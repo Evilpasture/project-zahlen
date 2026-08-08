@@ -78,7 +78,7 @@ void RenderContext::Impl::DispatchSkinningPasses() {
                 .inSkinAddr       = skinMesh->vboAddress,
                 .outPosAddr       = scratchMesh->vboAddress,
                 .outAttrAddr      = scratchMesh->vboAddress + (scratchMesh->vertexCount * sizeof(VertexPosition)),
-                .jointsAddr       = ctx.BufferAddress(jointBuffers->Handle()),
+                .jointsAddr       = ctx.BufferAddress(frames.jointBuffers->Handle()),
                 .morphDeltasAddr  = ctx.BufferAddress(morphDeltasBuffer.Handle()),
                 .vertexCount      = posMesh->vertexCount,
                 .jointOffset      = drawCmd.jointOffset,
@@ -168,8 +168,8 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
         return;
     }
 
-    auto& stagingBuf  = tlasStagingBuffers[frame_index];
-    auto& instanceBuf = tlasInstanceBuffers[frame_index];
+    auto& stagingBuf  = frames.tlasStagingBuffers[frame_index];
+    auto& instanceBuf = frames.tlasInstanceBuffers[frame_index];
 
     std::memcpy(stagingBuf.Map().data, tlasInstancesScratch.data(), tlasInstancesScratch.size() * sizeof(VkAccelerationStructureInstanceKHR));
 
@@ -184,7 +184,7 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 
     ZHLN_TlasGeometryDesc geom = {.instance_data = ctx.BufferAddress(instanceBuf.Handle())};
 
-    rtCtx.BuildTLAS(cmd, geom, tlas[frame_index], ctx.BufferAddress(tlasScratchBuffer[frame_index].Handle()), tlasInstancesScratch.size());
+    rtCtx.BuildTLAS(cmd, geom, frames.tlas[frame_index], ctx.BufferAddress(frames.tlasScratchBuffer[frame_index].Handle()), tlasInstancesScratch.size());
 
     Vk::MemoryBarrier(
         cmd, {.src_stage  = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
@@ -329,7 +329,7 @@ RenderResult RenderContext::EndFrame() noexcept {
                 auto csgCount  = _impl->queues.csgDrawQueue.size();
 
                 if (drawCount > 0 || csgCount > 0) {
-                    auto  mapped = _impl->instanceDataBuffers[_impl->frame_index].Map();
+                    auto  mapped = _impl->frames.instanceDataBuffers[_impl->frame_index].Map();
                     auto* dst    = static_cast<InstanceData*>(mapped.data);
 
                     // 1. Write standard draw queue
@@ -362,7 +362,7 @@ RenderResult RenderContext::EndFrame() noexcept {
         }
 
         // Flip double-buffered resources
-        ZHLN::Reflect::ForEachField(*_impl, [](auto& field) { FlipObject(field); });
+        _impl->frames.FlipAll();
 
         std::swap(_impl->graphResources.shadowMap, _impl->shadowMapPrev);
         std::swap(_impl->shadowCascadeViews, _impl->shadowCascadeViewsPrev);

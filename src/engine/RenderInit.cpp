@@ -289,7 +289,7 @@ std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfi
             deletionQueue.Init(2);
             auto fvb_res = CreateDoubleBuffered(allocator, sizeof(GPUVolumetricVolume) * 64, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
             if (fvb_res) {
-                fogVolumesBuffer = std::move(*fvb_res);
+                frames.fogVolumesBuffer = std::move(*fvb_res);
             }
         });
 }
@@ -588,8 +588,8 @@ std::expected<void, Error> RenderContext::Impl::InitLineBuffers() noexcept {
         if (!gpu_buf_res) {
             return std::unexpected(Error(gpu_buf_res.error()));
         }
-        lineVbos[i]         = std::move(*gpu_buf_res);
-        lineVboAddresses[i] = ctx.BufferAddress(lineVbos[i].Handle());
+        frames.lineVbos[i]         = std::move(*gpu_buf_res);
+        frames.lineVboAddresses[i] = ctx.BufferAddress(frames.lineVbos[i].Handle());
     }
     ZHLN::Log("Allocated double-buffered dynamic line tracer VBOs ({} bytes).", lineBufferSize);
     return {};
@@ -732,14 +732,14 @@ std::expected<void, Error> RenderContext::Impl::InitShadowResources() {
 
         // 8. Allocate Double-Buffered Light Storage Buffers
         .and_then([&](auto&& fub) {
-            frameUniformBuffers = std::forward<decltype(fub)>(fub);
+            frames.frameUniformBuffers = std::forward<decltype(fub)>(fub);
             return CreateDoubleBuffered(allocator, sizeof(GPULight) * 128, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU)
                 .transform_error([](auto err) -> Error { return err; });
         })
 
         // 9. Allocate Double-Buffered Indirect Argument Buffers
         .and_then([&](auto&& lsb) {
-            lightStorageBuffers = std::forward<decltype(lsb)>(lsb);
+            frames.lightStorageBuffers = std::forward<decltype(lsb)>(lsb);
             return CreateDoubleBuffered(
                        allocator, sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances * 8, VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU
             )
@@ -747,7 +747,7 @@ std::expected<void, Error> RenderContext::Impl::InitShadowResources() {
         })
 
         // 10. Complete pipeline assignment
-        .transform([&](auto&& sib) { shadowIndirectBuffers = std::forward<decltype(sib)>(sib); });
+        .transform([&](auto&& sib) { frames.shadowIndirectBuffers = std::forward<decltype(sib)>(sib); });
 }
 
 std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
@@ -757,46 +757,46 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
     cullingLayout = CullingLayout::CreateLayout(ctx.Device());
     cullingPool   = CullingLayout::CreatePool(ctx.Device(), 4);
 
-    cullingSetsPass1[0] = CullingLayout::Allocate(ctx.Device(), cullingPool.Get(), cullingLayout.Get());
-    cullingSetsPass1[1] = CullingLayout::Allocate(ctx.Device(), cullingPool.Get(), cullingLayout.Get());
-    cullingSetsPass2[0] = CullingLayout::Allocate(ctx.Device(), cullingPool.Get(), cullingLayout.Get());
-    cullingSetsPass2[1] = CullingLayout::Allocate(ctx.Device(), cullingPool.Get(), cullingLayout.Get());
+    frames.cullingSetsPass1[0] = CullingLayout::Allocate(ctx.Device(), cullingPool.Get(), cullingLayout.Get());
+    frames.cullingSetsPass1[1] = CullingLayout::Allocate(ctx.Device(), cullingPool.Get(), cullingLayout.Get());
+    frames.cullingSetsPass2[0] = CullingLayout::Allocate(ctx.Device(), cullingPool.Get(), cullingLayout.Get());
+    frames.cullingSetsPass2[1] = CullingLayout::Allocate(ctx.Device(), cullingPool.Get(), cullingLayout.Get());
 
     auto make_instance_set = [&](uint32_t i) -> std::expected<void, Error> {
         return Vk::Buffer::Create(
                    allocator.Get(), sizeof(InstanceData) * kGpuCullingMaxInstances, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU
         )
             .and_then([&, i](auto&& idb) {
-                instanceDataBuffers[i] = std::move(idb);
+                frames.instanceDataBuffers[i] = std::move(idb);
                 return Vk::Buffer::Create(
                     allocator.Get(), sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances,
                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY
                 );
             })
             .and_then([&, i](auto&& icb1) {
-                indirectCommandsBuffers[i] = std::move(icb1);
+                frames.indirectCommandsBuffers[i] = std::move(icb1);
                 return Vk::Buffer::Create(
                     allocator.Get(), sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances,
                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY
                 );
             })
             .and_then([&, i](auto&& icb2) {
-                indirectCommandsBuffersPass2[i] = std::move(icb2);
+                frames.indirectCommandsBuffersPass2[i] = std::move(icb2);
                 return Vk::Buffer::Create(
                     allocator.Get(), sizeof(uint32_t) * kGpuCullingMaxInstances, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                     VMA_MEMORY_USAGE_GPU_ONLY
                 );
             })
             .and_then([&, i](auto&& spcb) {
-                secondPassCandidatesBuffers[i] = std::move(spcb);
+                frames.secondPassCandidatesBuffers[i] = std::move(spcb);
                 return Vk::Buffer::Create(
                     allocator.Get(), sizeof(uint32_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                     VMA_MEMORY_USAGE_GPU_ONLY
                 );
             })
             .transform([&, i](auto&& spcnt) -> void {
-                globalCounterBuffers[i]   = std::move(spcnt);
-                secondPassCountBuffers[i] = std::move(globalCounterBuffers[i]);
+                frames.globalCounterBuffers[i]   = std::move(spcnt);
+                frames.secondPassCountBuffers[i] = std::move(frames.globalCounterBuffers[i]);
             });
     };
 
@@ -821,7 +821,7 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
                 .transform_error([](VkResult res) -> Error { return res; })
                 .and_then([&, numClusters](auto&& cbb) -> std::expected<void, Error> {
                     clusterBoundsBuffer = std::forward<decltype(cbb)>(cbb);
-                    Vk::AllocateDoubleBufferedSet<ClusterCullingLayout>(ctx.Device(), clusterCullingDescLayout, clusterCullingPool, clusterCullingSets);
+                    Vk::AllocateDoubleBufferedSet<ClusterCullingLayout>(ctx.Device(), clusterCullingDescLayout, clusterCullingPool, frames.clusterCullingSets);
 
                     auto make_cluster_set = [&](uint32_t i) -> std::expected<void, Error> {
                         return Vk::Buffer::Create(
@@ -829,14 +829,14 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
                         )
                             .transform_error([](VkResult res) -> Error { return res; })
                             .and_then([&, i](auto&& cgb) { // Deduced as std::expected<Vk::Buffer, Error>
-                                clusterGridBuffers[i] = std::forward<decltype(cgb)>(cgb);
+                                frames.clusterGridBuffers[i] = std::forward<decltype(cgb)>(cgb);
                                 return Vk::Buffer::Create(
                                            allocator.Get(), sizeof(uint32_t) * numClusters * 64, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_GPU_ONLY
                                 )
                                     .transform_error([](VkResult res) -> Error { return res; });
                             })
                             .and_then([&, i](auto&& lsb) { // Deduced as std::expected<Vk::Buffer, Error>
-                                lightIndexListBuffers[i] = std::forward<decltype(lsb)>(lsb);
+                                frames.lightIndexListBuffers[i] = std::forward<decltype(lsb)>(lsb);
                                 return Vk::Buffer::Create(
                                            allocator.Get(), sizeof(uint32_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                                            VMA_MEMORY_USAGE_GPU_ONLY
@@ -844,12 +844,12 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
                                     .transform_error([](VkResult res) -> Error { return res; });
                             })
                             .transform([&, i](auto&& gcb) -> void { // Transforms final Vk::Buffer to void
-                                globalCounterBuffers[i] = std::forward<decltype(gcb)>(gcb);
+                                frames.globalCounterBuffers[i] = std::forward<decltype(gcb)>(gcb);
                                 ClusterCullingLayout::Write(
-                                    ctx.Device(), clusterCullingSets[i], Vk::BufferWrite {.buffer = clusterBoundsBuffer.Handle()},
-                                    Vk::BufferWrite {.buffer = clusterGridBuffers[i].Handle()}, Vk::BufferWrite {.buffer = lightIndexListBuffers[i].Handle()},
-                                    Vk::BufferWrite {.buffer = globalCounterBuffers[i].Handle()}, Vk::BufferWrite {.buffer = frameUniformBuffers[i].Handle()},
-                                    Vk::BufferWrite {.buffer = lightStorageBuffers[i].Handle()}
+                                    ctx.Device(), frames.clusterCullingSets[i], Vk::BufferWrite {.buffer = clusterBoundsBuffer.Handle()},
+                                    Vk::BufferWrite {.buffer = frames.clusterGridBuffers[i].Handle()}, Vk::BufferWrite {.buffer = frames.lightIndexListBuffers[i].Handle()},
+                                    Vk::BufferWrite {.buffer = frames.globalCounterBuffers[i].Handle()}, Vk::BufferWrite {.buffer = frames.frameUniformBuffers[i].Handle()},
+                                    Vk::BufferWrite {.buffer = frames.lightStorageBuffers[i].Handle()}
                                 );
                             });
                     };
@@ -877,7 +877,7 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
                     )
                         .transform_error([](VkResult res) -> Error { return res; })
                         .and_then([&, i, tlasSizes](auto&& tb) { // Deduced as std::expected<Vk::Buffer, Error>
-                            tlasBuffer[i] = std::forward<decltype(tb)>(tb);
+                            frames.tlasBuffer[i] = std::forward<decltype(tb)>(tb);
                             return Vk::Buffer::Create(
                                        allocator.Get(), tlasSizes.build_scratch_size,
                                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY
@@ -885,8 +885,8 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
                                 .transform_error([](VkResult res) -> Error { return res; });
                         })
                         .and_then([&, i, tlasSizes](auto&& tsb) { // Deduced as std::expected<Vk::Buffer, Error>
-                            tlasScratchBuffer[i] = std::forward<decltype(tsb)>(tsb);
-                            tlas[i] = rtCtx.CreateAccelerationStructure(tlasBuffer[i].Handle(), tlasSizes.acceleration_structure_size, ZHLN_AS_TYPE_TOP_LEVEL);
+                            frames.tlasScratchBuffer[i] = std::forward<decltype(tsb)>(tsb);
+                            frames.tlas[i] = rtCtx.CreateAccelerationStructure(frames.tlasBuffer[i].Handle(), tlasSizes.acceleration_structure_size, ZHLN_AS_TYPE_TOP_LEVEL);
 
                             return Vk::Buffer::Create(
                                        allocator.Get(), sizeof(VkAccelerationStructureInstanceKHR) * kGpuCullingMaxInstances,
@@ -897,7 +897,7 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
                                 .transform_error([](VkResult res) -> Error { return res; });
                         })
                         .and_then([&, i](auto&& tib) { // Deduced as std::expected<Vk::Buffer, Error>
-                            tlasInstanceBuffers[i] = std::forward<decltype(tib)>(tib);
+                            frames.tlasInstanceBuffers[i] = std::forward<decltype(tib)>(tib);
                             return Vk::Buffer::Create(
                                        allocator.Get(), sizeof(VkAccelerationStructureInstanceKHR) * kGpuCullingMaxInstances, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                                        VMA_MEMORY_USAGE_CPU_ONLY
@@ -905,7 +905,7 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
                                 .transform_error([](VkResult res) -> Error { return res; });
                         })
                         .transform([&, i](auto&& tstb) -> void { // Transforms final Vk::Buffer to void
-                            tlasStagingBuffers[i] = std::forward<decltype(tstb)>(tstb);
+                            frames.tlasStagingBuffers[i] = std::forward<decltype(tstb)>(tstb);
                         });
                 };
 
@@ -929,7 +929,7 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
 }
 
 std::expected<void, Error> RenderContext::Impl::InitBindless() {
-    Vk::AllocateDoubleBufferedSet<GlobalSceneLayout>(ctx.Device(), bindlessLayout, bindlessPool, bindlessSets);
+    Vk::AllocateDoubleBufferedSet<GlobalSceneLayout>(ctx.Device(), bindlessLayout, bindlessPool, frames.bindlessSets);
 
     return Vk::SamplerBuilder {}
         .Linear()
@@ -964,25 +964,25 @@ std::expected<void, Error> RenderContext::Impl::InitBindless() {
                 auto gpu_buf = std::move(*gpu_buf_res);
 
                 auto address        = ctx.BufferAddress(gpu_buf.Handle());
-                debugMeshHandles[i] = meshPool.Create(std::move(gpu_buf), kMaxDebugVertices, address);
+                frames.debugMeshHandles[i] = meshPool.Create(std::move(gpu_buf), kMaxDebugVertices, address);
             }
 
             // Update global descriptor bindings
             Vk::DescriptorUpdater bindlessRegistry;
             for (int i = 0; i < 2; ++i) {
                 bindlessRegistry.BindSampler(1, globalSampler.Get());
-                bindlessRegistry.BindUniformBuffer(2, frameUniformBuffers[i].Handle());
-                bindlessRegistry.BindStorageBuffer(3, lightStorageBuffers[i].Handle());
-                bindlessRegistry.BindStorageBuffer(4, instanceDataBuffers[i].Handle());
-                bindlessRegistry.BindStorageBuffer(5, jointBuffers[i].Handle());
-                bindlessRegistry.BindStorageBuffer(6, jointBuffers[1 - i].Handle());
+                bindlessRegistry.BindUniformBuffer(2, frames.frameUniformBuffers[i].Handle());
+                bindlessRegistry.BindStorageBuffer(3, frames.lightStorageBuffers[i].Handle());
+                bindlessRegistry.BindStorageBuffer(4, frames.instanceDataBuffers[i].Handle());
+                bindlessRegistry.BindStorageBuffer(5, frames.jointBuffers[i].Handle());
+                bindlessRegistry.BindStorageBuffer(6, frames.jointBuffers[1 - i].Handle());
                 bindlessRegistry.BindStorageBuffer(7, morphDeltasBuffer.Handle());
 
                 bindlessRegistry.BindSampledImage(8, iblPayload.prefilteredView.Get(), VK_NULL_HANDLE, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
                 bindlessRegistry.BindSampledImage(9, iblPayload.brdfLutView.Get(), VK_NULL_HANDLE, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
                 bindlessRegistry.BindSampler(10, clampSampler.Get());
 
-                bindlessRegistry.UpdateSet(ctx.Device(), bindlessSets[i]);
+                bindlessRegistry.UpdateSet(ctx.Device(), frames.bindlessSets[i]);
             }
             return {};
         });
@@ -1607,9 +1607,9 @@ std::expected<void, Error> RenderContext::Impl::InitSkeletalAnimationResources()
         if (!jb_res) {
             return std::unexpected(Error(jb_res.error()));
         }
-        jointBuffers[i] = std::move(*jb_res);
+        frames.jointBuffers[i] = std::move(*jb_res);
 
-        auto mapped = jointBuffers[i].Map();
+        auto mapped = frames.jointBuffers[i].Map();
         std::memcpy(mapped.data, identities.data(), identities.size() * sizeof(JPH::Mat44));
     }
 
@@ -1691,8 +1691,8 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
 
     graphResources.sceneColor            = CreateDefaultTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32>(ext);
     graphResources.velocityBuffer        = CreateDefaultTarget<VK_FORMAT_R16G16_SFLOAT>(ext);
-    accumBuffers[0]                      = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
-    accumBuffers[1]                      = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
+    frames.accumBuffers[0]                      = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
+    frames.accumBuffers[1]                      = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
     graphResources.normalRoughnessBuffer = CreateDefaultTarget<VK_FORMAT_R8G8B8A8_UNORM>(ext);
     graphResources.hdrSceneColor         = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
     graphResources.ambientTarget         = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
@@ -1747,8 +1747,8 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
         std::array colorTargets = {
             graphResources.sceneColor.image.Handle(),
             graphResources.velocityBuffer.image.Handle(),
-            accumBuffers[0].image.Handle(),
-            accumBuffers[1].image.Handle(),
+            frames.accumBuffers[0].image.Handle(),
+            frames.accumBuffers[1].image.Handle(),
             graphResources.normalRoughnessBuffer.image.Handle(),
             graphResources.hdrSceneColor.image.Handle(),
             graphResources.ambientTarget.image.Handle(),
@@ -1804,7 +1804,7 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
     Vk::DescriptorUpdater bindlessRegistry;
     for (int i = 0; i < 2; ++i) {
         bindlessRegistry.BindSampledImage(11, graphResources.transLightingTarget.view.Get(), defaultSampler.Get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        bindlessRegistry.UpdateSet(ctx.Device(), bindlessSets[i]);
+        bindlessRegistry.UpdateSet(ctx.Device(), frames.bindlessSets[i]);
         bindlessRegistry.Clear();
     }
 
@@ -1831,16 +1831,16 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
     for (int i = 0; i < 2; ++i) {
         // Pass 1 Set (Reads Previous Frame's Hi-Z)
         CullingLayout::Write(
-            ctx.Device(), cullingSetsPass1[i], Vk::BufferWrite {.buffer = instanceDataBuffers[i].Handle()},
-            Vk::BufferWrite {.buffer = indirectCommandsBuffers[i].Handle()}, graphResources.hizMap.fullView.Get(), pointSampler.Get(),
-            Vk::BufferWrite {.buffer = secondPassCandidatesBuffers[i].Handle()}, Vk::BufferWrite {.buffer = secondPassCountBuffers[i].Handle()}
+            ctx.Device(), frames.cullingSetsPass1[i], Vk::BufferWrite {.buffer = frames.instanceDataBuffers[i].Handle()},
+            Vk::BufferWrite {.buffer = frames.indirectCommandsBuffers[i].Handle()}, graphResources.hizMap.fullView.Get(), pointSampler.Get(),
+            Vk::BufferWrite {.buffer = frames.secondPassCandidatesBuffers[i].Handle()}, Vk::BufferWrite {.buffer = frames.secondPassCountBuffers[i].Handle()}
         );
 
         // Pass 2 Set (Reads Current Frame's Hi-Z)
         CullingLayout::Write(
-            ctx.Device(), cullingSetsPass2[i], Vk::BufferWrite {.buffer = instanceDataBuffers[i].Handle()},
-            Vk::BufferWrite {.buffer = indirectCommandsBuffersPass2[i].Handle()}, graphResources.hizMap.fullView.Get(), pointSampler.Get(),
-            Vk::BufferWrite {.buffer = secondPassCandidatesBuffers[i].Handle()}, Vk::BufferWrite {.buffer = secondPassCountBuffers[i].Handle()}
+            ctx.Device(), frames.cullingSetsPass2[i], Vk::BufferWrite {.buffer = frames.instanceDataBuffers[i].Handle()},
+            Vk::BufferWrite {.buffer = frames.indirectCommandsBuffersPass2[i].Handle()}, graphResources.hizMap.fullView.Get(), pointSampler.Get(),
+            Vk::BufferWrite {.buffer = frames.secondPassCandidatesBuffers[i].Handle()}, Vk::BufferWrite {.buffer = frames.secondPassCountBuffers[i].Handle()}
         );
     }
 
@@ -1877,8 +1877,8 @@ std::expected<void, Error> RenderContext::Impl::InitUIDynamicBuffers() noexcept 
         if (!gpu_buf_res) {
             return std::unexpected(Error(gpu_buf_res.error()));
         }
-        uiVbos[i]         = std::move(*gpu_buf_res);
-        uiVboAddresses[i] = ctx.BufferAddress(uiVbos[i].Handle());
+        frames.uiVbos[i]         = std::move(*gpu_buf_res);
+        frames.uiVboAddresses[i] = ctx.BufferAddress(frames.uiVbos[i].Handle());
     }
     ZHLN::Log("Allocated double-buffered dynamic UI VBOs ({} bytes).", uiBufferSize);
     return {};

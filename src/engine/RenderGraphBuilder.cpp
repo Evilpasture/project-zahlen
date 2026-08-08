@@ -30,7 +30,7 @@ struct PassFactory {
         if constexpr (isMac) {
             return Vk::SkipWrite {};
         } else {
-            return self.rtCtx.Valid() ? &self.tlas.Current() : VK_NULL_HANDLE;
+            return self.rtCtx.Valid() ? &self.frames.tlas.Current() : VK_NULL_HANDLE;
         }
     }
 
@@ -128,7 +128,7 @@ struct PassFactory {
                 return;
             }
 
-            auto* bindlessSet = self.bindlessSets[self.frame_index];
+            auto* bindlessSet = self.frames.bindlessSets[self.frame_index];
 
             for (const auto& emitter: self.queues.particleEmittersQueue) {
                 auto* buffer = self.meshPool.Resolve(emitter.gpuBuffer).value_or(nullptr);
@@ -154,7 +154,7 @@ struct PassFactory {
                 return;
             }
 
-            auto* bindlessSet = self.bindlessSets[self.frame_index];
+            auto* bindlessSet = self.frames.bindlessSets[self.frame_index];
 
             for (const auto& emitter: self.queues.meshParticleQueue) {
                 auto* buffer = self.meshPool.Resolve(emitter.gpuBuffer).value_or(nullptr);
@@ -189,8 +189,8 @@ struct PassFactory {
         return Vk::MakePass<"VolumetricFogInject", Vk::ComputeWrite<Res_VoxelMedia>>([this](VkCommandBuffer c) noexcept {
             Profiler::ScopedGpuProfile<Stages::VolumetricFogInjectPass, FrameProfiler> timer(c, fIdx, self.gpuProfiler);
             self.volumetricFogInjectPass.WriteNext(
-                device, Vk::Assume<Vk::ComputeWrite<Res_VoxelMedia>>(self.graphResources.voxelMedia), self.frameUniformBuffers[fIdx].Handle(),
-                self.fogVolumesBuffer[fIdx].Handle()
+                device, Vk::Assume<Vk::ComputeWrite<Res_VoxelMedia>>(self.graphResources.voxelMedia), self.frames.frameUniformBuffers[fIdx].Handle(),
+                self.frames.fogVolumesBuffer[fIdx].Handle()
             );
 
             VolumetricFogInjectPushConstants pc = {};
@@ -204,8 +204,8 @@ struct PassFactory {
                 Profiler::ScopedGpuProfile<Stages::VolumetricLightInjectPass, FrameProfiler> timer(c, fIdx, self.gpuProfiler);
                 self.volumetricLightInjectPass.WriteNext(
                     device, Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelMedia>>(self.graphResources.voxelMedia),
-                    Vk::Assume<Vk::ComputeWrite<Res_VoxelLight>>(self.graphResources.voxelLight), self.frameUniformBuffers[fIdx].Handle(),
-                    self.lightStorageBuffers[fIdx].Handle(), self.clusterGridBuffers[fIdx].Handle(), self.lightIndexListBuffers[fIdx].Handle(),
+                    Vk::Assume<Vk::ComputeWrite<Res_VoxelLight>>(self.graphResources.voxelLight), self.frames.frameUniformBuffers[fIdx].Handle(),
+                    self.frames.lightStorageBuffers[fIdx].Handle(), self.frames.clusterGridBuffers[fIdx].Handle(), self.frames.lightIndexListBuffers[fIdx].Handle(),
                     self.graphResources.shadowMap.view.Get(), self.shadowSampler.Get()
                 );
                 VolumetricLightInjectPushConstants pc = {};
@@ -233,7 +233,7 @@ struct PassFactory {
                 self.volumetricTemporalPass.WriteNext(
                     device, Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelInt>>(self.graphResources.voxelIntegrated),
                     Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelHist>>(self.graphResources.voxelHistory),
-                    Vk::Assume<Vk::ComputeWrite<Res_VoxelResolved>>(self.graphResources.voxelResolved), self.frameUniformBuffers[fIdx].Handle(),
+                    Vk::Assume<Vk::ComputeWrite<Res_VoxelResolved>>(self.graphResources.voxelResolved), self.frames.frameUniformBuffers[fIdx].Handle(),
                     self.defaultSampler.Get()
                 );
                 VolumetricTemporalPushConstants pc = {};
@@ -250,7 +250,7 @@ struct PassFactory {
                     device, Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor), self.defaultSampler.Get(),
                     Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget),
                     Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer), self.pointSampler.Get(),
-                    self.iblPayload.prefilteredView.Get(), self.iblPayload.brdfLutView.Get(), self.clampSampler.Get(), self.frameUniformBuffers->Handle()
+                    self.iblPayload.prefilteredView.Get(), self.iblPayload.brdfLutView.Get(), self.clampSampler.Get(), self.frames.frameUniformBuffers->Handle()
                 );
                 self.ambientPass.Execute(ctx.Cmd(), pc);
             }
@@ -264,9 +264,9 @@ struct PassFactory {
             self.lightingPass.WriteNext(
                 device, Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor), self.defaultSampler.Get(),
                 Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget),
-                Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer), self.lightStorageBuffers->Handle(),
-                self.frameUniformBuffers->Handle(), self.graphResources.shadowMap.view.Get(), self.shadowSampler.Get(), self.ltcMatView.Get(),
-                self.ltcAmpView.Get(), self.clampSampler.Get(), self.clusterGridBuffers->Handle(), self.lightIndexListBuffers->Handle(),
+                Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer), self.frames.lightStorageBuffers->Handle(),
+                self.frames.frameUniformBuffers->Handle(), self.graphResources.shadowMap.view.Get(), self.shadowSampler.Get(), self.ltcMatView.Get(),
+                self.ltcAmpView.Get(), self.clampSampler.Get(), self.frames.clusterGridBuffers->Handle(), self.frames.lightIndexListBuffers->Handle(),
                 Vk::Assume<Vk::ShaderRead<Res_Ambient>>(self.graphResources.ambientTarget), self.pointSampler.Get(), GetTLAS(), self.shadowAtlasCubeView.Get(),
                 self.shadowAtlas2DView.Get()
             );
@@ -284,7 +284,7 @@ struct PassFactory {
                     device, Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor), self.defaultSampler.Get(),
                     Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget),
                     Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer), self.pointSampler.Get(),
-                    self.iblPayload.prefilteredView.Get(), GetTLAS(), self.frameUniformBuffers[fIdx].Handle(), self.iblPayload.brdfLutView.Get(),
+                    self.iblPayload.prefilteredView.Get(), GetTLAS(), self.frames.frameUniformBuffers[fIdx].Handle(), self.iblPayload.brdfLutView.Get(),
                     self.clampSampler.Get(), Vk::Assume<Vk::ShaderRead<Res_Lighting>>(self.graphResources.lightingTarget),
                     Vk::Assume<Vk::ShaderReadGeneral<Res_VoxelResolved>>(self.graphResources.voxelResolved)
                 );
@@ -314,7 +314,7 @@ struct PassFactory {
                     device, Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor), self.defaultSampler.Get(),
                     Vk::Assume<Vk::ShaderRead<Res_TransDepth>>(self.graphResources.transDepthBuffer),
                     Vk::Assume<Vk::ShaderRead<Res_TransNorm>>(self.graphResources.transNormalBuffer), self.pointSampler.Get(),
-                    self.iblPayload.prefilteredView.Get(), GetTLAS(), self.frameUniformBuffers[fIdx].Handle(), self.iblPayload.brdfLutView.Get(),
+                    self.iblPayload.prefilteredView.Get(), GetTLAS(), self.frames.frameUniformBuffers[fIdx].Handle(), self.iblPayload.brdfLutView.Get(),
                     self.clampSampler.Get(), Vk::Assume<Vk::ShaderRead<Res_Lighting>>(self.graphResources.lightingTarget),
                     Vk::Assume<Vk::ShaderReadGeneral<Res_VoxelResolved>>(self.graphResources.voxelResolved)
                 );
@@ -400,7 +400,7 @@ struct PassFactory {
             FrameRecorder recorder(c, self);
             recorder.encoder.BindPipeline(self.decalPipeline.Get(), self.decalPipelineLayout.Get());
 
-            std::array sets = {self.decalSet, self.bindlessSets[fIdx]};
+            std::array sets = {self.decalSet, self.frames.bindlessSets[fIdx]};
             recorder.encoder.BindDescriptorSets(0, sets);
 
             for (const auto& decalCmd: self.queues.decalQueue) {
@@ -431,9 +431,9 @@ struct PassFactory {
                 };
 
                 self.taaPass.WriteNext(
-                    device, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor), Vk::Assume<Vk::ShaderRead<Res_AccumCurr>>(self.accumBuffers.Current()),
+                    device, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor), Vk::Assume<Vk::ShaderRead<Res_AccumCurr>>(self.frames.accumBuffers.Current()),
                     Vk::Assume<Vk::ShaderRead<Res_Velocity>>(self.graphResources.velocityBuffer), self.defaultSampler.Get(),
-                    self.frameUniformBuffers[fIdx].Handle()
+                    self.frames.frameUniformBuffers[fIdx].Handle()
                 );
 
                 self.taaPass.Execute(c, TAAPushConstants {.feedback = self.aaState.taaFeedback});
@@ -552,7 +552,7 @@ struct PassFactory {
         using BlitInputRes         = std::conditional_t<Mode != None, Res_AccumNext, Res_HdrSceneColor>;
         const auto& blitInputImage = [&]() -> auto& {
             if constexpr (Mode != None) {
-                return self.accumBuffers.Next();
+                return self.frames.accumBuffers.Next();
             } else {
                 return self.graphResources.hdrSceneColor;
             }
@@ -565,7 +565,7 @@ struct PassFactory {
                 self.blitPass.WriteNext(
                     device, Vk::Assume<Vk::ShaderRead<BlitInputRes>>(blitInputImage), self.defaultSampler.Get(),
                     Vk::Assume<Vk::ShaderRead<Res_BloomFinal>>(self.graphResources.bloomFinalTarget),
-                    Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget), self.frameUniformBuffers[fIdx].Handle()
+                    Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget), self.frames.frameUniformBuffers[fIdx].Handle()
                 );
 
                 Passes::BlitPass {}.Execute(
@@ -677,11 +677,11 @@ void ExecuteFrameGraph(RenderContext::Impl& self, VkCommandBuffer cmd, const Pas
         binder.template Bind<Res_ShadowMap>(ref.handle, ref.view, ref.extent);
     }
     if constexpr (Vk::IsInList<Resources, Res_AccumCurr>::value) {
-        auto ref = Vk::MakeRef<Res_AccumCurr>(self.accumBuffers.Current());
+        auto ref = Vk::MakeRef<Res_AccumCurr>(self.frames.accumBuffers.Current());
         binder.template Bind<Res_AccumCurr>(ref.handle, ref.view, ref.extent);
     }
     if constexpr (Vk::IsInList<Resources, Res_AccumNext>::value) {
-        auto ref = Vk::MakeRef<Res_AccumNext>(self.accumBuffers.Next());
+        auto ref = Vk::MakeRef<Res_AccumNext>(self.frames.accumBuffers.Next());
         binder.template Bind<Res_AccumNext>(ref.handle, ref.view, ref.extent);
     }
     if constexpr (Vk::IsInList<Resources, Res_Swapchain>::value) {
@@ -811,7 +811,7 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
              .giIntensity = giSettings.giIntensity,
              .giSamples   = giSettings.giSamples,
              .enableSSR   = giSettings.enableSSR,
-             .enableRTR   = (tlas.Current() != VK_NULL_HANDLE) ? giSettings.enableRTR : 0,
+             .enableRTR   = (frames.tlas.Current() != VK_NULL_HANDLE) ? giSettings.enableRTR : 0,
              ._pad        = {}},
         .lightVariant = lightVariant,
         .reflVariant  = reflVariant

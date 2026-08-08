@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// File: src/render/RenderInternal.hpp
+// File: src/engine/RenderInternal.hpp
 #pragma once
 #include "Rendering.hpp"
 #include "engine/FileWatcher.hpp"
@@ -11,6 +11,7 @@
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/MemoryPool.hpp>
 #include <Zahlen/Core/RadixSort.hpp>
+#include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render.hpp>
@@ -57,6 +58,7 @@ class GenerationalPool {
         OutOfBoundsIndex, // Index exceeds pool capacity
         NullResource      // Internal error: slot points to null pointer
     };
+
     GenerationalPool() {
         _freeIndices.reserve(MaxObjects);
         for (size_t i = 0; i < MaxObjects; ++i) {
@@ -198,13 +200,13 @@ using FXAALayout = Vk::DescriptorLayout<
 using VolumetricClearLayout = Vk::DescriptorLayout<
     Vk::StorageImageSlot<0>, // outVoxelMedia
     Vk::StorageImageSlot<1>  // outVoxelLight
->;
+    >;
 
 using VolumetricFogInjectLayout = Vk::DescriptorLayout<
-    Vk::StorageImageSlot<0>,                               // outVoxelMedia
-    Vk::UniformSlot<1, VK_SHADER_STAGE_COMPUTE_BIT>,       // frame
-    Vk::StorageBufferSlot<2, VK_SHADER_STAGE_COMPUTE_BIT>  // fogVolumes
->;
+    Vk::StorageImageSlot<0>,                              // outVoxelMedia
+    Vk::UniformSlot<1, VK_SHADER_STAGE_COMPUTE_BIT>,      // frame
+    Vk::StorageBufferSlot<2, VK_SHADER_STAGE_COMPUTE_BIT> // fogVolumes
+    >;
 
 using VolumetricLightInjectLayout = Vk::DescriptorLayout<
     Vk::SampledImageSlot<0, VK_SHADER_STAGE_COMPUTE_BIT>,  // inVoxelMedia
@@ -215,20 +217,20 @@ using VolumetricLightInjectLayout = Vk::DescriptorLayout<
     Vk::StorageBufferSlot<5, VK_SHADER_STAGE_COMPUTE_BIT>, // clusterIndexList
     Vk::SampledImageSlot<6, VK_SHADER_STAGE_COMPUTE_BIT>,  // shadowMap
     Vk::SamplerSlot<7, VK_SHADER_STAGE_COMPUTE_BIT>        // shadowSampler
->;
+    >;
 
 using VolumetricIntegrationLayout = Vk::DescriptorLayout<
     Vk::SampledImageSlot<0, VK_SHADER_STAGE_COMPUTE_BIT>, // inVoxelLight
     Vk::StorageImageSlot<1>                               // outVoxelIntegrated
->;
+    >;
 
 using VolumetricTemporalLayout = Vk::DescriptorLayout<
     Vk::SampledImageSlot<0, VK_SHADER_STAGE_COMPUTE_BIT>, // inVoxelIntegratedCurrent
     Vk::SampledImageSlot<1, VK_SHADER_STAGE_COMPUTE_BIT>, // inVoxelIntegratedHistory
-    Vk::StorageImageSlot<2>,                               // outVoxelIntegratedResolved
-    Vk::UniformSlot<3, VK_SHADER_STAGE_COMPUTE_BIT>,       // frame
-    Vk::SamplerSlot<4, VK_SHADER_STAGE_COMPUTE_BIT>        // linearSampler
->;
+    Vk::StorageImageSlot<2>,                              // outVoxelIntegratedResolved
+    Vk::UniformSlot<3, VK_SHADER_STAGE_COMPUTE_BIT>,      // frame
+    Vk::SamplerSlot<4, VK_SHADER_STAGE_COMPUTE_BIT>       // linearSampler
+    >;
 
 using BlitLayout = Vk::DescriptorLayout<
     Vk::SampledImageSlot<0>,                         // texCurrent
@@ -238,7 +240,6 @@ using BlitLayout = Vk::DescriptorLayout<
     Vk::UniformSlot<4, VK_SHADER_STAGE_FRAGMENT_BIT> // frame
     >;
 
-// Layouts for Threshold & Blur
 using BloomThresholdLayout = Vk::DescriptorLayout<
     Vk::SampledImageSlot<0>, // texInput
     Vk::SamplerSlot<1>       // sampler
@@ -268,14 +269,12 @@ using MLAALayout = Vk::DescriptorLayout<
     Vk::SamplerSlot<1>       // sPoint
     >;
 
-// Pass 1: Edge Detection Layout (Reads the main scene color)
 using SMAAEdgeLayout = Vk::DescriptorLayout<
     Vk::SampledImageSlot<0>, // texInput (Color)
     Vk::SamplerSlot<1>,      // linearSampler
     Vk::SamplerSlot<2>       // pointSampler
     >;
 
-// Pass 2: Blending Weight Layout (Reads edges, Area LUT, and Search LUT)
 using SMAAWeightLayout = Vk::DescriptorLayout<
     Vk::SampledImageSlot<0>, // texEdges
     Vk::SampledImageSlot<1>, // texArea (LUT)
@@ -284,7 +283,6 @@ using SMAAWeightLayout = Vk::DescriptorLayout<
     Vk::SamplerSlot<4>       // pointSampler (Nearest / Point)
     >;
 
-// Pass 3: Neighborhood Blending Layout (Blends original color with calculated weights)
 using SMAABlendLayout = Vk::DescriptorLayout<
     Vk::SampledImageSlot<0>, // texInput (Color)
     Vk::SampledImageSlot<1>, // texWeights
@@ -496,23 +494,19 @@ static constexpr uint32_t kGpuCullingMaxInstances        = 8192;
 static constexpr uint32_t kGpuCullingMaxBatches          = 256;
 static constexpr uint32_t kGpuCullingMaxVisibleInstances = kGpuCullingMaxInstances * kGpuCullingMaxBatches;
 
-/**
- * @brief Heavily optimized, cache-line-friendly CPU draw command.
- * All redundant texture indexing and geometric properties have been stripped.
- */
 struct DrawCommand {
-    InstanceData         instanceData; // 272 bytes (contains world, prevWorld, indexes, factor overrides, etc.)
-    NativeMaterial*      material;     // 8 bytes
+    InstanceData         instanceData;
+    NativeMaterial*      material;
     NativeMaterial*      prePassMaterial;
-    NativeMesh*          posMesh;             // 8 bytes
-    NativeMesh*          attrMesh;            // 8 bytes
-    NativeMesh*          skinMesh;            // 8 bytes
-    BufferHandle         skinnedVertexBuffer; // 8 bytes
-    uint32_t             jointOffset;         // 4 bytes
-    uint32_t             morphOffset;         // 4 bytes
-    uint32_t             activeMorphCount;    // 4 bytes
-    std::array<float, 4> morphWeights;        // 16 bytes
-    DrawFlags            flags;               // 4 bytes
+    NativeMesh*          posMesh;
+    NativeMesh*          attrMesh;
+    NativeMesh*          skinMesh;
+    BufferHandle         skinnedVertexBuffer;
+    uint32_t             jointOffset;
+    uint32_t             morphOffset;
+    uint32_t             activeMorphCount;
+    std::array<float, 4> morphWeights;
+    DrawFlags            flags;
 };
 
 static_assert(std::is_trivially_copyable_v<DrawCommand> && std::is_trivially_constructible_v<DrawCommand>);
@@ -579,7 +573,7 @@ struct ShaderPair;
 }
 
 // ============================================================================
-// Frame Graph Resource Tags (Declared Before PIMPL Struct)
+// Frame Graph Resource Tags
 // ============================================================================
 using Res_SceneColor    = Vk::GraphImage<"SceneColor", VK_FORMAT_B10G11R11_UFLOAT_PACK32, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_Velocity      = Vk::GraphImage<"Velocity", VK_FORMAT_R16G16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
@@ -608,8 +602,7 @@ using Res_VoxelResolved = Vk::GraphImage<"VoxelResolved", VK_FORMAT_R16G16B16A16
 using Res_TransNorm     = Vk::GraphImage<"TransNorm", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_TransDepth    = Vk::GraphImage<"TransDepth", VK_FORMAT_D32_SFLOAT_S8_UINT, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT>;
 using Res_TransLighting = Vk::GraphImage<"TransLighting", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-
-using Res_HiZ = Vk::GraphImage<"HiZMap", VK_FORMAT_R32_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_HiZ           = Vk::GraphImage<"HiZMap", VK_FORMAT_R32_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
 
 namespace Vk {
 template <>
@@ -618,11 +611,8 @@ struct ClearColorOf<Res_TransLighting> {
 };
 } // namespace Vk
 
-// Only TAA targets remain persistent:
 using Res_AccumCurr = Vk::GraphImage<"AccumCurr", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true>;
 using Res_AccumNext = Vk::GraphImage<"AccumNext", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true>;
-
-// --- Impl Struct ---
 
 struct RenderQueues {
     ZHLN::Array<DrawCommand>                drawQueue;
@@ -639,9 +629,6 @@ struct RenderQueues {
 };
 
 struct RenderContext::Impl {
-    // ============================================================================
-    // Nested Types & Reflection Metadata
-    // ============================================================================
     struct RenderState {
         SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> initialState;
         Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>                                           finalColor;
@@ -712,9 +699,6 @@ struct RenderContext::Impl {
     static constexpr uint32_t NUM_CASCADES        = 4;
     static constexpr uint32_t MAX_PUNCTUAL_LIGHTS = 4;
 
-    // ============================================================================
-    // Centralized Buffer Capacity Limits (Single Source of Truth)
-    // ============================================================================
     static constexpr uint32_t kMaxLineVertices               = 500'000;
     static constexpr uint32_t kMaxDebugVertices              = 500'000;
     static constexpr uint32_t kMaxUiVertices                 = 100'000;
@@ -723,9 +707,6 @@ struct RenderContext::Impl {
     static constexpr uint32_t kGpuCullingMaxBatches          = 256;
     static constexpr uint32_t kGpuCullingMaxVisibleInstances = kGpuCullingMaxInstances * kGpuCullingMaxBatches;
 
-    // ============================================================================
-    // Core System Properties (64-Bit / High Alignment)
-    // ============================================================================
     Window&                                      window;
     String64                                     appName;
     Vk::Context                                  ctx;
@@ -745,9 +726,6 @@ struct RenderContext::Impl {
     VkCommandBuffer                           current_cmd = VK_NULL_HANDLE;
     Vk::CommandBuffer<Vk::QueueType::Compute> current_compute_cmd;
 
-    // ============================================================================
-    // Staging, Memory Reclamation & Multithreading
-    // ============================================================================
     std::unique_ptr<Vk::StagingContext>    stagingContext;
     Vk::DeletionQueue                      deletionQueue;
     std::optional<Vk::ScopedDeletionQueue> activeQueueGuard;
@@ -770,19 +748,53 @@ struct RenderContext::Impl {
     };
     mutable PendingAcquires pendingAcquires;
 
-    // ============================================================================
-    // Reflected Graph Resources & Backward-Compatible Aliases
-    // ============================================================================
     GraphResources graphResources;
 
-    DoubleBuffered<Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>> accumBuffers;
+    // ============================================================================
+    // Bounded Substruct for Double-Buffered Resources (Reflection-Safe for Clangd)
+    // ============================================================================
+    struct PerFrameResources {
+        DoubleBuffered<Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>> accumBuffers;
+        ZHLN::DoubleBuffered<VkDescriptorSet>                           bindlessSets;
+        ZHLN::DoubleBuffered<Vk::Buffer>                                lineVbos;
+        ZHLN::DoubleBuffered<VkDeviceAddress>                           lineVboAddresses;
+        ZHLN::DoubleBuffered<Vk::Buffer>                                uiVbos;
+        ZHLN::DoubleBuffered<VkDeviceAddress>                           uiVboAddresses;
+        ZHLN::DoubleBuffered<Vk::Buffer>                                clusterGridBuffers;
+        ZHLN::DoubleBuffered<Vk::Buffer>                                lightIndexListBuffers;
+        ZHLN::DoubleBuffered<Vk::Buffer>                                globalCounterBuffers;
+        ZHLN::DoubleBuffered<Vk::Buffer>                                frameUniformBuffers;
+        ZHLN::DoubleBuffered<Vk::Buffer>                                lightStorageBuffers;
+        ZHLN::DoubleBuffered<Vk::Buffer>                                instanceDataBuffers;
+        ZHLN::DoubleBuffered<Vk::Buffer>                                indirectCommandsBuffers;
+        ZHLN::DoubleBuffered<Vk::Buffer>                                indirectCommandsBuffersPass2;
+        ZHLN::DoubleBuffered<Vk::Buffer>                                secondPassCandidatesBuffers;
+        ZHLN::DoubleBuffered<Vk::Buffer>                                secondPassCountBuffers;
+        ZHLN::DoubleBuffered<Vk::Buffer>                                shadowIndirectBuffers;
+        ZHLN::DoubleBuffered<Vk::Buffer>                                jointBuffers;
+        ZHLN::DoubleBuffered<VkDescriptorSet>                           cullingSetsPass1;
+        ZHLN::DoubleBuffered<VkDescriptorSet>                           cullingSetsPass2;
+        ZHLN::DoubleBuffered<VkDescriptorSet>                           clusterCullingSets;
+        DoubleBuffered<VkAccelerationStructureKHR>                      tlas;
+        DoubleBuffered<Vk::Buffer>                                      tlasBuffer;
+        DoubleBuffered<Vk::Buffer>                                      tlasScratchBuffer;
+        DoubleBuffered<Vk::Buffer>                                      tlasInstanceBuffers;
+        DoubleBuffered<Vk::Buffer>                                      tlasStagingBuffers;
+        ZHLN::DoubleBuffered<BufferHandle>                              debugMeshHandles;
+        ZHLN::DoubleBuffered<Vk::Buffer>                                fogVolumesBuffer;
 
-    // ============================================================================
-    // Textures, Heaps & Bindless Descriptors
-    // ============================================================================
-    Vk::DescriptorSetLayout               bindlessLayout;
-    Vk::DescriptorPool                    bindlessPool;
-    ZHLN::DoubleBuffered<VkDescriptorSet> bindlessSets;
+        void FlipAll() noexcept {
+            ZHLN::Reflect::ForEachField(*this, [](auto& field) { FlipObject(field); });
+        }
+    };
+
+    PerFrameResources frames;
+
+    Vk::Buffer clusterBoundsBuffer;
+    Vk::Buffer morphDeltasBuffer;
+
+    Vk::DescriptorSetLayout bindlessLayout;
+    Vk::DescriptorPool      bindlessPool;
 
     Vk::Sampler globalSampler;
     Vk::Sampler clampSampler;
@@ -792,9 +804,6 @@ struct RenderContext::Impl {
     ZHLN::Array<Vk::Image>     textureImages;
     ZHLN::Array<Vk::ImageView> textureViews;
 
-    // ============================================================================
-    // Pipeline Objects & Compute Passes
-    // ============================================================================
     Vk::PostProcessPass<TAALayout>        taaPass;
     Vk::PostProcessPass<FXAALayout>       fxaaPass;
     Vk::PostProcessPass<MLAALayout>       mlaaPass;
@@ -823,8 +832,6 @@ struct RenderContext::Impl {
     Vk::DoubleBufferedComputePass<VolumetricIntegrationLayout> volumetricIntegrationPass;
     Vk::DoubleBufferedComputePass<VolumetricTemporalLayout>    volumetricTemporalPass;
 
-    ZHLN::DoubleBuffered<Vk::Buffer> fogVolumesBuffer;
-
     Vk::RenderTarget<VK_FORMAT_D32_SFLOAT> shadowMapPrev;
     ZHLN::Array<Vk::ImageView>             shadowCascadeViewsPrev;
 
@@ -852,53 +859,24 @@ struct RenderContext::Impl {
     Vk::PipelineLayout decalPipelineLayout;
     Vk::Pipeline       decalPipeline;
 
-    Vk::PipelineLayout                    linePipelineLayout;
-    Vk::Pipeline                          linePipeline;
-    ZHLN::DoubleBuffered<Vk::Buffer>      lineVbos;
-    ZHLN::DoubleBuffered<VkDeviceAddress> lineVboAddresses;
-    uint32_t                              activeLineVertexCount = 0;
-    uint32_t                              lineInstanceId        = 0;
+    Vk::PipelineLayout linePipelineLayout;
+    Vk::Pipeline       linePipeline;
+    uint32_t           activeLineVertexCount = 0;
+    uint32_t           lineInstanceId        = 0;
 
     std::expected<void, Error> BuildLinePipeline();
     std::expected<void, Error> InitLineBuffers() noexcept;
     void                       FlushLineQueue();
 
-    // ============================================================================
-    // GPU Storage & Double-Buffered Work Buffers
-    // ============================================================================
-    Vk::Buffer                       clusterBoundsBuffer;
-    ZHLN::DoubleBuffered<Vk::Buffer> clusterGridBuffers;
-    ZHLN::DoubleBuffered<Vk::Buffer> lightIndexListBuffers;
-    ZHLN::DoubleBuffered<Vk::Buffer> globalCounterBuffers;
-
-    ZHLN::DoubleBuffered<Vk::Buffer> frameUniformBuffers;
-    ZHLN::DoubleBuffered<Vk::Buffer> lightStorageBuffers;
-
-    ZHLN::DoubleBuffered<Vk::Buffer> instanceDataBuffers;
-    ZHLN::DoubleBuffered<Vk::Buffer> indirectCommandsBuffers;
-    ZHLN::DoubleBuffered<Vk::Buffer> indirectCommandsBuffersPass2;
-    ZHLN::DoubleBuffered<Vk::Buffer> secondPassCandidatesBuffers;
-    ZHLN::DoubleBuffered<Vk::Buffer> secondPassCountBuffers;
-    ZHLN::DoubleBuffered<Vk::Buffer> shadowIndirectBuffers;
-    ZHLN::DoubleBuffered<Vk::Buffer> jointBuffers;
-    Vk::Buffer                       morphDeltasBuffer;
-
-    // ============================================================================
-    // Descriptor Sets, Culling, Shadows & Lighting LUTs
-    // ============================================================================
-    Vk::DescriptorSetLayout               cullingLayout;
-    Vk::DescriptorPool                    cullingPool;
-    ZHLN::DoubleBuffered<VkDescriptorSet> cullingSetsPass1;
-    ZHLN::DoubleBuffered<VkDescriptorSet> cullingSetsPass2;
-
+    Vk::DescriptorSetLayout      cullingLayout;
+    Vk::DescriptorPool           cullingPool;
     Vk::ComputePass              hizGeneratePass;
     Vk::DescriptorSetLayout      hizDescLayout;
     Vk::DescriptorPool           hizPool;
     ZHLN::Array<VkDescriptorSet> hizSets;
 
-    Vk::DescriptorSetLayout               clusterCullingDescLayout;
-    Vk::DescriptorPool                    clusterCullingPool;
-    ZHLN::DoubleBuffered<VkDescriptorSet> clusterCullingSets;
+    Vk::DescriptorSetLayout clusterCullingDescLayout;
+    Vk::DescriptorPool      clusterCullingPool;
 
     Vk::DescriptorSetLayout proceduralBakeDescLayout;
     Vk::DescriptorPool      proceduralBakeDescPool;
@@ -917,13 +895,9 @@ struct RenderContext::Impl {
 
     Vk::IBLPayload iblPayload;
 
-    // ============================================================================
-    // Generational Memory Pools & Draw Commands
-    // ============================================================================
     GenerationalPool<NativeMesh, 8192, BufferHandle>       meshPool;
     GenerationalPool<NativeMaterial, 2048, PipelineHandle> materialPool;
 
-    // --- High-Level Asset Identifier Maps (Freestanding ZHLN::HashMap) ---
     ZHLN::HashMap<AssetID, Mesh>          assetMeshMap;
     ZHLN::HashMap<MaterialID, Material>   assetMaterialMap;
     ZHLN::HashMap<uint64_t, BufferHandle> skinnedScratchMap;
@@ -932,39 +906,22 @@ struct RenderContext::Impl {
     ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>> tracked2DEmitters;
     ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>> tracked3DEmitters;
 
-    RenderQueues                       queues;
-    ZHLN::Array<GPULight>              mappedLights;
-    ZHLN::DoubleBuffered<BufferHandle> debugMeshHandles;
+    RenderQueues          queues;
+    ZHLN::Array<GPULight> mappedLights;
 
     Vk::Pipeline       csgWritePipeline;
     Vk::Pipeline       csgDifferencePipeline;
     Vk::Pipeline       csgIntersectionPipeline;
     Vk::PipelineLayout csgPipelineLayout;
 
-    // ============================================================================
-    // User Interface Rendering (Vulkan Bound)
-    // ============================================================================
-    Vk::DescriptorPool                    uiPool;
-    Vk::Pipeline                          uiPipeline;
-    Vk::PipelineLayout                    uiPipelineLayout;
-    ZHLN::DoubleBuffered<Vk::Buffer>      uiVbos;
-    ZHLN::DoubleBuffered<VkDeviceAddress> uiVboAddresses;
+    Vk::DescriptorPool uiPool;
+    Vk::Pipeline       uiPipeline;
+    Vk::PipelineLayout uiPipelineLayout;
 
-    [[nodiscard]] std::expected<void, Error> InitUIDynamicBuffers() noexcept;
+    std::expected<void, Error> InitUIDynamicBuffers() noexcept;
 
-    // ============================================================================
-    // Hardware Ray Tracing Context (TLAS)
-    // ============================================================================
-    Vk::RayTracingContext                      rtCtx;
-    DoubleBuffered<VkAccelerationStructureKHR> tlas;
-    DoubleBuffered<Vk::Buffer>                 tlasBuffer;
-    DoubleBuffered<Vk::Buffer>                 tlasScratchBuffer;
-    DoubleBuffered<Vk::Buffer>                 tlasInstanceBuffers;
-    DoubleBuffered<Vk::Buffer>                 tlasStagingBuffers;
+    Vk::RayTracingContext rtCtx;
 
-    // ============================================================================
-    // Local Configuration & Math Tracking States
-    // ============================================================================
     JPH::Mat44    current_view_proj    = JPH::Mat44::sIdentity();
     JPH::Mat44    unjittered_view_proj = JPH::Mat44::sIdentity();
     JPH::Mat44    shadowProjView       = JPH::Mat44::sIdentity();
@@ -975,9 +932,6 @@ struct RenderContext::Impl {
     AAState       aaState {};
     FrameProfiler gpuProfiler;
 
-    // ============================================================================
-    // Hot-Reloading & Code Watchers
-    // ============================================================================
     struct WatchableShader {
         std::string           path;
         FileWatcher           watcher;
@@ -986,9 +940,6 @@ struct RenderContext::Impl {
 
     ZHLN::Array<WatchableShader> shaderWatchers;
 
-    // ============================================================================
-    // Primitives / State Boundaries (Grouped at Tail to Minimize Padding)
-    // ============================================================================
     uint32_t frame_index         = 0;
     uint32_t current_image_index = 0;
     uint32_t nextTextureIndex    = 0;
@@ -1004,17 +955,11 @@ struct RenderContext::Impl {
     bool depth_ready         = false;
     bool hasSkinnedThisFrame = false;
 
-    // ============================================================================
-    // Helper Structures & Temporary Stack Scratches
-    // ============================================================================
     ZHLN::Array<VkAccelerationStructureInstanceKHR> tlasInstancesScratch;
     ZHLN::Array<SortItem>                           sortItemsScratch;
     ZHLN::Array<SortItem>                           sortTempScratch;
     ZHLN::Array<DrawCommand>                        sortDrawQueueScratch;
 
-    // ============================================================================
-    // API Signatures & Execution Hooks
-    // ============================================================================
     Impl(Window& win): window(win) {
     }
 
@@ -1023,8 +968,8 @@ struct RenderContext::Impl {
         transferCmdRing.Cleanup();
         if (ctx.Device() != VK_NULL_HANDLE) {
             for (uint32_t i = 0; i < 2; ++i) {
-                if (tlas[i] != VK_NULL_HANDLE) {
-                    rtCtx.DestroyAccelerationStructure(tlas[i]);
+                if (frames.tlas[i] != VK_NULL_HANDLE) {
+                    rtCtx.DestroyAccelerationStructure(frames.tlas[i]);
                 }
             }
         }
@@ -1061,17 +1006,14 @@ struct RenderContext::Impl {
     };
 
     struct MeshParticleRenderPush {
-        // 64-bit Addresses (32 bytes) -> Offset 0
         VkDeviceAddress particleBufferAddr;
         VkDeviceAddress posAddress;
         VkDeviceAddress attrAddress;
         VkDeviceAddress iboAddress;
 
-        // 128-bit Vectors (32 bytes) -> Offset 32 (16-byte aligned!)
         float baseColorFactor[4];
         float emissiveFactor[4];
 
-        // 32-bit Scalars (36 bytes) -> Offset 64
         uint32_t indexCount;
         uint32_t albedoIdx;
         uint32_t normalIdx;
@@ -1234,11 +1176,11 @@ struct FrameRecorder {
     VkDescriptorSet                            bindlessSet;
 
     FrameRecorder(Vk::CommandBuffer<Vk::QueueType::Graphics> c, RenderContext::Impl& impl) noexcept:
-        cmd(c), encoder(c.handle), ctx(impl), frameIndex(impl.frame_index), bindlessSet(impl.bindlessSets[impl.frame_index]) {
+        cmd(c), encoder(c.handle), ctx(impl), frameIndex(impl.frame_index), bindlessSet(impl.frames.bindlessSets[impl.frame_index]) {
     }
 
     FrameRecorder(VkCommandBuffer c, RenderContext::Impl& impl) noexcept:
-        cmd({c}), encoder(c), ctx(impl), frameIndex(impl.frame_index), bindlessSet(impl.bindlessSets[impl.frame_index]) {
+        cmd({c}), encoder(c), ctx(impl), frameIndex(impl.frame_index), bindlessSet(impl.frames.bindlessSets[impl.frame_index]) {
     }
 };
 

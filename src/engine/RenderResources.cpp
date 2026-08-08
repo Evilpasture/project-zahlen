@@ -376,7 +376,7 @@ std::expected<uint32_t, Error> RenderContext::Impl::CreateTextureInternal(const 
                                     Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, mipLevels);
 
             uint32_t index = nextTextureIndex++;
-            Vk::UpdateBindlessTextureSlot(device, index, gpuView.Get(), bindlessSets, 0);
+            Vk::UpdateBindlessTextureSlot(device, index, gpuView.Get(), frames.bindlessSets, 0);
 
             textureImages.push_back(std::forward<decltype(gpuImage)>(gpuImage));
             textureViews.push_back(std::move(gpuView));
@@ -412,7 +412,7 @@ std::expected<uint32_t, Error> RenderContext::Impl::CreateTextureCubeInternal(co
             auto gpuView = Vk::CreateViewCube<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), 1);
 
             uint32_t index = nextTextureIndex++;
-            Vk::UpdateBindlessTextureSlot(device, index, gpuView.Get(), bindlessSets, 0);
+            Vk::UpdateBindlessTextureSlot(device, index, gpuView.Get(), frames.bindlessSets, 0);
 
             textureImages.push_back(std::forward<decltype(gpuImage)>(gpuImage));
             textureViews.push_back(std::move(gpuView));
@@ -539,7 +539,7 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
 }
 
 void RenderContext::UploadDebugVertices(const void* posData, size_t posSize, const void* attrData, size_t attrSize, uint32_t vertexCount) noexcept {
-    auto* nativeMesh = _impl->meshPool.Resolve(_impl->debugMeshHandles[_impl->frame_index]).value_or(nullptr);
+    auto* nativeMesh = _impl->meshPool.Resolve(_impl->frames.debugMeshHandles[_impl->frame_index]).value_or(nullptr);
     if (nativeMesh == nullptr) {
         return;
     }
@@ -557,7 +557,7 @@ void RenderContext::UploadDebugVertices(const void* posData, size_t posSize, con
 }
 
 BufferHandle RenderContext::GetDebugMeshBuffer() const noexcept {
-    return _impl->debugMeshHandles[_impl->frame_index];
+    return _impl->frames.debugMeshHandles[_impl->frame_index];
 }
 
 void RenderContext::SubmitUI(
@@ -571,7 +571,7 @@ void RenderContext::SubmitUI(
         return;
     }
 
-    auto&  vbo         = _impl->uiVbos[_impl->frame_index];
+    auto&  vbo         = _impl->frames.uiVbos[_impl->frame_index];
     size_t maxVertices = vbo.Size() / (sizeof(VertexPosition) + sizeof(VertexAttributes));
 
     uint32_t safeVertexCount = std::min(vertexCount, static_cast<uint32_t>(maxVertices));
@@ -593,7 +593,7 @@ void RenderContext::UpdateJointMatrices(uint32_t offset, const JPH::Mat44* matri
     if (count == 0) {
         return;
     }
-    auto  mappedRegion = _impl->jointBuffers[_impl->frame_index].Map();
+    auto  mappedRegion = _impl->frames.jointBuffers[_impl->frame_index].Map();
     auto* gpuJoints    = std::bit_cast<JPH::Mat44*>(mappedRegion.data);
 
     std::memcpy(gpuJoints + offset, matrices, count * sizeof(JPH::Mat44));

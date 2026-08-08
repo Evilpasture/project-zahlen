@@ -232,13 +232,13 @@ struct GpuCullingPolicyPass1 {
             .dstAccessMask       = VK_ACCESS_2_TRANSFER_WRITE_BIT,
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .buffer              = ctx.secondPassCountBuffers[recorder.frameIndex].Handle(),
+            .buffer              = ctx.frames.secondPassCountBuffers[recorder.frameIndex].Handle(),
             .offset              = 0,
             .size                = VK_WHOLE_SIZE
         };
         Vk::BufferBarrier(cmd, fillBarrier);
 
-        Vk::FillBuffer(cmd, ctx.secondPassCountBuffers[recorder.frameIndex], 0, 0u);
+        Vk::FillBuffer(cmd, ctx.frames.secondPassCountBuffers[recorder.frameIndex], 0, 0u);
 
         VkBufferMemoryBarrier2 clearBarrier = {
             .sType               = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
@@ -249,7 +249,7 @@ struct GpuCullingPolicyPass1 {
             .dstAccessMask       = VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT,
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .buffer              = ctx.secondPassCountBuffers[recorder.frameIndex].Handle(),
+            .buffer              = ctx.frames.secondPassCountBuffers[recorder.frameIndex].Handle(),
             .offset              = 0,
             .size                = VK_WHOLE_SIZE
         };
@@ -271,7 +271,7 @@ struct GpuCullingPolicyPass1 {
         pc.drawCount        = drawCount;
         pc.passIndex        = 0; // PASS 1
 
-        ctx.cullingPass.Dispatch(cmd, ctx.cullingSetsPass1[recorder.frameIndex], (drawCount + 63) / 64, 1, 1, pc);
+        ctx.cullingPass.Dispatch(cmd, ctx.frames.cullingSetsPass1[recorder.frameIndex], (drawCount + 63) / 64, 1, 1, pc);
 
         using enum Vk::BarrierStage;
         using enum Vk::BarrierAccess;
@@ -293,7 +293,7 @@ struct GpuCullingPolicyPass1 {
                             .pipeline       = group.material->pipeline.Get(),
                             .layout         = group.material->layout.Get(),
                             .set            = recorder.bindlessSet,
-                            .argumentBuffer = ctx.indirectCommandsBuffers[recorder.frameIndex].Handle(),
+                            .argumentBuffer = ctx.frames.indirectCommandsBuffers[recorder.frameIndex].Handle(),
                             .offset         = Vk::DrawIndirectState::OffsetForIndex(group.start),
                             .drawCount      = group.count,
                         },
@@ -326,13 +326,13 @@ struct GpuCullingPolicyPass2 {
             .dstAccessMask       = VK_ACCESS_2_TRANSFER_WRITE_BIT,
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .buffer              = ctx.indirectCommandsBuffersPass2[recorder.frameIndex].Handle(),
+            .buffer              = ctx.frames.indirectCommandsBuffersPass2[recorder.frameIndex].Handle(),
             .offset              = 0,
             .size                = VK_WHOLE_SIZE
         };
         Vk::BufferBarrier(cmd, fillBarrier);
 
-        Vk::FillBuffer(cmd, ctx.indirectCommandsBuffersPass2[recorder.frameIndex], 0, 0u);
+        Vk::FillBuffer(cmd, ctx.frames.indirectCommandsBuffersPass2[recorder.frameIndex], 0, 0u);
 
         VkBufferMemoryBarrier2 clearBarrier = {
             .sType               = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
@@ -343,7 +343,7 @@ struct GpuCullingPolicyPass2 {
             .dstAccessMask       = VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT,
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .buffer              = ctx.indirectCommandsBuffersPass2[recorder.frameIndex].Handle(),
+            .buffer              = ctx.frames.indirectCommandsBuffersPass2[recorder.frameIndex].Handle(),
             .offset              = 0,
             .size                = VK_WHOLE_SIZE
         };
@@ -358,7 +358,7 @@ struct GpuCullingPolicyPass2 {
             .drawCount      = drawCount,
             .passIndex      = 1,
         };
-        ctx.cullingPass.Dispatch(cmd, ctx.cullingSetsPass2[recorder.frameIndex], (drawCount + 63) / 64, 1, 1, pc);
+        ctx.cullingPass.Dispatch(cmd, ctx.frames.cullingSetsPass2[recorder.frameIndex], (drawCount + 63) / 64, 1, 1, pc);
 
         using enum Vk::BarrierStage;
         using enum Vk::BarrierAccess;
@@ -380,7 +380,7 @@ struct GpuCullingPolicyPass2 {
                             .pipeline       = group.material->pipeline.Get(),
                             .layout         = group.material->layout.Get(),
                             .set            = recorder.bindlessSet,
-                            .argumentBuffer = ctx.indirectCommandsBuffersPass2[recorder.frameIndex].Handle(),
+                            .argumentBuffer = ctx.frames.indirectCommandsBuffersPass2[recorder.frameIndex].Handle(),
                             .offset         = Vk::DrawIndirectState::OffsetForIndex(group.start),
                             .drawCount      = group.count,
                         },
@@ -480,7 +480,7 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
         cascadeFrustums[c].Update(ctx.currentUniforms.lightSpaceMatrices[c]);
     }
 
-    auto  mapped           = ctx.shadowIndirectBuffers->Map();
+    auto  mapped           = ctx.frames.shadowIndirectBuffers->Map();
     auto* indirectCmdsBase = static_cast<VkDrawIndirectCommand*>(mapped.data);
 
     std::array<uint32_t, 8> passWriteOffsets {};
@@ -567,7 +567,7 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
                             {.pipeline       = ctx.shadowPipeline.Get(),
                              .layout         = ctx.shadowPipelineLayout.Get(),
                              .set            = recorder.bindlessSet,
-                             .argumentBuffer = ctx.shadowIndirectBuffers->Handle(),
+                             .argumentBuffer = ctx.frames.shadowIndirectBuffers->Handle(),
                              .offset         = Vk::DrawIndirectState::OffsetForIndex(passWriteOffsets[c]),
                              .drawCount      = csmDrawCount},
                             ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 1 + c}, // Map: 1 -> Cas0, 2 -> Cas1, etc.
@@ -621,7 +621,7 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
                             .pipeline       = ctx.punctualShadowPipeline.Get(),
                             .layout         = ctx.punctualShadowPipelineLayout.Get(),
                             .set            = recorder.bindlessSet,
-                            .argumentBuffer = ctx.shadowIndirectBuffers->Handle(),
+                            .argumentBuffer = ctx.frames.shadowIndirectBuffers->Handle(),
                             .offset         = Vk::DrawIndirectState::OffsetForIndex(passWriteOffsets[slotIdx]),
                             .drawCount      = drawCount,
                         },
@@ -673,7 +673,7 @@ void MainPass1::Execute(
         }
     }
 
-    const bool useGpuCulling = ctx.cullingPass.pipeline.Valid() && ctx.indirectCommandsBuffers->Valid() && (drawCount <= kGpuCullingMaxInstances);
+    const bool useGpuCulling = ctx.cullingPass.pipeline.Valid() && ctx.frames.indirectCommandsBuffers->Valid() && (drawCount <= kGpuCullingMaxInstances);
     if (useGpuCulling) {
         ExecutePass<GpuCullingPolicyPass1>(recorder, groups, drawCount, in.sceneColor, in.velocity, in.normRough, in.depth);
     } else {
@@ -715,7 +715,7 @@ void MainPass2::Execute(
         }
     }
 
-    const bool useGpuCulling = ctx.cullingPass.pipeline.Valid() && ctx.indirectCommandsBuffers->Valid() && (drawCount <= kGpuCullingMaxInstances);
+    const bool useGpuCulling = ctx.cullingPass.pipeline.Valid() && ctx.frames.indirectCommandsBuffers->Valid() && (drawCount <= kGpuCullingMaxInstances);
     if (useGpuCulling) {
         ExecutePass<GpuCullingPolicyPass2>(recorder, groups, drawCount, in.sceneColor, in.velocity, in.normRough, in.depth);
     } else {
@@ -785,7 +785,7 @@ void ForwardPass::Execute(
             }
 
             if (ctx.particleRenderPipeline.Valid() && !ctx.queues.particleEmittersQueue.empty()) {
-                auto* bindlessSet = ctx.bindlessSets[ctx.frame_index];
+                auto* bindlessSet = ctx.frames.bindlessSets[ctx.frame_index];
 
                 for (const auto& emitter: ctx.queues.particleEmittersQueue) {
                     auto* buffer = ctx.meshPool.Resolve(emitter.gpuBuffer).value_or(nullptr);
@@ -856,8 +856,8 @@ void BlitPass::Execute(
 
                 VkRect2D defaultScissor = {.offset = {.x = 0, .y = 0}, .extent = {.width = inColor.extent.width, .height = inColor.extent.height}};
 
-                auto   baseVboAddress = ctx.uiVboAddresses[recorder.frameIndex];
-                size_t maxVertices    = ctx.uiVbos[recorder.frameIndex].Size() / (sizeof(VertexPosition) + sizeof(VertexAttributes));
+                auto   baseVboAddress = ctx.frames.uiVboAddresses[recorder.frameIndex];
+                size_t maxVertices    = ctx.frames.uiVbos[recorder.frameIndex].Size() / (sizeof(VertexPosition) + sizeof(VertexAttributes));
 
                 for (const auto& batch: ctx.queues.uiBatches) {
                     uipc.albedoIdx   = batch.textureIndex;

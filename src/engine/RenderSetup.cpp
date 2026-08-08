@@ -129,7 +129,7 @@ void SetFrameData(RenderContext& ctx, const Camera& cam, const FrameUniforms& un
             ComputeCascadeLightSpaceMatrix(cam, lightView, sunDir, nearDist, farDist, aspect, tanHalfFov, uniforms.shadowResolution);
     }
 
-    std::memcpy(impl->frameUniformBuffers->Map().data, &gpuUniforms, sizeof(FrameUniforms));
+    std::memcpy(impl->frames.frameUniformBuffers->Map().data, &gpuUniforms, sizeof(FrameUniforms));
 }
 
 void SetGISettings(RenderContext& ctx, const GISettings& settings) {
@@ -141,7 +141,7 @@ void SetLights(RenderContext& ctx, const GPULight* lights, uint32_t count) {
     auto*    impl      = ctx.GetImpl();
     uint32_t safeCount = std::min(count, 128u);
     if (safeCount > 0 && lights != nullptr) {
-        std::memcpy(impl->lightStorageBuffers->Map().data, lights, sizeof(GPULight) * safeCount);
+        std::memcpy(impl->frames.lightStorageBuffers->Map().data, lights, sizeof(GPULight) * safeCount);
         impl->mappedLights.assign(lights, lights + safeCount);
     } else {
         impl->mappedLights.clear();
