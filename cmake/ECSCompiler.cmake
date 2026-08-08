@@ -3,42 +3,47 @@
 
 include_guard(GLOBAL)
 
-# --- DISCOVER OR BUILD RUST ECS COMPILER (ECSC) ---
-set(ZHLN_ECSC_SEARCH_PATHS
-    "${CMAKE_SOURCE_DIR}/tools/bin"
-    "${CMAKE_SOURCE_DIR}/tools/ecsc/target/release"
-)
+# --- INTERNAL LAZY HELPER: DISCOVER OR BUILD ECSC ONLY ON-DEMAND ---
+function(_zhln_ensure_ecsc_binary OUT_VAR)
+    if(ECSC_BIN_CACHED AND EXISTS "${ECSC_BIN_CACHED}")
+        set(${OUT_VAR} "${ECSC_BIN_CACHED}" PARENT_SCOPE)
+        return()
+    endif()
 
-find_program(ECSC_BIN NAMES ecsc ecsc.exe HINTS ${ZHLN_ECSC_SEARCH_PATHS})
+    set(ZHLN_ECSC_SEARCH_PATHS
+        "${CMAKE_SOURCE_DIR}/tools/bin"
+        "${CMAKE_SOURCE_DIR}/tools/ecsc/target/release"
+    )
 
-if(NOT ECSC_BIN)
-    find_program(CARGO_BIN NAMES cargo)
-    if(CARGO_BIN)
-        message(STATUS "ecsc binary not found. Compiling ecsc via Cargo...")
-        execute_process(
-            COMMAND ${CARGO_BIN} build --release
-            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/ecsc"
-            RESULT_VARIABLE CARGO_RES
-        )
-        if(NOT CARGO_RES EQUAL 0)
-            message(FATAL_ERROR "Failed to build ecsc via Cargo. Check Cargo output above.")
+    find_program(FOUND_ECSC_BIN NAMES ecsc ecsc.exe HINTS ${ZHLN_ECSC_SEARCH_PATHS})
+
+    if(NOT FOUND_ECSC_BIN)
+        find_program(CARGO_BIN NAMES cargo)
+        if(CARGO_BIN)
+            message(STATUS "ecsc binary not found. Compiling ecsc via Cargo...")
+            execute_process(
+                COMMAND ${CARGO_BIN} build --release
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/ecsc"
+                RESULT_VARIABLE CARGO_RES
+            )
+            if(NOT CARGO_RES EQUAL 0)
+                message(FATAL_ERROR "Failed to build ecsc via Cargo. Check Cargo output above.")
+            endif()
+
+            find_program(FOUND_ECSC_BIN NAMES ecsc ecsc.exe HINTS ${ZHLN_ECSC_SEARCH_PATHS} NO_DEFAULT_PATH)
+        else()
+            message(FATAL_ERROR "Neither prebuilt 'ecsc' binary nor 'cargo' toolchain was found in PATH.")
         endif()
-
-        find_program(ECSC_BIN NAMES ecsc ecsc.exe HINTS ${ZHLN_ECSC_SEARCH_PATHS} NO_DEFAULT_PATH)
-    else()
-        message(FATAL_ERROR "Neither prebuilt 'ecsc' binary nor 'cargo' toolchain was found in PATH.")
     endif()
-endif()
 
-if(ECSC_BIN)
-    message(STATUS "Using ECS DSL Compiler: ${ECSC_BIN}")
-endif()
+    set(ECSC_BIN_CACHED "${FOUND_ECSC_BIN}" CACHE INTERNAL "Path to ecsc executable")
+    set(${OUT_VAR} "${FOUND_ECSC_BIN}" PARENT_SCOPE)
+endfunction()
 
-# --- FUNCTION: COMPILE .ECS FILES TO C++20/26 MODULES ---
+# --- PUBLIC FUNCTION: COMPILE .ECS FILES TO C++20/26 MODULES ---
 function(zahlen_compile_ecs_modules TARGET_NAME)
-    if(NOT ECSC_BIN)
-        message(FATAL_ERROR "zahlen_compile_ecs_modules called, but 'ecsc' binary is unavailable.")
-    endif()
+    # Lazy evaluation: Only search or build ecsc when this function is actually called!
+    _zhln_ensure_ecsc_binary(ECSC_BIN)
 
     set(GENERATED_MODULE_FILES "")
     set(GENERATED_CPP_FILES "")
@@ -53,7 +58,7 @@ function(zahlen_compile_ecs_modules TARGET_NAME)
         set(OUT_CPPM "${OUT_DIR}/${FILE_NAME_WE}.cppm")
         set(OUT_CPP  "${OUT_DIR}/${FILE_NAME_WE}.cpp")
 
-        # 1. Instant Configure-Time Generation (Guarantees clangd/LSP index availability)
+        # 1. Instant Configure-Time Generation (for immediate clangd/LSP indexing)
         execute_process(
             COMMAND "${ECSC_BIN}" compile
                     -i "${ABS_SRC}"
@@ -66,7 +71,7 @@ function(zahlen_compile_ecs_modules TARGET_NAME)
             message(WARNING "ecsc failed to compile ${FILE_NAME_WE}.ecs during configuration stage.")
         endif()
 
-        # 2. Build-Time Target (Triggers Ninja rebuilds whenever .ecs files change)
+        # 2. Build-Time Custom Command (for Ninja rebuilds)
         add_custom_command(
             OUTPUT "${OUT_CPPM}" "${OUT_CPP}"
             COMMAND "${ECSC_BIN}" compile
@@ -82,7 +87,7 @@ function(zahlen_compile_ecs_modules TARGET_NAME)
         list(APPEND GENERATED_CPP_FILES "${OUT_CPP}")
     endforeach()
 
-    # Register generated C++ module interface files (.cppm) with CMake 3.28+ CXX_MODULES
+    # Register generated C++ module interface files (.cppm)
     target_sources(${TARGET_NAME}
         PUBLIC
             FILE_SET CXX_MODULES
