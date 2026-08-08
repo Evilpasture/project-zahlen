@@ -5,12 +5,13 @@ A **simple** project that integrates Vulkan, Jolt Physics and ImGUI for hardware
 ## Build Requirements
 * **CMake (>= 3.25)**: Build automation tool.
 * **C++26 Compiler with -freflection**: Supporting C++26 standard features (GCC 16.1.1 or later).
-* **C23 Compiler**: Supporting C23 standard features (such as `#embed` support).
+* **C23 Compiler**: Supporting C23 standard features (such as `#embed` support, but a C++26 compiler can also do `#embed`).
 * **Python**: Used during the asset building phase to scan level assets and configure the parallel build rules.
 
 ## Build Instructions
 
-For creative works, the build system expects Blender files in `./blender/`
+For creative works, the build system expects Blender files in `./blender/` depending on your CMakeLists.txt.
+For compiled assets, the build system expects usually in resources/assets/ as an unofficial convention.
 
 You can do it the hard way, or the easy way.
 
@@ -286,7 +287,13 @@ Should work on macOS too with MoltenVK if you manage to compile it, but expect M
 The project is primarily developed on Linux and macOS, but should also work on Windows as originally planned. 
 That is true, if your compiler supports standard C++26 features. Otherwise, tough luck. Compile GCC 16.1.1+ yourself.
 
-See [here](https://en.cppreference.com/cpp/compiler_support/26) for compiler support information.
+The project can also be compiled with Bloomberg Clang with its own libcxx and libunwind and work effectively. 
+However, precompiled headers are buggy due to unknown internal compiler errors.
+Make sure to pass your compiled runtime `-stdlib=libc++` to the compiler and `-lc++abi` to the linker.
+
+I'd love to give instructions but it took an entire morning of my life to just get it to work.
+
+See [here](https://en.cppreference.com/cpp/compiler_support/26) for detailed compiler support information.
 
 These packages are expected to be installed on the host operating system:
 
