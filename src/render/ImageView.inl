@@ -54,6 +54,22 @@ inline auto CreateView(VkDevice device, VkImage image, VkImageAspectFlags aspect
 }
 
 template <VkFormat F>
+inline auto CreateView3D(VkDevice device, VkImage image, VkImageAspectFlags aspect, uint32_t mips) -> ImageView {
+    ZHLN_ImageViewDesc desc = {
+        .image            = image,
+        .format           = F,
+        .aspect           = aspect,
+        .mip_levels       = mips,
+        .array_layers     = 1,
+        .view_type        = VK_IMAGE_VIEW_TYPE_3D, // Standard 3D Type
+        .base_array_layer = 0,
+        .base_mip         = {},
+    };
+    VkImageView view = ZHLN_CreateImageView(device, &desc);
+    return ImageView {device, view};
+}
+
+template <VkFormat F>
 inline auto CreateViewCube(VkDevice device, VkImage image, uint32_t mips) -> ImageView {
     ZHLN_ImageViewDesc desc = {
         .image            = image,

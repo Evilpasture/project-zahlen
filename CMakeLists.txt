@@ -355,7 +355,9 @@ target_precompile_headers(zahlen_engine PRIVATE
     "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/src/render/Rendering.hpp>"
 )
 
-set_target_properties(zahlen_engine PROPERTIES DISABLE_PRECOMPILE_HEADERS ON)
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    set_target_properties(zahlen_engine PROPERTIES DISABLE_PRECOMPILE_HEADERS ON)
+endif()
 
 set_target_properties(zahlen_engine PROPERTIES
     CXX_STANDARD 26

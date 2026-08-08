@@ -50,10 +50,6 @@ template <typename... Ptrs>
     return (... || (ptrs == nullptr));
 }
 
-inline void BarrierComputeWriteToVertexRead(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd) {
-    Vk::BeginBarrier<Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite>(cmd).TransitionTo<Vk::BarrierStage::Vertex, Vk::BarrierAccess::ShaderRead>();
-}
-
 template <typename TargetImageT, typename RecordFn>
 inline void DispatchPostProcessPass(
     VkCommandBuffer     cmd,
@@ -231,7 +227,7 @@ void RenderContext::Impl::DispatchSkinningPasses() {
     }
 
     ZHLN::ScopedTimer profTimer("GPU Compute Skinning");
-    auto* const cmd = current_cmd;
+    auto* const       cmd = current_cmd;
     skinningPass.Bind(cmd);
 
     for (const auto& drawCmd: queues.drawQueue) {

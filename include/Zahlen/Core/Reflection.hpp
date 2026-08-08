@@ -618,16 +618,7 @@ constexpr void ForEachAnnotatedTypeInScope(F&& f) {
     // Wrap Expand in splice brackets to instantiate the ReplicatorType
     [:ZHLN::Reflect::Expand(members):] >> [&]<auto m>() {
         if constexpr (std::meta::is_type(m)) {
-            constexpr bool isAnnotated = []() consteval {
-                for (auto a: std::meta::annotations_of(m)) {
-                    if (std::meta::type_of(a) == ^^Tag) {
-                        return true;
-                    }
-                }
-                return false;
-            }();
-
-            if constexpr (isAnnotated) {
+            if constexpr (std::ranges::any_of(std::meta::annotations_of(m), [](auto a) { return std::meta::type_of(a) == ^^Tag; })) {
                 using TargetType = typename[:m:];
                 f.template operator()<TargetType>();
             }
