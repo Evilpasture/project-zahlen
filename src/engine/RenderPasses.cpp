@@ -545,7 +545,7 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
     }
 
     {
-        Profiler::ScopedGpuProfile<Stages::ShadowPass, FrameProfiler> timer(cmd, recorder.frameIndex, ctx.gpuProfiler);
+        Profiler::ScopedGpuProfile timer(cmd, recorder.frameIndex, ctx.gpuProfiler, Stage::ShadowPass);
         bool                                                          hasMeshParticles = !ctx.queues.meshParticleQueue.empty();
 
         for (uint32_t c = 0; c < RenderContext::Impl::NUM_CASCADES; ++c) {
@@ -639,7 +639,7 @@ void MainPass1::Execute(
 ) const noexcept {
     auto                                                         cmd = recorder.cmd;
     auto&                                                        ctx = recorder.ctx;
-    Profiler::ScopedGpuProfile<Stages::MainPass1, FrameProfiler> timer(cmd, recorder.frameIndex, ctx.gpuProfiler);
+    Profiler::ScopedGpuProfile timer(cmd, recorder.frameIndex, ctx.gpuProfiler, Stage::MainPass1);
 
     const auto drawCount = static_cast<uint32_t>(ctx.queues.drawQueue.size());
     if (drawCount == 0) {
@@ -687,7 +687,7 @@ void MainPass2::Execute(
 ) const noexcept {
     auto                                                         cmd = recorder.cmd;
     auto&                                                        ctx = recorder.ctx;
-    Profiler::ScopedGpuProfile<Stages::MainPass2, FrameProfiler> timer(cmd, recorder.frameIndex, ctx.gpuProfiler);
+    Profiler::ScopedGpuProfile timer(cmd, recorder.frameIndex, ctx.gpuProfiler, Stage::MainPass2);
 
     const auto drawCount = static_cast<uint32_t>(ctx.queues.drawQueue.size());
     if (drawCount == 0 && ctx.queues.meshParticleQueue.empty() && ctx.queues.csgDrawQueue.empty()) {
@@ -838,7 +838,7 @@ void BlitPass::Execute(
     VkCommandBuffer cmd = recorder.cmd;
     auto&           ctx = recorder.ctx;
 
-    Profiler::ScopedGpuProfile<Stages::BlitPass, FrameProfiler> timer(cmd, recorder.frameIndex, ctx.gpuProfiler);
+    Profiler::ScopedGpuProfile timer(cmd, recorder.frameIndex, ctx.gpuProfiler, Stage::BlitPass);
 
     struct BlitPushConstants {
         float vignetteIntensity;
@@ -915,7 +915,7 @@ void ViewmodelPass::Execute(
         return;
     }
 
-    Profiler::ScopedGpuProfile<Stages::ViewmodelPass, FrameProfiler> timer(cmd, recorder.frameIndex, ctx.gpuProfiler);
+    Profiler::ScopedGpuProfile timer(cmd, recorder.frameIndex, ctx.gpuProfiler, Stage::ViewmodelPass);
 
     Vk::DynamicPass(in.sceneColor.extent)
         .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)

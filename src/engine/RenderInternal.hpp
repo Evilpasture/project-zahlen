@@ -3,8 +3,8 @@
 
 // File: src/engine/RenderInternal.hpp
 #pragma once
+#include "FileWatcher.hpp"
 #include "Rendering.hpp"
-#include "engine/FileWatcher.hpp"
 #include <GLFW/glfw3.h>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/ControlFlow.hpp>
@@ -366,90 +366,30 @@ using DecalLayout = Vk::DescriptorLayout<
     Vk::SamplerSlot<1, VK_SHADER_STAGE_FRAGMENT_BIT>       // pointSampler
     >;
 
-namespace Stages {
-struct ShadowPass {
-    static constexpr std::string_view name = "[GPU] Shadow Map";
+enum class Stage : uint8_t {
+    ShadowPass,
+    MainPass1,
+    MainPass2,
+    HiZPass,
+    DecalPass,
+    ViewmodelPass,
+    TransPrePass,
+    TransReflection,
+    AAPass,
+    ForwardPass,
+    BloomThreshPass,
+    BloomBlurHPass,
+    BloomBlurVPass,
+    BlitPass,
+    PostProcessPass,
+    VolumetricClearPass,
+    VolumetricFogInjectPass,
+    VolumetricLightInjectPass,
+    VolumetricIntegratePass,
+    VolumetricTemporalPass,
 };
-struct MainPass1 {
-    static constexpr std::string_view name = "[GPU] G-Buffer/Pass1";
-};
-struct MainPass2 {
-    static constexpr std::string_view name = "[GPU] G-Buffer/Pass2";
-};
-struct HiZPass {
-    static constexpr std::string_view name = "[GPU] Hi-Z Generation";
-};
-struct DecalPass {
-    static constexpr std::string_view name = "[GPU] Decal Pass";
-};
-struct ViewmodelPass {
-    static constexpr std::string_view name = "[GPU] Viewmodel Pass";
-};
-struct TransPrePass {
-    static constexpr std::string_view name = "[GPU] Translucent Pre-Pass";
-};
-struct TransReflection {
-    static constexpr std::string_view name = "[GPU] Translucent Reflection";
-};
-struct AAPass {
-    static constexpr std::string_view name = "[GPU] Anti-Aliasing";
-};
-struct ForwardPass {
-    static constexpr std::string_view name = "[GPU] Forward";
-};
-struct BloomThreshPass {
-    static constexpr std::string_view name = "[GPU] Bloom Threshold";
-};
-struct BloomBlurHPass {
-    static constexpr std::string_view name = "[GPU] Bloom Blur H";
-};
-struct BloomBlurVPass {
-    static constexpr std::string_view name = "[GPU] Bloom Blur V";
-};
-struct BlitPass {
-    static constexpr std::string_view name = "[GPU] Blit/Composite";
-};
-struct PostProcessPass {
-    static constexpr std::string_view name = "[GPU] PostProcess (GI)";
-};
-struct VolumetricClearPass {
-    static constexpr std::string_view name = "[GPU] Volumetric Clear";
-};
-struct VolumetricFogInjectPass {
-    static constexpr std::string_view name = "[GPU] Volumetric Fog Inject";
-};
-struct VolumetricLightInjectPass {
-    static constexpr std::string_view name = "[GPU] Volumetric Light Inject";
-};
-struct VolumetricIntegratePass {
-    static constexpr std::string_view name = "[GPU] Volumetric Integrate";
-};
-struct VolumetricTemporalPass {
-    static constexpr std::string_view name = "[GPU] Volumetric Temporal Resolve";
-};
-} // namespace Stages
 
-using FrameProfiler = Profiler::GpuProfiler<
-    Stages::ShadowPass,
-    Stages::MainPass1,
-    Stages::HiZPass,
-    Stages::MainPass2,
-    Stages::DecalPass,
-    Stages::ViewmodelPass,
-    Stages::TransPrePass,
-    Stages::TransReflection,
-    Stages::AAPass,
-    Stages::ForwardPass,
-    Stages::PostProcessPass,
-    Stages::BloomThreshPass,
-    Stages::BloomBlurHPass,
-    Stages::BloomBlurVPass,
-    Stages::BlitPass,
-    Stages::VolumetricClearPass,
-    Stages::VolumetricFogInjectPass,
-    Stages::VolumetricLightInjectPass,
-    Stages::VolumetricIntegratePass,
-    Stages::VolumetricTemporalPass>;
+using FrameProfiler = Profiler::GpuProfiler<Stage>;
 
 struct NativeMesh {
     VkDevice                     device = VK_NULL_HANDLE;

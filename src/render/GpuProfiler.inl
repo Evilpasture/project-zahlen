@@ -1,7 +1,11 @@
+// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // src/render/GpuProfiler.inl
 
 #pragma once
 #include "GpuProfiler.hpp"
+#include <Zahlen/Core/Reflection.hpp>
 
 namespace ZHLN::Profiler {
 
@@ -9,8 +13,9 @@ namespace ZHLN::Profiler {
 // GpuProfiler Implementation
 // ============================================================================
 
-template <GpuStageTag... Stages>
-inline GpuProfiler<Stages...>::~GpuProfiler() noexcept {
+template <typename EnumT>
+    requires std::is_enum_v<EnumT>
+inline GpuProfiler<EnumT>::~GpuProfiler() noexcept {
     if (_device != VK_NULL_HANDLE) {
         for (uint32_t i = 0; i < 2; ++i) {
             if (_pools[i] != VK_NULL_HANDLE) {
@@ -20,14 +25,16 @@ inline GpuProfiler<Stages...>::~GpuProfiler() noexcept {
     }
 }
 
-template <GpuStageTag... Stages>
-inline GpuProfiler<Stages...>::GpuProfiler(GpuProfiler&& other) noexcept:
+template <typename EnumT>
+    requires std::is_enum_v<EnumT>
+inline GpuProfiler<EnumT>::GpuProfiler(GpuProfiler&& other) noexcept:
     _device(std::exchange(other._device, VK_NULL_HANDLE)), _pools(std::exchange(other._pools, {VK_NULL_HANDLE, VK_NULL_HANDLE})),
     _recordedMasks(std::exchange(other._recordedMasks, {0, 0})), _enabled(std::exchange(other._enabled, false)) {
 }
 
-template <GpuStageTag... Stages>
-inline auto GpuProfiler<Stages...>::operator=(GpuProfiler&& other) noexcept -> GpuProfiler& {
+template <typename EnumT>
+    requires std::is_enum_v<EnumT>
+inline auto GpuProfiler<EnumT>::operator=(GpuProfiler&& other) noexcept -> GpuProfiler& {
     if (this != &other) {
         if (_device != VK_NULL_HANDLE) {
             for (uint32_t i = 0; i < 2; ++i) {
@@ -44,8 +51,9 @@ inline auto GpuProfiler<Stages...>::operator=(GpuProfiler&& other) noexcept -> G
     return *this;
 }
 
-template <GpuStageTag... Stages>
-inline void GpuProfiler<Stages...>::Init(VkDevice device, VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex) noexcept {
+template <typename EnumT>
+    requires std::is_enum_v<EnumT>
+inline void GpuProfiler<EnumT>::Init(VkDevice device, VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex) noexcept {
     _device        = device;
     _recordedMasks = {0, 0};
     _enabled       = false;
@@ -84,8 +92,9 @@ inline void GpuProfiler<Stages...>::Init(VkDevice device, VkPhysicalDevice physi
     }
 }
 
-template <GpuStageTag... Stages>
-inline void GpuProfiler<Stages...>::Reset(uint32_t frameIndex) noexcept {
+template <typename EnumT>
+    requires std::is_enum_v<EnumT>
+inline void GpuProfiler<EnumT>::Reset(uint32_t frameIndex) noexcept {
     if (!_enabled) {
         return;
     }
@@ -94,47 +103,45 @@ inline void GpuProfiler<Stages...>::Reset(uint32_t frameIndex) noexcept {
     _recordedMasks[slot] = 0;
 }
 
-template <GpuStageTag... Stages>
-template <GpuStageTag Stage>
-inline void GpuProfiler<Stages...>::WriteStart(VkCommandBuffer cmd, uint32_t frameIndex) const noexcept {
+template <typename EnumT>
+    requires std::is_enum_v<EnumT>
+inline void GpuProfiler<EnumT>::WriteStart(VkCommandBuffer cmd, uint32_t frameIndex, EnumT stage) const noexcept {
     if (!_enabled) {
         return;
     }
-    static_assert(ContainsType<Stage, Stages...>, "Stage tag not registered in this GpuProfiler!");
-    constexpr uint32_t stage_idx = TypeIndex<Stage, Stages...>::value;
-    constexpr uint32_t query_idx = stage_idx * 2;
+    auto     stage_idx = static_cast<uint32_t>(stage);
+    uint32_t query_idx = stage_idx * 2;
+    uint32_t slot      = frameIndex % 2;
 
-    uint32_t slot = frameIndex % 2;
     _recordedMasks[slot] |= (1U << stage_idx);
 
-    // --- FIXED: Detect if this is a Compute pass and use the optimal stage mask to prevent hardware deadlocks ---
-    constexpr std::string_view stage_name = Stage::name;
-    constexpr bool             is_compute = stage_name.contains("Volumetric") || stage_name.contains("Compute");
-    VkPipelineStageFlags2      stage_mask = is_compute ? VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT : VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT;
+    std::string_view      stage_name = Reflect::EnumToString(stage);
+    bool                  is_compute = stage_name.contains("Volumetric") || stage_name.contains("Compute");
+    VkPipelineStageFlags2 stage_mask = is_compute ? VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT : VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT;
 
     vkCmdWriteTimestamp2(cmd, stage_mask, _pools[slot], query_idx);
 }
 
-template <GpuStageTag... Stages>
-template <GpuStageTag Stage>
-inline void GpuProfiler<Stages...>::WriteEnd(VkCommandBuffer cmd, uint32_t frameIndex) const noexcept {
+template <typename EnumT>
+    requires std::is_enum_v<EnumT>
+inline void GpuProfiler<EnumT>::WriteEnd(VkCommandBuffer cmd, uint32_t frameIndex, EnumT stage) const noexcept {
     if (!_enabled) {
         return;
     }
-    static_assert(ContainsType<Stage, Stages...>, "Stage tag not registered in this GpuProfiler!");
-    constexpr uint32_t query_idx = (TypeIndex<Stage, Stages...>::value * 2) + 1;
+    auto     stage_idx = static_cast<uint32_t>(stage);
+    uint32_t query_idx = (stage_idx * 2) + 1;
 
-    // --- FIXED: Detect if this is a Compute pass and use the optimal stage mask to prevent hardware deadlocks ---
-    constexpr std::string_view stage_name = Stage::name;
-    constexpr bool             is_compute = stage_name.contains("Volumetric") || stage_name.contains("Compute");
-    VkPipelineStageFlags2      stage_mask = is_compute ? VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT : VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT;
+    std::string_view      stage_name = Reflect::EnumToString(stage);
+    bool                  is_compute = stage_name.contains("Volumetric") || stage_name.contains("Compute");
+    VkPipelineStageFlags2 stage_mask = is_compute ? VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT : VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT;
 
     vkCmdWriteTimestamp2(cmd, stage_mask, _pools[frameIndex % 2], query_idx);
 }
 
-template <GpuStageTag... Stages>
+template <typename EnumT>
+    requires std::is_enum_v<EnumT>
 template <typename Func>
-inline void GpuProfiler<Stages...>::RetrieveResults(uint32_t frameIndex, float timestampPeriod, Func&& callback) noexcept {
+inline void GpuProfiler<EnumT>::RetrieveResults(uint32_t frameIndex, float timestampPeriod, Func&& callback) noexcept {
     if (!_enabled) {
         return;
     }
@@ -146,43 +153,42 @@ inline void GpuProfiler<Stages...>::RetrieveResults(uint32_t frameIndex, float t
 
     VkQueryPool pool = _pools[slot];
 
-    (
-        [&]<typename Stage>() {
-            constexpr uint32_t stage_idx = TypeIndex<Stage, Stages...>::value;
-            if (mask & (1U << stage_idx)) {
-                constexpr uint32_t      start_idx = stage_idx * 2;
-                std::array<uint64_t, 2> stage_results {};
+    for (uint32_t i = 0; i < kStageCount; ++i) {
+        if (mask & (1U << i)) {
+            uint32_t                start_idx = i * 2;
+            std::array<uint64_t, 2> stage_results {};
 
-                // Removed VK_QUERY_RESULT_WAIT_BIT to prevent hard CPU execution stalls
-                VkResult res = vkGetQueryPoolResults(
-                    _device, pool, start_idx, 2, stage_results.size() * sizeof(uint64_t), stage_results.data(), sizeof(uint64_t), VK_QUERY_RESULT_64_BIT
-                );
+            VkResult res = vkGetQueryPoolResults(
+                _device, pool, start_idx, 2, stage_results.size() * sizeof(uint64_t), stage_results.data(), sizeof(uint64_t), VK_QUERY_RESULT_64_BIT
+            );
 
-                if (res == VK_SUCCESS) {
-                    float duration_ms = 0.0F;
-                    if (stage_results[1] >= stage_results[0]) {
-                        duration_ms = static_cast<float>(stage_results[1] - stage_results[0]) * timestampPeriod / 1000000.0F;
-                    }
-                    std::forward<Func>(callback)(Stage::name, duration_ms);
+            if (res == VK_SUCCESS) {
+                float duration_ms = 0.0F;
+                if (stage_results[1] >= stage_results[0]) {
+                    duration_ms = static_cast<float>(stage_results[1] - stage_results[0]) * timestampPeriod / 1000000.0F;
                 }
+                auto             stage_enum = static_cast<EnumT>(i);
+                std::string_view name       = Reflect::EnumToString(stage_enum);
+                std::forward<Func>(callback)(name, duration_ms);
             }
-        }.template operator()<Stages>(),
-        ...);
+        }
+    }
+    _recordedMasks[slot] = 0;
 }
 
 // ============================================================================
 // ScopedGpuProfile Implementation
 // ============================================================================
 
-template <GpuStageTag Stage, typename ProfilerT>
-inline ScopedGpuProfile<Stage, ProfilerT>::ScopedGpuProfile(VkCommandBuffer cmd, uint32_t frameIndex, const ProfilerT& profiler) noexcept:
-    _cmd(cmd), _frameIndex(frameIndex), _profiler(profiler) {
-    _profiler.template WriteStart<Stage>(_cmd, _frameIndex);
+template <typename EnumT>
+inline ScopedGpuProfile<EnumT>::ScopedGpuProfile(VkCommandBuffer cmd, uint32_t frameIndex, const GpuProfiler<EnumT>& profiler, EnumT stage) noexcept:
+    _cmd(cmd), _frameIndex(frameIndex), _profiler(profiler), _stage(stage) {
+    _profiler.WriteStart(_cmd, _frameIndex, _stage);
 }
 
-template <GpuStageTag Stage, typename ProfilerT>
-inline ScopedGpuProfile<Stage, ProfilerT>::~ScopedGpuProfile() noexcept {
-    _profiler.template WriteEnd<Stage>(_cmd, _frameIndex);
+template <typename EnumT>
+inline ScopedGpuProfile<EnumT>::~ScopedGpuProfile() noexcept {
+    _profiler.WriteEnd(_cmd, _frameIndex, _stage);
 }
 
 } // namespace ZHLN::Profiler

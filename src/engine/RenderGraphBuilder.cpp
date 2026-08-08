@@ -59,7 +59,7 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeHiZGeneratePass() const noexcept {
         return Vk::MakePass<"HiZGenerate", Vk::ShaderRead<Res_Depth>, Vk::ComputeWrite<Res_HiZ>>([this](VkCommandBuffer cmd) noexcept {
-            Profiler::ScopedGpuProfile<Stages::HiZPass, FrameProfiler> timer(cmd, fIdx, self.gpuProfiler);
+            Profiler::ScopedGpuProfile timer(cmd, fIdx, self.gpuProfiler, Stage::HiZPass);
 
             uint32_t width  = self.graphResources.hizMap.extent.width;
             uint32_t height = self.graphResources.hizMap.extent.height;
@@ -176,7 +176,7 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeVolumetricClearPass() const noexcept {
         return Vk::MakePass<"VolumetricClear", Vk::ComputeWrite<Res_VoxelMedia>, Vk::ComputeWrite<Res_VoxelLight>>([this](VkCommandBuffer c) noexcept {
-            Profiler::ScopedGpuProfile<Stages::VolumetricClearPass, FrameProfiler> timer(c, fIdx, self.gpuProfiler);
+            Profiler::ScopedGpuProfile timer(c, fIdx, self.gpuProfiler, Stage::VolumetricClearPass);
             self.volumetricClearPass.WriteNext(
                 device, Vk::Assume<Vk::ComputeWrite<Res_VoxelMedia>>(self.graphResources.voxelMedia),
                 Vk::Assume<Vk::ComputeWrite<Res_VoxelLight>>(self.graphResources.voxelLight)
@@ -187,7 +187,7 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeVolumetricFogInjectPass() const noexcept {
         return Vk::MakePass<"VolumetricFogInject", Vk::ComputeWrite<Res_VoxelMedia>>([this](VkCommandBuffer c) noexcept {
-            Profiler::ScopedGpuProfile<Stages::VolumetricFogInjectPass, FrameProfiler> timer(c, fIdx, self.gpuProfiler);
+            Profiler::ScopedGpuProfile timer(c, fIdx, self.gpuProfiler, Stage::VolumetricFogInjectPass);
             self.volumetricFogInjectPass.WriteNext(
                 device, Vk::Assume<Vk::ComputeWrite<Res_VoxelMedia>>(self.graphResources.voxelMedia), self.frames.frameUniformBuffers[fIdx].Handle(),
                 self.frames.fogVolumesBuffer[fIdx].Handle()
@@ -201,7 +201,7 @@ struct PassFactory {
     [[nodiscard]] auto MakeVolumetricLightInjectPass() const noexcept {
         return Vk::MakePass<"VolumetricLightInject", Vk::ComputeReadGeneral<Res_VoxelMedia>, Vk::ComputeWrite<Res_VoxelLight>, Vk::ComputeRead<Res_ShadowMap>>(
             [this](VkCommandBuffer c) noexcept {
-                Profiler::ScopedGpuProfile<Stages::VolumetricLightInjectPass, FrameProfiler> timer(c, fIdx, self.gpuProfiler);
+                Profiler::ScopedGpuProfile timer(c, fIdx, self.gpuProfiler, Stage::VolumetricLightInjectPass);
                 self.volumetricLightInjectPass.WriteNext(
                     device, Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelMedia>>(self.graphResources.voxelMedia),
                     Vk::Assume<Vk::ComputeWrite<Res_VoxelLight>>(self.graphResources.voxelLight), self.frames.frameUniformBuffers[fIdx].Handle(),
@@ -216,7 +216,7 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeVolumetricIntegrationPass() const noexcept {
         return Vk::MakePass<"VolumetricIntegrate", Vk::ComputeReadGeneral<Res_VoxelLight>, Vk::ComputeWrite<Res_VoxelInt>>([this](VkCommandBuffer c) noexcept {
-            Profiler::ScopedGpuProfile<Stages::VolumetricIntegratePass, FrameProfiler> timer(c, fIdx, self.gpuProfiler);
+            Profiler::ScopedGpuProfile timer(c, fIdx, self.gpuProfiler, Stage::VolumetricIntegratePass);
             self.volumetricIntegrationPass.WriteNext(
                 device, Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelLight>>(self.graphResources.voxelLight),
                 Vk::Assume<Vk::ComputeWrite<Res_VoxelInt>>(self.graphResources.voxelIntegrated)
@@ -229,7 +229,7 @@ struct PassFactory {
         return Vk::MakePass<
             "VolumetricTemporal", Vk::ComputeReadGeneral<Res_VoxelInt>, Vk::ComputeReadGeneral<Res_VoxelHist>, Vk::ComputeWrite<Res_VoxelResolved>>(
             [this](VkCommandBuffer c) noexcept {
-                Profiler::ScopedGpuProfile<Stages::VolumetricTemporalPass, FrameProfiler> timer(c, fIdx, self.gpuProfiler);
+                Profiler::ScopedGpuProfile timer(c, fIdx, self.gpuProfiler, Stage::VolumetricTemporalPass);
                 self.volumetricTemporalPass.WriteNext(
                     device, Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelInt>>(self.graphResources.voxelIntegrated),
                     Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelHist>>(self.graphResources.voxelHistory),
@@ -279,7 +279,7 @@ struct PassFactory {
             "Reflection", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_Lighting>,
             Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ShaderReadGeneral<Res_VoxelResolved>, Vk::ColorWrite<Res_HdrSceneColor>>(
             [this](auto& ctx) noexcept {
-                Profiler::ScopedGpuProfile<Stages::PostProcessPass, FrameProfiler> timer(ctx.Cmd(), fIdx, self.gpuProfiler);
+                Profiler::ScopedGpuProfile timer(ctx.Cmd(), fIdx, self.gpuProfiler, Stage::PostProcessPass);
                 self.reflectionPass.WriteNext(
                     device, Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor), self.defaultSampler.Get(),
                     Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget),
@@ -308,7 +308,7 @@ struct PassFactory {
             "TransReflection", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_TransNorm>, Vk::ShaderRead<Res_TransDepth>, Vk::ShaderRead<Res_Lighting>,
             Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ShaderReadGeneral<Res_VoxelResolved>, Vk::ColorWrite<Res_TransLighting>>(
             [this](auto& ctx) noexcept {
-                Profiler::ScopedGpuProfile<Stages::TransReflection, FrameProfiler> timer(ctx.Cmd(), fIdx, self.gpuProfiler);
+                Profiler::ScopedGpuProfile timer(ctx.Cmd(), fIdx, self.gpuProfiler, Stage::TransReflection);
 
                 self.translucentReflectionPass.WriteNext(
                     device, Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor), self.defaultSampler.Get(),
@@ -326,7 +326,7 @@ struct PassFactory {
     [[nodiscard]] auto MakeForwardPass() const noexcept {
         auto& targetImage = self.graphResources.hdrSceneColor;
         return Vk::Passieren<"Forward", Vk::ColorWrite<Res_HdrSceneColor>, Vk::DepthStencilWrite<Res_Depth>>([this, &targetImage](VkCommandBuffer c) noexcept {
-            Profiler::ScopedGpuProfile<Stages::ForwardPass, FrameProfiler> timer(c, fIdx, self.gpuProfiler);
+            Profiler::ScopedGpuProfile timer(c, fIdx, self.gpuProfiler, Stage::ForwardPass);
             FrameRecorder                                                  fwdRecorder(c, self);
             Passes::ForwardPass {}.Execute(
                 fwdRecorder, Vk::Assume<Vk::ColorWrite<Res_HdrSceneColor>>(targetImage),
@@ -338,7 +338,7 @@ struct PassFactory {
     [[nodiscard]] auto MakeBloomThresholdPass() const noexcept {
         const auto& inputColor = self.graphResources.hdrSceneColor;
         return Vk::MakePass<"BloomThreshold", Vk::ShaderRead<Res_HdrSceneColor>, Vk::ColorWrite<Res_BloomThresh>>([this, &inputColor](auto& ctx) noexcept {
-            Profiler::ScopedGpuProfile<Stages::BloomThreshPass, FrameProfiler> timer(ctx.Cmd(), fIdx, self.gpuProfiler);
+            Profiler::ScopedGpuProfile timer(ctx.Cmd(), fIdx, self.gpuProfiler, Stage::BloomThreshPass);
             self.bloomThresholdPass.WriteNext(device, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor), self.defaultSampler.Get());
             self.bloomThresholdPass.Execute(ctx.Cmd());
         });
@@ -393,7 +393,7 @@ struct PassFactory {
                 return;
             }
 
-            Profiler::ScopedGpuProfile<Stages::DecalPass, FrameProfiler> timer(c, fIdx, self.gpuProfiler);
+            Profiler::ScopedGpuProfile timer(c, fIdx, self.gpuProfiler, Stage::DecalPass);
 
             DecalLayout::Write(self.ctx.Device(), self.decalSet, self.presentation.depthTarget.view.Get(), self.pointSampler.Get());
 
