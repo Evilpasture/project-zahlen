@@ -5,6 +5,7 @@
 
 #include "Zahlen/Entity.hpp"
 #include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Error.hpp>
 #include <expected>
 #include <functional>
 #include <memory>

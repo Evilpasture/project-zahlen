@@ -23,6 +23,11 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 project(zahlen LANGUAGES C CXX ASM)
 
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    add_compile_options(-Qunused-arguments)
+    add_link_options(-Qunused-arguments)
+endif()
+
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
 endif()
@@ -167,6 +172,10 @@ endif()
 option(ZHLN_DEV_MODE "Enable raw loose-file asset loading for development" ON)
 if(ZHLN_DEV_MODE)
     add_compile_definitions(ZHLN_DEV_MODE)
+endif()
+
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    add_compile_definitions(ZHLN_DEBUG=1)
 endif()
 
 if(APPLE)
@@ -345,6 +354,8 @@ add_library(zahlen_engine SHARED ${ENGINE_SOURCES})
 target_precompile_headers(zahlen_engine PRIVATE
     "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/src/render/Rendering.hpp>"
 )
+
+set_target_properties(zahlen_engine PROPERTIES DISABLE_PRECOMPILE_HEADERS ON)
 
 set_target_properties(zahlen_engine PROPERTIES
     CXX_STANDARD 26
@@ -683,9 +694,69 @@ if(USE_SANITIZERS)
 endif()
 
 # --- APPLY TARGET-SPECIFIC REFLECTION FLAGS ---
-if(COMPILER_HAS_REFLECTION)
-    target_compile_options(zahlen_render PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
-    target_compile_options(zahlen_engine PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
-    target_compile_options(zahlen_gltf PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
-    target_compile_options(zahlen PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
-endif()
+
+function(zahlen_use_custom_libcxx TARGET_NAME)
+    option(ZHLN_USE_CUSTOM_LIBCXX "Link against Bloomberg custom libc++" OFF)
+
+    if(NOT ZHLN_USE_CUSTOM_LIBCXX)
+        return()
+    endif()
+
+    get_filename_component(_DEFAULT_LLVM_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../llvm-p2996" ABSOLUTE)
+    set(LLVM_BLOOMBERG_ROOT "${_DEFAULT_LLVM_ROOT}" CACHE PATH "Path to Bloomberg LLVM monorepo")
+    set(LLVM_BLOOMBERG_BUILD "${LLVM_BLOOMBERG_ROOT}/build" CACHE PATH "Path to Bloomberg LLVM build directory")
+
+    if(NOT EXISTS "${LLVM_BLOOMBERG_ROOT}")
+        message(FATAL_ERROR "ZHLN_USE_CUSTOM_LIBCXX is ON, but LLVM root was not found at: ${LLVM_BLOOMBERG_ROOT}\n"
+                           "Pass -DLLVM_BLOOMBERG_ROOT=/path/to/llvm-p2996 to configure manually.")
+    endif()
+
+    # Discover all lib subdirectories (e.g. build/lib and build/lib/x86_64-pc-linux-gnu)
+    file(GLOB _LLVM_LIB_SUBDIRS LIST_DIRECTORIES true "${LLVM_BLOOMBERG_BUILD}/lib/*")
+    set(_ALL_LLVM_LIB_DIRS "${LLVM_BLOOMBERG_BUILD}/lib")
+    foreach(_DIR IN LISTS _LLVM_LIB_SUBDIRS)
+        if(IS_DIRECTORY "${_DIR}")
+            list(APPEND _ALL_LLVM_LIB_DIRS "${_DIR}")
+        endif()
+    endforeach()
+
+    # 1. Compile flags strictly for C++ source files
+    target_compile_options(${TARGET_NAME} PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>
+    )
+
+    # 2. Add -L and -Wl,-rpath for all discovered LLVM library paths
+    foreach(_LIB_DIR IN LISTS _ALL_LLVM_LIB_DIRS)
+        target_link_options(${TARGET_NAME} PRIVATE
+            $<$<PLATFORM_ID:Linux>:-L${_LIB_DIR}>
+            $<$<PLATFORM_ID:Linux>:-Wl,-rpath,${_LIB_DIR}>
+        )
+    endforeach()
+
+    target_link_options(${TARGET_NAME} PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>
+    )
+
+    # 3. Explicitly link c++, c++abi, and unwind
+    target_link_libraries(${TARGET_NAME} PRIVATE
+        c++
+        c++abi
+        unwind
+    )
+endfunction()
+
+function(zahlen_enable_reflection TARGET_NAME)
+    if(COMPILER_HAS_REFLECTION)
+        target_compile_options(${TARGET_NAME} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
+        if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+            target_compile_options(${TARGET_NAME} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-fannotation-attributes>")
+        endif()
+        target_compile_definitions(${TARGET_NAME} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:__cpp_impl_reflection=202603L>")
+    endif()
+    zahlen_use_custom_libcxx(${TARGET_NAME})
+endfunction()
+
+zahlen_enable_reflection(zahlen_render)
+zahlen_enable_reflection(zahlen_engine)
+zahlen_enable_reflection(zahlen_gltf)
+zahlen_enable_reflection(zahlen)

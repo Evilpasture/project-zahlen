@@ -9,10 +9,6 @@
 #include <immintrin.h>
 #endif
 
-#ifndef NDEBUG
-#define ZHLN_DEBUG 1
-#endif
-
 namespace ZHLN {
 
 // Forward declare the Fiber system
@@ -95,8 +91,8 @@ class Mutex {
 
     // --- Debug Variables & Helpers ---
 #ifdef ZHLN_DEBUG
-    alignas(32) ZHLN::Atomic<bool> _hasOwner;
-    ZHLN::Atomic<uintptr_t> _owner;
+    alignas(16) ZHLN::Atomic<bool> _hasOwner;
+    alignas(16) ZHLN::Atomic<uintptr_t> _owner;
 
     void CheckPreLock() noexcept;
     void PostLock() noexcept;

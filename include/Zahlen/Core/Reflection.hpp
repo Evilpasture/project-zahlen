@@ -49,62 +49,9 @@ constexpr bool IsBracesConstructible() {
 // 2. REFLECTION-DEPENDENT CORE (Split by Guard)
 // ============================================================================
 
-#if defined(__cpp_impl_reflection)
+#if defined(__cpp_impl_reflection) || (defined(__has_feature) && __has_feature(reflection))
 #include "Loop.hpp"
-
-#if defined(__clang__) && !defined(_GLIBCXX_META)
-
-#include <exception>       // IWYU pragma: keep
-#include <source_location> // IWYU pragma: keep
-#include <version>
-
-namespace clang_meta_compat {
-struct exception_base {
-    exception_base()          = default;
-    virtual ~exception_base() = default;
-
-    exception_base(const exception_base&)                = default;
-    exception_base& operator=(const exception_base&)     = default;
-    exception_base(exception_base&&) noexcept            = default;
-    exception_base& operator=(exception_base&&) noexcept = default;
-
-    [[nodiscard]] virtual consteval const char* what() const noexcept = 0;
-};
-} // namespace clang_meta_compat
-
-namespace std {
-using clang_meta_exc_base = ::clang_meta_compat::exception_base;
-}
-
-#define exception clang_meta_exc_base
-
-#if defined(__GNUC__) || defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wpedantic"
-#endif
-
-#include_next <meta>
-
-#if defined(__GNUC__) || defined(__clang__)
-#pragma GCC diagnostic pop
-#endif
-
-#undef exception
-
-#else
-
-#if defined(__GNUC__) || defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wpedantic"
-#endif
-
-#include_next <meta>
-
-#if defined(__GNUC__) || defined(__clang__)
-#pragma GCC diagnostic pop
-#endif
-
-#endif
+#include <meta>
 
 namespace ZHLN::Reflect {
 
@@ -305,12 +252,12 @@ constexpr auto ZipFieldsWithNames(T&& t) {
     static constexpr auto members =
         std::define_static_array(std::meta::nonstatic_data_members_of(^^std::remove_cvref_t<T>, std::meta::access_context::current()));
 
+    static constexpr auto names = []<std::size_t... Is>(std::index_sequence<Is...>) {
+        return std::array<std::string_view, sizeof...(Is)> {std::meta::identifier_of(members[Is])...};
+    }(std::make_index_sequence<members.size()>());
+
     return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-        return std::make_tuple(
-            std::pair<std::string_view, decltype(std::forward<T>(t).[:members[Is]:])> {
-                std::meta::identifier_of(members[Is]), std::forward<T>(t).[:members[Is]:]
-            }...
-        );
+        return std::make_tuple(std::pair<std::string_view, decltype(std::forward<T>(t).[:members[Is]:])> {names[Is], std::forward<T>(t).[:members[Is]:]}...);
     }(std::make_index_sequence<members.size()>());
 }
 
@@ -352,10 +299,8 @@ consteval auto FieldNames() {
 
 template <typename T>
 consteval bool HasField(std::string_view name) {
-    for (auto m: std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current()))
-        if (std::meta::identifier_of(m) == name)
-            return true;
-    return false;
+    constexpr auto members = std::define_static_array(std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current()));
+    return std::ranges::any_of(members, [name](auto m) { return std::meta::identifier_of(m) == name; });
 }
 
 template <typename E>
@@ -384,14 +329,10 @@ template <typename Tag, typename T>
 consteval bool HasTag(std::string_view field_name) {
     using U = std::remove_cvref_t<T>;
     if constexpr (requires { typename U::ReflectMetadata; }) {
-        using Meta                  = typename U::ReflectMetadata;
+        using Meta [[maybe_unused]] = typename U::ReflectMetadata;
         constexpr auto meta_members = std::define_static_array(std::meta::nonstatic_data_members_of(^^Meta, std::meta::access_context::current()));
 
-        for (auto m: meta_members) {
-            if (std::meta::identifier_of(m) == field_name) {
-                return std::meta::type_of(m) == ^^Tag;
-            }
-        }
+        return std::ranges::any_of(meta_members, [field_name](auto m) { return std::meta::identifier_of(m) == field_name && std::meta::type_of(m) == ^^Tag; });
     }
     return false;
 }
@@ -406,14 +347,9 @@ consteval auto BaseClasses() {
 
 template <typename T>
 consteval bool HasVirtualBases() {
-    using U              = std::remove_cvref_t<T>;
-    constexpr auto bases = std::define_static_array(std::meta::bases_of(^^U, std::meta::access_context::current()));
-    for (auto b: bases) {
-        if (std::meta::is_virtual(b)) {
-            return true;
-        }
-    }
-    return false;
+    using U [[maybe_unused]] = std::remove_cvref_t<T>;
+    constexpr auto bases     = std::define_static_array(std::meta::bases_of(^^U, std::meta::access_context::current()));
+    return std::ranges::any_of(bases, [](auto b) { return std::meta::is_virtual(b); });
 }
 
 template <StringLiteral NameConst, typename T>
@@ -448,8 +384,9 @@ constexpr std::string_view EnumToFlagsString(E value, std::string& out_buffer) {
         constexpr std::string_view name       = std::meta::identifier_of(enumerator);
 
         if (enum_under != 0 && (val_under & enum_under) == enum_under) {
-            if (!out_buffer.empty())
+            if (!out_buffer.empty()) {
                 out_buffer += " | ";
+            }
             out_buffer += name;
         }
     };
@@ -573,7 +510,7 @@ template <StringLiteral Name, typename... Fields>
 struct Define {
     struct type;
 
-    friend constexpr std::string_view GetSchemaName(type*) {
+    friend constexpr std::string_view GetSchemaName(type* /*unused*/) {
         return Name;
     }
 
@@ -606,8 +543,9 @@ constexpr void ForEachReflectedField(T&& t, F&& f) {
         constexpr std::string_view name  = std::meta::identifier_of(members[I]);
         constexpr auto             found = [&]() consteval -> std::meta::info {
             for (auto m: metaMembers) {
-                if (std::meta::identifier_of(m) == name)
+                if (std::meta::identifier_of(m) == name) {
                     return m;
+                }
             }
             return std::meta::info {};
         }();
@@ -638,22 +576,17 @@ constexpr void ForEachEnumerator(F&& f) {
  */
 template <typename T, typename F>
 constexpr void ForEachFieldAccessor(F&& f) {
-    constexpr auto members = std::define_static_array(std::meta::nonstatic_data_members_of(^^std::remove_cvref_t<T>, std::meta::access_context::current()));
+    using U                = std::remove_cvref_t<T>;
+    constexpr auto members = std::define_static_array(std::meta::nonstatic_data_members_of(^^U, std::meta::access_context::current()));
 
     [:ZHLN::Reflect::Expand(members):] >> [&]<auto member>() {
         constexpr std::string_view name = std::meta::identifier_of(member);
         using FieldType                 = typename[:std::meta::type_of(member):];
 
-        // 1. Const-Correct Read-Only Accessor
-        auto const_getter = [](const auto& inst) -> const FieldType& { return inst.[:member:]; };
+        auto const_getter = [](const U& inst) -> const FieldType& { return inst.[:member:]; };
+        auto mut_getter   = [](U& inst) -> FieldType& { return inst.[:member:]; };
+        auto setter       = [](U& inst, const FieldType& val) { inst.[:member:] = val; };
 
-        // 2. Mutable Accessor (Required by ScriptBinder for container elements)
-        auto mut_getter = [](auto& inst) -> FieldType& { return inst.[:member:]; };
-
-        // 3. Setter
-        auto setter = [](auto& inst, const FieldType& val) { inst.[:member:] = val; };
-
-        // Pass all 4 arguments expected by ScriptBinder
         f.template operator()<FieldType>(name, const_getter, mut_getter, setter);
     };
 }
@@ -687,8 +620,9 @@ constexpr void ForEachAnnotatedTypeInScope(F&& f) {
         if constexpr (std::meta::is_type(m)) {
             constexpr bool isAnnotated = []() consteval {
                 for (auto a: std::meta::annotations_of(m)) {
-                    if (std::meta::type_of(a) == ^^Tag)
+                    if (std::meta::type_of(a) == ^^Tag) {
                         return true;
+                    }
                 }
                 return false;
             }();
@@ -703,17 +637,13 @@ constexpr void ForEachAnnotatedTypeInScope(F&& f) {
 
 template <typename T>
 consteval std::size_t GetFloatFieldsCount() {
-    using U                = std::remove_cvref_t<T>;
-    constexpr auto members = std::define_static_array(std::meta::nonstatic_data_members_of(^^U, std::meta::access_context::current()));
+    using U [[maybe_unused]] = std::remove_cvref_t<T>;
+    constexpr auto members   = std::define_static_array(std::meta::nonstatic_data_members_of(^^U, std::meta::access_context::current()));
     if (members.empty()) {
         return 0;
     }
-    for (auto m: members) {
-        if (std::meta::type_of(m) != ^^float) {
-            return 0;
-        }
-    }
-    return members.size();
+    bool all_float = std::ranges::all_of(members, [](auto m) { return std::meta::type_of(m) == ^^float; });
+    return all_float ? members.size() : 0;
 }
 
 } // namespace ZHLN::Reflect

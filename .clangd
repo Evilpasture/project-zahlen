@@ -4,6 +4,7 @@ CompileFlags:
     [
       -Iinclude,
       -freflection,
+      -fannotation-attributes,
       -D__cpp_impl_reflection=202603L,
       -D__glibcxx_want_reflection,
     ]
