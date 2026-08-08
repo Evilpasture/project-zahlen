@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
+#include <Zahlen/CommandLine.hpp>
+#include <Zahlen/Core/String.hpp>
 #include <bit>
 #include <cstdint>
-#include <Zahlen/Core/String.hpp>
 #include <string_view>
 #include <version>
 
@@ -168,12 +169,12 @@ struct PhysicsConfig {
 };
 
 struct RenderConfig {
-    String64 appName;
-    uint32_t width            = 1280;
-    uint32_t height           = 720;
-    bool     vsync            = true;
-    bool     fullscreen       = false;
-    bool     enableValidation = true;
+    String64       appName;
+    uint32_t       width          = 1280;
+    uint32_t       height         = 720;
+    bool           vsync          = true;
+    bool           fullscreen     = false;
+    ValidationMode validationMode = ValidationMode::On;
 };
 
 struct EngineConfig {

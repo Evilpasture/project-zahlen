@@ -166,12 +166,21 @@ constexpr std::array Handlers = {
         }
     },
     CommandHandler {
-        .key         = "--no-validation",
+        .key         = "--validation",
         .shortKey    = "",
-        .placeholder = "",
-        .description = "Disable Vulkan validation layers completely",
-        .action      = [](ZHLN::CommandLineOptions& opt, std::string_view) -> std::expected<void, ZHLN::Error> {
-            opt.enableValidation = false;
+        .placeholder = "[on|off|gpu]",
+        .description = "Configure Vulkan validation layers: on (default), off, or gpu (GPU-assisted)",
+        .action      = [](ZHLN::CommandLineOptions& opt, std::string_view v) -> std::expected<void, ZHLN::Error> {
+            if (v.empty() || IsTrue(v) || v == "on") {
+                opt.validationMode = ZHLN::ValidationMode::On;
+            } else if (IsFalse(v) || v == "off") {
+                opt.validationMode = ZHLN::ValidationMode::Off;
+            } else if (v == "gpu" || v == "gpu_assisted") {
+                opt.validationMode = ZHLN::ValidationMode::GPU;
+            } else {
+                std::println(stderr, "Error: Invalid value '{}' for --validation. Valid options: on, off, gpu.", v);
+                return std::unexpected(ZHLN::CommandLineError::InvalidValue);
+            }
             return {};
         }
     },
@@ -364,7 +373,7 @@ void PrintHelp(std::string_view exeName) {
     std::println(
         R"(
 Environment Variables:
-  ZHLN_VALIDATION=0    Disable Vulkan validation layers
+  ZHLN_VALIDATION=off|on|gpu  Configure Vulkan validation mode
 )"
     );
 }
@@ -374,12 +383,17 @@ Environment Variables:
 namespace ZHLN {
 
 std::expected<CommandLineOptions, Error> HandleCommandLine(std::span<char* const> args) {
-    CommandLineOptions options {.args = args, .enableValidation = true, .launchEditor = false};
+    CommandLineOptions options {.args = args, .validationMode = ValidationMode::On, .launchEditor = false};
 
     // Check environment variables first (allows easy IDE configuration profiles)
     if (const char* envVal = std::getenv("ZHLN_VALIDATION")) {
-        if (std::string_view(envVal) == "0" || std::string_view(envVal) == "false") {
-            options.enableValidation = false;
+        std::string_view val(envVal);
+        if (val == "0" || val == "off" || val == "false" || val == "no") {
+            options.validationMode = ValidationMode::Off;
+        } else if (val == "gpu" || val == "gpu_assisted") {
+            options.validationMode = ValidationMode::GPU;
+        } else if (val == "1" || val == "on" || val == "true" || val == "yes") {
+            options.validationMode = ValidationMode::On;
         }
     }
 

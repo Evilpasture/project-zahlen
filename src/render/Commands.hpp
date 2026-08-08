@@ -224,36 +224,26 @@ void ExecuteImmediate(const Context& ctx, CommandRing<QType, Capacity>& ring, Re
  */
 template <QueueType QType = QueueType::Graphics, size_t Capacity = 8, typename RecordFn>
 void ExecuteImmediate(const Context& ctx, CommandRing<QType, Capacity>& ring, StagingRingBuffer& ringBuffer, RecordFn&& record) {
-    // 1. Recycle command buffer and fence from the ring (O(1) / Allocation-Free)
+    // 1. Recycle command buffer and fence from the ring
     auto [cmd, fence] = ring.Acquire();
     {
         CommandBufferGuard guard(cmd);
         std::forward<RecordFn>(record)(cmd);
     }
 
-    // 2. Submit via StagingRingBuffer to stamp active allocations and signal timeline
-    uint64_t submit_val = ringBuffer.Submit(cmd);
+    // 2. Submit command buffer and fence in a single submission
+    uint64_t submit_val = ringBuffer.Submit(cmd, fence);
 
-    // Abort the wait if the staging submission failed (indicated by timeline value 0)
     if (submit_val == 0) [[unlikely]] {
         return;
     }
 
-    // 3. Synchronously wait on the timeline semaphore to retire the staging memory
+    // 3. Synchronously wait on the timeline semaphore to retire staging memory
     VkSemaphore         semaphore = ringBuffer.GetSemaphore();
     VkSemaphoreWaitInfo wait_info = {
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO, .pNext = nullptr, .flags = 0, .semaphoreCount = 1, .pSemaphores = &semaphore, .pValues = &submit_val
     };
     vkWaitSemaphores(ctx.Device(), &wait_info, UINT64_MAX);
-
-    // 4. Signal the associated fence so that CommandRing's next Acquire doesn't stall
-    VkQueue queue = ResolveQueue<QType>(ctx);
-    if (auto res = QueueSubmit(
-            queue, VK_NULL_HANDLE, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, fence
-        );
-        !res) [[unlikely]] {
-        return;
-    }
 }
 
 // ============================================================================

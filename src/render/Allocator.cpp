@@ -480,7 +480,7 @@ auto StagingRingBuffer::Allocate(VkDeviceSize size, VkDeviceSize alignment) noex
     return {.buffer = _stagingBuffer.Handle(), .offset = aligned_head, .mappedData = static_cast<char*>(_mappedPtr) + aligned_head, .timelineValue = 0};
 }
 
-auto StagingRingBuffer::Submit(VkCommandBuffer cmd) noexcept -> uint64_t {
+auto StagingRingBuffer::Submit(VkCommandBuffer cmd, VkFence fence) noexcept -> uint64_t {
     _timelineValue++;
 
     for (auto& alloc: _activeAllocations) {
@@ -489,9 +489,8 @@ auto StagingRingBuffer::Submit(VkCommandBuffer cmd) noexcept -> uint64_t {
         }
     }
 
-    // Inspect the return value; return 0 on failure to prevent deadlocks in timeline wait loops
     if (auto res = QueueSubmit(
-            _queue, cmd, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE, _timelineSemaphore.Get(), _timelineValue, VK_PIPELINE_STAGE_2_COPY_BIT, VK_NULL_HANDLE
+            _queue, cmd, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE, _timelineSemaphore.Get(), _timelineValue, VK_PIPELINE_STAGE_2_COPY_BIT, fence
         );
         !res) [[unlikely]] {
         return 0;

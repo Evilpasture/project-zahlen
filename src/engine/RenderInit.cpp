@@ -296,7 +296,7 @@ std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfi
 
 namespace {
 
-std::expected<Vk::ExtensionResult, Error> GetPlatformInstanceExtensions(Window& window, bool enableValidation) noexcept {
+std::expected<Vk::ExtensionResult, Error> GetPlatformInstanceExtensions(Window& window, ZHLN::ValidationMode validationMode) noexcept {
     glfwSetErrorCallback([](int error, const char* description) { ZHLN::Log("[GLFW Error] Code {}: {}", error, description); });
 
     auto builder = Vk::ExtensionBuilder::ForInstance();
@@ -321,12 +321,14 @@ std::expected<Vk::ExtensionResult, Error> GetPlatformInstanceExtensions(Window& 
         builder.Require(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME).Require(VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
     }
 
-    return std::move(builder).Debug(enableValidation).OptionalIf("VK_KHR_portability_enumeration", isMac).Build().transform_error([](auto err) -> Error {
-        return err;
-    });
+    return std::move(builder)
+        .Debug(validationMode != ZHLN::ValidationMode::Off)
+        .OptionalIf("VK_KHR_portability_enumeration", isMac)
+        .Build()
+        .transform_error([](auto err) -> Error { return err; });
 }
 
-auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps) noexcept {
+auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps, ValidationMode validationMode) noexcept {
     return Vk::FeatureChainBuilder(physicalDevice)
         .Require<VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR>([](auto& f) { f.swapchainMaintenance1 = VK_TRUE; })
         .Require<VkPhysicalDeviceVulkan11Features>([](auto& f) {
@@ -350,15 +352,40 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
             f.timelineSemaphore                            = VK_TRUE;
             f.drawIndirectCount                            = caps.supportsDrawIndirectCount ? VK_TRUE : VK_FALSE;
             f.uniformAndStorageBuffer8BitAccess            = VK_TRUE;
+
+            // Enable Vulkan 1.2 features required for GPU-AV shader instrumentation
+            if (validationMode == ZHLN::ValidationMode::GPU) {
+                f.scalarBlockLayout            = VK_TRUE;
+                f.storageBuffer8BitAccess      = VK_TRUE;
+                f.shaderInt8                   = VK_TRUE;
+                f.vulkanMemoryModel            = VK_TRUE;
+                f.vulkanMemoryModelDeviceScope = VK_TRUE;
+            }
         })
         .Optional<VkPhysicalDeviceAccelerationStructureFeaturesKHR>([](auto& f) { f.accelerationStructure = VK_TRUE; })
         .Optional<VkPhysicalDeviceRayQueryFeaturesKHR>([](auto& f) { f.rayQuery = VK_TRUE; })
+        .Optional<VkPhysicalDeviceRobustness2FeaturesEXT>([validationMode](auto& f) {
+            f.nullDescriptor = VK_TRUE;
+
+            if (validationMode == ZHLN::ValidationMode::GPU) {
+                f.robustBufferAccess2 = VK_TRUE;
+                f.robustImageAccess2  = VK_TRUE;
+            }
+        })
         .Require<VkPhysicalDeviceFeatures2>([&](auto& f) {
             f.features.multiDrawIndirect         = VK_TRUE;
             f.features.samplerAnisotropy         = VK_TRUE;
             f.features.drawIndirectFirstInstance = VK_TRUE;
             f.features.shaderInt64               = caps.supportsInt64 ? VK_TRUE : VK_FALSE;
             f.features.imageCubeArray            = VK_TRUE;
+
+            // Enable Core features required by GPU-AV (and VUID 04000)
+            if (validationMode == ZHLN::ValidationMode::GPU) {
+                f.features.robustBufferAccess             = VK_TRUE;
+                f.features.fragmentStoresAndAtomics       = VK_TRUE;
+                f.features.vertexPipelineStoresAndAtomics = VK_TRUE;
+                f.features.shaderInt16                    = VK_TRUE;
+            }
         })
         .Build();
 }
@@ -491,11 +518,11 @@ std::expected<std::unique_ptr<RenderContext>, Error> RenderContext::Create(Windo
     int                     height      = 0;
     ZHLN_PhysicalDeviceInfo physicalInfo {};
 
-    return GetPlatformInstanceExtensions(window, cfg.enableValidation)
+    return GetPlatformInstanceExtensions(window, cfg.validationMode)
         .and_then([&](auto&& inst_exts) -> std::expected<void, Error> {
             return Vk::Context::Builder()
                 .AppName(impl->appName)
-                .EnableValidation(cfg.enableValidation)
+                .ValidationMode(static_cast<Vk::ValidationMode>(cfg.validationMode))
                 .InstanceExtensions(inst_exts)
                 .BuildInstance()
                 .transform([&](VkInstance inst) { instance = inst; });
@@ -524,7 +551,7 @@ std::expected<std::unique_ptr<RenderContext>, Error> RenderContext::Create(Windo
         .and_then([&]() -> std::expected<void, Error> {
             impl->surface         = Vk::Surface(instance, raw_surface);
             HardwareCaps caps     = ProbeHardware(physicalInfo.handle, physicalInfo.properties.properties.apiVersion);
-            auto         features = BuildFeatureChain(physicalInfo.handle, caps);
+            auto         features = BuildFeatureChain(physicalInfo.handle, caps, cfg.validationMode);
 
             return GetDeviceExtensions(physicalInfo.handle).and_then([&](auto&& dev_exts) -> std::expected<void, Error> {
                 return Vk::Context::Builder()
@@ -533,7 +560,7 @@ std::expected<std::unique_ptr<RenderContext>, Error> RenderContext::Create(Windo
                     .PhysicalDevice(physicalInfo)
                     .DeviceExtensions(dev_exts)
                     .DeviceFeatures(features.GetRoot())
-                    .EnableValidation(cfg.enableValidation)
+                    .ValidationMode(static_cast<Vk::ValidationMode>(cfg.validationMode))
                     .Build()
                     .transform([&](auto&& context) { impl->ctx = std::forward<decltype(context)>(context); });
             });
@@ -767,35 +794,35 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
                    allocator.Get(), sizeof(InstanceData) * kGpuCullingMaxInstances, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU
         )
             .and_then([&, i](auto&& idb) {
-                frames.instanceDataBuffers[i] = std::move(idb);
+                frames.instanceDataBuffers[i] = std::forward<decltype(idb)>(idb);
                 return Vk::Buffer::Create(
                     allocator.Get(), sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances,
                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY
                 );
             })
             .and_then([&, i](auto&& icb1) {
-                frames.indirectCommandsBuffers[i] = std::move(icb1);
+                frames.indirectCommandsBuffers[i] = std::forward<decltype(icb1)>(icb1);
                 return Vk::Buffer::Create(
                     allocator.Get(), sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances,
                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY
                 );
             })
             .and_then([&, i](auto&& icb2) {
-                frames.indirectCommandsBuffersPass2[i] = std::move(icb2);
+                frames.indirectCommandsBuffersPass2[i] = std::forward<decltype(icb2)>(icb2);
                 return Vk::Buffer::Create(
                     allocator.Get(), sizeof(uint32_t) * kGpuCullingMaxInstances, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                     VMA_MEMORY_USAGE_GPU_ONLY
                 );
             })
             .and_then([&, i](auto&& spcb) {
-                frames.secondPassCandidatesBuffers[i] = std::move(spcb);
+                frames.secondPassCandidatesBuffers[i] = std::forward<decltype(spcb)>(spcb);
                 return Vk::Buffer::Create(
                     allocator.Get(), sizeof(uint32_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                     VMA_MEMORY_USAGE_GPU_ONLY
                 );
             })
             .transform([&, i](auto&& spcnt) -> void {
-                frames.globalCounterBuffers[i]   = std::move(spcnt);
+                frames.globalCounterBuffers[i]   = std::forward<decltype(spcnt)>(spcnt);
                 frames.secondPassCountBuffers[i] = std::move(frames.globalCounterBuffers[i]);
             });
     };
@@ -847,8 +874,10 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
                                 frames.globalCounterBuffers[i] = std::forward<decltype(gcb)>(gcb);
                                 ClusterCullingLayout::Write(
                                     ctx.Device(), frames.clusterCullingSets[i], Vk::BufferWrite {.buffer = clusterBoundsBuffer.Handle()},
-                                    Vk::BufferWrite {.buffer = frames.clusterGridBuffers[i].Handle()}, Vk::BufferWrite {.buffer = frames.lightIndexListBuffers[i].Handle()},
-                                    Vk::BufferWrite {.buffer = frames.globalCounterBuffers[i].Handle()}, Vk::BufferWrite {.buffer = frames.frameUniformBuffers[i].Handle()},
+                                    Vk::BufferWrite {.buffer = frames.clusterGridBuffers[i].Handle()},
+                                    Vk::BufferWrite {.buffer = frames.lightIndexListBuffers[i].Handle()},
+                                    Vk::BufferWrite {.buffer = frames.globalCounterBuffers[i].Handle()},
+                                    Vk::BufferWrite {.buffer = frames.frameUniformBuffers[i].Handle()},
                                     Vk::BufferWrite {.buffer = frames.lightStorageBuffers[i].Handle()}
                                 );
                             });
@@ -886,7 +915,8 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
                         })
                         .and_then([&, i, tlasSizes](auto&& tsb) { // Deduced as std::expected<Vk::Buffer, Error>
                             frames.tlasScratchBuffer[i] = std::forward<decltype(tsb)>(tsb);
-                            frames.tlas[i] = rtCtx.CreateAccelerationStructure(frames.tlasBuffer[i].Handle(), tlasSizes.acceleration_structure_size, ZHLN_AS_TYPE_TOP_LEVEL);
+                            frames.tlas[i] =
+                                rtCtx.CreateAccelerationStructure(frames.tlasBuffer[i].Handle(), tlasSizes.acceleration_structure_size, ZHLN_AS_TYPE_TOP_LEVEL);
 
                             return Vk::Buffer::Create(
                                        allocator.Get(), sizeof(VkAccelerationStructureInstanceKHR) * kGpuCullingMaxInstances,
@@ -963,7 +993,7 @@ std::expected<void, Error> RenderContext::Impl::InitBindless() {
                 }
                 auto gpu_buf = std::move(*gpu_buf_res);
 
-                auto address        = ctx.BufferAddress(gpu_buf.Handle());
+                auto address               = ctx.BufferAddress(gpu_buf.Handle());
                 frames.debugMeshHandles[i] = meshPool.Create(std::move(gpu_buf), kMaxDebugVertices, address);
             }
 
@@ -1254,14 +1284,14 @@ std::expected<void, Error> RenderContext::Impl::InitPostProcessing() {
             return std::unexpected(RenderInitError::PipelineCreationFailed);
         }
 
-        VkPushConstantRange fogPush = {.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .offset = 0, .size = sizeof(VolumetricFogInjectPushConstants)};
-        auto csFogInject = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricFogInject).vertex);
+        VkPushConstantRange fogPush     = {.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .offset = 0, .size = sizeof(VolumetricFogInjectPushConstants)};
+        auto                csFogInject = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricFogInject).vertex);
         if (!volumetricFogInjectPass.Build(ctx.Device(), csFogInject, &fogPush, 1)) {
             return std::unexpected(RenderInitError::PipelineCreationFailed);
         }
 
-        VkPushConstantRange lightPush = {.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .offset = 0, .size = sizeof(VolumetricLightInjectPushConstants)};
-        auto csLightInject = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricLightInject).vertex);
+        VkPushConstantRange lightPush     = {.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .offset = 0, .size = sizeof(VolumetricLightInjectPushConstants)};
+        auto                csLightInject = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricLightInject).vertex);
         if (!volumetricLightInjectPass.Build(ctx.Device(), csLightInject, &lightPush, 1)) {
             return std::unexpected(RenderInitError::PipelineCreationFailed);
         }
@@ -1271,8 +1301,8 @@ std::expected<void, Error> RenderContext::Impl::InitPostProcessing() {
             return std::unexpected(RenderInitError::PipelineCreationFailed);
         }
 
-        VkPushConstantRange tempPush = {.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .offset = 0, .size = sizeof(VolumetricTemporalPushConstants)};
-        auto csTemporal = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricTemporal).vertex);
+        VkPushConstantRange tempPush   = {.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .offset = 0, .size = sizeof(VolumetricTemporalPushConstants)};
+        auto                csTemporal = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricTemporal).vertex);
         if (!volumetricTemporalPass.Build(ctx.Device(), csTemporal, &tempPush, 1)) {
             return std::unexpected(RenderInitError::PipelineCreationFailed);
         }
@@ -1328,7 +1358,8 @@ std::expected<void, Error> RenderContext::Impl::InitPostProcessing() {
         .and_then([&]() {
             return register_and_check(
                 "Volumetrics", buildVolumetrics,
-                {SHADER_VOLUMETRIC_CLEAR_CS_PATH, SHADER_VOLUMETRIC_FOG_INJECT_CS_PATH, SHADER_VOLUMETRIC_LIGHT_INJECT_CS_PATH, SHADER_VOLUMETRIC_INTEGRATION_CS_PATH, SHADER_VOLUMETRIC_TEMPORAL_CS_PATH}
+                {SHADER_VOLUMETRIC_CLEAR_CS_PATH, SHADER_VOLUMETRIC_FOG_INJECT_CS_PATH, SHADER_VOLUMETRIC_LIGHT_INJECT_CS_PATH,
+                 SHADER_VOLUMETRIC_INTEGRATION_CS_PATH, SHADER_VOLUMETRIC_TEMPORAL_CS_PATH}
             );
         })
         .and_then([&]() {
@@ -1691,8 +1722,8 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
 
     graphResources.sceneColor            = CreateDefaultTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32>(ext);
     graphResources.velocityBuffer        = CreateDefaultTarget<VK_FORMAT_R16G16_SFLOAT>(ext);
-    frames.accumBuffers[0]                      = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
-    frames.accumBuffers[1]                      = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
+    frames.accumBuffers[0]               = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
+    frames.accumBuffers[1]               = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
     graphResources.normalRoughnessBuffer = CreateDefaultTarget<VK_FORMAT_R8G8B8A8_UNORM>(ext);
     graphResources.hdrSceneColor         = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
     graphResources.ambientTarget         = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
@@ -1788,11 +1819,8 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
             cmd, graphResources.transDepthBuffer.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
         );
         std::array targets3D = {
-            graphResources.voxelMedia.image.Handle(),
-            graphResources.voxelLight.image.Handle(),
-            graphResources.voxelIntegrated.image.Handle(),
-            graphResources.voxelHistory.image.Handle(),
-            graphResources.voxelResolved.image.Handle()
+            graphResources.voxelMedia.image.Handle(), graphResources.voxelLight.image.Handle(), graphResources.voxelIntegrated.image.Handle(),
+            graphResources.voxelHistory.image.Handle(), graphResources.voxelResolved.image.Handle()
         };
 
         for (auto* const img: targets3D) {

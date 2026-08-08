@@ -1001,12 +1001,12 @@ int main(int argc, char* argv[]) {
                 ZHLN::EngineConfig config {
                     .physics = {.maxBodies = 5000, .maxBodyPairs = 10000, .maxContactConstraints = 10000, .tempAllocatorSize = 64 * 1024 * 1024},
                     .render  = {
-                        .appName          = "Zahlen World Editor",
-                        .width            = w,
-                        .height           = h,
-                        .vsync            = options.vsync,
-                        .fullscreen       = options.fullscreen,
-                        .enableValidation = options.enableValidation,
+                        .appName        = options.launchEditor ? "Zahlen World Editor" : "Zahlen Engine",
+                        .width          = w,
+                        .height         = h,
+                        .vsync          = options.vsync,
+                        .fullscreen     = options.fullscreen,
+                        .validationMode = options.validationMode,
                     },
                 };
 

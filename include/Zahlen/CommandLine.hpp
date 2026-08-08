@@ -14,6 +14,8 @@ namespace ZHLN {
 
 enum class LogLevel : uint8_t { Quiet, Moderate, Verbose };
 
+enum class ValidationMode : uint8_t { Off = 0, On = 1, GPU = 2 };
+
 enum class CommandLineError : uint8_t { Success = 0, InvalidValue, MissingValue, UnknownArgument };
 
 enum class GameplayDriver : uint8_t {
@@ -24,14 +26,14 @@ enum class GameplayDriver : uint8_t {
 
 struct CommandLineOptions {
     std::span<char* const> args;
-    bool                   enableValidation = true;
-    bool                   launchEditor     = false;
-    bool                   vsync            = true;
-    bool                   fullscreen       = false;
-    LogLevel               logLevel         = LogLevel::Moderate;
-    uint32_t               fpsLimit         = 0;
-    bool                   enableRenderDoc  = false;
-    bool                   benchmark        = false;
+    ValidationMode         validationMode  = ValidationMode::On;
+    bool                   launchEditor    = false;
+    bool                   vsync           = true;
+    bool                   fullscreen      = false;
+    LogLevel               logLevel        = LogLevel::Moderate;
+    uint32_t               fpsLimit        = 0;
+    bool                   enableRenderDoc = false;
+    bool                   benchmark       = false;
 
     // Configurable Game Loop Driver
     GameplayDriver driver = GameplayDriver::Fennel;

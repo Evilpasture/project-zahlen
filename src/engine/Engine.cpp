@@ -721,7 +721,7 @@ GameplayStatus Engine::Tick(float dt, GameplayDriver driver) {
 
     // 7. Motion Vectors & Transform History
     {
-        ZHLN::ScopedTimer profTimer("ECS System: Update Transform History");
+        ZHLN::ScopedTimer      profTimer("ECS System: Update Transform History");
         static TransformSystem ts;
         ts.UpdateTransformHistory(GetRegistry());
     }
@@ -740,12 +740,12 @@ int Engine::Run(const CommandLineOptions& options, UICallback uiCallback) {
     EngineConfig config {
         .physics = {.maxBodies = 5000, .maxBodyPairs = 10000, .maxContactConstraints = 10000, .tempAllocatorSize = 64 * 1024 * 1024},
         .render  = {
-            .appName          = options.launchEditor ? "Zahlen World Editor" : "Zahlen Engine",
-            .width            = w,
-            .height           = h,
-            .vsync            = options.vsync,
-            .fullscreen       = options.fullscreen,
-            .enableValidation = options.enableValidation,
+            .appName        = options.launchEditor ? "Zahlen World Editor" : "Zahlen Engine",
+            .width          = w,
+            .height         = h,
+            .vsync          = options.vsync,
+            .fullscreen     = options.fullscreen,
+            .validationMode = options.validationMode,
         },
     };
 
