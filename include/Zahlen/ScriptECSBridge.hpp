@@ -34,8 +34,8 @@ class ZHLN_API ScriptECSBridge {
         CallMethod(Entity entity, std::string_view compName, std::string_view methodName, std::span<const ScriptVal> args = {});
 
     // --- Multi-Level Object Drilling ---
-    [[nodiscard]] std::expected<ScriptVal, Error> GetPropertyOf(const ScriptVal& parentVal, std::string_view propName);
-    [[nodiscard]] std::expected<void, Error>      SetPropertyOf(ScriptVal& parentVal, std::string_view propName, const ScriptVal& val);
+    [[nodiscard]] std::expected<ScriptVal, Error> GetPropertyOf(const ScriptVal& parentVal, std::string_view propName) const;
+    [[nodiscard]] std::expected<void, Error>      SetPropertyOf(ScriptVal& parentVal, std::string_view propName, const ScriptVal& val) const;
 
     // --- Container Array Operations ---
     [[nodiscard]] std::expected<ScriptVal, Error> GetArrayElement(const ScriptVal& arrayVal, size_t index);

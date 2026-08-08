@@ -5,9 +5,6 @@
 
 namespace ZHLN {
 
-// REMOVED: ScriptECSBridge::ScriptECSBridge(ECS::Registry& reg): m_registry(reg) {}
-// (Already defined inline in include/Zahlen/ScriptECSBridge.hpp)
-
 std::expected<void*, Error> ScriptECSBridge::ResolveBoxedPointer(const BoxedObject& obj) const {
     // Path A: Stable ECS Handle Re-resolution
     if (obj.ownerEntity != NullEntity) {
@@ -41,8 +38,9 @@ std::expected<void*, Error> ScriptECSBridge::ResolveBoxedPointer(const BoxedObje
                 return std::unexpected(ScriptError::UnsupportedConversion);
             }
             auto res = propIt->second.get_element_at(compPtr, obj.elementIndex);
-            if (!res)
+            if (!res) {
                 return std::unexpected(res.error());
+            }
 
             if (const auto* freshlyBoxed = std::get_if<BoxedObject>(&res.value())) {
                 return freshlyBoxed->rawPtr;
@@ -92,8 +90,9 @@ std::expected<ScriptVal, Error> ScriptECSBridge::GetProperty(Entity entity, std:
     auto propIt = it->second.properties.find(propName);
     if (propIt != it->second.properties.end()) {
         auto res = propIt->second.get(compPtr);
-        if (!res)
+        if (!res) {
             return std::unexpected(res.error());
+        }
 
         ScriptVal val = res.value();
         if (auto* boxed = std::get_if<BoxedObject>(&val)) {
@@ -107,7 +106,7 @@ std::expected<ScriptVal, Error> ScriptECSBridge::GetProperty(Entity entity, std:
     return std::unexpected(ScriptError::PropertyNotFound);
 }
 
-std::expected<ScriptVal, Error> ScriptECSBridge::GetPropertyOf(const ScriptVal& parentVal, std::string_view propName) {
+std::expected<ScriptVal, Error> ScriptECSBridge::GetPropertyOf(const ScriptVal& parentVal, std::string_view propName) const {
     void*                 parentPtr = nullptr;
     std::string_view      typeName;
     Entity                ownerEnt = NullEntity;
@@ -116,8 +115,9 @@ std::expected<ScriptVal, Error> ScriptECSBridge::GetPropertyOf(const ScriptVal& 
 
     if (const auto* boxed = std::get_if<BoxedObject>(&parentVal)) {
         auto resolved = ResolveBoxedPointer(*boxed);
-        if (!resolved)
+        if (!resolved) {
             return std::unexpected(resolved.error());
+        }
         parentPtr = resolved.value();
         typeName  = boxed->typeName;
         ownerEnt  = boxed->ownerEntity;
@@ -142,8 +142,9 @@ std::expected<ScriptVal, Error> ScriptECSBridge::GetPropertyOf(const ScriptVal& 
     }
 
     auto res = propIt->second.get(parentPtr);
-    if (!res)
+    if (!res) {
         return res;
+    }
 
     ScriptVal outVal = res.value();
     if (auto* childBoxed = std::get_if<BoxedObject>(&outVal)) {
@@ -183,8 +184,9 @@ std::expected<void, Error> ScriptECSBridge::SetProperty(Entity entity, std::stri
     ScriptVal valueToAssign = val;
     if (auto* boxed = std::get_if<BoxedObject>(&valueToAssign)) {
         auto resolvedPtr = ResolveBoxedPointer(*boxed);
-        if (!resolvedPtr)
+        if (!resolvedPtr) {
             return std::unexpected(resolvedPtr.error());
+        }
         boxed->rawPtr = resolvedPtr.value();
     }
 
@@ -196,14 +198,15 @@ std::expected<void, Error> ScriptECSBridge::SetProperty(Entity entity, std::stri
     return std::unexpected(ScriptError::PropertyNotFound);
 }
 
-std::expected<void, Error> ScriptECSBridge::SetPropertyOf(ScriptVal& parentVal, std::string_view propName, const ScriptVal& val) {
+std::expected<void, Error> ScriptECSBridge::SetPropertyOf(ScriptVal& parentVal, std::string_view propName, const ScriptVal& val) const {
     void*            parentPtr = nullptr;
     std::string_view typeName;
 
     if (auto* boxed = std::get_if<BoxedObject>(&parentVal)) {
         auto resolved = ResolveBoxedPointer(*boxed);
-        if (!resolved)
+        if (!resolved) {
             return std::unexpected(resolved.error());
+        }
         parentPtr = resolved.value();
         typeName  = boxed->typeName;
     } else if (auto* owned = std::get_if<OwnedObject>(&parentVal)) {
@@ -227,8 +230,9 @@ std::expected<void, Error> ScriptECSBridge::SetPropertyOf(ScriptVal& parentVal, 
     ScriptVal valueToAssign = val;
     if (auto* valueBoxed = std::get_if<BoxedObject>(&valueToAssign)) {
         auto resolvedPtr = ResolveBoxedPointer(*valueBoxed);
-        if (!resolvedPtr)
+        if (!resolvedPtr) {
             return std::unexpected(resolvedPtr.error());
+        }
         valueBoxed->rawPtr = resolvedPtr.value();
     }
 
@@ -261,8 +265,9 @@ std::expected<ScriptVal, Error>
     for (auto& arg: resolvedArgs) {
         if (auto* boxed = std::get_if<BoxedObject>(&arg)) {
             auto resolvedPtr = ResolveBoxedPointer(*boxed);
-            if (!resolvedPtr)
+            if (!resolvedPtr) {
                 return std::unexpected(resolvedPtr.error());
+            }
             boxed->rawPtr = resolvedPtr.value();
         }
     }
@@ -322,8 +327,9 @@ std::expected<ScriptVal, Error> ScriptECSBridge::GetPropertyElementAt(Entity ent
     }
 
     auto res = propIt->second.get_element_at(compPtr, index);
-    if (!res)
+    if (!res) {
         return std::unexpected(res.error());
+    }
 
     ScriptVal val = res.value();
     if (auto* boxed = std::get_if<BoxedObject>(&val)) {
@@ -370,8 +376,9 @@ std::expected<void, Error>
     ScriptVal valueToAssign = val;
     if (auto* valueBoxed = std::get_if<BoxedObject>(&valueToAssign)) {
         auto resolvedPtr = ResolveBoxedPointer(*valueBoxed);
-        if (!resolvedPtr)
+        if (!resolvedPtr) {
             return std::unexpected(resolvedPtr.error());
+        }
         valueBoxed->rawPtr = resolvedPtr.value();
     }
 

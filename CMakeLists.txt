@@ -236,6 +236,8 @@ set(RAW_ENGINE_SOURCES
     src/engine/AssertHandler.cpp
     src/engine/DefaultPreset.cpp
     src/engine/RenderFrame.cpp
+    src/engine/RenderGraphBuilder.cpp
+    src/engine/RenderDrawCommands.cpp
     src/engine/RenderInit.cpp
     src/engine/RenderResources.cpp
     src/engine/Engine.cpp
