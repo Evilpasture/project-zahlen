@@ -129,6 +129,16 @@ consteval std::meta::info GetFieldTypeInfo() {
     static_assert(N < members.size(), "Index out of bounds.");
     return std::meta::type_of(members[N]);
 }
+
+template <typename T>
+constexpr auto ToTuple(T&& obj) {
+    if constexpr (requires { std::tuple_size<std::decay_t<T>>::value; }) {
+        return std::forward<T>(obj);
+    } else {
+        return std::make_tuple(std::forward<T>(obj));
+    }
+}
+
 } // namespace detail
 
 template <std::ranges::range R>
@@ -637,6 +647,30 @@ consteval std::size_t GetFloatFieldsCount() {
     return all_float ? members.size() : 0;
 }
 
+/**
+ * @brief Reflects on all member methods of an instance in source declaration order,
+ * executes them with no arguments, and returns their concatenated results in a std::tuple.
+ */
+template <typename T>
+constexpr auto CollectMethodResults(const T& inst) {
+    constexpr auto members = std::define_static_array(std::meta::members_of(^^std::remove_cvref_t<T>, std::meta::access_context::current()));
+
+    // Filter down to valid member functions in a single pass
+    constexpr auto methodHandles = [&] consteval {
+        std::vector<std::meta::info> vec;
+        for (auto m: members) {
+            if (std::meta::is_function(m) && std::meta::has_identifier(m)) {
+                vec.push_back(m);
+            }
+        }
+        return vec;
+    }();
+
+    return [&]<size_t... Is>(std::index_sequence<Is...>) {
+        return std::tuple_cat(detail::ToTuple((inst.[:methodHandles[Is]:]()))...);
+    }(std::make_index_sequence<methodHandles.size()> {});
+}
+
 } // namespace ZHLN::Reflect
 
 #else // Standard C++26 Fallback (Stubs - Waiting for compiler reflection)
@@ -850,6 +884,11 @@ constexpr void ForEachAnnotatedTypeInScope(F&& /*unused*/) {
 template <typename T>
 consteval std::size_t GetFloatFieldsCount() {
     return 0;
+}
+
+template <typename T>
+constexpr auto CollectMethodResults(const T& /*inst*/) {
+    return std::tuple {};
 }
 
 } // namespace ZHLN::Reflect
