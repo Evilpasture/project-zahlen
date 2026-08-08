@@ -526,13 +526,17 @@ void SetupPlayerRagdoll(RenderContext& /*rc*/, PhysicsContext& pc, ECS::Registry
     bool skeletonFound = false;
     for (Entity part: visualParts) {
         Patch<Components::MeshComponent>(reg, part, [&](auto& meshComp) {
-            Patch<Components::AnimatorComponent>(reg, part, [&](auto& animComp) {
-                if ((animComp.prefab != nullptr) && meshComp.skeletonIndex >= 0) {
-                    targetSkeleton = &animComp.prefab->skeletons[meshComp.skeletonIndex];
-                    jointOffset    = meshComp.jointOffset;
-                    skeletonFound  = true;
+            auto*  hier       = reg.Get<Components::HierarchyComponent>(part);
+            Entity parentRoot = (hier != nullptr) ? hier->parent : NullEntity;
+            if (parentRoot != NullEntity) {
+                if (auto* animComp = reg.Get<Components::AnimatorComponent>(parentRoot)) {
+                    if ((animComp->prefab != nullptr) && meshComp.skeletonIndex >= 0) {
+                        targetSkeleton = &animComp->prefab->skeletons[meshComp.skeletonIndex];
+                        jointOffset    = meshComp.jointOffset;
+                        skeletonFound  = true;
+                    }
                 }
-            });
+            }
         });
         if (skeletonFound)
             break;

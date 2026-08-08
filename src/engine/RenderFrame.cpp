@@ -68,14 +68,14 @@ void RenderContext::Impl::DispatchSkinningPasses() {
             auto* skinMesh    = drawCmd.skinMesh;
             auto* scratchMesh = meshPool.Resolve(drawCmd.skinnedVertexBuffer).value_or(nullptr);
 
-            if (AnyNull(posMesh, attrMesh, skinMesh, scratchMesh)) {
+            if (AnyNull(posMesh, attrMesh, scratchMesh)) {
                 continue;
             }
 
             SkinningConstants pcs {
                 .inPosAddr        = posMesh->vboAddress,
                 .inAttrAddr       = attrMesh->vboAddress,
-                .inSkinAddr       = skinMesh->vboAddress,
+                .inSkinAddr       = (skinMesh != nullptr) ? skinMesh->vboAddress : 0,
                 .outPosAddr       = scratchMesh->vboAddress,
                 .outAttrAddr      = scratchMesh->vboAddress + (scratchMesh->vertexCount * sizeof(VertexPosition)),
                 .jointsAddr       = ctx.BufferAddress(frames.jointBuffers->Handle()),
