@@ -174,6 +174,11 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const 
     } else if (params.skinnedVertexBuffer != Invalid && posMesh != nullptr) {
         attrAddr = finalPosMesh->vboAddress + (posMesh->vertexCount * sizeof(VertexPosition));
     }
+    uint32_t albedoIdx   = impl->textureManager.GetBindlessIndex(material.albedoMap);
+    uint32_t normalIdx   = impl->textureManager.GetBindlessIndex(material.normalMap);
+    uint32_t pbrIdx      = impl->textureManager.GetBindlessIndex(material.pbrMap);
+    uint32_t emissiveIdx = impl->textureManager.GetBindlessIndex(material.emissiveMap);
+
     uint32_t isViewmodel      = ((params.flags & DrawFlags::Viewmodel) != DrawFlags::None) ? 1u : 0u;
     uint32_t isSkinned        = (params.skinnedVertexBuffer == Invalid && (params.flags & Skinned) != None) ? 1u : 0u;
     uint32_t activeMorphCount = (params.skinnedVertexBuffer != Invalid) ? 0 : params.activeMorphCount;
@@ -189,8 +194,8 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const 
                  .iboAddress       = (nativeIndexMesh != nullptr) ? nativeIndexMesh->vboAddress : 0,
                  .vertexCount      = (posMesh != nullptr) ? posMesh->vertexCount : 0,
                  .indexCount       = mesh.indexCount,
-                 .texIndices0      = (material.normalIndex << 16) | (material.albedoIndex & 0xFFFF),
-                 .texIndices1      = (material.emissiveIndex << 16) | (material.pbrIndex & 0xFFFF),
+                 .texIndices0      = (normalIdx << 16) | (albedoIdx & 0xFFFF),
+                 .texIndices1      = (emissiveIdx << 16) | (pbrIdx & 0xFFFF),
                  .cullRadius       = params.cullRadius,
                  .metallicFactor   = params.metallic >= 0.0f ? params.metallic : material.metallicFactor,
                  .roughnessFactor  = params.roughness >= 0.0f ? params.roughness : material.roughnessFactor,
@@ -262,6 +267,11 @@ void DrawCSG(RenderContext& ctx, const Material& eyeMaterial, const Mesh& eyeMes
             attrAddr = finalPosMesh->vboAddress + (finalPosMesh->vertexCount * sizeof(VertexPosition));
         }
 
+        uint32_t albedoIdx   = impl->textureManager.GetBindlessIndex(material.albedoMap);
+        uint32_t normalIdx   = impl->textureManager.GetBindlessIndex(material.normalMap);
+        uint32_t pbrIdx      = impl->textureManager.GetBindlessIndex(material.pbrMap);
+        uint32_t emissiveIdx = impl->textureManager.GetBindlessIndex(material.emissiveMap);
+
         uint32_t isSkinned = (skinnedVertexBuffer == BufferHandle::Invalid && (flags & DrawFlags::Skinned) != DrawFlags::None) ? 1u : 0u;
 
         return {
@@ -275,8 +285,8 @@ void DrawCSG(RenderContext& ctx, const Material& eyeMaterial, const Mesh& eyeMes
                     .iboAddress       = (indexMesh != nullptr) ? indexMesh->vboAddress : 0,
                     .vertexCount      = (finalPosMesh != nullptr) ? finalPosMesh->vertexCount : 0,
                     .indexCount       = mesh.indexCount,
-                    .texIndices0      = (material.normalIndex << 16) | (material.albedoIndex & 0xFFFF),
-                    .texIndices1      = (material.emissiveIndex << 16) | (material.pbrIndex & 0xFFFF),
+                    .texIndices0      = (normalIdx << 16) | (albedoIdx & 0xFFFF),
+                    .texIndices1      = (emissiveIdx << 16) | (pbrIdx & 0xFFFF),
                     .cullRadius       = cullRadius,
                     .metallicFactor   = material.metallicFactor,
                     .roughnessFactor  = material.roughnessFactor,
@@ -329,8 +339,8 @@ void DrawDecal(RenderContext& ctx, const DecalParams& params) {
     impl->queues.decalQueue.push_back(
         {.transform    = params.transform,
          .invTransform = params.invTransform,
-         .albedoIndex  = params.albedoIndex,
-         .normalIndex  = params.normalIndex,
+         .albedoIndex  = impl->textureManager.GetBindlessIndex(params.albedoMap),
+         .normalIndex  = impl->textureManager.GetBindlessIndex(params.normalMap),
          .roughness    = params.roughness,
          .metallic     = params.metallic}
     );

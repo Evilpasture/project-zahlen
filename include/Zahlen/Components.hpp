@@ -42,7 +42,7 @@ struct Components {
         TextAlignment         align         = TextAlignment::Left;
         TextVerticalAlignment verticalAlign = TextVerticalAlignment::Top;
 
-        uint32_t fontIndex = 0;
+        TextureHandle fontIndex = TextureHandle::Invalid;
         float    offsetX   = 0.0f; // Optional fine-tuning offset
         float    offsetY   = 0.0f;
     };
@@ -275,7 +275,7 @@ struct Components {
         int physicsDrawMode = 0;
     };
     struct UISettingsComponent {
-        uint32_t  defaultFontAtlasIdx = 0;
+        TextureHandle defaultFontAtlas = TextureHandle::Invalid;
         FontAtlas fontAtlas;
     };
     struct ItemBaseComponent {
@@ -331,10 +331,9 @@ struct Components {
         char     _free_space[3] {};
     };
     struct UIPanelComponent {
-        JPH::Vec4 color        = {1.0f, 1.0f, 1.0f, 1.0f};
-        JPH::Vec4 borderRadius = {0.0f, 0.0f, 0.0f, 0.0f};
-
-        uint32_t textureIndex = 1;
+        JPH::Vec4     color        = {1.0f, 1.0f, 1.0f, 1.0f};
+        JPH::Vec4     borderRadius = {0.0f, 0.0f, 0.0f, 0.0f};
+        TextureHandle texture      = TextureHandle::Invalid;
         float    edgeWidth    = 0.0f;
         float    uvLeft       = 0.1f;
         float    uvRight      = 0.1f;
@@ -466,6 +465,7 @@ struct Components {
 
     struct ParticleEmitterComponent {
         ParticleEmitterParams params;
+        TextureHandle         textureAsset   = TextureHandle::Invalid;
         uint32_t              maxParticles   = 65536;
         bool                  active         = true;
         bool                  attachToCamera = false;
@@ -480,8 +480,8 @@ struct Components {
     };
 
     struct DecalComponent {
-        uint32_t albedoIndex = 1;
-        uint32_t normalIndex = 2;
+        TextureHandle albedoMap = TextureHandle::Invalid;
+        TextureHandle normalMap = TextureHandle::Invalid;
         float    roughness   = 0.5f;
         float    metallic    = 0.0f;
     };

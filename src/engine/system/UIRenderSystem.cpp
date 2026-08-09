@@ -221,14 +221,14 @@ void UIRenderSystem::Update(Engine& engine) {
 
     uint32_t currentVertexOffset = 0;
 
-    auto QueueBatch = [&](uint32_t textureIdx, uint32_t count, bool useScissor, ScissorRect scissor, bool isSDF = false) {
+    auto QueueBatch = [&](TextureHandle textureHandle, uint32_t count, bool useScissor, ScissorRect scissor, bool isSDF = false) {
         if (count == 0) {
             return;
         }
 
         if (!localBatches.empty()) {
             auto& last = localBatches.back();
-            if (last.textureIndex == textureIdx && last.isSDF == isSDF && last.useScissor == useScissor &&
+            if (last.texture == textureHandle && last.isSDF == isSDF && last.useScissor == useScissor &&
                 (!useScissor || (std::memcmp(&last.scissorRect, &scissor, sizeof(ScissorRect)) == 0))) {
                 last.vertexCount += count;
                 return;
@@ -236,7 +236,7 @@ void UIRenderSystem::Update(Engine& engine) {
         }
 
         localBatches.push_back(
-            {.textureIndex = textureIdx,
+            {.texture = textureHandle,
              .vertexStart  = currentVertexOffset - count,
              .vertexCount  = count,
              .useScissor   = useScissor,
@@ -288,7 +288,7 @@ void UIRenderSystem::Update(Engine& engine) {
                 localAttributes.resize(startIdx + written);
 
                 currentVertexOffset += written;
-                QueueBatch(panel->textureIndex, written, useScissor, currentScissor, false);
+                QueueBatch(panel->texture, written, useScissor, currentScissor, false);
             }
         }
 
@@ -350,8 +350,8 @@ void UIRenderSystem::Update(Engine& engine) {
 
                 currentVertexOffset += written;
 
-                uint32_t fontTexIdx = (text->fontIndex != 0) ? text->fontIndex : activeFont->textureIndex;
-                QueueBatch(fontTexIdx, written, useScissor, currentScissor, true);
+                TextureHandle fontTexHandle = (text->fontIndex != TextureHandle::Invalid) ? text->fontIndex : activeFont->texture;
+                QueueBatch(fontTexHandle, written, useScissor, currentScissor, true);
             }
         }
     }

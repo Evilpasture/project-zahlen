@@ -99,6 +99,7 @@ struct alignas(16) InstanceData {
     alignas(16) std::array<float, 4> emissiveFactor;
 };
 
+enum class TextureHandle : uint64_t { Invalid = 0 };
 struct UIObjectConstants {
     JPH::Mat44 orthoMatrix;
     uint64_t   posAddress;
@@ -108,12 +109,12 @@ struct UIObjectConstants {
 };
 
 struct UIBatch {
-    uint32_t    textureIndex = 0;
-    uint32_t    vertexStart  = 0;
-    uint32_t    vertexCount  = 0;
-    bool        useScissor   = false;
-    bool        isSDF        = false;
-    ScissorRect scissorRect  = {};
+    TextureHandle texture      = TextureHandle::Invalid;
+    uint32_t      vertexStart  = 0;
+    uint32_t      vertexCount  = 0;
+    bool          useScissor   = false;
+    bool          isSDF        = false;
+    ScissorRect   scissorRect  = {};
 };
 
 struct ClusterBounds {
@@ -184,11 +185,13 @@ static_assert(sizeof(InstanceData) == 272);
 enum class BufferHandle : uint64_t { Invalid = 0 };
 enum class PipelineHandle : uint64_t { Invalid = 0 };
 enum class ResourceGroupHandle : uint64_t { Invalid = 0 };
+
 // NOLINTEND(performance-enum-size)
 
 static_assert(sizeof(BufferHandle) == 8);
 static_assert(sizeof(PipelineHandle) == 8);
 static_assert(sizeof(ResourceGroupHandle) == 8);
+static_assert(sizeof(TextureHandle) == 8);
 
 struct Mesh {
     using enum BufferHandle;
@@ -362,10 +365,10 @@ struct Material {
     PipelineHandle      prePassPipeline    = PipelineHandle::Invalid;
     ResourceGroupHandle resourceGroup      = ResourceGroupHandle::Invalid;
     BufferHandle        constantBuffer     = BufferHandle::Invalid;
-    uint32_t            albedoIndex        = 1; // Default to Solid White (Index 1)
-    uint32_t            normalIndex        = 2; // Default to Flat Normal Map (Index 2)
-    uint32_t            pbrIndex           = 0; // Default to Solid Black (Index 0)
-    uint32_t            emissiveIndex      = 1; // Default to Solid White (Index 1)
+    TextureHandle       albedoMap          = TextureHandle::Invalid;
+    TextureHandle       normalMap          = TextureHandle::Invalid;
+    TextureHandle       pbrMap             = TextureHandle::Invalid;
+    TextureHandle       emissiveMap        = TextureHandle::Invalid;
     float               baseColorFactor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
     float               emissiveFactor[4]  = {0.0f, 0.0f, 0.0f, 1.0f};
     float               metallicFactor     = 1.0f;
@@ -415,7 +418,7 @@ struct GlyphMetric {
 };
 
 struct FontAtlas {
-    uint32_t    textureIndex = 0;
+    TextureHandle texture = TextureHandle::Invalid;
     GlyphMetric glyphs[96] {};
 };
 

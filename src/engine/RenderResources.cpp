@@ -90,6 +90,10 @@ void RenderContext::SubmitMeshParticleEmitter(
     );
 }
 
+uint32_t RenderContext::GetBindlessIndex(TextureHandle handle) const noexcept {
+    return _impl->textureManager.GetBindlessIndex(handle);
+}
+
 void RenderContext::ClearGPUCaches() noexcept {
     _impl->assetMeshMap.Clear();
     _impl->assetMaterialMap.Clear();
@@ -110,6 +114,8 @@ void RenderContext::ClearGPUCaches() noexcept {
         DestroyBuffer(pair.second);
     }
     _impl->tracked3DEmitters.clear();
+
+    _impl->textureManager.Clear();
 }
 
 ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& RenderContext::GetTracked2DEmitters() noexcept {
@@ -804,6 +810,10 @@ void RenderContext::Impl::RegisterShaderWatcher(const char* path, std::function<
 auto RenderContext::BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness)
     -> std::expected<uint32_t, Error> {
     return _impl->BakeProceduralTexture(width, height, variantIdx, scale, randomness, 0.0f);
+}
+
+TextureHandle RenderContext::CreateProceduralTexture(std::string_view name, uint32_t width, uint32_t height, bool isSRGB, const uint32_t* pixels) {
+    return _impl->textureManager.CreateProcedural(*this, name, width, height, isSRGB, pixels);
 }
 
 void RenderContext::ProvokeDeviceLost() {

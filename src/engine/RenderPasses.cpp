@@ -128,10 +128,10 @@ void Draw3DParticles(const FrameRecorder& recorder) noexcept {
             .baseColorFactor    = {},
             .emissiveFactor     = {},
             .indexCount         = gpuMesh->indexCount,
-            .albedoIdx          = gpuMat->albedoIndex,
-            .normalIdx          = gpuMat->normalIndex,
-            .pbrIdx             = gpuMat->pbrIndex,
-            .emissiveIdx        = gpuMat->emissiveIndex,
+            .albedoIdx          = ctx.textureManager.GetBindlessIndex(gpuMat->albedoMap),
+            .normalIdx          = ctx.textureManager.GetBindlessIndex(gpuMat->normalMap),
+            .pbrIdx             = ctx.textureManager.GetBindlessIndex(gpuMat->pbrMap),
+            .emissiveIdx        = ctx.textureManager.GetBindlessIndex(gpuMat->emissiveMap),
             .roughness          = gpuMat->roughnessFactor,
             .metallic           = gpuMat->metallicFactor,
             .alphaCutoff        = gpuMat->alphaCutoff,
@@ -182,7 +182,7 @@ void Draw3DParticleShadows(const FrameRecorder& recorder, uint32_t cascadeIndex)
             .baseColorFactor    = {},
             .emissiveFactor     = {},
             .indexCount         = gpuMesh->indexCount,
-            .albedoIdx          = gpuMat->albedoIndex,
+            .albedoIdx          = ctx.textureManager.GetBindlessIndex(gpuMat->albedoMap),
             .normalIdx          = 0,
             .pbrIdx             = 0,
             .emissiveIdx        = 0,
@@ -860,7 +860,7 @@ void BlitPass::Execute(
                 size_t maxVertices    = ctx.frames.uiVbos[recorder.frameIndex].Size() / (sizeof(VertexPosition) + sizeof(VertexAttributes));
 
                 for (const auto& batch: ctx.queues.uiBatches) {
-                    uipc.albedoIdx   = batch.textureIndex;
+                    uipc.albedoIdx   = ctx.textureManager.GetBindlessIndex(batch.texture);
                     uipc.isSDF       = batch.isSDF ? 1 : 0;
                     uipc.posAddress  = baseVboAddress + (batch.vertexStart * sizeof(VertexPosition));
                     uipc.attrAddress = baseVboAddress + (maxVertices * sizeof(VertexPosition)) + (batch.vertexStart * sizeof(VertexAttributes));

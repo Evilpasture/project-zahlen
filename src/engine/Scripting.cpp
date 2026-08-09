@@ -658,7 +658,7 @@ void RegisterCreativeWorkCommands() {
                     mat.baseColorFactor[2] = a.b;
                     mat.baseColorFactor[3] = a.a;
                     *a.outPipeline         = static_cast<uint64_t>(mat.pipeline);
-                    *a.outAlbedo           = mat.albedoIndex;
+                    *a.outAlbedo           = static_cast<uint64_t>(mat.albedoMap);
                     return 1;
                 }));
 

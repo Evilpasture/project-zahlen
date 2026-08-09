@@ -329,7 +329,7 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
                 ZHLN::Panic("Failed to compile debug line material: {}", debugLineMat_res.error().Message());
             }
             debugLineMat             = debugLineMat_res.value();
-            debugLineMat.albedoIndex = 1;
+            debugLineMat.albedoMap = TextureHandle(1);
 
             PipelineDesc solidDesc = lineDesc;
             solidDesc.isLineList   = false;
@@ -339,7 +339,7 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
                 ZHLN::Panic("Failed to compile debug solid material: {}", debugSolidMat_res.error().Message());
             }
             debugSolidMat             = debugSolidMat_res.value();
-            debugSolidMat.albedoIndex = 1;
+            debugSolidMat.albedoMap = TextureHandle(1);
         }
 
         bool isWireframe = (physicsDrawMode == 1);

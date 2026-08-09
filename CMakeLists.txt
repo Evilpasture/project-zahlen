@@ -242,6 +242,8 @@ set(RAW_ENGINE_SOURCES
     src/engine/Engine.cpp
     src/engine/CreativeWorksFactory.cpp
     src/engine/MeshBuilder.cpp
+    src/engine/TextureManager.cpp
+    src/engine/system/TextureSystem.cpp
     src/engine/system/AnimationSystem.cpp
     src/engine/CreativeWorksManager.cpp
     src/engine/Window.cpp

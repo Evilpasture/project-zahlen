@@ -52,7 +52,7 @@ static std::string FindSystemFont(const char* fontName) {
     return fontPath;
 }
 
-uint32_t CreateFontAtlasTexture(RenderContext& ctx) {
+TextureHandle CreateFontAtlasTexture(RenderContext& ctx) {
     std::string fontPath = FindSystemFont("sans-serif");
     if (fontPath.empty()) {
         fontPath = "/usr/share/fonts/TTF/DejaVuSans.ttf";
@@ -63,7 +63,7 @@ uint32_t CreateFontAtlasTexture(RenderContext& ctx) {
     FILE* f = std::fopen(fontPath.c_str(), "rb");
     if (f == nullptr) {
         Log("ERROR: Failed to open system font file: {}", fontPath);
-        return 0;
+        return TextureHandle::Invalid;
     }
 
     std::fseek(f, 0, SEEK_END);
@@ -79,7 +79,7 @@ uint32_t CreateFontAtlasTexture(RenderContext& ctx) {
     stbtt_fontinfo fontInfo {};
     if (!stbtt_InitFont(&fontInfo, fontBuffer.data(), fontOffset)) {
         Log("ERROR: stbtt_InitFont failed for {}", fontPath);
-        return 0;
+        return TextureHandle::Invalid;
     }
 
     const uint32_t       atlasSize = 1024;
@@ -89,7 +89,7 @@ uint32_t CreateFontAtlasTexture(RenderContext& ctx) {
     auto& reg                = engine->GetRegistry();
     auto  uiSettingsEntities = reg.GetEntitiesWith<Components::UISettingsComponent>();
     if (uiSettingsEntities.empty()) {
-        return 0;
+        return TextureHandle::Invalid;
     }
     auto* uiSettings = reg.Get<Components::UISettingsComponent>(uiSettingsEntities[0]);
 
@@ -164,17 +164,12 @@ uint32_t CreateFontAtlasTexture(RenderContext& ctx) {
         rgbaPixels[i] = (static_cast<uint32_t>(dist) << 24) | 0x00FFFFFF;
     }
 
-    auto tex_res = ctx.CreateTexture(rgbaPixels.data(), atlasSize, atlasSize, false);
-    if (!tex_res) {
-        Log("ERROR: CreateFontAtlasTexture failed to create Vulkan texture: {}", tex_res.error().Message());
-        return 0;
-    }
-    uint32_t texIdx = tex_res.value();
+    TextureHandle texHandle = ctx.CreateProceduralTexture("FontAtlas", atlasSize, atlasSize, false, rgbaPixels.data());
 
-    uiSettings->fontAtlas.textureIndex = texIdx;
-    uiSettings->defaultFontAtlasIdx    = texIdx;
+    uiSettings->fontAtlas.texture   = texHandle;
+    uiSettings->defaultFontAtlas    = texHandle;
 
-    return texIdx;
+    return texHandle;
 }
 
 uint32_t LoadTexture(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view path, bool isSRGB) {
