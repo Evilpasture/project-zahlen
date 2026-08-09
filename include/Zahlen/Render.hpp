@@ -109,6 +109,8 @@ class ZHLN_API RenderContext {
         DrawLine(start, end, color, color);
     }
 
+    [[nodiscard]] uint32_t GetBindlessIndex(TextureHandle handle) const noexcept;
+
     [[nodiscard]] auto CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB = true) -> std::expected<uint32_t, Error>;
     [[nodiscard]] auto CreateTextureCube(const void* const* faceData, uint32_t width, uint32_t height) -> std::expected<uint32_t, Error>;
 
@@ -136,6 +138,8 @@ class ZHLN_API RenderContext {
     void                                     ProvokeDeviceLost();
 
     auto BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness) -> std::expected<uint32_t, Error>;
+    TextureHandle CreateProceduralTexture(std::string_view name, uint32_t width, uint32_t height, bool isSRGB, const uint32_t* pixels);
+
 
     [[nodiscard]] auto GetImpl() const -> Impl* {
         return _impl.get();
@@ -185,8 +189,8 @@ struct CSGDrawParams {
 struct DecalParams {
     JPH::Mat44 transform    = JPH::Mat44::sIdentity();
     JPH::Mat44 invTransform = JPH::Mat44::sIdentity();
-    uint32_t   albedoIndex  = 1;
-    uint32_t   normalIndex  = 2;
+    TextureHandle albedoMap    = TextureHandle::Invalid;
+    TextureHandle normalMap    = TextureHandle::Invalid;
     float      roughness    = 0.5f;
     float      metallic     = 0.0f;
 };

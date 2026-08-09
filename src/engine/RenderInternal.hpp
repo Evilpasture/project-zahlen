@@ -5,6 +5,7 @@
 #pragma once
 #include "FileWatcher.hpp"
 #include "Rendering.hpp"
+#include "engine/TextureManager.hpp" // Private header
 #include <GLFW/glfw3.h>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/ControlFlow.hpp>
@@ -781,6 +782,9 @@ struct RenderContext::Impl {
 
     Vk::TypedPipeline<0, true> shadowPipeline;
     Vk::TypedPipeline<0, true> punctualShadowPipeline;
+
+    // Encapsulated Texture Lifecycle Manager
+    TextureManager textureManager;
 
     Vk::Buffer                  particleBuffer;
     Vk::ComputePass             particleUpdatePass;

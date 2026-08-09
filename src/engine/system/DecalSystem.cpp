@@ -24,8 +24,8 @@ void DecalSystem::Update(Engine& engine) {
             Renderer::DrawDecal(
                 rc, {.transform    = worldMat,
                      .invTransform = invWorld,
-                     .albedoIndex  = decalComp->albedoIndex,
-                     .normalIndex  = decalComp->normalIndex,
+                     .albedoMap    = decalComp->albedoMap,
+                     .normalMap    = decalComp->normalMap,
                      .roughness    = decalComp->roughness,
                      .metallic     = decalComp->metallic}
             );

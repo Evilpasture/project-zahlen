@@ -57,11 +57,16 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
     auto& rc  = engine.GetRenderContext();
     auto& reg = engine.GetRegistry();
 
-    uint32_t fontIdx        = 0;
+    TextureHandle fontHandle = TextureHandle::Invalid;
     auto     uiSettingsEnts = reg.GetEntitiesWith<Components::UISettingsComponent>();
     if (!uiSettingsEnts.empty()) {
-        if (auto* uiSettings = reg.Get<Components::UISettingsComponent>(uiSettingsEnts[0])) {
-            fontIdx = uiSettings->defaultFontAtlasIdx;
+        fontHandle = reg.Get<Components::UISettingsComponent>(uiSettingsEnts[0])->fontAtlas.texture;
+        if (fontHandle == TextureHandle::Invalid) {
+            fontHandle = CreativeWorksFactory::CreateFontAtlasTexture(rc);
+            if (auto* settings = reg.Get<Components::UISettingsComponent>(uiSettingsEnts[0])) {
+                settings->fontAtlas.texture = fontHandle;
+                settings->defaultFontAtlas = fontHandle;
+            }
         }
     }
 
@@ -157,14 +162,14 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
                       .clipChildren   = true
                   }
     );
-    reg.Add(popupBox, Components::UIPanelComponent {.color = {0.08f, 0.11f, 0.16f, 0.95f}, .textureIndex = 1, .edgeWidth = 1.0f});
+    reg.Add(popupBox, Components::UIPanelComponent {.color = {0.08f, 0.11f, 0.16f, 0.95f}, .texture = TextureHandle::Invalid, .edgeWidth = 1.0f});
     reg.Add(popupBox, Components::MeshComponent {}); // <-- Added to give the popup box DrawFlags capability
     s_UIPopupBox = popupBox;
 
     // Top Accent Stripe
     Entity topAccent = reg.Create();
     reg.Add(topAccent, Components::UIRectComponent {.parentEntity = popupBox, .x = 0.0f, .y = 0.0f, .width = 700.0f, .height = 4.0f, .hierarchyDepth = 2});
-    reg.Add(topAccent, Components::UIPanelComponent {.color = {0.3f, 0.85f, 1.0f, 1.0f}, .textureIndex = 1});
+    reg.Add(topAccent, Components::UIPanelComponent {.color = {0.3f, 0.85f, 1.0f, 1.0f}, .texture = TextureHandle::Invalid});
 
     // Header Title Text (Declaratively Centered)
     Entity headerText = reg.Create();
@@ -177,14 +182,14 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
                         .color         = {0.3f, 0.85f, 1.0f, 1.0f},
                         .align         = TextAlignment::Center,
                         .verticalAlign = TextVerticalAlignment::Center,
-                        .fontIndex     = fontIdx
+                        .fontIndex     = fontHandle
                     }
     );
 
     // Alert Toast Box
     Entity alertBox = reg.Create();
     reg.Add(alertBox, Components::UIRectComponent {.parentEntity = popupBox, .x = 25.0f, .y = 54.0f, .width = 650.0f, .height = 72.0f, .hierarchyDepth = 2});
-    reg.Add(alertBox, Components::UIPanelComponent {.color = {0.22f, 0.16f, 0.08f, 0.85f}, .textureIndex = 1, .edgeWidth = 1.0f});
+    reg.Add(alertBox, Components::UIPanelComponent {.color = {0.22f, 0.16f, 0.08f, 0.85f}, .texture = TextureHandle::Invalid, .edgeWidth = 1.0f});
 
     // Warning Title Inside Alert Toast
     Entity statusText = reg.Create();
@@ -205,7 +210,7 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
                         .color         = {1.0f, 0.85f, 0.3f, 1.0f},
                         .align         = TextAlignment::Left,
                         .verticalAlign = TextVerticalAlignment::Center,
-                        .fontIndex     = fontIdx
+                        .fontIndex     = fontHandle
                     }
     );
 
@@ -220,7 +225,7 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
                         .color         = {0.9f, 0.85f, 0.7f, 1.0f},
                         .align         = TextAlignment::Left,
                         .verticalAlign = TextVerticalAlignment::Center,
-                        .fontIndex     = fontIdx
+                        .fontIndex     = fontHandle
                     }
     );
 
@@ -229,7 +234,7 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
     reg.Add(
         sysInfoBox, Components::UIRectComponent {.parentEntity = popupBox, .x = 25.0f, .y = 138.0f, .width = 650.0f, .height = 210.0f, .hierarchyDepth = 2}
     );
-    reg.Add(sysInfoBox, Components::UIPanelComponent {.color = {0.05f, 0.07f, 0.11f, 0.85f}, .textureIndex = 1, .edgeWidth = 1.0f});
+    reg.Add(sysInfoBox, Components::UIPanelComponent {.color = {0.05f, 0.07f, 0.11f, 0.85f}, .texture = TextureHandle::Invalid, .edgeWidth = 1.0f});
 
     // System Environment Text
     Entity sysInfoText = reg.Create();
@@ -253,7 +258,7 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
                          .color         = {0.65f, 0.75f, 0.85f, 1.0f},
                          .align         = TextAlignment::Left,
                          .verticalAlign = TextVerticalAlignment::Top,
-                         .fontIndex     = fontIdx
+                         .fontIndex     = fontHandle
                      }
     );
 
@@ -268,7 +273,7 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
     Entity btnReload = reg.Create();
     reg.Add(btnReload, Components::NameComponent {.name = String64("BtnReload")});
     reg.Add(btnReload, Components::UIRectComponent {.parentEntity = popupBox, .x = 25.0f, .y = 368.0f, .width = btnW, .height = btnH, .hierarchyDepth = 2});
-    reg.Add(btnReload, Components::UIPanelComponent {.color = {0.16f, 0.24f, 0.36f, 0.95f}, .borderRadius = {4.0f, 4.0f, 4.0f, 4.0f}, .textureIndex = 1});
+    reg.Add(btnReload, Components::UIPanelComponent {.color = {0.16f, 0.24f, 0.36f, 0.95f}, .borderRadius = {4.0f, 4.0f, 4.0f, 4.0f}, .texture = TextureHandle::Invalid});
     reg.Add(btnReload, Components::UIButtonComponent {});
     reg.Add(
         btnReload, Components::UIStyleComponent {
@@ -288,7 +293,7 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
                        .color         = {0.9f, 0.95f, 1.0f, 1.0f},
                        .align         = TextAlignment::Center,
                        .verticalAlign = TextVerticalAlignment::Center,
-                       .fontIndex     = fontIdx
+                       .fontIndex     = fontHandle
                    }
     );
     s_BtnReload = btnReload;
@@ -297,7 +302,7 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
     Entity btnAnimate = reg.Create();
     reg.Add(btnAnimate, Components::NameComponent {.name = String64("BtnAnimate")});
     reg.Add(btnAnimate, Components::UIRectComponent {.parentEntity = popupBox, .x = 250.0f, .y = 368.0f, .width = btnW, .height = btnH, .hierarchyDepth = 2});
-    reg.Add(btnAnimate, Components::UIPanelComponent {.color = {0.16f, 0.24f, 0.36f, 0.95f}, .borderRadius = {4.0f, 4.0f, 4.0f, 4.0f}, .textureIndex = 1});
+    reg.Add(btnAnimate, Components::UIPanelComponent {.color = {0.16f, 0.24f, 0.36f, 0.95f}, .borderRadius = {4.0f, 4.0f, 4.0f, 4.0f}, .texture = TextureHandle::Invalid});
     reg.Add(btnAnimate, Components::UIButtonComponent {});
     reg.Add(
         btnAnimate, Components::UIStyleComponent {
@@ -317,7 +322,7 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
                         .color         = {0.9f, 0.95f, 1.0f, 1.0f},
                         .align         = TextAlignment::Center,
                         .verticalAlign = TextVerticalAlignment::Center,
-                        .fontIndex     = fontIdx
+                        .fontIndex     = fontHandle
                     }
     );
     s_BtnAnimate = btnAnimate;
@@ -326,7 +331,7 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
     Entity btnQuit = reg.Create();
     reg.Add(btnQuit, Components::NameComponent {.name = String64("BtnQuit")});
     reg.Add(btnQuit, Components::UIRectComponent {.parentEntity = popupBox, .x = 475.0f, .y = 368.0f, .width = btnW, .height = btnH, .hierarchyDepth = 2});
-    reg.Add(btnQuit, Components::UIPanelComponent {.color = {0.45f, 0.16f, 0.18f, 0.95f}, .borderRadius = {4.0f, 4.0f, 4.0f, 4.0f}, .textureIndex = 1});
+    reg.Add(btnQuit, Components::UIPanelComponent {.color = {0.45f, 0.16f, 0.18f, 0.95f}, .borderRadius = {4.0f, 4.0f, 4.0f, 4.0f}, .texture = TextureHandle::Invalid});
     reg.Add(btnQuit, Components::UIButtonComponent {});
     reg.Add(
         btnQuit, Components::UIStyleComponent {
@@ -346,7 +351,7 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
                      .color         = {1.0f, 0.9f, 0.9f, 1.0f},
                      .align         = TextAlignment::Center,
                      .verticalAlign = TextVerticalAlignment::Center,
-                     .fontIndex     = fontIdx
+                     .fontIndex     = fontHandle
                  }
     );
     s_BtnQuit = btnQuit;

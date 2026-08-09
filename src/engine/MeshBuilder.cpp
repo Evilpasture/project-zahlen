@@ -37,7 +37,7 @@ std::expected<Material, Error> CreateBasicMaterial(RenderContext& ctx, bool doub
         return std::unexpected(mat_res.error());
     }
     Material mat    = mat_res.value();
-    mat.albedoIndex = 1;
+    mat.albedoMap = TextureHandle::Invalid;
     return mat;
 }
 

@@ -34,7 +34,7 @@ Mesh CreateBox(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4& co
 Mesh CreateTerrainFromData(RenderContext& ctx, int sampleCount, float worldSize, const float* heights, const float* colorsRGBA);
 Mesh CreateTerrain(RenderContext& ctx, int sampleCount, float worldSize, float maxHeight, float* outHeights, TerrainType type = TerrainType::Default);
 
-uint32_t CreateFontAtlasTexture(RenderContext& ctx);
+TextureHandle CreateFontAtlasTexture(RenderContext& ctx);
 
 uint32_t LoadTexture(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view path, bool isSRGB = true);
 

@@ -516,6 +516,7 @@ std::unordered_map<cgltf_image*, uint32_t> UploadTexturesToGPU(RenderContext& ct
 
 CompiledPrimitive GetOrCreateCompiledPrimitive(
     RenderContext&                                                 ctx,
+    CreativeWorksManager&                                          cwMgr,
     const CPUPrimitiveJob&                                         primJob,
     const std::unordered_map<cgltf_image*, uint32_t>&              imageToBindlessIdx,
     std::unordered_map<const cgltf_primitive*, CompiledPrimitive>& primCache,
@@ -567,18 +568,15 @@ CompiledPrimitive GetOrCreateCompiledPrimitive(
     subMaterial.roughnessFactor = primJob.roughnessFactor;
     std::memcpy(subMaterial.baseColorFactor, primJob.baseColorFactor, sizeof(float) * 4);
 
-    auto GetBindlessIndex = [&](cgltf_image* img, uint32_t defaultIdx) -> uint32_t {
-        if (!img) {
-            return defaultIdx;
-        }
-        auto texIt = imageToBindlessIdx.find(img);
-        return (texIt != imageToBindlessIdx.end()) ? texIt->second : defaultIdx;
+    auto GetHandle = [&](cgltf_image* img) -> TextureHandle {
+        if (!img) return TextureHandle::Invalid;
+        return TextureHandle(static_cast<uint64_t>(CreativeWorksFactory::LoadTexture(ctx, cwMgr, img->uri ? img->uri : "", true)));
     };
 
-    subMaterial.albedoIndex   = GetBindlessIndex(primJob.albedoImage, 1);
-    subMaterial.normalIndex   = GetBindlessIndex(primJob.normalImage, 2);
-    subMaterial.pbrIndex      = GetBindlessIndex(primJob.pbrImage, 0);
-    subMaterial.emissiveIndex = GetBindlessIndex(primJob.emissiveImage, 1);
+    subMaterial.albedoMap   = GetHandle(primJob.albedoImage);
+    subMaterial.normalMap   = GetHandle(primJob.normalImage);
+    subMaterial.pbrMap      = GetHandle(primJob.pbrImage);
+    subMaterial.emissiveMap = GetHandle(primJob.emissiveImage);
     std::memcpy(subMaterial.emissiveFactor, primJob.emissiveFactor, sizeof(float) * 4);
 
     CompiledPrimitive compPrim = {
@@ -756,7 +754,7 @@ ModelPrefab* LoadGLBPrefab(RenderContext& ctx, CreativeWorksManager& cwMgr, std:
     for (const auto& primJob: primitiveJobs) {
         const auto*       node       = primJob.node;
         bool              isMirrored = (primJob.nodeTransform.GetDeterminant3x3() < 0.0f);
-        CompiledPrimitive compPrim   = GetOrCreateCompiledPrimitive(ctx, primJob, imageToBindlessIdx, primCache, isMirrored);
+        CompiledPrimitive compPrim   = GetOrCreateCompiledPrimitive(ctx, cwMgr, primJob, imageToBindlessIdx, primCache, isMirrored);
 
         ModelPart part;
         part.name            = (node->name != nullptr) ? String64(node->name) : String64("Unnamed");
@@ -822,7 +820,7 @@ ModelPrefab* LoadGLBPrefab(RenderContext& ctx, CreativeWorksManager& cwMgr, std:
     return result;
 }
 
-void RebuildPrefabGPUResources(RenderContext& ctx, CreativeWorksManager& /*cwMgr*/, ModelPrefab* prefab) {
+void RebuildPrefabGPUResources(RenderContext& ctx, CreativeWorksManager& cwMgr, ModelPrefab* prefab) {
     if (prefab == nullptr) {
         return;
     }
@@ -853,7 +851,7 @@ void RebuildPrefabGPUResources(RenderContext& ctx, CreativeWorksManager& /*cwMgr
         const auto& primJob    = primitiveJobs[i];
         bool        isMirrored = (primJob.nodeTransform.GetDeterminant3x3() < 0.0f);
 
-        CompiledPrimitive compPrim = GetOrCreateCompiledPrimitive(ctx, primJob, imageToBindlessIdx, primCache, isMirrored);
+        CompiledPrimitive compPrim = GetOrCreateCompiledPrimitive(ctx, cwMgr, primJob, imageToBindlessIdx, primCache, isMirrored);
 
         prefab->parts[i].mesh            = compPrim.mesh;
         prefab->parts[i].defaultMaterial = compPrim.defaultMaterial;

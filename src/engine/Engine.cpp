@@ -36,6 +36,7 @@
 #include <engine/FileWatcher.hpp>
 #include <engine/NativeScriptModule.hpp>
 #include <engine/Platform.hpp>
+#include <engine/system/TextureSystem.hpp>
 #include <engine/system/AnimationSystem.hpp>
 #include <engine/system/ArticulationSystem.hpp>
 #include <engine/system/CameraSystem.hpp>
@@ -194,6 +195,13 @@ void BuildSystemGraphs(Engine& engine) {
     auto& renderGraph = engine.GetRenderGraph();
 
     using namespace ZHLN::ECS;
+
+    updateGraph.AddSystem({
+        .update_func    = [](Engine& eng, float dt) { TextureSystem::Update(eng, dt); },
+        .name           = "TextureSystem",
+        .access_pattern = {},
+        .enabled        = true,
+    });
 
     updateGraph.AddSystem({
         .update_func    = Sys_VisualInterpolation,
