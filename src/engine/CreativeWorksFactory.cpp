@@ -23,6 +23,7 @@
 #include <engine/system/AnimationSystem.hpp>
 #include <engine/system/ArticulationSystem.hpp>
 #include <engine/system/LightingSystem.hpp>
+#include <engine/system/TerrainSystem.hpp>
 #include <gltf/GLTFImporter.hpp>
 #include <stb_image.h>
 #define STB_TRUETYPE_IMPLEMENTATION
@@ -93,11 +94,10 @@ TextureHandle CreateFontAtlasTexture(RenderContext& ctx) {
     }
     auto* uiSettings = reg.Get<Components::UISettingsComponent>(uiSettingsEntities[0]);
 
-    // High-Resolution SDF Generation Parameters
     const float   fontSize         = 32.0f;
     const float   scale            = stbtt_ScaleForPixelHeight(&fontInfo, fontSize);
     const int     padding          = 6;
-    const uint8_t onedge_value     = 128; // 0.5 in normalized space
+    const uint8_t onedge_value     = 128;
     const float   pixel_dist_scale = 128.0f / static_cast<float>(padding);
 
     uint32_t curX      = 2;
@@ -166,8 +166,8 @@ TextureHandle CreateFontAtlasTexture(RenderContext& ctx) {
 
     TextureHandle texHandle = ctx.CreateProceduralTexture("FontAtlas", atlasSize, atlasSize, false, rgbaPixels.data());
 
-    uiSettings->fontAtlas.texture   = texHandle;
-    uiSettings->defaultFontAtlas    = texHandle;
+    uiSettings->fontAtlas.texture = texHandle;
+    uiSettings->defaultFontAtlas  = texHandle;
 
     return texHandle;
 }
@@ -178,19 +178,16 @@ uint32_t LoadTexture(RenderContext& ctx, CreativeWorksManager& assetMgr, std::st
     CreativeWorkLoadRequest req;
     req.assetID = hash;
 
-    // 1. Fetch raw compressed file bytes from VFS / PAK
     if (!assetMgr.LoadSync(req)) {
         ZHLN::Log("WARNING: Failed to load texture asset from VFS: {}", path);
-        return 1; // Fallback to white pixel (Slot 1)
+        return 1;
     }
 
-    // 2. Decompress PNG/JPG in memory
     int            width    = 0;
     int            height   = 0;
     int            channels = 0;
     unsigned char* pixels   = stbi_load_from_memory(static_cast<const stbi_uc*>(req.outData), static_cast<int>(req.outSize), &width, &height, &channels, 4);
 
-    // Free VFS memory immediately
     assetMgr.FreeCreativeWorkMemory(req);
 
     if (pixels == nullptr) {
@@ -198,7 +195,6 @@ uint32_t LoadTexture(RenderContext& ctx, CreativeWorksManager& assetMgr, std::st
         return 1;
     }
 
-    // 3. Register raw pixels with Vulkan GPU
     auto texRes = ctx.CreateTexture(pixels, static_cast<uint32_t>(width), static_cast<uint32_t>(height), isSRGB);
     stbi_image_free(pixels);
 
@@ -292,7 +288,6 @@ Entity InstantiateMeshPart(
     Entity                                 rootEntity,
     std::unordered_map<int32_t, uint32_t>& allocatedSkeletons
 ) {
-    // Pure integer ID usage - cast scoped enum to uint64_t directly
     AssetID    meshAsset = part.meshAsset;
     MaterialID matAsset  = params.materialOverride.pipeline != PipelineHandle::Invalid ? static_cast<uint64_t>(params.materialOverride.pipeline) :
                                                                                          part.materialAsset;
@@ -347,18 +342,21 @@ Entity InstantiateMeshPart(
         JPH::Vec3 c2 = nodeLocal.GetColumn3(2);
         JPH::Vec3 localScale(c0.Length(), c1.Length(), c2.Length());
 
-        if (localScale.GetX() > 1e-5f)
+        if (localScale.GetX() > 1e-5f) {
             c0 /= localScale.GetX();
-        else
+        } else {
             c0 = JPH::Vec3::sAxisX();
-        if (localScale.GetY() > 1e-5f)
+        }
+        if (localScale.GetY() > 1e-5f) {
             c1 /= localScale.GetY();
-        else
+        } else {
             c1 = JPH::Vec3::sAxisY();
-        if (localScale.GetZ() > 1e-5f)
+        }
+        if (localScale.GetZ() > 1e-5f) {
             c2 /= localScale.GetZ();
-        else
+        } else {
             c2 = JPH::Vec3::sAxisZ();
+        }
 
         JPH::Mat44 rotMat(JPH::Vec4(c0, 0), JPH::Vec4(c1, 0), JPH::Vec4(c2, 0), JPH::Vec4(0, 0, 0, 1));
         JPH::Quat  localRot = rotMat.GetQuaternion().Normalized();
@@ -428,6 +426,119 @@ Entity TrySpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, const JPH:
 
 } // namespace
 
+Entity CreateBox(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, JPH::Vec3Arg halfExtents, const SpawnParams& params) {
+    JPH::Vec4 boxColor = (params.materialOverride.baseColorFactor[3] >= 0.0f) ?
+                             JPH::Vec4(
+                                 params.materialOverride.baseColorFactor[0], params.materialOverride.baseColorFactor[1],
+                                 params.materialOverride.baseColorFactor[2], params.materialOverride.baseColorFactor[3]
+                             ) :
+                             JPH::Vec4(0.8f, 0.4f, 0.2f, 1.0f);
+
+    Mesh mesh = CreateBoxMesh(ctx, halfExtents, boxColor);
+
+    Material mat;
+    if (params.materialOverride.pipeline != PipelineHandle::Invalid) {
+        mat = params.materialOverride;
+    } else {
+        auto mat_res           = CreateBasicMaterial(ctx, false, false, false);
+        mat                    = mat_res.value_or(Material {});
+        mat.baseColorFactor[0] = boxColor.GetX();
+        mat.baseColorFactor[1] = boxColor.GetY();
+        mat.baseColorFactor[2] = boxColor.GetZ();
+        mat.baseColorFactor[3] = boxColor.GetW();
+        mat.roughnessFactor    = 0.3f;
+        mat.metallicFactor     = 0.1f;
+    }
+
+    Entity     e         = reg.Create();
+    AssetID    meshAsset = HashAssetID("prefab_box_mesh_" + std::to_string(e.index));
+    MaterialID matAsset  = HashAssetID("prefab_box_mat_" + std::to_string(e.index));
+
+    ctx.RegisterGPUMesh(meshAsset, mesh);
+    ctx.RegisterGPUMaterial(matAsset, mat);
+
+    reg.Add(e, Components::NameComponent {.name = String64("Box_" + std::to_string(e.index))});
+    reg.Add(e, Components::TransformComponent {.position = JPH::Vec3(params.position), .rotation = params.rotation, .scale = params.scale});
+
+    float maxExtent = std::max({halfExtents.GetX(), halfExtents.GetY(), halfExtents.GetZ()});
+    reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = maxExtent * 2.0f});
+
+    reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
+
+    if (params.createPhysics && pc != nullptr) {
+        auto shape = Physics::GetOrCreateShape(
+            *pc, Physics::ShapeType::Box, halfExtents.GetX() * params.scale.GetX(), halfExtents.GetY() * params.scale.GetY(),
+            halfExtents.GetZ() * params.scale.GetZ()
+        );
+        auto body = Physics::CreateRigidBody(
+            *pc, shape, params.position, params.rotation, params.isStaticPhysics ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
+            params.isStaticPhysics ? static_cast<JPH::ObjectLayer>(0) : static_cast<JPH::ObjectLayer>(1), 0, params.physicsCategory, params.physicsMask
+        );
+        reg.Add(e, Components::PhysicsComponent {body});
+        if (!params.isStaticPhysics) {
+            reg.Add(
+                e, Components::PhysicsStateComponent {
+                       .currPosition = JPH::Vec3(params.position),
+                       .prevPosition = JPH::Vec3(params.position),
+                       .currRotation = params.rotation,
+                       .prevRotation = params.rotation
+                   }
+            );
+        }
+    }
+
+    return e;
+}
+
+Entity CreateBox(Engine& engine, JPH::Vec3Arg halfExtents, const SpawnParams& params) {
+    return CreateBox(engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), halfExtents, params);
+}
+
+Entity CreatePlane(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, float extent, const JPH::Vec4& color, const SpawnParams& params) {
+    Mesh mesh = CreatePlaneMesh(ctx, extent, color);
+
+    Material mat;
+    if (params.materialOverride.pipeline != PipelineHandle::Invalid) {
+        mat = params.materialOverride;
+    } else {
+        auto mat_res           = CreateBasicMaterial(ctx, false, false, false);
+        mat                    = mat_res.value_or(Material {});
+        mat.baseColorFactor[0] = color.GetX();
+        mat.baseColorFactor[1] = color.GetY();
+        mat.baseColorFactor[2] = color.GetZ();
+        mat.baseColorFactor[3] = color.GetW();
+        mat.roughnessFactor    = 0.35f;
+        mat.metallicFactor     = 0.15f;
+    }
+
+    Entity     e         = reg.Create();
+    AssetID    meshAsset = HashAssetID("prefab_plane_mesh_" + std::to_string(e.index));
+    MaterialID matAsset  = HashAssetID("prefab_plane_mat_" + std::to_string(e.index));
+
+    ctx.RegisterGPUMesh(meshAsset, mesh);
+    ctx.RegisterGPUMaterial(matAsset, mat);
+
+    reg.Add(e, Components::NameComponent {.name = String64("Plane_" + std::to_string(e.index))});
+    reg.Add(e, Components::TransformComponent {.position = JPH::Vec3(params.position), .rotation = params.rotation, .scale = params.scale});
+
+    reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = extent * 2.0f});
+
+    reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
+
+    if (params.createPhysics && pc != nullptr) {
+        auto shape = Physics::GetOrCreateShape(*pc, Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);
+        auto body =
+            Physics::CreateRigidBody(*pc, shape, params.position, params.rotation, JPH::EMotionType::Static, 0, 0, params.physicsCategory, params.physicsMask);
+        reg.Add(e, Components::PhysicsComponent {body});
+    }
+
+    return e;
+}
+
+Entity CreatePlane(Engine& engine, float extent, const JPH::Vec4& color, const SpawnParams& params) {
+    return CreatePlane(engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), extent, color, params);
+}
+
 uint32_t InstantiatePrefab(
     RenderContext&     ctx,
     ECS::Registry&     reg,
@@ -467,7 +578,6 @@ uint32_t InstantiatePrefab(
     for (size_t i = 0; i < prefab.parts.size(); ++i) {
         Entity meshEnt = InstantiateMeshPart(ctx, reg, pc, prefab, prefab.parts[i], preparedParts[i], params, rootEntity, allocatedSkeletons);
 
-        // Store the name to entity mapping for CSG resolution
         instantiatedParts[prefab.parts[i].name.c_str()] = meshEnt;
 
         if (outBuffer != nullptr && spawnedCount < maxCount) {
@@ -475,7 +585,6 @@ uint32_t InstantiatePrefab(
         }
         spawnedCount++;
 
-        // --- PRESERVED EMISSIVE VPL GENERATOR ---
         Entity glowEnt = TrySpawnEmissiveVPL(reg, prefab.parts[i], baseTransform * GetNodeLogicalTransform(prefab, prefab.parts[i].nodeIndex), scaleMult);
         if (glowEnt != NullEntity) {
             if (outBuffer != nullptr && spawnedCount < maxCount) {
@@ -485,7 +594,6 @@ uint32_t InstantiatePrefab(
         }
     }
 
-    // --- RESOLVE CSG MODIFIERS AND LINK ECS COMPONENTS ---
     for (const auto& part: prefab.parts) {
         if (!part.csgModifiers.empty()) {
             std::string partName = part.name.c_str();
@@ -499,7 +607,6 @@ uint32_t InstantiatePrefab(
                     if (opIt != instantiatedParts.end()) {
                         csgComp.modifiers.push_back({.operation = mod.operation, .operandEntity = opIt->second});
 
-                        // Exclude the operand cutter from standard main/shadow draw passes
                         Patch<Components::MeshComponent>(reg, opIt->second, [&](auto& cutMesh) { cutMesh.flags |= DrawFlags::Hidden; });
                     }
                 }
@@ -533,8 +640,9 @@ void SetupPlayerRagdoll(RenderContext& /*rc*/, PhysicsContext& pc, ECS::Registry
                 }
             }
         });
-        if (skeletonFound)
+        if (skeletonFound) {
             break;
+        }
     }
 
     if (targetSkeleton != nullptr) {
@@ -612,10 +720,6 @@ void SetupPlayerRagdoll(RenderContext& /*rc*/, PhysicsContext& pc, ECS::Registry
     }
 }
 
-// ============================================================================
-// DEVICE LOST RECOVERY
-// ============================================================================
-
 void RebuildVulkanResources(RenderContext& ctx, CreativeWorksManager& cwMgr, ECS::Registry& /*reg*/) {
     ZHLN::Log("[Engine] Device Lost: Clearing GPU asset cache. Next frame will re-upload assets lazily.");
 
@@ -637,6 +741,141 @@ void RebuildVulkanResources(RenderContext& ctx, CreativeWorksManager& cwMgr, ECS
             }
         }
     }
+}
+
+Entity CreateTerrainFromData(
+    RenderContext&     ctx,
+    ECS::Registry&     reg,
+    PhysicsContext*    pc,
+    int                sampleCount,
+    float              worldSize,
+    const float*       heights,
+    const float*       colorsRGBA,
+    const SpawnParams& params
+) {
+    Entity e = reg.Create();
+
+    Mesh mesh = CreateTerrainMeshFromData(ctx, sampleCount, worldSize, heights, colorsRGBA);
+
+    Material mat;
+    if (params.materialOverride.pipeline != PipelineHandle::Invalid) {
+        mat = params.materialOverride;
+    } else {
+        auto mat_res        = CreateBasicMaterial(ctx, false, false, false);
+        mat                 = mat_res.value_or(Material {});
+        mat.roughnessFactor = 0.85f;
+        mat.metallicFactor  = 0.05f;
+    }
+
+    AssetID    meshAsset = HashAssetID("prefab_terraindata_mesh_" + std::to_string(e.index));
+    MaterialID matAsset  = HashAssetID("prefab_terraindata_mat_" + std::to_string(e.index));
+
+    ctx.RegisterGPUMesh(meshAsset, mesh);
+    ctx.RegisterGPUMaterial(matAsset, mat);
+
+    TerrainData tData {.sampleCount = static_cast<uint32_t>(sampleCount), .worldSize = worldSize, .maxHeight = 35.0f, .heights = {}, .colors = {}};
+    if (heights != nullptr) {
+        tData.heights.assign(heights, heights + (static_cast<ptrdiff_t>(sampleCount * sampleCount)));
+    }
+    if (colorsRGBA != nullptr) {
+        tData.colors.assign(colorsRGBA, colorsRGBA + (static_cast<ptrdiff_t>(sampleCount * sampleCount * 4)));
+    }
+    TerrainHandle tHandle = TerrainSystem::RegisterTerrainData(std::move(tData));
+
+    reg.Add(e, Components::NameComponent {.name = String64("TerrainData_" + std::to_string(e.index))});
+    reg.Add(e, Components::TransformComponent {.position = JPH::Vec3(params.position), .rotation = params.rotation, .scale = params.scale});
+    reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = worldSize * 1.5f});
+    reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
+    reg.Add(
+        e, Components::TerrainComponent {
+               .sampleCount   = static_cast<uint32_t>(sampleCount),
+               .worldSize     = worldSize,
+               .maxHeight     = 35.0f,
+               .roughness     = mat.roughnessFactor,
+               .metallic      = mat.metallicFactor,
+               .terrainHandle = tHandle
+           }
+    );
+
+    if (params.createPhysics && pc != nullptr && heights != nullptr) {
+        auto shape = Physics::CreateHeightFieldShape(heights, sampleCount, worldSize);
+        auto body  = Physics::CreateRigidBody(*pc, shape, params.position, params.rotation, JPH::EMotionType::Static, 0);
+        reg.Add(e, Components::PhysicsComponent {body});
+    }
+
+    return e;
+}
+
+Entity CreateTerrainFromData(Engine& engine, int sampleCount, float worldSize, const float* heights, const float* colorsRGBA, const SpawnParams& params) {
+    return CreateTerrainFromData(
+        engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), sampleCount, worldSize, heights, colorsRGBA, params
+    );
+}
+
+Entity CreateTerrain(
+    RenderContext&     ctx,
+    ECS::Registry&     reg,
+    PhysicsContext*    pc,
+    int                sampleCount,
+    float              worldSize,
+    float              maxHeight,
+    TerrainType        type,
+    const SpawnParams& params
+) {
+    Entity e = reg.Create();
+
+    TerrainData tData {.sampleCount = static_cast<uint32_t>(sampleCount), .worldSize = worldSize, .maxHeight = maxHeight, .heights = {}, .colors = {}};
+    tData.heights.resize(static_cast<size_t>(sampleCount * sampleCount));
+
+    Mesh mesh = CreateTerrainMesh(ctx, sampleCount, worldSize, maxHeight, tData.heights.data(), type);
+
+    Material mat;
+    if (params.materialOverride.pipeline != PipelineHandle::Invalid) {
+        mat = params.materialOverride;
+    } else {
+        auto mat_res        = CreateBasicMaterial(ctx, false, false, false);
+        mat                 = mat_res.value_or(Material {});
+        mat.roughnessFactor = 0.85f;
+        mat.metallicFactor  = 0.05f;
+    }
+
+    AssetID    meshAsset = HashAssetID("prefab_terrain_mesh_" + std::to_string(e.index));
+    MaterialID matAsset  = HashAssetID("prefab_terrain_mat_" + std::to_string(e.index));
+
+    ctx.RegisterGPUMesh(meshAsset, mesh);
+    ctx.RegisterGPUMaterial(matAsset, mat);
+
+    TerrainHandle tHandle = TerrainSystem::RegisterTerrainData(std::move(tData));
+
+    reg.Add(e, Components::NameComponent {.name = String64("Terrain_" + std::to_string(e.index))});
+    reg.Add(e, Components::TransformComponent {.position = JPH::Vec3(params.position), .rotation = params.rotation, .scale = params.scale});
+    reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = worldSize * 1.5f});
+    reg.Add(e, Components::PBRComponent {.roughness = 0.85f, .metallic = 0.05f});
+    reg.Add(
+        e, Components::TerrainComponent {
+               .sampleCount   = static_cast<uint32_t>(sampleCount),
+               .worldSize     = worldSize,
+               .maxHeight     = maxHeight,
+               .roughness     = 0.85f,
+               .metallic      = 0.05f,
+               .terrainHandle = tHandle
+           }
+    );
+
+    if (params.createPhysics && pc != nullptr) {
+        const TerrainData* stored = TerrainSystem::GetTerrainData(tHandle);
+        if (stored != nullptr && !stored->heights.empty()) {
+            auto shape = Physics::CreateHeightFieldShape(stored->heights.data(), sampleCount, worldSize);
+            auto body  = Physics::CreateRigidBody(*pc, shape, params.position, params.rotation, JPH::EMotionType::Static, 0);
+            reg.Add(e, Components::PhysicsComponent {body});
+        }
+    }
+
+    return e;
+}
+
+Entity CreateTerrain(Engine& engine, int sampleCount, float worldSize, float maxHeight, TerrainType type, const SpawnParams& params) {
+    return CreateTerrain(engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), sampleCount, worldSize, maxHeight, type, params);
 }
 
 ModelPrefab* LoadModelPrefab(Engine& engine, std::string_view path) {

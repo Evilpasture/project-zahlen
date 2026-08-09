@@ -38,20 +38,19 @@ struct Components {
         float           scale = 1.0f;
         JPH::Vec4       color = {1.0f, 1.0f, 1.0f, 1.0f};
 
-        // Declarative Alignment - No manual math required by the author!
         TextAlignment         align         = TextAlignment::Left;
         TextVerticalAlignment verticalAlign = TextVerticalAlignment::Top;
 
         TextureHandle fontIndex = TextureHandle::Invalid;
-        float    offsetX   = 0.0f; // Optional fine-tuning offset
-        float    offsetY   = 0.0f;
+        float         offsetX   = 0.0f;
+        float         offsetY   = 0.0f;
     };
 
     struct UIStackComponent {
         float          spacing   = 8.0f;
         float          padding   = 8.0f;
         StackDirection direction = StackDirection::Vertical;
-        UIJustify      justify   = UIJustify::Start; // Auto-distributes child elements
+        UIJustify      justify   = UIJustify::Start;
     };
 
     struct UIFlexComponent {
@@ -63,7 +62,7 @@ struct Components {
 
         float flexGrow   = 0.0f;
         float flexShrink = 1.0f;
-        float flexBasis  = -1.0f; // -1.0f indicates Auto
+        float flexBasis  = -1.0f;
 
         float paddingLeft = 0.0f, paddingTop = 0.0f, paddingRight = 0.0f, paddingBottom = 0.0f;
         float marginLeft = 0.0f, marginTop = 0.0f, marginRight = 0.0f, marginBottom = 0.0f;
@@ -119,7 +118,7 @@ struct Components {
         static constexpr size_t MAX_LODS = 4;
         struct Level {
             AssetID meshAsset = InvalidAssetID;
-            float   distance  = 0.0f; // Max distance before switching to the NEXT level
+            float   distance  = 0.0f;
         };
         std::array<Level, MAX_LODS> levels;
         uint8_t                     count      = 0;
@@ -127,18 +126,12 @@ struct Components {
     };
 
     struct TerrainComponent {
-        uint32_t           sampleCount = 128;
-        float              worldSize   = 280.0f;
-        float              maxHeight   = 35.0f;
-        float              roughness   = 0.85f;
-        float              metallic    = 0.05f;
-        ZHLN::Array<float> heights;
-        ZHLN::Array<float> colors;
-
-        static void OnDestroy(TerrainComponent* t) noexcept {
-            t->heights.clear();
-            t->colors.clear();
-        }
+        uint32_t      sampleCount   = 128;
+        float         worldSize     = 280.0f;
+        float         maxHeight     = 35.0f;
+        float         roughness     = 0.85f;
+        float         metallic      = 0.05f;
+        TerrainHandle terrainHandle = TerrainHandle::Invalid;
     };
 
     struct PhysicsComponent {
@@ -196,11 +189,10 @@ struct Components {
         static void OnDestroy(RagdollComponent* r) noexcept {
             if (r->ragdollInstance != nullptr) {
                 if (r->isAddedToPhysics) {
-                    // Strictly unregister from Jolt Broadphase to prevent dangling pointer crashes
                     r->ragdollInstance->RemoveFromPhysicsSystem();
                     r->isAddedToPhysics = false;
                 }
-                r->ragdollInstance = nullptr; // Refcount gracefully drops
+                r->ragdollInstance = nullptr;
             }
         }
     };
@@ -276,7 +268,7 @@ struct Components {
     };
     struct UISettingsComponent {
         TextureHandle defaultFontAtlas = TextureHandle::Invalid;
-        FontAtlas fontAtlas;
+        FontAtlas     fontAtlas;
     };
     struct ItemBaseComponent {
         String64 name;
@@ -334,11 +326,11 @@ struct Components {
         JPH::Vec4     color        = {1.0f, 1.0f, 1.0f, 1.0f};
         JPH::Vec4     borderRadius = {0.0f, 0.0f, 0.0f, 0.0f};
         TextureHandle texture      = TextureHandle::Invalid;
-        float    edgeWidth    = 0.0f;
-        float    uvLeft       = 0.1f;
-        float    uvRight      = 0.1f;
-        float    uvTop        = 0.1f;
-        float    uvBottom     = 0.1f;
+        float         edgeWidth    = 0.0f;
+        float         uvLeft       = 0.1f;
+        float         uvRight      = 0.1f;
+        float         uvTop        = 0.1f;
+        float         uvBottom     = 0.1f;
     };
     struct UIButtonComponent {
         UIButton flags = UIButton::None;
@@ -482,8 +474,8 @@ struct Components {
     struct DecalComponent {
         TextureHandle albedoMap = TextureHandle::Invalid;
         TextureHandle normalMap = TextureHandle::Invalid;
-        float    roughness   = 0.5f;
-        float    metallic    = 0.0f;
+        float         roughness = 0.5f;
+        float         metallic  = 0.0f;
     };
 
     struct CSGComponent {
@@ -521,27 +513,27 @@ struct Components {
     enum class VolumetricVolumeType : uint32_t { Box = 0, Sphere = 1 };
 
     struct VolumetricFogComponent {
-        float     density          = 0.02f;
-        float     heightFalloff    = 0.035f;
-        float     heightOffset     = 0.0f;
-        float     anisotropy       = 0.5f; // Henyey-Greenstein g [-0.9, 0.9]
-        JPH::Vec3 scatteringColor  = JPH::Vec3(0.91f, 0.95f, 1.0f);
-        JPH::Vec3 absorptionColor  = JPH::Vec3(0.015f, 0.015f, 0.015f);
-        JPH::Vec3 emissiveColor    = JPH::Vec3::sZero();
-        float     noiseScale       = 0.035f;
-        float     noiseSpeed       = 1.0f;
-        float     noiseIntensity   = 0.5f;
-        uint32_t  enableNoise      = 1;
+        float     density         = 0.02f;
+        float     heightFalloff   = 0.035f;
+        float     heightOffset    = 0.0f;
+        float     anisotropy      = 0.5f;
+        JPH::Vec3 scatteringColor = JPH::Vec3(0.91f, 0.95f, 1.0f);
+        JPH::Vec3 absorptionColor = JPH::Vec3(0.015f, 0.015f, 0.015f);
+        JPH::Vec3 emissiveColor   = JPH::Vec3::sZero();
+        float     noiseScale      = 0.035f;
+        float     noiseSpeed      = 1.0f;
+        float     noiseIntensity  = 0.5f;
+        uint32_t  enableNoise     = 1;
     };
 
     struct VolumetricVolumeComponent {
-        VolumetricVolumeType type        = VolumetricVolumeType::Box;
-        JPH::Vec3            extents     = JPH::Vec3(5.0f, 5.0f, 5.0f);
-        float                density     = 0.1f;
-        JPH::Vec3            color       = JPH::Vec3(1.0f, 1.0f, 1.0f);
-        JPH::Vec3            emissive    = JPH::Vec3::sZero();
-        float                anisotropy  = 0.5f;
-        float                blendEdge   = 0.2f;
+        VolumetricVolumeType type       = VolumetricVolumeType::Box;
+        JPH::Vec3            extents    = JPH::Vec3(5.0f, 5.0f, 5.0f);
+        float                density    = 0.1f;
+        JPH::Vec3            color      = JPH::Vec3(1.0f, 1.0f, 1.0f);
+        JPH::Vec3            emissive   = JPH::Vec3::sZero();
+        float                anisotropy = 0.5f;
+        float                blendEdge  = 0.2f;
     };
 };
 

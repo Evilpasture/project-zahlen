@@ -7,12 +7,12 @@
 #include <atomic>
 #include <bit>
 #include <cmath>
-#include <concepts>
 #include <cstdarg>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <span>
 #include <string_view>
 #include <type_traits>
 
@@ -135,10 +135,6 @@ class FormatResult {
 
 namespace Detail {
 
-/**
- * @brief Performs a direct, unbuffered, lock-free system write to standard output.
- * This operation is async-signal safe on POSIX and Windows.
- */
 inline void RawWrite(int fd, const char* buf, size_t len) noexcept {
     if (len == 0) {
         return;
@@ -161,10 +157,6 @@ inline size_t SafeStrLen(const char* s) noexcept {
     return len;
 }
 
-/**
- * @brief Index-based string reversal.
- * Removes pointer subtraction to prevent out-of-bound underflow diagnostics.
- */
 inline void ReverseStr(char* buf, size_t len) noexcept {
     if (len <= 1) {
         return;
@@ -180,10 +172,6 @@ inline void ReverseStr(char* buf, size_t len) noexcept {
     }
 }
 
-/**
- * @brief Async-signal safe signed integer formatting.
- * Safely handles LLONG_MIN negation via unsigned conversion before arithmetic.
- */
 inline size_t FormatInt(char* buf, size_t max_len, int64_t val) noexcept {
     if (max_len == 0) {
         return 0;
@@ -192,8 +180,7 @@ inline size_t FormatInt(char* buf, size_t max_len, int64_t val) noexcept {
     bool     neg  = false;
     uint64_t uval = 0;
     if (val < 0) {
-        neg = true;
-        // Cast before negating to prevent signed integer overflow UB on LLONG_MIN
+        neg  = true;
         uval = -static_cast<uint64_t>(val);
     } else {
         uval = static_cast<uint64_t>(val);
@@ -218,9 +205,6 @@ inline size_t FormatInt(char* buf, size_t max_len, int64_t val) noexcept {
     return len;
 }
 
-/**
- * @brief Async-signal safe unsigned integer formatting.
- */
 inline size_t FormatUInt(char* buf, size_t max_len, uint64_t val, int base = 10, bool uppercase = false) noexcept {
     if (max_len == 0) {
         return 0;
@@ -243,7 +227,6 @@ inline size_t FormatUInt(char* buf, size_t max_len, uint64_t val, int base = 10,
     return len;
 }
 
-// Bit-casting for IEEE-754 properties without importing cmath
 inline uint64_t DoubleToRaw(double d) noexcept {
     uint64_t bits = 0;
     std::memcpy(&bits, &d, sizeof(bits));
@@ -319,7 +302,7 @@ inline size_t FormatDouble(char* buf, size_t max_len, double val, int precision 
             fpart *= 10.0;
             int digit  = static_cast<int>(fpart) % 10;
             buf[len++] = '0' + digit;
-            fpart -= digit; // Direct subtraction avoids floor loops
+            fpart -= digit;
         }
     }
     buf[len] = '\0';
@@ -394,7 +377,7 @@ inline size_t AppendValue(char* buf, size_t max_len, const T& val) noexcept {
 struct FormatOptions {
     bool   hex       = false;
     bool   uppercase = false;
-    size_t width     = 0; // Minimum field width (0-padded if hex)
+    size_t width     = 0;
 };
 
 } // namespace Detail
@@ -550,20 +533,17 @@ inline int BufferPrint(char* buf, size_t max_len, const char* fmt, ...) noexcept
 }
 
 // ============================================================================
-// ZHLN::Format (std::format Async-Signal Safe Replacement)
+// ZHLN::FormatTo (HYBRID: Type-Safe `{}` Formatting onto Stack Buffers)
 // ============================================================================
 
 template <typename... Args>
-inline FormatResult Format(std::string_view fmt, Args&&... args) noexcept {
-    size_t poolIdx = 0;
-    char*  buf     = SignalSafePool::Acquire(poolIdx);
-    if (!buf) {
+inline std::string_view FormatTo(char* buf, size_t max_len, std::string_view fmt, Args&&... args) noexcept {
+    if (buf == nullptr || max_len == 0) {
         return {};
     }
 
     constexpr size_t argCount = sizeof...(Args);
     if constexpr (argCount == 0) {
-        size_t max_len = SignalSafePool::BufferSize;
         size_t buf_idx = 0;
         size_t fmt_idx = 0;
         while (fmt_idx < fmt.size() && buf_idx < max_len - 1) {
@@ -578,7 +558,7 @@ inline FormatResult Format(std::string_view fmt, Args&&... args) noexcept {
             }
         }
         buf[buf_idx] = '\0';
-        return {poolIdx, buf_idx};
+        return {buf, buf_idx};
     } else {
         using FormatFn = size_t (*)(const void*, char*, size_t, Detail::FormatOptions);
 
@@ -615,7 +595,6 @@ inline FormatResult Format(std::string_view fmt, Args&&... args) noexcept {
         size_t buf_idx      = 0;
         size_t fmt_idx      = 0;
         size_t next_arg_idx = 0;
-        size_t max_len      = SignalSafePool::BufferSize;
 
         while (fmt_idx < fmt.size() && buf_idx < max_len - 1) {
             if (fmt[fmt_idx] == '{') {
@@ -646,34 +625,27 @@ inline FormatResult Format(std::string_view fmt, Args&&... args) noexcept {
                             bool is_hex   = spec.starts_with(':') && (spec.ends_with('x') || spec.ends_with('X'));
                             bool is_upper = spec.ends_with('X');
 
-                            // Parse width from spec (e.g., ":02X" -> width=2)
                             size_t width = 0;
                             if (spec.starts_with(':')) {
                                 std::string_view width_str = spec.substr(1);
-                                // Remove trailing x/X
                                 if (width_str.ends_with('x') || width_str.ends_with('X')) {
                                     width_str.remove_suffix(1);
                                 }
-                                // Parse digits
                                 for (char c: width_str) {
                                     if (c >= '0' && c <= '9') {
                                         width = width * 10 + (c - '0');
                                     } else {
-                                        break; // Stop at non-digit
+                                        break;
                                     }
                                 }
                             }
 
-                            // Format the value
                             size_t written = BoundAppenders(next_arg_idx, buf + buf_idx, remaining, {.hex = is_hex, .uppercase = is_upper, .width = width});
 
-                            // Apply zero-padding for hex values if needed
                             if (is_hex && width > written && remaining > (width - written)) {
-                                // Shift existing content to the right
                                 for (int i = static_cast<int>(written) - 1; i >= 0; --i) {
                                     buf[buf_idx + width - written + i] = buf[buf_idx + i];
                                 }
-                                // Fill leading zeros
                                 for (size_t i = 0; i < (width - written); ++i) {
                                     buf[buf_idx + i] = '0';
                                 }
@@ -701,8 +673,39 @@ inline FormatResult Format(std::string_view fmt, Args&&... args) noexcept {
         }
 
         buf[buf_idx] = '\0';
-        return {poolIdx, buf_idx};
+        return {buf, buf_idx};
     }
+}
+
+template <size_t N, typename... Args>
+inline std::string_view FormatTo(char (&buf)[N], std::string_view fmt, Args&&... args) noexcept {
+    return FormatTo(buf, N, fmt, std::forward<Args>(args)...);
+}
+
+template <typename... Args>
+inline std::string_view FormatTo(std::span<char> buf, std::string_view fmt, Args&&... args) noexcept {
+    return FormatTo(buf.data(), buf.size(), fmt, std::forward<Args>(args)...);
+}
+
+template <size_t N, typename... Args>
+inline std::string_view FormatTo(std::array<char, N>& buf, std::string_view fmt, Args&&... args) noexcept {
+    return FormatTo(buf.data(), N, fmt, std::forward<Args>(args)...);
+}
+
+// ============================================================================
+// ZHLN::Format (Pool-based std::format Async-Signal Safe Replacement)
+// ============================================================================
+
+template <typename... Args>
+inline FormatResult Format(std::string_view fmt, Args&&... args) noexcept {
+    size_t poolIdx = 0;
+    char*  buf     = SignalSafePool::Acquire(poolIdx);
+    if (!buf) {
+        return {};
+    }
+
+    std::string_view result = FormatTo(buf, SignalSafePool::BufferSize, fmt, std::forward<Args>(args)...);
+    return {poolIdx, result.size()};
 }
 
 // ============================================================================
@@ -725,14 +728,13 @@ inline void Print(int fd, std::string_view fmt, Args&&... args) noexcept {
 
 template <typename... Args>
 inline void Print(FILE* stream, std::string_view fmt, Args&&... args) noexcept {
-    // Map standard streams safely to raw file descriptors without calling fileno()
     int fd = (stream == stderr) ? 2 : 1;
     Print(fd, fmt, std::forward<Args>(args)...);
 }
 
 template <typename... Args>
 inline void Print(std::string_view fmt, Args&&... args) noexcept {
-    Print(1, fmt, std::forward<Args>(args)...); // Default to stdout
+    Print(1, fmt, std::forward<Args>(args)...);
 }
 
 // ============================================================================

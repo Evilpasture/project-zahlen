@@ -100,6 +100,8 @@ struct alignas(16) InstanceData {
 };
 
 enum class TextureHandle : uint64_t { Invalid = 0 };
+enum class TerrainHandle : uint64_t { Invalid = 0 };
+
 struct UIObjectConstants {
     JPH::Mat44 orthoMatrix;
     uint64_t   posAddress;
@@ -180,18 +182,15 @@ static_assert(sizeof(ObjectConstants) == 8);
 static_assert(sizeof(InstanceData) == 272);
 
 // --- Opaque Resource Handles ---
-// These abstract away Vulkan objects completely.
-// NOLINTBEGIN(performance-enum-size)
 enum class BufferHandle : uint64_t { Invalid = 0 };
 enum class PipelineHandle : uint64_t { Invalid = 0 };
 enum class ResourceGroupHandle : uint64_t { Invalid = 0 };
-
-// NOLINTEND(performance-enum-size)
 
 static_assert(sizeof(BufferHandle) == 8);
 static_assert(sizeof(PipelineHandle) == 8);
 static_assert(sizeof(ResourceGroupHandle) == 8);
 static_assert(sizeof(TextureHandle) == 8);
+static_assert(sizeof(TerrainHandle) == 8);
 
 struct Mesh {
     using enum BufferHandle;
@@ -203,7 +202,6 @@ struct Mesh {
     uint32_t     indexCount  = 0;
 };
 
-// NOLINTNEXTLINE(performance-enum-size)
 enum class LightType : uint32_t {
     Directional,
     Point,
@@ -213,12 +211,7 @@ enum class LightType : uint32_t {
 };
 static_assert(sizeof(LightType) == sizeof(uint32_t));
 
-// NOLINTNEXTLINE(performance-enum-size)
-enum class ParticleAlignment : uint32_t {
-    CameraBillboard   = 0, // Faces camera (Snow, Smoke, Dust)
-    VelocityStretched = 1, // Aligns along velocity vector (Rain, Sparks)
-    GroundFlat        = 2  // Aligns flat on the XZ ground plane (Shockwaves)
-};
+enum class ParticleAlignment : uint32_t { CameraBillboard = 0, VelocityStretched = 1, GroundFlat = 2 };
 
 struct alignas(16) ParticleEmitterParams {
     std::array<float, 3> gravity = {0.0f, -9.81f, 0.0f};
@@ -251,6 +244,7 @@ struct alignas(16) ParticleEmitterParams {
     uint32_t          blendMode    = 0;
 };
 static_assert(sizeof(ParticleEmitterParams) == 160, "ParticleEmitterParams alignment mismatch!");
+
 struct alignas(16) MeshParticleEmitterParams {
     std::array<float, 3> gravity = {0.0f, -9.81f, 0.0f};
     float                drag    = 0.2f;
@@ -282,40 +276,39 @@ struct alignas(16) MeshParticleEmitterParams {
 static_assert(sizeof(MeshParticleEmitterParams) == 160);
 
 struct alignas(16) Particle {
-    JPH::Vec4 position = JPH::Vec4::sZero(); // xyz = pos
-    JPH::Vec4 velocity = JPH::Vec4::sZero(); // xyz = vel
+    JPH::Vec4 position = JPH::Vec4::sZero();
+    JPH::Vec4 velocity = JPH::Vec4::sZero();
     JPH::Vec4 color    = JPH::Vec4::sReplicate(1.0f);
-    JPH::Vec4 params   = JPH::Vec4::sZero(); // x=age, y=lifetime, z=size, w=rotation
+    JPH::Vec4 params   = JPH::Vec4::sZero();
 };
 
 static_assert(sizeof(Particle) == 64);
 
 struct alignas(16) Particle3D {
-    JPH::Vec4 position; // xyz = pos, w = scale
-    JPH::Vec4 velocity; // xyz = vel, w = unused
-    JPH::Quat rotation; // xyzw = quaternion
-    JPH::Vec4 rotVel;   // xyz = angular velocity, w = unused
-    JPH::Vec4 color;    // rgba
-    JPH::Vec4 params;   // x = age, y = life, z = unused, w = unused
+    JPH::Vec4 position;
+    JPH::Vec4 velocity;
+    JPH::Quat rotation;
+    JPH::Vec4 rotVel;
+    JPH::Vec4 color;
+    JPH::Vec4 params;
 };
 static_assert(sizeof(Particle3D) == 96);
 
 struct alignas(16) GPULight {
     float     position[3];
-    LightType type; // 0 = Dir, 1 = Point, 2 = Spot, 3 = Area (LTC Quad)
+    LightType type;
     float     color[3];
     float     intensity;
     float     direction[3];
     float     range;
 
-    // --- Area Light Specific (64 Bytes) ---
-    float points[4][4]; // XYZ = World Space Vertices, W = Padding / Flags
+    float points[4][4];
 
     float    radius;
     float    innerConeCos;
     float    outerConeCos;
-    uint32_t twoSided;    // 0 = Single-Sided, 1 = Double-Sided Area Light
-    int32_t  shadowLayer; // -1 if no shadow, >= 0 for Atlas layer index
+    uint32_t twoSided;
+    int32_t  shadowLayer;
 
     alignas(16) float positionView[3];
 };
@@ -326,7 +319,6 @@ struct alignas(16) FrameUniforms {
     JPH::Mat44 unjitteredViewProj;
     JPH::Mat44 prevUnjitteredViewProj;
 
-    // Array of light-space projection matrices
     JPH::Mat44 lightSpaceMatrices[4];
 
     JPH::Mat44 invViewProj;
@@ -348,8 +340,8 @@ struct alignas(16) FrameUniforms {
     float     sunSize;
 
     alignas(16) float cascadeSplits[4];
-    int   numCascades; // E.g., 4
-    int   fullBright;  // 0 = Lit, 1 = Fullbright/Unlit
+    int   numCascades;
+    int   fullBright;
     float screenResolution[2];
 
     JPH::Vec4 skyZenith;
@@ -359,7 +351,6 @@ struct alignas(16) FrameUniforms {
     JPH::Mat44 viewmodelViewProj;
 };
 
-// Material handle representation
 struct Material {
     PipelineHandle      pipeline           = PipelineHandle::Invalid;
     PipelineHandle      prePassPipeline    = PipelineHandle::Invalid;
@@ -374,42 +365,39 @@ struct Material {
     float               metallicFactor     = 1.0f;
     float               roughnessFactor    = 1.0f;
     float               alphaCutoff        = 0.5f;
-    uint32_t            alphaMode          = 0; // 0=Opaque, 1=Mask, 2=Blend
+    uint32_t            alphaMode          = 0;
 };
 
 struct GISettings {
-    int   mode              = 1; // 0 = Off, 1 = SSAO, 2 = SSGI
+    int   mode              = 1;
     float aoRadius          = 0.5f;
     float aoBias            = 0.05f;
     float aoPower           = 1.8f;
     float giIntensity       = 1.2f;
     int   giSamples         = 8;
-    float vignetteIntensity = 1.1f; // 0.0f is completely off
-    float vignettePower     = 1.5f; // Controls softness falloff
+    float vignetteIntensity = 1.1f;
+    float vignettePower     = 1.5f;
     int   enableSSR         = 1;
     int   enableRTR         = 0;
 };
 
-// NOLINTNEXTLINE(performance-enum-size)
 enum class AAMode : uint32_t { None = 0, FXAA, MLAA, TAA, SMAA };
 
 struct AAState {
     AAMode mode = AAMode::TAA;
 
-    // TAA Options
-    float    taaFeedback = 0.95f; // 95% History, 5% Current Frame
+    float    taaFeedback = 0.95f;
     float    jitterX     = 0.0f;
     float    jitterY     = 0.0f;
     float    prevJitterX = 0.0f;
     float    prevJitterY = 0.0f;
-    uint32_t frameIndex  = 0; // Drives the Halton Jitter sequence
+    uint32_t frameIndex  = 0;
 
-    // FXAA Options
     float    fxaaSubpix           = 0.75f;
     float    fxaaEdgeThreshold    = 0.166f;
     float    fxaaEdgeThresholdMin = 0.0833f;
-    float    mlaaThreshold        = 0.1f; // Edge detection sensitivity
-    uint32_t mlaaMaxSearchSteps   = 16;   // Maximum pixels to search
+    float    mlaaThreshold        = 0.1f;
+    uint32_t mlaaMaxSearchSteps   = 16;
 };
 
 struct GlyphMetric {
@@ -483,15 +471,14 @@ constexpr bool operator!=(T a, T b) noexcept {
     return !(a == b);
 }
 
-// NOLINTNEXTLINE(performance-enum-size)
 enum class DrawFlags : uint32_t {
     None            = 0,
-    ExcludeFromTLAS = 1 << 0, // Generic raytracing exclusion
-    Skinned         = 1 << 1, // Tells the renderer that this draw is skin-weighted
+    ExcludeFromTLAS = 1 << 0,
+    Skinned         = 1 << 1,
     VisibleInMain   = 1 << 2,
     VisibleInShadow = 1 << 3,
     Hidden          = 1 << 4,
-    Viewmodel       = 1 << 5, // First-person viewmodel overlay tag
+    Viewmodel       = 1 << 5,
 };
 } // namespace ZHLN
 

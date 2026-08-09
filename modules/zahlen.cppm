@@ -315,6 +315,7 @@ using ZHLN::Offset2D;
 using ZHLN::ParticleAlignment;
 using ZHLN::ParticleEmitterParams;
 using ZHLN::ScissorRect;
+using ZHLN::TerrainHandle;
 using ZHLN::UIBatch;
 using ZHLN::UIObjectConstants;
 using ZHLN::VertexAttributes;

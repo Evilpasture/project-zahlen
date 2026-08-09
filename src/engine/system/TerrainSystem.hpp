@@ -4,10 +4,20 @@
 #pragma once
 
 #include <Zahlen/Common.h>
+#include <Zahlen/Core/Array.hpp>
+#include <Zahlen/Types.hpp>
 
 namespace ZHLN {
 
 class Engine;
+
+struct TerrainData {
+    uint32_t           sampleCount = 128;
+    float              worldSize   = 280.0f;
+    float              maxHeight   = 35.0f;
+    ZHLN::Array<float> heights;
+    ZHLN::Array<float> colors;
+};
 
 class ZHLN_API TerrainSystem {
   public:
@@ -19,17 +29,12 @@ class ZHLN_API TerrainSystem {
     TerrainSystem(TerrainSystem&&)                 = default;
     TerrainSystem& operator=(TerrainSystem&&)      = default;
 
-    /**
-     * @brief Processes TerrainComponents:
-     *  - Generates GPU meshes and materials on-demand for uninitialized or invalidated terrain assets.
-     *  - Synchronizes terrain material properties (roughness/metallic) with the RenderContext.
-     */
     void Update(Engine& engine, float dt);
 
-    /**
-     * @brief Performs a fast bilinear height query on active terrains at world coordinate (x, z).
-     * @return The interpolated height in world units, or 0.0f if no terrain covers the coordinate.
-     */
+    static TerrainHandle      RegisterTerrainData(TerrainData data) noexcept;
+    static const TerrainData* GetTerrainData(TerrainHandle handle) noexcept;
+    static void               UnregisterTerrainData(TerrainHandle handle) noexcept;
+
     static float SampleHeightAt(const Engine& engine, float worldX, float worldZ) noexcept;
 };
 

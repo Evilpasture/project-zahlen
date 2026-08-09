@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// File: src/engine/MeshBuilder.cpp
 #include "Resources.hpp"
 #include "Zahlen/Render.hpp"
 #include <Zahlen/Components.hpp>
@@ -19,6 +18,33 @@
 #include <vector>
 
 namespace ZHLN::CreativeWorksFactory {
+
+Mesh CreateTetrahedronMesh(RenderContext& ctx) {
+    std::vector<VertexPosition>   positions = {{{1.0f, 1.0f, 1.0f}}, {{-1.0f, -1.0f, 1.0f}}, {{-1.0f, 1.0f, -1.0f}}, {{1.0f, -1.0f, -1.0f}}};
+    std::vector<uint32_t>         indices   = {0, 1, 2, 0, 3, 1, 0, 2, 3, 1, 3, 2};
+    std::vector<VertexAttributes> attributes;
+    Packed1010102                 n = Math::PackNormal(0.0f, 1.0f, 0.0f);
+    Packed1010102                 t = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f);
+    PackedRGBA8                   c = Math::PackColor(1.0f, 1.0f, 1.0f, 1.0f);
+    for (size_t i = 0; i < positions.size(); ++i) {
+        attributes.push_back({.normal = n, .tangent = t, .uv = Math::PackUV(0.0f, 0.0f), .color = c});
+    }
+
+    BufferHandle posVbo  = ctx.CreateVertexBuffer(positions.data(), positions.size() * sizeof(VertexPosition));
+    BufferHandle attrVbo = ctx.CreateVertexBuffer(attributes.data(), attributes.size() * sizeof(VertexAttributes));
+    BufferHandle ibo     = ctx.CreateIndexBuffer(indices.data(), indices.size() * sizeof(uint32_t));
+
+    Mesh finalMesh = {
+        .posBuffer   = posVbo,
+        .attrBuffer  = attrVbo,
+        .skinBuffer  = BufferHandle::Invalid,
+        .indexBuffer = ibo,
+        .vertexCount = static_cast<uint32_t>(positions.size()),
+        .indexCount  = static_cast<uint32_t>(indices.size())
+    };
+    (void) ctx.BuildMeshBLAS(finalMesh);
+    return finalMesh;
+}
 
 std::expected<Material, Error> CreateBasicMaterial(RenderContext& ctx, bool doubleSided, bool alphaBlend, bool additiveBlend) {
     using enum Resource::ShaderID;
@@ -559,227 +585,6 @@ Mesh CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, flo
         }
     }
     return finalMesh;
-}
-
-// ============================================================================
-// HIGH-LEVEL PREFABRICATION SPAWNERS (ENTITY FACTORY)
-// ============================================================================
-
-Entity CreatePlane(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, float extent, const JPH::Vec4& color, const SpawnParams& params) {
-    Mesh mesh = CreatePlaneMesh(ctx, extent, color);
-
-    Material mat;
-    if (params.materialOverride.pipeline != PipelineHandle::Invalid) {
-        mat = params.materialOverride;
-    } else {
-        auto mat_res           = CreateBasicMaterial(ctx, false, false, false);
-        mat                    = mat_res.value_or(Material {});
-        mat.baseColorFactor[0] = color.GetX();
-        mat.baseColorFactor[1] = color.GetY();
-        mat.baseColorFactor[2] = color.GetZ();
-        mat.baseColorFactor[3] = color.GetW();
-        mat.roughnessFactor    = 0.35f;
-        mat.metallicFactor     = 0.15f;
-    }
-
-    Entity     e         = reg.Create();
-    AssetID    meshAsset = HashAssetID("prefab_plane_mesh_" + std::to_string(e.index));
-    MaterialID matAsset  = HashAssetID("prefab_plane_mat_" + std::to_string(e.index));
-
-    ctx.RegisterGPUMesh(meshAsset, mesh);
-    ctx.RegisterGPUMaterial(matAsset, mat);
-
-    reg.Add(e, Components::NameComponent {.name = String64("Plane_" + std::to_string(e.index))});
-    reg.Add(e, Components::TransformComponent {.position = JPH::Vec3(params.position), .rotation = params.rotation, .scale = params.scale});
-
-    reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = extent * 2.0f});
-
-    reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
-
-    if (params.createPhysics && pc != nullptr) {
-        auto shape = Physics::GetOrCreateShape(*pc, Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);
-        auto body =
-            Physics::CreateRigidBody(*pc, shape, params.position, params.rotation, JPH::EMotionType::Static, 0, 0, params.physicsCategory, params.physicsMask);
-        reg.Add(e, Components::PhysicsComponent {body});
-    }
-
-    return e;
-}
-
-Entity CreatePlane(Engine& engine, float extent, const JPH::Vec4& color, const SpawnParams& params) {
-    return CreatePlane(engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), extent, color, params);
-}
-
-Entity CreateBox(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, JPH::Vec3Arg halfExtents, const SpawnParams& params) {
-    JPH::Vec4 boxColor = (params.materialOverride.baseColorFactor[3] >= 0.0f) ?
-                             JPH::Vec4(
-                                 params.materialOverride.baseColorFactor[0], params.materialOverride.baseColorFactor[1],
-                                 params.materialOverride.baseColorFactor[2], params.materialOverride.baseColorFactor[3]
-                             ) :
-                             JPH::Vec4(0.8f, 0.4f, 0.2f, 1.0f);
-
-    Mesh mesh = CreateBoxMesh(ctx, halfExtents, boxColor);
-
-    Material mat;
-    if (params.materialOverride.pipeline != PipelineHandle::Invalid) {
-        mat = params.materialOverride;
-    } else {
-        auto mat_res           = CreateBasicMaterial(ctx, false, false, false);
-        mat                    = mat_res.value_or(Material {});
-        mat.baseColorFactor[0] = boxColor.GetX();
-        mat.baseColorFactor[1] = boxColor.GetY();
-        mat.baseColorFactor[2] = boxColor.GetZ();
-        mat.baseColorFactor[3] = boxColor.GetW();
-        mat.roughnessFactor    = 0.3f;
-        mat.metallicFactor     = 0.1f;
-    }
-
-    Entity     e         = reg.Create();
-    AssetID    meshAsset = HashAssetID("prefab_box_mesh_" + std::to_string(e.index));
-    MaterialID matAsset  = HashAssetID("prefab_box_mat_" + std::to_string(e.index));
-
-    ctx.RegisterGPUMesh(meshAsset, mesh);
-    ctx.RegisterGPUMaterial(matAsset, mat);
-
-    reg.Add(e, Components::NameComponent {.name = String64("Box_" + std::to_string(e.index))});
-    reg.Add(e, Components::TransformComponent {.position = JPH::Vec3(params.position), .rotation = params.rotation, .scale = params.scale});
-
-    float maxExtent = std::max({halfExtents.GetX(), halfExtents.GetY(), halfExtents.GetZ()});
-    reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = maxExtent * 2.0f});
-
-    reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
-
-    if (params.createPhysics && pc != nullptr) {
-        auto shape = Physics::GetOrCreateShape(
-            *pc, Physics::ShapeType::Box, halfExtents.GetX() * params.scale.GetX(), halfExtents.GetY() * params.scale.GetY(),
-            halfExtents.GetZ() * params.scale.GetZ()
-        );
-        auto body = Physics::CreateRigidBody(
-            *pc, shape, params.position, params.rotation, params.isStaticPhysics ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
-            params.isStaticPhysics ? static_cast<JPH::ObjectLayer>(0) : static_cast<JPH::ObjectLayer>(1), 0, params.physicsCategory, params.physicsMask
-        );
-        reg.Add(e, Components::PhysicsComponent {body});
-        if (!params.isStaticPhysics) {
-            reg.Add(
-                e, Components::PhysicsStateComponent {
-                       .currPosition = JPH::Vec3(params.position),
-                       .prevPosition = JPH::Vec3(params.position),
-                       .currRotation = params.rotation,
-                       .prevRotation = params.rotation
-                   }
-            );
-        }
-    }
-
-    return e;
-}
-
-Entity CreateBox(Engine& engine, JPH::Vec3Arg halfExtents, const SpawnParams& params) {
-    return CreateBox(engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), halfExtents, params);
-}
-
-Entity CreateTerrainFromData(
-    RenderContext&     ctx,
-    ECS::Registry&     reg,
-    PhysicsContext*    pc,
-    int                sampleCount,
-    float              worldSize,
-    const float*       heights,
-    const float*       colorsRGBA,
-    const SpawnParams& params
-) {
-    Entity e = reg.Create();
-
-    Mesh mesh = CreateTerrainMeshFromData(ctx, sampleCount, worldSize, heights, colorsRGBA);
-
-    Material mat;
-    if (params.materialOverride.pipeline != PipelineHandle::Invalid) {
-        mat = params.materialOverride;
-    } else {
-        auto mat_res        = CreateBasicMaterial(ctx, false, false, false);
-        mat                 = mat_res.value_or(Material {});
-        mat.roughnessFactor = 0.85f;
-        mat.metallicFactor  = 0.05f;
-    }
-
-    AssetID    meshAsset = HashAssetID("prefab_terraindata_mesh_" + std::to_string(e.index));
-    MaterialID matAsset  = HashAssetID("prefab_terraindata_mat_" + std::to_string(e.index));
-
-    ctx.RegisterGPUMesh(meshAsset, mesh);
-    ctx.RegisterGPUMaterial(matAsset, mat);
-
-    reg.Add(e, Components::NameComponent {.name = String64("TerrainData_" + std::to_string(e.index))});
-    reg.Add(e, Components::TransformComponent {.position = JPH::Vec3(params.position), .rotation = params.rotation, .scale = params.scale});
-    reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = worldSize * 1.5f});
-    reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
-
-    if (params.createPhysics && pc != nullptr && heights != nullptr) {
-        auto shape = Physics::CreateHeightFieldShape(heights, sampleCount, worldSize);
-        auto body  = Physics::CreateRigidBody(*pc, shape, params.position, params.rotation, JPH::EMotionType::Static, 0);
-        reg.Add(e, Components::PhysicsComponent {body});
-    }
-
-    return e;
-}
-
-Entity CreateTerrainFromData(Engine& engine, int sampleCount, float worldSize, const float* heights, const float* colorsRGBA, const SpawnParams& params) {
-    return CreateTerrainFromData(
-        engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), sampleCount, worldSize, heights, colorsRGBA, params
-    );
-}
-
-Entity CreateTerrain(
-    RenderContext&     ctx,
-    ECS::Registry&     reg,
-    PhysicsContext*    pc,
-    int                sampleCount,
-    float              worldSize,
-    float              maxHeight,
-    TerrainType        type,
-    const SpawnParams& params
-) {
-    Entity e = reg.Create();
-
-    auto terrainComp = Components::TerrainComponent {
-        .sampleCount = static_cast<uint32_t>(sampleCount), .worldSize = worldSize, .maxHeight = maxHeight, .roughness = 0.85f, .metallic = 0.05f
-    };
-    terrainComp.heights.resize(static_cast<size_t>(sampleCount * sampleCount));
-
-    Mesh mesh = CreateTerrainMesh(ctx, sampleCount, worldSize, maxHeight, terrainComp.heights.data(), type);
-
-    Material mat;
-    if (params.materialOverride.pipeline != PipelineHandle::Invalid) {
-        mat = params.materialOverride;
-    } else {
-        auto mat_res        = CreateBasicMaterial(ctx, false, false, false);
-        mat                 = mat_res.value_or(Material {});
-        mat.roughnessFactor = terrainComp.roughness;
-        mat.metallicFactor  = terrainComp.metallic;
-    }
-
-    AssetID    meshAsset = HashAssetID("prefab_terrain_mesh_" + std::to_string(e.index));
-    MaterialID matAsset  = HashAssetID("prefab_terrain_mat_" + std::to_string(e.index));
-
-    ctx.RegisterGPUMesh(meshAsset, mesh);
-    ctx.RegisterGPUMaterial(matAsset, mat);
-
-    reg.Add(e, Components::NameComponent {.name = String64("Terrain_" + std::to_string(e.index))});
-    reg.Add(e, Components::TransformComponent {.position = JPH::Vec3(params.position), .rotation = params.rotation, .scale = params.scale});
-    reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = worldSize * 1.5f});
-    reg.Add(e, Components::PBRComponent {.roughness = terrainComp.roughness, .metallic = terrainComp.metallic});
-    reg.Add(e, std::move(terrainComp));
-
-    if (params.createPhysics && pc != nullptr) {
-        auto shape = Physics::CreateHeightFieldShape(terrainComp.heights.data(), sampleCount, worldSize);
-        auto body  = Physics::CreateRigidBody(*pc, shape, params.position, params.rotation, JPH::EMotionType::Static, 0);
-        reg.Add(e, Components::PhysicsComponent {body});
-    }
-
-    return e;
-}
-
-Entity CreateTerrain(Engine& engine, int sampleCount, float worldSize, float maxHeight, TerrainType type, const SpawnParams& params) {
-    return CreateTerrain(engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), sampleCount, worldSize, maxHeight, type, params);
 }
 
 } // namespace ZHLN::CreativeWorksFactory

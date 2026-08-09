@@ -304,6 +304,17 @@ inline void CopyBuffer(VkCommandBuffer cmd, const Buffer& src, const Buffer& dst
     CopyBuffer(cmd, src.Handle(), dst.Handle(), size, srcOffset, dstOffset);
 }
 
+inline void BufferBarrier(
+    VkCommandBuffer cmd,
+    const Buffer&   buffer,
+    BarrierStage    srcStage,
+    BarrierAccess   srcAccess,
+    BarrierStage    dstStage,
+    BarrierAccess   dstAccess
+) noexcept {
+    BufferBarrier(cmd, buffer.Handle(), srcStage, srcAccess, dstStage, dstAccess);
+}
+
 // ============================================================================
 // Staging Ring Buffer (Timeline Semaphore Synchronized)
 // ============================================================================

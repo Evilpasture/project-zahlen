@@ -144,6 +144,30 @@ struct BufferQueueBarrier {
 inline void BufferBarrier(VkCommandBuffer cmd, const VkBufferMemoryBarrier2& barrier) noexcept;
 inline void BufferBarrier(VkCommandBuffer cmd, std::span<const VkBufferMemoryBarrier2> barriers) noexcept;
 
+inline void BufferBarrier(
+    VkCommandBuffer cmd,
+    VkBuffer        buffer,
+    BarrierStage    srcStage,
+    BarrierAccess   srcAccess,
+    BarrierStage    dstStage,
+    BarrierAccess   dstAccess
+) noexcept {
+    VkBufferMemoryBarrier2 barrier = {
+        .sType               = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+        .pNext               = nullptr,
+        .srcStageMask        = static_cast<VkPipelineStageFlags2>(srcStage),
+        .srcAccessMask       = static_cast<VkAccessFlags2>(srcAccess),
+        .dstStageMask        = static_cast<VkPipelineStageFlags2>(dstStage),
+        .dstAccessMask       = static_cast<VkAccessFlags2>(dstAccess),
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .buffer              = buffer,
+        .offset              = 0,
+        .size                = VK_WHOLE_SIZE
+    };
+    BufferBarrier(cmd, barrier);
+}
+
 template <QueueType QType>
 [[nodiscard]] constexpr auto ResolveQueue(const Context& ctx) noexcept -> VkQueue;
 

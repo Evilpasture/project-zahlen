@@ -95,28 +95,19 @@ struct PassFactory {
         return Vk::MakePass<"ClusterCulling">([this](VkCommandBuffer c) noexcept {
             Profiler::ScopedGpuProfile timer(c, fIdx, self.gpuProfiler, Stage::ClusterCullingPass);
 
-            // 1. Zero the atomic counter via the Transfer stage
-            vkCmdFillBuffer(c, self.frames.globalCounterBuffers[fIdx].Handle(), 0, VK_WHOLE_SIZE, 0);
+            const auto& counterBuffer = self.frames.globalCounterBuffers[fIdx];
 
-            // 2. Barrier: Wait for FillBuffer (Transfer) to finish before the Compute Shader executes
+            Vk::FillBuffer(c, counterBuffer, 0, 0u);
+
             Vk::BufferBarrier(
-                c, {.sType         = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
-                    .srcStageMask  = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                    .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                    .dstStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                    .dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
-                    .buffer        = self.frames.globalCounterBuffers[fIdx].Handle(),
-                    .offset        = 0,
-                    .size          = VK_WHOLE_SIZE}
+                c, counterBuffer, Vk::BarrierStage::Transfer, Vk::BarrierAccess::TransferWrite, Vk::BarrierStage::Compute,
+                Vk::BarrierAccess::ShaderRead | Vk::BarrierAccess::ShaderWrite
             );
 
-            // 3. Dispatch Cluster Culling
             self.clusterCullingPass.Dispatch(c, self.frames.clusterCullingSets[fIdx], 16, 9, 24);
-
-            // No trailing barrier needed!
-            // The Timeline Semaphore in `SubmitAndPresent` handles the Compute -> Fragment sync safely.
         });
     }
+
     [[nodiscard]] auto MakeMainPass2() const noexcept {
         return Vk::Passieren<
             "MainPass2", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::DepthStencilWrite<Res_Depth>,
