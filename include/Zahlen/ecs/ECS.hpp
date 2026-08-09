@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
+#include "Zahlen/Core/ControlFlow.hpp"
 #include <Zahlen/Buffer.h>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/HashMap.hpp>
@@ -137,9 +138,58 @@ class ZHLN_API Registry {
     ~Registry();
 
     Entity Create();
-    void   Destroy(Entity entity);
-    bool   IsAlive(Entity entity) const noexcept;
-    void   Clear();
+
+    /**
+     * @brief Creates an entity and attaches component instances in a single atomic lock.
+     *
+     * Usage:
+     *   Entity e = reg.Create(
+     *       Components::TransformComponent{.position = {0, 1, 0}},
+     *       Components::NameComponent{.name = "Player"}
+     *   );
+     */
+    template <typename C1, typename... Cs>
+    Entity Create(C1&& c1, Cs&&... cs) {
+        return ZHLN::Lock(sync.shadowLock, [&] {
+            if (_freeCount == 0) {
+                EnsureEntityCapacity(static_cast<uint32_t>(_entityCapacity));
+            }
+            uint32_t index  = _freeIndices[--_freeCount];
+            auto     entity = Entity {.index = index, .generation = _generations[index]};
+
+            Add(entity, std::forward<C1>(c1));
+            (Add(entity, std::forward<Cs>(cs)), ...);
+
+            return entity;
+        });
+    }
+
+    /**
+     * @brief Creates an entity and default-constructs components by type in a single atomic lock.
+     *
+     * Usage:
+     *   Entity e = reg.Create<Components::TransformComponent, Components::MeshComponent>();
+     */
+    template <typename T1, typename... Ts>
+        requires(std::is_default_constructible_v<T1> && (std::is_default_constructible_v<Ts> && ...))
+    Entity Create() {
+        return ZHLN::Lock(sync.shadowLock, [&] {
+            if (_freeCount == 0) {
+                EnsureEntityCapacity(static_cast<uint32_t>(_entityCapacity));
+            }
+            uint32_t index  = _freeIndices[--_freeCount];
+            auto     entity = Entity {.index = index, .generation = _generations[index]};
+
+            Add<T1>(entity);
+            (Add<Ts>(entity), ...);
+
+            return entity;
+        });
+    }
+
+    void Destroy(Entity entity);
+    bool IsAlive(Entity entity) const noexcept;
+    void Clear();
 
     uint32_t RegisterComponentDynamic(std::string_view name, size_t size, size_t alignment);
     void*    AddDynamic(Entity entity, uint32_t familyID);
@@ -366,4 +416,42 @@ inline bool Patch(const ECS::Registry& reg, Entity e, Fn&& fn) {
     }
     return false;
 }
+
+template <typename... Ts, typename Fn>
+    requires(sizeof...(Ts) > 1)
+inline bool Patch(ECS::Registry& reg, Entity e, Fn&& fn) {
+    auto ptrs     = std::make_tuple(reg.Get<Ts>(e)...);
+    bool allValid = std::apply([](auto*... p) { return (p && ...); }, ptrs);
+    if (allValid) {
+        std::apply([&](auto*... p) { std::forward<Fn>(fn)(*p...); }, ptrs);
+        return true;
+    }
+    return false;
+}
+
+template <typename... Ts, typename Fn>
+    requires(sizeof...(Ts) > 1)
+inline bool Patch(const ECS::Registry& reg, Entity e, Fn&& fn) {
+    auto ptrs     = std::make_tuple(reg.Get<Ts>(e)...);
+    bool allValid = std::apply([](const auto*... p) { return (p && ...); }, ptrs);
+    if (allValid) {
+        std::apply([&](const auto*... p) { std::forward<Fn>(fn)(*p...); }, ptrs);
+        return true;
+    }
+    return false;
+}
+
+template <typename T, typename... Args>
+inline bool Assign(ECS::Registry& reg, Entity e, Args&&... args) {
+    return Patch<T>(reg, e, [&](auto& c) {
+        if constexpr (sizeof...(Args) == 1 && (std::is_assignable_v<T&, Args> && ...)) {
+            c = (std::forward<Args>(args), ...);
+        } else if constexpr (requires { c = T {std::forward<Args>(args)...}; }) {
+            c = T {std::forward<Args>(args)...};
+        } else if constexpr (requires { c = T(std::forward<Args>(args)...); }) {
+            c = T(std::forward<Args>(args)...);
+        }
+    });
+}
+
 } // namespace ZHLN::ECS

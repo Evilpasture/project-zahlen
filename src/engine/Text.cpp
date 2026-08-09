@@ -129,6 +129,11 @@ uint32_t AppendTextVertices(
 
 uint32_t
     AppendPanelVertices(VertexPosition* outPos, VertexAttributes* outAttr, const Components::UIRectComponent& rect, const Components::UIPanelComponent& panel) {
+    // Skip generating quad geometry for completely transparent/invisible layout boxes
+    if (panel.color.GetW() <= 0.0f && panel.edgeWidth <= 0.0f) {
+        return 0;
+    }
+
     float x0 = rect.computedAbsMinX;
     float y0 = rect.computedAbsMinY;
     float x1 = rect.computedAbsMaxX;

@@ -6,6 +6,7 @@
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/Ragdoll/Ragdoll.h>
 #include <Zahlen/Core/Array.hpp>
+#include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <algorithm>
 #include <array>
@@ -44,6 +45,14 @@ struct Components {
         TextureHandle fontIndex = TextureHandle::Invalid;
         float         offsetX   = 0.0f;
         float         offsetY   = 0.0f;
+    };
+
+    struct UIChildCacheComponent {
+        struct ChildRecord {
+            Entity           entity           = NullEntity;
+            mutable uint64_t lastVisitedFrame = 0;
+        };
+        HashMap<uint64_t, ChildRecord> children;
     };
 
     struct UIStackComponent {

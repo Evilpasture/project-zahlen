@@ -107,7 +107,7 @@ class UILayoutSystem {
             bool isFlexChild =
                 (rect.parentEntity != NullEntity && reg.IsAlive(rect.parentEntity) && reg.Get<Components::UIFlexComponent>(rect.parentEntity) != nullptr);
 
-            if (!isFlexChild && flex == nullptr) {
+            if (!isFlexChild) {
                 // Anchor-based Canvas Positioning (e.g. Center popups, anchored HUDs)
                 YGNodeStyleSetPositionType(node, YGPositionTypeAbsolute);
 
@@ -116,8 +116,10 @@ class UILayoutSystem {
 
                 YGNodeStyleSetPosition(node, YGEdgeLeft, anchorLeft);
                 YGNodeStyleSetPosition(node, YGEdgeTop, anchorTop);
-            } else if (flex != nullptr) {
-                // Flexbox Style Configuration
+            }
+
+            if (flex != nullptr) {
+                // Flexbox Style Configuration for laying out children
                 switch (flex->direction) {
                     case FlexDirection::Column:
                         YGNodeStyleSetFlexDirection(node, YGFlexDirectionColumn);

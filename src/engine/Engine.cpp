@@ -608,37 +608,31 @@ bool Engine::InitializeDefaultScene() {
 
     reg.RegisterAllComponentsIn<ZHLN::Components>();
 
-    Entity cameraEntity = reg.Create();
-    reg.Add(cameraEntity, Components::MainCameraTagComponent {});
-    reg.Add(cameraEntity, Components::CameraComponent {});
-    reg.Add(cameraEntity, Components::AASettingsComponent {.state = {.mode = AAMode::TAA, .taaFeedback = 0.95f}});
-
-    reg.Add(cameraEntity, Components::FreeCamTagComponent {});
-    reg.Add(cameraEntity, Components::InputComponent {});
-    reg.Add(
-        cameraEntity, Components::TargetCameraComponent {
-                          .distance          = 4.5f,
-                          .targetDistance    = 4.5f,
-                          .yaw               = -90.0f,
-                          .pitch             = -10.0f,
-                          .stiffness         = 15.0f,
-                          .vignetteIntensity = 1.10f,
-                          .vignettePower     = 1.50f,
-                          .fov               = 45.0f,
-                          .targetFov         = 45.0f
-                      }
+    reg.Create(
+        Components::MainCameraTagComponent {}, Components::CameraComponent {},
+        Components::AASettingsComponent {.state = {.mode = AAMode::TAA, .taaFeedback = 0.95f}}, Components::FreeCamTagComponent {},
+        Components::InputComponent {},
+        Components::TargetCameraComponent {
+            .distance          = 4.5f,
+            .targetDistance    = 4.5f,
+            .yaw               = -90.0f,
+            .pitch             = -10.0f,
+            .stiffness         = 15.0f,
+            .vignetteIntensity = 1.10f,
+            .vignettePower     = 1.50f,
+            .fov               = 45.0f,
+            .targetFov         = 45.0f
+        }
     );
 
-    Entity settingsEntity = reg.Create();
-    reg.Add(settingsEntity, Components::GlobalSettingsTagComponent {});
-    reg.Add(settingsEntity, Components::PostProcessSettingsComponent {});
-    reg.Add(settingsEntity, Components::ShadowSettingsComponent {});
-    reg.Add(settingsEntity, Components::DebugSettingsComponent {.physicsDrawMode = 0});
+    reg.Create(
+        Components::GlobalSettingsTagComponent {}, Components::PostProcessSettingsComponent {}, Components::ShadowSettingsComponent {},
+        Components::DebugSettingsComponent {.physicsDrawMode = 0}
+    );
 
-    Entity uiSettings = reg.Create();
-    reg.Add(uiSettings, Components::UISettingsComponent {});
+    reg.Create(Components::UISettingsComponent {});
+
     CreativeWorksFactory::CreateFontAtlasTexture(rc);
-
     BuildSystemGraphs(*this);
     return true;
 }

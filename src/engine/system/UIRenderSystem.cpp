@@ -236,12 +236,12 @@ void UIRenderSystem::Update(Engine& engine) {
         }
 
         localBatches.push_back(
-            {.texture = textureHandle,
-             .vertexStart  = currentVertexOffset - count,
-             .vertexCount  = count,
-             .useScissor   = useScissor,
-             .isSDF        = isSDF,
-             .scissorRect  = scissor}
+            {.texture     = textureHandle,
+             .vertexStart = currentVertexOffset - count,
+             .vertexCount = count,
+             .useScissor  = useScissor,
+             .isSDF       = isSDF,
+             .scissorRect = scissor}
         );
     };
 
@@ -313,22 +313,24 @@ void UIRenderSystem::Update(Engine& engine) {
 
                 TextBounds bounds = (activeFont != nullptr) ? MeasureTextBounds(*activeFont, displayStr, text->scale) : TextBounds {};
 
-                // 1. Horizontal Alignment (Ink-precise)
+                // 1. Horizontal Alignment (Clamped to prevent left overflow)
                 if (text->align == TextAlignment::Center) {
-                    float centerOffset = (containerWidth - bounds.width()) * 0.5f;
+                    float centerOffset = std::max(0.0f, (containerWidth - bounds.width()) * 0.5f);
                     drawX              = rect->computedAbsMinX + centerOffset - bounds.minX + text->offsetX;
                 } else if (text->align == TextAlignment::Right) {
-                    drawX = rect->computedAbsMaxX - bounds.maxX + text->offsetX;
+                    float rightOffset = std::max(0.0f, containerWidth - bounds.width());
+                    drawX             = rect->computedAbsMinX + rightOffset - bounds.minX + text->offsetX;
                 } else {
                     drawX = rect->computedAbsMinX - bounds.minX + text->offsetX;
                 }
 
-                // 2. Vertical Alignment (Ink-precise)
+                // 2. Vertical Alignment (Clamped to prevent top overflow)
                 if (text->verticalAlign == TextVerticalAlignment::Center) {
-                    float centerOffset = (containerHeight - bounds.height()) * 0.5f;
+                    float centerOffset = std::max(0.0f, (containerHeight - bounds.height()) * 0.5f);
                     drawY              = rect->computedAbsMinY + centerOffset - bounds.minY + text->offsetY;
                 } else if (text->verticalAlign == TextVerticalAlignment::Bottom) {
-                    drawY = rect->computedAbsMaxY - bounds.maxY + text->offsetY;
+                    float bottomOffset = std::max(0.0f, containerHeight - bounds.height());
+                    drawY              = rect->computedAbsMinY + bottomOffset - bounds.minY + text->offsetY;
                 } else {
                     drawY = rect->computedAbsMinY - bounds.minY + text->offsetY;
                 }
