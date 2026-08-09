@@ -4,7 +4,6 @@
 #include "RenderSystem.hpp"
 #include "CameraSystem.hpp"
 #include "CullingSystem.hpp"
-#include "DecalSystem.hpp"
 #include "LightingSystem.hpp"
 #include "UIRenderSystem.hpp"
 #include <Zahlen/Camera.hpp>
@@ -110,7 +109,6 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
         sunSize              = shadowSettings->sunSize;
     }
 
-    // --- RESTORED ORIGINAL WORKING SHADOW CALCULATION ---
     float textelSize = shadowWidth / static_cast<float>(shadowResolution);
 
     JPH::Vec3 shadowCenter = cam.position;
@@ -167,9 +165,6 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
     Renderer::SetFrameData(rc, cam, uniforms, outShadowProjView, dt);
     Renderer::SetMatrices(rc, vp, unjitteredVp);
 
-    // ========================================================================
-    // HIGH-LEVEL ASSET RESOLUTION DRAW PASS
-    // ========================================================================
     const auto& mainVisible   = engine.GetVisibleEntities();
     const auto& shadowVisible = engine.GetVisibleShadowEntities();
 
@@ -196,8 +191,22 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
                 Mesh     gpuMesh = *gpuMeshOpt;
                 Material gpuMat  = *gpuMatOpt;
 
+                auto* skelMesh   = reg.Get<Components::SkeletalMeshComponent>(e);
+                auto* morphComp  = reg.Get<Components::MorphTargetComponent>(e);
+                auto* worldTrans = reg.Get<Components::WorldTransformComponent>(e);
+
+                JPH::Mat44 worldMat = (worldTrans != nullptr) ? worldTrans->world : JPH::Mat44::sIdentity();
+                JPH::Mat44 prevMat  = (worldTrans != nullptr) ? worldTrans->previous : worldMat;
+
+                bool     isSkinned   = (skelMesh != nullptr);
+                uint32_t jointOffset = isSkinned ? skelMesh->jointOffset : 0;
+
+                uint32_t     morphOffset      = (morphComp != nullptr) ? morphComp->offset : 0;
+                uint32_t     activeMorphCount = (morphComp != nullptr) ? morphComp->activeCount : 0;
+                const float* morphWeights     = (morphComp != nullptr) ? morphComp->weights.data() : nullptr;
+
                 BufferHandle scratchVbo = BufferHandle::Invalid;
-                if (meshComp->isSkinned) {
+                if (isSkinned) {
                     scratchVbo = rc.GetOrCreateSkinnedScratchBuffer(e.Pack(), gpuMesh.vertexCount);
                 }
 
@@ -216,23 +225,22 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
                     metallic  = pbr->metallic;
                 }
 
-                // --- STENCIL CSG INTERCEPTION ---
                 if (auto* csg = reg.Get<Components::CSGComponent>(e)) {
                     CSGDrawParams csgParams;
                     csgParams.eyeParams = {
-                        .transform           = meshComp->worldTransform,
-                        .prevTransform       = meshComp->prevTransform,
+                        .transform           = worldMat,
+                        .prevTransform       = prevMat,
                         .cullRadius          = meshComp->cullRadius,
                         .localCenter         = {meshComp->localCenter.GetX(), meshComp->localCenter.GetY(), meshComp->localCenter.GetZ()},
-                        .jointOffset         = meshComp->jointOffset,
-                        .morphOffset         = meshComp->morphOffset,
-                        .activeMorphCount    = meshComp->activeMorphCount,
+                        .jointOffset         = jointOffset,
+                        .morphOffset         = morphOffset,
+                        .activeMorphCount    = activeMorphCount,
+                        .morphWeights        = morphWeights,
                         .flags               = drawFlags,
                         .skinnedVertexBuffer = scratchVbo,
                         .roughness           = roughness,
                         .metallic            = metallic
                     };
-                    csgParams.eyeParams.morphWeights = meshComp->morphWeights.data();
 
                     for (const auto& mod: csg->modifiers) {
                         if (reg.IsAlive(mod.operandEntity)) {
@@ -240,21 +248,24 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
                                 auto cutGpuMeshOpt = rc.GetGPUMesh(cutMesh->meshAsset);
                                 auto cutGpuMatOpt  = rc.GetGPUMaterial(cutMesh->materialAsset);
                                 if (cutGpuMeshOpt && cutGpuMatOpt) {
-                                    // Resolve skinning scratch VBO for the cutter if it's skinned
+                                    auto*      cutSkelMesh   = reg.Get<Components::SkeletalMeshComponent>(mod.operandEntity);
+                                    auto*      cutWorldTrans = reg.Get<Components::WorldTransformComponent>(mod.operandEntity);
+                                    JPH::Mat44 cutWorldMat   = (cutWorldTrans != nullptr) ? cutWorldTrans->world : JPH::Mat44::sIdentity();
+                                    JPH::Mat44 cutPrevMat    = (cutWorldTrans != nullptr) ? cutWorldTrans->previous : cutWorldMat;
+
                                     BufferHandle cutScratchVbo = BufferHandle::Invalid;
-                                    if (cutMesh->isSkinned) {
+                                    if (cutSkelMesh != nullptr) {
                                         cutScratchVbo = rc.GetOrCreateSkinnedScratchBuffer(mod.operandEntity.Pack(), cutGpuMeshOpt->vertexCount);
                                     }
 
                                     csgParams.cutters.push_back(
-                                        {.mesh          = *cutGpuMeshOpt,
-                                         .material      = *cutGpuMatOpt,
-                                         .transform     = cutMesh->worldTransform,
-                                         .prevTransform = cutMesh->prevTransform,
-                                         .cullRadius    = cutMesh->cullRadius,
-                                         .operation     = mod.operation,
-
-                                         .jointOffset         = cutMesh->jointOffset,
+                                        {.mesh                = *cutGpuMeshOpt,
+                                         .material            = *cutGpuMatOpt,
+                                         .transform           = cutWorldMat,
+                                         .prevTransform       = cutPrevMat,
+                                         .cullRadius          = cutMesh->cullRadius,
+                                         .operation           = mod.operation,
+                                         .jointOffset         = (cutSkelMesh != nullptr) ? cutSkelMesh->jointOffset : 0,
                                          .skinnedVertexBuffer = cutScratchVbo,
                                          .flags               = cutMesh->flags}
                                     );
@@ -264,22 +275,21 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
                     }
 
                     if (!csgParams.cutters.empty()) {
-                        Renderer::DrawCSG(rc, gpuMat, gpuMesh, csgParams); // Clean, opaque public call
+                        Renderer::DrawCSG(rc, gpuMat, gpuMesh, csgParams);
                         continue;
                     }
                 }
 
-                // Standard non-CSG path
                 Renderer::Draw(
                     rc, gpuMat, gpuMesh,
-                    {.transform           = meshComp->worldTransform,
-                     .prevTransform       = meshComp->prevTransform,
+                    {.transform           = worldMat,
+                     .prevTransform       = prevMat,
                      .cullRadius          = meshComp->cullRadius,
                      .localCenter         = {meshComp->localCenter.GetX(), meshComp->localCenter.GetY(), meshComp->localCenter.GetZ()},
-                     .jointOffset         = meshComp->jointOffset,
-                     .morphOffset         = meshComp->morphOffset,
-                     .activeMorphCount    = meshComp->activeMorphCount,
-                     .morphWeights        = meshComp->morphWeights.data(),
+                     .jointOffset         = jointOffset,
+                     .morphOffset         = morphOffset,
+                     .activeMorphCount    = activeMorphCount,
+                     .morphWeights        = morphWeights,
                      .flags               = drawFlags,
                      .skinnedVertexBuffer = scratchVbo,
                      .roughness           = roughness,
@@ -328,7 +338,7 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
             if (!debugLineMat_res) {
                 ZHLN::Panic("Failed to compile debug line material: {}", debugLineMat_res.error().Message());
             }
-            debugLineMat             = debugLineMat_res.value();
+            debugLineMat           = debugLineMat_res.value();
             debugLineMat.albedoMap = TextureHandle(1);
 
             PipelineDesc solidDesc = lineDesc;
@@ -338,7 +348,7 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
             if (!debugSolidMat_res) {
                 ZHLN::Panic("Failed to compile debug solid material: {}", debugSolidMat_res.error().Message());
             }
-            debugSolidMat             = debugSolidMat_res.value();
+            debugSolidMat           = debugSolidMat_res.value();
             debugSolidMat.albedoMap = TextureHandle(1);
         }
 

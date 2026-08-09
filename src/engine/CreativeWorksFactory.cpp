@@ -208,8 +208,10 @@ ModelPrefab* LoadModelPrefab(RenderContext& ctx, CreativeWorksManager& assetMgr,
 namespace {
 
 Entity SpawnPrefabRoot(ECS::Registry& reg, std::string_view vPath, const SpawnParams& p) {
-    Entity root = reg.Create();
+    Entity     root     = reg.Create();
+    JPH::Mat44 localMat = Math::CreateTransform(JPH::Vec3(p.position), p.rotation, p.scale);
     reg.Add(root, Components::TransformComponent {.position = JPH::Vec3(p.position), .rotation = p.rotation, .scale = p.scale});
+    reg.Add(root, Components::WorldTransformComponent {.world = localMat, .previous = localMat});
     reg.Add(root, Components::NameComponent {.name = String64("Root_" + std::string(vPath))});
     return root;
 }
@@ -317,8 +319,11 @@ Entity InstantiateMeshPart(
         flags |= DrawFlags::ExcludeFromTLAS;
     }
 
+    JPH::Mat44 worldMat = Math::CreateTransform(prep.translation, prep.rotation, prep.scale);
+
     if (params.createPhysics && prep.shape != nullptr) {
         reg.Add(e, Components::TransformComponent {.position = prep.translation, .rotation = prep.rotation, .scale = prep.scale});
+        reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
         reg.Add(
             e, Components::PhysicsComponent {Physics::CreateRigidBody(
                    pc, prep.shape, JPH::RVec3(prep.translation), prep.rotation, params.isStaticPhysics ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
@@ -342,26 +347,24 @@ Entity InstantiateMeshPart(
         JPH::Vec3 c2 = nodeLocal.GetColumn3(2);
         JPH::Vec3 localScale(c0.Length(), c1.Length(), c2.Length());
 
-        if (localScale.GetX() > 1e-5f) {
+        if (localScale.GetX() > 1e-5f)
             c0 /= localScale.GetX();
-        } else {
+        else
             c0 = JPH::Vec3::sAxisX();
-        }
-        if (localScale.GetY() > 1e-5f) {
+        if (localScale.GetY() > 1e-5f)
             c1 /= localScale.GetY();
-        } else {
+        else
             c1 = JPH::Vec3::sAxisY();
-        }
-        if (localScale.GetZ() > 1e-5f) {
+        if (localScale.GetZ() > 1e-5f)
             c2 /= localScale.GetZ();
-        } else {
+        else
             c2 = JPH::Vec3::sAxisZ();
-        }
 
         JPH::Mat44 rotMat(JPH::Vec4(c0, 0), JPH::Vec4(c1, 0), JPH::Vec4(c2, 0), JPH::Vec4(0, 0, 0, 1));
         JPH::Quat  localRot = rotMat.GetQuaternion().Normalized();
 
         reg.Add(e, Components::TransformComponent {.position = localPos, .rotation = localRot, .scale = localScale});
+        reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
         reg.Add(e, Components::HierarchyComponent {.parent = rootEntity});
     }
 
@@ -375,17 +378,24 @@ Entity InstantiateMeshPart(
                .localCenter   = JPH::Vec3(
                    (part.localMax[0] + part.localMin[0]) * 0.5f, (part.localMax[1] + part.localMin[1]) * 0.5f, (part.localMax[2] + part.localMin[2]) * 0.5f
                ),
-               .localTransform   = part.localTransform,
-               .jointOffset      = assignedJointOffset,
-               .isSkinned        = part.isSkinned && params.isAnimated,
-               .morphOffset      = part.morphOffset,
-               .activeMorphCount = part.activeMorphCount,
-               .morphWeights     = {part.defaultMorphWeights[0], part.defaultMorphWeights[1], part.defaultMorphWeights[2], part.defaultMorphWeights[3]},
-               .nodeIndex        = part.nodeIndex,
-               .skeletonIndex    = part.skeletonIndex,
-               .flags            = flags
+               .flags     = flags,
+               .nodeIndex = part.nodeIndex
            }
     );
+
+    if (part.isSkinned && params.isAnimated) {
+        reg.Add(e, Components::SkeletalMeshComponent {.jointOffset = assignedJointOffset, .skeletonIndex = part.skeletonIndex});
+    }
+
+    if (part.activeMorphCount > 0) {
+        reg.Add(
+            e, Components::MorphTargetComponent {
+                   .offset      = part.morphOffset,
+                   .activeCount = part.activeMorphCount,
+                   .weights     = {part.defaultMorphWeights[0], part.defaultMorphWeights[1], part.defaultMorphWeights[2], part.defaultMorphWeights[3]}
+               }
+        );
+    }
 
     return e;
 }
@@ -457,12 +467,14 @@ Entity CreateBox(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, JPH
     ctx.RegisterGPUMesh(meshAsset, mesh);
     ctx.RegisterGPUMaterial(matAsset, mat);
 
+    JPH::Mat44 worldMat = Math::CreateTransform(JPH::Vec3(params.position), params.rotation, params.scale);
+
     reg.Add(e, Components::NameComponent {.name = String64("Box_" + std::to_string(e.index))});
     reg.Add(e, Components::TransformComponent {.position = JPH::Vec3(params.position), .rotation = params.rotation, .scale = params.scale});
+    reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
 
     float maxExtent = std::max({halfExtents.GetX(), halfExtents.GetY(), halfExtents.GetZ()});
     reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = maxExtent * 2.0f});
-
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
 
     if (params.createPhysics && pc != nullptr) {
@@ -518,11 +530,13 @@ Entity CreatePlane(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, f
     ctx.RegisterGPUMesh(meshAsset, mesh);
     ctx.RegisterGPUMaterial(matAsset, mat);
 
+    JPH::Mat44 worldMat = Math::CreateTransform(JPH::Vec3(params.position), params.rotation, params.scale);
+
     reg.Add(e, Components::NameComponent {.name = String64("Plane_" + std::to_string(e.index))});
     reg.Add(e, Components::TransformComponent {.position = JPH::Vec3(params.position), .rotation = params.rotation, .scale = params.scale});
+    reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
 
     reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = extent * 2.0f});
-
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
 
     if (params.createPhysics && pc != nullptr) {
@@ -621,20 +635,20 @@ uint32_t InstantiatePrefab(
     return spawnedCount;
 }
 
-void SetupPlayerRagdoll(RenderContext& /*rc*/, PhysicsContext& pc, ECS::Registry& reg, Entity playerEntity, std::span<const Entity> visualParts) {
+void SetupPlayerRagdoll(PhysicsContext& pc, ECS::Registry& reg, Entity playerEntity, std::span<const Entity> visualParts) {
     const Skeleton* targetSkeleton = nullptr;
     uint32_t        jointOffset    = 0;
 
     bool skeletonFound = false;
     for (Entity part: visualParts) {
-        Patch<Components::MeshComponent>(reg, part, [&](auto& meshComp) {
+        Patch<Components::SkeletalMeshComponent>(reg, part, [&](auto& skelMesh) {
             auto*  hier       = reg.Get<Components::HierarchyComponent>(part);
             Entity parentRoot = (hier != nullptr) ? hier->parent : NullEntity;
             if (parentRoot != NullEntity) {
                 if (auto* animComp = reg.Get<Components::AnimatorComponent>(parentRoot)) {
-                    if ((animComp->prefab != nullptr) && meshComp.skeletonIndex >= 0) {
-                        targetSkeleton = &animComp->prefab->skeletons[meshComp.skeletonIndex];
-                        jointOffset    = meshComp.jointOffset;
+                    if ((animComp->prefab != nullptr) && skelMesh.skeletonIndex >= 0) {
+                        targetSkeleton = &animComp->prefab->skeletons[skelMesh.skeletonIndex];
+                        jointOffset    = skelMesh.jointOffset;
                         skeletonFound  = true;
                     }
                 }
@@ -720,6 +734,10 @@ void SetupPlayerRagdoll(RenderContext& /*rc*/, PhysicsContext& pc, ECS::Registry
     }
 }
 
+void SetupPlayerRagdoll(Engine& engine, Entity playerEntity, std::span<const Entity> visualParts) {
+    SetupPlayerRagdoll(engine.GetPhysicsContext(), engine.GetRegistry(), playerEntity, visualParts);
+}
+
 void RebuildVulkanResources(RenderContext& ctx, CreativeWorksManager& cwMgr, ECS::Registry& /*reg*/) {
     ZHLN::Log("[Engine] Device Lost: Clearing GPU asset cache. Next frame will re-upload assets lazily.");
 
@@ -780,10 +798,13 @@ Entity CreateTerrainFromData(
     if (colorsRGBA != nullptr) {
         tData.colors.assign(colorsRGBA, colorsRGBA + (static_cast<ptrdiff_t>(sampleCount * sampleCount * 4)));
     }
-    TerrainHandle tHandle = TerrainSystem::RegisterTerrainData(std::move(tData));
+    TerrainHandle tHandle  = TerrainSystem::RegisterTerrainData(std::move(tData));
+    JPH::Mat44    worldMat = Math::CreateTransform(JPH::Vec3(params.position), params.rotation, params.scale);
 
     reg.Add(e, Components::NameComponent {.name = String64("TerrainData_" + std::to_string(e.index))});
     reg.Add(e, Components::TransformComponent {.position = JPH::Vec3(params.position), .rotation = params.rotation, .scale = params.scale});
+    reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
+
     reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = worldSize * 1.5f});
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
     reg.Add(
@@ -845,10 +866,13 @@ Entity CreateTerrain(
     ctx.RegisterGPUMesh(meshAsset, mesh);
     ctx.RegisterGPUMaterial(matAsset, mat);
 
-    TerrainHandle tHandle = TerrainSystem::RegisterTerrainData(std::move(tData));
+    TerrainHandle tHandle  = TerrainSystem::RegisterTerrainData(std::move(tData));
+    JPH::Mat44    worldMat = Math::CreateTransform(JPH::Vec3(params.position), params.rotation, params.scale);
 
     reg.Add(e, Components::NameComponent {.name = String64("Terrain_" + std::to_string(e.index))});
     reg.Add(e, Components::TransformComponent {.position = JPH::Vec3(params.position), .rotation = params.rotation, .scale = params.scale});
+    reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
+
     reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = worldSize * 1.5f});
     reg.Add(e, Components::PBRComponent {.roughness = 0.85f, .metallic = 0.05f});
     reg.Add(
@@ -892,10 +916,6 @@ uint32_t InstantiatePrefab(Engine& engine, std::string_view path, const SpawnPar
         return 0;
     }
     return InstantiatePrefab(engine, *prefab, params, outBuffer, maxCount);
-}
-
-void SetupPlayerRagdoll(Engine& engine, Entity playerEntity, std::span<const Entity> visualParts) {
-    SetupPlayerRagdoll(engine.GetRenderContext(), engine.GetPhysicsContext(), engine.GetRegistry(), playerEntity, visualParts);
 }
 
 } // namespace ZHLN::CreativeWorksFactory

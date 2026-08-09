@@ -357,4 +357,13 @@ inline bool Patch(ECS::Registry& reg, Entity e, Fn&& fn) {
     }
     return false;
 }
+
+template <typename T, typename Fn>
+inline bool Patch(const ECS::Registry& reg, Entity e, Fn&& fn) {
+    if (const auto* c = reg.Get<T>(e)) {
+        std::forward<Fn>(fn)(*c);
+        return true;
+    }
+    return false;
+}
 } // namespace ZHLN::ECS

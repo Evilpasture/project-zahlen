@@ -89,13 +89,14 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
     // ========================================================================
 
     // Sun Light
-    Entity sun = reg.Create();
+    Entity     sun      = reg.Create();
+    JPH::Vec3  sunPos   = {12.0f, 25.0f, 12.0f};
+    JPH::Quat  sunRot   = Math::EulerDegreesToQuat({50.0f, -35.0f, 0.0f});
+    JPH::Mat44 sunWorld = Math::CreateTransform(sunPos, sunRot);
+
     reg.Add(sun, Components::NameComponent {.name = String64("FallbackSun")});
-    reg.Add(
-        sun, Components::TransformComponent {
-                 .position = {12.0f, 25.0f, 12.0f}, .rotation = Math::EulerDegreesToQuat({50.0f, -35.0f, 0.0f}), .scale = {1.0f, 1.0f, 1.0f}
-             }
-    );
+    reg.Add(sun, Components::TransformComponent {.position = sunPos, .rotation = sunRot, .scale = {1.0f, 1.0f, 1.0f}});
+    reg.Add(sun, Components::WorldTransformComponent {.world = sunWorld, .previous = sunWorld});
     reg.Add(
         sun, Components::LightComponent {
                  .type = LightType::Sun, .color = JPH::Vec3(1.0f, 0.96f, 0.88f), .intensity = 180.0f, .direction = JPH::Vec3(0.4f, 1.0f, 0.3f).Normalized()
@@ -103,9 +104,13 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
     );
 
     // Accent Point Light
-    Entity pointLight = reg.Create();
+    Entity     pointLight = reg.Create();
+    JPH::Vec3  lightPos   = {0.0f, 2.5f, 0.0f};
+    JPH::Mat44 lightWorld = Math::CreateTransform(lightPos, JPH::Quat::sIdentity());
+
     reg.Add(pointLight, Components::NameComponent {.name = String64("FallbackPointLight")});
-    reg.Add(pointLight, Components::TransformComponent {.position = {0.0f, 2.5f, 0.0f}, .rotation = JPH::Quat::sIdentity(), .scale = {1.0f, 1.0f, 1.0f}});
+    reg.Add(pointLight, Components::TransformComponent {.position = lightPos, .rotation = JPH::Quat::sIdentity(), .scale = {1.0f, 1.0f, 1.0f}});
+    reg.Add(pointLight, Components::WorldTransformComponent {.world = lightWorld, .previous = lightWorld});
     reg.Add(
         pointLight, Components::LightComponent {
                         .type = LightType::Point, .color = JPH::Vec3(0.2f, 0.85f, 1.0f), .intensity = 220.0f, .radius = 0.6f, .range = 18.0f, .shadowLayer = -1
@@ -373,15 +378,15 @@ void DefaultPreset::Update(Engine& engine, float dt) {
 
     if (escDown && !wasEscDown) {
         s_PopupVisible = !s_PopupVisible;
-        if (auto* mesh = reg.Get<Components::MeshComponent>(s_UIPopupBox)) {
+        ECS::Patch<Components::MeshComponent>(reg, s_UIPopupBox, [&](auto& mesh) {
             if (s_PopupVisible) {
-                mesh->flags &= ~DrawFlags::Hidden;
+                mesh.flags &= ~DrawFlags::Hidden;
                 Log("[DefaultPreset] Native GUI Popup Restored.");
             } else {
-                mesh->flags |= DrawFlags::Hidden;
+                mesh.flags |= DrawFlags::Hidden;
                 Log("[DefaultPreset] Native GUI Popup Minimized (Press ESC to restore).");
             }
-        }
+        });
     }
     wasEscDown = escDown;
 

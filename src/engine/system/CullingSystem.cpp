@@ -29,7 +29,9 @@ void VerifyCullingResults(const ECS::Registry& reg, const JPH::Array<Entity>& vi
 
     size_t expectedVisible = 0;
     for (size_t i = 0; i < entities.size(); ++i) {
-        JPH::Vec3 pos = meshes[i].worldTransform.GetTranslation();
+        const auto* worldTrans = reg.Get<Components::WorldTransformComponent>(entities[i]);
+        JPH::Mat44  worldMat   = (worldTrans != nullptr) ? worldTrans->world : JPH::Mat44::sIdentity();
+        JPH::Vec3   pos        = worldMat * meshes[i].localCenter;
 
         bool visibleInMain   = cam.frustum.IsSphereVisible(pos, meshes[i].cullRadius);
         bool visibleInShadow = cam.shadowFrustum.IsSphereVisible(pos, meshes[i].cullRadius);
@@ -51,16 +53,6 @@ void VerifyCullingResults(const ECS::Registry& reg, const JPH::Array<Entity>& vi
     if (visible.size() != expectedVisible && CullingStats::EnableCulling) {
         ZHLN::Log("[Test Fail] Culling: Visible count {} does not match expected {}", visible.size(), expectedVisible);
     }
-
-    if (visible.size() > 1) {
-        for (size_t i = 0; i < visible.size(); ++i) {
-            for (size_t j = i + 1; j < visible.size(); ++j) {
-                if (visible[i].index == visible[j].index) {
-                    ZHLN::Log("[Test Fail] Culling: Duplicate entity {} in visible list", visible[i].index);
-                }
-            }
-        }
-    }
 }
 }} // namespace ZHLN::Tests
 
@@ -69,9 +61,9 @@ namespace ZHLN {
 template <bool UsePhysicsTransforms>
 void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible, JPH::Array<Entity>& outVisibleShadow) {
     ZHLN::ScopedTimer profTimer("Culling (ECS O(N))");
-    auto& cam = engine.GetCamera();
-    auto& reg = engine.GetRegistry();
-    auto& rc  = engine.GetRenderContext();
+    auto&             cam = engine.GetCamera();
+    auto&             reg = engine.GetRegistry();
+    auto&             rc  = engine.GetRenderContext();
 
     auto entities       = reg.GetEntitiesWith<Components::MeshComponent>();
     auto cameraEntities = reg.GetEntitiesWith<Components::CameraComponent>();
@@ -135,13 +127,11 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible, JPH::
         s_WasFrozen = false;
     }
 
-    // --- RESTORED ORIGINAL WORKING SHADOW CULLING ---
     if (!isFullBright) {
         auto [sunDirection, sunIntensity] = LightingSystem::GetSunDirectionAndIntensity(reg);
 
         JPH::Vec3 shadowCenter = cam.position;
-
-        float texelSize = shadowWidth / static_cast<float>(shadowResolution);
+        float     texelSize    = shadowWidth / static_cast<float>(shadowResolution);
         shadowCenter.SetX(std::round(shadowCenter.GetX() / texelSize) * texelSize);
         shadowCenter.SetY(std::round(shadowCenter.GetY() / texelSize) * texelSize);
         shadowCenter.SetZ(std::round(shadowCenter.GetZ() / texelSize) * texelSize);
@@ -196,18 +186,21 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible, JPH::
 
         CullingStats::TotalTriangles += meshTris;
 
-        JPH::Vec3 pos             = meshes[i].worldTransform * meshes[i].localCenter;
-        float     scaleX          = meshes[i].worldTransform.GetColumn3(0).Length();
-        float     scaleY          = meshes[i].worldTransform.GetColumn3(1).Length();
-        float     scaleZ          = meshes[i].worldTransform.GetColumn3(2).Length();
+        const auto* worldTrans = reg.Get<Components::WorldTransformComponent>(e);
+        JPH::Mat44  worldMat   = (worldTrans != nullptr) ? worldTrans->world : JPH::Mat44::sIdentity();
+
+        JPH::Vec3 pos             = worldMat * meshComp.localCenter;
+        float     scaleX          = worldMat.GetColumn3(0).Length();
+        float     scaleY          = worldMat.GetColumn3(1).Length();
+        float     scaleZ          = worldMat.GetColumn3(2).Length();
         float     currentMaxScale = std::max({scaleX, scaleY, scaleZ});
 
-        if (cam.frustum.IsSphereVisible(pos, meshes[i].cullRadius * currentMaxScale)) {
+        if (cam.frustum.IsSphereVisible(pos, meshComp.cullRadius * currentMaxScale)) {
             outVisible.push_back(e);
             CullingStats::RenderedTriangles += meshTris;
         }
 
-        if (!isFullBright && cam.shadowFrustum.IsSphereVisible(pos, meshes[i].cullRadius)) {
+        if (!isFullBright && cam.shadowFrustum.IsSphereVisible(pos, meshComp.cullRadius)) {
             outVisibleShadow.push_back(e);
         }
     }

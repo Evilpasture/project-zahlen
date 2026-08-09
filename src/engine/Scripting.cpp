@@ -597,16 +597,16 @@ void RegisterCreativeWorkCommands() {
         })
     );
 
-    RegisterCmd("SetupRagdoll", MakeCmd<SetupRagdollArgs>([](ZHLN::Engine* engine, const SetupRagdollArgs& a) -> uint64_t {
-                    std::vector<ZHLN::Entity> parts(a.count);
-                    for (uint32_t i = 0; i < a.count; ++i) {
-                        parts[i] = ZHLN::Entity::Unpack(a.visualParts[i]);
-                    }
-                    ZHLN::CreativeWorksFactory::SetupPlayerRagdoll(
-                        engine->GetRenderContext(), engine->GetPhysicsContext(), engine->GetRegistry(), ZHLN::Entity::Unpack(a.playerEntity), parts
-                    );
-                    return 1;
-                }));
+    RegisterCmd(
+        "SetupRagdoll", MakeCmd<SetupRagdollArgs>([](ZHLN::Engine* engine, const SetupRagdollArgs& a) -> uint64_t {
+            std::vector<ZHLN::Entity> parts(a.count);
+            for (uint32_t i = 0; i < a.count; ++i) {
+                parts[i] = ZHLN::Entity::Unpack(a.visualParts[i]);
+            }
+            ZHLN::CreativeWorksFactory::SetupPlayerRagdoll(engine->GetPhysicsContext(), engine->GetRegistry(), ZHLN::Entity::Unpack(a.playerEntity), parts);
+            return 1;
+        })
+    );
 
     RegisterCmd("CreateBox", MakeCmd<CreateBoxArgs>([](ZHLN::Engine* engine, const CreateBoxArgs& a) -> uint64_t {
                     ZHLN::Mesh mesh =
@@ -682,26 +682,21 @@ void RegisterCreativeWorkCommands() {
             rc.RegisterGPUMesh(entityMeshAsset, mesh);
             rc.RegisterGPUMaterial(entityMatAsset, mat);
 
-            reg.Add(
-                e, ZHLN::Components::TransformComponent {.position = {a.px, a.py, a.pz}, .rotation = {a.rx, a.ry, a.rz, a.rw}, .scale = {1.0f, 1.0f, 1.0f}}
-            );
+            JPH::Quat  rotation(a.rx, a.ry, a.rz, a.rw);
+            JPH::Mat44 worldMat = ZHLN::Math::CreateTransform(JPH::Vec3(a.px, a.py, a.pz), rotation, JPH::Vec3(1.0f, 1.0f, 1.0f));
+
+            reg.Add(e, ZHLN::Components::TransformComponent {.position = {a.px, a.py, a.pz}, .rotation = rotation, .scale = {1.0f, 1.0f, 1.0f}});
+            reg.Add(e, ZHLN::Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
+
             ZHLN::DrawFlags flags = ZHLN::DrawFlags::None;
             if (isTransparent) {
                 flags |= ZHLN::DrawFlags::ExcludeFromTLAS;
             }
 
             reg.Add(
-                e, ZHLN::Components::MeshComponent {
-                       .meshAsset      = entityMeshAsset,
-                       .materialAsset  = entityMatAsset,
-                       .cullRadius     = cullRadius,
-                       .localTransform = JPH::Mat44::sIdentity(),
-                       .prevTransform  = JPH::Mat44::sIdentity(),
-                       .flags          = flags
-                   }
+                e, ZHLN::Components::MeshComponent {.meshAsset = entityMeshAsset, .materialAsset = entityMatAsset, .cullRadius = cullRadius, .flags = flags}
             );
 
-            JPH::Quat rotation(a.rx, a.ry, a.rz, a.rw);
             reg.Add(
                 e, ZHLN::Components::PhysicsComponent {ZHLN::Physics::CreateRigidBody(
                        pc, shape, JPH::RVec3(a.px, a.py, a.pz), rotation, a.isStatic ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,

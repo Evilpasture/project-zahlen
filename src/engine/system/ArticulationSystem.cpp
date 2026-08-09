@@ -102,7 +102,6 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
         uint32_t offset = ragComp.jointOffset;
         uint32_t count  = ragComp.jointCount;
 
-        // --- A. CONSUME TRANSIENT COMMANDS ---
         if (auto* hitCmd = reg.Get<Components::RagdollHitReactionCommand>(e)) {
             if (hitCmd->jointIndex < count) {
                 uint32_t globalIdx                         = offset + hitCmd->jointIndex;
@@ -128,7 +127,6 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
             reg.Remove<Components::RagdollImpulseCommand>(e);
         }
 
-        // --- B. CONTIGUOUS BLEND & DECAY STEP ---
         bool hasActiveBlend = false;
         for (uint32_t j = 0; j < count; ++j) {
             uint32_t globalIdx = offset + j;
@@ -158,7 +156,6 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
             continue;
         }
 
-        // --- C. PHYSICS SYSTEM SYNC ---
         JPH::Ragdoll*        ragdoll = ragComp.ragdollInstance;
         const JPH::Skeleton* skel    = ragdoll->GetRagdollSettings()->GetSkeleton();
 
@@ -220,22 +217,17 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
             });
         }
 
-        // --- D. OUTPUT BLENDED TRANSFORM TO GPU ---
         if (ragComp.state != RagdollState::Inactive) {
             JPH::Array<JPH::Mat44> physicalWorldJoints(count, JPH::Mat44::sIdentity());
             JPH::RVec3             actualRootOffset = JPH::RVec3::sZero();
 
-            ZHLN::Lock(world.sync.shadowLock, [&] {
-                ragdoll->GetPose(actualRootOffset, physicalWorldJoints.data());
-            });
+            ZHLN::Lock(world.sync.shadowLock, [&] { ragdoll->GetPose(actualRootOffset, physicalWorldJoints.data()); });
 
-            // Sync physics translation roots to all associated child visual components
-            auto allMeshEntities = reg.GetEntitiesWith<Components::MeshComponent>();
-            auto allMeshes       = reg.GetRawArray<Components::MeshComponent>();
-
-            for (size_t k = 0; k < allMeshEntities.size(); ++k) {
-                if (allMeshes[k].isSkinned && allMeshes[k].jointOffset == offset) {
-                    if (auto* trans = reg.Get<Components::TransformComponent>(allMeshEntities[k])) {
+            auto allSkinnedEntities = reg.GetEntitiesWith<Components::SkeletalMeshComponent>();
+            for (Entity childEnt: allSkinnedEntities) {
+                auto* skelMesh = reg.Get<Components::SkeletalMeshComponent>(childEnt);
+                if (skelMesh != nullptr && skelMesh->jointOffset == offset) {
+                    if (auto* trans = reg.Get<Components::TransformComponent>(childEnt)) {
                         trans->position = JPH::Vec3(actualRootOffset);
                         trans->rotation = JPH::Quat::sIdentity();
                     }

@@ -112,12 +112,12 @@ uint32_t InstantiatePrefab(
     uint32_t           maxCount  = 0
 );
 
-void SetupPlayerRagdoll(RenderContext& rc, PhysicsContext& pc, ECS::Registry& reg, Entity playerEntity, std::span<const Entity> visualParts);
+void SetupPlayerRagdoll(PhysicsContext& pc, ECS::Registry& reg, Entity playerEntity, std::span<const Entity> visualParts);
+void SetupPlayerRagdoll(Engine& engine, Entity playerEntity, std::span<const Entity> visualParts);
 void RebuildVulkanResources(RenderContext& ctx, CreativeWorksManager& cwMgr, ECS::Registry& reg);
 
 ModelPrefab* LoadModelPrefab(Engine& engine, std::string_view path);
 uint32_t     InstantiatePrefab(Engine& engine, const ModelPrefab& prefab, const SpawnParams& params, Entity* outBuffer = nullptr, uint32_t maxCount = 0);
 uint32_t     InstantiatePrefab(Engine& engine, std::string_view path, const SpawnParams& params, Entity* outBuffer = nullptr, uint32_t maxCount = 0);
-void         SetupPlayerRagdoll(Engine& engine, Entity playerEntity, std::span<const Entity> visualParts);
 
 } // namespace ZHLN::CreativeWorksFactory

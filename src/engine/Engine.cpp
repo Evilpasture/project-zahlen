@@ -36,7 +36,6 @@
 #include <engine/FileWatcher.hpp>
 #include <engine/NativeScriptModule.hpp>
 #include <engine/Platform.hpp>
-#include <engine/system/TextureSystem.hpp>
 #include <engine/system/AnimationSystem.hpp>
 #include <engine/system/ArticulationSystem.hpp>
 #include <engine/system/CameraSystem.hpp>
@@ -51,6 +50,7 @@
 #include <engine/system/RenderSystem.hpp>
 #include <engine/system/TargetCameraSystem.hpp>
 #include <engine/system/TerrainSystem.hpp>
+#include <engine/system/TextureSystem.hpp>
 #include <engine/system/TransformSystem.hpp>
 #include <engine/system/UIInteractionSystem.hpp>
 #include <engine/system/UIRenderSystem.hpp>
@@ -206,15 +206,17 @@ void BuildSystemGraphs(Engine& engine) {
     updateGraph.AddSystem({
         .update_func    = Sys_VisualInterpolation,
         .name           = "VisualInterpolationSystem",
-        .access_pattern = {Read<Components::PhysicsStateComponent>(), Write<Components::TransformComponent>()},
+        .access_pattern = {Read<Components::PhysicsStateComponent>(), Write<Components::TransformComponent>(), Write<Components::WorldTransformComponent>()},
         .enabled        = true,
     });
 
     updateGraph.AddSystem({
-        .update_func    = Sys_Animation,
-        .name           = "AnimationSystem",
-        .access_pattern = {Read<Components::MovementComponent>(), Write<Components::MeshComponent>()},
-        .enabled        = true,
+        .update_func = Sys_Animation,
+        .name        = "AnimationSystem",
+        .access_pattern =
+            {Read<Components::MovementComponent>(), Read<Components::SkeletalMeshComponent>(), Write<Components::TransformComponent>(),
+             Write<Components::MorphTargetComponent>()},
+        .enabled = true,
     });
 
     updateGraph.AddSystem({
@@ -233,7 +235,7 @@ void BuildSystemGraphs(Engine& engine) {
     updateGraph.AddSystem({
         .update_func    = Sys_Transform,
         .name           = "TransformSystem",
-        .access_pattern = {Read<Components::HierarchyComponent>(), Read<Components::TransformComponent>(), Write<Components::MeshComponent>()},
+        .access_pattern = {Read<Components::HierarchyComponent>(), Read<Components::TransformComponent>(), Write<Components::WorldTransformComponent>()},
         .enabled        = true,
     });
 
@@ -289,7 +291,7 @@ void BuildSystemGraphs(Engine& engine) {
     renderGraph.AddSystem({
         .update_func    = Sys_Culling,
         .name           = "CullingSystem",
-        .access_pattern = {Read<Components::MeshComponent>(), Read<Components::CameraComponent>()},
+        .access_pattern = {Read<Components::MeshComponent>(), Read<Components::WorldTransformComponent>(), Read<Components::CameraComponent>()},
         .enabled        = true,
     });
 

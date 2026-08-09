@@ -784,6 +784,7 @@ void DrawEditorPanels(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& opti
         pp = reg.Get<ZHLN::Components::PostProcessSettingsComponent>(settingsEntities[0]);
     }
 
+    // --- TOOLBAR PANEL ---
     ImGui::Begin("Toolbar", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove);
     ImGui::SetWindowPos({0, 0});
     ImGui::SetWindowSize({(float) engine.GetWindow().GetSize().width, 42.0f});
@@ -813,6 +814,7 @@ void DrawEditorPanels(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& opti
     }
     ImGui::End();
 
+    // --- SCENE HIERARCHY PANEL ---
     ImGui::Begin("Scene Hierarchy");
     for (ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::NameComponent>()) {
         auto*       nameComp   = reg.Get<ZHLN::Components::NameComponent>(e);
@@ -824,6 +826,7 @@ void DrawEditorPanels(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& opti
     }
     ImGui::End();
 
+    // --- COMPONENT INSPECTOR PANEL ---
     ImGui::Begin("Component Inspector");
     if (s_EditorState.selectedEntity != ZHLN::NullEntity && reg.IsAlive(s_EditorState.selectedEntity)) {
         ZHLN::Entity e = s_EditorState.selectedEntity;
@@ -837,6 +840,7 @@ void DrawEditorPanels(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& opti
         }
         ImGui::Separator();
 
+        // 1. Name Component
         if (auto* name = reg.Get<ZHLN::Components::NameComponent>(e)) {
             if (ImGui::CollapsingHeader("Name Component", ImGuiTreeNodeFlags_DefaultOpen)) {
                 char buf[64];
@@ -847,8 +851,9 @@ void DrawEditorPanels(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& opti
             }
         }
 
+        // 2. Transform Component (Local State)
         if (auto* trans = reg.Get<ZHLN::Components::TransformComponent>(e)) {
-            if (ImGui::CollapsingHeader("Transform Component", ImGuiTreeNodeFlags_DefaultOpen)) {
+            if (ImGui::CollapsingHeader("Transform Component (Local)", ImGuiTreeNodeFlags_DefaultOpen)) {
                 std::array<float, 3> pos   = {trans->position.GetX(), trans->position.GetY(), trans->position.GetZ()};
                 JPH::Vec3            euler = ZHLN::Math::QuatToEulerDegrees(trans->rotation);
                 std::array<float, 3> rot   = {euler.GetX(), euler.GetY(), euler.GetZ()};
@@ -873,6 +878,44 @@ void DrawEditorPanels(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& opti
             }
         }
 
+        // 3. World Transform Component (Calculated Matrix)
+        if (auto* worldTrans = reg.Get<ZHLN::Components::WorldTransformComponent>(e)) {
+            if (ImGui::CollapsingHeader("World Transform Component (Cached)")) {
+                JPH::Vec3 wPos = worldTrans->world.GetTranslation();
+                ImGui::Text("World Position: (%.2f, %.2f, %.2f)", wPos.GetX(), wPos.GetY(), wPos.GetZ());
+            }
+        }
+
+        // 4. Mesh Component
+        if (auto* mesh = reg.Get<ZHLN::Components::MeshComponent>(e)) {
+            if (ImGui::CollapsingHeader("Mesh Component", ImGuiTreeNodeFlags_DefaultOpen)) {
+                ImGui::Text("Mesh Asset ID: %llu", static_cast<unsigned long long>(mesh->meshAsset));
+                ImGui::Text("Material Asset ID: %llu", static_cast<unsigned long long>(mesh->materialAsset));
+                ImGui::DragFloat("Cull Radius", &mesh->cullRadius, 0.1f, 0.0f, 1000.0f, "%.2f");
+                ImGui::Text("Node Index: %d", mesh->nodeIndex);
+            }
+        }
+
+        // 5. Skeletal Mesh Component
+        if (auto* skelMesh = reg.Get<ZHLN::Components::SkeletalMeshComponent>(e)) {
+            if (ImGui::CollapsingHeader("Skeletal Mesh Component", ImGuiTreeNodeFlags_DefaultOpen)) {
+                ImGui::Text("Joint Offset: %u", skelMesh->jointOffset);
+                ImGui::Text("Skeleton Index: %d", skelMesh->skeletonIndex);
+            }
+        }
+
+        // 6. Morph Target Component
+        if (auto* morph = reg.Get<ZHLN::Components::MorphTargetComponent>(e)) {
+            if (ImGui::CollapsingHeader("Morph Target Component", ImGuiTreeNodeFlags_DefaultOpen)) {
+                ImGui::Text("Morph Offset: %u", morph->offset);
+                ImGui::Text("Active Target Count: %u", morph->activeCount);
+                for (uint32_t w = 0; w < morph->activeCount; ++w) {
+                    ImGui::SliderFloat(std::format("Weight {}", w).c_str(), &morph->weights[w], 0.0f, 1.0f);
+                }
+            }
+        }
+
+        // 7. PBR Component
         if (auto* pbr = reg.Get<ZHLN::Components::PBRComponent>(e)) {
             if (ImGui::CollapsingHeader("PBR Component", ImGuiTreeNodeFlags_DefaultOpen)) {
                 ImGui::SliderFloat("Roughness", &pbr->roughness, 0.0f, 1.0f);
@@ -880,6 +923,7 @@ void DrawEditorPanels(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& opti
             }
         }
 
+        // 8. Light Component
         if (auto* light = reg.Get<ZHLN::Components::LightComponent>(e)) {
             if (ImGui::CollapsingHeader("Light Component", ImGuiTreeNodeFlags_DefaultOpen)) {
                 std::array<float, 3> color = {light->color.GetX(), light->color.GetY(), light->color.GetZ()};

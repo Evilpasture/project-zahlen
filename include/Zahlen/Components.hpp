@@ -83,35 +83,45 @@ struct Components {
         float roughness = 0.5f;
         float metallic  = 0.0f;
     };
+    // Pure local transform state (what designers edit)
     struct TransformComponent {
         JPH::Vec3 position = JPH::Vec3::sZero();
         JPH::Quat rotation = JPH::Quat::sIdentity();
         JPH::Vec3 scale    = JPH::Vec3::sReplicate(1.0f);
 
-        [[nodiscard]] JPH::Mat44 GetMatrix() const {
+        [[nodiscard]] JPH::Mat44 GetLocalMatrix() const {
             return JPH::Mat44::sRotationTranslation(rotation, position) * JPH::Mat44::sScale(scale);
         }
+
+        [[nodiscard]] JPH::Mat44 GetMatrix() const {
+            return GetLocalMatrix();
+        }
+    };
+
+    // Computed cached matrices (updated by a TransformSystem)
+    struct WorldTransformComponent {
+        JPH::Mat44 world    = JPH::Mat44::sIdentity();
+        JPH::Mat44 previous = JPH::Mat44::sIdentity(); // For TAA / Motion Blur vectors
     };
 
     struct MeshComponent {
         AssetID    meshAsset     = InvalidAssetID;
         MaterialID materialAsset = InvalidMaterialID;
         float      cullRadius    = 1.0f;
+        JPH::Vec3  localCenter   = JPH::Vec3::sZero();
+        DrawFlags  flags         = DrawFlags::None;
+        int32_t    nodeIndex     = -1;
+    };
 
-        JPH::Vec3  localCenter    = JPH::Vec3::sZero();
-        JPH::Mat44 localTransform = JPH::Mat44::sIdentity();
-        JPH::Mat44 prevTransform  = JPH::Mat44::sIdentity();
-        JPH::Mat44 worldTransform = JPH::Mat44::sIdentity();
-        uint32_t   jointOffset    = 0;
-        bool       isSkinned      = false;
+    struct SkeletalMeshComponent {
+        uint32_t jointOffset   = 0;
+        int32_t  skeletonIndex = -1;
+    };
 
-        uint32_t             morphOffset      = 0;
-        uint32_t             activeMorphCount = 0;
-        std::array<float, 4> morphWeights     = {0.0f, 0.0f, 0.0f, 0.0f};
-
-        int32_t   nodeIndex     = -1;
-        int32_t   skeletonIndex = -1;
-        DrawFlags flags         = DrawFlags::None;
+    struct MorphTargetComponent {
+        uint32_t             offset      = 0;
+        uint32_t             activeCount = 0;
+        std::array<float, 4> weights     = {0.0f, 0.0f, 0.0f, 0.0f};
     };
 
     struct LODComponent {

@@ -15,10 +15,10 @@ void DecalSystem::Update(Engine& engine) {
     auto& reg = engine.GetRegistry();
 
     for (Entity e: reg.GetEntitiesWith<Components::DecalComponent>()) {
-        auto* decalComp = reg.Get<Components::DecalComponent>(e);
-        auto* trans     = reg.Get<Components::TransformComponent>(e);
-        if ((decalComp != nullptr) && (trans != nullptr)) {
-            JPH::Mat44 worldMat = trans->GetMatrix();
+        auto* decalComp  = reg.Get<Components::DecalComponent>(e);
+        auto* worldTrans = reg.Get<Components::WorldTransformComponent>(e);
+        if ((decalComp != nullptr) && (worldTrans != nullptr)) {
+            JPH::Mat44 worldMat = worldTrans->world;
             JPH::Mat44 invWorld = worldMat.Inversed();
 
             Renderer::DrawDecal(

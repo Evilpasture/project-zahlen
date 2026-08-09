@@ -1,22 +1,18 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// File: src/engine/system/AnimationSystem.cpp
-
-// clang-format off
-#include <Jolt/Jolt.h>
-// clang-format on
 #include "AnimationSystem.hpp"
+#include <Jolt/Jolt.h>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/IK.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/SkeletalAnimation.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
 #include <cmath>
-#include <Zahlen/Threading/TaskSystem.hpp>
 
 namespace ZHLN {
 
@@ -35,7 +31,6 @@ void SampleChannel(const AnimationChannel& channel, float time, JPH::Vec3& outT,
         return;
     }
 
-    // Fast binary search over native float array
     auto   it   = std::ranges::upper_bound(channel.keyTimes, time);
     size_t idx1 = (it == channel.keyTimes.end()) ? channel.keyTimes.size() - 1 : std::distance(channel.keyTimes.begin(), it);
     size_t idx0 = (idx1 > 0) ? idx1 - 1 : 0;
@@ -44,7 +39,6 @@ void SampleChannel(const AnimationChannel& channel, float time, JPH::Vec3& outT,
     float t1     = channel.keyTimes[idx1];
     float factor = (t1 > t0) ? (time - t0) / (t1 - t0) : 0.0f;
 
-    // Optional: Step Interpolation Override
     if (channel.interpolation == InterpolationType::Step) {
         factor = 0.0f;
     }
@@ -130,18 +124,18 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
         return;
     }
 
-    // 1. Calculate total joints required for GPU memory allocation
-    uint32_t totalJoints     = 0;
-    auto     allMeshEntities = reg.GetEntitiesWith<Components::MeshComponent>();
+    uint32_t totalJoints        = 0;
+    auto     allSkinnedEntities = reg.GetEntitiesWith<Components::SkeletalMeshComponent>();
 
-    for (Entity e: allMeshEntities) {
-        auto* mesh = reg.Get<Components::MeshComponent>(e);
-        if ((mesh != nullptr) && mesh->isSkinned && mesh->skeletonIndex >= 0) {
+    for (Entity e: allSkinnedEntities) {
+        auto* skelMesh = reg.Get<Components::SkeletalMeshComponent>(e);
+        if (skelMesh != nullptr && skelMesh->skeletonIndex >= 0) {
             auto*  hier       = reg.Get<Components::HierarchyComponent>(e);
             Entity parentRoot = (hier != nullptr) ? hier->parent : NullEntity;
             if (auto* anim = reg.Get<Components::AnimatorComponent>(parentRoot)) {
                 if (anim->prefab != nullptr) {
-                    totalJoints = std::max(totalJoints, mesh->jointOffset + static_cast<uint32_t>(anim->prefab->skeletons[mesh->skeletonIndex].joints.size()));
+                    totalJoints =
+                        std::max(totalJoints, skelMesh->jointOffset + static_cast<uint32_t>(anim->prefab->skeletons[skelMesh->skeletonIndex].joints.size()));
                 }
             }
         }
@@ -153,7 +147,6 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
 
     JPH::Array<JPH::Mat44> calculatedJoints(std::max(totalJoints, 1u), JPH::Mat44::sIdentity());
 
-    // 2. Evaluate root model animations safely in parallel across worker fibers
     TaskSystem::ParallelFor(entities.size(), 1, [&](uint32_t start, uint32_t end, uint32_t) {
         for (uint32_t i = start; i < end; ++i) {
             Entity                         rootEntity = entities[i];
@@ -162,10 +155,8 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
             if (!anim.prefab) {
                 continue;
             }
-
             const ModelPrefab& prefab = *anim.prefab;
 
-            // A. Populate default base local node transforms
             std::vector<JPH::Vec3> baseT(prefab.nodes.size());
             std::vector<JPH::Quat> baseR(prefab.nodes.size());
             std::vector<JPH::Vec3> baseS(prefab.nodes.size());
@@ -173,18 +164,15 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
                 Decompose(prefab.nodes[n].localTransform, baseT[n], baseR[n], baseS[n]);
             }
 
-            // Track animated morph weights per node
             std::vector<std::array<float, 4>> nodeMorphWeights(prefab.nodes.size(), {0.0f, 0.0f, 0.0f, 0.0f});
             std::vector<uint32_t>             nodeActiveMorphCounts(prefab.nodes.size(), 0);
 
-            // B. Update Blending State Progress
             if (anim.blendDuration > 0.0f && anim.prevTrackIdx >= 0) {
                 anim.blendFactor = std::min(1.0f, anim.blendFactor + (dt / anim.blendDuration));
             } else {
                 anim.blendFactor = 1.0f;
             }
 
-            // C. Sample Previous Track (If Blending)
             std::vector<JPH::Vec3> prevT = baseT;
             std::vector<JPH::Quat> prevR = baseR;
             std::vector<JPH::Vec3> prevS = baseS;
@@ -208,7 +196,6 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
                 }
             }
 
-            // D. Sample Current Track
             std::vector<JPH::Vec3> currT = baseT;
             std::vector<JPH::Quat> currR = baseR;
             std::vector<JPH::Vec3> currS = baseS;
@@ -241,7 +228,6 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
                 }
             }
 
-            // E. Linearly / Spherically Interpolate Poses
             std::vector<JPH::Mat44> localTransforms(prefab.nodes.size());
             for (size_t n = 0; n < prefab.nodes.size(); ++n) {
                 if (anim.prevTrackIdx >= 0 && anim.blendFactor < 1.0f) {
@@ -249,19 +235,16 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
                     JPH::Vec3 blendedT = prevT[n] + t * (currT[n] - prevT[n]);
                     JPH::Quat blendedR = prevR[n].SLERP(currR[n], t).Normalized();
                     JPH::Vec3 blendedS = prevS[n] + t * (currS[n] - prevS[n]);
-
                     localTransforms[n] = JPH::Mat44::sRotationTranslation(blendedR, blendedT).PreScaled(blendedS);
                 } else {
                     localTransforms[n] = JPH::Mat44::sRotationTranslation(currR[n], currT[n]).PreScaled(currS[n]);
                 }
             }
 
-            // F. Finalize Blend Lifecycle
             if (anim.blendFactor >= 1.0f) {
-                anim.prevTrackIdx = -1; // End active blend tracking
+                anim.prevTrackIdx = -1;
             }
 
-            // G. Topologically solve world matrices for the entire glTF node tree
             std::vector<JPH::Mat44> worldTransforms(prefab.nodes.size(), JPH::Mat44::sIdentity());
             std::vector<bool>       computed(prefab.nodes.size(), false);
 
@@ -286,25 +269,22 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
                 auto _ = GetWorldTransform(GetWorldTransform, static_cast<int32_t>(n));
             }
 
-            // --- G2. SOLVE TWO-BONE IK CHAINS ---
             if (auto* ikComp = reg.Get<Components::TwoBoneIKComponent>(rootEntity)) {
                 for (auto& chain: ikComp->chains) {
                     if (chain.weight <= 0.001f || chain.upperNodeIndex < 0 || chain.lowerNodeIndex < 0 || chain.endNodeIndex < 0) {
                         continue;
                     }
-
                     if (chain.upperNodeIndex >= static_cast<int32_t>(prefab.nodes.size()) ||
                         chain.lowerNodeIndex >= static_cast<int32_t>(prefab.nodes.size()) || chain.endNodeIndex >= static_cast<int32_t>(prefab.nodes.size())) {
                         continue;
                     }
 
-                    // Resolve dynamic target position if tracking a target entity
                     JPH::Vec3 solvedTargetPos = chain.targetPosition;
                     JPH::Quat solvedTargetRot = chain.targetRotation;
 
                     if (chain.targetEntity != NullEntity && reg.IsAlive(chain.targetEntity)) {
                         if (auto* tTrans = reg.Get<Components::TransformComponent>(chain.targetEntity)) {
-                            JPH::Mat44 tMat = tTrans->GetMatrix();
+                            JPH::Mat44 tMat = tTrans->GetLocalMatrix();
                             solvedTargetPos = tMat * chain.targetOffset;
                             solvedTargetRot = tTrans->rotation;
                         }
@@ -332,7 +312,6 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
                         JPH::Vec3 localLowerDir = (localTransforms[chain.endNodeIndex].GetTranslation()).Normalized();
 
                         JPH::Mat44 newUpperWorld = IK::AlignNodeToDirection(upperWorld, localUpperDir, ikOutput.upperDirection);
-
                         JPH::Mat44 newLowerWorld = JPH::Mat44::sRotationTranslation(lowerWorld.GetQuaternion(), ikOutput.midPosition);
                         newLowerWorld            = IK::AlignNodeToDirection(newLowerWorld, localLowerDir, ikOutput.lowerDirection);
 
@@ -342,7 +321,6 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
                             newEndWorld = JPH::Mat44::sRotationTranslation(solvedTargetRot, solvedTargetPos);
                         }
 
-                        // Blend between keyframed pose and solved IK pose
                         float w        = std::clamp(chain.weight, 0.0f, 1.0f);
                         auto  BlendMat = [](const JPH::Mat44& a, const JPH::Mat44& b, float t) {
                             JPH::Vec3 tA = a.GetTranslation();
@@ -359,7 +337,7 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
                 }
             }
 
-            // H. Apply calculated node matrices & morph weights to child mesh primitives
+            auto allMeshEntities = reg.GetEntitiesWith<Components::MeshComponent>();
             for (Entity childEnt: allMeshEntities) {
                 auto* hier = reg.Get<Components::HierarchyComponent>(childEnt);
                 if (!hier || hier->parent != rootEntity) {
@@ -372,21 +350,23 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
                 }
 
                 if (nodeActiveMorphCounts[mesh->nodeIndex] > 0) {
-                    mesh->activeMorphCount = nodeActiveMorphCounts[mesh->nodeIndex];
-                    mesh->morphWeights     = nodeMorphWeights[mesh->nodeIndex];
+                    auto* morphComp = reg.Get<Components::MorphTargetComponent>(childEnt);
+                    if (morphComp == nullptr) {
+                        morphComp = &reg.Add<Components::MorphTargetComponent>(childEnt);
+                    }
+                    morphComp->activeCount = nodeActiveMorphCounts[mesh->nodeIndex];
+                    morphComp->weights     = nodeMorphWeights[mesh->nodeIndex];
                 }
 
-                if (mesh->isSkinned) {
-                    if (mesh->skeletonIndex >= 0 && mesh->skeletonIndex < static_cast<int32_t>(prefab.skeletons.size())) {
-                        const Skeleton& skeleton     = prefab.skeletons[mesh->skeletonIndex];
-                        JPH::Mat44      invMeshWorld = worldTransforms[mesh->nodeIndex].Inversed();
+                auto* skelMesh = reg.Get<Components::SkeletalMeshComponent>(childEnt);
+                if (skelMesh != nullptr && skelMesh->skeletonIndex >= 0 && skelMesh->skeletonIndex < static_cast<int32_t>(prefab.skeletons.size())) {
+                    const Skeleton& skeleton     = prefab.skeletons[skelMesh->skeletonIndex];
+                    JPH::Mat44      invMeshWorld = worldTransforms[mesh->nodeIndex].Inversed();
 
-                        for (size_t j = 0; j < skeleton.joints.size(); ++j) {
-                            const auto& joint                       = skeleton.joints[j];
-                            calculatedJoints[mesh->jointOffset + j] = invMeshWorld * worldTransforms[joint.nodeIndex] * joint.inverseBindMatrix;
-                        }
+                    for (size_t j = 0; j < skeleton.joints.size(); ++j) {
+                        const auto& joint                           = skeleton.joints[j];
+                        calculatedJoints[skelMesh->jointOffset + j] = invMeshWorld * worldTransforms[joint.nodeIndex] * joint.inverseBindMatrix;
                     }
-                    mesh->localTransform = JPH::Mat44::sIdentity();
                 } else {
                     JPH::Vec3 t {};
                     JPH::Vec3 s {};
@@ -398,7 +378,6 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
                         childTrans->rotation = r;
                         childTrans->scale    = s;
                     }
-                    mesh->localTransform = JPH::Mat44::sIdentity();
                 }
             }
         }

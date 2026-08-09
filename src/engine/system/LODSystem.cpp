@@ -34,7 +34,14 @@ void LODSystem::Update(Engine& engine) {
                 continue;
             }
 
-            float dist = (meshComp->worldTransform.GetTranslation() - cam.position).Length();
+            JPH::Vec3 worldPos = JPH::Vec3::sZero();
+            if (auto* worldTrans = reg.Get<Components::WorldTransformComponent>(e)) {
+                worldPos = worldTrans->world.GetTranslation();
+            } else if (auto* trans = reg.Get<Components::TransformComponent>(e)) {
+                worldPos = trans->position;
+            }
+
+            float dist = (worldPos - cam.position).Length();
 
             // Default to the lowest detail mesh available
             uint8_t selectedLOD = lodGroup.count - 1;
