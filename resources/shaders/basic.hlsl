@@ -11,6 +11,16 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, ui
     if (inst.iboAddress != 0) {
         actualVertexId = vk::RawBufferLoad<uint>(inst.iboAddress + vertexId * 4, 4);
     }
+    /*
+     * NOTE: Defensive check against OOB BDA fetches.
+     * This is a very rare case, but it's still possible to trigger it.
+     * The only way to trigger it is to have a very large mesh with a
+     * very large number of vertices, and a very large number of instances.
+     * In this case, the BDA address will be 0, and the actualVertexId will
+     * be greater than the vertexCount. This will cause a crash in the
+     * following line, which is trying to access the vertex attributes.
+     */
+    actualVertexId = min(actualVertexId, max(inst.vertexCount, 1u) - 1u);
 
     uint texIndices0 = inst.texIndices0;
     uint albedoIdx   = texIndices0 & 0xFFFF;

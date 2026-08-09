@@ -12,14 +12,14 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Render.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
+#include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <cgltf.h>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
-#include <Zahlen/physics/Physics.hpp>
 #include <stb_image.h>
-#include <Zahlen/Threading/TaskSystem.hpp>
 #include <unordered_map>
 #include <vector>
 
@@ -360,7 +360,16 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job) {
         job.indexCount = static_cast<uint32_t>(prim.indices->count);
         job.indices.resize(job.indexCount);
         for (size_t idx = 0; idx < job.indexCount; ++idx) {
-            job.indices[idx] = static_cast<uint32_t>(cgltf_accessor_read_index(prim.indices, idx));
+            uint32_t rawIndex = static_cast<uint32_t>(cgltf_accessor_read_index(prim.indices, idx));
+
+            /*
+             * NOTE: Malformed or multi-primitive glTF files can contain index accessors whose
+             * values exceed the local primitive's vertex count. On Vulkan, where vertex
+             * positions are fetched via bindless raw buffer loads (`vk::RawBufferLoad`), an
+             * out-of-bounds index causes an immediate GPU MMU page fault at heap boundaries,
+             * resulting in VK_ERROR_DEVICE_LOST. We strictly clamp indices to [0, vertexCount - 1].
+             */
+            job.indices[idx] = std::min(rawIndex, static_cast<uint32_t>(vertexCount > 0 ? vertexCount - 1 : 0));
         }
     } else {
         job.indexCount = static_cast<uint32_t>(job.positions.size());

@@ -205,8 +205,8 @@ struct PassFactory {
                 self.volumetricLightInjectPass.WriteNext(
                     device, Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelMedia>>(self.graphResources.voxelMedia),
                     Vk::Assume<Vk::ComputeWrite<Res_VoxelLight>>(self.graphResources.voxelLight), self.frames.frameUniformBuffers[fIdx].Handle(),
-                    self.frames.lightStorageBuffers[fIdx].Handle(), self.frames.clusterGridBuffers[fIdx].Handle(), self.frames.lightIndexListBuffers[fIdx].Handle(),
-                    self.graphResources.shadowMap.view.Get(), self.shadowSampler.Get()
+                    self.frames.lightStorageBuffers[fIdx].Handle(), self.frames.clusterGridBuffers[fIdx].Handle(),
+                    self.frames.lightIndexListBuffers[fIdx].Handle(), self.graphResources.shadowMap.view.Get(), self.shadowSampler.Get()
                 );
                 VolumetricLightInjectPushConstants pc = {};
                 self.volumetricLightInjectPass.Dispatch(c, 160 / 8, (90 + 7) / 8, 64, pc);
@@ -327,7 +327,7 @@ struct PassFactory {
         auto& targetImage = self.graphResources.hdrSceneColor;
         return Vk::Passieren<"Forward", Vk::ColorWrite<Res_HdrSceneColor>, Vk::DepthStencilWrite<Res_Depth>>([this, &targetImage](VkCommandBuffer c) noexcept {
             Profiler::ScopedGpuProfile timer(c, fIdx, self.gpuProfiler, Stage::ForwardPass);
-            FrameRecorder                                                  fwdRecorder(c, self);
+            FrameRecorder              fwdRecorder(c, self);
             Passes::ForwardPass {}.Execute(
                 fwdRecorder, Vk::Assume<Vk::ColorWrite<Res_HdrSceneColor>>(targetImage),
                 Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(self.presentation.depthTarget)
@@ -431,7 +431,8 @@ struct PassFactory {
                 };
 
                 self.taaPass.WriteNext(
-                    device, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor), Vk::Assume<Vk::ShaderRead<Res_AccumCurr>>(self.frames.accumBuffers.Current()),
+                    device, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor),
+                    Vk::Assume<Vk::ShaderRead<Res_AccumCurr>>(self.frames.accumBuffers.Current()),
                     Vk::Assume<Vk::ShaderRead<Res_Velocity>>(self.graphResources.velocityBuffer), self.defaultSampler.Get(),
                     self.frames.frameUniformBuffers[fIdx].Handle()
                 );

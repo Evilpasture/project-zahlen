@@ -58,8 +58,7 @@ VSOutput VSMain(uint vertexID : SV_VertexID) {
     VSOutput output;
     output.uv = float2((vertexID << 1) & 2, vertexID & 2);
 
-    // Flip-free projection; top-left of the texture maps straight to top-left of clip space (-1,
-    // -1)
+    // Flip-free projection; top-left of the texture maps straight to top-left of clip space (-1, -1)
     output.pos = float4(output.uv.x * 2.0f - 1.0f, output.uv.y * 2.0f - 1.0f, 0.0f, 1.0f);
     return output;
 }
@@ -103,7 +102,6 @@ float4 PSMain(VSOutput input): SV_Target0 {
     } else
 #endif
     {
-        // Compute cascade, bias, and projection ONLY on the fallback path to save GPU cycles
         uint cascadeIndex = 0;
         if (viewDepth > frame.cascadeSplits.x)
             cascadeIndex = 1;
@@ -112,18 +110,14 @@ float4 PSMain(VSOutput input): SV_Target0 {
         if (viewDepth > frame.cascadeSplits.z)
             cascadeIndex = 3;
 
-        // Calculate normal bias relative to cascade-specific texel footprint
         float  texelSizeWorld = (frame.shadowWidth * (cascadeIndex + 1)) / frame.shadowResolution;
         float  normalBias     = saturate(1.0 - dot(N, L_sun)) * 1.5 + 0.2;
         float3 biasedWorldPos = worldPos + N * (normalBias * texelSizeWorld);
 
-        // Transform position to the selected light-space matrix
         float4 shadowPos = mul(frame.lightSpaceMatrices[cascadeIndex], float4(biasedWorldPos, 1.0f));
 
-        // Flipped Y multiplier removed; mapping now matches Vulkan's native Y-down coordinate space
         shadowPos.xy = shadowPos.xy * 0.5f + 0.5f * shadowPos.w;
 
-        // Fall back to your standard CSM + PCSS calculation if RT is inactive
         shadow = CalculateShadowPCSS(shadowPos, N, L_sun, input.pos.xy, shadowMap, shadowSampler, pointSampler, frame.shadowResolution, cascadeIndex);
     }
 
@@ -143,10 +137,14 @@ float4 PSMain(VSOutput input): SV_Target0 {
     uint sliceZ = uint(max(0.0f, log(viewDepth) * frame.zScale + frame.zBias));
     uint cIdx   = min(uint(input.uv.x * 16.0f), 15u) + (min(uint(input.uv.y * 9.0f), 8u) * 16) + (min(sliceZ, 23u) * 144);
 
-    ClusterVolume cluster = clusterGrid[cIdx];
+    ClusterVolume cluster        = clusterGrid[cIdx];
+    uint          lightListCount = min(cluster.count, 64u); // Safety clamp against out-of-bounds reads
 
-    for (uint i = 0; i < cluster.count; ++i) {
-        uint  l     = clusterIndexList[cluster.offset + i];
+    for (uint i = 0; i < lightListCount; ++i) {
+        uint l = clusterIndexList[cluster.offset + i];
+        if (l >= frame.lightCount)
+            continue; // Out-of-bounds guard
+
         Light light = lights[l];
         if (light.type == 3) { // AREA LIGHT
             float2   uv      = float2(roughness, sqrt(1.0f - NdotV));
@@ -227,18 +225,15 @@ float4 PSMain(VSOutput input): SV_Target0 {
                 } else
 #endif
                     if (light.shadowLayer >= 0) {
-                    if (light.type == 1) {    // POINT LIGHT (Omni-directional Cubemap)
-                        float3 r = -L_unnorm; // Vector from light to pixel
+                    if (light.type == 1) { // POINT LIGHT (Omni-directional Cubemap)
+                        float3 r = -L_unnorm;
 
-                        // Reconstruct linear distance matching the exact format written to the
-                        // shadow map
                         float currentDepth = (distToCenter / max(light.range, 0.001f)) - 0.005f;
 
                         shadowVisibility = punctualShadowCube.SampleCmpLevelZero(shadowSampler, float4(r, light.shadowLayer), currentDepth);
                     } else if (light.type == 2) { // SPOT LIGHT (2D Perspective Array)
                         float4 sPos = mul((float4x4) light.points, float4(worldPos + N * 0.05f, 1.0f));
-                        // Native Vulkan positive coordinate mapping mapping [-1, 1] to [0, 1]
-                        sPos.xy = sPos.xy * 0.5f + 0.5f * sPos.w;
+                        sPos.xy     = sPos.xy * 0.5f + 0.5f * sPos.w;
 
                         float depthRef   = (sPos.z / sPos.w) - 0.005f;
                         shadowVisibility = punctualShadow2D.SampleCmpLevelZero(shadowSampler, float3(sPos.xy / sPos.w, (float) light.shadowLayer), depthRef);

@@ -852,17 +852,18 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
 
                     auto make_cluster_set = [&](uint32_t i) -> std::expected<void, Error> {
                         return Vk::Buffer::Create(
-                                   allocator.Get(), sizeof(ClusterVolume) * numClusters, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_GPU_ONLY
+                                   allocator.Get(), sizeof(ClusterVolume) * numClusters, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                   VMA_MEMORY_USAGE_GPU_ONLY
                         )
                             .transform_error([](VkResult res) -> Error { return res; })
-                            .and_then([&, i](auto&& cgb) { // Deduced as std::expected<Vk::Buffer, Error>
+                            .and_then([&, i](auto&& cgb) {
                                 frames.clusterGridBuffers[i] = std::forward<decltype(cgb)>(cgb);
                                 return Vk::Buffer::Create(
                                            allocator.Get(), sizeof(uint32_t) * numClusters * 64, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_GPU_ONLY
                                 )
                                     .transform_error([](VkResult res) -> Error { return res; });
                             })
-                            .and_then([&, i](auto&& lsb) { // Deduced as std::expected<Vk::Buffer, Error>
+                            .and_then([&, i](auto&& lsb) {
                                 frames.lightIndexListBuffers[i] = std::forward<decltype(lsb)>(lsb);
                                 return Vk::Buffer::Create(
                                            allocator.Get(), sizeof(uint32_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
@@ -870,8 +871,15 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
                                 )
                                     .transform_error([](VkResult res) -> Error { return res; });
                             })
-                            .transform([&, i](auto&& gcb) -> void { // Transforms final Vk::Buffer to void
+                            .transform([&, i](auto&& gcb) -> void {
                                 frames.globalCounterBuffers[i] = std::forward<decltype(gcb)>(gcb);
+
+                                // Zero-initialize clusterGridBuffer and globalCounterBuffer to guarantee zero counts
+                                Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
+                                    Vk::FillBuffer(cmd, frames.clusterGridBuffers[i], 0, 0u);
+                                    Vk::FillBuffer(cmd, frames.globalCounterBuffers[i], 0, 0u);
+                                });
+
                                 ClusterCullingLayout::Write(
                                     ctx.Device(), frames.clusterCullingSets[i], Vk::BufferWrite {.buffer = clusterBoundsBuffer.Handle()},
                                     Vk::BufferWrite {.buffer = frames.clusterGridBuffers[i].Handle()},

@@ -45,7 +45,6 @@ float SampleShadowPCF3x3(float3 projCoords, float cascade, float angle) {
     float shadow    = 0.0f;
     float texelSize = 1.0f / float(frame.shadowResolution);
 
-    // Dynamic bias scaling with cascade depth to prevent self-shadowing acne
     float bias         = 0.0012f * (cascade + 1.0f);
     float compareDepth = projCoords.z - bias;
 
@@ -111,11 +110,9 @@ float SampleShadowPCF3x3(float3 projCoords, float cascade, float angle) {
     float  shadow     = 1.0f;
 
     if (projCoords.x >= 0.0f && projCoords.x <= 1.0f && projCoords.y >= 0.0f && projCoords.y <= 1.0f && projCoords.z >= 0.0f && projCoords.z <= 1.0f) {
-        // --- ROTATED 3x3 PCF FILTER ---
         float rotationAngle = GetNoise3D(tid, frame.camPos.w) * 2.0f * 3.14159265f;
         shadow              = SampleShadowPCF3x3(projCoords, (float) cascadeIndex, rotationAngle);
 
-        // Smoothly fade out shadows near the shadow map boundaries
         float3 boundaryDist = min(projCoords.xyz, 1.0f - projCoords.xyz);
         float  fade         = saturate(min(boundaryDist.x, min(boundaryDist.y, boundaryDist.z)) * 8.0f);
         shadow              = lerp(1.0f, shadow, fade);
@@ -123,12 +120,16 @@ float SampleShadowPCF3x3(float3 projCoords, float cascade, float angle) {
 
     accumulatedLight += frame.lightDir.w * phaseSun * shadow * scattering;
 
-    uint3         clusterCoords = uint3(uint(uv.x * 16.0f), uint(uv.y * 9.0f), uint(max(0.0f, log(depthVS) * frame.zScale + frame.zBias)));
-    uint          clusterIdx    = clusterCoords.x + (clusterCoords.y * 16) + (min(clusterCoords.z, 23u) * 144);
-    ClusterVolume cluster       = clusterGrid[clusterIdx];
+    uint3         clusterCoords  = uint3(uint(uv.x * 16.0f), uint(uv.y * 9.0f), uint(max(0.0f, log(depthVS) * frame.zScale + frame.zBias)));
+    uint          clusterIdx     = clusterCoords.x + (clusterCoords.y * 16) + (min(clusterCoords.z, 23u) * 144);
+    ClusterVolume cluster        = clusterGrid[clusterIdx];
+    uint          lightListCount = min(cluster.count, 64u); // Defense-in-depth bounds clamp
 
-    for (uint i = 0; i < cluster.count; ++i) {
-        uint  lIdx  = clusterIndexList[cluster.offset + i];
+    for (uint i = 0; i < lightListCount; ++i) {
+        uint lIdx = clusterIndexList[cluster.offset + i];
+        if (lIdx >= frame.lightCount)
+            continue; // Out-of-bounds index guard
+
         Light light = lights[lIdx];
 
         if (light.type == 0 || light.type == 4)

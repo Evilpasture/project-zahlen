@@ -49,17 +49,16 @@ float GetNoise3D(uint3 tid, float time) {
 }
 
 float SampleShadowPCF3x3(float3 projCoords, float cascade, float angle) {
-    float shadow    = 0.0f;
-    float texelSize = 1.0f / float(frame.shadowResolution);
+    float shadow       = 0.0f;
+    float texelSize    = 1.0f / float(frame.shadowResolution);
     float bias         = 0.0012f * (cascade + 1.0f);
     float compareDepth = projCoords.z - bias;
 
     float s = sin(angle);
     float c = cos(angle);
 
-    float2 offsets[9] = {float2(-1.0f, -1.0f), float2(0.0f, -1.0f), float2(1.0f, -1.0f),
-                         float2(-1.0f, 0.0f),  float2(0.0f, 0.0f),  float2(1.0f, 0.0f),
-                         float2(-1.0f, 1.0f),  float2(0.0f, 1.0f),  float2(1.0f, 1.0f)};
+    float2 offsets[9] = {float2(-1.0f, -1.0f), float2(0.0f, -1.0f), float2(1.0f, -1.0f), float2(-1.0f, 0.0f), float2(0.0f, 0.0f),
+                         float2(1.0f, 0.0f),   float2(-1.0f, 1.0f), float2(0.0f, 1.0f),  float2(1.0f, 1.0f)};
 
     [unroll] for (int i = 0; i < 9; ++i) {
         float2 rotatedOffset = float2(offsets[i].x * c - offsets[i].y * s, offsets[i].x * s + offsets[i].y * c) * texelSize;
@@ -71,7 +70,8 @@ float SampleShadowPCF3x3(float3 projCoords, float cascade, float angle) {
 [numthreads(8, 8, 1)] void CSMain(uint3 tid : SV_DispatchThreadID) {
     uint3 gridDim;
     outVoxelLight.GetDimensions(gridDim.x, gridDim.y, gridDim.z);
-    if (any(tid >= gridDim)) return;
+    if (any(tid >= gridDim))
+        return;
 
     float4 media      = inVoxelMedia[tid];
     float3 scattering = media.rgb;
@@ -102,9 +102,12 @@ float SampleShadowPCF3x3(float3 projCoords, float cascade, float angle) {
     float  phaseSun = PhaseDualHG(dot(-V, L_sun), lightPC.phaseAnisotropy, -0.10f, 0.50f);
 
     uint cascadeIndex = 0;
-    if (depthVS > frame.cascadeSplits.x) cascadeIndex = 1;
-    if (depthVS > frame.cascadeSplits.y) cascadeIndex = 2;
-    if (depthVS > frame.cascadeSplits.z) cascadeIndex = 3;
+    if (depthVS > frame.cascadeSplits.x)
+        cascadeIndex = 1;
+    if (depthVS > frame.cascadeSplits.y)
+        cascadeIndex = 2;
+    if (depthVS > frame.cascadeSplits.z)
+        cascadeIndex = 3;
 
     float4 shadowPos = mul(frame.lightSpaceMatrices[cascadeIndex], float4(worldPos, 1.0f));
     shadowPos.xy     = shadowPos.xy * 0.5f + 0.5f * shadowPos.w;
@@ -112,9 +115,10 @@ float SampleShadowPCF3x3(float3 projCoords, float cascade, float angle) {
     float3 projCoords = shadowPos.xyz / shadowPos.w;
     float  shadow     = 1.0f;
 
-    if (lightPC.enableShadows != 0 && projCoords.x >= 0.0f && projCoords.x <= 1.0f && projCoords.y >= 0.0f && projCoords.y <= 1.0f && projCoords.z >= 0.0f && projCoords.z <= 1.0f) {
+    if (lightPC.enableShadows != 0 && projCoords.x >= 0.0f && projCoords.x <= 1.0f && projCoords.y >= 0.0f && projCoords.y <= 1.0f && projCoords.z >= 0.0f &&
+        projCoords.z <= 1.0f) {
         float rotationAngle = GetNoise3D(tid, frame.camPos.w) * 2.0f * 3.14159265f;
-        shadow = SampleShadowPCF3x3(projCoords, (float) cascadeIndex, rotationAngle);
+        shadow              = SampleShadowPCF3x3(projCoords, (float) cascadeIndex, rotationAngle);
 
         float3 boundaryDist = min(projCoords.xyz, 1.0f - projCoords.xyz);
         float  fade         = saturate(min(boundaryDist.x, min(boundaryDist.y, boundaryDist.z)) * 8.0f);
@@ -124,15 +128,20 @@ float SampleShadowPCF3x3(float3 projCoords, float cascade, float angle) {
     accumulatedLight += frame.lightDir.w * phaseSun * shadow * scattering * lightPC.scatteringIntensity;
 
     // --- 3. Clustered Point/Spot/Area Lights (Shared Cluster Grid Assignment) ---
-    uint3 clusterCoords = uint3(uint(uv.x * 16.0f), uint(uv.y * 9.0f), uint(max(0.0f, log(depthVS) * frame.zScale + frame.zBias)));
-    uint  clusterIdx    = clusterCoords.x + (clusterCoords.y * 16) + (min(clusterCoords.z, 23u) * 144);
-    ClusterVolume cluster = clusterGrid[clusterIdx];
+    uint3         clusterCoords  = uint3(uint(uv.x * 16.0f), uint(uv.y * 9.0f), uint(max(0.0f, log(depthVS) * frame.zScale + frame.zBias)));
+    uint          clusterIdx     = clusterCoords.x + (clusterCoords.y * 16) + (min(clusterCoords.z, 23u) * 144);
+    ClusterVolume cluster        = clusterGrid[clusterIdx];
+    uint          lightListCount = min(cluster.count, 64u); // Defense-in-depth bounds clamp
 
-    for (uint i = 0; i < cluster.count; ++i) {
-        uint  lIdx  = clusterIndexList[cluster.offset + i];
+    for (uint i = 0; i < lightListCount; ++i) {
+        uint lIdx = clusterIndexList[cluster.offset + i];
+        if (lIdx >= frame.lightCount)
+            continue; // Out-of-bounds index guard
+
         Light light = lights[lIdx];
 
-        if (light.type == 0 || light.type == 4) continue; // Skip Sun/Dir
+        if (light.type == 0 || light.type == 4)
+            continue; // Skip Sun/Dir
 
         float3 L_unnorm = light.position - worldPos;
         float  dist     = length(L_unnorm);

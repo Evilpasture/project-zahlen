@@ -456,9 +456,7 @@ std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, VkResult>
 
                 Vk::BufferBarrier(cmd, release);
 
-                ZHLN::Lock(pendingAcquires.mutex, [&] {
-                    pendingAcquires.buffers.push_back(acquire);
-                });
+                ZHLN::Lock(pendingAcquires.mutex, [&] { pendingAcquires.buffers.push_back(acquire); });
             }
         });
 
@@ -501,7 +499,7 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
     ZHLN_BlasGeometryDesc geom = {
         .vertex_data   = scratchMesh->vboAddress,
         .vertex_stride = sizeof(VertexPosition),
-        .max_vertex    = scratchMesh->vertexCount,
+        .max_vertex    = scratchMesh->vertexCount > 0 ? scratchMesh->vertexCount - 1 : 0,
         .vertex_format = VK_FORMAT_R32G32B32_SFLOAT,
         .index_data    = drawCmd.instanceData.iboAddress,
         .index_type    = (drawCmd.instanceData.iboAddress != 0) ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_NONE_KHR
@@ -707,7 +705,7 @@ RenderResult RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept {
             b.geom = {
                 .vertex_data   = b.posMesh->vboAddress,
                 .vertex_stride = sizeof(VertexPosition),
-                .max_vertex    = mesh.vertexCount,
+                .max_vertex    = mesh.vertexCount > 0 ? mesh.vertexCount - 1 : 0,
                 .vertex_format = VK_FORMAT_R32G32B32_SFLOAT,
                 .index_data    = (b.indexMesh != nullptr) ? b.indexMesh->vboAddress : 0,
                 .index_type    = (b.indexMesh != nullptr) ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_NONE_KHR
@@ -758,7 +756,7 @@ RenderResult RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept {
                     tempCmd, {.src_stage  = VK_PIPELINE_STAGE_2_COPY_BIT,
                               .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
                               .dst_stage  = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-                              .dst_access = VK_ACCESS_2_SHADER_READ_BIT}
+                              .dst_access = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR}
                 );
                 impl->rtCtx.BuildBLAS(tempCmd, b.geom, b.blas, Vk::GetBufferAddress(impl->ctx.Device(), b.scratch.Handle()), b.primitiveCount);
             }
