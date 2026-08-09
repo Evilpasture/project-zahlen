@@ -57,15 +57,29 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
     auto& rc  = engine.GetRenderContext();
     auto& reg = engine.GetRegistry();
 
-    TextureHandle fontHandle = TextureHandle::Invalid;
-    auto     uiSettingsEnts = reg.GetEntitiesWith<Components::UISettingsComponent>();
+    // ========================================================================
+    // 0. POST-PROCESSING & GLOBAL SETTINGS CONFIGURATION
+    // ========================================================================
+    auto   settingsEntities = reg.GetEntitiesWith<Components::GlobalSettingsTagComponent>();
+    Entity settingsEnt      = settingsEntities.empty() ? reg.Create() : settingsEntities[0];
+    if (settingsEntities.empty()) {
+        reg.Add(settingsEnt, Components::GlobalSettingsTagComponent {});
+    }
+
+    ECS::Patch<Components::PostProcessSettingsComponent>(reg, settingsEnt, [&](auto& pp) {
+        pp.enableRTR = 1;
+        pp.enableSSR = 0;
+    });
+
+    TextureHandle fontHandle     = TextureHandle::Invalid;
+    auto          uiSettingsEnts = reg.GetEntitiesWith<Components::UISettingsComponent>();
     if (!uiSettingsEnts.empty()) {
         fontHandle = reg.Get<Components::UISettingsComponent>(uiSettingsEnts[0])->fontAtlas.texture;
         if (fontHandle == TextureHandle::Invalid) {
             fontHandle = CreativeWorksFactory::CreateFontAtlasTexture(rc);
             if (auto* settings = reg.Get<Components::UISettingsComponent>(uiSettingsEnts[0])) {
                 settings->fontAtlas.texture = fontHandle;
-                settings->defaultFontAtlas = fontHandle;
+                settings->defaultFontAtlas  = fontHandle;
             }
         }
     }
@@ -99,40 +113,18 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
     );
     s_PointLight = pointLight;
 
-    // PBR Ground Grid
-    Mesh     planeMesh       = CreativeWorksFactory::CreatePlane(rc, 35.0f, {0.12f, 0.14f, 0.18f, 1.0f});
-    auto     planeMat_res    = CreativeWorksFactory::CreateBasicMaterial(rc);
-    Material planeMat        = planeMat_res.value_or(Material {});
-    planeMat.roughnessFactor = 0.35f;
-    planeMat.metallicFactor  = 0.15f;
+    // --- PBR Ground Grid (High-Level Spawner) ---
+    Entity planeEnt = CreativeWorksFactory::CreatePlane(
+        engine, 35.0f, {0.12f, 0.14f, 0.18f, 1.0f}, CreativeWorksFactory::SpawnParams {.position = {0.0f, 0.0f, 0.0f}, .roughness = 0.05f, .metallic = 0.30f}
+    );
+    ECS::Patch<Components::NameComponent>(reg, planeEnt, [](auto& name) { name.name.assign("FallbackGround"); });
 
-    AssetID    planeMeshAsset = HashAssetID("default_preset_plane_mesh");
-    MaterialID planeMatAsset  = HashAssetID("default_preset_plane_mat");
-    rc.RegisterGPUMesh(planeMeshAsset, planeMesh);
-    rc.RegisterGPUMaterial(planeMatAsset, planeMat);
-
-    Entity planeEnt = reg.Create();
-    reg.Add(planeEnt, Components::NameComponent {.name = String64("FallbackGround")});
-    reg.Add(planeEnt, Components::TransformComponent {.position = {0.0f, 0.0f, 0.0f}, .rotation = JPH::Quat::sIdentity(), .scale = {1.0f, 1.0f, 1.0f}});
-    reg.Add(planeEnt, Components::MeshComponent {.meshAsset = planeMeshAsset, .materialAsset = planeMatAsset, .cullRadius = 50.0f});
-
-    // Central Metallic Emblem
-    Mesh     boxMesh       = CreativeWorksFactory::CreateBox(rc, JPH::Vec3(1.2f, 1.2f, 1.2f), {0.1f, 0.6f, 0.95f, 1.0f});
-    auto     boxMat_res    = CreativeWorksFactory::CreateBasicMaterial(rc);
-    Material boxMat        = boxMat_res.value_or(Material {});
-    boxMat.roughnessFactor = 0.15f;
-    boxMat.metallicFactor  = 0.85f;
-
-    AssetID    boxMeshAsset = HashAssetID("default_preset_box_mesh");
-    MaterialID boxMatAsset  = HashAssetID("default_preset_box_mat");
-    rc.RegisterGPUMesh(boxMeshAsset, boxMesh);
-    rc.RegisterGPUMaterial(boxMatAsset, boxMat);
-
-    Entity boxEnt = reg.Create();
-    reg.Add(boxEnt, Components::NameComponent {.name = String64("FallbackEmblem")});
-    reg.Add(boxEnt, Components::TransformComponent {.position = {0.0f, 2.0f, 0.0f}, .rotation = JPH::Quat::sIdentity(), .scale = {1.0f, 1.0f, 1.0f}});
-    reg.Add(boxEnt, Components::MeshComponent {.meshAsset = boxMeshAsset, .materialAsset = boxMatAsset, .cullRadius = 3.5f});
-    reg.Add(boxEnt, Components::PBRComponent {.roughness = 0.15f, .metallic = 0.85f});
+    // --- Central Metallic Emblem (High-Level Spawner) ---
+    Entity boxEnt = CreativeWorksFactory::CreateBox(
+        engine, JPH::Vec3(1.2f, 1.2f, 1.2f),
+        CreativeWorksFactory::SpawnParams {.position = {0.0f, 2.0f, 0.0f}, .roughness = 0.15f, .metallic = 0.85f, .color = {0.1f, 0.6f, 0.95f, 1.0f}}
+    );
+    ECS::Patch<Components::NameComponent>(reg, boxEnt, [](auto& name) { name.name.assign("FallbackEmblem"); });
     s_CubeEntity = boxEnt;
 
     // Camera Positioning
@@ -144,7 +136,7 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
 
     // ========================================================================
     // 2. REFINED DECLARATIVE NATIVE ECS 2D UI POPUP LAYOUT (700x440)
-    // ================================================================= grand
+    // ========================================================================
     // Main Centered Window Panel
     Entity popupBox = reg.Create();
     reg.Add(popupBox, Components::NameComponent {.name = String64("FallbackUIPopupBox")});
@@ -163,7 +155,7 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
                   }
     );
     reg.Add(popupBox, Components::UIPanelComponent {.color = {0.08f, 0.11f, 0.16f, 0.95f}, .texture = TextureHandle::Invalid, .edgeWidth = 1.0f});
-    reg.Add(popupBox, Components::MeshComponent {}); // <-- Added to give the popup box DrawFlags capability
+    reg.Add(popupBox, Components::MeshComponent {});
     s_UIPopupBox = popupBox;
 
     // Top Accent Stripe
@@ -273,7 +265,10 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
     Entity btnReload = reg.Create();
     reg.Add(btnReload, Components::NameComponent {.name = String64("BtnReload")});
     reg.Add(btnReload, Components::UIRectComponent {.parentEntity = popupBox, .x = 25.0f, .y = 368.0f, .width = btnW, .height = btnH, .hierarchyDepth = 2});
-    reg.Add(btnReload, Components::UIPanelComponent {.color = {0.16f, 0.24f, 0.36f, 0.95f}, .borderRadius = {4.0f, 4.0f, 4.0f, 4.0f}, .texture = TextureHandle::Invalid});
+    reg.Add(
+        btnReload,
+        Components::UIPanelComponent {.color = {0.16f, 0.24f, 0.36f, 0.95f}, .borderRadius = {4.0f, 4.0f, 4.0f, 4.0f}, .texture = TextureHandle::Invalid}
+    );
     reg.Add(btnReload, Components::UIButtonComponent {});
     reg.Add(
         btnReload, Components::UIStyleComponent {
@@ -302,7 +297,10 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
     Entity btnAnimate = reg.Create();
     reg.Add(btnAnimate, Components::NameComponent {.name = String64("BtnAnimate")});
     reg.Add(btnAnimate, Components::UIRectComponent {.parentEntity = popupBox, .x = 250.0f, .y = 368.0f, .width = btnW, .height = btnH, .hierarchyDepth = 2});
-    reg.Add(btnAnimate, Components::UIPanelComponent {.color = {0.16f, 0.24f, 0.36f, 0.95f}, .borderRadius = {4.0f, 4.0f, 4.0f, 4.0f}, .texture = TextureHandle::Invalid});
+    reg.Add(
+        btnAnimate,
+        Components::UIPanelComponent {.color = {0.16f, 0.24f, 0.36f, 0.95f}, .borderRadius = {4.0f, 4.0f, 4.0f, 4.0f}, .texture = TextureHandle::Invalid}
+    );
     reg.Add(btnAnimate, Components::UIButtonComponent {});
     reg.Add(
         btnAnimate, Components::UIStyleComponent {
@@ -331,7 +329,10 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
     Entity btnQuit = reg.Create();
     reg.Add(btnQuit, Components::NameComponent {.name = String64("BtnQuit")});
     reg.Add(btnQuit, Components::UIRectComponent {.parentEntity = popupBox, .x = 475.0f, .y = 368.0f, .width = btnW, .height = btnH, .hierarchyDepth = 2});
-    reg.Add(btnQuit, Components::UIPanelComponent {.color = {0.45f, 0.16f, 0.18f, 0.95f}, .borderRadius = {4.0f, 4.0f, 4.0f, 4.0f}, .texture = TextureHandle::Invalid});
+    reg.Add(
+        btnQuit,
+        Components::UIPanelComponent {.color = {0.45f, 0.16f, 0.18f, 0.95f}, .borderRadius = {4.0f, 4.0f, 4.0f, 4.0f}, .texture = TextureHandle::Invalid}
+    );
     reg.Add(btnQuit, Components::UIButtonComponent {});
     reg.Add(
         btnQuit, Components::UIStyleComponent {

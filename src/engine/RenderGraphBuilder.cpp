@@ -91,6 +91,32 @@ struct PassFactory {
         });
     }
 
+    [[nodiscard]] auto MakeClusterCullingPass() const noexcept {
+        return Vk::MakePass<"ClusterCulling">([this](VkCommandBuffer c) noexcept {
+            Profiler::ScopedGpuProfile timer(c, fIdx, self.gpuProfiler, Stage::ClusterCullingPass);
+
+            // 1. Zero the atomic counter via the Transfer stage
+            vkCmdFillBuffer(c, self.frames.globalCounterBuffers[fIdx].Handle(), 0, VK_WHOLE_SIZE, 0);
+
+            // 2. Barrier: Wait for FillBuffer (Transfer) to finish before the Compute Shader executes
+            Vk::BufferBarrier(
+                c, {.sType         = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+                    .srcStageMask  = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                    .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                    .dstStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                    .dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
+                    .buffer        = self.frames.globalCounterBuffers[fIdx].Handle(),
+                    .offset        = 0,
+                    .size          = VK_WHOLE_SIZE}
+            );
+
+            // 3. Dispatch Cluster Culling
+            self.clusterCullingPass.Dispatch(c, self.frames.clusterCullingSets[fIdx], 16, 9, 24);
+
+            // No trailing barrier needed!
+            // The Timeline Semaphore in `SubmitAndPresent` handles the Compute -> Fragment sync safely.
+        });
+    }
     [[nodiscard]] auto MakeMainPass2() const noexcept {
         return Vk::Passieren<
             "MainPass2", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::DepthStencilWrite<Res_Depth>,
@@ -286,8 +312,9 @@ struct PassFactory {
                     Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer), self.pointSampler.Get(),
                     self.iblPayload.prefilteredView.Get(), GetTLAS(), self.frames.frameUniformBuffers[fIdx].Handle(), self.iblPayload.brdfLutView.Get(),
                     self.clampSampler.Get(), Vk::Assume<Vk::ShaderRead<Res_Lighting>>(self.graphResources.lightingTarget),
-                    Vk::Assume<Vk::ShaderReadGeneral<Res_VoxelResolved>>(self.graphResources.voxelResolved)
+                    Vk::Assume<Vk::ShaderReadGeneral<Res_VoxelResolved>>(self.graphResources.voxelResolved), self.frames.instanceDataBuffers[fIdx].Handle()
                 );
+
                 self.reflectionPass.ExecuteVariant(ctx.Cmd(), reflVariant, pc);
             }
         );
@@ -316,7 +343,7 @@ struct PassFactory {
                     Vk::Assume<Vk::ShaderRead<Res_TransNorm>>(self.graphResources.transNormalBuffer), self.pointSampler.Get(),
                     self.iblPayload.prefilteredView.Get(), GetTLAS(), self.frames.frameUniformBuffers[fIdx].Handle(), self.iblPayload.brdfLutView.Get(),
                     self.clampSampler.Get(), Vk::Assume<Vk::ShaderRead<Res_Lighting>>(self.graphResources.lightingTarget),
-                    Vk::Assume<Vk::ShaderReadGeneral<Res_VoxelResolved>>(self.graphResources.voxelResolved)
+                    Vk::Assume<Vk::ShaderReadGeneral<Res_VoxelResolved>>(self.graphResources.voxelResolved), self.frames.instanceDataBuffers[fIdx].Handle()
                 );
                 self.translucentReflectionPass.ExecuteVariant(ctx.Cmd(), reflVariant, pc);
             }
@@ -613,7 +640,7 @@ struct PassFactory {
 
 auto BuildComputeGraph(const PassFactory& factory) {
     return Vk::CompileTimeFrameGraph(
-        factory.MakeVolumetricClearPass(), factory.MakeVolumetricFogInjectPass(), factory.MakeVolumetricLightInjectPass(),
+        factory.MakeClusterCullingPass(), factory.MakeVolumetricClearPass(), factory.MakeVolumetricFogInjectPass(), factory.MakeVolumetricLightInjectPass(),
         factory.MakeVolumetricIntegrationPass(), factory.MakeVolumetricTemporalPass(), factory.MakeParticleUpdatePass(), factory.MakeMeshParticleUpdatePass()
     );
 }

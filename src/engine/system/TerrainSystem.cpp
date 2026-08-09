@@ -40,7 +40,7 @@ void TerrainSystem::Update(Engine& engine, float /*dt*/) {
         // 2. Lazy bake or re-bake GPU mesh if invalidated
         if (!rc.GetGPUMesh(meshComp->meshAsset).has_value()) {
             if (!terrain.heights.empty()) {
-                Mesh tMesh = CreativeWorksFactory::CreateTerrainFromData(
+                Mesh tMesh = CreativeWorksFactory::CreateTerrainMeshFromData(
                     rc, terrain.sampleCount, terrain.worldSize, terrain.heights.data(), terrain.colors.empty() ? nullptr : terrain.colors.data()
                 );
                 rc.RegisterGPUMesh(meshComp->meshAsset, tMesh);

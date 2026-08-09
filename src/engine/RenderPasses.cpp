@@ -546,7 +546,7 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
 
     {
         Profiler::ScopedGpuProfile timer(cmd, recorder.frameIndex, ctx.gpuProfiler, Stage::ShadowPass);
-        bool                                                          hasMeshParticles = !ctx.queues.meshParticleQueue.empty();
+        bool                       hasMeshParticles = !ctx.queues.meshParticleQueue.empty();
 
         for (uint32_t c = 0; c < RenderContext::Impl::NUM_CASCADES; ++c) {
             uint32_t csmDrawCount = passDrawCounts[c];
@@ -592,7 +592,7 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
 
         for (uint32_t l_idx = 0; l_idx < ctx.mappedLights.size(); ++l_idx) {
             const auto& light = ctx.mappedLights[l_idx];
-            if (light.shadowLayer < 0 || light.type == Point) {
+            if (light.shadowLayer < 0) {
                 continue;
             }
 
@@ -637,8 +637,8 @@ void MainPass1::Execute(
     const FrameRecorder&                                                                                       recorder,
     SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> in
 ) const noexcept {
-    auto                                                         cmd = recorder.cmd;
-    auto&                                                        ctx = recorder.ctx;
+    auto                       cmd = recorder.cmd;
+    auto&                      ctx = recorder.ctx;
     Profiler::ScopedGpuProfile timer(cmd, recorder.frameIndex, ctx.gpuProfiler, Stage::MainPass1);
 
     const auto drawCount = static_cast<uint32_t>(ctx.queues.drawQueue.size());
@@ -685,8 +685,8 @@ void MainPass2::Execute(
     const FrameRecorder&                                                                                       recorder,
     SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> in
 ) const noexcept {
-    auto                                                         cmd = recorder.cmd;
-    auto&                                                        ctx = recorder.ctx;
+    auto                       cmd = recorder.cmd;
+    auto&                      ctx = recorder.ctx;
     Profiler::ScopedGpuProfile timer(cmd, recorder.frameIndex, ctx.gpuProfiler, Stage::MainPass2);
 
     const auto drawCount = static_cast<uint32_t>(ctx.queues.drawQueue.size());

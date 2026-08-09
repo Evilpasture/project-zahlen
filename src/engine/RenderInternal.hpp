@@ -351,7 +351,8 @@ using ReflectionLayout = Vk::DescriptorLayout<
     Vk::SampledImageSlot<8, VK_SHADER_STAGE_FRAGMENT_BIT>,  // brdfLUT
     Vk::SamplerSlot<9, VK_SHADER_STAGE_FRAGMENT_BIT>,       // clampSampler
     Vk::SampledImageSlot<10, VK_SHADER_STAGE_FRAGMENT_BIT>, // texLighting (Pass 2 Output)
-    Vk::SampledImageSlot<11, VK_SHADER_STAGE_FRAGMENT_BIT>  // texVoxelIntegrated
+    Vk::SampledImageSlot<11, VK_SHADER_STAGE_FRAGMENT_BIT>, // texVoxelIntegrated
+    Vk::StorageBufferSlot<12, VK_SHADER_STAGE_FRAGMENT_BIT> // g_instances
     >;
 
 using BakeLayout = Vk::DescriptorLayout<Vk::StorageImageSlot<0>>;
@@ -388,6 +389,9 @@ enum class Stage : uint8_t {
     VolumetricLightInjectPass,
     VolumetricIntegratePass,
     VolumetricTemporalPass,
+    ClusterCullingPass,
+    ParticleUpdatePass,
+    MeshParticleUpdatePass,
 };
 
 using FrameProfiler = Profiler::GpuProfiler<Stage>;

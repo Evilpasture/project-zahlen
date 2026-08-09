@@ -105,37 +105,27 @@ inline void GpuProfiler<EnumT>::Reset(uint32_t frameIndex) noexcept {
 
 template <typename EnumT>
     requires std::is_enum_v<EnumT>
-inline void GpuProfiler<EnumT>::WriteStart(VkCommandBuffer cmd, uint32_t frameIndex, EnumT stage) const noexcept {
+void GpuProfiler<EnumT>::WriteStart(VkCommandBuffer cmd, uint32_t frameIndex, EnumT stage) const noexcept {
     if (!_enabled) {
         return;
     }
     auto     stage_idx = static_cast<uint32_t>(stage);
     uint32_t query_idx = stage_idx * 2;
-    uint32_t slot      = frameIndex % 2;
 
-    _recordedMasks[slot] |= (1U << stage_idx);
-
-    std::string_view      stage_name = Reflect::EnumToString(stage);
-    bool                  is_compute = stage_name.contains("Volumetric") || stage_name.contains("Compute");
-    VkPipelineStageFlags2 stage_mask = is_compute ? VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT : VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT;
-
-    vkCmdWriteTimestamp2(cmd, stage_mask, _pools[slot], query_idx);
+    _recordedMasks[frameIndex] |= (1U << stage_idx);
+    vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_NONE, _pools[frameIndex], query_idx);
 }
 
 template <typename EnumT>
     requires std::is_enum_v<EnumT>
-inline void GpuProfiler<EnumT>::WriteEnd(VkCommandBuffer cmd, uint32_t frameIndex, EnumT stage) const noexcept {
+void GpuProfiler<EnumT>::WriteEnd(VkCommandBuffer cmd, uint32_t frameIndex, EnumT stage) const noexcept {
     if (!_enabled) {
         return;
     }
     auto     stage_idx = static_cast<uint32_t>(stage);
     uint32_t query_idx = (stage_idx * 2) + 1;
 
-    std::string_view      stage_name = Reflect::EnumToString(stage);
-    bool                  is_compute = stage_name.contains("Volumetric") || stage_name.contains("Compute");
-    VkPipelineStageFlags2 stage_mask = is_compute ? VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT : VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT;
-
-    vkCmdWriteTimestamp2(cmd, stage_mask, _pools[frameIndex % 2], query_idx);
+    vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_NONE, _pools[frameIndex], query_idx);
 }
 
 template <typename EnumT>

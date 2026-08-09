@@ -513,11 +513,15 @@ using ZHLN::Window;
 namespace CreativeWorksFactory {
 using ZHLN::CreativeWorksFactory::CreateBasicMaterial;
 using ZHLN::CreativeWorksFactory::CreateBox;
+using ZHLN::CreativeWorksFactory::CreateBoxMesh;
 using ZHLN::CreativeWorksFactory::CreateFontAtlasTexture;
 using ZHLN::CreativeWorksFactory::CreatePlane;
+using ZHLN::CreativeWorksFactory::CreatePlaneMesh;
 using ZHLN::CreativeWorksFactory::CreateTerrain;
 using ZHLN::CreativeWorksFactory::CreateTerrainFromData;
-using ZHLN::CreativeWorksFactory::CreateTetrahedron;
+using ZHLN::CreativeWorksFactory::CreateTerrainMesh;
+using ZHLN::CreativeWorksFactory::CreateTerrainMeshFromData;
+using ZHLN::CreativeWorksFactory::CreateTetrahedronMesh;
 using ZHLN::CreativeWorksFactory::InstantiatePrefab;
 using ZHLN::CreativeWorksFactory::LoadModelPrefab;
 using ZHLN::CreativeWorksFactory::LoadTexture;

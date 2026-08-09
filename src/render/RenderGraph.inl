@@ -230,7 +230,7 @@ consteval auto ComputeStateTable() {
 
             using Usages = typename Pass::Usages;
 
-            if constexpr (Usages::size > 0) { // <--- Add guard here
+            if constexpr (Usages::size > 0) {
                 [&]<size_t... Is>(std::index_sequence<Is...>) {
                     (
                         [&]<size_t I>() {
@@ -326,37 +326,6 @@ template <typename T>
 } // namespace detail
 
 // ============================================================================
-// Pass Builder Definitions
-// ============================================================================
-
-template <ResourceName Name, typename... Usages, typename RecordFn>
-constexpr auto MakePass(RecordFn&& record) {
-    constexpr bool has_graphics = (detail::IsColorAttachment<Usages>::value || ...) || (detail::IsDepthAttachment<Usages>::value || ...);
-
-    if constexpr (has_graphics) {
-        static_assert(
-            !std::is_invocable_v<RecordFn, VkCommandBuffer>, "\n\n================================================================================\n"
-                                                             "  [COMPILER ERROR] Render pass safety violation detected!\n"
-                                                             "================================================================================\n\n"
-                                                             "  Direct use of MakePass with ColorWrite or DepthWrite is not allowed.\n"
-                                                             "  Recording draw calls outside of an active Vulkan RenderPass causes undefined "
-                                                             "behaviour.\n\n"
-                                                             "  Resolution:\n"
-                                                             "    - Write your lambdas to accept 'auto& ctx' instead of raw VkCommandBuffer.\n"
-                                                             "    - The graph executor will automatically open and close the RenderPass for you.\n\n"
-                                                             "================================================================================\n"
-        );
-    }
-
-    return GraphPass<Name, TypeList<Usages...>, RecordFn> {std::forward<RecordFn>(record)};
-}
-
-template <ResourceName Name, typename... Usages, typename RecordFn>
-constexpr auto Passieren(RecordFn&& record, detail::BypassGraphicsCheckToken /*unused*/) {
-    return GraphPass<Name, TypeList<Usages...>, RecordFn> {std::forward<RecordFn>(record)};
-}
-
-// ============================================================================
 // ResourceBinder Definition
 // ============================================================================
 
@@ -381,13 +350,14 @@ constexpr CompileTimeFrameGraph<Passes...>::CompileTimeFrameGraph(Passes&&... pa
 }
 
 template <typename... Passes>
-void CompileTimeFrameGraph<Passes...>::Execute(VkCommandBuffer cmd, const Binder& binder) const {
+template <typename ProfilerT>
+void CompileTimeFrameGraph<Passes...>::Execute(VkCommandBuffer cmd, const Binder& binder, uint32_t frameIndex, ProfilerT* profiler) const {
     const auto& bindings = binder.GetBindings();
 
     std::apply(
         [&](const auto&... passPack) noexcept(false) {
             [&]<size_t... Is>(std::index_sequence<Is...>) noexcept(false) {
-                (ExecutePass<Is>(cmd, bindings, passPack...[Is]), ...);
+                (ExecutePass<Is>(cmd, bindings, passPack...[Is], frameIndex, profiler), ...);
             }(std::make_index_sequence<NumPasses> {});
         },
         _passes
@@ -395,8 +365,21 @@ void CompileTimeFrameGraph<Passes...>::Execute(VkCommandBuffer cmd, const Binder
 }
 
 template <typename... Passes>
-template <size_t PassIndex, typename PassType>
-void CompileTimeFrameGraph<Passes...>::ExecutePass(VkCommandBuffer cmd, const std::array<GraphResource, NumResources>& bindings, const PassType& pass) const {
+template <size_t PassIndex, typename PassType, typename ProfilerT>
+void CompileTimeFrameGraph<Passes...>::ExecutePass(
+    VkCommandBuffer                                cmd,
+    const std::array<GraphResource, NumResources>& bindings,
+    const PassType&                                pass,
+    uint32_t                                       frameIndex,
+    ProfilerT*                                     profiler
+) const {
+    // AUTOMATED GPU PROFILING TIMER (Zero-overhead: only active when profiler pointer is passed)
+    if constexpr (!std::is_same_v<ProfilerT, void*>) {
+        if (profiler != nullptr) {
+            profiler->WriteStart(cmd, frameIndex, static_cast<uint32_t>(PassIndex));
+        }
+    }
+
     using Usages   = typename PassType::Usages;
     using RecordFn = typename PassType::RecordFn;
 
@@ -468,6 +451,12 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(VkCommandBuffer cmd, const st
         }
     } else {
         pass.record(cmd);
+    }
+
+    if constexpr (!std::is_same_v<ProfilerT, void*>) {
+        if (profiler != nullptr) {
+            profiler->WriteEnd(cmd, frameIndex, static_cast<uint32_t>(PassIndex));
+        }
     }
 }
 
@@ -859,7 +848,7 @@ constexpr void PrintResources(VisualizerStringT& msg, std::index_sequence<ResIdx
 
 // 3. Standalone helper to print a single pass state
 template <typename GraphT, size_t PassIdx, typename Pass, typename Resources, size_t NumResources, typename VisualizerStringT>
-constexpr void PrintPassState(VisualizerStringT& msg) noexcept {
+constexpr void PrintPassState(VisualizerStringT& msg, std::index_sequence<0> /*unused*/) noexcept {
     msg.append("  ● Pass [");
     msg.append_int(PassIdx);
     msg.append("]: \"");
@@ -872,7 +861,9 @@ constexpr void PrintPassState(VisualizerStringT& msg) noexcept {
 // 4. Standalone helper to fold over pass index sequence
 template <typename GraphT, typename PassesTuple, typename Resources, size_t NumResources, typename VisualizerStringT, size_t... PassIdxs>
 constexpr void PrintPasses(VisualizerStringT& msg, std::index_sequence<PassIdxs...> /*unused*/) noexcept {
-    ((PrintPassState<GraphT, PassIdxs, std::tuple_element_t<PassIdxs, PassesTuple>, Resources, NumResources>(msg), msg.append("\n")), ...);
+    ((PrintPassState<GraphT, PassIdxs, std::tuple_element_t<PassIdxs, PassesTuple>, Resources, NumResources>(msg, std::make_index_sequence<1> {}),
+      msg.append("\n")),
+     ...);
 }
 
 // 5. Standalone helper to print registered resource list

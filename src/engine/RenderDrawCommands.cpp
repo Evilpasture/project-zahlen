@@ -1,3 +1,4 @@
+// src/engine/RenderDrawCommands.cpp
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -89,7 +90,6 @@ void RenderContext::Impl::FlushLineQueue() {
 
     activeLineVertexCount = vertIdx;
 
-    // Allocate identity instance data for the line batch
     auto lineInstanceIdx = static_cast<uint32_t>(queues.drawQueue.size());
     lineInstanceId       = lineInstanceIdx;
 
@@ -114,7 +114,7 @@ void RenderContext::Impl::FlushLineQueue() {
         .metallicFactor   = 0.0f,
         .roughnessFactor  = 1.0f,
         .alphaCutoff      = 0.0f,
-        .flags            = 2, // Forward pass flag
+        .flags            = 2,
         .jointOffset      = 0,
         .morphOffset      = 0,
         .activeMorphCount = 0,
@@ -135,7 +135,6 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const 
     using enum BufferHandle;
     auto* impl = ctx.GetImpl();
 
-    // 1. Resolve required pipeline/vertex resources
     auto posMesh_res        = impl->meshPool.Resolve(mesh.posBuffer);
     auto attrMesh_res       = impl->meshPool.Resolve(mesh.attrBuffer);
     auto nativeMaterial_res = impl->materialPool.Resolve(material.pipeline);
@@ -174,10 +173,12 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const 
     } else if (params.skinnedVertexBuffer != Invalid && posMesh != nullptr) {
         attrAddr = finalPosMesh->vboAddress + (posMesh->vertexCount * sizeof(VertexPosition));
     }
-    uint32_t albedoIdx   = impl->textureManager.GetBindlessIndex(material.albedoMap);
-    uint32_t normalIdx   = impl->textureManager.GetBindlessIndex(material.normalMap);
-    uint32_t pbrIdx      = impl->textureManager.GetBindlessIndex(material.pbrMap);
-    uint32_t emissiveIdx = impl->textureManager.GetBindlessIndex(material.emissiveMap);
+
+    // --- BUG FIX: Properly route default texture indices based on handle validity ---
+    uint32_t albedoIdx   = material.albedoMap != TextureHandle::Invalid ? impl->textureManager.GetBindlessIndex(material.albedoMap) : 1;
+    uint32_t normalIdx   = material.normalMap != TextureHandle::Invalid ? impl->textureManager.GetBindlessIndex(material.normalMap) : 2;
+    uint32_t pbrIdx      = material.pbrMap != TextureHandle::Invalid ? impl->textureManager.GetBindlessIndex(material.pbrMap) : 1;
+    uint32_t emissiveIdx = material.emissiveMap != TextureHandle::Invalid ? impl->textureManager.GetBindlessIndex(material.emissiveMap) : 0;
 
     uint32_t isViewmodel      = ((params.flags & DrawFlags::Viewmodel) != DrawFlags::None) ? 1u : 0u;
     uint32_t isSkinned        = (params.skinnedVertexBuffer == Invalid && (params.flags & Skinned) != None) ? 1u : 0u;
@@ -267,10 +268,11 @@ void DrawCSG(RenderContext& ctx, const Material& eyeMaterial, const Mesh& eyeMes
             attrAddr = finalPosMesh->vboAddress + (finalPosMesh->vertexCount * sizeof(VertexPosition));
         }
 
-        uint32_t albedoIdx   = impl->textureManager.GetBindlessIndex(material.albedoMap);
-        uint32_t normalIdx   = impl->textureManager.GetBindlessIndex(material.normalMap);
-        uint32_t pbrIdx      = impl->textureManager.GetBindlessIndex(material.pbrMap);
-        uint32_t emissiveIdx = impl->textureManager.GetBindlessIndex(material.emissiveMap);
+        // --- BUG FIX: Properly route default texture indices based on handle validity ---
+        uint32_t albedoIdx   = material.albedoMap != TextureHandle::Invalid ? impl->textureManager.GetBindlessIndex(material.albedoMap) : 1;
+        uint32_t normalIdx   = material.normalMap != TextureHandle::Invalid ? impl->textureManager.GetBindlessIndex(material.normalMap) : 2;
+        uint32_t pbrIdx      = material.pbrMap != TextureHandle::Invalid ? impl->textureManager.GetBindlessIndex(material.pbrMap) : 1;
+        uint32_t emissiveIdx = material.emissiveMap != TextureHandle::Invalid ? impl->textureManager.GetBindlessIndex(material.emissiveMap) : 0;
 
         uint32_t isSkinned = (skinnedVertexBuffer == BufferHandle::Invalid && (flags & DrawFlags::Skinned) != DrawFlags::None) ? 1u : 0u;
 
@@ -336,11 +338,13 @@ void DrawCSG(RenderContext& ctx, const Material& eyeMaterial, const Mesh& eyeMes
 
 void DrawDecal(RenderContext& ctx, const DecalParams& params) {
     auto* impl = ctx.GetImpl();
+
+    // --- BUG FIX: Safely route valid indices directly for Decals ---
     impl->queues.decalQueue.push_back(
         {.transform    = params.transform,
          .invTransform = params.invTransform,
-         .albedoIndex  = impl->textureManager.GetBindlessIndex(params.albedoMap),
-         .normalIndex  = impl->textureManager.GetBindlessIndex(params.normalMap),
+         .albedoIndex  = params.albedoMap != TextureHandle::Invalid ? impl->textureManager.GetBindlessIndex(params.albedoMap) : 1,
+         .normalIndex  = params.normalMap != TextureHandle::Invalid ? impl->textureManager.GetBindlessIndex(params.normalMap) : 2,
          .roughness    = params.roughness,
          .metallic     = params.metallic}
     );

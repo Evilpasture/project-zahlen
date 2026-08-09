@@ -286,7 +286,7 @@ template <typename T = uint32_t>
 void FillBuffer(VkCommandBuffer cmd, const Buffer& buffer, VkDeviceSize offset = 0, T data = 0) {
     static_assert(sizeof(T) % 4 == 0, "Type must be 4-byte aligned for vkCmdFillBuffer");
 
-    vkCmdFillBuffer(cmd, buffer.Handle(), offset, sizeof(T), data);
+    vkCmdFillBuffer(cmd, buffer.Handle(), offset, VK_WHOLE_SIZE, *reinterpret_cast<const uint32_t*>(&data));
 }
 
 /**

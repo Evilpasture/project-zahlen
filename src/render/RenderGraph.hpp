@@ -7,6 +7,9 @@
 #error "Please include <src/render/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include <array>
+#include <string_view>
+
 namespace ZHLN::Vk {
 
 // ============================================================================
@@ -17,12 +20,15 @@ template <size_t N>
 struct ResourceName {
     std::array<char, N> value {};
 
-    // Define constructor inline so it is immediately available for constexpr initialization
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
     constexpr ResourceName(const char (&str)[N]) {
         for (size_t i = 0; i < N; ++i) {
             value[i] = str[i];
         }
+    }
+
+    [[nodiscard]] constexpr std::string_view string_view() const noexcept {
+        return std::string_view(value.data(), N > 0 && value[N - 1] == '\0' ? N - 1 : N);
     }
 };
 
@@ -56,6 +62,7 @@ struct DummyUsage {
     static constexpr VkAccessFlags2        access = 0;
 };
 } // namespace detail
+
 template <>
 struct TypeList<> {
     static constexpr size_t size = 0;
@@ -211,14 +218,35 @@ consteval auto ComputeStateTable();
  * Triggers a static assertion if rasterization attachments are used directly.
  */
 template <ResourceName Name, typename... Usages, typename RecordFn>
-constexpr auto MakePass(RecordFn&& record);
+constexpr auto MakePass(RecordFn&& record) {
+    constexpr bool has_graphics = (detail::IsColorAttachment<Usages>::value || ...) || (detail::IsDepthAttachment<Usages>::value || ...);
+
+    if constexpr (has_graphics) {
+        static_assert(
+            !std::is_invocable_v<RecordFn, VkCommandBuffer>, "\n\n================================================================================\n"
+                                                             "  [COMPILER ERROR] Render pass safety violation detected!\n"
+                                                             "================================================================================\n\n"
+                                                             "  Direct use of MakePass with ColorWrite or DepthWrite is not allowed.\n"
+                                                             "  Recording draw calls outside of an active Vulkan RenderPass causes undefined "
+                                                             "behaviour.\n\n"
+                                                             "  Resolution:\n"
+                                                             "    - Write your lambdas to accept 'auto& ctx' instead of raw VkCommandBuffer.\n"
+                                                             "    - The graph executor will automatically open and close the RenderPass for you.\n\n"
+                                                             "================================================================================\n"
+        );
+    }
+
+    return GraphPass<Name, TypeList<Usages...>, std::decay_t<RecordFn>> {std::forward<RecordFn>(record)};
+}
 
 /**
  * @brief UNSAFE / Framework-only pass builder.
  * Required for internal wrappers that manually handle render pass boundaries.
  */
 template <ResourceName Name, typename... Usages, typename RecordFn>
-constexpr auto Passieren(RecordFn&& record, [[maybe_unused]] detail::BypassGraphicsCheckToken unused = {});
+constexpr auto Passieren(RecordFn&& record, detail::BypassGraphicsCheckToken /*unused*/ = {}) {
+    return GraphPass<Name, TypeList<Usages...>, std::decay_t<RecordFn>> {std::forward<RecordFn>(record)};
+}
 
 struct GraphResource {
     VkImage     handle = VK_NULL_HANDLE;
@@ -256,7 +284,8 @@ class CompileTimeFrameGraph {
 
     constexpr explicit CompileTimeFrameGraph(Passes&&... passes);
 
-    void Execute(VkCommandBuffer cmd, const Binder& binder) const;
+    template <typename ProfilerT = void*>
+    void Execute(VkCommandBuffer cmd, const Binder& binder, uint32_t frameIndex = 0, ProfilerT* profiler = nullptr) const;
 
   private:
     template <size_t PassIndex, typename PassType>
@@ -307,8 +336,14 @@ class CompileTimeFrameGraph {
         }
     }
 
-    template <size_t PassIndex, typename PassType>
-    void ExecutePass(VkCommandBuffer cmd, const std::array<GraphResource, NumResources>& bindings, const PassType& pass) const;
+    template <size_t PassIndex, typename PassType, typename ProfilerT>
+    void ExecutePass(
+        VkCommandBuffer                                cmd,
+        const std::array<GraphResource, NumResources>& bindings,
+        const PassType&                                pass,
+        uint32_t                                       frameIndex,
+        ProfilerT*                                     profiler
+    ) const;
 
     std::tuple<Passes...> _passes;
 };

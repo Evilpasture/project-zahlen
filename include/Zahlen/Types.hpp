@@ -109,12 +109,12 @@ struct UIObjectConstants {
 };
 
 struct UIBatch {
-    TextureHandle texture      = TextureHandle::Invalid;
-    uint32_t      vertexStart  = 0;
-    uint32_t      vertexCount  = 0;
-    bool          useScissor   = false;
-    bool          isSDF        = false;
-    ScissorRect   scissorRect  = {};
+    TextureHandle texture     = TextureHandle::Invalid;
+    uint32_t      vertexStart = 0;
+    uint32_t      vertexCount = 0;
+    bool          useScissor  = false;
+    bool          isSDF       = false;
+    ScissorRect   scissorRect = {};
 };
 
 struct ClusterBounds {
@@ -128,26 +128,26 @@ struct ClusterVolume {
 
 struct alignas(16) GPUVolumetricVolume {
     JPH::Mat44 invTransform;
-    JPH::Vec4  extentsAndType;  // xyz = extents, w = type (0=Box, 1=Sphere)
-    JPH::Vec4  colorAndDensity; // xyz = color, w = density
-    JPH::Vec4  emissiveAndAniso;// xyz = emissive, w = anisotropy
+    JPH::Vec4  extentsAndType;   // xyz = extents, w = type (0=Box, 1=Sphere)
+    JPH::Vec4  colorAndDensity;  // xyz = color, w = density
+    JPH::Vec4  emissiveAndAniso; // xyz = emissive, w = anisotropy
 };
 static_assert(sizeof(GPUVolumetricVolume) == 112);
 
 struct alignas(16) VolumetricFogInjectPushConstants {
-    float    density;
-    float    heightFalloff;
-    float    heightOffset;
-    float    anisotropy;
+    float density;
+    float heightFalloff;
+    float heightOffset;
+    float anisotropy;
 
-    float    scatteringColor[3];
-    float    noiseScale;
+    float scatteringColor[3];
+    float noiseScale;
 
-    float    absorptionColor[3];
-    float    noiseSpeed;
+    float absorptionColor[3];
+    float noiseSpeed;
 
-    float    emissiveColor[3];
-    float    noiseIntensity;
+    float emissiveColor[3];
+    float noiseIntensity;
 
     uint32_t volumeCount;
     uint32_t enableNoise;
@@ -300,7 +300,6 @@ struct alignas(16) Particle3D {
 };
 static_assert(sizeof(Particle3D) == 96);
 
-// Align structures to 16-byte boundaries to match HLSL std430 layout
 struct alignas(16) GPULight {
     float     position[3];
     LightType type; // 0 = Dir, 1 = Point, 2 = Spot, 3 = Area (LTC Quad)
@@ -317,9 +316,10 @@ struct alignas(16) GPULight {
     float    outerConeCos;
     uint32_t twoSided;    // 0 = Single-Sided, 1 = Double-Sided Area Light
     int32_t  shadowLayer; // -1 if no shadow, >= 0 for Atlas layer index
-    float    positionView[3];
+
+    alignas(16) float positionView[3];
 };
-static_assert(sizeof(GPULight) == 144);
+static_assert(sizeof(GPULight) == 160);
 
 struct alignas(16) FrameUniforms {
     JPH::Mat44 viewProj;
@@ -419,7 +419,7 @@ struct GlyphMetric {
 
 struct FontAtlas {
     TextureHandle texture = TextureHandle::Invalid;
-    GlyphMetric glyphs[96] {};
+    GlyphMetric   glyphs[96] {};
 };
 
 enum class CSGOperation : uint8_t { Difference = 0, Union = 1, Intersection = 2 };

@@ -580,50 +580,18 @@ void RegisterCreativeWorkCommands() {
 
     RegisterCmd(
         "SpawnTerrain", MakeCmd<SpawnTerrainArgs>([](ZHLN::Engine* engine, const SpawnTerrainArgs& a) -> uint64_t {
-            auto& rc  = engine->GetRenderContext();
-            auto& pc  = engine->GetPhysicsContext();
-            auto& reg = engine->GetRegistry();
-
             uint32_t samples   = (a.sampleCount > 0) ? a.sampleCount : 128;
             float    worldSize = (a.worldSize > 0.0f) ? a.worldSize : 200.0f;
             float    maxHeight = (a.maxHeight > 0.0f) ? a.maxHeight : 25.0f;
 
-            Mesh               mesh;
-            std::vector<float> heightsVec;
+            ZHLN::CreativeWorksFactory::SpawnParams params {.createPhysics = true, .isStaticPhysics = true, .roughness = a.roughness, .metallic = a.metallic};
 
+            ZHLN::Entity e = ZHLN::NullEntity;
             if (a.heights != nullptr && a.colorsRGBA != nullptr) {
-                mesh = ZHLN::CreativeWorksFactory::CreateTerrainFromData(rc, samples, worldSize, a.heights, a.colorsRGBA);
-                heightsVec.assign(a.heights, a.heights + (samples * samples));
+                e = ZHLN::CreativeWorksFactory::CreateTerrainFromData(*engine, samples, worldSize, a.heights, a.colorsRGBA, params);
             } else {
-                heightsVec.resize(static_cast<size_t>(samples) * samples);
-                mesh = ZHLN::CreativeWorksFactory::CreateTerrain(rc, samples, worldSize, maxHeight, heightsVec.data());
+                e = ZHLN::CreativeWorksFactory::CreateTerrain(*engine, samples, worldSize, maxHeight, ZHLN::CreativeWorksFactory::TerrainType::Default, params);
             }
-
-            auto shape = ZHLN::Physics::CreateHeightFieldShape(heightsVec.data(), samples, worldSize);
-
-            auto mat_res = ZHLN::CreativeWorksFactory::CreateBasicMaterial(rc);
-            if (!mat_res) {
-                return 0;
-            }
-            Material mat = mat_res.value();
-
-            Entity e = reg.Create();
-
-            AssetID    terrainMeshAsset = HashAssetID("terrain_mesh_" + std::to_string(e.index));
-            MaterialID terrainMatAsset  = HashAssetID("terrain_mat_" + std::to_string(e.index));
-            rc.RegisterGPUMesh(terrainMeshAsset, mesh);
-            rc.RegisterGPUMaterial(terrainMatAsset, mat);
-
-            reg.Add(e, Components::TransformComponent {.position = {0.0f, 0.0f, 0.0f}, .rotation = JPH::Quat::sIdentity(), .scale = {1.0f, 1.0f, 1.0f}});
-            reg.Add(e, Components::MeshComponent {.meshAsset = terrainMeshAsset, .materialAsset = terrainMatAsset, .cullRadius = worldSize * 1.5f});
-            reg.Add(
-                e, Components::PhysicsComponent {
-                       Physics::CreateRigidBody(pc, shape, JPH::RVec3(0.0f, 0.0f, 0.0f), JPH::Quat::sIdentity(), JPH::EMotionType::Static, 0)
-                   }
-            );
-            reg.Add(e, Components::PhysicsStateComponent {});
-            reg.Add(e, Components::PBRComponent {.roughness = a.roughness, .metallic = a.metallic});
-            reg.Add(e, Components::NameComponent {.name = String64("Terrain")});
 
             return e.Pack();
         })
@@ -642,7 +610,7 @@ void RegisterCreativeWorkCommands() {
 
     RegisterCmd("CreateBox", MakeCmd<CreateBoxArgs>([](ZHLN::Engine* engine, const CreateBoxArgs& a) -> uint64_t {
                     ZHLN::Mesh mesh =
-                        ZHLN::CreativeWorksFactory::CreateBox(engine->GetRenderContext(), JPH::Vec3(a.hx, a.hy, a.hz), JPH::Vec4(a.r, a.g, a.b, a.a));
+                        ZHLN::CreativeWorksFactory::CreateBoxMesh(engine->GetRenderContext(), JPH::Vec3(a.hx, a.hy, a.hz), JPH::Vec4(a.r, a.g, a.b, a.a));
                     return static_cast<uint64_t>(mesh.posBuffer);
                 }));
 
@@ -662,89 +630,93 @@ void RegisterCreativeWorkCommands() {
                     return 1;
                 }));
 
-    RegisterCmd("SpawnEntity", MakeCmd<SpawnEntityArgs>([](ZHLN::Engine* engine, const SpawnEntityArgs& a) -> uint64_t {
-                    auto& rc  = engine->GetRenderContext();
-                    auto& pc  = engine->GetPhysicsContext();
-                    auto& reg = engine->GetRegistry();
+    RegisterCmd(
+        "SpawnEntity", MakeCmd<SpawnEntityArgs>([](ZHLN::Engine* engine, const SpawnEntityArgs& a) -> uint64_t {
+            auto type = static_cast<ZHLN::Physics::ShapeType>(a.shapeType);
 
-                    ZHLN::Mesh     mesh;
-                    JPH::ShapeRefC shape;
-                    float          cullRadius = 1.0f;
-                    auto           type       = static_cast<ZHLN::Physics::ShapeType>(a.shapeType);
-
-                    switch (type) {
-                        case ZHLN::Physics::ShapeType::Sphere:
-                            mesh       = ZHLN::CreativeWorksFactory::CreateBox(rc, JPH::Vec3(a.p1, a.p1, a.p1), {a.r, a.g, a.b, a.a});
-                            shape      = ZHLN::Physics::GetOrCreateShape(pc, type, a.p1);
-                            cullRadius = a.p1 * 2.0f;
-                            break;
-                        case ZHLN::Physics::ShapeType::Plane:
-                            mesh       = ZHLN::CreativeWorksFactory::CreatePlane(rc, a.p1, {a.r, a.g, a.b, a.a});
-                            shape      = ZHLN::Physics::GetOrCreateShape(pc, type, 0.0f, 1.0f, 0.0f, 0.0f);
-                            cullRadius = a.p1 * 2.0f;
-                            break;
-                        case ZHLN::Physics::ShapeType::Box:
-                        default:
-                            mesh       = ZHLN::CreativeWorksFactory::CreateBox(rc, JPH::Vec3(a.p1, a.p2, a.p3), {a.r, a.g, a.b, a.a});
-                            shape      = ZHLN::Physics::GetOrCreateShape(pc, ZHLN::Physics::ShapeType::Box, a.p1, a.p2, a.p3);
-                            cullRadius = std::max({a.p1, a.p2, a.p3}) * 2.0f;
-                            break;
-                    }
-
-                    bool isTransparent = (a.a < 1.0f);
-
-                    auto mat_res = ZHLN::CreativeWorksFactory::CreateBasicMaterial(rc, false, isTransparent);
-                    if (!mat_res) {
-                        ZHLN::Panic("Failed to create basic material inside SpawnEntity: {}", mat_res.error().Message());
-                    }
-                    ZHLN::Material mat     = mat_res.value();
-                    mat.baseColorFactor[0] = a.r;
-                    mat.baseColorFactor[1] = a.g;
-                    mat.baseColorFactor[2] = a.b;
-                    mat.baseColorFactor[3] = a.a;
-
-                    ZHLN::Entity e = reg.Create();
-
-                    AssetID    entityMeshAsset = HashAssetID("procedural_mesh_" + std::to_string(e.index));
-                    MaterialID entityMatAsset  = HashAssetID("procedural_mat_" + std::to_string(e.index));
-                    rc.RegisterGPUMesh(entityMeshAsset, mesh);
-                    rc.RegisterGPUMaterial(entityMatAsset, mat);
-
-                    reg.Add(
-                        e,
-                        ZHLN::Components::TransformComponent {.position = {a.px, a.py, a.pz}, .rotation = {a.rx, a.ry, a.rz, a.rw}, .scale = {1.0f, 1.0f, 1.0f}}
-                    );
-                    ZHLN::DrawFlags flags = ZHLN::DrawFlags::None;
-                    if (isTransparent) {
-                        flags |= ZHLN::DrawFlags::ExcludeFromTLAS;
-                    }
-
-                    reg.Add(
-                        e, ZHLN::Components::MeshComponent {
-                               .meshAsset      = entityMeshAsset,
-                               .materialAsset  = entityMatAsset,
-                               .cullRadius     = cullRadius,
-                               .localTransform = JPH::Mat44::sIdentity(),
-                               .prevTransform  = JPH::Mat44::sIdentity(),
-                               .flags          = flags
+            if (type == ZHLN::Physics::ShapeType::Plane) {
+                return ZHLN::CreativeWorksFactory::CreatePlane(
+                           *engine, a.p1, {a.r, a.g, a.b, a.a},
+                           ZHLN::CreativeWorksFactory::SpawnParams {
+                               .position = {a.px, a.py, a.pz}, .rotation = {a.rx, a.ry, a.rz, a.rw}, .createPhysics = true, .isStaticPhysics = (a.isStatic != 0)
                            }
-                    );
-
-                    JPH::Quat rotation(a.rx, a.ry, a.rz, a.rw);
-                    reg.Add(
-                        e, ZHLN::Components::PhysicsComponent {ZHLN::Physics::CreateRigidBody(
-                               pc, shape, JPH::RVec3(a.px, a.py, a.pz), rotation, a.isStatic ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
-                               a.isStatic ? static_cast<JPH::ObjectLayer>(0) : static_cast<JPH::ObjectLayer>(1), 0
-                           )}
-                    );
-                    reg.Add(
-                        e, ZHLN::Components::PhysicsStateComponent {
-                               .currPosition = {a.px, a.py, a.pz}, .prevPosition = {a.px, a.py, a.pz}, .currRotation = rotation, .prevRotation = rotation
+                )
+                    .Pack();
+            } else if (type == ZHLN::Physics::ShapeType::Box) {
+                return ZHLN::CreativeWorksFactory::CreateBox(
+                           *engine, JPH::Vec3(a.p1, a.p2, a.p3),
+                           ZHLN::CreativeWorksFactory::SpawnParams {
+                               .position        = {a.px, a.py, a.pz},
+                               .rotation        = {a.rx, a.ry, a.rz, a.rw},
+                               .createPhysics   = true,
+                               .isStaticPhysics = (a.isStatic != 0),
+                               .color           = {a.r, a.g, a.b, a.a}
                            }
-                    );
+                ).Pack();
+            }
 
-                    return e.Pack();
-                }));
+            // Fallback for custom shapes (e.g. Sphere) using low-level Mesh + RigidBody
+            auto& rc  = engine->GetRenderContext();
+            auto& pc  = engine->GetPhysicsContext();
+            auto& reg = engine->GetRegistry();
+
+            ZHLN::Mesh mesh          = ZHLN::CreativeWorksFactory::CreateBoxMesh(rc, JPH::Vec3(a.p1, a.p1, a.p1), {a.r, a.g, a.b, a.a});
+            auto       shape         = ZHLN::Physics::GetOrCreateShape(pc, type, a.p1);
+            float      cullRadius    = a.p1 * 2.0f;
+            bool       isTransparent = (a.a < 1.0f);
+
+            auto mat_res = ZHLN::CreativeWorksFactory::CreateBasicMaterial(rc, false, isTransparent);
+            if (!mat_res) {
+                ZHLN::Panic("Failed to create basic material inside SpawnEntity: {}", mat_res.error().Message());
+            }
+            ZHLN::Material mat     = mat_res.value();
+            mat.baseColorFactor[0] = a.r;
+            mat.baseColorFactor[1] = a.g;
+            mat.baseColorFactor[2] = a.b;
+            mat.baseColorFactor[3] = a.a;
+
+            ZHLN::Entity e = reg.Create();
+
+            AssetID    entityMeshAsset = HashAssetID("procedural_mesh_" + std::to_string(e.index));
+            MaterialID entityMatAsset  = HashAssetID("procedural_mat_" + std::to_string(e.index));
+            rc.RegisterGPUMesh(entityMeshAsset, mesh);
+            rc.RegisterGPUMaterial(entityMatAsset, mat);
+
+            reg.Add(
+                e, ZHLN::Components::TransformComponent {.position = {a.px, a.py, a.pz}, .rotation = {a.rx, a.ry, a.rz, a.rw}, .scale = {1.0f, 1.0f, 1.0f}}
+            );
+            ZHLN::DrawFlags flags = ZHLN::DrawFlags::None;
+            if (isTransparent) {
+                flags |= ZHLN::DrawFlags::ExcludeFromTLAS;
+            }
+
+            reg.Add(
+                e, ZHLN::Components::MeshComponent {
+                       .meshAsset      = entityMeshAsset,
+                       .materialAsset  = entityMatAsset,
+                       .cullRadius     = cullRadius,
+                       .localTransform = JPH::Mat44::sIdentity(),
+                       .prevTransform  = JPH::Mat44::sIdentity(),
+                       .flags          = flags
+                   }
+            );
+
+            JPH::Quat rotation(a.rx, a.ry, a.rz, a.rw);
+            reg.Add(
+                e, ZHLN::Components::PhysicsComponent {ZHLN::Physics::CreateRigidBody(
+                       pc, shape, JPH::RVec3(a.px, a.py, a.pz), rotation, a.isStatic ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
+                       a.isStatic ? static_cast<JPH::ObjectLayer>(0) : static_cast<JPH::ObjectLayer>(1), 0
+                   )}
+            );
+            reg.Add(
+                e, ZHLN::Components::PhysicsStateComponent {
+                       .currPosition = {a.px, a.py, a.pz}, .prevPosition = {a.px, a.py, a.pz}, .currRotation = rotation, .prevRotation = rotation
+                   }
+            );
+
+            return e.Pack();
+        })
+    );
 
     RegisterCmd("SpawnLight", MakeCmd<SpawnLightArgs>([](ZHLN::Engine* engine, const SpawnLightArgs& a) -> uint64_t {
                     auto& reg = engine->GetRegistry();
@@ -1155,22 +1127,18 @@ void RegisterSystemCommands() {
     RegisterCmd("InitPlayer", MakeCmd<void>([](ZHLN::Engine* engine) -> uint64_t {
                     using namespace ZHLN;
                     auto& reg = engine->GetRegistry();
-                    auto& pc  = engine->GetPhysicsContext();
 
-                    auto         groundShape = ZHLN::Physics::GetOrCreateShape(pc, ZHLN::Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);
-                    ZHLN::Entity ground      = reg.Create();
-                    reg.Add(
-                        ground,
-                        Components::PhysicsComponent {Physics::CreateRigidBody(pc, groundShape, {0, 0, 0}, JPH::Quat::sIdentity(), JPH::EMotionType::Static, 0)}
+                    auto _ = CreativeWorksFactory::CreatePlane(
+                        *engine, 1000.0f, {0.6f, 0.6f, 0.6f, 1.0f},
+                        CreativeWorksFactory::SpawnParams {.position = {0.0f, 0.0f, 0.0f}, .createPhysics = true, .isStaticPhysics = true}
                     );
-                    reg.Add(ground, Components::PhysicsStateComponent {});
 
                     ZHLN::Entity playerEntity = reg.Create();
                     reg.Add(playerEntity, Components::PlayerTagComponent {});
                     reg.Add(playerEntity, Components::TransformComponent {.position = {0.0f, 3.0f, 0.0f}});
                     reg.Add(playerEntity, Components::MovementComponent {});
                     reg.Add(playerEntity, ZHLN::Components::InputComponent {});
-                    ZHLN::Entity charPhys = ZHLN::Physics::CreateCharacter(pc, JPH::RVec3(0.0f, 3.0f, 0.0f));
+                    ZHLN::Entity charPhys = ZHLN::Physics::CreateCharacter(engine->GetPhysicsContext(), JPH::RVec3(0.0f, 3.0f, 0.0f));
                     reg.Add(playerEntity, Components::PhysicsComponent {charPhys});
                     reg.Add(playerEntity, Components::PhysicsStateComponent {.currPosition = {0.0f, 3.0f, 0.0f}, .prevPosition = {0.0f, 3.0f, 0.0f}});
 

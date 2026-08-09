@@ -80,6 +80,13 @@ PunctualShadowVSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_
     return output;
 }
 
-void PSMain(PunctualShadowVSOutput input) {
-    // Empty for depth-only rendering
+struct PunctualShadowPSOutput {
+    float depth : SV_Depth;
+};
+
+PunctualShadowPSOutput PSMain(PunctualShadowVSOutput input) {
+    PunctualShadowPSOutput output;
+    // Write linear depth [0, 1] directly to the shadow cubemap
+    output.depth = saturate(input.linearDepth);
+    return output;
 }

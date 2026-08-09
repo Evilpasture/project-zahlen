@@ -2,15 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "RenderInternal.hpp"
-#include "Zahlen/Math3D.hpp"
 #include "Zahlen/Profiler.hpp"
-#include "engine/Scheduler.hpp"
 #include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <array>
 #include <cstring>
-#include <tuple>
-#include <type_traits>
 #include <utility>
 
 namespace ZHLN {
