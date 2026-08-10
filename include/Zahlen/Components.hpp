@@ -450,14 +450,13 @@ struct Components {
     };
 
     struct AudioSourceComponent {
-        std::string filepath;
-        float       volume        = 1.0f;
-        float       pitch         = 1.0f;
-        bool        isLooping     = false;
-        bool        isSpatialized = true;
-        bool        playOnStart   = true;
-
-        void* nativeSound = nullptr;
+        String128 filepath;
+        float     volume        = 1.0f;
+        float     pitch         = 1.0f;
+        bool      isLooping     = false;
+        bool      isSpatialized = true;
+        bool      playOnStart   = true;
+        bool      isPaused      = false;
     };
     struct InputComponent {
         float localMoveX     = 0.0f;

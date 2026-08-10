@@ -5,7 +5,6 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
-#include <new>
 #include <type_traits>
 #include <utility>
 
@@ -24,7 +23,6 @@ class HashMap {
         ClearAndFree();
     }
 
-    // Move-only semantics (prevents dangerous shallow copying of raw pointers)
     HashMap(const HashMap&)            = delete;
     HashMap& operator=(const HashMap&) = delete;
 
@@ -60,34 +58,39 @@ class HashMap {
             Resize(_capacity * 2);
         }
 
-        // Fast power-of-two bitwise mask instead of integer modulo (%)
-        const size_t mask = _capacity - 1;
-        size_t       idx  = Hash(key) & mask;
+        const size_t mask      = _capacity - 1;
+        size_t       idx       = Hash(key) & mask;
+        auto         firstTomb = static_cast<size_t>(-1);
 
-        while (_states[idx] == 1) {
-            if (_keys[idx] == key) {
-                _values[idx] = value; // Assignment operator if key already constructed
-                return;
+        while (_states[idx] != 0) {
+            if (_states[idx] == 1) {
+                if (_keys[idx] == key) {
+                    _values[idx] = value;
+                    return;
+                }
+            } else if (_states[idx] == 2 && firstTomb == static_cast<size_t>(-1)) {
+                firstTomb = idx;
             }
             idx = (idx + 1) & mask;
         }
 
-        // Placement new: Construct objects directly into the raw buffer block
-        _states[idx] = 1;
-        ::new (static_cast<void*>(&_keys[idx])) Key(key);
-        ::new (static_cast<void*>(&_values[idx])) Value(value);
+        // Reuse first tombstone slot if encountered, otherwise use empty slot
+        size_t insertIdx = (firstTomb != static_cast<size_t>(-1)) ? firstTomb : idx;
+
+        _states[insertIdx] = 1;
+        ::new (static_cast<void*>(&_keys[insertIdx])) Key(key);
+        ::new (static_cast<void*>(&_values[insertIdx])) Value(value);
         _size++;
     }
 
     [[nodiscard]] const Value* Find(const Key& key) const noexcept {
-        if (_capacity == 0) {
+        if (_capacity == 0 || _size == 0) {
             return nullptr;
         }
 
         const size_t mask = _capacity - 1;
         size_t       idx  = Hash(key) & mask;
 
-        // Guaranteed to terminate because load factor constraint leaves empty slots
         while (_states[idx] != 0) {
             if (_states[idx] == 1 && _keys[idx] == key) {
                 return &_values[idx];
@@ -97,18 +100,45 @@ class HashMap {
         return nullptr;
     }
 
+    [[nodiscard]] Value* Find(const Key& key) noexcept {
+        return const_cast<Value*>(std::as_const(*this).Find(key));
+    }
+
+    /**
+     * @brief O(1) Tombstone Erasure.
+     */
+    bool Erase(const Key& key) noexcept {
+        if (_capacity == 0 || _size == 0) {
+            return false;
+        }
+
+        const size_t mask = _capacity - 1;
+        size_t       idx  = Hash(key) & mask;
+
+        while (_states[idx] != 0) {
+            if (_states[idx] == 1 && _keys[idx] == key) {
+                _keys[idx].~Key();
+                _values[idx].~Value();
+                _states[idx] = 2; // Tombstone / Deleted
+                _size--;
+                return true;
+            }
+            idx = (idx + 1) & mask;
+        }
+        return false;
+    }
+
     void Clear() noexcept {
         if (_states == nullptr) {
             return;
         }
 
-        // Manually destroy objects in all active slots
         for (size_t i = 0; i < _capacity; ++i) {
             if (_states[i] == 1) {
                 _keys[i].~Key();
                 _values[i].~Value();
-                _states[i] = 0;
             }
+            _states[i] = 0;
         }
         _size = 0;
     }
@@ -146,16 +176,14 @@ class HashMap {
 
   private:
     void AllocateStorage() {
-        _states = new uint8_t[_capacity](); // Zero-initialized status bytes
-
-        // Allocate raw, completely uninitialized memory chunks
+        _states = new uint8_t[_capacity](); // 0 = Empty, 1 = Active, 2 = Tombstone
         _keys   = static_cast<Key*>(::operator new[](_capacity * sizeof(Key)));
         _values = static_cast<Value*>(::operator new[](_capacity * sizeof(Value)));
     }
 
     void ClearAndFree() {
         if (_states != nullptr) {
-            Clear(); // Invokes destructors on active keys/values
+            Clear();
             delete[] _states;
             ::operator delete[](_keys);
             ::operator delete[](_values);
@@ -169,13 +197,12 @@ class HashMap {
         size_t   old_capacity = _capacity;
 
         _capacity = new_capacity;
-        AllocateStorage(); // Sets up empty buffers with new capacity
+        AllocateStorage(); // Fresh zeroed status array automatically purges tombstones
         _size = 0;
 
         for (size_t i = 0; i < old_capacity; ++i) {
             if (old_states[i] == 1) {
                 Insert(old_keys[i], old_values[i]);
-                // Destroy the old object after it has been safely migrated
                 old_keys[i].~Key();
                 old_values[i].~Value();
             }
@@ -196,7 +223,6 @@ class HashMap {
 #endif
         size_t hash = FNV_offset_basis;
         for (size_t i = 0; i < length; ++i) {
-            // Safe access that prevents UBSan from assuming 8-byte natural alignment
             hash ^= static_cast<size_t>(static_cast<uint8_t>(str[i]));
             hash *= FNV_prime;
         }
@@ -204,7 +230,6 @@ class HashMap {
     }
 
     [[nodiscard]] size_t Hash(const Key& key) const noexcept {
-        // Handle integers, enums, handles, and raw pointers
         if constexpr (sizeof(Key) <= 8 && (std::is_integral_v<Key> || std::is_enum_v<Key> || std::is_pointer_v<Key>) ) {
             uint64_t val = 0;
             if constexpr (std::is_pointer_v<Key>) {
@@ -212,30 +237,23 @@ class HashMap {
             } else {
                 val = static_cast<uint64_t>(key);
             }
-            // High-entropy mixing step
             uint64_t scrambled = val * 11400714819323198485ULL;
             return static_cast<size_t>(scrambled >> (64 - std::countr_zero(_capacity)));
-        }
-        // Handle objects that expose data() and length() (std::string, std::string_view, custom
-        // spans)
-        else if constexpr (requires {
-                               key.data();
-                               key.length();
-                           }) {
-            // Safely cast the data pointer to a byte-oriented character stream
+        } else if constexpr (requires {
+                                 key.data();
+                                 key.length();
+                             }) {
             const char* data_ptr = reinterpret_cast<const char*>(key.data());
             return HashRawBytes(data_ptr, key.length() * sizeof(*key.data()));
         } else {
-            // Static assert prevents compilations with unhandled types,
-            // forcing you to maintain a clean dependency structure.
-            static_assert(sizeof(Key) == 0, "Unsupported Key type! Write a specialized path to avoid <functional>.");
+            static_assert(sizeof(Key) == 0, "Unsupported Key type!");
             return 0;
         }
     }
 
-    uint8_t* _states   = nullptr; // 0 = Empty, 1 = Active
-    Key*     _keys     = nullptr; // Raw storage pointer
-    Value*   _values   = nullptr; // Raw storage pointer
+    uint8_t* _states   = nullptr; // 0 = Empty, 1 = Active, 2 = Tombstone
+    Key*     _keys     = nullptr;
+    Value*   _values   = nullptr;
     size_t   _capacity = 0;
     size_t   _size     = 0;
 };
