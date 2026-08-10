@@ -730,6 +730,8 @@ GameplayStatus Engine::Tick(float dt, GameplayDriver driver) {
         ts.UpdateTransformHistory(GetRegistry());
     }
 
+    _impl->frameCounter++;
+
     return status;
 }
 
@@ -744,12 +746,12 @@ int Engine::Run(const CommandLineOptions& options, UICallback uiCallback) {
     EngineConfig config {
         .physics = {.maxBodies = 5000, .maxBodyPairs = 10000, .maxContactConstraints = 10000, .tempAllocatorSize = 64 * 1024 * 1024},
         .render  = {
-            .appName        = options.launchEditor ? "Zahlen World Editor" : "Zahlen Engine",
-            .width          = w,
-            .height         = h,
-            .vsync          = options.vsync,
-            .fullscreen     = options.fullscreen,
-            .validationMode = options.validationMode,
+             .appName        = options.launchEditor ? "Zahlen World Editor" : "Zahlen Engine",
+             .width          = w,
+             .height         = h,
+             .vsync          = options.vsync,
+             .fullscreen     = options.fullscreen,
+             .validationMode = options.validationMode,
         },
     };
 
