@@ -34,8 +34,6 @@ namespace ZHLN::CreativeWorksFactory {
 
 static std::string FindSystemFont(const char* fontName) {
 #ifdef __APPLE__
-    // On macOS, Fontconfig frequently falls back to CJK/Japanese TTC collections.
-    // Prioritize standard Western TrueType fonts to ensure clean ASCII glyph rendering.
     const char* macFallbacks[] = {
         "/System/Library/Fonts/Supplemental/Arial.ttf", "/System/Library/Fonts/Supplemental/Helvetica.ttf", "/System/Library/Fonts/Supplemental/Verdana.ttf",
         "/System/Library/Fonts/Supplemental/Courier New.ttf"
@@ -340,9 +338,11 @@ Entity InstantiateMeshPart(
     if (params.createPhysics && prep.shape != nullptr) {
         reg.Add(e, Components::TransformComponent {.position = prep.translation, .rotation = prep.rotation, .scale = prep.scale});
         reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
+
+        // FIXED: Replaced Physics::CreateRigidBody with pc.CreateRigidBody
         reg.Add(
-            e, Components::PhysicsComponent {Physics::CreateRigidBody(
-                   pc, prep.shape, JPH::RVec3(prep.translation), prep.rotation, params.isStaticPhysics ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
+            e, Components::PhysicsComponent {pc.CreateRigidBody(
+                   prep.shape, JPH::RVec3(prep.translation), prep.rotation, params.isStaticPhysics ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
                    params.isStaticPhysics ? static_cast<JPH::ObjectLayer>(0) : static_cast<JPH::ObjectLayer>(1), 0, params.physicsCategory, params.physicsMask
                )}
         );
@@ -494,12 +494,14 @@ Entity CreateBox(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, JPH
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
 
     if (params.createPhysics && pc != nullptr) {
-        auto shape = Physics::GetOrCreateShape(
-            *pc, Physics::ShapeType::Box, halfExtents.GetX() * params.scale.GetX(), halfExtents.GetY() * params.scale.GetY(),
+        // FIXED: Used pc->GetOrCreateShape
+        auto shape = pc->GetOrCreateShape(
+            Physics::ShapeType::Box, halfExtents.GetX() * params.scale.GetX(), halfExtents.GetY() * params.scale.GetY(),
             halfExtents.GetZ() * params.scale.GetZ()
         );
-        auto body = Physics::CreateRigidBody(
-            *pc, shape, params.position, params.rotation, params.isStaticPhysics ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
+        // FIXED: Used pc->CreateRigidBody
+        auto body = pc->CreateRigidBody(
+            shape, params.position, params.rotation, params.isStaticPhysics ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
             params.isStaticPhysics ? static_cast<JPH::ObjectLayer>(0) : static_cast<JPH::ObjectLayer>(1), 0, params.physicsCategory, params.physicsMask
         );
         reg.Add(e, Components::PhysicsComponent {body});
@@ -556,9 +558,9 @@ Entity CreatePlane(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, f
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
 
     if (params.createPhysics && pc != nullptr) {
-        auto shape = Physics::GetOrCreateShape(*pc, Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);
-        auto body =
-            Physics::CreateRigidBody(*pc, shape, params.position, params.rotation, JPH::EMotionType::Static, 0, 0, params.physicsCategory, params.physicsMask);
+        // FIXED: Using instance methods
+        auto shape = pc->GetOrCreateShape(Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);
+        auto body  = pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, 0, 0, params.physicsCategory, params.physicsMask);
         reg.Add(e, Components::PhysicsComponent {body});
     }
 
@@ -705,30 +707,32 @@ void SetupPlayerRagdoll(PhysicsContext& pc, ECS::Registry& reg, Entity playerEnt
             part.rotation       = bindPose.GetQuaternion().Normalized();
 
             std::ranges::transform(name, name.begin(), ::tolower);
+            // FIXED: Used pc.GetOrCreateShape instead of Physics::GetOrCreateShape
             if (name.contains("hip") || name.contains("pelvis") || name.contains("root")) {
-                part.shape = Physics::GetOrCreateShape(pc, Physics::ShapeType::Capsule, 0.4f, 0.2f);
+                part.shape = pc.GetOrCreateShape(Physics::ShapeType::Capsule, 0.4f, 0.2f);
                 part.mass  = 15.0f;
             } else if (name.contains("spine") || name.contains("chest") || name.contains("torso")) {
-                part.shape         = Physics::GetOrCreateShape(pc, Physics::ShapeType::Capsule, 0.5f, 0.25f);
+                part.shape         = pc.GetOrCreateShape(Physics::ShapeType::Capsule, 0.5f, 0.25f);
                 part.mass          = 20.0f;
                 part.enableMotors  = true;
                 part.maxMotorForce = 250.0f;
             } else if (name.contains("head") || name.contains("neck")) {
-                part.shape         = Physics::GetOrCreateShape(pc, Physics::ShapeType::Sphere, 0.3f);
+                part.shape         = pc.GetOrCreateShape(Physics::ShapeType::Sphere, 0.3f);
                 part.mass          = 8.0f;
                 part.enableMotors  = true;
                 part.maxMotorForce = 250.0f;
             } else if (IsImportantJoint(name)) {
-                part.shape = Physics::GetOrCreateShape(pc, Physics::ShapeType::Capsule, 0.2f, 0.1f);
+                part.shape = pc.GetOrCreateShape(Physics::ShapeType::Capsule, 0.2f, 0.1f);
                 part.mass  = 3.0f;
             } else {
-                part.shape = Physics::GetOrCreateShape(pc, Physics::ShapeType::Sphere, 0.08f);
+                part.shape = pc.GetOrCreateShape(Physics::ShapeType::Sphere, 0.08f);
                 part.mass  = 0.5f;
             }
             parts.push_back(part);
         }
 
-        auto ragdollInstance = Physics::CreateSkeletalRagdoll(pc, joltSkel, parts);
+        // FIXED: Used pc.CreateSkeletalRagdoll
+        auto ragdollInstance = pc.CreateSkeletalRagdoll(joltSkel, parts);
         ragdollInstance->AddRef();
 
         ArticulationSystem::BindSkeleton(jointOffset, *targetSkeleton);
@@ -836,7 +840,8 @@ Entity CreateTerrainFromData(
 
     if (params.createPhysics && pc != nullptr && heights != nullptr) {
         auto shape = Physics::CreateHeightFieldShape(heights, sampleCount, worldSize);
-        auto body  = Physics::CreateRigidBody(*pc, shape, params.position, params.rotation, JPH::EMotionType::Static, 0);
+        // FIXED: Used pc->CreateRigidBody
+        auto body = pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, 0);
         reg.Add(e, Components::PhysicsComponent {body});
     }
 
@@ -906,7 +911,7 @@ Entity CreateTerrain(
         const TerrainData* stored = TerrainSystem::GetTerrainData(tHandle);
         if (stored != nullptr && !stored->heights.empty()) {
             auto shape = Physics::CreateHeightFieldShape(stored->heights.data(), sampleCount, worldSize);
-            auto body  = Physics::CreateRigidBody(*pc, shape, params.position, params.rotation, JPH::EMotionType::Static, 0);
+            auto body  = pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, 0);
             reg.Add(e, Components::PhysicsComponent {body});
         }
     }

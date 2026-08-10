@@ -372,26 +372,15 @@ using ZHLN::ECS::SparseSet;
 using ZHLN::PhysicsContext;
 
 namespace Physics {
-using ZHLN::Physics::AddImpulse;
-using ZHLN::Physics::CreateCharacter;
-using ZHLN::Physics::CreateMeshBody;
+using ZHLN::Physics::ConstraintHandle;
+using ZHLN::Physics::ConstraintParams;
+using ZHLN::Physics::ConstraintType;
+using ZHLN::Physics::CreateHeightFieldShape;
 using ZHLN::Physics::CreateMeshShape;
-using ZHLN::Physics::CreateRigidBody;
-using ZHLN::Physics::DestroyBody;
-using ZHLN::Physics::FrustumCull;
-using ZHLN::Physics::GetCharacterVelocity;
-using ZHLN::Physics::GetOrCreateShape;
-using ZHLN::Physics::IsCharacterOnGround;
-using ZHLN::Physics::OverlapAABB;
-using ZHLN::Physics::OverlapSphere;
-using ZHLN::Physics::Raycast;
-using ZHLN::Physics::RaycastAll;
+using ZHLN::Physics::CullResult;
+using ZHLN::Physics::GetBodyID;
+using ZHLN::Physics::RaycastPenetrationResult;
 using ZHLN::Physics::RaycastResult;
-using ZHLN::Physics::SetCharacterPosition;
-using ZHLN::Physics::SetCharacterVelocity;
-using ZHLN::Physics::SetCollisionFilter;
-using ZHLN::Physics::SetLinearVelocity;
-using ZHLN::Physics::Shapecast;
 using ZHLN::Physics::ShapeCastResult;
 using ZHLN::Physics::ShapeType;
 } // namespace Physics

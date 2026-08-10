@@ -655,13 +655,12 @@ void RegisterCreativeWorkCommands() {
                 ).Pack();
             }
 
-            // Fallback for custom shapes (e.g. Sphere) using low-level Mesh + RigidBody
             auto& rc  = engine->GetRenderContext();
             auto& pc  = engine->GetPhysicsContext();
             auto& reg = engine->GetRegistry();
 
             ZHLN::Mesh mesh          = ZHLN::CreativeWorksFactory::CreateBoxMesh(rc, JPH::Vec3(a.p1, a.p1, a.p1), {a.r, a.g, a.b, a.a});
-            auto       shape         = ZHLN::Physics::GetOrCreateShape(pc, type, a.p1);
+            auto       shape         = pc.GetOrCreateShape(type, a.p1);
             float      cullRadius    = a.p1 * 2.0f;
             bool       isTransparent = (a.a < 1.0f);
 
@@ -698,8 +697,8 @@ void RegisterCreativeWorkCommands() {
             );
 
             reg.Add(
-                e, ZHLN::Components::PhysicsComponent {ZHLN::Physics::CreateRigidBody(
-                       pc, shape, JPH::RVec3(a.px, a.py, a.pz), rotation, a.isStatic ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
+                e, ZHLN::Components::PhysicsComponent {pc.CreateRigidBody(
+                       shape, JPH::RVec3(a.px, a.py, a.pz), rotation, a.isStatic ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
                        a.isStatic ? static_cast<JPH::ObjectLayer>(0) : static_cast<JPH::ObjectLayer>(1), 0
                    )}
             );
@@ -768,35 +767,32 @@ void RegisterPhysicsCommands() {
                 }));
 
     RegisterCmd("SetCharacterVelocity", MakeCmd<SetCharVelArgs>([](ZHLN::Engine* engine, const SetCharVelArgs& a) -> uint64_t {
-                    ZHLN::Physics::SetCharacterVelocity(engine->GetPhysicsContext(), ZHLN::Entity::Unpack(a.entityRaw), JPH::Vec3(a.x, a.y, a.z));
+                    engine->GetPhysicsContext().SetCharacterVelocity(ZHLN::Entity::Unpack(a.entityRaw), JPH::Vec3(a.x, a.y, a.z));
                     return 0;
                 }));
 
     RegisterCmd("IsCharacterOnGround", MakeCmd<EntityOnlyArgs>([](ZHLN::Engine* engine, const EntityOnlyArgs& a) -> uint64_t {
-                    return ZHLN::Physics::IsCharacterOnGround(engine->GetPhysicsContext(), ZHLN::Entity::Unpack(a.entityRaw)) ? 1 : 0;
+                    return engine->GetPhysicsContext().IsCharacterOnGround(ZHLN::Entity::Unpack(a.entityRaw)) ? 1 : 0;
                 }));
 
     RegisterCmd("SetLinearVelocity", MakeCmd<SetCharVelArgs>([](ZHLN::Engine* engine, const SetCharVelArgs& a) -> uint64_t {
-                    ZHLN::Physics::SetLinearVelocity(engine->GetPhysicsContext(), ZHLN::Entity::Unpack(a.entityRaw), JPH::Vec3(a.x, a.y, a.z));
+                    engine->GetPhysicsContext().SetLinearVelocity(ZHLN::Entity::Unpack(a.entityRaw), JPH::Vec3(a.x, a.y, a.z));
                     return 0;
                 }));
 
     RegisterCmd("AddImpulse", MakeCmd<SetCharVelArgs>([](ZHLN::Engine* engine, const SetCharVelArgs& a) -> uint64_t {
-                    ZHLN::Physics::AddImpulse(engine->GetPhysicsContext(), ZHLN::Entity::Unpack(a.entityRaw), JPH::Vec3(a.x, a.y, a.z));
+                    engine->GetPhysicsContext().AddImpulse(ZHLN::Entity::Unpack(a.entityRaw), JPH::Vec3(a.x, a.y, a.z));
                     return 0;
                 }));
 
     RegisterCmd("AddImpulseAt", MakeCmd<AddImpulseAtArgs>([](ZHLN::Engine* engine, const AddImpulseAtArgs& a) -> uint64_t {
-                    ZHLN::Physics::AddImpulse(
-                        engine->GetPhysicsContext(), ZHLN::Entity::Unpack(a.entityRaw), JPH::Vec3(a.ix, a.iy, a.iz), JPH::RVec3(a.px, a.py, a.pz)
-                    );
+                    engine->GetPhysicsContext().AddImpulse(ZHLN::Entity::Unpack(a.entityRaw), JPH::Vec3(a.ix, a.iy, a.iz), JPH::RVec3(a.px, a.py, a.pz));
                     return 0;
                 }));
 
     RegisterCmd("Raycast", MakeCmd<RaycastArgs>([](ZHLN::Engine* engine, const RaycastArgs& a) -> uint64_t {
                     ZHLN::Entity ignore = a.ignoreEntity != 0 ? ZHLN::Entity::Unpack(a.ignoreEntity) : ZHLN::Entity {};
-                    auto         res =
-                        ZHLN::Physics::Raycast(engine->GetPhysicsContext(), JPH::RVec3(a.ox, a.oy, a.oz), JPH::Vec3(a.dx, a.dy, a.dz), a.maxDist, ignore);
+                    auto         res    = engine->GetPhysicsContext().Raycast(JPH::RVec3(a.ox, a.oy, a.oz), JPH::Vec3(a.dx, a.dy, a.dz), a.maxDist, ignore);
                     a.outResult->hasHit = res.hasHit ? 1 : 0;
                     if (res.hasHit) {
                         a.outResult->entity   = res.handle.Pack();
@@ -813,9 +809,7 @@ void RegisterPhysicsCommands() {
 
     RegisterCmd("RaycastPenetration", MakeCmd<RaycastPenetrationArgs>([](ZHLN::Engine* engine, const RaycastPenetrationArgs& a) -> uint64_t {
                     ZHLN::Entity ignore = a.ignoreEntity != 0 ? ZHLN::Entity::Unpack(a.ignoreEntity) : ZHLN::Entity {};
-                    auto         res    = ZHLN::Physics::RaycastPenetration(
-                        engine->GetPhysicsContext(), JPH::RVec3(a.ox, a.oy, a.oz), JPH::Vec3(a.dx, a.dy, a.dz), a.maxDist, ignore
-                    );
+                    auto res = engine->GetPhysicsContext().RaycastPenetration(JPH::RVec3(a.ox, a.oy, a.oz), JPH::Vec3(a.dx, a.dy, a.dz), a.maxDist, ignore);
                     a.outResult->hasHit = res.hasHit ? 1 : 0;
                     if (res.hasHit) {
                         a.outResult->entity        = res.handle.Pack();
@@ -1147,7 +1141,7 @@ void RegisterSystemCommands() {
                     reg.Add(playerEntity, Components::TransformComponent {.position = {0.0f, 3.0f, 0.0f}});
                     reg.Add(playerEntity, Components::MovementComponent {});
                     reg.Add(playerEntity, ZHLN::Components::InputComponent {});
-                    ZHLN::Entity charPhys = ZHLN::Physics::CreateCharacter(engine->GetPhysicsContext(), JPH::RVec3(0.0f, 3.0f, 0.0f));
+                    ZHLN::Entity charPhys = engine->GetPhysicsContext().CreateCharacter(JPH::RVec3(0.0f, 3.0f, 0.0f));
                     reg.Add(playerEntity, Components::PhysicsComponent {charPhys});
                     reg.Add(playerEntity, Components::PhysicsStateComponent {.currPosition = {0.0f, 3.0f, 0.0f}, .prevPosition = {0.0f, 3.0f, 0.0f}});
 

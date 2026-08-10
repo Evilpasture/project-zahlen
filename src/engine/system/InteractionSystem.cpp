@@ -34,9 +34,9 @@ void InteractionSystem::Update(Engine& engine, float dt) {
     auto triggerEntities = reg.GetEntitiesWith<Components::TriggerComponent>();
     auto triggers        = reg.GetRawArray<Components::TriggerComponent>();
 
-    auto  inputEnts                 = reg.GetEntitiesWith<Components::InputStateComponent>();
-    auto* inputState                = inputEnts.empty() ? nullptr : reg.Get<Components::InputStateComponent>(inputEnts[0]);
-    bool  interactPressed           = (inputState != nullptr) && inputState->IsKeyDown(static_cast<uint8_t>(KeyCode::E));
+    auto        inputEnts           = reg.GetEntitiesWith<Components::InputStateComponent>();
+    auto*       inputState          = inputEnts.empty() ? nullptr : reg.Get<Components::InputStateComponent>(inputEnts[0]);
+    bool        interactPressed     = (inputState != nullptr) && inputState->IsKeyDown(static_cast<uint8_t>(KeyCode::E));
     static bool wasInteractPressed  = false;
     bool        interactJustPressed = interactPressed && !wasInteractPressed;
     wasInteractPressed              = interactPressed;
@@ -77,7 +77,8 @@ void InteractionSystem::Update(Engine& engine, float dt) {
                             pickup->isPickedUp                   = 1;
 
                             if (auto* phys = reg.Get<Components::PhysicsComponent>(triggerEnt)) {
-                                Physics::DestroyBody(engine.GetPhysicsContext(), phys->physicsHandle);
+                                // FIXED: Use physics context instance method
+                                engine.GetPhysicsContext().DestroyBody(phys->physicsHandle);
                                 reg.Remove<Components::PhysicsComponent>(triggerEnt);
                             }
                             if (reg.Get<Components::MeshComponent>(triggerEnt) != nullptr) {
@@ -97,15 +98,11 @@ void InteractionSystem::Update(Engine& engine, float dt) {
                     }
                 }
 
-                // Handle Usables (Integer Hash Matching)
                 if (!processed) {
                     if (auto* usable = reg.Get<Components::UsableComponent>(triggerEnt)) {
                         if (usable->scriptHash != 0) {
                             Log("Interacted! Dispatching event for script hash: {:#X}", usable->scriptHash);
                             engine.GetAudioContext().PlayProceduralBeep(550.0f, 0.08f, 0.20f);
-
-                            // Script resolution can be evaluated near-instantly on the Lua side:
-                            // Lua: if usable.scriptHash == path_hash then run_script() end
                         }
                     }
                 }

@@ -1,11 +1,11 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/physics/Physics.hpp> // For GetBodyID
 #include "Zahlen/Log.hpp"
 #include "physics/PhysicsWorld.hpp"
 #include <Jolt/Physics/Constraints/HingeConstraint.h>
 #include <Jolt/Physics/Constraints/SliderConstraint.h>
+#include <Zahlen/physics/Physics.hpp> // For GetBodyID
 
 namespace ZHLN::Physics {
 
@@ -52,8 +52,9 @@ void PhysicsWorld::FlushCommands(Command* capturedQueue, size_t capturedCount) {
             }
 
             case CommandType::CreateConstraint: {
-                JPH::BodyID id1 = GetBodyID(cmd.createC.b1);
-                JPH::BodyID id2 = GetBodyID(cmd.createC.b2);
+                // FIXED: Pass `*this` as the world to the free function `GetBodyID`
+                JPH::BodyID id1 = GetBodyID(*this, cmd.createC.b1);
+                JPH::BodyID id2 = GetBodyID(*this, cmd.createC.b2);
 
                 JPH::BodyLockWrite lock1(system->GetBodyLockInterface(), id1);
                 JPH::BodyLockWrite lock2(system->GetBodyLockInterface(), id2);

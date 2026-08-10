@@ -194,7 +194,8 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
                     ZHLN::Lock(world.sync.shadowLock, [&] {
                         ragdoll->AddToPhysicsSystem(JPH::EActivation::Activate);
                         if (phys != nullptr) {
-                            JPH::Vec3 charVel = Physics::GetCharacterVelocity(engine.GetPhysicsContext(), phys->physicsHandle);
+                            // FIXED: Use context instance method call correctly
+                            JPH::Vec3 charVel = engine.GetPhysicsContext().GetCharacterVelocity(phys->physicsHandle);
                             ragdoll->SetPose(animPose);
                             ragdoll->SetLinearAndAngularVelocity(charVel, JPH::Vec3::sZero());
                         }

@@ -11,8 +11,10 @@
 #include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
+#include <Zahlen/physics/Physics.hpp>
 #include <cstdint>
 #include <type_traits>
+#include <utility>
 
 namespace ZHLN {
 class PhysicsContext;
@@ -30,35 +32,6 @@ struct WorldStateHeader {
 };
 
 inline constexpr std::size_t CACHE_LINE = 64;
-
-struct ConstraintHandle {
-    uint32_t                         index;
-    uint32_t                         generation;
-    [[nodiscard]] constexpr uint64_t Pack() const noexcept {
-        return (static_cast<uint64_t>(generation) << 32) | index;
-    }
-};
-
-static_assert((std::is_trivially_default_constructible_v<ConstraintHandle> && std::is_trivially_copyable_v<ConstraintHandle>) );
-
-enum class ConstraintType : uint8_t { Fixed, Point, Hinge, Slider, Cone, Distance };
-
-struct ConstraintParams {
-    JPH::Vec3 pivot;
-    JPH::Vec3 axis;
-    float     limitMin;
-    float     limitMax;
-    // Motor/Spring
-    bool  hasMotor;
-    float target; // Angle or Position
-    float frequency;
-    float damping;
-    float maxForce;
-    bool  disableCollisions;
-};
-
-// Protects struct Command from being non-trivial
-static_assert((std::is_trivially_default_constructible_v<ConstraintParams> && std::is_trivially_copyable_v<ConstraintParams>) );
 
 enum class CommandType : uint8_t { DestroyBody, CreateConstraint, DestroyConstraint, SetConstraintTarget, SetCollisionFilter };
 #if defined(__clang__)
@@ -242,8 +215,6 @@ struct PhysicsWorld {
     ZHLN::Entity AllocateHandle();
     void         RemoveBodySlot(uint32_t slot);
     void         ResizeConstraintBuffers(size_t newCapacity);
-
-    JPH::BodyID GetBodyID(ZHLN::Entity handle);
 
     // Constraints
     ConstraintHandle AllocateConstraintHandle();

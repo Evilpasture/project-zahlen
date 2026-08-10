@@ -353,7 +353,8 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
         }
 
         bool isWireframe = (physicsDrawMode == 1);
-        auto debugData   = Physics::GetDebugDrawData(engine.GetPhysicsContext(), true, true, isWireframe);
+        // FIXED: Replaced free-function Physics::GetDebugDrawData with context method call
+        auto debugData = engine.GetPhysicsContext().GetDebugDrawData(true, true, isWireframe);
 
         std::vector<VertexPosition>   debugPos;
         std::vector<VertexAttributes> debugAttr;

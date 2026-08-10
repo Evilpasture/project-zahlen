@@ -31,7 +31,9 @@
 #include <cmath>
 #include <format>
 #include <imgui.h>
+#include <physics/PhysicsWorld.hpp> // FIXED: Included to define complete type of PhysicsWorld
 #include <print>
+#include <thread> // FIXED: Added to fix 'std::this_thread'
 
 extern std::vector<std::string> s_InvShellLog;
 extern bool                     s_InvScrollToBottom;
@@ -138,10 +140,10 @@ void DrawConsole(ZHLN::Engine& engine) {
     size_t entryCount = ZHLN::GameConsole::GetEntryCount();
     for (size_t i = 0; i < entryCount; ++i) {
         std::string_view text;
-        float            r;
-        float            g;
-        float            b;
-        float            a;
+        float            r = NAN;
+        float            g = NAN;
+        float            b = NAN;
+        float            a = NAN;
         ZHLN::GameConsole::GetEntry(i, text, r, g, b, a);
         ImGui::TextColored(ImVec4(r, g, b, a), "%.*s", (int) text.size(), text.data());
     }
@@ -714,7 +716,6 @@ EditorState s_EditorState;
 void UpdateEditorCamera(ZHLN::Camera& cam, const ZHLN::Components::InputStateComponent& state, float dt) {
     const float sensitivity = 0.15f;
 
-    // High-level ImGui capture is checked here (main.cpp only).
     const bool imguiCapturesMouse    = ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureMouse;
     const bool imguiCapturesKeyboard = ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureKeyboard;
 
@@ -734,8 +735,7 @@ void UpdateEditorCamera(ZHLN::Camera& cam, const ZHLN::Components::InputStateCom
     forward         = forward.Normalized();
     JPH::Vec3 right = forward.Cross(JPH::Vec3::sAxisY()).Normalized();
 
-    float moveSpeed =
-        state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LShift)) ? (s_EditorState.freeCamSpeed * 2.5f) : s_EditorState.freeCamSpeed;
+    float moveSpeed = state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LShift)) ? (s_EditorState.freeCamSpeed * 2.5f) : s_EditorState.freeCamSpeed;
 
     JPH::Vec3 moveDirection = JPH::Vec3::sZero();
     if (state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::W))) {
@@ -757,8 +757,8 @@ void UpdateEditorCamera(ZHLN::Camera& cam, const ZHLN::Components::InputStateCom
 }
 
 ZHLN::Physics::RaycastResult CastPickingRay(ZHLN::Engine& engine, const ZHLN::Camera& cam) {
-    auto& reg = engine.GetRegistry();
-    auto  ents = reg.GetEntitiesWith<ZHLN::Components::InputStateComponent>();
+    auto& reg    = engine.GetRegistry();
+    auto  ents   = reg.GetEntitiesWith<ZHLN::Components::InputStateComponent>();
     float mouseX = 0.0f;
     float mouseY = 0.0f;
     if (!ents.empty()) {
@@ -786,7 +786,8 @@ ZHLN::Physics::RaycastResult CastPickingRay(ZHLN::Engine& engine, const ZHLN::Ca
     JPH::Vec3 pFar  = JPH::Vec3(farWorld.GetX() / farWorld.GetW(), farWorld.GetY() / farWorld.GetW(), farWorld.GetZ() / farWorld.GetW());
     JPH::Vec3 dir   = (pFar - pNear).Normalized();
 
-    return ZHLN::Physics::Raycast(engine.GetPhysicsContext(), JPH::RVec3(pNear), dir, 1000.0f);
+    // FIXED: Call Raycast as an instance method of PhysicsContext
+    return engine.GetPhysicsContext().Raycast(JPH::RVec3(pNear), dir, 1000.0f);
 }
 
 void DrawEditorPanels(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options) {
@@ -974,11 +975,10 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
         float frameTime = clock.GetDeltaTime();
         engine.ProcessEvents();
 
-        auto& reg  = engine.GetRegistry();
-        auto  ents = reg.GetEntitiesWith<ZHLN::Components::InputStateComponent>();
+        auto& reg   = engine.GetRegistry();
+        auto  ents  = reg.GetEntitiesWith<ZHLN::Components::InputStateComponent>();
         auto* state = ents.empty() ? nullptr : reg.Get<ZHLN::Components::InputStateComponent>(ents[0]);
 
-        // High-level ImGui lives here (main.cpp); capture is also mirrored onto InputStateComponent.
         const bool imguiCapturesMouse    = ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureMouse;
         const bool imguiCapturesKeyboard = ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureKeyboard;
 
@@ -1055,7 +1055,7 @@ int main(int argc, char* argv[]) {
         })
         .and_then([](const ZHLN::CommandLineOptions& options) -> std::expected<int, int> {
             if (options.helpRequested || options.versionRequested || options.printGraphRequested) {
-                return 0; // Clean exit for CLI queries
+                return 0;
             }
 
             ZHLN::SetLogLevel(options.logLevel);
@@ -1071,12 +1071,12 @@ int main(int argc, char* argv[]) {
                 ZHLN::EngineConfig config {
                     .physics = {.maxBodies = 5000, .maxBodyPairs = 10000, .maxContactConstraints = 10000, .tempAllocatorSize = 64 * 1024 * 1024},
                     .render  = {
-                         .appName        = options.launchEditor ? "Zahlen World Editor" : "Zahlen Engine",
-                         .width          = w,
-                         .height         = h,
-                         .vsync          = options.vsync,
-                         .fullscreen     = options.fullscreen,
-                         .validationMode = options.validationMode,
+                        .appName        = options.launchEditor ? "Zahlen World Editor" : "Zahlen Engine",
+                        .width          = w,
+                        .height         = h,
+                        .vsync          = options.vsync,
+                        .fullscreen     = options.fullscreen,
+                        .validationMode = options.validationMode,
                     },
                 };
 

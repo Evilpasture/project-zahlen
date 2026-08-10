@@ -8,8 +8,12 @@
 #include <Jolt/Physics/Constraints/HingeConstraint.h>
 #include <Jolt/Physics/Constraints/PointConstraint.h>
 #include <Jolt/Physics/Constraints/SliderConstraint.h>
+#include <Zahlen/Core/ControlFlow.hpp>
+#include <Zahlen/physics/Physics.hpp>
 
-namespace ZHLN::Physics {
+namespace ZHLN {
+
+namespace Physics {
 
 JPH::Constraint* CreateNativeConstraint(const ConstraintType type, JPH::Body* b1, JPH::Body* b2, const ConstraintParams& p) {
     switch (type) {
@@ -30,7 +34,6 @@ JPH::Constraint* CreateNativeConstraint(const ConstraintType type, JPH::Body* b1
             settings.mPoint1 = settings.mPoint2 = JPH::RVec3(p.pivot);
             settings.mHingeAxis1 = settings.mHingeAxis2 = p.axis;
 
-            // Calculate a normal perpendicular to the axis for the reference frame
             JPH::Vec3 normal      = p.axis.GetNormalizedPerpendicular();
             settings.mNormalAxis1 = settings.mNormalAxis2 = normal;
 
@@ -59,7 +62,6 @@ JPH::Constraint* CreateNativeConstraint(const ConstraintType type, JPH::Body* b1
             settings.mSpace  = JPH::EConstraintSpace::WorldSpace;
             settings.mPoint1 = settings.mPoint2 = JPH::RVec3(p.pivot);
 
-            // Normalize axis and handle zero-length axis safety
             JPH::Vec3 axis  = p.axis;
             float     lenSq = axis.LengthSq();
             if (lenSq < 1e-6f) {
@@ -69,17 +71,13 @@ JPH::Constraint* CreateNativeConstraint(const ConstraintType type, JPH::Body* b1
             }
 
             settings.mTwistAxis1 = settings.mTwistAxis2 = axis;
-
-            // Typically for a cone, we use the limitMax as the half-cone angle
-            settings.mHalfConeAngle = p.limitMax;
+            settings.mHalfConeAngle                     = p.limitMax;
             return settings.Create(*b1, *b2);
         }
         case ConstraintType::Distance: {
             JPH::DistanceConstraintSettings settings;
             settings.mSpace = JPH::EConstraintSpace::WorldSpace;
 
-            // If the pivot is near zero, Culverin defaults to the current distance between bodies.
-            // Otherwise, it uses the pivot for both anchor points.
             if (p.pivot.LengthSq() > 1e-6f) {
                 settings.mPoint1 = settings.mPoint2 = JPH::RVec3(p.pivot);
             } else {
@@ -98,4 +96,38 @@ JPH::Constraint* CreateNativeConstraint(const ConstraintType type, JPH::Body* b1
     return nullptr;
 }
 
-} // namespace ZHLN::Physics
+} // namespace Physics
+
+Physics::ConstraintHandle
+    PhysicsContext::CreateConstraint(Physics::ConstraintType type, ZHLN::Entity b1, ZHLN::Entity b2, const Physics::ConstraintParams& params) {
+    auto& world = GetInternalWorld();
+
+    Physics::ConstraintHandle handle = world.AllocateConstraintHandle();
+
+    ZHLN::Lock(world.sync.shadowLock, [&] {
+        Physics::Command cmd {};
+        cmd.type           = Physics::CommandType::CreateConstraint;
+        cmd.cHandle        = handle;
+        cmd.createC.cType  = type;
+        cmd.createC.b1     = b1;
+        cmd.createC.b2     = b2;
+        cmd.createC.params = params;
+
+        world.commandQueue[world.commandCount++] = cmd;
+    });
+
+    return handle;
+}
+
+void PhysicsContext::SetConstraintTarget(Physics::ConstraintHandle handle, float value) {
+    auto& world = GetInternalWorld();
+    ZHLN::Lock(world.sync.shadowLock, [&] {
+        Physics::Command cmd {};
+        cmd.type                                 = Physics::CommandType::SetConstraintTarget;
+        cmd.setTarget.targetCHandle              = handle;
+        cmd.setTarget.targetValue                = value;
+        world.commandQueue[world.commandCount++] = cmd;
+    });
+}
+
+} // namespace ZHLN
