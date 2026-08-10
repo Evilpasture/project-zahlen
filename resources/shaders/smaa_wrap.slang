@@ -61,7 +61,7 @@ SamplerState pointSampler;
 #endif
 
 // Include the core library with our static overrides active
-import SMAA; // modern Slang import (was #include "SMAA.hlsl")
+#include "SMAA.hlsl" // Slang __include for SMAA (was #include "SMAA.hlsl", import SMAA via SMAA.slang was ambiguous due to preprocessor defines)
 
 // ============================================================================
 // PASS 1: Edge Detection
