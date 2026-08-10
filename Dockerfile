@@ -15,7 +15,6 @@ RUN pacman -S --needed --noconfirm \
     git \
     python \
     blender \
-    shader-slang \
     spirv-tools \
     vulkan-devel \
     vulkan-icd-loader \
@@ -26,7 +25,18 @@ RUN pacman -S --needed --noconfirm \
     gtest \
     fennel \
     simdjson \
-    pkgconf
+    pkgconf \
+    curl
+
+# Install slangc from GitHub release (shader-slang is AUR-only, not in official Arch repos)
+RUN curl -L -o /tmp/slang.tar.gz https://github.com/shader-slang/slang/releases/download/v2026.4/slang-2026.4-linux-x86_64.tar.gz \
+    && mkdir -p /opt/slang \
+    && tar -xzf /tmp/slang.tar.gz -C /opt/slang --strip-components=1 \
+    && ln -sf /opt/slang/bin/slangc /usr/local/bin/slangc \
+    && ln -sf /opt/slang/lib/* /usr/local/lib/ 2>/dev/null || true \
+    && ldconfig 2>/dev/null || true \
+    && slangc -version \
+    && rm /tmp/slang.tar.gz
 
 # Set default compilers to GCC
 ENV CC=gcc
