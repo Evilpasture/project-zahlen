@@ -51,28 +51,45 @@ while [[ "$#" -gt 0 ]]; do
             fi
             ;;
         --p2996)
-            if [[ -d "$HOME/clang-p2996/install" ]]; then
-                P2996_INSTALL="$HOME/clang-p2996/install"
-                P2996_BUILD="$HOME/clang-p2996/build"
-                P2996_ROOT="$HOME/clang-p2996"
-            elif [[ -d "../clang-p2996/install" ]]; then
-                P2996_INSTALL="$(cd ../clang-p2996/install && pwd)"
-                P2996_BUILD="$(cd ../clang-p2996/build && pwd)"
-                P2996_ROOT="$(cd ../clang-p2996 && pwd)"
+            # Find the root directory (either clang-p2996 or llvm-p2996)
+            P2996_ROOT=""
+            for dir in "$HOME/clang-p2996" "$HOME/llvm-p2996" "../clang-p2996" "../llvm-p2996"; do
+                if [[ -d "$dir" ]]; then
+                    P2996_ROOT="$(cd "$dir" && pwd)"
+                    break
+                fi
+            done
+
+            if [[ -z "$P2996_ROOT" ]]; then
+                echo "Error: Could not find custom p2996 directory (~/llvm-p2996 or ~/clang-p2996)." >&2
+                exit 1
+            fi
+
+            # Determine install vs build-tree paths
+            if [[ -d "$P2996_ROOT/install" ]]; then
+                P2996_INSTALL="$P2996_ROOT/install"
+                P2996_BUILD="$P2996_ROOT/build"
+            elif [[ -x "$P2996_ROOT/build/bin/clang" ]]; then
+                # Handle in-tree build directories on Linux
+                P2996_INSTALL="$P2996_ROOT/build"
+                P2996_BUILD="$P2996_ROOT/build"
             else
-                echo "Error: Could not find custom clang-p2996 installation." >&2
+                echo "Error: Found $P2996_ROOT, but could not find compiled binaries in install/ or build/bin/." >&2
                 exit 1
             fi
 
             COMPILER_CC="$P2996_INSTALL/bin/clang"
             COMPILER_CXX="$P2996_INSTALL/bin/clang++"
 
-            # Add these to configuration arguments, NOT build arguments
+            # Dynamic library loader flag: -Wl,-rpath on Linux vs -Wl,-rpath on macOS
+            LIB_DIR="$P2996_INSTALL/lib"
+            [[ -d "$P2996_INSTALL/lib64" ]] && LIB_DIR="$P2996_INSTALL/lib64"
+
             CMAKE_CONF_ARGS+=(
                 "-DCMAKE_PREFIX_PATH=$P2996_INSTALL"
-                "-DCMAKE_CXX_FLAGS=-stdlib=libc++ -Wno-unused-command-line-argument -L$P2996_INSTALL/lib"
-                "-DCMAKE_EXE_LINKER_FLAGS=-Wl,-rpath,$P2996_INSTALL/lib -L$P2996_INSTALL/lib"
-                "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-rpath,$P2996_INSTALL/lib -L$P2996_INSTALL/lib"
+                "-DCMAKE_CXX_FLAGS=-stdlib=libc++ -Wno-unused-command-line-argument -L$LIB_DIR"
+                "-DCMAKE_EXE_LINKER_FLAGS=-Wl,-rpath,$LIB_DIR -L$LIB_DIR"
+                "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-rpath,$LIB_DIR -L$LIB_DIR"
                 "-DZHLN_USE_CUSTOM_LIBCXX=ON"
                 "-DLLVM_BLOOMBERG_ROOT=$P2996_ROOT"
                 "-DLLVM_BLOOMBERG_BUILD=$P2996_BUILD"
