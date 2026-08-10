@@ -50,7 +50,6 @@ function(compile_slang SHADER_PATH ENTRY STAGE OUTPUT_VAR)
                 -entry ${ENTRY}
                 -matrix-layout-column-major
                 -fvk-use-dx-layout
-                -fspv-target-env=vulkan1.3
                 -I "${SHADER_SRC_DIR}" -I "${SHADER_INCLUDE_DIR}"
                 ${EXTRA_ARGS} -o ${OUTPUT_SPV}
         DEPENDS ${SHADER_PATH}
