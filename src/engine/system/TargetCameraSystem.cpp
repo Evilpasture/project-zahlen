@@ -62,7 +62,11 @@ void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept 
         // FREE-CAM INTERCEPTION BRANCH (Must run before target check)
         // ========================================================================
         if (ECS::Patch<Components::FreeCamTagComponent>(reg, camEnt, [](const auto&) {})) {
-            const auto& input = engine.GetInput();
+            auto  inputEnts = reg.GetEntitiesWith<Components::InputStateComponent>();
+            auto* state     = inputEnts.empty() ? nullptr : reg.Get<Components::InputStateComponent>(inputEnts[0]);
+            if (state == nullptr) {
+                return;
+            }
 
             // 1. Resolve dynamic fly speed from player's MovementComponent if alive, else default
             float baseSpeed = 12.0f;
@@ -71,13 +75,13 @@ void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept 
             }
 
             // 2. Scale fly speed dynamically (Shift maps to 2x speed)
-            const float speed       = input.IsKeyDown(KeyCode::LShift) ? (baseSpeed * 2.0f) : baseSpeed;
+            const float speed       = state->IsKeyDown(static_cast<uint8_t>(KeyCode::LShift)) ? (baseSpeed * 2.0f) : baseSpeed;
             const float sensitivity = 0.15f;
 
             // Mouse look (Hold Right-Click to look around)
-            if (input.IsMouseButtonDown(KeyCode::RButton)) {
-                cam.yaw += input.GetMouseDeltaX() * sensitivity;                                           // Updated
-                cam.pitch = std::clamp(cam.pitch - (input.GetMouseDeltaY() * sensitivity), -89.0f, 89.0f); // Updated
+            if (state->IsMouseButtonDown(static_cast<uint8_t>(KeyCode::RButton))) {
+                cam.yaw += state->GetMouseDeltaX() * sensitivity;
+                cam.pitch = std::clamp(cam.pitch - (state->GetMouseDeltaY() * sensitivity), -89.0f, 89.0f);
             }
 
             float     yawRad   = JPH::DegreesToRadians(cam.yaw);
@@ -87,16 +91,16 @@ void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept 
             JPH::Vec3 right = forward.Cross(JPH::Vec3::sAxisY()).Normalized();
 
             JPH::Vec3 moveDirection = JPH::Vec3::sZero();
-            if (input.IsKeyDown(KeyCode::W)) {
+            if (state->IsKeyDown(static_cast<uint8_t>(KeyCode::W))) {
                 moveDirection += forward;
             }
-            if (input.IsKeyDown(KeyCode::S)) {
+            if (state->IsKeyDown(static_cast<uint8_t>(KeyCode::S))) {
                 moveDirection -= forward;
             }
-            if (input.IsKeyDown(KeyCode::A)) {
+            if (state->IsKeyDown(static_cast<uint8_t>(KeyCode::A))) {
                 moveDirection -= right;
             }
-            if (input.IsKeyDown(KeyCode::D)) {
+            if (state->IsKeyDown(static_cast<uint8_t>(KeyCode::D))) {
                 moveDirection += right;
             }
 
@@ -138,7 +142,9 @@ void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept 
         }
 
         // 2. Smoothly interpolate Zoom and FOV target values
-        float wheelDelta = engine.GetInput().GetMouseWheel(); // Updated
+        auto  inputEnts  = reg.GetEntitiesWith<Components::InputStateComponent>();
+        auto* inputState = inputEnts.empty() ? nullptr : reg.Get<Components::InputStateComponent>(inputEnts[0]);
+        float wheelDelta = (inputState != nullptr) ? inputState->GetMouseWheel() : 0.0f;
         if (std::abs(wheelDelta) > 0.01f) {
             camComp.targetDistance = JPH::Clamp(camComp.targetDistance - wheelDelta * 0.5f, 1.5f, 15.0f);
         }
@@ -154,9 +160,9 @@ void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept 
 
         // 3. Process Mouse look and Sync to camera properties
         const float sensitivity = 0.15f;
-        if (engine.GetInput().IsMouseButtonDown(KeyCode::RButton)) {
-            camComp.yaw += engine.GetInput().GetMouseDeltaX() * sensitivity;                                               // Updated
-            camComp.pitch = std::clamp(camComp.pitch - (engine.GetInput().GetMouseDeltaY() * sensitivity), -89.0f, 89.0f); // Updated
+        if (inputState != nullptr && inputState->IsMouseButtonDown(static_cast<uint8_t>(KeyCode::RButton))) {
+            camComp.yaw += inputState->GetMouseDeltaX() * sensitivity;
+            camComp.pitch = std::clamp(camComp.pitch - (inputState->GetMouseDeltaY() * sensitivity), -89.0f, 89.0f);
         }
 
         cam.yaw   = camComp.yaw;

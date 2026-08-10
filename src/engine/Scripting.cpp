@@ -880,12 +880,26 @@ void RegisterPhysicsCommands() {
 
 void RegisterInputAndCameraCommands() {
     RegisterCmd("IsKeyDown", MakeCmd<IsKeyDownArgs>([](ZHLN::Engine* engine, const IsKeyDownArgs& a) -> uint64_t {
-                    return engine->GetInput().IsKeyDown(static_cast<ZHLN::KeyCode>(a.key)) ? 1 : 0;
+                    auto& reg  = engine->GetRegistry();
+                    auto  ents = reg.GetEntitiesWith<ZHLN::Components::InputStateComponent>();
+                    if (ents.empty()) {
+                        return 0;
+                    }
+                    auto* state = reg.Get<ZHLN::Components::InputStateComponent>(ents[0]);
+                    return (state != nullptr && state->IsKeyDown(a.key)) ? 1 : 0;
                 }));
 
     RegisterCmd("GetMouseDelta", MakeCmd<GetMouseDeltaArgs>([](ZHLN::Engine* engine, const GetMouseDeltaArgs& a) -> uint64_t {
-                    *a.outX = engine->GetInput().GetMouseDeltaX(); 
-                    *a.outY = engine->GetInput().GetMouseDeltaY(); 
+                    auto& reg  = engine->GetRegistry();
+                    auto  ents = reg.GetEntitiesWith<ZHLN::Components::InputStateComponent>();
+                    if (ents.empty()) {
+                        *a.outX = 0.0f;
+                        *a.outY = 0.0f;
+                        return 0;
+                    }
+                    auto* state = reg.Get<ZHLN::Components::InputStateComponent>(ents[0]);
+                    *a.outX     = (state != nullptr) ? state->GetMouseDeltaX() : 0.0f;
+                    *a.outY     = (state != nullptr) ? state->GetMouseDeltaY() : 0.0f;
                     return 0;
                 }));
 

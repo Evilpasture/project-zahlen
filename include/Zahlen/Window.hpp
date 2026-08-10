@@ -49,6 +49,8 @@ class ZHLN_API Window {
     [[nodiscard]] void* GetTTYContext() const;
     bool                ReinitTTY();
 
+    [[nodiscard]] const WindowInputReceiver& GetInputReceiver() const noexcept;
+
     [[nodiscard]] std::expected<void*, Error> CreateVulkanSurface(void* instance, void* physicalDevice, int& outWidth, int& outHeight) noexcept;
 
   private:

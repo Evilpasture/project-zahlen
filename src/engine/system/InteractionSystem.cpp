@@ -12,8 +12,7 @@
 namespace ZHLN {
 
 void InteractionSystem::Update(Engine& engine, float dt) {
-    auto& reg   = engine.GetRegistry();
-    auto& input = engine.GetInput();
+    auto& reg = engine.GetRegistry();
 
     Entity playerEnt = NullEntity;
     for (Entity e: reg.GetEntitiesWith<Components::MovementComponent>()) {
@@ -35,7 +34,9 @@ void InteractionSystem::Update(Engine& engine, float dt) {
     auto triggerEntities = reg.GetEntitiesWith<Components::TriggerComponent>();
     auto triggers        = reg.GetRawArray<Components::TriggerComponent>();
 
-    bool        interactPressed     = input.IsKeyDown(KeyCode::E);
+    auto  inputEnts                 = reg.GetEntitiesWith<Components::InputStateComponent>();
+    auto* inputState                = inputEnts.empty() ? nullptr : reg.Get<Components::InputStateComponent>(inputEnts[0]);
+    bool  interactPressed           = (inputState != nullptr) && inputState->IsKeyDown(static_cast<uint8_t>(KeyCode::E));
     static bool wasInteractPressed  = false;
     bool        interactJustPressed = interactPressed && !wasInteractPressed;
     wasInteractPressed              = interactPressed;

@@ -1,15 +1,12 @@
 // include/Zahlen/Input.hpp
 #pragma once
 
-#include <Zahlen/Common.h>
 #include <Zahlen/Types.hpp>
+#include <cstdint>
 
 namespace ZHLN {
 
-namespace ECS {
-class Registry;
-}
-
+// Platform-neutral key / mouse button identifiers.
 enum class KeyCode : uint8_t {
     Unknown = 0,
     Num0,
@@ -79,39 +76,6 @@ enum class KeyCode : uint8_t {
     LButton,
     RButton,
     MButton
-};
-
-class ZHLN_API InputManager {
-  public:
-    InputManager() noexcept = default;
-    explicit InputManager(ECS::Registry& reg) noexcept: _registry(&reg) {
-    }
-
-    // Event Injections (Mutators)
-    void InjectKeyDown(KeyCode key) noexcept;
-    void InjectKeyUp(KeyCode key) noexcept;
-    void InjectLocalMotion(float x, float y) noexcept;
-    void InjectWheelMotion(float delta) noexcept;
-    void InjectResize(const Extent2D& extent) noexcept;
-    void ResetDeltas() noexcept;
-
-    // Convenience State Queries (Readers)
-    [[nodiscard]] bool IsKeyDown(KeyCode key) const noexcept;
-    [[nodiscard]] bool IsMouseButtonDown(KeyCode key) const noexcept;
-
-    // --- Added Resize Helpers ---
-    [[nodiscard]] bool     NeedsResize() const noexcept;
-    [[nodiscard]] Extent2D GetNewSize() const noexcept;
-    void                   ClearResizeFlag() noexcept;
-
-    [[nodiscard]] float GetMouseX() const noexcept;
-    [[nodiscard]] float GetMouseY() const noexcept;
-    [[nodiscard]] float GetMouseDeltaX() const noexcept;
-    [[nodiscard]] float GetMouseDeltaY() const noexcept;
-    [[nodiscard]] float GetMouseWheel() const noexcept;
-
-  private:
-    ECS::Registry* _registry = nullptr;
 };
 
 } // namespace ZHLN

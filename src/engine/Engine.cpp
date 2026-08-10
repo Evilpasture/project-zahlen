@@ -106,7 +106,6 @@ struct EngineImpl {
 
     Camera        mainCamera;
     ECS::Registry registry;
-    InputManager  inputHandle;
 
     std::unique_ptr<ECS::SystemGraph>         updateGraph;
     std::unique_ptr<ECS::SystemGraph>         renderGraph;
@@ -402,11 +401,14 @@ std::expected<void, Error> Engine::InitInternal(const EngineConfig& cfg) {
     }
 
     auto onKey = [](void* userdata, KeyCode key, bool pressed) {
-        auto*        reg = static_cast<ECS::Registry*>(userdata);
-        InputManager input(*reg); // Create lightweight 8-byte handle
-        if (pressed) {
-            input.InjectKeyDown(key);
+        auto* reg  = static_cast<ECS::Registry*>(userdata);
+        auto  ents = reg->GetEntitiesWith<Components::InputStateComponent>();
+        auto* state =
+            ents.empty() ? reg->Get<Components::InputStateComponent>(reg->Create(Components::InputStateComponent {})) :
+                           reg->Get<Components::InputStateComponent>(ents[0]);
+        state->SetKey(static_cast<uint8_t>(key), pressed);
 
+        if (pressed) {
             // Handle text navigation directly on focused text input components
             for (Entity e: reg->GetEntitiesWith<Components::UITextInputComponent>()) {
                 auto* inputComp = reg->Get<Components::UITextInputComponent>(e);
@@ -423,24 +425,34 @@ std::expected<void, Error> Engine::InitInternal(const EngineConfig& cfg) {
                     }
                 }
             }
-        } else {
-            input.InjectKeyUp(key);
         }
     };
 
     auto onMouseMove = [](void* userdata, float x, float y) {
-        auto* reg = static_cast<ECS::Registry*>(userdata);
-        InputManager(*reg).InjectLocalMotion(x, y);
+        auto* reg  = static_cast<ECS::Registry*>(userdata);
+        auto  ents = reg->GetEntitiesWith<Components::InputStateComponent>();
+        auto* state =
+            ents.empty() ? reg->Get<Components::InputStateComponent>(reg->Create(Components::InputStateComponent {})) :
+                           reg->Get<Components::InputStateComponent>(ents[0]);
+        state->ApplyLocalMotion(x, y);
     };
 
     auto onMouseScroll = [](void* userdata, float delta) {
-        auto* reg = static_cast<ECS::Registry*>(userdata);
-        InputManager(*reg).InjectWheelMotion(delta);
+        auto* reg  = static_cast<ECS::Registry*>(userdata);
+        auto  ents = reg->GetEntitiesWith<Components::InputStateComponent>();
+        auto* state =
+            ents.empty() ? reg->Get<Components::InputStateComponent>(reg->Create(Components::InputStateComponent {})) :
+                           reg->Get<Components::InputStateComponent>(ents[0]);
+        state->ApplyWheel(delta);
     };
 
     auto onResize = [](void* userdata, Extent2D extent) {
-        auto* reg = static_cast<ECS::Registry*>(userdata);
-        InputManager(*reg).InjectResize(extent);
+        auto* reg  = static_cast<ECS::Registry*>(userdata);
+        auto  ents = reg->GetEntitiesWith<Components::InputStateComponent>();
+        auto* state =
+            ents.empty() ? reg->Get<Components::InputStateComponent>(reg->Create(Components::InputStateComponent {})) :
+                           reg->Get<Components::InputStateComponent>(ents[0]);
+        state->ApplyResize(extent);
     };
 
     auto onChar = [](void* userdata, unsigned int codepoint) {
@@ -465,7 +477,8 @@ std::expected<void, Error> Engine::InitInternal(const EngineConfig& cfg) {
 
     _impl->window = std::make_unique<Window>(cfg.render.appName.data(), cfg.render.width, cfg.render.height, cfg.render.fullscreen, receiver, use_tty);
 
-    _impl->inputHandle = InputManager(_impl->registry);
+    // Singleton InputStateComponent must exist before the first event pump.
+    _impl->registry.Create(Components::InputStateComponent {});
 
     if (use_tty && _impl->window->GetTTYContext() == nullptr) {
         ZHLN::Log("[Engine] FATAL: TTY Input initialization failed (libseat session rejected).");
@@ -540,13 +553,20 @@ bool Engine::IsRunning() const {
 void Engine::ProcessEvents() {
     ZHLN::CheckForCrashes(this);
 
-    // 1. Reset frame deltas on the active ECS component
-    InputManager inputManager(_impl->registry);
-    inputManager.ResetDeltas();
+    auto& reg = _impl->registry;
+    auto  ents = reg.GetEntitiesWith<Components::InputStateComponent>();
+    Components::InputStateComponent* inputState = ents.empty() ? nullptr : reg.Get<Components::InputStateComponent>(ents[0]);
+    if (inputState != nullptr) {
+        inputState->ResetDeltas();
+    }
 
     if (_impl->window->IsTTY()) {
-        // 2. Pass the lightweight input manager to the TTY event poller
-        TTYBackend::ProcessEvents(_impl->window->GetTTYContext(), &inputManager);
+        // TTY path uses the same WindowInputReceiver callbacks as GLFW
+        TTYBackend::ProcessEvents(_impl->window->GetTTYContext(), _impl->window->GetInputReceiver());
+        if (inputState != nullptr) {
+            inputState->wantCaptureKeyboard = false;
+            inputState->wantCaptureMouse    = false;
+        }
         return;
     }
 
@@ -554,6 +574,14 @@ void Engine::ProcessEvents() {
     ImGui_ImplVulkan_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
+
+    // Mirror ImGui capture into ECS so gameplay systems stay ImGui-free.
+    // High-level ImGui UI remains in main.cpp; only the capture flags cross here.
+    if (inputState != nullptr) {
+        const ImGuiIO& io               = ImGui::GetIO();
+        inputState->wantCaptureKeyboard = io.WantCaptureKeyboard;
+        inputState->wantCaptureMouse    = io.WantCaptureMouse;
+    }
 }
 
 bool Engine::BeginFrame(bool& outDeviceLost) noexcept {
@@ -594,9 +622,6 @@ PhysicsContext& Engine::GetPhysicsContext() {
 }
 RenderContext& Engine::GetRenderContext() {
     return *_impl->renderContext;
-}
-InputManager& Engine::GetInput() noexcept {
-    return _impl->inputHandle;
 }
 Camera& Engine::GetCamera() {
     return _impl->mainCamera;
@@ -844,10 +869,16 @@ int Engine::Run(const CommandLineOptions& options, UICallback uiCallback) {
 
         float rawDt = std::min(static_cast<float>(elapsed), 0.1f);
 
-        if (engine->GetInput().NeedsResize()) {
-            engine->GetRenderContext().SetResolution(engine->GetInput().GetNewSize());
-            engine->GetInput().ClearResizeFlag();
-            continue;
+        {
+            auto& r    = engine->GetRegistry();
+            auto  iEnts = r.GetEntitiesWith<Components::InputStateComponent>();
+            if (!iEnts.empty()) {
+                if (auto* st = r.Get<Components::InputStateComponent>(iEnts[0]); st != nullptr && st->needsResize) {
+                    engine->GetRenderContext().SetResolution(st->newSize);
+                    st->needsResize = false;
+                    continue;
+                }
+            }
         }
 
         // Single synchronized engine tick

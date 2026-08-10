@@ -7,7 +7,7 @@
 namespace ZHLN {
 struct Window::Impl {
     GLFWwindow*         handle      = nullptr;
-    WindowInputReceiver receiver    = {}; // No more dependency on ECS/InputManager
+    WindowInputReceiver receiver    = {}; // Platform-neutral callbacks into ECS registry
     bool                is_tty      = false;
     void*               tty_context = nullptr;
     uint32_t            width       = 0;

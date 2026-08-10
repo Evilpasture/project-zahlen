@@ -711,12 +711,20 @@ struct EditorState {
 
 EditorState s_EditorState;
 
-void UpdateEditorCamera(ZHLN::Camera& cam, const ZHLN::InputManager& input, float dt) {
+void UpdateEditorCamera(ZHLN::Camera& cam, const ZHLN::Components::InputStateComponent& state, float dt) {
     const float sensitivity = 0.15f;
 
-    if (input.IsMouseButtonDown(ZHLN::KeyCode::RButton)) {
-        cam.yaw += input.GetMouseDeltaX() * sensitivity;
-        cam.pitch = std::clamp(cam.pitch - (input.GetMouseDeltaY() * sensitivity), -89.0f, 89.0f);
+    // High-level ImGui capture is checked here (main.cpp only).
+    const bool imguiCapturesMouse    = ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureMouse;
+    const bool imguiCapturesKeyboard = ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureKeyboard;
+
+    if (state.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton)) && !imguiCapturesMouse) {
+        cam.yaw += state.mouseDeltaX * sensitivity;
+        cam.pitch = std::clamp(cam.pitch - (state.mouseDeltaY * sensitivity), -89.0f, 89.0f);
+    }
+
+    if (imguiCapturesKeyboard) {
+        return;
     }
 
     float yawRad   = JPH::DegreesToRadians(cam.yaw);
@@ -726,19 +734,20 @@ void UpdateEditorCamera(ZHLN::Camera& cam, const ZHLN::InputManager& input, floa
     forward         = forward.Normalized();
     JPH::Vec3 right = forward.Cross(JPH::Vec3::sAxisY()).Normalized();
 
-    float moveSpeed = input.IsKeyDown(ZHLN::KeyCode::LShift) ? (s_EditorState.freeCamSpeed * 2.5f) : s_EditorState.freeCamSpeed;
+    float moveSpeed =
+        state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LShift)) ? (s_EditorState.freeCamSpeed * 2.5f) : s_EditorState.freeCamSpeed;
 
     JPH::Vec3 moveDirection = JPH::Vec3::sZero();
-    if (input.IsKeyDown(ZHLN::KeyCode::W)) {
+    if (state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::W))) {
         moveDirection += forward;
     }
-    if (input.IsKeyDown(ZHLN::KeyCode::S)) {
+    if (state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::S))) {
         moveDirection -= forward;
     }
-    if (input.IsKeyDown(ZHLN::KeyCode::A)) {
+    if (state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::A))) {
         moveDirection -= right;
     }
-    if (input.IsKeyDown(ZHLN::KeyCode::D)) {
+    if (state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::D))) {
         moveDirection += right;
     }
 
@@ -748,10 +757,17 @@ void UpdateEditorCamera(ZHLN::Camera& cam, const ZHLN::InputManager& input, floa
 }
 
 ZHLN::Physics::RaycastResult CastPickingRay(ZHLN::Engine& engine, const ZHLN::Camera& cam) {
-    const auto& input   = engine.GetInput();
-    float       mouseX  = input.GetMouseX();
-    float       mouseY  = input.GetMouseY();
-    auto        winSize = engine.GetWindow().GetSize();
+    auto& reg = engine.GetRegistry();
+    auto  ents = reg.GetEntitiesWith<ZHLN::Components::InputStateComponent>();
+    float mouseX = 0.0f;
+    float mouseY = 0.0f;
+    if (!ents.empty()) {
+        if (auto* st = reg.Get<ZHLN::Components::InputStateComponent>(ents[0])) {
+            mouseX = st->mouseX;
+            mouseY = st->mouseY;
+        }
+    }
+    auto winSize = engine.GetWindow().GetSize();
 
     if (winSize.width == 0 || winSize.height == 0) {
         return {};
@@ -958,13 +974,20 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
         float frameTime = clock.GetDeltaTime();
         engine.ProcessEvents();
 
-        if (engine.GetInput().IsKeyDown(ZHLN::KeyCode::Escape)) {
+        auto& reg  = engine.GetRegistry();
+        auto  ents = reg.GetEntitiesWith<ZHLN::Components::InputStateComponent>();
+        auto* state = ents.empty() ? nullptr : reg.Get<ZHLN::Components::InputStateComponent>(ents[0]);
+
+        // High-level ImGui lives here (main.cpp); capture is also mirrored onto InputStateComponent.
+        const bool imguiCapturesMouse    = ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureMouse;
+        const bool imguiCapturesKeyboard = ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureKeyboard;
+
+        if (state != nullptr && state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Escape)) && !imguiCapturesKeyboard) {
             engine.GetWindow().Close();
             break;
         }
 
-        if (!engine.GetInput().IsKeyDown(ZHLN::KeyCode::Unknown) && !engine.GetInput().IsMouseButtonDown(ZHLN::KeyCode::RButton) &&
-            !ImGui::GetIO().WantCaptureMouse) {
+        if (state != nullptr && !state->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton)) && !imguiCapturesMouse) {
             static bool wasMouseDown = false;
             bool        isMouseDown  = glfwGetMouseButton(static_cast<GLFWwindow*>(engine.GetWindow().GetNativeHandle()), GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
 
@@ -977,9 +1000,9 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
 
         DrawEditorPanels(engine, options);
 
-        if (engine.GetInput().NeedsResize()) {
-            engine.GetRenderContext().SetResolution(engine.GetInput().GetNewSize());
-            engine.GetInput().ClearResizeFlag();
+        if (state != nullptr && state->needsResize) {
+            engine.GetRenderContext().SetResolution(state->newSize);
+            state->needsResize = false;
             ImGui::EndFrame();
             continue;
         }
@@ -991,7 +1014,9 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
                 break;
             }
         } else {
-            UpdateEditorCamera(cam, engine.GetInput(), frameTime);
+            if (state != nullptr) {
+                UpdateEditorCamera(cam, *state, frameTime);
+            }
 
             ZHLN::GameplayStatus status = engine.Tick(0.0f, options.driver);
             if (status == ZHLN::GameplayStatus::RequestQuit) {

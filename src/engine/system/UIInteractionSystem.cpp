@@ -12,8 +12,13 @@
 namespace ZHLN {
 
 void UIInteractionSystem::Update(Engine& engine, float dt) {
-    auto& reg   = engine.GetRegistry();
-    auto& input = engine.GetInput();
+    auto& reg = engine.GetRegistry();
+
+    auto  inputEnts = reg.GetEntitiesWith<Components::InputStateComponent>();
+    auto* state     = inputEnts.empty() ? nullptr : reg.Get<Components::InputStateComponent>(inputEnts[0]);
+    if (state == nullptr) {
+        return;
+    }
 
     auto IsEntityOrAncestorHidden = [&](Entity ent) -> bool {
         Entity curr = ent;
@@ -36,7 +41,8 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
         return;
     }
 
-    bool leftMouseDown = input.IsMouseButtonDown(KeyCode::LButton);
+    // Native ECS UI uses raw button state so ImGui capture does not block in-world panels.
+    bool leftMouseDown = state->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
 
     // 1. Process active dragging
     for (Entity e: reg.GetEntitiesWith<Components::UIDragComponent>()) {
@@ -46,8 +52,9 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                 drag->isDragging = false;
             } else {
                 if (auto* targetRect = reg.Get<Components::UIRectComponent>(drag->targetEntity)) {
-                    targetRect->x += input.GetMouseDeltaX(); // Updated
-                    targetRect->y += input.GetMouseDeltaY(); // Updated
+                    // Drag uses ungated deltas so ImGui capture does not stall an active drag.
+                    targetRect->x += state->mouseDeltaX;
+                    targetRect->y += state->mouseDeltaY;
                 }
             }
         }
@@ -69,8 +76,8 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
     bool focusCaptured = false;
 
     // Cache mouse coordinates once per pass
-    float mouseX = input.GetMouseX(); // Updated
-    float mouseY = input.GetMouseY(); // Updated
+    float mouseX = state->mouseX;
+    float mouseY = state->mouseY;
 
     for (const auto& entry: sortedEntries) {
         Entity      e      = entities[entry.rawIndex];
