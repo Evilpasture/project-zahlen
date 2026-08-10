@@ -1,77 +1,166 @@
-// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
-// SPDX-License-Identifier: GPL-3.0-or-later
-
+// src/engine/Input.cpp
+#include <Zahlen/Components.hpp>
 #include <Zahlen/Input.hpp>
-#include <imgui.h> // Include ImGui locally to avoid header pollution
-
+#include <Zahlen/ecs/ECS.hpp>
+#include <imgui.h>
 namespace ZHLN {
 
-void InputContext::ResetDeltas() {
-    _mouse.deltaX = 0;
-    _mouse.deltaY = 0;
-    _mouse.wheel  = 0;
+namespace {
+[[nodiscard]] Components::InputStateComponent* GetOrCreateInfo(ECS::Registry* reg) noexcept {
+    if (reg == nullptr) {
+        return nullptr;
+    }
+    auto entities = reg->GetEntitiesWith<Components::InputStateComponent>();
+    if (!entities.empty()) {
+        return reg->Get<Components::InputStateComponent>(entities[0]);
+    }
+    Entity e = reg->Create(Components::InputStateComponent {});
+    return reg->Get<Components::InputStateComponent>(e);
 }
+} // namespace
 
-bool InputContext::IsKeyDown(KeyCode key) const noexcept {
-    if (key == KeyCode::Unknown) {
-        return false;
-    }
-
-    // If ImGui is capturing keyboard input (e.g. typing), block gameplay keys
-    if (ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureKeyboard) {
-        return false;
-    }
-
-    return _keys[static_cast<size_t>(key)];
-}
-
-bool InputContext::IsMouseButtonDown(KeyCode key) const noexcept {
-    if (key == KeyCode::Unknown) {
-        return false;
-    }
-
-    // If ImGui is capturing mouse input (hovered/clicked on UI), block gameplay clicks
-    if (ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureMouse) {
-        return false;
-    }
-
-    return _keys[static_cast<size_t>(key)];
-}
-
-void InputContext::InjectKeyDown(KeyCode key) {
+void InputManager::InjectKeyDown(KeyCode key) noexcept {
     if (key == KeyCode::Unknown) {
         return;
     }
-    _keys[static_cast<size_t>(key)] = true;
-}
-
-void InputContext::InjectKeyUp(KeyCode key) {
-    _keys[static_cast<size_t>(key)] = false;
-}
-
-void InputContext::InjectLocalMotion(float x, float y) {
-    _mouse.x = x;
-    _mouse.y = y;
-
-    if (_firstMouse) {
-        _lastX      = x;
-        _lastY      = y;
-        _firstMouse = false;
+    if (auto* state = GetOrCreateInfo(_registry)) {
+        state->keys[static_cast<size_t>(key)] = true;
     }
-
-    _mouse.deltaX = x - _lastX;
-    _mouse.deltaY = y - _lastY;
-    _lastX        = x;
-    _lastY        = y;
 }
 
-void InputContext::InjectWheelMotion(float delta) {
-    _mouse.wheel = delta;
+void InputManager::InjectKeyUp(KeyCode key) noexcept {
+    if (key == KeyCode::Unknown) {
+        return;
+    }
+    if (auto* state = GetOrCreateInfo(_registry)) {
+        state->keys[static_cast<size_t>(key)] = false;
+    }
 }
 
-void InputContext::InjectResize(const Extent2D& extent) {
-    _newSize     = extent;
-    _needsResize = true;
+void InputManager::InjectLocalMotion(float x, float y) noexcept {
+    if (auto* state = GetOrCreateInfo(_registry)) {
+        state->mouseX = x;
+        state->mouseY = y;
+
+        if (state->firstMouse) {
+            state->lastX      = x;
+            state->lastY      = y;
+            state->firstMouse = false;
+        }
+
+        state->mouseDeltaX = x - state->lastX;
+        state->mouseDeltaY = y - state->lastY;
+        state->lastX       = x;
+        state->lastY       = y;
+    }
+}
+
+void InputManager::InjectWheelMotion(float delta) noexcept {
+    if (auto* state = GetOrCreateInfo(_registry)) {
+        state->mouseWheel = delta;
+    }
+}
+
+void InputManager::InjectResize(const Extent2D& extent) noexcept {
+    if (auto* state = GetOrCreateInfo(_registry)) {
+        state->newSize     = extent;
+        state->needsResize = true;
+    }
+}
+
+void InputManager::ResetDeltas() noexcept {
+    if (auto* state = GetOrCreateInfo(_registry)) {
+        state->mouseDeltaX = 0.0f;
+        state->mouseDeltaY = 0.0f;
+        state->mouseWheel  = 0.0f;
+    }
+}
+
+bool InputManager::IsKeyDown(KeyCode key) const noexcept {
+    if (key == KeyCode::Unknown || _registry == nullptr) {
+        return false;
+    }
+    if (ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureKeyboard) {
+        return false;
+    }
+    const auto* state = GetOrCreateInfo(_registry);
+    return state != nullptr && state->keys[static_cast<size_t>(key)];
+}
+
+bool InputManager::IsMouseButtonDown(KeyCode key) const noexcept {
+    if (key == KeyCode::Unknown || _registry == nullptr) {
+        return false;
+    }
+    if (ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureMouse) {
+        return false;
+    }
+    const auto* state = GetOrCreateInfo(_registry);
+    return state != nullptr && state->keys[static_cast<size_t>(key)];
+}
+
+bool InputManager::NeedsResize() const noexcept {
+    if (_registry == nullptr) {
+        return false;
+    }
+    const auto* state = GetOrCreateInfo(_registry);
+    return state != nullptr && state->needsResize;
+}
+
+Extent2D InputManager::GetNewSize() const noexcept {
+    if (_registry == nullptr) {
+        return {};
+    }
+    const auto* state = GetOrCreateInfo(_registry);
+    return state != nullptr ? state->newSize : Extent2D {};
+}
+
+void InputManager::ClearResizeFlag() noexcept {
+    if (_registry == nullptr) {
+        return;
+    }
+    if (auto* state = GetOrCreateInfo(_registry)) {
+        state->needsResize = false;
+    }
+}
+
+float InputManager::GetMouseX() const noexcept {
+    if (_registry == nullptr) {
+        return 0.0f;
+    }
+    const auto* state = GetOrCreateInfo(_registry);
+    return state != nullptr ? state->mouseX : 0.0f;
+}
+
+float InputManager::GetMouseY() const noexcept {
+    if (_registry == nullptr) {
+        return 0.0f;
+    }
+    const auto* state = GetOrCreateInfo(_registry);
+    return state != nullptr ? state->mouseY : 0.0f;
+}
+
+float InputManager::GetMouseDeltaX() const noexcept {
+    if (_registry == nullptr) {
+        return 0.0f;
+    }
+    const auto* state = GetOrCreateInfo(_registry);
+    return state != nullptr ? state->mouseDeltaX : 0.0f;
+}
+
+float InputManager::GetMouseDeltaY() const noexcept {
+    if (_registry == nullptr) {
+        return 0.0f;
+    }
+    const auto* state = GetOrCreateInfo(_registry);
+    return state != nullptr ? state->mouseDeltaY : 0.0f;
+}
+
+float InputManager::GetMouseWheel() const noexcept {
+    if (_registry == nullptr) {
+        return 0.0f;
+    }
+    const auto* state = GetOrCreateInfo(_registry);
+    return state != nullptr ? state->mouseWheel : 0.0f;
 }
 
 } // namespace ZHLN

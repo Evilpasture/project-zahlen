@@ -10,7 +10,7 @@
 #include <vulkan/vulkan.h>
 
 namespace ZHLN {
-class InputContext;
+class InputManager; // Forward declaration
 }
 
 namespace ZHLN::TTYBackend {
@@ -26,7 +26,7 @@ void Shutdown(void* context);
 
 bool IsRunning(void* context);
 
-void ProcessEvents(void* context, InputContext* input);
+void ProcessEvents(void* context, InputManager* input);
 
 // Required extensions for VK_KHR_display
 std::vector<std::string_view> GetRequiredInstanceExtensions();

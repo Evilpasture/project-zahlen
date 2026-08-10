@@ -1,3 +1,4 @@
+// src/engine/system/UIInteractionSystem.cpp
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -13,7 +14,6 @@ namespace ZHLN {
 void UIInteractionSystem::Update(Engine& engine, float dt) {
     auto& reg   = engine.GetRegistry();
     auto& input = engine.GetInput();
-    auto  mouse = input.GetMouse();
 
     auto IsEntityOrAncestorHidden = [&](Entity ent) -> bool {
         Entity curr = ent;
@@ -46,8 +46,8 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                 drag->isDragging = false;
             } else {
                 if (auto* targetRect = reg.Get<Components::UIRectComponent>(drag->targetEntity)) {
-                    targetRect->x += mouse.deltaX;
-                    targetRect->y += mouse.deltaY;
+                    targetRect->x += input.GetMouseDeltaX(); // Updated
+                    targetRect->y += input.GetMouseDeltaY(); // Updated
                 }
             }
         }
@@ -67,6 +67,10 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
 
     bool clickConsumed = false;
     bool focusCaptured = false;
+
+    // Cache mouse coordinates once per pass
+    float mouseX = input.GetMouseX(); // Updated
+    float mouseY = input.GetMouseY(); // Updated
 
     for (const auto& entry: sortedEntries) {
         Entity      e      = entities[entry.rawIndex];
@@ -96,7 +100,7 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
         }
 
         bool inside =
-            (mouse.x >= rect.computedAbsMinX && mouse.x <= rect.computedAbsMaxX && mouse.y >= rect.computedAbsMinY && mouse.y <= rect.computedAbsMaxY);
+            (mouseX >= rect.computedAbsMinX && mouseX <= rect.computedAbsMaxX && mouseY >= rect.computedAbsMinY && mouseY <= rect.computedAbsMaxY); // Updated
 
         if (inside) {
             button->Set(UIButton::Hovered, true);

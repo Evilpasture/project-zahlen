@@ -94,7 +94,6 @@ void RebuildVulkanResources(RenderContext& ctx, CreativeWorksManager& assetMgr, 
 }
 
 struct EngineImpl {
-    std::unique_ptr<InputContext>         input;
     std::unique_ptr<Window>               window;
     std::unique_ptr<RenderContext>        renderContext;
     std::unique_ptr<PhysicsContext>       physicsContext;
@@ -107,6 +106,7 @@ struct EngineImpl {
 
     Camera        mainCamera;
     ECS::Registry registry;
+    InputManager  inputHandle;
 
     std::unique_ptr<ECS::SystemGraph>         updateGraph;
     std::unique_ptr<ECS::SystemGraph>         renderGraph;
@@ -380,7 +380,6 @@ std::expected<void, Error> Engine::InitInternal(const EngineConfig& cfg) {
 
     _impl               = std::make_unique<EngineImpl>();
     _impl->config       = cfg;
-    _impl->input        = std::make_unique<InputContext>();
     _impl->scriptRunner = std::make_unique<ScriptRunner>();
 
     bool use_tty = false;
@@ -402,8 +401,71 @@ std::expected<void, Error> Engine::InitInternal(const EngineConfig& cfg) {
         }
     }
 
-    _impl->window =
-        std::make_unique<Window>(cfg.render.appName.data(), cfg.render.width, cfg.render.height, cfg.render.fullscreen, _impl->input.get(), use_tty);
+    auto onKey = [](void* userdata, KeyCode key, bool pressed) {
+        auto*        reg = static_cast<ECS::Registry*>(userdata);
+        InputManager input(*reg); // Create lightweight 8-byte handle
+        if (pressed) {
+            input.InjectKeyDown(key);
+
+            // Handle text navigation directly on focused text input components
+            for (Entity e: reg->GetEntitiesWith<Components::UITextInputComponent>()) {
+                auto* inputComp = reg->Get<Components::UITextInputComponent>(e);
+                if (inputComp && inputComp->isFocused) {
+                    std::string_view curr = inputComp->text;
+                    if (key == KeyCode::Backspace && inputComp->cursorIndex > 0) {
+                        std::string next = std::string(curr.substr(0, inputComp->cursorIndex - 1)) + std::string(curr.substr(inputComp->cursorIndex));
+                        inputComp->text.assign(next);
+                        inputComp->cursorIndex--;
+                    } else if (key == KeyCode::Left && inputComp->cursorIndex > 0) {
+                        inputComp->cursorIndex--;
+                    } else if (key == KeyCode::Right && inputComp->cursorIndex < curr.size()) {
+                        inputComp->cursorIndex++;
+                    }
+                }
+            }
+        } else {
+            input.InjectKeyUp(key);
+        }
+    };
+
+    auto onMouseMove = [](void* userdata, float x, float y) {
+        auto* reg = static_cast<ECS::Registry*>(userdata);
+        InputManager(*reg).InjectLocalMotion(x, y);
+    };
+
+    auto onMouseScroll = [](void* userdata, float delta) {
+        auto* reg = static_cast<ECS::Registry*>(userdata);
+        InputManager(*reg).InjectWheelMotion(delta);
+    };
+
+    auto onResize = [](void* userdata, Extent2D extent) {
+        auto* reg = static_cast<ECS::Registry*>(userdata);
+        InputManager(*reg).InjectResize(extent);
+    };
+
+    auto onChar = [](void* userdata, unsigned int codepoint) {
+        auto* reg = static_cast<ECS::Registry*>(userdata);
+        for (Entity e: reg->GetEntitiesWith<Components::UITextInputComponent>()) {
+            auto* inputComp = reg->Get<Components::UITextInputComponent>(e);
+            if (inputComp && inputComp->isFocused) {
+                if (codepoint >= 32 && codepoint <= 126 && inputComp->text.size() < 255) {
+                    std::string_view curr = inputComp->text;
+                    std::string      next = std::string(curr.substr(0, inputComp->cursorIndex)) + static_cast<char>(codepoint) +
+                                       std::string(curr.substr(inputComp->cursorIndex));
+                    inputComp->text.assign(next);
+                    inputComp->cursorIndex++;
+                }
+            }
+        }
+    };
+
+    WindowInputReceiver receiver = {
+        .userdata = &_impl->registry, .onKey = onKey, .onMouseMove = onMouseMove, .onMouseScroll = onMouseScroll, .onResize = onResize, .onChar = onChar
+    };
+
+    _impl->window = std::make_unique<Window>(cfg.render.appName.data(), cfg.render.width, cfg.render.height, cfg.render.fullscreen, receiver, use_tty);
+
+    _impl->inputHandle = InputManager(_impl->registry);
 
     if (use_tty && _impl->window->GetTTYContext() == nullptr) {
         ZHLN::Log("[Engine] FATAL: TTY Input initialization failed (libseat session rejected).");
@@ -421,7 +483,6 @@ std::expected<void, Error> Engine::InitInternal(const EngineConfig& cfg) {
     JPH::Factory::sInstance = new JPH::Factory();
     JPH::RegisterTypes();
 
-    // Instantiate through the thread-safe static factory method and capture state
     auto rc_res = RenderContext::Create(*_impl->window, cfg.render);
     if (!rc_res) {
         ZHLN::Log("RenderContext initialization failed: {}", rc_res.error().Message());
@@ -478,10 +539,14 @@ bool Engine::IsRunning() const {
 
 void Engine::ProcessEvents() {
     ZHLN::CheckForCrashes(this);
-    _impl->input->ResetDeltas();
+
+    // 1. Reset frame deltas on the active ECS component
+    InputManager inputManager(_impl->registry);
+    inputManager.ResetDeltas();
 
     if (_impl->window->IsTTY()) {
-        TTYBackend::ProcessEvents(_impl->window->GetTTYContext(), _impl->input.get());
+        // 2. Pass the lightweight input manager to the TTY event poller
+        TTYBackend::ProcessEvents(_impl->window->GetTTYContext(), &inputManager);
         return;
     }
 
@@ -530,8 +595,8 @@ PhysicsContext& Engine::GetPhysicsContext() {
 RenderContext& Engine::GetRenderContext() {
     return *_impl->renderContext;
 }
-InputContext& Engine::GetInput() {
-    return *_impl->input;
+InputManager& Engine::GetInput() noexcept {
+    return _impl->inputHandle;
 }
 Camera& Engine::GetCamera() {
     return _impl->mainCamera;

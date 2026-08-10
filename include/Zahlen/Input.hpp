@@ -2,16 +2,16 @@
 #pragma once
 
 #include <Zahlen/Common.h>
-#include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Types.hpp>
-#include <bitset>
 
 namespace ZHLN {
 
+namespace ECS {
+class Registry;
+}
+
 enum class KeyCode : uint8_t {
     Unknown = 0,
-
-    // Numbers (0 - 9)
     Num0,
     Num1,
     Num2,
@@ -22,8 +22,6 @@ enum class KeyCode : uint8_t {
     Num7,
     Num8,
     Num9,
-
-    // Alphabet (A - Z)
     A,
     B,
     C,
@@ -50,8 +48,6 @@ enum class KeyCode : uint8_t {
     X,
     Y,
     Z,
-
-    // Function Keys
     F1,
     F2,
     F3,
@@ -64,80 +60,58 @@ enum class KeyCode : uint8_t {
     F10,
     F11,
     F12,
-
-    // Modifiers
     LShift,
     RShift,
     LControl,
     RControl,
     LAlt,
     RAlt,
-
-    // Navigation & Editing
     Space,
     Escape,
     Enter,
     Backspace,
     Tab,
     Delete,
-
-    // Arrow Keys
     Up,
     Down,
     Left,
     Right,
-
-    // Mouse Buttons
     LButton,
     RButton,
     MButton
 };
 
-struct MouseState {
-    float          x = 0, y = 0;
-    float          deltaX = 0, deltaY = 0;
-    std::bitset<8> buttons;
-    float          wheel = 0;
-};
-
-class ZHLN_API InputContext {
+class ZHLN_API InputManager {
   public:
-    InputContext() = default;
-
-    [[nodiscard]] bool              IsKeyDown(KeyCode key) const noexcept;
-    [[nodiscard]] bool              IsMouseButtonDown(KeyCode key) const noexcept;
-    [[nodiscard]] const MouseState& GetMouse() const noexcept {
-        return _mouse;
+    InputManager() noexcept = default;
+    explicit InputManager(ECS::Registry& reg) noexcept: _registry(&reg) {
     }
 
-    void ResetDeltas();
+    // Event Injections (Mutators)
+    void InjectKeyDown(KeyCode key) noexcept;
+    void InjectKeyUp(KeyCode key) noexcept;
+    void InjectLocalMotion(float x, float y) noexcept;
+    void InjectWheelMotion(float delta) noexcept;
+    void InjectResize(const Extent2D& extent) noexcept;
+    void ResetDeltas() noexcept;
 
-    [[nodiscard]] bool NeedsResize() const {
-        return _needsResize;
-    }
-    [[nodiscard]] Extent2D GetNewSize() const {
-        return _newSize;
-    }
-    void ClearResizeFlag() {
-        _needsResize = false;
-    }
+    // Convenience State Queries (Readers)
+    [[nodiscard]] bool IsKeyDown(KeyCode key) const noexcept;
+    [[nodiscard]] bool IsMouseButtonDown(KeyCode key) const noexcept;
 
-    void InjectKeyDown(KeyCode key);
-    void InjectKeyUp(KeyCode key);
-    void InjectLocalMotion(float x, float y);
-    void InjectWheelMotion(float delta);
-    void InjectResize(const Extent2D& extent);
+    // --- Added Resize Helpers ---
+    [[nodiscard]] bool     NeedsResize() const noexcept;
+    [[nodiscard]] Extent2D GetNewSize() const noexcept;
+    void                   ClearResizeFlag() noexcept;
+
+    [[nodiscard]] float GetMouseX() const noexcept;
+    [[nodiscard]] float GetMouseY() const noexcept;
+    [[nodiscard]] float GetMouseDeltaX() const noexcept;
+    [[nodiscard]] float GetMouseDeltaY() const noexcept;
+    [[nodiscard]] float GetMouseWheel() const noexcept;
 
   private:
-    bool     _needsResize = false;
-    Extent2D _newSize {.width = 0, .height = 0};
-
-    // Perfectly sized to the exact number of key enumerators
-    std::bitset<ZHLN::Reflect::EnumCount<KeyCode>()> _keys;
-
-    MouseState _mouse;
-    float      _lastX = 0, _lastY = 0;
-    bool       _firstMouse = true;
+    ECS::Registry* _registry = nullptr;
 };
 
 } // namespace ZHLN

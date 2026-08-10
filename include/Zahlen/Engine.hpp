@@ -21,7 +21,7 @@
 
 namespace ZHLN {
 
-class InputContext;
+class InputManager;
 class Window;
 class RenderContext;
 class PhysicsContext;
@@ -64,7 +64,7 @@ class ZHLN_API Engine {
     Window&                            GetWindow();
     PhysicsContext&                    GetPhysicsContext();
     RenderContext&                     GetRenderContext();
-    InputContext&                      GetInput();
+    InputManager&                      GetInput() noexcept;
     Camera&                            GetCamera();
     ALife::Simulator&                  GetALife();
     CreativeWorksManager&              GetCreativeWorksManager();

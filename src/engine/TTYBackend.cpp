@@ -430,7 +430,7 @@ void EmergencyRestore() {
     }
 }
 
-void ProcessEvents(void* context, InputContext* input) {
+void ProcessEvents(void* context, InputManager* input) {
     auto* state = static_cast<TTYState*>(context);
     if ((state == nullptr) || state->epoll_fd < 0 || (input == nullptr)) {
         return;
@@ -549,7 +549,7 @@ void Shutdown(void*) {
 }
 void EmergencyRestore() {
 }
-void ProcessEvents(void*, InputContext*) {
+void ProcessEvents(void*, InputManager*) {
 }
 std::vector<std::string_view> GetRequiredInstanceExtensions() {
     return {};

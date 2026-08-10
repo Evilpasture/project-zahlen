@@ -462,6 +462,22 @@ struct Components {
         bool  wantsToJump    = false;
         bool  wantsToSprint  = false;
     };
+    struct InputStateComponent {
+        std::bitset<64> keys; // Safe raw bitset, no enum dependency
+
+        float mouseX      = 0.0f;
+        float mouseY      = 0.0f;
+        float mouseDeltaX = 0.0f;
+        float mouseDeltaY = 0.0f;
+        float mouseWheel  = 0.0f;
+
+        float lastX      = 0.0f;
+        float lastY      = 0.0f;
+        bool  firstMouse = true;
+
+        bool     needsResize = false;
+        Extent2D newSize {.width = 0, .height = 0};
+    };
     struct LightComponent {
         LightType  type;
         JPH::Vec3  color       = JPH::Vec3::sZero();

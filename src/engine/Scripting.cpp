@@ -884,8 +884,8 @@ void RegisterInputAndCameraCommands() {
                 }));
 
     RegisterCmd("GetMouseDelta", MakeCmd<GetMouseDeltaArgs>([](ZHLN::Engine* engine, const GetMouseDeltaArgs& a) -> uint64_t {
-                    *a.outX = engine->GetInput().GetMouse().deltaX;
-                    *a.outY = engine->GetInput().GetMouse().deltaY;
+                    *a.outX = engine->GetInput().GetMouseDeltaX(); 
+                    *a.outY = engine->GetInput().GetMouseDeltaY(); 
                     return 0;
                 }));
 

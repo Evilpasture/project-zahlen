@@ -1,3 +1,4 @@
+// src/engine/system/InputSystem.cpp
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -8,12 +9,13 @@
 #include "Zahlen/Entity.hpp"
 #include "Zahlen/Input.hpp"
 #include <Zahlen/ecs/ECS.hpp>
+#include <cmath>
+
 namespace ZHLN {
 
 void InputSystem::Update(Engine& engine) {
     auto& input = engine.GetInput();
     auto& reg   = engine.GetRegistry();
-    auto  mouse = input.GetMouse();
 
     for (Entity e: reg.GetEntitiesWith<Components::InputComponent>()) {
         if (auto* ic = reg.Get<Components::InputComponent>(e)) {
@@ -42,15 +44,16 @@ void InputSystem::Update(Engine& engine) {
 
             if (input.IsMouseButtonDown(KeyCode::RButton)) {
                 const float sensitivity = 0.15f;
-                ic->lookYawDelta        = mouse.deltaX * sensitivity;
-                ic->lookPitchDelta      = mouse.deltaY * sensitivity;
+                ic->lookYawDelta        = input.GetMouseDeltaX() * sensitivity; // Updated
+                ic->lookPitchDelta      = input.GetMouseDeltaY() * sensitivity; // Updated
             } else {
                 ic->lookYawDelta   = 0.0f;
                 ic->lookPitchDelta = 0.0f;
             }
 
-            if (std::abs(mouse.wheel) > 0.01f) {
-                ic->zoomDelta = mouse.wheel * 0.5f;
+            float wheel = input.GetMouseWheel(); // Updated
+            if (std::abs(wheel) > 0.01f) {
+                ic->zoomDelta = wheel * 0.5f;
             } else {
                 ic->zoomDelta = 0.0f;
             }

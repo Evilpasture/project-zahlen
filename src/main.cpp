@@ -711,12 +711,12 @@ struct EditorState {
 
 EditorState s_EditorState;
 
-void UpdateEditorCamera(ZHLN::Camera& cam, const ZHLN::InputContext& input, float dt) {
+void UpdateEditorCamera(ZHLN::Camera& cam, const ZHLN::InputManager& input, float dt) {
     const float sensitivity = 0.15f;
 
     if (input.IsMouseButtonDown(ZHLN::KeyCode::RButton)) {
-        cam.yaw += input.GetMouse().deltaX * sensitivity;
-        cam.pitch = std::clamp(cam.pitch - (input.GetMouse().deltaY * sensitivity), -89.0f, 89.0f);
+        cam.yaw += input.GetMouseDeltaX() * sensitivity;
+        cam.pitch = std::clamp(cam.pitch - (input.GetMouseDeltaY() * sensitivity), -89.0f, 89.0f);
     }
 
     float yawRad   = JPH::DegreesToRadians(cam.yaw);
@@ -749,15 +749,16 @@ void UpdateEditorCamera(ZHLN::Camera& cam, const ZHLN::InputContext& input, floa
 
 ZHLN::Physics::RaycastResult CastPickingRay(ZHLN::Engine& engine, const ZHLN::Camera& cam) {
     const auto& input   = engine.GetInput();
-    auto        mouse   = input.GetMouse();
+    float       mouseX  = input.GetMouseX();
+    float       mouseY  = input.GetMouseY();
     auto        winSize = engine.GetWindow().GetSize();
 
     if (winSize.width == 0 || winSize.height == 0) {
         return {};
     }
 
-    float ndcX   = (2.0f * mouse.x) / (float) winSize.width - 1.0f;
-    float ndcY   = 1.0f - (2.0f * mouse.y) / (float) winSize.height;
+    float ndcX   = (2.0f * mouseX) / (float) winSize.width - 1.0f;
+    float ndcY   = 1.0f - (2.0f * mouseY) / (float) winSize.height;
     float aspect = (float) winSize.width / (float) winSize.height;
 
     JPH::Mat44 invVP = (cam.GetProjectionMatrix(aspect) * cam.GetViewMatrix()).Inversed();
@@ -1045,12 +1046,12 @@ int main(int argc, char* argv[]) {
                 ZHLN::EngineConfig config {
                     .physics = {.maxBodies = 5000, .maxBodyPairs = 10000, .maxContactConstraints = 10000, .tempAllocatorSize = 64 * 1024 * 1024},
                     .render  = {
-                        .appName        = options.launchEditor ? "Zahlen World Editor" : "Zahlen Engine",
-                        .width          = w,
-                        .height         = h,
-                        .vsync          = options.vsync,
-                        .fullscreen     = options.fullscreen,
-                        .validationMode = options.validationMode,
+                         .appName        = options.launchEditor ? "Zahlen World Editor" : "Zahlen Engine",
+                         .width          = w,
+                         .height         = h,
+                         .vsync          = options.vsync,
+                         .fullscreen     = options.fullscreen,
+                         .validationMode = options.validationMode,
                     },
                 };
 

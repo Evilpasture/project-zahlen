@@ -76,8 +76,8 @@ void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept 
 
             // Mouse look (Hold Right-Click to look around)
             if (input.IsMouseButtonDown(KeyCode::RButton)) {
-                cam.yaw += input.GetMouse().deltaX * sensitivity;
-                cam.pitch = std::clamp(cam.pitch - (input.GetMouse().deltaY * sensitivity), -89.0f, 89.0f);
+                cam.yaw += input.GetMouseDeltaX() * sensitivity;                                           // Updated
+                cam.pitch = std::clamp(cam.pitch - (input.GetMouseDeltaY() * sensitivity), -89.0f, 89.0f); // Updated
             }
 
             float     yawRad   = JPH::DegreesToRadians(cam.yaw);
@@ -138,7 +138,7 @@ void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept 
         }
 
         // 2. Smoothly interpolate Zoom and FOV target values
-        float wheelDelta = engine.GetInput().GetMouse().wheel;
+        float wheelDelta = engine.GetInput().GetMouseWheel(); // Updated
         if (std::abs(wheelDelta) > 0.01f) {
             camComp.targetDistance = JPH::Clamp(camComp.targetDistance - wheelDelta * 0.5f, 1.5f, 15.0f);
         }
@@ -155,8 +155,8 @@ void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept 
         // 3. Process Mouse look and Sync to camera properties
         const float sensitivity = 0.15f;
         if (engine.GetInput().IsMouseButtonDown(KeyCode::RButton)) {
-            camComp.yaw += engine.GetInput().GetMouse().deltaX * sensitivity;
-            camComp.pitch = std::clamp(camComp.pitch - (engine.GetInput().GetMouse().deltaY * sensitivity), -89.0f, 89.0f);
+            camComp.yaw += engine.GetInput().GetMouseDeltaX() * sensitivity;                                               // Updated
+            camComp.pitch = std::clamp(camComp.pitch - (engine.GetInput().GetMouseDeltaY() * sensitivity), -89.0f, 89.0f); // Updated
         }
 
         cam.yaw   = camComp.yaw;
