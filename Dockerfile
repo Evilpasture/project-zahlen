@@ -28,17 +28,25 @@ RUN pacman -S --needed --noconfirm \
     pkgconf \
     curl
 
-# Install Vulkan SDK 1.4.350.0 (includes slangc at $VULKAN_SDK/x86_64/bin/slangc)
-# Per maintainer: just use the one in Vulkan SDK at ~/.local/share/vulkan-sdk/1.4.350.0/x86_64/bin/slangc
+# Install Vulkan SDK 1.4.350.0 (includes slangc) - robust to tarball layout
 RUN curl -L -o /tmp/vulkan-sdk.tar.xz https://sdk.lunarg.com/sdk/download/1.4.350.0/linux/vulkansdk-linux-x86_64-1.4.350.0.tar.xz \
-    && mkdir -p /opt/vulkan-sdk \
-    && tar -xf /tmp/vulkan-sdk.tar.xz -C /opt/vulkan-sdk --strip-components=1 \
-    && ls /opt/vulkan-sdk/1.4.350.0/x86_64/bin/slangc && /opt/vulkan-sdk/1.4.350.0/x86_64/bin/slangc -version \
+    && mkdir -p /opt \
+    && tar -xf /tmp/vulkan-sdk.tar.xz -C /opt \
+    && echo "--- SDK top ---" && ls /opt | head -n 20 \
+    && SLANGC=$(find /opt -name slangc -type f -executable | head -n 1) \
+    && echo "found slangc at $SLANGC" && ls -lh "$SLANGC" \
+    && ln -sf "$SLANGC" /usr/local/bin/slangc \
+    && SLANGLIBDIR=$(dirname "$SLANGC")/../lib && echo "lib dir $SLANGLIBDIR" && ls "$SLANGLIBDIR" 2>&1 | head -n 30 \
+    && cp -P "$SLANGLIBDIR"/libslang*.so* /usr/local/lib/ 2>/dev/null || true \
+    && cp -P "$SLANGLIBDIR"/*.so* /usr/local/lib/ 2>/dev/null || true \
+    && ldconfig \
+    && VULKAN_SDK_DIR=$(dirname $(dirname "$SLANGC")) && echo "VULKAN_SDK_DIR=$VULKAN_SDK_DIR" && ln -sfn "$VULKAN_SDK_DIR" /opt/vulkan-sdk/current \
+    && slangc --version \
     && rm /tmp/vulkan-sdk.tar.xz
 
-ENV VULKAN_SDK=/opt/vulkan-sdk/1.4.350.0/x86_64
-ENV PATH=$VULKAN_SDK/bin:$PATH
-ENV LD_LIBRARY_PATH=$VULKAN_SDK/lib:$LD_LIBRARY_PATH
+ENV VULKAN_SDK=/opt/vulkan-sdk/current
+ENV PATH=/usr/local/bin:$VULKAN_SDK/bin:$PATH
+ENV LD_LIBRARY_PATH=/usr/local/lib
 
 # Set default compilers to GCC
 ENV CC=gcc
