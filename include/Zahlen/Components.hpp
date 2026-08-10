@@ -3,16 +3,16 @@
 
 // include/Zahlen/Components.hpp
 #pragma once
-#include "Entity.hpp"
-#include "Types.hpp"
-#include "alife/Types.hpp"
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/Ragdoll/Ragdoll.h>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Core/String.hpp>
+#include <Zahlen/Entity.hpp>
 #include <Zahlen/Input.hpp>
+#include <Zahlen/Types.hpp>
+#include <Zahlen/alife/Types.hpp>
 #include <algorithm>
 #include <array>
 #include <bitset>
