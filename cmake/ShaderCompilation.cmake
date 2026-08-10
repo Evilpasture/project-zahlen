@@ -34,7 +34,7 @@ message(STATUS "slangc found: ${SLANG_EXECUTABLE} - Slang-only compilation")
 
 # ----------------------------------------------------------------------------
 # compile_slang: compiles a single Slang entry point to SPIR-V.
-# -matrix-layout column_major is mandatory (slang defaults row_major, old HLSL
+# -matrix-layout-column-major is mandatory (slang defaults row_major, old HLSL
 #   used column_major via #pragma pack_matrix).
 # ----------------------------------------------------------------------------
 function(compile_slang SHADER_PATH ENTRY STAGE OUTPUT_VAR)
@@ -48,7 +48,7 @@ function(compile_slang SHADER_PATH ENTRY STAGE OUTPUT_VAR)
                 -target spirv
                 -profile ${STAGE}
                 -entry ${ENTRY}
-                -matrix-layout column_major
+                -matrix-layout-column-major
                 -fvk-use-dx-layout
                 -fspv-target-env=vulkan1.3
                 -I "${SHADER_SRC_DIR}" -I "${SHADER_INCLUDE_DIR}"
