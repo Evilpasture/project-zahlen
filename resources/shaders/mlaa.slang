@@ -19,7 +19,6 @@ struct MLAAPushConstants {
     float threshold;
     uint  maxSearchSteps;
 };
-// Push constant pc moved to entry-point uniform param (was global uniform MLAAPushConstants pc;)
 // Descriptor Layout: DescriptorLayout<SampledImageSlot<0>, SamplerSlot<1>>
 Texture2D    colorTex;
 SamplerState sPoint;
@@ -27,6 +26,8 @@ SamplerState sPoint;
 // ============================================================================
 // Structures
 // ============================================================================
+
+[[push_constant]] MLAAPushConstants pc;
 
 struct VSOutput {
     float4 pos : SV_Position;
@@ -39,7 +40,7 @@ struct VSOutput {
 
 [shader("vertex")]
 
-VSOutput VSMain(uint vertexID : SV_VertexID, uniform MLAAPushConstants pc) {
+VSOutput VSMain(uint vertexID : SV_VertexID) {
     VSOutput output;
     output.uv = float2((vertexID << 1) & 2, vertexID & 2);
     // Flip-free projection; top-left of the texture maps straight to top-left of clip space (-1, -1)
@@ -161,7 +162,7 @@ float CalculateArea(float d1, float d2, float ortho1, float ortho2) {
 
 [shader("fragment")]
 
-float4 PSMain(VSOutput input, uniform MLAAPushConstants pc): SV_Target0 {
+float4 PSMain(VSOutput input): SV_Target0 {
     float2 uv          = input.uv;
     float4 centerColor = colorTex.SampleLevel(sPoint, uv, 0);
 
