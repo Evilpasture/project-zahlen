@@ -16,6 +16,8 @@ RUN pacman -S --needed --noconfirm \
     python \
     blender \
     directx-shader-compiler \
+    shader-slang \
+    spirv-tools \
     vulkan-devel \
     vulkan-icd-loader \
     libevdev \

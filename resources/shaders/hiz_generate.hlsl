@@ -1,5 +1,6 @@
 // resources/shaders/hiz_generate.hlsl
-#pragma pack_matrix(column_major)
+#pragma pack_matrix(column_major) // KEEP: DXC requires this; Slang equivalent is -matrix-layout column_major (or column_major qualifier). See SHADER.md
+// Slang note: Slang defaults to row_major memory layout, DXC to column_major. For parity, compile Slang with -matrix-layout column_major or use explicit column_major float4x4.
 
 struct PushConstants {
     float rcpSrcWidth;

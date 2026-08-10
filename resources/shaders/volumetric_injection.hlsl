@@ -1,5 +1,6 @@
 // resources/shaders/volumetric_injection.hlsl
-#pragma pack_matrix(column_major)
+#pragma pack_matrix(column_major) // KEEP: DXC requires this; Slang equivalent is -matrix-layout column_major (or column_major qualifier). See SHADER.md
+// Slang note: Slang defaults to row_major memory layout, DXC to column_major. For parity, compile Slang with -matrix-layout column_major or use explicit column_major float4x4.
 #include "pbr_helpers.hlsl"
 #include "uniforms.hlsl"
 
@@ -47,7 +48,7 @@ float Noise3D(float3 p) {
     float n110 = Hash3D(ip + float3(1, 1, 0));
     float n001 = Hash3D(ip + float3(0, 0, 1));
     float n101 = Hash3D(ip + float3(1, 0, 1));
-    float n011 = Hash3D(ip + float3(0, 0, 1));
+    float n011 = Hash3D(ip + float3(0, 1, 1)); // Fixed: was (0,0,1) duplicate of n001
     float n111 = Hash3D(ip + float3(1, 1, 1));
 
     float r00 = lerp(n000, n100, u.x);

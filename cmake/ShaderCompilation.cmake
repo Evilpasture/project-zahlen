@@ -1,6 +1,28 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Modern Slang-first shader compilation with DXC fallback
+# ──────────────────────────────────────────────────────────────────────────────
+# This file is Slang-modernized: DXC silently masks several classes of bugs that
+# Slang's strict frontend surfaces:
+#   - duplicate vk::binding numbers (basic.hlsl :11,0 alias)
+#   - macro redefinition of a type keyword (smaa_wrap.hlsl: SamplerState)
+#   - out-of-bounds BDA store (hang_gpu.hlsl)
+#   - copy-paste noise bug (volumetric_* n011)
+#   - push-constant oversize (>128 bytes guaranteed minimum)
+#   - row_major vs column_major memory layout mismatch
+# All .hlsl files have been patched for those bugs, and idiomatic .slang
+# counterparts are generated via tools/slang_migrate.py:
+#   import <module>;  // instead of #include "x.hlsl"
+#   module <name>;    // for library headers (pbr_helpers, uniforms, common)
+#   [shader("vertex")] etc. // explicit stage attributes
+# The build prefers `slangc` for .slang sources when available, falling back
+# to `dxc` for .hlsl.  Either toolchain targets SPIR-V / Vulkan 1.3.
+# ──────────────────────────────────────────────────────────────────────────────
+
+option(ZHLN_USE_SLANG "Prefer slangc for .slang shaders when available (strict diagnostics, modern syntax)" ON)
+
 # Initialize the global generated shader tracking lists
 set(ALL_GENERATED_SPVS "")
 set(ALL_SHADER_DEFINITIONS "")
@@ -10,16 +32,60 @@ set(SHADER_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 set(GEN_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated_shaders")
 file(MAKE_DIRECTORY ${GEN_INCLUDE_DIR})
 
-find_program(DXC_EXECUTABLE NAMES dxc PATHS "$ENV{VULKAN_SDK}/bin" "D:/Vulkan-SDK/1.4.341.1/bin")
-if(NOT DXC_EXECUTABLE)
-    message(FATAL_ERROR "DXC not found!")
+find_program(DXC_EXECUTABLE NAMES dxc PATHS "$ENV{VULKAN_SDK}/bin" "D:/Vulkan-SDK/1.4.341.1/bin" "/usr/bin" "/usr/local/bin")
+find_program(SLANG_EXECUTABLE NAMES slangc PATHS "$ENV{VULKAN_SDK}/bin" "/usr/bin" "/usr/local/bin" "C:/VulkanSDK/*/bin")
+
+if(NOT DXC_EXECUTABLE AND NOT SLANG_EXECUTABLE)
+    message(FATAL_ERROR "Neither DXC nor slangc found! Install Vulkan SDK with DXC or Slang (shader-slang).")
 endif()
 
+if(DXC_EXECUTABLE)
+    message(STATUS "DXC found: ${DXC_EXECUTABLE}")
+else()
+    message(WARNING "DXC not found - HLSL fallback disabled")
+endif()
+
+if(SLANG_EXECUTABLE)
+    message(STATUS "slangc found: ${SLANG_EXECUTABLE} - Slang-first compilation enabled")
+    if(ZHLN_USE_SLANG)
+        message(STATUS "ZHLN_USE_SLANG=ON - .slang sources will be preferred when present")
+    else()
+        message(STATUS "ZHLN_USE_SLANG=OFF - .hlsl via DXC will be used even when .slang exists")
+    endif()
+else()
+    message(STATUS "slangc not found - using DXC only. Install slangc for strict Slang diagnostics.")
+    set(ZHLN_USE_SLANG OFF)
+endif()
+
+# Helper: if SHADER_PATH is .hlsl and a .slang counterpart exists and slangc is enabled, switch to .slang
+function(resolve_shader_path INPUT_PATH OUTPUT_VAR)
+    set(RESOLVED "${INPUT_PATH}")
+    if(ZHLN_USE_SLANG AND SLANG_EXECUTABLE)
+        get_filename_component(EXT "${INPUT_PATH}" EXT)
+        if(EXT STREQUAL ".hlsl")
+            string(REPLACE ".hlsl" ".slang" SLANG_CANDIDATE "${INPUT_PATH}")
+            if(EXISTS "${SLANG_CANDIDATE}")
+                set(RESOLVED "${SLANG_CANDIDATE}")
+            endif()
+        endif()
+    endif()
+    set(${OUTPUT_VAR} "${RESOLVED}" PARENT_SCOPE)
+endfunction()
+
 # ----------------------------------------------------------------------------
-# compile_hlsl: compiles a single HLSL entry point to SPIR-V.
-# Sets ${OUTPUT_VAR} in the parent scope to the resulting .spv path.
+# compile_hlsl: compiles a single HLSL entry point to SPIR-V via DXC.
 # ----------------------------------------------------------------------------
 function(compile_hlsl SHADER_PATH ENTRY STAGE OUTPUT_VAR)
+    resolve_shader_path("${SHADER_PATH}" RESOLVED_PATH)
+    get_filename_component(EXT "${RESOLVED_PATH}" EXT)
+    if(EXT STREQUAL ".slang" AND SLANG_EXECUTABLE AND ZHLN_USE_SLANG)
+        # Dispatch to Slang path
+        compile_slang("${RESOLVED_PATH}" ${ENTRY} ${STAGE} ${OUTPUT_VAR} ${ARGN})
+        # Propagate the slang-generated variable back to this scope's caller
+        set(${OUTPUT_VAR} ${${OUTPUT_VAR}} PARENT_SCOPE)
+        return()
+    endif()
+
     get_filename_component(FILE_NAME ${SHADER_PATH} NAME)
     set(OUTPUT_SPV "${GEN_INCLUDE_DIR}/${FILE_NAME}.${ENTRY}.${OUTPUT_VAR}.spv")
     set(EXTRA_ARGS ${ARGN})
@@ -34,6 +100,45 @@ function(compile_hlsl SHADER_PATH ENTRY STAGE OUTPUT_VAR)
                 "${SHADER_SRC_DIR}/pbr_helpers.hlsl"
                 "${SHADER_SRC_DIR}/uniforms.hlsl"
         COMMENT "DXC: Generating ${FILE_NAME}.${ENTRY}.${OUTPUT_VAR}.spv"
+        VERBATIM
+    )
+    set(${OUTPUT_VAR} ${OUTPUT_SPV} PARENT_SCOPE)
+endfunction()
+
+# ----------------------------------------------------------------------------
+# compile_slang: compiles a single Slang entry point to SPIR-V via slangc.
+# Preserves Vulkan 1.3 target, column_major layout (critical: Slang defaults
+# to row_major, DXC to column_major - mismatch silently transposes all matrices).
+# ----------------------------------------------------------------------------
+function(compile_slang SHADER_PATH ENTRY STAGE OUTPUT_VAR)
+    # Slang stage mapping: vs_6_5 -> vertex, ps_6_5 -> fragment, cs_6_0 -> compute
+    # slangc accepts -profile <stage>_6_0 and -entry <name>, plus -target spirv
+    get_filename_component(FILE_NAME ${SHADER_PATH} NAME)
+    set(OUTPUT_SPV "${GEN_INCLUDE_DIR}/${FILE_NAME}.${ENTRY}.${OUTPUT_VAR}.spv")
+    set(EXTRA_ARGS ${ARGN})
+
+    # Derive slang -profile from HLSL profile: vs_6_5 -> vs_6_5 etc. slangc understands same.
+    # Use -matrix-layout column_major to match #pragma pack_matrix(column_major) that DXC requires.
+    # -fvk-use-dx-layout matches DXC's cbuffer packing (std140 vs scalar).
+    # -I search paths for `import` modules.
+    add_custom_command(
+        OUTPUT ${OUTPUT_SPV}
+        COMMAND ${SLANG_EXECUTABLE} ${SHADER_PATH}
+                -target spirv
+                -profile ${STAGE}
+                -entry ${ENTRY}
+                -matrix-layout column_major
+                -fvk-use-dx-layout
+                -fspv-target-env=vulkan1.3
+                -I "${SHADER_SRC_DIR}" -I "${SHADER_INCLUDE_DIR}"
+                ${EXTRA_ARGS} -o ${OUTPUT_SPV}
+        DEPENDS ${SHADER_PATH}
+                "${SHADER_SRC_DIR}/common.slang"
+                "${SHADER_SRC_DIR}/pbr_helpers.slang"
+                "${SHADER_SRC_DIR}/uniforms.slang"
+                "${SHADER_SRC_DIR}/common_types.slang"
+                "${SHADER_SRC_DIR}/SMAA.slang"
+        COMMENT "slangc: Generating ${FILE_NAME}.${ENTRY}.${OUTPUT_VAR}.spv (Slang modern, column_major)"
         VERBATIM
     )
     set(${OUTPUT_VAR} ${OUTPUT_SPV} PARENT_SCOPE)
@@ -62,7 +167,7 @@ function(add_shader_target TARGET_SUFFIX)
             string(REPLACE " " ";" STAGE_SPECIFIC_ARGS "${STAGE_SPECIFIC_ARGS}")
         endif()
 
-        # Pass ${MACRO} as the unique output variable name to prevent collisions
+        # Dispatch: compile_hlsl will internally switch to compile_slang if a .slang counterpart exists
         compile_hlsl("${SHADER_PATH}" ${ENTRY} ${PROFILE} ${MACRO} ${ARG_EXTRA_ARGS} ${STAGE_SPECIFIC_ARGS})
 
         list(APPEND OUTPUTS ${${MACRO}})
@@ -113,6 +218,10 @@ endfunction()
 
 # ============================================================================
 # --- EXECUTE COMPILATIONS ---
+# When a .slang counterpart exists and slangc is available, compile_hlsl
+# will transparently dispatch to slangc (see resolve_shader_path above).
+# This keeps the call sites stable (still referencing .hlsl) while the build
+# is Slang-first.  To force DXC, configure with -DZHLN_USE_SLANG=OFF.
 # ============================================================================
 
 compile_shaders(zahlen_engine

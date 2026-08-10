@@ -221,7 +221,7 @@ PSOutput PSMain(VSOutput input) {
 #ifdef FORWARD_PASS
 
 [[vk::binding(11, 0)]] Texture2D<float4> texTransLighting;
-[[vk::binding(11, 0)]] SamplerState      texTransLightingSampler;
+[[vk::binding(12, 0)]] SamplerState      texTransLightingSampler; // Slang fix: distinct binding (was 11,0 duplicate - DXC aliasing bug)
 
 float3 RotateVector(float3 V, float3 lightDir) {
     float lenB = length(lightDir);

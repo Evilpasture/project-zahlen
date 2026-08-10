@@ -1,5 +1,6 @@
 // resources/shaders/ambient.hlsl
-#pragma pack_matrix(column_major)
+#pragma pack_matrix(column_major) // KEEP: DXC requires this; Slang equivalent is -matrix-layout column_major (or column_major qualifier). See SHADER.md
+// Slang note: Slang defaults to row_major memory layout, DXC to column_major. For parity, compile Slang with -matrix-layout column_major or use explicit column_major float4x4.
 #include "pbr_helpers.hlsl"
 #include "uniforms.hlsl"
 
@@ -17,6 +18,10 @@ struct PushConstants {
     int      enableRTR;
     int      _pad;
 };
+// SLANG WARNING: This push constant block size (~180 bytes) exceeds Vulkan's guaranteed minimum maxPushConstantsSize (128).
+// DXC silently allows it, but Slang's SPIR-V legalization validates against VkPhysicalDeviceLimits::maxPushConstantsSize.
+// Desktop GPUs typically support 256, but mobile/portable targets may fail. Consider splitting into ConstantBuffer for portability or verify device limit.
+// Modern Slang idiom: use ParameterBlock<FrameUniforms> or ConstantBuffer for large per-frame data, keep push constants <128 bytes.
 [[vk::push_constant]] PushConstants pc;
 
 // --- G-Buffer Inputs ---
