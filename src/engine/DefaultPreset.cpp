@@ -117,8 +117,7 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
 
     Entity boxEnt = CreativeWorksFactory::CreateBox(
         engine, JPH::Vec3(1.2f, 1.2f, 1.2f),
-        CreativeWorksFactory::SpawnParams {.position = {0.0f, 2.0f, 0.0f}, .roughness = 0.15f, .metallic = 0.85f, .color =0.1f, 0.6f, 0.95f, 1.0f}
-}
+        CreativeWorksFactory::SpawnParams {.position = {0.0f, 2.0f, 0.0f}, .roughness = 0.15f, .metallic = 0.85f, .color = {0.1f, 0.6f, 0.95f, 1.0f}}
     );
     ECS::Assign<Components::NameComponent>(reg, boxEnt, "FallbackEmblem");
     s_CubeEntity = boxEnt;
@@ -128,110 +127,108 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
     cam.yaw      = -90.0f;
     cam.pitch    = -14.0f;
     cam.fov      = 52.0f;
+}
+
+void DefaultPreset::Update(Engine& engine, float dt) {
+    if (!s_IsActive) {
+        return;
     }
 
-    void DefaultPreset::Update(Engine& engine, float dt) {
-        if (!s_IsActive) {
-            return;
-        }
+    s_AccumTime += dt;
+    auto& reg   = engine.GetRegistry();
+    auto& input = engine.GetInput();
+    auto& rc    = engine.GetRenderContext();
 
-        s_AccumTime += dt;
-        auto& reg   = engine.GetRegistry();
-        auto& input = engine.GetInput();
-        auto& rc    = engine.GetRenderContext();
+    // --- TOGGLE POPUP VISIBILITY WITH ESCAPE KEY ---
+    bool        escDown    = input.IsKeyDown(KeyCode::Escape);
+    static bool wasEscDown = false;
 
-        // --- TOGGLE POPUP VISIBILITY WITH ESCAPE KEY ---
-        bool        escDown    = input.IsKeyDown(KeyCode::Escape);
-        static bool wasEscDown = false;
+    if (escDown && !wasEscDown) {
+        s_PopupVisible = !s_PopupVisible;
+        Log("[DefaultPreset] Native GUI Popup {}.", s_PopupVisible ? "Restored" : "Minimized");
+    }
+    wasEscDown = escDown;
 
-        if (escDown && !wasEscDown) {
-            s_PopupVisible = !s_PopupVisible;
-            Log("[DefaultPreset] Native GUI Popup {}.", s_PopupVisible ? "Restored" : "Minimized");
-        }
-        wasEscDown = escDown;
+    // 1. Animate 3D Emblem & Orbit Light
+    if (s_AnimateScene) {
+        ECS::Patch<Components::TransformComponent>(reg, s_CubeEntity, [&](auto& trans) {
+            JPH::Vec3 euler(s_AccumTime * 25.0f, s_AccumTime * 45.0f, s_AccumTime * 15.0f);
+            trans.rotation = Math::EulerDegreesToQuat(euler);
+            trans.position.SetY(2.0f + std::sin(s_AccumTime * 2.0f) * 0.25f);
+        });
 
-        // 1. Animate 3D Emblem & Orbit Light
-        if (s_AnimateScene) {
-            ECS::Patch<Components::TransformComponent>(reg, s_CubeEntity, [&](auto& trans) {
-                JPH::Vec3 euler(s_AccumTime * 25.0f, s_AccumTime * 45.0f, s_AccumTime * 15.0f);
-                trans.rotation = Math::EulerDegreesToQuat(euler);
-                trans.position.SetY(2.0f + std::sin(s_AccumTime * 2.0f) * 0.25f);
-            });
+        ECS::Patch<Components::TransformComponent>(reg, s_PointLight, [&](auto& trans) {
+            float orbitX   = std::cos(s_AccumTime * 1.5f) * 3.5f;
+            float orbitZ   = std::sin(s_AccumTime * 1.5f) * 3.5f;
+            trans.position = JPH::Vec3(orbitX, 2.5f + std::sin(s_AccumTime * 3.0f) * 0.5f, orbitZ);
+        });
+    }
 
-            ECS::Patch<Components::TransformComponent>(reg, s_PointLight, [&](auto& trans) {
-                float orbitX   = std::cos(s_AccumTime * 1.5f) * 3.5f;
-                float orbitZ   = std::sin(s_AccumTime * 1.5f) * 3.5f;
-                trans.position = JPH::Vec3(orbitX, 2.5f + std::sin(s_AccumTime * 3.0f) * 0.5f, orbitZ);
-            });
-        }
+    // 2. IMMEDIATE-MODE NATIVE ECS 2D UI EVALUATION
+    if (s_PopupVisible) {
+        GUI::Context ui(reg, engine.GetCurrentFrame());
 
-        // 2. IMMEDIATE-MODE NATIVE ECS 2D UI EVALUATION
-        if (s_PopupVisible) {
-            GUI::Context ui(reg, engine.GetCurrentFrame());
+        s_UIPopupBox = ui.BeginPanel(
+            "FallbackUIPopupBox", GUI::PanelConfig {.width = 700.0f, .height = 440.0f, .x = -350.0f, .y = -220.0f, .gap = 14.0f, .padding = 20.0f}, [&]() {
+                // Header Title (Fits perfectly at 0.70f scale)
+                ui.Label(
+                    "ZAHLEN ENGINE :: STANDALONE FALLBACK MODE",
+                    GUI::LabelConfig {.scale = 0.70f, .color = {0.3f, 0.85f, 1.0f, 1.0f}, .align = TextAlignment::Center, .height = 28.0f}
+                );
 
-            s_UIPopupBox = ui.BeginPanel(
-                "FallbackUIPopupBox", GUI::PanelConfig {.width = 700.0f, .height = 440.0f, .x = -350.0f, .y = -220.0f, .gap = 14.0f, .padding = 20.0f}, [&]() {
-                    // Header Title (Fits perfectly at 0.70f scale)
-                    ui.Label(
-                        "ZAHLEN ENGINE :: STANDALONE FALLBACK MODE",
-                        GUI::LabelConfig {.scale = 0.70f, .color = {0.3f, 0.85f, 1.0f, 1.0f}, .align = TextAlignment::Center, .height = 28.0f}
-                    );
+                // Alert Toast Box
+                std::string reasonTitle = (s_Reason == FallbackReason::MissingBootScript)   ? "[WARNING] MISSING BOOT SCRIPT ('scripts/boot.lua')" :
+                                          (s_Reason == FallbackReason::MissingNativeModule) ? "[WARNING] MISSING NATIVE MODULE ('libgameplay.so')" :
+                                                                                              "[WARNING] NO GAMEPLAY MODULE DETECTED";
 
-                    // Alert Toast Box
-                    std::string reasonTitle = (s_Reason == FallbackReason::MissingBootScript)   ? "[WARNING] MISSING BOOT SCRIPT ('scripts/boot.lua')" :
-                                              (s_Reason == FallbackReason::MissingNativeModule) ? "[WARNING] MISSING NATIVE MODULE ('libgameplay.so')" :
-                                                                                                  "[WARNING] NO GAMEPLAY MODULE DETECTED";
+                ui.BeginBox(GUI::BoxConfig {.height = 72.0f, .color = {0.22f, 0.16f, 0.08f, 0.85f}, .gap = 4.0f, .padding = 10.0f}, [&]() {
+                    ui.Label(reasonTitle, GUI::LabelConfig {.color = {1.0f, 0.85f, 0.3f, 1.0f}});
+                    ui.Label(s_DetailMsg, GUI::LabelConfig {.scale = 0.75f, .color = {0.9f, 0.85f, 0.7f, 1.0f}});
+                });
 
-                    ui.BeginBox(GUI::BoxConfig {.height = 72.0f, .color = {0.22f, 0.16f, 0.08f, 0.85f}, .gap = 4.0f, .padding = 10.0f}, [&]() {
-                        ui.Label(reasonTitle, GUI::LabelConfig {.color = {1.0f, 0.85f, 0.3f, 1.0f}});
-                        ui.Label(s_DetailMsg, GUI::LabelConfig {.scale = 0.75f, .color = {0.9f, 0.85f, 0.7f, 1.0f}});
-                    });
+                // System Environment Inset Box
+                std::string envSummary = std::format(
+                    "Engine Version:   {}\nCompiler:         {}\nTarget Triple:    {}\nGPU Hardware:     {}", ZHLN::Version::String, Compiler,
+                    ZHLN_TARGET_TRIPLE, rc.GetGPUName()
+                );
 
-                    // System Environment Inset Box
-                    std::string envSummary = std::format(
-                        "Engine Version:   {}\nCompiler:         {}\nTarget Triple:    {}\nGPU Hardware:     {}", ZHLN::Version::String, Compiler,
-                        ZHLN_TARGET_TRIPLE, rc.GetGPUName()
-                    );
+                ui.BeginBox(GUI::BoxConfig {.height = 170.0f, .color = {0.05f, 0.07f, 0.11f, 0.85f}, .padding = 12.0f}, [&]() {
+                    ui.Label(envSummary, GUI::LabelConfig {.scale = 0.80f, .color = {0.65f, 0.75f, 0.85f, 1.0f}, .verticalAlign = TextVerticalAlignment::Top});
+                });
 
-                    ui.BeginBox(GUI::BoxConfig {.height = 170.0f, .color = {0.05f, 0.07f, 0.11f, 0.85f}, .padding = 12.0f}, [&]() {
-                        ui.Label(
-                            envSummary, GUI::LabelConfig {.scale = 0.80f, .color = {0.65f, 0.75f, 0.85f, 1.0f}, .verticalAlign = TextVerticalAlignment::Top}
+                // Transparent Horizontal Button Bar
+                ui.BeginBox(
+                    GUI::BoxConfig {
+                        .height    = 48.0f,
+                        .color     = {0.0f, 0.0f, 0.0f, 0.0f},
+                        .edgeWidth = 0.0f,
+                        .direction = FlexDirection::Row,
+                        .justify   = FlexJustify::SpaceBetween,
+                        .padding   = 0.0f
+                    },
+                    [&]() {
+                        s_BtnReload = ui.Button("Reload Boot", GUI::ButtonConfig {.width = 210.0f}, [&]() {
+                            Log("[DefaultPreset] Reloading 'scripts/boot.lua' via Native UI...");
+                            engine.GetScriptRunner().ReloadFile("scripts/boot.lua");
+                        });
+
+                        s_BtnAnimate = ui.Button(s_AnimateScene ? "Pause Motion" : "Resume Motion", GUI::ButtonConfig {.width = 210.0f}, [&]() {
+                            s_AnimateScene = !s_AnimateScene;
+                        });
+
+                        s_BtnQuit = ui.Button(
+                            "Quit Engine",
+                            GUI::ButtonConfig {.width = 210.0f, .normalColor = {0.45f, 0.16f, 0.18f, 0.95f}, .hoverColor = {0.65f, 0.22f, 0.25f, 1.0f}},
+                            [&]() { engine.GetWindow().Close(); }
                         );
-                    });
-
-                    // Transparent Horizontal Button Bar
-                    ui.BeginBox(
-                        GUI::BoxConfig {
-                            .height    = 48.0f,
-                            .color     = {0.0f, 0.0f, 0.0f, 0.0f},
-                            .edgeWidth = 0.0f,
-                            .direction = FlexDirection::Row,
-                            .justify   = FlexJustify::SpaceBetween,
-                            .padding   = 0.0f
-                        },
-                        [&]() {
-                            s_BtnReload = ui.Button("Reload Boot", GUI::ButtonConfig {.width = 210.0f}, [&]() {
-                                Log("[DefaultPreset] Reloading 'scripts/boot.lua' via Native UI...");
-                                engine.GetScriptRunner().ReloadFile("scripts/boot.lua");
-                            });
-
-                            s_BtnAnimate = ui.Button(s_AnimateScene ? "Pause Motion" : "Resume Motion", GUI::ButtonConfig {.width = 210.0f}, [&]() {
-                                s_AnimateScene = !s_AnimateScene;
-                            });
-
-                            s_BtnQuit = ui.Button(
-                                "Quit Engine",
-                                GUI::ButtonConfig {.width = 210.0f, .normalColor = {0.45f, 0.16f, 0.18f, 0.95f}, .hoverColor = {0.65f, 0.22f, 0.25f, 1.0f}},
-                                [&]() { engine.GetWindow().Close(); }
-                            );
-                        }
-                    );
-                }
-            );
-        } else {
-            GUI::Context ui(reg, engine.GetCurrentFrame());
-            ui.SweepStaleChildren(NullEntity);
-        }
+                    }
+                );
+            }
+        );
+    } else {
+        GUI::Context ui(reg, engine.GetCurrentFrame());
+        ui.SweepStaleChildren(NullEntity);
     }
+}
 
-    } // namespace ZHLN
+} // namespace ZHLN
