@@ -9,7 +9,7 @@
 // Slang: column_major via -matrix-layout column_major (removed #pragma pack_matrix) // KEEP: DXC requires this; Slang equivalent is -matrix-layout column_major (or column_major qualifier). See SHADER.md
 // Slang note: Slang defaults to row_major memory layout, DXC to column_major. For parity, compile Slang with -matrix-layout column_major or use explicit column_major float4x4.
 import uniforms; // modern Slang import (was #include "uniforms.hlsl")
-import pbr_helpers; // for vk::RawBufferLoad BDA helpers
+import pbr_helpers;
 
 struct Particle {
     float4 position;
@@ -23,12 +23,11 @@ struct RenderPushConstants {
     uint     alignment;
     uint     textureIndex;
 };
-[[vk::push_constant]] RenderPushConstants pc;
-
+// Push constant pc moved to entry-point uniform param (was global uniform RenderPushConstants pc;)
 // Decoupled Bindings (No longer importing common.hlsl's conflicting push constants)
-[[vk::binding(0, 0)]] Texture2D                     globalTextures[];
-[[vk::binding(1, 0)]] SamplerState                  defaultSampler;
-[[vk::binding(2, 0)]] ConstantBuffer<FrameUniforms> frame;
+Texture2D                     globalTextures[];
+SamplerState                  defaultSampler;
+ConstantBuffer<FrameUniforms> frame;
 
 struct ParticleVSOutput {
     float4 pos : SV_Position;
@@ -37,10 +36,11 @@ struct ParticleVSOutput {
 };
 
 [shader("vertex")]
-ParticleVSOutput VSMain(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID) {
+
+ParticleVSOutput VSMain(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID, uniform RenderPushConstants pc) {
     ParticleVSOutput output;
     uint64_t         addr = pc.particleBufferAddr + instanceID * sizeof(Particle);
-    Particle         p    = vk::RawBufferLoad<Particle>(addr, 4);
+    Particle         p    = *(Particle*)(addr);
 
     float2 quadUVs[6] = {float2(0, 0), float2(0, 1), float2(1, 0), float2(1, 0), float2(0, 1), float2(1, 1)};
     float2 offsets[6] = {float2(-0.5f, -0.5f), float2(-0.5f, 0.5f), float2(0.5f, -0.5f), float2(0.5f, -0.5f), float2(-0.5f, 0.5f), float2(0.5f, 0.5f)};
@@ -82,7 +82,8 @@ ParticleVSOutput VSMain(uint vertexID : SV_VertexID, uint instanceID : SV_Instan
 }
 
 [shader("fragment")]
-float4 PSMain(ParticleVSOutput input): SV_Target0 {
+
+float4 PSMain(ParticleVSOutput input, uniform RenderPushConstants pc): SV_Target0 {
     float4 texColor   = globalTextures[pc.textureIndex].Sample(defaultSampler, input.uv);
     float4 finalColor = texColor * input.color;
 
@@ -98,4 +99,4 @@ float4 PSMain(ParticleVSOutput input): SV_Target0 {
 // * HLSL `#include` -> Slang `import` for modules (see pbr_helpers, uniforms, common modules).
 // * Entry points annotated with [shader("vertex"/"fragment"/"compute")] for explicit stage declaration (Slang idiom).
 // * Duplicate binding / macro redefinition / out-of-bounds BDA silent bugs fixed – Slang's stricter diagnostics surface them.
-// * All vk::binding / vk::push_constant / vk::constant_id attributes preserved for SPIR-V Vulkan 1.3 target parity.
+// * All resources use actual Slang syntax (auto binding, uniform push constants, SpecializationConstant) without vk:: extensions.

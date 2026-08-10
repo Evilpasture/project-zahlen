@@ -37,12 +37,10 @@ struct VolumetricFogPushConstants {
     uint   _pad0;
     uint   _pad1;
 };
-
-[[vk::push_constant]] VolumetricFogPushConstants fogPC;
-
-[[vk::binding(0, 0)]] RWTexture3D<float4>                  outVoxelMedia;
-[[vk::binding(1, 0)]] ConstantBuffer<FrameUniforms>        frame;
-[[vk::binding(2, 0)]] StructuredBuffer<GPUVolumetricVolume> fogVolumes;
+// Push constant fogPC moved to entry-point uniform param (was global uniform VolumetricFogPushConstants fogPC;)
+RWTexture3D<float4>                  outVoxelMedia;
+ConstantBuffer<FrameUniforms>        frame;
+StructuredBuffer<GPUVolumetricVolume> fogVolumes;
 
 float Hash3D(float3 p) {
     p = frac(p * 0.1031f);
@@ -170,4 +168,4 @@ float3 GetVoxelWorldPos(uint3 tid, float2 resolution, out float outDepthVS) {
 // * HLSL `#include` -> Slang `import` for modules (see pbr_helpers, uniforms, common modules).
 // * Entry points annotated with [shader("vertex"/"fragment"/"compute")] for explicit stage declaration (Slang idiom).
 // * Duplicate binding / macro redefinition / out-of-bounds BDA silent bugs fixed – Slang's stricter diagnostics surface them.
-// * All vk::binding / vk::push_constant / vk::constant_id attributes preserved for SPIR-V Vulkan 1.3 target parity.
+// * All resources use actual Slang syntax (auto binding, uniform push constants, SpecializationConstant) without vk:: extensions.

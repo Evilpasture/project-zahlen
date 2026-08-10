@@ -18,12 +18,12 @@ struct ClusterVolume {
     uint count;
 };
 
-[[vk::binding(0, 0)]] StructuredBuffer<ClusterBounds>   in_Bounds;
-[[vk::binding(1, 0)]] RWStructuredBuffer<ClusterVolume> out_Grid;
-[[vk::binding(2, 0)]] RWStructuredBuffer<uint>          out_IndexList;
-[[vk::binding(3, 0)]] RWStructuredBuffer<uint>          out_Counter;
-[[vk::binding(4, 0)]] ConstantBuffer<FrameUniforms>     frame;  // Bound to slot 4 matching C++ layout
-[[vk::binding(5, 0)]] StructuredBuffer<Light>           lights; // Bound to slot 5 matching C++ layout
+StructuredBuffer<ClusterBounds>   in_Bounds;
+RWStructuredBuffer<ClusterVolume> out_Grid;
+RWStructuredBuffer<uint>          out_IndexList;
+RWStructuredBuffer<uint>          out_Counter;
+ConstantBuffer<FrameUniforms>     frame;  // Bound to slot 4 matching C++ layout
+StructuredBuffer<Light>           lights; // Bound to slot 5 matching C++ layout
 
 // --- Sphere vs Axis-Aligned Bounding Box (AABB) ---
 bool SphereAABB(float3 c, float r, float3 minB, float3 maxB) {
@@ -97,4 +97,4 @@ bool ConeBehindPlane(float3 T, float3 D, float R, float r, float3 N, float d) {
 // * HLSL `#include` -> Slang `import` for modules (see pbr_helpers, uniforms, common modules).
 // * Entry points annotated with [shader("vertex"/"fragment"/"compute")] for explicit stage declaration (Slang idiom).
 // * Duplicate binding / macro redefinition / out-of-bounds BDA silent bugs fixed – Slang's stricter diagnostics surface them.
-// * All vk::binding / vk::push_constant / vk::constant_id attributes preserved for SPIR-V Vulkan 1.3 target parity.
+// * All resources use actual Slang syntax (auto binding, uniform push constants, SpecializationConstant) without vk:: extensions.

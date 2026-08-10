@@ -11,7 +11,7 @@ import pbr_helpers;
 import uniforms; // modern Slang import (was #include "common.hlsl")
 
 [shader("vertex")]
-VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, uint viewId : SV_ViewID) {
+VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, uint viewId : SV_ViewID, uniform ObjectConstants obj) {
     VSOutput output;
 
     uint         instId = (obj.instanceId != 4294967295u) ? obj.instanceId : instanceId;
@@ -19,7 +19,7 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, ui
 
     uint actualVertexId = vertexId;
     if (inst.iboAddress != 0) {
-        actualVertexId = vk::RawBufferLoad<uint>(inst.iboAddress + vertexId * 4, 4);
+        actualVertexId = *(uint*)(inst.iboAddress + vertexId * 4);
     }
     /*
      * NOTE: Defensive check against OOB BDA fetches.
@@ -46,7 +46,7 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, ui
 
     float4x4 activeVP = (isViewmodel != 0) ? frame.viewmodelViewProj : frame.viewProj;
 
-    float3 position     = vk::RawBufferLoad<float3>(inst.posAddress + actualVertexId * 12, 4);
+    float3 position     = *(float3*)(inst.posAddress + actualVertexId * 12);
     float2 localUV      = float2(0, 0);
     float4 localColor   = float4(1, 1, 1, 1);
     float3 localNormal  = float3(0, 1, 0);
@@ -55,10 +55,10 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, ui
     // Load Attributes
     if (inst.attrAddress != 0) {
         uint64_t attrAddr   = inst.attrAddress + actualVertexId * 16;
-        uint     normalRaw  = vk::RawBufferLoad<uint>(attrAddr + 0, 4);
-        uint     tangentRaw = vk::RawBufferLoad<uint>(attrAddr + 4, 4);
-        uint     uvRaw      = vk::RawBufferLoad<uint>(attrAddr + 8, 4);
-        uint     colorRaw   = vk::RawBufferLoad<uint>(attrAddr + 12, 4);
+        uint     normalRaw  = *(uint*)(attrAddr + 0);
+        uint     tangentRaw = *(uint*)(attrAddr + 4);
+        uint     uvRaw      = *(uint*)(attrAddr + 8);
+        uint     colorRaw   = *(uint*)(attrAddr + 12);
 
         localNormal  = UnpackNormal(normalRaw).xyz;
         localTangent = UnpackNormal(tangentRaw);
@@ -73,8 +73,8 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, ui
 
     if (isSkinned != 0 && inst.skinAddress != 0) {
         uint64_t skinAddr   = inst.skinAddress + actualVertexId * 12;
-        uint2    jointsRaw  = vk::RawBufferLoad<uint2>(skinAddr + 0, 4);
-        uint     weightsRaw = vk::RawBufferLoad<uint>(skinAddr + 8, 4);
+        uint2    jointsRaw  = *(uint2*)(skinAddr + 0);
+        uint     weightsRaw = *(uint*)(skinAddr + 8);
 
         localJoints = UnpackJoints(jointsRaw);
         weights     = UnpackColor(weightsRaw);
@@ -159,7 +159,7 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, ui
 }
 
 [shader("fragment")]
-void PSShadow(VSOutput input) {
+void PSShadow(VSOutput input, uniform ObjectConstants obj) {
     uint4  indices         = input.materialIndices;
     float4 baseColorFactor = input.baseColorFactor;
     float  alphaCutoff     = input.pbrFactors.z;
@@ -173,7 +173,7 @@ void PSShadow(VSOutput input) {
 }
 
 [shader("fragment")]
-PSOutput PSMain(VSOutput input) {
+PSOutput PSMain(VSOutput input, uniform ObjectConstants obj) {
     PSOutput output;
 
     uint4  indices         = input.materialIndices;
@@ -232,8 +232,8 @@ PSOutput PSMain(VSOutput input) {
 
 #ifdef FORWARD_PASS
 
-[[vk::binding(11, 0)]] Texture2D<float4> texTransLighting;
-[[vk::binding(12, 0)]] SamplerState      texTransLightingSampler; // Slang fix: distinct binding (was 11,0 duplicate - DXC aliasing bug)
+Texture2D<float4> texTransLighting;
+SamplerState      texTransLightingSampler; // Slang fix: distinct binding (was 11,0 duplicate - DXC aliasing bug)
 
 float3 RotateVector(float3 V, float3 lightDir) {
     float lenB = length(lightDir);
@@ -253,7 +253,7 @@ float3 RotateVector(float3 V, float3 lightDir) {
 }
 
 [shader("fragment")]
-float4 PSForward(VSOutput input): SV_Target0 {
+float4 PSForward(VSOutput input, uniform ObjectConstants obj): SV_Target0 {
     uint4  indices         = input.materialIndices;
     float4 baseColorFactor = input.baseColorFactor;
     float  roughnessFactor = input.pbrFactors.y;
@@ -287,4 +287,4 @@ float4 PSForward(VSOutput input): SV_Target0 {
 // * HLSL `#include` -> Slang `import` for modules (see pbr_helpers, uniforms, common modules).
 // * Entry points annotated with [shader("vertex"/"fragment"/"compute")] for explicit stage declaration (Slang idiom).
 // * Duplicate binding / macro redefinition / out-of-bounds BDA silent bugs fixed – Slang's stricter diagnostics surface them.
-// * All vk::binding / vk::push_constant / vk::constant_id attributes preserved for SPIR-V Vulkan 1.3 target parity.
+// * All resources use actual Slang syntax (auto binding, uniform push constants, SpecializationConstant) without vk:: extensions.

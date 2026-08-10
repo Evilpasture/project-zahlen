@@ -23,8 +23,7 @@ struct DecalPushConstants {
 // DXC silently allows it, but Slang's SPIR-V legalization validates against VkPhysicalDeviceLimits::maxPushConstantsSize.
 // Desktop GPUs typically support 256, but mobile/portable targets may fail. Consider splitting into ConstantBuffer for portability or verify device limit.
 // Modern Slang idiom: use ParameterBlock<FrameUniforms> or ConstantBuffer for large per-frame data, keep push constants <128 bytes.
-[[vk::push_constant]] DecalPushConstants pc;
-
+// Push constant pc moved to entry-point uniform param (was global uniform DecalPushConstants pc;)
 struct VSOutput {
     float4 pos : SV_Position;
 };
@@ -43,12 +42,13 @@ static const uint CubeIndices[36] = {
 };
 
 // --- Set 1: Global Bindless Layout (Inherited from Engine) ---
-[[vk::binding(0, 1)]] Texture2D                     globalTextures[];
-[[vk::binding(1, 1)]] SamplerState                  defaultSampler;
-[[vk::binding(2, 1)]] ConstantBuffer<FrameUniforms> frame;
+Texture2D                     globalTextures[];
+SamplerState                  defaultSampler;
+ConstantBuffer<FrameUniforms> frame;
 
 [shader("vertex")]
-VSOutput VSMain(uint vertexID : SV_VertexID) {
+
+VSOutput VSMain(uint vertexID : SV_VertexID, uniform DecalPushConstants pc) {
     VSOutput output;
     float3   localPos = CubeVertices[CubeIndices[vertexID]];
     float4   worldPos = mul(pc.worldMatrix, float4(localPos, 1.0f));
@@ -57,8 +57,8 @@ VSOutput VSMain(uint vertexID : SV_VertexID) {
 }
 
 // --- Set 0: Custom Decal Layout ---
-[[vk::binding(0, 0)]] Texture2D<float> texDepth;
-[[vk::binding(1, 0)]] SamplerState     pointSampler;
+Texture2D<float> texDepth;
+SamplerState     pointSampler;
 
 struct PSOutput {
     float4 albedo : SV_Target0;          // Writes to G-Buffer SceneColor (Slot 0)
@@ -66,7 +66,8 @@ struct PSOutput {
 };
 
 [shader("fragment")]
-PSOutput PSMain(VSOutput input) {
+
+PSOutput PSMain(VSOutput input, uniform DecalPushConstants pc) {
     PSOutput output;
 
     // 1. Reconstruct screen-space UV coordinates
@@ -128,4 +129,4 @@ PSOutput PSMain(VSOutput input) {
 // * HLSL `#include` -> Slang `import` for modules (see pbr_helpers, uniforms, common modules).
 // * Entry points annotated with [shader("vertex"/"fragment"/"compute")] for explicit stage declaration (Slang idiom).
 // * Duplicate binding / macro redefinition / out-of-bounds BDA silent bugs fixed – Slang's stricter diagnostics surface them.
-// * All vk::binding / vk::push_constant / vk::constant_id attributes preserved for SPIR-V Vulkan 1.3 target parity.
+// * All resources use actual Slang syntax (auto binding, uniform push constants, SpecializationConstant) without vk:: extensions.

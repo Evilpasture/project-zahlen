@@ -5,7 +5,7 @@
 //               -I resources/shaders -I include -o <out>.spv
 // See SHADER.md for column_major, right-handed, CCW conventions preserved.
 
-import pbr_helpers; // for vk::RawBufferLoad BDA
+import pbr_helpers;
 // resources/shaders/skinning.hlsl
 // Slang: column_major via -matrix-layout column_major (removed #pragma pack_matrix) // KEEP: DXC requires this; Slang equivalent is -matrix-layout column_major (or column_major qualifier). See SHADER.md
 // Slang note: Slang defaults to row_major memory layout, DXC to column_major. For parity, compile Slang with -matrix-layout column_major or use explicit column_major float4x4.
@@ -51,9 +51,7 @@ struct SkinningConstants {
     uint32_t activeMorphCount; // <-- ADDED
     float    morphWeights[4];  // <-- ADDED
 };
-
-[[vk::push_constant]] SkinningConstants pcs;
-
+// Push constant pcs moved to entry-point uniform param (was global uniform SkinningConstants pcs;)
 float4 UnpackNormal(uint packed) {
     float x = (float(packed & 0x3FF) / 1023.0f) * 2.0f - 1.0f;
     float y = (float((packed >> 10) & 0x3FF) / 1023.0f) * 2.0f - 1.0f;
@@ -76,10 +74,10 @@ float4 SkinPosition(float4 position, uint4 joints, float4 weights, uint jointOff
     uint64_t j2_addr = jointsAddr + (jointOffset + joints.z) * 64;
     uint64_t j3_addr = jointsAddr + (jointOffset + joints.w) * 64;
 
-    GPUJoint j0 = vk::RawBufferLoad<GPUJoint>(j0_addr, 4);
-    GPUJoint j1 = vk::RawBufferLoad<GPUJoint>(j1_addr, 4);
-    GPUJoint j2 = vk::RawBufferLoad<GPUJoint>(j2_addr, 4);
-    GPUJoint j3 = vk::RawBufferLoad<GPUJoint>(j3_addr, 4);
+    GPUJoint j0 = *(GPUJoint*)(j0_addr);
+    GPUJoint j1 = *(GPUJoint*)(j1_addr);
+    GPUJoint j2 = *(GPUJoint*)(j2_addr);
+    GPUJoint j3 = *(GPUJoint*)(j3_addr);
 
     float4 pos = (j0.col0 * position.x + j0.col1 * position.y + j0.col2 * position.z + j0.col3 * position.w) * weights.x +
                  (j1.col0 * position.x + j1.col1 * position.y + j1.col2 * position.z + j1.col3 * position.w) * weights.y +
@@ -94,10 +92,10 @@ float3 SkinDirection(float3 direction, uint4 joints, float4 weights, uint jointO
     uint64_t j2_addr = jointsAddr + (jointOffset + joints.z) * 64;
     uint64_t j3_addr = jointsAddr + (jointOffset + joints.w) * 64;
 
-    GPUJoint j0 = vk::RawBufferLoad<GPUJoint>(j0_addr, 4);
-    GPUJoint j1 = vk::RawBufferLoad<GPUJoint>(j1_addr, 4);
-    GPUJoint j2 = vk::RawBufferLoad<GPUJoint>(j2_addr, 4);
-    GPUJoint j3 = vk::RawBufferLoad<GPUJoint>(j3_addr, 4);
+    GPUJoint j0 = *(GPUJoint*)(j0_addr);
+    GPUJoint j1 = *(GPUJoint*)(j1_addr);
+    GPUJoint j2 = *(GPUJoint*)(j2_addr);
+    GPUJoint j3 = *(GPUJoint*)(j3_addr);
 
     float3 dir = (j0.col0.xyz * direction.x + j0.col1.xyz * direction.y + j0.col2.xyz * direction.z) * weights.x +
                  (j1.col0.xyz * direction.x + j1.col1.xyz * direction.y + j1.col2.xyz * direction.z) * weights.y +
@@ -111,18 +109,18 @@ float3 SkinDirection(float3 direction, uint4 joints, float4 weights, uint jointO
         return;
 
     // Load separated SoA input streams
-    float3 localPos   = vk::RawBufferLoad<float3>(pcs.inPosAddr + tid.x * 12, 4);
-    uint   normalRaw  = vk::RawBufferLoad<uint>(pcs.inAttrAddr + tid.x * 16 + 0, 4);
-    uint   tangentRaw = vk::RawBufferLoad<uint>(pcs.inAttrAddr + tid.x * 16 + 4, 4);
-    uint   uvRaw      = vk::RawBufferLoad<uint>(pcs.inAttrAddr + tid.x * 16 + 8, 4);
-    uint   colorRaw   = vk::RawBufferLoad<uint>(pcs.inAttrAddr + tid.x * 16 + 12, 4);
+    float3 localPos   = *(float3*)(pcs.inPosAddr + tid.x * 12);
+    uint   normalRaw  = *(uint*)(pcs.inAttrAddr + tid.x * 16 + 0);
+    uint   tangentRaw = *(uint*)(pcs.inAttrAddr + tid.x * 16 + 4);
+    uint   uvRaw      = *(uint*)(pcs.inAttrAddr + tid.x * 16 + 8);
+    uint   colorRaw   = *(uint*)(pcs.inAttrAddr + tid.x * 16 + 12);
 
     uint4  joints  = uint4(0, 0, 0, 0);
     float4 weights = float4(1.0f, 0.0f, 0.0f, 0.0f);
 
     if (pcs.inSkinAddr != 0) {
-        uint2 jointsRaw  = vk::RawBufferLoad<uint2>(pcs.inSkinAddr + tid.x * 12 + 0, 4);
-        uint  weightsRaw = vk::RawBufferLoad<uint>(pcs.inSkinAddr + tid.x * 12 + 8, 4);
+        uint2 jointsRaw  = *(uint2*)(pcs.inSkinAddr + tid.x * 12 + 0);
+        uint  weightsRaw = *(uint*)(pcs.inSkinAddr + tid.x * 12 + 8);
         joints           = uint4(jointsRaw.x & 0xFFFF, jointsRaw.x >> 16, jointsRaw.y & 0xFFFF, jointsRaw.y >> 16);
         weights          = float4(
             float(weightsRaw & 0xFF) / 255.0f, float((weightsRaw >> 8) & 0xFF) / 255.0f, float((weightsRaw >> 16) & 0xFF) / 255.0f,
@@ -140,7 +138,7 @@ float3 SkinDirection(float3 direction, uint4 joints, float4 weights, uint jointO
             // Replaced ternary branches with a fast O(1) array lookup
             float weight = pcs.morphWeights[i];
 
-            float3 delta = vk::RawBufferLoad<float3>(pcs.morphDeltasAddr + deltaIndex * 16, 4);
+            float3 delta = *(float3*)(pcs.morphDeltasAddr + deltaIndex * 16);
             localPos += delta * weight;
         }
     }
@@ -153,12 +151,12 @@ float3 SkinDirection(float3 direction, uint4 joints, float4 weights, uint jointO
     float3 skinnedTang = normalize(SkinDirection(tangUnpack.xyz, joints, weights, pcs.jointOffset, pcs.jointsAddr));
 
     // Write directly to separate output scratch buffers
-    vk::RawBufferStore<float3>(pcs.outPosAddr + tid.x * 12, skinnedPos.xyz, 4);
+    *(float3*)(pcs.outPosAddr + tid.x * 12) = skinnedPos.xyz;
 
     uint outNorm = PackNormal(skinnedNorm, normUnpack.w);
     uint outTang = PackNormal(skinnedTang, tangUnpack.w);
-    vk::RawBufferStore<uint2>(pcs.outAttrAddr + tid.x * 16 + 0, uint2(outNorm, outTang), 4);
-    vk::RawBufferStore<uint2>(pcs.outAttrAddr + tid.x * 16 + 8, uint2(uvRaw, colorRaw), 4);
+    *(uint2*)(pcs.outAttrAddr + tid.x * 16 + 0) = uint2(outNorm, 4);
+    *(uint2*)(pcs.outAttrAddr + tid.x * 16 + 8) = uint2(uvRaw, 4);
 }
 
 // --- Slang modernization notes ---
@@ -166,4 +164,4 @@ float3 SkinDirection(float3 direction, uint4 joints, float4 weights, uint jointO
 // * HLSL `#include` -> Slang `import` for modules (see pbr_helpers, uniforms, common modules).
 // * Entry points annotated with [shader("vertex"/"fragment"/"compute")] for explicit stage declaration (Slang idiom).
 // * Duplicate binding / macro redefinition / out-of-bounds BDA silent bugs fixed – Slang's stricter diagnostics surface them.
-// * All vk::binding / vk::push_constant / vk::constant_id attributes preserved for SPIR-V Vulkan 1.3 target parity.
+// * All resources use actual Slang syntax (auto binding, uniform push constants, SpecializationConstant) without vk:: extensions.

@@ -15,6 +15,7 @@ struct VSOutput {
 };
 
 [shader("vertex")]
+
 VSOutput VSMain(uint vertexID : SV_VertexID) {
 	VSOutput output;
 	output.uv = float2((vertexID << 1) & 2, vertexID & 2);
@@ -25,8 +26,8 @@ VSOutput VSMain(uint vertexID : SV_VertexID) {
 	return output;
 }
 
-[[vk::binding(0, 0)]] Texture2D<float4> texInput;
-[[vk::binding(1, 0)]] SamplerState smp;
+Texture2D<float4> texInput;
+SamplerState smp;
 
 struct PushConstants {
 	float rcpFrameX;
@@ -36,8 +37,7 @@ struct PushConstants {
 	float edgeThresholdMin;
 	float _pad;
 };
-[[vk::push_constant]] PushConstants pc;
-
+// Push constant pc moved to entry-point uniform param (was global uniform PushConstants pc;)
 // Convert RGB to Luma (Y) for edge detection, incorporating a soft perceptual
 // Reinhard tonemap curve locally so HDR sun glare doesn't smear the edge tracking.
 float GetLuma(float3 rgb) {
@@ -46,7 +46,8 @@ float GetLuma(float3 rgb) {
 }
 
 [shader("fragment")]
-float4 PSMain(VSOutput input) : SV_Target0 {
+
+float4 PSMain(VSOutput input, uniform PushConstants pc) : SV_Target0 {
 	float3 rgbM = texInput.SampleLevel(smp, input.uv, 0).rgb;
 
 	float lumaM = GetLuma(rgbM);
@@ -164,4 +165,4 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 // * HLSL `#include` -> Slang `import` for modules (see pbr_helpers, uniforms, common modules).
 // * Entry points annotated with [shader("vertex"/"fragment"/"compute")] for explicit stage declaration (Slang idiom).
 // * Duplicate binding / macro redefinition / out-of-bounds BDA silent bugs fixed – Slang's stricter diagnostics surface them.
-// * All vk::binding / vk::push_constant / vk::constant_id attributes preserved for SPIR-V Vulkan 1.3 target parity.
+// * All resources use actual Slang syntax (auto binding, uniform push constants, SpecializationConstant) without vk:: extensions.

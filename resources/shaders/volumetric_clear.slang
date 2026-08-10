@@ -9,8 +9,8 @@
 // Slang: column_major via -matrix-layout column_major (removed #pragma pack_matrix) // KEEP: DXC requires this; Slang equivalent is -matrix-layout column_major (or column_major qualifier). See SHADER.md
 // Slang note: Slang defaults to row_major memory layout, DXC to column_major. For parity, compile Slang with -matrix-layout column_major or use explicit column_major float4x4.
 
-[[vk::binding(0, 0)]] RWTexture3D<float4> outVoxelMedia;
-[[vk::binding(1, 0)]] RWTexture3D<float4> outVoxelLight;
+RWTexture3D<float4> outVoxelMedia;
+RWTexture3D<float4> outVoxelLight;
 
 [numthreads(8, 8, 1)] void CSMain(uint3 tid : SV_DispatchThreadID) {
     uint3 gridDim;
@@ -26,4 +26,4 @@
 // * HLSL `#include` -> Slang `import` for modules (see pbr_helpers, uniforms, common modules).
 // * Entry points annotated with [shader("vertex"/"fragment"/"compute")] for explicit stage declaration (Slang idiom).
 // * Duplicate binding / macro redefinition / out-of-bounds BDA silent bugs fixed – Slang's stricter diagnostics surface them.
-// * All vk::binding / vk::push_constant / vk::constant_id attributes preserved for SPIR-V Vulkan 1.3 target parity.
+// * All resources use actual Slang syntax (auto binding, uniform push constants, SpecializationConstant) without vk:: extensions.

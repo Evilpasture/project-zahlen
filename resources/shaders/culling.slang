@@ -29,15 +29,13 @@ struct CullingConstants {
     uint     drawCount;
     uint     passIndex;
 };
-
-[[vk::push_constant]] CullingConstants cullConstants;
-
-[[vk::binding(0, 0)]] StructuredBuffer<InstanceData>          g_instances;
-[[vk::binding(1, 0)]] RWStructuredBuffer<DrawIndirectCommand> g_indirectCommands;
-[[vk::binding(2, 0)]] Texture2D<float>                        g_hizTexture;
-[[vk::binding(3, 0)]] SamplerState                            g_pointSampler;
-[[vk::binding(4, 0)]] RWStructuredBuffer<uint>                g_secondPassCandidates;
-[[vk::binding(5, 0)]] RWStructuredBuffer<uint>                g_secondPassCount;
+// Push constant cullConstants moved to entry-point uniform param (was global uniform CullingConstants cullConstants;)
+StructuredBuffer<InstanceData>          g_instances;
+RWStructuredBuffer<DrawIndirectCommand> g_indirectCommands;
+Texture2D<float>                        g_hizTexture;
+SamplerState                            g_pointSampler;
+RWStructuredBuffer<uint>                g_secondPassCandidates;
+RWStructuredBuffer<uint>                g_secondPassCount;
 
 bool SphereFrustumVisible(float3 center, float radius) {
     float4 r0 = float4(cullConstants.viewProj._m00, cullConstants.viewProj._m01, cullConstants.viewProj._m02, cullConstants.viewProj._m03);
@@ -178,4 +176,4 @@ bool IsHiZVisible(float3 center, float radius) {
 // * HLSL `#include` -> Slang `import` for modules (see pbr_helpers, uniforms, common modules).
 // * Entry points annotated with [shader("vertex"/"fragment"/"compute")] for explicit stage declaration (Slang idiom).
 // * Duplicate binding / macro redefinition / out-of-bounds BDA silent bugs fixed – Slang's stricter diagnostics surface them.
-// * All vk::binding / vk::push_constant / vk::constant_id attributes preserved for SPIR-V Vulkan 1.3 target parity.
+// * All resources use actual Slang syntax (auto binding, uniform push constants, SpecializationConstant) without vk:: extensions.

@@ -13,6 +13,7 @@ struct VSOutput {
 };
 
 [shader("vertex")]
+
 VSOutput VSMain(uint vertexID : SV_VertexID) {
 	VSOutput output;
 	output.uv = float2((vertexID << 1) & 2, vertexID & 2);
@@ -23,17 +24,16 @@ VSOutput VSMain(uint vertexID : SV_VertexID) {
 	return output;
 }
 
-[[vk::binding(0, 0)]] Texture2D<float4> texCurrent;
-[[vk::binding(1, 0)]] Texture2D<float4> texHistory;
-[[vk::binding(2, 0)]] Texture2D<float2> texVelocity;
-[[vk::binding(3, 0)]] SamplerState smp;
-[[vk::binding(4, 0)]] ConstantBuffer<FrameUniforms> frame;
+Texture2D<float4> texCurrent;
+Texture2D<float4> texHistory;
+Texture2D<float2> texVelocity;
+SamplerState smp;
+ConstantBuffer<FrameUniforms> frame;
 
 struct PushConstants {
 	float feedback;
 };
-[[vk::push_constant]] PushConstants pc;
-
+// Push constant pc moved to entry-point uniform param (was global uniform PushConstants pc;)
 // --- COLOR SPACE CONVERSIONS ---
 // Decouples luminance from chrominance to prevent chromatic ghosting
 float3 RGBToYCoCg(float3 rgb) {
@@ -110,7 +110,8 @@ float4 SampleTextureCatmullRom(Texture2D<float4> tex, SamplerState s, float2 uv,
 }
 
 [shader("fragment")]
-float4 PSMain(VSOutput input) : SV_Target0 {
+
+float4 PSMain(VSOutput input, uniform PushConstants pc) : SV_Target0 {
 	uint w, h;
 	texCurrent.GetDimensions(w, h);
 	float2 texelSize = 1.0f / float2(w, h);
@@ -188,4 +189,4 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 // * HLSL `#include` -> Slang `import` for modules (see pbr_helpers, uniforms, common modules).
 // * Entry points annotated with [shader("vertex"/"fragment"/"compute")] for explicit stage declaration (Slang idiom).
 // * Duplicate binding / macro redefinition / out-of-bounds BDA silent bugs fixed – Slang's stricter diagnostics surface them.
-// * All vk::binding / vk::push_constant / vk::constant_id attributes preserved for SPIR-V Vulkan 1.3 target parity.
+// * All resources use actual Slang syntax (auto binding, uniform push constants, SpecializationConstant) without vk:: extensions.

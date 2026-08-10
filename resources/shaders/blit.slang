@@ -17,6 +17,7 @@ struct VSOutput {
 };
 
 [shader("vertex")]
+
 VSOutput VSMain(uint vertexID : SV_VertexID) {
     VSOutput output;
     output.uv = float2((vertexID << 1) & 2, vertexID & 2);
@@ -31,13 +32,12 @@ struct PushConstants {
     float vignettePower;
     int   fullBright;
 };
-[[vk::push_constant]] PushConstants pc;
-
-[[vk::binding(0, 0)]] Texture2D<float4>             texInput;
-[[vk::binding(1, 0)]] SamplerState                  smp;
-[[vk::binding(2, 0)]] Texture2D<float4>             texBloom; // Bound dynamically by BlitPass
-[[vk::binding(3, 0)]] Texture2D<float>              texDepth;
-[[vk::binding(4, 0)]] ConstantBuffer<FrameUniforms> frame;
+// Push constant pc moved to entry-point uniform param (was global uniform PushConstants pc;)
+Texture2D<float4>             texInput;
+SamplerState                  smp;
+Texture2D<float4>             texBloom; // Bound dynamically by BlitPass
+Texture2D<float>              texDepth;
+ConstantBuffer<FrameUniforms> frame;
 
 float3 ACESFilm(float3 x) {
     float a = 2.51f;
@@ -49,7 +49,8 @@ float3 ACESFilm(float3 x) {
 }
 
 [shader("fragment")]
-float4 PSMain(VSOutput input): SV_Target0 {
+
+float4 PSMain(VSOutput input, uniform PushConstants pc): SV_Target0 {
     float3 hdrColor = texInput.SampleLevel(smp, input.uv, 0).rgb;
 
     // Bypasses HDR exposure, bloom, and tonemapping if fullbright is enabled
@@ -83,4 +84,4 @@ float4 PSMain(VSOutput input): SV_Target0 {
 // * HLSL `#include` -> Slang `import` for modules (see pbr_helpers, uniforms, common modules).
 // * Entry points annotated with [shader("vertex"/"fragment"/"compute")] for explicit stage declaration (Slang idiom).
 // * Duplicate binding / macro redefinition / out-of-bounds BDA silent bugs fixed – Slang's stricter diagnostics surface them.
-// * All vk::binding / vk::push_constant / vk::constant_id attributes preserved for SPIR-V Vulkan 1.3 target parity.
+// * All resources use actual Slang syntax (auto binding, uniform push constants, SpecializationConstant) without vk:: extensions.

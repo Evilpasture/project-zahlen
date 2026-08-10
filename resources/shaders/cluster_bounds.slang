@@ -14,8 +14,8 @@ struct ClusterBounds {
 	float4 maxPoint;
 };
 
-[[vk::binding(0, 0)]] RWStructuredBuffer<ClusterBounds> out_Bounds;
-[[vk::binding(4, 0)]] ConstantBuffer<FrameUniforms> frame;
+RWStructuredBuffer<ClusterBounds> out_Bounds;
+ConstantBuffer<FrameUniforms> frame;
 
 float4 Unproject(float4 coord) {
 	float4 res = mul(frame.invViewProj, coord);
@@ -69,4 +69,4 @@ float4 Unproject(float4 coord) {
 // * HLSL `#include` -> Slang `import` for modules (see pbr_helpers, uniforms, common modules).
 // * Entry points annotated with [shader("vertex"/"fragment"/"compute")] for explicit stage declaration (Slang idiom).
 // * Duplicate binding / macro redefinition / out-of-bounds BDA silent bugs fixed – Slang's stricter diagnostics surface them.
-// * All vk::binding / vk::push_constant / vk::constant_id attributes preserved for SPIR-V Vulkan 1.3 target parity.
+// * All resources use actual Slang syntax (auto binding, uniform push constants, SpecializationConstant) without vk:: extensions.

@@ -15,16 +15,16 @@
 struct PushConstants {
 	float4 rtMetrics; // x: 1/w, y: 1/h, z: w, w: h
 };
-[[vk::push_constant]] PushConstants pc;
+// Push constant pc moved to entry-point uniform param (was global uniform PushConstants pc;)
 #define SMAA_RT_METRICS pc.rtMetrics
 
 // ============================================================================
 // STAGE-SPECIFIC DESCRIPTORS & SAMPLER MACRO REMAPPING
 // ============================================================================
 #if defined(EDGE_PASS)
-[[vk::binding(0, 0)]] Texture2D colorTex;
-[[vk::binding(1, 0)]] SamplerState linearSampler;
-[[vk::binding(2, 0)]] SamplerState pointSampler;
+Texture2D colorTex;
+SamplerState linearSampler;
+SamplerState pointSampler;
 
 // Slang FIX: The macro redefining `SamplerState` as `static SamplerState` redefines a type keyword, which DXC silently allows but Slang (in strict mode) correctly rejects.
 // Modern Slang solution: SMAA.hlsl should declare its samplers as `SamplerState` parameters, or mark them `static` explicitly inside SMAA.hlsl.
@@ -37,11 +37,11 @@ struct PushConstants {
 #endif
 
 #if defined(WEIGHT_PASS)
-[[vk::binding(0, 0)]] Texture2D edgesTex;
-[[vk::binding(1, 0)]] Texture2D areaTex;
-[[vk::binding(2, 0)]] Texture2D searchTex;
-[[vk::binding(3, 0)]] SamplerState linearSampler;
-[[vk::binding(4, 0)]] SamplerState pointSampler;
+Texture2D edgesTex;
+Texture2D areaTex;
+Texture2D searchTex;
+SamplerState linearSampler;
+SamplerState pointSampler;
 
 // #define SamplerState static SamplerState // REMOVED for Slang strictness - see above
 
@@ -50,10 +50,10 @@ struct PushConstants {
 #endif
 
 #if defined(BLEND_PASS)
-[[vk::binding(0, 0)]] Texture2D colorTex;
-[[vk::binding(1, 0)]] Texture2D blendTex;
-[[vk::binding(2, 0)]] SamplerState linearSampler;
-[[vk::binding(3, 0)]] SamplerState pointSampler;
+Texture2D colorTex;
+Texture2D blendTex;
+SamplerState linearSampler;
+SamplerState pointSampler;
 
 // #define SamplerState static SamplerState // REMOVED for Slang strictness - see above
 
@@ -75,7 +75,8 @@ struct EdgeVSOutput {
 };
 
 [shader("vertex")]
-EdgeVSOutput SmaaEdgeVS(uint vertexID : SV_VertexID) {
+
+EdgeVSOutput SmaaEdgeVS(uint vertexID : SV_VertexID, uniform PushConstants pc) {
 	EdgeVSOutput output;
 	output.uv = float2((vertexID << 1) & 2, vertexID & 2);
 
@@ -87,7 +88,8 @@ EdgeVSOutput SmaaEdgeVS(uint vertexID : SV_VertexID) {
 }
 
 [shader("fragment")]
-float4 SmaaEdgePS(EdgeVSOutput input) : SV_Target0 {
+
+float4 SmaaEdgePS(EdgeVSOutput input, uniform PushConstants pc) : SV_Target0 {
 	return float4(SMAALumaEdgeDetectionPS(input.uv, input.offset, colorTex), 0.0f, 0.0f);
 }
 #endif
@@ -104,7 +106,8 @@ struct WeightVSOutput {
 };
 
 [shader("vertex")]
-WeightVSOutput SmaaWeightVS(uint vertexID : SV_VertexID) {
+
+WeightVSOutput SmaaWeightVS(uint vertexID : SV_VertexID, uniform PushConstants pc) {
 	WeightVSOutput output;
 	output.uv = float2((vertexID << 1) & 2, vertexID & 2);
 
@@ -116,7 +119,8 @@ WeightVSOutput SmaaWeightVS(uint vertexID : SV_VertexID) {
 }
 
 [shader("fragment")]
-float4 SmaaWeightPS(WeightVSOutput input) : SV_Target0 {
+
+float4 SmaaWeightPS(WeightVSOutput input, uniform PushConstants pc) : SV_Target0 {
 	return SMAABlendingWeightCalculationPS(input.uv, input.pixcoord, input.offset, edgesTex,
 										   areaTex, searchTex, float4(0.0f, 0.0f, 0.0f, 0.0f));
 }
@@ -133,7 +137,8 @@ struct BlendVSOutput {
 };
 
 [shader("vertex")]
-BlendVSOutput SmaaBlendVS(uint vertexID : SV_VertexID) {
+
+BlendVSOutput SmaaBlendVS(uint vertexID : SV_VertexID, uniform PushConstants pc) {
 	BlendVSOutput output;
 	output.uv = float2((vertexID << 1) & 2, vertexID & 2);
 	output.position = float4(output.uv.x * 2.0f - 1.0f, output.uv.y * 2.0f - 1.0f, 0.0f, 1.0f);
@@ -143,7 +148,8 @@ BlendVSOutput SmaaBlendVS(uint vertexID : SV_VertexID) {
 }
 
 [shader("fragment")]
-float4 SmaaBlendPS(BlendVSOutput input) : SV_Target0 {
+
+float4 SmaaBlendPS(BlendVSOutput input, uniform PushConstants pc) : SV_Target0 {
 	return SMAANeighborhoodBlendingPS(input.uv, input.offset, colorTex, blendTex);
 }
 #endif
@@ -153,4 +159,4 @@ float4 SmaaBlendPS(BlendVSOutput input) : SV_Target0 {
 // * HLSL `#include` -> Slang `import` for modules (see pbr_helpers, uniforms, common modules).
 // * Entry points annotated with [shader("vertex"/"fragment"/"compute")] for explicit stage declaration (Slang idiom).
 // * Duplicate binding / macro redefinition / out-of-bounds BDA silent bugs fixed – Slang's stricter diagnostics surface them.
-// * All vk::binding / vk::push_constant / vk::constant_id attributes preserved for SPIR-V Vulkan 1.3 target parity.
+// * All resources use actual Slang syntax (auto binding, uniform push constants, SpecializationConstant) without vk:: extensions.

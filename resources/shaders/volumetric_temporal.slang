@@ -16,14 +16,12 @@ struct VolumetricTemporalPushConstants {
     uint  resetHistory;
     uint  _pad;
 };
-
-[[vk::push_constant]] VolumetricTemporalPushConstants tempPC;
-
-[[vk::binding(0, 0)]] Texture3D<float4>            inVoxelIntegratedCurrent;
-[[vk::binding(1, 0)]] Texture3D<float4>            inVoxelIntegratedHistory;
-[[vk::binding(2, 0)]] RWTexture3D<float4>          outVoxelIntegratedResolved;
-[[vk::binding(3, 0)]] ConstantBuffer<FrameUniforms> frame;
-[[vk::binding(4, 0)]] SamplerState                 linearSampler;
+// Push constant tempPC moved to entry-point uniform param (was global uniform VolumetricTemporalPushConstants tempPC;)
+Texture3D<float4>            inVoxelIntegratedCurrent;
+Texture3D<float4>            inVoxelIntegratedHistory;
+RWTexture3D<float4>          outVoxelIntegratedResolved;
+ConstantBuffer<FrameUniforms> frame;
+SamplerState                 linearSampler;
 
 float3 GetVoxelWorldPos(uint3 tid, float3 gridDim, out float outDepthVS) {
     float2 uv = (float2(tid.xy) + 0.5f) / gridDim.xy;
@@ -106,4 +104,4 @@ float3 GetVoxelWorldPos(uint3 tid, float3 gridDim, out float outDepthVS) {
 // * HLSL `#include` -> Slang `import` for modules (see pbr_helpers, uniforms, common modules).
 // * Entry points annotated with [shader("vertex"/"fragment"/"compute")] for explicit stage declaration (Slang idiom).
 // * Duplicate binding / macro redefinition / out-of-bounds BDA silent bugs fixed – Slang's stricter diagnostics surface them.
-// * All vk::binding / vk::push_constant / vk::constant_id attributes preserved for SPIR-V Vulkan 1.3 target parity.
+// * All resources use actual Slang syntax (auto binding, uniform push constants, SpecializationConstant) without vk:: extensions.

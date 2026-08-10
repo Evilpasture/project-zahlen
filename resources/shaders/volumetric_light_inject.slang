@@ -22,17 +22,15 @@ struct VolumetricLightInjectPushConstants {
     float phaseAnisotropy;
     uint  enableShadows;
 };
-
-[[vk::push_constant]] VolumetricLightInjectPushConstants lightPC;
-
-[[vk::binding(0, 0)]] Texture3D<float4>               inVoxelMedia;
-[[vk::binding(1, 0)]] RWTexture3D<float4>             outVoxelLight;
-[[vk::binding(2, 0)]] ConstantBuffer<FrameUniforms>   frame;
-[[vk::binding(3, 0)]] StructuredBuffer<Light>         lights;
-[[vk::binding(4, 0)]] StructuredBuffer<ClusterVolume> clusterGrid;
-[[vk::binding(5, 0)]] StructuredBuffer<uint>          clusterIndexList;
-[[vk::binding(6, 0)]] Texture2DArray<float>           shadowMap;
-[[vk::binding(7, 0)]] SamplerComparisonState          shadowSampler;
+// Push constant lightPC moved to entry-point uniform param (was global uniform VolumetricLightInjectPushConstants lightPC;)
+Texture3D<float4>               inVoxelMedia;
+RWTexture3D<float4>             outVoxelLight;
+ConstantBuffer<FrameUniforms>   frame;
+StructuredBuffer<Light>         lights;
+StructuredBuffer<ClusterVolume> clusterGrid;
+StructuredBuffer<uint>          clusterIndexList;
+Texture2DArray<float>           shadowMap;
+SamplerComparisonState          shadowSampler;
 
 float PhaseHG(float cosTheta, float g) {
     float g2 = g * g;
@@ -172,4 +170,4 @@ float SampleShadowPCF3x3(float3 projCoords, float cascade, float angle) {
 // * HLSL `#include` -> Slang `import` for modules (see pbr_helpers, uniforms, common modules).
 // * Entry points annotated with [shader("vertex"/"fragment"/"compute")] for explicit stage declaration (Slang idiom).
 // * Duplicate binding / macro redefinition / out-of-bounds BDA silent bugs fixed – Slang's stricter diagnostics surface them.
-// * All vk::binding / vk::push_constant / vk::constant_id attributes preserved for SPIR-V Vulkan 1.3 target parity.
+// * All resources use actual Slang syntax (auto binding, uniform push constants, SpecializationConstant) without vk:: extensions.

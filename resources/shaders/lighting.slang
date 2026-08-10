@@ -28,38 +28,37 @@ struct PushConstants {
 // DXC silently allows it, but Slang's SPIR-V legalization validates against VkPhysicalDeviceLimits::maxPushConstantsSize.
 // Desktop GPUs typically support 256, but mobile/portable targets may fail. Consider splitting into ConstantBuffer for portability or verify device limit.
 // Modern Slang idiom: use ParameterBlock<FrameUniforms> or ConstantBuffer for large per-frame data, keep push constants <128 bytes.
-[[vk::push_constant]] PushConstants pc;
-
+// Push constant pc moved to entry-point uniform param (was global uniform PushConstants pc;)
 struct ClusterVolume {
     uint offset;
     uint count;
 };
 
 // --- G-Buffer & Lighting Inputs ---
-[[vk::binding(0, 0)]] Texture2D<float4>                texInput;
-[[vk::binding(1, 0)]] SamplerState                     smp;
-[[vk::binding(2, 0)]] Texture2D<float>                 texDepth;
-[[vk::binding(3, 0)]] Texture2D<float4>                texNormalRoughness;
-[[vk::binding(4, 0)]] StructuredBuffer<Light>          lights;
-[[vk::binding(5, 0)]] ConstantBuffer<FrameUniforms>    frame;
-[[vk::binding(6, 0)]] Texture2DArray<float>            shadowMap;
-[[vk::binding(7, 0)]] SamplerComparisonState           shadowSampler;
-[[vk::binding(8, 0)]] Texture2D                        ltc_mat;
-[[vk::binding(9, 0)]] Texture2D                        ltc_amp;
-[[vk::binding(10, 0)]] SamplerState                    clampSampler;
-[[vk::binding(11, 0)]] StructuredBuffer<ClusterVolume> clusterGrid;
-[[vk::binding(12, 0)]] StructuredBuffer<uint>          clusterIndexList;
-[[vk::binding(13, 0)]] Texture2D<float4>               texAmbient;
-[[vk::binding(14, 0)]] SamplerState                    pointSampler;
+Texture2D<float4>                texInput;
+SamplerState                     smp;
+Texture2D<float>                 texDepth;
+Texture2D<float4>                texNormalRoughness;
+StructuredBuffer<Light>          lights;
+ConstantBuffer<FrameUniforms>    frame;
+Texture2DArray<float>            shadowMap;
+SamplerComparisonState           shadowSampler;
+Texture2D                        ltc_mat;
+Texture2D                        ltc_amp;
+SamplerState                    clampSampler;
+StructuredBuffer<ClusterVolume> clusterGrid;
+StructuredBuffer<uint>          clusterIndexList;
+Texture2D<float4>               texAmbient;
+SamplerState                    pointSampler;
 #ifndef DISABLE_RTR
-[[vk::binding(15, 0)]] RaytracingAccelerationStructure tlas;
+RaytracingAccelerationStructure tlas;
 #endif
 
 // --- Punctual Shadow Maps ---
-[[vk::binding(16, 0)]] TextureCubeArray<float> punctualShadowCube; //  Omni-directional shadows
-[[vk::binding(17, 0)]] Texture2DArray<float>   punctualShadow2D;   // Spotlight shadows
+TextureCubeArray<float> punctualShadowCube; //  Omni-directional shadows
+Texture2DArray<float>   punctualShadow2D;   // Spotlight shadows
 
-[[vk::constant_id(0)]] const int ENABLE_RTR = 1;
+[[SpecializationConstant]] const int ENABLE_RTR = 1;
 
 struct VSOutput {
     float4 pos : SV_Position;
@@ -67,6 +66,7 @@ struct VSOutput {
 };
 
 [shader("vertex")]
+
 VSOutput VSMain(uint vertexID : SV_VertexID) {
     VSOutput output;
     output.uv = float2((vertexID << 1) & 2, vertexID & 2);
@@ -77,7 +77,8 @@ VSOutput VSMain(uint vertexID : SV_VertexID) {
 }
 
 [shader("fragment")]
-float4 PSMain(VSOutput input): SV_Target0 {
+
+float4 PSMain(VSOutput input, uniform PushConstants pc): SV_Target0 {
     float depth = texDepth.SampleLevel(pointSampler, input.uv, 0);
     if (depth >= 1.0f)
         discard;
@@ -268,4 +269,4 @@ float4 PSMain(VSOutput input): SV_Target0 {
 // * HLSL `#include` -> Slang `import` for modules (see pbr_helpers, uniforms, common modules).
 // * Entry points annotated with [shader("vertex"/"fragment"/"compute")] for explicit stage declaration (Slang idiom).
 // * Duplicate binding / macro redefinition / out-of-bounds BDA silent bugs fixed – Slang's stricter diagnostics surface them.
-// * All vk::binding / vk::push_constant / vk::constant_id attributes preserved for SPIR-V Vulkan 1.3 target parity.
+// * All resources use actual Slang syntax (auto binding, uniform push constants, SpecializationConstant) without vk:: extensions.

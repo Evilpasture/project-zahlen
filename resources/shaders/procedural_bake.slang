@@ -10,7 +10,7 @@
 // Slang note: Slang defaults to row_major memory layout, DXC to column_major. For parity, compile Slang with -matrix-layout column_major or use explicit column_major float4x4.
 
 // Define our constant-id mappings
-[[vk::constant_id(0)]] const int BAKE_TYPE = 0; // 0 = Voronoi, 1 = Perlin, 2 = Wave/Marble
+[[SpecializationConstant]] const int BAKE_TYPE = 0; // 0 = Voronoi, 1 = Perlin, 2 = Wave/Marble
 
 struct PushConstants {
 	uint width;
@@ -19,9 +19,8 @@ struct PushConstants {
 	float param1; // Randomness / Detail
 	float param2; // Distortion
 };
-[[vk::push_constant]] PushConstants pc;
-
-[[vk::binding(0, 0)]] RWTexture2D<float4> outTexture;
+// Push constant pc moved to entry-point uniform param (was global uniform PushConstants pc;)
+RWTexture2D<float4> outTexture;
 
 // --- NOISE MATH LIBRARIES ---
 float2 Hash22(float2 p) {
@@ -85,4 +84,4 @@ float EvaluatePerlin(float2 uv) {
 // * HLSL `#include` -> Slang `import` for modules (see pbr_helpers, uniforms, common modules).
 // * Entry points annotated with [shader("vertex"/"fragment"/"compute")] for explicit stage declaration (Slang idiom).
 // * Duplicate binding / macro redefinition / out-of-bounds BDA silent bugs fixed – Slang's stricter diagnostics surface them.
-// * All vk::binding / vk::push_constant / vk::constant_id attributes preserved for SPIR-V Vulkan 1.3 target parity.
+// * All resources use actual Slang syntax (auto binding, uniform push constants, SpecializationConstant) without vk:: extensions.

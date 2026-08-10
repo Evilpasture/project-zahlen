@@ -42,11 +42,11 @@ struct InstanceData {
     float4 emissiveFactor;
 };
 
-[[vk::binding(12, 0)]] StructuredBuffer<InstanceData> g_instances;
+StructuredBuffer<InstanceData> g_instances;
 
-[[vk::constant_id(0)]] const int ENABLE_SSR = 1;
+[[SpecializationConstant]] const int ENABLE_SSR = 1;
 #ifndef DISABLE_RTR
-[[vk::constant_id(1)]] const int ENABLE_RTR = 1;
+[[SpecializationConstant]] const int ENABLE_RTR = 1;
 #else
 static const int ENABLE_RTR = 0;
 #endif
@@ -87,22 +87,21 @@ struct PushConstants {
 // DXC silently allows it, but Slang's SPIR-V legalization validates against VkPhysicalDeviceLimits::maxPushConstantsSize.
 // Desktop GPUs typically support 256, but mobile/portable targets may fail. Consider splitting into ConstantBuffer for portability or verify device limit.
 // Modern Slang idiom: use ParameterBlock<FrameUniforms> or ConstantBuffer for large per-frame data, keep push constants <128 bytes.
-[[vk::push_constant]] PushConstants pc;
-
-[[vk::binding(0, 0)]] Texture2D<float4>   texInput;
-[[vk::binding(1, 0)]] SamplerState        smp;
-[[vk::binding(2, 0)]] Texture2D<float>    texDepth;
-[[vk::binding(3, 0)]] Texture2D<float4>   texNormalRoughness;
-[[vk::binding(4, 0)]] SamplerState        pointSampler;
-[[vk::binding(5, 0)]] TextureCube<float4> texEnvMap;
+// Push constant pc moved to entry-point uniform param (was global uniform PushConstants pc;)
+Texture2D<float4>   texInput;
+SamplerState        smp;
+Texture2D<float>    texDepth;
+Texture2D<float4>   texNormalRoughness;
+SamplerState        pointSampler;
+TextureCube<float4> texEnvMap;
 #ifndef DISABLE_RTR
-[[vk::binding(6, 0)]] RaytracingAccelerationStructure tlas;
+RaytracingAccelerationStructure tlas;
 #endif
-[[vk::binding(7, 0)]] ConstantBuffer<FrameUniforms> frame;
-[[vk::binding(8, 0)]] Texture2D                     brdfLUT;
-[[vk::binding(9, 0)]] SamplerState                  clampSampler;
-[[vk::binding(10, 0)]] Texture2D<float4>            texLighting;
-[[vk::binding(11, 0)]] Texture3D<float4>            texVoxelIntegrated;
+ConstantBuffer<FrameUniforms> frame;
+Texture2D                     brdfLUT;
+SamplerState                  clampSampler;
+Texture2D<float4>            texLighting;
+Texture3D<float4>            texVoxelIntegrated;
 
 #ifndef DISABLE_RTR
 float2 RaytraceRTR(
@@ -188,6 +187,7 @@ struct VSOutput {
 };
 
 [shader("vertex")]
+
 VSOutput VSMain(uint vertexID : SV_VertexID) {
     VSOutput output;
     output.uv  = float2((vertexID << 1) & 2, vertexID & 2);
@@ -196,7 +196,8 @@ VSOutput VSMain(uint vertexID : SV_VertexID) {
 }
 
 [shader("fragment")]
-float4 PSMain(VSOutput input): SV_Target0 {
+
+float4 PSMain(VSOutput input, uniform PushConstants pc): SV_Target0 {
     float  depth = texDepth.SampleLevel(pointSampler, input.uv, 0).r;
     float3 litColor;
     float  viewDepth = 250.0f;
@@ -338,4 +339,4 @@ float4 PSMain(VSOutput input): SV_Target0 {
 // * HLSL `#include` -> Slang `import` for modules (see pbr_helpers, uniforms, common modules).
 // * Entry points annotated with [shader("vertex"/"fragment"/"compute")] for explicit stage declaration (Slang idiom).
 // * Duplicate binding / macro redefinition / out-of-bounds BDA silent bugs fixed – Slang's stricter diagnostics surface them.
-// * All vk::binding / vk::push_constant / vk::constant_id attributes preserved for SPIR-V Vulkan 1.3 target parity.
+// * All resources use actual Slang syntax (auto binding, uniform push constants, SpecializationConstant) without vk:: extensions.

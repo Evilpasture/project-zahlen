@@ -80,20 +80,19 @@ public uint4 UnpackJoints(uint2 packed) {
 }
 
 #ifndef SKIP_BINDINGS
-public [[vk::push_constant]] ObjectConstants obj;
+// ObjectConstants obj moved to entry-point uniform in basic.slang (actual Slang push constant)
+public Texture2D                      globalTextures[];
+public SamplerState                   defaultSampler;
+public ConstantBuffer<FrameUniforms>  frame;
+public StructuredBuffer<Light>        lights;
+public StructuredBuffer<InstanceData> g_instances;
+public StructuredBuffer<GPUJoint>     g_joints;
+public StructuredBuffer<GPUJoint>     g_prevJoints;
+public StructuredBuffer<float4>       g_morphDeltas;
 
-public [[vk::binding(0, 0)]] Texture2D                      globalTextures[];
-public [[vk::binding(1, 0)]] SamplerState                   defaultSampler;
-public [[vk::binding(2, 0)]] ConstantBuffer<FrameUniforms>  frame;
-public [[vk::binding(3, 0)]] StructuredBuffer<Light>        lights;
-public [[vk::binding(4, 0)]] StructuredBuffer<InstanceData> g_instances;
-public [[vk::binding(5, 0)]] StructuredBuffer<GPUJoint>     g_joints;
-public [[vk::binding(6, 0)]] StructuredBuffer<GPUJoint>     g_prevJoints;
-public [[vk::binding(7, 0)]] StructuredBuffer<float4>       g_morphDeltas;
-
-public [[vk::binding(8, 0)]] TextureCube   prefilteredMap;
-public [[vk::binding(9, 0)]] Texture2D     brdfLUT;
-public [[vk::binding(10, 0)]] SamplerState clampSampler;
+public TextureCube   prefilteredMap;
+public Texture2D     brdfLUT;
+public SamplerState clampSampler;
 
 public struct VSOutput {
     public float4                 pos : SV_Position;
@@ -195,4 +194,4 @@ public float3 GetMorphDisplacement(uint vertexId, uint vertexCount, uint morphOf
 // * HLSL `#include` -> Slang `import` for modules (see pbr_helpers, uniforms, common modules).
 // * Entry points annotated with [shader("vertex"/"fragment"/"compute")] for explicit stage declaration (Slang idiom).
 // * Duplicate binding / macro redefinition / out-of-bounds BDA silent bugs fixed – Slang's stricter diagnostics surface them.
-// * All vk::binding / vk::push_constant / vk::constant_id attributes preserved for SPIR-V Vulkan 1.3 target parity.
+// * All resources use actual Slang syntax (auto binding, uniform push constants, SpecializationConstant) without vk:: extensions.

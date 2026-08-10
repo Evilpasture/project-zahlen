@@ -5,7 +5,7 @@
 //               -I resources/shaders -I include -o <out>.spv
 // See SHADER.md for column_major, right-handed, CCW conventions preserved.
 
-import pbr_helpers; // for vk::RawBufferLoad BDA
+import pbr_helpers;
 // resources/shaders/ui.hlsl
 // Slang: column_major via -matrix-layout column_major (removed #pragma pack_matrix) // KEEP: DXC requires this; Slang equivalent is -matrix-layout column_major (or column_major qualifier). See SHADER.md
 // Slang note: Slang defaults to row_major memory layout, DXC to column_major. For parity, compile Slang with -matrix-layout column_major or use explicit column_major float4x4.
@@ -47,11 +47,9 @@ struct UIObjectConstants {
     uint     albedoIdx;
     uint     isSDF;
 };
-
-[[vk::push_constant]] UIObjectConstants obj;
-
-[[vk::binding(0, 0)]] Texture2D    globalTextures[];
-[[vk::binding(1, 0)]] SamplerState defaultSampler;
+// Push constant obj moved to entry-point uniform param (was global uniform UIObjectConstants obj;)
+Texture2D    globalTextures[];
+SamplerState defaultSampler;
 
 struct UIVSOutput {
     float4 pos : SV_Position;
@@ -60,12 +58,13 @@ struct UIVSOutput {
 };
 
 [shader("vertex")]
-UIVSOutput VSMain(uint vertexId : SV_VertexID) {
+
+UIVSOutput VSMain(uint vertexId : SV_VertexID, uniform UIObjectConstants obj) {
     UIVSOutput output;
 
-    float3 position = vk::RawBufferLoad<float3>(obj.posAddress + vertexId * 12, 4);
-    uint   uv       = vk::RawBufferLoad<uint>(obj.attrAddress + vertexId * 16 + 8, 4);
-    uint   color    = vk::RawBufferLoad<uint>(obj.attrAddress + vertexId * 16 + 12, 4);
+    float3 position = *(float3*)(obj.posAddress + vertexId * 12);
+    uint   uv       = *(uint*)(obj.attrAddress + vertexId * 16 + 8);
+    uint   color    = *(uint*)(obj.attrAddress + vertexId * 16 + 12);
 
     output.pos   = mul(obj.orthoMatrix, float4(position, 1.0f));
     output.uv    = LocalUnpackUV(uv);
@@ -74,7 +73,8 @@ UIVSOutput VSMain(uint vertexId : SV_VertexID) {
 }
 
 [shader("fragment")]
-float4 PSMain(UIVSOutput input): SV_Target0 {
+
+float4 PSMain(UIVSOutput input, uniform UIObjectConstants obj): SV_Target0 {
     float4 texSample = globalTextures[obj.albedoIdx].Sample(defaultSampler, input.uv);
     float  alpha     = texSample.a;
 
@@ -93,4 +93,4 @@ float4 PSMain(UIVSOutput input): SV_Target0 {
 // * HLSL `#include` -> Slang `import` for modules (see pbr_helpers, uniforms, common modules).
 // * Entry points annotated with [shader("vertex"/"fragment"/"compute")] for explicit stage declaration (Slang idiom).
 // * Duplicate binding / macro redefinition / out-of-bounds BDA silent bugs fixed – Slang's stricter diagnostics surface them.
-// * All vk::binding / vk::push_constant / vk::constant_id attributes preserved for SPIR-V Vulkan 1.3 target parity.
+// * All resources use actual Slang syntax (auto binding, uniform push constants, SpecializationConstant) without vk:: extensions.

@@ -19,12 +19,10 @@ struct MLAAPushConstants {
     float threshold;
     uint  maxSearchSteps;
 };
-
-[[vk::push_constant]] MLAAPushConstants pc;
-
+// Push constant pc moved to entry-point uniform param (was global uniform MLAAPushConstants pc;)
 // Descriptor Layout: DescriptorLayout<SampledImageSlot<0>, SamplerSlot<1>>
-[[vk::binding(0, 0)]] Texture2D    colorTex;
-[[vk::binding(1, 0)]] SamplerState sPoint;
+Texture2D    colorTex;
+SamplerState sPoint;
 
 // ============================================================================
 // Structures
@@ -40,7 +38,8 @@ struct VSOutput {
 // ============================================================================
 
 [shader("vertex")]
-VSOutput VSMain(uint vertexID : SV_VertexID) {
+
+VSOutput VSMain(uint vertexID : SV_VertexID, uniform MLAAPushConstants pc) {
     VSOutput output;
     output.uv = float2((vertexID << 1) & 2, vertexID & 2);
     // Flip-free projection; top-left of the texture maps straight to top-left of clip space (-1, -1)
@@ -161,7 +160,8 @@ float CalculateArea(float d1, float d2, float ortho1, float ortho2) {
 // ============================================================================
 
 [shader("fragment")]
-float4 PSMain(VSOutput input): SV_Target0 {
+
+float4 PSMain(VSOutput input, uniform MLAAPushConstants pc): SV_Target0 {
     float2 uv          = input.uv;
     float4 centerColor = colorTex.SampleLevel(sPoint, uv, 0);
 
@@ -229,4 +229,4 @@ float4 PSMain(VSOutput input): SV_Target0 {
 // * HLSL `#include` -> Slang `import` for modules (see pbr_helpers, uniforms, common modules).
 // * Entry points annotated with [shader("vertex"/"fragment"/"compute")] for explicit stage declaration (Slang idiom).
 // * Duplicate binding / macro redefinition / out-of-bounds BDA silent bugs fixed – Slang's stricter diagnostics surface them.
-// * All vk::binding / vk::push_constant / vk::constant_id attributes preserved for SPIR-V Vulkan 1.3 target parity.
+// * All resources use actual Slang syntax (auto binding, uniform push constants, SpecializationConstant) without vk:: extensions.

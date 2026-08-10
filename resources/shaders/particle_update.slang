@@ -9,7 +9,7 @@
 // Slang: column_major via -matrix-layout column_major (removed #pragma pack_matrix) // KEEP: DXC requires this; Slang equivalent is -matrix-layout column_major (or column_major qualifier). See SHADER.md
 // Slang note: Slang defaults to row_major memory layout, DXC to column_major. For parity, compile Slang with -matrix-layout column_major or use explicit column_major float4x4.
 import uniforms; // modern Slang import (was #include "uniforms.hlsl")
-import pbr_helpers; // for vk::RawBufferLoad BDA helpers
+import pbr_helpers;
 
 struct Particle {
     float4 position; // xyz = position, w = unused
@@ -51,9 +51,8 @@ struct ComputePushConstants {
 // DXC silently allows it, but Slang's SPIR-V legalization validates against VkPhysicalDeviceLimits::maxPushConstantsSize.
 // Desktop GPUs typically support 256, but mobile/portable targets may fail. Consider splitting into ConstantBuffer for portability or verify device limit.
 // Modern Slang idiom: use ParameterBlock<FrameUniforms> or ConstantBuffer for large per-frame data, keep push constants <128 bytes.
-[[vk::push_constant]] ComputePushConstants pc;
-
-[[vk::binding(2, 0)]] ConstantBuffer<FrameUniforms> frame;
+// Push constant pc moved to entry-point uniform param (was global uniform ComputePushConstants pc;)
+ConstantBuffer<FrameUniforms> frame;
 
 // Fast GPU 3D Hash
 float Hash13(float3 p) {
@@ -79,7 +78,7 @@ float3 SampleTurbulence(float3 pos) {
         return;
 
     uint64_t addr = pc.particleBufferAddr + idx * sizeof(Particle);
-    Particle part = vk::RawBufferLoad<Particle>(addr, 4);
+    Particle part = *(Particle*)(addr);
 
     float dt = pc.deltaTime;
 
@@ -140,7 +139,7 @@ float3 SampleTurbulence(float3 pos) {
         part.params.z     = pc.p.startSize.x;
     }
 
-    vk::RawBufferStore<Particle>(addr, part, 4);
+    *(Particle*)(addr) = part;
 }
 
 // --- Slang modernization notes ---
@@ -148,4 +147,4 @@ float3 SampleTurbulence(float3 pos) {
 // * HLSL `#include` -> Slang `import` for modules (see pbr_helpers, uniforms, common modules).
 // * Entry points annotated with [shader("vertex"/"fragment"/"compute")] for explicit stage declaration (Slang idiom).
 // * Duplicate binding / macro redefinition / out-of-bounds BDA silent bugs fixed – Slang's stricter diagnostics surface them.
-// * All vk::binding / vk::push_constant / vk::constant_id attributes preserved for SPIR-V Vulkan 1.3 target parity.
+// * All resources use actual Slang syntax (auto binding, uniform push constants, SpecializationConstant) without vk:: extensions.

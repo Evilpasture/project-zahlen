@@ -11,7 +11,7 @@
 import pbr_helpers; // modern Slang import (was #include "pbr_helpers.hlsl")
 import uniforms; // modern Slang import (was #include "uniforms.hlsl")
 
-[[vk::constant_id(0)]] const int BAKE_TYPE = 0;
+[[SpecializationConstant]] const int BAKE_TYPE = 0;
 
 struct PushConstants {
     uint  width;
@@ -20,10 +20,9 @@ struct PushConstants {
     float param1;
     float param2;
 };
-[[vk::push_constant]] PushConstants pc;
-
-[[vk::binding(0, 0)]] RWTexture3D<float4>           outVoxelMedia;
-[[vk::binding(1, 0)]] ConstantBuffer<FrameUniforms> frame;
+// Push constant pc moved to entry-point uniform param (was global uniform PushConstants pc;)
+RWTexture3D<float4>           outVoxelMedia;
+ConstantBuffer<FrameUniforms> frame;
 
 // --- Stable 2D Spatial-Temporal Ray Jitter ---
 float TemporalHash2D(uint2 tid, float timeOffset) {
@@ -167,4 +166,4 @@ float3 GetVoxelWorldPos(uint3 tid, float2 resolution, out float outDepthVS) {
 // * HLSL `#include` -> Slang `import` for modules (see pbr_helpers, uniforms, common modules).
 // * Entry points annotated with [shader("vertex"/"fragment"/"compute")] for explicit stage declaration (Slang idiom).
 // * Duplicate binding / macro redefinition / out-of-bounds BDA silent bugs fixed – Slang's stricter diagnostics surface them.
-// * All vk::binding / vk::push_constant / vk::constant_id attributes preserved for SPIR-V Vulkan 1.3 target parity.
+// * All resources use actual Slang syntax (auto binding, uniform push constants, SpecializationConstant) without vk:: extensions.

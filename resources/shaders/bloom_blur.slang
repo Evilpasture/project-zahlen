@@ -15,6 +15,7 @@ struct VSOutput {
 };
 
 [shader("vertex")]
+
 VSOutput VSMain(uint vertexID : SV_VertexID) {
 	VSOutput output;
 	output.uv = float2((vertexID << 1) & 2, vertexID & 2);
@@ -28,14 +29,14 @@ struct PushConstants {
 	float rcpHeight;
 	float padding;
 };
-[[vk::push_constant]] PushConstants pc;
-
-[[vk::binding(0, 0)]] Texture2D<float4> texInput;
-[[vk::binding(1, 0)]] SamplerState smp;
-[[vk::binding(2, 0)]] Texture2D<float4> texLow;
+// Push constant pc moved to entry-point uniform param (was global uniform PushConstants pc;)
+Texture2D<float4> texInput;
+SamplerState smp;
+Texture2D<float4> texLow;
 
 [shader("fragment")]
-float4 PSMain(VSOutput input) : SV_Target0 {
+
+float4 PSMain(VSOutput input, uniform PushConstants pc) : SV_Target0 {
 	float2 texelSize = float2(pc.rcpWidth, pc.rcpHeight);
 
 	if (pc.mode == 0) {
@@ -93,4 +94,4 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 // * HLSL `#include` -> Slang `import` for modules (see pbr_helpers, uniforms, common modules).
 // * Entry points annotated with [shader("vertex"/"fragment"/"compute")] for explicit stage declaration (Slang idiom).
 // * Duplicate binding / macro redefinition / out-of-bounds BDA silent bugs fixed – Slang's stricter diagnostics surface them.
-// * All vk::binding / vk::push_constant / vk::constant_id attributes preserved for SPIR-V Vulkan 1.3 target parity.
+// * All resources use actual Slang syntax (auto binding, uniform push constants, SpecializationConstant) without vk:: extensions.

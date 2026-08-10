@@ -20,28 +20,28 @@ import pbr_helpers;
 import uniforms; // modern Slang import (was #include "common.hlsl")
 
 // 2. Redeclare only the exact resources this specialized pass needs [2, 3]
-[[vk::binding(4, 0)]] StructuredBuffer<InstanceData> g_instances;
-[[vk::binding(3, 0)]] StructuredBuffer<Light>        lights;
+StructuredBuffer<InstanceData> g_instances;
+StructuredBuffer<Light>        lights;
 
 struct PushConstants {
     uint lightIndex;
 };
-[[vk::push_constant]] PushConstants pc;
-
+// Push constant pc moved to entry-point uniform param (was global uniform PushConstants pc;)
 struct PunctualShadowVSOutput {
     float4 pos : SV_Position;
     float  linearDepth : TEXCOORD0;
 };
 
 [shader("vertex")]
-PunctualShadowVSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, uint viewId : SV_ViewID) {
+
+PunctualShadowVSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, uint viewId : SV_ViewID, uniform PushConstants pc) {
     PunctualShadowVSOutput output;
 
     InstanceData inst           = g_instances[instanceId];
-    uint         actualVertexId = inst.iboAddress != 0 ? vk::RawBufferLoad<uint>(inst.iboAddress + vertexId * 4, 4) : vertexId;
+    uint         actualVertexId = inst.iboAddress != 0 ? *(uint*)(inst.iboAddress + vertexId * 4) : vertexId;
     actualVertexId              = min(actualVertexId, max(inst.vertexCount, 1u) - 1u);
 
-    float3 localPos = vk::RawBufferLoad<float3>(inst.posAddress + actualVertexId * 12, 4);
+    float3 localPos = *(float3*)(inst.posAddress + actualVertexId * 12);
     float3 worldPos = mul(inst.world, float4(localPos, 1.0f)).xyz;
 
     // 2. Fetch Light Data
@@ -100,7 +100,8 @@ struct PunctualShadowPSOutput {
 };
 
 [shader("fragment")]
-PunctualShadowPSOutput PSMain(PunctualShadowVSOutput input) {
+
+PunctualShadowPSOutput PSMain(PunctualShadowVSOutput input, uniform PushConstants pc) {
     PunctualShadowPSOutput output;
     // Write linear depth [0, 1] directly to the shadow cubemap
     output.depth = saturate(input.linearDepth);
@@ -112,4 +113,4 @@ PunctualShadowPSOutput PSMain(PunctualShadowVSOutput input) {
 // * HLSL `#include` -> Slang `import` for modules (see pbr_helpers, uniforms, common modules).
 // * Entry points annotated with [shader("vertex"/"fragment"/"compute")] for explicit stage declaration (Slang idiom).
 // * Duplicate binding / macro redefinition / out-of-bounds BDA silent bugs fixed – Slang's stricter diagnostics surface them.
-// * All vk::binding / vk::push_constant / vk::constant_id attributes preserved for SPIR-V Vulkan 1.3 target parity.
+// * All resources use actual Slang syntax (auto binding, uniform push constants, SpecializationConstant) without vk:: extensions.

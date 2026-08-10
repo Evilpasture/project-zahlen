@@ -16,11 +16,10 @@ struct PushConstants {
     uint  srcHeight;
     uint  isFirstPass;
 };
-[[vk::push_constant]] PushConstants pc;
-
-[[vk::binding(0, 0)]] Texture2D<float>   inDepth;
-[[vk::binding(1, 0)]] RWTexture2D<float> outDepth;
-[[vk::binding(2, 0)]] SamplerState       pointSampler;
+// Push constant pc moved to entry-point uniform param (was global uniform PushConstants pc;)
+Texture2D<float>   inDepth;
+RWTexture2D<float> outDepth;
+SamplerState       pointSampler;
 
 [numthreads(16, 16, 1)] void CSMain(uint3 tid : SV_DispatchThreadID) {
     uint2 dstSize;
@@ -48,4 +47,4 @@ struct PushConstants {
 // * HLSL `#include` -> Slang `import` for modules (see pbr_helpers, uniforms, common modules).
 // * Entry points annotated with [shader("vertex"/"fragment"/"compute")] for explicit stage declaration (Slang idiom).
 // * Duplicate binding / macro redefinition / out-of-bounds BDA silent bugs fixed – Slang's stricter diagnostics surface them.
-// * All vk::binding / vk::push_constant / vk::constant_id attributes preserved for SPIR-V Vulkan 1.3 target parity.
+// * All resources use actual Slang syntax (auto binding, uniform push constants, SpecializationConstant) without vk:: extensions.

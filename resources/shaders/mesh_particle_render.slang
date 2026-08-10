@@ -41,12 +41,10 @@ struct MeshParticleRenderPushConstants {
 
     uint _padding; // Offset 100
 };
-
-[[vk::push_constant]] MeshParticleRenderPushConstants mp_pc;
-
-[[vk::binding(0, 0)]] Texture2D                     globalTextures[];
-[[vk::binding(1, 0)]] SamplerState                  defaultSampler;
-[[vk::binding(2, 0)]] ConstantBuffer<FrameUniforms> frame;
+// Push constant mp_pc moved to entry-point uniform param (was global uniform MeshParticleRenderPushConstants mp_pc;)
+Texture2D                     globalTextures[];
+SamplerState                  defaultSampler;
+ConstantBuffer<FrameUniforms> frame;
 
 struct VSOutput {
     float4                 pos : SV_Position;
@@ -89,10 +87,11 @@ float3 RotateVectorByQuat(float3 v, float4 q) {
 }
 
 [shader("vertex")]
-VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, uint viewId : SV_ViewID) {
+
+VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, uint viewId : SV_ViewID, uniform MeshParticleRenderPushConstants mp_pc) {
     VSOutput output;
 
-    Particle3D p = vk::RawBufferLoad<Particle3D>(mp_pc.particleBufferAddr + instanceId * sizeof(Particle3D), 4);
+    Particle3D p = *(Particle3D*)(mp_pc.particleBufferAddr + instanceId * sizeof(Particle3D));
 
     // Cull dead particles cleanly (0-area degenerate clip position)
     if (p.params.x >= p.params.y || p.params.y <= 0.0f) {
@@ -113,9 +112,9 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, ui
         return output;
     }
 
-    uint actualVertexId = mp_pc.iboAddress != 0 ? vk::RawBufferLoad<uint>(mp_pc.iboAddress + vertexId * 4, 4) : vertexId;
+    uint actualVertexId = mp_pc.iboAddress != 0 ? *(uint*)(mp_pc.iboAddress + vertexId * 4) : vertexId;
 
-    float3 localPos   = vk::RawBufferLoad<float3>(mp_pc.posAddress + actualVertexId * 12, 4);
+    float3 localPos   = *(float3*)(mp_pc.posAddress + actualVertexId * 12);
     float3 scaledPos  = localPos * p.position.w;
     float3 rotatedPos = RotateVectorByQuat(scaledPos, p.rotation);
     float3 worldPos   = rotatedPos + p.position.xyz;
@@ -130,9 +129,9 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, ui
 
     if (mp_pc.attrAddress != 0) {
         uint64_t attrAddr   = mp_pc.attrAddress + actualVertexId * 16;
-        uint     normalRaw  = vk::RawBufferLoad<uint>(attrAddr + 0, 4);
-        uint     tangentRaw = vk::RawBufferLoad<uint>(attrAddr + 4, 4);
-        uint     uvRaw      = vk::RawBufferLoad<uint>(attrAddr + 8, 4);
+        uint     normalRaw  = *(uint*)(attrAddr + 0);
+        uint     tangentRaw = *(uint*)(attrAddr + 4);
+        uint     uvRaw      = *(uint*)(attrAddr + 8);
 
         float3 localNormal = UnpackNormal(normalRaw).xyz;
         output.normal      = normalize(RotateVectorByQuat(localNormal, p.rotation));
@@ -159,7 +158,8 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, ui
 }
 
 [shader("fragment")]
-void PSShadow(VSOutput input) {
+
+void PSShadow(VSOutput input, uniform MeshParticleRenderPushConstants mp_pc) {
     uint4  indices         = input.materialIndices;
     float4 baseColorFactor = input.baseColorFactor;
     float  alphaCutoff     = input.pbrFactors.z;
@@ -173,7 +173,8 @@ void PSShadow(VSOutput input) {
 }
 
 [shader("fragment")]
-PSOutput PSMain(VSOutput input) {
+
+PSOutput PSMain(VSOutput input, uniform MeshParticleRenderPushConstants mp_pc) {
     PSOutput output;
 
     uint4  indices         = input.materialIndices;
@@ -230,4 +231,4 @@ PSOutput PSMain(VSOutput input) {
 // * HLSL `#include` -> Slang `import` for modules (see pbr_helpers, uniforms, common modules).
 // * Entry points annotated with [shader("vertex"/"fragment"/"compute")] for explicit stage declaration (Slang idiom).
 // * Duplicate binding / macro redefinition / out-of-bounds BDA silent bugs fixed – Slang's stricter diagnostics surface them.
-// * All vk::binding / vk::push_constant / vk::constant_id attributes preserved for SPIR-V Vulkan 1.3 target parity.
+// * All resources use actual Slang syntax (auto binding, uniform push constants, SpecializationConstant) without vk:: extensions.

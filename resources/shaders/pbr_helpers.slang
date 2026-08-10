@@ -8,14 +8,6 @@
 // resources/shaders/pbr_helpers.hlsl
 module pbr_helpers;
 
-// Slang BDA helpers: HLSL vk::RawBufferLoad/Store are HLSL intrinsics not in Slang vk namespace.
-// Provide Slang-native PhysicalStorageBuffer helpers so existing HLSL BDA code compiles under slangc.
-namespace vk {
-    public T RawBufferLoad<T>(uint64_t addr) { return *(T*)addr; }
-    public T RawBufferLoad<T>(uint64_t addr, uint alignment) { return *(T*)addr; }
-    public void RawBufferStore<T>(uint64_t addr, T value) { *(T*)addr = value; }
-    public void RawBufferStore<T>(uint64_t addr, T value, uint alignment) { *(T*)addr = value; }
-}
 // import uniforms; // uncomment if sh.h dependency needed
 // This module is imported by `import pbr_helpers;` instead of #include
 
@@ -491,4 +483,4 @@ public float2 RaymarchSSR(
 // * HLSL `#include` -> Slang `import` for modules (see pbr_helpers, uniforms, common modules).
 // * Entry points annotated with [shader("vertex"/"fragment"/"compute")] for explicit stage declaration (Slang idiom).
 // * Duplicate binding / macro redefinition / out-of-bounds BDA silent bugs fixed – Slang's stricter diagnostics surface them.
-// * All vk::binding / vk::push_constant / vk::constant_id attributes preserved for SPIR-V Vulkan 1.3 target parity.
+// * All resources use actual Slang syntax (auto binding, uniform push constants, SpecializationConstant) without vk:: extensions.
