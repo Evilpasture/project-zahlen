@@ -23,7 +23,6 @@ struct RenderPushConstants {
     uint     alignment;
     uint     textureIndex;
 };
-// Push constant pc moved to entry-point uniform param (was global uniform RenderPushConstants pc;)
 // Decoupled Bindings (No longer importing common.hlsl's conflicting push constants)
 Texture2D                     globalTextures[];
 SamplerState                  defaultSampler;
@@ -35,9 +34,11 @@ struct ParticleVSOutput {
     float4 color : COLOR;
 };
 
+[[push_constant]] RenderPushConstants pc;
+
 [shader("vertex")]
 
-ParticleVSOutput VSMain(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID, uniform RenderPushConstants pc) {
+ParticleVSOutput VSMain(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID) {
     ParticleVSOutput output;
     uint64_t         addr = pc.particleBufferAddr + instanceID * sizeof(Particle);
     Particle         p    = *(Particle*)(addr);
@@ -83,7 +84,7 @@ ParticleVSOutput VSMain(uint vertexID : SV_VertexID, uint instanceID : SV_Instan
 
 [shader("fragment")]
 
-float4 PSMain(ParticleVSOutput input, uniform RenderPushConstants pc): SV_Target0 {
+float4 PSMain(ParticleVSOutput input): SV_Target0 {
     float4 texColor   = globalTextures[pc.textureIndex].Sample(defaultSampler, input.uv);
     float4 finalColor = texColor * input.color;
 

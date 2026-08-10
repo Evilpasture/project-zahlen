@@ -29,7 +29,6 @@ struct PushConstants {
 // DXC silently allows it, but Slang's SPIR-V legalization validates against VkPhysicalDeviceLimits::maxPushConstantsSize.
 // Desktop GPUs typically support 256, but mobile/portable targets may fail. Consider splitting into ConstantBuffer for portability or verify device limit.
 // Modern Slang idiom: use ParameterBlock<FrameUniforms> or ConstantBuffer for large per-frame data, keep push constants <128 bytes.
-// Push constant pc moved to entry-point uniform param (was global uniform PushConstants pc;)
 // --- G-Buffer Inputs ---
 Texture2D<float4>             texInput;
 SamplerState                  smp;
@@ -46,6 +45,8 @@ struct VSOutput {
     float2 uv : TEXCOORD0;
 };
 
+[[push_constant]] PushConstants pc;
+
 [shader("vertex")]
 
 VSOutput VSMain(uint vertexID : SV_VertexID) {
@@ -60,7 +61,7 @@ VSOutput VSMain(uint vertexID : SV_VertexID) {
 
 [shader("fragment")]
 
-float4 PSMain(VSOutput input, uniform PushConstants pc): SV_Target0 {
+float4 PSMain(VSOutput input): SV_Target0 {
     float depth = texDepth.SampleLevel(pointSampler, input.uv, 0).r;
     if (depth >= 1.0f) {
         return float4(0.0f, 0.0f, 0.0f, 1.0f);

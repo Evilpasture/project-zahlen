@@ -23,7 +23,6 @@ struct DecalPushConstants {
 // DXC silently allows it, but Slang's SPIR-V legalization validates against VkPhysicalDeviceLimits::maxPushConstantsSize.
 // Desktop GPUs typically support 256, but mobile/portable targets may fail. Consider splitting into ConstantBuffer for portability or verify device limit.
 // Modern Slang idiom: use ParameterBlock<FrameUniforms> or ConstantBuffer for large per-frame data, keep push constants <128 bytes.
-// Push constant pc moved to entry-point uniform param (was global uniform DecalPushConstants pc;)
 struct VSOutput {
     float4 pos : SV_Position;
 };
@@ -46,9 +45,11 @@ Texture2D                     globalTextures[];
 SamplerState                  defaultSampler;
 ConstantBuffer<FrameUniforms> frame;
 
+[[push_constant]] DecalPushConstants pc;
+
 [shader("vertex")]
 
-VSOutput VSMain(uint vertexID : SV_VertexID, uniform DecalPushConstants pc) {
+VSOutput VSMain(uint vertexID : SV_VertexID) {
     VSOutput output;
     float3   localPos = CubeVertices[CubeIndices[vertexID]];
     float4   worldPos = mul(pc.worldMatrix, float4(localPos, 1.0f));
@@ -67,7 +68,7 @@ struct PSOutput {
 
 [shader("fragment")]
 
-PSOutput PSMain(VSOutput input, uniform DecalPushConstants pc) {
+PSOutput PSMain(VSOutput input) {
     PSOutput output;
 
     // 1. Reconstruct screen-space UV coordinates

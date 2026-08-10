@@ -15,7 +15,6 @@
 struct PushConstants {
 	float4 rtMetrics; // x: 1/w, y: 1/h, z: w, w: h
 };
-// Push constant pc moved to entry-point uniform param (was global uniform PushConstants pc;)
 #define SMAA_RT_METRICS pc.rtMetrics
 
 // ============================================================================
@@ -74,9 +73,11 @@ struct EdgeVSOutput {
 	float4 offset[3] : TEXCOORD1;
 };
 
+[[push_constant]] PushConstants pc;
+
 [shader("vertex")]
 
-EdgeVSOutput SmaaEdgeVS(uint vertexID : SV_VertexID, uniform PushConstants pc) {
+EdgeVSOutput SmaaEdgeVS(uint vertexID : SV_VertexID) {
 	EdgeVSOutput output;
 	output.uv = float2((vertexID << 1) & 2, vertexID & 2);
 
@@ -89,7 +90,7 @@ EdgeVSOutput SmaaEdgeVS(uint vertexID : SV_VertexID, uniform PushConstants pc) {
 
 [shader("fragment")]
 
-float4 SmaaEdgePS(EdgeVSOutput input, uniform PushConstants pc) : SV_Target0 {
+float4 SmaaEdgePS(EdgeVSOutput input) : SV_Target0 {
 	return float4(SMAALumaEdgeDetectionPS(input.uv, input.offset, colorTex), 0.0f, 0.0f);
 }
 #endif
@@ -107,7 +108,7 @@ struct WeightVSOutput {
 
 [shader("vertex")]
 
-WeightVSOutput SmaaWeightVS(uint vertexID : SV_VertexID, uniform PushConstants pc) {
+WeightVSOutput SmaaWeightVS(uint vertexID : SV_VertexID) {
 	WeightVSOutput output;
 	output.uv = float2((vertexID << 1) & 2, vertexID & 2);
 
@@ -120,7 +121,7 @@ WeightVSOutput SmaaWeightVS(uint vertexID : SV_VertexID, uniform PushConstants p
 
 [shader("fragment")]
 
-float4 SmaaWeightPS(WeightVSOutput input, uniform PushConstants pc) : SV_Target0 {
+float4 SmaaWeightPS(WeightVSOutput input) : SV_Target0 {
 	return SMAABlendingWeightCalculationPS(input.uv, input.pixcoord, input.offset, edgesTex,
 										   areaTex, searchTex, float4(0.0f, 0.0f, 0.0f, 0.0f));
 }
@@ -138,7 +139,7 @@ struct BlendVSOutput {
 
 [shader("vertex")]
 
-BlendVSOutput SmaaBlendVS(uint vertexID : SV_VertexID, uniform PushConstants pc) {
+BlendVSOutput SmaaBlendVS(uint vertexID : SV_VertexID) {
 	BlendVSOutput output;
 	output.uv = float2((vertexID << 1) & 2, vertexID & 2);
 	output.position = float4(output.uv.x * 2.0f - 1.0f, output.uv.y * 2.0f - 1.0f, 0.0f, 1.0f);
@@ -149,7 +150,7 @@ BlendVSOutput SmaaBlendVS(uint vertexID : SV_VertexID, uniform PushConstants pc)
 
 [shader("fragment")]
 
-float4 SmaaBlendPS(BlendVSOutput input, uniform PushConstants pc) : SV_Target0 {
+float4 SmaaBlendPS(BlendVSOutput input) : SV_Target0 {
 	return SMAANeighborhoodBlendingPS(input.uv, input.offset, colorTex, blendTex);
 }
 #endif

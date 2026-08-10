@@ -10,8 +10,10 @@ import common;
 import pbr_helpers;
 import uniforms; // modern Slang import (was #include "common.hlsl")
 
+[[push_constant]] ObjectConstants obj;
+
 [shader("vertex")]
-VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, uint viewId : SV_ViewID, uniform ObjectConstants obj) {
+VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, uint viewId : SV_ViewID) {
     VSOutput output;
 
     uint         instId = (obj.instanceId != 4294967295u) ? obj.instanceId : instanceId;
@@ -159,7 +161,7 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, ui
 }
 
 [shader("fragment")]
-void PSShadow(VSOutput input, uniform ObjectConstants obj) {
+void PSShadow(VSOutput input) {
     uint4  indices         = input.materialIndices;
     float4 baseColorFactor = input.baseColorFactor;
     float  alphaCutoff     = input.pbrFactors.z;
@@ -173,7 +175,7 @@ void PSShadow(VSOutput input, uniform ObjectConstants obj) {
 }
 
 [shader("fragment")]
-PSOutput PSMain(VSOutput input, uniform ObjectConstants obj) {
+PSOutput PSMain(VSOutput input) {
     PSOutput output;
 
     uint4  indices         = input.materialIndices;
@@ -253,7 +255,7 @@ float3 RotateVector(float3 V, float3 lightDir) {
 }
 
 [shader("fragment")]
-float4 PSForward(VSOutput input, uniform ObjectConstants obj): SV_Target0 {
+float4 PSForward(VSOutput input): SV_Target0 {
     uint4  indices         = input.materialIndices;
     float4 baseColorFactor = input.baseColorFactor;
     float  roughnessFactor = input.pbrFactors.y;

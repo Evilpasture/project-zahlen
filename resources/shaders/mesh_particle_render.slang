@@ -41,7 +41,6 @@ struct MeshParticleRenderPushConstants {
 
     uint _padding; // Offset 100
 };
-// Push constant mp_pc moved to entry-point uniform param (was global uniform MeshParticleRenderPushConstants mp_pc;)
 Texture2D                     globalTextures[];
 SamplerState                  defaultSampler;
 ConstantBuffer<FrameUniforms> frame;
@@ -86,9 +85,11 @@ float3 RotateVectorByQuat(float3 v, float4 q) {
     return v + q.w * t + cross(q.xyz, t);
 }
 
+[[push_constant]] MeshParticleRenderPushConstants mp_pc;
+
 [shader("vertex")]
 
-VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, uint viewId : SV_ViewID, uniform MeshParticleRenderPushConstants mp_pc) {
+VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, uint viewId : SV_ViewID) {
     VSOutput output;
 
     Particle3D p = *(Particle3D*)(mp_pc.particleBufferAddr + instanceId * sizeof(Particle3D));
@@ -159,7 +160,7 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, ui
 
 [shader("fragment")]
 
-void PSShadow(VSOutput input, uniform MeshParticleRenderPushConstants mp_pc) {
+void PSShadow(VSOutput input) {
     uint4  indices         = input.materialIndices;
     float4 baseColorFactor = input.baseColorFactor;
     float  alphaCutoff     = input.pbrFactors.z;
@@ -174,7 +175,7 @@ void PSShadow(VSOutput input, uniform MeshParticleRenderPushConstants mp_pc) {
 
 [shader("fragment")]
 
-PSOutput PSMain(VSOutput input, uniform MeshParticleRenderPushConstants mp_pc) {
+PSOutput PSMain(VSOutput input) {
     PSOutput output;
 
     uint4  indices         = input.materialIndices;

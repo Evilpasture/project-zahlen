@@ -12,6 +12,8 @@ struct VSOutput {
 	float2 uv : TEXCOORD0;
 };
 
+[[push_constant]] PushConstants pc;
+
 [shader("vertex")]
 
 VSOutput VSMain(uint vertexID : SV_VertexID) {
@@ -33,7 +35,6 @@ ConstantBuffer<FrameUniforms> frame;
 struct PushConstants {
 	float feedback;
 };
-// Push constant pc moved to entry-point uniform param (was global uniform PushConstants pc;)
 // --- COLOR SPACE CONVERSIONS ---
 // Decouples luminance from chrominance to prevent chromatic ghosting
 float3 RGBToYCoCg(float3 rgb) {
@@ -111,7 +112,7 @@ float4 SampleTextureCatmullRom(Texture2D<float4> tex, SamplerState s, float2 uv,
 
 [shader("fragment")]
 
-float4 PSMain(VSOutput input, uniform PushConstants pc) : SV_Target0 {
+float4 PSMain(VSOutput input) : SV_Target0 {
 	uint w, h;
 	texCurrent.GetDimensions(w, h);
 	float2 texelSize = 1.0f / float2(w, h);

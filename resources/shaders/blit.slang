@@ -16,6 +16,8 @@ struct VSOutput {
     float2 uv : TEXCOORD0;
 };
 
+[[push_constant]] PushConstants pc;
+
 [shader("vertex")]
 
 VSOutput VSMain(uint vertexID : SV_VertexID) {
@@ -32,7 +34,6 @@ struct PushConstants {
     float vignettePower;
     int   fullBright;
 };
-// Push constant pc moved to entry-point uniform param (was global uniform PushConstants pc;)
 Texture2D<float4>             texInput;
 SamplerState                  smp;
 Texture2D<float4>             texBloom; // Bound dynamically by BlitPass
@@ -50,7 +51,7 @@ float3 ACESFilm(float3 x) {
 
 [shader("fragment")]
 
-float4 PSMain(VSOutput input, uniform PushConstants pc): SV_Target0 {
+float4 PSMain(VSOutput input): SV_Target0 {
     float3 hdrColor = texInput.SampleLevel(smp, input.uv, 0).rgb;
 
     // Bypasses HDR exposure, bloom, and tonemapping if fullbright is enabled

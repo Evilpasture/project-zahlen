@@ -26,15 +26,16 @@ StructuredBuffer<Light>        lights;
 struct PushConstants {
     uint lightIndex;
 };
-// Push constant pc moved to entry-point uniform param (was global uniform PushConstants pc;)
 struct PunctualShadowVSOutput {
     float4 pos : SV_Position;
     float  linearDepth : TEXCOORD0;
 };
 
+[[push_constant]] PushConstants pc;
+
 [shader("vertex")]
 
-PunctualShadowVSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, uint viewId : SV_ViewID, uniform PushConstants pc) {
+PunctualShadowVSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, uint viewId : SV_ViewID) {
     PunctualShadowVSOutput output;
 
     InstanceData inst           = g_instances[instanceId];
@@ -101,7 +102,7 @@ struct PunctualShadowPSOutput {
 
 [shader("fragment")]
 
-PunctualShadowPSOutput PSMain(PunctualShadowVSOutput input, uniform PushConstants pc) {
+PunctualShadowPSOutput PSMain(PunctualShadowVSOutput input) {
     PunctualShadowPSOutput output;
     // Write linear depth [0, 1] directly to the shadow cubemap
     output.depth = saturate(input.linearDepth);

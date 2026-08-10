@@ -14,6 +14,8 @@ struct VSOutput {
 	float2 uv : TEXCOORD0;
 };
 
+[[push_constant]] PushConstants pc;
+
 [shader("vertex")]
 
 VSOutput VSMain(uint vertexID : SV_VertexID) {
@@ -37,7 +39,6 @@ struct PushConstants {
 	float edgeThresholdMin;
 	float _pad;
 };
-// Push constant pc moved to entry-point uniform param (was global uniform PushConstants pc;)
 // Convert RGB to Luma (Y) for edge detection, incorporating a soft perceptual
 // Reinhard tonemap curve locally so HDR sun glare doesn't smear the edge tracking.
 float GetLuma(float3 rgb) {
@@ -47,7 +48,7 @@ float GetLuma(float3 rgb) {
 
 [shader("fragment")]
 
-float4 PSMain(VSOutput input, uniform PushConstants pc) : SV_Target0 {
+float4 PSMain(VSOutput input) : SV_Target0 {
 	float3 rgbM = texInput.SampleLevel(smp, input.uv, 0).rgb;
 
 	float lumaM = GetLuma(rgbM);

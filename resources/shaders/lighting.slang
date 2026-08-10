@@ -28,7 +28,6 @@ struct PushConstants {
 // DXC silently allows it, but Slang's SPIR-V legalization validates against VkPhysicalDeviceLimits::maxPushConstantsSize.
 // Desktop GPUs typically support 256, but mobile/portable targets may fail. Consider splitting into ConstantBuffer for portability or verify device limit.
 // Modern Slang idiom: use ParameterBlock<FrameUniforms> or ConstantBuffer for large per-frame data, keep push constants <128 bytes.
-// Push constant pc moved to entry-point uniform param (was global uniform PushConstants pc;)
 struct ClusterVolume {
     uint offset;
     uint count;
@@ -65,6 +64,8 @@ struct VSOutput {
     float2 uv : TEXCOORD0;
 };
 
+[[push_constant]] PushConstants pc;
+
 [shader("vertex")]
 
 VSOutput VSMain(uint vertexID : SV_VertexID) {
@@ -78,7 +79,7 @@ VSOutput VSMain(uint vertexID : SV_VertexID) {
 
 [shader("fragment")]
 
-float4 PSMain(VSOutput input, uniform PushConstants pc): SV_Target0 {
+float4 PSMain(VSOutput input): SV_Target0 {
     float depth = texDepth.SampleLevel(pointSampler, input.uv, 0);
     if (depth >= 1.0f)
         discard;
@@ -247,7 +248,8 @@ float4 PSMain(VSOutput input, uniform PushConstants pc): SV_Target0 {
 
                         shadowVisibility = punctualShadowCube.SampleCmpLevelZero(shadowSampler, float4(r, light.shadowLayer), currentDepth);
                     } else if (light.type == 2) { // SPOT LIGHT (2D Perspective Array)
-                        float4 sPos = mul((float4x4) light.points, float4(worldPos + N * 0.05f, 1.0f));
+                        float4x4 lightMat = float4x4(light.points[0], light.points[1], light.points[2], light.points[3]);
+        float4 sPos = mul(lightMat, float4(worldPos + N * 0.05f, 1.0f));
                         sPos.xy     = sPos.xy * 0.5f + 0.5f * sPos.w;
 
                         float depthRef   = (sPos.z / sPos.w) - 0.005f;

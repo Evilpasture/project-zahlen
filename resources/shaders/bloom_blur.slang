@@ -14,6 +14,8 @@ struct VSOutput {
 	float2 uv : TEXCOORD0;
 };
 
+[[push_constant]] PushConstants pc;
+
 [shader("vertex")]
 
 VSOutput VSMain(uint vertexID : SV_VertexID) {
@@ -29,14 +31,13 @@ struct PushConstants {
 	float rcpHeight;
 	float padding;
 };
-// Push constant pc moved to entry-point uniform param (was global uniform PushConstants pc;)
 Texture2D<float4> texInput;
 SamplerState smp;
 Texture2D<float4> texLow;
 
 [shader("fragment")]
 
-float4 PSMain(VSOutput input, uniform PushConstants pc) : SV_Target0 {
+float4 PSMain(VSOutput input) : SV_Target0 {
 	float2 texelSize = float2(pc.rcpWidth, pc.rcpHeight);
 
 	if (pc.mode == 0) {

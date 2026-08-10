@@ -47,7 +47,6 @@ struct UIObjectConstants {
     uint     albedoIdx;
     uint     isSDF;
 };
-// Push constant obj moved to entry-point uniform param (was global uniform UIObjectConstants obj;)
 Texture2D    globalTextures[];
 SamplerState defaultSampler;
 
@@ -57,9 +56,11 @@ struct UIVSOutput {
     float4 color : COLOR;
 };
 
+[[push_constant]] UIObjectConstants obj;
+
 [shader("vertex")]
 
-UIVSOutput VSMain(uint vertexId : SV_VertexID, uniform UIObjectConstants obj) {
+UIVSOutput VSMain(uint vertexId : SV_VertexID) {
     UIVSOutput output;
 
     float3 position = *(float3*)(obj.posAddress + vertexId * 12);
@@ -74,7 +75,7 @@ UIVSOutput VSMain(uint vertexId : SV_VertexID, uniform UIObjectConstants obj) {
 
 [shader("fragment")]
 
-float4 PSMain(UIVSOutput input, uniform UIObjectConstants obj): SV_Target0 {
+float4 PSMain(UIVSOutput input): SV_Target0 {
     float4 texSample = globalTextures[obj.albedoIdx].Sample(defaultSampler, input.uv);
     float  alpha     = texSample.a;
 
