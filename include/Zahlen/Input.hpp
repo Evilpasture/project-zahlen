@@ -7,7 +7,6 @@
 namespace ZHLN {
 
 // Platform-neutral key / mouse button identifiers.
-// Raw device state lives on Components::InputStateComponent — no manager, no helpers.
 enum class KeyCode : uint8_t {
     Unknown = 0,
     Num0,

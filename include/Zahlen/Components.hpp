@@ -7,7 +7,9 @@
 #include <Jolt/Physics/Ragdoll/Ragdoll.h>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/HashMap.hpp>
+#include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Core/String.hpp>
+#include <Zahlen/Input.hpp>
 #include <algorithm>
 #include <array>
 #include <bitset>
@@ -470,7 +472,7 @@ struct Components {
     // Member functions keep injection / query logic on the component itself —
     // there is no InputManager and no parallel helper translation unit.
     struct InputStateComponent {
-        std::bitset<128> keys; // Indexed by KeyCode (uint8_t); room past MButton
+        std::bitset<Reflect::EnumCount<KeyCode>()> keys; // Indexed by KeyCode (uint8_t); room past MButton
 
         float mouseX      = 0.0f;
         float mouseY      = 0.0f;
