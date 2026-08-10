@@ -33,6 +33,22 @@
 namespace ZHLN::CreativeWorksFactory {
 
 static std::string FindSystemFont(const char* fontName) {
+#ifdef __APPLE__
+    // On macOS, Fontconfig frequently falls back to CJK/Japanese TTC collections.
+    // Prioritize standard Western TrueType fonts to ensure clean ASCII glyph rendering.
+    const char* macFallbacks[] = {
+        "/System/Library/Fonts/Supplemental/Arial.ttf", "/System/Library/Fonts/Supplemental/Helvetica.ttf", "/System/Library/Fonts/Supplemental/Verdana.ttf",
+        "/System/Library/Fonts/Supplemental/Courier New.ttf"
+    };
+    for (const auto* path: macFallbacks) {
+        FILE* f = std::fopen(path, "rb");
+        if (f != nullptr) {
+            std::fclose(f);
+            return path;
+        }
+    }
+#endif
+
     FcConfig*  config = FcInitLoadConfigAndFonts();
     FcPattern* pat    = FcNameParse(reinterpret_cast<const FcChar8*>(fontName));
     FcConfigSubstitute(config, pat, FcMatchPattern);

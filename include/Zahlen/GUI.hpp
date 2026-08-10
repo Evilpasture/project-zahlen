@@ -189,6 +189,30 @@ class Context {
         return newEntity;
     }
 
+    void DestroyUIEntity(Entity ent) noexcept {
+        if (!m_reg->IsAlive(ent)) {
+            return;
+        }
+
+        // Gather all child UI rects referencing 'ent' as their parent
+        auto                uiRects = m_reg->GetEntitiesWith<Components::UIRectComponent>();
+        ZHLN::Array<Entity> childrenToDestroy;
+
+        for (Entity e: uiRects) {
+            if (auto* rect = m_reg->Get<Components::UIRectComponent>(e)) {
+                if (rect->parentEntity == ent) {
+                    childrenToDestroy.push_back(e);
+                }
+            }
+        }
+
+        for (Entity child: childrenToDestroy) {
+            DestroyUIEntity(child);
+        }
+
+        m_reg->Destroy(ent);
+    }
+
     // Sweep unvisited child entities under a parent node (or root)
     void SweepStaleChildren(Entity parentEntity) {
         Entity cacheEntity = (parentEntity != NullEntity) ? parentEntity : GetRootCacheEntity();
@@ -211,7 +235,8 @@ class Context {
         for (uint64_t key: staleKeys) {
             if (const auto* rec = cache->children.Find(key)) {
                 if (m_reg->IsAlive(rec->entity)) {
-                    m_reg->Destroy(rec->entity);
+                    // Use recursive destruction instead of plain registry destroy
+                    DestroyUIEntity(rec->entity);
                 }
             }
         }
@@ -410,6 +435,61 @@ class Context {
         });
 
         return e;
+    }
+
+    template <typename OnClickFn>
+    Entity Button(std::string_view id, std::string_view text, const ButtonConfig& cfg, OnClickFn&& onClick) {
+        Entity   parent = GetCurrentParent();
+        uint32_t depth  = GetCurrentDepth();
+
+        uint64_t key = HashCombine(parent.Pack(), HashStringView(id));
+
+        TextureHandle fontHandle = TextureHandle::Invalid;
+        auto          uiSettings = m_reg->GetEntitiesWith<Components::UISettingsComponent>();
+        if (!uiSettings.empty()) {
+            fontHandle = m_reg->Get<Components::UISettingsComponent>(uiSettings[0])->fontAtlas.texture;
+        }
+
+        Entity e = GetOrCreateEntity(key, [&]() {
+            return m_reg->Create(
+                Components::NameComponent {.name = String64(id)},
+                Components::UIRectComponent {.parentEntity = parent, .width = cfg.width, .height = cfg.height, .hierarchyDepth = depth},
+                Components::UIPanelComponent {.color = cfg.normalColor, .borderRadius = cfg.borderRadius}, Components::UIButtonComponent {},
+                Components::UIStyleComponent {
+                    .normalColor     = cfg.normalColor,
+                    .hoverColor      = cfg.hoverColor,
+                    .pressedColor    = cfg.pressedColor,
+                    .textColorNormal = cfg.textColor,
+                    .textColorHover  = {1.0f, 1.0f, 1.0f, 1.0f},
+                    .transitionSpeed = 16.0f,
+                    .hasTextColor    = true
+                },
+                Components::TextComponent {
+                    .text          = String256(text),
+                    .scale         = cfg.scale,
+                    .color         = cfg.textColor,
+                    .align         = cfg.align,
+                    .verticalAlign = cfg.verticalAlign,
+                    .fontIndex     = fontHandle
+                }
+            );
+        });
+
+        // Update the text in the TextComponent of the existing entity dynamically
+        ECS::Patch<Components::TextComponent>(*m_reg, e, [&](auto& textComp) { textComp.text.assign(text); });
+
+        ECS::Patch<Components::UIButtonComponent>(*m_reg, e, [&](const auto& btn) {
+            if (btn.Has(UIButton::Clicked)) {
+                std::forward<OnClickFn>(onClick)();
+            }
+        });
+
+        return e;
+    }
+
+    template <typename OnClickFn>
+    Entity Button(std::string_view id, std::string_view text, OnClickFn&& onClick) {
+        return Button(id, text, ButtonConfig {}, std::forward<OnClickFn>(onClick));
     }
 
     template <typename OnClickFn>

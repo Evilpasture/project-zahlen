@@ -212,7 +212,7 @@ void DefaultPreset::Update(Engine& engine, float dt) {
                             engine.GetScriptRunner().ReloadFile("scripts/boot.lua");
                         });
 
-                        s_BtnAnimate = ui.Button(s_AnimateScene ? "Pause Motion" : "Resume Motion", GUI::ButtonConfig {.width = 210.0f}, [&]() {
+                        s_BtnAnimate = ui.Button("BtnAnimate", s_AnimateScene ? "Pause Motion" : "Resume Motion", GUI::ButtonConfig {.width = 210.0f}, [&]() {
                             s_AnimateScene = !s_AnimateScene;
                         });
 
