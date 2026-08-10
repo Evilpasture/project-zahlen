@@ -9,16 +9,83 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <optional>
 
 namespace ZHLN {
 
 namespace {
+
+struct ResolvedMeshMaterial {
+    NativeMesh*     posMesh         = nullptr;
+    NativeMesh*     attrMesh        = nullptr;
+    NativeMesh*     finalPosMesh    = nullptr;
+    NativeMesh*     skinMesh        = nullptr;
+    NativeMesh*     indexMesh       = nullptr;
+    NativeMaterial* material        = nullptr;
+    NativeMaterial* prePassMaterial = nullptr;
+    VkDeviceAddress posAddr         = 0;
+    VkDeviceAddress attrAddr        = 0;
+};
+
+struct BindlessIndices {
+    uint32_t albedo;
+    uint32_t normal;
+    uint32_t pbr;
+    uint32_t emissive;
+};
 
 [[nodiscard]] inline std::array<float, 4> UnpackMorphWeights(const float* weights) noexcept {
     if (weights == nullptr) {
         return {0.0f, 0.0f, 0.0f, 0.0f};
     }
     return {weights[0], weights[1], weights[2], weights[3]};
+}
+
+[[nodiscard]] BindlessIndices ResolveMaterialTextures(RenderContext::Impl* impl, const Material& material) noexcept {
+    return {
+        .albedo   = (material.albedoMap != TextureHandle::Invalid) ? impl->textureManager.GetBindlessIndex(material.albedoMap) : 1,
+        .normal   = (material.normalMap != TextureHandle::Invalid) ? impl->textureManager.GetBindlessIndex(material.normalMap) : 2,
+        .pbr      = (material.pbrMap != TextureHandle::Invalid) ? impl->textureManager.GetBindlessIndex(material.pbrMap) : 1,
+        .emissive = (material.emissiveMap != TextureHandle::Invalid) ? impl->textureManager.GetBindlessIndex(material.emissiveMap) : 0
+    };
+}
+
+[[nodiscard]] std::optional<ResolvedMeshMaterial>
+    ResolveDrawInputs(RenderContext::Impl* impl, const Material& material, const Mesh& mesh, BufferHandle skinnedVertexBuffer) noexcept {
+    using enum BufferHandle;
+
+    auto posMesh_res        = impl->meshPool.Resolve(mesh.posBuffer);
+    auto attrMesh_res       = impl->meshPool.Resolve(mesh.attrBuffer);
+    auto nativeMaterial_res = impl->materialPool.Resolve(material.pipeline);
+
+    if (!posMesh_res || !attrMesh_res || !nativeMaterial_res) [[unlikely]] {
+        return std::nullopt;
+    }
+
+    ResolvedMeshMaterial res;
+    res.posMesh  = posMesh_res.value();
+    res.attrMesh = attrMesh_res.value();
+    res.material = nativeMaterial_res.value();
+
+    if (material.prePassPipeline != PipelineHandle::Invalid) {
+        res.prePassMaterial = impl->materialPool.Resolve(material.prePassPipeline).value_or(nullptr);
+    }
+
+    res.skinMesh  = (mesh.skinBuffer != Invalid) ? impl->meshPool.Resolve(mesh.skinBuffer).value_or(nullptr) : nullptr;
+    res.indexMesh = (mesh.indexBuffer != Invalid) ? impl->meshPool.Resolve(mesh.indexBuffer).value_or(nullptr) : nullptr;
+
+    res.finalPosMesh = (skinnedVertexBuffer != Invalid) ? impl->meshPool.Resolve(skinnedVertexBuffer).value_or(nullptr) : res.posMesh;
+
+    res.posAddr  = (res.finalPosMesh != nullptr) ? res.finalPosMesh->vboAddress : 0;
+    res.attrAddr = (res.attrMesh != nullptr) ? res.attrMesh->vboAddress : 0;
+
+    if (res.posMesh == res.attrMesh && res.posMesh != nullptr) {
+        res.attrAddr = res.posMesh->vboAddress + (RenderContext::Impl::kMaxLineVertices * sizeof(VertexPosition));
+    } else if (skinnedVertexBuffer != Invalid && res.posMesh != nullptr) {
+        res.attrAddr = res.finalPosMesh->vboAddress + (res.posMesh->vertexCount * sizeof(VertexPosition));
+    }
+
+    return res;
 }
 
 } // namespace
@@ -140,11 +207,8 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
     using enum DrawFlags;
     using enum BufferHandle;
 
-    auto posMesh_res        = _impl->meshPool.Resolve(mesh.posBuffer);
-    auto attrMesh_res       = _impl->meshPool.Resolve(mesh.attrBuffer);
-    auto nativeMaterial_res = _impl->materialPool.Resolve(material.pipeline);
-
-    if (!posMesh_res || !attrMesh_res || !nativeMaterial_res) [[unlikely]] {
+    auto resolved = ResolveDrawInputs(_impl.get(), material, mesh, params.skinnedVertexBuffer);
+    if (!resolved) [[unlikely]] {
         static uint32_t s_WarnCount = 0;
         if (s_WarnCount++ < 5) {
             ZHLN::Log("WARNING: RenderContext::Draw skipped draw call with invalid mesh or material handle.");
@@ -152,55 +216,31 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
         return;
     }
 
-    auto* posMesh        = posMesh_res.value();
-    auto* attrMesh       = attrMesh_res.value();
-    auto* nativeMaterial = nativeMaterial_res.value();
-
-    NativeMaterial* prePassMaterial = nullptr;
-    if (material.prePassPipeline != PipelineHandle::Invalid) {
-        prePassMaterial = _impl->materialPool.Resolve(material.prePassPipeline).value_or(nullptr);
-    }
-
-    auto* skinMesh        = (mesh.skinBuffer != Invalid) ? _impl->meshPool.Resolve(mesh.skinBuffer).value_or(nullptr) : nullptr;
-    auto* nativeIndexMesh = (mesh.indexBuffer != Invalid) ? _impl->meshPool.Resolve(mesh.indexBuffer).value_or(nullptr) : nullptr;
-
     if (params.skinnedVertexBuffer != Invalid) {
         _impl->hasSkinnedThisFrame = true;
     }
 
-    auto* finalPosMesh = (params.skinnedVertexBuffer != Invalid) ? _impl->meshPool.Resolve(params.skinnedVertexBuffer).value_or(nullptr) : posMesh;
-
-    VkDeviceAddress posAddr  = (finalPosMesh != nullptr) ? finalPosMesh->vboAddress : 0;
-    VkDeviceAddress attrAddr = (attrMesh != nullptr) ? attrMesh->vboAddress : 0;
-
-    if (posMesh == attrMesh && posMesh != nullptr) {
-        attrAddr = posMesh->vboAddress + (RenderContext::Impl::kMaxLineVertices * sizeof(VertexPosition));
-    } else if (params.skinnedVertexBuffer != Invalid && posMesh != nullptr) {
-        attrAddr = finalPosMesh->vboAddress + (posMesh->vertexCount * sizeof(VertexPosition));
-    }
-
-    uint32_t albedoIdx   = material.albedoMap != TextureHandle::Invalid ? _impl->textureManager.GetBindlessIndex(material.albedoMap) : 1;
-    uint32_t normalIdx   = material.normalMap != TextureHandle::Invalid ? _impl->textureManager.GetBindlessIndex(material.normalMap) : 2;
-    uint32_t pbrIdx      = material.pbrMap != TextureHandle::Invalid ? _impl->textureManager.GetBindlessIndex(material.pbrMap) : 1;
-    uint32_t emissiveIdx = material.emissiveMap != TextureHandle::Invalid ? _impl->textureManager.GetBindlessIndex(material.emissiveMap) : 0;
+    auto tex = ResolveMaterialTextures(_impl.get(), material);
 
     uint32_t isViewmodel      = ((params.flags & DrawFlags::Viewmodel) != DrawFlags::None) ? 1u : 0u;
     uint32_t isSkinned        = (params.skinnedVertexBuffer == Invalid && (params.flags & Skinned) != None) ? 1u : 0u;
     uint32_t activeMorphCount = (params.skinnedVertexBuffer != Invalid) ? 0 : params.activeMorphCount;
+
+    auto morphWeights = UnpackMorphWeights(params.morphWeights);
 
     _impl->queues.drawQueue.push_back(
         {.instanceData =
              {
                  .world            = params.transform,
                  .prevWorld        = params.prevTransform,
-                 .posAddress       = posAddr,
-                 .attrAddress      = attrAddr,
-                 .skinAddress      = (skinMesh != nullptr) ? skinMesh->vboAddress : 0,
-                 .iboAddress       = (nativeIndexMesh != nullptr) ? nativeIndexMesh->vboAddress : 0,
-                 .vertexCount      = (posMesh != nullptr) ? posMesh->vertexCount : 0,
+                 .posAddress       = resolved->posAddr,
+                 .attrAddress      = resolved->attrAddr,
+                 .skinAddress      = (resolved->skinMesh != nullptr) ? resolved->skinMesh->vboAddress : 0,
+                 .iboAddress       = (resolved->indexMesh != nullptr) ? resolved->indexMesh->vboAddress : 0,
+                 .vertexCount      = (resolved->posMesh != nullptr) ? resolved->posMesh->vertexCount : 0,
                  .indexCount       = mesh.indexCount,
-                 .texIndices0      = (normalIdx << 16) | (albedoIdx & 0xFFFF),
-                 .texIndices1      = (emissiveIdx << 16) | (pbrIdx & 0xFFFF),
+                 .texIndices0      = (tex.normal << 16) | (tex.albedo & 0xFFFF),
+                 .texIndices1      = (tex.emissive << 16) | (tex.pbr & 0xFFFF),
                  .cullRadius       = params.cullRadius,
                  .metallicFactor   = params.metallic >= 0.0f ? params.metallic : material.metallicFactor,
                  .roughnessFactor  = params.roughness >= 0.0f ? params.roughness : material.roughnessFactor,
@@ -211,7 +251,7 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
                  .activeMorphCount = activeMorphCount,
                  .localCenter      = {params.localCenter[0], params.localCenter[1], params.localCenter[2]},
                  ._paddingCenter   = {},
-                 .morphWeights     = UnpackMorphWeights(params.morphWeights),
+                 .morphWeights     = morphWeights,
                  .baseColorFactor  = (params.colorOverride[3] >= 0.0f) ?
                                          params.colorOverride :
                                          std::array<float, 4> {
@@ -222,16 +262,16 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
                          params.emissiveOverride :
                          std::array<float, 4> {material.emissiveFactor[0], material.emissiveFactor[1], material.emissiveFactor[2], material.emissiveFactor[3]},
              },
-         .material            = nativeMaterial,
-         .prePassMaterial     = prePassMaterial,
-         .posMesh             = finalPosMesh,
-         .attrMesh            = attrMesh,
-         .skinMesh            = skinMesh,
+         .material            = resolved->material,
+         .prePassMaterial     = resolved->prePassMaterial,
+         .posMesh             = resolved->finalPosMesh,
+         .attrMesh            = resolved->attrMesh,
+         .skinMesh            = resolved->skinMesh,
          .skinnedVertexBuffer = params.skinnedVertexBuffer,
          .jointOffset         = params.jointOffset,
          .morphOffset         = params.morphOffset,
          .activeMorphCount    = params.activeMorphCount,
-         .morphWeights        = UnpackMorphWeights(params.morphWeights),
+         .morphWeights        = morphWeights,
          .flags               = params.flags}
     );
 }
@@ -239,41 +279,12 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
 void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, const CSGDrawParams& params) noexcept {
     auto MakeCommand = [&](const Material& material, const Mesh& mesh, const JPH::Mat44& transform, const JPH::Mat44& prevTransform, float cullRadius,
                            uint32_t jointOffset, BufferHandle skinnedVertexBuffer, DrawFlags flags) -> DrawCommand {
-        auto posMesh_res        = _impl->meshPool.Resolve(mesh.posBuffer);
-        auto attrMesh_res       = _impl->meshPool.Resolve(mesh.attrBuffer);
-        auto nativeMaterial_res = _impl->materialPool.Resolve(material.pipeline);
-
-        if (!posMesh_res || !attrMesh_res || !nativeMaterial_res) {
+        auto resolved = ResolveDrawInputs(_impl.get(), material, mesh, skinnedVertexBuffer);
+        if (!resolved) {
             return {};
         }
 
-        auto* posMesh        = posMesh_res.value();
-        auto* attrMesh       = attrMesh_res.value();
-        auto* nativeMaterial = nativeMaterial_res.value();
-
-        NativeMaterial* prePassMaterial = nullptr;
-        if (material.prePassPipeline != PipelineHandle::Invalid) {
-            prePassMaterial = _impl->materialPool.Resolve(material.prePassPipeline).value_or(nullptr);
-        }
-
-        auto* skinMesh  = (mesh.skinBuffer != BufferHandle::Invalid) ? _impl->meshPool.Resolve(mesh.skinBuffer).value_or(nullptr) : nullptr;
-        auto* indexMesh = (mesh.indexBuffer != BufferHandle::Invalid) ? _impl->meshPool.Resolve(mesh.indexBuffer).value_or(nullptr) : nullptr;
-
-        auto* finalPosMesh = (skinnedVertexBuffer != BufferHandle::Invalid) ? _impl->meshPool.Resolve(skinnedVertexBuffer).value_or(nullptr) : posMesh;
-
-        VkDeviceAddress posAddr  = (finalPosMesh != nullptr) ? finalPosMesh->vboAddress : 0;
-        VkDeviceAddress attrAddr = (attrMesh != nullptr) ? attrMesh->vboAddress : 0;
-
-        if (posMesh == attrMesh && posMesh != nullptr) {
-            attrAddr = finalPosMesh->vboAddress + (500000 * sizeof(VertexPosition));
-        } else if (skinnedVertexBuffer != BufferHandle::Invalid && finalPosMesh != nullptr) {
-            attrAddr = finalPosMesh->vboAddress + (finalPosMesh->vertexCount * sizeof(VertexPosition));
-        }
-
-        uint32_t albedoIdx   = material.albedoMap != TextureHandle::Invalid ? _impl->textureManager.GetBindlessIndex(material.albedoMap) : 1;
-        uint32_t normalIdx   = material.normalMap != TextureHandle::Invalid ? _impl->textureManager.GetBindlessIndex(material.normalMap) : 2;
-        uint32_t pbrIdx      = material.pbrMap != TextureHandle::Invalid ? _impl->textureManager.GetBindlessIndex(material.pbrMap) : 1;
-        uint32_t emissiveIdx = material.emissiveMap != TextureHandle::Invalid ? _impl->textureManager.GetBindlessIndex(material.emissiveMap) : 0;
+        auto tex = ResolveMaterialTextures(_impl.get(), material);
 
         uint32_t isSkinned = (skinnedVertexBuffer == BufferHandle::Invalid && (flags & DrawFlags::Skinned) != DrawFlags::None) ? 1u : 0u;
 
@@ -282,14 +293,14 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
                 {
                     .world            = transform,
                     .prevWorld        = prevTransform,
-                    .posAddress       = posAddr,
-                    .attrAddress      = attrAddr,
-                    .skinAddress      = (skinMesh != nullptr) ? skinMesh->vboAddress : 0,
-                    .iboAddress       = (indexMesh != nullptr) ? indexMesh->vboAddress : 0,
-                    .vertexCount      = (finalPosMesh != nullptr) ? finalPosMesh->vertexCount : 0,
+                    .posAddress       = resolved->posAddr,
+                    .attrAddress      = resolved->attrAddr,
+                    .skinAddress      = (resolved->skinMesh != nullptr) ? resolved->skinMesh->vboAddress : 0,
+                    .iboAddress       = (resolved->indexMesh != nullptr) ? resolved->indexMesh->vboAddress : 0,
+                    .vertexCount      = (resolved->finalPosMesh != nullptr) ? resolved->finalPosMesh->vertexCount : 0,
                     .indexCount       = mesh.indexCount,
-                    .texIndices0      = (normalIdx << 16) | (albedoIdx & 0xFFFF),
-                    .texIndices1      = (emissiveIdx << 16) | (pbrIdx & 0xFFFF),
+                    .texIndices0      = (tex.normal << 16) | (tex.albedo & 0xFFFF),
+                    .texIndices1      = (tex.emissive << 16) | (tex.pbr & 0xFFFF),
                     .cullRadius       = cullRadius,
                     .metallicFactor   = material.metallicFactor,
                     .roughnessFactor  = material.roughnessFactor,
@@ -304,11 +315,11 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
                     .baseColorFactor  = {material.baseColorFactor[0], material.baseColorFactor[1], material.baseColorFactor[2], material.baseColorFactor[3]},
                     .emissiveFactor   = {material.emissiveFactor[0], material.emissiveFactor[1], material.emissiveFactor[2], material.emissiveFactor[3]},
                 },
-            .material            = nativeMaterial,
-            .prePassMaterial     = prePassMaterial,
-            .posMesh             = finalPosMesh,
-            .attrMesh            = attrMesh,
-            .skinMesh            = skinMesh,
+            .material            = resolved->material,
+            .prePassMaterial     = resolved->prePassMaterial,
+            .posMesh             = resolved->finalPosMesh,
+            .attrMesh            = resolved->attrMesh,
+            .skinMesh            = resolved->skinMesh,
             .skinnedVertexBuffer = skinnedVertexBuffer,
             .jointOffset         = jointOffset,
             .morphOffset         = 0,
