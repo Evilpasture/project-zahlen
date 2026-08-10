@@ -15,6 +15,7 @@
 struct PushConstants {
 	float4 rtMetrics; // x: 1/w, y: 1/h, z: w, w: h
 };
+[[push_constant]] PushConstants pc;
 #define SMAA_RT_METRICS pc.rtMetrics
 
 // ============================================================================
@@ -61,7 +62,11 @@ SamplerState pointSampler;
 #endif
 
 // Include the core library with our static overrides active
-#include "SMAA.hlsl" // Slang __include for SMAA (was #include "SMAA.hlsl", import SMAA via SMAA.slang was ambiguous due to preprocessor defines)
+#define LinearSampler linearSampler
+#define PointSampler pointSampler
+#define SamplerState static SamplerState
+#include "SMAA.hlsl"
+#undef SamplerState
 
 // ============================================================================
 // PASS 1: Edge Detection
@@ -73,7 +78,6 @@ struct EdgeVSOutput {
 	float4 offset[3] : TEXCOORD1;
 };
 
-[[push_constant]] PushConstants pc;
 
 [shader("vertex")]
 

@@ -6,4 +6,8 @@
 
 module SMAA;
 
-__include "SMAA.hlsl";
+#define SMAA_HLSL_4 1
+#define SMAA_PRESET_ULTRA 1
+#define SamplerState static SamplerState
+#include "SMAA.hlsl"
+#undef SamplerState
