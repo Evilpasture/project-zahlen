@@ -175,7 +175,7 @@ using GlobalSceneLayout = Vk::DescriptorLayout<
     Vk::BindlessSampledImageSlot<0, 4096, kCommonStages>,
     Vk::SamplerSlot<1, kCommonStages>,
     Vk::UniformSlot<2, kCommonStages>,                                        // FrameUniforms
-    Vk::StorageBufferSlot<3, kCommonStages>,                                  // Lights (Declared in common.hlsl)
+    Vk::StorageBufferSlot<3, kCommonStages>,                                  // Lights (Declared in common.slang)
     Vk::StorageBufferSlot<4, kCommonStages>,                                  // InstanceData
     Vk::StorageBufferSlot<5, VK_SHADER_STAGE_VERTEX_BIT>,                     // Joints
     Vk::StorageBufferSlot<6, VK_SHADER_STAGE_VERTEX_BIT>,                     // PrevJoints

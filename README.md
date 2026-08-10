@@ -297,7 +297,7 @@ See [here](https://en.cppreference.com/cpp/compiler_support/26) for detailed com
 
 These packages are expected to be installed on the host operating system:
 
-* **Vulkan SDK (>= 1.3)**: Core graphics API, validation layers, and the DirectX Shader Compiler (`dxc`) used for SPIR-V shader compilation.
+* **Vulkan SDK (>= 1.3)** with **shader-slang** (`slangc`): Core graphics API, validation layers, and Slang used for SPIR-V shader compilation (DXC removed, Slang-only).
 * **zstd (Zstandard)**: Compression algorithm used to build and decompress custom `.pak` assets.
 * **Windows SDK** *(Windows only)*: Windows API headers and libraries. It's expected that you should have the SDK installed on your system.
 * **Visual Studio Build Tools** *(Windows only)*: Required to build the project with Clang/LLVM when targeting Windows.

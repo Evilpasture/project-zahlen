@@ -15,7 +15,6 @@ RUN pacman -S --needed --noconfirm \
     git \
     python \
     blender \
-    directx-shader-compiler \
     shader-slang \
     spirv-tools \
     vulkan-devel \
