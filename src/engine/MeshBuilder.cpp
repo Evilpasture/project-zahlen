@@ -540,7 +540,7 @@ Mesh CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, flo
             VertexAttributes attrC = {
                 .normal  = Math::PackNormal(nC.GetX(), nC.GetY(), nC.GetZ()),
                 .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f),
-                .uv      = Math::PackUV((float) x / sampleCount, (float) (z + 1) * sampleCount),
+                .uv      = Math::PackUV((float) x / sampleCount, (float) (z + 1) / sampleCount),
                 .color   = get_color(cy, nC)
             };
 
@@ -548,7 +548,7 @@ Mesh CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, flo
             VertexAttributes attrD = {
                 .normal  = Math::PackNormal(nD.GetX(), nD.GetY(), nD.GetZ()),
                 .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f),
-                .uv      = Math::PackUV((float) (x + 1) / sampleCount, (float) (z + 1) * sampleCount),
+                .uv      = Math::PackUV((float) (x + 1) / sampleCount, (float) (z + 1) / sampleCount),
                 .color   = get_color(dy, nD)
             };
 
@@ -591,5 +591,4 @@ Mesh CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, flo
     }
     return finalMesh;
 }
-
 } // namespace ZHLN::CreativeWorksFactory
