@@ -182,7 +182,7 @@ void LightingSystem::Update(Engine& engine, [[maybe_unused]] float dt) {
         });
     }
 
-    Renderer::SetLights(rc, sceneLights.data(), sceneLights.size());
+    rc.SetLights(sceneLights.data(), sceneLights.size());
 }
 
 } // namespace ZHLN

@@ -40,6 +40,52 @@ struct PipelineDesc {
     bool        isLineList       = false;
 };
 
+struct DrawParams {
+    JPH::Mat44           transform        = JPH::Mat44::sIdentity();
+    JPH::Mat44           prevTransform    = JPH::Mat44::sIdentity();
+    float                cullRadius       = 1.0f;
+    std::array<float, 3> localCenter      = {0.0f, 0.0f, 0.0f};
+    uint32_t             jointOffset      = 0;
+    uint32_t             morphOffset      = 0;
+    uint32_t             activeMorphCount = 0;
+    const float*         morphWeights     = nullptr;
+    DrawFlags            flags            = DrawFlags::None;
+
+    BufferHandle skinnedVertexBuffer = BufferHandle::Invalid;
+
+    float roughness = -1.0f;
+    float metallic  = -1.0f;
+
+    std::array<float, 4> colorOverride    = {1.0f, 1.0f, 1.0f, -1.0f}; // alpha < 0 means disable override
+    std::array<float, 4> emissiveOverride = {0.0f, 0.0f, 0.0f, -1.0f}; // alpha < 0 means disable override
+};
+
+struct CSGCutterParams {
+    Mesh         mesh;
+    Material     material;
+    JPH::Mat44   transform           = JPH::Mat44::sIdentity();
+    JPH::Mat44   prevTransform       = JPH::Mat44::sIdentity();
+    float        cullRadius          = 1.0f;
+    CSGOperation operation           = CSGOperation::Difference;
+    uint32_t     jointOffset         = 0;
+    BufferHandle skinnedVertexBuffer = BufferHandle::Invalid;
+    DrawFlags    flags               = DrawFlags::None;
+};
+
+struct CSGDrawParams {
+    DrawParams                   eyeParams;
+    ZHLN::Array<CSGCutterParams> cutters; // Stably using your custom Array container
+};
+
+struct DecalParams {
+    JPH::Mat44    transform    = JPH::Mat44::sIdentity();
+    JPH::Mat44    invTransform = JPH::Mat44::sIdentity();
+    TextureHandle albedoMap    = TextureHandle::Invalid;
+    TextureHandle normalMap    = TextureHandle::Invalid;
+    float         roughness    = 0.5f;
+    float         metallic     = 0.0f;
+};
+
 struct Camera;
 
 class ZHLN_API RenderContext {
@@ -137,74 +183,24 @@ class ZHLN_API RenderContext {
     [[nodiscard]] std::expected<void, Error> SetShadowResolution(uint32_t resolution);
     void                                     ProvokeDeviceLost();
 
-    auto BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness) -> std::expected<uint32_t, Error>;
+    auto          BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness) -> std::expected<uint32_t, Error>;
     TextureHandle CreateProceduralTexture(std::string_view name, uint32_t width, uint32_t height, bool isSRGB, const uint32_t* pixels);
-
 
     [[nodiscard]] auto GetImpl() const -> Impl* {
         return _impl.get();
     }
 
+    // --- OOP Idiomatic State & Command Submission APIs ---
+    void SetMatrices(const JPH::Mat44& viewProj, const JPH::Mat44& unjitteredViewProj) noexcept;
+    void SetFrameData(const Camera& cam, const FrameUniforms& uniforms, const JPH::Mat44& shadowProjView, float dt = 0.0166f) noexcept;
+    void SetGISettings(const GISettings& settings) noexcept;
+    void SetLights(const GPULight* lights, uint32_t count) noexcept;
+    void Draw(const Material& material, const Mesh& mesh, const DrawParams& params) noexcept;
+    void DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, const CSGDrawParams& params) noexcept;
+    void DrawDecal(const DecalParams& params) noexcept;
+
   private:
     std::unique_ptr<Impl> _impl;
 };
-
-struct DrawParams {
-    JPH::Mat44           transform        = JPH::Mat44::sIdentity();
-    JPH::Mat44           prevTransform    = JPH::Mat44::sIdentity();
-    float                cullRadius       = 1.0f;
-    std::array<float, 3> localCenter      = {0.0f, 0.0f, 0.0f};
-    uint32_t             jointOffset      = 0;
-    uint32_t             morphOffset      = 0;
-    uint32_t             activeMorphCount = 0;
-    const float*         morphWeights     = nullptr;
-    DrawFlags            flags            = DrawFlags::None;
-
-    BufferHandle skinnedVertexBuffer = BufferHandle::Invalid;
-
-    float roughness = -1.0f;
-    float metallic  = -1.0f;
-
-    std::array<float, 4> colorOverride    = {1.0f, 1.0f, 1.0f, -1.0f}; // alpha < 0 means disable override
-    std::array<float, 4> emissiveOverride = {0.0f, 0.0f, 0.0f, -1.0f}; // alpha < 0 means disable override
-};
-
-struct CSGCutterParams {
-    Mesh         mesh;
-    Material     material;
-    JPH::Mat44   transform           = JPH::Mat44::sIdentity();
-    JPH::Mat44   prevTransform       = JPH::Mat44::sIdentity();
-    float        cullRadius          = 1.0f;
-    CSGOperation operation           = CSGOperation::Difference;
-    uint32_t     jointOffset         = 0;
-    BufferHandle skinnedVertexBuffer = BufferHandle::Invalid;
-    DrawFlags    flags               = DrawFlags::None;
-};
-
-struct CSGDrawParams {
-    DrawParams                   eyeParams;
-    ZHLN::Array<CSGCutterParams> cutters; // Stably using your custom Array container
-};
-
-struct DecalParams {
-    JPH::Mat44 transform    = JPH::Mat44::sIdentity();
-    JPH::Mat44 invTransform = JPH::Mat44::sIdentity();
-    TextureHandle albedoMap    = TextureHandle::Invalid;
-    TextureHandle normalMap    = TextureHandle::Invalid;
-    float      roughness    = 0.5f;
-    float      metallic     = 0.0f;
-};
-
-namespace Renderer {
-
-void SetMatrices(RenderContext& ctx, const JPH::Mat44& viewProj, const JPH::Mat44& unjitteredViewProj);
-void SetFrameData(RenderContext& ctx, const Camera& cam, const FrameUniforms& uniforms, const JPH::Mat44& shadowProjView, float dt = 0.0166f);
-void SetGISettings(RenderContext& ctx, const GISettings& settings);
-
-void SetLights(RenderContext& ctx, const GPULight* lights, uint32_t count);
-void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const DrawParams& params);
-void DrawCSG(RenderContext& ctx, const Material& eyeMaterial, const Mesh& eyeMesh, const CSGDrawParams& params);
-void DrawDecal(RenderContext& ctx, const DecalParams& params);
-} // namespace Renderer
 
 } // namespace ZHLN

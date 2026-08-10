@@ -1,6 +1,4 @@
-// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
-// SPDX-License-Identifier: GPL-3.0-or-later
-
+// src/engine/RenderSetup.cpp
 #include "RenderInternal.hpp"
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/Math3D.hpp"
@@ -8,7 +6,7 @@
 #include <cmath>
 #include <cstring>
 
-namespace ZHLN::Renderer {
+namespace ZHLN {
 
 namespace {
 
@@ -77,26 +75,23 @@ JPH::Mat44 ComputeCascadeLightSpaceMatrix(
 
 } // namespace
 
-void SetMatrices(RenderContext& ctx, const JPH::Mat44& viewProj, const JPH::Mat44& unjitteredViewProj) {
-    auto* impl                 = ctx.GetImpl();
-    impl->current_view_proj    = viewProj;
-    impl->unjittered_view_proj = unjitteredViewProj;
+void RenderContext::SetMatrices(const JPH::Mat44& viewProj, const JPH::Mat44& unjitteredViewProj) noexcept {
+    _impl->current_view_proj    = viewProj;
+    _impl->unjittered_view_proj = unjitteredViewProj;
 }
 
-void SetFrameData(RenderContext& ctx, const Camera& cam, const FrameUniforms& uniforms, const JPH::Mat44& shadowProjView, float dt) {
-    auto* impl = ctx.GetImpl();
+void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniforms, const JPH::Mat44& shadowProjView, float dt) noexcept {
+    _impl->shadowProjView  = shadowProjView;
+    _impl->currentUniforms = uniforms;
+    _impl->currentDt       = std::clamp(dt, 0.0001f, 0.1f);
 
-    impl->shadowProjView  = shadowProjView;
-    impl->currentUniforms = uniforms;
-    impl->currentDt       = std::clamp(dt, 0.0001f, 0.1f);
-
-    VkExtent2D res    = impl->graphResources.sceneColor.extent;
+    VkExtent2D res    = _impl->graphResources.sceneColor.extent;
     float      aspect = (res.height > 0) ? (float) res.width / res.height : 1.777f;
 
-    if (aspect != impl->lastAspectRatio || cam.fov != impl->lastFov) {
-        impl->lastAspectRatio = aspect;
-        impl->lastFov         = cam.fov;
-        impl->UploadClusterBounds(cam.GetProjectionMatrix(aspect));
+    if (aspect != _impl->lastAspectRatio || cam.fov != _impl->lastFov) {
+        _impl->lastAspectRatio = aspect;
+        _impl->lastFov         = cam.fov;
+        _impl->UploadClusterBounds(cam.GetProjectionMatrix(aspect));
     }
 
     std::array<float, 4> cascadeSplits {};
@@ -109,12 +104,11 @@ void SetFrameData(RenderContext& ctx, const Camera& cam, const FrameUniforms& un
     gpuUniforms.screenResolution[0] = static_cast<float>(res.width);
     gpuUniforms.screenResolution[1] = static_cast<float>(res.height);
 
-    // Compute viewmodel projection matrix (fixed 58.0f FOV by default for viewmodels, matching Three.js prototype)
     JPH::Mat44 viewmodelProj      = Math::CreatePerspective(JPH::DegreesToRadians(58.0f), aspect, cam.nearZ, cam.farZ);
     gpuUniforms.viewmodelViewProj = viewmodelProj * cam.GetViewMatrix();
 
     std::memcpy(gpuUniforms.cascadeSplits, cascadeSplits.data(), sizeof(float) * 4);
-    std::memcpy(gpuUniforms.sh, impl->iblPayload.shCoeffs.data(), sizeof(JPH::Vec4) * 9);
+    std::memcpy(gpuUniforms.sh, _impl->iblPayload.shCoeffs.data(), sizeof(JPH::Vec4) * 9);
 
     JPH::Vec3  sunDir    = JPH::Vec3(uniforms.lightDir[0], uniforms.lightDir[1], uniforms.lightDir[2]).Normalized();
     JPH::Mat44 lightView = Math::CreateLookAt(sunDir * 100.0f, JPH::Vec3::sZero(), JPH::Vec3::sAxisY());
@@ -129,23 +123,21 @@ void SetFrameData(RenderContext& ctx, const Camera& cam, const FrameUniforms& un
             ComputeCascadeLightSpaceMatrix(cam, lightView, sunDir, nearDist, farDist, aspect, tanHalfFov, uniforms.shadowResolution);
     }
 
-    std::memcpy(impl->frames.frameUniformBuffers->Map().data, &gpuUniforms, sizeof(FrameUniforms));
+    std::memcpy(_impl->frames.frameUniformBuffers->Map().data, &gpuUniforms, sizeof(FrameUniforms));
 }
 
-void SetGISettings(RenderContext& ctx, const GISettings& settings) {
-    auto* impl       = ctx.GetImpl();
-    impl->giSettings = settings;
+void RenderContext::SetGISettings(const GISettings& settings) noexcept {
+    _impl->giSettings = settings;
 }
 
-void SetLights(RenderContext& ctx, const GPULight* lights, uint32_t count) {
-    auto*    impl      = ctx.GetImpl();
+void RenderContext::SetLights(const GPULight* lights, uint32_t count) noexcept {
     uint32_t safeCount = std::min(count, 128u);
     if (safeCount > 0 && lights != nullptr) {
-        std::memcpy(impl->frames.lightStorageBuffers->Map().data, lights, sizeof(GPULight) * safeCount);
-        impl->mappedLights.assign(lights, lights + safeCount);
+        std::memcpy(_impl->frames.lightStorageBuffers->Map().data, lights, sizeof(GPULight) * safeCount);
+        _impl->mappedLights.assign(lights, lights + safeCount);
     } else {
-        impl->mappedLights.clear();
+        _impl->mappedLights.clear();
     }
 }
 
-} // namespace ZHLN::Renderer
+} // namespace ZHLN

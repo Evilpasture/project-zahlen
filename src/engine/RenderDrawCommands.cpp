@@ -23,6 +23,10 @@ namespace {
 
 } // namespace
 
+// ============================================================================
+// RenderContext::Impl Internal Member Functions
+// ============================================================================
+
 void RenderContext::Impl::SortDrawQueue() {
     auto drawCount = static_cast<uint32_t>(queues.drawQueue.size());
     if (drawCount == 0) {
@@ -128,21 +132,22 @@ void RenderContext::Impl::FlushLineQueue() {
     queues.lineQueue.clear();
 }
 
-namespace Renderer {
+// ============================================================================
+// RenderContext Public Member Functions
+// ============================================================================
 
-void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const DrawParams& params) {
+void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawParams& params) noexcept {
     using enum DrawFlags;
     using enum BufferHandle;
-    auto* impl = ctx.GetImpl();
 
-    auto posMesh_res        = impl->meshPool.Resolve(mesh.posBuffer);
-    auto attrMesh_res       = impl->meshPool.Resolve(mesh.attrBuffer);
-    auto nativeMaterial_res = impl->materialPool.Resolve(material.pipeline);
+    auto posMesh_res        = _impl->meshPool.Resolve(mesh.posBuffer);
+    auto attrMesh_res       = _impl->meshPool.Resolve(mesh.attrBuffer);
+    auto nativeMaterial_res = _impl->materialPool.Resolve(material.pipeline);
 
     if (!posMesh_res || !attrMesh_res || !nativeMaterial_res) [[unlikely]] {
         static uint32_t s_WarnCount = 0;
         if (s_WarnCount++ < 5) {
-            ZHLN::Log("WARNING: Renderer::Draw skipped draw call with invalid mesh or material handle.");
+            ZHLN::Log("WARNING: RenderContext::Draw skipped draw call with invalid mesh or material handle.");
         }
         return;
     }
@@ -153,17 +158,17 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const 
 
     NativeMaterial* prePassMaterial = nullptr;
     if (material.prePassPipeline != PipelineHandle::Invalid) {
-        prePassMaterial = impl->materialPool.Resolve(material.prePassPipeline).value_or(nullptr);
+        prePassMaterial = _impl->materialPool.Resolve(material.prePassPipeline).value_or(nullptr);
     }
 
-    auto* skinMesh        = (mesh.skinBuffer != Invalid) ? impl->meshPool.Resolve(mesh.skinBuffer).value_or(nullptr) : nullptr;
-    auto* nativeIndexMesh = (mesh.indexBuffer != Invalid) ? impl->meshPool.Resolve(mesh.indexBuffer).value_or(nullptr) : nullptr;
+    auto* skinMesh        = (mesh.skinBuffer != Invalid) ? _impl->meshPool.Resolve(mesh.skinBuffer).value_or(nullptr) : nullptr;
+    auto* nativeIndexMesh = (mesh.indexBuffer != Invalid) ? _impl->meshPool.Resolve(mesh.indexBuffer).value_or(nullptr) : nullptr;
 
     if (params.skinnedVertexBuffer != Invalid) {
-        impl->hasSkinnedThisFrame = true;
+        _impl->hasSkinnedThisFrame = true;
     }
 
-    auto* finalPosMesh = (params.skinnedVertexBuffer != Invalid) ? impl->meshPool.Resolve(params.skinnedVertexBuffer).value_or(nullptr) : posMesh;
+    auto* finalPosMesh = (params.skinnedVertexBuffer != Invalid) ? _impl->meshPool.Resolve(params.skinnedVertexBuffer).value_or(nullptr) : posMesh;
 
     VkDeviceAddress posAddr  = (finalPosMesh != nullptr) ? finalPosMesh->vboAddress : 0;
     VkDeviceAddress attrAddr = (attrMesh != nullptr) ? attrMesh->vboAddress : 0;
@@ -174,17 +179,16 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const 
         attrAddr = finalPosMesh->vboAddress + (posMesh->vertexCount * sizeof(VertexPosition));
     }
 
-    // --- BUG FIX: Properly route default texture indices based on handle validity ---
-    uint32_t albedoIdx   = material.albedoMap != TextureHandle::Invalid ? impl->textureManager.GetBindlessIndex(material.albedoMap) : 1;
-    uint32_t normalIdx   = material.normalMap != TextureHandle::Invalid ? impl->textureManager.GetBindlessIndex(material.normalMap) : 2;
-    uint32_t pbrIdx      = material.pbrMap != TextureHandle::Invalid ? impl->textureManager.GetBindlessIndex(material.pbrMap) : 1;
-    uint32_t emissiveIdx = material.emissiveMap != TextureHandle::Invalid ? impl->textureManager.GetBindlessIndex(material.emissiveMap) : 0;
+    uint32_t albedoIdx   = material.albedoMap != TextureHandle::Invalid ? _impl->textureManager.GetBindlessIndex(material.albedoMap) : 1;
+    uint32_t normalIdx   = material.normalMap != TextureHandle::Invalid ? _impl->textureManager.GetBindlessIndex(material.normalMap) : 2;
+    uint32_t pbrIdx      = material.pbrMap != TextureHandle::Invalid ? _impl->textureManager.GetBindlessIndex(material.pbrMap) : 1;
+    uint32_t emissiveIdx = material.emissiveMap != TextureHandle::Invalid ? _impl->textureManager.GetBindlessIndex(material.emissiveMap) : 0;
 
     uint32_t isViewmodel      = ((params.flags & DrawFlags::Viewmodel) != DrawFlags::None) ? 1u : 0u;
     uint32_t isSkinned        = (params.skinnedVertexBuffer == Invalid && (params.flags & Skinned) != None) ? 1u : 0u;
     uint32_t activeMorphCount = (params.skinnedVertexBuffer != Invalid) ? 0 : params.activeMorphCount;
 
-    impl->queues.drawQueue.push_back(
+    _impl->queues.drawQueue.push_back(
         {.instanceData =
              {
                  .world            = params.transform,
@@ -211,8 +215,8 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const 
                  .baseColorFactor  = (params.colorOverride[3] >= 0.0f) ?
                                          params.colorOverride :
                                          std::array<float, 4> {
-                                             material.baseColorFactor[0], material.baseColorFactor[1], material.baseColorFactor[2], material.baseColorFactor[3]
-                                         },
+                                            material.baseColorFactor[0], material.baseColorFactor[1], material.baseColorFactor[2], material.baseColorFactor[3]
+                                        },
                  .emissiveFactor =
                      (params.emissiveOverride[3] >= 0.0f) ?
                          params.emissiveOverride :
@@ -220,7 +224,7 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const 
              },
          .material            = nativeMaterial,
          .prePassMaterial     = prePassMaterial,
-         .posMesh             = posMesh,
+         .posMesh             = finalPosMesh,
          .attrMesh            = attrMesh,
          .skinMesh            = skinMesh,
          .skinnedVertexBuffer = params.skinnedVertexBuffer,
@@ -232,14 +236,12 @@ void Draw(RenderContext& ctx, const Material& material, const Mesh& mesh, const 
     );
 }
 
-void DrawCSG(RenderContext& ctx, const Material& eyeMaterial, const Mesh& eyeMesh, const CSGDrawParams& params) {
-    auto* impl = ctx.GetImpl();
-
+void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, const CSGDrawParams& params) noexcept {
     auto MakeCommand = [&](const Material& material, const Mesh& mesh, const JPH::Mat44& transform, const JPH::Mat44& prevTransform, float cullRadius,
                            uint32_t jointOffset, BufferHandle skinnedVertexBuffer, DrawFlags flags) -> DrawCommand {
-        auto posMesh_res        = impl->meshPool.Resolve(mesh.posBuffer);
-        auto attrMesh_res       = impl->meshPool.Resolve(mesh.attrBuffer);
-        auto nativeMaterial_res = impl->materialPool.Resolve(material.pipeline);
+        auto posMesh_res        = _impl->meshPool.Resolve(mesh.posBuffer);
+        auto attrMesh_res       = _impl->meshPool.Resolve(mesh.attrBuffer);
+        auto nativeMaterial_res = _impl->materialPool.Resolve(material.pipeline);
 
         if (!posMesh_res || !attrMesh_res || !nativeMaterial_res) {
             return {};
@@ -251,13 +253,13 @@ void DrawCSG(RenderContext& ctx, const Material& eyeMaterial, const Mesh& eyeMes
 
         NativeMaterial* prePassMaterial = nullptr;
         if (material.prePassPipeline != PipelineHandle::Invalid) {
-            prePassMaterial = impl->materialPool.Resolve(material.prePassPipeline).value_or(nullptr);
+            prePassMaterial = _impl->materialPool.Resolve(material.prePassPipeline).value_or(nullptr);
         }
 
-        auto* skinMesh  = (mesh.skinBuffer != BufferHandle::Invalid) ? impl->meshPool.Resolve(mesh.skinBuffer).value_or(nullptr) : nullptr;
-        auto* indexMesh = (mesh.indexBuffer != BufferHandle::Invalid) ? impl->meshPool.Resolve(mesh.indexBuffer).value_or(nullptr) : nullptr;
+        auto* skinMesh  = (mesh.skinBuffer != BufferHandle::Invalid) ? _impl->meshPool.Resolve(mesh.skinBuffer).value_or(nullptr) : nullptr;
+        auto* indexMesh = (mesh.indexBuffer != BufferHandle::Invalid) ? _impl->meshPool.Resolve(mesh.indexBuffer).value_or(nullptr) : nullptr;
 
-        auto* finalPosMesh = (skinnedVertexBuffer != BufferHandle::Invalid) ? impl->meshPool.Resolve(skinnedVertexBuffer).value_or(nullptr) : posMesh;
+        auto* finalPosMesh = (skinnedVertexBuffer != BufferHandle::Invalid) ? _impl->meshPool.Resolve(skinnedVertexBuffer).value_or(nullptr) : posMesh;
 
         VkDeviceAddress posAddr  = (finalPosMesh != nullptr) ? finalPosMesh->vboAddress : 0;
         VkDeviceAddress attrAddr = (attrMesh != nullptr) ? attrMesh->vboAddress : 0;
@@ -268,11 +270,10 @@ void DrawCSG(RenderContext& ctx, const Material& eyeMaterial, const Mesh& eyeMes
             attrAddr = finalPosMesh->vboAddress + (finalPosMesh->vertexCount * sizeof(VertexPosition));
         }
 
-        // --- BUG FIX: Properly route default texture indices based on handle validity ---
-        uint32_t albedoIdx   = material.albedoMap != TextureHandle::Invalid ? impl->textureManager.GetBindlessIndex(material.albedoMap) : 1;
-        uint32_t normalIdx   = material.normalMap != TextureHandle::Invalid ? impl->textureManager.GetBindlessIndex(material.normalMap) : 2;
-        uint32_t pbrIdx      = material.pbrMap != TextureHandle::Invalid ? impl->textureManager.GetBindlessIndex(material.pbrMap) : 1;
-        uint32_t emissiveIdx = material.emissiveMap != TextureHandle::Invalid ? impl->textureManager.GetBindlessIndex(material.emissiveMap) : 0;
+        uint32_t albedoIdx   = material.albedoMap != TextureHandle::Invalid ? _impl->textureManager.GetBindlessIndex(material.albedoMap) : 1;
+        uint32_t normalIdx   = material.normalMap != TextureHandle::Invalid ? _impl->textureManager.GetBindlessIndex(material.normalMap) : 2;
+        uint32_t pbrIdx      = material.pbrMap != TextureHandle::Invalid ? _impl->textureManager.GetBindlessIndex(material.pbrMap) : 1;
+        uint32_t emissiveIdx = material.emissiveMap != TextureHandle::Invalid ? _impl->textureManager.GetBindlessIndex(material.emissiveMap) : 0;
 
         uint32_t isSkinned = (skinnedVertexBuffer == BufferHandle::Invalid && (flags & DrawFlags::Skinned) != DrawFlags::None) ? 1u : 0u;
 
@@ -333,22 +334,18 @@ void DrawCSG(RenderContext& ctx, const Material& eyeMaterial, const Mesh& eyeMes
         csgCmd.cutters.push_back({.draw = cutCmd, .instanceIdx = 0, .operation = cutter.operation});
     }
 
-    impl->queues.csgDrawQueue.push_back(std::move(csgCmd));
+    _impl->queues.csgDrawQueue.push_back(std::move(csgCmd));
 }
 
-void DrawDecal(RenderContext& ctx, const DecalParams& params) {
-    auto* impl = ctx.GetImpl();
-
-    // --- BUG FIX: Safely route valid indices directly for Decals ---
-    impl->queues.decalQueue.push_back(
+void RenderContext::DrawDecal(const DecalParams& params) noexcept {
+    _impl->queues.decalQueue.push_back(
         {.transform    = params.transform,
          .invTransform = params.invTransform,
-         .albedoIndex  = params.albedoMap != TextureHandle::Invalid ? impl->textureManager.GetBindlessIndex(params.albedoMap) : 1,
-         .normalIndex  = params.normalMap != TextureHandle::Invalid ? impl->textureManager.GetBindlessIndex(params.normalMap) : 2,
+         .albedoIndex  = params.albedoMap != TextureHandle::Invalid ? _impl->textureManager.GetBindlessIndex(params.albedoMap) : 1,
+         .normalIndex  = params.normalMap != TextureHandle::Invalid ? _impl->textureManager.GetBindlessIndex(params.normalMap) : 2,
          .roughness    = params.roughness,
          .metallic     = params.metallic}
     );
 }
 
-} // namespace Renderer
 } // namespace ZHLN

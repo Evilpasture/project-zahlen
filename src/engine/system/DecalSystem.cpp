@@ -21,13 +21,13 @@ void DecalSystem::Update(Engine& engine) {
             JPH::Mat44 worldMat = worldTrans->world;
             JPH::Mat44 invWorld = worldMat.Inversed();
 
-            Renderer::DrawDecal(
-                rc, {.transform    = worldMat,
-                     .invTransform = invWorld,
-                     .albedoMap    = decalComp->albedoMap,
-                     .normalMap    = decalComp->normalMap,
-                     .roughness    = decalComp->roughness,
-                     .metallic     = decalComp->metallic}
+            rc.DrawDecal(
+                {.transform    = worldMat,
+                 .invTransform = invWorld,
+                 .albedoMap    = decalComp->albedoMap,
+                 .normalMap    = decalComp->normalMap,
+                 .roughness    = decalComp->roughness,
+                 .metallic     = decalComp->metallic}
             );
         }
     }

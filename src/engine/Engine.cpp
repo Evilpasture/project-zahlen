@@ -162,20 +162,18 @@ void Sys_PostProcess(Engine& engine, float /*dt*/) {
 
     for (Entity e: reg.GetEntitiesWith<Components::PostProcessSettingsComponent>()) {
         if (auto* pp = reg.Get<Components::PostProcessSettingsComponent>(e)) {
-            Renderer::SetGISettings(
-                rc, {
-                        .mode              = pp->giMode,
-                        .aoRadius          = pp->aoRadius,
-                        .aoBias            = pp->aoBias,
-                        .aoPower           = pp->aoPower,
-                        .giIntensity       = pp->giIntensity,
-                        .giSamples         = pp->giSamples,
-                        .vignetteIntensity = pp->vignetteIntensity,
-                        .vignettePower     = pp->vignettePower,
-                        .enableSSR         = pp->enableSSR ? 1 : 0,
-                        .enableRTR         = pp->enableRTR ? 1 : 0,
-                    }
-            );
+            rc.SetGISettings({
+                .mode              = pp->giMode,
+                .aoRadius          = pp->aoRadius,
+                .aoBias            = pp->aoBias,
+                .aoPower           = pp->aoPower,
+                .giIntensity       = pp->giIntensity,
+                .giSamples         = pp->giSamples,
+                .vignetteIntensity = pp->vignetteIntensity,
+                .vignettePower     = pp->vignettePower,
+                .enableSSR         = pp->enableSSR ? 1 : 0,
+                .enableRTR         = pp->enableRTR ? 1 : 0,
+            });
         }
     }
 }
@@ -766,7 +764,7 @@ int Engine::Run(const CommandLineOptions& options, UICallback uiCallback) {
     engine->InitializeDefaultScene();
 
     if (uiCallback) {
-        engine->SetUICallback(uiCallback);
+        engine->SetUICallback(std::move(uiCallback));
     }
 
     const double targetFrameTime = options.fpsLimit > 0 ? 1.0 / static_cast<double>(options.fpsLimit) : 0.0;

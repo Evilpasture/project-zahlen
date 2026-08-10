@@ -162,8 +162,8 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
     uniforms.zBias  = -(24.0f * std::log(0.1f)) / std::log(1000.0f / 0.1f);
 
     rc.SetAAState(aaState);
-    Renderer::SetFrameData(rc, cam, uniforms, outShadowProjView, dt);
-    Renderer::SetMatrices(rc, vp, unjitteredVp);
+    rc.SetFrameData(cam, uniforms, outShadowProjView, dt);
+    rc.SetMatrices(vp, unjitteredVp);
 
     const auto& mainVisible   = engine.GetVisibleEntities();
     const auto& shadowVisible = engine.GetVisibleShadowEntities();
@@ -275,13 +275,13 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
                     }
 
                     if (!csgParams.cutters.empty()) {
-                        Renderer::DrawCSG(rc, gpuMat, gpuMesh, csgParams);
+                        rc.DrawCSG(gpuMat, gpuMesh, csgParams);
                         continue;
                     }
                 }
 
-                Renderer::Draw(
-                    rc, gpuMat, gpuMesh,
+                rc.Draw(
+                    gpuMat, gpuMesh,
                     {.transform           = worldMat,
                      .prevTransform       = prevMat,
                      .cullRadius          = meshComp->cullRadius,
@@ -402,8 +402,8 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
                 .indexCount  = 0
             };
 
-            Renderer::Draw(
-                rc, isWireframe ? debugLineMat : debugSolidMat, debugMesh,
+            rc.Draw(
+                isWireframe ? debugLineMat : debugSolidMat, debugMesh,
                 {.transform = JPH::Mat44::sIdentity(), .prevTransform = JPH::Mat44::sIdentity(), .cullRadius = 10000.0f}
             );
         }

@@ -406,16 +406,6 @@ using ZHLN::PipelineDesc;
 using ZHLN::PipelineHandle;
 using ZHLN::RenderContext;
 
-namespace Renderer {
-using ZHLN::Renderer::Draw;
-using ZHLN::Renderer::DrawCSG;
-using ZHLN::Renderer::DrawDecal;
-using ZHLN::Renderer::SetFrameData;
-using ZHLN::Renderer::SetGISettings;
-using ZHLN::Renderer::SetLights;
-using ZHLN::Renderer::SetMatrices;
-} // namespace Renderer
-
 namespace GUI {
 using ZHLN::GUI::AppendTextVertices;
 using ZHLN::GUI::MeasureTextBounds;
