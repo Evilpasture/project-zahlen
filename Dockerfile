@@ -28,20 +28,17 @@ RUN pacman -S --needed --noconfirm \
     pkgconf \
     curl
 
-# Install slangc from GitHub release (shader-slang is AUR-only, not in official Arch repos)
-RUN curl -L -o /tmp/slang.tar.gz https://github.com/shader-slang/slang/releases/download/v2026.4/slang-2026.4-linux-x86_64.tar.gz \
-    && mkdir -p /opt/slang \
-    && echo "--- tar contents (first 20) ---" && tar -tzf /tmp/slang.tar.gz | head -n 20 \
-    && tar -xzf /tmp/slang.tar.gz -C /opt/slang \
-    && echo "--- extracted tree ---" && ls -R /opt/slang | head -n 100 \
-    && SLANGC=$(find /opt/slang -name slangc -type f | head -n 1) \
-    && echo "found slangc at $SLANGC" && ls -lh "$SLANGC" \
-    && ln -sf "$SLANGC" /usr/local/bin/slangc \
-    && find /opt/slang -name "*.so*" -exec cp -P {} /usr/local/lib/ \; 2>/dev/null || true \
-    && find /opt/slang -name "*.so*" -exec echo "lib {}" \; | head -n 20 \
-    && ldconfig 2>/dev/null || true \
-    && slangc --version \
-    && rm /tmp/slang.tar.gz
+# Install Vulkan SDK 1.4.350.0 (includes slangc at $VULKAN_SDK/x86_64/bin/slangc)
+# Per maintainer: just use the one in Vulkan SDK at ~/.local/share/vulkan-sdk/1.4.350.0/x86_64/bin/slangc
+RUN curl -L -o /tmp/vulkan-sdk.tar.xz https://sdk.lunarg.com/sdk/download/1.4.350.0/linux/vulkansdk-linux-x86_64-1.4.350.0.tar.xz \
+    && mkdir -p /opt/vulkan-sdk \
+    && tar -xf /tmp/vulkan-sdk.tar.xz -C /opt/vulkan-sdk --strip-components=1 \
+    && ls /opt/vulkan-sdk/1.4.350.0/x86_64/bin/slangc && /opt/vulkan-sdk/1.4.350.0/x86_64/bin/slangc -version \
+    && rm /tmp/vulkan-sdk.tar.xz
+
+ENV VULKAN_SDK=/opt/vulkan-sdk/1.4.350.0/x86_64
+ENV PATH=$VULKAN_SDK/bin:$PATH
+ENV LD_LIBRARY_PATH=$VULKAN_SDK/lib:$LD_LIBRARY_PATH
 
 # Set default compilers to GCC
 ENV CC=gcc
