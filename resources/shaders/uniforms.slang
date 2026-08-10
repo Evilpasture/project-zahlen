@@ -8,7 +8,7 @@
 // resources/shaders/uniforms.hlsl
 module uniforms;
 
-struct FrameUniforms {
+public struct FrameUniforms {
     float4x4 viewProj;
     float4x4 unjitteredViewProj;
     float4x4 prevUnjitteredViewProj;
@@ -44,7 +44,7 @@ struct FrameUniforms {
     float4x4 viewmodelViewProj; // Appended at the end!
 };
 
-struct Light {
+public struct Light {
     float3 position;
     uint   type;
     float3 color;

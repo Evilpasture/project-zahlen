@@ -13,7 +13,7 @@ module common;
 import pbr_helpers; // modern Slang (was #include "pbr_helpers.hlsl")
 import uniforms;   // modern Slang (was #include "uniforms.hlsl")
 
-struct InstanceData {
+public struct InstanceData {
     float4x4 world;
     float4x4 prevWorld;
     uint64_t posAddress;
@@ -44,12 +44,12 @@ struct InstanceData {
     float4 emissiveFactor;
 };
 
-struct ObjectConstants {
+public struct ObjectConstants {
     uint instanceId;
     uint isShadowPass;
 };
 
-struct GPUJoint {
+public struct GPUJoint {
     float4 col0;
     float4 col1;
     float4 col2;
@@ -57,7 +57,7 @@ struct GPUJoint {
 };
 
 // --- Attribute Unpackers ---
-float4 UnpackNormal(uint packed) {
+public float4 UnpackNormal(uint packed) {
     float x = (float(packed & 0x3FF) / 1023.0f) * 2.0f - 1.0f;
     float y = (float((packed >> 10) & 0x3FF) / 1023.0f) * 2.0f - 1.0f;
     float z = (float((packed >> 20) & 0x3FF) / 1023.0f) * 2.0f - 1.0f;
@@ -65,17 +65,17 @@ float4 UnpackNormal(uint packed) {
     return float4(x, y, z, w);
 }
 
-float2 UnpackUV(uint packed) {
+public float2 UnpackUV(uint packed) {
     return float2(f16tof32(packed & 0xFFFF), f16tof32(packed >> 16));
 }
 
-float4 UnpackColor(uint packed) {
+public float4 UnpackColor(uint packed) {
     return float4(
         float(packed & 0xFF) / 255.0f, float((packed >> 8) & 0xFF) / 255.0f, float((packed >> 16) & 0xFF) / 255.0f, float((packed >> 24) & 0xFF) / 255.0f
     );
 }
 
-uint4 UnpackJoints(uint2 packed) {
+public uint4 UnpackJoints(uint2 packed) {
     return uint4(packed.x & 0xFFFF, packed.x >> 16, packed.y & 0xFFFF, packed.y >> 16);
 }
 
@@ -95,7 +95,7 @@ uint4 UnpackJoints(uint2 packed) {
 [[vk::binding(9, 0)]] Texture2D     brdfLUT;
 [[vk::binding(10, 0)]] SamplerState clampSampler;
 
-struct VSOutput {
+public struct VSOutput {
     float4                 pos : SV_Position;
     float4                 currClip : TEXCOORD0;
     float4                 prevClip : TEXCOORD1;
@@ -112,14 +112,14 @@ struct VSOutput {
     nointerpolation float4 emissiveFactor : TEXCOORD8;
 };
 
-struct PSOutput {
+public struct PSOutput {
     float4 color : SV_Target0;
     float2 velocity : SV_Target1;
     float4 normalRoughness : SV_Target2;
 };
 
 // --- SKELETAL SKINNING ---
-float4 SkinPositionPrev(float4 position, uint4 joints, float4 weights, uint jointOffset) {
+public float4 SkinPositionPrev(float4 position, uint4 joints, float4 weights, uint jointOffset) {
     GPUJoint j0 = g_prevJoints[jointOffset + joints.x];
     GPUJoint j1 = g_prevJoints[jointOffset + joints.y];
     GPUJoint j2 = g_prevJoints[jointOffset + joints.z];
@@ -132,7 +132,7 @@ float4 SkinPositionPrev(float4 position, uint4 joints, float4 weights, uint join
     return pos;
 }
 
-float4 SkinPosition(float4 position, uint4 joints, float4 weights, uint jointOffset) {
+public float4 SkinPosition(float4 position, uint4 joints, float4 weights, uint jointOffset) {
     GPUJoint j0 = g_joints[jointOffset + joints.x];
     GPUJoint j1 = g_joints[jointOffset + joints.y];
     GPUJoint j2 = g_joints[jointOffset + joints.z];
@@ -145,7 +145,7 @@ float4 SkinPosition(float4 position, uint4 joints, float4 weights, uint jointOff
     return pos;
 }
 
-float3 SkinDirection(float3 direction, uint4 joints, float4 weights, uint jointOffset) {
+public float3 SkinDirection(float3 direction, uint4 joints, float4 weights, uint jointOffset) {
     if (dot(weights, float4(1.5, 1.0, 1.0, 1.0)) < 0.001) {
         return direction;
     }
@@ -163,7 +163,7 @@ float3 SkinDirection(float3 direction, uint4 joints, float4 weights, uint jointO
     return dir;
 }
 
-float3 GetMorphDisplacement(uint vertexId, uint vertexCount, uint morphOffset, uint activeMorphCount, float4 weights) {
+public float3 GetMorphDisplacement(uint vertexId, uint vertexCount, uint morphOffset, uint activeMorphCount, float4 weights) {
     float3 displacement = float3(0, 0, 0);
 
     [unroll] for (uint i = 0; i < 4; ++i) {

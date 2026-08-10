@@ -13,32 +13,32 @@ module pbr_helpers;
 // ============================================================================
 // CONSTANTS & NOISE
 // ============================================================================
-static const float3 HemisphereSamples[8] = {float3(0.35517f, -0.06385f, 0.93261f), float3(-0.19134f, 0.37512f, 0.90695f),
+public static const float3 HemisphereSamples[8] = {float3(0.35517f, -0.06385f, 0.93261f), float3(-0.19134f, 0.37512f, 0.90695f),
                                             float3(0.52841f, 0.50284f, 0.68412f),  float3(-0.67215f, -0.32111f, 0.66723f),
                                             float3(0.11211f, -0.78121f, 0.61432f), float3(-0.73211f, 0.42152f, 0.53512f),
                                             float3(0.81232f, -0.31211f, 0.49312f), float3(0.05211f, 0.88121f, 0.47012f)};
 
-static const float2 PoissonDisk[16] = {float2(-0.94201624, -0.39906216), float2(0.94558609, -0.76890725),  float2(-0.094184101, -0.9293887),
+public static const float2 PoissonDisk[16] = {float2(-0.94201624, -0.39906216), float2(0.94558609, -0.76890725),  float2(-0.094184101, -0.9293887),
                                        float2(0.34495938, 0.2938776),    float2(-0.91588581, 0.45771432),  float2(-0.81544232, -0.87912464),
                                        float2(-0.38208752, 0.27676845),  float2(0.97484398, 0.7564837),    float2(0.44323325, -0.97511554),
                                        float2(0.53742981, -0.4737342),   float2(-0.26496911, -0.41893023), float2(0.79197514, 0.19090188),
                                        float2(-0.2418884, 0.99706507),   float2(-0.81409955, -0.9143759),  float2(0.19984126, 0.78641367),
                                        float2(0.14383161, -0.1410079)};
 
-float GetStableWeylNoise(uint2 pixelPos, float timeOffset) {
+public float GetStableWeylNoise(uint2 pixelPos, float timeOffset) {
     float spatial  = frac(float(pixelPos.x * 12664589 + pixelPos.y * 9546283) * 0.6180339887498949f);
     float temporal = frac(timeOffset * 0.6180339887498949f);
     return frac(spatial + temporal);
 }
 
-float GetRotationAngle(float2 screenPos, float timeOffset) {
+public float GetRotationAngle(float2 screenPos, float timeOffset) {
     float temporalOffset = timeOffset * 1.61803398875f * 10.0f;
     screenPos += temporalOffset;
     float3 magic = float3(0.06711056f, 0.00583715f, 52.9829189f);
     return frac(magic.z * frac(dot(screenPos, magic.xy)));
 }
 
-float GetShadowDither(float2 screenPos) {
+public float GetShadowDither(float2 screenPos) {
     float3 magic = float3(0.06711056f, 0.00583715f, 52.9829189f);
     return frac(magic.z * frac(dot(screenPos, magic.xy)));
 }
@@ -46,13 +46,13 @@ float GetShadowDither(float2 screenPos) {
 // ============================================================================
 // MATH UTILITIES
 // ============================================================================
-float2 PackNormalOctahedron(float3 N) {
+public float2 PackNormalOctahedron(float3 N) {
     N /= (abs(N.x) + abs(N.y) + abs(N.z));
     float2 s = float2(N.x >= 0.0 ? 1.0 : -1.0, N.y >= 0.0 ? 1.0 : -1.0);
     return N.z >= 0.0 ? N.xy : (1.0 - abs(N.yx)) * s;
 }
 
-float3 UnpackNormalOctahedron(float2 oct) {
+public float3 UnpackNormalOctahedron(float2 oct) {
     float3 N = float3(oct, 1.0 - abs(oct.x) - abs(oct.y));
     float2 s = float2(N.x >= 0.0 ? 1.0 : -1.0, N.y >= 0.0 ? 1.0 : -1.0);
     if (N.z < 0.0) {
@@ -61,13 +61,13 @@ float3 UnpackNormalOctahedron(float2 oct) {
     return normalize(N);
 }
 
-float3 ReconstructWorldPos(float2 uv, float depth, float4x4 invViewProj) {
+public float3 ReconstructWorldPos(float2 uv, float depth, float4x4 invViewProj) {
     float4 clipSpacePos  = float4(uv.x * 2.0f - 1.0f, uv.y * 2.0f - 1.0f, depth, 1.0f);
     float4 worldSpacePos = mul(invViewProj, clipSpacePos);
     return worldSpacePos.xyz / worldSpacePos.w;
 }
 
-float SoftClamp(float x, float limit) {
+public float SoftClamp(float x, float limit) {
     return limit * (1.0f - exp(-x / max(limit, 0.0001f)));
 }
 
@@ -77,7 +77,7 @@ float SoftClamp(float x, float limit) {
 #define BLOCKER_SEARCH_SAMPLES 16
 #define PCF_SAMPLES            16
 
-float FindBlocker(float2 uv, float zReceiver, float searchRadius, Texture2DArray<float> shadowMap, SamplerState linearSampler, uint cascadeIndex) {
+public float FindBlocker(float2 uv, float zReceiver, float searchRadius, Texture2DArray<float> shadowMap, SamplerState linearSampler, uint cascadeIndex) {
     float blockerSum  = 0.0f;
     int   numBlockers = 0;
     float blockerBias = 0.0005f;
@@ -97,7 +97,7 @@ float FindBlocker(float2 uv, float zReceiver, float searchRadius, Texture2DArray
     return blockerSum / (float) numBlockers;
 }
 
-float CalculateShadowPCSS(
+public float CalculateShadowPCSS(
     float4                 shadowPos,
     float3                 N,
     float3                 L,
@@ -151,7 +151,7 @@ float CalculateShadowPCSS(
 /**
  * @brief Computes a high-performance, stochastically dithered soft ray-traced shadow.
  */
-float CalculateShadowRayTraced(
+public float CalculateShadowRayTraced(
     float3                          worldPos,
     float3                          N,
     float3                          L,
@@ -202,7 +202,7 @@ float CalculateShadowRayTraced(
 // ============================================================================
 // ANALYTICAL PBR LIGHTING
 // ============================================================================
-float DistributionGGX(float3 N, float3 H, float roughness) {
+public float DistributionGGX(float3 N, float3 H, float roughness) {
     float a     = roughness * roughness;
     float a2    = a * a;
     float NdotH = saturate(dot(N, H));
@@ -210,43 +210,43 @@ float DistributionGGX(float3 N, float3 H, float roughness) {
     return a2 / (3.14159265f * denom * denom);
 }
 
-float GeometrySchlickGGX(float NdotV, float roughness) {
+public float GeometrySchlickGGX(float NdotV, float roughness) {
     float k = pow(roughness + 1.0f, 2.0f) / 8.0f;
     return NdotV / max(NdotV * (1.0f - k) + k, 0.001f);
 }
 
-float GeometrySmith(float3 N, float3 V, float3 L, float roughness) {
+public float GeometrySmith(float3 N, float3 V, float3 L, float roughness) {
     return GeometrySchlickGGX(saturate(dot(N, V)), roughness) * GeometrySchlickGGX(saturate(dot(N, L)), roughness);
 }
 
-float3 FresnelSchlick(float cosTheta, float3 F0) {
+public float3 FresnelSchlick(float cosTheta, float3 F0) {
     return F0 + (1.0 - F0) * pow(saturate(1.0 - cosTheta), 5.0);
 }
 
-float3 FresnelSchlickRoughness(float cosTheta, float3 F0, float roughness) {
+public float3 FresnelSchlickRoughness(float cosTheta, float3 F0, float roughness) {
     return F0 + (max(float3(1.0 - roughness, 1.0 - roughness, 1.0 - roughness), F0) - F0) * pow(saturate(1.0 - cosTheta), 5.0);
 }
 
-float GetDirectionalAlbedo(float NoX, float roughness, Texture2D brdfLUT, SamplerState clampSampler) {
+public float GetDirectionalAlbedo(float NoX, float roughness, Texture2D brdfLUT, SamplerState clampSampler) {
     float2 envBRDF = brdfLUT.SampleLevel(clampSampler, float2(saturate(NoX), roughness), 0.0f).rg;
     return envBRDF.x + envBRDF.y;
 }
 
-float GetAverageAlbedo(float roughness) {
+public float GetAverageAlbedo(float roughness) {
     return 1.0f - roughness * (0.334f - roughness * 0.125f);
 }
 
 // ============================================================================
 // IBL & GLOBAL ILLUMINATION
 // ============================================================================
-float3 EvaluateSH(float3 N, float4 sh[9]) {
+public float3 EvaluateSH(float3 N, float4 sh[9]) {
     float3 result = sh[0].xyz * 0.282095f + sh[1].xyz * -0.488603f * N.y + sh[2].xyz * 0.488603f * N.z + sh[3].xyz * -0.488603f * N.x +
                     sh[4].xyz * 1.092548f * N.x * N.y + sh[5].xyz * -1.092548f * N.y * N.z + sh[6].xyz * 0.315392f * (3.0f * N.z * N.z - 1.0f) +
                     sh[7].xyz * -1.092548f * N.x * N.z + sh[8].xyz * 0.546274f * (N.x * N.x - N.y * N.y);
     return max(result, float3(0.0f, 0.0f, 0.0f));
 }
 
-float3 BoxParallaxCorrection(float3 posWS, float3 R, float3 boxMin, float3 boxMax, float3 probePos) {
+public float3 BoxParallaxCorrection(float3 posWS, float3 R, float3 boxMin, float3 boxMax, float3 probePos) {
     float3 eps  = float3(0.1f, 0.1f, 0.1f);
     float3 bMin = boxMin - eps;
     float3 bMax = boxMax + eps;
@@ -263,7 +263,7 @@ float3 BoxParallaxCorrection(float3 posWS, float3 R, float3 boxMin, float3 boxMa
 // ============================================================================
 // AREA LIGHTS (LTC)
 // ============================================================================
-float3 IntegrateEdgeVector(float3 v1, float3 v2) {
+public float3 IntegrateEdgeVector(float3 v1, float3 v2) {
     float x              = dot(v1, v2);
     float y              = abs(x);
     float a              = 0.8543985 + (0.4965155 + 0.0145206 * y) * y;
@@ -273,7 +273,7 @@ float3 IntegrateEdgeVector(float3 v1, float3 v2) {
     return cross(v1, v2) * theta_sintheta;
 }
 
-float3 LTC_Evaluate(float3 N, float3 V, float3 P, float3x3 Minv, float4 points[4], bool twoSided) {
+public float3 LTC_Evaluate(float3 N, float3 V, float3 P, float3x3 Minv, float4 points[4], bool twoSided) {
     float3 T1, T2;
     T1         = normalize(V - N * dot(V, N));
     T2         = cross(N, T1);
@@ -321,7 +321,7 @@ float3 LTC_Evaluate(float3 N, float3 V, float3 P, float3x3 Minv, float4 points[4
 // ============================================================================
 // REFLECTIONS
 // ============================================================================
-float2 RaymarchSSR(
+public float2 RaymarchSSR(
     float3           worldPos,
     float3           startPosWS,
     float3           dirWS,

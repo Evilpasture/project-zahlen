@@ -12,7 +12,7 @@ import uniforms;
 // This file is generated as a thin wrapper; for full source see common.slang.
 // It is included here to satisfy Slang's module system cleanly.
 
-struct InstanceData {
+public struct InstanceData {
     float4x4 world;
     float4x4 prevWorld;
     uint64_t posAddress;
@@ -43,12 +43,12 @@ struct InstanceData {
     float4 emissiveFactor;
 };
 
-struct ObjectConstants {
+public struct ObjectConstants {
     uint instanceId;
     uint isShadowPass;
 };
 
-struct GPUJoint {
+public struct GPUJoint {
     float4 col0;
     float4 col1;
     float4 col2;
