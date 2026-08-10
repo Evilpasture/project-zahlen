@@ -42,7 +42,12 @@ Mesh CreateTetrahedronMesh(RenderContext& ctx) {
         .vertexCount = static_cast<uint32_t>(positions.size()),
         .indexCount  = static_cast<uint32_t>(indices.size())
     };
-    (void) ctx.BuildMeshBLAS(finalMesh);
+    auto res = ctx.BuildMeshBLAS(finalMesh);
+    if (!res) [[unlikely]] {
+        if (!res.error().Is(VulkanCallError::FeatureNotPresent)) {
+            ZHLN::Log("WARNING: CreateTetrahedronMesh: Failed to build mesh BLAS: {}", res.error().Message());
+        }
+    }
     return finalMesh;
 }
 
