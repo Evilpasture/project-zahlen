@@ -13,46 +13,46 @@ import uniforms;
 // It is included here to satisfy Slang's module system cleanly.
 
 public struct InstanceData {
-    float4x4 world;
-    float4x4 prevWorld;
-    uint64_t posAddress;
-    uint64_t attrAddress;
-    uint64_t skinAddress;
-    uint64_t iboAddress;
+    public float4x4 world;
+    public float4x4 prevWorld;
+    public uint64_t posAddress;
+    public uint64_t attrAddress;
+    public uint64_t skinAddress;
+    public uint64_t iboAddress;
 
-    uint vertexCount;
-    uint indexCount;
-    uint texIndices0;
-    uint texIndices1;
+    public uint vertexCount;
+    public uint indexCount;
+    public uint texIndices0;
+    public uint texIndices1;
 
-    float cullRadius;
-    float metallicFactor;
-    float roughnessFactor;
-    float alphaCutoff;
+    public float cullRadius;
+    public float metallicFactor;
+    public float roughnessFactor;
+    public float alphaCutoff;
 
-    uint flags;
-    uint jointOffset;
-    uint morphOffset;
-    uint activeMorphCount;
+    public uint flags;
+    public uint jointOffset;
+    public uint morphOffset;
+    public uint activeMorphCount;
 
-    float3 localCenter;
-    uint   _paddingCenter;
+    public float3 localCenter;
+    public uint   _paddingCenter;
 
-    float4 morphWeights;
-    float4 baseColorFactor;
-    float4 emissiveFactor;
+    public float4 morphWeights;
+    public float4 baseColorFactor;
+    public float4 emissiveFactor;
 };
 
 public struct ObjectConstants {
-    uint instanceId;
-    uint isShadowPass;
+    public uint instanceId;
+    public uint isShadowPass;
 };
 
 public struct GPUJoint {
-    float4 col0;
-    float4 col1;
-    float4 col2;
-    float4 col3;
+    public float4 col0;
+    public float4 col1;
+    public float4 col2;
+    public float4 col3;
 };
 
 // --- Attribute Unpackers ---
