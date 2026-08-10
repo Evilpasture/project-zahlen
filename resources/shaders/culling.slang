@@ -11,7 +11,7 @@
 // For compatibility we preserve #include path, but a pure Slang port would `import common_types;` here.
 // See common.slang / common_types.slang separation.
 #define SKIP_BINDINGS
-import common;
+import common_types; // was import common; with SKIP_BINDINGS
 import pbr_helpers;
 import uniforms; // modern Slang import (was #include "common.hlsl")
 
@@ -30,6 +30,7 @@ struct CullingConstants {
     uint     passIndex;
 };
 // Push constant cullConstants moved to entry-point uniform param (was global uniform CullingConstants cullConstants;)
+[[push_constant]] CullingConstants cullConstants;
 StructuredBuffer<InstanceData>          g_instances;
 RWStructuredBuffer<DrawIndirectCommand> g_indirectCommands;
 Texture2D<float>                        g_hizTexture;

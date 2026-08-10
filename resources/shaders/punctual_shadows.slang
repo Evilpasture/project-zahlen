@@ -15,7 +15,7 @@
 // For compatibility we preserve #include path, but a pure Slang port would `import common_types;` here.
 // See common.slang / common_types.slang separation.
 #define SKIP_BINDINGS
-import common;
+import common_types; // was import common; with SKIP_BINDINGS to avoid duplicate g_instances/lights
 import pbr_helpers;
 import uniforms; // modern Slang import (was #include "common.hlsl")
 

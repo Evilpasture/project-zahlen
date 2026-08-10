@@ -16,7 +16,7 @@ struct PushConstants {
     uint  srcHeight;
     uint  isFirstPass;
 };
-// Push constant pc moved to entry-point uniform param (was global uniform PushConstants pc;)
+[[push_constant]] PushConstants pc;
 Texture2D<float>   inDepth;
 RWTexture2D<float> outDepth;
 SamplerState       pointSampler;
