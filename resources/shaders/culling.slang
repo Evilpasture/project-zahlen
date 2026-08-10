@@ -11,7 +11,9 @@
 // For compatibility we preserve #include path, but a pure Slang port would `import common_types;` here.
 // See common.slang / common_types.slang separation.
 #define SKIP_BINDINGS
-import common; // modern Slang import (was #include "common.hlsl")
+import common;
+import pbr_helpers;
+import uniforms; // modern Slang import (was #include "common.hlsl")
 
 struct DrawIndirectCommand {
     uint vertexCount;

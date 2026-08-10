@@ -15,7 +15,9 @@
 // For compatibility we preserve #include path, but a pure Slang port would `import common_types;` here.
 // See common.slang / common_types.slang separation.
 #define SKIP_BINDINGS
-import common; // modern Slang import (was #include "common.hlsl")
+import common;
+import pbr_helpers;
+import uniforms; // modern Slang import (was #include "common.hlsl")
 
 // 2. Redeclare only the exact resources this specialized pass needs [2, 3]
 [[vk::binding(4, 0)]] StructuredBuffer<InstanceData> g_instances;

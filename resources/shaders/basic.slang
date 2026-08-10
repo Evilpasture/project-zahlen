@@ -6,7 +6,9 @@
 // See SHADER.md for column_major, right-handed, CCW conventions preserved.
 
 // resources/shaders/basic.hlsl
-import common; // modern Slang import (was #include "common.hlsl")
+import common;
+import pbr_helpers;
+import uniforms; // modern Slang import (was #include "common.hlsl")
 
 [shader("vertex")]
 VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, uint viewId : SV_ViewID) {

@@ -9,55 +9,55 @@
 module uniforms;
 
 public struct FrameUniforms {
-    float4x4 viewProj;
-    float4x4 unjitteredViewProj;
-    float4x4 prevUnjitteredViewProj;
+    public float4x4 viewProj;
+    public float4x4 unjitteredViewProj;
+    public float4x4 prevUnjitteredViewProj;
 
-    float4x4 lightSpaceMatrices[4];
+    public float4x4 lightSpaceMatrices[4];
 
-    float4x4 invViewProj;
-    float4   camPos;
-    float4   lightDir;
-    uint     lightCount;
-    float    ambientExposure;
-    float    shadowWidth;
-    uint     shadowResolution;
-    float4   sh[9];
-    float4   probeMin;
-    float4   probeMax;
-    float4   probePos;
-    float4   jitterParams;
-    int      enableRTR;
-    float    zScale;
-    float    zBias;
-    float    sunSize;
+    public float4x4 invViewProj;
+    public float4   camPos;
+    public float4   lightDir;
+    public uint     lightCount;
+    public float    ambientExposure;
+    public float    shadowWidth;
+    public uint     shadowResolution;
+    public float4   sh[9];
+    public float4   probeMin;
+    public float4   probeMax;
+    public float4   probePos;
+    public float4   jitterParams;
+    public int      enableRTR;
+    public float    zScale;
+    public float    zBias;
+    public float    sunSize;
 
-    float4 cascadeSplits;
-    int    numCascades;
-    int    fullBright;
-    float2 screenResolution;
+    public float4 cascadeSplits;
+    public int    numCascades;
+    public int    fullBright;
+    public float2 screenResolution;
 
-    float4 skyZenith;
-    float4 skyHorizon;
-    float4 skyGround;
+    public float4 skyZenith;
+    public float4 skyHorizon;
+    public float4 skyGround;
 
-    float4x4 viewmodelViewProj; // Appended at the end!
+    public float4x4 viewmodelViewProj; // Appended at the end!
 };
 
 public struct Light {
-    float3 position;
-    uint   type;
-    float3 color;
-    float  intensity;
-    float3 direction;
-    float  range;
-    float4 points[4];
-    float  radius;
-    float  innerConeCos;
-    float  outerConeCos;
-    uint   twoSided;
-    int    shadowLayer;
-    float4 positionView;
+    public float3 position;
+    public uint   type;
+    public float3 color;
+    public float  intensity;
+    public float3 direction;
+    public float  range;
+    public float4 points[4];
+    public float  radius;
+    public float  innerConeCos;
+    public float  outerConeCos;
+    public uint   twoSided;
+    public int    shadowLayer;
+    public float4 positionView;
 };
 
 // end module uniforms

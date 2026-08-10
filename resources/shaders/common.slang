@@ -10,50 +10,50 @@ module common;
 // resources/shaders/common.hlsl
 // Slang: column_major via -matrix-layout column_major (removed #pragma pack_matrix) // KEEP: DXC requires this; Slang equivalent is -matrix-layout column_major (or column_major qualifier). See SHADER.md
 // Slang note: Slang defaults to row_major memory layout, DXC to column_major. For parity, compile Slang with -matrix-layout column_major or use explicit column_major float4x4.
-public import pbr_helpers; // modern Slang (was #include "pbr_helpers.hlsl")
-public import uniforms;   // modern Slang (was #include "uniforms.hlsl")
+import pbr_helpers; // modern Slang (was #include "pbr_helpers.hlsl")
+import uniforms;   // modern Slang (was #include "uniforms.hlsl")
 
 public struct InstanceData {
-    float4x4 world;
-    float4x4 prevWorld;
-    uint64_t posAddress;
-    uint64_t attrAddress;
-    uint64_t skinAddress;
-    uint64_t iboAddress;
+    public float4x4 world;
+    public float4x4 prevWorld;
+    public uint64_t posAddress;
+    public uint64_t attrAddress;
+    public uint64_t skinAddress;
+    public uint64_t iboAddress;
 
-    uint vertexCount;
-    uint indexCount;
-    uint texIndices0;
-    uint texIndices1;
+    public uint vertexCount;
+    public uint indexCount;
+    public uint texIndices0;
+    public uint texIndices1;
 
-    float cullRadius;
-    float metallicFactor;
-    float roughnessFactor;
-    float alphaCutoff;
+    public float cullRadius;
+    public float metallicFactor;
+    public float roughnessFactor;
+    public float alphaCutoff;
 
-    uint flags;
-    uint jointOffset;
-    uint morphOffset;
-    uint activeMorphCount;
+    public uint flags;
+    public uint jointOffset;
+    public uint morphOffset;
+    public uint activeMorphCount;
 
-    float3 localCenter;
-    uint   _paddingCenter;
+    public float3 localCenter;
+    public uint   _paddingCenter;
 
-    float4 morphWeights;
-    float4 baseColorFactor;
-    float4 emissiveFactor;
+    public float4 morphWeights;
+    public float4 baseColorFactor;
+    public float4 emissiveFactor;
 };
 
 public struct ObjectConstants {
-    uint instanceId;
-    uint isShadowPass;
+    public uint instanceId;
+    public uint isShadowPass;
 };
 
 public struct GPUJoint {
-    float4 col0;
-    float4 col1;
-    float4 col2;
-    float4 col3;
+    public float4 col0;
+    public float4 col1;
+    public float4 col2;
+    public float4 col3;
 };
 
 // --- Attribute Unpackers ---
@@ -96,26 +96,26 @@ public [[vk::binding(9, 0)]] Texture2D     brdfLUT;
 public [[vk::binding(10, 0)]] SamplerState clampSampler;
 
 public struct VSOutput {
-    float4                 pos : SV_Position;
-    float4                 currClip : TEXCOORD0;
-    float4                 prevClip : TEXCOORD1;
-    float3                 worldPos : POSITION;
-    float3                 normal : NORMAL;
-    float4                 tangent : TANGENT;
-    float2                 uv : TEXCOORD2;
-    float4                 shadowPos : TEXCOORD3;
-    float4                 color : COLOR;
-    nointerpolation uint4  materialIndices : TEXCOORD4;
-    nointerpolation float4 baseColorFactor : TEXCOORD5;
-    nointerpolation float3 pbrFactors : TEXCOORD6;
-    nointerpolation uint   alphaMode : TEXCOORD7;
-    nointerpolation float4 emissiveFactor : TEXCOORD8;
+    public float4                 pos : SV_Position;
+    public float4                 currClip : TEXCOORD0;
+    public float4                 prevClip : TEXCOORD1;
+    public float3                 worldPos : POSITION;
+    public float3                 normal : NORMAL;
+    public float4                 tangent : TANGENT;
+    public float2                 uv : TEXCOORD2;
+    public float4                 shadowPos : TEXCOORD3;
+    public float4                 color : COLOR;
+    public nointerpolation uint4  materialIndices : TEXCOORD4;
+    public nointerpolation float4 baseColorFactor : TEXCOORD5;
+    public nointerpolation float3 pbrFactors : TEXCOORD6;
+    public nointerpolation uint   alphaMode : TEXCOORD7;
+    public nointerpolation float4 emissiveFactor : TEXCOORD8;
 };
 
 public struct PSOutput {
-    float4 color : SV_Target0;
-    float2 velocity : SV_Target1;
-    float4 normalRoughness : SV_Target2;
+    public float4 color : SV_Target0;
+    public float2 velocity : SV_Target1;
+    public float4 normalRoughness : SV_Target2;
 };
 
 // --- SKELETAL SKINNING ---
