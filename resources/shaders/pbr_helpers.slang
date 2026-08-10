@@ -7,6 +7,15 @@
 
 // resources/shaders/pbr_helpers.hlsl
 module pbr_helpers;
+
+// Slang BDA helpers: HLSL vk::RawBufferLoad/Store are HLSL intrinsics not in Slang vk namespace.
+// Provide Slang-native PhysicalStorageBuffer helpers so existing HLSL BDA code compiles under slangc.
+public namespace vk {
+    public T RawBufferLoad<T>(uint64_t addr) { return *reinterpret_cast<T*>(addr); }
+    public T RawBufferLoad<T>(uint64_t addr, uint alignment) { return *reinterpret_cast<T*>(addr); }
+    public void RawBufferStore<T>(uint64_t addr, T value) { *reinterpret_cast<T*>(addr) = value; }
+    public void RawBufferStore<T>(uint64_t addr, T value, uint alignment) { *reinterpret_cast<T*>(addr) = value; }
+}
 // import uniforms; // uncomment if sh.h dependency needed
 // This module is imported by `import pbr_helpers;` instead of #include
 

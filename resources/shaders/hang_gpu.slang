@@ -5,6 +5,7 @@
 //               -I resources/shaders -I include -o <out>.spv
 // See SHADER.md for column_major, right-handed, CCW conventions preserved.
 
+import pbr_helpers; // for vk::RawBufferLoad BDA
 // resources/shaders/hang_gpu.hlsl
 // Slang: column_major via -matrix-layout column_major (removed #pragma pack_matrix) // KEEP: DXC requires this; Slang equivalent is -matrix-layout column_major (or column_major qualifier). See SHADER.md
 // Slang note: Slang defaults to row_major memory layout, DXC to column_major. For parity, compile Slang with -matrix-layout column_major or use explicit column_major float4x4.

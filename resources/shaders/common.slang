@@ -10,8 +10,8 @@ module common;
 // resources/shaders/common.hlsl
 // Slang: column_major via -matrix-layout column_major (removed #pragma pack_matrix) // KEEP: DXC requires this; Slang equivalent is -matrix-layout column_major (or column_major qualifier). See SHADER.md
 // Slang note: Slang defaults to row_major memory layout, DXC to column_major. For parity, compile Slang with -matrix-layout column_major or use explicit column_major float4x4.
-import pbr_helpers; // modern Slang (was #include "pbr_helpers.hlsl")
-import uniforms;   // modern Slang (was #include "uniforms.hlsl")
+public import pbr_helpers; // modern Slang (was #include "pbr_helpers.hlsl")
+public import uniforms;   // modern Slang (was #include "uniforms.hlsl")
 
 public struct InstanceData {
     float4x4 world;
@@ -80,20 +80,20 @@ public uint4 UnpackJoints(uint2 packed) {
 }
 
 #ifndef SKIP_BINDINGS
-[[vk::push_constant]] ObjectConstants obj;
+public [[vk::push_constant]] ObjectConstants obj;
 
-[[vk::binding(0, 0)]] Texture2D                      globalTextures[];
-[[vk::binding(1, 0)]] SamplerState                   defaultSampler;
-[[vk::binding(2, 0)]] ConstantBuffer<FrameUniforms>  frame;
-[[vk::binding(3, 0)]] StructuredBuffer<Light>        lights;
-[[vk::binding(4, 0)]] StructuredBuffer<InstanceData> g_instances;
-[[vk::binding(5, 0)]] StructuredBuffer<GPUJoint>     g_joints;
-[[vk::binding(6, 0)]] StructuredBuffer<GPUJoint>     g_prevJoints;
-[[vk::binding(7, 0)]] StructuredBuffer<float4>       g_morphDeltas;
+public [[vk::binding(0, 0)]] Texture2D                      globalTextures[];
+public [[vk::binding(1, 0)]] SamplerState                   defaultSampler;
+public [[vk::binding(2, 0)]] ConstantBuffer<FrameUniforms>  frame;
+public [[vk::binding(3, 0)]] StructuredBuffer<Light>        lights;
+public [[vk::binding(4, 0)]] StructuredBuffer<InstanceData> g_instances;
+public [[vk::binding(5, 0)]] StructuredBuffer<GPUJoint>     g_joints;
+public [[vk::binding(6, 0)]] StructuredBuffer<GPUJoint>     g_prevJoints;
+public [[vk::binding(7, 0)]] StructuredBuffer<float4>       g_morphDeltas;
 
-[[vk::binding(8, 0)]] TextureCube   prefilteredMap;
-[[vk::binding(9, 0)]] Texture2D     brdfLUT;
-[[vk::binding(10, 0)]] SamplerState clampSampler;
+public [[vk::binding(8, 0)]] TextureCube   prefilteredMap;
+public [[vk::binding(9, 0)]] Texture2D     brdfLUT;
+public [[vk::binding(10, 0)]] SamplerState clampSampler;
 
 public struct VSOutput {
     float4                 pos : SV_Position;
