@@ -40,7 +40,7 @@ RUN curl -L -o /tmp/vulkan-sdk.tar.xz https://sdk.lunarg.com/sdk/download/1.4.35
     && cp -P "$SLANGLIBDIR"/libslang*.so* /usr/local/lib/ 2>/dev/null || true \
     && cp -P "$SLANGLIBDIR"/*.so* /usr/local/lib/ 2>/dev/null || true \
     && ldconfig \
-    && VULKAN_SDK_DIR=$(dirname $(dirname "$SLANGC")) && echo "VULKAN_SDK_DIR=$VULKAN_SDK_DIR" && ln -sfn "$VULKAN_SDK_DIR" /opt/vulkan-sdk/current \
+    && VULKAN_SDK_DIR=$(dirname $(dirname "$SLANGC")) && echo "VULKAN_SDK_DIR=$VULKAN_SDK_DIR" && mkdir -p /opt/vulkan-sdk && ln -sfn "$VULKAN_SDK_DIR" /opt/vulkan-sdk/current \
     && slangc --version \
     && rm /tmp/vulkan-sdk.tar.xz
 
