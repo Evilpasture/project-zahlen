@@ -135,12 +135,13 @@ void DefaultPreset::Update(Engine& engine, float dt) {
     }
 
     s_AccumTime += dt;
-    auto& reg   = engine.GetRegistry();
-    auto& input = engine.GetInput();
-    auto& rc    = engine.GetRenderContext();
+    auto& reg = engine.GetRegistry();
+    auto& rc  = engine.GetRenderContext();
 
     // --- TOGGLE POPUP VISIBILITY WITH ESCAPE KEY ---
-    bool        escDown    = input.IsKeyDown(KeyCode::Escape);
+    auto  inputEnts        = reg.GetEntitiesWith<Components::InputStateComponent>();
+    auto* inputState       = inputEnts.empty() ? nullptr : reg.Get<Components::InputStateComponent>(inputEnts[0]);
+    bool  escDown          = (inputState != nullptr) && inputState->IsKeyDown(static_cast<uint8_t>(KeyCode::Escape));
     static bool wasEscDown = false;
 
     if (escDown && !wasEscDown) {

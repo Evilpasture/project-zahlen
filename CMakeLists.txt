@@ -247,7 +247,6 @@ set(RAW_ENGINE_SOURCES
     src/engine/system/AnimationSystem.cpp
     src/engine/CreativeWorksManager.cpp
     src/engine/Window.cpp
-    src/engine/Input.cpp
     src/engine/Platform.cpp
     src/engine/Scripting.cpp
     src/engine/LuaScriptRuntime.cpp

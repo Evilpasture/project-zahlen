@@ -13,24 +13,34 @@
 
 namespace ZHLN {
 
+namespace {
+[[nodiscard]] const Components::InputStateComponent* GetInputState(const ECS::Registry& reg) noexcept {
+    auto ents = reg.GetEntitiesWith<Components::InputStateComponent>();
+    return ents.empty() ? nullptr : reg.Get<Components::InputStateComponent>(ents[0]);
+}
+} // namespace
+
 void InputSystem::Update(Engine& engine) {
-    auto& input = engine.GetInput();
-    auto& reg   = engine.GetRegistry();
+    auto&       reg   = engine.GetRegistry();
+    const auto* state = GetInputState(reg);
+    if (state == nullptr) {
+        return;
+    }
 
     for (Entity e: reg.GetEntitiesWith<Components::InputComponent>()) {
         if (auto* ic = reg.Get<Components::InputComponent>(e)) {
             float moveX = 0.0f;
             float moveZ = 0.0f;
-            if (input.IsKeyDown(KeyCode::W)) {
+            if (state->IsKeyDown(static_cast<uint8_t>(KeyCode::W))) {
                 moveZ += 1.0f;
             }
-            if (input.IsKeyDown(KeyCode::S)) {
+            if (state->IsKeyDown(static_cast<uint8_t>(KeyCode::S))) {
                 moveZ -= 1.0f;
             }
-            if (input.IsKeyDown(KeyCode::A)) {
+            if (state->IsKeyDown(static_cast<uint8_t>(KeyCode::A))) {
                 moveX -= 1.0f;
             }
-            if (input.IsKeyDown(KeyCode::D)) {
+            if (state->IsKeyDown(static_cast<uint8_t>(KeyCode::D))) {
                 moveX += 1.0f;
             }
 
@@ -42,24 +52,24 @@ void InputSystem::Update(Engine& engine) {
             ic->localMoveX = moveX;
             ic->localMoveZ = moveZ;
 
-            if (input.IsMouseButtonDown(KeyCode::RButton)) {
+            if (state->IsMouseButtonDown(static_cast<uint8_t>(KeyCode::RButton))) {
                 const float sensitivity = 0.15f;
-                ic->lookYawDelta        = input.GetMouseDeltaX() * sensitivity; // Updated
-                ic->lookPitchDelta      = input.GetMouseDeltaY() * sensitivity; // Updated
+                ic->lookYawDelta        = state->GetMouseDeltaX() * sensitivity;
+                ic->lookPitchDelta      = state->GetMouseDeltaY() * sensitivity;
             } else {
                 ic->lookYawDelta   = 0.0f;
                 ic->lookPitchDelta = 0.0f;
             }
 
-            float wheel = input.GetMouseWheel(); // Updated
+            float wheel = state->GetMouseWheel();
             if (std::abs(wheel) > 0.01f) {
                 ic->zoomDelta = wheel * 0.5f;
             } else {
                 ic->zoomDelta = 0.0f;
             }
 
-            ic->wantsToJump   = input.IsKeyDown(KeyCode::Space);
-            ic->wantsToSprint = input.IsKeyDown(KeyCode::LShift);
+            ic->wantsToJump   = state->IsKeyDown(static_cast<uint8_t>(KeyCode::Space));
+            ic->wantsToSprint = state->IsKeyDown(static_cast<uint8_t>(KeyCode::LShift));
         }
     }
 }

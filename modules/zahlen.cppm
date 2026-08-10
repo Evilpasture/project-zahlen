@@ -489,7 +489,6 @@ using ZHLN::FallbackReason;
 using ZHLN::GameConsole;
 using ZHLN::GameplayDriver;
 using ZHLN::HandleCommandLine;
-using ZHLN::InputManager;
 using ZHLN::KeyCode;
 using ZHLN::ModelNode;
 using ZHLN::ModelPart;

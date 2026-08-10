@@ -5,6 +5,7 @@
 #include "TTYBackend.hpp"
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/Window.hpp>
 
 #ifdef __linux__
 #include <dirent.h>
@@ -430,9 +431,9 @@ void EmergencyRestore() {
     }
 }
 
-void ProcessEvents(void* context, InputManager* input) {
+void ProcessEvents(void* context, const WindowInputReceiver& receiver) {
     auto* state = static_cast<TTYState*>(context);
-    if ((state == nullptr) || state->epoll_fd < 0 || (input == nullptr)) {
+    if ((state == nullptr) || state->epoll_fd < 0) {
         return;
     }
 
@@ -490,11 +491,11 @@ void ProcessEvents(void* context, InputManager* input) {
                 }
 
                 KeyCode key = MapEvdevKey(ev.code);
-                if (key != KeyCode::Unknown) {
+                if (key != KeyCode::Unknown && receiver.onKey) {
                     if (ev.value == 1 || ev.value == 2) {
-                        input->InjectKeyDown(key);
+                        receiver.onKey(receiver.userdata, key, true);
                     } else if (ev.value == 0) {
-                        input->InjectKeyUp(key);
+                        receiver.onKey(receiver.userdata, key, false);
                     }
                 }
 
@@ -512,21 +513,21 @@ void ProcessEvents(void* context, InputManager* input) {
                     mouseMoved = true;
                 }
 
-                if (ev.code == REL_WHEEL) {
-                    input->InjectWheelMotion((float) ev.value);
+                if (ev.code == REL_WHEEL && receiver.onMouseScroll) {
+                    receiver.onMouseScroll(receiver.userdata, (float) ev.value);
                 }
             }
         }
     }
 
-    if (mouseMoved) {
+    if (mouseMoved && receiver.onMouseMove) {
         static float virtualMouseX = 960.0f;
         static float virtualMouseY = 540.0f;
 
         virtualMouseX += mouseAccumX;
         virtualMouseY += mouseAccumY;
 
-        input->InjectLocalMotion(virtualMouseX, virtualMouseY);
+        receiver.onMouseMove(receiver.userdata, virtualMouseX, virtualMouseY);
     }
 }
 
@@ -549,7 +550,7 @@ void Shutdown(void*) {
 }
 void EmergencyRestore() {
 }
-void ProcessEvents(void*, InputManager*) {
+void ProcessEvents(void*, const WindowInputReceiver&) {
 }
 std::vector<std::string_view> GetRequiredInstanceExtensions() {
     return {};

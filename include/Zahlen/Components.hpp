@@ -10,6 +10,7 @@
 #include <Zahlen/Core/String.hpp>
 #include <algorithm>
 #include <array>
+#include <bitset>
 #include <span>
 
 namespace ZHLN {
@@ -462,8 +463,14 @@ struct Components {
         bool  wantsToJump    = false;
         bool  wantsToSprint  = false;
     };
+    // Singleton-style raw device state. Written by window/TTY event pumps;
+    // read by systems via registry. UI capture flags are filled by Engine after
+    // ImGui::NewFrame so systems never touch ImGui headers.
+    //
+    // Member functions keep injection / query logic on the component itself —
+    // there is no InputManager and no parallel helper translation unit.
     struct InputStateComponent {
-        std::bitset<64> keys; // Safe raw bitset, no enum dependency
+        std::bitset<128> keys; // Indexed by KeyCode (uint8_t); room past MButton
 
         float mouseX      = 0.0f;
         float mouseY      = 0.0f;
@@ -475,8 +482,89 @@ struct Components {
         float lastY      = 0.0f;
         bool  firstMouse = true;
 
+        bool wantCaptureKeyboard = false;
+        bool wantCaptureMouse    = false;
+
         bool     needsResize = false;
         Extent2D newSize {.width = 0, .height = 0};
+
+        void SetKey(uint8_t key, bool down) noexcept {
+            if (key == 0 || key >= keys.size()) {
+                return;
+            }
+            keys[key] = down;
+        }
+
+        void ApplyLocalMotion(float x, float y) noexcept {
+            mouseX = x;
+            mouseY = y;
+            if (firstMouse) {
+                lastX      = x;
+                lastY      = y;
+                firstMouse = false;
+            }
+            mouseDeltaX = x - lastX;
+            mouseDeltaY = y - lastY;
+            lastX       = x;
+            lastY       = y;
+        }
+
+        void ApplyWheel(float delta) noexcept {
+            mouseWheel = delta;
+        }
+
+        void ApplyResize(const Extent2D& extent) noexcept {
+            newSize     = extent;
+            needsResize = true;
+        }
+
+        void ResetDeltas() noexcept {
+            mouseDeltaX = 0.0f;
+            mouseDeltaY = 0.0f;
+            mouseWheel  = 0.0f;
+        }
+
+        // Gameplay: gated by ImGui / UI capture flags.
+        [[nodiscard]] bool IsKeyDown(uint8_t key) const noexcept {
+            if (key == 0 || key >= keys.size() || wantCaptureKeyboard) {
+                return false;
+            }
+            return keys[key];
+        }
+
+        [[nodiscard]] bool IsMouseButtonDown(uint8_t key) const noexcept {
+            if (key == 0 || key >= keys.size() || wantCaptureMouse) {
+                return false;
+            }
+            return keys[key];
+        }
+
+        // Editor / native UI: ignore capture flags.
+        [[nodiscard]] bool IsKeyDownRaw(uint8_t key) const noexcept {
+            if (key == 0 || key >= keys.size()) {
+                return false;
+            }
+            return keys[key];
+        }
+
+        [[nodiscard]] bool IsMouseButtonDownRaw(uint8_t key) const noexcept {
+            if (key == 0 || key >= keys.size()) {
+                return false;
+            }
+            return keys[key];
+        }
+
+        [[nodiscard]] float GetMouseDeltaX() const noexcept {
+            return wantCaptureMouse ? 0.0f : mouseDeltaX;
+        }
+
+        [[nodiscard]] float GetMouseDeltaY() const noexcept {
+            return wantCaptureMouse ? 0.0f : mouseDeltaY;
+        }
+
+        [[nodiscard]] float GetMouseWheel() const noexcept {
+            return wantCaptureMouse ? 0.0f : mouseWheel;
+        }
     };
     struct LightComponent {
         LightType  type;

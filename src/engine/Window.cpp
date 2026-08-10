@@ -352,6 +352,10 @@ void* Window::GetTTYContext() const {
     return _impl->tty_context;
 }
 
+const WindowInputReceiver& Window::GetInputReceiver() const noexcept {
+    return _impl->receiver;
+}
+
 bool Window::ReinitTTY() {
     if (_impl->is_tty && _impl->tty_context == nullptr) {
         _impl->tty_context = TTYBackend::Init(_impl->width, _impl->height);
