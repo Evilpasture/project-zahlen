@@ -6,4 +6,4 @@
 
 module SMAA;
 
-__include "SMAA.hlsl"
+__include "SMAA.hlsl";
