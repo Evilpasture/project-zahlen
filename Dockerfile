@@ -31,11 +31,16 @@ RUN pacman -S --needed --noconfirm \
 # Install slangc from GitHub release (shader-slang is AUR-only, not in official Arch repos)
 RUN curl -L -o /tmp/slang.tar.gz https://github.com/shader-slang/slang/releases/download/v2026.4/slang-2026.4-linux-x86_64.tar.gz \
     && mkdir -p /opt/slang \
-    && tar -xzf /tmp/slang.tar.gz -C /opt/slang --strip-components=1 \
-    && ln -sf /opt/slang/bin/slangc /usr/local/bin/slangc \
-    && ln -sf /opt/slang/lib/* /usr/local/lib/ 2>/dev/null || true \
+    && echo "--- tar contents (first 20) ---" && tar -tzf /tmp/slang.tar.gz | head -n 20 \
+    && tar -xzf /tmp/slang.tar.gz -C /opt/slang \
+    && echo "--- extracted tree ---" && ls -R /opt/slang | head -n 100 \
+    && SLANGC=$(find /opt/slang -name slangc -type f | head -n 1) \
+    && echo "found slangc at $SLANGC" && ls -lh "$SLANGC" \
+    && ln -sf "$SLANGC" /usr/local/bin/slangc \
+    && find /opt/slang -name "*.so*" -exec cp -P {} /usr/local/lib/ \; 2>/dev/null || true \
+    && find /opt/slang -name "*.so*" -exec echo "lib {}" \; | head -n 20 \
     && ldconfig 2>/dev/null || true \
-    && slangc -version \
+    && slangc --version \
     && rm /tmp/slang.tar.gz
 
 # Set default compilers to GCC
