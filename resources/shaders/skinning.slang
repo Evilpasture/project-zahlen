@@ -51,7 +51,7 @@ struct SkinningConstants {
     uint32_t activeMorphCount; // <-- ADDED
     float    morphWeights[4];  // <-- ADDED
 };
-// Push constant pcs moved to entry-point uniform param (was global uniform SkinningConstants pcs;)
+[[push_constant]] SkinningConstants pcs;
 float4 UnpackNormal(uint packed) {
     float x = (float(packed & 0x3FF) / 1023.0f) * 2.0f - 1.0f;
     float y = (float((packed >> 10) & 0x3FF) / 1023.0f) * 2.0f - 1.0f;
@@ -162,6 +162,8 @@ float3 SkinDirection(float3 direction, uint4 joints, float4 weights, uint jointO
 // --- Slang modernization notes ---
 // * `#pragma pack_matrix(column_major)` removed – use compiler flag `-matrix-layout column_major` to preserve DXC's column-major semantics.
 // * HLSL `#include` -> Slang `import` for modules (see pbr_helpers, uniforms, common modules).
+// * Entry points annotated with [[push_constant]] SkinningConstants pcs;
+
 // * Entry points annotated with [shader("vertex"/"fragment"/"compute")] for explicit stage declaration (Slang idiom).
 // * Duplicate binding / macro redefinition / out-of-bounds BDA silent bugs fixed – Slang's stricter diagnostics surface them.
 // * All resources use actual Slang syntax (auto binding, uniform push constants, SpecializationConstant) without vk:: extensions.

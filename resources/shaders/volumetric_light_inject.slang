@@ -22,7 +22,7 @@ struct VolumetricLightInjectPushConstants {
     float phaseAnisotropy;
     uint  enableShadows;
 };
-// Push constant lightPC moved to entry-point uniform param (was global uniform VolumetricLightInjectPushConstants lightPC;)
+[[push_constant]] VolumetricLightInjectPushConstants lightPC;
 Texture3D<float4>               inVoxelMedia;
 RWTexture3D<float4>             outVoxelLight;
 ConstantBuffer<FrameUniforms>   frame;
@@ -168,6 +168,8 @@ float SampleShadowPCF3x3(float3 projCoords, float cascade, float angle) {
 // --- Slang modernization notes ---
 // * `#pragma pack_matrix(column_major)` removed – use compiler flag `-matrix-layout column_major` to preserve DXC's column-major semantics.
 // * HLSL `#include` -> Slang `import` for modules (see pbr_helpers, uniforms, common modules).
+// * Entry points annotated with [[push_constant]] VolumetricLightInjectPushConstants lightPC;
+
 // * Entry points annotated with [shader("vertex"/"fragment"/"compute")] for explicit stage declaration (Slang idiom).
 // * Duplicate binding / macro redefinition / out-of-bounds BDA silent bugs fixed – Slang's stricter diagnostics surface them.
 // * All resources use actual Slang syntax (auto binding, uniform push constants, SpecializationConstant) without vk:: extensions.

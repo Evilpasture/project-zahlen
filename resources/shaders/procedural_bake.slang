@@ -19,7 +19,7 @@ struct PushConstants {
 	float param1; // Randomness / Detail
 	float param2; // Distortion
 };
-// Push constant pc moved to entry-point uniform param (was global uniform PushConstants pc;)
+[[push_constant]] PushConstants pc;
 RWTexture2D<float4> outTexture;
 
 // --- NOISE MATH LIBRARIES ---
@@ -82,6 +82,8 @@ float EvaluatePerlin(float2 uv) {
 // --- Slang modernization notes ---
 // * `#pragma pack_matrix(column_major)` removed – use compiler flag `-matrix-layout column_major` to preserve DXC's column-major semantics.
 // * HLSL `#include` -> Slang `import` for modules (see pbr_helpers, uniforms, common modules).
+// * Entry points annotated with [shader("vertex"/"fragment"/"compute")] for explicit stage declaration (Slang idiom).
+
 // * Entry points annotated with [shader("vertex"/"fragment"/"compute")] for explicit stage declaration (Slang idiom).
 // * Duplicate binding / macro redefinition / out-of-bounds BDA silent bugs fixed – Slang's stricter diagnostics surface them.
 // * All resources use actual Slang syntax (auto binding, uniform push constants, SpecializationConstant) without vk:: extensions.

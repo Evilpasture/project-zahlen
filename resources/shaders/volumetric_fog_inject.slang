@@ -37,7 +37,7 @@ struct VolumetricFogPushConstants {
     uint   _pad0;
     uint   _pad1;
 };
-// Push constant fogPC moved to entry-point uniform param (was global uniform VolumetricFogPushConstants fogPC;)
+[[push_constant]] VolumetricFogPushConstants fogPC;
 RWTexture3D<float4>                  outVoxelMedia;
 ConstantBuffer<FrameUniforms>        frame;
 StructuredBuffer<GPUVolumetricVolume> fogVolumes;
@@ -166,6 +166,8 @@ float3 GetVoxelWorldPos(uint3 tid, float2 resolution, out float outDepthVS) {
 // --- Slang modernization notes ---
 // * `#pragma pack_matrix(column_major)` removed – use compiler flag `-matrix-layout column_major` to preserve DXC's column-major semantics.
 // * HLSL `#include` -> Slang `import` for modules (see pbr_helpers, uniforms, common modules).
+// * Entry points annotated with [[push_constant]] VolumetricFogPushConstants fogPC;
+
 // * Entry points annotated with [shader("vertex"/"fragment"/"compute")] for explicit stage declaration (Slang idiom).
 // * Duplicate binding / macro redefinition / out-of-bounds BDA silent bugs fixed – Slang's stricter diagnostics surface them.
 // * All resources use actual Slang syntax (auto binding, uniform push constants, SpecializationConstant) without vk:: extensions.

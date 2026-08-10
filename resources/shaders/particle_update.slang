@@ -51,7 +51,7 @@ struct ComputePushConstants {
 // DXC silently allows it, but Slang's SPIR-V legalization validates against VkPhysicalDeviceLimits::maxPushConstantsSize.
 // Desktop GPUs typically support 256, but mobile/portable targets may fail. Consider splitting into ConstantBuffer for portability or verify device limit.
 // Modern Slang idiom: use ParameterBlock<FrameUniforms> or ConstantBuffer for large per-frame data, keep push constants <128 bytes.
-// Push constant pc moved to entry-point uniform param (was global uniform ComputePushConstants pc;)
+[[push_constant]] ComputePushConstants pc;
 ConstantBuffer<FrameUniforms> frame;
 
 // Fast GPU 3D Hash
@@ -145,6 +145,8 @@ float3 SampleTurbulence(float3 pos) {
 // --- Slang modernization notes ---
 // * `#pragma pack_matrix(column_major)` removed – use compiler flag `-matrix-layout column_major` to preserve DXC's column-major semantics.
 // * HLSL `#include` -> Slang `import` for modules (see pbr_helpers, uniforms, common modules).
+// * Entry points annotated with [shader("vertex"/"fragment"/"compute")] for explicit stage declaration (Slang idiom).
+
 // * Entry points annotated with [shader("vertex"/"fragment"/"compute")] for explicit stage declaration (Slang idiom).
 // * Duplicate binding / macro redefinition / out-of-bounds BDA silent bugs fixed – Slang's stricter diagnostics surface them.
 // * All resources use actual Slang syntax (auto binding, uniform push constants, SpecializationConstant) without vk:: extensions.

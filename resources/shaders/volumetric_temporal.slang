@@ -16,7 +16,7 @@ struct VolumetricTemporalPushConstants {
     uint  resetHistory;
     uint  _pad;
 };
-// Push constant tempPC moved to entry-point uniform param (was global uniform VolumetricTemporalPushConstants tempPC;)
+[[push_constant]] VolumetricTemporalPushConstants tempPC;
 Texture3D<float4>            inVoxelIntegratedCurrent;
 Texture3D<float4>            inVoxelIntegratedHistory;
 RWTexture3D<float4>          outVoxelIntegratedResolved;
@@ -102,6 +102,8 @@ float3 GetVoxelWorldPos(uint3 tid, float3 gridDim, out float outDepthVS) {
 // --- Slang modernization notes ---
 // * `#pragma pack_matrix(column_major)` removed – use compiler flag `-matrix-layout column_major` to preserve DXC's column-major semantics.
 // * HLSL `#include` -> Slang `import` for modules (see pbr_helpers, uniforms, common modules).
+// * Entry points annotated with [[push_constant]] VolumetricTemporalPushConstants tempPC;
+
 // * Entry points annotated with [shader("vertex"/"fragment"/"compute")] for explicit stage declaration (Slang idiom).
 // * Duplicate binding / macro redefinition / out-of-bounds BDA silent bugs fixed – Slang's stricter diagnostics surface them.
 // * All resources use actual Slang syntax (auto binding, uniform push constants, SpecializationConstant) without vk:: extensions.
