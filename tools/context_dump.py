@@ -26,6 +26,7 @@ def get_git_tracked_files(
         ".h",
         ".S",
         ".glsl",
+        ".slang",
         ".vert",
         ".frag",
         ".metal",
@@ -136,6 +137,8 @@ def generate_snapshot_string(tracked_files, target_dir):
             lang = "glsl"
         elif ext in {".hlsl", ".slang"}:
             lang = "hlsl"
+        elif ext == "slang":
+            lang = "slang"
         elif ext == ".log":
             lang = "txt"
         elif ext == ".sh":
