@@ -297,7 +297,8 @@ class ComputePipelineBuilder {
   public:
     ComputePipelineBuilder() = default;
 
-    auto Shader(const uint32_t* code, size_t size, const char* entry = "main") noexcept -> ComputePipelineBuilder&;
+    // entry == nullptr → the entry point is reflected from the SPIR-V module.
+    auto Shader(const uint32_t* code, size_t size, const char* entry = nullptr) noexcept -> ComputePipelineBuilder&;
     auto Shader(const ZHLN_ShaderDesc& desc) noexcept -> ComputePipelineBuilder&;
     auto Layout(VkPipelineLayout l) noexcept -> ComputePipelineBuilder&;
     auto Specialization(const VkSpecializationInfo* info) noexcept -> ComputePipelineBuilder&;

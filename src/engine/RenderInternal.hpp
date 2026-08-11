@@ -273,7 +273,10 @@ struct ShaderStageSource {
     static constexpr ShaderStage  stage = Stage;
     const char*                   path;
     std::span<const std::uint8_t> fallback;
-    const char*                   entryPoint = "main";
+    // nullptr → the entry-point name is reflected out of the SPIR-V module
+    // (ZHLN_Internal_FindSpirvEntryPoint), so VSMain/PSMain/CSMain/Smaa* all
+    // resolve automatically without per-call-site bookkeeping.
+    const char* entryPoint = nullptr;
 };
 
 using VertexStageSource   = ShaderStageSource<ShaderStage::Vertex>;
