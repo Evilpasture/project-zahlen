@@ -107,12 +107,6 @@ struct MaterialData {
 
 static_assert((std::is_trivially_default_constructible_v<MaterialData> && std::is_trivially_copyable_v<MaterialData>) );
 
-/**
- * @brief Thread-Safe, Cache-Isolated Structure of Arrays (SoA) Physics World.
- * No default initializers allowed to maintain Standard Layout / Triviality rules.
- */
-std::pair<const ContactEvent*, size_t> GetContactEvents(const PhysicsContext& ctx);
-
 struct PhysicsWorld {
     mutable BufferSync sync;
 

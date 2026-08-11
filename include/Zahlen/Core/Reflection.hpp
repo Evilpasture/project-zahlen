@@ -43,6 +43,10 @@ constexpr bool IsBracesConstructible() {
     return std::is_aggregate_v<std::remove_cvref_t<T>>;
 }
 
+struct MetaDescription {
+    const char* text;
+};
+
 } // namespace ZHLN::Reflect
 
 // ============================================================================
@@ -54,6 +58,10 @@ constexpr bool IsBracesConstructible() {
 #include <meta>
 
 namespace ZHLN::Reflect {
+
+consteval auto Description(std::string_view text) -> MetaDescription {
+    return MetaDescription {std::define_static_string(text)};
+}
 
 namespace detail {
 template <auto... vals>
@@ -114,7 +122,7 @@ constexpr void ChunkedFieldVisitor(T&& t, F&& f) {
         static constexpr auto members =
             std::define_static_array(std::meta::nonstatic_data_members_of(^^std::remove_cvref_t<T>, std::meta::access_context::current()));
 
-        ZHLN::Unroll<Step>([&](auto I) {
+        Unroll<Step>([&](auto I) {
             constexpr std::size_t Index = Start + decltype(I)::value;
             f(t.[:members[Index]:]);
         });
@@ -144,6 +152,7 @@ constexpr auto ToTuple(T&& obj) {
 template <std::ranges::range R>
 consteval auto Expand(R&& range) {
     std::vector<std::meta::info> args;
+    args.reserve(range.size());
     for (auto r: range) {
         args.push_back(std::meta::reflect_constant(r));
     }
@@ -155,7 +164,7 @@ constexpr void ForEachField(T&& t, F&& f) {
     static constexpr auto members =
         std::define_static_array(std::meta::nonstatic_data_members_of(^^std::remove_cvref_t<T>, std::meta::access_context::current()));
 
-    ZHLN::Unroll<members.size()>([&](auto I) { f(t.[:members[decltype(I)::value]:]); });
+    Unroll<members.size()>([&](auto I) { f(t.[:members[decltype(I)::value]:]); });
 }
 
 template <typename T, typename F>
@@ -163,7 +172,7 @@ constexpr void ForEachFieldWithName(T&& t, F&& f) {
     static constexpr auto members =
         std::define_static_array(std::meta::nonstatic_data_members_of(^^std::remove_cvref_t<T>, std::meta::access_context::current()));
 
-    ZHLN::Unroll<members.size()>([&](auto I) {
+    Unroll<members.size()>([&](auto I) {
         constexpr auto             member = members[decltype(I)::value];
         constexpr std::string_view name   = []() consteval {
             if (std::meta::has_identifier(member)) {
@@ -187,7 +196,7 @@ constexpr void ForEachDataMember(F&& f) {
     constexpr auto members = std::define_static_array(std::meta::nonstatic_data_members_of(^^std::remove_cvref_t<T>, std::meta::access_context::current()));
 
     // Wrap Expand in splice brackets to instantiate the ReplicatorType
-    [:ZHLN::Reflect::Expand(members):] >> [&]<auto member>() { f.template operator()<member>(); };
+    [:Expand(members):] >> [&]<auto member>() { f.template operator()<member>(); };
 }
 
 /**
@@ -198,7 +207,7 @@ constexpr void ForEachMemberFunction(F&& f) {
     constexpr auto members = std::define_static_array(std::meta::members_of(^^std::remove_cvref_t<T>, std::meta::access_context::current()));
 
     // Wrap Expand in splice brackets to instantiate the ReplicatorType
-    [:ZHLN::Reflect::Expand(members):] >> [&]<auto member>() {
+    [:Expand(members):] >> [&]<auto member>() {
         if constexpr (std::meta::is_function(member) && std::meta::has_identifier(member)) {
             f.template operator()<member>();
         }
@@ -209,7 +218,7 @@ template <typename T, typename F>
 constexpr void ForEachFieldInfo(F&& f) {
     constexpr auto members = std::define_static_array(std::meta::nonstatic_data_members_of(^^std::remove_cvref_t<T>, std::meta::access_context::current()));
 
-    [:ZHLN::Reflect::Expand(members):] >> [&]<auto member>() {
+    [:Expand(members):] >> [&]<auto member>() {
         constexpr std::string_view name   = std::meta::identifier_of(member);
         constexpr std::size_t      offset = std::meta::offset_of(member).bytes;
         using FieldType                   = typename[:std::meta::type_of(member):];
@@ -234,7 +243,7 @@ constexpr std::string_view EnumToString(E value) {
     static constexpr auto enumerators = std::define_static_array(std::meta::enumerators_of(^^E));
     std::string_view      result      = "Unknown";
 
-    ZHLN::Unroll<enumerators.size()>([&](auto ic) {
+    Unroll<enumerators.size()>([&](auto ic) {
         constexpr auto             enumerator = enumerators[decltype(ic)::value];
         constexpr std::string_view name       = std::meta::identifier_of(enumerator);
         if (value == static_cast<E>([:enumerator:])) {
@@ -440,7 +449,8 @@ consteval auto MemberFunctionNames() {
                     names[idx++] = std::meta::identifier_of(member);
                 }
             }(),
-            ...);
+            ...
+        );
         return names;
     }(std::make_index_sequence<all_members.size()>());
 }
@@ -512,7 +522,8 @@ constexpr void ForEachNestedType(F&& f) {
                     }
                 }
             }(),
-            ...);
+            ...
+        );
     }(std::make_index_sequence<members.size()> {});
 }
 
@@ -626,7 +637,7 @@ constexpr void ForEachAnnotatedTypeInScope(F&& f) {
     constexpr auto members = std::define_static_array(std::meta::members_of(ScopeInfo, std::meta::access_context::current()));
 
     // Wrap Expand in splice brackets to instantiate the ReplicatorType
-    [:ZHLN::Reflect::Expand(members):] >> [&]<auto m>() {
+    [:Expand(members):] >> [&]<auto m>() {
         if constexpr (std::meta::is_type(m)) {
             if constexpr (std::ranges::any_of(std::meta::annotations_of(m), [](auto a) { return std::meta::type_of(a) == ^^Tag; })) {
                 using TargetType = typename[:m:];
@@ -634,6 +645,33 @@ constexpr void ForEachAnnotatedTypeInScope(F&& f) {
             }
         }
     };
+}
+
+template <typename Tag, auto EntityInfo>
+consteval std::optional<Tag> GetAnnotation() {
+    std::optional<Tag> result = std::nullopt;
+
+    [:Expand(std::meta::annotations_of(EntityInfo)):] >> [&]<auto annotation> {
+        if constexpr (std::meta::type_of(annotation) == ^^Tag) {
+            result = std::meta::extract<Tag>(annotation);
+        }
+    };
+
+    return result;
+}
+
+template <typename Tag, typename E>
+    requires std::is_enum_v<E>
+constexpr std::optional<Tag> GetEnumeratorAnnotation(E value) {
+    std::optional<Tag> result = std::nullopt;
+
+    [:Expand(std::meta::enumerators_of(^^E)):] >> [&]<auto enumerator> {
+        if (value == static_cast<E>([:enumerator:])) {
+            result = GetAnnotation<Tag, enumerator>();
+        }
+    };
+
+    return result;
 }
 
 template <typename T>
@@ -676,6 +714,11 @@ constexpr auto CollectMethodResults(const T& inst) {
 #else // Standard C++26 Fallback (Stubs - Waiting for compiler reflection)
 
 namespace ZHLN::Reflect {
+
+constexpr auto Description(std::string_view text) -> MetaDescription {
+    // Fallback for non-reflecting environments / standard compilation
+    return MetaDescription {text.data()};
+}
 
 template <std::ranges::range R>
 consteval int Expand(R&& /*unused*/) {
@@ -881,6 +924,17 @@ template <auto ScopeInfo, typename Tag, typename F>
 constexpr void ForEachAnnotatedTypeInScope(F&& /*unused*/) {
 }
 
+template <typename Tag, typename T>
+consteval std::optional<Tag> GetAnnotation() {
+    return std::nullopt;
+}
+
+template <typename Tag, typename E>
+    requires std::is_enum_v<E>
+constexpr std::optional<Tag> GetEnumeratorAnnotation(E /*unused*/) {
+    return std::nullopt;
+}
+
 template <typename T>
 consteval std::size_t GetFloatFieldsCount() {
     return 0;
@@ -1018,6 +1072,15 @@ std::string ToDebugString(const T& t) {
     std::string out;
     CustomFormatter<std::remove_cvref_t<T>>::format(t, out);
     return out;
+}
+
+template <typename E>
+    requires std::is_enum_v<E>
+constexpr std::string_view EnumToMessage(E value) {
+    if (auto desc = GetEnumeratorAnnotation<MetaDescription>(value)) {
+        return desc->text;
+    }
+    return EnumToString(value);
 }
 
 } // namespace ZHLN::Reflect

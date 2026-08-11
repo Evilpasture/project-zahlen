@@ -30,8 +30,12 @@ constexpr uint32_t HashTypeName(std::string_view str) noexcept {
 template <typename E>
     requires std::is_enum_v<E>
 inline const ErrorCategory* GetCategoryInstance() noexcept {
+    // Force compiler instantiation of EnumToMessage<E> via immediate invocation to prevent link-time undefined symbol errors in Clang
+    [[maybe_unused]] constexpr auto dummy = ZHLN::Reflect::EnumToMessage(E {});
+
     static constexpr ErrorCategory cat = {.name = ZHLN::Reflect::TypeName<E>(), .to_string = [](uint32_t val) noexcept -> std::string_view {
-                                              return ZHLN::Reflect::EnumToString(static_cast<E>(val));
+                                              // Using abstracted EnumToMessage to fetch annotations, falling back to string names
+                                              return ZHLN::Reflect::EnumToMessage(static_cast<E>(val));
                                           }};
     return &cat;
 }
@@ -154,7 +158,8 @@ constexpr std::string_view ToString(T val) noexcept {
     if constexpr (std::is_same_v<T, Error>) {
         return val.Message();
     } else if constexpr (std::is_enum_v<T>) {
-        return ZHLN::Reflect::EnumToString(val);
+        // Updated to use EnumToMessage to prioritize annotations
+        return ZHLN::Reflect::EnumToMessage(val);
     } else {
         static_assert(sizeof(T) == 0, "ToString is only defined for Error or reflected Enums.");
         return "";

@@ -29,10 +29,10 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <alloca.h>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <new>
-#include <stdlib.h>
 
 namespace ZHLN {
 
@@ -177,8 +177,9 @@ class JobSystemFiber final: public JPH::JobSystemWithBarrier {
     }
 
     void QueueJobs(JPH::JobSystem::Job** inJobs, uint inNumJobs) override {
-        if (inNumJobs == 0)
+        if (inNumJobs == 0) {
             return;
+        }
 
         auto* tasks = static_cast<ZHLN::TaskSystem::Task*>(alloca(inNumJobs * sizeof(ZHLN::TaskSystem::Task)));
 
@@ -356,12 +357,14 @@ JPH::ShapeRefC PhysicsContext::GetOrCreateShape(Physics::ShapeType type, float p
 
 static Physics::MaterialData ResolveMaterial(const Physics::PhysicsWorld& world, uint32_t id) {
     constexpr auto materialDefault = Physics::MaterialData {.id = 0, .friction = 0.2f, .restitution = 0.0f};
-    if (id == 0)
+    if (id == 0) {
         return materialDefault;
+    }
 
     for (size_t i = 0; i < world.materialCount; ++i) {
-        if (world.materials[i].id == id)
+        if (world.materials[i].id == id) {
             return world.materials[i];
+        }
     }
     return materialDefault;
 }
@@ -464,14 +467,16 @@ JPH::ShapeRefC CreateMeshShape(const VertexPosition* vertices, uint32_t vertexCo
         uint32_t i2 = indices[i + 1];
         uint32_t i3 = indices[i + 2];
 
-        if (i1 == i2 || i2 == i3 || i1 == i3)
+        if (i1 == i2 || i2 == i3 || i1 == i3) {
             continue;
+        }
 
         joltTriangles.push_back(JPH::IndexedTriangle(i1, i2, i3, 0, 0));
     }
 
-    if (joltTriangles.empty())
+    if (joltTriangles.empty()) {
         return nullptr;
+    }
 
     JPH::MeshShapeSettings  settings(std::move(joltVertices), std::move(joltTriangles));
     JPH::Shape::ShapeResult result = settings.Create();
@@ -507,8 +512,9 @@ ZHLN::Entity PhysicsContext::CreateMeshBody(
     uint32_t              mask
 ) {
     JPH::ShapeRefC shape = Physics::CreateMeshShape(vertices, vertexCount, indices, indexCount);
-    if (shape == nullptr)
+    if (shape == nullptr) {
         return ZHLN::NullEntity;
+    }
     return CreateRigidBody(shape, pos, rot, JPH::EMotionType::Static, Layers::NON_MOVING, 0, category, mask);
 }
 
@@ -674,16 +680,19 @@ void PhysicsContext::DestroyBody(ZHLN::Entity handle) {
     auto&          world = _impl->world;
     const uint32_t slot  = handle.index;
 
-    if (slot >= world.slotCapacity)
+    if (slot >= world.slotCapacity) {
         return;
-    if (world.generations[slot].load(std::memory_order::acquire) != handle.generation)
+    }
+    if (world.generations[slot].load(std::memory_order::acquire) != handle.generation) {
         return;
+    }
 
     const uint8_t                state = world.slotStates[slot].load(std::memory_order::acquire);
     const Physics::SlotPredicate pred  = Physics::GetSlotPredicate(state);
 
-    if (!pred.isDestructible)
+    if (!pred.isDestructible) {
         return;
+    }
 
     world.slotStates[slot].store(Physics::SLOT_PENDING_DESTROY, std::memory_order::release);
 
@@ -731,6 +740,16 @@ void PhysicsContext::AddImpulse(ZHLN::Entity handle, JPH::Vec3Arg impulse, JPH::
         _impl->world.bodyInterface->AddImpulse(id, impulse, position);
         _impl->world.bodyInterface->ActivateBody(id);
     }
+}
+
+std::pair<const Physics::ContactEvent*, size_t> PhysicsContext::GetContactEvents() const {
+    const auto& world = _impl->world;
+
+    // Clamp the count to capacity in case the buffer overflowed
+    size_t count = world.contactCount.load(std::memory_order::acquire);
+    count        = std::min(count, world.contactCapacity);
+
+    return {world.contactBuffer.data(), count};
 }
 
 JPH::PhysicsSystem& PhysicsContext::GetInternalSystem() noexcept {

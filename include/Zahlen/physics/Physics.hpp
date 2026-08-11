@@ -33,7 +33,7 @@ enum ID : uint8_t { NON_MOVING = 0, MOVING = 1, NUM_LAYERS = 2 };
 namespace Physics {
 struct PhysicsWorld;
 struct DebugDrawData;
-
+struct ContactEvent;
 enum class ShapeType : uint8_t { Box = 0, Sphere = 1, Capsule = 2, Cylinder = 3, Plane = 4 };
 
 enum class ConstraintType : uint8_t { Fixed, Point, Hinge, Slider, Cone, Distance };
@@ -187,21 +187,23 @@ class ZHLN_API PhysicsContext {
     JPH::Ref<JPH::Ragdoll> CreateSkeletalRagdoll(const JPH::Skeleton* skeleton, const std::vector<Physics::RagdollPartParams>& parts);
 
     // --- Actions & Settings ---
-    void                   SetCollisionFilter(ZHLN::Entity handle, uint32_t category, uint32_t mask);
-    Physics::DebugDrawData GetDebugDrawData(bool drawShapes = true, bool drawConstraints = true, bool wireframe = true) const;
-    void                   RegisterMaterial(uint32_t id, float friction, float restitution);
+    void                                 SetCollisionFilter(ZHLN::Entity handle, uint32_t category, uint32_t mask);
+    [[nodiscard]] Physics::DebugDrawData GetDebugDrawData(bool drawShapes = true, bool drawConstraints = true, bool wireframe = true) const;
+    void                                 RegisterMaterial(uint32_t id, float friction, float restitution);
 
     void DestroyBody(ZHLN::Entity handle);
     void SetLinearVelocity(ZHLN::Entity handle, JPH::Vec3Arg velocity);
     void SetCharacterVelocity(ZHLN::Entity handle, JPH::Vec3Arg velocity);
     void SetCharacterPosition(ZHLN::Entity handle, JPH::RVec3Arg position);
 
-    JPH::Vec3  GetCharacterVelocity(ZHLN::Entity handle) const;
-    bool       IsCharacterOnGround(ZHLN::Entity handle) const;
-    BufferView GetPositionBuffer() const;
-    JPH::Quat  GetRotation(JPH::BodyID bodyID) const;
-    void       AddImpulse(ZHLN::Entity handle, JPH::Vec3Arg impulse);
-    void       AddImpulse(ZHLN::Entity handle, JPH::Vec3Arg impulse, JPH::RVec3Arg position);
+    JPH::Vec3                GetCharacterVelocity(ZHLN::Entity handle) const;
+    [[nodiscard]] bool       IsCharacterOnGround(ZHLN::Entity handle) const;
+    [[nodiscard]] BufferView GetPositionBuffer() const;
+    JPH::Quat                GetRotation(JPH::BodyID bodyID) const;
+    void                     AddImpulse(ZHLN::Entity handle, JPH::Vec3Arg impulse);
+    void                     AddImpulse(ZHLN::Entity handle, JPH::Vec3Arg impulse, JPH::RVec3Arg position);
+
+    [[nodiscard]] std::pair<const Physics::ContactEvent*, size_t> GetContactEvents() const;
 
     // --- Constraints ---
     Physics::ConstraintHandle CreateConstraint(Physics::ConstraintType type, ZHLN::Entity b1, ZHLN::Entity b2, const Physics::ConstraintParams& params);

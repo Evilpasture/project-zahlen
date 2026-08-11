@@ -760,11 +760,11 @@ void RegisterPhysicsCommands() {
                 }));
 
     RegisterCmd("GetPhysicsContactEvents", MakeCmd<GetBufferArgs>([](ZHLN::Engine* engine, const GetBufferArgs& a) -> uint64_t {
-                    auto        events = ZHLN::Physics::GetContactEvents(engine->GetPhysicsContext());
+                    auto        events = engine->GetPhysicsContext().GetContactEvents();
                     const char* fmt    = (sizeof(JPH::Real) == 8) ? "EvtD" : "EvtF";
                     *a.outView         = ZHLN::ViewComposer::Build(&engine->GetPhysicsContext().GetWorld(), events.first, fmt, events.second);
                     return 0;
-                }));
+                })); 
 
     RegisterCmd("SetCharacterVelocity", MakeCmd<SetCharVelArgs>([](ZHLN::Engine* engine, const SetCharVelArgs& a) -> uint64_t {
                     engine->GetPhysicsContext().SetCharacterVelocity(ZHLN::Entity::Unpack(a.entityRaw), JPH::Vec3(a.x, a.y, a.z));
