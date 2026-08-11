@@ -140,10 +140,10 @@ extern const ShaderPair bloom_threshold_shaders {.vertex = bloom_threshold_vs_ra
 
 // --- Bloom Blur Shaders ---
 constexpr uint8_t bloom_blur_vs_raw[] = {
-#embed SHADER_BLOOM_BLUR_HLSL_VS_PATH
+#embed SHADER_BLOOM_BLUR_SLANG_VS_PATH
 };
 constexpr uint8_t bloom_blur_ps_raw[] = {
-#embed SHADER_BLOOM_BLUR_HLSL_PS_PATH
+#embed SHADER_BLOOM_BLUR_SLANG_VS_PATH
 };
 extern const ShaderPair bloom_blur_shaders {.vertex = bloom_blur_vs_raw, .fragment = bloom_blur_ps_raw};
 

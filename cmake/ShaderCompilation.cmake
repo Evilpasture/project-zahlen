@@ -173,7 +173,7 @@ compile_shaders(zahlen_engine
     "${SHADER_SRC_DIR}/mlaa.hlsl"
     "${SHADER_SRC_DIR}/ambient.hlsl"
     "${SHADER_SRC_DIR}/bloom_threshold.slang"
-    "${SHADER_SRC_DIR}/bloom_blur.hlsl"
+    "${SHADER_SRC_DIR}/bloom_blur.slang"
     "${SHADER_SRC_DIR}/punctual_shadows.hlsl"
 )
 

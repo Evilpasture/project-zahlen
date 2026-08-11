@@ -94,13 +94,13 @@ auto UnsafeReflectedLayoutBuilder::BuildUnsafe(VkDevice device) noexcept -> Unsa
                 has_bindless_flags = true;
             }
 
-            result.reflectedSets[setIdx].bindings.push_back({
-                .binding         = binding.binding,
-                .descriptorType  = binding.descriptorType,
-                .descriptorCount = binding.descriptorCount,
-                .stageFlags      = binding.stageFlags,
-                .bindingFlags    = flags
-            });
+            result.reflectedSets[setIdx].bindings.push_back(
+                {.binding         = binding.binding,
+                 .descriptorType  = binding.descriptorType,
+                 .descriptorCount = binding.descriptorCount,
+                 .stageFlags      = binding.stageFlags,
+                 .bindingFlags    = flags}
+            );
         }
 
         const VkDescriptorSetLayoutBindingFlagsCreateInfo flags_info = {
@@ -163,10 +163,7 @@ auto UnsafeReflectedLayout::CreatePool(VkDevice device, uint32_t maxSets) const 
 
     for (uint32_t i = 0; i <= VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT; ++i) {
         if (descriptorTypeCounts[i] > 0) {
-            pool_sizes.push_back({
-                .type            = static_cast<VkDescriptorType>(i),
-                .descriptorCount = descriptorTypeCounts[i] * maxSets
-            });
+            pool_sizes.push_back({.type = static_cast<VkDescriptorType>(i), .descriptorCount = descriptorTypeCounts[i] * maxSets});
         }
     }
     if (pool_sizes.empty()) {
@@ -195,7 +192,7 @@ auto UnsafeReflectedLayout::CreatePool(VkDevice device, uint32_t maxSets) const 
     return {device, pool};
 }
 
-auto UnsafeReflectedLayout::Allocate(VkDevice device, VkDescriptorPool pool, VkDescriptorSetLayout layout) const noexcept -> VkDescriptorSet {
+auto UnsafeReflectedLayout::Allocate(VkDevice device, VkDescriptorPool pool, VkDescriptorSetLayout layout) noexcept -> VkDescriptorSet {
     const VkDescriptorSetAllocateInfo info = {
         .sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
         .pNext              = nullptr,
@@ -210,16 +207,19 @@ auto UnsafeReflectedLayout::Allocate(VkDevice device, VkDescriptorPool pool, VkD
 
 bool UnsafeReflectedLayout::Build(VkDevice device, const ShaderStages& shaders) noexcept {
     UnsafeReflectedLayoutBuilder builder;
-    auto vertSpv = shaders.GetVertSpv();
-    auto fragSpv = shaders.GetFragSpv();
-    if (!vertSpv.empty()) {
-        builder.AddStageUnsafe({.code = vertSpv.data(), .size = vertSpv.size() * 4}, VK_SHADER_STAGE_VERTEX_BIT);
+    auto                         vert_spv = shaders.GetVertSpv();
+    auto                         frag_spv = shaders.GetFragSpv();
+    if (!vert_spv.empty()) {
+        builder.AddStageUnsafe({.code = vert_spv.data(), .size = vert_spv.size() * 4, .entry_point = {}}, VK_SHADER_STAGE_VERTEX_BIT);
     }
-    if (!fragSpv.empty()) {
-        builder.AddStageUnsafe({.code = fragSpv.data(), .size = fragSpv.size() * 4}, VK_SHADER_STAGE_FRAGMENT_BIT);
+    if (!frag_spv.empty()) {
+        builder.AddStageUnsafe({.code = frag_spv.data(), .size = frag_spv.size() * 4, .entry_point = {}}, VK_SHADER_STAGE_FRAGMENT_BIT);
     }
     *this = builder.BuildUnsafe(device);
     return setLayoutCount > 0;
 }
 
+[[nodiscard]] auto UnsafeReflectedLayout::CreateLayout(VkDevice /*unused*/) const noexcept -> VkDescriptorSetLayout {
+    return GetSetLayout(0);
+}
 } // namespace ZHLN::Vk

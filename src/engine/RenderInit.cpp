@@ -1231,18 +1231,17 @@ std::expected<void, Error> RenderContext::Impl::BuildBloomPipelines() {
                          std::string downName = std::format("Bloom Downsample {}", i);
                          return BuildPassHelper(
                              this, bloomDownPass[i], downName.c_str(),
-                             {.path = SHADER_BLOOM_BLUR_HLSL_VS_PATH, .fallback = Resource::GetShaderProgram(BloomBlur).vertex, .entryPoint = "VSMain"},
-                             {.path = SHADER_BLOOM_BLUR_HLSL_PS_PATH, .fallback = Resource::GetShaderProgram(BloomBlur).fragment, .entryPoint = "PSMain"},
+                             {.path = SHADER_BLOOM_BLUR_SLANG_VS_PATH, .fallback = Resource::GetShaderProgram(BloomBlur).vertex},
+                             {.path = SHADER_BLOOM_BLUR_SLANG_PS_PATH, .fallback = Resource::GetShaderProgram(BloomBlur).fragment},
                              {VK_FORMAT_R16G16B16A16_SFLOAT}, &kawasePush, 1
                          );
                      }
         ).and_then([&, i]() {
             std::string upName = std::format("Bloom Upsample {}", i);
             return BuildPassHelper(
-                this, bloomUpPass[i], upName.c_str(),
-                {.path = SHADER_BLOOM_BLUR_HLSL_VS_PATH, .fallback = Resource::GetShaderProgram(BloomBlur).vertex, .entryPoint = "VSMain"},
-                {.path = SHADER_BLOOM_BLUR_HLSL_PS_PATH, .fallback = Resource::GetShaderProgram(BloomBlur).fragment, .entryPoint = "PSMain"},
-                {VK_FORMAT_R16G16B16A16_SFLOAT}, &kawasePush, 1
+                this, bloomUpPass[i], upName.c_str(), {.path = SHADER_BLOOM_BLUR_SLANG_VS_PATH, .fallback = Resource::GetShaderProgram(BloomBlur).vertex},
+                {.path = SHADER_BLOOM_BLUR_SLANG_PS_PATH, .fallback = Resource::GetShaderProgram(BloomBlur).fragment}, {VK_FORMAT_R16G16B16A16_SFLOAT},
+                &kawasePush, 1
             );
         });
     }
@@ -1360,7 +1359,7 @@ std::expected<void, Error> RenderContext::Impl::InitPostProcessing() {
         .and_then([&]() {
             return register_and_check(
                 "Bloom", [this]() { return BuildBloomPipelines(); },
-                {SHADER_BLOOM_THRESHOLD_SLANG_VS_PATH, SHADER_BLOOM_THRESHOLD_SLANG_PS_PATH, SHADER_BLOOM_BLUR_HLSL_VS_PATH, SHADER_BLOOM_BLUR_HLSL_PS_PATH}
+                {SHADER_BLOOM_THRESHOLD_SLANG_VS_PATH, SHADER_BLOOM_THRESHOLD_SLANG_PS_PATH, SHADER_BLOOM_BLUR_SLANG_VS_PATH, SHADER_BLOOM_BLUR_SLANG_PS_PATH}
             );
         })
         .and_then([&]() {

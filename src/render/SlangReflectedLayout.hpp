@@ -7,12 +7,11 @@
 #error "Please include <src/render/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
-#include <slang/slang.h>
-#include <vector>
 #include <array>
+#include <slang/slang.h>
 #include <tuple>
 #include <utility>
-#include <type_traits>
+#include <vector>
 
 namespace ZHLN::Vk {
 
@@ -46,40 +45,33 @@ struct SlangReflectedLayout {
         return setIndex < setLayoutCount ? descriptorSetLayouts[setIndex].Get() : VK_NULL_HANDLE;
     }
 
-    [[nodiscard]] auto CreateLayout(VkDevice device) const noexcept -> VkDescriptorSetLayout {
-        return GetSetLayout(0);
-    }
+    [[nodiscard]] auto CreateLayout(VkDevice device = VK_NULL_HANDLE) const noexcept -> VkDescriptorSetLayout;
 
     [[nodiscard]] auto CreatePool(VkDevice device, uint32_t maxSets) const noexcept -> DescriptorPool;
 
-    [[nodiscard]] auto Allocate(VkDevice device, VkDescriptorPool pool, VkDescriptorSetLayout layout) const noexcept -> VkDescriptorSet;
+    [[nodiscard]] static auto Allocate(VkDevice device, VkDescriptorPool pool, VkDescriptorSetLayout layout) noexcept -> VkDescriptorSet;
 
     template <typename... Args>
     void Write(VkDevice device, VkDescriptorSet set, Args&&... args) const noexcept {
-        const auto arg_tuple = std::forward_as_tuple(std::forward<Args>(args)...);
-        constexpr size_t kCount = sizeof...(Args);
-        std::array<VkDescriptorImageInfo, kCount>                        image_infos {};
-        std::array<VkDescriptorBufferInfo, kCount>                       buffer_infos {};
-        std::array<VkWriteDescriptorSetAccelerationStructureKHR, kCount> as_infos {};
-        std::array<VkWriteDescriptorSet, kCount>                         writes {};
+        const auto                                                        arg_tuple = std::forward_as_tuple(std::forward<Args>(args)...);
+        constexpr size_t                                                  k_count   = sizeof...(Args);
+        std::array<VkDescriptorImageInfo, k_count>                        image_infos {};
+        std::array<VkDescriptorBufferInfo, k_count>                       buffer_infos {};
+        std::array<VkWriteDescriptorSetAccelerationStructureKHR, k_count> as_infos {};
+        std::array<VkWriteDescriptorSet, k_count>                         writes {};
 
         [&]<size_t... I>(std::index_sequence<I...>) {
             (detail::WriteReflectedBinding(
-                 set,
-                 I < reflectedSets[0].bindings.size() ? reflectedSets[0].bindings[I].binding : 0,
-                 I < reflectedSets[0].bindings.size() ? reflectedSets[0].bindings[I].descriptorType : VK_DESCRIPTOR_TYPE_MAX_ENUM,
-                 std::get<I>(arg_tuple),
-                 image_infos[I],
-                 buffer_infos[I],
-                 as_infos[I],
-                 writes[I]
+                 set, I < reflectedSets[0].bindings.size() ? reflectedSets[0].bindings[I].binding : 0,
+                 I < reflectedSets[0].bindings.size() ? reflectedSets[0].bindings[I].descriptorType : VK_DESCRIPTOR_TYPE_MAX_ENUM, std::get<I>(arg_tuple),
+                 image_infos[I], buffer_infos[I], as_infos[I], writes[I]
              ),
              ...);
-        }(std::make_index_sequence<kCount> {});
+        }(std::make_index_sequence<k_count> {});
 
-        std::array<VkWriteDescriptorSet, kCount> valid_writes {};
-        uint32_t                                 valid_count = 0;
-        for (uint32_t i = 0; i < kCount; ++i) {
+        std::array<VkWriteDescriptorSet, k_count> valid_writes {};
+        uint32_t                                  valid_count = 0;
+        for (uint32_t i = 0; i < k_count; ++i) {
             if (writes[i].descriptorCount > 0) {
                 valid_writes[valid_count++] = writes[i];
             }

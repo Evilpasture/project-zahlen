@@ -21,7 +21,7 @@ bool PostProcessPass<LayoutT>::Build(
         if (!layoutInstance.Build(device, shaders)) {
             return false;
         }
-        descLayout     = layoutInstance.GetSetLayout(0);
+        descLayout     = std::move(layoutInstance.descriptorSetLayouts[0]);
         pool           = layoutInstance.CreatePool(device, 2);
         sets[0]        = layoutInstance.Allocate(device, pool.Get(), descLayout.Get());
         sets[1]        = layoutInstance.Allocate(device, pool.Get(), descLayout.Get());
