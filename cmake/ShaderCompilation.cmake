@@ -218,7 +218,7 @@ add_shader_target(hang_gpu_shader
 )
 
 add_shader_target(procedural_bake
-    STAGES "${SHADER_SRC_DIR}/procedural_bake.hlsl|CSMain|cs_6_0|SHADER_PROCEDURAL_BAKE_CS_PATH"
+    STAGES "${SHADER_SRC_DIR}/procedural_bake.slang|CSMain|cs_6_0|SHADER_PROCEDURAL_BAKE_SLANG_CS_PATH"
 )
 
 add_shader_target(vol_clear_shader
