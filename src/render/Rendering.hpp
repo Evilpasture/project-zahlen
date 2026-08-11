@@ -81,6 +81,7 @@ static constexpr auto isLegacy = false;
 #include "ImageView.hpp"
 #include "RenderCore.hpp"    
 #include "ReflectedLayout.hpp"
+#include "SlangReflectedLayout.hpp"
 #include "Raytracing.hpp"
 #include "SemaphorePool.hpp"
 #include "DynamicRendering.hpp"

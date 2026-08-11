@@ -24,6 +24,7 @@ add_library(zahlen_render STATIC
     Swapchain.cpp
     ShaderStages.cpp
     ReflectedLayout.cpp
+    SlangReflectedLayout.cpp
     SemaphorePool.cpp
     Raytracing.cpp
     Surface.cpp
