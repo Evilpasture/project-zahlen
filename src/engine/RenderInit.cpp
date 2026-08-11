@@ -1854,8 +1854,8 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
 
     graphResources.sceneColor            = CreateDefaultTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32>(ext);
     graphResources.velocityBuffer        = CreateDefaultTarget<VK_FORMAT_R16G16_SFLOAT>(ext);
-    frames.accumBuffers[0]               = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
-    frames.accumBuffers[1]               = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
+    frames.accumBuffers[0]               = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext, VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+    frames.accumBuffers[1]               = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext, VK_IMAGE_USAGE_TRANSFER_DST_BIT);
     graphResources.normalRoughnessBuffer = CreateDefaultTarget<VK_FORMAT_R8G8B8A8_UNORM>(ext);
     graphResources.hdrSceneColor         = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
     graphResources.ambientTarget         = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
@@ -1871,19 +1871,19 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
     VkExtent3D voxelExt = {.width = 160, .height = 90, .depth = 64};
 
     graphResources.voxelMedia =
-        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
 
     graphResources.voxelLight =
-        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
 
     graphResources.voxelIntegrated =
-        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
 
     graphResources.voxelHistory =
-        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
 
     graphResources.voxelResolved =
-        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
 
     graphResources.bloomThresholdTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext2);
     graphResources.bloomDown1           = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext4);
@@ -1907,11 +1907,37 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
 
     // Transition all newly allocated render targets to their correct default layouts
     Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
+        // History-bearing targets are READ before their first full-coverage
+        // write: TAA samples AccumCurr on frame 0, and the volumetric
+        // temporal filter samples VoxelHist before it ever wrote it (and the
+        // graphics queue reads VoxelResolved one compute-submission early).
+        // Leaving the content as VRAM garbage made the very first frames
+        // differ between runs — worse, NaN bit patterns survive the
+        // neighborhood clamps and poison temporal accumulation indefinitely.
+        // Clear every target whose first definition is a read.
+        const VkClearColorValue      clearBlack = {.float32 = {0.0F, 0.0F, 0.0F, 0.0F}};
+        const VkImageSubresourceRange clearRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = VK_REMAINING_MIP_LEVELS, .baseArrayLayer = 0, .layerCount = VK_REMAINING_ARRAY_LAYERS
+        };
+        const std::array accumImages = {frames.accumBuffers[0].image.Handle(), frames.accumBuffers[1].image.Handle()};
+        for (const auto img: accumImages) {
+            Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
+            vkCmdClearColorImage(cmd, img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearBlack, 1, &clearRange);
+            Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
+        }
+        const std::array targets3D = {
+            graphResources.voxelMedia.image.Handle(), graphResources.voxelLight.image.Handle(), graphResources.voxelIntegrated.image.Handle(),
+            graphResources.voxelHistory.image.Handle(), graphResources.voxelResolved.image.Handle()
+        };
+        for (auto* const img: targets3D) {
+            Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
+            vkCmdClearColorImage(cmd, img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearBlack, 1, &clearRange);
+            Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
+        }
+
         std::array colorTargets = {
             graphResources.sceneColor.image.Handle(),
             graphResources.velocityBuffer.image.Handle(),
-            frames.accumBuffers[0].image.Handle(),
-            frames.accumBuffers[1].image.Handle(),
             graphResources.normalRoughnessBuffer.image.Handle(),
             graphResources.hdrSceneColor.image.Handle(),
             graphResources.ambientTarget.image.Handle(),
@@ -1950,36 +1976,28 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
             cmd, graphResources.transDepthBuffer.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
         );
-        // Every consumer of the voxel volumes uses a GENERAL layout
-        // (ComputeWrite / ComputeReadGeneral in the compute graph,
-        // ShaderReadGeneral in the frame graph's Reflection passes), so their
-        // steady-state rest layout is GENERAL. This matters because the frame
-        // graph seeds resources it never writes as "external read-only
-        // inputs" at their first-usage layout and emits NO barrier for them
-        // (see the [Unchanged] GENERAL entries for VoxelResolved in the graph
-        // dump): parking them at READ_ONLY here left the first frames after
-        // every recreate with an actual READ_ONLY image behind a
-        // GENERAL-written descriptor (VUID-vkCmdDraw-None-09600).
-        std::array targets3D = {
-            graphResources.voxelMedia.image.Handle(), graphResources.voxelLight.image.Handle(), graphResources.voxelIntegrated.image.Handle(),
-            graphResources.voxelHistory.image.Handle(), graphResources.voxelResolved.image.Handle()
-        };
-
-        for (auto* const img: targets3D) {
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
-        }
+        // (The five voxel volumes above end their clear sequence in GENERAL,
+        // matching every consumer: ComputeWrite/ComputeReadGeneral in the
+        // compute graph, ShaderReadGeneral in the frame graph's Reflection
+        // passes. The frame graph seeds resources it never writes as external
+        // read-only inputs at their first-usage layout and emits no barrier
+        // for them, so GENERAL must be their rest layout.)
 
         // The HiZ pyramid is the only render target not covered by the lists
         // above: without this warm-up its whole mip chain sits in UNDEFINED
         // until the first HiZGenerate, yet the two occlusion culling sets
         // sample the full-chain view (written READ_ONLY) before that — pass 1
         // already runs inside MainShadow, one pass earlier than HiZGenerate.
-        // Land it in its per-frame steady state (MainPass2's ComputeRead
-        // leaves it READ_ONLY) so every culling read is always well-defined.
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(
+        // Clear it to far depth so frame-0 culling conservatively occludes
+        // nothing instead of consuming raw VRAM garbage, and land it in its
+        // per-frame steady state (MainPass2's ComputeRead leaves it
+        // READ_ONLY) so every culling read is always well-defined.
+        const VkClearColorValue clearFarDepth = {.float32 = {1.0F, 1.0F, 1.0F, 1.0F}};
+        Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
             cmd, graphResources.hizMap.image.Handle(), VK_IMAGE_ASPECT_COLOR_BIT
         );
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+        vkCmdClearColorImage(cmd, graphResources.hizMap.image.Handle(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearFarDepth, 1, &clearRange);
+        Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
             cmd, graphResources.hizMap.image.Handle(), VK_IMAGE_ASPECT_COLOR_BIT
         );
     });
