@@ -7,7 +7,12 @@
 add_library(zahlen_audio STATIC
     AudioContext.cpp # <-- Keep only the context here
 )
-set_target_properties(zahlen_audio PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_target_properties(zahlen_audio PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    CXX_STANDARD 26
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+)
 
 # Propagate Jolt, FFI Engine headers, and miniaudio search directories
 target_include_directories(zahlen_audio PUBLIC 
