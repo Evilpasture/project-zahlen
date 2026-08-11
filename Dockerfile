@@ -25,7 +25,23 @@ RUN pacman -S --needed --noconfirm \
     gtest \
     fennel \
     simdjson \
-    pkgconf
+    pkgconf \
+    wget \
+    tar \
+    curl
+
+# Install full LunarG Vulkan SDK (includes slangc)
+ARG VULKAN_SDK_VER=1.3.296.0
+RUN wget https://sdk.lunarg.com/sdk/download/${VULKAN_SDK_VER}/linux/vulkansdk-linux-x86_64-${VULKAN_SDK_VER}.tar.xz -O /tmp/vulkansdk.tar.xz && \
+    mkdir -p /opt/vulkansdk && \
+    tar -xf /tmp/vulkansdk.tar.xz -C /opt/vulkansdk --strip-components=1 && \
+    rm /tmp/vulkansdk.tar.xz
+
+# Export Vulkan SDK binaries (slangc, dxc, spirv-opt, etc.) and libraries
+ENV VULKAN_SDK=/opt/vulkansdk/x86_64
+ENV PATH=$VULKAN_SDK/bin:$PATH
+ENV LD_LIBRARY_PATH=$VULKAN_SDK/lib:$LD_LIBRARY_PATH
+ENV CMAKE_PREFIX_PATH=$VULKAN_SDK:$CMAKE_PREFIX_PATH
 
 # Set default compilers to GCC
 ENV CC=gcc
@@ -37,7 +53,7 @@ COPY . .
 
 # 1. Configure CMake 
 RUN cmake -B build -S . -G Ninja \
-    -DCMAKE_BUILD_TYPE=Release 
+    -DCMAKE_BUILD_TYPE=Release
 
 # 2. Compile asset cooker and run compilation
 RUN cmake --build build --target zahlen
