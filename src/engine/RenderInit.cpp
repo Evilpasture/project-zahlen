@@ -1011,11 +1011,17 @@ std::expected<void, Error> RenderContext::Impl::InitBindless() {
                {.path = Resource::Paths::BasicPS, .fallback = basicShaders.fragment, .entryPoint = "PSMain"}
     )
         .and_then([&](auto&& basicStages) -> std::expected<Vk::Sampler, Error> {
-            const Vk::ReflectedStageInput reflectInputs[4] = {
+            const Vk::ReflectedStageInput reflectInputs[6] = {
                 {.shader = Vk::CreateShaderDesc(basicStages.GetVertSpv()), .stage = VK_SHADER_STAGE_VERTEX_BIT},
                 {.shader = Vk::CreateShaderDesc(basicStages.GetFragSpv()), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
                 {.shader = Vk::CreateShaderDesc(Resource::GetShaderProgram(PunctualShadows).vertex), .stage = VK_SHADER_STAGE_VERTEX_BIT},
                 {.shader = Vk::CreateShaderDesc(Resource::forward_frag), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
+                // Compute consumers widen the stage flags of the members they
+                // touch (`scene.frame` for both particle simulations). Without
+                // them the union layout carries only VS|FS stage flags and
+                // vkCreateComputePipelines trips VUID-07988.
+                {.shader = Vk::CreateShaderDesc(Resource::GetShaderProgram(ParticleUpdate).vertex), .stage = VK_SHADER_STAGE_COMPUTE_BIT},
+                {.shader = Vk::CreateShaderDesc(Resource::GetShaderProgram(MeshParticleUpdate).vertex), .stage = VK_SHADER_STAGE_COMPUTE_BIT},
             };
             if (!bindlessLayout.Build(ctx.Device(), std::span {reflectInputs})) {
                 ZHLN::Log("[RenderInit] ERROR: Failed to reflect the global bindless layout!");

@@ -9,7 +9,7 @@
 namespace ZHLN::Vk {
 
 void UnsafeReflectedLayoutBuilder::AddStageUnsafe(const ZHLN_ShaderDesc& desc, VkShaderStageFlags stage) noexcept {
-    if ((desc.code != nullptr) && desc.size > 0 && _stageCount < 5) {
+    if ((desc.code != nullptr) && desc.size > 0 && _stageCount < _stages.size()) {
         _stages[_stageCount++] = {.code = desc.code, .size = desc.size, .stage = stage};
     }
 }

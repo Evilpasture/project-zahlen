@@ -282,7 +282,7 @@ class UnsafeReflectedLayoutBuilder {
         size_t             size  = 0;
         VkShaderStageFlags stage = 0;
     };
-    std::array<StageData, 5> _stages {};
+    std::array<StageData, 8> _stages {};
     uint32_t                 _stageCount = 0;
 };
 } // namespace ZHLN::Vk

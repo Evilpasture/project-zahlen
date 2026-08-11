@@ -616,7 +616,16 @@ struct PassFactory {
 
     template <typename SrcImgT, typename PassT>
     static void RunKawasePass(VkDevice device, VkCommandBuffer cmd, PassT& pass, const SrcImgT& src, const Vk::Sampler& defaultSampler) noexcept {
-        pass.WriteNext(device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(src), defaultSampler.Get(), Vk::SkipWrite {});
+        // bloom_blur.slang's `texLow` is statically reachable (mode is a runtime
+        // push constant, not a specialization), so every compiled Kawase
+        // pipeline has binding 2 in its layout even though the downsample
+        // branch never samples it at runtime. Write the source image into that
+        // slot to keep the descriptor valid; the upsample draws below bind the
+        // real lower-resolution input there.
+        pass.WriteNext(
+            device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(src), defaultSampler.Get(),
+            Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(src)
+        );
         pass.Execute(
             cmd, RenderContext::Impl::KawasePushConstants {
                      .mode = 0, .rcpWidth = 1.0f / (float) src.extent.width, .rcpHeight = 1.0f / (float) src.extent.height, .padding = 0.0f
