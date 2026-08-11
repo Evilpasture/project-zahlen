@@ -1940,8 +1940,13 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
                 ctx.Device(), hizSets[i], presentation.depthTarget.view.Get(), graphResources.hizMap.mipViews[0].Get(), pointSampler.Get()
             );
         } else {
+            // The whole HiZ pyramid sits in VK_IMAGE_LAYOUT_GENERAL for the
+            // duration of the pass (the graph declares it ComputeWrite), so
+            // the sampled side must be written with GENERAL too — only the
+            // base pass's depth input is a true READ_ONLY resource.
             hizDescLayout.Write(
-                ctx.Device(), hizSets[i], graphResources.hizMap.mipViews[i - 1].Get(), graphResources.hizMap.mipViews[i].Get(), pointSampler.Get()
+                ctx.Device(), hizSets[i], Vk::ImageWrite {.view = graphResources.hizMap.mipViews[i - 1].Get(), .layout = VK_IMAGE_LAYOUT_GENERAL},
+                Vk::ImageWrite {.view = graphResources.hizMap.mipViews[i].Get(), .layout = VK_IMAGE_LAYOUT_GENERAL}, pointSampler.Get()
             );
         }
     }
