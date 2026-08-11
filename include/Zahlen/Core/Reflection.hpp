@@ -147,7 +147,118 @@ constexpr auto ToTuple(T&& obj) {
     }
 }
 
+template <size_t ID>
+struct AnonymousNode {
+    struct type;
+};
+
+template <typename T, size_t N>
+struct FixedArrayBinding {
+    using type = std::array<T, N>;
+};
+
 } // namespace detail
+
+class TypeDescriptor {
+  public:
+    consteval TypeDescriptor() noexcept = default;
+
+    template <typename T>
+    static consteval TypeDescriptor Of() noexcept {
+        return TypeDescriptor(^^std::remove_cvref_t<T>);
+    }
+
+    static consteval TypeDescriptor String() noexcept {
+        return Of<std::string_view>();
+    }
+
+    static consteval TypeDescriptor Int64() noexcept {
+        return Of<int64_t>();
+    }
+
+    static consteval TypeDescriptor Float64() noexcept {
+        return Of<double>();
+    }
+
+    static consteval TypeDescriptor Boolean() noexcept {
+        return Of<bool>();
+    }
+
+    static consteval TypeDescriptor Null() noexcept {
+        return Of<std::nullptr_t>();
+    }
+
+    static consteval TypeDescriptor Void() noexcept {
+        return Of<void>();
+    }
+
+    static consteval TypeDescriptor ArrayOf(TypeDescriptor elemType, size_t count) noexcept {
+        std::vector<std::meta::info> template_args = {elemType.m_handle, std::meta::reflect_constant(count)};
+        return TypeDescriptor(std::meta::type_of(std::meta::substitute(^^detail::FixedArrayBinding, template_args)));
+    }
+
+    [[nodiscard]] consteval auto Handle() const noexcept {
+        return m_handle;
+    }
+
+  private:
+    explicit consteval TypeDescriptor(std::meta::info handle) noexcept: m_handle(handle) {
+    }
+    std::meta::info m_handle = {};
+
+    template <typename TargetStruct>
+    friend class AggregateBuilder;
+};
+
+/// High-level builder for synthesizing C++ aggregate structures at compile time
+template <typename TargetStruct>
+class AggregateBuilder {
+  public:
+    consteval AggregateBuilder() noexcept: m_targetInfo(std::meta::dealias(^^TargetStruct)) {
+    }
+
+    /// Adds a typed field to the structure using C++ types
+    template <typename T>
+    consteval AggregateBuilder& AddField(std::string_view name) noexcept {
+        return AddField(name, TypeDescriptor::Of<T>());
+    }
+
+    /// Adds a field using a TypeDescriptor
+    consteval AggregateBuilder& AddField(std::string_view name, TypeDescriptor typeDesc) noexcept {
+        std::meta::data_member_options opts;
+        opts.name = std::string(name);
+        m_specs.push_back(std::meta::data_member_spec(typeDesc.Handle(), opts));
+        return *this;
+    }
+
+    /// Adds a fixed-size array field
+    template <typename T>
+    consteval AggregateBuilder& AddArrayField(std::string_view name, size_t count) noexcept {
+        return AddField(name, TypeDescriptor::ArrayOf(TypeDescriptor::Of<T>(), count));
+    }
+
+    /// Synthesizes a nested struct and adds it as a member
+    template <size_t NodeID, typename ConfigFn>
+    consteval TypeDescriptor AddNestedObject(std::string_view name, ConfigFn&& configFn) noexcept {
+        using NestedType = typename detail::AnonymousNode<NodeID>::type;
+        AggregateBuilder<NestedType> nestedBuilder;
+        configFn(nestedBuilder);
+        TypeDescriptor nestedDesc = nestedBuilder.Build();
+
+        AddField(name, nestedDesc);
+        return nestedDesc;
+    }
+
+    /// Injects all registered member specifications into the target aggregate AST
+    consteval TypeDescriptor Build() noexcept {
+        std::meta::define_aggregate(m_targetInfo, m_specs);
+        return TypeDescriptor(m_targetInfo);
+    }
+
+  private:
+    std::meta::info              m_targetInfo;
+    std::vector<std::meta::info> m_specs;
+};
 
 template <std::ranges::range R>
 consteval auto Expand(R&& range) {
@@ -449,8 +560,7 @@ consteval auto MemberFunctionNames() {
                     names[idx++] = std::meta::identifier_of(member);
                 }
             }(),
-            ...
-        );
+            ...);
         return names;
     }(std::make_index_sequence<all_members.size()>());
 }
@@ -493,7 +603,7 @@ consteval bool ValidateSerializability() {
     static constexpr auto members = std::define_static_array(std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current()));
 
     bool ok = true;
-    ZHLN::Unroll<members.size()>([&](auto I) {
+    Unroll<members.size()>([&](auto I) {
         constexpr auto             member = members[decltype(I)::value];
         constexpr std::string_view name   = std::meta::identifier_of(member);
 
@@ -522,8 +632,7 @@ constexpr void ForEachNestedType(F&& f) {
                     }
                 }
             }(),
-            ...
-        );
+            ...);
     }(std::make_index_sequence<members.size()> {});
 }
 
@@ -559,7 +668,7 @@ constexpr void ForEachReflectedField(T&& t, F&& f) {
     [[maybe_unused]] static constexpr auto metaMembers =
         std::define_static_array(std::meta::nonstatic_data_members_of(^^Meta, std::meta::access_context::current()));
 
-    ZHLN::Unroll<members.size()>([&](auto ic) {
+    Unroll<members.size()>([&](auto ic) {
         constexpr size_t           I     = decltype(ic)::value;
         constexpr std::string_view name  = std::meta::identifier_of(members[I]);
         constexpr auto             found = [&]() consteval -> std::meta::info {
@@ -572,7 +681,7 @@ constexpr void ForEachReflectedField(T&& t, F&& f) {
         }();
         if constexpr (found != std::meta::info {}) {
             using Tag = typename[:std::meta::type_of(found):];
-            f.template operator()<Tag>(t.[:members[I]:]);
+            std::forward<F>(f).template operator()<Tag>(std::forward<T>(t).[:members[I]:]);
         }
     });
 }
@@ -581,7 +690,7 @@ template <typename E, typename F>
     requires std::is_enum_v<E>
 constexpr void ForEachEnumerator(F&& f) {
     static constexpr auto enumerators = std::define_static_array(std::meta::enumerators_of(^^E));
-    ZHLN::Unroll<enumerators.size()>([&](auto ic) {
+    Unroll<enumerators.size()>([&](auto ic) {
         constexpr auto enumerator = enumerators[decltype(ic)::value];
         constexpr E    Val        = static_cast<E>([:enumerator:]);
         f.template     operator()<Val>();
@@ -619,8 +728,7 @@ template <typename T, typename F>
 constexpr void ForEachMethodPointer(F&& f) {
     constexpr auto members = std::define_static_array(std::meta::members_of(^^std::remove_cvref_t<T>, std::meta::access_context::current()));
 
-    // FIX: Wrap Expand(...) in [: ... :] splice brackets
-    [:ZHLN::Reflect::Expand(members):] >> [&]<auto member>() {
+    [:Reflect::Expand(members):] >> [&]<auto member>() {
         if constexpr (std::meta::is_function(member) && std::meta::has_identifier(member)) {
             constexpr std::string_view name = std::meta::identifier_of(member);
             constexpr auto             pmf  = &[:member:];
