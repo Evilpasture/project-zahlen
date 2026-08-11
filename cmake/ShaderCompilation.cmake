@@ -189,7 +189,7 @@ add_shader_target(culling_shader
 )
 
 add_shader_target(hiz_generate_shader
-    STAGES "${SHADER_SRC_DIR}/hiz_generate.hlsl|CSMain|cs_6_0|SHADER_HIZ_GENERATE_CS_PATH"
+    STAGES "${SHADER_SRC_DIR}/hiz_generate.slang|CSMain|cs_6_0|SHADER_HIZ_GENERATE_SLANG_CS_PATH"
 )
 
 add_shader_target(shadow_shader

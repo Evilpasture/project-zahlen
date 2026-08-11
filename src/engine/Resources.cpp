@@ -242,7 +242,7 @@ constexpr uint8_t culling_comp_raw[] = {
 };
 
 constexpr uint8_t hiz_generate_comp_raw[] = {
-#embed SHADER_HIZ_GENERATE_CS_PATH
+#embed SHADER_HIZ_GENERATE_SLANG_CS_PATH
 };
 
 constexpr uint8_t shadow_frag_raw[] = {
@@ -351,7 +351,7 @@ const char* const MeshParticleRenderPS    = SHADER_MESH_PARTICLE_RENDER_PS_PATH;
 const char* const MeshParticleShadowVS    = SHADER_MESH_PARTICLE_SHADOW_VS_PATH;
 const char* const MeshParticleShadowPS    = SHADER_MESH_PARTICLE_SHADOW_PS_PATH;
 const char* const CullingCS               = SHADER_CULLING_HLSL_CS_PATH;
-const char* const HizGenerateCS           = SHADER_HIZ_GENERATE_CS_PATH;
+const char* const HizGenerateCS           = SHADER_HIZ_GENERATE_SLANG_CS_PATH;
 const char* const ShadowPS                = SHADER_SHADOW_HLSL_PS_PATH;
 const char* const ClusterBoundsCS         = SHADER_CLUSTER_BOUNDS_CS_PATH;
 const char* const ClusterCullingCS        = SHADER_CLUSTER_CULLING_CS_PATH;

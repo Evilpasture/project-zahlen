@@ -1,5 +1,4 @@
-// resources/shaders/hiz_generate.hlsl
-#pragma pack_matrix(column_major)
+// resources/shaders/hiz_generate.slang
 
 struct PushConstants {
     float rcpSrcWidth;
@@ -8,13 +7,14 @@ struct PushConstants {
     uint  srcHeight;
     uint  isFirstPass;
 };
-[[vk::push_constant]] PushConstants pc;
 
-[[vk::binding(0, 0)]] Texture2D<float>   inDepth;
-[[vk::binding(1, 0)]] RWTexture2D<float> outDepth;
-[[vk::binding(2, 0)]] SamplerState       pointSampler;
+[vk::push_constant] PushConstants pc;
 
-[numthreads(16, 16, 1)] void CSMain(uint3 tid : SV_DispatchThreadID) {
+Texture2D<float>   inDepth;
+RWTexture2D<float> outDepth;
+SamplerState       pointSampler;
+
+[shader("compute")][numthreads(16, 16, 1)] void CSMain(uint3 tid : SV_DispatchThreadID) {
     uint2 dstSize;
     outDepth.GetDimensions(dstSize.x, dstSize.y);
     if (tid.x >= dstSize.x || tid.y >= dstSize.y)
