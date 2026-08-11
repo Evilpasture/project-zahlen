@@ -193,10 +193,7 @@ using TAALayout = Vk::DescriptorLayout<
     Vk::SamplerSlot<3>,
     Vk::UniformSlot<4, VK_SHADER_STAGE_FRAGMENT_BIT>>;
 
-using FXAALayout = Vk::DescriptorLayout<
-    Vk::SampledImageSlot<0>, // texCurrent (Color)
-    Vk::SamplerSlot<1>       // sampler
-    >;
+using FXAALayout = Vk::SlangReflectedLayout;
 
 using VolumetricClearLayout = Vk::DescriptorLayout<
     Vk::StorageImageSlot<0>, // outVoxelMedia

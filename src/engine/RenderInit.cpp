@@ -1084,12 +1084,13 @@ std::expected<void, Error> RenderContext::Impl::BuildTAAPipeline() {
 }
 
 std::expected<void, Error> RenderContext::Impl::BuildFXAAPipeline() {
-    VkPushConstantRange fxaaPush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(float) * 6};
+    using enum Resource::ShaderID;
 
     return BuildPassHelper(
-        this, fxaaPass, "FXAA", {.path = Resource::Paths::FxaaVS, .fallback = Resource::GetShaderProgram(Fxaa).vertex, .entryPoint = "VSMain"},
-        {.path = Resource::Paths::FxaaPS, .fallback = Resource::GetShaderProgram(Fxaa).fragment, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT},
-        &fxaaPush, 1
+        this, fxaaPass, "FXAA",
+        {.path = Resource::Paths::FxaaVS, .fallback = Resource::GetShaderProgram(Fxaa).vertex},
+        {.path = Resource::Paths::FxaaPS, .fallback = Resource::GetShaderProgram(Fxaa).fragment},
+        {VK_FORMAT_R16G16B16A16_SFLOAT}
     );
 }
 
@@ -1140,8 +1141,8 @@ std::expected<void, Error> RenderContext::Impl::BuildAmbientPipeline() {
 
     return BuildPassHelper(
         this, ambientPass, "Ambient", {.path = Resource::Paths::AmbientVS, .fallback = Resource::GetShaderProgram(Ambient).vertex, .entryPoint = "VSMain"},
-        {.path = Resource::Paths::AmbientPS, .fallback = Resource::GetShaderProgram(Ambient).fragment, .entryPoint = "PSMain"},
-        {VK_FORMAT_R16G16B16A16_SFLOAT}, &ppPush, 1
+        {.path = Resource::Paths::AmbientPS, .fallback = Resource::GetShaderProgram(Ambient).fragment, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT},
+        &ppPush, 1
     );
 }
 
@@ -1218,8 +1219,7 @@ std::expected<void, Error> RenderContext::Impl::BuildBloomPipelines() {
     using enum Resource::ShaderID;
 
     auto res = BuildPassHelper(
-        this, bloomThresholdPass, "Bloom Threshold",
-        {.path = Resource::Paths::BloomThresholdVS, .fallback = Resource::GetShaderProgram(BloomThreshold).vertex},
+        this, bloomThresholdPass, "Bloom Threshold", {.path = Resource::Paths::BloomThresholdVS, .fallback = Resource::GetShaderProgram(BloomThreshold).vertex},
         {.path = Resource::Paths::BloomThresholdPS, .fallback = Resource::GetShaderProgram(BloomThreshold).fragment}, {VK_FORMAT_R16G16B16A16_SFLOAT}
     );
 
@@ -1258,8 +1258,8 @@ std::expected<void, Error> RenderContext::Impl::BuildBlitPipeline() {
 
     return BuildPassHelper(
         this, blitPass, "Blit", {.path = Resource::Paths::BlitVS, .fallback = Resource::GetShaderProgram(Blit).vertex, .entryPoint = "VSMain"},
-        {.path = Resource::Paths::BlitPS, .fallback = Resource::GetShaderProgram(Blit).fragment, .entryPoint = "PSMain"},
-        {presentation.swapchain.Get().format}, &blitPush, 1
+        {.path = Resource::Paths::BlitPS, .fallback = Resource::GetShaderProgram(Blit).fragment, .entryPoint = "PSMain"}, {presentation.swapchain.Get().format},
+        &blitPush, 1
     );
 }
 
@@ -1337,8 +1337,8 @@ std::expected<void, Error> RenderContext::Impl::InitPostProcessing() {
         .and_then([&]() {
             return register_and_check(
                 "SMAA", [this]() { return BuildSMAAPipeline(); },
-                {Resource::Paths::SmaaEdgeVS, Resource::Paths::SmaaEdgePS, Resource::Paths::SmaaWeightVS, Resource::Paths::SmaaWeightPS, Resource::Paths::SmaaBlendVS,
-                 Resource::Paths::SmaaBlendPS}
+                {Resource::Paths::SmaaEdgeVS, Resource::Paths::SmaaEdgePS, Resource::Paths::SmaaWeightVS, Resource::Paths::SmaaWeightPS,
+                 Resource::Paths::SmaaBlendVS, Resource::Paths::SmaaBlendPS}
             );
         })
         .and_then([&]() {
@@ -1383,7 +1383,9 @@ std::expected<void, Error> RenderContext::Impl::InitPostProcessing() {
                  Resource::Paths::MeshParticleShadowVS}
             );
         })
-        .and_then([&]() { return register_and_check("Decals", [this]() { return BuildDecalPipeline(); }, {Resource::Paths::DecalVS, Resource::Paths::DecalPS}); })
+        .and_then([&]() {
+            return register_and_check("Decals", [this]() { return BuildDecalPipeline(); }, {Resource::Paths::DecalVS, Resource::Paths::DecalPS});
+        })
         .and_then([&]() { return register_and_check("Blit", [this]() { return BuildBlitPipeline(); }, {Resource::Paths::BlitVS, Resource::Paths::BlitPS}); })
         // CHANGED: Converted to .and_then to handle expected texture allocations monadically
         .and_then([&]() -> std::expected<void, Error> {
