@@ -473,20 +473,6 @@ target_include_directories(zahlen_engine PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/stb
 )
 
-if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/resources/shaders/SMAA.hlsl")
-    message(STATUS "SMAA.hlsl not found. Downloading from official iryoku/smaa repository...")
-    file(DOWNLOAD
-        "https://raw.githubusercontent.com/iryoku/smaa/master/SMAA.hlsl"
-        "${CMAKE_CURRENT_SOURCE_DIR}/resources/shaders/SMAA.hlsl"
-        SHOW_PROGRESS
-        STATUS DOWNLOAD_STATUS
-    )
-    list(GET DOWNLOAD_STATUS 0 DOWNLOAD_CODE)
-    if(NOT DOWNLOAD_CODE EQUAL 0)
-        message(FATAL_ERROR "Failed to download SMAA.hlsl: ${DOWNLOAD_STATUS}")
-    endif()
-endif()
-
 # --- AUTOMATIC FENNEL BOOTSTRAP DOWNLOADER ---
 if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/fennel.lua")
     message(STATUS "fennel.lua not found. Downloading from official fennel-lang.org...")
