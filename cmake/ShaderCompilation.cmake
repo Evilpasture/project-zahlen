@@ -314,14 +314,11 @@ add_shader_target(decal_shader
 )
 
 # ============================================================================
-# --- ISOLATE SHADER DEFINITIONS & DEPENDENCIES TO ONLY THE CONSUMING FILES ---
+# --- ISOLATE SHADER DEFINITIONS & DEPENDENCIES TO ONLY THE EMBEDDING FILE ---
 # ============================================================================
 
 set(SHADER_CONSUMING_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/Resources.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/RenderInit.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/RenderResources.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/RenderProcedural.cpp"
 )
 
 # Expand target files to include both original and transpiled source paths

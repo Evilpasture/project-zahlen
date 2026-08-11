@@ -117,8 +117,8 @@ std::expected<void, Error> RenderContext::Impl::BuildParticlePipelines() {
 
             auto renderShaders = Resource::GetShaderProgram(ParticleRender);
             return LoadAndCreateShaders(
-                       {.path = SHADER_PARTICLE_RENDER_VS_PATH, .fallback = renderShaders.vertex, .entryPoint = "VSMain"},
-                       {.path = SHADER_PARTICLE_RENDER_PS_PATH, .fallback = renderShaders.fragment, .entryPoint = "PSMain"}
+                       {.path = Resource::Paths::ParticleRenderVS, .fallback = renderShaders.vertex, .entryPoint = "VSMain"},
+                       {.path = Resource::Paths::ParticleRenderPS, .fallback = renderShaders.fragment, .entryPoint = "PSMain"}
             )
                 .and_then([&](auto&& shaders) -> std::expected<void, Error> {
                     return Vk::PipelineBuilder {}
@@ -165,8 +165,8 @@ std::expected<void, Error> RenderContext::Impl::BuildMeshParticlePipelines() {
             // 3. G-Buffer Deferred Graphics Pipeline (mesh_particle_render.hlsl)
             auto mpRenderShaders = Resource::GetShaderProgram(MeshParticleRender);
             return LoadAndCreateShaders(
-                       {.path = SHADER_MESH_PARTICLE_RENDER_VS_PATH, .fallback = mpRenderShaders.vertex, .entryPoint = "VSMain"},
-                       {.path = SHADER_MESH_PARTICLE_RENDER_PS_PATH, .fallback = mpRenderShaders.fragment, .entryPoint = "PSMain"}
+                       {.path = Resource::Paths::MeshParticleRenderVS, .fallback = mpRenderShaders.vertex, .entryPoint = "VSMain"},
+                       {.path = Resource::Paths::MeshParticleRenderPS, .fallback = mpRenderShaders.fragment, .entryPoint = "PSMain"}
             )
                 .and_then([&](auto&& shaders) -> std::expected<void, Error> {
                     return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
@@ -185,8 +185,8 @@ std::expected<void, Error> RenderContext::Impl::BuildMeshParticlePipelines() {
             // 4. Directional Shadow Cascade Pipeline (mesh_particle_shadow.hlsl)
             auto mpShadowShaders = Resource::GetShaderProgram(MeshParticleShadow);
             return LoadAndCreateShaders(
-                       {.path = SHADER_MESH_PARTICLE_SHADOW_VS_PATH, .fallback = mpShadowShaders.vertex, .entryPoint = "VSMain"},
-                       {.path = SHADER_MESH_PARTICLE_SHADOW_PS_PATH, .fallback = mpShadowShaders.fragment, .entryPoint = "PSShadow"}
+                       {.path = Resource::Paths::MeshParticleShadowVS, .fallback = mpShadowShaders.vertex, .entryPoint = "VSMain"},
+                       {.path = Resource::Paths::MeshParticleShadowPS, .fallback = mpShadowShaders.fragment, .entryPoint = "PSShadow"}
             )
                 .and_then([&](auto&& shaders) -> std::expected<void, Error> {
                     return Vk::PipelineBuilder<0, true> {}
@@ -411,8 +411,8 @@ template <typename LayoutT>
     RenderContext::Impl*            self,
     Vk::PostProcessPass<LayoutT>&   pass,
     const char*                     passName,
-    ShaderStageSource               vs,
-    ShaderStageSource               ps,
+    VertexStageSource               vs,
+    FragmentStageSource             ps,
     std::initializer_list<VkFormat> colorFormats,
     const VkPushConstantRange*      pushConstants = nullptr,
     uint32_t                        pushCount     = 0,
@@ -433,8 +433,8 @@ template <typename LayoutT>
     RenderContext::Impl*                  self,
     Vk::PostProcessPass<LayoutT>&         pass,
     const char*                           passName,
-    ShaderStageSource                     vs,
-    ShaderStageSource                     ps,
+    VertexStageSource                     vs,
+    FragmentStageSource                   ps,
     std::initializer_list<VkFormat>       colorFormats,
     std::span<const VkSpecializationInfo> specInfos,
     const VkPushConstantRange*            pushConstants = nullptr,
@@ -453,7 +453,7 @@ template <typename LayoutT>
 
 } // namespace
 
-std::expected<Vk::ShaderStages, Error> RenderContext::Impl::LoadAndCreateShaders(ShaderStageSource vs, ShaderStageSource ps) const noexcept {
+std::expected<Vk::ShaderStages, Error> RenderContext::Impl::LoadAndCreateShaders(VertexStageSource vs, FragmentStageSource ps) const noexcept {
     const void*           vs_code = nullptr;
     size_t                vs_size = 0;
     const void*           ps_code = nullptr;
@@ -471,7 +471,7 @@ std::expected<Vk::ShaderStages, Error> RenderContext::Impl::LoadAndCreateShaders
         .transform_error([](auto err) -> Error { return err; });
 }
 
-std::expected<Vk::Pipeline, Error> RenderContext::Impl::LoadAndCreateComputeShader(ShaderStageSource cs, VkPipelineLayout layout) const noexcept {
+std::expected<Vk::Pipeline, Error> RenderContext::Impl::LoadAndCreateComputeShader(ComputeStageSource cs, VkPipelineLayout layout) const noexcept {
     const void*           cs_code = nullptr;
     size_t                cs_size = 0;
     std::vector<uint32_t> disk_cs;
@@ -582,7 +582,7 @@ std::expected<void, Error> RenderContext::Impl::BuildSkinningPipeline() {
         .and_then([&](auto&& layout) -> std::expected<void, Error> {
             skinningPass.pipelineLayout = std::forward<decltype(layout)>(layout);
             return LoadAndCreateComputeShader(
-                       {.path = SHADER_SKINNING_HLSL_CS_PATH, .fallback = Resource::skinning_comp, .entryPoint = "CSMain"}, skinningPass.pipelineLayout.Get()
+                       {.path = Resource::Paths::SkinningCS, .fallback = Resource::skinning_comp, .entryPoint = "CSMain"}, skinningPass.pipelineLayout.Get()
             )
                 .transform([&](auto&& pipeline) { skinningPass.pipeline = std::forward<decltype(pipeline)>(pipeline); });
         });
@@ -635,8 +635,8 @@ std::expected<void, Error> RenderContext::Impl::BuildLinePipeline() {
             auto basicShaders = Resource::GetShaderProgram(Resource::ShaderID::Basic);
 
             return LoadAndCreateShaders(
-                       {.path = SHADER_BASIC_HLSL_VS_PATH, .fallback = basicShaders.vertex, .entryPoint = "VSMain"},
-                       {.path = SHADER_FORWARD_HLSL_PS_PATH, .fallback = Resource::forward_frag, .entryPoint = "PSMain"}
+                       {.path = Resource::Paths::BasicVS, .fallback = basicShaders.vertex, .entryPoint = "VSMain"},
+                       {.path = Resource::Paths::ForwardPS, .fallback = Resource::forward_frag, .entryPoint = "PSMain"}
             )
                 .and_then([&](auto&& shaders) -> std::expected<void, Error> {
                     return Vk::PipelineBuilder<1, true> {}
@@ -955,7 +955,7 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
         .and_then([&]() { return BuildSkinningPipeline(); })
         .transform([&]() {
             if constexpr (isDev) {
-                RegisterShaderWatcher(SHADER_SKINNING_HLSL_CS_PATH, [this]() {
+                RegisterShaderWatcher(Resource::Paths::SkinningCS, [this]() {
                     auto res = BuildSkinningPipeline();
                     if (!res) {
                         ZHLN::Log("ERROR: Failed to hot-reload Skinning pipeline: {}", res.error().Message());
@@ -1054,8 +1054,8 @@ std::expected<void, Error> RenderContext::Impl::BuildDecalPipeline() {
             auto decalShaders = Resource::GetShaderProgram(Decal);
 
             return LoadAndCreateShaders(
-                       {.path = SHADER_DECAL_VS_PATH, .fallback = decalShaders.vertex, .entryPoint = "VSMain"},
-                       {.path = SHADER_DECAL_PS_PATH, .fallback = decalShaders.fragment, .entryPoint = "PSMain"}
+                       {.path = Resource::Paths::DecalVS, .fallback = decalShaders.vertex, .entryPoint = "VSMain"},
+                       {.path = Resource::Paths::DecalPS, .fallback = decalShaders.fragment, .entryPoint = "PSMain"}
             )
                 .and_then([&](auto&& shaders) -> std::expected<void, Error> {
                     return Vk::PipelineBuilder<2, true> {} // Updated from 3 to 2 attachments
@@ -1077,8 +1077,8 @@ std::expected<void, Error> RenderContext::Impl::BuildTAAPipeline() {
     VkPushConstantRange taaPush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(float)};
 
     return BuildPassHelper(
-        this, taaPass, "TAA", {.path = SHADER_TAA_HLSL_VS_PATH, .fallback = Resource::GetShaderProgram(Taa).vertex, .entryPoint = "VSMain"},
-        {.path = SHADER_TAA_HLSL_PS_PATH, .fallback = Resource::GetShaderProgram(Taa).fragment, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT},
+        this, taaPass, "TAA", {.path = Resource::Paths::TaaVS, .fallback = Resource::GetShaderProgram(Taa).vertex, .entryPoint = "VSMain"},
+        {.path = Resource::Paths::TaaPS, .fallback = Resource::GetShaderProgram(Taa).fragment, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT},
         &taaPush, 1
     );
 }
@@ -1087,8 +1087,8 @@ std::expected<void, Error> RenderContext::Impl::BuildFXAAPipeline() {
     VkPushConstantRange fxaaPush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(float) * 6};
 
     return BuildPassHelper(
-        this, fxaaPass, "FXAA", {.path = SHADER_FXAA_HLSL_VS_PATH, .fallback = Resource::GetShaderProgram(Fxaa).vertex, .entryPoint = "VSMain"},
-        {.path = SHADER_FXAA_HLSL_PS_PATH, .fallback = Resource::GetShaderProgram(Fxaa).fragment, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT},
+        this, fxaaPass, "FXAA", {.path = Resource::Paths::FxaaVS, .fallback = Resource::GetShaderProgram(Fxaa).vertex, .entryPoint = "VSMain"},
+        {.path = Resource::Paths::FxaaPS, .fallback = Resource::GetShaderProgram(Fxaa).fragment, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT},
         &fxaaPush, 1
     );
 }
@@ -1102,8 +1102,8 @@ std::expected<void, Error> RenderContext::Impl::BuildMLAAPipeline() {
 
     return BuildPassHelper(
         this, mlaaPass, "MLAA",
-        {.path = SHADER_MLAA_HLSL_VS_PATH, .fallback = Resource::GetShaderProgram(Resource::ShaderID::Mlaa).vertex, .entryPoint = "VSMain"},
-        {.path = SHADER_MLAA_HLSL_PS_PATH, .fallback = Resource::GetShaderProgram(Resource::ShaderID::Mlaa).fragment, .entryPoint = "PSMain"},
+        {.path = Resource::Paths::MlaaVS, .fallback = Resource::GetShaderProgram(Resource::ShaderID::Mlaa).vertex, .entryPoint = "VSMain"},
+        {.path = Resource::Paths::MlaaPS, .fallback = Resource::GetShaderProgram(Resource::ShaderID::Mlaa).fragment, .entryPoint = "PSMain"},
         {VK_FORMAT_R16G16B16A16_SFLOAT}, &mlaaPush, 1
     );
 }
@@ -1113,23 +1113,23 @@ std::expected<void, Error> RenderContext::Impl::BuildSMAAPipeline() {
 
     return BuildPassHelper(
                this, smaaEdgePass, "SMAA Edge Detection",
-               {.path = SHADER_SMAA_EDGE_VS_PATH, .fallback = Resource::GetShaderProgram(SmaaEdge).vertex, .entryPoint = "SmaaEdgeVS"},
-               {.path = SHADER_SMAA_EDGE_PS_PATH, .fallback = Resource::GetShaderProgram(SmaaEdge).fragment, .entryPoint = "SmaaEdgePS"},
+               {.path = Resource::Paths::SmaaEdgeVS, .fallback = Resource::GetShaderProgram(SmaaEdge).vertex, .entryPoint = "SmaaEdgeVS"},
+               {.path = Resource::Paths::SmaaEdgePS, .fallback = Resource::GetShaderProgram(SmaaEdge).fragment, .entryPoint = "SmaaEdgePS"},
                {VK_FORMAT_R8G8_UNORM}, &smaaPush, 1
     )
         .and_then([&]() {
             return BuildPassHelper(
                 this, smaaWeightPass, "SMAA Blending Weight",
-                {.path = SHADER_SMAA_WEIGHT_VS_PATH, .fallback = Resource::GetShaderProgram(SmaaWeight).vertex, .entryPoint = "SmaaWeightVS"},
-                {.path = SHADER_SMAA_WEIGHT_PS_PATH, .fallback = Resource::GetShaderProgram(SmaaWeight).fragment, .entryPoint = "SmaaWeightPS"},
+                {.path = Resource::Paths::SmaaWeightVS, .fallback = Resource::GetShaderProgram(SmaaWeight).vertex, .entryPoint = "SmaaWeightVS"},
+                {.path = Resource::Paths::SmaaWeightPS, .fallback = Resource::GetShaderProgram(SmaaWeight).fragment, .entryPoint = "SmaaWeightPS"},
                 {VK_FORMAT_R8G8B8A8_UNORM}, &smaaPush, 1
             );
         })
         .and_then([&]() {
             return BuildPassHelper(
                 this, smaaBlendPass, "SMAA Neighborhood Blend",
-                {.path = SHADER_SMAA_BLEND_VS_PATH, .fallback = Resource::GetShaderProgram(SmaaBlend).vertex, .entryPoint = "SmaaBlendVS"},
-                {.path = SHADER_SMAA_BLEND_PS_PATH, .fallback = Resource::GetShaderProgram(SmaaBlend).fragment, .entryPoint = "SmaaBlendPS"},
+                {.path = Resource::Paths::SmaaBlendVS, .fallback = Resource::GetShaderProgram(SmaaBlend).vertex, .entryPoint = "SmaaBlendVS"},
+                {.path = Resource::Paths::SmaaBlendPS, .fallback = Resource::GetShaderProgram(SmaaBlend).fragment, .entryPoint = "SmaaBlendPS"},
                 {VK_FORMAT_R16G16B16A16_SFLOAT}, &smaaPush, 1
             );
         });
@@ -1139,8 +1139,8 @@ std::expected<void, Error> RenderContext::Impl::BuildAmbientPipeline() {
     VkPushConstantRange ppPush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = 192};
 
     return BuildPassHelper(
-        this, ambientPass, "Ambient", {.path = SHADER_AMBIENT_HLSL_VS_PATH, .fallback = Resource::GetShaderProgram(Ambient).vertex, .entryPoint = "VSMain"},
-        {.path = SHADER_AMBIENT_HLSL_PS_PATH, .fallback = Resource::GetShaderProgram(Ambient).fragment, .entryPoint = "PSMain"},
+        this, ambientPass, "Ambient", {.path = Resource::Paths::AmbientVS, .fallback = Resource::GetShaderProgram(Ambient).vertex, .entryPoint = "VSMain"},
+        {.path = Resource::Paths::AmbientPS, .fallback = Resource::GetShaderProgram(Ambient).fragment, .entryPoint = "PSMain"},
         {VK_FORMAT_R16G16B16A16_SFLOAT}, &ppPush, 1
     );
 }
@@ -1160,8 +1160,8 @@ std::expected<void, Error> RenderContext::Impl::BuildLightingPipeline() {
     }
 
     bool        hasRt  = rtCtx.Valid();
-    const char* vsPath = hasRt ? SHADER_LIGHTING_HLSL_VS_PATH : SHADER_LIGHTING_NORT_HLSL_VS_PATH;
-    const char* psPath = hasRt ? SHADER_LIGHTING_HLSL_PS_PATH : SHADER_LIGHTING_NORT_HLSL_PS_PATH;
+    const char* vsPath = hasRt ? Resource::Paths::LightingVS : Resource::Paths::LightingNortVS;
+    const char* psPath = hasRt ? Resource::Paths::LightingPS : Resource::Paths::LightingNortPS;
 
     auto vsSpan = hasRt ? Resource::GetShaderProgram(Lighting).vertex : Resource::GetShaderProgram(LightingNort).vertex;
     auto psSpan = hasRt ? Resource::GetShaderProgram(Lighting).fragment : Resource::GetShaderProgram(LightingNort).fragment;
@@ -1193,8 +1193,8 @@ std::expected<void, Error> RenderContext::Impl::BuildReflectionPipelines() {
     }
 
     bool        hasRt  = rtCtx.Valid();
-    const char* vsPath = hasRt ? SHADER_REFLECTION_HLSL_VS_PATH : SHADER_REFLECTION_NORT_HLSL_VS_PATH;
-    const char* psPath = hasRt ? SHADER_REFLECTION_HLSL_PS_PATH : SHADER_REFLECTION_NORT_HLSL_PS_PATH;
+    const char* vsPath = hasRt ? Resource::Paths::ReflectionVS : Resource::Paths::ReflectionNortVS;
+    const char* psPath = hasRt ? Resource::Paths::ReflectionPS : Resource::Paths::ReflectionNortPS;
 
     auto vsSpan = hasRt ? Resource::GetShaderProgram(Reflection).vertex : Resource::GetShaderProgram(Resource::ShaderID::ReflectionNort).vertex;
     auto psSpan = hasRt ? Resource::GetShaderProgram(Reflection).fragment : Resource::GetShaderProgram(Resource::ShaderID::ReflectionNort).fragment;
@@ -1219,8 +1219,8 @@ std::expected<void, Error> RenderContext::Impl::BuildBloomPipelines() {
 
     auto res = BuildPassHelper(
         this, bloomThresholdPass, "Bloom Threshold",
-        {.path = SHADER_BLOOM_THRESHOLD_SLANG_VS_PATH, .fallback = Resource::GetShaderProgram(BloomThreshold).vertex},
-        {.path = SHADER_BLOOM_THRESHOLD_SLANG_PS_PATH, .fallback = Resource::GetShaderProgram(BloomThreshold).fragment}, {VK_FORMAT_R16G16B16A16_SFLOAT}
+        {.path = Resource::Paths::BloomThresholdVS, .fallback = Resource::GetShaderProgram(BloomThreshold).vertex},
+        {.path = Resource::Paths::BloomThresholdPS, .fallback = Resource::GetShaderProgram(BloomThreshold).fragment}, {VK_FORMAT_R16G16B16A16_SFLOAT}
     );
 
     VkPushConstantRange kawasePush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(KawasePushConstants)};
@@ -1231,16 +1231,16 @@ std::expected<void, Error> RenderContext::Impl::BuildBloomPipelines() {
                          std::string downName = std::format("Bloom Downsample {}", i);
                          return BuildPassHelper(
                              this, bloomDownPass[i], downName.c_str(),
-                             {.path = SHADER_BLOOM_BLUR_SLANG_VS_PATH, .fallback = Resource::GetShaderProgram(BloomBlur).vertex},
-                             {.path = SHADER_BLOOM_BLUR_SLANG_PS_PATH, .fallback = Resource::GetShaderProgram(BloomBlur).fragment},
+                             {.path = Resource::Paths::BloomBlurVS, .fallback = Resource::GetShaderProgram(BloomBlur).vertex},
+                             {.path = Resource::Paths::BloomBlurPS, .fallback = Resource::GetShaderProgram(BloomBlur).fragment},
                              {VK_FORMAT_R16G16B16A16_SFLOAT}, &kawasePush, 1
                          );
                      }
         ).and_then([&, i]() {
             std::string upName = std::format("Bloom Upsample {}", i);
             return BuildPassHelper(
-                this, bloomUpPass[i], upName.c_str(), {.path = SHADER_BLOOM_BLUR_SLANG_VS_PATH, .fallback = Resource::GetShaderProgram(BloomBlur).vertex},
-                {.path = SHADER_BLOOM_BLUR_SLANG_PS_PATH, .fallback = Resource::GetShaderProgram(BloomBlur).fragment}, {VK_FORMAT_R16G16B16A16_SFLOAT},
+                this, bloomUpPass[i], upName.c_str(), {.path = Resource::Paths::BloomBlurVS, .fallback = Resource::GetShaderProgram(BloomBlur).vertex},
+                {.path = Resource::Paths::BloomBlurPS, .fallback = Resource::GetShaderProgram(BloomBlur).fragment}, {VK_FORMAT_R16G16B16A16_SFLOAT},
                 &kawasePush, 1
             );
         });
@@ -1257,8 +1257,8 @@ std::expected<void, Error> RenderContext::Impl::BuildBlitPipeline() {
     };
 
     return BuildPassHelper(
-        this, blitPass, "Blit", {.path = SHADER_BLIT_HLSL_VS_PATH, .fallback = Resource::GetShaderProgram(Blit).vertex, .entryPoint = "VSMain"},
-        {.path = SHADER_BLIT_HLSL_PS_PATH, .fallback = Resource::GetShaderProgram(Blit).fragment, .entryPoint = "PSMain"},
+        this, blitPass, "Blit", {.path = Resource::Paths::BlitVS, .fallback = Resource::GetShaderProgram(Blit).vertex, .entryPoint = "VSMain"},
+        {.path = Resource::Paths::BlitPS, .fallback = Resource::GetShaderProgram(Blit).fragment, .entryPoint = "PSMain"},
         {presentation.swapchain.Get().format}, &blitPush, 1
     );
 }
@@ -1331,60 +1331,60 @@ std::expected<void, Error> RenderContext::Impl::InitPostProcessing() {
                 .transform_error([](auto err) -> Error { return err; })
                 .transform([&](auto pointResult) { pointSampler = std::move(pointResult); });
         })
-        .and_then([&]() { return register_and_check("TAA", [this]() { return BuildTAAPipeline(); }, {SHADER_TAA_HLSL_VS_PATH, SHADER_TAA_HLSL_PS_PATH}); })
-        .and_then([&]() { return register_and_check("FXAA", [this]() { return BuildFXAAPipeline(); }, {SHADER_FXAA_HLSL_VS_PATH, SHADER_FXAA_HLSL_PS_PATH}); })
-        .and_then([&]() { return register_and_check("MLAA", [this]() { return BuildMLAAPipeline(); }, {SHADER_MLAA_HLSL_VS_PATH, SHADER_MLAA_HLSL_PS_PATH}); })
+        .and_then([&]() { return register_and_check("TAA", [this]() { return BuildTAAPipeline(); }, {Resource::Paths::TaaVS, Resource::Paths::TaaPS}); })
+        .and_then([&]() { return register_and_check("FXAA", [this]() { return BuildFXAAPipeline(); }, {Resource::Paths::FxaaVS, Resource::Paths::FxaaPS}); })
+        .and_then([&]() { return register_and_check("MLAA", [this]() { return BuildMLAAPipeline(); }, {Resource::Paths::MlaaVS, Resource::Paths::MlaaPS}); })
         .and_then([&]() {
             return register_and_check(
                 "SMAA", [this]() { return BuildSMAAPipeline(); },
-                {SHADER_SMAA_EDGE_VS_PATH, SHADER_SMAA_EDGE_PS_PATH, SHADER_SMAA_WEIGHT_VS_PATH, SHADER_SMAA_WEIGHT_PS_PATH, SHADER_SMAA_BLEND_VS_PATH,
-                 SHADER_SMAA_BLEND_PS_PATH}
+                {Resource::Paths::SmaaEdgeVS, Resource::Paths::SmaaEdgePS, Resource::Paths::SmaaWeightVS, Resource::Paths::SmaaWeightPS, Resource::Paths::SmaaBlendVS,
+                 Resource::Paths::SmaaBlendPS}
             );
         })
         .and_then([&]() {
-            return register_and_check("Ambient", [this]() { return BuildAmbientPipeline(); }, {SHADER_AMBIENT_HLSL_VS_PATH, SHADER_AMBIENT_HLSL_PS_PATH});
+            return register_and_check("Ambient", [this]() { return BuildAmbientPipeline(); }, {Resource::Paths::AmbientVS, Resource::Paths::AmbientPS});
         })
         .and_then([&]() {
             return register_and_check(
                 "Lighting", [this]() { return BuildLightingPipeline(); },
-                {SHADER_LIGHTING_HLSL_VS_PATH, SHADER_LIGHTING_HLSL_PS_PATH, SHADER_LIGHTING_NORT_HLSL_VS_PATH, SHADER_LIGHTING_NORT_HLSL_PS_PATH}
+                {Resource::Paths::LightingVS, Resource::Paths::LightingPS, Resource::Paths::LightingNortVS, Resource::Paths::LightingNortPS}
             );
         })
         .and_then([&]() {
             return register_and_check(
                 "Reflection", [this]() { return BuildReflectionPipelines(); },
-                {SHADER_REFLECTION_HLSL_VS_PATH, SHADER_REFLECTION_HLSL_PS_PATH, SHADER_REFLECTION_NORT_HLSL_VS_PATH, SHADER_REFLECTION_NORT_HLSL_PS_PATH}
+                {Resource::Paths::ReflectionVS, Resource::Paths::ReflectionPS, Resource::Paths::ReflectionNortVS, Resource::Paths::ReflectionNortPS}
             );
         })
         .and_then([&]() {
             return register_and_check(
                 "Bloom", [this]() { return BuildBloomPipelines(); },
-                {SHADER_BLOOM_THRESHOLD_SLANG_VS_PATH, SHADER_BLOOM_THRESHOLD_SLANG_PS_PATH, SHADER_BLOOM_BLUR_SLANG_VS_PATH, SHADER_BLOOM_BLUR_SLANG_PS_PATH}
+                {Resource::Paths::BloomThresholdVS, Resource::Paths::BloomThresholdPS, Resource::Paths::BloomBlurVS, Resource::Paths::BloomBlurPS}
             );
         })
         .and_then([&]() {
             return register_and_check(
                 "Volumetrics", buildVolumetrics,
-                {SHADER_VOLUMETRIC_CLEAR_CS_PATH, SHADER_VOLUMETRIC_FOG_INJECT_CS_PATH, SHADER_VOLUMETRIC_LIGHT_INJECT_CS_PATH,
-                 SHADER_VOLUMETRIC_INTEGRATION_CS_PATH, SHADER_VOLUMETRIC_TEMPORAL_CS_PATH}
+                {Resource::Paths::VolumetricClearCS, Resource::Paths::VolumetricFogInjectCS, Resource::Paths::VolumetricLightInjectCS,
+                 Resource::Paths::VolumetricIntegrationCS, Resource::Paths::VolumetricTemporalCS}
             );
         })
         .and_then([&]() {
             // Build Particle Compute + Render Pipelines
             return register_and_check(
                 "Particles", [this]() { return BuildParticlePipelines(); },
-                {SHADER_PARTICLE_UPDATE_CS_PATH, SHADER_PARTICLE_RENDER_VS_PATH, SHADER_PARTICLE_RENDER_PS_PATH}
+                {Resource::Paths::ParticleUpdateCS, Resource::Paths::ParticleRenderVS, Resource::Paths::ParticleRenderPS}
             );
         })
         .and_then([&]() {
             return register_and_check(
                 "3D Mesh Particles", [this]() { return BuildMeshParticlePipelines(); },
-                {SHADER_MESH_PARTICLE_UPDATE_CS_PATH, SHADER_MESH_PARTICLE_RENDER_VS_PATH, SHADER_MESH_PARTICLE_RENDER_PS_PATH,
-                 SHADER_MESH_PARTICLE_SHADOW_VS_PATH}
+                {Resource::Paths::MeshParticleUpdateCS, Resource::Paths::MeshParticleRenderVS, Resource::Paths::MeshParticleRenderPS,
+                 Resource::Paths::MeshParticleShadowVS}
             );
         })
-        .and_then([&]() { return register_and_check("Decals", [this]() { return BuildDecalPipeline(); }, {SHADER_DECAL_VS_PATH, SHADER_DECAL_PS_PATH}); })
-        .and_then([&]() { return register_and_check("Blit", [this]() { return BuildBlitPipeline(); }, {SHADER_BLIT_HLSL_VS_PATH, SHADER_BLIT_HLSL_PS_PATH}); })
+        .and_then([&]() { return register_and_check("Decals", [this]() { return BuildDecalPipeline(); }, {Resource::Paths::DecalVS, Resource::Paths::DecalPS}); })
+        .and_then([&]() { return register_and_check("Blit", [this]() { return BuildBlitPipeline(); }, {Resource::Paths::BlitVS, Resource::Paths::BlitPS}); })
         // CHANGED: Converted to .and_then to handle expected texture allocations monadically
         .and_then([&]() -> std::expected<void, Error> {
             ZHLN::Array<uint32_t> smaaAreaPixels(static_cast<size_t>(160 * 560));
@@ -1411,8 +1411,8 @@ std::expected<void, Error> RenderContext::Impl::InitCSGPipelines() {
     auto basicShaders = Resource::GetShaderProgram(Basic);
 
     return LoadAndCreateShaders(
-               {.path = SHADER_BASIC_HLSL_VS_PATH, .fallback = basicShaders.vertex, .entryPoint = "VSMain"},
-               {.path = SHADER_BASIC_HLSL_PS_PATH, .fallback = basicShaders.fragment, .entryPoint = "PSMain"}
+               {.path = Resource::Paths::BasicVS, .fallback = basicShaders.vertex, .entryPoint = "VSMain"},
+               {.path = Resource::Paths::BasicPS, .fallback = basicShaders.fragment, .entryPoint = "PSMain"}
     )
         .and_then([&](auto&& compiledShaders) {
             shaders = std::forward<decltype(compiledShaders)>(compiledShaders);
@@ -1507,7 +1507,7 @@ std::expected<void, Error> RenderContext::Impl::InitCSGPipelines() {
         .transform([&](auto&& intersectPipeline) {
             csgIntersectionPipeline = std::forward<decltype(intersectPipeline)>(intersectPipeline);
 
-            WatchPipeline(SHADER_BASIC_HLSL_VS_PATH, SHADER_BASIC_HLSL_PS_PATH, [this]() {
+            WatchPipeline(Resource::Paths::BasicVS, Resource::Paths::BasicPS, [this]() {
                 auto res = InitCSGPipelines();
                 if (!res) {
                     ZHLN::Log("ERROR: Failed to hot-reload CSG stencil pipelines: {}", res.error().Message());
@@ -1889,7 +1889,7 @@ std::expected<void, Error> RenderContext::Impl::BuildHangGpuPipeline() {
         .and_then([&](auto&& layout) -> std::expected<void, Error> {
             hangGpuPass.pipelineLayout = std::forward<decltype(layout)>(layout);
             return LoadAndCreateComputeShader(
-                       {.path = SHADER_HANG_GPU_HLSL_CS_PATH, .fallback = Resource::hang_gpu_comp, .entryPoint = "CSMain"}, hangGpuPass.pipelineLayout.Get()
+                       {.path = Resource::Paths::HangGpuCS, .fallback = Resource::hang_gpu_comp, .entryPoint = "CSMain"}, hangGpuPass.pipelineLayout.Get()
             )
                 .transform([&](auto&& pipeline) { hangGpuPass.pipeline = std::forward<decltype(pipeline)>(pipeline); });
         });

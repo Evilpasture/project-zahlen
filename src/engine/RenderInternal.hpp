@@ -421,11 +421,19 @@ struct NativeMesh {
     }
 };
 
+enum class ShaderStage : std::uint8_t { Vertex, Fragment, Compute };
+
+template <ShaderStage Stage>
 struct ShaderStageSource {
+    static constexpr ShaderStage  stage = Stage;
     const char*                   path;
     std::span<const std::uint8_t> fallback;
     const char*                   entryPoint = "main";
 };
+
+using VertexStageSource   = ShaderStageSource<ShaderStage::Vertex>;
+using FragmentStageSource = ShaderStageSource<ShaderStage::Fragment>;
+using ComputeStageSource  = ShaderStageSource<ShaderStage::Compute>;
 
 struct NativeMaterial {
     Vk::Pipeline       pipeline;
@@ -1078,7 +1086,8 @@ struct RenderContext::Impl {
     [[nodiscard]] auto CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> std::expected<uint32_t, Error>;
     [[nodiscard]] auto CreateTextureCubeInternal(const void* const* faceData, uint32_t width, uint32_t height) -> std::expected<uint32_t, Error>;
 
-    std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, VkResult> CreateGPUBuffer(size_t size, const void* data, VkBufferUsageFlags functionalUsage) const;
+    [[nodiscard]] std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, VkResult>
+        CreateGPUBuffer(size_t size, const void* data, VkBufferUsageFlags functionalUsage) const;
 
     void BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const DrawCommand& drawCmd, NativeMesh* scratchMesh) const;
 
@@ -1092,18 +1101,18 @@ struct RenderContext::Impl {
     void CheckShaderWatchers() noexcept;
 
     template <VkFormat F>
-    auto CreateDefaultTarget(VkExtent2D ext, VkImageUsageFlags extraFlags = 0) {
+    [[nodiscard]] auto CreateDefaultTarget(VkExtent2D ext, VkImageUsageFlags extraFlags = 0) {
         return Vk::RenderTarget<F>::Create(allocator, ctx, ext, {.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | extraFlags});
     }
 
     bool RecreateTargets(VkExtent2D ext);
 
-    void                       RecreatePunctualShadowViews() noexcept;
-    std::expected<void, Error> InitSkeletalAnimationResources();
-    std::expected<void, Error> InitLightingLUTs();
+    void                                     RecreatePunctualShadowViews() noexcept;
+    [[nodiscard]] std::expected<void, Error> InitSkeletalAnimationResources();
+    [[nodiscard]] std::expected<void, Error> InitLightingLUTs();
 
-    [[nodiscard]] std::expected<Vk::ShaderStages, Error> LoadAndCreateShaders(ShaderStageSource vs, ShaderStageSource ps) const noexcept;
-    [[nodiscard]] std::expected<Vk::Pipeline, Error>     LoadAndCreateComputeShader(ShaderStageSource cs, VkPipelineLayout layout) const noexcept;
+    [[nodiscard]] std::expected<Vk::ShaderStages, Error> LoadAndCreateShaders(VertexStageSource vs, FragmentStageSource ps) const noexcept;
+    [[nodiscard]] std::expected<Vk::Pipeline, Error>     LoadAndCreateComputeShader(ComputeStageSource cs, VkPipelineLayout layout) const noexcept;
 
     void WatchPipeline(const char* vsPath, const char* psPath, std::function<void()> rebuild_fn) noexcept;
     void UploadClusterBounds(const JPH::Mat44& proj);
@@ -1242,7 +1251,8 @@ inline std::vector<uint32_t> LoadShaderSpv(const std::string& path) noexcept {
     return buffer;
 }
 
-inline bool LoadShaderData(const ShaderStageSource& src, const void*& outData, size_t& outSize, std::vector<uint32_t>& diskBuffer) {
+template <ShaderStage Stage>
+inline bool LoadShaderData(const ShaderStageSource<Stage>& src, const void*& outData, size_t& outSize, std::vector<uint32_t>& diskBuffer) {
     outData = src.fallback.data();
     outSize = src.fallback.size_bytes();
     if constexpr (isDev) {

@@ -7,6 +7,67 @@
 
 namespace ZHLN::Resource {
 
+namespace Paths {
+extern const char* const BasicVS;
+extern const char* const BasicPS;
+extern const char* const BlitVS;
+extern const char* const BlitPS;
+extern const char* const TaaVS;
+extern const char* const TaaPS;
+extern const char* const UiVS;
+extern const char* const UiPS;
+extern const char* const AmbientVS;
+extern const char* const AmbientPS;
+extern const char* const LightingVS;
+extern const char* const LightingPS;
+extern const char* const ReflectionVS;
+extern const char* const ReflectionPS;
+extern const char* const ReflectionNortVS;
+extern const char* const ReflectionNortPS;
+extern const char* const FxaaVS;
+extern const char* const FxaaPS;
+extern const char* const MlaaVS;
+extern const char* const MlaaPS;
+extern const char* const SmaaEdgeVS;
+extern const char* const SmaaEdgePS;
+extern const char* const SmaaWeightVS;
+extern const char* const SmaaWeightPS;
+extern const char* const SmaaBlendVS;
+extern const char* const SmaaBlendPS;
+extern const char* const BloomThresholdVS;
+extern const char* const BloomThresholdPS;
+extern const char* const BloomBlurVS;
+extern const char* const BloomBlurPS;
+extern const char* const PunctualShadowsVS;
+extern const char* const PunctualShadowsPS;
+extern const char* const LightingNortVS;
+extern const char* const LightingNortPS;
+extern const char* const VolumetricClearCS;
+extern const char* const VolumetricFogInjectCS;
+extern const char* const VolumetricLightInjectCS;
+extern const char* const VolumetricIntegrationCS;
+extern const char* const VolumetricTemporalCS;
+extern const char* const ParticleUpdateCS;
+extern const char* const ParticleRenderVS;
+extern const char* const ParticleRenderPS;
+extern const char* const DecalVS;
+extern const char* const DecalPS;
+extern const char* const MeshParticleUpdateCS;
+extern const char* const MeshParticleRenderVS;
+extern const char* const MeshParticleRenderPS;
+extern const char* const MeshParticleShadowVS;
+extern const char* const MeshParticleShadowPS;
+extern const char* const CullingCS;
+extern const char* const HizGenerateCS;
+extern const char* const ShadowPS;
+extern const char* const ClusterBoundsCS;
+extern const char* const ClusterCullingCS;
+extern const char* const SkinningCS;
+extern const char* const ForwardPS;
+extern const char* const HangGpuCS;
+extern const char* const ProceduralBakeCS;
+} // namespace Paths
+
 struct ShaderPair {
     std::span<const uint8_t> vertex;
     std::span<const uint8_t> fragment;
@@ -46,7 +107,7 @@ enum class ShaderID : uint8_t {
     VolumetricLightInject,
     VolumetricIntegration,
     VolumetricTemporal,
-    VolumetricInjection, // Legacy alias
+    VolumetricInjection,  // Legacy alias
     VolumetricScattering, // Legacy alias
     ParticleUpdate,
     ParticleRender,

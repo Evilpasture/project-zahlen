@@ -269,6 +269,8 @@ constexpr uint8_t hang_gpu_comp_raw[] = {
 #embed SHADER_HANG_GPU_HLSL_CS_PATH
 };
 
+static auto procedural_bake_comp_path = SHADER_PROCEDURAL_BAKE_CS_PATH;
+
 constexpr uint8_t procedural_bake_comp_raw[] = {
 #embed SHADER_PROCEDURAL_BAKE_CS_PATH
 };
@@ -297,5 +299,66 @@ extern const std::span<const uint8_t> hang_gpu_comp {hang_gpu_comp_raw, sizeof(h
 extern const std::span<const uint8_t> procedural_bake_comp {procedural_bake_comp_raw, sizeof(procedural_bake_comp_raw)};
 extern const std::span<const uint8_t> ltc_mat {ltc_mat_raw, sizeof(ltc_mat_raw)};
 extern const std::span<const uint8_t> ltc_amp {ltc_amp_raw, sizeof(ltc_amp_raw)};
+
+namespace Paths {
+const char* const BasicVS                 = SHADER_BASIC_HLSL_VS_PATH;
+const char* const BasicPS                 = SHADER_BASIC_HLSL_PS_PATH;
+const char* const BlitVS                  = SHADER_BLIT_HLSL_VS_PATH;
+const char* const BlitPS                  = SHADER_BLIT_HLSL_PS_PATH;
+const char* const TaaVS                   = SHADER_TAA_HLSL_VS_PATH;
+const char* const TaaPS                   = SHADER_TAA_HLSL_PS_PATH;
+const char* const UiVS                    = SHADER_UI_HLSL_VS_PATH;
+const char* const UiPS                    = SHADER_UI_HLSL_PS_PATH;
+const char* const AmbientVS               = SHADER_AMBIENT_HLSL_VS_PATH;
+const char* const AmbientPS               = SHADER_AMBIENT_HLSL_PS_PATH;
+const char* const LightingVS              = SHADER_LIGHTING_HLSL_VS_PATH;
+const char* const LightingPS              = SHADER_LIGHTING_HLSL_PS_PATH;
+const char* const ReflectionVS            = SHADER_REFLECTION_HLSL_VS_PATH;
+const char* const ReflectionPS            = SHADER_REFLECTION_HLSL_PS_PATH;
+const char* const ReflectionNortVS        = SHADER_REFLECTION_NORT_HLSL_VS_PATH;
+const char* const ReflectionNortPS        = SHADER_REFLECTION_NORT_HLSL_PS_PATH;
+const char* const FxaaVS                  = SHADER_FXAA_HLSL_VS_PATH;
+const char* const FxaaPS                  = SHADER_FXAA_HLSL_PS_PATH;
+const char* const MlaaVS                  = SHADER_MLAA_HLSL_VS_PATH;
+const char* const MlaaPS                  = SHADER_MLAA_HLSL_PS_PATH;
+const char* const SmaaEdgeVS              = SHADER_SMAA_EDGE_VS_PATH;
+const char* const SmaaEdgePS              = SHADER_SMAA_EDGE_PS_PATH;
+const char* const SmaaWeightVS            = SHADER_SMAA_WEIGHT_VS_PATH;
+const char* const SmaaWeightPS            = SHADER_SMAA_WEIGHT_PS_PATH;
+const char* const SmaaBlendVS             = SHADER_SMAA_BLEND_VS_PATH;
+const char* const SmaaBlendPS             = SHADER_SMAA_BLEND_PS_PATH;
+const char* const BloomThresholdVS        = SHADER_BLOOM_THRESHOLD_SLANG_VS_PATH;
+const char* const BloomThresholdPS        = SHADER_BLOOM_THRESHOLD_SLANG_PS_PATH;
+const char* const BloomBlurVS             = SHADER_BLOOM_BLUR_SLANG_VS_PATH;
+const char* const BloomBlurPS             = SHADER_BLOOM_BLUR_SLANG_PS_PATH;
+const char* const PunctualShadowsVS       = SHADER_PUNCTUAL_SHADOWS_HLSL_VS_PATH;
+const char* const PunctualShadowsPS       = SHADER_PUNCTUAL_SHADOWS_HLSL_PS_PATH;
+const char* const LightingNortVS          = SHADER_LIGHTING_NORT_HLSL_VS_PATH;
+const char* const LightingNortPS          = SHADER_LIGHTING_NORT_HLSL_PS_PATH;
+const char* const VolumetricClearCS       = SHADER_VOLUMETRIC_CLEAR_CS_PATH;
+const char* const VolumetricFogInjectCS   = SHADER_VOLUMETRIC_FOG_INJECT_CS_PATH;
+const char* const VolumetricLightInjectCS = SHADER_VOLUMETRIC_LIGHT_INJECT_CS_PATH;
+const char* const VolumetricIntegrationCS = SHADER_VOLUMETRIC_INTEGRATION_CS_PATH;
+const char* const VolumetricTemporalCS    = SHADER_VOLUMETRIC_TEMPORAL_CS_PATH;
+const char* const ParticleUpdateCS        = SHADER_PARTICLE_UPDATE_CS_PATH;
+const char* const ParticleRenderVS        = SHADER_PARTICLE_RENDER_VS_PATH;
+const char* const ParticleRenderPS        = SHADER_PARTICLE_RENDER_PS_PATH;
+const char* const DecalVS                 = SHADER_DECAL_VS_PATH;
+const char* const DecalPS                 = SHADER_DECAL_PS_PATH;
+const char* const MeshParticleUpdateCS    = SHADER_MESH_PARTICLE_UPDATE_CS_PATH;
+const char* const MeshParticleRenderVS    = SHADER_MESH_PARTICLE_RENDER_VS_PATH;
+const char* const MeshParticleRenderPS    = SHADER_MESH_PARTICLE_RENDER_PS_PATH;
+const char* const MeshParticleShadowVS    = SHADER_MESH_PARTICLE_SHADOW_VS_PATH;
+const char* const MeshParticleShadowPS    = SHADER_MESH_PARTICLE_SHADOW_PS_PATH;
+const char* const CullingCS               = SHADER_CULLING_HLSL_CS_PATH;
+const char* const HizGenerateCS           = SHADER_HIZ_GENERATE_CS_PATH;
+const char* const ShadowPS                = SHADER_SHADOW_HLSL_PS_PATH;
+const char* const ClusterBoundsCS         = SHADER_CLUSTER_BOUNDS_CS_PATH;
+const char* const ClusterCullingCS        = SHADER_CLUSTER_CULLING_CS_PATH;
+const char* const SkinningCS              = SHADER_SKINNING_HLSL_CS_PATH;
+const char* const ForwardPS               = SHADER_FORWARD_HLSL_PS_PATH;
+const char* const HangGpuCS               = SHADER_HANG_GPU_HLSL_CS_PATH;
+const char* const ProceduralBakeCS        = SHADER_PROCEDURAL_BAKE_CS_PATH;
+} // namespace Paths
 
 } // namespace ZHLN::Resource

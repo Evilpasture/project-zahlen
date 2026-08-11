@@ -20,7 +20,10 @@ std::expected<void, Error> RenderContext::Impl::BuildProceduralBakePipeline() {
     size_t                cs_size = 0;
     std::vector<uint32_t> disk_cs;
 
-    LoadShaderData({.path = SHADER_PROCEDURAL_BAKE_CS_PATH, .fallback = Resource::procedural_bake_comp, .entryPoint = "CSMain"}, cs_code, cs_size, disk_cs);
+    LoadShaderData(
+        ComputeStageSource {.path = Resource::Paths::ProceduralBakeCS, .fallback = Resource::procedural_bake_comp, .entryPoint = "CSMain"}, cs_code, cs_size,
+        disk_cs
+    );
 
     ZHLN_ShaderDesc shaderDesc = {.code = Vk::AsSpirV(cs_code), .size = cs_size, .entry_point = "CSMain"};
 
