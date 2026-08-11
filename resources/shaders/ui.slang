@@ -1,26 +1,12 @@
-// resources/shaders/ui.hlsl
-#pragma pack_matrix(column_major)
-
-struct Vertex {
-    float pos_x;
-    float pos_y;
-    float pos_z;
-    uint  normal;
-    uint  tangent;
-    uint  uv;
-    uint  color;
-    uint  joint0;
-    uint  joint1;
-    float weight0;
-    float weight1;
-    float weight2;
-    float weight3;
-    uint  pad0;
-    uint  pad1;
-    uint  pad2;
+// resources/shaders/ui.slang
+struct VertexAttributes {
+    uint normal;
+    uint tangent;
+    uint uv;
+    uint color;
 };
 
-// --- Custom Local Unpackers (Preventing Duplicate Definition Errors) ---
+// --- Custom Local Unpackers ---
 float2 LocalUnpackUV(uint packed) {
     return float2(f16tof32(packed & 0xFFFF), f16tof32(packed >> 16));
 }
@@ -39,10 +25,10 @@ struct UIObjectConstants {
     uint     isSDF;
 };
 
-[[vk::push_constant]] UIObjectConstants obj;
+[vk::push_constant] UIObjectConstants obj;
 
-[[vk::binding(0, 0)]] Texture2D    globalTextures[];
-[[vk::binding(1, 0)]] SamplerState defaultSampler;
+Texture2D    globalTextures[];
+SamplerState defaultSampler;
 
 struct UIVSOutput {
     float4 pos : SV_Position;
@@ -50,12 +36,19 @@ struct UIVSOutput {
     float4 color : COLOR;
 };
 
-UIVSOutput VSMain(uint vertexId : SV_VertexID) {
+[shader("vertex")] UIVSOutput VSMain(uint vertexId : SV_VertexID) {
     UIVSOutput output;
 
-    float3 position = vk::RawBufferLoad<float3>(obj.posAddress + vertexId * 12, 4);
-    uint   uv       = vk::RawBufferLoad<uint>(obj.attrAddress + vertexId * 16 + 8, 4);
-    uint   color    = vk::RawBufferLoad<uint>(obj.attrAddress + vertexId * 16 + 12, 4);
+    // Cast physical buffer device addresses to strongly-typed GPU pointers
+    float3*           posPool  = (float3*) obj.posAddress;
+    VertexAttributes* attrPool = (VertexAttributes*) obj.attrAddress;
+
+    // Load data cleanly with array subscripting
+    float3           position = posPool[vertexId];
+    VertexAttributes attr     = attrPool[vertexId];
+
+    uint uv    = attr.uv;
+    uint color = attr.color;
 
     output.pos   = mul(obj.orthoMatrix, float4(position, 1.0f));
     output.uv    = LocalUnpackUV(uv);
@@ -63,7 +56,7 @@ UIVSOutput VSMain(uint vertexId : SV_VertexID) {
     return output;
 }
 
-float4 PSMain(UIVSOutput input): SV_Target0 {
+    [shader("fragment")] float4 PSMain(UIVSOutput input): SV_Target0 {
     float4 texSample = globalTextures[obj.albedoIdx].Sample(defaultSampler, input.uv);
     float  alpha     = texSample.a;
 

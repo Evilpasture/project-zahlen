@@ -353,6 +353,7 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
             f.timelineSemaphore                            = VK_TRUE;
             f.drawIndirectCount                            = caps.supportsDrawIndirectCount ? VK_TRUE : VK_FALSE;
             f.uniformAndStorageBuffer8BitAccess            = VK_TRUE;
+            f.shaderFloat16                                = VK_TRUE;
 
             // Enable Vulkan 1.2 features required for GPU-AV shader instrumentation
             if (validationMode == ZHLN::ValidationMode::GPU) {
@@ -379,6 +380,7 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
             f.features.drawIndirectFirstInstance = VK_TRUE;
             f.features.shaderInt64               = caps.supportsInt64 ? VK_TRUE : VK_FALSE;
             f.features.imageCubeArray            = VK_TRUE;
+            f.features.shaderInt16               = VK_TRUE;
 
             // Enable Core features required by GPU-AV (and VUID 04000)
             if (validationMode == ZHLN::ValidationMode::GPU) {

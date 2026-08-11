@@ -173,7 +173,7 @@ compile_shaders(zahlen_engine
     "${SHADER_SRC_DIR}/basic.hlsl"
     "${SHADER_SRC_DIR}/blit.hlsl"
     "${SHADER_SRC_DIR}/taa.hlsl"
-    "${SHADER_SRC_DIR}/ui.hlsl"
+    "${SHADER_SRC_DIR}/ui.slang"
     "${SHADER_SRC_DIR}/fxaa.slang"
     "${SHADER_SRC_DIR}/mlaa.slang"
     "${SHADER_SRC_DIR}/ambient.hlsl"

@@ -41,10 +41,10 @@ extern const ShaderPair taa_shaders {.vertex = taa_vs_raw, .fragment = taa_ps_ra
 
 // --- UI Shaders ---
 constexpr uint8_t ui_vs_raw[] = {
-#embed SHADER_UI_HLSL_VS_PATH
+#embed SHADER_UI_SLANG_VS_PATH
 };
 constexpr uint8_t ui_ps_raw[] = {
-#embed SHADER_UI_HLSL_PS_PATH
+#embed SHADER_UI_SLANG_PS_PATH
 };
 extern const ShaderPair ui_shaders {.vertex = ui_vs_raw, .fragment = ui_ps_raw};
 
@@ -307,8 +307,8 @@ const char* const BlitVS                  = SHADER_BLIT_HLSL_VS_PATH;
 const char* const BlitPS                  = SHADER_BLIT_HLSL_PS_PATH;
 const char* const TaaVS                   = SHADER_TAA_HLSL_VS_PATH;
 const char* const TaaPS                   = SHADER_TAA_HLSL_PS_PATH;
-const char* const UiVS                    = SHADER_UI_HLSL_VS_PATH;
-const char* const UiPS                    = SHADER_UI_HLSL_PS_PATH;
+const char* const UiVS                    = SHADER_UI_SLANG_VS_PATH;
+const char* const UiPS                    = SHADER_UI_SLANG_PS_PATH;
 const char* const AmbientVS               = SHADER_AMBIENT_HLSL_VS_PATH;
 const char* const AmbientPS               = SHADER_AMBIENT_HLSL_PS_PATH;
 const char* const LightingVS              = SHADER_LIGHTING_HLSL_VS_PATH;
