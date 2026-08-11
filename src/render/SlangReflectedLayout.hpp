@@ -8,6 +8,7 @@
 #endif
 
 #include <array>
+#include <map>
 #include <slang/slang.h>
 #include <tuple>
 #include <utility>
@@ -47,8 +48,11 @@ struct SlangReflectedLayout {
     std::array<DescriptorSetLayout, 4> descriptorSetLayouts;
     uint32_t                           setLayoutCount = 0;
 
-    // Tracks the exact count of each descriptor type needed across all sets
-    std::array<uint32_t, VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT + 1> descriptorTypeCounts {};
+    // Tracks the exact count of each descriptor type needed across all sets.
+    // Sparse for the same reason as UnsafeReflectedLayout: the ray-tracing
+    // acceleration-structure descriptor type value is far outside the core
+    // Vulkan enum range.
+    std::map<VkDescriptorType, uint32_t> descriptorTypeCounts {};
     std::array<SlangReflectedSet, 4>                              reflectedSets {};
 
     [[nodiscard]] auto GetSetLayout(uint32_t setIndex = 0) const noexcept -> VkDescriptorSetLayout {

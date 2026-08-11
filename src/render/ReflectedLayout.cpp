@@ -168,9 +168,9 @@ auto UnsafeReflectedLayout::CreatePool(VkDevice device, uint32_t maxSets) const 
     std::vector<VkDescriptorPoolSize> pool_sizes;
     bool                              update_after_bind = false;
 
-    for (uint32_t i = 0; i <= VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT; ++i) {
-        if (descriptorTypeCounts[i] > 0) {
-            pool_sizes.push_back({.type = static_cast<VkDescriptorType>(i), .descriptorCount = descriptorTypeCounts[i] * maxSets});
+    for (const auto& [type, count]: descriptorTypeCounts) {
+        if (count > 0) {
+            pool_sizes.push_back({.type = type, .descriptorCount = count * maxSets});
         }
     }
     if (pool_sizes.empty()) {
