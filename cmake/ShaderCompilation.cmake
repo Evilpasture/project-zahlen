@@ -214,7 +214,7 @@ add_shader_target(forward_shader
 )
 
 add_shader_target(hang_gpu_shader
-    STAGES "${SHADER_SRC_DIR}/hang_gpu.hlsl|CSMain|cs_6_0|SHADER_HANG_GPU_HLSL_CS_PATH"
+    STAGES "${SHADER_SRC_DIR}/hang_gpu.slang|CSMain|cs_6_0|SHADER_HANG_GPU_SLANG_CS_PATH"
 )
 
 add_shader_target(procedural_bake

@@ -266,7 +266,7 @@ constexpr uint8_t forward_frag_raw[] = {
 };
 
 constexpr uint8_t hang_gpu_comp_raw[] = {
-#embed SHADER_HANG_GPU_HLSL_CS_PATH
+#embed SHADER_HANG_GPU_SLANG_CS_PATH
 };
 
 static auto procedural_bake_comp_path = SHADER_PROCEDURAL_BAKE_CS_PATH;
@@ -357,7 +357,7 @@ const char* const ClusterBoundsCS         = SHADER_CLUSTER_BOUNDS_CS_PATH;
 const char* const ClusterCullingCS        = SHADER_CLUSTER_CULLING_CS_PATH;
 const char* const SkinningCS              = SHADER_SKINNING_SLANG_CS_PATH;
 const char* const ForwardPS               = SHADER_FORWARD_HLSL_PS_PATH;
-const char* const HangGpuCS               = SHADER_HANG_GPU_HLSL_CS_PATH;
+const char* const HangGpuCS               = SHADER_HANG_GPU_SLANG_CS_PATH;
 const char* const ProceduralBakeCS        = SHADER_PROCEDURAL_BAKE_CS_PATH;
 } // namespace Paths
 
