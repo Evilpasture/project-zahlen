@@ -95,10 +95,10 @@ extern const ShaderPair fxaa_shaders {.vertex = fxaa_vs_raw, .fragment = fxaa_ps
 
 // --- MLAA Shaders ---
 constexpr uint8_t mlaa_vs_raw[] = {
-#embed SHADER_MLAA_HLSL_VS_PATH
+#embed SHADER_MLAA_SLANG_VS_PATH
 };
 constexpr uint8_t mlaa_ps_raw[] = {
-#embed SHADER_MLAA_HLSL_PS_PATH
+#embed SHADER_MLAA_SLANG_PS_PATH
 };
 extern const ShaderPair mlaa_shaders {.vertex = mlaa_vs_raw, .fragment = mlaa_ps_raw};
 
@@ -319,8 +319,8 @@ const char* const ReflectionNortVS        = SHADER_REFLECTION_NORT_HLSL_VS_PATH;
 const char* const ReflectionNortPS        = SHADER_REFLECTION_NORT_HLSL_PS_PATH;
 const char* const FxaaVS                  = SHADER_FXAA_SLANG_VS_PATH;
 const char* const FxaaPS                  = SHADER_FXAA_SLANG_PS_PATH;
-const char* const MlaaVS                  = SHADER_MLAA_HLSL_VS_PATH;
-const char* const MlaaPS                  = SHADER_MLAA_HLSL_PS_PATH;
+const char* const MlaaVS                  = SHADER_MLAA_SLANG_VS_PATH;
+const char* const MlaaPS                  = SHADER_MLAA_SLANG_PS_PATH;
 const char* const SmaaEdgeVS              = SHADER_SMAA_EDGE_VS_PATH;
 const char* const SmaaEdgePS              = SHADER_SMAA_EDGE_PS_PATH;
 const char* const SmaaWeightVS            = SHADER_SMAA_WEIGHT_VS_PATH;

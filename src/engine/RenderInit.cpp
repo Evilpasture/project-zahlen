@@ -1087,25 +1087,19 @@ std::expected<void, Error> RenderContext::Impl::BuildFXAAPipeline() {
     using enum Resource::ShaderID;
 
     return BuildPassHelper(
-        this, fxaaPass, "FXAA",
-        {.path = Resource::Paths::FxaaVS, .fallback = Resource::GetShaderProgram(Fxaa).vertex},
-        {.path = Resource::Paths::FxaaPS, .fallback = Resource::GetShaderProgram(Fxaa).fragment},
-        {VK_FORMAT_R16G16B16A16_SFLOAT}
+        this, fxaaPass, "FXAA", {.path = Resource::Paths::FxaaVS, .fallback = Resource::GetShaderProgram(Fxaa).vertex},
+        {.path = Resource::Paths::FxaaPS, .fallback = Resource::GetShaderProgram(Fxaa).fragment}, {VK_FORMAT_R16G16B16A16_SFLOAT}
     );
 }
 
 std::expected<void, Error> RenderContext::Impl::BuildMLAAPipeline() {
-    VkPushConstantRange mlaaPush = {
-        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-        .offset     = 0,
-        .size       = sizeof(float) * 3 + sizeof(uint32_t), // Matches the 16-byte push constant struct
-    };
+    using enum Resource::ShaderID;
 
     return BuildPassHelper(
         this, mlaaPass, "MLAA",
-        {.path = Resource::Paths::MlaaVS, .fallback = Resource::GetShaderProgram(Resource::ShaderID::Mlaa).vertex, .entryPoint = "VSMain"},
-        {.path = Resource::Paths::MlaaPS, .fallback = Resource::GetShaderProgram(Resource::ShaderID::Mlaa).fragment, .entryPoint = "PSMain"},
-        {VK_FORMAT_R16G16B16A16_SFLOAT}, &mlaaPush, 1
+        {.path = Resource::Paths::MlaaVS, .fallback = Resource::GetShaderProgram(Mlaa).vertex},
+        {.path = Resource::Paths::MlaaPS, .fallback = Resource::GetShaderProgram(Mlaa).fragment},
+        {VK_FORMAT_R16G16B16A16_SFLOAT}
     );
 }
 

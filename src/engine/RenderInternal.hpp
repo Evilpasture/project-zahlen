@@ -259,10 +259,7 @@ using CullingLayout = Vk::DescriptorLayout<
     Vk::StorageBufferSlot<5, VK_SHADER_STAGE_COMPUTE_BIT>  // g_secondPassCount
     >;
 
-using MLAALayout = Vk::DescriptorLayout<
-    Vk::SampledImageSlot<0>, // colorTex
-    Vk::SamplerSlot<1>       // sPoint
-    >;
+using MLAALayout = Vk::SlangReflectedLayout;
 
 using SMAAEdgeLayout = Vk::DescriptorLayout<
     Vk::SampledImageSlot<0>, // texInput (Color)
