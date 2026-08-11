@@ -173,6 +173,8 @@ if(ZHLN_DEV_MODE)
     add_compile_definitions(ZHLN_DEV_MODE)
 endif()
 
+option(ZHLN_BUILD_TESTS "Build engine test suite" OFF)
+
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_compile_definitions(ZHLN_DEBUG=1)
 endif()
@@ -765,3 +767,10 @@ zahlen_enable_reflection(zahlen_render)
 zahlen_enable_reflection(zahlen_engine)
 zahlen_enable_reflection(zahlen_gltf)
 zahlen_enable_reflection(zahlen)
+
+# --- TESTS ---
+if(ZHLN_BUILD_TESTS)
+    add_subdirectory(tests)
+endif()
+
+
