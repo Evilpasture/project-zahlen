@@ -14,6 +14,56 @@
 #include <type_traits>
 #include <vector>
 
+#if defined(__unix__) || defined(__APPLE__) || defined(__linux__)
+#define ZHLN_TEST_TIMEOUT_SUPPORTED 1
+#include <setjmp.h>
+#include <signal.h>
+#include <unistd.h>
+
+#if defined(__APPLE__)
+#include <sys/sysctl.h>
+inline bool IsDebuggerAttached() noexcept {
+    int               mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()};
+    struct kinfo_proc info {};
+    size_t            size = sizeof(info);
+    if (sysctl(mib, 4, &info, &size, nullptr, 0) == 0) {
+        return (info.kp_proc.p_flag & P_TRACED) != 0;
+    }
+    return false;
+}
+#elif defined(__linux__)
+#include <fstream>
+#include <string>
+inline bool IsDebuggerAttached() noexcept {
+    std::ifstream file("/proc/self/status");
+    std::string   line;
+    while (std::getline(file, line)) {
+        if (line.compare(0, 10, "TracerPid:") == 0) {
+            size_t first = line.find_first_not_of(" \t", 10);
+            if (first != std::string::npos) {
+                std::string val = line.substr(first);
+                return !val.empty() && val != "0" && val != "0\n";
+            }
+        }
+    }
+    return false;
+}
+#else
+inline bool IsDebuggerAttached() noexcept {
+    return false;
+}
+#endif
+
+// Inline global jump buffer for timeout recovery
+inline sigjmp_buf g_testTimeoutJmpBuf;
+
+inline void TestTimeoutSignalHandler(int sig) {
+    if (sig == SIGALRM) {
+        siglongjmp(g_testTimeoutJmpBuf, 1);
+    }
+}
+#endif
+
 namespace ZHLN::Test {
 
 enum class TestFrameworkError : uint32_t {
@@ -50,7 +100,7 @@ std::string FormatValue(const T& val) {
     return ZHLN::Reflect::ToDebugString(val);
 }
 
-// Non-aborting Expectations (Returns false on mismatch, does not stop execution)
+// Non-aborting Expectations
 template <typename T1, typename T2>
 bool ExpectEq(const T1& actual, const T2& expected, std::source_location loc = std::source_location::current()) {
     if constexpr (requires { actual == expected; }) {
@@ -105,7 +155,7 @@ inline bool ExpectFalse(bool condition, std::source_location loc = std::source_l
     return false;
 }
 
-// Aborting Assertions (Propagates std::expected error on mismatch to allow clean early exits)
+// Aborting Assertions
 template <typename T1, typename T2>
 [[nodiscard]] std::expected<void, ZHLN::Error> AssertEq(const T1& actual, const T2& expected, std::source_location loc = std::source_location::current()) {
     if (ExpectEq(actual, expected, loc)) {
@@ -167,7 +217,48 @@ TestStats RunSuite() {
             auto& ctx = GetThreadLocalContext();
             ctx.Reset(name);
 
-            auto result = (target.*pmf)();
+            ReturnType result = std::unexpected(ZHLN::Error(TestFrameworkError::AssertionFailed));
+
+#if defined(ZHLN_TEST_TIMEOUT_SUPPORTED)
+            // Register SIGALRM handler to recover from deadlocks
+            struct sigaction sa {};
+            sa.sa_handler = TestTimeoutSignalHandler;
+            sigemptyset(&sa.sa_mask);
+            sa.sa_flags = 0;
+            struct sigaction old_sa;
+            sigaction(SIGALRM, &sa, &old_sa);
+
+            // Bypass alarm completely if running under a debugger (stepping/inspecting locks takes time)
+            if (IsDebuggerAttached()) {
+                alarm(0);
+            } else {
+                alarm(15); // Standard 15-second timeout for typical CLI/CI environment runs
+            }
+
+            if (sigsetjmp(g_testTimeoutJmpBuf, 1) == 0) {
+                result = (target.*pmf)();
+
+                // Clear alarm and restore old signal handler on success
+                alarm(0);
+                sigaction(SIGALRM, &old_sa, nullptr);
+            } else {
+                // Timeout fired! Clear alarm and record diagnostics
+                alarm(0);
+                sigaction(SIGALRM, &old_sa, nullptr);
+
+                ctx.failures.push_back(
+                    {.file          = "Unknown",
+                     .line          = 0,
+                     .actualValue   = "Test execution timed out (deadlock or infinite loop)",
+                     .expectedValue = "Test execution completes under 15 seconds",
+                     .op            = "Timeout"}
+                );
+                result = std::unexpected(ZHLN::Error(TestFrameworkError::AssertionFailed));
+            }
+#else
+            // Fallback for non-POSIX platforms
+            result = (target.*pmf)();
+#endif
 
             bool testPassed = result.has_value() && ctx.failures.empty();
 
@@ -180,14 +271,18 @@ TestStats RunSuite() {
                     ZHLN::Println("    {}Fatal Suite Error: {}{}", Color::Red, result.error().Message(), Color::Reset);
                 }
                 for (const auto& f: ctx.failures) {
-                    ZHLN::Println("    {}Location: {}:{}{}", Color::Gray, f.file, f.line, Color::Reset);
-                    if (f.op == "true" || f.op == "false") {
-                        ZHLN::Println("      Expected condition to be: {}", f.expectedValue);
-                        ZHLN::Println("      Actual condition was    : {}", f.actualValue);
+                    if (f.op == "Timeout") {
+                        ZHLN::Println("    {}Timeout Error: {}{}", Color::Red, f.actualValue, Color::Reset);
                     } else {
-                        ZHLN::Println("      Comparison mismatch on  : '{}'", f.op);
-                        ZHLN::Println("        Actual value          : {}", f.actualValue);
-                        ZHLN::Println("        Expected value        : {}", f.expectedValue);
+                        ZHLN::Println("    {}Location: {}:{}{}", Color::Gray, f.file, f.line, Color::Reset);
+                        if (f.op == "true" || f.op == "false") {
+                            ZHLN::Println("      Expected condition to be: {}", f.expectedValue);
+                            ZHLN::Println("      Actual condition was    : {}", f.actualValue);
+                        } else {
+                            ZHLN::Println("      Comparison mismatch on  : '{}'", f.op);
+                            ZHLN::Println("        Actual value          : {}", f.actualValue);
+                            ZHLN::Println("        Expected value        : {}", f.expectedValue);
+                        }
                     }
                 }
                 stats.failed++;
