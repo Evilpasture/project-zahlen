@@ -12,9 +12,11 @@
 #include "imgui.h"
 #include <Features.hpp>
 #include <StagingContext.hpp>
+#include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <cstddef>
+#include <cstdio>
 #include <functional>
 #include <stb_image.h>
 #include <vector>
@@ -1742,6 +1744,47 @@ std::expected<void, Error> RenderContext::Impl::InitSkeletalAnimationResources()
     return {};
 }
 
+namespace {
+
+// Tags every long-lived image with its semantic name via VK_EXT_debug_utils so
+// validation messages and captures identify resources instead of raw handles.
+// No-op unless validation is enabled (the extension is only injected then).
+void ApplyImageDebugNames(RenderContext::Impl& impl) noexcept {
+    const auto& ctx = impl.ctx;
+
+    Reflect::ForEachReflectedField<typename RenderContext::Impl::GraphResources::ReflectMetadata>(
+        impl.graphResources, [&]<typename Tag>(auto& rt) {
+            if constexpr (requires { rt.image.Handle(); }) {
+                Vk::Debug::SetImageName(ctx, rt.image.Handle(), Tag::name.string_view());
+            }
+        }
+    );
+
+    Vk::Debug::SetImageName(ctx, impl.frames.accumBuffers[0].image.Handle(), "AccumHistory0");
+    Vk::Debug::SetImageName(ctx, impl.frames.accumBuffers[1].image.Handle(), "AccumHistory1");
+    Vk::Debug::SetImageName(ctx, impl.presentation.depthTarget.image.Handle(), "DepthTarget");
+    Vk::Debug::SetImageName(ctx, impl.shadowMapPrev.image.Handle(), "ShadowMapPrev");
+    Vk::Debug::SetImageName(ctx, impl.iblPayload.brdfLutImage.Handle(), "IBL.BrdfLut");
+    Vk::Debug::SetImageName(ctx, impl.iblPayload.prefilteredImage.Handle(), "IBL.PrefilteredCube");
+    Vk::Debug::SetImageName(ctx, impl.ltcMatImage.Handle(), "LTC.Mat");
+    Vk::Debug::SetImageName(ctx, impl.ltcAmpImage.Handle(), "LTC.Amp");
+
+    for (size_t i = 0; i < impl.textureImages.size(); ++i) {
+        char name[32];
+        std::snprintf(name, sizeof(name), "BindlessTexture%03zu", i);
+        Vk::Debug::SetImageName(ctx, impl.textureImages[i].Handle(), name);
+    }
+
+    const auto& swapchain = impl.presentation.swapchain.Get();
+    for (uint32_t i = 0; i < swapchain.image_count; ++i) {
+        char name[32];
+        std::snprintf(name, sizeof(name), "Swapchain%u", i);
+        Vk::Debug::SetImageName(ctx, swapchain.images[i], name);
+    }
+}
+
+} // namespace
+
 std::expected<void, Error> RenderContext::Impl::InitLightingLUTs() {
     stagingContext = std::make_unique<Vk::StagingContext>(allocator, ctx);
 
@@ -1799,6 +1842,8 @@ std::expected<void, Error> RenderContext::Impl::InitLightingLUTs() {
 
             ltcMatView = Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcMatImage.Handle());
             ltcAmpView = Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcAmpImage.Handle());
+
+            ApplyImageDebugNames(*this);
         });
 }
 
@@ -1914,6 +1959,20 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
             Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
             Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
         }
+
+        // The HiZ pyramid is the only render target not covered by the lists
+        // above: without this warm-up its whole mip chain sits in UNDEFINED
+        // until the first HiZGenerate, yet the two occlusion culling sets
+        // sample the full-chain view (written READ_ONLY) before that — pass 1
+        // already runs inside MainShadow, one pass earlier than HiZGenerate.
+        // Land it in its per-frame steady state (MainPass2's ComputeRead
+        // leaves it READ_ONLY) so every culling read is always well-defined.
+        Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(
+            cmd, graphResources.hizMap.image.Handle(), VK_IMAGE_ASPECT_COLOR_BIT
+        );
+        Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+            cmd, graphResources.hizMap.image.Handle(), VK_IMAGE_ASPECT_COLOR_BIT
+        );
     });
 
     // Translucency input is a plain Texture2D at registry slot 10 (sampler split).
@@ -1967,6 +2026,8 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
             Vk::BufferWrite {.buffer = frames.secondPassCandidatesBuffers[i].Handle()}, Vk::BufferWrite {.buffer = frames.secondPassCountBuffers[i].Handle()}
         );
     }
+
+    ApplyImageDebugNames(*this);
 
     return true;
 }

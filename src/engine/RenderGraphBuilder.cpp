@@ -353,14 +353,24 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeForwardPass() const noexcept {
         auto& targetImage = self.graphResources.hdrSceneColor;
-        return Vk::Passieren<"Forward", Vk::ColorWrite<Res_HdrSceneColor>, Vk::DepthStencilWrite<Res_Depth>>([this, &targetImage](VkCommandBuffer c) noexcept {
-            Profiler::ScopedGpuProfile timer(c, fIdx, self.gpuProfiler, Stage::ForwardPass);
-            FrameRecorder              fwdRecorder(c, self);
-            Passes::ForwardPass {}.Execute(
-                fwdRecorder, Vk::Assume<Vk::ColorWrite<Res_HdrSceneColor>>(targetImage),
-                Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(self.presentation.depthTarget)
-            );
-        });
+        // Translucent draws in this pass sample texTransLighting through the
+        // global bindless set (basic.slang), whose descriptor is written once
+        // with SHADER_READ_ONLY_OPTIMAL at target-recreate time. TransReflection
+        // leaves that image in COLOR_ATTACHMENT_OPTIMAL, so declare the read
+        // here and let the graph barrier it back to a sampled layout before
+        // the draws (and before next frame's early mesh draws with the same
+        // statically-used descriptor).
+        return Vk::Passieren<
+            "Forward", Vk::ColorWrite<Res_HdrSceneColor>, Vk::DepthStencilWrite<Res_Depth>, Vk::ShaderRead<Res_TransLighting>>(
+            [this, &targetImage](VkCommandBuffer c) noexcept {
+                Profiler::ScopedGpuProfile timer(c, fIdx, self.gpuProfiler, Stage::ForwardPass);
+                FrameRecorder              fwdRecorder(c, self);
+                Passes::ForwardPass {}.Execute(
+                    fwdRecorder, Vk::Assume<Vk::ColorWrite<Res_HdrSceneColor>>(targetImage),
+                    Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(self.presentation.depthTarget)
+                );
+            }
+        );
     }
 
     [[nodiscard]] auto MakeBloomThresholdPass() const noexcept {

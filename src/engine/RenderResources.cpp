@@ -8,6 +8,7 @@
 #include <Zahlen/Core/ControlFlow.hpp>
 #include <algorithm>
 #include <cstddef>
+#include <cstdio>
 #include <utility>
 
 namespace ZHLN {
@@ -384,6 +385,12 @@ std::expected<uint32_t, Error> RenderContext::Impl::CreateTextureInternal(const 
             uint32_t index = nextTextureIndex++;
             Vk::UpdateBindlessTextureSlot(device, index, gpuView.Get(), frames.bindlessSets, 11);
 
+            {
+                char name[32];
+                std::snprintf(name, sizeof(name), "BindlessTexture%03u", index);
+                Vk::Debug::SetImageName(ctx, gpuImage.Handle(), name);
+            }
+
             textureImages.push_back(std::forward<decltype(gpuImage)>(gpuImage));
             textureViews.push_back(std::move(gpuView));
 
@@ -419,6 +426,12 @@ std::expected<uint32_t, Error> RenderContext::Impl::CreateTextureCubeInternal(co
 
             uint32_t index = nextTextureIndex++;
             Vk::UpdateBindlessTextureSlot(device, index, gpuView.Get(), frames.bindlessSets, 11);
+
+            {
+                char name[32];
+                std::snprintf(name, sizeof(name), "BindlessCubeTexture%03u", index);
+                Vk::Debug::SetImageName(ctx, gpuImage.Handle(), name);
+            }
 
             textureImages.push_back(std::forward<decltype(gpuImage)>(gpuImage));
             textureViews.push_back(std::move(gpuView));
