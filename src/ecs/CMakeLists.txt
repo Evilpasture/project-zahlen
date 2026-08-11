@@ -8,7 +8,12 @@ add_library(zahlen_ecs OBJECT
     SystemGraph.cpp
     EntityCommandBuffer.cpp
 )
-set_target_properties(zahlen_ecs PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_target_properties(zahlen_ecs PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    CXX_STANDARD 26
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+)
 
 target_include_directories(zahlen_ecs PUBLIC 
     ${PROJECT_SOURCE_DIR}/include

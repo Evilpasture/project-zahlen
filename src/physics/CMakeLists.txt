@@ -15,7 +15,12 @@ add_library(zahlen_physics STATIC
     PhysicsDebug.hpp
     RagdollFactory.cpp
 )
-set_target_properties(zahlen_physics PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_target_properties(zahlen_physics PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    CXX_STANDARD 26
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+)
 
 target_link_libraries(zahlen_physics
     PRIVATE

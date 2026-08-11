@@ -16,10 +16,10 @@ set(IMGUI_SOURCES
 add_library(imgui STATIC ${IMGUI_SOURCES})
 
 # ISOLATE LANGUAGE STANDARD FOR THIRD-PARTY CODE
-# This forces ImGui and its Apple dependencies to use C++23.
+# This forces ImGui and its Apple dependencies to use C++26.
 # Your main project target can still freely use C++26.
 set_target_properties(imgui PROPERTIES
-    CXX_STANDARD 23
+    CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
 )

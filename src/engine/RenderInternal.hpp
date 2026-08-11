@@ -241,10 +241,7 @@ using BlitLayout = Vk::DescriptorLayout<
     Vk::UniformSlot<4, VK_SHADER_STAGE_FRAGMENT_BIT> // frame
     >;
 
-using BloomThresholdLayout = Vk::DescriptorLayout<
-    Vk::SampledImageSlot<0>, // texInput
-    Vk::SamplerSlot<1>       // sampler
-    >;
+using BloomThresholdLayout = Vk::SlangReflectedLayout;
 
 using BlurLayout = Vk::DescriptorLayout<
     Vk::SampledImageSlot<0>, // texInput

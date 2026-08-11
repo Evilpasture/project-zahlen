@@ -56,8 +56,12 @@ set_source_files_properties(RenderCore.c PROPERTIES
     C_EXTENSIONS OFF
 )
 
-target_compile_features(zahlen_render PUBLIC cxx_std_23)
-set_target_properties(zahlen_render PROPERTIES CXX_EXTENSIONS OFF)
+target_compile_features(zahlen_render PUBLIC cxx_std_26)
+set_target_properties(zahlen_render PROPERTIES
+    CXX_STANDARD 26
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+)
 
 target_link_libraries(zahlen_render PUBLIC
     Vulkan::Vulkan

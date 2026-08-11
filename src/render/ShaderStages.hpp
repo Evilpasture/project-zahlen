@@ -7,6 +7,7 @@
 #include <expected>
 #include <filesystem>
 #include <span>
+#include <vector>
 
 namespace ZHLN::Vk {
 
@@ -27,6 +28,9 @@ class ShaderStages {
   public:
     constexpr ShaderStages() = default;
     constexpr ShaderStages(VkDevice device, const ZHLN_ShaderStages raw): _device(device), _raw(raw) {
+    }
+    constexpr ShaderStages(VkDevice device, const ZHLN_ShaderStages raw, std::vector<uint32_t> vertSpv, std::vector<uint32_t> fragSpv):
+        _device(device), _raw(raw), _vertSpv(std::move(vertSpv)), _fragSpv(std::move(fragSpv)) {
     }
 
     ~ShaderStages();
@@ -69,14 +73,22 @@ class ShaderStages {
     [[nodiscard]] constexpr auto Get() const -> const ZHLN_ShaderStages* {
         return &_raw;
     }
+    [[nodiscard]] constexpr auto GetVertSpv() const noexcept -> std::span<const uint32_t> {
+        return _vertSpv;
+    }
+    [[nodiscard]] constexpr auto GetFragSpv() const noexcept -> std::span<const uint32_t> {
+        return _fragSpv;
+    }
     [[nodiscard("Always verify shader stages are valid before pipeline creation")]]
     constexpr auto Valid() const -> bool {
         return _raw.vert.handle != VK_NULL_HANDLE;
     }
 
   private:
-    VkDevice          _device = VK_NULL_HANDLE;
-    ZHLN_ShaderStages _raw {};
+    VkDevice              _device = VK_NULL_HANDLE;
+    ZHLN_ShaderStages     _raw {};
+    std::vector<uint32_t> _vertSpv {};
+    std::vector<uint32_t> _fragSpv {};
 };
 
 [[nodiscard]] constexpr auto AsSpirV(const void* data) -> const uint32_t* {

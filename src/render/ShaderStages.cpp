@@ -12,7 +12,11 @@ ShaderStages::~ShaderStages() {
     }
 }
 
-ShaderStages::ShaderStages(ShaderStages&& other) noexcept: _device(std::exchange(other._device, VK_NULL_HANDLE)), _raw(std::exchange(other._raw, {})) {
+ShaderStages::ShaderStages(ShaderStages&& other) noexcept:
+    _device(std::exchange(other._device, VK_NULL_HANDLE)),
+    _raw(std::exchange(other._raw, {})),
+    _vertSpv(std::move(other._vertSpv)),
+    _fragSpv(std::move(other._fragSpv)) {
 }
 
 auto ShaderStages::operator=(ShaderStages&& other) noexcept -> ShaderStages& {
@@ -20,8 +24,10 @@ auto ShaderStages::operator=(ShaderStages&& other) noexcept -> ShaderStages& {
         if (_device != VK_NULL_HANDLE) {
             ZHLN_DestroyShaderStages(_device, &_raw);
         }
-        _device = std::exchange(other._device, VK_NULL_HANDLE);
-        _raw    = std::exchange(other._raw, {});
+        _device  = std::exchange(other._device, VK_NULL_HANDLE);
+        _raw     = std::exchange(other._raw, {});
+        _vertSpv = std::move(other._vertSpv);
+        _fragSpv = std::move(other._fragSpv);
     }
     return *this;
 }
@@ -90,7 +96,15 @@ auto ShaderStages::Create(VkDevice device, const ZHLN_ShaderDesc& vert, const ZH
     }
     stages.vert.view_mask = ZHLN_DetectShaderViewMask(&vert);
     stages.frag.view_mask = ZHLN_DetectShaderViewMask(&frag);
-    return ShaderStages {device, stages};
+    std::vector<uint32_t> vertSpv;
+    std::vector<uint32_t> fragSpv;
+    if (vert.code && vert.size > 0) {
+        vertSpv.assign(vert.code, vert.code + (vert.size / sizeof(uint32_t)));
+    }
+    if (frag.code && frag.size > 0) {
+        fragSpv.assign(frag.code, frag.code + (frag.size / sizeof(uint32_t)));
+    }
+    return ShaderStages {device, stages, std::move(vertSpv), std::move(fragSpv)};
 }
 
 } // namespace ZHLN::Vk
