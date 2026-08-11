@@ -131,10 +131,10 @@ extern const ShaderPair smaa_blend_shaders {.vertex = smaa_blend_vs_raw, .fragme
 
 // --- Bloom Threshold Shaders ---
 constexpr uint8_t bloom_threshold_vs_raw[] = {
-#embed SHADER_BLOOM_THRESHOLD_HLSL_VS_PATH
+#embed SHADER_BLOOM_THRESHOLD_SLANG_VS_PATH
 };
 constexpr uint8_t bloom_threshold_ps_raw[] = {
-#embed SHADER_BLOOM_THRESHOLD_HLSL_PS_PATH
+#embed SHADER_BLOOM_THRESHOLD_SLANG_PS_PATH
 };
 extern const ShaderPair bloom_threshold_shaders {.vertex = bloom_threshold_vs_raw, .fragment = bloom_threshold_ps_raw};
 

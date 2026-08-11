@@ -15,6 +15,11 @@ if(NOT DXC_EXECUTABLE)
     message(FATAL_ERROR "DXC not found!")
 endif()
 
+find_program(SLANG_EXECUTABLE NAMES slangc PATHS "$ENV{VULKAN_SDK}/bin" "$ENV{SLANG_BIN}")
+if(NOT SLANG_EXECUTABLE)
+    message(FATAL_ERROR "Slang compiler (slangc) not found!")
+endif()
+
 # ----------------------------------------------------------------------------
 # compile_hlsl: compiles a single HLSL entry point to SPIR-V.
 # Sets ${OUTPUT_VAR} in the parent scope to the resulting .spv path.
@@ -34,6 +39,38 @@ function(compile_hlsl SHADER_PATH ENTRY STAGE OUTPUT_VAR)
                 "${SHADER_SRC_DIR}/pbr_helpers.hlsl"
                 "${SHADER_SRC_DIR}/uniforms.hlsl"
         COMMENT "DXC: Generating ${FILE_NAME}.${ENTRY}.${OUTPUT_VAR}.spv"
+        VERBATIM
+    )
+    set(${OUTPUT_VAR} ${OUTPUT_SPV} PARENT_SCOPE)
+endfunction()
+
+function(compile_slang SHADER_PATH ENTRY STAGE OUTPUT_VAR)
+    get_filename_component(FILE_NAME ${SHADER_PATH} NAME_WE)
+    set(OUTPUT_SPV "${GEN_INCLUDE_DIR}/${FILE_NAME}.${ENTRY}.${OUTPUT_VAR}.spv")
+    set(EXTRA_ARGS ${ARGN})
+
+    # Map HLSL profiles to Slang's stage names
+    set(SLANG_STAGE ${STAGE})
+    if(STAGE MATCHES "^vs_")
+        set(SLANG_STAGE "vertex")
+    elseif(STAGE MATCHES "^ps_")
+        set(SLANG_STAGE "fragment")
+    elseif(STAGE MATCHES "^cs_")
+        set(SLANG_STAGE "compute")
+    endif()
+
+    add_custom_command(
+        OUTPUT ${OUTPUT_SPV}
+        COMMAND ${SLANG_EXECUTABLE} ${SHADER_PATH}
+                -entry ${ENTRY}
+                -stage ${SLANG_STAGE}
+                -target spirv
+                -I "${SHADER_SRC_DIR}"
+                -I "${SHADER_INCLUDE_DIR}"
+                ${EXTRA_ARGS}
+                -o ${OUTPUT_SPV}
+        DEPENDS ${SHADER_PATH}
+        COMMENT "Slang: Generating ${FILE_NAME}.${ENTRY}.${OUTPUT_VAR}.spv"
         VERBATIM
     )
     set(${OUTPUT_VAR} ${OUTPUT_SPV} PARENT_SCOPE)
@@ -88,17 +125,29 @@ function(compile_shaders TARGET_NAME)
     set(STAGE_ENTRIES  "VSMain" "PSMain")
     set(STAGE_PROFILES "vs_6_5" "ps_6_5")
 
-    foreach(HLSL_SRC IN LISTS SHADER_FILES)
-        get_filename_component(FILE_NAME ${HLSL_SRC} NAME)
+    foreach(SHADER_SRC IN LISTS SHADER_FILES)
+        get_filename_component(FILE_NAME ${SHADER_SRC} NAME_WLE)
+        get_filename_component(FILE_EXT ${SHADER_SRC} LAST_EXT)
+
         foreach(i RANGE 1)
             list(GET STAGE_EXTS     ${i} EXT)
             list(GET STAGE_ENTRIES  ${i} ENTRY)
             list(GET STAGE_PROFILES ${i} PROFILE)
 
-            string(MAKE_C_IDENTIFIER "SHADER_${FILE_NAME}_${EXT}_PATH" MACRO_NAME)
-            string(TOUPPER ${MACRO_NAME} MACRO_NAME)
+            if(FILE_EXT STREQUAL ".slang")
+                # Clean, native Slang macro generation
+                string(MAKE_C_IDENTIFIER "SHADER_${FILE_NAME}_SLANG_${EXT}_PATH" MACRO_NAME)
+                string(TOUPPER ${MACRO_NAME} MACRO_NAME)
 
-            compile_hlsl("${HLSL_SRC}" ${ENTRY} ${PROFILE} ${MACRO_NAME})
+                compile_slang("${SHADER_SRC}" ${ENTRY} ${PROFILE} ${MACRO_NAME})
+            else()
+                # Clean, native HLSL macro generation
+                string(MAKE_C_IDENTIFIER "SHADER_${FILE_NAME}_HLSL_${EXT}_PATH" MACRO_NAME)
+                string(TOUPPER ${MACRO_NAME} MACRO_NAME)
+
+                compile_hlsl("${SHADER_SRC}" ${ENTRY} ${PROFILE} ${MACRO_NAME})
+            endif()
+
             list(APPEND ALL_SPV_OUTPUTS ${${MACRO_NAME}})
             list(APPEND ALL_SHADER_DEFINITIONS "${MACRO_NAME}=\"${${MACRO_NAME}}\"")
         endforeach()
@@ -123,7 +172,7 @@ compile_shaders(zahlen_engine
     "${SHADER_SRC_DIR}/fxaa.hlsl"
     "${SHADER_SRC_DIR}/mlaa.hlsl"
     "${SHADER_SRC_DIR}/ambient.hlsl"
-    "${SHADER_SRC_DIR}/bloom_threshold.hlsl"
+    "${SHADER_SRC_DIR}/bloom_threshold.slang"
     "${SHADER_SRC_DIR}/bloom_blur.hlsl"
     "${SHADER_SRC_DIR}/punctual_shadows.hlsl"
 )

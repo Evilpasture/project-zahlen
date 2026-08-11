@@ -335,6 +335,7 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
             f.multiview                          = VK_TRUE;
             f.storageBuffer16BitAccess           = VK_TRUE;
             f.uniformAndStorageBuffer16BitAccess = VK_TRUE;
+            f.shaderDrawParameters               = VK_TRUE;
         })
         .Require<VkPhysicalDeviceVulkan13Features>([](auto& f) {
             f.synchronization2               = VK_TRUE;
@@ -1218,9 +1219,8 @@ std::expected<void, Error> RenderContext::Impl::BuildBloomPipelines() {
 
     auto res = BuildPassHelper(
         this, bloomThresholdPass, "Bloom Threshold",
-        {.path = SHADER_BLOOM_THRESHOLD_HLSL_VS_PATH, .fallback = Resource::GetShaderProgram(BloomThreshold).vertex, .entryPoint = "VSMain"},
-        {.path = SHADER_BLOOM_THRESHOLD_HLSL_PS_PATH, .fallback = Resource::GetShaderProgram(BloomThreshold).fragment, .entryPoint = "PSMain"},
-        {VK_FORMAT_R16G16B16A16_SFLOAT}
+        {.path = SHADER_BLOOM_THRESHOLD_SLANG_VS_PATH, .fallback = Resource::GetShaderProgram(BloomThreshold).vertex},
+        {.path = SHADER_BLOOM_THRESHOLD_SLANG_PS_PATH, .fallback = Resource::GetShaderProgram(BloomThreshold).fragment}, {VK_FORMAT_R16G16B16A16_SFLOAT}
     );
 
     VkPushConstantRange kawasePush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(KawasePushConstants)};
@@ -1360,7 +1360,7 @@ std::expected<void, Error> RenderContext::Impl::InitPostProcessing() {
         .and_then([&]() {
             return register_and_check(
                 "Bloom", [this]() { return BuildBloomPipelines(); },
-                {SHADER_BLOOM_THRESHOLD_HLSL_VS_PATH, SHADER_BLOOM_THRESHOLD_HLSL_PS_PATH, SHADER_BLOOM_BLUR_HLSL_VS_PATH, SHADER_BLOOM_BLUR_HLSL_PS_PATH}
+                {SHADER_BLOOM_THRESHOLD_SLANG_VS_PATH, SHADER_BLOOM_THRESHOLD_SLANG_PS_PATH, SHADER_BLOOM_BLUR_HLSL_VS_PATH, SHADER_BLOOM_BLUR_HLSL_PS_PATH}
             );
         })
         .and_then([&]() {
