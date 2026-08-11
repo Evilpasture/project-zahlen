@@ -234,7 +234,7 @@ add_shader_target(vol_light_inject_shader
 )
 
 add_shader_target(vol_integrate_shader
-    STAGES "${SHADER_SRC_DIR}/volumetric_integration.hlsl|CSMain|cs_6_0|SHADER_VOLUMETRIC_INTEGRATION_CS_PATH"
+    STAGES "${SHADER_SRC_DIR}/volumetric_integration.slang|CSMain|cs_6_0|SHADER_VOLUMETRIC_INTEGRATION_SLANG_CS_PATH"
 )
 
 add_shader_target(vol_temporal_shader

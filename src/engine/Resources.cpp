@@ -182,7 +182,7 @@ constexpr uint8_t vol_light_inject_cs_raw[] = {
 extern const ShaderPair volumetric_light_inject_shaders {.vertex = vol_light_inject_cs_raw, .fragment = {}};
 
 constexpr uint8_t vol_integrate_cs_raw[] = {
-#embed SHADER_VOLUMETRIC_INTEGRATION_CS_PATH
+#embed SHADER_VOLUMETRIC_INTEGRATION_SLANG_CS_PATH
 };
 extern const ShaderPair volumetric_integration_shaders {.vertex = vol_integrate_cs_raw, .fragment = {}};
 
@@ -338,7 +338,7 @@ const char* const LightingNortPS          = SHADER_LIGHTING_NORT_HLSL_PS_PATH;
 const char* const VolumetricClearCS       = SHADER_VOLUMETRIC_CLEAR_CS_PATH;
 const char* const VolumetricFogInjectCS   = SHADER_VOLUMETRIC_FOG_INJECT_CS_PATH;
 const char* const VolumetricLightInjectCS = SHADER_VOLUMETRIC_LIGHT_INJECT_CS_PATH;
-const char* const VolumetricIntegrationCS = SHADER_VOLUMETRIC_INTEGRATION_CS_PATH;
+const char* const VolumetricIntegrationCS = SHADER_VOLUMETRIC_INTEGRATION_SLANG_CS_PATH;
 const char* const VolumetricTemporalCS    = SHADER_VOLUMETRIC_TEMPORAL_CS_PATH;
 const char* const ParticleUpdateCS        = SHADER_PARTICLE_UPDATE_CS_PATH;
 const char* const ParticleRenderVS        = SHADER_PARTICLE_RENDER_VS_PATH;
