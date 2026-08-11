@@ -120,7 +120,7 @@ Zahlen adheres strictly to standard Vulkan and Jolt Physics conventions across b
 * **Camera Orientation**: Default forward vector looks down **$-Z$** (at `yaw = -90.0f` and `pitch = 0.0f`).
 
 ### Matrix Layout & Multiplication Order
-* **Storage Layout**: **Column-Major** in both C++ (`JPH::Mat44`) and HLSL (`#pragma pack_matrix(column_major)`).
+* **Storage Layout**: **Column-Major** in both C++ (`JPH::Mat44`) and Slang (compiled with `-matrix-layout-column-major`).
 * **Multiplication Order**: **Column Vectors** ($M \cdot v$). Shaders and host code execute `mul(matrix, vector)` / `m * v`.
 
 ### Winding Order & Culling
@@ -223,7 +223,7 @@ When porting prototype gameplay or math logic from a **TypeScript + Three.js + R
 | :--- | :--- | :--- | :--- |
 | **World Coordinate System** | Right-Handed, $+Y$ Up | Right-Handed, $+Y$ Up | **Direct 1:1 Mapping** |
 | **Forward Vector** | $-Z$ | $-Z$ | **Direct 1:1 Mapping** |
-| **Matrix Storage Layout** | Column-Major (`Matrix4`) | Column-Major (`JPH::Mat44` / HLSL) | **Direct 1:1 Mapping** |
+| **Matrix Storage Layout** | Column-Major (`Matrix4`) | Column-Major (`JPH::Mat44` / Slang) | **Direct 1:1 Mapping** |
 | **Matrix Vector Multiplication** | $M \cdot v$ (`v.applyMatrix4(m)`) | $M \cdot v$ (`m * v` / `mul(m, v)`) | **Direct 1:1 Mapping** |
 | **Winding Order** | Counter-Clockwise (CCW) | Counter-Clockwise (CCW) | **Direct 1:1 Mapping** |
 | **Box Geometry Sizes** | Full-Extents $(W, H, D)$ | **Half-Extents** $(X, Y, Z)$ | ⚠️ **Divide dimensions by 2** |
