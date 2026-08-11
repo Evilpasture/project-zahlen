@@ -1950,6 +1950,16 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
             cmd, graphResources.transDepthBuffer.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
         );
+        // Every consumer of the voxel volumes uses a GENERAL layout
+        // (ComputeWrite / ComputeReadGeneral in the compute graph,
+        // ShaderReadGeneral in the frame graph's Reflection passes), so their
+        // steady-state rest layout is GENERAL. This matters because the frame
+        // graph seeds resources it never writes as "external read-only
+        // inputs" at their first-usage layout and emits NO barrier for them
+        // (see the [Unchanged] GENERAL entries for VoxelResolved in the graph
+        // dump): parking them at READ_ONLY here left the first frames after
+        // every recreate with an actual READ_ONLY image behind a
+        // GENERAL-written descriptor (VUID-vkCmdDraw-None-09600).
         std::array targets3D = {
             graphResources.voxelMedia.image.Handle(), graphResources.voxelLight.image.Handle(), graphResources.voxelIntegrated.image.Handle(),
             graphResources.voxelHistory.image.Handle(), graphResources.voxelResolved.image.Handle()
@@ -1957,7 +1967,6 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
 
         for (auto* const img: targets3D) {
             Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
         }
 
         // The HiZ pyramid is the only render target not covered by the lists
