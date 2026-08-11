@@ -1,7 +1,7 @@
 // resources/shaders/volumetric_injection.hlsl
-#pragma pack_matrix(column_major)
-#include "pbr_helpers.hlsl"
-#include "uniforms.hlsl"
+
+import pbr_helpers;
+import uniforms;
 
 [[vk::constant_id(0)]] const int BAKE_TYPE = 0;
 
@@ -12,10 +12,10 @@ struct PushConstants {
     float param1;
     float param2;
 };
-[[vk::push_constant]] PushConstants pc;
+[vk::push_constant] PushConstants pc;
 
-[[vk::binding(0, 0)]] RWTexture3D<float4>           outVoxelMedia;
-[[vk::binding(1, 0)]] ConstantBuffer<FrameUniforms> frame;
+RWTexture3D<float4>           outVoxelMedia;
+ConstantBuffer<FrameUniforms> frame;
 
 // --- Stable 2D Spatial-Temporal Ray Jitter ---
 float TemporalHash2D(uint2 tid, float timeOffset) {

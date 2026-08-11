@@ -8,7 +8,17 @@
 namespace ZHLN {
 
 std::expected<void, Error> RenderContext::Impl::BuildProceduralBakePipeline() {
-    Vk::AllocateSingleBufferedSet<BakeLayout>(ctx.Device(), proceduralBakeDescLayout, proceduralBakeDescPool, proceduralBakeSet);
+    // Reflect the bake layout out of the compiled shader instead of allocating
+    // from a static C++ descriptor-layout typedef.
+    if (!proceduralBakeDescLayout.Build(
+            ctx.Device(), Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::ProceduralBakeComp).vertex, "CSMain"),
+            VK_SHADER_STAGE_COMPUTE_BIT
+        )) {
+        ZHLN::Log("[Shader] Failed to reflect procedural bake layout!");
+        return std::unexpected(RenderInitError::PipelineCreationFailed);
+    }
+    proceduralBakeDescPool = proceduralBakeDescLayout.CreatePool(ctx.Device(), 1);
+    proceduralBakeSet      = proceduralBakeDescLayout.Allocate(ctx.Device(), proceduralBakeDescPool.Get(), proceduralBakeDescLayout.GetSetLayout());
 
     VkPushConstantRange push = {
         .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
@@ -36,7 +46,7 @@ std::expected<void, Error> RenderContext::Impl::BuildProceduralBakePipeline() {
         specInfos[i] = {.mapEntryCount = 1, .pMapEntries = specEntries.data(), .dataSize = sizeof(int), .pData = &variants[i]};
     }
 
-    auto build_res = proceduralBakePass.BuildVariants(ctx.Device(), proceduralBakeDescLayout.Get(), shaderDesc, specInfos, &push, 1);
+    auto build_res = proceduralBakePass.BuildVariants(ctx.Device(), proceduralBakeDescLayout.GetSetLayout(), shaderDesc, specInfos, &push, 1);
     if (!build_res) {
         ZHLN::Log("[Shader] Failed to build specialized Procedural Bake Compute variants: {}", build_res.error().Message());
         return std::unexpected(build_res.error());
@@ -77,7 +87,7 @@ std::expected<uint32_t, Error>
             auto writeView = Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 1);
 
             // Write to compute descriptor set
-            BakeLayout::Write(device, proceduralBakeSet, Vk::ImageWrite {.view = writeView.Get()});
+            proceduralBakeDescLayout.Write(device, proceduralBakeSet, Vk::ImageWrite {.view = writeView.Get()});
 
             // Dispatch the Compute Shader via allocation-free ExecuteImmediate
             Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
@@ -95,7 +105,7 @@ std::expected<uint32_t, Error>
 
             // Register our generated view into the Bindless Set
             uint32_t index = nextTextureIndex++;
-            Vk::UpdateBindlessTextureSlot(device, index, writeView.Get(), frames.bindlessSets, 0);
+            Vk::UpdateBindlessTextureSlot(device, index, writeView.Get(), frames.bindlessSets, 11);
 
             textureImages.push_back(std::forward<decltype(gpuImage)>(gpuImage));
             textureViews.push_back(std::move(writeView));

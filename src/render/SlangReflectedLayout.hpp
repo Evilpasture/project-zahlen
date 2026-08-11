@@ -29,6 +29,16 @@ struct SlangReflectedSet {
     std::vector<SlangReflectedBinding> bindings;
 };
 
+struct UnsafeReflectedLayout;
+
+/**
+ * @brief A single SPIR-V blob + stage to reflect over.
+ */
+struct ReflectedStageInput {
+    ZHLN_ShaderDesc        shader;
+    VkShaderStageFlagBits stage;
+};
+
 /**
  * @brief Holds descriptor and pipeline layout handles generated via Slang reflection.
  */
@@ -82,6 +92,28 @@ struct SlangReflectedLayout {
     }
 
     bool Build(VkDevice device, const ShaderStages& shaders) noexcept;
+
+    /// Reflects a single stage (commonly a compute shader described by a raw SPV blob).
+    bool Build(VkDevice device, const ZHLN_ShaderDesc& shader, VkShaderStageFlagBits stage) noexcept;
+
+    /// Reflects the union of an arbitrary set of stages (e.g. the bindless scene registry).
+    bool Build(VkDevice device, std::span<const ReflectedStageInput> stages) noexcept;
+
+    /// True when `binding` is present in the given reflected set.
+    [[nodiscard]] auto HasBinding(uint32_t setIndex, uint32_t binding) const noexcept -> bool {
+        if (setIndex >= 4) {
+            return false;
+        }
+        for (const auto& b: reflectedSets[setIndex].bindings) {
+            if (b.binding == binding) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+  private:
+    void AdoptUnsafe(UnsafeReflectedLayout&& unsafe_res) noexcept;
 };
 
 /**

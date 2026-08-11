@@ -1,7 +1,7 @@
 // resources/shaders/ambient.hlsl
-#pragma pack_matrix(column_major)
-#include "pbr_helpers.hlsl"
-#include "uniforms.hlsl"
+
+import pbr_helpers;
+import uniforms;
 
 struct PushConstants {
     float4x4 invViewProj;
@@ -17,18 +17,19 @@ struct PushConstants {
     int      enableRTR;
     int      _pad;
 };
-[[vk::push_constant]] PushConstants pc;
+[vk::push_constant] PushConstants pc;
 
 // --- G-Buffer Inputs ---
-[[vk::binding(0, 0)]] Texture2D<float4>             texInput;
-[[vk::binding(1, 0)]] SamplerState                  smp;
-[[vk::binding(2, 0)]] Texture2D<float>              texDepth;
-[[vk::binding(3, 0)]] Texture2D<float4>             texNormalRoughness;
-[[vk::binding(4, 0)]] SamplerState                  pointSampler;
-[[vk::binding(5, 0)]] TextureCube<float4>           texEnvMap;
-[[vk::binding(6, 0)]] Texture2D                     brdfLUT;
-[[vk::binding(7, 0)]] SamplerState                  clampSampler;
-[[vk::binding(8, 0)]] ConstantBuffer<FrameUniforms> frame;
+// NOTE: keep the declaration order and the engine-side descriptor write order
+// in sync. Ambient/GI uses SH irradiance only -- no prefiltered specular IBL
+// resources are sampled here, so they are intentionally NOT declared midway
+// (unused declarations would be stripped and break positional writes).
+Texture2D<float4>             texInput;
+SamplerState                  smp;
+Texture2D<float>              texDepth;
+Texture2D<float4>             texNormalRoughness;
+SamplerState                  pointSampler;
+ConstantBuffer<FrameUniforms> frame;
 
 struct VSOutput {
     float4 pos : SV_Position;

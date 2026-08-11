@@ -1,20 +1,30 @@
-// resources/shaders/volumetric_scattering.hlsl
-#pragma pack_matrix(column_major)
-#include "uniforms.hlsl"
+// resources/shaders/volumetric_light_inject.hlsl
+
+import pbr_helpers;
+import uniforms;
 
 struct ClusterVolume {
     uint offset;
     uint count;
 };
 
-[[vk::binding(0, 0)]] Texture3D<float4>               inVoxelMedia;
-[[vk::binding(1, 0)]] RWTexture3D<float4>             outVoxelLight;
-[[vk::binding(2, 0)]] ConstantBuffer<FrameUniforms>   frame;
-[[vk::binding(3, 0)]] StructuredBuffer<Light>         lights;
-[[vk::binding(4, 0)]] StructuredBuffer<ClusterVolume> clusterGrid;
-[[vk::binding(5, 0)]] StructuredBuffer<uint>          clusterIndexList;
-[[vk::binding(6, 0)]] Texture2DArray<float>           shadowMap;
-[[vk::binding(7, 0)]] SamplerComparisonState          shadowSampler;
+struct VolumetricLightInjectPushConstants {
+    float scatteringIntensity;
+    float ambientIntensity;
+    float phaseAnisotropy;
+    uint  enableShadows;
+};
+
+[vk::push_constant] VolumetricLightInjectPushConstants lightPC;
+
+Texture3D<float4>               inVoxelMedia;
+RWTexture3D<float4>             outVoxelLight;
+ConstantBuffer<FrameUniforms>   frame;
+StructuredBuffer<Light>         lights;
+StructuredBuffer<ClusterVolume> clusterGrid;
+StructuredBuffer<uint>          clusterIndexList;
+Texture2DArray<float>           shadowMap;
+SamplerComparisonState          shadowSampler;
 
 float PhaseHG(float cosTheta, float g) {
     float g2 = g * g;
@@ -25,13 +35,11 @@ float PhaseDualHG(float cosTheta, float g1, float g2, float k) {
     return lerp(PhaseHG(cosTheta, g2), PhaseHG(cosTheta, g1), k);
 }
 
-// --- Stable 2D Spatial-Temporal Ray Jitter ---
 float TemporalHash2D(uint2 tid, float timeOffset) {
     float spatial = frac(float(tid.x * 12664589 + tid.y * 9546283) * 0.6180339887f);
     return frac(spatial + timeOffset * 60.0f * 0.6180339887f);
 }
 
-// --- High-Frequency 3D Hash for Rotated PCF ---
 float GetNoise3D(uint3 tid, float time) {
     uint h = tid.x * 1597334673U + tid.y * 3812015801U + tid.z * 2798796415U;
     h ^= (h >> 16);
@@ -40,11 +48,9 @@ float GetNoise3D(uint3 tid, float time) {
     return frac(spatial + time * 60.0f * 0.6180339887f);
 }
 
-// --- Rotated 3x3 PCF Shadow Sampler ---
 float SampleShadowPCF3x3(float3 projCoords, float cascade, float angle) {
-    float shadow    = 0.0f;
-    float texelSize = 1.0f / float(frame.shadowResolution);
-
+    float shadow       = 0.0f;
+    float texelSize    = 1.0f / float(frame.shadowResolution);
     float bias         = 0.0012f * (cascade + 1.0f);
     float compareDepth = projCoords.z - bias;
 
@@ -56,10 +62,8 @@ float SampleShadowPCF3x3(float3 projCoords, float cascade, float angle) {
 
     [unroll] for (int i = 0; i < 9; ++i) {
         float2 rotatedOffset = float2(offsets[i].x * c - offsets[i].y * s, offsets[i].x * s + offsets[i].y * c) * texelSize;
-
         shadow += shadowMap.SampleCmpLevelZero(shadowSampler, float3(projCoords.xy + rotatedOffset, cascade), compareDepth);
     }
-
     return shadow / 9.0f;
 }
 
@@ -73,7 +77,7 @@ float SampleShadowPCF3x3(float3 projCoords, float cascade, float angle) {
     float3 scattering = media.rgb;
     float  extinction = media.a;
 
-    if (extinction <= 0.0f) {
+    if (extinction <= 0.00001f && length(scattering) <= 0.00001f) {
         outVoxelLight[tid] = float4(0.0f, 0.0f, 0.0f, 0.0f);
         return;
     }
@@ -89,11 +93,13 @@ float SampleShadowPCF3x3(float3 projCoords, float cascade, float angle) {
 
     float3 accumulatedLight = float3(0.0f, 0.0f, 0.0f);
 
-    float3 ambientSkyColor = float3(0.5f, 0.6f, 0.75f) * frame.ambientExposure * 0.005f;
+    // --- 1. Ambient Sky Light ---
+    float3 ambientSkyColor = float3(0.5f, 0.6f, 0.75f) * frame.ambientExposure * 0.005f * lightPC.ambientIntensity;
     accumulatedLight += ambientSkyColor * scattering;
 
+    // --- 2. Sun / Directional Light ---
     float3 L_sun    = normalize(frame.lightDir.xyz);
-    float  phaseSun = PhaseDualHG(dot(-V, L_sun), 0.35f, -0.10f, 0.50f);
+    float  phaseSun = PhaseDualHG(dot(-V, L_sun), lightPC.phaseAnisotropy, -0.10f, 0.50f);
 
     uint cascadeIndex = 0;
     if (depthVS > frame.cascadeSplits.x)
@@ -109,7 +115,8 @@ float SampleShadowPCF3x3(float3 projCoords, float cascade, float angle) {
     float3 projCoords = shadowPos.xyz / shadowPos.w;
     float  shadow     = 1.0f;
 
-    if (projCoords.x >= 0.0f && projCoords.x <= 1.0f && projCoords.y >= 0.0f && projCoords.y <= 1.0f && projCoords.z >= 0.0f && projCoords.z <= 1.0f) {
+    if (lightPC.enableShadows != 0 && projCoords.x >= 0.0f && projCoords.x <= 1.0f && projCoords.y >= 0.0f && projCoords.y <= 1.0f && projCoords.z >= 0.0f &&
+        projCoords.z <= 1.0f) {
         float rotationAngle = GetNoise3D(tid, frame.camPos.w) * 2.0f * 3.14159265f;
         shadow              = SampleShadowPCF3x3(projCoords, (float) cascadeIndex, rotationAngle);
 
@@ -118,8 +125,9 @@ float SampleShadowPCF3x3(float3 projCoords, float cascade, float angle) {
         shadow              = lerp(1.0f, shadow, fade);
     }
 
-    accumulatedLight += frame.lightDir.w * phaseSun * shadow * scattering;
+    accumulatedLight += frame.lightDir.w * phaseSun * shadow * scattering * lightPC.scatteringIntensity;
 
+    // --- 3. Clustered Point/Spot/Area Lights (Shared Cluster Grid Assignment) ---
     uint3         clusterCoords  = uint3(uint(uv.x * 16.0f), uint(uv.y * 9.0f), uint(max(0.0f, log(depthVS) * frame.zScale + frame.zBias)));
     uint          clusterIdx     = clusterCoords.x + (clusterCoords.y * 16) + (min(clusterCoords.z, 23u) * 144);
     ClusterVolume cluster        = clusterGrid[clusterIdx];
@@ -133,7 +141,7 @@ float SampleShadowPCF3x3(float3 projCoords, float cascade, float angle) {
         Light light = lights[lIdx];
 
         if (light.type == 0 || light.type == 4)
-            continue;
+            continue; // Skip Sun/Dir
 
         float3 L_unnorm = light.position - worldPos;
         float  dist     = length(L_unnorm);
@@ -143,7 +151,7 @@ float SampleShadowPCF3x3(float3 projCoords, float cascade, float angle) {
         float atten     = saturate(1.0f - distRatio * distRatio) / (dist * dist + 1.0f);
 
         if (atten > 0.0f) {
-            float phase = PhaseDualHG(dot(-V, L), 0.75f, -0.1f, 0.88f);
+            float phase = PhaseDualHG(dot(-V, L), lightPC.phaseAnisotropy, -0.1f, 0.88f);
             accumulatedLight += light.color * light.intensity * atten * phase * scattering;
         }
     }

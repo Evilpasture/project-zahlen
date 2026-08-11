@@ -1,6 +1,7 @@
 // resources/shaders/particle_render.hlsl
-#pragma pack_matrix(column_major)
-#include "uniforms.hlsl"
+
+import common;
+import uniforms;
 
 struct Particle {
     float4 position;
@@ -14,12 +15,9 @@ struct RenderPushConstants {
     uint     alignment;
     uint     textureIndex;
 };
-[[vk::push_constant]] RenderPushConstants pc;
+[vk::push_constant] RenderPushConstants pc;
 
-// Decoupled Bindings (No longer importing common.hlsl's conflicting push constants)
-[[vk::binding(0, 0)]] Texture2D                     globalTextures[];
-[[vk::binding(1, 0)]] SamplerState                  defaultSampler;
-[[vk::binding(2, 0)]] ConstantBuffer<FrameUniforms> frame;
+// Bindless registry now comes from the `scene` parameter block (common.slang).
 
 struct ParticleVSOutput {
     float4 pos : SV_Position;
@@ -30,7 +28,7 @@ struct ParticleVSOutput {
 ParticleVSOutput VSMain(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID) {
     ParticleVSOutput output;
     uint64_t         addr = pc.particleBufferAddr + instanceID * sizeof(Particle);
-    Particle         p    = vk::RawBufferLoad<Particle>(addr, 4);
+    Particle         p    = (*(Particle*)(addr));
 
     float2 quadUVs[6] = {float2(0, 0), float2(0, 1), float2(1, 0), float2(1, 0), float2(0, 1), float2(1, 1)};
     float2 offsets[6] = {float2(-0.5f, -0.5f), float2(-0.5f, 0.5f), float2(0.5f, -0.5f), float2(0.5f, -0.5f), float2(-0.5f, 0.5f), float2(0.5f, 0.5f)};
@@ -47,7 +45,7 @@ ParticleVSOutput VSMain(uint vertexID : SV_VertexID, uint instanceID : SV_Instan
 
     if (pc.alignment == 0) {
         // Mode 0: Camera-Facing Billboard
-        float3 camDir   = normalize(frame.camPos.xyz - p.position.xyz);
+        float3 camDir   = normalize(scene.frame.camPos.xyz - p.position.xyz);
         float3 camRight = normalize(cross(float3(0.0f, 1.0f, 0.0f), camDir));
         float3 camUp    = normalize(cross(camDir, camRight));
 
@@ -56,7 +54,7 @@ ParticleVSOutput VSMain(uint vertexID : SV_VertexID, uint instanceID : SV_Instan
         // Mode 1: Velocity-Stretched Billboard
         float  speed  = length(p.velocity.xyz);
         float3 velDir = (speed > 0.001f) ? (p.velocity.xyz / speed) : float3(0, 1, 0);
-        float3 camDir = normalize(frame.camPos.xyz - p.position.xyz);
+        float3 camDir = normalize(scene.frame.camPos.xyz - p.position.xyz);
         float3 side   = normalize(cross(velDir, camDir));
 
         worldPos += side * offset.x + velDir * offset.y;
@@ -65,14 +63,14 @@ ParticleVSOutput VSMain(uint vertexID : SV_VertexID, uint instanceID : SV_Instan
         worldPos += float3(rotatedOffset.x, 0.0f, rotatedOffset.y);
     }
 
-    output.pos   = mul(frame.viewProj, float4(worldPos, 1.0f));
+    output.pos   = mul(scene.frame.viewProj, float4(worldPos, 1.0f));
     output.uv    = uv;
     output.color = p.color;
     return output;
 }
 
 float4 PSMain(ParticleVSOutput input): SV_Target0 {
-    float4 texColor   = globalTextures[pc.textureIndex].Sample(defaultSampler, input.uv);
+    float4 texColor   = scene.globalTextures[pc.textureIndex].Sample(scene.defaultSampler, input.uv);
     float4 finalColor = texColor * input.color;
 
     if (finalColor.a <= 0.001f) {

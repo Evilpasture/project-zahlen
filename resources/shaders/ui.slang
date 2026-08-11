@@ -1,4 +1,5 @@
 // resources/shaders/ui.slang
+import common;
 struct VertexAttributes {
     uint normal;
     uint tangent;
@@ -25,10 +26,9 @@ struct UIObjectConstants {
     uint     isSDF;
 };
 
-[vk::push_constant] UIObjectConstants obj;
+[vk::push_constant] UIObjectConstants uiObj;
 
-Texture2D    globalTextures[];
-SamplerState defaultSampler;
+// Bindless registry now comes from the `scene` parameter block (common.slang).
 
 struct UIVSOutput {
     float4 pos : SV_Position;
@@ -40,8 +40,8 @@ struct UIVSOutput {
     UIVSOutput output;
 
     // Cast physical buffer device addresses to strongly-typed GPU pointers
-    float3*           posPool  = (float3*) obj.posAddress;
-    VertexAttributes* attrPool = (VertexAttributes*) obj.attrAddress;
+    float3*           posPool  = (float3*) uiObj.posAddress;
+    VertexAttributes* attrPool = (VertexAttributes*) uiObj.attrAddress;
 
     // Load data cleanly with array subscripting
     float3           position = posPool[vertexId];
@@ -50,17 +50,17 @@ struct UIVSOutput {
     uint uv    = attr.uv;
     uint color = attr.color;
 
-    output.pos   = mul(obj.orthoMatrix, float4(position, 1.0f));
+    output.pos   = mul(uiObj.orthoMatrix, float4(position, 1.0f));
     output.uv    = LocalUnpackUV(uv);
     output.color = LocalUnpackColor(color);
     return output;
 }
 
     [shader("fragment")] float4 PSMain(UIVSOutput input): SV_Target0 {
-    float4 texSample = globalTextures[obj.albedoIdx].Sample(defaultSampler, input.uv);
+    float4 texSample = scene.globalTextures[uiObj.albedoIdx].Sample(scene.defaultSampler, input.uv);
     float  alpha     = texSample.a;
 
-    if (obj.isSDF != 0) {
+    if (uiObj.isSDF != 0) {
         float distance = texSample.a;
         // Screen-space derivative calculates edge sharpness dynamically at any scale
         float smoothing = max(fwidth(distance), 0.0001f);

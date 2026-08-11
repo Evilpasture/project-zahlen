@@ -171,116 +171,37 @@ static constexpr float  kClearDepthValue    = 1.0f;
 // --- Layouts and Types ---
 static constexpr VkShaderStageFlags kCommonStages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
 
-using GlobalSceneLayout = Vk::DescriptorLayout<
-    Vk::BindlessSampledImageSlot<0, 4096, kCommonStages>,
-    Vk::SamplerSlot<1, kCommonStages>,
-    Vk::UniformSlot<2, kCommonStages>,                                        // FrameUniforms
-    Vk::StorageBufferSlot<3, kCommonStages>,                                  // Lights (Declared in common.hlsl)
-    Vk::StorageBufferSlot<4, kCommonStages>,                                  // InstanceData
-    Vk::StorageBufferSlot<5, VK_SHADER_STAGE_VERTEX_BIT>,                     // Joints
-    Vk::StorageBufferSlot<6, VK_SHADER_STAGE_VERTEX_BIT>,                     // PrevJoints
-    Vk::StorageBufferSlot<7, VK_SHADER_STAGE_VERTEX_BIT>,                     // MorphDeltas
-    Vk::SampledImageSlot<8, VK_SHADER_STAGE_FRAGMENT_BIT>,                    // Specular IBL
-    Vk::SampledImageSlot<9, VK_SHADER_STAGE_FRAGMENT_BIT>,                    // BRDF LUT
-    Vk::SamplerSlot<10, VK_SHADER_STAGE_FRAGMENT_BIT>,                        // Clamp Sampler
-    Vk::BindlessCombinedImageSamplerSlot<11, 1, VK_SHADER_STAGE_FRAGMENT_BIT> // Translucent Lighting
-    >;
+// ----------------------------------------------------------------------------
+// Per-pass descriptor layouts. Layout authority lives in the compiled shaders:
+// every pass layout is reflected (SPIRV-Reflect) from its Slang-produced SPIR-V
+// instead of being declared as a static C++ `DescriptorLayout<...>` type list.
+// The aliases below keep the historical pass names while pointing at the single
+// reflection-driven implementation.
+// ----------------------------------------------------------------------------
+using GlobalSceneLayout           = Vk::SlangReflectedLayout;
+using TAALayout                   = Vk::SlangReflectedLayout;
+using FXAALayout                  = Vk::SlangReflectedLayout;
+using MLAALayout                  = Vk::SlangReflectedLayout;
+using SMAAEdgeLayout              = Vk::SlangReflectedLayout;
+using SMAAWeightLayout            = Vk::SlangReflectedLayout;
+using SMAABlendLayout             = Vk::SlangReflectedLayout;
+using AmbientLayout               = Vk::SlangReflectedLayout;
+using LightingLayout              = Vk::SlangReflectedLayout;
+using ReflectionLayout            = Vk::SlangReflectedLayout;
+using BlitLayout                  = Vk::SlangReflectedLayout;
+using BloomThresholdLayout        = Vk::SlangReflectedLayout;
+using KawaseLayout                = Vk::SlangReflectedLayout;
+using VolumetricClearLayout       = Vk::SlangReflectedLayout;
+using VolumetricFogInjectLayout   = Vk::SlangReflectedLayout;
+using VolumetricLightInjectLayout = Vk::SlangReflectedLayout;
+using VolumetricIntegrationLayout = Vk::SlangReflectedLayout;
+using VolumetricTemporalLayout    = Vk::SlangReflectedLayout;
+using CullingLayout               = Vk::SlangReflectedLayout;
+using HiZGenerateLayout           = Vk::SlangReflectedLayout;
+using ClusterCullingLayout        = Vk::SlangReflectedLayout;
+using BakeLayout                  = Vk::SlangReflectedLayout;
+using DecalLayout                 = Vk::SlangReflectedLayout;
 
-using TAALayout = Vk::DescriptorLayout<
-    Vk::SampledImageSlot<0>,
-    Vk::SampledImageSlot<1>,
-    Vk::SampledImageSlot<2>,
-    Vk::SamplerSlot<3>,
-    Vk::UniformSlot<4, VK_SHADER_STAGE_FRAGMENT_BIT>>;
-
-using FXAALayout = Vk::SlangReflectedLayout;
-
-using VolumetricClearLayout = Vk::DescriptorLayout<
-    Vk::StorageImageSlot<0>, // outVoxelMedia
-    Vk::StorageImageSlot<1>  // outVoxelLight
-    >;
-
-using VolumetricFogInjectLayout = Vk::DescriptorLayout<
-    Vk::StorageImageSlot<0>,                              // outVoxelMedia
-    Vk::UniformSlot<1, VK_SHADER_STAGE_COMPUTE_BIT>,      // frame
-    Vk::StorageBufferSlot<2, VK_SHADER_STAGE_COMPUTE_BIT> // fogVolumes
-    >;
-
-using VolumetricLightInjectLayout = Vk::DescriptorLayout<
-    Vk::SampledImageSlot<0, VK_SHADER_STAGE_COMPUTE_BIT>,  // inVoxelMedia
-    Vk::StorageImageSlot<1>,                               // outVoxelLight
-    Vk::UniformSlot<2, VK_SHADER_STAGE_COMPUTE_BIT>,       // frame
-    Vk::StorageBufferSlot<3, VK_SHADER_STAGE_COMPUTE_BIT>, // lights
-    Vk::StorageBufferSlot<4, VK_SHADER_STAGE_COMPUTE_BIT>, // clusterGrid
-    Vk::StorageBufferSlot<5, VK_SHADER_STAGE_COMPUTE_BIT>, // clusterIndexList
-    Vk::SampledImageSlot<6, VK_SHADER_STAGE_COMPUTE_BIT>,  // shadowMap
-    Vk::SamplerSlot<7, VK_SHADER_STAGE_COMPUTE_BIT>        // shadowSampler
-    >;
-
-using VolumetricIntegrationLayout = Vk::DescriptorLayout<
-    Vk::SampledImageSlot<0, VK_SHADER_STAGE_COMPUTE_BIT>, // inVoxelLight
-    Vk::StorageImageSlot<1>                               // outVoxelIntegrated
-    >;
-
-using VolumetricTemporalLayout = Vk::DescriptorLayout<
-    Vk::SampledImageSlot<0, VK_SHADER_STAGE_COMPUTE_BIT>, // inVoxelIntegratedCurrent
-    Vk::SampledImageSlot<1, VK_SHADER_STAGE_COMPUTE_BIT>, // inVoxelIntegratedHistory
-    Vk::StorageImageSlot<2>,                              // outVoxelIntegratedResolved
-    Vk::UniformSlot<3, VK_SHADER_STAGE_COMPUTE_BIT>,      // frame
-    Vk::SamplerSlot<4, VK_SHADER_STAGE_COMPUTE_BIT>       // linearSampler
-    >;
-
-using BlitLayout = Vk::DescriptorLayout<
-    Vk::SampledImageSlot<0>,                         // texCurrent
-    Vk::SamplerSlot<1>,                              // sampler
-    Vk::SampledImageSlot<2>,                         // texBloom
-    Vk::SampledImageSlot<3>,                         // texDepth
-    Vk::UniformSlot<4, VK_SHADER_STAGE_FRAGMENT_BIT> // frame
-    >;
-
-using BloomThresholdLayout = Vk::SlangReflectedLayout;
-
-using BlurLayout = Vk::DescriptorLayout<
-    Vk::SampledImageSlot<0>, // texInput
-    Vk::SamplerSlot<1>       // sampler
-    >;
-
-using HiZGenerateLayout = Vk::DescriptorLayout<
-    Vk::SampledImageSlot<0, VK_SHADER_STAGE_COMPUTE_BIT>,
-    Vk::StorageImageSlot<1, VK_SHADER_STAGE_COMPUTE_BIT>,
-    Vk::SamplerSlot<2, VK_SHADER_STAGE_COMPUTE_BIT>>;
-
-using CullingLayout = Vk::DescriptorLayout<
-    Vk::StorageBufferSlot<0>,                              // g_instances
-    Vk::StorageBufferSlot<1>,                              // g_indirectCommands
-    Vk::SampledImageSlot<2, VK_SHADER_STAGE_COMPUTE_BIT>,  // g_hizTexture
-    Vk::SamplerSlot<3, VK_SHADER_STAGE_COMPUTE_BIT>,       // g_pointSampler
-    Vk::StorageBufferSlot<4, VK_SHADER_STAGE_COMPUTE_BIT>, // g_secondPassCandidates
-    Vk::StorageBufferSlot<5, VK_SHADER_STAGE_COMPUTE_BIT>  // g_secondPassCount
-    >;
-
-using MLAALayout = Vk::SlangReflectedLayout;
-
-using SMAAEdgeLayout = Vk::DescriptorLayout<
-    Vk::SampledImageSlot<0>, // texInput (Color)
-    Vk::SamplerSlot<1>,      // linearSampler
-    Vk::SamplerSlot<2>       // pointSampler
-    >;
-
-using SMAAWeightLayout = Vk::DescriptorLayout<
-    Vk::SampledImageSlot<0>, // texEdges
-    Vk::SampledImageSlot<1>, // texArea (LUT)
-    Vk::SampledImageSlot<2>, // texSearch (LUT)
-    Vk::SamplerSlot<3>,      // linearSampler
-    Vk::SamplerSlot<4>       // pointSampler (Nearest / Point)
-    >;
-
-using SMAABlendLayout = Vk::DescriptorLayout<
-    Vk::SampledImageSlot<0>, // texInput (Color)
-    Vk::SampledImageSlot<1>, // texWeights
-    Vk::SamplerSlot<2>,      // linearSampler
-    Vk::SamplerSlot<3>       // pointSampler
-    >;
 
 using ActiveGBuffer = Vk::GBufferLayout<
     Vk::RenderTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32>, // Index 0: sceneColor
@@ -288,76 +209,6 @@ using ActiveGBuffer = Vk::GBufferLayout<
     Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>           // Index 2: normalRoughnessBuffer
     >;
 
-using ClusterCullingLayout = Vk::DescriptorLayout<
-    Vk::StorageBufferSlot<0>,                             // ClusterBoundsBuffer (R/W)
-    Vk::StorageBufferSlot<1>,                             // ClusterGridBuffer (W)
-    Vk::StorageBufferSlot<2>,                             // LightIndexListBuffer (W)
-    Vk::StorageBufferSlot<3>,                             // GlobalCounterBuffer (Atomic)
-    Vk::UniformSlot<4, VK_SHADER_STAGE_COMPUTE_BIT>,      // Frame UBO
-    Vk::StorageBufferSlot<5, VK_SHADER_STAGE_COMPUTE_BIT> // Lights SSBO
-    >;
-
-using AmbientLayout = Vk::DescriptorLayout<
-    Vk::SampledImageSlot<0>,                               // texAlbedo
-    Vk::SamplerSlot<1>,                                    // sampler
-    Vk::SampledImageSlot<2>,                               // texDepth
-    Vk::SampledImageSlot<3>,                               // texNormalRoughness
-    Vk::SamplerSlot<4>,                                    // pointSampler
-    Vk::SampledImageSlot<5>,                               // texEnvMap
-    Vk::SampledImageSlot<6, VK_SHADER_STAGE_FRAGMENT_BIT>, // brdfLUT
-    Vk::SamplerSlot<7, VK_SHADER_STAGE_FRAGMENT_BIT>,      // clampSampler
-    Vk::UniformSlot<8, VK_SHADER_STAGE_FRAGMENT_BIT>       // frame
-    >;
-
-using LightingLayout = Vk::DescriptorLayout<
-    Vk::SampledImageSlot<0>,                                 // texAlbedo
-    Vk::SamplerSlot<1>,                                      // sampler
-    Vk::SampledImageSlot<2>,                                 // texDepth
-    Vk::SampledImageSlot<3>,                                 // texNormalRoughness
-    Vk::StorageBufferSlot<4, VK_SHADER_STAGE_FRAGMENT_BIT>,  // lights
-    Vk::UniformSlot<5, VK_SHADER_STAGE_FRAGMENT_BIT>,        // frame
-    Vk::SampledImageSlot<6, VK_SHADER_STAGE_FRAGMENT_BIT>,   // shadowMap
-    Vk::SamplerSlot<7, VK_SHADER_STAGE_FRAGMENT_BIT>,        // shadowSampler
-    Vk::SampledImageSlot<8, VK_SHADER_STAGE_FRAGMENT_BIT>,   // ltc_mat
-    Vk::SampledImageSlot<9, VK_SHADER_STAGE_FRAGMENT_BIT>,   // ltc_amp
-    Vk::SamplerSlot<10, VK_SHADER_STAGE_FRAGMENT_BIT>,       // clampSampler
-    Vk::StorageBufferSlot<11, VK_SHADER_STAGE_FRAGMENT_BIT>, // clusterGrid
-    Vk::StorageBufferSlot<12, VK_SHADER_STAGE_FRAGMENT_BIT>, // clusterIndexList
-    Vk::SampledImageSlot<13, VK_SHADER_STAGE_FRAGMENT_BIT>,  // texAmbient (Pass 1 Output)
-    Vk::SamplerSlot<14, VK_SHADER_STAGE_FRAGMENT_BIT>,       // pointSampler
-    EngineAS<15, VK_SHADER_STAGE_FRAGMENT_BIT>,              // TLAS
-    Vk::SampledImageSlot<16, VK_SHADER_STAGE_FRAGMENT_BIT>,  // punctualShadowCube (Point)
-    Vk::SampledImageSlot<17, VK_SHADER_STAGE_FRAGMENT_BIT>   // punctualShadow2D (Spot)
-    >;
-
-using ReflectionLayout = Vk::DescriptorLayout<
-    Vk::SampledImageSlot<0>,                                // texAlbedo
-    Vk::SamplerSlot<1>,                                     // sampler
-    Vk::SampledImageSlot<2>,                                // texDepth
-    Vk::SampledImageSlot<3>,                                // texNormalRoughness
-    Vk::SamplerSlot<4>,                                     // pointSampler
-    Vk::SampledImageSlot<5>,                                // texEnvMap
-    EngineAS<6, VK_SHADER_STAGE_FRAGMENT_BIT>,              // TLAS
-    Vk::UniformSlot<7, VK_SHADER_STAGE_FRAGMENT_BIT>,       // frame
-    Vk::SampledImageSlot<8, VK_SHADER_STAGE_FRAGMENT_BIT>,  // brdfLUT
-    Vk::SamplerSlot<9, VK_SHADER_STAGE_FRAGMENT_BIT>,       // clampSampler
-    Vk::SampledImageSlot<10, VK_SHADER_STAGE_FRAGMENT_BIT>, // texLighting (Pass 2 Output)
-    Vk::SampledImageSlot<11, VK_SHADER_STAGE_FRAGMENT_BIT>, // texVoxelIntegrated
-    Vk::StorageBufferSlot<12, VK_SHADER_STAGE_FRAGMENT_BIT> // g_instances
-    >;
-
-using BakeLayout = Vk::DescriptorLayout<Vk::StorageImageSlot<0>>;
-
-using KawaseLayout = Vk::DescriptorLayout<
-    Vk::SampledImageSlot<0>, // texInput (current source)
-    Vk::SamplerSlot<1>,      // sampler
-    Vk::SampledImageSlot<2>  // texLow (downsampled source for combine)
-    >;
-
-using DecalLayout = Vk::DescriptorLayout<
-    Vk::SampledImageSlot<0, VK_SHADER_STAGE_FRAGMENT_BIT>, // texDepth
-    Vk::SamplerSlot<1, VK_SHADER_STAGE_FRAGMENT_BIT>       // pointSampler
-    >;
 
 enum class Stage : uint8_t {
     ShadowPass,
@@ -719,6 +570,7 @@ struct RenderContext::Impl {
         ZHLN::DoubleBuffered<VkDescriptorSet>                           cullingSetsPass1;
         ZHLN::DoubleBuffered<VkDescriptorSet>                           cullingSetsPass2;
         ZHLN::DoubleBuffered<VkDescriptorSet>                           clusterCullingSets;
+        ZHLN::DoubleBuffered<VkDescriptorSet>                           clusterBoundsSets;
         DoubleBuffered<VkAccelerationStructureKHR>                      tlas;
         DoubleBuffered<Vk::Buffer>                                      tlasBuffer;
         DoubleBuffered<Vk::Buffer>                                      tlasScratchBuffer;
@@ -737,7 +589,7 @@ struct RenderContext::Impl {
     Vk::Buffer clusterBoundsBuffer;
     Vk::Buffer morphDeltasBuffer;
 
-    Vk::DescriptorSetLayout bindlessLayout;
+    Vk::SlangReflectedLayout bindlessLayout;
     Vk::DescriptorPool      bindlessPool;
 
     Vk::Sampler globalSampler;
@@ -799,7 +651,7 @@ struct RenderContext::Impl {
     Vk::Pipeline       meshParticleRenderPipeline;
     Vk::Pipeline       meshParticleShadowPipeline;
 
-    Vk::DescriptorSetLayout decalDescLayout;
+    Vk::SlangReflectedLayout decalDescLayout;
     Vk::DescriptorPool      decalDescPool;
     VkDescriptorSet         decalSet = VK_NULL_HANDLE;
 
@@ -815,17 +667,20 @@ struct RenderContext::Impl {
     std::expected<void, Error> InitLineBuffers() noexcept;
     void                       FlushLineQueue();
 
-    Vk::DescriptorSetLayout      cullingLayout;
+    Vk::SlangReflectedLayout      cullingLayout;
     Vk::DescriptorPool           cullingPool;
     Vk::ComputePass              hizGeneratePass;
-    Vk::DescriptorSetLayout      hizDescLayout;
+    Vk::SlangReflectedLayout      hizDescLayout;
     Vk::DescriptorPool           hizPool;
     ZHLN::Array<VkDescriptorSet> hizSets;
 
-    Vk::DescriptorSetLayout clusterCullingDescLayout;
+    Vk::SlangReflectedLayout clusterCullingDescLayout;
     Vk::DescriptorPool      clusterCullingPool;
 
-    Vk::DescriptorSetLayout proceduralBakeDescLayout;
+    Vk::SlangReflectedLayout clusterBoundsDescLayout;
+    Vk::DescriptorPool      clusterBoundsPool;
+
+    Vk::SlangReflectedLayout proceduralBakeDescLayout;
     Vk::DescriptorPool      proceduralBakeDescPool;
     VkDescriptorSet         proceduralBakeSet = VK_NULL_HANDLE;
 

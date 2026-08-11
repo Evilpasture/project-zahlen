@@ -1,6 +1,6 @@
 // resources/shaders/volumetric_temporal.hlsl
-#pragma pack_matrix(column_major)
-#include "uniforms.hlsl"
+
+import uniforms;
 
 struct VolumetricTemporalPushConstants {
     float temporalWeight;
@@ -9,13 +9,13 @@ struct VolumetricTemporalPushConstants {
     uint  _pad;
 };
 
-[[vk::push_constant]] VolumetricTemporalPushConstants tempPC;
+[vk::push_constant] VolumetricTemporalPushConstants tempPC;
 
-[[vk::binding(0, 0)]] Texture3D<float4>            inVoxelIntegratedCurrent;
-[[vk::binding(1, 0)]] Texture3D<float4>            inVoxelIntegratedHistory;
-[[vk::binding(2, 0)]] RWTexture3D<float4>          outVoxelIntegratedResolved;
-[[vk::binding(3, 0)]] ConstantBuffer<FrameUniforms> frame;
-[[vk::binding(4, 0)]] SamplerState                 linearSampler;
+Texture3D<float4>            inVoxelIntegratedCurrent;
+Texture3D<float4>            inVoxelIntegratedHistory;
+RWTexture3D<float4>          outVoxelIntegratedResolved;
+ConstantBuffer<FrameUniforms> frame;
+SamplerState                 linearSampler;
 
 float3 GetVoxelWorldPos(uint3 tid, float3 gridDim, out float outDepthVS) {
     float2 uv = (float2(tid.xy) + 0.5f) / gridDim.xy;

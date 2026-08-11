@@ -1,13 +1,13 @@
 // File: resources/shaders/cluster_bounds.hlsl
-#pragma pack_matrix(column_major)
-#include "uniforms.hlsl"
+
+import uniforms;
 struct ClusterBounds {
 	float4 minPoint;
 	float4 maxPoint;
 };
 
-[[vk::binding(0, 0)]] RWStructuredBuffer<ClusterBounds> out_Bounds;
-[[vk::binding(4, 0)]] ConstantBuffer<FrameUniforms> frame;
+RWStructuredBuffer<ClusterBounds> out_Bounds;
+ConstantBuffer<FrameUniforms> frame;
 
 float4 Unproject(float4 coord) {
 	float4 res = mul(frame.invViewProj, coord);

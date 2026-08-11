@@ -135,7 +135,7 @@ std::expected<void, Error> RenderContext::Impl::CompileShadowPipeline(VkDevice d
         .transform_error([](auto err) -> Error { return err; })
         .and_then([&, device](auto&& shaders) -> std::expected<void, Error> {
             return Vk::PipelineLayoutBuilder(device)
-                .AddDescriptorSetLayout(bindlessLayout.Get())
+                .AddDescriptorSetLayout(bindlessLayout.GetSetLayout())
                 .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(ObjectConstants))
                 .Build()
                 .transform_error([](auto err) -> Error {
@@ -166,7 +166,7 @@ std::expected<void, Error> RenderContext::Impl::CompilePunctualShadowPipeline(Vk
         .transform_error([](auto err) -> Error { return err; })
         .and_then([&, device](auto&& shaders) -> std::expected<void, Error> {
             return Vk::PipelineLayoutBuilder(device)
-                .AddDescriptorSetLayout(bindlessLayout.Get())
+                .AddDescriptorSetLayout(bindlessLayout.GetSetLayout())
                 .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT, sizeof(uint32_t))
                 .Build()
                 .transform_error([](auto err) -> Error {
@@ -269,7 +269,7 @@ std::expected<Material, Error> RenderContext::CreateMaterial(const PipelineDesc&
         })
         .and_then([impl, &desc](auto&& shaders) -> std::expected<Material, Error> {
             return Vk::PipelineLayoutBuilder(impl->ctx.Device())
-                .AddDescriptorSetLayout(impl->bindlessLayout.Get())
+                .AddDescriptorSetLayout(impl->bindlessLayout.GetSetLayout())
                 .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(ObjectConstants))
                 .Build()
                 .transform_error([](auto err) -> Error {
@@ -382,7 +382,7 @@ std::expected<uint32_t, Error> RenderContext::Impl::CreateTextureInternal(const 
                                     Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, mipLevels);
 
             uint32_t index = nextTextureIndex++;
-            Vk::UpdateBindlessTextureSlot(device, index, gpuView.Get(), frames.bindlessSets, 0);
+            Vk::UpdateBindlessTextureSlot(device, index, gpuView.Get(), frames.bindlessSets, 11);
 
             textureImages.push_back(std::forward<decltype(gpuImage)>(gpuImage));
             textureViews.push_back(std::move(gpuView));
@@ -418,7 +418,7 @@ std::expected<uint32_t, Error> RenderContext::Impl::CreateTextureCubeInternal(co
             auto gpuView = Vk::CreateViewCube<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), 1);
 
             uint32_t index = nextTextureIndex++;
-            Vk::UpdateBindlessTextureSlot(device, index, gpuView.Get(), frames.bindlessSets, 0);
+            Vk::UpdateBindlessTextureSlot(device, index, gpuView.Get(), frames.bindlessSets, 11);
 
             textureImages.push_back(std::forward<decltype(gpuImage)>(gpuImage));
             textureViews.push_back(std::move(gpuView));

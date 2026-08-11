@@ -1,7 +1,7 @@
 // resources/shaders/decal.hlsl
-#pragma pack_matrix(column_major)
-#include "pbr_helpers.hlsl"
-#include "uniforms.hlsl"
+
+import common;
+import pbr_helpers;
 
 struct DecalPushConstants {
     float4x4 worldMatrix;
@@ -11,7 +11,7 @@ struct DecalPushConstants {
     float    roughness;
     float    metallic;
 };
-[[vk::push_constant]] DecalPushConstants pc;
+[vk::push_constant] DecalPushConstants pc;
 
 struct VSOutput {
     float4 pos : SV_Position;
@@ -30,22 +30,19 @@ static const uint CubeIndices[36] = {
     1, 2, 6, 1, 6, 5  // Right
 };
 
-// --- Set 1: Global Bindless Layout (Inherited from Engine) ---
-[[vk::binding(0, 1)]] Texture2D                     globalTextures[];
-[[vk::binding(1, 1)]] SamplerState                  defaultSampler;
-[[vk::binding(2, 1)]] ConstantBuffer<FrameUniforms> frame;
+// Global bindless registry is now provided by the `scene` parameter block.
 
 VSOutput VSMain(uint vertexID : SV_VertexID) {
     VSOutput output;
     float3   localPos = CubeVertices[CubeIndices[vertexID]];
     float4   worldPos = mul(pc.worldMatrix, float4(localPos, 1.0f));
-    output.pos        = mul(frame.viewProj, worldPos);
+    output.pos        = mul(scene.frame.viewProj, worldPos);
     return output;
 }
 
 // --- Set 0: Custom Decal Layout ---
-[[vk::binding(0, 0)]] Texture2D<float> texDepth;
-[[vk::binding(1, 0)]] SamplerState     pointSampler;
+Texture2D<float> texDepth;
+SamplerState     pointSampler;
 
 struct PSOutput {
     float4 albedo : SV_Target0;          // Writes to G-Buffer SceneColor (Slot 0)
@@ -56,7 +53,7 @@ PSOutput PSMain(VSOutput input) {
     PSOutput output;
 
     // 1. Reconstruct screen-space UV coordinates
-    float2 uv = input.pos.xy / frame.screenResolution;
+    float2 uv = input.pos.xy / scene.frame.screenResolution;
 
     // 2. Sample Depth
     float depth = texDepth.SampleLevel(pointSampler, uv, 0).r;
@@ -65,7 +62,7 @@ PSOutput PSMain(VSOutput input) {
     }
 
     // 3. Reconstruct World Position of G-Buffer geometry
-    float3 worldPos = ReconstructWorldPos(uv, depth, frame.invViewProj);
+    float3 worldPos = ReconstructWorldPos(uv, depth, scene.frame.invViewProj);
 
     // 4. Transform World Position to Decal's Local Space
     float4 localPos = mul(pc.invWorldMatrix, float4(worldPos, 1.0f));
@@ -77,7 +74,7 @@ PSOutput PSMain(VSOutput input) {
     float2 decalUV = localPos.xy + 0.5f;
 
     // 7. Sample Decal Albedo
-    float4 albedo = globalTextures[pc.albedoIndex].Sample(defaultSampler, decalUV);
+    float4 albedo = scene.globalTextures[pc.albedoIndex].Sample(scene.defaultSampler, decalUV);
     if (albedo.a < 0.01f) {
         discard;
     }
@@ -90,7 +87,7 @@ PSOutput PSMain(VSOutput input) {
     float  metallic  = pc.metallic;
 
     if (pc.normalIndex != 2) { // 2 is flat normal fallback
-        float3 normalMap = globalTextures[pc.normalIndex].Sample(defaultSampler, decalUV).rgb * 2.0f - 1.0f;
+        float3 normalMap = scene.globalTextures[pc.normalIndex].Sample(scene.defaultSampler, decalUV).rgb * 2.0f - 1.0f;
 
         // Aligns local tangent space to world axes
         float3 T      = normalize(mul((float3x3) pc.worldMatrix, float3(1, 0, 0)));

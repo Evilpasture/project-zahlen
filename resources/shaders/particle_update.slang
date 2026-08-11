@@ -1,6 +1,7 @@
 // resources/shaders/particle_update.hlsl
-#pragma pack_matrix(column_major)
-#include "uniforms.hlsl"
+
+import common;
+import uniforms;
 
 struct Particle {
     float4 position; // xyz = position, w = unused
@@ -38,10 +39,7 @@ struct ComputePushConstants {
     float                 deltaTime;
     ParticleEmitterParams p;
 };
-[[vk::push_constant]] ComputePushConstants pc;
-
-[[vk::binding(2, 0)]] ConstantBuffer<FrameUniforms> frame;
-
+[vk::push_constant] ComputePushConstants pc;
 // Fast GPU 3D Hash
 float Hash13(float3 p) {
     p = frac(p * 0.1031f);
@@ -55,7 +53,7 @@ float3 Hash33(float3 p) {
 
 // Procedural 3D turbulence force using sine-cosine offsets
 float3 SampleTurbulence(float3 pos) {
-    float  time = frame.camPos.w;
+    float  time = scene.frame.camPos.w;
     float3 p    = pos * pc.p.turbulenceFreq + float3(time * 0.2f, time * 0.3f, time * 0.1f);
     return float3(sin(p.y * 3.2f + p.z * 1.5f), cos(p.x * 2.1f + p.z * 1.5f), sin(p.x * 4.0f + p.y * 1.5f)) * pc.p.turbulence;
 }
@@ -66,7 +64,7 @@ float3 SampleTurbulence(float3 pos) {
         return;
 
     uint64_t addr = pc.particleBufferAddr + idx * sizeof(Particle);
-    Particle part = vk::RawBufferLoad<Particle>(addr, 4);
+    Particle part = (*(Particle*)(addr));
 
     float dt = pc.deltaTime;
 
@@ -106,7 +104,7 @@ float3 SampleTurbulence(float3 pos) {
 
     // 5. Respawn Logic (If dead or wrapped-out when not looping)
     if (part.params.x >= part.params.y || (wrapped && pc.p.loopBoundary <= 0.5f) || part.params.y <= 0.0f) {
-        float3 seed = float3(idx, frame.camPos.w, dt);
+        float3 seed = float3(idx, scene.frame.camPos.w, dt);
         float3 rand = Hash33(seed) * 2.0f - 1.0f;
 
         if (!wrapped || part.params.y <= 0.0f) {
@@ -127,5 +125,5 @@ float3 SampleTurbulence(float3 pos) {
         part.params.z     = pc.p.startSize.x;
     }
 
-    vk::RawBufferStore<Particle>(addr, part, 4);
+    (*(Particle*)(addr)) = part;
 }

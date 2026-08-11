@@ -1,7 +1,8 @@
 // resources/shaders/mesh_particle_render.hlsl
-#pragma pack_matrix(column_major)
-#include "pbr_helpers.hlsl"
-#include "uniforms.hlsl"
+
+import common;
+import pbr_helpers;
+import uniforms;
 
 struct Particle3D {
     float4 position; // xyz = pos, w = scale
@@ -34,11 +35,9 @@ struct MeshParticleRenderPushConstants {
     uint _padding; // Offset 100
 };
 
-[[vk::push_constant]] MeshParticleRenderPushConstants mp_pc;
+[vk::push_constant] MeshParticleRenderPushConstants mp_pc;
 
-[[vk::binding(0, 0)]] Texture2D                     globalTextures[];
-[[vk::binding(1, 0)]] SamplerState                  defaultSampler;
-[[vk::binding(2, 0)]] ConstantBuffer<FrameUniforms> frame;
+// Bindless registry now comes from the `scene` parameter block (common.slang).
 
 struct VSOutput {
     float4                 pos : SV_Position;
@@ -83,7 +82,7 @@ float3 RotateVectorByQuat(float3 v, float4 q) {
 VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, uint viewId : SV_ViewID) {
     VSOutput output;
 
-    Particle3D p = vk::RawBufferLoad<Particle3D>(mp_pc.particleBufferAddr + instanceId * sizeof(Particle3D), 4);
+    Particle3D p = (*(Particle3D*)(mp_pc.particleBufferAddr + instanceId * sizeof(Particle3D)));
 
     // Cull dead particles cleanly (0-area degenerate clip position)
     if (p.params.x >= p.params.y || p.params.y <= 0.0f) {
@@ -104,26 +103,26 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, ui
         return output;
     }
 
-    uint actualVertexId = mp_pc.iboAddress != 0 ? vk::RawBufferLoad<uint>(mp_pc.iboAddress + vertexId * 4, 4) : vertexId;
+    uint actualVertexId = mp_pc.iboAddress != 0 ? (*(uint*)(mp_pc.iboAddress + vertexId * 4)) : vertexId;
 
-    float3 localPos   = vk::RawBufferLoad<float3>(mp_pc.posAddress + actualVertexId * 12, 4);
+    float3 localPos   = (*(float3*)(mp_pc.posAddress + actualVertexId * 12));
     float3 scaledPos  = localPos * p.position.w;
     float3 rotatedPos = RotateVectorByQuat(scaledPos, p.rotation);
     float3 worldPos   = rotatedPos + p.position.xyz;
 
     output.worldPos = worldPos;
-    output.pos      = mul(frame.viewProj, float4(worldPos, 1.0f));
+    output.pos      = mul(scene.frame.viewProj, float4(worldPos, 1.0f));
     output.currClip = output.pos;
-    output.prevClip = mul(frame.prevUnjitteredViewProj, float4(worldPos, 1.0f));
+    output.prevClip = mul(scene.frame.prevUnjitteredViewProj, float4(worldPos, 1.0f));
 
     uint cascadeIndex = clamp(viewId, 0u, 3u);
-    output.shadowPos  = mul(frame.lightSpaceMatrices[cascadeIndex], float4(worldPos, 1.0f));
+    output.shadowPos  = mul(scene.frame.lightSpaceMatrices[cascadeIndex], float4(worldPos, 1.0f));
 
     if (mp_pc.attrAddress != 0) {
         uint64_t attrAddr   = mp_pc.attrAddress + actualVertexId * 16;
-        uint     normalRaw  = vk::RawBufferLoad<uint>(attrAddr + 0, 4);
-        uint     tangentRaw = vk::RawBufferLoad<uint>(attrAddr + 4, 4);
-        uint     uvRaw      = vk::RawBufferLoad<uint>(attrAddr + 8, 4);
+        uint     normalRaw  = (*(uint*)(attrAddr + 0));
+        uint     tangentRaw = (*(uint*)(attrAddr + 4));
+        uint     uvRaw      = (*(uint*)(attrAddr + 8));
 
         float3 localNormal = UnpackNormal(normalRaw).xyz;
         output.normal      = normalize(RotateVectorByQuat(localNormal, p.rotation));
@@ -155,7 +154,7 @@ void PSShadow(VSOutput input) {
     float  alphaCutoff     = input.pbrFactors.z;
     uint   alphaMode       = input.alphaMode;
 
-    float4 albedo = globalTextures[indices.x].Sample(defaultSampler, input.uv) * baseColorFactor * input.color;
+    float4 albedo = scene.globalTextures[indices.x].Sample(scene.defaultSampler, input.uv) * baseColorFactor * input.color;
 
     if (alphaMode == 1 && albedo.a < alphaCutoff) {
         discard;
@@ -172,15 +171,15 @@ PSOutput PSMain(VSOutput input) {
     float  alphaCutoff     = input.pbrFactors.z;
     uint   alphaMode       = input.alphaMode;
 
-    float4 albedo      = globalTextures[indices.x].Sample(defaultSampler, input.uv) * baseColorFactor * input.color;
-    float3 emissiveMap = globalTextures[indices.w].Sample(defaultSampler, input.uv).rgb;
+    float4 albedo      = scene.globalTextures[indices.x].Sample(scene.defaultSampler, input.uv) * baseColorFactor * input.color;
+    float3 emissiveMap = scene.globalTextures[indices.w].Sample(scene.defaultSampler, input.uv).rgb;
     float3 emissive    = emissiveMap * input.emissiveFactor.rgb;
 
     if (alphaMode == 1 && albedo.a < alphaCutoff) {
         discard;
     }
 
-    float4 pbr       = globalTextures[indices.z].Sample(defaultSampler, input.uv);
+    float4 pbr       = scene.globalTextures[indices.z].Sample(scene.defaultSampler, input.uv);
     float  roughness = max((indices.z == 0 ? 1.0f : pbr.g) * roughnessFactor, 0.045f);
     float  metallic  = (indices.z == 0 ? 1.0f : pbr.b) * metallicFactor;
 
@@ -196,7 +195,7 @@ PSOutput PSMain(VSOutput input) {
         float  tangentSign = input.tangent.w * 2.0f - 1.0f;
         float3 B           = normalize(cross(N, T) * tangentSign);
 
-        float3 normalMap = globalTextures[indices.y].Sample(defaultSampler, input.uv).rgb * 2.0f - 1.0f;
+        float3 normalMap = scene.globalTextures[indices.y].Sample(scene.defaultSampler, input.uv).rgb * 2.0f - 1.0f;
         worldNormal      = normalize(normalMap.x * T + normalMap.y * B + normalMap.z * N);
     }
 

@@ -14,28 +14,28 @@ namespace ZHLN::Resource {
 
 // --- Basic Shaders ---
 constexpr uint8_t basic_vs_raw[] = {
-#embed SHADER_BASIC_HLSL_VS_PATH
+#embed SHADER_BASIC_SLANG_VS_PATH
 };
 constexpr uint8_t basic_ps_raw[] = {
-#embed SHADER_BASIC_HLSL_PS_PATH
+#embed SHADER_BASIC_SLANG_PS_PATH
 };
 extern const ShaderPair basic_shaders {.vertex = basic_vs_raw, .fragment = basic_ps_raw};
 
 // --- Blit Shaders ---
 constexpr uint8_t blit_vs_raw[] = {
-#embed SHADER_BLIT_HLSL_VS_PATH
+#embed SHADER_BLIT_SLANG_VS_PATH
 };
 constexpr uint8_t blit_ps_raw[] = {
-#embed SHADER_BLIT_HLSL_PS_PATH
+#embed SHADER_BLIT_SLANG_PS_PATH
 };
 extern const ShaderPair blit_shaders {.vertex = blit_vs_raw, .fragment = blit_ps_raw};
 
 // --- TAA Shaders ---
 constexpr uint8_t taa_vs_raw[] = {
-#embed SHADER_TAA_HLSL_VS_PATH
+#embed SHADER_TAA_SLANG_VS_PATH
 };
 constexpr uint8_t taa_ps_raw[] = {
-#embed SHADER_TAA_HLSL_PS_PATH
+#embed SHADER_TAA_SLANG_PS_PATH
 };
 extern const ShaderPair taa_shaders {.vertex = taa_vs_raw, .fragment = taa_ps_raw};
 
@@ -50,37 +50,37 @@ extern const ShaderPair ui_shaders {.vertex = ui_vs_raw, .fragment = ui_ps_raw};
 
 // --- Ambient Shaders ---
 constexpr uint8_t ambient_vs_raw[] = {
-#embed SHADER_AMBIENT_HLSL_VS_PATH
+#embed SHADER_AMBIENT_SLANG_VS_PATH
 };
 constexpr uint8_t ambient_ps_raw[] = {
-#embed SHADER_AMBIENT_HLSL_PS_PATH
+#embed SHADER_AMBIENT_SLANG_PS_PATH
 };
 extern const ShaderPair ambient_shaders {.vertex = ambient_vs_raw, .fragment = ambient_ps_raw};
 
 // --- Lighting Shaders ---
 constexpr uint8_t lighting_vs_raw[] = {
-#embed SHADER_LIGHTING_HLSL_VS_PATH
+#embed SHADER_LIGHTING_SLANG_VS_PATH
 };
 constexpr uint8_t lighting_ps_raw[] = {
-#embed SHADER_LIGHTING_HLSL_PS_PATH
+#embed SHADER_LIGHTING_SLANG_PS_PATH
 };
 extern const ShaderPair lighting_shaders {.vertex = lighting_vs_raw, .fragment = lighting_ps_raw};
 
 // --- Reflection Shaders ---
 constexpr uint8_t reflection_vs_raw[] = {
-#embed SHADER_REFLECTION_HLSL_VS_PATH
+#embed SHADER_REFLECTION_SLANG_VS_PATH
 };
 constexpr uint8_t reflection_ps_raw[] = {
-#embed SHADER_REFLECTION_HLSL_PS_PATH
+#embed SHADER_REFLECTION_SLANG_PS_PATH
 };
 extern const ShaderPair reflection_shaders {.vertex = reflection_vs_raw, .fragment = reflection_ps_raw};
 
 // --- Reflection NoRT Shaders ---
 constexpr uint8_t reflection_nort_vs_raw[] = {
-#embed SHADER_REFLECTION_NORT_HLSL_VS_PATH
+#embed SHADER_REFLECTION_NORT_SLANG_VS_PATH
 };
 constexpr uint8_t reflection_nort_ps_raw[] = {
-#embed SHADER_REFLECTION_NORT_HLSL_PS_PATH
+#embed SHADER_REFLECTION_NORT_SLANG_PS_PATH
 };
 extern const ShaderPair reflection_nort_shaders {.vertex = reflection_nort_vs_raw, .fragment = reflection_nort_ps_raw};
 
@@ -143,25 +143,25 @@ constexpr uint8_t bloom_blur_vs_raw[] = {
 #embed SHADER_BLOOM_BLUR_SLANG_VS_PATH
 };
 constexpr uint8_t bloom_blur_ps_raw[] = {
-#embed SHADER_BLOOM_BLUR_SLANG_VS_PATH
+#embed SHADER_BLOOM_BLUR_SLANG_PS_PATH
 };
 extern const ShaderPair bloom_blur_shaders {.vertex = bloom_blur_vs_raw, .fragment = bloom_blur_ps_raw};
 
 // --- Punctual Shadows Shaders ---
 constexpr uint8_t punctual_shadows_vs_raw[] = {
-#embed SHADER_PUNCTUAL_SHADOWS_HLSL_VS_PATH
+#embed SHADER_PUNCTUAL_SHADOWS_SLANG_VS_PATH
 };
 constexpr uint8_t punctual_shadows_ps_raw[] = {
-#embed SHADER_PUNCTUAL_SHADOWS_HLSL_PS_PATH
+#embed SHADER_PUNCTUAL_SHADOWS_SLANG_PS_PATH
 };
 extern const ShaderPair punctual_shadows_shaders {.vertex = punctual_shadows_vs_raw, .fragment = punctual_shadows_ps_raw};
 
 // --- Lighting NoRT Shaders ---
 constexpr uint8_t lighting_nort_vs_raw[] = {
-#embed SHADER_LIGHTING_NORT_HLSL_VS_PATH
+#embed SHADER_LIGHTING_NORT_SLANG_VS_PATH
 };
 constexpr uint8_t lighting_nort_ps_raw[] = {
-#embed SHADER_LIGHTING_NORT_HLSL_PS_PATH
+#embed SHADER_LIGHTING_NORT_SLANG_PS_PATH
 };
 extern const ShaderPair lighting_nort_shaders {.vertex = lighting_nort_vs_raw, .fragment = lighting_nort_ps_raw};
 
@@ -238,7 +238,7 @@ extern const ShaderPair mesh_particle_shadow_shaders {.vertex = mesh_particle_sh
 
 // --- Single Shaders and Binary Resources ---
 constexpr uint8_t culling_comp_raw[] = {
-#embed SHADER_CULLING_HLSL_CS_PATH
+#embed SHADER_CULLING_SLANG_CS_PATH
 };
 
 constexpr uint8_t hiz_generate_comp_raw[] = {
@@ -246,7 +246,7 @@ constexpr uint8_t hiz_generate_comp_raw[] = {
 };
 
 constexpr uint8_t shadow_frag_raw[] = {
-#embed SHADER_SHADOW_HLSL_PS_PATH
+#embed SHADER_SHADOW_SLANG_PS_PATH
 };
 
 constexpr uint8_t cluster_bounds_raw[] = {
@@ -262,7 +262,7 @@ constexpr uint8_t skinning_comp_raw[] = {
 };
 
 constexpr uint8_t forward_frag_raw[] = {
-#embed SHADER_FORWARD_HLSL_PS_PATH
+#embed SHADER_FORWARD_SLANG_PS_PATH
 };
 
 constexpr uint8_t hang_gpu_comp_raw[] = {
@@ -301,22 +301,22 @@ extern const std::span<const uint8_t> ltc_mat {ltc_mat_raw, sizeof(ltc_mat_raw)}
 extern const std::span<const uint8_t> ltc_amp {ltc_amp_raw, sizeof(ltc_amp_raw)};
 
 namespace Paths {
-const char* const BasicVS                 = SHADER_BASIC_HLSL_VS_PATH;
-const char* const BasicPS                 = SHADER_BASIC_HLSL_PS_PATH;
-const char* const BlitVS                  = SHADER_BLIT_HLSL_VS_PATH;
-const char* const BlitPS                  = SHADER_BLIT_HLSL_PS_PATH;
-const char* const TaaVS                   = SHADER_TAA_HLSL_VS_PATH;
-const char* const TaaPS                   = SHADER_TAA_HLSL_PS_PATH;
+const char* const BasicVS                 = SHADER_BASIC_SLANG_VS_PATH;
+const char* const BasicPS                 = SHADER_BASIC_SLANG_PS_PATH;
+const char* const BlitVS                  = SHADER_BLIT_SLANG_VS_PATH;
+const char* const BlitPS                  = SHADER_BLIT_SLANG_PS_PATH;
+const char* const TaaVS                   = SHADER_TAA_SLANG_VS_PATH;
+const char* const TaaPS                   = SHADER_TAA_SLANG_PS_PATH;
 const char* const UiVS                    = SHADER_UI_SLANG_VS_PATH;
 const char* const UiPS                    = SHADER_UI_SLANG_PS_PATH;
-const char* const AmbientVS               = SHADER_AMBIENT_HLSL_VS_PATH;
-const char* const AmbientPS               = SHADER_AMBIENT_HLSL_PS_PATH;
-const char* const LightingVS              = SHADER_LIGHTING_HLSL_VS_PATH;
-const char* const LightingPS              = SHADER_LIGHTING_HLSL_PS_PATH;
-const char* const ReflectionVS            = SHADER_REFLECTION_HLSL_VS_PATH;
-const char* const ReflectionPS            = SHADER_REFLECTION_HLSL_PS_PATH;
-const char* const ReflectionNortVS        = SHADER_REFLECTION_NORT_HLSL_VS_PATH;
-const char* const ReflectionNortPS        = SHADER_REFLECTION_NORT_HLSL_PS_PATH;
+const char* const AmbientVS               = SHADER_AMBIENT_SLANG_VS_PATH;
+const char* const AmbientPS               = SHADER_AMBIENT_SLANG_PS_PATH;
+const char* const LightingVS              = SHADER_LIGHTING_SLANG_VS_PATH;
+const char* const LightingPS              = SHADER_LIGHTING_SLANG_PS_PATH;
+const char* const ReflectionVS            = SHADER_REFLECTION_SLANG_VS_PATH;
+const char* const ReflectionPS            = SHADER_REFLECTION_SLANG_PS_PATH;
+const char* const ReflectionNortVS        = SHADER_REFLECTION_NORT_SLANG_VS_PATH;
+const char* const ReflectionNortPS        = SHADER_REFLECTION_NORT_SLANG_PS_PATH;
 const char* const FxaaVS                  = SHADER_FXAA_SLANG_VS_PATH;
 const char* const FxaaPS                  = SHADER_FXAA_SLANG_PS_PATH;
 const char* const MlaaVS                  = SHADER_MLAA_SLANG_VS_PATH;
@@ -331,10 +331,10 @@ const char* const BloomThresholdVS        = SHADER_BLOOM_THRESHOLD_SLANG_VS_PATH
 const char* const BloomThresholdPS        = SHADER_BLOOM_THRESHOLD_SLANG_PS_PATH;
 const char* const BloomBlurVS             = SHADER_BLOOM_BLUR_SLANG_VS_PATH;
 const char* const BloomBlurPS             = SHADER_BLOOM_BLUR_SLANG_PS_PATH;
-const char* const PunctualShadowsVS       = SHADER_PUNCTUAL_SHADOWS_HLSL_VS_PATH;
-const char* const PunctualShadowsPS       = SHADER_PUNCTUAL_SHADOWS_HLSL_PS_PATH;
-const char* const LightingNortVS          = SHADER_LIGHTING_NORT_HLSL_VS_PATH;
-const char* const LightingNortPS          = SHADER_LIGHTING_NORT_HLSL_PS_PATH;
+const char* const PunctualShadowsVS       = SHADER_PUNCTUAL_SHADOWS_SLANG_VS_PATH;
+const char* const PunctualShadowsPS       = SHADER_PUNCTUAL_SHADOWS_SLANG_PS_PATH;
+const char* const LightingNortVS          = SHADER_LIGHTING_NORT_SLANG_VS_PATH;
+const char* const LightingNortPS          = SHADER_LIGHTING_NORT_SLANG_PS_PATH;
 const char* const VolumetricClearCS       = SHADER_VOLUMETRIC_CLEAR_SLANG_CS_PATH;
 const char* const VolumetricFogInjectCS   = SHADER_VOLUMETRIC_FOG_INJECT_CS_PATH;
 const char* const VolumetricLightInjectCS = SHADER_VOLUMETRIC_LIGHT_INJECT_CS_PATH;
@@ -350,13 +350,13 @@ const char* const MeshParticleRenderVS    = SHADER_MESH_PARTICLE_RENDER_VS_PATH;
 const char* const MeshParticleRenderPS    = SHADER_MESH_PARTICLE_RENDER_PS_PATH;
 const char* const MeshParticleShadowVS    = SHADER_MESH_PARTICLE_SHADOW_VS_PATH;
 const char* const MeshParticleShadowPS    = SHADER_MESH_PARTICLE_SHADOW_PS_PATH;
-const char* const CullingCS               = SHADER_CULLING_HLSL_CS_PATH;
+const char* const CullingCS               = SHADER_CULLING_SLANG_CS_PATH;
 const char* const HizGenerateCS           = SHADER_HIZ_GENERATE_SLANG_CS_PATH;
-const char* const ShadowPS                = SHADER_SHADOW_HLSL_PS_PATH;
+const char* const ShadowPS                = SHADER_SHADOW_SLANG_PS_PATH;
 const char* const ClusterBoundsCS         = SHADER_CLUSTER_BOUNDS_CS_PATH;
 const char* const ClusterCullingCS        = SHADER_CLUSTER_CULLING_CS_PATH;
 const char* const SkinningCS              = SHADER_SKINNING_SLANG_CS_PATH;
-const char* const ForwardPS               = SHADER_FORWARD_HLSL_PS_PATH;
+const char* const ForwardPS               = SHADER_FORWARD_SLANG_PS_PATH;
 const char* const HangGpuCS               = SHADER_HANG_GPU_SLANG_CS_PATH;
 const char* const ProceduralBakeCS        = SHADER_PROCEDURAL_BAKE_SLANG_CS_PATH;
 } // namespace Paths

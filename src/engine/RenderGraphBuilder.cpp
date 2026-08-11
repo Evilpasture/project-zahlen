@@ -263,11 +263,13 @@ struct PassFactory {
     [[nodiscard]] auto MakeAmbientPass() const noexcept {
         return Vk::MakePass<"Ambient", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>, Vk::ColorWrite<Res_Ambient>>(
             [this](auto& ctx) noexcept {
+                // Order must mirror ambient.slang's set-0 declaration order:
+                // texInput, smp, texDepth, texNormalRoughness, pointSampler, frame.
                 self.ambientPass.WriteNext(
                     device, Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor), self.defaultSampler.Get(),
                     Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget),
                     Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer), self.pointSampler.Get(),
-                    self.iblPayload.prefilteredView.Get(), self.iblPayload.brdfLutView.Get(), self.clampSampler.Get(), self.frames.frameUniformBuffers->Handle()
+                    self.frames.frameUniformBuffers->Handle()
                 );
                 self.ambientPass.Execute(ctx.Cmd(), pc);
             }
@@ -278,14 +280,18 @@ struct PassFactory {
         return Vk::MakePass<
             "Lighting", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_Ambient>,
             Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ColorWrite<Res_Lighting>>([this](auto& ctx) noexcept {
+            // Order must mirror lighting.slang's set-0 declaration order.
+            // NOTE: GetTLAS() is LAST (binding 17 in the RT variant; absent in
+            // the NoRT variant), so the trailing NORT-only hole never shifts
+            // any other binding's positional write.
             self.lightingPass.WriteNext(
                 device, Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor), self.defaultSampler.Get(),
                 Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget),
                 Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer), self.frames.lightStorageBuffers->Handle(),
                 self.frames.frameUniformBuffers->Handle(), self.graphResources.shadowMap.view.Get(), self.shadowSampler.Get(), self.ltcMatView.Get(),
                 self.ltcAmpView.Get(), self.clampSampler.Get(), self.frames.clusterGridBuffers->Handle(), self.frames.lightIndexListBuffers->Handle(),
-                Vk::Assume<Vk::ShaderRead<Res_Ambient>>(self.graphResources.ambientTarget), self.pointSampler.Get(), GetTLAS(), self.shadowAtlasCubeView.Get(),
-                self.shadowAtlas2DView.Get()
+                Vk::Assume<Vk::ShaderRead<Res_Ambient>>(self.graphResources.ambientTarget), self.pointSampler.Get(), self.shadowAtlasCubeView.Get(),
+                self.shadowAtlas2DView.Get(), GetTLAS()
             );
             self.lightingPass.ExecuteVariant(ctx.Cmd(), lightVariant, pc);
         });
@@ -297,13 +303,16 @@ struct PassFactory {
             Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ShaderReadGeneral<Res_VoxelResolved>, Vk::ColorWrite<Res_HdrSceneColor>>(
             [this](auto& ctx) noexcept {
                 Profiler::ScopedGpuProfile timer(ctx.Cmd(), fIdx, self.gpuProfiler, Stage::PostProcessPass);
+                // Order must mirror reflection.slang's set-0 declaration order
+                // (g_instances and the RT-only tlas trail at the tail).
                 self.reflectionPass.WriteNext(
                     device, Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor), self.defaultSampler.Get(),
                     Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget),
                     Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer), self.pointSampler.Get(),
-                    self.iblPayload.prefilteredView.Get(), GetTLAS(), self.frames.frameUniformBuffers[fIdx].Handle(), self.iblPayload.brdfLutView.Get(),
+                    self.iblPayload.prefilteredView.Get(), self.frames.frameUniformBuffers[fIdx].Handle(), self.iblPayload.brdfLutView.Get(),
                     self.clampSampler.Get(), Vk::Assume<Vk::ShaderRead<Res_Lighting>>(self.graphResources.lightingTarget),
-                    Vk::Assume<Vk::ShaderReadGeneral<Res_VoxelResolved>>(self.graphResources.voxelResolved), self.frames.instanceDataBuffers[fIdx].Handle()
+                    Vk::Assume<Vk::ShaderReadGeneral<Res_VoxelResolved>>(self.graphResources.voxelResolved), self.frames.instanceDataBuffers[fIdx].Handle(),
+                    GetTLAS()
                 );
 
                 self.reflectionPass.ExecuteVariant(ctx.Cmd(), reflVariant, pc);
@@ -332,9 +341,10 @@ struct PassFactory {
                     device, Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor), self.defaultSampler.Get(),
                     Vk::Assume<Vk::ShaderRead<Res_TransDepth>>(self.graphResources.transDepthBuffer),
                     Vk::Assume<Vk::ShaderRead<Res_TransNorm>>(self.graphResources.transNormalBuffer), self.pointSampler.Get(),
-                    self.iblPayload.prefilteredView.Get(), GetTLAS(), self.frames.frameUniformBuffers[fIdx].Handle(), self.iblPayload.brdfLutView.Get(),
+                    self.iblPayload.prefilteredView.Get(), self.frames.frameUniformBuffers[fIdx].Handle(), self.iblPayload.brdfLutView.Get(),
                     self.clampSampler.Get(), Vk::Assume<Vk::ShaderRead<Res_Lighting>>(self.graphResources.lightingTarget),
-                    Vk::Assume<Vk::ShaderReadGeneral<Res_VoxelResolved>>(self.graphResources.voxelResolved), self.frames.instanceDataBuffers[fIdx].Handle()
+                    Vk::Assume<Vk::ShaderReadGeneral<Res_VoxelResolved>>(self.graphResources.voxelResolved), self.frames.instanceDataBuffers[fIdx].Handle(),
+                    GetTLAS()
                 );
                 self.translucentReflectionPass.ExecuteVariant(ctx.Cmd(), reflVariant, pc);
             }
@@ -413,7 +423,7 @@ struct PassFactory {
 
             Profiler::ScopedGpuProfile timer(c, fIdx, self.gpuProfiler, Stage::DecalPass);
 
-            DecalLayout::Write(self.ctx.Device(), self.decalSet, self.presentation.depthTarget.view.Get(), self.pointSampler.Get());
+            self.decalDescLayout.Write(self.ctx.Device(), self.decalSet, self.presentation.depthTarget.view.Get(), self.pointSampler.Get());
 
             FrameRecorder recorder(c, self);
             recorder.encoder.BindPipeline(self.decalPipeline.Get(), self.decalPipelineLayout.Get());
@@ -518,7 +528,7 @@ struct PassFactory {
                 } metrics = {rcpW, rcpH, (float) inputColor.extent.width, (float) inputColor.extent.height};
 
                 self.smaaEdgePass.WriteNext(
-                    device, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor), self.defaultSampler.Get(), self.pointSampler.Get()
+                    device, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor), self.defaultSampler.Get()
                 );
                 self.smaaEdgePass.Execute(c, metrics, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
             }
@@ -536,8 +546,8 @@ struct PassFactory {
 
                 const auto& [areaView, searchView] = std::tie(self.textureViews[self.smaaAreaTexIdx], self.textureViews[self.smaaSearchTexIdx]);
                 self.smaaWeightPass.WriteNext(
-                    device, Vk::Assume<Vk::ShaderRead<Res_SmaaEdge>>(self.graphResources.smaaEdgeTarget), areaView, searchView, self.defaultSampler.Get(),
-                    self.pointSampler.Get()
+                    device, Vk::Assume<Vk::ShaderRead<Res_SmaaEdge>>(self.graphResources.smaaEdgeTarget), areaView, searchView,
+                    self.defaultSampler.Get()
                 );
                 self.smaaWeightPass.Execute(c, metrics, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
             }
@@ -557,7 +567,7 @@ struct PassFactory {
 
                     self.smaaBlendPass.WriteNext(
                         device, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor),
-                        Vk::Assume<Vk::ShaderRead<Res_SmaaWeight>>(self.graphResources.smaaWeightTarget), self.defaultSampler.Get(), self.pointSampler.Get()
+                        Vk::Assume<Vk::ShaderRead<Res_SmaaWeight>>(self.graphResources.smaaWeightTarget), self.defaultSampler.Get()
                     );
                     self.smaaBlendPass.Execute(c, metrics, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
                 }

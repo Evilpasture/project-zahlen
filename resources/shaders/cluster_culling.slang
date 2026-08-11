@@ -1,5 +1,5 @@
-#pragma pack_matrix(column_major)
-#include "uniforms.hlsl"
+
+import uniforms;
 struct ClusterBounds {
     float4 minPoint;
     float4 maxPoint;
@@ -10,12 +10,12 @@ struct ClusterVolume {
     uint count;
 };
 
-[[vk::binding(0, 0)]] StructuredBuffer<ClusterBounds>   in_Bounds;
-[[vk::binding(1, 0)]] RWStructuredBuffer<ClusterVolume> out_Grid;
-[[vk::binding(2, 0)]] RWStructuredBuffer<uint>          out_IndexList;
-[[vk::binding(3, 0)]] RWStructuredBuffer<uint>          out_Counter;
-[[vk::binding(4, 0)]] ConstantBuffer<FrameUniforms>     frame;  // Bound to slot 4 matching C++ layout
-[[vk::binding(5, 0)]] StructuredBuffer<Light>           lights; // Bound to slot 5 matching C++ layout
+StructuredBuffer<ClusterBounds>   in_Bounds;
+RWStructuredBuffer<ClusterVolume> out_Grid;
+RWStructuredBuffer<uint>          out_IndexList;
+RWStructuredBuffer<uint>          out_Counter;
+ConstantBuffer<FrameUniforms>     frame;  // Bound to slot 4 matching C++ layout
+StructuredBuffer<Light>           lights; // Bound to slot 5 matching C++ layout
 
 // --- Sphere vs Axis-Aligned Bounding Box (AABB) ---
 bool SphereAABB(float3 c, float r, float3 minB, float3 maxB) {

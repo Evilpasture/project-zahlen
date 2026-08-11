@@ -101,14 +101,14 @@ std::expected<void, Error> RenderContext::Impl::BuildParticlePipelines() {
         .size       = sizeof(ComputePushConstants) // 176 Bytes
     };
 
-    if (!particleUpdatePass.Build(ctx.Device(), bindlessLayout.Get(), csShader, &updatePush, 1)) {
+    if (!particleUpdatePass.Build(ctx.Device(), bindlessLayout.GetSetLayout(), csShader, &updatePush, 1)) {
         ZHLN::Log("ERROR: Failed to build particle update compute pipeline!");
         return std::unexpected(RenderInitError::PipelineCreationFailed);
     }
 
     // 3. Build Billboard Graphics Pipeline (particle_render.hlsl)
     return Vk::PipelineLayoutBuilder(ctx.Device())
-        .AddDescriptorSetLayout(bindlessLayout.Get())
+        .AddDescriptorSetLayout(bindlessLayout.GetSetLayout())
         .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(ParticleRenderPushConstants))
         .Build()
         .transform_error([](auto) -> Error { return RenderInitError::PipelineLayoutCreationFailed; })
@@ -145,17 +145,17 @@ std::expected<void, Error> RenderContext::Impl::BuildMeshParticlePipelines() {
     VkPushConstantRange mpUpdatePush = {
         .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
         .offset     = 0,
-        .size       = sizeof(RenderContext::Impl::MeshParticleComputePush) // 208 bytes
+        .size       = sizeof(RenderContext::Impl::MeshParticleComputePush) // 176 bytes
     };
 
-    if (!meshParticleUpdatePass.Build(ctx.Device(), bindlessLayout.Get(), csMeshShader, &mpUpdatePush, 1)) {
+    if (!meshParticleUpdatePass.Build(ctx.Device(), bindlessLayout.GetSetLayout(), csMeshShader, &mpUpdatePush, 1)) {
         ZHLN::Log("ERROR: Failed to build 3D mesh particle update compute pipeline!");
         return std::unexpected(RenderInitError::PipelineCreationFailed);
     }
 
     // 2. Pipeline Layout for 3D Mesh Particle Graphics Pipelines
     return Vk::PipelineLayoutBuilder(ctx.Device())
-        .AddDescriptorSetLayout(bindlessLayout.Get())
+        .AddDescriptorSetLayout(bindlessLayout.GetSetLayout())
         .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(MeshParticleRenderPush))
         .Build()
         .transform_error([](auto) -> Error { return RenderInitError::PipelineLayoutCreationFailed; })
@@ -625,7 +625,7 @@ std::expected<void, Error> RenderContext::Impl::InitLineBuffers() noexcept {
 
 std::expected<void, Error> RenderContext::Impl::BuildLinePipeline() {
     return Vk::PipelineLayoutBuilder(ctx.Device())
-        .AddDescriptorSetLayout(bindlessLayout.Get())
+        .AddDescriptorSetLayout(bindlessLayout.GetSetLayout())
         .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(ObjectConstants))
         .Build()
         .transform_error([](auto) -> Error { return RenderInitError::PipelineLayoutCreationFailed; })
@@ -636,7 +636,7 @@ std::expected<void, Error> RenderContext::Impl::BuildLinePipeline() {
 
             return LoadAndCreateShaders(
                        {.path = Resource::Paths::BasicVS, .fallback = basicShaders.vertex, .entryPoint = "VSMain"},
-                       {.path = Resource::Paths::ForwardPS, .fallback = Resource::forward_frag, .entryPoint = "PSMain"}
+                       {.path = Resource::Paths::ForwardPS, .fallback = Resource::forward_frag, .entryPoint = "PSForward"}
             )
                 .and_then([&](auto&& shaders) -> std::expected<void, Error> {
                     return Vk::PipelineBuilder<1, true> {}
@@ -781,14 +781,19 @@ std::expected<void, Error> RenderContext::Impl::InitShadowResources() {
 std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
     using enum Resource::ShaderID;
 
-    // 1. Initial side-effects: Descriptor sets allocation
-    cullingLayout = CullingLayout::CreateLayout(ctx.Device());
-    cullingPool   = CullingLayout::CreatePool(ctx.Device(), 4);
+    // 1. Initial side-effects: reflect the culling layout out of the compiled
+    //    shader, then allocate the per-frame descriptor sets.
+    auto cullingShader = Vk::CreateShaderDesc(Resource::culling_comp);
+    if (!cullingLayout.Build(ctx.Device(), cullingShader, VK_SHADER_STAGE_COMPUTE_BIT)) {
+        ZHLN::Log("[RenderInit] ERROR: Failed to reflect culling layout from culling SPV!");
+        return std::unexpected(RenderInitError::PipelineCreationFailed);
+    }
+    cullingPool = cullingLayout.CreatePool(ctx.Device(), 4);
 
-    frames.cullingSetsPass1[0] = CullingLayout::Allocate(ctx.Device(), cullingPool.Get(), cullingLayout.Get());
-    frames.cullingSetsPass1[1] = CullingLayout::Allocate(ctx.Device(), cullingPool.Get(), cullingLayout.Get());
-    frames.cullingSetsPass2[0] = CullingLayout::Allocate(ctx.Device(), cullingPool.Get(), cullingLayout.Get());
-    frames.cullingSetsPass2[1] = CullingLayout::Allocate(ctx.Device(), cullingPool.Get(), cullingLayout.Get());
+    frames.cullingSetsPass1[0] = CullingLayout::Allocate(ctx.Device(), cullingPool.Get(), cullingLayout.GetSetLayout());
+    frames.cullingSetsPass1[1] = CullingLayout::Allocate(ctx.Device(), cullingPool.Get(), cullingLayout.GetSetLayout());
+    frames.cullingSetsPass2[0] = CullingLayout::Allocate(ctx.Device(), cullingPool.Get(), cullingLayout.GetSetLayout());
+    frames.cullingSetsPass2[1] = CullingLayout::Allocate(ctx.Device(), cullingPool.Get(), cullingLayout.GetSetLayout());
 
     auto make_instance_set = [&](uint32_t i) -> std::expected<void, Error> {
         return Vk::Buffer::Create(
@@ -831,14 +836,12 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
     VkPushConstantRange cullingPush = {
         .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
         .offset     = 0,
-        .size       = sizeof(CullingConstants), // 80 bytes (exact match)
+        .size       = sizeof(CullingConstants),
     };
-
-    auto cullingShader = Vk::CreateShaderDesc(Resource::culling_comp);
 
     return make_instance_set(0)
         .and_then([&]() { return make_instance_set(1); })
-        .and_then([&]() { return cullingPass.Build(ctx.Device(), cullingLayout.Get(), cullingShader, &cullingPush, 1); })
+        .and_then([&]() { return cullingPass.Build(ctx.Device(), cullingLayout.GetSetLayout(), cullingShader, &cullingPush, 1); })
         .and_then([&]() -> std::expected<void, Error> {
             constexpr auto numClusters = static_cast<size_t>(16 * 9 * 24);
 
@@ -849,7 +852,17 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
                 .transform_error([](VkResult res) -> Error { return res; })
                 .and_then([&, numClusters](auto&& cbb) -> std::expected<void, Error> {
                     clusterBoundsBuffer = std::forward<decltype(cbb)>(cbb);
-                    Vk::AllocateDoubleBufferedSet<ClusterCullingLayout>(ctx.Device(), clusterCullingDescLayout, clusterCullingPool, frames.clusterCullingSets);
+
+                    // Reflect the cluster-culling layout out of the compiled shader, then
+                    // allocate the double-buffered set pair.
+                    auto ccShader = Vk::CreateShaderDesc(Resource::GetShaderProgram(ClusterCulling).vertex);
+                    if (!clusterCullingDescLayout.Build(ctx.Device(), ccShader, VK_SHADER_STAGE_COMPUTE_BIT)) {
+                        ZHLN::Log("[RenderInit] ERROR: Failed to reflect cluster-culling layout!");
+                        return std::unexpected(RenderInitError::PipelineCreationFailed);
+                    }
+                    clusterCullingPool           = clusterCullingDescLayout.CreatePool(ctx.Device(), 2);
+                    frames.clusterCullingSets[0] = clusterCullingDescLayout.Allocate(ctx.Device(), clusterCullingPool.Get(), clusterCullingDescLayout.GetSetLayout());
+                    frames.clusterCullingSets[1] = clusterCullingDescLayout.Allocate(ctx.Device(), clusterCullingPool.Get(), clusterCullingDescLayout.GetSetLayout());
 
                     auto make_cluster_set = [&](uint32_t i) -> std::expected<void, Error> {
                         return Vk::Buffer::Create(
@@ -881,7 +894,9 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
                                     Vk::FillBuffer(cmd, frames.globalCounterBuffers[i], 0, 0u);
                                 });
 
-                                ClusterCullingLayout::Write(
+                                // Order mirrors cluster_culling.slang's set-0 declaration order:
+                                // in_Bounds, out_Grid, out_IndexList, out_Counter, frame, lights.
+                                clusterCullingDescLayout.Write(
                                     ctx.Device(), frames.clusterCullingSets[i], Vk::BufferWrite {.buffer = clusterBoundsBuffer.Handle()},
                                     Vk::BufferWrite {.buffer = frames.clusterGridBuffers[i].Handle()},
                                     Vk::BufferWrite {.buffer = frames.lightIndexListBuffers[i].Handle()},
@@ -895,13 +910,28 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
                     return make_cluster_set(0).and_then([&, make_cluster_set]() { return make_cluster_set(1); });
                 });
         })
-        .and_then([&]() {
+        .and_then([&]() -> std::expected<void, Error> {
+            // The cluster-bounds pass only touches {out_Bounds, frame}, so it gets
+            // its own reflected layout rather than sharing clusterCullingDescLayout.
             auto bDesc = Vk::CreateShaderDesc(Resource::GetShaderProgram(ClusterBounds).vertex);
-            return clusterBoundsPass.Build(ctx.Device(), clusterCullingDescLayout.Get(), bDesc);
+            if (!clusterBoundsDescLayout.Build(ctx.Device(), bDesc, VK_SHADER_STAGE_COMPUTE_BIT)) {
+                ZHLN::Log("[RenderInit] ERROR: Failed to reflect cluster-bounds layout!");
+                return std::unexpected(RenderInitError::PipelineCreationFailed);
+            }
+            clusterBoundsPool = clusterBoundsDescLayout.CreatePool(ctx.Device(), 2);
+            for (int i = 0; i < 2; ++i) {
+                frames.clusterBoundsSets[i] = clusterBoundsDescLayout.Allocate(ctx.Device(), clusterBoundsPool.Get(), clusterBoundsDescLayout.GetSetLayout());
+                // Order mirrors cluster_bounds.slang's set-0 declaration order: out_Bounds, frame.
+                clusterBoundsDescLayout.Write(
+                    ctx.Device(), frames.clusterBoundsSets[i], Vk::BufferWrite {.buffer = clusterBoundsBuffer.Handle()},
+                    Vk::BufferWrite {.buffer = frames.frameUniformBuffers[i].Handle()}
+                );
+            }
+            return clusterBoundsPass.Build(ctx.Device(), clusterBoundsDescLayout.GetSetLayout(), bDesc);
         })
         .and_then([&]() {
             auto cDesc = Vk::CreateShaderDesc(Resource::GetShaderProgram(ClusterCulling).vertex);
-            return clusterCullingPass.Build(ctx.Device(), clusterCullingDescLayout.Get(), cDesc);
+            return clusterCullingPass.Build(ctx.Device(), clusterCullingDescLayout.GetSetLayout(), cDesc);
         })
         .and_then([&]() -> std::expected<void, Error> {
             if (rtCtx.Valid()) {
@@ -968,15 +998,42 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
 }
 
 std::expected<void, Error> RenderContext::Impl::InitBindless() {
-    Vk::AllocateDoubleBufferedSet<GlobalSceneLayout>(ctx.Device(), bindlessLayout, bindlessPool, frames.bindlessSets);
+    using enum Resource::ShaderID;
 
-    return Vk::SamplerBuilder {}
-        .Linear()
-        .Repeat()
-        .Anisotropy(ctx.PhysicalInfo().properties.properties.limits.maxSamplerAnisotropy)
-        .LodRange(0.0f, 0.0f)
-        .Build(ctx.Device())
-        .transform_error([](auto err) -> Error { return err; })
+    // Reflect the authoritative GlobalSceneRegistry layout out of the compiled
+    // scene shaders. The union across every `scene`-consuming entry point
+    // (basic VS/PS, forward PS, punctual-shadow VS) covers exactly the registry
+    // members in live use: {0,1,2,3,4,5,6,10,11}, with the runtime texture
+    // array (11) picking up partially-bound / update-after-bind flags.
+    auto basicShaders = Resource::GetShaderProgram(Basic);
+    return LoadAndCreateShaders(
+               {.path = Resource::Paths::BasicVS, .fallback = basicShaders.vertex, .entryPoint = "VSMain"},
+               {.path = Resource::Paths::BasicPS, .fallback = basicShaders.fragment, .entryPoint = "PSMain"}
+    )
+        .and_then([&](auto&& basicStages) -> std::expected<Vk::Sampler, Error> {
+            const Vk::ReflectedStageInput reflectInputs[4] = {
+                {.shader = Vk::CreateShaderDesc(basicStages.GetVertSpv()), .stage = VK_SHADER_STAGE_VERTEX_BIT},
+                {.shader = Vk::CreateShaderDesc(basicStages.GetFragSpv()), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
+                {.shader = Vk::CreateShaderDesc(Resource::GetShaderProgram(PunctualShadows).vertex), .stage = VK_SHADER_STAGE_VERTEX_BIT},
+                {.shader = Vk::CreateShaderDesc(Resource::forward_frag), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
+            };
+            if (!bindlessLayout.Build(ctx.Device(), std::span {reflectInputs})) {
+                ZHLN::Log("[RenderInit] ERROR: Failed to reflect the global bindless layout!");
+                return std::unexpected(RenderInitError::PipelineCreationFailed);
+            }
+
+            bindlessPool           = bindlessLayout.CreatePool(ctx.Device(), 2);
+            frames.bindlessSets[0] = bindlessLayout.Allocate(ctx.Device(), bindlessPool.Get(), bindlessLayout.GetSetLayout());
+            frames.bindlessSets[1] = bindlessLayout.Allocate(ctx.Device(), bindlessPool.Get(), bindlessLayout.GetSetLayout());
+
+            return Vk::SamplerBuilder {}
+                .Linear()
+                .Repeat()
+                .Anisotropy(ctx.PhysicalInfo().properties.properties.limits.maxSamplerAnisotropy)
+                .LodRange(0.0f, 0.0f)
+                .Build(ctx.Device())
+                .transform_error([](auto err) -> Error { return err; });
+        })
         .and_then([&](auto&& globalRes) -> std::expected<void, Error> {
             globalSampler = std::forward<decltype(globalRes)>(globalRes);
 
@@ -1006,33 +1063,45 @@ std::expected<void, Error> RenderContext::Impl::InitBindless() {
                 frames.debugMeshHandles[i] = meshPool.Create(std::move(gpu_buf), kMaxDebugVertices, address);
             }
 
-            // Update global descriptor bindings
+            // Update global descriptor bindings. The binding numbers mirror the
+            // GlobalSceneRegistry member order in common.slang. Writes are gated
+            // by HasBinding() because prefilteredMap/brdfLUT/clampSampler are
+            // only declared (never sampled via `scene`) and are stripped from
+            // the reflected layout by dead-code elimination.
             Vk::DescriptorUpdater bindlessRegistry;
             for (int i = 0; i < 2; ++i) {
-                bindlessRegistry.BindSampler(1, globalSampler.Get());
-                bindlessRegistry.BindUniformBuffer(2, frames.frameUniformBuffers[i].Handle());
-                bindlessRegistry.BindStorageBuffer(3, frames.lightStorageBuffers[i].Handle());
-                bindlessRegistry.BindStorageBuffer(4, frames.instanceDataBuffers[i].Handle());
-                bindlessRegistry.BindStorageBuffer(5, frames.jointBuffers[i].Handle());
-                bindlessRegistry.BindStorageBuffer(6, frames.jointBuffers[1 - i].Handle());
-                bindlessRegistry.BindStorageBuffer(7, morphDeltasBuffer.Handle());
+                if (bindlessLayout.HasBinding(0, 0)) {
+                    bindlessRegistry.BindSampler(0, globalSampler.Get());
+                }
+                bindlessRegistry.BindUniformBuffer(1, frames.frameUniformBuffers[i].Handle());
+                bindlessRegistry.BindStorageBuffer(2, frames.lightStorageBuffers[i].Handle());
+                bindlessRegistry.BindStorageBuffer(3, frames.instanceDataBuffers[i].Handle());
+                bindlessRegistry.BindStorageBuffer(4, frames.jointBuffers[i].Handle());
+                bindlessRegistry.BindStorageBuffer(5, frames.jointBuffers[1 - i].Handle());
+                bindlessRegistry.BindStorageBuffer(6, morphDeltasBuffer.Handle());
 
-                bindlessRegistry.BindSampledImage(8, iblPayload.prefilteredView.Get(), VK_NULL_HANDLE, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-                bindlessRegistry.BindSampledImage(9, iblPayload.brdfLutView.Get(), VK_NULL_HANDLE, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-                bindlessRegistry.BindSampler(10, clampSampler.Get());
+                if (bindlessLayout.HasBinding(0, 7)) {
+                    bindlessRegistry.BindSampledImage(7, iblPayload.prefilteredView.Get(), VK_NULL_HANDLE, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                }
+                if (bindlessLayout.HasBinding(0, 8)) {
+                    bindlessRegistry.BindSampledImage(8, iblPayload.brdfLutView.Get(), VK_NULL_HANDLE, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                }
+                if (bindlessLayout.HasBinding(0, 9)) {
+                    bindlessRegistry.BindSampler(9, clampSampler.Get());
+                }
+                // Binding 10 (texTransLighting) is written by RecreateTargets once
+                // the translucent-lighting target exists. Binding 11 is the dynamic
+                // globalTextures pool (UpdateBindlessTextureSlot).
 
                 bindlessRegistry.UpdateSet(ctx.Device(), frames.bindlessSets[i]);
             }
             return {};
         });
 }
+
 using enum Resource::ShaderID;
 std::expected<void, Error> RenderContext::Impl::BuildDecalPipeline() {
     using enum Resource::ShaderID;
-
-    decalDescLayout = DecalLayout::CreateLayout(ctx.Device());
-    decalDescPool   = DecalLayout::CreatePool(ctx.Device(), 1);
-    decalSet        = DecalLayout::Allocate(ctx.Device(), decalDescPool.Get(), decalDescLayout.Get());
 
     VkPushConstantRange push = {
         .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -1042,16 +1111,30 @@ std::expected<void, Error> RenderContext::Impl::BuildDecalPipeline() {
 
     static constexpr std::array<VkFormat, 2> decalFormats = {VK_FORMAT_B10G11R11_UFLOAT_PACK32, VK_FORMAT_R8G8B8A8_UNORM};
 
+    auto decalShaders = Resource::GetShaderProgram(Decal);
+
+    // Reflects decal.slang set 0 ({texDepth, pointSampler}) and set 1 (the scene
+    // parameter block subset). The pipeline layout is assembled BY HAND below so
+    // set 1 gets the FULL bindless layout handle (subset is compatible).
+    const Vk::ReflectedStageInput reflectInputs[2] = {
+        {.shader = Vk::CreateShaderDesc(decalShaders.vertex), .stage = VK_SHADER_STAGE_VERTEX_BIT},
+        {.shader = Vk::CreateShaderDesc(decalShaders.fragment), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
+    };
+    if (!decalDescLayout.Build(ctx.Device(), std::span {reflectInputs})) {
+        ZHLN::Log("[RenderInit] ERROR: Failed to reflect decal descriptor layout!");
+        return std::unexpected(RenderInitError::PipelineCreationFailed);
+    }
+    decalDescPool = decalDescLayout.CreatePool(ctx.Device(), 1);
+    decalSet      = decalDescLayout.Allocate(ctx.Device(), decalDescPool.Get(), decalDescLayout.GetSetLayout());
+
     return Vk::PipelineLayoutBuilder(ctx.Device())
-        .AddDescriptorSetLayout(decalDescLayout.Get()) // Set 0: DecalLayout (texDepth, pointSampler)
-        .AddDescriptorSetLayout(bindlessLayout.Get())  // Set 1: Global Bindless Layout
+        .AddDescriptorSetLayout(decalDescLayout.GetSetLayout()) // Set 0: Decal (texDepth, pointSampler)
+        .AddDescriptorSetLayout(bindlessLayout.GetSetLayout())  // Set 1: Global Bindless Layout
         .AddPushConstant(push.stageFlags, push.size, push.offset)
         .Build()
         .transform_error([](auto) -> Error { return RenderInitError::PipelineLayoutCreationFailed; })
         .and_then([&](auto&& layout) -> std::expected<void, Error> {
             decalPipelineLayout = std::forward<decltype(layout)>(layout);
-
-            auto decalShaders = Resource::GetShaderProgram(Decal);
 
             return LoadAndCreateShaders(
                        {.path = Resource::Paths::DecalVS, .fallback = decalShaders.vertex, .entryPoint = "VSMain"},
@@ -1409,7 +1492,7 @@ std::expected<void, Error> RenderContext::Impl::InitCSGPipelines() {
             shaders = std::forward<decltype(compiledShaders)>(compiledShaders);
 
             return Vk::PipelineLayoutBuilder(ctx.Device())
-                .AddDescriptorSetLayout(bindlessLayout.Get())
+                .AddDescriptorSetLayout(bindlessLayout.GetSetLayout())
                 .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(ObjectConstants))
                 .Build()
                 .transform_error([](auto) -> Error { return RenderInitError::PipelineLayoutCreationFailed; });
@@ -1544,7 +1627,7 @@ std::expected<void, Error> RenderContext::Impl::SetupUI(GLFWwindow* window) {
         })
         .and_then([&]() -> std::expected<void, Error> {
             return Vk::PipelineLayoutBuilder(ctx.Device())
-                .AddDescriptorSetLayout(bindlessLayout.Get())
+                .AddDescriptorSetLayout(bindlessLayout.GetSetLayout())
                 .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(UIObjectConstants))
                 .Build()
                 .transform_error([](auto) -> Error { return RenderInitError::UISetupFailed; })
@@ -1801,7 +1884,7 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
         }
 
         if (decalSet != VK_NULL_HANDLE) {
-            DecalLayout::Write(ctx.Device(), decalSet, presentation.depthTarget.view.Get(), pointSampler.Get());
+            decalDescLayout.Write(ctx.Device(), decalSet, presentation.depthTarget.view.Get(), pointSampler.Get());
         }
 
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>(
@@ -1827,9 +1910,10 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
         }
     });
 
+    // Translucency input is a plain Texture2D at registry slot 10 (sampler split).
     Vk::DescriptorUpdater bindlessRegistry;
     for (int i = 0; i < 2; ++i) {
-        bindlessRegistry.BindSampledImage(11, graphResources.transLightingTarget.view.Get(), defaultSampler.Get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        bindlessRegistry.BindSampledImage(10, graphResources.transLightingTarget.view.Get(), VK_NULL_HANDLE, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         bindlessRegistry.UpdateSet(ctx.Device(), frames.bindlessSets[i]);
         bindlessRegistry.Clear();
     }
@@ -1838,17 +1922,19 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
         hizPool = {};
     }
     uint32_t mips = graphResources.hizMap.mipLevels;
-    hizPool       = HiZGenerateLayout::CreatePool(ctx.Device(), mips);
+    hizPool = hizDescLayout.CreatePool(ctx.Device(), mips);
     hizSets.resize(mips);
 
     for (uint32_t i = 0; i < mips; ++i) {
-        hizSets[i] = HiZGenerateLayout::Allocate(ctx.Device(), hizPool.Get(), hizDescLayout.Get());
+        hizSets[i] = HiZGenerateLayout::Allocate(ctx.Device(), hizPool.Get(), hizDescLayout.GetSetLayout());
         if (i == 0) {
-            HiZGenerateLayout::Write(
+            // hiz SPV keeps only {inDepth@0, outDepth@1}: the trailing sampler
+            // arg is safely skipped by the reflected writer.
+            hizDescLayout.Write(
                 ctx.Device(), hizSets[i], presentation.depthTarget.view.Get(), graphResources.hizMap.mipViews[0].Get(), pointSampler.Get()
             );
         } else {
-            HiZGenerateLayout::Write(
+            hizDescLayout.Write(
                 ctx.Device(), hizSets[i], graphResources.hizMap.mipViews[i - 1].Get(), graphResources.hizMap.mipViews[i].Get(), pointSampler.Get()
             );
         }
@@ -1856,14 +1942,15 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
 
     for (int i = 0; i < 2; ++i) {
         // Pass 1 Set (Reads Previous Frame's Hi-Z)
-        CullingLayout::Write(
+        // Order mirrors culling.slang's set-0 declaration order.
+        cullingLayout.Write(
             ctx.Device(), frames.cullingSetsPass1[i], Vk::BufferWrite {.buffer = frames.instanceDataBuffers[i].Handle()},
             Vk::BufferWrite {.buffer = frames.indirectCommandsBuffers[i].Handle()}, graphResources.hizMap.fullView.Get(), pointSampler.Get(),
             Vk::BufferWrite {.buffer = frames.secondPassCandidatesBuffers[i].Handle()}, Vk::BufferWrite {.buffer = frames.secondPassCountBuffers[i].Handle()}
         );
 
         // Pass 2 Set (Reads Current Frame's Hi-Z)
-        CullingLayout::Write(
+        cullingLayout.Write(
             ctx.Device(), frames.cullingSetsPass2[i], Vk::BufferWrite {.buffer = frames.instanceDataBuffers[i].Handle()},
             Vk::BufferWrite {.buffer = frames.indirectCommandsBuffersPass2[i].Handle()}, graphResources.hizMap.fullView.Get(), pointSampler.Get(),
             Vk::BufferWrite {.buffer = frames.secondPassCandidatesBuffers[i].Handle()}, Vk::BufferWrite {.buffer = frames.secondPassCountBuffers[i].Handle()}
@@ -1887,10 +1974,13 @@ std::expected<void, Error> RenderContext::Impl::BuildHangGpuPipeline() {
 }
 
 std::expected<void, Error> RenderContext::Impl::BuildHiZPipeline() {
-    hizDescLayout              = HiZGenerateLayout::CreateLayout(ctx.Device());
-    VkPushConstantRange pc     = {.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .offset = 0, .size = sizeof(float) * 2 + sizeof(uint32_t) * 3};
-    auto                shader = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::HizGenerateComp).vertex);
-    return hizGeneratePass.Build(ctx.Device(), hizDescLayout.Get(), shader, &pc, 1);
+    auto shader = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::HizGenerateComp).vertex);
+    if (!hizDescLayout.Build(ctx.Device(), shader, VK_SHADER_STAGE_COMPUTE_BIT)) {
+        ZHLN::Log("[RenderInit] ERROR: Failed to reflect Hi-Z layout from hiz_generate SPV!");
+        return std::unexpected(RenderInitError::PipelineCreationFailed);
+    }
+    VkPushConstantRange pc = {.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .offset = 0, .size = sizeof(float) * 2 + sizeof(uint32_t) * 3};
+    return hizGeneratePass.Build(ctx.Device(), hizDescLayout.GetSetLayout(), shader, &pc, 1);
 }
 
 std::expected<void, Error> RenderContext::Impl::InitUIDynamicBuffers() noexcept {

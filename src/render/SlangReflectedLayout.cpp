@@ -300,7 +300,27 @@ bool SlangReflectedLayout::Build(VkDevice device, const ShaderStages& shaders) n
     if (!frag_spv.empty()) {
         builder.AddStageUnsafe({.code = frag_spv.data(), .size = frag_spv.size() * 4, .entry_point = {}}, VK_SHADER_STAGE_FRAGMENT_BIT);
     }
-    auto unsafe_res            = builder.BuildUnsafe(device);
+    AdoptUnsafe(builder.BuildUnsafe(device));
+    return setLayoutCount > 0;
+}
+
+bool SlangReflectedLayout::Build(VkDevice device, const ZHLN_ShaderDesc& shader, VkShaderStageFlagBits stage) noexcept {
+    UnsafeReflectedLayoutBuilder builder;
+    builder.AddStageUnsafe(shader, stage);
+    AdoptUnsafe(builder.BuildUnsafe(device));
+    return setLayoutCount > 0;
+}
+
+bool SlangReflectedLayout::Build(VkDevice device, std::span<const ReflectedStageInput> stages) noexcept {
+    UnsafeReflectedLayoutBuilder builder;
+    for (const auto& s: stages) {
+        builder.AddStageUnsafe(s.shader, s.stage);
+    }
+    AdoptUnsafe(builder.BuildUnsafe(device));
+    return setLayoutCount > 0;
+}
+
+void SlangReflectedLayout::AdoptUnsafe(UnsafeReflectedLayout&& unsafe_res) noexcept {
     this->pipelineLayout       = std::move(unsafe_res.pipelineLayout);
     this->descriptorSetLayouts = std::move(unsafe_res.descriptorSetLayouts);
     this->setLayoutCount       = unsafe_res.setLayoutCount;
@@ -317,7 +337,6 @@ bool SlangReflectedLayout::Build(VkDevice device, const ShaderStages& shaders) n
             );
         }
     }
-    return setLayoutCount > 0;
 }
 
 [[nodiscard]] auto SlangReflectedLayout::CreateLayout(VkDevice /*unused*/) const noexcept -> VkDescriptorSetLayout {
