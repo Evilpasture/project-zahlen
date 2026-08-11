@@ -222,7 +222,7 @@ add_shader_target(procedural_bake
 )
 
 add_shader_target(vol_clear_shader
-    STAGES "${SHADER_SRC_DIR}/volumetric_clear.hlsl|CSMain|cs_6_0|SHADER_VOLUMETRIC_CLEAR_CS_PATH"
+    STAGES "${SHADER_SRC_DIR}/volumetric_clear.slang|CSMain|cs_6_0|SHADER_VOLUMETRIC_CLEAR_SLANG_CS_PATH"
 )
 
 add_shader_target(vol_fog_inject_shader
@@ -303,12 +303,12 @@ add_shader_target(lighting_nort_shader
 # --- Integrated stage-specific defines for SMAA ---
 add_shader_target(smaa_shaders
     STAGES
-        "${SHADER_SRC_DIR}/smaa_wrap.hlsl|SmaaEdgeVS|vs_6_5|SHADER_SMAA_EDGE_VS_PATH|-DEDGE_PASS -DSMAA_INCLUDE_VS=1 -DSMAA_INCLUDE_PS=1"
-        "${SHADER_SRC_DIR}/smaa_wrap.hlsl|SmaaEdgePS|ps_6_5|SHADER_SMAA_EDGE_PS_PATH|-DEDGE_PASS -DSMAA_INCLUDE_VS=1 -DSMAA_INCLUDE_PS=1"
-        "${SHADER_SRC_DIR}/smaa_wrap.hlsl|SmaaWeightVS|vs_6_5|SHADER_SMAA_WEIGHT_VS_PATH|-DWEIGHT_PASS -DSMAA_INCLUDE_VS=1 -DSMAA_INCLUDE_PS=1"
-        "${SHADER_SRC_DIR}/smaa_wrap.hlsl|SmaaWeightPS|ps_6_5|SHADER_SMAA_WEIGHT_PS_PATH|-DWEIGHT_PASS -DSMAA_INCLUDE_VS=1 -DSMAA_INCLUDE_PS=1"
-        "${SHADER_SRC_DIR}/smaa_wrap.hlsl|SmaaBlendVS|vs_6_5|SHADER_SMAA_BLEND_VS_PATH|-DBLEND_PASS -DSMAA_INCLUDE_VS=1 -DSMAA_INCLUDE_PS=1"
-        "${SHADER_SRC_DIR}/smaa_wrap.hlsl|SmaaBlendPS|ps_6_5|SHADER_SMAA_BLEND_PS_PATH|-DBLEND_PASS -DSMAA_INCLUDE_VS=1 -DSMAA_INCLUDE_PS=1"
+        "${SHADER_SRC_DIR}/SMAA.slang|SmaaEdgeVS|vs_6_5|SHADER_SMAA_EDGE_VS_PATH|-DEDGE_PASS"
+        "${SHADER_SRC_DIR}/SMAA.slang|SmaaEdgePS|ps_6_5|SHADER_SMAA_EDGE_PS_PATH|-DEDGE_PASS"
+        "${SHADER_SRC_DIR}/SMAA.slang|SmaaWeightVS|vs_6_5|SHADER_SMAA_WEIGHT_VS_PATH|-DWEIGHT_PASS"
+        "${SHADER_SRC_DIR}/SMAA.slang|SmaaWeightPS|ps_6_5|SHADER_SMAA_WEIGHT_PS_PATH|-DWEIGHT_PASS"
+        "${SHADER_SRC_DIR}/SMAA.slang|SmaaBlendVS|vs_6_5|SHADER_SMAA_BLEND_VS_PATH|-DBLEND_PASS"
+        "${SHADER_SRC_DIR}/SMAA.slang|SmaaBlendPS|ps_6_5|SHADER_SMAA_BLEND_PS_PATH|-DBLEND_PASS"
 )
 
 # --- DECAL SHADER ---

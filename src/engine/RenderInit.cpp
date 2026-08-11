@@ -1103,25 +1103,22 @@ std::expected<void, Error> RenderContext::Impl::BuildSMAAPipeline() {
     VkPushConstantRange smaaPush = {.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(float) * 4};
 
     return BuildPassHelper(
-               this, smaaEdgePass, "SMAA Edge Detection",
-               {.path = Resource::Paths::SmaaEdgeVS, .fallback = Resource::GetShaderProgram(SmaaEdge).vertex, .entryPoint = "SmaaEdgeVS"},
-               {.path = Resource::Paths::SmaaEdgePS, .fallback = Resource::GetShaderProgram(SmaaEdge).fragment, .entryPoint = "SmaaEdgePS"},
-               {VK_FORMAT_R8G8_UNORM}, &smaaPush, 1
+               this, smaaEdgePass, "SMAA Edge Detection", {.path = Resource::Paths::SmaaEdgeVS, .fallback = Resource::GetShaderProgram(SmaaEdge).vertex},
+               {.path = Resource::Paths::SmaaEdgePS, .fallback = Resource::GetShaderProgram(SmaaEdge).fragment}, {VK_FORMAT_R8G8_UNORM}, &smaaPush, 1
     )
         .and_then([&]() {
             return BuildPassHelper(
                 this, smaaWeightPass, "SMAA Blending Weight",
-                {.path = Resource::Paths::SmaaWeightVS, .fallback = Resource::GetShaderProgram(SmaaWeight).vertex, .entryPoint = "SmaaWeightVS"},
-                {.path = Resource::Paths::SmaaWeightPS, .fallback = Resource::GetShaderProgram(SmaaWeight).fragment, .entryPoint = "SmaaWeightPS"},
-                {VK_FORMAT_R8G8B8A8_UNORM}, &smaaPush, 1
+                {.path = Resource::Paths::SmaaWeightVS, .fallback = Resource::GetShaderProgram(SmaaWeight).vertex},
+                {.path = Resource::Paths::SmaaWeightPS, .fallback = Resource::GetShaderProgram(SmaaWeight).fragment}, {VK_FORMAT_R8G8B8A8_UNORM}, &smaaPush, 1
             );
         })
         .and_then([&]() {
             return BuildPassHelper(
                 this, smaaBlendPass, "SMAA Neighborhood Blend",
-                {.path = Resource::Paths::SmaaBlendVS, .fallback = Resource::GetShaderProgram(SmaaBlend).vertex, .entryPoint = "SmaaBlendVS"},
-                {.path = Resource::Paths::SmaaBlendPS, .fallback = Resource::GetShaderProgram(SmaaBlend).fragment, .entryPoint = "SmaaBlendPS"},
-                {VK_FORMAT_R16G16B16A16_SFLOAT}, &smaaPush, 1
+                {.path = Resource::Paths::SmaaBlendVS, .fallback = Resource::GetShaderProgram(SmaaBlend).vertex},
+                {.path = Resource::Paths::SmaaBlendPS, .fallback = Resource::GetShaderProgram(SmaaBlend).fragment}, {VK_FORMAT_R16G16B16A16_SFLOAT}, &smaaPush,
+                1
             );
         });
 }
@@ -1881,7 +1878,7 @@ std::expected<void, Error> RenderContext::Impl::BuildHangGpuPipeline() {
         .and_then([&](auto&& layout) -> std::expected<void, Error> {
             hangGpuPass.pipelineLayout = std::forward<decltype(layout)>(layout);
             return LoadAndCreateComputeShader(
-                       ComputeStageSource{.path = Resource::Paths::HangGpuCS, .fallback = Resource::hang_gpu_comp}, hangGpuPass.pipelineLayout.Get()
+                       ComputeStageSource {.path = Resource::Paths::HangGpuCS, .fallback = Resource::hang_gpu_comp}, hangGpuPass.pipelineLayout.Get()
             )
                 .transform([&](auto&& pipeline) { hangGpuPass.pipeline = std::forward<decltype(pipeline)>(pipeline); });
         });

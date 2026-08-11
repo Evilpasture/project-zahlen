@@ -167,7 +167,7 @@ extern const ShaderPair lighting_nort_shaders {.vertex = lighting_nort_vs_raw, .
 
 // --- Volumetric Compute Shaders ---
 constexpr uint8_t vol_clear_cs_raw[] = {
-#embed SHADER_VOLUMETRIC_CLEAR_CS_PATH
+#embed SHADER_VOLUMETRIC_CLEAR_SLANG_CS_PATH
 };
 extern const ShaderPair volumetric_clear_shaders {.vertex = vol_clear_cs_raw, .fragment = {}};
 
@@ -335,7 +335,7 @@ const char* const PunctualShadowsVS       = SHADER_PUNCTUAL_SHADOWS_HLSL_VS_PATH
 const char* const PunctualShadowsPS       = SHADER_PUNCTUAL_SHADOWS_HLSL_PS_PATH;
 const char* const LightingNortVS          = SHADER_LIGHTING_NORT_HLSL_VS_PATH;
 const char* const LightingNortPS          = SHADER_LIGHTING_NORT_HLSL_PS_PATH;
-const char* const VolumetricClearCS       = SHADER_VOLUMETRIC_CLEAR_CS_PATH;
+const char* const VolumetricClearCS       = SHADER_VOLUMETRIC_CLEAR_SLANG_CS_PATH;
 const char* const VolumetricFogInjectCS   = SHADER_VOLUMETRIC_FOG_INJECT_CS_PATH;
 const char* const VolumetricLightInjectCS = SHADER_VOLUMETRIC_LIGHT_INJECT_CS_PATH;
 const char* const VolumetricIntegrationCS = SHADER_VOLUMETRIC_INTEGRATION_SLANG_CS_PATH;
