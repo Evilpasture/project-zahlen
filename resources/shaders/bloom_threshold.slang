@@ -14,17 +14,19 @@ struct VSOutput {
     return output;
 }
 
-// Explicit bindings matching BloomThresholdLayout exactly
-[[vk::binding(0, 0)]] public
-Texture2D<float4> texInput;
-[[vk::binding(1, 0)]] public
-SamplerState smp;
+// ParameterBlock for BloomThreshold shader reflection
+public struct BloomThresholdParams {
+    public Texture2D<float4> texInput;
+    public SamplerState smp;
+};
+
+public ParameterBlock<BloomThresholdParams> params;
 
 static const float3 kLumaBT709 = float3(0.2126, 0.7152, 0.0722);
 
 // Raster Pixel Stage
 [shader("fragment")] public float4 PSMain(VSOutput input): SV_Target0 {
-    float3 color = texInput.SampleLevel(smp, input.uv, 0).rgb;
+    float3 color = params.texInput.SampleLevel(params.smp, input.uv, 0).rgb;
 
     // 1. Relative luminance (ITU-R BT.709)
     float luma = dot(color, kLumaBT709);

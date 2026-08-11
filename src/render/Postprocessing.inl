@@ -17,17 +17,28 @@ bool PostProcessPass<LayoutT>::Build(
     uint32_t                        pushCount,
     bool                            additive
 ) noexcept {
-    descLayout = LayoutT::CreateLayout(device);
-    pool       = LayoutT::CreatePool(device, 2);
+    if constexpr (requires { layoutInstance.Build(device, shaders); }) {
+        if (!layoutInstance.Build(device, shaders)) {
+            return false;
+        }
+        descLayout     = layoutInstance.GetSetLayout(0);
+        pool           = layoutInstance.CreatePool(device, 2);
+        sets[0]        = layoutInstance.Allocate(device, pool.Get(), descLayout.Get());
+        sets[1]        = layoutInstance.Allocate(device, pool.Get(), descLayout.Get());
+        pipelineLayout = std::move(layoutInstance.pipelineLayout);
+    } else {
+        descLayout = LayoutT::CreateLayout(device);
+        pool       = LayoutT::CreatePool(device, 2);
 
-    sets[0] = LayoutT::Allocate(device, pool.Get(), descLayout.Get());
-    sets[1] = LayoutT::Allocate(device, pool.Get(), descLayout.Get());
+        sets[0] = LayoutT::Allocate(device, pool.Get(), descLayout.Get());
+        sets[1] = LayoutT::Allocate(device, pool.Get(), descLayout.Get());
 
-    VkDescriptorSetLayout         raw_layout    = descLayout.Get();
-    const ZHLN_PipelineLayoutDesc p_layout_desc = {
-        .set_layouts = &raw_layout, .set_layout_count = 1, .push_constants = pushConstants, .push_constant_count = pushCount
-    };
-    pipelineLayout = PipelineLayout(device, ZHLN_CreatePipelineLayout(device, &p_layout_desc));
+        VkDescriptorSetLayout         raw_layout    = descLayout.Get();
+        const ZHLN_PipelineLayoutDesc p_layout_desc = {
+            .set_layouts = &raw_layout, .set_layout_count = 1, .push_constants = pushConstants, .push_constant_count = pushCount
+        };
+        pipelineLayout = PipelineLayout(device, ZHLN_CreatePipelineLayout(device, &p_layout_desc));
+    }
 
     auto builder = PipelineBuilder {}.Shaders(shaders).Layout(pipelineLayout.Get()).ColorFormats(colorFormats).NoDepth().CullNone();
 
@@ -53,17 +64,28 @@ bool PostProcessPass<LayoutT>::BuildVariants(
     std::span<const VkSpecializationInfo> specInfos,
     bool                                  additive
 ) noexcept {
-    descLayout = LayoutT::CreateLayout(device);
-    pool       = LayoutT::CreatePool(device, 2);
+    if constexpr (requires { layoutInstance.Build(device, shaders); }) {
+        if (!layoutInstance.Build(device, shaders)) {
+            return false;
+        }
+        descLayout     = layoutInstance.GetSetLayout(0);
+        pool           = layoutInstance.CreatePool(device, 2);
+        sets[0]        = layoutInstance.Allocate(device, pool.Get(), descLayout.Get());
+        sets[1]        = layoutInstance.Allocate(device, pool.Get(), descLayout.Get());
+        pipelineLayout = std::move(layoutInstance.pipelineLayout);
+    } else {
+        descLayout = LayoutT::CreateLayout(device);
+        pool       = LayoutT::CreatePool(device, 2);
 
-    sets[0] = LayoutT::Allocate(device, pool.Get(), descLayout.Get());
-    sets[1] = LayoutT::Allocate(device, pool.Get(), descLayout.Get());
+        sets[0] = LayoutT::Allocate(device, pool.Get(), descLayout.Get());
+        sets[1] = LayoutT::Allocate(device, pool.Get(), descLayout.Get());
 
-    VkDescriptorSetLayout         raw_layout    = descLayout.Get();
-    const ZHLN_PipelineLayoutDesc p_layout_desc = {
-        .set_layouts = &raw_layout, .set_layout_count = 1, .push_constants = pushConstants, .push_constant_count = pushCount
-    };
-    pipelineLayout = PipelineLayout(device, ZHLN_CreatePipelineLayout(device, &p_layout_desc));
+        VkDescriptorSetLayout         raw_layout    = descLayout.Get();
+        const ZHLN_PipelineLayoutDesc p_layout_desc = {
+            .set_layouts = &raw_layout, .set_layout_count = 1, .push_constants = pushConstants, .push_constant_count = pushCount
+        };
+        pipelineLayout = PipelineLayout(device, ZHLN_CreatePipelineLayout(device, &p_layout_desc));
+    }
 
     pipelines.clear();
     pipelines.reserve(specInfos.size());
@@ -126,14 +148,28 @@ void PostProcessPass<LayoutT>::WriteNext(VkDevice device, Args&&... args) const 
 
         if constexpr (requires { std::declval<FirstT>().AsTuple(); }) {
             std::apply(
-                [&](auto&&... unpacked) { LayoutT::Write(device, sets.Next(), std::forward<decltype(unpacked)>(unpacked)...); },
+                [&](auto&&... unpacked) {
+                    if constexpr (requires { layoutInstance.Write(device, sets.Next(), unpacked...); }) {
+                        layoutInstance.Write(device, sets.Next(), std::forward<decltype(unpacked)>(unpacked)...);
+                    } else {
+                        LayoutT::Write(device, sets.Next(), std::forward<decltype(unpacked)>(unpacked)...);
+                    }
+                },
                 std::get<0>(std::forward_as_tuple(args...)).AsTuple()
             );
         } else {
-            LayoutT::Write(device, sets.Next(), std::forward<Args>(args)...);
+            if constexpr (requires { layoutInstance.Write(device, sets.Next(), args...); }) {
+                layoutInstance.Write(device, sets.Next(), std::forward<Args>(args)...);
+            } else {
+                LayoutT::Write(device, sets.Next(), std::forward<Args>(args)...);
+            }
         }
     } else {
-        LayoutT::Write(device, sets.Next(), std::forward<Args>(args)...);
+        if constexpr (requires { layoutInstance.Write(device, sets.Next(), args...); }) {
+            layoutInstance.Write(device, sets.Next(), std::forward<Args>(args)...);
+        } else {
+            LayoutT::Write(device, sets.Next(), std::forward<Args>(args)...);
+        }
     }
 }
 
