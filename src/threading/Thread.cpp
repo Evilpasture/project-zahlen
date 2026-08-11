@@ -1,14 +1,14 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Threading/Thread.hpp>
+#include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
+#include <Zahlen/Threading/Thread.hpp>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <Zahlen/Core/Platform.hpp>
 
 #if defined(__x86_64__) || defined(_M_X64)
 #include <emmintrin.h>
@@ -131,7 +131,7 @@ Fiber* Fiber::Create(size_t stackSize, FiberFunc func, void* arg) noexcept {
     fiber->stackLimit = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(map) + pageSize);
 #endif
 
-    // 4. Initialize Stack Frame for mag_switch
+    // 4. Initialize Stack Frame for ZHLN_Switch
     uintptr_t sp = structAddr;
 
 #if defined(_WIN32) && (defined(__x86_64__) || defined(_M_X64))

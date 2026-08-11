@@ -14,7 +14,7 @@ using FiberFunc = void (*)(void*);
  * Wraps the mag_asm backend in a C++ interface.
  */
 struct alignas(128) Fiber {
-    void*     stackPointer; // Offset 0: Used by mag_switch
+    void*     stackPointer; // Offset 0: Used by ZHLN_Switch
     void*     mapAddr;      // Base of mmap/VirtualAlloc
     size_t    mapSize;      // Total size including guard pages
     FiberFunc func;         // Entry point
