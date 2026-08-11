@@ -581,9 +581,7 @@ std::expected<void, Error> RenderContext::Impl::BuildSkinningPipeline() {
         .transform_error([](auto) -> Error { return RenderInitError::PipelineLayoutCreationFailed; })
         .and_then([&](auto&& layout) -> std::expected<void, Error> {
             skinningPass.pipelineLayout = std::forward<decltype(layout)>(layout);
-            return LoadAndCreateComputeShader(
-                       {.path = Resource::Paths::SkinningCS, .fallback = Resource::skinning_comp, .entryPoint = "CSMain"}, skinningPass.pipelineLayout.Get()
-            )
+            return LoadAndCreateComputeShader({.path = Resource::Paths::SkinningCS, .fallback = Resource::skinning_comp}, skinningPass.pipelineLayout.Get())
                 .transform([&](auto&& pipeline) { skinningPass.pipeline = std::forward<decltype(pipeline)>(pipeline); });
         });
 }
@@ -1096,10 +1094,8 @@ std::expected<void, Error> RenderContext::Impl::BuildMLAAPipeline() {
     using enum Resource::ShaderID;
 
     return BuildPassHelper(
-        this, mlaaPass, "MLAA",
-        {.path = Resource::Paths::MlaaVS, .fallback = Resource::GetShaderProgram(Mlaa).vertex},
-        {.path = Resource::Paths::MlaaPS, .fallback = Resource::GetShaderProgram(Mlaa).fragment},
-        {VK_FORMAT_R16G16B16A16_SFLOAT}
+        this, mlaaPass, "MLAA", {.path = Resource::Paths::MlaaVS, .fallback = Resource::GetShaderProgram(Mlaa).vertex},
+        {.path = Resource::Paths::MlaaPS, .fallback = Resource::GetShaderProgram(Mlaa).fragment}, {VK_FORMAT_R16G16B16A16_SFLOAT}
     );
 }
 

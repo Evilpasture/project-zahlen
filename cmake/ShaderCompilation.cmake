@@ -100,7 +100,12 @@ function(add_shader_target TARGET_SUFFIX)
         endif()
 
         # Pass ${MACRO} as the unique output variable name to prevent collisions
-        compile_hlsl("${SHADER_PATH}" ${ENTRY} ${PROFILE} ${MACRO} ${ARG_EXTRA_ARGS} ${STAGE_SPECIFIC_ARGS})
+        get_filename_component(FILE_EXT "${SHADER_PATH}" LAST_EXT)
+        if(FILE_EXT STREQUAL ".slang")
+            compile_slang("${SHADER_PATH}" ${ENTRY} ${PROFILE} ${MACRO} ${ARG_EXTRA_ARGS} ${STAGE_SPECIFIC_ARGS})
+        else()
+            compile_hlsl("${SHADER_PATH}" ${ENTRY} ${PROFILE} ${MACRO} ${ARG_EXTRA_ARGS} ${STAGE_SPECIFIC_ARGS})
+        endif()
 
         list(APPEND OUTPUTS ${${MACRO}})
         list(APPEND ALL_SHADER_DEFINITIONS "${MACRO}=\"${${MACRO}}\"")
@@ -200,7 +205,7 @@ add_shader_target(cluster_cull
 )
 
 add_shader_target(skinning_shader
-    STAGES "${SHADER_SRC_DIR}/skinning.hlsl|CSMain|cs_6_0|SHADER_SKINNING_HLSL_CS_PATH"
+    STAGES "${SHADER_SRC_DIR}/skinning.slang|CSMain|cs_6_0|SHADER_SKINNING_SLANG_CS_PATH"
 )
 
 add_shader_target(forward_shader
