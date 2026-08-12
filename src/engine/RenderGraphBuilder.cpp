@@ -121,6 +121,14 @@ struct PassFactory {
         return Vk::Passieren<
             "MainShadow", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::DepthStencilWrite<Res_Depth>,
             Vk::DepthWrite<Res_ShadowMap>, Vk::DepthWrite<Res_ShadowAtlas>>([this](VkCommandBuffer c) noexcept {
+            if (Diag::DisableMainPassParallelism()) {
+                // Bisection aid: record shadow + main serially into the primary.
+                FrameRecorder shadowRec(c, self);
+                Passes::ShadowPass {}.Execute(shadowRec);
+                FrameRecorder mainRec(c, self);
+                Passes::MainPass1 {}.Execute(mainRec, BuildSceneResources());
+                return;
+            }
             auto& rec = self.parallelRecorder.Current();
             rec.Reset();
             TaskSystemScheduler scheduler;

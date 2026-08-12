@@ -39,6 +39,22 @@ struct IBLPayload {
 
 namespace ZHLN {
 
+// ============================================================================
+// Environment-Toggleable Render Diagnostics (Impl in RenderFrame.cpp)
+// ============================================================================
+// These exist to triage run-to-run nondeterminism in the scene pass without
+// requiring RenderDoc or GPU-AV. They are read once at startup:
+//   ZHLN_NO_GPU_CULLING=1       Force the CPU culling policy in MainPass1/2.
+//   ZHLN_NO_PARALLEL_MAINPASS=1 Record "MainShadow" serially into the primary
+//                               command buffer (no secondary parallelism).
+//   ZHLN_DEBUG_INDIRECT=1       Periodically log the queued draws, the retired
+//                               GPU indirect commands and instance buffer data.
+namespace Diag {
+[[nodiscard]] bool DisableGpuCulling() noexcept;
+[[nodiscard]] bool DisableMainPassParallelism() noexcept;
+[[nodiscard]] bool IndirectTelemetryEnabled() noexcept;
+} // namespace Diag
+
 template <uint32_t B, VkShaderStageFlags S = VK_SHADER_STAGE_FRAGMENT_BIT>
 using EngineAS = std::conditional_t<
     isMac,
@@ -669,6 +685,22 @@ struct RenderContext::Impl {
     std::expected<void, Error> BuildLinePipeline();
     std::expected<void, Error> InitLineBuffers() noexcept;
     void                       FlushLineQueue();
+
+    // --- Indirect-draw telemetry (enabled via ZHLN_DEBUG_INDIRECT=1) ---
+    // The GPU-only indirect/counter buffers cannot be mapped, so the frame
+    // copies their heads into a small host-visible readback buffer at the end
+    // of recording; the dump two frames later (slot retired) reads that copy.
+    static constexpr uint32_t kTelemetryMaxDraws      = 8;
+    static constexpr size_t   kTelemetryPass1Offset   = 0;
+    static constexpr size_t   kTelemetryPass2Offset   = sizeof(VkDrawIndirectCommand) * kTelemetryMaxDraws;
+    static constexpr size_t   kTelemetryCountOffset   = kTelemetryPass2Offset * 2;
+    static constexpr size_t   kTelemetryReadbackBytes = kTelemetryCountOffset + sizeof(uint32_t);
+
+    std::array<Vk::Buffer, 2> indirectReadbackBuffers {};
+    bool                      indirectReadbackReady = false;
+
+    void RecordIndirectTelemetry(VkCommandBuffer cmd) noexcept;
+    void DumpIndirectTelemetry(uint32_t frameNo) noexcept;
 
     Vk::SlangReflectedLayout      cullingLayout;
     Vk::DescriptorPool           cullingPool;

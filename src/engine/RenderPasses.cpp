@@ -673,7 +673,8 @@ void MainPass1::Execute(
         }
     }
 
-    const bool useGpuCulling = ctx.cullingPass.pipeline.Valid() && ctx.frames.indirectCommandsBuffers->Valid() && (drawCount <= kGpuCullingMaxInstances);
+    const bool useGpuCulling =
+        ctx.cullingPass.pipeline.Valid() && ctx.frames.indirectCommandsBuffers->Valid() && (drawCount <= kGpuCullingMaxInstances) && !Diag::DisableGpuCulling();
     if (useGpuCulling) {
         ExecutePass<GpuCullingPolicyPass1>(recorder, groups, drawCount, in.sceneColor, in.velocity, in.normRough, in.depth);
     } else {
@@ -715,7 +716,8 @@ void MainPass2::Execute(
         }
     }
 
-    const bool useGpuCulling = ctx.cullingPass.pipeline.Valid() && ctx.frames.indirectCommandsBuffers->Valid() && (drawCount <= kGpuCullingMaxInstances);
+    const bool useGpuCulling =
+        ctx.cullingPass.pipeline.Valid() && ctx.frames.indirectCommandsBuffers->Valid() && (drawCount <= kGpuCullingMaxInstances) && !Diag::DisableGpuCulling();
     if (useGpuCulling) {
         ExecutePass<GpuCullingPolicyPass2>(recorder, groups, drawCount, in.sceneColor, in.velocity, in.normRough, in.depth);
     } else {
