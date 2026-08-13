@@ -14,6 +14,17 @@ struct PushConstants {
 
 RWTexture2D<float4> outTexture;
 
+// Patterns are compile-time types. CSMain intentionally retains BAKE_TYPE as the
+// host-visible specialization constant: changing it would break existing pipeline
+// specialization-map entries. Each selected path is monomorphized by Slang.
+public interface IBakePattern {
+    static float3 generate(float2 uv);
+}
+
+public float3 GenerateBake<T : IBakePattern>(float2 uv) {
+    return T.generate(uv);
+}
+
 // --- NOISE MATH LIBRARIES ---
 float2 Hash22(float2 p) {
     float3 p3 = frac(float3(p.xyx) * float3(0.1031f, 0.1030f, 0.0973f));
@@ -48,25 +59,39 @@ float EvaluatePerlin(float2 uv) {
     return Hash22(floor(uv)).x; // Placeholder representation
 }
 
+public struct VoronoiPattern : IBakePattern {
+    public static float3 generate(float2 uv) {
+        float3 v = EvaluateVoronoi(uv * pc.param0);
+        return lerp(float3(0.1f, 0.12f, 0.15f), float3(v.yz, 0.5f), smoothstep(0.05f, 0.12f, v.x));
+    }
+}
+
+public struct PerlinPattern : IBakePattern {
+    public static float3 generate(float2 uv) {
+        float n = EvaluatePerlin(uv * pc.param0);
+        return float3(n, n, n);
+    }
+}
+
+public struct MarblePattern : IBakePattern {
+    public static float3 generate(float2 uv) {
+        float wave = sin(uv.x * pc.param0 + EvaluatePerlin(uv * pc.param0 * 2.0f) * pc.param2);
+        return float3(wave, wave, wave) * 0.5f + 0.5f;
+    }
+}
+
 [shader("compute")][numthreads(16, 16, 1)] void CSMain(uint3 tid : SV_DispatchThreadID) {
     if (tid.x >= pc.width || tid.y >= pc.height)
         return;
 
-    float2 uv    = float2(tid.x, tid.y) / float2(pc.width, pc.height);
-    float3 color = float3(0.0f, 0.0f, 0.0f);
-
-    // Branching is evaluated at PIPELINE COMPILATION TIME via specialization constants
-    if (BAKE_TYPE == 0) {
-        float3 v = EvaluateVoronoi(uv * pc.param0);
-        color    = lerp(float3(0.1f, 0.12f, 0.15f), float3(v.yz, 0.5f), smoothstep(0.05f, 0.12f, v.x));
-    } else if (BAKE_TYPE == 1) {
-        float n = EvaluatePerlin(uv * pc.param0);
-        color   = float3(n, n, n);
-    } else if (BAKE_TYPE == 2) {
-        // Wave/Marble math
-        float wave = sin(uv.x * pc.param0 + EvaluatePerlin(uv * pc.param0 * 2.0f) * pc.param2);
-        color      = float3(wave, wave, wave) * 0.5f + 0.5f;
-    }
+    float2 uv = float2(tid.x, tid.y) / float2(pc.width, pc.height);
+    float3 color;
+    if (BAKE_TYPE == 0)
+        color = GenerateBake<VoronoiPattern>(uv);
+    else if (BAKE_TYPE == 1)
+        color = GenerateBake<PerlinPattern>(uv);
+    else
+        color = GenerateBake<MarblePattern>(uv);
 
     outTexture[tid.xy] = float4(color, 1.0f);
 }

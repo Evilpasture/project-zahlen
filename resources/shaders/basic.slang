@@ -37,53 +37,25 @@ VSOutput VSMain(uint vertexId : SV_VulkanVertexID, uint instanceId : SV_VulkanIn
     uint         instId = (obj.instanceId != 4294967295u) ? obj.instanceId : instanceId;
     InstanceData inst   = scene.g_instances[instId];
 
-    uint actualVertexId = vertexId;
-    if (inst.iboAddress != 0) {
-        actualVertexId = (*(uint*)(inst.iboAddress + vertexId * 4));
-    }
-    /*
-     * NOTE: Defensive check against OOB BDA fetches.
-     * This is a very rare case, but it's still possible to trigger it.
-     * The only way to trigger it is to have a very large mesh with a
-     * very large number of vertices, and a very large number of instances.
-     * In this case, the BDA address will be 0, and the actualVertexId will
-     * be greater than the vertexCount. This will cause a crash in the
-     * following line, which is trying to access the vertex attributes.
-     */
+    // Typed BDA indexing keeps the byte-stride contract in one place.
+    uint actualVertexId = inst.fetchIndex(vertexId);
+    // Preserve the legacy defensive clamp before any BDA vertex fetch.
     actualVertexId = min(actualVertexId, max(inst.vertexCount, 1u) - 1u);
 
-    uint texIndices0 = inst.texIndices0;
-    uint albedoIdx   = texIndices0 & 0xFFFF;
-    uint normalIdx   = texIndices0 >> 16;
-    uint texIndices1 = inst.texIndices1;
-    uint pbrIdx      = texIndices1 & 0xFFFF;
-    uint emissiveIdx = texIndices1 >> 16;
+    float4x4 activeVP = inst.isViewmodel ? scene.frame.viewmodelViewProj : scene.frame.viewProj;
 
-    uint flags       = inst.flags;
-    uint alphaMode   = flags & 0xFF;
-    uint isSkinned   = (flags >> 8) & 0xFF;
-    uint isViewmodel = (flags >> 16) & 0xFF;
-
-    float4x4 activeVP = (isViewmodel != 0) ? scene.frame.viewmodelViewProj : scene.frame.viewProj;
-
-    float3 position     = (*(float3*)(inst.posAddress + actualVertexId * 12));
+    float3 position     = inst.fetchPosition(actualVertexId);
     float2 localUV      = float2(0, 0);
     float4 localColor   = float4(1, 1, 1, 1);
     float3 localNormal  = float3(0, 1, 0);
     float4 localTangent = float4(1, 0, 0, 1);
 
-    // Load Attributes
     if (inst.attrAddress != 0) {
-        uint64_t attrAddr   = inst.attrAddress + actualVertexId * 16;
-        uint     normalRaw  = (*(uint*)(attrAddr + 0));
-        uint     tangentRaw = (*(uint*)(attrAddr + 4));
-        uint     uvRaw      = (*(uint*)(attrAddr + 8));
-        uint     colorRaw   = (*(uint*)(attrAddr + 12));
-
-        localNormal  = UnpackNormal(normalRaw).xyz;
-        localTangent = UnpackNormal(tangentRaw);
-        localUV      = UnpackUV(uvRaw);
-        localColor   = UnpackColor(colorRaw);
+        VertexAttributes attributes = inst.fetchAttributes(actualVertexId);
+        localNormal  = attributes.unpackedNormal.xyz;
+        localTangent = attributes.unpackedTangent;
+        localUV      = attributes.unpackedUV;
+        localColor   = attributes.unpackedColor;
     }
 
     float4 localPos = float4(position, 1.0f);
@@ -91,13 +63,10 @@ VSOutput VSMain(uint vertexId : SV_VulkanVertexID, uint instanceId : SV_VulkanIn
     uint4  localJoints = uint4(0, 0, 0, 0);
     float4 weights     = float4(0.0f, 0.0f, 0.0f, 0.0f);
 
-    if (isSkinned != 0 && inst.skinAddress != 0) {
-        uint64_t skinAddr   = inst.skinAddress + actualVertexId * 12;
-        uint2    jointsRaw  = (*(uint2*)(skinAddr + 0));
-        uint     weightsRaw = (*(uint*)(skinAddr + 8));
-
-        localJoints = UnpackJoints(jointsRaw);
-        weights     = UnpackColor(weightsRaw);
+    if (inst.isSkinned && inst.skinAddress != 0) {
+        SkinVertex skin = inst.fetchSkin(actualVertexId);
+        localJoints = skin.unpackedJoints;
+        weights     = skin.unpackedWeights;
     }
 
     uint   vertexCount      = inst.vertexCount;
@@ -115,7 +84,7 @@ VSOutput VSMain(uint vertexId : SV_VulkanVertexID, uint instanceId : SV_VulkanIn
     float4x4 prevWorldMatrix = inst.prevWorld;
     uint     jointOffset     = inst.jointOffset;
 
-    if (isSkinned != 0) {
+    if (inst.isSkinned) {
         worldPos           = mul(worldMatrix, SkinPosition(localPos, localJoints, weights, jointOffset));
         output.normal      = normalize(mul(world3x3, SkinDirection(localNormal, localJoints, weights, jointOffset)));
         output.tangent.xyz = normalize(mul(world3x3, SkinDirection(localTangent.xyz, localJoints, weights, jointOffset)));
@@ -142,8 +111,8 @@ VSOutput VSMain(uint vertexId : SV_VulkanVertexID, uint instanceId : SV_VulkanIn
         output.baseColorFactor = baseColorFactor;
         output.emissiveFactor  = emissiveFactor;
         output.pbrFactors      = float3(metallicFactor, roughnessFactor, alphaCutoff);
-        output.alphaMode       = alphaMode;
-        output.materialIndices = uint4(albedoIdx, 0, 0, 0);
+        output.alphaMode       = inst.alphaMode;
+        output.materialIndices = uint4(inst.albedoIndex, 0, 0, 0);
 
         output.currClip  = 0;
         output.prevClip  = 0;
@@ -158,7 +127,7 @@ VSOutput VSMain(uint vertexId : SV_VulkanVertexID, uint instanceId : SV_VulkanIn
     output.currClip = mul(activeVP, worldPos);
 
     float4 prevWorldPos;
-    if (isSkinned != 0) {
+    if (inst.isSkinned) {
         prevWorldPos = mul(prevWorldMatrix, SkinPositionPrev(localPos, localJoints, weights, jointOffset));
     } else {
         prevWorldPos = mul(prevWorldMatrix, localPos);
@@ -170,11 +139,11 @@ VSOutput VSMain(uint vertexId : SV_VulkanVertexID, uint instanceId : SV_VulkanIn
 
     output.shadowPos       = mul(scene.frame.lightSpaceMatrices[0], worldPos);
     output.color           = localColor;
-    output.materialIndices = uint4(albedoIdx, normalIdx, pbrIdx, emissiveIdx);
+    output.materialIndices = uint4(inst.albedoIndex, inst.normalIndex, inst.pbrIndex, inst.emissiveIndex);
     output.baseColorFactor = baseColorFactor;
     output.emissiveFactor  = emissiveFactor;
     output.pbrFactors      = float3(metallicFactor, roughnessFactor, alphaCutoff);
-    output.alphaMode       = alphaMode;
+    output.alphaMode       = inst.alphaMode;
     return output;
 }
 

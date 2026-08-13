@@ -62,9 +62,8 @@ float3 SampleTurbulence(float3 pos) {
     uint idx = tid.x;
     if (idx >= pc.particleCount)
         return;
-
-    uint64_t addr = pc.particleBufferAddr + idx * sizeof(Particle);
-    Particle part = (*(Particle*)(addr));
+    Particle* particles = (Particle*)pc.particleBufferAddr;
+    Particle part = particles[idx];
 
     float dt = pc.deltaTime;
 
@@ -125,5 +124,5 @@ float3 SampleTurbulence(float3 pos) {
         part.params.z     = pc.p.startSize.x;
     }
 
-    (*(Particle*)(addr)) = part;
+    particles[idx] = part;
 }

@@ -34,6 +34,53 @@ public struct InstanceData {
     public float4 emissiveFactor;
 };
 
+// These transient views describe the existing BDA element layouts. They are never
+// reflected in InstanceData, so the C++ ABI remains unchanged.
+public struct VertexAttributes {
+    public uint normal;
+    public uint tangent;
+    public uint uv;
+    public uint color;
+};
+
+public struct SkinVertex {
+    public uint2 joints;
+    public uint weights;
+};
+
+// Extensions deliberately add behavior only: no fields, padding, or descriptor bindings.
+public extension InstanceData {
+    [ForceInline] public property uint albedoIndex { get { return this.texIndices0 & 0xFFFFu; } }
+    [ForceInline] public property uint normalIndex { get { return this.texIndices0 >> 16; } }
+    [ForceInline] public property uint pbrIndex { get { return this.texIndices1 & 0xFFFFu; } }
+    [ForceInline] public property uint emissiveIndex { get { return this.texIndices1 >> 16; } }
+    [ForceInline] public property uint alphaMode { get { return this.flags & 0xFFu; } }
+    [ForceInline] public property bool isSkinned { get { return ((this.flags >> 8) & 0xFFu) != 0; } }
+    [ForceInline] public property bool isViewmodel { get { return ((this.flags >> 16) & 0xFFu) != 0; } }
+
+    [ForceInline] public uint fetchIndex(uint indexId) {
+        if (this.iboAddress == 0) return indexId;
+        uint* indices = (uint*)this.iboAddress;
+        return indices[indexId];
+    }
+
+    [ForceInline] public float3 fetchPosition(uint vertexId) {
+        if (this.posAddress == 0) return float3(0.0f);
+        float3* positions = (float3*)this.posAddress;
+        return positions[vertexId];
+    }
+
+    [ForceInline] public VertexAttributes fetchAttributes(uint vertexId) {
+        VertexAttributes* attributes = (VertexAttributes*)this.attrAddress;
+        return attributes[vertexId];
+    }
+
+    [ForceInline] public SkinVertex fetchSkin(uint vertexId) {
+        SkinVertex* skin = (SkinVertex*)this.skinAddress;
+        return skin[vertexId];
+    }
+}
+
 public struct ObjectConstants {
     public uint instanceId;
     public uint isShadowPass;
@@ -45,6 +92,16 @@ public struct GPUJoint {
     public float4 col2;
     public float4 col3;
 };
+
+public extension GPUJoint {
+    [ForceInline] public float4 transformPosition(float4 position) {
+        return this.col0 * position.x + this.col1 * position.y + this.col2 * position.z + this.col3 * position.w;
+    }
+
+    [ForceInline] public float3 transformDirection(float3 direction) {
+        return this.col0.xyz * direction.x + this.col1.xyz * direction.y + this.col2.xyz * direction.z;
+    }
+}
 
 /**
  * The authoritative layout of the global, per-frame bindless descriptor set.
@@ -94,6 +151,19 @@ public uint4 UnpackJoints(uint2 packed) {
     return uint4(packed.x & 0xFFFF, packed.x >> 16, packed.y & 0xFFFF, packed.y >> 16);
 }
 
+public extension VertexAttributes {
+    [ForceInline] public property float4 unpackedNormal { get { return UnpackNormal(this.normal); } }
+    [ForceInline] public property float4 unpackedTangent { get { return UnpackNormal(this.tangent); } }
+    [ForceInline] public property float2 unpackedUV { get { return UnpackUV(this.uv); } }
+    [ForceInline] public property float4 unpackedColor { get { return UnpackColor(this.color); } }
+}
+
+public extension SkinVertex {
+    [ForceInline] public property uint4 unpackedJoints { get { return UnpackJoints(this.joints); } }
+    [ForceInline] public property float4 unpackedWeights { get { return UnpackColor(this.weights); } }
+}
+
+
 // --- SKELETAL SKINNING ---
 public float4 SkinPositionPrev(float4 position, uint4 joints, float4 weights, uint jointOffset) {
     GPUJoint j0 = scene.g_prevJoints[jointOffset + joints.x];
@@ -101,10 +171,10 @@ public float4 SkinPositionPrev(float4 position, uint4 joints, float4 weights, ui
     GPUJoint j2 = scene.g_prevJoints[jointOffset + joints.z];
     GPUJoint j3 = scene.g_prevJoints[jointOffset + joints.w];
 
-    float4 pos = (j0.col0 * position.x + j0.col1 * position.y + j0.col2 * position.z + j0.col3 * position.w) * weights.x +
-                 (j1.col0 * position.x + j1.col1 * position.y + j1.col2 * position.z + j1.col3 * position.w) * weights.y +
-                 (j2.col0 * position.x + j2.col1 * position.y + j2.col2 * position.z + j2.col3 * position.w) * weights.z +
-                 (j3.col0 * position.x + j3.col1 * position.y + j3.col2 * position.z + j3.col3 * position.w) * weights.w;
+    float4 pos = (j0.transformPosition(position)) * weights.x +
+                 (j1.transformPosition(position)) * weights.y +
+                 (j2.transformPosition(position)) * weights.z +
+                 (j3.transformPosition(position)) * weights.w;
     return pos;
 }
 
@@ -114,10 +184,10 @@ public float4 SkinPosition(float4 position, uint4 joints, float4 weights, uint j
     GPUJoint j2 = scene.g_joints[jointOffset + joints.z];
     GPUJoint j3 = scene.g_joints[jointOffset + joints.w];
 
-    float4 pos = (j0.col0 * position.x + j0.col1 * position.y + j0.col2 * position.z + j0.col3 * position.w) * weights.x +
-                 (j1.col0 * position.x + j1.col1 * position.y + j1.col2 * position.z + j1.col3 * position.w) * weights.y +
-                 (j2.col0 * position.x + j2.col1 * position.y + j2.col2 * position.z + j2.col3 * position.w) * weights.z +
-                 (j3.col0 * position.x + j3.col1 * position.y + j3.col2 * position.z + j3.col3 * position.w) * weights.w;
+    float4 pos = (j0.transformPosition(position)) * weights.x +
+                 (j1.transformPosition(position)) * weights.y +
+                 (j2.transformPosition(position)) * weights.z +
+                 (j3.transformPosition(position)) * weights.w;
     return pos;
 }
 
@@ -131,10 +201,10 @@ public float3 SkinDirection(float3 direction, uint4 joints, float4 weights, uint
     GPUJoint j2 = scene.g_joints[jointOffset + joints.z];
     GPUJoint j3 = scene.g_joints[jointOffset + joints.w];
 
-    float3 dir = (j0.col0.xyz * direction.x + j0.col1.xyz * direction.y + j0.col2.xyz * direction.z) * weights.x +
-                 (j1.col0.xyz * direction.x + j1.col1.xyz * direction.y + j1.col2.xyz * direction.z) * weights.y +
-                 (j2.col0.xyz * direction.x + j2.col1.xyz * direction.y + j2.col2.xyz * direction.z) * weights.z +
-                 (j3.col0.xyz * direction.x + j3.col1.xyz * direction.y + j3.col2.xyz * direction.z) * weights.w;
+    float3 dir = (j0.transformDirection(direction)) * weights.x +
+                 (j1.transformDirection(direction)) * weights.y +
+                 (j2.transformDirection(direction)) * weights.z +
+                 (j3.transformDirection(direction)) * weights.w;
 
     return dir;
 }

@@ -51,17 +51,26 @@ float3 Hash33(float3 p) {
     return float3(Hash13(p), Hash13(p + float3(17.1f, 9.3f, 27.5f)), Hash13(p + float3(31.4f, 45.2f, 11.8f)));
 }
 
-float4 QuatMultiply(float4 q1, float4 q2) {
-    return float4(
-        q1.w * q2.x + q1.x * q2.w + q1.y * q2.z - q1.z * q2.y, q1.w * q2.y - q1.x * q2.z + q1.y * q2.w + q1.z * q2.x,
-        q1.w * q2.z + q1.x * q2.y - q1.y * q2.x + q1.z * q2.w, q1.w * q2.w - q1.x * q2.x - q1.y * q2.y - q1.z * q2.z
-    );
-}
+public struct Quaternion {
+    public float4 value;
+    public init(float4 value) { this.value = value; }
 
-float4 QuatFromAxisAngle(float3 axis, float angle) {
-    float halfAngle = angle * 0.5f;
-    float s         = sin(halfAngle);
-    return float4(axis.x * s, axis.y * s, axis.z * s, cos(halfAngle));
+    [ForceInline] public static Quaternion fromAxisAngle(float3 axis, float angle) {
+        float halfAngle = angle * 0.5f;
+        return Quaternion(float4(axis * sin(halfAngle), cos(halfAngle)));
+    }
+
+    [ForceInline] public static Quaternion operator*(Quaternion lhs, Quaternion rhs) {
+        float4 q1 = lhs.value;
+        float4 q2 = rhs.value;
+        return Quaternion(float4(
+            q1.w * q2.x + q1.x * q2.w + q1.y * q2.z - q1.z * q2.y,
+            q1.w * q2.y - q1.x * q2.z + q1.y * q2.w + q1.z * q2.x,
+            q1.w * q2.z + q1.x * q2.y - q1.y * q2.x + q1.z * q2.w,
+            q1.w * q2.w - q1.x * q2.x - q1.y * q2.y - q1.z * q2.z));
+    }
+
+    [ForceInline] public Quaternion normalized() { return Quaternion(normalize(this.value)); }
 }
 
 [numthreads(64, 1, 1)] void CSMain(uint3 tid : SV_DispatchThreadID) {
@@ -69,8 +78,8 @@ float4 QuatFromAxisAngle(float3 axis, float angle) {
     if (idx >= pc.particleCount)
         return;
 
-    uint64_t   addr = pc.particleBufferAddr + idx * sizeof(Particle3D);
-    Particle3D p    = (*(Particle3D*)(addr));
+    Particle3D* particles = (Particle3D*)pc.particleBufferAddr;
+    Particle3D p = particles[idx];
     float      dt   = pc.deltaTime;
 
     // --- 1. INITIAL SEED (UNINITIALIZED BRAND-NEW PARTICLE) ---
@@ -100,8 +109,8 @@ float4 QuatFromAxisAngle(float3 axis, float angle) {
         // Integrate Rotation
         float angle = length(p.rotVel.xyz) * dt;
         if (angle > 0.0001f) {
-            float4 dq  = QuatFromAxisAngle(normalize(p.rotVel.xyz), angle);
-            p.rotation = normalize(QuatMultiply(dq, p.rotation));
+            Quaternion dq = Quaternion.fromAxisAngle(normalize(p.rotVel.xyz), angle);
+            p.rotation = (dq * Quaternion(p.rotation)).normalized().value;
         }
 
         // Interpolate Color & Scale over Lifetime
@@ -125,5 +134,5 @@ float4 QuatFromAxisAngle(float3 axis, float angle) {
         p.color      = pc.p.startColor;
     }
 
-    (*(Particle3D*)(addr)) = p;
+    particles[idx] = p;
 }

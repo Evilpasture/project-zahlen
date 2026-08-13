@@ -1,23 +1,5 @@
 // resources/shaders/ui.slang
 import common;
-struct VertexAttributes {
-    uint normal;
-    uint tangent;
-    uint uv;
-    uint color;
-};
-
-// --- Custom Local Unpackers ---
-float2 LocalUnpackUV(uint packed) {
-    return float2(f16tof32(packed & 0xFFFF), f16tof32(packed >> 16));
-}
-
-float4 LocalUnpackColor(uint packed) {
-    return float4(
-        float(packed & 0xFF) / 255.0f, float((packed >> 8) & 0xFF) / 255.0f, float((packed >> 16) & 0xFF) / 255.0f, float((packed >> 24) & 0xFF) / 255.0f
-    );
-}
-
 struct UIObjectConstants {
     float4x4 orthoMatrix;
     uint64_t posAddress;
@@ -47,12 +29,9 @@ struct UIVSOutput {
     float3           position = posPool[vertexId];
     VertexAttributes attr     = attrPool[vertexId];
 
-    uint uv    = attr.uv;
-    uint color = attr.color;
-
     output.pos   = mul(uiObj.orthoMatrix, float4(position, 1.0f));
-    output.uv    = LocalUnpackUV(uv);
-    output.color = LocalUnpackColor(color);
+    output.uv    = attr.unpackedUV;
+    output.color = attr.unpackedColor;
     return output;
 }
 

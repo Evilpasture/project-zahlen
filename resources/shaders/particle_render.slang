@@ -27,8 +27,8 @@ struct ParticleVSOutput {
 
 ParticleVSOutput VSMain(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID) {
     ParticleVSOutput output;
-    uint64_t         addr = pc.particleBufferAddr + instanceID * sizeof(Particle);
-    Particle         p    = (*(Particle*)(addr));
+    Particle* particles = (Particle*)pc.particleBufferAddr;
+    Particle p = particles[instanceID];
 
     float2 quadUVs[6] = {float2(0, 0), float2(0, 1), float2(1, 0), float2(1, 0), float2(0, 1), float2(1, 1)};
     float2 offsets[6] = {float2(-0.5f, -0.5f), float2(-0.5f, 0.5f), float2(0.5f, -0.5f), float2(0.5f, -0.5f), float2(-0.5f, 0.5f), float2(0.5f, 0.5f)};

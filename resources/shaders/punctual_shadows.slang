@@ -20,10 +20,10 @@ PunctualShadowVSOutput VSMain(uint vertexId : SV_VulkanVertexID, uint instanceId
     PunctualShadowVSOutput output;
 
     InstanceData inst           = scene.g_instances[instanceId];
-    uint         actualVertexId = inst.iboAddress != 0 ? (*(uint*)(inst.iboAddress + vertexId * 4)) : vertexId;
+    uint         actualVertexId = inst.fetchIndex(vertexId);
     actualVertexId              = min(actualVertexId, max(inst.vertexCount, 1u) - 1u);
 
-    float3 localPos = (*(float3*)(inst.posAddress + actualVertexId * 12));
+    float3 localPos = inst.fetchPosition(actualVertexId);
     float3 worldPos = mul(inst.world, float4(localPos, 1.0f)).xyz;
 
     // 2. Fetch Light Data

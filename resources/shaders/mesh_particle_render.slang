@@ -62,27 +62,21 @@ struct PSOutput {
     float4 normalRoughness : SV_Target2;
 };
 
-float4 UnpackNormal(uint packed) {
-    float x = (float(packed & 0x3FF) / 1023.0f) * 2.0f - 1.0f;
-    float y = (float((packed >> 10) & 0x3FF) / 1023.0f) * 2.0f - 1.0f;
-    float z = (float((packed >> 20) & 0x3FF) / 1023.0f) * 2.0f - 1.0f;
-    float w = (packed >> 30) > 0 ? 1.0f : -1.0f;
-    return float4(x, y, z, w);
-}
+public struct Quaternion {
+    public float4 value;
+    public init(float4 value) { this.value = value; }
 
-float2 UnpackUV(uint packed) {
-    return float2(f16tof32(packed & 0xFFFF), f16tof32(packed >> 16));
-}
-
-float3 RotateVectorByQuat(float3 v, float4 q) {
-    float3 t = 2.0f * cross(q.xyz, v);
-    return v + q.w * t + cross(q.xyz, t);
+    [ForceInline] public float3 rotate(float3 vector) {
+        float3 t = 2.0f * cross(this.value.xyz, vector);
+        return vector + this.value.w * t + cross(this.value.xyz, t);
+    }
 }
 
 VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, uint viewId : SV_ViewID) {
     VSOutput output;
 
-    Particle3D p = (*(Particle3D*)(mp_pc.particleBufferAddr + instanceId * sizeof(Particle3D)));
+    Particle3D* particles = (Particle3D*)mp_pc.particleBufferAddr;
+    Particle3D p = particles[instanceId];
 
     // Cull dead particles cleanly (0-area degenerate clip position)
     if (p.params.x >= p.params.y || p.params.y <= 0.0f) {
@@ -103,11 +97,16 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, ui
         return output;
     }
 
-    uint actualVertexId = mp_pc.iboAddress != 0 ? (*(uint*)(mp_pc.iboAddress + vertexId * 4)) : vertexId;
+    uint actualVertexId = vertexId;
+    if (mp_pc.iboAddress != 0) {
+        uint* indices = (uint*)mp_pc.iboAddress;
+        actualVertexId = indices[vertexId];
+    }
 
-    float3 localPos   = (*(float3*)(mp_pc.posAddress + actualVertexId * 12));
+    float3* positions = (float3*)mp_pc.posAddress;
+    float3 localPos = positions[actualVertexId];
     float3 scaledPos  = localPos * p.position.w;
-    float3 rotatedPos = RotateVectorByQuat(scaledPos, p.rotation);
+    float3 rotatedPos = Quaternion(p.rotation).rotate(scaledPos);
     float3 worldPos   = rotatedPos + p.position.xyz;
 
     output.worldPos = worldPos;
@@ -119,19 +118,17 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, ui
     output.shadowPos  = mul(scene.frame.lightSpaceMatrices[cascadeIndex], float4(worldPos, 1.0f));
 
     if (mp_pc.attrAddress != 0) {
-        uint64_t attrAddr   = mp_pc.attrAddress + actualVertexId * 16;
-        uint     normalRaw  = (*(uint*)(attrAddr + 0));
-        uint     tangentRaw = (*(uint*)(attrAddr + 4));
-        uint     uvRaw      = (*(uint*)(attrAddr + 8));
+        VertexAttributes* attributes = (VertexAttributes*)mp_pc.attrAddress;
+        VertexAttributes attributesAtVertex = attributes[actualVertexId];
+        Quaternion rotation = Quaternion(p.rotation);
 
-        float3 localNormal = UnpackNormal(normalRaw).xyz;
-        output.normal      = normalize(RotateVectorByQuat(localNormal, p.rotation));
+        float3 localNormal = attributesAtVertex.unpackedNormal.xyz;
+        output.normal      = normalize(rotation.rotate(localNormal));
 
-        float4 localTangent = UnpackNormal(tangentRaw);
-        output.tangent.xyz  = normalize(RotateVectorByQuat(localTangent.xyz, p.rotation));
+        float4 localTangent = attributesAtVertex.unpackedTangent;
+        output.tangent.xyz  = normalize(rotation.rotate(localTangent.xyz));
         output.tangent.w    = localTangent.w;
-
-        output.uv = UnpackUV(uvRaw);
+        output.uv           = attributesAtVertex.unpackedUV;
     } else {
         output.normal  = float3(0.0f, 1.0f, 0.0f);
         output.tangent = float4(1.0f, 0.0f, 0.0f, 1.0f);
