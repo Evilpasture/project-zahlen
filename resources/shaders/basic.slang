@@ -25,7 +25,13 @@ struct PSOutput {
     float4 normalRoughness : SV_Target2;
 };
 
-VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, uint viewId : SV_ViewID) {
+// NOTE: use the Vulkan-native index semantics here. Slang maps SV_InstanceID
+// to (InstanceIndex - BaseInstance) -- D3D semantics, i.e. it EXCLUDES
+// firstInstance -- whereas the old DXC build received raw InstanceIndex. All
+// of this engine's indirect draws encode the instance slot in firstInstance
+// (see kGpuCullingSentinel handling below), so the raw Vulkan builtins are
+// required. Same argument applies to SV_VertexID/SV_VulkanVertexID.
+VSOutput VSMain(uint vertexId : SV_VulkanVertexID, uint instanceId : SV_VulkanInstanceID, uint viewId : SV_ViewID) {
     VSOutput output;
 
     uint         instId = (obj.instanceId != 4294967295u) ? obj.instanceId : instanceId;

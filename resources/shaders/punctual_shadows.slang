@@ -13,7 +13,10 @@ struct PunctualShadowVSOutput {
     float  linearDepth : TEXCOORD0;
 };
 
-PunctualShadowVSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, uint viewId : SV_ViewID) {
+// NOTE: SV_Vulkan* semantics are required here -- the CPU-built shadow
+// indirect commands encode the instance slot in firstInstance, and Slang's
+// SV_InstanceID would strip BaseInstance (yielding 0 for every sub-draw).
+PunctualShadowVSOutput VSMain(uint vertexId : SV_VulkanVertexID, uint instanceId : SV_VulkanInstanceID, uint viewId : SV_ViewID) {
     PunctualShadowVSOutput output;
 
     InstanceData inst           = scene.g_instances[instanceId];
