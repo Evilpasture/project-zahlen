@@ -31,7 +31,7 @@ RUN pacman -S --needed --noconfirm \
     curl
 
 # Install full LunarG Vulkan SDK (includes slangc)
-ARG VULKAN_SDK_VER=1.3.296.0
+ARG VULKAN_SDK_VER=1.4.304.0
 RUN wget https://sdk.lunarg.com/sdk/download/${VULKAN_SDK_VER}/linux/vulkansdk-linux-x86_64-${VULKAN_SDK_VER}.tar.xz -O /tmp/vulkansdk.tar.xz && \
     mkdir -p /opt/vulkansdk && \
     tar -xf /tmp/vulkansdk.tar.xz -C /opt/vulkansdk --strip-components=1 && \
