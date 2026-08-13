@@ -5,11 +5,27 @@
 #include "Zahlen/Profiler.hpp"
 #include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
+#include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <cstring>
 #include <utility>
 
 namespace ZHLN {
+
+namespace Diag {
+
+bool DisableGpuCulling() noexcept {
+    static const bool enabled = std::getenv("ZHLN_NO_GPU_CULLING") != nullptr;
+    return enabled;
+}
+
+bool IndirectTelemetryEnabled() noexcept {
+    static const bool enabled = std::getenv("ZHLN_DEBUG_INDIRECT") != nullptr;
+    return enabled;
+}
+
+} // namespace Diag
 
 namespace {
 
@@ -246,6 +262,116 @@ RenderResult RenderContext::BeginFrame() noexcept {
     return {};
 }
 
+void RenderContext::Impl::RecordIndirectTelemetry(VkCommandBuffer cmd) noexcept {
+    if (!indirectReadbackReady) {
+        bool ok = true;
+        for (uint32_t i = 0; i < 2; ++i) {
+            auto rb = Vk::Buffer::Create(
+                allocator.Get(), kTelemetryReadbackBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_TO_CPU
+            );
+            if (!rb) {
+                ok = false;
+                break;
+            }
+            indirectReadbackBuffers[i] = std::move(*rb);
+        }
+        if (!ok) {
+            ZHLN::Log("[Diag] Failed to allocate indirect telemetry readback buffers; telemetry disabled.");
+            return;
+        }
+        indirectReadbackReady = true;
+    }
+
+    const auto bytes = sizeof(VkDrawIndirectCommand) * kTelemetryMaxDraws;
+
+    // Make the culling writes visible to the transfer stage before copying.
+    Vk::BufferBarrier(
+        cmd, frames.indirectCommandsBuffers[frame_index], Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite, Vk::BarrierStage::Transfer,
+        Vk::BarrierAccess::TransferRead
+    );
+    Vk::BufferBarrier(
+        cmd, frames.indirectCommandsBuffersPass2[frame_index], Vk::BarrierStage::Compute | Vk::BarrierStage::Transfer,
+        Vk::BarrierAccess::ShaderWrite | Vk::BarrierAccess::TransferWrite, Vk::BarrierStage::Transfer, Vk::BarrierAccess::TransferRead
+    );
+    Vk::BufferBarrier(
+        cmd, frames.secondPassCountBuffers[frame_index], Vk::BarrierStage::Compute | Vk::BarrierStage::Transfer,
+        Vk::BarrierAccess::ShaderWrite | Vk::BarrierAccess::TransferWrite, Vk::BarrierStage::Transfer, Vk::BarrierAccess::TransferRead
+    );
+
+    auto& dst = indirectReadbackBuffers[frame_index];
+    Vk::CopyBuffer(cmd, frames.indirectCommandsBuffers[frame_index], dst, bytes, 0, kTelemetryPass1Offset);
+    Vk::CopyBuffer(cmd, frames.indirectCommandsBuffersPass2[frame_index], dst, bytes, 0, kTelemetryPass2Offset);
+    Vk::CopyBuffer(cmd, frames.secondPassCountBuffers[frame_index], dst, sizeof(uint32_t), 0, kTelemetryCountOffset);
+}
+
+void RenderContext::Impl::DumpIndirectTelemetry(uint32_t frameNo) noexcept {
+    const auto drawCount = static_cast<uint32_t>(queues.drawQueue.size());
+
+    const bool useGpuCulling = cullingPass.pipeline.Valid() && frames.indirectCommandsBuffers->Valid() && (drawCount <= kGpuCullingMaxInstances) &&
+                               !Diag::DisableGpuCulling();
+
+    ZHLN::Log("[Diag] ---- frame {}: draws={} gpuCulling={} ----", frameNo, drawCount, useGpuCulling ? 1 : 0);
+
+    if (drawCount == 0) {
+        return;
+    }
+
+    // Mirror of MainPass1/2's group building so the log shows the exact
+    // indirect ranges the walker consumes this frame.
+    VkPipeline currentPipeline = VK_NULL_HANDLE;
+    uint32_t   groupStart      = 0;
+    for (uint32_t i = 0; i < drawCount; ++i) {
+        const auto&       drawCmd      = queues.drawQueue[i];
+        const auto* const drawMat      = drawCmd.material;
+        const bool        forwardOnly = (drawCmd.instanceData.flags & 0xFF) == 2;
+        const bool        viewmodel   = (drawCmd.flags & DrawFlags::Viewmodel) != DrawFlags::None;
+        const bool        matValid    = (drawMat != nullptr) && drawMat->pipeline.Valid();
+
+        if (forwardOnly || viewmodel || !matValid) {
+            ZHLN::Log("[Diag]   draw {} EXCLUDED from main passes (fwdOnly={} vm={} matValid={})", i, forwardOnly ? 1 : 0, viewmodel ? 1 : 0, matValid ? 1 : 0);
+            currentPipeline = VK_NULL_HANDLE;
+            continue;
+        }
+
+        if (i == 0 || drawMat->pipeline.Get() != currentPipeline) {
+            groupStart      = i;
+            currentPipeline = drawMat->pipeline.Get();
+            ZHLN::Log(
+                "[Diag]   group @{} pipeline=0x{:x}", groupStart, static_cast<uint64_t>(reinterpret_cast<uintptr_t>(currentPipeline))
+            );
+        } else {
+            ZHLN::Log("[Diag]   draw {} extends group @{}", i, groupStart);
+        }
+    }
+
+    const uint32_t n = std::min(drawCount, kTelemetryMaxDraws);
+    for (uint32_t i = 0; i < n; ++i) {
+        const auto& dq  = queues.drawQueue[i].instanceData;
+        const auto  tr  = dq.world.GetTranslation();
+        ZHLN::Log(
+            "[Diag]   queue inst[{}]: vtx={} idx={} posAddr=0x{:x} iboAddr=0x{:x} radius={:.3f} t=({:.2f},{:.2f},{:.2f})", i, dq.vertexCount,
+            dq.indexCount, static_cast<uint64_t>(dq.posAddress), static_cast<uint64_t>(dq.iboAddress), dq.cullRadius, tr.GetX(), tr.GetY(), tr.GetZ()
+        );
+    }
+
+    if (indirectReadbackReady) {
+        auto  mapped = indirectReadbackBuffers[frame_index].Map();
+        auto* bytes  = static_cast<const uint8_t*>(mapped.data);
+        if (bytes != nullptr) {
+            const auto* pass1 = reinterpret_cast<const VkDrawIndirectCommand*>(bytes + kTelemetryPass1Offset);
+            const auto* pass2 = reinterpret_cast<const VkDrawIndirectCommand*>(bytes + kTelemetryPass2Offset);
+            const auto* count = reinterpret_cast<const uint32_t*>(bytes + kTelemetryCountOffset);
+            ZHLN::Log("[Diag]   retired (frame-2) pass2 candidateCount={}", *count);
+            for (uint32_t i = 0; i < n; ++i) {
+                ZHLN::Log(
+                    "[Diag]   cmd[{}] pass1(vc={} ic={} fv={} fi={}) pass2(vc={} ic={} fv={} fi={})", i, pass1[i].vertexCount, pass1[i].instanceCount,
+                    pass1[i].firstVertex, pass1[i].firstInstance, pass2[i].vertexCount, pass2[i].instanceCount, pass2[i].firstVertex, pass2[i].firstInstance
+                );
+            }
+        }
+    }
+}
+
 RenderResult RenderContext::EndFrame() noexcept {
     struct EndFrameGuard {
         RenderContext::Impl* impl;
@@ -347,8 +473,24 @@ RenderResult RenderContext::EndFrame() noexcept {
                 }
                 _impl->BuildTLAS(cmd);
 
+                if (Diag::IndirectTelemetryEnabled()) {
+                    static uint32_t s_TelemetryFrame = 0;
+                    ++s_TelemetryFrame;
+                    // Every ~2 seconds starting after both readback slots have
+                    // been written at least once; the readback slot holds data
+                    // retired two frames ago, which is representative since the
+                    // behavior is stable within a run.
+                    if (s_TelemetryFrame >= 4 && (s_TelemetryFrame % 120) == 4) {
+                        _impl->DumpIndirectTelemetry(s_TelemetryFrame);
+                    }
+                }
+
                 // Graphics-only recording
                 _impl->RecordSceneFrame({cmd});
+
+                if (Diag::IndirectTelemetryEnabled()) {
+                    _impl->RecordIndirectTelemetry(cmd);
+                }
             },
             [this]() { _impl->resized = true; }
         );

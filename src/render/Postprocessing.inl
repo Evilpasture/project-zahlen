@@ -17,17 +17,31 @@ bool PostProcessPass<LayoutT>::Build(
     uint32_t                        pushCount,
     bool                            additive
 ) noexcept {
-    descLayout = LayoutT::CreateLayout(device);
-    pool       = LayoutT::CreatePool(device, 2);
+    // Descriptor layout authority lives in the compiled shader: reflect it.
+    if (!layoutInstance.Build(device, shaders)) {
+        return false;
+    }
+    pool    = layoutInstance.CreatePool(device, 2);
+    sets[0] = layoutInstance.Allocate(device, pool.Get(), layoutInstance.GetSetLayout());
+    sets[1] = layoutInstance.Allocate(device, pool.Get(), layoutInstance.GetSetLayout());
 
-    sets[0] = LayoutT::Allocate(device, pool.Get(), descLayout.Get());
-    sets[1] = LayoutT::Allocate(device, pool.Get(), descLayout.Get());
-
-    VkDescriptorSetLayout         raw_layout    = descLayout.Get();
-    const ZHLN_PipelineLayoutDesc p_layout_desc = {
-        .set_layouts = &raw_layout, .set_layout_count = 1, .push_constants = pushConstants, .push_constant_count = pushCount
-    };
-    pipelineLayout = PipelineLayout(device, ZHLN_CreatePipelineLayout(device, &p_layout_desc));
+    if (pushConstants != nullptr && pushCount > 0) {
+        // The caller widens the reflected push range (e.g. alignas(16)-padded host
+        // structs) or forces stage coverage the compiler dead-code-eliminated:
+        // rebuild the pipeline layout manually around the reflected set layout.
+        PipelineLayoutBuilder layoutBuilder(device);
+        layoutBuilder.AddDescriptorSetLayout(layoutInstance.GetSetLayout());
+        for (uint32_t i = 0; i < pushCount; ++i) {
+            layoutBuilder.AddPushConstant(pushConstants[i].stageFlags, pushConstants[i].size, pushConstants[i].offset);
+        }
+        auto layout_res = layoutBuilder.Build();
+        if (!layout_res) {
+            return false;
+        }
+        pipelineLayout = std::move(*layout_res);
+    } else {
+        pipelineLayout = std::move(layoutInstance.pipelineLayout);
+    }
 
     auto builder = PipelineBuilder {}.Shaders(shaders).Layout(pipelineLayout.Get()).ColorFormats(colorFormats).NoDepth().CullNone();
 
@@ -53,17 +67,29 @@ bool PostProcessPass<LayoutT>::BuildVariants(
     std::span<const VkSpecializationInfo> specInfos,
     bool                                  additive
 ) noexcept {
-    descLayout = LayoutT::CreateLayout(device);
-    pool       = LayoutT::CreatePool(device, 2);
+    if (!layoutInstance.Build(device, shaders)) {
+        return false;
+    }
+    pool    = layoutInstance.CreatePool(device, 2);
+    sets[0] = layoutInstance.Allocate(device, pool.Get(), layoutInstance.GetSetLayout());
+    sets[1] = layoutInstance.Allocate(device, pool.Get(), layoutInstance.GetSetLayout());
 
-    sets[0] = LayoutT::Allocate(device, pool.Get(), descLayout.Get());
-    sets[1] = LayoutT::Allocate(device, pool.Get(), descLayout.Get());
-
-    VkDescriptorSetLayout         raw_layout    = descLayout.Get();
-    const ZHLN_PipelineLayoutDesc p_layout_desc = {
-        .set_layouts = &raw_layout, .set_layout_count = 1, .push_constants = pushConstants, .push_constant_count = pushCount
-    };
-    pipelineLayout = PipelineLayout(device, ZHLN_CreatePipelineLayout(device, &p_layout_desc));
+    if (pushConstants != nullptr && pushCount > 0) {
+        // Same override as Build(): caller-specified push ranges widen or
+        // re-scope the raw reflected block (see PostProcessPass::Build).
+        PipelineLayoutBuilder layoutBuilder(device);
+        layoutBuilder.AddDescriptorSetLayout(layoutInstance.GetSetLayout());
+        for (uint32_t i = 0; i < pushCount; ++i) {
+            layoutBuilder.AddPushConstant(pushConstants[i].stageFlags, pushConstants[i].size, pushConstants[i].offset);
+        }
+        auto layout_res = layoutBuilder.Build();
+        if (!layout_res) {
+            return false;
+        }
+        pipelineLayout = std::move(*layout_res);
+    } else {
+        pipelineLayout = std::move(layoutInstance.pipelineLayout);
+    }
 
     pipelines.clear();
     pipelines.reserve(specInfos.size());
@@ -126,14 +152,16 @@ void PostProcessPass<LayoutT>::WriteNext(VkDevice device, Args&&... args) const 
 
         if constexpr (requires { std::declval<FirstT>().AsTuple(); }) {
             std::apply(
-                [&](auto&&... unpacked) { LayoutT::Write(device, sets.Next(), std::forward<decltype(unpacked)>(unpacked)...); },
+                [&](auto&&... unpacked) {
+                    layoutInstance.Write(device, sets.Next(), std::forward<decltype(unpacked)>(unpacked)...);
+                },
                 std::get<0>(std::forward_as_tuple(args...)).AsTuple()
             );
         } else {
-            LayoutT::Write(device, sets.Next(), std::forward<Args>(args)...);
+            layoutInstance.Write(device, sets.Next(), std::forward<Args>(args)...);
         }
     } else {
-        LayoutT::Write(device, sets.Next(), std::forward<Args>(args)...);
+        layoutInstance.Write(device, sets.Next(), std::forward<Args>(args)...);
     }
 }
 

@@ -7,9 +7,38 @@
 #error "Please include <src/render/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include <array>
+#include <map>
 #include <slang/slang.h>
+#include <tuple>
+#include <utility>
+#include <vector>
 
 namespace ZHLN::Vk {
+
+class ShaderStages;
+
+struct SlangReflectedBinding {
+    uint32_t                 binding         = 0;
+    VkDescriptorType         descriptorType  = VK_DESCRIPTOR_TYPE_MAX_ENUM;
+    uint32_t                 descriptorCount = 1;
+    VkShaderStageFlags       stageFlags      = 0;
+    VkDescriptorBindingFlags bindingFlags    = 0;
+};
+
+struct SlangReflectedSet {
+    std::vector<SlangReflectedBinding> bindings;
+};
+
+struct UnsafeReflectedLayout;
+
+/**
+ * @brief A single SPIR-V blob + stage to reflect over.
+ */
+struct ReflectedStageInput {
+    ZHLN_ShaderDesc        shader;
+    VkShaderStageFlagBits stage;
+};
 
 /**
  * @brief Holds descriptor and pipeline layout handles generated via Slang reflection.
@@ -19,12 +48,76 @@ struct SlangReflectedLayout {
     std::array<DescriptorSetLayout, 4> descriptorSetLayouts;
     uint32_t                           setLayoutCount = 0;
 
-    // Tracks the exact count of each descriptor type needed across all sets
-    std::array<uint32_t, VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT + 1> descriptorTypeCounts {};
+    // Tracks the exact count of each descriptor type needed across all sets.
+    // Sparse for the same reason as UnsafeReflectedLayout: the ray-tracing
+    // acceleration-structure descriptor type value is far outside the core
+    // Vulkan enum range.
+    std::map<VkDescriptorType, uint32_t> descriptorTypeCounts {};
+    std::array<SlangReflectedSet, 4>                              reflectedSets {};
 
     [[nodiscard]] auto GetSetLayout(uint32_t setIndex = 0) const noexcept -> VkDescriptorSetLayout {
         return setIndex < setLayoutCount ? descriptorSetLayouts[setIndex].Get() : VK_NULL_HANDLE;
     }
+
+    [[nodiscard]] auto CreateLayout(VkDevice device = VK_NULL_HANDLE) const noexcept -> VkDescriptorSetLayout;
+
+    [[nodiscard]] auto CreatePool(VkDevice device, uint32_t maxSets) const noexcept -> DescriptorPool;
+
+    [[nodiscard]] static auto Allocate(VkDevice device, VkDescriptorPool pool, VkDescriptorSetLayout layout) noexcept -> VkDescriptorSet;
+
+    template <typename... Args>
+    void Write(VkDevice device, VkDescriptorSet set, Args&&... args) const noexcept {
+        const auto                                                        arg_tuple = std::forward_as_tuple(std::forward<Args>(args)...);
+        constexpr size_t                                                  k_count   = sizeof...(Args);
+        std::array<VkDescriptorImageInfo, k_count>                        image_infos {};
+        std::array<VkDescriptorBufferInfo, k_count>                       buffer_infos {};
+        std::array<VkWriteDescriptorSetAccelerationStructureKHR, k_count> as_infos {};
+        std::array<VkWriteDescriptorSet, k_count>                         writes {};
+
+        [&]<size_t... I>(std::index_sequence<I...>) {
+            (detail::WriteReflectedBinding(
+                 set, I < reflectedSets[0].bindings.size() ? reflectedSets[0].bindings[I].binding : 0,
+                 I < reflectedSets[0].bindings.size() ? reflectedSets[0].bindings[I].descriptorType : VK_DESCRIPTOR_TYPE_MAX_ENUM, std::get<I>(arg_tuple),
+                 image_infos[I], buffer_infos[I], as_infos[I], writes[I]
+             ),
+             ...);
+        }(std::make_index_sequence<k_count> {});
+
+        std::array<VkWriteDescriptorSet, k_count> valid_writes {};
+        uint32_t                                  valid_count = 0;
+        for (uint32_t i = 0; i < k_count; ++i) {
+            if (writes[i].descriptorCount > 0) {
+                valid_writes[valid_count++] = writes[i];
+            }
+        }
+        if (valid_count > 0) {
+            vkUpdateDescriptorSets(device, valid_count, valid_writes.data(), 0, nullptr);
+        }
+    }
+
+    bool Build(VkDevice device, const ShaderStages& shaders) noexcept;
+
+    /// Reflects a single stage (commonly a compute shader described by a raw SPV blob).
+    bool Build(VkDevice device, const ZHLN_ShaderDesc& shader, VkShaderStageFlagBits stage) noexcept;
+
+    /// Reflects the union of an arbitrary set of stages (e.g. the bindless scene registry).
+    bool Build(VkDevice device, std::span<const ReflectedStageInput> stages) noexcept;
+
+    /// True when `binding` is present in the given reflected set.
+    [[nodiscard]] auto HasBinding(uint32_t setIndex, uint32_t binding) const noexcept -> bool {
+        if (setIndex >= 4) {
+            return false;
+        }
+        for (const auto& b: reflectedSets[setIndex].bindings) {
+            if (b.binding == binding) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+  private:
+    void AdoptUnsafe(UnsafeReflectedLayout&& unsafe_res) noexcept;
 };
 
 /**

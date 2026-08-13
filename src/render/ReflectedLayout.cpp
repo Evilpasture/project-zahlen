@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "ReflectedLayout.hpp"
+#include "ShaderStages.hpp"
 #include <map>
+#include <vector>
 
 namespace ZHLN::Vk {
 
 void UnsafeReflectedLayoutBuilder::AddStageUnsafe(const ZHLN_ShaderDesc& desc, VkShaderStageFlags stage) noexcept {
-    if ((desc.code != nullptr) && desc.size > 0 && _stageCount < 5) {
+    if ((desc.code != nullptr) && desc.size > 0 && _stageCount < _stages.size()) {
         _stages[_stageCount++] = {.code = desc.code, .size = desc.size, .stage = stage};
     }
 }
@@ -43,14 +45,21 @@ auto UnsafeReflectedLayoutBuilder::BuildUnsafe(VkDevice device) noexcept -> Unsa
                 auto& binding           = merged_sets[set_idx][binding_idx];
                 binding.binding         = binding_idx;
                 binding.descriptorType  = static_cast<VkDescriptorType>(reflected_binding->descriptor_type);
-                binding.descriptorCount = reflected_binding->count;
+
+                // SPIRV-Reflect reports runtime-sized arrays (e.g. Slang's
+                // `Texture2D globalTextures[]` inside the GlobalSceneRegistry
+                // ParameterBlock) with count == 0. Treat them like any other
+                // bindless pool: size them to the engine's bindless capacity.
+                const bool is_runtime_array = (reflected_binding->count == 0);
+                const bool is_bindless_pool = is_runtime_array || (reflected_binding->count >= 1024);
+                binding.descriptorCount     = is_bindless_pool ? 4096 : reflected_binding->count;
                 binding.stageFlags |= stage.stage;
                 binding.pImmutableSamplers = nullptr;
 
                 // ACCUMULATE EXACT TYPE COUNT FOR THE POOL
                 result.descriptorTypeCounts[binding.descriptorType] += binding.descriptorCount;
 
-                if (reflected_binding->count >= 1024) {
+                if (is_bindless_pool) {
                     merged_flags[set_idx][binding_idx] = VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
                 }
             }
@@ -91,6 +100,14 @@ auto UnsafeReflectedLayoutBuilder::BuildUnsafe(VkDevice device) noexcept -> Unsa
             if (flags != 0) {
                 has_bindless_flags = true;
             }
+
+            result.reflectedSets[setIdx].bindings.push_back(
+                {.binding         = binding.binding,
+                 .descriptorType  = binding.descriptorType,
+                 .descriptorCount = binding.descriptorCount,
+                 .stageFlags      = binding.stageFlags,
+                 .bindingFlags    = flags}
+            );
         }
 
         const VkDescriptorSetLayoutBindingFlagsCreateInfo flags_info = {
@@ -145,5 +162,71 @@ auto UnsafeReflectedLayoutBuilder::BuildUnsafe(VkDevice device) noexcept -> Unsa
     result.pipelineLayout = PipelineLayout(device, pipeline_layout);
 
     return result;
+}
+
+auto UnsafeReflectedLayout::CreatePool(VkDevice device, uint32_t maxSets) const noexcept -> DescriptorPool {
+    std::vector<VkDescriptorPoolSize> pool_sizes;
+    bool                              update_after_bind = false;
+
+    for (const auto& [type, count]: descriptorTypeCounts) {
+        if (count > 0) {
+            pool_sizes.push_back({.type = type, .descriptorCount = count * maxSets});
+        }
+    }
+    if (pool_sizes.empty()) {
+        pool_sizes.push_back({.type = VK_DESCRIPTOR_TYPE_SAMPLER, .descriptorCount = maxSets});
+    }
+
+    for (const auto& set: reflectedSets) {
+        for (const auto& b: set.bindings) {
+            if ((b.bindingFlags & VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT) != 0) {
+                update_after_bind = true;
+            }
+        }
+    }
+
+    const VkDescriptorPoolCreateInfo info = {
+        .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .pNext         = nullptr,
+        .flags         = (update_after_bind ? VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT : 0U) | VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+        .maxSets       = maxSets,
+        .poolSizeCount = static_cast<uint32_t>(pool_sizes.size()),
+        .pPoolSizes    = pool_sizes.data(),
+    };
+
+    VkDescriptorPool pool = VK_NULL_HANDLE;
+    vkCreateDescriptorPool(device, &info, nullptr, &pool);
+    return {device, pool};
+}
+
+auto UnsafeReflectedLayout::Allocate(VkDevice device, VkDescriptorPool pool, VkDescriptorSetLayout layout) noexcept -> VkDescriptorSet {
+    const VkDescriptorSetAllocateInfo info = {
+        .sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .pNext              = nullptr,
+        .descriptorPool     = pool,
+        .descriptorSetCount = 1,
+        .pSetLayouts        = &layout,
+    };
+    VkDescriptorSet set = VK_NULL_HANDLE;
+    vkAllocateDescriptorSets(device, &info, &set);
+    return set;
+}
+
+bool UnsafeReflectedLayout::Build(VkDevice device, const ShaderStages& shaders) noexcept {
+    UnsafeReflectedLayoutBuilder builder;
+    auto                         vert_spv = shaders.GetVertSpv();
+    auto                         frag_spv = shaders.GetFragSpv();
+    if (!vert_spv.empty()) {
+        builder.AddStageUnsafe({.code = vert_spv.data(), .size = vert_spv.size() * 4, .entry_point = {}}, VK_SHADER_STAGE_VERTEX_BIT);
+    }
+    if (!frag_spv.empty()) {
+        builder.AddStageUnsafe({.code = frag_spv.data(), .size = frag_spv.size() * 4, .entry_point = {}}, VK_SHADER_STAGE_FRAGMENT_BIT);
+    }
+    *this = builder.BuildUnsafe(device);
+    return setLayoutCount > 0;
+}
+
+[[nodiscard]] auto UnsafeReflectedLayout::CreateLayout(VkDevice /*unused*/) const noexcept -> VkDescriptorSetLayout {
+    return GetSetLayout(0);
 }
 } // namespace ZHLN::Vk

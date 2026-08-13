@@ -11,7 +11,12 @@ add_library(zahlen_threading STATIC
     TaskSystem.cpp
     
 )
-set_target_properties(zahlen_threading PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_target_properties(zahlen_threading PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    CXX_STANDARD 26
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+)
 
 # Allow other modules to find the headers
 target_include_directories(zahlen_threading PUBLIC 
