@@ -10,12 +10,12 @@ struct ClusterVolume {
     uint count;
 };
 
-StructuredBuffer<ClusterBounds>   in_Bounds;
+StructuredBuffer<ClusterBounds> in_Bounds;
 RWStructuredBuffer<ClusterVolume> out_Grid;
-RWStructuredBuffer<uint>          out_IndexList;
-RWStructuredBuffer<uint>          out_Counter;
-ConstantBuffer<FrameUniforms>     frame;  // Bound to slot 4 matching C++ layout
-StructuredBuffer<Light>           lights; // Bound to slot 5 matching C++ layout
+RWStructuredBuffer<uint> out_IndexList;
+RWStructuredBuffer<uint> out_Counter;
+ConstantBuffer<FrameUniforms> frame; // Bound to slot 4 matching C++ layout
+StructuredBuffer<Light> lights;      // Bound to slot 5 matching C++ layout
 
 // --- Sphere vs Axis-Aligned Bounding Box (AABB) ---
 bool SphereAABB(float3 c, float r, float3 minB, float3 maxB) {
@@ -45,9 +45,10 @@ bool ConeBehindPlane(float3 T, float3 D, float R, float r, float3 N, float d) {
     return (valTip < 0.0f) && (valBase < 0.0f);
 }
 
-[numthreads(16, 9, 1)] void CSMain(uint3 id : SV_DispatchThreadID) {
-    uint          cIdx = id.x + (id.y * 16) + (id.z * 144);
-    ClusterBounds b    = in_Bounds[cIdx]; // These are now static view-space bounds!
+[numthreads(16, 9, 1)]
+void CSMain(uint3 id: SV_DispatchThreadID) {
+    uint cIdx       = id.x + (id.y * 16) + (id.z * 144);
+    ClusterBounds b = in_Bounds[cIdx]; // These are now static view-space bounds!
 
     uint count = 0;
     uint list[64];

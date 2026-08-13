@@ -27,16 +27,18 @@ struct InstanceData {
     uint activeMorphCount;
 
     float3 localCenter;
-    uint   _paddingCenter;
+    uint _paddingCenter;
 
     float4 morphWeights;
     float4 baseColorFactor;
     float4 emissiveFactor;
 };
 
-[[vk::constant_id(0)]] const int ENABLE_SSR = 1;
+[[vk::constant_id(0)]]
+const int ENABLE_SSR = 1;
 #ifndef DISABLE_RTR
-[[vk::constant_id(1)]] const int ENABLE_RTR = 1;
+[[vk::constant_id(1)]]
+const int ENABLE_RTR = 1;
 #else
 static const int ENABLE_RTR = 0;
 #endif
@@ -49,8 +51,8 @@ float3 RotateVector(float3 V, float3 lightDir) {
     float3 A     = normalize(float3(0.5f, 1.0f, 0.2f));
     float3 B     = lightDir / lenB;
     float3 q_xyz = cross(B, A);
-    float  q_w   = 1.0f + dot(A, B);
-    float  q_len = sqrt(dot(q_xyz, q_xyz) + q_w * q_w);
+    float q_w    = 1.0f + dot(A, B);
+    float q_len  = sqrt(dot(q_xyz, q_xyz) + q_w * q_w);
     if (q_len > 0.0001f) {
         q_xyz /= q_len;
         q_w /= q_len;
@@ -62,30 +64,31 @@ float3 RotateVector(float3 V, float3 lightDir) {
 struct PushConstants {
     float4x4 invViewProj;
     float4x4 viewProj;
-    float4   camPos;
-    int      giMode;
-    float    aoRadius;
-    float    aoBias;
-    float    aoPower;
-    float    giIntensity;
-    int      giSamples;
-    int      enableSSR_dynamic;
-    int      enableRTR_dynamic;
-    int      _pad;
+    float4 camPos;
+    int giMode;
+    float aoRadius;
+    float aoBias;
+    float aoPower;
+    float giIntensity;
+    int giSamples;
+    int enableSSR_dynamic;
+    int enableRTR_dynamic;
+    int _pad;
 };
-[vk::push_constant] PushConstants pc;
+[vk::push_constant]
+PushConstants pc;
 
-Texture2D<float4>   texInput;
-SamplerState        smp;
-Texture2D<float>    texDepth;
-Texture2D<float4>   texNormalRoughness;
-SamplerState        pointSampler;
+Texture2D<float4> texInput;
+SamplerState smp;
+Texture2D<float> texDepth;
+Texture2D<float4> texNormalRoughness;
+SamplerState pointSampler;
 TextureCube<float4> texEnvMap;
 ConstantBuffer<FrameUniforms> frame;
-Texture2D                     brdfLUT;
-SamplerState                  clampSampler;
-Texture2D<float4>            texLighting;
-Texture3D<float4>            texVoxelIntegrated;
+Texture2D brdfLUT;
+SamplerState clampSampler;
+Texture2D<float4> texLighting;
+Texture3D<float4> texVoxelIntegrated;
 StructuredBuffer<InstanceData> g_instances;
 // The TLAS binding is declared LAST on purpose (see lighting.slang).
 #ifndef DISABLE_RTR
@@ -93,19 +96,8 @@ RaytracingAccelerationStructure tlas;
 #endif
 
 #ifndef DISABLE_RTR
-float2 RaytraceRTR(
-    float3                          worldPos,
-    float3                          N,
-    float3                          R,
-    out float                       confidence,
-    out float3                      fallbackColor,
-    RaytracingAccelerationStructure tlas,
-    Texture2D<float>                texDepth,
-    SamplerState                    pointSampler,
-    float4x4                        viewProj,
-    float4                          camPos,
-    float4x4                        invViewProj
-) {
+float2 RaytraceRTR(float3 worldPos, float3 N, float3 R, out float confidence, out float3 fallbackColor, RaytracingAccelerationStructure tlas,
+                   Texture2D<float> texDepth, SamplerState pointSampler, float4x4 viewProj, float4 camPos, float4x4 invViewProj) {
     confidence    = 0.0f;
     fallbackColor = float3(0.0f, 0.0f, 0.0f);
 
@@ -121,7 +113,7 @@ float2 RaytraceRTR(
     }
 
     if (q.CommittedStatus() == COMMITTED_TRIANGLE_HIT) {
-        float  rayT        = q.CommittedRayT();
+        float rayT         = q.CommittedRayT();
         float3 hitWorldPos = ray.Origin + ray.Direction * rayT;
         float4 hitClip     = mul(viewProj, float4(hitWorldPos, 1.0f));
 
@@ -132,10 +124,10 @@ float2 RaytraceRTR(
         float2 hitUV  = hitNDC * 0.5f + 0.5f;
 
         float2 edgeFactor = smoothstep(0.0f, 0.03f, hitUV) * smoothstep(1.0f, 0.97f, hitUV);
-        float  onScreen   = edgeFactor.x * edgeFactor.y;
+        float onScreen    = edgeFactor.x * edgeFactor.y;
 
         if (onScreen > 0.0f) {
-            float  sampledRawDepth = texDepth.SampleLevel(pointSampler, hitUV, 0);
+            float sampledRawDepth  = texDepth.SampleLevel(pointSampler, hitUV, 0);
             float3 sampledWorldPos = ReconstructWorldPos(hitUV, sampledRawDepth, invViewProj);
 
             float distToHit     = hitClip.w;
@@ -154,8 +146,8 @@ float2 RaytraceRTR(
 
         // --- BACKFACING / OFF-SCREEN FALLBACK ---
         // Fetch instance base color directly from SSBO!
-        uint         instanceID = q.CommittedInstanceID();
-        InstanceData hitInst    = g_instances[instanceID];
+        uint instanceID      = q.CommittedInstanceID();
+        InstanceData hitInst = g_instances[instanceID];
 
         float3 hitBaseColor = hitInst.baseColorFactor.rgb;
         float3 ambientLight = EvaluateSH(float3(0.0f, 1.0f, 0.0f), frame.sh) * frame.ambientExposure;
@@ -175,17 +167,17 @@ struct VSOutput {
     float2 uv : TEXCOORD0;
 };
 
-VSOutput VSMain(uint vertexID : SV_VertexID) {
+VSOutput VSMain(uint vertexID: SV_VertexID) {
     VSOutput output;
     output.uv  = float2((vertexID << 1) & 2, vertexID & 2);
     output.pos = float4(output.uv.x * 2.0f - 1.0f, output.uv.y * 2.0f - 1.0f, 0.0f, 1.0f);
     return output;
 }
 
-float4 PSMain(VSOutput input): SV_Target0 {
-    float  depth = texDepth.SampleLevel(pointSampler, input.uv, 0).r;
+float4 PSMain(VSOutput input) : SV_Target0 {
+    float depth = texDepth.SampleLevel(pointSampler, input.uv, 0).r;
     float3 litColor;
-    float  viewDepth = 250.0f;
+    float viewDepth = 250.0f;
 
     if (depth >= 1.0f) {
         float3 worldPos = ReconstructWorldPos(input.uv, 1.0f, pc.invViewProj);
@@ -193,9 +185,9 @@ float4 PSMain(VSOutput input): SV_Target0 {
 
         rayDir = RotateVector(rayDir, frame.lightDir.xyz);
 
-        float  dy      = rayDir.y;
-        float3 skyGrad = (dy >= 0.0f) ? lerp(frame.skyHorizon.rgb, frame.skyZenith.rgb, pow(saturate(dy), 1.2f)) :
-                                        lerp(frame.skyHorizon.rgb, frame.skyGround.rgb, pow(saturate(-dy), 0.5f));
+        float dy       = rayDir.y;
+        float3 skyGrad = (dy >= 0.0f) ? lerp(frame.skyHorizon.rgb, frame.skyZenith.rgb, pow(saturate(dy), 1.2f))
+                                      : lerp(frame.skyHorizon.rgb, frame.skyGround.rgb, pow(saturate(-dy), 0.5f));
 
         litColor = skyGrad * frame.ambientExposure;
     } else {
@@ -205,8 +197,8 @@ float4 PSMain(VSOutput input): SV_Target0 {
         }
 
         float4 normRoughRaw = texNormalRoughness.SampleLevel(smp, input.uv, 0);
-        float  roughness    = normRoughRaw.z;
-        float  metallic     = normRoughRaw.w;
+        float roughness     = normRoughRaw.z;
+        float metallic      = normRoughRaw.w;
 
         float4 albedoRaw = texInput.SampleLevel(smp, input.uv, 0);
         float3 N         = UnpackNormalOctahedron(normRoughRaw.xy * 2.0f - 1.0f);
@@ -223,21 +215,20 @@ float4 PSMain(VSOutput input): SV_Target0 {
         }
 
         float3 F0      = lerp(float3(0.04f, 0.04f, 0.04f), albedoRaw.rgb, metallic);
-        float  NdotV   = saturate(dot(N, V));
+        float NdotV    = saturate(dot(N, V));
         float2 envBRDF = brdfLUT.SampleLevel(clampSampler, float2(NdotV, roughness), 0.0f).rg;
         float3 F_rough = FresnelSchlickRoughness(NdotV, F0, roughness);
         float3 FssEss  = F_rough * envBRDF.x + float3(envBRDF.y, envBRDF.y, envBRDF.y);
 
-        float3 R_corr  = R;
-        float  boxFade = 0.0f;
+        float3 R_corr = R;
+        float boxFade = 0.0f;
         if (frame.probeMin.w > 0.0f) {
             float3 boxCenter      = (frame.probeMax.xyz + frame.probeMin.xyz) * 0.5f;
             float3 boxExtent      = (frame.probeMax.xyz - frame.probeMin.xyz) * 0.5f;
             float3 distFromCenter = abs(worldPos - boxCenter);
-            float  normDist =
-                max(max(abs(distFromCenter.x) / max(boxExtent.x, 0.0001f), abs(distFromCenter.y) / max(boxExtent.y, 0.0001f)),
-                    abs(distFromCenter.z) / max(boxExtent.z, 0.0001f));
-            boxFade = smoothstep(1.0f, 0.9f, normDist);
+            float normDist        = max(max(abs(distFromCenter.x) / max(boxExtent.x, 0.0001f), abs(distFromCenter.y) / max(boxExtent.y, 0.0001f)),
+                                        abs(distFromCenter.z) / max(boxExtent.z, 0.0001f));
+            boxFade               = smoothstep(1.0f, 0.9f, normDist);
         }
 
         if (boxFade > 0.0f) {
@@ -252,8 +243,8 @@ float4 PSMain(VSOutput input): SV_Target0 {
         litColor = litColorRaw.rgb;
 
         if (roughness <= 0.4f && (ENABLE_SSR != 0 || ENABLE_RTR != 0)) {
-            float  confidence      = 0.0f;
-            float  debugValue      = 0.0f;
+            float confidence       = 0.0f;
+            float debugValue       = 0.0f;
             float3 reflectionColor = float3(0.0f, 0.0f, 0.0f);
             float2 hitUV           = float2(-1.0f, -1.0f);
             float3 biasedStartPos  = worldPos + N * 0.05f;
@@ -293,10 +284,10 @@ float4 PSMain(VSOutput input): SV_Target0 {
 
             litColor += specReflect * roughnessFade * horizonOcclusion;
         } else {
-            float3 F_refl        = float3(0.15f, 0.15f, 0.15f);
-            float3 F_term        = F_refl + (1.0f - F_refl) * pow(saturate(1.0f - dot(V, N)), 5.0f);
-            float  roughnessFade = saturate(1.0f - roughness);
-            litColor             = lerp(litColor, litColor + specularIBL * F_term * roughnessFade, roughnessFade);
+            float3 F_refl       = float3(0.15f, 0.15f, 0.15f);
+            float3 F_term       = F_refl + (1.0f - F_refl) * pow(saturate(1.0f - dot(V, N)), 5.0f);
+            float roughnessFade = saturate(1.0f - roughness);
+            litColor            = lerp(litColor, litColor + specularIBL * F_term * roughnessFade, roughnessFade);
         }
     }
 
@@ -307,8 +298,8 @@ float4 PSMain(VSOutput input): SV_Target0 {
         float2 noisePos = input.pos.xy;
         noisePos.x += (frame.camPos.w * 60.0f) * 5.588238f;
         noisePos.y += (frame.camPos.w * 60.0f) * 5.588238f;
-        float3 magic  = float3(0.06711056f, 0.00583715f, 52.9829189f);
-        float  dither = frac(magic.z * frac(dot(noisePos, magic.xy))) - 0.5f;
+        float3 magic = float3(0.06711056f, 0.00583715f, 52.9829189f);
+        float dither = frac(magic.z * frac(dot(noisePos, magic.xy))) - 0.5f;
 
         zSlice += (dither * 1.5f) / 64.0f;
 

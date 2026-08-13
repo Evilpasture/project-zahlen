@@ -6,29 +6,30 @@ import uniforms;
 struct PushConstants {
     float4x4 invViewProj;
     float4x4 viewProj;
-    float4   camPos;
-    int      giMode;
-    float    aoRadius;
-    float    aoBias;
-    float    aoPower;
-    float    giIntensity;
-    int      giSamples;
-    int      enableSSR;
-    int      enableRTR;
-    int      _pad;
+    float4 camPos;
+    int giMode;
+    float aoRadius;
+    float aoBias;
+    float aoPower;
+    float giIntensity;
+    int giSamples;
+    int enableSSR;
+    int enableRTR;
+    int _pad;
 };
-[vk::push_constant] PushConstants pc;
+[vk::push_constant]
+PushConstants pc;
 
 // --- G-Buffer Inputs ---
 // NOTE: keep the declaration order and the engine-side descriptor write order
 // in sync. Ambient/GI uses SH irradiance only -- no prefiltered specular IBL
 // resources are sampled here, so they are intentionally NOT declared midway
 // (unused declarations would be stripped and break positional writes).
-Texture2D<float4>             texInput;
-SamplerState                  smp;
-Texture2D<float>              texDepth;
-Texture2D<float4>             texNormalRoughness;
-SamplerState                  pointSampler;
+Texture2D<float4> texInput;
+SamplerState smp;
+Texture2D<float> texDepth;
+Texture2D<float4> texNormalRoughness;
+SamplerState pointSampler;
 ConstantBuffer<FrameUniforms> frame;
 
 struct VSOutput {
@@ -36,7 +37,7 @@ struct VSOutput {
     float2 uv : TEXCOORD0;
 };
 
-VSOutput VSMain(uint vertexID : SV_VertexID) {
+VSOutput VSMain(uint vertexID: SV_VertexID) {
     VSOutput output;
     output.uv = float2((vertexID << 1) & 2, vertexID & 2);
 
@@ -46,7 +47,7 @@ VSOutput VSMain(uint vertexID : SV_VertexID) {
     return output;
 }
 
-float4 PSMain(VSOutput input): SV_Target0 {
+float4 PSMain(VSOutput input) : SV_Target0 {
     float depth = texDepth.SampleLevel(pointSampler, input.uv, 0).r;
     if (depth >= 1.0f) {
         return float4(0.0f, 0.0f, 0.0f, 1.0f);
@@ -59,24 +60,24 @@ float4 PSMain(VSOutput input): SV_Target0 {
     float3 worldPos = ReconstructWorldPos(input.uv, depth, pc.invViewProj);
 
     // FIX: Use true view-space depth (z-depth) instead of Euclidean length to prevent edge warping
-    float  viewDepth     = mul(frame.unjitteredViewProj, float4(worldPos, 1.0f)).w;
-    float  ao            = 1.0f;
+    float viewDepth      = mul(frame.unjitteredViewProj, float4(worldPos, 1.0f)).w;
+    float ao             = 1.0f;
     float3 indirectLight = float3(0.0f, 0.0f, 0.0f);
 
     float2 edgeFactor = smoothstep(0.0f, 0.08f, input.uv) * smoothstep(1.0f, 0.92f, input.uv);
-    float  screenFade = edgeFactor.x * edgeFactor.y;
+    float screenFade  = edgeFactor.x * edgeFactor.y;
 
     // --- DEFINE SMOOTH FADE BOUNDARY FROM 40m TO 50m ---
     float fade = saturate((50.0f - viewDepth) / 10.0f);
 
     if (pc.giMode > 0 && fade > 0.0f) {
         float occlusion = 0.0f;
-        uint  dw, dh;
+        uint dw, dh;
         texDepth.GetDimensions(dw, dh);
 
         if (pc.giMode == 3 || pc.giMode == 4) {
             float angle        = GetStableWeylNoise(uint2(input.pos.xy), pc.camPos.w) * 2.0f * 3.14159265f;
-            int   steps        = max(pc.giSamples / 6, 1);
+            int steps          = max(pc.giSamples / 6, 1);
             float jitterOffset = GetRotationAngle(input.pos.xy, pc.camPos.w);
             float aspect       = float(dw) / max(float(dh), 1.0f);
             float focalLength  = abs(pc.viewProj[1][1]);
@@ -85,7 +86,7 @@ float4 PSMain(VSOutput input): SV_Target0 {
             float uvRadius = min((pc.aoRadius * focalLength) / max(viewDepth, 0.1f), 0.2f);
 
             for (int d = 0; d < 4; ++d) {
-                float  sliceAngle = (float(d) / 4.0f) * 3.14159265f + angle;
+                float sliceAngle  = (float(d) / 4.0f) * 3.14159265f + angle;
                 float2 rotatedDir = float2(cos(sliceAngle), sin(sliceAngle));
                 float2 uvStep     = rotatedDir * uvRadius;
                 uvStep.x /= aspect;
@@ -94,8 +95,8 @@ float4 PSMain(VSOutput input): SV_Target0 {
                 float max_sin_left  = 0.0f;
 
                 for (int i = 1; i <= steps; ++i) {
-                    float  linearT  = (float(i) - 0.5f + (jitterOffset - 0.5f)) / float(steps);
-                    float  t        = linearT * linearT;
+                    float linearT   = (float(i) - 0.5f + (jitterOffset - 0.5f)) / float(steps);
+                    float t         = linearT * linearT;
                     float2 uv_right = input.uv + uvStep * t;
                     float2 uv_left  = input.uv - uvStep * t;
 
@@ -104,7 +105,7 @@ float4 PSMain(VSOutput input): SV_Target0 {
                         if (d_right < 1.0f) {
                             float3 pos_right = ReconstructWorldPos(uv_right, d_right, pc.invViewProj);
                             float3 H         = pos_right - worldPos;
-                            float  len       = length(H);
+                            float len        = length(H);
                             if (len < pc.aoRadius)
                                 max_sin_right = max(max_sin_right, dot(H, N) / max(len, 0.001f));
                         }
@@ -114,7 +115,7 @@ float4 PSMain(VSOutput input): SV_Target0 {
                         if (d_left < 1.0f) {
                             float3 pos_left = ReconstructWorldPos(uv_left, d_left, pc.invViewProj);
                             float3 H        = pos_left - worldPos;
-                            float  len      = length(H);
+                            float len       = length(H);
                             if (len < pc.aoRadius)
                                 max_sin_left = max(max_sin_left, dot(H, N) / max(len, 0.001f));
                         }
@@ -154,7 +155,7 @@ float4 PSMain(VSOutput input): SV_Target0 {
                     continue;
 
                 float3 sampleWorldPos = ReconstructWorldPos(uv_sample, sampleRawDepth, pc.invViewProj);
-                float  diff           = length(testPos - pc.camPos.xyz) - length(sampleWorldPos - pc.camPos.xyz);
+                float diff            = length(testPos - pc.camPos.xyz) - length(sampleWorldPos - pc.camPos.xyz);
 
                 if (diff > 0.0f) {
                     float finalWeight = smoothstep(0.0f, pc.aoBias * 2.0f, diff - pc.aoBias) * smoothstep(0.0f, 1.0f, pc.aoRadius / abs(diff));

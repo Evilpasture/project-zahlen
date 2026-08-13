@@ -14,33 +14,34 @@ struct Particle3D {
 
 struct MeshParticleEmitterParams {
     float3 gravity;
-    float  drag;
+    float drag;
     float3 turbulence;
-    float  turbulenceFreq;
+    float turbulenceFreq;
     float3 spawnOrigin;
-    float  spawnRadius;
+    float spawnRadius;
     float3 spawnBoxExtent;
-    float  loopBoundary; // 0.0 = One-Shot Burst, 1.0 = Continuous Loop
+    float loopBoundary; // 0.0 = One-Shot Burst, 1.0 = Continuous Loop
     float3 initVelMin;
-    float  lifetimeMin;
+    float lifetimeMin;
     float3 initVelMax;
-    float  lifetimeMax;
+    float lifetimeMax;
     float3 rotVelMin;
-    float  scaleMin;
+    float scaleMin;
     float3 rotVelMax;
-    float  scaleMax;
+    float scaleMax;
     float4 startColor;
     float4 endColor;
 };
 
 struct ComputePushConstants {
-    uint64_t                  particleBufferAddr;
-    uint                      particleCount;
-    float                     deltaTime;
+    uint64_t particleBufferAddr;
+    uint particleCount;
+    float deltaTime;
     MeshParticleEmitterParams p;
 };
 
-[vk::push_constant] ComputePushConstants          pc;
+[vk::push_constant]
+ComputePushConstants pc;
 float Hash13(float3 p) {
     p = frac(p * 0.1031f);
     p += dot(p, p.zyx + 31.32f);
@@ -53,34 +54,39 @@ float3 Hash33(float3 p) {
 
 public struct Quaternion {
     public float4 value;
-    public __init(float4 value) { this.value = value; }
+    public __init(float4 value) {
+        this.value = value;
+    }
 
-    [ForceInline] public static Quaternion fromAxisAngle(float3 axis, float angle) {
+    [ForceInline]
+    public static Quaternion fromAxisAngle(float3 axis, float angle) {
         float halfAngle = angle * 0.5f;
         return Quaternion(float4(axis * sin(halfAngle), cos(halfAngle)));
     }
 
-    [ForceInline] public static Quaternion multiply(Quaternion lhs, Quaternion rhs) {
+    [ForceInline]
+    public static Quaternion multiply(Quaternion lhs, Quaternion rhs) {
         float4 q1 = lhs.value;
         float4 q2 = rhs.value;
-        return Quaternion(float4(
-            q1.w * q2.x + q1.x * q2.w + q1.y * q2.z - q1.z * q2.y,
-            q1.w * q2.y - q1.x * q2.z + q1.y * q2.w + q1.z * q2.x,
-            q1.w * q2.z + q1.x * q2.y - q1.y * q2.x + q1.z * q2.w,
-            q1.w * q2.w - q1.x * q2.x - q1.y * q2.y - q1.z * q2.z));
+        return Quaternion(float4(q1.w * q2.x + q1.x * q2.w + q1.y * q2.z - q1.z * q2.y, q1.w * q2.y - q1.x * q2.z + q1.y * q2.w + q1.z * q2.x,
+                                 q1.w * q2.z + q1.x * q2.y - q1.y * q2.x + q1.z * q2.w, q1.w * q2.w - q1.x * q2.x - q1.y * q2.y - q1.z * q2.z));
     }
 
-    [ForceInline] public Quaternion normalized() { return Quaternion(normalize(this.value)); }
+    [ForceInline]
+    public Quaternion normalized() {
+        return Quaternion(normalize(this.value));
+    }
 }
 
-[numthreads(64, 1, 1)] void CSMain(uint3 tid : SV_DispatchThreadID) {
+[numthreads(64, 1, 1)]
+void CSMain(uint3 tid: SV_DispatchThreadID) {
     uint idx = tid.x;
     if (idx >= pc.particleCount)
         return;
 
-    Particle3D* particles = (Particle3D*)pc.particleBufferAddr;
-    Particle3D p = particles[idx];
-    float      dt   = pc.deltaTime;
+    Particle3D* particles = (Particle3D*) pc.particleBufferAddr;
+    Particle3D p          = particles[idx];
+    float dt              = pc.deltaTime;
 
     // --- 1. INITIAL SEED (UNINITIALIZED BRAND-NEW PARTICLE) ---
     if (p.params.y <= 0.0f) {
@@ -110,7 +116,7 @@ public struct Quaternion {
         float angle = length(p.rotVel.xyz) * dt;
         if (angle > 0.0001f) {
             Quaternion dq = Quaternion.fromAxisAngle(normalize(p.rotVel.xyz), angle);
-            p.rotation = Quaternion.multiply(dq, Quaternion(p.rotation)).normalized().value;
+            p.rotation    = Quaternion.multiply(dq, Quaternion(p.rotation)).normalized().value;
         }
 
         // Interpolate Color & Scale over Lifetime

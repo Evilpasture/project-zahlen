@@ -1,16 +1,18 @@
 // resources/shaders/procedural_bake.slang
 
-[vk::constant_id(0)] const int BAKE_TYPE = 0; // 0 = Voronoi, 1 = Perlin, 2 = Wave/Marble
+[vk::constant_id(0)]
+const int BAKE_TYPE = 0; // 0 = Voronoi, 1 = Perlin, 2 = Wave/Marble
 
 struct PushConstants {
-    uint  width;
-    uint  height;
+    uint width;
+    uint height;
     float param0; // Scale
     float param1; // Randomness / Detail
     float param2; // Distortion
 };
 
-[vk::push_constant] PushConstants pc;
+[vk::push_constant]
+PushConstants pc;
 
 RWTexture2D<float4> outTexture;
 
@@ -36,14 +38,14 @@ float3 EvaluateVoronoi(float2 uv) {
     float2 ip = floor(uv);
     float2 fp = frac(uv);
     float2 mg, mr;
-    float  md = 8.0f;
+    float md = 8.0f;
 
     for (int y = -1; y <= 1; y++) {
         for (int x = -1; x <= 1; x++) {
             float2 g = float2(float(x), float(y));
             float2 o = Hash22(ip + g) * pc.param1; // param1 = randomness
             float2 r = g + o - fp;
-            float  d = dot(r, r);
+            float d  = dot(r, r);
             if (d < md) {
                 md = d;
                 mr = r;
@@ -80,7 +82,9 @@ public struct MarblePattern : IBakePattern {
     }
 }
 
-[shader("compute")][numthreads(16, 16, 1)] void CSMain(uint3 tid : SV_DispatchThreadID) {
+[shader("compute")]
+[numthreads(16, 16, 1)]
+void CSMain(uint3 tid: SV_DispatchThreadID) {
     if (tid.x >= pc.width || tid.y >= pc.height)
         return;
 

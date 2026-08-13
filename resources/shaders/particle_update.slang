@@ -12,34 +12,35 @@ struct Particle {
 
 struct ParticleEmitterParams {
     float3 gravity;
-    float  drag;
+    float drag;
     float3 turbulence;
-    float  turbulenceFreq;
+    float turbulenceFreq;
     float3 spawnOrigin;
-    float  spawnRadius;
+    float spawnRadius;
     float3 spawnBoxExtent;
-    float  loopBoundary;
+    float loopBoundary;
     float3 initVelMin;
-    float  lifetimeMin;
+    float lifetimeMin;
     float3 initVelMax;
-    float  lifetimeMax;
+    float lifetimeMax;
     float4 startColor;
     float4 endColor;
     float2 startSize;
     float2 endSize;
-    float  spinSpeed;
-    uint   textureIndex;
-    uint   alignment;
-    uint   blendMode;
+    float spinSpeed;
+    uint textureIndex;
+    uint alignment;
+    uint blendMode;
 };
 
 struct ComputePushConstants {
-    uint64_t              particleBufferAddr;
-    uint                  particleCount;
-    float                 deltaTime;
+    uint64_t particleBufferAddr;
+    uint particleCount;
+    float deltaTime;
     ParticleEmitterParams p;
 };
-[vk::push_constant] ComputePushConstants pc;
+[vk::push_constant]
+ComputePushConstants pc;
 // Fast GPU 3D Hash
 float Hash13(float3 p) {
     p = frac(p * 0.1031f);
@@ -53,17 +54,18 @@ float3 Hash33(float3 p) {
 
 // Procedural 3D turbulence force using sine-cosine offsets
 float3 SampleTurbulence(float3 pos) {
-    float  time = scene.frame.camPos.w;
-    float3 p    = pos * pc.p.turbulenceFreq + float3(time * 0.2f, time * 0.3f, time * 0.1f);
+    float time = scene.frame.camPos.w;
+    float3 p   = pos * pc.p.turbulenceFreq + float3(time * 0.2f, time * 0.3f, time * 0.1f);
     return float3(sin(p.y * 3.2f + p.z * 1.5f), cos(p.x * 2.1f + p.z * 1.5f), sin(p.x * 4.0f + p.y * 1.5f)) * pc.p.turbulence;
 }
 
-[numthreads(64, 1, 1)] void CSMain(uint3 tid : SV_DispatchThreadID) {
+[numthreads(64, 1, 1)]
+void CSMain(uint3 tid: SV_DispatchThreadID) {
     uint idx = tid.x;
     if (idx >= pc.particleCount)
         return;
-    Particle* particles = (Particle*)pc.particleBufferAddr;
-    Particle part = particles[idx];
+    Particle* particles = (Particle*) pc.particleBufferAddr;
+    Particle part       = particles[idx];
 
     float dt = pc.deltaTime;
 

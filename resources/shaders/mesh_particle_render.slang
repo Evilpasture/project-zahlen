@@ -22,37 +22,38 @@ struct MeshParticleRenderPushConstants {
     float4 baseColorFactor; // Offset 32 (16-byte aligned)
     float4 emissiveFactor;  // Offset 48 (16-byte aligned)
 
-    uint  indexCount; // Offset 64
-    uint  albedoIdx;
-    uint  normalIdx;
-    uint  pbrIdx;
-    uint  emissiveIdx;
+    uint indexCount; // Offset 64
+    uint albedoIdx;
+    uint normalIdx;
+    uint pbrIdx;
+    uint emissiveIdx;
     float roughness;
     float metallic;
     float alphaCutoff;
-    uint  alphaMode;
+    uint alphaMode;
 
     uint _padding; // Offset 100
 };
 
-[vk::push_constant] MeshParticleRenderPushConstants mp_pc;
+[vk::push_constant]
+MeshParticleRenderPushConstants mp_pc;
 
 // Bindless registry now comes from the `scene` parameter block (common.slang).
 
 struct VSOutput {
-    float4                 pos : SV_Position;
-    float4                 currClip : TEXCOORD0;
-    float4                 prevClip : TEXCOORD1;
-    float3                 worldPos : POSITION;
-    float3                 normal : NORMAL;
-    float4                 tangent : TANGENT;
-    float2                 uv : TEXCOORD2;
-    float4                 shadowPos : TEXCOORD3;
-    float4                 color : COLOR;
-    nointerpolation uint4  materialIndices : TEXCOORD4;
+    float4 pos : SV_Position;
+    float4 currClip : TEXCOORD0;
+    float4 prevClip : TEXCOORD1;
+    float3 worldPos : POSITION;
+    float3 normal : NORMAL;
+    float4 tangent : TANGENT;
+    float2 uv : TEXCOORD2;
+    float4 shadowPos : TEXCOORD3;
+    float4 color : COLOR;
+    nointerpolation uint4 materialIndices : TEXCOORD4;
     nointerpolation float4 baseColorFactor : TEXCOORD5;
     nointerpolation float3 pbrFactors : TEXCOORD6;
-    nointerpolation uint   alphaMode : TEXCOORD7;
+    nointerpolation uint alphaMode : TEXCOORD7;
     nointerpolation float4 emissiveFactor : TEXCOORD8;
 };
 
@@ -64,19 +65,22 @@ struct PSOutput {
 
 public struct Quaternion {
     public float4 value;
-    public __init(float4 value) { this.value = value; }
+    public __init(float4 value) {
+        this.value = value;
+    }
 
-    [ForceInline] public float3 rotate(float3 vector) {
+    [ForceInline]
+    public float3 rotate(float3 vector) {
         float3 t = 2.0f * cross(this.value.xyz, vector);
         return vector + this.value.w * t + cross(this.value.xyz, t);
     }
 }
 
-VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, uint viewId : SV_ViewID) {
+VSOutput VSMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID, uint viewId: SV_ViewID) {
     VSOutput output;
 
-    Particle3D* particles = (Particle3D*)mp_pc.particleBufferAddr;
-    Particle3D p = particles[instanceId];
+    Particle3D* particles = (Particle3D*) mp_pc.particleBufferAddr;
+    Particle3D p          = particles[instanceId];
 
     // Cull dead particles cleanly (0-area degenerate clip position)
     if (p.params.x >= p.params.y || p.params.y <= 0.0f) {
@@ -99,17 +103,17 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, ui
 
     uint actualVertexId = vertexId;
     if (mp_pc.iboAddress != 0) {
-        uint* indices = (uint*)mp_pc.iboAddress;
+        uint* indices  = (uint*) mp_pc.iboAddress;
         actualVertexId = indices[vertexId];
     }
 
     // Mesh vertices are packed float3 values (12-byte stride), not a padded float3 array.
-    float* positionValues = (float*)mp_pc.posAddress;
-    uint positionOffset = actualVertexId * 3u;
-    float3 localPos = float3(positionValues[positionOffset], positionValues[positionOffset + 1u], positionValues[positionOffset + 2u]);
-    float3 scaledPos  = localPos * p.position.w;
-    float3 rotatedPos = Quaternion(p.rotation).rotate(scaledPos);
-    float3 worldPos   = rotatedPos + p.position.xyz;
+    float* positionValues = (float*) mp_pc.posAddress;
+    uint positionOffset   = actualVertexId * 3u;
+    float3 localPos       = float3(positionValues[positionOffset], positionValues[positionOffset + 1u], positionValues[positionOffset + 2u]);
+    float3 scaledPos      = localPos * p.position.w;
+    float3 rotatedPos     = Quaternion(p.rotation).rotate(scaledPos);
+    float3 worldPos       = rotatedPos + p.position.xyz;
 
     output.worldPos = worldPos;
     output.pos      = mul(scene.frame.viewProj, float4(worldPos, 1.0f));
@@ -120,9 +124,9 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, ui
     output.shadowPos  = mul(scene.frame.lightSpaceMatrices[cascadeIndex], float4(worldPos, 1.0f));
 
     if (mp_pc.attrAddress != 0) {
-        VertexAttributes* attributes = (VertexAttributes*)mp_pc.attrAddress;
+        VertexAttributes* attributes        = (VertexAttributes*) mp_pc.attrAddress;
         VertexAttributes attributesAtVertex = attributes[actualVertexId];
-        Quaternion rotation = Quaternion(p.rotation);
+        Quaternion rotation                 = Quaternion(p.rotation);
 
         float3 localNormal = attributesAtVertex.unpackedNormal.xyz;
         output.normal      = normalize(rotation.rotate(localNormal));
@@ -148,10 +152,10 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, ui
 }
 
 void PSShadow(VSOutput input) {
-    uint4  indices         = input.materialIndices;
+    uint4 indices          = input.materialIndices;
     float4 baseColorFactor = input.baseColorFactor;
-    float  alphaCutoff     = input.pbrFactors.z;
-    uint   alphaMode       = input.alphaMode;
+    float alphaCutoff      = input.pbrFactors.z;
+    uint alphaMode         = input.alphaMode;
 
     float4 albedo = scene.globalTextures[indices.x].Sample(scene.defaultSampler, input.uv) * baseColorFactor * input.color;
 
@@ -163,12 +167,12 @@ void PSShadow(VSOutput input) {
 PSOutput PSMain(VSOutput input) {
     PSOutput output;
 
-    uint4  indices         = input.materialIndices;
+    uint4 indices          = input.materialIndices;
     float4 baseColorFactor = input.baseColorFactor;
-    float  metallicFactor  = input.pbrFactors.x;
-    float  roughnessFactor = input.pbrFactors.y;
-    float  alphaCutoff     = input.pbrFactors.z;
-    uint   alphaMode       = input.alphaMode;
+    float metallicFactor   = input.pbrFactors.x;
+    float roughnessFactor  = input.pbrFactors.y;
+    float alphaCutoff      = input.pbrFactors.z;
+    uint alphaMode         = input.alphaMode;
 
     float4 albedo      = scene.globalTextures[indices.x].Sample(scene.defaultSampler, input.uv) * baseColorFactor * input.color;
     float3 emissiveMap = scene.globalTextures[indices.w].Sample(scene.defaultSampler, input.uv).rgb;
@@ -178,9 +182,9 @@ PSOutput PSMain(VSOutput input) {
         discard;
     }
 
-    float4 pbr       = scene.globalTextures[indices.z].Sample(scene.defaultSampler, input.uv);
-    float  roughness = max((indices.z == 0 ? 1.0f : pbr.g) * roughnessFactor, 0.045f);
-    float  metallic  = (indices.z == 0 ? 1.0f : pbr.b) * metallicFactor;
+    float4 pbr      = scene.globalTextures[indices.z].Sample(scene.defaultSampler, input.uv);
+    float roughness = max((indices.z == 0 ? 1.0f : pbr.g) * roughnessFactor, 0.045f);
+    float metallic  = (indices.z == 0 ? 1.0f : pbr.b) * metallicFactor;
 
     float3 N           = normalize(input.normal);
     float3 worldNormal = N;
@@ -190,9 +194,9 @@ PSOutput PSMain(VSOutput input) {
         if (dot(T_unnorm, T_unnorm) < 0.0001f) {
             T_unnorm = cross(N, abs(N.y) < 0.999f ? float3(0, 1, 0) : float3(1, 0, 0));
         }
-        float3 T           = normalize(T_unnorm);
-        float  tangentSign = input.tangent.w * 2.0f - 1.0f;
-        float3 B           = normalize(cross(N, T) * tangentSign);
+        float3 T          = normalize(T_unnorm);
+        float tangentSign = input.tangent.w * 2.0f - 1.0f;
+        float3 B          = normalize(cross(N, T) * tangentSign);
 
         float3 normalMap = scene.globalTextures[indices.y].Sample(scene.defaultSampler, input.uv).rgb * 2.0f - 1.0f;
         worldNormal      = normalize(normalMap.x * T + normalMap.y * B + normalMap.z * N);
@@ -202,8 +206,8 @@ PSOutput PSMain(VSOutput input) {
     float2 packedNormal    = PackNormalOctahedron(worldNormal) * 0.5f + 0.5f;
     output.normalRoughness = float4(packedNormal, roughness, metallic);
 
-    float  currW   = max(input.currClip.w, 0.0001f);
-    float  prevW   = max(input.prevClip.w, 0.0001f);
+    float currW    = max(input.currClip.w, 0.0001f);
+    float prevW    = max(input.prevClip.w, 0.0001f);
     float2 ndcCurr = input.currClip.xy / currW;
     float2 ndcPrev = input.prevClip.xy / prevW;
 

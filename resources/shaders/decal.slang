@@ -6,20 +6,21 @@ import pbr_helpers;
 struct DecalPushConstants {
     float4x4 worldMatrix;
     float4x4 invWorldMatrix;
-    uint     albedoIndex;
-    uint     normalIndex;
-    float    roughness;
-    float    metallic;
+    uint albedoIndex;
+    uint normalIndex;
+    float roughness;
+    float metallic;
 };
-[vk::push_constant] DecalPushConstants pc;
+[vk::push_constant]
+DecalPushConstants pc;
 
 struct VSOutput {
     float4 pos : SV_Position;
 };
 
 // Procedural unit cube corners ranging from [-0.5, 0.5]
-static const float3 CubeVertices[8] = {float3(-0.5, -0.5, -0.5), float3(0.5, -0.5, -0.5), float3(0.5, 0.5, -0.5), float3(-0.5, 0.5, -0.5),
-                                       float3(-0.5, -0.5, 0.5),  float3(0.5, -0.5, 0.5),  float3(0.5, 0.5, 0.5),  float3(-0.5, 0.5, 0.5)};
+static const float3 CubeVertices[8] = { float3(-0.5, -0.5, -0.5), float3(0.5, -0.5, -0.5), float3(0.5, 0.5, -0.5), float3(-0.5, 0.5, -0.5),
+                                        float3(-0.5, -0.5, 0.5),  float3(0.5, -0.5, 0.5),  float3(0.5, 0.5, 0.5),  float3(-0.5, 0.5, 0.5) };
 
 static const uint CubeIndices[36] = {
     0, 2, 1, 0, 3, 2, // Front
@@ -32,17 +33,17 @@ static const uint CubeIndices[36] = {
 
 // Global bindless registry is now provided by the `scene` parameter block.
 
-VSOutput VSMain(uint vertexID : SV_VertexID) {
+VSOutput VSMain(uint vertexID: SV_VertexID) {
     VSOutput output;
-    float3   localPos = CubeVertices[CubeIndices[vertexID]];
-    float4   worldPos = mul(pc.worldMatrix, float4(localPos, 1.0f));
-    output.pos        = mul(scene.frame.viewProj, worldPos);
+    float3 localPos = CubeVertices[CubeIndices[vertexID]];
+    float4 worldPos = mul(pc.worldMatrix, float4(localPos, 1.0f));
+    output.pos      = mul(scene.frame.viewProj, worldPos);
     return output;
 }
 
 // --- Set 0: Custom Decal Layout ---
 Texture2D<float> texDepth;
-SamplerState     pointSampler;
+SamplerState pointSampler;
 
 struct PSOutput {
     float4 albedo : SV_Target0;          // Writes to G-Buffer SceneColor (Slot 0)
@@ -82,9 +83,9 @@ PSOutput PSMain(VSOutput input) {
     output.albedo = albedo;
 
     // 8. Normal Mapping
-    float3 N         = float3(0.0f, 0.0f, 1.0f);
-    float  roughness = pc.roughness;
-    float  metallic  = pc.metallic;
+    float3 N        = float3(0.0f, 0.0f, 1.0f);
+    float roughness = pc.roughness;
+    float metallic  = pc.metallic;
 
     if (pc.normalIndex != 2) { // 2 is flat normal fallback
         float3 normalMap = scene.globalTextures[pc.normalIndex].Sample(scene.defaultSampler, decalUV).rgb * 2.0f - 1.0f;
