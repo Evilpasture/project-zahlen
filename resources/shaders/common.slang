@@ -50,13 +50,13 @@ public struct SkinVertex {
 
 // Extensions deliberately add behavior only: no fields, padding, or descriptor bindings.
 public extension InstanceData {
-    [ForceInline] public property uint albedoIndex { get { return this.texIndices0 & 0xFFFFu; } }
-    [ForceInline] public property uint normalIndex { get { return this.texIndices0 >> 16; } }
-    [ForceInline] public property uint pbrIndex { get { return this.texIndices1 & 0xFFFFu; } }
-    [ForceInline] public property uint emissiveIndex { get { return this.texIndices1 >> 16; } }
-    [ForceInline] public property uint alphaMode { get { return this.flags & 0xFFu; } }
-    [ForceInline] public property bool isSkinned { get { return ((this.flags >> 8) & 0xFFu) != 0; } }
-    [ForceInline] public property bool isViewmodel { get { return ((this.flags >> 16) & 0xFFu) != 0; } }
+    public property uint albedoIndex { [ForceInline] get { return this.texIndices0 & 0xFFFFu; } }
+    public property uint normalIndex { [ForceInline] get { return this.texIndices0 >> 16; } }
+    public property uint pbrIndex { [ForceInline] get { return this.texIndices1 & 0xFFFFu; } }
+    public property uint emissiveIndex { [ForceInline] get { return this.texIndices1 >> 16; } }
+    public property uint alphaMode { [ForceInline] get { return this.flags & 0xFFu; } }
+    public property bool isSkinned { [ForceInline] get { return ((this.flags >> 8) & 0xFFu) != 0; } }
+    public property bool isViewmodel { [ForceInline] get { return ((this.flags >> 16) & 0xFFu) != 0; } }
 
     [ForceInline] public uint fetchIndex(uint indexId) {
         if (this.iboAddress == 0) return indexId;
@@ -152,15 +152,15 @@ public uint4 UnpackJoints(uint2 packed) {
 }
 
 public extension VertexAttributes {
-    [ForceInline] public property float4 unpackedNormal { get { return UnpackNormal(this.normal); } }
-    [ForceInline] public property float4 unpackedTangent { get { return UnpackNormal(this.tangent); } }
-    [ForceInline] public property float2 unpackedUV { get { return UnpackUV(this.uv); } }
-    [ForceInline] public property float4 unpackedColor { get { return UnpackColor(this.color); } }
+    public property float4 unpackedNormal { [ForceInline] get { return UnpackNormal(this.normal); } }
+    public property float4 unpackedTangent { [ForceInline] get { return UnpackNormal(this.tangent); } }
+    public property float2 unpackedUV { [ForceInline] get { return UnpackUV(this.uv); } }
+    public property float4 unpackedColor { [ForceInline] get { return UnpackColor(this.color); } }
 }
 
 public extension SkinVertex {
-    [ForceInline] public property uint4 unpackedJoints { get { return UnpackJoints(this.joints); } }
-    [ForceInline] public property float4 unpackedWeights { get { return UnpackColor(this.weights); } }
+    public property uint4 unpackedJoints { [ForceInline] get { return UnpackJoints(this.joints); } }
+    public property float4 unpackedWeights { [ForceInline] get { return UnpackColor(this.weights); } }
 }
 
 

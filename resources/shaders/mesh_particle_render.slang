@@ -64,7 +64,7 @@ struct PSOutput {
 
 public struct Quaternion {
     public float4 value;
-    public init(float4 value) { this.value = value; }
+    public __init(float4 value) { this.value = value; }
 
     [ForceInline] public float3 rotate(float3 vector) {
         float3 t = 2.0f * cross(this.value.xyz, vector);

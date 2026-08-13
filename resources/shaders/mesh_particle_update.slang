@@ -53,14 +53,14 @@ float3 Hash33(float3 p) {
 
 public struct Quaternion {
     public float4 value;
-    public init(float4 value) { this.value = value; }
+    public __init(float4 value) { this.value = value; }
 
     [ForceInline] public static Quaternion fromAxisAngle(float3 axis, float angle) {
         float halfAngle = angle * 0.5f;
         return Quaternion(float4(axis * sin(halfAngle), cos(halfAngle)));
     }
 
-    [ForceInline] public static Quaternion operator*(Quaternion lhs, Quaternion rhs) {
+    [ForceInline] public static Quaternion multiply(Quaternion lhs, Quaternion rhs) {
         float4 q1 = lhs.value;
         float4 q2 = rhs.value;
         return Quaternion(float4(
@@ -110,7 +110,7 @@ public struct Quaternion {
         float angle = length(p.rotVel.xyz) * dt;
         if (angle > 0.0001f) {
             Quaternion dq = Quaternion.fromAxisAngle(normalize(p.rotVel.xyz), angle);
-            p.rotation = (dq * Quaternion(p.rotation)).normalized().value;
+            p.rotation = Quaternion.multiply(dq, Quaternion(p.rotation)).normalized().value;
         }
 
         // Interpolate Color & Scale over Lifetime
