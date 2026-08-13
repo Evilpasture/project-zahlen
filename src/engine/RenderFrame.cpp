@@ -20,11 +20,6 @@ bool DisableGpuCulling() noexcept {
     return enabled;
 }
 
-bool DisableMainPassParallelism() noexcept {
-    static const bool enabled = std::getenv("ZHLN_NO_PARALLEL_MAINPASS") != nullptr;
-    return enabled;
-}
-
 bool IndirectTelemetryEnabled() noexcept {
     static const bool enabled = std::getenv("ZHLN_DEBUG_INDIRECT") != nullptr;
     return enabled;

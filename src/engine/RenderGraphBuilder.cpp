@@ -132,7 +132,7 @@ struct PassFactory {
             const bool gpuCullingUsed = self.cullingPass.pipeline.Valid() && self.frames.indirectCommandsBuffers->Valid() &&
                                         (drawCount <= kGpuCullingMaxInstances) && !Diag::DisableGpuCulling();
 
-            if (Diag::DisableMainPassParallelism() || !gpuCullingUsed) {
+            if (!gpuCullingUsed) {
                 FrameRecorder shadowRec(c, self);
                 Passes::ShadowPass {}.Execute(shadowRec);
                 FrameRecorder mainRec(c, self);

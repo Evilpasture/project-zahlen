@@ -44,14 +44,11 @@ namespace ZHLN {
 // ============================================================================
 // These exist to triage run-to-run nondeterminism in the scene pass without
 // requiring RenderDoc or GPU-AV. They are read once at startup:
-//   ZHLN_NO_GPU_CULLING=1       Force the CPU culling policy in MainPass1/2.
-//   ZHLN_NO_PARALLEL_MAINPASS=1 Record "MainShadow" serially into the primary
-//                               command buffer (no secondary parallelism).
-//   ZHLN_DEBUG_INDIRECT=1       Periodically log the queued draws, the retired
-//                               GPU indirect commands and instance buffer data.
+//   ZHLN_NO_GPU_CULLING=1  Force the CPU culling policy in MainPass1/2.
+//   ZHLN_DEBUG_INDIRECT=1  Periodically log the queued draws, the retired
+//                          GPU indirect commands and instance buffer data.
 namespace Diag {
 [[nodiscard]] bool DisableGpuCulling() noexcept;
-[[nodiscard]] bool DisableMainPassParallelism() noexcept;
 [[nodiscard]] bool IndirectTelemetryEnabled() noexcept;
 } // namespace Diag
 

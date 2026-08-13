@@ -805,18 +805,24 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
                 frames.instanceDataBuffers[i] = std::forward<decltype(idb)>(idb);
                 return Vk::Buffer::Create(
                     allocator.Get(), sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances,
-                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY
+                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                    VMA_MEMORY_USAGE_GPU_ONLY
                 );
             })
             .and_then([&, i](auto&& icb1) {
                 frames.indirectCommandsBuffers[i] = std::forward<decltype(icb1)>(icb1);
                 return Vk::Buffer::Create(
                     allocator.Get(), sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances,
-                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY
+                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                    VMA_MEMORY_USAGE_GPU_ONLY
                 );
             })
             .and_then([&, i](auto&& icb2) {
                 frames.indirectCommandsBuffersPass2[i] = std::forward<decltype(icb2)>(icb2);
+                // NOTE: TRANSFER_SRC on both indirect buffers exists for the
+                // ZHLN_DEBUG_INDIRECT readback (end-of-frame head copy).
                 return Vk::Buffer::Create(
                     allocator.Get(), sizeof(uint32_t) * kGpuCullingMaxInstances, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                     VMA_MEMORY_USAGE_GPU_ONLY
