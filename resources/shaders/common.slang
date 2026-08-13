@@ -66,8 +66,11 @@ public extension InstanceData {
 
     [ForceInline] public float3 fetchPosition(uint vertexId) {
         if (this.posAddress == 0) return float3(0.0f);
-        float3* positions = (float3*)this.posAddress;
-        return positions[vertexId];
+        // Positions are a tightly packed host float3 stream (12-byte stride).
+        // A float3* may be given a 16-byte array stride by SPIR-V layout rules.
+        float* values = (float*)this.posAddress;
+        uint valueOffset = vertexId * 3u;
+        return float3(values[valueOffset], values[valueOffset + 1u], values[valueOffset + 2u]);
     }
 
     [ForceInline] public VertexAttributes fetchAttributes(uint vertexId) {

@@ -103,8 +103,10 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, ui
         actualVertexId = indices[vertexId];
     }
 
-    float3* positions = (float3*)mp_pc.posAddress;
-    float3 localPos = positions[actualVertexId];
+    // Mesh vertices are packed float3 values (12-byte stride), not a padded float3 array.
+    float* positionValues = (float*)mp_pc.posAddress;
+    uint positionOffset = actualVertexId * 3u;
+    float3 localPos = float3(positionValues[positionOffset], positionValues[positionOffset + 1u], positionValues[positionOffset + 2u]);
     float3 scaledPos  = localPos * p.position.w;
     float3 rotatedPos = Quaternion(p.rotation).rotate(scaledPos);
     float3 worldPos   = rotatedPos + p.position.xyz;
