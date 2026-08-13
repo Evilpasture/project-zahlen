@@ -76,8 +76,15 @@ public extension InstanceData {
     }
 
     [ForceInline] public SkinVertex fetchSkin(uint vertexId) {
-        SkinVertex* skin = (SkinVertex*)this.skinAddress;
-        return skin[vertexId];
+        // The host packs each influence record as three uints (12 bytes). Do
+        // not index a SkinVertex* here: its GPU array stride can be rounded to
+        // 16 bytes by the target layout, unlike the host's tightly packed BDA.
+        uint* words = (uint*)this.skinAddress;
+        uint wordOffset = vertexId * 3u;
+        SkinVertex result;
+        result.joints = uint2(words[wordOffset], words[wordOffset + 1u]);
+        result.weights = words[wordOffset + 2u];
+        return result;
     }
 }
 
