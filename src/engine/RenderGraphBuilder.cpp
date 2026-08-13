@@ -121,8 +121,18 @@ struct PassFactory {
         return Vk::Passieren<
             "MainShadow", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::DepthStencilWrite<Res_Depth>,
             Vk::DepthWrite<Res_ShadowMap>, Vk::DepthWrite<Res_ShadowAtlas>>([this](VkCommandBuffer c) noexcept {
-            if (Diag::DisableMainPassParallelism()) {
-                // Bisection aid: record shadow + main serially into the primary.
+            // The CPU culling policy inside MainPass1 records its own
+            // secondaries (ParallelDrawDispatch), and Vulkan forbids nesting
+            // secondaries without the nestedCommandBuffer feature
+            // (VUID-vkCmdBeginRendering-commandBuffer-06068 and friends). So
+            // whenever GPU culling won't be used -- including the
+            // ZHLN_NO_GPU_CULLING bisect toggle -- record shadow + main
+            // serially into the primary command buffer instead.
+            const auto drawCount      = static_cast<uint32_t>(self.queues.drawQueue.size());
+            const bool gpuCullingUsed = self.cullingPass.pipeline.Valid() && self.frames.indirectCommandsBuffers->Valid() &&
+                                        (drawCount <= kGpuCullingMaxInstances) && !Diag::DisableGpuCulling();
+
+            if (Diag::DisableMainPassParallelism() || !gpuCullingUsed) {
                 FrameRecorder shadowRec(c, self);
                 Passes::ShadowPass {}.Execute(shadowRec);
                 FrameRecorder mainRec(c, self);
