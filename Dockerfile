@@ -30,18 +30,27 @@ RUN pacman -S --needed --noconfirm \
     tar \
     curl
 
-# Install full LunarG Vulkan SDK (includes slangc)
+# 1. Install LunarG Vulkan SDK
 ARG VULKAN_SDK_VER=1.4.304.0
 RUN wget https://sdk.lunarg.com/sdk/download/${VULKAN_SDK_VER}/linux/vulkansdk-linux-x86_64-${VULKAN_SDK_VER}.tar.xz -O /tmp/vulkansdk.tar.xz && \
     mkdir -p /opt/vulkansdk && \
     tar -xf /tmp/vulkansdk.tar.xz -C /opt/vulkansdk --strip-components=1 && \
     rm /tmp/vulkansdk.tar.xz
 
-# Export Vulkan SDK binaries (slangc, dxc, spirv-opt, etc.) and libraries
+# 2. Install modern Slang compiler (v2026.14+) with SV_VulkanVertexID/SV_VulkanInstanceID support
+ARG SLANG_VER=2026.14
+RUN wget https://github.com/shader-slang/slang/releases/download/v${SLANG_VER}/slang-${SLANG_VER}-linux-x86_64.tar.gz -O /tmp/slang.tar.gz && \
+    mkdir -p /opt/slang && \
+    tar -xf /tmp/slang.tar.gz -C /opt/slang && \
+    cp -f /opt/slang/bin/slangc /opt/vulkansdk/x86_64/bin/slangc && \
+    (cp -f /opt/slang/lib/libslang.so /opt/vulkansdk/x86_64/lib/ 2>/dev/null || true) && \
+    rm /tmp/slang.tar.gz
+
+# Export Vulkan SDK & Slang paths (also fixing the syntax for variable expansions)
 ENV VULKAN_SDK=/opt/vulkansdk/x86_64
-ENV PATH=$VULKAN_SDK/bin:$PATH
-ENV LD_LIBRARY_PATH=$VULKAN_SDK/lib:$LD_LIBRARY_PATH
-ENV CMAKE_PREFIX_PATH=$VULKAN_SDK:$CMAKE_PREFIX_PATH
+ENV PATH=/opt/slang/bin:$VULKAN_SDK/bin:$PATH
+ENV LD_LIBRARY_PATH=/opt/slang/lib:$VULKAN_SDK/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+ENV CMAKE_PREFIX_PATH=/opt/slang:$VULKAN_SDK${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}
 
 # Set default compilers to GCC
 ENV CC=gcc
@@ -51,14 +60,14 @@ WORKDIR /workspace
 
 COPY . .
 
-# 1. Configure CMake 
+# Configure CMake 
 RUN cmake -B build -S . -G Ninja \
     -DCMAKE_BUILD_TYPE=Release
 
-# 2. Compile asset cooker and run compilation
+# Compile asset cooker and run compilation
 RUN cmake --build build --target zahlen
 
-# 3. Collect all compiled binaries and shared libraries into a flat distribution folder
+# Collect all compiled binaries and shared libraries into a flat distribution folder
 RUN mkdir -p /workspace/dist && \
     cp /workspace/build/zahlen /workspace/dist/ && \
     cp /workspace/build/libzahlen_engine.so /workspace/dist/ && \
