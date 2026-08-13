@@ -1,12 +1,13 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-cmake_minimum_required(VERSION 3.28)
+# 1. Enable CTest testing framework
+enable_testing()
 
-# 1. Automatically discover all test source files in this directory
+# 2. Automatically discover all test source files in this directory
 file(GLOB TEST_SOURCES CONFIGURE_DEPENDS "Test*.cpp")
 
-# 2. Iterate and dynamically register each test executable
+# 3. Iterate and dynamically register each test executable
 foreach(TEST_SRC IN LISTS TEST_SOURCES)
     # Extract file name without path or extension (e.g., "TestTaskSystem")
     get_filename_component(TEST_FILE_WE ${TEST_SRC} NAME_WLE)
@@ -39,4 +40,7 @@ foreach(TEST_SRC IN LISTS TEST_SOURCES)
 
     # Applies the required reflection flags (-freflection / custom libc++) configured in the root
     zahlen_enable_reflection(${TARGET_NAME})
+
+    # 4. Register the executable as a test with CTest
+    add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
 endforeach()

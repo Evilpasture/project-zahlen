@@ -200,6 +200,8 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/LuaJIT SYSTEM)
 set(DOUBLE_PRECISION ON CACHE BOOL "" FORCE)
 set(USE_STD_INCLUDES ON CACHE BOOL "" FORCE)
 set(USE_RTTI OFF CACHE BOOL "" FORCE)
+set(TARGET_UNIT_TESTS OFF CACHE BOOL "Build Jolt Unit Tests" FORCE)
+set(JPH_BUILD_TESTS OFF CACHE BOOL "Build Jolt Unit Tests" FORCE)
 
 # Force the debug renderer to compile globally, even in Release configurations
 add_compile_definitions(JPH_DEBUG_RENDERER)
@@ -756,6 +758,7 @@ zahlen_enable_reflection(zahlen)
 
 # --- TESTS ---
 if(ZHLN_BUILD_TESTS)
+    enable_testing()
     add_subdirectory(tests)
 endif()
 
