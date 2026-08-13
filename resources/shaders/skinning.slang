@@ -8,8 +8,8 @@ struct VertexAttributes {
 };
 
 struct VertexSkin {
-    uint2 joints;  // Packed 4x uint16_t (8 bytes total)
-    uint  weights; // Packed UNORM8 weights
+    uint2 joints; // Packed 4x uint16_t (8 bytes total)
+    uint weights; // Packed UNORM8 weights
 };
 
 struct GPUJoint {
@@ -31,10 +31,11 @@ struct SkinningConstants {
     uint32_t jointOffset;
     uint32_t morphOffset;
     uint32_t activeMorphCount;
-    float    morphWeights[4];
+    float morphWeights[4];
 };
 
-[vk::push_constant] SkinningConstants pcs;
+[vk::push_constant]
+SkinningConstants pcs;
 
 float4 UnpackNormal(uint packed) {
     float x = (float(packed & 0x3FF) / 1023.0f) * 2.0f - 1.0f;
@@ -83,34 +84,35 @@ uint4 UnpackJoints(uint2 packed) {
 }
 
 float4 UnpackWeights(uint packed) {
-    return float4(
-        float(packed & 0xFF) / 255.0f, float((packed >> 8) & 0xFF) / 255.0f, float((packed >> 16) & 0xFF) / 255.0f, float((packed >> 24) & 0xFF) / 255.0f
-    );
+    return float4(float(packed & 0xFF) / 255.0f, float((packed >> 8) & 0xFF) / 255.0f, float((packed >> 16) & 0xFF) / 255.0f,
+                  float((packed >> 24) & 0xFF) / 255.0f);
 }
 
-[shader("compute")][numthreads(64, 1, 1)] void CSMain(uint3 tid : SV_DispatchThreadID) {
+[shader("compute")]
+[numthreads(64, 1, 1)]
+void CSMain(uint3 tid: SV_DispatchThreadID) {
     if (tid.x >= pcs.vertexCount)
         return;
 
     // Convert raw 64-bit addresses to strongly-typed GPU pointers
-    float3*           inPosPool       = (float3*) pcs.inPosAddr;
-    VertexAttributes* inAttrPool      = (VertexAttributes*) pcs.inAttrAddr;
-    VertexSkin*       inSkinPool      = (VertexSkin*) pcs.inSkinAddr;
-    float3*           outPosPool      = (float3*) pcs.outPosAddr;
-    VertexAttributes* outAttrPool     = (VertexAttributes*) pcs.outAttrAddr;
-    GPUJoint*         jointsPool      = (GPUJoint*) pcs.jointsAddr;
-    float4*           morphDeltasPool = (float4*) pcs.morphDeltasAddr;
+    float3* inPosPool             = (float3*) pcs.inPosAddr;
+    VertexAttributes* inAttrPool  = (VertexAttributes*) pcs.inAttrAddr;
+    VertexSkin* inSkinPool        = (VertexSkin*) pcs.inSkinAddr;
+    float3* outPosPool            = (float3*) pcs.outPosAddr;
+    VertexAttributes* outAttrPool = (VertexAttributes*) pcs.outAttrAddr;
+    GPUJoint* jointsPool          = (GPUJoint*) pcs.jointsAddr;
+    float4* morphDeltasPool       = (float4*) pcs.morphDeltasAddr;
 
     // Load separated SoA input streams using raw array subscripting
-    float3           localPos = inPosPool[tid.x];
-    VertexAttributes attr     = inAttrPool[tid.x];
+    float3 localPos       = inPosPool[tid.x];
+    VertexAttributes attr = inAttrPool[tid.x];
 
     uint normalRaw  = attr.normal;
     uint tangentRaw = attr.tangent;
     uint uvRaw      = attr.uv;
     uint colorRaw   = attr.color;
 
-    uint4  joints  = uint4(0, 0, 0, 0);
+    uint4 joints   = uint4(0, 0, 0, 0);
     float4 weights = float4(1.0f, 0.0f, 0.0f, 0.0f);
 
     if (pcs.inSkinAddr != 0) {
@@ -121,13 +123,14 @@ float4 UnpackWeights(uint packed) {
 
     // Apply Morph Targets FIRST (in bind-pose space)
     if (pcs.activeMorphCount > 0) {
-        [unroll] for (uint i = 0; i < 4; ++i) {
+        [unroll]
+        for (uint i = 0; i < 4; ++i) {
             if (i >= pcs.activeMorphCount)
                 break;
             uint deltaIndex = pcs.morphOffset + (i * pcs.vertexCount) + tid.x;
 
-            float  weight = pcs.morphWeights[i];
-            float3 delta  = morphDeltasPool[deltaIndex].xyz;
+            float weight = pcs.morphWeights[i];
+            float3 delta = morphDeltasPool[deltaIndex].xyz;
             localPos += delta * weight;
         }
     }
@@ -144,5 +147,5 @@ float4 UnpackWeights(uint packed) {
 
     uint outNorm       = PackNormal(skinnedNorm, normUnpack.w);
     uint outTang       = PackNormal(skinnedTang, tangUnpack.w);
-    outAttrPool[tid.x] = {outNorm, outTang, uvRaw, colorRaw};
+    outAttrPool[tid.x] = { outNorm, outTang, uvRaw, colorRaw };
 }

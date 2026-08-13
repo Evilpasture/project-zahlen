@@ -12,10 +12,11 @@ struct Particle {
 
 struct RenderPushConstants {
     uint64_t particleBufferAddr;
-    uint     alignment;
-    uint     textureIndex;
+    uint alignment;
+    uint textureIndex;
 };
-[vk::push_constant] RenderPushConstants pc;
+[vk::push_constant]
+RenderPushConstants pc;
 
 // Bindless registry now comes from the `scene` parameter block (common.slang).
 
@@ -25,20 +26,20 @@ struct ParticleVSOutput {
     float4 color : COLOR;
 };
 
-ParticleVSOutput VSMain(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID) {
+ParticleVSOutput VSMain(uint vertexID: SV_VertexID, uint instanceID: SV_InstanceID) {
     ParticleVSOutput output;
-    uint64_t         addr = pc.particleBufferAddr + instanceID * sizeof(Particle);
-    Particle         p    = (*(Particle*)(addr));
+    Particle* particles = (Particle*) pc.particleBufferAddr;
+    Particle p          = particles[instanceID];
 
-    float2 quadUVs[6] = {float2(0, 0), float2(0, 1), float2(1, 0), float2(1, 0), float2(0, 1), float2(1, 1)};
-    float2 offsets[6] = {float2(-0.5f, -0.5f), float2(-0.5f, 0.5f), float2(0.5f, -0.5f), float2(0.5f, -0.5f), float2(-0.5f, 0.5f), float2(0.5f, 0.5f)};
+    float2 quadUVs[6] = { float2(0, 0), float2(0, 1), float2(1, 0), float2(1, 0), float2(0, 1), float2(1, 1) };
+    float2 offsets[6] = { float2(-0.5f, -0.5f), float2(-0.5f, 0.5f), float2(0.5f, -0.5f), float2(0.5f, -0.5f), float2(-0.5f, 0.5f), float2(0.5f, 0.5f) };
 
     float2 uv     = quadUVs[vertexID];
-    float  size   = p.params.z;
+    float size    = p.params.z;
     float2 offset = offsets[vertexID] * size;
 
-    float  cosA          = cos(p.params.w);
-    float  sinA          = sin(p.params.w);
+    float cosA           = cos(p.params.w);
+    float sinA           = sin(p.params.w);
     float2 rotatedOffset = float2(offset.x * cosA - offset.y * sinA, offset.x * sinA + offset.y * cosA);
 
     float3 worldPos = p.position.xyz;
@@ -52,7 +53,7 @@ ParticleVSOutput VSMain(uint vertexID : SV_VertexID, uint instanceID : SV_Instan
         worldPos += camRight * rotatedOffset.x + camUp * rotatedOffset.y;
     } else if (pc.alignment == 1) {
         // Mode 1: Velocity-Stretched Billboard
-        float  speed  = length(p.velocity.xyz);
+        float speed   = length(p.velocity.xyz);
         float3 velDir = (speed > 0.001f) ? (p.velocity.xyz / speed) : float3(0, 1, 0);
         float3 camDir = normalize(scene.frame.camPos.xyz - p.position.xyz);
         float3 side   = normalize(cross(velDir, camDir));
@@ -69,7 +70,7 @@ ParticleVSOutput VSMain(uint vertexID : SV_VertexID, uint instanceID : SV_Instan
     return output;
 }
 
-float4 PSMain(ParticleVSOutput input): SV_Target0 {
+float4 PSMain(ParticleVSOutput input) : SV_Target0 {
     float4 texColor   = scene.globalTextures[pc.textureIndex].Sample(scene.defaultSampler, input.uv);
     float4 finalColor = texColor * input.color;
 

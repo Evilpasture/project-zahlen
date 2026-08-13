@@ -5,7 +5,8 @@ struct VSOutput {
     float2 uv : TEXCOORD0;
 };
 
-[shader("vertex")] VSOutput VSMain(uint vertexID : SV_VertexID) {
+[shader("vertex")]
+VSOutput VSMain(uint vertexID: SV_VertexID) {
     VSOutput output;
     output.uv = float2((vertexID << 1) & 2, vertexID & 2);
 
@@ -23,10 +24,11 @@ struct PushConstants {
     float _pad;
 };
 
-[vk::push_constant] PushConstants pc;
+[vk::push_constant]
+PushConstants pc;
 
 Texture2D<float4> texInput;
-SamplerState      smp;
+SamplerState smp;
 
 // Convert RGB to Luma (Y) for edge detection, incorporating a soft perceptual
 // Reinhard tonemap curve locally so HDR sun glare doesn't smear the edge tracking.
@@ -35,7 +37,8 @@ float GetLuma(float3 rgb) {
     return luma / (1.0f + luma);
 }
 
-[shader("fragment")] float4 PSMain(VSOutput input): SV_Target0 {
+[shader("fragment")]
+float4 PSMain(VSOutput input) : SV_Target0 {
     float3 rgbM = texInput.SampleLevel(smp, input.uv, 0.0f).rgb;
 
     float lumaM = GetLuma(rgbM);
@@ -63,16 +66,16 @@ float GetLuma(float3 rgb) {
     float subpixBlend  = smoothstep(0.0f, 1.0f, subpixFilter);
     subpixBlend        = subpixBlend * subpixBlend * pc.subpix;
 
-    float edgeHoriz    = abs(-2.0f * lumaN + lumaNW + lumaNE) + abs(-4.0f * lumaM + lumaW + lumaE) * 2.0f + abs(-2.0f * lumaS + lumaSW + lumaSE);
-    float edgeVert     = abs(-2.0f * lumaW + lumaNW + lumaSW) + abs(-4.0f * lumaM + lumaN + lumaS) * 2.0f + abs(-2.0f * lumaE + lumaNE + lumaSE);
-    bool  isHorizontal = edgeHoriz >= edgeVert;
+    float edgeHoriz   = abs(-2.0f * lumaN + lumaNW + lumaNE) + abs(-4.0f * lumaM + lumaW + lumaE) * 2.0f + abs(-2.0f * lumaS + lumaSW + lumaSE);
+    float edgeVert    = abs(-2.0f * lumaW + lumaNW + lumaSW) + abs(-4.0f * lumaM + lumaN + lumaS) * 2.0f + abs(-2.0f * lumaE + lumaNE + lumaSE);
+    bool isHorizontal = edgeHoriz >= edgeVert;
 
     float luma1     = isHorizontal ? lumaN : lumaW;
     float luma2     = isHorizontal ? lumaS : lumaE;
     float gradient1 = luma1 - lumaM;
     float gradient2 = luma2 - lumaM;
 
-    bool  is1Steepest    = abs(gradient1) >= abs(gradient2);
+    bool is1Steepest     = abs(gradient1) >= abs(gradient2);
     float gradientScaled = 0.25f * max(abs(gradient1), abs(gradient2));
 
     float stepLength = isHorizontal ? pc.rcpFrameY : pc.rcpFrameX;
@@ -99,11 +102,12 @@ float GetLuma(float3 rgb) {
 
     float lumaEnd1 = 0.0f;
     float lumaEnd2 = 0.0f;
-    bool  reached1 = false;
-    bool  reached2 = false;
+    bool reached1  = false;
+    bool reached2  = false;
 
     // Quality preset 12 - steps up to 8 texels
-    [unroll] for (int i = 0; i < 8; ++i) {
+    [unroll]
+    for (int i = 0; i < 8; ++i) {
         if (!reached1)
             lumaEnd1 = GetLuma(texInput.SampleLevel(smp, uv1, 0.0f).rgb) - lumaLocalAverage;
         if (!reached2)
@@ -124,15 +128,15 @@ float GetLuma(float3 rgb) {
     float dist1 = isHorizontal ? (input.uv.x - uv1.x) : (input.uv.y - uv1.y);
     float dist2 = isHorizontal ? (uv2.x - input.uv.x) : (uv2.y - input.uv.y);
 
-    bool  isDirection1 = dist1 < dist2;
-    float distFinal    = min(dist1, dist2);
+    bool isDirection1 = dist1 < dist2;
+    float distFinal   = min(dist1, dist2);
 
     float edgeThickness = dist1 + dist2;
     float pixelOffset   = -distFinal / edgeThickness + 0.5f;
 
-    bool  isLumaCenterSmaller = lumaM < lumaLocalAverage;
-    bool  isLeftCorrect       = ((isDirection1 ? lumaEnd1 : lumaEnd2) < 0.0f) != isLumaCenterSmaller;
-    float finalOffset         = isLeftCorrect ? pixelOffset : 0.0f;
+    bool isLumaCenterSmaller = lumaM < lumaLocalAverage;
+    bool isLeftCorrect       = ((isDirection1 ? lumaEnd1 : lumaEnd2) < 0.0f) != isLumaCenterSmaller;
+    float finalOffset        = isLeftCorrect ? pixelOffset : 0.0f;
 
     finalOffset = max(finalOffset, subpixBlend);
 

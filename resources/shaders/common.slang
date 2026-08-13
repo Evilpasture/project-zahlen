@@ -27,12 +27,111 @@ public struct InstanceData {
     public uint activeMorphCount;
 
     public float3 localCenter;
-    public uint   _paddingCenter;
+    public uint _paddingCenter;
 
     public float4 morphWeights;
     public float4 baseColorFactor;
+
     public float4 emissiveFactor;
 };
+
+// These transient views describe the existing BDA element layouts. They are never
+// reflected in InstanceData, so the C++ ABI remains unchanged.
+public struct VertexAttributes {
+    public uint normal;
+    public uint tangent;
+    public uint uv;
+    public uint color;
+};
+
+public struct SkinVertex {
+    public uint2 joints;
+    public uint weights;
+};
+
+// Extensions deliberately add behavior only: no fields, padding, or descriptor bindings.
+public extension InstanceData {
+    public property uint albedoIndex {
+        [ForceInline]
+        get {
+            return this.texIndices0 & 0xFFFFu;
+        }
+    }
+    public property uint normalIndex {
+        [ForceInline]
+        get {
+            return this.texIndices0 >> 16;
+        }
+    }
+    public property uint pbrIndex {
+        [ForceInline]
+        get {
+            return this.texIndices1 & 0xFFFFu;
+        }
+    }
+    public property uint emissiveIndex {
+        [ForceInline]
+        get {
+            return this.texIndices1 >> 16;
+        }
+    }
+    public property uint alphaMode {
+        [ForceInline]
+        get {
+            return this.flags & 0xFFu;
+        }
+    }
+    public property bool isSkinned {
+        [ForceInline]
+        get {
+            return ((this.flags >> 8) & 0xFFu) != 0;
+        }
+    }
+    public property bool isViewmodel {
+        [ForceInline]
+        get {
+            return ((this.flags >> 16) & 0xFFu) != 0;
+        }
+    }
+
+    [ForceInline]
+    public uint fetchIndex(uint indexId) {
+        if (this.iboAddress == 0)
+            return indexId;
+        uint* indices = (uint*) this.iboAddress;
+        return indices[indexId];
+    }
+
+    [ForceInline]
+    public float3 fetchPosition(uint vertexId) {
+        if (this.posAddress == 0)
+            return float3(0.0f);
+        // Positions are a tightly packed host float3 stream (12-byte stride).
+        // A float3* may be given a 16-byte array stride by SPIR-V layout rules.
+        float* values    = (float*) this.posAddress;
+        uint valueOffset = vertexId * 3u;
+        return float3(values[valueOffset], values[valueOffset + 1u], values[valueOffset + 2u]);
+    }
+
+    [ForceInline]
+    public VertexAttributes fetchAttributes(uint vertexId) {
+        VertexAttributes* attributes = (VertexAttributes*) this.attrAddress;
+        return attributes[vertexId];
+    }
+
+    [ForceInline]
+    public SkinVertex fetchSkin(uint vertexId) {
+        // The host packs each influence record as three uints (12 bytes). Do
+        // not index a SkinVertex* here: its GPU array stride can be rounded to
+        // 16 bytes by the target layout, unlike the host's tightly packed BDA.
+        uint* words     = (uint*) this.skinAddress;
+        uint wordOffset = vertexId * 3u;
+        SkinVertex result;
+        result.joints  = uint2(words[wordOffset], words[wordOffset + 1u]);
+        result.weights = words[wordOffset + 2u];
+        return result;
+    }
+}
 
 public struct ObjectConstants {
     public uint instanceId;
@@ -46,6 +145,18 @@ public struct GPUJoint {
     public float4 col3;
 };
 
+public extension GPUJoint {
+    [ForceInline]
+    public float4 transformPosition(float4 position) {
+        return this.col0 * position.x + this.col1 * position.y + this.col2 * position.z + this.col3 * position.w;
+    }
+
+    [ForceInline]
+    public float3 transformDirection(float3 direction) {
+        return this.col0.xyz * direction.x + this.col1.xyz * direction.y + this.col2.xyz * direction.z;
+    }
+}
+
 /**
  * The authoritative layout of the global, per-frame bindless descriptor set.
  * The C++ side reflects the exact binding indices out of the compiled
@@ -53,23 +164,24 @@ public struct GPUJoint {
  * NOTE: `globalTextures` is a runtime array and therefore must stay LAST.
  */
 public struct GlobalSceneRegistry {
-    public SamplerState                   defaultSampler;   // 0
-    public ConstantBuffer<FrameUniforms>  frame;            // 1
-    public StructuredBuffer<Light>        lights;           // 2
-    public StructuredBuffer<InstanceData> g_instances;      // 3
-    public StructuredBuffer<GPUJoint>     g_joints;         // 4
-    public StructuredBuffer<GPUJoint>     g_prevJoints;     // 5
-    public StructuredBuffer<float4>       g_morphDeltas;    // 6
-    public TextureCube                    prefilteredMap;   // 7
-    public Texture2D                      brdfLUT;          // 8
-    public SamplerState                   clampSampler;     // 9
-    public Texture2D<float4>              texTransLighting; // 10
-    public Texture2D                      globalTextures[]; // 11
+    public SamplerState defaultSampler;                // 0
+    public ConstantBuffer<FrameUniforms> frame;        // 1
+    public StructuredBuffer<Light> lights;             // 2
+    public StructuredBuffer<InstanceData> g_instances; // 3
+    public StructuredBuffer<GPUJoint> g_joints;        // 4
+    public StructuredBuffer<GPUJoint> g_prevJoints;    // 5
+    public StructuredBuffer<float4> g_morphDeltas;     // 6
+    public TextureCube prefilteredMap;                 // 7
+    public Texture2D brdfLUT;                          // 8
+    public SamplerState clampSampler;                  // 9
+    public Texture2D<float4> texTransLighting;         // 10
+    public Texture2D globalTextures[];                 // 11
 };
 
 public ParameterBlock<GlobalSceneRegistry> scene;
 
-[vk::push_constant] public ObjectConstants obj;
+[vk::push_constant]
+public ObjectConstants obj;
 
 // --- Attribute Unpackers ---
 public float4 UnpackNormal(uint packed) {
@@ -85,13 +197,54 @@ public float2 UnpackUV(uint packed) {
 }
 
 public float4 UnpackColor(uint packed) {
-    return float4(
-        float(packed & 0xFF) / 255.0f, float((packed >> 8) & 0xFF) / 255.0f, float((packed >> 16) & 0xFF) / 255.0f, float((packed >> 24) & 0xFF) / 255.0f
-    );
+    return float4(float(packed & 0xFF) / 255.0f, float((packed >> 8) & 0xFF) / 255.0f, float((packed >> 16) & 0xFF) / 255.0f,
+                  float((packed >> 24) & 0xFF) / 255.0f);
 }
 
 public uint4 UnpackJoints(uint2 packed) {
     return uint4(packed.x & 0xFFFF, packed.x >> 16, packed.y & 0xFFFF, packed.y >> 16);
+}
+
+public extension VertexAttributes {
+    public property float4 unpackedNormal {
+        [ForceInline]
+        get {
+            return UnpackNormal(this.normal);
+        }
+    }
+    public property float4 unpackedTangent {
+        [ForceInline]
+        get {
+            return UnpackNormal(this.tangent);
+        }
+    }
+    public property float2 unpackedUV {
+        [ForceInline]
+        get {
+            return UnpackUV(this.uv);
+        }
+    }
+    public property float4 unpackedColor {
+        [ForceInline]
+        get {
+            return UnpackColor(this.color);
+        }
+    }
+}
+
+public extension SkinVertex {
+    public property uint4 unpackedJoints {
+        [ForceInline]
+        get {
+            return UnpackJoints(this.joints);
+        }
+    }
+    public property float4 unpackedWeights {
+        [ForceInline]
+        get {
+            return UnpackColor(this.weights);
+        }
+    }
 }
 
 // --- SKELETAL SKINNING ---
@@ -101,10 +254,8 @@ public float4 SkinPositionPrev(float4 position, uint4 joints, float4 weights, ui
     GPUJoint j2 = scene.g_prevJoints[jointOffset + joints.z];
     GPUJoint j3 = scene.g_prevJoints[jointOffset + joints.w];
 
-    float4 pos = (j0.col0 * position.x + j0.col1 * position.y + j0.col2 * position.z + j0.col3 * position.w) * weights.x +
-                 (j1.col0 * position.x + j1.col1 * position.y + j1.col2 * position.z + j1.col3 * position.w) * weights.y +
-                 (j2.col0 * position.x + j2.col1 * position.y + j2.col2 * position.z + j2.col3 * position.w) * weights.z +
-                 (j3.col0 * position.x + j3.col1 * position.y + j3.col2 * position.z + j3.col3 * position.w) * weights.w;
+    float4 pos = (j0.transformPosition(position)) * weights.x + (j1.transformPosition(position)) * weights.y + (j2.transformPosition(position)) * weights.z +
+                 (j3.transformPosition(position)) * weights.w;
     return pos;
 }
 
@@ -114,10 +265,8 @@ public float4 SkinPosition(float4 position, uint4 joints, float4 weights, uint j
     GPUJoint j2 = scene.g_joints[jointOffset + joints.z];
     GPUJoint j3 = scene.g_joints[jointOffset + joints.w];
 
-    float4 pos = (j0.col0 * position.x + j0.col1 * position.y + j0.col2 * position.z + j0.col3 * position.w) * weights.x +
-                 (j1.col0 * position.x + j1.col1 * position.y + j1.col2 * position.z + j1.col3 * position.w) * weights.y +
-                 (j2.col0 * position.x + j2.col1 * position.y + j2.col2 * position.z + j2.col3 * position.w) * weights.z +
-                 (j3.col0 * position.x + j3.col1 * position.y + j3.col2 * position.z + j3.col3 * position.w) * weights.w;
+    float4 pos = (j0.transformPosition(position)) * weights.x + (j1.transformPosition(position)) * weights.y + (j2.transformPosition(position)) * weights.z +
+                 (j3.transformPosition(position)) * weights.w;
     return pos;
 }
 
@@ -131,10 +280,8 @@ public float3 SkinDirection(float3 direction, uint4 joints, float4 weights, uint
     GPUJoint j2 = scene.g_joints[jointOffset + joints.z];
     GPUJoint j3 = scene.g_joints[jointOffset + joints.w];
 
-    float3 dir = (j0.col0.xyz * direction.x + j0.col1.xyz * direction.y + j0.col2.xyz * direction.z) * weights.x +
-                 (j1.col0.xyz * direction.x + j1.col1.xyz * direction.y + j1.col2.xyz * direction.z) * weights.y +
-                 (j2.col0.xyz * direction.x + j2.col1.xyz * direction.y + j2.col2.xyz * direction.z) * weights.z +
-                 (j3.col0.xyz * direction.x + j3.col1.xyz * direction.y + j3.col2.xyz * direction.z) * weights.w;
+    float3 dir = (j0.transformDirection(direction)) * weights.x + (j1.transformDirection(direction)) * weights.y +
+                 (j2.transformDirection(direction)) * weights.z + (j3.transformDirection(direction)) * weights.w;
 
     return dir;
 }
@@ -142,7 +289,8 @@ public float3 SkinDirection(float3 direction, uint4 joints, float4 weights, uint
 public float3 GetMorphDisplacement(uint vertexId, uint vertexCount, uint morphOffset, uint activeMorphCount, float4 weights) {
     float3 displacement = float3(0, 0, 0);
 
-    [unroll] for (uint i = 0; i < 4; ++i) {
+    [unroll]
+    for (uint i = 0; i < 4; ++i) {
         if (i >= activeMorphCount) {
             break;
         }

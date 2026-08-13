@@ -3,18 +3,21 @@
 struct PushConstants {
     float rcpSrcWidth;
     float rcpSrcHeight;
-    uint  srcWidth;
-    uint  srcHeight;
-    uint  isFirstPass;
+    uint srcWidth;
+    uint srcHeight;
+    uint isFirstPass;
 };
 
-[vk::push_constant] PushConstants pc;
+[vk::push_constant]
+PushConstants pc;
 
-Texture2D<float>   inDepth;
+Texture2D<float> inDepth;
 RWTexture2D<float> outDepth;
-SamplerState       pointSampler;
+SamplerState pointSampler;
 
-[shader("compute")][numthreads(16, 16, 1)] void CSMain(uint3 tid : SV_DispatchThreadID) {
+[shader("compute")]
+[numthreads(16, 16, 1)]
+void CSMain(uint3 tid: SV_DispatchThreadID) {
     uint2 dstSize;
     outDepth.GetDimensions(dstSize.x, dstSize.y);
     if (tid.x >= dstSize.x || tid.y >= dstSize.y)

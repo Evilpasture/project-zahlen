@@ -8,7 +8,7 @@ struct VSOutput {
     float2 uv : TEXCOORD0;
 };
 
-VSOutput VSMain(uint vertexID : SV_VertexID) {
+VSOutput VSMain(uint vertexID: SV_VertexID) {
     VSOutput output;
     output.uv = float2((vertexID << 1) & 2, vertexID & 2);
 
@@ -20,14 +20,15 @@ VSOutput VSMain(uint vertexID : SV_VertexID) {
 struct PushConstants {
     float vignetteIntensity;
     float vignettePower;
-    int   fullBright;
+    int fullBright;
 };
-[vk::push_constant] PushConstants pc;
+[vk::push_constant]
+PushConstants pc;
 
-Texture2D<float4>             texInput;
-SamplerState                  smp;
-Texture2D<float4>             texBloom; // Bound dynamically by BlitPass
-Texture2D<float>              texDepth;
+Texture2D<float4> texInput;
+SamplerState smp;
+Texture2D<float4> texBloom; // Bound dynamically by BlitPass
+Texture2D<float> texDepth;
 ConstantBuffer<FrameUniforms> frame;
 
 float3 ACESFilm(float3 x) {
@@ -39,7 +40,7 @@ float3 ACESFilm(float3 x) {
     return saturate((x * (a * x + b)) / (x * (c * x + d) + e));
 }
 
-float4 PSMain(VSOutput input): SV_Target0 {
+float4 PSMain(VSOutput input) : SV_Target0 {
     float3 hdrColor = texInput.SampleLevel(smp, input.uv, 0).rgb;
 
     // Bypasses HDR exposure, bloom, and tonemapping if fullbright is enabled
@@ -59,9 +60,9 @@ float4 PSMain(VSOutput input): SV_Target0 {
 
     // Apply Vignette overlay
     if (pc.vignetteIntensity > 0.0f) {
-        float2 uvDist   = abs(input.uv - 0.5f) * pc.vignetteIntensity;
-        float  vignette = saturate(1.0f - dot(uvDist, uvDist));
-        vignette        = pow(vignette, max(pc.vignettePower, 0.01f));
+        float2 uvDist  = abs(input.uv - 0.5f) * pc.vignetteIntensity;
+        float vignette = saturate(1.0f - dot(uvDist, uvDist));
+        vignette       = pow(vignette, max(pc.vignettePower, 0.01f));
         finalColor *= vignette;
     }
 

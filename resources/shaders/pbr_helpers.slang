@@ -6,17 +6,17 @@ import uniforms;
 // ============================================================================
 // CONSTANTS & NOISE
 // ============================================================================
-public static const float3 HemisphereSamples[8] = {float3(0.35517f, -0.06385f, 0.93261f), float3(-0.19134f, 0.37512f, 0.90695f),
-                                                   float3(0.52841f, 0.50284f, 0.68412f),  float3(-0.67215f, -0.32111f, 0.66723f),
-                                                   float3(0.11211f, -0.78121f, 0.61432f), float3(-0.73211f, 0.42152f, 0.53512f),
-                                                   float3(0.81232f, -0.31211f, 0.49312f), float3(0.05211f, 0.88121f, 0.47012f)};
+public static const float3 HemisphereSamples[8] = { float3(0.35517f, -0.06385f, 0.93261f), float3(-0.19134f, 0.37512f, 0.90695f),
+                                                    float3(0.52841f, 0.50284f, 0.68412f),  float3(-0.67215f, -0.32111f, 0.66723f),
+                                                    float3(0.11211f, -0.78121f, 0.61432f), float3(-0.73211f, 0.42152f, 0.53512f),
+                                                    float3(0.81232f, -0.31211f, 0.49312f), float3(0.05211f, 0.88121f, 0.47012f) };
 
-public static const float2 PoissonDisk[16] = {float2(-0.94201624, -0.39906216), float2(0.94558609, -0.76890725),  float2(-0.094184101, -0.9293887),
-                                              float2(0.34495938, 0.2938776),    float2(-0.91588581, 0.45771432),  float2(-0.81544232, -0.87912464),
-                                              float2(-0.38208752, 0.27676845),  float2(0.97484398, 0.7564837),    float2(0.44323325, -0.97511554),
-                                              float2(0.53742981, -0.4737342),   float2(-0.26496911, -0.41893023), float2(0.79197514, 0.19090188),
-                                              float2(-0.2418884, 0.99706507),   float2(-0.81409955, -0.9143759),  float2(0.19984126, 0.78641367),
-                                              float2(0.14383161, -0.1410079)};
+public static const float2 PoissonDisk[16] = { float2(-0.94201624, -0.39906216), float2(0.94558609, -0.76890725),  float2(-0.094184101, -0.9293887),
+                                               float2(0.34495938, 0.2938776),    float2(-0.91588581, 0.45771432),  float2(-0.81544232, -0.87912464),
+                                               float2(-0.38208752, 0.27676845),  float2(0.97484398, 0.7564837),    float2(0.44323325, -0.97511554),
+                                               float2(0.53742981, -0.4737342),   float2(-0.26496911, -0.41893023), float2(0.79197514, 0.19090188),
+                                               float2(-0.2418884, 0.99706507),   float2(-0.81409955, -0.9143759),  float2(0.19984126, 0.78641367),
+                                               float2(0.14383161, -0.1410079) };
 
 public float GetStableWeylNoise(uint2 pixelPos, float timeOffset) {
     float spatial  = frac(float(pixelPos.x * 12664589 + pixelPos.y * 9546283) * 0.6180339887498949f);
@@ -68,16 +68,17 @@ public float SoftClamp(float x, float limit) {
 // PERCENTAGE-CLOSER SOFT SHADOWS (PCSS)
 // ============================================================================
 #define BLOCKER_SEARCH_SAMPLES 16
-#define PCF_SAMPLES            16
+#define PCF_SAMPLES 16
 
 public float FindBlocker(float2 uv, float zReceiver, float searchRadius, Texture2DArray<float> shadowMap, SamplerState linearSampler, uint cascadeIndex) {
     float blockerSum  = 0.0f;
-    int   numBlockers = 0;
+    int numBlockers   = 0;
     float blockerBias = 0.0005f;
 
-    [unroll] for (int i = 0; i < BLOCKER_SEARCH_SAMPLES; ++i) {
-        float2 offset         = PoissonDisk[i] * searchRadius;
-        float  shadowMapDepth = shadowMap.SampleLevel(linearSampler, float3(uv + offset, cascadeIndex), 0);
+    [unroll]
+    for (int i = 0; i < BLOCKER_SEARCH_SAMPLES; ++i) {
+        float2 offset        = PoissonDisk[i] * searchRadius;
+        float shadowMapDepth = shadowMap.SampleLevel(linearSampler, float3(uv + offset, cascadeIndex), 0);
 
         if (shadowMapDepth < (zReceiver - blockerBias)) {
             blockerSum += shadowMapDepth;
@@ -90,17 +91,8 @@ public float FindBlocker(float2 uv, float zReceiver, float searchRadius, Texture
     return blockerSum / (float) numBlockers;
 }
 
-public float CalculateShadowPCSS(
-    float4                 shadowPos,
-    float3                 N,
-    float3                 L,
-    float2                 screenPos,
-    Texture2DArray<float>  shadowMap,
-    SamplerComparisonState shadowSampler,
-    SamplerState           linearSampler,
-    float                  shadowResolution,
-    uint                   cascadeIndex
-) {
+public float CalculateShadowPCSS(float4 shadowPos, float3 N, float3 L, float2 screenPos, Texture2DArray<float> shadowMap, SamplerComparisonState shadowSampler,
+                                 SamplerState linearSampler, float shadowResolution, uint cascadeIndex) {
     float3 projCoords = shadowPos.xyz / shadowPos.w;
 
     if (projCoords.x < 0.0 || projCoords.x > 1.0 || projCoords.y < 0.0 || projCoords.y > 1.0 || projCoords.z < 0.0 || projCoords.z > 1.0) {
@@ -132,7 +124,8 @@ public float CalculateShadowPCSS(
     float s      = sin(angle);
     float c      = cos(angle);
 
-    [unroll] for (int i = 0; i < PCF_SAMPLES; ++i) {
+    [unroll]
+    for (int i = 0; i < PCF_SAMPLES; ++i) {
         float2 offset = float2(PoissonDisk[i].x * c - PoissonDisk[i].y * s, PoissonDisk[i].x * s + PoissonDisk[i].y * c) * filterRadius;
         shadow += shadowMap.SampleCmpLevelZero(shadowSampler, float3(projCoords.xy + offset, cascadeIndex), zReceiver);
     }
@@ -144,15 +137,8 @@ public float CalculateShadowPCSS(
 /**
  * @brief Computes a high-performance, stochastically dithered soft ray-traced shadow.
  */
-public float CalculateShadowRayTraced(
-    float3                          worldPos,
-    float3                          N,
-    float3                          L,
-    float2                          screenPos,
-    float                           time,
-    RaytracingAccelerationStructure tlas,
-    float                           sunSize = 0.001f
-) {
+public float CalculateShadowRayTraced(float3 worldPos, float3 N, float3 L, float2 screenPos, float time, RaytracingAccelerationStructure tlas,
+                                      float sunSize = 0.001f) {
     float3 up        = abs(L.y) < 0.999f ? float3(0.0f, 1.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f);
     float3 right     = normalize(cross(up, L));
     float3 bitangent = cross(L, right);
@@ -161,12 +147,13 @@ public float CalculateShadowRayTraced(
     float cosA  = cos(angle);
     float sinA  = sin(angle);
 
-    float     unblockedRays = 0.0f;
-    const int RAY_SAMPLES   = 4;
+    float unblockedRays   = 0.0f;
+    const int RAY_SAMPLES = 4;
 
     float spread = max(sunSize, 0.00001f);
 
-    [unroll] for (int i = 0; i < RAY_SAMPLES; ++i) {
+    [unroll]
+    for (int i = 0; i < RAY_SAMPLES; ++i) {
         float2 p      = PoissonDisk[i];
         float2 jitter = float2(p.x * cosA - p.y * sinA, p.x * sinA + p.y * cosA) * spread;
 
@@ -248,7 +235,7 @@ public float3 BoxParallaxCorrection(float3 posWS, float3 R, float3 boxMin, float
     float3 t1                  = (bMax - posWS) * invR;
     float3 t2                  = (bMin - posWS) * invR;
     float3 tMax                = max(t1, t2);
-    float  distance            = min(min(tMax.x, tMax.y), tMax.z);
+    float distance             = min(min(tMax.x, tMax.y), tMax.z);
     float3 intersectPositionWS = posWS + R * distance;
     return normalize(intersectPositionWS - probePos);
 }
@@ -278,10 +265,11 @@ public float3 LTC_Evaluate(float3 N, float3 V, float3 P, float3x3 Minv, float4 p
     L[2] = mul(Minv, mul(R, points[2].xyz - P));
     L[3] = mul(Minv, mul(R, points[3].xyz - P));
 
-    int    n = 0;
+    int n = 0;
     float3 clipped[5];
 
-    [unroll] for (int i = 0; i < 4; ++i) {
+    [unroll]
+    for (int i = 0; i < 4; ++i) {
         float3 v1 = L[i];
         float3 v2 = L[(i + 1) % 4];
 
@@ -296,7 +284,8 @@ public float3 LTC_Evaluate(float3 N, float3 V, float3 P, float3x3 Minv, float4 p
 
     if (n < 3)
         return float3(0, 0, 0);
-    [unroll] for (int j = 0; j < n; ++j) {
+    [unroll]
+    for (int j = 0; j < n; ++j) {
         clipped[j] = normalize(clipped[j]);
     }
     float3 sum = float3(0, 0, 0);
@@ -314,23 +303,12 @@ public float3 LTC_Evaluate(float3 N, float3 V, float3 P, float3x3 Minv, float4 p
 // ============================================================================
 // REFLECTIONS
 // ============================================================================
-public float2 RaymarchSSR(
-    float3           worldPos,
-    float3           startPosWS,
-    float3           dirWS,
-    float3           N,
-    out float        confidence,
-    out float        debugValue,
-    Texture2D<float> texDepth,
-    SamplerState     pointSampler,
-    float4x4         viewProj,
-    float4           camPos,
-    float4x4         invViewProj
-) {
+public float2 RaymarchSSR(float3 worldPos, float3 startPosWS, float3 dirWS, float3 N, out float confidence, out float debugValue, Texture2D<float> texDepth,
+                          SamplerState pointSampler, float4x4 viewProj, float4 camPos, float4x4 invViewProj) {
     debugValue = 0.0f;
 
     const float maxDistance = 30.0f;
-    float3      endPosWS    = startPosWS + dirWS * maxDistance;
+    float3 endPosWS         = startPosWS + dirWS * maxDistance;
 
     float4 startClip = mul(viewProj, float4(startPosWS, 1.0f));
     float4 endClip   = mul(viewProj, float4(endPosWS, 1.0f));
@@ -365,20 +343,21 @@ public float2 RaymarchSSR(
     float maxPixelDist = max(screenPixels.x, screenPixels.y);
     float stepCount    = clamp(maxPixelDist / 3.0f, 16.0f, 64.0f);
 
-    float  invW_step  = (invW_end - invW_start) / stepCount;
-    float2 uv_w_step  = (uv_w_end - uv_w_start) / stepCount;
-    float  ndc_z_step = (ndc_z_end - ndc_z_start) / stepCount;
+    float invW_step  = (invW_end - invW_start) / stepCount;
+    float2 uv_w_step = (uv_w_end - uv_w_start) / stepCount;
+    float ndc_z_step = (ndc_z_end - ndc_z_start) / stepCount;
 
     uint2 pixelPos = uint2(startUV * float2(dw, dh));
     float dither   = GetStableWeylNoise(pixelPos, 0.0f);
 
-    float  startOffset  = 1.2f + dither;
-    float  current_invW = invW_start + invW_step * startOffset;
+    float startOffset   = 1.2f + dither;
+    float current_invW  = invW_start + invW_step * startOffset;
     float2 current_uv_w = uv_w_start + uv_w_step * startOffset;
 
     confidence = 0.0f;
 
-    [loop] for (int i = 0; i < 64; ++i) {
+    [loop]
+    for (int i = 0; i < 64; ++i) {
         if (i >= int(stepCount))
             break;
 
@@ -410,13 +389,14 @@ public float2 RaymarchSSR(
             float t_start = max(0.0f, (float(i) + dither) / stepCount);
             float t_end   = (float(i) + 1.0f + dither) / stepCount;
 
-            float  t_mid  = 0.0f;
+            float t_mid   = 0.0f;
             float2 mid_uv = 0.0f;
 
-            [unroll(4)] for (int b = 0; b < 4; ++b) {
+            [unroll(4)]
+            for (int b = 0; b < 4; ++b) {
                 t_mid = (t_start + t_end) * 0.5f;
 
-                float  mid_invW = invW_start + (invW_end - invW_start) * t_mid;
+                float mid_invW  = invW_start + (invW_end - invW_start) * t_mid;
                 float2 mid_uv_w = uv_w_start + (uv_w_end - uv_w_start) * t_mid;
 
                 mid_uv = mid_uv_w / mid_invW;
@@ -425,7 +405,7 @@ public float2 RaymarchSSR(
 
                 float3 mid_ws = ReconstructWorldPos(mid_uv, midRayDepth, invViewProj);
 
-                float  midDepth     = texDepth.SampleLevel(pointSampler, mid_uv, 0).r;
+                float midDepth      = texDepth.SampleLevel(pointSampler, mid_uv, 0).r;
                 float3 midSampledWS = ReconstructWorldPos(mid_uv, midDepth, invViewProj);
 
                 float midRayDist    = length(mid_ws - camPos.xyz);
@@ -443,10 +423,10 @@ public float2 RaymarchSSR(
 
             float finalRayDepth = ndc_z_start + (ndc_z_end - ndc_z_start) * t_mid;
 
-            float3 mid_ws          = ReconstructWorldPos(mid_uv, finalRayDepth, invViewProj);
-            float3 finalSampledWS  = ReconstructWorldPos(mid_uv, finalDepth, invViewProj);
-            float  finalRayDist    = length(mid_ws - camPos.xyz);
-            float  finalSampleDist = length(finalSampledWS - camPos.xyz);
+            float3 mid_ws         = ReconstructWorldPos(mid_uv, finalRayDepth, invViewProj);
+            float3 finalSampledWS = ReconstructWorldPos(mid_uv, finalDepth, invViewProj);
+            float finalRayDist    = length(mid_ws - camPos.xyz);
+            float finalSampleDist = length(finalSampledWS - camPos.xyz);
 
             float distFromStart      = length(mid_ws - startPosWS);
             float heightAboveSurface = dot(mid_ws - worldPos, N);

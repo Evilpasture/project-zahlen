@@ -10,20 +10,21 @@ struct DrawIndirectCommand {
 
 struct CullingConstants {
     float4x4 viewProj;
-    float2   hizScreenSize;
-    uint     maxHiZMipLevel;
-    uint     drawCount;
-    uint     passIndex;
+    float2 hizScreenSize;
+    uint maxHiZMipLevel;
+    uint drawCount;
+    uint passIndex;
 };
 
-[vk::push_constant] CullingConstants cullConstants;
+[vk::push_constant]
+CullingConstants cullConstants;
 
-StructuredBuffer<InstanceData>          g_instances;
+StructuredBuffer<InstanceData> g_instances;
 RWStructuredBuffer<DrawIndirectCommand> g_indirectCommands;
-Texture2D<float>                        g_hizTexture;
-SamplerState                            g_pointSampler;
-RWStructuredBuffer<uint>                g_secondPassCandidates;
-RWStructuredBuffer<uint>                g_secondPassCount;
+Texture2D<float> g_hizTexture;
+SamplerState g_pointSampler;
+RWStructuredBuffer<uint> g_secondPassCandidates;
+RWStructuredBuffer<uint> g_secondPassCount;
 
 bool SphereFrustumVisible(float3 center, float radius) {
     float4 r0 = float4(cullConstants.viewProj._m00, cullConstants.viewProj._m01, cullConstants.viewProj._m02, cullConstants.viewProj._m03);
@@ -39,7 +40,8 @@ bool SphereFrustumVisible(float3 center, float radius) {
     planes[4] = r2;
     planes[5] = r3 - r2;
 
-    [unroll] for (uint i = 0; i < 6; ++i) {
+    [unroll]
+    for (uint i = 0; i < 6; ++i) {
         float len = length(planes[i].xyz);
         planes[i] /= max(len, 1e-6f);
         if (dot(float4(center, 1.0f), planes[i]) < -radius)
@@ -54,11 +56,11 @@ bool ProjectAABB(float3 center, float radius, out float4 outUvBounds, out float 
 
     float3 minPos     = center - radius;
     float3 maxPos     = center + radius;
-    float3 corners[8] = {float3(minPos.x, minPos.y, minPos.z), float3(maxPos.x, minPos.y, minPos.z), float3(minPos.x, maxPos.y, minPos.z),
-                         float3(maxPos.x, maxPos.y, minPos.z), float3(minPos.x, minPos.y, maxPos.z), float3(maxPos.x, minPos.y, maxPos.z),
-                         float3(minPos.x, maxPos.y, maxPos.z), float3(maxPos.x, maxPos.y, maxPos.z)};
+    float3 corners[8] = { float3(minPos.x, minPos.y, minPos.z), float3(maxPos.x, minPos.y, minPos.z), float3(minPos.x, maxPos.y, minPos.z),
+                          float3(maxPos.x, maxPos.y, minPos.z), float3(minPos.x, minPos.y, maxPos.z), float3(maxPos.x, minPos.y, maxPos.z),
+                          float3(minPos.x, maxPos.y, maxPos.z), float3(maxPos.x, maxPos.y, maxPos.z) };
 
-    float  minZ  = 1.0f;
+    float minZ   = 1.0f;
     float2 minUV = float2(1.0f, 1.0f);
     float2 maxUV = float2(0.0f, 0.0f);
 
@@ -82,13 +84,13 @@ bool ProjectAABB(float3 center, float radius, out float4 outUvBounds, out float 
 
 bool IsHiZVisible(float3 center, float radius) {
     float4 uvBounds;
-    float  minZ;
+    float minZ;
     if (!ProjectAABB(center, radius, uvBounds, minZ))
         return true;
 
-    float2 size         = (uvBounds.zw - uvBounds.xy) * cullConstants.hizScreenSize;
-    float  maxDimension = max(size.x, size.y);
-    float  mip          = clamp(floor(log2(max(maxDimension, 1.0f))), 0.0f, float(cullConstants.maxHiZMipLevel));
+    float2 size        = (uvBounds.zw - uvBounds.xy) * cullConstants.hizScreenSize;
+    float maxDimension = max(size.x, size.y);
+    float mip          = clamp(floor(log2(max(maxDimension, 1.0f))), 0.0f, float(cullConstants.maxHiZMipLevel));
 
     float d0 = g_hizTexture.SampleLevel(g_pointSampler, uvBounds.xy, mip).r;
     float d1 = g_hizTexture.SampleLevel(g_pointSampler, uvBounds.zy, mip).r;
@@ -98,19 +100,20 @@ bool IsHiZVisible(float3 center, float radius) {
     return (minZ - 0.0001f) <= max(max(d0, d1), max(d2, d3));
 }
 
-[numthreads(64, 1, 1)] void CSMain(uint3 dispatchThreadID : SV_DispatchThreadID) {
+[numthreads(64, 1, 1)]
+void CSMain(uint3 dispatchThreadID: SV_DispatchThreadID) {
     if (cullConstants.passIndex == 0) {
         // --- PASS 1: Frustum + Last Frame Hi-Z ---
         uint index = dispatchThreadID.x;
         if (index >= cullConstants.drawCount)
             return;
 
-        InstanceData inst   = g_instances[index];
-        float3       center = mul(inst.world, float4(inst.localCenter, 1.0f)).xyz;
-        float        scaleX = length(float3(inst.world._m00, inst.world._m10, inst.world._m20));
-        float        scaleY = length(float3(inst.world._m01, inst.world._m11, inst.world._m21));
-        float        scaleZ = length(float3(inst.world._m02, inst.world._m12, inst.world._m22));
-        float        radius = inst.cullRadius * max(scaleX, max(scaleY, scaleZ));
+        InstanceData inst = g_instances[index];
+        float3 center     = mul(inst.world, float4(inst.localCenter, 1.0f)).xyz;
+        float scaleX      = length(float3(inst.world._m00, inst.world._m10, inst.world._m20));
+        float scaleY      = length(float3(inst.world._m01, inst.world._m11, inst.world._m21));
+        float scaleZ      = length(float3(inst.world._m02, inst.world._m12, inst.world._m22));
+        float radius      = inst.cullRadius * max(scaleX, max(scaleY, scaleZ));
 
         bool frustumVisible = SphereFrustumVisible(center, radius);
         bool pass1Visible   = false;
@@ -140,13 +143,13 @@ bool IsHiZVisible(float3 center, float radius) {
         if (candidateIdx >= totalCandidates)
             return;
 
-        uint         index  = g_secondPassCandidates[candidateIdx];
-        InstanceData inst   = g_instances[index];
-        float3       center = mul(inst.world, float4(inst.localCenter, 1.0f)).xyz;
-        float        scaleX = length(float3(inst.world._m00, inst.world._m10, inst.world._m20));
-        float        scaleY = length(float3(inst.world._m01, inst.world._m11, inst.world._m21));
-        float        scaleZ = length(float3(inst.world._m02, inst.world._m12, inst.world._m22));
-        float        radius = inst.cullRadius * max(scaleX, max(scaleY, scaleZ));
+        uint index        = g_secondPassCandidates[candidateIdx];
+        InstanceData inst = g_instances[index];
+        float3 center     = mul(inst.world, float4(inst.localCenter, 1.0f)).xyz;
+        float scaleX      = length(float3(inst.world._m00, inst.world._m10, inst.world._m20));
+        float scaleY      = length(float3(inst.world._m01, inst.world._m11, inst.world._m21));
+        float scaleZ      = length(float3(inst.world._m02, inst.world._m12, inst.world._m22));
+        float radius      = inst.cullRadius * max(scaleX, max(scaleY, scaleZ));
 
         bool pass2Visible = IsHiZVisible(center, radius);
 

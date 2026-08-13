@@ -8,12 +8,13 @@ struct MLAAPushConstants {
     float rcpFrameX;
     float rcpFrameY;
     float threshold;
-    uint  maxSearchSteps;
+    uint maxSearchSteps;
 };
 
-[vk::push_constant] MLAAPushConstants pc;
+[vk::push_constant]
+MLAAPushConstants pc;
 
-Texture2D    colorTex;
+Texture2D colorTex;
 SamplerState sPoint;
 
 // ============================================================================
@@ -29,7 +30,8 @@ struct VSOutput {
 // Vertex Shader Entry Point
 // ============================================================================
 
-[shader("vertex")] VSOutput VSMain(uint vertexID : SV_VertexID) {
+[shader("vertex")]
+VSOutput VSMain(uint vertexID: SV_VertexID) {
     VSOutput output;
     output.uv = float2((vertexID << 1) & 2, vertexID & 2);
     // Flip-free projection; top-left of the texture maps straight to top-left of clip space (-1, -1)
@@ -67,7 +69,8 @@ float SearchUp(float2 uv, float maxSteps) {
     float2 step      = float2(0.0f, -pc.rcpFrameY);
     float2 currentUV = uv + step;
 
-    [loop] for (uint i = 1; i <= (uint) maxSteps; ++i) {
+    [loop]
+    for (uint i = 1; i <= (uint) maxSteps; ++i) {
         float3 colC = colorTex.SampleLevel(sPoint, currentUV, 0.0f).rgb;
         float3 colL = colorTex.SampleLevel(sPoint, currentUV - float2(pc.rcpFrameX, 0.0f), 0.0f).rgb;
         if (!IsEdge(GetLuma(colC), GetLuma(colL))) {
@@ -83,7 +86,8 @@ float SearchDown(float2 uv, float maxSteps) {
     float2 step      = float2(0.0f, pc.rcpFrameY);
     float2 currentUV = uv + step;
 
-    [loop] for (uint i = 1; i <= (uint) maxSteps; ++i) {
+    [loop]
+    for (uint i = 1; i <= (uint) maxSteps; ++i) {
         float3 colC = colorTex.SampleLevel(sPoint, currentUV, 0.0f).rgb;
         float3 colL = colorTex.SampleLevel(sPoint, currentUV - float2(pc.rcpFrameX, 0.0f), 0.0f).rgb;
         if (!IsEdge(GetLuma(colC), GetLuma(colL))) {
@@ -99,7 +103,8 @@ float SearchLeft(float2 uv, float maxSteps) {
     float2 step      = float2(-pc.rcpFrameX, 0.0f);
     float2 currentUV = uv + step;
 
-    [loop] for (uint i = 1; i <= (uint) maxSteps; ++i) {
+    [loop]
+    for (uint i = 1; i <= (uint) maxSteps; ++i) {
         float3 colC = colorTex.SampleLevel(sPoint, currentUV, 0.0f).rgb;
         float3 colT = colorTex.SampleLevel(sPoint, currentUV - float2(0.0f, pc.rcpFrameY), 0.0f).rgb;
         if (!IsEdge(GetLuma(colC), GetLuma(colT))) {
@@ -115,7 +120,8 @@ float SearchRight(float2 uv, float maxSteps) {
     float2 step      = float2(pc.rcpFrameX, 0.0f);
     float2 currentUV = uv + step;
 
-    [loop] for (uint i = 1; i <= (uint) maxSteps; ++i) {
+    [loop]
+    for (uint i = 1; i <= (uint) maxSteps; ++i) {
         float3 colC = colorTex.SampleLevel(sPoint, currentUV, 0.0f).rgb;
         float3 colT = colorTex.SampleLevel(sPoint, currentUV - float2(0.0f, pc.rcpFrameY), 0.0f).rgb;
         if (!IsEdge(GetLuma(colC), GetLuma(colT))) {
@@ -149,7 +155,8 @@ float CalculateArea(float d1, float d2, float ortho1, float ortho2) {
 // Pixel/Fragment Shader Entry Point
 // ============================================================================
 
-[shader("fragment")] float4 PSMain(VSOutput input): SV_Target0 {
+[shader("fragment")]
+float4 PSMain(VSOutput input) : SV_Target0 {
     float2 uv          = input.uv;
     float4 centerColor = colorTex.SampleLevel(sPoint, uv, 0.0f);
 

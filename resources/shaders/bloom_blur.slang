@@ -5,7 +5,8 @@ struct VSOutput {
     float2 uv : TEXCOORD0;
 };
 
-[shader("vertex")] VSOutput VSMain(uint vertexID : SV_VertexID) {
+[shader("vertex")]
+VSOutput VSMain(uint vertexID: SV_VertexID) {
     VSOutput output;
     output.uv  = float2((vertexID << 1) & 2, vertexID & 2);
     output.pos = float4(output.uv.x * 2.0f - 1.0f, output.uv.y * 2.0f - 1.0f, 0.0f, 1.0f);
@@ -13,19 +14,21 @@ struct VSOutput {
 }
 
 struct PushConstants {
-    int   mode; // 0 = Downsample, 1 = Upsample
+    int mode; // 0 = Downsample, 1 = Upsample
     float rcpWidth;
     float rcpHeight;
     float padding;
 };
 
-[vk::push_constant] PushConstants pc;
+[vk::push_constant]
+PushConstants pc;
 
 Texture2D<float4> texInput;
-SamplerState      smp;
+SamplerState smp;
 Texture2D<float4> texLow;
 
-[shader("fragment")] float4 PSMain(VSOutput input): SV_Target0 {
+[shader("fragment")]
+float4 PSMain(VSOutput input) : SV_Target0 {
     float2 texelSize = float2(pc.rcpWidth, pc.rcpHeight);
 
     if (pc.mode == 0) {

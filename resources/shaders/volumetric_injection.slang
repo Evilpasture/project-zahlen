@@ -3,18 +3,20 @@
 import pbr_helpers;
 import uniforms;
 
-[[vk::constant_id(0)]] const int BAKE_TYPE = 0;
+[[vk::constant_id(0)]]
+const int BAKE_TYPE = 0;
 
 struct PushConstants {
-    uint  width;
-    uint  height;
+    uint width;
+    uint height;
     float param0;
     float param1;
     float param2;
 };
-[vk::push_constant] PushConstants pc;
+[vk::push_constant]
+PushConstants pc;
 
-RWTexture3D<float4>           outVoxelMedia;
+RWTexture3D<float4> outVoxelMedia;
 ConstantBuffer<FrameUniforms> frame;
 
 // --- Stable 2D Spatial-Temporal Ray Jitter ---
@@ -64,7 +66,8 @@ float Noise3D(float3 p) {
 float FBM3D(float3 p, int octaves) {
     float val = 0.0f;
     float amp = 0.5f;
-    [unroll] for (int i = 0; i < 2; i++) {
+    [unroll]
+    for (int i = 0; i < 2; i++) {
         val += amp * Noise3D(p);
         p *= 2.1f;
         amp *= 0.5f;
@@ -73,17 +76,20 @@ float FBM3D(float3 p, int octaves) {
 }
 
 float Worley3D(float3 p) {
-    float3 ip       = floor(p);
-    float3 fp       = frac(p);
-    float  min_dist = 1e9f;
+    float3 ip      = floor(p);
+    float3 fp      = frac(p);
+    float min_dist = 1e9f;
 
-    [unroll] for (int z = -1; z <= 1; ++z) {
-        [unroll] for (int y = -1; y <= 1; ++y) {
-            [unroll] for (int x = -1; x <= 1; ++x) {
+    [unroll]
+    for (int z = -1; z <= 1; ++z) {
+        [unroll]
+        for (int y = -1; y <= 1; ++y) {
+            [unroll]
+            for (int x = -1; x <= 1; ++x) {
                 float3 g = float3(x, y, z);
                 float3 o = Hash3D_Vec3(ip + g);
                 float3 r = g + o - fp;
-                float  d = dot(r, r);
+                float d  = dot(r, r);
                 min_dist = min(min_dist, d);
             }
         }
@@ -104,13 +110,14 @@ float3 GetVoxelWorldPos(uint3 tid, float2 resolution, out float outDepthVS) {
     return frame.camPos.xyz + dir * depthVS;
 }
 
-[numthreads(8, 8, 1)] void CSMain(uint3 tid : SV_DispatchThreadID) {
+[numthreads(8, 8, 1)]
+void CSMain(uint3 tid: SV_DispatchThreadID) {
     uint3 gridDim;
     outVoxelMedia.GetDimensions(gridDim.x, gridDim.y, gridDim.z);
     if (any(tid >= gridDim))
         return;
 
-    float  depthVS  = 0.0f;
+    float depthVS   = 0.0f;
     float3 worldPos = GetVoxelWorldPos(tid, float2(gridDim.xy), depthVS);
 
     float time = frame.camPos.w;
@@ -128,11 +135,11 @@ float3 GetVoxelWorldPos(uint3 tid, float2 resolution, out float outDepthVS) {
 
     // --- 2. SWIRLING SNOWDRIFTS & TURBULENCE ---
     float3 windSamplePos = worldPos * 0.035f + float3(windOffset.x, time * 0.8f, windOffset.y);
-    float  windGusts     = Worley3D(windSamplePos);
+    float windGusts      = Worley3D(windSamplePos);
 
     // High-frequency turbulent snow streaks
     float3 turbulencePos = worldPos * 0.10f + float3(windOffset.x * 2.2f, time * 1.6f, windOffset.y * 2.2f);
-    float  turbulence    = FBM3D(turbulencePos, 2);
+    float turbulence     = FBM3D(turbulencePos, 2);
 
     fogDensity *= lerp(0.35f, 1.85f, windGusts * turbulence);
 
@@ -141,15 +148,15 @@ float3 GetVoxelWorldPos(uint3 tid, float2 resolution, out float outDepthVS) {
         float3 center  = (frame.probeMax.xyz + frame.probeMin.xyz) * 0.5f;
         float3 extents = (frame.probeMax.xyz - frame.probeMin.xyz) * 0.5f;
         float3 dist    = abs(worldPos - center) / max(extents, 0.001f);
-        float  mask    = saturate(1.0f - max(dist.x, max(dist.y, dist.z)));
+        float mask     = saturate(1.0f - max(dist.x, max(dist.y, dist.z)));
         fogDensity *= mask;
     }
 
     // --- 3. ICY BLUE-WHITE SNOW SCATTERING COEFFICIENTS ---
     // Pure ice/snow forward scattering (bright, crisp winter light)
     float3 scatteringCoeff = float3(0.91f, 0.95f, 1.0f) * fogDensity;
-    float  absorptionCoeff = 0.015f * fogDensity; // High single-scattering
-    float  extinction      = dot(scatteringCoeff, float3(0.2126f, 0.7152f, 0.0722f)) + absorptionCoeff;
+    float absorptionCoeff  = 0.015f * fogDensity; // High single-scattering
+    float extinction       = dot(scatteringCoeff, float3(0.2126f, 0.7152f, 0.0722f)) + absorptionCoeff;
 
     outVoxelMedia[tid] = float4(scatteringCoeff, extinction);
 }

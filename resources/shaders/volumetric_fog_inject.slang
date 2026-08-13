@@ -4,36 +4,37 @@ import uniforms;
 
 struct GPUVolumetricVolume {
     float4x4 invTransform;
-    float4   extentsAndType;  // xyz = extents, w = type (0=Box, 1=Sphere)
-    float4   colorAndDensity; // xyz = color, w = density
-    float4   emissiveAndAniso;// xyz = emissive, w = anisotropy
+    float4 extentsAndType;   // xyz = extents, w = type (0=Box, 1=Sphere)
+    float4 colorAndDensity;  // xyz = color, w = density
+    float4 emissiveAndAniso; // xyz = emissive, w = anisotropy
 };
 
 struct VolumetricFogPushConstants {
-    float  density;
-    float  heightFalloff;
-    float  heightOffset;
-    float  anisotropy;
+    float density;
+    float heightFalloff;
+    float heightOffset;
+    float anisotropy;
 
     float3 scatteringColor;
-    float  noiseScale;
+    float noiseScale;
 
     float3 absorptionColor;
-    float  noiseSpeed;
+    float noiseSpeed;
 
     float3 emissiveColor;
-    float  noiseIntensity;
+    float noiseIntensity;
 
-    uint   volumeCount;
-    uint   enableNoise;
-    uint   _pad0;
-    uint   _pad1;
+    uint volumeCount;
+    uint enableNoise;
+    uint _pad0;
+    uint _pad1;
 };
 
-[vk::push_constant] VolumetricFogPushConstants fogPC;
+[vk::push_constant]
+VolumetricFogPushConstants fogPC;
 
-RWTexture3D<float4>                  outVoxelMedia;
-ConstantBuffer<FrameUniforms>        frame;
+RWTexture3D<float4> outVoxelMedia;
+ConstantBuffer<FrameUniforms> frame;
 StructuredBuffer<GPUVolumetricVolume> fogVolumes;
 
 float Hash3D(float3 p) {
@@ -70,7 +71,8 @@ float Noise3D(float3 p) {
 float FBM3D(float3 p) {
     float val = 0.0f;
     float amp = 0.5f;
-    [unroll] for (int i = 0; i < 3; i++) {
+    [unroll]
+    for (int i = 0; i < 3; i++) {
         val += amp * Noise3D(p);
         p *= 2.05f;
         amp *= 0.5f;
@@ -84,7 +86,7 @@ float TemporalHash2D(uint2 tid, float timeOffset) {
 }
 
 float3 GetVoxelWorldPos(uint3 tid, float2 resolution, out float outDepthVS) {
-    float2 uv = (float2(tid.xy) + 0.5f) / resolution;
+    float2 uv     = (float2(tid.xy) + 0.5f) / resolution;
     float jitter  = TemporalHash2D(tid.xy, frame.camPos.w) - 0.5f;
     float depthVS = 0.1f * pow(10000.0f, (float(tid.z) + 0.5f + jitter * 0.5f) / 64.0f);
     outDepthVS    = depthVS;
@@ -95,22 +97,24 @@ float3 GetVoxelWorldPos(uint3 tid, float2 resolution, out float outDepthVS) {
     return frame.camPos.xyz + dir * depthVS;
 }
 
-[numthreads(8, 8, 1)] void CSMain(uint3 tid : SV_DispatchThreadID) {
+[numthreads(8, 8, 1)]
+void CSMain(uint3 tid: SV_DispatchThreadID) {
     uint3 gridDim;
     outVoxelMedia.GetDimensions(gridDim.x, gridDim.y, gridDim.z);
-    if (any(tid >= gridDim)) return;
+    if (any(tid >= gridDim))
+        return;
 
-    float  depthVS  = 0.0f;
+    float depthVS   = 0.0f;
     float3 worldPos = GetVoxelWorldPos(tid, float2(gridDim.xy), depthVS);
-    float  time     = frame.camPos.w;
+    float time      = frame.camPos.w;
 
     // --- 1. GLOBAL HEIGHT FOG + NOISE ---
-    float boundedY = max(worldPos.y - fogPC.heightOffset, -10.0f);
+    float boundedY   = max(worldPos.y - fogPC.heightOffset, -10.0f);
     float fogDensity = fogPC.density * exp(-fogPC.heightFalloff * boundedY);
 
     if (fogPC.enableNoise != 0 && fogDensity > 0.00001f) {
         float3 noisePos = worldPos * fogPC.noiseScale + float3(time * fogPC.noiseSpeed * 0.2f, time * fogPC.noiseSpeed * 0.1f, time * fogPC.noiseSpeed * 0.15f);
-        float  noiseVal = FBM3D(noisePos);
+        float noiseVal  = FBM3D(noisePos);
         fogDensity *= lerp(1.0f, noiseVal * 2.0f, fogPC.noiseIntensity);
     }
 
@@ -122,7 +126,7 @@ float3 GetVoxelWorldPos(uint3 tid, float2 resolution, out float outDepthVS) {
         float3 center  = (frame.probeMax.xyz + frame.probeMin.xyz) * 0.5f;
         float3 extents = (frame.probeMax.xyz - frame.probeMin.xyz) * 0.5f;
         float3 dist    = abs(worldPos - center) / max(extents, 0.001f);
-        float  mask    = saturate(1.0f - max(dist.x, max(dist.y, dist.z)));
+        float mask     = saturate(1.0f - max(dist.x, max(dist.y, dist.z)));
         scatteringCoeff *= mask;
         extinctionCoeff *= mask;
     }
@@ -130,11 +134,11 @@ float3 GetVoxelWorldPos(uint3 tid, float2 resolution, out float outDepthVS) {
     // --- 2. LOCAL FOG VOLUMES INJECTION ---
     for (uint i = 0; i < fogPC.volumeCount; ++i) {
         GPUVolumetricVolume vol = fogVolumes[i];
-        float3 localPos = mul(vol.invTransform, float4(worldPos, 1.0f)).xyz;
+        float3 localPos         = mul(vol.invTransform, float4(worldPos, 1.0f)).xyz;
 
         float volMask = 0.0f;
         if (vol.extentsAndType.w == 0.0f) { // Box Volume
-            float3 d = abs(localPos) / vol.extentsAndType.xyz;
+            float3 d   = abs(localPos) / vol.extentsAndType.xyz;
             float maxD = max(d.x, max(d.y, d.z));
             if (maxD < 1.0f) {
                 volMask = smoothstep(1.0f, 0.8f, maxD);
@@ -154,5 +158,5 @@ float3 GetVoxelWorldPos(uint3 tid, float2 resolution, out float outDepthVS) {
     }
 
     float scalarExtinction = dot(extinctionCoeff, float3(0.2126f, 0.7152f, 0.0722f));
-    outVoxelMedia[tid] = float4(scatteringCoeff, scalarExtinction);
+    outVoxelMedia[tid]     = float4(scatteringCoeff, scalarExtinction);
 }
