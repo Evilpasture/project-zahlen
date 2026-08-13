@@ -1,6 +1,7 @@
 // resources/shaders/mesh_particle_update.hlsl
-#pragma pack_matrix(column_major)
-#include "uniforms.hlsl"
+
+import common;
+import uniforms;
 
 struct Particle3D {
     float4 position; // xyz = pos, w = scale
@@ -39,9 +40,7 @@ struct ComputePushConstants {
     MeshParticleEmitterParams p;
 };
 
-[[vk::push_constant]] ComputePushConstants          pc;
-[[vk::binding(2, 0)]] ConstantBuffer<FrameUniforms> frame;
-
+[vk::push_constant] ComputePushConstants          pc;
 float Hash13(float3 p) {
     p = frac(p * 0.1031f);
     p += dot(p, p.zyx + 31.32f);
@@ -71,12 +70,12 @@ float4 QuatFromAxisAngle(float3 axis, float angle) {
         return;
 
     uint64_t   addr = pc.particleBufferAddr + idx * sizeof(Particle3D);
-    Particle3D p    = vk::RawBufferLoad<Particle3D>(addr, 4);
+    Particle3D p    = (*(Particle3D*)(addr));
     float      dt   = pc.deltaTime;
 
     // --- 1. INITIAL SEED (UNINITIALIZED BRAND-NEW PARTICLE) ---
     if (p.params.y <= 0.0f) {
-        float3 seed = float3(idx, frame.camPos.w, pc.p.scaleMin);
+        float3 seed = float3(idx, scene.frame.camPos.w, pc.p.scaleMin);
         float3 rand = Hash33(seed) * 2.0f - 1.0f;
 
         p.position.xyz = pc.p.spawnOrigin + rand * (pc.p.spawnBoxExtent * 0.5f);
@@ -112,7 +111,7 @@ float4 QuatFromAxisAngle(float3 axis, float angle) {
     }
     // --- 3. RECYCLING (ONLY IF LOOPING IS ENABLED!) ---
     else if (pc.p.loopBoundary > 0.5f) {
-        float3 seed = float3(idx, frame.camPos.w, p.params.x);
+        float3 seed = float3(idx, scene.frame.camPos.w, p.params.x);
         float3 rand = Hash33(seed) * 2.0f - 1.0f;
 
         p.position.xyz = pc.p.spawnOrigin + rand * (pc.p.spawnBoxExtent * 0.5f);
@@ -126,5 +125,5 @@ float4 QuatFromAxisAngle(float3 axis, float angle) {
         p.color      = pc.p.startColor;
     }
 
-    vk::RawBufferStore<Particle3D>(addr, p, 4);
+    (*(Particle3D*)(addr)) = p;
 }

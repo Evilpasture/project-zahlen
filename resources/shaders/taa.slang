@@ -1,5 +1,5 @@
 // resources/shaders/taa.hlsl
-#include "uniforms.hlsl"
+import uniforms;
 struct VSOutput {
 	float4 pos : SV_Position;
 	float2 uv : TEXCOORD0;
@@ -15,16 +15,16 @@ VSOutput VSMain(uint vertexID : SV_VertexID) {
 	return output;
 }
 
-[[vk::binding(0, 0)]] Texture2D<float4> texCurrent;
-[[vk::binding(1, 0)]] Texture2D<float4> texHistory;
-[[vk::binding(2, 0)]] Texture2D<float2> texVelocity;
-[[vk::binding(3, 0)]] SamplerState smp;
-[[vk::binding(4, 0)]] ConstantBuffer<FrameUniforms> frame;
+Texture2D<float4> texCurrent;
+Texture2D<float4> texHistory;
+Texture2D<float2> texVelocity;
+SamplerState smp;
+ConstantBuffer<FrameUniforms> frame;
 
 struct PushConstants {
 	float feedback;
 };
-[[vk::push_constant]] PushConstants pc;
+[vk::push_constant] PushConstants pc;
 
 // --- COLOR SPACE CONVERSIONS ---
 // Decouples luminance from chrominance to prevent chromatic ghosting

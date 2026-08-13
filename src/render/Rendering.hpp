@@ -69,6 +69,7 @@ static constexpr auto isLegacy = false;
 #include "Utils.hpp"
 #include "Extensions.hpp"
 #include "Features.hpp"
+#include "DebugNames.hpp"
 #include "Vertex.hpp"
 #include "Handles.hpp"
 #include "Context.hpp"

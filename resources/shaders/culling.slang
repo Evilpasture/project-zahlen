@@ -1,6 +1,5 @@
 // resources/shaders/culling.hlsl
-#define SKIP_BINDINGS
-#include "common.hlsl"
+import common;
 
 struct DrawIndirectCommand {
     uint vertexCount;
@@ -17,14 +16,14 @@ struct CullingConstants {
     uint     passIndex;
 };
 
-[[vk::push_constant]] CullingConstants cullConstants;
+[vk::push_constant] CullingConstants cullConstants;
 
-[[vk::binding(0, 0)]] StructuredBuffer<InstanceData>          g_instances;
-[[vk::binding(1, 0)]] RWStructuredBuffer<DrawIndirectCommand> g_indirectCommands;
-[[vk::binding(2, 0)]] Texture2D<float>                        g_hizTexture;
-[[vk::binding(3, 0)]] SamplerState                            g_pointSampler;
-[[vk::binding(4, 0)]] RWStructuredBuffer<uint>                g_secondPassCandidates;
-[[vk::binding(5, 0)]] RWStructuredBuffer<uint>                g_secondPassCount;
+StructuredBuffer<InstanceData>          g_instances;
+RWStructuredBuffer<DrawIndirectCommand> g_indirectCommands;
+Texture2D<float>                        g_hizTexture;
+SamplerState                            g_pointSampler;
+RWStructuredBuffer<uint>                g_secondPassCandidates;
+RWStructuredBuffer<uint>                g_secondPassCount;
 
 bool SphereFrustumVisible(float3 center, float radius) {
     float4 r0 = float4(cullConstants.viewProj._m00, cullConstants.viewProj._m01, cullConstants.viewProj._m02, cullConstants.viewProj._m03);

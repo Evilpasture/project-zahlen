@@ -1,6 +1,6 @@
 // resources/shaders/volumetric_fog_inject.hlsl
-#pragma pack_matrix(column_major)
-#include "uniforms.hlsl"
+
+import uniforms;
 
 struct GPUVolumetricVolume {
     float4x4 invTransform;
@@ -30,11 +30,11 @@ struct VolumetricFogPushConstants {
     uint   _pad1;
 };
 
-[[vk::push_constant]] VolumetricFogPushConstants fogPC;
+[vk::push_constant] VolumetricFogPushConstants fogPC;
 
-[[vk::binding(0, 0)]] RWTexture3D<float4>                  outVoxelMedia;
-[[vk::binding(1, 0)]] ConstantBuffer<FrameUniforms>        frame;
-[[vk::binding(2, 0)]] StructuredBuffer<GPUVolumetricVolume> fogVolumes;
+RWTexture3D<float4>                  outVoxelMedia;
+ConstantBuffer<FrameUniforms>        frame;
+StructuredBuffer<GPUVolumetricVolume> fogVolumes;
 
 float Hash3D(float3 p) {
     p = frac(p * 0.1031f);

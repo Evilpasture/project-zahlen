@@ -1,7 +1,7 @@
 // resources/shaders/blit.hlsl
-#pragma pack_matrix(column_major)
-#include "pbr_helpers.hlsl"
-#include "uniforms.hlsl"
+
+import pbr_helpers;
+import uniforms;
 
 struct VSOutput {
     float4 pos : SV_Position;
@@ -22,13 +22,13 @@ struct PushConstants {
     float vignettePower;
     int   fullBright;
 };
-[[vk::push_constant]] PushConstants pc;
+[vk::push_constant] PushConstants pc;
 
-[[vk::binding(0, 0)]] Texture2D<float4>             texInput;
-[[vk::binding(1, 0)]] SamplerState                  smp;
-[[vk::binding(2, 0)]] Texture2D<float4>             texBloom; // Bound dynamically by BlitPass
-[[vk::binding(3, 0)]] Texture2D<float>              texDepth;
-[[vk::binding(4, 0)]] ConstantBuffer<FrameUniforms> frame;
+Texture2D<float4>             texInput;
+SamplerState                  smp;
+Texture2D<float4>             texBloom; // Bound dynamically by BlitPass
+Texture2D<float>              texDepth;
+ConstantBuffer<FrameUniforms> frame;
 
 float3 ACESFilm(float3 x) {
     float a = 2.51f;

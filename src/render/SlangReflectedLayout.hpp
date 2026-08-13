@@ -8,6 +8,7 @@
 #endif
 
 #include <array>
+#include <map>
 #include <slang/slang.h>
 #include <tuple>
 #include <utility>
@@ -29,6 +30,16 @@ struct SlangReflectedSet {
     std::vector<SlangReflectedBinding> bindings;
 };
 
+struct UnsafeReflectedLayout;
+
+/**
+ * @brief A single SPIR-V blob + stage to reflect over.
+ */
+struct ReflectedStageInput {
+    ZHLN_ShaderDesc        shader;
+    VkShaderStageFlagBits stage;
+};
+
 /**
  * @brief Holds descriptor and pipeline layout handles generated via Slang reflection.
  */
@@ -37,8 +48,11 @@ struct SlangReflectedLayout {
     std::array<DescriptorSetLayout, 4> descriptorSetLayouts;
     uint32_t                           setLayoutCount = 0;
 
-    // Tracks the exact count of each descriptor type needed across all sets
-    std::array<uint32_t, VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT + 1> descriptorTypeCounts {};
+    // Tracks the exact count of each descriptor type needed across all sets.
+    // Sparse for the same reason as UnsafeReflectedLayout: the ray-tracing
+    // acceleration-structure descriptor type value is far outside the core
+    // Vulkan enum range.
+    std::map<VkDescriptorType, uint32_t> descriptorTypeCounts {};
     std::array<SlangReflectedSet, 4>                              reflectedSets {};
 
     [[nodiscard]] auto GetSetLayout(uint32_t setIndex = 0) const noexcept -> VkDescriptorSetLayout {
@@ -82,6 +96,28 @@ struct SlangReflectedLayout {
     }
 
     bool Build(VkDevice device, const ShaderStages& shaders) noexcept;
+
+    /// Reflects a single stage (commonly a compute shader described by a raw SPV blob).
+    bool Build(VkDevice device, const ZHLN_ShaderDesc& shader, VkShaderStageFlagBits stage) noexcept;
+
+    /// Reflects the union of an arbitrary set of stages (e.g. the bindless scene registry).
+    bool Build(VkDevice device, std::span<const ReflectedStageInput> stages) noexcept;
+
+    /// True when `binding` is present in the given reflected set.
+    [[nodiscard]] auto HasBinding(uint32_t setIndex, uint32_t binding) const noexcept -> bool {
+        if (setIndex >= 4) {
+            return false;
+        }
+        for (const auto& b: reflectedSets[setIndex].bindings) {
+            if (b.binding == binding) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+  private:
+    void AdoptUnsafe(UnsafeReflectedLayout&& unsafe_res) noexcept;
 };
 
 /**

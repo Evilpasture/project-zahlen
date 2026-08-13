@@ -1,15 +1,45 @@
-// resources/shaders/basic.hlsl
-#include "common.hlsl"
+// resources/shaders/basic.slang
+import common;
+import pbr_helpers;
 
-VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, uint viewId : SV_ViewID) {
+struct VSOutput {
+    float4                 pos : SV_Position;
+    float4                 currClip : TEXCOORD0;
+    float4                 prevClip : TEXCOORD1;
+    float3                 worldPos : POSITION;
+    float3                 normal : NORMAL;
+    float4                 tangent : TANGENT;
+    float2                 uv : TEXCOORD2;
+    float4                 shadowPos : TEXCOORD3;
+    float4                 color : COLOR;
+    nointerpolation uint4  materialIndices : TEXCOORD4;
+    nointerpolation float4 baseColorFactor : TEXCOORD5;
+    nointerpolation float3 pbrFactors : TEXCOORD6;
+    nointerpolation uint   alphaMode : TEXCOORD7;
+    nointerpolation float4 emissiveFactor : TEXCOORD8;
+};
+
+struct PSOutput {
+    float4 color : SV_Target0;
+    float2 velocity : SV_Target1;
+    float4 normalRoughness : SV_Target2;
+};
+
+// NOTE: use the Vulkan-native index semantics here. Slang maps SV_InstanceID
+// to (InstanceIndex - BaseInstance) -- D3D semantics, i.e. it EXCLUDES
+// firstInstance -- whereas the old DXC build received raw InstanceIndex. All
+// of this engine's indirect draws encode the instance slot in firstInstance
+// (see kGpuCullingSentinel handling below), so the raw Vulkan builtins are
+// required. Same argument applies to SV_VertexID/SV_VulkanVertexID.
+VSOutput VSMain(uint vertexId : SV_VulkanVertexID, uint instanceId : SV_VulkanInstanceID, uint viewId : SV_ViewID) {
     VSOutput output;
 
     uint         instId = (obj.instanceId != 4294967295u) ? obj.instanceId : instanceId;
-    InstanceData inst   = g_instances[instId];
+    InstanceData inst   = scene.g_instances[instId];
 
     uint actualVertexId = vertexId;
     if (inst.iboAddress != 0) {
-        actualVertexId = vk::RawBufferLoad<uint>(inst.iboAddress + vertexId * 4, 4);
+        actualVertexId = (*(uint*)(inst.iboAddress + vertexId * 4));
     }
     /*
      * NOTE: Defensive check against OOB BDA fetches.
@@ -34,9 +64,9 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, ui
     uint isSkinned   = (flags >> 8) & 0xFF;
     uint isViewmodel = (flags >> 16) & 0xFF;
 
-    float4x4 activeVP = (isViewmodel != 0) ? frame.viewmodelViewProj : frame.viewProj;
+    float4x4 activeVP = (isViewmodel != 0) ? scene.frame.viewmodelViewProj : scene.frame.viewProj;
 
-    float3 position     = vk::RawBufferLoad<float3>(inst.posAddress + actualVertexId * 12, 4);
+    float3 position     = (*(float3*)(inst.posAddress + actualVertexId * 12));
     float2 localUV      = float2(0, 0);
     float4 localColor   = float4(1, 1, 1, 1);
     float3 localNormal  = float3(0, 1, 0);
@@ -45,10 +75,10 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, ui
     // Load Attributes
     if (inst.attrAddress != 0) {
         uint64_t attrAddr   = inst.attrAddress + actualVertexId * 16;
-        uint     normalRaw  = vk::RawBufferLoad<uint>(attrAddr + 0, 4);
-        uint     tangentRaw = vk::RawBufferLoad<uint>(attrAddr + 4, 4);
-        uint     uvRaw      = vk::RawBufferLoad<uint>(attrAddr + 8, 4);
-        uint     colorRaw   = vk::RawBufferLoad<uint>(attrAddr + 12, 4);
+        uint     normalRaw  = (*(uint*)(attrAddr + 0));
+        uint     tangentRaw = (*(uint*)(attrAddr + 4));
+        uint     uvRaw      = (*(uint*)(attrAddr + 8));
+        uint     colorRaw   = (*(uint*)(attrAddr + 12));
 
         localNormal  = UnpackNormal(normalRaw).xyz;
         localTangent = UnpackNormal(tangentRaw);
@@ -63,8 +93,8 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, ui
 
     if (isSkinned != 0 && inst.skinAddress != 0) {
         uint64_t skinAddr   = inst.skinAddress + actualVertexId * 12;
-        uint2    jointsRaw  = vk::RawBufferLoad<uint2>(skinAddr + 0, 4);
-        uint     weightsRaw = vk::RawBufferLoad<uint>(skinAddr + 8, 4);
+        uint2    jointsRaw  = (*(uint2*)(skinAddr + 0));
+        uint     weightsRaw = (*(uint*)(skinAddr + 8));
 
         localJoints = UnpackJoints(jointsRaw);
         weights     = UnpackColor(weightsRaw);
@@ -107,7 +137,7 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, ui
         // Extract the cascade index mapped from the CPU
         uint cascadeIndex = obj.isShadowPass - 1;
 
-        output.pos             = mul(frame.lightSpaceMatrices[cascadeIndex], worldPos);
+        output.pos             = mul(scene.frame.lightSpaceMatrices[cascadeIndex], worldPos);
         output.uv              = localUV;
         output.baseColorFactor = baseColorFactor;
         output.emissiveFactor  = emissiveFactor;
@@ -133,12 +163,12 @@ VSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, ui
     } else {
         prevWorldPos = mul(prevWorldMatrix, localPos);
     }
-    output.prevClip = mul(frame.prevUnjitteredViewProj, prevWorldPos);
+    output.prevClip = mul(scene.frame.prevUnjitteredViewProj, prevWorldPos);
 
     output.tangent.w = localTangent.w;
     output.uv        = localUV;
 
-    output.shadowPos       = mul(frame.lightSpaceMatrices[0], worldPos);
+    output.shadowPos       = mul(scene.frame.lightSpaceMatrices[0], worldPos);
     output.color           = localColor;
     output.materialIndices = uint4(albedoIdx, normalIdx, pbrIdx, emissiveIdx);
     output.baseColorFactor = baseColorFactor;
@@ -154,7 +184,7 @@ void PSShadow(VSOutput input) {
     float  alphaCutoff     = input.pbrFactors.z;
     uint   alphaMode       = input.alphaMode;
 
-    float4 albedo = globalTextures[indices.x].Sample(defaultSampler, input.uv) * baseColorFactor * input.color;
+    float4 albedo = scene.globalTextures[indices.x].Sample(scene.defaultSampler, input.uv) * baseColorFactor * input.color;
 
     if (alphaMode == 1 && albedo.a < alphaCutoff) {
         discard;
@@ -171,15 +201,15 @@ PSOutput PSMain(VSOutput input) {
     float  alphaCutoff     = input.pbrFactors.z;
     uint   alphaMode       = input.alphaMode;
 
-    float4 albedo      = globalTextures[indices.x].Sample(defaultSampler, input.uv) * baseColorFactor * input.color;
-    float3 emissiveMap = globalTextures[indices.w].Sample(defaultSampler, input.uv).rgb;
+    float4 albedo      = scene.globalTextures[indices.x].Sample(scene.defaultSampler, input.uv) * baseColorFactor * input.color;
+    float3 emissiveMap = scene.globalTextures[indices.w].Sample(scene.defaultSampler, input.uv).rgb;
     float3 emissive    = emissiveMap * input.emissiveFactor.rgb;
 
     if (alphaMode == 1 && albedo.a < alphaCutoff) {
         discard;
     }
 
-    float4 pbr = globalTextures[indices.z].Sample(defaultSampler, input.uv);
+    float4 pbr = scene.globalTextures[indices.z].Sample(scene.defaultSampler, input.uv);
 
     float roughness = max((indices.z == 0 ? 1.0f : pbr.g) * roughnessFactor, 0.045f);
     float metallic  = (indices.z == 0 ? 1.0f : pbr.b) * metallicFactor;
@@ -200,7 +230,7 @@ PSOutput PSMain(VSOutput input) {
         float  tangentSign = input.tangent.w * 2.0f - 1.0f;
         float3 B           = normalize(cross(N, T) * tangentSign);
 
-        float3 normalMap = globalTextures[indices.y].Sample(defaultSampler, input.uv).rgb * 2.0f - 1.0f;
+        float3 normalMap = scene.globalTextures[indices.y].Sample(scene.defaultSampler, input.uv).rgb * 2.0f - 1.0f;
         worldNormal      = normalize(normalMap.x * T + normalMap.y * B + normalMap.z * N);
     }
 
@@ -219,9 +249,6 @@ PSOutput PSMain(VSOutput input) {
 }
 
 #ifdef FORWARD_PASS
-
-[[vk::binding(11, 0)]] Texture2D<float4> texTransLighting;
-[[vk::binding(11, 0)]] SamplerState      texTransLightingSampler;
 
 float3 RotateVector(float3 V, float3 lightDir) {
     float lenB = length(lightDir);
@@ -245,20 +272,20 @@ float4 PSForward(VSOutput input): SV_Target0 {
     float4 baseColorFactor = input.baseColorFactor;
     float  roughnessFactor = input.pbrFactors.y;
 
-    float4 albedo      = globalTextures[indices.x].Sample(defaultSampler, input.uv) * baseColorFactor * input.color;
-    float3 emissiveMap = globalTextures[indices.w].Sample(defaultSampler, input.uv).rgb;
+    float4 albedo      = scene.globalTextures[indices.x].Sample(scene.defaultSampler, input.uv) * baseColorFactor * input.color;
+    float3 emissiveMap = scene.globalTextures[indices.w].Sample(scene.defaultSampler, input.uv).rgb;
 
     float3 emissive = emissiveMap * input.emissiveFactor.rgb * albedo.a;
 
-    if (frame.fullBright != 0) {
+    if (scene.frame.fullBright != 0) {
         return float4(albedo.rgb + emissive, albedo.a);
     }
 
-    float2 screenUV = input.pos.xy / frame.screenResolution;
+    float2 screenUV = input.pos.xy / scene.frame.screenResolution;
 
-    float4 transLighting = texTransLighting.SampleLevel(texTransLightingSampler, screenUV, 0);
+    float4 transLighting = scene.texTransLighting.SampleLevel(scene.defaultSampler, screenUV, 0);
 
-    float3 diffuseIBL = albedo.rgb * frame.ambientExposure * 0.5f;
+    float3 diffuseIBL = albedo.rgb * scene.frame.ambientExposure * 0.5f;
 
     float  reflFactor = saturate(1.0f - roughnessFactor);
     float3 finalColor = diffuseIBL + (transLighting.rgb * reflFactor) + emissive;

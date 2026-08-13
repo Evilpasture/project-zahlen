@@ -9,7 +9,7 @@
 namespace ZHLN::Vk {
 
 void UnsafeReflectedLayoutBuilder::AddStageUnsafe(const ZHLN_ShaderDesc& desc, VkShaderStageFlags stage) noexcept {
-    if ((desc.code != nullptr) && desc.size > 0 && _stageCount < 5) {
+    if ((desc.code != nullptr) && desc.size > 0 && _stageCount < _stages.size()) {
         _stages[_stageCount++] = {.code = desc.code, .size = desc.size, .stage = stage};
     }
 }
@@ -45,14 +45,21 @@ auto UnsafeReflectedLayoutBuilder::BuildUnsafe(VkDevice device) noexcept -> Unsa
                 auto& binding           = merged_sets[set_idx][binding_idx];
                 binding.binding         = binding_idx;
                 binding.descriptorType  = static_cast<VkDescriptorType>(reflected_binding->descriptor_type);
-                binding.descriptorCount = reflected_binding->count;
+
+                // SPIRV-Reflect reports runtime-sized arrays (e.g. Slang's
+                // `Texture2D globalTextures[]` inside the GlobalSceneRegistry
+                // ParameterBlock) with count == 0. Treat them like any other
+                // bindless pool: size them to the engine's bindless capacity.
+                const bool is_runtime_array = (reflected_binding->count == 0);
+                const bool is_bindless_pool = is_runtime_array || (reflected_binding->count >= 1024);
+                binding.descriptorCount     = is_bindless_pool ? 4096 : reflected_binding->count;
                 binding.stageFlags |= stage.stage;
                 binding.pImmutableSamplers = nullptr;
 
                 // ACCUMULATE EXACT TYPE COUNT FOR THE POOL
                 result.descriptorTypeCounts[binding.descriptorType] += binding.descriptorCount;
 
-                if (reflected_binding->count >= 1024) {
+                if (is_bindless_pool) {
                     merged_flags[set_idx][binding_idx] = VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
                 }
             }
@@ -161,9 +168,9 @@ auto UnsafeReflectedLayout::CreatePool(VkDevice device, uint32_t maxSets) const 
     std::vector<VkDescriptorPoolSize> pool_sizes;
     bool                              update_after_bind = false;
 
-    for (uint32_t i = 0; i <= VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT; ++i) {
-        if (descriptorTypeCounts[i] > 0) {
-            pool_sizes.push_back({.type = static_cast<VkDescriptorType>(i), .descriptorCount = descriptorTypeCounts[i] * maxSets});
+    for (const auto& [type, count]: descriptorTypeCounts) {
+        if (count > 0) {
+            pool_sizes.push_back({.type = type, .descriptorCount = count * maxSets});
         }
     }
     if (pool_sizes.empty()) {

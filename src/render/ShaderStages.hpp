@@ -66,8 +66,8 @@ class ShaderStages {
         VkDevice                     device,
         const std::filesystem::path& vertPath,
         const std::filesystem::path& fragPath,
-        const char*                  vertEntry = "main",
-        const char*                  fragEntry = "main"
+        const char*                  vertEntry = nullptr,
+        const char*                  fragEntry = nullptr
     ) -> std::expected<ShaderStages, ZHLN::Error>;
 
     [[nodiscard]] constexpr auto Get() const -> const ZHLN_ShaderStages* {

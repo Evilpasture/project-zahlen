@@ -121,6 +121,24 @@ struct PassFactory {
         return Vk::Passieren<
             "MainShadow", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::DepthStencilWrite<Res_Depth>,
             Vk::DepthWrite<Res_ShadowMap>, Vk::DepthWrite<Res_ShadowAtlas>>([this](VkCommandBuffer c) noexcept {
+            // The CPU culling policy inside MainPass1 records its own
+            // secondaries (ParallelDrawDispatch), and Vulkan forbids nesting
+            // secondaries without the nestedCommandBuffer feature
+            // (VUID-vkCmdBeginRendering-commandBuffer-06068 and friends). So
+            // whenever GPU culling won't be used -- including the
+            // ZHLN_NO_GPU_CULLING bisect toggle -- record shadow + main
+            // serially into the primary command buffer instead.
+            const auto drawCount      = static_cast<uint32_t>(self.queues.drawQueue.size());
+            const bool gpuCullingUsed = self.cullingPass.pipeline.Valid() && self.frames.indirectCommandsBuffers->Valid() &&
+                                        (drawCount <= kGpuCullingMaxInstances) && !Diag::DisableGpuCulling();
+
+            if (!gpuCullingUsed) {
+                FrameRecorder shadowRec(c, self);
+                Passes::ShadowPass {}.Execute(shadowRec);
+                FrameRecorder mainRec(c, self);
+                Passes::MainPass1 {}.Execute(mainRec, BuildSceneResources());
+                return;
+            }
             auto& rec = self.parallelRecorder.Current();
             rec.Reset();
             TaskSystemScheduler scheduler;
@@ -263,11 +281,13 @@ struct PassFactory {
     [[nodiscard]] auto MakeAmbientPass() const noexcept {
         return Vk::MakePass<"Ambient", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>, Vk::ColorWrite<Res_Ambient>>(
             [this](auto& ctx) noexcept {
+                // Order must mirror ambient.slang's set-0 declaration order:
+                // texInput, smp, texDepth, texNormalRoughness, pointSampler, frame.
                 self.ambientPass.WriteNext(
                     device, Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor), self.defaultSampler.Get(),
                     Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget),
                     Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer), self.pointSampler.Get(),
-                    self.iblPayload.prefilteredView.Get(), self.iblPayload.brdfLutView.Get(), self.clampSampler.Get(), self.frames.frameUniformBuffers->Handle()
+                    self.frames.frameUniformBuffers->Handle()
                 );
                 self.ambientPass.Execute(ctx.Cmd(), pc);
             }
@@ -278,14 +298,18 @@ struct PassFactory {
         return Vk::MakePass<
             "Lighting", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_Ambient>,
             Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ColorWrite<Res_Lighting>>([this](auto& ctx) noexcept {
+            // Order must mirror lighting.slang's set-0 declaration order.
+            // NOTE: GetTLAS() is LAST (binding 17 in the RT variant; absent in
+            // the NoRT variant), so the trailing NORT-only hole never shifts
+            // any other binding's positional write.
             self.lightingPass.WriteNext(
                 device, Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor), self.defaultSampler.Get(),
                 Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget),
                 Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer), self.frames.lightStorageBuffers->Handle(),
                 self.frames.frameUniformBuffers->Handle(), self.graphResources.shadowMap.view.Get(), self.shadowSampler.Get(), self.ltcMatView.Get(),
                 self.ltcAmpView.Get(), self.clampSampler.Get(), self.frames.clusterGridBuffers->Handle(), self.frames.lightIndexListBuffers->Handle(),
-                Vk::Assume<Vk::ShaderRead<Res_Ambient>>(self.graphResources.ambientTarget), self.pointSampler.Get(), GetTLAS(), self.shadowAtlasCubeView.Get(),
-                self.shadowAtlas2DView.Get()
+                Vk::Assume<Vk::ShaderRead<Res_Ambient>>(self.graphResources.ambientTarget), self.pointSampler.Get(), self.shadowAtlasCubeView.Get(),
+                self.shadowAtlas2DView.Get(), GetTLAS()
             );
             self.lightingPass.ExecuteVariant(ctx.Cmd(), lightVariant, pc);
         });
@@ -297,13 +321,16 @@ struct PassFactory {
             Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ShaderReadGeneral<Res_VoxelResolved>, Vk::ColorWrite<Res_HdrSceneColor>>(
             [this](auto& ctx) noexcept {
                 Profiler::ScopedGpuProfile timer(ctx.Cmd(), fIdx, self.gpuProfiler, Stage::PostProcessPass);
+                // Order must mirror reflection.slang's set-0 declaration order
+                // (g_instances and the RT-only tlas trail at the tail).
                 self.reflectionPass.WriteNext(
                     device, Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor), self.defaultSampler.Get(),
                     Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget),
                     Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer), self.pointSampler.Get(),
-                    self.iblPayload.prefilteredView.Get(), GetTLAS(), self.frames.frameUniformBuffers[fIdx].Handle(), self.iblPayload.brdfLutView.Get(),
+                    self.iblPayload.prefilteredView.Get(), self.frames.frameUniformBuffers[fIdx].Handle(), self.iblPayload.brdfLutView.Get(),
                     self.clampSampler.Get(), Vk::Assume<Vk::ShaderRead<Res_Lighting>>(self.graphResources.lightingTarget),
-                    Vk::Assume<Vk::ShaderReadGeneral<Res_VoxelResolved>>(self.graphResources.voxelResolved), self.frames.instanceDataBuffers[fIdx].Handle()
+                    Vk::Assume<Vk::ShaderReadGeneral<Res_VoxelResolved>>(self.graphResources.voxelResolved), self.frames.instanceDataBuffers[fIdx].Handle(),
+                    GetTLAS()
                 );
 
                 self.reflectionPass.ExecuteVariant(ctx.Cmd(), reflVariant, pc);
@@ -332,9 +359,10 @@ struct PassFactory {
                     device, Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor), self.defaultSampler.Get(),
                     Vk::Assume<Vk::ShaderRead<Res_TransDepth>>(self.graphResources.transDepthBuffer),
                     Vk::Assume<Vk::ShaderRead<Res_TransNorm>>(self.graphResources.transNormalBuffer), self.pointSampler.Get(),
-                    self.iblPayload.prefilteredView.Get(), GetTLAS(), self.frames.frameUniformBuffers[fIdx].Handle(), self.iblPayload.brdfLutView.Get(),
+                    self.iblPayload.prefilteredView.Get(), self.frames.frameUniformBuffers[fIdx].Handle(), self.iblPayload.brdfLutView.Get(),
                     self.clampSampler.Get(), Vk::Assume<Vk::ShaderRead<Res_Lighting>>(self.graphResources.lightingTarget),
-                    Vk::Assume<Vk::ShaderReadGeneral<Res_VoxelResolved>>(self.graphResources.voxelResolved), self.frames.instanceDataBuffers[fIdx].Handle()
+                    Vk::Assume<Vk::ShaderReadGeneral<Res_VoxelResolved>>(self.graphResources.voxelResolved), self.frames.instanceDataBuffers[fIdx].Handle(),
+                    GetTLAS()
                 );
                 self.translucentReflectionPass.ExecuteVariant(ctx.Cmd(), reflVariant, pc);
             }
@@ -343,14 +371,24 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeForwardPass() const noexcept {
         auto& targetImage = self.graphResources.hdrSceneColor;
-        return Vk::Passieren<"Forward", Vk::ColorWrite<Res_HdrSceneColor>, Vk::DepthStencilWrite<Res_Depth>>([this, &targetImage](VkCommandBuffer c) noexcept {
-            Profiler::ScopedGpuProfile timer(c, fIdx, self.gpuProfiler, Stage::ForwardPass);
-            FrameRecorder              fwdRecorder(c, self);
-            Passes::ForwardPass {}.Execute(
-                fwdRecorder, Vk::Assume<Vk::ColorWrite<Res_HdrSceneColor>>(targetImage),
-                Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(self.presentation.depthTarget)
-            );
-        });
+        // Translucent draws in this pass sample texTransLighting through the
+        // global bindless set (basic.slang), whose descriptor is written once
+        // with SHADER_READ_ONLY_OPTIMAL at target-recreate time. TransReflection
+        // leaves that image in COLOR_ATTACHMENT_OPTIMAL, so declare the read
+        // here and let the graph barrier it back to a sampled layout before
+        // the draws (and before next frame's early mesh draws with the same
+        // statically-used descriptor).
+        return Vk::Passieren<
+            "Forward", Vk::ColorWrite<Res_HdrSceneColor>, Vk::DepthStencilWrite<Res_Depth>, Vk::ShaderRead<Res_TransLighting>>(
+            [this, &targetImage](VkCommandBuffer c) noexcept {
+                Profiler::ScopedGpuProfile timer(c, fIdx, self.gpuProfiler, Stage::ForwardPass);
+                FrameRecorder              fwdRecorder(c, self);
+                Passes::ForwardPass {}.Execute(
+                    fwdRecorder, Vk::Assume<Vk::ColorWrite<Res_HdrSceneColor>>(targetImage),
+                    Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(self.presentation.depthTarget)
+                );
+            }
+        );
     }
 
     [[nodiscard]] auto MakeBloomThresholdPass() const noexcept {
@@ -413,7 +451,7 @@ struct PassFactory {
 
             Profiler::ScopedGpuProfile timer(c, fIdx, self.gpuProfiler, Stage::DecalPass);
 
-            DecalLayout::Write(self.ctx.Device(), self.decalSet, self.presentation.depthTarget.view.Get(), self.pointSampler.Get());
+            self.decalDescLayout.Write(self.ctx.Device(), self.decalSet, self.presentation.depthTarget.view.Get(), self.pointSampler.Get());
 
             FrameRecorder recorder(c, self);
             recorder.encoder.BindPipeline(self.decalPipeline.Get(), self.decalPipelineLayout.Get());
@@ -518,7 +556,7 @@ struct PassFactory {
                 } metrics = {rcpW, rcpH, (float) inputColor.extent.width, (float) inputColor.extent.height};
 
                 self.smaaEdgePass.WriteNext(
-                    device, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor), self.defaultSampler.Get(), self.pointSampler.Get()
+                    device, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor), self.defaultSampler.Get()
                 );
                 self.smaaEdgePass.Execute(c, metrics, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
             }
@@ -536,8 +574,8 @@ struct PassFactory {
 
                 const auto& [areaView, searchView] = std::tie(self.textureViews[self.smaaAreaTexIdx], self.textureViews[self.smaaSearchTexIdx]);
                 self.smaaWeightPass.WriteNext(
-                    device, Vk::Assume<Vk::ShaderRead<Res_SmaaEdge>>(self.graphResources.smaaEdgeTarget), areaView, searchView, self.defaultSampler.Get(),
-                    self.pointSampler.Get()
+                    device, Vk::Assume<Vk::ShaderRead<Res_SmaaEdge>>(self.graphResources.smaaEdgeTarget), areaView, searchView,
+                    self.defaultSampler.Get()
                 );
                 self.smaaWeightPass.Execute(c, metrics, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
             }
@@ -557,7 +595,7 @@ struct PassFactory {
 
                     self.smaaBlendPass.WriteNext(
                         device, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor),
-                        Vk::Assume<Vk::ShaderRead<Res_SmaaWeight>>(self.graphResources.smaaWeightTarget), self.defaultSampler.Get(), self.pointSampler.Get()
+                        Vk::Assume<Vk::ShaderRead<Res_SmaaWeight>>(self.graphResources.smaaWeightTarget), self.defaultSampler.Get()
                     );
                     self.smaaBlendPass.Execute(c, metrics, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
                 }
@@ -606,7 +644,16 @@ struct PassFactory {
 
     template <typename SrcImgT, typename PassT>
     static void RunKawasePass(VkDevice device, VkCommandBuffer cmd, PassT& pass, const SrcImgT& src, const Vk::Sampler& defaultSampler) noexcept {
-        pass.WriteNext(device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(src), defaultSampler.Get(), Vk::SkipWrite {});
+        // bloom_blur.slang's `texLow` is statically reachable (mode is a runtime
+        // push constant, not a specialization), so every compiled Kawase
+        // pipeline has binding 2 in its layout even though the downsample
+        // branch never samples it at runtime. Write the source image into that
+        // slot to keep the descriptor valid; the upsample draws below bind the
+        // real lower-resolution input there.
+        pass.WriteNext(
+            device, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(src), defaultSampler.Get(),
+            Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(src)
+        );
         pass.Execute(
             cmd, RenderContext::Impl::KawasePushConstants {
                      .mode = 0, .rcpWidth = 1.0f / (float) src.extent.width, .rcpHeight = 1.0f / (float) src.extent.height, .padding = 0.0f

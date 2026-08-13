@@ -1,7 +1,7 @@
 // resources/shaders/lighting.hlsl
-#pragma pack_matrix(column_major)
-#include "pbr_helpers.hlsl"
-#include "uniforms.hlsl"
+
+import pbr_helpers;
+import uniforms;
 struct PushConstants {
     float4x4 invViewProj;
     float4x4 viewProj;
@@ -16,7 +16,7 @@ struct PushConstants {
     int      enableRTR;
     int      _pad;
 };
-[[vk::push_constant]] PushConstants pc;
+[vk::push_constant] PushConstants pc;
 
 struct ClusterVolume {
     uint offset;
@@ -24,28 +24,32 @@ struct ClusterVolume {
 };
 
 // --- G-Buffer & Lighting Inputs ---
-[[vk::binding(0, 0)]] Texture2D<float4>                texInput;
-[[vk::binding(1, 0)]] SamplerState                     smp;
-[[vk::binding(2, 0)]] Texture2D<float>                 texDepth;
-[[vk::binding(3, 0)]] Texture2D<float4>                texNormalRoughness;
-[[vk::binding(4, 0)]] StructuredBuffer<Light>          lights;
-[[vk::binding(5, 0)]] ConstantBuffer<FrameUniforms>    frame;
-[[vk::binding(6, 0)]] Texture2DArray<float>            shadowMap;
-[[vk::binding(7, 0)]] SamplerComparisonState           shadowSampler;
-[[vk::binding(8, 0)]] Texture2D                        ltc_mat;
-[[vk::binding(9, 0)]] Texture2D                        ltc_amp;
-[[vk::binding(10, 0)]] SamplerState                    clampSampler;
-[[vk::binding(11, 0)]] StructuredBuffer<ClusterVolume> clusterGrid;
-[[vk::binding(12, 0)]] StructuredBuffer<uint>          clusterIndexList;
-[[vk::binding(13, 0)]] Texture2D<float4>               texAmbient;
-[[vk::binding(14, 0)]] SamplerState                    pointSampler;
-#ifndef DISABLE_RTR
-[[vk::binding(15, 0)]] RaytracingAccelerationStructure tlas;
-#endif
+Texture2D<float4>                texInput;
+SamplerState                     smp;
+Texture2D<float>                 texDepth;
+Texture2D<float4>                texNormalRoughness;
+StructuredBuffer<Light>          lights;
+ConstantBuffer<FrameUniforms>    frame;
+Texture2DArray<float>            shadowMap;
+SamplerComparisonState           shadowSampler;
+Texture2D                        ltc_mat;
+Texture2D                        ltc_amp;
+SamplerState                    clampSampler;
+StructuredBuffer<ClusterVolume> clusterGrid;
+StructuredBuffer<uint>          clusterIndexList;
+Texture2D<float4>               texAmbient;
+SamplerState                    pointSampler;
 
 // --- Punctual Shadow Maps ---
-[[vk::binding(16, 0)]] TextureCubeArray<float> punctualShadowCube; //  Omni-directional shadows
-[[vk::binding(17, 0)]] Texture2DArray<float>   punctualShadow2D;   // Spotlight shadows
+TextureCubeArray<float> punctualShadowCube; //  Omni-directional shadows
+Texture2DArray<float>   punctualShadow2D;   // Spotlight shadows
+
+// The TLAS binding is declared LAST on purpose: in the NoRT variant this
+// declaration disappears entirely, so the (never present) hole stays at the
+// tail of the binding table and positional descriptor writes stay aligned.
+#ifndef DISABLE_RTR
+RaytracingAccelerationStructure tlas;
+#endif
 
 [[vk::constant_id(0)]] const int ENABLE_RTR = 1;
 
@@ -232,7 +236,14 @@ float4 PSMain(VSOutput input): SV_Target0 {
 
                         shadowVisibility = punctualShadowCube.SampleCmpLevelZero(shadowSampler, float4(r, light.shadowLayer), currentDepth);
                     } else if (light.type == 2) { // SPOT LIGHT (2D Perspective Array)
-                        float4 sPos = mul((float4x4) light.points, float4(worldPos + N * 0.05f, 1.0f));
+                        // Slang has no direct array->matrix cast; columns of a
+                        // column-major float4x4 map 1:1 to the float4 array.
+                        float4x4 lightViewProj;
+                        lightViewProj[0] = light.points[0];
+                        lightViewProj[1] = light.points[1];
+                        lightViewProj[2] = light.points[2];
+                        lightViewProj[3] = light.points[3];
+                        float4 sPos = mul(lightViewProj, float4(worldPos + N * 0.05f, 1.0f));
                         sPos.xy     = sPos.xy * 0.5f + 0.5f * sPos.w;
 
                         float depthRef   = (sPos.z / sPos.w) - 0.005f;

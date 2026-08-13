@@ -1,7 +1,7 @@
 // resources/shaders/reflection.hlsl
-#pragma pack_matrix(column_major)
-#include "pbr_helpers.hlsl"
-#include "uniforms.hlsl"
+
+import pbr_helpers;
+import uniforms;
 
 struct InstanceData {
     float4x4 world;
@@ -33,8 +33,6 @@ struct InstanceData {
     float4 baseColorFactor;
     float4 emissiveFactor;
 };
-
-[[vk::binding(12, 0)]] StructuredBuffer<InstanceData> g_instances;
 
 [[vk::constant_id(0)]] const int ENABLE_SSR = 1;
 #ifndef DISABLE_RTR
@@ -75,22 +73,24 @@ struct PushConstants {
     int      enableRTR_dynamic;
     int      _pad;
 };
-[[vk::push_constant]] PushConstants pc;
+[vk::push_constant] PushConstants pc;
 
-[[vk::binding(0, 0)]] Texture2D<float4>   texInput;
-[[vk::binding(1, 0)]] SamplerState        smp;
-[[vk::binding(2, 0)]] Texture2D<float>    texDepth;
-[[vk::binding(3, 0)]] Texture2D<float4>   texNormalRoughness;
-[[vk::binding(4, 0)]] SamplerState        pointSampler;
-[[vk::binding(5, 0)]] TextureCube<float4> texEnvMap;
+Texture2D<float4>   texInput;
+SamplerState        smp;
+Texture2D<float>    texDepth;
+Texture2D<float4>   texNormalRoughness;
+SamplerState        pointSampler;
+TextureCube<float4> texEnvMap;
+ConstantBuffer<FrameUniforms> frame;
+Texture2D                     brdfLUT;
+SamplerState                  clampSampler;
+Texture2D<float4>            texLighting;
+Texture3D<float4>            texVoxelIntegrated;
+StructuredBuffer<InstanceData> g_instances;
+// The TLAS binding is declared LAST on purpose (see lighting.slang).
 #ifndef DISABLE_RTR
-[[vk::binding(6, 0)]] RaytracingAccelerationStructure tlas;
+RaytracingAccelerationStructure tlas;
 #endif
-[[vk::binding(7, 0)]] ConstantBuffer<FrameUniforms> frame;
-[[vk::binding(8, 0)]] Texture2D                     brdfLUT;
-[[vk::binding(9, 0)]] SamplerState                  clampSampler;
-[[vk::binding(10, 0)]] Texture2D<float4>            texLighting;
-[[vk::binding(11, 0)]] Texture3D<float4>            texVoxelIntegrated;
 
 #ifndef DISABLE_RTR
 float2 RaytraceRTR(

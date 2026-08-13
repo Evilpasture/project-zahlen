@@ -12,9 +12,11 @@
 #include "imgui.h"
 #include <Features.hpp>
 #include <StagingContext.hpp>
+#include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <cstddef>
+#include <cstdio>
 #include <functional>
 #include <stb_image.h>
 #include <vector>
@@ -101,14 +103,14 @@ std::expected<void, Error> RenderContext::Impl::BuildParticlePipelines() {
         .size       = sizeof(ComputePushConstants) // 176 Bytes
     };
 
-    if (!particleUpdatePass.Build(ctx.Device(), bindlessLayout.Get(), csShader, &updatePush, 1)) {
+    if (!particleUpdatePass.Build(ctx.Device(), bindlessLayout.GetSetLayout(), csShader, &updatePush, 1)) {
         ZHLN::Log("ERROR: Failed to build particle update compute pipeline!");
         return std::unexpected(RenderInitError::PipelineCreationFailed);
     }
 
     // 3. Build Billboard Graphics Pipeline (particle_render.hlsl)
     return Vk::PipelineLayoutBuilder(ctx.Device())
-        .AddDescriptorSetLayout(bindlessLayout.Get())
+        .AddDescriptorSetLayout(bindlessLayout.GetSetLayout())
         .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(ParticleRenderPushConstants))
         .Build()
         .transform_error([](auto) -> Error { return RenderInitError::PipelineLayoutCreationFailed; })
@@ -145,17 +147,17 @@ std::expected<void, Error> RenderContext::Impl::BuildMeshParticlePipelines() {
     VkPushConstantRange mpUpdatePush = {
         .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
         .offset     = 0,
-        .size       = sizeof(RenderContext::Impl::MeshParticleComputePush) // 208 bytes
+        .size       = sizeof(RenderContext::Impl::MeshParticleComputePush) // 176 bytes
     };
 
-    if (!meshParticleUpdatePass.Build(ctx.Device(), bindlessLayout.Get(), csMeshShader, &mpUpdatePush, 1)) {
+    if (!meshParticleUpdatePass.Build(ctx.Device(), bindlessLayout.GetSetLayout(), csMeshShader, &mpUpdatePush, 1)) {
         ZHLN::Log("ERROR: Failed to build 3D mesh particle update compute pipeline!");
         return std::unexpected(RenderInitError::PipelineCreationFailed);
     }
 
     // 2. Pipeline Layout for 3D Mesh Particle Graphics Pipelines
     return Vk::PipelineLayoutBuilder(ctx.Device())
-        .AddDescriptorSetLayout(bindlessLayout.Get())
+        .AddDescriptorSetLayout(bindlessLayout.GetSetLayout())
         .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(MeshParticleRenderPush))
         .Build()
         .transform_error([](auto) -> Error { return RenderInitError::PipelineLayoutCreationFailed; })
@@ -625,7 +627,7 @@ std::expected<void, Error> RenderContext::Impl::InitLineBuffers() noexcept {
 
 std::expected<void, Error> RenderContext::Impl::BuildLinePipeline() {
     return Vk::PipelineLayoutBuilder(ctx.Device())
-        .AddDescriptorSetLayout(bindlessLayout.Get())
+        .AddDescriptorSetLayout(bindlessLayout.GetSetLayout())
         .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(ObjectConstants))
         .Build()
         .transform_error([](auto) -> Error { return RenderInitError::PipelineLayoutCreationFailed; })
@@ -636,7 +638,7 @@ std::expected<void, Error> RenderContext::Impl::BuildLinePipeline() {
 
             return LoadAndCreateShaders(
                        {.path = Resource::Paths::BasicVS, .fallback = basicShaders.vertex, .entryPoint = "VSMain"},
-                       {.path = Resource::Paths::ForwardPS, .fallback = Resource::forward_frag, .entryPoint = "PSMain"}
+                       {.path = Resource::Paths::ForwardPS, .fallback = Resource::forward_frag, .entryPoint = "PSForward"}
             )
                 .and_then([&](auto&& shaders) -> std::expected<void, Error> {
                     return Vk::PipelineBuilder<1, true> {}
@@ -781,14 +783,19 @@ std::expected<void, Error> RenderContext::Impl::InitShadowResources() {
 std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
     using enum Resource::ShaderID;
 
-    // 1. Initial side-effects: Descriptor sets allocation
-    cullingLayout = CullingLayout::CreateLayout(ctx.Device());
-    cullingPool   = CullingLayout::CreatePool(ctx.Device(), 4);
+    // 1. Initial side-effects: reflect the culling layout out of the compiled
+    //    shader, then allocate the per-frame descriptor sets.
+    auto cullingShader = Vk::CreateShaderDesc(Resource::culling_comp);
+    if (!cullingLayout.Build(ctx.Device(), cullingShader, VK_SHADER_STAGE_COMPUTE_BIT)) {
+        ZHLN::Log("[RenderInit] ERROR: Failed to reflect culling layout from culling SPV!");
+        return std::unexpected(RenderInitError::PipelineCreationFailed);
+    }
+    cullingPool = cullingLayout.CreatePool(ctx.Device(), 4);
 
-    frames.cullingSetsPass1[0] = CullingLayout::Allocate(ctx.Device(), cullingPool.Get(), cullingLayout.Get());
-    frames.cullingSetsPass1[1] = CullingLayout::Allocate(ctx.Device(), cullingPool.Get(), cullingLayout.Get());
-    frames.cullingSetsPass2[0] = CullingLayout::Allocate(ctx.Device(), cullingPool.Get(), cullingLayout.Get());
-    frames.cullingSetsPass2[1] = CullingLayout::Allocate(ctx.Device(), cullingPool.Get(), cullingLayout.Get());
+    frames.cullingSetsPass1[0] = CullingLayout::Allocate(ctx.Device(), cullingPool.Get(), cullingLayout.GetSetLayout());
+    frames.cullingSetsPass1[1] = CullingLayout::Allocate(ctx.Device(), cullingPool.Get(), cullingLayout.GetSetLayout());
+    frames.cullingSetsPass2[0] = CullingLayout::Allocate(ctx.Device(), cullingPool.Get(), cullingLayout.GetSetLayout());
+    frames.cullingSetsPass2[1] = CullingLayout::Allocate(ctx.Device(), cullingPool.Get(), cullingLayout.GetSetLayout());
 
     auto make_instance_set = [&](uint32_t i) -> std::expected<void, Error> {
         return Vk::Buffer::Create(
@@ -798,18 +805,24 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
                 frames.instanceDataBuffers[i] = std::forward<decltype(idb)>(idb);
                 return Vk::Buffer::Create(
                     allocator.Get(), sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances,
-                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY
+                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                    VMA_MEMORY_USAGE_GPU_ONLY
                 );
             })
             .and_then([&, i](auto&& icb1) {
                 frames.indirectCommandsBuffers[i] = std::forward<decltype(icb1)>(icb1);
                 return Vk::Buffer::Create(
                     allocator.Get(), sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances,
-                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY
+                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                    VMA_MEMORY_USAGE_GPU_ONLY
                 );
             })
             .and_then([&, i](auto&& icb2) {
                 frames.indirectCommandsBuffersPass2[i] = std::forward<decltype(icb2)>(icb2);
+                // NOTE: TRANSFER_SRC on both indirect buffers exists for the
+                // ZHLN_DEBUG_INDIRECT readback (end-of-frame head copy).
                 return Vk::Buffer::Create(
                     allocator.Get(), sizeof(uint32_t) * kGpuCullingMaxInstances, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                     VMA_MEMORY_USAGE_GPU_ONLY
@@ -831,14 +844,12 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
     VkPushConstantRange cullingPush = {
         .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
         .offset     = 0,
-        .size       = sizeof(CullingConstants), // 80 bytes (exact match)
+        .size       = sizeof(CullingConstants),
     };
-
-    auto cullingShader = Vk::CreateShaderDesc(Resource::culling_comp);
 
     return make_instance_set(0)
         .and_then([&]() { return make_instance_set(1); })
-        .and_then([&]() { return cullingPass.Build(ctx.Device(), cullingLayout.Get(), cullingShader, &cullingPush, 1); })
+        .and_then([&]() { return cullingPass.Build(ctx.Device(), cullingLayout.GetSetLayout(), cullingShader, &cullingPush, 1); })
         .and_then([&]() -> std::expected<void, Error> {
             constexpr auto numClusters = static_cast<size_t>(16 * 9 * 24);
 
@@ -849,7 +860,17 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
                 .transform_error([](VkResult res) -> Error { return res; })
                 .and_then([&, numClusters](auto&& cbb) -> std::expected<void, Error> {
                     clusterBoundsBuffer = std::forward<decltype(cbb)>(cbb);
-                    Vk::AllocateDoubleBufferedSet<ClusterCullingLayout>(ctx.Device(), clusterCullingDescLayout, clusterCullingPool, frames.clusterCullingSets);
+
+                    // Reflect the cluster-culling layout out of the compiled shader, then
+                    // allocate the double-buffered set pair.
+                    auto ccShader = Vk::CreateShaderDesc(Resource::GetShaderProgram(ClusterCulling).vertex);
+                    if (!clusterCullingDescLayout.Build(ctx.Device(), ccShader, VK_SHADER_STAGE_COMPUTE_BIT)) {
+                        ZHLN::Log("[RenderInit] ERROR: Failed to reflect cluster-culling layout!");
+                        return std::unexpected(RenderInitError::PipelineCreationFailed);
+                    }
+                    clusterCullingPool           = clusterCullingDescLayout.CreatePool(ctx.Device(), 2);
+                    frames.clusterCullingSets[0] = clusterCullingDescLayout.Allocate(ctx.Device(), clusterCullingPool.Get(), clusterCullingDescLayout.GetSetLayout());
+                    frames.clusterCullingSets[1] = clusterCullingDescLayout.Allocate(ctx.Device(), clusterCullingPool.Get(), clusterCullingDescLayout.GetSetLayout());
 
                     auto make_cluster_set = [&](uint32_t i) -> std::expected<void, Error> {
                         return Vk::Buffer::Create(
@@ -881,7 +902,9 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
                                     Vk::FillBuffer(cmd, frames.globalCounterBuffers[i], 0, 0u);
                                 });
 
-                                ClusterCullingLayout::Write(
+                                // Order mirrors cluster_culling.slang's set-0 declaration order:
+                                // in_Bounds, out_Grid, out_IndexList, out_Counter, frame, lights.
+                                clusterCullingDescLayout.Write(
                                     ctx.Device(), frames.clusterCullingSets[i], Vk::BufferWrite {.buffer = clusterBoundsBuffer.Handle()},
                                     Vk::BufferWrite {.buffer = frames.clusterGridBuffers[i].Handle()},
                                     Vk::BufferWrite {.buffer = frames.lightIndexListBuffers[i].Handle()},
@@ -895,13 +918,28 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
                     return make_cluster_set(0).and_then([&, make_cluster_set]() { return make_cluster_set(1); });
                 });
         })
-        .and_then([&]() {
+        .and_then([&]() -> std::expected<void, Error> {
+            // The cluster-bounds pass only touches {out_Bounds, frame}, so it gets
+            // its own reflected layout rather than sharing clusterCullingDescLayout.
             auto bDesc = Vk::CreateShaderDesc(Resource::GetShaderProgram(ClusterBounds).vertex);
-            return clusterBoundsPass.Build(ctx.Device(), clusterCullingDescLayout.Get(), bDesc);
+            if (!clusterBoundsDescLayout.Build(ctx.Device(), bDesc, VK_SHADER_STAGE_COMPUTE_BIT)) {
+                ZHLN::Log("[RenderInit] ERROR: Failed to reflect cluster-bounds layout!");
+                return std::unexpected(RenderInitError::PipelineCreationFailed);
+            }
+            clusterBoundsPool = clusterBoundsDescLayout.CreatePool(ctx.Device(), 2);
+            for (int i = 0; i < 2; ++i) {
+                frames.clusterBoundsSets[i] = clusterBoundsDescLayout.Allocate(ctx.Device(), clusterBoundsPool.Get(), clusterBoundsDescLayout.GetSetLayout());
+                // Order mirrors cluster_bounds.slang's set-0 declaration order: out_Bounds, frame.
+                clusterBoundsDescLayout.Write(
+                    ctx.Device(), frames.clusterBoundsSets[i], Vk::BufferWrite {.buffer = clusterBoundsBuffer.Handle()},
+                    Vk::BufferWrite {.buffer = frames.frameUniformBuffers[i].Handle()}
+                );
+            }
+            return clusterBoundsPass.Build(ctx.Device(), clusterBoundsDescLayout.GetSetLayout(), bDesc);
         })
         .and_then([&]() {
             auto cDesc = Vk::CreateShaderDesc(Resource::GetShaderProgram(ClusterCulling).vertex);
-            return clusterCullingPass.Build(ctx.Device(), clusterCullingDescLayout.Get(), cDesc);
+            return clusterCullingPass.Build(ctx.Device(), clusterCullingDescLayout.GetSetLayout(), cDesc);
         })
         .and_then([&]() -> std::expected<void, Error> {
             if (rtCtx.Valid()) {
@@ -968,15 +1006,48 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
 }
 
 std::expected<void, Error> RenderContext::Impl::InitBindless() {
-    Vk::AllocateDoubleBufferedSet<GlobalSceneLayout>(ctx.Device(), bindlessLayout, bindlessPool, frames.bindlessSets);
+    using enum Resource::ShaderID;
 
-    return Vk::SamplerBuilder {}
-        .Linear()
-        .Repeat()
-        .Anisotropy(ctx.PhysicalInfo().properties.properties.limits.maxSamplerAnisotropy)
-        .LodRange(0.0f, 0.0f)
-        .Build(ctx.Device())
-        .transform_error([](auto err) -> Error { return err; })
+    // Reflect the authoritative GlobalSceneRegistry layout out of the compiled
+    // scene shaders. The union across every `scene`-consuming entry point
+    // (basic VS/PS, forward PS, punctual-shadow VS) covers exactly the registry
+    // members in live use: {0,1,2,3,4,5,6,10,11}, with the runtime texture
+    // array (11) picking up partially-bound / update-after-bind flags.
+    auto basicShaders = Resource::GetShaderProgram(Basic);
+    return LoadAndCreateShaders(
+               {.path = Resource::Paths::BasicVS, .fallback = basicShaders.vertex, .entryPoint = "VSMain"},
+               {.path = Resource::Paths::BasicPS, .fallback = basicShaders.fragment, .entryPoint = "PSMain"}
+    )
+        .and_then([&](auto&& basicStages) -> std::expected<Vk::Sampler, Error> {
+            const Vk::ReflectedStageInput reflectInputs[6] = {
+                {.shader = Vk::CreateShaderDesc(basicStages.GetVertSpv()), .stage = VK_SHADER_STAGE_VERTEX_BIT},
+                {.shader = Vk::CreateShaderDesc(basicStages.GetFragSpv()), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
+                {.shader = Vk::CreateShaderDesc(Resource::GetShaderProgram(PunctualShadows).vertex), .stage = VK_SHADER_STAGE_VERTEX_BIT},
+                {.shader = Vk::CreateShaderDesc(Resource::forward_frag), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
+                // Compute consumers widen the stage flags of the members they
+                // touch (`scene.frame` for both particle simulations). Without
+                // them the union layout carries only VS|FS stage flags and
+                // vkCreateComputePipelines trips VUID-07988.
+                {.shader = Vk::CreateShaderDesc(Resource::GetShaderProgram(ParticleUpdate).vertex), .stage = VK_SHADER_STAGE_COMPUTE_BIT},
+                {.shader = Vk::CreateShaderDesc(Resource::GetShaderProgram(MeshParticleUpdate).vertex), .stage = VK_SHADER_STAGE_COMPUTE_BIT},
+            };
+            if (!bindlessLayout.Build(ctx.Device(), std::span {reflectInputs})) {
+                ZHLN::Log("[RenderInit] ERROR: Failed to reflect the global bindless layout!");
+                return std::unexpected(RenderInitError::PipelineCreationFailed);
+            }
+
+            bindlessPool           = bindlessLayout.CreatePool(ctx.Device(), 2);
+            frames.bindlessSets[0] = bindlessLayout.Allocate(ctx.Device(), bindlessPool.Get(), bindlessLayout.GetSetLayout());
+            frames.bindlessSets[1] = bindlessLayout.Allocate(ctx.Device(), bindlessPool.Get(), bindlessLayout.GetSetLayout());
+
+            return Vk::SamplerBuilder {}
+                .Linear()
+                .Repeat()
+                .Anisotropy(ctx.PhysicalInfo().properties.properties.limits.maxSamplerAnisotropy)
+                .LodRange(0.0f, 0.0f)
+                .Build(ctx.Device())
+                .transform_error([](auto err) -> Error { return err; });
+        })
         .and_then([&](auto&& globalRes) -> std::expected<void, Error> {
             globalSampler = std::forward<decltype(globalRes)>(globalRes);
 
@@ -1006,33 +1077,45 @@ std::expected<void, Error> RenderContext::Impl::InitBindless() {
                 frames.debugMeshHandles[i] = meshPool.Create(std::move(gpu_buf), kMaxDebugVertices, address);
             }
 
-            // Update global descriptor bindings
+            // Update global descriptor bindings. The binding numbers mirror the
+            // GlobalSceneRegistry member order in common.slang. Writes are gated
+            // by HasBinding() because prefilteredMap/brdfLUT/clampSampler are
+            // only declared (never sampled via `scene`) and are stripped from
+            // the reflected layout by dead-code elimination.
             Vk::DescriptorUpdater bindlessRegistry;
             for (int i = 0; i < 2; ++i) {
-                bindlessRegistry.BindSampler(1, globalSampler.Get());
-                bindlessRegistry.BindUniformBuffer(2, frames.frameUniformBuffers[i].Handle());
-                bindlessRegistry.BindStorageBuffer(3, frames.lightStorageBuffers[i].Handle());
-                bindlessRegistry.BindStorageBuffer(4, frames.instanceDataBuffers[i].Handle());
-                bindlessRegistry.BindStorageBuffer(5, frames.jointBuffers[i].Handle());
-                bindlessRegistry.BindStorageBuffer(6, frames.jointBuffers[1 - i].Handle());
-                bindlessRegistry.BindStorageBuffer(7, morphDeltasBuffer.Handle());
+                if (bindlessLayout.HasBinding(0, 0)) {
+                    bindlessRegistry.BindSampler(0, globalSampler.Get());
+                }
+                bindlessRegistry.BindUniformBuffer(1, frames.frameUniformBuffers[i].Handle());
+                bindlessRegistry.BindStorageBuffer(2, frames.lightStorageBuffers[i].Handle());
+                bindlessRegistry.BindStorageBuffer(3, frames.instanceDataBuffers[i].Handle());
+                bindlessRegistry.BindStorageBuffer(4, frames.jointBuffers[i].Handle());
+                bindlessRegistry.BindStorageBuffer(5, frames.jointBuffers[1 - i].Handle());
+                bindlessRegistry.BindStorageBuffer(6, morphDeltasBuffer.Handle());
 
-                bindlessRegistry.BindSampledImage(8, iblPayload.prefilteredView.Get(), VK_NULL_HANDLE, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-                bindlessRegistry.BindSampledImage(9, iblPayload.brdfLutView.Get(), VK_NULL_HANDLE, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-                bindlessRegistry.BindSampler(10, clampSampler.Get());
+                if (bindlessLayout.HasBinding(0, 7)) {
+                    bindlessRegistry.BindSampledImage(7, iblPayload.prefilteredView.Get(), VK_NULL_HANDLE, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                }
+                if (bindlessLayout.HasBinding(0, 8)) {
+                    bindlessRegistry.BindSampledImage(8, iblPayload.brdfLutView.Get(), VK_NULL_HANDLE, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                }
+                if (bindlessLayout.HasBinding(0, 9)) {
+                    bindlessRegistry.BindSampler(9, clampSampler.Get());
+                }
+                // Binding 10 (texTransLighting) is written by RecreateTargets once
+                // the translucent-lighting target exists. Binding 11 is the dynamic
+                // globalTextures pool (UpdateBindlessTextureSlot).
 
                 bindlessRegistry.UpdateSet(ctx.Device(), frames.bindlessSets[i]);
             }
             return {};
         });
 }
+
 using enum Resource::ShaderID;
 std::expected<void, Error> RenderContext::Impl::BuildDecalPipeline() {
     using enum Resource::ShaderID;
-
-    decalDescLayout = DecalLayout::CreateLayout(ctx.Device());
-    decalDescPool   = DecalLayout::CreatePool(ctx.Device(), 1);
-    decalSet        = DecalLayout::Allocate(ctx.Device(), decalDescPool.Get(), decalDescLayout.Get());
 
     VkPushConstantRange push = {
         .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -1042,16 +1125,30 @@ std::expected<void, Error> RenderContext::Impl::BuildDecalPipeline() {
 
     static constexpr std::array<VkFormat, 2> decalFormats = {VK_FORMAT_B10G11R11_UFLOAT_PACK32, VK_FORMAT_R8G8B8A8_UNORM};
 
+    auto decalShaders = Resource::GetShaderProgram(Decal);
+
+    // Reflects decal.slang set 0 ({texDepth, pointSampler}) and set 1 (the scene
+    // parameter block subset). The pipeline layout is assembled BY HAND below so
+    // set 1 gets the FULL bindless layout handle (subset is compatible).
+    const Vk::ReflectedStageInput reflectInputs[2] = {
+        {.shader = Vk::CreateShaderDesc(decalShaders.vertex), .stage = VK_SHADER_STAGE_VERTEX_BIT},
+        {.shader = Vk::CreateShaderDesc(decalShaders.fragment), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
+    };
+    if (!decalDescLayout.Build(ctx.Device(), std::span {reflectInputs})) {
+        ZHLN::Log("[RenderInit] ERROR: Failed to reflect decal descriptor layout!");
+        return std::unexpected(RenderInitError::PipelineCreationFailed);
+    }
+    decalDescPool = decalDescLayout.CreatePool(ctx.Device(), 1);
+    decalSet      = decalDescLayout.Allocate(ctx.Device(), decalDescPool.Get(), decalDescLayout.GetSetLayout());
+
     return Vk::PipelineLayoutBuilder(ctx.Device())
-        .AddDescriptorSetLayout(decalDescLayout.Get()) // Set 0: DecalLayout (texDepth, pointSampler)
-        .AddDescriptorSetLayout(bindlessLayout.Get())  // Set 1: Global Bindless Layout
+        .AddDescriptorSetLayout(decalDescLayout.GetSetLayout()) // Set 0: Decal (texDepth, pointSampler)
+        .AddDescriptorSetLayout(bindlessLayout.GetSetLayout())  // Set 1: Global Bindless Layout
         .AddPushConstant(push.stageFlags, push.size, push.offset)
         .Build()
         .transform_error([](auto) -> Error { return RenderInitError::PipelineLayoutCreationFailed; })
         .and_then([&](auto&& layout) -> std::expected<void, Error> {
             decalPipelineLayout = std::forward<decltype(layout)>(layout);
-
-            auto decalShaders = Resource::GetShaderProgram(Decal);
 
             return LoadAndCreateShaders(
                        {.path = Resource::Paths::DecalVS, .fallback = decalShaders.vertex, .entryPoint = "VSMain"},
@@ -1409,7 +1506,7 @@ std::expected<void, Error> RenderContext::Impl::InitCSGPipelines() {
             shaders = std::forward<decltype(compiledShaders)>(compiledShaders);
 
             return Vk::PipelineLayoutBuilder(ctx.Device())
-                .AddDescriptorSetLayout(bindlessLayout.Get())
+                .AddDescriptorSetLayout(bindlessLayout.GetSetLayout())
                 .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(ObjectConstants))
                 .Build()
                 .transform_error([](auto) -> Error { return RenderInitError::PipelineLayoutCreationFailed; });
@@ -1544,7 +1641,7 @@ std::expected<void, Error> RenderContext::Impl::SetupUI(GLFWwindow* window) {
         })
         .and_then([&]() -> std::expected<void, Error> {
             return Vk::PipelineLayoutBuilder(ctx.Device())
-                .AddDescriptorSetLayout(bindlessLayout.Get())
+                .AddDescriptorSetLayout(bindlessLayout.GetSetLayout())
                 .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(UIObjectConstants))
                 .Build()
                 .transform_error([](auto) -> Error { return RenderInitError::UISetupFailed; })
@@ -1653,6 +1750,47 @@ std::expected<void, Error> RenderContext::Impl::InitSkeletalAnimationResources()
     return {};
 }
 
+namespace {
+
+// Tags every long-lived image with its semantic name via VK_EXT_debug_utils so
+// validation messages and captures identify resources instead of raw handles.
+// No-op unless validation is enabled (the extension is only injected then).
+void ApplyImageDebugNames(RenderContext::Impl& impl) noexcept {
+    const auto& ctx = impl.ctx;
+
+    Reflect::ForEachReflectedField<typename RenderContext::Impl::GraphResources::ReflectMetadata>(
+        impl.graphResources, [&]<typename Tag>(auto& rt) {
+            if constexpr (requires { rt.image.Handle(); }) {
+                Vk::Debug::SetImageName(ctx, rt.image.Handle(), Tag::name.string_view());
+            }
+        }
+    );
+
+    Vk::Debug::SetImageName(ctx, impl.frames.accumBuffers[0].image.Handle(), "AccumHistory0");
+    Vk::Debug::SetImageName(ctx, impl.frames.accumBuffers[1].image.Handle(), "AccumHistory1");
+    Vk::Debug::SetImageName(ctx, impl.presentation.depthTarget.image.Handle(), "DepthTarget");
+    Vk::Debug::SetImageName(ctx, impl.shadowMapPrev.image.Handle(), "ShadowMapPrev");
+    Vk::Debug::SetImageName(ctx, impl.iblPayload.brdfLutImage.Handle(), "IBL.BrdfLut");
+    Vk::Debug::SetImageName(ctx, impl.iblPayload.prefilteredImage.Handle(), "IBL.PrefilteredCube");
+    Vk::Debug::SetImageName(ctx, impl.ltcMatImage.Handle(), "LTC.Mat");
+    Vk::Debug::SetImageName(ctx, impl.ltcAmpImage.Handle(), "LTC.Amp");
+
+    for (size_t i = 0; i < impl.textureImages.size(); ++i) {
+        char name[32];
+        std::snprintf(name, sizeof(name), "BindlessTexture%03zu", i);
+        Vk::Debug::SetImageName(ctx, impl.textureImages[i].Handle(), name);
+    }
+
+    const auto& swapchain = impl.presentation.swapchain.Get();
+    for (uint32_t i = 0; i < swapchain.image_count; ++i) {
+        char name[32];
+        std::snprintf(name, sizeof(name), "Swapchain%u", i);
+        Vk::Debug::SetImageName(ctx, swapchain.images[i], name);
+    }
+}
+
+} // namespace
+
 std::expected<void, Error> RenderContext::Impl::InitLightingLUTs() {
     stagingContext = std::make_unique<Vk::StagingContext>(allocator, ctx);
 
@@ -1710,6 +1848,8 @@ std::expected<void, Error> RenderContext::Impl::InitLightingLUTs() {
 
             ltcMatView = Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcMatImage.Handle());
             ltcAmpView = Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcAmpImage.Handle());
+
+            ApplyImageDebugNames(*this);
         });
 }
 
@@ -1720,8 +1860,8 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
 
     graphResources.sceneColor            = CreateDefaultTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32>(ext);
     graphResources.velocityBuffer        = CreateDefaultTarget<VK_FORMAT_R16G16_SFLOAT>(ext);
-    frames.accumBuffers[0]               = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
-    frames.accumBuffers[1]               = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
+    frames.accumBuffers[0]               = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext, VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+    frames.accumBuffers[1]               = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext, VK_IMAGE_USAGE_TRANSFER_DST_BIT);
     graphResources.normalRoughnessBuffer = CreateDefaultTarget<VK_FORMAT_R8G8B8A8_UNORM>(ext);
     graphResources.hdrSceneColor         = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
     graphResources.ambientTarget         = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
@@ -1737,19 +1877,19 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
     VkExtent3D voxelExt = {.width = 160, .height = 90, .depth = 64};
 
     graphResources.voxelMedia =
-        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
 
     graphResources.voxelLight =
-        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
 
     graphResources.voxelIntegrated =
-        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
 
     graphResources.voxelHistory =
-        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
 
     graphResources.voxelResolved =
-        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
 
     graphResources.bloomThresholdTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext2);
     graphResources.bloomDown1           = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext4);
@@ -1773,11 +1913,37 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
 
     // Transition all newly allocated render targets to their correct default layouts
     Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
+        // History-bearing targets are READ before their first full-coverage
+        // write: TAA samples AccumCurr on frame 0, and the volumetric
+        // temporal filter samples VoxelHist before it ever wrote it (and the
+        // graphics queue reads VoxelResolved one compute-submission early).
+        // Leaving the content as VRAM garbage made the very first frames
+        // differ between runs — worse, NaN bit patterns survive the
+        // neighborhood clamps and poison temporal accumulation indefinitely.
+        // Clear every target whose first definition is a read.
+        const VkClearColorValue      clearBlack = {.float32 = {0.0F, 0.0F, 0.0F, 0.0F}};
+        const VkImageSubresourceRange clearRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = VK_REMAINING_MIP_LEVELS, .baseArrayLayer = 0, .layerCount = VK_REMAINING_ARRAY_LAYERS
+        };
+        const std::array accumImages = {frames.accumBuffers[0].image.Handle(), frames.accumBuffers[1].image.Handle()};
+        for (const auto img: accumImages) {
+            Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
+            vkCmdClearColorImage(cmd, img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearBlack, 1, &clearRange);
+            Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
+        }
+        const std::array targets3D = {
+            graphResources.voxelMedia.image.Handle(), graphResources.voxelLight.image.Handle(), graphResources.voxelIntegrated.image.Handle(),
+            graphResources.voxelHistory.image.Handle(), graphResources.voxelResolved.image.Handle()
+        };
+        for (auto* const img: targets3D) {
+            Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
+            vkCmdClearColorImage(cmd, img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearBlack, 1, &clearRange);
+            Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
+        }
+
         std::array colorTargets = {
             graphResources.sceneColor.image.Handle(),
             graphResources.velocityBuffer.image.Handle(),
-            frames.accumBuffers[0].image.Handle(),
-            frames.accumBuffers[1].image.Handle(),
             graphResources.normalRoughnessBuffer.image.Handle(),
             graphResources.hdrSceneColor.image.Handle(),
             graphResources.ambientTarget.image.Handle(),
@@ -1801,7 +1967,7 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
         }
 
         if (decalSet != VK_NULL_HANDLE) {
-            DecalLayout::Write(ctx.Device(), decalSet, presentation.depthTarget.view.Get(), pointSampler.Get());
+            decalDescLayout.Write(ctx.Device(), decalSet, presentation.depthTarget.view.Get(), pointSampler.Get());
         }
 
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>(
@@ -1816,20 +1982,36 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
             cmd, graphResources.transDepthBuffer.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
         );
-        std::array targets3D = {
-            graphResources.voxelMedia.image.Handle(), graphResources.voxelLight.image.Handle(), graphResources.voxelIntegrated.image.Handle(),
-            graphResources.voxelHistory.image.Handle(), graphResources.voxelResolved.image.Handle()
-        };
+        // (The five voxel volumes above end their clear sequence in GENERAL,
+        // matching every consumer: ComputeWrite/ComputeReadGeneral in the
+        // compute graph, ShaderReadGeneral in the frame graph's Reflection
+        // passes. The frame graph seeds resources it never writes as external
+        // read-only inputs at their first-usage layout and emits no barrier
+        // for them, so GENERAL must be their rest layout.)
 
-        for (auto* const img: targets3D) {
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
-        }
+        // The HiZ pyramid is the only render target not covered by the lists
+        // above: without this warm-up its whole mip chain sits in UNDEFINED
+        // until the first HiZGenerate, yet the two occlusion culling sets
+        // sample the full-chain view (written READ_ONLY) before that — pass 1
+        // already runs inside MainShadow, one pass earlier than HiZGenerate.
+        // Clear it to far depth so frame-0 culling conservatively occludes
+        // nothing instead of consuming raw VRAM garbage, and land it in its
+        // per-frame steady state (MainPass2's ComputeRead leaves it
+        // READ_ONLY) so every culling read is always well-defined.
+        const VkClearColorValue clearFarDepth = {.float32 = {1.0F, 1.0F, 1.0F, 1.0F}};
+        Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
+            cmd, graphResources.hizMap.image.Handle(), VK_IMAGE_ASPECT_COLOR_BIT
+        );
+        vkCmdClearColorImage(cmd, graphResources.hizMap.image.Handle(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearFarDepth, 1, &clearRange);
+        Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+            cmd, graphResources.hizMap.image.Handle(), VK_IMAGE_ASPECT_COLOR_BIT
+        );
     });
 
+    // Translucency input is a plain Texture2D at registry slot 10 (sampler split).
     Vk::DescriptorUpdater bindlessRegistry;
     for (int i = 0; i < 2; ++i) {
-        bindlessRegistry.BindSampledImage(11, graphResources.transLightingTarget.view.Get(), defaultSampler.Get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        bindlessRegistry.BindSampledImage(10, graphResources.transLightingTarget.view.Get(), VK_NULL_HANDLE, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         bindlessRegistry.UpdateSet(ctx.Device(), frames.bindlessSets[i]);
         bindlessRegistry.Clear();
     }
@@ -1838,37 +2020,47 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
         hizPool = {};
     }
     uint32_t mips = graphResources.hizMap.mipLevels;
-    hizPool       = HiZGenerateLayout::CreatePool(ctx.Device(), mips);
+    hizPool = hizDescLayout.CreatePool(ctx.Device(), mips);
     hizSets.resize(mips);
 
     for (uint32_t i = 0; i < mips; ++i) {
-        hizSets[i] = HiZGenerateLayout::Allocate(ctx.Device(), hizPool.Get(), hizDescLayout.Get());
+        hizSets[i] = HiZGenerateLayout::Allocate(ctx.Device(), hizPool.Get(), hizDescLayout.GetSetLayout());
         if (i == 0) {
-            HiZGenerateLayout::Write(
+            // hiz SPV keeps only {inDepth@0, outDepth@1}: the trailing sampler
+            // arg is safely skipped by the reflected writer.
+            hizDescLayout.Write(
                 ctx.Device(), hizSets[i], presentation.depthTarget.view.Get(), graphResources.hizMap.mipViews[0].Get(), pointSampler.Get()
             );
         } else {
-            HiZGenerateLayout::Write(
-                ctx.Device(), hizSets[i], graphResources.hizMap.mipViews[i - 1].Get(), graphResources.hizMap.mipViews[i].Get(), pointSampler.Get()
+            // The whole HiZ pyramid sits in VK_IMAGE_LAYOUT_GENERAL for the
+            // duration of the pass (the graph declares it ComputeWrite), so
+            // the sampled side must be written with GENERAL too — only the
+            // base pass's depth input is a true READ_ONLY resource.
+            hizDescLayout.Write(
+                ctx.Device(), hizSets[i], Vk::ImageWrite {.view = graphResources.hizMap.mipViews[i - 1].Get(), .layout = VK_IMAGE_LAYOUT_GENERAL},
+                Vk::ImageWrite {.view = graphResources.hizMap.mipViews[i].Get(), .layout = VK_IMAGE_LAYOUT_GENERAL}, pointSampler.Get()
             );
         }
     }
 
     for (int i = 0; i < 2; ++i) {
         // Pass 1 Set (Reads Previous Frame's Hi-Z)
-        CullingLayout::Write(
+        // Order mirrors culling.slang's set-0 declaration order.
+        cullingLayout.Write(
             ctx.Device(), frames.cullingSetsPass1[i], Vk::BufferWrite {.buffer = frames.instanceDataBuffers[i].Handle()},
             Vk::BufferWrite {.buffer = frames.indirectCommandsBuffers[i].Handle()}, graphResources.hizMap.fullView.Get(), pointSampler.Get(),
             Vk::BufferWrite {.buffer = frames.secondPassCandidatesBuffers[i].Handle()}, Vk::BufferWrite {.buffer = frames.secondPassCountBuffers[i].Handle()}
         );
 
         // Pass 2 Set (Reads Current Frame's Hi-Z)
-        CullingLayout::Write(
+        cullingLayout.Write(
             ctx.Device(), frames.cullingSetsPass2[i], Vk::BufferWrite {.buffer = frames.instanceDataBuffers[i].Handle()},
             Vk::BufferWrite {.buffer = frames.indirectCommandsBuffersPass2[i].Handle()}, graphResources.hizMap.fullView.Get(), pointSampler.Get(),
             Vk::BufferWrite {.buffer = frames.secondPassCandidatesBuffers[i].Handle()}, Vk::BufferWrite {.buffer = frames.secondPassCountBuffers[i].Handle()}
         );
     }
+
+    ApplyImageDebugNames(*this);
 
     return true;
 }
@@ -1887,10 +2079,13 @@ std::expected<void, Error> RenderContext::Impl::BuildHangGpuPipeline() {
 }
 
 std::expected<void, Error> RenderContext::Impl::BuildHiZPipeline() {
-    hizDescLayout              = HiZGenerateLayout::CreateLayout(ctx.Device());
-    VkPushConstantRange pc     = {.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .offset = 0, .size = sizeof(float) * 2 + sizeof(uint32_t) * 3};
-    auto                shader = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::HizGenerateComp).vertex);
-    return hizGeneratePass.Build(ctx.Device(), hizDescLayout.Get(), shader, &pc, 1);
+    auto shader = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::HizGenerateComp).vertex);
+    if (!hizDescLayout.Build(ctx.Device(), shader, VK_SHADER_STAGE_COMPUTE_BIT)) {
+        ZHLN::Log("[RenderInit] ERROR: Failed to reflect Hi-Z layout from hiz_generate SPV!");
+        return std::unexpected(RenderInitError::PipelineCreationFailed);
+    }
+    VkPushConstantRange pc = {.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .offset = 0, .size = sizeof(float) * 2 + sizeof(uint32_t) * 3};
+    return hizGeneratePass.Build(ctx.Device(), hizDescLayout.GetSetLayout(), shader, &pc, 1);
 }
 
 std::expected<void, Error> RenderContext::Impl::InitUIDynamicBuffers() noexcept {

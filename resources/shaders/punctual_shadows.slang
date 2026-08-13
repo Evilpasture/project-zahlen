@@ -1,36 +1,33 @@
-// resources/shaders/punctual_shadows.hlsl
-#pragma pack_matrix(column_major)
+// resources/shaders/punctual_shadows.slang
 
-// 1. Skip standard bindings to prevent duplicate push constant blocks
-#define SKIP_BINDINGS
-#include "common.hlsl"
-
-// 2. Redeclare only the exact resources this specialized pass needs [2, 3]
-[[vk::binding(4, 0)]] StructuredBuffer<InstanceData> g_instances;
-[[vk::binding(3, 0)]] StructuredBuffer<Light>        lights;
+import common;
+import uniforms;
 
 struct PushConstants {
     uint lightIndex;
 };
-[[vk::push_constant]] PushConstants pc;
+[vk::push_constant] PushConstants pc;
 
 struct PunctualShadowVSOutput {
     float4 pos : SV_Position;
     float  linearDepth : TEXCOORD0;
 };
 
-PunctualShadowVSOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID, uint viewId : SV_ViewID) {
+// NOTE: SV_Vulkan* semantics are required here -- the CPU-built shadow
+// indirect commands encode the instance slot in firstInstance, and Slang's
+// SV_InstanceID would strip BaseInstance (yielding 0 for every sub-draw).
+PunctualShadowVSOutput VSMain(uint vertexId : SV_VulkanVertexID, uint instanceId : SV_VulkanInstanceID, uint viewId : SV_ViewID) {
     PunctualShadowVSOutput output;
 
-    InstanceData inst           = g_instances[instanceId];
-    uint         actualVertexId = inst.iboAddress != 0 ? vk::RawBufferLoad<uint>(inst.iboAddress + vertexId * 4, 4) : vertexId;
+    InstanceData inst           = scene.g_instances[instanceId];
+    uint         actualVertexId = inst.iboAddress != 0 ? (*(uint*)(inst.iboAddress + vertexId * 4)) : vertexId;
     actualVertexId              = min(actualVertexId, max(inst.vertexCount, 1u) - 1u);
 
-    float3 localPos = vk::RawBufferLoad<float3>(inst.posAddress + actualVertexId * 12, 4);
+    float3 localPos = (*(float3*)(inst.posAddress + actualVertexId * 12));
     float3 worldPos = mul(inst.world, float4(localPos, 1.0f)).xyz;
 
     // 2. Fetch Light Data
-    Light  light    = lights[pc.lightIndex];
+    Light  light    = scene.lights[pc.lightIndex];
     float3 lightPos = light.position;
 
     // 3. Build View Matrix for the specific Cubemap Face (Native Vulkan Orientations)

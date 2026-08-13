@@ -8,6 +8,7 @@
 #endif
 
 #include <array>
+#include <map>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -187,8 +188,12 @@ struct UnsafeReflectedLayout {
     std::array<DescriptorSetLayout, 4> descriptorSetLayouts;
     uint32_t                           setLayoutCount = 0;
 
-    // Tracks the exact count of each descriptor type needed by all sets combined
-    std::array<uint32_t, VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT + 1> descriptorTypeCounts {};
+    // Tracks the exact count of each descriptor type needed by all sets combined.
+    // Sparse: extension descriptor types (e.g. VK_DESCRIPTOR_TYPE_ACCELERATION_
+    // STRUCTURE_KHR = 1000150000, used by Slang's RaytracingAccelerationStructure)
+    // are far outside the core 0..INPUT_ATTACHMENT enum range, so indexing a
+    // fixed array by raw VkDescriptorType overflows it.
+    std::map<VkDescriptorType, uint32_t> descriptorTypeCounts {};
     std::array<ReflectedSet, 4>                                   reflectedSets {};
 
     /**
@@ -277,7 +282,7 @@ class UnsafeReflectedLayoutBuilder {
         size_t             size  = 0;
         VkShaderStageFlags stage = 0;
     };
-    std::array<StageData, 5> _stages {};
+    std::array<StageData, 8> _stages {};
     uint32_t                 _stageCount = 0;
 };
 } // namespace ZHLN::Vk

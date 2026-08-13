@@ -91,7 +91,7 @@ struct ComputePass {
 
 template <typename LayoutT>
 struct DoubleBufferedComputePass {
-    DescriptorSetLayout                   descLayout;
+    [[no_unique_address]] LayoutT         layoutInstance {};
     DescriptorPool                        pool;
     ZHLN::DoubleBuffered<VkDescriptorSet> sets;
     PipelineLayout                        pipelineLayout;
@@ -99,13 +99,16 @@ struct DoubleBufferedComputePass {
 
     [[nodiscard]] bool
         Build(VkDevice device, const ZHLN_ShaderDesc& shader, const VkPushConstantRange* pushConstants = nullptr, uint32_t pushCount = 0) noexcept {
-        descLayout = LayoutT::CreateLayout(device);
-        pool       = LayoutT::CreatePool(device, 2);
-        sets[0]    = LayoutT::Allocate(device, pool.Get(), descLayout.Get());
-        sets[1]    = LayoutT::Allocate(device, pool.Get(), descLayout.Get());
+        // Layout authority lives in the compiled shader: reflect the set layout.
+        if (!layoutInstance.Build(device, shader, VK_SHADER_STAGE_COMPUTE_BIT)) {
+            return false;
+        }
+        pool    = layoutInstance.CreatePool(device, 2);
+        sets[0] = layoutInstance.Allocate(device, pool.Get(), layoutInstance.GetSetLayout());
+        sets[1] = layoutInstance.Allocate(device, pool.Get(), layoutInstance.GetSetLayout());
 
         PipelineLayoutBuilder builder(device);
-        builder.AddDescriptorSetLayout(descLayout.Get());
+        builder.AddDescriptorSetLayout(layoutInstance.GetSetLayout());
         for (uint32_t i = 0; i < pushCount; ++i) {
             builder.AddPushConstant(pushConstants[i].stageFlags, pushConstants[i].size, pushConstants[i].offset);
         }
@@ -126,7 +129,7 @@ struct DoubleBufferedComputePass {
 
     template <typename... Args>
     void WriteNext(VkDevice device, Args&&... args) const noexcept {
-        LayoutT::Write(device, sets.Next(), std::forward<Args>(args)...);
+        layoutInstance.Write(device, sets.Next(), std::forward<Args>(args)...);
     }
 
     void Dispatch(VkCommandBuffer cmd, uint32_t x, uint32_t y, uint32_t z) const noexcept {
