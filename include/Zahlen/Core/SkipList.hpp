@@ -5,11 +5,11 @@
 
 #include "Atomic.hpp"
 #include "ControlFlow.hpp"
+#include <Zahlen/Threading/Mutex.hpp>
 #include <algorithm>
 #include <array>
 #include <cstdint>
 #include <new>
-#include <Zahlen/Threading/Mutex.hpp>
 #include <utility>
 #include <vector>
 
@@ -125,6 +125,10 @@ class SkipList {
 
         const_cast<SkipList*>(this)->ExitReader();
         return result;
+    }
+
+    [[nodiscard]] Value* Find(const Key& key) noexcept {
+        return const_cast<SkipList*>(this)->Find(key);
     }
 
     /**
@@ -364,9 +368,7 @@ class SkipList {
     }
 
     void RetireNode(SkipNode* node) {
-        ZHLN::Lock(_retireMutex, [&] {
-            _retireQueue.push_back(node);
-        });
+        ZHLN::Lock(_retireMutex, [&] { _retireQueue.push_back(node); });
         TryPurge();
     }
 

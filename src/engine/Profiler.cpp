@@ -44,14 +44,14 @@ SkipList<std::string, ProfileDataInternal<100>, std::less<>> s_Metrics;
 
 void CPUProfiler::Record(std::string_view name, float timeMS) noexcept {
     std::string key(name);
-    const auto* dataPtr = s_Metrics.Find(key);
+    auto*       dataPtr = s_Metrics.Find(key);
 
     if (dataPtr == nullptr) [[unlikely]] {
         s_Metrics.Insert(key, ProfileDataInternal<100> {});
         dataPtr = s_Metrics.Find(key);
     }
 
-    auto* data = const_cast<ProfileDataInternal<100>*>(dataPtr);
+    auto* data = static_cast<ProfileDataInternal<100>*>(dataPtr);
     data->Push(timeMS);
 }
 
