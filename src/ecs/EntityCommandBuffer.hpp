@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/Entity.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 #include <new>
 #include <utility>
 #include <vector>
@@ -24,13 +24,13 @@ class EntityCommandBuffer {
     EntityCommandBuffer& operator=(EntityCommandBuffer&&)      = delete;
 
     [[nodiscard]] Entity CreateEntity() {
-        Entity e = {_tempIndexCounter++, 0xFFFFFFFF};
-        _commands.push_back({CommandType::Create, e, 0, nullptr, nullptr});
+        Entity e = {.index = _tempIndexCounter++, .generation = 0xFFFFFFFF};
+        _commands.push_back({CommandType::Create, e, 0, nullptr, nullptr, nullptr});
         return e;
     }
 
     void DestroyEntity(Entity e) {
-        _commands.push_back({CommandType::Destroy, e, 0, nullptr, nullptr});
+        _commands.push_back({CommandType::Destroy, e, 0, nullptr, nullptr, nullptr});
     }
 
     template <typename T>
@@ -46,7 +46,9 @@ class EntityCommandBuffer {
             ::operator delete(ptr, std::align_val_t {alignof(ComponentType)});
         };
 
-        _commands.push_back({CommandType::AddComponent, e, familyId, storage, destructor});
+        auto applyFn = [](Registry& reg, Entity target, void* ptr) { reg.Add<ComponentType>(target, std::move(*static_cast<ComponentType*>(ptr))); };
+
+        _commands.push_back({CommandType::AddComponent, e, familyId, storage, destructor, applyFn});
     }
 
     void Playback();
@@ -61,6 +63,7 @@ class EntityCommandBuffer {
         uint32_t    familyId;
         void*       componentData;
         void (*destructor)(void*);
+        void (*applyFn)(Registry&, Entity, void*);
     };
 
     Registry*            _registry = nullptr;
