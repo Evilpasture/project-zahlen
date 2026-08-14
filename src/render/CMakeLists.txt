@@ -9,6 +9,22 @@
 
 find_package(Vulkan REQUIRED)
 
+find_package(slang CONFIG QUIET HINTS
+    "$ENV{VULKAN_SDK}/lib/cmake"
+    "$ENV{VULKAN_SDK}/lib/cmake/slang"
+)
+
+if(NOT TARGET slang::slang)
+    find_library(SLANG_LIBRARY NAMES slang HINTS "$ENV{VULKAN_SDK}/lib" "/usr/lib" "/usr/local/lib")
+    find_path(SLANG_INCLUDE_DIR NAMES slang.h HINTS "$ENV{VULKAN_SDK}/include" "/usr/include" "/usr/local/include")
+
+    add_library(slang::slang UNKNOWN IMPORTED)
+    set_target_properties(slang::slang PROPERTIES
+        IMPORTED_LOCATION "${SLANG_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${SLANG_INCLUDE_DIR}"
+    )
+endif()
+
 add_library(zahlen_render STATIC
     RenderCore.c
     VmaImplementation.cpp
@@ -67,6 +83,7 @@ target_link_libraries(zahlen_render PUBLIC
     Vulkan::Vulkan
     GPUOpen::VulkanMemoryAllocator
     spirv_reflect
+    slang::slang
 )
 
 target_include_directories(zahlen_render PUBLIC
