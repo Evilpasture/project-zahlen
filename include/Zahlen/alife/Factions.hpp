@@ -3,8 +3,9 @@
 
 #pragma once
 
-#include <cstdint>
+#include <Zahlen/Common.h>
 #include <Zahlen/Core/String.hpp>
+#include <cstdint>
 #include <string_view>
 #include <vector>
 
@@ -15,7 +16,7 @@ struct FactionDef {
     uint32_t id;
 };
 
-class FactionRegistry {
+class ZHLN_API FactionRegistry {
   public:
     explicit FactionRegistry(uint32_t capacity);
 

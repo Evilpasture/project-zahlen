@@ -7,6 +7,7 @@
 #include "Graph.hpp"
 #include "SpatialGrid.hpp"
 #include "Types.hpp"
+#include <Zahlen/Common.h>
 #include <functional>
 
 // Forward-declare Engine to break the circular dependency loop
@@ -33,11 +34,11 @@ struct SimConfig {
     SimTuning default_tuning;
 };
 
-class Simulator {
+class ZHLN_API Simulator {
   public:
     explicit Simulator(const SimConfig& config = SimConfig {});
 
-    // Subsystem update hook (using fully-qualified forward-declared namespace)
+    // Subsystem update hook
     void Update(ZHLN::Engine& engine, float dt, JPH::RVec3Arg observer_pos);
 
     void SetRelation(uint32_t a, uint32_t b, float value);

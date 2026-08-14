@@ -1,7 +1,6 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-
 # src/alife/CMakeLists.txt
 
 set(ALIFE_SOURCES
@@ -12,8 +11,7 @@ set(ALIFE_SOURCES
     SpatialGrid.cpp
 )
 
-# Create a static library for the ALife subsystem
-add_library(zahlen_alife STATIC ${ALIFE_SOURCES})
+add_library(zahlen_alife OBJECT ${ALIFE_SOURCES})
 set_target_properties(zahlen_alife PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     CXX_STANDARD 26
@@ -40,7 +38,6 @@ target_link_libraries(zahlen_alife PUBLIC
     Jolt
 )
 
-# Optional: Disable RTTI and Exceptions to match the rest of the engine (if not on MSVC)
 if(NOT MSVC)
     target_compile_options(zahlen_alife PRIVATE -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti)
 endif()

@@ -4,6 +4,7 @@
 #pragma once
 
 #include "Types.hpp"
+#include <Zahlen/Common.h>
 #include <Zahlen/Entity.hpp>
 #include <vector>
 
@@ -14,7 +15,7 @@ class Registry;
 
 namespace ZHLN::ALife {
 
-class SpatialGrid {
+class ZHLN_API SpatialGrid {
   public:
     SpatialGrid(uint32_t w, uint32_t h, float cell_size);
 

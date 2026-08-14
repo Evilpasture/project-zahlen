@@ -4,6 +4,7 @@
 #pragma once
 
 #include "Types.hpp"
+#include <Zahlen/Common.h>
 #include <memory_resource>
 #include <vector>
 
@@ -39,7 +40,7 @@ struct PathWorkspace {
     }
 };
 
-class LevelGraph {
+class ZHLN_API LevelGraph {
   public:
     explicit LevelGraph(uint32_t node_count);
 

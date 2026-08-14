@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <Zahlen/Common.h>
 #include <Zahlen/Core/String.hpp>
 #include <cstdint>
 #include <string_view>
@@ -31,7 +32,7 @@ struct WorldState {
     }
 };
 
-class WorldStateRegistry {
+class ZHLN_API WorldStateRegistry {
   public:
     uint32_t               RegisterKey(std::string_view name);
     [[nodiscard]] uint32_t GetID(std::string_view name) const;
@@ -58,6 +59,6 @@ struct PlanRequest {
     WorldState goal;
 };
 
-[[nodiscard]] Plan SolvePlan(const PlanRequest& request, const std::vector<Action>& actions);
+[[nodiscard]] ZHLN_API Plan SolvePlan(const PlanRequest& request, const std::vector<Action>& actions);
 
 } // namespace ZHLN::ALife
