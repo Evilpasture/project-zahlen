@@ -157,8 +157,9 @@ class ZHLN_API RenderContext {
 
     [[nodiscard]] uint32_t GetBindlessIndex(TextureHandle handle) const noexcept;
 
-    [[nodiscard]] auto CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB = true) -> std::expected<uint32_t, Error>;
-    [[nodiscard]] auto CreateTextureCube(const void* const* faceData, uint32_t width, uint32_t height) -> std::expected<uint32_t, Error>;
+    [[nodiscard]] auto          CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB = true) -> std::expected<uint32_t, Error>;
+    [[nodiscard]] auto          CreateTextureCube(const void* const* faceData, uint32_t width, uint32_t height) -> std::expected<uint32_t, Error>;
+    [[nodiscard]] TextureHandle RegisterTexture(std::string_view name, uint32_t bindlessIndex, bool isSRGB = true);
 
     /**
      * @brief Generates a texture procedurally by invoking a CPU-side callback to populate the pixel buffer.

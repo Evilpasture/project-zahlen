@@ -346,6 +346,10 @@ auto RenderContext::CreateTextureCube(const void* const* faceData, uint32_t widt
     return _impl->CreateTextureCubeInternal(faceData, width, height);
 }
 
+TextureHandle RenderContext::RegisterTexture(std::string_view name, uint32_t bindlessIndex, bool isSRGB) {
+    return _impl->textureManager.RegisterUploaded(name, bindlessIndex, isSRGB);
+}
+
 std::expected<uint32_t, Error> RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB) {
     auto* const  device    = ctx.Device();
     const size_t imageSize = static_cast<size_t>(width) * height * 4;

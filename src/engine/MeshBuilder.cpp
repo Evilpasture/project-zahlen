@@ -78,6 +78,28 @@ std::expected<Material, Error> CreateBasicMaterial(RenderContext& ctx, bool doub
     return mat;
 }
 
+std::expected<Material, Error> CreateMaterial(RenderContext& ctx, const MaterialDesc& desc) {
+    auto basicMat = CreateBasicMaterial(ctx, desc.doubleSided, desc.alphaBlend, desc.additiveBlend);
+    if (!basicMat) {
+        return std::unexpected(basicMat.error());
+    }
+
+    Material mat        = *basicMat;
+    mat.alphaMode       = desc.alphaMode;
+    mat.alphaCutoff     = desc.alphaCutoff;
+    mat.metallicFactor  = desc.metallic;
+    mat.roughnessFactor = desc.roughness;
+    mat.albedoMap       = desc.albedoMap;
+    mat.normalMap       = desc.normalMap;
+    mat.pbrMap          = desc.pbrMap;
+    mat.emissiveMap     = desc.emissiveMap;
+
+    std::ranges::copy(desc.baseColor, mat.baseColorFactor);
+    std::ranges::copy(desc.emissive, mat.emissiveFactor);
+
+    return mat;
+}
+
 // ============================================================================
 // LOW-LEVEL GPU MESH BUILDERS (RAW GEOMETRY)
 // ============================================================================

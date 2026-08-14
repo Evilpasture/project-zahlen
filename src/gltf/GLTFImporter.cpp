@@ -492,9 +492,11 @@ void ProcessCPUTasks(
     }
 }
 
-std::unordered_map<cgltf_image*, uint32_t> UploadTexturesToGPU(RenderContext& ctx, JPH::Array<CPUTextureJob>& textureJobs) {
-    std::unordered_map<cgltf_image*, uint32_t> imageToBindlessIdx;
-    for (auto& texJob: textureJobs) {
+std::unordered_map<cgltf_image*, TextureHandle> UploadTexturesToGPU(RenderContext& ctx, std::string_view glbPath, JPH::Array<CPUTextureJob>& textureJobs) {
+    std::unordered_map<cgltf_image*, TextureHandle> imageToHandle;
+
+    for (size_t i = 0; i < textureJobs.size(); ++i) {
+        auto& texJob = textureJobs[i];
         if (texJob.decodedPixels != nullptr) {
             auto tex_res = ctx.CreateTexture(texJob.decodedPixels, texJob.width, texJob.height, texJob.isSRGB);
             if (texJob.wasRescaled) {
@@ -503,23 +505,23 @@ std::unordered_map<cgltf_image*, uint32_t> UploadTexturesToGPU(RenderContext& ct
                 stbi_image_free(texJob.decodedPixels);
             }
 
-            uint32_t index = 1;
-            if (tex_res) {
-                index = tex_res.value();
-            }
-            imageToBindlessIdx[texJob.image] = index;
+            uint32_t    bindlessIdx = tex_res ? *tex_res : 1;
+            std::string texName     = std::format("{}#tex_{}", glbPath, i);
+
+            // Register handle directly through RenderContext
+            imageToHandle[texJob.image] = ctx.RegisterTexture(texName, bindlessIdx, texJob.isSRGB);
         } else {
-            imageToBindlessIdx[texJob.image] = 1;
+            imageToHandle[texJob.image] = TextureHandle::Invalid;
         }
     }
-    return imageToBindlessIdx;
+
+    return imageToHandle;
 }
 
 CompiledPrimitive GetOrCreateCompiledPrimitive(
     RenderContext&                                                 ctx,
-    CreativeWorksManager&                                          cwMgr,
     const CPUPrimitiveJob&                                         primJob,
-    const std::unordered_map<cgltf_image*, uint32_t>&              imageToBindlessIdx,
+    const std::unordered_map<cgltf_image*, TextureHandle>&         imageToHandle,
     std::unordered_map<const cgltf_primitive*, CompiledPrimitive>& primCache,
     bool                                                           isMirrored
 ) {
@@ -528,18 +530,16 @@ CompiledPrimitive GetOrCreateCompiledPrimitive(
         return it->second;
     }
 
-    BufferHandle posVbo  = ctx.CreateVertexBuffer(primJob.positions.data(), primJob.positions.size() * sizeof(VertexPosition), sizeof(VertexPosition));
-    BufferHandle attrVbo = ctx.CreateVertexBuffer(primJob.attributes.data(), primJob.attributes.size() * sizeof(VertexAttributes), sizeof(VertexAttributes));
+    const BufferHandle posVbo = ctx.CreateVertexBuffer(primJob.positions.data(), primJob.positions.size() * sizeof(VertexPosition), sizeof(VertexPosition));
+    const BufferHandle attrVbo =
+        ctx.CreateVertexBuffer(primJob.attributes.data(), primJob.attributes.size() * sizeof(VertexAttributes), sizeof(VertexAttributes));
 
-    BufferHandle skinVbo = BufferHandle::Invalid;
-    if (!primJob.skins.empty()) {
-        skinVbo = ctx.CreateVertexBuffer(primJob.skins.data(), primJob.skins.size() * sizeof(VertexSkin), sizeof(VertexSkin));
-    }
+    const BufferHandle skinVbo = !primJob.skins.empty() ?
+                                     ctx.CreateVertexBuffer(primJob.skins.data(), primJob.skins.size() * sizeof(VertexSkin), sizeof(VertexSkin)) :
+                                     BufferHandle::Invalid;
 
-    BufferHandle ibo = BufferHandle::Invalid;
-    if (primJob.indexCount > 0) {
-        ibo = ctx.CreateIndexBuffer(primJob.indices.data(), primJob.indexCount * sizeof(uint32_t));
-    }
+    const BufferHandle ibo = (primJob.indexCount > 0) ? ctx.CreateIndexBuffer(primJob.indices.data(), primJob.indexCount * sizeof(uint32_t)) :
+                                                        BufferHandle::Invalid;
 
     Mesh subMesh = {
         .posBuffer   = posVbo,
@@ -556,24 +556,27 @@ CompiledPrimitive GetOrCreateCompiledPrimitive(
         }
     }
 
-    uint32_t finalMorphOffset = 0;
-    if (primJob.activeMorphCount > 0) {
-        finalMorphOffset = ctx.AllocateMorphDeltas(static_cast<uint32_t>(primJob.positions.size()) * primJob.activeMorphCount, primJob.tempDeltas.data());
-    }
+    const uint32_t finalMorphOffset =
+        (primJob.activeMorphCount > 0) ?
+            ctx.AllocateMorphDeltas(static_cast<uint32_t>(primJob.positions.size()) * primJob.activeMorphCount, primJob.tempDeltas.data()) :
+            0;
 
-    auto     subMaterial_res    = CreativeWorksFactory::CreateBasicMaterial(ctx, primJob.doubleSided || isMirrored, primJob.alphaBlend);
-    Material subMaterial        = subMaterial_res.value();
-    subMaterial.alphaMode       = primJob.alphaMode;
-    subMaterial.alphaCutoff     = primJob.alphaCutoff;
-    subMaterial.metallicFactor  = primJob.metallicFactor;
-    subMaterial.roughnessFactor = primJob.roughnessFactor;
-    std::memcpy(subMaterial.baseColorFactor, primJob.baseColorFactor, sizeof(float) * 4);
-
-    subMaterial.albedoMap   = imageToBindlessIdx | ZHLN::Ranges::FindOr<TextureHandle>(primJob.albedoImage, TextureHandle::Invalid);
-    subMaterial.normalMap   = imageToBindlessIdx | ZHLN::Ranges::FindOr<TextureHandle>(primJob.normalImage, TextureHandle::Invalid);
-    subMaterial.pbrMap      = imageToBindlessIdx | ZHLN::Ranges::FindOr<TextureHandle>(primJob.pbrImage, TextureHandle::Invalid);
-    subMaterial.emissiveMap = imageToBindlessIdx | ZHLN::Ranges::FindOr<TextureHandle>(primJob.emissiveImage, TextureHandle::Invalid);
-    std::memcpy(subMaterial.emissiveFactor, primJob.emissiveFactor, sizeof(float) * 4);
+    const Material subMaterial =
+        CreativeWorksFactory::CreateMaterial(
+            ctx, {.doubleSided = primJob.doubleSided || isMirrored,
+                  .alphaBlend  = primJob.alphaBlend,
+                  .alphaMode   = primJob.alphaMode,
+                  .alphaCutoff = primJob.alphaCutoff,
+                  .metallic    = primJob.metallicFactor,
+                  .roughness   = primJob.roughnessFactor,
+                  .baseColor   = {primJob.baseColorFactor[0], primJob.baseColorFactor[1], primJob.baseColorFactor[2], primJob.baseColorFactor[3]},
+                  .emissive    = {primJob.emissiveFactor[0], primJob.emissiveFactor[1], primJob.emissiveFactor[2], primJob.emissiveFactor[3]},
+                  .albedoMap   = imageToHandle | ZHLN::Ranges::FindOr(primJob.albedoImage, TextureHandle::Invalid),
+                  .normalMap   = imageToHandle | ZHLN::Ranges::FindOr(primJob.normalImage, TextureHandle::Invalid),
+                  .pbrMap      = imageToHandle | ZHLN::Ranges::FindOr(primJob.pbrImage, TextureHandle::Invalid),
+                  .emissiveMap = imageToHandle | ZHLN::Ranges::FindOr(primJob.emissiveImage, TextureHandle::Invalid)}
+        )
+            .value_or(Material {});
 
     CompiledPrimitive compPrim = {
         .mesh             = subMesh,
@@ -743,14 +746,14 @@ ModelPrefab* LoadGLBPrefab(RenderContext& ctx, CreativeWorksManager& cwMgr, std:
 
     JPH::Array<CPUTextureJob> textureJobs;
     ProcessCPUTasks(rawPath, uniqueImages, primitiveJobs, textureJobs);
-    auto imageToBindlessIdx = UploadTexturesToGPU(ctx, textureJobs);
+    auto imageToBindlessIdx = UploadTexturesToGPU(ctx, pathStr, textureJobs);
 
     std::unordered_map<const cgltf_primitive*, CompiledPrimitive> primCache;
 
     for (const auto& primJob: primitiveJobs) {
         const auto*       node       = primJob.node;
         bool              isMirrored = (primJob.nodeTransform.GetDeterminant3x3() < 0.0f);
-        CompiledPrimitive compPrim   = GetOrCreateCompiledPrimitive(ctx, cwMgr, primJob, imageToBindlessIdx, primCache, isMirrored);
+        CompiledPrimitive compPrim   = GetOrCreateCompiledPrimitive(ctx, primJob, imageToBindlessIdx, primCache, isMirrored);
 
         ModelPart part;
         part.name            = (node->name != nullptr) ? String64(node->name) : String64("Unnamed");
@@ -764,7 +767,7 @@ ModelPrefab* LoadGLBPrefab(RenderContext& ctx, CreativeWorksManager& cwMgr, std:
 
         part.localTransform = JPH::Mat44::sIdentity();
         part.nodeIndex      = nodeMap[node];
-        part.isSkinned      = (node->skin != nullptr) || !primJob.skins.empty();
+        part.isSkinned      = (node->skin != nullptr) && !primJob.skins.empty();
 
         if (node->skin != nullptr) {
             part.skeletonIndex = skinMap[node->skin];
@@ -816,7 +819,7 @@ ModelPrefab* LoadGLBPrefab(RenderContext& ctx, CreativeWorksManager& cwMgr, std:
     return result;
 }
 
-void RebuildPrefabGPUResources(RenderContext& ctx, CreativeWorksManager& cwMgr, ModelPrefab* prefab) {
+void RebuildPrefabGPUResources(RenderContext& ctx, ModelPrefab* prefab) {
     if (prefab == nullptr) {
         return;
     }
@@ -839,7 +842,7 @@ void RebuildPrefabGPUResources(RenderContext& ctx, CreativeWorksManager& cwMgr, 
 
     JPH::Array<CPUTextureJob> textureJobs;
     ProcessCPUTasks(rawPath, uniqueImages, primitiveJobs, textureJobs);
-    auto imageToBindlessIdx = UploadTexturesToGPU(ctx, textureJobs);
+    auto imageToBindlessIdx = UploadTexturesToGPU(ctx, prefab->virtualPath.c_str(), textureJobs);
 
     std::unordered_map<const cgltf_primitive*, CompiledPrimitive> primCache;
 
@@ -847,7 +850,7 @@ void RebuildPrefabGPUResources(RenderContext& ctx, CreativeWorksManager& cwMgr, 
         const auto& primJob    = primitiveJobs[i];
         bool        isMirrored = (primJob.nodeTransform.GetDeterminant3x3() < 0.0f);
 
-        CompiledPrimitive compPrim = GetOrCreateCompiledPrimitive(ctx, cwMgr, primJob, imageToBindlessIdx, primCache, isMirrored);
+        CompiledPrimitive compPrim = GetOrCreateCompiledPrimitive(ctx, primJob, imageToBindlessIdx, primCache, isMirrored);
 
         prefab->parts[i].mesh            = compPrim.mesh;
         prefab->parts[i].defaultMaterial = compPrim.defaultMaterial;

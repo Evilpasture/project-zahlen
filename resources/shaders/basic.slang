@@ -196,7 +196,7 @@ PSOutput PSMain(VSOutput input) {
             T_unnorm = cross(N, abs(N.y) < 0.999f ? float3(0, 1, 0) : float3(1, 0, 0));
         }
         float3 T          = normalize(T_unnorm);
-        float tangentSign = input.tangent.w * 2.0f - 1.0f;
+        float tangentSign = input.tangent.w;
         float3 B          = normalize(cross(N, T) * tangentSign);
 
         float3 normalMap = scene.globalTextures[indices.y].Sample(scene.defaultSampler, input.uv).rgb * 2.0f - 1.0f;

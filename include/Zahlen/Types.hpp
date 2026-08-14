@@ -104,6 +104,13 @@ struct alignas(16) InstanceData {
 enum class TextureHandle : uint64_t { Invalid = 0 };
 enum class TerrainHandle : uint64_t { Invalid = 0 };
 
+namespace SystemTextures {
+inline constexpr TextureHandle Invalid    = TextureHandle(0);
+inline constexpr TextureHandle Black      = TextureHandle(1);
+inline constexpr TextureHandle White      = TextureHandle(2);
+inline constexpr TextureHandle FlatNormal = TextureHandle(3);
+} // namespace SystemTextures
+
 struct UIObjectConstants {
     JPH::Mat44 orthoMatrix;
     uint64_t   posAddress;

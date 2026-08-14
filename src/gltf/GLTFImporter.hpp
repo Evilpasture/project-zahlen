@@ -12,6 +12,6 @@ class CreativeWorksManager;
 
 namespace GLTF {
 ModelPrefab* LoadGLBPrefab(RenderContext& ctx, CreativeWorksManager& cwMgr, std::string_view path);
-void         RebuildPrefabGPUResources(RenderContext& ctx, CreativeWorksManager& cwMgr, ModelPrefab* prefab);
+void         RebuildPrefabGPUResources(RenderContext& ctx, ModelPrefab* prefab);
 } // namespace GLTF
 } // namespace ZHLN

@@ -772,7 +772,7 @@ void RebuildVulkanResources(RenderContext& ctx, CreativeWorksManager& cwMgr, ECS
         cwMgr.GetCachedPrefabs(prefabs.data(), count);
 
         for (auto* prefab: prefabs) {
-            GLTF::RebuildPrefabGPUResources(ctx, cwMgr, prefab);
+            GLTF::RebuildPrefabGPUResources(ctx, prefab);
             for (size_t i = 0; i < prefab->parts.size(); ++i) {
                 std::string assetKeyStr = std::string(prefab->virtualPath.c_str()) + "#" + prefab->parts[i].name.c_str() + "_" +
                                           std::to_string(prefab->parts[i].nodeIndex);

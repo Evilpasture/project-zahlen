@@ -31,8 +31,31 @@ Mesh CreateBoxMesh(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4
 Mesh CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldSize, const float* heights, const float* colorsRGBA);
 Mesh CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, float maxHeight, float* outHeights, TerrainType type = TerrainType::Default);
 
+struct MaterialDesc {
+    // Pipeline configuration
+    bool doubleSided   = false;
+    bool alphaBlend    = false;
+    bool additiveBlend = false;
+
+    // PBR factors (using std::array eliminates memcpy)
+    uint32_t             alphaMode   = 0;
+    float                alphaCutoff = 0.5f;
+    float                metallic    = 1.0f;
+    float                roughness   = 1.0f;
+    std::array<float, 4> baseColor   = {1.0f, 1.0f, 1.0f, 1.0f};
+    std::array<float, 4> emissive    = {0.0f, 0.0f, 0.0f, 1.0f};
+
+    // Texture bindings
+    TextureHandle albedoMap   = TextureHandle::Invalid;
+    TextureHandle normalMap   = TextureHandle::Invalid;
+    TextureHandle pbrMap      = TextureHandle::Invalid;
+    TextureHandle emissiveMap = TextureHandle::Invalid;
+};
+
 [[nodiscard]] std::expected<Material, Error>
     CreateBasicMaterial(RenderContext& ctx, bool doubleSided = false, bool alphaBlend = false, bool additiveBlend = false);
+
+[[nodiscard]] std::expected<Material, Error> CreateMaterial(RenderContext& ctx, const MaterialDesc& desc);
 
 TextureHandle CreateFontAtlasTexture(RenderContext& ctx);
 uint32_t      LoadTexture(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view path, bool isSRGB = true);
