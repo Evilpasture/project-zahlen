@@ -256,7 +256,7 @@ class AggregateBuilder {
     /// Adds a field using a TypeDescriptor
     consteval AggregateBuilder& AddField(std::string_view name, TypeDescriptor typeDesc) noexcept {
         std::meta::data_member_options opts;
-        opts.name = name;
+        opts.name = std::define_static_string(name);
         m_specs.push_back(std::meta::data_member_spec(typeDesc.Handle(), opts));
         return *this;
     }
@@ -681,7 +681,7 @@ struct Define {
 
         auto build_field = [&]<typename F>() {
             std::meta::data_member_options opts;
-            opts.name = F::name;
+            opts.name = std::define_static_string(F::name);
             specs.push_back(std::meta::data_member_spec(^^typename F::type, opts));
         };
 
