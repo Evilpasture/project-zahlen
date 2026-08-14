@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/JSON.hpp>
+#include <cstring>
 #include <simdjson.h>
 
 namespace ZHLN::ReflectJSON {
@@ -30,112 +31,143 @@ std::expected<Document, Error> Document::Parse(std::string_view jsonString) noex
 }
 
 ValueReader Document::GetRoot() const noexcept {
+    if (!_impl) {
+        return ValueReader();
+    }
     return ValueReader(&_impl->doc);
 }
 
 // --- ValueReader Implementation ---
 
-std::expected<int64_t, Error> ValueReader::GetInt() const noexcept {
-    if (!_node)
-        return std::unexpected(JSONError::TypeMismatch);
-    const auto* elem = static_cast<const simdjson::dom::element*>(_node);
-    int64_t     val  = 0;
-    if (elem->get<int64_t>().get(val)) {
-        return std::unexpected(JSONError::TypeMismatch);
+static_assert(sizeof(simdjson::dom::element) <= sizeof(uint64_t) * 2, "simdjson element exceeds ValueReader storage size!");
+
+ValueReader::ValueReader(const void* internalNode) {
+    if (internalNode != nullptr) {
+        std::memcpy(_opaque, internalNode, sizeof(simdjson::dom::element));
+        _valid = true;
     }
-    return val;
+}
+
+std::expected<int64_t, Error> ValueReader::GetInt() const noexcept {
+    if (!_valid)
+        return std::unexpected(JSONError::TypeMismatch);
+    const auto& elem = *reinterpret_cast<const simdjson::dom::element*>(_opaque);
+
+    int64_t val = 0;
+    if (elem.get_int64().get(val) == simdjson::SUCCESS) {
+        return val;
+    }
+    uint64_t uval = 0;
+    if (elem.get_uint64().get(uval) == simdjson::SUCCESS) {
+        return static_cast<int64_t>(uval);
+    }
+    return std::unexpected(JSONError::TypeMismatch);
 }
 
 std::expected<uint64_t, Error> ValueReader::GetUInt() const noexcept {
-    if (!_node)
+    if (!_valid)
         return std::unexpected(JSONError::TypeMismatch);
-    const auto* elem = static_cast<const simdjson::dom::element*>(_node);
-    uint64_t    val  = 0;
-    if (elem->get<uint64_t>().get(val)) {
-        return std::unexpected(JSONError::TypeMismatch);
+    const auto& elem = *reinterpret_cast<const simdjson::dom::element*>(_opaque);
+
+    uint64_t uval = 0;
+    if (elem.get_uint64().get(uval) == simdjson::SUCCESS) {
+        return uval;
     }
-    return val;
+    int64_t val = 0;
+    if (elem.get_int64().get(val) == simdjson::SUCCESS && val >= 0) {
+        return static_cast<uint64_t>(val);
+    }
+    return std::unexpected(JSONError::TypeMismatch);
 }
 
 std::expected<double, Error> ValueReader::GetDouble() const noexcept {
-    if (!_node)
+    if (!_valid)
         return std::unexpected(JSONError::TypeMismatch);
-    const auto* elem = static_cast<const simdjson::dom::element*>(_node);
-    double      val  = 0.0;
-    if (elem->get<double>().get(val)) {
-        return std::unexpected(JSONError::TypeMismatch);
+    const auto& elem = *reinterpret_cast<const simdjson::dom::element*>(_opaque);
+
+    double val = 0.0;
+    if (elem.get_double().get(val) == simdjson::SUCCESS) {
+        return val;
     }
-    return val;
+    int64_t ival = 0;
+    if (elem.get_int64().get(ival) == simdjson::SUCCESS) {
+        return static_cast<double>(ival);
+    }
+    uint64_t uval = 0;
+    if (elem.get_uint64().get(uval) == simdjson::SUCCESS) {
+        return static_cast<double>(uval);
+    }
+    return std::unexpected(JSONError::TypeMismatch);
 }
 
 std::expected<bool, Error> ValueReader::GetBool() const noexcept {
-    if (!_node)
+    if (!_valid)
         return std::unexpected(JSONError::TypeMismatch);
-    const auto* elem = static_cast<const simdjson::dom::element*>(_node);
-    bool        val  = false;
-    if (elem->get<bool>().get(val)) {
-        return std::unexpected(JSONError::TypeMismatch);
+    const auto& elem = *reinterpret_cast<const simdjson::dom::element*>(_opaque);
+
+    bool val = false;
+    if (elem.get_bool().get(val) == simdjson::SUCCESS) {
+        return val;
     }
-    return val;
+    return std::unexpected(JSONError::TypeMismatch);
 }
 
 std::expected<std::string_view, Error> ValueReader::GetString() const noexcept {
-    if (!_node)
+    if (!_valid)
         return std::unexpected(JSONError::TypeMismatch);
-    const auto*      elem = static_cast<const simdjson::dom::element*>(_node);
+    const auto& elem = *reinterpret_cast<const simdjson::dom::element*>(_opaque);
+
     std::string_view val;
-    if (elem->get<std::string_view>().get(val)) {
-        return std::unexpected(JSONError::TypeMismatch);
+    if (elem.get_string().get(val) == simdjson::SUCCESS) {
+        return val;
     }
-    return val;
+    return std::unexpected(JSONError::TypeMismatch);
 }
 
 std::expected<ValueReader, Error> ValueReader::GetKey(std::string_view key) const noexcept {
-    if (!_node)
+    if (!_valid)
         return std::unexpected(JSONError::TypeMismatch);
-    const auto* elem = static_cast<const simdjson::dom::element*>(_node);
-
-    simdjson::dom::object obj;
-    if (elem->get<simdjson::dom::object>().get(obj)) {
-        return std::unexpected(JSONError::TypeMismatch);
-    }
+    const auto& elem = *reinterpret_cast<const simdjson::dom::element*>(_opaque);
 
     simdjson::dom::element field_elem;
-    if (obj.at_key(key).get(field_elem)) {
+    auto                   err = elem.at_key(key).get(field_elem);
+    if (err == simdjson::NO_SUCH_FIELD) {
         return std::unexpected(JSONError::MissingField);
     }
+    if (err != simdjson::SUCCESS) {
+        return std::unexpected(JSONError::TypeMismatch);
+    }
 
-    static thread_local simdjson::dom::element s_tempElement;
-    s_tempElement = field_elem;
-    return ValueReader(&s_tempElement);
+    return ValueReader(&field_elem);
 }
 
 size_t ValueReader::GetArraySize() const noexcept {
-    if (!_node)
+    if (!_valid)
         return 0;
-    const auto*          elem = static_cast<const simdjson::dom::element*>(_node);
+    const auto& elem = *reinterpret_cast<const simdjson::dom::element*>(_opaque);
+
     simdjson::dom::array arr;
-    if (elem->get<simdjson::dom::array>().get(arr)) {
+    if (elem.get_array().get(arr) != simdjson::SUCCESS) {
         return 0;
     }
     return arr.size();
 }
 
 std::expected<ValueReader, Error> ValueReader::GetArrayElement(size_t index) const noexcept {
-    if (!_node)
+    if (!_valid)
         return std::unexpected(JSONError::TypeMismatch);
-    const auto*          elem = static_cast<const simdjson::dom::element*>(_node);
+    const auto& elem = *reinterpret_cast<const simdjson::dom::element*>(_opaque);
+
     simdjson::dom::array arr;
-    if (elem->get<simdjson::dom::array>().get(arr)) {
+    if (elem.get_array().get(arr) != simdjson::SUCCESS) {
         return std::unexpected(JSONError::TypeMismatch);
     }
 
     size_t i = 0;
     for (auto val: arr) {
         if (i == index) {
-            static thread_local simdjson::dom::element s_tempElem;
-            s_tempElem = val;
-            return ValueReader(&s_tempElem);
+            simdjson::dom::element childElem = val;
+            return ValueReader(&childElem);
         }
         i++;
     }

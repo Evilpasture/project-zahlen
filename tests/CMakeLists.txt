@@ -7,15 +7,10 @@ enable_testing()
 # 2. Automatically discover all test source files in this directory
 file(GLOB TEST_SOURCES CONFIGURE_DEPENDS "Test*.cpp")
 
-# 3. Iterate and dynamically register each test executable
+# 3. Iterate and dynamically register each test executable with original casing preserved
 foreach(TEST_SRC IN LISTS TEST_SOURCES)
-    # Extract file name without path or extension (e.g., "TestTaskSystem")
-    get_filename_component(TEST_FILE_WE ${TEST_SRC} NAME_WLE)
-
-    # Convert PascalCase (TestTaskSystem) to snake_case (test_task_system)
-    string(REGEX REPLACE "([A-Z])" "_\\1" TARGET_NAME "${TEST_FILE_WE}")
-    string(TOLOWER "${TARGET_NAME}" TARGET_NAME)
-    string(REGEX REPLACE "^_" "" TARGET_NAME "${TARGET_NAME}")
+    # Extract file name without path or extension (e.g., "TestTaskSystem", "TestJSON", "TestECS")
+    get_filename_component(TARGET_NAME ${TEST_SRC} NAME_WLE)
 
     add_executable(${TARGET_NAME} ${TEST_SRC})
 
@@ -67,7 +62,7 @@ foreach(TEST_SRC IN LISTS TEST_SOURCES)
         endif()
     endif()
 
-    # 4. Register the executable as a test with CTest
+    # 4. Register the executable as a test with CTest (using original casing)
     add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
 
     # Pass Sanitizer options to CTest runner so reports halt and print stack traces

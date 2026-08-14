@@ -128,7 +128,7 @@ class SkipList {
     }
 
     [[nodiscard]] Value* Find(const Key& key) noexcept {
-        return const_cast<SkipList*>(this)->Find(key);
+        return const_cast<Value*>(std::as_const(*this).Find(key));
     }
 
     /**

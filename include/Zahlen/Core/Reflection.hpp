@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
+#include "Print.hpp"
 #include <algorithm>
 #include <array>
 #include <format>
@@ -11,7 +12,6 @@
 #include <string_view>
 #include <tuple>
 #include <type_traits>
-
 namespace ZHLN::Reflect {
 
 // ============================================================================
@@ -155,6 +155,36 @@ struct AnonymousNode {
 template <typename T, size_t N>
 struct FixedArrayBinding {
     using type = std::array<T, N>;
+};
+
+template <typename T>
+struct MethodCollector {
+    static constexpr auto all_members = std::define_static_array(std::meta::members_of(^^std::remove_cvref_t<T>, std::meta::access_context::current()));
+
+    static consteval std::size_t get_count() {
+        std::size_t c = 0;
+        for (auto m: all_members) {
+            if (std::meta::is_function(m) && std::meta::has_identifier(m)) {
+                ++c;
+            }
+        }
+        return c;
+    }
+
+    static constexpr std::size_t count = get_count();
+
+    static consteval auto get_methods() {
+        std::array<std::meta::info, count> methods {};
+        std::size_t                        idx = 0;
+        for (auto m: all_members) {
+            if (std::meta::is_function(m) && std::meta::has_identifier(m)) {
+                methods[idx++] = m;
+            }
+        }
+        return methods;
+    }
+
+    static constexpr auto method_handles = get_methods();
 };
 
 } // namespace detail
@@ -799,22 +829,10 @@ consteval std::size_t GetFloatFieldsCount() {
  */
 template <typename T>
 constexpr auto CollectMethodResults(const T& inst) {
-    constexpr auto members = std::define_static_array(std::meta::members_of(^^std::remove_cvref_t<T>, std::meta::access_context::current()));
-
-    // Filter down to valid member functions in a single pass
-    constexpr auto methodHandles = [&] consteval {
-        std::vector<std::meta::info> vec;
-        for (auto m: members) {
-            if (std::meta::is_function(m) && std::meta::has_identifier(m)) {
-                vec.push_back(m);
-            }
-        }
-        return vec;
-    }();
-
+    using Collector = detail::MethodCollector<std::remove_cvref_t<T>>;
     return [&]<size_t... Is>(std::index_sequence<Is...>) {
-        return std::tuple_cat(detail::ToTuple((inst.[:methodHandles[Is]:]()))...);
-    }(std::make_index_sequence<methodHandles.size()> {});
+        return std::tuple_cat(detail::ToTuple((inst.[:Collector::method_handles[Is]:]()))...);
+    }(std::make_index_sequence<Collector::count> {});
 }
 
 } // namespace ZHLN::Reflect
@@ -1189,6 +1207,35 @@ constexpr std::string_view EnumToMessage(E value) {
         return desc->text;
     }
     return EnumToString(value);
+}
+
+/**
+ * @brief Formats an enum's reflected description template with the provided arguments
+ * using the engine's zero-allocation signal-safe formatter.
+ *
+ * Example:
+ *   auto msg = ZHLN::Reflect::FormatEnumMessage(HandleError::GenerationMismatch, 2, 1);
+ *   ZHLN::Println("{}", msg.string_view());
+ */
+template <typename E, typename... Args>
+    requires std::is_enum_v<E>
+inline auto FormatEnumMessage(E value, Args&&... args) {
+    std::string_view fmt = EnumToMessage(value);
+    return ZHLN::Format(fmt, std::forward<Args>(args)...);
+}
+
+/**
+ * @brief Formats an enum's reflected description template into a standard std::string.
+ */
+template <typename E, typename... Args>
+    requires std::is_enum_v<E>
+inline std::string FormatEnumMessageString(E value, Args&&... args) {
+    std::string_view fmt = EnumToMessage(value);
+    if constexpr (sizeof...(Args) == 0) {
+        return std::string(fmt);
+    } else {
+        return std::vformat(fmt, std::make_format_args(args...));
+    }
 }
 
 } // namespace ZHLN::Reflect

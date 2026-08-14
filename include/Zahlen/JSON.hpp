@@ -22,8 +22,7 @@ namespace ReflectJSON {
 class ZHLN_API ValueReader {
   public:
     ValueReader() = default;
-    explicit ValueReader(const void* internalNode): _node(internalNode) {
-    }
+    explicit ValueReader(const void* internalNode);
 
     [[nodiscard]] std::expected<int64_t, Error>          GetInt() const noexcept;
     [[nodiscard]] std::expected<uint64_t, Error>         GetUInt() const noexcept;
@@ -36,7 +35,8 @@ class ZHLN_API ValueReader {
     [[nodiscard]] std::expected<ValueReader, Error> GetArrayElement(size_t index) const noexcept;
 
   private:
-    const void* _node = nullptr;
+    uint64_t _opaque[2] = {0, 0};
+    bool     _valid     = false;
 };
 
 // Opaque non-template Document Parser
