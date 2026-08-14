@@ -139,6 +139,11 @@ void CreativeWorksManager::ExecuteLoad(CreativeWorkLoadRequest* req) {
         });
     }
 
+    if (archive == nullptr || !req->success) {
+        req->success = false;
+        return;
+    }
+
     req->outSize     = entry.uncompressedSize;
     char* payloadRaw = static_cast<char*>(archive->mapped.data) + entry.offset;
 

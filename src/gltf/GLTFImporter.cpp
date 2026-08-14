@@ -7,6 +7,7 @@
 #include "Zahlen/JSON.hpp"
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
+#include <Zahlen/Core/Ranges.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/CreativeWorksManager.hpp>
 #include <Zahlen/Log.hpp>
@@ -568,15 +569,10 @@ CompiledPrimitive GetOrCreateCompiledPrimitive(
     subMaterial.roughnessFactor = primJob.roughnessFactor;
     std::memcpy(subMaterial.baseColorFactor, primJob.baseColorFactor, sizeof(float) * 4);
 
-    auto GetHandle = [&](cgltf_image* img) -> TextureHandle {
-        if (!img) return TextureHandle::Invalid;
-        return TextureHandle(static_cast<uint64_t>(CreativeWorksFactory::LoadTexture(ctx, cwMgr, img->uri ? img->uri : "", true)));
-    };
-
-    subMaterial.albedoMap   = GetHandle(primJob.albedoImage);
-    subMaterial.normalMap   = GetHandle(primJob.normalImage);
-    subMaterial.pbrMap      = GetHandle(primJob.pbrImage);
-    subMaterial.emissiveMap = GetHandle(primJob.emissiveImage);
+    subMaterial.albedoMap   = imageToBindlessIdx | ZHLN::Ranges::FindOr<TextureHandle>(primJob.albedoImage, TextureHandle::Invalid);
+    subMaterial.normalMap   = imageToBindlessIdx | ZHLN::Ranges::FindOr<TextureHandle>(primJob.normalImage, TextureHandle::Invalid);
+    subMaterial.pbrMap      = imageToBindlessIdx | ZHLN::Ranges::FindOr<TextureHandle>(primJob.pbrImage, TextureHandle::Invalid);
+    subMaterial.emissiveMap = imageToBindlessIdx | ZHLN::Ranges::FindOr<TextureHandle>(primJob.emissiveImage, TextureHandle::Invalid);
     std::memcpy(subMaterial.emissiveFactor, primJob.emissiveFactor, sizeof(float) * 4);
 
     CompiledPrimitive compPrim = {

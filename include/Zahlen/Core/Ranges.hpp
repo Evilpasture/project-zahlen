@@ -6,6 +6,7 @@
 
 #include <array>
 #include <iterator>
+#include <optional>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -668,6 +669,122 @@ template <typename Key, typename Factory, typename KeySelector = DefaultKeySelec
     return FindOrInsertAdapter<std::decay_t<Key>, std::decay_t<Factory>, std::decay_t<KeySelector>> {
         std::forward<Key>(key), std::forward<Factory>(factory), std::forward<KeySelector>(key_selector)
     };
+}
+
+// ============================================================================
+// FindOr / FindValue Adapters (Associative & Pair Range Lookup)
+// ============================================================================
+
+template <typename TargetType, typename Key, typename Fallback, typename KeySelector = DefaultKeySelector>
+struct FindOrAdapter {
+    Key         key;
+    Fallback    fallback;
+    KeySelector key_selector {};
+
+    template <typename Container>
+    constexpr auto operator()(const Container& c) const {
+        using ValueType = std::conditional_t<std::is_void_v<TargetType>, std::decay_t<Fallback>, TargetType>;
+
+        // 1. Specialized for ZHLN::HashMap (returns Value* / const Value*)
+        if constexpr (requires { c.Find(key); }) {
+            if (const auto* val = c.Find(key)) {
+                return static_cast<ValueType>(*val);
+            }
+            return static_cast<ValueType>(fallback);
+        }
+        // 2. Specialized for std::map / std::unordered_map (has .find())
+        else if constexpr (requires { c.find(key); }) {
+            auto it = c.find(key);
+            if (it != c.end()) {
+                if constexpr (requires { it->second; }) {
+                    return static_cast<ValueType>(it->second);
+                } else {
+                    return static_cast<ValueType>(*it);
+                }
+            }
+            return static_cast<ValueType>(fallback);
+        }
+        // 3. Fallback for linear pair ranges / ZHLN::Array<Pair>
+        else {
+            auto it = ZHLN::Ranges::FindIf(c, [this](const auto& element) {
+                if constexpr (std::is_invocable_v<KeySelector, decltype(element)>) {
+                    return key_selector(element) == key;
+                } else {
+                    return element.first == key;
+                }
+            });
+
+            if (it != c.end()) {
+                if constexpr (requires { it->second; }) {
+                    return static_cast<ValueType>(it->second);
+                } else {
+                    return static_cast<ValueType>(*it);
+                }
+            }
+            return static_cast<ValueType>(fallback);
+        }
+    }
+};
+
+template <typename Key, typename KeySelector = DefaultKeySelector>
+struct FindValueAdapter {
+    Key         key;
+    KeySelector key_selector {};
+
+    template <typename Container>
+    constexpr auto operator()(const Container& c) const {
+        using MappedType = decltype([](const Container& cont, const Key& k) {
+            if constexpr (requires { cont.Find(k); }) {
+                return *cont.Find(k);
+            } else if constexpr (requires { cont.find(k)->second; }) {
+                return cont.find(k)->second;
+            } else {
+                return cont.begin()->second;
+            }
+        }(c, key));
+
+        using OptType = std::optional<std::decay_t<MappedType>>;
+
+        if constexpr (requires { c.Find(key); }) {
+            if (const auto* val = c.Find(key)) {
+                return OptType(*val);
+            }
+            return OptType(std::nullopt);
+        } else if constexpr (requires { c.find(key); }) {
+            auto it = c.find(key);
+            if (it != c.end()) {
+                return OptType(it->second);
+            }
+            return OptType(std::nullopt);
+        } else {
+            auto it = ZHLN::Ranges::FindIf(c, [this](const auto& element) {
+                if constexpr (std::is_invocable_v<KeySelector, decltype(element)>) {
+                    return key_selector(element) == key;
+                } else {
+                    return element.first == key;
+                }
+            });
+
+            if (it != c.end()) {
+                return OptType(it->second);
+            }
+            return OptType(std::nullopt);
+        }
+    }
+};
+
+// --- Factory Functions ---
+
+template <typename TargetType = void, typename Key, typename Fallback, typename KeySelector = DefaultKeySelector>
+[[nodiscard]] constexpr auto FindOr(Key&& key, Fallback&& fallback, KeySelector&& key_selector = {}) {
+    return FindOrAdapter<TargetType, std::decay_t<Key>, std::decay_t<Fallback>, std::decay_t<KeySelector>> {
+        std::forward<Key>(key), std::forward<Fallback>(fallback), std::forward<KeySelector>(key_selector)
+    };
+}
+
+template <typename Key, typename KeySelector = DefaultKeySelector>
+[[nodiscard]] constexpr auto FindValue(Key&& key, KeySelector&& key_selector = {}) {
+    return FindValueAdapter<std::decay_t<Key>, std::decay_t<KeySelector>> {std::forward<Key>(key), std::forward<KeySelector>(key_selector)};
 }
 
 } // namespace ZHLN::Ranges
