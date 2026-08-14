@@ -362,14 +362,15 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
 
                 auto* skelMesh = reg.Get<Components::SkeletalMeshComponent>(childEnt);
                 if (skelMesh != nullptr && skelMesh->skeletonIndex >= 0 && skelMesh->skeletonIndex < static_cast<int32_t>(prefab.skeletons.size())) {
-                    const Skeleton& skeleton     = prefab.skeletons[skelMesh->skeletonIndex];
-                    JPH::Mat44      invMeshWorld = worldTransforms[mesh->nodeIndex].Inversed();
+                    const Skeleton& skeleton = prefab.skeletons[skelMesh->skeletonIndex];
 
+                    // Compute pure Model-Space pose (no invMeshWorld!)
                     for (size_t j = 0; j < skeleton.joints.size(); ++j) {
                         const auto& joint                           = skeleton.joints[j];
-                        calculatedJoints[skelMesh->jointOffset + j] = invMeshWorld * worldTransforms[joint.nodeIndex] * joint.inverseBindMatrix;
+                        calculatedJoints[skelMesh->jointOffset + j] = worldTransforms[joint.nodeIndex] * joint.inverseBindMatrix;
                     }
                 } else {
+                    // Non-skinned parts (attachments/accessories) follow their node hierarchy transform
                     JPH::Vec3 t {};
                     JPH::Vec3 s {};
                     JPH::Quat r {};

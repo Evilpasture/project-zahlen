@@ -306,6 +306,8 @@ Entity InstantiateMeshPart(
     Entity                                 rootEntity,
     std::unordered_map<int32_t, uint32_t>& allocatedSkeletons
 ) {
+    const JPH::Mat44 baseTransform = Math::CreateTransform(JPH::Vec3(params.position), params.rotation, params.scale); // <-- ADDED HERE
+
     AssetID    meshAsset = part.meshAsset;
     MaterialID matAsset  = params.materialOverride.pipeline != PipelineHandle::Invalid ? static_cast<uint64_t>(params.materialOverride.pipeline) :
                                                                                          part.materialAsset;
@@ -341,7 +343,6 @@ Entity InstantiateMeshPart(
         reg.Add(e, Components::TransformComponent {.position = prep.translation, .rotation = prep.rotation, .scale = prep.scale});
         reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
 
-        // FIXED: Replaced Physics::CreateRigidBody with pc.CreateRigidBody
         reg.Add(
             e, Components::PhysicsComponent {pc.CreateRigidBody(
                    prep.shape, JPH::RVec3(prep.translation), prep.rotation, params.isStaticPhysics ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
@@ -356,7 +357,13 @@ Entity InstantiateMeshPart(
                    }
             );
         }
+    } else if (part.isSkinned && params.isAnimated) {
+        // Skinned meshes are posed by the skeleton in root space
+        reg.Add(e, Components::TransformComponent {.position = JPH::Vec3::sZero(), .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)});
+        reg.Add(e, Components::WorldTransformComponent {.world = baseTransform, .previous = baseTransform});
+        reg.Add(e, Components::HierarchyComponent {.parent = rootEntity});
     } else {
+        // Non-skinned accessories use their local node offset
         JPH::Mat44 nodeLocal = GetNodeLogicalTransform(prefab, part.nodeIndex) * part.localTransform;
         JPH::Vec3  localPos  = nodeLocal.GetTranslation();
 
@@ -365,18 +372,21 @@ Entity InstantiateMeshPart(
         JPH::Vec3 c2 = nodeLocal.GetColumn3(2);
         JPH::Vec3 localScale(c0.Length(), c1.Length(), c2.Length());
 
-        if (localScale.GetX() > 1e-5f)
+        if (localScale.GetX() > 1e-5f) {
             c0 /= localScale.GetX();
-        else
+        } else {
             c0 = JPH::Vec3::sAxisX();
-        if (localScale.GetY() > 1e-5f)
+        }
+        if (localScale.GetY() > 1e-5f) {
             c1 /= localScale.GetY();
-        else
+        } else {
             c1 = JPH::Vec3::sAxisY();
-        if (localScale.GetZ() > 1e-5f)
+        }
+        if (localScale.GetZ() > 1e-5f) {
             c2 /= localScale.GetZ();
-        else
+        } else {
             c2 = JPH::Vec3::sAxisZ();
+        }
 
         JPH::Mat44 rotMat(JPH::Vec4(c0, 0), JPH::Vec4(c1, 0), JPH::Vec4(c2, 0), JPH::Vec4(0, 0, 0, 1));
         JPH::Quat  localRot = rotMat.GetQuaternion().Normalized();
