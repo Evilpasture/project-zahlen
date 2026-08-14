@@ -64,6 +64,9 @@ struct RestrictSpan {
     [[nodiscard, gnu::always_inline]] auto end() const noexcept -> pointer {
         return _ptr + _len;
     }
+    [[nodiscard, gnu::always_inline]] constexpr auto empty() const noexcept -> bool {
+        return _len == 0;
+    }
 };
 // NOLINTNEXTLINE(modernize-avoid-c-arrays)
 template <typename T, std::size_t N>
