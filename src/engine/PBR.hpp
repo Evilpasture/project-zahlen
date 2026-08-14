@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
+// clang-format off
 #include <Jolt/Jolt.h>
+// clang-format on
 #include <Jolt/Math/Vec3.h>
 #include <array>
 #include <cstdint>

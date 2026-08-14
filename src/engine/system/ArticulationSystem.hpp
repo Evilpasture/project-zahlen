@@ -3,7 +3,9 @@
 
 #pragma once
 
+// clang-format off
 #include <Jolt/Jolt.h>
+// clang-format on
 #include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Common.h>

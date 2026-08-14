@@ -103,8 +103,8 @@ done
 
 # 2. Configuration (Only runs if needed)
 if [[ -n "$COMPILER_CC" && -f "$BUILD_DIR/CMakeCache.txt" ]]; then
-    echo "--- Compiler switch requested: Clearing existing CMake cache ---"
-    rm -f "$BUILD_DIR/CMakeCache.txt"
+    echo "--- Compiler switch requested: Resetting CMake cache (preserving Ninja state & assets) ---"
+    rm -rf "$BUILD_DIR/CMakeCache.txt" "$BUILD_DIR/CMakeFiles"
 fi
 
 if [ ! -f "$BUILD_DIR/CMakeCache.txt" ]; then

@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "AnimationSystem.hpp"
+// clang-format off
 #include <Jolt/Jolt.h>
+// clang-format on
 #include <Zahlen/Components.hpp>
 #include <Zahlen/IK.hpp>
 #include <Zahlen/Log.hpp>

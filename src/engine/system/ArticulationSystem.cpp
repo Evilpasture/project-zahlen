@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "ArticulationSystem.hpp"
+// clang-format off
 #include <Jolt/Jolt.h>
+// clang-format on
 #include <Jolt/Skeleton/Skeleton.h>
 #include <Jolt/Skeleton/SkeletonPose.h>
 #include <Zahlen/Components.hpp>

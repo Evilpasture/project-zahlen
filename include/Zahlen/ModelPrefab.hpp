@@ -7,7 +7,9 @@
 #include <Zahlen/Core/String.hpp>
 #include "SkeletalAnimation.hpp"
 #include "Types.hpp"
+// clang-format off
 #include <Jolt/Jolt.h>
+// clang-format on
 #include <Jolt/Physics/Collision/Shape/Shape.h>
 #include <vector>
 

@@ -6,7 +6,9 @@
 #include <cstring>
 // clang-format off
 
+// clang-format off
 #include <Jolt/Jolt.h>
+// clang-format on
 #include <Jolt/Geometry/AABox.h>
 #include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Quat.h>

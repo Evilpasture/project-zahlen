@@ -3,7 +3,9 @@
 
 #include "PhysicsWorld.hpp"
 #include "Zahlen/Log.hpp"
+// clang-format off
 #include <Jolt/Jolt.h>
+// clang-format on
 #include <Jolt/Physics/Body/Body.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <array>

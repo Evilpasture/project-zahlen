@@ -5,7 +5,9 @@
 
 #include "Zahlen/Entity.hpp"
 #include "Zahlen/Sync.hpp"
+// clang-format off
 #include <Jolt/Jolt.h>
+// clang-format on
 #include <Jolt/Physics/Character/CharacterVirtual.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Zahlen/Core/Atomic.hpp>

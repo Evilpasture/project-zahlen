@@ -1,7 +1,9 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+// clang-format off
 #include <Jolt/Jolt.h>
+// clang-format on
 #include <Utils.hpp>
 #include <cmath>
 #include <cstddef>

@@ -173,7 +173,7 @@ if(ZHLN_DEV_MODE)
     add_compile_definitions(ZHLN_DEV_MODE)
 endif()
 
-option(ZHLN_BUILD_TESTS "Build engine test suite" OFF)
+option(ZHLN_BUILD_TESTS "Build engine test suite" ON)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_compile_definitions(ZHLN_DEBUG=1)
@@ -693,7 +693,8 @@ endif()
 function(zahlen_use_custom_libcxx TARGET_NAME)
     option(ZHLN_USE_CUSTOM_LIBCXX "Link against Bloomberg custom libc++" OFF)
 
-    if(NOT ZHLN_USE_CUSTOM_LIBCXX)
+    # Only apply custom LLVM libc++ when explicitly enabled on Clang
+    if(NOT ZHLN_USE_CUSTOM_LIBCXX OR CMAKE_CXX_COMPILER_ID MATCHES "GNU")
         return()
     endif()
 
@@ -706,7 +707,6 @@ function(zahlen_use_custom_libcxx TARGET_NAME)
                            "Pass -DLLVM_BLOOMBERG_ROOT=/path/to/llvm-p2996 to configure manually.")
     endif()
 
-    # Discover all lib subdirectories (e.g. build/lib and build/lib/x86_64-pc-linux-gnu)
     file(GLOB _LLVM_LIB_SUBDIRS LIST_DIRECTORIES true "${LLVM_BLOOMBERG_BUILD}/lib/*")
     set(_ALL_LLVM_LIB_DIRS "${LLVM_BLOOMBERG_BUILD}/lib")
     foreach(_DIR IN LISTS _LLVM_LIB_SUBDIRS)
@@ -715,12 +715,10 @@ function(zahlen_use_custom_libcxx TARGET_NAME)
         endif()
     endforeach()
 
-    # 1. Compile flags strictly for C++ source files
     target_compile_options(${TARGET_NAME} PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>
     )
 
-    # 2. Add -L and -Wl,-rpath for all discovered LLVM library paths
     foreach(_LIB_DIR IN LISTS _ALL_LLVM_LIB_DIRS)
         target_link_options(${TARGET_NAME} PRIVATE
             $<$<PLATFORM_ID:Linux>:-L${_LIB_DIR}>
@@ -732,7 +730,6 @@ function(zahlen_use_custom_libcxx TARGET_NAME)
         $<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>
     )
 
-    # 3. Explicitly link c++, c++abi, and unwind
     target_link_libraries(${TARGET_NAME} PRIVATE
         c++
         c++abi

@@ -3,7 +3,9 @@
 
 // File: src/zcook/Transform.cpp
 #include "Transform.hpp"
+// clang-format off
 #include <Jolt/Jolt.h>
+// clang-format on
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Types.hpp>

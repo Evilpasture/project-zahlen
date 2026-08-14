@@ -3,7 +3,9 @@
 
 #pragma once
 
+// clang-format off
 #include <Jolt/Jolt.h>
+// clang-format on
 #include <Jolt/Renderer/DebugRendererSimple.h>
 
 namespace ZHLN::Physics {

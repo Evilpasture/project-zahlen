@@ -3,7 +3,9 @@
 
 // include/Zahlen/Components.hpp
 #pragma once
+// clang-format off
 #include <Jolt/Jolt.h>
+// clang-format on
 #include <Jolt/Physics/Ragdoll/Ragdoll.h>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/HashMap.hpp>

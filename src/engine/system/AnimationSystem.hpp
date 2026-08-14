@@ -5,7 +5,9 @@
 // clang-format off
 #include "Zahlen/Components.hpp"
 #include <Zahlen/Core/Atomic.hpp>
+// clang-format off
 #include <Jolt/Jolt.h>
+// clang-format on
 #include <Jolt/Core/Array.h>
 #include <Jolt/Core/UnorderedMap.h>
 #include <Jolt/Math/Mat44.h>

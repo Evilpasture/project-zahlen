@@ -3,7 +3,9 @@
 
 // src/audio/AudioSystem.cpp
 
+// clang-format off
 #include <Jolt/Jolt.h>
+// clang-format on
 #include <Jolt/Math/Math.h>
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Components.hpp>

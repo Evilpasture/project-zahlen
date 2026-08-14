@@ -4,7 +4,9 @@
 // File: src/main.cpp
 #include "engine/Platform.hpp"
 #include <GLFW/glfw3.h>
+// clang-format off
 #include <Jolt/Jolt.h>
+// clang-format on
 #include <Jolt/Physics/Collision/CastResult.h>
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Camera.hpp>

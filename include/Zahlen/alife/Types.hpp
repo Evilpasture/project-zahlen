@@ -4,7 +4,9 @@
 // include/Zahlen/alife/Types.hpp
 #pragma once
 
+// clang-format off
 #include <Jolt/Jolt.h>
+// clang-format on
 #include <Jolt/Math/DVec3.h>
 #include <Jolt/Math/Real.h>
 #include <Jolt/Math/Vec3.h>

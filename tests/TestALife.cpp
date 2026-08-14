@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Components.hpp>
 #include <Zahlen/alife/Factions.hpp>
 #include <Zahlen/alife/GOAP.hpp>
 #include <Zahlen/alife/Graph.hpp>
 #include <Zahlen/alife/SpatialGrid.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 #include <expected>
 #include <memory_resource>
 
@@ -112,6 +114,58 @@ struct ALifeTestSuite {
             factions.SetRelation(stalkers, bandits, -1.0f);
             ZHLN::Test::ExpectEq(factions.GetRelation(stalkers, bandits), -1.0f);
             ZHLN::Test::ExpectEq(factions.GetRelation(bandits, stalkers), -1.0f); // Symmetric
+
+            return {};
+        }
+
+        // --- 4. Spatial Grid Partitioning & Radial Query ---
+        std::expected<void, ZHLN::Error> spatial_grid_queries() {
+            ZHLN::ECS::Registry reg;
+            reg.RegisterComponent<ZHLN::Components::ALifeComponent>("ALifeComponent");
+
+            // 100x100 grid with 50.0m cells
+            ZHLN::ALife::SpatialGrid grid(100, 100, 50.0f);
+
+            // Entity 1 at (100, 0, 100) -> Cell (2, 2)
+            ZHLN::Entity e1 = reg.Create();
+            auto&        c1 = reg.Add<ZHLN::Components::ALifeComponent>(e1);
+            c1.position     = JPH::RVec3(100.0, 0.0, 100.0);
+            c1.self_entity  = e1;
+            grid.UpdateEntity(reg, e1, JPH::RVec3(-1, -1, -1));
+
+            // Entity 2 at (110, 0, 100) (Distance 10m from e1)
+            ZHLN::Entity e2 = reg.Create();
+            auto&        c2 = reg.Add<ZHLN::Components::ALifeComponent>(e2);
+            c2.position     = JPH::RVec3(110.0, 0.0, 100.0);
+            c2.self_entity  = e2;
+            grid.UpdateEntity(reg, e2, JPH::RVec3(-1, -1, -1));
+
+            // Entity 3 at (800, 0, 800) (Far away)
+            ZHLN::Entity e3 = reg.Create();
+            auto&        c3 = reg.Add<ZHLN::Components::ALifeComponent>(e3);
+            c3.position     = JPH::RVec3(800.0, 0.0, 800.0);
+            c3.self_entity  = e3;
+            grid.UpdateEntity(reg, e3, JPH::RVec3(-1, -1, -1));
+
+            // Query within 20m of (100, 0, 100)
+            std::vector<ZHLN::Entity> results;
+            uint32_t                  count = grid.Query(reg, JPH::RVec3(100.0, 0.0, 100.0), 20.0f, results);
+
+            // Should find e1 and e2, but NOT e3
+            ZHLN::Test::ExpectEq(count, 2u);
+            ZHLN::Test::ExpectEq(results.size(), static_cast<size_t>(2));
+
+            // Move e2 outside the radius
+            JPH::RVec3 oldPos = c2.position;
+            c2.position       = JPH::RVec3(300.0, 0.0, 300.0);
+            grid.UpdateEntity(reg, e2, oldPos);
+
+            results.clear();
+            count = grid.Query(reg, JPH::RVec3(100.0, 0.0, 100.0), 20.0f, results);
+            ZHLN::Test::ExpectEq(count, 1u);
+            if (count == 1) {
+                ZHLN::Test::ExpectEq(results[0], e1);
+            }
 
             return {};
         }
