@@ -30,6 +30,7 @@ struct CommandLineOptions {
     bool                   launchEditor    = false;
     bool                   vsync           = true;
     bool                   fullscreen      = false;
+    bool                   headless        = false;
     LogLevel               logLevel        = LogLevel::Moderate;
     uint32_t               fpsLimit        = 0;
     bool                   enableRenderDoc = false;
