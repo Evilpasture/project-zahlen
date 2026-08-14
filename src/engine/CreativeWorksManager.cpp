@@ -131,7 +131,6 @@ void CreativeWorksManager::ExecuteLoad(CreativeWorkLoadRequest* req) {
         ZHLN::Lock(_catalogMutex, [&] {
             const CatalogEntry* catEntry = _catalog.Find(req->assetID);
             if (catEntry == nullptr) {
-                req->success = false;
                 return;
             }
             entry   = catEntry->entry;
@@ -139,7 +138,8 @@ void CreativeWorksManager::ExecuteLoad(CreativeWorkLoadRequest* req) {
         });
     }
 
-    if (archive == nullptr || !req->success) {
+    // ✅ Fixed: Only abort if the asset was not found in the catalog
+    if (archive == nullptr) {
         req->success = false;
         return;
     }

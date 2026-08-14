@@ -46,7 +46,7 @@ struct BindlessIndices {
         .albedo   = (material.albedoMap != TextureHandle::Invalid) ? impl->textureManager.GetBindlessIndex(material.albedoMap) : 1,
         .normal   = (material.normalMap != TextureHandle::Invalid) ? impl->textureManager.GetBindlessIndex(material.normalMap) : 2,
         .pbr      = (material.pbrMap != TextureHandle::Invalid) ? impl->textureManager.GetBindlessIndex(material.pbrMap) : 1,
-        .emissive = (material.emissiveMap != TextureHandle::Invalid) ? impl->textureManager.GetBindlessIndex(material.emissiveMap) : 0
+        .emissive = (material.emissiveMap != TextureHandle::Invalid) ? impl->textureManager.GetBindlessIndex(material.emissiveMap) : 1
     };
 }
 
@@ -230,41 +230,38 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
 
     _impl->queues.drawQueue.push_back(
         {.instanceData =
-             {
-                 .world            = params.transform,
-                 .prevWorld        = params.prevTransform,
-                 .posAddress       = resolved->posAddr,
-                 .attrAddress      = resolved->attrAddr,
-                 .skinAddress      = (resolved->skinMesh != nullptr) ? resolved->skinMesh->vboAddress : 0,
-                 .iboAddress       = (resolved->indexMesh != nullptr) ? resolved->indexMesh->vboAddress : 0,
-                 .vertexCount      = (resolved->posMesh != nullptr) ? resolved->posMesh->vertexCount : 0,
-                 .indexCount       = mesh.indexCount,
-                 .texIndices0      = (tex.normal << 16) | (tex.albedo & 0xFFFF),
-                 .texIndices1      = (tex.emissive << 16) | (tex.pbr & 0xFFFF),
-                 .cullRadius       = params.cullRadius,
-                 .metallicFactor   = params.metallic >= 0.0f ? params.metallic : material.metallicFactor,
-                 .roughnessFactor  = params.roughness >= 0.0f ? params.roughness : material.roughnessFactor,
-                 .alphaCutoff      = material.alphaCutoff,
-                 .flags            = (isViewmodel << 16) | (isSkinned << 8) | (material.alphaMode & 0xFF),
-                 .jointOffset      = params.jointOffset,
-                 .morphOffset      = params.morphOffset,
-                 .activeMorphCount = activeMorphCount,
-                 .localCenter      = {params.localCenter[0], params.localCenter[1], params.localCenter[2]},
-                 ._paddingCenter   = {},
-                 .morphWeights     = morphWeights,
-                 .baseColorFactor  = (params.colorOverride[3] >= 0.0f) ?
-                                         params.colorOverride :
-                                         std::array<float, 4> {
-                                            material.baseColorFactor[0], material.baseColorFactor[1], material.baseColorFactor[2], material.baseColorFactor[3]
-                                        },
-                 .emissiveFactor =
-                     (params.emissiveOverride[3] >= 0.0f) ?
-                         params.emissiveOverride :
-                         std::array<float, 4> {material.emissiveFactor[0], material.emissiveFactor[1], material.emissiveFactor[2], material.emissiveFactor[3]},
-             },
+             {.world            = params.transform,
+              .prevWorld        = params.prevTransform,
+              .posAddress       = resolved->posAddr, // Points to scratchMesh for basic.slang
+              .attrAddress      = resolved->attrAddr,
+              .skinAddress      = (resolved->skinMesh != nullptr) ? resolved->skinMesh->vboAddress : 0,
+              .iboAddress       = (resolved->indexMesh != nullptr) ? resolved->indexMesh->vboAddress : 0,
+              .vertexCount      = (resolved->posMesh != nullptr) ? resolved->posMesh->vertexCount : 0,
+              .indexCount       = mesh.indexCount,
+              .texIndices0      = (tex.normal << 16) | (tex.albedo & 0xFFFF),
+              .texIndices1      = (tex.emissive << 16) | (tex.pbr & 0xFFFF),
+              .cullRadius       = params.cullRadius,
+              .metallicFactor   = params.metallic >= 0.0f ? params.metallic : material.metallicFactor,
+              .roughnessFactor  = params.roughness >= 0.0f ? params.roughness : material.roughnessFactor,
+              .alphaCutoff      = material.alphaCutoff,
+              .flags            = (isViewmodel << 16) | (isSkinned << 8) | (material.alphaMode & 0xFF),
+              .jointOffset      = params.jointOffset,
+              .morphOffset      = params.morphOffset,
+              .activeMorphCount = activeMorphCount,
+              .localCenter      = {params.localCenter[0], params.localCenter[1], params.localCenter[2]},
+              ._paddingCenter   = {},
+              .morphWeights     = morphWeights,
+              .baseColorFactor =
+                  (params.colorOverride[3] >= 0.0f) ?
+                      params.colorOverride :
+                      std::array<float, 4> {material.baseColorFactor[0], material.baseColorFactor[1], material.baseColorFactor[2], material.baseColorFactor[3]},
+              .emissiveFactor =
+                  (params.emissiveOverride[3] >= 0.0f) ?
+                      params.emissiveOverride :
+                      std::array<float, 4> {material.emissiveFactor[0], material.emissiveFactor[1], material.emissiveFactor[2], material.emissiveFactor[3]}},
          .material            = resolved->material,
          .prePassMaterial     = resolved->prePassMaterial,
-         .posMesh             = resolved->finalPosMesh,
+         .posMesh             = resolved->posMesh,
          .attrMesh            = resolved->attrMesh,
          .skinMesh            = resolved->skinMesh,
          .skinnedVertexBuffer = params.skinnedVertexBuffer,

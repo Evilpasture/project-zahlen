@@ -39,7 +39,7 @@ void SampleChannel(const AnimationChannel& channel, float time, JPH::Vec3& outT,
 
     float t0     = channel.keyTimes[idx0];
     float t1     = channel.keyTimes[idx1];
-    float factor = (t1 > t0) ? (time - t0) / (t1 - t0) : 0.0f;
+    float factor = (t1 > t0) ? std::clamp((time - t0) / (t1 - t0), 0.0f, 1.0f) : 0.0f;
 
     if (channel.interpolation == InterpolationType::Step) {
         factor = 0.0f;

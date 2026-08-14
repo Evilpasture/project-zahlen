@@ -27,6 +27,7 @@ foreach(TEST_SRC IN LISTS TEST_SOURCES)
     target_include_directories(${TARGET_NAME} PRIVATE
         ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_SOURCE_DIR}/src
+        ${PROJECT_SOURCE_DIR}/tests
     )
 
     if(NOT MSVC)

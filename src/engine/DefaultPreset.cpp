@@ -41,7 +41,7 @@ void DefaultPreset::ClearFallback() noexcept {
 }
 
 void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, std::string_view detailMessage) {
-    if (s_IsActive) {
+    if (s_IsActive || s_Disabled) {
         return;
     }
 
@@ -139,9 +139,9 @@ void DefaultPreset::Update(Engine& engine, float dt) {
     auto& rc  = engine.GetRenderContext();
 
     // --- TOGGLE POPUP VISIBILITY WITH ESCAPE KEY ---
-    auto  inputEnts        = reg.GetEntitiesWith<Components::InputStateComponent>();
-    auto* inputState       = inputEnts.empty() ? nullptr : reg.Get<Components::InputStateComponent>(inputEnts[0]);
-    bool  escDown          = (inputState != nullptr) && inputState->IsKeyDown(static_cast<uint8_t>(KeyCode::Escape));
+    auto        inputEnts  = reg.GetEntitiesWith<Components::InputStateComponent>();
+    auto*       inputState = inputEnts.empty() ? nullptr : reg.Get<Components::InputStateComponent>(inputEnts[0]);
+    bool        escDown    = (inputState != nullptr) && inputState->IsKeyDown(static_cast<uint8_t>(KeyCode::Escape));
     static bool wasEscDown = false;
 
     if (escDown && !wasEscDown) {

@@ -20,9 +20,16 @@ class ZHLN_API DefaultPreset {
     static void               Update(Engine& engine, float dt);
     [[nodiscard]] static bool IsActive() noexcept;
     static void               ClearFallback() noexcept;
+    static void               SetDisabled(bool disabled) noexcept {
+        s_Disabled = disabled;
+    }
+    [[nodiscard]] static bool IsDisabled() noexcept {
+        return s_Disabled;
+    }
 
   private:
     static inline bool           s_IsActive       = false;
+    static inline bool           s_Disabled       = false;
     static inline FallbackReason s_Reason         = FallbackReason::None;
     static inline char           s_DetailMsg[256] = "";
 

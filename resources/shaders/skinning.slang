@@ -7,11 +7,6 @@ struct VertexAttributes {
     uint color;
 };
 
-struct VertexSkin {
-    uint2 joints; // Packed 4x uint16_t (8 bytes total)
-    uint weights; // Packed UNORM8 weights
-};
-
 struct GPUJoint {
     float4 col0;
     float4 col1;
@@ -54,6 +49,12 @@ uint PackNormal(float3 n, float w) {
 }
 
 float4 SkinPosition(float4 position, uint4 joints, float4 weights, uint jointOffset, GPUJoint* jointsPool) {
+    float wSum = weights.x + weights.y + weights.z + weights.w;
+    if (wSum < 1e-4f) {
+        return position; // Unweighted vertices stay in bind position
+    }
+    weights /= wSum; // Normalize weights
+
     GPUJoint j0 = jointsPool[jointOffset + joints.x];
     GPUJoint j1 = jointsPool[jointOffset + joints.y];
     GPUJoint j2 = jointsPool[jointOffset + joints.z];
@@ -67,6 +68,12 @@ float4 SkinPosition(float4 position, uint4 joints, float4 weights, uint jointOff
 }
 
 float3 SkinDirection(float3 direction, uint4 joints, float4 weights, uint jointOffset, GPUJoint* jointsPool) {
+    float wSum = weights.x + weights.y + weights.z + weights.w;
+    if (wSum < 1e-4f) {
+        return direction;
+    }
+    weights /= wSum;
+
     GPUJoint j0 = jointsPool[jointOffset + joints.x];
     GPUJoint j1 = jointsPool[jointOffset + joints.y];
     GPUJoint j2 = jointsPool[jointOffset + joints.z];
@@ -94,34 +101,36 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     if (tid.x >= pcs.vertexCount)
         return;
 
-    // Convert raw 64-bit addresses to strongly-typed GPU pointers
-    float3* inPosPool             = (float3*) pcs.inPosAddr;
+    // 1. Convert raw 64-bit addresses to typed GPU pointers
+    float* inPosValues            = (float*) pcs.inPosAddr;
     VertexAttributes* inAttrPool  = (VertexAttributes*) pcs.inAttrAddr;
-    VertexSkin* inSkinPool        = (VertexSkin*) pcs.inSkinAddr;
-    float3* outPosPool            = (float3*) pcs.outPosAddr;
+    float* outPosValues           = (float*) pcs.outPosAddr;
     VertexAttributes* outAttrPool = (VertexAttributes*) pcs.outAttrAddr;
     GPUJoint* jointsPool          = (GPUJoint*) pcs.jointsAddr;
     float4* morphDeltasPool       = (float4*) pcs.morphDeltasAddr;
 
-    // Load separated SoA input streams using raw array subscripting
-    float3 localPos       = inPosPool[tid.x];
-    VertexAttributes attr = inAttrPool[tid.x];
+    // 2. Fetch input position with packed 12-byte (3-float) stride
+    uint posOffset  = tid.x * 3u;
+    float3 localPos = float3(inPosValues[posOffset], inPosValues[posOffset + 1u], inPosValues[posOffset + 2u]);
 
-    uint normalRaw  = attr.normal;
-    uint tangentRaw = attr.tangent;
-    uint uvRaw      = attr.uv;
-    uint colorRaw   = attr.color;
+    VertexAttributes attr = inAttrPool[tid.x];
+    uint normalRaw        = attr.normal;
+    uint tangentRaw       = attr.tangent;
+    uint uvRaw            = attr.uv;
+    uint colorRaw         = attr.color;
 
     uint4 joints   = uint4(0, 0, 0, 0);
     float4 weights = float4(1.0f, 0.0f, 0.0f, 0.0f);
 
+    // 3. Fetch skinning indices/weights with packed 12-byte (3-uint) stride
     if (pcs.inSkinAddr != 0) {
-        VertexSkin skin = inSkinPool[tid.x];
-        joints          = UnpackJoints(skin.joints);
-        weights         = UnpackWeights(skin.weights);
+        uint* skinWords = (uint*) pcs.inSkinAddr;
+        uint skinOffset = tid.x * 3u;
+        joints          = UnpackJoints(uint2(skinWords[skinOffset], skinWords[skinOffset + 1u]));
+        weights         = UnpackWeights(skinWords[skinOffset + 2u]);
     }
 
-    // Apply Morph Targets FIRST (in bind-pose space)
+    // 4. Apply Morph Targets (in bind-pose space)
     if (pcs.activeMorphCount > 0) {
         [unroll]
         for (uint i = 0; i < 4; ++i) {
@@ -135,16 +144,19 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         }
     }
 
-    // Apply joint matrices SECOND
+    // 5. Apply Joint Matrices
     float4 skinnedPos  = SkinPosition(float4(localPos, 1.0f), joints, weights, pcs.jointOffset, jointsPool);
     float4 normUnpack  = UnpackNormal(normalRaw);
     float3 skinnedNorm = normalize(SkinDirection(normUnpack.xyz, joints, weights, pcs.jointOffset, jointsPool));
     float4 tangUnpack  = UnpackNormal(tangentRaw);
     float3 skinnedTang = normalize(SkinDirection(tangUnpack.xyz, joints, weights, pcs.jointOffset, jointsPool));
 
-    // Write results directly to output scratch buffers via pointer offsets
-    outPosPool[tid.x] = skinnedPos.xyz;
+    // 6. Write output position with tightly packed 12-byte stride (3 floats)
+    outPosValues[posOffset + 0u] = skinnedPos.x;
+    outPosValues[posOffset + 1u] = skinnedPos.y;
+    outPosValues[posOffset + 2u] = skinnedPos.z;
 
+    // 7. Write 16-byte packed attributes
     uint outNorm       = PackNormal(skinnedNorm, normUnpack.w);
     uint outTang       = PackNormal(skinnedTang, tangUnpack.w);
     outAttrPool[tid.x] = { outNorm, outTang, uvRaw, colorRaw };
