@@ -868,9 +868,11 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
                         ZHLN::Log("[RenderInit] ERROR: Failed to reflect cluster-culling layout!");
                         return std::unexpected(RenderInitError::PipelineCreationFailed);
                     }
-                    clusterCullingPool           = clusterCullingDescLayout.CreatePool(ctx.Device(), 2);
-                    frames.clusterCullingSets[0] = clusterCullingDescLayout.Allocate(ctx.Device(), clusterCullingPool.Get(), clusterCullingDescLayout.GetSetLayout());
-                    frames.clusterCullingSets[1] = clusterCullingDescLayout.Allocate(ctx.Device(), clusterCullingPool.Get(), clusterCullingDescLayout.GetSetLayout());
+                    clusterCullingPool = clusterCullingDescLayout.CreatePool(ctx.Device(), 2);
+                    frames.clusterCullingSets[0] =
+                        clusterCullingDescLayout.Allocate(ctx.Device(), clusterCullingPool.Get(), clusterCullingDescLayout.GetSetLayout());
+                    frames.clusterCullingSets[1] =
+                        clusterCullingDescLayout.Allocate(ctx.Device(), clusterCullingPool.Get(), clusterCullingDescLayout.GetSetLayout());
 
                     auto make_cluster_set = [&](uint32_t i) -> std::expected<void, Error> {
                         return Vk::Buffer::Create(
@@ -1758,13 +1760,11 @@ namespace {
 void ApplyImageDebugNames(RenderContext::Impl& impl) noexcept {
     const auto& ctx = impl.ctx;
 
-    Reflect::ForEachReflectedField<typename RenderContext::Impl::GraphResources::ReflectMetadata>(
-        impl.graphResources, [&]<typename Tag>(auto& rt) {
-            if constexpr (requires { rt.image.Handle(); }) {
-                Vk::Debug::SetImageName(ctx, rt.image.Handle(), Tag::name.string_view());
-            }
+    Reflect::ForEachReflectedField<typename RenderContext::Impl::GraphResources::ReflectMetadata>(impl.graphResources, [&]<typename Tag>(auto& rt) {
+        if constexpr (requires { rt.image.Handle(); }) {
+            Vk::Debug::SetImageName(ctx, rt.image.Handle(), Tag::name.string_view());
         }
-    );
+    });
 
     Vk::Debug::SetImageName(ctx, impl.frames.accumBuffers[0].image.Handle(), "AccumHistory0");
     Vk::Debug::SetImageName(ctx, impl.frames.accumBuffers[1].image.Handle(), "AccumHistory1");
@@ -1776,16 +1776,12 @@ void ApplyImageDebugNames(RenderContext::Impl& impl) noexcept {
     Vk::Debug::SetImageName(ctx, impl.ltcAmpImage.Handle(), "LTC.Amp");
 
     for (size_t i = 0; i < impl.textureImages.size(); ++i) {
-        char name[32];
-        std::snprintf(name, sizeof(name), "BindlessTexture%03zu", i);
-        Vk::Debug::SetImageName(ctx, impl.textureImages[i].Handle(), name);
+        Vk::Debug::SetImageName(ctx, impl.textureImages[i].Handle(), std::format("BindlessTexture{:03}", i));
     }
 
     const auto& swapchain = impl.presentation.swapchain.Get();
     for (uint32_t i = 0; i < swapchain.image_count; ++i) {
-        char name[32];
-        std::snprintf(name, sizeof(name), "Swapchain%u", i);
-        Vk::Debug::SetImageName(ctx, swapchain.images[i], name);
+        Vk::Debug::SetImageName(ctx, swapchain.images[i], std::format("Swapchain{}", i));
     }
 }
 
@@ -1876,20 +1872,25 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
     // 160x90 aligns cleanly with 16x9 light clusters, maintaining 10x subdivision.
     VkExtent3D voxelExt = {.width = 160, .height = 90, .depth = 64};
 
-    graphResources.voxelMedia =
-        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+    graphResources.voxelMedia = Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
+        allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
+    );
 
-    graphResources.voxelLight =
-        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+    graphResources.voxelLight = Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
+        allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
+    );
 
-    graphResources.voxelIntegrated =
-        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+    graphResources.voxelIntegrated = Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
+        allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
+    );
 
-    graphResources.voxelHistory =
-        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+    graphResources.voxelHistory = Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
+        allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
+    );
 
-    graphResources.voxelResolved =
-        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+    graphResources.voxelResolved = Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
+        allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
+    );
 
     graphResources.bloomThresholdTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext2);
     graphResources.bloomDown1           = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext4);
@@ -1921,9 +1922,13 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
         // differ between runs — worse, NaN bit patterns survive the
         // neighborhood clamps and poison temporal accumulation indefinitely.
         // Clear every target whose first definition is a read.
-        const VkClearColorValue      clearBlack = {.float32 = {0.0F, 0.0F, 0.0F, 0.0F}};
+        const VkClearColorValue       clearBlack = {.float32 = {0.0F, 0.0F, 0.0F, 0.0F}};
         const VkImageSubresourceRange clearRange = {
-            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = VK_REMAINING_MIP_LEVELS, .baseArrayLayer = 0, .layerCount = VK_REMAINING_ARRAY_LAYERS
+            .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel   = 0,
+            .levelCount     = VK_REMAINING_MIP_LEVELS,
+            .baseArrayLayer = 0,
+            .layerCount     = VK_REMAINING_ARRAY_LAYERS
         };
         const std::array accumImages = {frames.accumBuffers[0].image.Handle(), frames.accumBuffers[1].image.Handle()};
         for (const auto img: accumImages) {
@@ -1941,25 +1946,23 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
             Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
         }
 
-        std::array colorTargets = {
-            graphResources.sceneColor.image.Handle(),
-            graphResources.velocityBuffer.image.Handle(),
-            graphResources.normalRoughnessBuffer.image.Handle(),
-            graphResources.hdrSceneColor.image.Handle(),
-            graphResources.ambientTarget.image.Handle(),
-            graphResources.lightingTarget.image.Handle(),
-            graphResources.smaaEdgeTarget.image.Handle(),
-            graphResources.smaaWeightTarget.image.Handle(),
-            graphResources.bloomThresholdTarget.image.Handle(),
-            graphResources.bloomDown1.image.Handle(),
-            graphResources.bloomDown2.image.Handle(),
-            graphResources.bloomDown3.image.Handle(),
-            graphResources.bloomUp2.image.Handle(),
-            graphResources.bloomUp1.image.Handle(),
-            graphResources.bloomFinalTarget.image.Handle(),
-            graphResources.transNormalBuffer.image.Handle(),
-            graphResources.transLightingTarget.image.Handle()
-        };
+        std::array colorTargets = {graphResources.sceneColor.image.Handle(),
+                                   graphResources.velocityBuffer.image.Handle(),
+                                   graphResources.normalRoughnessBuffer.image.Handle(),
+                                   graphResources.hdrSceneColor.image.Handle(),
+                                   graphResources.ambientTarget.image.Handle(),
+                                   graphResources.lightingTarget.image.Handle(),
+                                   graphResources.smaaEdgeTarget.image.Handle(),
+                                   graphResources.smaaWeightTarget.image.Handle(),
+                                   graphResources.bloomThresholdTarget.image.Handle(),
+                                   graphResources.bloomDown1.image.Handle(),
+                                   graphResources.bloomDown2.image.Handle(),
+                                   graphResources.bloomDown3.image.Handle(),
+                                   graphResources.bloomUp2.image.Handle(),
+                                   graphResources.bloomUp1.image.Handle(),
+                                   graphResources.bloomFinalTarget.image.Handle(),
+                                   graphResources.transNormalBuffer.image.Handle(),
+                                   graphResources.transLightingTarget.image.Handle()};
 
         for (auto* const img: colorTargets) {
             Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
@@ -2020,7 +2023,7 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
         hizPool = {};
     }
     uint32_t mips = graphResources.hizMap.mipLevels;
-    hizPool = hizDescLayout.CreatePool(ctx.Device(), mips);
+    hizPool       = hizDescLayout.CreatePool(ctx.Device(), mips);
     hizSets.resize(mips);
 
     for (uint32_t i = 0; i < mips; ++i) {
@@ -2028,9 +2031,7 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
         if (i == 0) {
             // hiz SPV keeps only {inDepth@0, outDepth@1}: the trailing sampler
             // arg is safely skipped by the reflected writer.
-            hizDescLayout.Write(
-                ctx.Device(), hizSets[i], presentation.depthTarget.view.Get(), graphResources.hizMap.mipViews[0].Get(), pointSampler.Get()
-            );
+            hizDescLayout.Write(ctx.Device(), hizSets[i], presentation.depthTarget.view.Get(), graphResources.hizMap.mipViews[0].Get(), pointSampler.Get());
         } else {
             // The whole HiZ pyramid sits in VK_IMAGE_LAYOUT_GENERAL for the
             // duration of the pass (the graph declares it ComputeWrite), so
