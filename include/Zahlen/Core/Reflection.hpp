@@ -787,15 +787,12 @@ constexpr void ForEachAnnotatedTypeInScope(F&& f) {
 
 template <typename Tag, auto EntityInfo>
 consteval std::optional<Tag> GetAnnotation() {
-    std::optional<Tag> result = std::nullopt;
-
-    [:Expand(std::meta::annotations_of(EntityInfo)):] >> [&]<auto annotation> {
-        if constexpr (std::meta::type_of(annotation) == ^^Tag) {
-            result = std::meta::extract<Tag>(annotation);
+    for (auto a: std::meta::annotations_of(EntityInfo)) {
+        if (std::meta::type_of(a) == ^^Tag) {
+            return std::meta::extract<Tag>(a);
         }
-    };
-
-    return result;
+    }
+    return std::nullopt;
 }
 
 template <typename Tag, typename E>
