@@ -49,22 +49,32 @@ bool CreativeWorksManager::MountPak(std::string_view pakFilePath) {
         return false;
     }
 
-    const auto* header = static_cast<const PakHeader*>(archive->mapped.data);
-    if (std::memcmp(header->magic, "ZPAK", 4) != 0) {
+    if (archive->mapped.size < sizeof(PakHeader)) {
+        Log("ERROR: PAK file smaller than header: {}", pakFilePath);
+        Platform::CloseMappedFile(archive->mapped);
+        delete archive;
+        return false;
+    }
+
+    // Safely copy header to stack to ensure alignment
+    PakHeader header {};
+    std::memcpy(&header, archive->mapped.data, sizeof(PakHeader));
+
+    if (std::memcmp(header.magic, "ZPAK", 4) != 0) {
         Log("ERROR: Invalid PAK magic signature in: {}", pakFilePath);
         Platform::CloseMappedFile(archive->mapped);
         delete archive;
         return false;
     }
 
-    const auto* entries = reinterpret_cast<const PakEntry*>(static_cast<const char*>(archive->mapped.data) + header->tocOffset);
+    const auto* baseData = static_cast<const char*>(archive->mapped.data);
 
     ZHLN::Lock(_catalogMutex, [&] {
         if (_archiveCount >= _archiveCapacity) {
             size_t newCap  = _archiveCapacity == 0 ? 4 : _archiveCapacity * 2;
             auto** newArrs = new PakArchive*[newCap];
             if (_archives != nullptr) {
-                std::memcpy(newArrs, _archives, _archiveCount * sizeof(PakArchive*));
+                std::memcpy(static_cast<void*>(newArrs), static_cast<void*>(_archives), _archiveCount * sizeof(PakArchive*));
                 delete[] _archives;
             }
             _archives        = newArrs;
@@ -72,12 +82,15 @@ bool CreativeWorksManager::MountPak(std::string_view pakFilePath) {
         }
         _archives[_archiveCount++] = archive;
 
-        for (uint32_t i = 0; i < header->entryCount; ++i) {
-            _catalog.Insert(entries[i].pathHash, CatalogEntry {entries[i], archive});
+        for (uint32_t i = 0; i < header.entryCount; ++i) {
+            // Safely copy unaligned packed entry to aligned stack memory
+            PakEntry entry {};
+            std::memcpy(&entry, baseData + header.tocOffset + (i * sizeof(PakEntry)), sizeof(PakEntry));
+            _catalog.Insert(entry.pathHash, CatalogEntry {.entry = entry, .archive = archive});
         }
     });
 
-    Log("Mounted PAK: {} ({} assets)", pakFilePath, header->entryCount);
+    Log("Mounted PAK: {} ({} assets)", pakFilePath, header.entryCount);
     return true;
 }
 
@@ -126,11 +139,11 @@ void CreativeWorksManager::ExecuteLoad(CreativeWorkLoadRequest* req) {
         });
     }
 
-    req->outSize           = entry.uncompressedSize;
-    const char* payloadRaw = static_cast<const char*>(archive->mapped.data) + entry.offset;
+    req->outSize     = entry.uncompressedSize;
+    char* payloadRaw = static_cast<char*>(archive->mapped.data) + entry.offset;
 
     if (entry.compression == 0) {
-        req->outData    = const_cast<char*>(payloadRaw);
+        req->outData    = payloadRaw;
         req->isZeroCopy = true;
         req->success    = true;
         return;
@@ -188,7 +201,7 @@ void CreativeWorksManager::CachePrefab(uint64_t hash, ModelPrefab* prefab) {
             size_t newCap  = _prefabsCapacity == 0 ? 8 : _prefabsCapacity * 2;
             auto** newArrs = new ModelPrefab*[newCap];
             if (_prefabsMemory != nullptr) {
-                std::memcpy(newArrs, _prefabsMemory, _prefabsCount * sizeof(ModelPrefab*));
+                std::memcpy(static_cast<void*>(newArrs), static_cast<void*>(_prefabsMemory), _prefabsCount * sizeof(ModelPrefab*));
                 delete[] _prefabsMemory;
             }
             _prefabsMemory   = newArrs;
@@ -214,7 +227,7 @@ uint32_t CreativeWorksManager::GetCachedPrefabs(ModelPrefab** outPrefabs, uint32
             return static_cast<uint32_t>(_prefabsCount);
         }
         uint32_t toCopy = std::min(static_cast<uint32_t>(_prefabsCount), maxCount);
-        std::memcpy(outPrefabs, _prefabsMemory, toCopy * sizeof(ModelPrefab*));
+        std::memcpy(static_cast<void*>(outPrefabs), static_cast<void*>(_prefabsMemory), toCopy * sizeof(ModelPrefab*));
         return toCopy;
     });
 }

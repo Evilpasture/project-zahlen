@@ -551,7 +551,14 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
     };
 
     VkDevice handle = VK_NULL_HANDLE;
-    if (vkCreateDevice(desc->physical->handle, &create_info, nullptr, &handle) != VK_SUCCESS) {
+    VkResult res    = vkCreateDevice(desc->physical->handle, &create_info, nullptr, &handle);
+    if (res != VK_SUCCESS) {
+        fprintf(stderr, "\n=======================================================\n");
+        fprintf(stderr, "[VULKAN DEVICE ERROR]\n");
+        fprintf(stderr, "  Target GPU:    %s\n", desc->physical->properties.properties.deviceName);
+        fprintf(stderr, "  Driver Error:  %s (VkResult: %d)\n", ZHLN_VkResultString(res), res);
+        fprintf(stderr, "  Active Exts:   %u extensions enabled\n", active_count);
+        fprintf(stderr, "=======================================================\n\n");
         return null_result;
     }
 

@@ -165,7 +165,18 @@ option(USE_SANITIZERS "Enable ASan and UBSan" OFF)
 if(USE_SANITIZERS)
     add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
     add_link_options(-fsanitize=address,undefined)
-    add_definitions(-D__ASAN_ENABLED__)
+    add_definitions(
+        -D__ASAN_ENABLED__
+        -DZHLN_PROJECT_ROOT="${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+
+    # Centralized test environment string for CTest
+    set(ZHLN_TEST_ENVIRONMENT
+        "ASAN_OPTIONS=protect_shadow_gap=0:detect_leaks=1:symbolize=1:halt_on_error=1"
+        "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp:print_suppressions=0"
+        "UBSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/ubsan.supp:print_stacktrace=1:halt_on_error=1"
+        "TSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tsan.supp:halt_on_error=1"
+    )
 endif()
 
 option(ZHLN_DEV_MODE "Enable raw loose-file asset loading for development" ON)
@@ -752,6 +763,7 @@ zahlen_enable_reflection(zahlen_render)
 zahlen_enable_reflection(zahlen_engine)
 zahlen_enable_reflection(zahlen_gltf)
 zahlen_enable_reflection(zahlen)
+zahlen_enable_reflection(zcook)
 
 # --- TESTS ---
 if(ZHLN_BUILD_TESTS)

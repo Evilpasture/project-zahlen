@@ -1,15 +1,9 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# 1. Enable CTest testing framework
-enable_testing()
+file(GLOB RENDER_TEST_SOURCES CONFIGURE_DEPENDS "Test*.cpp")
 
-# 2. Automatically discover all test source files in this directory
-file(GLOB TEST_SOURCES CONFIGURE_DEPENDS "Test*.cpp")
-
-# 3. Iterate and dynamically register each test executable with original casing preserved
-foreach(TEST_SRC IN LISTS TEST_SOURCES)
-    # Extract file name without path or extension (e.g., "TestTaskSystem", "TestJSON", "TestECS")
+foreach(TEST_SRC IN LISTS RENDER_TEST_SOURCES)
     get_filename_component(TARGET_NAME ${TEST_SRC} NAME_WLE)
 
     add_executable(${TARGET_NAME} ${TEST_SRC})
@@ -22,18 +16,19 @@ foreach(TEST_SRC IN LISTS TEST_SOURCES)
 
     target_link_libraries(${TARGET_NAME} PRIVATE
         zahlen_engine
+        zahlen_render
     )
 
     target_include_directories(${TARGET_NAME} PRIVATE
         ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_SOURCE_DIR}/src
+        ${PROJECT_SOURCE_DIR}/tests
     )
 
     if(NOT MSVC)
         target_compile_options(${TARGET_NAME} PRIVATE -fno-exceptions -fno-rtti)
     endif()
 
-    # Applies the required reflection flags (-freflection / custom libc++) configured in the root
     zahlen_enable_reflection(${TARGET_NAME})
 
     # --- ASAN & UBSAN CONFIGURATION ---
@@ -62,22 +57,15 @@ foreach(TEST_SRC IN LISTS TEST_SOURCES)
         endif()
     endif()
 
-    # 4. Register the executable as a test with CTest (using original casing)
-    add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
-    set_tests_properties(${TARGET_NAME} PROPERTIES LABELS "CPU;Fast")
+    add_test(NAME GPU_${TARGET_NAME} COMMAND ${TARGET_NAME})
+    set_tests_properties(GPU_${TARGET_NAME} PROPERTIES
+        LABELS "GPU;LocalOnly"
+        TIMEOUT 60
+    )
 
-    # Pass Sanitizer options to CTest runner so reports halt and print stack traces
     if(USE_SANITIZERS)
-        set_tests_properties(${TARGET_NAME} PROPERTIES
+        set_tests_properties(GPU_${TARGET_NAME} PROPERTIES
             ENVIRONMENT "${ZHLN_TEST_ENVIRONMENT}"
         )
     endif()
 endforeach()
-
-# 5. Local GPU Render Test Suite (Off by default for headless CI/CD)
-option(ZHLN_BUILD_GPU_TESTS "Build GPU/Vulkan rendering tests (local hardware required)" OFF)
-
-if(ZHLN_BUILD_GPU_TESTS)
-    message(STATUS "Configuring local GPU render tests in tests/render...")
-    add_subdirectory(render)
-endif()

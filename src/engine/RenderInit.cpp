@@ -236,6 +236,7 @@ std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfi
         .and_then([&]() { return InitBindless(); })
         .and_then([&]() { return BuildHangGpuPipeline(); })
         .and_then([&]() { return BuildHiZPipeline(); })
+        .and_then([&]() { return BuildProceduralBakePipeline(); })
         .and_then([&]() {
             return CompileShadowPipeline(
                        ctx.Device(), Resource::ShaderPair {.vertex = Resource::GetShaderProgram(Basic).vertex, .fragment = Resource::shadow_frag}
@@ -332,7 +333,7 @@ std::expected<Vk::ExtensionResult, Error> GetPlatformInstanceExtensions(Window& 
 
 auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps, ValidationMode validationMode) noexcept {
     return Vk::FeatureChainBuilder(physicalDevice)
-        .Require<VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR>([](auto& f) { f.swapchainMaintenance1 = VK_TRUE; })
+        .Optional<VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR>([](auto& f) { f.swapchainMaintenance1 = VK_TRUE; })
         .Require<VkPhysicalDeviceVulkan11Features>([](auto& f) {
             f.multiview                          = VK_TRUE;
             f.storageBuffer16BitAccess           = VK_TRUE;
@@ -357,7 +358,6 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
             f.uniformAndStorageBuffer8BitAccess            = VK_TRUE;
             f.shaderFloat16                                = VK_TRUE;
 
-            // Enable Vulkan 1.2 features required for GPU-AV shader instrumentation
             if (validationMode == ZHLN::ValidationMode::GPU) {
                 f.scalarBlockLayout            = VK_TRUE;
                 f.storageBuffer8BitAccess      = VK_TRUE;
@@ -384,7 +384,6 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
             f.features.imageCubeArray            = VK_TRUE;
             f.features.shaderInt16               = VK_TRUE;
 
-            // Enable Core features required by GPU-AV (and VUID 04000)
             if (validationMode == ZHLN::ValidationMode::GPU) {
                 f.features.robustBufferAccess             = VK_TRUE;
                 f.features.fragmentStoresAndAtomics       = VK_TRUE;
@@ -398,9 +397,9 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
 std::expected<Vk::ExtensionResult, Error> GetDeviceExtensions(VkPhysicalDevice physicalDevice) noexcept {
     return Vk::ExtensionBuilder::ForDevice(physicalDevice)
         .Require(VK_KHR_SWAPCHAIN_EXTENSION_NAME)
-        .Require(VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME)
-        .Require(VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME)
-        .Require("VK_EXT_robustness2")
+        .Optional(VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME)
+        .Optional(VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME)
+        .Optional("VK_EXT_robustness2")
         .OptionalIf("VK_KHR_portability_subset", isMac)
         .OptionalGroup(
             {VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_RAY_QUERY_EXTENSION_NAME, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME},
@@ -516,7 +515,6 @@ std::expected<std::unique_ptr<RenderContext>, Error> RenderContext::Create(Windo
     auto impl     = std::make_unique<Impl>(window);
     impl->appName = cfg.appName;
 
-    // Local state captured by reference and mutated synchronously inside the pipeline
     VkInstance              instance    = VK_NULL_HANDLE;
     VkSurfaceKHR            raw_surface = VK_NULL_HANDLE;
     int                     width       = 0;
@@ -554,6 +552,7 @@ std::expected<std::unique_ptr<RenderContext>, Error> RenderContext::Create(Windo
             return {};
         })
         .and_then([&]() -> std::expected<void, Error> {
+            // Adopt surface into RAII container
             impl->surface         = Vk::Surface(instance, raw_surface);
             HardwareCaps caps     = ProbeHardware(physicalInfo.handle, physicalInfo.properties.properties.apiVersion);
             auto         features = BuildFeatureChain(physicalInfo.handle, caps, cfg.validationMode);

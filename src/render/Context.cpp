@@ -97,7 +97,6 @@ std::expected<ZHLN_PhysicalDeviceInfo, ZHLN::Error> Context::Builder::SelectPhys
 
 std::expected<Context, Error> Context::Builder::Build() const noexcept {
     Context ctx;
-    ctx._instance = _instance;
     ctx._surface  = _surface;
     ctx._physical = _physical;
 
@@ -114,6 +113,8 @@ std::expected<Context, Error> Context::Builder::Build() const noexcept {
         return std::unexpected(RenderInitError::DeviceCreationFailed);
     }
 
+    // Only take ownership of _instance once device creation succeeds
+    ctx._instance = _instance;
     return ctx;
 }
 
