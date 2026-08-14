@@ -186,9 +186,7 @@ class ZHLN_API RenderContext {
     auto          BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness) -> std::expected<uint32_t, Error>;
     TextureHandle CreateProceduralTexture(std::string_view name, uint32_t width, uint32_t height, bool isSRGB, const uint32_t* pixels);
 
-    [[nodiscard]] auto GetImpl() const -> Impl* {
-        return _impl.get();
-    }
+    [[nodiscard]] std::expected<void, Error> CaptureScreenshotPPM(std::string_view outputPath) noexcept;
 
     // --- OOP Idiomatic State & Command Submission APIs ---
     void SetMatrices(const JPH::Mat44& viewProj, const JPH::Mat44& unjitteredViewProj) noexcept;

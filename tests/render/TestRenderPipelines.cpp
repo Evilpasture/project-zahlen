@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include "Zahlen/Render.hpp"
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/Engine.hpp>
@@ -31,7 +32,8 @@ struct RenderPipelinesTestSuite {
                     .height         = 720,
                     .vsync          = false,
                     .fullscreen     = false,
-                    .validationMode = ZHLN::ValidationMode::On
+                    .validationMode = ZHLN::ValidationMode::On,
+                    .headless       = true
                 }
             };
 
@@ -70,6 +72,8 @@ struct RenderPipelinesTestSuite {
                 ZHLN::Test::ExpectEq(status, ZHLN::GameplayStatus::OK);
             }
 
+            auto captureRes = engine->GetRenderContext().CaptureScreenshotPPM("test_render_output.ppm");
+            ZHLN::Test::ExpectTrue(captureRes.has_value());
             ZHLN::Test::ExpectTrue(engine->GetCurrentFrame() >= 60u);
             ZHLN::Test::ExpectTrue(!engine->GetVisibleEntities().empty());
 

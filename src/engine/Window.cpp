@@ -187,10 +187,11 @@ KeyCode MapGLFWKey(int key) noexcept {
 
 } // namespace
 
-Window::Window(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver, bool useTTY):
+Window::Window(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver, bool useTTY, bool headless):
     _impl(std::make_unique<Impl>()) {
     _impl->receiver = receiver;
     _impl->is_tty   = useTTY;
+    _impl->headless = headless;
 
     if (_impl->is_tty) {
         _impl->width       = width;
@@ -198,6 +199,11 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, bool full
         _impl->tty_context = TTYBackend::Init(width, height);
     } else {
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+        if (headless) {
+            // Hide the window from the desktop/taskbar completely
+            glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+            glfwWindowHint(GLFW_FOCUSED, GLFW_FALSE);
+        }
 
         GLFWmonitor* monitor = nullptr;
         if (fullscreen) {
@@ -218,7 +224,9 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, bool full
         glfwSetWindowUserPointer(_impl->handle, this);
 
         if (_impl->handle != nullptr) {
-            glfwShowWindow(_impl->handle);
+            if (!headless) {
+                glfwShowWindow(_impl->handle);
+            }
             glfwPollEvents();
         }
 

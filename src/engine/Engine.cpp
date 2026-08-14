@@ -471,7 +471,8 @@ std::expected<void, Error> Engine::InitInternal(const EngineConfig& cfg) {
         .userdata = &_impl->registry, .onKey = onKey, .onMouseMove = onMouseMove, .onMouseScroll = onMouseScroll, .onResize = onResize, .onChar = onChar
     };
 
-    _impl->window = std::make_unique<Window>(cfg.render.appName.data(), cfg.render.width, cfg.render.height, cfg.render.fullscreen, receiver, use_tty);
+    _impl->window =
+        std::make_unique<Window>(cfg.render.appName.data(), cfg.render.width, cfg.render.height, cfg.render.fullscreen, receiver, use_tty, cfg.render.headless);
 
     // Singleton InputStateComponent must exist before the first event pump.
     _impl->registry.Create(Components::InputStateComponent {});

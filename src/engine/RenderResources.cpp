@@ -825,6 +825,58 @@ TextureHandle RenderContext::CreateProceduralTexture(std::string_view name, uint
     return _impl->textureManager.CreateProcedural(*this, name, width, height, isSRGB, pixels);
 }
 
+std::expected<void, Error> RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept {
+    auto* const impl   = _impl.get();
+    const auto  extent = impl->presentation.swapchain.Get().extent;
+
+    const size_t imageBytes = static_cast<size_t>(extent.width) * extent.height * 4;
+
+    // 1. Allocate host-visible readback buffer via engine Allocator
+    auto stagingRes = Vk::Buffer::Create(impl->allocator.Get(), imageBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_TO_CPU);
+    if (!stagingRes) {
+        return std::unexpected(stagingRes.error());
+    }
+    auto stagingBuffer = std::move(*stagingRes);
+
+    // 2. Record and submit transfer using engine command ring & typed transitions
+    Vk::ExecuteImmediate(impl->ctx, impl->graphicsCmdRing, [&](VkCommandBuffer cmd) {
+        auto* const swapchainImage = impl->presentation.swapchain.Get().images[impl->current_image_index];
+
+        Vk::TransitionLayout<VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL>(cmd, swapchainImage);
+        Vk::CopyImageToBuffer(cmd, swapchainImage, stagingBuffer.Handle(), extent);
+        Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(cmd, swapchainImage);
+    });
+
+    // 3. Map memory with typed pointer accessor
+    auto mapped = stagingBuffer.Map();
+    if (mapped.data == nullptr) {
+        return std::unexpected(RenderInitError::SubsystemAllocationFailed);
+    }
+    const auto* const srcPixels = mapped.As<const uint8_t>();
+
+    // 4. Output image file
+    std::ofstream ofs(std::string(outputPath), std::ios::binary);
+    if (!ofs.is_open()) {
+        return std::unexpected(RenderInitError::UnknownError);
+    }
+
+    ofs << "P6\n" << extent.width << " " << extent.height << "\n255\n";
+
+    // Fast conversion: BGRA (Vulkan Swapchain) -> RGB (PPM)
+    ZHLN::Array<uint8_t> rgb(static_cast<size_t>(extent.width) * extent.height * 3);
+    for (size_t i = 0; i < static_cast<size_t>(extent.width) * extent.height; ++i) {
+        rgb[i * 3 + 0] = srcPixels[i * 4 + 2]; // R
+        rgb[i * 3 + 1] = srcPixels[i * 4 + 1]; // G
+        rgb[i * 3 + 2] = srcPixels[i * 4 + 0]; // B
+    }
+
+    ofs.write(reinterpret_cast<const char*>(rgb.data()), rgb.size());
+    ofs.close();
+
+    ZHLN::Log("[Test Capture] Rendered frame written to: {}", outputPath);
+    return {};
+}
+
 void RenderContext::ProvokeDeviceLost() {
     _impl->ProvokeDeviceLostInternal();
 }

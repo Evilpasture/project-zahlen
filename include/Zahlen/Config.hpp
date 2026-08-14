@@ -175,6 +175,7 @@ struct RenderConfig {
     bool           vsync          = true;
     bool           fullscreen     = false;
     ValidationMode validationMode = ValidationMode::On;
+    bool           headless       = false;
 };
 
 struct EngineConfig {

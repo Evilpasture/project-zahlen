@@ -21,7 +21,14 @@ struct RenderComputeTestSuite {
     struct Tests {
         std::expected<void, ZHLN::Error> procedural_bake_compute_execution() {
             const ZHLN::EngineConfig cfg {
-                .render = {.appName = "LocalGPUComputeTest", .width = 640, .height = 480, .vsync = false, .validationMode = ZHLN::ValidationMode::On}
+                .render = {
+                    .appName        = "LocalGPUComputeTest",
+                    .width          = 640,
+                    .height         = 480,
+                    .vsync          = false,
+                    .validationMode = ZHLN::ValidationMode::On,
+                    .headless       = true,
+                }
             };
 
             auto       engineRes   = ZHLN::Engine::Create(cfg);

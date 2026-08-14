@@ -35,6 +35,32 @@ inline void CopyBufferToImage(const VkCommandBuffer cmd, const ZHLN_BufferImageC
     ZHLN_CmdCopyBufferToImage(cmd, &desc);
 }
 
+inline void
+    CopyImageToBuffer(VkCommandBuffer cmd, VkImage srcImage, VkBuffer dstBuffer, VkExtent2D extent, VkImageLayout layout, VkImageAspectFlags aspect) noexcept {
+    const VkBufferImageCopy2 region = {
+        .sType             = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
+        .pNext             = nullptr,
+        .bufferOffset      = 0,
+        .bufferRowLength   = extent.width,
+        .bufferImageHeight = extent.height,
+        .imageSubresource  = {.aspectMask = aspect, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1},
+        .imageOffset       = {0, 0, 0},
+        .imageExtent       = {.width = extent.width, .height = extent.height, .depth = 1},
+    };
+
+    const VkCopyImageToBufferInfo2 copyInfo = {
+        .sType          = VK_STRUCTURE_TYPE_COPY_IMAGE_TO_BUFFER_INFO_2,
+        .pNext          = nullptr,
+        .srcImage       = srcImage,
+        .srcImageLayout = layout,
+        .dstBuffer      = dstBuffer,
+        .regionCount    = 1,
+        .pRegions       = &region,
+    };
+
+    vkCmdCopyImageToBuffer2(cmd, &copyInfo);
+}
+
 template <size_t RegionCount>
 constexpr auto CreateCopyRegions(
     VkDeviceSize       baseOffset,

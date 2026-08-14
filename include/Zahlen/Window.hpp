@@ -25,7 +25,15 @@ struct WindowInputReceiver {
 
 class ZHLN_API Window {
   public:
-    Window(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver, bool useTTY = false);
+    Window(
+        const String32&            title,
+        uint32_t                   width,
+        uint32_t                   height,
+        bool                       fullscreen,
+        const WindowInputReceiver& receiver,
+        bool                       useTTY   = false,
+        bool                       headless = false
+    );
     ~Window();
 
     Window(const Window&)            = delete;

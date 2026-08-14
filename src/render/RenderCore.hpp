@@ -200,6 +200,15 @@ void ImageBarrier(const VkCommandBuffer cmd, const ZHLN_ImageBarrierDesc& desc) 
 
 void CopyBufferToImage(const VkCommandBuffer cmd, const ZHLN_BufferImageCopyDesc& desc) noexcept;
 
+void CopyImageToBuffer(
+    VkCommandBuffer    cmd,
+    VkImage            srcImage,
+    VkBuffer           dstBuffer,
+    VkExtent2D         extent,
+    VkImageLayout      layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+    VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT
+) noexcept;
+
 template <size_t RegionCount>
 [[nodiscard]] constexpr auto CreateCopyRegions(
     VkDeviceSize       baseOffset,
