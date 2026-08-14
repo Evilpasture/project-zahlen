@@ -803,9 +803,10 @@ template <typename Tag, typename E>
 constexpr std::optional<Tag> GetEnumeratorAnnotation(E value) {
     std::optional<Tag> result = std::nullopt;
 
-    [:Expand(std::meta::enumerators_of(^^E)):] >> [&]<auto enumerator> {
+    [:Expand(std::define_static_array(std::meta::enumerators_of(^^E))):] >> [&]<auto enumerator> {
+        constexpr auto annotation = GetAnnotation<Tag, enumerator>();
         if (value == static_cast<E>([:enumerator:])) {
-            result = GetAnnotation<Tag, enumerator>();
+            result = annotation;
         }
     };
 
