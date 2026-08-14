@@ -38,7 +38,7 @@ inline bool IsDebuggerAttached() noexcept {
     std::ifstream file("/proc/self/status");
     std::string   line;
     while (std::getline(file, line)) {
-        if (line.compare(0, 10, "TracerPid:") == 0) {
+        if (line.starts_with("TracerPid:")) {
             size_t first = line.find_first_not_of(" \t", 10);
             if (first != std::string::npos) {
                 std::string val = line.substr(first);
