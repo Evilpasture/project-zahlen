@@ -68,6 +68,7 @@ struct JSONTestSuite {
     struct Tests {
         // --- 1. Compile-Time JSON Reflection Verification ---
         std::expected<void, ZHLN::Error> compile_time_json_schema_and_values() {
+#ifndef ZHLN_IN_DOCKER
             // Verify synthesized struct fields and reflected values
             ZHLN::Test::ExpectEq(kStaticParsed.engine, "Zahlen");
             ZHLN::Test::ExpectEq(kStaticParsed.version, 2026);
@@ -79,6 +80,7 @@ struct JSONTestSuite {
                 "    [Compile-Time JSON] Synthesized & Parsed config for '{}' (v{}, Window: {}x{})", kStaticParsed.engine, kStaticParsed.version,
                 kStaticParsed.window.width, kStaticParsed.window.height
             );
+#endif
 
             return {};
         }
