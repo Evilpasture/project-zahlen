@@ -337,8 +337,8 @@ void DynamicPass<ColorCount, HasDepth>::Execute(VkCommandBuffer cmd, Func&& func
     const VkViewport viewport = {
         .x        = 0.0F,
         .y        = 0.0F,
-        .width    = (float) _extent.width,
-        .height   = (float) _extent.height,
+        .width    = static_cast<float>(_extent.width),
+        .height   = static_cast<float>(_extent.height),
         .minDepth = 0.0F,
         .maxDepth = 1.0F,
     };

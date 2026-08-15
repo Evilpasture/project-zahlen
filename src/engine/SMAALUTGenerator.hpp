@@ -175,19 +175,19 @@ inline float AreaDiagInternal1(SmaaVec2 p1, SmaaVec2 p2, SmaaVec2 p) noexcept {
 
     float           count       = 0.0f;
     constexpr int   samples     = 30; // SAMPLES_DIAG
-    constexpr float inv_samples = 1.0f / (float) (samples - 1);
+    constexpr float inv_samples = 1.0f / static_cast<float>(samples - 1);
 
     for (int x = 0; x < samples; ++x) {
-        float px   = p.x + (float) x * inv_samples;
+        float px   = p.x + static_cast<float>(x) * inv_samples;
         float a_px = a * px;
         for (int y = 0; y < samples; ++y) {
-            float py = p.y + (float) y * inv_samples;
+            float py = p.y + static_cast<float>(y) * inv_samples;
             if ((a_px + b * py + const_part) > 0.0f) {
                 count += 1.0f;
             }
         }
     }
-    return count / (float) (samples * samples);
+    return count / static_cast<float>(samples * samples);
 }
 
 static constexpr std::pair<int, int> edgesdiag[16] = {{0, 0}, {1, 0}, {0, 2}, {1, 2}, {2, 0}, {3, 0}, {2, 2}, {3, 2},
@@ -319,7 +319,7 @@ inline void FillSmaaAreaTex(std::span<uint32_t> outPixels) noexcept {
                     auto r = static_cast<uint8_t>(Saturate(res.first) * 255.0f);
                     auto g = static_cast<uint8_t>(Saturate(res.second) * 255.0f);
 
-                    outPixels[(startY + right) * width + (startX + left)] = 0xFF000000u | (uint32_t(g) << 8) | r;
+                    outPixels[(startY + right) * width + (startX + left)] = 0xFF000000u | (static_cast<uint32_t>(g) << 8) | r;
                 }
             }
         }
@@ -336,12 +336,12 @@ inline void FillSmaaAreaTex(std::span<uint32_t> outPixels) noexcept {
 
             for (int right = 0; right < 20; ++right) {
                 for (int left = 0; left < 20; ++left) {
-                    auto res = AreaDiag(pattern, (float) left, (float) right, offset);
+                    auto res = AreaDiag(pattern, static_cast<float>(left), static_cast<float>(right), offset);
 
                     auto r = static_cast<uint8_t>(Saturate(res.x) * 255.0f);
                     auto g = static_cast<uint8_t>(Saturate(res.y) * 255.0f);
 
-                    outPixels[(startY + right) * width + (startX + left)] = 0xFF000000u | (uint32_t(g) << 8) | r;
+                    outPixels[(startY + right) * width + (startX + left)] = 0xFF000000u | (static_cast<uint32_t>(g) << 8) | r;
                 }
             }
         }
@@ -375,7 +375,10 @@ inline void FillSmaaSearchTex(std::span<uint32_t> outPixels) noexcept {
         for (int e1: {0, 1}) {
             for (int e2: {0, 1}) {
                 for (int e3: {0, 1}) {
-                    combos[idx++] = {.edges = {e0, e1, e2, e3}, .val = Bilinear((float) e0, (float) e1, (float) e2, (float) e3)};
+                    combos[idx++] = {
+                        .edges = {e0, e1, e2, e3},
+                        .val   = Bilinear(static_cast<float>(e0), static_cast<float>(e1), static_cast<float>(e2), static_cast<float>(e3))
+                    };
                 }
             }
         }
@@ -430,7 +433,7 @@ inline void FillSmaaSearchTex(std::span<uint32_t> outPixels) noexcept {
         uint32_t cy = 15 - fy;
         for (uint32_t fx = 0; fx < width; ++fx) {
             uint8_t val                = temp[(17 + cy) * 66 + fx];
-            outPixels[fy * width + fx] = 0xFF000000u | (uint32_t(val) << 16) | (uint32_t(val) << 8) | val;
+            outPixels[fy * width + fx] = 0xFF000000u | (static_cast<uint32_t>(val) << 16) | (static_cast<uint32_t>(val) << 8) | val;
         }
     }
 }
