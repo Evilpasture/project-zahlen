@@ -2,9 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "Types.hpp"
 #include <cstring>
-// clang-format off
 
 // clang-format off
 #include <Jolt/Jolt.h>
@@ -14,7 +12,7 @@
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
-// clang-format on
+#include <Zahlen/Types.hpp>
 
 namespace ZHLN::Math {
 
@@ -137,25 +135,25 @@ inline auto CreateOrthoMatrix(float width, float height) -> JPH::Mat44 {
 }
 
 constexpr Packed1010102 PackNormal(float x, float y, float z, float w = 0.0f) {
-    uint32_t xs = (uint32_t) ((x * 0.5f + 0.5f) * 1023.0f) & 0x3FF;
-    uint32_t ys = (uint32_t) ((y * 0.5f + 0.5f) * 1023.0f) & 0x3FF;
-    uint32_t zs = (uint32_t) ((z * 0.5f + 0.5f) * 1023.0f) & 0x3FF;
-    uint32_t ws = (uint32_t) (w > 0 ? 3 : 0) & 0x3;
+    uint32_t xs = static_cast<uint32_t>((x * 0.5f + 0.5f) * 1023.0f) & 0x3FF;
+    uint32_t ys = static_cast<uint32_t>((y * 0.5f + 0.5f) * 1023.0f) & 0x3FF;
+    uint32_t zs = static_cast<uint32_t>((z * 0.5f + 0.5f) * 1023.0f) & 0x3FF;
+    uint32_t ws = static_cast<uint32_t>(w > 0 ? 3 : 0) & 0x3;
     return {(ws << 30) | (zs << 20) | (ys << 10) | xs};
 }
 
 // Simple Color packer
 constexpr PackedRGBA8 PackColor(float r, float g, float b, float a = 1.0f) {
-    uint32_t rs = (uint32_t) (r * 255.0f) & 0xFF;
-    uint32_t gs = (uint32_t) (g * 255.0f) & 0xFF;
-    uint32_t bs = (uint32_t) (b * 255.0f) & 0xFF;
-    uint32_t as = (uint32_t) (a * 255.0f) & 0xFF;
+    uint32_t rs = static_cast<uint32_t>(r * 255.0f) & 0xFF;
+    uint32_t gs = static_cast<uint32_t>(g * 255.0f) & 0xFF;
+    uint32_t bs = static_cast<uint32_t>(b * 255.0f) & 0xFF;
+    uint32_t as = static_cast<uint32_t>(a * 255.0f) & 0xFF;
     return {(as << 24) | (bs << 16) | (gs << 8) | rs};
 }
 
 inline uint16_t FloatToHalf(float f) {
     // Use memcpy to avoid strict aliasing issues
-    uint32_t i;
+    uint32_t i = 0;
     std::memcpy(&i, &f, 4);
 
     uint32_t s = (i >> 16) & 0x8000;
@@ -164,16 +162,16 @@ inline uint16_t FloatToHalf(float f) {
 
     // Handle Zero or extremely small denormals
     if (e <= -15) {
-        return (uint16_t) s;
+        return static_cast<uint16_t>(s);
     }
 
     // Handle Exponent overflow (for values > 65504)
     if (e > 15) {
-        return (uint16_t) (s | 0x7C00);
+        return static_cast<uint16_t>(s | 0x7C00);
     }
 
     // Re-bias exponent and pack
-    return (uint16_t) (s | ((e + 15) << 10) | (m >> 13));
+    return static_cast<uint16_t>(s | ((e + 15) << 10) | (m >> 13));
 }
 
 // Packs 4 floats into 4 halves
@@ -201,7 +199,7 @@ inline void PackFloatsToHalf(const float* src, uint16_t* dst) {
 }
 
 inline PackedHalf2 PackUV(float u, float v) {
-    return {(uint32_t) (FloatToHalf(v) << 16) | FloatToHalf(u)};
+    return {static_cast<uint32_t>(FloatToHalf(v) << 16) | FloatToHalf(u)};
 }
 
 } // namespace ZHLN::Math

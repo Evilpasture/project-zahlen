@@ -109,3 +109,5 @@ if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
         $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic>
     )
 endif()
+
+target_link_libraries(zahlen_render PRIVATE zahlen_warnings)

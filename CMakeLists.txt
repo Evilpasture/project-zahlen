@@ -22,6 +22,8 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 project(zahlen LANGUAGES C CXX ASM)
 
+include(CompilerWarnings)
+
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     add_compile_options(-Qunused-arguments)
     add_link_options(-Qunused-arguments)
@@ -346,6 +348,7 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/gltf)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/alife)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/audio)
 
+# --- ASSEMBLE COMPILER FLAGS METADATA ---
 set(COMPILER_FLAGS_LIST "${CMAKE_CXX_FLAGS}")
 if(CMAKE_BUILD_TYPE)
     string(TOUPPER "${CMAKE_BUILD_TYPE}" UPPER_BUILD_TYPE)
@@ -354,17 +357,10 @@ else()
     set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} ${CMAKE_CXX_FLAGS_DEBUG}")
 endif()
 
-if(NOT MSVC)
-    set(GCC_ONLY_FLAGS
-        "--param=destructive-interference-size=64"
-        "-Wno-interference-size"
-        "-fno-exceptions"
-        "-fno-rtti"
-    )
-    set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti")
-    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
-        set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} --param=destructive-interference-size=64")
-    endif()
+set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} ${ZHLN_COMPILE_WARNINGS_STR} -fno-exceptions -fno-rtti")
+
+if(COMPILER_HAS_REFLECTION)
+    set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} -freflection")
 endif()
 
 string(STRIP "${COMPILER_FLAGS_LIST}" COMPILER_FLAGS_LIST)
@@ -480,14 +476,14 @@ target_include_directories(zahlen_engine SYSTEM PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/JoltPhysics
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/renderdoc
 )
-target_include_directories(zahlen_engine PUBLIC
+target_include_directories(zahlen_engine SYSTEM PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/LuaJIT/src
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/yoga
     ${CMAKE_BINARY_DIR}/generated_shaders
 )
-target_include_directories(zahlen_engine PRIVATE
+target_include_directories(zahlen_engine SYSTEM PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/cgltf
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/stb
 )
@@ -622,7 +618,7 @@ add_executable(zcook
     src/zcook/Cook.cpp
 )
 target_link_libraries(zcook PRIVATE zahlen_engine)
-target_include_directories(zcook PRIVATE
+target_include_directories(zcook SYSTEM PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/cgltf
     ${CMAKE_CURRENT_SOURCE_DIR}/src/zcook
 )
@@ -778,3 +774,5 @@ if(ZHLN_BUILD_TESTS)
 endif()
 
 
+
+target_link_libraries(zahlen_engine PRIVATE zahlen_warnings)

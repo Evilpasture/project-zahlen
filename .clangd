@@ -2,11 +2,15 @@ CompileFlags:
   CompilationDatabase: "build"
   Add:
     [
-      -Iinclude,
+      -I../include,
+      -I../src,
+      -isystem,
+      ../extern/JoltPhysics,
       -freflection,
       -fannotation-attributes,
       -D__cpp_impl_reflection=202603L,
       -D__glibcxx_want_reflection,
+      -DJPH_DOUBLE_PRECISION,
     ]
 
 Diagnostics:
@@ -15,14 +19,20 @@ Diagnostics:
 
 ---
 If:
-  PathMatch: .*\.(hpp|inl)
+  PathMatch: .*\.(hpp|inl|h)
 CompileFlags:
   Add:
     [
       -xc++-header,
       -std=c++26,
+      -I../include,
+      -I../src,
+      -isystem,
+      ../extern/JoltPhysics,
       -freflection,
+      -fannotation-attributes,
       -D__cpp_impl_reflection=202603L,
       -D__glibcxx_want_reflection,
+      -DJPH_DOUBLE_PRECISION,
     ]
   Remove: [-std=*]

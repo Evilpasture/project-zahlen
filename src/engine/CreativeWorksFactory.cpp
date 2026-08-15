@@ -709,7 +709,7 @@ void SetupPlayerRagdoll(PhysicsContext& pc, ECS::Registry& reg, Entity playerEnt
             std::string name = targetSkeleton->joints[i].name.c_str();
 
             Physics::RagdollPartParams part;
-            part.jointIndex       = (uint32_t) i;
+            part.jointIndex       = static_cast<uint32_t>(i);
             part.parentJointIndex = targetSkeleton->joints[i].parentIndex;
             part.mass             = 1.0f;
             part.enableMotors     = false;
@@ -870,7 +870,7 @@ Entity CreateTerrain(
     RenderContext&     ctx,
     ECS::Registry&     reg,
     PhysicsContext*    pc,
-    int                sampleCount,
+    size_t             sampleCount,
     float              worldSize,
     float              maxHeight,
     TerrainType        type,
@@ -879,7 +879,7 @@ Entity CreateTerrain(
     Entity e = reg.Create();
 
     TerrainData tData {.sampleCount = static_cast<uint32_t>(sampleCount), .worldSize = worldSize, .maxHeight = maxHeight, .heights = {}, .colors = {}};
-    tData.heights.resize(static_cast<size_t>(sampleCount * sampleCount));
+    tData.heights.resize(sampleCount * sampleCount);
 
     Mesh mesh = CreateTerrainMesh(ctx, sampleCount, worldSize, maxHeight, tData.heights.data(), type);
 

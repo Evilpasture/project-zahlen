@@ -1,10 +1,12 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
+
 #pragma once
 
-#include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/Threading/TaskSystem.hpp>
+#include <Zahlen/Common.h>
 #include <Zahlen/Core/Atomic.hpp>
+#include <Zahlen/ecs/ECS.hpp>
+#include <cstdint>
 #include <string_view>
 #include <vector>
 
@@ -45,36 +47,38 @@ class ZHLN_API SystemGraph {
     SystemGraph()  = default;
     ~SystemGraph() = default;
 
+    SystemGraph(const SystemGraph&)                = delete;
+    SystemGraph& operator=(const SystemGraph&)     = delete;
+    SystemGraph(SystemGraph&&) noexcept            = default;
+    SystemGraph& operator=(SystemGraph&&) noexcept = default;
+
     void AddSystem(SystemInfo info);
     void Compile();
     void Execute(ZHLN::Engine& engine, float dt);
 
-    void SetSystemEnabled(std::string_view name, bool enabled);
+    void                 SetSystemEnabled(std::string_view name, bool enabled) noexcept;
+    [[nodiscard]] bool   IsSystemEnabled(std::string_view name) const noexcept;
+    [[nodiscard]] size_t GetSystemCount() const noexcept;
+    [[nodiscard]] bool   IsEmpty() const noexcept;
+    void                 Clear() noexcept;
+
+    [[nodiscard]] static bool HasConflict(const SystemInfo& systemA, const SystemInfo& systemB) noexcept;
 
   private:
     struct Node {
-        SystemInfo             info;
-        std::vector<uint32_t>  dependents;
-        uint32_t               initialDependencyCount = 0;
-        ZHLN::Atomic<uint32_t> currentDependencyCount {0};
+        SystemInfo            info;
+        std::vector<uint32_t> dependents;
+        uint32_t              initialDependencyCount = 0;
     };
 
-    struct ExecPayload {
-        SystemGraph* graph;
-        uint32_t     nodeIdx;
-    };
+    struct ExecutionContext;
+    struct NodePayload;
 
-    [[nodiscard]] bool HasConflict(const SystemInfo& systemA, const SystemInfo& systemB) const noexcept;
-    static void        TaskThunk(void* arg);
-    void               DispatchNode(uint32_t nodeIdx);
+    static void TaskThunk(void* arg);
+    void        DispatchNode(ExecutionContext& ctx, uint32_t nodeIdx);
 
-    std::vector<Node>        _nodes;
-    std::vector<ExecPayload> _payloads;
-    std::vector<uint32_t>    _entryNodes;
-
-    ZHLN::Engine*       _currentEngine = nullptr;
-    float               _currentDt     = 0.0f;
-    TaskSystem::Counter _completionCounter;
+    std::vector<Node>     _nodes;
+    std::vector<uint32_t> _entryNodes;
 };
 
 } // namespace ZHLN::ECS

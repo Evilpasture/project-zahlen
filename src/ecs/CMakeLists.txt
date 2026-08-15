@@ -23,3 +23,5 @@ target_include_directories(zahlen_ecs PUBLIC
 if(NOT MSVC)
     target_compile_options(zahlen_ecs PRIVATE -fno-exceptions -fno-rtti)
 endif()
+
+target_link_libraries(zahlen_ecs PRIVATE zahlen_warnings)

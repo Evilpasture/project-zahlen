@@ -101,7 +101,7 @@ Entity CreateTerrain(
     RenderContext&     ctx,
     ECS::Registry&     reg,
     PhysicsContext*    pc,
-    int                sampleCount,
+    size_t             sampleCount,
     float              worldSize,
     float              maxHeight,
     TerrainType        type   = TerrainType::Default,

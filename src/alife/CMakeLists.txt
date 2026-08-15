@@ -23,7 +23,7 @@ set_target_properties(zahlen_alife PROPERTIES
 target_compile_definitions(zahlen_alife PRIVATE _CRT_SECURE_NO_WARNINGS)
 
 # Include directories
-target_include_directories(zahlen_alife PUBLIC
+target_include_directories(zahlen_alife SYSTEM PUBLIC
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/extern/JoltPhysics
 )
@@ -41,3 +41,5 @@ target_link_libraries(zahlen_alife PUBLIC
 if(NOT MSVC)
     target_compile_options(zahlen_alife PRIVATE -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti)
 endif()
+
+target_link_libraries(zahlen_alife PRIVATE zahlen_warnings)

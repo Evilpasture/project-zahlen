@@ -15,6 +15,8 @@ set_target_properties(zahlen_gltf PROPERTIES
 target_include_directories(zahlen_gltf PUBLIC
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/src
+)
+target_include_directories(zahlen_gltf SYSTEM PUBLIC
     ${PROJECT_SOURCE_DIR}/extern/cgltf
     ${PROJECT_SOURCE_DIR}/extern/stb
 )
@@ -35,3 +37,5 @@ target_link_libraries(zahlen_gltf PRIVATE
 if(NOT MSVC)
     target_compile_options(zahlen_gltf PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>)
 endif()
+
+target_link_libraries(zahlen_gltf PRIVATE zahlen_warnings)

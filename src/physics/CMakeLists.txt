@@ -58,3 +58,5 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
         set_target_properties(zahlen_physics PROPERTIES COMPILE_OPTIONS "${PHYS_OPTIONS}")
     endif()
 endif()
+
+target_link_libraries(zahlen_physics PRIVATE zahlen_warnings)

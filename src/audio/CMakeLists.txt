@@ -14,10 +14,11 @@ set_target_properties(zahlen_audio PROPERTIES
     CXX_EXTENSIONS OFF
 )
 
-# Propagate Jolt, FFI Engine headers, and miniaudio search directories
-target_include_directories(zahlen_audio PUBLIC 
+target_include_directories(zahlen_audio PUBLIC
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/src
+)
+target_include_directories(zahlen_audio SYSTEM PUBLIC
     ${PROJECT_SOURCE_DIR}/extern/miniaudio
     ${PROJECT_SOURCE_DIR}/extern/JoltPhysics
 )
@@ -33,7 +34,7 @@ target_link_libraries(zahlen_audio PRIVATE
 )
 
 # Apply global Jolt macro definitions to match Engine alignment (prevents silent ABI crashes)
-target_compile_definitions(zahlen_audio PRIVATE 
+target_compile_definitions(zahlen_audio PRIVATE
     JPH_DOUBLE_PRECISION
     JPH_NO_CUSTOM_DETERMINISTIC_OPERATIONS
     $<$<CONFIG:Debug>:JPH_DEBUG>
@@ -43,3 +44,5 @@ target_compile_definitions(zahlen_audio PRIVATE
 if(NOT MSVC)
     target_compile_options(zahlen_audio PRIVATE -fno-exceptions -fno-rtti)
 endif()
+
+target_link_libraries(zahlen_audio PRIVATE zahlen_warnings)

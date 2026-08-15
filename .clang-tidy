@@ -31,6 +31,7 @@ Checks: >
   readability-*,
   cppcoreguidelines-*,
   misc-*,
+  google-readability-casting,
   -modernize-use-trailing-return-type,
   -readability-identifier-length,
   -cppcoreguidelines-owning-memory,
@@ -54,8 +55,8 @@ Checks: >
   -bugprone-exception-escape,
   -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access
 
-WarningsAsErrors: 'bugprone-*,performance-*,clang-analyzer-*'
-HeaderFilterRegex: 'include/|src/'
+WarningsAsErrors: "bugprone-*,performance-*,clang-analyzer-*"
+HeaderFilterRegex: "include/|src/"
 
 # Clang-tidy specific option adjustments
 CheckOptions:
@@ -64,10 +65,10 @@ CheckOptions:
   readability-implicit-bool-conversion.AllowIntegerConditions: true
   readability-magic-numbers.IgnoredIntegerValues: "0;1;2;3;4"
   readability-magic-numbers.IgnoredFloatingPointValues: "0.0;1.0;2.0;-1.0;0.5"
-  
+
   # Prevents linter from complaining when magic numbers are used to initialize enum values
   readability-magic-numbers.IgnoreEnums: true
-  
+
   # Forces the cppcoreguidelines layer to respect the same numeric baselines
   cppcoreguidelines-avoid-magic-numbers.IgnoredIntegerValues: "0;1;2;3;4"
   cppcoreguidelines-avoid-magic-numbers.IgnoredFloatingPointValues: "0.0;1.0;2.0;-1.0;0.5"

@@ -4,6 +4,7 @@
 #pragma once
 
 #include "RenderCore.hpp"
+#include "Utils.hpp"
 
 namespace ZHLN::Vk {
 

@@ -496,7 +496,7 @@ auto RenderContext::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHa
     return Vk::Buffer::Create(_impl->allocator.Get(), size, usage, VMA_MEMORY_USAGE_GPU_ONLY)
         .transform([this, vertexCount](auto&& gpu_buf) {
             VkDeviceAddress address = Vk::GetBufferAddress(_impl->ctx.Device(), gpu_buf.Handle());
-            auto            handle  = _impl->meshPool.Create(std::move(gpu_buf), vertexCount, address);
+            auto            handle  = _impl->meshPool.Create(std::forward<decltype(gpu_buf)>(gpu_buf), vertexCount, address);
 
             // Register RT Context with the scratch mesh for automatic lifecycle cleanup
             if (_impl->rtCtx.Valid()) {
@@ -909,8 +909,8 @@ void RenderContext::Impl::UploadClusterBounds(const JPH::Mat44& proj) {
     for (uint32_t z = 0; z < 24; ++z) {
         float n     = 0.1f;
         float f     = 1000.0f;
-        float sNear = n * std::pow(f / n, (float) z / 24.0f);
-        float sFar  = n * std::pow(f / n, (float) (z + 1) / 24.0f);
+        float sNear = n * std::pow(f / n, static_cast<float>(z) / 24.0f);
+        float sFar  = n * std::pow(f / n, static_cast<float>(z + 1) / 24.0f);
 
         float tNear = (sNear - n) / (f - n);
         float tFar  = (sFar - n) / (f - n);

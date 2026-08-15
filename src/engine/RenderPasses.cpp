@@ -257,16 +257,16 @@ struct GpuCullingPolicyPass1 {
 
         // 2. Dispatch Culling Pass 1 (Frustum + Last Frame Hi-Z)
         struct CullingConstants {
-            JPH::Mat44 viewProj;
-            float      hizScreenSize[2];
-            uint32_t   maxHiZMipLevel;
-            uint32_t   drawCount;
-            uint32_t   passIndex;
+            JPH::Mat44           viewProj;
+            std::array<float, 2> hizScreenSize;
+            uint32_t             maxHiZMipLevel;
+            uint32_t             drawCount;
+            uint32_t             passIndex;
         } pc {};
 
         pc.viewProj         = ctx.unjittered_view_proj;
-        pc.hizScreenSize[0] = (float) color_att.extent.width;
-        pc.hizScreenSize[1] = (float) color_att.extent.height;
+        pc.hizScreenSize[0] = static_cast<float>(color_att.extent.width);
+        pc.hizScreenSize[1] = static_cast<float>(color_att.extent.height);
         pc.maxHiZMipLevel   = ctx.graphResources.hizMap.mipLevels > 0 ? ctx.graphResources.hizMap.mipLevels - 1 : 0;
         pc.drawCount        = drawCount;
         pc.passIndex        = 0; // PASS 1
@@ -353,7 +353,7 @@ struct GpuCullingPolicyPass2 {
 
         RenderContext::Impl::CullingConstants pc {
             .viewProj       = ctx.unjittered_view_proj,
-            .hizScreenSize  = {(float) color_att.extent.width, (float) color_att.extent.height},
+            .hizScreenSize  = {static_cast<float>(color_att.extent.width), static_cast<float>(color_att.extent.height)},
             .maxHiZMipLevel = ctx.graphResources.hizMap.mipLevels > 0 ? ctx.graphResources.hizMap.mipLevels - 1 : 0,
             .drawCount      = drawCount,
             .passIndex      = 1,
@@ -420,8 +420,9 @@ struct CpuCullingPolicyPass1 {
                     {.width = color_att.extent.width, .height = color_att.extent.height}, drawCount, kParallelChunkSize, TaskSystemSchedulerAdapter {},
                     [&](uint32_t /*chunkIdx*/) -> VkCommandBuffer {
                         uint32_t wIdx = TaskSystem::GetWorkerIndex();
-                        if (wIdx >= ctx.workerCmds.size())
-                            wIdx = (uint32_t) (ctx.workerCmds.size() - 1);
+                        if (wIdx >= ctx.workerCmds.size()) {
+                            wIdx = static_cast<uint32_t>(ctx.workerCmds.size() - 1);
+                        }
                         uint32_t localCmdIdx = ctx.workerCmds[wIdx].cmdCount[recorder.frameIndex].fetch_add(1, std::memory_order::relaxed);
                         return ctx.workerCmds[wIdx].pools[recorder.frameIndex][localCmdIdx];
                     },
@@ -673,8 +674,8 @@ void MainPass1::Execute(
         }
     }
 
-    const bool useGpuCulling =
-        ctx.cullingPass.pipeline.Valid() && ctx.frames.indirectCommandsBuffers->Valid() && (drawCount <= kGpuCullingMaxInstances) && !Diag::DisableGpuCulling();
+    const bool useGpuCulling = ctx.cullingPass.pipeline.Valid() && ctx.frames.indirectCommandsBuffers->Valid() && (drawCount <= kGpuCullingMaxInstances) &&
+                               !Diag::DisableGpuCulling();
     if (useGpuCulling) {
         ExecutePass<GpuCullingPolicyPass1>(recorder, groups, drawCount, in.sceneColor, in.velocity, in.normRough, in.depth);
     } else {
@@ -716,8 +717,8 @@ void MainPass2::Execute(
         }
     }
 
-    const bool useGpuCulling =
-        ctx.cullingPass.pipeline.Valid() && ctx.frames.indirectCommandsBuffers->Valid() && (drawCount <= kGpuCullingMaxInstances) && !Diag::DisableGpuCulling();
+    const bool useGpuCulling = ctx.cullingPass.pipeline.Valid() && ctx.frames.indirectCommandsBuffers->Valid() && (drawCount <= kGpuCullingMaxInstances) &&
+                               !Diag::DisableGpuCulling();
     if (useGpuCulling) {
         ExecutePass<GpuCullingPolicyPass2>(recorder, groups, drawCount, in.sceneColor, in.velocity, in.normRough, in.depth);
     } else {

@@ -27,12 +27,13 @@
 #include <Zahlen/Profiler.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Scripting.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/alife/Simulator.hpp>
 #include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/physics/Physics.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
+#include <Zahlen/physics/Physics.hpp>
 #include <engine/FileWatcher.hpp>
 #include <engine/NativeScriptModule.hpp>
 #include <engine/Platform.hpp>

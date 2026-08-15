@@ -5,12 +5,12 @@
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Profiler.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/alife/Simulator.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 #include <cmath>
 #include <cstdlib>
-#include <Zahlen/ecs/ECS.hpp>
 #include <fstream>
-#include <Zahlen/Threading/TaskSystem.hpp>
 
 namespace ZHLN::ALife {
 
@@ -59,8 +59,9 @@ void Simulator::Update(Engine& engine, float dt, JPH::RVec3Arg observer_pos) {
     std::span<const Entity>                  entities = reg.GetEntitiesWith<Components::ALifeComponent>();
     RestrictSpan<Components::ALifeComponent> comps    = reg.GetRawArray<Components::ALifeComponent>();
 
-    if (entities.empty())
+    if (entities.empty()) {
         return;
+    }
 
     // --- PHASE 1: MOVEMENT & STATE SWITCHING (Parallel) ---
     TaskSystem::ParallelFor(entities.size(), 256, [&](uint32_t start, uint32_t end, uint32_t) {
@@ -68,8 +69,9 @@ void Simulator::Update(Engine& engine, float dt, JPH::RVec3Arg observer_pos) {
             Entity                      e    = entities[i];
             Components::ALifeComponent& comp = comps[i];
 
-            if (comp.state == State::Dead)
+            if (comp.state == State::Dead) {
                 continue;
+            }
 
             // Handle Waiting
             if (comp.wait_time > 0) {
@@ -88,8 +90,9 @@ void Simulator::Update(Engine& engine, float dt, JPH::RVec3Arg observer_pos) {
                 JPH::RVec3 target_pos  = _levelGraph.GetNode(target_node).position;
 
                 float speed = comp.travel_speed;
-                if (comp.is_fleeing)
+                if (comp.is_fleeing) {
                     speed *= 1.5f;
+                }
 
                 comp.position = MoveTowards(comp.position, target_pos, speed * game_dt);
 
@@ -99,8 +102,9 @@ void Simulator::Update(Engine& engine, float dt, JPH::RVec3Arg observer_pos) {
 
                     if (comp.path_index >= comp.path_count) {
                         comp.path_count = 0;
-                        if (on_task_completed)
+                        if (on_task_completed) {
                             on_task_completed(*this, e);
+                        }
                     }
                 }
             }
@@ -109,16 +113,18 @@ void Simulator::Update(Engine& engine, float dt, JPH::RVec3Arg observer_pos) {
                 JPH::RVec3 target_pos = _levelGraph.GetNode(comp.target_node).position;
 
                 float speed = comp.travel_speed;
-                if (comp.is_fleeing)
+                if (comp.is_fleeing) {
                     speed *= 1.5f;
+                }
 
                 comp.position = MoveTowards(comp.position, target_pos, speed * game_dt);
 
                 if (comp.position.IsClose(target_pos, 0.01f)) {
                     comp.current_node = comp.target_node;
                     comp.target_node  = INVALID_GRAPH_NODE;
-                    if (on_task_completed)
+                    if (on_task_completed) {
                         on_task_completed(*this, e);
+                    }
                 }
             }
 
@@ -134,7 +140,7 @@ void Simulator::Update(Engine& engine, float dt, JPH::RVec3Arg observer_pos) {
 
             if (comp.state != old_state) {
                 // Thread-safe if event callback uses ZHLN_LOCK or concurrent queues
-                BroadcastEvent({EventType::StateChange, e, {.state_change = {old_state, comp.state}}});
+                BroadcastEvent({EventType::StateChange, e, {.state_change = {.old_state = old_state, .new_state = comp.state}}});
             }
         }
     });
@@ -142,8 +148,8 @@ void Simulator::Update(Engine& engine, float dt, JPH::RVec3Arg observer_pos) {
     // --- PHASE 2: SPATIAL GRID REBUILD (Serial) ---
     // Fast O(N) re-indexing of all entities into the spatial grid
     _grid.Clear();
-    for (size_t i = 0; i < entities.size(); ++i) {
-        _grid.UpdateEntity(reg, entities[i], JPH::RVec3(-1, -1, -1)); // -1 forces fresh insertion
+    for (auto entitie: entities) {
+        _grid.UpdateEntity(reg, entitie, JPH::RVec3(-1, -1, -1)); // -1 forces fresh insertion
     }
 
     // --- PHASE 3: OFFLINE INTERACTIONS (Parallel) ---
@@ -156,8 +162,9 @@ void Simulator::Update(Engine& engine, float dt, JPH::RVec3Arg observer_pos) {
                 Entity                      e    = entities[i];
                 Components::ALifeComponent& comp = comps[i];
 
-                if (comp.state != State::Offline || comp.state == State::Dead)
+                if (comp.state != State::Offline || comp.state == State::Dead) {
                     continue;
+                }
 
                 neighbors.clear();
                 _grid.Query(reg, comp.position, 50.0f, neighbors);
@@ -180,16 +187,18 @@ void Simulator::Update(Engine& engine, float dt, JPH::RVec3Arg observer_pos) {
 void Simulator::ResolveOfflineInteraction(ECS::Registry& reg, Entity e1, Entity e2) {
     auto* c1 = reg.Get<Components::ALifeComponent>(e1);
     auto* c2 = reg.Get<Components::ALifeComponent>(e2);
-    if (!c1 || !c2)
+    if ((c1 == nullptr) || (c2 == nullptr)) {
         return;
+    }
 
     if (c1->state != State::Dead && c2->state != State::Dead) {
         float rel = _factionRegistry.GetRelation(c1->faction_id, c2->faction_id);
 
         if (rel < -0.5f) {
             // Combat Roll
-            if ((std::rand() % 100) > _tuning.combat_hit_chance)
+            if ((std::rand() % 100) > _tuning.combat_hit_chance) {
                 return;
+            }
 
             int32_t dmg1 = (c1->power / 4) + (std::rand() % 5);
             int32_t dmg2 = (c2->power / 4) + (std::rand() % 5);
@@ -197,10 +206,12 @@ void Simulator::ResolveOfflineInteraction(ECS::Registry& reg, Entity e1, Entity 
             c1->health -= dmg2;
             c2->health -= dmg1;
 
-            if (c1->health < _tuning.combat_flee_threshold && c1->health > 0)
+            if (c1->health < _tuning.combat_flee_threshold && c1->health > 0) {
                 c1->is_fleeing = true;
-            if (c2->health < _tuning.combat_flee_threshold && c2->health > 0)
+            }
+            if (c2->health < _tuning.combat_flee_threshold && c2->health > 0) {
                 c2->is_fleeing = true;
+            }
 
             c1->wait_time = _tuning.combat_wait_time;
             c2->wait_time = _tuning.combat_wait_time;
@@ -239,15 +250,15 @@ void Simulator::ResolveOfflineInteraction(ECS::Registry& reg, Entity e1, Entity 
 struct SaveHeader {
     uint32_t magic   = 0x414C4946; // "ALIF"
     uint32_t version = 1;
-    uint32_t entity_count;
+    uint32_t entity_count {};
 };
 
 struct SaveRecord {
-    Entity                     entity;
+    Entity                     entity {};
     Components::ALifeComponent comp;
 };
 
-bool Simulator::Save(const char* filename) const {
+bool Simulator::Save(const char* /*filename*/) const {
     // Note: This only saves the ALife component data, not the full ECS registry.
     // In a real engine, ECS serialization is usually handled holistically.
     // But this fulfills the A-Life specific save requirement.
@@ -263,8 +274,9 @@ bool Simulator::Save(const char* filename) const {
 
 bool Simulator::Load(ECS::Registry& reg, const char* filename) {
     std::ifstream file(filename, std::ios::binary);
-    if (!file.is_open())
+    if (!file.is_open()) {
         return false;
+    }
 
     SaveHeader header;
     file.read(reinterpret_cast<char*>(&header), sizeof(SaveHeader));
@@ -285,7 +297,7 @@ bool Simulator::Load(ECS::Registry& reg, const char* filename) {
             if (auto* existing = reg.Get<Components::ALifeComponent>(rec.entity)) {
                 *existing = rec.comp;
             } else {
-                reg.Add(rec.entity, std::move(rec.comp));
+                reg.Add(rec.entity, rec.comp);
             }
         }
     }

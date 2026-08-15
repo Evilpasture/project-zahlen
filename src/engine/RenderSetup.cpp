@@ -89,7 +89,7 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniform
     _impl->currentDt       = std::clamp(dt, 0.0001f, 0.1f);
 
     VkExtent2D res    = _impl->graphResources.sceneColor.extent;
-    float      aspect = (res.height > 0) ? (float) res.width / res.height : 1.777f;
+    float      aspect = (res.height > 0) ? static_cast<float>(res.width) / res.height : 1.777f;
 
     if (aspect != _impl->lastAspectRatio || cam.fov != _impl->lastFov) {
         _impl->lastAspectRatio = aspect;

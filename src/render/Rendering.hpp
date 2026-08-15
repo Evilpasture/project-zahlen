@@ -66,7 +66,6 @@ static constexpr auto isLegacy = false;
 // Zahlen Graphics Module (Topologically Sorted)
 // ============================================================================
 // clang-format off
-#include "Utils.hpp"
 #include "Extensions.hpp"
 #include "Features.hpp"
 #include "DebugNames.hpp"
@@ -98,7 +97,6 @@ static constexpr auto isLegacy = false;
 #include "GpuProfiler.hpp"
 #include "PresentationContext.hpp"
 #include "Texture.hpp"
-#include "TextureUtils.hpp"
 #include "ParallelRecorder.hpp"
 #include "ParallelDraw.hpp"
 #include "RenderGraph.hpp"
