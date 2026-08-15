@@ -535,8 +535,8 @@ WeightVSOutput SmaaWeightVS(uint vertexID: SV_VertexID) {
     output.pixcoord  = output.uv * SMAA_RT_METRICS.zw;
     output.offset[0] = SMAA_RT_METRICS.xyxy * float4(-0.25f, -0.125f, 1.25f, -0.125f) + output.uv.xyxy;
     output.offset[1] = SMAA_RT_METRICS.xyxy * float4(-0.125f, -0.25f, -0.125f, 1.25f) + output.uv.xyxy;
-    output.offset[2] = SMAA_RT_METRICS.xxyy * (float4(-2.0f, 2.0f, -2.0f, 2.0f) * float(SMAA_MAX_SEARCH_STEPS)),
-    float4(output.offset[0].xz, output.offset[1].yw);
+    output.offset[2] =
+        SMAA_RT_METRICS.xxyy * (float4(-2.0f, 2.0f, -2.0f, 2.0f) * float(SMAA_MAX_SEARCH_STEPS)) + float4(output.offset[0].xz, output.offset[1].yw);
     return output;
 }
 

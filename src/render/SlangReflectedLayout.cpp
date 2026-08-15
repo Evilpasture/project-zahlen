@@ -266,7 +266,8 @@ auto SlangReflectedLayout::CreatePool(VkDevice device, uint32_t maxSets) const n
     const VkDescriptorPoolCreateInfo info = {
         .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
         .pNext         = nullptr,
-        .flags         = (update_after_bind ? VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT : 0U) | VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+        .flags         = (update_after_bind ? static_cast<VkDescriptorPoolCreateFlags>(VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT) : 0U) |
+                         VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
         .maxSets       = maxSets,
         .poolSizeCount = static_cast<uint32_t>(pool_sizes.size()),
         .pPoolSizes    = pool_sizes.data(),

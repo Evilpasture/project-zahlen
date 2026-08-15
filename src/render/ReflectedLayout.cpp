@@ -42,9 +42,9 @@ auto UnsafeReflectedLayoutBuilder::BuildUnsafe(VkDevice device) noexcept -> Unsa
                 const auto* reflected_binding = reflected_set->bindings[b];
                 uint32_t    binding_idx       = reflected_binding->binding;
 
-                auto& binding           = merged_sets[set_idx][binding_idx];
-                binding.binding         = binding_idx;
-                binding.descriptorType  = static_cast<VkDescriptorType>(reflected_binding->descriptor_type);
+                auto& binding          = merged_sets[set_idx][binding_idx];
+                binding.binding        = binding_idx;
+                binding.descriptorType = static_cast<VkDescriptorType>(reflected_binding->descriptor_type);
 
                 // SPIRV-Reflect reports runtime-sized arrays (e.g. Slang's
                 // `Texture2D globalTextures[]` inside the GlobalSceneRegistry
@@ -188,7 +188,8 @@ auto UnsafeReflectedLayout::CreatePool(VkDevice device, uint32_t maxSets) const 
     const VkDescriptorPoolCreateInfo info = {
         .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
         .pNext         = nullptr,
-        .flags         = (update_after_bind ? VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT : 0U) | VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+        .flags         = (update_after_bind ? static_cast<VkDescriptorPoolCreateFlags>(VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT) : 0U) |
+                         VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
         .maxSets       = maxSets,
         .poolSizeCount = static_cast<uint32_t>(pool_sizes.size()),
         .pPoolSizes    = pool_sizes.data(),
