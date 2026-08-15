@@ -1858,7 +1858,7 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
     frames.accumBuffers[0]               = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext, VK_IMAGE_USAGE_TRANSFER_DST_BIT);
     frames.accumBuffers[1]               = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext, VK_IMAGE_USAGE_TRANSFER_DST_BIT);
     graphResources.normalRoughnessBuffer = CreateDefaultTarget<VK_FORMAT_R8G8B8A8_UNORM>(ext);
-    graphResources.hdrSceneColor         = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
+    graphResources.hdrSceneColor         = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext, VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
     graphResources.ambientTarget         = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
     graphResources.lightingTarget        = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
     graphResources.smaaEdgeTarget        = CreateDefaultTarget<VK_FORMAT_R8G8_UNORM>(ext);

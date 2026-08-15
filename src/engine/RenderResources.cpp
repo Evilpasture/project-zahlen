@@ -17,7 +17,7 @@ namespace ZHLN {
 // High-Level GPU Asset Registry & Resolution API
 // ============================================================================
 
-std::optional<Mesh> RenderContext::GetGPUMesh(AssetID id) const noexcept {
+auto RenderContext::GetGPUMesh(AssetID id) const noexcept -> std::optional<Mesh> {
     const Mesh* found = _impl->assetMeshMap.Find(id);
     if (found != nullptr) {
         return *found;
@@ -25,7 +25,7 @@ std::optional<Mesh> RenderContext::GetGPUMesh(AssetID id) const noexcept {
     return std::nullopt;
 }
 
-std::optional<Material> RenderContext::GetGPUMaterial(MaterialID id) const noexcept {
+auto RenderContext::GetGPUMaterial(MaterialID id) const noexcept -> std::optional<Material> {
     const Material* found = _impl->assetMaterialMap.Find(id);
     if (found != nullptr) {
         return *found;
@@ -41,7 +41,7 @@ void RenderContext::RegisterGPUMaterial(MaterialID id, Material mat) noexcept {
     _impl->assetMaterialMap.Insert(id, mat);
 }
 
-BufferHandle RenderContext::GetOrCreateSkinnedScratchBuffer(uint64_t entityKey, uint32_t vertexCount) {
+auto RenderContext::GetOrCreateSkinnedScratchBuffer(uint64_t entityKey, uint32_t vertexCount) -> BufferHandle {
     const BufferHandle* existing = _impl->skinnedScratchMap.Find(entityKey);
     if (existing != nullptr && *existing != BufferHandle::Invalid) {
         return *existing;
@@ -54,7 +54,7 @@ BufferHandle RenderContext::GetOrCreateSkinnedScratchBuffer(uint64_t entityKey, 
     return handle;
 }
 
-BufferHandle RenderContext::CreateStorageBuffer(size_t size) {
+auto RenderContext::CreateStorageBuffer(size_t size) -> BufferHandle {
     auto res = _impl->CreateGPUBuffer(size, nullptr, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
     if (res) {
         return _impl->meshPool.Create(std::move(res->first), 0, res->second);
@@ -62,7 +62,7 @@ BufferHandle RenderContext::CreateStorageBuffer(size_t size) {
     return BufferHandle::Invalid;
 }
 
-BufferHandle RenderContext::GetOrCreateParticleBuffer(uint64_t entityKey, uint32_t maxParticles) {
+auto RenderContext::GetOrCreateParticleBuffer(uint64_t entityKey, uint32_t maxParticles) -> BufferHandle {
     const BufferHandle* existing = _impl->particleBufferMap.Find(entityKey);
     if (existing != nullptr && *existing != BufferHandle::Invalid) {
         return *existing;
@@ -91,7 +91,7 @@ void RenderContext::SubmitMeshParticleEmitter(
     );
 }
 
-uint32_t RenderContext::GetBindlessIndex(TextureHandle handle) const noexcept {
+auto RenderContext::GetBindlessIndex(TextureHandle handle) const noexcept -> uint32_t {
     return _impl->textureManager.GetBindlessIndex(handle);
 }
 
@@ -99,9 +99,9 @@ void RenderContext::ClearGPUCaches() noexcept {
     _impl->assetMeshMap.Clear();
     _impl->assetMaterialMap.Clear();
 
-    _impl->skinnedScratchMap.ForEach([this](uint64_t /*key*/, BufferHandle handle) { DestroyBuffer(handle); });
+    _impl->skinnedScratchMap.ForEach([this](uint64_t /*key*/, BufferHandle handle) -> void { DestroyBuffer(handle); });
     _impl->skinnedScratchMap.Clear();
-    _impl->particleBufferMap.ForEach([this](uint64_t /*key*/, BufferHandle handle) { DestroyBuffer(handle); });
+    _impl->particleBufferMap.ForEach([this](uint64_t /*key*/, BufferHandle handle) -> void { DestroyBuffer(handle); });
     _impl->particleBufferMap.Clear();
 
     // Destroy and clear tracked 2D particle buffers
@@ -119,11 +119,11 @@ void RenderContext::ClearGPUCaches() noexcept {
     _impl->textureManager.Clear();
 }
 
-ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& RenderContext::GetTracked2DEmitters() noexcept {
+auto RenderContext::GetTracked2DEmitters() noexcept -> ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& {
     return _impl->tracked2DEmitters;
 }
 
-ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& RenderContext::GetTracked3DEmitters() noexcept {
+auto RenderContext::GetTracked3DEmitters() noexcept -> ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& {
     return _impl->tracked3DEmitters;
 }
 
@@ -131,7 +131,7 @@ ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& RenderContext::GetTracked3DEmit
 // RenderContext Subsystem Implementation
 // ============================================================================
 
-std::expected<void, Error> RenderContext::Impl::CompileShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData) {
+auto RenderContext::Impl::CompileShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData) -> std::expected<void, Error> {
     return Vk::ShaderStages::Create(device, shaderData, "VSMain", "PSShadow")
         .transform_error([](auto err) -> Error { return err; })
         .and_then([&, device](auto&& shaders) -> std::expected<void, Error> {
@@ -157,12 +157,12 @@ std::expected<void, Error> RenderContext::Impl::CompileShadowPipeline(VkDevice d
                             ZHLN::Log("Shadow pipeline compilation error: {} (Category: {})", err.Message(), err.Category());
                             return RenderInitError::PipelineCreationFailed;
                         })
-                        .transform([&](auto&& pipeline) { shadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
+                        .transform([&](auto&& pipeline) -> auto { shadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
                 });
         });
 }
 
-std::expected<void, Error> RenderContext::Impl::CompilePunctualShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData) {
+auto RenderContext::Impl::CompilePunctualShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData) -> std::expected<void, Error> {
     return Vk::ShaderStages::Create(device, shaderData)
         .transform_error([](auto err) -> Error { return err; })
         .and_then([&, device](auto&& shaders) -> std::expected<void, Error> {
@@ -189,7 +189,7 @@ std::expected<void, Error> RenderContext::Impl::CompilePunctualShadowPipeline(Vk
                             ZHLN::Log("Punctual shadow pipeline compilation error: {} (Category: {})", err.Message(), err.Category());
                             return RenderInitError::PipelineCreationFailed;
                         })
-                        .transform([&](auto&& pipeline) { punctualShadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
+                        .transform([&](auto&& pipeline) -> auto { punctualShadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
                 });
         });
 }
@@ -202,7 +202,7 @@ auto RenderContext::GetGPUName() const -> const char* {
     return &_impl->ctx.PhysicalInfo().properties.properties.deviceName[0];
 }
 
-uint32_t RenderContext::GetFrameIndex() const noexcept {
+auto RenderContext::GetFrameIndex() const noexcept -> uint32_t {
     return _impl->frame_index;
 }
 
@@ -218,7 +218,7 @@ void RenderContext::SetResolution([[maybe_unused]] const Extent2D& res) {
 
 auto RenderContext::CreateVertexBuffer(const void* data, size_t size, uint32_t stride) -> BufferHandle {
     return _impl->CreateGPUBuffer(size, data, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)
-        .transform([this, size, stride](auto&& pair) {
+        .transform([this, size, stride](auto&& pair) -> auto {
             return _impl->meshPool.Create(std::move(pair.first), static_cast<uint32_t>(size / stride), pair.second);
         })
         .value_or(BufferHandle::Invalid);
@@ -226,7 +226,7 @@ auto RenderContext::CreateVertexBuffer(const void* data, size_t size, uint32_t s
 
 auto RenderContext::CreateIndexBuffer(const void* data, size_t size) -> BufferHandle {
     return _impl->CreateGPUBuffer(size, data, VK_BUFFER_USAGE_INDEX_BUFFER_BIT)
-        .transform([this, size](auto&& pair) {
+        .transform([this, size](auto&& pair) -> auto {
             return _impl->meshPool.Create(std::move(pair.first), static_cast<uint32_t>(size / sizeof(uint32_t)), pair.second);
         })
         .value_or(BufferHandle::Invalid);
@@ -252,12 +252,12 @@ void RenderContext::UpdateBuffer(BufferHandle handle, const void* data, size_t s
     auto stagingAlloc = _impl->transferRingBuffer.Allocate(size);
     std::memcpy(stagingAlloc.mappedData, data, size);
 
-    Vk::ExecuteImmediate<Vk::QueueType::Transfer>(_impl->ctx, _impl->transferCmdRing, _impl->transferRingBuffer, [&](VkCommandBuffer cmd) {
+    Vk::ExecuteImmediate<Vk::QueueType::Transfer>(_impl->ctx, _impl->transferCmdRing, _impl->transferRingBuffer, [&](VkCommandBuffer cmd) -> void {
         Vk::CopyRingBuffer(cmd, stagingAlloc, nativeMesh->buffer, size);
     });
 }
 
-std::expected<Material, Error> RenderContext::CreateMaterial(const PipelineDesc& desc) {
+auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> std::expected<Material, Error> {
     ZHLN_ShaderDesc v_desc = {.code = Vk::AsSpirV(desc.vertexShaderData), .size = desc.vertexShaderSize, .entry_point = nullptr};
     ZHLN_ShaderDesc f_desc = {.code = Vk::AsSpirV(desc.fragShaderData), .size = desc.fragShaderSize, .entry_point = nullptr};
 
@@ -307,7 +307,7 @@ std::expected<Material, Error> RenderContext::CreateMaterial(const PipelineDesc&
                             ZHLN::Log("Material pipeline creation error: {} (Category: {})", err.Message(), err.Category());
                             return MaterialCreationError::PipelineCreationFailed;
                         })
-                        .transform([impl, &desc, &layout](auto&& compiledPipeline) {
+                        .transform([impl, &desc, &layout](auto&& compiledPipeline) -> auto {
                             return Material {
                                 .pipeline = impl->materialPool.Create(
                                     std::forward<decltype(compiledPipeline)>(compiledPipeline), std::forward<decltype(layout)>(layout)
@@ -346,11 +346,11 @@ auto RenderContext::CreateTextureCube(const void* const* faceData, uint32_t widt
     return _impl->CreateTextureCubeInternal(faceData, width, height);
 }
 
-TextureHandle RenderContext::RegisterTexture(std::string_view name, uint32_t bindlessIndex, bool isSRGB) {
+auto RenderContext::RegisterTexture(std::string_view name, uint32_t bindlessIndex, bool isSRGB) -> TextureHandle {
     return _impl->textureManager.RegisterUploaded(name, bindlessIndex, isSRGB);
 }
 
-std::expected<uint32_t, Error> RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB) {
+auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> std::expected<uint32_t, Error> {
     auto* const  device    = ctx.Device();
     const size_t imageSize = static_cast<size_t>(width) * height * 4;
     uint32_t     mipLevels = std::bit_width(std::max(width, height));
@@ -366,7 +366,7 @@ std::expected<uint32_t, Error> RenderContext::Impl::CreateTextureInternal(const 
             auto stagingAlloc = stagingRingBuffer.Allocate(imageSize);
             std::memcpy(stagingAlloc.mappedData, data, imageSize);
 
-            Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) {
+            Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) -> void {
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, gpuImage.Handle());
 
                 Vk::CopyBufferToImage(
@@ -398,7 +398,7 @@ std::expected<uint32_t, Error> RenderContext::Impl::CreateTextureInternal(const 
         });
 }
 
-std::expected<uint32_t, Error> RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceData, uint32_t width, uint32_t height) {
+auto RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceData, uint32_t width, uint32_t height) -> std::expected<uint32_t, Error> {
     auto* const       device   = ctx.Device();
     const size_t      faceSize = static_cast<size_t>(width) * height * 4;
     VkImageUsageFlags usage    = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
@@ -413,7 +413,7 @@ std::expected<uint32_t, Error> RenderContext::Impl::CreateTextureCubeInternal(co
                 std::memcpy(static_cast<char*>(stagingAlloc.mappedData) + (i * faceSize), faceData[i], faceSize);
             }
 
-            Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) {
+            Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) -> void {
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, gpuImage.Handle());
 
                 auto regions = Vk::CreateCopyRegions<6>(stagingAlloc.offset, faceSize, {.width = width, .height = height, .depth = {}});
@@ -427,11 +427,8 @@ std::expected<uint32_t, Error> RenderContext::Impl::CreateTextureCubeInternal(co
             uint32_t index = nextTextureIndex++;
             Vk::UpdateBindlessTextureSlot(device, index, gpuView.Get(), frames.bindlessSets, 11);
 
-            {
-                char name[32];
-                std::snprintf(name, sizeof(name), "BindlessCubeTexture%03u", index);
-                Vk::Debug::SetImageName(ctx, gpuImage.Handle(), name);
-            }
+            std::array<char, 32> buf {};
+            Vk::Debug::SetImageName(ctx, gpuImage.Handle(), FormatTo(buf, "BindlessCubeTexture{:03}", index));
 
             textureImages.push_back(std::forward<decltype(gpuImage)>(gpuImage));
             textureViews.push_back(std::move(gpuView));
@@ -440,8 +437,8 @@ std::expected<uint32_t, Error> RenderContext::Impl::CreateTextureCubeInternal(co
         });
 }
 
-std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, VkResult>
-    RenderContext::Impl::CreateGPUBuffer(size_t size, const void* data, VkBufferUsageFlags functionalUsage) const {
+auto RenderContext::Impl::CreateGPUBuffer(size_t size, const void* data, VkBufferUsageFlags functionalUsage) const
+    -> std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, VkResult> {
     VkBufferUsageFlags usage = functionalUsage | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
 
     if (rtCtx.Valid()) {
@@ -450,7 +447,7 @@ std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, VkResult>
 
     bool diffQueue = ctx.PhysicalInfo().graphics_family != ctx.PhysicalInfo().transfer_family;
 
-    return Vk::Buffer::Create(allocator.Get(), size, usage, VMA_MEMORY_USAGE_GPU_ONLY).transform([&, size, data, diffQueue](auto&& gpu_buf) {
+    return Vk::Buffer::Create(allocator.Get(), size, usage, VMA_MEMORY_USAGE_GPU_ONLY).transform([&, size, data, diffQueue](auto&& gpu_buf) -> auto {
         auto stagingAlloc = transferRingBuffer.Allocate(size);
 
         if (data != nullptr) {
@@ -459,7 +456,7 @@ std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, VkResult>
             std::memset(stagingAlloc.mappedData, 0, size);
         }
 
-        Vk::ExecuteImmediate<Vk::QueueType::Transfer>(ctx, transferCmdRing, transferRingBuffer, [&](VkCommandBuffer cmd) {
+        Vk::ExecuteImmediate<Vk::QueueType::Transfer>(ctx, transferCmdRing, transferRingBuffer, [&](VkCommandBuffer cmd) -> void {
             Vk::CopyRingBuffer(cmd, stagingAlloc, gpu_buf, size);
             if (diffQueue) {
                 auto [release, acquire] = Vk::BufferQueueBarrier::Create(
@@ -475,7 +472,7 @@ std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, VkResult>
 
                 Vk::BufferBarrier(cmd, release);
 
-                ZHLN::Lock(pendingAcquires.mutex, [&] { pendingAcquires.buffers.push_back(acquire); });
+                ZHLN::Lock(pendingAcquires.mutex, [&] -> void { pendingAcquires.buffers.push_back(acquire); });
             }
         });
 
@@ -494,7 +491,7 @@ auto RenderContext::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHa
     }
 
     return Vk::Buffer::Create(_impl->allocator.Get(), size, usage, VMA_MEMORY_USAGE_GPU_ONLY)
-        .transform([this, vertexCount](auto&& gpu_buf) {
+        .transform([this, vertexCount](auto&& gpu_buf) -> auto {
             VkDeviceAddress address = Vk::GetBufferAddress(_impl->ctx.Device(), gpu_buf.Handle());
             auto            handle  = _impl->meshPool.Create(std::forward<decltype(gpu_buf)>(gpu_buf), vertexCount, address);
 
@@ -573,7 +570,7 @@ void RenderContext::UploadDebugVertices(const void* posData, size_t posSize, con
     nativeMesh->vertexCount = std::min(vertexCount, RenderContext::Impl::kMaxDebugVertices);
 }
 
-BufferHandle RenderContext::GetDebugMeshBuffer() const noexcept {
+auto RenderContext::GetDebugMeshBuffer() const noexcept -> BufferHandle {
     return _impl->frames.debugMeshHandles[_impl->frame_index];
 }
 
@@ -616,7 +613,7 @@ void RenderContext::UpdateJointMatrices(uint32_t offset, const JPH::Mat44* matri
     std::memcpy(gpuJoints + offset, matrices, count * sizeof(JPH::Mat44));
 }
 
-uint32_t RenderContext::AllocateMorphDeltas(uint32_t count, const float* deltas) {
+auto RenderContext::AllocateMorphDeltas(uint32_t count, const float* deltas) -> uint32_t {
     uint32_t offset = _impl->nextMorphDeltaIndex;
 
     auto   mappedRegion = _impl->morphDeltasBuffer.Map();
@@ -633,7 +630,7 @@ uint32_t RenderContext::AllocateMorphDeltas(uint32_t count, const float* deltas)
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #endif
 
-std::expected<void, Error> RenderContext::SetShadowResolution(uint32_t resolution) {
+auto RenderContext::SetShadowResolution(uint32_t resolution) -> std::expected<void, Error> {
     auto* impl   = _impl.get();
     auto* device = impl->ctx.Device();
 
@@ -642,7 +639,7 @@ std::expected<void, Error> RenderContext::SetShadowResolution(uint32_t resolutio
             ZHLN::Log("SetShadowResolution WaitIdle failed: {}", ToString(err));
             return ShadowResolutionError::RecreationFailed;
         })
-        .transform([&](VkResult) {
+        .transform([&](VkResult) -> void {
             impl->graphResources.shadowMap = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
                 impl->allocator, impl->ctx, {.width = resolution, .height = resolution},
                 {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, .arrayLayers = RenderContext::Impl::NUM_CASCADES}
@@ -662,7 +659,7 @@ std::expected<void, Error> RenderContext::SetShadowResolution(uint32_t resolutio
                 impl->shadowCascadeViewsPrev[i] = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(impl->ctx.Device(), impl->shadowMapPrev.image.Handle(), i, 1);
             }
 
-            Vk::ExecuteImmediate(impl->ctx, impl->graphicsCmdRing, [&](VkCommandBuffer cmd) {
+            Vk::ExecuteImmediate(impl->ctx, impl->graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
                     cmd, impl->graphResources.shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
                 );
@@ -692,7 +689,7 @@ void RenderContext::SetAAState(const AAState& state) {
     _impl->aaState = state;
 }
 
-RenderResult RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept {
+auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
     auto* impl = _impl.get();
 
     struct BuildContext {
@@ -738,7 +735,7 @@ RenderResult RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept {
                        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY
             )
                 .transform_error([](VkResult res) -> Error { return {res}; })
-                .transform([b = std::move(b)](auto&& buffer) mutable {
+                .transform([b = std::move(b)](auto&& buffer) mutable -> auto {
                     b.blasBuffer = std::forward<decltype(buffer)>(buffer);
                     return std::move(b);
                 });
@@ -754,7 +751,7 @@ RenderResult RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept {
                        VMA_MEMORY_USAGE_GPU_ONLY
             )
                 .transform_error([](VkResult res) -> Error { return {res}; })
-                .transform([b = std::move(b)](auto&& buffer) mutable {
+                .transform([b = std::move(b)](auto&& buffer) mutable -> auto {
                     b.scratch = std::forward<decltype(buffer)>(buffer);
                     return std::move(b);
                 });
@@ -785,7 +782,7 @@ RenderResult RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept {
                        VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR
             )
                 .transform_error([](auto err) -> Error { return err; })
-                .transform([&]() {
+                .transform([&]() -> void {
                     b.posMesh->blasBuffer  = std::move(b.blasBuffer);
                     b.posMesh->blas        = b.blas;
                     b.posMesh->blasAddress = impl->rtCtx.GetAccelerationStructureAddress(b.blas);
@@ -795,7 +792,7 @@ RenderResult RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept {
         });
 }
 
-std::expected<void, Error> RenderContext::Impl::InitializeSystemTextures() noexcept {
+auto RenderContext::Impl::InitializeSystemTextures() noexcept -> std::expected<void, Error> {
     ZHLN::Log("[Resource Factory] Registering fallback system texture slots...");
 
     std::array<uint8_t, 4> blackPixel  = {0, 0, 0, 0};
@@ -825,15 +822,15 @@ auto RenderContext::BakeProceduralTexture(uint32_t width, uint32_t height, uint3
     return _impl->BakeProceduralTexture(width, height, variantIdx, scale, randomness, 0.0f);
 }
 
-TextureHandle RenderContext::CreateProceduralTexture(std::string_view name, uint32_t width, uint32_t height, bool isSRGB, const uint32_t* pixels) {
+auto RenderContext::CreateProceduralTexture(std::string_view name, uint32_t width, uint32_t height, bool isSRGB, const uint32_t* pixels) -> TextureHandle {
     return _impl->textureManager.CreateProcedural(*this, name, width, height, isSRGB, pixels);
 }
 
-std::expected<void, Error> RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept {
+auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -> std::expected<void, Error> {
     auto* const impl   = _impl.get();
-    const auto  extent = impl->presentation.swapchain.Get().extent;
+    const auto  extent = impl->graphResources.hdrSceneColor.extent;
 
-    const size_t imageBytes = static_cast<size_t>(extent.width) * extent.height * 4;
+    const size_t imageBytes = static_cast<size_t>(extent.width) * extent.height * sizeof(uint16_t) * 4;
 
     // 1. Allocate host-visible readback buffer via engine Allocator
     auto stagingRes = Vk::Buffer::Create(impl->allocator.Get(), imageBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_TO_CPU);
@@ -842,13 +839,13 @@ std::expected<void, Error> RenderContext::CaptureScreenshotPPM(std::string_view 
     }
     auto stagingBuffer = std::move(*stagingRes);
 
-    // 2. Record and submit transfer using engine command ring & typed transitions
-    Vk::ExecuteImmediate(impl->ctx, impl->graphicsCmdRing, [&](VkCommandBuffer cmd) {
-        auto* const swapchainImage = impl->presentation.swapchain.Get().images[impl->current_image_index];
+    // 2. Record and submit transfer from internal hdrSceneColor
+    Vk::ExecuteImmediate(impl->ctx, impl->graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
+        auto* const targetImg = impl->graphResources.hdrSceneColor.image.Handle();
 
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL>(cmd, swapchainImage);
-        Vk::CopyImageToBuffer(cmd, swapchainImage, stagingBuffer.Handle(), extent);
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(cmd, swapchainImage);
+        Vk::TransitionLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL>(cmd, targetImg);
+        Vk::CopyImageToBuffer(cmd, targetImg, stagingBuffer.Handle(), extent);
+        Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, targetImg);
     });
 
     // 3. Map memory with typed pointer accessor
@@ -856,7 +853,7 @@ std::expected<void, Error> RenderContext::CaptureScreenshotPPM(std::string_view 
     if (mapped.data == nullptr) {
         return std::unexpected(RenderInitError::SubsystemAllocationFailed);
     }
-    const auto* const srcPixels = mapped.As<const uint8_t>();
+    const auto* const halfFloats = mapped.As<const uint16_t>();
 
     // 4. Output image file
     std::ofstream ofs(std::string(outputPath), std::ios::binary);
@@ -866,12 +863,49 @@ std::expected<void, Error> RenderContext::CaptureScreenshotPPM(std::string_view 
 
     ofs << "P6\n" << extent.width << " " << extent.height << "\n255\n";
 
-    // Fast conversion: BGRA (Vulkan Swapchain) -> RGB (PPM)
+    auto HalfToFloat = [](uint16_t h) noexcept -> float {
+        uint32_t sign     = (h >> 15) & 0x00000001;
+        uint32_t exponent = (h >> 10) & 0x0000001f;
+        uint32_t mantissa = h & 0x000003ff;
+
+        if (exponent == 0) {
+            if (mantissa == 0) {
+                return sign ? -0.0f : 0.0f;
+            }
+            return (sign ? -1.0f : 1.0f) * std::ldexp(static_cast<float>(mantissa), -24);
+        }
+        if (exponent == 31) {
+            return sign ? -INFINITY : INFINITY;
+        }
+        return (sign ? -1.0f : 1.0f) * std::ldexp(static_cast<float>(mantissa | 0x0400), static_cast<int>(exponent) - 15 - 10);
+    };
+
+    auto ACESFilm = [](float x) noexcept -> float {
+        float a = 2.51f;
+        float b = 0.03f;
+        float c = 2.43f;
+        float d = 0.59f;
+        float e = 0.14f;
+        return std::clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0f, 1.0f);
+    };
+
+    bool isFullBright = (impl->currentUniforms.fullBright != 0);
+
     ZHLN::Array<uint8_t> rgb(static_cast<size_t>(extent.width) * extent.height * 3);
     for (size_t i = 0; i < static_cast<size_t>(extent.width) * extent.height; ++i) {
-        rgb[i * 3 + 0] = srcPixels[i * 4 + 2]; // R
-        rgb[i * 3 + 1] = srcPixels[i * 4 + 1]; // G
-        rgb[i * 3 + 2] = srcPixels[i * 4 + 0]; // B
+        float r = HalfToFloat(halfFloats[i * 4 + 0]);
+        float g = HalfToFloat(halfFloats[i * 4 + 1]);
+        float b = HalfToFloat(halfFloats[i * 4 + 2]);
+
+        if (!isFullBright) {
+            r = ACESFilm(r * 0.015f);
+            g = ACESFilm(g * 0.015f);
+            b = ACESFilm(b * 0.015f);
+        }
+
+        rgb[i * 3 + 0] = static_cast<uint8_t>(std::clamp(r, 0.0f, 1.0f) * 255.0f);
+        rgb[i * 3 + 1] = static_cast<uint8_t>(std::clamp(g, 0.0f, 1.0f) * 255.0f);
+        rgb[i * 3 + 2] = static_cast<uint8_t>(std::clamp(b, 0.0f, 1.0f) * 255.0f);
     }
 
     ofs.write(reinterpret_cast<const char*>(rgb.data()), rgb.size());
@@ -901,9 +935,9 @@ void RenderContext::Impl::UploadClusterBounds(const JPH::Mat44& proj) {
     float tsX = 2.0f / 16.0f;
     float tsY = 2.0f / 9.0f;
 
-    auto Unproject = [&](const JPH::Vec4& coord) {
+    auto Unproject = [&](const JPH::Vec4& coord) -> JPH::Vec3 {
         JPH::Vec4 res = invProj * coord;
-        return JPH::Vec3(res.GetX() / res.GetW(), res.GetY() / res.GetW(), res.GetZ() / res.GetW());
+        return {res.GetX() / res.GetW(), res.GetY() / res.GetW(), res.GetZ() / res.GetW()};
     };
 
     for (uint32_t z = 0; z < 24; ++z) {
@@ -950,7 +984,7 @@ void RenderContext::Impl::UploadClusterBounds(const JPH::Mat44& proj) {
     auto stagingAlloc = stagingRingBuffer.Allocate(cpuBounds.size() * sizeof(ClusterBounds));
     std::memcpy(stagingAlloc.mappedData, cpuBounds.data(), cpuBounds.size() * sizeof(ClusterBounds));
 
-    Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) {
+    Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) -> void {
         Vk::CopyRingBuffer(cmd, stagingAlloc, clusterBoundsBuffer, cpuBounds.size() * sizeof(ClusterBounds));
 
         Vk::MemoryBarrier(
