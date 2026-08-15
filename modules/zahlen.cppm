@@ -184,6 +184,8 @@ module;
 #include <Zahlen/alife/SpatialGrid.hpp>
 #include <Zahlen/alife/Types.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ecs/EntityCommandBuffer.hpp>
+#include <Zahlen/ecs/SystemGraph.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <Zahlen/render/RenderCode.hpp>
 
@@ -362,10 +364,17 @@ using ZHLN::UIButton;
 using ZHLN::UIJustify;
 
 namespace ECS {
+using ZHLN::ECS::Access;
+using ZHLN::ECS::ComponentAccess;
 using ZHLN::ECS::ComponentFamily;
+using ZHLN::ECS::EntityCommandBuffer;
 using ZHLN::ECS::Patch;
+using ZHLN::ECS::Read;
 using ZHLN::ECS::Registry;
 using ZHLN::ECS::SparseSet;
+using ZHLN::ECS::SystemGraph;
+using ZHLN::ECS::SystemInfo;
+using ZHLN::ECS::Write;
 } // namespace ECS
 
 // Physics

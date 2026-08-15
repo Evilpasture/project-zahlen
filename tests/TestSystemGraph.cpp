@@ -7,11 +7,12 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ecs/SystemGraph.hpp>
 #include <atomic>
-#include <ecs/SystemGraph.hpp>
 #include <expected>
+#include <thread>
 
-enum class SystemGraphTestError : uint32_t {
+enum class SystemGraphTestError : uint8_t {
     Success = 0,
     HazardMismatch[[= ZHLN::Reflect::Description("SystemGraph failed to detect a Read/Write or Write/Write component conflict.")]],
     ExecutionOrderFailed[[= ZHLN::Reflect::Description("Systems were executed out of dependency order.")]],
@@ -25,10 +26,15 @@ struct TestCompB {
     int value = 0;
 };
 
+// Constants for test
+constexpr float     TestDeltaTime = 0.016f;
+constexpr uintptr_t FakeEnginePtr = 0x12345678;
+
 struct SystemGraphTestSuite {
     SystemGraphTestSuite() {
         ZHLN::Fiber::InitMainThread();
-        ZHLN::TaskSystem::Init(2, 32, 131072);
+        // Initialize a multi-threaded task system so parallel dispatch can be tested
+        ZHLN::TaskSystem::Init(4, 32, 131072);
     }
 
     ~SystemGraphTestSuite() {
@@ -38,20 +44,19 @@ struct SystemGraphTestSuite {
     struct Tests {
         // --- 1. Conflict Detection & Compile Order ---
         std::expected<void, ZHLN::Error> hazard_conflict_detection() {
-            ZHLN::ECS::Registry reg;
-            reg.RegisterComponent<TestCompA>("TestCompA");
-            reg.RegisterComponent<TestCompB>("TestCompB");
-
             ZHLN::ECS::SystemGraph graph;
 
-            static std::atomic<int> executionCounter {0};
-            static int              orderA = 0;
-            static int              orderB = 0;
-            executionCounter               = 0;
+            static std::atomic<int> executionCounter {1};
+            static std::atomic<int> orderA {0};
+            static std::atomic<int> orderB {0};
+
+            executionCounter.store(1);
+            orderA.store(0);
+            orderB.store(0);
 
             // System 1: Writes to TestCompA
             graph.AddSystem(
-                {.update_func    = [](ZHLN::Engine&, float) { orderA = executionCounter.fetch_add(1, std::memory_order::seq_cst); },
+                {.update_func    = [](ZHLN::Engine&, float) { orderA.store(executionCounter.fetch_add(1, std::memory_order::seq_cst)); },
                  .name           = "WriterA",
                  .access_pattern = {ZHLN::ECS::Write<TestCompA>()},
                  .enabled        = true}
@@ -59,7 +64,7 @@ struct SystemGraphTestSuite {
 
             // System 2: Reads from TestCompA (Conflicting -> must run AFTER System 1)
             graph.AddSystem(
-                {.update_func    = [](ZHLN::Engine&, float) { orderB = executionCounter.fetch_add(1, std::memory_order::seq_cst); },
+                {.update_func    = [](ZHLN::Engine&, float) { orderB.store(executionCounter.fetch_add(1, std::memory_order::seq_cst)); },
                  .name           = "ReaderA",
                  .access_pattern = {ZHLN::ECS::Read<TestCompA>()},
                  .enabled        = true}
@@ -67,37 +72,80 @@ struct SystemGraphTestSuite {
 
             graph.Compile();
 
-            // Mock minimal engine execution context
-            ZHLN::EngineConfig cfg;
-            cfg.render.appName = "TestGraph";
-            // Verification of compile: WriterA must precede ReaderA
-            ZHLN::Test::ExpectTrue(true);
+            // Mock minimal engine execution context (systems don't actually use the engine ref)
+            auto* fakeEngine = reinterpret_cast<ZHLN::Engine*>(FakeEnginePtr);
+            graph.Execute(*fakeEngine, TestDeltaTime);
+
+            // Verification: WriterA must precede ReaderA
+            auto chkA = ZHLN::Test::AssertTrue(orderA.load() > 0);
+            if (!chkA) {
+                return chkA;
+            }
+
+            auto chkB = ZHLN::Test::AssertTrue(orderB.load() > orderA.load());
+            if (!chkB) {
+                return chkB;
+            }
 
             return {};
         }
 
         // --- 2. Independent Systems Parallel Dispatch ---
         std::expected<void, ZHLN::Error> independent_systems_dispatch() {
-            using namespace ZHLN::ECS;
+            ZHLN::ECS::SystemGraph graph;
 
-            SystemInfo sysA {.update_func = nullptr, .name = "SysA", .access_pattern = {Read<TestCompA>()}};
+            static std::atomic<int> executionCounter {1};
+            static std::atomic<int> orderA {0};
+            static std::atomic<int> orderB {0};
+            static std::atomic<int> orderC {0};
 
-            SystemInfo sysB {
-                .update_func = nullptr, .name = "SysB", .access_pattern = {Read<TestCompA>()} // Read-Read -> NO conflict
-            };
+            executionCounter.store(1);
+            orderA.store(0);
+            orderB.store(0);
+            orderC.store(0);
 
-            SystemInfo sysC {
-                .update_func = nullptr, .name = "SysC", .access_pattern = {Write<TestCompA>()} // Read-Write -> CONFLICT
-            };
+            // SysA and SysB both READ TestCompA (No conflict, run parallel)
+            graph.AddSystem(
+                {.update_func =
+                     [](ZHLN::Engine&, float) {
+                         std::this_thread::sleep_for(std::chrono::milliseconds(2)); // Force a slight delay to prove overlap
+                         orderA.store(executionCounter.fetch_add(1, std::memory_order::seq_cst));
+                     },
+                 .name           = "SysA_Read",
+                 .access_pattern = {ZHLN::ECS::Read<TestCompA>()},
+                 .enabled        = true}
+            );
 
-            SystemGraph graph;
-            graph.AddSystem(sysA);
-            graph.AddSystem(sysB);
-            graph.AddSystem(sysC);
+            graph.AddSystem(
+                {.update_func =
+                     [](ZHLN::Engine&, float) {
+                         std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                         orderB.store(executionCounter.fetch_add(1, std::memory_order::seq_cst));
+                     },
+                 .name           = "SysB_Read",
+                 .access_pattern = {ZHLN::ECS::Read<TestCompA>()},
+                 .enabled        = true}
+            );
+
+            // SysC WRITES TestCompA (Conflict, must run after BOTH A and B)
+            graph.AddSystem(
+                {.update_func    = [](ZHLN::Engine&, float) { orderC.store(executionCounter.fetch_add(1, std::memory_order::seq_cst)); },
+                 .name           = "SysC_Write",
+                 .access_pattern = {ZHLN::ECS::Write<TestCompA>()},
+                 .enabled        = true}
+            );
+
             graph.Compile();
 
-            // SysA and SysB have no conflict; both can execute as root entry nodes
-            ZHLN::Test::ExpectTrue(true);
+            auto* fakeEngine = reinterpret_cast<ZHLN::Engine*>(FakeEnginePtr);
+            graph.Execute(*fakeEngine, TestDeltaTime);
+
+            // SysC MUST execute after both SysA and SysB complete
+            auto chkC = ZHLN::Test::AssertTrue(orderC.load() > orderA.load() && orderC.load() > orderB.load());
+            if (!chkC) {
+                return chkC;
+            }
+
             return {};
         }
     };

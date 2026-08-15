@@ -1,6 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
-#include "SystemGraph.hpp"
+#include <Zahlen/ecs/SystemGraph.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <utility>
 

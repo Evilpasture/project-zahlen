@@ -764,7 +764,7 @@ void RegisterPhysicsCommands() {
                     const char* fmt    = (sizeof(JPH::Real) == 8) ? "EvtD" : "EvtF";
                     *a.outView         = ZHLN::ViewComposer::Build(&engine->GetPhysicsContext().GetWorld(), events.first, fmt, events.second);
                     return 0;
-                })); 
+                }));
 
     RegisterCmd("SetCharacterVelocity", MakeCmd<SetCharVelArgs>([](ZHLN::Engine* engine, const SetCharVelArgs& a) -> uint64_t {
                     engine->GetPhysicsContext().SetCharacterVelocity(ZHLN::Entity::Unpack(a.entityRaw), JPH::Vec3(a.x, a.y, a.z));

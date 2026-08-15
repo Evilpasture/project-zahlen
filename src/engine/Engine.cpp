@@ -31,8 +31,8 @@
 #include <Zahlen/alife/Simulator.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
-#include <ecs/EntityCommandBuffer.hpp>
-#include <ecs/SystemGraph.hpp>
+#include <Zahlen/ecs/EntityCommandBuffer.hpp>
+#include <Zahlen/ecs/SystemGraph.hpp>
 #include <engine/FileWatcher.hpp>
 #include <engine/NativeScriptModule.hpp>
 #include <engine/Platform.hpp>

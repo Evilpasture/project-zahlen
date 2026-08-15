@@ -266,9 +266,7 @@ void RenderContext::Impl::RecordIndirectTelemetry(VkCommandBuffer cmd) noexcept 
     if (!indirectReadbackReady) {
         bool ok = true;
         for (uint32_t i = 0; i < 2; ++i) {
-            auto rb = Vk::Buffer::Create(
-                allocator.Get(), kTelemetryReadbackBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_TO_CPU
-            );
+            auto rb = Vk::Buffer::Create(allocator.Get(), kTelemetryReadbackBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_TO_CPU);
             if (!rb) {
                 ok = false;
                 break;
@@ -321,8 +319,8 @@ void RenderContext::Impl::DumpIndirectTelemetry(uint32_t frameNo) noexcept {
     VkPipeline currentPipeline = VK_NULL_HANDLE;
     uint32_t   groupStart      = 0;
     for (uint32_t i = 0; i < drawCount; ++i) {
-        const auto&       drawCmd      = queues.drawQueue[i];
-        const auto* const drawMat      = drawCmd.material;
+        const auto&       drawCmd     = queues.drawQueue[i];
+        const auto* const drawMat     = drawCmd.material;
         const bool        forwardOnly = (drawCmd.instanceData.flags & 0xFF) == 2;
         const bool        viewmodel   = (drawCmd.flags & DrawFlags::Viewmodel) != DrawFlags::None;
         const bool        matValid    = (drawMat != nullptr) && drawMat->pipeline.Valid();
@@ -336,9 +334,7 @@ void RenderContext::Impl::DumpIndirectTelemetry(uint32_t frameNo) noexcept {
         if (i == 0 || drawMat->pipeline.Get() != currentPipeline) {
             groupStart      = i;
             currentPipeline = drawMat->pipeline.Get();
-            ZHLN::Log(
-                "[Diag]   group @{} pipeline=0x{:x}", groupStart, static_cast<uint64_t>(reinterpret_cast<uintptr_t>(currentPipeline))
-            );
+            ZHLN::Log("[Diag]   group @{} pipeline=0x{:x}", groupStart, static_cast<uint64_t>(reinterpret_cast<uintptr_t>(currentPipeline)));
         } else {
             ZHLN::Log("[Diag]   draw {} extends group @{}", i, groupStart);
         }
@@ -346,11 +342,11 @@ void RenderContext::Impl::DumpIndirectTelemetry(uint32_t frameNo) noexcept {
 
     const uint32_t n = std::min(drawCount, kTelemetryMaxDraws);
     for (uint32_t i = 0; i < n; ++i) {
-        const auto& dq  = queues.drawQueue[i].instanceData;
-        const auto  tr  = dq.world.GetTranslation();
+        const auto& dq = queues.drawQueue[i].instanceData;
+        const auto  tr = dq.world.GetTranslation();
         ZHLN::Log(
-            "[Diag]   queue inst[{}]: vtx={} idx={} posAddr=0x{:x} iboAddr=0x{:x} radius={:.3f} t=({:.2f},{:.2f},{:.2f})", i, dq.vertexCount,
-            dq.indexCount, static_cast<uint64_t>(dq.posAddress), static_cast<uint64_t>(dq.iboAddress), dq.cullRadius, tr.GetX(), tr.GetY(), tr.GetZ()
+            "[Diag]   queue inst[{}]: vtx={} idx={} posAddr=0x{:x} iboAddr=0x{:x} radius={:.3f} t=({:.2f},{:.2f},{:.2f})", i, dq.vertexCount, dq.indexCount,
+            static_cast<uint64_t>(dq.posAddress), static_cast<uint64_t>(dq.iboAddress), dq.cullRadius, tr.GetX(), tr.GetY(), tr.GetZ()
         );
     }
 
