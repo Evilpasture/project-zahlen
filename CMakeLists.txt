@@ -773,6 +773,8 @@ if(ZHLN_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 
-
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extras")
+    add_subdirectory(extras)
+endif()
 
 target_link_libraries(zahlen_engine PRIVATE zahlen_warnings)
