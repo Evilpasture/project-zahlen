@@ -32,6 +32,7 @@ Checks: >
   cppcoreguidelines-*,
   misc-*,
   google-readability-casting,
+  performance-type-promotion-in-math-fn
   -modernize-use-trailing-return-type,
   -readability-identifier-length,
   -cppcoreguidelines-owning-memory,
