@@ -1,9 +1,8 @@
-// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
-// SPDX-License-Identifier: GPL-3.0-or-later
-
 // src/gltf/GLTFImporter.hpp
 #pragma once
+
 #include <Zahlen/ModelPrefab.hpp>
+#include <span>
 #include <string_view>
 
 namespace ZHLN {
@@ -11,7 +10,8 @@ class RenderContext;
 class CreativeWorksManager;
 
 namespace GLTF {
-ModelPrefab* LoadGLBPrefab(RenderContext& ctx, CreativeWorksManager& cwMgr, std::string_view path);
-void         RebuildPrefabGPUResources(RenderContext& ctx, ModelPrefab* prefab);
+auto LoadGLBPrefab(RenderContext& ctx, CreativeWorksManager& cwMgr, std::string_view path) -> ModelPrefab*;
+auto LoadGLBPrefabFromMemory(RenderContext& ctx, CreativeWorksManager& cwMgr, std::span<const uint8_t> bytes, std::string_view virtualPath) -> ModelPrefab*;
+void RebuildPrefabGPUResources(RenderContext& ctx, ModelPrefab* prefab);
 } // namespace GLTF
 } // namespace ZHLN

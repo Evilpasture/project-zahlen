@@ -14,18 +14,18 @@
 #include <cmath>
 #include <cstddef>
 #include <cstring>
-#include <string>
 #include <vector>
 
 namespace ZHLN::CreativeWorksFactory {
 
-Mesh CreateTetrahedronMesh(RenderContext& ctx) {
+auto CreateTetrahedronMesh(RenderContext& ctx) -> Mesh {
     std::vector<VertexPosition>   positions = {{{1.0f, 1.0f, 1.0f}}, {{-1.0f, -1.0f, 1.0f}}, {{-1.0f, 1.0f, -1.0f}}, {{1.0f, -1.0f, -1.0f}}};
     std::vector<uint32_t>         indices   = {0, 1, 2, 0, 3, 1, 0, 2, 3, 1, 3, 2};
     std::vector<VertexAttributes> attributes;
     Packed1010102                 n = Math::PackNormal(0.0f, 1.0f, 0.0f);
     Packed1010102                 t = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f);
     PackedRGBA8                   c = Math::PackColor(1.0f, 1.0f, 1.0f, 1.0f);
+    attributes.reserve(positions.size());
     for (size_t i = 0; i < positions.size(); ++i) {
         attributes.push_back({.normal = n, .tangent = t, .uv = Math::PackUV(0.0f, 0.0f), .color = c});
     }
@@ -51,7 +51,7 @@ Mesh CreateTetrahedronMesh(RenderContext& ctx) {
     return finalMesh;
 }
 
-std::expected<Material, Error> CreateBasicMaterial(RenderContext& ctx, bool doubleSided, bool alphaBlend, bool additiveBlend) {
+auto CreateBasicMaterial(RenderContext& ctx, bool doubleSided, bool alphaBlend, bool additiveBlend) -> std::expected<Material, Error> {
     using enum Resource::ShaderID;
     PipelineDesc desc;
     desc.vertexShaderData = Resource::GetShaderProgram(Basic).vertex.data();
@@ -78,14 +78,14 @@ std::expected<Material, Error> CreateBasicMaterial(RenderContext& ctx, bool doub
     return mat;
 }
 
-std::expected<Material, Error> CreateMaterial(RenderContext& ctx, const MaterialDesc& desc) {
+auto CreateMaterial(RenderContext& ctx, const MaterialDesc& desc) -> std::expected<Material, Error> {
     auto basicMat = CreateBasicMaterial(ctx, desc.doubleSided, desc.alphaBlend, desc.additiveBlend);
     if (!basicMat) {
         return std::unexpected(basicMat.error());
     }
 
     Material mat        = *basicMat;
-    mat.alphaMode       = desc.alphaMode;
+    mat.alphaMode       = (desc.alphaMode != 0) ? desc.alphaMode : basicMat->alphaMode;
     mat.alphaCutoff     = desc.alphaCutoff;
     mat.metallicFactor  = desc.metallic;
     mat.roughnessFactor = desc.roughness;
@@ -104,7 +104,7 @@ std::expected<Material, Error> CreateMaterial(RenderContext& ctx, const Material
 // LOW-LEVEL GPU MESH BUILDERS (RAW GEOMETRY)
 // ============================================================================
 
-Mesh CreatePlaneMesh(RenderContext& ctx, float extent, const JPH::Vec4& color) {
+auto CreatePlaneMesh(RenderContext& ctx, float extent, const JPH::Vec4& color) -> Mesh {
     Packed1010102 n = Math::PackNormal(0.0f, 1.0f, 0.0f);
     Packed1010102 t = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f);
     PackedRGBA8   c = Math::PackColor(color.GetX(), color.GetY(), color.GetZ(), color.GetW());
@@ -138,7 +138,7 @@ Mesh CreatePlaneMesh(RenderContext& ctx, float extent, const JPH::Vec4& color) {
     return finalMesh;
 }
 
-Mesh CreateBoxMesh(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4& color) {
+auto CreateBoxMesh(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4& color) -> Mesh {
     const float x = halfExtents.GetX();
     const float y = halfExtents.GetY();
     const float z = halfExtents.GetZ();
@@ -273,7 +273,7 @@ Mesh CreateBoxMesh(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4
     return finalMesh;
 }
 
-Mesh CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldSize, const float* heights, const float* colorsRGBA) {
+auto CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldSize, const float* heights, const float* colorsRGBA) -> Mesh {
     float halfSize = worldSize / 2.0f;
     float dx       = worldSize / (sampleCount - 1);
     float dz       = worldSize / (sampleCount - 1);
@@ -319,7 +319,7 @@ Mesh CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldS
             JPH::Vec3 nC = get_normal(x, z + 1);
             JPH::Vec3 nD = get_normal(x + 1, z + 1);
 
-            auto fetch_color = [&](int idx) {
+            auto fetch_color = [&](int idx) -> PackedRGBA8 {
                 if (colorsRGBA == nullptr) {
                     return Math::PackColor(0.8f, 0.8f, 0.8f, 1.0f);
                 }
@@ -331,7 +331,7 @@ Mesh CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldS
             VertexAttributes attrA {
                 .normal  = Math::PackNormal(nA.GetX(), nA.GetY(), nA.GetZ()),
                 .tangent = Math::PackNormal(1, 0, 0, 1),
-                .uv      = Math::PackUV((float) x / sampleCount, (float) z / sampleCount),
+                .uv      = Math::PackUV(static_cast<float>(x) / sampleCount, static_cast<float>(z) / sampleCount),
                 .color   = fetch_color(idxA)
             };
 
@@ -339,7 +339,7 @@ Mesh CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldS
             VertexAttributes attrB {
                 .normal  = Math::PackNormal(nB.GetX(), nB.GetY(), nB.GetZ()),
                 .tangent = Math::PackNormal(1, 0, 0, 1),
-                .uv      = Math::PackUV((float) (x + 1) / sampleCount, (float) z / sampleCount),
+                .uv      = Math::PackUV(static_cast<float>(x + 1) / sampleCount, static_cast<float>(z) / sampleCount),
                 .color   = fetch_color(idxB)
             };
 
@@ -347,7 +347,7 @@ Mesh CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldS
             VertexAttributes attrC {
                 .normal  = Math::PackNormal(nC.GetX(), nC.GetY(), nC.GetZ()),
                 .tangent = Math::PackNormal(1, 0, 0, 1),
-                .uv      = Math::PackUV((float) x / sampleCount, (float) (z + 1) / sampleCount),
+                .uv      = Math::PackUV(static_cast<float>(x) / sampleCount, static_cast<float>(z + 1) / sampleCount),
                 .color   = fetch_color(idxC)
             };
 
@@ -355,7 +355,7 @@ Mesh CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldS
             VertexAttributes attrD {
                 .normal  = Math::PackNormal(nD.GetX(), nD.GetY(), nD.GetZ()),
                 .tangent = Math::PackNormal(1, 0, 0, 1),
-                .uv      = Math::PackUV((float) (x + 1) / sampleCount, (float) (z + 1) / sampleCount),
+                .uv      = Math::PackUV(static_cast<float>(x + 1) / sampleCount, static_cast<float>(z + 1) / sampleCount),
                 .color   = fetch_color(idxD)
             };
 
@@ -386,7 +386,7 @@ Mesh CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldS
     return finalMesh;
 }
 
-Mesh CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, float maxHeight, float* outHeights, TerrainType type) {
+auto CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, float maxHeight, float* outHeights, TerrainType type) -> Mesh {
     auto hash = [](float x, float y) -> float {
         uint32_t ix = 0;
         std::memcpy(&ix, &x, sizeof(float));
@@ -398,9 +398,9 @@ Mesh CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, flo
         return static_cast<float>(hashVal & 0xFFFFFFu) / 16777215.0f;
     };
 
-    auto lerp = [](float a, float b, float t) { return a + t * (b - a); };
+    auto lerp = [](float a, float b, float t) -> float { return a + t * (b - a); };
 
-    auto noise = [&](float x, float y) {
+    auto noise = [&](float x, float y) -> float {
         float ix = std::floor(x);
         float iy = std::floor(y);
         float fx = x - ix;
@@ -410,7 +410,7 @@ Mesh CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, flo
         return lerp(lerp(hash(ix, iy), hash(ix + 1.0f, iy), ux), lerp(hash(ix, iy + 1.0f), hash(ix + 1.0f, iy + 1.0f), ux), uy);
     };
 
-    auto get_height = [&](float x, float z) {
+    auto get_height = [&](float x, float z) -> float {
         if (type == TerrainType::Snow) {
             float tx = x * 0.012f;
             float tz = z * 0.012f;
@@ -434,20 +434,19 @@ Mesh CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, flo
             ridge *= ridge;
 
             return (std::pow(val, 1.2f) * 0.75f + ridge * 0.25f) * maxHeight;
-        } else {
-            float val  = 0.0f;
-            float amp  = 0.5f;
-            float freq = 0.015f;
-            float tx   = x * freq;
-            float tz   = z * freq;
-            for (int i = 0; i < 4; i++) {
-                val += amp * noise(tx, tz);
-                tx *= 2.1f;
-                tz *= 2.15f;
-                amp *= 0.45f;
-            }
-            return std::pow(val, 1.4f) * maxHeight;
         }
+        float val  = 0.0f;
+        float amp  = 0.5f;
+        float freq = 0.015f;
+        float tx   = x * freq;
+        float tz   = z * freq;
+        for (int i = 0; i < 4; i++) {
+            val += amp * noise(tx, tz);
+            tx *= 2.1f;
+            tz *= 2.15f;
+            amp *= 0.45f;
+        }
+        return std::pow(val, 1.4f) * maxHeight;
     };
 
     float halfSize = worldSize / 2.0f;
@@ -504,7 +503,7 @@ Mesh CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, flo
             JPH::Vec3 nC = get_normal(x, z + 1);
             JPH::Vec3 nD = get_normal(x + 1, z + 1);
 
-            auto get_color = [&](float y, JPH::Vec3 normal) {
+            auto get_color = [&](float y, JPH::Vec3 normal) -> PackedRGBA8 {
                 float slope = normal.GetY();
                 float normY = y / maxHeight;
 
@@ -527,26 +526,25 @@ Mesh CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, flo
                     }
                     float snowVar = 0.90f + 0.06f * std::sin(y * 0.4f);
                     return Math::PackColor(snowVar * 0.95f, snowVar * 0.98f, snowVar, 1.0f);
-                } else {
-                    if (slope < 0.65f) {
-                        return Math::PackColor(0.35f, 0.32f, 0.29f, 1.0f);
-                    }
-                    if (normY > 0.75f) {
-                        return Math::PackColor(0.95f, 0.95f, 0.98f, 1.0f);
-                    }
-                    if (normY < 0.12f) {
-                        return Math::PackColor(0.72f, 0.64f, 0.48f, 1.0f);
-                    }
-                    float greenVar = 0.4f + 0.12f * std::sin(y * 0.5f);
-                    return Math::PackColor(0.12f, greenVar, 0.08f, 1.0f);
                 }
+                if (slope < 0.65f) {
+                    return Math::PackColor(0.35f, 0.32f, 0.29f, 1.0f);
+                }
+                if (normY > 0.75f) {
+                    return Math::PackColor(0.95f, 0.95f, 0.98f, 1.0f);
+                }
+                if (normY < 0.12f) {
+                    return Math::PackColor(0.72f, 0.64f, 0.48f, 1.0f);
+                }
+                float greenVar = 0.4f + 0.12f * std::sin(y * 0.5f);
+                return Math::PackColor(0.12f, greenVar, 0.08f, 1.0f);
             };
 
             VertexPosition   posA  = {{ax, ay, az}};
             VertexAttributes attrA = {
                 .normal  = Math::PackNormal(nA.GetX(), nA.GetY(), nA.GetZ()),
                 .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f),
-                .uv      = Math::PackUV((float) x / sampleCount, (float) z / sampleCount),
+                .uv      = Math::PackUV(static_cast<float>(x) / sampleCount, static_cast<float>(z) / sampleCount),
                 .color   = get_color(ay, nA)
             };
 
@@ -554,7 +552,7 @@ Mesh CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, flo
             VertexAttributes attrB = {
                 .normal  = Math::PackNormal(nB.GetX(), nB.GetY(), nB.GetZ()),
                 .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f),
-                .uv      = Math::PackUV((float) (x + 1) / sampleCount, (float) z / sampleCount),
+                .uv      = Math::PackUV(static_cast<float>(x + 1) / sampleCount, static_cast<float>(z) / sampleCount),
                 .color   = get_color(by, nB)
             };
 
@@ -562,7 +560,7 @@ Mesh CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, flo
             VertexAttributes attrC = {
                 .normal  = Math::PackNormal(nC.GetX(), nC.GetY(), nC.GetZ()),
                 .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f),
-                .uv      = Math::PackUV((float) x / sampleCount, (float) (z + 1) / sampleCount),
+                .uv      = Math::PackUV(static_cast<float>(x) / sampleCount, static_cast<float>(z + 1) / sampleCount),
                 .color   = get_color(cy, nC)
             };
 
@@ -570,7 +568,7 @@ Mesh CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, flo
             VertexAttributes attrD = {
                 .normal  = Math::PackNormal(nD.GetX(), nD.GetY(), nD.GetZ()),
                 .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f),
-                .uv      = Math::PackUV((float) (x + 1) / sampleCount, (float) (z + 1) / sampleCount),
+                .uv      = Math::PackUV(static_cast<float>(x + 1) / sampleCount, static_cast<float>(z + 1) / sampleCount),
                 .color   = get_color(dy, nD)
             };
 

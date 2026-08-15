@@ -24,28 +24,29 @@ class ZHLN_API ScriptECSBridge {
         ZHLN::RegisterManifest<Manifest>();
 
         // 2. Register with ECS Registry
-        ZHLN::Reflect::ForEachNestedType<Manifest>([this]<typename Comp>() { m_registry.RegisterComponent<Comp>(ZHLN::Reflect::TypeName<Comp>()); });
+        ZHLN::Reflect::ForEachNestedType<Manifest>([this]<typename Comp>() -> auto { m_registry.RegisterComponent<Comp>(ZHLN::Reflect::TypeName<Comp>()); });
     }
 
     // --- Entity Component Roots ---
-    [[nodiscard]] std::expected<ScriptVal, Error> GetProperty(Entity entity, std::string_view compName, std::string_view propName);
-    [[nodiscard]] std::expected<void, Error>      SetProperty(Entity entity, std::string_view compName, std::string_view propName, const ScriptVal& val);
-    [[nodiscard]] std::expected<ScriptVal, Error>
-        CallMethod(Entity entity, std::string_view compName, std::string_view methodName, std::span<const ScriptVal> args = {});
+    [[nodiscard]] auto GetProperty(Entity entity, std::string_view compName, std::string_view propName) -> std::expected<ScriptVal, Error>;
+    [[nodiscard]] auto SetProperty(Entity entity, std::string_view compName, std::string_view propName, const ScriptVal& val) -> std::expected<void, Error>;
+    [[nodiscard]] auto CallMethod(Entity entity, std::string_view compName, std::string_view methodName, std::span<const ScriptVal> args = {})
+        -> std::expected<ScriptVal, Error>;
 
     // --- Multi-Level Object Drilling ---
-    [[nodiscard]] std::expected<ScriptVal, Error> GetPropertyOf(const ScriptVal& parentVal, std::string_view propName) const;
-    [[nodiscard]] std::expected<void, Error>      SetPropertyOf(ScriptVal& parentVal, std::string_view propName, const ScriptVal& val) const;
+    [[nodiscard]] auto GetPropertyOf(const ScriptVal& parentVal, std::string_view propName) const -> std::expected<ScriptVal, Error>;
+    [[nodiscard]] auto SetPropertyOf(ScriptVal& parentVal, std::string_view propName, const ScriptVal& val) const -> std::expected<void, Error>;
 
     // --- Container Array Operations ---
-    [[nodiscard]] std::expected<ScriptVal, Error> GetArrayElement(const ScriptVal& arrayVal, size_t index);
-    [[nodiscard]] std::expected<void, Error>      SetArrayElement(ScriptVal& arrayVal, size_t index, const ScriptVal& val);
+    [[nodiscard]] auto GetArrayElement(const ScriptVal& arrayVal, size_t index) -> std::expected<ScriptVal, Error>;
+    [[nodiscard]] auto SetArrayElement(ScriptVal& arrayVal, size_t index, const ScriptVal& val) -> std::expected<void, Error>;
 
-    [[nodiscard]] std::expected<ScriptVal, Error> GetPropertyElementAt(Entity entity, std::string_view compName, std::string_view propName, size_t index);
-    [[nodiscard]] std::expected<void, Error>
-        SetPropertyElementAt(Entity entity, std::string_view compName, std::string_view propName, size_t index, const ScriptVal& val);
+    [[nodiscard]] auto
+        GetPropertyElementAt(Entity entity, std::string_view compName, std::string_view propName, size_t index) -> std::expected<ScriptVal, Error>;
+    [[nodiscard]] auto SetPropertyElementAt(Entity entity, std::string_view compName, std::string_view propName, size_t index, const ScriptVal& val)
+        -> std::expected<void, Error>;
 
-    [[nodiscard]] std::expected<void*, Error> ResolveBoxedPointer(const BoxedObject& obj) const;
+    [[nodiscard]] auto ResolveBoxedPointer(const BoxedObject& obj) const -> std::expected<void*, Error>;
 
   private:
     ECS::Registry& m_registry;

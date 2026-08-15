@@ -25,7 +25,6 @@ module;
 
 // Standard Library Headers
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <cstdint>
 #include <numbers>
@@ -310,7 +309,7 @@ class System {
                 rc.DrawLine(pTail, pHead, tracer.colorEnd, tracer.colorStart);
             }
         }
-        ZHLN::Ranges::EraseIf(m_tracers, [](const auto& t) { return (t.traveled - t.length) >= t.totalDistance; });
+        ZHLN::Ranges::EraseIf(m_tracers, [](const auto& t) -> auto { return (t.traveled - t.length) >= t.totalDistance; });
 
         // 2. Advance and Render Expanding Shockwave Rings
         for (auto& ring: m_rings) {
@@ -335,7 +334,7 @@ class System {
                 prevP = p;
             }
         }
-        ZHLN::Ranges::EraseIf(m_rings, [](const auto& r) { return r.age >= r.duration; });
+        ZHLN::Ranges::EraseIf(m_rings, [](const auto& r) -> auto { return r.age >= r.duration; });
 
         // 3. Advance Impact Particles (Generalized drag + gravity without planar floor assumption)
         for (auto& p: m_particles) {
@@ -354,7 +353,7 @@ class System {
                 rc.DrawLine(streakTail, p.position, col, col);
             }
         }
-        ZHLN::Ranges::EraseIf(m_particles, [](const auto& p) { return p.age >= p.maxLife; });
+        ZHLN::Ranges::EraseIf(m_particles, [](const auto& p) -> auto { return p.age >= p.maxLife; });
     }
 
     void Clear() noexcept {
@@ -364,7 +363,7 @@ class System {
     }
 
   private:
-    static inline std::vector<uint32_t> GenerateBulletHoleTexture(uint32_t size) {
+    static auto GenerateBulletHoleTexture(uint32_t size) -> std::vector<uint32_t> {
         std::vector<uint32_t> pixels(static_cast<size_t>(size * size));
         const float           center = size * 0.5f;
 
@@ -386,7 +385,7 @@ class System {
 
     bool                                          m_initialized    = false;
     TextureHandle                                 m_defaultHoleTex = TextureHandle::Invalid;
-    std::random_device                            m_randomDevice {};
+    std::random_device                            m_randomDevice;
     std::unordered_map<uint32_t, SurfaceResponse> m_surfaces;
 
     std::vector<BulletTracer>   m_tracers;

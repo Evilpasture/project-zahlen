@@ -53,21 +53,21 @@ enum SlotState : uint8_t { SLOT_EMPTY = 0, SLOT_ALIVE = 1, SLOT_CHARACTER = 2 };
 // =================================================================================================
 // MEMORY UTILITIES
 // =================================================================================================
-
+namespace {
 template <typename T>
-[[nodiscard]] static T* AllocateAligned(size_t count, size_t alignment) {
+[[nodiscard]] auto AllocateAligned(size_t count, size_t alignment) -> T* {
     return static_cast<T*>(::operator new[](count * sizeof(T), std::align_val_t {alignment}));
 }
 
 template <typename T>
-static void DeallocateAligned(T* ptr, size_t alignment) {
+void DeallocateAligned(T* ptr, size_t alignment) {
     if (ptr) {
         ::operator delete[](ptr, std::align_val_t {alignment});
     }
 }
 
 template <typename T>
-static void ReallocateAligned(T*& ptr, size_t old_count, size_t new_count, size_t alignment) {
+void ReallocateAligned(T*& ptr, size_t old_count, size_t new_count, size_t alignment) {
     static_assert(std::is_trivially_copyable_v<T>);
     T* new_ptr = AllocateAligned<T>(new_count, alignment);
     if (ptr && old_count > 0) {
@@ -78,6 +78,7 @@ static void ReallocateAligned(T*& ptr, size_t old_count, size_t new_count, size_
     }
     ptr = new_ptr;
 }
+} // namespace
 
 // --- Jolt Boilerplate: Layers & Filters ---
 
@@ -89,16 +90,16 @@ class BPLayerInterfaceImpl final: public JPH::BroadPhaseLayerInterface {
         mObjectToBroadPhase[Layers::NON_MOVING] = JPH::BroadPhaseLayer(BroadPhaseLayers::NON_MOVING);
         mObjectToBroadPhase[Layers::MOVING]     = JPH::BroadPhaseLayer(BroadPhaseLayers::MOVING);
     }
-    [[nodiscard]] uint32_t GetNumBroadPhaseLayers() const override {
+    [[nodiscard]] auto GetNumBroadPhaseLayers() const -> uint32_t override {
         return BroadPhaseLayers::NUM_LAYERS;
     }
 
-    [[nodiscard]] JPH::BroadPhaseLayer GetBroadPhaseLayer(JPH::ObjectLayer inLayer) const override {
+    [[nodiscard]] auto GetBroadPhaseLayer(JPH::ObjectLayer inLayer) const -> JPH::BroadPhaseLayer override {
         return mObjectToBroadPhase[inLayer];
     }
 
 #if defined(JPH_EXTERNAL_PROFILE) || defined(JPH_PROFILE_ENABLED)
-    [[nodiscard]] const char* GetBroadPhaseLayerName(JPH::BroadPhaseLayer inLayer) const override {
+    [[nodiscard]] auto GetBroadPhaseLayerName(JPH::BroadPhaseLayer inLayer) const -> const char* override {
         switch (static_cast<BroadPhaseLayers::ID>(static_cast<uint8_t>(inLayer))) {
             case BroadPhaseLayers::NON_MOVING:
                 return "NON_MOVING";
@@ -113,7 +114,7 @@ class BPLayerInterfaceImpl final: public JPH::BroadPhaseLayerInterface {
 
 class ObjectVsBroadPhaseLayerFilterImpl: public JPH::ObjectVsBroadPhaseLayerFilter {
   public:
-    [[nodiscard]] bool ShouldCollide(JPH::ObjectLayer inLayer1, JPH::BroadPhaseLayer inLayer2) const override {
+    [[nodiscard]] auto ShouldCollide(JPH::ObjectLayer inLayer1, JPH::BroadPhaseLayer inLayer2) const -> bool override {
         switch (inLayer1) {
             case Layers::NON_MOVING:
                 return inLayer2 == JPH::BroadPhaseLayer(BroadPhaseLayers::MOVING);
@@ -127,7 +128,7 @@ class ObjectVsBroadPhaseLayerFilterImpl: public JPH::ObjectVsBroadPhaseLayerFilt
 
 class ObjectLayerPairFilterImpl: public JPH::ObjectLayerPairFilter {
   public:
-    [[nodiscard]] bool ShouldCollide(JPH::ObjectLayer inObject1, JPH::ObjectLayer inObject2) const override {
+    [[nodiscard]] auto ShouldCollide(JPH::ObjectLayer inObject1, JPH::ObjectLayer inObject2) const -> bool override {
         switch (inObject1) {
             case Layers::NON_MOVING:
                 return inObject2 == Layers::MOVING;
@@ -157,12 +158,12 @@ class JobSystemFiber final: public JPH::JobSystemWithBarrier {
 
     ~JobSystemFiber() override = default;
 
-    [[nodiscard]] int GetMaxConcurrency() const override {
+    [[nodiscard]] auto GetMaxConcurrency() const -> int override {
         return static_cast<int>(ZHLN::TaskSystem::GetWorkerCount());
     }
 
-    JPH::JobSystem::JobHandle
-        CreateJob(const char* inName, JPH::ColorArg inColor, const JPH::JobSystem::JobFunction& inJobFunction, JPH::uint32 inNumDependencies = 0) override {
+    auto CreateJob(const char* inName, JPH::ColorArg inColor, const JPH::JobSystem::JobFunction& inJobFunction, JPH::uint32 inNumDependencies = 0)
+        -> JPH::JobSystem::JobHandle override {
         JPH::uint32 index = mJobs.ConstructObject(inName, inColor, this, inJobFunction, inNumDependencies);
         if (index == JPH::FixedSizeFreeList<JPH::JobSystem::Job>::cInvalidObjectIndex) {
             ZHLN::Panic("Jolt: JobSystemFiber exceeded the maximum number of jobs!");
@@ -253,7 +254,7 @@ void PhysicsContext::Step(float deltaTime) {
 
     size_t capturedCount = 0;
 
-    ZHLN::Lock(world.sync.shadowLock, [&] {
+    ZHLN::Lock(world.sync.shadowLock, [&] -> void {
         capturedCount = world.commandCount;
         if (capturedCount > 0) {
             world.commandQueue.swap(world.commandQueueSpare);
@@ -270,9 +271,10 @@ void PhysicsContext::Step(float deltaTime) {
 
     _impl->physicsSystem.Update(deltaTime, 2, _impl->tempAllocator.get(), &_impl->jobSystem);
 
-    JPH::CharacterVirtual::ExtendedUpdateSettings updateSettings;
-    updateSettings.mWalkStairsStepUp     = JPH::Vec3(0.0f, 0.5f, 0.0f);
-    updateSettings.mStickToFloorStepDown = JPH::Vec3(0.0f, -0.5f, 0.0f);
+    const JPH::CharacterVirtual::ExtendedUpdateSettings updateSettings {
+        .mStickToFloorStepDown = JPH::Vec3(0.0f, -0.5f, 0.0f),
+        .mWalkStairsStepUp     = JPH::Vec3(0.0f, 0.5f, 0.0f),
+    };
 
     for (auto* character: _impl->activeCharacters) {
         character->ExtendedUpdate(
@@ -281,19 +283,19 @@ void PhysicsContext::Step(float deltaTime) {
         );
     }
 
-    ZHLN::Lock(world.sync.shadowLock, [&] { world.Synchronize(&_impl->physicsSystem, _impl->activeCharacters); });
+    ZHLN::Lock(world.sync.shadowLock, [&] -> void { world.Synchronize(&_impl->physicsSystem, _impl->activeCharacters); });
     world.isStepping.store(false, std::memory_order::release);
 }
 
-const Physics::PhysicsWorld& PhysicsContext::GetWorld() const {
+auto PhysicsContext::GetWorld() const -> const Physics::PhysicsWorld& {
     return _impl->world;
 }
 
-uint32_t PhysicsContext::GetActiveBodyCount() const {
+auto PhysicsContext::GetActiveBodyCount() const -> uint32_t {
     return _impl->physicsSystem.GetNumActiveBodies(JPH::EBodyType::RigidBody);
 }
 
-size_t PhysicsContext::GetMemoryUsage() const {
+auto PhysicsContext::GetMemoryUsage() const -> size_t {
     return _impl->tempAllocator->GetSize();
 }
 
@@ -301,7 +303,7 @@ void PhysicsContext::OptimizeBroadphase() {
     _impl->physicsSystem.OptimizeBroadPhase();
 }
 
-JPH::ShapeRefC PhysicsContext::GetOrCreateShape(Physics::ShapeType type, float p1, float p2, float p3, float p4) {
+auto PhysicsContext::GetOrCreateShape(Physics::ShapeType type, float p1, float p2, float p3, float p4) -> JPH::ShapeRefC {
     auto* impl = _impl.get();
 
     const float np1 = (p1 < 1e-3f && type != Physics::ShapeType::Plane) ? 1e-3f : p1;
@@ -315,49 +317,51 @@ JPH::ShapeRefC PhysicsContext::GetOrCreateShape(Physics::ShapeType type, float p
         }
     }
 
-    JPH::ShapeRefC shape;
+    // Lock section returns the created shape directly into a const variable
+    return ZHLN::Lock(impl->world.sync.shadowLock, [&]() -> JPH::ShapeRefC {
+        JPH::ShapeRefC newShape;
 
-    ZHLN::Lock(impl->world.sync.shadowLock, [&] {
         switch (type) {
             case Physics::ShapeType::Box: {
                 JPH::BoxShapeSettings s(JPH::Vec3(np1, np2, np3), 0.05f);
-                shape = s.Create().Get();
+                newShape = s.Create().Get();
                 break;
             }
             case Physics::ShapeType::Sphere: {
                 JPH::SphereShapeSettings s(np1);
-                shape = s.Create().Get();
+                newShape = s.Create().Get();
                 break;
             }
             case Physics::ShapeType::Capsule: {
                 JPH::CapsuleShapeSettings s(np1, np2);
-                shape = s.Create().Get();
+                newShape = s.Create().Get();
                 break;
             }
             case Physics::ShapeType::Cylinder: {
                 JPH::CylinderShapeSettings s(np1, np2, 0.05f);
-                shape = s.Create().Get();
+                newShape = s.Create().Get();
                 break;
             }
             case Physics::ShapeType::Plane: {
                 JPH::Plane              plane(JPH::Vec3(np1, np2, np3), np4);
                 JPH::PlaneShapeSettings s(plane, nullptr, 1000.0f);
-                shape = s.Create().Get();
+                newShape = s.Create().Get();
                 break;
             }
         }
 
-        if (shape == nullptr) {
+        if (newShape == nullptr) {
             ZHLN::Log("Failed to create Jolt Shape! Degenerate parameters?");
-            return;
+            return nullptr;
         }
 
-        impl->shapeCache.push_back({.key = ShapeKey {.type = static_cast<uint32_t>(type), .p1 = np1, .p2 = np2, .p3 = np3, .p4 = np4}, .shape = shape});
+        impl->shapeCache.push_back({.key = ShapeKey {.type = static_cast<uint32_t>(type), .p1 = np1, .p2 = np2, .p3 = np3, .p4 = np4}, .shape = newShape});
+
+        return newShape;
     });
-    return shape;
 }
 
-static Physics::MaterialData ResolveMaterial(const Physics::PhysicsWorld& world, uint32_t id) {
+static auto ResolveMaterial(const Physics::PhysicsWorld& world, uint32_t id) -> Physics::MaterialData {
     constexpr auto materialDefault = Physics::MaterialData {.id = 0, .friction = 0.2f, .restitution = 0.0f};
     if (id == 0) {
         return materialDefault;
@@ -371,7 +375,7 @@ static Physics::MaterialData ResolveMaterial(const Physics::PhysicsWorld& world,
     return materialDefault;
 }
 
-ZHLN::Entity PhysicsContext::CreateRigidBody(
+auto PhysicsContext::CreateRigidBody(
     const JPH::ShapeRefC& shape,
     JPH::RVec3Arg         pos,
     JPH::QuatArg          rot,
@@ -380,12 +384,12 @@ ZHLN::Entity PhysicsContext::CreateRigidBody(
     uint32_t              materialID,
     uint32_t              category,
     uint32_t              mask
-) {
+) -> ZHLN::Entity {
     auto&                 world = _impl->world;
     Physics::MaterialData mat {};
 
     ZHLN::Entity handle = world.AllocateHandle();
-    ZHLN::Lock(world.sync.shadowLock, [&] {
+    ZHLN::Lock(world.sync.shadowLock, [&] -> void {
         mat = ResolveMaterial(world, materialID);
         JPH::BodyCreationSettings settings(shape, pos, rot, motion, layer);
         settings.mUserData    = handle.Pack();
@@ -438,7 +442,7 @@ ZHLN::Entity PhysicsContext::CreateRigidBody(
 namespace Physics {
 
 // ADDED: Missing GetBodyID implementation that operates on the core struct
-JPH::BodyID GetBodyID(const PhysicsWorld& world, ZHLN::Entity handle) {
+auto GetBodyID(const PhysicsWorld& world, ZHLN::Entity handle) -> JPH::BodyID {
     if (handle.index >= world.slotCapacity) {
         return {};
     }
@@ -451,7 +455,7 @@ JPH::BodyID GetBodyID(const PhysicsWorld& world, ZHLN::Entity handle) {
     return world.bodyIDs[dense];
 }
 
-JPH::ShapeRefC CreateMeshShape(const VertexPosition* vertices, uint32_t vertexCount, const uint32_t* indices, uint32_t indexCount) {
+auto CreateMeshShape(const VertexPosition* vertices, uint32_t vertexCount, const uint32_t* indices, uint32_t indexCount) -> JPH::ShapeRefC {
     if (vertexCount < 3 || indexCount < 3 || (indexCount % 3) != 0) {
         return nullptr;
     }
@@ -485,7 +489,7 @@ JPH::ShapeRefC CreateMeshShape(const VertexPosition* vertices, uint32_t vertexCo
     return result.HasError() ? nullptr : result.Get();
 }
 
-JPH::ShapeRefC CreateHeightFieldShape(const float* heights, int sampleCount, float worldSize) {
+auto CreateHeightFieldShape(const float* heights, int sampleCount, float worldSize) -> JPH::ShapeRefC {
     JPH::HeightFieldShapeSettings settings;
     settings.mSampleCount = sampleCount;
     settings.mHeightSamples.resize(static_cast<size_t>(sampleCount) * sampleCount);
@@ -503,7 +507,7 @@ JPH::ShapeRefC CreateHeightFieldShape(const float* heights, int sampleCount, flo
 
 } // namespace Physics
 
-ZHLN::Entity PhysicsContext::CreateMeshBody(
+auto PhysicsContext::CreateMeshBody(
     const VertexPosition* vertices,
     uint32_t              vertexCount,
     const uint32_t*       indices,
@@ -512,7 +516,7 @@ ZHLN::Entity PhysicsContext::CreateMeshBody(
     JPH::QuatArg          rot,
     uint32_t              category,
     uint32_t              mask
-) {
+) -> ZHLN::Entity {
     JPH::ShapeRefC shape = Physics::CreateMeshShape(vertices, vertexCount, indices, indexCount);
     if (shape == nullptr) {
         return ZHLN::NullEntity;
@@ -520,14 +524,14 @@ ZHLN::Entity PhysicsContext::CreateMeshBody(
     return CreateRigidBody(shape, pos, rot, JPH::EMotionType::Static, Layers::NON_MOVING, 0, category, mask);
 }
 
-ZHLN::Entity PhysicsContext::CreateCharacter(JPH::RVec3Arg position, uint32_t category, uint32_t mask) {
+auto PhysicsContext::CreateCharacter(JPH::RVec3Arg position, uint32_t category, uint32_t mask) -> ZHLN::Entity {
     auto* impl  = _impl.get();
     auto& world = impl->world;
 
     JPH::ShapeRefC charShape = GetOrCreateShape(Physics::ShapeType::Capsule, 0.5f, 0.3f);
 
     ZHLN::Entity handle = world.AllocateHandle();
-    ZHLN::Lock(world.sync.shadowLock, [&] {
+    ZHLN::Lock(world.sync.shadowLock, [&] -> void {
         JPH::CharacterVirtualSettings settings;
         settings.mShape       = charShape;
         settings.mMaxStrength = 100.0f;
@@ -575,7 +579,7 @@ ZHLN::Entity PhysicsContext::CreateCharacter(JPH::RVec3Arg position, uint32_t ca
 
 void PhysicsContext::SetCollisionFilter(ZHLN::Entity handle, uint32_t category, uint32_t mask) {
     auto& world = _impl->world;
-    ZHLN::Lock(world.sync.shadowLock, [&] {
+    ZHLN::Lock(world.sync.shadowLock, [&] -> void {
         Physics::Command cmd {};
         cmd.type                                 = Physics::CommandType::SetCollisionFilter;
         cmd.setFilter.handle                     = handle;
@@ -585,7 +589,7 @@ void PhysicsContext::SetCollisionFilter(ZHLN::Entity handle, uint32_t category, 
     });
 }
 
-Physics::DebugDrawData PhysicsContext::GetDebugDrawData(bool drawShapes, bool drawConstraints, bool wireframe) const {
+auto PhysicsContext::GetDebugDrawData(bool drawShapes, bool drawConstraints, bool wireframe) const -> Physics::DebugDrawData {
     auto* impl = _impl.get();
 
     impl->debugRenderer->Clear();
@@ -637,7 +641,7 @@ void PhysicsContext::SetLinearVelocity(ZHLN::Entity handle, JPH::Vec3Arg velocit
     }
 }
 
-JPH::Vec3 PhysicsContext::GetCharacterVelocity(ZHLN::Entity handle) const {
+auto PhysicsContext::GetCharacterVelocity(ZHLN::Entity handle) const -> JPH::Vec3 {
     if (handle.index < _impl->characterMap.size()) {
         auto& character = _impl->characterMap[handle.index];
         if (character != nullptr) {
@@ -647,7 +651,7 @@ JPH::Vec3 PhysicsContext::GetCharacterVelocity(ZHLN::Entity handle) const {
     return JPH::Vec3::sZero();
 }
 
-bool PhysicsContext::IsCharacterOnGround(ZHLN::Entity handle) const {
+auto PhysicsContext::IsCharacterOnGround(ZHLN::Entity handle) const -> bool {
     if (handle.index < _impl->characterMap.size()) {
         auto& character = _impl->characterMap[handle.index];
         if (character != nullptr) {
@@ -657,7 +661,7 @@ bool PhysicsContext::IsCharacterOnGround(ZHLN::Entity handle) const {
     return false;
 }
 
-BufferView PhysicsContext::GetPositionBuffer() const {
+auto PhysicsContext::GetPositionBuffer() const -> BufferView {
     const auto& world = GetWorld();
     BufferView  view {};
     view.buf        = world.positions;
@@ -669,11 +673,11 @@ BufferView PhysicsContext::GetPositionBuffer() const {
     return view;
 }
 
-JPH::Quat PhysicsContext::GetRotation(JPH::BodyID bodyID) const {
+auto PhysicsContext::GetRotation(JPH::BodyID bodyID) const -> JPH::Quat {
     return _impl->world.bodyInterface->GetRotation(bodyID);
 }
 
-ZHLN::Entity PhysicsContext::GetEntityHandle(JPH::BodyID bodyID) const {
+auto PhysicsContext::GetEntityHandle(JPH::BodyID bodyID) const -> ZHLN::Entity {
     uint64_t rawData = _impl->world.bodyInterface->GetUserData(bodyID);
     return ZHLN::Entity::Unpack(rawData);
 }
@@ -698,7 +702,7 @@ void PhysicsContext::DestroyBody(ZHLN::Entity handle) {
 
     world.slotStates[slot].store(Physics::SLOT_PENDING_DESTROY, std::memory_order::release);
 
-    ZHLN::Lock(world.sync.shadowLock, [&] {
+    ZHLN::Lock(world.sync.shadowLock, [&] -> void {
         if (world.commandCount >= world.commandQueue.size()) {
             size_t newCap = world.commandQueue.size() == 0 ? 64 : world.commandQueue.size() * 2;
             world.commandQueue.resize(newCap);
@@ -710,7 +714,7 @@ void PhysicsContext::DestroyBody(ZHLN::Entity handle) {
 
 void PhysicsContext::RegisterMaterial(uint32_t id, float friction, float restitution) {
     auto& world = _impl->world;
-    ZHLN::Lock(world.sync.shadowLock, [&] {
+    ZHLN::Lock(world.sync.shadowLock, [&] -> void {
         for (size_t i = 0; i < world.materialCount; ++i) {
             if (world.materials[i].id == id) {
                 world.materials[i].friction    = friction;
@@ -744,7 +748,7 @@ void PhysicsContext::AddImpulse(ZHLN::Entity handle, JPH::Vec3Arg impulse, JPH::
     }
 }
 
-std::pair<const Physics::ContactEvent*, size_t> PhysicsContext::GetContactEvents() const {
+auto PhysicsContext::GetContactEvents() const -> std::pair<const Physics::ContactEvent*, size_t> {
     const auto& world = _impl->world;
 
     // Clamp the count to capacity in case the buffer overflowed
@@ -754,19 +758,19 @@ std::pair<const Physics::ContactEvent*, size_t> PhysicsContext::GetContactEvents
     return {world.contactBuffer.data(), count};
 }
 
-JPH::PhysicsSystem& PhysicsContext::GetInternalSystem() noexcept {
+auto PhysicsContext::GetInternalSystem() noexcept -> JPH::PhysicsSystem& {
     return _impl->physicsSystem;
 }
 
-const JPH::PhysicsSystem& PhysicsContext::GetInternalSystem() const noexcept {
+auto PhysicsContext::GetInternalSystem() const noexcept -> const JPH::PhysicsSystem& {
     return _impl->physicsSystem;
 }
 
-Physics::PhysicsWorld& PhysicsContext::GetInternalWorld() noexcept {
+auto PhysicsContext::GetInternalWorld() noexcept -> Physics::PhysicsWorld& {
     return _impl->world;
 }
 
-const Physics::PhysicsWorld& PhysicsContext::GetInternalWorld() const noexcept {
+auto PhysicsContext::GetInternalWorld() const noexcept -> const Physics::PhysicsWorld& {
     return _impl->world;
 }
 

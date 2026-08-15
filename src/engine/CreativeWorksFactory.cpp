@@ -34,7 +34,7 @@
 
 namespace ZHLN::CreativeWorksFactory {
 
-static std::string FindSystemFont(const char* fontName) {
+static auto FindSystemFont(const char* fontName) -> std::string {
 #ifdef __APPLE__
     const char* macFallbacks[] = {
         "/System/Library/Fonts/Supplemental/Arial.ttf", "/System/Library/Fonts/Supplemental/Helvetica.ttf", "/System/Library/Fonts/Supplemental/Verdana.ttf",
@@ -69,7 +69,7 @@ static std::string FindSystemFont(const char* fontName) {
     return fontPath;
 }
 
-TextureHandle CreateFontAtlasTexture(RenderContext& ctx) {
+auto CreateFontAtlasTexture(RenderContext& ctx) -> TextureHandle {
     std::string fontPath = FindSystemFont("sans-serif");
     if (fontPath.empty()) {
         fontPath = "/usr/share/fonts/TTF/DejaVuSans.ttf";
@@ -188,7 +188,7 @@ TextureHandle CreateFontAtlasTexture(RenderContext& ctx) {
     return texHandle;
 }
 
-uint32_t LoadTexture(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view path, bool isSRGB) {
+auto LoadTexture(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view path, bool isSRGB) -> uint32_t {
     uint64_t hash = HashCreativeWorkPath(path);
 
     CreativeWorkLoadRequest req;
@@ -217,13 +217,13 @@ uint32_t LoadTexture(RenderContext& ctx, CreativeWorksManager& assetMgr, std::st
     return texRes ? *texRes : 1;
 }
 
-ModelPrefab* LoadModelPrefab(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view path) {
+auto LoadModelPrefab(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view path) -> ModelPrefab* {
     return GLTF::LoadGLBPrefab(ctx, assetMgr, path);
 }
 
 namespace {
 
-Entity SpawnPrefabRoot(ECS::Registry& reg, std::string_view vPath, const SpawnParams& p) {
+auto SpawnPrefabRoot(ECS::Registry& reg, std::string_view vPath, const SpawnParams& p) -> Entity {
     Entity     root     = reg.Create();
     JPH::Mat44 localMat = Math::CreateTransform(JPH::Vec3(p.position), p.rotation, p.scale);
     reg.Add(root, Components::TransformComponent {.position = JPH::Vec3(p.position), .rotation = p.rotation, .scale = p.scale});
@@ -232,7 +232,7 @@ Entity SpawnPrefabRoot(ECS::Registry& reg, std::string_view vPath, const SpawnPa
     return root;
 }
 
-JPH::Mat44 GetNodeLogicalTransform(const ModelPrefab& prefab, int32_t nodeIndex) {
+auto GetNodeLogicalTransform(const ModelPrefab& prefab, int32_t nodeIndex) -> JPH::Mat44 {
     JPH::Mat44 matrix    = prefab.nodes[nodeIndex].localTransform;
     int32_t    parentIdx = prefab.nodes[nodeIndex].parentIndex;
 
@@ -260,7 +260,7 @@ void PreparePrefabPhysics(
 ) {
     outPrepared.resize(prefab.parts.size());
 
-    TaskSystem::ParallelFor(prefab.parts.size(), 16, [&](uint32_t start, uint32_t end, uint32_t) {
+    TaskSystem::ParallelFor(prefab.parts.size(), 16, [&](uint32_t start, uint32_t end, uint32_t) -> void {
         for (uint32_t i = start; i < end; ++i) {
             const auto& part = prefab.parts[i];
             auto&       prep = outPrepared[i];
@@ -295,7 +295,7 @@ void PreparePrefabPhysics(
     });
 }
 
-Entity InstantiateMeshPart(
+auto InstantiateMeshPart(
     RenderContext&                         ctx,
     ECS::Registry&                         reg,
     PhysicsContext&                        pc,
@@ -305,7 +305,7 @@ Entity InstantiateMeshPart(
     const SpawnParams&                     params,
     Entity                                 rootEntity,
     std::unordered_map<int32_t, uint32_t>& allocatedSkeletons
-) {
+) -> Entity {
     const JPH::Mat44 baseTransform = Math::CreateTransform(JPH::Vec3(params.position), params.rotation, params.scale); // <-- ADDED HERE
 
     AssetID    meshAsset = part.meshAsset;
@@ -428,7 +428,7 @@ Entity InstantiateMeshPart(
     return e;
 }
 
-Entity TrySpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, const JPH::Mat44& baseTransform, float scaleMult) {
+auto TrySpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, const JPH::Mat44& baseTransform, float scaleMult) -> Entity {
     const float* ef  = part.defaultMaterial.emissiveFactor;
     float        lum = ef[0] * 0.2126f + ef[1] * 0.7152f + ef[2] * 0.0722f;
     if (lum <= 0.01f) {
@@ -464,7 +464,7 @@ Entity TrySpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, const JPH:
 
 } // namespace
 
-Entity CreateBox(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, JPH::Vec3Arg halfExtents, const SpawnParams& params) {
+auto CreateBox(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, JPH::Vec3Arg halfExtents, const SpawnParams& params) -> Entity {
     JPH::Vec4 boxColor = (params.materialOverride.baseColorFactor[3] >= 0.0f) ?
                              JPH::Vec4(
                                  params.materialOverride.baseColorFactor[0], params.materialOverride.baseColorFactor[1],
@@ -532,11 +532,11 @@ Entity CreateBox(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, JPH
     return e;
 }
 
-Entity CreateBox(Engine& engine, JPH::Vec3Arg halfExtents, const SpawnParams& params) {
+auto CreateBox(Engine& engine, JPH::Vec3Arg halfExtents, const SpawnParams& params) -> Entity {
     return CreateBox(engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), halfExtents, params);
 }
 
-Entity CreatePlane(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, float extent, const JPH::Vec4& color, const SpawnParams& params) {
+auto CreatePlane(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, float extent, const JPH::Vec4& color, const SpawnParams& params) -> Entity {
     Mesh mesh = CreatePlaneMesh(ctx, extent, color);
 
     Material mat;
@@ -579,11 +579,11 @@ Entity CreatePlane(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, f
     return e;
 }
 
-Entity CreatePlane(Engine& engine, float extent, const JPH::Vec4& color, const SpawnParams& params) {
+auto CreatePlane(Engine& engine, float extent, const JPH::Vec4& color, const SpawnParams& params) -> Entity {
     return CreatePlane(engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), extent, color, params);
 }
 
-uint32_t InstantiatePrefab(
+auto InstantiatePrefab(
     RenderContext&     ctx,
     ECS::Registry&     reg,
     PhysicsContext&    pc,
@@ -591,7 +591,7 @@ uint32_t InstantiatePrefab(
     const SpawnParams& params,
     Entity*            outBuffer,
     uint32_t           maxCount
-) {
+) -> uint32_t {
     uint32_t spawnedCount = 0;
     Entity   rootEntity   = NullEntity;
     uint32_t startIndex   = 0;
@@ -651,7 +651,7 @@ uint32_t InstantiatePrefab(
                     if (opIt != instantiatedParts.end()) {
                         csgComp.modifiers.push_back({.operation = mod.operation, .operandEntity = opIt->second});
 
-                        Patch<Components::MeshComponent>(reg, opIt->second, [&](auto& cutMesh) { cutMesh.flags |= DrawFlags::Hidden; });
+                        Patch<Components::MeshComponent>(reg, opIt->second, [&](auto& cutMesh) -> auto { cutMesh.flags |= DrawFlags::Hidden; });
                     }
                 }
 
@@ -671,7 +671,7 @@ void SetupPlayerRagdoll(PhysicsContext& pc, ECS::Registry& reg, Entity playerEnt
 
     bool skeletonFound = false;
     for (Entity part: visualParts) {
-        Patch<Components::SkeletalMeshComponent>(reg, part, [&](auto& skelMesh) {
+        Patch<Components::SkeletalMeshComponent>(reg, part, [&](auto& skelMesh) -> auto {
             auto*  hier       = reg.Get<Components::HierarchyComponent>(part);
             Entity parentRoot = (hier != nullptr) ? hier->parent : NullEntity;
             if (parentRoot != NullEntity) {
@@ -793,7 +793,7 @@ void RebuildVulkanResources(RenderContext& ctx, CreativeWorksManager& cwMgr, ECS
     }
 }
 
-Entity CreateTerrainFromData(
+auto CreateTerrainFromData(
     RenderContext&     ctx,
     ECS::Registry&     reg,
     PhysicsContext*    pc,
@@ -802,7 +802,7 @@ Entity CreateTerrainFromData(
     const float*       heights,
     const float*       colorsRGBA,
     const SpawnParams& params
-) {
+) -> Entity {
     Entity e = reg.Create();
 
     Mesh mesh = CreateTerrainMeshFromData(ctx, sampleCount, worldSize, heights, colorsRGBA);
@@ -860,13 +860,14 @@ Entity CreateTerrainFromData(
     return e;
 }
 
-Entity CreateTerrainFromData(Engine& engine, int sampleCount, float worldSize, const float* heights, const float* colorsRGBA, const SpawnParams& params) {
+auto CreateTerrainFromData(Engine& engine, int sampleCount, float worldSize, const float* heights, const float* colorsRGBA, const SpawnParams& params)
+    -> Entity {
     return CreateTerrainFromData(
         engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), sampleCount, worldSize, heights, colorsRGBA, params
     );
 }
 
-Entity CreateTerrain(
+auto CreateTerrain(
     RenderContext&     ctx,
     ECS::Registry&     reg,
     PhysicsContext*    pc,
@@ -875,7 +876,7 @@ Entity CreateTerrain(
     float              maxHeight,
     TerrainType        type,
     const SpawnParams& params
-) {
+) -> Entity {
     Entity e = reg.Create();
 
     TerrainData tData {.sampleCount = static_cast<uint32_t>(sampleCount), .worldSize = worldSize, .maxHeight = maxHeight, .heights = {}, .colors = {}};
@@ -931,20 +932,39 @@ Entity CreateTerrain(
     return e;
 }
 
-Entity CreateTerrain(Engine& engine, int sampleCount, float worldSize, float maxHeight, TerrainType type, const SpawnParams& params) {
+auto CreateTerrain(Engine& engine, int sampleCount, float worldSize, float maxHeight, TerrainType type, const SpawnParams& params) -> Entity {
     return CreateTerrain(engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), sampleCount, worldSize, maxHeight, type, params);
 }
 
-ModelPrefab* LoadModelPrefab(Engine& engine, std::string_view path) {
+auto LoadModelPrefab(Engine& engine, std::string_view path) -> ModelPrefab* {
     return LoadModelPrefab(engine.GetRenderContext(), engine.GetCreativeWorksManager(), path);
 }
 
-uint32_t InstantiatePrefab(Engine& engine, const ModelPrefab& prefab, const SpawnParams& params, Entity* outBuffer, uint32_t maxCount) {
+auto InstantiatePrefab(Engine& engine, const ModelPrefab& prefab, const SpawnParams& params, Entity* outBuffer, uint32_t maxCount) -> uint32_t {
     return InstantiatePrefab(engine.GetRenderContext(), engine.GetRegistry(), engine.GetPhysicsContext(), prefab, params, outBuffer, maxCount);
 }
 
-uint32_t InstantiatePrefab(Engine& engine, std::string_view path, const SpawnParams& params, Entity* outBuffer, uint32_t maxCount) {
+auto InstantiatePrefab(Engine& engine, std::string_view path, const SpawnParams& params, Entity* outBuffer, uint32_t maxCount) -> uint32_t {
     ModelPrefab* prefab = LoadModelPrefab(engine, path);
+    if (prefab == nullptr) {
+        return 0;
+    }
+    return InstantiatePrefab(engine, *prefab, params, outBuffer, maxCount);
+}
+
+auto LoadModelPrefabFromMemory(Engine& engine, std::span<const uint8_t> bytes, std::string_view virtualPath) -> ModelPrefab* {
+    return GLTF::LoadGLBPrefabFromMemory(engine.GetRenderContext(), engine.GetCreativeWorksManager(), bytes, virtualPath);
+}
+
+auto InstantiatePrefabFromMemory(
+    Engine&                  engine,
+    std::span<const uint8_t> bytes,
+    std::string_view         virtualPath,
+    const SpawnParams&       params,
+    Entity*                  outBuffer,
+    uint32_t                 maxCount
+) -> uint32_t {
+    const auto* prefab = LoadModelPrefabFromMemory(engine, bytes, virtualPath);
     if (prefab == nullptr) {
         return 0;
     }

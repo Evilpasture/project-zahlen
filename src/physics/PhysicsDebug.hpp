@@ -28,7 +28,7 @@ class PhysicsDebugRenderer final: public JPH::DebugRendererSimple {
     PhysicsDebugRenderer() {
         Initialize();
     }
-    virtual ~PhysicsDebugRenderer() override = default;
+    ~PhysicsDebugRenderer() override = default;
 
     void DrawLine(JPH::RVec3Arg inFrom, JPH::RVec3Arg inTo, JPH::ColorArg inColor) override;
     void DrawTriangle(JPH::RVec3Arg inV1, JPH::RVec3Arg inV2, JPH::RVec3Arg inV3, JPH::ColorArg inColor, ECastShadow inCastShadow) override;

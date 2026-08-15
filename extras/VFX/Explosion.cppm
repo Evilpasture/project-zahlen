@@ -22,6 +22,7 @@ module;
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/physics/Physics.hpp>
+#include <physics/PhysicsWorld.hpp>
 
 // Standard Library Headers
 #include <algorithm>
@@ -356,17 +357,17 @@ export struct CraterDecalComponent {
 export class ExplosionSystem {
   public:
     static void Init(Engine& engine) {
-        if (s_Init) {
-            return;
-        }
-        s_Init = true;
-
         auto& rc  = engine.GetRenderContext();
         auto& reg = engine.GetRegistry();
 
-        // Register ECS components
+        // Register ECS components for the current registry instance
         reg.RegisterComponent<ExplosionComponent>("ExplosionComponent");
         reg.RegisterComponent<CraterDecalComponent>("CraterDecalComponent");
+
+        if (s_LastRenderContext == &rc) {
+            return;
+        }
+        s_LastRenderContext = &rc;
 
         // Register procedural textures into TextureManager
         s_FireTexHandle         = rc.CreateProceduralTexture("vfx_artillery_fire", 256, 256, true, GenerateFireTexture(256).data());
@@ -397,7 +398,6 @@ export class ExplosionSystem {
 
     static Entity Spawn(Engine& engine, const JPH::Vec3& origin, float scale = 1.0f, OrdnanceType type = OrdnanceType::ArtilleryMortar) {
         auto& reg = engine.GetRegistry();
-        auto& ecb = engine.GetMainECB();
         Init(engine);
 
         ExplosionComponent initialExp {.type = type, .origin = origin, .scale = scale, .duration = (type == OrdnanceType::ArtilleryMortar) ? 3.5f : 2.5f};
@@ -418,8 +418,8 @@ export class ExplosionSystem {
         JPH::Vec3  lightWorldPos = origin + JPH::Vec3(0.0f, 1.8f * scale, 0.0f);
         JPH::Mat44 rootTransform = Math::CreateTransform(lightWorldPos, JPH::Quat::sIdentity());
 
-        // ATTACH LightComponent DIRECTLY TO ROOT (Guarantees atomic cleanup when root expires!)
-        ecb.AddComponent(
+        // Attach synchronously to root entity
+        reg.Add(
             root, Components::NameComponent {.name = String64("ArtilleryExplosionRoot")}, Components::TransformComponent {.position = lightWorldPos},
             Components::WorldTransformComponent {.world = rootTransform, .previous = rootTransform},
             Components::LightComponent {
@@ -434,7 +434,7 @@ export class ExplosionSystem {
         );
 
         if (debrisEntity != NullEntity) {
-            ecb.AddComponent(
+            reg.Add(
                 debrisEntity, Components::NameComponent {.name = String64("Artillery3DDebris")}, Components::TransformComponent {.position = origin},
                 Components::MeshParticleEmitterComponent {
                     .meshAsset     = s_DebrisMeshAsset,
@@ -473,9 +473,7 @@ export class ExplosionSystem {
     }
 
     static void Update(Engine& engine, float dt) {
-        if (!s_Init) {
-            return;
-        }
+        Init(engine);
 
         auto& reg = engine.GetRegistry();
         auto& ecb = engine.GetMainECB();
@@ -485,70 +483,72 @@ export class ExplosionSystem {
         // 1. UPDATE ACTIVE EXPLOSIONS (Fireball, Flash, Shockwaves)
         // --------------------------------------------------------------------
         auto expEntities = reg.GetEntitiesWith<ExplosionComponent>();
-        auto explosions  = reg.GetRawArray<ExplosionComponent>();
+        if (!expEntities.empty()) {
+            auto explosions = reg.GetRawArray<ExplosionComponent>();
 
-        for (size_t i = 0; i < expEntities.size(); ++i) {
-            Entity              e   = expEntities[i];
-            ExplosionComponent& exp = explosions[i];
-            exp.age += dt;
+            for (size_t i = 0; i < expEntities.size(); ++i) {
+                Entity              e   = expEntities[i];
+                ExplosionComponent& exp = explosions[i];
+                exp.age += dt;
 
-            // Flash Decay on Root Entity (Fades sharply to true 0 within ~0.6s)
-            ECS::Patch<Components::LightComponent>(reg, e, [&](auto& light) {
-                float flashT = std::exp(-exp.age * 5.5f);
-                if (flashT < 0.002f) {
-                    light.intensity = 0.0f; // Drop to pitch black so zero light lingers in fog
-                } else {
-                    float flicker   = (0.92f + Hash31(exp.origin * exp.age) * 0.16f);
-                    light.intensity = flashT * flicker * 2800.0f * exp.scale * exp.scale;
-                    light.color     = JPH::Vec3(1.0f, 0.48f * flashT + 0.1f, 0.09f * flashT);
-                }
-            });
-
-            // Spawn autonomous crater decal
-            if (!exp.craterSpawned && exp.age >= 0.20f && exp.type == OrdnanceType::ArtilleryMortar) {
-                exp.craterSpawned = true;
-                Entity crater     = reg.Create();
-
-                float     randomYaw = Hash31(exp.origin) * 6.2831853f;
-                JPH::Quat yawRot    = JPH::Quat::sRotation(JPH::Vec3::sAxisY(), randomYaw);
-                JPH::Quat baseRot   = JPH::Quat::sRotation(JPH::Vec3::sAxisX(), JPH::DegreesToRadians(-90.0f));
-                JPH::Quat decalRot  = (yawRot * baseRot).Normalized();
-
-                float     radius    = 3.4f * exp.scale;
-                float     projDepth = 5.0f * exp.scale;
-                JPH::Vec3 decalScale(radius * 2.0f, radius * 2.0f, projDepth);
-
-                JPH::Mat44 localMat = Math::CreateTransform(exp.origin, decalRot, decalScale);
-
-                // Autonomous entity with CraterDecalComponent
-                ecb.AddComponent(
-                    crater, Components::NameComponent {.name = String64("ArtilleryCraterDecal")},
-                    Components::TransformComponent {.position = exp.origin, .rotation = decalRot, .scale = decalScale},
-                    Components::WorldTransformComponent {.world = localMat, .previous = localMat},
-                    Components::DecalComponent {.albedoMap = s_CraterTexHandle, .normalMap = s_CraterNormalTexHandle, .roughness = 0.96f, .metallic = 0.0f},
-                    CraterDecalComponent {
-                        .age          = 0.0f,
-                        .lifetime     = 28.0f,
-                        .fadeDuration = 6.0f,
-                        .baseRadius   = radius,
-                        .baseDepth    = projDepth,
-                        .origin       = exp.origin,
-                        .rotation     = decalRot
+                // Flash Decay on Root Entity (Fades sharply to true 0 within ~0.6s)
+                ECS::Patch<Components::LightComponent>(reg, e, [&](auto& light) {
+                    float flashT = std::exp(-exp.age * 5.5f);
+                    if (flashT < 0.002f) {
+                        light.intensity = 0.0f; // Drop to pitch black so zero light lingers in fog
+                    } else {
+                        float flicker   = (0.92f + Hash31(exp.origin * exp.age) * 0.16f);
+                        light.intensity = flashT * flicker * 2800.0f * exp.scale * exp.scale;
+                        light.color     = JPH::Vec3(1.0f, 0.48f * flashT + 0.1f, 0.09f * flashT);
                     }
-                );
-            }
+                });
 
-            // Update Particle Emitters
-            UpdateGroup(exp.fireball, dt, false);
-            UpdateGroup(exp.soilSmoke, dt, true);
-            RenderBatchGPU(rc, e, exp);
+                // Spawn autonomous crater decal
+                if (!exp.craterSpawned && exp.age >= 0.20f && exp.type == OrdnanceType::ArtilleryMortar) {
+                    exp.craterSpawned = true;
+                    Entity crater     = reg.Create();
 
-            // Clean up explosion particle root and children when particles finish
-            if (exp.age > exp.duration) {
-                if (exp.debrisEntity != NullEntity) {
-                    ecb.DestroyEntity(exp.debrisEntity);
+                    float     randomYaw = Hash31(exp.origin) * 6.2831853f;
+                    JPH::Quat yawRot    = JPH::Quat::sRotation(JPH::Vec3::sAxisY(), randomYaw);
+                    JPH::Quat baseRot   = JPH::Quat::sRotation(JPH::Vec3::sAxisX(), JPH::DegreesToRadians(-90.0f));
+                    JPH::Quat decalRot  = (yawRot * baseRot).Normalized();
+
+                    float     radius    = 3.4f * exp.scale;
+                    float     projDepth = 5.0f * exp.scale;
+                    JPH::Vec3 decalScale(radius * 2.0f, radius * 2.0f, projDepth);
+
+                    JPH::Mat44 localMat = Math::CreateTransform(exp.origin, decalRot, decalScale);
+
+                    // Autonomous entity with CraterDecalComponent
+                    ecb.AddComponent(
+                        crater, Components::NameComponent {.name = String64("ArtilleryCraterDecal")},
+                        Components::TransformComponent {.position = exp.origin, .rotation = decalRot, .scale = decalScale},
+                        Components::WorldTransformComponent {.world = localMat, .previous = localMat},
+                        Components::DecalComponent {.albedoMap = s_CraterTexHandle, .normalMap = s_CraterNormalTexHandle, .roughness = 0.96f, .metallic = 0.0f},
+                        CraterDecalComponent {
+                            .age          = 0.0f,
+                            .lifetime     = 28.0f,
+                            .fadeDuration = 6.0f,
+                            .baseRadius   = radius,
+                            .baseDepth    = projDepth,
+                            .origin       = exp.origin,
+                            .rotation     = decalRot
+                        }
+                    );
                 }
-                ecb.DestroyEntity(e); // Atomically destroys root and its LightComponent
+
+                // Update Particle Emitters
+                UpdateGroup(exp.fireball, dt, false);
+                UpdateGroup(exp.soilSmoke, dt, true);
+                RenderBatchGPU(rc, e, exp);
+
+                // Clean up explosion particle root and children when particles finish
+                if (exp.age > exp.duration) {
+                    if (exp.debrisEntity != NullEntity) {
+                        ecb.DestroyEntity(exp.debrisEntity);
+                    }
+                    ecb.DestroyEntity(e); // Atomically destroys root and its LightComponent
+                }
             }
         }
 
@@ -556,59 +556,68 @@ export class ExplosionSystem {
         // 2. UPDATE PERSISTENT CRATER DECALS (Long-lived & Smooth Fade)
         // --------------------------------------------------------------------
         auto craterEntities = reg.GetEntitiesWith<CraterDecalComponent>();
-        auto craters        = reg.GetRawArray<CraterDecalComponent>();
+        if (!craterEntities.empty()) {
+            auto craters = reg.GetRawArray<CraterDecalComponent>();
 
-        for (size_t i = 0; i < craterEntities.size(); ++i) {
-            Entity                craterEnt = craterEntities[i];
-            CraterDecalComponent& crater    = craters[i];
-            crater.age += dt;
+            for (size_t i = 0; i < craterEntities.size(); ++i) {
+                Entity                craterEnt = craterEntities[i];
+                CraterDecalComponent& crater    = craters[i];
+                crater.age += dt;
 
-            // Handle smooth dissolution over the final fadeDuration seconds
-            if (crater.age >= (crater.lifetime - crater.fadeDuration)) {
-                float remaining = std::max(0.0f, crater.lifetime - crater.age);
-                float fadeRatio = remaining / crater.fadeDuration; // 1.0 -> 0.0
+                // Handle smooth dissolution over the final fadeDuration seconds
+                if (crater.age >= (crater.lifetime - crater.fadeDuration)) {
+                    float remaining = std::max(0.0f, crater.lifetime - crater.age);
+                    float fadeRatio = remaining / crater.fadeDuration; // 1.0 -> 0.0
 
-                float ease          = std::pow(fadeRatio, 0.75f);
-                float currentRadius = crater.baseRadius * ease;
-                float currentDepth  = crater.baseDepth * ease;
+                    float ease          = std::pow(fadeRatio, 0.75f);
+                    float currentRadius = crater.baseRadius * ease;
+                    float currentDepth  = crater.baseDepth * ease;
 
-                JPH::Vec3 newScale(currentRadius * 2.0f, currentRadius * 2.0f, currentDepth);
+                    JPH::Vec3 newScale(currentRadius * 2.0f, currentRadius * 2.0f, currentDepth);
 
-                ECS::Patch<Components::TransformComponent>(reg, craterEnt, [&](auto& trans) { trans.scale = newScale; });
-                ECS::Patch<Components::WorldTransformComponent>(reg, craterEnt, [&](auto& wt) {
-                    wt.world = Math::CreateTransform(crater.origin, crater.rotation, newScale);
-                });
-            }
+                    ECS::Patch<Components::TransformComponent>(reg, craterEnt, [&](auto& trans) { trans.scale = newScale; });
+                    ECS::Patch<Components::WorldTransformComponent>(reg, craterEnt, [&](auto& wt) {
+                        wt.world = Math::CreateTransform(crater.origin, crater.rotation, newScale);
+                    });
+                }
 
-            if (crater.age >= crater.lifetime) {
-                ecb.DestroyEntity(craterEnt);
+                if (crater.age >= crater.lifetime) {
+                    ecb.DestroyEntity(craterEnt);
+                }
             }
         }
     }
 
   private:
     static void ApplyPhysicalBlastImpulse(Engine& engine, JPH::Vec3Arg center, float radius, float maxImpulse) {
-        auto&                    reg = engine.GetRegistry();
-        auto&                    pc  = engine.GetPhysicsContext();
+        auto&                    pc    = engine.GetPhysicsContext();
+        const auto&              world = pc.GetWorld();
         JPH::Array<ZHLN::Entity> overlapped;
         pc.OverlapSphere(JPH::RVec3(center), radius, overlapped);
 
-        for (Entity e: overlapped) {
-            if (!reg.IsAlive(e)) {
+        for (Entity physHandle: overlapped) {
+            if (physHandle.index >= world.slotCapacity) {
+                continue;
+            }
+            if (world.generations[physHandle.index].load(std::memory_order::acquire) != physHandle.generation) {
                 continue;
             }
 
-            ECS::Patch<Components::TransformComponent>(reg, e, [&](const auto& trans) {
-                JPH::Vec3 diff    = trans.position - center;
-                float     dist    = diff.Length();
-                float     falloff = 1.0f - std::clamp(dist / radius, 0.0f, 1.0f);
+            uint32_t  dense = world.slotToDense[physHandle.index];
+            JPH::Vec3 bodyPos(
+                static_cast<float>(world.positions[dense * 4 + 0]), static_cast<float>(world.positions[dense * 4 + 1]),
+                static_cast<float>(world.positions[dense * 4 + 2])
+            );
 
-                if (dist > 1e-4f && falloff > 0.01f) {
-                    JPH::Vec3 impulseDir = (diff / dist) + JPH::Vec3(0.0f, 0.35f, 0.0f);
-                    JPH::Vec3 impulse    = impulseDir.Normalized() * (maxImpulse * falloff * falloff);
-                    pc.AddImpulse(e, impulse);
-                }
-            });
+            JPH::Vec3 diff    = bodyPos - center;
+            float     dist    = diff.Length();
+            float     falloff = 1.0f - std::clamp(dist / radius, 0.0f, 1.0f);
+
+            if (dist > 1e-4f && falloff > 0.01f) {
+                JPH::Vec3 impulseDir = (diff / dist) + JPH::Vec3(0.0f, 0.35f, 0.0f);
+                JPH::Vec3 impulse    = impulseDir.Normalized() * (maxImpulse * falloff * falloff);
+                pc.AddImpulse(physHandle, impulse);
+            }
         }
     }
 
@@ -881,7 +890,7 @@ export class ExplosionSystem {
         }
     }
 
-    inline static bool s_Init = false;
+    inline static RenderContext* s_LastRenderContext = nullptr;
 
     // Type-safe registered Texture Handles
     inline static TextureHandle s_FireTexHandle         = TextureHandle::Invalid;

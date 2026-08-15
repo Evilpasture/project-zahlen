@@ -767,14 +767,17 @@ zahlen_enable_reflection(zahlen_gltf)
 zahlen_enable_reflection(zahlen)
 zahlen_enable_reflection(zcook)
 
+option(ZHLN_BUILD_EXTRAS "Build first-party engine feature modules and VFX toolkits" ON)
+
+if(ZHLN_BUILD_EXTRAS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extras")
+    add_subdirectory(extras)
+endif()
+
 # --- TESTS ---
 if(ZHLN_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
 
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extras")
-    add_subdirectory(extras)
-endif()
 
 target_link_libraries(zahlen_engine PRIVATE zahlen_warnings)

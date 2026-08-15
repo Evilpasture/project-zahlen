@@ -1,8 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/physics/Physics.hpp>
 #include "PhysicsWorld.hpp"
+#include <Zahlen/physics/Physics.hpp>
 
 namespace ZHLN::Physics {
 
@@ -11,7 +11,8 @@ class ContactListener final: public JPH::ContactListener {
     explicit ContactListener(PhysicsWorld* world): _world(world) {
     }
 
-    JPH::ValidateResult OnContactValidate(const JPH::Body& b1, const JPH::Body& b2, JPH::RVec3Arg, const JPH::CollideShapeResult&) override {
+    auto OnContactValidate(const JPH::Body& b1, const JPH::Body& b2, JPH::RVec3Arg /*inBaseOffset*/, const JPH::CollideShapeResult& /*inCollisionResult*/)
+        -> JPH::ValidateResult override {
         uint32_t d1 = GetDense(b1.GetID());
         uint32_t d2 = GetDense(b2.GetID());
         if (d1 == 0xFFFFFFFF || d2 == 0xFFFFFFFF) {
@@ -24,11 +25,11 @@ class ContactListener final: public JPH::ContactListener {
         return JPH::ValidateResult::AcceptAllContactsForThisBodyPair;
     }
 
-    void OnContactAdded(const JPH::Body& b1, const JPH::Body& b2, const JPH::ContactManifold& m, JPH::ContactSettings&) override {
+    void OnContactAdded(const JPH::Body& b1, const JPH::Body& b2, const JPH::ContactManifold& m, JPH::ContactSettings& /*ioSettings*/) override {
         Record(ContactType::Added, b1, b2, m);
     }
 
-    void OnContactPersisted(const JPH::Body& b1, const JPH::Body& b2, const JPH::ContactManifold& m, JPH::ContactSettings&) override {
+    void OnContactPersisted(const JPH::Body& b1, const JPH::Body& b2, const JPH::ContactManifold& m, JPH::ContactSettings& /*ioSettings*/) override {
         Record(ContactType::Persisted, b1, b2, m);
     }
 
@@ -46,13 +47,13 @@ class ContactListener final: public JPH::ContactListener {
   private:
     PhysicsWorld* _world;
 
-    uint32_t GetDense(JPH::BodyID id) {
+    auto GetDense(JPH::BodyID id) -> uint32_t {
         uint32_t     j_idx = id.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
         ZHLN::Entity h     = ZHLN::Entity::Unpack(_world->idToHandleMap[j_idx].load(std::memory_order::relaxed));
         return (h.index < _world->slotCapacity) ? _world->slotToDense[h.index] : 0xFFFFFFFF;
     }
 
-    ZHLN::Entity GetHandle(JPH::BodyID id) {
+    auto GetHandle(JPH::BodyID id) -> ZHLN::Entity {
         uint32_t j_idx = id.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
         return ZHLN::Entity::Unpack(_world->idToHandleMap[j_idx].load(std::memory_order::relaxed));
     }
@@ -107,19 +108,23 @@ class CharacterListener final: public JPH::CharacterContactListener {
     explicit CharacterListener(PhysicsWorld* world): _world(world) {
     }
 
-    bool OnContactValidate(const JPH::CharacterVirtual* inChar, const JPH::CharacterContact& inContact) override {
+    auto OnContactValidate(const JPH::CharacterVirtual* inChar, const JPH::CharacterContact& inContact) -> bool override {
         return Filter(inChar->GetUserData(), inContact.mBodyB);
     }
 
-    bool OnCharacterContactValidate(const JPH::CharacterVirtual* inChar, const JPH::CharacterContact& inContact) override {
+    auto OnCharacterContactValidate(const JPH::CharacterVirtual* inChar, const JPH::CharacterContact& inContact) -> bool override {
         return Filter(inChar->GetUserData(), inContact.mCharacterB->GetUserData());
     }
 
-    void OnContactAdded(const JPH::CharacterVirtual* inChar, const JPH::CharacterContact& inContact, JPH::CharacterContactSettings& ioSettings) override {
+    void OnContactAdded(const JPH::CharacterVirtual* inChar, const JPH::CharacterContact& inContact, JPH::CharacterContactSettings& /*ioSettings*/) override {
         ApplyPushImpulse(inChar, inContact);
     }
 
-    void OnContactPersisted(const JPH::CharacterVirtual* inChar, const JPH::CharacterContact& inContact, JPH::CharacterContactSettings& ioSettings) override {
+    void OnContactPersisted(
+        const JPH::CharacterVirtual* inChar,
+        const JPH::CharacterContact& inContact,
+        JPH::CharacterContactSettings& /*ioSettings*/
+    ) override {
         ApplyPushImpulse(inChar, inContact);
     }
 
@@ -129,15 +134,15 @@ class CharacterListener final: public JPH::CharacterContactListener {
         JPH::RVec3 delta = inChar->GetPosition() - inBody2.GetPosition();
 
         // v = omega x r
-        ioLinVel.SetX(omega.GetY() * (float) delta.GetZ());
-        ioLinVel.SetZ(-omega.GetY() * (float) delta.GetX());
+        ioLinVel.SetX(omega.GetY() * static_cast<float>(delta.GetZ()));
+        ioLinVel.SetZ(-omega.GetY() * static_cast<float>(delta.GetX()));
         ioAngVel.SetY(omega.GetY());
     }
 
   private:
     PhysicsWorld* _world;
 
-    bool Filter(uint64_t u1, JPH::BodyID id2) {
+    auto Filter(uint64_t u1, JPH::BodyID id2) -> bool {
         uint32_t j_idx2 = id2.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
         uint64_t u2     = _world->idToHandleMap[j_idx2].load(std::memory_order::relaxed);
         if (u2 == 0) {
@@ -149,7 +154,7 @@ class CharacterListener final: public JPH::CharacterContactListener {
         return ((_world->categories[d1] & _world->masks[d2]) != 0u) && ((_world->categories[d2] & _world->masks[d1]) != 0u);
     }
 
-    bool Filter(uint64_t u1, uint64_t u2) {
+    auto Filter(uint64_t u1, uint64_t u2) -> bool {
         if (u1 == 0 || u2 == 0) {
             return false;
         }

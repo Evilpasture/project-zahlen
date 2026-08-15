@@ -13,12 +13,12 @@
 
 namespace ZHLN {
 
-JPH::Ref<JPH::Ragdoll> PhysicsContext::CreateSkeletalRagdoll(const JPH::Skeleton* skeleton, const std::vector<Physics::RagdollPartParams>& parts) {
+auto PhysicsContext::CreateSkeletalRagdoll(JPH::Ref<JPH::Skeleton> skeleton, const std::vector<Physics::RagdollPartParams>& parts) -> JPH::Ref<JPH::Ragdoll> {
     auto& joltSystem = GetInternalSystem();
     auto& world      = GetInternalWorld();
 
     JPH::Ref<JPH::RagdollSettings> settings = new JPH::RagdollSettings();
-    settings->mSkeleton                     = const_cast<JPH::Skeleton*>(skeleton);
+    settings->mSkeleton                     = skeleton;
     settings->mParts.resize(skeleton->GetJointCount());
 
     return ZHLN::Lock(world.sync.shadowLock, [&]() -> JPH::Ref<JPH::Ragdoll> {

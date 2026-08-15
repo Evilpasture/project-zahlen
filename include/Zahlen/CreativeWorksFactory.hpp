@@ -25,11 +25,12 @@ namespace ZHLN::CreativeWorksFactory {
 enum class TerrainType : uint8_t { Default = 0, Snow = 1, Desert = 2 };
 
 // --- Low-Level GPU Geometry Builders ---
-Mesh CreateTetrahedronMesh(RenderContext& ctx);
-Mesh CreatePlaneMesh(RenderContext& ctx, float extent = 10.0f, const JPH::Vec4& color = {0.6f, 0.6f, 0.6f, 1.0f});
-Mesh CreateBoxMesh(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4& color = {0.8f, 0.4f, 0.2f, 1.0f});
-Mesh CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldSize, const float* heights, const float* colorsRGBA);
-Mesh CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, float maxHeight, float* outHeights, TerrainType type = TerrainType::Default);
+auto CreateTetrahedronMesh(RenderContext& ctx) -> Mesh;
+auto CreatePlaneMesh(RenderContext& ctx, float extent = 10.0f, const JPH::Vec4& color = {0.6f, 0.6f, 0.6f, 1.0f}) -> Mesh;
+auto CreateBoxMesh(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4& color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
+auto CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldSize, const float* heights, const float* colorsRGBA) -> Mesh;
+auto CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, float maxHeight, float* outHeights, TerrainType type = TerrainType::Default)
+    -> Mesh;
 
 struct MaterialDesc {
     // Pipeline configuration
@@ -52,13 +53,13 @@ struct MaterialDesc {
     TextureHandle emissiveMap = TextureHandle::Invalid;
 };
 
-[[nodiscard]] std::expected<Material, Error>
-    CreateBasicMaterial(RenderContext& ctx, bool doubleSided = false, bool alphaBlend = false, bool additiveBlend = false);
+[[nodiscard]] auto
+    CreateBasicMaterial(RenderContext& ctx, bool doubleSided = false, bool alphaBlend = false, bool additiveBlend = false) -> std::expected<Material, Error>;
 
-[[nodiscard]] std::expected<Material, Error> CreateMaterial(RenderContext& ctx, const MaterialDesc& desc);
+[[nodiscard]] auto CreateMaterial(RenderContext& ctx, const MaterialDesc& desc) -> std::expected<Material, Error>;
 
-TextureHandle CreateFontAtlasTexture(RenderContext& ctx);
-uint32_t      LoadTexture(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view path, bool isSRGB = true);
+auto CreateFontAtlasTexture(RenderContext& ctx) -> TextureHandle;
+auto LoadTexture(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view path, bool isSRGB = true) -> uint32_t;
 
 struct SpawnParams {
     JPH::RVec3 position = JPH::RVec3::sZero();
@@ -82,22 +83,22 @@ struct SpawnParams {
 // --- High-Level Prefabrication Spawners (Entity Factory) ---
 
 // Box Spawners
-Entity CreateBox(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, JPH::Vec3Arg halfExtents, const SpawnParams& params = {});
-Entity CreateBox(Engine& engine, JPH::Vec3Arg halfExtents, const SpawnParams& params = {});
+auto CreateBox(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, JPH::Vec3Arg halfExtents, const SpawnParams& params = {}) -> Entity;
+auto CreateBox(Engine& engine, JPH::Vec3Arg halfExtents, const SpawnParams& params = {}) -> Entity;
 
 // Plane Spawners
-Entity CreatePlane(
+auto CreatePlane(
     RenderContext&     ctx,
     ECS::Registry&     reg,
     PhysicsContext*    pc,
     float              extent = 10.0f,
     const JPH::Vec4&   color  = {0.6f, 0.6f, 0.6f, 1.0f},
     const SpawnParams& params = {}
-);
-Entity CreatePlane(Engine& engine, float extent = 10.0f, const JPH::Vec4& color = {0.6f, 0.6f, 0.6f, 1.0f}, const SpawnParams& params = {});
+) -> Entity;
+auto CreatePlane(Engine& engine, float extent = 10.0f, const JPH::Vec4& color = {0.6f, 0.6f, 0.6f, 1.0f}, const SpawnParams& params = {}) -> Entity;
 
 // Terrain Spawners
-Entity CreateTerrain(
+auto CreateTerrain(
     RenderContext&     ctx,
     ECS::Registry&     reg,
     PhysicsContext*    pc,
@@ -106,11 +107,11 @@ Entity CreateTerrain(
     float              maxHeight,
     TerrainType        type   = TerrainType::Default,
     const SpawnParams& params = {}
-);
-Entity
-    CreateTerrain(Engine& engine, int sampleCount, float worldSize, float maxHeight, TerrainType type = TerrainType::Default, const SpawnParams& params = {});
+) -> Entity;
+auto CreateTerrain(Engine& engine, int sampleCount, float worldSize, float maxHeight, TerrainType type = TerrainType::Default, const SpawnParams& params = {})
+    -> Entity;
 
-Entity CreateTerrainFromData(
+auto CreateTerrainFromData(
     RenderContext&     ctx,
     ECS::Registry&     reg,
     PhysicsContext*    pc,
@@ -119,13 +120,20 @@ Entity CreateTerrainFromData(
     const float*       heights,
     const float*       colorsRGBA,
     const SpawnParams& params = {}
-);
-Entity CreateTerrainFromData(Engine& engine, int sampleCount, float worldSize, const float* heights, const float* colorsRGBA, const SpawnParams& params = {});
+) -> Entity;
+auto CreateTerrainFromData(Engine& engine, int sampleCount, float worldSize, const float* heights, const float* colorsRGBA, const SpawnParams& params = {})
+    -> Entity;
 
-// Model Prefabs
-ModelPrefab* LoadModelPrefab(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view path);
+// --- Model Prefab Loaders ---
+auto LoadModelPrefab(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view path) -> ModelPrefab*;
+auto LoadModelPrefab(Engine& engine, std::string_view path) -> ModelPrefab*;
+auto LoadModelPrefabFromMemory(RenderContext& ctx, CreativeWorksManager& assetMgr, std::span<const uint8_t> bytes, std::string_view virtualPath)
+    -> ModelPrefab*;
+auto LoadModelPrefabFromMemory(Engine& engine, std::span<const uint8_t> bytes, std::string_view virtualPath) -> ModelPrefab*;
 
-uint32_t InstantiatePrefab(
+// --- Prefab Spawners ---
+// Low-level context overload (Required by Scripting.cpp)
+auto InstantiatePrefab(
     RenderContext&     ctx,
     ECS::Registry&     reg,
     PhysicsContext&    pc,
@@ -133,14 +141,22 @@ uint32_t InstantiatePrefab(
     const SpawnParams& params,
     Entity*            outBuffer = nullptr,
     uint32_t           maxCount  = 0
-);
+) -> uint32_t;
+
+// Engine-level convenience overloads
+auto InstantiatePrefab(Engine& engine, const ModelPrefab& prefab, const SpawnParams& params, Entity* outBuffer = nullptr, uint32_t maxCount = 0) -> uint32_t;
+auto InstantiatePrefab(Engine& engine, std::string_view path, const SpawnParams& params, Entity* outBuffer = nullptr, uint32_t maxCount = 0) -> uint32_t;
+auto InstantiatePrefabFromMemory(
+    Engine&                  engine,
+    std::span<const uint8_t> bytes,
+    std::string_view         virtualPath,
+    const SpawnParams&       params,
+    Entity*                  outBuffer = nullptr,
+    uint32_t                 maxCount  = 0
+) -> uint32_t;
 
 void SetupPlayerRagdoll(PhysicsContext& pc, ECS::Registry& reg, Entity playerEntity, std::span<const Entity> visualParts);
 void SetupPlayerRagdoll(Engine& engine, Entity playerEntity, std::span<const Entity> visualParts);
 void RebuildVulkanResources(RenderContext& ctx, CreativeWorksManager& cwMgr, ECS::Registry& reg);
-
-ModelPrefab* LoadModelPrefab(Engine& engine, std::string_view path);
-uint32_t     InstantiatePrefab(Engine& engine, const ModelPrefab& prefab, const SpawnParams& params, Entity* outBuffer = nullptr, uint32_t maxCount = 0);
-uint32_t     InstantiatePrefab(Engine& engine, std::string_view path, const SpawnParams& params, Entity* outBuffer = nullptr, uint32_t maxCount = 0);
 
 } // namespace ZHLN::CreativeWorksFactory

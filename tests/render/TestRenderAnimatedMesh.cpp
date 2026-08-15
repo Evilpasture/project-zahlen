@@ -14,15 +14,30 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <expected>
-#include <filesystem>
 #include <fstream>
+#include <span>
+#include <string>
 #include <vector>
-
-enum class AnimatedMeshTestError : uint32_t {
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wc23-extensions"
+#endif
+namespace {
+// Embed the binary GLB directly into the read-only data section of the test binary
+// NOLINTBEGIN(bugprone-string-literal-with-embedded-nul, modernize-avoid-c-arrays, cppcoreguidelines-avoid-c-arrays)
+constexpr uint8_t kUziGlbData[] = {
+#embed "Uzi.glb"
+};
+// NOLINTEND(bugprone-string-literal-with-embedded-nul, modernize-avoid-c-arrays, cppcoreguidelines-avoid-c-arrays)
+} // namespace
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
+enum class AnimatedMeshTestError : uint8_t {
     Success = 0,
-    AssetNotFound[[= ZHLN::Reflect::Description("Could not find 'Uzi.glb' on disk.")]],
-    PrefabLoadFailed[[= ZHLN::Reflect::Description("CreativeWorksFactory failed to load or parse the GLB prefab.")]],
+    PrefabLoadFailed[[= ZHLN::Reflect::Description("CreativeWorksFactory failed to load or parse the in-memory GLB prefab.")]],
     NoSkeletalMeshSpawned[[= ZHLN::Reflect::Description("No entities with SkeletalMeshComponent were spawned.")]],
     NoAnimatorFound[[= ZHLN::Reflect::Description("Root entity does not contain an AnimatorComponent.")]],
     SimulationTickFailed[[= ZHLN::Reflect::Description("Engine::Tick failed during animated mesh playback.")]],
@@ -43,27 +58,9 @@ struct RenderAnimatedMeshTestSuite {
 
     struct Tests {
         std::expected<void, ZHLN::Error> headless_automated_skinning_and_emission_verification() {
-            // 1. Resolve asset path
-            while (!std::filesystem::exists("resources") && std::filesystem::current_path().has_parent_path()) {
-                auto parent = std::filesystem::current_path().parent_path();
-                if (parent == std::filesystem::current_path()) {
-                    break;
-                }
-                std::filesystem::current_path(parent);
-            }
-
-            std::string assetPath;
-            if (std::filesystem::exists("resources/assets/Uzi.glb")) {
-                assetPath = "Uzi.glb";
-            } else if (std::filesystem::exists("resources/assets/murderdrones/Uzi.glb")) {
-                assetPath = "murderdrones/Uzi.glb";
-            } else {
-                return std::unexpected(AnimatedMeshTestError::AssetNotFound);
-            }
-
             ZHLN::DefaultPreset::SetDisabled(true);
 
-            // 2. Headless Configuration (Runs cleanly in CI/CD without X11/Wayland windows)
+            // 1. Headless Configuration (Runs hermetically in CI/CD without window managers)
             const ZHLN::EngineConfig cfg {
                 .physics = {.maxBodies = 512, .maxBodyPairs = 1024, .maxContactConstraints = 1024, .tempAllocatorSize = 16 * 1024 * 1024},
                 .render  = {
@@ -83,14 +80,14 @@ struct RenderAnimatedMeshTestSuite {
                 return checkEngine;
             }
 
-            auto engine = std::move(engineRes.value());
+            const auto engine = std::move(engineRes.value());
             engine->InitializeDefaultScene();
 
             auto& reg = engine->GetRegistry();
             auto& rc  = engine->GetRenderContext();
 
-            // 3. Directional Lighting
-            ZHLN::Entity sunEnt = reg.Create();
+            // 2. Directional Sun Lighting
+            const ZHLN::Entity sunEnt = reg.Create();
             reg.Add(
                 sunEnt,
                 ZHLN::Components::TransformComponent {
@@ -99,10 +96,10 @@ struct RenderAnimatedMeshTestSuite {
                 ZHLN::Components::LightComponent {.type = ZHLN::LightType::Sun, .color = JPH::Vec3(1.0f, 0.98f, 0.94f), .intensity = 160.0f}
             );
 
-            // 4. Instantiate Prefab
+            // 3. Instantiate Prefab Directly From Embedded In-Memory Byte Stream
             std::vector<ZHLN::Entity> spawnedParts(512);
-            uint32_t                  count = ZHLN::CreativeWorksFactory::InstantiatePrefab(
-                *engine, assetPath,
+            const uint32_t            count = ZHLN::CreativeWorksFactory::InstantiatePrefabFromMemory(
+                *engine, kUziGlbData, "Uzi.glb",
                 {
                     .position        = JPH::RVec3(0.0f, 0.0f, 0.0f),
                     .createPhysics   = false,
@@ -117,8 +114,8 @@ struct RenderAnimatedMeshTestSuite {
                 return std::unexpected(AnimatedMeshTestError::PrefabLoadFailed);
             }
 
-            ZHLN::Entity rootEntity = spawnedParts[0];
-            auto*        animComp   = reg.Get<ZHLN::Components::AnimatorComponent>(rootEntity);
+            const ZHLN::Entity rootEntity = spawnedParts[0];
+            const auto*        animComp   = reg.Get<ZHLN::Components::AnimatorComponent>(rootEntity);
             if (animComp == nullptr) {
                 return std::unexpected(AnimatedMeshTestError::NoAnimatorFound);
             }
@@ -129,28 +126,28 @@ struct RenderAnimatedMeshTestSuite {
             cam.pitch    = 0.0f;
             cam.fov      = 45.0f;
 
-            // 5. Automated Ticking (60 frames)
+            // 4. Automated Ticking (60 frames of animation playback & skinning compute)
             constexpr float dt = 1.0f / 60.0f;
             for (uint32_t frame = 0; frame < 60; ++frame) {
                 engine->ProcessEvents();
-                auto status = engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
+                const auto status = engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
                 if (status != ZHLN::GameplayStatus::OK) {
                     return std::unexpected(AnimatedMeshTestError::SimulationTickFailed);
                 }
             }
 
-            // 6. Automated Skinning Sanity Check: Verify Bounding Radii
-            for (ZHLN::Entity e: spawnedParts) {
-                if (auto* mesh = reg.Get<ZHLN::Components::MeshComponent>(e)) {
+            // 5. Automated Skinning Sanity Check: Verify Bounding Radii
+            for (const ZHLN::Entity e: spawnedParts) {
+                if (const auto* mesh = reg.Get<ZHLN::Components::MeshComponent>(e)) {
                     if (std::isnan(mesh->cullRadius) || std::isinf(mesh->cullRadius) || mesh->cullRadius > 20.0f) {
                         return std::unexpected(AnimatedMeshTestError::MeshDeformationExplosion);
                     }
                 }
             }
 
-            // 7. Automated Pixel Readback & Color Histogram Analysis
+            // 6. Automated Pixel Readback & Color Histogram Analysis
             const std::string ppmPath    = "headless_skinning_output.ppm";
-            auto              captureRes = rc.CaptureScreenshotPPM(ppmPath);
+            const auto        captureRes = rc.CaptureScreenshotPPM(ppmPath);
             if (!captureRes) {
                 return std::unexpected(AnimatedMeshTestError::RenderOutputBlank);
             }
@@ -168,17 +165,17 @@ struct RenderAnimatedMeshTestSuite {
             ppm.get(); // consume newline
 
             std::vector<uint8_t> pixels(static_cast<size_t>(width * height * 3));
-            ppm.read(reinterpret_cast<char*>(pixels.data()), pixels.size());
+            ppm.read(reinterpret_cast<char*>(pixels.data()), static_cast<std::streamsize>(pixels.size()));
 
             uint32_t purpleEmissivePixels   = 0;
             uint32_t visibleCharacterPixels = 0;
 
             for (size_t i = 0; i < pixels.size(); i += 3) {
-                uint8_t r = pixels[i + 0];
-                uint8_t g = pixels[i + 1];
-                uint8_t b = pixels[i + 2];
+                const uint8_t r = pixels[i + 0];
+                const uint8_t g = pixels[i + 1];
+                const uint8_t b = pixels[i + 2];
 
-                // Check for non-black pixels (rendered character)
+                // Check for non-black pixels (rendered character geometry)
                 if (r > 15 || g > 15 || b > 15) {
                     visibleCharacterPixels++;
                 }
@@ -199,7 +196,7 @@ struct RenderAnimatedMeshTestSuite {
                 return std::unexpected(AnimatedMeshTestError::MissingEmissiveGlow);
             }
 
-            ZHLN::Println("    [PASS] Headless test verified skinning geometry and {} purple emissive pixels.", purpleEmissivePixels);
+            ZHLN::Println("    [PASS] Headless test verified embedded skinning geometry and {} purple emissive pixels.", purpleEmissivePixels);
             return {};
         }
     };

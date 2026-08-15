@@ -51,7 +51,7 @@ struct Frustum {
         mW[1] = JPH::Vec4(planes[4].GetW(), planes[5].GetW(), 1e10f, 1e10f);
     }
 
-    [[nodiscard]] JPH_INLINE bool IsSphereVisible(JPH::Vec3Arg center, float radius) const {
+    [[nodiscard]] JPH_INLINE auto IsSphereVisible(JPH::Vec3Arg center, float radius) const -> bool {
         // Stability Fix: Inflate radius by a small margin (0.5m)
         // This prevents "flicker" culling which causes renderer command spikes
         float inflatedRadius = -(radius + 0.5f);
@@ -85,7 +85,7 @@ struct Camera {
     Frustum frustum {};
     Frustum shadowFrustum {};
 
-    [[nodiscard]] JPH::Mat44 GetViewMatrix() const {
+    [[nodiscard]] auto GetViewMatrix() const -> JPH::Mat44 {
         JPH::Vec3 direction {};
         direction.SetX(JPH::Cos(JPH::DegreesToRadians(yaw)) * JPH::Cos(JPH::DegreesToRadians(pitch)));
         direction.SetY(JPH::Sin(JPH::DegreesToRadians(pitch)));
@@ -94,7 +94,7 @@ struct Camera {
         return Math::CreateLookAt(position, position + direction.Normalized(), JPH::Vec3::sAxisY());
     }
 
-    [[nodiscard]] JPH::Mat44 GetProjectionMatrix(float aspectRatio) const {
+    [[nodiscard]] auto GetProjectionMatrix(float aspectRatio) const -> JPH::Mat44 {
         return Math::CreatePerspective(JPH::DegreesToRadians(fov), aspectRatio, nearZ, farZ);
     }
 
@@ -103,17 +103,17 @@ struct Camera {
     static constexpr float Halton_3[16] = {0.333f, 0.666f, 0.111f, 0.444f, 0.777f, 0.222f, 0.555f, 0.888f,
                                            0.037f, 0.370f, 0.703f, 0.148f, 0.481f, 0.814f, 0.259f, 0.592f};
 
-    [[nodiscard]] JPH::Mat44 GetJitteredProjectionMatrix(float aspectRatio, uint32_t width, uint32_t height, AAState& aaState) const {
+    [[nodiscard]] auto GetJitteredProjectionMatrix(float aspectRatio, uint32_t width, uint32_t height, AAState& aaState) const -> JPH::Mat44 {
         JPH::Mat44 proj = GetProjectionMatrix(aspectRatio);
 
         if (aaState.mode == AAMode::TAA) {
             // Map Halton sequence [-0.5, 0.5] to Sub-Pixel NDC space
-            float jitterX = (Halton_2[aaState.frameIndex % 16] - 0.5f) / (float) width;
-            float jitterY = (Halton_3[aaState.frameIndex % 16] - 0.5f) / (float) height;
+            float jitterX = (Halton_2[aaState.frameIndex % 16] - 0.5f) / static_cast<float>(width);
+            float jitterY = (Halton_3[aaState.frameIndex % 16] - 0.5f) / static_cast<float>(height);
 
             // If frameIndex is 0, there is no previous jitter
-            float prevJitterX = aaState.frameIndex > 0 ? (Camera::Halton_2[(aaState.frameIndex - 1) % 16] - 0.5f) / (float) width : 0.0f;
-            float prevJitterY = aaState.frameIndex > 0 ? (Camera::Halton_3[(aaState.frameIndex - 1) % 16] - 0.5f) / (float) height : 0.0f;
+            float prevJitterX = aaState.frameIndex > 0 ? (Camera::Halton_2[(aaState.frameIndex - 1) % 16] - 0.5f) / static_cast<float>(width) : 0.0f;
+            float prevJitterY = aaState.frameIndex > 0 ? (Camera::Halton_3[(aaState.frameIndex - 1) % 16] - 0.5f) / static_cast<float>(height) : 0.0f;
 
             aaState.jitterX     = jitterX;
             aaState.jitterY     = jitterY;

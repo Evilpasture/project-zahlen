@@ -13,7 +13,7 @@ namespace {
 
 // --- Internal Memory Utilities ---
 template <typename T>
-[[nodiscard]] T* AllocateAligned(size_t count, size_t alignment) {
+[[nodiscard]] auto AllocateAligned(size_t count, size_t alignment) -> T* {
     return static_cast<T*>(::operator new[](count * sizeof(T), std::align_val_t {alignment}));
 }
 
@@ -80,7 +80,7 @@ void PhysicsWorld::Init(uint32_t inMaxBodies, JPH::PhysicsSystem* inSystem, JPH:
     // Explicitly zero-initialize JPH::Arrays of POD types because Jolt's Array::resize leaves them
     // uninitialized!
     std::memset(idToHandleMap.data(), 0, idToHandleMap.size() * sizeof(decltype(idToHandleMap)::value_type));
-    std::memset((void*) joltBodyPtrs.data(), 0, joltBodyPtrs.size() * sizeof(decltype(joltBodyPtrs)::value_type));
+    std::memset(static_cast<void*>(joltBodyPtrs.data()), 0, joltBodyPtrs.size() * sizeof(decltype(joltBodyPtrs)::value_type));
 
     for (uint32_t i = 0; i < capacity; ++i) {
         generations[i].store(1, std::memory_order::relaxed);
@@ -108,7 +108,7 @@ void PhysicsWorld::Init(uint32_t inMaxBodies, JPH::PhysicsSystem* inSystem, JPH:
     constraintCapacity = inMaxBodies;
 
     constraints.resize(constraintCapacity, nullptr);
-    std::memset((void*) constraints.data(), 0, constraints.size() * sizeof(decltype(constraints)::value_type));
+    std::memset(static_cast<void*>(constraints.data()), 0, constraints.size() * sizeof(decltype(constraints)::value_type));
     constraintStates.resize(constraintCapacity, SLOT_EMPTY);
     constraintGenerations.resize(constraintCapacity);
     freeConstraintSlots.resize(constraintCapacity);
@@ -191,7 +191,7 @@ void PhysicsWorld::ResizeBuffers(size_t newCapacity) {
     // Explicitly zero-initialize the newly added elements to prevent garbage pointer reads
     size_t addedCount = newCapacity - oldCap;
     std::memset(idToHandleMap.data() + (oldCap + 1), 0, addedCount * sizeof(decltype(idToHandleMap)::value_type));
-    std::memset((void*) (joltBodyPtrs.data() + (oldCap + 1)), 0, addedCount * sizeof(decltype(joltBodyPtrs)::value_type));
+    std::memset(static_cast<void*>(joltBodyPtrs.data() + (oldCap + 1)), 0, addedCount * sizeof(decltype(joltBodyPtrs)::value_type));
 
     size_t freeIdx = freeCount.load(std::memory_order::relaxed);
     for (size_t i = oldCap; i < newCapacity; i++) {
@@ -212,7 +212,7 @@ void PhysicsWorld::ResizeConstraintBuffers(size_t newCapacity) {
 
     constraints.resize(newCapacity, nullptr);
     size_t addedCount = newCapacity - oldCap;
-    std::memset((void*) (constraints.data() + oldCap), 0, addedCount * sizeof(decltype(constraints)::value_type));
+    std::memset(static_cast<void*>(constraints.data() + oldCap), 0, addedCount * sizeof(decltype(constraints)::value_type));
     constraintStates.resize(newCapacity, SLOT_EMPTY);
     constraintGenerations.resize(newCapacity);
     freeConstraintSlots.resize(newCapacity);
@@ -223,7 +223,7 @@ void PhysicsWorld::ResizeConstraintBuffers(size_t newCapacity) {
     }
 }
 
-ZHLN::Entity PhysicsWorld::AllocateHandle() {
+auto PhysicsWorld::AllocateHandle() -> ZHLN::Entity {
     size_t available = freeCount.load(std::memory_order::acquire);
     if (available == 0) {
         ResizeBuffers(capacity * 2);
@@ -270,7 +270,7 @@ void PhysicsWorld::RemoveBodySlot(uint32_t slot) {
     count.fetch_sub(1, std::memory_order::release);
 }
 
-ConstraintHandle PhysicsWorld::AllocateConstraintHandle() {
+auto PhysicsWorld::AllocateConstraintHandle() -> ConstraintHandle {
     // If we are out of slots, double the capacity
     if (freeConstraintCount == 0) {
         ResizeConstraintBuffers(constraintCapacity * 2);
@@ -290,7 +290,7 @@ void PhysicsWorld::RemoveConstraintSlot(uint32_t slot) {
     freeConstraintSlots[freeConstraintCount++] = slot;
 }
 
-JPH::Array<std::byte> PhysicsWorld::SaveState() const {
+auto PhysicsWorld::SaveState() const -> JPH::Array<std::byte> {
     size_t currentCount = count.load(std::memory_order::acquire);
     size_t slotCap      = slotCapacity;
 
@@ -307,11 +307,11 @@ JPH::Array<std::byte> PhysicsWorld::SaveState() const {
     JPH::Array<std::byte> buffer(totalSize);
     auto*                 ptr = buffer.data();
 
-    ZHLN::Lock(sync.shadowLock, [&] {
+    ZHLN::Lock(sync.shadowLock, [&] -> void {
         // 2. Write Header
         WorldStateHeader header;
-        header.bodyCount    = (uint32_t) currentCount;
-        header.slotCapacity = (uint32_t) slotCap;
+        header.bodyCount    = static_cast<uint32_t>(currentCount);
+        header.slotCapacity = static_cast<uint32_t>(slotCap);
         header.worldTime    = time;
         std::memcpy(ptr, &header, sizeof(WorldStateHeader));
         ptr += sizeof(WorldStateHeader);
@@ -347,7 +347,7 @@ JPH::Array<std::byte> PhysicsWorld::SaveState() const {
     return buffer;
 }
 
-bool PhysicsWorld::LoadState(const uint8_t* data, size_t size) {
+auto PhysicsWorld::LoadState(const uint8_t* data, size_t size) -> bool {
     if (size < sizeof(WorldStateHeader)) {
         return false;
     }
@@ -362,7 +362,7 @@ bool PhysicsWorld::LoadState(const uint8_t* data, size_t size) {
     const uint8_t* ptr        = data + sizeof(WorldStateHeader);
     size_t         savedCount = header->bodyCount;
 
-    ZHLN::Lock(sync.shadowLock, [&] {
+    ZHLN::Lock(sync.shadowLock, [&] -> void {
         // 1. Restore SoA Buffers
         size_t posSize = savedCount * sizeof(JPH::Real) * 4;
         size_t rotSize = savedCount * sizeof(float) * 4;
@@ -379,7 +379,7 @@ bool PhysicsWorld::LoadState(const uint8_t* data, size_t size) {
 
         // 2. Restore Mapping Tables
         for (size_t i = 0; i < slotCapacity; ++i) {
-            uint32_t g;
+            uint32_t g = 0;
             std::memcpy(&g, ptr, sizeof(uint32_t));
             generations[i].store(g, std::memory_order::relaxed);
             ptr += sizeof(uint32_t);
