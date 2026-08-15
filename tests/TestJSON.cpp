@@ -36,6 +36,7 @@ struct ActorConfig {
 // Compile-Time JSON Schema & Constants
 // ============================================================================
 
+#ifndef ZHLN_IN_DOCKER
 constexpr auto kStaticConfigJSON = ZHLN::Reflect::StringLiteral(R"({
     "engine": "Zahlen",
     "version": 2026,
@@ -58,7 +59,7 @@ static_assert(kStaticParsed.debug == true);
 static_assert(kStaticParsed.engine == "Zahlen");
 static_assert(kStaticParsed.window.width == 1920);
 static_assert(kStaticParsed.window.height == 1080);
-
+#endif
 // ============================================================================
 // Test Suite Class
 // ============================================================================

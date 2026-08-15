@@ -184,6 +184,12 @@ if(ZHLN_DEV_MODE)
     add_compile_definitions(ZHLN_DEV_MODE)
 endif()
 
+option(ZHLN_IN_DOCKER "Build running inside a Docker container" OFF)
+if(ZHLN_IN_DOCKER)
+    add_compile_definitions(ZHLN_IN_DOCKER=1)
+    message(STATUS "Docker container build mode enabled.")
+endif()
+
 option(ZHLN_BUILD_TESTS "Build engine test suite" ON)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")

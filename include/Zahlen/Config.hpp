@@ -141,6 +141,12 @@ inline constexpr size_t CacheLineSize = 64; // Safe fallback
 inline constexpr bool isLittleEndian = (std::endian::native == std::endian::little);
 inline constexpr bool isBigEndian    = (std::endian::native == std::endian::big);
 
+#if defined(ZHLN_IN_DOCKER)
+inline constexpr bool isDocker = true;
+#else
+inline constexpr bool isDocker = false;
+#endif
+
 // Check if the compiler supports a standardized debug break hook
 inline void DebugBreak() noexcept {
 #if defined(_WIN32) || defined(_WIN64)

@@ -52,7 +52,8 @@ COPY . .
 RUN cmake -B build -S . -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DZHLN_BUILD_TESTS=ON \
-    -DUSE_SANITIZERS=ON
+    -DUSE_SANITIZERS=ON \
+    -DZHLN_IN_DOCKER=ON
 
 # 2. Build everything (Engine, Asset Cooker, and Test Executables)
 RUN cmake --build build
