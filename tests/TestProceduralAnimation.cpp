@@ -52,9 +52,12 @@ struct ProceduralAnimationTestSuite {
 
             // Exercise the imported TestRig naming path as well as the
             // generated fallback hierarchy.
+            // Deliberately place suffix-ambiguous names in adversarial order:
+            // exact matching must beat "Sup_Spine" -> "Spine" and
+            // "Forearm_L" -> "UpperArmL" regardless of node order.
             constexpr std::array<std::string_view, ZHLN::kCoreBoneCount> coreNames = {
-                "Root",      "Hips",   "Spine",   "Sup_Spine", "Chest",  "Neck",  "Head",    "Upper_Arm_L", "Forearm_L", "Hand_L", "Upper_Arm_R",
-                "Forearm_R", "Hand_R", "Thigh_L", "Shin_L",    "Foot_L", "Toe_L", "Thigh_R", "Shin_R",      "Foot_R",    "Toe_R",
+                "Root",        "Hips",   "Sup_Spine", "Spine",  "Chest",  "Neck",  "Head",    "Forearm_L", "Upper_Arm_L", "Hand_L", "Forearm_R",
+                "Upper_Arm_R", "Hand_R", "Thigh_L",   "Shin_L", "Foot_L", "Toe_L", "Thigh_R", "Shin_R",    "Foot_R",      "Toe_R",
             };
             ZHLN::ModelPrefab prefab;
             prefab.virtualPath = "TestRig.glb";
@@ -92,7 +95,13 @@ struct ProceduralAnimationTestSuite {
             prefab.nodes[malformedNode].parentIndex = static_cast<int32_t>(ZHLN::kMaxRigNodes + 7);
 
             ZHLN::RigBoneMap importedMap;
-            if (!ZHLN::BuildBoneMap(prefab, skeleton, importedMap) || importedMap.parentIndices[malformedNode] != -1) {
+            if (!ZHLN::BuildBoneMap(prefab, skeleton, importedMap) || importedMap.parentIndices[malformedNode] != -1 ||
+                importedMap.nodeIndices[static_cast<size_t>(ZHLN::CharacterBone::Spine)] != 3 ||
+                importedMap.nodeIndices[static_cast<size_t>(ZHLN::CharacterBone::SupSpine)] != 2 ||
+                importedMap.nodeIndices[static_cast<size_t>(ZHLN::CharacterBone::UpperArmL)] != 8 ||
+                importedMap.nodeIndices[static_cast<size_t>(ZHLN::CharacterBone::ForearmL)] != 7 ||
+                importedMap.nodeIndices[static_cast<size_t>(ZHLN::CharacterBone::UpperArmR)] != 11 ||
+                importedMap.nodeIndices[static_cast<size_t>(ZHLN::CharacterBone::ForearmR)] != 10) {
                 return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
             for (size_t slot = 0; slot < ZHLN::HairStrandsComponent::kTotalParticles; ++slot) {

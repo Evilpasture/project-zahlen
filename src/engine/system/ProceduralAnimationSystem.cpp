@@ -33,6 +33,11 @@ import ZHLN.SecondaryPhysics;
 namespace ZHLN {
 namespace {
 
+inline constexpr std::array<std::string_view, kCoreBoneCount> kCoreBoneLabels = {
+    "Root",     "Hips",  "Spine",  "SupSpine", "Chest", "Neck", "Head",   "UpperArmL", "ForearmL", "HandL", "UpperArmR",
+    "ForearmR", "HandR", "ThighL", "ShinL",    "FootL", "ToeL", "ThighR", "ShinR",     "FootR",    "ToeR",
+};
+
 struct CanonicalName {
     std::array<char, 96> data {};
     size_t               size = 0;
@@ -59,9 +64,16 @@ struct CanonicalName {
     return result;
 }
 
-[[nodiscard]] bool MatchesAny(std::string_view value, std::span<const std::string_view> aliases) noexcept {
+[[nodiscard]] std::string_view StripKnownRigPrefix(std::string_view value) noexcept {
+    if (value.size() > 3 && (value.starts_with("def") || value.starts_with("org"))) {
+        value.remove_prefix(3);
+    }
+    return value;
+}
+
+[[nodiscard]] bool MatchesAny(std::string_view value, std::span<const std::string_view> aliases, bool allowSuffix) noexcept {
     for (std::string_view alias: aliases) {
-        if (value == alias || (value.size() > alias.size() && value.ends_with(alias))) {
+        if (value == alias || (allowSuffix && value.size() > alias.size() && value.ends_with(alias))) {
             return true;
         }
     }
@@ -69,96 +81,96 @@ struct CanonicalName {
 }
 
 template <size_t N>
-[[nodiscard]] bool MatchesAny(std::string_view value, const std::array<std::string_view, N>& aliases) noexcept {
-    return MatchesAny(value, std::span<const std::string_view>(aliases));
+[[nodiscard]] bool MatchesAny(std::string_view value, const std::array<std::string_view, N>& aliases, bool allowSuffix) noexcept {
+    return MatchesAny(value, std::span<const std::string_view>(aliases), allowSuffix);
 }
 
-[[nodiscard]] bool MatchesBone(std::string_view name, CharacterBone bone) noexcept {
+[[nodiscard]] bool MatchesBone(std::string_view name, CharacterBone bone, bool allowSuffix) noexcept {
     using namespace std::literals;
     switch (bone) {
         case CharacterBone::Root: {
             constexpr std::array aliases = {"root"sv, "armature"sv, "rig"sv, "characterrig"sv};
-            return MatchesAny(name, aliases);
+            return MatchesAny(name, aliases, allowSuffix);
         }
         case CharacterBone::Hips: {
             constexpr std::array aliases = {"hips"sv, "hip"sv, "pelvis"sv, "mixamorighips"sv};
-            return MatchesAny(name, aliases);
+            return MatchesAny(name, aliases, allowSuffix);
         }
         case CharacterBone::Spine: {
             constexpr std::array aliases = {"spine"sv, "spine0"sv, "spine01"sv};
-            return MatchesAny(name, aliases);
+            return MatchesAny(name, aliases, allowSuffix);
         }
         case CharacterBone::SupSpine: {
             constexpr std::array aliases = {"supspine"sv, "upperspine"sv, "spine1"sv, "spine02"sv};
-            return MatchesAny(name, aliases);
+            return MatchesAny(name, aliases, allowSuffix);
         }
         case CharacterBone::Chest: {
             constexpr std::array aliases = {"chest"sv, "upperchest"sv, "spine2"sv, "spine03"sv};
-            return MatchesAny(name, aliases);
+            return MatchesAny(name, aliases, allowSuffix);
         }
         case CharacterBone::Neck: {
             constexpr std::array aliases = {"neck"sv, "neck1"sv, "mixamorigneck"sv};
-            return MatchesAny(name, aliases);
+            return MatchesAny(name, aliases, allowSuffix);
         }
         case CharacterBone::Head: {
             constexpr std::array aliases = {"head"sv, "mixamorighead"sv};
-            return MatchesAny(name, aliases);
+            return MatchesAny(name, aliases, allowSuffix);
         }
         case CharacterBone::UpperArmL: {
             constexpr std::array aliases = {"upperarml"sv, "leftupperarm"sv, "arml"sv, "mixamorigleftarm"sv};
-            return MatchesAny(name, aliases);
+            return MatchesAny(name, aliases, allowSuffix);
         }
         case CharacterBone::ForearmL: {
             constexpr std::array aliases = {"forearml"sv, "leftforearm"sv, "lowerarml"sv, "mixamorigleftforearm"sv};
-            return MatchesAny(name, aliases);
+            return MatchesAny(name, aliases, allowSuffix);
         }
         case CharacterBone::HandL: {
             constexpr std::array aliases = {"handl"sv, "lefthand"sv, "mixamoriglefthand"sv};
-            return MatchesAny(name, aliases);
+            return MatchesAny(name, aliases, allowSuffix);
         }
         case CharacterBone::UpperArmR: {
             constexpr std::array aliases = {"upperarmr"sv, "rightupperarm"sv, "armr"sv, "mixamorigrightarm"sv};
-            return MatchesAny(name, aliases);
+            return MatchesAny(name, aliases, allowSuffix);
         }
         case CharacterBone::ForearmR: {
             constexpr std::array aliases = {"forearmr"sv, "rightforearm"sv, "lowerarmr"sv, "mixamorigrightforearm"sv};
-            return MatchesAny(name, aliases);
+            return MatchesAny(name, aliases, allowSuffix);
         }
         case CharacterBone::HandR: {
             constexpr std::array aliases = {"handr"sv, "righthand"sv, "mixamorigrighthand"sv};
-            return MatchesAny(name, aliases);
+            return MatchesAny(name, aliases, allowSuffix);
         }
         case CharacterBone::ThighL: {
             constexpr std::array aliases = {"thighl"sv, "leftupleg"sv, "upperlegl"sv, "mixamorigleftupleg"sv};
-            return MatchesAny(name, aliases);
+            return MatchesAny(name, aliases, allowSuffix);
         }
         case CharacterBone::ShinL: {
             constexpr std::array aliases = {"shinl"sv, "leftleg"sv, "lowerlegl"sv, "calfl"sv, "mixamorigleftleg"sv};
-            return MatchesAny(name, aliases);
+            return MatchesAny(name, aliases, allowSuffix);
         }
         case CharacterBone::FootL: {
             constexpr std::array aliases = {"footl"sv, "leftfoot"sv, "anklel"sv, "mixamorigleftfoot"sv};
-            return MatchesAny(name, aliases);
+            return MatchesAny(name, aliases, allowSuffix);
         }
         case CharacterBone::ToeL: {
             constexpr std::array aliases = {"toel"sv, "lefttoe"sv, "lefttoebase"sv, "mixamoriglefttoebase"sv};
-            return MatchesAny(name, aliases);
+            return MatchesAny(name, aliases, allowSuffix);
         }
         case CharacterBone::ThighR: {
             constexpr std::array aliases = {"thighr"sv, "rightupleg"sv, "upperlegr"sv, "mixamorigrightupleg"sv};
-            return MatchesAny(name, aliases);
+            return MatchesAny(name, aliases, allowSuffix);
         }
         case CharacterBone::ShinR: {
             constexpr std::array aliases = {"shinr"sv, "rightleg"sv, "lowerlegr"sv, "calfr"sv, "mixamorigrightleg"sv};
-            return MatchesAny(name, aliases);
+            return MatchesAny(name, aliases, allowSuffix);
         }
         case CharacterBone::FootR: {
             constexpr std::array aliases = {"footr"sv, "rightfoot"sv, "ankler"sv, "mixamorigrightfoot"sv};
-            return MatchesAny(name, aliases);
+            return MatchesAny(name, aliases, allowSuffix);
         }
         case CharacterBone::ToeR: {
             constexpr std::array aliases = {"toer"sv, "righttoe"sv, "righttoebase"sv, "mixamorigrighttoebase"sv};
-            return MatchesAny(name, aliases);
+            return MatchesAny(name, aliases, allowSuffix);
         }
         default:
             return false;
@@ -354,14 +366,23 @@ bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMa
     for (size_t semanticIndex = 0; semanticIndex < kCoreBoneCount; ++semanticIndex) {
         const auto semantic = static_cast<CharacterBone>(semanticIndex);
         int32_t    bestNode = -1;
-        for (uint32_t node = 0; node < outMap.nodeCount; ++node) {
-            if (claimed[node]) {
-                continue;
-            }
-            const CanonicalName canonical = Canonicalize(std::string_view(prefab.nodes[node].name));
-            if (MatchesBone(canonical.View(), semantic)) {
-                bestNode = static_cast<int32_t>(node);
-                break;
+
+        // First search exact normalized aliases across the entire rig. Only
+        // fall back to suffix matching for exporter-specific prefixes. This
+        // prevents Forearm.L from being consumed as UpperArm.L ("armL") and
+        // Sup_Spine from being consumed as Spine when node order is unusual.
+        for (uint32_t pass = 0; pass < 2 && bestNode < 0; ++pass) {
+            const bool allowSuffix = pass != 0;
+            for (uint32_t node = 0; node < outMap.nodeCount; ++node) {
+                if (claimed[node]) {
+                    continue;
+                }
+                const CanonicalName    canonical  = Canonicalize(std::string_view(prefab.nodes[node].name));
+                const std::string_view normalized = StripKnownRigPrefix(canonical.View());
+                if (MatchesBone(normalized, semantic, allowSuffix)) {
+                    bestNode = static_cast<int32_t>(node);
+                    break;
+                }
             }
         }
         if (bestNode >= 0) {
@@ -614,6 +635,23 @@ void ProceduralAnimationSystem::Update(Engine& engine, float dt) noexcept {
                 "[ProceduralAnimation] Rig '{}': {}; mapped {}/{} core bones and {}/{} hair strands ({} deform hair bones).", prefab->virtualPath,
                 complete ? "complete" : "partial", mappedCoreBones, kCoreBoneCount, mappedHairStrands, HairStrandsComponent::kStrandCount, mappedHairBones
             );
+            if (!complete) {
+                for (size_t semantic = 0; semantic < kCoreBoneCount; ++semantic) {
+                    if (boneMap->nodeIndices[semantic] < 0) {
+                        ZHLN::Log("[ProceduralAnimation] Missing core mapping: {}", kCoreBoneLabels[semantic]);
+                    }
+                }
+                for (size_t strand = 0; strand < HairStrandsComponent::kStrandCount; ++strand) {
+                    const size_t rootSemantic = static_cast<size_t>(CharacterBone::HairStart) + strand * HairStrandsComponent::kLinksPerStrand;
+                    bool         strandMapped = false;
+                    for (size_t link = 0; link < HairStrandsComponent::kLinksPerStrand; ++link) {
+                        strandMapped = strandMapped || boneMap->nodeIndices[rootSemantic + link] >= 0;
+                    }
+                    if (!strandMapped) {
+                        ZHLN::Log("[ProceduralAnimation] Missing hair strand mapping: S{:02}", strand + 1);
+                    }
+                }
+            }
         }
         if (!boneMap->initialized || boneMap->nodeCount == 0) {
             continue;

@@ -29,6 +29,7 @@ import ZHLN.Locomotion;
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdlib>
 #include <utility>
 #include <vector>
 
@@ -229,8 +230,14 @@ auto main(int argc, char* argv[]) -> int {
     constexpr float                      kJumpForce = 7.00f;
     const ZHLN::Entity player = ZHLN::Locomotion::SpawnCharacter(*engine, JPH::Vec3(0.0f, 1.20f, 0.0f), dualShapeConfig, kWalkSpeed, kJumpForce);
 
-    // 2. Load GLB and attach procedural animation state
-    AttachCharacterRig(*engine, player, "UziProc.glb");
+    // 2. Load the committed known-good reference GLB by default. Override this
+    // at runtime to compare a project rig against the exact same evaluator:
+    // ZHLN_PROCEDURAL_RIG=UziProc.glb ./build/samples/ProceduralAnimationSample
+    const char*            rigOverride = std::getenv("ZHLN_PROCEDURAL_RIG");
+    const std::string_view rigPath     = rigOverride != nullptr && rigOverride[0] != '\0' ? std::string_view(rigOverride) :
+                                                                                            std::string_view("ProceduralAnimationBaseRig.glb");
+    ZHLN::Log("[Sample] Using procedural rig '{}'. Set ZHLN_PROCEDURAL_RIG to override.", rigPath);
+    AttachCharacterRig(*engine, player, rigPath);
 
     ZHLN::Clock clock;
     float       sampleTime = 0.0f;
