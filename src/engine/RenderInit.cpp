@@ -234,6 +234,8 @@ std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfi
         })
         .and_then([&]() { return InitCullingResources(); })
         .and_then([&]() { return InitBindless(); })
+        .and_then([&]() { return InitLineBuffers(); })
+        .and_then([&]() { return BuildLinePipeline(); })
         .and_then([&]() { return BuildHangGpuPipeline(); })
         .and_then([&]() { return BuildHiZPipeline(); })
         .and_then([&]() { return BuildProceduralBakePipeline(); })
@@ -259,9 +261,7 @@ std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfi
             auto* windowHandle = window.IsTTY() ? nullptr : static_cast<GLFWwindow*>(window.GetNativeHandle());
             return SetupUI(windowHandle);
         })
-        .and_then([&]() {
-            return InitUIDynamicBuffers();
-        })
+        .and_then([&]() { return InitUIDynamicBuffers(); })
         .and_then([&]() -> std::expected<void, Error> {
             uint32_t workerCount = TaskSystem::GetWorkerCount() + 1;
             if (workerCount == 0) {
@@ -404,12 +404,11 @@ std::expected<Vk::ExtensionResult, Error> GetDeviceExtensions(VkPhysicalDevice p
 
     if (!isHeadless) {
         builder.Require(VK_KHR_SWAPCHAIN_EXTENSION_NAME)
-               .Optional(VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME)
-               .Optional(VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME);
+            .Optional(VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME)
+            .Optional(VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME);
     }
 
-    return builder
-        .Optional("VK_EXT_robustness2")
+    return builder.Optional("VK_EXT_robustness2")
         .OptionalIf("VK_KHR_portability_subset", isMac)
         .OptionalGroup(
             {VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_RAY_QUERY_EXTENSION_NAME, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME},

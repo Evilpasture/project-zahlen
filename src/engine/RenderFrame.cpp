@@ -15,12 +15,12 @@ namespace ZHLN {
 
 namespace Diag {
 
-bool DisableGpuCulling() noexcept {
+auto DisableGpuCulling() noexcept -> bool {
     static const bool enabled = std::getenv("ZHLN_NO_GPU_CULLING") != nullptr;
     return enabled;
 }
 
-bool IndirectTelemetryEnabled() noexcept {
+auto IndirectTelemetryEnabled() noexcept -> bool {
     static const bool enabled = std::getenv("ZHLN_DEBUG_INDIRECT") != nullptr;
     return enabled;
 }
@@ -29,7 +29,7 @@ bool IndirectTelemetryEnabled() noexcept {
 
 namespace {
 
-inline RenderFrameResult MapFrameResult(ZHLN_FrameResult res) noexcept {
+inline auto MapFrameResult(ZHLN_FrameResult res) noexcept -> RenderFrameResult {
     using enum RenderFrameResult;
     switch (res) {
         case ZHLN_FrameResult_Ok:
@@ -46,7 +46,7 @@ inline RenderFrameResult MapFrameResult(ZHLN_FrameResult res) noexcept {
 }
 
 template <typename... Ptrs>
-[[nodiscard]] constexpr bool AnyNull(Ptrs... ptrs) noexcept {
+[[nodiscard]] constexpr auto AnyNull(Ptrs... ptrs) noexcept -> bool {
     return (... || (ptrs == nullptr));
 }
 
@@ -56,7 +56,7 @@ template <typename... Ptrs>
 // RenderContext Infrastructure & Lifecycles
 // ============================================================================
 
-std::optional<Extent2D> RenderContext::GetFramebufferSize() const {
+auto RenderContext::GetFramebufferSize() const -> std::optional<Extent2D> {
     Extent2D size = _impl->window.GetSize();
     if (size.width == 0 || size.height == 0) {
         return std::nullopt;
@@ -112,7 +112,7 @@ void RenderContext::Impl::DispatchSkinningPasses() {
     );
 
     if (rtCtx.Valid()) {
-        ZHLN::ScopedTimer profTimer("GPU Skinned BLAS Rebuilds");
+        ZHLN::ScopedTimer profTimerBLAS("GPU Skinned BLAS Rebuilds");
         for (const auto& drawCmd: queues.drawQueue) {
             if (drawCmd.skinnedVertexBuffer != BufferHandle::Invalid) {
                 auto* scratchMesh = meshPool.Resolve(drawCmd.skinnedVertexBuffer).value_or(nullptr);
@@ -156,16 +156,15 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
         const auto& t = drawCmd.instanceData.world;
 
         VkAccelerationStructureInstanceKHR inst {
-            .transform =
-                [&]() {
-                    VkTransformMatrixKHR m;
-                    for (int row = 0; row < 3; ++row) {
-                        for (int col = 0; col < 4; ++col) {
-                            m.matrix[row][col] = t(row, col);
-                        }
+            .transform = [&]() -> VkTransformMatrixKHR {
+                VkTransformMatrixKHR m;
+                for (int row = 0; row < 3; ++row) {
+                    for (int col = 0; col < 4; ++col) {
+                        m.matrix[row][col] = t(row, col);
                     }
-                    return m;
-                }(),
+                }
+                return m;
+            }(),
             .instanceCustomIndex                    = i,
             .mask                                   = 0xFF,
             .instanceShaderBindingTableRecordOffset = 0,
@@ -206,7 +205,7 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
     );
 }
 
-RenderResult RenderContext::BeginFrame() noexcept {
+auto RenderContext::BeginFrame() noexcept -> RenderResult {
     using enum RenderFrameResult;
 
     // 1. Wait for the previous frame at this slot to finish
@@ -228,7 +227,9 @@ RenderResult RenderContext::BeginFrame() noexcept {
 
     // Retrieve GPU profiling results
     float timestampPeriod = _impl->ctx.PhysicalInfo().properties.properties.limits.timestampPeriod;
-    _impl->gpuProfiler.RetrieveResults(frame_index, timestampPeriod, [](std::string_view name, float durationMS) { CPUProfiler::Record(name, durationMS); });
+    _impl->gpuProfiler.RetrieveResults(frame_index, timestampPeriod, [](std::string_view name, float durationMS) -> void {
+        CPUProfiler::Record(name, durationMS);
+    });
 
     _impl->sync.StepTimeline(frame_index);
 
@@ -351,8 +352,8 @@ void RenderContext::Impl::DumpIndirectTelemetry(uint32_t frameNo) noexcept {
     }
 
     if (indirectReadbackReady) {
-        auto  mapped = indirectReadbackBuffers[frame_index].Map();
-        auto* bytes  = static_cast<const uint8_t*>(mapped.data);
+        auto        mapped = indirectReadbackBuffers[frame_index].Map();
+        const auto* bytes  = static_cast<const uint8_t*>(mapped.data);
         if (bytes != nullptr) {
             const auto* pass1 = reinterpret_cast<const VkDrawIndirectCommand*>(bytes + kTelemetryPass1Offset);
             const auto* pass2 = reinterpret_cast<const VkDrawIndirectCommand*>(bytes + kTelemetryPass2Offset);
@@ -368,7 +369,7 @@ void RenderContext::Impl::DumpIndirectTelemetry(uint32_t frameNo) noexcept {
     }
 }
 
-RenderResult RenderContext::EndFrame() noexcept {
+auto RenderContext::EndFrame() noexcept -> RenderResult {
     struct EndFrameGuard {
         RenderContext::Impl* impl;
         explicit EndFrameGuard(RenderContext::Impl* i) noexcept: impl(i) {
@@ -381,10 +382,10 @@ RenderResult RenderContext::EndFrame() noexcept {
                 impl->hasSkinnedThisFrame = false;
             }
         }
-        EndFrameGuard(const EndFrameGuard&)            = delete;
-        EndFrameGuard& operator=(const EndFrameGuard&) = delete;
-        EndFrameGuard(EndFrameGuard&&)                 = delete;
-        EndFrameGuard& operator=(EndFrameGuard&&)      = delete;
+        EndFrameGuard(const EndFrameGuard&)                    = delete;
+        auto operator=(const EndFrameGuard&) -> EndFrameGuard& = delete;
+        EndFrameGuard(EndFrameGuard&&)                         = delete;
+        auto operator=(EndFrameGuard&&) -> EndFrameGuard&      = delete;
     } frameGuard {_impl.get()};
 
     using enum RenderFrameResult;
@@ -422,8 +423,8 @@ RenderResult RenderContext::EndFrame() noexcept {
             // ================================================================
             // HEADLESS PATH: No swapchain. Record and submit directly.
             // ================================================================
-            const auto cmd = _impl->pools.Cmd(_impl->frame_index);
-            _impl->current_cmd  = cmd;
+            const auto cmd     = _impl->pools.Cmd(_impl->frame_index);
+            _impl->current_cmd = cmd;
 
             vkResetFences(_impl->ctx.Device(), 1, &_impl->sync[_impl->frame_index].in_flight);
             _impl->pools[_impl->frame_index].Reset();
@@ -435,6 +436,7 @@ RenderResult RenderContext::EndFrame() noexcept {
             if (_impl->queues.drawQueue.size() > kGpuCullingMaxInstances) {
                 _impl->queues.drawQueue.resize(kGpuCullingMaxInstances);
             }
+            _impl->FlushLineQueue();
 
             _impl->SortDrawQueue();
 
@@ -482,15 +484,8 @@ RenderResult RenderContext::EndFrame() noexcept {
             // Wait on the compute timeline (same as the windowed path) and signal
             // the in-flight fence so BeginFrame can wait on it next frame.
             auto submit_res = Vk::QueueSubmit(
-                _impl->ctx.GraphicsQueue(),
-                static_cast<VkCommandBuffer>(cmd),
-                _impl->sync[_impl->frame_index].compute_timeline,
-                computeSignalValue,
-                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-                VK_NULL_HANDLE,
-                0,
-                VK_PIPELINE_STAGE_2_NONE,
-                _impl->sync[_impl->frame_index].in_flight
+                _impl->ctx.GraphicsQueue(), static_cast<VkCommandBuffer>(cmd), _impl->sync[_impl->frame_index].compute_timeline, computeSignalValue,
+                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE, _impl->sync[_impl->frame_index].in_flight
             );
 
             if (!submit_res) {
@@ -514,7 +509,7 @@ RenderResult RenderContext::EndFrame() noexcept {
                  .computeSemaphore  = _impl->sync[_impl->frame_index].compute_timeline,
                  .computeWaitValue  = computeSignalValue},
                 _impl->frame_index,
-                [this](VkCommandBuffer cmd, uint32_t image_index) {
+                [this](VkCommandBuffer cmd, uint32_t image_index) -> void {
                     _impl->current_cmd         = cmd;
                     _impl->current_image_index = image_index;
 
@@ -525,6 +520,8 @@ RenderResult RenderContext::EndFrame() noexcept {
                     if (_impl->queues.drawQueue.size() > kGpuCullingMaxInstances) {
                         _impl->queues.drawQueue.resize(kGpuCullingMaxInstances);
                     }
+
+                    _impl->FlushLineQueue();
 
                     _impl->SortDrawQueue();
 
@@ -573,7 +570,7 @@ RenderResult RenderContext::EndFrame() noexcept {
                         _impl->RecordIndirectTelemetry(cmd);
                     }
                 },
-                [this]() { _impl->resized = true; }
+                [this]() -> void { _impl->resized = true; }
             );
 
             if (res != ZHLN_FrameResult_Ok && res != ZHLN_FrameResult_Suboptimal) {
@@ -605,7 +602,7 @@ void RenderContext::Impl::ProvokeDeviceLostInternal() const {
         hangGpuPass.Bind(current_cmd);
         Vk::ComputePass::Dispatch(current_cmd, 512, 512, 1);
     } else {
-        Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](auto cmd) {
+        Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](auto cmd) -> auto {
             hangGpuPass.Bind(cmd);
             hangGpuPass.Dispatch(cmd, 512, 512, 1);
         });
