@@ -11,6 +11,7 @@
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/ProceduralAnimation.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -43,7 +44,7 @@ inline const JPH::Vec4 kSkyGround {0.20f, 0.28f, 0.20f, 1.0f};
 auto BuildProceduralArena(ZHLN::Engine& engine) -> void {
     auto& reg = engine.GetRegistry();
 
-    // 1. Atmosphere
+    // 1. Configure Post-Processing Atmosphere via ECS Patch
     for (ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
         ZHLN::ECS::Patch<ZHLN::Components::PostProcessSettingsComponent>(reg, e, [](auto& pp) -> auto {
             pp.ambientExposure = kAmbientExposure;
@@ -53,13 +54,13 @@ auto BuildProceduralArena(ZHLN::Engine& engine) -> void {
         });
     }
 
-    // 2. Terrain
+    // 2. Terrain (220m procedural rolling landscape)
     ZHLN::CreativeWorksFactory::CreateTerrain(
         engine, 128, 220.0f, 12.0f, ZHLN::CreativeWorksFactory::TerrainType::Default,
         ZHLN::CreativeWorksFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = true, .isStaticPhysics = true, .roughness = 0.80f}
     );
 
-    // 3. Center Platform (Top is at Y = 1.0m)
+    // 3. Center Platform
     ZHLN::CreativeWorksFactory::CreateBox(
         engine, JPH::Vec3(10.0f, 0.50f, 10.0f),
         ZHLN::CreativeWorksFactory::SpawnParams {
@@ -67,8 +68,7 @@ auto BuildProceduralArena(ZHLN::Engine& engine) -> void {
         }
     );
 
-    // 4. Thirty-degree grounding ramp (the yellow contact-normal lines should
-    // remain perpendicular to this surface while both feet stay planted).
+    // 4. 30-Degree Grounding Test Ramp
     ZHLN::CreativeWorksFactory::CreateBox(
         engine, JPH::Vec3(4.5f, 0.18f, 2.2f),
         ZHLN::CreativeWorksFactory::SpawnParams {
@@ -96,7 +96,7 @@ auto BuildProceduralArena(ZHLN::Engine& engine) -> void {
         );
     }
 
-    // 5. Static Obstacle Pillars (Testing Wall Hugging)
+    // 6. Obstacle Pillars
     struct PillarDesc {
         float     x, z, width, height;
         JPH::Vec4 color;
@@ -119,13 +119,67 @@ auto BuildProceduralArena(ZHLN::Engine& engine) -> void {
         );
     }
 
-    // 6. Directional Sunlight
+    // 7. Directional Sunlight via Variadic Create
     reg.Create(
         ZHLN::Components::NameComponent {.name = ZHLN::String64("SunLight")}, ZHLN::Components::TransformComponent {.position = kSunPosition},
         ZHLN::Components::LightComponent {
             .type = ZHLN::LightType::Sun, .color = kSunColor, .intensity = kSunIntensity, .direction = JPH::Vec3(0.45f, 1.00f, 0.30f).Normalized()
         }
     );
+}
+
+/**
+ * @brief Attaches a loaded GLB model or generates a procedural fallback rig.
+ */
+auto AttachCharacterRig(ZHLN::Engine& engine, ZHLN::Entity player, std::string_view glbPath) -> void {
+    auto& reg    = engine.GetRegistry();
+    auto* prefab = ZHLN::CreativeWorksFactory::LoadModelPrefab(engine, glbPath);
+
+    ZHLN::ProceduralLocomotionComponent locomotion {
+        .strideLength = 1.25f,
+        .stepHeight   = 0.24f,
+        .legReach     = 0.83f,
+    };
+    ZHLN::HairStrandsComponent      hair {};
+    ZHLN::ProceduralLookAtComponent lookAt {
+        .targetWorldPos = JPH::Vec3(0.0f, 2.0f, 4.0f),
+        .weight         = 0.85f,
+        .maxAngleDeg    = 70.0f,
+    };
+
+    if (prefab != nullptr) {
+        ZHLN::Log("[Sample] GLB model '{}' loaded successfully. Instantiating visual parts...", glbPath);
+
+        // Instantiate visual skinned hierarchy (without physics colliders)
+        std::array<ZHLN::Entity, 64> parts {};
+        uint32_t                     count = ZHLN::CreativeWorksFactory::InstantiatePrefab(
+            engine, *prefab, ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0f, 1.20f, 0.0f), .createPhysics = false, .isAnimated = true},
+            parts.data(), static_cast<uint32_t>(parts.size())
+        );
+
+        // Re-parent spawned visual mesh parts directly under the player CharacterVirtual entity
+        for (uint32_t i = 1; i < count; ++i) {
+            ZHLN::ECS::Patch<ZHLN::Components::HierarchyComponent>(reg, parts[i], [&](auto& hier) -> auto { hier.parent = player; });
+        }
+
+        // Clean up redundant container root entity (parts[0])
+        if (count > 0) {
+            reg.Destroy(parts[0]);
+        }
+
+        // Variadic component registration: AnimatorComponent triggers RigBoneMap discovery
+        reg.Add(
+            player, ZHLN::Components::AnimatorComponent {.prefab = prefab}, ZHLN::RigBoneMap {}, // Initialized lazily on frame 0 by ProceduralAnimationSystem
+            std::move(locomotion), std::move(hair), std::move(lookAt)
+        );
+    } else {
+        ZHLN::Log("[Sample] Notice: '{}' not found. Falling back to in-memory procedural rig.", glbPath);
+
+        ZHLN::RigBoneMap proceduralRig {};
+        ZHLN::BuildStandardProceduralRig(proceduralRig);
+
+        reg.Add(player, std::move(proceduralRig), std::move(locomotion), std::move(hair), std::move(lookAt));
+    }
 }
 
 } // namespace
@@ -161,30 +215,12 @@ auto main(int argc, char* argv[]) -> int {
     engine->InitializeDefaultScene();
     BuildProceduralArena(*engine);
 
-    // Spawn the Jolt CharacterVirtual and attach the allocation-free procedural
-    // pose state. The sample rig is generated in memory, so no external GLB is
-    // required; imported TestRig.glb characters use BuildBoneMap instead.
+    // 1. Spawn CharacterVirtual with Overgrowth Dual-Shape Hull
     const ZHLN::Physics::DualShapeConfig dualShapeConfig {};
     const ZHLN::Entity                   player = ZHLN::Locomotion::SpawnCharacter(*engine, JPH::Vec3(0.0f, 1.20f, 0.0f), dualShapeConfig);
 
-    ZHLN::RigBoneMap debugRig;
-    ZHLN::BuildStandardProceduralRig(debugRig);
-    engine->GetRegistry().Add(player, std::move(debugRig));
-    engine->GetRegistry().Add(
-        player, ZHLN::ProceduralLocomotionComponent {
-                    .strideLength = 1.25f,
-                    .stepHeight   = 0.24f,
-                    .legReach     = 0.83f,
-                }
-    );
-    engine->GetRegistry().Add(player, ZHLN::HairStrandsComponent {});
-    engine->GetRegistry().Add(
-        player, ZHLN::ProceduralLookAtComponent {
-                    .targetWorldPos = JPH::Vec3(0.0f, 2.0f, 4.0f),
-                    .weight         = 0.85f,
-                    .maxAngleDeg    = 70.0f,
-                }
-    );
+    // 2. Load GLB and attach procedural animation state
+    AttachCharacterRig(*engine, player, "UziProc.glb");
 
     ZHLN::Clock clock;
     float       sampleTime = 0.0f;
@@ -197,9 +233,11 @@ auto main(int argc, char* argv[]) -> int {
         const auto dt = std::min(clock.GetDeltaTime(), 0.05f);
         engine->ProcessEvents();
 
-        // 1. Mouse Look Delta
-        for (ZHLN::Entity e: engine->GetRegistry().GetEntitiesWith<ZHLN::Components::InputStateComponent>()) {
-            ZHLN::ECS::Patch<ZHLN::Components::InputStateComponent>(engine->GetRegistry(), e, [&](auto& st) -> auto {
+        auto& registry = engine->GetRegistry();
+
+        // 1. Mouse Look Delta via Multi-Component Patch
+        for (ZHLN::Entity e: registry.GetEntitiesWith<ZHLN::Components::InputStateComponent>()) {
+            ZHLN::ECS::Patch<ZHLN::Components::InputStateComponent>(registry, e, [&](auto& st) -> auto {
                 if (st.needsResize) {
                     engine->GetRenderContext().SetResolution(st.newSize);
                     st.needsResize = false;
@@ -211,31 +249,26 @@ auto main(int argc, char* argv[]) -> int {
             });
         }
 
-        // Give the distributed spine/chest/head look-at a slowly moving target.
+        // 2. Update Procedural Look-At Orbit via Multi-Component Patch
         sampleTime += dt;
-        auto& registry = engine->GetRegistry();
-        if (const auto* playerTransform = registry.Get<ZHLN::Components::TransformComponent>(player)) {
-            ZHLN::ECS::Patch<ZHLN::ProceduralLookAtComponent>(registry, player, [&](auto& lookAt) {
-                lookAt.targetWorldPos = playerTransform->position + playerTransform->rotation * JPH::Vec3(std::sin(sampleTime * 0.65f) * 2.2f, 1.65f, 4.0f);
-            });
-        }
+        ZHLN::ECS::Patch<ZHLN::Components::TransformComponent, ZHLN::ProceduralLookAtComponent>(registry, player, [&](const auto& trans, auto& lookAt) -> auto {
+            lookAt.targetWorldPos = trans.position + trans.rotation * JPH::Vec3(std::sin(sampleTime * 0.65f) * 2.2f, 1.65f, 4.0f);
+        });
 
-        // 2. Synchronized engine tick: Input -> CharacterVirtual -> procedural
-        // animation -> transform/culling -> Vulkan render.
+        // 3. Synchronized Engine Tick
         const auto status = engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
         if (status == ZHLN::GameplayStatus::RequestQuit) {
             engine->GetWindow().Close();
             break;
         }
 
-        // 3. Overlay both the collision hull and the evaluated 140-control pose.
+        // 4. Render Visual Collision Rig & Evaluated Procedural Skeleton
         ZHLN::Locomotion::RenderDebugRig(*engine, player, dualShapeConfig);
-        const auto* playerTransform = registry.Get<ZHLN::Components::TransformComponent>(player);
-        const auto* gait            = registry.Get<ZHLN::ProceduralLocomotionComponent>(player);
-        const auto* rig             = registry.Get<ZHLN::RigBoneMap>(player);
-        if (playerTransform != nullptr && rig != nullptr) {
-            ZHLN::DrawProceduralDebugRig(engine->GetRenderContext(), playerTransform->position, playerTransform->rotation, *rig, gait);
-        }
+
+        ZHLN::ECS::Patch<ZHLN::Components::TransformComponent, ZHLN::RigBoneMap>(registry, player, [&](const auto& trans, const auto& rig) -> auto {
+            const auto* gait = registry.Get<ZHLN::ProceduralLocomotionComponent>(player);
+            ZHLN::DrawProceduralDebugRig(engine->GetRenderContext(), trans.position, trans.rotation, rig, gait);
+        });
     }
 
     ZHLN::TaskSystem::Shutdown();
