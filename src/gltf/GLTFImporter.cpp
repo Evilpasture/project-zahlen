@@ -309,6 +309,10 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job) {
         if (prim.material->normal_texture.texture != nullptr) {
             job.normalImage = prim.material->normal_texture.texture->image;
         }
+
+        if (prim.material->emissive_texture.texture != nullptr) {
+            job.emissiveImage = prim.material->emissive_texture.texture->image;
+        }
     }
 
     const size_t vertexCount = posAcc->count;

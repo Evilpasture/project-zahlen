@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <filesystem>
 #include <miniaudio.h>
 #include <numbers>
 #include <type_traits>
@@ -533,6 +534,7 @@ AudioContext::~AudioContext() {
         // Clean up active bursts
         for (auto* burst: _impl->activeBursts) {
             ma_sound_uninit(&burst->sound);
+            ma_biquad_uninit(&burst->biquad, nullptr);
             ma_noise_uninit(&burst->noise, nullptr);
             ma_data_source_uninit(&burst->base);
             _impl->burstPool.Destroy(burst);
@@ -547,6 +549,7 @@ AudioContext::~AudioContext() {
         // Clean up active loop synths
         for (auto* synth: _impl->activeLoopSynths) {
             ma_sound_uninit(&synth->sound);
+            ma_biquad_uninit(&synth->biquad, nullptr);
             ma_waveform_uninit(&synth->waveform1);
             ma_waveform_uninit(&synth->waveform2);
             ma_data_source_uninit(&synth->base);
@@ -597,6 +600,7 @@ void AudioContext::UpdateListener(const JPH::Vec3& position, const JPH::Vec3& di
         _impl->activeBursts | EraseIf([&](NoiseBurstData* burst) {
             if (ma_sound_at_end(&burst->sound) == MA_TRUE || burst->currentFrame >= burst->totalFrames) {
                 ma_sound_uninit(&burst->sound);
+                ma_biquad_uninit(&burst->biquad, nullptr);
                 ma_noise_uninit(&burst->noise, nullptr);
                 ma_data_source_uninit(&burst->base);
                 _impl->burstPool.Destroy(burst);
@@ -625,6 +629,7 @@ void AudioContext::UpdateListener(const JPH::Vec3& position, const JPH::Vec3& di
         _impl->activeLoopSynths | EraseIf([&](LoopSynthData* synth) {
             if (ma_sound_at_end(&synth->sound) == MA_TRUE || synth->isFinished.load(std::memory_order::relaxed)) {
                 ma_sound_uninit(&synth->sound);
+                ma_biquad_uninit(&synth->biquad, nullptr);
                 ma_waveform_uninit(&synth->waveform1);
                 ma_waveform_uninit(&synth->waveform2);
                 ma_data_source_uninit(&synth->base);
@@ -708,6 +713,7 @@ void AudioContext::PlayNoiseBurst3D(
 
     ma_result result = ma_sound_init_from_data_source(&_impl->engine, &burst->base, flags, nullptr, &burst->sound);
     if (result != MA_SUCCESS) {
+        ma_biquad_uninit(&burst->biquad, nullptr);
         ma_noise_uninit(&burst->noise, nullptr);
         ma_data_source_uninit(&burst->base);
         _impl->burstPool.Destroy(burst);
@@ -795,6 +801,7 @@ auto AudioContext::CreateLoopSynth(AudioWaveformType waveType1, AudioWaveformTyp
 
     ma_result result = ma_sound_init_from_data_source(&_impl->engine, &synth->base, MA_SOUND_FLAG_NO_SPATIALIZATION, nullptr, &synth->sound);
     if (result != MA_SUCCESS) {
+        ma_biquad_uninit(&synth->biquad, nullptr);
         ma_waveform_uninit(&synth->waveform1);
         ma_waveform_uninit(&synth->waveform2);
         ma_data_source_uninit(&synth->base);
@@ -843,6 +850,7 @@ void AudioContext::DestroyLoopSynth(void* handle) {
     });
 
     ma_sound_uninit(&synth->sound);
+    ma_biquad_uninit(&synth->biquad, nullptr);
     ma_waveform_uninit(&synth->waveform1);
     ma_waveform_uninit(&synth->waveform2);
     ma_data_source_uninit(&synth->base);
@@ -850,7 +858,7 @@ void AudioContext::DestroyLoopSynth(void* handle) {
 }
 
 void AudioContext::PlayOneShot(const std::string& filepath, float /*volume*/) {
-    if (!_impl->initialized) {
+    if (!_impl->initialized || !std::filesystem::exists(filepath)) {
         return;
     }
 
@@ -858,7 +866,7 @@ void AudioContext::PlayOneShot(const std::string& filepath, float /*volume*/) {
 }
 
 void AudioContext::PlayOneShot3D(const std::string& filepath, const JPH::Vec3& position, float volume) {
-    if (!_impl->initialized) {
+    if (!_impl->initialized || !std::filesystem::exists(filepath)) {
         return;
     }
 

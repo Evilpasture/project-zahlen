@@ -890,13 +890,15 @@ void BlitPass::Execute(
                     );
                 }
             }
-            if (!ctx.window.IsTTY()) {
+            if (!ctx.window.IsTTY() && !ctx.window.IsHeadless()) {
                 ImGui::Render();
                 ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
             }
         });
     }
-    Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(cmd, swapchainTarget.handle);
+    if (ctx.presentation.swapchain.Valid()) {
+        Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(cmd, swapchainTarget.handle);
+    }
 }
 
 void ViewmodelPass::Execute(
