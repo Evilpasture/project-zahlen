@@ -129,9 +129,34 @@ auto CreateMeshShape(const VertexPosition* vertices, uint32_t vertexCount, const
 auto CreateHeightFieldShape(const float* heights, int sampleCount, float worldSize) -> JPH::ShapeRefC;
 auto GetBodyID(const PhysicsWorld& world, ZHLN::Entity handle) -> JPH::BodyID;
 
+/**
+ * @brief David Rosen (Overgrowth) Dual-Shape Rig parameters:
+ *  - Lower Lifter Sphere: rides ground, climbs stairs, hoists steps.
+ *  - Upper Bumper Oval: slides along walls and handles torso/head obstacles.
+ */
+struct DualShapeConfig {
+    float lifterRadius   = 0.40f; // Half-extent (diameter 0.80m)
+    float bumperRadiusXZ = 0.50f; // Half-extent (width 1.00m)
+    float bumperRadiusY  = 0.70f; // Half-extent (height 1.40m)
+
+    [[nodiscard]] constexpr auto GetLifterOffsetY() const noexcept -> float {
+        return lifterRadius;
+    }
+
+    // Exact analytical equator cut: Y_B = Y_L + R_y * sqrt(1 - (R_L / R_xz)^2)
+    [[nodiscard]] constexpr auto GetBumperOffsetY() const noexcept -> float {
+        const float ratio = lifterRadius / bumperRadiusXZ;
+        if (ratio >= 1.0f) {
+            return lifterRadius;
+        }
+        return lifterRadius + (bumperRadiusY * std::sqrt(1.0f - (ratio * ratio)));
+    }
+};
+
+auto CreateDualShape(const DualShapeConfig& config = {}) -> JPH::ShapeRefC;
+
 } // namespace Physics
 
-static_assert(std::is_trivially_copyable_v<ZHLN::Entity>);
 static_assert((std::is_trivially_default_constructible_v<ZHLN::Entity> && std::is_trivially_copyable_v<ZHLN::Entity>) );
 
 class ZHLN_API PhysicsContext {
@@ -182,7 +207,13 @@ class ZHLN_API PhysicsContext {
         uint32_t              mask     = 0xFFFFFFFF
     ) -> ZHLN::Entity;
 
-    auto CreateCharacter(JPH::RVec3Arg position, uint32_t category = 0xFFFFFFFF, uint32_t mask = 0xFFFFFFFF) -> ZHLN::Entity;
+    // Overloaded CreateCharacter supporting native Dual-Shape compound hulls
+    auto CreateCharacter(JPH::RVec3Arg position, const Physics::DualShapeConfig& config = {}, uint32_t category = 0xFFFFFFFF, uint32_t mask = 0xFFFFFFFF)
+        -> ZHLN::Entity;
+
+    auto CreateCharacter(JPH::RVec3Arg position, uint32_t category, uint32_t mask = 0xFFFFFFFF) -> ZHLN::Entity {
+        return CreateCharacter(position, Physics::DualShapeConfig {}, category, mask);
+    }
 
     auto CreateSkeletalRagdoll(JPH::Ref<JPH::Skeleton> skeleton, const std::vector<Physics::RagdollPartParams>& parts) -> JPH::Ref<JPH::Ragdoll>;
 

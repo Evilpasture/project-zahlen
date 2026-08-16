@@ -84,7 +84,6 @@ void MovementSystem(Engine& engine, float dt) {
                 }
             });
 
-            // FIXED: Using pc.IsCharacterOnGround
             bool onGround = pc.IsCharacterOnGround(phys->physicsHandle);
 
             move.wasGrounded = move.isGrounded;
@@ -97,30 +96,22 @@ void MovementSystem(Engine& engine, float dt) {
                 move.landingTimer -= dt;
             }
 
-            if (onGround && move.jumpRequested && move.jumpDelayTimer <= 0.0f) {
-                move.jumpDelayTimer = 0.15f;
-            }
-            move.jumpRequested = false;
-
+            // 1. Accumulate gravity or handle jumping
             if (onGround) {
-                if (move.jumpDelayTimer > 0.0f) {
-                    move.jumpDelayTimer -= dt;
-                    if (move.jumpDelayTimer <= 0.0f) {
-                        move.currentYVel = move.jumpForce;
-                        move.isGrounded  = false;
-                    } else {
-                        move.currentYVel = -1.0f;
-                    }
+                if (move.jumpRequested) {
+                    move.currentYVel   = move.jumpForce;
+                    move.isGrounded    = false;
+                    move.jumpRequested = false;
                 } else {
-                    move.currentYVel = -1.0f;
+                    move.currentYVel = 0.0f;
                 }
             } else {
-                move.jumpDelayTimer = 0.0f;
-                move.currentYVel -= 30.0f * dt;
+                move.currentYVel -= 32.0f * dt; // <-- Integrates gravity when in air
             }
 
-            float     speedMultiplier = (move.jumpDelayTimer > 0.0f) ? 0.25f : 1.0f;
-            JPH::Vec3 velocity        = {move.inputX * move.speed * speedMultiplier, move.currentYVel, move.inputZ * move.speed * speedMultiplier};
+            // 2. Feed velocity into Jolt CharacterVirtual
+            const float     speedMultiplier = (move.jumpDelayTimer > 0.0f) ? 0.25f : 1.0f;
+            const JPH::Vec3 velocity        = {move.inputX * move.speed * speedMultiplier, move.currentYVel, move.inputZ * move.speed * speedMultiplier};
 
             pc.SetCharacterVelocity(phys->physicsHandle, velocity);
 

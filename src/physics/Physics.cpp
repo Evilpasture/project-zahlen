@@ -21,6 +21,7 @@
 #include <Jolt/Physics/Collision/Shape/MeshShape.h>
 #include <Jolt/Physics/Collision/Shape/PlaneShape.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
+#include <Jolt/Physics/Collision/Shape/StaticCompoundShape.h>
 #include <Jolt/Physics/Constraints/HingeConstraint.h>
 #include <Jolt/Physics/Constraints/MotorSettings.h>
 #include <Jolt/Physics/Constraints/SliderConstraint.h>
@@ -271,12 +272,13 @@ void PhysicsContext::Step(float deltaTime) {
 
     _impl->physicsSystem.Update(deltaTime, 2, _impl->tempAllocator.get(), &_impl->jobSystem);
 
-    const JPH::CharacterVirtual::ExtendedUpdateSettings updateSettings {
-        .mStickToFloorStepDown = JPH::Vec3(0.0f, -0.5f, 0.0f),
-        .mWalkStairsStepUp     = JPH::Vec3(0.0f, 0.5f, 0.0f),
-    };
-
     for (auto* character: _impl->activeCharacters) {
+        // Disable floor-sticking when character has upward velocity (jumping)
+        JPH::CharacterVirtual::ExtendedUpdateSettings updateSettings {
+            .mStickToFloorStepDown = (character->GetLinearVelocity().GetY() <= 0.01f) ? JPH::Vec3(0.0f, -0.25f, 0.0f) : JPH::Vec3::sZero(),
+            .mWalkStairsStepUp     = JPH::Vec3(0.0f, 0.40f, 0.0f),
+        };
+
         character->ExtendedUpdate(
             deltaTime, _impl->physicsSystem.GetGravity(), updateSettings, _impl->physicsSystem.GetDefaultBroadPhaseLayerFilter(Layers::MOVING),
             _impl->physicsSystem.GetDefaultLayerFilter(Layers::MOVING), {}, {}, *_impl->tempAllocator
@@ -505,6 +507,25 @@ auto CreateHeightFieldShape(const float* heights, int sampleCount, float worldSi
     return result.HasError() ? nullptr : result.Get();
 }
 
+auto CreateDualShape(const DualShapeConfig& config) -> JPH::ShapeRefC {
+    JPH::StaticCompoundShapeSettings compound;
+
+    // 1. Lower Lifter Sphere (Bottom touches Y = 0.0m, Center at Y = R_L)
+    JPH::ShapeRefC lifterShape = new JPH::SphereShape(config.lifterRadius);
+    compound.AddShape(JPH::Vec3(0.0f, config.GetLifterOffsetY(), 0.0f), JPH::Quat::sIdentity(), lifterShape);
+
+    // 2. Upper Bumper Oval / Spheroid Capsule (Centered at Y_B with exact equator cut)
+    const float    cylinderHalfHeight = std::max(0.001f, config.bumperRadiusY - config.bumperRadiusXZ);
+    JPH::ShapeRefC bumperShape        = (config.bumperRadiusY > config.bumperRadiusXZ) ?
+                                            static_cast<JPH::ShapeRefC>(new JPH::CapsuleShape(cylinderHalfHeight, config.bumperRadiusXZ)) :
+                                            static_cast<JPH::ShapeRefC>(new JPH::SphereShape(config.bumperRadiusXZ));
+
+    compound.AddShape(JPH::Vec3(0.0f, config.GetBumperOffsetY(), 0.0f), JPH::Quat::sIdentity(), bumperShape);
+
+    auto res = compound.Create();
+    return res.HasError() ? nullptr : res.Get();
+}
+
 } // namespace Physics
 
 auto PhysicsContext::CreateMeshBody(
@@ -524,17 +545,27 @@ auto PhysicsContext::CreateMeshBody(
     return CreateRigidBody(shape, pos, rot, JPH::EMotionType::Static, Layers::NON_MOVING, 0, category, mask);
 }
 
-auto PhysicsContext::CreateCharacter(JPH::RVec3Arg position, uint32_t category, uint32_t mask) -> ZHLN::Entity {
+auto PhysicsContext::CreateCharacter(JPH::RVec3Arg position, const Physics::DualShapeConfig& config, uint32_t category, uint32_t mask) -> ZHLN::Entity {
     auto* impl  = _impl.get();
     auto& world = impl->world;
 
-    JPH::ShapeRefC charShape = GetOrCreateShape(Physics::ShapeType::Capsule, 0.5f, 0.3f);
+    JPH::ShapeRefC charShape = Physics::CreateDualShape(config);
+    if (charShape == nullptr) {
+        charShape = GetOrCreateShape(Physics::ShapeType::Capsule, 0.5f, 0.3f);
+    }
 
     ZHLN::Entity handle = world.AllocateHandle();
     ZHLN::Lock(world.sync.shadowLock, [&] -> void {
         JPH::CharacterVirtualSettings settings;
-        settings.mShape       = charShape;
-        settings.mMaxStrength = 100.0f;
+        settings.mShape                       = charShape;
+        settings.mMaxSlopeAngle               = JPH::DegreesToRadians(45.0f);
+        settings.mMaxStrength                 = 100.0f;
+        settings.mBackFaceMode                = JPH::EBackFaceMode::CollideWithBackFaces;
+        settings.mCharacterPadding            = 0.02f;
+        settings.mPenetrationRecoverySpeed    = 1.0f;
+        settings.mEnhancedInternalEdgeRemoval = true;
+        // Accept ground contacts across the entire lower lifter sphere (y <= lifterRadius)
+        settings.mSupportingVolume = JPH::Plane(JPH::Vec3::sAxisY(), -config.lifterRadius);
 
         auto* character = new JPH::CharacterVirtual(&settings, position, JPH::Quat::sIdentity(), &impl->physicsSystem);
         character->SetListener(&impl->characterListener);
@@ -547,9 +578,9 @@ auto PhysicsContext::CreateCharacter(JPH::RVec3Arg position, uint32_t category, 
         impl->activeCharacters.push_back(character);
 
         auto dense                      = static_cast<uint32_t>(world.count.fetch_add(1, std::memory_order::relaxed));
+        world.bodyIDs[dense]            = JPH::BodyID();
         world.slotToDense[handle.index] = dense;
         world.denseToSlot[dense]        = handle.index;
-        world.bodyIDs[dense]            = JPH::BodyID();
         world.slotStates[handle.index].store(SLOT_CHARACTER, std::memory_order::release);
         world.categories[dense] = category;
         world.masks[dense]      = mask;

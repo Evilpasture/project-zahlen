@@ -180,8 +180,8 @@ struct RenderAnimatedMeshTestSuite {
                     visibleCharacterPixels++;
                 }
 
-                // Detect purple/magenta emissive visor glow (high R & B, lower G)
-                if (r > 120 && b > 150 && g < 100) {
+                // Detect purple/magenta emissive visor glow or purple hair (Blue & Red dominant over Green)
+                if (b > 120 && r > 90 && b > g && r > (g - 20) && (b - g) > 20) {
                     purpleEmissivePixels++;
                 }
             }

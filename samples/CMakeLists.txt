@@ -21,6 +21,7 @@ foreach(SAMPLE_SRC IN LISTS SAMPLE_SOURCES)
         CXX_STANDARD 26
         CXX_STANDARD_REQUIRED ON
         CXX_EXTENSIONS OFF
+        CXX_SCAN_FOR_MODULES ON
     )
 
     target_link_libraries(${SAMPLE_NAME} PRIVATE
@@ -29,6 +30,11 @@ foreach(SAMPLE_SRC IN LISTS SAMPLE_SOURCES)
         Jolt
         zahlen_warnings
     )
+
+    # Link the extras toolkit library to import modules (e.g., ZHLN.Locomotion)
+    if(TARGET zahlen_extras)
+        target_link_libraries(${SAMPLE_NAME} PRIVATE zahlen_extras)
+    endif()
 
     target_compile_definitions(${SAMPLE_NAME} PRIVATE
         JPH_DOUBLE_PRECISION
