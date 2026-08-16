@@ -178,7 +178,13 @@ auto AttachCharacterRig(ZHLN::Engine& engine, ZHLN::Entity player, std::string_v
 
         // Variadic component registration: AnimatorComponent triggers RigBoneMap discovery
         reg.Add(
-            player, ZHLN::Components::AnimatorComponent {.prefab = prefab}, ZHLN::RigBoneMap {}, // Initialized lazily on frame 0 by ProceduralAnimationSystem
+            player,
+            ZHLN::Components::AnimatorComponent {
+                .currentTrackIdx = prefab->animations.empty() ? -1 : 0,
+                .currentLoop     = true,
+                .prefab          = prefab,
+            },
+            ZHLN::RigBoneMap {}, // Initialized lazily on frame 0 by ProceduralAnimationSystem
             std::move(locomotion), std::move(hair), std::move(lookAt)
         );
     } else {

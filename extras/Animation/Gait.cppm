@@ -32,6 +32,19 @@ namespace Detail {
     return value < 0.0f ? value + 1.0f : value;
 }
 
+inline void SpringScalar(float& value, float& velocity, float target, float dt, float frequency, float damping) noexcept {
+    const float safeDt   = std::clamp(dt, 0.0f, 0.05f);
+    const float omega    = kGaitTwoPi * std::max(frequency, 0.01f);
+    const float f        = 1.0f + 2.0f * safeDt * std::max(damping, 0.0f) * omega;
+    const float oo       = omega * omega;
+    const float hoo      = safeDt * oo;
+    const float hhoo     = safeDt * hoo;
+    const float invDet   = 1.0f / (f + hhoo);
+    const float oldValue = value;
+    value                = (f * value + safeDt * velocity + hhoo * target) * invDet;
+    velocity             = (velocity + hoo * (target - oldValue)) * invDet;
+}
+
 [[nodiscard]] inline bool IsDescendant(const RigBoneMap& map, int32_t node, int32_t ancestor) noexcept {
     const uint32_t safeNodeCount = std::min<uint32_t>(map.nodeCount, static_cast<uint32_t>(kMaxRigNodes));
     if (node < 0 || ancestor < 0 || node >= static_cast<int32_t>(safeNodeCount) || ancestor >= static_cast<int32_t>(safeNodeCount)) {
@@ -78,12 +91,11 @@ inline void TranslateSubtree(const RigBoneMap& map, JPH::Mat44* transforms, int3
     return JPH::Mat44::sRotationTranslation(MatrixRotation(matrix), matrix.GetTranslation());
 }
 
-inline void RotateSubtree(const RigBoneMap& map, JPH::Mat44* transforms, int32_t rootNode, JPH::QuatArg rotation) noexcept {
+inline void RotateSubtreeAroundPivot(const RigBoneMap& map, JPH::Mat44* transforms, int32_t rootNode, JPH::Vec3Arg pivot, JPH::QuatArg rotation) noexcept {
     if (transforms == nullptr || rootNode < 0 || rootNode >= static_cast<int32_t>(map.nodeCount)) {
         return;
     }
 
-    const JPH::Vec3 pivot = transforms[rootNode].GetTranslation();
     for (uint32_t node = 0; node < map.nodeCount; ++node) {
         if (!IsDescendant(map, static_cast<int32_t>(node), rootNode)) {
             continue;
@@ -95,6 +107,13 @@ inline void RotateSubtree(const RigBoneMap& map, JPH::Mat44* transforms, int32_t
         const JPH::Quat oldRotation = MatrixRotation(transforms[node]);
         transforms[node]            = JPH::Mat44::sRotationTranslation((rotation * oldRotation).Normalized(), newPosition).PreScaled(oldScale);
     }
+}
+
+inline void RotateSubtree(const RigBoneMap& map, JPH::Mat44* transforms, int32_t rootNode, JPH::QuatArg rotation) noexcept {
+    if (transforms == nullptr || rootNode < 0 || rootNode >= static_cast<int32_t>(map.nodeCount)) {
+        return;
+    }
+    RotateSubtreeAroundPivot(map, transforms, rootNode, transforms[rootNode].GetTranslation(), rotation);
 }
 
 [[nodiscard]] inline int32_t Node(const RigBoneMap& map, CharacterBone bone) noexcept {
@@ -121,8 +140,9 @@ inline void EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg veloc
     const float speed     = std::sqrt(velocity.GetX() * velocity.GetX() + velocity.GetZ() * velocity.GetZ());
     const float cycleRate = speed / std::max(gait.strideLength, 0.01f);
     gait.phase            = Detail::WrapUnit(gait.phase + cycleRate * std::max(dt, 0.0f));
+    gait.strideWheelAngle = gait.phase * kGaitTwoPi;
 
-    auto evaluateFoot = [&](float phaseOffset, JPH::Vec3& target, float& plantWeight) {
+    auto evaluateFoot = [&](float phaseOffset, JPH::Vec3& target, float& plantWeight, float& passWeight, float& reachWeight) {
         const float p       = Detail::WrapUnit(gait.phase + phaseOffset);
         const bool  isSwing = p < 0.5f;
         const float t       = isSwing ? p * 2.0f : (p - 0.5f) * 2.0f;
@@ -136,10 +156,15 @@ inline void EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg veloc
         target.SetY(y);
         target.SetZ(z);
         plantWeight = isSwing ? 0.0f : 1.0f;
+
+        const float wheelPass  = std::sin(kGaitTwoPi * p);
+        const float wheelReach = std::cos(kGaitTwoPi * p);
+        passWeight             = wheelPass * wheelPass;
+        reachWeight            = wheelReach * wheelReach;
     };
 
-    evaluateFoot(0.0f, gait.localFootTargetL, gait.plantWeightL);
-    evaluateFoot(0.5f, gait.localFootTargetR, gait.plantWeightR);
+    evaluateFoot(0.0f, gait.localFootTargetL, gait.plantWeightL, gait.passWeightL, gait.reachWeightL);
+    evaluateFoot(0.5f, gait.localFootTargetR, gait.plantWeightR, gait.passWeightR, gait.reachWeightR);
     gait.localFootTargetL.SetX(0.14f);
     gait.localFootTargetR.SetX(-0.14f);
 
@@ -157,13 +182,39 @@ inline void EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg veloc
         gait.pelvisSway = std::sin(kGaitTwoPi * gait.phase) * 0.035f;
     }
 
-    gait.forwardLean        = std::clamp(-gait.directionalAcceleration.GetZ() * 0.018f, -0.22f, 0.22f);
-    const float centripetal = speed * angularVelocity;
-    gait.lateralBank        = std::clamp(gait.directionalAcceleration.GetX() * 0.008f - centripetal * 0.018f, -0.28f, 0.28f);
+    const float targetForwardLean = std::clamp(-gait.directionalAcceleration.GetZ() * 0.018f, -0.22f, 0.22f);
+    const float centripetal       = speed * angularVelocity;
+    const float targetLateralBank = std::clamp(gait.directionalAcceleration.GetX() * 0.008f - centripetal * 0.018f, -0.28f, 0.28f);
+    Detail::SpringScalar(gait.forwardLean, gait.tiltPitchVelocity, targetForwardLean, dt, 5.5f, 0.88f);
+    Detail::SpringScalar(gait.lateralBank, gait.tiltRollVelocity, targetLateralBank, dt, 5.5f, 0.88f);
 }
 
 inline void EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg velocity, float dt) noexcept {
     EvaluateGait(gait, velocity, 0.0f, dt);
+}
+
+/** Rotates the complete posed body around an estimated center of mass. */
+inline void ApplyAccelerationTilt(ProceduralLocomotionComponent& gait, JPH::Mat44* nodeTransforms, const RigBoneMap& map) noexcept {
+    if (nodeTransforms == nullptr || map.nodeCount == 0) {
+        return;
+    }
+
+    const int32_t hipsNode  = Detail::Node(map, CharacterBone::Hips);
+    const int32_t chestNode = Detail::Node(map, CharacterBone::Chest);
+    if (hipsNode < 0 || hipsNode >= static_cast<int32_t>(map.nodeCount)) {
+        return;
+    }
+
+    const JPH::Vec3 hipsPosition  = nodeTransforms[hipsNode].GetTranslation();
+    const JPH::Vec3 chestPosition = chestNode >= 0 && chestNode < static_cast<int32_t>(map.nodeCount) ? nodeTransforms[chestNode].GetTranslation() :
+                                                                                                        hipsPosition + JPH::Vec3(0.0f, 0.35f, 0.0f);
+    // Approximate the humanoid COM from pelvis and torso masses. This is a
+    // physical weighted center, not an animation interpolation.
+    gait.centerOfMassModel = (hipsPosition * 0.68f + chestPosition * 0.32f);
+
+    const JPH::Quat pitch = JPH::Quat::sRotation(JPH::Vec3::sAxisX(), gait.forwardLean);
+    const JPH::Quat roll  = JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), gait.lateralBank);
+    Detail::RotateSubtreeAroundPivot(map, nodeTransforms, hipsNode, gait.centerOfMassModel, (pitch * roll).Normalized());
 }
 
 /** Stage 3: terrain projection, pelvis reach correction, and analytic leg IK. */
@@ -320,7 +371,7 @@ inline void SolveLegGrounding(
     solveLeg(CharacterBone::ThighR, CharacterBone::ShinR, CharacterBone::FootR, CharacterBone::ToeR, targetModelR, contactR.normal);
 }
 
-/** Stage 4: torso inertia, anti-phase arm swing, and distributed look-at. */
+/** Stage 4: anti-phase arm swing and distributed look-at. */
 inline void SolveUpperBody(
     const ProceduralLocomotionComponent& gait,
     const ProceduralLookAtComponent*     lookAt,
@@ -331,22 +382,6 @@ inline void SolveUpperBody(
 ) noexcept {
     if (nodeTransforms == nullptr || map.nodeCount == 0) {
         return;
-    }
-
-    const JPH::Quat lean    = JPH::Quat::sRotation(JPH::Vec3::sAxisX(), gait.forwardLean);
-    const JPH::Quat bank    = JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), gait.lateralBank);
-    const JPH::Quat inertia = (lean * bank).Normalized();
-
-    const std::array<std::pair<CharacterBone, float>, 3> torsoDistribution = {{
-        {CharacterBone::Spine, 0.25f},
-        {CharacterBone::SupSpine, 0.30f},
-        {CharacterBone::Chest, 0.45f},
-    }};
-    for (const auto& [bone, weight]: torsoDistribution) {
-        const int32_t node = Detail::Node(map, bone);
-        if (node >= 0) {
-            Detail::RotateSubtree(map, nodeTransforms, node, JPH::Quat::sIdentity().SLERP(inertia, weight).Normalized());
-        }
     }
 
     const float horizontalSpeed =

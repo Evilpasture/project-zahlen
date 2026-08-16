@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdio>
 #include <expected>
+#include <numbers>
 #include <string_view>
 
 import ZHLN.Gait;
@@ -121,7 +122,29 @@ struct ProceduralAnimationTestSuite {
             const bool phaseIsDistanceDriven = std::abs(gait.phase - 0.625f) < 0.0001f;
             const bool feetAreOpposed        = gait.plantWeightL != gait.plantWeightR;
             const bool accelerationIsFinite  = std::isfinite(gait.directionalAcceleration.GetZ());
-            if (!phaseIsDistanceDriven || !feetAreOpposed || !accelerationIsFinite) {
+            const bool wheelTracksPhase      = std::abs(gait.strideWheelAngle - gait.phase * 2.0f * std::numbers::pi_v<float>) < 0.0001f;
+            const bool passReachPartition    = std::abs(gait.passWeightL + gait.reachWeightL - 1.0f) < 0.0001f;
+            if (!phaseIsDistanceDriven || !feetAreOpposed || !accelerationIsFinite || !wheelTracksPhase || !passReachPartition) {
+                return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
+            }
+            return {};
+        }
+
+        std::expected<void, ZHLN::Error> acceleration_tilt_preserves_com_radius() {
+            ZHLN::RigBoneMap map;
+            ZHLN::BuildStandardProceduralRig(map);
+            const int32_t   headNode   = map.nodeIndices[static_cast<size_t>(ZHLN::CharacterBone::Head)];
+            const JPH::Vec3 headBefore = map.modelTransforms[static_cast<size_t>(headNode)].GetTranslation();
+
+            ZHLN::ProceduralLocomotionComponent gait;
+            gait.forwardLean = 0.18f;
+            gait.lateralBank = -0.11f;
+            ZHLN::Animation::ApplyAccelerationTilt(gait, map.modelTransforms.data(), map);
+
+            const JPH::Vec3 headAfter    = map.modelTransforms[static_cast<size_t>(headNode)].GetTranslation();
+            const float     beforeRadius = (headBefore - gait.centerOfMassModel).Length();
+            const float     afterRadius  = (headAfter - gait.centerOfMassModel).Length();
+            if ((headAfter - headBefore).LengthSq() < 1.0e-6f || std::abs(beforeRadius - afterRadius) > 0.0001f) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
             return {};

@@ -85,6 +85,19 @@ struct alignas(64) RigBoneMap {
     std::array<JPH::Mat44, kMaxRigNodes> localTransforms {};
     std::array<JPH::Mat44, kMaxRigNodes> modelTransforms {};
 
+    // Critically damped keyframe state for the 21 semantic controls. Authored
+    // clip samples become spring targets; procedural passes then layer on top.
+    std::array<JPH::Vec3, kCoreBoneCount> poseTranslations {};
+    std::array<JPH::Vec3, kCoreBoneCount> poseTranslationVelocities {};
+    std::array<JPH::Quat, kCoreBoneCount> poseRotations {};
+    std::array<JPH::Vec3, kCoreBoneCount> poseAngularVelocities {};
+    std::array<JPH::Vec3, kCoreBoneCount> poseScales {};
+    std::array<JPH::Vec3, kCoreBoneCount> poseScaleVelocities {};
+    float                                 poseSpringFrequency   = 8.0f;
+    float                                 poseSpringDamping     = 0.90f;
+    int32_t                               springPoseTrack       = -1;
+    bool                                  springPoseInitialized = false;
+
     const ModelPrefab* sourcePrefab  = nullptr;
     uint32_t           nodeCount     = 0;
     uint32_t           jointOffset   = 0;
@@ -109,12 +122,23 @@ struct ProceduralLocomotionComponent {
     float     plantWeightL     = 1.0f;
     float     plantWeightR     = 1.0f;
 
-    float forwardLean = 0.0f;
-    float lateralBank = 0.0f;
-    float pelvisBob   = 0.0f;
-    float pelvisSway  = 0.0f;
-    float pelvisDrop  = 0.0f;
-    float turnRate    = 0.0f;
+    float forwardLean       = 0.0f;
+    float lateralBank       = 0.0f;
+    float tiltPitchVelocity = 0.0f;
+    float tiltRollVelocity  = 0.0f;
+    float pelvisBob         = 0.0f;
+    float pelvisSway        = 0.0f;
+    float pelvisDrop        = 0.0f;
+    float turnRate          = 0.0f;
+
+    // Gait-wheel instrumentation. Pass peaks as a foot crosses below the COM;
+    // reach peaks near the forward/back stride extrema.
+    float     strideWheelAngle  = 0.0f;
+    float     passWeightL       = 0.0f;
+    float     passWeightR       = 0.0f;
+    float     reachWeightL      = 0.0f;
+    float     reachWeightR      = 0.0f;
+    JPH::Vec3 centerOfMassModel = JPH::Vec3(0.0f, 1.12f, 0.0f);
 
     JPH::Vec3 previousVelocity        = JPH::Vec3::sZero();
     JPH::Vec3 directionalAcceleration = JPH::Vec3::sZero();

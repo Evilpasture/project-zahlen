@@ -84,3 +84,21 @@ relative to the head directly from the GLB bind pose. XPBD distance, bend, and
 compliant shape constraints return the simulated particles to that authored
 silhouette. Collision constraints preserve any intentional bind-pose overlap
 with the head or torso instead of forcibly straightening the hairstyle.
+
+## Keyframes and procedural layers
+
+The reference GLB contains a minimal three-key `IdlePose` clip for the hips,
+`Sup_Spine`, and chest. Keyframe intervals use minimum-jerk interpolation rather
+than constant-speed linear blending. The 21 semantic controls then follow those
+authored targets through a damped spring; fingers and other non-semantic nodes
+still receive the eased authored pose directly. Gait, COM tilt, IK, look-at, and
+hair are layered after that base pose.
+
+`RigBoneMap::poseSpringFrequency` and `poseSpringDamping` tune the authored-pose
+response. Acceleration pitch and roll use their own springs and rotate the whole
+hips subtree around the estimated center of mass before foot IK re-establishes
+ground contact.
+
+The debug overlay draws a sagittal stride wheel beside the COM. Cyan indicates
+pass-pose landmarks, orange indicates reach-pose landmarks, and the moving spoke
+shows the current distance-driven stride phase.

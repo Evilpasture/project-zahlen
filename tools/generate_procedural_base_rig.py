@@ -217,6 +217,26 @@ for x, y, z in globals_:
     ))
 ibm_accessor = accessor(pack_floats(inverse_bind_matrices), 5126, len(bone_names), "MAT4")
 
+# A deliberately sparse three-key idle pose demonstrates the intended workflow:
+# authored intent supplies targets, minimum-jerk sampling removes linear timing,
+# and the runtime spring adds continuity and inertia.
+idle_times = [0.0, 1.0, 2.0]
+idle_time_accessor = accessor(pack_floats(idle_times), 5126, len(idle_times), "SCALAR", min=[0.0], max=[2.0])
+idle_hips_accessor = accessor(
+    pack_floats([0.0, 1.0, 0.0, 0.0, 1.015, 0.0, 0.0, 1.0, 0.0]),
+    5126,
+    3,
+    "VEC3",
+)
+
+
+def x_rotation(angle: float) -> tuple[float, float, float, float]:
+    return (math.sin(angle * 0.5), 0.0, 0.0, math.cos(angle * 0.5))
+
+
+idle_chest_accessor = accessor(pack_floats([*x_rotation(-0.015), *x_rotation(0.025), *x_rotation(-0.015)]), 5126, 3, "VEC4")
+idle_sup_spine_accessor = accessor(pack_floats([*x_rotation(0.010), *x_rotation(-0.018), *x_rotation(0.010)]), 5126, 3, "VEC4")
+
 mesh_node = len(nodes)
 nodes.append({"name": "ProceduralBaseRigMesh", "mesh": 0, "skin": 0})
 
@@ -255,6 +275,19 @@ document = {
             "metallicFactor": 0.0,
             "roughnessFactor": 0.78,
         },
+    }],
+    "animations": [{
+        "name": "IdlePose",
+        "samplers": [
+            {"input": idle_time_accessor, "output": idle_hips_accessor, "interpolation": "LINEAR"},
+            {"input": idle_time_accessor, "output": idle_chest_accessor, "interpolation": "LINEAR"},
+            {"input": idle_time_accessor, "output": idle_sup_spine_accessor, "interpolation": "LINEAR"},
+        ],
+        "channels": [
+            {"sampler": 0, "target": {"node": hips, "path": "translation"}},
+            {"sampler": 1, "target": {"node": chest, "path": "rotation"}},
+            {"sampler": 2, "target": {"node": sup_spine, "path": "rotation"}},
+        ],
     }],
     "buffers": [{"byteLength": len(blob)}],
     "bufferViews": buffer_views,

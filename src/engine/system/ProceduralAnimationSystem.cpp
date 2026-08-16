@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <iterator>
 #include <numbers>
 #include <span>
 #include <string_view>
@@ -239,24 +240,175 @@ void ResetRigBoneMap(RigBoneMap& map) noexcept {
     FillIdentity(map.bindLocalTransforms);
     FillIdentity(map.localTransforms);
     FillIdentity(map.modelTransforms);
-    map.sourcePrefab  = nullptr;
-    map.nodeCount     = 0;
-    map.jointOffset   = 0;
-    map.jointCount    = 0;
-    map.skeletonIndex = -1;
-    map.poseVersion   = 0;
-    map.initialized   = false;
-    map.poseValid     = false;
+    map.poseTranslations.fill(JPH::Vec3::sZero());
+    map.poseTranslationVelocities.fill(JPH::Vec3::sZero());
+    map.poseRotations.fill(JPH::Quat::sIdentity());
+    map.poseAngularVelocities.fill(JPH::Vec3::sZero());
+    map.poseScales.fill(JPH::Vec3::sReplicate(1.0f));
+    map.poseScaleVelocities.fill(JPH::Vec3::sZero());
+    map.springPoseTrack       = -1;
+    map.springPoseInitialized = false;
+    map.sourcePrefab          = nullptr;
+    map.nodeCount             = 0;
+    map.jointOffset           = 0;
+    map.jointCount            = 0;
+    map.skeletonIndex         = -1;
+    map.poseVersion           = 0;
+    map.initialized           = false;
+    map.poseValid             = false;
+}
+
+[[nodiscard]] JPH::Vec3 ExtractScale(const JPH::Mat44& matrix) noexcept {
+    return JPH::Vec3(matrix.GetColumn3(0).Length(), matrix.GetColumn3(1).Length(), matrix.GetColumn3(2).Length());
 }
 
 [[nodiscard]] JPH::Quat ExtractRotation(const JPH::Mat44& matrix) noexcept {
-    const float     xScale = matrix.GetColumn3(0).Length();
-    const float     yScale = matrix.GetColumn3(1).Length();
-    const float     zScale = matrix.GetColumn3(2).Length();
-    const JPH::Vec3 x      = xScale > 1.0e-6f ? matrix.GetColumn3(0) / xScale : JPH::Vec3::sAxisX();
-    const JPH::Vec3 y      = yScale > 1.0e-6f ? matrix.GetColumn3(1) / yScale : JPH::Vec3::sAxisY();
-    const JPH::Vec3 z      = zScale > 1.0e-6f ? matrix.GetColumn3(2) / zScale : JPH::Vec3::sAxisZ();
+    const JPH::Vec3 scale = ExtractScale(matrix);
+    const JPH::Vec3 x     = scale.GetX() > 1.0e-6f ? matrix.GetColumn3(0) / scale.GetX() : JPH::Vec3::sAxisX();
+    const JPH::Vec3 y     = scale.GetY() > 1.0e-6f ? matrix.GetColumn3(1) / scale.GetY() : JPH::Vec3::sAxisY();
+    const JPH::Vec3 z     = scale.GetZ() > 1.0e-6f ? matrix.GetColumn3(2) / scale.GetZ() : JPH::Vec3::sAxisZ();
     return JPH::Mat44(JPH::Vec4(x, 0.0f), JPH::Vec4(y, 0.0f), JPH::Vec4(z, 0.0f), JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f)).GetQuaternion().Normalized();
+}
+
+[[nodiscard]] float SmootherStep(float value) noexcept {
+    value = std::clamp(value, 0.0f, 1.0f);
+    return value * value * value * (value * (value * 6.0f - 15.0f) + 10.0f);
+}
+
+void SpringVector(JPH::Vec3& value, JPH::Vec3& velocity, JPH::Vec3Arg target, float dt, float frequency, float damping) noexcept {
+    const float     safeDt   = std::clamp(dt, 0.0f, 0.05f);
+    const float     omega    = 2.0f * std::numbers::pi_v<float> * std::max(frequency, 0.01f);
+    const float     f        = 1.0f + 2.0f * safeDt * std::max(damping, 0.0f) * omega;
+    const float     oo       = omega * omega;
+    const float     hoo      = safeDt * oo;
+    const float     hhoo     = safeDt * hoo;
+    const float     invDet   = 1.0f / (f + hhoo);
+    const JPH::Vec3 oldValue = value;
+    value                    = (value * f + velocity * safeDt + JPH::Vec3(target) * hhoo) * invDet;
+    velocity                 = (velocity + (JPH::Vec3(target) - oldValue) * hoo) * invDet;
+}
+
+void SpringRotation(JPH::Quat& value, JPH::Vec3& angularVelocity, JPH::QuatArg target, float dt, float frequency, float damping) noexcept {
+    const float safeDt = std::clamp(dt, 0.0f, 0.05f);
+    const float omega  = 2.0f * std::numbers::pi_v<float> * std::max(frequency, 0.01f);
+    JPH::Quat   error  = (target * value.Inversed()).Normalized();
+    JPH::Vec3   axis;
+    float       angle = 0.0f;
+    error.GetAxisAngle(axis, angle);
+    const JPH::Vec3 errorVector = axis * angle;
+    const float     denominator = 1.0f + 2.0f * std::max(damping, 0.0f) * omega * safeDt + omega * omega * safeDt * safeDt;
+    angularVelocity             = (angularVelocity + errorVector * (omega * omega * safeDt)) / denominator;
+
+    const JPH::Vec3 rotationStep = angularVelocity * safeDt;
+    const float     stepAngle    = rotationStep.Length();
+    if (stepAngle > 1.0e-7f) {
+        value = (JPH::Quat::sRotation(rotationStep / stepAngle, std::min(stepAngle, std::numbers::pi_v<float>)) * value).Normalized();
+    }
+}
+
+void SamplePoseChannel(const AnimationChannel& channel, float time, JPH::Vec3& translation, JPH::Quat& rotation, JPH::Vec3& scale) noexcept {
+    if (channel.keyTimes.empty() || channel.keyValues.empty()) {
+        return;
+    }
+
+    const auto   upper  = std::ranges::upper_bound(channel.keyTimes, time);
+    const size_t index1 = upper == channel.keyTimes.end() ? channel.keyTimes.size() - 1 : static_cast<size_t>(std::distance(channel.keyTimes.begin(), upper));
+    const size_t index0 = index1 > 0 ? index1 - 1 : 0;
+    const float  time0  = channel.keyTimes[index0];
+    const float  time1  = channel.keyTimes[index1];
+    float        phase  = time1 > time0 ? (time - time0) / (time1 - time0) : 0.0f;
+    phase               = channel.interpolation == InterpolationType::Step ? 0.0f : SmootherStep(phase);
+
+    const size_t components   = channel.path == AnimationPathType::Rotation ? 4u : 3u;
+    const size_t valuesPerKey = channel.keyValues.size() / channel.keyTimes.size();
+    if (valuesPerKey < components) {
+        return;
+    }
+    const size_t valueOffset = channel.interpolation == InterpolationType::CubicSpline && valuesPerKey >= components * 3 ? components : 0u;
+    const float* value0      = channel.keyValues.data() + index0 * valuesPerKey + valueOffset;
+    const float* value1      = channel.keyValues.data() + index1 * valuesPerKey + valueOffset;
+
+    if (channel.path == AnimationPathType::Translation) {
+        const JPH::Vec3 a(value0[0], value0[1], value0[2]);
+        const JPH::Vec3 b(value1[0], value1[1], value1[2]);
+        translation = a + (b - a) * phase;
+    } else if (channel.path == AnimationPathType::Rotation) {
+        const JPH::Quat a(value0[0], value0[1], value0[2], value0[3]);
+        const JPH::Quat b(value1[0], value1[1], value1[2], value1[3]);
+        rotation = a.Normalized().SLERP(b.Normalized(), phase).Normalized();
+    } else if (channel.path == AnimationPathType::Scale) {
+        const JPH::Vec3 a(value0[0], value0[1], value0[2]);
+        const JPH::Vec3 b(value1[0], value1[1], value1[2]);
+        scale = a + (b - a) * phase;
+    }
+}
+
+void ApplyAuthoredSpringPose(const Components::AnimatorComponent* animator, RigBoneMap& map, float dt) noexcept {
+    std::array<JPH::Vec3, kMaxRigNodes> targetTranslations {};
+    std::array<JPH::Quat, kMaxRigNodes> targetRotations {};
+    std::array<JPH::Vec3, kMaxRigNodes> targetScales {};
+
+    for (uint32_t node = 0; node < map.nodeCount; ++node) {
+        targetTranslations[node] = map.bindLocalTransforms[node].GetTranslation();
+        targetRotations[node]    = ExtractRotation(map.bindLocalTransforms[node]);
+        targetScales[node]       = ExtractScale(map.bindLocalTransforms[node]);
+    }
+
+    int32_t activeTrack = -1;
+    if (animator != nullptr && animator->prefab != nullptr && animator->currentTrackIdx >= 0 &&
+        animator->currentTrackIdx < static_cast<int32_t>(animator->prefab->animations.size())) {
+        activeTrack               = animator->currentTrackIdx;
+        const AnimationClip& clip = animator->prefab->animations[static_cast<size_t>(activeTrack)];
+        for (const AnimationChannel& channel: clip.channels) {
+            if (channel.targetNodeIndex < 0 || channel.targetNodeIndex >= static_cast<int32_t>(map.nodeCount) || channel.path == AnimationPathType::Weights) {
+                continue;
+            }
+            const size_t node = static_cast<size_t>(channel.targetNodeIndex);
+            SamplePoseChannel(channel, animator->currentTrackTime, targetTranslations[node], targetRotations[node], targetScales[node]);
+        }
+    }
+
+    // Non-semantic controls (fingers, face, accessories) still receive the
+    // eased authored pose. The 21 semantic controls get a temporal spring so
+    // keyframes and procedural offsets cooperate instead of fighting.
+    for (uint32_t node = 0; node < map.nodeCount; ++node) {
+        map.localTransforms[node] = JPH::Mat44::sRotationTranslation(targetRotations[node], targetTranslations[node]).PreScaled(targetScales[node]);
+    }
+
+    if (!map.springPoseInitialized) {
+        for (size_t semantic = 0; semantic < kCoreBoneCount; ++semantic) {
+            const int32_t node = map.nodeIndices[semantic];
+            if (node < 0 || node >= static_cast<int32_t>(map.nodeCount)) {
+                continue;
+            }
+            map.poseTranslations[semantic]          = targetTranslations[static_cast<size_t>(node)];
+            map.poseTranslationVelocities[semantic] = JPH::Vec3::sZero();
+            map.poseRotations[semantic]             = targetRotations[static_cast<size_t>(node)];
+            map.poseAngularVelocities[semantic]     = JPH::Vec3::sZero();
+            map.poseScales[semantic]                = targetScales[static_cast<size_t>(node)];
+            map.poseScaleVelocities[semantic]       = JPH::Vec3::sZero();
+        }
+        map.springPoseInitialized = true;
+    }
+
+    for (size_t semantic = 0; semantic < kCoreBoneCount; ++semantic) {
+        const int32_t node = map.nodeIndices[semantic];
+        if (node < 0 || node >= static_cast<int32_t>(map.nodeCount)) {
+            continue;
+        }
+        const size_t nodeIndex = static_cast<size_t>(node);
+        SpringVector(
+            map.poseTranslations[semantic], map.poseTranslationVelocities[semantic], targetTranslations[nodeIndex], dt, map.poseSpringFrequency,
+            map.poseSpringDamping
+        );
+        SpringRotation(
+            map.poseRotations[semantic], map.poseAngularVelocities[semantic], targetRotations[nodeIndex], dt, map.poseSpringFrequency, map.poseSpringDamping
+        );
+        SpringVector(map.poseScales[semantic], map.poseScaleVelocities[semantic], targetScales[nodeIndex], dt, map.poseSpringFrequency, map.poseSpringDamping);
+        map.localTransforms[nodeIndex] =
+            JPH::Mat44::sRotationTranslation(map.poseRotations[semantic], map.poseTranslations[semantic]).PreScaled(map.poseScales[semantic]);
+    }
+    map.springPoseTrack = activeTrack;
 }
 
 void ResolveForwardKinematics(RigBoneMap& map) noexcept {
@@ -662,11 +814,13 @@ void ProceduralAnimationSystem::Update(Engine& engine, float dt) noexcept {
             continue;
         }
 
-        std::copy_n(boneMap->bindLocalTransforms.begin(), boneMap->nodeCount, boneMap->localTransforms.begin());
-        ResolveForwardKinematics(*boneMap);
         if (hair != nullptr && !hair->bindPoseInitialized) {
+            std::copy_n(boneMap->bindLocalTransforms.begin(), boneMap->nodeCount, boneMap->localTransforms.begin());
+            ResolveForwardKinematics(*boneMap);
             Animation::ConfigureHairBindPose(*hair, boneMap->modelTransforms.data(), *boneMap);
         }
+        ApplyAuthoredSpringPose(animator, *boneMap, dt);
+        ResolveForwardKinematics(*boneMap);
 
         const JPH::Vec3 velocityWorld = physicsComponent != nullptr ? physics.GetCharacterVelocity(physicsComponent->physicsHandle) : JPH::Vec3::sZero();
         const JPH::Quat rootRotation  = transform->rotation.Normalized();
@@ -683,8 +837,10 @@ void ProceduralAnimationSystem::Update(Engine& engine, float dt) noexcept {
         gait->previousRootRotation   = rootRotation;
         gait->orientationInitialized = true;
 
-        // Stages 1-2: velocity/acceleration calculus and parametric gait.
+        // Stages 1-2: velocity/acceleration calculus, parametric gait, and a
+        // whole-body spring tilt around the estimated center of mass.
         Animation::EvaluateGait(*gait, velocityLocal, angularVelocity, dt);
+        Animation::ApplyAccelerationTilt(*gait, boneMap->modelTransforms.data(), *boneMap);
 
         // Stage 3: terrain contact, pelvis reach correction, and two-bone IK.
         const Entity ignoredHandle = physicsComponent != nullptr ? physicsComponent->physicsHandle : Entity {};
@@ -820,6 +976,31 @@ void DrawProceduralDebugRig(
         const JPH::Vec3 footR = ModelToWorld(rootPosition, rootRotation, gait->localFootTargetR);
         renderContext.DrawLine(footL, footL + gait->footNormalL * 0.22f, normalColor);
         renderContext.DrawLine(footR, footR + gait->footNormalR * 0.22f, normalColor);
+
+        // Sagittal stride wheel: cyan ticks are pass poses, orange ticks are
+        // reach poses, and the spoke follows the distance-driven gait phase.
+        constexpr float wheelRadius      = 0.24f;
+        const JPH::Vec3 wheelCenterModel = gait->centerOfMassModel + JPH::Vec3(-0.48f, 0.0f, 0.0f);
+        const JPH::Vec4 wheelColor(0.40f, 0.45f, 0.55f, 0.85f);
+        const JPH::Vec4 passColor(0.10f, 0.95f, 1.00f, 1.0f);
+        const JPH::Vec4 reachColor(1.00f, 0.42f, 0.08f, 1.0f);
+        drawCross(ModelToWorld(rootPosition, rootRotation, gait->centerOfMassModel), 0.032f, normalColor);
+        for (uint32_t segment = 0; segment < 24; ++segment) {
+            const float     angle0 = 2.0f * std::numbers::pi_v<float> * static_cast<float>(segment) / 24.0f;
+            const float     angle1 = 2.0f * std::numbers::pi_v<float> * static_cast<float>(segment + 1) / 24.0f;
+            const JPH::Vec3 p0     = wheelCenterModel + JPH::Vec3(0.0f, std::sin(angle0) * wheelRadius, std::cos(angle0) * wheelRadius);
+            const JPH::Vec3 p1     = wheelCenterModel + JPH::Vec3(0.0f, std::sin(angle1) * wheelRadius, std::cos(angle1) * wheelRadius);
+            renderContext.DrawLine(ModelToWorld(rootPosition, rootRotation, p0), ModelToWorld(rootPosition, rootRotation, p1), wheelColor);
+        }
+        const JPH::Vec3 wheelMarkerModel = wheelCenterModel +
+                                           JPH::Vec3(0.0f, std::sin(gait->strideWheelAngle) * wheelRadius, std::cos(gait->strideWheelAngle) * wheelRadius);
+        const JPH::Vec4 markerColor      = gait->passWeightL > gait->reachWeightL ? passColor : reachColor;
+        renderContext.DrawLine(
+            ModelToWorld(rootPosition, rootRotation, wheelCenterModel), ModelToWorld(rootPosition, rootRotation, wheelMarkerModel), markerColor
+        );
+        drawCross(ModelToWorld(rootPosition, rootRotation, wheelMarkerModel), 0.025f, markerColor);
+        drawCross(ModelToWorld(rootPosition, rootRotation, wheelCenterModel + JPH::Vec3(0.0f, wheelRadius, 0.0f)), 0.018f, passColor);
+        drawCross(ModelToWorld(rootPosition, rootRotation, wheelCenterModel + JPH::Vec3(0.0f, 0.0f, wheelRadius)), 0.018f, reachColor);
     }
 }
 

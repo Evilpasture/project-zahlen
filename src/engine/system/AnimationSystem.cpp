@@ -43,6 +43,11 @@ void SampleChannel(const AnimationChannel& channel, float time, JPH::Vec3& outT,
 
     if (channel.interpolation == InterpolationType::Step) {
         factor = 0.0f;
+    } else {
+        // Minimum-jerk interpolation avoids the constant velocity and hard
+        // derivative changes of a linear keyframe blend. Procedural characters
+        // add a temporal spring on top of this authored target.
+        factor = factor * factor * factor * (factor * (factor * 6.0f - 15.0f) + 10.0f);
     }
 
     if (channel.path == AnimationPathType::Translation) {
@@ -77,6 +82,9 @@ void SampleWeightsChannel(const AnimationChannel& channel, float time, float* ou
 
     if (channel.interpolation == InterpolationType::Step) {
         factor = 0.0f;
+    } else {
+        factor = std::clamp(factor, 0.0f, 1.0f);
+        factor = factor * factor * factor * (factor * (factor * 6.0f - 15.0f) + 10.0f);
     }
 
     auto     numWeights = static_cast<uint32_t>(channel.keyValues.size() / channel.keyTimes.size());
