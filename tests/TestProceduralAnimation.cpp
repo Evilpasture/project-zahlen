@@ -78,8 +78,14 @@ struct ProceduralAnimationTestSuite {
                 }
             }
 
+            // Simulate an exporter whose parent lies outside the fixed runtime
+            // window. The mapper must sever it rather than exposing the pose
+            // traversal to an out-of-bounds parent index.
+            const size_t malformedNode              = static_cast<size_t>(ZHLN::CharacterBone::ToeR);
+            prefab.nodes[malformedNode].parentIndex = static_cast<int32_t>(ZHLN::kMaxRigNodes + 7);
+
             ZHLN::RigBoneMap importedMap;
-            if (!ZHLN::BuildBoneMap(prefab, skeleton, importedMap)) {
+            if (!ZHLN::BuildBoneMap(prefab, skeleton, importedMap) || importedMap.parentIndices[malformedNode] != -1) {
                 return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
             return {};

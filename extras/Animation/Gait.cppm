@@ -33,17 +33,22 @@ namespace Detail {
 }
 
 [[nodiscard]] inline bool IsDescendant(const RigBoneMap& map, int32_t node, int32_t ancestor) noexcept {
-    if (node < 0 || ancestor < 0 || node >= static_cast<int32_t>(map.nodeCount)) {
+    const uint32_t safeNodeCount = std::min<uint32_t>(map.nodeCount, static_cast<uint32_t>(kMaxRigNodes));
+    if (node < 0 || ancestor < 0 || node >= static_cast<int32_t>(safeNodeCount) || ancestor >= static_cast<int32_t>(safeNodeCount)) {
         return false;
     }
+
     int32_t cursor = node;
-    for (uint32_t depth = 0; depth < map.nodeCount && cursor >= 0; ++depth) {
+    for (uint32_t depth = 0; depth < safeNodeCount; ++depth) {
+        if (cursor < 0 || cursor >= static_cast<int32_t>(safeNodeCount)) {
+            return false;
+        }
         if (cursor == ancestor) {
             return true;
         }
         cursor = map.parentIndices[static_cast<size_t>(cursor)];
     }
-    return false;
+    return false; // A cycle or an over-deep malformed hierarchy.
 }
 
 inline void TranslateSubtree(const RigBoneMap& map, JPH::Mat44* transforms, int32_t rootNode, JPH::Vec3Arg delta) noexcept {

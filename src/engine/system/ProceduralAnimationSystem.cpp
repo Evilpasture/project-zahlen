@@ -174,6 +174,23 @@ void FillIdentity(std::span<JPH::Mat44> matrices) noexcept {
     std::ranges::fill(matrices, JPH::Mat44::sIdentity());
 }
 
+void ResetRigBoneMap(RigBoneMap& map) noexcept {
+    map.nodeIndices.fill(-1);
+    FillIdentity(map.inverseBindMatrices);
+    map.parentIndices.fill(-1);
+    FillIdentity(map.bindLocalTransforms);
+    FillIdentity(map.localTransforms);
+    FillIdentity(map.modelTransforms);
+    map.sourcePrefab  = nullptr;
+    map.nodeCount     = 0;
+    map.jointOffset   = 0;
+    map.jointCount    = 0;
+    map.skeletonIndex = -1;
+    map.poseVersion   = 0;
+    map.initialized   = false;
+    map.poseValid     = false;
+}
+
 [[nodiscard]] JPH::Quat ExtractRotation(const JPH::Mat44& matrix) noexcept {
     const float     xScale = matrix.GetColumn3(0).Length();
     const float     yScale = matrix.GetColumn3(1).Length();
@@ -265,18 +282,23 @@ struct SkinBinding {
 } // namespace
 
 bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMap& outMap) noexcept {
-    outMap = RigBoneMap {};
-    FillIdentity(outMap.inverseBindMatrices);
-    FillIdentity(outMap.bindLocalTransforms);
-    FillIdentity(outMap.localTransforms);
-    FillIdentity(outMap.modelTransforms);
+    ResetRigBoneMap(outMap);
 
     outMap.sourcePrefab = &prefab;
     outMap.nodeCount    = std::min<uint32_t>(static_cast<uint32_t>(prefab.nodes.size()), static_cast<uint32_t>(kMaxRigNodes));
     outMap.jointCount   = std::min<uint32_t>(static_cast<uint32_t>(skeleton.joints.size()), static_cast<uint32_t>(kMaxRigNodes));
+    if (prefab.nodes.size() > kMaxRigNodes) {
+        ZHLN::Log(
+            "[ProceduralAnimation] Rig '{}' contains {} nodes; evaluating the first {} and safely detaching parents outside that window.", prefab.virtualPath,
+            prefab.nodes.size(), kMaxRigNodes
+        );
+    }
 
     for (uint32_t node = 0; node < outMap.nodeCount; ++node) {
-        outMap.parentIndices[node]       = prefab.nodes[node].parentIndex;
+        const int32_t importedParent     = prefab.nodes[node].parentIndex;
+        const bool    parentIsValid      = importedParent >= 0 && importedParent < static_cast<int32_t>(outMap.nodeCount) &&
+                                           importedParent != static_cast<int32_t>(node);
+        outMap.parentIndices[node]       = parentIsValid ? importedParent : -1;
         outMap.bindLocalTransforms[node] = prefab.nodes[node].localTransform;
         outMap.localTransforms[node]     = prefab.nodes[node].localTransform;
     }
@@ -385,11 +407,7 @@ bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMa
 }
 
 void BuildStandardProceduralRig(RigBoneMap& outMap) noexcept {
-    outMap = RigBoneMap {};
-    FillIdentity(outMap.inverseBindMatrices);
-    FillIdentity(outMap.bindLocalTransforms);
-    FillIdentity(outMap.localTransforms);
-    FillIdentity(outMap.modelTransforms);
+    ResetRigBoneMap(outMap);
     outMap.nodeCount  = static_cast<uint32_t>(kBoneCount);
     outMap.jointCount = static_cast<uint32_t>(kBoneCount);
 

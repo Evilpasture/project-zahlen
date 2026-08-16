@@ -56,7 +56,10 @@ enum class CharacterBone : uint16_t {
 
 inline constexpr size_t kBoneCount     = static_cast<size_t>(CharacterBone::TotalBones);
 inline constexpr size_t kCoreBoneCount = static_cast<size_t>(CharacterBone::ToeR) + 1;
-inline constexpr size_t kMaxRigNodes   = 256;
+// Real production GLBs commonly contain hundreds of mesh/attachment nodes in
+// addition to the 140 deform controls. Keep fixed-capacity evaluation while
+// leaving enough headroom for those imported hierarchies.
+inline constexpr size_t kMaxRigNodes = 512;
 
 /**
  * Allocation-free runtime map from semantic controls to glTF nodes.
