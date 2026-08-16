@@ -8,6 +8,7 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <expected>
 #include <string_view>
 
@@ -64,7 +65,13 @@ struct ProceduralAnimationTestSuite {
                 if (node < ZHLN::kCoreBoneCount) {
                     prefab.nodes[node].name = ZHLN::String64(coreNames[node]);
                 } else if (node >= static_cast<size_t>(ZHLN::CharacterBone::HairStart)) {
-                    prefab.nodes[node].name = ZHLN::String64("Hair_Link");
+                    const size_t particle = node - static_cast<size_t>(ZHLN::CharacterBone::HairStart);
+                    char         hairName[32] {};
+                    std::snprintf(
+                        hairName, sizeof(hairName), "DEF-Hair_S%02zu_%02zu", particle / ZHLN::HairStrandsComponent::kLinksPerStrand + 1,
+                        particle % ZHLN::HairStrandsComponent::kLinksPerStrand + 1
+                    );
+                    prefab.nodes[node].name = ZHLN::String64(hairName);
                 }
                 prefab.nodes[node].parentIndex    = map.parentIndices[node];
                 prefab.nodes[node].localTransform = map.bindLocalTransforms[node];
@@ -87,6 +94,12 @@ struct ProceduralAnimationTestSuite {
             ZHLN::RigBoneMap importedMap;
             if (!ZHLN::BuildBoneMap(prefab, skeleton, importedMap) || importedMap.parentIndices[malformedNode] != -1) {
                 return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+            }
+            for (size_t slot = 0; slot < ZHLN::HairStrandsComponent::kTotalParticles; ++slot) {
+                const size_t semantic = static_cast<size_t>(ZHLN::CharacterBone::HairStart) + slot;
+                if (importedMap.nodeIndices[semantic] != static_cast<int32_t>(semantic)) {
+                    return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+                }
             }
             return {};
         }

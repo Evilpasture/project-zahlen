@@ -273,9 +273,13 @@ inline void SolveLegGrounding(
         const float     upperLength   = std::max((shinPosition - thighPosition).Length(), 0.001f);
         const float     lowerLength   = std::max((footPosition - shinPosition).Length(), 0.001f);
 
-        JPH::Vec3 pole = nodeTransforms[thighNode].Multiply3x3(JPH::Vec3::sAxisZ());
-        pole           = Detail::SafeNormalized(pole, JPH::Vec3::sAxisZ());
-        const auto ik  = IK::SolveTwoBoneIK({
+        // Bone roll differs substantially between Blender rigs. Deriving the
+        // pole from the thigh's local +Z can therefore make a knee bend
+        // sideways. Use the character-model forward axis with a tiny bilateral
+        // outward bias for a stable anatomical bend direction.
+        const float     poleX = thighBone == CharacterBone::ThighL ? 0.08f : -0.08f;
+        const JPH::Vec3 pole  = JPH::Vec3(poleX, 0.0f, 1.0f).Normalized();
+        const auto      ik    = IK::SolveTwoBoneIK({
             .upperPosition  = thighPosition,
             .targetPosition = target,
             .poleVector     = pole,

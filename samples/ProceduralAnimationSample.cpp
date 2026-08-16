@@ -137,8 +137,8 @@ auto AttachCharacterRig(ZHLN::Engine& engine, ZHLN::Entity player, std::string_v
     auto* prefab = ZHLN::CreativeWorksFactory::LoadModelPrefab(engine, glbPath);
 
     ZHLN::ProceduralLocomotionComponent locomotion {
-        .strideLength = 1.25f,
-        .stepHeight   = 0.24f,
+        .strideLength = 1.40f,
+        .stepHeight   = 0.22f,
         .legReach     = 0.83f,
     };
     ZHLN::HairStrandsComponent      hair {};
@@ -225,7 +225,9 @@ auto main(int argc, char* argv[]) -> int {
 
     // 1. Spawn CharacterVirtual with Overgrowth Dual-Shape Hull
     const ZHLN::Physics::DualShapeConfig dualShapeConfig {};
-    const ZHLN::Entity                   player = ZHLN::Locomotion::SpawnCharacter(*engine, JPH::Vec3(0.0f, 1.20f, 0.0f), dualShapeConfig);
+    constexpr float                      kWalkSpeed = 2.40f;
+    constexpr float                      kJumpForce = 7.00f;
+    const ZHLN::Entity player = ZHLN::Locomotion::SpawnCharacter(*engine, JPH::Vec3(0.0f, 1.20f, 0.0f), dualShapeConfig, kWalkSpeed, kJumpForce);
 
     // 2. Load GLB and attach procedural animation state
     AttachCharacterRig(*engine, player, "UziProc.glb");

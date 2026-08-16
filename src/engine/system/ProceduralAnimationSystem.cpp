@@ -170,6 +170,52 @@ template <size_t N>
            name.find("strand") != std::string_view::npos;
 }
 
+struct HairAddress {
+    int32_t strand = -1;
+    int32_t link   = -1;
+
+    [[nodiscard]] bool IsValid() const noexcept {
+        return strand >= 0 && strand < static_cast<int32_t>(HairStrandsComponent::kStrandCount) && link >= 0 &&
+               link < static_cast<int32_t>(HairStrandsComponent::kLinksPerStrand);
+    }
+};
+
+[[nodiscard]] HairAddress ParseHairAddress(std::string_view name) noexcept {
+    auto lower = [](char c) { return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c; };
+
+    size_t hairEnd = std::string_view::npos;
+    for (size_t i = 0; i + 4 <= name.size(); ++i) {
+        if (lower(name[i]) == 'h' && lower(name[i + 1]) == 'a' && lower(name[i + 2]) == 'i' && lower(name[i + 3]) == 'r') {
+            hairEnd = i + 4;
+            break;
+        }
+    }
+    if (hairEnd == std::string_view::npos) {
+        return {};
+    }
+
+    std::array<uint32_t, 2> numbers {};
+    size_t                  numberCount = 0;
+    for (size_t i = hairEnd; i < name.size() && numberCount < numbers.size();) {
+        if (name[i] < '0' || name[i] > '9') {
+            ++i;
+            continue;
+        }
+        uint32_t value = 0;
+        while (i < name.size() && name[i] >= '0' && name[i] <= '9') {
+            value = value * 10u + static_cast<uint32_t>(name[i] - '0');
+            ++i;
+        }
+        numbers[numberCount++] = value;
+    }
+
+    if (numberCount != 2 || numbers[0] == 0 || numbers[1] == 0) {
+        return {};
+    }
+    HairAddress result {.strand = static_cast<int32_t>(numbers[0] - 1), .link = static_cast<int32_t>(numbers[1] - 1)};
+    return result.IsValid() ? result : HairAddress {};
+}
+
 void FillIdentity(std::span<JPH::Mat44> matrices) noexcept {
     std::ranges::fill(matrices, JPH::Mat44::sIdentity());
 }
@@ -349,19 +395,54 @@ bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMa
         }
     }
 
-    std::array<bool, kMaxRigNodes> hairClaimed {};
-    size_t                         hairMapped = 0;
-    for (uint32_t root = 0; root < outMap.nodeCount && hairMapped < HairStrandsComponent::kTotalParticles; ++root) {
+    std::array<bool, kMaxRigNodes>                          hairClaimed {};
+    std::array<bool, HairStrandsComponent::kTotalParticles> hairSlotClaimed {};
+
+    // Prefer explicit DEF-Hair_Sxx_yy addressing. Strands in production rigs
+    // may contain four, five, or six links, so preserve the semantic gaps
+    // instead of shifting the next strand into the previous strand's slots.
+    for (uint32_t node = 0; node < outMap.nodeCount; ++node) {
+        if (!hairCandidate[node] || claimed[node]) {
+            continue;
+        }
+        const HairAddress address = ParseHairAddress(std::string_view(prefab.nodes[node].name));
+        if (!address.IsValid()) {
+            continue;
+        }
+
+        const size_t slot = static_cast<size_t>(address.strand) * HairStrandsComponent::kLinksPerStrand + static_cast<size_t>(address.link);
+        if (hairSlotClaimed[slot]) {
+            continue;
+        }
+        const size_t semanticIndex        = static_cast<size_t>(CharacterBone::HairStart) + slot;
+        outMap.nodeIndices[semanticIndex] = static_cast<int32_t>(node);
+        hairSlotClaimed[slot]             = true;
+        hairClaimed[node]                 = true;
+        claimed[node]                     = true;
+    }
+
+    // Fallback for rigs that name only the strand roots: assign each hierarchy
+    // chain to the next entirely unmapped strand.
+    size_t nextFallbackStrand = 0;
+    for (uint32_t root = 0; root < outMap.nodeCount && nextFallbackStrand < HairStrandsComponent::kStrandCount; ++root) {
         const int32_t parent       = outMap.parentIndices[root];
         const bool    parentIsHair = parent >= 0 && parent < static_cast<int32_t>(outMap.nodeCount) && hairCandidate[static_cast<size_t>(parent)];
-        if (!hairCandidate[root] || parentIsHair) {
+        if (!hairCandidate[root] || hairClaimed[root] || parentIsHair) {
             continue;
+        }
+        while (nextFallbackStrand < HairStrandsComponent::kStrandCount && hairSlotClaimed[nextFallbackStrand * HairStrandsComponent::kLinksPerStrand]) {
+            ++nextFallbackStrand;
+        }
+        if (nextFallbackStrand >= HairStrandsComponent::kStrandCount) {
+            break;
         }
 
         int32_t current = static_cast<int32_t>(root);
         for (size_t link = 0; link < HairStrandsComponent::kLinksPerStrand && current >= 0; ++link) {
-            const size_t semanticIndex                = static_cast<size_t>(CharacterBone::HairStart) + hairMapped++;
+            const size_t slot                         = nextFallbackStrand * HairStrandsComponent::kLinksPerStrand + link;
+            const size_t semanticIndex                = static_cast<size_t>(CharacterBone::HairStart) + slot;
             outMap.nodeIndices[semanticIndex]         = current;
+            hairSlotClaimed[slot]                     = true;
             claimed[static_cast<size_t>(current)]     = true;
             hairClaimed[static_cast<size_t>(current)] = true;
 
@@ -374,17 +455,35 @@ bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMa
             }
             current = next;
         }
+        ++nextFallbackStrand;
     }
 
-    // Preserve partial rigs for debugging and unusual exporters, filling any
-    // remaining semantic slots deterministically.
-    for (uint32_t node = 0; node < outMap.nodeCount && hairMapped < HairStrandsComponent::kTotalParticles; ++node) {
+    // Preserve unusual unstructured hair nodes by filling only genuinely empty
+    // slots. Explicit strand/link addresses always win.
+    size_t freeHairSlot = 0;
+    for (uint32_t node = 0; node < outMap.nodeCount && freeHairSlot < HairStrandsComponent::kTotalParticles; ++node) {
         if (!hairCandidate[node] || hairClaimed[node]) {
             continue;
         }
-        outMap.nodeIndices[static_cast<size_t>(CharacterBone::HairStart) + hairMapped++] = static_cast<int32_t>(node);
+        while (freeHairSlot < HairStrandsComponent::kTotalParticles && hairSlotClaimed[freeHairSlot]) {
+            ++freeHairSlot;
+        }
+        if (freeHairSlot >= HairStrandsComponent::kTotalParticles) {
+            break;
+        }
+        outMap.nodeIndices[static_cast<size_t>(CharacterBone::HairStart) + freeHairSlot] = static_cast<int32_t>(node);
+        hairSlotClaimed[freeHairSlot]                                                    = true;
         claimed[node]                                                                    = true;
         hairClaimed[node]                                                                = true;
+    }
+
+    size_t mappedHairStrands = 0;
+    for (size_t strand = 0; strand < HairStrandsComponent::kStrandCount; ++strand) {
+        bool hasMappedLink = false;
+        for (size_t link = 0; link < HairStrandsComponent::kLinksPerStrand; ++link) {
+            hasMappedLink = hasMappedLink || hairSlotClaimed[strand * HairStrandsComponent::kLinksPerStrand + link];
+        }
+        mappedHairStrands += hasMappedLink ? 1u : 0u;
     }
 
     for (size_t semanticIndex = 0; semanticIndex < kBoneCount; ++semanticIndex) {
@@ -403,7 +502,7 @@ bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMa
     ResolveForwardKinematics(outMap);
     outMap.initialized = true;
     outMap.poseValid   = true;
-    return coreMapped == kCoreBoneCount && hairMapped == HairStrandsComponent::kTotalParticles;
+    return coreMapped == kCoreBoneCount && mappedHairStrands == HairStrandsComponent::kStrandCount;
 }
 
 void BuildStandardProceduralRig(RigBoneMap& outMap) noexcept {
@@ -493,9 +592,28 @@ void ProceduralAnimationSystem::Update(Engine& engine, float dt) noexcept {
             const bool complete    = BuildBoneMap(*prefab, *skin.skeleton, *boneMap);
             boneMap->jointOffset   = skin.skeletalMesh->jointOffset;
             boneMap->skeletonIndex = skin.skeletalMesh->skeletonIndex;
-            if (!complete) {
-                ZHLN::Log("[ProceduralAnimation] Rig '{}' is partial; unmapped controls remain in bind pose.", prefab->virtualPath);
+
+            size_t mappedCoreBones = 0;
+            for (size_t semantic = 0; semantic < kCoreBoneCount; ++semantic) {
+                mappedCoreBones += boneMap->nodeIndices[semantic] >= 0 ? 1u : 0u;
             }
+            size_t mappedHairBones   = 0;
+            size_t mappedHairStrands = 0;
+            for (size_t strand = 0; strand < HairStrandsComponent::kStrandCount; ++strand) {
+                bool strandMapped = false;
+                for (size_t link = 0; link < HairStrandsComponent::kLinksPerStrand; ++link) {
+                    const size_t semantic = static_cast<size_t>(CharacterBone::HairStart) + strand * HairStrandsComponent::kLinksPerStrand + link;
+                    if (boneMap->nodeIndices[semantic] >= 0) {
+                        ++mappedHairBones;
+                        strandMapped = true;
+                    }
+                }
+                mappedHairStrands += strandMapped ? 1u : 0u;
+            }
+            ZHLN::Log(
+                "[ProceduralAnimation] Rig '{}': {}; mapped {}/{} core bones and {}/{} hair strands ({} deform hair bones).", prefab->virtualPath,
+                complete ? "complete" : "partial", mappedCoreBones, kCoreBoneCount, mappedHairStrands, HairStrandsComponent::kStrandCount, mappedHairBones
+            );
         }
         if (!boneMap->initialized || boneMap->nodeCount == 0) {
             continue;
