@@ -256,17 +256,10 @@ std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfi
             return InitPostProcessing();
         })
         .and_then([&]() -> std::expected<void, Error> {
-            if (window.IsHeadless()) {
-                // True headless mode: no ImGui, no swapchain-backed UI pipeline.
-                return {};
-            }
             auto* windowHandle = window.IsTTY() ? nullptr : static_cast<GLFWwindow*>(window.GetNativeHandle());
             return SetupUI(windowHandle);
         })
-        .and_then([&]() -> std::expected<void, Error> {
-            if (window.IsHeadless()) {
-                return {};
-            }
+        .and_then([&]() {
             return InitUIDynamicBuffers();
         })
         .and_then([&]() -> std::expected<void, Error> {
@@ -1672,7 +1665,7 @@ std::expected<void, Error> RenderContext::Impl::SetupUI(GLFWwindow* window) {
                 .transform([&](auto&& layout) { uiPipelineLayout = std::forward<decltype(layout)>(layout); });
         })
         .and_then([&]() -> std::expected<void, Error> {
-            VkFormat swapchainFormat = presentation.swapchain.Get().format;
+            VkFormat swapchainFormat = presentation.GetPresentFormat();
 
             return Vk::PipelineBuilder {}
                 .Shaders(uiShaders)
@@ -1691,7 +1684,7 @@ std::expected<void, Error> RenderContext::Impl::SetupUI(GLFWwindow* window) {
                 ImGui::CreateContext();
                 ImGui_ImplGlfw_InitForVulkan(window, true);
 
-                VkFormat swapchainFormat = presentation.swapchain.Get().format;
+                VkFormat swapchainFormat = presentation.GetPresentFormat();
 
                 ImGui_ImplVulkan_InitInfo init_info = {
                     .ApiVersion         = VK_API_VERSION_1_3,

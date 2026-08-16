@@ -896,7 +896,9 @@ void BlitPass::Execute(
             }
         });
     }
-    Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(cmd, swapchainTarget.handle);
+    if (ctx.presentation.swapchain.Valid()) {
+        Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(cmd, swapchainTarget.handle);
+    }
 }
 
 void ViewmodelPass::Execute(
