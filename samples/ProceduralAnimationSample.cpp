@@ -30,6 +30,7 @@ import ZHLN.Locomotion;
 #include <array>
 #include <cmath>
 #include <utility>
+#include <vector>
 
 namespace {
 
@@ -150,20 +151,27 @@ auto AttachCharacterRig(ZHLN::Engine& engine, ZHLN::Entity player, std::string_v
     if (prefab != nullptr) {
         ZHLN::Log("[Sample] GLB model '{}' loaded successfully. Instantiating visual parts...", glbPath);
 
-        // Instantiate visual skinned hierarchy (without physics colliders)
-        std::array<ZHLN::Entity, 64> parts {};
-        uint32_t                     count = ZHLN::CreativeWorksFactory::InstantiatePrefab(
+        // Instantiate the visual hierarchy without physics colliders. A prefab
+        // can emit one root, one entity per part, and at most one emissive VPL
+        // per part. Size the output dynamically: InstantiatePrefab returns the
+        // total number spawned even when the caller's output span is smaller.
+        const size_t              outputCapacity = 1 + prefab->parts.size() * 2;
+        std::vector<ZHLN::Entity> parts(outputCapacity);
+        const uint32_t            count = ZHLN::CreativeWorksFactory::InstantiatePrefab(
             engine, *prefab, ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0f, 1.20f, 0.0f), .createPhysics = false, .isAnimated = true},
             parts.data(), static_cast<uint32_t>(parts.size())
         );
+        const uint32_t writtenCount = std::min(count, static_cast<uint32_t>(parts.size()));
 
-        // Re-parent spawned visual mesh parts directly under the player CharacterVirtual entity
-        for (uint32_t i = 1; i < count; ++i) {
+        // Re-parent every returned visual mesh part directly under the player
+        // CharacterVirtual entity. Emissive VPLs have no hierarchy and are
+        // safely ignored by Patch.
+        for (uint32_t i = 1; i < writtenCount; ++i) {
             ZHLN::ECS::Patch<ZHLN::Components::HierarchyComponent>(reg, parts[i], [&](auto& hier) -> auto { hier.parent = player; });
         }
 
-        // Clean up redundant container root entity (parts[0])
-        if (count > 0) {
+        // Clean up the redundant prefab container root (parts[0]).
+        if (writtenCount > 0) {
             reg.Destroy(parts[0]);
         }
 
