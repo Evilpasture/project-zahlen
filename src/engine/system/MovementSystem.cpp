@@ -106,7 +106,8 @@ void MovementSystem(Engine& engine, float dt) {
                     move.currentYVel = 0.0f;
                 }
             } else {
-                move.currentYVel -= 32.0f * dt; // <-- Integrates gravity when in air
+                move.currentYVel -= 32.0f * dt; // Integrate gravity when in air
+                move.jumpRequested = false;     // Clear any unconsumed jump requests while airborne!
             }
 
             // 2. Feed velocity into Jolt CharacterVirtual

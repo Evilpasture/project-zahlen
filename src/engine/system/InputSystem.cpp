@@ -115,7 +115,7 @@ void InputSystem::PlayerInputTranslate(Engine& engine, const Camera& cam) {
         move->inputX      = worldX;
         move->inputZ      = worldZ;
         move->isSprinting = input->wantsToSprint && (len > 0.001f);
-        if (input->wantsToJump) {
+        if (input->wantsToJump && move->isGrounded) {
             move->jumpRequested = true;
         }
     }

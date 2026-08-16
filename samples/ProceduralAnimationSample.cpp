@@ -26,7 +26,6 @@ import ZHLN.Locomotion;
 #include <Jolt/Math/Vec4.h>
 #include <algorithm>
 #include <array>
-#include <cmath>
 
 namespace {
 
@@ -43,7 +42,7 @@ auto BuildProceduralArena(ZHLN::Engine& engine) -> void {
 
     // 1. Atmosphere
     for (ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
-        ZHLN::ECS::Patch<ZHLN::Components::PostProcessSettingsComponent>(reg, e, [](auto& pp) {
+        ZHLN::ECS::Patch<ZHLN::Components::PostProcessSettingsComponent>(reg, e, [](auto& pp) -> auto {
             pp.ambientExposure = kAmbientExposure;
             pp.skyZenith       = kSkyZenith;
             pp.skyHorizon      = kSkyHorizon;
@@ -86,10 +85,10 @@ auto BuildProceduralArena(ZHLN::Engine& engine) -> void {
         JPH::Vec4 color;
     };
     const std::array<PillarDesc, 4> pillars = {
-        {{-14.0f, -8.0f, 1.5f, 5.0f, {0.35f, 0.45f, 0.60f, 1.0f}},
-         {-18.0f, 4.0f, 2.0f, 7.5f, {0.30f, 0.40f, 0.55f, 1.0f}},
-         {18.0f, 12.0f, 2.2f, 9.0f, {0.25f, 0.35f, 0.50f, 1.0f}},
-         {14.0f, -16.0f, 2.0f, 8.0f, {0.28f, 0.38f, 0.52f, 1.0f}}}
+        {{.x = -14.0f, .z = -8.0f, .width = 1.5f, .height = 5.0f, .color = {0.35f, 0.45f, 0.60f, 1.0f}},
+         {.x = -18.0f, .z = 4.0f, .width = 2.0f, .height = 7.5f, .color = {0.30f, 0.40f, 0.55f, 1.0f}},
+         {.x = 18.0f, .z = 12.0f, .width = 2.2f, .height = 9.0f, .color = {0.25f, 0.35f, 0.50f, 1.0f}},
+         {.x = 14.0f, .z = -16.0f, .width = 2.0f, .height = 8.0f, .color = {0.28f, 0.38f, 0.52f, 1.0f}}}
     };
     for (const auto& p: pillars) {
         ZHLN::CreativeWorksFactory::CreateBox(
@@ -114,7 +113,7 @@ auto BuildProceduralArena(ZHLN::Engine& engine) -> void {
 
 } // namespace
 
-int main(int argc, char* argv[]) {
+auto main(int argc, char* argv[]) -> int {
     auto optionsRes = ZHLN::HandleCommandLine(std::span(argv, static_cast<size_t>(argc)));
     if (!optionsRes) {
         return EXIT_FAILURE;
@@ -158,7 +157,7 @@ int main(int argc, char* argv[]) {
 
         // 1. Mouse Look Delta
         for (ZHLN::Entity e: engine->GetRegistry().GetEntitiesWith<ZHLN::Components::InputStateComponent>()) {
-            ZHLN::ECS::Patch<ZHLN::Components::InputStateComponent>(engine->GetRegistry(), e, [&](auto& st) {
+            ZHLN::ECS::Patch<ZHLN::Components::InputStateComponent>(engine->GetRegistry(), e, [&](auto& st) -> auto {
                 if (st.needsResize) {
                     engine->GetRenderContext().SetResolution(st.newSize);
                     st.needsResize = false;

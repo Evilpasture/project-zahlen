@@ -771,11 +771,39 @@ void PhysicsContext::AddImpulse(ZHLN::Entity handle, JPH::Vec3Arg impulse) {
 }
 
 void PhysicsContext::AddImpulse(ZHLN::Entity handle, JPH::Vec3Arg impulse, JPH::RVec3Arg position) {
-    // FIXED: Passed _impl->world to free function
     JPH::BodyID id = Physics::GetBodyID(_impl->world, handle);
     if (!id.IsInvalid()) {
         _impl->world.bodyInterface->AddImpulse(id, impulse, position);
         _impl->world.bodyInterface->ActivateBody(id);
+    }
+}
+
+void PhysicsContext::AddRadialImpulse(JPH::RVec3Arg center, float radius, float maxImpulse) {
+    const auto&              world = GetWorld();
+    JPH::Array<ZHLN::Entity> overlapped;
+    OverlapSphere(center, radius, overlapped);
+
+    for (Entity physHandle: overlapped) {
+        if (physHandle.index >= world.slotCapacity) {
+            continue;
+        }
+        if (world.generations[physHandle.index].load(std::memory_order::acquire) != physHandle.generation) {
+            continue;
+        }
+
+        uint32_t   dense = world.slotToDense[physHandle.index];
+        size_t     base  = static_cast<size_t>(dense) * 4;
+        JPH::RVec3 bodyPos(world.positions[base], world.positions[base + 1], world.positions[base + 2]);
+
+        JPH::RVec3 diff    = bodyPos - center;
+        auto       dist    = static_cast<float>(diff.Length());
+        float      falloff = 1.0f - std::clamp(dist / radius, 0.0f, 1.0f);
+
+        if (dist > 1e-4f && falloff > 0.01f) {
+            JPH::Vec3 impulseDir = JPH::Vec3(diff / static_cast<double>(dist)) + JPH::Vec3(0.0f, 0.35f, 0.0f);
+            JPH::Vec3 impulse    = impulseDir.Normalized() * (maxImpulse * falloff * falloff);
+            AddImpulse(physHandle, impulse);
+        }
     }
 }
 

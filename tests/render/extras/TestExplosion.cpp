@@ -12,7 +12,6 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/physics/Physics.hpp>
-#include <cmath>
 #include <expected>
 #include <memory>
 
@@ -21,7 +20,6 @@ import ZHLN.Explosions;
 enum class ExplosionTestError : uint32_t {
     Success = 0,
     ExplosionSpawnFailed[[= ZHLN::Reflect::Description("ExplosionSystem::Spawn failed to instantiate entity hierarchy.")]],
-    BlastImpulseFailed[[= ZHLN::Reflect::Description("Radial physical blast impulse failed to propel nearby dynamic rigid bodies.")]],
     CraterDecalSpawnFailed[[= ZHLN::Reflect::Description("Autonomous crater decal was not spawned after ground impact delay.")]],
     CraterFadeFailed[[= ZHLN::Reflect::Description("Crater decal did not dissolve/scale down during the fade window.")]],
     EntityLeakDetected[[= ZHLN::Reflect::Description("Explosion root or debris entities remained alive after duration expired.")]],
@@ -67,11 +65,12 @@ struct ExplosionTestSuite {
         // ====================================================================
         // 1. Standard Fireball Spawn & Lifecycle
         // ====================================================================
-        std::expected<void, ZHLN::Error> standard_fireball_lifecycle() {
+        auto standard_fireball_lifecycle() -> std::expected<void, ZHLN::Error> {
             auto engine      = CreateTestEngine();
             auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine)
+            if (!checkEngine) {
                 return checkEngine;
+            }
 
             auto& reg = engine->GetRegistry();
 
@@ -83,8 +82,9 @@ struct ExplosionTestSuite {
 
             const auto* comp      = reg.Get<ZHLN::ExplosionComponent>(expRoot);
             auto        checkComp = ZHLN::Test::AssertTrue(comp != nullptr);
-            if (!checkComp)
+            if (!checkComp) {
                 return checkComp;
+            }
 
             ZHLN::Test::ExpectEq(comp->type, ZHLN::OrdnanceType::StandardFireball);
             ZHLN::Test::ExpectEq(comp->debrisEntity, ZHLN::NullEntity);
@@ -108,22 +108,16 @@ struct ExplosionTestSuite {
         }
 
         // ====================================================================
-        // 2. Artillery Mortar: Blast Impulse, 3D Debris & Crater Decal
+        // 2. Artillery Mortar: 3D Debris & Crater Decal
         // ====================================================================
-        std::expected<void, ZHLN::Error> artillery_mortar_blast_impulse_and_crater() {
+        auto artillery_mortar_and_crater() -> std::expected<void, ZHLN::Error> {
             auto engine      = CreateTestEngine();
             auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine)
+            if (!checkEngine) {
                 return checkEngine;
+            }
 
             auto& reg = engine->GetRegistry();
-            auto& pc  = engine->GetPhysicsContext();
-
-            // 1. Spawn a dynamic physical box 3.0m away from blast epicenter
-            const ZHLN::Entity box = ZHLN::CreativeWorksFactory::CreateBox(
-                *engine, JPH::Vec3(0.5f, 0.5f, 0.5f), {.position = JPH::RVec3(3.0, 1.0, 0.0), .createPhysics = true, .isStaticPhysics = false}
-            );
-            pc.OptimizeBroadphase();
 
             // 2. Detonate Artillery Mortar at (0, 0, 0)
             const ZHLN::Entity expRoot = ZHLN::ExplosionSystem::Spawn(*engine, JPH::Vec3(0.0f, 0.0f, 0.0f), 1.0f, ZHLN::OrdnanceType::ArtilleryMortar);
@@ -131,8 +125,9 @@ struct ExplosionTestSuite {
 
             const auto* comp      = reg.Get<ZHLN::ExplosionComponent>(expRoot);
             auto        checkComp = ZHLN::Test::AssertTrue(comp != nullptr);
-            if (!checkComp)
+            if (!checkComp) {
                 return checkComp;
+            }
 
             const ZHLN::Entity debrisEnt = comp->debrisEntity;
             ZHLN::Test::ExpectTrue(debrisEnt != ZHLN::NullEntity);
@@ -156,19 +151,11 @@ struct ExplosionTestSuite {
                 }
             }
 
-            // Invariant 1: Crater Decal spawned with DecalComponent
+            // Crater Decal spawned with DecalComponent
             ZHLN::Test::ExpectTrue(craterObserved);
             ZHLN::Test::ExpectTrue(reg.IsAlive(foundCrater));
             ZHLN::Test::ExpectTrue(reg.Get<ZHLN::Components::DecalComponent>(foundCrater) != nullptr);
 
-            // Invariant 2: Radial blast impulse propelled dynamic box away
-            const auto* boxPhys  = reg.Get<ZHLN::Components::PhysicsStateComponent>(box);
-            auto        checkBox = ZHLN::Test::AssertTrue(boxPhys != nullptr);
-            if (!checkBox)
-                return checkBox;
-            ZHLN::Test::ExpectTrue(boxPhys->currPosition.GetX() > 3.2f || boxPhys->currPosition.GetY() > 1.2f);
-
-            // 4. Simulate until explosion duration expires (ArtilleryMortar duration is 3.5s = 210 frames)
             for (int i = 0; i < 180; ++i) {
                 engine->ProcessEvents();
                 ZHLN::ExplosionSystem::Update(*engine, dt);
@@ -188,11 +175,12 @@ struct ExplosionTestSuite {
         // ====================================================================
         // 3. Crater Decal Fade Dissolution & Lifetime Cleanup
         // ====================================================================
-        std::expected<void, ZHLN::Error> crater_decal_fade_and_cleanup() {
+        auto crater_decal_fade_and_cleanup() -> std::expected<void, ZHLN::Error> {
             auto engine      = CreateTestEngine();
             auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine)
+            if (!checkEngine) {
                 return checkEngine;
+            }
 
             auto& reg = engine->GetRegistry();
 
@@ -224,8 +212,9 @@ struct ExplosionTestSuite {
             // Invariant 1: Scale shrunk dynamically during fade
             const auto* trans      = reg.Get<ZHLN::Components::TransformComponent>(craterEnt);
             auto        checkTrans = ZHLN::Test::AssertTrue(trans != nullptr);
-            if (!checkTrans)
+            if (!checkTrans) {
                 return checkTrans;
+            }
             ZHLN::Test::ExpectTrue(trans->scale.GetX() < 6.8f);
 
             // 2. Simulate past the 28.0s expiration mark (age: 27s -> 29.5s)
@@ -244,6 +233,6 @@ struct ExplosionTestSuite {
     };
 };
 
-int main() {
+auto main() -> int {
     return ZHLN::Test::Runner::Run<ExplosionTestSuite>();
 }

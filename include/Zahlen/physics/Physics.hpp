@@ -234,6 +234,8 @@ class ZHLN_API PhysicsContext {
     void               AddImpulse(ZHLN::Entity handle, JPH::Vec3Arg impulse);
     void               AddImpulse(ZHLN::Entity handle, JPH::Vec3Arg impulse, JPH::RVec3Arg position);
 
+    void AddRadialImpulse(JPH::RVec3Arg center, float radius, float maxImpulse);
+
     [[nodiscard]] auto GetContactEvents() const -> std::pair<const Physics::ContactEvent*, size_t>;
 
     // --- Constraints ---

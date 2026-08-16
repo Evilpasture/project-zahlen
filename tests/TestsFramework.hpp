@@ -66,7 +66,7 @@ inline void TestTimeoutSignalHandler(int sig) {
 
 namespace ZHLN::Test {
 
-enum class TestFrameworkError : uint32_t {
+enum class TestFrameworkError : uint8_t {
     Success = 0,
     AssertionFailed[[= ZHLN::Reflect::Description("One or more assertions failed in this test. ")]],
 };

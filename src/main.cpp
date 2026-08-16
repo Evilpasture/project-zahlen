@@ -7,6 +7,7 @@
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
+#include "physics/PhysicsWorld.hpp"
 #include <Jolt/Physics/Collision/CastResult.h>
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Camera.hpp>
@@ -33,7 +34,6 @@
 #include <cmath>
 #include <format>
 #include <imgui.h>
-#include <physics/PhysicsWorld.hpp> // FIXED: Included to define complete type of PhysicsWorld
 #include <print>
 #include <thread> // FIXED: Added to fix 'std::this_thread'
 

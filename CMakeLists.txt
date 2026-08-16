@@ -478,7 +478,6 @@ target_include_directories(zahlen_engine SYSTEM PRIVATE
 )
 target_include_directories(zahlen_engine SYSTEM PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/LuaJIT/src
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/yoga
     ${CMAKE_BINARY_DIR}/generated_shaders
@@ -486,6 +485,7 @@ target_include_directories(zahlen_engine SYSTEM PUBLIC
 target_include_directories(zahlen_engine SYSTEM PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/cgltf
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/stb
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
 # --- AUTOMATIC FENNEL BOOTSTRAP DOWNLOADER ---

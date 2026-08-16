@@ -21,8 +21,6 @@ module;
 #include <Zahlen/Types.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
-#include <Zahlen/physics/Physics.hpp>
-#include <physics/PhysicsWorld.hpp>
 
 // Standard Library Headers
 #include <algorithm>
@@ -460,9 +458,6 @@ export class ExplosionSystem {
             );
         }
 
-        // Radial Physical Blast Force
-        ApplyPhysicalBlastImpulse(engine, origin, 18.0f * scale, 1400.0f * scale * scale);
-
         // Procedural Audio DSP
         auto& audio = engine.GetAudioContext();
         audio.PlayNoiseBurst3D(AudioFilterType::LowPass, 60.0f, 3.5f, 1.0f, 0.85f, origin, AudioNoiseType::Brownian);
@@ -589,38 +584,6 @@ export class ExplosionSystem {
     }
 
   private:
-    static void ApplyPhysicalBlastImpulse(Engine& engine, JPH::Vec3Arg center, float radius, float maxImpulse) {
-        auto&                    pc    = engine.GetPhysicsContext();
-        const auto&              world = pc.GetWorld();
-        JPH::Array<ZHLN::Entity> overlapped;
-        pc.OverlapSphere(JPH::RVec3(center), radius, overlapped);
-
-        for (Entity physHandle: overlapped) {
-            if (physHandle.index >= world.slotCapacity) {
-                continue;
-            }
-            if (world.generations[physHandle.index].load(std::memory_order::acquire) != physHandle.generation) {
-                continue;
-            }
-
-            uint32_t  dense = world.slotToDense[physHandle.index];
-            JPH::Vec3 bodyPos(
-                static_cast<float>(world.positions[dense * 4 + 0]), static_cast<float>(world.positions[dense * 4 + 1]),
-                static_cast<float>(world.positions[dense * 4 + 2])
-            );
-
-            JPH::Vec3 diff    = bodyPos - center;
-            float     dist    = diff.Length();
-            float     falloff = 1.0f - std::clamp(dist / radius, 0.0f, 1.0f);
-
-            if (dist > 1e-4f && falloff > 0.01f) {
-                JPH::Vec3 impulseDir = (diff / dist) + JPH::Vec3(0.0f, 0.35f, 0.0f);
-                JPH::Vec3 impulse    = impulseDir.Normalized() * (maxImpulse * falloff * falloff);
-                pc.AddImpulse(physHandle, impulse);
-            }
-        }
-    }
-
     static void InitArtilleryParticles(ExplosionComponent& exp, std::mt19937& gen) {
         exp.fireball.resize(78);
         for (size_t i = 0; i < exp.fireball.size(); ++i) {

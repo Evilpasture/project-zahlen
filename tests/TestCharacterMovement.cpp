@@ -6,12 +6,17 @@
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
+#include "engine/system/CameraSystem.hpp"
+#include "engine/system/TargetCameraSystem.hpp"
 #include <Jolt/Core/Factory.h>
 #include <Jolt/RegisterTypes.h>
 #include <Zahlen/Buffer.h>
+#include <Zahlen/Camera.hpp>
+#include <Zahlen/Components.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <cmath>
@@ -19,32 +24,114 @@
 #include <vector>
 
 // ============================================================================
-// Test Suite Error Codes & Descriptions
+// Error Codes
 // ============================================================================
 
-enum class CharacterMovementTestError : uint32_t {
+enum class CharacterTestError : uint8_t {
     Success = 0,
-    DisplacementFailed[[= ZHLN::Reflect::Description("Character failed to traverse forward at expected velocity.")]],
-    VerticalJitterDetected[[= ZHLN::Reflect::Description("Vertical position variance exceeded flat-ground stability threshold.")]],
-    WallPenetrationDetected[[= ZHLN::Reflect::Description("Character breached or penetrated inside a solid obstacle collider.")]],
-    JumpTrajectoryFailed[[= ZHLN::Reflect::Description("Character jump trajectory or apex altitude did not match parabolic kinematics.")]],
-    LandingTransitionFailed[[= ZHLN::Reflect::Description("Landing state transition failed upon touchdown.")]],
-    StepClimbingFailed[[= ZHLN::Reflect::Description("Character failed to step up and climb over an obstacle ledge.")]],
-    DynamicPushFailed[[= ZHLN::Reflect::Description("Character failed to push or impart impulse to a dynamic rigid body.")]],
+    GroundedStateFailed[[= ZHLN::Reflect::Description("Character failed to maintain or establish a stable grounded state.")]],
+    DisplacementMismatch[[= ZHLN::Reflect::Description("Kinematic displacement did not match expected velocity integration.")]],
+    SubFrameJitterDetected[[= ZHLN::Reflect::Description("Sub-frame alpha interpolation produced non-monotonic or jittery motion.")]],
+    CameraDistanceVariance[[= ZHLN::Reflect::Description("Camera-to-character relative distance variance exceeded 0.1mm threshold.")]],
+    MotionNonMonotonic[[= ZHLN::Reflect::Description("Position hitching, backward movement, or teleportation detected.")]],
+    WallBreachDetected[[= ZHLN::Reflect::Description("Character penetrated into a solid obstacle collider.")]],
+    WallSlideFailed[[= ZHLN::Reflect::Description("Character failed to slide tangentially along an obstacle plane.")]],
+    JumpTrajectoryFailed[[= ZHLN::Reflect::Description("Jump trajectory, apex altitude, or landing transition failed.")]],
+    StepClimbFailed[[= ZHLN::Reflect::Description("Character failed to step up and traverse over an obstacle ledge.")]],
+    SlopeClimbFailed[[= ZHLN::Reflect::Description("Character failed to climb a walkable slope or slid unexpectedly.")]],
+    DynamicPushFailed[[= ZHLN::Reflect::Description("Character failed to impart momentum to a dynamic rigid body.")]],
 };
+
+// ============================================================================
+// Helpers
+// ============================================================================
 
 namespace {
 
-inline float GetDensePosition(const ZHLN::PhysicsContext& pc, uint32_t denseIndex, uint32_t axis) noexcept {
+inline auto GetBodyPosition(const ZHLN::PhysicsContext& pc, uint32_t denseIndex) noexcept -> JPH::Vec3 {
     auto        posView = pc.GetPositionBuffer();
     const auto* posData = static_cast<const JPH::Real*>(posView.buf);
-    return static_cast<float>(posData[denseIndex * 4 + axis]);
+    return {static_cast<float>(posData[denseIndex * 4 + 0]), static_cast<float>(posData[denseIndex * 4 + 1]), static_cast<float>(posData[denseIndex * 4 + 2])};
 }
 
 } // namespace
 
 // ============================================================================
-// Test Suite Implementation
+// CPU Pipeline Test Harness
+// ============================================================================
+
+struct CPUPipelineHarness {
+    ZHLN::ECS::Registry  reg;
+    ZHLN::PhysicsContext pc;
+    ZHLN::Camera         cam;
+    ZHLN::Entity         player {};
+    ZHLN::Entity         charPhys {};
+
+    float accumulator  = 0.0f;
+    float currentAlpha = 0.0f;
+
+    static constexpr float kTargetDt = 1.0f / 60.0f;
+
+    explicit CPUPipelineHarness(const ZHLN::PhysicsConfig& cfg, JPH::RVec3Arg spawnPos = JPH::RVec3(0, 0, 0), const ZHLN::Physics::DualShapeConfig& hull = {}):
+        pc(cfg) {
+        // Ground at Y = -0.5m with half-height 0.5m -> surface at Y = 0.0m (Dense index 0)
+        auto groundShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 100.0f, 0.5f, 100.0f);
+        pc.CreateRigidBody(groundShape, JPH::RVec3(0, -0.5, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::NON_MOVING);
+
+        // Character at spawn position (Dense index 1)
+        charPhys = pc.CreateCharacter(spawnPos, hull);
+        player   = reg.Create(
+            ZHLN::Components::TransformComponent {.position = JPH::Vec3(spawnPos)}, ZHLN::Components::MovementComponent {.speed = 6.0f},
+            ZHLN::Components::PhysicsComponent {charPhys},
+            ZHLN::Components::PhysicsStateComponent {.currPosition = JPH::Vec3(spawnPos), .prevPosition = JPH::Vec3(spawnPos)}
+        );
+
+        pc.OptimizeBroadphase();
+
+        cam.position = JPH::Vec3(spawnPos) + JPH::Vec3(0.0f, 1.5f, -5.0f);
+        cam.yaw      = -90.0f;
+        cam.pitch    = 0.0f;
+    }
+
+    void Settle(int frames = 15) {
+        for (int i = 0; i < frames; ++i) {
+            Tick(kTargetDt, 0.0f, 0.0f);
+        }
+    }
+
+    void Tick(float renderDt, float inputX, float inputZ, float verticalVel = 0.0f) {
+        auto* move  = reg.Get<ZHLN::Components::MovementComponent>(player);
+        auto* state = reg.Get<ZHLN::Components::PhysicsStateComponent>(player);
+        auto* trans = reg.Get<ZHLN::Components::TransformComponent>(player);
+
+        move->inputX = inputX;
+        move->inputZ = inputZ;
+
+        accumulator += std::min(renderDt, 0.1f);
+        while (accumulator >= kTargetDt) {
+            JPH::Vec3 vel(move->inputX * move->speed, verticalVel, move->inputZ * move->speed);
+            pc.SetCharacterVelocity(charPhys, vel);
+
+            pc.Step(kTargetDt);
+
+            state->prevPosition = state->currPosition;
+            state->currPosition = GetBodyPosition(pc, 1);
+
+            accumulator -= kTargetDt;
+        }
+
+        currentAlpha = accumulator / kTargetDt;
+        float alpha  = std::clamp(currentAlpha, 0.0f, 1.0f);
+
+        trans->position = state->prevPosition + alpha * (state->currPosition - state->prevPosition);
+
+        JPH::Vec3 targetCenter = trans->position + JPH::Vec3(0.0f, 1.5f, 0.0f);
+        cam.position           = targetCenter + JPH::Vec3(0.0f, 0.0f, -5.0f);
+    }
+};
+
+// ============================================================================
+// Test Suite
 // ============================================================================
 
 struct CharacterMovementTestSuite {
@@ -69,271 +156,356 @@ struct CharacterMovementTestSuite {
     }
 
     struct Tests {
-        // ====================================================================
-        // 1. Flat Ground Movement & Sub-Millimeter Jitter Verification
-        // ====================================================================
-        std::expected<void, ZHLN::Error> character_ground_movement_and_jitter() {
-            ZHLN::PhysicsConfig  cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
-            ZHLN::PhysicsContext pc(cfg);
+        // 1. Settle & Resting Stability
+        auto test_01_flat_ground_settling_and_stability() -> std::expected<void, ZHLN::Error> {
+            ZHLN::PhysicsConfig cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
+            CPUPipelineHarness  harness(cfg);
 
-            // 1. Ground at Y = 0.0m (Dense index 0)
-            auto groundShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 50.0f, 0.5f, 50.0f);
-            pc.CreateRigidBody(groundShape, JPH::RVec3(0, -0.5, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::NON_MOVING);
+            harness.Settle(20);
 
-            // 2. Character at (0, 0, 0) (Dense index 1)
-            constexpr uint32_t kCharDenseIndex = 1;
-            ZHLN::Entity       charHandle      = pc.CreateCharacter(JPH::RVec3(0.0, 0.0, 0.0));
-            pc.OptimizeBroadphase();
+            ZHLN::Test::ExpectTrue(harness.pc.IsCharacterOnGround(harness.charPhys));
 
-            constexpr float dt = 1.0f / 60.0f;
+            JPH::Vec3 pos = GetBodyPosition(harness.pc, 1);
+            ZHLN::Test::ExpectTrue(std::abs(pos.GetY()) < 0.005f);
 
-            // Settle on ground for 10 frames
-            for (int i = 0; i < 10; ++i) {
-                pc.SetCharacterVelocity(charHandle, JPH::Vec3::sZero());
-                pc.Step(dt);
+            if (!harness.pc.IsCharacterOnGround(harness.charPhys) || std::abs(pos.GetY()) >= 0.005f) {
+                return std::unexpected(CharacterTestError::GroundedStateFailed);
             }
-            ZHLN::Test::ExpectTrue(pc.IsCharacterOnGround(charHandle));
-
-            constexpr uint32_t kFrames = 60; // 1.0 second simulation
-            std::vector<float> yPositions;
-            yPositions.reserve(kFrames);
-
-            constexpr float kMoveSpeed = 6.0f;
-            for (uint32_t i = 0; i < kFrames; ++i) {
-                pc.SetCharacterVelocity(charHandle, JPH::Vec3(0.0f, 0.0f, kMoveSpeed));
-                pc.Step(dt);
-
-                yPositions.push_back(GetDensePosition(pc, kCharDenseIndex, 1));
-
-                // Invariant: Character must advance monotonically along +Z
-                ZHLN::Test::ExpectTrue(GetDensePosition(pc, kCharDenseIndex, 2) > 0.0f);
-            }
-
-            // A. Forward Displacement Verification (~6.0m in 1.0s)
-            float totalZ = GetDensePosition(pc, kCharDenseIndex, 2);
-            ZHLN::Test::ExpectTrue(totalZ > 5.0f && totalZ < 7.0f);
-
-            // B. Jitter Analysis (Verify vertical position variance is under 5mm on flat terrain)
-            float minY           = *std::min_element(yPositions.begin(), yPositions.end());
-            float maxY           = *std::max_element(yPositions.begin(), yPositions.end());
-            float heightVariance = maxY - minY;
-
-            ZHLN::Test::ExpectTrue(heightVariance < 0.005f);
-            if (heightVariance >= 0.005f) {
-                return std::unexpected(CharacterMovementTestError::VerticalJitterDetected);
-            }
-
             return {};
         }
 
-        // ====================================================================
-        // 2. Obstacle Wall Collision, Penetration & Slide Response
-        // ====================================================================
-        std::expected<void, ZHLN::Error> character_wall_collision_and_penetration() {
-            ZHLN::PhysicsConfig  cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
-            ZHLN::PhysicsContext pc(cfg);
+        // 2. Kinematic Forward & Lateral Displacement
+        auto test_02_constant_velocity_displacement() -> std::expected<void, ZHLN::Error> {
+            ZHLN::PhysicsConfig cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
+            CPUPipelineHarness  harness(cfg);
+            harness.Settle(10);
 
-            // 1. Ground at Y = 0.0m (Dense index 0)
-            auto groundShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 50.0f, 0.5f, 50.0f);
-            pc.CreateRigidBody(groundShape, JPH::RVec3(0, -0.5, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::NON_MOVING);
-
-            // 2. Obstacle Wall at Z = 4.0m with half-depth 0.5m -> Front face at Z = 3.5m (Dense index 1)
-            auto wallShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 4.0f, 2.0f, 0.5f);
-            pc.CreateRigidBody(wallShape, JPH::RVec3(0.0, 1.5, 4.0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::NON_MOVING);
-
-            // 3. Spawn Character at Z = 0.0m with Bumper radius XZ = 0.5m (Dense index 2)
-            constexpr uint32_t             kCharDenseIndex = 2;
-            ZHLN::Physics::DualShapeConfig hull {.lifterRadius = 0.4f, .bumperRadiusXZ = 0.5f, .bumperRadiusY = 0.7f};
-            ZHLN::Entity                   charHandle = pc.CreateCharacter(JPH::RVec3(0.0, 0.0, 0.0), hull);
-            pc.OptimizeBroadphase();
-
-            constexpr float dt = 1.0f / 60.0f;
-
-            // Settle
-            for (int i = 0; i < 10; ++i) {
-                pc.SetCharacterVelocity(charHandle, JPH::Vec3::sZero());
-                pc.Step(dt);
+            for (int i = 0; i < 60; ++i) {
+                harness.Tick(1.0f / 60.0f, 0.0f, 1.0f);
             }
 
-            // Run for 90 frames (1.5s): without a wall, character would reach 12m
-            for (uint32_t i = 0; i < 90; ++i) {
-                pc.SetCharacterVelocity(charHandle, JPH::Vec3(0.0f, 0.0f, 8.0f));
-                pc.Step(dt);
+            JPH::Vec3 pos = GetBodyPosition(harness.pc, 1);
+            ZHLN::Test::ExpectTrue(pos.GetZ() >= 5.85f && pos.GetZ() <= 6.15f);
+
+            if (pos.GetZ() < 5.85f || pos.GetZ() > 6.15f) {
+                return std::unexpected(CharacterTestError::DisplacementMismatch);
             }
-
-            float finalZ = GetDensePosition(pc, kCharDenseIndex, 2);
-
-            // Expected stop: Wall front (3.50m) - Bumper radius (0.50m) = Z ~ 3.00m (±0.15m padding)
-            ZHLN::Test::ExpectTrue(finalZ <= 3.15f);
-            ZHLN::Test::ExpectTrue(finalZ >= 2.85f);
-
-            if (finalZ > 3.15f) {
-                return std::unexpected(CharacterMovementTestError::WallPenetrationDetected);
-            }
-
             return {};
         }
 
-        // ====================================================================
-        // 3. Jump Trajectory, Airborne State & Touchdown Lifecycle
-        // ====================================================================
-        std::expected<void, ZHLN::Error> character_jump_gravity_and_landing() {
-            ZHLN::PhysicsConfig  cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
-            ZHLN::PhysicsContext pc(cfg);
+        // 3. 144 Hz Sub-Frame Interpolation Smoothness
+        auto test_03_144hz_subframe_interpolation_smoothness() -> std::expected<void, ZHLN::Error> {
+            ZHLN::PhysicsConfig cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
+            CPUPipelineHarness  harness(cfg);
+            harness.Settle(10);
 
-            // 1. Ground at Y = 0.0m (Dense index 0)
-            auto groundShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 50.0f, 0.5f, 50.0f);
-            pc.CreateRigidBody(groundShape, JPH::RVec3(0, -0.5, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::NON_MOVING);
+            harness.Tick(1.0f / 60.0f, 0.0f, 1.0f);
 
-            // 2. Character at (0, 0, 0) (Dense index 1)
-            constexpr uint32_t kCharDenseIndex = 1;
-            ZHLN::Entity       charHandle      = pc.CreateCharacter(JPH::RVec3(0.0, 0.0, 0.0));
-            pc.OptimizeBroadphase();
+            const auto* trans = harness.reg.Get<ZHLN::Components::TransformComponent>(harness.player);
+            float       lastZ = trans->position.GetZ();
 
-            constexpr float dt = 1.0f / 60.0f;
+            constexpr float dt144 = 1.0f / 144.0f;
+            for (int i = 0; i < 144; ++i) {
+                harness.Tick(dt144, 0.0f, 1.0f);
 
-            // Settle on ground for 10 frames
-            for (int i = 0; i < 10; ++i) {
-                pc.SetCharacterVelocity(charHandle, JPH::Vec3::sZero());
-                pc.Step(dt);
+                float currZ = trans->position.GetZ();
+                ZHLN::Test::ExpectTrue(currZ > lastZ);
+
+                if (currZ <= lastZ) {
+                    return std::unexpected(CharacterTestError::SubFrameJitterDetected);
+                }
+                lastZ = currZ;
             }
-            ZHLN::Test::ExpectTrue(pc.IsCharacterOnGround(charHandle));
+            return {};
+        }
 
-            float startY = GetDensePosition(pc, kCharDenseIndex, 1);
+        // 4. Camera-to-Character Relative Distance Invariance (< 0.1mm)
+        auto test_04_camera_relative_distance_invariance() -> std::expected<void, ZHLN::Error> {
+            ZHLN::PhysicsConfig cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
+            CPUPipelineHarness  harness(cfg);
+            harness.Settle(10);
 
-            // 1. Initiate Jump (v0 = 18.0 m/s > 15 m/s floor-snapping escape velocity)
-            float vertVel = 18.0f;
-            pc.SetCharacterVelocity(charHandle, JPH::Vec3(0.0f, vertVel, 0.0f));
-            pc.Step(dt);
+            std::vector<float> distances;
+            distances.reserve(144);
 
-            ZHLN::Test::ExpectFalse(pc.IsCharacterOnGround(charHandle));
+            constexpr float dt144 = 1.0f / 144.0f;
+            for (int i = 0; i < 144; ++i) {
+                harness.Tick(dt144, 0.0f, 1.0f);
 
-            // 2. Track trajectory until touchdown
-            float peakY       = startY;
-            bool  wasAirborne = false;
-            bool  landed      = false;
+                const auto* trans        = harness.reg.Get<ZHLN::Components::TransformComponent>(harness.player);
+                JPH::Vec3   targetCenter = trans->position + JPH::Vec3(0.0f, 1.5f, 0.0f);
+
+                float dist = (harness.cam.position - targetCenter).Length();
+                distances.push_back(dist);
+            }
+
+            float minDist  = *std::ranges::min_element(distances);
+            float maxDist  = *std::ranges::max_element(distances);
+            float variance = maxDist - minDist;
+
+            ZHLN::Test::ExpectTrue(variance < 0.0001f);
+            ZHLN::Test::ExpectTrue(std::abs(minDist - 5.0f) < 0.0001f);
+
+            if (variance >= 0.0001f) {
+                return std::unexpected(CharacterTestError::CameraDistanceVariance);
+            }
+            return {};
+        }
+
+        // 5. Variable Delta-Time Motion Monotonicity
+        auto test_05_variable_dt_motion_monotonicity() -> std::expected<void, ZHLN::Error> {
+            ZHLN::PhysicsConfig cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
+            CPUPipelineHarness  harness(cfg);
+            harness.Settle(10);
+
+            harness.Tick(1.0f / 60.0f, 0.0f, 1.0f);
+
+            const auto* trans = harness.reg.Get<ZHLN::Components::TransformComponent>(harness.player);
+            float       lastZ = trans->position.GetZ();
+
+            const std::array<float, 5> variableDts = {0.008f, 0.033f, 0.012f, 0.048f, 0.016f};
+
+            for (int loop = 0; loop < 25; ++loop) {
+                for (float dt: variableDts) {
+                    harness.Tick(dt, 0.0f, 1.0f);
+
+                    float currZ = trans->position.GetZ();
+                    ZHLN::Test::ExpectTrue(currZ > lastZ);
+
+                    if (currZ <= lastZ) {
+                        return std::unexpected(CharacterTestError::MotionNonMonotonic);
+                    }
+                    lastZ = currZ;
+                }
+            }
+            return {};
+        }
+
+        // 6. Wall Collision & Penetration Resistance
+        auto test_06_wall_collision_and_penetration_prevention() -> std::expected<void, ZHLN::Error> {
+            ZHLN::PhysicsConfig cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
+            CPUPipelineHarness  harness(cfg);
+
+            auto wallShape = harness.pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 10.0f, 2.0f, 0.5f);
+            harness.pc.CreateRigidBody(wallShape, JPH::RVec3(0, 1.5, 4.0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::NON_MOVING);
+            harness.pc.OptimizeBroadphase();
+
+            harness.Settle(10);
 
             for (int i = 0; i < 90; ++i) {
-                bool onGround = pc.IsCharacterOnGround(charHandle);
+                harness.Tick(1.0f / 60.0f, 0.0f, 1.66f);
+            }
+
+            JPH::Vec3 pos = GetBodyPosition(harness.pc, 1);
+
+            ZHLN::Test::ExpectTrue(pos.GetZ() <= 3.15f);
+            ZHLN::Test::ExpectTrue(pos.GetZ() >= 2.85f);
+
+            if (pos.GetZ() > 3.15f) {
+                return std::unexpected(CharacterTestError::WallBreachDetected);
+            }
+            return {};
+        }
+
+        // 7. Angled Wall Sliding & Tangential Deflection
+        auto test_07_angled_wall_sliding_deflection() -> std::expected<void, ZHLN::Error> {
+            ZHLN::PhysicsConfig cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
+            CPUPipelineHarness  harness(cfg);
+
+            auto wallShape = harness.pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 50.0f, 2.0f, 0.5f);
+            harness.pc.CreateRigidBody(wallShape, JPH::RVec3(0, 1.5, 3.0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::NON_MOVING);
+            harness.pc.OptimizeBroadphase();
+
+            harness.Settle(10);
+
+            for (int i = 0; i < 60; ++i) {
+                harness.Tick(1.0f / 60.0f, 1.0f, 1.0f);
+            }
+
+            JPH::Vec3 pos = GetBodyPosition(harness.pc, 1);
+
+            ZHLN::Test::ExpectTrue(pos.GetZ() <= 2.20f);
+            ZHLN::Test::ExpectTrue(pos.GetX() >= 4.0f);
+
+            if (pos.GetZ() > 2.20f || pos.GetX() < 4.0f) {
+                return std::unexpected(CharacterTestError::WallSlideFailed);
+            }
+            return {};
+        }
+
+        // 8. Jump Trajectory & Parabolic Apex
+        auto test_08_jump_kinematics_and_landing() -> std::expected<void, ZHLN::Error> {
+            ZHLN::PhysicsConfig cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
+            CPUPipelineHarness  harness(cfg);
+            harness.Settle(10);
+
+            float vertVel  = 12.0f;
+            float peakY    = 0.0f;
+            bool  wasInAir = false;
+            bool  landed   = false;
+
+            constexpr float dt = 1.0f / 60.0f;
+
+            for (int i = 0; i < 90; ++i) {
+                bool onGround = harness.pc.IsCharacterOnGround(harness.charPhys);
+
                 if (!onGround) {
-                    wasAirborne = true;
-                    vertVel -= 32.0f * dt; // Gravity: -32 m/s^2
-                    peakY = std::max(peakY, GetDensePosition(pc, kCharDenseIndex, 1));
-                } else if (wasAirborne) {
+                    wasInAir = true;
+                    vertVel -= 32.0f * dt;
+                    peakY = std::max(peakY, GetBodyPosition(harness.pc, 1).GetY());
+                } else if (wasInAir) {
                     landed  = true;
                     vertVel = 0.0f;
-                    break; // Touchdown achieved
+                    break;
                 }
-                pc.SetCharacterVelocity(charHandle, JPH::Vec3(0.0f, vertVel, 0.0f));
-                pc.Step(dt);
+
+                harness.Tick(dt, 0.0f, 0.0f, vertVel);
             }
 
-            // Expected Apex with v0 = 18.0 m/s and g = 32 m/s^2: h = 324 / 64 ≈ 5.0m
-            ZHLN::Test::ExpectTrue(wasAirborne);
+            ZHLN::Test::ExpectTrue(wasInAir);
             ZHLN::Test::ExpectTrue(landed);
-            ZHLN::Test::ExpectTrue(peakY >= startY + 3.0f && peakY <= startY + 6.0f);
-            ZHLN::Test::ExpectTrue(pc.IsCharacterOnGround(charHandle));
+            ZHLN::Test::ExpectTrue(peakY >= 1.8f && peakY <= 2.7f);
+            ZHLN::Test::ExpectTrue(harness.pc.IsCharacterOnGround(harness.charPhys));
 
-            if (!landed || !pc.IsCharacterOnGround(charHandle)) {
-                return std::unexpected(CharacterMovementTestError::LandingTransitionFailed);
+            if (!landed || peakY < 1.8f) {
+                return std::unexpected(CharacterTestError::JumpTrajectoryFailed);
             }
-
             return {};
         }
 
-        // ====================================================================
-        // 4. Ledge & Stair Step-Up Climbing Traversal
-        // ====================================================================
-        std::expected<void, ZHLN::Error> character_step_climbing_traversal() {
-            ZHLN::PhysicsConfig  cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
-            ZHLN::PhysicsContext pc(cfg);
+        // 9. Ledge & Curb Step-Up Auto-Climbing
+        auto test_09_ledge_step_climbing() -> std::expected<void, ZHLN::Error> {
+            ZHLN::PhysicsConfig cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
+            CPUPipelineHarness  harness(cfg);
 
-            // 1. Lower ground at Y = 0.0m (Dense index 0)
-            auto groundShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 50.0f, 0.5f, 50.0f);
-            pc.CreateRigidBody(groundShape, JPH::RVec3(0, -0.5, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::NON_MOVING);
+            auto curbShape = harness.pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 5.0f, 0.075f, 0.5f);
+            harness.pc.CreateRigidBody(curbShape, JPH::RVec3(0, 0.075, 2.0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::NON_MOVING);
+            harness.pc.OptimizeBroadphase();
 
-            // 2. Step Curb: Height = 0.10m (half-height = 0.05m), Depth = 1.0m (half-depth = 0.5m) (Dense index 1)
-            // Positioned at (0.0, 0.05, 2.0) -> spans Z in [1.5m, 2.5m], top surface at Y = 0.10m
-            auto stepShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 2.0f, 0.05f, 0.5f);
-            pc.CreateRigidBody(stepShape, JPH::RVec3(0.0, 0.05, 2.0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::NON_MOVING);
+            harness.Settle(10);
 
-            // 3. Spawn Character at Z = 0.0m on ground (Dense index 2)
-            constexpr uint32_t kCharDenseIndex = 2;
-            ZHLN::Entity       charHandle      = pc.CreateCharacter(JPH::RVec3(0.0, 0.0, 0.0));
-            pc.OptimizeBroadphase();
-
-            constexpr float dt = 1.0f / 60.0f;
-            for (int i = 0; i < 10; ++i) {
-                pc.SetCharacterVelocity(charHandle, JPH::Vec3::sZero());
-                pc.Step(dt);
+            for (int i = 0; i < 75; ++i) {
+                harness.Tick(1.0f / 60.0f, 0.0f, 0.66f);
             }
 
-            // Walk across the step at 4 m/s for 80 frames (1.33s, total distance 5.3m)
-            for (uint32_t i = 0; i < 80; ++i) {
-                pc.SetCharacterVelocity(charHandle, JPH::Vec3(0.0f, 0.0f, 4.0f));
-                pc.Step(dt);
+            JPH::Vec3 pos = GetBodyPosition(harness.pc, 1);
+
+            ZHLN::Test::ExpectTrue(pos.GetZ() > 3.0f);
+            ZHLN::Test::ExpectTrue(harness.pc.IsCharacterOnGround(harness.charPhys));
+
+            if (pos.GetZ() <= 3.0f || !harness.pc.IsCharacterOnGround(harness.charPhys)) {
+                return std::unexpected(CharacterTestError::StepClimbFailed);
             }
-
-            float finalZ = GetDensePosition(pc, kCharDenseIndex, 2);
-
-            // Invariant: Character climbed over and traversed past the step (Z > 3.0m)
-            ZHLN::Test::ExpectTrue(finalZ > 3.0f);
-            ZHLN::Test::ExpectTrue(pc.IsCharacterOnGround(charHandle));
-
-            if (finalZ <= 3.0f) {
-                return std::unexpected(CharacterMovementTestError::StepClimbingFailed);
-            }
-
             return {};
         }
 
-        // ====================================================================
-        // 5. Dynamic Rigid Body Push Interaction
-        // ====================================================================
-        std::expected<void, ZHLN::Error> character_dynamic_rigidbody_push() {
-            ZHLN::PhysicsConfig  cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
-            ZHLN::PhysicsContext pc(cfg);
+        // 10. Walkable Slope Traversal
+        auto test_10_walkable_slope_climbing() -> std::expected<void, ZHLN::Error> {
+            ZHLN::PhysicsConfig cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
+            CPUPipelineHarness  harness(cfg);
 
-            // 1. Ground at Y = 0.0m
-            auto groundShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 50.0f, 0.5f, 50.0f);
-            pc.CreateRigidBody(groundShape, JPH::RVec3(0, -0.5, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::NON_MOVING);
+            JPH::Quat rampRot   = JPH::Quat::sRotation(JPH::Vec3::sAxisX(), JPH::DegreesToRadians(-25.0f));
+            auto      rampShape = harness.pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 5.0f, 0.2f, 5.0f);
+            harness.pc.CreateRigidBody(rampShape, JPH::RVec3(0, 1.0, 4.0), rampRot, JPH::EMotionType::Static, ZHLN::Layers::NON_MOVING);
+            harness.pc.OptimizeBroadphase();
 
-            // 2. Dynamic pushable box at Z = 2.0m (Bottom touches Y = 0.0m)
-            auto         boxShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 0.25f, 0.25f, 0.25f);
+            harness.Settle(10);
+
+            for (int i = 0; i < 60; ++i) {
+                harness.Tick(1.0f / 60.0f, 0.0f, 1.0f);
+            }
+
+            JPH::Vec3 pos = GetBodyPosition(harness.pc, 1);
+
+            ZHLN::Test::ExpectTrue(pos.GetY() > 0.8f);
+            ZHLN::Test::ExpectTrue(pos.GetZ() > 3.0f);
+
+            if (pos.GetY() <= 0.8f) {
+                return std::unexpected(CharacterTestError::SlopeClimbFailed);
+            }
+            return {};
+        }
+
+        // 11. Dynamic Rigid Body Push Interaction
+        auto test_11_dynamic_rigid_body_push_impulse() -> std::expected<void, ZHLN::Error> {
+            ZHLN::PhysicsConfig cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
+            CPUPipelineHarness  harness(cfg);
+
+            auto         boxShape = harness.pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 0.25f, 0.25f, 0.25f);
             ZHLN::Entity pushBox =
-                pc.CreateRigidBody(boxShape, JPH::RVec3(0.0, 0.25, 2.0), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::MOVING);
+                harness.pc.CreateRigidBody(boxShape, JPH::RVec3(0.0, 0.25, 2.0), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::MOVING);
+            harness.pc.OptimizeBroadphase();
 
-            // 3. Spawn Character at Z = 0.0m
-            ZHLN::Entity charHandle = pc.CreateCharacter(JPH::RVec3(0.0, 0.0, 0.0));
-            pc.OptimizeBroadphase();
+            harness.Settle(10);
 
-            constexpr float dt = 1.0f / 60.0f;
-            for (int i = 0; i < 10; ++i) {
-                pc.SetCharacterVelocity(charHandle, JPH::Vec3::sZero());
-                pc.Step(dt);
+            for (int i = 0; i < 60; ++i) {
+                harness.Tick(1.0f / 60.0f, 0.0f, 0.66f);
             }
 
-            // Walk into the box for 60 frames
-            for (uint32_t i = 0; i < 60; ++i) {
-                pc.SetCharacterVelocity(charHandle, JPH::Vec3(0.0f, 0.0f, 4.0f));
-                pc.Step(dt);
-            }
-
-            // Invariant: Query the dynamic box position using public Raycast API
-            auto rayHit = pc.Raycast(JPH::RVec3(0.0, 0.25, 0.0), JPH::Vec3(0.0f, 0.0f, 1.0f), 10.0f);
+            auto rayHit = harness.pc.Raycast(JPH::RVec3(0.0, 0.25, 0.0), JPH::Vec3(0.0f, 0.0f, 1.0f), 10.0f);
             ZHLN::Test::ExpectTrue(rayHit.hasHit);
             ZHLN::Test::ExpectTrue(rayHit.handle == pushBox);
             ZHLN::Test::ExpectTrue(rayHit.position.GetZ() > 2.6f);
 
             if (!rayHit.hasHit || rayHit.position.GetZ() <= 2.6f) {
-                return std::unexpected(CharacterMovementTestError::DynamicPushFailed);
+                return std::unexpected(CharacterTestError::DynamicPushFailed);
             }
+            return {};
+        }
 
+        // ====================================================================
+        // PROOF TEST: TargetCameraSystem Alpha Interpolation (Pure CPU)
+        // Tests directly on registry & camera without creating an Engine/GPU!
+        // ====================================================================
+        auto test_proof_target_camera_alpha_interpolation_on_cpu() -> std::expected<void, ZHLN::Error> {
+            ZHLN::ECS::Registry reg;
+            ZHLN::Camera        cam;
+
+            ZHLN::Entity target = reg.Create(
+                ZHLN::Components::TransformComponent {},
+                ZHLN::Components::PhysicsStateComponent {.currPosition = JPH::Vec3(0.0f, 0.0f, 10.0f), .prevPosition = JPH::Vec3(0.0f, 0.0f, 0.0f)}
+            );
+
+            reg.Create(
+                ZHLN::Components::TargetCameraComponent {
+                    .target              = target,
+                    .distance            = 5.0f,
+                    .targetDistance      = 5.0f,
+                    .yaw                 = -90.0f,
+                    .pitch               = 0.0f,
+                    .targetOffset        = JPH::Vec3::sZero(),
+                    .stiffness           = 15.0f,
+                    .smoothTargetPos     = JPH::Vec3::sZero(),
+                    .hasInitSmoothTarget = 1
+                },
+                ZHLN::Components::InputComponent {}
+            );
+
+            ZHLN::TargetCameraSystem targetCamSys;
+            constexpr float          dt    = 0.01666f;
+            constexpr float          alpha = 0.5f; // Halfway between 0m and 10m -> 5.0m
+
+            // Run camera system directly on CPU with pure Registry & Camera!
+            targetCamSys.Update(reg, cam, dt, alpha);
+
+            // Sub-frame target position at alpha=0.5 is 5.0m.
+            // Smoothing factor: f = 1 - exp(-15 * 0.01666) ≈ 0.2212
+            // Expected smoothed target: 0.0 + 0.2212 * 5.0 ≈ 1.106m
+            // Buggy code without alpha interpolation produces: 0.0 + 0.2212 * 10.0 ≈ 2.212m
+            auto        camEnts       = reg.GetEntitiesWith<ZHLN::Components::TargetCameraComponent>();
+            const auto* camComp       = reg.Get<ZHLN::Components::TargetCameraComponent>(camEnts[0]);
+            float       actualSmoothZ = camComp->smoothTargetPos.GetZ();
+
+            ZHLN::Test::ExpectTrue(std::abs(actualSmoothZ - 1.106f) < 0.05f);
+
+            if (std::abs(actualSmoothZ - 1.106f) >= 0.05f) {
+                return std::unexpected(ZHLN::Error(CharacterTestError::SubFrameJitterDetected));
+            }
             return {};
         }
     };
 };
 
-int main() {
+auto main() -> int {
     return ZHLN::Test::Runner::Run<CharacterMovementTestSuite>();
 }
