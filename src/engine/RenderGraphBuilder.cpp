@@ -751,9 +751,19 @@ void ExecuteFrameGraph(RenderContext::Impl& self, VkCommandBuffer cmd, const Pas
         binder.template Bind<Res_AccumNext>(ref.handle, ref.view, ref.extent);
     }
     if constexpr (Vk::IsInList<Resources, Res_Swapchain>::value) {
-        const auto& sc = self.presentation.swapchain.Get();
-        auto ref = Vk::MakeRef<Res_Swapchain>(sc.images[self.current_image_index], sc.views[self.current_image_index], self.graphResources.sceneColor.extent);
-        binder.template Bind<Res_Swapchain>(ref.handle, ref.view, ref.extent);
+        if (self.presentation.swapchain.Valid()) {
+            const auto& sc = self.presentation.swapchain.Get();
+            auto ref = Vk::MakeRef<Res_Swapchain>(sc.images[self.current_image_index], sc.views[self.current_image_index], self.graphResources.sceneColor.extent);
+            binder.template Bind<Res_Swapchain>(ref.handle, ref.view, ref.extent);
+        } else {
+            // Headless mode: bind the offscreen color target in place of the swapchain
+            auto ref = Vk::MakeRef<Res_Swapchain>(
+                self.presentation.headlessColorTarget.image.Handle(),
+                self.presentation.headlessColorTarget.view.Get(),
+                self.presentation.headlessColorTarget.extent
+            );
+            binder.template Bind<Res_Swapchain>(ref.handle, ref.view, ref.extent);
+        }
     }
 
     graph.Execute(cmd, binder);
@@ -849,12 +859,22 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
     using enum AAMode;
 
     auto getSwapchainImage = [&]() -> Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> {
+        if (presentation.swapchain.Valid()) {
+            return {
+                .handle = presentation.swapchain.Get().images[imageIdx],
+                .view   = presentation.swapchain.Get().views[imageIdx],
+                .extent = {.width = graphResources.sceneColor.extent.width, .height = graphResources.sceneColor.extent.height, .depth = 1},
+                .aspect = VK_IMAGE_ASPECT_COLOR_BIT,
+                .format = presentation.swapchain.Get().format
+            };
+        }
+        // Headless mode: use the offscreen color target
         return {
-            .handle = presentation.swapchain.Get().images[imageIdx],
-            .view   = presentation.swapchain.Get().views[imageIdx],
-            .extent = {.width = graphResources.sceneColor.extent.width, .height = graphResources.sceneColor.extent.height, .depth = 1},
+            .handle = presentation.headlessColorTarget.image.Handle(),
+            .view   = presentation.headlessColorTarget.view.Get(),
+            .extent = {.width = presentation.headlessColorTarget.extent.width, .height = presentation.headlessColorTarget.extent.height, .depth = 1},
             .aspect = VK_IMAGE_ASPECT_COLOR_BIT,
-            .format = presentation.swapchain.Get().format
+            .format = VK_FORMAT_R8G8B8A8_UNORM
         };
     };
 

@@ -383,21 +383,27 @@ std::expected<void, Error> Engine::InitInternal(const EngineConfig& cfg) {
     _impl->scriptRunner = std::make_unique<ScriptRunner>();
 
     bool use_tty = false;
-    if constexpr (isLinux) {
-        // Detects both RenderDoc and NVIDIA Nsight Graphics (Nomad) launch environments
-        if (std::getenv("ENABLE_VULKAN_RENDERDOC_CAPTURE") != nullptr || std::getenv("NOMAD_VULKAN_LAYER") != nullptr ||
-            std::getenv("NGFX_INJECTION") != nullptr) {
-            glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
-        }
-    }
 
-    if (!glfwInit()) {
-        if (TTYBackend::IsSupported()) {
-            ZHLN::Log("GLFW failed to initialize. Falling back to native TTY Display Mode.");
-            use_tty = true;
-        } else {
-            ZHLN::Log("GLFW failed to initialize, and native KMS/TTY display mode is not supported on this platform.");
-            return std::unexpected(EngineInitError::WindowCreationFailed);
+    if (cfg.render.headless) {
+        // True headless mode: skip GLFW entirely. No display server is required.
+        ZHLN::Log("[Engine] Headless mode enabled. Skipping GLFW initialization.");
+    } else {
+        if constexpr (isLinux) {
+            // Detects both RenderDoc and NVIDIA Nsight Graphics (Nomad) launch environments
+            if (std::getenv("ENABLE_VULKAN_RENDERDOC_CAPTURE") != nullptr || std::getenv("NOMAD_VULKAN_LAYER") != nullptr ||
+                std::getenv("NGFX_INJECTION") != nullptr) {
+                glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
+            }
+        }
+
+        if (!glfwInit()) {
+            if (TTYBackend::IsSupported()) {
+                ZHLN::Log("GLFW failed to initialize. Falling back to native TTY Display Mode.");
+                use_tty = true;
+            } else {
+                ZHLN::Log("GLFW failed to initialize, and native KMS/TTY display mode is not supported on this platform.");
+                return std::unexpected(EngineInitError::WindowCreationFailed);
+            }
         }
     }
 
@@ -535,7 +541,9 @@ Engine::~Engine() {
     _impl->mainECB.reset();
     _impl->cullingSystem.reset();
 
-    glfwTerminate();
+    if (!_impl->config.render.headless) {
+        glfwTerminate();
+    }
 
     JPH::UnregisterTypes();
     if (JPH::Factory::sInstance != nullptr) {
@@ -556,6 +564,11 @@ void Engine::ProcessEvents() {
     Components::InputStateComponent* inputState = ents.empty() ? nullptr : reg.Get<Components::InputStateComponent>(ents[0]);
     if (inputState != nullptr) {
         inputState->ResetDeltas();
+    }
+
+    if (_impl->window->IsHeadless()) {
+        // True headless mode: no windowing event queue to poll, no ImGui frames.
+        return;
     }
 
     if (_impl->window->IsTTY()) {
@@ -837,6 +850,7 @@ int Engine::Run(const CommandLineOptions& options, UICallback uiCallback) {
             .height         = h,
             .vsync          = options.vsync,
             .fullscreen     = options.fullscreen,
+            .headless       = options.headless,
             .validationMode = options.validationMode,
         },
     };

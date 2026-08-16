@@ -23,6 +23,11 @@ class PresentationContext {
     // The main depth buffer is tied to the window resolution
     RenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT> depthTarget;
 
+    // Headless offscreen color target: used as the Blit pass output when no
+    // swapchain exists.  R8G8B8A8_UNORM matches the most common sRGB
+    // swapchain format and keeps the Blit pipeline format consistent.
+    RenderTarget<VK_FORMAT_R8G8B8A8_UNORM> headlessColorTarget;
+
     PresentationContext()  = default;
     ~PresentationContext() = default;
 
@@ -36,6 +41,16 @@ class PresentationContext {
         -> std::expected<void, ZHLN::Error>;
 
     [[nodiscard]] auto Rebuild(uint32_t width, uint32_t height) -> std::expected<void, ZHLN::Error>;
+
+    /// @brief Returns the effective color format for the Blit pass output.
+    ///        Uses the swapchain format when available, otherwise R8G8B8A8_UNORM
+    ///        from the headless color target.
+    [[nodiscard]] VkFormat GetPresentFormat() const noexcept {
+        if (swapchain.Valid()) {
+            return swapchain.Get().format;
+        }
+        return VK_FORMAT_R8G8B8A8_UNORM;
+    }
 
   private:
     const Context* _ctx     = nullptr;

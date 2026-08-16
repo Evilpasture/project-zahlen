@@ -57,6 +57,7 @@ class ZHLN_API Window {
     void CaptureMouse(bool captured);
 
     [[nodiscard]] bool  IsTTY() const;
+    [[nodiscard]] bool  IsHeadless() const;
     [[nodiscard]] void* GetTTYContext() const;
     bool                ReinitTTY();
 

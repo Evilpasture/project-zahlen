@@ -255,11 +255,20 @@ std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfi
                 Vk::CommandPools<2, Vk::QueueType::Compute>::Create(ctx.Device(), {.queueFamily = ctx.PhysicalInfo().compute_family, .buffersPerPool = 1});
             return InitPostProcessing();
         })
-        .and_then([&]() {
+        .and_then([&]() -> std::expected<void, Error> {
+            if (window.IsHeadless()) {
+                // True headless mode: no ImGui, no swapchain-backed UI pipeline.
+                return {};
+            }
             auto* windowHandle = window.IsTTY() ? nullptr : static_cast<GLFWwindow*>(window.GetNativeHandle());
             return SetupUI(windowHandle);
         })
-        .and_then([&]() { return InitUIDynamicBuffers(); })
+        .and_then([&]() -> std::expected<void, Error> {
+            if (window.IsHeadless()) {
+                return {};
+            }
+            return InitUIDynamicBuffers();
+        })
         .and_then([&]() -> std::expected<void, Error> {
             uint32_t workerCount = TaskSystem::GetWorkerCount() + 1;
             if (workerCount == 0) {
@@ -300,15 +309,18 @@ std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfi
 namespace {
 
 std::expected<Vk::ExtensionResult, Error> GetPlatformInstanceExtensions(Window& window, ZHLN::ValidationMode validationMode) noexcept {
-    glfwSetErrorCallback([](int error, const char* description) { ZHLN::Log("[GLFW Error] Code {}: {}", error, description); });
-
     auto builder = Vk::ExtensionBuilder::ForInstance();
 
-    if (window.IsTTY()) {
+    if (window.IsHeadless()) {
+        // True headless mode: no surface extensions required. GLFW is not
+        // initialised, so we must not call any GLFW functions here.
+    } else if (window.IsTTY()) {
         for (const auto ext: TTYBackend::GetRequiredInstanceExtensions()) {
             builder.Require(ext);
         }
     } else {
+        glfwSetErrorCallback([](int error, const char* description) { ZHLN::Log("[GLFW Error] Code {}: {}", error, description); });
+
         uint32_t     glfwExtensionCount = 0;
         const char** glfwExtensions     = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
 
@@ -394,11 +406,16 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
         .Build();
 }
 
-std::expected<Vk::ExtensionResult, Error> GetDeviceExtensions(VkPhysicalDevice physicalDevice) noexcept {
-    return Vk::ExtensionBuilder::ForDevice(physicalDevice)
-        .Require(VK_KHR_SWAPCHAIN_EXTENSION_NAME)
-        .Optional(VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME)
-        .Optional(VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME)
+std::expected<Vk::ExtensionResult, Error> GetDeviceExtensions(VkPhysicalDevice physicalDevice, bool isHeadless) noexcept {
+    auto builder = Vk::ExtensionBuilder::ForDevice(physicalDevice);
+
+    if (!isHeadless) {
+        builder.Require(VK_KHR_SWAPCHAIN_EXTENSION_NAME)
+               .Optional(VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME)
+               .Optional(VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME);
+    }
+
+    return builder
         .Optional("VK_EXT_robustness2")
         .OptionalIf("VK_KHR_portability_subset", isMac)
         .OptionalGroup(
@@ -531,10 +548,16 @@ std::expected<std::unique_ptr<RenderContext>, Error> RenderContext::Create(Windo
                 .transform([&](VkInstance inst) { instance = inst; });
         })
         .and_then([&]() -> std::expected<void, Error> {
-            if (!window.IsTTY()) {
+            if (!window.IsTTY() && !window.IsHeadless()) {
                 return window.CreateVulkanSurface(instance, nullptr, width, height)
                     .transform_error([](auto) -> Error { return RenderInitError::SurfaceCreationFailed; })
                     .transform([&](void* surface) { raw_surface = static_cast<VkSurfaceKHR>(surface); });
+            }
+            if (window.IsHeadless()) {
+                // Headless: obtain offscreen dimensions without creating a VkSurfaceKHR
+                return window.CreateVulkanSurface(instance, nullptr, width, height)
+                    .transform_error([](auto) -> Error { return RenderInitError::SurfaceCreationFailed; })
+                    .transform([&](void* /*surface*/) { raw_surface = VK_NULL_HANDLE; });
             }
             return {};
         })
@@ -552,12 +575,12 @@ std::expected<std::unique_ptr<RenderContext>, Error> RenderContext::Create(Windo
             return {};
         })
         .and_then([&]() -> std::expected<void, Error> {
-            // Adopt surface into RAII container
+            // Adopt surface into RAII container (VK_NULL_HANDLE is safe for headless)
             impl->surface         = Vk::Surface(instance, raw_surface);
             HardwareCaps caps     = ProbeHardware(physicalInfo.handle, physicalInfo.properties.properties.apiVersion);
             auto         features = BuildFeatureChain(physicalInfo.handle, caps, cfg.validationMode);
 
-            return GetDeviceExtensions(physicalInfo.handle).and_then([&](auto&& dev_exts) -> std::expected<void, Error> {
+            return GetDeviceExtensions(physicalInfo.handle, window.IsHeadless()).and_then([&](auto&& dev_exts) -> std::expected<void, Error> {
                 return Vk::Context::Builder()
                     .Instance(instance)
                     .Surface(raw_surface)
@@ -598,7 +621,7 @@ RenderContext::~RenderContext() {
         _impl->stagingContext.reset();
 
         // --- SAFETY: Only shut down ImGui if it was actually initialized ---
-        if (!_impl->window.IsTTY()) {
+        if (!_impl->window.IsTTY() && !_impl->window.IsHeadless()) {
             ImGui_ImplVulkan_Shutdown();
             ImGui_ImplGlfw_Shutdown();
             ImGui::DestroyContext();
@@ -1345,7 +1368,7 @@ std::expected<void, Error> RenderContext::Impl::BuildBlitPipeline() {
 
     return BuildPassHelper(
         this, blitPass, "Blit", {.path = Resource::Paths::BlitVS, .fallback = Resource::GetShaderProgram(Blit).vertex, .entryPoint = "VSMain"},
-        {.path = Resource::Paths::BlitPS, .fallback = Resource::GetShaderProgram(Blit).fragment, .entryPoint = "PSMain"}, {presentation.swapchain.Get().format},
+        {.path = Resource::Paths::BlitPS, .fallback = Resource::GetShaderProgram(Blit).fragment, .entryPoint = "PSMain"}, {presentation.GetPresentFormat()},
         &blitPush, 1
     );
 }

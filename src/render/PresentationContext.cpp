@@ -26,6 +26,31 @@ auto PresentationContext::Rebuild(uint32_t width, uint32_t height) -> std::expec
         return std::unexpected(idle_res.error());
     }
 
+    // In headless mode (no surface), skip swapchain construction entirely.
+    // Allocate a depth target and a color target using the requested render
+    // extent for offscreen rendering.
+    if (_surface == VK_NULL_HANDLE) {
+        const VkExtent2D renderExtent = {.width = width, .height = height};
+        depthTarget = RenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>::Create(
+            *_alloc, *_ctx, renderExtent, {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT}
+        );
+
+        if (!depthTarget.Valid()) {
+            return std::unexpected(RenderInitError::SubsystemAllocationFailed);
+        }
+
+        // Headless offscreen color target for the Blit pass output
+        headlessColorTarget = RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>::Create(
+            *_alloc, *_ctx, renderExtent, {.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT}
+        );
+
+        if (!headlessColorTarget.Valid()) {
+            return std::unexpected(RenderInitError::SubsystemAllocationFailed);
+        }
+
+        return {};
+    }
+
     const ZHLN_Device raw_dev = {
         .handle         = _ctx->Device(),
         .graphics_queue = _ctx->GraphicsQueue(),

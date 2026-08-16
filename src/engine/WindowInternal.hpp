@@ -13,6 +13,7 @@ struct Window::Impl {
     WindowInputReceiver receiver    = {}; // Platform-neutral callbacks into ECS registry
     bool                is_tty      = false;
     bool                headless    = false;
+    bool                is_running  = true; // Managed internally in headless mode
     void*               tty_context = nullptr;
     uint32_t            width       = 0;
     uint32_t            height      = 0;

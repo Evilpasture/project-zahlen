@@ -890,7 +890,7 @@ void BlitPass::Execute(
                     );
                 }
             }
-            if (!ctx.window.IsTTY()) {
+            if (!ctx.window.IsTTY() && !ctx.window.IsHeadless()) {
                 ImGui::Render();
                 ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
             }

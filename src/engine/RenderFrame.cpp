@@ -416,83 +416,169 @@ RenderResult RenderContext::EndFrame() noexcept {
         }
 
         // ====================================================================
-        // 2. RECORD GRAPHICS QUEUE
+        // 2. RECORD & SUBMIT GRAPHICS QUEUE
         // ====================================================================
-        res = Vk::DrawFrame<2, false>(
-            {.ctx               = _impl->ctx,
-             .swapchain         = _impl->presentation.swapchain,
-             .sync              = _impl->sync,
-             .pools             = _impl->pools,
-             .presentSemaphores = _impl->presentation.presentSemaphores,
-             .stagingSemaphore  = _impl->transferRingBuffer.GetSemaphore(),
-             .stagingWaitValue  = _impl->transferRingBuffer.GetCurrentValue(),
-             .computeSemaphore  = _impl->sync[_impl->frame_index].compute_timeline,
-             .computeWaitValue  = computeSignalValue},
-            _impl->frame_index,
-            [this](VkCommandBuffer cmd, uint32_t image_index) {
-                _impl->current_cmd         = cmd;
-                _impl->current_image_index = image_index;
+        if (_impl->presentation.swapchain.Get().handle == VK_NULL_HANDLE) {
+            // ================================================================
+            // HEADLESS PATH: No swapchain. Record and submit directly.
+            // ================================================================
+            const auto cmd = _impl->pools.Cmd(_impl->frame_index);
+            _impl->current_cmd  = cmd;
 
-                _impl->pendingAcquires.Drain(cmd);
+            vkResetFences(_impl->ctx.Device(), 1, &_impl->sync[_impl->frame_index].in_flight);
+            _impl->pools[_impl->frame_index].Reset();
+            ZHLN_BeginCommandBuffer(cmd);
 
-                _impl->DispatchSkinningPasses();
+            _impl->pendingAcquires.Drain(cmd);
+            _impl->DispatchSkinningPasses();
 
-                if (_impl->queues.drawQueue.size() > kGpuCullingMaxInstances) {
-                    _impl->queues.drawQueue.resize(kGpuCullingMaxInstances);
+            if (_impl->queues.drawQueue.size() > kGpuCullingMaxInstances) {
+                _impl->queues.drawQueue.resize(kGpuCullingMaxInstances);
+            }
+
+            _impl->SortDrawQueue();
+
+            auto drawCount = _impl->queues.drawQueue.size();
+            auto csgCount  = _impl->queues.csgDrawQueue.size();
+
+            if (drawCount > 0 || csgCount > 0) {
+                auto  mapped = _impl->frames.instanceDataBuffers[_impl->frame_index].Map();
+                auto* dst    = static_cast<InstanceData*>(mapped.data);
+
+                for (size_t i = 0; i < drawCount; ++i) {
+                    dst[i] = _impl->queues.drawQueue[i].instanceData;
                 }
 
-                _impl->SortDrawQueue();
+                uint32_t csgOffset = drawCount;
+                for (auto& csgCmd: _impl->queues.csgDrawQueue) {
+                    dst[csgOffset]        = csgCmd.eyeDraw.instanceData;
+                    csgCmd.eyeInstanceIdx = csgOffset++;
 
-                auto drawCount = _impl->queues.drawQueue.size();
-                auto csgCount  = _impl->queues.csgDrawQueue.size();
+                    for (auto& cutter: csgCmd.cutters) {
+                        dst[csgOffset]     = cutter.draw.instanceData;
+                        cutter.instanceIdx = csgOffset++;
+                    }
+                }
+            }
+            _impl->BuildTLAS(cmd);
 
-                if (drawCount > 0 || csgCount > 0) {
-                    auto  mapped = _impl->frames.instanceDataBuffers[_impl->frame_index].Map();
-                    auto* dst    = static_cast<InstanceData*>(mapped.data);
+            if (Diag::IndirectTelemetryEnabled()) {
+                static uint32_t s_TelemetryFrame = 0;
+                ++s_TelemetryFrame;
+                if (s_TelemetryFrame >= 4 && (s_TelemetryFrame % 120) == 4) {
+                    _impl->DumpIndirectTelemetry(s_TelemetryFrame);
+                }
+            }
 
-                    // 1. Write standard draw queue
-                    for (size_t i = 0; i < drawCount; ++i) {
-                        dst[i] = _impl->queues.drawQueue[i].instanceData;
+            _impl->RecordSceneFrame({cmd});
+
+            if (Diag::IndirectTelemetryEnabled()) {
+                _impl->RecordIndirectTelemetry(cmd);
+            }
+
+            ZHLN_EndCommandBuffer(cmd);
+
+            // Submit directly to the graphics queue with timeline semaphore sync.
+            // Wait on the compute timeline (same as the windowed path) and signal
+            // the in-flight fence so BeginFrame can wait on it next frame.
+            auto submit_res = Vk::QueueSubmit(
+                _impl->ctx.GraphicsQueue(),
+                static_cast<VkCommandBuffer>(cmd),
+                _impl->sync[_impl->frame_index].compute_timeline,
+                computeSignalValue,
+                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                VK_NULL_HANDLE,
+                0,
+                VK_PIPELINE_STAGE_2_NONE,
+                _impl->sync[_impl->frame_index].in_flight
+            );
+
+            if (!submit_res) {
+                return std::unexpected(Error);
+            }
+
+            // Advance the frame index
+            _impl->frame_index = (_impl->frame_index + 1) & 1;
+        } else {
+            // ================================================================
+            // WINDOWED / TTY PATH: Standard swapchain-based DrawFrame
+            // ================================================================
+            res = Vk::DrawFrame<2, false>(
+                {.ctx               = _impl->ctx,
+                 .swapchain         = _impl->presentation.swapchain,
+                 .sync              = _impl->sync,
+                 .pools             = _impl->pools,
+                 .presentSemaphores = _impl->presentation.presentSemaphores,
+                 .stagingSemaphore  = _impl->transferRingBuffer.GetSemaphore(),
+                 .stagingWaitValue  = _impl->transferRingBuffer.GetCurrentValue(),
+                 .computeSemaphore  = _impl->sync[_impl->frame_index].compute_timeline,
+                 .computeWaitValue  = computeSignalValue},
+                _impl->frame_index,
+                [this](VkCommandBuffer cmd, uint32_t image_index) {
+                    _impl->current_cmd         = cmd;
+                    _impl->current_image_index = image_index;
+
+                    _impl->pendingAcquires.Drain(cmd);
+
+                    _impl->DispatchSkinningPasses();
+
+                    if (_impl->queues.drawQueue.size() > kGpuCullingMaxInstances) {
+                        _impl->queues.drawQueue.resize(kGpuCullingMaxInstances);
                     }
 
-                    // 2. Write CSG draw queue
-                    uint32_t csgOffset = drawCount;
-                    for (auto& csgCmd: _impl->queues.csgDrawQueue) {
-                        dst[csgOffset]        = csgCmd.eyeDraw.instanceData;
-                        csgCmd.eyeInstanceIdx = csgOffset++;
+                    _impl->SortDrawQueue();
 
-                        for (auto& cutter: csgCmd.cutters) {
-                            dst[csgOffset]     = cutter.draw.instanceData;
-                            cutter.instanceIdx = csgOffset++;
+                    auto drawCount = _impl->queues.drawQueue.size();
+                    auto csgCount  = _impl->queues.csgDrawQueue.size();
+
+                    if (drawCount > 0 || csgCount > 0) {
+                        auto  mapped = _impl->frames.instanceDataBuffers[_impl->frame_index].Map();
+                        auto* dst    = static_cast<InstanceData*>(mapped.data);
+
+                        // 1. Write standard draw queue
+                        for (size_t i = 0; i < drawCount; ++i) {
+                            dst[i] = _impl->queues.drawQueue[i].instanceData;
+                        }
+
+                        // 2. Write CSG draw queue
+                        uint32_t csgOffset = drawCount;
+                        for (auto& csgCmd: _impl->queues.csgDrawQueue) {
+                            dst[csgOffset]        = csgCmd.eyeDraw.instanceData;
+                            csgCmd.eyeInstanceIdx = csgOffset++;
+
+                            for (auto& cutter: csgCmd.cutters) {
+                                dst[csgOffset]     = cutter.draw.instanceData;
+                                cutter.instanceIdx = csgOffset++;
+                            }
                         }
                     }
-                }
-                _impl->BuildTLAS(cmd);
+                    _impl->BuildTLAS(cmd);
 
-                if (Diag::IndirectTelemetryEnabled()) {
-                    static uint32_t s_TelemetryFrame = 0;
-                    ++s_TelemetryFrame;
-                    // Every ~2 seconds starting after both readback slots have
-                    // been written at least once; the readback slot holds data
-                    // retired two frames ago, which is representative since the
-                    // behavior is stable within a run.
-                    if (s_TelemetryFrame >= 4 && (s_TelemetryFrame % 120) == 4) {
-                        _impl->DumpIndirectTelemetry(s_TelemetryFrame);
+                    if (Diag::IndirectTelemetryEnabled()) {
+                        static uint32_t s_TelemetryFrame = 0;
+                        ++s_TelemetryFrame;
+                        // Every ~2 seconds starting after both readback slots have
+                        // been written at least once; the readback slot holds data
+                        // retired two frames ago, which is representative since the
+                        // behavior is stable within a run.
+                        if (s_TelemetryFrame >= 4 && (s_TelemetryFrame % 120) == 4) {
+                            _impl->DumpIndirectTelemetry(s_TelemetryFrame);
+                        }
                     }
-                }
 
-                // Graphics-only recording
-                _impl->RecordSceneFrame({cmd});
+                    // Graphics-only recording
+                    _impl->RecordSceneFrame({cmd});
 
-                if (Diag::IndirectTelemetryEnabled()) {
-                    _impl->RecordIndirectTelemetry(cmd);
-                }
-            },
-            [this]() { _impl->resized = true; }
-        );
+                    if (Diag::IndirectTelemetryEnabled()) {
+                        _impl->RecordIndirectTelemetry(cmd);
+                    }
+                },
+                [this]() { _impl->resized = true; }
+            );
 
-        if (res != ZHLN_FrameResult_Ok && res != ZHLN_FrameResult_Suboptimal) {
-            return std::unexpected(MapFrameResult(res));
+            if (res != ZHLN_FrameResult_Ok && res != ZHLN_FrameResult_Suboptimal) {
+                return std::unexpected(MapFrameResult(res));
+            }
         }
 
         // Flip double-buffered resources

@@ -193,17 +193,22 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, bool full
     _impl->is_tty   = useTTY;
     _impl->headless = headless;
 
+    if (_impl->headless) {
+        // True headless mode: bypass GLFW entirely. No display server, no window,
+        // no surface. Running state is managed internally.
+        _impl->handle     = nullptr;
+        _impl->is_running = true;
+        _impl->width      = width;
+        _impl->height     = height;
+        return;
+    }
+
     if (_impl->is_tty) {
         _impl->width       = width;
         _impl->height      = height;
         _impl->tty_context = TTYBackend::Init(width, height);
     } else {
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-        if (headless) {
-            // Hide the window from the desktop/taskbar completely
-            glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-            glfwWindowHint(GLFW_FOCUSED, GLFW_FALSE);
-        }
 
         GLFWmonitor* monitor = nullptr;
         if (fullscreen) {
@@ -224,9 +229,7 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, bool full
         glfwSetWindowUserPointer(_impl->handle, this);
 
         if (_impl->handle != nullptr) {
-            if (!headless) {
-                glfwShowWindow(_impl->handle);
-            }
+            glfwShowWindow(_impl->handle);
             glfwPollEvents();
         }
 
@@ -305,6 +308,9 @@ Window::~Window() {
 }
 
 bool Window::IsRunning() const {
+    if (_impl->headless) {
+        return _impl->is_running;
+    }
     if (_impl->is_tty) {
         return TTYBackend::IsRunning(_impl->tty_context);
     }
@@ -315,7 +321,7 @@ void Window::ProcessEvents() {
 }
 
 Extent2D Window::GetSize() const {
-    if (_impl->is_tty) {
+    if (_impl->headless || _impl->is_tty) {
         return {.width = _impl->width, .height = _impl->height};
     }
 
@@ -341,6 +347,10 @@ void* Window::GetNativeHandle() const {
 }
 
 void Window::Close() {
+    if (_impl->headless) {
+        _impl->is_running = false;
+        return;
+    }
     if (!_impl->is_tty && _impl->handle != nullptr) {
         glfwSetWindowShouldClose(_impl->handle, GLFW_TRUE);
     }
@@ -354,6 +364,10 @@ void Window::CaptureMouse(bool captured) {
 
 bool Window::IsTTY() const {
     return _impl->is_tty;
+}
+
+bool Window::IsHeadless() const {
+    return _impl->headless;
 }
 
 void* Window::GetTTYContext() const {

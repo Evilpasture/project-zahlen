@@ -445,7 +445,7 @@ void DrawOrientationGizmo(const ZHLN::Camera& cam) {
 // ============================================================================
 
 void UISystem(ZHLN::Engine& engine) {
-    if (engine.GetWindow().IsTTY()) {
+    if (engine.GetWindow().IsTTY() || engine.GetWindow().IsHeadless()) {
         return;
     }
 
