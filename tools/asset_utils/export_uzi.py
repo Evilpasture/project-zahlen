@@ -39,6 +39,14 @@ HAND_FINGER_PATTERNS = [
     "roundcube", "plane.037", "plane.128", "claw"
 ]
 
+def safe_str(val) -> str:
+    try:
+        if isinstance(val, bytes):
+            return val.decode("utf-8", errors="replace")
+        return str(val).encode("utf-8", errors="replace").decode("utf-8")
+    except Exception:
+        return "Unknown Error"
+
 def should_hide_facial_element(obj_name):
     name_lower = obj_name.lower()
     return any(pat in name_lower for pat in FACIAL_HIDE_PATTERNS)
@@ -51,6 +59,14 @@ def is_hand_or_finger(obj):
     p_name = obj.parent.name.lower() if obj.parent else ""
     return any(k in o_name or k in p_name for k in HAND_FINGER_PATTERNS)
 
+def is_limb_object(obj):
+    \"\"\"Returns True if an object belongs to metal arm or leg assemblies.\"\"\"
+    if not obj or is_hand_or_finger(obj):
+        return False
+    in_limbs_col = any(c.name.lower() in ["limbs", "limb_hooks"] for c in obj.users_collection)
+    parent_limb = obj.parent and any(k in obj.parent.name.lower() for k in ["arm", "leg", "thigh", "shin", "forearm", "limb"])
+    return in_limbs_col or parent_limb
+
 def deselect_all_objects():
     \"\"\"Safely forces OBJECT mode and deselects all objects without UI context failures.\"\"\"
     if bpy.context.object and bpy.context.object.mode != 'OBJECT':
@@ -62,19 +78,289 @@ def deselect_all_objects():
         if obj:
             obj.select_set(False)
 
+def setup_environment_and_drivers():
+    print("[*] Enabling Python script auto-execution for rig UI...", flush=True)
+    bpy.context.preferences.filepaths.use_scripts_auto_execute = True
+
+    for txt in bpy.data.texts:
+        if txt.name.endswith(".py") or any(k in txt.name.lower() for k in ["rig", "driver", "ui"]):
+            try:
+                exec(txt.as_string(), {"__name__": "__main__"})
+                print(f"  [+] Executed embedded rig script: '{txt.name}'", flush=True)
+            except Exception as e:
+                print(f"  [~] Notice running embedded script '{txt.name}': {e}", flush=True)
+
+    layer_collections = [bpy.context.view_layer.layer_collection]
+    while layer_collections:
+        l_c = layer_collections.pop(0)
+        layer_collections.extend(l_c.children)
+        l_c.exclude = False
+        l_c.hide_viewport = False
+
+    bpy.context.view_layer.update()
+
+def setup_root_bone(main_rig):
+    \"\"\"Ensures a ground-level 'Root' deform bone at (0, 0, 0) parented above DEF-Hips for engine root motion.\"\"\"
+    print("[*] Setting up floor 'Root' bone at (0, 0, 0)...", flush=True)
+    if not main_rig or not main_rig.data:
+        return
+
+    deselect_all_objects()
+    main_rig.select_set(True)
+    bpy.context.view_layer.objects.active = main_rig
+    bpy.ops.object.mode_set(mode='EDIT')
+    ebs = main_rig.data.edit_bones
+
+    root_bone = ebs.get("Root") or ebs.get("DEF-Root")
+    if not root_bone:
+        if "neutral_bone" in ebs:
+            root_bone = ebs["neutral_bone"]
+            root_bone.name = "Root"
+        else:
+            root_bone = ebs.new("Root")
+            root_bone.head = (0.0, 0.0, 0.0)
+            root_bone.tail = (0.0, 0.0, 0.1)
+
+    root_bone.use_deform = True
+
+    hips = ebs.get("DEF-Hips") or ebs.get("Hips")
+    if hips and hips.parent is None:
+        hips.parent = root_bone
+        print("  [+] Parented 'DEF-Hips' under 'Root'.", flush=True)
+
+    bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.context.view_layer.update()
+
+def setup_shoulder_bones(main_rig):
+    \"\"\"Detects and standardizes DEF-Shoulder.L and DEF-Shoulder.R deform status.\"\"\"
+    print("[*] Configuring shoulder/clavicle deform bones...", flush=True)
+    if not main_rig or not main_rig.data:
+        return
+
+    deselect_all_objects()
+    main_rig.select_set(True)
+    bpy.context.view_layer.objects.active = main_rig
+    bpy.ops.object.mode_set(mode='EDIT')
+    ebs = main_rig.data.edit_bones
+
+    for side in ["L", "R", "l", "r"]:
+        side_upper = side.upper()
+        candidates = [
+            f"DEF-shoulder.{side}", f"DEF-Shoulder.{side}", f"DEF-shoulder.{side_upper}", f"DEF-Shoulder.{side_upper}",
+            f"DEF-Clavicle.{side_upper}", f"DEF-clavicle.{side}"
+        ]
+        for c in candidates:
+            b = ebs.get(c)
+            if b:
+                standard_name = f"DEF-Shoulder.{side_upper}"
+                old_name = b.name
+                b.name = standard_name
+                b.use_deform = True
+
+                for m_obj in bpy.data.objects:
+                    if m_obj.type == 'MESH' and old_name in m_obj.vertex_groups:
+                        vg = m_obj.vertex_groups.get(old_name)
+                        if vg:
+                            vg.name = standard_name
+
+                print(f"  [+] Configured deform shoulder bone: '{standard_name}'", flush=True)
+                break
+
+    bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.context.view_layer.update()
+
+def convert_hair_curves_to_mesh():
+    \"\"\"Converts renderable hair curves to 3D meshes before armature binding.\"\"\"
+    print("[*] Converting hair curve strands to 3D meshes...", flush=True)
+    deselect_all_objects()
+
+    for obj in list(bpy.data.objects):
+        if obj and getattr(obj, "type", None) in {'CURVE', 'SURFACE', 'FONT'} and not obj.hide_render:
+            if is_limb_object(obj):
+                continue
+
+            is_hair = any("hair" in col.name.lower() for col in obj.users_collection) or \
+                      any(slot.material and "hair" in slot.material.name.lower() for slot in obj.material_slots) or \
+                      (hasattr(obj.data, "bevel_depth") and obj.data.bevel_depth > 0)
+
+            if not is_hair and any(k.lower() in obj.name.lower() for k in ["curve_sock"]):
+                continue
+
+            deselect_all_objects()
+            obj.select_set(True)
+            bpy.context.view_layer.objects.active = obj
+            try:
+                bpy.ops.object.convert(target='MESH')
+                obj.name = f"Hair_Mesh_{obj.name}"
+                obj.hide_render = False
+                obj.hide_viewport = False
+                print(f"  [+] Converted hair curve to MESH: '{obj.name}'", flush=True)
+            except Exception as e:
+                print(f"  [-] Skipped '{obj.name}': {e}", flush=True)
+
+    bpy.context.view_layer.update()
+
+def setup_and_rename_hair_chains(main_rig):
+    \"\"\"Bakes world transforms on Hair_Rig, joins it into main_rig, parents roots to DEF-Head with offset, and renames chains.\"\"\"
+    print("[*] Processing hair rig and parenting strand chains to DEF-Head...", flush=True)
+    if not main_rig or not main_rig.data:
+        return
+
+    if main_rig.data:
+        main_rig.data.pose_position = 'REST'
+    bpy.context.view_layer.update()
+
+    # 1. Bake world transform into any secondary hair armatures before joining
+    hair_rigs = [
+        o for o in bpy.data.objects 
+        if o.type == 'ARMATURE' and o != main_rig and any(k in o.name.lower() for k in ["hair", "hair_rig", "armature."])
+    ]
+
+    for h_rig in hair_rigs:
+        if h_rig.data:
+            h_rig.data.pose_position = 'REST'
+        bpy.context.view_layer.update()
+
+        # Capture visual matrix in REST pose
+        world_mat = h_rig.matrix_world.copy()
+        
+        # Clear constraints/bone parent while keeping world matrix
+        h_rig.parent = None
+        h_rig.constraints.clear()
+        h_rig.matrix_world = world_mat
+        bpy.context.view_layer.update()
+
+        # Apply transform directly so edit bones are positioned at true head height
+        deselect_all_objects()
+        h_rig.select_set(True)
+        bpy.context.view_layer.objects.active = h_rig
+        try:
+            bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+        except Exception as e:
+            print(f"  [~] Notice applying transform on '{h_rig.name}': {e}", flush=True)
+
+        # Join into main_rig
+        deselect_all_objects()
+        h_rig.select_set(True)
+        main_rig.select_set(True)
+        bpy.context.view_layer.objects.active = main_rig
+        try:
+            bpy.ops.object.join()
+            print(f"  [+] Merged '{h_rig.name}' into main rig with world transforms intact.", flush=True)
+        except Exception as e:
+            print(f"  [~] Notice joining hair rig: {safe_str(e)}", flush=True)
+
+    # 2. Setup bone hierarchy in Edit Mode
+    deselect_all_objects()
+    main_rig.select_set(True)
+    bpy.context.view_layer.objects.active = main_rig
+    bpy.ops.object.mode_set(mode='EDIT')
+    ebs = main_rig.data.edit_bones
+
+    head_bone = ebs.get("DEF-Head") or ebs.get("Head")
+
+    # Find root bones of hair chains
+    hair_root_bones = []
+    for b in list(ebs):
+        b_name = b.name
+        if b_name.startswith("Bone") or b_name.startswith("Hair") or "hair" in b_name.lower():
+            if b != head_bone:
+                if b.parent is None or b.parent == head_bone or not (b.parent.name.startswith("Bone") or "hair" in b.parent.name.lower()):
+                    hair_root_bones.append(b)
+
+    print(f"  [+] Found {len(hair_root_bones)} hair strand root bones.", flush=True)
+
+    strand_idx = 1
+    for root_b in hair_root_bones:
+        if head_bone:
+            root_b.parent = head_bone
+            root_b.use_connect = False  # CRITICAL: Do NOT snap to parent tail, maintain head offset!
+
+        curr = root_b
+        depth = 1
+        while curr:
+            new_name = f"DEF-Hair_S{strand_idx:02d}_{depth:02d}"
+            old_name = curr.name
+            curr.name = new_name
+            curr.use_deform = True
+
+            # Sync vertex group name across all character meshes
+            for m_obj in bpy.data.objects:
+                if m_obj.type == 'MESH' and old_name in m_obj.vertex_groups:
+                    vg = m_obj.vertex_groups.get(old_name)
+                    if vg:
+                        vg.name = new_name
+
+            children = [c for c in curr.children if c.name.startswith("Bone") or "hair" in c.name.lower() or c.name.startswith("DEF-Hair")]
+            curr = children[0] if children else None
+            depth += 1
+
+        strand_idx += 1
+
+    bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.context.view_layer.update()
+
+def preserve_dynamic_hair_skinning(main_rig):
+    \"\"\"Applies world transforms on hair meshes and binds them cleanly to main_rig in REST pose.\"\"\"
+    print("[*] Preserving vertex group skinning and world alignment on dynamic hair meshes...", flush=True)
+    if not main_rig or not main_rig.data:
+        return
+
+    for obj in list(bpy.data.objects):
+        if not (obj and getattr(obj, "type", None) == 'MESH' and not obj.hide_render):
+            continue
+
+        if is_limb_object(obj) or should_hide_facial_element(obj.name):
+            continue
+
+        has_hair_vgroups = any("DEF-Hair" in vg.name or "Bone." in vg.name or "hair" in vg.name.lower() for vg in obj.vertex_groups)
+        is_in_hair_col = any("hair" in c.name.lower() for c in obj.users_collection)
+
+        if has_hair_vgroups or is_in_hair_col:
+            # 1. Bake world transform
+            world_mat = obj.matrix_world.copy()
+            obj.parent = None
+            obj.constraints.clear()
+            obj.matrix_world = world_mat
+            bpy.context.view_layer.update()
+
+            deselect_all_objects()
+            obj.select_set(True)
+            bpy.context.view_layer.objects.active = obj
+            try:
+                bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+            except Exception as e:
+                print(f"  [~] Notice applying transform on hair mesh '{obj.name}': {e}", flush=True)
+
+            # 2. Parent to main_rig as Object
+            obj.parent = main_rig
+            obj.parent_type = 'OBJECT'
+            obj.matrix_world = main_rig.matrix_world
+
+            # 3. Ensure Armature modifier targets main_rig
+            arm_mod = next((m for m in obj.modifiers if m.type == 'ARMATURE'), None)
+            if not arm_mod:
+                arm_mod = obj.modifiers.new(name="Armature", type='ARMATURE')
+            arm_mod.object = main_rig
+
+            obj.hide_render = False
+            obj.hide_viewport = False
+            print(f"  [+] Aligned and preserved skinning for hair mesh: '{obj.name}'", flush=True)
+
+    bpy.context.view_layer.update()
+
 def enable_all_deform_bones(main_rig):
-    \"\"\"Forces use_deform = True on all character deform bones so glTF exporter never strips them.\"\"\"
-    print("[*] Enabling 'use_deform = True' strictly on DEF- deform bones...", flush=True)
+    \"\"\"Forces use_deform = True strictly on DEF-* and Root bones so glTF exporter outputs a clean skeleton.\"\"\"
+    print("[*] Enabling 'use_deform = True' strictly on DEF-* and Root bones...", flush=True)
     if not (main_rig and main_rig.data):
         return
 
     for bone in main_rig.data.bones:
-        # Strictly check for def- or tail/hair deform bones
-        if bone.name.lower().startswith("def-"):
+        b_name_lower = bone.name.lower()
+        if b_name_lower.startswith("def-") or b_name_lower in ["root"]:
             bone.use_deform = True
-        elif not any(prefix in bone.name for prefix in ["CTR-", "MCH-", "FK-", "IK-", "WGT-"]):
-            # Retain hair/tail bones if they don't have control prefixes
-            pass
+        elif any(prefix in bone.name for prefix in ["CTR-", "MCH-", "FK-", "IK-", "WGT-", "AUX_"]):
+            bone.use_deform = False
         else:
             bone.use_deform = False
 
@@ -83,7 +369,7 @@ def enable_all_deform_bones(main_rig):
 def setup_cycles_gpu():
     scene = bpy.context.scene
     scene.render.engine = "CYCLES"
-    scene.cycles.samples = 16  # 16 samples is fast and clean for texture baking
+    scene.cycles.samples = 16
 
     try:
         prefs = bpy.context.preferences.addons["cycles"].preferences
@@ -116,7 +402,6 @@ def setup_cycles_gpu():
     except Exception as e:
         print(f"[~] Notice setting up Cycles GPU: {e}", flush=True)
 
-
 def ensure_uv_unwrap(obj):
     if not (obj and getattr(obj, "data", None)):
         return
@@ -132,7 +417,6 @@ def ensure_uv_unwrap(obj):
         bpy.ops.mesh.select_all(action="SELECT")
         bpy.ops.uv.smart_project(island_margin=0.02)
         bpy.ops.object.mode_set(mode="OBJECT")
-
 
 def bake_procedural_material(mat_name, target_objects, resolution=2048):
     mat = bpy.data.materials.get(mat_name)
@@ -157,11 +441,9 @@ def bake_procedural_material(mat_name, target_objects, resolution=2048):
         "TEX_CHECKER",
     }
 
-    # Determine what needs baking
     bake_color = False
     bake_normal = False
 
-    # 1. Check if Base Color is driven by procedural texture nodes
     base_color_input = bsdf_node.inputs.get("Base Color")
     if base_color_input and base_color_input.is_linked:
         for n in nodes:
@@ -169,7 +451,6 @@ def bake_procedural_material(mat_name, target_objects, resolution=2048):
                 bake_color = True
                 break
 
-    # 2. Check if Normal is driven by a custom group or procedural bump
     normal_input = bsdf_node.inputs.get("Normal")
     if normal_input and normal_input.is_linked:
         from_node = normal_input.links[0].from_node
@@ -188,7 +469,6 @@ def bake_procedural_material(mat_name, target_objects, resolution=2048):
     target_obj = target_objects[0]
     ensure_uv_unwrap(target_obj)
 
-    # 3. ISOLATED BAKE DUMMY OBJECT
     tmp_mesh = target_obj.data.copy()
     tmp_obj = bpy.data.objects.new(f"__tmp_bake_{mat_name}", tmp_mesh)
     bpy.context.collection.objects.link(tmp_obj)
@@ -202,7 +482,6 @@ def bake_procedural_material(mat_name, target_objects, resolution=2048):
     bake_node = nodes.new("ShaderNodeTexImage")
     bake_node.location = (-400, 300)
 
-    # PASS 1: BAKE DIFFUSE COLOR
     diffuse_img = None
     if bake_color:
         diffuse_img_name = f"{mat_name}_Baked_Diffuse"
@@ -230,7 +509,6 @@ def bake_procedural_material(mat_name, target_objects, resolution=2048):
         bpy.ops.object.bake(type="DIFFUSE", save_mode="INTERNAL")
         diffuse_img.pack()
 
-    # PASS 2: BAKE NORMAL MAP
     normal_img = None
     if bake_normal:
         normal_img_name = f"{mat_name}_Baked_Normal"
@@ -256,14 +534,12 @@ def bake_procedural_material(mat_name, target_objects, resolution=2048):
         bpy.ops.object.bake(type="NORMAL", save_mode="INTERNAL")
         normal_img.pack()
 
-    # Cleanup dummy object
     bpy.data.objects.remove(tmp_obj, do_unlink=True)
     if tmp_mesh.users == 0:
         bpy.data.meshes.remove(tmp_mesh)
 
     nodes.remove(bake_node)
 
-    # REWIRE MATERIAL NODES SAFELY
     print(f"  [*] Rewiring '{mat_name}' PBR nodes...", flush=True)
 
     if bake_color and diffuse_img:
@@ -313,14 +589,6 @@ def optimize_subsurf_modifiers(obj, max_level=1):
     first_subsurf = subsurf_mods[0]
     first_subsurf.levels = min(first_subsurf.levels, max_level)
     first_subsurf.render_levels = min(first_subsurf.render_levels, max_level)
-
-def is_limb_object(obj):
-    \"\"\"Returns True if an object belongs to metal arm or leg assemblies.\"\"\"
-    if not obj or is_hand_or_finger(obj):
-        return False
-    in_limbs_col = any(c.name.lower() in ["limbs", "limb_hooks"] for c in obj.users_collection)
-    parent_limb = obj.parent and any(k in obj.parent.name.lower() for k in ["arm", "leg", "thigh", "shin", "forearm", "limb"])
-    return in_limbs_col or parent_limb
 
 def convert_particle_systems_to_real_mesh(main_rig):
     print(
@@ -486,35 +754,6 @@ def patch_blender_52_gltf_cache_bug():
     except Exception as e:
         print(f"[~] Notice while patching glTF exporter: {e}", flush=True)
 
-def safe_str(val) -> str:
-    try:
-        if isinstance(val, bytes):
-            return val.decode("utf-8", errors="replace")
-        return str(val).encode("utf-8", errors="replace").decode("utf-8")
-    except Exception:
-        return "Unknown Error"
-
-def setup_environment_and_drivers():
-    print("[*] Enabling Python script auto-execution for rig UI...", flush=True)
-    bpy.context.preferences.filepaths.use_scripts_auto_execute = True
-
-    for txt in bpy.data.texts:
-        if txt.name.endswith(".py") or any(k in txt.name.lower() for k in ["rig", "driver", "ui"]):
-            try:
-                exec(txt.as_string(), {"__name__": "__main__"})
-                print(f"  [+] Executed embedded rig script: '{txt.name}'", flush=True)
-            except Exception as e:
-                print(f"  [~] Notice running embedded script '{txt.name}': {e}", flush=True)
-
-    layer_collections = [bpy.context.view_layer.layer_collection]
-    while layer_collections:
-        l_c = layer_collections.pop(0)
-        layer_collections.extend(l_c.children)
-        l_c.exclude = False
-        l_c.hide_viewport = False
-
-    bpy.context.view_layer.update()
-
 def get_socket_color(socket):
     if socket.is_linked:
         from_node = socket.links[0].from_node
@@ -531,7 +770,6 @@ def get_socket_color(socket):
         if isinstance(val, (list, tuple)):
             return list(val)
     return [1.0, 1.0, 1.0, 1.0]
-
 
 def convert_emission_shaders_to_pbr():
     print(
@@ -624,12 +862,6 @@ def convert_emission_shaders_to_pbr():
                 )
 
             mat.node_tree.links.new(bsdf_node.outputs["BSDF"], surface_input)
-            print(
-                f"  [+] Converted emission shader for '{mat.name}' -> Base"
-                f" Color: ({base_r:.2f}, {base_g:.2f}, {base_b:.2f}),"
-                f" Strength: {strength_val}",
-                flush=True,
-            )
 
     bpy.context.view_layer.update()
 
@@ -653,8 +885,6 @@ def fix_visor_glass_materials():
                             node.inputs["Transmission Weight"].default_value = 0.8
                         elif "Transmission" in node.inputs:
                             node.inputs["Transmission"].default_value = 0.8
-
-            print(f"  [+] Set alpha transparency on visor glass material: '{mat.name}'", flush=True)
 
     bpy.context.view_layer.update()
 
@@ -681,7 +911,6 @@ def bind_mesh_to_head_deform_bone(obj, main_rig, bone_name="DEF-Head"):
         arm_mod = obj.modifiers.new(name="Armature", type='ARMATURE')
     arm_mod.object = main_rig
 
-    # Force 100% vertex weights to target deform bone so glTF exporter recognizes skinning
     target_vgroup = bone_name if (main_rig.data and bone_name in main_rig.data.bones) else "Head"
     vgroup = obj.vertex_groups.get(target_vgroup) or obj.vertex_groups.new(name=target_vgroup)
 
@@ -715,11 +944,8 @@ def fix_and_bind_neck_mesh(main_rig):
 
         obj.hide_render = False
         obj.hide_viewport = False
-
-        # Clear any existing groups so we guarantee it goes to the correct bone
         obj.vertex_groups.clear()
         bind_mesh_to_head_deform_bone(obj, main_rig, neck_bone)
-        print(f"  [+] Neck element '{obj.name}' successfully skinned 100% to bone '{neck_bone}'.", flush=True)
 
     bpy.context.view_layer.update()
 
@@ -735,13 +961,10 @@ def bind_hands_and_fingers_safely(main_rig):
     for obj in list(bpy.data.objects):
         if obj and getattr(obj, "type", None) == 'MESH' and not obj.hide_render:
             if is_hand_or_finger(obj):
-                
-                # Retrieve the specific finger/thumb bone this mesh is parented to
                 bone_target = None
                 if obj.parent == main_rig and obj.parent_type == 'BONE' and obj.parent_bone:
                     bone_target = obj.parent_bone
 
-                # Safely convert to normal mesh object attached to rig
                 if obj.parent != main_rig or obj.parent_type != 'OBJECT':
                     world_mat = obj.matrix_world.copy()
                     obj.parent = main_rig
@@ -753,7 +976,6 @@ def bind_hands_and_fingers_safely(main_rig):
                     arm_mod = obj.modifiers.new(name="Armature", type='ARMATURE')
                 arm_mod.object = main_rig
 
-                # If we knew what bone it belonged to, force 100% weight to that exact bone!
                 if bone_target:
                     obj.vertex_groups.clear()
                     vgroup = obj.vertex_groups.get(bone_target) or obj.vertex_groups.new(name=bone_target)
@@ -763,7 +985,6 @@ def bind_hands_and_fingers_safely(main_rig):
 
                 obj.hide_render = False
                 obj.hide_viewport = False
-                print(f"  [+] Hand/Finger element '{obj.name}' converted and skinned to '{bone_target}'.", flush=True)
 
     bpy.context.view_layer.update()
 
@@ -791,8 +1012,6 @@ def bake_and_attach_teeth(main_rig):
                 )
 
                 old_mesh = obj.data
-                world_mat = obj.matrix_world.copy()
-
                 obj.data = new_mesh
 
                 if old_mesh and old_mesh.users == 0:
@@ -809,8 +1028,6 @@ def bake_and_attach_teeth(main_rig):
                 if "bot" in teeth_name.lower():
                     obj.matrix_world.translation.z += 0.005
 
-                print(f"  [+] Teeth '{obj.name}' (~{len(new_mesh.polygons)} faces) tucked behind visor screen.", flush=True)
-
             except Exception as e:
                 print(f"  [~] Notice baking teeth '{obj.name}': {safe_str(e)}", flush=True)
 
@@ -822,15 +1039,12 @@ def apply_facial_gui_visibility_and_hide_anchors(main_rig):
     facial_rig = bpy.data.objects.get("Facial_Rig")
     if facial_rig:
         facial_rig.hide_render = True
-        print("  [-] Omitted secondary control armature 'Facial_Rig' from glTF export.", flush=True)
 
     for obj in list(bpy.data.objects):
         if not obj:
             continue
-
         if should_hide_facial_element(obj.name):
             obj.hide_render = True
-            print(f"  [-] Omitted facial element/GUI from glTF export: '{obj.name}'", flush=True)
 
     bpy.context.view_layer.update()
 
@@ -1014,8 +1228,6 @@ def bake_clothing_modifiers_with_shapekeys():
                     if m.type in {'SUBSURF', 'SOLIDIFY', 'SHRINKWRAP', 'DISPLACE', 'CORRECTIVE_SMOOTH'}:
                         obj.modifiers.remove(m)
 
-            print(f"  [+] Successfully baked modifiers into '{obj.name}'", flush=True)
-
         except Exception as e:
             print(f"  [~] Notice while baking '{obj.name}': {safe_str(e)}", flush=True)
 
@@ -1064,8 +1276,6 @@ def bake_limb_modifiers():
         if not target_mods:
             continue
 
-        print(f"  [*] Baking metal limb geometry on: '{obj.name}'...", flush=True)
-
         try:
             depsgraph = bpy.context.evaluated_depsgraph_get()
             obj_eval = obj.evaluated_get(depsgraph)
@@ -1086,8 +1296,6 @@ def bake_limb_modifiers():
             if obj.data and hasattr(obj.data, "polygons"):
                 for poly in obj.data.polygons:
                     poly.use_smooth = True
-
-            print(f"  [+] Successfully baked metal limb ring/bevel into '{obj.name}' ({len(obj.data.polygons)} faces)", flush=True)
 
         except Exception as e:
             print(f"  [~] Notice while baking limb '{obj.name}': {safe_str(e)}", flush=True)
@@ -1129,12 +1337,10 @@ def bake_socks_modifiers():
             world_mat = obj.matrix_world.copy()
             obj.parent = None
             obj.matrix_world = world_mat
-            print(f"  [+] Unparented '{obj.name}' from AUX container.", flush=True)
 
         for m in list(obj.modifiers):
             if m.type == 'MASK':
                 obj.modifiers.remove(m)
-                print(f"  [+] Removed Mask modifier from '{obj.name}'.", flush=True)
 
         deselect_all_objects()
         obj.select_set(True)
@@ -1142,7 +1348,6 @@ def bake_socks_modifiers():
 
         try:
             bpy.ops.object.convert(target='MESH')
-            print(f"  [+] Converted '{obj.name}' to baked MESH ({len(obj.data.vertices)} verts, {len(obj.data.polygons)} faces)", flush=True)
         except Exception as e:
             print(f"  [~] Notice converting '{obj.name}': {safe_str(e)}", flush=True)
 
@@ -1182,11 +1387,7 @@ def attach_socks_to_bones(main_rig):
 
         try:
             bpy.ops.object.parent_set(type='ARMATURE_AUTO')
-            print(f"  [+] Generated smooth leg skinning weights for sock: '{sock_name}'", flush=True)
-
         except Exception as e:
-            print(f"  [~] Notice skinning sock '{sock_name}': {safe_str(e)}", flush=True)
-
             arm_mod = next((m for m in sock_obj.modifiers if m.type == 'ARMATURE'), None)
             if not arm_mod:
                 arm_mod = sock_obj.modifiers.new(name="Armature", type='ARMATURE')
@@ -1195,85 +1396,31 @@ def attach_socks_to_bones(main_rig):
     main_rig.data.pose_position = 'REST'
     bpy.context.view_layer.update()
 
-def convert_hair_curves_to_mesh():
-    print("[*] Converting renderable hair curves to 3D meshes...", flush=True)
-    if bpy.ops.object.mode_set.poll():
-        bpy.ops.object.mode_set(mode='OBJECT')
-
-    for obj in list(bpy.data.objects):
-        if obj and getattr(obj, "type", None) in {'CURVE', 'SURFACE', 'FONT'} and not obj.hide_render:
-            if is_limb_object(obj):
-                continue
-
-            is_hair = any("hair" in col.name.lower() for col in obj.users_collection) or \
-                      any(slot.material and "hair" in slot.material.name.lower() for slot in obj.material_slots) or \
-                      (hasattr(obj.data, "bevel_depth") and obj.data.bevel_depth > 0)
-
-            if not is_hair and any(k.lower() in obj.name.lower() for k in ["curve_sock"]):
-                continue
-
-            deselect_all_objects()
-            obj.select_set(True)
-            bpy.context.view_layer.objects.active = obj
-            try:
-                bpy.ops.object.convert(target='MESH')
-                obj.name = f"Hair_Mesh_{obj.name}"
-                obj.hide_render = False
-                obj.hide_viewport = False
-                print(f"  [+] Converted hair curve to MESH: '{obj.name}'", flush=True)
-            except Exception as e:
-                print(f"  [-] Skipped '{obj.name}': {e}", flush=True)
-
-    bpy.context.view_layer.update()
-
-
 def fix_head_hair_and_accessories_parenting(main_rig):
-    print("[*] Re-parenting active head, hair, visor, and beanie directly to 'DEF-Head'...", flush=True)
+    \"\"\"Re-parents rigid head accessories (beanie, visor, skull plates) to DEF-Head without overriding hair skinning.\"\"\"
+    print("[*] Re-parenting active head, beanie, and accessories directly to 'DEF-Head'...", flush=True)
     if not main_rig or not main_rig.data:
         return
 
     target_bone = "DEF-Head" if "DEF-Head" in main_rig.data.bones else "Head"
-    head_objects = set()
-
-    for col in bpy.data.collections:
-        if not col:
-            continue
-        c_name = col.name.lower()
-        if any(k in c_name for k in ["head", "hair", "face", "beanie", "hat", "eyes", "mouth", "mesh"]):
-            for obj in col.all_objects:
-                if obj and getattr(obj, "type", None) == 'MESH':
-                    if is_limb_object(obj) or should_hide_facial_element(obj.name):
-                        continue
-                    o_name = obj.name.lower()
-                    if not any(b in o_name for b in ["cylinder.001", "cylinder.002", "jacket", "clothes", "sock", "boot", "symbol"]):
-                        head_objects.add(obj)
-
-    CORE_HEAD_NAMES = [
+    
+    RIGID_HEAD_NAMES = [
         "HeadTop", "VisorExt", "VisorInt", "AUX_SCREEN", "Sphere.014", "Sphere.015",
-        "Cylinder.017", "Eye.L", "Eye.R", "Teeth_Top", "Teeth_Bot", "Mouth_Shrink"
+        "Cylinder.017", "Eye.L", "Eye.R", "Beanie", "Hat", "Cap"
     ]
-    for elem_name in CORE_HEAD_NAMES:
-        obj = bpy.data.objects.get(elem_name)
-        if obj and getattr(obj, "type", None) == 'MESH':
-            if not should_hide_facial_element(obj.name):
-                head_objects.add(obj)
 
-    for obj in head_objects:
-        if not obj or is_limb_object(obj) or should_hide_facial_element(obj.name):
-            continue
-        try:
-            bind_mesh_to_head_deform_bone(obj, main_rig, target_bone)
-            print(f"  [+] Bound active head element '{obj.name}' to bone '{target_bone}'.", flush=True)
-        except Exception as e:
-            print(f"  [~] Notice binding '{obj.name}': {safe_str(e)}", flush=True)
+    for name in RIGID_HEAD_NAMES:
+        for obj in bpy.data.objects:
+            if not (obj and getattr(obj, "type", None) == 'MESH' and not obj.hide_render):
+                continue
+            if name.lower() in obj.name.lower() and not should_hide_facial_element(obj.name):
+                if not any("DEF-Hair" in vg.name for vg in obj.vertex_groups):
+                    bind_mesh_to_head_deform_bone(obj, main_rig, target_bone)
 
     bpy.context.view_layer.update()
 
 def fix_and_bake_mouth_shrink(main_rig):
-    print(
-        "[*] Baking 'Mouth_Shrink' native modifier stack onto visor...",
-        flush=True,
-    )
+    print("[*] Baking 'Mouth_Shrink' native modifier stack onto visor...", flush=True)
     if not main_rig or not main_rig.data:
         return
 
@@ -1281,12 +1428,7 @@ def fix_and_bake_mouth_shrink(main_rig):
     mouth_obj = bpy.data.objects.get("Mouth_Shrink")
 
     if mouth_obj and getattr(mouth_obj, "type", None) == "MESH":
-        for aux_name in [
-            "AUX_MOUTH",
-            "AUX_SCREEN",
-            "VisorInt",
-            "VisorExt",
-        ]:
+        for aux_name in ["AUX_MOUTH", "AUX_SCREEN", "VisorInt", "VisorExt"]:
             aux = bpy.data.objects.get(aux_name)
             if aux:
                 aux.hide_viewport = False
@@ -1322,9 +1464,7 @@ def fix_and_bake_mouth_shrink(main_rig):
 
         bpy.context.view_layer.update()
 
-        world_mat = mouth_obj.matrix_world.copy()
         depsgraph = bpy.context.evaluated_depsgraph_get()
-
         try:
             mouth_eval = mouth_obj.evaluated_get(depsgraph)
             new_mesh = bpy.data.meshes.new_from_object(
@@ -1338,11 +1478,6 @@ def fix_and_bake_mouth_shrink(main_rig):
                 bpy.data.meshes.remove(old_mesh)
 
             mouth_obj.modifiers.clear()
-
-            print(
-                f"  [+] Natively baked 'Mouth_Shrink' to smooth MESH ({len(mouth_obj.data.polygons)} faces).",
-                flush=True,
-            )
 
         except Exception as e:
             print(f"  [~] Notice converting Mouth_Shrink: {safe_str(e)}", flush=True)
@@ -1373,18 +1508,15 @@ def hide_non_character_widgets_and_symbols():
 
         name_lower = obj.name.lower()
 
-        # STRIP ALL LIMB NURBSPATHS / CABLES
         if "nurbspath" in name_lower:
             is_head_hair = any(c.name.lower() in ["hair", "head", "head accessories"] for c in obj.users_collection) or \
                            any(s.material and "hair" in s.material.name.lower() for s in obj.material_slots)
             if not is_head_hair:
                 obj.hide_render = True
-                print(f"  [-] Stripped limb NurbsPath cable from glTF export: '{obj.name}'", flush=True)
                 continue
 
         if should_hide_facial_element(obj.name) or any(pat.lower() in name_lower for pat in HIDE_PATTERNS):
             obj.hide_render = True
-            print(f"  [-] Omitted from glTF export: '{obj.name}'", flush=True)
             continue
 
         if obj.type == 'CURVE':
@@ -1392,7 +1524,6 @@ def hide_non_character_widgets_and_symbols():
                            any(s.material and "hair" in s.material.name.lower() for s in obj.material_slots)
             if not is_head_hair:
                 obj.hide_render = True
-                print(f"  [-] Omitted curve from glTF export: '{obj.name}'", flush=True)
                 continue
 
     bpy.context.view_layer.update()
@@ -1452,71 +1583,12 @@ def skin_limbs_to_armature(main_rig):
 
         try:
             bpy.ops.object.parent_set(type='ARMATURE_AUTO')
-            print(f"  [+] Skinned metal limb: '{obj.name}'", flush=True)
-
         except Exception as e:
-            print(f"  [~] Notice skinning '{obj.name}': {safe_str(e)}", flush=True)
-
             if not arm_mod:
                 arm_mod = obj.modifiers.new(name="Armature", type='ARMATURE')
                 arm_mod.object = main_rig
 
     main_rig.data.pose_position = 'REST'
-    bpy.context.view_layer.update()
-
-def bake_and_attach_hair_to_head(main_rig):
-    print("[*] Baking hair meshes and binding flush to 'DEF-Head'...", flush=True)
-    if not main_rig or not main_rig.data:
-        return
-
-    target_bone = "DEF-Head" if "DEF-Head" in main_rig.data.bones else "Head"
-    bpy.context.view_layer.update()
-
-    hair_objects = []
-
-    for obj in bpy.data.objects:
-        if obj and getattr(obj, "type", None) == 'MESH' and not obj.hide_render:
-            if is_limb_object(obj) or should_hide_facial_element(obj.name):
-                continue
-
-            is_in_hair_col = any("hair" in c.name.lower() for c in obj.users_collection) or \
-                             any("clothes" in c.name.lower() for c in obj.users_collection)
-            has_hair_rig = any(m.type == 'ARMATURE' and m.object and "hair" in m.object.name.lower() for m in obj.modifiers)
-            has_hair_mat = any(s.material and "hair" in s.material.name.lower() for s in obj.material_slots)
-
-            if is_in_hair_col or has_hair_rig or has_hair_mat:
-                hair_objects.append(obj)
-
-    depsgraph = bpy.context.evaluated_depsgraph_get()
-
-    for obj in hair_objects:
-        print(f"  [*] Baking hair geometry on: '{obj.name}'...", flush=True)
-
-        try:
-            obj_eval = obj.evaluated_get(depsgraph)
-            new_mesh = bpy.data.meshes.new_from_object(
-                obj_eval, preserve_all_data_layers=True, depsgraph=depsgraph
-            )
-
-            old_mesh = obj.data
-            world_mat = obj.matrix_world.copy()
-
-            obj.data = new_mesh
-
-            if old_mesh and old_mesh.users == 0:
-                bpy.data.meshes.remove(old_mesh)
-
-            for m in list(obj.modifiers):
-                if m.type in {'ARMATURE', 'CORRECTIVE_SMOOTH'}:
-                    obj.modifiers.remove(m)
-
-            bind_mesh_to_head_deform_bone(obj, main_rig, target_bone)
-
-            print(f"  [+] Baked hair mesh '{obj.name}' bound flush to bone '{target_bone}'.", flush=True)
-
-        except Exception as e:
-            print(f"  [~] Notice baking hair '{obj.name}': {safe_str(e)}", flush=True)
-
     bpy.context.view_layer.update()
 
 def is_armature_action(action, main_rig):
@@ -1661,8 +1733,6 @@ def stash_and_slot_character_actions(main_rig):
         strip.frame_start = start_frame
         strip.frame_end = end_frame
 
-        print(f"    - Stashed action: '{action.name}' -> NLA Track: '{track_name}'", flush=True)
-
     for track in main_rig.animation_data.nla_tracks:
         track.mute = True
 
@@ -1687,7 +1757,6 @@ def run_gltf_export(filepath, export_baked_animations=False):
         if main_rig.animation_data:
             main_rig.animation_data.action = None
 
-    # Remove subsurf modifiers prior to export
     for obj in bpy.data.objects:
         if obj and getattr(obj, "type", None) == 'MESH':
             for m in list(obj.modifiers):
@@ -1696,9 +1765,7 @@ def run_gltf_export(filepath, export_baked_animations=False):
 
     patch_blender_52_gltf_cache_bug()
 
-    # GLTF EXPORT CONFIGURATION
     if export_baked_animations:
-        # Baked Actions / Keyframe Mode
         bpy.ops.export_scene.gltf(
             filepath=filepath,
             export_format='GLB',
@@ -1719,17 +1786,16 @@ def run_gltf_export(filepath, export_baked_animations=False):
             export_lights=False,
         )
     else:
-        # Procedural FK/IK Engine Mode (No Keyframes, Clean Deform Bones, T-Pose Rest Matrices)
         bpy.ops.export_scene.gltf(
             filepath=filepath,
             export_format='GLB',
-            export_skins=True,               # Exports skeleton, weights, and inverseBindMatrices
-            export_morph=True,               # Retains blend shapes/shape keys
+            export_skins=True,
+            export_morph=True,
             export_tangents=False,
             export_normals=True,
             export_apply=False,
-            export_animations=False,         # No baked animation tracks
-            export_def_bones=True,           # Clean deform-only bone hierarchy
+            export_animations=False,
+            export_def_bones=True,
             export_rest_position_armature=True,
             use_renderable=True,
             export_cameras=False,
@@ -1751,27 +1817,32 @@ def main():
 
     main_rig = bpy.data.objects.get("Rig") or bpy.data.objects.get("Rig.001")
 
-    # Force REST pose at start of main pipeline
     if main_rig and main_rig.data:
         main_rig.data.pose_position = 'REST'
     bpy.context.view_layer.update()
 
-    # CRITICAL: Ensures all target bones exist in the skeleton during glTF output
+    # 1. Convert curves before hair pipeline runs
+    convert_hair_curves_to_mesh()
+
+    # 2. Setup Bone Hierarchy (Root, Shoulders, Hair Chains)
+    setup_root_bone(main_rig)
+    setup_shoulder_bones(main_rig)
+    setup_and_rename_hair_chains(main_rig)
+    preserve_dynamic_hair_skinning(main_rig)
     enable_all_deform_bones(main_rig)
 
     apply_facial_gui_visibility_and_hide_anchors(main_rig)
 
-    # Bind neck sphere joint ('Sphere.016') & collar ('Cylinder.013') to DEF-Neck cleanly in REST pose
+    # 3. Attachments & Facial Modifiers
     fix_and_bind_neck_mesh(main_rig)
-
     bake_and_attach_teeth(main_rig)
     bake_facial_shrinkwrap_only()
 
+    # 4. Rigid Accessories (Beanie, Visor)
     fix_head_hair_and_accessories_parenting(main_rig)
-    bake_and_attach_hair_to_head(main_rig)
-
     fix_and_bake_mouth_shrink(main_rig)
 
+    # 5. Clothing, Particles & Limbs
     bake_clothing_modifiers_with_shapekeys()
     convert_particle_systems_to_real_mesh(main_rig)
 
@@ -1779,9 +1850,7 @@ def main():
     bake_socks_modifiers()
     attach_socks_to_bones(main_rig)
 
-    convert_hair_curves_to_mesh()
-
-    # AUTOMATICALLY BAKE ALL PROCEDURAL & GROUP-BASED NORMAL MATERIALS
+    # 6. Procedural Materials Bake Pass
     procedural_and_group_node_types = {
         "TEX_NOISE",
         "TEX_WAVE",
@@ -1814,22 +1883,11 @@ def main():
         if target_objs:
             bake_procedural_material(mat.name, target_objs, resolution=2048)
 
+    # 7. Final Armature Binding & Cleanup
     skin_limbs_to_armature(main_rig)
-
-    # Preserve author skinning on hands, thumbs, and fingers (prevents ARMATURE_AUTO distortion)
     bind_hands_and_fingers_safely(main_rig)
-
     hide_non_character_widgets_and_symbols()
-
-    # Final enforcement pass to guarantee floating 3D eyebrows, eyelids, tongues, and widgets are excluded
     final_facial_and_widget_cleanup_pass()
-
-    # =========================================================================
-    # ANIMATION PROCESSING MODE TOGGLE
-    # =========================================================================
-    # purge_non_armature_animation_data(main_rig)
-    # stash_and_slot_character_actions(main_rig)
-    # deep_fcurve_pruning(main_rig)
 
     if main_rig and main_rig.data:
         main_rig.data.pose_position = 'REST'
