@@ -779,5 +779,12 @@ if(ZHLN_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 
+# --- SAMPLES ---
+option(ZHLN_BUILD_SAMPLES "Build engine sample applications" ON)
+
+if(ZHLN_BUILD_SAMPLES AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/samples")
+    add_subdirectory(samples)
+endif()
+
 
 target_link_libraries(zahlen_engine PRIVATE zahlen_warnings)
