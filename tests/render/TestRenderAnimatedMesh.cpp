@@ -86,12 +86,6 @@ struct RenderAnimatedMeshTestSuite {
             auto& reg = engine->GetRegistry();
             auto& rc  = engine->GetRenderContext();
 
-            // Enable Fullbright to test raw material albedo and emissive colors directly
-            auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-            if (!settingsEnts.empty()) {
-                ZHLN::ECS::Patch<ZHLN::Components::PostProcessSettingsComponent>(reg, settingsEnts[0], [](auto& pp) { pp.fullBright = 1; });
-            }
-
             // 2. Directional Sun Lighting
             const ZHLN::Entity sunEnt = reg.Create();
             reg.Add(
