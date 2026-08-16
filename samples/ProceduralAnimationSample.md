@@ -78,3 +78,9 @@ DEF-Toe.R
 Hair bones use `DEF-Hair_Sxx_yy`, where `xx` is strand `01..18` and `yy` is
 link `01..06`. Individual strands may stop at link 04 or 05; missing tail links
 remain intentionally unmapped rather than shifting the following strand.
+
+At initialization, each mapped hair bone's position and rotation are captured
+relative to the head directly from the GLB bind pose. XPBD distance, bend, and
+compliant shape constraints return the simulated particles to that authored
+silhouette. Collision constraints preserve any intentional bind-pose overlap
+with the head or torso instead of forcibly straightening the hairstyle.

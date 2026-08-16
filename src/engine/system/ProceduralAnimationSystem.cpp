@@ -598,6 +598,7 @@ void ProceduralAnimationSystem::Update(Engine& engine, float dt) noexcept {
 
     for (Entity entity: registry.GetEntitiesWith<ProceduralLocomotionComponent>()) {
         auto* gait             = registry.Get<ProceduralLocomotionComponent>(entity);
+        auto* hair             = registry.Get<HairStrandsComponent>(entity);
         auto* transform        = registry.Get<Components::TransformComponent>(entity);
         auto* physicsComponent = registry.Get<Components::PhysicsComponent>(entity);
         auto* boneMap          = registry.Get<RigBoneMap>(entity);
@@ -613,6 +614,10 @@ void ProceduralAnimationSystem::Update(Engine& engine, float dt) noexcept {
             const bool complete    = BuildBoneMap(*prefab, *skin.skeleton, *boneMap);
             boneMap->jointOffset   = skin.skeletalMesh->jointOffset;
             boneMap->skeletonIndex = skin.skeletalMesh->skeletonIndex;
+            if (hair != nullptr) {
+                hair->bindPoseInitialized = false;
+                hair->initialized         = false;
+            }
 
             size_t mappedCoreBones = 0;
             for (size_t semantic = 0; semantic < kCoreBoneCount; ++semantic) {
@@ -659,6 +664,9 @@ void ProceduralAnimationSystem::Update(Engine& engine, float dt) noexcept {
 
         std::copy_n(boneMap->bindLocalTransforms.begin(), boneMap->nodeCount, boneMap->localTransforms.begin());
         ResolveForwardKinematics(*boneMap);
+        if (hair != nullptr && !hair->bindPoseInitialized) {
+            Animation::ConfigureHairBindPose(*hair, boneMap->modelTransforms.data(), *boneMap);
+        }
 
         const JPH::Vec3 velocityWorld = physicsComponent != nullptr ? physics.GetCharacterVelocity(physicsComponent->physicsHandle) : JPH::Vec3::sZero();
         const JPH::Quat rootRotation  = transform->rotation.Normalized();
@@ -687,7 +695,7 @@ void ProceduralAnimationSystem::Update(Engine& engine, float dt) noexcept {
         Animation::SolveUpperBody(*gait, lookAt, transform->position, rootRotation, boneMap->modelTransforms.data(), *boneMap);
 
         // Stage 5: worker-fiber XPBD secondary motion.
-        if (auto* hair = registry.Get<HairStrandsComponent>(entity)) {
+        if (hair != nullptr) {
             const int32_t   headNode          = boneMap->nodeIndices[static_cast<size_t>(CharacterBone::Head)];
             const JPH::Vec3 headModelPosition = (headNode >= 0 && headNode < static_cast<int32_t>(boneMap->nodeCount)) ?
                                                     boneMap->modelTransforms[static_cast<size_t>(headNode)].GetTranslation() :
@@ -702,7 +710,7 @@ void ProceduralAnimationSystem::Update(Engine& engine, float dt) noexcept {
                 ZHLN::ScopedTimer hairTimer("Procedural Animation: 18-Strand XPBD");
                 Animation::StepHairSimulation(*hair, headWorldPosition, headWorldRotation, velocityWorld, dt);
             }
-            Animation::ExtractHairBoneTransforms(*hair, boneMap->modelTransforms.data(), *boneMap);
+            Animation::ExtractHairBoneTransforms(*hair, headWorldRotation, boneMap->modelTransforms.data(), *boneMap);
 
             // The secondary solver works in world space for collision stability;
             // convert its output back into the character's model space.

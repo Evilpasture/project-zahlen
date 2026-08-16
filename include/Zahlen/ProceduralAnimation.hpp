@@ -137,16 +137,27 @@ struct alignas(64) HairStrandsComponent {
 
     std::array<JPH::Vec3, kTotalParticles> positions {};
     std::array<JPH::Vec3, kTotalParticles> prevPositions {};
+
+    // Rest state is stored in head-local space and populated directly from the
+    // imported GLB bind pose. This lets every mapped bone return to its authored
+    // silhouette instead of treating all strands as gravity-only ropes.
+    std::array<JPH::Vec3, kTotalParticles> restLocalPositions {};
+    std::array<JPH::Quat, kTotalParticles> restLocalRotations {};
+    std::array<JPH::Vec3, kTotalParticles> restLocalDirections {};
     std::array<float, kTotalParticles>     segmentLengths {};
+    std::array<float, kTotalParticles>     bendLengths {};
     std::array<JPH::Vec3, kStrandCount>    rootBindOffsets {};
 
     float damping                = 0.94f;
     float gravity                = -9.81f;
     float compliance             = 0.000002f;
+    float bendCompliance         = 0.000020f;
+    float shapeCompliance        = 0.000010f;
     float headColliderRadius     = 0.16f;
     float torsoColliderRadiusXZ  = 0.24f;
     float torsoColliderRadiusY   = 0.38f;
     float shoulderColliderRadius = 0.20f;
+    bool  bindPoseInitialized    = false;
     bool  initialized            = false;
 };
 

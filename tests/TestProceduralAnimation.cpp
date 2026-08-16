@@ -146,6 +146,35 @@ struct ProceduralAnimationTestSuite {
             }
             return {};
         }
+
+        std::expected<void, ZHLN::Error> xpbd_hair_returns_to_authored_bind_shape() {
+            ZHLN::RigBoneMap map;
+            ZHLN::BuildStandardProceduralRig(map);
+            const int32_t   headNode     = map.nodeIndices[static_cast<size_t>(ZHLN::CharacterBone::Head)];
+            const JPH::Vec3 headPosition = map.modelTransforms[static_cast<size_t>(headNode)].GetTranslation();
+
+            // Author a deliberately horizontal first strand. A gravity-only
+            // rope would collapse; shape and bend constraints must retain it.
+            for (size_t link = 0; link < ZHLN::HairStrandsComponent::kLinksPerStrand; ++link) {
+                const size_t  semantic = static_cast<size_t>(ZHLN::CharacterBone::HairStart) + link;
+                const int32_t node     = map.nodeIndices[semantic];
+                map.modelTransforms[static_cast<size_t>(node)] =
+                    JPH::Mat44::sTranslation(headPosition + JPH::Vec3(0.15f + static_cast<float>(link) * 0.08f, 0.08f, 0.0f));
+            }
+
+            ZHLN::HairStrandsComponent hair;
+            ZHLN::Animation::ConfigureHairBindPose(hair, map.modelTransforms.data(), map);
+            for (uint32_t frame = 0; frame < 120; ++frame) {
+                ZHLN::Animation::StepHairSimulation(hair, headPosition, JPH::Quat::sIdentity(), JPH::Vec3::sZero(), 1.0f / 60.0f);
+            }
+
+            constexpr size_t tip         = ZHLN::HairStrandsComponent::kLinksPerStrand - 1;
+            const JPH::Vec3  authoredTip = headPosition + hair.restLocalPositions[tip];
+            if ((hair.positions[tip] - authoredTip).Length() > 0.04f) {
+                return std::unexpected(ProceduralAnimationTestError::HairConstraintFailed);
+            }
+            return {};
+        }
     };
 };
 
