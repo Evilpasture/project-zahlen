@@ -103,6 +103,24 @@ The debug overlay draws a sagittal stride wheel beside the COM. Cyan indicates
 pass-pose landmarks, orange indicates reach-pose landmarks, and the moving spoke
 shows the current distance-driven stride phase.
 
+## Constant-gravity bounce
+
+Pelvis bounce is a ballistic support-to-support arc:
+
+```text
+y(t) = 0.5 * gravity * t * (flightTime - t)
+```
+
+Its active curvature is always `-bounceGravity`. At low speed the support
+interval permits a slower, taller arc; at high speed the interval gets shorter
+and the arc naturally becomes flatter without changing gravity. A bounded flight
+window models landing and remaining supported at very low movement speeds.
+
+Tune `bounceGravity` and `maxBounceFlightTime` on
+`ProceduralLocomotionComponent`, or disable only this layer with
+`ProceduralAnimationConfigComponent::enableGravityBounce`. Hold left Shift in
+the sample to compare the normal-speed arc against the flatter sprint arc.
+
 ## Isolation switches
 
 Disable only analytical leg IK while leaving the gait and upper-body layers on:

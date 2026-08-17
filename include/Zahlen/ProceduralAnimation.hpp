@@ -122,14 +122,17 @@ struct ProceduralLocomotionComponent {
     float     plantWeightL     = 1.0f;
     float     plantWeightR     = 1.0f;
 
-    float forwardLean       = 0.0f;
-    float lateralBank       = 0.0f;
-    float tiltPitchVelocity = 0.0f;
-    float tiltRollVelocity  = 0.0f;
-    float pelvisBob         = 0.0f;
-    float pelvisSway        = 0.0f;
-    float pelvisDrop        = 0.0f;
-    float turnRate          = 0.0f;
+    float forwardLean         = 0.0f;
+    float lateralBank         = 0.0f;
+    float tiltPitchVelocity   = 0.0f;
+    float tiltRollVelocity    = 0.0f;
+    float pelvisBob           = 0.0f;
+    float pelvisSway          = 0.0f;
+    float pelvisDrop          = 0.0f;
+    float gravityBounce       = 0.0f;
+    float bounceGravity       = 9.81f;
+    float maxBounceFlightTime = 0.36f;
+    float turnRate            = 0.0f;
 
     // Gait-wheel instrumentation. Pass peaks as a foot crosses below the COM;
     // reach peaks near the forward/back stride extrema.
@@ -194,6 +197,7 @@ struct ProceduralLookAtComponent {
 /** Runtime layer switches for animation authoring and isolation workflows. */
 struct ProceduralAnimationConfigComponent {
     bool enableGait             = true;
+    bool enableGravityBounce    = true;
     bool enableLegIK            = true;
     bool enableAccelerationTilt = true;
     bool enableUpperBody        = true;

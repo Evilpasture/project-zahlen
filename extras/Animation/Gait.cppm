@@ -127,6 +127,26 @@ inline void RotateSubtree(const RigBoneMap& map, JPH::Mat44* transforms, int32_t
 } // namespace Detail
 
 /**
+ * Ballistic pelvis bounce between support contacts. The second derivative of
+ * the active arc is always -bounceGravity. Faster motion shortens the available
+ * flight interval, naturally flattening the curve without changing gravity.
+ */
+[[nodiscard]] inline float EvaluateGravityBounce(const ProceduralLocomotionComponent& gait, float speed) noexcept {
+    if (speed < 0.035f || gait.bounceGravity <= 0.0f) {
+        return 0.0f;
+    }
+
+    const float supportInterval = gait.strideLength / (2.0f * std::max(speed, 0.01f));
+    const float flightTime      = std::min(supportInterval, std::max(gait.maxBounceFlightTime, 0.01f));
+    const float supportPhase    = Detail::WrapUnit(gait.phase * 2.0f);
+    const float elapsed         = supportPhase * supportInterval;
+    if (elapsed >= flightTime) {
+        return 0.0f; // Landed; remain supported until the next contact.
+    }
+    return 0.5f * gait.bounceGravity * elapsed * (flightTime - elapsed);
+}
+
+/**
  * Stage 1 + 2: extract directional acceleration, advance the distance-driven
  * stride clock, and evaluate alternating cubic/parabolic foot trajectories.
  * Velocity is expected in character-local space.
@@ -173,13 +193,15 @@ inline void EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg veloc
         gait.localFootTargetR.SetZ(0.0f);
         gait.localFootTargetL.SetY(0.0f);
         gait.localFootTargetR.SetY(0.0f);
-        gait.plantWeightL = 1.0f;
-        gait.plantWeightR = 1.0f;
-        gait.pelvisBob    = 0.0f;
-        gait.pelvisSway   = 0.0f;
+        gait.plantWeightL  = 1.0f;
+        gait.plantWeightR  = 1.0f;
+        gait.gravityBounce = 0.0f;
+        gait.pelvisBob     = 0.0f;
+        gait.pelvisSway    = 0.0f;
     } else {
-        gait.pelvisBob  = -std::sin(kGaitTwoPi * 2.0f * gait.phase) * 0.045f;
-        gait.pelvisSway = std::sin(kGaitTwoPi * gait.phase) * 0.035f;
+        gait.gravityBounce = EvaluateGravityBounce(gait, speed);
+        gait.pelvisBob     = gait.gravityBounce;
+        gait.pelvisSway    = std::sin(kGaitTwoPi * gait.phase) * 0.035f;
     }
 
     const float targetForwardLean = std::clamp(-gait.directionalAcceleration.GetZ() * 0.018f, -0.22f, 0.22f);
@@ -215,6 +237,19 @@ inline void ApplyAccelerationTilt(ProceduralLocomotionComponent& gait, JPH::Mat4
     const JPH::Quat pitch = JPH::Quat::sRotation(JPH::Vec3::sAxisX(), gait.forwardLean);
     const JPH::Quat roll  = JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), gait.lateralBank);
     Detail::RotateSubtreeAroundPivot(map, nodeTransforms, hipsNode, gait.centerOfMassModel, (pitch * roll).Normalized());
+}
+
+/** Applies gait sway/bounce independently from analytical foot IK. */
+inline void
+    ApplyPelvisGaitOffset(const ProceduralLocomotionComponent& gait, JPH::Mat44* nodeTransforms, const RigBoneMap& map, bool includeDrop = true) noexcept {
+    if (nodeTransforms == nullptr) {
+        return;
+    }
+    const int32_t hipsNode = Detail::Node(map, CharacterBone::Hips);
+    if (hipsNode >= 0 && hipsNode < static_cast<int32_t>(map.nodeCount)) {
+        const float drop = includeDrop ? gait.pelvisDrop : 0.0f;
+        Detail::TranslateSubtree(map, nodeTransforms, hipsNode, JPH::Vec3(gait.pelvisSway, gait.pelvisBob + drop, 0.0f));
+    }
 }
 
 /** Stage 3: terrain projection, pelvis reach correction, and analytic leg IK. */
@@ -283,7 +318,6 @@ inline void SolveLegGrounding(
     gait.localFootTargetL        = targetModelL;
     gait.localFootTargetR        = targetModelR;
 
-    const int32_t hipsNode   = Detail::Node(map, CharacterBone::Hips);
     const int32_t thighLNode = Detail::Node(map, CharacterBone::ThighL);
     const int32_t thighRNode = Detail::Node(map, CharacterBone::ThighR);
 
@@ -303,9 +337,7 @@ inline void SolveLegGrounding(
     }
     gait.pelvisDrop = -std::clamp(requiredDrop, 0.0f, 0.38f);
 
-    if (hipsNode >= 0) {
-        Detail::TranslateSubtree(map, nodeTransforms, hipsNode, JPH::Vec3(gait.pelvisSway, gait.pelvisBob + gait.pelvisDrop, 0.0f));
-    }
+    ApplyPelvisGaitOffset(gait, nodeTransforms, map, true);
 
     auto solveLeg = [&](CharacterBone thighBone, CharacterBone shinBone, CharacterBone footBone, CharacterBone toeBone, JPH::Vec3Arg target,
                         JPH::Vec3Arg worldNormal) {

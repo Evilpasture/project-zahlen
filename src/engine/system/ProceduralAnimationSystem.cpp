@@ -825,6 +825,7 @@ void ProceduralAnimationSystem::Update(Engine& engine, float dt) noexcept {
 
         const bool keyframeOnly           = config != nullptr && config->keyframeOnly;
         const bool gaitEnabled            = !keyframeOnly && (config == nullptr || config->enableGait);
+        const bool gravityBounceEnabled   = gaitEnabled && (config == nullptr || config->enableGravityBounce);
         const bool ikEnabled              = !keyframeOnly && (config == nullptr || config->enableLegIK);
         const bool accelerationEnabled    = !keyframeOnly && (config == nullptr || config->enableAccelerationTilt);
         const bool upperBodyEnabled       = !keyframeOnly && (config == nullptr || config->enableUpperBody);
@@ -849,6 +850,10 @@ void ProceduralAnimationSystem::Update(Engine& engine, float dt) noexcept {
         // whole-body spring tilt around the estimated center of mass.
         if (gaitEnabled) {
             Animation::EvaluateGait(*gait, velocityLocal, angularVelocity, dt);
+            if (!gravityBounceEnabled) {
+                gait->gravityBounce = 0.0f;
+                gait->pelvisBob     = 0.0f;
+            }
         }
         if (accelerationEnabled) {
             Animation::ApplyAccelerationTilt(*gait, boneMap->modelTransforms.data(), *boneMap);
@@ -858,6 +863,8 @@ void ProceduralAnimationSystem::Update(Engine& engine, float dt) noexcept {
         if (ikEnabled) {
             const Entity ignoredHandle = physicsComponent != nullptr ? physicsComponent->physicsHandle : Entity {};
             Animation::SolveLegGrounding(engine, transform->position, rootRotation, *gait, boneMap->modelTransforms.data(), *boneMap, ignoredHandle);
+        } else if (gaitEnabled) {
+            Animation::ApplyPelvisGaitOffset(*gait, boneMap->modelTransforms.data(), *boneMap, false);
         }
 
         // Stage 4: arm counter-swing and look-at.

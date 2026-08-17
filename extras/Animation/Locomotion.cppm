@@ -17,6 +17,7 @@ module;
 #include <Zahlen/Types.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
+#include <algorithm>
 #include <cmath>
 #include <numbers>
 
@@ -183,7 +184,8 @@ inline auto
     // 3. Draw Velocity Vector
     const auto* move = reg.Get<Components::MovementComponent>(playerEntity);
     if (move != nullptr) {
-        const JPH::Vec3 vel(move->inputX * move->speed, move->currentYVel, move->inputZ * move->speed);
+        const float     speed = move->speed * (move->isSprinting ? std::max(move->sprintMultiplier, 1.0f) : 1.0f);
+        const JPH::Vec3 vel(move->inputX * speed, move->currentYVel, move->inputZ * speed);
         if (vel.LengthSq() > 0.01f) {
             rc.DrawLine(finalBumperCenter, finalBumperCenter + (vel * 0.25f), palette.colorVelocityDebug);
         }

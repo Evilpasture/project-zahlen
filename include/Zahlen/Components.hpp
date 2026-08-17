@@ -175,13 +175,14 @@ struct Components {
         JPH::Quat orientation     = JPH::Quat::sIdentity();
         JPH::Quat prevOrientation = JPH::Quat::sIdentity();
 
-        float inputX         = 0.0f;
-        float inputZ         = 0.0f;
-        float currentYVel    = 0.0f;
-        float speed          = 7.0f;
-        float jumpForce      = 12.0f;
-        float landingTimer   = 0.0f;
-        float jumpDelayTimer = 0.0f;
+        float inputX           = 0.0f;
+        float inputZ           = 0.0f;
+        float currentYVel      = 0.0f;
+        float speed            = 7.0f;
+        float sprintMultiplier = 1.65f;
+        float jumpForce        = 12.0f;
+        float landingTimer     = 0.0f;
+        float jumpDelayTimer   = 0.0f;
 
         bool jumpRequested = false;
         bool isGrounded    = true;
