@@ -220,10 +220,26 @@ struct ProceduralAnimationConfigComponent {
     bool authoredPoseOnly = false;
 };
 
+/** Authored locomotion clips synchronized to the procedural stride wheel. */
+struct ProceduralLocomotionTracksComponent {
+    int32_t idleTrack = -1;
+    int32_t walkTrack = -1;
+    int32_t runTrack  = -1;
+
+    float movementThreshold        = 0.08f;
+    float runSpeedThreshold        = 3.20f;
+    float synchronizedPhase        = 0.0f;
+    float synchronizedTime         = 0.0f;
+    float passWeight               = 0.0f;
+    float reachWeight              = 1.0f;
+    bool  synchronizeToStrideWheel = true;
+};
+
 /** Core procedural algorithms. Extras may consume these APIs; core never consumes extras. */
 namespace Animation {
 
 ZHLN_API float EvaluateGravityBounce(const ProceduralLocomotionComponent& gait, float speed) noexcept;
+ZHLN_API float EvaluateTwoKeyPosePhase(float stridePhase) noexcept;
 ZHLN_API void  EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg velocity, float angularVelocity, float dt) noexcept;
 ZHLN_API void  EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg velocity, float dt) noexcept;
 ZHLN_API void  ApplyAccelerationTilt(ProceduralLocomotionComponent& gait, JPH::Mat44* nodeTransforms, const RigBoneMap& map) noexcept;

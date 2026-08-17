@@ -217,25 +217,74 @@ for x, y, z in globals_:
     ))
 ibm_accessor = accessor(pack_floats(inverse_bind_matrices), 5126, len(bone_names), "MAT4")
 
-# A deliberately sparse three-key idle pose demonstrates the intended workflow:
-# authored intent supplies targets, minimum-jerk sampling removes linear timing,
-# and the runtime spring adds continuity and inertia.
-idle_times = [0.0, 1.0, 2.0]
-idle_time_accessor = accessor(pack_floats(idle_times), 5126, len(idle_times), "SCALAR", min=[0.0], max=[2.0])
-idle_hips_accessor = accessor(
-    pack_floats([0.0, 1.0, 0.0, 0.0, 1.015, 0.0, 0.0, 1.0, 0.0]),
-    5126,
-    3,
-    "VEC3",
-)
-
-
+# Sparse authored locomotion poses. Walk and run intentionally contain exactly
+# two opposing reach keys; runtime synchronization ping-pongs between them using
+# the stride wheel, so pass poses are produced by the selected interpolator.
 def x_rotation(angle: float) -> tuple[float, float, float, float]:
     return (math.sin(angle * 0.5), 0.0, 0.0, math.cos(angle * 0.5))
 
 
-idle_chest_accessor = accessor(pack_floats([*x_rotation(-0.015), *x_rotation(0.025), *x_rotation(-0.015)]), 5126, 3, "VEC4")
-idle_sup_spine_accessor = accessor(pack_floats([*x_rotation(0.010), *x_rotation(-0.018), *x_rotation(0.010)]), 5126, 3, "VEC4")
+def y_rotation(angle: float) -> tuple[float, float, float, float]:
+    return (0.0, math.sin(angle * 0.5), 0.0, math.cos(angle * 0.5))
+
+
+def z_rotation(angle: float) -> tuple[float, float, float, float]:
+    return (0.0, 0.0, math.sin(angle * 0.5), math.cos(angle * 0.5))
+
+
+def rotation_pair(first: tuple[float, float, float, float], second: tuple[float, float, float, float]) -> int:
+    return accessor(pack_floats([*first, *second]), 5126, 2, "VEC4")
+
+
+idle_time_accessor = accessor(pack_floats([0.0]), 5126, 1, "SCALAR", min=[0.0], max=[0.0])
+idle_hips_accessor = accessor(pack_floats([0.0, 1.0, 0.0]), 5126, 1, "VEC3")
+idle_chest_accessor = accessor(pack_floats([*x_rotation(0.018)]), 5126, 1, "VEC4")
+idle_sup_spine_accessor = accessor(pack_floats([*x_rotation(-0.012)]), 5126, 1, "VEC4")
+
+locomotion_time_accessor = accessor(pack_floats([0.0, 1.0]), 5126, 2, "SCALAR", min=[0.0], max=[1.0])
+walk_accessors = {
+    "thigh_l": rotation_pair(x_rotation(-0.42), x_rotation(0.42)),
+    "thigh_r": rotation_pair(x_rotation(0.42), x_rotation(-0.42)),
+    "shin_l": rotation_pair(x_rotation(0.16), x_rotation(0.48)),
+    "shin_r": rotation_pair(x_rotation(0.48), x_rotation(0.16)),
+    "arm_l": rotation_pair(y_rotation(0.34), y_rotation(-0.34)),
+    "arm_r": rotation_pair(y_rotation(-0.34), y_rotation(0.34)),
+    "chest": rotation_pair(z_rotation(-0.025), z_rotation(0.025)),
+}
+run_accessors = {
+    "thigh_l": rotation_pair(x_rotation(-0.78), x_rotation(0.78)),
+    "thigh_r": rotation_pair(x_rotation(0.78), x_rotation(-0.78)),
+    "shin_l": rotation_pair(x_rotation(0.28), x_rotation(0.92)),
+    "shin_r": rotation_pair(x_rotation(0.92), x_rotation(0.28)),
+    "arm_l": rotation_pair(y_rotation(0.62), y_rotation(-0.62)),
+    "arm_r": rotation_pair(y_rotation(-0.62), y_rotation(0.62)),
+    "chest": rotation_pair(z_rotation(-0.045), z_rotation(0.045)),
+}
+
+
+def locomotion_animation(name: str, outputs: dict[str, int]) -> dict:
+    targets = {
+        "thigh_l": thigh_l,
+        "thigh_r": thigh_r,
+        "shin_l": shin_l,
+        "shin_r": shin_r,
+        "arm_l": upper_arm_l,
+        "arm_r": upper_arm_r,
+        "chest": chest,
+    }
+    ordered_names = tuple(targets)
+    return {
+        "name": name,
+        "samplers": [
+            {"input": locomotion_time_accessor, "output": outputs[channel], "interpolation": "LINEAR"}
+            for channel in ordered_names
+        ],
+        "channels": [
+            {"sampler": index, "target": {"node": targets[channel], "path": "rotation"}}
+            for index, channel in enumerate(ordered_names)
+        ],
+    }
+
 
 mesh_node = len(nodes)
 nodes.append({"name": "ProceduralBaseRigMesh", "mesh": 0, "skin": 0})
@@ -276,19 +325,23 @@ document = {
             "roughnessFactor": 0.78,
         },
     }],
-    "animations": [{
-        "name": "IdlePose",
-        "samplers": [
-            {"input": idle_time_accessor, "output": idle_hips_accessor, "interpolation": "LINEAR"},
-            {"input": idle_time_accessor, "output": idle_chest_accessor, "interpolation": "LINEAR"},
-            {"input": idle_time_accessor, "output": idle_sup_spine_accessor, "interpolation": "LINEAR"},
-        ],
-        "channels": [
-            {"sampler": 0, "target": {"node": hips, "path": "translation"}},
-            {"sampler": 1, "target": {"node": chest, "path": "rotation"}},
-            {"sampler": 2, "target": {"node": sup_spine, "path": "rotation"}},
-        ],
-    }],
+    "animations": [
+        {
+            "name": "IdlePose",
+            "samplers": [
+                {"input": idle_time_accessor, "output": idle_hips_accessor, "interpolation": "STEP"},
+                {"input": idle_time_accessor, "output": idle_chest_accessor, "interpolation": "STEP"},
+                {"input": idle_time_accessor, "output": idle_sup_spine_accessor, "interpolation": "STEP"},
+            ],
+            "channels": [
+                {"sampler": 0, "target": {"node": hips, "path": "translation"}},
+                {"sampler": 1, "target": {"node": chest, "path": "rotation"}},
+                {"sampler": 2, "target": {"node": sup_spine, "path": "rotation"}},
+            ],
+        },
+        locomotion_animation("Walk_Reach_Poses", walk_accessors),
+        locomotion_animation("Run_Reach_Poses", run_accessors),
+    ],
     "buffers": [{"byteLength": len(blob)}],
     "bufferViews": buffer_views,
     "accessors": accessors,

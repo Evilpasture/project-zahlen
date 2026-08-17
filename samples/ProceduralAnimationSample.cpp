@@ -190,13 +190,16 @@ auto AttachCharacterRig(ZHLN::Engine& engine, ZHLN::Entity player, std::string_v
     if (prefab != nullptr) {
         ZHLN::Log("[Sample] GLB model '{}' loaded successfully. Instantiating visual parts...", glbPath);
 
-        int32_t selectedTrack = ZHLN::FindAnimationTrack(*prefab, "idle");
-        if (selectedTrack < 0 && !prefab->animations.empty()) {
-            selectedTrack = 0;
+        int32_t idleTrack = ZHLN::FindAnimationTrack(*prefab, "idle");
+        if (idleTrack < 0 && !prefab->animations.empty()) {
+            idleTrack = 0;
         }
-        if (selectedTrack >= 0) {
-            const auto& clip = prefab->animations[static_cast<size_t>(selectedTrack)];
-            ZHLN::Log("[Sample] Selected authored track {}: '{}' (duration={}, channels={}).", selectedTrack, clip.name, clip.duration, clip.channels.size());
+        const int32_t walkTrack = ZHLN::FindAnimationTrack(*prefab, "walk");
+        const int32_t runTrack  = ZHLN::FindAnimationTrack(*prefab, "run");
+        if (idleTrack >= 0) {
+            const auto& clip = prefab->animations[static_cast<size_t>(idleTrack)];
+            ZHLN::Log("[Sample] Selected idle track {}: '{}' (duration={}, channels={}).", idleTrack, clip.name, clip.duration, clip.channels.size());
+            ZHLN::Log("[Sample] Locomotion tracks: idle={}, walk={}, run={}.", idleTrack, walkTrack, runTrack);
         } else {
             ZHLN::Log("[Sample] WARNING: '{}' contains no authored animation track; bind pose will be shown.", glbPath);
         }
@@ -229,9 +232,14 @@ auto AttachCharacterRig(ZHLN::Engine& engine, ZHLN::Entity player, std::string_v
         reg.Add(
             player,
             ZHLN::Components::AnimatorComponent {
-                .currentTrackIdx = selectedTrack,
+                .currentTrackIdx = idleTrack,
                 .currentLoop     = true,
                 .prefab          = prefab,
+            },
+            ZHLN::ProceduralLocomotionTracksComponent {
+                .idleTrack = idleTrack,
+                .walkTrack = walkTrack,
+                .runTrack  = runTrack,
             },
             ZHLN::RigBoneMap {}, // Initialized lazily on frame 0 by ProceduralAnimationSystem
             std::move(locomotion), std::move(hair), std::move(lookAt), animationConfig

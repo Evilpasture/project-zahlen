@@ -35,8 +35,10 @@ struct ProceduralAnimationTestSuite {
             prefab.animations.push_back({.name = ZHLN::String64("Walk")});
             prefab.animations.push_back({.name = ZHLN::String64("Combat_Idle_Loop")});
             prefab.animations.push_back({.name = ZHLN::String64("IDLE")});
+            prefab.animations.push_back({.name = ZHLN::String64("Run_Reach_Poses")});
 
             if (ZHLN::FindAnimationTrack(prefab, "idle") != 2 || ZHLN::FindAnimationTrack(prefab, "combat idle") != 1 ||
+                ZHLN::FindAnimationTrack(prefab, "walk") != 0 || ZHLN::FindAnimationTrack(prefab, "run") != 3 ||
                 ZHLN::FindAnimationTrack(prefab, "missing") != -1) {
                 return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
@@ -134,7 +136,11 @@ struct ProceduralAnimationTestSuite {
             const bool accelerationIsFinite  = std::isfinite(gait.directionalAcceleration.GetZ());
             const bool wheelTracksPhase      = std::abs(gait.strideWheelAngle - gait.phase * 2.0f * std::numbers::pi_v<float>) < 0.0001f;
             const bool passReachPartition    = std::abs(gait.passWeightL + gait.reachWeightL - 1.0f) < 0.0001f;
-            if (!phaseIsDistanceDriven || !feetAreOpposed || !accelerationIsFinite || !wheelTracksPhase || !passReachPartition) {
+            const bool twoKeySynchronization = std::abs(ZHLN::Animation::EvaluateTwoKeyPosePhase(0.0f)) < 0.0001f &&
+                                               std::abs(ZHLN::Animation::EvaluateTwoKeyPosePhase(0.25f) - 0.5f) < 0.0001f &&
+                                               std::abs(ZHLN::Animation::EvaluateTwoKeyPosePhase(0.5f) - 1.0f) < 0.0001f &&
+                                               std::abs(ZHLN::Animation::EvaluateTwoKeyPosePhase(0.75f) - 0.5f) < 0.0001f;
+            if (!phaseIsDistanceDriven || !feetAreOpposed || !accelerationIsFinite || !wheelTracksPhase || !passReachPartition || !twoKeySynchronization) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
             return {};

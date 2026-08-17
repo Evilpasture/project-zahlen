@@ -87,12 +87,18 @@ with the head or torso instead of forcibly straightening the hairstyle.
 
 ## Keyframes and procedural layers
 
-The reference GLB contains a minimal three-key `IdlePose` clip for the hips,
-`Sup_Spine`, and chest. Keyframe intervals use minimum-jerk interpolation rather
-than constant-speed linear blending. The 21 semantic controls then follow those
-authored targets through a damped spring; fingers and other non-semantic nodes
-still receive the eased authored pose directly. Gait, COM tilt, IK, look-at, and
-hair are layered after that base pose.
+The reference GLB contains three authored tracks:
+
+- `IdlePose`: one static authored pose for hips, `Sup_Spine`, and chest.
+- `Walk_Reach_Poses`: two opposing reach keys for legs, arms, and chest.
+- `Run_Reach_Poses`: two larger opposing reach keys for the same controls.
+
+`ProceduralLocomotionTracksComponent` selects idle/walk/run from movement state.
+For walk and run, the stride wheel ping-pongs between the two authored reach keys;
+pass poses occur halfway between them and are produced by the selected bicubic or
+spring-damper interpolator. This keeps authored motion synchronized to actual
+travel distance instead of clip playback speed. Gait, COM tilt, IK, look-at, and
+hair are layered after that synchronized base pose.
 
 `ProceduralAnimationConfigComponent::poseInterpolation` selects the authored-pose
 interpolator. `Bicubic` uses four neighboring keys with configurable cardinal
@@ -122,6 +128,18 @@ ZHLN_POSE_INTERPOLATION=bicubic ZHLN_BICUBIC_TENSION=0.0 \
 
 ZHLN_POSE_INTERPOLATION=spring ZHLN_SPRING_STIFFNESS=2500 \
     ZHLN_SPRING_DAMPING_FACTOR=0.9 ./build/samples/ProceduralAnimationSample
+```
+
+Configure synchronized locomotion tracks for another GLB with:
+
+```cpp
+registry.Add(character, ZHLN::ProceduralLocomotionTracksComponent {
+    .idleTrack = ZHLN::FindAnimationTrack(*prefab, "idle"),
+    .walkTrack = ZHLN::FindAnimationTrack(*prefab, "walk"),
+    .runTrack = ZHLN::FindAnimationTrack(*prefab, "run"),
+    .runSpeedThreshold = 3.2f,
+    .synchronizeToStrideWheel = true,
+});
 ```
 
 Acceleration pitch and roll use their own springs and rotate the whole hips

@@ -473,6 +473,59 @@ void ApplyAuthoredPose(const Components::AnimatorComponent* animator, const Proc
     map.springPoseTrack = activeTrack;
 }
 
+[[nodiscard]] bool IsValidTrack(const Components::AnimatorComponent& animator, int32_t track) noexcept {
+    return animator.prefab != nullptr && track >= 0 && track < static_cast<int32_t>(animator.prefab->animations.size());
+}
+
+void SynchronizeLocomotionTrack(
+    Components::AnimatorComponent&       animator,
+    ProceduralLocomotionTracksComponent& tracks,
+    const Components::MovementComponent* movement,
+    const ProceduralLocomotionComponent& gait,
+    float                                speed
+) noexcept {
+    const bool moving  = speed > std::max(tracks.movementThreshold, 0.0f);
+    const bool running = moving && ((movement != nullptr && movement->isSprinting) || speed >= std::max(tracks.runSpeedThreshold, 0.0f));
+
+    int32_t desiredTrack = tracks.idleTrack;
+    if (moving) {
+        desiredTrack = running && IsValidTrack(animator, tracks.runTrack) ? tracks.runTrack : tracks.walkTrack;
+        if (!IsValidTrack(animator, desiredTrack)) {
+            desiredTrack = IsValidTrack(animator, tracks.runTrack) ? tracks.runTrack : tracks.idleTrack;
+        }
+    }
+    if (!IsValidTrack(animator, desiredTrack)) {
+        return;
+    }
+
+    if (animator.currentTrackIdx != desiredTrack) {
+        animator.prevTrackIdx      = animator.currentTrackIdx;
+        animator.prevTrackTime     = animator.currentTrackTime;
+        animator.prevPlaybackSpeed = animator.currentPlaybackSpeed;
+        animator.currentTrackIdx   = desiredTrack;
+        animator.currentTrackTime  = 0.0f;
+        animator.blendFactor       = 0.0f;
+        animator.isFinished        = false;
+    }
+
+    tracks.passWeight  = 0.5f * (gait.passWeightL + gait.passWeightR);
+    tracks.reachWeight = 0.5f * (gait.reachWeightL + gait.reachWeightR);
+    if (moving && tracks.synchronizeToStrideWheel) {
+        const float wheelPhase = gait.phase;
+        // Two authored keys represent opposing reach poses. Ping-pong across
+        // the stride wheel makes pass occur halfway between them and returns to
+        // key zero without a loop discontinuity.
+        const float          posePhase = Animation::EvaluateTwoKeyPosePhase(wheelPhase);
+        const AnimationClip& clip      = animator.prefab->animations[static_cast<size_t>(desiredTrack)];
+        tracks.synchronizedPhase       = posePhase;
+        tracks.synchronizedTime        = posePhase * std::max(clip.duration, 0.0f);
+        animator.currentTrackTime      = tracks.synchronizedTime;
+    } else {
+        tracks.synchronizedPhase = 0.0f;
+        tracks.synchronizedTime  = animator.currentTrackTime;
+    }
+}
+
 void ResolveForwardKinematics(RigBoneMap& map) noexcept {
     std::array<bool, kMaxRigNodes> computed {};
     std::array<bool, kMaxRigNodes> visiting {};
@@ -835,6 +888,8 @@ void ProceduralAnimationSystem::Update(Engine& engine, float dt) noexcept {
         auto* gait             = registry.Get<ProceduralLocomotionComponent>(entity);
         auto* hair             = registry.Get<HairStrandsComponent>(entity);
         auto* config           = registry.Get<ProceduralAnimationConfigComponent>(entity);
+        auto* tracks           = registry.Get<ProceduralLocomotionTracksComponent>(entity);
+        auto* movement         = registry.Get<Components::MovementComponent>(entity);
         auto* transform        = registry.Get<Components::TransformComponent>(entity);
         auto* physicsComponent = registry.Get<Components::PhysicsComponent>(entity);
         auto* boneMap          = registry.Get<RigBoneMap>(entity);
@@ -842,7 +897,7 @@ void ProceduralAnimationSystem::Update(Engine& engine, float dt) noexcept {
             continue;
         }
 
-        const auto*        animator = registry.Get<Components::AnimatorComponent>(entity);
+        auto*              animator = registry.Get<Components::AnimatorComponent>(entity);
         const ModelPrefab* prefab   = animator != nullptr ? animator->prefab : boneMap->sourcePrefab;
         SkinBinding        skin     = FindSkinBinding(registry, entity, prefab);
 
@@ -922,9 +977,6 @@ void ProceduralAnimationSystem::Update(Engine& engine, float dt) noexcept {
             ResolveForwardKinematics(*boneMap);
             Animation::ConfigureHairBindPose(*hair, boneMap->modelTransforms.data(), *boneMap);
         }
-        ApplyAuthoredPose(animator, config, *boneMap, dt);
-        ResolveForwardKinematics(*boneMap);
-
         const bool authoredPoseOnly       = config != nullptr && config->authoredPoseOnly;
         const bool gaitEnabled            = !authoredPoseOnly && (config == nullptr || config->enableGait);
         const bool gravityBounceEnabled   = gaitEnabled && (config == nullptr || config->enableGravityBounce);
@@ -932,10 +984,12 @@ void ProceduralAnimationSystem::Update(Engine& engine, float dt) noexcept {
         const bool accelerationEnabled    = !authoredPoseOnly && (config == nullptr || config->enableAccelerationTilt);
         const bool upperBodyEnabled       = !authoredPoseOnly && (config == nullptr || config->enableUpperBody);
         const bool secondaryMotionEnabled = !authoredPoseOnly && (config == nullptr || config->enableSecondaryMotion);
+        const bool locomotionSyncEnabled  = animator != nullptr && tracks != nullptr && tracks->synchronizeToStrideWheel;
 
-        const JPH::Vec3 velocityWorld = physicsComponent != nullptr ? physics.GetCharacterVelocity(physicsComponent->physicsHandle) : JPH::Vec3::sZero();
-        const JPH::Quat rootRotation  = transform->rotation.Normalized();
-        const JPH::Vec3 velocityLocal = rootRotation.Inversed() * velocityWorld;
+        const JPH::Vec3 velocityWorld   = physicsComponent != nullptr ? physics.GetCharacterVelocity(physicsComponent->physicsHandle) : JPH::Vec3::sZero();
+        const JPH::Quat rootRotation    = transform->rotation.Normalized();
+        const JPH::Vec3 velocityLocal   = rootRotation.Inversed() * velocityWorld;
+        const float     horizontalSpeed = std::sqrt(velocityLocal.GetX() * velocityLocal.GetX() + velocityLocal.GetZ() * velocityLocal.GetZ());
 
         float angularVelocity = 0.0f;
         if (gait->orientationInitialized) {
@@ -948,14 +1002,23 @@ void ProceduralAnimationSystem::Update(Engine& engine, float dt) noexcept {
         gait->previousRootRotation   = rootRotation;
         gait->orientationInitialized = true;
 
-        // Stages 1-2: velocity/acceleration calculus, parametric gait, and a
-        // whole-body spring tilt around the estimated center of mass.
-        if (gaitEnabled) {
+        // Advance the stride wheel before sampling locomotion clips so the two
+        // authored reach keys and their interpolated pass pose stay phase locked.
+        if (gaitEnabled || locomotionSyncEnabled) {
             Animation::EvaluateGait(*gait, velocityLocal, angularVelocity, dt);
-            if (!gravityBounceEnabled) {
-                gait->gravityBounce = 0.0f;
-                gait->pelvisBob     = 0.0f;
-            }
+        }
+        if (animator != nullptr && tracks != nullptr) {
+            SynchronizeLocomotionTrack(*animator, *tracks, movement, *gait, horizontalSpeed);
+        }
+
+        ApplyAuthoredPose(animator, config, *boneMap, dt);
+        ResolveForwardKinematics(*boneMap);
+
+        // Stages 1-2: apply optional gait and whole-body COM layers after the
+        // synchronized authored pose has been evaluated.
+        if (gaitEnabled && !gravityBounceEnabled) {
+            gait->gravityBounce = 0.0f;
+            gait->pelvisBob     = 0.0f;
         }
         if (accelerationEnabled) {
             Animation::ApplyAccelerationTilt(*gait, boneMap->modelTransforms.data(), *boneMap);

@@ -142,6 +142,12 @@ float EvaluateGravityBounce(const ProceduralLocomotionComponent& gait, float spe
     return 0.5f * gait.bounceGravity * elapsed * (flightTime - elapsed);
 }
 
+/** Maps one stride-wheel revolution onto two opposing authored reach keys. */
+float EvaluateTwoKeyPosePhase(float stridePhase) noexcept {
+    const float phase = Detail::WrapUnit(stridePhase);
+    return phase <= 0.5f ? phase * 2.0f : (1.0f - phase) * 2.0f;
+}
+
 /**
  * Stage 1 + 2: extract directional acceleration, advance the distance-driven
  * stride clock, and evaluate alternating cubic/parabolic foot trajectories.
