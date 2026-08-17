@@ -184,12 +184,11 @@ template <size_t N>
 }
 
 struct HairAddress {
-    int32_t strand = -1;
-    int32_t link   = -1;
+    size_t strand = HairStrandsComponent::kStrandCount;
+    size_t link   = HairStrandsComponent::kLinksPerStrand;
 
     [[nodiscard]] bool IsValid() const noexcept {
-        return strand >= 0 && strand < static_cast<int32_t>(HairStrandsComponent::kStrandCount) && link >= 0 &&
-               link < static_cast<int32_t>(HairStrandsComponent::kLinksPerStrand);
+        return strand < HairStrandsComponent::kStrandCount && link < HairStrandsComponent::kLinksPerStrand;
     }
 };
 
@@ -207,16 +206,16 @@ struct HairAddress {
         return {};
     }
 
-    std::array<uint32_t, 2> numbers {};
-    size_t                  numberCount = 0;
+    std::array<size_t, 2> numbers {};
+    size_t                numberCount = 0;
     for (size_t i = hairEnd; i < name.size() && numberCount < numbers.size();) {
         if (name[i] < '0' || name[i] > '9') {
             ++i;
             continue;
         }
-        uint32_t value = 0;
+        size_t value = 0;
         while (i < name.size() && name[i] >= '0' && name[i] <= '9') {
-            value = value * 10u + static_cast<uint32_t>(name[i] - '0');
+            value = value * 10u + static_cast<size_t>(name[i] - '0');
             ++i;
         }
         numbers[numberCount++] = value;
@@ -225,7 +224,7 @@ struct HairAddress {
     if (numberCount != 2 || numbers[0] == 0 || numbers[1] == 0) {
         return {};
     }
-    HairAddress result {.strand = static_cast<int32_t>(numbers[0] - 1), .link = static_cast<int32_t>(numbers[1] - 1)};
+    HairAddress result {.strand = numbers[0] - 1, .link = numbers[1] - 1};
     return result.IsValid() ? result : HairAddress {};
 }
 
@@ -234,9 +233,9 @@ void FillIdentity(std::span<JPH::Mat44> matrices) noexcept {
 }
 
 void ResetRigBoneMap(RigBoneMap& map) noexcept {
-    map.nodeIndices.fill(-1);
+    map.nodeIndices.fill(InvalidRigNode);
     FillIdentity(map.inverseBindMatrices);
-    map.parentIndices.fill(-1);
+    map.parentIndices.fill(InvalidRigNode);
     FillIdentity(map.bindLocalTransforms);
     FillIdentity(map.localTransforms);
     FillIdentity(map.modelTransforms);
@@ -411,7 +410,7 @@ void ApplyAuthoredPose(const Components::AnimatorComponent* animator, const Proc
     const float                 springDampingFactor = config != nullptr ? config->springDampingFactor : map.poseSpringDampingFactor;
     const float                 bicubicTension      = config != nullptr ? config->bicubicTension : 0.0f;
 
-    for (uint32_t node = 0; node < map.nodeCount; ++node) {
+    for (size_t node = 0; node < map.nodeCount; ++node) {
         targetTranslations[node] = map.bindLocalTransforms[node].GetTranslation();
         targetRotations[node]    = ExtractRotation(map.bindLocalTransforms[node]);
         targetScales[node]       = ExtractScale(map.bindLocalTransforms[node]);
@@ -435,21 +434,21 @@ void ApplyAuthoredPose(const Components::AnimatorComponent* animator, const Proc
     // authored curve directly. In spring-damper mode the 21 semantic controls
     // use those samples as physical targets; bicubic mode drives all controls
     // directly from the four-key curve.
-    for (uint32_t node = 0; node < map.nodeCount; ++node) {
+    for (size_t node = 0; node < map.nodeCount; ++node) {
         map.localTransforms[node] = JPH::Mat44::sRotationTranslation(targetRotations[node], targetTranslations[node]).PreScaled(targetScales[node]);
     }
 
     if (!map.springPoseInitialized || mode == PoseInterpolationMode::Bicubic) {
         for (size_t semantic = 0; semantic < kCoreBoneCount; ++semantic) {
-            const int32_t node = map.nodeIndices[semantic];
-            if (node < 0 || node >= static_cast<int32_t>(map.nodeCount)) {
+            const RigNodeIndex node = map.nodeIndices[semantic];
+            if (!IsValidRigNode(node, map.nodeCount)) {
                 continue;
             }
-            map.poseTranslations[semantic]          = targetTranslations[static_cast<size_t>(node)];
+            map.poseTranslations[semantic]          = targetTranslations[node];
             map.poseTranslationVelocities[semantic] = JPH::Vec3::sZero();
-            map.poseRotations[semantic]             = targetRotations[static_cast<size_t>(node)];
+            map.poseRotations[semantic]             = targetRotations[node];
             map.poseAngularVelocities[semantic]     = JPH::Vec3::sZero();
-            map.poseScales[semantic]                = targetScales[static_cast<size_t>(node)];
+            map.poseScales[semantic]                = targetScales[node];
             map.poseScaleVelocities[semantic]       = JPH::Vec3::sZero();
         }
         map.springPoseInitialized = true;
@@ -460,11 +459,11 @@ void ApplyAuthoredPose(const Components::AnimatorComponent* animator, const Proc
     }
 
     for (size_t semantic = 0; semantic < kCoreBoneCount; ++semantic) {
-        const int32_t node = map.nodeIndices[semantic];
-        if (node < 0 || node >= static_cast<int32_t>(map.nodeCount)) {
+        const RigNodeIndex node = map.nodeIndices[semantic];
+        if (!IsValidRigNode(node, map.nodeCount)) {
             continue;
         }
-        const size_t nodeIndex = static_cast<size_t>(node);
+        const RigNodeIndex nodeIndex = node;
         SpringVector(
             map.poseTranslations[semantic], map.poseTranslationVelocities[semantic], targetTranslations[nodeIndex], dt, springStiffness, springDampingFactor
         );
@@ -533,40 +532,37 @@ void ResolveForwardKinematics(RigBoneMap& map) noexcept {
     std::array<bool, kMaxRigNodes> computed {};
     std::array<bool, kMaxRigNodes> visiting {};
 
-    auto resolveNode = [&](auto& self, int32_t node) -> JPH::Mat44 {
-        if (node < 0 || node >= static_cast<int32_t>(map.nodeCount)) {
+    auto resolveNode = [&](auto& self, RigNodeIndex node) -> JPH::Mat44 {
+        if (!IsValidRigNode(node, map.nodeCount)) {
             return JPH::Mat44::sIdentity();
         }
-        if (computed[static_cast<size_t>(node)]) {
-            return map.modelTransforms[static_cast<size_t>(node)];
+        if (computed[node]) {
+            return map.modelTransforms[node];
         }
-        if (visiting[static_cast<size_t>(node)]) {
-            map.modelTransforms[static_cast<size_t>(node)] = map.localTransforms[static_cast<size_t>(node)];
-            computed[static_cast<size_t>(node)]            = true;
-            return map.modelTransforms[static_cast<size_t>(node)];
+        if (visiting[node]) {
+            map.modelTransforms[node] = map.localTransforms[node];
+            computed[node]            = true;
+            return map.modelTransforms[node];
         }
 
-        visiting[static_cast<size_t>(node)]            = true;
-        const int32_t parent                           = map.parentIndices[static_cast<size_t>(node)];
-        map.modelTransforms[static_cast<size_t>(node)] = (parent >= 0 && parent < static_cast<int32_t>(map.nodeCount)) ?
-                                                             self(self, parent) * map.localTransforms[static_cast<size_t>(node)] :
-                                                             map.localTransforms[static_cast<size_t>(node)];
-        visiting[static_cast<size_t>(node)]            = false;
-        computed[static_cast<size_t>(node)]            = true;
-        return map.modelTransforms[static_cast<size_t>(node)];
+        visiting[node]            = true;
+        const RigNodeIndex parent = map.parentIndices[node];
+        map.modelTransforms[node] = IsValidRigNode(parent, map.nodeCount) ? self(self, parent) * map.localTransforms[node] : map.localTransforms[node];
+        visiting[node]            = false;
+        computed[node]            = true;
+        return map.modelTransforms[node];
     };
 
-    for (uint32_t node = 0; node < map.nodeCount; ++node) {
-        static_cast<void>(resolveNode(resolveNode, static_cast<int32_t>(node)));
+    for (RigNodeIndex node = 0; node < map.nodeCount; ++node) {
+        static_cast<void>(resolveNode(resolveNode, node));
     }
 }
 
 void CaptureLocalPose(RigBoneMap& map) noexcept {
-    for (uint32_t node = 0; node < map.nodeCount; ++node) {
-        const int32_t parent      = map.parentIndices[node];
-        map.localTransforms[node] = (parent >= 0 && parent < static_cast<int32_t>(map.nodeCount)) ?
-                                        map.modelTransforms[static_cast<size_t>(parent)].Inversed() * map.modelTransforms[node] :
-                                        map.modelTransforms[node];
+    for (RigNodeIndex node = 0; node < map.nodeCount; ++node) {
+        const RigNodeIndex parent = map.parentIndices[node];
+        map.localTransforms[node] = IsValidRigNode(parent, map.nodeCount) ? map.modelTransforms[parent].Inversed() * map.modelTransforms[node] :
+                                                                            map.modelTransforms[node];
     }
 }
 
@@ -634,8 +630,8 @@ bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMa
     ResetRigBoneMap(outMap);
 
     outMap.sourcePrefab = &prefab;
-    outMap.nodeCount    = std::min<uint32_t>(static_cast<uint32_t>(prefab.nodes.size()), static_cast<uint32_t>(kMaxRigNodes));
-    outMap.jointCount   = std::min<uint32_t>(static_cast<uint32_t>(skeleton.joints.size()), static_cast<uint32_t>(kMaxRigNodes));
+    outMap.nodeCount    = std::min(prefab.nodes.size(), kMaxRigNodes);
+    outMap.jointCount   = static_cast<uint32_t>(std::min(skeleton.joints.size(), kMaxRigNodes));
     if (prefab.nodes.size() > kMaxRigNodes) {
         ZHLN::Log(
             "[ProceduralAnimation] Rig '{}' contains {} nodes; evaluating the first {} and safely detaching parents outside that window.", prefab.virtualPath,
@@ -643,11 +639,11 @@ bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMa
         );
     }
 
-    for (uint32_t node = 0; node < outMap.nodeCount; ++node) {
+    for (RigNodeIndex node = 0; node < outMap.nodeCount; ++node) {
         const int32_t importedParent     = prefab.nodes[node].parentIndex;
-        const bool    parentIsValid      = importedParent >= 0 && importedParent < static_cast<int32_t>(outMap.nodeCount) &&
-                                           importedParent != static_cast<int32_t>(node);
-        outMap.parentIndices[node]       = parentIsValid ? importedParent : -1;
+        const bool    parentIsValid      = importedParent >= 0 && static_cast<RigNodeIndex>(importedParent) < outMap.nodeCount &&
+                                           static_cast<RigNodeIndex>(importedParent) != node;
+        outMap.parentIndices[node]       = parentIsValid ? static_cast<RigNodeIndex>(importedParent) : InvalidRigNode;
         outMap.bindLocalTransforms[node] = prefab.nodes[node].localTransform;
         outMap.localTransforms[node]     = prefab.nodes[node].localTransform;
     }
@@ -655,30 +651,30 @@ bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMa
     std::array<bool, kMaxRigNodes> claimed {};
     size_t                         coreMapped = 0;
     for (size_t semanticIndex = 0; semanticIndex < kCoreBoneCount; ++semanticIndex) {
-        const auto semantic = static_cast<CharacterBone>(semanticIndex);
-        int32_t    bestNode = -1;
+        const auto   semantic = static_cast<CharacterBone>(semanticIndex);
+        RigNodeIndex bestNode = InvalidRigNode;
 
         // First search exact normalized aliases across the entire rig. Only
         // fall back to suffix matching for exporter-specific prefixes. This
         // prevents Forearm.L from being consumed as UpperArm.L ("armL") and
         // Sup_Spine from being consumed as Spine when node order is unusual.
-        for (uint32_t pass = 0; pass < 2 && bestNode < 0; ++pass) {
+        for (size_t pass = 0; pass < 2 && bestNode == InvalidRigNode; ++pass) {
             const bool allowSuffix = pass != 0;
-            for (uint32_t node = 0; node < outMap.nodeCount; ++node) {
+            for (RigNodeIndex node = 0; node < outMap.nodeCount; ++node) {
                 if (claimed[node]) {
                     continue;
                 }
                 const CanonicalName    canonical  = Canonicalize(std::string_view(prefab.nodes[node].name));
                 const std::string_view normalized = StripKnownRigPrefix(canonical.View());
                 if (MatchesBone(normalized, semantic, allowSuffix)) {
-                    bestNode = static_cast<int32_t>(node);
+                    bestNode = node;
                     break;
                 }
             }
         }
-        if (bestNode >= 0) {
-            outMap.nodeIndices[semanticIndex]      = bestNode;
-            claimed[static_cast<size_t>(bestNode)] = true;
+        if (bestNode != InvalidRigNode) {
+            outMap.nodeIndices[semanticIndex] = bestNode;
+            claimed[bestNode]                 = true;
             ++coreMapped;
         }
     }
@@ -686,18 +682,17 @@ bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMa
     // Discover secondary chains from hierarchy rather than relying on glTF
     // storage order (exporters may emit depth-first or breadth-first nodes).
     std::array<bool, kMaxRigNodes> hairCandidate {};
-    for (uint32_t node = 0; node < outMap.nodeCount; ++node) {
+    for (RigNodeIndex node = 0; node < outMap.nodeCount; ++node) {
         const CanonicalName canonical = Canonicalize(std::string_view(prefab.nodes[node].name));
         hairCandidate[node]           = !claimed[node] && IsHairNode(canonical.View());
     }
     // A named hair/strand root often has generically named child joints. Mark
     // those descendants as candidates too.
-    for (uint32_t pass = 0; pass < outMap.nodeCount; ++pass) {
+    for (size_t pass = 0; pass < outMap.nodeCount; ++pass) {
         bool changed = false;
-        for (uint32_t node = 0; node < outMap.nodeCount; ++node) {
-            const int32_t parent = outMap.parentIndices[node];
-            if (!claimed[node] && !hairCandidate[node] && parent >= 0 && parent < static_cast<int32_t>(outMap.nodeCount) &&
-                hairCandidate[static_cast<size_t>(parent)]) {
+        for (RigNodeIndex node = 0; node < outMap.nodeCount; ++node) {
+            const RigNodeIndex parent = outMap.parentIndices[node];
+            if (!claimed[node] && !hairCandidate[node] && IsValidRigNode(parent, outMap.nodeCount) && hairCandidate[parent]) {
                 hairCandidate[node] = true;
                 changed             = true;
             }
@@ -713,7 +708,7 @@ bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMa
     // Prefer explicit DEF-Hair_Sxx_yy addressing. Strands in production rigs
     // may contain four, five, or six links, so preserve the semantic gaps
     // instead of shifting the next strand into the previous strand's slots.
-    for (uint32_t node = 0; node < outMap.nodeCount; ++node) {
+    for (RigNodeIndex node = 0; node < outMap.nodeCount; ++node) {
         if (!hairCandidate[node] || claimed[node]) {
             continue;
         }
@@ -722,12 +717,12 @@ bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMa
             continue;
         }
 
-        const size_t slot = static_cast<size_t>(address.strand) * HairStrandsComponent::kLinksPerStrand + static_cast<size_t>(address.link);
+        const size_t slot = address.strand * HairStrandsComponent::kLinksPerStrand + address.link;
         if (hairSlotClaimed[slot]) {
             continue;
         }
-        const size_t semanticIndex        = static_cast<size_t>(CharacterBone::HairStart) + slot;
-        outMap.nodeIndices[semanticIndex] = static_cast<int32_t>(node);
+        const size_t semanticIndex        = BoneSlot(CharacterBone::HairStart) + slot;
+        outMap.nodeIndices[semanticIndex] = node;
         hairSlotClaimed[slot]             = true;
         hairClaimed[node]                 = true;
         claimed[node]                     = true;
@@ -736,9 +731,9 @@ bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMa
     // Fallback for rigs that name only the strand roots: assign each hierarchy
     // chain to the next entirely unmapped strand.
     size_t nextFallbackStrand = 0;
-    for (uint32_t root = 0; root < outMap.nodeCount && nextFallbackStrand < HairStrandsComponent::kStrandCount; ++root) {
-        const int32_t parent       = outMap.parentIndices[root];
-        const bool    parentIsHair = parent >= 0 && parent < static_cast<int32_t>(outMap.nodeCount) && hairCandidate[static_cast<size_t>(parent)];
+    for (RigNodeIndex root = 0; root < outMap.nodeCount && nextFallbackStrand < HairStrandsComponent::kStrandCount; ++root) {
+        const RigNodeIndex parent       = outMap.parentIndices[root];
+        const bool         parentIsHair = IsValidRigNode(parent, outMap.nodeCount) && hairCandidate[parent];
         if (!hairCandidate[root] || hairClaimed[root] || parentIsHair) {
             continue;
         }
@@ -749,19 +744,19 @@ bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMa
             break;
         }
 
-        int32_t current = static_cast<int32_t>(root);
-        for (size_t link = 0; link < HairStrandsComponent::kLinksPerStrand && current >= 0; ++link) {
-            const size_t slot                         = nextFallbackStrand * HairStrandsComponent::kLinksPerStrand + link;
-            const size_t semanticIndex                = static_cast<size_t>(CharacterBone::HairStart) + slot;
-            outMap.nodeIndices[semanticIndex]         = current;
-            hairSlotClaimed[slot]                     = true;
-            claimed[static_cast<size_t>(current)]     = true;
-            hairClaimed[static_cast<size_t>(current)] = true;
+        RigNodeIndex current = root;
+        for (size_t link = 0; link < HairStrandsComponent::kLinksPerStrand && IsValidRigNode(current, outMap.nodeCount); ++link) {
+            const size_t slot                 = nextFallbackStrand * HairStrandsComponent::kLinksPerStrand + link;
+            const size_t semanticIndex        = BoneSlot(CharacterBone::HairStart) + slot;
+            outMap.nodeIndices[semanticIndex] = current;
+            hairSlotClaimed[slot]             = true;
+            claimed[current]                  = true;
+            hairClaimed[current]              = true;
 
-            int32_t next = -1;
-            for (uint32_t node = 0; node < outMap.nodeCount; ++node) {
+            RigNodeIndex next = InvalidRigNode;
+            for (RigNodeIndex node = 0; node < outMap.nodeCount; ++node) {
                 if (hairCandidate[node] && !hairClaimed[node] && outMap.parentIndices[node] == current) {
-                    next = static_cast<int32_t>(node);
+                    next = node;
                     break;
                 }
             }
@@ -773,7 +768,7 @@ bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMa
     // Preserve unusual unstructured hair nodes by filling only genuinely empty
     // slots. Explicit strand/link addresses always win.
     size_t freeHairSlot = 0;
-    for (uint32_t node = 0; node < outMap.nodeCount && freeHairSlot < HairStrandsComponent::kTotalParticles; ++node) {
+    for (RigNodeIndex node = 0; node < outMap.nodeCount && freeHairSlot < HairStrandsComponent::kTotalParticles; ++node) {
         if (!hairCandidate[node] || hairClaimed[node]) {
             continue;
         }
@@ -783,10 +778,10 @@ bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMa
         if (freeHairSlot >= HairStrandsComponent::kTotalParticles) {
             break;
         }
-        outMap.nodeIndices[static_cast<size_t>(CharacterBone::HairStart) + freeHairSlot] = static_cast<int32_t>(node);
-        hairSlotClaimed[freeHairSlot]                                                    = true;
-        claimed[node]                                                                    = true;
-        hairClaimed[node]                                                                = true;
+        outMap.nodeIndices[BoneSlot(CharacterBone::HairStart) + freeHairSlot] = node;
+        hairSlotClaimed[freeHairSlot]                                         = true;
+        claimed[node]                                                         = true;
+        hairClaimed[node]                                                     = true;
     }
 
     size_t mappedHairStrands = 0;
@@ -799,12 +794,12 @@ bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMa
     }
 
     for (size_t semanticIndex = 0; semanticIndex < kBoneCount; ++semanticIndex) {
-        const int32_t node = outMap.nodeIndices[semanticIndex];
-        if (node < 0) {
+        const RigNodeIndex node = outMap.nodeIndices[semanticIndex];
+        if (!IsValidRigNode(node, outMap.nodeCount)) {
             continue;
         }
         for (const Joint& joint: skeleton.joints) {
-            if (joint.nodeIndex == node) {
+            if (joint.nodeIndex >= 0 && static_cast<RigNodeIndex>(joint.nodeIndex) == node) {
                 outMap.inverseBindMatrices[semanticIndex] = joint.inverseBindMatrix;
                 break;
             }
@@ -819,50 +814,49 @@ bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMa
 
 void BuildStandardProceduralRig(RigBoneMap& outMap) noexcept {
     ResetRigBoneMap(outMap);
-    outMap.nodeCount  = static_cast<uint32_t>(kBoneCount);
+    outMap.nodeCount  = kBoneCount;
     outMap.jointCount = static_cast<uint32_t>(kBoneCount);
 
-    auto addBone = [&](CharacterBone bone, int32_t parentNode, JPH::Vec3Arg translation) {
-        const size_t  semantic               = static_cast<size_t>(bone);
-        const int32_t node                   = static_cast<int32_t>(semantic);
-        outMap.nodeIndices[semantic]         = node;
+    auto addBone = [&](CharacterBone bone, RigNodeIndex parentNode, JPH::Vec3Arg translation) {
+        const size_t semantic                = BoneSlot(bone);
+        outMap.nodeIndices[semantic]         = semantic;
         outMap.parentIndices[semantic]       = parentNode;
         outMap.bindLocalTransforms[semantic] = JPH::Mat44::sTranslation(translation);
         outMap.localTransforms[semantic]     = outMap.bindLocalTransforms[semantic];
     };
 
-    addBone(CharacterBone::Root, -1, JPH::Vec3::sZero());
-    addBone(CharacterBone::Hips, static_cast<int32_t>(CharacterBone::Root), JPH::Vec3(0.0f, 1.0f, 0.0f));
-    addBone(CharacterBone::Spine, static_cast<int32_t>(CharacterBone::Hips), JPH::Vec3(0.0f, 0.15f, 0.0f));
-    addBone(CharacterBone::SupSpine, static_cast<int32_t>(CharacterBone::Spine), JPH::Vec3(0.0f, 0.16f, 0.0f));
-    addBone(CharacterBone::Chest, static_cast<int32_t>(CharacterBone::SupSpine), JPH::Vec3(0.0f, 0.17f, 0.0f));
-    addBone(CharacterBone::Neck, static_cast<int32_t>(CharacterBone::Chest), JPH::Vec3(0.0f, 0.16f, 0.0f));
-    addBone(CharacterBone::Head, static_cast<int32_t>(CharacterBone::Neck), JPH::Vec3(0.0f, 0.12f, 0.0f));
+    addBone(CharacterBone::Root, InvalidRigNode, JPH::Vec3::sZero());
+    addBone(CharacterBone::Hips, BoneSlot(CharacterBone::Root), JPH::Vec3(0.0f, 1.0f, 0.0f));
+    addBone(CharacterBone::Spine, BoneSlot(CharacterBone::Hips), JPH::Vec3(0.0f, 0.15f, 0.0f));
+    addBone(CharacterBone::SupSpine, BoneSlot(CharacterBone::Spine), JPH::Vec3(0.0f, 0.16f, 0.0f));
+    addBone(CharacterBone::Chest, BoneSlot(CharacterBone::SupSpine), JPH::Vec3(0.0f, 0.17f, 0.0f));
+    addBone(CharacterBone::Neck, BoneSlot(CharacterBone::Chest), JPH::Vec3(0.0f, 0.16f, 0.0f));
+    addBone(CharacterBone::Head, BoneSlot(CharacterBone::Neck), JPH::Vec3(0.0f, 0.12f, 0.0f));
 
-    addBone(CharacterBone::UpperArmL, static_cast<int32_t>(CharacterBone::Chest), JPH::Vec3(0.21f, 0.10f, 0.0f));
-    addBone(CharacterBone::ForearmL, static_cast<int32_t>(CharacterBone::UpperArmL), JPH::Vec3(0.28f, 0.0f, 0.0f));
-    addBone(CharacterBone::HandL, static_cast<int32_t>(CharacterBone::ForearmL), JPH::Vec3(0.24f, 0.0f, 0.0f));
-    addBone(CharacterBone::UpperArmR, static_cast<int32_t>(CharacterBone::Chest), JPH::Vec3(-0.21f, 0.10f, 0.0f));
-    addBone(CharacterBone::ForearmR, static_cast<int32_t>(CharacterBone::UpperArmR), JPH::Vec3(-0.28f, 0.0f, 0.0f));
-    addBone(CharacterBone::HandR, static_cast<int32_t>(CharacterBone::ForearmR), JPH::Vec3(-0.24f, 0.0f, 0.0f));
+    addBone(CharacterBone::UpperArmL, BoneSlot(CharacterBone::Chest), JPH::Vec3(0.21f, 0.10f, 0.0f));
+    addBone(CharacterBone::ForearmL, BoneSlot(CharacterBone::UpperArmL), JPH::Vec3(0.28f, 0.0f, 0.0f));
+    addBone(CharacterBone::HandL, BoneSlot(CharacterBone::ForearmL), JPH::Vec3(0.24f, 0.0f, 0.0f));
+    addBone(CharacterBone::UpperArmR, BoneSlot(CharacterBone::Chest), JPH::Vec3(-0.21f, 0.10f, 0.0f));
+    addBone(CharacterBone::ForearmR, BoneSlot(CharacterBone::UpperArmR), JPH::Vec3(-0.28f, 0.0f, 0.0f));
+    addBone(CharacterBone::HandR, BoneSlot(CharacterBone::ForearmR), JPH::Vec3(-0.24f, 0.0f, 0.0f));
 
-    addBone(CharacterBone::ThighL, static_cast<int32_t>(CharacterBone::Hips), JPH::Vec3(0.12f, -0.06f, 0.0f));
-    addBone(CharacterBone::ShinL, static_cast<int32_t>(CharacterBone::ThighL), JPH::Vec3(0.0f, -0.43f, 0.015f));
-    addBone(CharacterBone::FootL, static_cast<int32_t>(CharacterBone::ShinL), JPH::Vec3(0.0f, -0.42f, 0.025f));
-    addBone(CharacterBone::ToeL, static_cast<int32_t>(CharacterBone::FootL), JPH::Vec3(0.0f, -0.045f, 0.18f));
-    addBone(CharacterBone::ThighR, static_cast<int32_t>(CharacterBone::Hips), JPH::Vec3(-0.12f, -0.06f, 0.0f));
-    addBone(CharacterBone::ShinR, static_cast<int32_t>(CharacterBone::ThighR), JPH::Vec3(0.0f, -0.43f, 0.015f));
-    addBone(CharacterBone::FootR, static_cast<int32_t>(CharacterBone::ShinR), JPH::Vec3(0.0f, -0.42f, 0.025f));
-    addBone(CharacterBone::ToeR, static_cast<int32_t>(CharacterBone::FootR), JPH::Vec3(0.0f, -0.045f, 0.18f));
+    addBone(CharacterBone::ThighL, BoneSlot(CharacterBone::Hips), JPH::Vec3(0.12f, -0.06f, 0.0f));
+    addBone(CharacterBone::ShinL, BoneSlot(CharacterBone::ThighL), JPH::Vec3(0.0f, -0.43f, 0.015f));
+    addBone(CharacterBone::FootL, BoneSlot(CharacterBone::ShinL), JPH::Vec3(0.0f, -0.42f, 0.025f));
+    addBone(CharacterBone::ToeL, BoneSlot(CharacterBone::FootL), JPH::Vec3(0.0f, -0.045f, 0.18f));
+    addBone(CharacterBone::ThighR, BoneSlot(CharacterBone::Hips), JPH::Vec3(-0.12f, -0.06f, 0.0f));
+    addBone(CharacterBone::ShinR, BoneSlot(CharacterBone::ThighR), JPH::Vec3(0.0f, -0.43f, 0.015f));
+    addBone(CharacterBone::FootR, BoneSlot(CharacterBone::ShinR), JPH::Vec3(0.0f, -0.42f, 0.025f));
+    addBone(CharacterBone::ToeR, BoneSlot(CharacterBone::FootR), JPH::Vec3(0.0f, -0.045f, 0.18f));
 
     constexpr float kTwoPi = 2.0f * std::numbers::pi_v<float>;
     for (size_t strand = 0; strand < HairStrandsComponent::kStrandCount; ++strand) {
         const float angle = kTwoPi * static_cast<float>(strand) / static_cast<float>(HairStrandsComponent::kStrandCount);
         for (size_t link = 0; link < HairStrandsComponent::kLinksPerStrand; ++link) {
             const size_t particle          = strand * HairStrandsComponent::kLinksPerStrand + link;
-            const size_t semantic          = static_cast<size_t>(CharacterBone::HairStart) + particle;
-            outMap.nodeIndices[semantic]   = static_cast<int32_t>(semantic);
-            outMap.parentIndices[semantic] = (link == 0) ? static_cast<int32_t>(CharacterBone::Head) : static_cast<int32_t>(semantic - 1);
+            const size_t semantic          = BoneSlot(CharacterBone::HairStart) + particle;
+            outMap.nodeIndices[semantic]   = semantic;
+            outMap.parentIndices[semantic] = (link == 0) ? BoneSlot(CharacterBone::Head) : semantic - 1;
             const JPH::Vec3 translation = (link == 0) ? JPH::Vec3(std::cos(angle) * 0.150f, 0.075f, std::sin(angle) * 0.150f) : JPH::Vec3(0.0f, -0.105f, 0.0f);
             outMap.bindLocalTransforms[semantic] = JPH::Mat44::sTranslation(translation);
             outMap.localTransforms[semantic]     = outMap.bindLocalTransforms[semantic];
@@ -871,9 +865,9 @@ void BuildStandardProceduralRig(RigBoneMap& outMap) noexcept {
 
     ResolveForwardKinematics(outMap);
     for (size_t semantic = 0; semantic < kBoneCount; ++semantic) {
-        const int32_t node = outMap.nodeIndices[semantic];
-        if (node >= 0) {
-            outMap.inverseBindMatrices[semantic] = outMap.modelTransforms[static_cast<size_t>(node)].Inversed();
+        const RigNodeIndex node = outMap.nodeIndices[semantic];
+        if (IsValidRigNode(node, outMap.nodeCount)) {
+            outMap.inverseBindMatrices[semantic] = outMap.modelTransforms[node].Inversed();
         }
     }
     outMap.initialized = true;
@@ -965,15 +959,15 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
 
             size_t mappedCoreBones = 0;
             for (size_t semantic = 0; semantic < kCoreBoneCount; ++semantic) {
-                mappedCoreBones += boneMap->nodeIndices[semantic] >= 0 ? 1u : 0u;
+                mappedCoreBones += IsValidRigNode(boneMap->nodeIndices[semantic], boneMap->nodeCount) ? 1u : 0u;
             }
             size_t mappedHairBones   = 0;
             size_t mappedHairStrands = 0;
             for (size_t strand = 0; strand < HairStrandsComponent::kStrandCount; ++strand) {
                 bool strandMapped = false;
                 for (size_t link = 0; link < HairStrandsComponent::kLinksPerStrand; ++link) {
-                    const size_t semantic = static_cast<size_t>(CharacterBone::HairStart) + strand * HairStrandsComponent::kLinksPerStrand + link;
-                    if (boneMap->nodeIndices[semantic] >= 0) {
+                    const size_t semantic = BoneSlot(CharacterBone::HairStart) + strand * HairStrandsComponent::kLinksPerStrand + link;
+                    if (IsValidRigNode(boneMap->nodeIndices[semantic], boneMap->nodeCount)) {
                         ++mappedHairBones;
                         strandMapped = true;
                     }
@@ -1005,15 +999,15 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
             }
             if (!complete) {
                 for (size_t semantic = 0; semantic < kCoreBoneCount; ++semantic) {
-                    if (boneMap->nodeIndices[semantic] < 0) {
+                    if (!IsValidRigNode(boneMap->nodeIndices[semantic], boneMap->nodeCount)) {
                         ZHLN::Log("[ProceduralAnimation] Missing core mapping: {}", kCoreBoneLabels[semantic]);
                     }
                 }
                 for (size_t strand = 0; strand < HairStrandsComponent::kStrandCount; ++strand) {
-                    const size_t rootSemantic = static_cast<size_t>(CharacterBone::HairStart) + strand * HairStrandsComponent::kLinksPerStrand;
+                    const size_t rootSemantic = BoneSlot(CharacterBone::HairStart) + strand * HairStrandsComponent::kLinksPerStrand;
                     bool         strandMapped = false;
                     for (size_t link = 0; link < HairStrandsComponent::kLinksPerStrand; ++link) {
-                        strandMapped = strandMapped || boneMap->nodeIndices[rootSemantic + link] >= 0;
+                        strandMapped = strandMapped || IsValidRigNode(boneMap->nodeIndices[rootSemantic + link], boneMap->nodeCount);
                     }
                     if (!strandMapped) {
                         ZHLN::Log("[ProceduralAnimation] Missing hair strand mapping: S{:02}", strand + 1);
@@ -1101,15 +1095,12 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
 
         // Stage 5: worker-fiber XPBD secondary motion.
         if (hair != nullptr && secondaryMotionEnabled) {
-            const int32_t   headNode          = boneMap->nodeIndices[static_cast<size_t>(CharacterBone::Head)];
-            const JPH::Vec3 headModelPosition = (headNode >= 0 && headNode < static_cast<int32_t>(boneMap->nodeCount)) ?
-                                                    boneMap->modelTransforms[static_cast<size_t>(headNode)].GetTranslation() :
-                                                    JPH::Vec3(0.0f, 1.60f, 0.0f);
-            const JPH::Quat headModelRotation = (headNode >= 0 && headNode < static_cast<int32_t>(boneMap->nodeCount)) ?
-                                                    ExtractRotation(boneMap->modelTransforms[static_cast<size_t>(headNode)]) :
-                                                    JPH::Quat::sIdentity();
-            const JPH::Vec3 headWorldPosition = ModelToWorld(transform->position, rootRotation, headModelPosition);
-            const JPH::Quat headWorldRotation = (rootRotation * headModelRotation).Normalized();
+            const RigNodeIndex headNode          = boneMap->nodeIndices[BoneSlot(CharacterBone::Head)];
+            const bool         hasHead           = IsValidRigNode(headNode, boneMap->nodeCount);
+            const JPH::Vec3    headModelPosition = hasHead ? boneMap->modelTransforms[headNode].GetTranslation() : JPH::Vec3(0.0f, 1.60f, 0.0f);
+            const JPH::Quat    headModelRotation = hasHead ? ExtractRotation(boneMap->modelTransforms[headNode]) : JPH::Quat::sIdentity();
+            const JPH::Vec3    headWorldPosition = ModelToWorld(transform->position, rootRotation, headModelPosition);
+            const JPH::Quat    headWorldRotation = (rootRotation * headModelRotation).Normalized();
 
             {
                 ZHLN::ScopedTimer hairTimer("Procedural Animation: 18-Strand XPBD");
@@ -1121,16 +1112,16 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
             // convert its output back into the character's model space.
             const JPH::Quat inverseRoot = rootRotation.Inversed();
             for (size_t particle = 0; particle < HairStrandsComponent::kTotalParticles; ++particle) {
-                const size_t  semantic = static_cast<size_t>(CharacterBone::HairStart) + particle;
-                const int32_t node     = boneMap->nodeIndices[semantic];
-                if (node < 0 || node >= static_cast<int32_t>(boneMap->nodeCount)) {
+                const size_t       semantic = BoneSlot(CharacterBone::HairStart) + particle;
+                const RigNodeIndex node     = boneMap->nodeIndices[semantic];
+                if (!IsValidRigNode(node, boneMap->nodeCount)) {
                     continue;
                 }
-                const JPH::Mat44 world         = boneMap->modelTransforms[static_cast<size_t>(node)];
+                const JPH::Mat44 world         = boneMap->modelTransforms[node];
                 const JPH::Vec3  modelPosition = inverseRoot * (world.GetTranslation() - transform->position);
                 const JPH::Quat  modelRotation = (inverseRoot * ExtractRotation(world)).Normalized();
                 const JPH::Vec3  worldScale(world.GetColumn3(0).Length(), world.GetColumn3(1).Length(), world.GetColumn3(2).Length());
-                boneMap->modelTransforms[static_cast<size_t>(node)] = JPH::Mat44::sRotationTranslation(modelRotation, modelPosition).PreScaled(worldScale);
+                boneMap->modelTransforms[node] = JPH::Mat44::sRotationTranslation(modelRotation, modelPosition).PreScaled(worldScale);
             }
         } else if (hair != nullptr) {
             // Re-seed from the authored shape when secondary motion is enabled
@@ -1158,10 +1149,11 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
             std::array<JPH::Mat44, kMaxRigNodes> finalPalette {};
             std::ranges::fill(finalPalette, JPH::Mat44::sIdentity());
             for (uint32_t jointIndex = 0; jointIndex < count; ++jointIndex) {
-                const Joint& joint          = skin.skeleton->joints[jointIndex];
-                JPH::Mat44   modelTransform = JPH::Mat44::sIdentity();
-                if (joint.nodeIndex >= 0 && joint.nodeIndex < static_cast<int32_t>(boneMap->nodeCount)) {
-                    modelTransform           = boneMap->modelTransforms[static_cast<size_t>(joint.nodeIndex)];
+                const Joint&       joint          = skin.skeleton->joints[jointIndex];
+                JPH::Mat44         modelTransform = JPH::Mat44::sIdentity();
+                const RigNodeIndex node           = joint.nodeIndex >= 0 ? static_cast<RigNodeIndex>(joint.nodeIndex) : InvalidRigNode;
+                if (IsValidRigNode(node, boneMap->nodeCount)) {
+                    modelTransform           = boneMap->modelTransforms[node];
                     finalPalette[jointIndex] = modelTransform * joint.inverseBindMatrix;
                 }
                 if (poseOverride != nullptr && jointIndex < Components::KinematicPoseOverrideComponent::MaxJoints) {
@@ -1192,10 +1184,8 @@ void DrawProceduralDebugRig(
         return;
     }
 
-    const auto worldPosition = [&](int32_t node) {
-        return ModelToWorld(rootPosition, rootRotation, boneMap.modelTransforms[static_cast<size_t>(node)].GetTranslation());
-    };
-    const auto drawCross = [&](JPH::Vec3Arg point, float radius, JPH::Vec4Arg color) {
+    const auto worldPosition = [&](RigNodeIndex node) { return ModelToWorld(rootPosition, rootRotation, boneMap.modelTransforms[node].GetTranslation()); };
+    const auto drawCross     = [&](JPH::Vec3Arg point, float radius, JPH::Vec4Arg color) {
         renderContext.DrawLine(point - JPH::Vec3(radius, 0.0f, 0.0f), point + JPH::Vec3(radius, 0.0f, 0.0f), color);
         renderContext.DrawLine(point - JPH::Vec3(0.0f, radius, 0.0f), point + JPH::Vec3(0.0f, radius, 0.0f), color);
         renderContext.DrawLine(point - JPH::Vec3(0.0f, 0.0f, radius), point + JPH::Vec3(0.0f, 0.0f, radius), color);
@@ -1207,30 +1197,30 @@ void DrawProceduralDebugRig(
     const JPH::Vec4 hairColor(0.90f, 0.25f, 1.00f, 1.0f);
 
     for (size_t semantic = 0; semantic < kCoreBoneCount; ++semantic) {
-        const int32_t node = boneMap.nodeIndices[semantic];
-        if (node < 0 || node >= static_cast<int32_t>(boneMap.nodeCount)) {
+        const RigNodeIndex node = boneMap.nodeIndices[semantic];
+        if (!IsValidRigNode(node, boneMap.nodeCount)) {
             continue;
         }
-        const int32_t parent = boneMap.parentIndices[static_cast<size_t>(node)];
-        JPH::Vec4     color  = torsoColor;
-        if (semantic >= static_cast<size_t>(CharacterBone::UpperArmL) && semantic <= static_cast<size_t>(CharacterBone::HandR)) {
+        const RigNodeIndex parent = boneMap.parentIndices[node];
+        JPH::Vec4          color  = torsoColor;
+        if (semantic >= BoneSlot(CharacterBone::UpperArmL) && semantic <= BoneSlot(CharacterBone::HandR)) {
             color = armColor;
-        } else if (semantic >= static_cast<size_t>(CharacterBone::ThighL)) {
+        } else if (semantic >= BoneSlot(CharacterBone::ThighL)) {
             color = legColor;
         }
-        if (parent >= 0 && parent < static_cast<int32_t>(boneMap.nodeCount)) {
+        if (IsValidRigNode(parent, boneMap.nodeCount)) {
             renderContext.DrawLine(worldPosition(parent), worldPosition(node), color);
         }
-        drawCross(worldPosition(node), semantic == static_cast<size_t>(CharacterBone::Head) ? 0.07f : 0.025f, color);
+        drawCross(worldPosition(node), semantic == BoneSlot(CharacterBone::Head) ? 0.07f : 0.025f, color);
     }
 
     for (size_t strand = 0; strand < HairStrandsComponent::kStrandCount; ++strand) {
         for (size_t link = 0; link + 1 < HairStrandsComponent::kLinksPerStrand; ++link) {
-            const size_t  particle0 = strand * HairStrandsComponent::kLinksPerStrand + link;
-            const size_t  particle1 = particle0 + 1;
-            const int32_t node0     = boneMap.nodeIndices[static_cast<size_t>(CharacterBone::HairStart) + particle0];
-            const int32_t node1     = boneMap.nodeIndices[static_cast<size_t>(CharacterBone::HairStart) + particle1];
-            if (node0 >= 0 && node1 >= 0 && node0 < static_cast<int32_t>(boneMap.nodeCount) && node1 < static_cast<int32_t>(boneMap.nodeCount)) {
+            const size_t       particle0 = strand * HairStrandsComponent::kLinksPerStrand + link;
+            const size_t       particle1 = particle0 + 1;
+            const RigNodeIndex node0     = boneMap.nodeIndices[BoneSlot(CharacterBone::HairStart) + particle0];
+            const RigNodeIndex node1     = boneMap.nodeIndices[BoneSlot(CharacterBone::HairStart) + particle1];
+            if (IsValidRigNode(node0, boneMap.nodeCount) && IsValidRigNode(node1, boneMap.nodeCount)) {
                 renderContext.DrawLine(worldPosition(node0), worldPosition(node1), hairColor);
             }
         }

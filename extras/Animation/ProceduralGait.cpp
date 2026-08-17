@@ -49,31 +49,31 @@ inline void SpringScalar(float& value, float& velocity, float target, float dt, 
     velocity             = (velocity + hoo * (target - oldValue)) * invDet;
 }
 
-[[nodiscard]] inline bool IsDescendant(const RigBoneMap& map, int32_t node, int32_t ancestor) noexcept {
-    const uint32_t safeNodeCount = std::min<uint32_t>(map.nodeCount, static_cast<uint32_t>(kMaxRigNodes));
-    if (node < 0 || ancestor < 0 || node >= static_cast<int32_t>(safeNodeCount) || ancestor >= static_cast<int32_t>(safeNodeCount)) {
+[[nodiscard]] inline bool IsDescendant(const RigBoneMap& map, RigNodeIndex node, RigNodeIndex ancestor) noexcept {
+    const size_t safeNodeCount = std::min(map.nodeCount, kMaxRigNodes);
+    if (!IsValidRigNode(node, safeNodeCount) || !IsValidRigNode(ancestor, safeNodeCount)) {
         return false;
     }
 
-    int32_t cursor = node;
-    for (uint32_t depth = 0; depth < safeNodeCount; ++depth) {
-        if (cursor < 0 || cursor >= static_cast<int32_t>(safeNodeCount)) {
+    RigNodeIndex cursor = node;
+    for (size_t depth = 0; depth < safeNodeCount; ++depth) {
+        if (!IsValidRigNode(cursor, safeNodeCount)) {
             return false;
         }
         if (cursor == ancestor) {
             return true;
         }
-        cursor = map.parentIndices[static_cast<size_t>(cursor)];
+        cursor = map.parentIndices[cursor];
     }
     return false; // A cycle or an over-deep malformed hierarchy.
 }
 
-inline void TranslateSubtree(const RigBoneMap& map, JPH::Mat44* transforms, int32_t rootNode, JPH::Vec3Arg delta) noexcept {
-    if (transforms == nullptr || rootNode < 0) {
+inline void TranslateSubtree(const RigBoneMap& map, JPH::Mat44* transforms, RigNodeIndex rootNode, JPH::Vec3Arg delta) noexcept {
+    if (transforms == nullptr || !IsValidRigNode(rootNode, map.nodeCount)) {
         return;
     }
-    for (uint32_t node = 0; node < map.nodeCount; ++node) {
-        if (IsDescendant(map, static_cast<int32_t>(node), rootNode)) {
+    for (size_t node = 0; node < map.nodeCount; ++node) {
+        if (IsDescendant(map, node, rootNode)) {
             transforms[node].SetTranslation(transforms[node].GetTranslation() + delta);
         }
     }
@@ -105,13 +105,13 @@ inline void TranslateSubtree(const RigBoneMap& map, JPH::Mat44* transforms, int3
     return JPH::Mat44::sRotationTranslation(rotation, translation).PreScaled(scale);
 }
 
-inline void RotateSubtreeAroundPivot(const RigBoneMap& map, JPH::Mat44* transforms, int32_t rootNode, JPH::Vec3Arg pivot, JPH::QuatArg rotation) noexcept {
-    if (transforms == nullptr || rootNode < 0 || rootNode >= static_cast<int32_t>(map.nodeCount)) {
+inline void RotateSubtreeAroundPivot(const RigBoneMap& map, JPH::Mat44* transforms, RigNodeIndex rootNode, JPH::Vec3Arg pivot, JPH::QuatArg rotation) noexcept {
+    if (transforms == nullptr || !IsValidRigNode(rootNode, map.nodeCount)) {
         return;
     }
 
-    for (uint32_t node = 0; node < map.nodeCount; ++node) {
-        if (!IsDescendant(map, static_cast<int32_t>(node), rootNode)) {
+    for (size_t node = 0; node < map.nodeCount; ++node) {
+        if (!IsDescendant(map, node, rootNode)) {
             continue;
         }
 
@@ -123,15 +123,15 @@ inline void RotateSubtreeAroundPivot(const RigBoneMap& map, JPH::Mat44* transfor
     }
 }
 
-inline void RotateSubtree(const RigBoneMap& map, JPH::Mat44* transforms, int32_t rootNode, JPH::QuatArg rotation) noexcept {
-    if (transforms == nullptr || rootNode < 0 || rootNode >= static_cast<int32_t>(map.nodeCount)) {
+inline void RotateSubtree(const RigBoneMap& map, JPH::Mat44* transforms, RigNodeIndex rootNode, JPH::QuatArg rotation) noexcept {
+    if (transforms == nullptr || !IsValidRigNode(rootNode, map.nodeCount)) {
         return;
     }
     RotateSubtreeAroundPivot(map, transforms, rootNode, transforms[rootNode].GetTranslation(), rotation);
 }
 
-[[nodiscard]] inline int32_t Node(const RigBoneMap& map, CharacterBone bone) noexcept {
-    return map.nodeIndices[static_cast<size_t>(bone)];
+[[nodiscard]] inline RigNodeIndex Node(const RigBoneMap& map, CharacterBone bone) noexcept {
+    return map.nodeIndices[BoneSlot(bone)];
 }
 
 [[nodiscard]] inline JPH::Vec3 SafeNormalized(JPH::Vec3Arg value, JPH::Vec3Arg fallback) noexcept {
@@ -246,15 +246,15 @@ void ApplyAccelerationTilt(ProceduralLocomotionComponent& gait, JPH::Mat44* node
         return;
     }
 
-    const int32_t hipsNode  = Detail::Node(map, CharacterBone::Hips);
-    const int32_t chestNode = Detail::Node(map, CharacterBone::Chest);
-    if (hipsNode < 0 || hipsNode >= static_cast<int32_t>(map.nodeCount)) {
+    const RigNodeIndex hipsNode  = Detail::Node(map, CharacterBone::Hips);
+    const RigNodeIndex chestNode = Detail::Node(map, CharacterBone::Chest);
+    if (!IsValidRigNode(hipsNode, map.nodeCount)) {
         return;
     }
 
     const JPH::Vec3 hipsPosition  = nodeTransforms[hipsNode].GetTranslation();
-    const JPH::Vec3 chestPosition = chestNode >= 0 && chestNode < static_cast<int32_t>(map.nodeCount) ? nodeTransforms[chestNode].GetTranslation() :
-                                                                                                        hipsPosition + JPH::Vec3(0.0f, 0.35f, 0.0f);
+    const JPH::Vec3 chestPosition = IsValidRigNode(chestNode, map.nodeCount) ? nodeTransforms[chestNode].GetTranslation() :
+                                                                               hipsPosition + JPH::Vec3(0.0f, 0.35f, 0.0f);
     // Approximate the humanoid COM from pelvis and torso masses. This is a
     // physical weighted center, not an animation interpolation.
     gait.centerOfMassModel = (hipsPosition * 0.68f + chestPosition * 0.32f);
@@ -269,8 +269,8 @@ void ApplyPelvisGaitOffset(const ProceduralLocomotionComponent& gait, JPH::Mat44
     if (nodeTransforms == nullptr) {
         return;
     }
-    const int32_t hipsNode = Detail::Node(map, CharacterBone::Hips);
-    if (hipsNode >= 0 && hipsNode < static_cast<int32_t>(map.nodeCount)) {
+    const RigNodeIndex hipsNode = Detail::Node(map, CharacterBone::Hips);
+    if (IsValidRigNode(hipsNode, map.nodeCount)) {
         const float drop = includeDrop ? gait.pelvisDrop : 0.0f;
         Detail::TranslateSubtree(map, nodeTransforms, hipsNode, JPH::Vec3(gait.pelvisSway, gait.pelvisBob + drop, 0.0f));
     }
@@ -340,8 +340,8 @@ void SolveLegGrounding(
         if (!preserveAuthoredFootXZ) {
             return JPH::Vec3(proceduralTarget);
         }
-        const int32_t footNode = Detail::Node(map, footBone);
-        return footNode >= 0 && footNode < static_cast<int32_t>(map.nodeCount) ? nodeTransforms[footNode].GetTranslation() : JPH::Vec3(proceduralTarget);
+        const RigNodeIndex footNode = Detail::Node(map, footBone);
+        return IsValidRigNode(footNode, map.nodeCount) ? nodeTransforms[footNode].GetTranslation() : JPH::Vec3(proceduralTarget);
     };
 
     const JPH::Vec3 probeL   = footProbe(CharacterBone::FootL, gait.localFootTargetL);
@@ -360,12 +360,12 @@ void SolveLegGrounding(
     gait.localFootTargetL        = targetModelL;
     gait.localFootTargetR        = targetModelR;
 
-    const int32_t thighLNode = Detail::Node(map, CharacterBone::ThighL);
-    const int32_t thighRNode = Detail::Node(map, CharacterBone::ThighR);
+    const RigNodeIndex thighLNode = Detail::Node(map, CharacterBone::ThighL);
+    const RigNodeIndex thighRNode = Detail::Node(map, CharacterBone::ThighR);
 
     float requiredDrop   = 0.0f;
-    auto  accumulateDrop = [&](int32_t thighNode, JPH::Vec3Arg target, float plantWeight) {
-        if (thighNode < 0 || thighNode >= static_cast<int32_t>(map.nodeCount)) {
+    auto  accumulateDrop = [&](RigNodeIndex thighNode, JPH::Vec3Arg target, float plantWeight) {
+        if (!IsValidRigNode(thighNode, map.nodeCount)) {
             return;
         }
         const float distance = (target - nodeTransforms[thighNode].GetTranslation()).Length();
@@ -387,12 +387,11 @@ void SolveLegGrounding(
             return; // Preserve the authored swing pose completely.
         }
 
-        const int32_t thighNode = Detail::Node(map, thighBone);
-        const int32_t shinNode  = Detail::Node(map, shinBone);
-        const int32_t footNode  = Detail::Node(map, footBone);
-        const int32_t toeNode   = Detail::Node(map, toeBone);
-        if (thighNode < 0 || shinNode < 0 || footNode < 0 || thighNode >= static_cast<int32_t>(map.nodeCount) ||
-            shinNode >= static_cast<int32_t>(map.nodeCount) || footNode >= static_cast<int32_t>(map.nodeCount)) {
+        const RigNodeIndex thighNode = Detail::Node(map, thighBone);
+        const RigNodeIndex shinNode  = Detail::Node(map, shinBone);
+        const RigNodeIndex footNode  = Detail::Node(map, footBone);
+        const RigNodeIndex toeNode   = Detail::Node(map, toeBone);
+        if (!IsValidRigNode(thighNode, map.nodeCount) || !IsValidRigNode(shinNode, map.nodeCount) || !IsValidRigNode(footNode, map.nodeCount)) {
             return;
         }
 
@@ -424,8 +423,8 @@ void SolveLegGrounding(
             return;
         }
 
-        JPH::Vec3 upperBindDirection = map.bindLocalTransforms[static_cast<size_t>(shinNode)].GetTranslation();
-        JPH::Vec3 lowerBindDirection = map.bindLocalTransforms[static_cast<size_t>(footNode)].GetTranslation();
+        JPH::Vec3 upperBindDirection = map.bindLocalTransforms[shinNode].GetTranslation();
+        JPH::Vec3 lowerBindDirection = map.bindLocalTransforms[footNode].GetTranslation();
         upperBindDirection           = Detail::SafeNormalized(upperBindDirection, JPH::Vec3(0.0f, -1.0f, 0.0f));
         lowerBindDirection           = Detail::SafeNormalized(lowerBindDirection, JPH::Vec3(0.0f, -1.0f, 0.0f));
 
@@ -454,9 +453,9 @@ void SolveLegGrounding(
         nodeTransforms[shinNode]  = Detail::BlendTransform(authoredShin, solvedShin, solveWeight);
         nodeTransforms[footNode]  = Detail::BlendTransform(authoredFoot, solvedFoot, solveWeight);
 
-        if (toeNode >= 0 && toeNode < static_cast<int32_t>(map.nodeCount)) {
+        if (IsValidRigNode(toeNode, map.nodeCount)) {
             const JPH::Mat44 authoredToe = nodeTransforms[toeNode];
-            const JPH::Mat44 solvedToe   = solvedFoot * map.bindLocalTransforms[static_cast<size_t>(toeNode)];
+            const JPH::Mat44 solvedToe   = solvedFoot * map.bindLocalTransforms[toeNode];
             nodeTransforms[toeNode]      = Detail::BlendTransform(authoredToe, solvedToe, solveWeight);
         }
     };
@@ -480,14 +479,14 @@ void SolveUpperBody(
 
     const float horizontalSpeed =
         std::sqrt(gait.previousVelocity.GetX() * gait.previousVelocity.GetX() + gait.previousVelocity.GetZ() * gait.previousVelocity.GetZ());
-    const float   swingWeight = std::clamp(horizontalSpeed * 0.35f, 0.0f, 1.0f);
-    const float   armAngle    = std::sin(kGaitTwoPi * gait.phase) * 0.58f * swingWeight;
-    const int32_t armL        = Detail::Node(map, CharacterBone::UpperArmL);
-    const int32_t armR        = Detail::Node(map, CharacterBone::UpperArmR);
-    if (armL >= 0) {
+    const float        swingWeight = std::clamp(horizontalSpeed * 0.35f, 0.0f, 1.0f);
+    const float        armAngle    = std::sin(kGaitTwoPi * gait.phase) * 0.58f * swingWeight;
+    const RigNodeIndex armL        = Detail::Node(map, CharacterBone::UpperArmL);
+    const RigNodeIndex armR        = Detail::Node(map, CharacterBone::UpperArmR);
+    if (IsValidRigNode(armL, map.nodeCount)) {
         Detail::RotateSubtree(map, nodeTransforms, armL, JPH::Quat::sRotation(JPH::Vec3::sAxisX(), -armAngle));
     }
-    if (armR >= 0) {
+    if (IsValidRigNode(armR, map.nodeCount)) {
         Detail::RotateSubtree(map, nodeTransforms, armR, JPH::Quat::sRotation(JPH::Vec3::sAxisX(), armAngle));
     }
 
@@ -495,8 +494,8 @@ void SolveUpperBody(
         return;
     }
 
-    const int32_t headNode = Detail::Node(map, CharacterBone::Head);
-    if (headNode < 0 || headNode >= static_cast<int32_t>(map.nodeCount)) {
+    const RigNodeIndex headNode = Detail::Node(map, CharacterBone::Head);
+    if (!IsValidRigNode(headNode, map.nodeCount)) {
         return;
     }
 
@@ -524,8 +523,8 @@ void SolveUpperBody(
         {CharacterBone::Head, 0.60f},
     }};
     for (const auto& [bone, weight]: lookDistribution) {
-        const int32_t node = Detail::Node(map, bone);
-        if (node >= 0) {
+        const RigNodeIndex node = Detail::Node(map, bone);
+        if (IsValidRigNode(node, map.nodeCount)) {
             const JPH::Quat partial = JPH::Quat::sIdentity().SLERP(fullAim, weight * clampedWeight).Normalized();
             Detail::RotateSubtree(map, nodeTransforms, node, partial);
         }

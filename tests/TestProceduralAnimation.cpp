@@ -54,12 +54,12 @@ struct ProceduralAnimationTestSuite {
                 return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
             for (size_t i = 0; i < ZHLN::kCoreBoneCount; ++i) {
-                if (map.nodeIndices[i] < 0) {
+                if (!ZHLN::IsValidRigNode(map.nodeIndices[i], map.nodeCount)) {
                     return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
                 }
             }
-            for (size_t i = static_cast<size_t>(ZHLN::CharacterBone::HairStart); i < ZHLN::kBoneCount; ++i) {
-                if (map.nodeIndices[i] < 0) {
+            for (size_t i = ZHLN::BoneSlot(ZHLN::CharacterBone::HairStart); i < ZHLN::kBoneCount; ++i) {
+                if (!ZHLN::IsValidRigNode(map.nodeIndices[i], map.nodeCount)) {
                     return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
                 }
             }
@@ -81,8 +81,8 @@ struct ProceduralAnimationTestSuite {
             for (size_t node = 0; node < ZHLN::kBoneCount; ++node) {
                 if (node < ZHLN::kCoreBoneCount) {
                     prefab.nodes[node].name = ZHLN::String64(coreNames[node]);
-                } else if (node >= static_cast<size_t>(ZHLN::CharacterBone::HairStart)) {
-                    const size_t particle = node - static_cast<size_t>(ZHLN::CharacterBone::HairStart);
+                } else if (node >= ZHLN::BoneSlot(ZHLN::CharacterBone::HairStart)) {
+                    const size_t particle = node - ZHLN::BoneSlot(ZHLN::CharacterBone::HairStart);
                     char         hairName[32] {};
                     std::snprintf(
                         hairName, sizeof(hairName), "DEF-Hair_S%02zu_%02zu", particle / ZHLN::HairStrandsComponent::kLinksPerStrand + 1,
@@ -90,9 +90,10 @@ struct ProceduralAnimationTestSuite {
                     );
                     prefab.nodes[node].name = ZHLN::String64(hairName);
                 }
-                prefab.nodes[node].parentIndex    = map.parentIndices[node];
+                prefab.nodes[node].parentIndex = ZHLN::IsValidRigNode(map.parentIndices[node], map.nodeCount) ? static_cast<int32_t>(map.parentIndices[node]) :
+                                                                                                                -1;
                 prefab.nodes[node].localTransform = map.bindLocalTransforms[node];
-                if (node < ZHLN::kCoreBoneCount || node >= static_cast<size_t>(ZHLN::CharacterBone::HairStart)) {
+                if (node < ZHLN::kCoreBoneCount || node >= ZHLN::BoneSlot(ZHLN::CharacterBone::HairStart)) {
                     skeleton.joints.push_back({
                         .name              = prefab.nodes[node].name,
                         .parentIndex       = -1,
@@ -105,22 +106,22 @@ struct ProceduralAnimationTestSuite {
             // Simulate an exporter whose parent lies outside the fixed runtime
             // window. The mapper must sever it rather than exposing the pose
             // traversal to an out-of-bounds parent index.
-            const size_t malformedNode              = static_cast<size_t>(ZHLN::CharacterBone::ToeR);
+            const size_t malformedNode              = ZHLN::BoneSlot(ZHLN::CharacterBone::ToeR);
             prefab.nodes[malformedNode].parentIndex = static_cast<int32_t>(ZHLN::kMaxRigNodes + 7);
 
             ZHLN::RigBoneMap importedMap;
-            if (!ZHLN::BuildBoneMap(prefab, skeleton, importedMap) || importedMap.parentIndices[malformedNode] != -1 ||
-                importedMap.nodeIndices[static_cast<size_t>(ZHLN::CharacterBone::Spine)] != 3 ||
-                importedMap.nodeIndices[static_cast<size_t>(ZHLN::CharacterBone::SupSpine)] != 2 ||
-                importedMap.nodeIndices[static_cast<size_t>(ZHLN::CharacterBone::UpperArmL)] != 8 ||
-                importedMap.nodeIndices[static_cast<size_t>(ZHLN::CharacterBone::ForearmL)] != 7 ||
-                importedMap.nodeIndices[static_cast<size_t>(ZHLN::CharacterBone::UpperArmR)] != 11 ||
-                importedMap.nodeIndices[static_cast<size_t>(ZHLN::CharacterBone::ForearmR)] != 10) {
+            if (!ZHLN::BuildBoneMap(prefab, skeleton, importedMap) || importedMap.parentIndices[malformedNode] != ZHLN::InvalidRigNode ||
+                importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Spine)] != 3 ||
+                importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::SupSpine)] != 2 ||
+                importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::UpperArmL)] != 8 ||
+                importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ForearmL)] != 7 ||
+                importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::UpperArmR)] != 11 ||
+                importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ForearmR)] != 10) {
                 return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
             for (size_t slot = 0; slot < ZHLN::HairStrandsComponent::kTotalParticles; ++slot) {
-                const size_t semantic = static_cast<size_t>(ZHLN::CharacterBone::HairStart) + slot;
-                if (importedMap.nodeIndices[semantic] != static_cast<int32_t>(semantic)) {
+                const size_t semantic = ZHLN::BoneSlot(ZHLN::CharacterBone::HairStart) + slot;
+                if (importedMap.nodeIndices[semantic] != semantic) {
                     return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
                 }
             }
@@ -186,15 +187,15 @@ struct ProceduralAnimationTestSuite {
         std::expected<void, ZHLN::Error> acceleration_tilt_preserves_com_radius() {
             ZHLN::RigBoneMap map;
             ZHLN::BuildStandardProceduralRig(map);
-            const int32_t   headNode   = map.nodeIndices[static_cast<size_t>(ZHLN::CharacterBone::Head)];
-            const JPH::Vec3 headBefore = map.modelTransforms[static_cast<size_t>(headNode)].GetTranslation();
+            const ZHLN::RigNodeIndex headNode   = map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Head)];
+            const JPH::Vec3          headBefore = map.modelTransforms[headNode].GetTranslation();
 
             ZHLN::ProceduralLocomotionComponent gait;
             gait.forwardLean = 0.18f;
             gait.lateralBank = -0.11f;
             ZHLN::Animation::ApplyAccelerationTilt(gait, map.modelTransforms.data(), map);
 
-            const JPH::Vec3 headAfter    = map.modelTransforms[static_cast<size_t>(headNode)].GetTranslation();
+            const JPH::Vec3 headAfter    = map.modelTransforms[headNode].GetTranslation();
             const float     beforeRadius = (headBefore - gait.centerOfMassModel).Length();
             const float     afterRadius  = (headAfter - gait.centerOfMassModel).Length();
             if ((headAfter - headBefore).LengthSq() < 1.0e-6f || std::abs(beforeRadius - afterRadius) > 0.0001f) {
@@ -226,16 +227,15 @@ struct ProceduralAnimationTestSuite {
         std::expected<void, ZHLN::Error> xpbd_hair_returns_to_authored_bind_shape() {
             ZHLN::RigBoneMap map;
             ZHLN::BuildStandardProceduralRig(map);
-            const int32_t   headNode     = map.nodeIndices[static_cast<size_t>(ZHLN::CharacterBone::Head)];
-            const JPH::Vec3 headPosition = map.modelTransforms[static_cast<size_t>(headNode)].GetTranslation();
+            const ZHLN::RigNodeIndex headNode     = map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Head)];
+            const JPH::Vec3          headPosition = map.modelTransforms[headNode].GetTranslation();
 
             // Author a deliberately horizontal first strand. A gravity-only
             // rope would collapse; shape and bend constraints must retain it.
             for (size_t link = 0; link < ZHLN::HairStrandsComponent::kLinksPerStrand; ++link) {
-                const size_t  semantic = static_cast<size_t>(ZHLN::CharacterBone::HairStart) + link;
-                const int32_t node     = map.nodeIndices[semantic];
-                map.modelTransforms[static_cast<size_t>(node)] =
-                    JPH::Mat44::sTranslation(headPosition + JPH::Vec3(0.15f + static_cast<float>(link) * 0.08f, 0.08f, 0.0f));
+                const size_t             semantic = ZHLN::BoneSlot(ZHLN::CharacterBone::HairStart) + link;
+                const ZHLN::RigNodeIndex node     = map.nodeIndices[semantic];
+                map.modelTransforms[node]         = JPH::Mat44::sTranslation(headPosition + JPH::Vec3(0.15f + static_cast<float>(link) * 0.08f, 0.08f, 0.0f));
             }
 
             ZHLN::HairStrandsComponent hair;

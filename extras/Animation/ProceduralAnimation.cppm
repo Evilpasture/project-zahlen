@@ -17,6 +17,7 @@ module;
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <string_view>
 
 export module ZHLN.ProceduralAnimation;
@@ -29,7 +30,7 @@ export namespace ZHLN {
  * secondary-motion chains. The gap is intentional and leaves room for fingers
  * and future facial controls without invalidating serialized maps.
  */
-enum class CharacterBone : uint16_t {
+enum class CharacterBone : size_t {
     Root = 0,
     Hips,
     Spine,
@@ -56,8 +57,18 @@ enum class CharacterBone : uint16_t {
     TotalBones = HairStart + HairCount
 };
 
-inline constexpr size_t kBoneCount     = static_cast<size_t>(CharacterBone::TotalBones);
-inline constexpr size_t kCoreBoneCount = static_cast<size_t>(CharacterBone::ToeR) + 1;
+using RigNodeIndex                           = size_t;
+inline constexpr RigNodeIndex InvalidRigNode = std::numeric_limits<RigNodeIndex>::max();
+
+[[nodiscard]] constexpr size_t BoneSlot(CharacterBone bone) noexcept {
+    return static_cast<size_t>(bone);
+}
+[[nodiscard]] constexpr bool IsValidRigNode(RigNodeIndex node, size_t nodeCount) noexcept {
+    return node != InvalidRigNode && node < nodeCount;
+}
+
+inline constexpr size_t kBoneCount     = BoneSlot(CharacterBone::TotalBones);
+inline constexpr size_t kCoreBoneCount = BoneSlot(CharacterBone::ToeR) + 1;
 // Real production GLBs commonly contain hundreds of mesh/attachment nodes in
 // addition to the 140 deform controls. Keep fixed-capacity evaluation while
 // leaving enough headroom for those imported hierarchies.
@@ -71,16 +82,16 @@ inline constexpr size_t kMaxRigNodes = 512;
  * so pose evaluation and forward kinematics do not allocate every frame.
  */
 struct alignas(64) RigBoneMap {
-    std::array<int32_t, kBoneCount> nodeIndices = [] {
-        std::array<int32_t, kBoneCount> values {};
-        values.fill(-1);
+    std::array<RigNodeIndex, kBoneCount> nodeIndices = [] {
+        std::array<RigNodeIndex, kBoneCount> values {};
+        values.fill(InvalidRigNode);
         return values;
     }();
     std::array<JPH::Mat44, kBoneCount> inverseBindMatrices {};
 
-    std::array<int32_t, kMaxRigNodes> parentIndices = [] {
-        std::array<int32_t, kMaxRigNodes> values {};
-        values.fill(-1);
+    std::array<RigNodeIndex, kMaxRigNodes> parentIndices = [] {
+        std::array<RigNodeIndex, kMaxRigNodes> values {};
+        values.fill(InvalidRigNode);
         return values;
     }();
     std::array<JPH::Mat44, kMaxRigNodes> bindLocalTransforms {};
@@ -101,7 +112,7 @@ struct alignas(64) RigBoneMap {
     bool                                  springPoseInitialized   = false;
 
     const ModelPrefab* sourcePrefab  = nullptr;
-    uint32_t           nodeCount     = 0;
+    size_t             nodeCount     = 0;
     uint32_t           jointOffset   = 0;
     uint32_t           jointCount    = 0;
     int32_t            skeletonIndex = -1;

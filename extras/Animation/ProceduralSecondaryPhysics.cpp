@@ -185,8 +185,8 @@ void ConfigureHairBindPose(HairStrandsComponent& hair, const JPH::Mat44* bindMod
         return;
     }
 
-    const int32_t headNode = map.nodeIndices[static_cast<size_t>(CharacterBone::Head)];
-    if (headNode < 0 || headNode >= static_cast<int32_t>(map.nodeCount)) {
+    const RigNodeIndex headNode = map.nodeIndices[BoneSlot(CharacterBone::Head)];
+    if (!IsValidRigNode(headNode, map.nodeCount)) {
         SecondaryDetail::GenerateFallbackRestPose(hair);
         return;
     }
@@ -200,10 +200,10 @@ void ConfigureHairBindPose(HairStrandsComponent& hair, const JPH::Mat44* bindMod
         const float  angle = 2.0f * std::numbers::pi_v<float> * static_cast<float>(strand) / static_cast<float>(HairStrandsComponent::kStrandCount);
         const size_t base  = strand * HairStrandsComponent::kLinksPerStrand;
         for (size_t link = 0; link < HairStrandsComponent::kLinksPerStrand; ++link) {
-            const size_t  particle = base + link;
-            const size_t  semantic = static_cast<size_t>(CharacterBone::HairStart) + particle;
-            const int32_t node     = map.nodeIndices[semantic];
-            if (node >= 0 && node < static_cast<int32_t>(map.nodeCount)) {
+            const size_t       particle = base + link;
+            const size_t       semantic = BoneSlot(CharacterBone::HairStart) + particle;
+            const RigNodeIndex node     = map.nodeIndices[semantic];
+            if (IsValidRigNode(node, map.nodeCount)) {
                 hair.restLocalPositions[particle] = inverseHeadRotation * (bindModelTransforms[node].GetTranslation() - headPosition);
                 hair.restLocalRotations[particle] = (inverseHeadRotation * SecondaryDetail::ExtractRotation(bindModelTransforms[node])).Normalized();
                 continue;
@@ -317,13 +317,13 @@ void ExtractHairBoneTransforms(const HairStrandsComponent& hair, JPH::QuatArg he
         return;
     }
 
-    constexpr size_t hairBoneOffset = static_cast<size_t>(CharacterBone::HairStart);
+    constexpr size_t hairBoneOffset = BoneSlot(CharacterBone::HairStart);
     for (size_t strand = 0; strand < HairStrandsComponent::kStrandCount; ++strand) {
         const size_t base = strand * HairStrandsComponent::kLinksPerStrand;
         for (size_t link = 0; link < HairStrandsComponent::kLinksPerStrand; ++link) {
-            const size_t  particleIndex = base + link;
-            const int32_t nodeIndex     = map.nodeIndices[hairBoneOffset + particleIndex];
-            if (nodeIndex < 0 || nodeIndex >= static_cast<int32_t>(map.nodeCount)) {
+            const size_t       particleIndex = base + link;
+            const RigNodeIndex nodeIndex     = map.nodeIndices[hairBoneOffset + particleIndex];
+            if (!IsValidRigNode(nodeIndex, map.nodeCount)) {
                 continue;
             }
 
