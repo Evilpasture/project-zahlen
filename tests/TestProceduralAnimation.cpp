@@ -66,6 +66,16 @@ struct ProceduralAnimationTestSuite {
                 }
             }
 
+            const JPH::Vec3 thighPosition = map.modelTransforms[map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ThighL)]].GetTranslation();
+            const JPH::Vec3 shinPosition  = map.modelTransforms[map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ShinL)]].GetTranslation();
+            const JPH::Vec3 footPosition  = map.modelTransforms[map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::FootL)]].GetTranslation();
+            const JPH::Vec3 headPosition  = map.modelTransforms[map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Head)]].GetTranslation();
+            const JPH::Vec3 hairRoot = map.modelTransforms[map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::HairStart)]].GetTranslation() - headPosition;
+            if (!(shinPosition.GetZ() > thighPosition.GetZ() && shinPosition.GetZ() > footPosition.GetZ()) || hairRoot.GetY() < 0.15f ||
+                JPH::Vec3(hairRoot.GetX(), 0.0f, hairRoot.GetZ()).Length() < 0.08f) {
+                return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+            }
+
             // Exercise the imported TestRig naming path as well as the
             // generated fallback hierarchy.
             // Deliberately place suffix-ambiguous names in adversarial order:

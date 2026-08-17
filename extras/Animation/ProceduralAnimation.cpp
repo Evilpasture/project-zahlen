@@ -841,12 +841,12 @@ void BuildStandardProceduralRig(RigBoneMap& outMap) noexcept {
     addBone(CharacterBone::HandR, BoneSlot(CharacterBone::ForearmR), JPH::Vec3(-0.24f, 0.0f, 0.0f));
 
     addBone(CharacterBone::ThighL, BoneSlot(CharacterBone::Hips), JPH::Vec3(0.12f, -0.06f, 0.0f));
-    addBone(CharacterBone::ShinL, BoneSlot(CharacterBone::ThighL), JPH::Vec3(0.0f, -0.43f, 0.015f));
-    addBone(CharacterBone::FootL, BoneSlot(CharacterBone::ShinL), JPH::Vec3(0.0f, -0.42f, 0.025f));
+    addBone(CharacterBone::ShinL, BoneSlot(CharacterBone::ThighL), JPH::Vec3(0.0f, -0.43f, 0.06f));
+    addBone(CharacterBone::FootL, BoneSlot(CharacterBone::ShinL), JPH::Vec3(0.0f, -0.42f, -0.06f));
     addBone(CharacterBone::ToeL, BoneSlot(CharacterBone::FootL), JPH::Vec3(0.0f, -0.045f, 0.18f));
     addBone(CharacterBone::ThighR, BoneSlot(CharacterBone::Hips), JPH::Vec3(-0.12f, -0.06f, 0.0f));
-    addBone(CharacterBone::ShinR, BoneSlot(CharacterBone::ThighR), JPH::Vec3(0.0f, -0.43f, 0.015f));
-    addBone(CharacterBone::FootR, BoneSlot(CharacterBone::ShinR), JPH::Vec3(0.0f, -0.42f, 0.025f));
+    addBone(CharacterBone::ShinR, BoneSlot(CharacterBone::ThighR), JPH::Vec3(0.0f, -0.43f, 0.06f));
+    addBone(CharacterBone::FootR, BoneSlot(CharacterBone::ShinR), JPH::Vec3(0.0f, -0.42f, -0.06f));
     addBone(CharacterBone::ToeR, BoneSlot(CharacterBone::FootR), JPH::Vec3(0.0f, -0.045f, 0.18f));
 
     constexpr float kTwoPi = 2.0f * std::numbers::pi_v<float>;
@@ -857,7 +857,7 @@ void BuildStandardProceduralRig(RigBoneMap& outMap) noexcept {
             const size_t semantic          = BoneSlot(CharacterBone::HairStart) + particle;
             outMap.nodeIndices[semantic]   = semantic;
             outMap.parentIndices[semantic] = (link == 0) ? BoneSlot(CharacterBone::Head) : semantic - 1;
-            const JPH::Vec3 translation = (link == 0) ? JPH::Vec3(std::cos(angle) * 0.150f, 0.075f, std::sin(angle) * 0.150f) : JPH::Vec3(0.0f, -0.105f, 0.0f);
+            const JPH::Vec3 translation = (link == 0) ? JPH::Vec3(std::cos(angle) * 0.105f, 0.17f, std::sin(angle) * 0.105f) : JPH::Vec3(0.0f, -0.105f, 0.0f);
             outMap.bindLocalTransforms[semantic] = JPH::Mat44::sTranslation(translation);
             outMap.localTransforms[semantic]     = outMap.bindLocalTransforms[semantic];
         }

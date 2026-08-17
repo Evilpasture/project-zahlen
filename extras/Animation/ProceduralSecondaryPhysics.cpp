@@ -141,7 +141,7 @@ inline void GenerateFallbackRestPose(HairStrandsComponent& hair) noexcept {
 
     for (size_t strand = 0; strand < HairStrandsComponent::kStrandCount; ++strand) {
         const float     angle = kTwoPi * static_cast<float>(strand) / static_cast<float>(HairStrandsComponent::kStrandCount);
-        const JPH::Vec3 rootOffset(std::cos(angle) * 0.150f, 0.075f + 0.020f * std::sin(angle * 2.0f), std::sin(angle) * 0.150f);
+        const JPH::Vec3 rootOffset(std::cos(angle) * 0.105f, 0.17f + 0.010f * std::sin(angle * 2.0f), std::sin(angle) * 0.105f);
         const JPH::Vec3 outward(std::cos(angle), 0.0f, std::sin(angle));
         const size_t    base = strand * HairStrandsComponent::kLinksPerStrand;
         for (size_t link = 0; link < HairStrandsComponent::kLinksPerStrand; ++link) {
@@ -210,7 +210,7 @@ void ConfigureHairBindPose(HairStrandsComponent& hair, const JPH::Mat44* bindMod
             }
 
             if (link == 0) {
-                hair.restLocalPositions[particle] = JPH::Vec3(std::cos(angle) * 0.150f, 0.075f, std::sin(angle) * 0.150f);
+                hair.restLocalPositions[particle] = JPH::Vec3(std::cos(angle) * 0.105f, 0.17f, std::sin(angle) * 0.105f);
                 hair.restLocalRotations[particle] = JPH::Quat::sIdentity();
                 continue;
             }

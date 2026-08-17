@@ -50,12 +50,15 @@ forearm_r = add_bone("DEF-Forearm.R", upper_arm_r, (-0.28, 0.0, 0.0))
 hand_r = add_bone("DEF-Hand.R", forearm_r, (-0.24, 0.0, 0.0))
 
 thigh_l = add_bone("DEF-Thigh.L", hips, (0.12, -0.06, 0.0))
-shin_l = add_bone("DEF-Shin.L", thigh_l, (0.0, -0.43, 0.015))
-foot_l = add_bone("DEF-Foot.L", shin_l, (0.0, -0.42, 0.025))
+# Put the knee slightly forward of the hip/ankle line. This gives the idle pose
+# a human forward bend instead of the reverse, bird-like hinge caused by an
+# ankle that sits farther forward than the knee.
+shin_l = add_bone("DEF-Shin.L", thigh_l, (0.0, -0.43, 0.06))
+foot_l = add_bone("DEF-Foot.L", shin_l, (0.0, -0.42, -0.06))
 toe_l = add_bone("DEF-Toe.L", foot_l, (0.0, -0.045, 0.18))
 thigh_r = add_bone("DEF-Thigh.R", hips, (-0.12, -0.06, 0.0))
-shin_r = add_bone("DEF-Shin.R", thigh_r, (0.0, -0.43, 0.015))
-foot_r = add_bone("DEF-Foot.R", shin_r, (0.0, -0.42, 0.025))
+shin_r = add_bone("DEF-Shin.R", thigh_r, (0.0, -0.43, 0.06))
+foot_r = add_bone("DEF-Foot.R", shin_r, (0.0, -0.42, -0.06))
 toe_r = add_bone("DEF-Toe.R", foot_r, (0.0, -0.045, 0.18))
 
 hair_bones: list[int] = []
@@ -64,7 +67,8 @@ for strand in range(18):
     parent = head
     for link in range(6):
         translation = (
-            (math.cos(angle) * 0.15, 0.075, math.sin(angle) * 0.15)
+            # Upper-scalp ring rather than the head's equator.
+            (math.cos(angle) * 0.105, 0.17, math.sin(angle) * 0.105)
             if link == 0
             else (0.0, -0.105, 0.0)
         )
