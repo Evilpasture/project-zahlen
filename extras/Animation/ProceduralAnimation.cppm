@@ -256,13 +256,20 @@ struct ProceduralLocomotionTracksComponent {
 /** Core procedural algorithms. Extras may consume these APIs; core never consumes extras. */
 namespace Animation {
 
-float EvaluateGravityBounce(const ProceduralLocomotionComponent& gait, float speed) noexcept;
-float EvaluateTwoKeyPosePhase(float stridePhase) noexcept;
-void  EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg velocity, float angularVelocity, float dt) noexcept;
-void  EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg velocity, float dt) noexcept;
-void  ApplyAccelerationTilt(ProceduralLocomotionComponent& gait, JPH::Mat44* nodeTransforms, const RigBoneMap& map) noexcept;
-void  ApplyPelvisGaitOffset(const ProceduralLocomotionComponent& gait, JPH::Mat44* nodeTransforms, const RigBoneMap& map, bool includeDrop = true) noexcept;
-void  SolveLegGrounding(
+float      EvaluateGravityBounce(const ProceduralLocomotionComponent& gait, float speed) noexcept;
+float      EvaluateTwoKeyPosePhase(float stridePhase) noexcept;
+void       EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg velocity, float angularVelocity, float dt) noexcept;
+void       EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg velocity, float dt) noexcept;
+void       ApplyAccelerationTilt(ProceduralLocomotionComponent& gait, JPH::Mat44* nodeTransforms, const RigBoneMap& map) noexcept;
+JPH::Mat44 CorrectBoneDirection(
+    const JPH::Mat44& authoredTransform,
+    JPH::Vec3Arg      currentDirection,
+    JPH::Vec3Arg      solvedDirection,
+    JPH::Vec3Arg      solvedPosition
+) noexcept;
+JPH::Mat44 AlignFootToGround(const JPH::Mat44& authoredFoot, JPH::Vec3Arg target, JPH::Vec3Arg modelNormal) noexcept;
+void ApplyPelvisGaitOffset(const ProceduralLocomotionComponent& gait, JPH::Mat44* nodeTransforms, const RigBoneMap& map, bool includeDrop = true) noexcept;
+void SolveLegGrounding(
     Engine&                        engine,
     JPH::Vec3Arg                   rootPosition,
     JPH::QuatArg                   rootRotation,
@@ -332,6 +339,7 @@ namespace ProceduralAnimation {
 void Register(Engine& engine);
 /** Direct evaluation entry point for custom schedules. */
 void Update(Engine& engine, float dt) noexcept;
+void SyncNonSkinnedAttachments(ECS::Registry& registry, Entity rootEntity, const RigBoneMap& boneMap) noexcept;
 void DrawDebugRig(
     RenderContext&                       renderContext,
     JPH::Vec3Arg                         rootPosition,

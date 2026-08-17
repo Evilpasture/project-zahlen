@@ -892,7 +892,7 @@ void ProceduralAnimation::Register(Engine& engine) {
             .access_pattern =
                 {
                     Read<Components::PhysicsComponent>(),
-                    Read<Components::TransformComponent>(),
+                    Write<Components::TransformComponent>(),
                     Read<ProceduralLookAtComponent>(),
                     Read<ProceduralAnimationConfigComponent>(),
                     Read<Components::SkeletalMeshComponent>(),
@@ -909,6 +909,33 @@ void ProceduralAnimation::Register(Engine& engine) {
     if (inserted) {
         graph.Compile();
         ZHLN::Log("[ProceduralAnimation] Registered optional subsystem before ArticulationSystem.");
+    }
+}
+
+void ProceduralAnimation::SyncNonSkinnedAttachments(ECS::Registry& registry, Entity rootEntity, const RigBoneMap& boneMap) noexcept {
+    for (Entity childEntity: registry.GetEntitiesWith<Components::MeshComponent>()) {
+        const auto* hierarchy = registry.Get<Components::HierarchyComponent>(childEntity);
+        if (hierarchy == nullptr || hierarchy->parent != rootEntity) {
+            continue;
+        }
+        const auto* mesh = registry.Get<Components::MeshComponent>(childEntity);
+        if (mesh == nullptr || mesh->nodeIndex < 0) {
+            continue;
+        }
+        const RigNodeIndex node = static_cast<RigNodeIndex>(mesh->nodeIndex);
+        if (!IsValidRigNode(node, boneMap.nodeCount)) {
+            continue;
+        }
+        const auto* skeletalMesh = registry.Get<Components::SkeletalMeshComponent>(childEntity);
+        if (skeletalMesh != nullptr && skeletalMesh->skeletonIndex >= 0) {
+            continue;
+        }
+        if (auto* childTransform = registry.Get<Components::TransformComponent>(childEntity)) {
+            const JPH::Mat44& modelTransform = boneMap.modelTransforms[node];
+            childTransform->position         = modelTransform.GetTranslation();
+            childTransform->rotation         = ExtractRotation(modelTransform);
+            childTransform->scale            = ExtractScale(modelTransform);
+        }
     }
 }
 
@@ -1170,6 +1197,10 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
             boneMap->skeletonIndex = skin.skeletalMesh->skeletonIndex;
             renderer.UpdateJointMatrices(skin.skeletalMesh->jointOffset, finalPalette.data(), count);
         }
+
+        // Non-skinned child entities are attachments, not palette consumers.
+        // Publish their evaluated node TRS before core TransformSystem runs.
+        ProceduralAnimation::SyncNonSkinnedAttachments(registry, entity, *boneMap);
     }
 }
 

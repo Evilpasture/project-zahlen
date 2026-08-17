@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Components.hpp>
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/SkeletalAnimation.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 #include <array>
 #include <cmath>
 #include <cstdio>
@@ -180,6 +182,64 @@ struct ProceduralAnimationTestSuite {
             if (!(slowApex > fastApex) || slowApex > gait.maxBounceHeight + 0.0001f || std::abs(measuredAcceleration + gait.bounceGravity) > 0.2f ||
                 std::abs(contactStart) > 0.0001f || std::abs(contactEnd) > 0.0001f) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
+            }
+            return {};
+        }
+
+        std::expected<void, ZHLN::Error> model_space_ik_and_ankle_alignment() {
+            const JPH::Vec3  down(0.0f, -1.0f, 0.0f);
+            const JPH::Vec3  solvedDirection = JPH::Vec3(0.18f, -0.97f, 0.12f).Normalized();
+            const JPH::Mat44 authoredBone    = JPH::Mat44::sIdentity();
+            const JPH::Vec3  solvedPosition(0.1f, 0.7f, -0.2f);
+            const JPH::Mat44 corrected = ZHLN::Animation::CorrectBoneDirection(authoredBone, down, solvedDirection, solvedPosition);
+            if (!corrected.Multiply3x3(down).Normalized().IsClose(solvedDirection, 0.0001f) || !corrected.GetTranslation().IsClose(solvedPosition, 0.0001f)) {
+                return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
+            }
+
+            const JPH::Quat  authoredYaw  = JPH::Quat::sRotation(JPH::Vec3::sAxisY(), 0.4f);
+            const JPH::Mat44 authoredFoot = JPH::Mat44::sRotationTranslation(authoredYaw, JPH::Vec3::sZero());
+            const JPH::Vec3  footTarget(0.2f, 0.05f, 0.3f);
+            const JPH::Mat44 flatFoot = ZHLN::Animation::AlignFootToGround(authoredFoot, footTarget, JPH::Vec3::sAxisY());
+            if (!flatFoot.GetTranslation().IsClose(footTarget, 0.0001f) ||
+                !flatFoot.Multiply3x3(JPH::Vec3::sAxisZ()).Normalized().IsClose(authoredFoot.Multiply3x3(JPH::Vec3::sAxisZ()).Normalized(), 0.0001f)) {
+                return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
+            }
+
+            const JPH::Vec3  slopeNormal = JPH::Vec3(0.25f, 0.95f, 0.18f).Normalized();
+            const JPH::Mat44 slopeFoot   = ZHLN::Animation::AlignFootToGround(authoredFoot, footTarget, slopeNormal);
+            if (!slopeFoot.Multiply3x3(JPH::Vec3::sAxisY()).Normalized().IsClose(slopeNormal, 0.0001f)) {
+                return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
+            }
+            return {};
+        }
+
+        std::expected<void, ZHLN::Error> non_skinned_attachments_follow_evaluated_nodes() {
+            ZHLN::ECS::Registry registry;
+            registry.RegisterAllComponentsIn<ZHLN::Components>();
+            const ZHLN::Entity root       = registry.Create();
+            const ZHLN::Entity attachment = registry.Create(
+                ZHLN::Components::TransformComponent {}, ZHLN::Components::MeshComponent {.nodeIndex = 2}, ZHLN::Components::HierarchyComponent {.parent = root}
+            );
+            const ZHLN::Entity skinned = registry.Create(
+                ZHLN::Components::TransformComponent {.position = JPH::Vec3(9.0f, 9.0f, 9.0f)}, ZHLN::Components::MeshComponent {.nodeIndex = 2},
+                ZHLN::Components::SkeletalMeshComponent {.skeletonIndex = 0}, ZHLN::Components::HierarchyComponent {.parent = root}
+            );
+
+            ZHLN::RigBoneMap map;
+            map.nodeCount = 3;
+            const JPH::Vec3 expectedPosition(0.3f, 1.4f, -0.2f);
+            const JPH::Vec3 expectedScale(1.2f, 0.8f, 1.1f);
+            const JPH::Quat expectedRotation = JPH::Quat::sRotation(JPH::Vec3::sAxisY(), 0.35f);
+            map.modelTransforms[2]           = JPH::Mat44::sRotationTranslation(expectedRotation, expectedPosition).PreScaled(expectedScale);
+
+            ZHLN::ProceduralAnimation::SyncNonSkinnedAttachments(registry, root, map);
+            const auto* attachmentTransform = registry.Get<ZHLN::Components::TransformComponent>(attachment);
+            const auto* skinnedTransform    = registry.Get<ZHLN::Components::TransformComponent>(skinned);
+            if (attachmentTransform == nullptr || !attachmentTransform->position.IsClose(expectedPosition, 0.0001f) ||
+                !attachmentTransform->scale.IsClose(expectedScale, 0.0001f) ||
+                !(attachmentTransform->rotation * JPH::Vec3::sAxisZ()).IsClose(expectedRotation * JPH::Vec3::sAxisZ(), 0.0001f) ||
+                skinnedTransform == nullptr || !skinnedTransform->position.IsClose(JPH::Vec3(9.0f, 9.0f, 9.0f), 0.0001f)) {
+                return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
             return {};
         }

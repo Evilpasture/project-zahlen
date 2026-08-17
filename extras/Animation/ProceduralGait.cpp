@@ -91,10 +91,6 @@ inline void TranslateSubtree(const RigBoneMap& map, JPH::Mat44* transforms, RigN
     return JPH::Mat44(JPH::Vec4(x, 0.0f), JPH::Vec4(y, 0.0f), JPH::Vec4(z, 0.0f), JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f)).GetQuaternion().Normalized();
 }
 
-[[nodiscard]] inline JPH::Mat44 WithoutScale(const JPH::Mat44& matrix) noexcept {
-    return JPH::Mat44::sRotationTranslation(MatrixRotation(matrix), matrix.GetTranslation());
-}
-
 [[nodiscard]] inline JPH::Mat44 BlendTransform(const JPH::Mat44& authored, const JPH::Mat44& solved, float weight) noexcept {
     const float     easedWeight   = SmoothStep(weight);
     const JPH::Vec3 translation   = authored.GetTranslation() + (solved.GetTranslation() - authored.GetTranslation()) * easedWeight;
@@ -264,6 +260,25 @@ void ApplyAccelerationTilt(ProceduralLocomotionComponent& gait, JPH::Mat44* node
     Detail::RotateSubtreeAroundPivot(map, nodeTransforms, hipsNode, gait.centerOfMassModel, (pitch * roll).Normalized());
 }
 
+JPH::Mat44 CorrectBoneDirection(
+    const JPH::Mat44& authoredTransform,
+    JPH::Vec3Arg      currentDirection,
+    JPH::Vec3Arg      solvedDirection,
+    JPH::Vec3Arg      solvedPosition
+) noexcept {
+    const JPH::Quat correction = JPH::Quat::sFromTo(
+        Detail::SafeNormalized(currentDirection, JPH::Vec3(0.0f, -1.0f, 0.0f)), Detail::SafeNormalized(solvedDirection, JPH::Vec3(0.0f, -1.0f, 0.0f))
+    );
+    const JPH::Quat rotation = (correction * Detail::MatrixRotation(authoredTransform)).Normalized();
+    return JPH::Mat44::sRotationTranslation(rotation, solvedPosition).PreScaled(Detail::MatrixScale(authoredTransform));
+}
+
+JPH::Mat44 AlignFootToGround(const JPH::Mat44& authoredFoot, JPH::Vec3Arg target, JPH::Vec3Arg modelNormal) noexcept {
+    const JPH::Quat correction = JPH::Quat::sFromTo(JPH::Vec3::sAxisY(), Detail::SafeNormalized(modelNormal, JPH::Vec3::sAxisY()));
+    const JPH::Quat rotation   = (correction * Detail::MatrixRotation(authoredFoot)).Normalized();
+    return JPH::Mat44::sRotationTranslation(rotation, target).PreScaled(Detail::MatrixScale(authoredFoot));
+}
+
 /** Applies gait sway/bounce independently from analytical foot IK. */
 void ApplyPelvisGaitOffset(const ProceduralLocomotionComponent& gait, JPH::Mat44* nodeTransforms, const RigBoneMap& map, bool includeDrop) noexcept {
     if (nodeTransforms == nullptr) {
@@ -423,31 +438,21 @@ void SolveLegGrounding(
             return;
         }
 
-        JPH::Vec3 upperBindDirection = map.bindLocalTransforms[shinNode].GetTranslation();
-        JPH::Vec3 lowerBindDirection = map.bindLocalTransforms[footNode].GetTranslation();
-        upperBindDirection           = Detail::SafeNormalized(upperBindDirection, JPH::Vec3(0.0f, -1.0f, 0.0f));
-        lowerBindDirection           = Detail::SafeNormalized(lowerBindDirection, JPH::Vec3(0.0f, -1.0f, 0.0f));
+        // Derive correction axes from the evaluated model-space pose rather
+        // than assuming that imported bones use a particular local axis.
+        const JPH::Vec3 currentUpperDir = Detail::SafeNormalized(shinPosition - thighPosition, JPH::Vec3(0.0f, -1.0f, 0.0f));
+        const JPH::Vec3 currentLowerDir = Detail::SafeNormalized(footPosition - shinPosition, JPH::Vec3(0.0f, -1.0f, 0.0f));
 
         const JPH::Mat44 authoredThigh = nodeTransforms[thighNode];
         const JPH::Mat44 authoredShin  = nodeTransforms[shinNode];
         const JPH::Mat44 authoredFoot  = nodeTransforms[footNode];
-        const JPH::Vec3  thighScale    = Detail::MatrixScale(authoredThigh);
-        const JPH::Vec3  shinScale     = Detail::MatrixScale(authoredShin);
-        const JPH::Vec3  footScale     = Detail::MatrixScale(authoredFoot);
 
-        const JPH::Mat44 solvedThigh =
-            IK::AlignNodeToDirection(Detail::WithoutScale(authoredThigh), upperBindDirection, ik.upperDirection).PreScaled(thighScale);
-        JPH::Mat44 solvedShin = authoredShin;
-        solvedShin.SetTranslation(ik.midPosition);
-        solvedShin = IK::AlignNodeToDirection(Detail::WithoutScale(solvedShin), lowerBindDirection, ik.lowerDirection).PreScaled(shinScale);
+        const JPH::Mat44 solvedThigh = CorrectBoneDirection(authoredThigh, currentUpperDir, ik.upperDirection, thighPosition);
+        const JPH::Mat44 solvedShin  = CorrectBoneDirection(authoredShin, currentLowerDir, ik.lowerDirection, ik.midPosition);
 
-        JPH::Mat44 solvedFoot = authoredFoot;
-        solvedFoot.SetTranslation(target);
-        const JPH::Vec3 modelNormal = Detail::SafeNormalized(inverseRootRot * worldNormal, JPH::Vec3::sAxisY());
-        const JPH::Vec3 currentUp   = Detail::SafeNormalized(solvedFoot.Multiply3x3(JPH::Vec3::sAxisY()), JPH::Vec3::sAxisY());
-        const JPH::Quat ankleAlign  = JPH::Quat::sFromTo(currentUp, modelNormal);
-        const JPH::Quat footRot     = Detail::MatrixRotation(solvedFoot);
-        solvedFoot                  = JPH::Mat44::sRotationTranslation((ankleAlign * footRot).Normalized(), target).PreScaled(footScale);
+        // Flat ground is the identity correction: sFromTo(+Y, +Y).
+        const JPH::Vec3  modelNormal = Detail::SafeNormalized(inverseRootRot * worldNormal, JPH::Vec3::sAxisY());
+        const JPH::Mat44 solvedFoot  = AlignFootToGround(authoredFoot, target, modelNormal);
 
         nodeTransforms[thighNode] = Detail::BlendTransform(authoredThigh, solvedThigh, solveWeight);
         nodeTransforms[shinNode]  = Detail::BlendTransform(authoredShin, solvedShin, solveWeight);
