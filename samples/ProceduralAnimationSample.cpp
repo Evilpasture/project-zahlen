@@ -182,7 +182,9 @@ auto AttachCharacterRig(ZHLN::Engine& engine, ZHLN::Entity player, std::string_v
         "[Sample] Pose interpolation: {} (stiffness={}, damping factor={}, bicubic tension={}).", useBicubic ? "bicubic" : "spring-damper",
         animationConfig.springStiffness, animationConfig.springDampingFactor, animationConfig.bicubicTension
     );
-    ZHLN::Log("[Sample] Leg IK is plant-only with weight {}.", animationConfig.enableLegIK ? animationConfig.legIKWeight : 0.0f);
+    ZHLN::Log(
+        "[Sample] Leg IK is plant-only with weight {}; authored foot X/Z is preserved.", animationConfig.enableLegIK ? animationConfig.legIKWeight : 0.0f
+    );
     if (animationConfig.authoredPoseOnly) {
         ZHLN::Log("[Sample] Authored-pose-only isolation enabled; all procedural layers are bypassed.");
     } else if (!animationConfig.enableLegIK) {

@@ -170,9 +170,12 @@ the sample to compare the normal-speed arc against the flatter sprint arc.
 
 ## Isolation switches
 
-Leg IK is plant-weighted: authored walk/run keys drive the complete swing phase,
-while grounding blends in only during stance. Tune the stance correction or turn
-it off entirely:
+Leg IK is an additive grounding layer. Authored walk/run keys determine each
+foot's horizontal placement and drive the complete swing phase. During stance,
+the solver raycasts beneath that authored X/Z location, adds only the correction
+needed for contact height and terrain normal, and world-locks the resulting plant.
+It never substitutes the procedural stride target for an authored foot target.
+Tune the stance correction or turn it off entirely:
 
 ```bash
 ZHLN_LEG_IK_WEIGHT=0.65 ./build/samples/ProceduralAnimationSample

@@ -1026,10 +1026,11 @@ void ProceduralAnimationSystem::Update(Engine& engine, float dt) noexcept {
 
         // Stage 3: terrain contact, pelvis reach correction, and two-bone IK.
         if (ikEnabled) {
-            const Entity ignoredHandle = physicsComponent != nullptr ? physicsComponent->physicsHandle : Entity {};
-            const float  legIKWeight   = config != nullptr ? config->legIKWeight : 1.0f;
+            const Entity ignoredHandle          = physicsComponent != nullptr ? physicsComponent->physicsHandle : Entity {};
+            const float  legIKWeight            = config != nullptr ? config->legIKWeight : 1.0f;
+            const bool   preserveAuthoredFootXZ = config == nullptr || config->preserveAuthoredFootXZ;
             Animation::SolveLegGrounding(
-                engine, transform->position, rootRotation, *gait, boneMap->modelTransforms.data(), *boneMap, ignoredHandle, legIKWeight
+                engine, transform->position, rootRotation, *gait, boneMap->modelTransforms.data(), *boneMap, ignoredHandle, legIKWeight, preserveAuthoredFootXZ
             );
         } else if (gaitEnabled) {
             Animation::ApplyPelvisGaitOffset(*gait, boneMap->modelTransforms.data(), *boneMap, false);

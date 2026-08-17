@@ -212,6 +212,7 @@ struct ProceduralAnimationConfigComponent {
     bool enableGait             = true;
     bool enableGravityBounce    = true;
     bool enableLegIK            = true;
+    bool preserveAuthoredFootXZ = true;
     bool enableAccelerationTilt = true;
     bool enableUpperBody        = true;
     bool enableSecondaryMotion  = true;
@@ -253,8 +254,9 @@ ZHLN_API void SolveLegGrounding(
     ProceduralLocomotionComponent& gait,
     JPH::Mat44*                    nodeTransforms,
     const RigBoneMap&              map,
-    Entity                         ignoredPhysicsHandle = {},
-    float                          ikWeight             = 1.0f
+    Entity                         ignoredPhysicsHandle   = {},
+    float                          ikWeight               = 1.0f,
+    bool                           preserveAuthoredFootXZ = true
 ) noexcept;
 ZHLN_API void SolveUpperBody(
     const ProceduralLocomotionComponent& gait,

@@ -284,7 +284,8 @@ void SolveLegGrounding(
     JPH::Mat44*                    nodeTransforms,
     const RigBoneMap&              map,
     Entity                         ignoredPhysicsHandle,
-    float                          ikWeight
+    float                          ikWeight,
+    bool                           preserveAuthoredFootXZ
 ) noexcept {
     if (nodeTransforms == nullptr || map.nodeCount == 0) {
         return;
@@ -328,14 +329,24 @@ void SolveLegGrounding(
         return contact;
     };
 
-    const bool  plantedL = gait.plantWeightL > 0.5f;
-    const bool  plantedR = gait.plantWeightR > 0.5f;
-    FootContact contactL = raycastFoot(gait.localFootTargetL, plantedL, plantedL && !gait.wasPlantedL, gait.plantedFootWorldL, gait.footLockValidL);
-    FootContact contactR = raycastFoot(gait.localFootTargetR, plantedR, plantedR && !gait.wasPlantedR, gait.plantedFootWorldR, gait.footLockValidR);
-    gait.wasPlantedL     = plantedL;
-    gait.wasPlantedR     = plantedR;
-    gait.footNormalL     = contactL.normal;
-    gait.footNormalR     = contactR.normal;
+    auto footProbe = [&](CharacterBone footBone, JPH::Vec3Arg proceduralTarget) {
+        if (!preserveAuthoredFootXZ) {
+            return JPH::Vec3(proceduralTarget);
+        }
+        const int32_t footNode = Detail::Node(map, footBone);
+        return footNode >= 0 && footNode < static_cast<int32_t>(map.nodeCount) ? nodeTransforms[footNode].GetTranslation() : JPH::Vec3(proceduralTarget);
+    };
+
+    const JPH::Vec3 probeL   = footProbe(CharacterBone::FootL, gait.localFootTargetL);
+    const JPH::Vec3 probeR   = footProbe(CharacterBone::FootR, gait.localFootTargetR);
+    const bool      plantedL = gait.plantWeightL > 0.5f;
+    const bool      plantedR = gait.plantWeightR > 0.5f;
+    FootContact     contactL = raycastFoot(probeL, plantedL, plantedL && !gait.wasPlantedL, gait.plantedFootWorldL, gait.footLockValidL);
+    FootContact     contactR = raycastFoot(probeR, plantedR, plantedR && !gait.wasPlantedR, gait.plantedFootWorldR, gait.footLockValidR);
+    gait.wasPlantedL         = plantedL;
+    gait.wasPlantedR         = plantedR;
+    gait.footNormalL         = contactL.normal;
+    gait.footNormalR         = contactR.normal;
 
     const JPH::Vec3 targetModelL = toModel(contactL.position);
     const JPH::Vec3 targetModelR = toModel(contactR.position);
