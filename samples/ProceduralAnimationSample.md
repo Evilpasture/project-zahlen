@@ -34,6 +34,10 @@ ZHLN::ProceduralAnimation::Register(engine);
 `Register` installs the extras-owned ECS types and inserts its evaluator before
 the generic core `ArticulationSystem` phase. Core knows only about
 `KinematicPoseOverrideComponent`, not about gait, hair, IK, or `RigBoneMap`.
+When a procedural entity gains `RagdollComponent`, the extras evaluator creates
+a missing `KinematicPoseOverrideComponent` automatically before publishing its
+motor target, so articulation cannot silently fall back to bind pose because of
+a spawn omission.
 
 Run the same sample with another packed GLB without editing C++:
 

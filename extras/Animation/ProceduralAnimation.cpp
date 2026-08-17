@@ -935,6 +935,17 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
         auto* physicsComponent = registry.Get<Components::PhysicsComponent>(entity);
         auto* poseOverride     = registry.Get<Components::KinematicPoseOverrideComponent>(entity);
         auto* boneMap          = registry.Get<RigBoneMap>(entity);
+
+        // Articulation consumes only the generic core pose hook. Guarantee that
+        // a procedural ragdoll publishes through that hook even when spawn code
+        // forgot to attach it explicitly.
+        if (poseOverride == nullptr && registry.Get<Components::RagdollComponent>(entity) != nullptr) {
+            poseOverride = &registry.Add(entity, Components::KinematicPoseOverrideComponent {});
+            ZHLN::Log("[ProceduralAnimation] Added missing KinematicPoseOverrideComponent to ragdoll entity {}.", entity.index);
+        }
+        if (poseOverride != nullptr) {
+            poseOverride->valid = false;
+        }
         if (gait == nullptr || transform == nullptr || boneMap == nullptr) {
             continue;
         }
