@@ -138,23 +138,21 @@ inline void RotateSubtree(const RigBoneMap& map, JPH::Mat44* transforms, int32_t
 } // namespace Detail
 
 /**
- * Ballistic pelvis bounce between support contacts. The second derivative of
- * the active arc is always -bounceGravity. Faster motion shortens the available
- * flight interval, naturally flattening the curve without changing gravity.
+ * Smooth cosine pelvis bounce between support contacts. The unconstrained
+ * amplitude is chosen so acceleration at the apex equals -bounceGravity. Since
+ * the support interval shrinks with speed, fast motion naturally gets flatter
+ * without changing the gravity parameter.
  */
 float EvaluateGravityBounce(const ProceduralLocomotionComponent& gait, float speed) noexcept {
-    if (speed < 0.035f || gait.bounceGravity <= 0.0f) {
+    if (speed < 0.035f || gait.bounceGravity <= 0.0f || gait.maxBounceHeight <= 0.0f) {
         return 0.0f;
     }
 
-    const float supportInterval = gait.strideLength / (2.0f * std::max(speed, 0.01f));
-    const float flightTime      = std::min(supportInterval, std::max(gait.maxBounceFlightTime, 0.01f));
-    const float supportPhase    = Detail::WrapUnit(gait.phase * 2.0f);
-    const float elapsed         = supportPhase * supportInterval;
-    if (elapsed >= flightTime) {
-        return 0.0f; // Landed; remain supported until the next contact.
-    }
-    return 0.5f * gait.bounceGravity * elapsed * (flightTime - elapsed);
+    const float supportInterval  = gait.strideLength / (2.0f * std::max(speed, 0.01f));
+    const float gravityAmplitude = gait.bounceGravity * supportInterval * supportInterval / (2.0f * std::numbers::pi_v<float> * std::numbers::pi_v<float>);
+    const float amplitude        = std::min(gravityAmplitude, gait.maxBounceHeight);
+    const float supportPhase     = Detail::WrapUnit(gait.phase * 2.0f);
+    return 0.5f * amplitude * (1.0f - std::cos(kGaitTwoPi * supportPhase));
 }
 
 /** Maps one stride-wheel revolution onto two opposing authored reach keys. */

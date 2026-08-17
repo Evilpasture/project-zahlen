@@ -150,29 +150,33 @@ struct ProceduralAnimationTestSuite {
 
         std::expected<void, ZHLN::Error> gravity_bounce_flattens_with_speed() {
             ZHLN::ProceduralLocomotionComponent gait;
-            gait.strideLength        = 1.40f;
-            gait.bounceGravity       = 9.81f;
-            gait.maxBounceFlightTime = 0.36f;
+            gait.strideLength    = 1.40f;
+            gait.bounceGravity   = 9.81f;
+            gait.maxBounceHeight = 0.065f;
 
-            const float slowSpeed    = 1.0f;
-            const float slowInterval = gait.strideLength / (2.0f * slowSpeed);
-            gait.phase               = (0.18f / slowInterval) * 0.5f;
-            const float slowApex     = ZHLN::Animation::EvaluateGravityBounce(gait, slowSpeed);
+            const float slowSpeed = 1.0f;
+            gait.phase            = 0.25f;
+            const float slowApex  = ZHLN::Animation::EvaluateGravityBounce(gait, slowSpeed);
 
             const float fastSpeed    = 4.0f;
             const float fastInterval = gait.strideLength / (2.0f * fastSpeed);
-            gait.phase               = 0.25f; // Midpoint of the shortened support interval.
+            gait.phase               = 0.25f;
             const float fastApex     = ZHLN::Animation::EvaluateGravityBounce(gait, fastSpeed);
 
-            constexpr float      sampleStep = 0.06f;
+            constexpr float      sampleStep = 0.01f;
             std::array<float, 3> samples {};
             for (size_t i = 0; i < samples.size(); ++i) {
-                const float elapsed = 0.12f + sampleStep * static_cast<float>(i);
-                gait.phase          = (elapsed / slowInterval) * 0.5f;
-                samples[i]          = ZHLN::Animation::EvaluateGravityBounce(gait, slowSpeed);
+                const float elapsed = fastInterval * 0.5f + sampleStep * (static_cast<float>(i) - 1.0f);
+                gait.phase          = (elapsed / fastInterval) * 0.5f;
+                samples[i]          = ZHLN::Animation::EvaluateGravityBounce(gait, fastSpeed);
             }
             const float measuredAcceleration = (samples[2] - 2.0f * samples[1] + samples[0]) / (sampleStep * sampleStep);
-            if (!(slowApex > fastApex) || std::abs(measuredAcceleration + gait.bounceGravity) > 0.01f) {
+            gait.phase                       = 0.0f;
+            const float contactStart         = ZHLN::Animation::EvaluateGravityBounce(gait, slowSpeed);
+            gait.phase                       = 0.5f;
+            const float contactEnd           = ZHLN::Animation::EvaluateGravityBounce(gait, slowSpeed);
+            if (!(slowApex > fastApex) || slowApex > gait.maxBounceHeight + 0.0001f || std::abs(measuredAcceleration + gait.bounceGravity) > 0.2f ||
+                std::abs(contactStart) > 0.0001f || std::abs(contactEnd) > 0.0001f) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
             return {};
