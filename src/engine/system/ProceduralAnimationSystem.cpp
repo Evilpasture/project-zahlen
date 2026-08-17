@@ -1185,22 +1185,27 @@ void DrawProceduralDebugRig(
         const JPH::Vec4 passColor(0.10f, 0.95f, 1.00f, 1.0f);
         const JPH::Vec4 reachColor(1.00f, 0.42f, 0.08f, 1.0f);
         drawCross(ModelToWorld(rootPosition, rootRotation, gait->centerOfMassModel), 0.032f, normalColor);
+        // +Z is forward and +Y is up. Forward rolling therefore rotates around
+        // +X, which maps an initial +Z spoke toward -Y (clockwise when viewed
+        // from the character's right side).
         for (uint32_t segment = 0; segment < 24; ++segment) {
             const float     angle0 = 2.0f * std::numbers::pi_v<float> * static_cast<float>(segment) / 24.0f;
             const float     angle1 = 2.0f * std::numbers::pi_v<float> * static_cast<float>(segment + 1) / 24.0f;
-            const JPH::Vec3 p0     = wheelCenterModel + JPH::Vec3(0.0f, std::sin(angle0) * wheelRadius, std::cos(angle0) * wheelRadius);
-            const JPH::Vec3 p1     = wheelCenterModel + JPH::Vec3(0.0f, std::sin(angle1) * wheelRadius, std::cos(angle1) * wheelRadius);
+            const JPH::Vec3 p0     = wheelCenterModel + JPH::Vec3(0.0f, -std::sin(angle0) * wheelRadius, std::cos(angle0) * wheelRadius);
+            const JPH::Vec3 p1     = wheelCenterModel + JPH::Vec3(0.0f, -std::sin(angle1) * wheelRadius, std::cos(angle1) * wheelRadius);
             renderContext.DrawLine(ModelToWorld(rootPosition, rootRotation, p0), ModelToWorld(rootPosition, rootRotation, p1), wheelColor);
         }
         const JPH::Vec3 wheelMarkerModel = wheelCenterModel +
-                                           JPH::Vec3(0.0f, std::sin(gait->strideWheelAngle) * wheelRadius, std::cos(gait->strideWheelAngle) * wheelRadius);
+                                           JPH::Vec3(0.0f, -std::sin(gait->strideWheelAngle) * wheelRadius, std::cos(gait->strideWheelAngle) * wheelRadius);
         const JPH::Vec4 markerColor      = gait->passWeightL > gait->reachWeightL ? passColor : reachColor;
         renderContext.DrawLine(
             ModelToWorld(rootPosition, rootRotation, wheelCenterModel), ModelToWorld(rootPosition, rootRotation, wheelMarkerModel), markerColor
         );
         drawCross(ModelToWorld(rootPosition, rootRotation, wheelMarkerModel), 0.025f, markerColor);
         drawCross(ModelToWorld(rootPosition, rootRotation, wheelCenterModel + JPH::Vec3(0.0f, wheelRadius, 0.0f)), 0.018f, passColor);
+        drawCross(ModelToWorld(rootPosition, rootRotation, wheelCenterModel - JPH::Vec3(0.0f, wheelRadius, 0.0f)), 0.018f, passColor);
         drawCross(ModelToWorld(rootPosition, rootRotation, wheelCenterModel + JPH::Vec3(0.0f, 0.0f, wheelRadius)), 0.018f, reachColor);
+        drawCross(ModelToWorld(rootPosition, rootRotation, wheelCenterModel - JPH::Vec3(0.0f, 0.0f, wheelRadius)), 0.018f, reachColor);
     }
 }
 
