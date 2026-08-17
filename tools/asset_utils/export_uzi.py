@@ -25,6 +25,7 @@ def export_uzi_to_glb(blend_path: str, glb_path: str) -> bool:
 
     expr = """
 import bpy
+import mathutils
 import os
 
 FACIAL_HIDE_PATTERNS = [
@@ -762,8 +763,8 @@ def bind_mesh_to_head_deform_bone(obj, main_rig, bone_name="DEF-Head"):
     obj.hide_render = False
     obj.hide_viewport = False
 
-def fix_and_bind_neck_mesh(main_rig):
-    print("[*] Binding neck joint sphere ('Sphere.016') and collar ('Cylinder.013') to 'DEF-Neck' in REST pose...", flush=True)
+def fix_and_bind_necklace_components(main_rig):
+    print("[*] Binding all separate Necklace components independently to 'DEF-Neck' without merging...", flush=True)
     if not main_rig or not main_rig.data:
         return
 
@@ -771,20 +772,93 @@ def fix_and_bind_neck_mesh(main_rig):
     bpy.context.view_layer.update()
 
     neck_bone = "DEF-Neck" if "DEF-Neck" in main_rig.data.bones else ("Neck" if "Neck" in main_rig.data.bones else "DEF-Head")
-    NECK_OBJECT_NAMES = [
-        "Sphere.016", "Cylinder.013", "Cylinder.017", "Cylinder.018", "Cylinder.016",
-        "Uzi_Necklace", "Uzi_Necklace_2", "Neck", "Necklace", "Choker", "Collar"
-    ]
 
-    for neck_name in NECK_OBJECT_NAMES:
-        obj = bpy.data.objects.get(neck_name)
+    necklace_objects = []
+
+    # 1. Collect all objects residing in the Necklace collection
+    for col in bpy.data.collections:
+        if "necklace" in col.name.lower():
+            for obj in col.all_objects:
+                if obj and getattr(obj, "type", None) == 'MESH' and obj not in necklace_objects:
+                    necklace_objects.append(obj)
+
+    # 2. Collect root object Cylinder.013 and any children / related objects
+    root_necklace_obj = bpy.data.objects.get("Cylinder.013")
+    if root_necklace_obj and root_necklace_obj not in necklace_objects:
+        necklace_objects.append(root_necklace_obj)
+
+    for obj in list(bpy.data.objects):
         if not (obj and getattr(obj, "type", None) == 'MESH'):
             continue
+        if obj.parent == root_necklace_obj or (obj.parent and "necklace" in obj.parent.name.lower()):
+            if obj not in necklace_objects:
+                necklace_objects.append(obj)
+        elif any(k in obj.name.lower() for k in ["uzi_necklace", "necklace", "choker", "cylinder.015"]) or (obj.name == "Cylinder" and obj.parent == root_necklace_obj):
+            if obj not in necklace_objects:
+                necklace_objects.append(obj)
+
+    if not necklace_objects:
+        print("  [~] Notice: No necklace objects found in scene.", flush=True)
+        return
+
+    print(f"  [+] Found {len(necklace_objects)} separate necklace components: {[o.name for o in necklace_objects]}", flush=True)
+
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+
+    # Bind each component individually to DEF-Neck without joining/merging them
+    for obj in necklace_objects:
         obj.hide_render = False
         obj.hide_viewport = False
-        obj.vertex_groups.clear()
-        bind_mesh_to_head_deform_bone(obj, main_rig, neck_bone)
 
+        # Capture exact current world matrix in REST pose
+        world_mat = obj.matrix_world.copy()
+
+        # Bake non-armature modifiers (e.g. Mirror, Array, Subsurf) individually ON THIS OBJECT ONLY
+        non_arm_mods = [m for m in obj.modifiers if m.type != 'ARMATURE']
+        if non_arm_mods:
+            try:
+                obj_eval = obj.evaluated_get(depsgraph)
+                new_mesh = bpy.data.meshes.new_from_object(obj_eval, preserve_all_data_layers=True, depsgraph=depsgraph)
+                old_mesh = obj.data
+                obj.data = new_mesh
+                if old_mesh and old_mesh.users == 0:
+                    bpy.data.meshes.remove(old_mesh)
+
+                for m in non_arm_mods:
+                    obj.modifiers.remove(m)
+            except Exception as e:
+                print(f"  [~] Notice baking modifiers on '{obj.name}': {safe_str(e)}", flush=True)
+
+        # Parent directly to main_rig in world space so glTF skeleton skinning functions cleanly
+        obj.parent = main_rig
+        obj.parent_type = 'OBJECT'
+        obj.matrix_world = world_mat
+        bpy.context.view_layer.update()
+
+        # Add Armature modifier targeting main_rig
+        arm_mod = next((m for m in obj.modifiers if m.type == 'ARMATURE'), None)
+        if not arm_mod:
+            arm_mod = obj.modifiers.new(name="Armature", type='ARMATURE')
+        arm_mod.object = main_rig
+
+        # Assign 100% rigid weight for DEF-Neck bone to keep component locked around neck
+        vg = obj.vertex_groups.get(neck_bone) or obj.vertex_groups.new(name=neck_bone)
+        if obj.data and hasattr(obj.data, "vertices") and len(obj.data.vertices) > 0:
+            all_indices = list(range(len(obj.data.vertices)))
+            vg.add(all_indices, 1.0, 'REPLACE')
+
+        print(f"  [+] Bound separate component '{obj.name}' cleanly to bone '{neck_bone}'.", flush=True)
+
+    # Bind auxiliary neck spheres (e.g. Sphere.016)
+    for sphere_name in ["Sphere.016", "Neck", "Cylinder.016", "Cylinder.017", "Cylinder.018"]:
+        s_obj = bpy.data.objects.get(sphere_name)
+        if s_obj and getattr(s_obj, "type", None) == 'MESH' and s_obj not in necklace_objects:
+            s_obj.hide_render = False
+            s_obj.hide_viewport = False
+            s_obj.vertex_groups.clear()
+            bind_mesh_to_head_deform_bone(s_obj, main_rig, neck_bone)
+
+    main_rig.data.pose_position = 'REST'
     bpy.context.view_layer.update()
 
 def bind_hands_and_fingers_safely(main_rig):
@@ -1151,7 +1225,6 @@ def skin_limbs_and_boots_safely(main_rig):
             arm_mod = obj.modifiers.new(name="Armature", type='ARMATURE')
         arm_mod.object = main_rig
 
-        # If it had a bone parent, give 100% rigid weights
         if bone_target:
             obj.vertex_groups.clear()
             vg = obj.vertex_groups.new(name=bone_target)
@@ -1291,7 +1364,6 @@ def bake_eyes_onto_visor(main_rig):
 
     head_bone = "DEF-Head" if (main_rig.data and "DEF-Head" in main_rig.data.bones) else "Head"
 
-    # Evaluate in REST pose so eyes project onto the resting visor surface
     main_rig.data.pose_position = 'REST'
     bpy.context.view_layer.update()
     depsgraph = bpy.context.evaluated_depsgraph_get()
@@ -1309,7 +1381,6 @@ def bake_eyes_onto_visor(main_rig):
             new_mesh = bpy.data.meshes.new_from_object(obj_eval, preserve_all_data_layers=True, depsgraph=depsgraph)
             world_mat = obj_eval.matrix_world.copy()
 
-            # Transform vertex buffer into main_rig coordinate space so origin is (0, 0, 0)
             to_rig_mat = main_rig.matrix_world.inverted() @ world_mat
             new_mesh.transform(to_rig_mat)
 
@@ -1536,8 +1607,8 @@ def main():
 
     apply_facial_gui_visibility_and_hide_anchors(main_rig)
 
-    # 3. Attachments & Facial Modifiers
-    fix_and_bind_neck_mesh(main_rig)
+    # 3. Attachments & Facial Modifiers (Independently bind necklace components)
+    fix_and_bind_necklace_components(main_rig)
     bake_and_attach_teeth(main_rig)
 
     # 4. Rigid Accessories (Beanie, Visor)
