@@ -232,6 +232,7 @@ void BuildSystemGraphs(Engine& engine) {
                 Read<Components::PhysicsComponent>(),
                 Read<Components::TransformComponent>(),
                 Read<ProceduralLookAtComponent>(),
+                Read<ProceduralAnimationConfigComponent>(),
                 Read<Components::SkeletalMeshComponent>(),
                 Write<ProceduralLocomotionComponent>(),
                 Write<HairStrandsComponent>(),
@@ -733,6 +734,7 @@ bool Engine::InitializeDefaultScene() {
     reg.RegisterComponent<ProceduralLocomotionComponent>("ProceduralLocomotionComponent");
     reg.RegisterComponent<HairStrandsComponent>("HairStrandsComponent");
     reg.RegisterComponent<ProceduralLookAtComponent>("ProceduralLookAtComponent");
+    reg.RegisterComponent<ProceduralAnimationConfigComponent>("ProceduralAnimationConfigComponent");
     reg.RegisterComponent<RigBoneMap>("RigBoneMap");
 
     reg.Create(

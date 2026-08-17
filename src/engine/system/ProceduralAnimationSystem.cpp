@@ -751,6 +751,7 @@ void ProceduralAnimationSystem::Update(Engine& engine, float dt) noexcept {
     for (Entity entity: registry.GetEntitiesWith<ProceduralLocomotionComponent>()) {
         auto* gait             = registry.Get<ProceduralLocomotionComponent>(entity);
         auto* hair             = registry.Get<HairStrandsComponent>(entity);
+        auto* config           = registry.Get<ProceduralAnimationConfigComponent>(entity);
         auto* transform        = registry.Get<Components::TransformComponent>(entity);
         auto* physicsComponent = registry.Get<Components::PhysicsComponent>(entity);
         auto* boneMap          = registry.Get<RigBoneMap>(entity);
@@ -822,6 +823,13 @@ void ProceduralAnimationSystem::Update(Engine& engine, float dt) noexcept {
         ApplyAuthoredSpringPose(animator, *boneMap, dt);
         ResolveForwardKinematics(*boneMap);
 
+        const bool keyframeOnly           = config != nullptr && config->keyframeOnly;
+        const bool gaitEnabled            = !keyframeOnly && (config == nullptr || config->enableGait);
+        const bool ikEnabled              = !keyframeOnly && (config == nullptr || config->enableLegIK);
+        const bool accelerationEnabled    = !keyframeOnly && (config == nullptr || config->enableAccelerationTilt);
+        const bool upperBodyEnabled       = !keyframeOnly && (config == nullptr || config->enableUpperBody);
+        const bool secondaryMotionEnabled = !keyframeOnly && (config == nullptr || config->enableSecondaryMotion);
+
         const JPH::Vec3 velocityWorld = physicsComponent != nullptr ? physics.GetCharacterVelocity(physicsComponent->physicsHandle) : JPH::Vec3::sZero();
         const JPH::Quat rootRotation  = transform->rotation.Normalized();
         const JPH::Vec3 velocityLocal = rootRotation.Inversed() * velocityWorld;
@@ -839,19 +847,27 @@ void ProceduralAnimationSystem::Update(Engine& engine, float dt) noexcept {
 
         // Stages 1-2: velocity/acceleration calculus, parametric gait, and a
         // whole-body spring tilt around the estimated center of mass.
-        Animation::EvaluateGait(*gait, velocityLocal, angularVelocity, dt);
-        Animation::ApplyAccelerationTilt(*gait, boneMap->modelTransforms.data(), *boneMap);
+        if (gaitEnabled) {
+            Animation::EvaluateGait(*gait, velocityLocal, angularVelocity, dt);
+        }
+        if (accelerationEnabled) {
+            Animation::ApplyAccelerationTilt(*gait, boneMap->modelTransforms.data(), *boneMap);
+        }
 
         // Stage 3: terrain contact, pelvis reach correction, and two-bone IK.
-        const Entity ignoredHandle = physicsComponent != nullptr ? physicsComponent->physicsHandle : Entity {};
-        Animation::SolveLegGrounding(engine, transform->position, rootRotation, *gait, boneMap->modelTransforms.data(), *boneMap, ignoredHandle);
+        if (ikEnabled) {
+            const Entity ignoredHandle = physicsComponent != nullptr ? physicsComponent->physicsHandle : Entity {};
+            Animation::SolveLegGrounding(engine, transform->position, rootRotation, *gait, boneMap->modelTransforms.data(), *boneMap, ignoredHandle);
+        }
 
-        // Stage 4: distributed torso inertia, arm counter-swing, and look-at.
-        const auto* lookAt = registry.Get<ProceduralLookAtComponent>(entity);
-        Animation::SolveUpperBody(*gait, lookAt, transform->position, rootRotation, boneMap->modelTransforms.data(), *boneMap);
+        // Stage 4: arm counter-swing and look-at.
+        if (upperBodyEnabled) {
+            const auto* lookAt = registry.Get<ProceduralLookAtComponent>(entity);
+            Animation::SolveUpperBody(*gait, lookAt, transform->position, rootRotation, boneMap->modelTransforms.data(), *boneMap);
+        }
 
         // Stage 5: worker-fiber XPBD secondary motion.
-        if (hair != nullptr) {
+        if (hair != nullptr && secondaryMotionEnabled) {
             const int32_t   headNode          = boneMap->nodeIndices[static_cast<size_t>(CharacterBone::Head)];
             const JPH::Vec3 headModelPosition = (headNode >= 0 && headNode < static_cast<int32_t>(boneMap->nodeCount)) ?
                                                     boneMap->modelTransforms[static_cast<size_t>(headNode)].GetTranslation() :
@@ -883,6 +899,10 @@ void ProceduralAnimationSystem::Update(Engine& engine, float dt) noexcept {
                 const JPH::Vec3  worldScale(world.GetColumn3(0).Length(), world.GetColumn3(1).Length(), world.GetColumn3(2).Length());
                 boneMap->modelTransforms[static_cast<size_t>(node)] = JPH::Mat44::sRotationTranslation(modelRotation, modelPosition).PreScaled(worldScale);
             }
+        } else if (hair != nullptr) {
+            // Re-seed from the authored shape when secondary motion is enabled
+            // again instead of resuming stale Verlet velocity.
+            hair->initialized = false;
         }
 
         // Stage 6 is supplied by ArticulationSystem immediately after this

@@ -102,3 +102,34 @@ ground contact.
 The debug overlay draws a sagittal stride wheel beside the COM. Cyan indicates
 pass-pose landmarks, orange indicates reach-pose landmarks, and the moving spoke
 shows the current distance-driven stride phase.
+
+## Isolation switches
+
+Disable only analytical leg IK while leaving the gait and upper-body layers on:
+
+```bash
+ZHLN_DISABLE_IK=1 ./build/samples/ProceduralAnimationSample
+```
+
+Evaluate only the authored clip, minimum-jerk key sampling, and pose springs:
+
+```bash
+ZHLN_KEYFRAME_ONLY=1 ./build/samples/ProceduralAnimationSample
+```
+
+Games can configure the same behavior per entity:
+
+```cpp
+registry.Add(character, ZHLN::ProceduralAnimationConfigComponent {
+    .enableLegIK = false,
+});
+
+// Or isolate the authored pose completely:
+registry.Add(character, ZHLN::ProceduralAnimationConfigComponent {
+    .keyframeOnly = true,
+});
+```
+
+`keyframeOnly` overrides all individual layer switches. Other switches allow
+gait, COM tilt, upper-body procedural motion, and secondary motion to be toggled
+independently.

@@ -43,6 +43,15 @@ inline const JPH::Vec4 kSkyZenith {0.25f, 0.55f, 0.95f, 1.0f};
 inline const JPH::Vec4 kSkyHorizon {0.70f, 0.85f, 1.00f, 1.0f};
 inline const JPH::Vec4 kSkyGround {0.20f, 0.28f, 0.20f, 1.0f};
 
+[[nodiscard]] bool EnvironmentFlag(const char* name) {
+    const char* value = std::getenv(name);
+    if (value == nullptr || value[0] == '\0') {
+        return false;
+    }
+    const std::string_view text(value);
+    return text != "0" && text != "false" && text != "FALSE" && text != "off" && text != "OFF";
+}
+
 auto BuildProceduralArena(ZHLN::Engine& engine) -> void {
     auto& reg = engine.GetRegistry();
 
@@ -148,6 +157,15 @@ auto AttachCharacterRig(ZHLN::Engine& engine, ZHLN::Entity player, std::string_v
         .weight         = 0.85f,
         .maxAngleDeg    = 70.0f,
     };
+    ZHLN::ProceduralAnimationConfigComponent animationConfig {
+        .enableLegIK  = !EnvironmentFlag("ZHLN_DISABLE_IK"),
+        .keyframeOnly = EnvironmentFlag("ZHLN_KEYFRAME_ONLY"),
+    };
+    if (animationConfig.keyframeOnly) {
+        ZHLN::Log("[Sample] Keyframe-only isolation enabled; all procedural layers are bypassed.");
+    } else if (!animationConfig.enableLegIK) {
+        ZHLN::Log("[Sample] Leg IK disabled; gait/keyframe layers remain active.");
+    }
 
     if (prefab != nullptr) {
         ZHLN::Log("[Sample] GLB model '{}' loaded successfully. Instantiating visual parts...", glbPath);
@@ -185,7 +203,7 @@ auto AttachCharacterRig(ZHLN::Engine& engine, ZHLN::Entity player, std::string_v
                 .prefab          = prefab,
             },
             ZHLN::RigBoneMap {}, // Initialized lazily on frame 0 by ProceduralAnimationSystem
-            std::move(locomotion), std::move(hair), std::move(lookAt)
+            std::move(locomotion), std::move(hair), std::move(lookAt), animationConfig
         );
     } else {
         ZHLN::Log("[Sample] Notice: '{}' not found. Falling back to in-memory procedural rig.", glbPath);
@@ -193,7 +211,7 @@ auto AttachCharacterRig(ZHLN::Engine& engine, ZHLN::Entity player, std::string_v
         ZHLN::RigBoneMap proceduralRig {};
         ZHLN::BuildStandardProceduralRig(proceduralRig);
 
-        reg.Add(player, std::move(proceduralRig), std::move(locomotion), std::move(hair), std::move(lookAt));
+        reg.Add(player, std::move(proceduralRig), std::move(locomotion), std::move(hair), std::move(lookAt), animationConfig);
     }
 }
 

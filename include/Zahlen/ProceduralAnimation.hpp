@@ -191,6 +191,19 @@ struct ProceduralLookAtComponent {
     float     maxAngleDeg    = 75.0f;
 };
 
+/** Runtime layer switches for animation authoring and isolation workflows. */
+struct ProceduralAnimationConfigComponent {
+    bool enableGait             = true;
+    bool enableLegIK            = true;
+    bool enableAccelerationTilt = true;
+    bool enableUpperBody        = true;
+    bool enableSecondaryMotion  = true;
+
+    // Overrides all switches above and evaluates only the authored keyframe
+    // pose, minimum-jerk key sampling, and semantic pose springs.
+    bool keyframeOnly = false;
+};
+
 /**
  * Builds a map for an imported glTF rig. Matching is case/separator insensitive
  * and accepts common Blender, Mixamo, and TestRig aliases.
