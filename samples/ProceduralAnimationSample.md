@@ -161,7 +161,7 @@ ZHLN_DISABLE_IK=1 ./build/samples/ProceduralAnimationSample
 Evaluate only the authored clip and the selected bicubic or spring-damper pose interpolator:
 
 ```bash
-ZHLN_KEYFRAME_ONLY=1 ./build/samples/ProceduralAnimationSample
+ZHLN_AUTHORED_POSE_ONLY=1 ./build/samples/ProceduralAnimationSample
 ```
 
 Games can configure the same behavior per entity:
@@ -173,10 +173,24 @@ registry.Add(character, ZHLN::ProceduralAnimationConfigComponent {
 
 // Or isolate the authored pose completely:
 registry.Add(character, ZHLN::ProceduralAnimationConfigComponent {
-    .keyframeOnly = true,
+    .authoredPoseOnly = true,
 });
 ```
 
-`keyframeOnly` overrides all individual layer switches. Other switches allow
-gait, COM tilt, upper-body procedural motion, and secondary motion to be toggled
-independently.
+`authoredPoseOnly` does **not** select an animation. It only bypasses procedural
+layers after evaluating `AnimatorComponent::currentTrackIdx`. If that index is
+`-1`, the authored result is correctly the bind pose. Use `FindAnimationTrack`
+to select by name:
+
+```cpp
+animator.currentTrackIdx = ZHLN::FindAnimationTrack(*animator.prefab, "idle");
+```
+
+The lookup is case-insensitive, prefers an exact name, then accepts a substring
+such as `Combat_Idle_Loop`. Startup logs print the selected index, clip name,
+duration, total channel count, and usable transform-channel count. A T-pose with
+`usable transforms=0` is an import/export or node-capacity issue; a T-pose with
+`no valid authored track selected` is a track-selection issue.
+
+Other switches allow gait, COM tilt, upper-body procedural motion, and secondary
+motion to be toggled independently.

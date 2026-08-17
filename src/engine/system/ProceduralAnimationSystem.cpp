@@ -553,6 +553,27 @@ struct SkinBinding {
 
 } // namespace
 
+int32_t FindAnimationTrack(const ModelPrefab& prefab, std::string_view name) noexcept {
+    const CanonicalName query = Canonicalize(name);
+    if (query.size == 0) {
+        return -1;
+    }
+
+    for (size_t index = 0; index < prefab.animations.size(); ++index) {
+        const CanonicalName candidate = Canonicalize(std::string_view(prefab.animations[index].name));
+        if (candidate.View() == query.View()) {
+            return static_cast<int32_t>(index);
+        }
+    }
+    for (size_t index = 0; index < prefab.animations.size(); ++index) {
+        const CanonicalName candidate = Canonicalize(std::string_view(prefab.animations[index].name));
+        if (candidate.View().find(query.View()) != std::string_view::npos) {
+            return static_cast<int32_t>(index);
+        }
+    }
+    return -1;
+}
+
 bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMap& outMap) noexcept {
     ResetRigBoneMap(outMap);
 
@@ -855,6 +876,25 @@ void ProceduralAnimationSystem::Update(Engine& engine, float dt) noexcept {
                 "[ProceduralAnimation] Rig '{}': {}; mapped {}/{} core bones and {}/{} hair strands ({} deform hair bones).", prefab->virtualPath,
                 complete ? "complete" : "partial", mappedCoreBones, kCoreBoneCount, mappedHairStrands, HairStrandsComponent::kStrandCount, mappedHairBones
             );
+            if (animator != nullptr && animator->currentTrackIdx >= 0 && animator->currentTrackIdx < static_cast<int32_t>(prefab->animations.size())) {
+                const AnimationClip& clip                    = prefab->animations[static_cast<size_t>(animator->currentTrackIdx)];
+                size_t               usableTransformChannels = 0;
+                for (const AnimationChannel& channel: clip.channels) {
+                    usableTransformChannels += channel.path != AnimationPathType::Weights && channel.targetNodeIndex >= 0 &&
+                                                       channel.targetNodeIndex < static_cast<int32_t>(boneMap->nodeCount) ?
+                                                   1u :
+                                                   0u;
+                }
+                ZHLN::Log(
+                    "[ProceduralAnimation] Authored track {}: '{}' (time={}, duration={}, channels={}, usable transforms={}).", animator->currentTrackIdx,
+                    clip.name, animator->currentTrackTime, clip.duration, clip.channels.size(), usableTransformChannels
+                );
+                if (usableTransformChannels == 0) {
+                    ZHLN::Log("[ProceduralAnimation] WARNING: selected track has no usable transform channels; bind pose will be shown.");
+                }
+            } else {
+                ZHLN::Log("[ProceduralAnimation] WARNING: no valid authored track selected; bind pose will be shown.");
+            }
             if (!complete) {
                 for (size_t semantic = 0; semantic < kCoreBoneCount; ++semantic) {
                     if (boneMap->nodeIndices[semantic] < 0) {
@@ -885,13 +925,13 @@ void ProceduralAnimationSystem::Update(Engine& engine, float dt) noexcept {
         ApplyAuthoredPose(animator, config, *boneMap, dt);
         ResolveForwardKinematics(*boneMap);
 
-        const bool keyframeOnly           = config != nullptr && config->keyframeOnly;
-        const bool gaitEnabled            = !keyframeOnly && (config == nullptr || config->enableGait);
+        const bool authoredPoseOnly       = config != nullptr && config->authoredPoseOnly;
+        const bool gaitEnabled            = !authoredPoseOnly && (config == nullptr || config->enableGait);
         const bool gravityBounceEnabled   = gaitEnabled && (config == nullptr || config->enableGravityBounce);
-        const bool ikEnabled              = !keyframeOnly && (config == nullptr || config->enableLegIK);
-        const bool accelerationEnabled    = !keyframeOnly && (config == nullptr || config->enableAccelerationTilt);
-        const bool upperBodyEnabled       = !keyframeOnly && (config == nullptr || config->enableUpperBody);
-        const bool secondaryMotionEnabled = !keyframeOnly && (config == nullptr || config->enableSecondaryMotion);
+        const bool ikEnabled              = !authoredPoseOnly && (config == nullptr || config->enableLegIK);
+        const bool accelerationEnabled    = !authoredPoseOnly && (config == nullptr || config->enableAccelerationTilt);
+        const bool upperBodyEnabled       = !authoredPoseOnly && (config == nullptr || config->enableUpperBody);
+        const bool secondaryMotionEnabled = !authoredPoseOnly && (config == nullptr || config->enableSecondaryMotion);
 
         const JPH::Vec3 velocityWorld = physicsComponent != nullptr ? physics.GetCharacterVelocity(physicsComponent->physicsHandle) : JPH::Vec3::sZero();
         const JPH::Quat rootRotation  = transform->rotation.Normalized();

@@ -175,20 +175,31 @@ auto AttachCharacterRig(ZHLN::Engine& engine, ZHLN::Entity player, std::string_v
         .springDampingFactor = EnvironmentFloat("ZHLN_SPRING_DAMPING_FACTOR", 0.90f),
         .bicubicTension      = EnvironmentFloat("ZHLN_BICUBIC_TENSION", 0.0f),
         .enableLegIK         = !EnvironmentFlag("ZHLN_DISABLE_IK"),
-        .keyframeOnly        = EnvironmentFlag("ZHLN_KEYFRAME_ONLY"),
+        .authoredPoseOnly    = EnvironmentFlag("ZHLN_AUTHORED_POSE_ONLY") || EnvironmentFlag("ZHLN_KEYFRAME_ONLY"),
     };
     ZHLN::Log(
         "[Sample] Pose interpolation: {} (stiffness={}, damping factor={}, bicubic tension={}).", useBicubic ? "bicubic" : "spring-damper",
         animationConfig.springStiffness, animationConfig.springDampingFactor, animationConfig.bicubicTension
     );
-    if (animationConfig.keyframeOnly) {
-        ZHLN::Log("[Sample] Keyframe-only isolation enabled; all procedural layers are bypassed.");
+    if (animationConfig.authoredPoseOnly) {
+        ZHLN::Log("[Sample] Authored-pose-only isolation enabled; all procedural layers are bypassed.");
     } else if (!animationConfig.enableLegIK) {
         ZHLN::Log("[Sample] Leg IK disabled; gait/keyframe layers remain active.");
     }
 
     if (prefab != nullptr) {
         ZHLN::Log("[Sample] GLB model '{}' loaded successfully. Instantiating visual parts...", glbPath);
+
+        int32_t selectedTrack = ZHLN::FindAnimationTrack(*prefab, "idle");
+        if (selectedTrack < 0 && !prefab->animations.empty()) {
+            selectedTrack = 0;
+        }
+        if (selectedTrack >= 0) {
+            const auto& clip = prefab->animations[static_cast<size_t>(selectedTrack)];
+            ZHLN::Log("[Sample] Selected authored track {}: '{}' (duration={}, channels={}).", selectedTrack, clip.name, clip.duration, clip.channels.size());
+        } else {
+            ZHLN::Log("[Sample] WARNING: '{}' contains no authored animation track; bind pose will be shown.", glbPath);
+        }
 
         // Instantiate the visual hierarchy without physics colliders. A prefab
         // can emit one root, one entity per part, and at most one emissive VPL
@@ -218,7 +229,7 @@ auto AttachCharacterRig(ZHLN::Engine& engine, ZHLN::Entity player, std::string_v
         reg.Add(
             player,
             ZHLN::Components::AnimatorComponent {
-                .currentTrackIdx = prefab->animations.empty() ? -1 : 0,
+                .currentTrackIdx = selectedTrack,
                 .currentLoop     = true,
                 .prefab          = prefab,
             },

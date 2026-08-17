@@ -30,6 +30,19 @@ struct ProceduralAnimationTestSuite {
     }
 
     struct Tests {
+        std::expected<void, ZHLN::Error> authored_track_lookup_prefers_exact_idle() {
+            ZHLN::ModelPrefab prefab;
+            prefab.animations.push_back({.name = ZHLN::String64("Walk")});
+            prefab.animations.push_back({.name = ZHLN::String64("Combat_Idle_Loop")});
+            prefab.animations.push_back({.name = ZHLN::String64("IDLE")});
+
+            if (ZHLN::FindAnimationTrack(prefab, "idle") != 2 || ZHLN::FindAnimationTrack(prefab, "combat idle") != 1 ||
+                ZHLN::FindAnimationTrack(prefab, "missing") != -1) {
+                return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+            }
+            return {};
+        }
+
         std::expected<void, ZHLN::Error> standard_rig_maps_every_control() {
             ZHLN::RigBoneMap map;
             ZHLN::BuildStandardProceduralRig(map);

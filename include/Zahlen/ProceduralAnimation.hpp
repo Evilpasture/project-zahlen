@@ -14,6 +14,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 
 namespace ZHLN {
 
@@ -216,7 +217,7 @@ struct ProceduralAnimationConfigComponent {
 
     // Overrides all switches above and evaluates only the authored keyframe
     // pose through the selected bicubic or spring-damper interpolator.
-    bool keyframeOnly = false;
+    bool authoredPoseOnly = false;
 };
 
 /** Core procedural algorithms. Extras may consume these APIs; core never consumes extras. */
@@ -265,6 +266,9 @@ ZHLN_API void
 ZHLN_API void ExtractHairBoneTransforms(const HairStrandsComponent& hair, JPH::Mat44* nodeTransforms, const RigBoneMap& map) noexcept;
 
 } // namespace Animation
+
+/** Finds an authored animation by case-insensitive exact name, then substring. */
+ZHLN_API int32_t FindAnimationTrack(const ModelPrefab& prefab, std::string_view name) noexcept;
 
 /**
  * Builds a map for an imported glTF rig. Matching is case/separator insensitive
