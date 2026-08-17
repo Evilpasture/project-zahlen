@@ -205,17 +205,19 @@ enum class PoseInterpolationMode : uint8_t {
 
 /** Runtime layer switches and pose interpolation settings. */
 struct ProceduralAnimationConfigComponent {
-    PoseInterpolationMode poseInterpolation   = PoseInterpolationMode::SpringDamper;
-    float                 springStiffness     = 2500.0f;
-    float                 springDampingFactor = 0.90f;
-    float                 bicubicTension      = 0.0f;
-    float                 legIKWeight         = 0.85f;
-    float                 pelvisDropWeight    = 1.0f;
+    PoseInterpolationMode poseInterpolation       = PoseInterpolationMode::SpringDamper;
+    float                 springStiffness         = 2500.0f;
+    float                 springDampingFactor     = 0.90f;
+    float                 bicubicTension          = 0.0f;
+    float                 legIKWeight             = 0.65f;
+    float                 pelvisDropWeight        = 1.0f;
+    float                 maxFootHeightCorrection = 0.18f;
 
     bool enableGait             = true;
     bool enableGravityBounce    = true;
     bool enableLegIK            = true;
     bool preserveAuthoredFootXZ = true;
+    bool worldLockFeet          = false;
     bool enableAccelerationTilt = true;
     bool enableUpperBody        = true;
     bool enableSecondaryMotion  = true;
@@ -257,11 +259,13 @@ ZHLN_API void SolveLegGrounding(
     ProceduralLocomotionComponent& gait,
     JPH::Mat44*                    nodeTransforms,
     const RigBoneMap&              map,
-    Entity                         ignoredPhysicsHandle   = {},
-    float                          ikWeight               = 1.0f,
-    bool                           preserveAuthoredFootXZ = true,
-    float                          dt                     = 1.0f / 60.0f,
-    float                          pelvisDropWeight       = 1.0f
+    Entity                         ignoredPhysicsHandle    = {},
+    float                          ikWeight                = 1.0f,
+    bool                           preserveAuthoredFootXZ  = true,
+    bool                           worldLockFeet           = false,
+    float                          maxFootHeightCorrection = 0.18f,
+    float                          dt                      = 1.0f / 60.0f,
+    float                          pelvisDropWeight        = 1.0f
 ) noexcept;
 ZHLN_API void SolveUpperBody(
     const ProceduralLocomotionComponent& gait,

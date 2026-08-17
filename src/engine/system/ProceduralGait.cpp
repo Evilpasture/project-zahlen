@@ -284,6 +284,8 @@ void SolveLegGrounding(
     Entity                         ignoredPhysicsHandle,
     float                          ikWeight,
     bool                           preserveAuthoredFootXZ,
+    bool                           worldLockFeet,
+    float                          maxFootHeightCorrection,
     float                          dt,
     float                          pelvisDropWeight
 ) noexcept {
@@ -308,10 +310,12 @@ void SolveLegGrounding(
 
         const auto hit = physics.Raycast(JPH::RVec3(probeWorld + JPH::Vec3(0.0f, 0.75f, 0.0f)), JPH::Vec3(0.0f, -1.0f, 0.0f), 1.80f, ignoredPhysicsHandle);
 
-        FootContact contact {
-            .position = hit.hasHit ? JPH::Vec3(hit.position) : desiredWorld,
-            .normal   = hit.hasHit ? Detail::SafeNormalized(hit.normal, JPH::Vec3::sAxisY()) : JPH::Vec3::sAxisY()
-        };
+        FootContact contact {.position = desiredWorld, .normal = hit.hasHit ? Detail::SafeNormalized(hit.normal, JPH::Vec3::sAxisY()) : JPH::Vec3::sAxisY()};
+        if (hit.hasHit) {
+            const float maxCorrection    = std::max(maxFootHeightCorrection, 0.0f);
+            const float heightCorrection = std::clamp(JPH::Vec3(hit.position).GetY() - desiredWorld.GetY(), -maxCorrection, maxCorrection);
+            contact.position.SetY(desiredWorld.GetY() + heightCorrection);
+        }
 
         if (planted) {
             if (!lockValid || enteringPlant) {
@@ -339,12 +343,12 @@ void SolveLegGrounding(
 
     const JPH::Vec3 probeL   = footProbe(CharacterBone::FootL, gait.localFootTargetL);
     const JPH::Vec3 probeR   = footProbe(CharacterBone::FootR, gait.localFootTargetR);
-    const bool      plantedL = gait.plantWeightL > 0.5f;
-    const bool      plantedR = gait.plantWeightR > 0.5f;
-    FootContact     contactL = raycastFoot(probeL, plantedL, plantedL && !gait.wasPlantedL, gait.plantedFootWorldL, gait.footLockValidL);
-    FootContact     contactR = raycastFoot(probeR, plantedR, plantedR && !gait.wasPlantedR, gait.plantedFootWorldR, gait.footLockValidR);
-    gait.wasPlantedL         = plantedL;
-    gait.wasPlantedR         = plantedR;
+    const bool      lockL    = worldLockFeet && gait.plantWeightL > 0.5f;
+    const bool      lockR    = worldLockFeet && gait.plantWeightR > 0.5f;
+    FootContact     contactL = raycastFoot(probeL, lockL, lockL && !gait.wasPlantedL, gait.plantedFootWorldL, gait.footLockValidL);
+    FootContact     contactR = raycastFoot(probeR, lockR, lockR && !gait.wasPlantedR, gait.plantedFootWorldR, gait.footLockValidR);
+    gait.wasPlantedL         = lockL;
+    gait.wasPlantedR         = lockR;
     gait.footNormalL         = contactL.normal;
     gait.footNormalR         = contactR.normal;
 
@@ -395,13 +399,18 @@ void SolveLegGrounding(
         const float     upperLength   = std::max((shinPosition - thighPosition).Length(), 0.001f);
         const float     lowerLength   = std::max((footPosition - shinPosition).Length(), 0.001f);
 
-        // Bone roll differs substantially between Blender rigs. Deriving the
-        // pole from the thigh's local +Z can therefore make a knee bend
-        // sideways. Use the character-model forward axis with a tiny bilateral
-        // outward bias for a stable anatomical bend direction.
-        const float     poleX = thighBone == CharacterBone::ThighL ? 0.08f : -0.08f;
-        const JPH::Vec3 pole  = JPH::Vec3(poleX, 0.0f, 1.0f).Normalized();
-        const auto      ik    = IK::SolveTwoBoneIK({
+        // Preserve the authored knee plane. The IK correction should bend from
+        // the keyframed shin direction rather than resetting every plant to a
+        // hard-coded character-forward pole.
+        const JPH::Vec3 targetAxis   = Detail::SafeNormalized(target - thighPosition, JPH::Vec3(0.0f, -1.0f, 0.0f));
+        JPH::Vec3       authoredPole = (shinPosition - thighPosition) - targetAxis * (shinPosition - thighPosition).Dot(targetAxis);
+        if (authoredPole.LengthSq() < 1.0e-6f) {
+            const float     poleX = thighBone == CharacterBone::ThighL ? 0.08f : -0.08f;
+            const JPH::Vec3 fallbackPole(poleX, 0.0f, 1.0f);
+            authoredPole = fallbackPole - targetAxis * fallbackPole.Dot(targetAxis);
+        }
+        const JPH::Vec3 pole = Detail::SafeNormalized(authoredPole, JPH::Vec3::sAxisZ());
+        const auto      ik   = IK::SolveTwoBoneIK({
             .upperPosition  = thighPosition,
             .targetPosition = target,
             .poleVector     = pole,

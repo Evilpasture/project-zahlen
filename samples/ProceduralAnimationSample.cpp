@@ -170,23 +170,26 @@ auto AttachCharacterRig(ZHLN::Engine& engine, ZHLN::Entity player, std::string_v
     const char*                              interpolationValue = std::getenv("ZHLN_POSE_INTERPOLATION");
     const bool                               useBicubic         = interpolationValue != nullptr && std::string_view(interpolationValue) == "bicubic";
     ZHLN::ProceduralAnimationConfigComponent animationConfig {
-        .poseInterpolation      = useBicubic ? ZHLN::PoseInterpolationMode::Bicubic : ZHLN::PoseInterpolationMode::SpringDamper,
-        .springStiffness        = EnvironmentFloat("ZHLN_SPRING_STIFFNESS", 2500.0f),
-        .springDampingFactor    = EnvironmentFloat("ZHLN_SPRING_DAMPING_FACTOR", 0.90f),
-        .bicubicTension         = EnvironmentFloat("ZHLN_BICUBIC_TENSION", 0.0f),
-        .legIKWeight            = EnvironmentFloat("ZHLN_LEG_IK_WEIGHT", 0.85f),
-        .pelvisDropWeight       = EnvironmentFloat("ZHLN_PELVIS_DROP_WEIGHT", 1.0f),
-        .enableLegIK            = !EnvironmentFlag("ZHLN_DISABLE_IK"),
-        .enableAccelerationTilt = !EnvironmentFlag("ZHLN_DISABLE_ACCELERATION_TILT"),
-        .authoredPoseOnly       = EnvironmentFlag("ZHLN_AUTHORED_POSE_ONLY") || EnvironmentFlag("ZHLN_KEYFRAME_ONLY"),
+        .poseInterpolation       = useBicubic ? ZHLN::PoseInterpolationMode::Bicubic : ZHLN::PoseInterpolationMode::SpringDamper,
+        .springStiffness         = EnvironmentFloat("ZHLN_SPRING_STIFFNESS", 2500.0f),
+        .springDampingFactor     = EnvironmentFloat("ZHLN_SPRING_DAMPING_FACTOR", 0.90f),
+        .bicubicTension          = EnvironmentFloat("ZHLN_BICUBIC_TENSION", 0.0f),
+        .legIKWeight             = EnvironmentFloat("ZHLN_LEG_IK_WEIGHT", 0.65f),
+        .pelvisDropWeight        = EnvironmentFloat("ZHLN_PELVIS_DROP_WEIGHT", 1.0f),
+        .maxFootHeightCorrection = EnvironmentFloat("ZHLN_MAX_FOOT_HEIGHT_CORRECTION", 0.18f),
+        .enableLegIK             = !EnvironmentFlag("ZHLN_DISABLE_IK"),
+        .worldLockFeet           = EnvironmentFlag("ZHLN_WORLD_LOCK_FEET"),
+        .enableAccelerationTilt  = !EnvironmentFlag("ZHLN_DISABLE_ACCELERATION_TILT"),
+        .authoredPoseOnly        = EnvironmentFlag("ZHLN_AUTHORED_POSE_ONLY") || EnvironmentFlag("ZHLN_KEYFRAME_ONLY"),
     };
     ZHLN::Log(
         "[Sample] Pose interpolation: {} (stiffness={}, damping factor={}, bicubic tension={}).", useBicubic ? "bicubic" : "spring-damper",
         animationConfig.springStiffness, animationConfig.springDampingFactor, animationConfig.bicubicTension
     );
     ZHLN::Log(
-        "[Sample] Leg IK is plant-only with weight {}; authored foot X/Z is preserved; pelvis-drop weight={}.",
-        animationConfig.enableLegIK ? animationConfig.legIKWeight : 0.0f, animationConfig.pelvisDropWeight
+        "[Sample] Leg IK weight={}; authored X/Z=true; world lock={}; max height correction={}; pelvis-drop weight={}.",
+        animationConfig.enableLegIK ? animationConfig.legIKWeight : 0.0f, animationConfig.worldLockFeet, animationConfig.maxFootHeightCorrection,
+        animationConfig.pelvisDropWeight
     );
     if (animationConfig.authoredPoseOnly) {
         ZHLN::Log("[Sample] Authored-pose-only isolation enabled; all procedural layers are bypassed.");

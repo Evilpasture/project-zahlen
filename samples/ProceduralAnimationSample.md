@@ -188,13 +188,18 @@ ZHLN_PELVIS_DROP_WEIGHT=0 ./build/samples/ProceduralAnimationSample
 
 Leg IK is an additive grounding layer. Authored walk/run keys determine each
 foot's horizontal placement and drive the complete swing phase. During stance,
-the solver raycasts beneath that authored X/Z location, adds only the correction
-needed for contact height and terrain normal, and world-locks the resulting plant.
-It never substitutes the procedural stride target for an authored foot target.
-Tune the stance correction or turn it off entirely:
+the solver raycasts beneath that authored X/Z location and limits itself to a
+small vertical/normal correction. Its knee pole is derived from the authored shin
+pose instead of resetting to a fixed forward bend.
+
+World-locking is **off by default** because freezing X/Z necessarily cancels part
+of an authored plant animation. Enable it only when deliberate foot locking is
+more important than preserving that motion. Tune each contribution independently:
 
 ```bash
-ZHLN_LEG_IK_WEIGHT=0.65 ./build/samples/ProceduralAnimationSample
+ZHLN_LEG_IK_WEIGHT=0.4 ./build/samples/ProceduralAnimationSample
+ZHLN_MAX_FOOT_HEIGHT_CORRECTION=0.10 ./build/samples/ProceduralAnimationSample
+ZHLN_WORLD_LOCK_FEET=1 ./build/samples/ProceduralAnimationSample
 ZHLN_DISABLE_IK=1 ./build/samples/ProceduralAnimationSample
 ```
 
