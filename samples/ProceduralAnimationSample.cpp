@@ -12,15 +12,15 @@
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/ModelPrefab.hpp>
-#include <Zahlen/ProceduralAnimation.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
 
-// Import Dual-Shape Locomotion Module
+// Optional extras/toolkit modules
 import ZHLN.Locomotion;
+import ZHLN.ProceduralAnimation;
 
 // Jolt Physics
 #include <Jolt/Jolt.h>
@@ -251,7 +251,7 @@ auto AttachCharacterRig(ZHLN::Engine& engine, ZHLN::Entity player, std::string_v
                 .walkTrack = walkTrack,
                 .runTrack  = runTrack,
             },
-            ZHLN::RigBoneMap {}, // Initialized lazily on frame 0 by ProceduralAnimationSystem
+            ZHLN::Components::KinematicPoseOverrideComponent {}, ZHLN::RigBoneMap {}, // Initialized lazily on frame 0 by the optional subsystem
             std::move(locomotion), std::move(hair), std::move(lookAt), animationConfig
         );
     } else {
@@ -260,7 +260,10 @@ auto AttachCharacterRig(ZHLN::Engine& engine, ZHLN::Entity player, std::string_v
         ZHLN::RigBoneMap proceduralRig {};
         ZHLN::BuildStandardProceduralRig(proceduralRig);
 
-        reg.Add(player, std::move(proceduralRig), std::move(locomotion), std::move(hair), std::move(lookAt), animationConfig);
+        reg.Add(
+            player, ZHLN::Components::KinematicPoseOverrideComponent {}, std::move(proceduralRig), std::move(locomotion), std::move(hair), std::move(lookAt),
+            animationConfig
+        );
     }
 }
 
@@ -295,6 +298,7 @@ auto main(int argc, char* argv[]) -> int {
     auto engine = std::move(engineRes.value());
     engine->GetWindow().Focus();
     engine->InitializeDefaultScene();
+    ZHLN::ProceduralAnimation::Register(*engine);
     BuildProceduralArena(*engine);
 
     // 1. Spawn CharacterVirtual with Overgrowth Dual-Shape Hull
@@ -357,7 +361,7 @@ auto main(int argc, char* argv[]) -> int {
 
         ZHLN::ECS::Patch<ZHLN::Components::TransformComponent, ZHLN::RigBoneMap>(registry, player, [&](const auto& trans, const auto& rig) -> auto {
             const auto* gait = registry.Get<ZHLN::ProceduralLocomotionComponent>(player);
-            ZHLN::DrawProceduralDebugRig(engine->GetRenderContext(), trans.position, trans.rotation, rig, gait);
+            ZHLN::ProceduralAnimation::DrawDebugRig(engine->GetRenderContext(), trans.position, trans.rotation, rig, gait);
         });
     }
 

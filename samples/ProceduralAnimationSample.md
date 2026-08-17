@@ -21,6 +21,20 @@ cmake --build build --target ProceduralAnimationSample
 ./build/samples/ProceduralAnimationSample
 ```
 
+The subsystem is an optional extras module. Consumers opt in explicitly after
+initializing the core scene:
+
+```cpp
+import ZHLN.ProceduralAnimation;
+
+engine.InitializeDefaultScene();
+ZHLN::ProceduralAnimation::Register(engine);
+```
+
+`Register` installs the extras-owned ECS types and inserts its evaluator before
+the generic core `ArticulationSystem` phase. Core knows only about
+`KinematicPoseOverrideComponent`, not about gait, hair, IK, or `RigBoneMap`.
+
 Run the same sample with another packed GLB without editing C++:
 
 ```bash

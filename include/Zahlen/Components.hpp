@@ -135,6 +135,15 @@ struct Components {
         int32_t  skeletonIndex = -1;
     };
 
+    /** Generic model-space motor target produced by optional pose systems. */
+    struct alignas(64) KinematicPoseOverrideComponent {
+        static constexpr size_t           MaxJoints = 512;
+        std::array<JPH::Mat44, MaxJoints> modelTransforms {};
+        uint32_t                          jointCount  = 0;
+        uint64_t                          poseVersion = 0;
+        bool                              valid       = false;
+    };
+
     struct MorphTargetComponent {
         uint32_t             offset      = 0;
         uint32_t             activeCount = 0;

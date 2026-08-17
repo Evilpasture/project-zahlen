@@ -90,6 +90,45 @@ struct SystemGraphTestSuite {
             return {};
         }
 
+        std::expected<void, ZHLN::Error> optional_system_insertion_before_named_phase() {
+            ZHLN::ECS::SystemGraph  graph;
+            static std::atomic<int> executionCounter {1};
+            static std::atomic<int> extensionOrder {0};
+            static std::atomic<int> anchorOrder {0};
+            executionCounter.store(1);
+            extensionOrder.store(0);
+            anchorOrder.store(0);
+
+            graph.AddSystem({
+                .update_func    = [](ZHLN::Engine&, float) { anchorOrder.store(executionCounter.fetch_add(1)); },
+                .name           = "GenericAnchor",
+                .access_pattern = {ZHLN::ECS::Read<TestCompA>()},
+                .enabled        = true,
+            });
+            const bool inserted = graph.AddSystemBefore(
+                {
+                    .update_func    = [](ZHLN::Engine&, float) { extensionOrder.store(executionCounter.fetch_add(1)); },
+                    .name           = "OptionalExtension",
+                    .access_pattern = {ZHLN::ECS::Write<TestCompA>()},
+                    .enabled        = true,
+                },
+                "GenericAnchor"
+            );
+            const bool duplicateRejected = !graph.AddSystemBefore({.name = "OptionalExtension"}, "GenericAnchor");
+            const bool missingRejected   = !graph.AddSystemBefore({.name = "MissingAnchorExtension"}, "DoesNotExist");
+            if (!inserted || !duplicateRejected || !missingRejected) {
+                return std::unexpected(SystemGraphTestError::ExecutionOrderFailed);
+            }
+
+            graph.Compile();
+            auto* fakeEngine = reinterpret_cast<ZHLN::Engine*>(FakeEnginePtr);
+            graph.Execute(*fakeEngine, TestDeltaTime);
+            if (!(extensionOrder.load() > 0 && anchorOrder.load() > extensionOrder.load())) {
+                return std::unexpected(SystemGraphTestError::ExecutionOrderFailed);
+            }
+            return {};
+        }
+
         // --- 2. Independent Systems Parallel Dispatch ---
         std::expected<void, ZHLN::Error> independent_systems_dispatch() {
             ZHLN::ECS::SystemGraph graph;

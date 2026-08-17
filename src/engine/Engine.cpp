@@ -24,7 +24,6 @@
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/ProceduralAnimation.hpp>
 #include <Zahlen/Profiler.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Scripting.hpp>
@@ -49,7 +48,6 @@
 #include <engine/system/ParticleSystem.hpp>
 #include <engine/system/PhysicsStateSystem.hpp>
 #include <engine/system/PhysicsSystem.hpp>
-#include <engine/system/ProceduralAnimationSystem.hpp>
 #include <engine/system/RenderSystem.hpp>
 #include <engine/system/TargetCameraSystem.hpp>
 #include <engine/system/TerrainSystem.hpp>
@@ -133,11 +131,6 @@ void Sys_VisualInterpolation(Engine& engine, float /*dt*/) {
 void Sys_Animation(Engine& engine, float dt) {
     static AnimationSystem sys;
     sys.UpdateAnimations(engine.GetRenderContext(), engine.GetRegistry(), dt);
-}
-
-void Sys_ProceduralAnimation(Engine& engine, float dt) {
-    static ProceduralAnimationSystem sys;
-    sys.Update(engine, dt);
 }
 
 void Sys_Articulation(Engine& engine, float dt) {
@@ -225,31 +218,13 @@ void BuildSystemGraphs(Engine& engine) {
     });
 
     updateGraph.AddSystem({
-        .update_func = Sys_ProceduralAnimation,
-        .name        = "ProceduralAnimationSystem",
-        .access_pattern =
-            {
-                Read<Components::PhysicsComponent>(),
-                Read<Components::TransformComponent>(),
-                Read<ProceduralLookAtComponent>(),
-                Read<ProceduralAnimationConfigComponent>(),
-                Read<Components::SkeletalMeshComponent>(),
-                Write<ProceduralLocomotionComponent>(),
-                Write<ProceduralLocomotionTracksComponent>(),
-                Write<HairStrandsComponent>(),
-                Write<RigBoneMap>(),
-            },
-        .enabled = true,
-    });
-
-    updateGraph.AddSystem({
         .update_func = Sys_Articulation,
         .name        = "ArticulationSystem",
         .access_pattern =
             {
                 Read<Components::PhysicsComponent>(),
                 Read<Components::MeshComponent>(),
-                Read<RigBoneMap>(),
+                Read<Components::KinematicPoseOverrideComponent>(),
                 Write<Components::RagdollComponent>(),
                 Write<Components::TransformComponent>(),
             },
@@ -732,12 +707,6 @@ bool Engine::InitializeDefaultScene() {
     auto& reg = GetRegistry();
 
     reg.RegisterAllComponentsIn<ZHLN::Components>();
-    reg.RegisterComponent<ProceduralLocomotionComponent>("ProceduralLocomotionComponent");
-    reg.RegisterComponent<HairStrandsComponent>("HairStrandsComponent");
-    reg.RegisterComponent<ProceduralLookAtComponent>("ProceduralLookAtComponent");
-    reg.RegisterComponent<ProceduralAnimationConfigComponent>("ProceduralAnimationConfigComponent");
-    reg.RegisterComponent<ProceduralLocomotionTracksComponent>("ProceduralLocomotionTracksComponent");
-    reg.RegisterComponent<RigBoneMap>("RigBoneMap");
 
     reg.Create(
         Components::MainCameraTagComponent {}, Components::CameraComponent {},

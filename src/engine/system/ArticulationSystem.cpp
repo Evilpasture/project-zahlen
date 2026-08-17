@@ -12,7 +12,6 @@
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/ModelPrefab.hpp>
-#include <Zahlen/ProceduralAnimation.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/SkeletalAnimation.hpp>
 #include <Zahlen/ecs/ECS.hpp>
@@ -188,20 +187,11 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
             }
         }
 
-        // ProceduralAnimationSystem runs immediately before articulation. Use
-        // its model-space target as the motor pose instead of reconstructing a
-        // bind pose, then blend the physical joints over that target below.
-        if (const auto* procedural = reg.Get<RigBoneMap>(e); procedural != nullptr && procedural->poseValid && procedural->sourcePrefab != nullptr &&
-                                                             procedural->skeletonIndex >= 0 &&
-                                                             procedural->skeletonIndex < static_cast<int32_t>(procedural->sourcePrefab->skeletons.size())) {
-            const Skeleton& sourceSkeleton  = procedural->sourcePrefab->skeletons[static_cast<size_t>(procedural->skeletonIndex)];
-            const uint32_t  proceduralCount = std::min<uint32_t>(count, static_cast<uint32_t>(sourceSkeleton.joints.size()));
-            for (uint32_t j = 0; j < proceduralCount; ++j) {
-                const int32_t node = sourceSkeleton.joints[j].nodeIndex;
-                if (node >= 0 && node < static_cast<int32_t>(procedural->nodeCount)) {
-                    modelJoints[j] = procedural->modelTransforms[static_cast<size_t>(node)];
-                }
-            }
+        // Optional pose providers publish model-space motor targets through a
+        // generic core component. Articulation does not depend on any provider.
+        if (const auto* poseOverride = reg.Get<Components::KinematicPoseOverrideComponent>(e); poseOverride != nullptr && poseOverride->valid) {
+            const uint32_t overrideCount = std::min<uint32_t>(count, poseOverride->jointCount);
+            std::copy_n(poseOverride->modelTransforms.begin(), overrideCount, modelJoints.begin());
         }
 
         std::memcpy(animPose.GetJointMatrices().data(), modelJoints.data(), count * sizeof(JPH::Mat44));

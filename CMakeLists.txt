@@ -285,9 +285,6 @@ set(RAW_ENGINE_SOURCES
     src/engine/TextureManager.cpp
     src/engine/system/TextureSystem.cpp
     src/engine/system/AnimationSystem.cpp
-    src/engine/system/ProceduralAnimationSystem.cpp
-    src/engine/system/ProceduralGait.cpp
-    src/engine/system/ProceduralSecondaryPhysics.cpp
     src/engine/CreativeWorksManager.cpp
     src/engine/Window.cpp
     src/engine/Platform.cpp

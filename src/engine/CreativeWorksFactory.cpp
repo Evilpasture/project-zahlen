@@ -599,8 +599,8 @@ auto InstantiatePrefab(
     if (!params.createPhysics) {
         rootEntity = SpawnPrefabRoot(reg, prefab.virtualPath.c_str(), params);
 
-        // Keep the prefab/skeleton source available even for purely procedural
-        // skinned rigs that contain no authored animation clips.
+        // Keep the prefab/skeleton source available for skinned rigs that
+        // contain no authored animation clips.
         if (params.isAnimated && (!prefab.animations.empty() || !prefab.skeletons.empty())) {
             reg.Add(
                 rootEntity, Components::AnimatorComponent {

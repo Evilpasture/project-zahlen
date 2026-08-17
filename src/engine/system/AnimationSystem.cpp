@@ -45,8 +45,8 @@ void SampleChannel(const AnimationChannel& channel, float time, JPH::Vec3& outT,
         factor = 0.0f;
     } else {
         // Minimum-jerk interpolation avoids the constant velocity and hard
-        // derivative changes of a linear keyframe blend. Procedural characters
-        // add a temporal spring on top of this authored target.
+        // derivative changes of a linear keyframe blend. Optional pose providers
+        // may add further temporal filtering through generic extension hooks.
         factor = factor * factor * factor * (factor * (factor * 6.0f - 15.0f) + 10.0f);
     }
 

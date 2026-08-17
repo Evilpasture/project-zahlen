@@ -14,6 +14,9 @@ file(GLOB SAMPLE_SOURCES
 
 foreach(SAMPLE_SRC IN LISTS SAMPLE_SOURCES)
     get_filename_component(SAMPLE_NAME ${SAMPLE_SRC} NAME_WE)
+    if("${SAMPLE_NAME}" STREQUAL "ProceduralAnimationSample" AND NOT TARGET zahlen_extras)
+        continue()
+    endif()
 
     add_executable(${SAMPLE_NAME} ${SAMPLE_SRC})
 

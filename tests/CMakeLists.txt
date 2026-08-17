@@ -6,6 +6,9 @@ enable_testing()
 
 # 2. Automatically discover all test source files in this directory
 file(GLOB TEST_SOURCES CONFIGURE_DEPENDS "Test*.cpp")
+if(NOT TARGET zahlen_extras)
+    list(FILTER TEST_SOURCES EXCLUDE REGEX "/TestProceduralAnimation\\.cpp$")
+endif()
 
 # 3. Iterate and dynamically register each test executable with original casing preserved
 foreach(TEST_SRC IN LISTS TEST_SOURCES)
@@ -23,6 +26,9 @@ foreach(TEST_SRC IN LISTS TEST_SOURCES)
     target_link_libraries(${TARGET_NAME} PRIVATE
         zahlen_engine
     )
+    if("${TARGET_NAME}" STREQUAL "TestProceduralAnimation" AND TARGET zahlen_extras)
+        target_link_libraries(${TARGET_NAME} PRIVATE zahlen_extras)
+    endif()
 
     target_include_directories(${TARGET_NAME} PRIVATE
         ${PROJECT_SOURCE_DIR}/include

@@ -3,7 +3,6 @@
 
 #include "TestsFramework.hpp"
 #include <Zahlen/ModelPrefab.hpp>
-#include <Zahlen/ProceduralAnimation.hpp>
 #include <Zahlen/SkeletalAnimation.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <array>
@@ -12,6 +11,8 @@
 #include <expected>
 #include <numbers>
 #include <string_view>
+
+import ZHLN.ProceduralAnimation;
 
 enum class ProceduralAnimationTestError : uint32_t {
     Success = 0,

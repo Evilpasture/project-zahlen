@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "ProceduralAnimationSystem.hpp"
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
@@ -13,11 +12,11 @@
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/ModelPrefab.hpp>
-#include <Zahlen/ProceduralAnimation.hpp>
 #include <Zahlen/Profiler.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/SkeletalAnimation.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ecs/SystemGraph.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <array>
@@ -27,6 +26,8 @@
 #include <span>
 #include <string_view>
 #include <utility>
+
+import ZHLN.ProceduralAnimation;
 
 namespace ZHLN {
 namespace {
@@ -877,7 +878,45 @@ void BuildStandardProceduralRig(RigBoneMap& outMap) noexcept {
     outMap.poseValid   = true;
 }
 
-void ProceduralAnimationSystem::Update(Engine& engine, float dt) noexcept {
+void ProceduralAnimation::Register(Engine& engine) {
+    auto& registry = engine.GetRegistry();
+    registry.RegisterComponent<ProceduralLocomotionComponent>("ProceduralLocomotionComponent");
+    registry.RegisterComponent<HairStrandsComponent>("HairStrandsComponent");
+    registry.RegisterComponent<ProceduralLookAtComponent>("ProceduralLookAtComponent");
+    registry.RegisterComponent<ProceduralAnimationConfigComponent>("ProceduralAnimationConfigComponent");
+    registry.RegisterComponent<ProceduralLocomotionTracksComponent>("ProceduralLocomotionTracksComponent");
+    registry.RegisterComponent<RigBoneMap>("RigBoneMap");
+
+    using namespace ECS;
+    auto&      graph    = engine.GetUpdateGraph();
+    const bool inserted = graph.AddSystemBefore(
+        {
+            .update_func = [](Engine& target, float dt) { ProceduralAnimation::Update(target, dt); },
+            .name        = "ProceduralAnimationSystem",
+            .access_pattern =
+                {
+                    Read<Components::PhysicsComponent>(),
+                    Read<Components::TransformComponent>(),
+                    Read<ProceduralLookAtComponent>(),
+                    Read<ProceduralAnimationConfigComponent>(),
+                    Read<Components::SkeletalMeshComponent>(),
+                    Write<ProceduralLocomotionComponent>(),
+                    Write<ProceduralLocomotionTracksComponent>(),
+                    Write<HairStrandsComponent>(),
+                    Write<RigBoneMap>(),
+                    Write<Components::KinematicPoseOverrideComponent>(),
+                },
+            .enabled = true,
+        },
+        "ArticulationSystem"
+    );
+    if (inserted) {
+        graph.Compile();
+        ZHLN::Log("[ProceduralAnimation] Registered optional subsystem before ArticulationSystem.");
+    }
+}
+
+void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
     ZHLN::ScopedTimer timer("ECS System: Procedural Animation");
 
     auto& registry = engine.GetRegistry();
@@ -892,6 +931,7 @@ void ProceduralAnimationSystem::Update(Engine& engine, float dt) noexcept {
         auto* movement         = registry.Get<Components::MovementComponent>(entity);
         auto* transform        = registry.Get<Components::TransformComponent>(entity);
         auto* physicsComponent = registry.Get<Components::PhysicsComponent>(entity);
+        auto* poseOverride     = registry.Get<Components::KinematicPoseOverrideComponent>(entity);
         auto* boneMap          = registry.Get<RigBoneMap>(entity);
         if (gait == nullptr || transform == nullptr || boneMap == nullptr) {
             continue;
@@ -1094,6 +1134,9 @@ void ProceduralAnimationSystem::Update(Engine& engine, float dt) noexcept {
         ResolveForwardKinematics(*boneMap);
         boneMap->poseValid = true;
         ++boneMap->poseVersion;
+        if (poseOverride != nullptr) {
+            poseOverride->valid = false;
+        }
 
         // Stage 8: bake the imported skeleton order and stream one contiguous
         // matrix palette into the current Vulkan frame buffer.
@@ -1102,10 +1145,20 @@ void ProceduralAnimationSystem::Update(Engine& engine, float dt) noexcept {
             std::array<JPH::Mat44, kMaxRigNodes> finalPalette {};
             std::ranges::fill(finalPalette, JPH::Mat44::sIdentity());
             for (uint32_t jointIndex = 0; jointIndex < count; ++jointIndex) {
-                const Joint& joint = skin.skeleton->joints[jointIndex];
+                const Joint& joint          = skin.skeleton->joints[jointIndex];
+                JPH::Mat44   modelTransform = JPH::Mat44::sIdentity();
                 if (joint.nodeIndex >= 0 && joint.nodeIndex < static_cast<int32_t>(boneMap->nodeCount)) {
-                    finalPalette[jointIndex] = boneMap->modelTransforms[static_cast<size_t>(joint.nodeIndex)] * joint.inverseBindMatrix;
+                    modelTransform           = boneMap->modelTransforms[static_cast<size_t>(joint.nodeIndex)];
+                    finalPalette[jointIndex] = modelTransform * joint.inverseBindMatrix;
                 }
+                if (poseOverride != nullptr && jointIndex < Components::KinematicPoseOverrideComponent::MaxJoints) {
+                    poseOverride->modelTransforms[jointIndex] = modelTransform;
+                }
+            }
+            if (poseOverride != nullptr) {
+                poseOverride->jointCount  = std::min<uint32_t>(count, static_cast<uint32_t>(Components::KinematicPoseOverrideComponent::MaxJoints));
+                poseOverride->poseVersion = boneMap->poseVersion;
+                poseOverride->valid       = true;
             }
             boneMap->jointOffset   = skin.skeletalMesh->jointOffset;
             boneMap->jointCount    = count;
@@ -1207,6 +1260,16 @@ void DrawProceduralDebugRig(
         drawCross(ModelToWorld(rootPosition, rootRotation, wheelCenterModel + JPH::Vec3(0.0f, 0.0f, wheelRadius)), 0.018f, reachColor);
         drawCross(ModelToWorld(rootPosition, rootRotation, wheelCenterModel - JPH::Vec3(0.0f, 0.0f, wheelRadius)), 0.018f, reachColor);
     }
+}
+
+void ProceduralAnimation::DrawDebugRig(
+    RenderContext&                       renderContext,
+    JPH::Vec3Arg                         rootPosition,
+    JPH::QuatArg                         rootRotation,
+    const RigBoneMap&                    boneMap,
+    const ProceduralLocomotionComponent* gait
+) noexcept {
+    DrawProceduralDebugRig(renderContext, rootPosition, rootRotation, boneMap, gait);
 }
 
 } // namespace ZHLN

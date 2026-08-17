@@ -8,12 +8,13 @@
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
-#include <Zahlen/ProceduralAnimation.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <numbers>
+
+import ZHLN.ProceduralAnimation;
 
 namespace ZHLN::Animation {
 

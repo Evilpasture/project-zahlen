@@ -10,12 +10,13 @@
 #include <Jolt/Math/Vec4.h>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/IK.hpp>
-#include <Zahlen/ProceduralAnimation.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <cmath>
 #include <numbers>
 #include <utility>
+
+import ZHLN.ProceduralAnimation;
 
 namespace ZHLN::Animation {
 

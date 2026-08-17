@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#pragma once
+module;
 
 // clang-format off
 #include <Jolt/Jolt.h>
@@ -10,18 +10,18 @@
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Common.h>
+#include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
+#include <Zahlen/ModelPrefab.hpp>
+#include <Zahlen/Render.hpp>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
 
-namespace ZHLN {
+export module ZHLN.ProceduralAnimation;
 
-class Engine;
-class RenderContext;
-struct ModelPrefab;
-struct Skeleton;
+export namespace ZHLN {
 
 /**
  * Stable semantic slots used by the procedural solver. The first 21 entries are
@@ -245,14 +245,13 @@ struct ProceduralLocomotionTracksComponent {
 /** Core procedural algorithms. Extras may consume these APIs; core never consumes extras. */
 namespace Animation {
 
-ZHLN_API float EvaluateGravityBounce(const ProceduralLocomotionComponent& gait, float speed) noexcept;
-ZHLN_API float EvaluateTwoKeyPosePhase(float stridePhase) noexcept;
-ZHLN_API void  EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg velocity, float angularVelocity, float dt) noexcept;
-ZHLN_API void  EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg velocity, float dt) noexcept;
-ZHLN_API void  ApplyAccelerationTilt(ProceduralLocomotionComponent& gait, JPH::Mat44* nodeTransforms, const RigBoneMap& map) noexcept;
-ZHLN_API void
-    ApplyPelvisGaitOffset(const ProceduralLocomotionComponent& gait, JPH::Mat44* nodeTransforms, const RigBoneMap& map, bool includeDrop = true) noexcept;
-ZHLN_API void SolveLegGrounding(
+float EvaluateGravityBounce(const ProceduralLocomotionComponent& gait, float speed) noexcept;
+float EvaluateTwoKeyPosePhase(float stridePhase) noexcept;
+void  EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg velocity, float angularVelocity, float dt) noexcept;
+void  EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg velocity, float dt) noexcept;
+void  ApplyAccelerationTilt(ProceduralLocomotionComponent& gait, JPH::Mat44* nodeTransforms, const RigBoneMap& map) noexcept;
+void  ApplyPelvisGaitOffset(const ProceduralLocomotionComponent& gait, JPH::Mat44* nodeTransforms, const RigBoneMap& map, bool includeDrop = true) noexcept;
+void  SolveLegGrounding(
     Engine&                        engine,
     JPH::Vec3Arg                   rootPosition,
     JPH::QuatArg                   rootRotation,
@@ -267,7 +266,7 @@ ZHLN_API void SolveLegGrounding(
     float                          dt                      = 1.0f / 60.0f,
     float                          pelvisDropWeight        = 1.0f
 ) noexcept;
-ZHLN_API void SolveUpperBody(
+void SolveUpperBody(
     const ProceduralLocomotionComponent& gait,
     const ProceduralLookAtComponent*     lookAt,
     JPH::Vec3Arg                         rootPosition,
@@ -275,46 +274,61 @@ ZHLN_API void SolveUpperBody(
     JPH::Mat44*                          nodeTransforms,
     const RigBoneMap&                    map
 ) noexcept;
-ZHLN_API void SolveUpperBody(
+void SolveUpperBody(
     const ProceduralLocomotionComponent& gait,
     const ProceduralLookAtComponent*     lookAt,
     JPH::Mat44*                          nodeTransforms,
     const RigBoneMap&                    map
 ) noexcept;
 
-ZHLN_API void ConfigureHairBindPose(HairStrandsComponent& hair, const JPH::Mat44* bindModelTransforms, const RigBoneMap& map) noexcept;
-ZHLN_API void StepHairSimulation(
+void ConfigureHairBindPose(HairStrandsComponent& hair, const JPH::Mat44* bindModelTransforms, const RigBoneMap& map) noexcept;
+void StepHairSimulation(
     HairStrandsComponent& hair,
     JPH::Vec3Arg          headWorldPosition,
     JPH::QuatArg          headWorldRotation,
     JPH::Vec3Arg          characterVelocity,
     float                 dt
 ) noexcept;
-ZHLN_API void
-    ExtractHairBoneTransforms(const HairStrandsComponent& hair, JPH::QuatArg headWorldRotation, JPH::Mat44* nodeTransforms, const RigBoneMap& map) noexcept;
-ZHLN_API void ExtractHairBoneTransforms(const HairStrandsComponent& hair, JPH::Mat44* nodeTransforms, const RigBoneMap& map) noexcept;
+void ExtractHairBoneTransforms(const HairStrandsComponent& hair, JPH::QuatArg headWorldRotation, JPH::Mat44* nodeTransforms, const RigBoneMap& map) noexcept;
+void ExtractHairBoneTransforms(const HairStrandsComponent& hair, JPH::Mat44* nodeTransforms, const RigBoneMap& map) noexcept;
 
 } // namespace Animation
 
 /** Finds an authored animation by case-insensitive exact name, then substring. */
-ZHLN_API int32_t FindAnimationTrack(const ModelPrefab& prefab, std::string_view name) noexcept;
+int32_t FindAnimationTrack(const ModelPrefab& prefab, std::string_view name) noexcept;
 
 /**
  * Builds a map for an imported glTF rig. Matching is case/separator insensitive
  * and accepts common Blender, Mixamo, and TestRig aliases.
  */
-ZHLN_API bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMap& outMap) noexcept;
+bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMap& outMap) noexcept;
 
 /** Builds the same hierarchy procedurally for the self-contained sample. */
-ZHLN_API void BuildStandardProceduralRig(RigBoneMap& outMap) noexcept;
+void BuildStandardProceduralRig(RigBoneMap& outMap) noexcept;
 
 /** Draws the most recently evaluated pose, including contact normals and hair. */
-ZHLN_API void DrawProceduralDebugRig(
+void DrawProceduralDebugRig(
     RenderContext&                       renderContext,
     JPH::Vec3Arg                         rootPosition,
     JPH::QuatArg                         rootRotation,
     const RigBoneMap&                    boneMap,
     const ProceduralLocomotionComponent* gait = nullptr
 ) noexcept;
+
+namespace ProceduralAnimation {
+
+/** Registers ECS types and inserts the optional evaluator before articulation. */
+void Register(Engine& engine);
+/** Direct evaluation entry point for custom schedules. */
+void Update(Engine& engine, float dt) noexcept;
+void DrawDebugRig(
+    RenderContext&                       renderContext,
+    JPH::Vec3Arg                         rootPosition,
+    JPH::QuatArg                         rootRotation,
+    const RigBoneMap&                    boneMap,
+    const ProceduralLocomotionComponent* gait = nullptr
+) noexcept;
+
+} // namespace ProceduralAnimation
 
 } // namespace ZHLN
