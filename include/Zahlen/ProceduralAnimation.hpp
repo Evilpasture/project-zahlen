@@ -85,18 +85,18 @@ struct alignas(64) RigBoneMap {
     std::array<JPH::Mat44, kMaxRigNodes> localTransforms {};
     std::array<JPH::Mat44, kMaxRigNodes> modelTransforms {};
 
-    // Critically damped keyframe state for the 21 semantic controls. Authored
-    // clip samples become spring targets; procedural passes then layer on top.
+    // Spring-damper keyframe state for the 21 semantic controls. Authored clip
+    // samples become physical targets; procedural passes then layer on top.
     std::array<JPH::Vec3, kCoreBoneCount> poseTranslations {};
     std::array<JPH::Vec3, kCoreBoneCount> poseTranslationVelocities {};
     std::array<JPH::Quat, kCoreBoneCount> poseRotations {};
     std::array<JPH::Vec3, kCoreBoneCount> poseAngularVelocities {};
     std::array<JPH::Vec3, kCoreBoneCount> poseScales {};
     std::array<JPH::Vec3, kCoreBoneCount> poseScaleVelocities {};
-    float                                 poseSpringFrequency   = 8.0f;
-    float                                 poseSpringDamping     = 0.90f;
-    int32_t                               springPoseTrack       = -1;
-    bool                                  springPoseInitialized = false;
+    float                                 poseSpringStiffness     = 2500.0f;
+    float                                 poseSpringDampingFactor = 0.90f;
+    int32_t                               springPoseTrack         = -1;
+    bool                                  springPoseInitialized   = false;
 
     const ModelPrefab* sourcePrefab  = nullptr;
     uint32_t           nodeCount     = 0;
@@ -194,8 +194,18 @@ struct ProceduralLookAtComponent {
     float     maxAngleDeg    = 75.0f;
 };
 
-/** Runtime layer switches for animation authoring and isolation workflows. */
+enum class PoseInterpolationMode : uint8_t {
+    Bicubic,
+    SpringDamper,
+};
+
+/** Runtime layer switches and pose interpolation settings. */
 struct ProceduralAnimationConfigComponent {
+    PoseInterpolationMode poseInterpolation   = PoseInterpolationMode::SpringDamper;
+    float                 springStiffness     = 2500.0f;
+    float                 springDampingFactor = 0.90f;
+    float                 bicubicTension      = 0.0f;
+
     bool enableGait             = true;
     bool enableGravityBounce    = true;
     bool enableLegIK            = true;
@@ -204,7 +214,7 @@ struct ProceduralAnimationConfigComponent {
     bool enableSecondaryMotion  = true;
 
     // Overrides all switches above and evaluates only the authored keyframe
-    // pose, minimum-jerk key sampling, and semantic pose springs.
+    // pose through the selected bicubic or spring-damper interpolator.
     bool keyframeOnly = false;
 };
 

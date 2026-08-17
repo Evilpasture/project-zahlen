@@ -275,29 +275,30 @@ void ResetRigBoneMap(RigBoneMap& map) noexcept {
     return value * value * value * (value * (value * 6.0f - 15.0f) + 10.0f);
 }
 
-void SpringVector(JPH::Vec3& value, JPH::Vec3& velocity, JPH::Vec3Arg target, float dt, float frequency, float damping) noexcept {
-    const float     safeDt   = std::clamp(dt, 0.0f, 0.05f);
-    const float     omega    = 2.0f * std::numbers::pi_v<float> * std::max(frequency, 0.01f);
-    const float     f        = 1.0f + 2.0f * safeDt * std::max(damping, 0.0f) * omega;
-    const float     oo       = omega * omega;
-    const float     hoo      = safeDt * oo;
-    const float     hhoo     = safeDt * hoo;
-    const float     invDet   = 1.0f / (f + hhoo);
-    const JPH::Vec3 oldValue = value;
-    value                    = (value * f + velocity * safeDt + JPH::Vec3(target) * hhoo) * invDet;
-    velocity                 = (velocity + (JPH::Vec3(target) - oldValue) * hoo) * invDet;
+void SpringVector(JPH::Vec3& value, JPH::Vec3& velocity, JPH::Vec3Arg target, float dt, float stiffness, float dampingFactor) noexcept {
+    const float     safeDt             = std::clamp(dt, 0.0f, 0.05f);
+    const float     safeStiffness      = std::max(stiffness, 0.0f);
+    const float     dampingCoefficient = 2.0f * std::sqrt(safeStiffness) * std::max(dampingFactor, 0.0f);
+    const float     f                  = 1.0f + safeDt * dampingCoefficient;
+    const float     hoo                = safeDt * safeStiffness;
+    const float     hhoo               = safeDt * hoo;
+    const float     invDet             = 1.0f / (f + hhoo);
+    const JPH::Vec3 oldValue           = value;
+    value                              = (value * f + velocity * safeDt + JPH::Vec3(target) * hhoo) * invDet;
+    velocity                           = (velocity + (JPH::Vec3(target) - oldValue) * hoo) * invDet;
 }
 
-void SpringRotation(JPH::Quat& value, JPH::Vec3& angularVelocity, JPH::QuatArg target, float dt, float frequency, float damping) noexcept {
-    const float safeDt = std::clamp(dt, 0.0f, 0.05f);
-    const float omega  = 2.0f * std::numbers::pi_v<float> * std::max(frequency, 0.01f);
-    JPH::Quat   error  = (target * value.Inversed()).Normalized();
+void SpringRotation(JPH::Quat& value, JPH::Vec3& angularVelocity, JPH::QuatArg target, float dt, float stiffness, float dampingFactor) noexcept {
+    const float safeDt             = std::clamp(dt, 0.0f, 0.05f);
+    const float safeStiffness      = std::max(stiffness, 0.0f);
+    const float dampingCoefficient = 2.0f * std::sqrt(safeStiffness) * std::max(dampingFactor, 0.0f);
+    JPH::Quat   error              = (target * value.Inversed()).Normalized();
     JPH::Vec3   axis;
     float       angle = 0.0f;
     error.GetAxisAngle(axis, angle);
     const JPH::Vec3 errorVector = axis * angle;
-    const float     denominator = 1.0f + 2.0f * std::max(damping, 0.0f) * omega * safeDt + omega * omega * safeDt * safeDt;
-    angularVelocity             = (angularVelocity + errorVector * (omega * omega * safeDt)) / denominator;
+    const float     denominator = 1.0f + dampingCoefficient * safeDt + safeStiffness * safeDt * safeDt;
+    angularVelocity             = (angularVelocity + errorVector * (safeStiffness * safeDt)) / denominator;
 
     const JPH::Vec3 rotationStep = angularVelocity * safeDt;
     const float     stepAngle    = rotationStep.Length();
@@ -306,18 +307,65 @@ void SpringRotation(JPH::Quat& value, JPH::Vec3& angularVelocity, JPH::QuatArg t
     }
 }
 
-void SamplePoseChannel(const AnimationChannel& channel, float time, JPH::Vec3& translation, JPH::Quat& rotation, JPH::Vec3& scale) noexcept {
+[[nodiscard]] JPH::Vec3 BicubicVector(JPH::Vec3Arg p0, JPH::Vec3Arg p1, JPH::Vec3Arg p2, JPH::Vec3Arg p3, float phase, float tension) noexcept {
+    const float     tangentScale = 0.5f * (1.0f - std::clamp(tension, -1.0f, 1.0f));
+    const JPH::Vec3 tangent1     = (p2 - p0) * tangentScale;
+    const JPH::Vec3 tangent2     = (p3 - p1) * tangentScale;
+    const float     t2           = phase * phase;
+    const float     t3           = t2 * phase;
+    const float     h00          = 2.0f * t3 - 3.0f * t2 + 1.0f;
+    const float     h10          = t3 - 2.0f * t2 + phase;
+    const float     h01          = -2.0f * t3 + 3.0f * t2;
+    const float     h11          = t3 - t2;
+    return p1 * h00 + tangent1 * h10 + p2 * h01 + tangent2 * h11;
+}
+
+[[nodiscard]] float QuaternionDot(JPH::QuatArg a, JPH::QuatArg b) noexcept {
+    return a.GetX() * b.GetX() + a.GetY() * b.GetY() + a.GetZ() * b.GetZ() + a.GetW() * b.GetW();
+}
+
+[[nodiscard]] JPH::Quat AlignQuaternionHemisphere(JPH::QuatArg value, JPH::QuatArg reference) noexcept {
+    return QuaternionDot(value, reference) < 0.0f ? JPH::Quat(-value.GetX(), -value.GetY(), -value.GetZ(), -value.GetW()) : JPH::Quat(value);
+}
+
+[[nodiscard]] JPH::Quat BicubicRotation(JPH::QuatArg q0, JPH::QuatArg q1, JPH::QuatArg q2, JPH::QuatArg q3, float phase, float tension) noexcept {
+    const JPH::Quat p1  = q1.Normalized();
+    const JPH::Quat p0  = AlignQuaternionHemisphere(q0.Normalized(), p1);
+    const JPH::Quat p2  = AlignQuaternionHemisphere(q2.Normalized(), p1);
+    const JPH::Quat p3  = AlignQuaternionHemisphere(q3.Normalized(), p1);
+    const JPH::Vec3 xyz = BicubicVector(p0.GetXYZ(), p1.GetXYZ(), p2.GetXYZ(), p3.GetXYZ(), phase, tension);
+
+    const float tangentScale = 0.5f * (1.0f - std::clamp(tension, -1.0f, 1.0f));
+    const float tangent1     = (p2.GetW() - p0.GetW()) * tangentScale;
+    const float tangent2     = (p3.GetW() - p1.GetW()) * tangentScale;
+    const float t2           = phase * phase;
+    const float t3           = t2 * phase;
+    const float w            = p1.GetW() * (2.0f * t3 - 3.0f * t2 + 1.0f) + tangent1 * (t3 - 2.0f * t2 + phase) + p2.GetW() * (-2.0f * t3 + 3.0f * t2) +
+                               tangent2 * (t3 - t2);
+    return JPH::Quat(xyz.GetX(), xyz.GetY(), xyz.GetZ(), w).Normalized();
+}
+
+void SamplePoseChannel(
+    const AnimationChannel& channel,
+    float                   time,
+    PoseInterpolationMode   mode,
+    float                   bicubicTension,
+    JPH::Vec3&              translation,
+    JPH::Quat&              rotation,
+    JPH::Vec3&              scale
+) noexcept {
     if (channel.keyTimes.empty() || channel.keyValues.empty()) {
         return;
     }
 
-    const auto   upper  = std::ranges::upper_bound(channel.keyTimes, time);
-    const size_t index1 = upper == channel.keyTimes.end() ? channel.keyTimes.size() - 1 : static_cast<size_t>(std::distance(channel.keyTimes.begin(), upper));
-    const size_t index0 = index1 > 0 ? index1 - 1 : 0;
-    const float  time0  = channel.keyTimes[index0];
-    const float  time1  = channel.keyTimes[index1];
-    float        phase  = time1 > time0 ? (time - time0) / (time1 - time0) : 0.0f;
-    phase               = channel.interpolation == InterpolationType::Step ? 0.0f : SmootherStep(phase);
+    const auto   upper    = std::ranges::upper_bound(channel.keyTimes, time);
+    const size_t index1   = upper == channel.keyTimes.end() ? channel.keyTimes.size() - 1 : static_cast<size_t>(std::distance(channel.keyTimes.begin(), upper));
+    const size_t index0   = index1 > 0 ? index1 - 1 : 0;
+    const float  time0    = channel.keyTimes[index0];
+    const float  time1    = channel.keyTimes[index1];
+    float        rawPhase = time1 > time0 ? std::clamp((time - time0) / (time1 - time0), 0.0f, 1.0f) : 0.0f;
+    const bool   useBicubic = mode == PoseInterpolationMode::Bicubic && channel.interpolation != InterpolationType::Step;
+    const float  phase      = channel.interpolation == InterpolationType::Step ? 0.0f : (useBicubic ? rawPhase : SmootherStep(rawPhase));
 
     const size_t components   = channel.path == AnimationPathType::Rotation ? 4u : 3u;
     const size_t valuesPerKey = channel.keyValues.size() / channel.keyTimes.size();
@@ -325,28 +373,43 @@ void SamplePoseChannel(const AnimationChannel& channel, float time, JPH::Vec3& t
         return;
     }
     const size_t valueOffset = channel.interpolation == InterpolationType::CubicSpline && valuesPerKey >= components * 3 ? components : 0u;
-    const float* value0      = channel.keyValues.data() + index0 * valuesPerKey + valueOffset;
-    const float* value1      = channel.keyValues.data() + index1 * valuesPerKey + valueOffset;
+    const size_t indexPrev   = index0 > 0 ? index0 - 1 : index0;
+    const size_t indexNext   = std::min(index1 + 1, channel.keyTimes.size() - 1);
+    const auto   valueAt     = [&](size_t key) { return channel.keyValues.data() + key * valuesPerKey + valueOffset; };
+    const float* valuePrev   = valueAt(indexPrev);
+    const float* value0      = valueAt(index0);
+    const float* value1      = valueAt(index1);
+    const float* valueNext   = valueAt(indexNext);
 
-    if (channel.path == AnimationPathType::Translation) {
-        const JPH::Vec3 a(value0[0], value0[1], value0[2]);
-        const JPH::Vec3 b(value1[0], value1[1], value1[2]);
-        translation = a + (b - a) * phase;
+    if (channel.path == AnimationPathType::Translation || channel.path == AnimationPathType::Scale) {
+        const JPH::Vec3 p0(valuePrev[0], valuePrev[1], valuePrev[2]);
+        const JPH::Vec3 p1(value0[0], value0[1], value0[2]);
+        const JPH::Vec3 p2(value1[0], value1[1], value1[2]);
+        const JPH::Vec3 p3(valueNext[0], valueNext[1], valueNext[2]);
+        const JPH::Vec3 result = useBicubic ? BicubicVector(p0, p1, p2, p3, phase, bicubicTension) : p1 + (p2 - p1) * phase;
+        if (channel.path == AnimationPathType::Translation) {
+            translation = result;
+        } else {
+            scale = result;
+        }
     } else if (channel.path == AnimationPathType::Rotation) {
-        const JPH::Quat a(value0[0], value0[1], value0[2], value0[3]);
-        const JPH::Quat b(value1[0], value1[1], value1[2], value1[3]);
-        rotation = a.Normalized().SLERP(b.Normalized(), phase).Normalized();
-    } else if (channel.path == AnimationPathType::Scale) {
-        const JPH::Vec3 a(value0[0], value0[1], value0[2]);
-        const JPH::Vec3 b(value1[0], value1[1], value1[2]);
-        scale = a + (b - a) * phase;
+        const JPH::Quat q0(valuePrev[0], valuePrev[1], valuePrev[2], valuePrev[3]);
+        const JPH::Quat q1(value0[0], value0[1], value0[2], value0[3]);
+        const JPH::Quat q2(value1[0], value1[1], value1[2], value1[3]);
+        const JPH::Quat q3(valueNext[0], valueNext[1], valueNext[2], valueNext[3]);
+        rotation = useBicubic ? BicubicRotation(q0, q1, q2, q3, phase, bicubicTension) : q1.Normalized().SLERP(q2.Normalized(), phase).Normalized();
     }
 }
 
-void ApplyAuthoredSpringPose(const Components::AnimatorComponent* animator, RigBoneMap& map, float dt) noexcept {
+void ApplyAuthoredPose(const Components::AnimatorComponent* animator, const ProceduralAnimationConfigComponent* config, RigBoneMap& map, float dt) noexcept {
     std::array<JPH::Vec3, kMaxRigNodes> targetTranslations {};
     std::array<JPH::Quat, kMaxRigNodes> targetRotations {};
     std::array<JPH::Vec3, kMaxRigNodes> targetScales {};
+
+    const PoseInterpolationMode mode                = config != nullptr ? config->poseInterpolation : PoseInterpolationMode::SpringDamper;
+    const float                 springStiffness     = config != nullptr ? config->springStiffness : map.poseSpringStiffness;
+    const float                 springDampingFactor = config != nullptr ? config->springDampingFactor : map.poseSpringDampingFactor;
+    const float                 bicubicTension      = config != nullptr ? config->bicubicTension : 0.0f;
 
     for (uint32_t node = 0; node < map.nodeCount; ++node) {
         targetTranslations[node] = map.bindLocalTransforms[node].GetTranslation();
@@ -364,18 +427,19 @@ void ApplyAuthoredSpringPose(const Components::AnimatorComponent* animator, RigB
                 continue;
             }
             const size_t node = static_cast<size_t>(channel.targetNodeIndex);
-            SamplePoseChannel(channel, animator->currentTrackTime, targetTranslations[node], targetRotations[node], targetScales[node]);
+            SamplePoseChannel(channel, animator->currentTrackTime, mode, bicubicTension, targetTranslations[node], targetRotations[node], targetScales[node]);
         }
     }
 
-    // Non-semantic controls (fingers, face, accessories) still receive the
-    // eased authored pose. The 21 semantic controls get a temporal spring so
-    // keyframes and procedural offsets cooperate instead of fighting.
+    // Non-semantic controls (fingers, face, accessories) receive the selected
+    // authored curve directly. In spring-damper mode the 21 semantic controls
+    // use those samples as physical targets; bicubic mode drives all controls
+    // directly from the four-key curve.
     for (uint32_t node = 0; node < map.nodeCount; ++node) {
         map.localTransforms[node] = JPH::Mat44::sRotationTranslation(targetRotations[node], targetTranslations[node]).PreScaled(targetScales[node]);
     }
 
-    if (!map.springPoseInitialized) {
+    if (!map.springPoseInitialized || mode == PoseInterpolationMode::Bicubic) {
         for (size_t semantic = 0; semantic < kCoreBoneCount; ++semantic) {
             const int32_t node = map.nodeIndices[semantic];
             if (node < 0 || node >= static_cast<int32_t>(map.nodeCount)) {
@@ -390,6 +454,10 @@ void ApplyAuthoredSpringPose(const Components::AnimatorComponent* animator, RigB
         }
         map.springPoseInitialized = true;
     }
+    if (mode == PoseInterpolationMode::Bicubic) {
+        map.springPoseTrack = activeTrack;
+        return;
+    }
 
     for (size_t semantic = 0; semantic < kCoreBoneCount; ++semantic) {
         const int32_t node = map.nodeIndices[semantic];
@@ -398,13 +466,10 @@ void ApplyAuthoredSpringPose(const Components::AnimatorComponent* animator, RigB
         }
         const size_t nodeIndex = static_cast<size_t>(node);
         SpringVector(
-            map.poseTranslations[semantic], map.poseTranslationVelocities[semantic], targetTranslations[nodeIndex], dt, map.poseSpringFrequency,
-            map.poseSpringDamping
+            map.poseTranslations[semantic], map.poseTranslationVelocities[semantic], targetTranslations[nodeIndex], dt, springStiffness, springDampingFactor
         );
-        SpringRotation(
-            map.poseRotations[semantic], map.poseAngularVelocities[semantic], targetRotations[nodeIndex], dt, map.poseSpringFrequency, map.poseSpringDamping
-        );
-        SpringVector(map.poseScales[semantic], map.poseScaleVelocities[semantic], targetScales[nodeIndex], dt, map.poseSpringFrequency, map.poseSpringDamping);
+        SpringRotation(map.poseRotations[semantic], map.poseAngularVelocities[semantic], targetRotations[nodeIndex], dt, springStiffness, springDampingFactor);
+        SpringVector(map.poseScales[semantic], map.poseScaleVelocities[semantic], targetScales[nodeIndex], dt, springStiffness, springDampingFactor);
         map.localTransforms[nodeIndex] =
             JPH::Mat44::sRotationTranslation(map.poseRotations[semantic], map.poseTranslations[semantic]).PreScaled(map.poseScales[semantic]);
     }
@@ -820,7 +885,7 @@ void ProceduralAnimationSystem::Update(Engine& engine, float dt) noexcept {
             ResolveForwardKinematics(*boneMap);
             Animation::ConfigureHairBindPose(*hair, boneMap->modelTransforms.data(), *boneMap);
         }
-        ApplyAuthoredSpringPose(animator, *boneMap, dt);
+        ApplyAuthoredPose(animator, config, *boneMap, dt);
         ResolveForwardKinematics(*boneMap);
 
         const bool keyframeOnly           = config != nullptr && config->keyframeOnly;

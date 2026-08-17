@@ -94,10 +94,39 @@ authored targets through a damped spring; fingers and other non-semantic nodes
 still receive the eased authored pose directly. Gait, COM tilt, IK, look-at, and
 hair are layered after that base pose.
 
-`RigBoneMap::poseSpringFrequency` and `poseSpringDamping` tune the authored-pose
-response. Acceleration pitch and roll use their own springs and rotate the whole
-hips subtree around the estimated center of mass before foot IK re-establishes
-ground contact.
+`ProceduralAnimationConfigComponent::poseInterpolation` selects the authored-pose
+interpolator. `Bicubic` uses four neighboring keys with configurable cardinal
+`bicubicTension`. `SpringDamper` follows the eased key target through a unit-mass
+spring configured by `springStiffness` and `springDampingFactor`. A damping factor
+of `1` is critical damping, values below `1` overshoot, and values above `1` are
+overdamped.
+
+```cpp
+registry.Add(character, ZHLN::ProceduralAnimationConfigComponent {
+    .poseInterpolation = ZHLN::PoseInterpolationMode::Bicubic,
+    .bicubicTension = 0.0f,
+});
+
+registry.Add(character, ZHLN::ProceduralAnimationConfigComponent {
+    .poseInterpolation = ZHLN::PoseInterpolationMode::SpringDamper,
+    .springStiffness = 2500.0f,
+    .springDampingFactor = 0.90f,
+});
+```
+
+The sample exposes the same selection without recompiling:
+
+```bash
+ZHLN_POSE_INTERPOLATION=bicubic ZHLN_BICUBIC_TENSION=0.0 \
+    ./build/samples/ProceduralAnimationSample
+
+ZHLN_POSE_INTERPOLATION=spring ZHLN_SPRING_STIFFNESS=2500 \
+    ZHLN_SPRING_DAMPING_FACTOR=0.9 ./build/samples/ProceduralAnimationSample
+```
+
+Acceleration pitch and roll use their own springs and rotate the whole hips
+subtree around the estimated center of mass before foot IK re-establishes ground
+contact.
 
 The debug overlay draws a sagittal stride wheel beside the COM. Cyan indicates
 pass-pose landmarks, orange indicates reach-pose landmarks, and the moving spoke
@@ -129,7 +158,7 @@ Disable only analytical leg IK while leaving the gait and upper-body layers on:
 ZHLN_DISABLE_IK=1 ./build/samples/ProceduralAnimationSample
 ```
 
-Evaluate only the authored clip, minimum-jerk key sampling, and pose springs:
+Evaluate only the authored clip and the selected bicubic or spring-damper pose interpolator:
 
 ```bash
 ZHLN_KEYFRAME_ONLY=1 ./build/samples/ProceduralAnimationSample

@@ -52,6 +52,16 @@ inline const JPH::Vec4 kSkyGround {0.20f, 0.28f, 0.20f, 1.0f};
     return text != "0" && text != "false" && text != "FALSE" && text != "off" && text != "OFF";
 }
 
+[[nodiscard]] float EnvironmentFloat(const char* name, float fallback) {
+    const char* value = std::getenv(name);
+    if (value == nullptr || value[0] == '\0') {
+        return fallback;
+    }
+    char*       end    = nullptr;
+    const float parsed = std::strtof(value, &end);
+    return end != value ? parsed : fallback;
+}
+
 auto BuildProceduralArena(ZHLN::Engine& engine) -> void {
     auto& reg = engine.GetRegistry();
 
@@ -157,10 +167,20 @@ auto AttachCharacterRig(ZHLN::Engine& engine, ZHLN::Entity player, std::string_v
         .weight         = 0.85f,
         .maxAngleDeg    = 70.0f,
     };
+    const char*                              interpolationValue = std::getenv("ZHLN_POSE_INTERPOLATION");
+    const bool                               useBicubic         = interpolationValue != nullptr && std::string_view(interpolationValue) == "bicubic";
     ZHLN::ProceduralAnimationConfigComponent animationConfig {
-        .enableLegIK  = !EnvironmentFlag("ZHLN_DISABLE_IK"),
-        .keyframeOnly = EnvironmentFlag("ZHLN_KEYFRAME_ONLY"),
+        .poseInterpolation   = useBicubic ? ZHLN::PoseInterpolationMode::Bicubic : ZHLN::PoseInterpolationMode::SpringDamper,
+        .springStiffness     = EnvironmentFloat("ZHLN_SPRING_STIFFNESS", 2500.0f),
+        .springDampingFactor = EnvironmentFloat("ZHLN_SPRING_DAMPING_FACTOR", 0.90f),
+        .bicubicTension      = EnvironmentFloat("ZHLN_BICUBIC_TENSION", 0.0f),
+        .enableLegIK         = !EnvironmentFlag("ZHLN_DISABLE_IK"),
+        .keyframeOnly        = EnvironmentFlag("ZHLN_KEYFRAME_ONLY"),
     };
+    ZHLN::Log(
+        "[Sample] Pose interpolation: {} (stiffness={}, damping factor={}, bicubic tension={}).", useBicubic ? "bicubic" : "spring-damper",
+        animationConfig.springStiffness, animationConfig.springDampingFactor, animationConfig.bicubicTension
+    );
     if (animationConfig.keyframeOnly) {
         ZHLN::Log("[Sample] Keyframe-only isolation enabled; all procedural layers are bypassed.");
     } else if (!animationConfig.enableLegIK) {
