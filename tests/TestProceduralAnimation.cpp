@@ -242,10 +242,10 @@ struct ProceduralAnimationTestSuite {
             const JPH::Quat expectedRotation = JPH::Quat::sRotation(JPH::Vec3::sAxisY(), 0.35f);
             map.modelTransforms[2]           = JPH::Mat44::sRotationTranslation(expectedRotation, expectedPosition).PreScaled(expectedScale);
 
-            ZHLN::ProceduralAnimation::SyncNonSkinnedAttachments(registry, root, map);
-            const auto* attachmentTransform = registry.Get<ZHLN::Components::TransformComponent>(attachment);
-            const auto* skinnedTransform    = registry.Get<ZHLN::Components::TransformComponent>(skinned);
-            if (attachmentTransform == nullptr || !attachmentTransform->position.IsClose(expectedPosition, 0.0001f) ||
+            const size_t synchronizedCount   = ZHLN::ProceduralAnimation::SyncNonSkinnedAttachments(registry, root, map);
+            const auto*  attachmentTransform = registry.Get<ZHLN::Components::TransformComponent>(attachment);
+            const auto*  skinnedTransform    = registry.Get<ZHLN::Components::TransformComponent>(skinned);
+            if (synchronizedCount != 1 || attachmentTransform == nullptr || !attachmentTransform->position.IsClose(expectedPosition, 0.0001f) ||
                 !attachmentTransform->scale.IsClose(expectedScale, 0.0001f) ||
                 !(attachmentTransform->rotation * JPH::Vec3::sAxisZ()).IsClose(expectedRotation * JPH::Vec3::sAxisZ(), 0.0001f) ||
                 skinnedTransform == nullptr || !skinnedTransform->position.IsClose(JPH::Vec3(9.0f, 9.0f, 9.0f), 0.0001f)) {

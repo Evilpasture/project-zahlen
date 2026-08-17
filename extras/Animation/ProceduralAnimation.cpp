@@ -245,16 +245,17 @@ void ResetRigBoneMap(RigBoneMap& map) noexcept {
     map.poseAngularVelocities.fill(JPH::Vec3::sZero());
     map.poseScales.fill(JPH::Vec3::sReplicate(1.0f));
     map.poseScaleVelocities.fill(JPH::Vec3::sZero());
-    map.springPoseTrack       = -1;
-    map.springPoseInitialized = false;
-    map.sourcePrefab          = nullptr;
-    map.nodeCount             = 0;
-    map.jointOffset           = 0;
-    map.jointCount            = 0;
-    map.skeletonIndex         = -1;
-    map.poseVersion           = 0;
-    map.initialized           = false;
-    map.poseValid             = false;
+    map.springPoseTrack             = -1;
+    map.springPoseInitialized       = false;
+    map.sourcePrefab                = nullptr;
+    map.nodeCount                   = 0;
+    map.jointOffset                 = 0;
+    map.jointCount                  = 0;
+    map.skeletonIndex               = -1;
+    map.poseVersion                 = 0;
+    map.synchronizedAttachmentCount = 0;
+    map.initialized                 = false;
+    map.poseValid                   = false;
 }
 
 [[nodiscard]] JPH::Vec3 ExtractScale(const JPH::Mat44& matrix) noexcept {
@@ -893,6 +894,8 @@ void ProceduralAnimation::Register(Engine& engine) {
                 {
                     Read<Components::PhysicsComponent>(),
                     Write<Components::TransformComponent>(),
+                    Read<Components::HierarchyComponent>(),
+                    Read<Components::MeshComponent>(),
                     Read<ProceduralLookAtComponent>(),
                     Read<ProceduralAnimationConfigComponent>(),
                     Read<Components::SkeletalMeshComponent>(),
@@ -912,7 +915,8 @@ void ProceduralAnimation::Register(Engine& engine) {
     }
 }
 
-void ProceduralAnimation::SyncNonSkinnedAttachments(ECS::Registry& registry, Entity rootEntity, const RigBoneMap& boneMap) noexcept {
+size_t ProceduralAnimation::SyncNonSkinnedAttachments(ECS::Registry& registry, Entity rootEntity, const RigBoneMap& boneMap) noexcept {
+    size_t synchronizedCount = 0;
     for (Entity childEntity: registry.GetEntitiesWith<Components::MeshComponent>()) {
         const auto* hierarchy = registry.Get<Components::HierarchyComponent>(childEntity);
         if (hierarchy == nullptr || hierarchy->parent != rootEntity) {
@@ -935,8 +939,10 @@ void ProceduralAnimation::SyncNonSkinnedAttachments(ECS::Registry& registry, Ent
             childTransform->position         = modelTransform.GetTranslation();
             childTransform->rotation         = ExtractRotation(modelTransform);
             childTransform->scale            = ExtractScale(modelTransform);
+            ++synchronizedCount;
         }
     }
+    return synchronizedCount;
 }
 
 void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
@@ -1200,7 +1206,11 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
 
         // Non-skinned child entities are attachments, not palette consumers.
         // Publish their evaluated node TRS before core TransformSystem runs.
-        ProceduralAnimation::SyncNonSkinnedAttachments(registry, entity, *boneMap);
+        const size_t previousAttachmentCount = boneMap->synchronizedAttachmentCount;
+        boneMap->synchronizedAttachmentCount = ProceduralAnimation::SyncNonSkinnedAttachments(registry, entity, *boneMap);
+        if (boneMap->poseVersion == 1 || previousAttachmentCount != boneMap->synchronizedAttachmentCount) {
+            ZHLN::Log("[ProceduralAnimation] Entity {} synchronized {} non-skinned node attachments.", entity.index, boneMap->synchronizedAttachmentCount);
+        }
     }
 }
 

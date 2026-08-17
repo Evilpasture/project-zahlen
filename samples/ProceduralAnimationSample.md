@@ -37,7 +37,9 @@ the generic core `ArticulationSystem` phase. Core knows only about
 When a procedural entity gains `RagdollComponent`, the extras evaluator creates
 a missing `KinematicPoseOverrideComponent` automatically before publishing its
 motor target, so articulation cannot silently fall back to bind pose because of
-a spawn omission.
+a spawn omission. The evaluator also logs the number of non-skinned node
+attachments synchronized for each character; a zero count immediately exposes a
+hierarchy/spawn binding issue rather than silently freezing an attachment.
 
 Run the same sample with another packed GLB without editing C++:
 
