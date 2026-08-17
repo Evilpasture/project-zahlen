@@ -131,16 +131,18 @@ struct ProceduralAnimationTestSuite {
             gait.strideLength = 1.60f;
 
             ZHLN::Animation::EvaluateGait(gait, JPH::Vec3(0.0f, 0.0f, 4.0f), 0.25f);
-            const bool phaseIsDistanceDriven = std::abs(gait.phase - 0.625f) < 0.0001f;
-            const bool feetAreOpposed        = gait.plantWeightL != gait.plantWeightR;
-            const bool accelerationIsFinite  = std::isfinite(gait.directionalAcceleration.GetZ());
-            const bool wheelTracksPhase      = std::abs(gait.strideWheelAngle - gait.phase * 2.0f * std::numbers::pi_v<float>) < 0.0001f;
-            const bool passReachPartition    = std::abs(gait.passWeightL + gait.reachWeightL - 1.0f) < 0.0001f;
-            const bool twoKeySynchronization = std::abs(ZHLN::Animation::EvaluateTwoKeyPosePhase(0.0f)) < 0.0001f &&
-                                               std::abs(ZHLN::Animation::EvaluateTwoKeyPosePhase(0.25f) - 0.5f) < 0.0001f &&
-                                               std::abs(ZHLN::Animation::EvaluateTwoKeyPosePhase(0.5f) - 1.0f) < 0.0001f &&
-                                               std::abs(ZHLN::Animation::EvaluateTwoKeyPosePhase(0.75f) - 0.5f) < 0.0001f;
-            if (!phaseIsDistanceDriven || !feetAreOpposed || !accelerationIsFinite || !wheelTracksPhase || !passReachPartition || !twoKeySynchronization) {
+            const bool phaseIsDistanceDriven  = std::abs(gait.phase - 0.625f) < 0.0001f;
+            const bool feetAreOpposed         = gait.plantWeightL != gait.plantWeightR;
+            const bool authoredSwingPreserved = gait.plantWeightR < 0.001f && gait.plantWeightL > 0.99f;
+            const bool accelerationIsFinite   = std::isfinite(gait.directionalAcceleration.GetZ());
+            const bool wheelTracksPhase       = std::abs(gait.strideWheelAngle - gait.phase * 2.0f * std::numbers::pi_v<float>) < 0.0001f;
+            const bool passReachPartition     = std::abs(gait.passWeightL + gait.reachWeightL - 1.0f) < 0.0001f;
+            const bool twoKeySynchronization  = std::abs(ZHLN::Animation::EvaluateTwoKeyPosePhase(0.0f)) < 0.0001f &&
+                                                std::abs(ZHLN::Animation::EvaluateTwoKeyPosePhase(0.25f) - 0.5f) < 0.0001f &&
+                                                std::abs(ZHLN::Animation::EvaluateTwoKeyPosePhase(0.5f) - 1.0f) < 0.0001f &&
+                                                std::abs(ZHLN::Animation::EvaluateTwoKeyPosePhase(0.75f) - 0.5f) < 0.0001f;
+            if (!phaseIsDistanceDriven || !feetAreOpposed || !authoredSwingPreserved || !accelerationIsFinite || !wheelTracksPhase || !passReachPartition ||
+                !twoKeySynchronization) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
             return {};

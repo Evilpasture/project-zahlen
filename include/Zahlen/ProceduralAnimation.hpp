@@ -207,6 +207,7 @@ struct ProceduralAnimationConfigComponent {
     float                 springStiffness     = 2500.0f;
     float                 springDampingFactor = 0.90f;
     float                 bicubicTension      = 0.0f;
+    float                 legIKWeight         = 0.85f;
 
     bool enableGait             = true;
     bool enableGravityBounce    = true;
@@ -252,7 +253,8 @@ ZHLN_API void SolveLegGrounding(
     ProceduralLocomotionComponent& gait,
     JPH::Mat44*                    nodeTransforms,
     const RigBoneMap&              map,
-    Entity                         ignoredPhysicsHandle = {}
+    Entity                         ignoredPhysicsHandle = {},
+    float                          ikWeight             = 1.0f
 ) noexcept;
 ZHLN_API void SolveUpperBody(
     const ProceduralLocomotionComponent& gait,

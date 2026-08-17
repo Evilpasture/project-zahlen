@@ -170,11 +170,17 @@ the sample to compare the normal-speed arc against the flatter sprint arc.
 
 ## Isolation switches
 
-Disable only analytical leg IK while leaving the gait and upper-body layers on:
+Leg IK is plant-weighted: authored walk/run keys drive the complete swing phase,
+while grounding blends in only during stance. Tune the stance correction or turn
+it off entirely:
 
 ```bash
+ZHLN_LEG_IK_WEIGHT=0.65 ./build/samples/ProceduralAnimationSample
 ZHLN_DISABLE_IK=1 ./build/samples/ProceduralAnimationSample
 ```
+
+`legIKWeight=0` preserves authored legs; `1` gives full terrain correction at the
+center of the plant interval. Touchdown and toe-off use smooth nonlinear fades.
 
 Evaluate only the authored clip and the selected bicubic or spring-damper pose interpolator:
 

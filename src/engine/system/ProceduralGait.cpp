@@ -28,6 +28,11 @@ namespace Detail {
     return value < 0.0f ? value + 1.0f : value;
 }
 
+[[nodiscard]] inline float SmoothStep(float value) noexcept {
+    value = std::clamp(value, 0.0f, 1.0f);
+    return value * value * (3.0f - 2.0f * value);
+}
+
 inline void SpringScalar(float& value, float& velocity, float target, float dt, float frequency, float damping) noexcept {
     const float safeDt   = std::clamp(dt, 0.0f, 0.05f);
     const float omega    = kGaitTwoPi * std::max(frequency, 0.01f);
@@ -85,6 +90,16 @@ inline void TranslateSubtree(const RigBoneMap& map, JPH::Mat44* transforms, int3
 
 [[nodiscard]] inline JPH::Mat44 WithoutScale(const JPH::Mat44& matrix) noexcept {
     return JPH::Mat44::sRotationTranslation(MatrixRotation(matrix), matrix.GetTranslation());
+}
+
+[[nodiscard]] inline JPH::Mat44 BlendTransform(const JPH::Mat44& authored, const JPH::Mat44& solved, float weight) noexcept {
+    const float     easedWeight   = SmoothStep(weight);
+    const JPH::Vec3 translation   = authored.GetTranslation() + (solved.GetTranslation() - authored.GetTranslation()) * easedWeight;
+    const JPH::Vec3 authoredScale = MatrixScale(authored);
+    const JPH::Vec3 solvedScale   = MatrixScale(solved);
+    const JPH::Vec3 scale         = authoredScale + (solvedScale - authoredScale) * easedWeight;
+    const JPH::Quat rotation      = MatrixRotation(authored).SLERP(MatrixRotation(solved), easedWeight).Normalized();
+    return JPH::Mat44::sRotationTranslation(rotation, translation).PreScaled(scale);
 }
 
 inline void RotateSubtreeAroundPivot(const RigBoneMap& map, JPH::Mat44* transforms, int32_t rootNode, JPH::Vec3Arg pivot, JPH::QuatArg rotation) noexcept {
@@ -177,7 +192,14 @@ void EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg velocity, fl
 
         target.SetY(y);
         target.SetZ(z);
-        plantWeight = isSwing ? 0.0f : 1.0f;
+        if (isSwing) {
+            plantWeight = 0.0f;
+        } else {
+            constexpr float kContactBlendFraction = 0.12f;
+            const float     fadeIn                = Detail::SmoothStep(t / kContactBlendFraction);
+            const float     fadeOut               = Detail::SmoothStep((1.0f - t) / kContactBlendFraction);
+            plantWeight                           = fadeIn * fadeOut;
+        }
 
         const float wheelPass  = std::sin(kGaitTwoPi * p);
         const float wheelReach = std::cos(kGaitTwoPi * p);
@@ -261,7 +283,8 @@ void SolveLegGrounding(
     ProceduralLocomotionComponent& gait,
     JPH::Mat44*                    nodeTransforms,
     const RigBoneMap&              map,
-    Entity                         ignoredPhysicsHandle
+    Entity                         ignoredPhysicsHandle,
+    float                          ikWeight
 ) noexcept {
     if (nodeTransforms == nullptr || map.nodeCount == 0) {
         return;
@@ -341,7 +364,12 @@ void SolveLegGrounding(
     ApplyPelvisGaitOffset(gait, nodeTransforms, map, true);
 
     auto solveLeg = [&](CharacterBone thighBone, CharacterBone shinBone, CharacterBone footBone, CharacterBone toeBone, JPH::Vec3Arg target,
-                        JPH::Vec3Arg worldNormal) {
+                        JPH::Vec3Arg worldNormal, float plantWeight) {
+        const float solveWeight = std::clamp(plantWeight * ikWeight, 0.0f, 1.0f);
+        if (solveWeight <= 0.001f) {
+            return; // Preserve the authored swing pose completely.
+        }
+
         const int32_t thighNode = Detail::Node(map, thighBone);
         const int32_t shinNode  = Detail::Node(map, shinBone);
         const int32_t footNode  = Detail::Node(map, footBone);
@@ -379,29 +407,40 @@ void SolveLegGrounding(
         upperBindDirection           = Detail::SafeNormalized(upperBindDirection, JPH::Vec3(0.0f, -1.0f, 0.0f));
         lowerBindDirection           = Detail::SafeNormalized(lowerBindDirection, JPH::Vec3(0.0f, -1.0f, 0.0f));
 
-        const JPH::Vec3 thighScale = Detail::MatrixScale(nodeTransforms[thighNode]);
-        const JPH::Vec3 shinScale  = Detail::MatrixScale(nodeTransforms[shinNode]);
-        const JPH::Vec3 footScale  = Detail::MatrixScale(nodeTransforms[footNode]);
-        nodeTransforms[thighNode] =
-            IK::AlignNodeToDirection(Detail::WithoutScale(nodeTransforms[thighNode]), upperBindDirection, ik.upperDirection).PreScaled(thighScale);
-        nodeTransforms[shinNode].SetTranslation(ik.midPosition);
-        nodeTransforms[shinNode] =
-            IK::AlignNodeToDirection(Detail::WithoutScale(nodeTransforms[shinNode]), lowerBindDirection, ik.lowerDirection).PreScaled(shinScale);
+        const JPH::Mat44 authoredThigh = nodeTransforms[thighNode];
+        const JPH::Mat44 authoredShin  = nodeTransforms[shinNode];
+        const JPH::Mat44 authoredFoot  = nodeTransforms[footNode];
+        const JPH::Vec3  thighScale    = Detail::MatrixScale(authoredThigh);
+        const JPH::Vec3  shinScale     = Detail::MatrixScale(authoredShin);
+        const JPH::Vec3  footScale     = Detail::MatrixScale(authoredFoot);
 
-        nodeTransforms[footNode].SetTranslation(target);
+        const JPH::Mat44 solvedThigh =
+            IK::AlignNodeToDirection(Detail::WithoutScale(authoredThigh), upperBindDirection, ik.upperDirection).PreScaled(thighScale);
+        JPH::Mat44 solvedShin = authoredShin;
+        solvedShin.SetTranslation(ik.midPosition);
+        solvedShin = IK::AlignNodeToDirection(Detail::WithoutScale(solvedShin), lowerBindDirection, ik.lowerDirection).PreScaled(shinScale);
+
+        JPH::Mat44 solvedFoot = authoredFoot;
+        solvedFoot.SetTranslation(target);
         const JPH::Vec3 modelNormal = Detail::SafeNormalized(inverseRootRot * worldNormal, JPH::Vec3::sAxisY());
-        const JPH::Vec3 currentUp   = Detail::SafeNormalized(nodeTransforms[footNode].Multiply3x3(JPH::Vec3::sAxisY()), JPH::Vec3::sAxisY());
+        const JPH::Vec3 currentUp   = Detail::SafeNormalized(solvedFoot.Multiply3x3(JPH::Vec3::sAxisY()), JPH::Vec3::sAxisY());
         const JPH::Quat ankleAlign  = JPH::Quat::sFromTo(currentUp, modelNormal);
-        const JPH::Quat footRot     = Detail::MatrixRotation(nodeTransforms[footNode]);
-        nodeTransforms[footNode]    = JPH::Mat44::sRotationTranslation((ankleAlign * footRot).Normalized(), target).PreScaled(footScale);
+        const JPH::Quat footRot     = Detail::MatrixRotation(solvedFoot);
+        solvedFoot                  = JPH::Mat44::sRotationTranslation((ankleAlign * footRot).Normalized(), target).PreScaled(footScale);
+
+        nodeTransforms[thighNode] = Detail::BlendTransform(authoredThigh, solvedThigh, solveWeight);
+        nodeTransforms[shinNode]  = Detail::BlendTransform(authoredShin, solvedShin, solveWeight);
+        nodeTransforms[footNode]  = Detail::BlendTransform(authoredFoot, solvedFoot, solveWeight);
 
         if (toeNode >= 0 && toeNode < static_cast<int32_t>(map.nodeCount)) {
-            nodeTransforms[toeNode] = nodeTransforms[footNode] * map.bindLocalTransforms[static_cast<size_t>(toeNode)];
+            const JPH::Mat44 authoredToe = nodeTransforms[toeNode];
+            const JPH::Mat44 solvedToe   = solvedFoot * map.bindLocalTransforms[static_cast<size_t>(toeNode)];
+            nodeTransforms[toeNode]      = Detail::BlendTransform(authoredToe, solvedToe, solveWeight);
         }
     };
 
-    solveLeg(CharacterBone::ThighL, CharacterBone::ShinL, CharacterBone::FootL, CharacterBone::ToeL, targetModelL, contactL.normal);
-    solveLeg(CharacterBone::ThighR, CharacterBone::ShinR, CharacterBone::FootR, CharacterBone::ToeR, targetModelR, contactR.normal);
+    solveLeg(CharacterBone::ThighL, CharacterBone::ShinL, CharacterBone::FootL, CharacterBone::ToeL, targetModelL, contactL.normal, gait.plantWeightL);
+    solveLeg(CharacterBone::ThighR, CharacterBone::ShinR, CharacterBone::FootR, CharacterBone::ToeR, targetModelR, contactR.normal, gait.plantWeightR);
 }
 
 /** Stage 4: anti-phase arm swing and distributed look-at. */

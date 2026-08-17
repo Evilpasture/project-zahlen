@@ -174,6 +174,7 @@ auto AttachCharacterRig(ZHLN::Engine& engine, ZHLN::Entity player, std::string_v
         .springStiffness     = EnvironmentFloat("ZHLN_SPRING_STIFFNESS", 2500.0f),
         .springDampingFactor = EnvironmentFloat("ZHLN_SPRING_DAMPING_FACTOR", 0.90f),
         .bicubicTension      = EnvironmentFloat("ZHLN_BICUBIC_TENSION", 0.0f),
+        .legIKWeight         = EnvironmentFloat("ZHLN_LEG_IK_WEIGHT", 0.85f),
         .enableLegIK         = !EnvironmentFlag("ZHLN_DISABLE_IK"),
         .authoredPoseOnly    = EnvironmentFlag("ZHLN_AUTHORED_POSE_ONLY") || EnvironmentFlag("ZHLN_KEYFRAME_ONLY"),
     };
@@ -181,6 +182,7 @@ auto AttachCharacterRig(ZHLN::Engine& engine, ZHLN::Entity player, std::string_v
         "[Sample] Pose interpolation: {} (stiffness={}, damping factor={}, bicubic tension={}).", useBicubic ? "bicubic" : "spring-damper",
         animationConfig.springStiffness, animationConfig.springDampingFactor, animationConfig.bicubicTension
     );
+    ZHLN::Log("[Sample] Leg IK is plant-only with weight {}.", animationConfig.enableLegIK ? animationConfig.legIKWeight : 0.0f);
     if (animationConfig.authoredPoseOnly) {
         ZHLN::Log("[Sample] Authored-pose-only isolation enabled; all procedural layers are bypassed.");
     } else if (!animationConfig.enableLegIK) {
