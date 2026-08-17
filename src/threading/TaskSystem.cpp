@@ -206,11 +206,26 @@ void Dispatch(std::span<const Task> tasks, Counter* counter) {
         counter->value.fetch_add(tasks.size(), std::memory_order::relaxed);
     }
 
+    Fiber*     currentFiber   = Fiber::GetCurrent();
+    const bool nestedDispatch = currentFiber != nullptr && !currentFiber->isMain;
+
     for (const auto& task: tasks) {
-        // Pull allocation-free from the single-element local cache first
+        // A task fiber must never block waiting for another free fiber: all
+        // workers can otherwise hold parents while nested ParallelFor calls wait
+        // for a pool entry that cannot become free. Prefer a cached/global fiber,
+        // then execute inline as cooperative work when the pool is saturated.
         Fiber* f = PopLocalFiber();
         if (f == nullptr) {
-            f = s_freeQueue.PopOrWait();
+            f = nestedDispatch ? s_freeQueue.TryPop() : s_freeQueue.PopOrWait();
+        }
+        if (f == nullptr) {
+            if (task.func != nullptr) {
+                task.func(task.arg);
+            }
+            if (counter != nullptr) {
+                counter->value.fetch_sub(1, std::memory_order::release);
+            }
+            continue;
         }
 
         auto* data    = static_cast<FiberData*>(f->arg);

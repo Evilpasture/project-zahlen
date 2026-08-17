@@ -83,6 +83,36 @@ struct TaskSystemTestSuite {
             }
             return {};
         }
+
+        std::expected<void, ZHLN::Error> nested_parallel_for_survives_fiber_pool_saturation() {
+            constexpr size_t      outerTaskCount = 24;
+            constexpr size_t      innerTaskCount = 64;
+            std::atomic<uint32_t> completed {0};
+
+            struct Payload {
+                std::atomic<uint32_t>* completed;
+            } payload {&completed};
+
+            auto outerTask = [](void* raw) {
+                auto* value = static_cast<Payload*>(raw);
+                ZHLN::TaskSystem::ParallelFor(innerTaskCount, 1, [&](uint32_t start, uint32_t end, uint32_t) {
+                    value->completed->fetch_add(end - start, std::memory_order::relaxed);
+                });
+            };
+
+            std::array<ZHLN::TaskSystem::Task, outerTaskCount> tasks {};
+            for (auto& task: tasks) {
+                task = {.func = outerTask, .arg = &payload};
+            }
+
+            ZHLN::TaskSystem::Counter counter;
+            ZHLN::TaskSystem::Dispatch(tasks, &counter);
+            ZHLN::TaskSystem::Wait(&counter);
+            if (completed.load(std::memory_order::relaxed) != outerTaskCount * innerTaskCount) {
+                return std::unexpected(TaskSystemError::ParallelForFailed);
+            }
+            return {};
+        }
     };
 };
 
