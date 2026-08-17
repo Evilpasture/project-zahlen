@@ -28,6 +28,9 @@ foreach(TEST_SRC IN LISTS TEST_SOURCES)
     )
     if("${TARGET_NAME}" STREQUAL "TestProceduralAnimation" AND TARGET zahlen_extras)
         target_link_libraries(${TARGET_NAME} PRIVATE zahlen_extras)
+        target_sources(${TARGET_NAME} PRIVATE ${PROJECT_SOURCE_DIR}/extern/cgltf_impl.c)
+        target_include_directories(${TARGET_NAME} PRIVATE ${PROJECT_SOURCE_DIR}/extern/cgltf)
+        target_compile_definitions(${TARGET_NAME} PRIVATE ZHLN_TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
     endif()
 
     target_include_directories(${TARGET_NAME} PRIVATE

@@ -340,6 +340,7 @@ namespace ProceduralAnimation {
 void Register(Engine& engine);
 /** Direct evaluation entry point for custom schedules. */
 void   Update(Engine& engine, float dt) noexcept;
+void   ResolveModelTransforms(RigBoneMap& boneMap) noexcept;
 size_t SyncNonSkinnedAttachments(ECS::Registry& registry, Entity rootEntity, const RigBoneMap& boneMap) noexcept;
 void   DrawDebugRig(
     RenderContext&                       renderContext,

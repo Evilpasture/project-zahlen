@@ -915,6 +915,10 @@ void ProceduralAnimation::Register(Engine& engine) {
     }
 }
 
+void ProceduralAnimation::ResolveModelTransforms(RigBoneMap& boneMap) noexcept {
+    ResolveForwardKinematics(boneMap);
+}
+
 size_t ProceduralAnimation::SyncNonSkinnedAttachments(ECS::Registry& registry, Entity rootEntity, const RigBoneMap& boneMap) noexcept {
     size_t synchronizedCount = 0;
     for (Entity childEntity: registry.GetEntitiesWith<Components::MeshComponent>()) {

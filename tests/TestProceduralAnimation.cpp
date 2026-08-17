@@ -8,11 +8,17 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <array>
+#include <cgltf.h>
 #include <cmath>
 #include <cstdio>
 #include <expected>
+#include <fstream>
+#include <iostream>
+#include <memory>
 #include <numbers>
+#include <string>
 #include <string_view>
+#include <vector>
 
 import ZHLN.ProceduralAnimation;
 
@@ -250,6 +256,124 @@ struct ProceduralAnimationTestSuite {
                 !(attachmentTransform->rotation * JPH::Vec3::sAxisZ()).IsClose(expectedRotation * JPH::Vec3::sAxisZ(), 0.0001f) ||
                 skinnedTransform == nullptr || !skinnedTransform->position.IsClose(JPH::Vec3(9.0f, 9.0f, 9.0f), 0.0001f)) {
                 return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+            }
+            return {};
+        }
+
+        std::expected<void, ZHLN::Error> real_glb_foot_descendants_follow_pose() {
+            const std::string assetPath = std::string(ZHLN_TEST_SOURCE_DIR) + "/resources/assets/UziProc.glb";
+            std::ifstream     stream(assetPath, std::ios::binary);
+            char              magic[4] {};
+            stream.read(magic, sizeof(magic));
+            if (stream.gcount() != 4 || std::string_view(magic, 4) != "glTF") {
+                std::cout << "[SKIP] UziProc.glb is an unresolved Git LFS pointer.\n";
+                return {};
+            }
+
+            cgltf_options options {};
+            cgltf_data*   rawData = nullptr;
+            if (cgltf_parse_file(&options, assetPath.c_str(), &rawData) != cgltf_result_success || rawData == nullptr || rawData->skins_count == 0) {
+                return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+            }
+            std::unique_ptr<cgltf_data, decltype(&cgltf_free)> data(rawData, &cgltf_free);
+
+            ZHLN::ModelPrefab prefab;
+            prefab.virtualPath = "UziProc.glb";
+            prefab.nodes.resize(data->nodes_count);
+            for (size_t node = 0; node < data->nodes_count; ++node) {
+                float matrix[16] {};
+                cgltf_node_transform_local(&data->nodes[node], matrix);
+                prefab.nodes[node].name           = data->nodes[node].name != nullptr ? ZHLN::String64(data->nodes[node].name) : ZHLN::String64("Node");
+                prefab.nodes[node].parentIndex    = data->nodes[node].parent != nullptr ? static_cast<int32_t>(data->nodes[node].parent - data->nodes) : -1;
+                prefab.nodes[node].localTransform = JPH::Mat44(
+                    JPH::Vec4(matrix[0], matrix[1], matrix[2], matrix[3]), JPH::Vec4(matrix[4], matrix[5], matrix[6], matrix[7]),
+                    JPH::Vec4(matrix[8], matrix[9], matrix[10], matrix[11]), JPH::Vec4(matrix[12], matrix[13], matrix[14], matrix[15])
+                );
+            }
+
+            const cgltf_skin& sourceSkin = data->skins[0];
+            ZHLN::Skeleton    skeleton;
+            skeleton.joints.reserve(sourceSkin.joints_count);
+            for (size_t jointIndex = 0; jointIndex < sourceSkin.joints_count; ++jointIndex) {
+                const cgltf_node* jointNode   = sourceSkin.joints[jointIndex];
+                int32_t           parentJoint = -1;
+                for (size_t candidate = 0; candidate < sourceSkin.joints_count; ++candidate) {
+                    if (sourceSkin.joints[candidate] == jointNode->parent) {
+                        parentJoint = static_cast<int32_t>(candidate);
+                        break;
+                    }
+                }
+                skeleton.joints.push_back({
+                    .name              = jointNode->name != nullptr ? ZHLN::String64(jointNode->name) : ZHLN::String64("Joint"),
+                    .parentIndex       = parentJoint,
+                    .nodeIndex         = static_cast<int32_t>(jointNode - data->nodes),
+                    .inverseBindMatrix = JPH::Mat44::sIdentity(),
+                });
+            }
+
+            ZHLN::RigBoneMap map;
+            ZHLN::BuildBoneMap(prefab, skeleton, map);
+            const std::array<ZHLN::RigNodeIndex, 2> footNodes = {
+                map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::FootL)],
+                map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::FootR)],
+            };
+            if (!ZHLN::IsValidRigNode(footNodes[0], map.nodeCount) || !ZHLN::IsValidRigNode(footNodes[1], map.nodeCount)) {
+                return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+            }
+
+            struct Descendant {
+                ZHLN::RigNodeIndex node;
+                JPH::Mat44         before;
+                ZHLN::Entity       entity;
+            };
+            std::vector<Descendant> descendants;
+            ZHLN::ECS::Registry     registry;
+            registry.RegisterAllComponentsIn<ZHLN::Components>();
+            const ZHLN::Entity root = registry.Create();
+            for (ZHLN::RigNodeIndex node = 0; node < map.nodeCount; ++node) {
+                if (data->nodes[node].mesh == nullptr || data->nodes[node].skin != nullptr) {
+                    continue;
+                }
+                ZHLN::RigNodeIndex ancestor  = map.parentIndices[node];
+                bool               underFoot = node == footNodes[0] || node == footNodes[1];
+                for (size_t depth = 0; depth < map.nodeCount && ZHLN::IsValidRigNode(ancestor, map.nodeCount); ++depth) {
+                    underFoot = underFoot || ancestor == footNodes[0] || ancestor == footNodes[1];
+                    ancestor  = map.parentIndices[ancestor];
+                }
+                if (!underFoot) {
+                    continue;
+                }
+                const ZHLN::Entity child = registry.Create(
+                    ZHLN::Components::TransformComponent {}, ZHLN::Components::MeshComponent {.nodeIndex = static_cast<int32_t>(node)},
+                    ZHLN::Components::HierarchyComponent {.parent = root}
+                );
+                descendants.push_back({.node = node, .before = map.modelTransforms[node], .entity = child});
+            }
+            if (descendants.empty()) {
+                return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+            }
+
+            for (ZHLN::RigNodeIndex footNode: footNodes) {
+                map.localTransforms[footNode] = map.localTransforms[footNode] * JPH::Mat44::sRotation(JPH::Quat::sRotation(JPH::Vec3::sAxisX(), 0.3f));
+            }
+            ZHLN::ProceduralAnimation::ResolveModelTransforms(map);
+            for (const Descendant& descendant: descendants) {
+                const JPH::Mat44& after = map.modelTransforms[descendant.node];
+                const bool        moved = !(after.GetTranslation() - descendant.before.GetTranslation()).IsNearZero(0.0001f) ||
+                                          !(after.GetColumn3(1) - descendant.before.GetColumn3(1)).IsNearZero(0.0001f);
+                if (!moved) {
+                    return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+                }
+            }
+
+            if (ZHLN::ProceduralAnimation::SyncNonSkinnedAttachments(registry, root, map) != descendants.size()) {
+                return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+            }
+            for (const Descendant& descendant: descendants) {
+                const auto* transform = registry.Get<ZHLN::Components::TransformComponent>(descendant.entity);
+                if (transform == nullptr || !transform->position.IsClose(map.modelTransforms[descendant.node].GetTranslation(), 0.0001f)) {
+                    return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+                }
             }
             return {};
         }
