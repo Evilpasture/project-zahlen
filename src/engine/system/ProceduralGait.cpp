@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-module;
-
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
@@ -19,9 +17,7 @@ module;
 #include <numbers>
 #include <utility>
 
-export module ZHLN.Gait;
-
-export namespace ZHLN::Animation {
+namespace ZHLN::Animation {
 
 inline constexpr float kGaitTwoPi = 2.0f * std::numbers::pi_v<float>;
 
@@ -131,7 +127,7 @@ inline void RotateSubtree(const RigBoneMap& map, JPH::Mat44* transforms, int32_t
  * the active arc is always -bounceGravity. Faster motion shortens the available
  * flight interval, naturally flattening the curve without changing gravity.
  */
-[[nodiscard]] inline float EvaluateGravityBounce(const ProceduralLocomotionComponent& gait, float speed) noexcept {
+float EvaluateGravityBounce(const ProceduralLocomotionComponent& gait, float speed) noexcept {
     if (speed < 0.035f || gait.bounceGravity <= 0.0f) {
         return 0.0f;
     }
@@ -151,7 +147,7 @@ inline void RotateSubtree(const RigBoneMap& map, JPH::Mat44* transforms, int32_t
  * stride clock, and evaluate alternating cubic/parabolic foot trajectories.
  * Velocity is expected in character-local space.
  */
-inline void EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg velocity, float angularVelocity, float dt) noexcept {
+void EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg velocity, float angularVelocity, float dt) noexcept {
     const float safeDt           = std::max(dt, 0.0001f);
     gait.directionalAcceleration = (velocity - gait.previousVelocity) / safeDt;
     gait.previousVelocity        = velocity;
@@ -211,12 +207,12 @@ inline void EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg veloc
     Detail::SpringScalar(gait.lateralBank, gait.tiltRollVelocity, targetLateralBank, dt, 5.5f, 0.88f);
 }
 
-inline void EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg velocity, float dt) noexcept {
+void EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg velocity, float dt) noexcept {
     EvaluateGait(gait, velocity, 0.0f, dt);
 }
 
 /** Rotates the complete posed body around an estimated center of mass. */
-inline void ApplyAccelerationTilt(ProceduralLocomotionComponent& gait, JPH::Mat44* nodeTransforms, const RigBoneMap& map) noexcept {
+void ApplyAccelerationTilt(ProceduralLocomotionComponent& gait, JPH::Mat44* nodeTransforms, const RigBoneMap& map) noexcept {
     if (nodeTransforms == nullptr || map.nodeCount == 0) {
         return;
     }
@@ -240,8 +236,7 @@ inline void ApplyAccelerationTilt(ProceduralLocomotionComponent& gait, JPH::Mat4
 }
 
 /** Applies gait sway/bounce independently from analytical foot IK. */
-inline void
-    ApplyPelvisGaitOffset(const ProceduralLocomotionComponent& gait, JPH::Mat44* nodeTransforms, const RigBoneMap& map, bool includeDrop = true) noexcept {
+void ApplyPelvisGaitOffset(const ProceduralLocomotionComponent& gait, JPH::Mat44* nodeTransforms, const RigBoneMap& map, bool includeDrop) noexcept {
     if (nodeTransforms == nullptr) {
         return;
     }
@@ -253,14 +248,14 @@ inline void
 }
 
 /** Stage 3: terrain projection, pelvis reach correction, and analytic leg IK. */
-inline void SolveLegGrounding(
+void SolveLegGrounding(
     Engine&                        engine,
     JPH::Vec3Arg                   rootPosition,
     JPH::QuatArg                   rootRotation,
     ProceduralLocomotionComponent& gait,
     JPH::Mat44*                    nodeTransforms,
     const RigBoneMap&              map,
-    Entity                         ignoredPhysicsHandle = {}
+    Entity                         ignoredPhysicsHandle
 ) noexcept {
     if (nodeTransforms == nullptr || map.nodeCount == 0) {
         return;
@@ -404,7 +399,7 @@ inline void SolveLegGrounding(
 }
 
 /** Stage 4: anti-phase arm swing and distributed look-at. */
-inline void SolveUpperBody(
+void SolveUpperBody(
     const ProceduralLocomotionComponent& gait,
     const ProceduralLookAtComponent*     lookAt,
     JPH::Vec3Arg                         rootPosition,
@@ -470,7 +465,7 @@ inline void SolveUpperBody(
     }
 }
 
-inline void SolveUpperBody(
+void SolveUpperBody(
     const ProceduralLocomotionComponent& gait,
     const ProceduralLookAtComponent*     lookAt,
     JPH::Mat44*                          nodeTransforms,

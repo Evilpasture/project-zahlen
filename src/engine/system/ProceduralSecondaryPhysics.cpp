@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-module;
-
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
@@ -17,9 +15,7 @@ module;
 #include <cmath>
 #include <numbers>
 
-export module ZHLN.SecondaryPhysics;
-
-export namespace ZHLN::Animation {
+namespace ZHLN::Animation {
 
 namespace SecondaryDetail {
 
@@ -181,7 +177,7 @@ inline void InitializeParticles(HairStrandsComponent& hair, JPH::Vec3Arg headPos
  * links are extrapolated only for the internal solver and are never uploaded to
  * unmapped bones.
  */
-inline void ConfigureHairBindPose(HairStrandsComponent& hair, const JPH::Mat44* bindModelTransforms, const RigBoneMap& map) noexcept {
+void ConfigureHairBindPose(HairStrandsComponent& hair, const JPH::Mat44* bindModelTransforms, const RigBoneMap& map) noexcept {
     if (bindModelTransforms == nullptr || map.nodeCount == 0) {
         return;
     }
@@ -233,7 +229,7 @@ inline void ConfigureHairBindPose(HairStrandsComponent& hair, const JPH::Mat44* 
  * preserve strand curvature, while a compliant head-local shape constraint
  * drives every particle back toward its authored GLB bind pose.
  */
-inline void StepHairSimulation(
+void StepHairSimulation(
     HairStrandsComponent& hair,
     JPH::Vec3Arg          headWorldPosition,
     JPH::QuatArg          headWorldRotation,
@@ -313,8 +309,7 @@ inline void StepHairSimulation(
 }
 
 /** Generates one world transform for every mapped secondary bone. */
-inline void
-    ExtractHairBoneTransforms(const HairStrandsComponent& hair, JPH::QuatArg headWorldRotation, JPH::Mat44* nodeTransforms, const RigBoneMap& map) noexcept {
+void ExtractHairBoneTransforms(const HairStrandsComponent& hair, JPH::QuatArg headWorldRotation, JPH::Mat44* nodeTransforms, const RigBoneMap& map) noexcept {
     if (nodeTransforms == nullptr || !hair.initialized) {
         return;
     }
@@ -350,7 +345,7 @@ inline void
     }
 }
 
-inline void ExtractHairBoneTransforms(const HairStrandsComponent& hair, JPH::Mat44* nodeTransforms, const RigBoneMap& map) noexcept {
+void ExtractHairBoneTransforms(const HairStrandsComponent& hair, JPH::Mat44* nodeTransforms, const RigBoneMap& map) noexcept {
     ExtractHairBoneTransforms(hair, JPH::Quat::sIdentity(), nodeTransforms, map);
 }
 

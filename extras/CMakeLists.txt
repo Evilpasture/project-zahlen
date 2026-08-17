@@ -14,10 +14,6 @@ file(GLOB_RECURSE ZHLN_EXTRAS_MODULES
     "${CMAKE_CURRENT_SOURCE_DIR}/*.ixx"
 )
 
-# Gait and SecondaryPhysics are consumed by an engine system and are therefore
-# registered on zahlen_engine to avoid a zahlen_engine <-> zahlen_extras cycle.
-list(FILTER ZHLN_EXTRAS_MODULES EXCLUDE REGEX "/Animation/(Gait|SecondaryPhysics)\\.cppm$")
-
 # 2. Automatically discover any accompanying C/C++ implementation files (.cpp / .c)
 file(GLOB_RECURSE ZHLN_EXTRAS_SOURCES
     CONFIGURE_DEPENDS

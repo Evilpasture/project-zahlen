@@ -13,9 +13,6 @@
 #include <numbers>
 #include <string_view>
 
-import ZHLN.Gait;
-import ZHLN.SecondaryPhysics;
-
 enum class ProceduralAnimationTestError : uint32_t {
     Success = 0,
     RigMappingFailed[[= ZHLN::Reflect::Description("The generated procedural rig did not map all core and secondary controls.")]],

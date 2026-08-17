@@ -80,6 +80,23 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.venv")
 endif()
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+# Enforce the one-way dependency boundary: optional extras may consume core,
+# while src/, include/, and modules/ must never consume extras.
+execute_process(
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_core_extras_boundary.py"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    RESULT_VARIABLE ZHLN_CORE_EXTRAS_BOUNDARY_RESULT
+    OUTPUT_VARIABLE ZHLN_CORE_EXTRAS_BOUNDARY_OUTPUT
+    ERROR_VARIABLE ZHLN_CORE_EXTRAS_BOUNDARY_ERROR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_STRIP_TRAILING_WHITESPACE
+)
+if(NOT ZHLN_CORE_EXTRAS_BOUNDARY_RESULT EQUAL 0)
+    message(FATAL_ERROR "${ZHLN_CORE_EXTRAS_BOUNDARY_ERROR}")
+endif()
+message(STATUS "${ZHLN_CORE_EXTRAS_BOUNDARY_OUTPUT}")
+
 set(ZHLN_TRANSPILER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/tools/transpile_reflection.py")
 
 function(zahlen_transpile_sources OUT_SOURCES_VAR)
@@ -269,6 +286,8 @@ set(RAW_ENGINE_SOURCES
     src/engine/system/TextureSystem.cpp
     src/engine/system/AnimationSystem.cpp
     src/engine/system/ProceduralAnimationSystem.cpp
+    src/engine/system/ProceduralGait.cpp
+    src/engine/system/ProceduralSecondaryPhysics.cpp
     src/engine/CreativeWorksManager.cpp
     src/engine/Window.cpp
     src/engine/Platform.cpp
@@ -443,22 +462,6 @@ target_sources(zahlen_engine
         TYPE CXX_MODULES
         BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/modules
         FILES ${ZHLN_MODULE_FILES}
-)
-
-# The procedural evaluator is an engine system, so its primitive modules must
-# live on the engine side of the zahlen_engine <- zahlen_extras dependency.
-# Their source files remain in extras/Animation as the public feature toolkit.
-set(ZHLN_PROCEDURAL_ANIMATION_MODULES
-    ${CMAKE_CURRENT_SOURCE_DIR}/extras/Animation/Gait.cppm
-    ${CMAKE_CURRENT_SOURCE_DIR}/extras/Animation/SecondaryPhysics.cppm
-)
-set_source_files_properties(${ZHLN_PROCEDURAL_ANIMATION_MODULES} PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
-target_sources(zahlen_engine
-    PUBLIC
-        FILE_SET procedural_animation_modules
-        TYPE CXX_MODULES
-        BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/extras/Animation
-        FILES ${ZHLN_PROCEDURAL_ANIMATION_MODULES}
 )
 
 target_link_libraries(zahlen_engine PRIVATE

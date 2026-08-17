@@ -17,6 +17,7 @@
 
 namespace ZHLN {
 
+class Engine;
 class RenderContext;
 struct ModelPrefab;
 struct Skeleton;
@@ -217,6 +218,53 @@ struct ProceduralAnimationConfigComponent {
     // pose through the selected bicubic or spring-damper interpolator.
     bool keyframeOnly = false;
 };
+
+/** Core procedural algorithms. Extras may consume these APIs; core never consumes extras. */
+namespace Animation {
+
+ZHLN_API float EvaluateGravityBounce(const ProceduralLocomotionComponent& gait, float speed) noexcept;
+ZHLN_API void  EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg velocity, float angularVelocity, float dt) noexcept;
+ZHLN_API void  EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg velocity, float dt) noexcept;
+ZHLN_API void  ApplyAccelerationTilt(ProceduralLocomotionComponent& gait, JPH::Mat44* nodeTransforms, const RigBoneMap& map) noexcept;
+ZHLN_API void
+    ApplyPelvisGaitOffset(const ProceduralLocomotionComponent& gait, JPH::Mat44* nodeTransforms, const RigBoneMap& map, bool includeDrop = true) noexcept;
+ZHLN_API void SolveLegGrounding(
+    Engine&                        engine,
+    JPH::Vec3Arg                   rootPosition,
+    JPH::QuatArg                   rootRotation,
+    ProceduralLocomotionComponent& gait,
+    JPH::Mat44*                    nodeTransforms,
+    const RigBoneMap&              map,
+    Entity                         ignoredPhysicsHandle = {}
+) noexcept;
+ZHLN_API void SolveUpperBody(
+    const ProceduralLocomotionComponent& gait,
+    const ProceduralLookAtComponent*     lookAt,
+    JPH::Vec3Arg                         rootPosition,
+    JPH::QuatArg                         rootRotation,
+    JPH::Mat44*                          nodeTransforms,
+    const RigBoneMap&                    map
+) noexcept;
+ZHLN_API void SolveUpperBody(
+    const ProceduralLocomotionComponent& gait,
+    const ProceduralLookAtComponent*     lookAt,
+    JPH::Mat44*                          nodeTransforms,
+    const RigBoneMap&                    map
+) noexcept;
+
+ZHLN_API void ConfigureHairBindPose(HairStrandsComponent& hair, const JPH::Mat44* bindModelTransforms, const RigBoneMap& map) noexcept;
+ZHLN_API void StepHairSimulation(
+    HairStrandsComponent& hair,
+    JPH::Vec3Arg          headWorldPosition,
+    JPH::QuatArg          headWorldRotation,
+    JPH::Vec3Arg          characterVelocity,
+    float                 dt
+) noexcept;
+ZHLN_API void
+    ExtractHairBoneTransforms(const HairStrandsComponent& hair, JPH::QuatArg headWorldRotation, JPH::Mat44* nodeTransforms, const RigBoneMap& map) noexcept;
+ZHLN_API void ExtractHairBoneTransforms(const HairStrandsComponent& hair, JPH::Mat44* nodeTransforms, const RigBoneMap& map) noexcept;
+
+} // namespace Animation
 
 /**
  * Builds a map for an imported glTF rig. Matching is case/separator insensitive

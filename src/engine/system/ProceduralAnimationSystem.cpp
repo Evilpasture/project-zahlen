@@ -28,9 +28,6 @@
 #include <string_view>
 #include <utility>
 
-import ZHLN.Gait;
-import ZHLN.SecondaryPhysics;
-
 namespace ZHLN {
 namespace {
 
