@@ -18,6 +18,7 @@ module;
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <span>
 #include <string_view>
 
 export module ZHLN.ProceduralAnimation;
@@ -111,15 +112,16 @@ struct alignas(64) RigBoneMap {
     int32_t                               springPoseTrack         = -1;
     bool                                  springPoseInitialized   = false;
 
-    const ModelPrefab* sourcePrefab                = nullptr;
-    size_t             nodeCount                   = 0;
-    uint32_t           jointOffset                 = 0;
-    uint32_t           jointCount                  = 0;
-    int32_t            skeletonIndex               = -1;
-    uint64_t           poseVersion                 = 0;
-    size_t             synchronizedAttachmentCount = 0;
-    bool               initialized                 = false;
-    bool               poseValid                   = false;
+    const ModelPrefab* sourcePrefab                 = nullptr;
+    size_t             nodeCount                    = 0;
+    uint32_t           jointOffset                  = 0;
+    uint32_t           jointCount                   = 0;
+    int32_t            skeletonIndex                = -1;
+    uint64_t           poseVersion                  = 0;
+    size_t             synchronizedAttachmentCount  = 0;
+    size_t             synchronizedSkinPaletteCount = 0;
+    bool               initialized                  = false;
+    bool               poseValid                    = false;
 };
 
 /** Parametric gait state, including persistent world-space foot locks. */
@@ -341,6 +343,7 @@ void Register(Engine& engine);
 /** Direct evaluation entry point for custom schedules. */
 void   Update(Engine& engine, float dt) noexcept;
 void   ResolveModelTransforms(RigBoneMap& boneMap) noexcept;
+size_t BuildSkinningPalette(const Skeleton& skeleton, const RigBoneMap& boneMap, std::span<JPH::Mat44> output) noexcept;
 size_t SyncNonSkinnedAttachments(ECS::Registry& registry, Entity rootEntity, const RigBoneMap& boneMap) noexcept;
 void   DrawDebugRig(
     RenderContext&                       renderContext,

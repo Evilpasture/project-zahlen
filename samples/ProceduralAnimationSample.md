@@ -37,9 +37,11 @@ the generic core `ArticulationSystem` phase. Core knows only about
 When a procedural entity gains `RagdollComponent`, the extras evaluator creates
 a missing `KinematicPoseOverrideComponent` automatically before publishing its
 motor target, so articulation cannot silently fall back to bind pose because of
-a spawn omission. The evaluator also logs the number of non-skinned node
-attachments synchronized for each character; a zero count immediately exposes a
-hierarchy/spawn binding issue rather than silently freezing an attachment.
+a spawn omission. Every distinct skin/joint offset on the character receives its
+own procedural palette; this is required when body, feet, clothing, and hair are
+exported as separate skins. The evaluator logs both the distinct palette count
+and the number of non-skinned attachments synchronized each frame topology
+changes, making skin-vs-attachment failures visible immediately.
 
 Run the same sample with another packed GLB without editing C++:
 

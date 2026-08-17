@@ -291,33 +291,76 @@ struct ProceduralAnimationTestSuite {
                 );
             }
 
-            const cgltf_skin& sourceSkin = data->skins[0];
-            ZHLN::Skeleton    skeleton;
-            skeleton.joints.reserve(sourceSkin.joints_count);
-            for (size_t jointIndex = 0; jointIndex < sourceSkin.joints_count; ++jointIndex) {
-                const cgltf_node* jointNode   = sourceSkin.joints[jointIndex];
-                int32_t           parentJoint = -1;
-                for (size_t candidate = 0; candidate < sourceSkin.joints_count; ++candidate) {
-                    if (sourceSkin.joints[candidate] == jointNode->parent) {
-                        parentJoint = static_cast<int32_t>(candidate);
-                        break;
-                    }
-                }
-                skeleton.joints.push_back({
-                    .name              = jointNode->name != nullptr ? ZHLN::String64(jointNode->name) : ZHLN::String64("Joint"),
-                    .parentIndex       = parentJoint,
-                    .nodeIndex         = static_cast<int32_t>(jointNode - data->nodes),
-                    .inverseBindMatrix = JPH::Mat44::sIdentity(),
-                });
-            }
-
+            std::vector<ZHLN::Skeleton> importedSkeletons;
+            importedSkeletons.reserve(data->skins_count);
             ZHLN::RigBoneMap map;
-            ZHLN::BuildBoneMap(prefab, skeleton, map);
+            size_t           bestCoreCount = 0;
+            for (size_t skinIndex = 0; skinIndex < data->skins_count; ++skinIndex) {
+                const cgltf_skin& sourceSkin = data->skins[skinIndex];
+                ZHLN::Skeleton    skeleton;
+                skeleton.name = sourceSkin.name != nullptr ? ZHLN::String64(sourceSkin.name) : ZHLN::String64("Skin");
+                skeleton.joints.reserve(sourceSkin.joints_count);
+                for (size_t jointIndex = 0; jointIndex < sourceSkin.joints_count; ++jointIndex) {
+                    const cgltf_node* jointNode   = sourceSkin.joints[jointIndex];
+                    int32_t           parentJoint = -1;
+                    for (size_t candidate = 0; candidate < sourceSkin.joints_count; ++candidate) {
+                        if (sourceSkin.joints[candidate] == jointNode->parent) {
+                            parentJoint = static_cast<int32_t>(candidate);
+                            break;
+                        }
+                    }
+                    skeleton.joints.push_back({
+                        .name              = jointNode->name != nullptr ? ZHLN::String64(jointNode->name) : ZHLN::String64("Joint"),
+                        .parentIndex       = parentJoint,
+                        .nodeIndex         = static_cast<int32_t>(jointNode - data->nodes),
+                        .inverseBindMatrix = JPH::Mat44::sIdentity(),
+                    });
+                }
+
+                ZHLN::RigBoneMap candidateMap;
+                ZHLN::BuildBoneMap(prefab, skeleton, candidateMap);
+                size_t coreCount = 0;
+                for (size_t semantic = 0; semantic < ZHLN::kCoreBoneCount; ++semantic) {
+                    coreCount += ZHLN::IsValidRigNode(candidateMap.nodeIndices[semantic], candidateMap.nodeCount) ? 1u : 0u;
+                }
+                if (importedSkeletons.empty() || coreCount > bestCoreCount) {
+                    map           = candidateMap;
+                    bestCoreCount = coreCount;
+                }
+                importedSkeletons.push_back(std::move(skeleton));
+            }
             const std::array<ZHLN::RigNodeIndex, 2> footNodes = {
                 map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::FootL)],
                 map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::FootR)],
             };
             if (!ZHLN::IsValidRigNode(footNodes[0], map.nodeCount) || !ZHLN::IsValidRigNode(footNodes[1], map.nodeCount)) {
+                return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+            }
+
+            struct SkinPaletteCheck {
+                size_t                  skinIndex;
+                std::vector<size_t>     footJoints;
+                std::vector<JPH::Mat44> before;
+            };
+            std::vector<SkinPaletteCheck> paletteChecks;
+            for (size_t skinIndex = 0; skinIndex < importedSkeletons.size(); ++skinIndex) {
+                const ZHLN::Skeleton& skeleton = importedSkeletons[skinIndex];
+                SkinPaletteCheck      check {.skinIndex = skinIndex};
+                for (size_t jointIndex = 0; jointIndex < skeleton.joints.size(); ++jointIndex) {
+                    const int32_t importedNode = skeleton.joints[jointIndex].nodeIndex;
+                    if (importedNode >= 0 &&
+                        (static_cast<ZHLN::RigNodeIndex>(importedNode) == footNodes[0] || static_cast<ZHLN::RigNodeIndex>(importedNode) == footNodes[1])) {
+                        check.footJoints.push_back(jointIndex);
+                    }
+                }
+                if (check.footJoints.empty()) {
+                    continue;
+                }
+                check.before.resize(skeleton.joints.size());
+                ZHLN::ProceduralAnimation::BuildSkinningPalette(skeleton, map, check.before);
+                paletteChecks.push_back(std::move(check));
+            }
+            if (paletteChecks.empty()) {
                 return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
 
@@ -357,6 +400,18 @@ struct ProceduralAnimationTestSuite {
                 map.localTransforms[footNode] = map.localTransforms[footNode] * JPH::Mat44::sRotation(JPH::Quat::sRotation(JPH::Vec3::sAxisX(), 0.3f));
             }
             ZHLN::ProceduralAnimation::ResolveModelTransforms(map);
+            for (const SkinPaletteCheck& check: paletteChecks) {
+                const ZHLN::Skeleton&   skeleton = importedSkeletons[check.skinIndex];
+                std::vector<JPH::Mat44> after(skeleton.joints.size());
+                ZHLN::ProceduralAnimation::BuildSkinningPalette(skeleton, map, after);
+                for (size_t footJoint: check.footJoints) {
+                    const bool changed = !(after[footJoint].GetColumn3(1) - check.before[footJoint].GetColumn3(1)).IsNearZero(0.0001f) ||
+                                         !(after[footJoint].GetColumn3(2) - check.before[footJoint].GetColumn3(2)).IsNearZero(0.0001f);
+                    if (!changed) {
+                        return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+                    }
+                }
+            }
             for (const Descendant& descendant: descendants) {
                 const JPH::Mat44& after = map.modelTransforms[descendant.node];
                 const bool        moved = !(after.GetTranslation() - descendant.before.GetTranslation()).IsNearZero(0.0001f) ||

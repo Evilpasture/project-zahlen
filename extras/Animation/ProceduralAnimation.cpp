@@ -24,6 +24,7 @@ module;
 #include <array>
 #include <cmath>
 #include <iterator>
+#include <limits>
 #include <numbers>
 #include <span>
 #include <string_view>
@@ -245,17 +246,18 @@ void ResetRigBoneMap(RigBoneMap& map) noexcept {
     map.poseAngularVelocities.fill(JPH::Vec3::sZero());
     map.poseScales.fill(JPH::Vec3::sReplicate(1.0f));
     map.poseScaleVelocities.fill(JPH::Vec3::sZero());
-    map.springPoseTrack             = -1;
-    map.springPoseInitialized       = false;
-    map.sourcePrefab                = nullptr;
-    map.nodeCount                   = 0;
-    map.jointOffset                 = 0;
-    map.jointCount                  = 0;
-    map.skeletonIndex               = -1;
-    map.poseVersion                 = 0;
-    map.synchronizedAttachmentCount = 0;
-    map.initialized                 = false;
-    map.poseValid                   = false;
+    map.springPoseTrack              = -1;
+    map.springPoseInitialized        = false;
+    map.sourcePrefab                 = nullptr;
+    map.nodeCount                    = 0;
+    map.jointOffset                  = 0;
+    map.jointCount                   = 0;
+    map.skeletonIndex                = -1;
+    map.poseVersion                  = 0;
+    map.synchronizedAttachmentCount  = 0;
+    map.synchronizedSkinPaletteCount = 0;
+    map.initialized                  = false;
+    map.poseValid                    = false;
 }
 
 [[nodiscard]] JPH::Vec3 ExtractScale(const JPH::Mat44& matrix) noexcept {
@@ -572,32 +574,57 @@ struct SkinBinding {
     const Skeleton*                    skeleton     = nullptr;
 };
 
+[[nodiscard]] size_t ScoreSkeletonForProceduralPose(const Skeleton& skeleton) noexcept {
+    size_t coreMatches = 0;
+    for (size_t semanticIndex = 0; semanticIndex < kCoreBoneCount; ++semanticIndex) {
+        const CharacterBone semantic = static_cast<CharacterBone>(semanticIndex);
+        bool                matched  = false;
+        for (const Joint& joint: skeleton.joints) {
+            const CanonicalName    canonical  = Canonicalize(std::string_view(joint.name));
+            const std::string_view normalized = StripKnownRigPrefix(canonical.View());
+            if (MatchesBone(normalized, semantic, false) || MatchesBone(normalized, semantic, true)) {
+                matched = true;
+                break;
+            }
+        }
+        coreMatches += matched ? 1u : 0u;
+    }
+
+    size_t hairMatches = 0;
+    for (const Joint& joint: skeleton.joints) {
+        hairMatches += IsHairNode(Canonicalize(std::string_view(joint.name)).View()) ? 1u : 0u;
+    }
+    return coreMatches * 1000u + hairMatches;
+}
+
 [[nodiscard]] SkinBinding FindSkinBinding(ECS::Registry& registry, Entity root, const ModelPrefab* prefab) noexcept {
     if (prefab == nullptr) {
         return {};
     }
 
-    auto resolve = [&](Entity entity) -> SkinBinding {
+    SkinBinding best;
+    size_t      bestScore = 0;
+    auto        consider  = [&](Entity entity) {
         auto* mesh = registry.Get<Components::SkeletalMeshComponent>(entity);
         if (mesh == nullptr || mesh->skeletonIndex < 0 || mesh->skeletonIndex >= static_cast<int32_t>(prefab->skeletons.size())) {
-            return {};
+            return;
         }
-        return {.skeletalMesh = mesh, .skeleton = &prefab->skeletons[static_cast<size_t>(mesh->skeletonIndex)]};
+        const Skeleton& skeleton = prefab->skeletons[static_cast<size_t>(mesh->skeletonIndex)];
+        const size_t    score    = ScoreSkeletonForProceduralPose(skeleton);
+        if (best.skeletalMesh == nullptr || score > bestScore) {
+            best      = {.skeletalMesh = mesh, .skeleton = &skeleton};
+            bestScore = score;
+        }
     };
 
-    if (SkinBinding direct = resolve(root); direct.skeletalMesh != nullptr) {
-        return direct;
-    }
-
+    consider(root);
     for (Entity entity: registry.GetEntitiesWith<Components::SkeletalMeshComponent>()) {
         const auto* hierarchy = registry.Get<Components::HierarchyComponent>(entity);
         if (hierarchy != nullptr && hierarchy->parent == root) {
-            if (SkinBinding child = resolve(entity); child.skeletalMesh != nullptr) {
-                return child;
-            }
+            consider(entity);
         }
     }
-    return {};
+    return best;
 }
 
 [[nodiscard]] JPH::Vec3 ModelToWorld(JPH::Vec3Arg rootPosition, JPH::QuatArg rootRotation, JPH::Vec3Arg modelPosition) noexcept {
@@ -919,6 +946,19 @@ void ProceduralAnimation::ResolveModelTransforms(RigBoneMap& boneMap) noexcept {
     ResolveForwardKinematics(boneMap);
 }
 
+size_t ProceduralAnimation::BuildSkinningPalette(const Skeleton& skeleton, const RigBoneMap& boneMap, std::span<JPH::Mat44> output) noexcept {
+    const size_t count = std::min(skeleton.joints.size(), output.size());
+    std::fill_n(output.begin(), count, JPH::Mat44::sIdentity());
+    for (size_t jointIndex = 0; jointIndex < count; ++jointIndex) {
+        const Joint&       joint = skeleton.joints[jointIndex];
+        const RigNodeIndex node  = joint.nodeIndex >= 0 ? static_cast<RigNodeIndex>(joint.nodeIndex) : InvalidRigNode;
+        if (IsValidRigNode(node, boneMap.nodeCount)) {
+            output[jointIndex] = boneMap.modelTransforms[node] * joint.inverseBindMatrix;
+        }
+    }
+    return count;
+}
+
 size_t ProceduralAnimation::SyncNonSkinnedAttachments(ECS::Registry& registry, Entity rootEntity, const RigBoneMap& boneMap) noexcept {
     size_t synchronizedCount = 0;
     for (Entity childEntity: registry.GetEntitiesWith<Components::MeshComponent>()) {
@@ -1179,33 +1219,66 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
             poseOverride->valid = false;
         }
 
-        // Stage 8: bake the imported skeleton order and stream one contiguous
-        // matrix palette into the current Vulkan frame buffer.
-        if (skin.skeletalMesh != nullptr && skin.skeleton != nullptr) {
-            const uint32_t count = std::min<uint32_t>(static_cast<uint32_t>(skin.skeleton->joints.size()), static_cast<uint32_t>(kMaxRigNodes));
-            std::array<JPH::Mat44, kMaxRigNodes> finalPalette {};
-            std::ranges::fill(finalPalette, JPH::Mat44::sIdentity());
-            for (uint32_t jointIndex = 0; jointIndex < count; ++jointIndex) {
-                const Joint&       joint          = skin.skeleton->joints[jointIndex];
-                JPH::Mat44         modelTransform = JPH::Mat44::sIdentity();
-                const RigNodeIndex node           = joint.nodeIndex >= 0 ? static_cast<RigNodeIndex>(joint.nodeIndex) : InvalidRigNode;
-                if (IsValidRigNode(node, boneMap->nodeCount)) {
-                    modelTransform           = boneMap->modelTransforms[node];
-                    finalPalette[jointIndex] = modelTransform * joint.inverseBindMatrix;
-                }
-                if (poseOverride != nullptr && jointIndex < Components::KinematicPoseOverrideComponent::MaxJoints) {
-                    poseOverride->modelTransforms[jointIndex] = modelTransform;
+        // Stage 8: every distinct skin palette used by this character must
+        // receive the evaluated node pose. A GLB may split body, feet, clothing,
+        // and hair across multiple skins/joint offsets.
+        std::array<uint32_t, kMaxRigNodes> uploadedOffsets {};
+        uploadedOffsets.fill(std::numeric_limits<uint32_t>::max());
+        size_t uploadedPaletteCount = 0;
+
+        auto uploadSkin = [&](Components::SkeletalMeshComponent* skeletalMesh) {
+            if (skeletalMesh == nullptr || skeletalMesh->skeletonIndex < 0 || skeletalMesh->skeletonIndex >= static_cast<int32_t>(prefab->skeletons.size())) {
+                return;
+            }
+            for (size_t i = 0; i < uploadedPaletteCount; ++i) {
+                if (uploadedOffsets[i] == skeletalMesh->jointOffset) {
+                    return;
                 }
             }
-            if (poseOverride != nullptr) {
-                poseOverride->jointCount  = std::min<uint32_t>(count, static_cast<uint32_t>(Components::KinematicPoseOverrideComponent::MaxJoints));
-                poseOverride->poseVersion = boneMap->poseVersion;
-                poseOverride->valid       = true;
+            if (uploadedPaletteCount >= uploadedOffsets.size()) {
+                return;
             }
-            boneMap->jointOffset   = skin.skeletalMesh->jointOffset;
-            boneMap->jointCount    = count;
-            boneMap->skeletonIndex = skin.skeletalMesh->skeletonIndex;
-            renderer.UpdateJointMatrices(skin.skeletalMesh->jointOffset, finalPalette.data(), count);
+
+            const Skeleton&                      skeleton = prefab->skeletons[static_cast<size_t>(skeletalMesh->skeletonIndex)];
+            std::array<JPH::Mat44, kMaxRigNodes> palette {};
+            const size_t                         paletteCount = ProceduralAnimation::BuildSkinningPalette(skeleton, *boneMap, palette);
+            renderer.UpdateJointMatrices(skeletalMesh->jointOffset, palette.data(), static_cast<uint32_t>(paletteCount));
+            uploadedOffsets[uploadedPaletteCount++] = skeletalMesh->jointOffset;
+
+            if (skeletalMesh == skin.skeletalMesh) {
+                if (poseOverride != nullptr) {
+                    const size_t overrideCount = std::min(paletteCount, Components::KinematicPoseOverrideComponent::MaxJoints);
+                    for (size_t jointIndex = 0; jointIndex < overrideCount; ++jointIndex) {
+                        const int32_t      importedNode           = skeleton.joints[jointIndex].nodeIndex;
+                        const RigNodeIndex node                   = importedNode >= 0 ? static_cast<RigNodeIndex>(importedNode) : InvalidRigNode;
+                        poseOverride->modelTransforms[jointIndex] = IsValidRigNode(node, boneMap->nodeCount) ? boneMap->modelTransforms[node] :
+                                                                                                               JPH::Mat44::sIdentity();
+                    }
+                    poseOverride->jointCount  = static_cast<uint32_t>(overrideCount);
+                    poseOverride->poseVersion = boneMap->poseVersion;
+                    poseOverride->valid       = true;
+                }
+                boneMap->jointOffset   = skeletalMesh->jointOffset;
+                boneMap->jointCount    = static_cast<uint32_t>(paletteCount);
+                boneMap->skeletonIndex = skeletalMesh->skeletonIndex;
+            }
+        };
+
+        // Upload the best semantic skeleton first so its generic motor target is
+        // always published even when another part shares the same joint offset.
+        uploadSkin(skin.skeletalMesh);
+        uploadSkin(registry.Get<Components::SkeletalMeshComponent>(entity));
+        for (Entity childEntity: registry.GetEntitiesWith<Components::SkeletalMeshComponent>()) {
+            const auto* hierarchy = registry.Get<Components::HierarchyComponent>(childEntity);
+            if (hierarchy != nullptr && hierarchy->parent == entity) {
+                uploadSkin(registry.Get<Components::SkeletalMeshComponent>(childEntity));
+            }
+        }
+
+        const size_t previousPaletteCount     = boneMap->synchronizedSkinPaletteCount;
+        boneMap->synchronizedSkinPaletteCount = uploadedPaletteCount;
+        if (boneMap->poseVersion == 1 || previousPaletteCount != uploadedPaletteCount) {
+            ZHLN::Log("[ProceduralAnimation] Entity {} uploaded {} distinct skin palettes.", entity.index, uploadedPaletteCount);
         }
 
         // Non-skinned child entities are attachments, not palette consumers.
