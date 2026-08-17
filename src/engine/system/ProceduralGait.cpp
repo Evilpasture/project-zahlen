@@ -283,7 +283,9 @@ void SolveLegGrounding(
     const RigBoneMap&              map,
     Entity                         ignoredPhysicsHandle,
     float                          ikWeight,
-    bool                           preserveAuthoredFootXZ
+    bool                           preserveAuthoredFootXZ,
+    float                          dt,
+    float                          pelvisDropWeight
 ) noexcept {
     if (nodeTransforms == nullptr || map.nodeCount == 0) {
         return;
@@ -355,20 +357,19 @@ void SolveLegGrounding(
     const int32_t thighRNode = Detail::Node(map, CharacterBone::ThighR);
 
     float requiredDrop   = 0.0f;
-    auto  accumulateDrop = [&](int32_t thighNode, JPH::Vec3Arg target) {
+    auto  accumulateDrop = [&](int32_t thighNode, JPH::Vec3Arg target, float plantWeight) {
         if (thighNode < 0 || thighNode >= static_cast<int32_t>(map.nodeCount)) {
             return;
         }
         const float distance = (target - nodeTransforms[thighNode].GetTranslation()).Length();
-        requiredDrop         = std::max(requiredDrop, distance - std::max(gait.legReach, 0.05f));
+        const float excess   = std::max(0.0f, distance - std::max(gait.legReach, 0.05f));
+        requiredDrop         = std::max(requiredDrop, excess * Detail::SmoothStep(plantWeight));
     };
-    if (plantedL) {
-        accumulateDrop(thighLNode, targetModelL);
-    }
-    if (plantedR) {
-        accumulateDrop(thighRNode, targetModelR);
-    }
-    gait.pelvisDrop = -std::clamp(requiredDrop, 0.0f, 0.38f);
+    accumulateDrop(thighLNode, targetModelL, gait.plantWeightL);
+    accumulateDrop(thighRNode, targetModelR, gait.plantWeightR);
+
+    gait.targetPelvisDrop = -std::clamp(requiredDrop * std::clamp(pelvisDropWeight, 0.0f, 1.0f), 0.0f, 0.38f);
+    Detail::SpringScalar(gait.pelvisDrop, gait.pelvisDropVelocity, gait.targetPelvisDrop, dt, 5.0f, 1.0f);
 
     ApplyPelvisGaitOffset(gait, nodeTransforms, map, true);
 

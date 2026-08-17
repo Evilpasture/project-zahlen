@@ -1028,9 +1028,11 @@ void ProceduralAnimationSystem::Update(Engine& engine, float dt) noexcept {
         if (ikEnabled) {
             const Entity ignoredHandle          = physicsComponent != nullptr ? physicsComponent->physicsHandle : Entity {};
             const float  legIKWeight            = config != nullptr ? config->legIKWeight : 1.0f;
+            const float  pelvisDropWeight       = config != nullptr ? config->pelvisDropWeight : 1.0f;
             const bool   preserveAuthoredFootXZ = config == nullptr || config->preserveAuthoredFootXZ;
             Animation::SolveLegGrounding(
-                engine, transform->position, rootRotation, *gait, boneMap->modelTransforms.data(), *boneMap, ignoredHandle, legIKWeight, preserveAuthoredFootXZ
+                engine, transform->position, rootRotation, *gait, boneMap->modelTransforms.data(), *boneMap, ignoredHandle, legIKWeight, preserveAuthoredFootXZ,
+                dt, pelvisDropWeight
             );
         } else if (gaitEnabled) {
             Animation::ApplyPelvisGaitOffset(*gait, boneMap->modelTransforms.data(), *boneMap, false);

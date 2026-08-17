@@ -163,12 +163,26 @@ Position and velocity are continuous at every contact, so there is no takeoff or
 landing snap. The amplitude formula makes acceleration at the apex equal
 `-bounceGravity`. Faster steps shorten the support interval and automatically
 produce a flatter curve without changing gravity. Very slow motion is limited by
-`maxBounceHeight` to avoid exaggerated vertical travel.
+`maxBounceHeight` (4.5 cm by default) to avoid exaggerated vertical travel.
 
 Tune `bounceGravity` and `maxBounceHeight` on `ProceduralLocomotionComponent`, or
 disable only this layer with
 `ProceduralAnimationConfigComponent::enableGravityBounce`. Hold left Shift in
 the sample to compare the normal-speed arc against the flatter sprint arc.
+
+The final pelvis height also includes terrain reach correction. Previously,
+`pelvisDrop` switched abruptly as feet entered the planted state, which could
+mask the cosine wave as vertical popping. Pelvis drop now uses continuous plant
+weights and a critically damped spring. To inspect each contribution separately:
+
+```bash
+# Authored hips plus cosine bounce, without IK drop or acceleration tilt:
+ZHLN_DISABLE_IK=1 ZHLN_DISABLE_ACCELERATION_TILT=1 \
+    ./build/samples/ProceduralAnimationSample
+
+# Keep leg IK, but remove only its pelvis compensation:
+ZHLN_PELVIS_DROP_WEIGHT=0 ./build/samples/ProceduralAnimationSample
+```
 
 ## Isolation switches
 
