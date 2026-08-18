@@ -220,7 +220,7 @@ auto AttachCharacterRig(ZHLN::Engine& engine, ZHLN::Entity player, std::string_v
         const size_t              outputCapacity = 1 + prefab->parts.size() * 2;
         std::vector<ZHLN::Entity> parts(outputCapacity);
         const uint32_t            count = ZHLN::CreativeWorksFactory::InstantiatePrefab(
-            engine, *prefab, ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0f, 1.20f, 0.0f), .createPhysics = false, .isAnimated = true},
+            engine, *prefab, ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 1.20, 0.0), .createPhysics = false, .isAnimated = true},
             parts.data(), static_cast<uint32_t>(parts.size())
         );
         const uint32_t writtenCount = std::min(count, static_cast<uint32_t>(parts.size()));
