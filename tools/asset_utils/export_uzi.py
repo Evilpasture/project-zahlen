@@ -1509,93 +1509,191 @@ def final_facial_and_widget_cleanup_pass():
 
     bpy.context.view_layer.update()
 
-def bake_pose_action_to_all_bones(main_rig, target_action_name="Uzi_IDLE"):
-    print(f"[*] Visually baking solved IK/FK pose '{target_action_name}' to all bones...", flush=True)
+def get_action_frame_range(action):
+    try:
+        if hasattr(action, "frame_range"):
+            fr = action.frame_range
+            return int(round(fr[0])), int(round(fr[1]))
+    except Exception:
+        pass
+
+    # Blender 5.x Slotted Actions channelbag scan
+    try:
+        if hasattr(action, "layers"):
+            frames = []
+            for layer in action.layers:
+                for strip in getattr(layer, "strips", []):
+                    for cb in getattr(strip, "channelbags", []):
+                        for fc in getattr(cb, "fcurves", []):
+                            for kp in fc.keyframe_points:
+                                frames.append(kp.co[0])
+            if frames:
+                return int(round(min(frames))), int(round(max(frames)))
+    except Exception:
+        pass
+
+    # Legacy Blender <= 4.3 fallback
+    try:
+        if hasattr(action, "fcurves") and action.fcurves:
+            frames = [kp.co[0] for fc in action.fcurves for kp in fc.keyframe_points]
+            if frames:
+                return int(round(min(frames))), int(round(max(frames)))
+    except Exception:
+        pass
+
+    return 1, 24
+
+
+def bind_action_and_slot(rig, action):
+    if not (rig and rig.animation_data and action):
+        return
+
+    rig.animation_data.action = action
+
+    # Blender 4.4+ / 5.2 Slotted Actions Binding
+    try:
+        if hasattr(rig.animation_data, "action_suitable_slots") and len(rig.animation_data.action_suitable_slots) > 0:
+            rig.animation_data.action_slot = rig.animation_data.action_suitable_slots[0]
+        elif hasattr(action, "slots") and len(action.slots) > 0:
+            rig.animation_data.action_slot = action.slots[0]
+    except Exception as e:
+        print(f"  [~] Notice binding slot for '{action.name}': {e}", flush=True)
+
+
+def bake_all_character_animations(main_rig, target_action_names=None):
+    print("[*] Starting multi-animation visual baking pass...", flush=True)
     if not main_rig or not main_rig.data:
         return
 
-    for obj in bpy.data.objects:
-        if obj != main_rig and obj.animation_data:
-            obj.animation_data_clear()
+    # 1. Unhide ALL bone collections and layers so every bone is active and bakeable
+    if hasattr(main_rig.data, "collections"):
+        for bcoll in main_rig.data.collections:
+            bcoll.is_visible = True
+    if hasattr(main_rig.data, "layers"):
+        main_rig.data.layers = [True] * len(main_rig.data.layers)
+    for b in main_rig.data.bones:
+        b.hide = False
+    for pb in main_rig.pose.bones:
+        pb.bone.hide = False
 
-    target_action = bpy.data.actions.get(target_action_name)
-    if not target_action:
-        for act in bpy.data.actions:
-            if "idle" in act.name.lower() or "uzi" in act.name.lower():
-                target_action = act
-                break
-
-    if not target_action:
-        print(f"[-] Warning: Action '{target_action_name}' not found!", flush=True)
-        return
-
-    pose_frame = int(target_action.frame_range[0])
-    bpy.context.scene.frame_start = pose_frame
-    bpy.context.scene.frame_end = pose_frame
-    bpy.context.scene.frame_set(pose_frame)
-
-    main_rig.data.pose_position = 'POSE'
-    if not main_rig.animation_data:
-        main_rig.animation_data_create()
-    main_rig.animation_data.action = target_action
-
+    # Ensure rig is in POSE mode
     deselect_all_objects()
     main_rig.select_set(True)
     bpy.context.view_layer.objects.active = main_rig
     bpy.ops.object.mode_set(mode='POSE')
+    main_rig.data.pose_position = 'POSE'
 
-    for pbone in main_rig.pose.bones:
-        if hasattr(pbone, "select"):
-            pbone.select = True
-        elif hasattr(pbone, "bone") and hasattr(pbone.bone, "select"):
-            pbone.bone.select = True
+    if not main_rig.animation_data:
+        main_rig.animation_data_create()
 
-    target_action.name = "__tmp_source_idle"
+    # Clear existing NLA tracks
+    for t in list(main_rig.animation_data.nla_tracks):
+        main_rig.animation_data.nla_tracks.remove(t)
+    main_rig.animation_data.use_nla = False
 
-    bpy.ops.nla.bake(
-        frame_start=pose_frame,
-        frame_end=pose_frame,
-        step=1,
-        only_selected=True,
-        visual_keying=True,
-        clear_constraints=False,
-        clear_parents=False,
-        use_current_action=False,
-        clean_curves=True,
-        bake_types={'POSE'}
-    )
+    # Clear animation data on non-rig objects (lights, cameras)
+    for obj in bpy.data.objects:
+        if obj != main_rig and obj.animation_data:
+            obj.animation_data_clear()
 
-    baked_action = main_rig.animation_data.action
-    baked_action.name = "Uzi_IDLE"
-    baked_action.use_fake_user = True
+    # 2. Collect target actions (Uzi_IDLE, Uzi_WALK, Uzi_RUN)
+    raw_actions = []
+    if target_action_names:
+        for name in target_action_names:
+            act = bpy.data.actions.get(name)
+            if act and act not in raw_actions:
+                raw_actions.append(act)
+    else:
+        for act in list(bpy.data.actions):
+            name_lower = act.name.lower()
+            if any(name_lower.startswith(p) for p in ["uzi_", "f uzi_"]):
+                raw_actions.append(act)
+            elif any(k in name_lower for k in ["idle", "walk", "run", "jump", "attack"]):
+                if not act.name.startswith("__"):
+                    raw_actions.append(act)
 
+    if not raw_actions:
+        print("[-] Warning: No matching actions found to bake!", flush=True)
+        return
+
+    print(f"[*] Found {len(raw_actions)} action(s) to bake: {[a.name for a in raw_actions]}", flush=True)
+
+    baked_actions = []
+
+    # 3. Bake each action
+    for src_action in raw_actions:
+        orig_name = src_action.name.replace("F ", "").strip()
+        start_frame, end_frame = get_action_frame_range(src_action)
+
+        print(f"  [*] Baking '{orig_name}' (Frames {start_frame} -> {end_frame})...", flush=True)
+
+        # Rename raw action temporarily
+        src_action.name = f"__raw_{orig_name}"
+        
+        # BIND ACTION AND SLOT IN BLENDER 5.2
+        bind_action_and_slot(main_rig, src_action)
+        main_rig.animation_data.use_nla = False
+
+        bpy.context.scene.frame_start = start_frame
+        bpy.context.scene.frame_end = end_frame
+        
+        # Scrub frame to force depsgraph animation recalculation
+        bpy.context.scene.frame_set(start_frame + 1 if start_frame == 0 else start_frame - 1)
+        bpy.context.scene.frame_set(start_frame)
+        bpy.context.view_layer.update()
+
+        # Bake visual transforms to ALL bones
+        bpy.ops.nla.bake(
+            frame_start=start_frame,
+            frame_end=end_frame,
+            step=1,
+            only_selected=False,
+            visual_keying=True,
+            clear_constraints=False,
+            clear_parents=False,
+            use_current_action=False,
+            clean_curves=False,
+            bake_types={'POSE'}
+        )
+
+        baked_act = main_rig.animation_data.action
+        baked_act.name = orig_name
+        baked_act.use_fake_user = True
+        baked_actions.append(baked_act)
+
+        # Clear any temporary NLA tracks created during baking
+        for t in list(main_rig.animation_data.nla_tracks):
+            main_rig.animation_data.nla_tracks.remove(t)
+        main_rig.animation_data.use_nla = False
+
+    # 4. Remove all raw source actions from Blender
     for act in list(bpy.data.actions):
-        if act != baked_action:
+        if act not in baked_actions:
             try:
                 bpy.data.actions.remove(act, do_unlink=True)
             except Exception:
                 pass
 
-    for t in list(main_rig.animation_data.nla_tracks):
-        main_rig.animation_data.nla_tracks.remove(t)
+    # 5. Clear all pose constraints so glTF exporter does NOT re-bake
+    print("[*] Clearing pose constraints on armature to lock baked keyframes...", flush=True)
+    for pbone in main_rig.pose.bones:
+        for c in list(pbone.constraints):
+            pbone.constraints.remove(c)
 
-    track = main_rig.animation_data.nla_tracks.new()
-    track.name = "Uzi_IDLE"
-    track.mute = False
+    for c in list(main_rig.constraints):
+        main_rig.constraints.remove(c)
 
-    strip = track.strips.new("Uzi_IDLE", pose_frame, baked_action)
-    strip.action = baked_action
-    strip.action_frame_start = pose_frame
-    strip.action_frame_end = pose_frame
-    strip.frame_start = pose_frame
-    strip.frame_end = pose_frame
+    # Set active action to the first clip
+    if baked_actions:
+        bind_action_and_slot(main_rig, baked_actions[0])
 
     bpy.ops.object.mode_set(mode='OBJECT')
     bpy.context.view_layer.update()
-    print(f"[+] Baked visual transforms to all {len(main_rig.pose.bones)} bones for 'Uzi_IDLE'.", flush=True)
+    print(f"[+] Successfully baked {len(baked_actions)} pure keyframe animation clip(s).", flush=True)
+
 
 def run_gltf_export(filepath):
-    print("[*] Executing native glTF 2.0 export with baked 'Uzi_IDLE' clip...", flush=True)
+    print("[*] Executing native glTF 2.0 export with baked animation clips...", flush=True)
     main_rig = bpy.data.objects.get("Rig") or bpy.data.objects.get("Rig.001")
 
     if main_rig and main_rig.data:
@@ -1704,8 +1802,8 @@ def main():
     hide_non_character_widgets_and_symbols()
     final_facial_and_widget_cleanup_pass()
 
-    # 8. Visually Bake Pose (IK Arms, Legs, Spine)
-    bake_pose_action_to_all_bones(main_rig, target_action_name="Uzi_IDLE")
+    # 8. Visually Bake Pose Animations (Full Frame Range for IDLE, WALK, RUN, ...)
+    bake_all_character_animations(main_rig)
 
     # 9. Run glTF Exporter
     run_gltf_export(__GLB_PATH__)
