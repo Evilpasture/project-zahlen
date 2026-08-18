@@ -7,9 +7,11 @@
 #include <Zahlen/SkeletalAnimation.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <algorithm>
 #include <array>
 #include <cgltf.h>
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
 #include <expected>
 #include <fstream>
@@ -165,6 +167,8 @@ struct ProceduralAnimationTestSuite {
 
             const ZHLN::RigNodeIndex forearmL     = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ForearmL)];
             const ZHLN::RigNodeIndex handL        = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::HandL)];
+            const ZHLN::RigNodeIndex forearmR     = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ForearmR)];
+            const ZHLN::RigNodeIndex handR        = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::HandR)];
             const ZHLN::RigNodeIndex supSpine     = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::SupSpine)];
             const ZHLN::RigNodeIndex chest        = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Chest)];
             const ZHLN::RigNodeIndex neck         = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Neck)];
@@ -178,8 +182,33 @@ struct ProceduralAnimationTestSuite {
             importedMap.localTransforms[supSpine] = importedMap.localTransforms[supSpine] *
                                                     JPH::Mat44::sRotation(JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), 0.25f));
             ZHLN::ProceduralAnimation::CaptureChildOfPoseDeltas(importedMap);
+
+            // Applying a torso correction after a hand correction moves the
+            // forearm without its detached hand. Reverse discovery order here
+            // to prove the solver resolves semantic parents before hand leaves.
+            std::reverse(
+                importedMap.childOfConstraints.begin(), importedMap.childOfConstraints.begin() + static_cast<std::ptrdiff_t>(importedMap.childOfConstraintCount)
+            );
+            auto findHandConstraint = [&](ZHLN::RigNodeIndex child) -> const ZHLN::RigChildOfConstraint* {
+                for (size_t index = 0; index < importedMap.childOfConstraintCount; ++index) {
+                    const ZHLN::RigChildOfConstraint& constraint = importedMap.childOfConstraints[index];
+                    if (constraint.kind == ZHLN::RigChildOfKind::Hand && constraint.child == child) {
+                        return &constraint;
+                    }
+                }
+                return nullptr;
+            };
+            const ZHLN::RigChildOfConstraint* handLConstraint = findHandConstraint(handL);
+            const ZHLN::RigChildOfConstraint* handRConstraint = findHandConstraint(handR);
+
             ZHLN::ProceduralAnimation::ResolveModelTransforms(importedMap);
-            if (ZHLN::ProceduralAnimation::ApplyChildOfConstraints(importedMap) != 5 ||
+            if (ZHLN::ProceduralAnimation::ApplyChildOfConstraints(importedMap) != 5 || handLConstraint == nullptr || handRConstraint == nullptr ||
+                !importedMap.modelTransforms[handL].IsClose(
+                    importedMap.modelTransforms[forearmL] * handLConstraint->bindRelative * handLConstraint->localPoseDelta, 0.0001f
+                ) ||
+                !importedMap.modelTransforms[handR].IsClose(
+                    importedMap.modelTransforms[forearmR] * handRConstraint->bindRelative * handRConstraint->localPoseDelta, 0.0001f
+                ) ||
                 (importedMap.modelTransforms[handL].GetTranslation() - handBefore).LengthSq() < 0.0001f ||
                 (importedMap.modelTransforms[chest].GetTranslation() - chestBefore).LengthSq() < 0.0001f ||
                 (importedMap.modelTransforms[neck].GetTranslation() - neckBefore).LengthSq() < 0.0001f ||

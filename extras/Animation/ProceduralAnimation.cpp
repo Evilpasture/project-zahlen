@@ -636,11 +636,14 @@ void ConfigureHumanoidChildOfConstraints(RigBoneMap& map) noexcept {
         constraint.localPoseDelta        = JPH::Mat44::sIdentity();
     };
 
-    addConstraint(CharacterBone::ForearmL, CharacterBone::HandL, RigChildOfKind::Hand);
-    addConstraint(CharacterBone::ForearmR, CharacterBone::HandR, RigChildOfKind::Hand);
+    // Store semantic parents before their dependants. In particular, repairing
+    // a detached chest can move both forearms through the imported subtree, so
+    // hands must be attached only after every possible torso correction.
     addConstraint(CharacterBone::SupSpine, CharacterBone::Chest, RigChildOfKind::Chest);
     addConstraint(CharacterBone::Chest, CharacterBone::Neck, RigChildOfKind::Neck);
     addConstraint(CharacterBone::Neck, CharacterBone::Head, RigChildOfKind::Head);
+    addConstraint(CharacterBone::ForearmL, CharacterBone::HandL, RigChildOfKind::Hand);
+    addConstraint(CharacterBone::ForearmR, CharacterBone::HandR, RigChildOfKind::Hand);
 }
 
 struct SkinBinding {
@@ -1032,27 +1035,41 @@ void ProceduralAnimation::CaptureChildOfPoseDeltas(RigBoneMap& boneMap) noexcept
 }
 
 size_t ProceduralAnimation::ApplyChildOfConstraints(RigBoneMap& boneMap, bool applyHands, bool applyChest, bool applyNeck, bool applyHead) noexcept {
+    // Corrections are order-dependent because each one carries the child's
+    // imported subtree. Resolve the torso from proximal to distal, then attach
+    // the hands after all possible torso/arm movement. Do not depend on storage
+    // order: diagnostics and future constraint discovery may reorder the array.
+    constexpr std::array applyOrder {
+        RigChildOfKind::Chest,
+        RigChildOfKind::Neck,
+        RigChildOfKind::Head,
+        RigChildOfKind::Hand,
+    };
+
     size_t appliedCount = 0;
-    for (size_t index = 0; index < boneMap.childOfConstraintCount; ++index) {
-        const RigChildOfConstraint& constraint = boneMap.childOfConstraints[index];
-        const bool enabled = (constraint.kind == RigChildOfKind::Hand && applyHands) || (constraint.kind == RigChildOfKind::Chest && applyChest) ||
-                             (constraint.kind == RigChildOfKind::Neck && applyNeck) || (constraint.kind == RigChildOfKind::Head && applyHead);
+    for (RigChildOfKind kind: applyOrder) {
+        const bool enabled = (kind == RigChildOfKind::Hand && applyHands) || (kind == RigChildOfKind::Chest && applyChest) ||
+                             (kind == RigChildOfKind::Neck && applyNeck) || (kind == RigChildOfKind::Head && applyHead);
         if (!enabled) {
             continue;
         }
-        if (!IsValidRigNode(constraint.parent, boneMap.nodeCount) || !IsValidRigNode(constraint.child, boneMap.nodeCount)) {
-            continue;
-        }
 
-        const JPH::Mat44 previousChild    = boneMap.modelTransforms[constraint.child];
-        const JPH::Mat44 constrainedChild = boneMap.modelTransforms[constraint.parent] * constraint.bindRelative * constraint.localPoseDelta;
-        const JPH::Mat44 modelCorrection  = constrainedChild * previousChild.Inversed();
-        for (RigNodeIndex node = 0; node < boneMap.nodeCount; ++node) {
-            if (IsNodeDescendant(boneMap, node, constraint.child)) {
-                boneMap.modelTransforms[node] = modelCorrection * boneMap.modelTransforms[node];
+        for (size_t index = 0; index < boneMap.childOfConstraintCount; ++index) {
+            const RigChildOfConstraint& constraint = boneMap.childOfConstraints[index];
+            if (constraint.kind != kind || !IsValidRigNode(constraint.parent, boneMap.nodeCount) || !IsValidRigNode(constraint.child, boneMap.nodeCount)) {
+                continue;
             }
+
+            const JPH::Mat44 previousChild    = boneMap.modelTransforms[constraint.child];
+            const JPH::Mat44 constrainedChild = boneMap.modelTransforms[constraint.parent] * constraint.bindRelative * constraint.localPoseDelta;
+            const JPH::Mat44 modelCorrection  = constrainedChild * previousChild.Inversed();
+            for (RigNodeIndex node = 0; node < boneMap.nodeCount; ++node) {
+                if (IsNodeDescendant(boneMap, node, constraint.child)) {
+                    boneMap.modelTransforms[node] = modelCorrection * boneMap.modelTransforms[node];
+                }
+            }
+            ++appliedCount;
         }
-        ++appliedCount;
     }
     return appliedCount;
 }
