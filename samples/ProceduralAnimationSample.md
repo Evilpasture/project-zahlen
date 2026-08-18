@@ -51,10 +51,13 @@ ZHLN_PROCEDURAL_RIG=UziProc.glb ./build/samples/ProceduralAnimationSample
 
 The sample loads the GLB before creating its `CharacterVirtual`. It transforms
 every mesh-part AABB through the imported node hierarchy, unions the results,
-and fits the lifter sphere and bumper capsule to that estimated visual envelope
-with small horizontal/vertical safety margins. The estimate is independent of
-asset names and works across nested transform containers. Consumers can use the
-same generic helpers:
+and fits the lifter sphere and bumper capsule to that estimated visual envelope.
+The torso bumper uses the complete depth but only a configurable fraction of the
+potential lateral reach, so animated arms or weapons do not inflate it to the
+full silhouette. A minimum vertical aspect keeps the bumper oval instead of
+silently degenerating into a sphere. The estimate is independent of asset names
+and works across nested transform containers. Consumers can use the same generic
+helpers:
 
 ```cpp
 const auto bounds = ZHLN::Locomotion::EstimateCharacterBounds(prefab);

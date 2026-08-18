@@ -87,12 +87,14 @@ struct ProceduralAnimationTestSuite {
             rootPart.localMax[2] = 1.0f;
             prefab.parts.push_back(std::move(rootPart));
 
-            const ZHLN::Locomotion::CharacterBoundsEstimate bounds           = ZHLN::Locomotion::EstimateCharacterBounds(prefab);
-            const ZHLN::Physics::DualShapeConfig            hull             = ZHLN::Locomotion::FitDualShapeToBounds(bounds);
-            constexpr float                                 horizontalExtent = 2.5f;
+            const ZHLN::Locomotion::CharacterBoundsEstimate bounds = ZHLN::Locomotion::EstimateCharacterBounds(prefab);
+            const ZHLN::Locomotion::DualShapeFitOptions     options;
+            const ZHLN::Physics::DualShapeConfig            hull = ZHLN::Locomotion::FitDualShapeToBounds(bounds, ZHLN::Physics::DualShapeConfig {}, options);
+            const float                                     horizontalExtent = std::max(2.5f * options.lateralCoverage, 1.25f) * options.horizontalPadding;
             const float                                     hullTop          = hull.GetBumperOffsetY() + hull.bumperRadiusY;
             if (!bounds.valid || !bounds.min.IsClose(JPH::Vec3(-2.0f, 1.0f, -1.25f), 0.0001f) || !bounds.max.IsClose(JPH::Vec3(2.5f, 5.0f, 1.0f), 0.0001f) ||
-                hull.bumperRadiusXZ < horizontalExtent || hull.lifterRadius >= hull.bumperRadiusXZ || hullTop < 5.0f * 1.06f - 0.0001f) {
+                std::abs(hull.bumperRadiusXZ - horizontalExtent) > 0.0001f || hull.lifterRadius >= hull.bumperRadiusXZ ||
+                hull.bumperRadiusY <= hull.bumperRadiusXZ || hullTop < 5.0f * options.verticalPadding - 0.0001f) {
                 return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
             return {};

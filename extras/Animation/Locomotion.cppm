@@ -41,8 +41,10 @@ struct CharacterBoundsEstimate {
 struct DualShapeFitOptions {
     float horizontalPadding   = 1.08f;
     float verticalPadding     = 1.06f;
+    float lateralCoverage     = 0.68f;
     float lifterToBumperRatio = 0.78f;
     float lifterToHeightRatio = 0.24f;
+    float minimumBumperAspect = 1.15f;
     float minimumBumperRadius = 0.10f;
 };
 
@@ -117,9 +119,13 @@ namespace Detail {
         return fallback;
     }
 
-    const float maxAbsX          = std::max(std::abs(bounds.min.GetX()), std::abs(bounds.max.GetX()));
-    const float maxAbsZ          = std::max(std::abs(bounds.min.GetZ()), std::abs(bounds.max.GetZ()));
-    const float horizontalExtent = std::max(maxAbsX, maxAbsZ);
+    const float maxAbsX = std::max(std::abs(bounds.min.GetX()), std::abs(bounds.max.GetX()));
+    const float maxAbsZ = std::max(std::abs(bounds.min.GetZ()), std::abs(bounds.max.GetZ()));
+    // The potential X envelope includes arms, weapons, and other appendages.
+    // A CharacterVirtual bumper represents the torso, so retain all depth but
+    // use a configurable fraction of lateral reach rather than swallowing the
+    // complete animation silhouette.
+    const float horizontalExtent = std::max(maxAbsX * std::clamp(options.lateralCoverage, 0.1f, 1.0f), maxAbsZ);
     const float targetTop        = std::max(bounds.max.GetY(), size.GetY()) * std::max(options.verticalPadding, 1.0f);
     if (!std::isfinite(horizontalExtent) || !std::isfinite(targetTop) || horizontalExtent <= 0.0f || targetTop <= 0.0f) {
         return fallback;
@@ -135,9 +141,11 @@ namespace Detail {
         std::max(options.minimumBumperRadius * 0.5f, 0.01f), maximumLifter
     );
 
-    const float cutRatio = std::clamp(result.lifterRadius / result.bumperRadiusXZ, 0.0f, 0.999f);
-    const float cutScale = std::sqrt(std::max(0.0f, 1.0f - cutRatio * cutRatio));
-    result.bumperRadiusY = std::max(result.bumperRadiusXZ, (targetTop - result.lifterRadius) / std::max(1.0f + cutScale, 0.001f));
+    const float cutRatio       = std::clamp(result.lifterRadius / result.bumperRadiusXZ, 0.0f, 0.999f);
+    const float cutScale       = std::sqrt(std::max(0.0f, 1.0f - cutRatio * cutRatio));
+    const float fittedRadiusY  = (targetTop - result.lifterRadius) / std::max(1.0f + cutScale, 0.001f);
+    const float minimumAspectY = result.bumperRadiusXZ * std::max(options.minimumBumperAspect, 1.01f);
+    result.bumperRadiusY       = std::max(minimumAspectY, fittedRadiusY);
     return result;
 }
 
