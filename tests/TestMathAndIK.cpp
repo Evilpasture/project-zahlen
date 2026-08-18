@@ -40,14 +40,19 @@ struct MathAndIKTestSuite {
             float upperDist = (output.midPosition - input.upperPosition).Length();
             ZHLN::Test::ExpectTrue(std::abs(upperDist - 2.0f) < 0.01f);
 
-            // Length from mid -> target must equal lowerLength
-            float lowerDist = (input.targetPosition - output.midPosition).Length();
+            // Length from mid -> constrained end must equal lowerLength
+            float lowerDist = (output.endPosition - output.midPosition).Length();
             ZHLN::Test::ExpectTrue(std::abs(lowerDist - 2.0f) < 0.01f);
 
             // Test 1b: Target out-of-reach clamping (target distance 10.0m > 4.0m)
             input.targetPosition = JPH::Vec3(0.0f, 2.0f, 10.0f);
+            input.maxExtension   = 0.98f;
             output               = ZHLN::IK::SolveTwoBoneIK(input);
             ZHLN::Test::ExpectTrue(output.valid);
+            ZHLN::Test::ExpectTrue(output.reachClamped);
+            ZHLN::Test::ExpectTrue(std::abs(output.solvedDistance - 3.92f) < 0.001f);
+            ZHLN::Test::ExpectTrue(std::abs((output.midPosition - input.upperPosition).Length() - input.upperLength) < 0.001f);
+            ZHLN::Test::ExpectTrue(std::abs((output.endPosition - output.midPosition).Length() - input.lowerLength) < 0.001f);
 
             return {};
         }

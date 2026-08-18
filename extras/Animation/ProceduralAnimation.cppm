@@ -157,20 +157,26 @@ struct ProceduralLocomotionComponent {
     JPH::Vec3 footNormalR      = JPH::Vec3::sAxisY();
     float     plantWeightL     = 1.0f;
     float     plantWeightR     = 1.0f;
+    bool      ikReachClampedL  = false;
+    bool      ikReachClampedR  = false;
 
-    float forwardLean        = 0.0f;
-    float lateralBank        = 0.0f;
-    float tiltPitchVelocity  = 0.0f;
-    float tiltRollVelocity   = 0.0f;
-    float pelvisBob          = 0.0f;
-    float pelvisSway         = 0.0f;
-    float pelvisDrop         = 0.0f;
-    float targetPelvisDrop   = 0.0f;
-    float pelvisDropVelocity = 0.0f;
-    float gravityBounce      = 0.0f;
-    float bounceGravity      = 9.81f;
-    float maxBounceHeight    = 0.045f;
-    float turnRate           = 0.0f;
+    float forwardLean             = 0.0f;
+    float lateralBank             = 0.0f;
+    float tiltPitchVelocity       = 0.0f;
+    float tiltRollVelocity        = 0.0f;
+    float ikBodyTiltPitch         = 0.0f;
+    float ikBodyTiltRoll          = 0.0f;
+    float ikBodyTiltPitchVelocity = 0.0f;
+    float ikBodyTiltRollVelocity  = 0.0f;
+    float pelvisBob               = 0.0f;
+    float pelvisSway              = 0.0f;
+    float pelvisDrop              = 0.0f;
+    float targetPelvisDrop        = 0.0f;
+    float pelvisDropVelocity      = 0.0f;
+    float gravityBounce           = 0.0f;
+    float bounceGravity           = 9.81f;
+    float maxBounceHeight         = 0.045f;
+    float turnRate                = 0.0f;
 
     // Gait-wheel instrumentation. Pass peaks as a foot crosses below the COM;
     // reach peaks near the forward/back stride extrema.
@@ -246,6 +252,10 @@ struct ProceduralAnimationConfigComponent {
     float                 legIKWeight             = 0.65f;
     float                 pelvisDropWeight        = 1.0f;
     float                 maxFootHeightCorrection = 0.18f;
+    float                 maxLegExtension         = 0.98f;
+    float                 maxIKBodyTiltDegrees    = 10.0f;
+    float                 maxAnkleSidewaysDegrees = 15.0f;
+    float                 maxAnkleForwardDegrees  = 35.0f;
 
     bool enableGait                         = true;
     bool enableGravityBounce                = true;
@@ -296,8 +306,27 @@ JPH::Mat44 CorrectBoneDirection(
     JPH::Vec3Arg      solvedDirection,
     JPH::Vec3Arg      solvedPosition
 ) noexcept;
-JPH::Mat44 AlignFootToGround(const JPH::Mat44& authoredFoot, JPH::Vec3Arg target, JPH::Vec3Arg modelNormal) noexcept;
-size_t     SetModelTransformAndCarrySubtree(JPH::Mat44* nodeTransforms, const RigBoneMap& map, RigNodeIndex rootNode, const JPH::Mat44& target) noexcept;
+JPH::Vec3  LimitGroundNormal(JPH::Vec3Arg modelNormal, float maxSidewaysRadians, float maxForwardRadians) noexcept;
+JPH::Mat44 AlignFootToGround(
+    const JPH::Mat44& authoredFoot,
+    JPH::Vec3Arg      target,
+    JPH::Vec3Arg      modelNormal,
+    float             maxSidewaysRadians = JPH::DegreesToRadians(15.0f),
+    float             maxForwardRadians  = JPH::DegreesToRadians(35.0f)
+) noexcept;
+size_t SetModelTransformAndCarrySubtree(JPH::Mat44* nodeTransforms, const RigBoneMap& map, RigNodeIndex rootNode, const JPH::Mat44& target) noexcept;
+void   ApplyIKReachTilt(
+    ProceduralLocomotionComponent& gait,
+    JPH::Mat44*                    nodeTransforms,
+    const RigBoneMap&              map,
+    JPH::Vec3Arg                   targetL,
+    JPH::Vec3Arg                   targetR,
+    float                          weightL,
+    float                          weightR,
+    float                          maxLegExtension,
+    float                          maxBodyTiltRadians,
+    float                          dt
+) noexcept;
 void ApplyPelvisGaitOffset(const ProceduralLocomotionComponent& gait, JPH::Mat44* nodeTransforms, const RigBoneMap& map, bool includeDrop = true) noexcept;
 void SolveLegGrounding(
     Engine&                        engine,
@@ -312,7 +341,11 @@ void SolveLegGrounding(
     bool                           worldLockFeet           = false,
     float                          maxFootHeightCorrection = 0.18f,
     float                          dt                      = 1.0f / 60.0f,
-    float                          pelvisDropWeight        = 1.0f
+    float                          pelvisDropWeight        = 1.0f,
+    float                          maxLegExtension         = 0.98f,
+    float                          maxBodyTiltRadians      = JPH::DegreesToRadians(10.0f),
+    float                          maxAnkleSidewaysRadians = JPH::DegreesToRadians(15.0f),
+    float                          maxAnkleForwardRadians  = JPH::DegreesToRadians(35.0f)
 ) noexcept;
 void SolveUpperBody(
     const ProceduralLocomotionComponent& gait,

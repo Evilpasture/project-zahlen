@@ -273,9 +273,28 @@ JPH::Mat44 CorrectBoneDirection(
     return JPH::Mat44::sRotationTranslation(rotation, solvedPosition).PreScaled(Detail::MatrixScale(authoredTransform));
 }
 
-JPH::Mat44 AlignFootToGround(const JPH::Mat44& authoredFoot, JPH::Vec3Arg target, JPH::Vec3Arg modelNormal) noexcept {
-    const JPH::Quat correction = JPH::Quat::sFromTo(JPH::Vec3::sAxisY(), Detail::SafeNormalized(modelNormal, JPH::Vec3::sAxisY()));
-    const JPH::Quat rotation   = (correction * Detail::MatrixRotation(authoredFoot)).Normalized();
+JPH::Vec3 LimitGroundNormal(JPH::Vec3Arg modelNormal, float maxSidewaysRadians, float maxForwardRadians) noexcept {
+    const JPH::Vec3 normal = Detail::SafeNormalized(modelNormal, JPH::Vec3::sAxisY());
+    // Decompose the normal into forward ankle pitch (around X) and sideways
+    // ankle roll (around Z). Reconstructing after independent clamps avoids the
+    // unrestricted sFromTo correction folding a foot sharply onto its side.
+    const float     pitch         = std::clamp(std::asin(std::clamp(normal.GetZ(), -1.0f, 1.0f)), -std::abs(maxForwardRadians), std::abs(maxForwardRadians));
+    const float     roll          = std::clamp(std::atan2(-normal.GetX(), normal.GetY()), -std::abs(maxSidewaysRadians), std::abs(maxSidewaysRadians));
+    const JPH::Quat pitchRotation = JPH::Quat::sRotation(JPH::Vec3::sAxisX(), pitch);
+    const JPH::Quat rollRotation  = JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), roll);
+    return Detail::SafeNormalized((rollRotation * pitchRotation) * JPH::Vec3::sAxisY(), JPH::Vec3::sAxisY());
+}
+
+JPH::Mat44 AlignFootToGround(
+    const JPH::Mat44& authoredFoot,
+    JPH::Vec3Arg      target,
+    JPH::Vec3Arg      modelNormal,
+    float             maxSidewaysRadians,
+    float             maxForwardRadians
+) noexcept {
+    const JPH::Vec3 limitedNormal = LimitGroundNormal(modelNormal, maxSidewaysRadians, maxForwardRadians);
+    const JPH::Quat correction    = JPH::Quat::sFromTo(JPH::Vec3::sAxisY(), limitedNormal);
+    const JPH::Quat rotation      = (correction * Detail::MatrixRotation(authoredFoot)).Normalized();
     return JPH::Mat44::sRotationTranslation(rotation, target).PreScaled(Detail::MatrixScale(authoredFoot));
 }
 
@@ -296,6 +315,91 @@ size_t SetModelTransformAndCarrySubtree(JPH::Mat44* nodeTransforms, const RigBon
         }
     }
     return carried;
+}
+
+void ApplyIKReachTilt(
+    ProceduralLocomotionComponent& gait,
+    JPH::Mat44*                    nodeTransforms,
+    const RigBoneMap&              map,
+    JPH::Vec3Arg                   targetL,
+    JPH::Vec3Arg                   targetR,
+    float                          weightL,
+    float                          weightR,
+    float                          maxLegExtension,
+    float                          maxBodyTiltRadians,
+    float                          dt
+) noexcept {
+    if (nodeTransforms == nullptr || map.nodeCount == 0) {
+        return;
+    }
+
+    const RigNodeIndex hipsNode = Detail::Node(map, CharacterBone::Hips);
+    if (!IsValidRigNode(hipsNode, map.nodeCount)) {
+        return;
+    }
+
+    JPH::Vec3 requestedShift = JPH::Vec3::sZero();
+    JPH::Vec3 supportPivot   = JPH::Vec3::sZero();
+    float     supportWeight  = 0.0f;
+    auto      accumulateLeg  = [&](CharacterBone thighBone, CharacterBone shinBone, CharacterBone footBone, JPH::Vec3Arg target, float rawWeight) {
+        const float weight = Detail::SmoothStep(std::clamp(rawWeight, 0.0f, 1.0f));
+        if (weight <= 0.001f) {
+            return;
+        }
+        const RigNodeIndex thighNode = Detail::Node(map, thighBone);
+        const RigNodeIndex shinNode  = Detail::Node(map, shinBone);
+        const RigNodeIndex footNode  = Detail::Node(map, footBone);
+        if (!IsValidRigNode(thighNode, map.nodeCount) || !IsValidRigNode(shinNode, map.nodeCount) || !IsValidRigNode(footNode, map.nodeCount)) {
+            return;
+        }
+
+        supportPivot += target * weight;
+        supportWeight += weight;
+        const JPH::Vec3 thighPosition = nodeTransforms[thighNode].GetTranslation();
+        const float     upperLength   = (nodeTransforms[shinNode].GetTranslation() - thighPosition).Length();
+        const float     lowerLength   = (nodeTransforms[footNode].GetTranslation() - nodeTransforms[shinNode].GetTranslation()).Length();
+        const float     maxReach      = (upperLength + lowerLength) * std::clamp(maxLegExtension, 0.50f, 0.999f);
+        const float     excess        = std::max((target - thighPosition).Length() - maxReach, 0.0f);
+        JPH::Vec3       horizontal    = target - thighPosition;
+        horizontal.SetY(0.0f);
+        if (excess > 0.0f && horizontal.LengthSq() > 1.0e-6f) {
+            requestedShift += horizontal.Normalized() * (excess * weight);
+        }
+    };
+
+    accumulateLeg(CharacterBone::ThighL, CharacterBone::ShinL, CharacterBone::FootL, targetL, weightL);
+    accumulateLeg(CharacterBone::ThighR, CharacterBone::ShinR, CharacterBone::FootR, targetR, weightR);
+
+    if (supportWeight > 0.001f) {
+        supportPivot /= supportWeight;
+        requestedShift /= supportWeight;
+    } else {
+        supportPivot = nodeTransforms[hipsNode].GetTranslation() - JPH::Vec3(0.0f, 1.0f, 0.0f);
+    }
+
+    const float maxTilt     = std::max(maxBodyTiltRadians, 0.0f);
+    float       targetPitch = 0.0f;
+    float       targetRoll  = 0.0f;
+    if (requestedShift.LengthSq() > 1.0e-8f && maxTilt > 0.0f) {
+        const float     lever     = std::max((nodeTransforms[hipsNode].GetTranslation() - supportPivot).Length(), 0.25f);
+        const float     angle     = std::min(std::atan2(requestedShift.Length(), lever), maxTilt);
+        const JPH::Vec3 direction = requestedShift.Normalized();
+        targetPitch               = direction.GetZ() * angle;
+        targetRoll                = -direction.GetX() * angle;
+    }
+
+    Detail::SpringScalar(gait.ikBodyTiltPitch, gait.ikBodyTiltPitchVelocity, targetPitch, dt, 6.0f, 1.0f);
+    Detail::SpringScalar(gait.ikBodyTiltRoll, gait.ikBodyTiltRollVelocity, targetRoll, dt, 6.0f, 1.0f);
+    const float tiltMagnitude = std::sqrt(gait.ikBodyTiltPitch * gait.ikBodyTiltPitch + gait.ikBodyTiltRoll * gait.ikBodyTiltRoll);
+    if (tiltMagnitude > maxTilt && tiltMagnitude > 1.0e-6f) {
+        const float scale = maxTilt / tiltMagnitude;
+        gait.ikBodyTiltPitch *= scale;
+        gait.ikBodyTiltRoll *= scale;
+    }
+
+    const JPH::Quat pitch = JPH::Quat::sRotation(JPH::Vec3::sAxisX(), gait.ikBodyTiltPitch);
+    const JPH::Quat roll  = JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), gait.ikBodyTiltRoll);
+    Detail::RotateSubtreeAroundPivot(map, nodeTransforms, hipsNode, supportPivot, (roll * pitch).Normalized());
 }
 
 /** Applies gait sway/bounce independently from analytical foot IK. */
@@ -324,7 +428,11 @@ void SolveLegGrounding(
     bool                           worldLockFeet,
     float                          maxFootHeightCorrection,
     float                          dt,
-    float                          pelvisDropWeight
+    float                          pelvisDropWeight,
+    float                          maxLegExtension,
+    float                          maxBodyTiltRadians,
+    float                          maxAnkleSidewaysRadians,
+    float                          maxAnkleForwardRadians
 ) noexcept {
     if (nodeTransforms == nullptr || map.nodeCount == 0) {
         return;
@@ -413,9 +521,15 @@ void SolveLegGrounding(
     Detail::SpringScalar(gait.pelvisDrop, gait.pelvisDropVelocity, gait.targetPelvisDrop, dt, 5.0f, 1.0f);
 
     ApplyPelvisGaitOffset(gait, nodeTransforms, map, true);
+    ApplyIKReachTilt(
+        gait, nodeTransforms, map, targetModelL, targetModelR, gait.plantWeightL * ikWeight, gait.plantWeightR * ikWeight, maxLegExtension, maxBodyTiltRadians,
+        dt
+    );
 
-    auto solveLeg = [&](CharacterBone thighBone, CharacterBone shinBone, CharacterBone footBone, JPH::Vec3Arg target, JPH::Vec3Arg worldNormal,
-                        float plantWeight) {
+    gait.ikReachClampedL = false;
+    gait.ikReachClampedR = false;
+    auto solveLeg        = [&](CharacterBone thighBone, CharacterBone shinBone, CharacterBone footBone, JPH::Vec3Arg target, JPH::Vec3Arg worldNormal,
+                               float plantWeight, bool& reachClamped) {
         const float solveWeight = std::clamp(plantWeight * ikWeight, 0.0f, 1.0f);
         if (solveWeight <= 0.001f) {
             return; // Preserve the authored swing pose completely.
@@ -451,10 +565,29 @@ void SolveLegGrounding(
             .poleVector     = pole,
             .upperLength    = upperLength,
             .lowerLength    = lowerLength,
+            .maxExtension   = maxLegExtension,
         });
         if (!ik.valid) {
             return;
         }
+
+        // Blend the end target, then solve the chain again. Blending thigh,
+        // knee, and ankle positions independently changes segment lengths; a
+        // second analytic solve keeps both lengths exact at every IK weight.
+        const float     poseWeight  = Detail::SmoothStep(solveWeight);
+        const JPH::Vec3 posedTarget = footPosition + (ik.endPosition - footPosition) * poseWeight;
+        const auto      posedIK     = IK::SolveTwoBoneIK({
+            .upperPosition  = thighPosition,
+            .targetPosition = posedTarget,
+            .poleVector     = pole,
+            .upperLength    = upperLength,
+            .lowerLength    = lowerLength,
+            .maxExtension   = maxLegExtension,
+        });
+        if (!posedIK.valid) {
+            return;
+        }
+        reachClamped = ik.reachClamped || posedIK.reachClamped;
 
         // Derive correction axes from the evaluated model-space pose rather
         // than assuming that imported bones use a particular local axis.
@@ -465,16 +598,17 @@ void SolveLegGrounding(
         const JPH::Mat44 authoredShin  = nodeTransforms[shinNode];
         const JPH::Mat44 authoredFoot  = nodeTransforms[footNode];
 
-        const JPH::Mat44 solvedThigh = CorrectBoneDirection(authoredThigh, currentUpperDir, ik.upperDirection, thighPosition);
-        const JPH::Mat44 solvedShin  = CorrectBoneDirection(authoredShin, currentLowerDir, ik.lowerDirection, ik.midPosition);
+        const JPH::Mat44 solvedThigh = CorrectBoneDirection(authoredThigh, currentUpperDir, posedIK.upperDirection, thighPosition);
+        const JPH::Mat44 solvedShin  = CorrectBoneDirection(authoredShin, currentLowerDir, posedIK.lowerDirection, posedIK.midPosition);
 
         // Flat ground is the identity correction: sFromTo(+Y, +Y).
         const JPH::Vec3  modelNormal = Detail::SafeNormalized(inverseRootRot * worldNormal, JPH::Vec3::sAxisY());
-        const JPH::Mat44 solvedFoot  = AlignFootToGround(authoredFoot, target, modelNormal);
+        const JPH::Mat44 solvedFoot  = AlignFootToGround(authoredFoot, posedIK.endPosition, modelNormal, maxAnkleSidewaysRadians, maxAnkleForwardRadians);
 
-        const JPH::Mat44 posedThigh = Detail::BlendTransform(authoredThigh, solvedThigh, solveWeight);
-        const JPH::Mat44 posedShin  = Detail::BlendTransform(authoredShin, solvedShin, solveWeight);
-        const JPH::Mat44 posedFoot  = Detail::BlendTransform(authoredFoot, solvedFoot, solveWeight);
+        const JPH::Mat44 posedThigh = solvedThigh;
+        const JPH::Mat44 posedShin  = solvedShin;
+        JPH::Mat44       posedFoot  = Detail::BlendTransform(authoredFoot, solvedFoot, solveWeight);
+        posedFoot.SetTranslation(posedIK.endPosition);
 
         // Apply proximal-to-distal targets while carrying each imported subtree.
         // Child transform nodes (foot shells, shoe pieces, sockets) were already
@@ -484,8 +618,8 @@ void SolveLegGrounding(
         SetModelTransformAndCarrySubtree(nodeTransforms, map, footNode, posedFoot);
     };
 
-    solveLeg(CharacterBone::ThighL, CharacterBone::ShinL, CharacterBone::FootL, targetModelL, contactL.normal, gait.plantWeightL);
-    solveLeg(CharacterBone::ThighR, CharacterBone::ShinR, CharacterBone::FootR, targetModelR, contactR.normal, gait.plantWeightR);
+    solveLeg(CharacterBone::ThighL, CharacterBone::ShinL, CharacterBone::FootL, targetModelL, contactL.normal, gait.plantWeightL, gait.ikReachClampedL);
+    solveLeg(CharacterBone::ThighR, CharacterBone::ShinR, CharacterBone::FootR, targetModelR, contactR.normal, gait.plantWeightR, gait.ikReachClampedR);
 }
 
 /** Stage 4: anti-phase arm swing and distributed look-at. */

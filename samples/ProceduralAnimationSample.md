@@ -248,12 +248,21 @@ more important than preserving that motion. Tune each contribution independently
 ```bash
 ZHLN_LEG_IK_WEIGHT=0.4 ./build/samples/ProceduralAnimationSample
 ZHLN_MAX_FOOT_HEIGHT_CORRECTION=0.10 ./build/samples/ProceduralAnimationSample
+ZHLN_MAX_LEG_EXTENSION=0.98 ./build/samples/ProceduralAnimationSample
+ZHLN_MAX_IK_BODY_TILT_DEGREES=10 ./build/samples/ProceduralAnimationSample
+ZHLN_MAX_ANKLE_SIDEWAYS_DEGREES=15 ./build/samples/ProceduralAnimationSample
+ZHLN_MAX_ANKLE_FORWARD_DEGREES=35 ./build/samples/ProceduralAnimationSample
 ZHLN_WORLD_LOCK_FEET=1 ./build/samples/ProceduralAnimationSample
 ZHLN_DISABLE_IK=1 ./build/samples/ProceduralAnimationSample
 ```
 
 `legIKWeight=0` preserves authored legs; `1` gives full terrain correction at the
 center of the plant interval. Touchdown and toe-off use smooth nonlinear fades.
+The reach solver first leans the hips/body toward an unreachable planted target,
+up to `maxIKBodyTiltDegrees`. Any remaining error is clamped to the physical
+two-bone reach, so neither segment stretches and the knee retains a small bend
+through `maxLegExtension`. Ground alignment independently limits ankle roll and
+pitch; steep lateral normals therefore cannot fold the foot onto its side.
 
 Evaluate only the authored clip and the selected bicubic or spring-damper pose interpolator:
 

@@ -326,9 +326,9 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
                         newLowerWorld            = IK::AlignNodeToDirection(newLowerWorld, localLowerDir, ikOutput.lowerDirection);
 
                         JPH::Mat44 newEndWorld = endWorld;
-                        newEndWorld.SetTranslation(solvedTargetPos);
+                        newEndWorld.SetTranslation(ikOutput.endPosition);
                         if (chain.orientEndEffector) {
-                            newEndWorld = JPH::Mat44::sRotationTranslation(solvedTargetRot, solvedTargetPos);
+                            newEndWorld = JPH::Mat44::sRotationTranslation(solvedTargetRot, ikOutput.endPosition);
                         }
 
                         float w        = std::clamp(chain.weight, 0.0f, 1.0f);

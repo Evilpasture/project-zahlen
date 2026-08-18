@@ -176,6 +176,10 @@ auto AttachCharacterRig(ZHLN::Engine& engine, ZHLN::Entity player, std::string_v
         .legIKWeight             = EnvironmentFloat("ZHLN_LEG_IK_WEIGHT", 0.65f),
         .pelvisDropWeight        = EnvironmentFloat("ZHLN_PELVIS_DROP_WEIGHT", 1.0f),
         .maxFootHeightCorrection = EnvironmentFloat("ZHLN_MAX_FOOT_HEIGHT_CORRECTION", 0.18f),
+        .maxLegExtension         = EnvironmentFloat("ZHLN_MAX_LEG_EXTENSION", 0.98f),
+        .maxIKBodyTiltDegrees    = EnvironmentFloat("ZHLN_MAX_IK_BODY_TILT_DEGREES", 10.0f),
+        .maxAnkleSidewaysDegrees = EnvironmentFloat("ZHLN_MAX_ANKLE_SIDEWAYS_DEGREES", 15.0f),
+        .maxAnkleForwardDegrees  = EnvironmentFloat("ZHLN_MAX_ANKLE_FORWARD_DEGREES", 35.0f),
         .enableLegIK             = !EnvironmentFlag("ZHLN_DISABLE_IK"),
         .worldLockFeet           = EnvironmentFlag("ZHLN_WORLD_LOCK_FEET"),
         .enableAccelerationTilt  = !EnvironmentFlag("ZHLN_DISABLE_ACCELERATION_TILT"),
@@ -189,6 +193,10 @@ auto AttachCharacterRig(ZHLN::Engine& engine, ZHLN::Entity player, std::string_v
         "[Sample] Leg IK weight={}; authored X/Z=true; world lock={}; max height correction={}; pelvis-drop weight={}.",
         animationConfig.enableLegIK ? animationConfig.legIKWeight : 0.0f, animationConfig.worldLockFeet, animationConfig.maxFootHeightCorrection,
         animationConfig.pelvisDropWeight
+    );
+    ZHLN::Log(
+        "[Sample] IK limits: extension={}, body tilt={} deg, ankle sideways={} deg, ankle forward={} deg.", animationConfig.maxLegExtension,
+        animationConfig.maxIKBodyTiltDegrees, animationConfig.maxAnkleSidewaysDegrees, animationConfig.maxAnkleForwardDegrees
     );
     if (animationConfig.authoredPoseOnly) {
         ZHLN::Log("[Sample] Authored-pose-only isolation enabled; all procedural layers are bypassed.");

@@ -454,6 +454,16 @@ struct ProceduralAnimationTestSuite {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
 
+            constexpr float maxSideways     = 0.20f;
+            constexpr float maxForward      = 0.50f;
+            const JPH::Vec3 extremeNormal   = JPH::Vec3(0.82f, 0.45f, 0.35f).Normalized();
+            const JPH::Vec3 limitedNormal   = ZHLN::Animation::LimitGroundNormal(extremeNormal, maxSideways, maxForward);
+            const float     limitedSideways = std::abs(std::atan2(-limitedNormal.GetX(), limitedNormal.GetY()));
+            const float     limitedForward  = std::abs(std::asin(std::clamp(limitedNormal.GetZ(), -1.0f, 1.0f)));
+            if (limitedSideways > maxSideways + 0.0001f || limitedForward > maxForward + 0.0001f) {
+                return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
+            }
+
             ZHLN::RigBoneMap subtreeMap;
             ZHLN::BuildStandardProceduralRig(subtreeMap);
             const ZHLN::RigNodeIndex footNode        = subtreeMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::FootL)];
@@ -472,6 +482,25 @@ struct ProceduralAnimationTestSuite {
                 !subtreeMap.modelTransforms[footNode].IsClose(carriedFoot, 0.0001f) ||
                 !subtreeMap.modelTransforms[toeNode].IsClose(correction * oldToe, 0.0001f) ||
                 !subtreeMap.modelTransforms[meshPartNode].IsClose(correction * oldMeshPart, 0.0001f)) {
+                return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
+            }
+
+            ZHLN::RigBoneMap tiltMap;
+            ZHLN::BuildStandardProceduralRig(tiltMap);
+            const auto                          baseTransforms    = tiltMap.modelTransforms;
+            const ZHLN::RigNodeIndex            tiltThigh         = tiltMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ThighL)];
+            const ZHLN::RigNodeIndex            tiltHips          = tiltMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Hips)];
+            const JPH::Vec3                     unreachableTarget = tiltMap.modelTransforms[tiltThigh].GetTranslation() + JPH::Vec3(1.5f, -0.35f, 0.0f);
+            constexpr float                     maxBodyTilt       = 0.14f;
+            ZHLN::ProceduralLocomotionComponent tiltGait;
+            for (uint32_t frame = 0; frame < 120; ++frame) {
+                tiltMap.modelTransforms = baseTransforms;
+                ZHLN::Animation::ApplyIKReachTilt(
+                    tiltGait, tiltMap.modelTransforms.data(), tiltMap, unreachableTarget, JPH::Vec3::sZero(), 1.0f, 0.0f, 0.96f, maxBodyTilt, 1.0f / 60.0f
+                );
+            }
+            const float appliedTilt = std::sqrt(tiltGait.ikBodyTiltPitch * tiltGait.ikBodyTiltPitch + tiltGait.ikBodyTiltRoll * tiltGait.ikBodyTiltRoll);
+            if (appliedTilt < 0.01f || appliedTilt > maxBodyTilt + 0.0001f || tiltMap.modelTransforms[tiltHips].IsClose(baseTransforms[tiltHips], 0.0001f)) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
             return {};

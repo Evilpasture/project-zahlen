@@ -1516,14 +1516,26 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
             const float  legIKWeight            = config != nullptr ? config->legIKWeight : 1.0f;
             const float  pelvisDropWeight       = config != nullptr ? config->pelvisDropWeight : 1.0f;
             const float  maxHeightCorrection    = config != nullptr ? config->maxFootHeightCorrection : 0.18f;
+            const float  maxLegExtension        = config != nullptr ? config->maxLegExtension : 0.98f;
+            const float  maxBodyTilt            = JPH::DegreesToRadians(config != nullptr ? config->maxIKBodyTiltDegrees : 10.0f);
+            const float  maxAnkleSideways       = JPH::DegreesToRadians(config != nullptr ? config->maxAnkleSidewaysDegrees : 15.0f);
+            const float  maxAnkleForward        = JPH::DegreesToRadians(config != nullptr ? config->maxAnkleForwardDegrees : 35.0f);
             const bool   preserveAuthoredFootXZ = config == nullptr || config->preserveAuthoredFootXZ;
             const bool   worldLockFeet          = config != nullptr && config->worldLockFeet;
             Animation::SolveLegGrounding(
                 engine, transform->position, rootRotation, *gait, boneMap->modelTransforms.data(), *boneMap, ignoredHandle, legIKWeight, preserveAuthoredFootXZ,
-                worldLockFeet, maxHeightCorrection, dt, pelvisDropWeight
+                worldLockFeet, maxHeightCorrection, dt, pelvisDropWeight, maxLegExtension, maxBodyTilt, maxAnkleSideways, maxAnkleForward
             );
-        } else if (gaitEnabled) {
-            Animation::ApplyPelvisGaitOffset(*gait, boneMap->modelTransforms.data(), *boneMap, false);
+        } else {
+            gait->ikBodyTiltPitch         = 0.0f;
+            gait->ikBodyTiltRoll          = 0.0f;
+            gait->ikBodyTiltPitchVelocity = 0.0f;
+            gait->ikBodyTiltRollVelocity  = 0.0f;
+            gait->ikReachClampedL         = false;
+            gait->ikReachClampedR         = false;
+            if (gaitEnabled) {
+                Animation::ApplyPelvisGaitOffset(*gait, boneMap->modelTransforms.data(), *boneMap, false);
+            }
         }
 
         // Stage 4: authored upper-body channels win by default. Procedural arm
