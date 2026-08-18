@@ -455,6 +455,34 @@ struct ProceduralAnimationTestSuite {
             return {};
         }
 
+        std::expected<void, ZHLN::Error> authored_upper_body_can_suppress_procedural_layers() {
+            ZHLN::RigBoneMap map;
+            ZHLN::BuildStandardProceduralRig(map);
+            const ZHLN::RigNodeIndex armNode    = map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::UpperArmL)];
+            const ZHLN::RigNodeIndex headNode   = map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Head)];
+            const JPH::Mat44         armBefore  = map.modelTransforms[armNode];
+            const JPH::Mat44         headBefore = map.modelTransforms[headNode];
+
+            ZHLN::ProceduralLocomotionComponent gait;
+            gait.phase            = 0.25f;
+            gait.previousVelocity = JPH::Vec3(0.0f, 0.0f, 2.0f);
+            ZHLN::ProceduralLookAtComponent lookAt {
+                .targetWorldPos = headBefore.GetTranslation() + JPH::Vec3(1.0f, 0.2f, 2.0f),
+                .weight         = 1.0f,
+            };
+
+            ZHLN::Animation::SolveUpperBody(gait, &lookAt, JPH::Vec3::sZero(), JPH::Quat::sIdentity(), map.modelTransforms.data(), map, false, false);
+            if (!map.modelTransforms[armNode].IsClose(armBefore, 0.0001f) || !map.modelTransforms[headNode].IsClose(headBefore, 0.0001f)) {
+                return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
+            }
+
+            ZHLN::Animation::SolveUpperBody(gait, &lookAt, JPH::Vec3::sZero(), JPH::Quat::sIdentity(), map.modelTransforms.data(), map, true, true);
+            if (map.modelTransforms[armNode].IsClose(armBefore, 0.0001f) || map.modelTransforms[headNode].IsClose(headBefore, 0.0001f)) {
+                return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
+            }
+            return {};
+        }
+
         std::expected<void, ZHLN::Error> acceleration_tilt_preserves_com_radius() {
             ZHLN::RigBoneMap map;
             ZHLN::BuildStandardProceduralRig(map);

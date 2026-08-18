@@ -480,6 +480,41 @@ void ApplyAuthoredPose(const Components::AnimatorComponent* animator, const Proc
     map.springPoseTrack = activeTrack;
 }
 
+struct AuthoredUpperBodyCoverage {
+    bool arms      = false;
+    bool torsoHead = false;
+};
+
+[[nodiscard]] AuthoredUpperBodyCoverage FindAuthoredUpperBodyCoverage(const Components::AnimatorComponent* animator, const RigBoneMap& map) noexcept {
+    AuthoredUpperBodyCoverage coverage;
+    if (animator == nullptr || animator->prefab == nullptr || animator->currentTrackIdx < 0 ||
+        animator->currentTrackIdx >= static_cast<int32_t>(animator->prefab->animations.size())) {
+        return coverage;
+    }
+
+    constexpr std::array armBones = {
+        CharacterBone::UpperArmL, CharacterBone::ForearmL, CharacterBone::HandL, CharacterBone::UpperArmR, CharacterBone::ForearmR, CharacterBone::HandR,
+    };
+    constexpr std::array torsoHeadBones = {
+        CharacterBone::Spine, CharacterBone::SupSpine, CharacterBone::Chest, CharacterBone::Neck, CharacterBone::Head,
+    };
+
+    const AnimationClip& clip = animator->prefab->animations[static_cast<size_t>(animator->currentTrackIdx)];
+    for (const AnimationChannel& channel: clip.channels) {
+        if (channel.path == AnimationPathType::Weights || channel.targetNodeIndex < 0) {
+            continue;
+        }
+        const RigNodeIndex target = static_cast<RigNodeIndex>(channel.targetNodeIndex);
+        for (CharacterBone bone: armBones) {
+            coverage.arms = coverage.arms || map.nodeIndices[BoneSlot(bone)] == target;
+        }
+        for (CharacterBone bone: torsoHeadBones) {
+            coverage.torsoHead = coverage.torsoHead || map.nodeIndices[BoneSlot(bone)] == target;
+        }
+    }
+    return coverage;
+}
+
 [[nodiscard]] bool IsValidTrack(const Components::AnimatorComponent& animator, int32_t track) noexcept {
     return animator.prefab != nullptr && track >= 0 && track < static_cast<int32_t>(animator.prefab->animations.size());
 }
@@ -1238,10 +1273,19 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
             Animation::ApplyPelvisGaitOffset(*gait, boneMap->modelTransforms.data(), *boneMap, false);
         }
 
-        // Stage 4: arm counter-swing and look-at.
+        // Stage 4: authored upper-body channels win by default. Procedural arm
+        // swing/look-at only fill groups not keyed by the active GLB track.
         if (upperBodyEnabled) {
-            const auto* lookAt = registry.Get<ProceduralLookAtComponent>(entity);
-            Animation::SolveUpperBody(*gait, lookAt, transform->position, rootRotation, boneMap->modelTransforms.data(), *boneMap);
+            const AuthoredUpperBodyCoverage coverage      = FindAuthoredUpperBodyCoverage(animator, *boneMap);
+            const bool                      forceLayering = config != nullptr && config->layerUpperBodyOverAuthoredChannels;
+            const bool                      applyArmSwing = forceLayering || !coverage.arms;
+            const bool                      applyLookAt   = forceLayering || !coverage.torsoHead;
+            const auto*                     lookAt        = registry.Get<ProceduralLookAtComponent>(entity);
+            if (applyArmSwing || applyLookAt) {
+                Animation::SolveUpperBody(
+                    *gait, lookAt, transform->position, rootRotation, boneMap->modelTransforms.data(), *boneMap, applyArmSwing, applyLookAt
+                );
+            }
         }
 
         // Stage 5: worker-fiber XPBD secondary motion.

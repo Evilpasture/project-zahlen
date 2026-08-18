@@ -168,6 +168,16 @@ Acceleration pitch and roll use their own springs and rotate the whole hips
 subtree around the estimated center of mass before foot IK re-establishes ground
 contact.
 
+The active clip is also inspected for authored upper-body coverage. If it keys
+arms/hands, procedural arm counter-swing is suppressed. If it keys spine, chest,
+neck, or head, procedural look-at is suppressed. This prevents the extras module
+from adding an idle sway on top of an authored GLB track. Explicitly opt back into
+both layers with:
+
+```cpp
+config.layerUpperBodyOverAuthoredChannels = true;
+```
+
 The debug overlay draws a sagittal stride wheel beside the COM. Cyan indicates
 pass-pose landmarks, orange indicates reach-pose landmarks, and the moving spoke
 shows the current distance-driven stride phase.

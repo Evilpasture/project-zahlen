@@ -476,26 +476,30 @@ void SolveUpperBody(
     JPH::Vec3Arg                         rootPosition,
     JPH::QuatArg                         rootRotation,
     JPH::Mat44*                          nodeTransforms,
-    const RigBoneMap&                    map
+    const RigBoneMap&                    map,
+    bool                                 applyArmSwing,
+    bool                                 applyLookAt
 ) noexcept {
     if (nodeTransforms == nullptr || map.nodeCount == 0) {
         return;
     }
 
-    const float horizontalSpeed =
-        std::sqrt(gait.previousVelocity.GetX() * gait.previousVelocity.GetX() + gait.previousVelocity.GetZ() * gait.previousVelocity.GetZ());
-    const float        swingWeight = std::clamp(horizontalSpeed * 0.35f, 0.0f, 1.0f);
-    const float        armAngle    = std::sin(kGaitTwoPi * gait.phase) * 0.58f * swingWeight;
-    const RigNodeIndex armL        = Detail::Node(map, CharacterBone::UpperArmL);
-    const RigNodeIndex armR        = Detail::Node(map, CharacterBone::UpperArmR);
-    if (IsValidRigNode(armL, map.nodeCount)) {
-        Detail::RotateSubtree(map, nodeTransforms, armL, JPH::Quat::sRotation(JPH::Vec3::sAxisX(), -armAngle));
-    }
-    if (IsValidRigNode(armR, map.nodeCount)) {
-        Detail::RotateSubtree(map, nodeTransforms, armR, JPH::Quat::sRotation(JPH::Vec3::sAxisX(), armAngle));
+    if (applyArmSwing) {
+        const float horizontalSpeed =
+            std::sqrt(gait.previousVelocity.GetX() * gait.previousVelocity.GetX() + gait.previousVelocity.GetZ() * gait.previousVelocity.GetZ());
+        const float        swingWeight = std::clamp(horizontalSpeed * 0.35f, 0.0f, 1.0f);
+        const float        armAngle    = std::sin(kGaitTwoPi * gait.phase) * 0.58f * swingWeight;
+        const RigNodeIndex armL        = Detail::Node(map, CharacterBone::UpperArmL);
+        const RigNodeIndex armR        = Detail::Node(map, CharacterBone::UpperArmR);
+        if (IsValidRigNode(armL, map.nodeCount)) {
+            Detail::RotateSubtree(map, nodeTransforms, armL, JPH::Quat::sRotation(JPH::Vec3::sAxisX(), -armAngle));
+        }
+        if (IsValidRigNode(armR, map.nodeCount)) {
+            Detail::RotateSubtree(map, nodeTransforms, armR, JPH::Quat::sRotation(JPH::Vec3::sAxisX(), armAngle));
+        }
     }
 
-    if (lookAt == nullptr || lookAt->weight <= 0.001f) {
+    if (!applyLookAt || lookAt == nullptr || lookAt->weight <= 0.001f) {
         return;
     }
 
@@ -542,7 +546,7 @@ void SolveUpperBody(
     JPH::Mat44*                          nodeTransforms,
     const RigBoneMap&                    map
 ) noexcept {
-    SolveUpperBody(gait, lookAt, JPH::Vec3::sZero(), JPH::Quat::sIdentity(), nodeTransforms, map);
+    SolveUpperBody(gait, lookAt, JPH::Vec3::sZero(), JPH::Quat::sIdentity(), nodeTransforms, map, true, true);
 }
 
 } // namespace ZHLN::Animation

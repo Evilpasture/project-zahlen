@@ -237,15 +237,16 @@ struct ProceduralAnimationConfigComponent {
     float                 pelvisDropWeight        = 1.0f;
     float                 maxFootHeightCorrection = 0.18f;
 
-    bool enableGait             = true;
-    bool enableGravityBounce    = true;
-    bool enableLegIK            = true;
-    bool preserveAuthoredFootXZ = true;
-    bool worldLockFeet          = false;
-    bool enableAccelerationTilt = true;
-    bool enableUpperBody        = true;
-    bool enableSecondaryMotion  = true;
-    bool enforceHandChildOf     = true;
+    bool enableGait                         = true;
+    bool enableGravityBounce                = true;
+    bool enableLegIK                        = true;
+    bool preserveAuthoredFootXZ             = true;
+    bool worldLockFeet                      = false;
+    bool enableAccelerationTilt             = true;
+    bool enableUpperBody                    = true;
+    bool enableSecondaryMotion              = true;
+    bool enforceHandChildOf                 = true;
+    bool layerUpperBodyOverAuthoredChannels = false;
 
     // Overrides all switches above and evaluates only the authored keyframe
     // pose through the selected bicubic or spring-damper interpolator.
@@ -304,7 +305,9 @@ void SolveUpperBody(
     JPH::Vec3Arg                         rootPosition,
     JPH::QuatArg                         rootRotation,
     JPH::Mat44*                          nodeTransforms,
-    const RigBoneMap&                    map
+    const RigBoneMap&                    map,
+    bool                                 applyArmSwing = true,
+    bool                                 applyLookAt   = true
 ) noexcept;
 void SolveUpperBody(
     const ProceduralLocomotionComponent& gait,
