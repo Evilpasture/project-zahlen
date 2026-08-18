@@ -621,7 +621,7 @@ void ConfigureHumanoidChildOfConstraints(RigBoneMap& map) noexcept {
     map.childOfConstraints.fill({});
     map.childOfConstraintCount = 0;
 
-    auto addConstraint = [&](CharacterBone parentBone, CharacterBone childBone) {
+    auto addConstraint = [&](CharacterBone parentBone, CharacterBone childBone, RigChildOfKind kind) {
         const RigNodeIndex parent = map.nodeIndices[BoneSlot(parentBone)];
         const RigNodeIndex child  = map.nodeIndices[BoneSlot(childBone)];
         if (!IsValidRigNode(parent, map.nodeCount) || !IsValidRigNode(child, map.nodeCount) || IsNodeDescendant(map, child, parent) ||
@@ -631,12 +631,14 @@ void ConfigureHumanoidChildOfConstraints(RigBoneMap& map) noexcept {
         RigChildOfConstraint& constraint = map.childOfConstraints[map.childOfConstraintCount++];
         constraint.parent                = parent;
         constraint.child                 = child;
+        constraint.kind                  = kind;
         constraint.bindRelative          = map.modelTransforms[parent].Inversed() * map.modelTransforms[child];
         constraint.localPoseDelta        = JPH::Mat44::sIdentity();
     };
 
-    addConstraint(CharacterBone::ForearmL, CharacterBone::HandL);
-    addConstraint(CharacterBone::ForearmR, CharacterBone::HandR);
+    addConstraint(CharacterBone::ForearmL, CharacterBone::HandL, RigChildOfKind::Hand);
+    addConstraint(CharacterBone::ForearmR, CharacterBone::HandR, RigChildOfKind::Hand);
+    addConstraint(CharacterBone::SupSpine, CharacterBone::Chest, RigChildOfKind::Chest);
 }
 
 struct SkinBinding {
@@ -1027,10 +1029,13 @@ void ProceduralAnimation::CaptureChildOfPoseDeltas(RigBoneMap& boneMap) noexcept
     }
 }
 
-size_t ProceduralAnimation::ApplyChildOfConstraints(RigBoneMap& boneMap) noexcept {
+size_t ProceduralAnimation::ApplyChildOfConstraints(RigBoneMap& boneMap, bool applyHands, bool applyChest) noexcept {
     size_t appliedCount = 0;
     for (size_t index = 0; index < boneMap.childOfConstraintCount; ++index) {
         const RigChildOfConstraint& constraint = boneMap.childOfConstraints[index];
+        if ((constraint.kind == RigChildOfKind::Hand && !applyHands) || (constraint.kind == RigChildOfKind::Chest && !applyChest)) {
+            continue;
+        }
         if (!IsValidRigNode(constraint.parent, boneMap.nodeCount) || !IsValidRigNode(constraint.child, boneMap.nodeCount)) {
             continue;
         }
@@ -1158,7 +1163,7 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
                 complete ? "complete" : "partial", mappedCoreBones, kCoreBoneCount, mappedHairStrands, HairStrandsComponent::kStrandCount, mappedHairBones
             );
             if (boneMap->childOfConstraintCount > 0) {
-                ZHLN::Log("[ProceduralAnimation] Added {} semantic hand child-of constraints.", boneMap->childOfConstraintCount);
+                ZHLN::Log("[ProceduralAnimation] Added {} semantic child-of constraints for detached hands/chest.", boneMap->childOfConstraintCount);
             }
             if (animator != nullptr && animator->currentTrackIdx >= 0 && animator->currentTrackIdx < static_cast<int32_t>(prefab->animations.size())) {
                 const AnimationClip& clip                    = prefab->animations[static_cast<size_t>(animator->currentTrackIdx)];
@@ -1214,6 +1219,8 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
         const bool upperBodyEnabled       = !authoredPoseOnly && (config == nullptr || config->enableUpperBody);
         const bool secondaryMotionEnabled = !authoredPoseOnly && (config == nullptr || config->enableSecondaryMotion);
         const bool handChildOfEnabled     = config == nullptr || config->enforceHandChildOf;
+        const bool chestChildOfEnabled    = config == nullptr || config->enforceChestChildOf;
+        const bool childOfEnabled         = handChildOfEnabled || chestChildOfEnabled;
         const bool locomotionSyncEnabled  = animator != nullptr && tracks != nullptr && tracks->synchronizeToStrideWheel;
 
         const JPH::Vec3 velocityWorld   = physicsComponent != nullptr ? physics.GetCharacterVelocity(physicsComponent->physicsHandle) : JPH::Vec3::sZero();
@@ -1242,7 +1249,7 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
         }
 
         ApplyAuthoredPose(animator, config, *boneMap, dt);
-        if (handChildOfEnabled) {
+        if (childOfEnabled) {
             ProceduralAnimation::CaptureChildOfPoseDeltas(*boneMap);
         }
         ResolveForwardKinematics(*boneMap);
@@ -1329,9 +1336,10 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
         // Jolt ragdoll poses over this kinematic target.
 
         // Stage 7: enforce semantic child-of relationships before recovering
-        // local transforms. Detached hands carry their finger subtrees with them.
-        if (handChildOfEnabled) {
-            ProceduralAnimation::ApplyChildOfConstraints(*boneMap);
+        // local transforms. Detached hands carry fingers; a detached chest
+        // carries neck/head and upper-body attachments with the torso.
+        if (childOfEnabled) {
+            ProceduralAnimation::ApplyChildOfConstraints(*boneMap, handChildOfEnabled, chestChildOfEnabled);
         }
         CaptureLocalPose(*boneMap);
         ResolveForwardKinematics(*boneMap);

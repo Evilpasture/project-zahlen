@@ -75,11 +75,17 @@ inline constexpr size_t kCoreBoneCount = BoneSlot(CharacterBone::ToeR) + 1;
 // leaving enough headroom for those imported hierarchies.
 inline constexpr size_t kMaxRigNodes = 512;
 
+enum class RigChildOfKind : uint8_t {
+    Hand,
+    Chest,
+};
+
 struct RigChildOfConstraint {
-    RigNodeIndex parent         = InvalidRigNode;
-    RigNodeIndex child          = InvalidRigNode;
-    JPH::Mat44   bindRelative   = JPH::Mat44::sIdentity();
-    JPH::Mat44   localPoseDelta = JPH::Mat44::sIdentity();
+    RigNodeIndex   parent         = InvalidRigNode;
+    RigNodeIndex   child          = InvalidRigNode;
+    RigChildOfKind kind           = RigChildOfKind::Hand;
+    JPH::Mat44     bindRelative   = JPH::Mat44::sIdentity();
+    JPH::Mat44     localPoseDelta = JPH::Mat44::sIdentity();
 };
 
 /**
@@ -246,6 +252,7 @@ struct ProceduralAnimationConfigComponent {
     bool enableUpperBody                    = true;
     bool enableSecondaryMotion              = true;
     bool enforceHandChildOf                 = true;
+    bool enforceChestChildOf                = true;
     bool layerUpperBodyOverAuthoredChannels = false;
 
     // Overrides all switches above and evaluates only the authored keyframe
@@ -358,7 +365,7 @@ void Register(Engine& engine);
 void   Update(Engine& engine, float dt) noexcept;
 void   ResolveModelTransforms(RigBoneMap& boneMap) noexcept;
 void   CaptureChildOfPoseDeltas(RigBoneMap& boneMap) noexcept;
-size_t ApplyChildOfConstraints(RigBoneMap& boneMap) noexcept;
+size_t ApplyChildOfConstraints(RigBoneMap& boneMap, bool applyHands = true, bool applyChest = true) noexcept;
 size_t BuildSkinningPalette(const Skeleton& skeleton, const RigBoneMap& boneMap, std::span<JPH::Mat44> output) noexcept;
 size_t SyncNonSkinnedAttachments(ECS::Registry& registry, Entity rootEntity, const RigBoneMap& boneMap) noexcept;
 void   DrawDebugRig(
