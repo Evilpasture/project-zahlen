@@ -644,6 +644,8 @@ void ConfigureHumanoidChildOfConstraints(RigBoneMap& map) noexcept {
     addConstraint(CharacterBone::Neck, CharacterBone::Head, RigChildOfKind::Head);
     addConstraint(CharacterBone::ForearmL, CharacterBone::HandL, RigChildOfKind::Hand);
     addConstraint(CharacterBone::ForearmR, CharacterBone::HandR, RigChildOfKind::Hand);
+    addConstraint(CharacterBone::FootL, CharacterBone::ToeL, RigChildOfKind::FootAttachment);
+    addConstraint(CharacterBone::FootR, CharacterBone::ToeR, RigChildOfKind::FootAttachment);
 }
 
 void ConfigureFootAttachmentConstraints(const ModelPrefab& prefab, RigBoneMap& map) noexcept {
@@ -653,10 +655,6 @@ void ConfigureFootAttachmentConstraints(const ModelPrefab& prefab, RigBoneMap& m
         return;
     }
 
-    // A rigid GLB attachment has no skin palette to identify its owner. Infer
-    // only compact meshes whose bind-space bounds touch a foot. This remains
-    // asset/name agnostic (Cylinder.004 is no different from Boot_L), while the
-    // size gate prevents a whole unskinned body or ground mesh being captured.
     std::array<bool, kMaxRigNodes> skinnedNodes {};
     for (const ModelPart& part: prefab.parts) {
         const RigNodeIndex node = part.nodeIndex >= 0 ? static_cast<RigNodeIndex>(part.nodeIndex) : InvalidRigNode;
@@ -729,7 +727,7 @@ void ConfigureFootAttachmentConstraints(const ModelPrefab& prefab, RigBoneMap& m
         const float        footLength     = IsValidRigNode(toe, map.nodeCount) ? (map.modelTransforms[toe].GetTranslation() - site.position).Length() : 0.0f;
         const float        characterMeasure = std::max(lowerLegLength, footLength * 2.0f);
         site.reach                          = std::max(lowerLegLength * 0.35f, footLength * 1.25f);
-        site.maxRadius                      = characterMeasure * 1.25f;
+        site.maxRadius                      = characterMeasure * 1.75f;
         return site;
     };
 
@@ -746,27 +744,93 @@ void ConfigureFootAttachmentConstraints(const ModelPrefab& prefab, RigBoneMap& m
         }
         return false;
     };
+    std::array<bool, kMaxRigNodes> containsCoreControls {};
+    for (size_t semantic = 0; semantic < kCoreBoneCount; ++semantic) {
+        RigNodeIndex cursor = map.nodeIndices[semantic];
+        for (size_t depth = 0; depth < map.nodeCount && IsValidRigNode(cursor, map.nodeCount); ++depth) {
+            containsCoreControls[cursor] = true;
+            cursor                       = map.parentIndices[cursor];
+        }
+    }
+    auto containsCoreControl        = [&](RigNodeIndex node) { return IsValidRigNode(node, map.nodeCount) && containsCoreControls[node]; };
+    auto findDetachedAttachmentRoot = [&](RigNodeIndex meshNode) {
+        RigNodeIndex root = meshNode;
+        for (size_t depth = 0; depth < map.nodeCount; ++depth) {
+            const RigNodeIndex parent = map.parentIndices[root];
+            if (!IsValidRigNode(parent, map.nodeCount) || isSemanticNode(parent) || containsCoreControl(parent)) {
+                break;
+            }
+            root = parent;
+        }
+        return root;
+    };
 
+    // Aggregate bounds by detached transform root. Exporters often emit one
+    // root-level shoe transform with several child mesh-part nodes. Constraining
+    // those parts independently leaves their owning transform behind; promoting
+    // to the highest non-rig ancestor repairs the relationship once and carries
+    // every child part together without consulting node names.
+    std::array<bool, kMaxRigNodes>      candidateRoots {};
+    std::array<JPH::Vec3, kMaxRigNodes> candidateMin {};
+    std::array<JPH::Vec3, kMaxRigNodes> candidateMax {};
     for (const ModelPart& part: prefab.parts) {
-        const RigNodeIndex child = part.nodeIndex >= 0 ? static_cast<RigNodeIndex>(part.nodeIndex) : InvalidRigNode;
-        if (part.isSkinned || !IsValidRigNode(child, map.nodeCount) || skinnedNodes[child] || constrainedNodes[child] || isSemanticNode(child) ||
-            map.childOfConstraintCount >= map.childOfConstraints.size()) {
+        const RigNodeIndex meshNode = part.nodeIndex >= 0 ? static_cast<RigNodeIndex>(part.nodeIndex) : InvalidRigNode;
+        if (!IsValidRigNode(meshNode, map.nodeCount) || isSemanticNode(meshNode) || constrainedNodes[meshNode]) {
             continue;
         }
 
-        const JPH::Mat44 meshBind = map.modelTransforms[child] * part.localTransform;
+        bool alreadyUnderFoot = false;
+        for (const FootSite& site: footSites) {
+            alreadyUnderFoot = alreadyUnderFoot || (IsValidRigNode(site.node, map.nodeCount) && IsNodeDescendant(map, meshNode, site.node));
+        }
+        if (alreadyUnderFoot) {
+            continue;
+        }
+
+        const RigNodeIndex root = findDetachedAttachmentRoot(meshNode);
+        if (!IsValidRigNode(root, map.nodeCount) || isSemanticNode(root) || containsCoreControl(root) || constrainedNodes[root] || skinnedNodes[root] ||
+            (part.isSkinned && root == meshNode)) {
+            continue;
+        }
+
+        const JPH::Mat44 meshBind = map.modelTransforms[meshNode] * part.localTransform;
         const JPH::Vec3  boundsMin(part.localMin[0], part.localMin[1], part.localMin[2]);
         const JPH::Vec3  boundsMax(part.localMax[0], part.localMax[1], part.localMax[2]);
-        const JPH::Vec3  localCenter = (boundsMin + boundsMax) * 0.5f;
-        const JPH::Vec3  halfExtent  = (boundsMax - boundsMin) * 0.5f;
-        const JPH::Vec3  modelCenter = meshBind.Multiply3x3(localCenter) + meshBind.GetTranslation();
-        const float      modelRadius = meshBind.Multiply3x3(halfExtent).Length();
+        for (uint32_t corner = 0; corner < 8; ++corner) {
+            const JPH::Vec3 localPoint(
+                (corner & 1u) != 0u ? boundsMax.GetX() : boundsMin.GetX(), (corner & 2u) != 0u ? boundsMax.GetY() : boundsMin.GetY(),
+                (corner & 4u) != 0u ? boundsMax.GetZ() : boundsMin.GetZ()
+            );
+            const JPH::Vec3 point = meshBind.Multiply3x3(localPoint) + meshBind.GetTranslation();
+            if (!candidateRoots[root]) {
+                candidateRoots[root] = true;
+                candidateMin[root]   = point;
+                candidateMax[root]   = point;
+            } else {
+                candidateMin[root] = JPH::Vec3(
+                    std::min(candidateMin[root].GetX(), point.GetX()), std::min(candidateMin[root].GetY(), point.GetY()),
+                    std::min(candidateMin[root].GetZ(), point.GetZ())
+                );
+                candidateMax[root] = JPH::Vec3(
+                    std::max(candidateMax[root].GetX(), point.GetX()), std::max(candidateMax[root].GetY(), point.GetY()),
+                    std::max(candidateMax[root].GetZ(), point.GetZ())
+                );
+            }
+        }
+    }
+
+    for (RigNodeIndex root = 0; root < map.nodeCount && map.childOfConstraintCount < map.childOfConstraints.size(); ++root) {
+        if (!candidateRoots[root]) {
+            continue;
+        }
+        const JPH::Vec3 modelCenter = (candidateMin[root] + candidateMax[root]) * 0.5f;
+        const float     modelRadius = ((candidateMax[root] - candidateMin[root]) * 0.5f).Length();
 
         const FootSite* nearest         = nullptr;
         float           nearestDistance = std::numeric_limits<float>::max();
         for (const FootSite& site: footSites) {
             if (!IsValidRigNode(site.node, map.nodeCount) || site.reach <= 0.0f || site.maxRadius <= 0.0f || modelRadius > site.maxRadius ||
-                IsNodeDescendant(map, child, site.node) || IsNodeDescendant(map, site.node, child)) {
+                IsNodeDescendant(map, root, site.node) || IsNodeDescendant(map, site.node, root)) {
                 continue;
             }
             const float centerDistance   = (modelCenter - site.position).Length();
@@ -776,11 +840,9 @@ void ConfigureFootAttachmentConstraints(const ModelPrefab& prefab, RigBoneMap& m
                 nearestDistance = centerDistance;
             }
         }
-        if (nearest == nullptr) {
-            continue;
+        if (nearest != nullptr) {
+            static_cast<void>(addFootConstraint(nearest->node, root));
         }
-
-        static_cast<void>(addFootConstraint(nearest->node, child));
     }
 }
 
@@ -1333,6 +1395,18 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
                     footAttachments += boneMap->childOfConstraints[index].kind == RigChildOfKind::FootAttachment ? 1u : 0u;
                 }
                 ZHLN::Log("[ProceduralAnimation] Added {} child-of constraints ({} foot attachments).", boneMap->childOfConstraintCount, footAttachments);
+                const RigNodeIndex footL = boneMap->nodeIndices[BoneSlot(CharacterBone::FootL)];
+                const RigNodeIndex footR = boneMap->nodeIndices[BoneSlot(CharacterBone::FootR)];
+                for (size_t index = 0; index < boneMap->childOfConstraintCount; ++index) {
+                    const RigChildOfConstraint& constraint = boneMap->childOfConstraints[index];
+                    if (constraint.kind != RigChildOfKind::FootAttachment || !IsValidRigNode(constraint.child, prefab->nodes.size())) {
+                        continue;
+                    }
+                    const std::string_view parentLabel = constraint.parent == footL ? "FootL" : (constraint.parent == footR ? "FootR" : "Foot");
+                    ZHLN::Log(
+                        "[ProceduralAnimation] {} -> node {} ('{}').", parentLabel, constraint.child, std::string_view(prefab->nodes[constraint.child].name)
+                    );
+                }
             }
             if (animator != nullptr && animator->currentTrackIdx >= 0 && animator->currentTrackIdx < static_cast<int32_t>(prefab->animations.size())) {
                 const AnimationClip& clip                    = prefab->animations[static_cast<size_t>(animator->currentTrackIdx)];

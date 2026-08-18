@@ -297,6 +297,7 @@ JPH::Mat44 CorrectBoneDirection(
     JPH::Vec3Arg      solvedPosition
 ) noexcept;
 JPH::Mat44 AlignFootToGround(const JPH::Mat44& authoredFoot, JPH::Vec3Arg target, JPH::Vec3Arg modelNormal) noexcept;
+size_t     SetModelTransformAndCarrySubtree(JPH::Mat44* nodeTransforms, const RigBoneMap& map, RigNodeIndex rootNode, const JPH::Mat44& target) noexcept;
 void ApplyPelvisGaitOffset(const ProceduralLocomotionComponent& gait, JPH::Mat44* nodeTransforms, const RigBoneMap& map, bool includeDrop = true) noexcept;
 void SolveLegGrounding(
     Engine&                        engine,

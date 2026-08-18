@@ -280,16 +280,19 @@ SupSpine -> Chest -> Neck -> Head
 Each constraint preserves its bind-relative offset and authored local animation,
 and each node carries its own descendants and attachments. Detached semantic
 foot copies in secondary skins are attached to the primary `FootL`/`FootR`
-controls. Compact unskinned meshes whose bind-space bounds touch a foot are also
-attached after IK. Geometry-based discovery uses rig-relative dimensions rather
-than asset paths or names, so opaque exports such as `Cylinder.004` work without
-putting Uzi-specific knowledge in the subsystem. Normally skinned footwear still
-uses its imported joint weights and palette.
+controls. Foot IK carries its model-space correction through every imported
+child transform, so mesh parts below a `DEF-Foot.*` transform stay coherent.
+
+For detached footwear, compact mesh bounds are aggregated at their highest
+non-rig transform ancestor. That owning transform is attached after IK and moves
+all of its child parts together. Discovery uses hierarchy, geometry, and
+rig-relative dimensions—not asset paths or node names. A skinned child part may
+participate when it is under a detached transform container, while an ordinary
+standalone skinned mesh remains palette-driven.
 
 Disable only intentionally different relationships with `enforceHandChildOf`,
 `enforceChestChildOf`, `enforceNeckChildOf`, `enforceHeadChildOf`, or
-`enforceFootAttachments`. Large meshes and already-skinned mesh nodes are never
-spatially auto-attached.
+`enforceFootAttachments`. Large meshes are never spatially auto-attached.
 
 Startup logs print the selected index, clip name,
 duration, total channel count, and usable transform-channel count. A T-pose with

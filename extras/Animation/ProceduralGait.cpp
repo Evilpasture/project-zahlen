@@ -279,6 +279,25 @@ JPH::Mat44 AlignFootToGround(const JPH::Mat44& authoredFoot, JPH::Vec3Arg target
     return JPH::Mat44::sRotationTranslation(rotation, target).PreScaled(Detail::MatrixScale(authoredFoot));
 }
 
+size_t SetModelTransformAndCarrySubtree(JPH::Mat44* nodeTransforms, const RigBoneMap& map, RigNodeIndex rootNode, const JPH::Mat44& target) noexcept {
+    if (nodeTransforms == nullptr || !IsValidRigNode(rootNode, map.nodeCount)) {
+        return 0;
+    }
+
+    // Model-space procedural solvers replace a semantic control directly. Its
+    // imported child transform nodes were evaluated before that replacement,
+    // so carry the same correction through the complete subtree immediately.
+    const JPH::Mat44 correction = target * nodeTransforms[rootNode].Inversed();
+    size_t           carried    = 0;
+    for (RigNodeIndex node = 0; node < map.nodeCount; ++node) {
+        if (Detail::IsDescendant(map, node, rootNode)) {
+            nodeTransforms[node] = correction * nodeTransforms[node];
+            ++carried;
+        }
+    }
+    return carried;
+}
+
 /** Applies gait sway/bounce independently from analytical foot IK. */
 void ApplyPelvisGaitOffset(const ProceduralLocomotionComponent& gait, JPH::Mat44* nodeTransforms, const RigBoneMap& map, bool includeDrop) noexcept {
     if (nodeTransforms == nullptr) {
@@ -395,8 +414,8 @@ void SolveLegGrounding(
 
     ApplyPelvisGaitOffset(gait, nodeTransforms, map, true);
 
-    auto solveLeg = [&](CharacterBone thighBone, CharacterBone shinBone, CharacterBone footBone, CharacterBone toeBone, JPH::Vec3Arg target,
-                        JPH::Vec3Arg worldNormal, float plantWeight) {
+    auto solveLeg = [&](CharacterBone thighBone, CharacterBone shinBone, CharacterBone footBone, JPH::Vec3Arg target, JPH::Vec3Arg worldNormal,
+                        float plantWeight) {
         const float solveWeight = std::clamp(plantWeight * ikWeight, 0.0f, 1.0f);
         if (solveWeight <= 0.001f) {
             return; // Preserve the authored swing pose completely.
@@ -405,7 +424,6 @@ void SolveLegGrounding(
         const RigNodeIndex thighNode = Detail::Node(map, thighBone);
         const RigNodeIndex shinNode  = Detail::Node(map, shinBone);
         const RigNodeIndex footNode  = Detail::Node(map, footBone);
-        const RigNodeIndex toeNode   = Detail::Node(map, toeBone);
         if (!IsValidRigNode(thighNode, map.nodeCount) || !IsValidRigNode(shinNode, map.nodeCount) || !IsValidRigNode(footNode, map.nodeCount)) {
             return;
         }
@@ -454,19 +472,20 @@ void SolveLegGrounding(
         const JPH::Vec3  modelNormal = Detail::SafeNormalized(inverseRootRot * worldNormal, JPH::Vec3::sAxisY());
         const JPH::Mat44 solvedFoot  = AlignFootToGround(authoredFoot, target, modelNormal);
 
-        nodeTransforms[thighNode] = Detail::BlendTransform(authoredThigh, solvedThigh, solveWeight);
-        nodeTransforms[shinNode]  = Detail::BlendTransform(authoredShin, solvedShin, solveWeight);
-        nodeTransforms[footNode]  = Detail::BlendTransform(authoredFoot, solvedFoot, solveWeight);
+        const JPH::Mat44 posedThigh = Detail::BlendTransform(authoredThigh, solvedThigh, solveWeight);
+        const JPH::Mat44 posedShin  = Detail::BlendTransform(authoredShin, solvedShin, solveWeight);
+        const JPH::Mat44 posedFoot  = Detail::BlendTransform(authoredFoot, solvedFoot, solveWeight);
 
-        if (IsValidRigNode(toeNode, map.nodeCount)) {
-            const JPH::Mat44 authoredToe = nodeTransforms[toeNode];
-            const JPH::Mat44 solvedToe   = solvedFoot * map.bindLocalTransforms[toeNode];
-            nodeTransforms[toeNode]      = Detail::BlendTransform(authoredToe, solvedToe, solveWeight);
-        }
+        // Apply proximal-to-distal targets while carrying each imported subtree.
+        // Child transform nodes (foot shells, shoe pieces, sockets) were already
+        // evaluated from the authored pose and otherwise remain visually behind.
+        SetModelTransformAndCarrySubtree(nodeTransforms, map, thighNode, posedThigh);
+        SetModelTransformAndCarrySubtree(nodeTransforms, map, shinNode, posedShin);
+        SetModelTransformAndCarrySubtree(nodeTransforms, map, footNode, posedFoot);
     };
 
-    solveLeg(CharacterBone::ThighL, CharacterBone::ShinL, CharacterBone::FootL, CharacterBone::ToeL, targetModelL, contactL.normal, gait.plantWeightL);
-    solveLeg(CharacterBone::ThighR, CharacterBone::ShinR, CharacterBone::FootR, CharacterBone::ToeR, targetModelR, contactR.normal, gait.plantWeightR);
+    solveLeg(CharacterBone::ThighL, CharacterBone::ShinL, CharacterBone::FootL, targetModelL, contactL.normal, gait.plantWeightL);
+    solveLeg(CharacterBone::ThighR, CharacterBone::ShinR, CharacterBone::FootR, targetModelR, contactR.normal, gait.plantWeightR);
 }
 
 /** Stage 4: anti-phase arm swing and distributed look-at. */
