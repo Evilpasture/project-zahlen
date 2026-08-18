@@ -646,6 +646,144 @@ void ConfigureHumanoidChildOfConstraints(RigBoneMap& map) noexcept {
     addConstraint(CharacterBone::ForearmR, CharacterBone::HandR, RigChildOfKind::Hand);
 }
 
+void ConfigureFootAttachmentConstraints(const ModelPrefab& prefab, RigBoneMap& map) noexcept {
+    const RigNodeIndex footL = map.nodeIndices[BoneSlot(CharacterBone::FootL)];
+    const RigNodeIndex footR = map.nodeIndices[BoneSlot(CharacterBone::FootR)];
+    if (!IsValidRigNode(footL, map.nodeCount) && !IsValidRigNode(footR, map.nodeCount)) {
+        return;
+    }
+
+    // A rigid GLB attachment has no skin palette to identify its owner. Infer
+    // only compact meshes whose bind-space bounds touch a foot. This remains
+    // asset/name agnostic (Cylinder.004 is no different from Boot_L), while the
+    // size gate prevents a whole unskinned body or ground mesh being captured.
+    std::array<bool, kMaxRigNodes> skinnedNodes {};
+    for (const ModelPart& part: prefab.parts) {
+        const RigNodeIndex node = part.nodeIndex >= 0 ? static_cast<RigNodeIndex>(part.nodeIndex) : InvalidRigNode;
+        if (part.isSkinned && IsValidRigNode(node, map.nodeCount)) {
+            skinnedNodes[node] = true;
+        }
+    }
+
+    std::array<bool, kMaxRigNodes> constrainedNodes {};
+    for (size_t index = 0; index < map.childOfConstraintCount; ++index) {
+        const RigNodeIndex child = map.childOfConstraints[index].child;
+        if (IsValidRigNode(child, map.nodeCount)) {
+            constrainedNodes[child] = true;
+        }
+    }
+
+    auto addFootConstraint = [&](RigNodeIndex parent, RigNodeIndex child) {
+        if (!IsValidRigNode(parent, map.nodeCount) || !IsValidRigNode(child, map.nodeCount) || parent == child || constrainedNodes[child] ||
+            IsNodeDescendant(map, child, parent) || IsNodeDescendant(map, parent, child) || map.childOfConstraintCount >= map.childOfConstraints.size()) {
+            return false;
+        }
+        RigChildOfConstraint& constraint = map.childOfConstraints[map.childOfConstraintCount++];
+        constraint.parent                = parent;
+        constraint.child                 = child;
+        constraint.kind                  = RigChildOfKind::FootAttachment;
+        constraint.bindRelative          = map.modelTransforms[parent].Inversed() * map.modelTransforms[child];
+        constraint.localPoseDelta        = JPH::Mat44::sIdentity();
+        constrainedNodes[child]          = true;
+        return true;
+    };
+
+    // Secondary skins may carry their own exported copy of a semantic foot
+    // joint. Attach those duplicate controls to the primary rig foot so their
+    // palettes remain synchronized without assuming any mesh or skin index.
+    for (const Skeleton& skeleton: prefab.skeletons) {
+        for (const Joint& joint: skeleton.joints) {
+            const RigNodeIndex child = joint.nodeIndex >= 0 ? static_cast<RigNodeIndex>(joint.nodeIndex) : InvalidRigNode;
+            if (!IsValidRigNode(child, map.nodeCount)) {
+                continue;
+            }
+            const CanonicalName    canonical  = Canonicalize(std::string_view(joint.name));
+            const std::string_view normalized = StripKnownRigPrefix(canonical.View());
+            const bool             matchesL   = MatchesBone(normalized, CharacterBone::FootL, false);
+            const bool             matchesR   = MatchesBone(normalized, CharacterBone::FootR, false);
+            if (matchesL) {
+                static_cast<void>(addFootConstraint(footL, child));
+            } else if (matchesR) {
+                static_cast<void>(addFootConstraint(footR, child));
+            }
+        }
+    }
+
+    struct FootSite {
+        RigNodeIndex node      = InvalidRigNode;
+        JPH::Vec3    position  = JPH::Vec3::sZero();
+        float        reach     = 0.0f;
+        float        maxRadius = 0.0f;
+    };
+    auto makeFootSite = [&](CharacterBone footBone, CharacterBone shinBone, CharacterBone toeBone) {
+        FootSite site;
+        site.node = map.nodeIndices[BoneSlot(footBone)];
+        if (!IsValidRigNode(site.node, map.nodeCount)) {
+            return site;
+        }
+
+        site.position                     = map.modelTransforms[site.node].GetTranslation();
+        const RigNodeIndex shin           = map.nodeIndices[BoneSlot(shinBone)];
+        const RigNodeIndex toe            = map.nodeIndices[BoneSlot(toeBone)];
+        const float        lowerLegLength = IsValidRigNode(shin, map.nodeCount) ? (map.modelTransforms[shin].GetTranslation() - site.position).Length() : 0.0f;
+        const float        footLength     = IsValidRigNode(toe, map.nodeCount) ? (map.modelTransforms[toe].GetTranslation() - site.position).Length() : 0.0f;
+        const float        characterMeasure = std::max(lowerLegLength, footLength * 2.0f);
+        site.reach                          = std::max(lowerLegLength * 0.35f, footLength * 1.25f);
+        site.maxRadius                      = characterMeasure * 1.25f;
+        return site;
+    };
+
+    const std::array footSites {
+        makeFootSite(CharacterBone::FootL, CharacterBone::ShinL, CharacterBone::ToeL),
+        makeFootSite(CharacterBone::FootR, CharacterBone::ShinR, CharacterBone::ToeR),
+    };
+
+    auto isSemanticNode = [&](RigNodeIndex node) {
+        for (RigNodeIndex semanticNode: map.nodeIndices) {
+            if (semanticNode == node) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    for (const ModelPart& part: prefab.parts) {
+        const RigNodeIndex child = part.nodeIndex >= 0 ? static_cast<RigNodeIndex>(part.nodeIndex) : InvalidRigNode;
+        if (part.isSkinned || !IsValidRigNode(child, map.nodeCount) || skinnedNodes[child] || constrainedNodes[child] || isSemanticNode(child) ||
+            map.childOfConstraintCount >= map.childOfConstraints.size()) {
+            continue;
+        }
+
+        const JPH::Mat44 meshBind = map.modelTransforms[child] * part.localTransform;
+        const JPH::Vec3  boundsMin(part.localMin[0], part.localMin[1], part.localMin[2]);
+        const JPH::Vec3  boundsMax(part.localMax[0], part.localMax[1], part.localMax[2]);
+        const JPH::Vec3  localCenter = (boundsMin + boundsMax) * 0.5f;
+        const JPH::Vec3  halfExtent  = (boundsMax - boundsMin) * 0.5f;
+        const JPH::Vec3  modelCenter = meshBind.Multiply3x3(localCenter) + meshBind.GetTranslation();
+        const float      modelRadius = meshBind.Multiply3x3(halfExtent).Length();
+
+        const FootSite* nearest         = nullptr;
+        float           nearestDistance = std::numeric_limits<float>::max();
+        for (const FootSite& site: footSites) {
+            if (!IsValidRigNode(site.node, map.nodeCount) || site.reach <= 0.0f || site.maxRadius <= 0.0f || modelRadius > site.maxRadius ||
+                IsNodeDescendant(map, child, site.node) || IsNodeDescendant(map, site.node, child)) {
+                continue;
+            }
+            const float centerDistance   = (modelCenter - site.position).Length();
+            const float distanceToBounds = std::max(centerDistance - modelRadius, 0.0f);
+            if (distanceToBounds <= site.reach && centerDistance < nearestDistance) {
+                nearest         = &site;
+                nearestDistance = centerDistance;
+            }
+        }
+        if (nearest == nullptr) {
+            continue;
+        }
+
+        static_cast<void>(addFootConstraint(nearest->node, child));
+    }
+}
+
 struct SkinBinding {
     Components::SkeletalMeshComponent* skeletalMesh = nullptr;
     const Skeleton*                    skeleton     = nullptr;
@@ -913,6 +1051,7 @@ bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMa
 
     ResolveForwardKinematics(outMap);
     ConfigureHumanoidChildOfConstraints(outMap);
+    ConfigureFootAttachmentConstraints(prefab, outMap);
     outMap.initialized = true;
     outMap.poseValid   = true;
     return coreMapped == kCoreBoneCount && mappedHairStrands == HairStrandsComponent::kStrandCount;
@@ -1034,22 +1173,27 @@ void ProceduralAnimation::CaptureChildOfPoseDeltas(RigBoneMap& boneMap) noexcept
     }
 }
 
-size_t ProceduralAnimation::ApplyChildOfConstraints(RigBoneMap& boneMap, bool applyHands, bool applyChest, bool applyNeck, bool applyHead) noexcept {
+size_t ProceduralAnimation::ApplyChildOfConstraints(
+    RigBoneMap& boneMap,
+    bool        applyHands,
+    bool        applyChest,
+    bool        applyNeck,
+    bool        applyHead,
+    bool        applyFootAttachments
+) noexcept {
     // Corrections are order-dependent because each one carries the child's
     // imported subtree. Resolve the torso from proximal to distal, then attach
-    // the hands after all possible torso/arm movement. Do not depend on storage
-    // order: diagnostics and future constraint discovery may reorder the array.
+    // the hands and rigid footwear after all possible torso/limb movement. Do
+    // not depend on storage order: discovery may reorder the array.
     constexpr std::array applyOrder {
-        RigChildOfKind::Chest,
-        RigChildOfKind::Neck,
-        RigChildOfKind::Head,
-        RigChildOfKind::Hand,
+        RigChildOfKind::Chest, RigChildOfKind::Neck, RigChildOfKind::Head, RigChildOfKind::Hand, RigChildOfKind::FootAttachment,
     };
 
     size_t appliedCount = 0;
     for (RigChildOfKind kind: applyOrder) {
         const bool enabled = (kind == RigChildOfKind::Hand && applyHands) || (kind == RigChildOfKind::Chest && applyChest) ||
-                             (kind == RigChildOfKind::Neck && applyNeck) || (kind == RigChildOfKind::Head && applyHead);
+                             (kind == RigChildOfKind::Neck && applyNeck) || (kind == RigChildOfKind::Head && applyHead) ||
+                             (kind == RigChildOfKind::FootAttachment && applyFootAttachments);
         if (!enabled) {
             continue;
         }
@@ -1184,7 +1328,11 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
                 complete ? "complete" : "partial", mappedCoreBones, kCoreBoneCount, mappedHairStrands, HairStrandsComponent::kStrandCount, mappedHairBones
             );
             if (boneMap->childOfConstraintCount > 0) {
-                ZHLN::Log("[ProceduralAnimation] Added {} semantic child-of constraints for detached hands/torso chain.", boneMap->childOfConstraintCount);
+                size_t footAttachments = 0;
+                for (size_t index = 0; index < boneMap->childOfConstraintCount; ++index) {
+                    footAttachments += boneMap->childOfConstraints[index].kind == RigChildOfKind::FootAttachment ? 1u : 0u;
+                }
+                ZHLN::Log("[ProceduralAnimation] Added {} child-of constraints ({} foot attachments).", boneMap->childOfConstraintCount, footAttachments);
             }
             if (animator != nullptr && animator->currentTrackIdx >= 0 && animator->currentTrackIdx < static_cast<int32_t>(prefab->animations.size())) {
                 const AnimationClip& clip                    = prefab->animations[static_cast<size_t>(animator->currentTrackIdx)];
@@ -1243,7 +1391,8 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
         const bool chestChildOfEnabled    = config == nullptr || config->enforceChestChildOf;
         const bool neckChildOfEnabled     = config == nullptr || config->enforceNeckChildOf;
         const bool headChildOfEnabled     = config == nullptr || config->enforceHeadChildOf;
-        const bool childOfEnabled         = handChildOfEnabled || chestChildOfEnabled || neckChildOfEnabled || headChildOfEnabled;
+        const bool footAttachmentsEnabled = config == nullptr || config->enforceFootAttachments;
+        const bool childOfEnabled         = handChildOfEnabled || chestChildOfEnabled || neckChildOfEnabled || headChildOfEnabled || footAttachmentsEnabled;
         const bool locomotionSyncEnabled  = animator != nullptr && tracks != nullptr && tracks->synchronizeToStrideWheel;
 
         const JPH::Vec3 velocityWorld   = physicsComponent != nullptr ? physics.GetCharacterVelocity(physicsComponent->physicsHandle) : JPH::Vec3::sZero();
@@ -1358,11 +1507,13 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
         // system. It consumes hit commands, decays motor stiffness, and blends
         // Jolt ragdoll poses over this kinematic target.
 
-        // Stage 7: enforce semantic child-of relationships before recovering
-        // local transforms. The repaired chain is SupSpine -> Chest -> Neck ->
-        // Head, while detached hands carry their finger subtrees.
+        // Stage 7: enforce child-of relationships before recovering local
+        // transforms. The repaired chain is SupSpine -> Chest -> Neck -> Head;
+        // detached hands and rigid footwear carry their imported subtrees.
         if (childOfEnabled) {
-            ProceduralAnimation::ApplyChildOfConstraints(*boneMap, handChildOfEnabled, chestChildOfEnabled, neckChildOfEnabled, headChildOfEnabled);
+            ProceduralAnimation::ApplyChildOfConstraints(
+                *boneMap, handChildOfEnabled, chestChildOfEnabled, neckChildOfEnabled, headChildOfEnabled, footAttachmentsEnabled
+            );
         }
         CaptureLocalPose(*boneMap);
         ResolveForwardKinematics(*boneMap);

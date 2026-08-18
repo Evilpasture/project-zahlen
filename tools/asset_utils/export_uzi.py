@@ -1270,6 +1270,59 @@ def skin_limbs_and_boots_safely(main_rig):
         except Exception:
             pass
 
+    # Rigidly bind every *foot-dominant* limb object to its semantic foot. A
+    # 100% single-joint skin is the glTF-safe equivalent of bone parenting and
+    # avoids relying on Blender object names after export. The side-purity gate
+    # deliberately ignores a combined two-boot mesh so it is never collapsed
+    # onto one foot.
+    def resolve_foot_bone(side):
+        suffix = ".L" if side == "left" else ".R"
+        candidates = [f"DEF-Foot{suffix}", f"Foot{suffix}", f"DEF_Foot_{suffix[-1]}", f"Foot_{suffix[-1]}"]
+        return next((name for name in candidates if name in main_rig.data.bones), None)
+
+    semantic_feet = [name for name in [resolve_foot_bone("left"), resolve_foot_bone("right")] if name]
+    for obj in limb_objects:
+        if not (obj and getattr(obj, "type", None) == 'MESH' and obj.data and len(obj.data.vertices) > 0):
+            continue
+
+        foot_scores = {bone: 0.0 for bone in semantic_feet}
+        foot_coverage = {bone: 0 for bone in semantic_feet}
+        total_weight = 0.0
+        for vertex in obj.data.vertices:
+            covered_bones = set()
+            for assignment in vertex.groups:
+                if assignment.group >= len(obj.vertex_groups):
+                    continue
+                weight = assignment.weight
+                total_weight += weight
+                group_name = obj.vertex_groups[assignment.group].name
+                if group_name in foot_scores:
+                    foot_scores[group_name] += weight
+                    if weight >= 0.20:
+                        covered_bones.add(group_name)
+            for bone in covered_bones:
+                foot_coverage[bone] += 1
+
+        if not foot_scores:
+            continue
+        target_bone = max(foot_scores, key=foot_scores.get)
+        target_score = foot_scores[target_bone]
+        total_foot_score = sum(foot_scores.values())
+        side_purity = target_score / max(total_foot_score, 1.0e-8)
+        dominance = target_score / max(total_weight, 1.0e-8)
+        coverage = foot_coverage[target_bone] / len(obj.data.vertices)
+
+        # Keep the existing source-asset repair as a fallback marker, but all
+        # other footwear is discovered entirely from its imported skin data.
+        source_boot_fallback = obj == left_boot and target_bone == resolve_foot_bone("left")
+        if not source_boot_fallback and (side_purity < 0.80 or (dominance < 0.45 and coverage < 0.60)):
+            continue
+
+        obj.vertex_groups.clear()
+        rigid_group = obj.vertex_groups.new(name=target_bone)
+        rigid_group.add(list(range(len(obj.data.vertices))), 1.0, 'REPLACE')
+        print(f"  [+] Rigidly attached foot-dominant mesh '{obj.name}' to '{target_bone}'.", flush=True)
+
     main_rig.data.pose_position = 'REST'
     bpy.context.view_layer.update()
 

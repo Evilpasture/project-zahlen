@@ -73,13 +73,15 @@ inline constexpr size_t kCoreBoneCount = BoneSlot(CharacterBone::ToeR) + 1;
 // Real production GLBs commonly contain hundreds of mesh/attachment nodes in
 // addition to the 140 deform controls. Keep fixed-capacity evaluation while
 // leaving enough headroom for those imported hierarchies.
-inline constexpr size_t kMaxRigNodes = 512;
+inline constexpr size_t kMaxRigNodes           = 512;
+inline constexpr size_t kMaxChildOfConstraints = 64;
 
 enum class RigChildOfKind : uint8_t {
     Hand,
     Chest,
     Neck,
     Head,
+    FootAttachment,
 };
 
 struct RigChildOfConstraint {
@@ -114,8 +116,8 @@ struct alignas(64) RigBoneMap {
     std::array<JPH::Mat44, kMaxRigNodes> localTransforms {};
     std::array<JPH::Mat44, kMaxRigNodes> modelTransforms {};
 
-    std::array<RigChildOfConstraint, 8> childOfConstraints {};
-    size_t                              childOfConstraintCount = 0;
+    std::array<RigChildOfConstraint, kMaxChildOfConstraints> childOfConstraints {};
+    size_t                                                   childOfConstraintCount = 0;
 
     // Spring-damper keyframe state for the 21 semantic controls. Authored clip
     // samples become physical targets; procedural passes then layer on top.
@@ -257,6 +259,7 @@ struct ProceduralAnimationConfigComponent {
     bool enforceChestChildOf                = true;
     bool enforceNeckChildOf                 = true;
     bool enforceHeadChildOf                 = true;
+    bool enforceFootAttachments             = true;
     bool layerUpperBodyOverAuthoredChannels = false;
 
     // Overrides all switches above and evaluates only the authored keyframe
@@ -369,7 +372,14 @@ void Register(Engine& engine);
 void   Update(Engine& engine, float dt) noexcept;
 void   ResolveModelTransforms(RigBoneMap& boneMap) noexcept;
 void   CaptureChildOfPoseDeltas(RigBoneMap& boneMap) noexcept;
-size_t ApplyChildOfConstraints(RigBoneMap& boneMap, bool applyHands = true, bool applyChest = true, bool applyNeck = true, bool applyHead = true) noexcept;
+size_t ApplyChildOfConstraints(
+    RigBoneMap& boneMap,
+    bool        applyHands           = true,
+    bool        applyChest           = true,
+    bool        applyNeck            = true,
+    bool        applyHead            = true,
+    bool        applyFootAttachments = true
+) noexcept;
 size_t BuildSkinningPalette(const Skeleton& skeleton, const RigBoneMap& boneMap, std::span<JPH::Mat44> output) noexcept;
 size_t SyncNonSkinnedAttachments(ECS::Registry& registry, Entity rootEntity, const RigBoneMap& boneMap) noexcept;
 void   DrawDebugRig(

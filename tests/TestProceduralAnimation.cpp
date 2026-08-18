@@ -20,6 +20,7 @@
 #include <numbers>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 import ZHLN.ProceduralAnimation;
@@ -148,9 +149,63 @@ struct ProceduralAnimationTestSuite {
             prefab.nodes[neckNode].localTransform  = map.modelTransforms[hipsNode].Inversed() * map.modelTransforms[neckNode];
             prefab.nodes[headNode].localTransform  = map.modelTransforms[hipsNode].Inversed() * map.modelTransforms[headNode];
 
+            // Add two compact, unskinned foot meshes with opaque exporter names
+            // and flattened Hips parents. Discovery must use bind geometry, not
+            // asset-specific "boot"/"shoe" naming.
+            auto addRigidFootPart = [&](ZHLN::CharacterBone footBone, std::string_view opaqueName, bool skinned = false, float extentScale = 1.0f) {
+                const size_t             node        = prefab.nodes.size();
+                const ZHLN::RigNodeIndex footNode    = map.nodeIndices[ZHLN::BoneSlot(footBone)];
+                const JPH::Mat44         targetModel = map.modelTransforms[footNode] * JPH::Mat44::sTranslation(JPH::Vec3(0.0f, -0.035f, 0.065f));
+                prefab.nodes.push_back({
+                    .name           = ZHLN::String64(opaqueName),
+                    .parentIndex    = static_cast<int32_t>(hipsNode),
+                    .localTransform = map.modelTransforms[hipsNode].Inversed() * targetModel,
+                    .hasMesh        = true,
+                });
+                ZHLN::ModelPart part;
+                part.name        = ZHLN::String64(opaqueName);
+                part.isSkinned   = skinned;
+                part.nodeIndex   = static_cast<int32_t>(node);
+                part.localMin[0] = -0.12f * extentScale;
+                part.localMin[1] = -0.06f * extentScale;
+                part.localMin[2] = -0.18f * extentScale;
+                part.localMax[0] = 0.12f * extentScale;
+                part.localMax[1] = 0.10f * extentScale;
+                part.localMax[2] = 0.22f * extentScale;
+                prefab.parts.push_back(std::move(part));
+                return node;
+            };
+            const size_t rigidFootLNode = addRigidFootPart(ZHLN::CharacterBone::FootL, "Object.314");
+            const size_t rigidFootRNode = addRigidFootPart(ZHLN::CharacterBone::FootR, "Primitive_027");
+            static_cast<void>(addRigidFootPart(ZHLN::CharacterBone::FootL, "AlreadySkinned", true));
+            static_cast<void>(addRigidFootPart(ZHLN::CharacterBone::FootR, "WholeBody", false, 8.0f));
+
+            // A secondary footwear skin can also export duplicate foot joints.
+            // Match those semantically, without relying on skin ordering.
+            ZHLN::Skeleton footwearSkin;
+            auto           addSecondaryFootJoint = [&](ZHLN::CharacterBone footBone, std::string_view jointName) {
+                const size_t             node     = prefab.nodes.size();
+                const ZHLN::RigNodeIndex footNode = map.nodeIndices[ZHLN::BoneSlot(footBone)];
+                prefab.nodes.push_back({
+                    .name           = ZHLN::String64(jointName),
+                    .parentIndex    = static_cast<int32_t>(hipsNode),
+                    .localTransform = map.modelTransforms[hipsNode].Inversed() * map.modelTransforms[footNode],
+                });
+                footwearSkin.joints.push_back({
+                    .name              = ZHLN::String64(jointName),
+                    .parentIndex       = -1,
+                    .nodeIndex         = static_cast<int32_t>(node),
+                    .inverseBindMatrix = map.modelTransforms[footNode].Inversed(),
+                });
+                return node;
+            };
+            const size_t secondaryFootLNode = addSecondaryFootJoint(ZHLN::CharacterBone::FootL, "DEF-Foot.L");
+            const size_t secondaryFootRNode = addSecondaryFootJoint(ZHLN::CharacterBone::FootR, "DEF-Foot.R");
+            prefab.skeletons.push_back(std::move(footwearSkin));
+
             ZHLN::RigBoneMap importedMap;
             if (!ZHLN::BuildBoneMap(prefab, skeleton, importedMap) || importedMap.parentIndices[malformedNode] != ZHLN::InvalidRigNode ||
-                importedMap.childOfConstraintCount != 5 || importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Spine)] != 3 ||
+                importedMap.childOfConstraintCount != 9 || importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Spine)] != 3 ||
                 importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::SupSpine)] != 2 ||
                 importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::UpperArmL)] != 8 ||
                 importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ForearmL)] != 7 ||
@@ -165,50 +220,80 @@ struct ProceduralAnimationTestSuite {
                 }
             }
 
-            const ZHLN::RigNodeIndex forearmL     = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ForearmL)];
-            const ZHLN::RigNodeIndex handL        = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::HandL)];
-            const ZHLN::RigNodeIndex forearmR     = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ForearmR)];
-            const ZHLN::RigNodeIndex handR        = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::HandR)];
-            const ZHLN::RigNodeIndex supSpine     = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::SupSpine)];
-            const ZHLN::RigNodeIndex chest        = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Chest)];
-            const ZHLN::RigNodeIndex neck         = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Neck)];
-            const ZHLN::RigNodeIndex head         = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Head)];
-            const JPH::Vec3          handBefore   = importedMap.modelTransforms[handL].GetTranslation();
-            const JPH::Vec3          chestBefore  = importedMap.modelTransforms[chest].GetTranslation();
-            const JPH::Vec3          neckBefore   = importedMap.modelTransforms[neck].GetTranslation();
-            const JPH::Vec3          headBefore   = importedMap.modelTransforms[head].GetTranslation();
-            importedMap.localTransforms[forearmL] = importedMap.localTransforms[forearmL] *
-                                                    JPH::Mat44::sRotation(JPH::Quat::sRotation(JPH::Vec3::sAxisY(), 0.45f));
-            importedMap.localTransforms[supSpine] = importedMap.localTransforms[supSpine] *
-                                                    JPH::Mat44::sRotation(JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), 0.25f));
+            const ZHLN::RigNodeIndex forearmL             = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ForearmL)];
+            const ZHLN::RigNodeIndex handL                = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::HandL)];
+            const ZHLN::RigNodeIndex forearmR             = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ForearmR)];
+            const ZHLN::RigNodeIndex handR                = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::HandR)];
+            const ZHLN::RigNodeIndex supSpine             = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::SupSpine)];
+            const ZHLN::RigNodeIndex chest                = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Chest)];
+            const ZHLN::RigNodeIndex neck                 = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Neck)];
+            const ZHLN::RigNodeIndex head                 = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Head)];
+            const ZHLN::RigNodeIndex footL                = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::FootL)];
+            const ZHLN::RigNodeIndex footR                = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::FootR)];
+            const JPH::Vec3          handBefore           = importedMap.modelTransforms[handL].GetTranslation();
+            const JPH::Vec3          chestBefore          = importedMap.modelTransforms[chest].GetTranslation();
+            const JPH::Vec3          neckBefore           = importedMap.modelTransforms[neck].GetTranslation();
+            const JPH::Vec3          headBefore           = importedMap.modelTransforms[head].GetTranslation();
+            const JPH::Mat44         rigidFootLBefore     = importedMap.modelTransforms[rigidFootLNode];
+            const JPH::Mat44         rigidFootRBefore     = importedMap.modelTransforms[rigidFootRNode];
+            const JPH::Mat44         secondaryFootLBefore = importedMap.modelTransforms[secondaryFootLNode];
+            const JPH::Mat44         secondaryFootRBefore = importedMap.modelTransforms[secondaryFootRNode];
+            importedMap.localTransforms[forearmL]         = importedMap.localTransforms[forearmL] *
+                                                            JPH::Mat44::sRotation(JPH::Quat::sRotation(JPH::Vec3::sAxisY(), 0.45f));
+            importedMap.localTransforms[supSpine]         = importedMap.localTransforms[supSpine] *
+                                                            JPH::Mat44::sRotation(JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), 0.25f));
+            importedMap.localTransforms[footL] = importedMap.localTransforms[footL] * JPH::Mat44::sRotation(JPH::Quat::sRotation(JPH::Vec3::sAxisX(), 0.30f));
+            importedMap.localTransforms[footR] = importedMap.localTransforms[footR] * JPH::Mat44::sRotation(JPH::Quat::sRotation(JPH::Vec3::sAxisX(), -0.25f));
             ZHLN::ProceduralAnimation::CaptureChildOfPoseDeltas(importedMap);
 
-            // Applying a torso correction after a hand correction moves the
-            // forearm without its detached hand. Reverse discovery order here
-            // to prove the solver resolves semantic parents before hand leaves.
+            // Applying an upstream correction after a leaf correction detaches
+            // that leaf. Reverse discovery order to prove semantic sorting keeps
+            // hands on forearms and rigid attachments on their final foot pose.
             std::reverse(
                 importedMap.childOfConstraints.begin(), importedMap.childOfConstraints.begin() + static_cast<std::ptrdiff_t>(importedMap.childOfConstraintCount)
             );
-            auto findHandConstraint = [&](ZHLN::RigNodeIndex child) -> const ZHLN::RigChildOfConstraint* {
+            auto findConstraint = [&](ZHLN::RigChildOfKind kind, ZHLN::RigNodeIndex child) -> const ZHLN::RigChildOfConstraint* {
                 for (size_t index = 0; index < importedMap.childOfConstraintCount; ++index) {
                     const ZHLN::RigChildOfConstraint& constraint = importedMap.childOfConstraints[index];
-                    if (constraint.kind == ZHLN::RigChildOfKind::Hand && constraint.child == child) {
+                    if (constraint.kind == kind && constraint.child == child) {
                         return &constraint;
                     }
                 }
                 return nullptr;
             };
-            const ZHLN::RigChildOfConstraint* handLConstraint = findHandConstraint(handL);
-            const ZHLN::RigChildOfConstraint* handRConstraint = findHandConstraint(handR);
+            const ZHLN::RigChildOfConstraint* handLConstraint          = findConstraint(ZHLN::RigChildOfKind::Hand, handL);
+            const ZHLN::RigChildOfConstraint* handRConstraint          = findConstraint(ZHLN::RigChildOfKind::Hand, handR);
+            const ZHLN::RigChildOfConstraint* rigidFootLConstraint     = findConstraint(ZHLN::RigChildOfKind::FootAttachment, rigidFootLNode);
+            const ZHLN::RigChildOfConstraint* rigidFootRConstraint     = findConstraint(ZHLN::RigChildOfKind::FootAttachment, rigidFootRNode);
+            const ZHLN::RigChildOfConstraint* secondaryFootLConstraint = findConstraint(ZHLN::RigChildOfKind::FootAttachment, secondaryFootLNode);
+            const ZHLN::RigChildOfConstraint* secondaryFootRConstraint = findConstraint(ZHLN::RigChildOfKind::FootAttachment, secondaryFootRNode);
 
             ZHLN::ProceduralAnimation::ResolveModelTransforms(importedMap);
-            if (ZHLN::ProceduralAnimation::ApplyChildOfConstraints(importedMap) != 5 || handLConstraint == nullptr || handRConstraint == nullptr ||
+            if (ZHLN::ProceduralAnimation::ApplyChildOfConstraints(importedMap) != 9 || handLConstraint == nullptr || handRConstraint == nullptr ||
+                rigidFootLConstraint == nullptr || rigidFootRConstraint == nullptr || secondaryFootLConstraint == nullptr ||
+                secondaryFootRConstraint == nullptr ||
                 !importedMap.modelTransforms[handL].IsClose(
                     importedMap.modelTransforms[forearmL] * handLConstraint->bindRelative * handLConstraint->localPoseDelta, 0.0001f
                 ) ||
                 !importedMap.modelTransforms[handR].IsClose(
                     importedMap.modelTransforms[forearmR] * handRConstraint->bindRelative * handRConstraint->localPoseDelta, 0.0001f
                 ) ||
+                !importedMap.modelTransforms[rigidFootLNode].IsClose(
+                    importedMap.modelTransforms[footL] * rigidFootLConstraint->bindRelative * rigidFootLConstraint->localPoseDelta, 0.0001f
+                ) ||
+                !importedMap.modelTransforms[rigidFootRNode].IsClose(
+                    importedMap.modelTransforms[footR] * rigidFootRConstraint->bindRelative * rigidFootRConstraint->localPoseDelta, 0.0001f
+                ) ||
+                !importedMap.modelTransforms[secondaryFootLNode].IsClose(
+                    importedMap.modelTransforms[footL] * secondaryFootLConstraint->bindRelative * secondaryFootLConstraint->localPoseDelta, 0.0001f
+                ) ||
+                !importedMap.modelTransforms[secondaryFootRNode].IsClose(
+                    importedMap.modelTransforms[footR] * secondaryFootRConstraint->bindRelative * secondaryFootRConstraint->localPoseDelta, 0.0001f
+                ) ||
+                importedMap.modelTransforms[rigidFootLNode].IsClose(rigidFootLBefore, 0.0001f) ||
+                importedMap.modelTransforms[rigidFootRNode].IsClose(rigidFootRBefore, 0.0001f) ||
+                importedMap.modelTransforms[secondaryFootLNode].IsClose(secondaryFootLBefore, 0.0001f) ||
+                importedMap.modelTransforms[secondaryFootRNode].IsClose(secondaryFootRBefore, 0.0001f) ||
                 (importedMap.modelTransforms[handL].GetTranslation() - handBefore).LengthSq() < 0.0001f ||
                 (importedMap.modelTransforms[chest].GetTranslation() - chestBefore).LengthSq() < 0.0001f ||
                 (importedMap.modelTransforms[neck].GetTranslation() - neckBefore).LengthSq() < 0.0001f ||

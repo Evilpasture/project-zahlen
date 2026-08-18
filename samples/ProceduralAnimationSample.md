@@ -278,9 +278,18 @@ SupSpine -> Chest -> Neck -> Head
 ```
 
 Each constraint preserves its bind-relative offset and authored local animation,
-and each node carries its own descendants and attachments. Disable only
-intentionally different relationships with `enforceHandChildOf`,
-`enforceChestChildOf`, `enforceNeckChildOf`, or `enforceHeadChildOf`.
+and each node carries its own descendants and attachments. Detached semantic
+foot copies in secondary skins are attached to the primary `FootL`/`FootR`
+controls. Compact unskinned meshes whose bind-space bounds touch a foot are also
+attached after IK. Geometry-based discovery uses rig-relative dimensions rather
+than asset paths or names, so opaque exports such as `Cylinder.004` work without
+putting Uzi-specific knowledge in the subsystem. Normally skinned footwear still
+uses its imported joint weights and palette.
+
+Disable only intentionally different relationships with `enforceHandChildOf`,
+`enforceChestChildOf`, `enforceNeckChildOf`, `enforceHeadChildOf`, or
+`enforceFootAttachments`. Large meshes and already-skinned mesh nodes are never
+spatially auto-attached.
 
 Startup logs print the selected index, clip name,
 duration, total channel count, and usable transform-channel count. A T-pose with
