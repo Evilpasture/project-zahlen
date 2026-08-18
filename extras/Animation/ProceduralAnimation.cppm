@@ -78,6 +78,8 @@ inline constexpr size_t kMaxRigNodes = 512;
 enum class RigChildOfKind : uint8_t {
     Hand,
     Chest,
+    Neck,
+    Head,
 };
 
 struct RigChildOfConstraint {
@@ -112,7 +114,7 @@ struct alignas(64) RigBoneMap {
     std::array<JPH::Mat44, kMaxRigNodes> localTransforms {};
     std::array<JPH::Mat44, kMaxRigNodes> modelTransforms {};
 
-    std::array<RigChildOfConstraint, 4> childOfConstraints {};
+    std::array<RigChildOfConstraint, 8> childOfConstraints {};
     size_t                              childOfConstraintCount = 0;
 
     // Spring-damper keyframe state for the 21 semantic controls. Authored clip
@@ -253,6 +255,8 @@ struct ProceduralAnimationConfigComponent {
     bool enableSecondaryMotion              = true;
     bool enforceHandChildOf                 = true;
     bool enforceChestChildOf                = true;
+    bool enforceNeckChildOf                 = true;
+    bool enforceHeadChildOf                 = true;
     bool layerUpperBodyOverAuthoredChannels = false;
 
     // Overrides all switches above and evaluates only the authored keyframe
@@ -365,7 +369,7 @@ void Register(Engine& engine);
 void   Update(Engine& engine, float dt) noexcept;
 void   ResolveModelTransforms(RigBoneMap& boneMap) noexcept;
 void   CaptureChildOfPoseDeltas(RigBoneMap& boneMap) noexcept;
-size_t ApplyChildOfConstraints(RigBoneMap& boneMap, bool applyHands = true, bool applyChest = true) noexcept;
+size_t ApplyChildOfConstraints(RigBoneMap& boneMap, bool applyHands = true, bool applyChest = true, bool applyNeck = true, bool applyHead = true) noexcept;
 size_t BuildSkinningPalette(const Skeleton& skeleton, const RigBoneMap& boneMap, std::span<JPH::Mat44> output) noexcept;
 size_t SyncNonSkinnedAttachments(ECS::Registry& registry, Entity rootEntity, const RigBoneMap& boneMap) noexcept;
 void   DrawDebugRig(

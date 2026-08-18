@@ -270,10 +270,17 @@ The lookup is case-insensitive, prefers an exact name, then accepts a substring
 such as `Combat_Idle_Loop`. If an imported GLB detaches `DEF-Hand.L/R` from its
 matching forearm, the rig builder adds a jump-free child-of constraint using the
 bind-relative transform. The constrained hand carries its finger subtree and
-retains authored local wrist motion. A detached `Chest` receives the same
-relationship to `SupSpine`, carrying neck/head and upper-body attachments with
-the torso. Disable only intentionally different exported relationships with
-`enforceHandChildOf=false` or `enforceChestChildOf=false`.
+retains authored local wrist motion. Detached upper-body nodes are repaired as a
+complete semantic chain:
+
+```text
+SupSpine -> Chest -> Neck -> Head
+```
+
+Each constraint preserves its bind-relative offset and authored local animation,
+and each node carries its own descendants and attachments. Disable only
+intentionally different relationships with `enforceHandChildOf`,
+`enforceChestChildOf`, `enforceNeckChildOf`, or `enforceHeadChildOf`.
 
 Startup logs print the selected index, clip name,
 duration, total channel count, and usable transform-channel count. A T-pose with
