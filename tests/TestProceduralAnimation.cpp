@@ -127,9 +127,19 @@ struct ProceduralAnimationTestSuite {
             const size_t malformedNode              = ZHLN::BoneSlot(ZHLN::CharacterBone::ToeR);
             prefab.nodes[malformedNode].parentIndex = static_cast<int32_t>(ZHLN::kMaxRigNodes + 7);
 
+            // Simulate an exporter that flattens both hand bones under Hips.
+            // Preserve their bind models so the child-of repair is jump-free.
+            const size_t hipsNode                  = ZHLN::BoneSlot(ZHLN::CharacterBone::Hips);
+            const size_t handLNode                 = ZHLN::BoneSlot(ZHLN::CharacterBone::HandL);
+            const size_t handRNode                 = ZHLN::BoneSlot(ZHLN::CharacterBone::HandR);
+            prefab.nodes[handLNode].parentIndex    = static_cast<int32_t>(hipsNode);
+            prefab.nodes[handRNode].parentIndex    = static_cast<int32_t>(hipsNode);
+            prefab.nodes[handLNode].localTransform = map.modelTransforms[hipsNode].Inversed() * map.modelTransforms[handLNode];
+            prefab.nodes[handRNode].localTransform = map.modelTransforms[hipsNode].Inversed() * map.modelTransforms[handRNode];
+
             ZHLN::RigBoneMap importedMap;
             if (!ZHLN::BuildBoneMap(prefab, skeleton, importedMap) || importedMap.parentIndices[malformedNode] != ZHLN::InvalidRigNode ||
-                importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Spine)] != 3 ||
+                importedMap.childOfConstraintCount != 2 || importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Spine)] != 3 ||
                 importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::SupSpine)] != 2 ||
                 importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::UpperArmL)] != 8 ||
                 importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ForearmL)] != 7 ||
@@ -142,6 +152,18 @@ struct ProceduralAnimationTestSuite {
                 if (importedMap.nodeIndices[semantic] != semantic) {
                     return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
                 }
+            }
+
+            const ZHLN::RigNodeIndex forearmL     = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ForearmL)];
+            const ZHLN::RigNodeIndex handL        = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::HandL)];
+            const JPH::Vec3          handBefore   = importedMap.modelTransforms[handL].GetTranslation();
+            importedMap.localTransforms[forearmL] = importedMap.localTransforms[forearmL] *
+                                                    JPH::Mat44::sRotation(JPH::Quat::sRotation(JPH::Vec3::sAxisY(), 0.45f));
+            ZHLN::ProceduralAnimation::CaptureChildOfPoseDeltas(importedMap);
+            ZHLN::ProceduralAnimation::ResolveModelTransforms(importedMap);
+            if (ZHLN::ProceduralAnimation::ApplyChildOfConstraints(importedMap) != 2 ||
+                (importedMap.modelTransforms[handL].GetTranslation() - handBefore).LengthSq() < 0.0001f) {
+                return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
             return {};
         }

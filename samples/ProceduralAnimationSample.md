@@ -257,7 +257,13 @@ animator.currentTrackIdx = ZHLN::FindAnimationTrack(*animator.prefab, "idle");
 ```
 
 The lookup is case-insensitive, prefers an exact name, then accepts a substring
-such as `Combat_Idle_Loop`. Startup logs print the selected index, clip name,
+such as `Combat_Idle_Loop`. If an imported GLB detaches `DEF-Hand.L/R` from its
+matching forearm, the rig builder adds a jump-free child-of constraint using the
+bind-relative transform. The constrained hand carries its finger subtree and
+retains authored local wrist motion. Set `enforceHandChildOf=false` only when the
+exported hierarchy intentionally uses a different relationship.
+
+Startup logs print the selected index, clip name,
 duration, total channel count, and usable transform-channel count. A T-pose with
 `usable transforms=0` is an import/export or node-capacity issue; a T-pose with
 `no valid authored track selected` is a track-selection issue.

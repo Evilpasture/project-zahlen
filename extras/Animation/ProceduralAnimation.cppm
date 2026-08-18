@@ -75,6 +75,13 @@ inline constexpr size_t kCoreBoneCount = BoneSlot(CharacterBone::ToeR) + 1;
 // leaving enough headroom for those imported hierarchies.
 inline constexpr size_t kMaxRigNodes = 512;
 
+struct RigChildOfConstraint {
+    RigNodeIndex parent         = InvalidRigNode;
+    RigNodeIndex child          = InvalidRigNode;
+    JPH::Mat44   bindRelative   = JPH::Mat44::sIdentity();
+    JPH::Mat44   localPoseDelta = JPH::Mat44::sIdentity();
+};
+
 /**
  * Allocation-free runtime map from semantic controls to glTF nodes.
  *
@@ -98,6 +105,9 @@ struct alignas(64) RigBoneMap {
     std::array<JPH::Mat44, kMaxRigNodes> bindLocalTransforms {};
     std::array<JPH::Mat44, kMaxRigNodes> localTransforms {};
     std::array<JPH::Mat44, kMaxRigNodes> modelTransforms {};
+
+    std::array<RigChildOfConstraint, 4> childOfConstraints {};
+    size_t                              childOfConstraintCount = 0;
 
     // Spring-damper keyframe state for the 21 semantic controls. Authored clip
     // samples become physical targets; procedural passes then layer on top.
@@ -235,6 +245,7 @@ struct ProceduralAnimationConfigComponent {
     bool enableAccelerationTilt = true;
     bool enableUpperBody        = true;
     bool enableSecondaryMotion  = true;
+    bool enforceHandChildOf     = true;
 
     // Overrides all switches above and evaluates only the authored keyframe
     // pose through the selected bicubic or spring-damper interpolator.
@@ -343,6 +354,8 @@ void Register(Engine& engine);
 /** Direct evaluation entry point for custom schedules. */
 void   Update(Engine& engine, float dt) noexcept;
 void   ResolveModelTransforms(RigBoneMap& boneMap) noexcept;
+void   CaptureChildOfPoseDeltas(RigBoneMap& boneMap) noexcept;
+size_t ApplyChildOfConstraints(RigBoneMap& boneMap) noexcept;
 size_t BuildSkinningPalette(const Skeleton& skeleton, const RigBoneMap& boneMap, std::span<JPH::Mat44> output) noexcept;
 size_t SyncNonSkinnedAttachments(ECS::Registry& registry, Entity rootEntity, const RigBoneMap& boneMap) noexcept;
 void   DrawDebugRig(
