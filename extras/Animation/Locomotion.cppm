@@ -13,6 +13,7 @@ module;
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
+#include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Types.hpp>
 #include <Zahlen/ecs/ECS.hpp>
@@ -26,6 +27,128 @@ export module ZHLN.Locomotion;
 export namespace ZHLN::Locomotion {
 
 inline constexpr float kTwoPi = 2.0f * std::numbers::pi_v<float>;
+
+struct CharacterBoundsEstimate {
+    JPH::Vec3 min   = JPH::Vec3::sZero();
+    JPH::Vec3 max   = JPH::Vec3::sZero();
+    bool      valid = false;
+
+    [[nodiscard]] auto Size() const noexcept -> JPH::Vec3 {
+        return valid ? max - min : JPH::Vec3::sZero();
+    }
+};
+
+struct DualShapeFitOptions {
+    float horizontalPadding   = 1.08f;
+    float verticalPadding     = 1.06f;
+    float lifterToBumperRatio = 0.78f;
+    float lifterToHeightRatio = 0.24f;
+    float minimumBumperRadius = 0.10f;
+};
+
+namespace Detail {
+
+[[nodiscard]] inline auto GetNodeModelTransform(const ModelPrefab& prefab, int32_t nodeIndex) noexcept -> JPH::Mat44 {
+    if (nodeIndex < 0 || nodeIndex >= static_cast<int32_t>(prefab.nodes.size())) {
+        return JPH::Mat44::sIdentity();
+    }
+
+    JPH::Mat44 transform = prefab.nodes[static_cast<size_t>(nodeIndex)].localTransform;
+    int32_t    parent    = prefab.nodes[static_cast<size_t>(nodeIndex)].parentIndex;
+    for (size_t depth = 0; depth < prefab.nodes.size() && parent >= 0 && parent < static_cast<int32_t>(prefab.nodes.size()); ++depth) {
+        transform = prefab.nodes[static_cast<size_t>(parent)].localTransform * transform;
+        parent    = prefab.nodes[static_cast<size_t>(parent)].parentIndex;
+    }
+    return transform;
+}
+
+} // namespace Detail
+
+/** Estimates the imported visual envelope from every transformed mesh AABB. */
+[[nodiscard]] inline auto
+    EstimateCharacterBounds(const ModelPrefab& prefab, JPH::Vec3Arg modelScale = JPH::Vec3::sReplicate(1.0f)) noexcept -> CharacterBoundsEstimate {
+    CharacterBoundsEstimate estimate;
+    const JPH::Mat44        scaleTransform = JPH::Mat44::sScale(modelScale);
+
+    auto expand = [&](JPH::Vec3Arg point) {
+        if (!std::isfinite(point.GetX()) || !std::isfinite(point.GetY()) || !std::isfinite(point.GetZ())) {
+            return;
+        }
+        if (!estimate.valid) {
+            estimate.min   = point;
+            estimate.max   = point;
+            estimate.valid = true;
+            return;
+        }
+        estimate.min =
+            JPH::Vec3(std::min(estimate.min.GetX(), point.GetX()), std::min(estimate.min.GetY(), point.GetY()), std::min(estimate.min.GetZ(), point.GetZ()));
+        estimate.max =
+            JPH::Vec3(std::max(estimate.max.GetX(), point.GetX()), std::max(estimate.max.GetY(), point.GetY()), std::max(estimate.max.GetZ(), point.GetZ()));
+    };
+
+    for (const ModelPart& part: prefab.parts) {
+        if (part.nodeIndex < 0 || part.nodeIndex >= static_cast<int32_t>(prefab.nodes.size())) {
+            continue;
+        }
+        const JPH::Mat44 transform = scaleTransform * Detail::GetNodeModelTransform(prefab, part.nodeIndex) * part.localTransform;
+        const JPH::Vec3  localMin(part.localMin[0], part.localMin[1], part.localMin[2]);
+        const JPH::Vec3  localMax(part.localMax[0], part.localMax[1], part.localMax[2]);
+        for (uint32_t corner = 0; corner < 8; ++corner) {
+            const JPH::Vec3 localPoint(
+                (corner & 1u) != 0u ? localMax.GetX() : localMin.GetX(), (corner & 2u) != 0u ? localMax.GetY() : localMin.GetY(),
+                (corner & 4u) != 0u ? localMax.GetZ() : localMin.GetZ()
+            );
+            expand(transform.Multiply3x3(localPoint) + transform.GetTranslation());
+        }
+    }
+    return estimate;
+}
+
+/** Fits the Overgrowth-style lifter and bumper to a visual envelope. */
+[[nodiscard]] inline auto
+    FitDualShapeToBounds(const CharacterBoundsEstimate& bounds, const Physics::DualShapeConfig& fallback = {}, const DualShapeFitOptions& options = {}) noexcept
+    -> Physics::DualShapeConfig {
+    if (!bounds.valid) {
+        return fallback;
+    }
+
+    const JPH::Vec3 size = bounds.Size();
+    if (size.GetX() <= 0.0f || size.GetY() <= 0.0f || size.GetZ() <= 0.0f) {
+        return fallback;
+    }
+
+    const float maxAbsX          = std::max(std::abs(bounds.min.GetX()), std::abs(bounds.max.GetX()));
+    const float maxAbsZ          = std::max(std::abs(bounds.min.GetZ()), std::abs(bounds.max.GetZ()));
+    const float horizontalExtent = std::max(maxAbsX, maxAbsZ);
+    const float targetTop        = std::max(bounds.max.GetY(), size.GetY()) * std::max(options.verticalPadding, 1.0f);
+    if (!std::isfinite(horizontalExtent) || !std::isfinite(targetTop) || horizontalExtent <= 0.0f || targetTop <= 0.0f) {
+        return fallback;
+    }
+
+    Physics::DualShapeConfig result;
+    result.bumperRadiusXZ     = std::max(horizontalExtent * std::max(options.horizontalPadding, 1.0f), std::max(options.minimumBumperRadius, 0.01f));
+    const float maximumLifter = result.bumperRadiusXZ * 0.95f;
+    result.lifterRadius       = std::clamp(
+        std::min(
+            result.bumperRadiusXZ * std::clamp(options.lifterToBumperRatio, 0.1f, 0.95f), targetTop * std::clamp(options.lifterToHeightRatio, 0.05f, 0.45f)
+        ),
+        std::max(options.minimumBumperRadius * 0.5f, 0.01f), maximumLifter
+    );
+
+    const float cutRatio = std::clamp(result.lifterRadius / result.bumperRadiusXZ, 0.0f, 0.999f);
+    const float cutScale = std::sqrt(std::max(0.0f, 1.0f - cutRatio * cutRatio));
+    result.bumperRadiusY = std::max(result.bumperRadiusXZ, (targetTop - result.lifterRadius) / std::max(1.0f + cutScale, 0.001f));
+    return result;
+}
+
+[[nodiscard]] inline auto EstimateDualShapeConfig(
+    const ModelPrefab&              prefab,
+    JPH::Vec3Arg                    modelScale = JPH::Vec3::sReplicate(1.0f),
+    const Physics::DualShapeConfig& fallback   = {},
+    const DualShapeFitOptions&      options    = {}
+) noexcept -> Physics::DualShapeConfig {
+    return FitDualShapeToBounds(EstimateCharacterBounds(prefab, modelScale), fallback, options);
+}
 
 struct EllipsoidDesc {
     float radiusXZ = 0.50f;

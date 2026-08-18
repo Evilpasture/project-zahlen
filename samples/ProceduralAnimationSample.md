@@ -49,6 +49,20 @@ Run the same sample with another packed GLB without editing C++:
 ZHLN_PROCEDURAL_RIG=UziProc.glb ./build/samples/ProceduralAnimationSample
 ```
 
+The sample loads the GLB before creating its `CharacterVirtual`. It transforms
+every mesh-part AABB through the imported node hierarchy, unions the results,
+and fits the lifter sphere and bumper capsule to that estimated visual envelope
+with small horizontal/vertical safety margins. The estimate is independent of
+asset names and works across nested transform containers. Consumers can use the
+same generic helpers:
+
+```cpp
+const auto bounds = ZHLN::Locomotion::EstimateCharacterBounds(prefab);
+const auto hull   = ZHLN::Locomotion::FitDualShapeToBounds(bounds);
+```
+
+Invalid or empty bounds retain the standard `DualShapeConfig` fallback.
+
 The reference should report:
 
 ```text

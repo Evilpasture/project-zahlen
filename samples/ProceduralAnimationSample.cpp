@@ -152,9 +152,8 @@ auto BuildProceduralArena(ZHLN::Engine& engine) -> void {
 /**
  * @brief Attaches a loaded GLB model or generates a procedural fallback rig.
  */
-auto AttachCharacterRig(ZHLN::Engine& engine, ZHLN::Entity player, std::string_view glbPath) -> void {
-    auto& reg    = engine.GetRegistry();
-    auto* prefab = ZHLN::CreativeWorksFactory::LoadModelPrefab(engine, glbPath);
+auto AttachCharacterRig(ZHLN::Engine& engine, ZHLN::Entity player, std::string_view glbPath, ZHLN::ModelPrefab* prefab) -> void {
+    auto& reg = engine.GetRegistry();
 
     ZHLN::ProceduralLocomotionComponent locomotion {
         .strideLength = 1.40f,
@@ -301,20 +300,35 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::ProceduralAnimation::Register(*engine);
     BuildProceduralArena(*engine);
 
-    // 1. Spawn CharacterVirtual with Overgrowth Dual-Shape Hull
-    const ZHLN::Physics::DualShapeConfig dualShapeConfig {};
-    constexpr float                      kWalkSpeed = 2.40f;
-    constexpr float                      kJumpForce = 7.00f;
-    const ZHLN::Entity player = ZHLN::Locomotion::SpawnCharacter(*engine, JPH::Vec3(0.0f, 1.20f, 0.0f), dualShapeConfig, kWalkSpeed, kJumpForce);
-
-    // 2. Load the committed known-good reference GLB by default. Override this
-    // at runtime to compare a project rig against the exact same evaluator:
-    // ZHLN_PROCEDURAL_RIG=UziProc.glb ./build/samples/ProceduralAnimationSample
+    // 1. Load the visual first so the CharacterVirtual hull can be fitted to
+    // every transformed mesh-part bound instead of assuming a fixed human size.
     const char*            rigOverride = std::getenv("ZHLN_PROCEDURAL_RIG");
     const std::string_view rigPath     = rigOverride != nullptr && rigOverride[0] != '\0' ? std::string_view(rigOverride) :
                                                                                             std::string_view("ProceduralAnimationBaseRig.glb");
     ZHLN::Log("[Sample] Using procedural rig '{}'. Set ZHLN_PROCEDURAL_RIG to override.", rigPath);
-    AttachCharacterRig(*engine, player, rigPath);
+    ZHLN::ModelPrefab* const prefab = ZHLN::CreativeWorksFactory::LoadModelPrefab(*engine, rigPath);
+
+    const ZHLN::Locomotion::CharacterBoundsEstimate bounds          = prefab != nullptr ? ZHLN::Locomotion::EstimateCharacterBounds(*prefab) :
+                                                                                          ZHLN::Locomotion::CharacterBoundsEstimate {};
+    const ZHLN::Physics::DualShapeConfig            dualShapeConfig = ZHLN::Locomotion::FitDualShapeToBounds(bounds);
+    if (bounds.valid) {
+        const JPH::Vec3 size = bounds.Size();
+        ZHLN::Log(
+            "[Sample] Estimated GLB bounds min=({}, {}, {}), max=({}, {}, {}), size=({}, {}, {}).", bounds.min.GetX(), bounds.min.GetY(), bounds.min.GetZ(),
+            bounds.max.GetX(), bounds.max.GetY(), bounds.max.GetZ(), size.GetX(), size.GetY(), size.GetZ()
+        );
+    }
+    ZHLN::Log(
+        "[Sample] Character hull: lifter radius={}, bumper radius XZ={}, bumper radius Y={}, top={}.", dualShapeConfig.lifterRadius,
+        dualShapeConfig.bumperRadiusXZ, dualShapeConfig.bumperRadiusY, dualShapeConfig.GetBumperOffsetY() + dualShapeConfig.bumperRadiusY
+    );
+
+    constexpr float    kWalkSpeed = 2.40f;
+    constexpr float    kJumpForce = 7.00f;
+    const ZHLN::Entity player     = ZHLN::Locomotion::SpawnCharacter(*engine, JPH::Vec3(0.0f, 1.20f, 0.0f), dualShapeConfig, kWalkSpeed, kJumpForce);
+
+    // 2. Attach the already-loaded visual to the fitted CharacterVirtual.
+    AttachCharacterRig(*engine, player, rigPath, prefab);
 
     ZHLN::Clock clock;
     float       sampleTime = 0.0f;

@@ -23,6 +23,7 @@
 #include <utility>
 #include <vector>
 
+import ZHLN.Locomotion;
 import ZHLN.ProceduralAnimation;
 
 enum class ProceduralAnimationTestError : uint32_t {
@@ -52,6 +53,45 @@ struct ProceduralAnimationTestSuite {
             if (ZHLN::FindAnimationTrack(prefab, "idle") != 2 || ZHLN::FindAnimationTrack(prefab, "combat idle") != 1 ||
                 ZHLN::FindAnimationTrack(prefab, "walk") != 0 || ZHLN::FindAnimationTrack(prefab, "run") != 3 ||
                 ZHLN::FindAnimationTrack(prefab, "missing") != -1) {
+                return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+            }
+            return {};
+        }
+
+        std::expected<void, ZHLN::Error> imported_bounds_fit_virtual_character_hull() {
+            ZHLN::ModelPrefab prefab;
+            prefab.nodes.push_back({.name = ZHLN::String64("Root"), .localTransform = JPH::Mat44::sTranslation(JPH::Vec3(0.0f, 1.0f, 0.0f))});
+            prefab.nodes.push_back(
+                {.name = ZHLN::String64("Nested"), .parentIndex = 0, .localTransform = JPH::Mat44::sTranslation(JPH::Vec3(1.0f, 2.0f, -1.0f))}
+            );
+
+            ZHLN::ModelPart nested;
+            nested.nodeIndex      = 1;
+            nested.localTransform = JPH::Mat44::sTranslation(JPH::Vec3(0.5f, 0.0f, 0.25f));
+            nested.localMin[0]    = -1.0f;
+            nested.localMin[1]    = -2.0f;
+            nested.localMin[2]    = -0.5f;
+            nested.localMax[0]    = 1.0f;
+            nested.localMax[1]    = 2.0f;
+            nested.localMax[2]    = 0.5f;
+            prefab.parts.push_back(std::move(nested));
+
+            ZHLN::ModelPart rootPart;
+            rootPart.nodeIndex   = 0;
+            rootPart.localMin[0] = -2.0f;
+            rootPart.localMin[1] = 0.0f;
+            rootPart.localMin[2] = -1.0f;
+            rootPart.localMax[0] = -1.0f;
+            rootPart.localMax[1] = 1.0f;
+            rootPart.localMax[2] = 1.0f;
+            prefab.parts.push_back(std::move(rootPart));
+
+            const ZHLN::Locomotion::CharacterBoundsEstimate bounds           = ZHLN::Locomotion::EstimateCharacterBounds(prefab);
+            const ZHLN::Physics::DualShapeConfig            hull             = ZHLN::Locomotion::FitDualShapeToBounds(bounds);
+            constexpr float                                 horizontalExtent = 2.5f;
+            const float                                     hullTop          = hull.GetBumperOffsetY() + hull.bumperRadiusY;
+            if (!bounds.valid || !bounds.min.IsClose(JPH::Vec3(-2.0f, 1.0f, -1.25f), 0.0001f) || !bounds.max.IsClose(JPH::Vec3(2.5f, 5.0f, 1.0f), 0.0001f) ||
+                hull.bumperRadiusXZ < horizontalExtent || hull.lifterRadius >= hull.bumperRadiusXZ || hullTop < 5.0f * 1.06f - 0.0001f) {
                 return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
             return {};
