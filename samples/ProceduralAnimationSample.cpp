@@ -149,8 +149,9 @@ auto BuildProceduralArena(ZHLN::Engine& engine) -> void {
     );
 }
 
-auto CreateTestHandgun(ZHLN::Engine& engine, ZHLN::Entity player) -> ZHLN::Entity {
+auto CreateTestHandgun(ZHLN::Engine& engine, ZHLN::Entity player, float itemScale) -> ZHLN::Entity {
     auto&              reg     = engine.GetRegistry();
+    const float        scale   = std::clamp(itemScale, 0.10f, 4.0f);
     const ZHLN::Entity handgun = reg.Create(
         ZHLN::Components::NameComponent {.name = ZHLN::String64("ProceduralTestHandgun")}, ZHLN::Components::TransformComponent {},
         ZHLN::Components::WorldTransformComponent {}, ZHLN::Components::HierarchyComponent {.parent = player}
@@ -164,12 +165,12 @@ auto CreateTestHandgun(ZHLN::Engine& engine, ZHLN::Entity player) -> ZHLN::Entit
         materialDesc.baseColor        = {color.GetX(), color.GetY(), color.GetZ(), color.GetW()};
         const ZHLN::Material material = ZHLN::CreativeWorksFactory::CreateMaterial(engine.GetRenderContext(), materialDesc).value_or(ZHLN::Material {});
         const ZHLN::Entity   part     = ZHLN::CreativeWorksFactory::CreateBox(
-            engine, halfExtents,
+            engine, JPH::Vec3(halfExtents) * scale,
             ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = material}
         );
         reg.Add(part, ZHLN::Components::HierarchyComponent {.parent = handgun});
         ZHLN::ECS::Patch<ZHLN::Components::TransformComponent>(reg, part, [&](auto& transform) -> auto {
-            transform.position = localPosition;
+            transform.position = JPH::Vec3(localPosition) * scale;
             transform.rotation = localRotation;
         });
         ZHLN::ECS::Patch<ZHLN::Components::NameComponent>(reg, part, [&](auto& component) -> auto { component.name = ZHLN::String64(name); });
@@ -192,42 +193,45 @@ auto CreateTestHandgun(ZHLN::Engine& engine, ZHLN::Entity player) -> ZHLN::Entit
     return handgun;
 }
 
-[[nodiscard]] auto BuildTestHandgunHandling(ZHLN::Entity handgun) -> ZHLN::Animation::ItemHandlingComponent {
+[[nodiscard]] auto BuildTestHandgunHandling(ZHLN::Entity handgun, float itemScale) -> ZHLN::Animation::ItemHandlingComponent {
     ZHLN::Animation::ItemHandlingComponent handling;
-    handling.driverMode     = ZHLN::Animation::ItemDriverMode::BodyMounted;
-    handling.itemEntity     = handgun;
-    handling.hipLocalOffset = JPH::Mat44::sTranslation(JPH::Vec3(-0.24f, -0.32f, 0.08f));
-    handling.aimLocalOffset = JPH::Mat44::sTranslation(JPH::Vec3(0.0f, -0.20f, 0.30f));
-    handling.aimProgress    = 1.0f;
-    handling.sway.massKg    = 1.1f;
-    handling.sway.stiffness = 115.0f;
-    handling.sway.damping   = 0.90f;
-    handling.avoidance      = {.probeDistance = 0.55f, .probeRadius = 0.08f, .pushbackScale = 0.80f, .tiltScale = 0.35f};
-    handling.grips[0]       = {
-        .assignedLimb = ZHLN::CharacterBone::HandR,
-        .localTransform =
-            JPH::Mat44::sRotationTranslation(JPH::Quat::sRotation(JPH::Vec3::sAxisX(), JPH::DegreesToRadians(-10.0f)), JPH::Vec3(-0.055f, -0.13f, -0.055f)),
+    const float                            scale  = std::clamp(itemScale, 0.10f, 4.0f);
+    const auto                             scaled = [scale](JPH::Vec3Arg value) { return JPH::Vec3(value) * scale; };
+    handling.driverMode                           = ZHLN::Animation::ItemDriverMode::BodyMounted;
+    handling.itemEntity                           = handgun;
+    handling.hipLocalOffset                       = JPH::Mat44::sTranslation(scaled(JPH::Vec3(-0.24f, -0.32f, 0.08f)));
+    handling.aimLocalOffset                       = JPH::Mat44::sTranslation(scaled(JPH::Vec3(0.0f, -0.20f, 0.30f)));
+    handling.aimProgress                          = 1.0f;
+    handling.sway.massKg                          = 1.1f;
+    handling.sway.stiffness                       = 115.0f;
+    handling.sway.damping                         = 0.90f;
+    handling.avoidance                            = {.probeDistance = 0.55f * scale, .probeRadius = 0.08f * scale, .pushbackScale = 0.80f, .tiltScale = 0.35f};
+    handling.grips[0]                             = {
+        .assignedLimb   = ZHLN::CharacterBone::HandR,
+        .localTransform = JPH::Mat44::sRotationTranslation(
+            JPH::Quat::sRotation(JPH::Vec3::sAxisX(), JPH::DegreesToRadians(-10.0f)), scaled(JPH::Vec3(-0.055f, -0.13f, -0.055f))
+        ),
         .ikWeight          = 0.0f,
         .evaluatedIKWeight = 0.0f,
         .rotationWeight    = 0.90f,
         .grasp             = {
             .shape        = ZHLN::Animation::GraspShape::TriggerGrip,
             .curlAxisMode = ZHLN::Animation::FingerCurlAxisMode::MirroredLocalX,
-            .gripRadius   = 0.022f,
+            .gripRadius   = 0.022f * scale,
             .tightness    = 0.90f,
             .triggerCurl  = 0.32f
         },
     };
     handling.grips[1] = {
         .assignedLimb      = ZHLN::CharacterBone::HandL,
-        .localTransform    = JPH::Mat44::sTranslation(JPH::Vec3(0.060f, -0.070f, 0.015f)),
+        .localTransform    = JPH::Mat44::sTranslation(scaled(JPH::Vec3(0.060f, -0.070f, 0.015f))),
         .ikWeight          = 0.0f,
         .evaluatedIKWeight = 0.0f,
         .rotationWeight    = 0.80f,
         .grasp             = {
             .shape        = ZHLN::Animation::GraspShape::Cylinder,
             .curlAxisMode = ZHLN::Animation::FingerCurlAxisMode::MirroredLocalX,
-            .gripRadius   = 0.030f,
+            .gripRadius   = 0.030f * scale,
             .tightness    = 0.82f
         },
     };
@@ -425,14 +429,19 @@ auto main(int argc, char* argv[]) -> int {
         dualShapeConfig.bumperRadiusXZ, dualShapeConfig.bumperRadiusY, dualShapeConfig.GetBumperOffsetY() + dualShapeConfig.bumperRadiusY
     );
 
+    constexpr float handgunAuthoringHeight = 1.75f;
+    const float     characterHeight        = bounds.valid ? std::max(bounds.Size().GetY(), 0.01f) : handgunAuthoringHeight;
+    const float     handgunScale           = std::clamp(characterHeight / handgunAuthoringHeight, 0.35f, 1.75f);
+    ZHLN::Log("[Sample] Test handgun scale={} from estimated character height={}.", handgunScale, characterHeight);
+
     constexpr float    kWalkSpeed = 2.40f;
     constexpr float    kJumpForce = 7.00f;
     const ZHLN::Entity player     = ZHLN::Locomotion::SpawnCharacter(*engine, JPH::Vec3(0.0f, 1.20f, 0.0f), dualShapeConfig, kWalkSpeed, kJumpForce);
-    const ZHLN::Entity handgun    = CreateTestHandgun(*engine, player);
+    const ZHLN::Entity handgun    = CreateTestHandgun(*engine, player, handgunScale);
 
-    // 2. Attach the already-loaded visual and the same test handgun setup to
-    // either the generated reference rig or an imported production rig.
-    AttachCharacterRig(*engine, player, rigPath, prefab, BuildTestHandgunHandling(handgun));
+    // 2. Attach the already-loaded visual and the same proportionally-scaled
+    // test handgun setup to either the reference or imported production rig.
+    AttachCharacterRig(*engine, player, rigPath, prefab, BuildTestHandgunHandling(handgun, handgunScale));
 
     ZHLN::Clock clock;
     float       sampleTime      = 0.0f;

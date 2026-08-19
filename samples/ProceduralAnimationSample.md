@@ -67,10 +67,13 @@ const auto hull   = ZHLN::Locomotion::FitDualShapeToBounds(bounds);
 Invalid or empty bounds retain the standard `DualShapeConfig` fallback.
 
 The sample also builds a five-box handgun at runtime, so no item asset is needed.
-Press `E` to switch between a body-mounted resting pose with authored arms and an
-aim-guided equipped pose with two active grips. The identical item setup is used
-for both the generated reference rig and `ZHLN_PROCEDURAL_RIG`, making arm IK,
-wrist limits, sway, wall pushback, and available finger bones directly comparable.
+Its geometry, placement offsets, grip points, grip radii, and obstacle probe are
+scaled from the imported GLB's estimated height relative to a 1.75 m authoring
+reference. Press `E` to switch between a body-mounted resting pose with authored
+arms and an aim-guided equipped pose with two active grips. The proportional item
+setup is used for both the generated reference rig and `ZHLN_PROCEDURAL_RIG`,
+making arm IK, wrist limits, sway, wall pushback, and available finger bones
+directly comparable.
 
 The reference should report:
 
