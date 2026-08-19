@@ -373,6 +373,24 @@ struct ProceduralAnimationTestSuite {
             return {};
         }
 
+        std::expected<void, ZHLN::Error> first_person_palette_masks_head_and_hair() {
+            ZHLN::RigBoneMap map;
+            ZHLN::BuildStandardProceduralRig(map);
+            const ZHLN::RigNodeIndex head = map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Head)];
+            const ZHLN::RigNodeIndex hair = map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::HairStart)];
+            const ZHLN::RigNodeIndex hand = map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::HandL)];
+            ZHLN::Skeleton           skeleton;
+            skeleton.joints.push_back({.name = ZHLN::String64("DEF-Head"), .nodeIndex = static_cast<int32_t>(head)});
+            skeleton.joints.push_back({.name = ZHLN::String64("DEF-Hair_S01_01"), .nodeIndex = static_cast<int32_t>(hair)});
+            skeleton.joints.push_back({.name = ZHLN::String64("DEF-Hand.L"), .nodeIndex = static_cast<int32_t>(hand)});
+            std::array<JPH::Mat44, 3> palette {JPH::Mat44::sIdentity(), JPH::Mat44::sIdentity(), JPH::Mat44::sIdentity()};
+            if (ZHLN::ProceduralAnimation::MaskFirstPersonPalette(skeleton, map, palette, true, true) != 2 || palette[0].GetColumn3(0).LengthSq() > 1.0e-8f ||
+                palette[1].GetColumn3(1).LengthSq() > 1.0e-8f || !palette[2].IsClose(JPH::Mat44::sIdentity(), 0.0001f)) {
+                return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+            }
+            return {};
+        }
+
         std::expected<void, ZHLN::Error> gait_clock_tracks_distance() {
             ZHLN::ProceduralLocomotionComponent gait;
             gait.strideLength = 1.60f;

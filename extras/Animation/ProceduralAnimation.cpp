@@ -1391,6 +1391,7 @@ void ProceduralAnimation::Register(Engine& engine) {
     registry.RegisterComponent<ProceduralLocomotionComponent>("ProceduralLocomotionComponent");
     registry.RegisterComponent<HairStrandsComponent>("HairStrandsComponent");
     registry.RegisterComponent<ProceduralLookAtComponent>("ProceduralLookAtComponent");
+    registry.RegisterComponent<FirstPersonVisibilityComponent>("FirstPersonVisibilityComponent");
     registry.RegisterComponent<ProceduralAnimationConfigComponent>("ProceduralAnimationConfigComponent");
     registry.RegisterComponent<ProceduralLocomotionTracksComponent>("ProceduralLocomotionTracksComponent");
     registry.RegisterComponent<Animation::ItemHandlingComponent>("ItemHandlingComponent");
@@ -1410,6 +1411,7 @@ void ProceduralAnimation::Register(Engine& engine) {
                     Read<Components::HierarchyComponent>(),
                     Read<Components::MeshComponent>(),
                     Read<ProceduralLookAtComponent>(),
+                    Read<FirstPersonVisibilityComponent>(),
                     Read<ProceduralAnimationConfigComponent>(),
                     Read<Components::SkeletalMeshComponent>(),
                     Write<ProceduralLocomotionComponent>(),
@@ -1531,6 +1533,42 @@ size_t ProceduralAnimation::BuildSkinningPalette(const Skeleton& skeleton, const
     return count;
 }
 
+size_t ProceduralAnimation::MaskFirstPersonPalette(
+    const Skeleton&       skeleton,
+    const RigBoneMap&     boneMap,
+    std::span<JPH::Mat44> palette,
+    bool                  hideHead,
+    bool                  hideHair
+) noexcept {
+    const size_t       count           = std::min(skeleton.joints.size(), palette.size());
+    const RigNodeIndex headNode        = boneMap.nodeIndices[BoneSlot(CharacterBone::Head)];
+    size_t             masked          = 0;
+    const JPH::Vec3    collapsePoint   = IsValidRigNode(headNode, boneMap.nodeCount) ? boneMap.modelTransforms[headNode].GetTranslation() : JPH::Vec3::sZero();
+    const JPH::Mat44   hiddenTransform = JPH::Mat44::sRotationTranslation(JPH::Quat::sIdentity(), collapsePoint).PreScaled(JPH::Vec3::sZero());
+
+    for (size_t jointIndex = 0; jointIndex < count; ++jointIndex) {
+        const Joint&           joint     = skeleton.joints[jointIndex];
+        const RigNodeIndex     node      = joint.nodeIndex >= 0 ? static_cast<RigNodeIndex>(joint.nodeIndex) : InvalidRigNode;
+        const CanonicalName    canonical = Canonicalize(std::string_view(joint.name));
+        const std::string_view name      = canonical.View();
+
+        bool isHair = name.find("hair") != std::string_view::npos || name.find("braid") != std::string_view::npos ||
+                      name.find("ponytail") != std::string_view::npos || name.find("strand") != std::string_view::npos;
+        for (size_t semantic = BoneSlot(CharacterBone::HairStart); !isHair && semantic < kBoneCount; ++semantic) {
+            isHair = boneMap.nodeIndices[semantic] == node;
+        }
+        const bool isHeadName  = name.find("head") != std::string_view::npos || name.find("face") != std::string_view::npos ||
+                                 name.find("eye") != std::string_view::npos || name.find("visor") != std::string_view::npos ||
+                                 name.find("hat") != std::string_view::npos || name.find("helmet") != std::string_view::npos;
+        const bool headRelated = !isHair && (isHeadName || (IsValidRigNode(headNode, boneMap.nodeCount) && IsNodeDescendant(boneMap, node, headNode)));
+        if ((hideHair && isHair) || (hideHead && headRelated)) {
+            palette[jointIndex] = hiddenTransform;
+            ++masked;
+        }
+    }
+    return masked;
+}
+
 size_t ProceduralAnimation::SyncNonSkinnedAttachments(ECS::Registry& registry, Entity rootEntity, const RigBoneMap& boneMap) noexcept {
     size_t synchronizedCount = 0;
     for (Entity childEntity: registry.GetEntitiesWith<Components::MeshComponent>()) {
@@ -1572,6 +1610,7 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
         auto* gait             = registry.Get<ProceduralLocomotionComponent>(entity);
         auto* hair             = registry.Get<HairStrandsComponent>(entity);
         auto* config           = registry.Get<ProceduralAnimationConfigComponent>(entity);
+        auto* firstPerson      = registry.Get<FirstPersonVisibilityComponent>(entity);
         auto* tracks           = registry.Get<ProceduralLocomotionTracksComponent>(entity);
         auto* itemHandling     = registry.Get<Animation::ItemHandlingComponent>(entity);
         auto* movement         = registry.Get<Components::MovementComponent>(entity);
@@ -2032,6 +2071,11 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
             const Skeleton&                      skeleton = prefab->skeletons[static_cast<size_t>(skeletalMesh->skeletonIndex)];
             std::array<JPH::Mat44, kMaxRigNodes> palette {};
             const size_t                         paletteCount = ProceduralAnimation::BuildSkinningPalette(skeleton, *boneMap, palette);
+            if (firstPerson != nullptr && firstPerson->enabled) {
+                ProceduralAnimation::MaskFirstPersonPalette(
+                    skeleton, *boneMap, std::span<JPH::Mat44>(palette.data(), paletteCount), firstPerson->hideHead, firstPerson->hideHair
+                );
+            }
             renderer.UpdateJointMatrices(skeletalMesh->jointOffset, palette.data(), static_cast<uint32_t>(paletteCount));
             uploadedOffsets[uploadedPaletteCount++] = skeletalMesh->jointOffset;
 

@@ -82,9 +82,11 @@ relative to the rig's head orientation. The sample's autonomous look-at orbit is
 suspended while first person is active and restored on exit. The mode uses a
 short near plane, retains the body and arms, and hides every mesh below any
 head/face/visor/eye/hair/hat
-transform ancestor. Separate head- or hair-only skins are hidden too, while skins
-that also contain torso/limb anchors remain visible. Returning to third person
-restores the previous orbit-camera settings and original mesh flags. Third-person
+transform ancestor. Separate head- or hair-only skins are hidden too. For combined
+body meshes such as the generated reference rig, the first-person palette
+collapses only head-, face-, and hair-driven joints at the head origin, leaving
+torso and arm skinning visible. Returning to third person restores the previous
+orbit-camera settings and original mesh flags. Third-person
 free-roam behavior is otherwise unchanged for now.
 
 The reference should report:

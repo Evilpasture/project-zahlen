@@ -216,6 +216,11 @@ void SetFirstPersonMode(ZHLN::Engine& engine, ZHLN::Entity player, FirstPersonVi
         state.thirdPersonSaved = false;
     }
 
+    ZHLN::ECS::Patch<ZHLN::FirstPersonVisibilityComponent>(registry, player, [&](auto& visibility) -> auto {
+        visibility.enabled  = enabled;
+        visibility.hideHead = true;
+        visibility.hideHair = true;
+    });
     for (const HiddenHeadMesh& hidden: state.headMeshes) {
         if (auto* mesh = registry.Get<ZHLN::Components::MeshComponent>(hidden.entity)) {
             mesh->flags = enabled ? hidden.originalFlags | ZHLN::DrawFlags::Hidden : hidden.originalFlags;
@@ -576,7 +581,7 @@ auto AttachCharacterRig(
                 .runTrack  = runTrack,
             },
             ZHLN::Components::KinematicPoseOverrideComponent {}, ZHLN::RigBoneMap {}, // Initialized lazily on frame 0 by the optional subsystem
-            std::move(locomotion), std::move(hair), std::move(lookAt), animationConfig, std::move(itemHandling)
+            std::move(locomotion), std::move(hair), std::move(lookAt), animationConfig, ZHLN::FirstPersonVisibilityComponent {}, std::move(itemHandling)
         );
     } else {
         ZHLN::Log("[Sample] Notice: '{}' not found. Falling back to in-memory procedural rig.", glbPath);
@@ -586,7 +591,7 @@ auto AttachCharacterRig(
 
         reg.Add(
             player, ZHLN::Components::KinematicPoseOverrideComponent {}, std::move(proceduralRig), std::move(locomotion), std::move(hair), std::move(lookAt),
-            animationConfig, std::move(itemHandling)
+            animationConfig, ZHLN::FirstPersonVisibilityComponent {}, std::move(itemHandling)
         );
     }
 }

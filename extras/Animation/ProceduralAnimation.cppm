@@ -264,6 +264,12 @@ struct ProceduralLookAtComponent {
     float     maxAngleDeg    = 75.0f;
 };
 
+struct FirstPersonVisibilityComponent {
+    bool enabled  = false;
+    bool hideHead = true;
+    bool hideHair = true;
+};
+
 namespace Animation {
 
 enum class ItemDriverMode : uint8_t {
@@ -609,6 +615,13 @@ size_t ApplyChildOfConstraints(
     bool        applyFootAttachments = true
 ) noexcept;
 size_t BuildSkinningPalette(const Skeleton& skeleton, const RigBoneMap& boneMap, std::span<JPH::Mat44> output) noexcept;
+size_t MaskFirstPersonPalette(
+    const Skeleton&       skeleton,
+    const RigBoneMap&     boneMap,
+    std::span<JPH::Mat44> palette,
+    bool                  hideHead = true,
+    bool                  hideHair = true
+) noexcept;
 size_t SyncNonSkinnedAttachments(ECS::Registry& registry, Entity rootEntity, const RigBoneMap& boneMap) noexcept;
 void   DrawDebugRig(
     RenderContext&                       renderContext,
