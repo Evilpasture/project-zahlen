@@ -588,8 +588,6 @@ struct ProceduralAnimationTestSuite {
             ZHLN::Animation::GripPoint leftGrip;
             leftGrip.assignedLimb            = ZHLN::CharacterBone::HandL;
             leftGrip.evaluatedIKWeight       = 1.0f;
-            leftGrip.maxWristTwistDeg        = 179.0f;
-            leftGrip.maxWristSwingDeg        = 179.0f;
             const JPH::Vec3 leftGripPosition = leftGripMap.modelTransforms[leftUpper].GetTranslation() + JPH::Vec3(0.38f, -0.05f, 0.12f);
             ZHLN::Animation::SolveLimbIK(
                 leftGripMap.modelTransforms.data(), leftGripMap, ZHLN::CharacterBone::UpperArmL, ZHLN::CharacterBone::ForearmL, ZHLN::CharacterBone::HandL,
@@ -597,8 +595,8 @@ struct ProceduralAnimationTestSuite {
             );
             const JPH::Quat solvedLeftPalm =
                 (leftGripMap.modelTransforms[leftGripHand].GetQuaternion().Normalized() * leftGripMap.handBoneToPalmRotations[0]).Normalized();
-            if ((solvedLeftPalm * JPH::Vec3::sAxisZ()).Dot(JPH::Vec3::sAxisZ()) < 0.99f ||
-                (solvedLeftPalm * JPH::Vec3::sAxisX()).Dot(-JPH::Vec3::sAxisX()) < 0.99f) {
+            if ((solvedLeftPalm * JPH::Vec3::sAxisZ()).Dot(JPH::Vec3::sAxisZ()) < 0.80f ||
+                (solvedLeftPalm * JPH::Vec3::sAxisX()).Dot(-JPH::Vec3::sAxisX()) < 0.80f) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
 
@@ -680,6 +678,15 @@ struct ProceduralAnimationTestSuite {
             float           hingeAngle = 0.0f;
             hinge.GetAxisAngle(hingeAxis, hingeAngle);
             if (std::abs(hingeAngle - 0.70f) > 0.001f || std::abs(std::abs(hingeAxis.Dot(JPH::Vec3::sAxisX())) - 1.0f) > 0.001f) {
+                return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
+            }
+            const JPH::Quat backwards = ZHLN::Animation::ConstrainFingerHingeRotation(
+                JPH::Quat::sIdentity(), JPH::Quat::sRotation(JPH::Vec3::sAxisX(), -0.5f), JPH::Vec3::sAxisX(), 1.0f, 0.70f, 0.0f
+            );
+            JPH::Vec3 backwardsAxis;
+            float     backwardsAngle = 0.0f;
+            backwards.GetAxisAngle(backwardsAxis, backwardsAngle);
+            if (std::abs(backwardsAngle) > 0.0001f) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
             return {};

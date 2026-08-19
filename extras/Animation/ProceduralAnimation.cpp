@@ -787,6 +787,36 @@ void ConfigureFingerConstraints(const ModelPrefab& prefab, RigBoneMap& map) noex
             }
         }
     }
+
+    // Freeze a stable flexion sign in bind pose. Runtime curl never re-selects
+    // the opposite direction as parent joints rotate, so a phalanx cannot
+    // suddenly hyperextend when the hand crosses an orientation threshold.
+    for (size_t index = 0; index < map.fingerJointConstraintCount; ++index) {
+        RigFingerJointConstraint& joint    = map.fingerJointConstraints[index];
+        const RigNodeIndex        handNode = map.nodeIndices[BoneSlot(joint.side == 0 ? CharacterBone::HandL : CharacterBone::HandR)];
+        if (!IsValidRigNode(handNode, map.nodeCount) || !IsValidRigNode(joint.child, map.nodeCount)) {
+            continue;
+        }
+        const JPH::Quat palmRotation    = (ExtractRotation(map.modelTransforms[handNode]) * map.handBoneToPalmRotations[joint.side]).Normalized();
+        const JPH::Vec3 palmNormal      = (palmRotation * JPH::Vec3::sAxisX()).Normalized();
+        JPH::Vec3       distalDirection = (palmRotation * JPH::Vec3::sAxisZ()).Normalized();
+        for (size_t nextIndex = index + 1; nextIndex < map.fingerJointConstraintCount; ++nextIndex) {
+            const RigFingerJointConstraint& next = map.fingerJointConstraints[nextIndex];
+            if (next.side == joint.side && next.digit == joint.digit && next.segment == joint.segment + 1 && IsValidRigNode(next.child, map.nodeCount)) {
+                const JPH::Vec3 candidateDirection = map.modelTransforms[next.child].GetTranslation() - map.modelTransforms[joint.child].GetTranslation();
+                if (candidateDirection.LengthSq() > 1.0e-8f) {
+                    distalDirection = candidateDirection.Normalized();
+                }
+                break;
+            }
+        }
+        JPH::Vec3 hingeAxis        = map.modelTransforms[joint.child].Multiply3x3(JPH::Vec3::sAxisX());
+        hingeAxis                  = hingeAxis.LengthSq() > 1.0e-8f ? hingeAxis.Normalized() : palmRotation * JPH::Vec3::sAxisY();
+        constexpr float probeAngle = 0.20f;
+        const float     plusScore  = (JPH::Quat::sRotation(hingeAxis, probeAngle) * distalDirection).Dot(palmNormal);
+        const float     minusScore = (JPH::Quat::sRotation(hingeAxis, -probeAngle) * distalDirection).Dot(palmNormal);
+        joint.hingeFlexSign        = plusScore >= minusScore ? 1.0f : -1.0f;
+    }
 }
 
 void ConfigureHumanoidChildOfConstraints(RigBoneMap& map) noexcept {

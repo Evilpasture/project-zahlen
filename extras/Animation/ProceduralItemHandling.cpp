@@ -433,7 +433,7 @@ void SolveLimbIK(
     const JPH::Vec3  currentUpperDirection = ItemDetail::SafeNormalized(forePosition - upperPosition, JPH::Vec3(0.0f, -1.0f, 0.0f));
     const JPH::Vec3  currentLowerDirection = ItemDetail::SafeNormalized(handPosition - forePosition, JPH::Vec3(0.0f, -1.0f, 0.0f));
     const JPH::Mat44 solvedUpper           = CorrectBoneDirection(nodeTransforms[upperNode], currentUpperDirection, ik.upperDirection, upperPosition);
-    const JPH::Mat44 solvedFore            = CorrectBoneDirection(nodeTransforms[foreNode], currentLowerDirection, ik.lowerDirection, ik.midPosition);
+    JPH::Mat44       solvedFore            = CorrectBoneDirection(nodeTransforms[foreNode], currentLowerDirection, ik.lowerDirection, ik.midPosition);
 
     JPH::Quat targetPalmRotation = ItemDetail::MatrixRotation(targetGripTransform);
     if (grip.orientationMode == GripOrientationMode::AutomaticHanded && handBone == CharacterBone::HandL) {
@@ -445,11 +445,35 @@ void SolveLimbIK(
     const JPH::Quat targetHandRotation =
         map.handPalmFramesValid[palmSide] ? (targetPalmRotation * map.handBoneToPalmRotations[palmSide].Inversed()).Normalized() : targetPalmRotation;
     const JPH::Quat authoredHandRotation = ItemDetail::MatrixRotation(nodeTransforms[handNode]);
-    const JPH::Quat constrainedRotation  = ConstrainWristRotation(
-        targetHandRotation, authoredHandRotation, ik.lowerDirection, JPH::DegreesToRadians(grip.maxWristTwistDeg), JPH::DegreesToRadians(grip.maxWristSwingDeg)
+
+    // Share palm-facing roll with the forearm before applying the tighter wrist
+    // cone. This lets a palm turn toward the item instead of remaining ground-
+    // facing merely because the required roll exceeds the wrist swing limit.
+    const JPH::Vec3 rollAxis          = ItemDetail::SafeNormalized(ik.lowerDirection, currentLowerDirection);
+    const JPH::Quat authoredPalmFrame = map.handPalmFramesValid[palmSide] ? (authoredHandRotation * map.handBoneToPalmRotations[palmSide]).Normalized() :
+                                                                            authoredHandRotation;
+    JPH::Vec3       currentPalmNormal = authoredPalmFrame * JPH::Vec3::sAxisX();
+    JPH::Vec3       targetPalmNormal  = targetPalmRotation * JPH::Vec3::sAxisX();
+    currentPalmNormal -= rollAxis * currentPalmNormal.Dot(rollAxis);
+    targetPalmNormal -= rollAxis * targetPalmNormal.Dot(rollAxis);
+    JPH::Quat forearmRoll = JPH::Quat::sIdentity();
+    if (currentPalmNormal.LengthSq() > 1.0e-8f && targetPalmNormal.LengthSq() > 1.0e-8f) {
+        currentPalmNormal      = currentPalmNormal.Normalized();
+        targetPalmNormal       = targetPalmNormal.Normalized();
+        const float signedRoll = std::atan2(rollAxis.Dot(currentPalmNormal.Cross(targetPalmNormal)), currentPalmNormal.Dot(targetPalmNormal));
+        const float rollLimit  = JPH::DegreesToRadians(std::abs(grip.maxForearmTwistDeg));
+        const float rollAngle  = std::clamp(signedRoll * std::clamp(grip.forearmTwistWeight * solveWeight, 0.0f, 1.0f), -rollLimit, rollLimit);
+        forearmRoll            = JPH::Quat::sRotation(rollAxis, rollAngle);
+        solvedFore = JPH::Mat44::sRotationTranslation((forearmRoll * ItemDetail::MatrixRotation(solvedFore)).Normalized(), solvedFore.GetTranslation())
+                         .PreScaled(ItemDetail::MatrixScale(solvedFore));
+    }
+
+    const JPH::Quat carriedHandRotation = (forearmRoll * authoredHandRotation).Normalized();
+    const JPH::Quat constrainedRotation = ConstrainWristRotation(
+        targetHandRotation, carriedHandRotation, ik.lowerDirection, JPH::DegreesToRadians(grip.maxWristTwistDeg), JPH::DegreesToRadians(grip.maxWristSwingDeg)
     );
     const float      rotationBlend = std::clamp(grip.rotationWeight * solveWeight, 0.0f, 1.0f);
-    const JPH::Quat  handRotation  = authoredHandRotation.SLERP(constrainedRotation, rotationBlend).Normalized();
+    const JPH::Quat  handRotation  = carriedHandRotation.SLERP(constrainedRotation, rotationBlend).Normalized();
     const JPH::Mat44 solvedHand = JPH::Mat44::sRotationTranslation(handRotation, ik.endPosition).PreScaled(ItemDetail::MatrixScale(nodeTransforms[handNode]));
 
     SetModelTransformAndCarrySubtree(nodeTransforms, map, upperNode, solvedUpper);
@@ -530,12 +554,7 @@ void ApplyKinematicFingers(
     if (!IsValidRigNode(handNode, map.nodeCount)) {
         return;
     }
-    const size_t    side                = handBone == CharacterBone::HandL ? 0u : 1u;
-    const JPH::Quat palmRotation        = map.handPalmFramesValid[side] ?
-                                              (ItemDetail::MatrixRotation(nodeTransforms[handNode]) * map.handBoneToPalmRotations[side]).Normalized() :
-                                              ItemDetail::MatrixRotation(nodeTransforms[handNode]);
-    const JPH::Vec3 palmNormal          = ItemDetail::SafeNormalized(palmRotation * JPH::Vec3::sAxisX(), JPH::Vec3(0.0f, -1.0f, 0.0f));
-    const JPH::Vec3 palmFingerDirection = ItemDetail::SafeNormalized(palmRotation * JPH::Vec3::sAxisZ(), JPH::Vec3::sAxisX());
+    const size_t side = handBone == CharacterBone::HandL ? 0u : 1u;
 
     for (size_t index = 0; index < map.fingerJointConstraintCount; ++index) {
         const RigFingerJointConstraint& joint = map.fingerJointConstraints[index];
@@ -551,25 +570,13 @@ void ApplyKinematicFingers(
         if (axisMode == FingerCurlAxisMode::MirroredLocalX && handBone == CharacterBone::HandL) {
             curlSign = 1.0f;
         } else if (axisMode == FingerCurlAxisMode::AutomaticPalm) {
-            JPH::Vec3 distalDirection = palmFingerDirection;
-            for (size_t nextIndex = index + 1; nextIndex < map.fingerJointConstraintCount; ++nextIndex) {
-                const RigFingerJointConstraint& next = map.fingerJointConstraints[nextIndex];
-                if (next.side == joint.side && next.digit == joint.digit && next.segment == joint.segment + 1 && IsValidRigNode(next.child, map.nodeCount)) {
-                    distalDirection = ItemDetail::SafeNormalized(nodeTransforms[next.child].GetTranslation() - current.GetTranslation(), palmFingerDirection);
-                    break;
-                }
-            }
-            constexpr float probeAngle = 0.20f;
-            const float     plusScore  = (JPH::Quat::sRotation(axis, probeAngle) * distalDirection).Dot(palmNormal);
-            const float     minusScore = (JPH::Quat::sRotation(axis, -probeAngle) * distalDirection).Dot(palmNormal);
-            curlSign                   = plusScore >= minusScore ? 1.0f : -1.0f;
+            curlSign = joint.hingeFlexSign;
         }
 
-        const float     desiredAngle     = curlSign * maximumAngle * std::clamp(fingerCurl * weight, 0.0f, 1.0f);
-        const JPH::Quat authoredRotation = ItemDetail::MatrixRotation(current);
-        const JPH::Quat desiredRotation  = (JPH::Quat::sRotation(axis, desiredAngle) * authoredRotation).Normalized();
-        const JPH::Quat constrainedRotation =
-            ConstrainFingerHingeRotation(authoredRotation, desiredRotation, axis, curlSign, maximumAngle, JPH::DegreesToRadians(8.0f));
+        const float      desiredAngle        = curlSign * maximumAngle * std::clamp(fingerCurl * weight, 0.0f, 1.0f);
+        const JPH::Quat  authoredRotation    = ItemDetail::MatrixRotation(current);
+        const JPH::Quat  desiredRotation     = (JPH::Quat::sRotation(axis, desiredAngle) * authoredRotation).Normalized();
+        const JPH::Quat  constrainedRotation = ConstrainFingerHingeRotation(authoredRotation, desiredRotation, axis, curlSign, maximumAngle, 0.0f);
         const JPH::Mat44 target = JPH::Mat44::sRotationTranslation(constrainedRotation, current.GetTranslation()).PreScaled(ItemDetail::MatrixScale(current));
         SetModelTransformAndCarrySubtree(nodeTransforms, map, joint.child, target);
     }

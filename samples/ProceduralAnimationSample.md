@@ -354,7 +354,9 @@ palm rather than an arbitrary hand-bone axis. In the default `AutomaticHanded`
 mode, grip-local `+Z` is hand/finger forward; the solver mirrors the left frame so
 both palms face inward while both hands continue pointing forward. Use
 `ExplicitPalmFrame` when an asset supplies all three axes directly (`+X` palm
-normal, `+Y` thumbward, `+Z` finger-forward). `ikWeight` is a target value:
+normal, `+Y` thumbward, `+Z` finger-forward). Palm-facing roll is shared between
+the forearm and wrist, so a ground-facing bind palm can turn toward the item
+without violating the wrist cone. `ikWeight` is a target value:
 setting it to zero spring-blends back to the authored arm rather than detaching
 in one frame. Aim-guided and body-mounted items are also translated back toward
 the character when a grip exceeds physical arm reach; the two-bone solver never
@@ -389,9 +391,10 @@ Finger chains are discovered by hand side, digit name, and phalanx order. Missin
 repairs, so flattened exported controls remain attached. Finger flex defaults to
 `AutomaticPalm`: each phalanx probes both local-X directions and chooses the one
 that bends its child toward the inferred palm. The resulting rotation is projected
-onto a one-axis hinge, with an 8-degree extension allowance and per-digit flexion
-limit. For unusual exports, `LocalNegativeX` and `MirroredLocalX` remain explicit
-asset-pipeline overrides.
+onto a one-axis hinge with zero procedural hyperextension and a per-digit flexion
+limit. The bind-pose flex direction is frozen at rig discovery time, preventing a
+joint from flipping backward as its parents rotate. For unusual exports,
+`LocalNegativeX` and `MirroredLocalX` remain explicit asset-pipeline overrides.
 
 Runtime checks should cover rapid vertical aiming for stable elbow poles, walking
 into a wall for smooth bounded item pushback, and changing a grip's `ikWeight`

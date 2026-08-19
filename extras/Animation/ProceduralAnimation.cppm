@@ -108,6 +108,7 @@ struct RigFingerJointConstraint {
     uint8_t      side           = 0; // 0 = left, 1 = right
     uint8_t      segment        = 0;
     bool         repairRelation = false;
+    float        hingeFlexSign  = -1.0f;
     JPH::Mat44   bindRelative   = JPH::Mat44::sIdentity();
     JPH::Mat44   localPoseDelta = JPH::Mat44::sIdentity();
 };
@@ -300,17 +301,19 @@ struct GraspDesc {
 };
 
 struct GripPoint {
-    CharacterBone       assignedLimb      = CharacterBone::HandR;
-    GripOrientationMode orientationMode   = GripOrientationMode::AutomaticHanded;
-    JPH::Mat44          localTransform    = JPH::Mat44::sIdentity();
-    JPH::Vec3           poleHintOffset    = JPH::Vec3(0.0f, -1.0f, -0.5f);
-    float               ikWeight          = 1.0f;
-    float               ikWeightVelocity  = 0.0f;
-    float               evaluatedIKWeight = 1.0f;
-    float               rotationWeight    = 1.0f;
-    float               maxArmExtension   = 0.98f;
-    float               maxWristTwistDeg  = 40.0f;
-    float               maxWristSwingDeg  = 50.0f;
+    CharacterBone       assignedLimb       = CharacterBone::HandR;
+    GripOrientationMode orientationMode    = GripOrientationMode::AutomaticHanded;
+    JPH::Mat44          localTransform     = JPH::Mat44::sIdentity();
+    JPH::Vec3           poleHintOffset     = JPH::Vec3(0.0f, -1.0f, -0.5f);
+    float               ikWeight           = 1.0f;
+    float               ikWeightVelocity   = 0.0f;
+    float               evaluatedIKWeight  = 1.0f;
+    float               rotationWeight     = 1.0f;
+    float               forearmTwistWeight = 0.65f;
+    float               maxArmExtension    = 0.98f;
+    float               maxForearmTwistDeg = 55.0f;
+    float               maxWristTwistDeg   = 40.0f;
+    float               maxWristSwingDeg   = 50.0f;
     GraspDesc           grasp;
 };
 
