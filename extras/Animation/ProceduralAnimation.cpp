@@ -1598,8 +1598,50 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
             Animation::UpdateItemDynamics(engine, entity, *itemHandling, transform->position, rootRotation, dt);
 
             for (size_t gripIndex = 0; gripIndex < gripCount; ++gripIndex) {
+                Animation::UpdateGripWeight(itemHandling->grips[gripIndex], dt);
+            }
+
+            // Torso compensation is a whole-body operation. Select the active
+            // grip with the greatest weighted reach excess and apply one lean.
+            size_t primaryReachGrip    = gripCount;
+            float  greatestReachExcess = 0.0f;
+            for (size_t gripIndex = 0; gripIndex < gripCount; ++gripIndex) {
+                const Animation::GripPoint& grip = itemHandling->grips[gripIndex];
+                if (grip.evaluatedIKWeight <= 0.001f) {
+                    continue;
+                }
+                const bool         left      = grip.assignedLimb == CharacterBone::HandL;
+                const RigNodeIndex upperNode = boneMap->nodeIndices[BoneSlot(left ? CharacterBone::UpperArmL : CharacterBone::UpperArmR)];
+                const RigNodeIndex foreNode  = boneMap->nodeIndices[BoneSlot(left ? CharacterBone::ForearmL : CharacterBone::ForearmR)];
+                const RigNodeIndex handNode  = boneMap->nodeIndices[BoneSlot(left ? CharacterBone::HandL : CharacterBone::HandR)];
+                if (!IsValidRigNode(upperNode, boneMap->nodeCount) || !IsValidRigNode(foreNode, boneMap->nodeCount) ||
+                    !IsValidRigNode(handNode, boneMap->nodeCount)) {
+                    continue;
+                }
+                const JPH::Vec3 upperPosition = boneMap->modelTransforms[upperNode].GetTranslation();
+                const float armLength  = (boneMap->modelTransforms[foreNode].GetTranslation() - upperPosition).Length() +
+                                         (boneMap->modelTransforms[handNode].GetTranslation() - boneMap->modelTransforms[foreNode].GetTranslation()).Length();
+                const JPH::Vec3 target = (itemHandling->itemModelTransform * grip.localTransform).GetTranslation();
+                const float     reachExcess = std::max((target - upperPosition).Length() - armLength * 0.90f, 0.0f) * grip.evaluatedIKWeight;
+                if (primaryReachGrip == gripCount || reachExcess > greatestReachExcess) {
+                    primaryReachGrip    = gripIndex;
+                    greatestReachExcess = reachExcess;
+                }
+            }
+
+            if (primaryReachGrip < gripCount) {
+                const Animation::GripPoint& grip = itemHandling->grips[primaryReachGrip];
+                const bool                  left = grip.assignedLimb == CharacterBone::HandL;
+                Animation::ApplyTorsoReachCompensation(
+                    boneMap->modelTransforms.data(), *boneMap, left ? CharacterBone::UpperArmL : CharacterBone::UpperArmR,
+                    left ? CharacterBone::ForearmL : CharacterBone::ForearmR, left ? CharacterBone::HandL : CharacterBone::HandR,
+                    (itemHandling->itemModelTransform * grip.localTransform).GetTranslation(), itemHandling->torsoReachWeight * grip.evaluatedIKWeight
+                );
+            }
+
+            for (size_t gripIndex = 0; gripIndex < gripCount; ++gripIndex) {
                 Animation::GripPoint& grip       = itemHandling->grips[gripIndex];
-                const float           gripWeight = Animation::UpdateGripWeight(grip, dt);
+                const float           gripWeight = grip.evaluatedIKWeight;
                 if (gripWeight <= 0.001f) {
                     continue;
                 }
@@ -1609,15 +1651,13 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
                 const CharacterBone handBone   = left ? CharacterBone::HandL : CharacterBone::HandR;
                 const JPH::Mat44    gripTarget = itemHandling->itemModelTransform * grip.localTransform;
 
-                Animation::ApplyTorsoReachCompensation(
-                    boneMap->modelTransforms.data(), *boneMap, upperBone, foreBone, handBone, gripTarget.GetTranslation(),
-                    itemHandling->torsoReachWeight * gripWeight
-                );
                 Animation::ApplyClavicleLead(
                     boneMap->modelTransforms.data(), *boneMap, upperBone, gripTarget.GetTranslation(), itemHandling->shoulderLeadWeight * gripWeight
                 );
                 Animation::SolveLimbIK(boneMap->modelTransforms.data(), *boneMap, upperBone, foreBone, handBone, gripTarget, grip);
-                Animation::ApplyKinematicFingers(boneMap->modelTransforms.data(), *boneMap, handBone, Animation::EvaluateFingerCurl(grip.grasp), gripWeight);
+                Animation::ApplyKinematicFingers(
+                    boneMap->modelTransforms.data(), *boneMap, handBone, Animation::EvaluateFingerCurl(grip.grasp), gripWeight, grip.grasp.curlAxisMode
+                );
             }
 
             // Detached-hand repair must preserve the just-solved model-space
@@ -1642,7 +1682,8 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
                     if (itemWorld == nullptr) {
                         itemWorld = &registry.Add(itemHandling->itemEntity, Components::WorldTransformComponent {.world = worldItem, .previous = worldItem});
                     } else {
-                        itemWorld->world = worldItem;
+                        itemWorld->previous = itemWorld->world;
+                        itemWorld->world    = worldItem;
                     }
                 }
             }

@@ -255,11 +255,17 @@ enum class GraspShape : uint8_t {
     RelaxedOpen,
 };
 
+enum class FingerCurlAxisMode : uint8_t {
+    LocalNegativeX, // Rotational symmetry: both hands curl around local -X.
+    MirroredLocalX, // Mirrored symmetry: left +X, right -X.
+};
+
 struct GraspDesc {
-    GraspShape shape       = GraspShape::Cylinder;
-    float      gripRadius  = 0.025f;
-    float      tightness   = 1.0f;
-    float      triggerCurl = 1.0f;
+    GraspShape         shape        = GraspShape::Cylinder;
+    FingerCurlAxisMode curlAxisMode = FingerCurlAxisMode::LocalNegativeX;
+    float              gripRadius   = 0.025f;
+    float              tightness    = 1.0f;
+    float              triggerCurl  = 1.0f;
 };
 
 struct GripPoint {
@@ -497,7 +503,14 @@ void SolveLimbIK(
     const GripPoint&  grip
 ) noexcept;
 [[nodiscard]] FingerCurlDesc EvaluateFingerCurl(const GraspDesc& grasp) noexcept;
-void ApplyKinematicFingers(JPH::Mat44* nodeTransforms, const RigBoneMap& map, CharacterBone handBone, const FingerCurlDesc& curl, float weight) noexcept;
+void                         ApplyKinematicFingers(
+    JPH::Mat44*           nodeTransforms,
+    const RigBoneMap&     map,
+    CharacterBone         handBone,
+    const FingerCurlDesc& curl,
+    float                 weight,
+    FingerCurlAxisMode    axisMode = FingerCurlAxisMode::LocalNegativeX
+) noexcept;
 
 void ConfigureHairBindPose(HairStrandsComponent& hair, const JPH::Mat44* bindModelTransforms, const RigBoneMap& map) noexcept;
 void StepHairSimulation(

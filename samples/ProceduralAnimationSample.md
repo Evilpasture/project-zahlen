@@ -366,6 +366,10 @@ A hand-anchored two-handed sword uses the same component with
 `driverMode=HandAnchored`, a heavier `sway.massKg`, and two cylindrical grips.
 For steering wheels, ladders, and levers, use `WorldAnchored`, set `worldAnchor`
 to the interaction transform, and place both grip transforms relative to it.
+Finger flex defaults to rotationally symmetric local `-X` axes. For rigs whose
+left-hand phalanges are mirrored, set
+`grasp.curlAxisMode = FingerCurlAxisMode::MirroredLocalX`; the left hand then
+uses local `+X` while the right remains on `-X`.
 
 Runtime checks should cover rapid vertical aiming for stable elbow poles, walking
 into a wall for smooth item pushback, and changing a grip's `ikWeight` from one

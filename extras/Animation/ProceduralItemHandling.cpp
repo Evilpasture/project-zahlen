@@ -197,6 +197,9 @@ void UpdateItemDynamics(
         const JPH::Vec3 localDriverDelta = driverRotation.Inversed() * (driverPosition - handling.sway.previousDriverPosition);
         handling.sway.positionOffset -= localDriverDelta * inertia;
         JPH::Quat delta = (driverRotation * handling.sway.previousDriverRotation.Inversed()).Normalized();
+        if (delta.GetW() < 0.0f) {
+            delta = JPH::Quat(-delta.GetX(), -delta.GetY(), -delta.GetZ(), -delta.GetW());
+        }
         JPH::Vec3 axis;
         float     angle = 0.0f;
         delta.GetAxisAngle(axis, angle);
@@ -421,7 +424,14 @@ FingerCurlDesc EvaluateFingerCurl(const GraspDesc& grasp) noexcept {
     return curl;
 }
 
-void ApplyKinematicFingers(JPH::Mat44* nodeTransforms, const RigBoneMap& map, CharacterBone handBone, const FingerCurlDesc& curl, float weight) noexcept {
+void ApplyKinematicFingers(
+    JPH::Mat44*           nodeTransforms,
+    const RigBoneMap&     map,
+    CharacterBone         handBone,
+    const FingerCurlDesc& curl,
+    float                 weight,
+    FingerCurlAxisMode    axisMode
+) noexcept {
     if (nodeTransforms == nullptr || map.sourcePrefab == nullptr || weight <= 0.001f) {
         return;
     }
@@ -429,6 +439,7 @@ void ApplyKinematicFingers(JPH::Mat44* nodeTransforms, const RigBoneMap& map, Ch
     if (!IsValidRigNode(handNode, map.nodeCount)) {
         return;
     }
+    const float curlSign = axisMode == FingerCurlAxisMode::MirroredLocalX && handBone == CharacterBone::HandL ? 1.0f : -1.0f;
 
     for (size_t desiredDepth = 1; desiredDepth <= 5; ++desiredDepth) {
         for (RigNodeIndex node = 0; node < map.nodeCount && node < map.sourcePrefab->nodes.size(); ++node) {
@@ -453,7 +464,7 @@ void ApplyKinematicFingers(JPH::Mat44* nodeTransforms, const RigBoneMap& map, Ch
             const auto       canonicalName = ItemDetail::Canonicalize(std::string_view(map.sourcePrefab->nodes[node].name));
             const bool       isThumb       = std::string_view(canonicalName.data()).find("thumb") != std::string_view::npos;
             const float      maximumAngle  = isThumb ? JPH::DegreesToRadians(50.0f) : JPH::DegreesToRadians(62.0f);
-            const JPH::Quat  rotation      = JPH::Quat::sRotation(axis, -maximumAngle * std::clamp(fingerCurl * weight, 0.0f, 1.0f));
+            const JPH::Quat  rotation      = JPH::Quat::sRotation(axis, curlSign * maximumAngle * std::clamp(fingerCurl * weight, 0.0f, 1.0f));
             const JPH::Mat44 target = JPH::Mat44::sRotationTranslation((rotation * ItemDetail::MatrixRotation(current)).Normalized(), current.GetTranslation())
                                           .PreScaled(ItemDetail::MatrixScale(current));
             SetModelTransformAndCarrySubtree(nodeTransforms, map, node, target);
