@@ -30,6 +30,7 @@ import ZHLN.ProceduralAnimation;
 #include <array>
 #include <cmath>
 #include <cstdlib>
+#include <numbers>
 #include <utility>
 #include <vector>
 
@@ -42,6 +43,170 @@ inline const JPH::Vec3 kSunColor {1.00f, 0.96f, 0.90f};
 inline const JPH::Vec4 kSkyZenith {0.25f, 0.55f, 0.95f, 1.0f};
 inline const JPH::Vec4 kSkyHorizon {0.70f, 0.85f, 1.00f, 1.0f};
 inline const JPH::Vec4 kSkyGround {0.20f, 0.28f, 0.20f, 1.0f};
+
+struct HiddenHeadMesh {
+    ZHLN::Entity    entity;
+    ZHLN::DrawFlags originalFlags = ZHLN::DrawFlags::None;
+};
+
+struct FirstPersonViewState {
+    bool                                    enabled          = false;
+    bool                                    toggleKeyWasDown = false;
+    bool                                    thirdPersonSaved = false;
+    float                                   thirdPersonNearZ = 0.1f;
+    ZHLN::Components::TargetCameraComponent thirdPersonCamera {};
+    std::vector<HiddenHeadMesh>             headMeshes;
+};
+
+[[nodiscard]] auto CanonicalNodeName(std::string_view name) -> std::array<char, 96> {
+    std::array<char, 96> result {};
+    size_t               write = 0;
+    for (char c: name) {
+        if (write + 1 >= result.size()) {
+            break;
+        }
+        if (c >= 'A' && c <= 'Z') {
+            c = static_cast<char>(c - 'A' + 'a');
+        }
+        if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+            result[write++] = c;
+        }
+    }
+    return result;
+}
+
+[[nodiscard]] bool IsHeadVisualName(std::string_view name) {
+    const auto             canonical = CanonicalNodeName(name);
+    const std::string_view value(canonical.data());
+    return value == "head" || value == "defhead" || value == "orghead" || value.find("head") != std::string_view::npos ||
+           value.find("face") != std::string_view::npos || value.find("visor") != std::string_view::npos || value.find("eye") != std::string_view::npos ||
+           value.find("hair") != std::string_view::npos || value.find("hat") != std::string_view::npos || value.find("beanie") != std::string_view::npos;
+}
+
+[[nodiscard]] bool IsNodeUnder(const ZHLN::ModelPrefab& prefab, int32_t node, int32_t ancestor) {
+    for (size_t depth = 0; depth < prefab.nodes.size() && node >= 0 && node < static_cast<int32_t>(prefab.nodes.size()); ++depth) {
+        if (node == ancestor) {
+            return true;
+        }
+        node = prefab.nodes[static_cast<size_t>(node)].parentIndex;
+    }
+    return false;
+}
+
+void CollectFirstPersonHeadMeshes(
+    ZHLN::ECS::Registry&          registry,
+    const ZHLN::ModelPrefab&      prefab,
+    std::span<const ZHLN::Entity> visualParts,
+    FirstPersonViewState&         state
+) {
+    int32_t headNode = -1;
+    for (size_t node = 0; node < prefab.nodes.size(); ++node) {
+        const auto             canonical = CanonicalNodeName(std::string_view(prefab.nodes[node].name));
+        const std::string_view name(canonical.data());
+        if (name == "head" || name == "defhead" || name == "orghead") {
+            headNode = static_cast<int32_t>(node);
+            break;
+        }
+    }
+
+    state.headMeshes.clear();
+    for (ZHLN::Entity entity: visualParts) {
+        auto* mesh = registry.Get<ZHLN::Components::MeshComponent>(entity);
+        if (mesh == nullptr || mesh->nodeIndex < 0 || mesh->nodeIndex >= static_cast<int32_t>(prefab.nodes.size())) {
+            continue;
+        }
+        const bool underHead = headNode >= 0 && IsNodeUnder(prefab, mesh->nodeIndex, headNode);
+        if (underHead || IsHeadVisualName(std::string_view(prefab.nodes[static_cast<size_t>(mesh->nodeIndex)].name))) {
+            state.headMeshes.push_back({.entity = entity, .originalFlags = mesh->flags});
+        }
+    }
+    ZHLN::Log("[Sample] First-person head hide set contains {} mesh parts.", state.headMeshes.size());
+}
+
+void SetFirstPersonMode(ZHLN::Engine& engine, ZHLN::Entity player, FirstPersonViewState& state, bool enabled) {
+    auto& registry       = engine.GetRegistry();
+    auto  cameraEntities = registry.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>();
+    if (cameraEntities.empty()) {
+        return;
+    }
+    const ZHLN::Entity cameraEntity = cameraEntities[0];
+    auto*              targetCamera = registry.Get<ZHLN::Components::TargetCameraComponent>(cameraEntity);
+    if (targetCamera == nullptr) {
+        return;
+    }
+
+    if (enabled) {
+        state.thirdPersonCamera = *targetCamera;
+        state.thirdPersonNearZ  = engine.GetCamera().nearZ;
+        state.thirdPersonSaved  = true;
+        registry.Remove<ZHLN::Components::FreeCamTagComponent>(cameraEntity);
+        targetCamera->target              = player;
+        targetCamera->distance            = 0.0f;
+        targetCamera->targetDistance      = 0.0f;
+        targetCamera->targetOffset        = JPH::Vec3(0.0f, 1.6f, 0.05f);
+        targetCamera->pitch               = 0.0f;
+        targetCamera->stiffness           = 30.0f;
+        targetCamera->fov                 = 75.0f;
+        targetCamera->targetFov           = 75.0f;
+        targetCamera->hasInitSmoothTarget = 0;
+        if (const auto* transform = registry.Get<ZHLN::Components::TransformComponent>(player)) {
+            const JPH::Vec3 forward = transform->rotation * JPH::Vec3::sAxisZ();
+            targetCamera->yaw       = std::atan2(forward.GetZ(), forward.GetX()) * (180.0f / std::numbers::pi_v<float>);
+        }
+        engine.GetCamera().yaw   = targetCamera->yaw;
+        engine.GetCamera().pitch = 0.0f;
+        engine.GetCamera().fov   = 75.0f;
+        engine.GetCamera().nearZ = 0.03f;
+    } else if (state.thirdPersonSaved) {
+        *targetCamera                     = state.thirdPersonCamera;
+        targetCamera->hasInitSmoothTarget = 0;
+        engine.GetCamera().yaw            = targetCamera->yaw;
+        engine.GetCamera().pitch          = targetCamera->pitch;
+        engine.GetCamera().fov            = targetCamera->fov;
+        engine.GetCamera().nearZ          = state.thirdPersonNearZ;
+        state.thirdPersonSaved            = false;
+    }
+
+    for (const HiddenHeadMesh& hidden: state.headMeshes) {
+        if (auto* mesh = registry.Get<ZHLN::Components::MeshComponent>(hidden.entity)) {
+            if (enabled) {
+                mesh->flags |= ZHLN::DrawFlags::Hidden;
+            } else {
+                mesh->flags = hidden.originalFlags;
+            }
+        }
+    }
+    state.enabled = enabled;
+    ZHLN::Log("[Sample] Camera mode: {}.", enabled ? "FIRST PERSON / FULL BODY" : "THIRD PERSON / ORBIT");
+}
+
+void UpdateFirstPersonFaceOffset(ZHLN::Engine& engine, ZHLN::Entity player, const FirstPersonViewState& state) {
+    if (!state.enabled) {
+        return;
+    }
+    auto& registry       = engine.GetRegistry();
+    auto  cameraEntities = registry.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>();
+    if (cameraEntities.empty()) {
+        return;
+    }
+    auto*       targetCamera = registry.Get<ZHLN::Components::TargetCameraComponent>(cameraEntities[0]);
+    const auto* transform    = registry.Get<ZHLN::Components::TransformComponent>(player);
+    const auto* rig          = registry.Get<ZHLN::RigBoneMap>(player);
+    if (targetCamera == nullptr || transform == nullptr || rig == nullptr) {
+        return;
+    }
+    const ZHLN::RigNodeIndex headNode = rig->nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Head)];
+    if (!ZHLN::IsValidRigNode(headNode, rig->nodeCount)) {
+        return;
+    }
+    const JPH::Mat44& head        = rig->modelTransforms[headNode];
+    JPH::Vec3         faceForward = head.Multiply3x3(JPH::Vec3::sAxisZ());
+    faceForward                   = faceForward.LengthSq() > 1.0e-8f ? faceForward.Normalized() : JPH::Vec3::sAxisZ();
+    const JPH::Vec3 faceModel     = head.GetTranslation() + faceForward * 0.055f + JPH::Vec3(0.0f, -0.015f, 0.0f);
+    targetCamera->targetOffset    = transform->rotation * faceModel;
+    targetCamera->distance        = 0.0f;
+    targetCamera->targetDistance  = 0.0f;
+}
 
 [[nodiscard]] bool EnvironmentFlag(const char* name) {
     const char* value = std::getenv(name);
@@ -249,7 +414,8 @@ auto AttachCharacterRig(
     ZHLN::Entity                           player,
     std::string_view                       glbPath,
     ZHLN::ModelPrefab*                     prefab,
-    ZHLN::Animation::ItemHandlingComponent itemHandling
+    ZHLN::Animation::ItemHandlingComponent itemHandling,
+    FirstPersonViewState&                  viewState
 ) -> void {
     auto& reg = engine.GetRegistry();
 
@@ -336,6 +502,9 @@ auto AttachCharacterRig(
         // safely ignored by Patch.
         for (uint32_t i = 1; i < writtenCount; ++i) {
             ZHLN::ECS::Patch<ZHLN::Components::HierarchyComponent>(reg, parts[i], [&](auto& hier) -> auto { hier.parent = player; });
+        }
+        if (writtenCount > 1) {
+            CollectFirstPersonHeadMeshes(reg, *prefab, std::span<const ZHLN::Entity>(parts.data() + 1, writtenCount - 1), viewState);
         }
 
         // Clean up the redundant prefab container root (parts[0]).
@@ -441,15 +610,16 @@ auto main(int argc, char* argv[]) -> int {
 
     // 2. Attach the already-loaded visual and the same proportionally-scaled
     // test handgun setup to either the reference or imported production rig.
-    AttachCharacterRig(*engine, player, rigPath, prefab, BuildTestHandgunHandling(handgun, handgunScale));
+    FirstPersonViewState viewState;
+    AttachCharacterRig(*engine, player, rigPath, prefab, BuildTestHandgunHandling(handgun, handgunScale), viewState);
 
     ZHLN::Clock clock;
     float       sampleTime      = 0.0f;
     bool        handgunEquipped = false;
     bool        equipKeyWasDown = false;
     ZHLN::Log(
-        "[ProceduralAnimationSample] Ready. WASD move, LSHIFT sprint, SPACE jump, E equip/rest handgun, Right-Click orbit. "
-        "Cyan/orange/green = torso/arms/IK legs; magenta = 108-bone XPBD hair; yellow = terrain normals."
+        "[ProceduralAnimationSample] Ready. WASD move, LSHIFT sprint, SPACE jump, E equip/rest handgun, V first/third person, Right-Click look. "
+        "First person keeps the full body and arms but hides head visuals."
     );
 
     while (engine->IsRunning()) {
@@ -460,9 +630,14 @@ auto main(int argc, char* argv[]) -> int {
 
         // 1. Mouse Look and edge-triggered handgun equip input.
         bool equipKeyDown = false;
+        bool viewKeyDown  = false;
         for (ZHLN::Entity e: registry.GetEntitiesWith<ZHLN::Components::InputStateComponent>()) {
             ZHLN::ECS::Patch<ZHLN::Components::InputStateComponent>(registry, e, [&](auto& st) -> auto {
                 equipKeyDown = equipKeyDown || st.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::E));
+                viewKeyDown  = viewKeyDown || st.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::V));
+                if (viewState.enabled) {
+                    st.mouseWheel = 0.0f;
+                }
                 if (st.needsResize) {
                     engine->GetRenderContext().SetResolution(st.newSize);
                     st.needsResize = false;
@@ -486,6 +661,11 @@ auto main(int argc, char* argv[]) -> int {
             ZHLN::Log("[Sample] Test handgun: {}.", handgunEquipped ? "EQUIPPED / AIM-GUIDED" : "RESTING / BODY-MOUNTED");
         }
         equipKeyWasDown = equipKeyDown;
+        if (viewKeyDown && !viewState.toggleKeyWasDown) {
+            SetFirstPersonMode(*engine, player, viewState, !viewState.enabled);
+        }
+        viewState.toggleKeyWasDown = viewKeyDown;
+        UpdateFirstPersonFaceOffset(*engine, player, viewState);
 
         // 2. Update Procedural Look-At Orbit via Multi-Component Patch
         sampleTime += dt;
@@ -500,13 +680,15 @@ auto main(int argc, char* argv[]) -> int {
             break;
         }
 
-        // 4. Render Visual Collision Rig & Evaluated Procedural Skeleton
-        ZHLN::Locomotion::RenderDebugRig(*engine, player, dualShapeConfig);
-
-        ZHLN::ECS::Patch<ZHLN::Components::TransformComponent, ZHLN::RigBoneMap>(registry, player, [&](const auto& trans, const auto& rig) -> auto {
-            const auto* gait = registry.Get<ZHLN::ProceduralLocomotionComponent>(player);
-            ZHLN::ProceduralAnimation::DrawDebugRig(engine->GetRenderContext(), trans.position, trans.rotation, rig, gait);
-        });
+        // 4. Render diagnostic hull/skeleton only in third person; first person
+        // keeps the actual full body and arms without debug geometry at the face.
+        if (!viewState.enabled) {
+            ZHLN::Locomotion::RenderDebugRig(*engine, player, dualShapeConfig);
+            ZHLN::ECS::Patch<ZHLN::Components::TransformComponent, ZHLN::RigBoneMap>(registry, player, [&](const auto& trans, const auto& rig) -> auto {
+                const auto* gait = registry.Get<ZHLN::ProceduralLocomotionComponent>(player);
+                ZHLN::ProceduralAnimation::DrawDebugRig(engine->GetRenderContext(), trans.position, trans.rotation, rig, gait);
+            });
+        }
     }
 
     ZHLN::TaskSystem::Shutdown();
