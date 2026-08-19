@@ -242,6 +242,8 @@ void ResetRigBoneMap(RigBoneMap& map) noexcept {
     FillIdentity(map.modelTransforms);
     map.handBoneToPalmRotations = {JPH::Quat::sIdentity(), JPH::Quat::sIdentity()};
     map.handPalmFramesValid.fill(false);
+    map.fingerJointConstraints.fill({});
+    map.fingerJointConstraintCount = 0;
     map.childOfConstraints.fill({});
     map.childOfConstraintCount = 0;
     map.poseTranslations.fill(JPH::Vec3::sZero());
@@ -683,6 +685,107 @@ void ConfigureHandPalmFrames(const ModelPrefab* prefab, RigBoneMap& map) noexcep
                 .Normalized();
         map.handBoneToPalmRotations[side] = (ExtractRotation(map.modelTransforms[handNode]).Inversed() * palmRotation).Normalized();
         map.handPalmFramesValid[side]     = true;
+    }
+}
+
+void ConfigureFingerConstraints(const ModelPrefab& prefab, RigBoneMap& map) noexcept {
+    map.fingerJointConstraints.fill({});
+    map.fingerJointConstraintCount = 0;
+
+    struct Candidate {
+        RigNodeIndex node         = InvalidRigNode;
+        FingerDigit  digit        = FingerDigit::Index;
+        uint8_t      side         = 0;
+        uint8_t      nameOrder    = 0;
+        float        handDistance = 0.0f;
+    };
+    std::array<Candidate, kMaxFingerJoints> candidates {};
+    size_t                                  candidateCount = 0;
+    for (RigNodeIndex node = 0; node < map.nodeCount && node < prefab.nodes.size() && candidateCount < candidates.size(); ++node) {
+        const CanonicalName    canonical = Canonicalize(std::string_view(prefab.nodes[node].name));
+        const std::string_view name      = canonical.View();
+        FingerDigit            digit;
+        size_t                 digitPosition = std::string_view::npos;
+        if ((digitPosition = name.find("thumb")) != std::string_view::npos) {
+            digit = FingerDigit::Thumb;
+        } else if ((digitPosition = name.find("index")) != std::string_view::npos) {
+            digit = FingerDigit::Index;
+        } else if ((digitPosition = name.find("middle")) != std::string_view::npos) {
+            digit = FingerDigit::Middle;
+        } else if ((digitPosition = name.find("ring")) != std::string_view::npos && name.find("spring") == std::string_view::npos) {
+            digit = FingerDigit::Ring;
+        } else if ((digitPosition = name.find("pinky")) != std::string_view::npos || (digitPosition = name.find("little")) != std::string_view::npos) {
+            digit = FingerDigit::Pinky;
+        } else {
+            continue;
+        }
+
+        const RigNodeIndex handL = map.nodeIndices[BoneSlot(CharacterBone::HandL)];
+        const RigNodeIndex handR = map.nodeIndices[BoneSlot(CharacterBone::HandR)];
+        uint8_t            side  = 0;
+        if (IsValidRigNode(handL, map.nodeCount) && IsNodeDescendant(map, node, handL)) {
+            side = 0;
+        } else if (IsValidRigNode(handR, map.nodeCount) && IsNodeDescendant(map, node, handR)) {
+            side = 1;
+        } else if (name.find("right") != std::string_view::npos || name.ends_with("r")) {
+            side = 1;
+        } else if (name.find("left") != std::string_view::npos || name.ends_with("l")) {
+            side = 0;
+        } else {
+            continue;
+        }
+
+        uint8_t order = 0;
+        for (size_t index = digitPosition; index < name.size(); ++index) {
+            if (name[index] >= '0' && name[index] <= '9') {
+                order = static_cast<uint8_t>(name[index] - '0');
+                if (index + 1 < name.size() && name[index + 1] >= '0' && name[index + 1] <= '9') {
+                    order = static_cast<uint8_t>(order * 10u + static_cast<uint8_t>(name[index + 1] - '0'));
+                }
+                break;
+            }
+        }
+        const RigNodeIndex handNode  = side == 0 ? handL : handR;
+        const float        distance  = IsValidRigNode(handNode, map.nodeCount) ?
+                                           (map.modelTransforms[node].GetTranslation() - map.modelTransforms[handNode].GetTranslation()).Length() :
+                                           0.0f;
+        candidates[candidateCount++] = {.node = node, .digit = digit, .side = side, .nameOrder = order, .handDistance = distance};
+    }
+
+    for (uint8_t side = 0; side < 2; ++side) {
+        for (uint8_t digitValue = 0; digitValue < 5; ++digitValue) {
+            std::array<Candidate, 8> chain {};
+            size_t                   chainCount = 0;
+            for (size_t index = 0; index < candidateCount && chainCount < chain.size(); ++index) {
+                if (candidates[index].side == side && static_cast<uint8_t>(candidates[index].digit) == digitValue) {
+                    chain[chainCount++] = candidates[index];
+                }
+            }
+            std::sort(chain.begin(), chain.begin() + static_cast<std::ptrdiff_t>(chainCount), [](const Candidate& lhs, const Candidate& rhs) {
+                if (lhs.nameOrder != 0 && rhs.nameOrder != 0 && lhs.nameOrder != rhs.nameOrder) {
+                    return lhs.nameOrder < rhs.nameOrder;
+                }
+                return lhs.handDistance < rhs.handDistance;
+            });
+
+            RigNodeIndex expectedParent = map.nodeIndices[BoneSlot(side == 0 ? CharacterBone::HandL : CharacterBone::HandR)];
+            for (size_t segment = 0; segment < chainCount && map.fingerJointConstraintCount < map.fingerJointConstraints.size(); ++segment) {
+                const RigNodeIndex child = chain[segment].node;
+                if (!IsValidRigNode(expectedParent, map.nodeCount) || !IsValidRigNode(child, map.nodeCount)) {
+                    continue;
+                }
+                RigFingerJointConstraint& constraint = map.fingerJointConstraints[map.fingerJointConstraintCount++];
+                constraint.parent                    = expectedParent;
+                constraint.child                     = child;
+                constraint.digit                     = static_cast<FingerDigit>(digitValue);
+                constraint.side                      = side;
+                constraint.segment                   = static_cast<uint8_t>(segment);
+                constraint.repairRelation            = !IsNodeDescendant(map, child, expectedParent);
+                constraint.bindRelative              = map.modelTransforms[expectedParent].Inversed() * map.modelTransforms[child];
+                constraint.localPoseDelta            = JPH::Mat44::sIdentity();
+                expectedParent                       = child;
+            }
+        }
     }
 }
 
@@ -1182,6 +1285,7 @@ bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMa
 
     ResolveForwardKinematics(outMap);
     ConfigureHandPalmFrames(&prefab, outMap);
+    ConfigureFingerConstraints(prefab, outMap);
     ConfigureHumanoidChildOfConstraints(outMap);
     ConfigureFootAttachmentConstraints(prefab, outMap);
     outMap.initialized = true;
@@ -1307,6 +1411,36 @@ void ProceduralAnimation::CaptureChildOfPoseDeltas(RigBoneMap& boneMap) noexcept
         }
         constraint.localPoseDelta = boneMap.bindLocalTransforms[constraint.child].Inversed() * boneMap.localTransforms[constraint.child];
     }
+}
+
+void ProceduralAnimation::CaptureFingerPoseDeltas(RigBoneMap& boneMap) noexcept {
+    for (size_t index = 0; index < boneMap.fingerJointConstraintCount; ++index) {
+        RigFingerJointConstraint& constraint = boneMap.fingerJointConstraints[index];
+        if (!IsValidRigNode(constraint.child, boneMap.nodeCount)) {
+            continue;
+        }
+        constraint.localPoseDelta = boneMap.bindLocalTransforms[constraint.child].Inversed() * boneMap.localTransforms[constraint.child];
+    }
+}
+
+size_t ProceduralAnimation::ApplyFingerRelationConstraints(RigBoneMap& boneMap) noexcept {
+    size_t applied = 0;
+    for (size_t index = 0; index < boneMap.fingerJointConstraintCount; ++index) {
+        const RigFingerJointConstraint& constraint = boneMap.fingerJointConstraints[index];
+        if (!constraint.repairRelation || !IsValidRigNode(constraint.parent, boneMap.nodeCount) || !IsValidRigNode(constraint.child, boneMap.nodeCount)) {
+            continue;
+        }
+        const JPH::Mat44 previousChild    = boneMap.modelTransforms[constraint.child];
+        const JPH::Mat44 constrainedChild = boneMap.modelTransforms[constraint.parent] * constraint.bindRelative * constraint.localPoseDelta;
+        const JPH::Mat44 correction       = constrainedChild * previousChild.Inversed();
+        for (RigNodeIndex node = 0; node < boneMap.nodeCount; ++node) {
+            if (IsNodeDescendant(boneMap, node, constraint.child)) {
+                boneMap.modelTransforms[node] = correction * boneMap.modelTransforms[node];
+            }
+        }
+        ++applied;
+    }
+    return applied;
 }
 
 size_t ProceduralAnimation::ApplyChildOfConstraints(
@@ -1483,6 +1617,16 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
                     );
                 }
             }
+            if (boneMap->fingerJointConstraintCount > 0) {
+                size_t repairedFingerRelations = 0;
+                for (size_t index = 0; index < boneMap->fingerJointConstraintCount; ++index) {
+                    repairedFingerRelations += boneMap->fingerJointConstraints[index].repairRelation ? 1u : 0u;
+                }
+                ZHLN::Log(
+                    "[ProceduralAnimation] Discovered {} finger joints; {} detached relations will be repaired.", boneMap->fingerJointConstraintCount,
+                    repairedFingerRelations
+                );
+            }
             if (animator != nullptr && animator->currentTrackIdx >= 0 && animator->currentTrackIdx < static_cast<int32_t>(prefab->animations.size())) {
                 const AnimationClip& clip                    = prefab->animations[static_cast<size_t>(animator->currentTrackIdx)];
                 size_t               usableTransformChannels = 0;
@@ -1574,6 +1718,7 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
         if (childOfEnabled) {
             ProceduralAnimation::CaptureChildOfPoseDeltas(*boneMap);
         }
+        ProceduralAnimation::CaptureFingerPoseDeltas(*boneMap);
         ResolveForwardKinematics(*boneMap);
 
         // Stages 1-2: apply optional gait and whole-body COM layers after the
@@ -1716,9 +1861,6 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
                     boneMap->modelTransforms.data(), *boneMap, upperBone, gripTarget.GetTranslation(), itemHandling->shoulderLeadWeight * gripWeight
                 );
                 Animation::SolveLimbIK(boneMap->modelTransforms.data(), *boneMap, upperBone, foreBone, handBone, gripTarget, grip);
-                Animation::ApplyKinematicFingers(
-                    boneMap->modelTransforms.data(), *boneMap, handBone, Animation::EvaluateFingerCurl(grip.grasp), gripWeight, grip.grasp.curlAxisMode
-                );
             }
 
             if (registry.IsAlive(itemHandling->itemEntity)) {
@@ -1809,6 +1951,23 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
                     boneMap->modelTransforms.data(), *boneMap, left ? CharacterBone::UpperArmL : CharacterBone::UpperArmR,
                     left ? CharacterBone::ForearmL : CharacterBone::ForearmR, left ? CharacterBone::HandL : CharacterBone::HandR,
                     itemHandling->itemModelTransform * grip.localTransform, grip
+                );
+            }
+        }
+        ProceduralAnimation::ApplyFingerRelationConstraints(*boneMap);
+        if (itemHandlingEnabled) {
+            std::array<bool, 2> curledHands {false, false};
+            const size_t        gripCount = std::min(itemHandling->gripCount, itemHandling->grips.size());
+            for (size_t gripIndex = 0; gripIndex < gripCount; ++gripIndex) {
+                const Animation::GripPoint& grip = itemHandling->grips[gripIndex];
+                const size_t                side = grip.assignedLimb == CharacterBone::HandL ? 0u : 1u;
+                if (grip.evaluatedIKWeight <= 0.001f || curledHands[side]) {
+                    continue;
+                }
+                curledHands[side] = true;
+                Animation::ApplyKinematicFingers(
+                    boneMap->modelTransforms.data(), *boneMap, side == 0 ? CharacterBone::HandL : CharacterBone::HandR,
+                    Animation::EvaluateFingerCurl(grip.grasp), grip.evaluatedIKWeight, grip.grasp.curlAxisMode
                 );
             }
         }

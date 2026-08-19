@@ -75,6 +75,7 @@ inline constexpr size_t kCoreBoneCount = BoneSlot(CharacterBone::ToeR) + 1;
 // leaving enough headroom for those imported hierarchies.
 inline constexpr size_t kMaxRigNodes           = 512;
 inline constexpr size_t kMaxChildOfConstraints = 64;
+inline constexpr size_t kMaxFingerJoints       = 40;
 
 enum class RigChildOfKind : uint8_t {
     Hand,
@@ -90,6 +91,25 @@ struct RigChildOfConstraint {
     RigChildOfKind kind           = RigChildOfKind::Hand;
     JPH::Mat44     bindRelative   = JPH::Mat44::sIdentity();
     JPH::Mat44     localPoseDelta = JPH::Mat44::sIdentity();
+};
+
+enum class FingerDigit : uint8_t {
+    Thumb,
+    Index,
+    Middle,
+    Ring,
+    Pinky,
+};
+
+struct RigFingerJointConstraint {
+    RigNodeIndex parent         = InvalidRigNode;
+    RigNodeIndex child          = InvalidRigNode;
+    FingerDigit  digit          = FingerDigit::Index;
+    uint8_t      side           = 0; // 0 = left, 1 = right
+    uint8_t      segment        = 0;
+    bool         repairRelation = false;
+    JPH::Mat44   bindRelative   = JPH::Mat44::sIdentity();
+    JPH::Mat44   localPoseDelta = JPH::Mat44::sIdentity();
 };
 
 /**
@@ -116,8 +136,10 @@ struct alignas(64) RigBoneMap {
     std::array<JPH::Mat44, kMaxRigNodes> localTransforms {};
     std::array<JPH::Mat44, kMaxRigNodes> modelTransforms {};
 
-    std::array<JPH::Quat, 2> handBoneToPalmRotations {JPH::Quat::sIdentity(), JPH::Quat::sIdentity()};
-    std::array<bool, 2>      handPalmFramesValid {false, false};
+    std::array<JPH::Quat, 2>                               handBoneToPalmRotations {JPH::Quat::sIdentity(), JPH::Quat::sIdentity()};
+    std::array<bool, 2>                                    handPalmFramesValid {false, false};
+    std::array<RigFingerJointConstraint, kMaxFingerJoints> fingerJointConstraints {};
+    size_t                                                 fingerJointConstraintCount = 0;
 
     std::array<RigChildOfConstraint, kMaxChildOfConstraints> childOfConstraints {};
     size_t                                                   childOfConstraintCount = 0;
@@ -514,7 +536,15 @@ void SolveLimbIK(
     const GripPoint&  grip
 ) noexcept;
 [[nodiscard]] FingerCurlDesc EvaluateFingerCurl(const GraspDesc& grasp) noexcept;
-void                         ApplyKinematicFingers(
+[[nodiscard]] JPH::Quat      ConstrainFingerHingeRotation(
+    JPH::QuatArg authoredRotation,
+    JPH::QuatArg desiredRotation,
+    JPH::Vec3Arg hingeAxis,
+    float        flexSign,
+    float        maxFlexRadians,
+    float        maxExtensionRadians
+) noexcept;
+void ApplyKinematicFingers(
     JPH::Mat44*           nodeTransforms,
     const RigBoneMap&     map,
     CharacterBone         handBone,
@@ -565,6 +595,8 @@ void Register(Engine& engine);
 void   Update(Engine& engine, float dt) noexcept;
 void   ResolveModelTransforms(RigBoneMap& boneMap) noexcept;
 void   CaptureChildOfPoseDeltas(RigBoneMap& boneMap) noexcept;
+void   CaptureFingerPoseDeltas(RigBoneMap& boneMap) noexcept;
+size_t ApplyFingerRelationConstraints(RigBoneMap& boneMap) noexcept;
 size_t ApplyChildOfConstraints(
     RigBoneMap& boneMap,
     bool        applyHands           = true,

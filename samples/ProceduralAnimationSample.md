@@ -384,10 +384,14 @@ A hand-anchored two-handed sword uses the same component with
 `driverMode=HandAnchored`, a heavier `sway.massKg`, and two cylindrical grips.
 For steering wheels, ladders, and levers, use `WorldAnchored`, set `worldAnchor`
 to the interaction transform, and place both grip transforms relative to it.
-Finger flex defaults to `AutomaticPalm`: each phalanx probes both local-X curl
-directions and chooses the one that bends its child toward the inferred palm.
-For unusual exports, `LocalNegativeX` and `MirroredLocalX` remain explicit asset
-pipeline overrides.
+Finger chains are discovered by hand side, digit name, and phalanx order. Missing
+`Hand -> proximal -> middle -> distal` relationships receive bind-relative
+repairs, so flattened exported controls remain attached. Finger flex defaults to
+`AutomaticPalm`: each phalanx probes both local-X directions and chooses the one
+that bends its child toward the inferred palm. The resulting rotation is projected
+onto a one-axis hinge, with an 8-degree extension allowance and per-digit flexion
+limit. For unusual exports, `LocalNegativeX` and `MirroredLocalX` remain explicit
+asset-pipeline overrides.
 
 Runtime checks should cover rapid vertical aiming for stable elbow poles, walking
 into a wall for smooth bounded item pushback, and changing a grip's `ikWeight`

@@ -649,6 +649,39 @@ struct ProceduralAnimationTestSuite {
             if (constrainedDistance > maximumReach + 0.0001f || constrainedDistanceL > maximumReachL + 0.0001f) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
+
+            ZHLN::RigBoneMap fingerMap;
+            fingerMap.nodeCount                                               = 4;
+            fingerMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::HandL)] = 0;
+            fingerMap.modelTransforms[0]                                      = JPH::Mat44::sIdentity();
+            fingerMap.modelTransforms[1]                                      = JPH::Mat44::sTranslation(JPH::Vec3(0.10f, 0.0f, 0.0f));
+            fingerMap.modelTransforms[2]                                      = JPH::Mat44::sTranslation(JPH::Vec3(0.18f, 0.0f, 0.0f));
+            fingerMap.modelTransforms[3]                                      = JPH::Mat44::sTranslation(JPH::Vec3(0.24f, 0.0f, 0.0f));
+            fingerMap.fingerJointConstraintCount                              = 3;
+            for (size_t segment = 0; segment < 3; ++segment) {
+                auto& constraint          = fingerMap.fingerJointConstraints[segment];
+                constraint.parent         = segment;
+                constraint.child          = segment + 1;
+                constraint.digit          = ZHLN::FingerDigit::Index;
+                constraint.side           = 0;
+                constraint.segment        = static_cast<uint8_t>(segment);
+                constraint.repairRelation = true;
+                constraint.bindRelative   = fingerMap.modelTransforms[segment].Inversed() * fingerMap.modelTransforms[segment + 1];
+            }
+            fingerMap.modelTransforms[0] = JPH::Mat44::sRotationTranslation(JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), 0.4f), JPH::Vec3(0.3f, 1.0f, -0.2f));
+            if (ZHLN::ProceduralAnimation::ApplyFingerRelationConstraints(fingerMap) != 3 ||
+                !fingerMap.modelTransforms[3].IsClose(fingerMap.modelTransforms[2] * fingerMap.fingerJointConstraints[2].bindRelative, 0.0001f)) {
+                return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
+            }
+
+            const JPH::Quat hingeTarget = (JPH::Quat::sRotation(JPH::Vec3::sAxisY(), 0.5f) * JPH::Quat::sRotation(JPH::Vec3::sAxisX(), 1.2f)).Normalized();
+            const JPH::Quat hinge = ZHLN::Animation::ConstrainFingerHingeRotation(JPH::Quat::sIdentity(), hingeTarget, JPH::Vec3::sAxisX(), 1.0f, 0.70f, 0.10f);
+            JPH::Vec3       hingeAxis;
+            float           hingeAngle = 0.0f;
+            hinge.GetAxisAngle(hingeAxis, hingeAngle);
+            if (std::abs(hingeAngle - 0.70f) > 0.001f || std::abs(std::abs(hingeAxis.Dot(JPH::Vec3::sAxisX())) - 1.0f) > 0.001f) {
+                return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
+            }
             return {};
         }
 

@@ -17,10 +17,8 @@ module;
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <numbers>
-#include <string_view>
 
 module ZHLN.ProceduralAnimation;
 
@@ -106,43 +104,20 @@ void SpringRotation(JPH::Quat& value, JPH::Vec3& velocity, JPH::QuatArg target, 
     }
 }
 
-[[nodiscard]] std::array<char, 96> Canonicalize(std::string_view name) noexcept {
-    std::array<char, 96> output {};
-    size_t               write = 0;
-    for (char c: name) {
-        if (write + 1 >= output.size()) {
-            break;
-        }
-        if (c >= 'A' && c <= 'Z') {
-            c = static_cast<char>(c - 'A' + 'a');
-        }
-        if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
-            output[write++] = c;
-        }
+[[nodiscard]] float CurlForDigit(FingerDigit digit, const FingerCurlDesc& curl) noexcept {
+    switch (digit) {
+        case FingerDigit::Thumb:
+            return curl.thumb;
+        case FingerDigit::Index:
+            return curl.index;
+        case FingerDigit::Middle:
+            return curl.middle;
+        case FingerDigit::Ring:
+            return curl.ring;
+        case FingerDigit::Pinky:
+            return curl.pinky;
     }
-    output[write] = '\0';
-    return output;
-}
-
-[[nodiscard]] float CurlForName(std::string_view name, const FingerCurlDesc& curl) noexcept {
-    const auto             canonicalStorage = Canonicalize(name);
-    const std::string_view canonical(canonicalStorage.data());
-    if (canonical.find("thumb") != std::string_view::npos) {
-        return curl.thumb;
-    }
-    if (canonical.find("index") != std::string_view::npos) {
-        return curl.index;
-    }
-    if (canonical.find("middle") != std::string_view::npos) {
-        return curl.middle;
-    }
-    if (canonical.find("ring") != std::string_view::npos) {
-        return curl.ring;
-    }
-    if (canonical.find("pinky") != std::string_view::npos || canonical.find("little") != std::string_view::npos) {
-        return curl.pinky;
-    }
-    return -1.0f;
+    return 0.0f;
 }
 
 } // namespace ItemDetail
@@ -508,6 +483,38 @@ FingerCurlDesc EvaluateFingerCurl(const GraspDesc& grasp) noexcept {
     return curl;
 }
 
+JPH::Quat ConstrainFingerHingeRotation(
+    JPH::QuatArg authoredRotation,
+    JPH::QuatArg desiredRotation,
+    JPH::Vec3Arg hingeAxis,
+    float        flexSign,
+    float        maxFlexRadians,
+    float        maxExtensionRadians
+) noexcept {
+    const JPH::Vec3 axis  = ItemDetail::SafeNormalized(hingeAxis, JPH::Vec3::sAxisX());
+    JPH::Quat       delta = (desiredRotation * authoredRotation.Inversed()).Normalized();
+    if (delta.GetW() < 0.0f) {
+        delta = JPH::Quat(-delta.GetX(), -delta.GetY(), -delta.GetZ(), -delta.GetW());
+    }
+    const JPH::Vec3 vector(delta.GetX(), delta.GetY(), delta.GetZ());
+    const JPH::Vec3 projected = axis * vector.Dot(axis);
+    const float     lengthSq  = projected.LengthSq() + delta.GetW() * delta.GetW();
+    JPH::Quat twist = lengthSq > 1.0e-8f ? JPH::Quat(projected.GetX(), projected.GetY(), projected.GetZ(), delta.GetW()).Normalized() : JPH::Quat::sIdentity();
+    JPH::Vec3 twistAxis;
+    float     angle = 0.0f;
+    twist.GetAxisAngle(twistAxis, angle);
+    if (angle > std::numbers::pi_v<float>) {
+        angle -= 2.0f * std::numbers::pi_v<float>;
+    }
+    if (twistAxis.Dot(axis) < 0.0f) {
+        angle = -angle;
+    }
+    const float flex      = std::abs(maxFlexRadians);
+    const float extension = std::abs(maxExtensionRadians);
+    const float clamped   = flexSign >= 0.0f ? std::clamp(angle, -extension, flex) : std::clamp(angle, -flex, extension);
+    return (JPH::Quat::sRotation(axis, clamped) * authoredRotation).Normalized();
+}
+
 void ApplyKinematicFingers(
     JPH::Mat44*           nodeTransforms,
     const RigBoneMap&     map,
@@ -516,65 +523,55 @@ void ApplyKinematicFingers(
     float                 weight,
     FingerCurlAxisMode    axisMode
 ) noexcept {
-    if (nodeTransforms == nullptr || map.sourcePrefab == nullptr || weight <= 0.001f) {
+    if (nodeTransforms == nullptr || weight <= 0.001f) {
         return;
     }
     const RigNodeIndex handNode = map.nodeIndices[BoneSlot(handBone)];
     if (!IsValidRigNode(handNode, map.nodeCount)) {
         return;
     }
-    const size_t    palmSide            = handBone == CharacterBone::HandL ? 0u : 1u;
-    const JPH::Quat palmRotation        = map.handPalmFramesValid[palmSide] ?
-                                              (ItemDetail::MatrixRotation(nodeTransforms[handNode]) * map.handBoneToPalmRotations[palmSide]).Normalized() :
+    const size_t    side                = handBone == CharacterBone::HandL ? 0u : 1u;
+    const JPH::Quat palmRotation        = map.handPalmFramesValid[side] ?
+                                              (ItemDetail::MatrixRotation(nodeTransforms[handNode]) * map.handBoneToPalmRotations[side]).Normalized() :
                                               ItemDetail::MatrixRotation(nodeTransforms[handNode]);
     const JPH::Vec3 palmNormal          = ItemDetail::SafeNormalized(palmRotation * JPH::Vec3::sAxisX(), JPH::Vec3(0.0f, -1.0f, 0.0f));
     const JPH::Vec3 palmFingerDirection = ItemDetail::SafeNormalized(palmRotation * JPH::Vec3::sAxisZ(), JPH::Vec3::sAxisX());
 
-    for (size_t desiredDepth = 1; desiredDepth <= 5; ++desiredDepth) {
-        for (RigNodeIndex node = 0; node < map.nodeCount && node < map.sourcePrefab->nodes.size(); ++node) {
-            if (node == handNode || !ItemDetail::IsDescendant(map, node, handNode)) {
-                continue;
-            }
-            size_t       depth  = 0;
-            RigNodeIndex cursor = node;
-            while (depth <= desiredDepth && IsValidRigNode(cursor, map.nodeCount) && cursor != handNode) {
-                cursor = map.parentIndices[cursor];
-                ++depth;
-            }
-            if (cursor != handNode || depth != desiredDepth) {
-                continue;
-            }
-            const float fingerCurl = ItemDetail::CurlForName(std::string_view(map.sourcePrefab->nodes[node].name), curl);
-            if (fingerCurl < 0.0f) {
-                continue;
-            }
-            const JPH::Mat44 current       = nodeTransforms[node];
-            const JPH::Vec3  axis          = ItemDetail::SafeNormalized(current.Multiply3x3(JPH::Vec3::sAxisX()), JPH::Vec3::sAxisX());
-            const auto       canonicalName = ItemDetail::Canonicalize(std::string_view(map.sourcePrefab->nodes[node].name));
-            const bool       isThumb       = std::string_view(canonicalName.data()).find("thumb") != std::string_view::npos;
-            const float      maximumAngle  = isThumb ? JPH::DegreesToRadians(50.0f) : JPH::DegreesToRadians(62.0f);
-            float            curlSign      = -1.0f;
-            if (axisMode == FingerCurlAxisMode::MirroredLocalX && handBone == CharacterBone::HandL) {
-                curlSign = 1.0f;
-            } else if (axisMode == FingerCurlAxisMode::AutomaticPalm) {
-                JPH::Vec3 distalDirection = palmFingerDirection;
-                for (RigNodeIndex child = 0; child < map.nodeCount; ++child) {
-                    if (map.parentIndices[child] == node) {
-                        distalDirection = ItemDetail::SafeNormalized(nodeTransforms[child].GetTranslation() - current.GetTranslation(), palmFingerDirection);
-                        break;
-                    }
-                }
-                constexpr float probeAngle = 0.20f;
-                const float     plusScore  = (JPH::Quat::sRotation(axis, probeAngle) * distalDirection).Dot(palmNormal);
-                const float     minusScore = (JPH::Quat::sRotation(axis, -probeAngle) * distalDirection).Dot(palmNormal);
-                curlSign                   = plusScore >= minusScore ? 1.0f : -1.0f;
-            }
-            const JPH::Quat  rotation = JPH::Quat::sRotation(axis, curlSign * maximumAngle * std::clamp(fingerCurl * weight, 0.0f, 1.0f));
-            const JPH::Mat44 target = JPH::Mat44::sRotationTranslation((rotation * ItemDetail::MatrixRotation(current)).Normalized(), current.GetTranslation())
-                                          .PreScaled(ItemDetail::MatrixScale(current));
-            SetModelTransformAndCarrySubtree(nodeTransforms, map, node, target);
+    for (size_t index = 0; index < map.fingerJointConstraintCount; ++index) {
+        const RigFingerJointConstraint& joint = map.fingerJointConstraints[index];
+        if (joint.side != side || !IsValidRigNode(joint.child, map.nodeCount)) {
+            continue;
         }
+        const float      fingerCurl   = ItemDetail::CurlForDigit(joint.digit, curl);
+        const JPH::Mat44 current      = nodeTransforms[joint.child];
+        const JPH::Vec3  axis         = ItemDetail::SafeNormalized(current.Multiply3x3(JPH::Vec3::sAxisX()), JPH::Vec3::sAxisX());
+        const bool       isThumb      = joint.digit == FingerDigit::Thumb;
+        const float      maximumAngle = isThumb ? JPH::DegreesToRadians(50.0f) : JPH::DegreesToRadians(62.0f);
+        float            curlSign     = -1.0f;
+        if (axisMode == FingerCurlAxisMode::MirroredLocalX && handBone == CharacterBone::HandL) {
+            curlSign = 1.0f;
+        } else if (axisMode == FingerCurlAxisMode::AutomaticPalm) {
+            JPH::Vec3 distalDirection = palmFingerDirection;
+            for (size_t nextIndex = index + 1; nextIndex < map.fingerJointConstraintCount; ++nextIndex) {
+                const RigFingerJointConstraint& next = map.fingerJointConstraints[nextIndex];
+                if (next.side == joint.side && next.digit == joint.digit && next.segment == joint.segment + 1 && IsValidRigNode(next.child, map.nodeCount)) {
+                    distalDirection = ItemDetail::SafeNormalized(nodeTransforms[next.child].GetTranslation() - current.GetTranslation(), palmFingerDirection);
+                    break;
+                }
+            }
+            constexpr float probeAngle = 0.20f;
+            const float     plusScore  = (JPH::Quat::sRotation(axis, probeAngle) * distalDirection).Dot(palmNormal);
+            const float     minusScore = (JPH::Quat::sRotation(axis, -probeAngle) * distalDirection).Dot(palmNormal);
+            curlSign                   = plusScore >= minusScore ? 1.0f : -1.0f;
+        }
+
+        const float     desiredAngle     = curlSign * maximumAngle * std::clamp(fingerCurl * weight, 0.0f, 1.0f);
+        const JPH::Quat authoredRotation = ItemDetail::MatrixRotation(current);
+        const JPH::Quat desiredRotation  = (JPH::Quat::sRotation(axis, desiredAngle) * authoredRotation).Normalized();
+        const JPH::Quat constrainedRotation =
+            ConstrainFingerHingeRotation(authoredRotation, desiredRotation, axis, curlSign, maximumAngle, JPH::DegreesToRadians(8.0f));
+        const JPH::Mat44 target = JPH::Mat44::sRotationTranslation(constrainedRotation, current.GetTranslation()).PreScaled(ItemDetail::MatrixScale(current));
+        SetModelTransformAndCarrySubtree(nodeTransforms, map, joint.child, target);
     }
 }
-
 } // namespace ZHLN::Animation
