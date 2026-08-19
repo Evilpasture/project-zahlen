@@ -264,6 +264,11 @@ enum class FingerCurlAxisMode : uint8_t {
     MirroredLocalX,
 };
 
+enum class GripOrientationMode : uint8_t {
+    AutomaticHanded,   // +Z faces forward; palm faces inward based on assigned hand.
+    ExplicitPalmFrame, // Grip rotation already supplies palm +X, thumb +Y, fingers +Z.
+};
+
 struct GraspDesc {
     GraspShape         shape        = GraspShape::Cylinder;
     FingerCurlAxisMode curlAxisMode = FingerCurlAxisMode::AutomaticPalm;
@@ -273,17 +278,18 @@ struct GraspDesc {
 };
 
 struct GripPoint {
-    CharacterBone assignedLimb      = CharacterBone::HandR;
-    JPH::Mat44    localTransform    = JPH::Mat44::sIdentity();
-    JPH::Vec3     poleHintOffset    = JPH::Vec3(0.0f, -1.0f, -0.5f);
-    float         ikWeight          = 1.0f;
-    float         ikWeightVelocity  = 0.0f;
-    float         evaluatedIKWeight = 1.0f;
-    float         rotationWeight    = 1.0f;
-    float         maxArmExtension   = 0.98f;
-    float         maxWristTwistDeg  = 40.0f;
-    float         maxWristSwingDeg  = 50.0f;
-    GraspDesc     grasp;
+    CharacterBone       assignedLimb      = CharacterBone::HandR;
+    GripOrientationMode orientationMode   = GripOrientationMode::AutomaticHanded;
+    JPH::Mat44          localTransform    = JPH::Mat44::sIdentity();
+    JPH::Vec3           poleHintOffset    = JPH::Vec3(0.0f, -1.0f, -0.5f);
+    float               ikWeight          = 1.0f;
+    float               ikWeightVelocity  = 0.0f;
+    float               evaluatedIKWeight = 1.0f;
+    float               rotationWeight    = 1.0f;
+    float               maxArmExtension   = 0.98f;
+    float               maxWristTwistDeg  = 40.0f;
+    float               maxWristSwingDeg  = 50.0f;
+    GraspDesc           grasp;
 };
 
 struct ItemObstacleAvoidance {

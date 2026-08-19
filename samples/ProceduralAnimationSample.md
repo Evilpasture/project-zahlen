@@ -350,9 +350,11 @@ Driver modes cover hand-anchored props, aim-guided weapons, body-mounted loads,
 and world-anchored interactions. Up to four grips may independently target the
 left or right hand. Palm frames are inferred from each imported hand's finger and
 thumb descendants (with a forearm-based fallback), so grip rotation targets the
-palm rather than an arbitrary hand-bone axis. A grip transform's local `+X` is
-its desired palm normal, `+Y` is thumbward, and `+Z` points toward the fingers.
-`ikWeight` is a target value:
+palm rather than an arbitrary hand-bone axis. In the default `AutomaticHanded`
+mode, grip-local `+Z` is hand/finger forward; the solver mirrors the left frame so
+both palms face inward while both hands continue pointing forward. Use
+`ExplicitPalmFrame` when an asset supplies all three axes directly (`+X` palm
+normal, `+Y` thumbward, `+Z` finger-forward). `ikWeight` is a target value:
 setting it to zero spring-blends back to the authored arm rather than detaching
 in one frame. Aim-guided and body-mounted items are also translated back toward
 the character when a grip exceeds physical arm reach; the two-bone solver never

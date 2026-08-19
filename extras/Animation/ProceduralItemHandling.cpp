@@ -460,8 +460,13 @@ void SolveLimbIK(
     const JPH::Mat44 solvedUpper           = CorrectBoneDirection(nodeTransforms[upperNode], currentUpperDirection, ik.upperDirection, upperPosition);
     const JPH::Mat44 solvedFore            = CorrectBoneDirection(nodeTransforms[foreNode], currentLowerDirection, ik.lowerDirection, ik.midPosition);
 
-    const JPH::Quat targetPalmRotation = ItemDetail::MatrixRotation(targetGripTransform);
-    const size_t    palmSide           = handBone == CharacterBone::HandL ? 0u : 1u;
+    JPH::Quat targetPalmRotation = ItemDetail::MatrixRotation(targetGripTransform);
+    if (grip.orientationMode == GripOrientationMode::AutomaticHanded && handBone == CharacterBone::HandL) {
+        // Preserve grip-local +Z as hand/finger forward while mirroring +X so
+        // the left palm faces inward instead of copying the right-hand side.
+        targetPalmRotation = (targetPalmRotation * JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), std::numbers::pi_v<float>)).Normalized();
+    }
+    const size_t    palmSide = handBone == CharacterBone::HandL ? 0u : 1u;
     const JPH::Quat targetHandRotation =
         map.handPalmFramesValid[palmSide] ? (targetPalmRotation * map.handBoneToPalmRotations[palmSide].Inversed()).Normalized() : targetPalmRotation;
     const JPH::Quat authoredHandRotation = ItemDetail::MatrixRotation(nodeTransforms[handNode]);

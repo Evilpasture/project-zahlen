@@ -563,6 +563,8 @@ struct ProceduralAnimationTestSuite {
             grip.assignedLimb      = ZHLN::CharacterBone::HandR;
             grip.evaluatedIKWeight = 1.0f;
             grip.maxArmExtension   = 0.98f;
+            grip.maxWristTwistDeg  = 179.0f;
+            grip.maxWristSwingDeg  = 179.0f;
             ZHLN::Animation::SolveLimbIK(
                 map.modelTransforms.data(), map, ZHLN::CharacterBone::UpperArmR, ZHLN::CharacterBone::ForearmR, ZHLN::CharacterBone::HandR,
                 JPH::Mat44::sRotationTranslation(JPH::Quat::sIdentity(), gripPosition), grip
@@ -571,6 +573,32 @@ struct ProceduralAnimationTestSuite {
             const float solvedLowerLength = (map.modelTransforms[hand].GetTranslation() - map.modelTransforms[fore].GetTranslation()).Length();
             if (std::abs(solvedUpperLength - upperLength) > 0.0001f || std::abs(solvedLowerLength - lowerLength) > 0.0001f ||
                 !map.modelTransforms[hand].GetTranslation().IsClose(gripPosition, 0.0001f)) {
+                return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
+            }
+            const JPH::Quat solvedPalmFrame = (map.modelTransforms[hand].GetQuaternion().Normalized() * map.handBoneToPalmRotations[1]).Normalized();
+            if ((solvedPalmFrame * JPH::Vec3::sAxisZ()).Dot(JPH::Vec3::sAxisZ()) < 0.99f ||
+                (solvedPalmFrame * JPH::Vec3::sAxisX()).Dot(JPH::Vec3::sAxisX()) < 0.99f) {
+                return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
+            }
+
+            ZHLN::RigBoneMap leftGripMap;
+            ZHLN::BuildStandardProceduralRig(leftGripMap);
+            const ZHLN::RigNodeIndex   leftUpper    = leftGripMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::UpperArmL)];
+            const ZHLN::RigNodeIndex   leftGripHand = leftGripMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::HandL)];
+            ZHLN::Animation::GripPoint leftGrip;
+            leftGrip.assignedLimb            = ZHLN::CharacterBone::HandL;
+            leftGrip.evaluatedIKWeight       = 1.0f;
+            leftGrip.maxWristTwistDeg        = 179.0f;
+            leftGrip.maxWristSwingDeg        = 179.0f;
+            const JPH::Vec3 leftGripPosition = leftGripMap.modelTransforms[leftUpper].GetTranslation() + JPH::Vec3(0.38f, -0.05f, 0.12f);
+            ZHLN::Animation::SolveLimbIK(
+                leftGripMap.modelTransforms.data(), leftGripMap, ZHLN::CharacterBone::UpperArmL, ZHLN::CharacterBone::ForearmL, ZHLN::CharacterBone::HandL,
+                JPH::Mat44::sTranslation(leftGripPosition), leftGrip
+            );
+            const JPH::Quat solvedLeftPalm =
+                (leftGripMap.modelTransforms[leftGripHand].GetQuaternion().Normalized() * leftGripMap.handBoneToPalmRotations[0]).Normalized();
+            if ((solvedLeftPalm * JPH::Vec3::sAxisZ()).Dot(JPH::Vec3::sAxisZ()) < 0.99f ||
+                (solvedLeftPalm * JPH::Vec3::sAxisX()).Dot(-JPH::Vec3::sAxisX()) < 0.99f) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
 
