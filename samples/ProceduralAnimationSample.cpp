@@ -149,10 +149,104 @@ auto BuildProceduralArena(ZHLN::Engine& engine) -> void {
     );
 }
 
+auto CreateTestHandgun(ZHLN::Engine& engine, ZHLN::Entity player) -> ZHLN::Entity {
+    auto&              reg     = engine.GetRegistry();
+    const ZHLN::Entity handgun = reg.Create(
+        ZHLN::Components::NameComponent {.name = ZHLN::String64("ProceduralTestHandgun")}, ZHLN::Components::TransformComponent {},
+        ZHLN::Components::WorldTransformComponent {}, ZHLN::Components::HierarchyComponent {.parent = player}
+    );
+
+    auto addPart = [&](std::string_view name, JPH::Vec3Arg halfExtents, JPH::Vec3Arg localPosition, JPH::QuatArg localRotation, JPH::Vec4Arg color,
+                       float metallic) {
+        ZHLN::CreativeWorksFactory::MaterialDesc materialDesc;
+        materialDesc.metallic         = metallic;
+        materialDesc.roughness        = 0.32f;
+        materialDesc.baseColor        = {color.GetX(), color.GetY(), color.GetZ(), color.GetW()};
+        const ZHLN::Material material = ZHLN::CreativeWorksFactory::CreateMaterial(engine.GetRenderContext(), materialDesc).value_or(ZHLN::Material {});
+        const ZHLN::Entity   part     = ZHLN::CreativeWorksFactory::CreateBox(
+            engine, halfExtents,
+            ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = material}
+        );
+        reg.Add(part, ZHLN::Components::HierarchyComponent {.parent = handgun});
+        ZHLN::ECS::Patch<ZHLN::Components::TransformComponent>(reg, part, [&](auto& transform) -> auto {
+            transform.position = localPosition;
+            transform.rotation = localRotation;
+        });
+        ZHLN::ECS::Patch<ZHLN::Components::NameComponent>(reg, part, [&](auto& component) -> auto { component.name = ZHLN::String64(name); });
+    };
+
+    const JPH::Vec4 darkMetal(0.10f, 0.12f, 0.15f, 1.0f);
+    const JPH::Vec4 gripColor(0.20f, 0.12f, 0.08f, 1.0f);
+    addPart("Handgun_Slide", JPH::Vec3(0.075f, 0.055f, 0.22f), JPH::Vec3(0.0f, 0.025f, 0.08f), JPH::Quat::sIdentity(), darkMetal, 0.90f);
+    addPart(
+        "Handgun_Barrel", JPH::Vec3(0.035f, 0.035f, 0.24f), JPH::Vec3(0.0f, 0.015f, 0.11f), JPH::Quat::sIdentity(), JPH::Vec4(0.05f, 0.06f, 0.07f, 1.0f), 1.0f
+    );
+    addPart(
+        "Handgun_Grip", JPH::Vec3(0.060f, 0.135f, 0.055f), JPH::Vec3(0.0f, -0.145f, -0.065f),
+        JPH::Quat::sRotation(JPH::Vec3::sAxisX(), JPH::DegreesToRadians(-10.0f)), gripColor, 0.35f
+    );
+    addPart("Handgun_TriggerGuard", JPH::Vec3(0.045f, 0.035f, 0.055f), JPH::Vec3(0.0f, -0.070f, 0.015f), JPH::Quat::sIdentity(), darkMetal, 0.80f);
+    addPart(
+        "Handgun_Sight", JPH::Vec3(0.018f, 0.018f, 0.045f), JPH::Vec3(0.0f, 0.095f, 0.02f), JPH::Quat::sIdentity(), JPH::Vec4(0.75f, 0.18f, 0.08f, 1.0f), 0.20f
+    );
+    return handgun;
+}
+
+[[nodiscard]] auto BuildTestHandgunHandling(ZHLN::Entity handgun) -> ZHLN::Animation::ItemHandlingComponent {
+    ZHLN::Animation::ItemHandlingComponent handling;
+    handling.driverMode     = ZHLN::Animation::ItemDriverMode::BodyMounted;
+    handling.itemEntity     = handgun;
+    handling.hipLocalOffset = JPH::Mat44::sTranslation(JPH::Vec3(-0.24f, -0.32f, 0.08f));
+    handling.aimLocalOffset = JPH::Mat44::sTranslation(JPH::Vec3(0.0f, -0.20f, 0.30f));
+    handling.aimProgress    = 1.0f;
+    handling.sway.massKg    = 1.1f;
+    handling.sway.stiffness = 115.0f;
+    handling.sway.damping   = 0.90f;
+    handling.avoidance      = {.probeDistance = 0.55f, .probeRadius = 0.08f, .pushbackScale = 0.80f, .tiltScale = 0.35f};
+    handling.grips[0]       = {
+        .assignedLimb = ZHLN::CharacterBone::HandR,
+        .localTransform =
+            JPH::Mat44::sRotationTranslation(JPH::Quat::sRotation(JPH::Vec3::sAxisX(), JPH::DegreesToRadians(-10.0f)), JPH::Vec3(-0.055f, -0.13f, -0.055f)),
+        .ikWeight          = 0.0f,
+        .evaluatedIKWeight = 0.0f,
+        .rotationWeight    = 0.90f,
+        .grasp             = {
+            .shape        = ZHLN::Animation::GraspShape::TriggerGrip,
+            .curlAxisMode = ZHLN::Animation::FingerCurlAxisMode::MirroredLocalX,
+            .gripRadius   = 0.022f,
+            .tightness    = 0.90f,
+            .triggerCurl  = 0.32f
+        },
+    };
+    handling.grips[1] = {
+        .assignedLimb      = ZHLN::CharacterBone::HandL,
+        .localTransform    = JPH::Mat44::sTranslation(JPH::Vec3(0.060f, -0.070f, 0.015f)),
+        .ikWeight          = 0.0f,
+        .evaluatedIKWeight = 0.0f,
+        .rotationWeight    = 0.80f,
+        .grasp             = {
+            .shape        = ZHLN::Animation::GraspShape::Cylinder,
+            .curlAxisMode = ZHLN::Animation::FingerCurlAxisMode::MirroredLocalX,
+            .gripRadius   = 0.030f,
+            .tightness    = 0.82f
+        },
+    };
+    handling.gripCount          = 2;
+    handling.shoulderLeadWeight = 0.18f;
+    handling.torsoReachWeight   = 0.18f;
+    return handling;
+}
+
 /**
  * @brief Attaches a loaded GLB model or generates a procedural fallback rig.
  */
-auto AttachCharacterRig(ZHLN::Engine& engine, ZHLN::Entity player, std::string_view glbPath, ZHLN::ModelPrefab* prefab) -> void {
+auto AttachCharacterRig(
+    ZHLN::Engine&                          engine,
+    ZHLN::Entity                           player,
+    std::string_view                       glbPath,
+    ZHLN::ModelPrefab*                     prefab,
+    ZHLN::Animation::ItemHandlingComponent itemHandling
+) -> void {
     auto& reg = engine.GetRegistry();
 
     ZHLN::ProceduralLocomotionComponent locomotion {
@@ -259,7 +353,7 @@ auto AttachCharacterRig(ZHLN::Engine& engine, ZHLN::Entity player, std::string_v
                 .runTrack  = runTrack,
             },
             ZHLN::Components::KinematicPoseOverrideComponent {}, ZHLN::RigBoneMap {}, // Initialized lazily on frame 0 by the optional subsystem
-            std::move(locomotion), std::move(hair), std::move(lookAt), animationConfig
+            std::move(locomotion), std::move(hair), std::move(lookAt), animationConfig, std::move(itemHandling)
         );
     } else {
         ZHLN::Log("[Sample] Notice: '{}' not found. Falling back to in-memory procedural rig.", glbPath);
@@ -269,7 +363,7 @@ auto AttachCharacterRig(ZHLN::Engine& engine, ZHLN::Entity player, std::string_v
 
         reg.Add(
             player, ZHLN::Components::KinematicPoseOverrideComponent {}, std::move(proceduralRig), std::move(locomotion), std::move(hair), std::move(lookAt),
-            animationConfig
+            animationConfig, std::move(itemHandling)
         );
     }
 }
@@ -334,14 +428,18 @@ auto main(int argc, char* argv[]) -> int {
     constexpr float    kWalkSpeed = 2.40f;
     constexpr float    kJumpForce = 7.00f;
     const ZHLN::Entity player     = ZHLN::Locomotion::SpawnCharacter(*engine, JPH::Vec3(0.0f, 1.20f, 0.0f), dualShapeConfig, kWalkSpeed, kJumpForce);
+    const ZHLN::Entity handgun    = CreateTestHandgun(*engine, player);
 
-    // 2. Attach the already-loaded visual to the fitted CharacterVirtual.
-    AttachCharacterRig(*engine, player, rigPath, prefab);
+    // 2. Attach the already-loaded visual and the same test handgun setup to
+    // either the generated reference rig or an imported production rig.
+    AttachCharacterRig(*engine, player, rigPath, prefab, BuildTestHandgunHandling(handgun));
 
     ZHLN::Clock clock;
-    float       sampleTime = 0.0f;
+    float       sampleTime      = 0.0f;
+    bool        handgunEquipped = false;
+    bool        equipKeyWasDown = false;
     ZHLN::Log(
-        "[ProceduralAnimationSample] Ready. WASD move, LSHIFT sprint, SPACE jump, Right-Click orbit. "
+        "[ProceduralAnimationSample] Ready. WASD move, LSHIFT sprint, SPACE jump, E equip/rest handgun, Right-Click orbit. "
         "Cyan/orange/green = torso/arms/IK legs; magenta = 108-bone XPBD hair; yellow = terrain normals."
     );
 
@@ -351,9 +449,11 @@ auto main(int argc, char* argv[]) -> int {
 
         auto& registry = engine->GetRegistry();
 
-        // 1. Mouse Look Delta via Multi-Component Patch
+        // 1. Mouse Look and edge-triggered handgun equip input.
+        bool equipKeyDown = false;
         for (ZHLN::Entity e: registry.GetEntitiesWith<ZHLN::Components::InputStateComponent>()) {
             ZHLN::ECS::Patch<ZHLN::Components::InputStateComponent>(registry, e, [&](auto& st) -> auto {
+                equipKeyDown = equipKeyDown || st.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::E));
                 if (st.needsResize) {
                     engine->GetRenderContext().SetResolution(st.newSize);
                     st.needsResize = false;
@@ -364,6 +464,19 @@ auto main(int argc, char* argv[]) -> int {
                 }
             });
         }
+        if (equipKeyDown && !equipKeyWasDown) {
+            handgunEquipped = !handgunEquipped;
+            ZHLN::ECS::Patch<ZHLN::Animation::ItemHandlingComponent>(registry, player, [&](auto& handling) -> auto {
+                handling.driverMode    = handgunEquipped ? ZHLN::Animation::ItemDriverMode::AimGuided : ZHLN::Animation::ItemDriverMode::BodyMounted;
+                handling.aimProgress   = handgunEquipped ? 1.0f : 0.0f;
+                const size_t gripCount = std::min(handling.gripCount, handling.grips.size());
+                for (size_t gripIndex = 0; gripIndex < gripCount; ++gripIndex) {
+                    handling.grips[gripIndex].ikWeight = handgunEquipped ? 1.0f : 0.0f;
+                }
+            });
+            ZHLN::Log("[Sample] Test handgun: {}.", handgunEquipped ? "EQUIPPED / AIM-GUIDED" : "RESTING / BODY-MOUNTED");
+        }
+        equipKeyWasDown = equipKeyDown;
 
         // 2. Update Procedural Look-At Orbit via Multi-Component Patch
         sampleTime += dt;
