@@ -1309,17 +1309,6 @@ void ProceduralAnimation::CaptureChildOfPoseDeltas(RigBoneMap& boneMap) noexcept
     }
 }
 
-void ProceduralAnimation::CaptureChildOfModelPoseDeltas(RigBoneMap& boneMap, RigChildOfKind kind) noexcept {
-    for (size_t index = 0; index < boneMap.childOfConstraintCount; ++index) {
-        RigChildOfConstraint& constraint = boneMap.childOfConstraints[index];
-        if (constraint.kind != kind || !IsValidRigNode(constraint.parent, boneMap.nodeCount) || !IsValidRigNode(constraint.child, boneMap.nodeCount)) {
-            continue;
-        }
-        const JPH::Mat44 desiredRelative = boneMap.modelTransforms[constraint.parent].Inversed() * boneMap.modelTransforms[constraint.child];
-        constraint.localPoseDelta        = constraint.bindRelative.Inversed() * desiredRelative;
-    }
-}
-
 size_t ProceduralAnimation::ApplyChildOfConstraints(
     RigBoneMap& boneMap,
     bool        applyHands,
@@ -1732,10 +1721,6 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
                 );
             }
 
-            // Detached-hand repair must preserve the just-solved model-space
-            // grip instead of restoring the authored wrist delta at Stage 7.
-            ProceduralAnimation::CaptureChildOfModelPoseDeltas(*boneMap, RigChildOfKind::Hand);
-
             if (registry.IsAlive(itemHandling->itemEntity)) {
                 const JPH::Mat44 worldItem = rootWorld * itemHandling->itemModelTransform;
                 JPH::Mat44       localItem = worldItem;
@@ -1809,6 +1794,9 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
                 *boneMap, handChildOfEnabled, chestChildOfEnabled, neckChildOfEnabled, headChildOfEnabled, footAttachmentsEnabled
             );
         }
+        // Child-of repair always runs unmodified. Only active grips are pinned
+        // again afterward; at rest, the original Forearm -> Hand relationship
+        // remains authoritative and cannot be neutralized by item state.
         if (itemHandlingEnabled) {
             const size_t gripCount = std::min(itemHandling->gripCount, itemHandling->grips.size());
             for (size_t gripIndex = 0; gripIndex < gripCount; ++gripIndex) {

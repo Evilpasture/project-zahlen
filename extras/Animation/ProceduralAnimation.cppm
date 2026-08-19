@@ -565,7 +565,6 @@ void Register(Engine& engine);
 void   Update(Engine& engine, float dt) noexcept;
 void   ResolveModelTransforms(RigBoneMap& boneMap) noexcept;
 void   CaptureChildOfPoseDeltas(RigBoneMap& boneMap) noexcept;
-void   CaptureChildOfModelPoseDeltas(RigBoneMap& boneMap, RigChildOfKind kind) noexcept;
 size_t ApplyChildOfConstraints(
     RigBoneMap& boneMap,
     bool        applyHands           = true,
