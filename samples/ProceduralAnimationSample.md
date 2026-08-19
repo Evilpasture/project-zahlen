@@ -78,12 +78,14 @@ directly comparable.
 Press `V` to toggle a full-body first-person view. The camera is constrained
 directly to the evaluated head transform: its eye offset is above and forward of
 the head origin, scaled from character height, and mouse look is a bounded offset
-relative to the rig's head orientation. The sample's autonomous look-at orbit is
-suspended while first person is active and restored on exit. The mode uses a
-short near plane, retains the body and arms, and hides every mesh below any
-head/face/visor/eye/hair/hat
-transform ancestor. Separate head- or hair-only skins are hidden too. For combined
-body meshes such as the generated reference rig, the first-person palette
+relative to the rig's head orientation. Only the head-local eye motion is spring
+smoothed; character-root movement is applied immediately, preventing forward
+motion from pulling the camera backward. The sample's autonomous look-at orbit
+is suspended while first person is active and restored on exit. The mode uses a
+short near plane, retains the body and arms, and hides meshes below any
+head/face/visor/eye/hair/hat transform ancestor. Compact geometry around the head
+and separate head- or hair-only skins are hidden too. For combined body meshes
+such as the generated reference rig, the first-person palette
 collapses only head-, face-, and hair-driven joints at the head origin, leaving
 torso and arm skinning visible. Returning to third person restores the previous
 orbit-camera settings and original mesh flags. Third-person

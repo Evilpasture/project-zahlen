@@ -102,6 +102,19 @@ struct FirstPersonViewState {
     return false;
 }
 
+[[nodiscard]] JPH::Mat44 GetPrefabNodeModelTransform(const ZHLN::ModelPrefab& prefab, int32_t node) {
+    if (node < 0 || node >= static_cast<int32_t>(prefab.nodes.size())) {
+        return JPH::Mat44::sIdentity();
+    }
+    JPH::Mat44 transform = prefab.nodes[static_cast<size_t>(node)].localTransform;
+    int32_t    parent    = prefab.nodes[static_cast<size_t>(node)].parentIndex;
+    for (size_t depth = 0; depth < prefab.nodes.size() && parent >= 0 && parent < static_cast<int32_t>(prefab.nodes.size()); ++depth) {
+        transform = prefab.nodes[static_cast<size_t>(parent)].localTransform * transform;
+        parent    = prefab.nodes[static_cast<size_t>(parent)].parentIndex;
+    }
+    return transform;
+}
+
 [[nodiscard]] bool HasHeadVisualAncestor(const ZHLN::ModelPrefab& prefab, int32_t node) {
     for (size_t depth = 0; depth < prefab.nodes.size() && node >= 0 && node < static_cast<int32_t>(prefab.nodes.size()); ++depth) {
         if (IsHeadVisualName(std::string_view(prefab.nodes[static_cast<size_t>(node)].name))) {
@@ -143,14 +156,20 @@ void CollectFirstPersonHeadMeshes(
     FirstPersonViewState&         state
 ) {
     int32_t headNode = -1;
+    int32_t neckNode = -1;
     for (size_t node = 0; node < prefab.nodes.size(); ++node) {
         const auto             canonical = CanonicalNodeName(std::string_view(prefab.nodes[node].name));
         const std::string_view name(canonical.data());
-        if (name == "head" || name == "defhead" || name == "orghead") {
+        if (headNode < 0 && (name == "head" || name == "defhead" || name == "orghead")) {
             headNode = static_cast<int32_t>(node);
-            break;
+        }
+        if (neckNode < 0 && (name == "neck" || name == "defneck" || name == "orgneck")) {
+            neckNode = static_cast<int32_t>(node);
         }
     }
+    const JPH::Vec3 headPosition = GetPrefabNodeModelTransform(prefab, headNode).GetTranslation();
+    const JPH::Vec3 neckPosition = GetPrefabNodeModelTransform(prefab, neckNode).GetTranslation();
+    const float     headScale    = headNode >= 0 && neckNode >= 0 ? std::max((headPosition - neckPosition).Length(), 0.06f) : 0.12f;
 
     state.headMeshes.clear();
     for (ZHLN::Entity entity: visualParts) {
@@ -158,10 +177,29 @@ void CollectFirstPersonHeadMeshes(
         if (mesh == nullptr || mesh->nodeIndex < 0 || mesh->nodeIndex >= static_cast<int32_t>(prefab.nodes.size())) {
             continue;
         }
-        const bool  underHead    = headNode >= 0 && IsNodeUnder(prefab, mesh->nodeIndex, headNode);
-        const auto* skeletalMesh = registry.Get<ZHLN::Components::SkeletalMeshComponent>(entity);
-        const bool  headSkin     = skeletalMesh != nullptr && IsHeadDominatedSkin(prefab, skeletalMesh->skeletonIndex);
-        if (underHead || HasHeadVisualAncestor(prefab, mesh->nodeIndex) || headSkin) {
+        const bool  underHead       = headNode >= 0 && IsNodeUnder(prefab, mesh->nodeIndex, headNode);
+        const auto* skeletalMesh    = registry.Get<ZHLN::Components::SkeletalMeshComponent>(entity);
+        const bool  headSkin        = skeletalMesh != nullptr && IsHeadDominatedSkin(prefab, skeletalMesh->skeletonIndex);
+        bool        compactNearHead = false;
+        for (const ZHLN::ModelPart& part: prefab.parts) {
+            if (part.nodeIndex != mesh->nodeIndex) {
+                continue;
+            }
+            const JPH::Mat44 model = GetPrefabNodeModelTransform(prefab, part.nodeIndex) * part.localTransform;
+            const JPH::Vec3  localMin(part.localMin[0], part.localMin[1], part.localMin[2]);
+            const JPH::Vec3  localMax(part.localMax[0], part.localMax[1], part.localMax[2]);
+            const JPH::Vec3  localCenter     = (localMin + localMax) * 0.5f;
+            const JPH::Vec3  halfExtent      = (localMax - localMin) * 0.5f;
+            const JPH::Vec3  center          = model.Multiply3x3(localCenter) + model.GetTranslation();
+            const float      radius          = model.Multiply3x3(halfExtent).Length();
+            const float      surfaceDistance = std::max((center - headPosition).Length() - radius, 0.0f);
+            compactNearHead                  = headNode >= 0 && radius <= headScale * 2.8f && surfaceDistance <= headScale * 1.8f &&
+                                               center.GetY() >= neckPosition.GetY() - headScale * 0.15f;
+            if (compactNearHead) {
+                break;
+            }
+        }
+        if (underHead || HasHeadVisualAncestor(prefab, mesh->nodeIndex) || headSkin || compactNearHead) {
             state.headMeshes.push_back({.entity = entity, .originalFlags = mesh->flags});
         }
     }
@@ -217,9 +255,13 @@ void SetFirstPersonMode(ZHLN::Engine& engine, ZHLN::Entity player, FirstPersonVi
     }
 
     ZHLN::ECS::Patch<ZHLN::FirstPersonVisibilityComponent>(registry, player, [&](auto& visibility) -> auto {
-        visibility.enabled  = enabled;
-        visibility.hideHead = true;
-        visibility.hideHair = true;
+        visibility.eyeOffsetModel    = JPH::Vec3(0.0f, state.eyeUpOffset, state.eyeForwardOffset);
+        visibility.lookYawDegrees    = state.lookYawOffset;
+        visibility.lookPitchDegrees  = state.lookPitchOffset;
+        visibility.enabled           = enabled;
+        visibility.hideHead          = true;
+        visibility.hideHair          = true;
+        visibility.cameraInitialized = false;
     });
     for (const HiddenHeadMesh& hidden: state.headMeshes) {
         if (auto* mesh = registry.Get<ZHLN::Components::MeshComponent>(hidden.entity)) {
@@ -228,39 +270,6 @@ void SetFirstPersonMode(ZHLN::Engine& engine, ZHLN::Entity player, FirstPersonVi
     }
     state.enabled = enabled;
     ZHLN::Log("[Sample] Camera mode: {}.", enabled ? "FIRST PERSON / HEAD-CONSTRAINED FULL BODY" : "THIRD PERSON / ORBIT");
-}
-
-void UpdateFirstPersonCamera(ZHLN::Engine& engine, ZHLN::Entity player, const FirstPersonViewState& state) {
-    if (!state.enabled) {
-        return;
-    }
-    auto&       registry  = engine.GetRegistry();
-    const auto* transform = registry.Get<ZHLN::Components::TransformComponent>(player);
-    const auto* rig       = registry.Get<ZHLN::RigBoneMap>(player);
-    if (transform == nullptr || rig == nullptr) {
-        return;
-    }
-    const ZHLN::RigNodeIndex headNode = rig->nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Head)];
-    if (!ZHLN::IsValidRigNode(headNode, rig->nodeCount)) {
-        return;
-    }
-
-    const JPH::Mat44& headModel         = rig->modelTransforms[headNode];
-    const JPH::Quat   headModelRotation = headModel.GetQuaternion().Normalized();
-    const JPH::Quat   headWorldRotation = (transform->rotation * headModelRotation).Normalized();
-    const JPH::Vec3   headWorldPosition = transform->position + transform->rotation * headModel.GetTranslation();
-    const JPH::Vec3   eyeOffset(0.0f, state.eyeUpOffset, state.eyeForwardOffset);
-    ZHLN::Camera&     camera = engine.GetCamera();
-    camera.position          = headWorldPosition + headWorldRotation * eyeOffset;
-
-    JPH::Vec3 rigForward  = headWorldRotation * JPH::Vec3::sAxisZ();
-    rigForward            = rigForward.LengthSq() > 1.0e-8f ? rigForward.Normalized() : transform->rotation * JPH::Vec3::sAxisZ();
-    const float baseYaw   = std::atan2(rigForward.GetZ(), rigForward.GetX()) * (180.0f / std::numbers::pi_v<float>);
-    const float basePitch = std::asin(std::clamp(rigForward.GetY(), -1.0f, 1.0f)) * (180.0f / std::numbers::pi_v<float>);
-    camera.yaw            = baseYaw + std::clamp(state.lookYawOffset, -80.0f, 80.0f);
-    camera.pitch          = std::clamp(basePitch + state.lookPitchOffset, -85.0f, 85.0f);
-    camera.fov            = 75.0f;
-    camera.nearZ          = 0.03f;
 }
 
 [[nodiscard]] bool EnvironmentFlag(const char* name) {
@@ -727,7 +736,12 @@ auto main(int argc, char* argv[]) -> int {
             SetFirstPersonMode(*engine, player, viewState, !viewState.enabled);
         }
         viewState.toggleKeyWasDown = viewKeyDown;
-        UpdateFirstPersonCamera(*engine, player, viewState);
+        if (viewState.enabled) {
+            ZHLN::ECS::Patch<ZHLN::FirstPersonVisibilityComponent>(registry, player, [&](auto& visibility) -> auto {
+                visibility.lookYawDegrees   = viewState.lookYawOffset;
+                visibility.lookPitchDegrees = viewState.lookPitchOffset;
+            });
+        }
 
         // 2. Update Procedural Look-At Orbit via Multi-Component Patch
         sampleTime += dt;

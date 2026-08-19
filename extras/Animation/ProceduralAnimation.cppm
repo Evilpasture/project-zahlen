@@ -265,9 +265,22 @@ struct ProceduralLookAtComponent {
 };
 
 struct FirstPersonVisibilityComponent {
-    bool enabled  = false;
-    bool hideHead = true;
-    bool hideHair = true;
+    JPH::Vec3 eyeOffsetModel      = JPH::Vec3(0.0f, 0.07f, 0.08f);
+    JPH::Vec3 smoothedEyeModel    = JPH::Vec3::sZero();
+    JPH::Vec3 eyeVelocity         = JPH::Vec3::sZero();
+    JPH::Quat smoothedViewModel   = JPH::Quat::sIdentity();
+    JPH::Vec3 viewAngularVelocity = JPH::Vec3::sZero();
+    float     lookYawDegrees      = 0.0f;
+    float     lookPitchDegrees    = 0.0f;
+    float     positionStiffness   = 120.0f;
+    float     rotationStiffness   = 160.0f;
+    float     dampingFactor       = 1.0f;
+    float     fov                 = 75.0f;
+    float     nearPlane           = 0.03f;
+    bool      enabled             = false;
+    bool      hideHead            = true;
+    bool      hideHair            = true;
+    bool      cameraInitialized   = false;
 };
 
 namespace Animation {

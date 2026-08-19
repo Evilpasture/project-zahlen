@@ -10,6 +10,7 @@ module;
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
+#include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
@@ -1411,7 +1412,7 @@ void ProceduralAnimation::Register(Engine& engine) {
                     Read<Components::HierarchyComponent>(),
                     Read<Components::MeshComponent>(),
                     Read<ProceduralLookAtComponent>(),
-                    Read<FirstPersonVisibilityComponent>(),
+                    Write<FirstPersonVisibilityComponent>(),
                     Read<ProceduralAnimationConfigComponent>(),
                     Read<Components::SkeletalMeshComponent>(),
                     Write<ProceduralLocomotionComponent>(),
@@ -2046,6 +2047,51 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
         ++boneMap->poseVersion;
         if (poseOverride != nullptr) {
             poseOverride->valid = false;
+        }
+
+        // Stage 7.5: drive the first-person camera from the current evaluated
+        // head pose. Smooth only the head-local eye offset/orientation; root
+        // translation remains immediate so forward movement cannot pull the
+        // camera behind the body.
+        if (firstPerson != nullptr && firstPerson->enabled) {
+            const RigNodeIndex headNode = boneMap->nodeIndices[BoneSlot(CharacterBone::Head)];
+            if (IsValidRigNode(headNode, boneMap->nodeCount)) {
+                const JPH::Mat44& headModel      = boneMap->modelTransforms[headNode];
+                const JPH::Quat   headRotation   = ExtractRotation(headModel);
+                const JPH::Vec3   targetEyeModel = headModel.GetTranslation() + headRotation * firstPerson->eyeOffsetModel;
+                const JPH::Quat   lookYaw =
+                    JPH::Quat::sRotation(JPH::Vec3::sAxisY(), JPH::DegreesToRadians(std::clamp(firstPerson->lookYawDegrees, -80.0f, 80.0f)));
+                const JPH::Quat lookPitch =
+                    JPH::Quat::sRotation(JPH::Vec3::sAxisX(), JPH::DegreesToRadians(std::clamp(firstPerson->lookPitchDegrees, -70.0f, 70.0f)));
+                const JPH::Quat targetViewModel = (headRotation * lookYaw * lookPitch).Normalized();
+                if (!firstPerson->cameraInitialized) {
+                    firstPerson->smoothedEyeModel    = targetEyeModel;
+                    firstPerson->eyeVelocity         = JPH::Vec3::sZero();
+                    firstPerson->smoothedViewModel   = targetViewModel;
+                    firstPerson->viewAngularVelocity = JPH::Vec3::sZero();
+                    firstPerson->cameraInitialized   = true;
+                } else {
+                    SpringVector(
+                        firstPerson->smoothedEyeModel, firstPerson->eyeVelocity, targetEyeModel, dt, firstPerson->positionStiffness, firstPerson->dampingFactor
+                    );
+                    SpringRotation(
+                        firstPerson->smoothedViewModel, firstPerson->viewAngularVelocity, targetViewModel, dt, firstPerson->rotationStiffness,
+                        firstPerson->dampingFactor
+                    );
+                }
+
+                Camera& camera            = engine.GetCamera();
+                camera.position           = transform->position + rootRotation * firstPerson->smoothedEyeModel;
+                const JPH::Quat worldView = (rootRotation * firstPerson->smoothedViewModel).Normalized();
+                JPH::Vec3       forward   = worldView * JPH::Vec3::sAxisZ();
+                forward                   = forward.LengthSq() > 1.0e-8f ? forward.Normalized() : rootRotation * JPH::Vec3::sAxisZ();
+                camera.yaw                = std::atan2(forward.GetZ(), forward.GetX()) * (180.0f / std::numbers::pi_v<float>);
+                camera.pitch              = std::asin(std::clamp(forward.GetY(), -1.0f, 1.0f)) * (180.0f / std::numbers::pi_v<float>);
+                camera.fov                = firstPerson->fov;
+                camera.nearZ              = firstPerson->nearPlane;
+            }
+        } else if (firstPerson != nullptr) {
+            firstPerson->cameraInitialized = false;
         }
 
         // Stage 8: every distinct skin palette used by this character must

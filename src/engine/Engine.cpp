@@ -758,9 +758,9 @@ GameplayStatus Engine::Tick(float dt, GameplayDriver driver) {
     }
     GetRenderContext().CheckShaderReload();
 
-    // 2. Camera Systems
-    targetCamSys.Update(*this, dt, GetCurrentAlpha());
-    camSys.Update(*this, dt, GetCurrentAlpha());
+    // 2. Translate gameplay input using the previous resolved camera. Camera
+    // transforms are finalized after physics and the update graph so rig-driven
+    // first-person views cannot lag one simulation frame behind their body.
     inputSystem.PlayerInputTranslate(*this, GetCamera());
 
     // 3. Physics Fixed Step & WriteBack
@@ -796,6 +796,11 @@ GameplayStatus Engine::Tick(float dt, GameplayDriver driver) {
     // 5. Update Graph & Command Buffer Playback
     GetUpdateGraph().Execute(*this, dt);
     GetMainECB().Playback();
+
+    // Resolve target cameras and camera matrices from current physics and
+    // procedural rig poses immediately before visibility/render work.
+    targetCamSys.Update(*this, dt, GetCurrentAlpha());
+    camSys.Update(*this, dt, GetCurrentAlpha());
     LODSystem::Update(*this);
 
     // 6. Render Graph & Frame Submission
