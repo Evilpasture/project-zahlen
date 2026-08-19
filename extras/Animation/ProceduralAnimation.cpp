@@ -1188,6 +1188,7 @@ void ProceduralAnimation::Register(Engine& engine) {
     registry.RegisterComponent<ProceduralLookAtComponent>("ProceduralLookAtComponent");
     registry.RegisterComponent<ProceduralAnimationConfigComponent>("ProceduralAnimationConfigComponent");
     registry.RegisterComponent<ProceduralLocomotionTracksComponent>("ProceduralLocomotionTracksComponent");
+    registry.RegisterComponent<Animation::ItemHandlingComponent>("ItemHandlingComponent");
     registry.RegisterComponent<RigBoneMap>("RigBoneMap");
 
     using namespace ECS;
@@ -1200,6 +1201,7 @@ void ProceduralAnimation::Register(Engine& engine) {
                 {
                     Read<Components::PhysicsComponent>(),
                     Write<Components::TransformComponent>(),
+                    Write<Components::WorldTransformComponent>(),
                     Read<Components::HierarchyComponent>(),
                     Read<Components::MeshComponent>(),
                     Read<ProceduralLookAtComponent>(),
@@ -1207,6 +1209,7 @@ void ProceduralAnimation::Register(Engine& engine) {
                     Read<Components::SkeletalMeshComponent>(),
                     Write<ProceduralLocomotionComponent>(),
                     Write<ProceduralLocomotionTracksComponent>(),
+                    Write<Animation::ItemHandlingComponent>(),
                     Write<HairStrandsComponent>(),
                     Write<RigBoneMap>(),
                     Write<Components::KinematicPoseOverrideComponent>(),
@@ -1232,6 +1235,17 @@ void ProceduralAnimation::CaptureChildOfPoseDeltas(RigBoneMap& boneMap) noexcept
             continue;
         }
         constraint.localPoseDelta = boneMap.bindLocalTransforms[constraint.child].Inversed() * boneMap.localTransforms[constraint.child];
+    }
+}
+
+void ProceduralAnimation::CaptureChildOfModelPoseDeltas(RigBoneMap& boneMap, RigChildOfKind kind) noexcept {
+    for (size_t index = 0; index < boneMap.childOfConstraintCount; ++index) {
+        RigChildOfConstraint& constraint = boneMap.childOfConstraints[index];
+        if (constraint.kind != kind || !IsValidRigNode(constraint.parent, boneMap.nodeCount) || !IsValidRigNode(constraint.child, boneMap.nodeCount)) {
+            continue;
+        }
+        const JPH::Mat44 desiredRelative = boneMap.modelTransforms[constraint.parent].Inversed() * boneMap.modelTransforms[constraint.child];
+        constraint.localPoseDelta        = constraint.bindRelative.Inversed() * desiredRelative;
     }
 }
 
@@ -1335,6 +1349,7 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
         auto* hair             = registry.Get<HairStrandsComponent>(entity);
         auto* config           = registry.Get<ProceduralAnimationConfigComponent>(entity);
         auto* tracks           = registry.Get<ProceduralLocomotionTracksComponent>(entity);
+        auto* itemHandling     = registry.Get<Animation::ItemHandlingComponent>(entity);
         auto* movement         = registry.Get<Components::MovementComponent>(entity);
         auto* transform        = registry.Get<Components::TransformComponent>(entity);
         auto* physicsComponent = registry.Get<Components::PhysicsComponent>(entity);
@@ -1461,6 +1476,7 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
         const bool accelerationEnabled    = !authoredPoseOnly && (config == nullptr || config->enableAccelerationTilt);
         const bool upperBodyEnabled       = !authoredPoseOnly && (config == nullptr || config->enableUpperBody);
         const bool secondaryMotionEnabled = !authoredPoseOnly && (config == nullptr || config->enableSecondaryMotion);
+        const bool itemHandlingEnabled    = !authoredPoseOnly && itemHandling != nullptr && itemHandling->enabled && itemHandling->gripCount > 0;
         const bool handChildOfEnabled     = config == nullptr || config->enforceHandChildOf;
         const bool chestChildOfEnabled    = config == nullptr || config->enforceChestChildOf;
         const bool neckChildOfEnabled     = config == nullptr || config->enforceNeckChildOf;
@@ -1553,6 +1569,85 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
             }
         }
 
+        // Stage 4.5: item driver, inertial/obstacle dynamics, upper-body reach,
+        // constrained arm IK, wrist limits, and procedural grasp.
+        if (itemHandlingEnabled) {
+            const size_t        gripCount       = std::min(itemHandling->gripCount, itemHandling->grips.size());
+            const CharacterBone primaryHandBone = itemHandling->grips[0].assignedLimb == CharacterBone::HandL ? CharacterBone::HandL : CharacterBone::HandR;
+            const RigNodeIndex  primaryHandNode = boneMap->nodeIndices[BoneSlot(primaryHandBone)];
+            const RigNodeIndex  chestNode       = boneMap->nodeIndices[BoneSlot(CharacterBone::Chest)];
+            const RigNodeIndex  headNode        = boneMap->nodeIndices[BoneSlot(CharacterBone::Head)];
+            const JPH::Mat44    primaryHand     = IsValidRigNode(primaryHandNode, boneMap->nodeCount) ? boneMap->modelTransforms[primaryHandNode] :
+                                                                                                        JPH::Mat44::sIdentity();
+            const JPH::Mat44    chest           = IsValidRigNode(chestNode, boneMap->nodeCount) ? boneMap->modelTransforms[chestNode] : JPH::Mat44::sIdentity();
+            const JPH::Vec3     headPosition    = IsValidRigNode(headNode, boneMap->nodeCount) ? boneMap->modelTransforms[headNode].GetTranslation() :
+                                                                                                 JPH::Vec3(0.0f, 1.6f, 0.0f);
+            JPH::Vec3           aimDirection    = JPH::Vec3::sAxisZ();
+            if (const auto* lookAt = registry.Get<ProceduralLookAtComponent>(entity)) {
+                const JPH::Vec3 targetModel = rootRotation.Inversed() * (lookAt->targetWorldPos - transform->position);
+                const JPH::Vec3 fromHead    = targetModel - headPosition;
+                if (fromHead.LengthSq() > 1.0e-8f) {
+                    aimDirection = fromHead.Normalized();
+                }
+            }
+
+            const JPH::Mat44 rootWorld    = JPH::Mat44::sRotationTranslation(rootRotation, transform->position);
+            const JPH::Mat44 worldToModel = rootWorld.Inversed();
+            itemHandling->itemModelTransform =
+                Animation::SolveItemBasePose(*itemHandling, primaryHand, chest, worldToModel, headPosition, aimDirection, itemHandling->worldAnchor);
+            Animation::UpdateItemDynamics(engine, entity, *itemHandling, transform->position, rootRotation, dt);
+
+            for (size_t gripIndex = 0; gripIndex < gripCount; ++gripIndex) {
+                Animation::GripPoint& grip       = itemHandling->grips[gripIndex];
+                const float           gripWeight = Animation::UpdateGripWeight(grip, dt);
+                if (gripWeight <= 0.001f) {
+                    continue;
+                }
+                const bool          left       = grip.assignedLimb == CharacterBone::HandL;
+                const CharacterBone upperBone  = left ? CharacterBone::UpperArmL : CharacterBone::UpperArmR;
+                const CharacterBone foreBone   = left ? CharacterBone::ForearmL : CharacterBone::ForearmR;
+                const CharacterBone handBone   = left ? CharacterBone::HandL : CharacterBone::HandR;
+                const JPH::Mat44    gripTarget = itemHandling->itemModelTransform * grip.localTransform;
+
+                Animation::ApplyTorsoReachCompensation(
+                    boneMap->modelTransforms.data(), *boneMap, upperBone, foreBone, handBone, gripTarget.GetTranslation(),
+                    itemHandling->torsoReachWeight * gripWeight
+                );
+                Animation::ApplyClavicleLead(
+                    boneMap->modelTransforms.data(), *boneMap, upperBone, gripTarget.GetTranslation(), itemHandling->shoulderLeadWeight * gripWeight
+                );
+                Animation::SolveLimbIK(boneMap->modelTransforms.data(), *boneMap, upperBone, foreBone, handBone, gripTarget, grip);
+                Animation::ApplyKinematicFingers(boneMap->modelTransforms.data(), *boneMap, handBone, Animation::EvaluateFingerCurl(grip.grasp), gripWeight);
+            }
+
+            // Detached-hand repair must preserve the just-solved model-space
+            // grip instead of restoring the authored wrist delta at Stage 7.
+            ProceduralAnimation::CaptureChildOfModelPoseDeltas(*boneMap, RigChildOfKind::Hand);
+
+            if (registry.IsAlive(itemHandling->itemEntity)) {
+                const JPH::Mat44 worldItem = rootWorld * itemHandling->itemModelTransform;
+                JPH::Mat44       localItem = worldItem;
+                if (const auto* hierarchy = registry.Get<Components::HierarchyComponent>(itemHandling->itemEntity);
+                    hierarchy != nullptr && hierarchy->parent != NullEntity && registry.IsAlive(hierarchy->parent)) {
+                    if (hierarchy->parent == entity) {
+                        localItem = itemHandling->itemModelTransform;
+                    } else if (const auto* parentWorld = registry.Get<Components::WorldTransformComponent>(hierarchy->parent)) {
+                        localItem = parentWorld->world.Inversed() * worldItem;
+                    }
+                }
+                if (auto* itemTransform = registry.Get<Components::TransformComponent>(itemHandling->itemEntity)) {
+                    itemTransform->position = localItem.GetTranslation();
+                    itemTransform->rotation = ExtractRotation(localItem);
+                    auto* itemWorld         = registry.Get<Components::WorldTransformComponent>(itemHandling->itemEntity);
+                    if (itemWorld == nullptr) {
+                        itemWorld = &registry.Add(itemHandling->itemEntity, Components::WorldTransformComponent {.world = worldItem, .previous = worldItem});
+                    } else {
+                        itemWorld->world = worldItem;
+                    }
+                }
+            }
+        }
+
         // Stage 5: worker-fiber XPBD secondary motion.
         if (hair != nullptr && secondaryMotionEnabled) {
             const RigNodeIndex headNode          = boneMap->nodeIndices[BoneSlot(CharacterBone::Head)];
@@ -1600,6 +1695,21 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
             ProceduralAnimation::ApplyChildOfConstraints(
                 *boneMap, handChildOfEnabled, chestChildOfEnabled, neckChildOfEnabled, headChildOfEnabled, footAttachmentsEnabled
             );
+        }
+        if (itemHandlingEnabled) {
+            const size_t gripCount = std::min(itemHandling->gripCount, itemHandling->grips.size());
+            for (size_t gripIndex = 0; gripIndex < gripCount; ++gripIndex) {
+                const Animation::GripPoint& grip = itemHandling->grips[gripIndex];
+                if (grip.evaluatedIKWeight <= 0.001f) {
+                    continue;
+                }
+                const bool left = grip.assignedLimb == CharacterBone::HandL;
+                Animation::SolveLimbIK(
+                    boneMap->modelTransforms.data(), *boneMap, left ? CharacterBone::UpperArmL : CharacterBone::UpperArmR,
+                    left ? CharacterBone::ForearmL : CharacterBone::ForearmR, left ? CharacterBone::HandL : CharacterBone::HandR,
+                    itemHandling->itemModelTransform * grip.localTransform, grip
+                );
+            }
         }
         CaptureLocalPose(*boneMap);
         ResolveForwardKinematics(*boneMap);

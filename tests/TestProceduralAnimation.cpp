@@ -506,6 +506,75 @@ struct ProceduralAnimationTestSuite {
             return {};
         }
 
+        std::expected<void, ZHLN::Error> item_handling_drives_constrained_grips() {
+            ZHLN::Animation::ItemHandlingComponent handling;
+            handling.driverMode           = ZHLN::Animation::ItemDriverMode::AimGuided;
+            handling.aimProgress          = 1.0f;
+            const JPH::Vec3  aimDirection = JPH::Vec3(1.0f, 0.1f, 0.2f).Normalized();
+            const JPH::Mat44 aimPose      = ZHLN::Animation::SolveItemBasePose(
+                handling, JPH::Mat44::sIdentity(), JPH::Mat44::sIdentity(), JPH::Mat44::sIdentity(), JPH::Vec3(0.0f, 1.6f, 0.0f), aimDirection,
+                JPH::Mat44::sIdentity()
+            );
+            if (!aimPose.Multiply3x3(JPH::Vec3::sAxisZ()).Normalized().IsClose(aimDirection, 0.0001f)) {
+                return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
+            }
+
+            handling.driverMode        = ZHLN::Animation::ItemDriverMode::WorldAnchored;
+            const JPH::Mat44 worldPose = ZHLN::Animation::SolveItemBasePose(
+                handling, JPH::Mat44::sIdentity(), JPH::Mat44::sIdentity(), JPH::Mat44::sTranslation(JPH::Vec3(-1.0f, 0.0f, 0.0f)), JPH::Vec3::sZero(),
+                JPH::Vec3::sAxisZ(), JPH::Mat44::sTranslation(JPH::Vec3(3.0f, 0.0f, 0.0f))
+            );
+            if (!worldPose.GetTranslation().IsClose(JPH::Vec3(2.0f, 0.0f, 0.0f), 0.0001f)) {
+                return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
+            }
+
+            ZHLN::Animation::GripPoint detachGrip;
+            detachGrip.ikWeight = 0.0f;
+            for (uint32_t frame = 0; frame < 90; ++frame) {
+                ZHLN::Animation::UpdateGripWeight(detachGrip, 1.0f / 60.0f);
+            }
+            const auto triggerCurl = ZHLN::Animation::EvaluateFingerCurl(
+                {.shape = ZHLN::Animation::GraspShape::TriggerGrip, .gripRadius = 0.02f, .tightness = 1.0f, .triggerCurl = 0.30f}
+            );
+            if (detachGrip.evaluatedIKWeight > 0.01f || std::abs(triggerCurl.index - 0.30f) > 0.0001f || triggerCurl.middle <= triggerCurl.index) {
+                return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
+            }
+
+            const JPH::Quat limitedWrist = ZHLN::Animation::ConstrainWristRotation(
+                JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), 1.2f), JPH::Quat::sIdentity(), JPH::Vec3::sAxisZ(), 0.30f, 0.45f
+            );
+            JPH::Vec3 wristAxis;
+            float     wristAngle = 0.0f;
+            limitedWrist.GetAxisAngle(wristAxis, wristAngle);
+            if (std::abs(wristAngle) > 0.3001f) {
+                return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
+            }
+
+            ZHLN::RigBoneMap map;
+            ZHLN::BuildStandardProceduralRig(map);
+            const ZHLN::RigNodeIndex   upper        = map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::UpperArmR)];
+            const ZHLN::RigNodeIndex   fore         = map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ForearmR)];
+            const ZHLN::RigNodeIndex   hand         = map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::HandR)];
+            const float                upperLength  = (map.modelTransforms[fore].GetTranslation() - map.modelTransforms[upper].GetTranslation()).Length();
+            const float                lowerLength  = (map.modelTransforms[hand].GetTranslation() - map.modelTransforms[fore].GetTranslation()).Length();
+            const JPH::Vec3            gripPosition = map.modelTransforms[upper].GetTranslation() + JPH::Vec3(-0.38f, -0.05f, 0.12f);
+            ZHLN::Animation::GripPoint grip;
+            grip.assignedLimb      = ZHLN::CharacterBone::HandR;
+            grip.evaluatedIKWeight = 1.0f;
+            grip.maxArmExtension   = 0.98f;
+            ZHLN::Animation::SolveLimbIK(
+                map.modelTransforms.data(), map, ZHLN::CharacterBone::UpperArmR, ZHLN::CharacterBone::ForearmR, ZHLN::CharacterBone::HandR,
+                JPH::Mat44::sRotationTranslation(JPH::Quat::sIdentity(), gripPosition), grip
+            );
+            const float solvedUpperLength = (map.modelTransforms[fore].GetTranslation() - map.modelTransforms[upper].GetTranslation()).Length();
+            const float solvedLowerLength = (map.modelTransforms[hand].GetTranslation() - map.modelTransforms[fore].GetTranslation()).Length();
+            if (std::abs(solvedUpperLength - upperLength) > 0.0001f || std::abs(solvedLowerLength - lowerLength) > 0.0001f ||
+                !map.modelTransforms[hand].GetTranslation().IsClose(gripPosition, 0.0001f)) {
+                return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
+            }
+            return {};
+        }
+
         std::expected<void, ZHLN::Error> non_skinned_attachments_follow_evaluated_nodes() {
             ZHLN::ECS::Registry registry;
             registry.RegisterAllComponentsIn<ZHLN::Components>();

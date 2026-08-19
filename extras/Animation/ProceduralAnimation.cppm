@@ -238,6 +238,94 @@ struct ProceduralLookAtComponent {
     float     maxAngleDeg    = 75.0f;
 };
 
+namespace Animation {
+
+enum class ItemDriverMode : uint8_t {
+    HandAnchored,
+    AimGuided,
+    BodyMounted,
+    WorldAnchored,
+};
+
+enum class GraspShape : uint8_t {
+    Cylinder,
+    TriggerGrip,
+    FlatPalm,
+    Pinch,
+    RelaxedOpen,
+};
+
+struct GraspDesc {
+    GraspShape shape       = GraspShape::Cylinder;
+    float      gripRadius  = 0.025f;
+    float      tightness   = 1.0f;
+    float      triggerCurl = 1.0f;
+};
+
+struct GripPoint {
+    CharacterBone assignedLimb      = CharacterBone::HandR;
+    JPH::Mat44    localTransform    = JPH::Mat44::sIdentity();
+    JPH::Vec3     poleHintOffset    = JPH::Vec3(0.0f, -1.0f, -0.5f);
+    float         ikWeight          = 1.0f;
+    float         ikWeightVelocity  = 0.0f;
+    float         evaluatedIKWeight = 1.0f;
+    float         rotationWeight    = 1.0f;
+    float         maxArmExtension   = 0.98f;
+    float         maxWristTwistDeg  = 40.0f;
+    float         maxWristSwingDeg  = 50.0f;
+    GraspDesc     grasp;
+};
+
+struct ItemObstacleAvoidance {
+    float probeDistance = 0.50f;
+    float probeRadius   = 0.12f;
+    float pushbackScale = 0.85f;
+    float tiltScale     = 0.35f;
+};
+
+struct ItemSwayState {
+    JPH::Vec3 positionOffset         = JPH::Vec3::sZero();
+    JPH::Vec3 positionVelocity       = JPH::Vec3::sZero();
+    JPH::Quat rotationOffset         = JPH::Quat::sIdentity();
+    JPH::Vec3 angularVelocity        = JPH::Vec3::sZero();
+    JPH::Vec3 previousDriverPosition = JPH::Vec3::sZero();
+    JPH::Quat previousDriverRotation = JPH::Quat::sIdentity();
+    float     massKg                 = 2.5f;
+    float     stiffness              = 130.0f;
+    float     damping                = 0.84f;
+    bool      driverInitialized      = false;
+};
+
+struct ItemHandlingComponent {
+    bool           enabled    = true;
+    ItemDriverMode driverMode = ItemDriverMode::HandAnchored;
+    Entity         itemEntity {};
+
+    JPH::Mat44 hipLocalOffset = JPH::Mat44::sTranslation(JPH::Vec3(0.20f, -0.16f, 0.40f));
+    JPH::Mat44 aimLocalOffset = JPH::Mat44::sTranslation(JPH::Vec3(0.00f, -0.05f, 0.22f));
+    JPH::Mat44 worldAnchor    = JPH::Mat44::sIdentity();
+    float      aimProgress    = 0.0f;
+    float      aimVelocity    = 0.0f;
+
+    std::array<GripPoint, 4> grips {};
+    size_t                   gripCount = 0;
+    ItemObstacleAvoidance    avoidance {};
+    ItemSwayState            sway {};
+    JPH::Mat44               itemModelTransform = JPH::Mat44::sIdentity();
+    float                    shoulderLeadWeight = 0.20f;
+    float                    torsoReachWeight   = 0.25f;
+};
+
+struct FingerCurlDesc {
+    float thumb  = 0.0f;
+    float index  = 0.0f;
+    float middle = 0.0f;
+    float ring   = 0.0f;
+    float pinky  = 0.0f;
+};
+
+} // namespace Animation
+
 enum class PoseInterpolationMode : uint8_t {
     Bicubic,
     SpringDamper,
@@ -364,6 +452,53 @@ void SolveUpperBody(
     const RigBoneMap&                    map
 ) noexcept;
 
+[[nodiscard]] JPH::Mat44 SolveItemBasePose(
+    const ItemHandlingComponent& handling,
+    const JPH::Mat44&            primaryHandModel,
+    const JPH::Mat44&            chestModel,
+    const JPH::Mat44&            worldToModel,
+    JPH::Vec3Arg                 headPosModel,
+    JPH::Vec3Arg                 aimDirModel,
+    const JPH::Mat44&            worldAnchor
+) noexcept;
+float UpdateGripWeight(GripPoint& grip, float dt) noexcept;
+void  UpdateItemDynamics(
+    Engine&                engine,
+    Entity                 characterEntity,
+    ItemHandlingComponent& handling,
+    JPH::Vec3Arg           rootPosition,
+    JPH::QuatArg           rootRotation,
+    float                  dt
+) noexcept;
+void ApplyClavicleLead(JPH::Mat44* nodeTransforms, const RigBoneMap& map, CharacterBone upperArmBone, JPH::Vec3Arg targetGripPos, float weight) noexcept;
+void ApplyTorsoReachCompensation(
+    JPH::Mat44*       nodeTransforms,
+    const RigBoneMap& map,
+    CharacterBone     upperArmBone,
+    CharacterBone     forearmBone,
+    CharacterBone     handBone,
+    JPH::Vec3Arg      targetGripPos,
+    float             weight
+) noexcept;
+[[nodiscard]] JPH::Quat ConstrainWristRotation(
+    JPH::QuatArg targetRotation,
+    JPH::QuatArg authoredRotation,
+    JPH::Vec3Arg twistAxis,
+    float        maxTwistRadians,
+    float        maxSwingRadians
+) noexcept;
+void SolveLimbIK(
+    JPH::Mat44*       nodeTransforms,
+    const RigBoneMap& map,
+    CharacterBone     upperBone,
+    CharacterBone     foreBone,
+    CharacterBone     handBone,
+    const JPH::Mat44& targetGripTransform,
+    const GripPoint&  grip
+) noexcept;
+[[nodiscard]] FingerCurlDesc EvaluateFingerCurl(const GraspDesc& grasp) noexcept;
+void ApplyKinematicFingers(JPH::Mat44* nodeTransforms, const RigBoneMap& map, CharacterBone handBone, const FingerCurlDesc& curl, float weight) noexcept;
+
 void ConfigureHairBindPose(HairStrandsComponent& hair, const JPH::Mat44* bindModelTransforms, const RigBoneMap& map) noexcept;
 void StepHairSimulation(
     HairStrandsComponent& hair,
@@ -406,6 +541,7 @@ void Register(Engine& engine);
 void   Update(Engine& engine, float dt) noexcept;
 void   ResolveModelTransforms(RigBoneMap& boneMap) noexcept;
 void   CaptureChildOfPoseDeltas(RigBoneMap& boneMap) noexcept;
+void   CaptureChildOfModelPoseDeltas(RigBoneMap& boneMap, RigChildOfKind kind) noexcept;
 size_t ApplyChildOfConstraints(
     RigBoneMap& boneMap,
     bool        applyHands           = true,

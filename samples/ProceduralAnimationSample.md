@@ -327,3 +327,46 @@ duration, total channel count, and usable transform-channel count. A T-pose with
 
 Other switches allow gait, COM tilt, upper-body procedural motion, and secondary
 motion to be toggled independently.
+
+## Procedural item handling
+
+`Animation::ItemHandlingComponent` is an optional Stage 4.5 layer between upper-
+body locomotion and XPBD secondary motion. Its dependency direction remains
+extras-to-core only. The layer evaluates the item driver, inertial sway and wall
+pushback, then applies torso reach, clavicle lead, constrained two-bone arm IK,
+wrist swing/twist limits, and hierarchy-discovered finger curls. Finally it publishes
+the item entity's local and world transforms.
+
+Driver modes cover hand-anchored props, aim-guided weapons, body-mounted loads,
+and world-anchored interactions. Up to four grips may independently target the
+left or right hand. `ikWeight` is a target value: setting it to zero spring-blends
+back to the authored arm rather than detaching in one frame.
+
+```cpp
+ZHLN::Animation::ItemHandlingComponent rifle;
+rifle.driverMode  = ZHLN::Animation::ItemDriverMode::AimGuided;
+rifle.itemEntity  = rifleEntity;
+rifle.sway.massKg = 2.2f;
+rifle.avoidance   = {.probeDistance = 0.65f};
+rifle.grips[0] = {
+    .assignedLimb   = ZHLN::CharacterBone::HandR,
+    .localTransform = JPH::Mat44::sTranslation(JPH::Vec3(0.0f, -0.08f, -0.15f)),
+    .grasp = {.shape = ZHLN::Animation::GraspShape::TriggerGrip, .gripRadius = 0.020f, .triggerCurl = 0.35f},
+};
+rifle.grips[1] = {
+    .assignedLimb   = ZHLN::CharacterBone::HandL,
+    .localTransform = JPH::Mat44::sTranslation(JPH::Vec3(0.0f, -0.04f, 0.20f)),
+    .grasp = {.shape = ZHLN::Animation::GraspShape::Cylinder, .gripRadius = 0.024f},
+};
+rifle.gripCount = 2;
+registry.Add(character, std::move(rifle));
+```
+
+A hand-anchored two-handed sword uses the same component with
+`driverMode=HandAnchored`, a heavier `sway.massKg`, and two cylindrical grips.
+For steering wheels, ladders, and levers, use `WorldAnchored`, set `worldAnchor`
+to the interaction transform, and place both grip transforms relative to it.
+
+Runtime checks should cover rapid vertical aiming for stable elbow poles, walking
+into a wall for smooth item pushback, and changing a grip's `ikWeight` from one
+to zero to verify a smooth return to authored animation.
