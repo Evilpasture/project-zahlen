@@ -75,12 +75,17 @@ setup is used for both the generated reference rig and `ZHLN_PROCEDURAL_RIG`,
 making arm IK, wrist limits, sway, wall pushback, and available finger bones
 directly comparable.
 
-Press `V` to toggle a full-body first-person view. The camera is placed at the
-evaluated face position each frame, uses a short near plane, retains the body and
-arms, and hides mesh parts under the imported head transform plus common
-face/visor/eye/hair accessories. Returning to third person restores the previous
-orbit-camera settings and original mesh flags. Third-person free-roam behavior is
-otherwise unchanged for now.
+Press `V` to toggle a full-body first-person view. The camera is constrained
+directly to the evaluated head transform: its eye offset is above and forward of
+the head origin, scaled from character height, and mouse look is a bounded offset
+relative to the rig's head orientation. The sample's autonomous look-at orbit is
+suspended while first person is active and restored on exit. The mode uses a
+short near plane, retains the body and arms, and hides every mesh below any
+head/face/visor/eye/hair/hat
+transform ancestor. Separate head- or hair-only skins are hidden too, while skins
+that also contain torso/limb anchors remain visible. Returning to third person
+restores the previous orbit-camera settings and original mesh flags. Third-person
+free-roam behavior is otherwise unchanged for now.
 
 The reference should report:
 
