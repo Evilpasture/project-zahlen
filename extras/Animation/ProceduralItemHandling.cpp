@@ -91,8 +91,11 @@ void SpringRotation(JPH::Quat& value, JPH::Vec3& velocity, JPH::QuatArg target, 
     const float safeStiffness      = std::max(stiffness, 0.0f);
     const float dampingCoefficient = 2.0f * std::sqrt(safeStiffness) * std::max(damping, 0.0f);
     JPH::Quat   error              = (target * value.Inversed()).Normalized();
-    JPH::Vec3   axis;
-    float       angle = 0.0f;
+    if (error.GetW() < 0.0f) {
+        error = JPH::Quat(-error.GetX(), -error.GetY(), -error.GetZ(), -error.GetW());
+    }
+    JPH::Vec3 axis;
+    float     angle = 0.0f;
     error.GetAxisAngle(axis, angle);
     const float denominator   = 1.0f + dampingCoefficient * safeDt + safeStiffness * safeDt * safeDt;
     velocity                  = (velocity + axis * (angle * safeStiffness * safeDt)) / denominator;
@@ -214,6 +217,8 @@ void UpdateItemDynamics(
     handling.sway.previousDriverRotation = driverRotation;
     handling.sway.driverInitialized      = true;
 
+    JPH::Vec3 obstaclePositionTarget = JPH::Vec3::sZero();
+    JPH::Quat obstacleRotationTarget = JPH::Quat::sIdentity();
     if (handling.avoidance.probeDistance > 0.01f) {
         const JPH::Mat44 worldItem = rootWorld * handling.itemModelTransform;
         const JPH::Vec3  origin    = worldItem.GetTranslation();
@@ -223,20 +228,43 @@ void UpdateItemDynamics(
             ignoredPhysics = physicsComponent->physicsHandle;
         }
         const auto hit = engine.GetPhysicsContext().Raycast(JPH::RVec3(origin), forward, handling.avoidance.probeDistance, ignoredPhysics);
-        if (hit.hasHit) {
+        if (hit.hasHit && std::isfinite(hit.fraction)) {
             const float penetration = handling.avoidance.probeDistance * (1.0f - std::clamp(hit.fraction, 0.0f, 1.0f));
-            handling.sway.positionOffset -= JPH::Vec3(0.0f, 0.0f, penetration * handling.avoidance.pushbackScale);
-            handling.sway.rotationOffset =
-                (handling.sway.rotationOffset * JPH::Quat::sRotation(JPH::Vec3::sAxisX(), penetration * handling.avoidance.tiltScale)).Normalized();
+            const float pushback    = std::clamp(penetration * std::max(handling.avoidance.pushbackScale, 0.0f), 0.0f, handling.avoidance.probeDistance);
+            const float tilt        = std::clamp(penetration * handling.avoidance.tiltScale, -JPH::DegreesToRadians(35.0f), JPH::DegreesToRadians(35.0f));
+            obstaclePositionTarget  = JPH::Vec3(0.0f, 0.0f, -pushback);
+            obstacleRotationTarget  = JPH::Quat::sRotation(JPH::Vec3::sAxisX(), tilt);
         }
     }
 
+    // Obstacle response is a bounded spring target, not a per-frame impulse.
+    // Repeated overlap at fraction zero therefore converges to one pushback
+    // distance instead of accumulating until the item leaves the scene.
     const float effectiveStiffness = std::max(handling.sway.stiffness, 0.0f) / std::max(handling.sway.massKg, 0.1f);
-    ItemDetail::SpringVector(handling.sway.positionOffset, handling.sway.positionVelocity, JPH::Vec3::sZero(), dt, effectiveStiffness, handling.sway.damping);
-    ItemDetail::SpringRotation(
-        handling.sway.rotationOffset, handling.sway.angularVelocity, JPH::Quat::sIdentity(), dt, effectiveStiffness, handling.sway.damping
+    ItemDetail::SpringVector(
+        handling.sway.positionOffset, handling.sway.positionVelocity, obstaclePositionTarget, dt, effectiveStiffness, handling.sway.damping
     );
-    handling.itemModelTransform = handling.itemModelTransform * JPH::Mat44::sRotationTranslation(handling.sway.rotationOffset, handling.sway.positionOffset);
+    ItemDetail::SpringRotation(
+        handling.sway.rotationOffset, handling.sway.angularVelocity, obstacleRotationTarget, dt, effectiveStiffness, handling.sway.damping
+    );
+
+    const bool finitePosition = std::isfinite(handling.sway.positionOffset.GetX()) && std::isfinite(handling.sway.positionOffset.GetY()) &&
+                                std::isfinite(handling.sway.positionOffset.GetZ());
+    const bool finiteRotation = std::isfinite(handling.sway.rotationOffset.GetX()) && std::isfinite(handling.sway.rotationOffset.GetY()) &&
+                                std::isfinite(handling.sway.rotationOffset.GetZ()) && std::isfinite(handling.sway.rotationOffset.GetW());
+    if (!finitePosition || !finiteRotation) {
+        handling.sway.positionOffset   = obstaclePositionTarget;
+        handling.sway.positionVelocity = JPH::Vec3::sZero();
+        handling.sway.rotationOffset   = obstacleRotationTarget;
+        handling.sway.angularVelocity  = JPH::Vec3::sZero();
+    }
+    const float maximumOffset = std::max(handling.avoidance.probeDistance * 1.25f, 0.25f);
+    if (handling.sway.positionOffset.LengthSq() > maximumOffset * maximumOffset) {
+        handling.sway.positionOffset = handling.sway.positionOffset.Normalized() * maximumOffset;
+        handling.sway.positionVelocity *= 0.25f;
+    }
+    handling.sway.rotationOffset = handling.sway.rotationOffset.Normalized();
+    handling.itemModelTransform  = handling.itemModelTransform * JPH::Mat44::sRotationTranslation(handling.sway.rotationOffset, handling.sway.positionOffset);
 }
 
 void ApplyClavicleLead(JPH::Mat44* nodeTransforms, const RigBoneMap& map, CharacterBone upperArmBone, JPH::Vec3Arg targetGripPos, float weight) noexcept {

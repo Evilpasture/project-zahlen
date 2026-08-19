@@ -381,5 +381,7 @@ left-hand phalanges are mirrored, set
 uses local `+X` while the right remains on `-X`.
 
 Runtime checks should cover rapid vertical aiming for stable elbow poles, walking
-into a wall for smooth item pushback, and changing a grip's `ikWeight` from one
-to zero to verify a smooth return to authored animation.
+into a wall for smooth bounded item pushback, and changing a grip's `ikWeight`
+from one to zero to verify a smooth return to authored animation. Wall overlap is
+a spring target rather than an accumulating impulse, so sustained contact cannot
+launch the item.
