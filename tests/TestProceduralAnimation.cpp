@@ -552,12 +552,13 @@ struct ProceduralAnimationTestSuite {
 
             ZHLN::RigBoneMap map;
             ZHLN::BuildStandardProceduralRig(map);
-            const ZHLN::RigNodeIndex   upper        = map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::UpperArmR)];
-            const ZHLN::RigNodeIndex   fore         = map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ForearmR)];
-            const ZHLN::RigNodeIndex   hand         = map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::HandR)];
-            const float                upperLength  = (map.modelTransforms[fore].GetTranslation() - map.modelTransforms[upper].GetTranslation()).Length();
-            const float                lowerLength  = (map.modelTransforms[hand].GetTranslation() - map.modelTransforms[fore].GetTranslation()).Length();
-            const JPH::Vec3            gripPosition = map.modelTransforms[upper].GetTranslation() + JPH::Vec3(-0.38f, -0.05f, 0.12f);
+            const ZHLN::RigNodeIndex upper       = map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::UpperArmR)];
+            const ZHLN::RigNodeIndex fore        = map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ForearmR)];
+            const ZHLN::RigNodeIndex hand        = map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::HandR)];
+            const float              upperLength = (map.modelTransforms[fore].GetTranslation() - map.modelTransforms[upper].GetTranslation()).Length();
+            const float              lowerLength = (map.modelTransforms[hand].GetTranslation() - map.modelTransforms[fore].GetTranslation()).Length();
+            const JPH::Quat rightBindPalmFrame   = (map.modelTransforms[hand].GetQuaternion().Normalized() * map.handBoneToPalmRotations[1]).Normalized();
+            const JPH::Vec3 gripPosition         = map.modelTransforms[upper].GetTranslation() + JPH::Vec3(-0.38f, -0.05f, 0.12f);
             ZHLN::Animation::GripPoint grip;
             grip.assignedLimb      = ZHLN::CharacterBone::HandR;
             grip.evaluatedIKWeight = 1.0f;
@@ -570,6 +571,54 @@ struct ProceduralAnimationTestSuite {
             const float solvedLowerLength = (map.modelTransforms[hand].GetTranslation() - map.modelTransforms[fore].GetTranslation()).Length();
             if (std::abs(solvedUpperLength - upperLength) > 0.0001f || std::abs(solvedLowerLength - lowerLength) > 0.0001f ||
                 !map.modelTransforms[hand].GetTranslation().IsClose(gripPosition, 0.0001f)) {
+                return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
+            }
+
+            if (!map.handPalmFramesValid[0] || !map.handPalmFramesValid[1]) {
+                return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
+            }
+            const ZHLN::RigNodeIndex leftHand      = map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::HandL)];
+            const JPH::Quat          leftPalmFrame = (map.modelTransforms[leftHand].GetQuaternion().Normalized() * map.handBoneToPalmRotations[0]).Normalized();
+            if ((leftPalmFrame * JPH::Vec3::sAxisX()).GetY() > -0.5f || (rightBindPalmFrame * JPH::Vec3::sAxisX()).GetY() > -0.5f) {
+                return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
+            }
+
+            ZHLN::RigBoneMap reachMap;
+            ZHLN::BuildStandardProceduralRig(reachMap);
+            ZHLN::Animation::ItemHandlingComponent reachHandling;
+            reachHandling.driverMode                 = ZHLN::Animation::ItemDriverMode::AimGuided;
+            reachHandling.itemModelTransform         = JPH::Mat44::sTranslation(JPH::Vec3(0.0f, 1.4f, 4.0f));
+            reachHandling.grips[0].assignedLimb      = ZHLN::CharacterBone::HandR;
+            reachHandling.grips[0].localTransform    = JPH::Mat44::sTranslation(JPH::Vec3(-0.05f, 0.0f, 0.0f));
+            reachHandling.grips[0].evaluatedIKWeight = 1.0f;
+            reachHandling.grips[0].maxArmExtension   = 0.96f;
+            reachHandling.grips[1].assignedLimb      = ZHLN::CharacterBone::HandL;
+            reachHandling.grips[1].localTransform    = JPH::Mat44::sTranslation(JPH::Vec3(0.05f, 0.0f, 0.0f));
+            reachHandling.grips[1].evaluatedIKWeight = 1.0f;
+            reachHandling.grips[1].maxArmExtension   = 0.96f;
+            reachHandling.gripCount                  = 2;
+            ZHLN::Animation::ConstrainItemToGripReach(reachHandling, reachMap.modelTransforms.data(), reachMap);
+            const ZHLN::RigNodeIndex reachUpper = reachMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::UpperArmR)];
+            const ZHLN::RigNodeIndex reachFore  = reachMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ForearmR)];
+            const ZHLN::RigNodeIndex reachHand  = reachMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::HandR)];
+            const float              maximumReach =
+                ((reachMap.modelTransforms[reachFore].GetTranslation() - reachMap.modelTransforms[reachUpper].GetTranslation()).Length() +
+                 (reachMap.modelTransforms[reachHand].GetTranslation() - reachMap.modelTransforms[reachFore].GetTranslation()).Length()) *
+                reachHandling.grips[0].maxArmExtension;
+            const float              constrainedDistance = ((reachHandling.itemModelTransform * reachHandling.grips[0].localTransform).GetTranslation() -
+                                                            reachMap.modelTransforms[reachUpper].GetTranslation())
+                                                               .Length();
+            const ZHLN::RigNodeIndex reachUpperL         = reachMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::UpperArmL)];
+            const ZHLN::RigNodeIndex reachForeL          = reachMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ForearmL)];
+            const ZHLN::RigNodeIndex reachHandL          = reachMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::HandL)];
+            const float              maximumReachL =
+                ((reachMap.modelTransforms[reachForeL].GetTranslation() - reachMap.modelTransforms[reachUpperL].GetTranslation()).Length() +
+                 (reachMap.modelTransforms[reachHandL].GetTranslation() - reachMap.modelTransforms[reachForeL].GetTranslation()).Length()) *
+                reachHandling.grips[1].maxArmExtension;
+            const float constrainedDistanceL = ((reachHandling.itemModelTransform * reachHandling.grips[1].localTransform).GetTranslation() -
+                                                reachMap.modelTransforms[reachUpperL].GetTranslation())
+                                                   .Length();
+            if (constrainedDistance > maximumReach + 0.0001f || constrainedDistanceL > maximumReachL + 0.0001f) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
             return {};

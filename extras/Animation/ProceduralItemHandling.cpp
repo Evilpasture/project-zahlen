@@ -267,6 +267,54 @@ void UpdateItemDynamics(
     handling.itemModelTransform  = handling.itemModelTransform * JPH::Mat44::sRotationTranslation(handling.sway.rotationOffset, handling.sway.positionOffset);
 }
 
+void ConstrainItemToGripReach(ItemHandlingComponent& handling, const JPH::Mat44* nodeTransforms, const RigBoneMap& map) noexcept {
+    if (nodeTransforms == nullptr || handling.driverMode == ItemDriverMode::WorldAnchored || handling.driverMode == ItemDriverMode::HandAnchored) {
+        return;
+    }
+
+    const size_t gripCount = std::min(handling.gripCount, handling.grips.size());
+    // A common item translation keeps all active grips coherent. Iterate a few
+    // times because correcting the farther hand can expose a smaller error on
+    // the opposite hand, but never solve each hand by stretching its arm.
+    const size_t correctionPasses = std::max<size_t>(4, gripCount * 4);
+    for (size_t pass = 0; pass < correctionPasses; ++pass) {
+        float     greatestExcess   = 0.0f;
+        float     correctionWeight = 0.0f;
+        JPH::Vec3 correction       = JPH::Vec3::sZero();
+        for (size_t gripIndex = 0; gripIndex < gripCount; ++gripIndex) {
+            const GripPoint& grip   = handling.grips[gripIndex];
+            const float      weight = std::clamp(grip.evaluatedIKWeight, 0.0f, 1.0f);
+            if (weight <= 0.001f) {
+                continue;
+            }
+            const bool         left      = grip.assignedLimb == CharacterBone::HandL;
+            const RigNodeIndex upperNode = map.nodeIndices[BoneSlot(left ? CharacterBone::UpperArmL : CharacterBone::UpperArmR)];
+            const RigNodeIndex foreNode  = map.nodeIndices[BoneSlot(left ? CharacterBone::ForearmL : CharacterBone::ForearmR)];
+            const RigNodeIndex handNode  = map.nodeIndices[BoneSlot(left ? CharacterBone::HandL : CharacterBone::HandR)];
+            if (!IsValidRigNode(upperNode, map.nodeCount) || !IsValidRigNode(foreNode, map.nodeCount) || !IsValidRigNode(handNode, map.nodeCount)) {
+                continue;
+            }
+            const JPH::Vec3 upperPosition = nodeTransforms[upperNode].GetTranslation();
+            const float     armLength     = (nodeTransforms[foreNode].GetTranslation() - upperPosition).Length() +
+                                            (nodeTransforms[handNode].GetTranslation() - nodeTransforms[foreNode].GetTranslation()).Length();
+            const JPH::Vec3 gripTarget    = (handling.itemModelTransform * grip.localTransform).GetTranslation();
+            const JPH::Vec3 reachVector   = gripTarget - upperPosition;
+            const float     distance      = reachVector.Length();
+            const float     maximumReach  = armLength * std::clamp(grip.maxArmExtension, 0.50f, 0.9999f);
+            const float     excess        = std::max(distance - maximumReach, 0.0f);
+            greatestExcess                = std::max(greatestExcess, excess * weight);
+            if (excess > 0.0f && distance > 1.0e-6f) {
+                correction += -reachVector * (excess * weight / distance);
+                correctionWeight += weight;
+            }
+        }
+        if (greatestExcess <= 1.0e-5f || correctionWeight <= 1.0e-5f) {
+            break;
+        }
+        handling.itemModelTransform.SetTranslation(handling.itemModelTransform.GetTranslation() + correction / correctionWeight);
+    }
+}
+
 void ApplyClavicleLead(JPH::Mat44* nodeTransforms, const RigBoneMap& map, CharacterBone upperArmBone, JPH::Vec3Arg targetGripPos, float weight) noexcept {
     if (nodeTransforms == nullptr || weight <= 0.001f) {
         return;
@@ -412,7 +460,10 @@ void SolveLimbIK(
     const JPH::Mat44 solvedUpper           = CorrectBoneDirection(nodeTransforms[upperNode], currentUpperDirection, ik.upperDirection, upperPosition);
     const JPH::Mat44 solvedFore            = CorrectBoneDirection(nodeTransforms[foreNode], currentLowerDirection, ik.lowerDirection, ik.midPosition);
 
-    const JPH::Quat targetHandRotation   = ItemDetail::MatrixRotation(targetGripTransform);
+    const JPH::Quat targetPalmRotation = ItemDetail::MatrixRotation(targetGripTransform);
+    const size_t    palmSide           = handBone == CharacterBone::HandL ? 0u : 1u;
+    const JPH::Quat targetHandRotation =
+        map.handPalmFramesValid[palmSide] ? (targetPalmRotation * map.handBoneToPalmRotations[palmSide].Inversed()).Normalized() : targetPalmRotation;
     const JPH::Quat authoredHandRotation = ItemDetail::MatrixRotation(nodeTransforms[handNode]);
     const JPH::Quat constrainedRotation  = ConstrainWristRotation(
         targetHandRotation, authoredHandRotation, ik.lowerDirection, JPH::DegreesToRadians(grip.maxWristTwistDeg), JPH::DegreesToRadians(grip.maxWristSwingDeg)
@@ -467,7 +518,12 @@ void ApplyKinematicFingers(
     if (!IsValidRigNode(handNode, map.nodeCount)) {
         return;
     }
-    const float curlSign = axisMode == FingerCurlAxisMode::MirroredLocalX && handBone == CharacterBone::HandL ? 1.0f : -1.0f;
+    const size_t    palmSide            = handBone == CharacterBone::HandL ? 0u : 1u;
+    const JPH::Quat palmRotation        = map.handPalmFramesValid[palmSide] ?
+                                              (ItemDetail::MatrixRotation(nodeTransforms[handNode]) * map.handBoneToPalmRotations[palmSide]).Normalized() :
+                                              ItemDetail::MatrixRotation(nodeTransforms[handNode]);
+    const JPH::Vec3 palmNormal          = ItemDetail::SafeNormalized(palmRotation * JPH::Vec3::sAxisX(), JPH::Vec3(0.0f, -1.0f, 0.0f));
+    const JPH::Vec3 palmFingerDirection = ItemDetail::SafeNormalized(palmRotation * JPH::Vec3::sAxisZ(), JPH::Vec3::sAxisX());
 
     for (size_t desiredDepth = 1; desiredDepth <= 5; ++desiredDepth) {
         for (RigNodeIndex node = 0; node < map.nodeCount && node < map.sourcePrefab->nodes.size(); ++node) {
@@ -492,7 +548,23 @@ void ApplyKinematicFingers(
             const auto       canonicalName = ItemDetail::Canonicalize(std::string_view(map.sourcePrefab->nodes[node].name));
             const bool       isThumb       = std::string_view(canonicalName.data()).find("thumb") != std::string_view::npos;
             const float      maximumAngle  = isThumb ? JPH::DegreesToRadians(50.0f) : JPH::DegreesToRadians(62.0f);
-            const JPH::Quat  rotation      = JPH::Quat::sRotation(axis, curlSign * maximumAngle * std::clamp(fingerCurl * weight, 0.0f, 1.0f));
+            float            curlSign      = -1.0f;
+            if (axisMode == FingerCurlAxisMode::MirroredLocalX && handBone == CharacterBone::HandL) {
+                curlSign = 1.0f;
+            } else if (axisMode == FingerCurlAxisMode::AutomaticPalm) {
+                JPH::Vec3 distalDirection = palmFingerDirection;
+                for (RigNodeIndex child = 0; child < map.nodeCount; ++child) {
+                    if (map.parentIndices[child] == node) {
+                        distalDirection = ItemDetail::SafeNormalized(nodeTransforms[child].GetTranslation() - current.GetTranslation(), palmFingerDirection);
+                        break;
+                    }
+                }
+                constexpr float probeAngle = 0.20f;
+                const float     plusScore  = (JPH::Quat::sRotation(axis, probeAngle) * distalDirection).Dot(palmNormal);
+                const float     minusScore = (JPH::Quat::sRotation(axis, -probeAngle) * distalDirection).Dot(palmNormal);
+                curlSign                   = plusScore >= minusScore ? 1.0f : -1.0f;
+            }
+            const JPH::Quat  rotation = JPH::Quat::sRotation(axis, curlSign * maximumAngle * std::clamp(fingerCurl * weight, 0.0f, 1.0f));
             const JPH::Mat44 target = JPH::Mat44::sRotationTranslation((rotation * ItemDetail::MatrixRotation(current)).Normalized(), current.GetTranslation())
                                           .PreScaled(ItemDetail::MatrixScale(current));
             SetModelTransformAndCarrySubtree(nodeTransforms, map, node, target);

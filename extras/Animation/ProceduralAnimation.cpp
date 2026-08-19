@@ -240,6 +240,8 @@ void ResetRigBoneMap(RigBoneMap& map) noexcept {
     FillIdentity(map.bindLocalTransforms);
     FillIdentity(map.localTransforms);
     FillIdentity(map.modelTransforms);
+    map.handBoneToPalmRotations = {JPH::Quat::sIdentity(), JPH::Quat::sIdentity()};
+    map.handPalmFramesValid.fill(false);
     map.childOfConstraints.fill({});
     map.childOfConstraintCount = 0;
     map.poseTranslations.fill(JPH::Vec3::sZero());
@@ -615,6 +617,73 @@ void CaptureLocalPose(RigBoneMap& map) noexcept {
         cursor = map.parentIndices[cursor];
     }
     return false;
+}
+
+void ConfigureHandPalmFrames(const ModelPrefab* prefab, RigBoneMap& map) noexcept {
+    constexpr std::array handBones    = {CharacterBone::HandL, CharacterBone::HandR};
+    constexpr std::array forearmBones = {CharacterBone::ForearmL, CharacterBone::ForearmR};
+    for (size_t side = 0; side < handBones.size(); ++side) {
+        const RigNodeIndex handNode    = map.nodeIndices[BoneSlot(handBones[side])];
+        const RigNodeIndex forearmNode = map.nodeIndices[BoneSlot(forearmBones[side])];
+        if (!IsValidRigNode(handNode, map.nodeCount)) {
+            continue;
+        }
+
+        const JPH::Vec3 handPosition    = map.modelTransforms[handNode].GetTranslation();
+        JPH::Vec3       fingerDirection = JPH::Vec3::sZero();
+        JPH::Vec3       thumbDirection  = JPH::Vec3::sZero();
+        size_t          fingerCount     = 0;
+        size_t          thumbCount      = 0;
+        if (prefab != nullptr) {
+            for (RigNodeIndex node = 0; node < map.nodeCount && node < prefab->nodes.size(); ++node) {
+                if (node == handNode || !IsNodeDescendant(map, node, handNode)) {
+                    continue;
+                }
+                const CanonicalName    canonical = Canonicalize(std::string_view(prefab->nodes[node].name));
+                const std::string_view name      = canonical.View();
+                const JPH::Vec3        offset    = map.modelTransforms[node].GetTranslation() - handPosition;
+                if (name.find("thumb") != std::string_view::npos) {
+                    thumbDirection += offset;
+                    ++thumbCount;
+                } else if (
+                    name.find("index") != std::string_view::npos || name.find("middle") != std::string_view::npos ||
+                    name.find("ring") != std::string_view::npos || name.find("pinky") != std::string_view::npos ||
+                    name.find("little") != std::string_view::npos || name.find("finger") != std::string_view::npos
+                ) {
+                    fingerDirection += offset;
+                    ++fingerCount;
+                }
+            }
+        }
+
+        if (fingerCount > 0) {
+            fingerDirection /= static_cast<float>(fingerCount);
+        } else if (IsValidRigNode(forearmNode, map.nodeCount)) {
+            fingerDirection = handPosition - map.modelTransforms[forearmNode].GetTranslation();
+        }
+        fingerDirection = fingerDirection.LengthSq() > 1.0e-8f ? fingerDirection.Normalized() : (side == 0 ? JPH::Vec3::sAxisX() : -JPH::Vec3::sAxisX());
+
+        if (thumbCount > 0) {
+            thumbDirection /= static_cast<float>(thumbCount);
+        } else {
+            thumbDirection = side == 0 ? -JPH::Vec3::sAxisZ() : JPH::Vec3::sAxisZ();
+        }
+        thumbDirection -= fingerDirection * thumbDirection.Dot(fingerDirection);
+        if (thumbDirection.LengthSq() < 1.0e-8f) {
+            const JPH::Vec3 fallback = side == 0 ? -JPH::Vec3::sAxisZ() : JPH::Vec3::sAxisZ();
+            thumbDirection           = fallback - fingerDirection * fallback.Dot(fingerDirection);
+        }
+        thumbDirection = thumbDirection.LengthSq() > 1.0e-8f ? thumbDirection.Normalized() : fingerDirection.GetNormalizedPerpendicular();
+
+        const JPH::Vec3 palmNormal = thumbDirection.Cross(fingerDirection).Normalized();
+        const JPH::Vec3 palmThumb  = fingerDirection.Cross(palmNormal).Normalized();
+        const JPH::Quat palmRotation =
+            JPH::Mat44(JPH::Vec4(palmNormal, 0.0f), JPH::Vec4(palmThumb, 0.0f), JPH::Vec4(fingerDirection, 0.0f), JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f))
+                .GetQuaternion()
+                .Normalized();
+        map.handBoneToPalmRotations[side] = (ExtractRotation(map.modelTransforms[handNode]).Inversed() * palmRotation).Normalized();
+        map.handPalmFramesValid[side]     = true;
+    }
 }
 
 void ConfigureHumanoidChildOfConstraints(RigBoneMap& map) noexcept {
@@ -1112,6 +1181,7 @@ bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMa
     }
 
     ResolveForwardKinematics(outMap);
+    ConfigureHandPalmFrames(&prefab, outMap);
     ConfigureHumanoidChildOfConstraints(outMap);
     ConfigureFootAttachmentConstraints(prefab, outMap);
     outMap.initialized = true;
@@ -1171,6 +1241,7 @@ void BuildStandardProceduralRig(RigBoneMap& outMap) noexcept {
     }
 
     ResolveForwardKinematics(outMap);
+    ConfigureHandPalmFrames(nullptr, outMap);
     for (size_t semantic = 0; semantic < kBoneCount; ++semantic) {
         const RigNodeIndex node = outMap.nodeIndices[semantic];
         if (IsValidRigNode(node, outMap.nodeCount)) {
@@ -1638,6 +1709,7 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
                     (itemHandling->itemModelTransform * grip.localTransform).GetTranslation(), itemHandling->torsoReachWeight * grip.evaluatedIKWeight
                 );
             }
+            Animation::ConstrainItemToGripReach(*itemHandling, boneMap->modelTransforms.data(), *boneMap);
 
             for (size_t gripIndex = 0; gripIndex < gripCount; ++gripIndex) {
                 Animation::GripPoint& grip       = itemHandling->grips[gripIndex];

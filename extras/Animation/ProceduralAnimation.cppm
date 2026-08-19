@@ -116,6 +116,9 @@ struct alignas(64) RigBoneMap {
     std::array<JPH::Mat44, kMaxRigNodes> localTransforms {};
     std::array<JPH::Mat44, kMaxRigNodes> modelTransforms {};
 
+    std::array<JPH::Quat, 2> handBoneToPalmRotations {JPH::Quat::sIdentity(), JPH::Quat::sIdentity()};
+    std::array<bool, 2>      handPalmFramesValid {false, false};
+
     std::array<RigChildOfConstraint, kMaxChildOfConstraints> childOfConstraints {};
     size_t                                                   childOfConstraintCount = 0;
 
@@ -256,13 +259,14 @@ enum class GraspShape : uint8_t {
 };
 
 enum class FingerCurlAxisMode : uint8_t {
-    LocalNegativeX, // Rotational symmetry: both hands curl around local -X.
-    MirroredLocalX, // Mirrored symmetry: left +X, right -X.
+    AutomaticPalm, // Select the sign that bends each finger toward the inferred palm.
+    LocalNegativeX,
+    MirroredLocalX,
 };
 
 struct GraspDesc {
     GraspShape         shape        = GraspShape::Cylinder;
-    FingerCurlAxisMode curlAxisMode = FingerCurlAxisMode::LocalNegativeX;
+    FingerCurlAxisMode curlAxisMode = FingerCurlAxisMode::AutomaticPalm;
     float              gripRadius   = 0.025f;
     float              tightness    = 1.0f;
     float              triggerCurl  = 1.0f;
@@ -476,6 +480,7 @@ void  UpdateItemDynamics(
     JPH::QuatArg           rootRotation,
     float                  dt
 ) noexcept;
+void ConstrainItemToGripReach(ItemHandlingComponent& handling, const JPH::Mat44* nodeTransforms, const RigBoneMap& map) noexcept;
 void ApplyClavicleLead(JPH::Mat44* nodeTransforms, const RigBoneMap& map, CharacterBone upperArmBone, JPH::Vec3Arg targetGripPos, float weight) noexcept;
 void ApplyTorsoReachCompensation(
     JPH::Mat44*       nodeTransforms,
@@ -509,7 +514,7 @@ void                         ApplyKinematicFingers(
     CharacterBone         handBone,
     const FingerCurlDesc& curl,
     float                 weight,
-    FingerCurlAxisMode    axisMode = FingerCurlAxisMode::LocalNegativeX
+    FingerCurlAxisMode    axisMode = FingerCurlAxisMode::AutomaticPalm
 ) noexcept;
 
 void ConfigureHairBindPose(HairStrandsComponent& hair, const JPH::Mat44* bindModelTransforms, const RigBoneMap& map) noexcept;

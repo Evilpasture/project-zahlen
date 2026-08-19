@@ -193,6 +193,17 @@ auto CreateTestHandgun(ZHLN::Engine& engine, ZHLN::Entity player, float itemScal
     return handgun;
 }
 
+[[nodiscard]] auto PistolPalmFrame(bool left, float gripSlopeDegrees = -10.0f) -> JPH::Quat {
+    const JPH::Vec3 palmNormal = left ? -JPH::Vec3::sAxisX() : JPH::Vec3::sAxisX();
+    const JPH::Vec3 fingerDirection(0.0f, -1.0f, 0.0f);
+    const JPH::Vec3 thumbDirection = fingerDirection.Cross(palmNormal).Normalized();
+    const JPH::Quat frame =
+        JPH::Mat44(JPH::Vec4(palmNormal, 0.0f), JPH::Vec4(thumbDirection, 0.0f), JPH::Vec4(fingerDirection, 0.0f), JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f))
+            .GetQuaternion()
+            .Normalized();
+    return (JPH::Quat::sRotation(JPH::Vec3::sAxisX(), JPH::DegreesToRadians(gripSlopeDegrees)) * frame).Normalized();
+}
+
 [[nodiscard]] auto BuildTestHandgunHandling(ZHLN::Entity handgun, float itemScale) -> ZHLN::Animation::ItemHandlingComponent {
     ZHLN::Animation::ItemHandlingComponent handling;
     const float                            scale  = std::clamp(itemScale, 0.10f, 4.0f);
@@ -207,16 +218,14 @@ auto CreateTestHandgun(ZHLN::Engine& engine, ZHLN::Entity player, float itemScal
     handling.sway.damping                         = 0.90f;
     handling.avoidance                            = {.probeDistance = 0.55f * scale, .probeRadius = 0.08f * scale, .pushbackScale = 0.80f, .tiltScale = 0.35f};
     handling.grips[0]                             = {
-        .assignedLimb   = ZHLN::CharacterBone::HandR,
-        .localTransform = JPH::Mat44::sRotationTranslation(
-            JPH::Quat::sRotation(JPH::Vec3::sAxisX(), JPH::DegreesToRadians(-10.0f)), scaled(JPH::Vec3(-0.055f, -0.13f, -0.055f))
-        ),
+        .assignedLimb      = ZHLN::CharacterBone::HandR,
+        .localTransform    = JPH::Mat44::sRotationTranslation(PistolPalmFrame(false), scaled(JPH::Vec3(-0.055f, -0.13f, -0.055f))),
         .ikWeight          = 0.0f,
         .evaluatedIKWeight = 0.0f,
         .rotationWeight    = 0.90f,
         .grasp             = {
             .shape        = ZHLN::Animation::GraspShape::TriggerGrip,
-            .curlAxisMode = ZHLN::Animation::FingerCurlAxisMode::MirroredLocalX,
+            .curlAxisMode = ZHLN::Animation::FingerCurlAxisMode::AutomaticPalm,
             .gripRadius   = 0.022f * scale,
             .tightness    = 0.90f,
             .triggerCurl  = 0.32f
@@ -224,13 +233,13 @@ auto CreateTestHandgun(ZHLN::Engine& engine, ZHLN::Entity player, float itemScal
     };
     handling.grips[1] = {
         .assignedLimb      = ZHLN::CharacterBone::HandL,
-        .localTransform    = JPH::Mat44::sTranslation(scaled(JPH::Vec3(0.060f, -0.070f, 0.015f))),
+        .localTransform    = JPH::Mat44::sRotationTranslation(PistolPalmFrame(true), scaled(JPH::Vec3(0.060f, -0.070f, 0.015f))),
         .ikWeight          = 0.0f,
         .evaluatedIKWeight = 0.0f,
         .rotationWeight    = 0.80f,
         .grasp             = {
             .shape        = ZHLN::Animation::GraspShape::Cylinder,
-            .curlAxisMode = ZHLN::Animation::FingerCurlAxisMode::MirroredLocalX,
+            .curlAxisMode = ZHLN::Animation::FingerCurlAxisMode::AutomaticPalm,
             .gripRadius   = 0.030f * scale,
             .tightness    = 0.82f
         },

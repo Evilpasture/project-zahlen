@@ -348,8 +348,15 @@ the item entity's local and world transforms.
 
 Driver modes cover hand-anchored props, aim-guided weapons, body-mounted loads,
 and world-anchored interactions. Up to four grips may independently target the
-left or right hand. `ikWeight` is a target value: setting it to zero spring-blends
-back to the authored arm rather than detaching in one frame.
+left or right hand. Palm frames are inferred from each imported hand's finger and
+thumb descendants (with a forearm-based fallback), so grip rotation targets the
+palm rather than an arbitrary hand-bone axis. A grip transform's local `+X` is
+its desired palm normal, `+Y` is thumbward, and `+Z` points toward the fingers.
+`ikWeight` is a target value:
+setting it to zero spring-blends back to the authored arm rather than detaching
+in one frame. Aim-guided and body-mounted items are also translated back toward
+the character when a grip exceeds physical arm reach; the two-bone solver never
+separates a hand from its forearm to chase the item.
 
 ```cpp
 ZHLN::Animation::ItemHandlingComponent rifle;
@@ -375,10 +382,10 @@ A hand-anchored two-handed sword uses the same component with
 `driverMode=HandAnchored`, a heavier `sway.massKg`, and two cylindrical grips.
 For steering wheels, ladders, and levers, use `WorldAnchored`, set `worldAnchor`
 to the interaction transform, and place both grip transforms relative to it.
-Finger flex defaults to rotationally symmetric local `-X` axes. For rigs whose
-left-hand phalanges are mirrored, set
-`grasp.curlAxisMode = FingerCurlAxisMode::MirroredLocalX`; the left hand then
-uses local `+X` while the right remains on `-X`.
+Finger flex defaults to `AutomaticPalm`: each phalanx probes both local-X curl
+directions and chooses the one that bends its child toward the inferred palm.
+For unusual exports, `LocalNegativeX` and `MirroredLocalX` remain explicit asset
+pipeline overrides.
 
 Runtime checks should cover rapid vertical aiming for stable elbow poles, walking
 into a wall for smooth bounded item pushback, and changing a grip's `ikWeight`
