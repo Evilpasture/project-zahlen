@@ -24,6 +24,7 @@ module;
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <functional>
 #include <iterator>
 #include <limits>
 #include <numbers>
@@ -66,6 +67,10 @@ struct CanonicalName {
         }
     }
     return result;
+}
+
+[[nodiscard]] bool IsDeformNode(std::string_view canonicalName) noexcept {
+    return canonicalName.starts_with("def");
 }
 
 [[nodiscard]] std::string_view StripKnownRigPrefix(std::string_view value) noexcept {
@@ -179,6 +184,27 @@ template <size_t N>
         default:
             return false;
     }
+}
+
+template <typename Range>
+[[nodiscard]] bool UsesDeformBoneConvention(const Range& entries) noexcept {
+    size_t matches = 0;
+    for (const auto& entry: entries) {
+        const CanonicalName canonical = Canonicalize(std::string_view(entry.name));
+        if (!IsDeformNode(canonical.View())) {
+            continue;
+        }
+        const std::string_view normalized = StripKnownRigPrefix(canonical.View());
+        for (size_t semantic = 1; semantic < kCoreBoneCount; ++semantic) {
+            if (MatchesBone(normalized, static_cast<CharacterBone>(semantic), false)) {
+                if (++matches >= 3) {
+                    return true;
+                }
+                break;
+            }
+        }
+    }
+    return false;
 }
 
 [[nodiscard]] bool IsHairNode(std::string_view name) noexcept {
@@ -590,8 +616,9 @@ void CaptureLocalPose(RigBoneMap& map) noexcept {
 }
 
 void ConfigureHandPalmFrames(const ModelPrefab* prefab, RigBoneMap& map) noexcept {
-    constexpr std::array handBones    = {CharacterBone::HandL, CharacterBone::HandR};
-    constexpr std::array forearmBones = {CharacterBone::ForearmL, CharacterBone::ForearmR};
+    const bool           deformOnlyRig = prefab != nullptr && UsesDeformBoneConvention(prefab->nodes);
+    constexpr std::array handBones     = {CharacterBone::HandL, CharacterBone::HandR};
+    constexpr std::array forearmBones  = {CharacterBone::ForearmL, CharacterBone::ForearmR};
     for (size_t side = 0; side < handBones.size(); ++side) {
         const RigNodeIndex handNode    = map.nodeIndices[BoneSlot(handBones[side])];
         const RigNodeIndex forearmNode = map.nodeIndices[BoneSlot(forearmBones[side])];
@@ -609,9 +636,15 @@ void ConfigureHandPalmFrames(const ModelPrefab* prefab, RigBoneMap& map) noexcep
                 if (node == handNode || !IsNodeDescendant(map, node, handNode)) {
                     continue;
                 }
-                const CanonicalName    canonical = Canonicalize(std::string_view(prefab->nodes[node].name));
-                const std::string_view name      = canonical.View();
-                const JPH::Vec3        offset    = map.modelTransforms[node].GetTranslation() - handPosition;
+                const CanonicalName canonical = Canonicalize(std::string_view(prefab->nodes[node].name));
+                if (deformOnlyRig && !IsDeformNode(canonical.View())) {
+                    continue;
+                }
+                const std::string_view name = canonical.View();
+                if (name.contains("claw")) {
+                    continue;
+                }
+                const JPH::Vec3 offset = map.modelTransforms[node].GetTranslation() - handPosition;
                 if (name.contains("thumb")) {
                     thumbDirection += offset;
                     ++thumbCount;
@@ -658,19 +691,24 @@ void ConfigureHandPalmFrames(const ModelPrefab* prefab, RigBoneMap& map) noexcep
 void ConfigureFingerConstraints(const ModelPrefab& prefab, RigBoneMap& map) noexcept {
     map.fingerJointConstraints.fill({});
     map.fingerJointConstraintCount = 0;
+    const bool deformOnlyRig       = UsesDeformBoneConvention(prefab.nodes);
 
     struct Candidate {
         RigNodeIndex node         = InvalidRigNode;
         FingerDigit  digit        = FingerDigit::Index;
         uint8_t      side         = 0;
+        uint8_t      chain        = 0;
         uint8_t      nameOrder    = 0;
         float        handDistance = 0.0f;
     };
     std::array<Candidate, kMaxFingerJoints> candidates {};
     size_t                                  candidateCount = 0;
     for (RigNodeIndex node = 0; node < map.nodeCount && node < prefab.nodes.size() && candidateCount < candidates.size(); ++node) {
-        const CanonicalName    canonical = Canonicalize(std::string_view(prefab.nodes[node].name));
-        const std::string_view name      = canonical.View();
+        const CanonicalName canonical = Canonicalize(std::string_view(prefab.nodes[node].name));
+        if (deformOnlyRig && !IsDeformNode(canonical.View())) {
+            continue;
+        }
+        const std::string_view name = canonical.View();
         struct DigitAlias {
             std::string_view token;
             FingerDigit      digit;
@@ -718,45 +756,68 @@ void ConfigureFingerConstraints(const ModelPrefab& prefab, RigBoneMap& map) noex
         const float        distance  = IsValidRigNode(handNode, map.nodeCount) ?
                                            (map.modelTransforms[node].GetTranslation() - map.modelTransforms[handNode].GetTranslation()).Length() :
                                            0.0f;
-        candidates[candidateCount++] = {.node = node, .digit = digit, .side = side, .nameOrder = order, .handDistance = distance};
+        candidates[candidateCount++] = {
+            .node         = node,
+            .digit        = digit,
+            .side         = side,
+            .chain        = static_cast<uint8_t>(name.contains("claw") ? 1u : 0u),
+            .nameOrder    = order,
+            .handDistance = distance
+        };
     }
 
     for (uint8_t side = 0; side < 2; ++side) {
-        for (uint8_t digitValue = 0; digitValue < 5; ++digitValue) {
-            std::array<Candidate, 8> chain {};
-            size_t                   chainCount = 0;
-            for (size_t index = 0; index < candidateCount && chainCount < chain.size(); ++index) {
-                if (candidates[index].side == side && static_cast<uint8_t>(candidates[index].digit) == digitValue) {
-                    chain[chainCount++] = candidates[index];
-                }
+        RigNodeIndex clawHand = InvalidRigNode;
+        for (RigNodeIndex node = 0; node < map.nodeCount && node < prefab.nodes.size(); ++node) {
+            const CanonicalName    canonical   = Canonicalize(std::string_view(prefab.nodes[node].name));
+            const std::string_view name        = canonical.View();
+            const bool             correctSide = side == 0 ? name.ends_with("l") : name.ends_with("r");
+            if (IsDeformNode(name) && name.contains("clawhand") && correctSide) {
+                clawHand = node;
+                break;
             }
-            std::sort(chain.begin(), chain.begin() + static_cast<std::ptrdiff_t>(chainCount), [](const Candidate& lhs, const Candidate& rhs) {
-                if (lhs.nameOrder != 0 && rhs.nameOrder != 0 && lhs.nameOrder != rhs.nameOrder) {
-                    return lhs.nameOrder < rhs.nameOrder;
-                }
-                return lhs.handDistance < rhs.handDistance;
-            });
+        }
 
-            RigNodeIndex expectedParent = map.nodeIndices[BoneSlot(side == 0 ? CharacterBone::HandL : CharacterBone::HandR)];
-            for (size_t segment = 0; segment < chainCount && map.fingerJointConstraintCount < map.fingerJointConstraints.size(); ++segment) {
-                const RigNodeIndex child = chain[segment].node;
-                if (!IsValidRigNode(expectedParent, map.nodeCount) || !IsValidRigNode(child, map.nodeCount)) {
-                    continue;
+        for (uint8_t chainValue = 0; chainValue < 2; ++chainValue) {
+            for (uint8_t digitValue = 0; digitValue < 5; ++digitValue) {
+                std::array<Candidate, 8> chain {};
+                size_t                   chainCount = 0;
+                for (size_t index = 0; index < candidateCount && chainCount < chain.size(); ++index) {
+                    if (candidates[index].side == side && candidates[index].chain == chainValue &&
+                        static_cast<uint8_t>(candidates[index].digit) == digitValue) {
+                        chain[chainCount++] = candidates[index];
+                    }
                 }
-                RigFingerJointConstraint& constraint = map.fingerJointConstraints[map.fingerJointConstraintCount++];
-                constraint.parent                    = expectedParent;
-                constraint.child                     = child;
-                constraint.digit                     = static_cast<FingerDigit>(digitValue);
-                constraint.side                      = side;
-                constraint.segment                   = static_cast<uint8_t>(segment);
-                constraint.repairRelation            = !IsNodeDescendant(map, child, expectedParent);
-                constraint.bindRelative              = map.modelTransforms[expectedParent].Inversed() * map.modelTransforms[child];
-                constraint.localPoseDelta            = JPH::Mat44::sIdentity();
-                expectedParent                       = child;
+                std::sort(chain.begin(), chain.begin() + static_cast<std::ptrdiff_t>(chainCount), [](const Candidate& lhs, const Candidate& rhs) {
+                    if (lhs.nameOrder != 0 && rhs.nameOrder != 0 && lhs.nameOrder != rhs.nameOrder) {
+                        return lhs.nameOrder < rhs.nameOrder;
+                    }
+                    return lhs.handDistance < rhs.handDistance;
+                });
+
+                RigNodeIndex expectedParent = chainValue == 1 && IsValidRigNode(clawHand, map.nodeCount) ?
+                                                  clawHand :
+                                                  map.nodeIndices[BoneSlot(side == 0 ? CharacterBone::HandL : CharacterBone::HandR)];
+                for (size_t segment = 0; segment < chainCount && map.fingerJointConstraintCount < map.fingerJointConstraints.size(); ++segment) {
+                    const RigNodeIndex child = chain[segment].node;
+                    if (!IsValidRigNode(expectedParent, map.nodeCount) || !IsValidRigNode(child, map.nodeCount)) {
+                        continue;
+                    }
+                    RigFingerJointConstraint& constraint = map.fingerJointConstraints[map.fingerJointConstraintCount++];
+                    constraint.parent                    = expectedParent;
+                    constraint.child                     = child;
+                    constraint.digit                     = static_cast<FingerDigit>(digitValue);
+                    constraint.side                      = side;
+                    constraint.chain                     = chainValue;
+                    constraint.segment                   = static_cast<uint8_t>(segment);
+                    constraint.repairRelation            = !IsNodeDescendant(map, child, expectedParent);
+                    constraint.bindRelative              = map.modelTransforms[expectedParent].Inversed() * map.modelTransforms[child];
+                    constraint.localPoseDelta            = JPH::Mat44::sIdentity();
+                    expectedParent                       = child;
+                }
             }
         }
     }
-
     // Freeze a stable flexion sign in bind pose. Runtime curl never re-selects
     // the opposite direction as parent joints rotate, so a phalanx cannot
     // suddenly hyperextend when the hand crosses an orientation threshold.
@@ -771,7 +832,8 @@ void ConfigureFingerConstraints(const ModelPrefab& prefab, RigBoneMap& map) noex
         JPH::Vec3       distalDirection = (palmRotation * JPH::Vec3::sAxisZ()).Normalized();
         for (size_t nextIndex = index + 1; nextIndex < map.fingerJointConstraintCount; ++nextIndex) {
             const RigFingerJointConstraint& next = map.fingerJointConstraints[nextIndex];
-            if (next.side == joint.side && next.digit == joint.digit && next.segment == joint.segment + 1 && IsValidRigNode(next.child, map.nodeCount)) {
+            if (next.side == joint.side && next.chain == joint.chain && next.digit == joint.digit && next.segment == joint.segment + 1 &&
+                IsValidRigNode(next.child, map.nodeCount)) {
                 const JPH::Vec3 candidateDirection = map.modelTransforms[next.child].GetTranslation() - map.modelTransforms[joint.child].GetTranslation();
                 if (candidateDirection.LengthSq() > 1.0e-8f) {
                     distalDirection = candidateDirection.Normalized();
@@ -1023,12 +1085,16 @@ struct SkinBinding {
 };
 
 [[nodiscard]] size_t ScoreSkeletonForProceduralPose(const Skeleton& skeleton) noexcept {
-    size_t coreMatches = 0;
+    const bool deformOnlyRig = UsesDeformBoneConvention(skeleton.joints);
+    size_t     coreMatches   = 0;
     for (size_t semanticIndex = 0; semanticIndex < kCoreBoneCount; ++semanticIndex) {
         const CharacterBone semantic = static_cast<CharacterBone>(semanticIndex);
         bool                matched  = false;
         for (const Joint& joint: skeleton.joints) {
-            const CanonicalName    canonical  = Canonicalize(std::string_view(joint.name));
+            const CanonicalName canonical = Canonicalize(std::string_view(joint.name));
+            if (deformOnlyRig && semantic != CharacterBone::Root && !IsDeformNode(canonical.View())) {
+                continue;
+            }
             const std::string_view normalized = StripKnownRigPrefix(canonical.View());
             if (MatchesBone(normalized, semantic, false) || MatchesBone(normalized, semantic, true)) {
                 matched = true;
@@ -1040,7 +1106,8 @@ struct SkinBinding {
 
     size_t hairMatches = 0;
     for (const Joint& joint: skeleton.joints) {
-        hairMatches += IsHairNode(Canonicalize(std::string_view(joint.name)).View()) ? 1u : 0u;
+        const CanonicalName canonical = Canonicalize(std::string_view(joint.name));
+        hairMatches += (!deformOnlyRig || IsDeformNode(canonical.View())) && IsHairNode(canonical.View()) ? 1u : 0u;
     }
     return coreMatches * 1000u + hairMatches;
 }
@@ -1124,6 +1191,8 @@ bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMa
         outMap.localTransforms[node]     = prefab.nodes[node].localTransform;
     }
 
+    const bool deformOnlyRig = UsesDeformBoneConvention(std::span(prefab.nodes.data(), outMap.nodeCount));
+
     std::array<bool, kMaxRigNodes> claimed {};
     size_t                         coreMapped = 0;
     for (size_t semanticIndex = 0; semanticIndex < kCoreBoneCount; ++semanticIndex) {
@@ -1140,7 +1209,10 @@ bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMa
                 if (claimed[node]) {
                     continue;
                 }
-                const CanonicalName    canonical  = Canonicalize(std::string_view(prefab.nodes[node].name));
+                const CanonicalName canonical = Canonicalize(std::string_view(prefab.nodes[node].name));
+                if (deformOnlyRig && semantic != CharacterBone::Root && !IsDeformNode(canonical.View())) {
+                    continue;
+                }
                 const std::string_view normalized = StripKnownRigPrefix(canonical.View());
                 if (MatchesBone(normalized, semantic, allowSuffix)) {
                     bestNode = node;
@@ -1160,15 +1232,16 @@ bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMa
     std::array<bool, kMaxRigNodes> hairCandidate {};
     for (RigNodeIndex node = 0; node < outMap.nodeCount; ++node) {
         const CanonicalName canonical = Canonicalize(std::string_view(prefab.nodes[node].name));
-        hairCandidate[node]           = !claimed[node] && IsHairNode(canonical.View());
+        hairCandidate[node]           = !claimed[node] && (!deformOnlyRig || IsDeformNode(canonical.View())) && IsHairNode(canonical.View());
     }
     // A named hair/strand root often has generically named child joints. Mark
     // those descendants as candidates too.
     for (size_t pass = 0; pass < outMap.nodeCount; ++pass) {
         bool changed = false;
         for (RigNodeIndex node = 0; node < outMap.nodeCount; ++node) {
-            const RigNodeIndex parent = outMap.parentIndices[node];
-            if (!claimed[node] && !hairCandidate[node] && IsValidRigNode(parent, outMap.nodeCount) && hairCandidate[parent]) {
+            const RigNodeIndex parent   = outMap.parentIndices[node];
+            const bool         eligible = !deformOnlyRig || IsDeformNode(Canonicalize(std::string_view(prefab.nodes[node].name)).View());
+            if (eligible && !claimed[node] && !hairCandidate[node] && IsValidRigNode(parent, outMap.nodeCount) && hairCandidate[parent]) {
                 hairCandidate[node] = true;
                 changed             = true;
             }
@@ -1192,6 +1265,7 @@ bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMa
         if (!address.IsValid()) {
             continue;
         }
+        outMap.sourceHairStrandCount = std::max(outMap.sourceHairStrandCount, address.strand + 1);
 
         const size_t slot = address.strand * HairStrandsComponent::kLinksPerStrand + address.link;
         if (hairSlotClaimed[slot]) {
@@ -1262,11 +1336,12 @@ bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMa
 
     size_t mappedHairStrands = 0;
     for (size_t strand = 0; strand < HairStrandsComponent::kStrandCount; ++strand) {
-        bool hasMappedLink = false;
-        for (size_t link = 0; link < HairStrandsComponent::kLinksPerStrand; ++link) {
-            hasMappedLink = hasMappedLink || hairSlotClaimed[strand * HairStrandsComponent::kLinksPerStrand + link];
-        }
-        mappedHairStrands += hasMappedLink ? 1u : 0u;
+        const auto first = hairSlotClaimed.begin() + static_cast<std::ptrdiff_t>(strand * HairStrandsComponent::kLinksPerStrand);
+        const auto last  = first + static_cast<std::ptrdiff_t>(HairStrandsComponent::kLinksPerStrand);
+        mappedHairStrands += std::ranges::any_of(first, last, std::identity {}) ? 1u : 0u;
+    }
+    if (outMap.sourceHairStrandCount == 0) {
+        outMap.sourceHairStrandCount = mappedHairStrands;
     }
 
     for (size_t semanticIndex = 0; semanticIndex < kBoneCount; ++semanticIndex) {
@@ -1289,13 +1364,15 @@ bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMa
     ConfigureFootAttachmentConstraints(prefab, outMap);
     outMap.initialized = true;
     outMap.poseValid   = true;
-    return coreMapped == kCoreBoneCount && mappedHairStrands == HairStrandsComponent::kStrandCount;
+    return coreMapped == kCoreBoneCount && outMap.sourceHairStrandCount >= HairStrandsComponent::kMinimumStrandCount &&
+           mappedHairStrands == outMap.sourceHairStrandCount;
 }
 
 void BuildStandardProceduralRig(RigBoneMap& outMap) noexcept {
     outMap.Reset();
-    outMap.nodeCount  = kBoneCount;
-    outMap.jointCount = static_cast<uint32_t>(kBoneCount);
+    outMap.nodeCount             = kBoneCount;
+    outMap.jointCount            = static_cast<uint32_t>(kBoneCount);
+    outMap.sourceHairStrandCount = HairStrandsComponent::kStrandCount;
 
     auto addBone = [&](CharacterBone bone, RigNodeIndex parentNode, JPH::Vec3Arg translation) {
         const size_t semantic                = BoneSlot(bone);
@@ -1630,7 +1707,7 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
             }
             ZHLN::Log(
                 "[ProceduralAnimation] Rig '{}': {}; mapped {}/{} core bones and {}/{} hair strands ({} deform hair bones).", prefab->virtualPath,
-                complete ? "complete" : "partial", mappedCoreBones, kCoreBoneCount, mappedHairStrands, HairStrandsComponent::kStrandCount, mappedHairBones
+                complete ? "complete" : "partial", mappedCoreBones, kCoreBoneCount, mappedHairStrands, boneMap->sourceHairStrandCount, mappedHairBones
             );
             if (boneMap->childOfConstraintCount > 0) {
                 size_t footAttachments = 0;
@@ -1686,7 +1763,7 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
                         ZHLN::Log("[ProceduralAnimation] Missing core mapping: {}", kCoreBoneLabels[semantic]);
                     }
                 }
-                for (size_t strand = 0; strand < HairStrandsComponent::kStrandCount; ++strand) {
+                for (size_t strand = 0; strand < boneMap->sourceHairStrandCount; ++strand) {
                     const size_t rootSemantic = BoneSlot(CharacterBone::HairStart) + strand * HairStrandsComponent::kLinksPerStrand;
                     bool         strandMapped = false;
                     for (size_t link = 0; link < HairStrandsComponent::kLinksPerStrand; ++link) {

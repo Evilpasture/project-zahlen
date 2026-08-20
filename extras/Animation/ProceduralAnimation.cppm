@@ -55,7 +55,7 @@ enum class CharacterBone : size_t {
     FootR,
     ToeR,
     HairStart  = 32,
-    HairCount  = 108,
+    HairCount  = 144,
     TotalBones = HairStart + HairCount
 };
 
@@ -76,7 +76,7 @@ inline constexpr size_t kCoreBoneCount = BoneSlot(CharacterBone::ToeR) + 1;
 // leaving enough headroom for those imported hierarchies.
 inline constexpr size_t kMaxRigNodes           = 512;
 inline constexpr size_t kMaxChildOfConstraints = 64;
-inline constexpr size_t kMaxFingerJoints       = 40;
+inline constexpr size_t kMaxFingerJoints       = 64;
 
 enum class RigChildOfKind : uint8_t {
     Hand,
@@ -107,6 +107,7 @@ struct RigFingerJointConstraint {
     RigNodeIndex child          = InvalidRigNode;
     FingerDigit  digit          = FingerDigit::Index;
     uint8_t      side           = 0; // 0 = left, 1 = right
+    uint8_t      chain          = 0; // 0 = standard hand, 1 = claw/alternate hand
     uint8_t      segment        = 0;
     bool         repairRelation = false;
     float        hingeFlexSign  = -1.0f;
@@ -177,6 +178,7 @@ struct alignas(64) RigBoneMap {
 
     const ModelPrefab* sourcePrefab                 = nullptr;
     size_t             nodeCount                    = 0;
+    size_t             sourceHairStrandCount        = 0;
     uint32_t           jointOffset                  = 0;
     uint32_t           jointCount                   = 0;
     int32_t            skeletonIndex                = -1;
@@ -248,11 +250,12 @@ struct ProceduralLocomotionComponent {
     bool      wasPlantedR       = true;
 };
 
-/** Fixed 18 x 6 particle state for hair, cloth strips, and accessories. */
+/** Fixed-capacity 24 x 6 particle state; rigs may populate 18-24 strands. */
 struct alignas(64) HairStrandsComponent {
-    static constexpr size_t kStrandCount    = 18;
-    static constexpr size_t kLinksPerStrand = 6;
-    static constexpr size_t kTotalParticles = kStrandCount * kLinksPerStrand;
+    static constexpr size_t kMinimumStrandCount = 18;
+    static constexpr size_t kStrandCount        = 24;
+    static constexpr size_t kLinksPerStrand     = 6;
+    static constexpr size_t kTotalParticles     = kStrandCount * kLinksPerStrand;
 
     std::array<JPH::Vec3, kTotalParticles> positions {};
     std::array<JPH::Vec3, kTotalParticles> prevPositions {};

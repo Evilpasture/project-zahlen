@@ -100,6 +100,43 @@ struct ProceduralAnimationTestSuite {
             return {};
         }
 
+        std::expected<void, ZHLN::Error> def_only_rig_filters_control_bones_and_maps_24_hair_strands() {
+            ZHLN::ModelPrefab prefab;
+            auto              addNode = [&](std::string_view name, int32_t parent, JPH::Vec3Arg translation) {
+                const size_t index = prefab.nodes.size();
+                prefab.nodes.push_back({.name = ZHLN::String64(name), .parentIndex = parent, .localTransform = JPH::Mat44::sTranslation(translation)});
+                return index;
+            };
+            const size_t root = addNode("Root", -1, JPH::Vec3::sZero());
+            static_cast<void>(addNode("CTR-Hand.L", static_cast<int32_t>(root), JPH::Vec3(0.2f, 1.0f, 0.0f)));
+            const size_t hand = addNode("DEF-Hand.L", static_cast<int32_t>(root), JPH::Vec3(0.3f, 1.0f, 0.0f));
+            static_cast<void>(addNode("CTR-Index_1.L", static_cast<int32_t>(hand), JPH::Vec3(0.04f, 0.0f, 0.0f)));
+            const size_t finger1 = addNode("DEF-Index_1.L", static_cast<int32_t>(hand), JPH::Vec3(0.05f, 0.0f, 0.0f));
+            static_cast<void>(addNode("CTR-Index_2.L", static_cast<int32_t>(finger1), JPH::Vec3(0.03f, 0.0f, 0.0f)));
+            const size_t finger2 = addNode("DEF-Index_2.L", static_cast<int32_t>(finger1), JPH::Vec3(0.03f, 0.0f, 0.0f));
+            const size_t finger3 = addNode("DEF-Index_3.L", static_cast<int32_t>(finger2), JPH::Vec3(0.02f, 0.0f, 0.0f));
+            const size_t hair24  = addNode("DEF-Hair_S24_04", static_cast<int32_t>(root), JPH::Vec3(0.0f, 1.5f, 0.0f));
+
+            ZHLN::Skeleton skeleton;
+            for (size_t node = 0; node < prefab.nodes.size(); ++node) {
+                skeleton.joints.push_back({.name = prefab.nodes[node].name, .nodeIndex = static_cast<int32_t>(node)});
+            }
+            ZHLN::RigBoneMap map;
+            static_cast<void>(ZHLN::BuildBoneMap(prefab, skeleton, map));
+            const size_t     hairSlot = ZHLN::BoneSlot(ZHLN::CharacterBone::HairStart) + 23 * ZHLN::HairStrandsComponent::kLinksPerStrand + 3;
+            const std::array expectedFingerNodes {finger1, finger2, finger3};
+            if (map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::HandL)] != hand || map.sourceHairStrandCount != 24 || map.nodeIndices[hairSlot] != hair24 ||
+                map.fingerJointConstraintCount != expectedFingerNodes.size()) {
+                return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+            }
+            for (size_t index = 0; index < map.fingerJointConstraintCount; ++index) {
+                if (map.fingerJointConstraints[index].child != expectedFingerNodes[index]) {
+                    return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+                }
+            }
+            return {};
+        }
+
         std::expected<void, ZHLN::Error> standard_rig_maps_every_control() {
             ZHLN::RigBoneMap map;
             map.nodeCount          = 7;

@@ -97,9 +97,10 @@ The reference should report:
 Rig 'ProceduralAnimationBaseRig.glb': complete; mapped 21/21 core bones and 18/18 hair strands (108 deform hair bones).
 ```
 
-A variable-length production hairstyle is also valid. For example, 18 strands
-with 96 total deform bones should report `complete` as long as every strand has
-at least one mapped link.
+Variable-length production hairstyles are also valid. The solver supports 18 to
+24 strands with up to six links each; shorter four- or five-link chains preserve
+semantic gaps. A rig reports `complete` when every DEF hair strand exported by
+that asset has at least one mapped link.
 
 ## Coordinate and scale contract
 
@@ -113,6 +114,10 @@ at least one mapped link.
 ## Required semantic bones
 
 The mapper is case- and separator-insensitive and accepts the `DEF-` prefix.
+When an imported rig contains a DEF deform set, semantic, finger, palm, and hair
+discovery switches to deform-only mode and ignores `CTR-`, `FK-`, `IK-`, and
+`MCH-` controls. Standard and `DEF-Claw-*` finger chains are tracked separately,
+so alternate hand variants cannot be interleaved into one phalanx chain.
 The reference uses:
 
 ```text
