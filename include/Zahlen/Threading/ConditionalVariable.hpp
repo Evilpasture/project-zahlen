@@ -37,13 +37,14 @@ class ConditionalVariable {
     void NotifyAll() noexcept;
 
   private:
-    // 0 = No active waiters, 1 = Active waiters present. This must be
-    // value-initialized; an indeterminate hint can permanently skip wakeups.
-    ZHLN::Atomic<uint8_t> _bits {};
+    // Raw zero means no active waiters. Keep the byte trivial for C/FFI layout;
+    // C++ owners must value-initialize and foreign storage must be zeroed.
+    ZHLN::Atomic<uint8_t> _bits;
 };
 
 static_assert(sizeof(ConditionalVariable) == 1, "ZHLN::ConditionalVariable must be exactly 1 byte!");
 static_assert(std::is_standard_layout_v<ConditionalVariable>, "ZHLN::ConditionalVariable must be standard layout!");
+static_assert(std::is_trivially_default_constructible_v<ConditionalVariable>, "ZHLN::ConditionalVariable must be trivially default constructible!");
 static_assert(std::is_trivially_copyable_v<ConditionalVariable>, "ZHLN::ConditionalVariable must be trivially copyable!");
 
 } // namespace ZHLN

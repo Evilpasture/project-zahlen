@@ -52,7 +52,7 @@ struct SyncPrimTestSuite {
             }
             std::destroy_at(initialized);
 
-            ZHLN::Mutex mutex;
+            ZHLN::Mutex mutex {};
 
             // Sequential lock/unlock
             mutex.lock();
@@ -75,7 +75,7 @@ struct SyncPrimTestSuite {
 
         // 2. Stress Test Mutex Mutual Exclusion under High Concurrency
         std::expected<void, ZHLN::Error> mutex_mutual_exclusion_stress() {
-            ZHLN::Mutex mutex;
+            ZHLN::Mutex mutex {};
             int         counter = 0;
 
             // Increment shared counter concurrently across worker tasks
@@ -93,8 +93,8 @@ struct SyncPrimTestSuite {
 
         // 3. Condition Variable Single-Signal (NotifyOne)
         std::expected<void, ZHLN::Error> condvar_notify_one() {
-            ZHLN::Mutex               mutex;
-            ZHLN::ConditionalVariable cv;
+            ZHLN::Mutex               mutex {};
+            ZHLN::ConditionalVariable cv {};
             bool                      ready          = false;
             bool                      workerFinished = false;
 
@@ -139,8 +139,8 @@ struct SyncPrimTestSuite {
 
         // 4. Condition Variable Multi-Signal (NotifyAll)
         std::expected<void, ZHLN::Error> condvar_notify_all() {
-            ZHLN::Mutex               mutex;
-            ZHLN::ConditionalVariable cv;
+            ZHLN::Mutex               mutex {};
+            ZHLN::ConditionalVariable cv {};
             bool                      ready      = false;
             int                       awakeCount = 0;
 

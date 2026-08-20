@@ -110,7 +110,7 @@ struct MaterialData {
 static_assert((std::is_trivially_default_constructible_v<MaterialData> && std::is_trivially_copyable_v<MaterialData>) );
 
 struct PhysicsWorld {
-    mutable BufferSync sync;
+    mutable BufferSync sync {};
 
     // ========================================================================
     // BUCKET 1: JOLT CORE (Cold)

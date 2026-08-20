@@ -84,7 +84,10 @@ class Mutex {
     static constexpr uint8_t HAS_WAITERS = 0x02;
     static constexpr uint8_t POISONED    = 0x04;
 
-    ZHLN::Atomic<uint8_t> _bits {};
+    // Raw zero is the unlocked C/FFI representation. Keep this member free of
+    // NSDMI so Mutex remains trivially default constructible; C++ owners must
+    // value-initialize (`Mutex mutex {}`), and FFI storage must be zeroed.
+    ZHLN::Atomic<uint8_t> _bits;
 
     [[gnu::cold, gnu::noinline]] void LockSlow() noexcept;
     [[gnu::cold, gnu::noinline]] void UnlockSlow() noexcept;
@@ -113,9 +116,10 @@ class Mutex {
 // Guarantee 1-byte footprint in Release builds
 static_assert(kIsDebugMutex || sizeof(Mutex) == 1, "ZHLN::Mutex must be exactly 1 byte in Release mode!");
 
-// Initialization is explicit (an indeterminate lock byte is not a valid mutex),
-// while the type remains standard-layout and trivially copyable for dense ECS use.
-static_assert(kIsDebugMutex || (std::is_standard_layout_v<Mutex> && std::is_trivially_copyable_v<Mutex>), "Mutex must remain POD-like in Release mode!");
+static_assert(
+    kIsDebugMutex || (std::is_trivially_default_constructible_v<Mutex> && std::is_standard_layout_v<Mutex> && std::is_trivially_copyable_v<Mutex>),
+    "Mutex must remain a trivial C-compatible byte in Release mode!"
+);
 
 /**
  * @brief Trivial RAII guard to avoid including <mutex> in interface headers.

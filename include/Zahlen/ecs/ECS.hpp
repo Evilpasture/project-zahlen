@@ -132,7 +132,7 @@ class ZHLN_API Registry {
     friend class EntityCommandBuffer;
 
   public:
-    mutable BufferSync sync;
+    mutable BufferSync sync {};
 
     Registry();
     ~Registry();

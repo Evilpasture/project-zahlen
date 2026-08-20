@@ -11,7 +11,7 @@ namespace ZHLN::ECS {
 
 namespace {
 
-static ZHLN::Mutex                         s_FamilyMutex;
+static ZHLN::Mutex                         s_FamilyMutex {};
 static uint32_t                            s_TypeCounter = 0;
 static HashMap<uint32_t, uint32_t>         s_HashToDense;
 static HashMap<std::string_view, uint32_t> s_NameToFamilyID;

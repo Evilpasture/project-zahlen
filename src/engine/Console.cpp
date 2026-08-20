@@ -20,7 +20,7 @@ struct ConsoleEntryInternal {
 std::vector<std::string>          s_History;
 int                               s_HistoryPos = -1;
 std::vector<ConsoleEntryInternal> s_Entries;
-ZHLN::Mutex                       s_Mutex;
+ZHLN::Mutex                       s_Mutex {};
 bool                              s_ScrollToBottom = false;
 
 } // namespace

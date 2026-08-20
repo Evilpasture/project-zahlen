@@ -29,7 +29,7 @@ struct TerrainSlot {
 };
 
 std::array<TerrainSlot, MAX_TERRAIN_SLOTS> s_TerrainSlots;
-ZHLN::Mutex                                s_LifecycleMutex;
+ZHLN::Mutex                                s_LifecycleMutex {};
 std::vector<TerrainData>                   s_DeferredCleanup;
 } // namespace
 
