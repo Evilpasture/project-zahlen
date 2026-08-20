@@ -27,6 +27,7 @@ module;
 #include <iterator>
 #include <limits>
 #include <numbers>
+#include <ranges>
 #include <span>
 #include <string_view>
 #include <utility>
@@ -181,8 +182,11 @@ template <size_t N>
 }
 
 [[nodiscard]] bool IsHairNode(std::string_view name) noexcept {
-    return name.find("hair") != std::string_view::npos || name.find("braid") != std::string_view::npos || name.find("ponytail") != std::string_view::npos ||
-           name.find("strand") != std::string_view::npos;
+    return name.contains("hair") || name.contains("braid") || name.contains("ponytail") || name.contains("strand");
+}
+
+[[nodiscard]] bool IsHeadVisualNode(std::string_view name) noexcept {
+    return name.contains("head") || name.contains("face") || name.contains("eye") || name.contains("visor") || name.contains("hat") || name.contains("helmet");
 }
 
 struct HairAddress {
@@ -228,43 +232,6 @@ struct HairAddress {
     }
     HairAddress result {.strand = numbers[0] - 1, .link = numbers[1] - 1};
     return result.IsValid() ? result : HairAddress {};
-}
-
-void FillIdentity(std::span<JPH::Mat44> matrices) noexcept {
-    std::ranges::fill(matrices, JPH::Mat44::sIdentity());
-}
-
-void ResetRigBoneMap(RigBoneMap& map) noexcept {
-    map.nodeIndices.fill(InvalidRigNode);
-    FillIdentity(map.inverseBindMatrices);
-    map.parentIndices.fill(InvalidRigNode);
-    FillIdentity(map.bindLocalTransforms);
-    FillIdentity(map.localTransforms);
-    FillIdentity(map.modelTransforms);
-    map.handBoneToPalmRotations = {JPH::Quat::sIdentity(), JPH::Quat::sIdentity()};
-    map.handPalmFramesValid.fill(false);
-    map.fingerJointConstraints.fill({});
-    map.fingerJointConstraintCount = 0;
-    map.childOfConstraints.fill({});
-    map.childOfConstraintCount = 0;
-    map.poseTranslations.fill(JPH::Vec3::sZero());
-    map.poseTranslationVelocities.fill(JPH::Vec3::sZero());
-    map.poseRotations.fill(JPH::Quat::sIdentity());
-    map.poseAngularVelocities.fill(JPH::Vec3::sZero());
-    map.poseScales.fill(JPH::Vec3::sReplicate(1.0f));
-    map.poseScaleVelocities.fill(JPH::Vec3::sZero());
-    map.springPoseTrack              = -1;
-    map.springPoseInitialized        = false;
-    map.sourcePrefab                 = nullptr;
-    map.nodeCount                    = 0;
-    map.jointOffset                  = 0;
-    map.jointCount                   = 0;
-    map.skeletonIndex                = -1;
-    map.poseVersion                  = 0;
-    map.synchronizedAttachmentCount  = 0;
-    map.synchronizedSkinPaletteCount = 0;
-    map.initialized                  = false;
-    map.poseValid                    = false;
 }
 
 [[nodiscard]] JPH::Vec3 ExtractScale(const JPH::Mat44& matrix) noexcept {
@@ -645,13 +612,12 @@ void ConfigureHandPalmFrames(const ModelPrefab* prefab, RigBoneMap& map) noexcep
                 const CanonicalName    canonical = Canonicalize(std::string_view(prefab->nodes[node].name));
                 const std::string_view name      = canonical.View();
                 const JPH::Vec3        offset    = map.modelTransforms[node].GetTranslation() - handPosition;
-                if (name.find("thumb") != std::string_view::npos) {
+                if (name.contains("thumb")) {
                     thumbDirection += offset;
                     ++thumbCount;
                 } else if (
-                    name.find("index") != std::string_view::npos || name.find("middle") != std::string_view::npos ||
-                    name.find("ring") != std::string_view::npos || name.find("pinky") != std::string_view::npos ||
-                    name.find("little") != std::string_view::npos || name.find("finger") != std::string_view::npos
+                    name.contains("index") || name.contains("middle") || name.contains("ring") || name.contains("pinky") || name.contains("little") ||
+                    name.contains("finger")
                 ) {
                     fingerDirection += offset;
                     ++fingerCount;
@@ -705,21 +671,23 @@ void ConfigureFingerConstraints(const ModelPrefab& prefab, RigBoneMap& map) noex
     for (RigNodeIndex node = 0; node < map.nodeCount && node < prefab.nodes.size() && candidateCount < candidates.size(); ++node) {
         const CanonicalName    canonical = Canonicalize(std::string_view(prefab.nodes[node].name));
         const std::string_view name      = canonical.View();
-        FingerDigit            digit;
-        size_t                 digitPosition = std::string_view::npos;
-        if ((digitPosition = name.find("thumb")) != std::string_view::npos) {
-            digit = FingerDigit::Thumb;
-        } else if ((digitPosition = name.find("index")) != std::string_view::npos) {
-            digit = FingerDigit::Index;
-        } else if ((digitPosition = name.find("middle")) != std::string_view::npos) {
-            digit = FingerDigit::Middle;
-        } else if ((digitPosition = name.find("ring")) != std::string_view::npos && name.find("spring") == std::string_view::npos) {
-            digit = FingerDigit::Ring;
-        } else if ((digitPosition = name.find("pinky")) != std::string_view::npos || (digitPosition = name.find("little")) != std::string_view::npos) {
-            digit = FingerDigit::Pinky;
-        } else {
+        struct DigitAlias {
+            std::string_view token;
+            FingerDigit      digit;
+        };
+        using namespace std::literals;
+        constexpr std::array digitAliases = {
+            DigitAlias {"thumb"sv, FingerDigit::Thumb}, DigitAlias {"index"sv, FingerDigit::Index}, DigitAlias {"middle"sv, FingerDigit::Middle},
+            DigitAlias {"ring"sv, FingerDigit::Ring},   DigitAlias {"pinky"sv, FingerDigit::Pinky}, DigitAlias {"little"sv, FingerDigit::Pinky},
+        };
+        const auto alias = std::ranges::find_if(digitAliases, [&](const DigitAlias& candidate) {
+            return name.contains(candidate.token) && (candidate.digit != FingerDigit::Ring || !name.contains("spring"));
+        });
+        if (alias == digitAliases.end()) {
             continue;
         }
+        const FingerDigit digit         = alias->digit;
+        const size_t      digitPosition = name.find(alias->token);
 
         const RigNodeIndex handL = map.nodeIndices[BoneSlot(CharacterBone::HandL)];
         const RigNodeIndex handR = map.nodeIndices[BoneSlot(CharacterBone::HandR)];
@@ -728,9 +696,9 @@ void ConfigureFingerConstraints(const ModelPrefab& prefab, RigBoneMap& map) noex
             side = 0;
         } else if (IsValidRigNode(handR, map.nodeCount) && IsNodeDescendant(map, node, handR)) {
             side = 1;
-        } else if (name.find("right") != std::string_view::npos || name.ends_with("r")) {
+        } else if (name.contains("right") || name.ends_with("r")) {
             side = 1;
-        } else if (name.find("left") != std::string_view::npos || name.ends_with("l")) {
+        } else if (name.contains("left") || name.ends_with("l")) {
             side = 0;
         } else {
             continue;
@@ -1127,7 +1095,7 @@ int32_t FindAnimationTrack(const ModelPrefab& prefab, std::string_view name) noe
     }
     for (size_t index = 0; index < prefab.animations.size(); ++index) {
         const CanonicalName candidate = Canonicalize(std::string_view(prefab.animations[index].name));
-        if (candidate.View().find(query.View()) != std::string_view::npos) {
+        if (candidate.View().contains(query.View())) {
             return static_cast<int32_t>(index);
         }
     }
@@ -1135,7 +1103,7 @@ int32_t FindAnimationTrack(const ModelPrefab& prefab, std::string_view name) noe
 }
 
 bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMap& outMap) noexcept {
-    ResetRigBoneMap(outMap);
+    outMap.Reset();
 
     outMap.sourcePrefab = &prefab;
     outMap.nodeCount    = std::min(prefab.nodes.size(), kMaxRigNodes);
@@ -1325,7 +1293,7 @@ bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMa
 }
 
 void BuildStandardProceduralRig(RigBoneMap& outMap) noexcept {
-    ResetRigBoneMap(outMap);
+    outMap.Reset();
     outMap.nodeCount  = kBoneCount;
     outMap.jointCount = static_cast<uint32_t>(kBoneCount);
 
@@ -1546,6 +1514,8 @@ size_t ProceduralAnimation::MaskFirstPersonPalette(
     size_t             masked          = 0;
     const JPH::Vec3    collapsePoint   = IsValidRigNode(headNode, boneMap.nodeCount) ? boneMap.modelTransforms[headNode].GetTranslation() : JPH::Vec3::sZero();
     const JPH::Mat44   hiddenTransform = JPH::Mat44::sRotationTranslation(JPH::Quat::sIdentity(), collapsePoint).PreScaled(JPH::Vec3::sZero());
+    const size_t       hairOffset      = BoneSlot(CharacterBone::HairStart);
+    const std::span<const RigNodeIndex> hairNodes(boneMap.nodeIndices.data() + hairOffset, kBoneCount - hairOffset);
 
     for (size_t jointIndex = 0; jointIndex < count; ++jointIndex) {
         const Joint&           joint     = skeleton.joints[jointIndex];
@@ -1553,15 +1523,9 @@ size_t ProceduralAnimation::MaskFirstPersonPalette(
         const CanonicalName    canonical = Canonicalize(std::string_view(joint.name));
         const std::string_view name      = canonical.View();
 
-        bool isHair = name.find("hair") != std::string_view::npos || name.find("braid") != std::string_view::npos ||
-                      name.find("ponytail") != std::string_view::npos || name.find("strand") != std::string_view::npos;
-        for (size_t semantic = BoneSlot(CharacterBone::HairStart); !isHair && semantic < kBoneCount; ++semantic) {
-            isHair = boneMap.nodeIndices[semantic] == node;
-        }
-        const bool isHeadName  = name.find("head") != std::string_view::npos || name.find("face") != std::string_view::npos ||
-                                 name.find("eye") != std::string_view::npos || name.find("visor") != std::string_view::npos ||
-                                 name.find("hat") != std::string_view::npos || name.find("helmet") != std::string_view::npos;
-        const bool headRelated = !isHair && (isHeadName || (IsValidRigNode(headNode, boneMap.nodeCount) && IsNodeDescendant(boneMap, node, headNode)));
+        const bool isHair      = IsHairNode(name) || std::ranges::find(hairNodes, node) != hairNodes.end();
+        const bool headRelated = !isHair &&
+                                 (IsHeadVisualNode(name) || (IsValidRigNode(headNode, boneMap.nodeCount) && IsNodeDescendant(boneMap, node, headNode)));
         if ((hideHair && isHair) || (hideHead && headRelated)) {
             palette[jointIndex] = hiddenTransform;
             ++masked;

@@ -102,6 +102,13 @@ struct ProceduralAnimationTestSuite {
 
         std::expected<void, ZHLN::Error> standard_rig_maps_every_control() {
             ZHLN::RigBoneMap map;
+            map.nodeCount          = 7;
+            map.modelTransforms[0] = JPH::Mat44::sTranslation(JPH::Vec3(1.0f, 2.0f, 3.0f));
+            map.Reset();
+            if (map.nodeCount != 0 || map.nodeIndices[0] != ZHLN::InvalidRigNode || !map.modelTransforms[0].IsClose(JPH::Mat44::sIdentity(), 0.0001f) ||
+                !map.poseRotations[0].IsClose(JPH::Quat::sIdentity(), 0.0001f) || !map.poseScales[0].IsClose(JPH::Vec3::sReplicate(1.0f), 0.0001f)) {
+                return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+            }
             ZHLN::BuildStandardProceduralRig(map);
 
             if (!map.initialized || !map.poseValid || map.nodeCount != ZHLN::kBoneCount) {

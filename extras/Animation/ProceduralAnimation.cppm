@@ -18,6 +18,7 @@ module;
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <span>
 #include <string_view>
 
@@ -126,16 +127,24 @@ struct alignas(64) RigBoneMap {
         values.fill(InvalidRigNode);
         return values;
     }();
-    std::array<JPH::Mat44, kBoneCount> inverseBindMatrices {};
+    std::array<JPH::Mat44, kBoneCount> inverseBindMatrices = [] {
+        std::array<JPH::Mat44, kBoneCount> values;
+        values.fill(JPH::Mat44::sIdentity());
+        return values;
+    }();
 
     std::array<RigNodeIndex, kMaxRigNodes> parentIndices = [] {
         std::array<RigNodeIndex, kMaxRigNodes> values {};
         values.fill(InvalidRigNode);
         return values;
     }();
-    std::array<JPH::Mat44, kMaxRigNodes> bindLocalTransforms {};
-    std::array<JPH::Mat44, kMaxRigNodes> localTransforms {};
-    std::array<JPH::Mat44, kMaxRigNodes> modelTransforms {};
+    std::array<JPH::Mat44, kMaxRigNodes> bindLocalTransforms = [] {
+        std::array<JPH::Mat44, kMaxRigNodes> values;
+        values.fill(JPH::Mat44::sIdentity());
+        return values;
+    }();
+    std::array<JPH::Mat44, kMaxRigNodes> localTransforms = bindLocalTransforms;
+    std::array<JPH::Mat44, kMaxRigNodes> modelTransforms = bindLocalTransforms;
 
     std::array<JPH::Quat, 2>                               handBoneToPalmRotations {JPH::Quat::sIdentity(), JPH::Quat::sIdentity()};
     std::array<bool, 2>                                    handPalmFramesValid {false, false};
@@ -149,9 +158,17 @@ struct alignas(64) RigBoneMap {
     // samples become physical targets; procedural passes then layer on top.
     std::array<JPH::Vec3, kCoreBoneCount> poseTranslations {};
     std::array<JPH::Vec3, kCoreBoneCount> poseTranslationVelocities {};
-    std::array<JPH::Quat, kCoreBoneCount> poseRotations {};
+    std::array<JPH::Quat, kCoreBoneCount> poseRotations = [] {
+        std::array<JPH::Quat, kCoreBoneCount> values;
+        values.fill(JPH::Quat::sIdentity());
+        return values;
+    }();
     std::array<JPH::Vec3, kCoreBoneCount> poseAngularVelocities {};
-    std::array<JPH::Vec3, kCoreBoneCount> poseScales {};
+    std::array<JPH::Vec3, kCoreBoneCount> poseScales = [] {
+        std::array<JPH::Vec3, kCoreBoneCount> values;
+        values.fill(JPH::Vec3::sReplicate(1.0f));
+        return values;
+    }();
     std::array<JPH::Vec3, kCoreBoneCount> poseScaleVelocities {};
     float                                 poseSpringStiffness     = 2500.0f;
     float                                 poseSpringDampingFactor = 0.90f;
@@ -168,6 +185,11 @@ struct alignas(64) RigBoneMap {
     size_t             synchronizedSkinPaletteCount = 0;
     bool               initialized                  = false;
     bool               poseValid                    = false;
+
+    void Reset() noexcept {
+        std::destroy_at(this);
+        std::construct_at(this);
+    }
 };
 
 /** Parametric gait state, including persistent world-space foot locks. */

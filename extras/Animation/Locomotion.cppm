@@ -238,26 +238,18 @@ inline auto SpawnCharacter(
     auto& reg = engine.GetRegistry();
     auto& pc  = engine.GetPhysicsContext();
 
-    const Entity player = reg.Create();
-    reg.Add(player, Components::PlayerTagComponent {});
-    reg.Add(player, Components::NameComponent {.name = String64("Player_VirtualCharacter")});
-    reg.Add(player, Components::TransformComponent {.position = spawnPosition});
-    reg.Add(
-        player,
-        Components::WorldTransformComponent {
-            .world = Math::CreateTransform(spawnPosition, JPH::Quat::sIdentity()), .previous = Math::CreateTransform(spawnPosition, JPH::Quat::sIdentity())
+    // Create physics first, then publish the complete gameplay entity in one
+    // atomic ECS insertion. No system can observe a partially assembled player.
+    const Entity     charPhys = pc.CreateCharacter(JPH::RVec3(spawnPosition), config);
+    const JPH::Mat44 world    = Math::CreateTransform(spawnPosition, JPH::Quat::sIdentity());
+    const Entity     player   = reg.Create(
+        Components::PlayerTagComponent {}, Components::NameComponent {.name = String64("Player_VirtualCharacter")},
+        Components::TransformComponent {.position = spawnPosition}, Components::WorldTransformComponent {.world = world, .previous = world},
+        Components::InputComponent {}, Components::MovementComponent {.speed = speed, .jumpForce = jumpForce},
+        Components::PhysicsComponent {.physicsHandle = charPhys},
+        Components::PhysicsStateComponent {
+            .currPosition = spawnPosition, .prevPosition = spawnPosition, .currRotation = JPH::Quat::sIdentity(), .prevRotation = JPH::Quat::sIdentity()
         }
-    );
-    reg.Add(player, Components::InputComponent {});
-    reg.Add(player, Components::MovementComponent {.speed = speed, .jumpForce = jumpForce});
-
-    // Create the Jolt CharacterVirtual with native Dual-Shape compound shape
-    const Entity charPhys = pc.CreateCharacter(JPH::RVec3(spawnPosition), config);
-    reg.Add(player, Components::PhysicsComponent {.physicsHandle = charPhys});
-    reg.Add(
-        player, Components::PhysicsStateComponent {
-                    .currPosition = spawnPosition, .prevPosition = spawnPosition, .currRotation = JPH::Quat::sIdentity(), .prevRotation = JPH::Quat::sIdentity()
-                }
     );
 
     // Configure third-person follow camera and strip FreeCam
@@ -265,21 +257,22 @@ inline auto SpawnCharacter(
         reg.Remove<Components::FreeCamTagComponent>(camEnt);
 
         reg.Add(
-            camEnt, Components::TargetCameraComponent {
-                        .target            = player,
-                        .distance          = 5.50f,
-                        .targetDistance    = 5.50f,
-                        .yaw               = 90.0f,
-                        .pitch             = -14.0f,
-                        .targetOffset      = JPH::Vec3(0.0f, 0.80f, 0.0f),
-                        .stiffness         = 24.0f,
-                        .vignetteIntensity = 1.10f,
-                        .vignettePower     = 1.50f,
-                        .fov               = 52.0f,
-                        .targetFov         = 52.0f
-                    }
+            camEnt,
+            Components::TargetCameraComponent {
+                .target            = player,
+                .distance          = 5.50f,
+                .targetDistance    = 5.50f,
+                .yaw               = 90.0f,
+                .pitch             = -14.0f,
+                .targetOffset      = JPH::Vec3(0.0f, 0.80f, 0.0f),
+                .stiffness         = 24.0f,
+                .vignetteIntensity = 1.10f,
+                .vignettePower     = 1.50f,
+                .fov               = 52.0f,
+                .targetFov         = 52.0f
+            },
+            Components::InputComponent {}
         );
-        reg.Add(camEnt, Components::InputComponent {});
     }
 
     return player;
