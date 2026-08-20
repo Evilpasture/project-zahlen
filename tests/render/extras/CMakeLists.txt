@@ -32,7 +32,10 @@ foreach(TEST_SRC IN LISTS EXTRAS_RENDER_TEST_SOURCES)
     )
 
     if(NOT MSVC)
-        target_compile_options(${TARGET_NAME} PRIVATE -fno-exceptions -fno-rtti)
+        # These tests import zahlen_extras PCMs, which are produced with the
+        # compiler default exception/RTTI ABI mode. Clang rejects mismatched
+        # module consumers before exported declarations become reachable.
+        target_compile_options(${TARGET_NAME} PRIVATE -fexceptions -frtti)
     endif()
 
     zahlen_enable_reflection(${TARGET_NAME})

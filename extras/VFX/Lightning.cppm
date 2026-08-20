@@ -34,15 +34,15 @@ module;
 
 export module ZHLN.Lightning;
 
-export namespace ZHLN {
+namespace ZHLN {
 
 // ============================================================================
 // 1. DATA TYPES & CONFIGURATION
 // ============================================================================
 
-enum class LightningPhase : uint8_t { Idle, SteppedLeader, ReturnStroke, Dissipating };
+export enum class LightningPhase: uint8_t { Idle, SteppedLeader, ReturnStroke, Dissipating };
 
-struct LightningConfig {
+export struct LightningConfig {
     float eta               = 2.0f;  // Branching factor / probability
     float peakCurrentKA     = 45.0f; // Peak current in kA
     float timeDilation      = 1.0f;  // Slow-motion factor
@@ -52,7 +52,7 @@ struct LightningConfig {
     float emissiveIntensity = 8000.0f;
 };
 
-struct LightningSegment {
+export struct LightningSegment {
     JPH::Vec3 start;
     JPH::Vec3 end;
     float     width;
@@ -63,7 +63,7 @@ struct LightningSegment {
 // 2. ECS COMPONENT (Pure DOD Data Storage - Zero Dead Memory)
 // ============================================================================
 
-struct LightningComponent {
+export struct LightningComponent {
     LightningConfig config {};
     LightningPhase  phase = LightningPhase::Idle;
 
@@ -110,15 +110,15 @@ struct LightningComponent {
 // 3. FRACTAL MESH GENERATOR
 // ============================================================================
 
-export namespace ZHLN::LightningGenerator {
+namespace ZHLN::LightningGenerator {
 
-struct GeneratedRibbon {
+export struct GeneratedRibbon {
     std::vector<VertexPosition>   positions;
     std::vector<VertexAttributes> attributes;
     uint32_t                      maxVertices = 0;
 };
 
-inline auto GenerateFractalSegments(JPH::Vec3Arg start, JPH::Vec3Arg end, float startWidth, const LightningConfig& config, std::mt19937& rng)
+export inline auto GenerateFractalSegments(JPH::Vec3Arg start, JPH::Vec3Arg end, float startWidth, const LightningConfig& config, std::mt19937& rng)
     -> std::vector<LightningSegment> {
     std::vector<LightningSegment> queue;
     queue.push_back({.start = start, .end = end, .width = startWidth, .branchLevel = 0.0f});
@@ -165,7 +165,7 @@ inline auto GenerateFractalSegments(JPH::Vec3Arg start, JPH::Vec3Arg end, float 
     return queue;
 }
 
-inline auto BuildCameraFacingRibbon(std::span<const LightningSegment> segments, JPH::Vec3Arg cameraPos) -> GeneratedRibbon {
+export inline auto BuildCameraFacingRibbon(std::span<const LightningSegment> segments, JPH::Vec3Arg cameraPos) -> GeneratedRibbon {
     GeneratedRibbon ribbon;
     ribbon.positions.reserve(segments.size() * 6);
     ribbon.attributes.reserve(segments.size() * 6);
@@ -220,7 +220,7 @@ inline auto BuildCameraFacingRibbon(std::span<const LightningSegment> segments, 
     return ribbon;
 }
 
-[[nodiscard]] inline auto EvaluateHeidler(float tUs, float i0, float t1, float t2) noexcept -> float {
+export [[nodiscard]] inline auto EvaluateHeidler(float tUs, float i0, float t1, float t2) noexcept -> float {
     if (tUs <= 0.0f || i0 <= 0.0f) {
         return 0.0f;
     }
@@ -235,12 +235,12 @@ inline auto BuildCameraFacingRibbon(std::span<const LightningSegment> segments, 
 // 4. ECS SYSTEM & API
 // ============================================================================
 
-export namespace ZHLN::Lightning {
+namespace ZHLN::Lightning {
 
 /**
  * @brief Spawns a procedural 3D branching lightning strike as an ECS entity.
  */
-auto Spawn(Engine& engine, JPH::RVec3Arg cloudPos, JPH::RVec3Arg groundPos, const LightningConfig& cfg = {}) -> Entity {
+export auto Spawn(Engine& engine, JPH::RVec3Arg cloudPos, JPH::RVec3Arg groundPos, const LightningConfig& cfg = {}) -> Entity {
     auto& reg = engine.GetRegistry();
     auto& rc  = engine.GetRenderContext();
 
@@ -344,7 +344,7 @@ auto Spawn(Engine& engine, JPH::RVec3Arg cloudPos, JPH::RVec3Arg groundPos, cons
 /**
  * @brief System update: advances strikes, evaluates Heidler curves, drives GPU material glow, and updates lights.
  */
-auto Update(Engine& engine, float dt) -> void {
+export auto Update(Engine& engine, float dt) -> void {
     auto&      rc   = engine.GetRenderContext();
     auto&      reg  = engine.GetRegistry();
     const auto ents = reg.GetEntitiesWith<LightningComponent>();
