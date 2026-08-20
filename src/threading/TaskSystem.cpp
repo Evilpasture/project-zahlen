@@ -224,13 +224,17 @@ void Dispatch(std::span<const Task> tasks, Counter* counter) {
         counter->value.fetch_add(tasks.size(), std::memory_order::relaxed);
     }
 
+    Fiber*     currentFiber   = Fiber::GetCurrent();
+    const bool nestedDispatch = currentFiber != nullptr && !currentFiber->isMain;
+
     for (const auto& task: tasks) {
-        // Dispatch never blocks waiting for a free fiber. Blocking here can
-        // deadlock both nested jobs and a saturated set of mutex waiters. Prefer
-        // a cached/global fiber, then execute inline as cooperative work.
+        // Parent task fibers must not block waiting for child fibers, but root
+        // dispatch preserves asynchronous queue semantics. Running root jobs
+        // inline can re-enter external job systems (notably Jolt) while they are
+        // still constructing dependency graphs and invalidate queued jobs.
         Fiber* f = PopLocalFiber();
         if (f == nullptr) {
-            f = s_freeQueue.TryPop();
+            f = nestedDispatch ? s_freeQueue.TryPop() : s_freeQueue.PopOrWait();
         }
         if (f == nullptr) {
             if (task.func != nullptr) {
