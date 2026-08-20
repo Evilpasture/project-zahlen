@@ -7,7 +7,9 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp> // Required for InitMainThread
 #include <array>
+#include <cstddef>
 #include <expected>
+#include <memory>
 
 // ============================================================================
 // Local Test Enums (Self-Contained)
@@ -37,6 +39,19 @@ struct SyncPrimTestSuite {
     struct Tests {
         // 1. Basic Mutex Locking/Unlocking Properties
         std::expected<void, ZHLN::Error> mutex_basic_lock_unlock() {
+            // Construction must initialize the lock byte even on dirty stack
+            // storage. The old trivial default constructor left this byte
+            // indeterminate and caused permanent "locked" states on macOS.
+            alignas(ZHLN::Mutex) std::array<std::byte, sizeof(ZHLN::Mutex)> dirtyStorage;
+            dirtyStorage.fill(std::byte {0xff});
+            auto*      initialized = std::construct_at(reinterpret_cast<ZHLN::Mutex*>(dirtyStorage.data()));
+            const bool dirtyTry    = initialized->try_lock();
+            ZHLN::Test::ExpectTrue(dirtyTry);
+            if (dirtyTry) {
+                initialized->unlock();
+            }
+            std::destroy_at(initialized);
+
             ZHLN::Mutex mutex;
 
             // Sequential lock/unlock

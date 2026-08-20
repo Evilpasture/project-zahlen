@@ -35,6 +35,17 @@ struct TaskSystemTestSuite {
     }
 
     struct Tests {
+        std::expected<void, ZHLN::Error> fiber_metadata_alignment() {
+            auto         noop    = [](void*) {};
+            ZHLN::Fiber* fiber   = ZHLN::Fiber::Create(131072, noop, nullptr);
+            const bool   aligned = fiber != nullptr && reinterpret_cast<uintptr_t>(fiber) % alignof(ZHLN::Fiber) == 0;
+            ZHLN::Fiber::Destroy(fiber);
+            if (!aligned) {
+                return std::unexpected(TaskSystemError::DispatchFailed);
+            }
+            return {};
+        }
+
         std::expected<void, ZHLN::Error> dispatch_and_wait() {
             std::atomic<int>          accum {0};
             ZHLN::TaskSystem::Counter counter;

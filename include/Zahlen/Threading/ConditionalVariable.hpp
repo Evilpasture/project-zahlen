@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Core/Atomic.hpp>
+#include <Zahlen/Threading/Mutex.hpp>
 #include <type_traits>
 
 namespace ZHLN {
@@ -37,14 +37,13 @@ class ConditionalVariable {
     void NotifyAll() noexcept;
 
   private:
-    // Trivial uninitialized atomic state to guarantee standard-layout / triviality.
-    // 0 = No active waiters, 1 = Active waiters present
-    ZHLN::Atomic<uint8_t> _bits;
+    // 0 = No active waiters, 1 = Active waiters present. This must be
+    // value-initialized; an indeterminate hint can permanently skip wakeups.
+    ZHLN::Atomic<uint8_t> _bits {};
 };
 
 static_assert(sizeof(ConditionalVariable) == 1, "ZHLN::ConditionalVariable must be exactly 1 byte!");
 static_assert(std::is_standard_layout_v<ConditionalVariable>, "ZHLN::ConditionalVariable must be standard layout!");
-static_assert(std::is_trivially_default_constructible_v<ConditionalVariable>, "ZHLN::ConditionalVariable must be trivially default constructible!");
 static_assert(std::is_trivially_copyable_v<ConditionalVariable>, "ZHLN::ConditionalVariable must be trivially copyable!");
 
 } // namespace ZHLN

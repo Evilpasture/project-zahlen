@@ -84,15 +84,15 @@ class Mutex {
     static constexpr uint8_t HAS_WAITERS = 0x02;
     static constexpr uint8_t POISONED    = 0x04;
 
-    ZHLN::Atomic<uint8_t> _bits;
+    ZHLN::Atomic<uint8_t> _bits {};
 
     [[gnu::cold, gnu::noinline]] void LockSlow() noexcept;
     [[gnu::cold, gnu::noinline]] void UnlockSlow() noexcept;
 
     // --- Debug Variables & Helpers ---
 #ifdef ZHLN_DEBUG
-    alignas(16) ZHLN::Atomic<bool> _hasOwner;
-    alignas(16) ZHLN::Atomic<uintptr_t> _owner;
+    alignas(16) ZHLN::Atomic<bool> _hasOwner {};
+    alignas(16) ZHLN::Atomic<uintptr_t> _owner {};
 
     void CheckPreLock() noexcept;
     void PostLock() noexcept;
@@ -113,11 +113,9 @@ class Mutex {
 // Guarantee 1-byte footprint in Release builds
 static_assert(kIsDebugMutex || sizeof(Mutex) == 1, "ZHLN::Mutex must be exactly 1 byte in Release mode!");
 
-// Guarantee it's a perfect POD
-static_assert(
-    kIsDebugMutex || (std::is_trivially_default_constructible_v<Mutex> && std::is_trivially_copyable_v<Mutex>),
-    "Mutex MUST be trivial in Release mode!"
-);
+// Initialization is explicit (an indeterminate lock byte is not a valid mutex),
+// while the type remains standard-layout and trivially copyable for dense ECS use.
+static_assert(kIsDebugMutex || (std::is_standard_layout_v<Mutex> && std::is_trivially_copyable_v<Mutex>), "Mutex must remain POD-like in Release mode!");
 
 /**
  * @brief Trivial RAII guard to avoid including <mutex> in interface headers.

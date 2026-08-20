@@ -56,6 +56,13 @@ struct WorkQueue {
         quit = true;
         cv.notify_all();
     }
+
+    void Reset() {
+        std::lock_guard    lock(mtx);
+        std::queue<Fiber*> empty;
+        fibers.swap(empty);
+        quit = false;
+    }
 };
 
 // --- Thread-Local Cache Optimization ---
@@ -144,8 +151,14 @@ static void WorkerMain(uint32_t index) {
 }
 
 void Init(uint32_t numThreads, uint32_t numFibers, size_t stackSize) {
+    if (!s_threads.empty() || !s_fiberPool.empty()) {
+        return;
+    }
     Platform::SetHighPriority();
     Fiber::InitMainThread();
+    s_readyQueue.Reset();
+    s_freeQueue.Reset();
+    t_localFiber = nullptr;
     if (numThreads == 0) {
         numThreads = std::thread::hardware_concurrency();
         if (numThreads == 0) {
@@ -195,6 +208,11 @@ void Shutdown() {
         Fiber::Destroy(f);
     }
     s_fiberPool.clear();
+    s_fiberData.clear();
+    s_readyQueue.Reset();
+    s_freeQueue.Reset();
+    t_localFiber  = nullptr;
+    s_workerCount = 0;
 }
 
 void Dispatch(std::span<const Task> tasks, Counter* counter) {
@@ -206,17 +224,13 @@ void Dispatch(std::span<const Task> tasks, Counter* counter) {
         counter->value.fetch_add(tasks.size(), std::memory_order::relaxed);
     }
 
-    Fiber*     currentFiber   = Fiber::GetCurrent();
-    const bool nestedDispatch = currentFiber != nullptr && !currentFiber->isMain;
-
     for (const auto& task: tasks) {
-        // A task fiber must never block waiting for another free fiber: all
-        // workers can otherwise hold parents while nested ParallelFor calls wait
-        // for a pool entry that cannot become free. Prefer a cached/global fiber,
-        // then execute inline as cooperative work when the pool is saturated.
+        // Dispatch never blocks waiting for a free fiber. Blocking here can
+        // deadlock both nested jobs and a saturated set of mutex waiters. Prefer
+        // a cached/global fiber, then execute inline as cooperative work.
         Fiber* f = PopLocalFiber();
         if (f == nullptr) {
-            f = nestedDispatch ? s_freeQueue.TryPop() : s_freeQueue.PopOrWait();
+            f = s_freeQueue.TryPop();
         }
         if (f == nullptr) {
             if (task.func != nullptr) {
