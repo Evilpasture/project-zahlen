@@ -43,13 +43,8 @@ foreach(SAMPLE_SRC IN LISTS SAMPLE_SOURCES)
         JPH_DOUBLE_PRECISION
     )
 
-    if(NOT MSVC)
-        target_compile_options(${SAMPLE_NAME} PRIVATE
-            $<$<AND:$<CXX_COMPILER_ID:GNU>,$<COMPILE_LANGUAGE:CXX>>:-fno-exceptions -fno-rtti>
-        )
-        if(WIN32)
-            target_link_options(${SAMPLE_NAME} PRIVATE -Xlinker /subsystem:console)
-        endif()
+    if(NOT MSVC AND WIN32)
+        target_link_options(${SAMPLE_NAME} PRIVATE -Xlinker /subsystem:console)
     endif()
 
     if(COMMAND zahlen_enable_reflection)

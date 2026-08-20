@@ -17,6 +17,7 @@
 #include <fstream>
 #include <mutex>
 #include <print>
+#include <utility>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -46,7 +47,12 @@ int CookMesh(int argc, char** argv) {
     std::string binMetaPath = fs::path(metaPath).replace_extension(".bin").string();
 
     Compiler::BinaryReader reader(binMetaPath);
-    Compiler::IRManifest   manifest = reader.Parse();
+    auto                   manifestResult = reader.Parse();
+    if (!manifestResult) {
+        std::println(stderr, "[zcook] ERROR: {}", manifestResult.error());
+        return 1;
+    }
+    Compiler::IRManifest manifest = std::move(*manifestResult);
 
     auto it = std::ranges::find_if(manifest.meshes, [&](const auto& m) { return m.id == meshId; });
     if (it == manifest.meshes.end()) {
@@ -158,7 +164,12 @@ int CookAnimation(int argc, char** argv) {
 
     std::string            binMetaPath = fs::path(metaPath).replace_extension(".bin").string();
     Compiler::BinaryReader reader(binMetaPath);
-    Compiler::IRManifest   manifest = reader.Parse();
+    auto                   manifestResult = reader.Parse();
+    if (!manifestResult) {
+        std::println(stderr, "[zcook] ERROR: {}", manifestResult.error());
+        return 1;
+    }
+    Compiler::IRManifest manifest = std::move(*manifestResult);
 
     auto it = std::ranges::find_if(manifest.animations, [&](const auto& a) { return a.id == animId; });
     if (it == manifest.animations.end()) {
@@ -427,7 +438,12 @@ int CookGLB(int argc, char** argv) {
 
     std::string            binMetaPath = fs::path(metaPath).replace_extension(".bin").string();
     Compiler::BinaryReader reader(binMetaPath);
-    Compiler::IRManifest   manifest = reader.Parse();
+    auto                   manifestResult = reader.Parse();
+    if (!manifestResult) {
+        std::println(stderr, "[zcook] ERROR: {}", manifestResult.error());
+        return 1;
+    }
+    Compiler::IRManifest manifest = std::move(*manifestResult);
 
     std::string levelFolder = fs::path(metaPath).parent_path().string();
     if (!GLB::EmitGLB(manifest, levelFolder, outPath)) {

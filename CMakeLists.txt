@@ -674,13 +674,14 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
 endif()
 
 if(NOT MSVC)
-    target_compile_options(zahlen_engine PRIVATE
-        $<$<AND:$<CXX_COMPILER_ID:GNU>,$<COMPILE_LANGUAGE:CXX>>:${GCC_ONLY_FLAGS}>
-        $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic>
-    )
-
-    target_compile_options(zahlen PRIVATE
-        $<$<AND:$<CXX_COMPILER_ID:GNU>,$<COMPILE_LANGUAGE:CXX>>:-fno-exceptions -fno-rtti>
+    # Module producers and every transitive consumer must agree on these ABI
+    # modes. Publish them from the engine target so core/extras PCMs, tools,
+    # samples, and tests cannot drift into incompatible configurations.
+    target_compile_options(zahlen_engine
+        PUBLIC $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>
+        PRIVATE
+            $<$<AND:$<CXX_COMPILER_ID:GNU>,$<COMPILE_LANGUAGE:CXX>>:${GCC_ONLY_FLAGS}>
+            $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic>
     )
     if(WIN32)
         target_link_options(zahlen_engine PRIVATE -Xlinker /subsystem:console)

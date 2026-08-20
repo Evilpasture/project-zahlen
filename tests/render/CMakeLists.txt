@@ -25,10 +25,6 @@ foreach(TEST_SRC IN LISTS RENDER_TEST_SOURCES)
         ${PROJECT_SOURCE_DIR}/tests
     )
 
-    if(NOT MSVC)
-        target_compile_options(${TARGET_NAME} PRIVATE -fno-exceptions -fno-rtti)
-    endif()
-
     zahlen_enable_reflection(${TARGET_NAME})
 
     # --- ASAN & UBSAN CONFIGURATION ---
