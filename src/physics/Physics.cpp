@@ -246,6 +246,18 @@ PhysicsContext::PhysicsContext(const PhysicsConfig& cfg): _impl(std::make_unique
 }
 
 PhysicsContext::~PhysicsContext() {
+    // CharacterVirtual instances retain listener/system pointers. Release them
+    // while the listeners, PhysicsSystem, and PhysicsWorld backing storage are
+    // still alive; allowing member destruction to release them after
+    // world.Shutdown() corrupts teardown state and faults on Apple ARM64.
+    for (auto& character: _impl->characterMap) {
+        if (character != nullptr) {
+            character->SetListener(nullptr);
+        }
+    }
+    _impl->activeCharacters.clear();
+    _impl->characterMap.clear();
+    _impl->physicsSystem.SetContactListener(nullptr);
     _impl->world.Shutdown();
 }
 
