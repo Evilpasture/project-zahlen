@@ -26,13 +26,14 @@ def export_sd_n_to_glb(blend_path: str, glb_path: str) -> bool:
     expr = """
 import bpy
 import mathutils
+import math
 import os
 
 FACIAL_HIDE_PATTERNS = [
     "eyelid", "eyebrow", "tongue", "blush", "expression", "mark",
     "anc-", "ctr-", "wgt-", "aux_mouth", "aux_screen", "aux_eye", "aux_face", "icosphere.001",
     "mouthless", "display_frame", "marks_frame", "solver", "warning", "full_x",
-    "x.l", "x.r", "tail_hooks"
+    "x.l", "x.r", "tail_hooks", "nurbspath.002"
 ]
 
 HAND_FINGER_PATTERNS = [
@@ -175,7 +176,7 @@ def convert_hair_curves_to_mesh():
                 continue
 
             name_lower = obj.name.lower()
-            if any(k in name_lower for k in ["tail", "curve_sock", "wing"]):
+            if any(k in name_lower for k in ["tail", "nurbspath.002", "nurbspath.026", "curve_sock", "wing"]):
                 continue
             if any("tail" in col.name.lower() for col in obj.users_collection):
                 continue
@@ -282,13 +283,13 @@ def bind_hair_meshes_to_rig(main_rig):
         name_lower = obj.name.lower()
         col_names = " ".join([c.name.lower() for c in obj.users_collection])
 
-        is_hair = "hair" in col_names or "hair" in name_lower or name_lower.startswith("nurbspath") or \
+        is_hair = "hair" in col_names or "hair" in name_lower or (name_lower.startswith("nurbspath") and "tail" not in col_names and "tail" not in name_lower and "nurbspath.002" not in name_lower and "nurbspath.026" not in name_lower) or \
                   any(s.material and "hair" in s.material.name.lower() for s in obj.material_slots)
 
         if not is_hair:
             continue
 
-        if is_limb_object(obj) or any(k in name_lower for k in ["tail", "wing"]):
+        if is_limb_object(obj) or any(k in name_lower for k in ["tail", "wing", "nurbspath.002", "nurbspath.026"]):
             continue
 
         world_mat = obj.matrix_world.copy()
@@ -335,14 +336,61 @@ def bind_hair_meshes_to_rig(main_rig):
 
     bpy.context.view_layer.update()
 
+def point_to_segment_projection(p, h, t):
+    v = t - h
+    w = p - h
+    c2 = v.dot(v)
+    if c2 <= 1e-8:
+        return 0.0, (p - h).length, h
+    c1 = w.dot(v)
+    t_param = max(0.0, min(1.0, c1 / c2))
+    proj = h + t_param * v
+    dist = (p - proj).length
+    return t_param, dist, proj
+
+def get_ordered_tail_bones(main_rig):
+    if not (main_rig and main_rig.data):
+        return []
+
+    ctr_tail_bones = []
+    for i in range(1, 20):
+        name_candidates = [f"CTR-Tail_{i}", f"CTR-Tail.{i:03d}", f"CTR-tail_{i}"]
+        found = next((main_rig.data.bones[n] for n in name_candidates if n in main_rig.data.bones), None)
+        if found:
+            ctr_tail_bones.append(found)
+        else:
+            break
+
+    if len(ctr_tail_bones) >= 3:
+        return ctr_tail_bones
+
+    def_tail_bones = [
+        b for b in main_rig.data.bones
+        if (b.name.lower().startswith("def-tail") or "tail" in b.name.lower()) and
+           not any(p in b.name for p in ["CTR-", "MCH-", "FK-", "IK-", "WGT-", "AUX_"])
+    ]
+    if def_tail_bones:
+        root_tail = next((b for b in def_tail_bones if b.parent is None or b.parent not in def_tail_bones), def_tail_bones[0])
+        ordered = [root_tail]
+        curr = root_tail
+        while curr:
+            children = [c for c in curr.children if c in def_tail_bones]
+            if children:
+                curr = children[0]
+                ordered.append(curr)
+            else:
+                break
+        return ordered
+
+    return [b for b in main_rig.data.bones if "tail" in b.name.lower() and not any(p in b.name for p in ["WGT-", "MCH-"])]
+
 def convert_and_rig_tail(main_rig):
-    print("[*] Converting Tail curve to 3D mesh and skinning to tail deform bones...", flush=True)
-    if not main_rig or not main_rig.data:
+    print("[*] Converting Tail cable to 3D mesh with 13-point CTR-Tail skinning...", flush=True)
+    if not (main_rig and main_rig.data):
         return
 
     main_rig.data.pose_position = 'REST'
     bpy.context.view_layer.update()
-    depsgraph = bpy.context.evaluated_depsgraph_get()
 
     def find_bone(candidates, fallback):
         for c in candidates:
@@ -354,60 +402,167 @@ def convert_and_rig_tail(main_rig):
                     return b.name
         return fallback
 
+    tail_bones = get_ordered_tail_bones(main_rig)
+    if not tail_bones:
+        print("[-] Warning: No tail bones found on armature!", flush=True)
+        return
+
+    for b in tail_bones:
+        b.use_deform = True
+
+    # 1. Convert syringe accessories curves (like NurbsPath.026 nanite fluid tube) to real MESH
+    for obj in list(bpy.data.objects):
+        if obj and getattr(obj, "type", None) in {'CURVE', 'SURFACE'} and not obj.name.startswith("__"):
+            name_l = obj.name.lower()
+            p_name_l = obj.parent.name.lower() if obj.parent else ""
+            if "nurbspath.026" in name_l or "tip" in p_name_l or ("syringe" in name_l and "tail" in name_l):
+                print(f"  [*] Converting tail syringe tube curve '{obj.name}' to MESH...", flush=True)
+                deselect_all_objects()
+                obj.select_set(True)
+                bpy.context.view_layer.objects.active = obj
+                try:
+                    bpy.ops.object.convert(target='MESH')
+                    obj.hide_render = False
+                    obj.hide_viewport = False
+                except Exception as e:
+                    print(f"  [-] Error converting '{obj.name}': {e}", flush=True)
+
+    # 2. Build continuous joint spine in world coordinates for main tail cable
+    joints = [main_rig.matrix_world @ tail_bones[0].head_local]
+    for b in tail_bones:
+        joints.append(main_rig.matrix_world @ b.tail_local)
+
+    seg_lengths = []
+    for i in range(len(joints) - 1):
+        seg_lengths.append((joints[i+1] - joints[i]).length)
+    
+    total_len = sum(seg_lengths) if sum(seg_lengths) > 1e-6 else 1.0
+    cum_dist = [0.0]
+    for l in seg_lengths:
+        cum_dist.append(cum_dist[-1] + l)
+
+    bone_centers = []
+    for i in range(len(tail_bones)):
+        c_param = (cum_dist[i] + cum_dist[i+1]) / (2.0 * total_len)
+        bone_centers.append((tail_bones[i].name, c_param))
+
+    hips_name = find_bone(["DEF-Hips", "Hips", "DEF-Pelvis"], None)
+    if hips_name and hips_name in main_rig.data.bones:
+        main_rig.data.bones[hips_name].use_deform = True
+
     tail_curves = [
         o for o in list(bpy.data.objects)
-        if o and getattr(o, "type", None) in {'CURVE', 'SURFACE'} and ("tail" in o.name.lower() or any("tail" in c.name.lower() for c in o.users_collection))
+        if o and getattr(o, "type", None) in {'CURVE', 'SURFACE'} and 
+           "tail" in o.name.lower() and "nurbspath.002" not in o.name.lower() and "nurbspath.026" not in o.name.lower() and
+           not o.name.startswith("__")
     ]
 
     for t_obj in tail_curves:
-        print(f"  [*] Evaluating and converting tail curve '{t_obj.name}' to MESH...", flush=True)
+        t_orig_name = t_obj.name
+        print(f"  [*] Baking Hook modifiers into smooth curved mesh for '{t_orig_name}'...", flush=True)
+
         t_obj.hide_render = False
         t_obj.hide_viewport = False
 
-        try:
-            obj_eval = t_obj.evaluated_get(depsgraph)
-            new_mesh = bpy.data.meshes.new_from_object(obj_eval, preserve_all_data_layers=True, depsgraph=depsgraph)
+        deselect_all_objects()
+        t_obj.select_set(True)
+        bpy.context.view_layer.objects.active = t_obj
 
-            t_orig_name = t_obj.name
+        try:
+            bpy.ops.object.duplicate()
+            tail_mesh_obj = bpy.context.view_layer.objects.active
+            tail_mesh_obj.name = t_orig_name
+
+            for m in tail_mesh_obj.modifiers:
+                m.show_viewport = True
+                m.show_render = True
+
+            bpy.ops.object.convert(target='MESH')
+            print(f"  [+] Converted curved mesh '{tail_mesh_obj.name}': {len(tail_mesh_obj.data.vertices)} vertices.", flush=True)
+
             t_obj.name = f"__orig_curve_{t_orig_name}"
             t_obj.hide_render = True
             t_obj.hide_viewport = True
 
-            tail_mesh_obj = bpy.data.objects.new(t_orig_name, new_mesh)
-            bpy.context.collection.objects.link(tail_mesh_obj)
+            if not tail_mesh_obj.material_slots and t_obj.material_slots:
+                for slot in t_obj.material_slots:
+                    if slot.material:
+                        tail_mesh_obj.data.materials.append(slot.material)
 
-            for slot in t_obj.material_slots:
-                if slot.material:
-                    tail_mesh_obj.data.materials.append(slot.material)
-
-            tail_mesh_obj.matrix_world = t_obj.matrix_world.copy()
-            tail_mesh_obj.hide_render = False
-            tail_mesh_obj.hide_viewport = False
+            if tail_mesh_obj.data and hasattr(tail_mesh_obj.data, "polygons"):
+                for poly in tail_mesh_obj.data.polygons:
+                    poly.use_smooth = True
 
             deselect_all_objects()
             tail_mesh_obj.select_set(True)
-            main_rig.select_set(True)
-            bpy.context.view_layer.objects.active = main_rig
-
+            bpy.context.view_layer.objects.active = tail_mesh_obj
             try:
-                bpy.ops.object.parent_set(type='ARMATURE_AUTO')
-                print(f"  [+] Successfully skinned tail mesh '{tail_mesh_obj.name}' along armature.", flush=True)
+                bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
             except Exception as e:
-                print(f"  [~] Notice auto weighting tail: {e}", flush=True)
-                arm_mod = tail_mesh_obj.modifiers.new(name="Armature", type='ARMATURE')
-                arm_mod.object = main_rig
-                hips_b = find_bone(["DEF-Hips", "Hips", "DEF-Tail_1"], "DEF-Hips")
-                vg = tail_mesh_obj.vertex_groups.new(name=hips_b)
-                if len(tail_mesh_obj.data.vertices) > 0:
-                    vg.add(list(range(len(tail_mesh_obj.data.vertices))), 1.0, 'REPLACE')
+                print(f"  [~] Notice applying transform on tail mesh: {e}", flush=True)
+
+            tail_mesh_obj.vertex_groups.clear()
+            vgroups = {b.name: tail_mesh_obj.vertex_groups.new(name=b.name) for b in tail_bones}
+            if hips_name:
+                vgroups[hips_name] = tail_mesh_obj.vertex_groups.new(name=hips_name)
+
+            sigma = 1.0 / (len(tail_bones) * 1.5)
+
+            for v in tail_mesh_obj.data.vertices:
+                p_world = v.co
+                
+                best_seg = 0
+                best_t = 0.0
+                best_dist = 1e9
+                for i in range(len(joints) - 1):
+                    t_p, d, _ = point_to_segment_projection(p_world, joints[i], joints[i+1])
+                    if d < best_dist:
+                        best_dist = d
+                        best_seg = i
+                        best_t = t_p
+
+                u = (cum_dist[best_seg] + best_t * seg_lengths[best_seg]) / total_len
+                u = max(0.0, min(1.0, u))
+
+                raw_w = []
+                for _, c_param in bone_centers:
+                    gw = math.exp(-((u - c_param) ** 2) / (2.0 * (sigma ** 2)))
+                    raw_w.append(gw)
+
+                hips_w = 0.0
+                if hips_name and u < 0.15:
+                    hips_w = math.exp(-((u - 0.0) ** 2) / (2.0 * ((sigma * 0.8) ** 2))) * 0.6
+
+                tot_w = sum(raw_w) + hips_w
+                if tot_w < 1e-6:
+                    tot_w = 1.0
+
+                for i, (b_name, _) in enumerate(bone_centers):
+                    nw = raw_w[i] / tot_w
+                    if nw > 0.01:
+                        vgroups[b_name].add([v.index], nw, 'REPLACE')
+
+                if hips_name and hips_w > 0.01:
+                    vgroups[hips_name].add([v.index], hips_w / tot_w, 'REPLACE')
+
+            tail_mesh_obj.parent = main_rig
+            tail_mesh_obj.parent_type = 'OBJECT'
+            tail_mesh_obj.matrix_world = main_rig.matrix_world
+
+            arm_mod = tail_mesh_obj.modifiers.new(name="Armature", type='ARMATURE')
+            arm_mod.object = main_rig
+
+            tail_mesh_obj.hide_render = False
+            tail_mesh_obj.hide_viewport = False
+            print(f"  [+] Successfully rigged smooth continuous tail mesh '{tail_mesh_obj.name}'.", flush=True)
 
         except Exception as e:
-            print(f"  [-] Error converting tail curve '{t_obj.name}': {e}", flush=True)
+            print(f"  [-] Error converting and rigging tail: {e}", flush=True)
 
     bpy.context.view_layer.update()
 
 def enable_all_deform_bones(main_rig):
-    print("[*] Enabling 'use_deform = True' on all deform, hair, tail, and limb bones...", flush=True)
+    print("[*] Enabling 'use_deform = True' on all deform, hair, CTR-Tail, and limb bones...", flush=True)
     if not (main_rig and main_rig.data):
         return
 
@@ -415,13 +570,17 @@ def enable_all_deform_bones(main_rig):
         b_name_lower = bone.name.lower()
         if b_name_lower.startswith("def-") or \
            b_name_lower.startswith("bone") or \
+           b_name_lower.startswith("ctr-tail") or \
            "hair" in b_name_lower or \
            "tail" in b_name_lower or \
            b_name_lower in [
                "root", "thigh.l", "thigh.r", "head", "foot.l", "foot.r", 
                "forearm.l", "forearm.r", "hand.l", "hand.r", "shin.l", "shin.r", "hips"
            ]:
-            bone.use_deform = True
+            if any(k in b_name_lower for k in ["wgt", "direction", "twist"]):
+                bone.use_deform = False
+            else:
+                bone.use_deform = True
         elif any(prefix in bone.name for prefix in ["CTR-", "MCH-", "FK-", "IK-", "WGT-", "AUX_"]):
             bone.use_deform = False
         else:
@@ -871,12 +1030,16 @@ def resolve_accessory_bone(obj, bones):
 
     col_names = " ".join([c.name.lower() for c in obj.users_collection])
 
-    # Skip hair objects here so they are processed in the dynamic hair pipeline
-    if "hair" in col_names or "hair" in name_lower or (name_lower.startswith("nurbspath") and "tail" not in col_names and "tail" not in name_lower):
+    if "hair" in col_names or "hair" in name_lower or (name_lower.startswith("nurbspath") and "tail" not in col_names and "tail" not in name_lower and "nurbspath.002" not in name_lower and "nurbspath.026" not in name_lower):
+        return None
+    if name_lower in ["tail", "nurbspath.002"] or name_lower.startswith("__orig_curve"):
         return None
 
-    # 1. Tail Syringe Bulb, Needle & Pieces (Tip, Syringe, Nanite, Bulb)
-    if any(k == name_lower or k in name_lower for k in ["tip", "tail_bulb", "syringe", "nanite", "acid"]) or \
+    if "hand.l" in col_names or "hand.r" in col_names or any(k in name_lower for k in ["plane.037", "plane.128", "circle.074", "circle.076", "circle.077", "circle.044", "circle.045"]):
+        return None
+
+    # 1. Tail Syringe Bulb, Needle & Nanite Fluid Tube (Tip, NurbsPath.026, Syringe, Nanite, Bulb)
+    if any(k == name_lower or k in name_lower for k in ["tip", "tail_bulb", "syringe", "nanite", "acid", "nurbspath.026"]) or \
        any(k in p_chain for k in ["tip", "tail_tip", "tail"]):
         if not any(k in name_lower for k in ["belt", "waist", "hips"]):
             return tail_tip_bone
@@ -916,19 +1079,11 @@ def resolve_accessory_bone(obj, bones):
     if "cylinder.037" in name_lower or "roundcube.046" in p_chain or "thigh_band.l" in name_lower:
         return thigh_l_bone
 
-    # 8. Left Hand & Fingers
-    if "hand.l" in col_names or "hand.l" in p_chain:
-        return hand_l_bone
-
-    # 9. Right Hand & Fingers
-    if "hand.r" in col_names or "hand.r" in p_chain:
-        return hand_r_bone
-
-    # 10. Pilot Armband
+    # 8. Pilot Armband
     if "armband" in name_lower:
         return arm_l_bone
 
-    # 11. Waist / Belt
+    # 9. Waist / Belt
     if "waist" in name_lower or "belt_n" in name_lower:
         return hips_bone
 
@@ -953,6 +1108,9 @@ def fix_and_bind_sd_n_accessories(main_rig):
                     return b.name
         return fallback
 
+    tail_bones = get_ordered_tail_bones(main_rig)
+    last_tail_bone = tail_bones[-1].name if tail_bones else "DEF-Tail_Tip"
+
     bones = {
         "head": find_bone(["DEF-Head", "Head", "head"], "DEF-Head"),
         "thigh_r": find_bone(["DEF-Thigh.R", "DEF-thigh.R", "DEF-UpLeg.R", "DEF-upleg.R", "Thigh.R", "thigh.R", "DEF-Leg.R"], "DEF-Thigh.R"),
@@ -963,7 +1121,7 @@ def fix_and_bind_sd_n_accessories(main_rig):
         "hand_r": find_bone(["DEF-Hand.R", "DEF-hand.R", "DEF-Wrist.R", "Hand.R", "DEF-Forearm.R"], "DEF-Hand.R"),
         "foot_r": find_bone(["DEF-Foot.R", "DEF-foot.R", "DEF-Shin.R", "DEF-shin.R", "Foot.R"], "DEF-Foot.R"),
         "foot_l": find_bone(["DEF-Foot.L", "DEF-foot.L", "DEF-Shin.L", "DEF-shin.L", "Foot.L"], "DEF-Foot.L"),
-        "tail_tip": find_bone(["DEF-Tail_Tip", "DEF-Tail_4", "DEF-Tail.004", "DEF-Tail_5", "Tail_Tip", "Tail.004"], "DEF-Tail_Tip"),
+        "tail_tip": find_bone([last_tail_bone, "CTR-Tail_13", "DEF-Tail_Tip", "DEF-Tail_4", "DEF-Tail.004", "DEF-Tail_5", "Tail_Tip"], last_tail_bone),
         "arm_l": find_bone(["DEF-Upper_arm.L", "DEF-upper_arm.L", "DEF-Forearm.L", "DEF-forearm.L", "Upper_Arm.L"], "DEF-Upper_arm.L"),
         "hips": find_bone(["DEF-Hips", "Hips", "hips", "DEF-Pelvis", "Pelvis"], "DEF-Hips"),
     }
@@ -1051,7 +1209,7 @@ def disable_and_scale_down_weapons(main_rig):
         is_in_weapons_col = any("weapon" in c.name.lower() for c in obj.users_collection)
 
         if (is_weapon or is_in_weapons_col) and not any(k in name_lower for k in [
-            "cylinder.005", "aux_door", "circle.082", "circle.083", "circle.084", "sphere.014", "sphere.015", "tip", "tail"
+            "cylinder.005", "aux_door", "circle.082", "circle.083", "circle.084", "sphere.014", "sphere.015", "tip", "tail", "nurbspath.002", "nurbspath.026", "plane.037", "plane.128"
         ]):
             print(f"  [-] Disabling/scaling down weapon mesh: '{obj.name}'", flush=True)
             if obj.data and hasattr(obj.data, "vertices"):
@@ -1064,12 +1222,13 @@ def disable_and_scale_down_weapons(main_rig):
     bpy.context.view_layer.update()
 
 def bind_hands_and_fingers_safely(main_rig):
-    print("[*] Converting author-parented hands and fingers to glTF-safe skinning...", flush=True)
-    if not main_rig or not main_rig.data:
+    print("[*] Binding and skinning all hand palms, fingers, and knuckles with applied rest matrices...", flush=True)
+    if not (main_rig and main_rig.data):
         return
 
     main_rig.data.pose_position = 'REST'
     bpy.context.view_layer.update()
+    depsgraph = bpy.context.evaluated_depsgraph_get()
 
     def find_bone(candidates, fallback):
         for c in candidates:
@@ -1084,44 +1243,101 @@ def bind_hands_and_fingers_safely(main_rig):
     hand_l_bone = find_bone(["DEF-Hand.L", "DEF-hand.L", "DEF-Wrist.L", "Hand.L", "DEF-Forearm.L"], "DEF-Hand.L")
     hand_r_bone = find_bone(["DEF-Hand.R", "DEF-hand.R", "DEF-Wrist.R", "Hand.R", "DEF-Forearm.R"], "DEF-Hand.R")
 
+    if hand_l_bone in main_rig.data.bones:
+        main_rig.data.bones[hand_l_bone].use_deform = True
+    if hand_r_bone in main_rig.data.bones:
+        main_rig.data.bones[hand_r_bone].use_deform = True
+
+    hand_objects = []
+
     for obj in list(bpy.data.objects):
-        if obj and getattr(obj, "type", None) == 'MESH' and not obj.hide_render:
-            if is_hand_or_finger(obj):
-                bone_target = None
-                if obj.parent == main_rig and obj.parent_type == 'BONE' and obj.parent_bone:
-                    bone_target = obj.parent_bone
+        if not (obj and getattr(obj, "type", None) == 'MESH' and not obj.hide_render):
+            continue
 
-                if not bone_target:
-                    name_lower = obj.name.lower()
-                    col_names = " ".join([c.name.lower() for c in obj.users_collection])
-                    parent_name = obj.parent.name.lower() if obj.parent else ""
-                    if ".r" in name_lower or ".r" in col_names or ".r" in parent_name or "right" in col_names:
-                        bone_target = hand_r_bone
-                    else:
-                        bone_target = hand_l_bone
+        name_lower = obj.name.lower()
+        col_names = " ".join([c.name.lower() for c in obj.users_collection])
+        parent_name = obj.parent.name.lower() if obj.parent else ""
 
-                world_mat = obj.matrix_world.copy()
-                obj.parent = main_rig
-                obj.parent_type = 'OBJECT'
-                obj.matrix_world = world_mat
+        is_in_hand_col = "hand.l" in col_names or "hand.r" in col_names or "hands" in col_names
+        is_hand_mesh = any(k in name_lower for k in ["plane.037", "plane.128"]) or is_hand_or_finger(obj)
+        is_hand_parent = any(k in parent_name for k in ["hand.l", "hand.r", "palm.l", "palm.r"])
 
-                arm_mod = next((m for m in obj.modifiers if m.type == 'ARMATURE'), None)
-                if not arm_mod:
-                    arm_mod = obj.modifiers.new(name="Armature", type='ARMATURE')
-                arm_mod.object = main_rig
+        if is_in_hand_col or is_hand_mesh or is_hand_parent:
+            if any(k in name_lower for k in ["claw", "blade", "smg", "cylinder.040", "cylinder.037", "tail", "nurbspath"]):
+                continue
 
-                if bone_target:
-                    if bone_target in main_rig.data.bones:
-                        main_rig.data.bones[bone_target].use_deform = True
-                    obj.vertex_groups.clear()
-                    vgroup = obj.vertex_groups.new(name=bone_target)
-                    if obj.data and hasattr(obj.data, "vertices") and len(obj.data.vertices) > 0:
-                        all_vert_indices = [v.index for v in obj.data.vertices]
-                        vgroup.add(all_vert_indices, 1.0, 'REPLACE')
+            target_bone = None
+            if obj.parent == main_rig and obj.parent_type == 'BONE' and obj.parent_bone:
+                if obj.parent_bone in main_rig.data.bones:
+                    target_bone = obj.parent_bone
 
-                obj.hide_render = False
-                obj.hide_viewport = False
+            if not target_bone:
+                if "hand.r" in col_names or ".r" in name_lower or ".r" in parent_name or name_lower == "plane.037":
+                    target_bone = hand_r_bone
+                else:
+                    target_bone = hand_l_bone
 
+            hand_objects.append((obj, target_bone))
+
+    print(f"  [*] Processing {len(hand_objects)} hand and finger meshes...", flush=True)
+
+    for obj, target_bone in hand_objects:
+        obj.hide_render = False
+        obj.hide_viewport = False
+
+        world_mat = obj.matrix_world.copy()
+
+        non_arm_mods = [m for m in obj.modifiers if m.type != 'ARMATURE']
+        if non_arm_mods:
+            try:
+                obj_eval = obj.evaluated_get(depsgraph)
+                new_mesh = bpy.data.meshes.new_from_object(obj_eval, preserve_all_data_layers=True, depsgraph=depsgraph)
+                old_mesh = obj.data
+                obj.data = new_mesh
+                if old_mesh and old_mesh.users == 0:
+                    bpy.data.meshes.remove(old_mesh)
+                for m in non_arm_mods:
+                    obj.modifiers.remove(m)
+            except Exception as e:
+                print(f"  [~] Notice baking modifiers on '{obj.name}': {safe_str(e)}", flush=True)
+
+        for c in list(obj.constraints):
+            obj.constraints.remove(c)
+
+        obj.parent = None
+        obj.matrix_world = world_mat
+        bpy.context.view_layer.update()
+
+        deselect_all_objects()
+        obj.select_set(True)
+        bpy.context.view_layer.objects.active = obj
+        try:
+            bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+        except Exception as e:
+            print(f"  [~] Notice applying transform on '{obj.name}': {e}", flush=True)
+
+        obj.parent = main_rig
+        obj.parent_type = 'OBJECT'
+        obj.matrix_world = main_rig.matrix_world
+
+        arm_mod = next((m for m in obj.modifiers if m.type == 'ARMATURE'), None)
+        if not arm_mod:
+            arm_mod = obj.modifiers.new(name="Armature", type='ARMATURE')
+        arm_mod.object = main_rig
+
+        if target_bone in main_rig.data.bones:
+            main_rig.data.bones[target_bone].use_deform = True
+
+        obj.vertex_groups.clear()
+        vg = obj.vertex_groups.new(name=target_bone)
+        if obj.data and hasattr(obj.data, "vertices") and len(obj.data.vertices) > 0:
+            all_indices = list(range(len(obj.data.vertices)))
+            vg.add(all_indices, 1.0, 'REPLACE')
+
+        obj.hide_render = False
+        obj.hide_viewport = False
+
+    main_rig.data.pose_position = 'REST'
     bpy.context.view_layer.update()
 
 def bake_and_attach_teeth(main_rig):
@@ -1357,7 +1573,7 @@ def skin_limbs_and_boots_safely(main_rig):
         "cylinder.022", "cylinder.024", "cylinder.025", "cylinder.026", 
         "cylinder.030", "cylinder.035", "cylinder.037", "cylinder.038", 
         "cylinder.039", "cylinder.040", "cylinder.041", "cylinder.043", 
-        "cylinder.063", "sphere.014", "sphere.015", "circle.", "plane.", "tip", "tail"
+        "cylinder.063", "sphere.014", "sphere.015", "circle.", "plane.", "tip", "tail", "nurbspath.002", "roundcube."
     ]
 
     for obj in bpy.data.objects:
@@ -1478,7 +1694,7 @@ def fix_and_bake_mouth_shrink(main_rig):
         depsgraph = bpy.context.evaluated_depsgraph_get()
         try:
             mouth_eval = mouth_obj.evaluated_get(depsgraph)
-            new_mesh = bpy.data.meshes.new_from_object(obj_eval, preserve_all_data_layers=True, depsgraph=depsgraph)
+            new_mesh = bpy.data.meshes.new_from_object(mouth_eval, preserve_all_data_layers=True, depsgraph=depsgraph)
             old_mesh = mouth_obj.data
             mouth_obj.data = new_mesh
             if old_mesh and old_mesh.users == 0:
@@ -1559,18 +1775,23 @@ def hide_non_character_widgets_and_symbols():
     HIDE_PATTERNS = [
         "WGT", "Widget", "Solver", "Warning", "X.L", "X.R", "Full_X", 
         "WD_Symbol", "Display_Frame", "Marks_Frame", "Curve_Sock",
-        "Mouthless", "Hide_Mouth", "ANC-Teeth"
+        "Mouthless", "Hide_Mouth", "ANC-Teeth", "NurbsPath.002"
     ]
 
     for obj in list(bpy.data.objects):
         if not obj:
             continue
         name_lower = obj.name.lower()
+        if name_lower == "nurbspath.002":
+            obj.hide_render = True
+            obj.hide_viewport = True
+            continue
+
         if "nurbspath" in name_lower:
             is_head_hair = any(c.name.lower() in ["hair", "head", "head accessories"] for c in obj.users_collection) or \
                            any(s.material and "hair" in s.material.name.lower() for s in obj.material_slots) or \
                            "hair" in name_lower
-            is_tail = "tail" in name_lower or any("tail" in c.name.lower() for c in obj.users_collection)
+            is_tail = "tail" in name_lower or "nurbspath.026" in name_lower or any("tail" in c.name.lower() for c in obj.users_collection)
             if not (is_head_hair or is_tail):
                 obj.hide_render = True
                 continue
@@ -1583,7 +1804,7 @@ def hide_non_character_widgets_and_symbols():
             is_head_hair = any("hair" in c.name.lower() for c in obj.users_collection) or \
                            any(s.material and "hair" in s.material.name.lower() for s in obj.material_slots) or \
                            "hair" in name_lower
-            is_tail = "tail" in name_lower or any("tail" in c.name.lower() for c in obj.users_collection)
+            is_tail = "tail" in name_lower or "nurbspath.026" in name_lower or any("tail" in c.name.lower() for c in obj.users_collection)
             if not (is_head_hair or is_tail):
                 obj.hide_render = True
                 continue
@@ -1594,6 +1815,10 @@ def final_facial_and_widget_cleanup_pass():
     print("[*] Enforcing hide state for floating 3D facial features & GUI elements before glTF write...", flush=True)
     for obj in list(bpy.data.objects):
         if not obj:
+            continue
+        if obj.name.lower() == "nurbspath.002":
+            obj.hide_render = True
+            obj.hide_viewport = True
             continue
         if should_hide_facial_element(obj.name) or any(k in obj.name.lower() for k in ["x.l", "x.r", "full_x"]):
             obj.hide_render = True
@@ -1817,7 +2042,7 @@ def main():
         main_rig.data.pose_position = 'REST'
     bpy.context.view_layer.update()
 
-    # 1. Convert hair curves to mesh
+    # 1. Convert hair curves to mesh (NurbsPath.002 & NurbsPath.026 are explicitly skipped)
     convert_hair_curves_to_mesh()
 
     # 2. Setup Bone Hierarchy (Root, Shoulders, Hair Chains)
@@ -1826,7 +2051,7 @@ def main():
     merge_and_setup_hair_rig(main_rig)
     bind_hair_meshes_to_rig(main_rig)
 
-    # 3. Convert & Rig Tail (Curves -> 3D Mesh + Deform Skinning)
+    # 3. Convert & Rig Tail (Cable with 13-point CTR-Tail Skinning, NurbsPath.026 converted to mesh)
     convert_and_rig_tail(main_rig)
 
     # 4. Enable Deform Flags on all Bone Chains
@@ -1868,7 +2093,7 @@ def main():
         if target_objs:
             bake_procedural_material(mat.name, target_objs, resolution=2048)
 
-    # 9. Final Armature Binding, Weapon Scaling & Eye Bake
+    # 9. Final Armature Binding, Hands/Fingers Skinning, Weapon Scaling & Eye Bake
     skin_limbs_and_boots_safely(main_rig)
     bind_hands_and_fingers_safely(main_rig)
     bake_eyes_onto_visor(main_rig)

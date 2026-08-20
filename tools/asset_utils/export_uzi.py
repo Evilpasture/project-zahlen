@@ -1184,7 +1184,7 @@ def attach_socks_to_bones(main_rig):
     bpy.context.view_layer.update()
 
 def skin_limbs_and_boots_safely(main_rig):
-    print("[*] Binding metal limb meshes and solidifying boots (preventing loose lace tearing)...", flush=True)
+    print("[*] Preserving limb skinning and boot hierarchies safely...", flush=True)
     if not main_rig or not main_rig.data:
         return
 
@@ -1199,18 +1199,31 @@ def skin_limbs_and_boots_safely(main_rig):
                 if not is_hand_or_finger(obj):
                     limb_objects.append(obj)
 
+    # Exclude sole accessories (Cylinder.022, .024, .026, .035, .038, .040, Plane.*)
+    # so they remain attached to their toe/sole parent bones
+    EXCLUDED_SOLE_PATTERNS = ["cylinder.022", "cylinder.024", "cylinder.025", "cylinder.026", "cylinder.035", "cylinder.038", "cylinder.040", "plane."]
+
     for obj in bpy.data.objects:
         if obj and getattr(obj, "type", None) == 'MESH' and not obj.hide_render:
             name_lower = obj.name.lower()
+            if any(p in name_lower for p in EXCLUDED_SOLE_PATTERNS):
+                continue
             if is_limb_object(obj) or any(k in name_lower for k in [
                 "cylinder.004", "cylinder.005", "cylinder.006", "cylinder.019", "cylinder.020",
-                "cylinder.021", "cylinder.024", "cylinder.025", "cylinder.026",
-                "cylinder.029", "cylinder.042", "cylinder.044", "cylinder.046"
+                "cylinder.021", "cylinder.029", "cylinder.042", "cylinder.044", "cylinder.046"
             ]):
                 if obj not in limb_objects:
                     limb_objects.append(obj)
 
     for obj in limb_objects:
+        # If the object already has an Armature modifier and vertex groups (e.g. Boots Cylinder.004 & .005),
+        # keep its author skinning intact!
+        has_armature = any(m.type == 'ARMATURE' for m in obj.modifiers)
+        if has_armature and obj.vertex_groups:
+            obj.hide_render = False
+            obj.hide_viewport = False
+            continue
+
         bone_target = None
         if obj.parent == main_rig and obj.parent_type == 'BONE' and obj.parent_bone:
             bone_target = obj.parent_bone
@@ -1242,86 +1255,6 @@ def skin_limbs_and_boots_safely(main_rig):
 
         obj.hide_render = False
         obj.hide_viewport = False
-
-    # Fix Left Boot (Cylinder.004) loose lace islands to prevent tearing
-    left_boot = bpy.data.objects.get("Cylinder.004")
-    if left_boot and getattr(left_boot, "type", None) == 'MESH':
-        foot_bone = "DEF-Foot.L" if "DEF-Foot.L" in main_rig.data.bones else ("Foot.L" if "Foot.L" in main_rig.data.bones else "DEF-Shin.L")
-        shin_bone = "DEF-Shin.L" if "DEF-Shin.L" in main_rig.data.bones else "Shin.L"
-
-        for vg in list(left_boot.vertex_groups):
-            vg_lower = vg.name.lower()
-            if any(k in vg_lower for k in [".r", "_r", "right", "head", "hips", "root"]):
-                left_boot.vertex_groups.remove(vg)
-
-        vg_foot = left_boot.vertex_groups.get(foot_bone) or left_boot.vertex_groups.new(name=foot_bone)
-        for v in left_boot.data.vertices:
-            v_weights = [g.weight for g in v.groups if g.group < len(left_boot.vertex_groups)]
-            if not v_weights or max(v_weights) < 0.2:
-                vg_foot.add([v.index], 1.0, 'REPLACE')
-
-        deselect_all_objects()
-        left_boot.select_set(True)
-        bpy.context.view_layer.objects.active = left_boot
-        try:
-            bpy.ops.object.vertex_group_clean(group_select_mode='ALL', limit=0.01)
-            bpy.ops.object.vertex_group_limit_total(group_select_mode='ALL', limit=4)
-            bpy.ops.object.vertex_group_normalize_all(group_select_mode='ALL', lock_active=False)
-        except Exception:
-            pass
-
-    # Rigidly bind every *foot-dominant* limb object to its semantic foot. A
-    # 100% single-joint skin is the glTF-safe equivalent of bone parenting and
-    # avoids relying on Blender object names after export. The side-purity gate
-    # deliberately ignores a combined two-boot mesh so it is never collapsed
-    # onto one foot.
-    def resolve_foot_bone(side):
-        suffix = ".L" if side == "left" else ".R"
-        candidates = [f"DEF-Foot{suffix}", f"Foot{suffix}", f"DEF_Foot_{suffix[-1]}", f"Foot_{suffix[-1]}"]
-        return next((name for name in candidates if name in main_rig.data.bones), None)
-
-    semantic_feet = [name for name in [resolve_foot_bone("left"), resolve_foot_bone("right")] if name]
-    for obj in limb_objects:
-        if not (obj and getattr(obj, "type", None) == 'MESH' and obj.data and len(obj.data.vertices) > 0):
-            continue
-
-        foot_scores = {bone: 0.0 for bone in semantic_feet}
-        foot_coverage = {bone: 0 for bone in semantic_feet}
-        total_weight = 0.0
-        for vertex in obj.data.vertices:
-            covered_bones = set()
-            for assignment in vertex.groups:
-                if assignment.group >= len(obj.vertex_groups):
-                    continue
-                weight = assignment.weight
-                total_weight += weight
-                group_name = obj.vertex_groups[assignment.group].name
-                if group_name in foot_scores:
-                    foot_scores[group_name] += weight
-                    if weight >= 0.20:
-                        covered_bones.add(group_name)
-            for bone in covered_bones:
-                foot_coverage[bone] += 1
-
-        if not foot_scores:
-            continue
-        target_bone = max(foot_scores, key=foot_scores.get)
-        target_score = foot_scores[target_bone]
-        total_foot_score = sum(foot_scores.values())
-        side_purity = target_score / max(total_foot_score, 1.0e-8)
-        dominance = target_score / max(total_weight, 1.0e-8)
-        coverage = foot_coverage[target_bone] / len(obj.data.vertices)
-
-        # Keep the existing source-asset repair as a fallback marker, but all
-        # other footwear is discovered entirely from its imported skin data.
-        source_boot_fallback = obj == left_boot and target_bone == resolve_foot_bone("left")
-        if not source_boot_fallback and (side_purity < 0.80 or (dominance < 0.45 and coverage < 0.60)):
-            continue
-
-        obj.vertex_groups.clear()
-        rigid_group = obj.vertex_groups.new(name=target_bone)
-        rigid_group.add(list(range(len(obj.data.vertices))), 1.0, 'REPLACE')
-        print(f"  [+] Rigidly attached foot-dominant mesh '{obj.name}' to '{target_bone}'.", flush=True)
 
     main_rig.data.pose_position = 'REST'
     bpy.context.view_layer.update()

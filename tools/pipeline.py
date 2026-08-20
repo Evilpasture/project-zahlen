@@ -10,6 +10,7 @@ import argparse
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from asset_utils.export_pomni import export_blend_to_glb as export_pomni_to_glb
 from asset_utils.export_uzi import export_uzi_to_glb
+from asset_utils.export_sd_n import export_sd_n_to_glb
 from asset_utils.cleaner import sanitize_glb
 from asset_utils.baker import bake_material_textures
 
@@ -19,7 +20,13 @@ def dispatch_exporter(input_path, output_path, character_override="auto") -> boo
     char_type = character_override.lower()
     input_lower = input_path.lower()
 
-    if char_type == "uzi" or (char_type == "auto" and "uzi" in input_lower):
+    if char_type in ("n", "sd-n", "sd_n") or (
+        char_type == "auto"
+        and any(k in input_lower for k in ["sd-n", "sd_n", "sdn", "/n.", "\\n."])
+    ):
+        print("[*] Profile Selected: SD-N (Toxilisk Rig Exporter)")
+        return export_sd_n_to_glb(input_path, output_path)
+    elif char_type == "uzi" or (char_type == "auto" and "uzi" in input_lower):
         print("[*] Profile Selected: Uzi (Toxilisk Rig Exporter)")
         return export_uzi_to_glb(input_path, output_path)
     elif char_type == "pomni" or (char_type == "auto" and "pomni" in input_lower):
@@ -39,7 +46,7 @@ def main():
     )
     parser.add_argument(
         "--character",
-        choices=["auto", "pomni", "uzi"],
+        choices=["auto", "pomni", "uzi", "n", "sd-n"],
         default="auto",
         help="Character profile to run (default: auto-detect from path)",
     )
