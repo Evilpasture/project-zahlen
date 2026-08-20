@@ -40,7 +40,14 @@ foreach(TEST_SRC IN LISTS TEST_SOURCES)
     )
 
     if(NOT MSVC)
-        target_compile_options(${TARGET_NAME} PRIVATE -fno-exceptions -fno-rtti)
+        # A C++ module consumer must use the same exception/RTTI ABI mode as the
+        # PCM producer. zahlen_extras currently builds with the compiler default
+        # (exceptions + RTTI), so keep its module integration test compatible.
+        if("${TARGET_NAME}" STREQUAL "TestProceduralAnimation" AND TARGET zahlen_extras)
+            target_compile_options(${TARGET_NAME} PRIVATE -fexceptions -frtti)
+        else()
+            target_compile_options(${TARGET_NAME} PRIVATE -fno-exceptions -fno-rtti)
+        endif()
     endif()
 
     # Applies the required reflection flags (-freflection / custom libc++) configured in the root
