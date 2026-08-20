@@ -869,9 +869,14 @@ void ConfigureHumanoidChildOfConstraints(RigBoneMap& map) noexcept {
         constraint.localPoseDelta        = JPH::Mat44::sIdentity();
     };
 
-    // Store semantic parents before their dependants. In particular, repairing
-    // a detached chest can move both forearms through the imported subtree, so
-    // hands must be attached only after every possible torso correction.
+    // Store semantic parents before their dependants. Knee constraints are
+    // positional joints: they carry a detached shin to the endpoint authored
+    // by its thigh without replacing the shin rotation produced by leg IK.
+    addConstraint(CharacterBone::ThighL, CharacterBone::ShinL, RigChildOfKind::Knee);
+    addConstraint(CharacterBone::ThighR, CharacterBone::ShinR, RigChildOfKind::Knee);
+
+    // Repairing a detached chest can move both forearms through the imported
+    // subtree, so hands attach only after every possible torso correction.
     addConstraint(CharacterBone::SupSpine, CharacterBone::Chest, RigChildOfKind::Chest);
     addConstraint(CharacterBone::Chest, CharacterBone::Neck, RigChildOfKind::Neck);
     addConstraint(CharacterBone::Neck, CharacterBone::Head, RigChildOfKind::Head);
@@ -1530,16 +1535,20 @@ size_t ProceduralAnimation::ApplyChildOfConstraints(
     bool        applyFootAttachments
 ) noexcept {
     // Corrections are order-dependent because each one carries the child's
-    // imported subtree. Resolve the torso from proximal to distal, then attach
-    // the hands and rigid footwear after all possible torso/limb movement. Do
-    // not depend on storage order: discovery may reorder the array.
+    // imported subtree. Resolve the torso from proximal to distal, pin knees
+    // before footwear, then attach hands and rigid footwear after all possible
+    // torso/limb movement. Do not depend on storage order: discovery may
+    // reorder the array.
     constexpr std::array applyOrder {
-        RigChildOfKind::Chest, RigChildOfKind::Neck, RigChildOfKind::Head, RigChildOfKind::Hand, RigChildOfKind::FootAttachment,
+        RigChildOfKind::Chest, RigChildOfKind::Neck, RigChildOfKind::Head, RigChildOfKind::Knee, RigChildOfKind::Hand, RigChildOfKind::FootAttachment,
     };
 
     size_t appliedCount = 0;
     for (RigChildOfKind kind: applyOrder) {
-        const bool enabled = (kind == RigChildOfKind::Hand && applyHands) || (kind == RigChildOfKind::Chest && applyChest) ||
+        // Knee integrity is structural rather than an optional animation
+        // layer. A detached semantic shin must remain pinned even when every
+        // configurable child-of repair is disabled.
+        const bool enabled = kind == RigChildOfKind::Knee || (kind == RigChildOfKind::Hand && applyHands) || (kind == RigChildOfKind::Chest && applyChest) ||
                              (kind == RigChildOfKind::Neck && applyNeck) || (kind == RigChildOfKind::Head && applyHead) ||
                              (kind == RigChildOfKind::FootAttachment && applyFootAttachments);
         if (!enabled) {
@@ -1553,8 +1562,20 @@ size_t ProceduralAnimation::ApplyChildOfConstraints(
             }
 
             const JPH::Mat44 previousChild    = boneMap.modelTransforms[constraint.child];
-            const JPH::Mat44 constrainedChild = boneMap.modelTransforms[constraint.parent] * constraint.bindRelative * constraint.localPoseDelta;
-            const JPH::Mat44 modelCorrection  = constrainedChild * previousChild.Inversed();
+            JPH::Mat44       constrainedChild = previousChild;
+            if (kind == RigChildOfKind::Knee) {
+                // This is a ball-joint position constraint, not a rigid
+                // child-of transform. Keep the evaluated shin basis (including
+                // its authored knee bend and procedural IK correction) and pin
+                // only its origin to the thigh's fixed bind-space endpoint.
+                // Ignoring child translation channels here makes upper-leg
+                // length invariant even in a flattened control hierarchy.
+                const JPH::Vec3 jointPosition = (boneMap.modelTransforms[constraint.parent] * constraint.bindRelative).GetTranslation();
+                constrainedChild.SetTranslation(jointPosition);
+            } else {
+                constrainedChild = boneMap.modelTransforms[constraint.parent] * constraint.bindRelative * constraint.localPoseDelta;
+            }
+            const JPH::Mat44 modelCorrection = constrainedChild * previousChild.Inversed();
             for (RigNodeIndex node = 0; node < boneMap.nodeCount; ++node) {
                 if (IsNodeDescendant(boneMap, node, constraint.child)) {
                     boneMap.modelTransforms[node] = modelCorrection * boneMap.modelTransforms[node];
@@ -1710,11 +1731,16 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
                 complete ? "complete" : "partial", mappedCoreBones, kCoreBoneCount, mappedHairStrands, boneMap->sourceHairStrandCount, mappedHairBones
             );
             if (boneMap->childOfConstraintCount > 0) {
+                size_t kneeJoints      = 0;
                 size_t footAttachments = 0;
                 for (size_t index = 0; index < boneMap->childOfConstraintCount; ++index) {
+                    kneeJoints += boneMap->childOfConstraints[index].kind == RigChildOfKind::Knee ? 1u : 0u;
                     footAttachments += boneMap->childOfConstraints[index].kind == RigChildOfKind::FootAttachment ? 1u : 0u;
                 }
-                ZHLN::Log("[ProceduralAnimation] Added {} child-of constraints ({} foot attachments).", boneMap->childOfConstraintCount, footAttachments);
+                ZHLN::Log(
+                    "[ProceduralAnimation] Added {} semantic constraints ({} knee joints; {} foot attachments).", boneMap->childOfConstraintCount, kneeJoints,
+                    footAttachments
+                );
                 const RigNodeIndex footL = boneMap->nodeIndices[BoneSlot(CharacterBone::FootL)];
                 const RigNodeIndex footR = boneMap->nodeIndices[BoneSlot(CharacterBone::FootR)];
                 for (size_t index = 0; index < boneMap->childOfConstraintCount; ++index) {
@@ -1797,8 +1823,13 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
         const bool neckChildOfEnabled     = config == nullptr || config->enforceNeckChildOf;
         const bool headChildOfEnabled     = config == nullptr || config->enforceHeadChildOf;
         const bool footAttachmentsEnabled = config == nullptr || config->enforceFootAttachments;
-        const bool childOfEnabled         = handChildOfEnabled || chestChildOfEnabled || neckChildOfEnabled || headChildOfEnabled || footAttachmentsEnabled;
-        const bool locomotionSyncEnabled  = animator != nullptr && tracks != nullptr && tracks->synchronizeToStrideWheel;
+        bool       hasKneeConstraints     = false;
+        for (size_t index = 0; index < boneMap->childOfConstraintCount; ++index) {
+            hasKneeConstraints = hasKneeConstraints || boneMap->childOfConstraints[index].kind == RigChildOfKind::Knee;
+        }
+        const bool childOfEnabled        = hasKneeConstraints || handChildOfEnabled || chestChildOfEnabled || neckChildOfEnabled || headChildOfEnabled ||
+                                           footAttachmentsEnabled;
+        const bool locomotionSyncEnabled = animator != nullptr && tracks != nullptr && tracks->synchronizeToStrideWheel;
 
         const JPH::Vec3 velocityWorld   = physicsComponent != nullptr ? physics.GetCharacterVelocity(physicsComponent->physicsHandle) : JPH::Vec3::sZero();
         const JPH::Quat rootRotation    = transform->rotation.Normalized();
@@ -1831,6 +1862,11 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
         }
         ProceduralAnimation::CaptureFingerPoseDeltas(*boneMap);
         ResolveForwardKinematics(*boneMap);
+        if (hasKneeConstraints) {
+            // Normalize detached export hierarchies before any solver measures
+            // leg lengths. The final Stage 7 pass pins the knees again after IK.
+            ProceduralAnimation::ApplyChildOfConstraints(*boneMap, false, false, false, false, false);
+        }
 
         // Stages 1-2: apply optional gait and whole-body COM layers after the
         // synchronized authored pose has been evaluated.
@@ -2039,9 +2075,10 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
         // system. It consumes hit commands, decays motor stiffness, and blends
         // Jolt ragdoll poses over this kinematic target.
 
-        // Stage 7: enforce child-of relationships before recovering local
-        // transforms. The repaired chain is SupSpine -> Chest -> Neck -> Head;
-        // detached hands and rigid footwear carry their imported subtrees.
+        // Stage 7: enforce semantic relationships before recovering local
+        // transforms. Detached knee joints are position-pinned before rigid
+        // footwear; the SupSpine -> Chest -> Neck -> Head chain and detached
+        // hands carry their imported subtrees.
         if (childOfEnabled) {
             ProceduralAnimation::ApplyChildOfConstraints(
                 *boneMap, handChildOfEnabled, chestChildOfEnabled, neckChildOfEnabled, headChildOfEnabled, footAttachmentsEnabled

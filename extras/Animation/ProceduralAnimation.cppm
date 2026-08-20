@@ -84,9 +84,13 @@ enum class RigChildOfKind : uint8_t {
     Neck,
     Head,
     FootAttachment,
+    Knee,
 };
 
 struct RigChildOfConstraint {
+    // Knee constraints pin only the child joint position. This preserves the
+    // authored/procedural shin rotation while preventing a flattened export
+    // hierarchy from opening a gap between the thigh and shin.
     RigNodeIndex   parent         = InvalidRigNode;
     RigNodeIndex   child          = InvalidRigNode;
     RigChildOfKind kind           = RigChildOfKind::Hand;

@@ -223,16 +223,22 @@ struct ProceduralAnimationTestSuite {
             const size_t hipsNode                  = ZHLN::BoneSlot(ZHLN::CharacterBone::Hips);
             const size_t handLNode                 = ZHLN::BoneSlot(ZHLN::CharacterBone::HandL);
             const size_t handRNode                 = ZHLN::BoneSlot(ZHLN::CharacterBone::HandR);
+            const size_t shinLNode                 = ZHLN::BoneSlot(ZHLN::CharacterBone::ShinL);
+            const size_t shinRNode                 = ZHLN::BoneSlot(ZHLN::CharacterBone::ShinR);
             const size_t chestNode                 = ZHLN::BoneSlot(ZHLN::CharacterBone::Chest);
             const size_t neckNode                  = ZHLN::BoneSlot(ZHLN::CharacterBone::Neck);
             const size_t headNode                  = ZHLN::BoneSlot(ZHLN::CharacterBone::Head);
             prefab.nodes[handLNode].parentIndex    = static_cast<int32_t>(hipsNode);
             prefab.nodes[handRNode].parentIndex    = static_cast<int32_t>(hipsNode);
+            prefab.nodes[shinLNode].parentIndex    = static_cast<int32_t>(hipsNode);
+            prefab.nodes[shinRNode].parentIndex    = static_cast<int32_t>(hipsNode);
             prefab.nodes[chestNode].parentIndex    = static_cast<int32_t>(hipsNode);
             prefab.nodes[neckNode].parentIndex     = static_cast<int32_t>(hipsNode);
             prefab.nodes[headNode].parentIndex     = static_cast<int32_t>(hipsNode);
             prefab.nodes[handLNode].localTransform = map.modelTransforms[hipsNode].Inversed() * map.modelTransforms[handLNode];
             prefab.nodes[handRNode].localTransform = map.modelTransforms[hipsNode].Inversed() * map.modelTransforms[handRNode];
+            prefab.nodes[shinLNode].localTransform = map.modelTransforms[hipsNode].Inversed() * map.modelTransforms[shinLNode];
+            prefab.nodes[shinRNode].localTransform = map.modelTransforms[hipsNode].Inversed() * map.modelTransforms[shinRNode];
             prefab.nodes[chestNode].localTransform = map.modelTransforms[hipsNode].Inversed() * map.modelTransforms[chestNode];
             prefab.nodes[neckNode].localTransform  = map.modelTransforms[hipsNode].Inversed() * map.modelTransforms[neckNode];
             prefab.nodes[headNode].localTransform  = map.modelTransforms[hipsNode].Inversed() * map.modelTransforms[headNode];
@@ -310,7 +316,7 @@ struct ProceduralAnimationTestSuite {
 
             ZHLN::RigBoneMap importedMap;
             if (!ZHLN::BuildBoneMap(prefab, skeleton, importedMap) || importedMap.parentIndices[malformedNode] != ZHLN::InvalidRigNode ||
-                importedMap.childOfConstraintCount != 10 || importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Spine)] != 3 ||
+                importedMap.childOfConstraintCount != 12 || importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Spine)] != 3 ||
                 importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::SupSpine)] != 2 ||
                 importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::UpperArmL)] != 8 ||
                 importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ForearmL)] != 7 ||
@@ -325,6 +331,10 @@ struct ProceduralAnimationTestSuite {
                 }
             }
 
+            const ZHLN::RigNodeIndex thighL           = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ThighL)];
+            const ZHLN::RigNodeIndex shinL            = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ShinL)];
+            const ZHLN::RigNodeIndex thighR           = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ThighR)];
+            const ZHLN::RigNodeIndex shinR            = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ShinR)];
             const ZHLN::RigNodeIndex forearmL         = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ForearmL)];
             const ZHLN::RigNodeIndex handL            = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::HandL)];
             const ZHLN::RigNodeIndex forearmR         = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ForearmR)];
@@ -346,10 +356,13 @@ struct ProceduralAnimationTestSuite {
             const JPH::Mat44 rigidFootRPartRelative   = importedMap.modelTransforms[rigidFootR.root].Inversed() * importedMap.modelTransforms[rigidFootR.part];
             const JPH::Mat44 secondaryFootLBefore     = importedMap.modelTransforms[secondaryFootLNode];
             const JPH::Mat44 secondaryFootRBefore     = importedMap.modelTransforms[secondaryFootRNode];
-            importedMap.localTransforms[forearmL]     = importedMap.localTransforms[forearmL] *
-                                                        JPH::Mat44::sRotation(JPH::Quat::sRotation(JPH::Vec3::sAxisY(), 0.45f));
-            importedMap.localTransforms[supSpine]     = importedMap.localTransforms[supSpine] *
-                                                        JPH::Mat44::sRotation(JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), 0.25f));
+            importedMap.localTransforms[thighL] = importedMap.localTransforms[thighL] * JPH::Mat44::sRotation(JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), 0.35f));
+            importedMap.localTransforms[thighR] = importedMap.localTransforms[thighR] *
+                                                  JPH::Mat44::sRotation(JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), -0.30f));
+            importedMap.localTransforms[forearmL] = importedMap.localTransforms[forearmL] *
+                                                    JPH::Mat44::sRotation(JPH::Quat::sRotation(JPH::Vec3::sAxisY(), 0.45f));
+            importedMap.localTransforms[supSpine] = importedMap.localTransforms[supSpine] *
+                                                    JPH::Mat44::sRotation(JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), 0.25f));
             importedMap.localTransforms[footL] = importedMap.localTransforms[footL] * JPH::Mat44::sRotation(JPH::Quat::sRotation(JPH::Vec3::sAxisX(), 0.30f));
             importedMap.localTransforms[footR] = importedMap.localTransforms[footR] * JPH::Mat44::sRotation(JPH::Quat::sRotation(JPH::Vec3::sAxisX(), -0.25f));
             ZHLN::ProceduralAnimation::CaptureChildOfPoseDeltas(importedMap);
@@ -369,6 +382,8 @@ struct ProceduralAnimationTestSuite {
                 }
                 return nullptr;
             };
+            const ZHLN::RigChildOfConstraint* kneeLConstraint          = findConstraint(ZHLN::RigChildOfKind::Knee, shinL);
+            const ZHLN::RigChildOfConstraint* kneeRConstraint          = findConstraint(ZHLN::RigChildOfKind::Knee, shinR);
             const ZHLN::RigChildOfConstraint* handLConstraint          = findConstraint(ZHLN::RigChildOfKind::Hand, handL);
             const ZHLN::RigChildOfConstraint* handRConstraint          = findConstraint(ZHLN::RigChildOfKind::Hand, handR);
             const ZHLN::RigChildOfConstraint* rigidFootLConstraint     = findConstraint(ZHLN::RigChildOfKind::FootAttachment, rigidFootL.root);
@@ -378,7 +393,27 @@ struct ProceduralAnimationTestSuite {
             const ZHLN::RigChildOfConstraint* toeRConstraint           = findConstraint(ZHLN::RigChildOfKind::FootAttachment, toeR);
 
             ZHLN::ProceduralAnimation::ResolveModelTransforms(importedMap);
-            if (ZHLN::ProceduralAnimation::ApplyChildOfConstraints(importedMap) != 10 || handLConstraint == nullptr || handRConstraint == nullptr ||
+            if (kneeLConstraint == nullptr || kneeRConstraint == nullptr) {
+                return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+            }
+            const JPH::Mat44 detachedShinL = importedMap.modelTransforms[shinL];
+            const JPH::Mat44 detachedShinR = importedMap.modelTransforms[shinR];
+            const JPH::Vec3  expectedKneeL = (importedMap.modelTransforms[thighL] * kneeLConstraint->bindRelative).GetTranslation();
+            const JPH::Vec3  expectedKneeR = (importedMap.modelTransforms[thighR] * kneeRConstraint->bindRelative).GetTranslation();
+
+            // Knee joints are structural and remain active even when every
+            // optional child-of relationship is disabled. They pin position
+            // without replacing the authored or IK-produced shin basis.
+            if (ZHLN::ProceduralAnimation::ApplyChildOfConstraints(importedMap, false, false, false, false, false) != 2 ||
+                !importedMap.modelTransforms[shinL].GetTranslation().IsClose(expectedKneeL, 0.0001f) ||
+                !importedMap.modelTransforms[shinR].GetTranslation().IsClose(expectedKneeR, 0.0001f) ||
+                !importedMap.modelTransforms[shinL].Multiply3x3(JPH::Vec3::sAxisZ()).IsClose(detachedShinL.Multiply3x3(JPH::Vec3::sAxisZ()), 0.0001f) ||
+                !importedMap.modelTransforms[shinR].Multiply3x3(JPH::Vec3::sAxisZ()).IsClose(detachedShinR.Multiply3x3(JPH::Vec3::sAxisZ()), 0.0001f) ||
+                detachedShinL.GetTranslation().IsClose(expectedKneeL, 0.0001f) || detachedShinR.GetTranslation().IsClose(expectedKneeR, 0.0001f)) {
+                return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+            }
+
+            if (ZHLN::ProceduralAnimation::ApplyChildOfConstraints(importedMap) != 12 || handLConstraint == nullptr || handRConstraint == nullptr ||
                 rigidFootLConstraint == nullptr || rigidFootRConstraint == nullptr || secondaryFootLConstraint == nullptr ||
                 secondaryFootRConstraint == nullptr || toeRConstraint == nullptr ||
                 !importedMap.modelTransforms[handL].IsClose(

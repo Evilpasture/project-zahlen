@@ -331,13 +331,16 @@ complete semantic chain:
 
 ```text
 SupSpine -> Chest -> Neck -> Head
+ThighL/R -> ShinL/R (when the exported deform hierarchy is detached)
 ```
 
 Each constraint preserves its bind-relative offset and authored local animation,
-and each node carries its own descendants and attachments. Detached semantic
-foot copies in secondary skins are attached to the primary `FootL`/`FootR`
-controls. Foot IK carries its model-space correction through every imported
-child transform, so mesh parts below a `DEF-Foot.*` transform stay coherent.
+and each node carries its own descendants and attachments. Knee constraints pin
+only the shin origin to the thigh endpoint, preserving authored knee bend and
+procedural IK rotation while making separation impossible. They are structural
+and cannot be disabled. Detached semantic foot copies in secondary skins are
+attached to the primary `FootL`/`FootR` controls. Foot IK carries its model-space
+correction through every imported child transform, so mesh parts below a `DEF-Foot.*` transform stay coherent.
 
 For detached footwear, compact mesh bounds are aggregated at their highest
 non-rig transform ancestor. That owning transform is attached after IK and moves
