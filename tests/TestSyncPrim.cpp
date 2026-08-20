@@ -29,7 +29,7 @@ struct SyncPrimTestSuite {
     SyncPrimTestSuite() {
         // Convert main thread to a Fiber context so that Mutex slow-path yielding works correctly
         ZHLN::Fiber::InitMainThread();
-        ZHLN::TaskSystem::Init(2, 32, 131072);
+        ZHLN::TaskSystem::Init(2, 32, ZHLN::kMinimumFiberStackSize);
     }
 
     ~SyncPrimTestSuite() {

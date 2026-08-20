@@ -28,7 +28,7 @@ enum class ExplosionTestError : uint32_t {
 struct ExplosionTestSuite {
     ExplosionTestSuite() {
         ZHLN::Fiber::InitMainThread();
-        ZHLN::TaskSystem::Init(2, 32, 131072);
+        ZHLN::TaskSystem::Init(2, 32, ZHLN::kMinimumFiberStackSize);
     }
 
     ~ExplosionTestSuite() {

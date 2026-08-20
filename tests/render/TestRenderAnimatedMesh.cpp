@@ -49,7 +49,7 @@ enum class AnimatedMeshTestError : uint8_t {
 struct RenderAnimatedMeshTestSuite {
     RenderAnimatedMeshTestSuite() {
         ZHLN::Fiber::InitMainThread();
-        ZHLN::TaskSystem::Init(2, 32, 131072);
+        ZHLN::TaskSystem::Init(2, 32, ZHLN::kMinimumFiberStackSize);
     }
 
     ~RenderAnimatedMeshTestSuite() {

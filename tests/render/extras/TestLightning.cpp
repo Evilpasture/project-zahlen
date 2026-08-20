@@ -30,7 +30,7 @@ enum class LightningTestError : uint32_t {
 struct LightningTestSuite {
     LightningTestSuite() {
         ZHLN::Fiber::InitMainThread();
-        ZHLN::TaskSystem::Init(2, 32, 131072);
+        ZHLN::TaskSystem::Init(2, 32, ZHLN::kMinimumFiberStackSize);
     }
 
     ~LightningTestSuite() {

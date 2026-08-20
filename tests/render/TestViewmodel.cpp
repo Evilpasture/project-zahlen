@@ -34,7 +34,7 @@ enum class ViewmodelTestError : uint8_t {
 struct ViewmodelTestSuite {
     ViewmodelTestSuite() {
         ZHLN::Fiber::InitMainThread();
-        ZHLN::TaskSystem::Init(2, 32, 131072);
+        ZHLN::TaskSystem::Init(2, 32, ZHLN::kMinimumFiberStackSize);
     }
 
     ~ViewmodelTestSuite() {

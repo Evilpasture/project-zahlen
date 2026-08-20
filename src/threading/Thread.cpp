@@ -4,6 +4,7 @@
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Threading/Thread.hpp>
+#include <algorithm>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
@@ -99,8 +100,9 @@ Fiber* Fiber::Create(size_t stackSize, FiberFunc func, void* arg) noexcept {
 #endif
 
     if (stackSize == 0) {
-        stackSize = static_cast<size_t>(1024 * 1024); // 1MB default
+        stackSize = kMinimumFiberStackSize;
     }
+    stackSize        = std::max(stackSize, kMinimumFiberStackSize);
     stackSize        = (stackSize + pageSize - 1) & ~(pageSize - 1);
     size_t totalSize = stackSize + (pageSize * 2); // Stack + 2 Guard Pages
 

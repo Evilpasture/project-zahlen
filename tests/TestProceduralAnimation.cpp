@@ -36,7 +36,7 @@ enum class ProceduralAnimationTestError : uint32_t {
 
 struct ProceduralAnimationTestSuite {
     ProceduralAnimationTestSuite() {
-        ZHLN::TaskSystem::Init(2, 32, 131072);
+        ZHLN::TaskSystem::Init(2, 32, ZHLN::kMinimumFiberStackSize);
     }
 
     ~ProceduralAnimationTestSuite() {

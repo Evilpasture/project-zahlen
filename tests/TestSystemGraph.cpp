@@ -34,7 +34,7 @@ struct SystemGraphTestSuite {
     SystemGraphTestSuite() {
         ZHLN::Fiber::InitMainThread();
         // Initialize a multi-threaded task system so parallel dispatch can be tested
-        ZHLN::TaskSystem::Init(4, 32, 131072);
+        ZHLN::TaskSystem::Init(4, 32, ZHLN::kMinimumFiberStackSize);
     }
 
     ~SystemGraphTestSuite() {

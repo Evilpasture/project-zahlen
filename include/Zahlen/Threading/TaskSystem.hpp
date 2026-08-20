@@ -2,15 +2,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
+#include <Zahlen/Core/Atomic.hpp>
+#include <Zahlen/Threading/Thread.hpp>
 #include <algorithm>
 #include <array>
 #include <cstdint>
-#include <Zahlen/Core/Atomic.hpp>
 #include <span>
-
-namespace ZHLN {
-struct Fiber;
-}
 
 namespace ZHLN::TaskSystem {
 uint32_t GetWorkerIndex();
@@ -32,7 +29,7 @@ struct Counter {
  * @brief Boots up the OS worker threads and pre-allocates the Fiber pool.
  * @param numThreads 0 = Auto-detect CPU cores
  */
-void Init(uint32_t numThreads = 0, uint32_t numFibers = 128, size_t stackSize = 524288);
+void Init(uint32_t numThreads = 0, uint32_t numFibers = 128, size_t stackSize = kMinimumFiberStackSize);
 
 /**
  * @brief Shuts down the threads and cleans up memory.

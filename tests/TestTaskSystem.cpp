@@ -25,8 +25,8 @@ enum class TaskSystemError : uint32_t {
 
 struct TaskSystemTestSuite {
     TaskSystemTestSuite() {
-        // Setup: Initialize the fiber scheduling environment (2 threads, 32 fibers, 128KB stack)
-        ZHLN::TaskSystem::Init(2, 32, 131072);
+        // Setup: Initialize the fiber scheduling environment with the guarded minimum stack.
+        ZHLN::TaskSystem::Init(2, 32, ZHLN::kMinimumFiberStackSize);
     }
 
     ~TaskSystemTestSuite() {
@@ -37,8 +37,9 @@ struct TaskSystemTestSuite {
     struct Tests {
         std::expected<void, ZHLN::Error> fiber_metadata_alignment() {
             auto         noop    = [](void*) {};
-            ZHLN::Fiber* fiber   = ZHLN::Fiber::Create(131072, noop, nullptr);
-            const bool   aligned = fiber != nullptr && reinterpret_cast<uintptr_t>(fiber) % alignof(ZHLN::Fiber) == 0;
+            ZHLN::Fiber* fiber   = ZHLN::Fiber::Create(ZHLN::kMinimumFiberStackSize, noop, nullptr);
+            const bool   aligned = fiber != nullptr && reinterpret_cast<uintptr_t>(fiber) % alignof(ZHLN::Fiber) == 0 &&
+                                   fiber->mapSize >= ZHLN::kMinimumFiberStackSize;
             ZHLN::Fiber::Destroy(fiber);
             if (!aligned) {
                 return std::unexpected(TaskSystemError::DispatchFailed);

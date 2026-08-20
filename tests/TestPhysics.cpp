@@ -23,7 +23,7 @@ enum class PhysicsTestError : uint32_t {
 struct PhysicsTestSuite {
     PhysicsTestSuite() {
         ZHLN::Fiber::InitMainThread();
-        ZHLN::TaskSystem::Init(2, 32, 131072);
+        ZHLN::TaskSystem::Init(2, 32, ZHLN::kMinimumFiberStackSize);
 
         JPH::RegisterDefaultAllocator();
         if (JPH::Factory::sInstance == nullptr) {
