@@ -6,9 +6,6 @@ enable_testing()
 
 # 2. Automatically discover all test source files in this directory
 file(GLOB TEST_SOURCES CONFIGURE_DEPENDS "Test*.cpp")
-if(NOT TARGET zahlen_extras)
-    list(FILTER TEST_SOURCES EXCLUDE REGEX "/TestProceduralAnimation\\.cpp$")
-endif()
 
 # 3. Iterate and dynamically register each test executable with original casing preserved
 foreach(TEST_SRC IN LISTS TEST_SOURCES)
@@ -26,13 +23,6 @@ foreach(TEST_SRC IN LISTS TEST_SOURCES)
     target_link_libraries(${TARGET_NAME} PRIVATE
         zahlen_engine
     )
-    if("${TARGET_NAME}" STREQUAL "TestProceduralAnimation" AND TARGET zahlen_extras)
-        target_link_libraries(${TARGET_NAME} PRIVATE zahlen_extras)
-        target_sources(${TARGET_NAME} PRIVATE ${PROJECT_SOURCE_DIR}/extern/cgltf_impl.c)
-        target_include_directories(${TARGET_NAME} PRIVATE ${PROJECT_SOURCE_DIR}/extern/cgltf)
-        target_compile_definitions(${TARGET_NAME} PRIVATE ZHLN_TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
-    endif()
-
     target_include_directories(${TARGET_NAME} PRIVATE
         ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_SOURCE_DIR}/src
@@ -79,6 +69,12 @@ foreach(TEST_SRC IN LISTS TEST_SOURCES)
         )
     endif()
 endforeach()
+
+# Optional CPU tests live with the extras toolkit and disappear completely when
+# ZHLN_BUILD_EXTRAS is disabled.
+if(ZHLN_BUILD_EXTRAS AND TARGET zahlen_extras)
+    add_subdirectory(extras)
+endif()
 
 # 5. Local GPU Render Test Suite (Off by default for headless CI/CD)
 option(ZHLN_BUILD_GPU_TESTS "Build GPU/Vulkan rendering tests (local hardware required)" OFF)
