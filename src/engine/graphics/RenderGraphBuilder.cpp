@@ -707,7 +707,7 @@ struct PassFactory {
     }
 
     template <typename SrcImgT, typename PassT>
-    void RunKawasePass(VkDevice device, VkCommandBuffer cmd, PassT& pass, const SrcImgT& src, const Vk::Sampler& defaultSampler) noexcept {
+    void RunKawasePass(VkDevice device, VkCommandBuffer cmd, PassT& pass, const SrcImgT& src, const Vk::Sampler& defaultSampler) const noexcept {
         // bloom_blur.slang's `texLow` is statically reachable (mode is a runtime
         // push constant, not a specialization), so every compiled Kawase
         // pipeline has binding 2 in its layout even though the downsample
@@ -727,7 +727,8 @@ struct PassFactory {
     }
 
     template <typename SrcImgT, typename SrcImg2T, typename PassT>
-    void RunKawasePass(VkDevice device, VkCommandBuffer cmd, PassT& pass, const SrcImgT& src, const Vk::Sampler& defaultSampler, const SrcImg2T& src2) noexcept {
+    void RunKawasePass(VkDevice device, VkCommandBuffer cmd, PassT& pass, const SrcImgT& src, const Vk::Sampler& defaultSampler, const SrcImg2T& src2)
+        const noexcept {
         pass.WriteHeap(
             self.ctx, self.heapManager, fIdx, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(src), defaultSampler,
             Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(src2)
