@@ -204,7 +204,7 @@ struct DoubleBufferedComputePass {
             return false;
         }
 
-        BuildHeapPassBindings(heap, layoutInstance.reflectedSets[0], 0, kHeapIndexPushOffset, heapBindings);
+        BuildHeapPassBindings(heap, layoutInstance.reflectedSets[0], 0, kHeapIndexPushOffset, 2, heapBindings);
 
         auto p_res = ComputePipelineBuilder().Shader(shader).Layout(VK_NULL_HANDLE).HeapMappings(heapBindings.GetInfo()).Build(device);
         if (!p_res) {
