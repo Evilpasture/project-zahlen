@@ -28,6 +28,12 @@ struct ComputePass {
         VkDevice device, const ZHLN_ShaderDesc& shader, const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping
     ) noexcept;
 
+    /// Heap-mode specialized variants (same mapping covers every variant).
+    [[nodiscard]] std::expected<void, ZHLN::Error> BuildHeapVariants(
+        VkDevice device, const ZHLN_ShaderDesc& shader, std::span<const VkSpecializationInfo> specInfos,
+        const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping
+    ) noexcept;
+
     [[nodiscard]] std::expected<void, ZHLN::Error> BuildVariants(
         VkDevice                              device,
         VkDescriptorSetLayout                 descriptorLayout,
@@ -73,6 +79,23 @@ struct ComputePass {
         Dispatch(cmd, x, y, z);
     }
 
+    // Like DispatchHeap, but also pushes the descriptor-index word consumed by
+    // HEAP_WITH_PUSH_INDEX mappings (frame parity / mip level / pass id).
+    template <GpuTriviallyCopyable T>
+    void DispatchHeapIndexed(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex, uint32_t x, uint32_t y, uint32_t z, const T& pushData)
+        const noexcept {
+        Bind(cmd);
+        PushData(ctx, cmd, 0, pushData);
+        PushHeapIndex(ctx, cmd, kHeapIndexPushOffset, heapIndex);
+        Dispatch(cmd, x, y, z);
+    }
+
+    void DispatchHeapIndexed(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex, uint32_t x, uint32_t y, uint32_t z) const noexcept {
+        Bind(cmd);
+        PushHeapIndex(ctx, cmd, kHeapIndexPushOffset, heapIndex);
+        Dispatch(cmd, x, y, z);
+    }
+
     static void Dispatch(VkCommandBuffer cmd, uint32_t x, uint32_t y, uint32_t z) noexcept {
         ZHLN_CmdDispatch(cmd, x, y, z);
     }
@@ -111,6 +134,9 @@ struct DoubleBufferedComputePass {
     ZHLN::DoubleBuffered<VkDescriptorSet> sets;
     PipelineLayout                        pipelineLayout;
     Pipeline                              pipeline;
+
+    // VK_EXT_descriptor_heap mode (BuildHeap): binding mapping + slots.
+    HeapPassBindings heapBindings;
 
     [[nodiscard]] bool
         Build(VkDevice device, const ZHLN_ShaderDesc& shader, const VkPushConstantRange* pushConstants = nullptr, uint32_t pushCount = 0) noexcept {
@@ -165,6 +191,47 @@ struct DoubleBufferedComputePass {
 
     void Flip() noexcept {
         sets.Flip();
+    }
+
+    // ============================================================================
+    // VK_EXT_descriptor_heap mode
+    // ============================================================================
+
+    [[nodiscard]] bool BuildHeap(VkDevice device, HeapManager& heap, const ZHLN_ShaderDesc& shader) noexcept {
+        // Reflect the set layout (drives the mapping table), then build a heap
+        // pipeline with a null layout + push data.
+        if (!layoutInstance.Build(device, shader, VK_SHADER_STAGE_COMPUTE_BIT)) {
+            return false;
+        }
+
+        BuildHeapPassBindings(heap, layoutInstance.reflectedSets[0], 0, kHeapIndexPushOffset, heapBindings);
+
+        auto p_res = ComputePipelineBuilder().Shader(shader).Layout(VK_NULL_HANDLE).HeapMappings(heapBindings.GetInfo()).Build(device);
+        if (!p_res) {
+            return false;
+        }
+        pipeline = std::move(*p_res);
+        pipelineLayout = {};
+        return true;
+    }
+
+    template <typename... Args>
+    void WriteHeap(const Context& ctx, HeapManager& heap, uint32_t heapIndex, Args&&... args) const noexcept {
+        WriteHeapBindings(heap, ctx, heapBindings, heapIndex, std::forward<Args>(args)...);
+    }
+
+    void DispatchHeap(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex, uint32_t x, uint32_t y, uint32_t z) const noexcept {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.Get());
+        PushHeapIndex(ctx, cmd, kHeapIndexPushOffset, heapIndex);
+        vkCmdDispatch(cmd, x, y, z);
+    }
+
+    template <GpuTriviallyCopyable T>
+    void DispatchHeap(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex, uint32_t x, uint32_t y, uint32_t z, const T& pushData) const noexcept {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.Get());
+        PushData(ctx, cmd, 0, pushData);
+        PushHeapIndex(ctx, cmd, kHeapIndexPushOffset, heapIndex);
+        vkCmdDispatch(cmd, x, y, z);
     }
 };
 

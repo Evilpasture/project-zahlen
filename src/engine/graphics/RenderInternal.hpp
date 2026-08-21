@@ -33,6 +33,9 @@ struct IBLPayload {
     Image                    prefilteredImage;
     ImageView                prefilteredView;
     std::array<JPH::Vec4, 9> shCoeffs {};
+    // VK_EXT_descriptor_heap: create infos for the heap image descriptors.
+    VkImageViewCreateInfo brdfLutViewInfo {};
+    VkImageViewCreateInfo prefilteredViewInfo {};
 };
 
 } // namespace ZHLN::Vk
@@ -189,6 +192,11 @@ static constexpr uint32_t kSceneDynamicResourceSlots = 32;
 static constexpr uint32_t kSceneStaticSamplerSlots   = 16;
 static constexpr uint32_t kSceneDynamicSamplerSlots  = 8;
 static constexpr uint32_t kGlobalTextureSlots        = 32768; // bindless globalTextures[] region
+static constexpr uint32_t kPassStaticResourceSlots   = 1024; // descriptor-heap passes (mip spans, parity pairs)
+static constexpr uint32_t kPassStaticSamplerSlots    = 64;
+static constexpr uint32_t kPassResourceHeapBase      = kSceneStaticResourceSlots + kGlobalTextureSlots;
+static constexpr uint32_t kPassSamplerHeapBase       = kSceneStaticSamplerSlots;
+static constexpr uint32_t kImGuiTextureSlots         = 512;  // ImGui texture region (tail of the pass slots)
 
 // Push-data layout (vkCmdPushDataEXT): per-draw struct at offset 0; the
 // per-frame scene-buffer device-address block (6 x uint64) lives at this
@@ -654,6 +662,32 @@ struct RenderContext::Impl {
     HeapMappingSet decalSceneHeapMappings; // descriptorSet = 1 (decal.slang's scene subset)
     HeapMappingSet decalHeapMappings;      // descriptorSet = 0 (texDepth + pointSampler)
 
+    // Per-pass heap binding tables (baked after each pass's layout reflection).
+    Vk::HeapPassBindings hizHeapBindings;
+    Vk::HeapPassBindings cullingHeapBindings;
+    Vk::HeapPassBindings clusterBoundsHeapBindings;
+    Vk::HeapPassBindings clusterCullingHeapBindings;
+    Vk::HeapPassBindings bakeHeapBindings;
+    Vk::HeapPassBindings volumetricClearHeapBindings;
+    Vk::HeapPassBindings volumetricFogInjectHeapBindings;
+    Vk::HeapPassBindings volumetricLightInjectHeapBindings;
+    Vk::HeapPassBindings volumetricIntegrationHeapBindings;
+    Vk::HeapPassBindings volumetricTemporalHeapBindings;
+
+    // Sampler create infos written into static sampler-heap slots.
+    VkSamplerCreateInfo shadowSamplerInfo {};
+    VkSamplerCreateInfo defaultSamplerInfo {};
+    VkSamplerCreateInfo pointSamplerInfo {};
+
+    // Static image create infos for views that are not plain RenderTargets.
+    VkImageViewCreateInfo shadowAtlasCubeViewInfo {};
+    VkImageViewCreateInfo shadowAtlas2DViewInfo {};
+    VkImageViewCreateInfo ltcMatViewInfo {};
+    VkImageViewCreateInfo ltcAmpViewInfo {};
+
+    // ImGui heap region (the backend fork sub-allocates slots from here).
+    uint32_t imguiTextureHeapBase = 0;
+
     // Static heap slots (allocated once at init).
     Vk::SamplerHandle globalSamplerSlot;
     Vk::SamplerHandle clampSamplerSlot;
@@ -776,6 +810,7 @@ struct RenderContext::Impl {
     void                       WritePointSamplerToHeap(const VkSamplerCreateInfo& info) noexcept;
     void                       WriteTransLightingToHeap() noexcept;
     void                       WriteTextureSlotToHeap(uint32_t bindlessIndex, VkImage image, VkFormat format, uint32_t mipLevels, bool cube) noexcept;
+    void                       InitPassSamplerDescriptors() noexcept;
 
     Vk::SlangReflectedLayout      cullingLayout;
     Vk::DescriptorPool           cullingPool;

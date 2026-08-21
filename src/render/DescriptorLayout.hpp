@@ -59,6 +59,9 @@ using AccelerationStructureSlot = BindingSlot<B, VK_DESCRIPTOR_TYPE_ACCELERATION
 struct ImageWrite {
     VkImageView   view   = VK_NULL_HANDLE;
     VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    // VK_EXT_descriptor_heap: parameters used to create `view` (heap image
+    // descriptors consume VkImageViewCreateInfo). Optional.
+    const VkImageViewCreateInfo* viewInfo = nullptr;
 };
 
 struct SamplerWrite {

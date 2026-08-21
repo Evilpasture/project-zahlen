@@ -14,6 +14,9 @@ struct RenderTarget {
     Image      image;
     ImageView  view;
     VkExtent2D extent {};
+    // VK_EXT_descriptor_heap: the parameters used to create `view` — image
+    // descriptors in the heaps consume VkImageViewCreateInfo instead of handles.
+    VkImageViewCreateInfo viewInfo {};
 
     RenderTarget() = default;
 
@@ -45,6 +48,7 @@ struct RenderTarget3D {
     Image      image;
     ImageView  view;
     VkExtent3D extent {};
+    VkImageViewCreateInfo viewInfo {};
 
     RenderTarget3D()  = default;
     ~RenderTarget3D() = default;
@@ -71,6 +75,8 @@ struct MipmappedRenderTarget {
     std::vector<ImageView> mipViews;
     VkExtent2D             extent {};
     uint32_t               mipLevels = 1;
+    VkImageViewCreateInfo           fullViewInfo {};
+    std::vector<VkImageViewCreateInfo> mipViewInfos;
 
     MipmappedRenderTarget() = default;
 
@@ -155,17 +161,17 @@ struct GBufferLayout {
 
 template <VkImageLayout L, VkFormat F>
 Vk::TypedImage<L> AssumeLayout(const Vk::RenderTarget<F>& rt, VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) {
-    return {rt.image.Handle(), rt.view.Get(), {rt.extent.width, rt.extent.height, 1}, aspect, F};
+    return {rt.image.Handle(), rt.view.Get(), {rt.extent.width, rt.extent.height, 1}, aspect, F, &rt.viewInfo};
 }
 
 template <VkImageLayout L, VkFormat F>
 Vk::TypedImage<L> AssumeLayout(const Vk::RenderTarget3D<F>& rt, VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) {
-    return {rt.image.Handle(), rt.view.Get(), rt.extent, aspect, F};
+    return {rt.image.Handle(), rt.view.Get(), rt.extent, aspect, F, &rt.viewInfo};
 }
 
 template <VkImageLayout L, VkFormat F>
 Vk::TypedImage<L> AssumeLayout(const Vk::MipmappedRenderTarget<F>& rt, VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) {
-    return {rt.image.Handle(), rt.fullView.Get(), {rt.extent.width, rt.extent.height, 1}, aspect, F};
+    return {rt.image.Handle(), rt.fullView.Get(), {rt.extent.width, rt.extent.height, 1}, aspect, F, &rt.fullViewInfo};
 }
 
 template <typename Usage>

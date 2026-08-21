@@ -18,6 +18,10 @@ struct PostProcessPass {
     Pipeline                              pipeline;
     std::vector<Pipeline>                 pipelines; // Unified storage for variants
 
+    // VK_EXT_descriptor_heap: binding mapping table + slot layout (valid when
+    // built through BuildHeap/BuildHeapVariants).
+    HeapPassBindings heapBindings;
+
     [[nodiscard]] bool Build(
         VkDevice                        device,
         const ShaderStages&             shaders,
@@ -61,6 +65,40 @@ struct PostProcessPass {
     void ExecuteVariant(VkCommandBuffer cmd, uint32_t variantIdx, const T& pushData, VkShaderStageFlags stages = VK_SHADER_STAGE_FRAGMENT_BIT) const noexcept;
 
     void Execute(VkCommandBuffer cmd) const noexcept;
+
+    // ============================================================================
+    // VK_EXT_descriptor_heap mode: no descriptor sets/pools/layouts. The pass
+    // reflects the set layout (for binding structure), bakes a PUSH_INDEX
+    // mapping table, and draws with a null pipeline layout + push data.
+    // ============================================================================
+
+    [[nodiscard]] bool BuildHeap(
+        VkDevice device, HeapManager& heap, const ShaderStages& shaders, std::initializer_list<VkFormat> colorFormats, bool additive = false
+    ) noexcept;
+
+    [[nodiscard]] bool BuildHeapVariants(
+        VkDevice                              device,
+        HeapManager&                          heap,
+        const ShaderStages&                   shaders,
+        std::initializer_list<VkFormat>       colorFormats,
+        std::span<const VkSpecializationInfo> specInfos,
+        bool                                  additive = false
+    ) noexcept;
+
+    template <typename... Args>
+    void WriteHeap(const Context& ctx, HeapManager& heap, uint32_t heapIndex, Args&&... args) const noexcept;
+
+    template <GpuTriviallyCopyable T>
+    void ExecuteHeap(const Context& ctx, VkCommandBuffer cmd, const T& pushData, uint32_t heapIndex, VkShaderStageFlags stages = VK_SHADER_STAGE_FRAGMENT_BIT)
+        const noexcept;
+
+    template <GpuTriviallyCopyable T>
+    void ExecuteVariantHeap(
+        const Context& ctx, VkCommandBuffer cmd, uint32_t variantIdx, const T& pushData, uint32_t heapIndex,
+        VkShaderStageFlags stages = VK_SHADER_STAGE_FRAGMENT_BIT
+    ) const noexcept;
+
+    void ExecuteHeap(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex) const noexcept;
 
     void Flip() noexcept {
         sets.Flip();

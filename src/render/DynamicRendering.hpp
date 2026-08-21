@@ -32,6 +32,11 @@ struct TypedImage {
     VkExtent3D                     extent {}; // Modified from VkExtent2D
     VkImageAspectFlags             aspect = VK_IMAGE_ASPECT_COLOR_BIT;
     VkFormat                       format = VK_FORMAT_UNDEFINED;
+    // VK_EXT_descriptor_heap: vkWriteResourceDescriptorsEXT consumes
+    // VkImageViewCreateInfo, so image descriptors written into the heaps
+    // carry the parameters used to create `view`. Optional (null = synthesize
+    // a 2D, single-mip, single-layer info from the fields above).
+    const VkImageViewCreateInfo* viewInfo = nullptr;
 };
 
 // ============================================================================

@@ -9,7 +9,8 @@ set(IMGUI_SOURCES
     imgui_widgets.cpp
     imgui_demo.cpp
     backends/imgui_impl_glfw.cpp
-    backends/imgui_impl_vulkan.cpp
+    # NOTE: imgui_impl_vulkan.cpp is replaced by the descriptor-heap fork at
+    # src/engine/graphics/imgui_impl_vulkan_heap.cpp (VK_EXT_descriptor_heap).
 )
 
 # 2. Create the static library

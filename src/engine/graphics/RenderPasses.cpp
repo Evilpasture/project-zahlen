@@ -5,7 +5,7 @@
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/Math3D.hpp"
 #include "Zahlen/Profiler.hpp"
-#include "backends/imgui_impl_vulkan.h"
+#include "imgui_impl_vulkan_heap.h"
 #include "imgui.h"
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <array>
@@ -272,7 +272,7 @@ struct GpuCullingPolicyPass1 {
         pc.drawCount        = drawCount;
         pc.passIndex        = 0; // PASS 1
 
-        ctx.cullingPass.Dispatch(cmd, ctx.frames.cullingSetsPass1[recorder.frameIndex], (drawCount + 63) / 64, 1, 1, pc);
+        ctx.cullingPass.DispatchHeapIndexed(ctx.ctx, cmd, 0 * 2 + recorder.frameIndex, (drawCount + 63) / 64, 1, 1, pc);
 
         using enum Vk::BarrierStage;
         using enum Vk::BarrierAccess;
@@ -365,7 +365,7 @@ struct GpuCullingPolicyPass2 {
             .drawCount      = drawCount,
             .passIndex      = 1,
         };
-        ctx.cullingPass.Dispatch(cmd, ctx.frames.cullingSetsPass2[recorder.frameIndex], (drawCount + 63) / 64, 1, 1, pc);
+        ctx.cullingPass.DispatchHeapIndexed(ctx.ctx, cmd, 1 * 2 + recorder.frameIndex, (drawCount + 63) / 64, 1, 1, pc);
 
         using enum Vk::BarrierStage;
         using enum Vk::BarrierAccess;
@@ -888,7 +888,7 @@ void BlitPass::Execute(
 
     if (ctx.blitPass.pipeline.Valid()) {
         Vk::DynamicPass(inColor.extent).AddColor(swapchainTarget, VK_ATTACHMENT_LOAD_OP_DONT_CARE).Execute(cmd, [&]() {
-            ctx.blitPass.Execute(cmd, pc);
+            ctx.blitPass.ExecuteHeap(ctx.ctx, cmd, pc, recorder.frameIndex);
 
             if (!ctx.queues.uiBatches.empty()) {
                 // blitPass is a legacy descriptor-set + push-constant pass; the
@@ -932,7 +932,7 @@ void BlitPass::Execute(
             }
             if (!ctx.window.IsTTY() && !ctx.window.IsHeadless()) {
                 ImGui::Render();
-                ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
+                ImGui_ImplVulkanHeap_RenderDrawData(ImGui::GetDrawData(), cmd);
             }
         });
     }

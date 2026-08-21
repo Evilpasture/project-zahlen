@@ -389,6 +389,14 @@ void SlotAllocator::Free(uint32_t slot) noexcept {
     }
 }
 
+void SlotAllocator::Skip(uint32_t count) noexcept {
+    _impl->nextSlot = _impl->nextSlot + count > _impl->capacity ? _impl->capacity : _impl->nextSlot + count;
+}
+
+auto SlotAllocator::Cursor() const noexcept -> uint32_t {
+    return _impl->nextSlot;
+}
+
 void SlotAllocator::Clear() noexcept {
     _impl->nextSlot = 0;
     _impl->freeSlots.clear();
@@ -497,6 +505,14 @@ void HeapManager::FlushSamplerBatch(SamplerWriteBatch& batch) noexcept {
 void HeapManager::BindHeaps(VkCommandBuffer cmd) const noexcept {
     _resourceHeap.Bind(cmd);
     _samplerHeap.Bind(cmd);
+}
+
+auto HeapManager::StaticResourceCursor() const noexcept -> uint32_t {
+    return _staticResourceAlloc.Cursor();
+}
+
+auto HeapManager::StaticSamplerCursor() const noexcept -> uint32_t {
+    return _staticSamplerAlloc.Cursor();
 }
 
 // ============================================================================

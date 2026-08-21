@@ -88,6 +88,7 @@ static constexpr auto isLegacy = false;
 #include "SemaphorePool.hpp"
 #include "Allocator.hpp"     // Before DescriptorHeap.hpp: it holds Buffer members
 #include "DescriptorHeap.hpp"
+#include "HeapBindings.hpp"
 #include "PipelineBuilder.hpp"
 #include "RenderTarget.hpp"
 #include "SamplerBuilder.hpp"

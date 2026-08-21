@@ -579,7 +579,7 @@ void Engine::ProcessEvents() {
     }
 
     glfwPollEvents();
-    ImGui_ImplVulkan_NewFrame();
+    ImGui_ImplVulkanHeap_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
 

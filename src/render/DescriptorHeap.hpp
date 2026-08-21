@@ -276,6 +276,8 @@ class SlotAllocator {
     void               Init(uint32_t capacity, DescriptorHeapError errorOnExhaustion) noexcept;
     [[nodiscard]] auto Allocate() noexcept -> std::expected<uint32_t, DescriptorHeapError>;
     void               Free(uint32_t slot) noexcept;
+    void               Skip(uint32_t count) noexcept;
+    [[nodiscard]] auto Cursor() const noexcept -> uint32_t;
     void               Clear() noexcept;
 
   private:
@@ -318,6 +320,18 @@ class HeapManager {
     [[nodiscard]] auto Valid() const noexcept -> bool {
         return _resourceHeap.Valid() && _samplerHeap.Valid();
     }
+
+    // Advances the static allocator cursors past reserved regions (e.g. the
+    // bindless globalTextures[] array that is addressed by offset, not by
+    // allocator-issued slots).
+    void SkipStaticResourceSlots(uint32_t count) noexcept {
+        _staticResourceAlloc.Skip(count);
+    }
+    void SkipStaticSamplerSlots(uint32_t count) noexcept {
+        _staticSamplerAlloc.Skip(count);
+    }
+    [[nodiscard]] auto StaticResourceCursor() const noexcept -> uint32_t;
+    [[nodiscard]] auto StaticSamplerCursor() const noexcept -> uint32_t;
 
     // --- Type-Safe Static Resource Allocation ---
     template <VkDescriptorType Type>
