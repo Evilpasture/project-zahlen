@@ -621,22 +621,28 @@ RenderContext::~RenderContext() {
     }
 }
 
-std::expected<void, Error> RenderContext::Impl::InitLineBuffers() noexcept {
-    const size_t lineBufferSize = kMaxLineVertices * (sizeof(VertexPosition) + sizeof(VertexAttributes));
+std::expected<void, Error> RenderContext::Impl::AllocateDynamicVertexBuffers(
+    size_t maxVertices, DoubleBuffered<Vk::Buffer>& bufs, DoubleBuffered<VkDeviceAddress>& addrs, VkBufferUsageFlags extraFlags, const char* label
+) noexcept {
+    const size_t bufferSize = maxVertices * (sizeof(VertexPosition) + sizeof(VertexAttributes));
 
     for (int i = 0; i < 2; ++i) {
-        auto gpu_buf_res = Vk::Buffer::Create(
-            allocator.Get(), lineBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        auto res = Vk::Buffer::Create(
+            allocator.Get(), bufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | extraFlags,
             VMA_MEMORY_USAGE_CPU_TO_GPU
         );
-        if (!gpu_buf_res) {
-            return std::unexpected(Error(gpu_buf_res.error()));
+        if (!res) {
+            return std::unexpected(res.error());
         }
-        frames.lineVbos[i]         = std::move(*gpu_buf_res);
-        frames.lineVboAddresses[i] = ctx.BufferAddress(frames.lineVbos[i].Handle());
+        bufs[i]  = std::move(*res);
+        addrs[i] = ctx.BufferAddress(bufs[i].Handle());
     }
-    ZHLN::Log("Allocated double-buffered dynamic line tracer VBOs ({} bytes).", lineBufferSize);
+    ZHLN::Log("Allocated double-buffered dynamic {} VBOs ({} bytes).", label, bufferSize);
     return {};
+}
+
+std::expected<void, Error> RenderContext::Impl::InitLineBuffers() noexcept {
+    return AllocateDynamicVertexBuffers(kMaxLineVertices, frames.lineVbos, frames.lineVboAddresses, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, "line");
 }
 
 std::expected<void, Error> RenderContext::Impl::BuildLinePipeline() {
@@ -850,8 +856,12 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
                 );
             })
             .transform([&, i](auto&& spcnt) -> void {
-                frames.globalCounterBuffers[i]   = std::forward<decltype(spcnt)>(spcnt);
-                frames.secondPassCountBuffers[i] = std::move(frames.globalCounterBuffers[i]);
+                // This buffer is the second-pass candidate counter, written by
+                // pass-1 culling and consumed by pass-2.  It is intentionally
+                // NOT routed through globalCounterBuffers (which serves the
+                // cluster-culling global counter allocated later in
+                // make_cluster_set) to avoid a moved-from ordering hazard.
+                frames.secondPassCountBuffers[i] = std::forward<decltype(spcnt)>(spcnt);
             });
     };
 
@@ -1129,7 +1139,6 @@ std::expected<void, Error> RenderContext::Impl::InitBindless() {
         });
 }
 
-using enum Resource::ShaderID;
 std::expected<void, Error> RenderContext::Impl::BuildDecalPipeline() {
     using enum Resource::ShaderID;
 
@@ -1310,7 +1319,6 @@ std::expected<void, Error> RenderContext::Impl::BuildReflectionPipelines() {
         return res;
     }
 
-    // ADD THIS:
     return BuildPassVariants(
         this, translucentReflectionPass, "Translucent Reflection", {.path = vsPath, .fallback = vsSpan, .entryPoint = "VSMain"},
         {.path = psPath, .fallback = psSpan, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos, &ppPush, 1
@@ -2104,20 +2112,7 @@ std::expected<void, Error> RenderContext::Impl::BuildHiZPipeline() {
 }
 
 std::expected<void, Error> RenderContext::Impl::InitUIDynamicBuffers() noexcept {
-    const size_t uiBufferSize = kMaxUiVertices * (sizeof(VertexPosition) + sizeof(VertexAttributes));
-
-    for (int i = 0; i < 2; ++i) {
-        auto gpu_buf_res = Vk::Buffer::Create(
-            allocator.Get(), uiBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU
-        );
-        if (!gpu_buf_res) {
-            return std::unexpected(Error(gpu_buf_res.error()));
-        }
-        frames.uiVbos[i]         = std::move(*gpu_buf_res);
-        frames.uiVboAddresses[i] = ctx.BufferAddress(frames.uiVbos[i].Handle());
-    }
-    ZHLN::Log("Allocated double-buffered dynamic UI VBOs ({} bytes).", uiBufferSize);
-    return {};
+    return AllocateDynamicVertexBuffers(kMaxUiVertices, frames.uiVbos, frames.uiVboAddresses, 0, "UI");
 }
 
 } // namespace ZHLN

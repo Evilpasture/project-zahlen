@@ -681,6 +681,9 @@ struct RenderContext::Impl {
 
     std::expected<void, Error> BuildLinePipeline();
     std::expected<void, Error> InitLineBuffers() noexcept;
+    std::expected<void, Error> AllocateDynamicVertexBuffers(
+        size_t maxVertices, DoubleBuffered<Vk::Buffer>& bufs, DoubleBuffered<VkDeviceAddress>& addrs, VkBufferUsageFlags extraFlags, const char* label
+    ) noexcept;
     void                       FlushLineQueue();
 
     // --- Indirect-draw telemetry (enabled via ZHLN_DEBUG_INDIRECT=1) ---
