@@ -24,7 +24,7 @@ auto DisableGpuCulling() noexcept -> bool {
 namespace {
 /// Seeded from ZHLN_NO_MESH_SHADING, then overridable at runtime so the two
 /// paths can be A/B-compared inside a single process (see TestMeshShaders).
-std::atomic<bool>& MeshShadingDisabledFlag() noexcept {
+auto MeshShadingDisabledFlag() noexcept -> std::atomic<bool>& {
     static std::atomic<bool> disabled {std::getenv("ZHLN_NO_MESH_SHADING") != nullptr};
     return disabled;
 }

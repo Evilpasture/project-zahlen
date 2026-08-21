@@ -14,22 +14,22 @@
 namespace ZHLN::PBR {
 
 // Standard Van der Corput radical inverse sequence
-float RadicalInverse_VdC(uint32_t bits) {
+auto RadicalInverse_VdC(uint32_t bits) -> float {
     bits = (bits << 16u) | (bits >> 16u);
     bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
     bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
     bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
     bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
-    return float(bits) * 2.3283064365386963e-10f; // / 0x100000000
+    return static_cast<float>(bits) * 2.3283064365386963e-10f; // / 0x100000000
 }
 
 // Hammersley sequence for low-discrepancy Monte Carlo sampling
-std::pair<float, float> Hammersley(uint32_t i, uint32_t N) {
-    return {float(i) / float(N), RadicalInverse_VdC(i)};
+auto Hammersley(uint32_t i, uint32_t N) -> std::pair<float, float> {
+    return {static_cast<float>(i) / static_cast<float>(N), RadicalInverse_VdC(i)};
 }
 
 // GGX importance sampling
-JPH::Vec3 ImportanceSampleGGX(float u1, float u2, float roughness) {
+auto ImportanceSampleGGX(float u1, float u2, float roughness) -> JPH::Vec3 {
     const float a   = roughness * roughness;
     const float phi = 2.0f * std::numbers::pi_v<float> * u1;
 
@@ -42,27 +42,27 @@ JPH::Vec3 ImportanceSampleGGX(float u1, float u2, float roughness) {
     return {std::cos(phi) * sinTheta, std::sin(phi) * sinTheta, cosTheta};
 }
 
-float GeometrySchlickGGX(float NdotV, float roughness) {
+auto GeometrySchlickGGX(float NdotV, float roughness) -> float {
     float a = roughness;
     float k = (a * a) / 2.0f; // For IBL geometry, k = alpha^2 / 2
     return NdotV / (NdotV * (1.0f - k) + k);
 }
 
-float GeometrySmith(float NdotV, float NdotL, float roughness) {
+auto GeometrySmith(float NdotV, float NdotL, float roughness) -> float {
     return GeometrySchlickGGX(NdotV, roughness) * GeometrySchlickGGX(NdotL, roughness);
 }
 
 // Generates the 2D texture bytes
-std::vector<uint32_t> GenerateBRDFLUT(uint32_t width, uint32_t height) {
+auto GenerateBRDFLUT(uint32_t width, uint32_t height) -> std::vector<uint32_t> {
     std::vector<uint32_t> pixels(static_cast<size_t>(width * height));
 
     for (uint32_t y = 0; y < height; ++y) {
         // FIX 1: Clamp roughness to prevent divide-by-zero in Importance Sampling
-        float roughness = std::max(float(y) / float(height - 1), 0.001f);
+        float roughness = std::max(static_cast<float>(y) / static_cast<float>(height - 1), 0.001f);
 
         for (uint32_t x = 0; x < width; ++x) {
             // FIX 2: Clamp NdotV so the left column doesn't evaluate to pure black 0.0
-            float NdotV = std::max(float(x) / float(width - 1), 0.001f);
+            float NdotV = std::max(static_cast<float>(x) / static_cast<float>(width - 1), 0.001f);
 
             float A = 0.0f;
             float B = 0.0f;
@@ -100,12 +100,12 @@ std::vector<uint32_t> GenerateBRDFLUT(uint32_t width, uint32_t height) {
                 }
             }
 
-            A /= float(SAMPLE_COUNT);
-            B /= float(SAMPLE_COUNT);
+            A /= static_cast<float>(SAMPLE_COUNT);
+            B /= static_cast<float>(SAMPLE_COUNT);
 
             auto r                = static_cast<uint8_t>(ZHLN::Clamp(A, 0.0f, 1.0f) * 255.0f);
             auto g                = static_cast<uint8_t>(ZHLN::Clamp(B, 0.0f, 1.0f) * 255.0f);
-            pixels[y * width + x] = 0xFF000000u | (uint32_t(g) << 8) | r;
+            pixels[y * width + x] = 0xFF000000u | (static_cast<uint32_t>(g) << 8) | r;
         }
     }
     return pixels;
