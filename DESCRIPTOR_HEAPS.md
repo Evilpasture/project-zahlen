@@ -120,13 +120,20 @@ the old bindless set array.
 
 ---
 
-## 4. Ported (heap + push data)
+## 4. Ported (heap + push data) — the entire frame
 
 * Scene registry pipelines: materials, shadow (cascade + punctual), lines,
   CSG stencil passes, particle render, mesh-particle render + shadow, UI
   batches, decals (set 0 + scene set 1 merged into one mapping chain).
-* Compute: particle update, mesh-particle update (`ComputePass::BuildHeap` +
-  `DispatchHeap`).
+* Compute: particle update, mesh-particle update, HiZ generation (per-mip
+  slot spans), occlusion culling (pass x parity spans), cluster
+  bounds/culling, all five volumetric passes, procedural bake.
+* Post-processing: ambient, lighting (variants), reflection (variants),
+  translucent reflection, bloom, TAA/FXAA/MLAA/SMAA, blit.
+* ImGui: the backend is forked to
+  `src/engine/graphics/imgui_impl_vulkan_heap.*` and renders through the
+  heaps (texture slots + linear/nearest sampler slots selected by push-data
+  index words) with a null pipeline layout.
 * `PipelineBuilder::HeapMappings` / `ComputePipelineBuilder::HeapMappings` set
   `descriptor_heap` on the pipeline desc; `RenderCore.c` chains the mapping
   structs into each `VkPipelineShaderStageCreateInfo` and adds
@@ -135,24 +142,20 @@ the old bindless set array.
 * All heap pipelines are created with `layout = VK_NULL_HANDLE`
   (`VUID-VkGraphicsPipelineCreateInfo-flags-11311`; `Impl::emptyPipelineLayout`
   is the named null alias used at the call sites).
+* `HeapBindings.hpp` bakes per-pass mapping tables: non-sampler bindings get
+  N-slot spans addressed by a per-dispatch index word pushed at offset 176
+  (frame parity, mip level, pass id); sampler bindings get one static slot.
 * Parallel/secondary recording: `ParallelDrawDispatch` supports heap-binding
   inheritance (`VkCommandBufferInheritanceDescriptorHeapInfoEXT`) plus an
   optional per-secondary push-data block; ported passes running in secondaries
   simply bind the heaps themselves (legal with a NULL inheritance chain).
 
-## 5. Still Legacy (descriptor sets + push constants)
+## 5. Still Legacy
 
-Ordered after/around heap segments so invalidations are harmless:
-
-* HiZ generation, GPU occlusion culling, cluster culling/bounds,
-  volumetric fog passes, ambient/lighting/reflection/translucent-reflection
-  post passes, bloom, TAA/FXAA/MLAA/SMAA, blit, procedural bake compute,
-  skinning (BDA + push constants only), and the ImGui backend (its own
-  descriptor pool, rendered last).
-
-These port by the same recipe: reflect the layout → allocate static heap slots
-+ `VkDescriptorSetAndBindingMappingEXT` entries → `BuildHeap`/`HeapMappings` →
-`BindHeapsAndPushFrame` at segment start → `DrawHeap`/`DispatchHeap`.
+* Skinning only: a BDA + push-constant compute pass recorded before the
+  frame's heap segments (it binds no descriptor sets).
+* `src/render/DescriptorLayout.hpp` (the compile-time DSL) remains for API
+  compatibility but has no frame-path consumers.
 
 ## 6. Test Coverage
 
@@ -169,11 +172,12 @@ These port by the same recipe: reflect the layout → allocate static heap slots
 
 ## 7. Follow-up Checklist
 
-- [ ] Port HiZ / culling / cluster passes (image + buffer bindings).
-- [ ] Port volumetric passes.
-- [ ] Port post-processing (TAA/FXAA/MLAA/SMAA, bloom, blit).
-- [ ] Port ambient/lighting/reflection passes.
-- [ ] Port procedural bake compute.
+- [x] Port HiZ / culling / cluster passes (image + buffer bindings).
+- [x] Port volumetric passes.
+- [x] Port post-processing (TAA/FXAA/MLAA/SMAA, bloom, blit).
+- [x] Port ambient/lighting/reflection passes.
+- [x] Port procedural bake compute.
+- [x] Port the ImGui backend (forked to a descriptor-heap backend).
 - [ ] Consider `VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_PUSH_INDEX_EXT` for
       per-draw material descriptor selection instead of push data fields.
 - [ ] Optional: direct descriptor access (`layout(descriptor_heap)`) for hot
