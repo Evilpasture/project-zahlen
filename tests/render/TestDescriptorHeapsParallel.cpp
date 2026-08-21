@@ -180,18 +180,21 @@ struct DescriptorHeapsParallelSuite {
             // scaling and mild tone mapping preserve hue order, so each
             // material must light up its own hue bucket.
             // ====================================================================
+            // Raw hue ranges (0..360). NOTE: red wraps the 0/360 seam and blue
+            // sits in [200, 280] — no negative wrapping here (a previous
+            // wrapped representation made blue pixels unclassifiable).
             struct Bucket {
                 const char* name;
-                int         lo; // inclusive hue range [lo, hi]
-                int         hi;
                 uint32_t    count = 0;
             };
-            std::array<Bucket, 4> buckets {{
-                {"red", 0, 24},
-                {"yellow", 36, 84},
-                {"green", 96, 150},
-                {"blue", 200, 280},
-            }};
+            const auto classifyHue = [](float h) -> int {
+                if (h >= 336.0f || h < 24.0f) return 0;   // red
+                if (h >= 36.0f && h < 84.0f) return 1;    // yellow
+                if (h >= 96.0f && h < 150.0f) return 2;   // green
+                if (h >= 200.0f && h < 280.0f) return 3;  // blue
+                return -1;
+            };
+            std::array<Bucket, 4> buckets {{{"red"}, {"yellow"}, {"green"}, {"blue"}}};
 
             constexpr int kCropTop    = 85;
             constexpr int kCropBottom = 395;
@@ -227,17 +230,15 @@ struct DescriptorHeapsParallelSuite {
                         h += 360.0f;
                     }
 
-                    for (auto& bucket: buckets) {
-                        const float hc = (h > 180.0f) ? h - 360.0f : h; // red wraps around 0/360
-                        if (static_cast<int>(hc) >= bucket.lo && static_cast<int>(hc) <= bucket.hi) {
-                            bucket.count++;
-                        }
+                    const int cls = classifyHue(h);
+                    if (cls >= 0) {
+                        buckets[static_cast<uint32_t>(cls)].count++;
                     }
                 }
             }
 
             for (const auto& bucket: buckets) {
-                ZHLN::Println("    [INFO] hue bucket '{}' [{}..{}]: {} pixels", bucket.name, bucket.lo, bucket.hi, bucket.count);
+                ZHLN::Println("    [INFO] hue bucket '{}': {} pixels", bucket.name, bucket.count);
             }
             ZHLN::Println("    [INFO] crop region {} px, saturated {} px", totalPx, saturated);
 
