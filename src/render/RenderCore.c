@@ -147,11 +147,24 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
     static const char* const validation_layers[] = {"VK_LAYER_KHRONOS_validation"};
 
     // --- Query available instance extensions to filter out unsupported ones ---
+    // Heap-allocated and unclamped on purpose: a fixed 128-entry array silently
+    // drops everything the loader reports past that index, which turns a
+    // perfectly supported extension into "unsupported" depending only on the
+    // driver's enumeration order.
     uint32_t available_count = 0;
     vkEnumerateInstanceExtensionProperties(nullptr, &available_count, nullptr);
-    available_count = ZHLN_Min(available_count, maxInstanceExtensions);
-    VkExtensionProperties available_exts[maxInstanceExtensions];
-    vkEnumerateInstanceExtensionProperties(nullptr, &available_count, available_exts);
+
+    VkExtensionProperties* available_exts = NULL;
+    if (available_count > 0) {
+        available_exts = (VkExtensionProperties*) calloc(available_count, sizeof(VkExtensionProperties));
+        if (available_exts == NULL) {
+            available_count = 0;
+        } else if (vkEnumerateInstanceExtensionProperties(nullptr, &available_count, available_exts) != VK_SUCCESS) {
+            free(available_exts);
+            available_exts  = NULL;
+            available_count = 0;
+        }
+    }
 
     const char* final_extensions[32];
     uint32_t    final_count = 0;
@@ -222,6 +235,13 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
                 }
             }
         }
+    }
+
+    // The availability table is no longer needed: final_extensions holds
+    // pointers into the caller's strings, not into available_exts.
+    if (available_exts != NULL) {
+        free(available_exts);
+        available_exts = NULL;
     }
 
     VkInstanceCreateInfo create_info = {
@@ -607,7 +627,29 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
                                                  ZHLN_MeshShaderLimitsSufficient(&mesh_limits);
 
     if (!mesh_available) {
-        fprintf(stderr, "[VULKAN] INFO: VK_EXT_mesh_shader unavailable or below required limits; falling back to the vertex pipeline.\n");
+        // Say WHICH gate failed: "unavailable or below limits" is useless when
+        // the real cause is that the extension never made it into the enabled
+        // list (the entry points are then NULL even on capable hardware).
+        if (!mesh_limits.supported) {
+            fprintf(stderr, "[VULKAN] INFO: VK_EXT_mesh_shader not reported by the physical device; using the vertex pipeline.\n");
+        } else if (pfn_draw_mesh_tasks == NULL || pfn_draw_mesh_tasks_indirect == NULL) {
+            fprintf(
+                stderr,
+                "[VULKAN] WARNING: VK_EXT_mesh_shader is supported by the device but its entry points did not resolve "
+                "(vkCmdDrawMeshTasksEXT=%p, vkCmdDrawMeshTasksIndirectEXT=%p). The extension was almost certainly not "
+                "enabled at device creation.\n",
+                (void*) pfn_draw_mesh_tasks, (void*) pfn_draw_mesh_tasks_indirect
+            );
+        } else {
+            fprintf(
+                stderr,
+                "[VULKAN] INFO: VK_EXT_mesh_shader limits below the engine's meshlet budget "
+                "(maxMeshOutputVertices=%u/64, maxMeshOutputPrimitives=%u/124, maxTaskWorkGroupInvocations=%u/32, "
+                "maxMeshWorkGroupInvocations=%u/64); using the vertex pipeline.\n",
+                mesh_limits.max_mesh_output_vertices, mesh_limits.max_mesh_output_primitives, mesh_limits.max_task_work_group_invocations,
+                mesh_limits.max_mesh_work_group_invocations
+            );
+        }
     } else {
         fprintf(
             stderr, "[VULKAN] INFO: VK_EXT_mesh_shader enabled (maxOutVerts=%u maxOutPrims=%u preferredTaskInvocations=%u).\n",

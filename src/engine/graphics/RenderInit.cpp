@@ -28,6 +28,11 @@ struct HardwareCaps {
     // VK_EXT_mesh_shader: extension + features + the hardware limits the
     // Zahlen task/mesh shaders were authored against.
     bool supportsMeshShader = false;
+    // Requested separately: FeatureChain::Optional drops the WHOLE feature
+    // struct when any single requested bit is unsupported, so asking for
+    // multiviewMeshShader unconditionally would silently disable taskShader
+    // and meshShader too on a device that lacks only the multiview bit.
+    bool supportsMultiviewMeshShader = false;
 };
 
 class HardwareCapsProber {
@@ -66,11 +71,13 @@ class HardwareCapsProber {
 };
 
 bool CheckMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept;
+bool CheckMultiviewMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept;
 
 HardwareCaps ProbeHardware(VkPhysicalDevice physicalDevice, uint32_t apiVersion) noexcept {
     HardwareCaps caps {};
     HardwareCapsProber(physicalDevice, apiVersion).ProbeInt64(caps.supportsInt64).ProbeDrawIndirectCount(caps.supportsDrawIndirectCount);
-    caps.supportsMeshShader = CheckMeshShaderSupport(physicalDevice);
+    caps.supportsMeshShader          = CheckMeshShaderSupport(physicalDevice);
+    caps.supportsMultiviewMeshShader = caps.supportsMeshShader && CheckMultiviewMeshShaderSupport(physicalDevice);
     return caps;
 }
 
@@ -80,6 +87,12 @@ HardwareCaps ProbeHardware(VkPhysicalDevice physicalDevice, uint32_t apiVersion)
 // less and the engine silently keeps the vertex pipeline.
 bool CheckMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept {
     if (!ZHLN::Vk::IsDeviceExtensionSupported(physicalDevice, VK_EXT_MESH_SHADER_EXTENSION_NAME)) {
+        // Log the count too: a suspiciously round number here (128, 256...)
+        // means something is truncating the enumeration again.
+        ZHLN::Log(
+            "[RenderInit] VK_EXT_mesh_shader not present among the {} device extensions reported; using the vertex pipeline.",
+            ZHLN::Vk::EnumerateDeviceExtensions(physicalDevice).size()
+        );
         return false;
     }
 
@@ -91,6 +104,10 @@ bool CheckMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept {
     vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
 
     if (meshFeatures.taskShader != VK_TRUE || meshFeatures.meshShader != VK_TRUE) {
+        ZHLN::Log(
+            "[RenderInit] VK_EXT_mesh_shader present but its features are not advertised (taskShader={}, meshShader={}); using the vertex pipeline.",
+            meshFeatures.taskShader, meshFeatures.meshShader
+        );
         return false;
     }
 
@@ -103,7 +120,22 @@ bool CheckMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept {
         );
         return false;
     }
+
+    ZHLN::Log(
+        "[RenderInit] VK_EXT_mesh_shader enabled (maxMeshOutputVertices={}, maxMeshOutputPrimitives={}, maxPreferredTaskWorkGroupInvocations={}).",
+        limits.max_mesh_output_vertices, limits.max_mesh_output_primitives, limits.max_preferred_task_work_group_invocations
+    );
     return true;
+}
+
+bool CheckMultiviewMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept {
+    VkPhysicalDeviceMeshShaderFeaturesEXT meshFeatures {};
+    meshFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT;
+    VkPhysicalDeviceFeatures2 features2 {};
+    features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    features2.pNext = &meshFeatures;
+    vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
+    return meshFeatures.multiviewMeshShader == VK_TRUE;
 }
 
 bool CheckRayTracingSupport(VkPhysicalDevice physicalDevice) noexcept {
@@ -423,9 +455,12 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
         // device actually supports mesh shading, because the feature struct
         // must not be chained on a device that lacks the extension.
         .Optional<VkPhysicalDeviceMeshShaderFeaturesEXT>([&caps](auto& f) {
-            f.taskShader          = caps.supportsMeshShader ? VK_TRUE : VK_FALSE;
-            f.meshShader          = caps.supportsMeshShader ? VK_TRUE : VK_FALSE;
-            f.multiviewMeshShader = caps.supportsMeshShader ? VK_TRUE : VK_FALSE;
+            f.taskShader = caps.supportsMeshShader ? VK_TRUE : VK_FALSE;
+            f.meshShader = caps.supportsMeshShader ? VK_TRUE : VK_FALSE;
+            // Only requested when the device actually has it: one unsupported
+            // bit would make FeatureChain::Optional discard the entire struct,
+            // leaving the extension enabled but task/mesh shading OFF.
+            f.multiviewMeshShader = caps.supportsMultiviewMeshShader ? VK_TRUE : VK_FALSE;
         })
         .Require<VkPhysicalDeviceFeatures2>([&](auto& f) {
             f.features.multiDrawIndirect         = VK_TRUE;

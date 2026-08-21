@@ -69,6 +69,33 @@ streams are written after the index stream. `sizeof(CookedMeshHeader)` is now
 `ZHLN_NO_GPU_CULLING`), which makes A/B comparison and driver-bug bisection a
 one-liner.
 
+### Two traps in the enablement path
+
+1. **Truncated extension enumeration.** `IsDeviceExtensionSupported()` used to
+   read the device extension list into a fixed `std::array<..., 128>` and clamp
+   the count, hiding every extension the driver reported past index 127.
+   Desktop drivers expose far more than that (NVIDIA: >200), and because the
+   list is roughly `VK_KHR_*` before `VK_EXT_*`, the KHR ray-tracing trio
+   survived the cut while `VK_EXT_mesh_shader` did not — mesh shading looked
+   unsupported on hardware that fully supports it, while
+   `VK_EXT_descriptor_heap` kept working because `ExtensionBuilder::ForDevice()`
+   enumerates into a growable vector. Both probes now enumerate the full list
+   (`EnumerateDeviceExtensions` / `EnumerateInstanceExtensions`, with a
+   `VK_INCOMPLETE` retry loop), and the same clamp was removed from the C-side
+   instance-extension filter.
+2. **All-or-nothing optional features.** `FeatureChain::Optional<T>` drops the
+   *entire* feature struct if any single requested `VkBool32` is unsupported.
+   Requesting `multiviewMeshShader` unconditionally would therefore have
+   silently disabled `taskShader`/`meshShader` on a device missing only the
+   multiview bit — enabled extension, no mesh shading, and a validation error
+   at pipeline creation instead of a clear message. It is now probed
+   separately and requested only when present.
+
+Failure diagnostics are per-gate: the log distinguishes "extension not
+reported" (and prints how many extensions *were* reported, so a suspiciously
+round number reveals a truncation regression) from "features not advertised",
+"entry points did not resolve" and "limits below the meshlet budget".
+
 ---
 
 ## 3. Pipelines
