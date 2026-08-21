@@ -151,7 +151,7 @@ struct DecalTestSuite {
             // Set Fullbright to test raw G-buffer decal color stamping without lighting variance
             auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
             if (!settingsEnts.empty()) {
-                ZHLN::ECS::Patch<ZHLN::Components::PostProcessSettingsComponent>(reg, settingsEnts[0], [](auto& pp) { pp.fullBright = 1; });
+                reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) { pp.fullBright = 1; });
             }
 
             // 1. Camera looking along standard forward direction (-Z) from Z = 2.0m
@@ -163,7 +163,7 @@ struct DecalTestSuite {
 
             auto camEnts = reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>();
             if (!camEnts.empty()) {
-                ZHLN::ECS::Patch<ZHLN::Components::TargetCameraComponent>(reg, camEnts[0], [](auto& tc) {
+                reg.Patch<ZHLN::Components::TargetCameraComponent>(camEnts[0], [](auto& tc) {
                     tc.yaw       = -90.0f;
                     tc.pitch     = 0.0f;
                     tc.stiffness = 0.0f;

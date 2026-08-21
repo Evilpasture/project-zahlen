@@ -409,65 +409,66 @@ class ZHLN_API Registry {
     size_t                         _compCapacity = 0;
     std::vector<ComponentTypeInfo> _typeInfo;
 
+    // Patch combinator: collapses the repetitive null-check dance.
+    // Stop writing `if (auto* c = reg.Get<T>(e))` manually.
+    template <typename T, typename Fn>
+    bool Patch(Entity e, Fn&& fn) {
+        if (auto* c = Get<T>(e)) {
+            std::forward<Fn>(fn)(*c);
+            return true;
+        }
+        return false;
+    }
+
+    template <typename T, typename Fn>
+    bool Patch(Entity e, Fn&& fn) const {
+        if (const auto* c = Get<T>(e)) {
+            std::forward<Fn>(fn)(*c);
+            return true;
+        }
+        return false;
+    }
+
+    template <typename... Ts, typename Fn>
+        requires(sizeof...(Ts) > 1)
+    bool Patch(Entity e, Fn&& fn) {
+        auto ptrs     = std::make_tuple(Get<Ts>(e)...);
+        bool allValid = std::apply([](auto*... p) { return (p && ...); }, ptrs);
+        if (allValid) {
+            std::apply([&](auto*... p) { std::forward<Fn>(fn)(*p...); }, ptrs);
+            return true;
+        }
+        return false;
+    }
+
+    template <typename... Ts, typename Fn>
+        requires(sizeof...(Ts) > 1)
+    bool Patch(Entity e, Fn&& fn) const {
+        auto ptrs     = std::make_tuple(Get<Ts>(e)...);
+        bool allValid = std::apply([](const auto*... p) { return (p && ...); }, ptrs);
+        if (allValid) {
+            std::apply([&](const auto*... p) { std::forward<Fn>(fn)(*p...); }, ptrs);
+            return true;
+        }
+        return false;
+    }
+
+    template <typename T, typename... Args>
+    bool Assign(Entity e, Args&&... args) {
+        return Patch<T>(e, [&](auto& c) {
+            if constexpr (sizeof...(Args) == 1 && (std::is_assignable_v<T&, Args> && ...)) {
+                c = (std::forward<Args>(args), ...);
+            } else if constexpr (requires { c = T {std::forward<Args>(args)...}; }) {
+                c = T {std::forward<Args>(args)...};
+            } else if constexpr (requires { c = T(std::forward<Args>(args)...); }) {
+                c = T(std::forward<Args>(args)...);
+            }
+        });
+    }
+
+  private:
     void EnsureEntityCapacity(uint32_t index);
     void EnsureComponentCapacity(uint32_t id);
 };
-
-// Patch combinator: collapses the repetitive null-check dance
-// Stop writing `if (auto* c = reg.Get<T>(e))` manually.
-template <typename T, typename Fn>
-inline bool Patch(ECS::Registry& reg, Entity e, Fn&& fn) {
-    if (auto* c = reg.Get<T>(e)) {
-        std::forward<Fn>(fn)(*c);
-        return true;
-    }
-    return false;
-}
-
-template <typename T, typename Fn>
-inline bool Patch(const ECS::Registry& reg, Entity e, Fn&& fn) {
-    if (const auto* c = reg.Get<T>(e)) {
-        std::forward<Fn>(fn)(*c);
-        return true;
-    }
-    return false;
-}
-
-template <typename... Ts, typename Fn>
-    requires(sizeof...(Ts) > 1)
-inline bool Patch(ECS::Registry& reg, Entity e, Fn&& fn) {
-    auto ptrs     = std::make_tuple(reg.Get<Ts>(e)...);
-    bool allValid = std::apply([](auto*... p) { return (p && ...); }, ptrs);
-    if (allValid) {
-        std::apply([&](auto*... p) { std::forward<Fn>(fn)(*p...); }, ptrs);
-        return true;
-    }
-    return false;
-}
-
-template <typename... Ts, typename Fn>
-    requires(sizeof...(Ts) > 1)
-inline bool Patch(const ECS::Registry& reg, Entity e, Fn&& fn) {
-    auto ptrs     = std::make_tuple(reg.Get<Ts>(e)...);
-    bool allValid = std::apply([](const auto*... p) { return (p && ...); }, ptrs);
-    if (allValid) {
-        std::apply([&](const auto*... p) { std::forward<Fn>(fn)(*p...); }, ptrs);
-        return true;
-    }
-    return false;
-}
-
-template <typename T, typename... Args>
-inline bool Assign(ECS::Registry& reg, Entity e, Args&&... args) {
-    return Patch<T>(reg, e, [&](auto& c) {
-        if constexpr (sizeof...(Args) == 1 && (std::is_assignable_v<T&, Args> && ...)) {
-            c = (std::forward<Args>(args), ...);
-        } else if constexpr (requires { c = T {std::forward<Args>(args)...}; }) {
-            c = T {std::forward<Args>(args)...};
-        } else if constexpr (requires { c = T(std::forward<Args>(args)...); }) {
-            c = T(std::forward<Args>(args)...);
-        }
-    });
-}
 
 } // namespace ZHLN::ECS

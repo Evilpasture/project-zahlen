@@ -95,7 +95,7 @@ struct ECSTestSuite {
             ZHLN::Test::ExpectEq(pos->x, StartX);
 
             // Test Patch combinator
-            bool patched = ZHLN::ECS::Patch<PositionComponent, VelocityComponent>(reg, e, [](auto& p, auto& v) {
+            bool patched = reg.Patch<PositionComponent, VelocityComponent>(e, [](auto& p, auto& v) {
                 p.x += v.vx;
                 p.y += v.vy;
                 p.z += v.vz;

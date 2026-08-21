@@ -137,7 +137,7 @@ struct ViewmodelTestSuite {
             );
 
             // Flag as Viewmodel
-            ZHLN::ECS::Patch<ZHLN::Components::MeshComponent>(reg, vmGun, [](auto& mc) { mc.flags |= ZHLN::DrawFlags::Viewmodel; });
+            reg.Patch<ZHLN::Components::MeshComponent>(vmGun, [](auto& mc) { mc.flags |= ZHLN::DrawFlags::Viewmodel; });
 
             const auto* mc      = reg.Get<ZHLN::Components::MeshComponent>(vmGun);
             auto        checkMC = ZHLN::Test::AssertTrue(mc != nullptr);
@@ -172,7 +172,7 @@ struct ViewmodelTestSuite {
             // Set Fullbright to test raw G-buffer viewmodel color resolution without lighting variance
             auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
             if (!settingsEnts.empty()) {
-                ZHLN::ECS::Patch<ZHLN::Components::PostProcessSettingsComponent>(reg, settingsEnts[0], [](auto& pp) { pp.fullBright = 1; });
+                reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) { pp.fullBright = 1; });
             }
 
             // 1. Setup Camera looking along standard forward direction (-Z)
@@ -185,7 +185,7 @@ struct ViewmodelTestSuite {
             // Sync camera backing ECS component
             auto camEnts = reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>();
             if (!camEnts.empty()) {
-                ZHLN::ECS::Patch<ZHLN::Components::TargetCameraComponent>(reg, camEnts[0], [](auto& tc) {
+                reg.Patch<ZHLN::Components::TargetCameraComponent>(camEnts[0], [](auto& tc) {
                     tc.yaw       = -90.0f;
                     tc.pitch     = 0.0f;
                     tc.stiffness = 0.0f;
@@ -216,7 +216,7 @@ struct ViewmodelTestSuite {
                 *engine, JPH::Vec3(0.3f, 0.3f, 0.3f),
                 ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 1.5, 1.2), .createPhysics = false, .materialOverride = vmMat}
             );
-            ZHLN::ECS::Patch<ZHLN::Components::MeshComponent>(reg, vmObject, [](auto& mc) { mc.flags |= ZHLN::DrawFlags::Viewmodel; });
+            reg.Patch<ZHLN::Components::MeshComponent>(vmObject, [](auto& mc) { mc.flags |= ZHLN::DrawFlags::Viewmodel; });
 
             // 4. Render 15 frames to stabilize G-buffer and Viewmodel pass
             constexpr float dt = 1.0f / 60.0f;

@@ -487,7 +487,7 @@ export class ExplosionSystem {
                 exp.age += dt;
 
                 // Flash Decay on Root Entity (Fades sharply to true 0 within ~0.6s)
-                ECS::Patch<Components::LightComponent>(reg, e, [&](auto& light) {
+                reg.Patch<Components::LightComponent>(e, [&](auto& light) {
                     float flashT = std::exp(-exp.age * 5.5f);
                     if (flashT < 0.002f) {
                         light.intensity = 0.0f; // Drop to pitch black so zero light lingers in fog
@@ -570,8 +570,8 @@ export class ExplosionSystem {
 
                     JPH::Vec3 newScale(currentRadius * 2.0f, currentRadius * 2.0f, currentDepth);
 
-                    ECS::Patch<Components::TransformComponent>(reg, craterEnt, [&](auto& trans) { trans.scale = newScale; });
-                    ECS::Patch<Components::WorldTransformComponent>(reg, craterEnt, [&](auto& wt) {
+                    reg.Patch<Components::TransformComponent>(craterEnt, [&](auto& trans) { trans.scale = newScale; });
+                    reg.Patch<Components::WorldTransformComponent>(craterEnt, [&](auto& wt) {
                         wt.world = Math::CreateTransform(crater.origin, crater.rotation, newScale);
                     });
                 }

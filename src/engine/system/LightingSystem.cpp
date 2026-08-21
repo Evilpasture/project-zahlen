@@ -21,15 +21,15 @@ std::pair<JPH::Vec3, float> LightingSystem::GetSunDirectionAndIntensity(const EC
     bool      sunFound     = false;
 
     for (Entity e: reg.GetEntitiesWith<Components::LightComponent>()) {
-        ECS::Patch<Components::LightComponent>(reg, e, [&](const auto& light) {
+        reg.Patch<Components::LightComponent>(e, [&](const auto& light) {
             if (light.type == LightType::Sun) {
                 // Prioritize explicit direction vector if set by script
                 if (light.direction.LengthSq() > 1e-4f) {
                     sunDirection = light.direction;
-                } else if (!ECS::Patch<Components::WorldTransformComponent>(reg, e, [&](const auto& worldTrans) {
+                } else if (!reg.Patch<Components::WorldTransformComponent>(e, [&](const auto& worldTrans) {
                                sunDirection = worldTrans.world.GetColumn3(2);
                            })) {
-                    ECS::Patch<Components::TransformComponent>(reg, e, [&](const auto& trans) { sunDirection = trans.GetLocalMatrix().GetColumn3(2); });
+                    reg.Patch<Components::TransformComponent>(e, [&](const auto& trans) { sunDirection = trans.GetLocalMatrix().GetColumn3(2); });
                 }
                 sunIntensity = light.intensity;
                 sunFound     = true;
@@ -46,11 +46,11 @@ std::pair<JPH::Vec3, float> LightingSystem::GetSunDirectionAndIntensity(const EC
         auto sunEntities = reg.GetEntitiesWith<Components::SunTagComponent>();
         if (!sunEntities.empty()) {
             Entity sunEnt = sunEntities[0];
-            if (!ECS::Patch<Components::WorldTransformComponent>(reg, sunEnt, [&](const auto& worldTrans) { sunDirection = worldTrans.world.GetColumn3(2); })) {
-                ECS::Patch<Components::TransformComponent>(reg, sunEnt, [&](const auto& trans) { sunDirection = trans.GetLocalMatrix().GetColumn3(2); });
+            if (!reg.Patch<Components::WorldTransformComponent>(sunEnt, [&](const auto& worldTrans) { sunDirection = worldTrans.world.GetColumn3(2); })) {
+                reg.Patch<Components::TransformComponent>(sunEnt, [&](const auto& trans) { sunDirection = trans.GetLocalMatrix().GetColumn3(2); });
             }
 
-            ECS::Patch<Components::LightComponent>(reg, sunEnt, [&](const auto& light) { sunIntensity = light.intensity; });
+            reg.Patch<Components::LightComponent>(sunEnt, [&](const auto& light) { sunIntensity = light.intensity; });
         }
     }
 
@@ -76,28 +76,28 @@ void LightingSystem::Update(Engine& engine, [[maybe_unused]] float dt) {
         ZHLN::Array<LightDistance> lightDistances;
 
         JPH::Vec3 playerPos    = JPH::Vec3::sZero();
-        bool      hasPlayerPos = ECS::Patch<Components::WorldTransformComponent>(reg, playerEnt, [&](const auto& playerWorldTrans) {
+        bool      hasPlayerPos = reg.Patch<Components::WorldTransformComponent>(playerEnt, [&](const auto& playerWorldTrans) {
             playerPos = playerWorldTrans.world.GetTranslation();
         });
 
         if (!hasPlayerPos) {
-            hasPlayerPos = ECS::Patch<Components::TransformComponent>(reg, playerEnt, [&](const auto& playerTrans) { playerPos = playerTrans.position; });
+            hasPlayerPos = reg.Patch<Components::TransformComponent>(playerEnt, [&](const auto& playerTrans) { playerPos = playerTrans.position; });
         }
 
         if (hasPlayerPos) {
             for (Entity e: reg.GetEntitiesWith<Components::LightComponent>()) {
-                ECS::Patch<Components::LightComponent>(reg, e, [&](auto& light) {
+                reg.Patch<Components::LightComponent>(e, [&](auto& light) {
                     light.shadowLayer = -1; // Reset to disabled initially
 
                     // Punctual shadows are only allocated to local point/spot lights
                     if (light.type == LightType::Point || light.type == LightType::Spot) {
                         JPH::Vec3 lightPos    = JPH::Vec3::sZero();
-                        bool      hasLightPos = ECS::Patch<Components::WorldTransformComponent>(reg, e, [&](const auto& worldTrans) {
+                        bool      hasLightPos = reg.Patch<Components::WorldTransformComponent>(e, [&](const auto& worldTrans) {
                             lightPos = worldTrans.world.GetTranslation();
                         });
 
                         if (!hasLightPos) {
-                            hasLightPos = ECS::Patch<Components::TransformComponent>(reg, e, [&](const auto& trans) { lightPos = trans.position; });
+                            hasLightPos = reg.Patch<Components::TransformComponent>(e, [&](const auto& trans) { lightPos = trans.position; });
                         }
 
                         if (hasLightPos) {
@@ -113,10 +113,10 @@ void LightingSystem::Update(Engine& engine, [[maybe_unused]] float dt) {
 
             auto shadowEntities = reg.GetEntitiesWith<Components::ShadowSettingsComponent>();
             if (!shadowEntities.empty()) {
-                ECS::Patch<Components::ShadowSettingsComponent>(reg, shadowEntities[0], [&](const auto& shadowSettings) {
+                reg.Patch<Components::ShadowSettingsComponent>(shadowEntities[0], [&](const auto& shadowSettings) {
                     uint32_t shadowCasters = std::min(static_cast<uint32_t>(shadowSettings.maxPunctualShadows), static_cast<uint32_t>(lightDistances.size()));
                     for (uint32_t i = 0; i < shadowCasters; ++i) {
-                        ECS::Patch<Components::LightComponent>(reg, lightDistances[i].entity, [&](auto& light) {
+                        reg.Patch<Components::LightComponent>(lightDistances[i].entity, [&](auto& light) {
                             light.shadowLayer = static_cast<int32_t>(i);
                         });
                     }
@@ -132,7 +132,7 @@ void LightingSystem::Update(Engine& engine, [[maybe_unused]] float dt) {
     sceneLights.reserve(lightEntities.size());
 
     for (Entity e: lightEntities) {
-        ECS::Patch<Components::LightComponent>(reg, e, [&](const auto& light) {
+        reg.Patch<Components::LightComponent>(e, [&](const auto& light) {
             GPULight gpuLight {};
             gpuLight.type        = light.type;
             gpuLight.intensity   = light.intensity;
@@ -145,13 +145,13 @@ void LightingSystem::Update(Engine& engine, [[maybe_unused]] float dt) {
 
             JPH::Vec3  pos          = JPH::Vec3::sZero();
             JPH::Mat44 worldMat     = JPH::Mat44::sIdentity();
-            bool       hasTransform = ECS::Patch<Components::WorldTransformComponent>(reg, e, [&](const auto& worldTrans) {
+            bool       hasTransform = reg.Patch<Components::WorldTransformComponent>(e, [&](const auto& worldTrans) {
                 pos      = worldTrans.world.GetTranslation();
                 worldMat = worldTrans.world;
             });
 
             if (!hasTransform) {
-                hasTransform = ECS::Patch<Components::TransformComponent>(reg, e, [&](const auto& trans) {
+                hasTransform = reg.Patch<Components::TransformComponent>(e, [&](const auto& trans) {
                     pos      = trans.position;
                     worldMat = trans.GetLocalMatrix();
                 });

@@ -440,12 +440,12 @@ export auto Update(Engine& engine, float dt) -> void {
         }
 
         if (reg.IsAlive(bolt.flashLightEntity)) {
-            ECS::Patch<Components::LightComponent>(reg, bolt.flashLightEntity, [&](auto& light) -> auto {
+            reg.Patch<Components::LightComponent>(bolt.flashLightEntity, [&](auto& light) -> auto {
                 light.intensity = bolt.flashLuminance * 8000000.0f;
             });
         }
         if (reg.IsAlive(bolt.impactLightEntity)) {
-            ECS::Patch<Components::LightComponent>(reg, bolt.impactLightEntity, [&](auto& light) -> auto {
+            reg.Patch<Components::LightComponent>(bolt.impactLightEntity, [&](auto& light) -> auto {
                 light.intensity = bolt.flashLuminance * 4000000.0f;
             });
         }
@@ -454,7 +454,7 @@ export auto Update(Engine& engine, float dt) -> void {
     // Apply combined peak flash luminance to global post-process settings
     const auto settingsEnts = reg.GetEntitiesWith<Components::GlobalSettingsTagComponent>();
     if (hasActiveBolts && !settingsEnts.empty()) {
-        ECS::Patch<Components::PostProcessSettingsComponent>(reg, settingsEnts[0], [&](auto& pp) -> auto {
+        reg.Patch<Components::PostProcessSettingsComponent>(settingsEnts[0], [&](auto& pp) -> auto {
             pp.ambientExposure = unflashedBaseExposure + (180.0f * peakLuminanceThisFrame);
         });
     }
@@ -474,7 +474,7 @@ export auto Update(Engine& engine, float dt) -> void {
 
     // Restore ambient exposure to baseline when all active bolts expire
     if (reg.GetEntitiesWith<LightningComponent>().empty() && !settingsEnts.empty()) {
-        ECS::Patch<Components::PostProcessSettingsComponent>(reg, settingsEnts[0], [&](auto& pp) -> auto { pp.ambientExposure = unflashedBaseExposure; });
+        reg.Patch<Components::PostProcessSettingsComponent>(settingsEnts[0], [&](auto& pp) -> auto { pp.ambientExposure = unflashedBaseExposure; });
     }
 }
 

@@ -155,7 +155,7 @@ struct LightningTestSuite {
             constexpr float kInitialBaselineExposure = 6.0f;
             const auto      settingsEnts             = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
             ZHLN::Test::ExpectTrue(!settingsEnts.empty());
-            ZHLN::ECS::Patch<ZHLN::Components::PostProcessSettingsComponent>(reg, settingsEnts[0], [](auto& pp) {
+            reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
                 pp.ambientExposure = kInitialBaselineExposure;
             });
 
@@ -201,7 +201,7 @@ struct LightningTestSuite {
                             returnStrokeObserved = true;
                             if (activeBolt->flashLuminance > 0.01f) {
                                 // Check if post-process exposure flashed
-                                ZHLN::ECS::Patch<ZHLN::Components::PostProcessSettingsComponent>(reg, settingsEnts[0], [&](const auto& pp) {
+                                reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [&](const auto& pp) {
                                     if (pp.ambientExposure > kInitialBaselineExposure + 5.0f) {
                                         exposureSpikeObserved = true;
                                     }
@@ -229,7 +229,7 @@ struct LightningTestSuite {
             ZHLN::Test::ExpectFalse(reg.IsAlive(impactLight));
 
             // Invariant 4: Ambient exposure must be cleanly restored to un-flashed baseline
-            ZHLN::ECS::Patch<ZHLN::Components::PostProcessSettingsComponent>(reg, settingsEnts[0], [&](const auto& pp) {
+            reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [&](const auto& pp) {
                 ZHLN::Test::ExpectEq(pp.ambientExposure, kInitialBaselineExposure);
             });
 
@@ -267,7 +267,7 @@ struct LightningTestSuite {
 
             constexpr float kBaselineExposure = 5.0f;
             const auto      settingsEnts      = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-            ZHLN::ECS::Patch<ZHLN::Components::PostProcessSettingsComponent>(reg, settingsEnts[0], [](auto& pp) { pp.ambientExposure = kBaselineExposure; });
+            reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) { pp.ambientExposure = kBaselineExposure; });
 
             // Spawn first strike
             const ZHLN::Entity bolt1 = ZHLN::Lightning::Spawn(*engine, JPH::RVec3(0, 150, 0), JPH::RVec3(-10, 0, 0));
@@ -301,7 +301,7 @@ struct LightningTestSuite {
             ZHLN::Test::ExpectTrue(reg.GetEntitiesWith<ZHLN::LightningComponent>().empty());
 
             // Exposure returned to 5.0f without compound accumulation
-            ZHLN::ECS::Patch<ZHLN::Components::PostProcessSettingsComponent>(reg, settingsEnts[0], [&](const auto& pp) {
+            reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [&](const auto& pp) {
                 ZHLN::Test::ExpectEq(pp.ambientExposure, kBaselineExposure);
             });
 

@@ -361,7 +361,6 @@ using ZHLN::ECS::Access;
 using ZHLN::ECS::ComponentAccess;
 using ZHLN::ECS::ComponentFamily;
 using ZHLN::ECS::EntityCommandBuffer;
-using ZHLN::ECS::Patch;
 using ZHLN::ECS::Read;
 using ZHLN::ECS::Registry;
 using ZHLN::ECS::SparseSet;
