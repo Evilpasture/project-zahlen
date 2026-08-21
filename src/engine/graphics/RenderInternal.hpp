@@ -317,7 +317,7 @@ using ComputeStageSource  = ShaderStageSource<ShaderStage::Compute>;
 
 struct NativeMaterial {
     Vk::Pipeline     pipeline;
-    VkPipelineLayout layout = VK_NULL_HANDLE; // Non-owning alias of the shared empty heap layout
+    VkPipelineLayout layout = VK_NULL_HANDLE; // Non-owning alias of the spec-required null heap layout
 };
 
 static constexpr uint32_t kGpuCullingMaxInstances        = 8192;
@@ -664,8 +664,7 @@ struct RenderContext::Impl {
     Vk::TextureHandle decalDepthSlot;
     uint32_t          textureHeapBase = 0; // first slot of the globalTextures[] region
 
-    Vk::PipelineLayout emptyLayoutOwner;            // RAII owner of the shared empty layout
-    VkPipelineLayout   emptyPipelineLayout = VK_NULL_HANDLE; // Shared by every descriptor-heap pipeline
+    VkPipelineLayout   emptyPipelineLayout = VK_NULL_HANDLE; // Spec-required null layout for every descriptor-heap pipeline
 
     Vk::Sampler globalSampler;
     Vk::Sampler clampSampler;
@@ -707,8 +706,8 @@ struct RenderContext::Impl {
     ZHLN::Array<Vk::ImageView>             shadowCascadeViewsPrev;
 
     Vk::PipelineLayout skinningPipelineLayout;
-    VkPipelineLayout   shadowPipelineLayout = VK_NULL_HANDLE; // Raw alias of the shared empty heap layout
-    VkPipelineLayout   punctualShadowPipelineLayout = VK_NULL_HANDLE; // Raw alias of the shared empty heap layout
+    VkPipelineLayout   shadowPipelineLayout = VK_NULL_HANDLE; // Raw alias of the spec-required null heap layout
+    VkPipelineLayout   punctualShadowPipelineLayout = VK_NULL_HANDLE; // Raw alias of the spec-required null heap layout
 
     Vk::TypedPipeline<0, true> shadowPipeline;
     Vk::TypedPipeline<0, true> punctualShadowPipeline;
@@ -718,19 +717,19 @@ struct RenderContext::Impl {
 
     Vk::Buffer                  particleBuffer;
     Vk::ComputePass             particleUpdatePass;
-    VkPipelineLayout            particleRenderLayout = VK_NULL_HANDLE; // Raw alias of the shared empty heap layout
+    VkPipelineLayout            particleRenderLayout = VK_NULL_HANDLE; // Raw alias of the spec-required null heap layout
     Vk::TypedPipeline<1, false> particleRenderPipeline;
 
     Vk::ComputePass    meshParticleUpdatePass;
-    VkPipelineLayout   meshParticleRenderLayout = VK_NULL_HANDLE; // Raw alias of the shared empty heap layout
+    VkPipelineLayout   meshParticleRenderLayout = VK_NULL_HANDLE; // Raw alias of the spec-required null heap layout
     Vk::Pipeline       meshParticleRenderPipeline;
     Vk::Pipeline       meshParticleShadowPipeline;
 
     Vk::SlangReflectedLayout decalDescLayout; // Reflection only: decal bindings map onto the heaps
-    VkPipelineLayout         decalPipelineLayout = VK_NULL_HANDLE; // Raw alias of the shared empty heap layout
+    VkPipelineLayout         decalPipelineLayout = VK_NULL_HANDLE; // Raw alias of the spec-required null heap layout
     Vk::Pipeline             decalPipeline;
 
-    VkPipelineLayout   linePipelineLayout = VK_NULL_HANDLE; // Raw alias of the shared empty heap layout
+    VkPipelineLayout   linePipelineLayout = VK_NULL_HANDLE; // Raw alias of the spec-required null heap layout
     Vk::Pipeline       linePipeline;
     uint32_t           activeLineVertexCount = 0;
     uint32_t           lineInstanceId        = 0;
@@ -825,11 +824,11 @@ struct RenderContext::Impl {
     Vk::Pipeline       csgWritePipeline;
     Vk::Pipeline       csgDifferencePipeline;
     Vk::Pipeline       csgIntersectionPipeline;
-    VkPipelineLayout   csgPipelineLayout = VK_NULL_HANDLE; // Raw alias of the shared empty heap layout
+    VkPipelineLayout   csgPipelineLayout = VK_NULL_HANDLE; // Raw alias of the spec-required null heap layout
 
     Vk::DescriptorPool uiPool;
     Vk::Pipeline       uiPipeline;
-    VkPipelineLayout   uiPipelineLayout = VK_NULL_HANDLE; // Raw alias of the shared empty heap layout
+    VkPipelineLayout   uiPipelineLayout = VK_NULL_HANDLE; // Raw alias of the spec-required null heap layout
 
     std::expected<void, Error> InitUIDynamicBuffers() noexcept;
 

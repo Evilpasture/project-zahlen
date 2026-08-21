@@ -761,15 +761,24 @@ std::expected<void, Error> RenderContext::Impl::InitShadowResources() {
         })
 
         // 7. Allocate Double-Buffered Frame Uniform Buffers
+        //    VK_EXT_descriptor_heap: their device addresses feed the scene
+        //    registry's PUSH_ADDRESS mappings, so they need
+        //    VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT.
         .and_then([&]() {
-            return CreateDoubleBuffered(allocator, sizeof(FrameUniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU)
+            return CreateDoubleBuffered(
+                       allocator, sizeof(FrameUniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                       VMA_MEMORY_USAGE_CPU_TO_GPU
+            )
                 .transform_error([](auto err) -> Error { return err; });
         })
 
-        // 8. Allocate Double-Buffered Light Storage Buffers
+        // 8. Allocate Double-Buffered Light Storage Buffers (same SDA requirement)
         .and_then([&](auto&& fub) {
             frames.frameUniformBuffers = std::forward<decltype(fub)>(fub);
-            return CreateDoubleBuffered(allocator, sizeof(GPULight) * 128, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU)
+            return CreateDoubleBuffered(
+                       allocator, sizeof(GPULight) * 128, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                       VMA_MEMORY_USAGE_CPU_TO_GPU
+            )
                 .transform_error([](auto err) -> Error { return err; });
         })
 
@@ -805,7 +814,10 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
 
     auto make_instance_set = [&](uint32_t i) -> std::expected<void, Error> {
         return Vk::Buffer::Create(
-                   allocator.Get(), sizeof(InstanceData) * kGpuCullingMaxInstances, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU
+                   allocator.Get(), sizeof(InstanceData) * kGpuCullingMaxInstances,
+                   // VK_EXT_descriptor_heap: instance-data buffer address feeds
+                   // the scene registry's PUSH_ADDRESS mapping.
+                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU
         )
             .and_then([&, i](auto&& idb) {
                 frames.instanceDataBuffers[i] = std::forward<decltype(idb)>(idb);
@@ -1050,16 +1062,11 @@ std::expected<void, Error> RenderContext::Impl::InitBindless() {
                 return std::unexpected(RenderInitError::PipelineCreationFailed);
             }
 
-            // Every descriptor-heap pipeline shares one empty pipeline layout:
-            // no descriptor set layouts (heaps replace them) and no push
-            // constant ranges (vkCmdPushDataEXT replaces them).
-            auto layout = Vk::PipelineLayoutBuilder(ctx.Device()).Build();
-            if (!layout) {
-                ZHLN::Log("[RenderInit] ERROR: Failed to create the empty descriptor-heap pipeline layout!");
-                return std::unexpected(RenderInitError::PipelineLayoutCreationFailed);
-            }
-            emptyLayoutOwner    = std::move(*layout);
-            emptyPipelineLayout = emptyLayoutOwner.Get();
+            // Descriptor-heap pipelines are created with VK_NULL_HANDLE as
+            // their pipeline layout (VUID-VkGraphicsPipelineCreateInfo-
+            // flags-11311); there is no layout object to own. The member
+            // exists only as a named alias for the null layout.
+            emptyPipelineLayout = VK_NULL_HANDLE;
             return {};
         })
         .and_then([&]() -> std::expected<void, Error> {
@@ -2172,11 +2179,12 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
 
         // VK_EXT_descriptor_heap: the decal pass samples the depth target
         // through the heap, so rewrite its descriptor whenever the target is
-        // recreated (the old view was destroyed).
+        // recreated (the old view was destroyed). Depth/stencil sampled-image
+        // descriptors must select exactly one aspect (VUID-VkImageDescriptorInfoEXT-pView-11430);
+        // decal.slang only reads the depth value.
         if (decalDepthSlot.Valid()) {
             const auto info = Vk::MakeViewCreateInfo2D(
-                presentation.depthTarget.image.Handle(), VK_FORMAT_D32_SFLOAT_S8_UINT, 1,
-                VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
+                presentation.depthTarget.image.Handle(), VK_FORMAT_D32_SFLOAT_S8_UINT, 1, VK_IMAGE_ASPECT_DEPTH_BIT
             );
             heapManager.WriteImage(decalDepthSlot, info, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         }

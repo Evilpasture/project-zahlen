@@ -97,7 +97,9 @@ auto ComputePipelineBuilder::Validate() const noexcept -> PipelineBuilderResult 
     if ((_code == nullptr) || _size == 0) {
         return PipelineBuilderResult::MissingShaders;
     }
-    if (_layout == VK_NULL_HANDLE) {
+    // VUID-VkComputePipelineCreateInfo-flags-11311: heap pipelines require
+    // layout == VK_NULL_HANDLE.
+    if (_layout == VK_NULL_HANDLE && !_descriptor_heap) {
         return PipelineBuilderResult::MissingLayout;
     }
     return PipelineBuilderResult::Succeeded;

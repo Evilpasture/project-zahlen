@@ -1300,7 +1300,9 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device, const ZHLN_Graphic
         .pDepthStencilState  = &depth_stencil,
         .pColorBlendState    = &color_blend,
         .pDynamicState       = &dynamic_state,
-        .layout              = desc->layout,
+        // VUID-VkGraphicsPipelineCreateInfo-flags-11311: descriptor-heap
+        // pipelines must use VK_NULL_HANDLE as their pipeline layout.
+        .layout              = desc->descriptor_heap ? VK_NULL_HANDLE : desc->layout,
     };
 
     VkPipeline pipeline = VK_NULL_HANDLE;
@@ -1777,7 +1779,8 @@ VkPipeline ZHLN_CreateComputePipeline(const VkDevice device, const ZHLN_ComputeP
         .sType  = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
         .pNext  = desc->descriptor_heap ? (const void*) &heap_flags2 : (const void*) NULL,
         .stage  = stage_info,
-        .layout = desc->layout,
+        // VUID-VkComputePipelineCreateInfo-flags-11311: same null-layout rule.
+        .layout = desc->descriptor_heap ? VK_NULL_HANDLE : desc->layout,
     };
 
     VkPipeline pipeline = VK_NULL_HANDLE;

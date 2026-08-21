@@ -31,6 +31,13 @@ needed** (this is the spec-sanctioned "binding interface" migration path).
 * Entry points are resolved once in `ZHLN_CreateDevice` and stored on
   `ZHLN_Device`; `ZHLN::Vk::Context` forwards to them.
 
+### Pipeline layouts are NULL for heap pipelines
+
+`VkPipelineCreateFlags2CreateInfoKHR::flags` with
+`VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT` requires `layout` to be
+`VK_NULL_HANDLE` (not an empty layout). `RenderCore.c` normalizes this at the
+C layer; the builders accept a null layout only in heap mode.
+
 ### State-model caveat
 
 Within a command buffer, heap/push-data commands and legacy
@@ -118,8 +125,9 @@ the old bindless set array.
   structs into each `VkPipelineShaderStageCreateInfo` and adds
   `VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT` via
   `VkPipelineCreateFlags2CreateInfoKHR`.
-* All heap pipelines share one empty `VkPipelineLayout`
-  (`Impl::emptyPipelineLayout`; raw aliases on the pass structs).
+* All heap pipelines are created with `layout = VK_NULL_HANDLE`
+  (`VUID-VkGraphicsPipelineCreateInfo-flags-11311`; `Impl::emptyPipelineLayout`
+  is the named null alias used at the call sites).
 * Parallel/secondary recording: `ParallelDrawDispatch` supports heap-binding
   inheritance (`VkCommandBufferInheritanceDescriptorHeapInfoEXT`) plus an
   optional per-secondary push-data block; ported passes running in secondaries

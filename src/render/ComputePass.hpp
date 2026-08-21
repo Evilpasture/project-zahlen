@@ -22,8 +22,8 @@ struct ComputePass {
         uint32_t                   pushCount     = 0
     ) noexcept;
 
-    /// VK_EXT_descriptor_heap variant: empty pipeline layout + set/binding ->
-    /// heap mapping. Dispatch through DispatchHeap (vkCmdPushDataEXT).
+    /// VK_EXT_descriptor_heap variant: null pipeline layout (spec-required) +
+    /// set/binding -> heap mapping. Dispatch through DispatchHeap (vkCmdPushDataEXT).
     [[nodiscard]] std::expected<void, ZHLN::Error> BuildHeap(
         VkDevice device, const ZHLN_ShaderDesc& shader, const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping
     ) noexcept;

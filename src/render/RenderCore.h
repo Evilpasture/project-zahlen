@@ -350,10 +350,11 @@ typedef struct ZHLN_GraphicsPipelineDesc {
 
     // --- VK_EXT_descriptor_heap (binding-interface mapping) ---
     // When descriptor_heap is true the pipeline is created with
-    // VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT, `layout` must hold no
-    // descriptor set layouts, and each stage maps its legacy set/binding
-    // decorations onto heap offsets through its mapping chain. Push constants
-    // are replaced by vkCmdPushDataEXT for such pipelines.
+    // VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT, `layout` must be
+    // VK_NULL_HANDLE (VUID-VkGraphicsPipelineCreateInfo-flags-11311), and
+    // each stage maps its legacy set/binding decorations onto heap offsets
+    // through its mapping chain. Push constants are replaced by
+    // vkCmdPushDataEXT for such pipelines.
     const bool                                                     descriptor_heap;
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* const     vs_mapping;
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* const     ps_mapping;

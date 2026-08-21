@@ -38,8 +38,9 @@ struct PipelineConfig {
     // VK_EXT_descriptor_heap: when true the pipeline is created with
     // VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT and each stage maps its
     // legacy set/binding decorations onto the bound heaps via its mapping
-    // chain. `layout` must then be an empty pipeline layout (no descriptor
-    // set layouts, no push constant ranges — push data replaces both).
+    // chain. `layout` must then be VK_NULL_HANDLE
+    // (VUID-VkGraphicsPipelineCreateInfo-flags-11311); push data replaces
+    // both descriptor set layouts and push constant ranges.
     bool                                                     descriptor_heap = false;
     const VkShaderDescriptorSetAndBindingMappingInfoEXT*     vs_mapping      = nullptr;
     const VkShaderDescriptorSetAndBindingMappingInfoEXT*     ps_mapping      = nullptr;
@@ -103,7 +104,8 @@ class PipelineBuilder {
 
     /// Marks the pipeline as a VK_EXT_descriptor_heap consumer and supplies the
     /// per-stage set/binding -> heap mappings (may be null for stages whose
-    /// resources are all BDA/push-data backed). The layout must be empty.
+    /// resources are all BDA/push-data backed). The layout must be
+    /// VK_NULL_HANDLE (spec-required for heap pipelines).
     auto HeapMappings(
         const VkShaderDescriptorSetAndBindingMappingInfoEXT* vsMapping, const VkShaderDescriptorSetAndBindingMappingInfoEXT* psMapping
     ) noexcept -> PipelineBuilder& {
@@ -278,7 +280,10 @@ class PipelineBuilder {
         if (_cfg.stages == nullptr) {
             return PipelineBuilderResult::MissingShaders;
         }
-        if (_cfg.layout == VK_NULL_HANDLE) {
+        // VUID-VkGraphicsPipelineCreateInfo-flags-11311: descriptor-heap
+        // pipelines require layout == VK_NULL_HANDLE, so a null layout is
+        // valid (and in fact required) in heap mode.
+        if (_cfg.layout == VK_NULL_HANDLE && !_cfg.descriptor_heap) {
             return PipelineBuilderResult::MissingLayout;
         }
         return PipelineBuilderResult::Succeeded;
