@@ -708,12 +708,8 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
                 mesh_limits.max_mesh_work_group_invocations
             );
         }
-    } else {
-        fprintf(
-            stderr, "[VULKAN] INFO: VK_EXT_mesh_shader enabled (maxOutVerts=%u maxOutPrims=%u preferredTaskInvocations=%u).\n",
-            mesh_limits.max_mesh_output_vertices, mesh_limits.max_mesh_output_primitives, mesh_limits.max_preferred_task_work_group_invocations
-        );
     }
+    // No success message on purpose: only the fallback is worth a line.
 
     return (ZHLN_Device) {
         .handle                         = handle,

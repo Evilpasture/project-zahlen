@@ -121,10 +121,8 @@ bool CheckMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept {
         return false;
     }
 
-    ZHLN::Log(
-        "[RenderInit] VK_EXT_mesh_shader enabled (maxMeshOutputVertices={}, maxMeshOutputPrimitives={}, maxPreferredTaskWorkGroupInvocations={}).",
-        limits.max_mesh_output_vertices, limits.max_mesh_output_primitives, limits.max_preferred_task_work_group_invocations
-    );
+    // Deliberately silent on success: a working feature is not news. Every
+    // return false above explains itself.
     return true;
 }
 
@@ -480,7 +478,7 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
         .Build();
 }
 
-std::expected<Vk::ExtensionResult, Error> GetDeviceExtensions(VkPhysicalDevice physicalDevice, bool isHeadless) noexcept {
+std::expected<Vk::ExtensionResult, Error> GetDeviceExtensions(VkPhysicalDevice physicalDevice, bool isHeadless, bool meshShaderSupported) noexcept {
     auto builder = Vk::ExtensionBuilder::ForDevice(physicalDevice);
 
     if (!isHeadless) {
@@ -510,7 +508,9 @@ std::expected<Vk::ExtensionResult, Error> GetDeviceExtensions(VkPhysicalDevice p
         // geometry passes with task/mesh shaders. It stays OPTIONAL: the vertex
         // pipeline is still built for every material, so devices without mesh
         // shading (or with limits below our meshlet budget) keep rendering.
-        .OptionalGroup({VK_EXT_MESH_SHADER_EXTENSION_NAME}, CheckMeshShaderSupport(physicalDevice))
+        // Support was already probed once into HardwareCaps; re-probing here
+        // would repeat the diagnostics for every failure.
+        .OptionalGroup({VK_EXT_MESH_SHADER_EXTENSION_NAME}, meshShaderSupported)
         .Build()
         .transform_error([](auto err) -> Error { return err; });
 }
@@ -670,17 +670,18 @@ std::expected<std::unique_ptr<RenderContext>, Error> RenderContext::Create(Windo
             HardwareCaps caps     = ProbeHardware(physicalInfo.handle, physicalInfo.properties.properties.apiVersion);
             auto         features = BuildFeatureChain(physicalInfo.handle, caps, cfg.validationMode);
 
-            return GetDeviceExtensions(physicalInfo.handle, window.IsHeadless()).and_then([&](auto&& dev_exts) -> std::expected<void, Error> {
-                return Vk::Context::Builder()
-                    .Instance(instance)
-                    .Surface(raw_surface)
-                    .PhysicalDevice(physicalInfo)
-                    .DeviceExtensions(dev_exts)
-                    .DeviceFeatures(features.GetRoot())
-                    .ValidationMode(static_cast<Vk::ValidationMode>(cfg.validationMode))
-                    .Build()
-                    .transform([&](auto&& context) { impl->ctx = std::forward<decltype(context)>(context); });
-            });
+            return GetDeviceExtensions(physicalInfo.handle, window.IsHeadless(), caps.supportsMeshShader)
+                .and_then([&](auto&& dev_exts) -> std::expected<void, Error> {
+                    return Vk::Context::Builder()
+                        .Instance(instance)
+                        .Surface(raw_surface)
+                        .PhysicalDevice(physicalInfo)
+                        .DeviceExtensions(dev_exts)
+                        .DeviceFeatures(features.GetRoot())
+                        .ValidationMode(static_cast<Vk::ValidationMode>(cfg.validationMode))
+                        .Build()
+                        .transform([&](auto&& context) { impl->ctx = std::forward<decltype(context)>(context); });
+                });
         })
         .and_then([&]() { return impl->InitSubsystems(cfg, width, height); })
         .transform([&]() { return std::make_unique<RenderContext>(PrivateToken {}, std::move(impl)); });
