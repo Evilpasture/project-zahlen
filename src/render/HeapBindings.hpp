@@ -94,7 +94,7 @@ inline void BuildHeapPassBindings(
         if (IsHeapSamplerType(b.descriptorType)) {
             entry.resourceMask = VK_SPIRV_RESOURCE_TYPE_SAMPLER_BIT_EXT;
             auto slot          = heap.AllocateStaticSampler();
-            const uint32_t s   = slot ? *slot : 0;
+            const uint32_t s   = slot ? slot->index : 0;
             out.slotBase.push_back(s);
             entry.sourceData.constantOffset.heapOffset = static_cast<uint32_t>(heap.SamplerOffset(s));
         } else {
@@ -145,7 +145,7 @@ inline void BuildHeapPassBindings(
                 // The sampler half of a combined image sampler resolves from a
                 // dedicated sampler-heap slot (constant; index-invariant).
                 auto smp = heap.AllocateStaticSampler();
-                entry.sourceData.pushIndex.samplerHeapOffset = static_cast<uint32_t>(heap.SamplerOffset(smp ? *smp : 0));
+                entry.sourceData.pushIndex.samplerHeapOffset = static_cast<uint32_t>(heap.SamplerOffset(smp ? smp->index : 0));
             }
         }
 
@@ -256,7 +256,12 @@ void WriteHeapBinding(
                 heap.WriteImage(TextureHandle {slot}, *info, typedLayout);
             }
         } else {
-            const VkImageLayout argLayout = (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) ? VK_IMAGE_LAYOUT_GENERAL : arg.layout;
+            VkImageLayout argLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            if constexpr (requires { arg.layout; }) {
+                argLayout = (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) ? VK_IMAGE_LAYOUT_GENERAL : arg.layout;
+            } else if (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
+                argLayout = VK_IMAGE_LAYOUT_GENERAL;
+            }
             if (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
                 heap.WriteStorageImage(StorageImageHandle {slot}, *info, VK_IMAGE_LAYOUT_GENERAL);
             } else {
