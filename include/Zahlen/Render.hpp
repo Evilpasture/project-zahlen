@@ -34,10 +34,20 @@ struct PipelineDesc {
     size_t      vertexShaderSize = 0;
     const void* fragShaderData   = nullptr;
     size_t      fragShaderSize   = 0;
-    bool        doubleSided      = false;
-    bool        alphaBlend       = false;
-    bool        additiveBlend    = false; // ADDED: Support for emissive particles
-    bool        isLineList       = false;
+
+    // VK_EXT_mesh_shader: optional task/mesh stages. When both the device
+    // supports mesh shading and `meshShaderData` is set, the material gets a
+    // SECOND pipeline built from task+mesh+fragment. The vertex pipeline is
+    // always built as well, so the renderer can fall back per draw call
+    // (skinned meshes, meshes without meshlet streams, unsupported devices).
+    const void* taskShaderData = nullptr;
+    size_t      taskShaderSize = 0;
+    const void* meshShaderData = nullptr;
+    size_t      meshShaderSize = 0;
+    bool        doubleSided    = false;
+    bool        alphaBlend     = false;
+    bool        additiveBlend  = false; // ADDED: Support for emissive particles
+    bool        isLineList     = false;
 };
 
 struct DrawParams {

@@ -18,9 +18,17 @@ struct CompiledMesh {
     std::vector<uint32_t>              indices;
     std::vector<Compiler::IRPrimitive> primitives;
     std::vector<uint32_t>              originalVertexIndices;
-    float                              minB[3]   = {1e30f, 1e30f, 1e30f};
-    float                              maxB[3]   = {-1e30f, -1e30f, -1e30f};
-    bool                               isSkinned = false;
+
+    // VK_EXT_mesh_shader streams (see include/Zahlen/Meshlet.hpp). Empty when
+    // the mesh is degenerate, in which case consumers fall back to the classic
+    // indexed draw path.
+    std::vector<GPUMeshlet> meshlets;
+    std::vector<uint32_t>   meshletVertices;
+    std::vector<uint8_t>    meshletTriangles;
+
+    float minB[3]   = {1e30f, 1e30f, 1e30f};
+    float maxB[3]   = {-1e30f, -1e30f, -1e30f};
+    bool  isSkinned = false;
 };
 
 CompiledMesh CompileRawMesh(const Compiler::IRMesh& mesh, const std::string& binPath);

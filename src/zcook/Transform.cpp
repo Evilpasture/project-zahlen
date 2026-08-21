@@ -8,6 +8,7 @@
 // clang-format on
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Math3D.hpp>
+#include <Zahlen/Meshlet.hpp>
 #include <Zahlen/Types.hpp>
 #include <cmath>
 #include <cstdio>
@@ -232,6 +233,18 @@ CompiledMesh CompileRawMesh(const Compiler::IRMesh& mesh, const std::string& bin
         result.maxB[0] = std::max(result.maxB[0], rv.px);
         result.maxB[1] = std::max(result.maxB[1], rv.py);
         result.maxB[2] = std::max(result.maxB[2], rv.pz);
+    }
+
+    // 5. Meshletize for VK_EXT_mesh_shader. The raw position/attribute/index
+    // streams above are still written to the .zmesh verbatim: the BLAS builder
+    // and the legacy vertex pipeline consume them unchanged, meshlets are only
+    // an additional index view over the same vertex pool.
+    if (auto meshlets = BuildMeshlets(result.indices, result.positions); !meshlets.Empty()) {
+        result.meshlets         = std::move(meshlets.meshlets);
+        result.meshletVertices  = std::move(meshlets.vertices);
+        result.meshletTriangles = std::move(meshlets.triangles);
+    } else if (!result.indices.empty()) {
+        std::println(stderr, "[zcook] WARNING: meshlet generation produced no clusters for mesh '{}'.", mesh.id);
     }
 
     return result;

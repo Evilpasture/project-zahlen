@@ -69,6 +69,15 @@ auto CreateBasicMaterial(RenderContext& ctx, bool doubleSided, bool alphaBlend, 
     desc.alphaBlend    = alphaBlend;
     desc.additiveBlend = additiveBlend;
 
+    // VK_EXT_mesh_shader: hand the task/mesh stages to the material as well.
+    // CreateMaterial builds the meshlet pipeline only when the device supports
+    // mesh shading; the vertex pipeline above is always built and stays the
+    // fallback for skinned meshes and meshes without meshlet streams.
+    desc.taskShaderData = Resource::basic_task.data();
+    desc.taskShaderSize = Resource::basic_task.size();
+    desc.meshShaderData = Resource::basic_mesh.data();
+    desc.meshShaderSize = Resource::basic_mesh.size();
+
     auto mat_res = ctx.CreateMaterial(desc);
     if (!mat_res) {
         return std::unexpected(mat_res.error());

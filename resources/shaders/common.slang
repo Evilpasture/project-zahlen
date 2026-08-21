@@ -33,6 +33,31 @@ public struct InstanceData {
     public float4 baseColorFactor;
 
     public float4 emissiveFactor;
+
+    // --- VK_EXT_mesh_shader meshlet streams (0 => no meshlets for this mesh) ---
+    // Mirrors the tail of ZHLN::InstanceData (include/Zahlen/Types.hpp):
+    //   offset 272: meshletAddress, 280: meshletVertexAddress,
+    //   offset 288: meshletTriAddress, 296: meshletCount, 300: padding.
+    public uint64_t meshletAddress;
+    public uint64_t meshletVertexAddress;
+    public uint64_t meshletTriAddress;
+    public uint meshletCount;
+    public uint _paddingMeshlet;
+};
+
+/// 64-byte meshlet descriptor. Kept in lockstep with ZHLN::GPUMeshlet.
+public struct GPUMeshlet {
+    public uint vertexOffset;
+    public uint triangleOffset;
+    public uint vertexCount;
+    public uint triangleCount;
+
+    public float3 sphereCenter;
+    public float sphereRadius;
+
+    public float3 coneApex;
+    public float3 coneAxis;
+    public float coneCutoff;
 };
 
 // These transient views describe the existing BDA element layouts. They are never
@@ -117,6 +142,55 @@ public extension InstanceData {
     public VertexAttributes fetchAttributes(uint vertexId) {
         VertexAttributes* attributes = (VertexAttributes*) this.attrAddress;
         return attributes[vertexId];
+    }
+
+    // --- VK_EXT_mesh_shader accessors ---------------------------------------
+    // Every meshlet stream is read through raw word loads for the same reason
+    // fetchPosition/fetchSkin are: a typed pointer may be assigned a padded
+    // array stride by SPIR-V layout rules, while the host writes tightly
+    // packed data. 16 words == sizeof(GPUMeshlet).
+    [ForceInline]
+    public bool hasMeshlets() {
+        return this.meshletAddress != 0 && this.meshletVertexAddress != 0 && this.meshletTriAddress != 0 && this.meshletCount > 0;
+    }
+
+    [ForceInline]
+    public GPUMeshlet fetchMeshlet(uint meshletIndex) {
+        uint* words = (uint*) this.meshletAddress;
+        uint base   = meshletIndex * 16u;
+
+        GPUMeshlet m;
+        m.vertexOffset   = words[base + 0u];
+        m.triangleOffset = words[base + 1u];
+        m.vertexCount    = words[base + 2u];
+        m.triangleCount  = words[base + 3u];
+        m.sphereCenter   = float3(asfloat(words[base + 4u]), asfloat(words[base + 5u]), asfloat(words[base + 6u]));
+        m.sphereRadius   = asfloat(words[base + 7u]);
+        m.coneApex       = float3(asfloat(words[base + 8u]), asfloat(words[base + 9u]), asfloat(words[base + 10u]));
+        m.coneAxis       = float3(asfloat(words[base + 11u]), asfloat(words[base + 12u]), asfloat(words[base + 13u]));
+        m.coneCutoff     = asfloat(words[base + 14u]);
+        return m;
+    }
+
+    /// Global vertex index of local vertex `local` inside a meshlet.
+    [ForceInline]
+    public uint fetchMeshletVertex(uint vertexOffset, uint local) {
+        uint* indices = (uint*) this.meshletVertexAddress;
+        return indices[vertexOffset + local];
+    }
+
+    /// One micro-triangle (three meshlet-local 8-bit indices). The cooker pads
+    /// every meshlet's triangle run to a 4-byte boundary, but a single triangle
+    /// may still straddle a word, hence the per-byte extraction.
+    [ForceInline]
+    public uint3 fetchMeshletTriangle(uint triangleOffset, uint triangleIndex) {
+        uint* words   = (uint*) this.meshletTriAddress;
+        uint byteBase = triangleOffset + (triangleIndex * 3u);
+
+        uint b0 = (words[(byteBase + 0u) >> 2u] >> (((byteBase + 0u) & 3u) * 8u)) & 0xFFu;
+        uint b1 = (words[(byteBase + 1u) >> 2u] >> (((byteBase + 1u) & 3u) * 8u)) & 0xFFu;
+        uint b2 = (words[(byteBase + 2u) >> 2u] >> (((byteBase + 2u) & 3u) * 8u)) & 0xFFu;
+        return uint3(b0, b1, b2);
     }
 
     [ForceInline]
@@ -312,3 +386,98 @@ public float3 GetMorphDisplacement(uint vertexId, uint vertexCount, uint morphOf
 
     return displacement;
 }
+
+
+// ============================================================================
+// VK_EXT_mesh_shader cluster culling helpers
+// ============================================================================
+
+/// Extracts the six frustum planes from a view-projection matrix (mul(M, v)
+/// convention, matching culling.slang) and tests a world-space sphere.
+public bool SphereFrustumVisible(float4x4 viewProj, float3 center, float radius) {
+    float4 r0 = float4(viewProj._m00, viewProj._m01, viewProj._m02, viewProj._m03);
+    float4 r1 = float4(viewProj._m10, viewProj._m11, viewProj._m12, viewProj._m13);
+    float4 r2 = float4(viewProj._m20, viewProj._m21, viewProj._m22, viewProj._m23);
+    float4 r3 = float4(viewProj._m30, viewProj._m31, viewProj._m32, viewProj._m33);
+
+    float4 planes[6];
+    planes[0] = r3 + r0; // left
+    planes[1] = r3 - r0; // right
+    planes[2] = r3 + r1; // bottom
+    planes[3] = r3 - r1; // top
+    planes[4] = r2;      // near (zero-to-one depth)
+    planes[5] = r3 - r2; // far
+
+    [unroll]
+    for (uint i = 0; i < 6; ++i) {
+        float len = length(planes[i].xyz);
+        planes[i] /= max(len, 1e-6f);
+        if (dot(float4(center, 1.0f), planes[i]) < -radius) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/// Largest scale factor of the upper-left 3x3 block; used to grow a local-space
+/// bounding sphere into world space without decomposing the transform.
+public float MatrixMaxScale(float4x4 m) {
+    float3 c0 = float3(m._m00, m._m10, m._m20);
+    float3 c1 = float3(m._m01, m._m11, m._m21);
+    float3 c2 = float3(m._m02, m._m12, m._m22);
+    return sqrt(max(dot(c0, c0), max(dot(c1, c1), dot(c2, c2))));
+}
+
+/// meshoptimizer normal-cone rejection. `coneCutoff` is cos(half angle) with the
+/// meshoptimizer sign convention: the cluster is invisible when the view vector
+/// lies inside the cone of back-facing normals.
+///  * coneCutoff >= 1.0 marks a degenerate cone (never cull).
+public bool ConeBackfaceCulled(float3 coneApexWorld, float3 coneAxisWorld, float coneCutoff, float3 cameraPos) {
+    if (coneCutoff >= 1.0f) {
+        return false;
+    }
+    float3 toCluster = coneApexWorld - cameraPos;
+    float len        = length(toCluster);
+    if (len < 1e-5f) {
+        return false;
+    }
+    return dot(toCluster / len, coneAxisWorld) >= coneCutoff;
+}
+
+// ============================================================================
+// Shared geometry-stage interface
+// ============================================================================
+//
+// Declared here (rather than in basic.slang) so that the vertex path
+// (basic.slang: VSMain) and the mesh path (basic_mesh.slang: MeshMain) emit a
+// bit-identical interface to the same fragment shaders (PSMain / PSShadow /
+// PSForward). Any divergence between the two would surface as a pipeline
+// link error rather than as silently wrong shading.
+//
+// NOTE the deliberately qualified name: several unrelated shaders that import
+// this module declare their own local `VSOutput`, and an exported symbol with
+// that name would make every one of them ambiguous. basic.slang aliases it.
+public struct SceneGeometryOutput {
+    public float4 pos : SV_Position;
+    public float4 currClip : TEXCOORD0;
+    public float4 prevClip : TEXCOORD1;
+    public float3 worldPos : POSITION;
+    public float3 normal : NORMAL;
+    public float4 tangent : TANGENT;
+    public float2 uv : TEXCOORD2;
+    public float4 shadowPos : TEXCOORD3;
+    public float4 color : COLOR;
+    public nointerpolation uint4 materialIndices : TEXCOORD4;
+    public nointerpolation float4 baseColorFactor : TEXCOORD5;
+    public nointerpolation float3 pbrFactors : TEXCOORD6;
+    public nointerpolation uint alphaMode : TEXCOORD7;
+    public nointerpolation float4 emissiveFactor : TEXCOORD8;
+};
+
+/// Payload handed from the task (amplification) stage to the mesh stage.
+/// One entry per surviving meshlet in the workgroup.
+public struct MeshletTaskPayload {
+    public uint instanceId;
+    public uint baseMeshlet;
+    public uint meshletIndices[32];
+};

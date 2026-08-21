@@ -32,6 +32,12 @@ function(compile_slang SHADER_PATH ENTRY STAGE OUTPUT_VAR)
         set(SLANG_STAGE "fragment")
     elseif(STAGE MATCHES "^cs_")
         set(SLANG_STAGE "compute")
+    elseif(STAGE MATCHES "^as_")
+        # VK_EXT_mesh_shader amplification (task) stage
+        set(SLANG_STAGE "amplification")
+    elseif(STAGE MATCHES "^ms_")
+        # VK_EXT_mesh_shader mesh stage
+        set(SLANG_STAGE "mesh")
     endif()
 
     add_custom_command(
@@ -154,6 +160,16 @@ add_shader_target(basic_shader
     STAGES
         "${SHADER_SRC_DIR}/basic.slang|VSMain|vs_6_5|SHADER_BASIC_SLANG_VS_PATH"
         "${SHADER_SRC_DIR}/basic.slang|PSMain|ps_6_5|SHADER_BASIC_SLANG_PS_PATH"
+)
+
+# --- VK_EXT_mesh_shader stages ---
+# basic_task.slang / basic_mesh.slang replace the input assembler + vertex stage
+# of the geometry passes. They reuse basic.slang's fragment shaders verbatim
+# through the shared VSOutput interface declared in common.slang.
+add_shader_target(basic_mesh_shader
+    STAGES
+        "${SHADER_SRC_DIR}/basic_task.slang|TaskMain|as_6_5|SHADER_BASIC_SLANG_TASK_PATH"
+        "${SHADER_SRC_DIR}/basic_mesh.slang|MeshMain|ms_6_5|SHADER_BASIC_SLANG_MESH_PATH"
 )
 
 # --- Single-stage compute/pixel targets ---

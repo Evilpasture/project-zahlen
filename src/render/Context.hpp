@@ -93,6 +93,40 @@ class Context {
         return _device.pfn_write_sampler_descriptors(_device.handle, count, samplers, descriptors);
     }
 
+    // ============================================================================
+    // VK_EXT_mesh_shader Entry Point Forwarding
+    // ============================================================================
+
+    /// True only when the extension, its entry points AND the required hardware
+    /// limits are all present (see ZHLN_MeshShaderLimitsSufficient).
+    [[nodiscard]] auto MeshShadersSupported() const noexcept -> bool {
+        return _device.mesh_shader_enabled;
+    }
+
+    void CmdDrawMeshTasks(VkCommandBuffer cmd, uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) const noexcept {
+        ZHLN_CmdDrawMeshTasks(&_device, cmd, groupCountX, groupCountY, groupCountZ);
+    }
+
+    void CmdDrawMeshTasksIndirect(VkCommandBuffer cmd, VkBuffer buffer, VkDeviceSize offset, uint32_t drawCount, uint32_t stride) const noexcept {
+        ZHLN_CmdDrawMeshTasksIndirect(&_device, cmd, buffer, offset, drawCount, stride);
+    }
+
+    void CmdDrawMeshTasksIndirectCount(
+        VkCommandBuffer cmd,
+        VkBuffer        buffer,
+        VkDeviceSize    offset,
+        VkBuffer        countBuffer,
+        VkDeviceSize    countBufferOffset,
+        uint32_t        maxDrawCount,
+        uint32_t        stride
+    ) const noexcept {
+        ZHLN_CmdDrawMeshTasksIndirectCount(&_device, cmd, buffer, offset, countBuffer, countBufferOffset, maxDrawCount, stride);
+    }
+
+    [[nodiscard]] auto MeshShaderLimits() const noexcept -> ZHLN_MeshShaderLimits {
+        return ZHLN_QueryMeshShaderLimits(_physical.handle);
+    }
+
     [[nodiscard("Always verify context initialization; check Valid() before use")]]
     auto Valid() const noexcept -> bool {
         return _device.handle != VK_NULL_HANDLE;

@@ -75,6 +75,44 @@ struct VertexSkin {
     PackedRGBA8 weights;   // 4B  - 8-bit UNORM weights mapped to [0.0, 1.0]
 }; // 12B
 
+// --- VK_EXT_mesh_shader meshlet descriptor -------------------------------
+//
+// 64-byte GPU descriptor for a single meshlet. Consumed by basic_task.slang
+// (frustum + normal-cone rejection) and basic_mesh.slang (cooperative
+// vertex/primitive unpack). Both index it through a raw BDA pointer, so the
+// layout below is the authoritative ABI: keep it in sync with `GPUMeshlet`
+// in resources/shaders/common.slang.
+struct alignas(16) GPUMeshlet {
+    uint32_t vertexOffset;   // First entry in the unique-vertex index array
+    uint32_t triangleOffset; // First byte in the 8-bit micro-index array
+    uint32_t vertexCount;    // <= kMeshletMaxVertices
+    uint32_t triangleCount;  // <= kMeshletMaxTriangles
+
+    // Bounding sphere used for frustum culling (object/local space)
+    float sphereCenter[3];
+    float sphereRadius;
+
+    // Normal cone used for cluster back-face culling (object/local space)
+    float    coneApex[3];
+    float    coneAxis[3];
+    float    coneCutoff; // cos(half angle); >= 1.0 disables cone culling
+    uint32_t _pad;
+};
+static_assert(sizeof(GPUMeshlet) == 64);
+static_assert(alignof(GPUMeshlet) == 16);
+
+// Partitioning limits. These match the guaranteed VK_EXT_mesh_shader minimums
+// (maxMeshOutputVertices >= 256, maxMeshOutputPrimitives >= 256) with plenty of
+// headroom, and are also the meshoptimizer build parameters used by the cooker
+// and the runtime glTF importer, so cooked and JIT meshlets stay identical.
+inline constexpr uint32_t kMeshletMaxVertices  = 64;
+inline constexpr uint32_t kMeshletMaxTriangles = 124; // multiple of 4 (meshoptimizer recommendation)
+inline constexpr float    kMeshletConeWeight   = 0.5f;
+// Meshlets handled by one task-shader workgroup (one payload slot each).
+inline constexpr uint32_t kMeshletsPerTaskGroup = 32;
+// Threads per mesh-shader workgroup (one vertex per thread, 2 prims per thread).
+inline constexpr uint32_t kMeshShaderGroupSize = 64;
+
 struct alignas(16) InstanceData {
     JPH::Mat44 world;
     JPH::Mat44 prevWorld;
@@ -99,6 +137,19 @@ struct alignas(16) InstanceData {
     alignas(16) std::array<float, 4> morphWeights;
     alignas(16) std::array<float, 4> baseColorFactor;
     alignas(16) std::array<float, 4> emissiveFactor;
+
+    // --- VK_EXT_mesh_shader meshlet streams (all optional / may be 0) -----
+    // Appended at the end on purpose: every existing designated-initializer
+    // call site keeps compiling and simply value-initializes these to 0,
+    // which the shaders read as "this instance has no meshlet data, use the
+    // legacy vertex path".
+    // (No default member initializers: DrawCommand static_asserts on
+    //  std::is_trivially_constructible_v, which NSDMIs would break.)
+    uint64_t meshletAddress;       // GPUMeshlet[]
+    uint64_t meshletVertexAddress; // uint32_t[]  unique vertex indices
+    uint64_t meshletTriAddress;    // uint8_t[]   packed micro-indices
+    uint32_t meshletCount;
+    uint32_t _paddingMeshlet;
 };
 
 enum class TextureHandle : uint64_t { Invalid = 0 };
@@ -188,7 +239,7 @@ struct ObjectConstants {
     uint32_t isShadowPass;
 };
 static_assert(sizeof(ObjectConstants) == 8);
-static_assert(sizeof(InstanceData) == 272);
+static_assert(sizeof(InstanceData) == 304);
 
 // --- Opaque Resource Handles ---
 enum class BufferHandle : uint64_t { Invalid = 0 };
@@ -209,6 +260,16 @@ struct Mesh {
     BufferHandle indexBuffer = Invalid;
     uint32_t     vertexCount = 0;
     uint32_t     indexCount  = 0;
+
+    // --- VK_EXT_mesh_shader meshlet streams ---
+    // The raw position/attribute/index buffers above are deliberately kept:
+    // ray tracing BLAS builds (ZHLN_CmdBuildBlas) and the legacy vertex
+    // pipeline still consume them. Meshlets are an additional view of the
+    // very same vertex pool.
+    BufferHandle meshletBuffer       = Invalid; // GPUMeshlet[]
+    BufferHandle meshletVertexBuffer = Invalid; // uint32_t[]
+    BufferHandle meshletTriBuffer    = Invalid; // uint8_t[] (padded to 4B)
+    uint32_t     meshletCount        = 0;
 };
 
 enum class LightType : uint32_t {

@@ -32,8 +32,20 @@ bool SlangReflectedLayout::Build(VkDevice /*device*/, const ShaderStages& shader
     UnsafeReflectedLayoutBuilder builder;
     auto                         vert_spv = shaders.GetVertSpv();
     auto                         frag_spv = shaders.GetFragSpv();
+    // VK_EXT_mesh_shader: task/mesh declare the very same `scene` parameter
+    // block as the vertex stage, so they must contribute their stage flags to
+    // the reflected bindless layout or the heap mapping table would advertise
+    // the resources as vertex-only.
+    auto task_spv = shaders.GetTaskSpv();
+    auto mesh_spv = shaders.GetMeshSpv();
     if (!vert_spv.empty()) {
         builder.AddStageUnsafe({.code = vert_spv.data(), .size = vert_spv.size() * 4, .entry_point = {}}, VK_SHADER_STAGE_VERTEX_BIT);
+    }
+    if (!task_spv.empty()) {
+        builder.AddStageUnsafe({.code = task_spv.data(), .size = task_spv.size() * 4, .entry_point = {}}, VK_SHADER_STAGE_TASK_BIT_EXT);
+    }
+    if (!mesh_spv.empty()) {
+        builder.AddStageUnsafe({.code = mesh_spv.data(), .size = mesh_spv.size() * 4, .entry_point = {}}, VK_SHADER_STAGE_MESH_BIT_EXT);
     }
     if (!frag_spv.empty()) {
         builder.AddStageUnsafe({.code = frag_spv.data(), .size = frag_spv.size() * 4, .entry_point = {}}, VK_SHADER_STAGE_FRAGMENT_BIT);

@@ -2,22 +2,11 @@
 import common;
 import pbr_helpers;
 
-struct VSOutput {
-    float4 pos : SV_Position;
-    float4 currClip : TEXCOORD0;
-    float4 prevClip : TEXCOORD1;
-    float3 worldPos : POSITION;
-    float3 normal : NORMAL;
-    float4 tangent : TANGENT;
-    float2 uv : TEXCOORD2;
-    float4 shadowPos : TEXCOORD3;
-    float4 color : COLOR;
-    nointerpolation uint4 materialIndices : TEXCOORD4;
-    nointerpolation float4 baseColorFactor : TEXCOORD5;
-    nointerpolation float3 pbrFactors : TEXCOORD6;
-    nointerpolation uint alphaMode : TEXCOORD7;
-    nointerpolation float4 emissiveFactor : TEXCOORD8;
-};
+// The geometry->fragment interface now lives in common.slang so the vertex path
+// (VSMain below) and the VK_EXT_mesh_shader path (basic_mesh.slang: MeshMain)
+// feed the fragment shaders in this file through one single, shared
+// declaration. The local alias keeps this file (and its diffs) unchanged.
+typealias VSOutput = SceneGeometryOutput;
 
 struct PSOutput {
     float4 color : SV_Target0;

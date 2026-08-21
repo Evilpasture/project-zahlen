@@ -10,6 +10,8 @@ namespace ZHLN::Resource {
 namespace Paths {
 extern const char* const BasicVS;
 extern const char* const BasicPS;
+extern const char* const BasicTask; // VK_EXT_mesh_shader amplification stage
+extern const char* const BasicMesh; // VK_EXT_mesh_shader mesh stage
 extern const char* const BlitVS;
 extern const char* const BlitPS;
 extern const char* const TaaVS;
@@ -155,6 +157,9 @@ extern const std::span<const uint8_t> cluster_bounds;
 extern const std::span<const uint8_t> cluster_culling;
 extern const std::span<const uint8_t> skinning_comp;
 extern const std::span<const uint8_t> forward_frag;
+// VK_EXT_mesh_shader geometry stages (paired with basic_shaders.fragment)
+extern const std::span<const uint8_t> basic_task;
+extern const std::span<const uint8_t> basic_mesh;
 extern const std::span<const uint8_t> hang_gpu_comp;
 extern const std::span<const uint8_t> procedural_bake_comp;
 extern const std::span<const uint8_t> ltc_mat;

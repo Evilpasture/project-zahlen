@@ -145,7 +145,41 @@ typedef struct ZHLN_Device {
     PFN_vkWriteResourceDescriptorsEXT pfn_write_resource_descriptors;
     PFN_vkWriteSamplerDescriptorsEXT  pfn_write_sampler_descriptors;
     bool                              descriptor_heap_enabled;
+
+    // --- VK_EXT_mesh_shader entry points (NULL when the extension is absent) ---
+    PFN_vkCmdDrawMeshTasksEXT              pfn_cmd_draw_mesh_tasks;
+    PFN_vkCmdDrawMeshTasksIndirectEXT      pfn_cmd_draw_mesh_tasks_indirect;
+    PFN_vkCmdDrawMeshTasksIndirectCountEXT pfn_cmd_draw_mesh_tasks_indirect_count;
+    bool                                   mesh_shader_enabled;
 } ZHLN_Device;
+
+/* --- VK_EXT_mesh_shader hardware limits --- */
+
+typedef struct ZHLN_MeshShaderLimits {
+    uint32_t max_mesh_output_vertices;
+    uint32_t max_mesh_output_primitives;
+    uint32_t max_task_work_group_invocations;
+    uint32_t max_mesh_work_group_invocations;
+    uint32_t max_preferred_task_work_group_invocations;
+    uint32_t max_preferred_mesh_work_group_invocations;
+    bool     prefers_compact_vertex_output;
+    bool     supported;
+} ZHLN_MeshShaderLimits;
+
+/**
+ * @brief Queries VkPhysicalDeviceMeshShaderPropertiesEXT.
+ * `supported` is false when the device does not advertise VK_EXT_mesh_shader,
+ * in which case all limits read back as zero.
+ */
+[[nodiscard]]
+ZHLN_MeshShaderLimits ZHLN_QueryMeshShaderLimits(VkPhysicalDevice physical);
+
+/**
+ * @brief True when the device satisfies the limits the Zahlen task/mesh
+ * shaders were written against (see resources/shaders/basic_mesh.slang).
+ */
+[[nodiscard]]
+bool ZHLN_MeshShaderLimitsSufficient(const ZHLN_MeshShaderLimits* ZHLN_RESTRICT limits);
 
 [[nodiscard]]
 ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* ZHLN_RESTRICT desc);
@@ -292,6 +326,12 @@ typedef struct ZHLN_Shader {
 } ZHLN_Shader;
 
 typedef struct ZHLN_ShaderStages {
+    // VK_EXT_mesh_shader: when `mesh.handle` is non-null the pipeline is a mesh
+    // pipeline. `task` is optional (a mesh shader may be dispatched directly),
+    // `vert` is then unused but deliberately kept so a single ZHLN_ShaderStages
+    // can carry both the legacy and the mesh path for the same material.
+    ZHLN_Shader task; // VK_SHADER_STAGE_TASK_BIT_EXT
+    ZHLN_Shader mesh; // VK_SHADER_STAGE_MESH_BIT_EXT
     ZHLN_Shader vert;
     ZHLN_Shader frag;
 } ZHLN_ShaderStages;
@@ -300,6 +340,8 @@ typedef struct ZHLN_ShaderStagesDesc {
     const VkDevice        device;
     const ZHLN_ShaderDesc vert;
     const ZHLN_ShaderDesc frag;
+    const ZHLN_ShaderDesc task; // optional (VK_EXT_mesh_shader)
+    const ZHLN_ShaderDesc mesh; // optional (VK_EXT_mesh_shader)
 } ZHLN_ShaderStagesDesc;
 
 [[nodiscard]]
@@ -315,11 +357,18 @@ bool ZHLN_CreateShaderStages(const ZHLN_ShaderStagesDesc* ZHLN_RESTRICT desc, ZH
 void ZHLN_DestroyShaderModule(VkDevice device, VkShaderModule module);
 void ZHLN_DestroyShaderStages(VkDevice device, ZHLN_ShaderStages* ZHLN_RESTRICT stages);
 
-// Populates the two VkPipelineShaderStageCreateInfo entries the pipeline builder needs.
-// out_stages must point to an array of 2.
+// Populates the VkPipelineShaderStageCreateInfo entries the pipeline builder needs.
+// out_stages must point to an array of ZHLN_MAX_SHADER_STAGES.
 // When heap mode is used (descriptor_heap == true), each stage's pNext receives the
 // corresponding VkShaderDescriptorSetAndBindingMappingInfoEXT so legacy set/binding
 // decorations in the SPIR-V are remapped onto the bound descriptor heaps.
+//
+// VK_EXT_mesh_shader: when the mesh stage is present, task+mesh replace the
+// vertex stage entirely (a pipeline may not contain both a vertex and a mesh
+// stage), and the task/mesh stages receive `vs_mapping` so the `scene`
+// parameter block resolves exactly like it does for vertex/fragment.
+#define ZHLN_MAX_SHADER_STAGES 3
+
 [[nodiscard]] uint32_t ZHLN_PopulateShaderStageInfos(
     const ZHLN_ShaderStages* ZHLN_RESTRICT               stages,
     VkPipelineShaderStageCreateInfo* ZHLN_RESTRICT       out_stages,
@@ -358,6 +407,9 @@ typedef struct ZHLN_GraphicsPipelineDesc {
     const bool                                                 descriptor_heap;
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* const vs_mapping;
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* const ps_mapping;
+    // VK_EXT_mesh_shader: the task and mesh stages consume the exact same
+    // `scene` parameter block as the vertex stage, so they reuse `vs_mapping`
+    // (chained into their own pNext by ZHLN_PopulateShaderStageInfos).
 
     const VkVertexInputBindingDescription* const ZHLN_RESTRICT   vertex_bindings;
     const VkVertexInputAttributeDescription* const ZHLN_RESTRICT vertex_attributes;
@@ -562,6 +614,42 @@ typedef struct ZHLN_ComputePipelineDesc {
 VkPipeline ZHLN_CreateComputePipeline(VkDevice device, const ZHLN_ComputePipelineDesc* ZHLN_RESTRICT desc);
 
 void ZHLN_CmdDispatch(VkCommandBuffer cmd, uint32_t group_count_x, uint32_t group_count_y, uint32_t group_count_z);
+
+/* --- MESH SHADING (VK_EXT_mesh_shader) ---
+ *
+ * The entry points are resolved once in ZHLN_CreateDevice and stored in
+ * ZHLN_Device. These wrappers are no-ops when the extension is unavailable, so
+ * callers only need to check ZHLN_Device::mesh_shader_enabled when deciding
+ * which pipeline to bind, never around the draw itself.
+ */
+
+void ZHLN_CmdDrawMeshTasks(
+    const ZHLN_Device* ZHLN_RESTRICT device,
+    VkCommandBuffer                  cmd,
+    uint32_t                         group_count_x,
+    uint32_t                         group_count_y,
+    uint32_t                         group_count_z
+);
+
+void ZHLN_CmdDrawMeshTasksIndirect(
+    const ZHLN_Device* ZHLN_RESTRICT device,
+    VkCommandBuffer                  cmd,
+    VkBuffer                         buffer,
+    VkDeviceSize                     offset,
+    uint32_t                         draw_count,
+    uint32_t                         stride
+);
+
+void ZHLN_CmdDrawMeshTasksIndirectCount(
+    const ZHLN_Device* ZHLN_RESTRICT device,
+    VkCommandBuffer                  cmd,
+    VkBuffer                         buffer,
+    VkDeviceSize                     offset,
+    VkBuffer                         count_buffer,
+    VkDeviceSize                     count_buffer_offset,
+    uint32_t                         max_draw_count,
+    uint32_t                         stride
+);
 
 /* --- MIPMAPPING --- */
 

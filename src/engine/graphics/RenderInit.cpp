@@ -25,6 +25,9 @@ namespace {
 struct HardwareCaps {
     bool supportsDrawIndirectCount = false;
     bool supportsInt64             = false;
+    // VK_EXT_mesh_shader: extension + features + the hardware limits the
+    // Zahlen task/mesh shaders were authored against.
+    bool supportsMeshShader = false;
 };
 
 class HardwareCapsProber {
@@ -62,10 +65,45 @@ class HardwareCapsProber {
     uint32_t         _apiVersion;
 };
 
+bool CheckMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept;
+
 HardwareCaps ProbeHardware(VkPhysicalDevice physicalDevice, uint32_t apiVersion) noexcept {
     HardwareCaps caps {};
     HardwareCapsProber(physicalDevice, apiVersion).ProbeInt64(caps.supportsInt64).ProbeDrawIndirectCount(caps.supportsDrawIndirectCount);
+    caps.supportsMeshShader = CheckMeshShaderSupport(physicalDevice);
     return caps;
+}
+
+// VK_EXT_mesh_shader is only usable when the extension is present, the two
+// feature bits are advertised AND the device's mesh-shader limits cover the
+// geometry budget baked into basic_task.slang / basic_mesh.slang. Anything
+// less and the engine silently keeps the vertex pipeline.
+bool CheckMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept {
+    if (!ZHLN::Vk::IsDeviceExtensionSupported(physicalDevice, VK_EXT_MESH_SHADER_EXTENSION_NAME)) {
+        return false;
+    }
+
+    VkPhysicalDeviceMeshShaderFeaturesEXT meshFeatures {};
+    meshFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT;
+    VkPhysicalDeviceFeatures2 features2 {};
+    features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    features2.pNext = &meshFeatures;
+    vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
+
+    if (meshFeatures.taskShader != VK_TRUE || meshFeatures.meshShader != VK_TRUE) {
+        return false;
+    }
+
+    const ZHLN_MeshShaderLimits limits = ZHLN_QueryMeshShaderLimits(physicalDevice);
+    if (!ZHLN_MeshShaderLimitsSufficient(&limits)) {
+        ZHLN::Log(
+            "[RenderInit] VK_EXT_mesh_shader present but limits are insufficient "
+            "(maxMeshOutputVertices={}, maxMeshOutputPrimitives={}, maxTaskWorkGroupInvocations={}); using the vertex pipeline.",
+            limits.max_mesh_output_vertices, limits.max_mesh_output_primitives, limits.max_task_work_group_invocations
+        );
+        return false;
+    }
+    return true;
 }
 
 bool CheckRayTracingSupport(VkPhysicalDevice physicalDevice) noexcept {
@@ -380,6 +418,15 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
         // them draw inside stencil-less render passes (and stencil-less
         // secondary command buffers) without format-mismatch VUIDs.
         .Require<VkPhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT>([](auto& f) { f.dynamicRenderingUnusedAttachments = VK_TRUE; })
+        // VK_EXT_mesh_shader. multiviewMeshShader lets the shadow pass render
+        // all cascades from a single dispatch; it is only requested when the
+        // device actually supports mesh shading, because the feature struct
+        // must not be chained on a device that lacks the extension.
+        .Optional<VkPhysicalDeviceMeshShaderFeaturesEXT>([&caps](auto& f) {
+            f.taskShader          = caps.supportsMeshShader ? VK_TRUE : VK_FALSE;
+            f.meshShader          = caps.supportsMeshShader ? VK_TRUE : VK_FALSE;
+            f.multiviewMeshShader = caps.supportsMeshShader ? VK_TRUE : VK_FALSE;
+        })
         .Require<VkPhysicalDeviceFeatures2>([&](auto& f) {
             f.features.multiDrawIndirect         = VK_TRUE;
             f.features.samplerAnisotropy         = VK_TRUE;
@@ -424,6 +471,11 @@ std::expected<Vk::ExtensionResult, Error> GetDeviceExtensions(VkPhysicalDevice p
         .Require(VK_EXT_DESCRIPTOR_HEAP_EXTENSION_NAME)
         .Require(VK_KHR_MAINTENANCE_5_EXTENSION_NAME)
         .Require(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME)
+        // VK_EXT_mesh_shader replaces the input assembler + vertex stage of the
+        // geometry passes with task/mesh shaders. It stays OPTIONAL: the vertex
+        // pipeline is still built for every material, so devices without mesh
+        // shading (or with limits below our meshlet budget) keep rendering.
+        .OptionalGroup({VK_EXT_MESH_SHADER_EXTENSION_NAME}, CheckMeshShaderSupport(physicalDevice))
         .Build()
         .transform_error([](auto err) -> Error { return err; });
 }

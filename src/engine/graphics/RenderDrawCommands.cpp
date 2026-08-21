@@ -25,7 +25,22 @@ struct ResolvedMeshMaterial {
     NativeMaterial* prePassMaterial = nullptr;
     VkDeviceAddress posAddr         = 0;
     VkDeviceAddress attrAddr        = 0;
+
+    // VK_EXT_mesh_shader streams (0 / 0 when the mesh has no meshlets, which
+    // makes both the task shader and the CPU-side path fall back to vertices).
+    VkDeviceAddress meshletAddr       = 0;
+    VkDeviceAddress meshletVertexAddr = 0;
+    VkDeviceAddress meshletTriAddr    = 0;
+    uint32_t        meshletCount      = 0;
 };
+
+/// Meshlet streams describe the ORIGINAL vertex pool. A GPU-skinned draw
+/// renders from a separate, post-skinning vertex buffer, so its meshlet vertex
+/// indices would no longer line up: those draws keep the vertex pipeline.
+[[nodiscard]] inline bool MeshletsUsable(const Mesh& mesh, BufferHandle skinnedVertexBuffer) noexcept {
+    return mesh.meshletCount > 0 && mesh.meshletBuffer != BufferHandle::Invalid && mesh.meshletVertexBuffer != BufferHandle::Invalid &&
+           mesh.meshletTriBuffer != BufferHandle::Invalid && skinnedVertexBuffer == BufferHandle::Invalid;
+}
 
 struct BindlessIndices {
     uint32_t albedo;
@@ -78,6 +93,19 @@ struct BindlessIndices {
 
     res.posAddr  = (res.finalPosMesh != nullptr) ? res.finalPosMesh->vboAddress : 0;
     res.attrAddr = (res.attrMesh != nullptr) ? res.attrMesh->vboAddress : 0;
+
+    if (MeshletsUsable(mesh, skinnedVertexBuffer)) {
+        auto* meshletMesh = impl->meshPool.Resolve(mesh.meshletBuffer).value_or(nullptr);
+        auto* meshletVtx  = impl->meshPool.Resolve(mesh.meshletVertexBuffer).value_or(nullptr);
+        auto* meshletTri  = impl->meshPool.Resolve(mesh.meshletTriBuffer).value_or(nullptr);
+
+        if (meshletMesh != nullptr && meshletVtx != nullptr && meshletTri != nullptr) {
+            res.meshletAddr       = meshletMesh->vboAddress;
+            res.meshletVertexAddr = meshletVtx->vboAddress;
+            res.meshletTriAddr    = meshletTri->vboAddress;
+            res.meshletCount      = mesh.meshletCount;
+        }
+    }
 
     if (res.posMesh == res.attrMesh && res.posMesh != nullptr) {
         res.attrAddr = res.posMesh->vboAddress + (RenderContext::Impl::kMaxLineVertices * sizeof(VertexPosition));
@@ -194,6 +222,13 @@ void RenderContext::Impl::FlushLineQueue() {
         .morphWeights     = {0.0f, 0.0f, 0.0f, 0.0f},
         .baseColorFactor  = {1.0f, 1.0f, 1.0f, 1.0f},
         .emissiveFactor   = {0.0f, 0.0f, 0.0f, 1.0f},
+        // Debug lines are not meshletized (LINE_LIST topology has no mesh
+        // pipeline variant); zero addresses keep them on the vertex path.
+        .meshletAddress       = 0,
+        .meshletVertexAddress = 0,
+        .meshletTriAddress    = 0,
+        .meshletCount         = 0,
+        ._paddingMeshlet      = 0,
     };
 
     queues.lineQueue.clear();
@@ -258,7 +293,13 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
               .emissiveFactor =
                   (params.emissiveOverride[3] >= 0.0f) ?
                       params.emissiveOverride :
-                      std::array<float, 4> {material.emissiveFactor[0], material.emissiveFactor[1], material.emissiveFactor[2], material.emissiveFactor[3]}},
+                      std::array<float, 4> {material.emissiveFactor[0], material.emissiveFactor[1], material.emissiveFactor[2], material.emissiveFactor[3]},
+              // VK_EXT_mesh_shader streams (all zero => vertex pipeline)
+              .meshletAddress       = resolved->meshletAddr,
+              .meshletVertexAddress = resolved->meshletVertexAddr,
+              .meshletTriAddress    = resolved->meshletTriAddr,
+              .meshletCount         = resolved->meshletCount,
+              ._paddingMeshlet      = 0},
          .material            = resolved->material,
          .prePassMaterial     = resolved->prePassMaterial,
          .posMesh             = resolved->posMesh,
@@ -311,6 +352,13 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
                     .morphWeights     = {},
                     .baseColorFactor  = {material.baseColorFactor[0], material.baseColorFactor[1], material.baseColorFactor[2], material.baseColorFactor[3]},
                     .emissiveFactor   = {material.emissiveFactor[0], material.emissiveFactor[1], material.emissiveFactor[2], material.emissiveFactor[3]},
+                    // CSG cutters are stencil-only draws; they still carry the
+                    // meshlet streams so they can take the mesh path too.
+                    .meshletAddress       = resolved->meshletAddr,
+                    .meshletVertexAddress = resolved->meshletVertexAddr,
+                    .meshletTriAddress    = resolved->meshletTriAddr,
+                    .meshletCount         = resolved->meshletCount,
+                    ._paddingMeshlet      = 0,
                 },
             .material            = resolved->material,
             .prePassMaterial     = resolved->prePassMaterial,

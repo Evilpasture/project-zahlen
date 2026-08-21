@@ -21,6 +21,16 @@ constexpr uint8_t basic_ps_raw[] = {
 };
 extern const ShaderPair basic_shaders {.vertex = basic_vs_raw, .fragment = basic_ps_raw};
 
+// --- VK_EXT_mesh_shader stages for the very same material ---
+constexpr uint8_t basic_task_raw[] = {
+#embed SHADER_BASIC_SLANG_TASK_PATH
+};
+constexpr uint8_t basic_mesh_raw[] = {
+#embed SHADER_BASIC_SLANG_MESH_PATH
+};
+extern const std::span<const uint8_t> basic_task {basic_task_raw, sizeof(basic_task_raw)};
+extern const std::span<const uint8_t> basic_mesh {basic_mesh_raw, sizeof(basic_mesh_raw)};
+
 // --- Blit Shaders ---
 constexpr uint8_t blit_vs_raw[] = {
 #embed SHADER_BLIT_SLANG_VS_PATH
@@ -303,6 +313,8 @@ extern const std::span<const uint8_t> ltc_amp {ltc_amp_raw, sizeof(ltc_amp_raw)}
 namespace Paths {
 const char* const BasicVS                 = SHADER_BASIC_SLANG_VS_PATH;
 const char* const BasicPS                 = SHADER_BASIC_SLANG_PS_PATH;
+const char* const BasicTask               = SHADER_BASIC_SLANG_TASK_PATH;
+const char* const BasicMesh               = SHADER_BASIC_SLANG_MESH_PATH;
 const char* const BlitVS                  = SHADER_BLIT_SLANG_VS_PATH;
 const char* const BlitPS                  = SHADER_BLIT_SLANG_PS_PATH;
 const char* const TaaVS                   = SHADER_TAA_SLANG_VS_PATH;

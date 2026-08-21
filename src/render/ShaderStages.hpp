@@ -32,6 +32,15 @@ class ShaderStages {
     constexpr ShaderStages(VkDevice device, const ZHLN_ShaderStages raw, std::vector<uint32_t> vertSpv, std::vector<uint32_t> fragSpv):
         _device(device), _raw(raw), _vertSpv(std::move(vertSpv)), _fragSpv(std::move(fragSpv)) {
     }
+    constexpr ShaderStages(
+        VkDevice                device,
+        const ZHLN_ShaderStages raw,
+        std::vector<uint32_t>   vertSpv,
+        std::vector<uint32_t>   fragSpv,
+        std::vector<uint32_t>   taskSpv,
+        std::vector<uint32_t>   meshSpv
+    ): _device(device), _raw(raw), _vertSpv(std::move(vertSpv)), _fragSpv(std::move(fragSpv)), _taskSpv(std::move(taskSpv)), _meshSpv(std::move(meshSpv)) {
+    }
 
     ~ShaderStages();
     ShaderStages(const ShaderStages&)                    = delete;
@@ -41,6 +50,14 @@ class ShaderStages {
 
     [[nodiscard("Shader creation may fail; verify validity before binding")]]
     static auto Create(VkDevice device, const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag) -> std::expected<ShaderStages, ZHLN::Error>;
+
+    /// VK_EXT_mesh_shader: builds a task + mesh + fragment stage set. `task`
+    /// may be empty (mesh shaders can be dispatched without amplification);
+    /// `mesh` is mandatory. The resulting ShaderStages carries no vertex
+    /// module, which is exactly what the pipeline builder keys off of.
+    [[nodiscard("Shader creation may fail; verify validity before binding")]]
+    static auto CreateMesh(VkDevice device, const ZHLN_ShaderDesc& task, const ZHLN_ShaderDesc& mesh, const ZHLN_ShaderDesc& frag)
+        -> std::expected<ShaderStages, ZHLN::Error>;
 
     template <typename T, size_t Extent1, typename U = const uint8_t, size_t Extent2 = std::dynamic_extent>
     [[nodiscard]] static auto Create(
@@ -79,9 +96,19 @@ class ShaderStages {
     [[nodiscard]] constexpr auto GetFragSpv() const noexcept -> std::span<const uint32_t> {
         return _fragSpv;
     }
+    [[nodiscard]] constexpr auto GetTaskSpv() const noexcept -> std::span<const uint32_t> {
+        return _taskSpv;
+    }
+    [[nodiscard]] constexpr auto GetMeshSpv() const noexcept -> std::span<const uint32_t> {
+        return _meshSpv;
+    }
+    /// True for a VK_EXT_mesh_shader pipeline (task+mesh instead of vertex).
+    [[nodiscard]] constexpr auto IsMeshPipeline() const noexcept -> bool {
+        return _raw.mesh.handle != VK_NULL_HANDLE;
+    }
     [[nodiscard("Always verify shader stages are valid before pipeline creation")]]
     constexpr auto Valid() const -> bool {
-        return _raw.vert.handle != VK_NULL_HANDLE;
+        return _raw.vert.handle != VK_NULL_HANDLE || _raw.mesh.handle != VK_NULL_HANDLE;
     }
 
   private:
@@ -89,6 +116,8 @@ class ShaderStages {
     ZHLN_ShaderStages     _raw {};
     std::vector<uint32_t> _vertSpv {};
     std::vector<uint32_t> _fragSpv {};
+    std::vector<uint32_t> _taskSpv {};
+    std::vector<uint32_t> _meshSpv {};
 };
 
 [[nodiscard]] constexpr auto AsSpirV(const void* data) -> const uint32_t* {

@@ -20,6 +20,14 @@ auto DisableGpuCulling() noexcept -> bool {
     return enabled;
 }
 
+auto DisableMeshShading() noexcept -> bool {
+    // Escape hatch mirroring ZHLN_NO_GPU_CULLING: forces every draw back onto
+    // the vertex pipeline even on hardware that supports VK_EXT_mesh_shader,
+    // which makes A/B-ing the two paths (and bisecting driver bugs) trivial.
+    static const bool disabled = std::getenv("ZHLN_NO_MESH_SHADING") != nullptr;
+    return disabled;
+}
+
 auto IndirectTelemetryEnabled() noexcept -> bool {
     static const bool enabled = std::getenv("ZHLN_DEBUG_INDIRECT") != nullptr;
     return enabled;
@@ -327,9 +335,9 @@ void RenderContext::Impl::DumpIndirectTelemetry(uint32_t frameNo) noexcept {
     const auto drawCount = static_cast<uint32_t>(queues.drawQueue.size());
 
     const bool useGpuCulling = cullingPass.pipeline.Valid() && frames.indirectCommandsBuffers->Valid() && (drawCount <= kGpuCullingMaxInstances) &&
-                               !Diag::DisableGpuCulling();
+                               !Diag::DisableGpuCulling() && !MeshShadingActive();
 
-    ZHLN::Log("[Diag] ---- frame {}: draws={} gpuCulling={} ----", frameNo, drawCount, useGpuCulling ? 1 : 0);
+    ZHLN::Log("[Diag] ---- frame {}: draws={} gpuCulling={} meshShading={} ----", frameNo, drawCount, useGpuCulling ? 1 : 0, MeshShadingActive() ? 1 : 0);
 
     if (drawCount == 0) {
         return;
