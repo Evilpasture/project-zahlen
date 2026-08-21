@@ -362,7 +362,6 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/threading)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/physics)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/ecs)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/gltf)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/alife)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/audio)
 
 # --- ASSEMBLE COMPILER FLAGS METADATA ---
@@ -443,7 +442,6 @@ set(ZHLN_MODULE_FILES
     modules/zahlen-physics.cppm
     modules/zahlen-render.cppm
     modules/zahlen-audio.cppm
-    modules/zahlen-alife.cppm
     modules/zahlen-scripting.cppm
     modules/zahlen-engine.cppm
     modules/zahlen.cppm
@@ -467,7 +465,6 @@ target_link_libraries(zahlen_engine PRIVATE
     zahlen_threading
     zahlen_ecs
     zahlen_gltf
-    zahlen_alife
     zahlen_audio
     glfw
     LuaJIT

@@ -29,7 +29,6 @@
 #include <Zahlen/Scripting.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Window.hpp>
-#include <Zahlen/alife/Simulator.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
@@ -99,7 +98,6 @@ struct EngineImpl {
     std::unique_ptr<RenderContext>        renderContext;
     std::unique_ptr<PhysicsContext>       physicsContext;
     std::unique_ptr<AudioContext>         audioContext;
-    std::unique_ptr<ALife::Simulator>     alifeSimulator;
     std::unique_ptr<CreativeWorksManager> assetManager;
     std::unique_ptr<ScriptRunner>         scriptRunner;
 
@@ -248,7 +246,7 @@ void BuildSystemGraphs(Engine& engine) {
     updateGraph.AddSystem({
         .update_func    = Sys_Audio,
         .name           = "AudioSystem",
-        .access_pattern = {Read<Components::PhysicsComponent>(), Read<Components::ALifeComponent>(), Write<Components::AudioSourceComponent>()},
+        .access_pattern = {Read<Components::PhysicsComponent>(), Write<Components::AudioSourceComponent>()},
         .enabled        = true,
     });
 
@@ -509,8 +507,7 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
 
     _impl->physicsContext = std::make_unique<PhysicsContext>(cfg.physics);
     _impl->audioContext   = std::make_unique<AudioContext>();
-    _impl->alifeSimulator = std::make_unique<ALife::Simulator>();
-    _impl->assetManager   = std::make_unique<CreativeWorksManager>();
+    _impl->assetManager = std::make_unique<CreativeWorksManager>();
 
     _impl->updateGraph   = std::make_unique<ECS::SystemGraph>();
     _impl->renderGraph   = std::make_unique<ECS::SystemGraph>();
@@ -636,9 +633,6 @@ auto Engine::GetRenderContext() -> RenderContext& {
 }
 auto Engine::GetCamera() -> Camera& {
     return _impl->mainCamera;
-}
-auto Engine::GetALife() -> ALife::Simulator& {
-    return *_impl->alifeSimulator;
 }
 auto Engine::GetCreativeWorksManager() -> CreativeWorksManager& {
     return *_impl->assetManager;

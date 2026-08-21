@@ -177,12 +177,6 @@ module;
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/Types.hpp>
 #include <Zahlen/Window.hpp>
-#include <Zahlen/alife/Factions.hpp>
-#include <Zahlen/alife/GOAP.hpp>
-#include <Zahlen/alife/Graph.hpp>
-#include <Zahlen/alife/Simulator.hpp>
-#include <Zahlen/alife/SpatialGrid.hpp>
-#include <Zahlen/alife/Types.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
@@ -198,7 +192,6 @@ export import :ecs;
 export import :physics;
 export import :render;
 export import :audio;
-export import :alife;
 export import :scripting;
 export import :engine;
 
@@ -417,36 +410,6 @@ using ZHLN::AudioFilterType;
 using ZHLN::AudioNoiseType;
 using ZHLN::AudioSystem;
 using ZHLN::AudioWaveformType;
-
-// ALife
-namespace ALife {
-using ZHLN::ALife::Action;
-using ZHLN::ALife::AStarData;
-using ZHLN::ALife::END_OF_LIST;
-using ZHLN::ALife::Event;
-using ZHLN::ALife::EventType;
-using ZHLN::ALife::FactionDef;
-using ZHLN::ALife::FactionRegistry;
-using ZHLN::ALife::HeapNode;
-using ZHLN::ALife::INVALID_GRAPH_NODE;
-using ZHLN::ALife::LevelGraph;
-using ZHLN::ALife::MAX_PATH_LENGTH;
-using ZHLN::ALife::Node;
-using ZHLN::ALife::NodeType;
-using ZHLN::ALife::PathRequest;
-using ZHLN::ALife::PathWorkspace;
-using ZHLN::ALife::Plan;
-using ZHLN::ALife::PlanRequest;
-using ZHLN::ALife::SimConfig;
-using ZHLN::ALife::SimTuning;
-using ZHLN::ALife::Simulator;
-using ZHLN::ALife::SolvePlan;
-using ZHLN::ALife::SpatialGrid;
-using ZHLN::ALife::State;
-using ZHLN::ALife::TaskType;
-using ZHLN::ALife::WorldState;
-using ZHLN::ALife::WorldStateRegistry;
-} // namespace ALife
 
 // Scripting
 using ZHLN::BoxedObject;

@@ -14,7 +14,6 @@
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Types.hpp>
-#include <Zahlen/alife/Types.hpp>
 #include <algorithm>
 #include <array>
 #include <bitset>
@@ -426,39 +425,6 @@ struct Components {
         bool  isFinished    = false;
 
         const ModelPrefab* prefab = nullptr;
-    };
-
-    struct ALifeComponent {
-        using enum ALife::State;
-        using enum ALife::TaskType;
-
-        JPH::RVec3   position     = JPH::RVec3::sZero();
-        ALife::State state        = Offline;
-        uint32_t     current_node = ALife::INVALID_GRAPH_NODE;
-        uint32_t     target_node  = ALife::INVALID_GRAPH_NODE;
-        float        travel_speed = 0.0f;
-        uint32_t     faction_id   = 0;
-        Entity       self_entity  = NullEntity;
-
-        uint32_t path[ALife::MAX_PATH_LENGTH] {};
-        uint32_t path_count = 0;
-        uint32_t path_index = 0;
-
-        int32_t wait_time   = 0;
-        bool    is_thinking = false;
-
-        uint32_t next_in_grid = ALife::END_OF_LIST;
-
-        uint32_t        class_id      = 0;
-        int32_t         health        = 100;
-        int32_t         power         = 10;
-        int32_t         money         = 0;
-        int32_t         energy        = 100;
-        int32_t         loot_value    = 0;
-        ALife::TaskType active_task   = Idle;
-        bool            is_looted     = false;
-        bool            is_fleeing    = false;
-        uint64_t        script_handle = 0;
     };
 
     struct AudioSourceComponent {

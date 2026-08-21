@@ -30,10 +30,6 @@ class ScriptRunner;
 struct Camera;
 struct EngineImpl;
 
-namespace ALife {
-class Simulator;
-}
-
 namespace ECS {
 class Registry;
 class SystemGraph;
@@ -64,7 +60,6 @@ class ZHLN_API Engine {
     PhysicsContext&                    GetPhysicsContext();
     RenderContext&                     GetRenderContext();
     Camera&                            GetCamera();
-    ALife::Simulator&                  GetALife();
     CreativeWorksManager&              GetCreativeWorksManager();
     AudioContext&                      GetAudioContext();
     ScriptRunner&                      GetScriptRunner();

@@ -1,12 +1,12 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Components.hpp>
+#include "ALifeComponents.hpp"
+#include "Simulator.hpp"
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Profiler.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/alife/Simulator.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <cmath>
 #include <cstdlib>
