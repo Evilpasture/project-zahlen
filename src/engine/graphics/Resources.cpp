@@ -31,6 +31,24 @@ constexpr uint8_t basic_mesh_raw[] = {
 extern const std::span<const uint8_t> basic_task {basic_task_raw, sizeof(basic_task_raw)};
 extern const std::span<const uint8_t> basic_mesh {basic_mesh_raw, sizeof(basic_mesh_raw)};
 
+// --- Per-pass variants of the geometry stages (see SceneShaderVariant) ---
+constexpr uint8_t basic_vs_shadow_raw[] = {
+#embed SHADER_BASIC_SLANG_VS_SHADOW_PATH
+};
+constexpr uint8_t basic_mesh_shadow_raw[] = {
+#embed SHADER_BASIC_SLANG_MESH_SHADOW_PATH
+};
+constexpr uint8_t basic_vs_forward_raw[] = {
+#embed SHADER_BASIC_SLANG_VS_FORWARD_PATH
+};
+constexpr uint8_t basic_mesh_forward_raw[] = {
+#embed SHADER_BASIC_SLANG_MESH_FORWARD_PATH
+};
+extern const std::span<const uint8_t> basic_vs_shadow {basic_vs_shadow_raw, sizeof(basic_vs_shadow_raw)};
+extern const std::span<const uint8_t> basic_mesh_shadow {basic_mesh_shadow_raw, sizeof(basic_mesh_shadow_raw)};
+extern const std::span<const uint8_t> basic_vs_forward {basic_vs_forward_raw, sizeof(basic_vs_forward_raw)};
+extern const std::span<const uint8_t> basic_mesh_forward {basic_mesh_forward_raw, sizeof(basic_mesh_forward_raw)};
+
 // --- Blit Shaders ---
 constexpr uint8_t blit_vs_raw[] = {
 #embed SHADER_BLIT_SLANG_VS_PATH
@@ -315,6 +333,10 @@ const char* const BasicVS                 = SHADER_BASIC_SLANG_VS_PATH;
 const char* const BasicPS                 = SHADER_BASIC_SLANG_PS_PATH;
 const char* const BasicTask               = SHADER_BASIC_SLANG_TASK_PATH;
 const char* const BasicMesh               = SHADER_BASIC_SLANG_MESH_PATH;
+const char* const BasicVSShadow           = SHADER_BASIC_SLANG_VS_SHADOW_PATH;
+const char* const BasicMeshShadow         = SHADER_BASIC_SLANG_MESH_SHADOW_PATH;
+const char* const BasicVSForward          = SHADER_BASIC_SLANG_VS_FORWARD_PATH;
+const char* const BasicMeshForward        = SHADER_BASIC_SLANG_MESH_FORWARD_PATH;
 const char* const BlitVS                  = SHADER_BLIT_SLANG_VS_PATH;
 const char* const BlitPS                  = SHADER_BLIT_SLANG_PS_PATH;
 const char* const TaaVS                   = SHADER_TAA_SLANG_VS_PATH;
@@ -372,5 +394,17 @@ const char* const ForwardPS               = SHADER_FORWARD_SLANG_PS_PATH;
 const char* const HangGpuCS               = SHADER_HANG_GPU_SLANG_CS_PATH;
 const char* const ProceduralBakeCS        = SHADER_PROCEDURAL_BAKE_SLANG_CS_PATH;
 } // namespace Paths
+
+SceneShaderSet GetSceneShaders(SceneShaderVariant variant) noexcept {
+    switch (variant) {
+        case SceneShaderVariant::Shadow:
+            return {.vertex = basic_vs_shadow, .fragment = shadow_frag, .task = basic_task, .mesh = basic_mesh_shadow};
+        case SceneShaderVariant::Forward:
+            return {.vertex = basic_vs_forward, .fragment = forward_frag, .task = basic_task, .mesh = basic_mesh_forward};
+        case SceneShaderVariant::GBuffer:
+        default:
+            return {.vertex = basic_shaders.vertex, .fragment = basic_shaders.fragment, .task = basic_task, .mesh = basic_mesh};
+    }
+}
 
 } // namespace ZHLN::Resource

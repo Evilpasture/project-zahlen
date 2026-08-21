@@ -295,9 +295,10 @@ std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfi
         .and_then([&]() { return BuildHiZPipeline(); })
         .and_then([&]() { return BuildProceduralBakePipeline(); })
         .and_then([&]() {
-            return CompileShadowPipeline(
-                       ctx.Device(), Resource::ShaderPair {.vertex = Resource::GetShaderProgram(Basic).vertex, .fragment = Resource::shadow_frag}
-            )
+            // Shadow variant: geometry + fragment stages from one lookup so
+            // their varying locations cannot drift apart.
+            const auto shadowShaders = Resource::GetSceneShaders(Resource::SceneShaderVariant::Shadow);
+            return CompileShadowPipeline(ctx.Device(), Resource::ShaderPair {.vertex = shadowShaders.vertex, .fragment = shadowShaders.fragment})
                 .transform_error([](auto e) -> Error { return e; });
         })
         .and_then([&]() {
@@ -751,11 +752,14 @@ std::expected<void, Error> RenderContext::Impl::InitLineBuffers() noexcept {
 std::expected<void, Error> RenderContext::Impl::BuildLinePipeline() {
     linePipelineLayout = emptyPipelineLayout;
 
-    auto basicShaders = Resource::GetShaderProgram(Resource::ShaderID::Basic);
+    // The debug line pipeline rasterises through PSForward, so it needs the
+    // Forward geometry variant (the G-buffer one emits motion vectors and a
+    // normal frame that PSForward does not read).
+    const auto forwardShaders = Resource::GetSceneShaders(Resource::SceneShaderVariant::Forward);
 
     return LoadAndCreateShaders(
-               {.path = Resource::Paths::BasicVS, .fallback = basicShaders.vertex, .entryPoint = "VSMain"},
-               {.path = Resource::Paths::ForwardPS, .fallback = Resource::forward_frag, .entryPoint = "PSForward"}
+               {.path = Resource::Paths::BasicVSForward, .fallback = forwardShaders.vertex, .entryPoint = "VSMain"},
+               {.path = Resource::Paths::ForwardPS, .fallback = forwardShaders.fragment, .entryPoint = "PSForward"}
     )
         .and_then([&](auto&& shaders) -> std::expected<void, Error> {
             return Vk::PipelineBuilder<1, true> {}

@@ -10,8 +10,12 @@ namespace ZHLN::Resource {
 namespace Paths {
 extern const char* const BasicVS;
 extern const char* const BasicPS;
-extern const char* const BasicTask; // VK_EXT_mesh_shader amplification stage
-extern const char* const BasicMesh; // VK_EXT_mesh_shader mesh stage
+extern const char* const BasicTask;        // VK_EXT_mesh_shader amplification stage
+extern const char* const BasicMesh;        // VK_EXT_mesh_shader mesh stage
+extern const char* const BasicVSShadow;    // -DZHLN_PASS_SHADOW variant
+extern const char* const BasicMeshShadow;  // -DZHLN_PASS_SHADOW variant
+extern const char* const BasicVSForward;   // -DFORWARD_PASS variant
+extern const char* const BasicMeshForward; // -DFORWARD_PASS variant
 extern const char* const BlitVS;
 extern const char* const BlitPS;
 extern const char* const TaaVS;
@@ -157,13 +161,38 @@ extern const std::span<const uint8_t> cluster_bounds;
 extern const std::span<const uint8_t> cluster_culling;
 extern const std::span<const uint8_t> skinning_comp;
 extern const std::span<const uint8_t> forward_frag;
-// VK_EXT_mesh_shader geometry stages (paired with basic_shaders.fragment)
+// Scene geometry stages. Never pair these by hand -- use GetSceneShaders().
 extern const std::span<const uint8_t> basic_task;
 extern const std::span<const uint8_t> basic_mesh;
+extern const std::span<const uint8_t> basic_vs_shadow;
+extern const std::span<const uint8_t> basic_mesh_shadow;
+extern const std::span<const uint8_t> basic_vs_forward;
+extern const std::span<const uint8_t> basic_mesh_forward;
 extern const std::span<const uint8_t> hang_gpu_comp;
 extern const std::span<const uint8_t> procedural_bake_comp;
 extern const std::span<const uint8_t> ltc_mat;
 extern const std::span<const uint8_t> ltc_amp;
+
+/// Which specialisation of the scene geometry interface a pipeline needs.
+/// basic.slang / basic_mesh.slang emit a different varying set per variant, so
+/// the geometry and fragment stages must come from the SAME variant.
+enum class SceneShaderVariant : uint8_t {
+    GBuffer, ///< MainPass1/2 + CSG: full interface (PSMain)
+    Shadow,  ///< Depth-only cascades: no motion vectors, no normal frame (PSShadow)
+    Forward, ///< Translucent/lines: no motion vectors, no normal frame (PSForward)
+};
+
+struct SceneShaderSet {
+    std::span<const uint8_t> vertex;
+    std::span<const uint8_t> fragment;
+    std::span<const uint8_t> task; ///< VK_EXT_mesh_shader (variant-independent)
+    std::span<const uint8_t> mesh; ///< VK_EXT_mesh_shader
+};
+
+/// The single place that pairs a geometry stage with its fragment stage.
+/// Mixing variants produces mismatched varying locations, which the validation
+/// layer reports as a SPIR-V interface error at pipeline creation.
+[[nodiscard]] SceneShaderSet GetSceneShaders(SceneShaderVariant variant) noexcept;
 
 struct ShaderMapping {
     ShaderID   id;

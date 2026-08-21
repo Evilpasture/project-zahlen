@@ -177,8 +177,10 @@ auto RenderContext::Impl::CompileShadowPipeline(VkDevice device, const Resource:
             }
 
             const ZHLN_ShaderDesc taskDesc = {.code = Vk::AsSpirV(Resource::basic_task.data()), .size = Resource::basic_task.size(), .entry_point = nullptr};
-            const ZHLN_ShaderDesc meshDesc = {.code = Vk::AsSpirV(Resource::basic_mesh.data()), .size = Resource::basic_mesh.size(), .entry_point = nullptr};
-            const ZHLN_ShaderDesc fragDesc = {.code = Vk::AsSpirV(shaderData.fragment.data()), .size = shaderData.fragment.size(), .entry_point = "PSShadow"};
+            // Shadow variant: its varying set must match PSShadow exactly.
+            const auto            shadowSet = Resource::GetSceneShaders(Resource::SceneShaderVariant::Shadow);
+            const ZHLN_ShaderDesc meshDesc  = {.code = Vk::AsSpirV(shadowSet.mesh.data()), .size = shadowSet.mesh.size(), .entry_point = nullptr};
+            const ZHLN_ShaderDesc fragDesc  = {.code = Vk::AsSpirV(shaderData.fragment.data()), .size = shaderData.fragment.size(), .entry_point = "PSShadow"};
 
             auto shaders = Vk::ShaderStages::CreateMesh(device, taskDesc, meshDesc, fragDesc);
             if (!shaders) {
@@ -416,12 +418,14 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> std::expected<Ma
 }
 
 auto RenderContext::CreateDebugLineMaterial() -> std::expected<Material, Error> {
-    auto shaders = Resource::GetShaderProgram(Resource::ShaderID::Basic);
+    // PSForward => the Forward geometry variant. No mesh stages: a LINE_LIST
+    // has no mesh-shader equivalent (mesh pipelines declare their own topology).
+    const auto shaders = Resource::GetSceneShaders(Resource::SceneShaderVariant::Forward);
     return CreateMaterial({
         .vertexShaderData = shaders.vertex.data(),
         .vertexShaderSize = shaders.vertex.size(),
-        .fragShaderData   = Resource::forward_frag.data(),
-        .fragShaderSize   = Resource::forward_frag.size(),
+        .fragShaderData   = shaders.fragment.data(),
+        .fragShaderSize   = shaders.fragment.size(),
         .doubleSided      = true,
         .alphaBlend       = true,
         .isLineList       = true,
@@ -429,14 +433,18 @@ auto RenderContext::CreateDebugLineMaterial() -> std::expected<Material, Error> 
 }
 
 auto RenderContext::CreateDebugSolidMaterial() -> std::expected<Material, Error> {
-    auto shaders = Resource::GetShaderProgram(Resource::ShaderID::Basic);
+    const auto shaders = Resource::GetSceneShaders(Resource::SceneShaderVariant::Forward);
     return CreateMaterial({
         .vertexShaderData = shaders.vertex.data(),
         .vertexShaderSize = shaders.vertex.size(),
-        .fragShaderData   = Resource::forward_frag.data(),
-        .fragShaderSize   = Resource::forward_frag.size(),
+        .fragShaderData   = shaders.fragment.data(),
+        .fragShaderSize   = shaders.fragment.size(),
         .doubleSided      = true,
         .alphaBlend       = true,
+        .taskShaderData   = shaders.task.data(),
+        .taskShaderSize   = shaders.task.size(),
+        .meshShaderData   = shaders.mesh.data(),
+        .meshShaderSize   = shaders.mesh.size(),
     });
 }
 

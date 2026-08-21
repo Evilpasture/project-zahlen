@@ -21,7 +21,9 @@ struct PSOutput {
 // (see kGpuCullingSentinel handling below), so the raw Vulkan builtins are
 // required. Same argument applies to SV_VertexID/SV_VulkanVertexID.
 VSOutput VSMain(uint vertexId: SV_VulkanVertexID, uint instanceId: SV_VulkanInstanceID, uint viewId: SV_ViewID) {
-    VSOutput output;
+    // Filled unconditionally; PackGeometryOutput drops whatever this pass's
+    // fragment stage does not read.
+    SceneGeometryVertex output;
 
     uint instId       = (obj.instanceId != 4294967295u) ? obj.instanceId : instanceId;
     InstanceData inst = scene.g_instances[instId];
@@ -106,7 +108,7 @@ VSOutput VSMain(uint vertexId: SV_VulkanVertexID, uint instanceId: SV_VulkanInst
         output.normal   = 0;
         output.tangent  = 0;
         output.color    = localColor;
-        return output;
+        return PackGeometryOutput(output);
     }
 
     output.pos      = mul(activeVP, worldPos);
@@ -129,9 +131,13 @@ VSOutput VSMain(uint vertexId: SV_VulkanVertexID, uint instanceId: SV_VulkanInst
     output.emissiveFactor  = emissiveFactor;
     output.pbrFactors      = float3(metallicFactor, roughnessFactor, alphaCutoff);
     output.alphaMode       = inst.alphaMode;
-    return output;
+    return PackGeometryOutput(output);
 }
 
+// Each fragment entry point is gated to its own variant: Slang type-checks the
+// whole module, so PSMain referencing G-buffer-only members would break the
+// shadow/forward compiles even though only one entry point is requested.
+#if defined(ZHLN_PASS_SHADOW)
 void PSShadow(VSOutput input) {
     uint4 indices          = input.materialIndices;
     float4 baseColorFactor = input.baseColorFactor;
@@ -145,6 +151,9 @@ void PSShadow(VSOutput input) {
     }
 }
 
+#endif // ZHLN_PASS_SHADOW
+
+#if !defined(ZHLN_PASS_SHADOW) && !defined(FORWARD_PASS)
 PSOutput PSMain(VSOutput input) {
     PSOutput output;
 
@@ -201,6 +210,8 @@ PSOutput PSMain(VSOutput input) {
 
     return output;
 }
+
+#endif // G-buffer variant
 
 #ifdef FORWARD_PASS
 

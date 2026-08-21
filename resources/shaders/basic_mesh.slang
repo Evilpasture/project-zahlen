@@ -57,7 +57,7 @@ void MeshMain(
         uint actualVertexId = inst.fetchMeshletVertex(m.vertexOffset, gtid);
         actualVertexId      = min(actualVertexId, max(inst.vertexCount, 1u) - 1u);
 
-        SceneGeometryOutput output;
+        SceneGeometryVertex output;
 
         float4x4 activeVP = inst.isViewmodel ? scene.frame.viewmodelViewProj : scene.frame.viewProj;
 
@@ -151,7 +151,7 @@ void MeshMain(
             output.alphaMode       = inst.alphaMode;
         }
 
-        outVertices[gtid] = output;
+        outVertices[gtid] = PackGeometryOutput(output);
     }
 
     // ------------------------------------------------------------------

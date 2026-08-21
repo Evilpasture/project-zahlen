@@ -107,31 +107,31 @@ auto CreateTetrahedronMesh(RenderContext& ctx) -> Mesh {
 }
 
 auto CreateBasicMaterial(RenderContext& ctx, bool doubleSided, bool alphaBlend, bool additiveBlend) -> std::expected<Material, Error> {
-    using enum Resource::ShaderID;
     PipelineDesc desc;
-    desc.vertexShaderData = Resource::GetShaderProgram(Basic).vertex.data();
-    desc.vertexShaderSize = static_cast<std::uint32_t>(Resource::GetShaderProgram(Basic).vertex.size());
 
-    if (alphaBlend || additiveBlend) {
-        desc.fragShaderData = Resource::forward_frag.data();
-        desc.fragShaderSize = static_cast<std::uint32_t>(Resource::forward_frag.size());
-    } else {
-        desc.fragShaderData = Resource::GetShaderProgram(Basic).fragment.data();
-        desc.fragShaderSize = static_cast<std::uint32_t>(Resource::GetShaderProgram(Basic).fragment.size());
-    }
+    // One lookup picks the geometry AND fragment stages together: the scene
+    // interface is compiled per pass, so a hand-rolled pairing of, say, the
+    // G-buffer vertex shader with PSForward would mismatch varying locations.
+    const bool translucent = alphaBlend || additiveBlend;
+    const auto shaders     = Resource::GetSceneShaders(translucent ? Resource::SceneShaderVariant::Forward : Resource::SceneShaderVariant::GBuffer);
+
+    desc.vertexShaderData = shaders.vertex.data();
+    desc.vertexShaderSize = shaders.vertex.size();
+    desc.fragShaderData   = shaders.fragment.data();
+    desc.fragShaderSize   = shaders.fragment.size();
+
+    // VK_EXT_mesh_shader: CreateMaterial builds the meshlet pipeline only when
+    // the device supports mesh shading; the vertex pipeline above is always
+    // built and stays the fallback for skinned meshes and meshes without
+    // meshlet streams.
+    desc.taskShaderData = shaders.task.data();
+    desc.taskShaderSize = shaders.task.size();
+    desc.meshShaderData = shaders.mesh.data();
+    desc.meshShaderSize = shaders.mesh.size();
 
     desc.doubleSided   = doubleSided;
     desc.alphaBlend    = alphaBlend;
     desc.additiveBlend = additiveBlend;
-
-    // VK_EXT_mesh_shader: hand the task/mesh stages to the material as well.
-    // CreateMaterial builds the meshlet pipeline only when the device supports
-    // mesh shading; the vertex pipeline above is always built and stays the
-    // fallback for skinned meshes and meshes without meshlet streams.
-    desc.taskShaderData = Resource::basic_task.data();
-    desc.taskShaderSize = Resource::basic_task.size();
-    desc.meshShaderData = Resource::basic_mesh.data();
-    desc.meshShaderSize = Resource::basic_mesh.size();
 
     auto mat_res = ctx.CreateMaterial(desc);
     if (!mat_res) {

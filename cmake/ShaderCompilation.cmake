@@ -182,8 +182,16 @@ add_shader_target(hiz_generate_shader
     STAGES "${SHADER_SRC_DIR}/hiz_generate.slang|CSMain|cs_6_0|SHADER_HIZ_GENERATE_SLANG_CS_PATH"
 )
 
+# Per-pass variants of the scene geometry interface. The geometry stage and the
+# fragment stage of one pipeline MUST share the same defines, otherwise their
+# varying locations disagree; Resource::GetSceneShaders() enforces the pairing
+# on the C++ side.
 add_shader_target(shadow_shader
-    STAGES "${SHADER_SRC_DIR}/basic.slang|PSShadow|ps_6_0|SHADER_SHADOW_SLANG_PS_PATH"
+    STAGES
+        "${SHADER_SRC_DIR}/basic.slang|VSMain|vs_6_5|SHADER_BASIC_SLANG_VS_SHADOW_PATH"
+        "${SHADER_SRC_DIR}/basic.slang|PSShadow|ps_6_0|SHADER_SHADOW_SLANG_PS_PATH"
+        "${SHADER_SRC_DIR}/basic_mesh.slang|MeshMain|ms_6_5|SHADER_BASIC_SLANG_MESH_SHADOW_PATH"
+    EXTRA_ARGS -DZHLN_PASS_SHADOW
 )
 
 add_shader_target(cluster_bounds
@@ -199,7 +207,10 @@ add_shader_target(skinning_shader
 )
 
 add_shader_target(forward_shader
-    STAGES "${SHADER_SRC_DIR}/basic.slang|PSForward|ps_6_0|SHADER_FORWARD_SLANG_PS_PATH"
+    STAGES
+        "${SHADER_SRC_DIR}/basic.slang|VSMain|vs_6_5|SHADER_BASIC_SLANG_VS_FORWARD_PATH"
+        "${SHADER_SRC_DIR}/basic.slang|PSForward|ps_6_0|SHADER_FORWARD_SLANG_PS_PATH"
+        "${SHADER_SRC_DIR}/basic_mesh.slang|MeshMain|ms_6_5|SHADER_BASIC_SLANG_MESH_FORWARD_PATH"
     EXTRA_ARGS -DFORWARD_PASS
 )
 

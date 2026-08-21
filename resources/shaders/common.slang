@@ -457,20 +457,91 @@ public bool ConeBackfaceCulled(float3 coneApexWorld, float3 coneAxisWorld, float
 // NOTE the deliberately qualified name: several unrelated shaders that import
 // this module declare their own local `VSOutput`, and an exported symbol with
 // that name would make every one of them ambiguous. basic.slang aliases it.
+// The full set of values the geometry stage computes. This is a plain value
+// type, NOT an interface: it carries no semantics and is never rasterised, so
+// VSMain/MeshMain can fill it unconditionally and stay free of #ifdefs.
+public struct SceneGeometryVertex {
+    public float4 pos;
+    public float4 currClip;
+    public float4 prevClip;
+    public float3 normal;
+    public float4 tangent;
+    public float2 uv;
+    public float4 color;
+    public uint4 materialIndices;
+    public float4 baseColorFactor;
+    public float3 pbrFactors;
+    public uint alphaMode;
+    public float4 emissiveFactor;
+};
+
+// The actual varying interface, specialised per pass.
+//
+// A geometry stage output that no fragment stage reads is legal but wasteful,
+// and the validation layer reports every one of them ("SPIR-V Interface ...
+// no corresponding Input declared"). Since the three fragment shaders consume
+// three different subsets, one shared interface cannot match them all -- so
+// the interface itself is compiled per pass. The geometry stage and the
+// fragment stage of a pipeline MUST be compiled with the same defines;
+// Resource::GetSceneShaders() is what guarantees that pairing.
 public struct SceneGeometryOutput {
     public float4 pos : SV_Position;
+
+#if !defined(ZHLN_PASS_SHADOW) && !defined(FORWARD_PASS)
+    // G-buffer only: motion vectors and the normal/tangent frame.
     public float4 currClip : TEXCOORD0;
     public float4 prevClip : TEXCOORD1;
     public float3 normal : NORMAL;
     public float4 tangent : TANGENT;
+#endif
+
     public float2 uv : TEXCOORD2;
     public float4 color : COLOR;
     public nointerpolation uint4 materialIndices : TEXCOORD4;
     public nointerpolation float4 baseColorFactor : TEXCOORD5;
     public nointerpolation float3 pbrFactors : TEXCOORD6;
+
+#if !defined(FORWARD_PASS)
+    // Alpha-mask testing: PSMain and PSShadow, but not PSForward.
     public nointerpolation uint alphaMode : TEXCOORD7;
+#endif
+
+#if !defined(ZHLN_PASS_SHADOW)
+    // Emissive: PSMain and PSForward, but not the depth-only shadow pass.
     public nointerpolation float4 emissiveFactor : TEXCOORD8;
+#endif
 };
+
+/// Narrows the full vertex payload down to the varyings this pass actually
+/// rasterises. Stores to dropped members never happen, so the geometry stage
+/// pays nothing for values the fragment stage would have discarded.
+public SceneGeometryOutput PackGeometryOutput(SceneGeometryVertex v) {
+    SceneGeometryOutput o;
+    o.pos = v.pos;
+
+#if !defined(ZHLN_PASS_SHADOW) && !defined(FORWARD_PASS)
+    o.currClip = v.currClip;
+    o.prevClip = v.prevClip;
+    o.normal   = v.normal;
+    o.tangent  = v.tangent;
+#endif
+
+    o.uv              = v.uv;
+    o.color           = v.color;
+    o.materialIndices = v.materialIndices;
+    o.baseColorFactor = v.baseColorFactor;
+    o.pbrFactors      = v.pbrFactors;
+
+#if !defined(FORWARD_PASS)
+    o.alphaMode = v.alphaMode;
+#endif
+
+#if !defined(ZHLN_PASS_SHADOW)
+    o.emissiveFactor = v.emissiveFactor;
+#endif
+
+    return o;
+}
 
 /// Payload handed from the task (amplification) stage to the mesh stage.
 /// One entry per surviving meshlet in the workgroup.

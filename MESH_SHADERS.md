@@ -119,6 +119,33 @@ gets its own `shadowMeshPipeline` (depth-only, `PSShadow`).
 
 ## 4. Shaders
 
+### Per-pass interface variants
+
+`SceneGeometryOutput` is compiled once per pass. The three fragment shaders
+consume different subsets of it, and a geometry-stage output that no fragment
+stage reads is both wasted interpolation and a validation warning on every
+pipeline build, so one shared interface cannot serve all three:
+
+| Variant | Define | Varyings | Fragment stage |
+| --- | --- | --- | --- |
+| G-buffer | *(none)* | 11 | `PSMain` |
+| Shadow | `ZHLN_PASS_SHADOW` | 6 | `PSShadow` |
+| Forward | `FORWARD_PASS` | 6 | `PSForward` |
+
+The shadow and forward passes drop motion vectors and the normal/tangent frame
+(and one of `alphaMode` / `emissiveFactor`), halving their varying traffic.
+
+`VSMain`/`MeshMain` stay `#ifdef`-free: they fill a plain `SceneGeometryVertex`
+and call `PackGeometryOutput()`, which narrows it to the varyings the pass
+actually rasterises. Dropped stores never happen, so nothing is paid for values
+the fragment stage would discard.
+
+Mixing variants across a pipeline mismatches varying locations, so the pairing
+is centralised in `Resource::GetSceneShaders(SceneShaderVariant)` -- geometry
+and fragment stages always come out of one lookup.
+`tools/check_shader_interfaces.py` compiles all three variants and reflects the
+SPIR-V to prove every interface is exact; it needs slangc but no GPU.
+
 * `common.slang` — `GPUMeshlet`, the `InstanceData` meshlet tail, BDA accessors
   (`fetchMeshlet`, `fetchMeshletVertex`, `fetchMeshletTriangle`),
   `SphereFrustumVisible`, `MatrixMaxScale`, `ConeBackfaceCulled`, and the shared
@@ -294,9 +321,5 @@ were reproduced with `ZHLN_NO_MESH_SHADING=1` and `ZHLN_NO_GPU_CULLING=1`.
    engine had not been trapping shader OOB at runtime at all. `Context` now owns
    a persistent messenger.
 
-   It subscribes to **errors only** unless `ValidationMode::GPU` is selected,
-   which adds warnings. The first warning it surfaced is one the layer itself
-   marks "not invalid": the vertex stage writes `VSOutput::alphaMode`
-   (location 11) and `PSForward` does not read it. That is inherent to one
-   shared vertex stage feeding several fragment variants, so it is advisory
-   noise on every pipeline build rather than a defect.
+   It subscribes to errors **and** warnings. The first warning it surfaced was a
+   real (if benign) interface mismatch, fixed in turn -- see below.
