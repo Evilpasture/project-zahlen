@@ -6,6 +6,7 @@
 #include <Zahlen/Core/ControlFlow.hpp>
 #include <cstring>
 #include <new>
+#include <utility>
 
 namespace ZHLN::Physics {
 
@@ -124,12 +125,12 @@ void PhysicsWorld::Init(uint32_t inMaxBodies, JPH::PhysicsSystem* inSystem, JPH:
 
 void PhysicsWorld::Shutdown() {
     // Reclaim hot SoA raw memory blocks
-    DeallocateAligned(positions, sizeof(JPH::Real) * 4);
-    DeallocateAligned(prevPositions, sizeof(JPH::Real) * 4);
-    DeallocateAligned(rotations, sizeof(float) * 4);
-    DeallocateAligned(prevRotations, sizeof(float) * 4);
-    DeallocateAligned(linearVelocities, sizeof(float) * 4);
-    DeallocateAligned(angularVelocities, sizeof(float) * 4);
+    DeallocateAligned(std::exchange(positions, nullptr), sizeof(JPH::Real) * 4);
+    DeallocateAligned(std::exchange(prevPositions, nullptr), sizeof(JPH::Real) * 4);
+    DeallocateAligned(std::exchange(rotations, nullptr), sizeof(float) * 4);
+    DeallocateAligned(std::exchange(prevRotations, nullptr), sizeof(float) * 4);
+    DeallocateAligned(std::exchange(linearVelocities, nullptr), sizeof(float) * 4);
+    DeallocateAligned(std::exchange(angularVelocities, nullptr), sizeof(float) * 4);
 
     // Clearing JPH::Arrays deallocates all system heap blocks automatically
     bodyIDs.clear();

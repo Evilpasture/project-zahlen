@@ -17,6 +17,7 @@ def get_git_tracked_files(
     ignore_inlines=False,
     ignore_scripts=False,
     ignore_tests=False,
+    ignore_extras=False,
 ):
     extensions = {
         ".cpp",
@@ -51,6 +52,8 @@ def get_git_tracked_files(
         ignore_paths.add("scripts")
     if ignore_tests:
         ignore_paths.add("tests")
+    if ignore_extras:
+        ignore_paths.add("extras")
 
     # If the flag is set, remove .inl from the allowed extensions
     if ignore_inlines:
@@ -170,6 +173,7 @@ def run_project_manager(
     ignore_inlines=False,
     ignore_scripts=False,
     ignore_tests=False,
+    ignore_extras=False,
 ):
     tracked_files = get_git_tracked_files(
         target,
@@ -178,6 +182,7 @@ def run_project_manager(
         ignore_inlines=ignore_inlines,
         ignore_scripts=ignore_scripts,
         ignore_tests=ignore_tests,
+        ignore_extras=ignore_extras,
     )
     if not tracked_files:
         print(f"No matching files found at '{target}'.")
@@ -273,17 +278,23 @@ if __name__ == "__main__":
     parser.add_argument(
         "--ignore-extras",
         action="store_true",
-        help="Ignore tools, scripts, tests, and .inl files altogether.",
+        help="Ignore the extras/ directory.",
+    )
+    parser.add_argument(
+        "--ignore-all",
+        action="store_true",
+        help="Ignore tools, scripts, tests, extras, and .inl files altogether.",
     )
 
     args = parser.parse_args()
 
-    # If --ignore-extras is set, enable all standard ignore flags
-    if args.ignore_extras:
+    # If --ignore-all is set, enable all standard ignore flags
+    if args.ignore_all:
         args.ignore_tools = True
         args.ignore_scripts = True
         args.ignore_tests = True
         args.ignore_inlines = True
+        args.ignore_extras = True
 
     run_project_manager(
         args.target,
@@ -292,4 +303,5 @@ if __name__ == "__main__":
         ignore_inlines=args.ignore_inlines,
         ignore_scripts=args.ignore_scripts,
         ignore_tests=args.ignore_tests,
+        ignore_extras=args.ignore_extras,
     )

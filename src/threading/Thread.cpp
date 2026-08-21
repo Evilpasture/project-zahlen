@@ -4,11 +4,13 @@
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Threading/Thread.hpp>
+#include <algorithm>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 
 #if defined(__x86_64__) || defined(_M_X64)
 #include <emmintrin.h>
@@ -98,36 +100,52 @@ Fiber* Fiber::Create(size_t stackSize, FiberFunc func, void* arg) noexcept {
 #endif
 
     if (stackSize == 0) {
-        stackSize = static_cast<size_t>(1024 * 1024); // 1MB default
+        stackSize = kMinimumFiberStackSize;
     }
+    stackSize        = std::max(stackSize, kMinimumFiberStackSize);
     stackSize        = (stackSize + pageSize - 1) & ~(pageSize - 1);
     size_t totalSize = stackSize + (pageSize * 2); // Stack + 2 Guard Pages
 
     // 2. Allocate Stack
-    void* map = nullptr;
+    void*     map      = nullptr;
+    uintptr_t stackTop = 0;
 #if defined(_WIN32)
     map = VirtualAlloc(nullptr, totalSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (map == nullptr) {
+        return nullptr;
+    }
     DWORD old;
     VirtualProtect(map, pageSize, PAGE_READWRITE | PAGE_GUARD, &old);
+    stackTop = std::bit_cast<uintptr_t>(map) + totalSize;
 #else
     map = mmap(nullptr, totalSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    mprotect(map, pageSize, PROT_NONE); // Bottom guard page
+    if (map == MAP_FAILED) {
+        return nullptr;
+    }
+    const uintptr_t mapBase = std::bit_cast<uintptr_t>(map);
+    mprotect(map, pageSize, PROT_NONE);
+    mprotect(std::bit_cast<void*>(mapBase + pageSize + stackSize), pageSize, PROT_NONE);
+    stackTop = mapBase + pageSize + stackSize;
 #endif
 
-    // 3. Place Fiber struct at the very top of the allocated memory
-    uintptr_t endAddr    = std::bit_cast<uintptr_t>(map) + totalSize;
-    uintptr_t structAddr = (endAddr - sizeof(Fiber)) & ~15ULL;
-    auto*     fiber      = std::bit_cast<Fiber*>(structAddr);
+    // 3. Construct aligned metadata immediately below the usable stack top.
+    // Fiber is alignas(128); the previous 16-byte placement was undefined on
+    // ARM64 and could fault when its atomic running flag was accessed.
+    static_assert(std::has_single_bit(alignof(Fiber)));
+    const uintptr_t structAddr = (stackTop - sizeof(Fiber)) & ~(static_cast<uintptr_t>(alignof(Fiber)) - 1u);
+    auto* const     fiber      = std::construct_at(std::bit_cast<Fiber*>(structAddr));
 
     fiber->mapAddr    = map;
     fiber->mapSize    = totalSize;
     fiber->func       = func;
     fiber->arg        = arg;
+    fiber->caller     = nullptr;
     fiber->isFinished = false;
     fiber->isMain     = false;
+    fiber->isRunning.store(false, std::memory_order::relaxed);
 
 #if defined(_WIN32)
-    fiber->stackBase  = reinterpret_cast<void*>(endAddr);
+    fiber->stackBase  = std::bit_cast<void*>(stackTop);
     fiber->stackLimit = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(map) + pageSize);
 #endif
 
@@ -186,10 +204,13 @@ void Fiber::Destroy(Fiber* fiber) noexcept {
     if ((fiber == nullptr) || fiber->isMain) {
         return;
     }
+    void* const  mapAddr = fiber->mapAddr;
+    const size_t mapSize = fiber->mapSize;
+    std::destroy_at(fiber);
 #if defined(_WIN32)
-    VirtualFree(fiber->mapAddr, 0, MEM_RELEASE);
+    VirtualFree(mapAddr, 0, MEM_RELEASE);
 #else
-    munmap(fiber->mapAddr, fiber->mapSize);
+    munmap(mapAddr, mapSize);
 #endif
 }
 

@@ -23,16 +23,11 @@ foreach(TEST_SRC IN LISTS TEST_SOURCES)
     target_link_libraries(${TARGET_NAME} PRIVATE
         zahlen_engine
     )
-
     target_include_directories(${TARGET_NAME} PRIVATE
         ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_SOURCE_DIR}/src
         ${PROJECT_SOURCE_DIR}/tests
     )
-
-    if(NOT MSVC)
-        target_compile_options(${TARGET_NAME} PRIVATE -fno-exceptions -fno-rtti)
-    endif()
 
     # Applies the required reflection flags (-freflection / custom libc++) configured in the root
     zahlen_enable_reflection(${TARGET_NAME})
@@ -74,6 +69,12 @@ foreach(TEST_SRC IN LISTS TEST_SOURCES)
         )
     endif()
 endforeach()
+
+# Optional CPU tests live with the extras toolkit and disappear completely when
+# ZHLN_BUILD_EXTRAS is disabled.
+if(ZHLN_BUILD_EXTRAS AND TARGET zahlen_extras)
+    add_subdirectory(extras)
+endif()
 
 # 5. Local GPU Render Test Suite (Off by default for headless CI/CD)
 option(ZHLN_BUILD_GPU_TESTS "Build GPU/Vulkan rendering tests (local hardware required)" OFF)

@@ -53,6 +53,8 @@ class ZHLN_API SystemGraph {
     SystemGraph& operator=(SystemGraph&&) noexcept = default;
 
     void AddSystem(SystemInfo info);
+    /** Inserts an optional subsystem before a named phase; returns false on duplicate/missing anchor. */
+    bool AddSystemBefore(SystemInfo info, std::string_view beforeSystem);
     void Compile();
     void Execute(ZHLN::Engine& engine, float dt);
 

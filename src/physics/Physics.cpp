@@ -159,6 +159,10 @@ class JobSystemFiber final: public JPH::JobSystemWithBarrier {
 
     ~JobSystemFiber() override = default;
 
+    void WaitIdle() noexcept {
+        ZHLN::TaskSystem::Wait(&mInFlight);
+    }
+
     [[nodiscard]] auto GetMaxConcurrency() const -> int override {
         return static_cast<int>(ZHLN::TaskSystem::GetWorkerCount());
     }
@@ -177,7 +181,7 @@ class JobSystemFiber final: public JPH::JobSystemWithBarrier {
         inJob->AddRef();
 
         ZHLN::TaskSystem::Task task = {.func = JoltJobThunk, .arg = inJob};
-        ZHLN::TaskSystem::Dispatch(std::span<const ZHLN::TaskSystem::Task>(&task, 1), nullptr);
+        ZHLN::TaskSystem::Dispatch(std::span<const ZHLN::TaskSystem::Task>(&task, 1), &mInFlight);
     }
 
     void QueueJobs(JPH::JobSystem::Job** inJobs, uint inNumJobs) override {
@@ -192,7 +196,7 @@ class JobSystemFiber final: public JPH::JobSystemWithBarrier {
             tasks[i] = {.func = JoltJobThunk, .arg = inJobs[i]};
         }
 
-        ZHLN::TaskSystem::Dispatch(std::span<const ZHLN::TaskSystem::Task>(tasks, inNumJobs), nullptr);
+        ZHLN::TaskSystem::Dispatch(std::span<const ZHLN::TaskSystem::Task>(tasks, inNumJobs), &mInFlight);
     }
 
     void FreeJob(JPH::JobSystem::Job* inJob) override {
@@ -201,7 +205,8 @@ class JobSystemFiber final: public JPH::JobSystemWithBarrier {
 
   private:
     using AvailableJobs = JPH::FixedSizeFreeList<JPH::JobSystem::Job>;
-    AvailableJobs mJobs;
+    ZHLN::TaskSystem::Counter mInFlight;
+    AvailableJobs             mJobs;
 };
 } // namespace
 
@@ -246,6 +251,19 @@ PhysicsContext::PhysicsContext(const PhysicsConfig& cfg): _impl(std::make_unique
 }
 
 PhysicsContext::~PhysicsContext() {
+    _impl->jobSystem.WaitIdle();
+    // CharacterVirtual instances retain listener/system pointers. Release them
+    // while the listeners, PhysicsSystem, and PhysicsWorld backing storage are
+    // still alive; allowing member destruction to release them after
+    // world.Shutdown() corrupts teardown state and faults on Apple ARM64.
+    for (auto& character: _impl->characterMap) {
+        if (character != nullptr) {
+            character->SetListener(nullptr);
+        }
+    }
+    _impl->activeCharacters.clear();
+    _impl->characterMap.clear();
+    _impl->physicsSystem.SetContactListener(nullptr);
     _impl->world.Shutdown();
 }
 
@@ -271,6 +289,10 @@ void PhysicsContext::Step(float deltaTime) {
     world.isStepping.store(true, std::memory_order::release);
 
     _impl->physicsSystem.Update(deltaTime, 2, _impl->tempAllocator.get(), &_impl->jobSystem);
+    // Jolt barriers should drain their jobs before returning, but keep an
+    // explicit scheduler-level fence so PhysicsContext teardown can never race
+    // a queued Job::Execute/Release on another fiber.
+    _impl->jobSystem.WaitIdle();
 
     for (auto* character: _impl->activeCharacters) {
         // Disable floor-sticking when character has upward velocity (jumping)

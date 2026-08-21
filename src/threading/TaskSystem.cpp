@@ -56,6 +56,13 @@ struct WorkQueue {
         quit = true;
         cv.notify_all();
     }
+
+    void Reset() {
+        std::lock_guard    lock(mtx);
+        std::queue<Fiber*> empty;
+        fibers.swap(empty);
+        quit = false;
+    }
 };
 
 // --- Thread-Local Cache Optimization ---
@@ -144,8 +151,14 @@ static void WorkerMain(uint32_t index) {
 }
 
 void Init(uint32_t numThreads, uint32_t numFibers, size_t stackSize) {
+    if (!s_threads.empty() || !s_fiberPool.empty()) {
+        return;
+    }
     Platform::SetHighPriority();
     Fiber::InitMainThread();
+    s_readyQueue.Reset();
+    s_freeQueue.Reset();
+    t_localFiber = nullptr;
     if (numThreads == 0) {
         numThreads = std::thread::hardware_concurrency();
         if (numThreads == 0) {
@@ -195,6 +208,11 @@ void Shutdown() {
         Fiber::Destroy(f);
     }
     s_fiberPool.clear();
+    s_fiberData.clear();
+    s_readyQueue.Reset();
+    s_freeQueue.Reset();
+    t_localFiber  = nullptr;
+    s_workerCount = 0;
 }
 
 void Dispatch(std::span<const Task> tasks, Counter* counter) {
@@ -206,11 +224,26 @@ void Dispatch(std::span<const Task> tasks, Counter* counter) {
         counter->value.fetch_add(tasks.size(), std::memory_order::relaxed);
     }
 
+    Fiber*     currentFiber   = Fiber::GetCurrent();
+    const bool nestedDispatch = currentFiber != nullptr && !currentFiber->isMain;
+
     for (const auto& task: tasks) {
-        // Pull allocation-free from the single-element local cache first
+        // Parent task fibers must not block waiting for child fibers, but root
+        // dispatch preserves asynchronous queue semantics. Running root jobs
+        // inline can re-enter external job systems (notably Jolt) while they are
+        // still constructing dependency graphs and invalidate queued jobs.
         Fiber* f = PopLocalFiber();
         if (f == nullptr) {
-            f = s_freeQueue.PopOrWait();
+            f = nestedDispatch ? s_freeQueue.TryPop() : s_freeQueue.PopOrWait();
+        }
+        if (f == nullptr) {
+            if (task.func != nullptr) {
+                task.func(task.arg);
+            }
+            if (counter != nullptr) {
+                counter->value.fetch_sub(1, std::memory_order::release);
+            }
+            continue;
         }
 
         auto* data    = static_cast<FiberData*>(f->arg);

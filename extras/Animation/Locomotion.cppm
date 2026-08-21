@@ -13,10 +13,12 @@ module;
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
+#include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Types.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
+#include <algorithm>
 #include <cmath>
 #include <numbers>
 
@@ -25,6 +27,136 @@ export module ZHLN.Locomotion;
 export namespace ZHLN::Locomotion {
 
 inline constexpr float kTwoPi = 2.0f * std::numbers::pi_v<float>;
+
+struct CharacterBoundsEstimate {
+    JPH::Vec3 min   = JPH::Vec3::sZero();
+    JPH::Vec3 max   = JPH::Vec3::sZero();
+    bool      valid = false;
+
+    [[nodiscard]] auto Size() const noexcept -> JPH::Vec3 {
+        return valid ? max - min : JPH::Vec3::sZero();
+    }
+};
+
+struct DualShapeFitOptions {
+    float horizontalPadding   = 1.08f;
+    float verticalPadding     = 1.06f;
+    float lateralCoverage     = 0.68f;
+    float lifterToBumperRatio = 0.78f;
+    float lifterToHeightRatio = 0.24f;
+    float minimumBumperAspect = 1.15f;
+    float minimumBumperRadius = 0.10f;
+};
+
+namespace Detail {
+
+[[nodiscard]] inline auto GetNodeModelTransform(const ModelPrefab& prefab, int32_t nodeIndex) noexcept -> JPH::Mat44 {
+    if (nodeIndex < 0 || nodeIndex >= static_cast<int32_t>(prefab.nodes.size())) {
+        return JPH::Mat44::sIdentity();
+    }
+
+    JPH::Mat44 transform = prefab.nodes[static_cast<size_t>(nodeIndex)].localTransform;
+    int32_t    parent    = prefab.nodes[static_cast<size_t>(nodeIndex)].parentIndex;
+    for (size_t depth = 0; depth < prefab.nodes.size() && parent >= 0 && parent < static_cast<int32_t>(prefab.nodes.size()); ++depth) {
+        transform = prefab.nodes[static_cast<size_t>(parent)].localTransform * transform;
+        parent    = prefab.nodes[static_cast<size_t>(parent)].parentIndex;
+    }
+    return transform;
+}
+
+} // namespace Detail
+
+/** Estimates the imported visual envelope from every transformed mesh AABB. */
+[[nodiscard]] inline auto
+    EstimateCharacterBounds(const ModelPrefab& prefab, JPH::Vec3Arg modelScale = JPH::Vec3::sReplicate(1.0f)) noexcept -> CharacterBoundsEstimate {
+    CharacterBoundsEstimate estimate;
+    const JPH::Mat44        scaleTransform = JPH::Mat44::sScale(modelScale);
+
+    auto expand = [&](JPH::Vec3Arg point) {
+        if (!std::isfinite(point.GetX()) || !std::isfinite(point.GetY()) || !std::isfinite(point.GetZ())) {
+            return;
+        }
+        if (!estimate.valid) {
+            estimate.min   = point;
+            estimate.max   = point;
+            estimate.valid = true;
+            return;
+        }
+        estimate.min =
+            JPH::Vec3(std::min(estimate.min.GetX(), point.GetX()), std::min(estimate.min.GetY(), point.GetY()), std::min(estimate.min.GetZ(), point.GetZ()));
+        estimate.max =
+            JPH::Vec3(std::max(estimate.max.GetX(), point.GetX()), std::max(estimate.max.GetY(), point.GetY()), std::max(estimate.max.GetZ(), point.GetZ()));
+    };
+
+    for (const ModelPart& part: prefab.parts) {
+        if (part.nodeIndex < 0 || part.nodeIndex >= static_cast<int32_t>(prefab.nodes.size())) {
+            continue;
+        }
+        const JPH::Mat44 transform = scaleTransform * Detail::GetNodeModelTransform(prefab, part.nodeIndex) * part.localTransform;
+        const JPH::Vec3  localMin(part.localMin[0], part.localMin[1], part.localMin[2]);
+        const JPH::Vec3  localMax(part.localMax[0], part.localMax[1], part.localMax[2]);
+        for (uint32_t corner = 0; corner < 8; ++corner) {
+            const JPH::Vec3 localPoint(
+                (corner & 1u) != 0u ? localMax.GetX() : localMin.GetX(), (corner & 2u) != 0u ? localMax.GetY() : localMin.GetY(),
+                (corner & 4u) != 0u ? localMax.GetZ() : localMin.GetZ()
+            );
+            expand(transform.Multiply3x3(localPoint) + transform.GetTranslation());
+        }
+    }
+    return estimate;
+}
+
+/** Fits the Overgrowth-style lifter and bumper to a visual envelope. */
+[[nodiscard]] inline auto
+    FitDualShapeToBounds(const CharacterBoundsEstimate& bounds, const Physics::DualShapeConfig& fallback = {}, const DualShapeFitOptions& options = {}) noexcept
+    -> Physics::DualShapeConfig {
+    if (!bounds.valid) {
+        return fallback;
+    }
+
+    const JPH::Vec3 size = bounds.Size();
+    if (size.GetX() <= 0.0f || size.GetY() <= 0.0f || size.GetZ() <= 0.0f) {
+        return fallback;
+    }
+
+    const float maxAbsX = std::max(std::abs(bounds.min.GetX()), std::abs(bounds.max.GetX()));
+    const float maxAbsZ = std::max(std::abs(bounds.min.GetZ()), std::abs(bounds.max.GetZ()));
+    // The potential X envelope includes arms, weapons, and other appendages.
+    // A CharacterVirtual bumper represents the torso, so retain all depth but
+    // use a configurable fraction of lateral reach rather than swallowing the
+    // complete animation silhouette.
+    const float horizontalExtent = std::max(maxAbsX * std::clamp(options.lateralCoverage, 0.1f, 1.0f), maxAbsZ);
+    const float targetTop        = std::max(bounds.max.GetY(), size.GetY()) * std::max(options.verticalPadding, 1.0f);
+    if (!std::isfinite(horizontalExtent) || !std::isfinite(targetTop) || horizontalExtent <= 0.0f || targetTop <= 0.0f) {
+        return fallback;
+    }
+
+    Physics::DualShapeConfig result;
+    result.bumperRadiusXZ     = std::max(horizontalExtent * std::max(options.horizontalPadding, 1.0f), std::max(options.minimumBumperRadius, 0.01f));
+    const float maximumLifter = result.bumperRadiusXZ * 0.95f;
+    result.lifterRadius       = std::clamp(
+        std::min(
+            result.bumperRadiusXZ * std::clamp(options.lifterToBumperRatio, 0.1f, 0.95f), targetTop * std::clamp(options.lifterToHeightRatio, 0.05f, 0.45f)
+        ),
+        std::max(options.minimumBumperRadius * 0.5f, 0.01f), maximumLifter
+    );
+
+    const float cutRatio       = std::clamp(result.lifterRadius / result.bumperRadiusXZ, 0.0f, 0.999f);
+    const float cutScale       = std::sqrt(std::max(0.0f, 1.0f - cutRatio * cutRatio));
+    const float fittedRadiusY  = (targetTop - result.lifterRadius) / std::max(1.0f + cutScale, 0.001f);
+    const float minimumAspectY = result.bumperRadiusXZ * std::max(options.minimumBumperAspect, 1.01f);
+    result.bumperRadiusY       = std::max(minimumAspectY, fittedRadiusY);
+    return result;
+}
+
+[[nodiscard]] inline auto EstimateDualShapeConfig(
+    const ModelPrefab&              prefab,
+    JPH::Vec3Arg                    modelScale = JPH::Vec3::sReplicate(1.0f),
+    const Physics::DualShapeConfig& fallback   = {},
+    const DualShapeFitOptions&      options    = {}
+) noexcept -> Physics::DualShapeConfig {
+    return FitDualShapeToBounds(EstimateCharacterBounds(prefab, modelScale), fallback, options);
+}
 
 struct EllipsoidDesc {
     float radiusXZ = 0.50f;
@@ -106,26 +238,18 @@ inline auto SpawnCharacter(
     auto& reg = engine.GetRegistry();
     auto& pc  = engine.GetPhysicsContext();
 
-    const Entity player = reg.Create();
-    reg.Add(player, Components::PlayerTagComponent {});
-    reg.Add(player, Components::NameComponent {.name = String64("Player_VirtualCharacter")});
-    reg.Add(player, Components::TransformComponent {.position = spawnPosition});
-    reg.Add(
-        player,
-        Components::WorldTransformComponent {
-            .world = Math::CreateTransform(spawnPosition, JPH::Quat::sIdentity()), .previous = Math::CreateTransform(spawnPosition, JPH::Quat::sIdentity())
+    // Create physics first, then publish the complete gameplay entity in one
+    // atomic ECS insertion. No system can observe a partially assembled player.
+    const Entity     charPhys = pc.CreateCharacter(JPH::RVec3(spawnPosition), config);
+    const JPH::Mat44 world    = Math::CreateTransform(spawnPosition, JPH::Quat::sIdentity());
+    const Entity     player   = reg.Create(
+        Components::PlayerTagComponent {}, Components::NameComponent {.name = String64("Player_VirtualCharacter")},
+        Components::TransformComponent {.position = spawnPosition}, Components::WorldTransformComponent {.world = world, .previous = world},
+        Components::InputComponent {}, Components::MovementComponent {.speed = speed, .jumpForce = jumpForce},
+        Components::PhysicsComponent {.physicsHandle = charPhys},
+        Components::PhysicsStateComponent {
+            .currPosition = spawnPosition, .prevPosition = spawnPosition, .currRotation = JPH::Quat::sIdentity(), .prevRotation = JPH::Quat::sIdentity()
         }
-    );
-    reg.Add(player, Components::InputComponent {});
-    reg.Add(player, Components::MovementComponent {.speed = speed, .jumpForce = jumpForce});
-
-    // Create the Jolt CharacterVirtual with native Dual-Shape compound shape
-    const Entity charPhys = pc.CreateCharacter(JPH::RVec3(spawnPosition), config);
-    reg.Add(player, Components::PhysicsComponent {.physicsHandle = charPhys});
-    reg.Add(
-        player, Components::PhysicsStateComponent {
-                    .currPosition = spawnPosition, .prevPosition = spawnPosition, .currRotation = JPH::Quat::sIdentity(), .prevRotation = JPH::Quat::sIdentity()
-                }
     );
 
     // Configure third-person follow camera and strip FreeCam
@@ -133,21 +257,22 @@ inline auto SpawnCharacter(
         reg.Remove<Components::FreeCamTagComponent>(camEnt);
 
         reg.Add(
-            camEnt, Components::TargetCameraComponent {
-                        .target            = player,
-                        .distance          = 5.50f,
-                        .targetDistance    = 5.50f,
-                        .yaw               = 90.0f,
-                        .pitch             = -14.0f,
-                        .targetOffset      = JPH::Vec3(0.0f, 0.80f, 0.0f),
-                        .stiffness         = 24.0f,
-                        .vignetteIntensity = 1.10f,
-                        .vignettePower     = 1.50f,
-                        .fov               = 52.0f,
-                        .targetFov         = 52.0f
-                    }
+            camEnt,
+            Components::TargetCameraComponent {
+                .target            = player,
+                .distance          = 5.50f,
+                .targetDistance    = 5.50f,
+                .yaw               = 90.0f,
+                .pitch             = -14.0f,
+                .targetOffset      = JPH::Vec3(0.0f, 0.80f, 0.0f),
+                .stiffness         = 24.0f,
+                .vignetteIntensity = 1.10f,
+                .vignettePower     = 1.50f,
+                .fov               = 52.0f,
+                .targetFov         = 52.0f
+            },
+            Components::InputComponent {}
         );
-        reg.Add(camEnt, Components::InputComponent {});
     }
 
     return player;
@@ -183,7 +308,8 @@ inline auto
     // 3. Draw Velocity Vector
     const auto* move = reg.Get<Components::MovementComponent>(playerEntity);
     if (move != nullptr) {
-        const JPH::Vec3 vel(move->inputX * move->speed, move->currentYVel, move->inputZ * move->speed);
+        const float     speed = move->speed * (move->isSprinting ? std::max(move->sprintMultiplier, 1.0f) : 1.0f);
+        const JPH::Vec3 vel(move->inputX * speed, move->currentYVel, move->inputZ * speed);
         if (vel.LengthSq() > 0.01f) {
             rc.DrawLine(finalBumperCenter, finalBumperCenter + (vel * 0.25f), palette.colorVelocityDebug);
         }

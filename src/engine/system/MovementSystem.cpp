@@ -8,6 +8,7 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
+#include <algorithm>
 #include <cmath>
 
 namespace ZHLN::Tests {
@@ -111,8 +112,10 @@ void MovementSystem(Engine& engine, float dt) {
             }
 
             // 2. Feed velocity into Jolt CharacterVirtual
-            const float     speedMultiplier = (move.jumpDelayTimer > 0.0f) ? 0.25f : 1.0f;
-            const JPH::Vec3 velocity        = {move.inputX * move.speed * speedMultiplier, move.currentYVel, move.inputZ * move.speed * speedMultiplier};
+            const float     jumpRecoveryMultiplier = (move.jumpDelayTimer > 0.0f) ? 0.25f : 1.0f;
+            const float     sprintMultiplier       = move.isSprinting ? std::max(move.sprintMultiplier, 1.0f) : 1.0f;
+            const float     movementSpeed          = move.speed * jumpRecoveryMultiplier * sprintMultiplier;
+            const JPH::Vec3 velocity               = {move.inputX * movementSpeed, move.currentYVel, move.inputZ * movementSpeed};
 
             pc.SetCharacterVelocity(phys->physicsHandle, velocity);
 

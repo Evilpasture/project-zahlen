@@ -15,7 +15,7 @@
 struct RenderPipelinesTestSuite {
     RenderPipelinesTestSuite() {
         ZHLN::Fiber::InitMainThread();
-        ZHLN::TaskSystem::Init(2, 32, 131072);
+        ZHLN::TaskSystem::Init(2, 32, ZHLN::kMinimumFiberStackSize);
     }
 
     ~RenderPipelinesTestSuite() {

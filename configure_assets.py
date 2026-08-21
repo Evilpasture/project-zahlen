@@ -382,15 +382,19 @@ rule zpak
             ninja_content += f"\nbuild {escape_ninja(output_glb)}: zglb {escape_ninja(meta_path)} | {escaped_deps} || {escaped_zcook}\n"
             glb_targets.append(output_glb)
 
-    # Process Raw Loose Textures
+    # Process raw loose textures and reference GLBs.
     assets_root = os.path.join(source_dir, "resources", "assets")
     if os.path.exists(assets_root):
         raw_textures = []
+        raw_models = []
         for root, dirs, files in os.walk(assets_root):
             dirs[:] = [d for d in dirs if d.lower() not in ["build", "cmake", ".git"]]
             for file in files:
+                input_path = os.path.join(root, file).replace("\\", "/")
                 if file.lower().endswith((".png", ".jpg", ".jpeg", ".tga")):
-                    raw_textures.append(os.path.join(root, file).replace("\\", "/"))
+                    raw_textures.append(input_path)
+                elif file.lower().endswith(".glb"):
+                    raw_models.append(input_path)
 
         for input_path in sorted(raw_textures):
             rel_path = os.path.relpath(input_path, assets_root).replace("\\", "/")
@@ -399,6 +403,13 @@ rule zpak
             ninja_content += f"build {escape_ninja(output_ztex)}: ztex {escape_ninja(input_path)} || {escaped_zcook}\n"
             compiled_targets.append(output_ztex)
             manifest_entries.append(f"{rel_path}={output_ztex}")
+
+        # GLBs are already runtime-ready containers. Pack them byte-for-byte so
+        # samples and games can load known-good reference rigs by virtual path.
+        for input_path in sorted(raw_models):
+            rel_path = os.path.relpath(input_path, assets_root).replace("\\", "/")
+            compiled_targets.append(input_path)
+            manifest_entries.append(f"{rel_path}={input_path}")
 
     # Write Manifest
     build_dir = os.path.dirname(output_file)

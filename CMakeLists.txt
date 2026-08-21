@@ -80,6 +80,23 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.venv")
 endif()
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+# Enforce the one-way dependency boundary: optional extras may consume core,
+# while src/, include/, and modules/ must never consume extras.
+execute_process(
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_core_extras_boundary.py"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    RESULT_VARIABLE ZHLN_CORE_EXTRAS_BOUNDARY_RESULT
+    OUTPUT_VARIABLE ZHLN_CORE_EXTRAS_BOUNDARY_OUTPUT
+    ERROR_VARIABLE ZHLN_CORE_EXTRAS_BOUNDARY_ERROR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_STRIP_TRAILING_WHITESPACE
+)
+if(NOT ZHLN_CORE_EXTRAS_BOUNDARY_RESULT EQUAL 0)
+    message(FATAL_ERROR "${ZHLN_CORE_EXTRAS_BOUNDARY_ERROR}")
+endif()
+message(STATUS "${ZHLN_CORE_EXTRAS_BOUNDARY_OUTPUT}")
+
 set(ZHLN_TRANSPILER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/tools/transpile_reflection.py")
 
 function(zahlen_transpile_sources OUT_SOURCES_VAR)
@@ -657,13 +674,14 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
 endif()
 
 if(NOT MSVC)
-    target_compile_options(zahlen_engine PRIVATE
-        $<$<AND:$<CXX_COMPILER_ID:GNU>,$<COMPILE_LANGUAGE:CXX>>:${GCC_ONLY_FLAGS}>
-        $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic>
-    )
-
-    target_compile_options(zahlen PRIVATE
-        $<$<AND:$<CXX_COMPILER_ID:GNU>,$<COMPILE_LANGUAGE:CXX>>:-fno-exceptions -fno-rtti>
+    # Module producers and every transitive consumer must agree on these ABI
+    # modes. Publish them from the engine target so core/extras PCMs, tools,
+    # samples, and tests cannot drift into incompatible configurations.
+    target_compile_options(zahlen_engine
+        PUBLIC $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>
+        PRIVATE
+            $<$<AND:$<CXX_COMPILER_ID:GNU>,$<COMPILE_LANGUAGE:CXX>>:${GCC_ONLY_FLAGS}>
+            $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic>
     )
     if(WIN32)
         target_link_options(zahlen_engine PRIVATE -Xlinker /subsystem:console)

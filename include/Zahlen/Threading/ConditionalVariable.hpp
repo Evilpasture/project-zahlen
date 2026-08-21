@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Core/Atomic.hpp>
+#include <Zahlen/Threading/Mutex.hpp>
 #include <type_traits>
 
 namespace ZHLN {
@@ -37,8 +37,8 @@ class ConditionalVariable {
     void NotifyAll() noexcept;
 
   private:
-    // Trivial uninitialized atomic state to guarantee standard-layout / triviality.
-    // 0 = No active waiters, 1 = Active waiters present
+    // Raw zero means no active waiters. Keep the byte trivial for C/FFI layout;
+    // C++ owners must value-initialize and foreign storage must be zeroed.
     ZHLN::Atomic<uint8_t> _bits;
 };
 

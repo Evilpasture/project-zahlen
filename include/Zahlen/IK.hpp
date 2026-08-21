@@ -20,13 +20,18 @@ struct TwoBoneIKSolverInput {
     JPH::Vec3 poleVector; // Direction hint for middle joint (elbow/knee)
     float     upperLength;
     float     lowerLength;
+    float     maxExtension = 0.9999f; // < 1 keeps the middle joint from locking straight.
 };
 
 struct TwoBoneIKSolverOutput {
     JPH::Vec3 midPosition;
+    JPH::Vec3 endPosition;
     JPH::Vec3 upperDirection;
     JPH::Vec3 lowerDirection;
-    bool      valid = false;
+    float     requestedDistance = 0.0f;
+    float     solvedDistance    = 0.0f;
+    bool      reachClamped      = false;
+    bool      valid             = false;
 };
 
 /**
@@ -36,22 +41,27 @@ struct TwoBoneIKSolverOutput {
 inline TwoBoneIKSolverOutput SolveTwoBoneIK(const TwoBoneIKSolverInput& input) noexcept {
     TwoBoneIKSolverOutput out;
 
-    JPH::Vec3 axis = input.targetPosition - input.upperPosition;
-    float     d    = axis.Length();
+    const JPH::Vec3 axis              = input.targetPosition - input.upperPosition;
+    const float     requestedDistance = axis.Length();
 
-    if (d < 1e-5f) {
+    const float l1 = input.upperLength;
+    const float l2 = input.lowerLength;
+    if (requestedDistance < 1.0e-5f || l1 <= 1.0e-5f || l2 <= 1.0e-5f) {
         return out;
     }
 
-    float l1 = input.upperLength;
-    float l2 = input.lowerLength;
-
-    // Enforce triangle inequality bounds to prevent imaginary numbers in acos
-    float maxD = (l1 + l2) * 0.9999f;
-    float minD = std::abs(l1 - l2) + 1e-4f;
-    d          = std::clamp(d, minD, maxD);
-
-    JPH::Vec3 normAxis = axis / axis.Length();
+    // Enforce triangle inequality and a configurable extension limit. Crucially,
+    // solve and publish a constrained end position instead of aiming the lower
+    // segment at the original unreachable target (which visually stretches it).
+    const float     minD      = std::abs(l1 - l2) + 1.0e-4f;
+    const float     extension = std::clamp(input.maxExtension, 0.50f, 0.9999f);
+    const float     maxD      = std::max(minD, (l1 + l2) * extension);
+    const float     d         = std::clamp(requestedDistance, minD, maxD);
+    const JPH::Vec3 normAxis  = axis / requestedDistance;
+    out.endPosition           = input.upperPosition + normAxis * d;
+    out.requestedDistance     = requestedDistance;
+    out.solvedDistance        = d;
+    out.reachClamped          = std::abs(requestedDistance - d) > 1.0e-5f;
 
     // Law of Cosines for upper joint angle
     float cosUpper   = std::clamp((l1 * l1 + d * d - l2 * l2) / (2.0f * l1 * d), -1.0f, 1.0f);
@@ -69,7 +79,7 @@ inline TwoBoneIKSolverOutput SolveTwoBoneIK(const TwoBoneIKSolverInput& input) n
     out.midPosition = input.upperPosition + (normAxis * std::cos(angleUpper) * l1) + (perp * std::sin(angleUpper) * l1);
 
     JPH::Vec3 upperVec = out.midPosition - input.upperPosition;
-    JPH::Vec3 lowerVec = input.targetPosition - out.midPosition;
+    JPH::Vec3 lowerVec = out.endPosition - out.midPosition;
 
     if (upperVec.LengthSq() > 1e-6f && lowerVec.LengthSq() > 1e-6f) {
         out.upperDirection = upperVec.Normalized();

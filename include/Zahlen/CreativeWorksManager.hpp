@@ -3,12 +3,12 @@
 
 #pragma once
 
-#include <cstdint>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/Span.hpp>
 #include <Zahlen/Core/String.hpp>
-#include <string_view>
 #include <Zahlen/Threading/Mutex.hpp>
+#include <cstdint>
+#include <string_view>
 
 namespace ZHLN {
 
@@ -169,14 +169,14 @@ class CreativeWorksManager {
     size_t              _archiveCapacity = 0;
 
     HashMap<uint64_t, CatalogEntry> _catalog;
-    Mutex                           _catalogMutex;
+    Mutex                           _catalogMutex {};
 
     // Prefab Cache tracking
     HashMap<uint64_t, ModelPrefab*> _prefabCache;
     ModelPrefab**                   _prefabsMemory   = nullptr;
     size_t                          _prefabsCount    = 0;
     size_t                          _prefabsCapacity = 0;
-    Mutex                           _prefabMutex;
+    Mutex                           _prefabMutex {};
 };
 
 } // namespace ZHLN

@@ -3,6 +3,7 @@
 
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
+#include <algorithm>
 #include <array>
 #include <span>
 #include <utility>
@@ -26,6 +27,23 @@ struct SystemGraph::ExecutionContext {
 
 void SystemGraph::AddSystem(SystemInfo info) {
     _nodes.push_back({.info = std::move(info), .dependents = {}, .initialDependencyCount = 0});
+}
+
+bool SystemGraph::AddSystemBefore(SystemInfo info, std::string_view beforeSystem) {
+    if (info.name == nullptr || beforeSystem.empty()) {
+        return false;
+    }
+    for (const Node& node: _nodes) {
+        if (std::string_view(node.info.name) == std::string_view(info.name)) {
+            return false;
+        }
+    }
+    const auto anchor = std::ranges::find_if(_nodes, [&](const Node& node) { return std::string_view(node.info.name) == beforeSystem; });
+    if (anchor == _nodes.end()) {
+        return false;
+    }
+    _nodes.insert(anchor, Node {.info = std::move(info), .dependents = {}, .initialDependencyCount = 0});
+    return true;
 }
 
 [[nodiscard]] bool SystemGraph::HasConflict(const SystemInfo& systemA, const SystemInfo& systemB) noexcept {

@@ -7,6 +7,10 @@
 #include <cstddef>
 namespace ZHLN {
 
+// Jolt collision jobs and modern libc++ frames can exceed 128 KiB on ARM64.
+// Keep enough usable stack for physics callbacks plus the fiber trampoline.
+inline constexpr size_t kMinimumFiberStackSize = 512u * 1024u;
+
 using FiberFunc = void (*)(void*);
 
 /**

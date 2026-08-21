@@ -77,7 +77,7 @@ enum class CoreContainersTestError : uint32_t {
 struct ContainersTestSuite {
     ContainersTestSuite() {
         ZHLN::Fiber::InitMainThread();
-        ZHLN::TaskSystem::Init(2, 32, 131072);
+        ZHLN::TaskSystem::Init(2, 32, ZHLN::kMinimumFiberStackSize);
     }
 
     ~ContainersTestSuite() {

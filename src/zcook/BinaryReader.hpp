@@ -4,19 +4,17 @@
 
 #pragma once
 #include "IR.hpp"
+#include <expected>
 #include <fstream>
-#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Compiler {
 
 class BinaryReader {
   public:
-    explicit BinaryReader(const std::string& filepath): m_stream(filepath, std::ios::binary) {
-        if (!m_stream.is_open()) {
-            throw std::runtime_error("Failed to open binary metadata file: " + filepath);
-        }
+    explicit BinaryReader(const std::string& filepath): m_stream(filepath, std::ios::binary), m_path(filepath) {
     }
 
     std::string ReadString() {
@@ -51,17 +49,21 @@ class BinaryReader {
         return vec;
     }
 
-    IRManifest Parse() {
+    std::expected<IRManifest, std::string> Parse() {
+        if (!m_stream.is_open()) {
+            return std::unexpected("Failed to open binary metadata file: " + m_path);
+        }
+
         // Validate Header Magic
-        char magic[4];
+        char magic[4] {};
         m_stream.read(magic, 4);
-        if (std::string(magic, 4) != "ZMET") {
-            throw std::runtime_error("Invalid file magic. Expected 'ZMET'");
+        if (std::string_view(magic, 4) != "ZMET") {
+            return std::unexpected("Invalid file magic. Expected 'ZMET'");
         }
 
         uint32_t version = Read<uint32_t>();
         if (version != 1) {
-            throw std::runtime_error("Unsupported metadata version!");
+            return std::unexpected("Unsupported metadata version: " + std::to_string(version));
         }
 
         IRManifest manifest;
@@ -230,11 +232,15 @@ class BinaryReader {
             manifest.animations.push_back(anim);
         }
 
+        if (!m_stream) {
+            return std::unexpected("Truncated or corrupt binary metadata file: " + m_path);
+        }
         return manifest;
     }
 
   private:
     std::ifstream m_stream;
+    std::string   m_path;
 };
 
 } // namespace Compiler

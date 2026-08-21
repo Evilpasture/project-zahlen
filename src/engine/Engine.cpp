@@ -91,7 +91,7 @@ static void InitRenderDocAPI() {
 }
 
 namespace CreativeWorksFactory {
-void RebuildVulkanResources(RenderContext& ctx, CreativeWorksManager& assetMgr, ECS::Registry& reg);
+
 }
 
 struct EngineImpl {
@@ -195,7 +195,7 @@ void BuildSystemGraphs(Engine& engine) {
     using namespace ZHLN::ECS;
 
     updateGraph.AddSystem({
-        .update_func    = [](Engine& eng, float dt) { TextureSystem::Update(eng, dt); },
+        .update_func    = [](Engine& eng, float dt) -> void { TextureSystem::Update(eng, dt); },
         .name           = "TextureSystem",
         .access_pattern = {},
         .enabled        = true,
@@ -224,6 +224,7 @@ void BuildSystemGraphs(Engine& engine) {
             {
                 Read<Components::PhysicsComponent>(),
                 Read<Components::MeshComponent>(),
+                Read<Components::KinematicPoseOverrideComponent>(),
                 Write<Components::RagdollComponent>(),
                 Write<Components::TransformComponent>(),
             },
@@ -252,11 +253,10 @@ void BuildSystemGraphs(Engine& engine) {
     });
 
     updateGraph.AddSystem({
-        .update_func =
-            [](Engine& eng, float dt) {
-                static InteractionSystem sys;
-                sys.Update(eng, dt);
-            },
+        .update_func = [](Engine& eng, float dt) -> void {
+            static InteractionSystem sys;
+            sys.Update(eng, dt);
+        },
         .name = "InteractionSystem",
         .access_pattern =
             {
@@ -294,7 +294,7 @@ void BuildSystemGraphs(Engine& engine) {
     });
 
     renderGraph.AddSystem({
-        .update_func    = [](Engine& eng, float /*dt*/) { DecalSystem::Update(eng); },
+        .update_func    = [](Engine& eng, float /*dt*/) -> void { DecalSystem::Update(eng); },
         .name           = "DecalSystem",
         .access_pattern = {Read<Components::DecalComponent>(), Read<Components::TransformComponent>()},
         .enabled        = true,
@@ -357,7 +357,7 @@ Engine::Engine(const EngineConfig& cfg, bool& outSuccess): _impl(nullptr) {
     }
 }
 
-std::expected<std::unique_ptr<Engine>, Error> Engine::Create(const EngineConfig& cfg) {
+auto Engine::Create(const EngineConfig& cfg) -> std::expected<std::unique_ptr<Engine>, Error> {
     auto engine = std::unique_ptr<Engine>(new (std::nothrow) Engine());
     if (!engine) {
         ZHLN::Log("Failed to allocate memory for the Engine context.");
@@ -372,7 +372,7 @@ std::expected<std::unique_ptr<Engine>, Error> Engine::Create(const EngineConfig&
     return engine;
 }
 
-std::expected<void, Error> Engine::InitInternal(const EngineConfig& cfg) {
+auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error> {
     g_CurrentEngine = this;
     s_GlobalEngine  = this;
 
@@ -407,7 +407,7 @@ std::expected<void, Error> Engine::InitInternal(const EngineConfig& cfg) {
         }
     }
 
-    auto onKey = [](void* userdata, KeyCode key, bool pressed) {
+    auto onKey = [](void* userdata, KeyCode key, bool pressed) -> void {
         auto* reg   = static_cast<ECS::Registry*>(userdata);
         auto  ents  = reg->GetEntitiesWith<Components::InputStateComponent>();
         auto* state = ents.empty() ? reg->Get<Components::InputStateComponent>(reg->Create(Components::InputStateComponent {})) :
@@ -434,7 +434,7 @@ std::expected<void, Error> Engine::InitInternal(const EngineConfig& cfg) {
         }
     };
 
-    auto onMouseMove = [](void* userdata, float x, float y) {
+    auto onMouseMove = [](void* userdata, float x, float y) -> void {
         auto* reg   = static_cast<ECS::Registry*>(userdata);
         auto  ents  = reg->GetEntitiesWith<Components::InputStateComponent>();
         auto* state = ents.empty() ? reg->Get<Components::InputStateComponent>(reg->Create(Components::InputStateComponent {})) :
@@ -442,7 +442,7 @@ std::expected<void, Error> Engine::InitInternal(const EngineConfig& cfg) {
         state->ApplyLocalMotion(x, y);
     };
 
-    auto onMouseScroll = [](void* userdata, float delta) {
+    auto onMouseScroll = [](void* userdata, float delta) -> void {
         auto* reg   = static_cast<ECS::Registry*>(userdata);
         auto  ents  = reg->GetEntitiesWith<Components::InputStateComponent>();
         auto* state = ents.empty() ? reg->Get<Components::InputStateComponent>(reg->Create(Components::InputStateComponent {})) :
@@ -450,7 +450,7 @@ std::expected<void, Error> Engine::InitInternal(const EngineConfig& cfg) {
         state->ApplyWheel(delta);
     };
 
-    auto onResize = [](void* userdata, Extent2D extent) {
+    auto onResize = [](void* userdata, Extent2D extent) -> void {
         auto* reg   = static_cast<ECS::Registry*>(userdata);
         auto  ents  = reg->GetEntitiesWith<Components::InputStateComponent>();
         auto* state = ents.empty() ? reg->Get<Components::InputStateComponent>(reg->Create(Components::InputStateComponent {})) :
@@ -458,7 +458,7 @@ std::expected<void, Error> Engine::InitInternal(const EngineConfig& cfg) {
         state->ApplyResize(extent);
     };
 
-    auto onChar = [](void* userdata, unsigned int codepoint) {
+    auto onChar = [](void* userdata, unsigned int codepoint) -> void {
         auto* reg = static_cast<ECS::Registry*>(userdata);
         for (Entity e: reg->GetEntitiesWith<Components::UITextInputComponent>()) {
             auto* inputComp = reg->Get<Components::UITextInputComponent>(e);
@@ -466,7 +466,7 @@ std::expected<void, Error> Engine::InitInternal(const EngineConfig& cfg) {
                 if (codepoint >= 32 && codepoint <= 126 && inputComp->text.size() < 255) {
                     std::string_view curr = inputComp->text;
                     std::string      next = std::string(curr.substr(0, inputComp->cursorIndex)) + static_cast<char>(codepoint) +
-                                            std::string(curr.substr(inputComp->cursorIndex));
+                                       std::string(curr.substr(inputComp->cursorIndex));
                     inputComp->text.assign(next);
                     inputComp->cursorIndex++;
                 }
@@ -552,7 +552,7 @@ Engine::~Engine() {
     }
 }
 
-bool Engine::IsRunning() const {
+auto Engine::IsRunning() const -> bool {
     return _impl->window->IsRunning();
 }
 
@@ -595,7 +595,7 @@ void Engine::ProcessEvents() {
     }
 }
 
-bool Engine::BeginFrame(bool& outDeviceLost) noexcept {
+auto Engine::BeginFrame(bool& outDeviceLost) noexcept -> bool {
     outDeviceLost = false;
     auto res      = _impl->renderContext->BeginFrame();
     if (!res) {
@@ -608,7 +608,7 @@ bool Engine::BeginFrame(bool& outDeviceLost) noexcept {
     return true;
 }
 
-bool Engine::EndFrame(bool& outDeviceLost) noexcept {
+auto Engine::EndFrame(bool& outDeviceLost) noexcept -> bool {
     outDeviceLost = false;
     auto res      = _impl->renderContext->EndFrame();
     if (!res) {
@@ -621,65 +621,65 @@ bool Engine::EndFrame(bool& outDeviceLost) noexcept {
     return true;
 }
 
-uint64_t Engine::GetCurrentFrame() const noexcept {
+auto Engine::GetCurrentFrame() const noexcept -> uint64_t {
     return _impl->frameCounter;
 }
 
-Window& Engine::GetWindow() {
+auto Engine::GetWindow() -> Window& {
     return *_impl->window;
 }
-PhysicsContext& Engine::GetPhysicsContext() {
+auto Engine::GetPhysicsContext() -> PhysicsContext& {
     return *_impl->physicsContext;
 }
-RenderContext& Engine::GetRenderContext() {
+auto Engine::GetRenderContext() -> RenderContext& {
     return *_impl->renderContext;
 }
-Camera& Engine::GetCamera() {
+auto Engine::GetCamera() -> Camera& {
     return _impl->mainCamera;
 }
-ALife::Simulator& Engine::GetALife() {
+auto Engine::GetALife() -> ALife::Simulator& {
     return *_impl->alifeSimulator;
 }
-CreativeWorksManager& Engine::GetCreativeWorksManager() {
+auto Engine::GetCreativeWorksManager() -> CreativeWorksManager& {
     return *_impl->assetManager;
 }
-AudioContext& Engine::GetAudioContext() {
+auto Engine::GetAudioContext() -> AudioContext& {
     return *_impl->audioContext;
 }
-ScriptRunner& Engine::GetScriptRunner() {
+auto Engine::GetScriptRunner() -> ScriptRunner& {
     return *_impl->scriptRunner;
 }
-ECS::Registry& Engine::GetRegistry() {
+auto Engine::GetRegistry() -> ECS::Registry& {
     return _impl->registry;
 }
 
-const ECS::Registry& Engine::GetRegistry() const {
+auto Engine::GetRegistry() const -> const ECS::Registry& {
     return _impl->registry;
 }
 
-ECS::SystemGraph& Engine::GetUpdateGraph() {
+auto Engine::GetUpdateGraph() -> ECS::SystemGraph& {
     return *_impl->updateGraph;
 }
-ECS::SystemGraph& Engine::GetRenderGraph() {
+auto Engine::GetRenderGraph() -> ECS::SystemGraph& {
     return *_impl->renderGraph;
 }
-ECS::EntityCommandBuffer& Engine::GetMainECB() {
+auto Engine::GetMainECB() -> ECS::EntityCommandBuffer& {
     return *_impl->mainECB;
 }
-CullingSystem& Engine::GetCullingSystem() {
+auto Engine::GetCullingSystem() -> CullingSystem& {
     return *_impl->cullingSystem;
 }
-JPH::Array<Entity>& Engine::GetVisibleEntities() {
+auto Engine::GetVisibleEntities() -> JPH::Array<Entity>& {
     return _impl->visibleEntities;
 }
-JPH::Array<Entity>& Engine::GetVisibleShadowEntities() {
+auto Engine::GetVisibleShadowEntities() -> JPH::Array<Entity>& {
     return _impl->visibleShadowEntities;
 }
-float& Engine::GetCurrentAlpha() {
+auto Engine::GetCurrentAlpha() -> float& {
     return _impl->currentAlpha;
 }
 
-void* Engine::GetGameState() const {
+auto Engine::GetGameState() const -> void* {
     return _impl->gameState;
 }
 void Engine::SetGameState(void* state) {
@@ -694,14 +694,14 @@ void Engine::ProvokeDeviceLost() {
     _impl->renderContext->ProvokeDeviceLost();
 }
 
-Engine* GetEngineContext() {
+auto GetEngineContext() -> Engine* {
     if (g_CurrentEngine != nullptr) {
         return g_CurrentEngine;
     }
     return s_GlobalEngine;
 }
 
-bool Engine::InitializeDefaultScene() {
+auto Engine::InitializeDefaultScene() -> bool {
     auto& rc  = GetRenderContext();
     auto& reg = GetRegistry();
 
@@ -736,7 +736,7 @@ bool Engine::InitializeDefaultScene() {
     return true;
 }
 
-GameplayStatus Engine::Tick(float dt, GameplayDriver driver) {
+auto Engine::Tick(float dt, GameplayDriver driver) -> GameplayStatus {
     static FileWatcher        gameplayWatcher("scripts/boot.lua");
     static NativeScriptModule nativeModule("scripts/gameplay");
     static InputSystem        inputSystem;
@@ -757,9 +757,9 @@ GameplayStatus Engine::Tick(float dt, GameplayDriver driver) {
     }
     GetRenderContext().CheckShaderReload();
 
-    // 2. Camera Systems
-    targetCamSys.Update(*this, dt, GetCurrentAlpha());
-    camSys.Update(*this, dt, GetCurrentAlpha());
+    // 2. Translate gameplay input using the previous resolved camera. Camera
+    // transforms are finalized after physics and the update graph so rig-driven
+    // first-person views cannot lag one simulation frame behind their body.
     inputSystem.PlayerInputTranslate(*this, GetCamera());
 
     // 3. Physics Fixed Step & WriteBack
@@ -795,6 +795,11 @@ GameplayStatus Engine::Tick(float dt, GameplayDriver driver) {
     // 5. Update Graph & Command Buffer Playback
     GetUpdateGraph().Execute(*this, dt);
     GetMainECB().Playback();
+
+    // Resolve target cameras and camera matrices from current physics and
+    // procedural rig poses immediately before visibility/render work.
+    targetCamSys.Update(*this, dt, GetCurrentAlpha());
+    camSys.Update(*this, dt, GetCurrentAlpha());
     LODSystem::Update(*this);
 
     // 6. Render Graph & Frame Submission
@@ -834,7 +839,7 @@ GameplayStatus Engine::Tick(float dt, GameplayDriver driver) {
     return status;
 }
 
-int Engine::Run(const CommandLineOptions& options, UICallback uiCallback) {
+auto Engine::Run(const CommandLineOptions& options, UICallback uiCallback) -> int {
     Platform::Init();
     ZHLN::SetupSignalHandler();
     TaskSystem::Init();
@@ -845,13 +850,13 @@ int Engine::Run(const CommandLineOptions& options, UICallback uiCallback) {
     EngineConfig config {
         .physics = {.maxBodies = 5000, .maxBodyPairs = 10000, .maxContactConstraints = 10000, .tempAllocatorSize = 64 * 1024 * 1024},
         .render  = {
-            .appName        = options.launchEditor ? "Zahlen World Editor" : "Zahlen Engine",
-            .width          = w,
-            .height         = h,
-            .vsync          = options.vsync,
-            .fullscreen     = options.fullscreen,
-            .headless       = options.headless,
-            .validationMode = options.validationMode,
+             .appName        = options.launchEditor ? "Zahlen World Editor" : "Zahlen Engine",
+             .width          = w,
+             .height         = h,
+             .vsync          = options.vsync,
+             .fullscreen     = options.fullscreen,
+             .validationMode = options.validationMode,
+             .headless       = options.headless,
         },
     };
 

@@ -187,6 +187,13 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
             }
         }
 
+        // Optional pose providers publish model-space motor targets through a
+        // generic core component. Articulation does not depend on any provider.
+        if (const auto* poseOverride = reg.Get<Components::KinematicPoseOverrideComponent>(e); poseOverride != nullptr && poseOverride->valid) {
+            const uint32_t overrideCount = std::min<uint32_t>(count, poseOverride->jointCount);
+            std::copy_n(poseOverride->modelTransforms.begin(), overrideCount, modelJoints.begin());
+        }
+
         std::memcpy(animPose.GetJointMatrices().data(), modelJoints.data(), count * sizeof(JPH::Mat44));
         animPose.CalculateJointStates();
 

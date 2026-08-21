@@ -43,6 +43,11 @@ void SampleChannel(const AnimationChannel& channel, float time, JPH::Vec3& outT,
 
     if (channel.interpolation == InterpolationType::Step) {
         factor = 0.0f;
+    } else {
+        // Minimum-jerk interpolation avoids the constant velocity and hard
+        // derivative changes of a linear keyframe blend. Optional pose providers
+        // may add further temporal filtering through generic extension hooks.
+        factor = factor * factor * factor * (factor * (factor * 6.0f - 15.0f) + 10.0f);
     }
 
     if (channel.path == AnimationPathType::Translation) {
@@ -77,6 +82,9 @@ void SampleWeightsChannel(const AnimationChannel& channel, float time, float* ou
 
     if (channel.interpolation == InterpolationType::Step) {
         factor = 0.0f;
+    } else {
+        factor = std::clamp(factor, 0.0f, 1.0f);
+        factor = factor * factor * factor * (factor * (factor * 6.0f - 15.0f) + 10.0f);
     }
 
     auto     numWeights = static_cast<uint32_t>(channel.keyValues.size() / channel.keyTimes.size());
@@ -318,9 +326,9 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
                         newLowerWorld            = IK::AlignNodeToDirection(newLowerWorld, localLowerDir, ikOutput.lowerDirection);
 
                         JPH::Mat44 newEndWorld = endWorld;
-                        newEndWorld.SetTranslation(solvedTargetPos);
+                        newEndWorld.SetTranslation(ikOutput.endPosition);
                         if (chain.orientEndEffector) {
-                            newEndWorld = JPH::Mat44::sRotationTranslation(solvedTargetRot, solvedTargetPos);
+                            newEndWorld = JPH::Mat44::sRotationTranslation(solvedTargetRot, ikOutput.endPosition);
                         }
 
                         float w        = std::clamp(chain.weight, 0.0f, 1.0f);

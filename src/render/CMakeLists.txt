@@ -78,6 +78,9 @@ set_target_properties(zahlen_render PROPERTIES
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
 )
+if(NOT MSVC)
+    target_compile_options(zahlen_render PRIVATE -fno-exceptions -fno-rtti)
+endif()
 
 target_link_libraries(zahlen_render PUBLIC
     Vulkan::Vulkan

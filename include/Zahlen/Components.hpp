@@ -135,6 +135,15 @@ struct Components {
         int32_t  skeletonIndex = -1;
     };
 
+    /** Generic model-space motor target produced by optional pose systems. */
+    struct alignas(64) KinematicPoseOverrideComponent {
+        static constexpr size_t           MaxJoints = 512;
+        std::array<JPH::Mat44, MaxJoints> modelTransforms {};
+        uint32_t                          jointCount  = 0;
+        uint64_t                          poseVersion = 0;
+        bool                              valid       = false;
+    };
+
     struct MorphTargetComponent {
         uint32_t             offset      = 0;
         uint32_t             activeCount = 0;
@@ -175,13 +184,14 @@ struct Components {
         JPH::Quat orientation     = JPH::Quat::sIdentity();
         JPH::Quat prevOrientation = JPH::Quat::sIdentity();
 
-        float inputX         = 0.0f;
-        float inputZ         = 0.0f;
-        float currentYVel    = 0.0f;
-        float speed          = 7.0f;
-        float jumpForce      = 12.0f;
-        float landingTimer   = 0.0f;
-        float jumpDelayTimer = 0.0f;
+        float inputX           = 0.0f;
+        float inputZ           = 0.0f;
+        float currentYVel      = 0.0f;
+        float speed            = 7.0f;
+        float sprintMultiplier = 1.65f;
+        float jumpForce        = 12.0f;
+        float landingTimer     = 0.0f;
+        float jumpDelayTimer   = 0.0f;
 
         bool jumpRequested = false;
         bool isGrounded    = true;

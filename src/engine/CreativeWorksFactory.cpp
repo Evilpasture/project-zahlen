@@ -599,8 +599,17 @@ auto InstantiatePrefab(
     if (!params.createPhysics) {
         rootEntity = SpawnPrefabRoot(reg, prefab.virtualPath.c_str(), params);
 
-        if (params.isAnimated && !prefab.animations.empty()) {
-            reg.Add(rootEntity, Components::AnimatorComponent {.currentTrackIdx = 0, .currentTrackTime = 0.0f, .currentLoop = true, .prefab = &prefab});
+        // Keep the prefab/skeleton source available for skinned rigs that
+        // contain no authored animation clips.
+        if (params.isAnimated && (!prefab.animations.empty() || !prefab.skeletons.empty())) {
+            reg.Add(
+                rootEntity, Components::AnimatorComponent {
+                                .currentTrackIdx  = prefab.animations.empty() ? -1 : 0,
+                                .currentTrackTime = 0.0f,
+                                .currentLoop      = true,
+                                .prefab           = &prefab,
+                            }
+            );
         }
 
         if (outBuffer != nullptr && maxCount > 0) {
