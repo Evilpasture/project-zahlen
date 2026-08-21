@@ -6,9 +6,8 @@
 
 namespace ZHLN::Vk {
 
-std::expected<void, ZHLN::Error> ComputePass::BuildHeap(
-    VkDevice device, const ZHLN_ShaderDesc& shader, const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping
-) noexcept {
+std::expected<void, ZHLN::Error>
+    ComputePass::BuildHeap(VkDevice device, const ZHLN_ShaderDesc& shader, const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping) noexcept {
     // VK_EXT_descriptor_heap: heap pipelines require layout == VK_NULL_HANDLE
     // (VUID-VkComputePipelineCreateInfo-flags-11311). Per-dispatch data
     // travels through vkCmdPushDataEXT.
@@ -23,19 +22,16 @@ std::expected<void, ZHLN::Error> ComputePass::BuildHeap(
 }
 
 std::expected<void, ZHLN::Error> ComputePass::BuildHeapVariants(
-    VkDevice device, const ZHLN_ShaderDesc& shader, std::span<const VkSpecializationInfo> specInfos,
+    VkDevice                                             device,
+    const ZHLN_ShaderDesc&                               shader,
+    std::span<const VkSpecializationInfo>                specInfos,
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping
 ) noexcept {
     pipelines.clear();
     pipelines.reserve(specInfos.size());
 
     for (const auto& spec: specInfos) {
-        auto p_res = ComputePipelineBuilder()
-                         .Shader(shader)
-                         .Layout(VK_NULL_HANDLE)
-                         .HeapMappings(mapping)
-                         .Specialization(&spec)
-                         .Build(device);
+        auto p_res = ComputePipelineBuilder().Shader(shader).Layout(VK_NULL_HANDLE).HeapMappings(mapping).Specialization(&spec).Build(device);
         if (!p_res) {
             return std::unexpected(p_res.error());
         }

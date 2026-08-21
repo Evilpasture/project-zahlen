@@ -26,8 +26,7 @@ DescriptorHeap<Type>::DescriptorHeap(DescriptorHeap&& other) noexcept:
     _device(std::exchange(other._device, VK_NULL_HANDLE)), _capacity(std::exchange(other._capacity, 0)), _stride(std::exchange(other._stride, 0)),
     _reservedSize(std::exchange(other._reservedSize, 0)), _buffer(std::move(other._buffer)), _mappedRegion(std::move(other._mappedRegion)),
     _mappedPtr(std::exchange(other._mappedPtr, nullptr)), _bindInfo(std::exchange(other._bindInfo, VkBindHeapInfoEXT {})),
-    _vkCmdBindHeapEXT(std::exchange(other._vkCmdBindHeapEXT, nullptr)),
-    _vkWriteDescriptorsEXT(std::exchange(other._vkWriteDescriptorsEXT, nullptr)) {
+    _vkCmdBindHeapEXT(std::exchange(other._vkCmdBindHeapEXT, nullptr)), _vkWriteDescriptorsEXT(std::exchange(other._vkWriteDescriptorsEXT, nullptr)) {
 }
 
 template <DescriptorHeapType Type>
@@ -50,13 +49,13 @@ auto DescriptorHeap<Type>::operator=(DescriptorHeap&& other) noexcept -> Descrip
 
 template <DescriptorHeapType Type>
 void DescriptorHeap<Type>::Cleanup() noexcept {
-    _mappedRegion  = {};
-    _buffer        = {};
-    _mappedPtr     = nullptr;
-    _capacity      = 0;
-    _stride        = 0;
-    _reservedSize  = 0;
-    _bindInfo      = {};
+    _mappedRegion = {};
+    _buffer       = {};
+    _mappedPtr    = nullptr;
+    _capacity     = 0;
+    _stride       = 0;
+    _reservedSize = 0;
+    _bindInfo     = {};
 }
 
 template <DescriptorHeapType Type>
@@ -82,8 +81,8 @@ auto DescriptorHeap<Type>::Init(const Context& ctx, Allocator& allocator, uint32
     }
 
     VkPhysicalDeviceDescriptorHeapPropertiesEXT props = {
-        .sType             = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_HEAP_PROPERTIES_EXT,
-        .pNext             = nullptr,
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_HEAP_PROPERTIES_EXT,
+        .pNext = nullptr,
     };
 
     VkPhysicalDeviceProperties2 props2 = {
@@ -93,8 +92,8 @@ auto DescriptorHeap<Type>::Init(const Context& ctx, Allocator& allocator, uint32
     };
     vkGetPhysicalDeviceProperties2(ctx.Physical(), &props2);
 
-    VkDeviceSize heap_alignment  = 0;
-    VkDeviceSize max_heap_size   = 0;
+    VkDeviceSize heap_alignment = 0;
+    VkDeviceSize max_heap_size  = 0;
     if constexpr (Type == DescriptorHeapType::Sampler) {
         _stride        = AlignUp(props.samplerDescriptorSize, props.samplerDescriptorAlignment);
         _reservedSize  = props.minSamplerHeapReservedRange;

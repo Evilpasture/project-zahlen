@@ -70,7 +70,12 @@ inline constexpr auto IsHeapSamplerType(VkDescriptorType t) noexcept -> bool {
 /// `slotSpan` is the number of index-addressable slots per non-sampler binding
 /// (2 = frame parity; larger for per-mip/per-pass index selection).
 inline void BuildHeapPassBindings(
-    HeapManager& heap, const SlangReflectedSet& set, uint32_t setIndex, uint32_t indexPushOffset, uint32_t slotSpan, HeapPassBindings& out
+    HeapManager&             heap,
+    const SlangReflectedSet& set,
+    uint32_t                 setIndex,
+    uint32_t                 indexPushOffset,
+    uint32_t                 slotSpan,
+    HeapPassBindings&        out
 ) noexcept {
     out.entries.clear();
     out.slotBase.clear();
@@ -93,9 +98,9 @@ inline void BuildHeapPassBindings(
         };
 
         if (IsHeapSamplerType(b.descriptorType)) {
-            entry.resourceMask = VK_SPIRV_RESOURCE_TYPE_SAMPLER_BIT_EXT;
-            auto slot          = heap.AllocateStaticSampler();
-            const uint32_t s   = slot ? slot->index : 0;
+            entry.resourceMask  = VK_SPIRV_RESOURCE_TYPE_SAMPLER_BIT_EXT;
+            auto           slot = heap.AllocateStaticSampler();
+            const uint32_t s    = slot ? slot->index : 0;
             out.slotBase.push_back(s);
             entry.sourceData.constantOffset.heapOffset = static_cast<uint32_t>(heap.SamplerOffset(s));
         } else {
@@ -141,16 +146,16 @@ inline void BuildHeapPassBindings(
             }
             out.slotBase.push_back(first == ~0U ? 0 : first);
 
-            entry.source      = VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_PUSH_INDEX_EXT;
-            entry.sourceData.pushIndex.heapOffset       = static_cast<uint32_t>(heap.ResourceOffset(first == ~0U ? 0 : first));
-            entry.sourceData.pushIndex.pushOffset       = indexPushOffset;
-            entry.sourceData.pushIndex.heapIndexStride  = static_cast<uint32_t>(heap.ResourceStride());
-            entry.sourceData.pushIndex.heapArrayStride  = 0;
+            entry.source                               = VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_PUSH_INDEX_EXT;
+            entry.sourceData.pushIndex.heapOffset      = static_cast<uint32_t>(heap.ResourceOffset(first == ~0U ? 0 : first));
+            entry.sourceData.pushIndex.pushOffset      = indexPushOffset;
+            entry.sourceData.pushIndex.heapIndexStride = static_cast<uint32_t>(heap.ResourceStride());
+            entry.sourceData.pushIndex.heapArrayStride = 0;
 
             if (b.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
                 // The sampler half of a combined image sampler resolves from a
                 // dedicated sampler-heap slot (constant; index-invariant).
-                auto smp = heap.AllocateStaticSampler();
+                auto smp                                     = heap.AllocateStaticSampler();
                 entry.sourceData.pushIndex.samplerHeapOffset = static_cast<uint32_t>(heap.SamplerOffset(smp ? smp->index : 0));
             }
         }
@@ -162,9 +167,7 @@ inline void BuildHeapPassBindings(
 
 /// Writes sampler descriptors into the static sampler slots of a pass.
 /// `samplerInfos[p]` describes the sampler of the p-th SAMPLER binding.
-inline void InitHeapPassSamplers(
-    HeapManager& heap, const HeapPassBindings& b, std::span<const VkSamplerCreateInfo> samplerInfos
-) noexcept {
+inline void InitHeapPassSamplers(HeapManager& heap, const HeapPassBindings& b, std::span<const VkSamplerCreateInfo> samplerInfos) noexcept {
     uint32_t s = 0;
     for (size_t i = 0; i < b.types.size() && i < b.slotBase.size(); ++i) {
         if (!IsHeapSamplerType(b.types[i])) {
@@ -232,9 +235,7 @@ const VkImageViewCreateInfo* SynthesizeViewInfo(const T& img, VkImageViewCreateI
 /// Writes one heap descriptor for one reflected binding from one argument.
 /// Returns the number of binding slots consumed (always 1).
 template <typename Arg>
-void WriteHeapBinding(
-    HeapManager& heap, const Context& ctx, uint32_t slotPairBase, uint32_t index, VkDescriptorType descriptorType, const Arg& arg
-) noexcept {
+void WriteHeapBinding(HeapManager& heap, const Context& ctx, uint32_t slotPairBase, uint32_t index, VkDescriptorType descriptorType, const Arg& arg) noexcept {
     using T = std::remove_cvref_t<Arg>;
 
     if constexpr (std::is_same_v<T, SkipWrite>) {
@@ -245,13 +246,12 @@ void WriteHeapBinding(
 
     if (descriptorType == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE || descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ||
         descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE || descriptorType == VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT) {
-        VkImageViewCreateInfo scratch {};
+        VkImageViewCreateInfo        scratch {};
         const VkImageViewCreateInfo* info = SynthesizeViewInfo(arg, scratch);
         if (info == nullptr || info->image == VK_NULL_HANDLE) {
             return; // Untranslatable arg (raw handle without view info): skip.
         }
-        const VkImageLayout layout =
-            (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        const VkImageLayout layout = (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
         if constexpr (IsTypedImage<T>::value) {
             // Typed images carry their compile-time layout contract.
@@ -281,7 +281,10 @@ void WriteHeapBinding(
         if constexpr (std::is_same_v<T, BufferWrite>) {
             buffer = arg.buffer;
             size   = arg.range;
-        } else if constexpr (requires { arg.Handle(); arg.Size(); }) {
+        } else if constexpr (requires {
+                                 arg.Handle();
+                                 arg.Size();
+                             }) {
             buffer = arg.Handle();
             size   = arg.Size();
         } else if constexpr (std::is_same_v<T, VkBuffer>) {
@@ -312,19 +315,19 @@ void WriteHeapBinding(
 /// (frame parity, mip, ...). Argument order must mirror the reflected set's
 /// binding order; sampler positions may pass anything (they are skipped).
 template <typename... Args>
-void WriteHeapBindings(
-    HeapManager& heap, const Context& ctx, const HeapPassBindings& b, uint32_t index, Args&&... args
-) noexcept {
+void WriteHeapBindings(HeapManager& heap, const Context& ctx, const HeapPassBindings& b, uint32_t index, Args&&... args) noexcept {
     size_t argIdx = 0;
-    ([&](const auto& arg) {
-        if (argIdx >= b.types.size() || argIdx >= b.slotBase.size()) {
-            return;
-        }
-        if (!IsHeapSamplerType(b.types[argIdx])) {
-            detail::WriteHeapBinding(heap, ctx, b.slotBase[argIdx], index, b.types[argIdx], arg);
-        }
-        argIdx++;
-    }(args), ...);
+    (
+        [&](const auto& arg) {
+            if (argIdx >= b.types.size() || argIdx >= b.slotBase.size()) {
+                return;
+            }
+            if (!IsHeapSamplerType(b.types[argIdx])) {
+                detail::WriteHeapBinding(heap, ctx, b.slotBase[argIdx], index, b.types[argIdx], arg);
+            }
+            argIdx++;
+        }(args),
+        ...);
 }
 
 } // namespace ZHLN::Vk

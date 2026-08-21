@@ -166,7 +166,8 @@ inline auto MakeViewCreateInfoCube(VkImage image, VkFormat format, uint32_t mipL
     };
 }
 
-inline auto MakeViewCreateInfo2DArray(VkImage image, VkFormat format, uint32_t baseLayer, uint32_t layerCount, VkImageAspectFlags aspect, uint32_t mipLevels) noexcept
+inline auto
+    MakeViewCreateInfo2DArray(VkImage image, VkFormat format, uint32_t baseLayer, uint32_t layerCount, VkImageAspectFlags aspect, uint32_t mipLevels) noexcept
     -> VkImageViewCreateInfo {
     return {
         .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,

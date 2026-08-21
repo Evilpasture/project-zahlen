@@ -300,14 +300,13 @@ struct DrawState {
     VkPipeline       pipeline      = VK_NULL_HANDLE;
     VkPipelineLayout layout        = VK_NULL_HANDLE;
     VkDescriptorSet  set           = VK_NULL_HANDLE;
-    bool heap = false; // VK_EXT_descriptor_heap: heaps bound on the command buffer; push data replaces push constants
+    bool             heap          = false; // VK_EXT_descriptor_heap: heaps bound on the command buffer; push data replaces push constants
     uint32_t         vertexCount   = 0;
     uint32_t         indexCount    = 0;
     uint32_t         instanceCount = 1;
     uint32_t         firstVertex   = 0;
     uint32_t         firstIndex    = 0;
     uint32_t         firstInstance = 0;
-
 };
 
 template <GpuTriviallyCopyable T>
@@ -322,7 +321,7 @@ struct DrawIndirectState {
     VkPipeline       pipeline       = VK_NULL_HANDLE;
     VkPipelineLayout layout         = VK_NULL_HANDLE;
     VkDescriptorSet  set            = VK_NULL_HANDLE;
-    bool heap = false; // VK_EXT_descriptor_heap: heaps bound on the command buffer; push data replaces push constants
+    bool             heap           = false; // VK_EXT_descriptor_heap: heaps bound on the command buffer; push data replaces push constants
     VkBuffer         argumentBuffer = VK_NULL_HANDLE;
     VkDeviceSize     offset         = 0; // Default byte offset
     uint32_t         drawCount      = 0;
@@ -337,14 +336,13 @@ struct DrawIndirectState {
     static constexpr VkDeviceSize OffsetForIndex(uint32_t index) noexcept {
         return static_cast<VkDeviceSize>(index) * sizeof(VkDrawIndirectCommand);
     }
-
 };
 
 struct DrawIndirectCountState {
     VkPipeline       pipeline          = VK_NULL_HANDLE;
     VkPipelineLayout layout            = VK_NULL_HANDLE;
     VkDescriptorSet  set               = VK_NULL_HANDLE;
-    bool heap = false; // VK_EXT_descriptor_heap: heaps bound on the command buffer; push data replaces push constants
+    bool             heap              = false; // VK_EXT_descriptor_heap: heaps bound on the command buffer; push data replaces push constants
     VkBuffer         argumentBuffer    = VK_NULL_HANDLE;
     VkDeviceSize     offset            = 0; // Byte offset into argumentBuffer
     VkBuffer         countBuffer       = VK_NULL_HANDLE;
@@ -363,7 +361,6 @@ struct DrawIndirectCountState {
     static constexpr VkDeviceSize CountOffsetForIndex(uint32_t index) noexcept {
         return static_cast<VkDeviceSize>(index) * sizeof(uint32_t);
     }
-
 };
 
 template <GpuTriviallyCopyable T>
@@ -390,7 +387,7 @@ struct DrawIndexedIndirectState {
     VkPipeline       pipeline       = VK_NULL_HANDLE;
     VkPipelineLayout layout         = VK_NULL_HANDLE;
     VkDescriptorSet  set            = VK_NULL_HANDLE;
-    bool heap = false; // VK_EXT_descriptor_heap: heaps bound on the command buffer; push data replaces push constants
+    bool             heap           = false; // VK_EXT_descriptor_heap: heaps bound on the command buffer; push data replaces push constants
     VkBuffer         argumentBuffer = VK_NULL_HANDLE;
     VkDeviceSize     offset         = 0;
     uint32_t         drawCount      = 0;
@@ -402,14 +399,13 @@ struct DrawIndexedIndirectState {
     static constexpr VkDeviceSize OffsetForIndex(uint32_t index) noexcept {
         return static_cast<VkDeviceSize>(index) * sizeof(VkDrawIndexedIndirectCommand);
     }
-
 };
 
 struct DrawIndexedIndirectCountState {
     VkPipeline       pipeline          = VK_NULL_HANDLE;
     VkPipelineLayout layout            = VK_NULL_HANDLE;
     VkDescriptorSet  set               = VK_NULL_HANDLE;
-    bool heap = false; // VK_EXT_descriptor_heap: heaps bound on the command buffer; push data replaces push constants
+    bool             heap              = false;          // VK_EXT_descriptor_heap: heaps bound on the command buffer; push data replaces push constants
     VkBuffer         argumentBuffer    = VK_NULL_HANDLE; // Buffer containing VkDrawIndexedIndirectCommand structs
     VkDeviceSize     offset            = 0;              // Byte offset into argumentBuffer
     VkBuffer         countBuffer       = VK_NULL_HANDLE; // Buffer containing a single uint32_t draw count
@@ -428,7 +424,6 @@ struct DrawIndexedIndirectCountState {
     static constexpr VkDeviceSize CountOffsetForIndex(uint32_t index) noexcept {
         return static_cast<VkDeviceSize>(index) * sizeof(uint32_t);
     }
-
 };
 
 template <GpuTriviallyCopyable T>

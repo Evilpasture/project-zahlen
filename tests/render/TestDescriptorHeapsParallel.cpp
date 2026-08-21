@@ -103,7 +103,7 @@ struct DescriptorHeapsParallelSuite {
 
             // 4 strongly separated material colors.
             struct TestMaterial {
-                std::array<float, 4> baseColor {};
+                std::array<float, 4>   baseColor {};
                 std::array<uint8_t, 3> rgb {};
             };
             const std::array<TestMaterial, 4> materials {{
@@ -116,8 +116,7 @@ struct DescriptorHeapsParallelSuite {
             std::array<ZHLN::Material, 4> gpuMaterials {};
             for (uint32_t m = 0; m < 4; ++m) {
                 auto matRes = ZHLN::CreativeWorksFactory::CreateMaterial(
-                    rc, ZHLN::CreativeWorksFactory::MaterialDesc {
-                            .metallic = 0.0f, .roughness = 1.0f, .baseColor = materials[m].baseColor}
+                    rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 1.0f, .baseColor = materials[m].baseColor}
                 );
                 if (!matRes) {
                     return std::unexpected(DescriptorHeapsParallelTestError::MaterialCreationFailed);
@@ -127,22 +126,21 @@ struct DescriptorHeapsParallelSuite {
 
             // 20 x 20 grid of cubes: 400 draw commands across 2 secondary
             // command buffers (kParallelChunkSize = 256 -> 2 chunks).
-            constexpr uint32_t kGridCols   = 20;
-            constexpr uint32_t kGridRows   = 20;
-            constexpr float    spacing     = 0.55f;
-            constexpr float    halfExtent  = 0.25f;
-            const float        firstCol    = -(static_cast<float>(kGridCols - 1) * spacing) * 0.5f;
+            constexpr uint32_t kGridCols  = 20;
+            constexpr uint32_t kGridRows  = 20;
+            constexpr float    spacing    = 0.55f;
+            constexpr float    halfExtent = 0.25f;
+            const float        firstCol   = -(static_cast<float>(kGridCols - 1) * spacing) * 0.5f;
 
             for (uint32_t row = 0; row < kGridRows; ++row) {
                 for (uint32_t col = 0; col < kGridCols; ++col) {
-                    const uint32_t matIdx  = (row * kGridCols + col) % 4;
-                    const JPH::Vec3 pos(
-                        firstCol + static_cast<float>(col) * spacing, 0.6f + static_cast<float>(row) * spacing, 0.0f
-                    );
+                    const uint32_t  matIdx = (row * kGridCols + col) % 4;
+                    const JPH::Vec3 pos(firstCol + static_cast<float>(col) * spacing, 0.6f + static_cast<float>(row) * spacing, 0.0f);
                     ZHLN::CreativeWorksFactory::CreateBox(
                         *engine, JPH::Vec3(halfExtent, halfExtent, halfExtent),
                         ZHLN::CreativeWorksFactory::SpawnParams {
-                            .position = JPH::RVec3(pos.GetX(), pos.GetY(), pos.GetZ()), .createPhysics = false, .materialOverride = gpuMaterials[matIdx]}
+                            .position = JPH::RVec3(pos.GetX(), pos.GetY(), pos.GetZ()), .createPhysics = false, .materialOverride = gpuMaterials[matIdx]
+                        }
                     );
                 }
             }
@@ -188,10 +186,14 @@ struct DescriptorHeapsParallelSuite {
                 uint32_t    count = 0;
             };
             const auto classifyHue = [](float h) -> int {
-                if (h >= 336.0f || h < 24.0f) return 0;   // red
-                if (h >= 36.0f && h < 84.0f) return 1;    // yellow
-                if (h >= 96.0f && h < 150.0f) return 2;   // green
-                if (h >= 200.0f && h < 280.0f) return 3;  // blue
+                if (h >= 336.0f || h < 24.0f)
+                    return 0; // red
+                if (h >= 36.0f && h < 84.0f)
+                    return 1; // yellow
+                if (h >= 96.0f && h < 150.0f)
+                    return 2; // green
+                if (h >= 200.0f && h < 280.0f)
+                    return 3; // blue
                 return -1;
             };
             std::array<Bucket, 4> buckets {{{"red"}, {"yellow"}, {"green"}, {"blue"}}};
@@ -206,9 +208,9 @@ struct DescriptorHeapsParallelSuite {
             for (int py = kCropTop; py < kCropBottom; ++py) {
                 for (int px = kCropLeft; px < kCropRight; ++px) {
                     const size_t idx = (static_cast<size_t>(py) * static_cast<size_t>(width) + static_cast<size_t>(px)) * 3;
-                    const int    r = pixels[idx + 0];
-                    const int    g = pixels[idx + 1];
-                    const int    b = pixels[idx + 2];
+                    const int    r   = pixels[idx + 0];
+                    const int    g   = pixels[idx + 1];
+                    const int    b   = pixels[idx + 2];
                     totalPx++;
 
                     const int mx = std::max({r, g, b});
@@ -247,11 +249,11 @@ struct DescriptorHeapsParallelSuite {
             for (int py = kCropTop; py < kCropBottom; ++py) {
                 for (int px = kCropLeft; px < kCropRight; ++px) {
                     const size_t idx = (static_cast<size_t>(py) * static_cast<size_t>(width) + static_cast<size_t>(px)) * 3;
-                    const int    r = pixels[idx + 0];
-                    const int    g = pixels[idx + 1];
-                    const int    b = pixels[idx + 2];
-                    const int    mx = std::max({r, g, b});
-                    const int    mn = std::min({r, g, b});
+                    const int    r   = pixels[idx + 0];
+                    const int    g   = pixels[idx + 1];
+                    const int    b   = pixels[idx + 2];
+                    const int    mx  = std::max({r, g, b});
+                    const int    mn  = std::min({r, g, b});
                     if (mx - mn < 24) {
                         continue;
                     }

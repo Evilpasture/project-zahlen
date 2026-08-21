@@ -54,7 +54,7 @@ void ParallelCommandRecorder<ConcurrentSlots>::RecordImpl(SchedulerPolicy&& sche
 
         // VK_EXT_descriptor_heap: inherit the primary's heap bindings (binding
         // our own would invalidate the primary's heap state after execution).
-        VkCommandBufferInheritanceInfo                    inherit_info = NullInheritanceInfo;
+        VkCommandBufferInheritanceInfo                        inherit_info = NullInheritanceInfo;
         const VkCommandBufferInheritanceDescriptorHeapInfoEXT heap_inherit = {
             .sType                 = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_DESCRIPTOR_HEAP_INFO_EXT,
             .pNext                 = nullptr,

@@ -1,10 +1,10 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "../Scheduler.hpp"
 #include "RenderInternal.hpp"
 #include "Zahlen/Math3D.hpp"
 #include "Zahlen/Profiler.hpp"
-#include "../Scheduler.hpp"
 #include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <array>
@@ -153,7 +153,9 @@ struct PassFactory {
             const auto samplerBind  = self.heapManager.GetSamplerHeapBindInfo();
             const auto resourceBind = self.heapManager.GetResourceHeapBindInfo();
             const auto frameAddrs   = self.FrameHeapAddresses();
-            rec.SetHeapState(&samplerBind, &resourceBind, &self.ctx, kHeapFrameAddrPushOffset, std::span<const VkDeviceAddress> {frameAddrs.data(), frameAddrs.size()});
+            rec.SetHeapState(
+                &samplerBind, &resourceBind, &self.ctx, kHeapFrameAddrPushOffset, std::span<const VkDeviceAddress> {frameAddrs.data(), frameAddrs.size()}
+            );
 
             TaskSystemScheduler scheduler;
             rec.Record(
@@ -321,20 +323,36 @@ struct PassFactory {
             // the NoRT variant), so the trailing NORT-only hole never shifts
             // any other binding's positional write.
             const auto ltcMatHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-                .handle = self.ltcMatImage.Handle(), .view = self.ltcMatView.Get(), .extent = {.width = 64, .height = 64, .depth = 1},
-                .aspect = VK_IMAGE_ASPECT_COLOR_BIT, .format = VK_FORMAT_R16G16B16A16_SFLOAT, .viewInfo = &self.ltcMatViewInfo
+                .handle   = self.ltcMatImage.Handle(),
+                .view     = self.ltcMatView.Get(),
+                .extent   = {.width = 64, .height = 64, .depth = 1},
+                .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
+                .format   = VK_FORMAT_R16G16B16A16_SFLOAT,
+                .viewInfo = &self.ltcMatViewInfo
             };
             const auto ltcAmpHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-                .handle = self.ltcAmpImage.Handle(), .view = self.ltcAmpView.Get(), .extent = {.width = 64, .height = 64, .depth = 1},
-                .aspect = VK_IMAGE_ASPECT_COLOR_BIT, .format = VK_FORMAT_R16G16B16A16_SFLOAT, .viewInfo = &self.ltcAmpViewInfo
+                .handle   = self.ltcAmpImage.Handle(),
+                .view     = self.ltcAmpView.Get(),
+                .extent   = {.width = 64, .height = 64, .depth = 1},
+                .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
+                .format   = VK_FORMAT_R16G16B16A16_SFLOAT,
+                .viewInfo = &self.ltcAmpViewInfo
             };
             const auto atlasCubeHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-                .handle = self.graphResources.shadowAtlas.image.Handle(), .view = self.shadowAtlasCubeView.Get(), .extent = {.width = 1024, .height = 1024, .depth = 1},
-                .aspect = VK_IMAGE_ASPECT_DEPTH_BIT, .format = VK_FORMAT_D32_SFLOAT, .viewInfo = &self.shadowAtlasCubeViewInfo
+                .handle   = self.graphResources.shadowAtlas.image.Handle(),
+                .view     = self.shadowAtlasCubeView.Get(),
+                .extent   = {.width = 1024, .height = 1024, .depth = 1},
+                .aspect   = VK_IMAGE_ASPECT_DEPTH_BIT,
+                .format   = VK_FORMAT_D32_SFLOAT,
+                .viewInfo = &self.shadowAtlasCubeViewInfo
             };
             const auto atlas2DHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-                .handle = self.graphResources.shadowAtlas.image.Handle(), .view = self.shadowAtlas2DView.Get(), .extent = {.width = 1024, .height = 1024, .depth = 1},
-                .aspect = VK_IMAGE_ASPECT_DEPTH_BIT, .format = VK_FORMAT_D32_SFLOAT, .viewInfo = &self.shadowAtlas2DViewInfo
+                .handle   = self.graphResources.shadowAtlas.image.Handle(),
+                .view     = self.shadowAtlas2DView.Get(),
+                .extent   = {.width = 1024, .height = 1024, .depth = 1},
+                .aspect   = VK_IMAGE_ASPECT_DEPTH_BIT,
+                .format   = VK_FORMAT_D32_SFLOAT,
+                .viewInfo = &self.shadowAtlas2DViewInfo
             };
             self.lightingPass.WriteHeap(
                 self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor), self.defaultSampler,
@@ -366,14 +384,20 @@ struct PassFactory {
                     Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget),
                     Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer), self.pointSampler,
                     Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-                        .handle = self.iblPayload.prefilteredImage.Handle(), .view = self.iblPayload.prefilteredView.Get(),
-                        .extent = {.width = 128, .height = 128, .depth = 1}, .aspect = VK_IMAGE_ASPECT_COLOR_BIT, .format = VK_FORMAT_R8G8B8A8_UNORM,
+                        .handle   = self.iblPayload.prefilteredImage.Handle(),
+                        .view     = self.iblPayload.prefilteredView.Get(),
+                        .extent   = {.width = 128, .height = 128, .depth = 1},
+                        .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
+                        .format   = VK_FORMAT_R8G8B8A8_UNORM,
                         .viewInfo = &self.iblPayload.prefilteredViewInfo
                     },
                     self.frames.frameUniformBuffers[fIdx],
                     Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-                        .handle = self.iblPayload.brdfLutImage.Handle(), .view = self.iblPayload.brdfLutView.Get(),
-                        .extent = {.width = 512, .height = 512, .depth = 1}, .aspect = VK_IMAGE_ASPECT_COLOR_BIT, .format = VK_FORMAT_R8G8B8A8_UNORM,
+                        .handle   = self.iblPayload.brdfLutImage.Handle(),
+                        .view     = self.iblPayload.brdfLutView.Get(),
+                        .extent   = {.width = 512, .height = 512, .depth = 1},
+                        .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
+                        .format   = VK_FORMAT_R8G8B8A8_UNORM,
                         .viewInfo = &self.iblPayload.brdfLutViewInfo
                     },
                     self.clampSampler, Vk::Assume<Vk::ShaderRead<Res_Lighting>>(self.graphResources.lightingTarget),
@@ -412,14 +436,20 @@ struct PassFactory {
                     Vk::Assume<Vk::ShaderRead<Res_TransDepth>>(self.graphResources.transDepthBuffer),
                     Vk::Assume<Vk::ShaderRead<Res_TransNorm>>(self.graphResources.transNormalBuffer), self.pointSampler,
                     Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-                        .handle = self.iblPayload.prefilteredImage.Handle(), .view = self.iblPayload.prefilteredView.Get(),
-                        .extent = {.width = 128, .height = 128, .depth = 1}, .aspect = VK_IMAGE_ASPECT_COLOR_BIT, .format = VK_FORMAT_R8G8B8A8_UNORM,
+                        .handle   = self.iblPayload.prefilteredImage.Handle(),
+                        .view     = self.iblPayload.prefilteredView.Get(),
+                        .extent   = {.width = 128, .height = 128, .depth = 1},
+                        .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
+                        .format   = VK_FORMAT_R8G8B8A8_UNORM,
                         .viewInfo = &self.iblPayload.prefilteredViewInfo
                     },
                     self.frames.frameUniformBuffers[fIdx],
                     Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-                        .handle = self.iblPayload.brdfLutImage.Handle(), .view = self.iblPayload.brdfLutView.Get(),
-                        .extent = {.width = 512, .height = 512, .depth = 1}, .aspect = VK_IMAGE_ASPECT_COLOR_BIT, .format = VK_FORMAT_R8G8B8A8_UNORM,
+                        .handle   = self.iblPayload.brdfLutImage.Handle(),
+                        .view     = self.iblPayload.brdfLutView.Get(),
+                        .extent   = {.width = 512, .height = 512, .depth = 1},
+                        .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
+                        .format   = VK_FORMAT_R8G8B8A8_UNORM,
                         .viewInfo = &self.iblPayload.brdfLutViewInfo
                     },
                     self.clampSampler, Vk::Assume<Vk::ShaderRead<Res_Lighting>>(self.graphResources.lightingTarget),
@@ -444,8 +474,7 @@ struct PassFactory {
         // here and let the graph barrier it back to a sampled layout before
         // the draws (and before next frame's early mesh draws with the same
         // statically-used descriptor).
-        return Vk::Passieren<
-            "Forward", Vk::ColorWrite<Res_HdrSceneColor>, Vk::DepthStencilWrite<Res_Depth>, Vk::ShaderRead<Res_TransLighting>>(
+        return Vk::Passieren<"Forward", Vk::ColorWrite<Res_HdrSceneColor>, Vk::DepthStencilWrite<Res_Depth>, Vk::ShaderRead<Res_TransLighting>>(
             [this, &targetImage](VkCommandBuffer c) noexcept {
                 Profiler::ScopedGpuProfile timer(c, fIdx, self.gpuProfiler, Stage::ForwardPass);
                 FrameRecorder              fwdRecorder(c, self);
@@ -555,8 +584,7 @@ struct PassFactory {
                 self.taaPass.WriteHeap(
                     self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor),
                     Vk::Assume<Vk::ShaderRead<Res_AccumCurr>>(self.frames.accumBuffers.Current()),
-                    Vk::Assume<Vk::ShaderRead<Res_Velocity>>(self.graphResources.velocityBuffer), self.defaultSampler,
-                    self.frames.frameUniformBuffers[fIdx]
+                    Vk::Assume<Vk::ShaderRead<Res_Velocity>>(self.graphResources.velocityBuffer), self.defaultSampler, self.frames.frameUniformBuffers[fIdx]
                 );
 
                 self.taaPass.ExecuteHeap(self.ctx, c, TAAPushConstants {.feedback = self.aaState.taaFeedback}, fIdx);
@@ -583,8 +611,8 @@ struct PassFactory {
                 self.fxaaPass.WriteHeap(self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor), self.defaultSampler);
 
                 self.fxaaPass.ExecuteHeap(
-                    self.ctx, c, FXAAPushConstants {rcpW, rcpH, self.aaState.fxaaSubpix, self.aaState.fxaaEdgeThreshold, self.aaState.fxaaEdgeThresholdMin, 0.0f},
-                    fIdx
+                    self.ctx, c,
+                    FXAAPushConstants {rcpW, rcpH, self.aaState.fxaaSubpix, self.aaState.fxaaEdgeThreshold, self.aaState.fxaaEdgeThresholdMin, 0.0f}, fIdx
                 );
             }
         });
@@ -607,9 +635,7 @@ struct PassFactory {
 
                 self.mlaaPass.WriteHeap(self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor), self.defaultSampler);
 
-                self.mlaaPass.ExecuteHeap(
-                    self.ctx, c, MLAAPushConstants {rcpW, rcpH, self.aaState.mlaaThreshold, self.aaState.mlaaMaxSearchSteps}, fIdx
-                );
+                self.mlaaPass.ExecuteHeap(self.ctx, c, MLAAPushConstants {rcpW, rcpH, self.aaState.mlaaThreshold, self.aaState.mlaaMaxSearchSteps}, fIdx);
             }
         });
     }
@@ -640,15 +666,25 @@ struct PassFactory {
                 } metrics = {rcpW, rcpH, (float) self.graphResources.smaaWeightTarget.extent.width, (float) self.graphResources.smaaWeightTarget.extent.height};
 
                 const auto& [areaView, searchView] = std::tie(self.textureViews[self.smaaAreaTexIdx], self.textureViews[self.smaaSearchTexIdx]);
-                const auto areaInfo = Vk::MakeViewCreateInfo2D(self.textureImages[self.smaaAreaTexIdx].Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
-                const auto searchInfo = Vk::MakeViewCreateInfo2D(self.textureImages[self.smaaSearchTexIdx].Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
+                const auto areaInfo =
+                    Vk::MakeViewCreateInfo2D(self.textureImages[self.smaaAreaTexIdx].Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
+                const auto searchInfo =
+                    Vk::MakeViewCreateInfo2D(self.textureImages[self.smaaSearchTexIdx].Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
                 const auto areaHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-                    .handle = self.textureImages[self.smaaAreaTexIdx].Handle(), .view = areaView.Get(), .extent = {.width = 160, .height = 560, .depth = 1},
-                    .aspect = VK_IMAGE_ASPECT_COLOR_BIT, .format = VK_FORMAT_R8G8B8A8_UNORM, .viewInfo = &areaInfo
+                    .handle   = self.textureImages[self.smaaAreaTexIdx].Handle(),
+                    .view     = areaView.Get(),
+                    .extent   = {.width = 160, .height = 560, .depth = 1},
+                    .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
+                    .format   = VK_FORMAT_R8G8B8A8_UNORM,
+                    .viewInfo = &areaInfo
                 };
                 const auto searchHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-                    .handle = self.textureImages[self.smaaSearchTexIdx].Handle(), .view = searchView.Get(), .extent = {.width = 64, .height = 16, .depth = 1},
-                    .aspect = VK_IMAGE_ASPECT_COLOR_BIT, .format = VK_FORMAT_R8G8B8A8_UNORM, .viewInfo = &searchInfo
+                    .handle   = self.textureImages[self.smaaSearchTexIdx].Handle(),
+                    .view     = searchView.Get(),
+                    .extent   = {.width = 64, .height = 16, .depth = 1},
+                    .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
+                    .format   = VK_FORMAT_R8G8B8A8_UNORM,
+                    .viewInfo = &searchInfo
                 };
                 self.smaaWeightPass.WriteHeap(
                     self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_SmaaEdge>>(self.graphResources.smaaEdgeTarget), areaHeap, searchHeap,
@@ -732,7 +768,8 @@ struct PassFactory {
             Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(src)
         );
         pass.ExecuteHeap(
-            self.ctx, cmd, RenderContext::Impl::KawasePushConstants {
+            self.ctx, cmd,
+            RenderContext::Impl::KawasePushConstants {
                 .mode = 0, .rcpWidth = 1.0f / (float) src.extent.width, .rcpHeight = 1.0f / (float) src.extent.height, .padding = 0.0f
             },
             fIdx
@@ -740,14 +777,21 @@ struct PassFactory {
     }
 
     template <typename SrcImgT, typename SrcImg2T, typename PassT>
-    void RunKawasePass(VkDevice device, VkCommandBuffer cmd, PassT& pass, const SrcImgT& src, const Vk::Sampler& defaultSampler, const SrcImg2T& src2)
-        const noexcept {
+    void RunKawasePass(
+        VkDevice           device,
+        VkCommandBuffer    cmd,
+        PassT&             pass,
+        const SrcImgT&     src,
+        const Vk::Sampler& defaultSampler,
+        const SrcImg2T&    src2
+    ) const noexcept {
         pass.WriteHeap(
             self.ctx, self.heapManager, fIdx, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(src), defaultSampler,
             Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(src2)
         );
         pass.ExecuteHeap(
-            self.ctx, cmd, RenderContext::Impl::KawasePushConstants {
+            self.ctx, cmd,
+            RenderContext::Impl::KawasePushConstants {
                 .mode = 1, .rcpWidth = 1.0f / (float) src.extent.width, .rcpHeight = 1.0f / (float) src.extent.height, .padding = 0.0f
             },
             fIdx
@@ -832,13 +876,13 @@ void ExecuteFrameGraph(RenderContext::Impl& self, VkCommandBuffer cmd, const Pas
     if constexpr (Vk::IsInList<Resources, Res_Swapchain>::value) {
         if (self.presentation.swapchain.Valid()) {
             const auto& sc = self.presentation.swapchain.Get();
-            auto ref = Vk::MakeRef<Res_Swapchain>(sc.images[self.current_image_index], sc.views[self.current_image_index], self.graphResources.sceneColor.extent);
+            auto        ref =
+                Vk::MakeRef<Res_Swapchain>(sc.images[self.current_image_index], sc.views[self.current_image_index], self.graphResources.sceneColor.extent);
             binder.template Bind<Res_Swapchain>(ref.handle, ref.view, ref.extent);
         } else {
             // Headless mode: bind the offscreen color target in place of the swapchain
             auto ref = Vk::MakeRef<Res_Swapchain>(
-                self.presentation.headlessColorTarget.image.Handle(),
-                self.presentation.headlessColorTarget.view.Get(),
+                self.presentation.headlessColorTarget.image.Handle(), self.presentation.headlessColorTarget.view.Get(),
                 self.presentation.headlessColorTarget.extent
             );
             binder.template Bind<Res_Swapchain>(ref.handle, ref.view, ref.extent);

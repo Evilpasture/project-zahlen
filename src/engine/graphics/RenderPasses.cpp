@@ -5,8 +5,8 @@
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/Math3D.hpp"
 #include "Zahlen/Profiler.hpp"
-#include "imgui_impl_vulkan_heap.h"
 #include "imgui.h"
+#include "imgui_impl_vulkan_heap.h"
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <array>
 
@@ -55,13 +55,7 @@ inline void SubmitDrawInstanced(
     // VK_EXT_descriptor_heap: heaps are bound on the command buffer; per-draw
     // data travels through push data (offset 0).
     encoder.DrawInstanced(
-        {.pipeline      = pipeline,
-         .layout        = layout,
-         .heap          = true,
-         .vertexCount   = vertexCount,
-         .instanceCount = 1,
-         .firstVertex   = 0,
-         .firstInstance = instanceIdx},
+        {.pipeline = pipeline, .layout = layout, .heap = true, .vertexCount = vertexCount, .instanceCount = 1, .firstVertex = 0, .firstInstance = instanceIdx},
         pushConstants, stages
     );
 }
@@ -81,9 +75,7 @@ void DrawCSGMeshes(const FrameRecorder& recorder, VkExtent3D extent) noexcept {
 
         for (const auto& cutter: csgCmd.cutters) {
             const ObjectConstants push = {.instanceId = cutter.instanceIdx, .isShadowPass = 0};
-            SubmitDrawInstanced(
-                recorder.encoder, cutter.draw, cutter.instanceIdx, push, ctx.csgWritePipeline.Get(), ctx.csgPipelineLayout
-            );
+            SubmitDrawInstanced(recorder.encoder, cutter.draw, cutter.instanceIdx, push, ctx.csgWritePipeline.Get(), ctx.csgPipelineLayout);
         }
 
         VkPipeline activePipeline = ctx.csgDifferencePipeline.Get();
@@ -432,13 +424,13 @@ struct CpuCullingPolicyPass1 {
                 Vk::ParallelDrawDispatch(
                     cmd,
                     Vk::SecondaryInheritance {
-                        .colorFormats            = colorFormats,
-                        .depthFormat             = VK_FORMAT_D32_SFLOAT_S8_UINT,
-                        .samplerHeapBindInfo     = &samplerBind,
-                        .resourceHeapBindInfo    = &resourceBind,
-                        .context                 = &ctx.ctx,
-                        .pushDataFrameOffset     = kHeapFrameAddrPushOffset,
-                        .pushDataFrameAddresses  = std::span<const VkDeviceAddress> {frameAddresses.data(), frameAddresses.size()},
+                        .colorFormats           = colorFormats,
+                        .depthFormat            = VK_FORMAT_D32_SFLOAT_S8_UINT,
+                        .samplerHeapBindInfo    = &samplerBind,
+                        .resourceHeapBindInfo   = &resourceBind,
+                        .context                = &ctx.ctx,
+                        .pushDataFrameOffset    = kHeapFrameAddrPushOffset,
+                        .pushDataFrameAddresses = std::span<const VkDeviceAddress> {frameAddresses.data(), frameAddresses.size()},
                     },
                     {.width = color_att.extent.width, .height = color_att.extent.height}, drawCount, kParallelChunkSize, TaskSystemSchedulerAdapter {},
                     [&](uint32_t /*chunkIdx*/) -> VkCommandBuffer {
@@ -786,8 +778,7 @@ void TranslucentPrePass::Execute(
                 const ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
 
                 SubmitDrawInstanced(
-                    recorder.encoder, drawCmd, static_cast<uint32_t>(i), push, drawCmd.prePassMaterial->pipeline.Get(),
-                    drawCmd.prePassMaterial->layout
+                    recorder.encoder, drawCmd, static_cast<uint32_t>(i), push, drawCmd.prePassMaterial->pipeline.Get(), drawCmd.prePassMaterial->layout
                 );
             }
         });

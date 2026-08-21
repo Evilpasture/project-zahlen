@@ -171,9 +171,8 @@ class Buffer {
     /// Creates a buffer whose memory block obeys an additional minimum alignment
     /// (e.g. VkPhysicalDeviceDescriptorHeapPropertiesEXT::{sampler,resource}HeapAlignment
     /// for descriptor-heap backing buffers, whose device address must be aligned).
-    [[nodiscard]] static auto
-        Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memUsage, VkDeviceSize minAlignment) noexcept
-            -> std::expected<Buffer, VkResult>;
+    [[nodiscard]] static auto Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memUsage, VkDeviceSize minAlignment) noexcept
+        -> std::expected<Buffer, VkResult>;
 
     void Flush(VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept;
 
@@ -227,7 +226,7 @@ class Buffer {
 
   private:
     VmaHandle<VkBuffer, vmaDestroyBuffer> _handle;
-    VmaAllocationInfo                     _info = {};
+    VmaAllocationInfo                     _info          = {};
     VkDeviceSize                          _requestedSize = 0;
 };
 

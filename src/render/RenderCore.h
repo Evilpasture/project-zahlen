@@ -321,9 +321,9 @@ void ZHLN_DestroyShaderStages(VkDevice device, ZHLN_ShaderStages* ZHLN_RESTRICT 
 // corresponding VkShaderDescriptorSetAndBindingMappingInfoEXT so legacy set/binding
 // decorations in the SPIR-V are remapped onto the bound descriptor heaps.
 [[nodiscard]] uint32_t ZHLN_PopulateShaderStageInfos(
-    const ZHLN_ShaderStages* ZHLN_RESTRICT              stages,
-    VkPipelineShaderStageCreateInfo* ZHLN_RESTRICT      out_stages,
-    const VkSpecializationInfo*                         spec_info,
+    const ZHLN_ShaderStages* ZHLN_RESTRICT               stages,
+    VkPipelineShaderStageCreateInfo* ZHLN_RESTRICT       out_stages,
+    const VkSpecializationInfo*                          spec_info,
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* vs_mapping,
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* ps_mapping
 );
@@ -355,9 +355,9 @@ typedef struct ZHLN_GraphicsPipelineDesc {
     // each stage maps its legacy set/binding decorations onto heap offsets
     // through its mapping chain. Push constants are replaced by
     // vkCmdPushDataEXT for such pipelines.
-    const bool                                                     descriptor_heap;
-    const VkShaderDescriptorSetAndBindingMappingInfoEXT* const     vs_mapping;
-    const VkShaderDescriptorSetAndBindingMappingInfoEXT* const     ps_mapping;
+    const bool                                                 descriptor_heap;
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT* const vs_mapping;
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT* const ps_mapping;
 
     const VkVertexInputBindingDescription* const ZHLN_RESTRICT   vertex_bindings;
     const VkVertexInputAttributeDescription* const ZHLN_RESTRICT vertex_attributes;

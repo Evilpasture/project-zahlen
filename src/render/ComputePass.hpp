@@ -21,13 +21,14 @@ struct ComputePass {
 
     /// VK_EXT_descriptor_heap: null pipeline layout (spec-required) +
     /// set/binding -> heap mapping.
-    [[nodiscard]] std::expected<void, ZHLN::Error> BuildHeap(
-        VkDevice device, const ZHLN_ShaderDesc& shader, const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping
-    ) noexcept;
+    [[nodiscard]] std::expected<void, ZHLN::Error>
+        BuildHeap(VkDevice device, const ZHLN_ShaderDesc& shader, const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping) noexcept;
 
     /// Heap-mode specialized variants (same mapping covers every variant).
     [[nodiscard]] std::expected<void, ZHLN::Error> BuildHeapVariants(
-        VkDevice device, const ZHLN_ShaderDesc& shader, std::span<const VkSpecializationInfo> specInfos,
+        VkDevice                                             device,
+        const ZHLN_ShaderDesc&                               shader,
+        std::span<const VkSpecializationInfo>                specInfos,
         const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping
     ) noexcept;
 
@@ -69,8 +70,8 @@ struct ComputePass {
     // Like DispatchHeap, but also pushes the descriptor-index word consumed by
     // HEAP_WITH_PUSH_INDEX mappings (frame parity / mip level / pass id).
     template <GpuTriviallyCopyable T>
-    void DispatchHeapIndexed(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex, uint32_t x, uint32_t y, uint32_t z, const T& pushData)
-        const noexcept {
+    void
+        DispatchHeapIndexed(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex, uint32_t x, uint32_t y, uint32_t z, const T& pushData) const noexcept {
         static_assert(sizeof(T) <= kHeapIndexPushOffset, "Pass push struct overruns the descriptor-index word");
         Bind(cmd);
         PushData(ctx, cmd, 0, pushData);
@@ -90,8 +91,8 @@ struct ComputePass {
 template <typename LayoutT>
 struct DoubleBufferedComputePass {
     [[no_unique_address]] LayoutT layoutInstance {};
-    Pipeline                     pipeline;
-    HeapPassBindings             heapBindings;
+    Pipeline                      pipeline;
+    HeapPassBindings              heapBindings;
 
     [[nodiscard]] bool BuildHeap(VkDevice device, HeapManager& heap, const ZHLN_ShaderDesc& shader) noexcept {
         // Reflect the binding structure (drives the mapping table), then build

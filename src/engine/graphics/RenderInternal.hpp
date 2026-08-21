@@ -186,11 +186,11 @@ static constexpr uint32_t kSceneDynamicResourceSlots = 32;
 static constexpr uint32_t kSceneStaticSamplerSlots   = 16;
 static constexpr uint32_t kSceneDynamicSamplerSlots  = 8;
 static constexpr uint32_t kGlobalTextureSlots        = 32768; // bindless globalTextures[] region
-static constexpr uint32_t kPassStaticResourceSlots   = 1024; // descriptor-heap passes (mip spans, parity pairs)
+static constexpr uint32_t kPassStaticResourceSlots   = 1024;  // descriptor-heap passes (mip spans, parity pairs)
 static constexpr uint32_t kPassStaticSamplerSlots    = 64;
 static constexpr uint32_t kPassResourceHeapBase      = kSceneStaticResourceSlots + kGlobalTextureSlots;
 static constexpr uint32_t kPassSamplerHeapBase       = kSceneStaticSamplerSlots;
-static constexpr uint32_t kImGuiTextureSlots         = 512;  // ImGui texture region (tail of the pass slots)
+static constexpr uint32_t kImGuiTextureSlots         = 512; // ImGui texture region (tail of the pass slots)
 
 // Push-data layout (vkCmdPushDataEXT): per-draw struct at offset 0; the
 // per-frame scene-buffer device-address block (6 x uint64) lives at this
@@ -236,13 +236,11 @@ using ClusterCullingLayout        = Vk::SlangReflectedLayout;
 using BakeLayout                  = Vk::SlangReflectedLayout;
 using DecalLayout                 = Vk::SlangReflectedLayout;
 
-
 using ActiveGBuffer = Vk::GBufferLayout<
     Vk::RenderTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32>, // Index 0: sceneColor
     Vk::RenderTarget<VK_FORMAT_R16G16_SFLOAT>,           // Index 1: velocityBuffer
     Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>           // Index 2: normalRoughnessBuffer
     >;
-
 
 enum class Stage : uint8_t {
     ShadowPass,
@@ -688,7 +686,7 @@ struct RenderContext::Impl {
     Vk::TextureHandle decalDepthSlot;
     uint32_t          textureHeapBase = 0; // first slot of the globalTextures[] region
 
-    VkPipelineLayout   emptyPipelineLayout = VK_NULL_HANDLE; // Spec-required null layout for every descriptor-heap pipeline
+    VkPipelineLayout emptyPipelineLayout = VK_NULL_HANDLE; // Spec-required null layout for every descriptor-heap pipeline
 
     Vk::Sampler globalSampler;
     Vk::Sampler clampSampler;
@@ -730,7 +728,7 @@ struct RenderContext::Impl {
     ZHLN::Array<Vk::ImageView>             shadowCascadeViewsPrev;
 
     Vk::PipelineLayout skinningPipelineLayout;
-    VkPipelineLayout   shadowPipelineLayout = VK_NULL_HANDLE; // Raw alias of the spec-required null heap layout
+    VkPipelineLayout   shadowPipelineLayout         = VK_NULL_HANDLE; // Raw alias of the spec-required null heap layout
     VkPipelineLayout   punctualShadowPipelineLayout = VK_NULL_HANDLE; // Raw alias of the spec-required null heap layout
 
     Vk::TypedPipeline<0, true> shadowPipeline;
@@ -744,26 +742,30 @@ struct RenderContext::Impl {
     VkPipelineLayout            particleRenderLayout = VK_NULL_HANDLE; // Raw alias of the spec-required null heap layout
     Vk::TypedPipeline<1, false> particleRenderPipeline;
 
-    Vk::ComputePass    meshParticleUpdatePass;
-    VkPipelineLayout   meshParticleRenderLayout = VK_NULL_HANDLE; // Raw alias of the spec-required null heap layout
-    Vk::Pipeline       meshParticleRenderPipeline;
-    Vk::Pipeline       meshParticleShadowPipeline;
+    Vk::ComputePass  meshParticleUpdatePass;
+    VkPipelineLayout meshParticleRenderLayout = VK_NULL_HANDLE; // Raw alias of the spec-required null heap layout
+    Vk::Pipeline     meshParticleRenderPipeline;
+    Vk::Pipeline     meshParticleShadowPipeline;
 
-    Vk::SlangReflectedLayout decalDescLayout; // Reflection only: decal bindings map onto the heaps
+    Vk::SlangReflectedLayout decalDescLayout;                      // Reflection only: decal bindings map onto the heaps
     VkPipelineLayout         decalPipelineLayout = VK_NULL_HANDLE; // Raw alias of the spec-required null heap layout
     Vk::Pipeline             decalPipeline;
 
-    VkPipelineLayout   linePipelineLayout = VK_NULL_HANDLE; // Raw alias of the spec-required null heap layout
-    Vk::Pipeline       linePipeline;
-    uint32_t           activeLineVertexCount = 0;
-    uint32_t           lineInstanceId        = 0;
+    VkPipelineLayout linePipelineLayout = VK_NULL_HANDLE; // Raw alias of the spec-required null heap layout
+    Vk::Pipeline     linePipeline;
+    uint32_t         activeLineVertexCount = 0;
+    uint32_t         lineInstanceId        = 0;
 
     std::expected<void, Error> BuildLinePipeline();
     std::expected<void, Error> InitLineBuffers() noexcept;
     std::expected<void, Error> AllocateDynamicVertexBuffers(
-        size_t maxVertices, DoubleBuffered<Vk::Buffer>& bufs, DoubleBuffered<VkDeviceAddress>& addrs, VkBufferUsageFlags extraFlags, const char* label
+        size_t                           maxVertices,
+        DoubleBuffered<Vk::Buffer>&      bufs,
+        DoubleBuffered<VkDeviceAddress>& addrs,
+        VkBufferUsageFlags               extraFlags,
+        const char*                      label
     ) noexcept;
-    void                       FlushLineQueue();
+    void FlushLineQueue();
 
     // --- Indirect-draw telemetry (enabled via ZHLN_DEBUG_INDIRECT=1) ---
     // The GPU-only indirect/counter buffers cannot be mapped, so the frame
@@ -802,9 +804,9 @@ struct RenderContext::Impl {
     void                       WriteTextureSlotToHeap(uint32_t bindlessIndex, VkImage image, VkFormat format, uint32_t mipLevels, bool cube) noexcept;
     void                       InitPassSamplerDescriptors() noexcept;
 
-    Vk::SlangReflectedLayout      cullingLayout;  // Reflection only: drives the heap binding table
-    Vk::ComputePass              hizGeneratePass;
-    Vk::SlangReflectedLayout      hizDescLayout;  // Reflection only
+    Vk::SlangReflectedLayout cullingLayout; // Reflection only: drives the heap binding table
+    Vk::ComputePass          hizGeneratePass;
+    Vk::SlangReflectedLayout hizDescLayout; // Reflection only
 
     Vk::SlangReflectedLayout clusterCullingDescLayout; // Reflection only
     Vk::SlangReflectedLayout clusterBoundsDescLayout;  // Reflection only
@@ -838,13 +840,13 @@ struct RenderContext::Impl {
     RenderQueues          queues;
     ZHLN::Array<GPULight> mappedLights;
 
-    Vk::Pipeline       csgWritePipeline;
-    Vk::Pipeline       csgDifferencePipeline;
-    Vk::Pipeline       csgIntersectionPipeline;
-    VkPipelineLayout   csgPipelineLayout = VK_NULL_HANDLE; // Raw alias of the spec-required null heap layout
+    Vk::Pipeline     csgWritePipeline;
+    Vk::Pipeline     csgDifferencePipeline;
+    Vk::Pipeline     csgIntersectionPipeline;
+    VkPipelineLayout csgPipelineLayout = VK_NULL_HANDLE; // Raw alias of the spec-required null heap layout
 
-    Vk::Pipeline       uiPipeline;
-    VkPipelineLayout   uiPipelineLayout = VK_NULL_HANDLE; // Raw alias of the spec-required null heap layout
+    Vk::Pipeline     uiPipeline;
+    VkPipelineLayout uiPipelineLayout = VK_NULL_HANDLE; // Raw alias of the spec-required null heap layout
 
     std::expected<void, Error> InitUIDynamicBuffers() noexcept;
 
@@ -1107,7 +1109,7 @@ struct FrameRecorder {
     // with SetHeapState). Such secondaries must not bind their own heaps —
     // doing so would invalidate the primary's heap state after execution —
     // and the recorder already re-pushed the per-frame device-address block.
-    bool                                       heapsInherited;
+    bool heapsInherited;
 
     FrameRecorder(Vk::CommandBuffer<Vk::QueueType::Graphics> c, RenderContext::Impl& impl, bool inherited = false) noexcept:
         cmd(c), encoder(c.handle, &impl.ctx), ctx(impl), frameIndex(impl.frame_index), heapsInherited(inherited) {

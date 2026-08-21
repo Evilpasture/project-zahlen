@@ -9,9 +9,8 @@
 namespace ZHLN::Vk {
 
 template <typename LayoutT>
-bool PostProcessPass<LayoutT>::BuildHeap(
-    VkDevice device, HeapManager& heap, const ShaderStages& shaders, std::initializer_list<VkFormat> colorFormats, bool additive
-) noexcept {
+bool PostProcessPass<
+    LayoutT>::BuildHeap(VkDevice device, HeapManager& heap, const ShaderStages& shaders, std::initializer_list<VkFormat> colorFormats, bool additive) noexcept {
     // Reflection only: the binding structure drives the mapping table.
     if (!layoutInstance.Build(device, shaders)) {
         return false;
@@ -40,8 +39,12 @@ bool PostProcessPass<LayoutT>::BuildHeap(
 
 template <typename LayoutT>
 bool PostProcessPass<LayoutT>::BuildHeapVariants(
-    VkDevice device, HeapManager& heap, const ShaderStages& shaders, std::initializer_list<VkFormat> colorFormats,
-    std::span<const VkSpecializationInfo> specInfos, bool additive
+    VkDevice                              device,
+    HeapManager&                          heap,
+    const ShaderStages&                   shaders,
+    std::initializer_list<VkFormat>       colorFormats,
+    std::span<const VkSpecializationInfo> specInfos,
+    bool                                  additive
 ) noexcept {
     // Specialization does not change the descriptor interface, so one mapping
     // table covers every variant.
@@ -85,8 +88,8 @@ void PostProcessPass<LayoutT>::WriteHeap(const Context& ctx, HeapManager& heap, 
 
 template <typename LayoutT>
 template <GpuTriviallyCopyable T>
-void PostProcessPass<LayoutT>::ExecuteHeap(const Context& ctx, VkCommandBuffer cmd, const T& pushData, uint32_t heapIndex, VkShaderStageFlags stages)
-    const noexcept {
+void PostProcessPass<
+    LayoutT>::ExecuteHeap(const Context& ctx, VkCommandBuffer cmd, const T& pushData, uint32_t heapIndex, VkShaderStageFlags stages) const noexcept {
     static_assert(sizeof(T) <= kHeapIndexPushOffset, "Pass push struct overruns the descriptor-index word");
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Get());
     PushData(ctx, cmd, 0, pushData);
@@ -97,7 +100,12 @@ void PostProcessPass<LayoutT>::ExecuteHeap(const Context& ctx, VkCommandBuffer c
 template <typename LayoutT>
 template <GpuTriviallyCopyable T>
 void PostProcessPass<LayoutT>::ExecuteVariantHeap(
-    const Context& ctx, VkCommandBuffer cmd, uint32_t variantIdx, const T& pushData, uint32_t heapIndex, VkShaderStageFlags stages
+    const Context&     ctx,
+    VkCommandBuffer    cmd,
+    uint32_t           variantIdx,
+    const T&           pushData,
+    uint32_t           heapIndex,
+    VkShaderStageFlags stages
 ) const noexcept {
     static_assert(sizeof(T) <= kHeapIndexPushOffset, "Pass push struct overruns the descriptor-index word");
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines[variantIdx].Get());

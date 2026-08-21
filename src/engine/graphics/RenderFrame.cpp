@@ -60,12 +60,9 @@ auto RenderContext::Impl::FrameHeapAddresses() const noexcept -> std::array<VkDe
     // Order must match the PUSH_ADDRESS mapping offsets baked in
     // BuildSceneHeapMappings: {frame, lights, instances, joints, prevJoints, morphDeltas}.
     return {
-        ctx.BufferAddress(frames.frameUniformBuffers[frame_index].Handle()),
-        ctx.BufferAddress(frames.lightStorageBuffers[frame_index].Handle()),
-        ctx.BufferAddress(frames.instanceDataBuffers[frame_index].Handle()),
-        ctx.BufferAddress(frames.jointBuffers[frame_index].Handle()),
-        ctx.BufferAddress(frames.jointBuffers[frame_index ^ 1].Handle()),
-        ctx.BufferAddress(morphDeltasBuffer.Handle()),
+        ctx.BufferAddress(frames.frameUniformBuffers[frame_index].Handle()), ctx.BufferAddress(frames.lightStorageBuffers[frame_index].Handle()),
+        ctx.BufferAddress(frames.instanceDataBuffers[frame_index].Handle()), ctx.BufferAddress(frames.jointBuffers[frame_index].Handle()),
+        ctx.BufferAddress(frames.jointBuffers[frame_index ^ 1].Handle()),    ctx.BufferAddress(morphDeltasBuffer.Handle()),
     };
 }
 

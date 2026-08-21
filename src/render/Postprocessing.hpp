@@ -23,7 +23,11 @@ struct PostProcessPass {
     HeapPassBindings              heapBindings;
 
     [[nodiscard]] bool BuildHeap(
-        VkDevice device, HeapManager& heap, const ShaderStages& shaders, std::initializer_list<VkFormat> colorFormats, bool additive = false
+        VkDevice                        device,
+        HeapManager&                    heap,
+        const ShaderStages&             shaders,
+        std::initializer_list<VkFormat> colorFormats,
+        bool                            additive = false
     ) noexcept;
 
     [[nodiscard]] bool BuildHeapVariants(
@@ -42,12 +46,21 @@ struct PostProcessPass {
     void WriteHeap(const Context& ctx, HeapManager& heap, uint32_t heapIndex, Args&&... args) const noexcept;
 
     template <GpuTriviallyCopyable T>
-    void ExecuteHeap(const Context& ctx, VkCommandBuffer cmd, const T& pushData, uint32_t heapIndex, VkShaderStageFlags stages = VK_SHADER_STAGE_FRAGMENT_BIT)
-        const noexcept;
+    void ExecuteHeap(
+        const Context&     ctx,
+        VkCommandBuffer    cmd,
+        const T&           pushData,
+        uint32_t           heapIndex,
+        VkShaderStageFlags stages = VK_SHADER_STAGE_FRAGMENT_BIT
+    ) const noexcept;
 
     template <GpuTriviallyCopyable T>
     void ExecuteVariantHeap(
-        const Context& ctx, VkCommandBuffer cmd, uint32_t variantIdx, const T& pushData, uint32_t heapIndex,
+        const Context&     ctx,
+        VkCommandBuffer    cmd,
+        uint32_t           variantIdx,
+        const T&           pushData,
+        uint32_t           heapIndex,
         VkShaderStageFlags stages = VK_SHADER_STAGE_FRAGMENT_BIT
     ) const noexcept;
 

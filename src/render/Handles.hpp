@@ -35,13 +35,13 @@ class DeviceHandle {
 // NOTE: RAII handles which call destructors from C. Inlinable with LTO.
 // (DescriptorSetLayout / DescriptorPool handles were removed with the
 // descriptor-set model; the frame consumes descriptor heaps instead.)
-using ShaderModule        = DeviceHandle<VkShaderModule, ZHLN_DestroyShaderModule>;
-using PipelineLayout      = DeviceHandle<VkPipelineLayout, ZHLN_DestroyPipelineLayout>;
-using Pipeline            = DeviceHandle<VkPipeline, ZHLN_DestroyPipeline>;
-using Semaphore           = DeviceHandle<VkSemaphore, ZHLN_DestroySemaphore>;
-using Sampler             = DeviceHandle<VkSampler, ZHLN_DestroySampler>;
+using ShaderModule   = DeviceHandle<VkShaderModule, ZHLN_DestroyShaderModule>;
+using PipelineLayout = DeviceHandle<VkPipelineLayout, ZHLN_DestroyPipelineLayout>;
+using Pipeline       = DeviceHandle<VkPipeline, ZHLN_DestroyPipeline>;
+using Semaphore      = DeviceHandle<VkSemaphore, ZHLN_DestroySemaphore>;
+using Sampler        = DeviceHandle<VkSampler, ZHLN_DestroySampler>;
 
-using ImageView           = DeviceHandle<VkImageView, ZHLN_DestroyImageView>;
+using ImageView = DeviceHandle<VkImageView, ZHLN_DestroyImageView>;
 
 } // namespace ZHLN::Vk
 #include "Handles.inl"

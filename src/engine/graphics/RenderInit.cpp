@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // File: src/engine/RenderInit.cpp
+#include "../TTYBackend.hpp"
 #include "IBLProcessor.hpp"
 #include "RenderInternal.hpp"
 #include "Resources.hpp"
 #include "SMAALUTGenerator.hpp"
 #include "backends/imgui_impl_glfw.h"
-#include "imgui_impl_vulkan_heap.h"
-#include "../TTYBackend.hpp"
 #include "imgui.h"
+#include "imgui_impl_vulkan_heap.h"
 #include <Features.hpp>
 #include <StagingContext.hpp>
 #include <Zahlen/Core/Reflection.hpp>
@@ -379,9 +379,7 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
         // format, but only some passes actually bind stencil; this feature lets
         // them draw inside stencil-less render passes (and stencil-less
         // secondary command buffers) without format-mismatch VUIDs.
-        .Require<VkPhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT>([](auto& f) {
-            f.dynamicRenderingUnusedAttachments = VK_TRUE;
-        })
+        .Require<VkPhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT>([](auto& f) { f.dynamicRenderingUnusedAttachments = VK_TRUE; })
         .Require<VkPhysicalDeviceFeatures2>([&](auto& f) {
             f.features.multiDrawIndirect         = VK_TRUE;
             f.features.samplerAnisotropy         = VK_TRUE;
@@ -432,8 +430,13 @@ std::expected<Vk::ExtensionResult, Error> GetDeviceExtensions(VkPhysicalDevice p
 
 template <typename LayoutT>
 [[nodiscard]] std::expected<void, Error> BuildPassHelper(
-    RenderContext::Impl* self, Vk::PostProcessPass<LayoutT>& pass, const char* passName, VertexStageSource vs, FragmentStageSource ps,
-    std::initializer_list<VkFormat> colorFormats, bool additive = false
+    RenderContext::Impl*            self,
+    Vk::PostProcessPass<LayoutT>&   pass,
+    const char*                     passName,
+    VertexStageSource               vs,
+    FragmentStageSource             ps,
+    std::initializer_list<VkFormat> colorFormats,
+    bool                            additive = false
 ) noexcept {
     return self->LoadAndCreateShaders(vs, ps).and_then([&](auto&& shaders) -> std::expected<void, Error> {
         // VK_EXT_descriptor_heap: the pass is a heap pipeline (null layout,
@@ -450,8 +453,14 @@ template <typename LayoutT>
 
 template <typename LayoutT>
 [[nodiscard]] std::expected<void, Error> BuildPassVariants(
-    RenderContext::Impl* self, Vk::PostProcessPass<LayoutT>& pass, const char* passName, VertexStageSource vs, FragmentStageSource ps,
-    std::initializer_list<VkFormat> colorFormats, std::span<const VkSpecializationInfo> specInfos, bool additive = false
+    RenderContext::Impl*                  self,
+    Vk::PostProcessPass<LayoutT>&         pass,
+    const char*                           passName,
+    VertexStageSource                     vs,
+    FragmentStageSource                   ps,
+    std::initializer_list<VkFormat>       colorFormats,
+    std::span<const VkSpecializationInfo> specInfos,
+    bool                                  additive = false
 ) noexcept {
     return self->LoadAndCreateShaders(vs, ps).and_then([&](auto&& shaders) -> std::expected<void, Error> {
         // VK_EXT_descriptor_heap: specialization never changes the descriptor
@@ -624,7 +633,11 @@ RenderContext::~RenderContext() {
 }
 
 std::expected<void, Error> RenderContext::Impl::AllocateDynamicVertexBuffers(
-    size_t maxVertices, DoubleBuffered<Vk::Buffer>& bufs, DoubleBuffered<VkDeviceAddress>& addrs, VkBufferUsageFlags extraFlags, const char* label
+    size_t                           maxVertices,
+    DoubleBuffered<Vk::Buffer>&      bufs,
+    DoubleBuffered<VkDeviceAddress>& addrs,
+    VkBufferUsageFlags               extraFlags,
+    const char*                      label
 ) noexcept {
     const size_t bufferSize = maxVertices * (sizeof(VertexPosition) + sizeof(VertexAttributes));
 
@@ -676,10 +689,7 @@ std::expected<void, Error> RenderContext::Impl::BuildLinePipeline() {
 std::expected<void, Error> RenderContext::Impl::InitShadowResources() {
     using enum RenderInitError;
 
-    auto shadowSamplerBuilder = Vk::SamplerBuilder {}
-                                     .Linear()
-                                     .ClampToBorder(VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE)
-                                     .DepthCompare();
+    auto shadowSamplerBuilder = Vk::SamplerBuilder {}.Linear().ClampToBorder(VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE).DepthCompare();
 
     return shadowSamplerBuilder.Build(ctx.Device())
         .transform_error([](auto err) -> Error { return err; })
@@ -735,19 +745,25 @@ std::expected<void, Error> RenderContext::Impl::InitShadowResources() {
 
         // 5. Create Atlas Image Views
         .and_then([&]() -> std::expected<void, Error> {
-            shadowAtlasCubeView = Vk::CreateViewCubeArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), graphResources.shadowAtlas.image.Handle(), 24);
-            shadowAtlas2DView   = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), graphResources.shadowAtlas.image.Handle(), 0, 24);
+            shadowAtlasCubeView     = Vk::CreateViewCubeArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), graphResources.shadowAtlas.image.Handle(), 24);
+            shadowAtlas2DView       = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), graphResources.shadowAtlas.image.Handle(), 0, 24);
             shadowAtlasCubeViewInfo = {
-                .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .pNext = nullptr, .flags = 0,
-                .image = graphResources.shadowAtlas.image.Handle(), .viewType = VK_IMAGE_VIEW_TYPE_CUBE_ARRAY,
-                .format = VK_FORMAT_D32_SFLOAT,
+                .sType      = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+                .pNext      = nullptr,
+                .flags      = 0,
+                .image      = graphResources.shadowAtlas.image.Handle(),
+                .viewType   = VK_IMAGE_VIEW_TYPE_CUBE_ARRAY,
+                .format     = VK_FORMAT_D32_SFLOAT,
                 .components = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY},
                 .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 24},
             };
             shadowAtlas2DViewInfo = {
-                .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .pNext = nullptr, .flags = 0,
-                .image = graphResources.shadowAtlas.image.Handle(), .viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
-                .format = VK_FORMAT_D32_SFLOAT,
+                .sType      = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+                .pNext      = nullptr,
+                .flags      = 0,
+                .image      = graphResources.shadowAtlas.image.Handle(),
+                .viewType   = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+                .format     = VK_FORMAT_D32_SFLOAT,
                 .components = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY},
                 .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 24},
             };
@@ -868,15 +884,15 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
                 // ZHLN_DEBUG_INDIRECT readback (end-of-frame head copy).
                 return Vk::Buffer::Create(
                     allocator.Get(), sizeof(uint32_t) * kGpuCullingMaxInstances,
-                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                    VMA_MEMORY_USAGE_GPU_ONLY
+                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY
                 );
             })
             .and_then([&, i](auto&& spcb) {
                 frames.secondPassCandidatesBuffers[i] = std::forward<decltype(spcb)>(spcb);
                 return Vk::Buffer::Create(
                     allocator.Get(), sizeof(uint32_t),
-                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                     VMA_MEMORY_USAGE_GPU_ONLY
                 );
             })
@@ -912,7 +928,9 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
                         ZHLN::Log("[RenderInit] ERROR: Failed to reflect cluster-culling layout!");
                         return std::unexpected(RenderInitError::PipelineCreationFailed);
                     }
-                    Vk::BuildHeapPassBindings(heapManager, clusterCullingDescLayout.reflectedSets[0], 0, Vk::kHeapIndexPushOffset, 2, clusterCullingHeapBindings);
+                    Vk::BuildHeapPassBindings(
+                        heapManager, clusterCullingDescLayout.reflectedSets[0], 0, Vk::kHeapIndexPushOffset, 2, clusterCullingHeapBindings
+                    );
 
                     auto make_cluster_set = [&](uint32_t i) -> std::expected<void, Error> {
                         return Vk::Buffer::Create(
@@ -1090,11 +1108,8 @@ std::expected<void, Error> RenderContext::Impl::InitBindless() {
         .and_then([&]() -> std::expected<void, Error> {
             // Build the samplers first: their VkSamplerCreateInfo values are
             // what vkWriteSamplerDescriptorsEXT consumes for the sampler heap.
-            auto globalBuilder = Vk::SamplerBuilder {}
-                                     .Linear()
-                                     .Repeat()
-                                     .Anisotropy(ctx.PhysicalInfo().properties.properties.limits.maxSamplerAnisotropy)
-                                     .LodRange(0.0f, 0.0f);
+            auto globalBuilder =
+                Vk::SamplerBuilder {}.Linear().Repeat().Anisotropy(ctx.PhysicalInfo().properties.properties.limits.maxSamplerAnisotropy).LodRange(0.0f, 0.0f);
             auto clampBuilder = Vk::SamplerBuilder {}.Linear().ClampToEdge();
 
             return globalBuilder.Build(ctx.Device())
@@ -1139,7 +1154,8 @@ std::expected<void, Error> RenderContext::Impl::InitBindless() {
         });
 }
 
-std::expected<void, Error> RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSamplerInfo, const VkSamplerCreateInfo& clampSamplerInfo) noexcept {
+std::expected<void, Error>
+    RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSamplerInfo, const VkSamplerCreateInfo& clampSamplerInfo) noexcept {
     auto init_res = heapManager.Init(
         ctx, allocator, kSceneStaticResourceSlots + kGlobalTextureSlots + kPassStaticResourceSlots, kSceneDynamicResourceSlots,
         kSceneStaticSamplerSlots + kPassStaticSamplerSlots, kSceneDynamicSamplerSlots, 2
@@ -1154,8 +1170,8 @@ std::expected<void, Error> RenderContext::Impl::InitSceneHeaps(const VkSamplerCr
     // descriptor-index word (kHeapIndexPushOffset + 4).
     if (heapManager.PushDataMaxSize() < (Vk::kHeapIndexPushOffset + 4)) [[unlikely]] {
         ZHLN::Log(
-            "[RenderInit] ERROR: maxPushDataSize ({}) too small for the push-data layout (needs {})",
-            heapManager.PushDataMaxSize(), Vk::kHeapIndexPushOffset + 4
+            "[RenderInit] ERROR: maxPushDataSize ({}) too small for the push-data layout (needs {})", heapManager.PushDataMaxSize(),
+            Vk::kHeapIndexPushOffset + 4
         );
         return std::unexpected(RenderInitError::PipelineCreationFailed);
     }
@@ -1255,9 +1271,9 @@ void RenderContext::Impl::BuildSceneHeapMappings() noexcept {
                     entry.sourceData.constantOffset.heapOffset = static_cast<uint32_t>(heapManager.SamplerOffset(globalSamplerSlot.index));
                     break;
                 case 1: // frame (uniform buffer)
-                    entry.resourceMask                  = VK_SPIRV_RESOURCE_TYPE_UNIFORM_BUFFER_BIT_EXT;
-                    entry.source                        = VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT;
-                    entry.sourceData.pushAddressOffset  = kHeapFrameAddrPushOffset + 0 * sizeof(uint64_t);
+                    entry.resourceMask                 = VK_SPIRV_RESOURCE_TYPE_UNIFORM_BUFFER_BIT_EXT;
+                    entry.source                       = VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT;
+                    entry.sourceData.pushAddressOffset = kHeapFrameAddrPushOffset + 0 * sizeof(uint64_t);
                     break;
                 case 2: // lights
                 case 3: // g_instances
@@ -1285,9 +1301,9 @@ void RenderContext::Impl::BuildSceneHeapMappings() noexcept {
                     entry.sourceData.constantOffset.heapOffset = static_cast<uint32_t>(heapManager.ResourceOffset(transLightingSlot.index));
                     break;
                 case 11: // globalTextures[] - the bindless texture array
-                    entry.resourceMask = VK_SPIRV_RESOURCE_TYPE_SAMPLED_IMAGE_BIT_EXT;
-                    entry.sourceData.constantOffset.heapOffset       = static_cast<uint32_t>(heapManager.ResourceOffset(textureHeapBase));
-                    entry.sourceData.constantOffset.heapArrayStride  = static_cast<uint32_t>(heapManager.ResourceStride());
+                    entry.resourceMask                              = VK_SPIRV_RESOURCE_TYPE_SAMPLED_IMAGE_BIT_EXT;
+                    entry.sourceData.constantOffset.heapOffset      = static_cast<uint32_t>(heapManager.ResourceOffset(textureHeapBase));
+                    entry.sourceData.constantOffset.heapArrayStride = static_cast<uint32_t>(heapManager.ResourceStride());
                     break;
                 default:
                     continue; // Unknown binding: nothing to map
@@ -1358,9 +1374,7 @@ void RenderContext::Impl::WriteTransLightingToHeap() noexcept {
     if (!graphResources.transLightingTarget.Valid() || !transLightingSlot.Valid()) {
         return;
     }
-    const auto info = Vk::MakeViewCreateInfo2D(
-        graphResources.transLightingTarget.image.Handle(), VK_FORMAT_R16G16B16A16_SFLOAT, 1, VK_IMAGE_ASPECT_COLOR_BIT
-    );
+    const auto info = Vk::MakeViewCreateInfo2D(graphResources.transLightingTarget.image.Handle(), VK_FORMAT_R16G16B16A16_SFLOAT, 1, VK_IMAGE_ASPECT_COLOR_BIT);
     heapManager.WriteImage(transLightingSlot, info, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 
@@ -1559,8 +1573,7 @@ std::expected<void, Error> RenderContext::Impl::BuildBloomPipelines() {
                          return BuildPassHelper(
                              this, bloomDownPass[i], downName.c_str(),
                              {.path = Resource::Paths::BloomBlurVS, .fallback = Resource::GetShaderProgram(BloomBlur).vertex},
-                             {.path = Resource::Paths::BloomBlurPS, .fallback = Resource::GetShaderProgram(BloomBlur).fragment},
-                             {VK_FORMAT_R16G16B16A16_SFLOAT}
+                             {.path = Resource::Paths::BloomBlurPS, .fallback = Resource::GetShaderProgram(BloomBlur).fragment}, {VK_FORMAT_R16G16B16A16_SFLOAT}
                          );
                      }
         ).and_then([&, i]() {
@@ -1698,16 +1711,14 @@ std::expected<void, Error> RenderContext::Impl::InitPostProcessing() {
         .and_then([&](auto defaultResult) -> std::expected<void, Error> {
             defaultSampler     = std::move(defaultResult);
             defaultSamplerInfo = defaultSamplerBuilder.Info();
-            auto pointBuilder = Vk::SamplerBuilder {}.Nearest().ClampToEdge();
-            return pointBuilder.Build(ctx.Device())
-                .transform_error([](auto err) -> Error { return err; })
-                .transform([&](auto pointResult) {
-                    pointSampler     = std::move(pointResult);
-                    pointSamplerInfo = pointBuilder.Info();
-                    // The decal pass samples through the sampler heap: write the
-                    // point-sampler descriptor into its static heap slot.
-                    WritePointSamplerToHeap(pointBuilder.Info());
-                });
+            auto pointBuilder  = Vk::SamplerBuilder {}.Nearest().ClampToEdge();
+            return pointBuilder.Build(ctx.Device()).transform_error([](auto err) -> Error { return err; }).transform([&](auto pointResult) {
+                pointSampler     = std::move(pointResult);
+                pointSamplerInfo = pointBuilder.Info();
+                // The decal pass samples through the sampler heap: write the
+                // point-sampler descriptor into its static heap slot.
+                WritePointSamplerToHeap(pointBuilder.Info());
+            });
         })
         .and_then([&]() { return register_and_check("TAA", [this]() { return BuildTAAPipeline(); }, {Resource::Paths::TaaVS, Resource::Paths::TaaPS}); })
         .and_then([&]() { return register_and_check("FXAA", [this]() { return BuildFXAAPipeline(); }, {Resource::Paths::FxaaVS, Resource::Paths::FxaaPS}); })
@@ -1803,7 +1814,7 @@ std::expected<void, Error> RenderContext::Impl::InitCSGPipelines() {
         .and_then([&](auto&& compiledShaders) {
             shaders = std::forward<decltype(compiledShaders)>(compiledShaders);
 
-            csgPipelineLayout = emptyPipelineLayout;
+            csgPipelineLayout             = emptyPipelineLayout;
             VkStencilOpState writeStencil = {
                 .failOp      = VK_STENCIL_OP_KEEP,
                 .passOp      = VK_STENCIL_OP_REPLACE,
@@ -1986,17 +1997,16 @@ std::expected<void, Error> RenderContext::Impl::SetupUI(GLFWwindow* window) {
                     .MinAllocationSize          = 0,
                     .CustomShaderVertCreateInfo = {},
                     .CustomShaderFragCreateInfo = {},
-                    .HeapInfo =
-                        {
-                            .HeapContext        = &ctx,
-                            .HeapManager        = &heapManager,
-                            .ResourceSlotBase   = imguiTextureHeapBase,
-                            .ResourceSlotCount  = kImGuiTextureSlots,
-                            .ResourceStride     = static_cast<uint32_t>(heapManager.ResourceStride()),
-                            .SamplerSlotLinear  = imguiSamplerLinear->index,
-                            .SamplerSlotNearest = imguiSamplerNearest->index,
-                            .SamplerStride      = static_cast<uint32_t>(heapManager.SamplerStride()),
-                        },
+                    .HeapInfo                   = {
+                        .HeapContext        = &ctx,
+                        .HeapManager        = &heapManager,
+                        .ResourceSlotBase   = imguiTextureHeapBase,
+                        .ResourceSlotCount  = kImGuiTextureSlots,
+                        .ResourceStride     = static_cast<uint32_t>(heapManager.ResourceStride()),
+                        .SamplerSlotLinear  = imguiSamplerLinear->index,
+                        .SamplerSlotNearest = imguiSamplerNearest->index,
+                        .SamplerStride      = static_cast<uint32_t>(heapManager.SamplerStride()),
+                    },
                 };
 
                 return make_expected(ImGui_ImplVulkanHeap_Init(&init_info), RenderInitError::UISetupFailed);
@@ -2135,8 +2145,8 @@ std::expected<void, Error> RenderContext::Impl::InitLightingLUTs() {
 
             stagingContext->ExecuteAsync();
 
-            ltcMatView = Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcMatImage.Handle());
-            ltcAmpView = Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcAmpImage.Handle());
+            ltcMatView     = Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcMatImage.Handle());
+            ltcAmpView     = Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcAmpImage.Handle());
             ltcMatViewInfo = Vk::MakeViewCreateInfo2D(ltcMatImage.Handle(), VK_FORMAT_R16G16B16A16_SFLOAT, 1, VK_IMAGE_ASPECT_COLOR_BIT);
             ltcAmpViewInfo = Vk::MakeViewCreateInfo2D(ltcAmpImage.Handle(), VK_FORMAT_R16G16B16A16_SFLOAT, 1, VK_IMAGE_ASPECT_COLOR_BIT);
 
@@ -2270,9 +2280,7 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
         // descriptors must select exactly one aspect (VUID-VkImageDescriptorInfoEXT-pView-11430);
         // decal.slang only reads the depth value.
         if (decalDepthSlot.Valid()) {
-            const auto info = Vk::MakeViewCreateInfo2D(
-                presentation.depthTarget.image.Handle(), VK_FORMAT_D32_SFLOAT_S8_UINT, 1, VK_IMAGE_ASPECT_DEPTH_BIT
-            );
+            const auto info = Vk::MakeViewCreateInfo2D(presentation.depthTarget.image.Handle(), VK_FORMAT_D32_SFLOAT_S8_UINT, 1, VK_IMAGE_ASPECT_DEPTH_BIT);
             heapManager.WriteImage(decalDepthSlot, info, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         }
 
@@ -2325,9 +2333,12 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
     const uint32_t mips = std::min<uint32_t>(graphResources.hizMap.mipLevels, 16);
     for (uint32_t m = 0; m < mips; ++m) {
         const Vk::TypedImage<VK_IMAGE_LAYOUT_GENERAL> outMip {
-            .handle = graphResources.hizMap.image.Handle(), .view = graphResources.hizMap.mipViews[m].Get(),
-            .extent = {.width = graphResources.hizMap.extent.width, .height = graphResources.hizMap.extent.height, .depth = 1},
-            .aspect = VK_IMAGE_ASPECT_COLOR_BIT, .format = VK_FORMAT_R32_SFLOAT, .viewInfo = &graphResources.hizMap.mipViewInfos[m]
+            .handle   = graphResources.hizMap.image.Handle(),
+            .view     = graphResources.hizMap.mipViews[m].Get(),
+            .extent   = {.width = graphResources.hizMap.extent.width, .height = graphResources.hizMap.extent.height, .depth = 1},
+            .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
+            .format   = VK_FORMAT_R32_SFLOAT,
+            .viewInfo = &graphResources.hizMap.mipViewInfos[m]
         };
         if (m == 0) {
             Vk::WriteHeapBindings(
@@ -2335,9 +2346,12 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
             );
         } else {
             const Vk::TypedImage<VK_IMAGE_LAYOUT_GENERAL> inMip {
-                .handle = graphResources.hizMap.image.Handle(), .view = graphResources.hizMap.mipViews[m - 1].Get(),
-                .extent = {.width = graphResources.hizMap.extent.width, .height = graphResources.hizMap.extent.height, .depth = 1},
-                .aspect = VK_IMAGE_ASPECT_COLOR_BIT, .format = VK_FORMAT_R32_SFLOAT, .viewInfo = &graphResources.hizMap.mipViewInfos[m - 1]
+                .handle   = graphResources.hizMap.image.Handle(),
+                .view     = graphResources.hizMap.mipViews[m - 1].Get(),
+                .extent   = {.width = graphResources.hizMap.extent.width, .height = graphResources.hizMap.extent.height, .depth = 1},
+                .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
+                .format   = VK_FORMAT_R32_SFLOAT,
+                .viewInfo = &graphResources.hizMap.mipViewInfos[m - 1]
             };
             Vk::WriteHeapBindings(heapManager, ctx, hizHeapBindings, m, inMip, outMip, Vk::SkipWrite {});
         }
@@ -2348,8 +2362,8 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
     // g_indirectCommands, g_hizTexture, g_pointSampler,
     // secondPassCandidates, secondPassCount.
     for (uint32_t idx = 0; idx < 4; ++idx) {
-        const uint32_t pass   = idx >> 1;
-        const uint32_t parity = idx & 1;
+        const uint32_t pass     = idx >> 1;
+        const uint32_t parity   = idx & 1;
         const auto&    indirect = (pass == 0) ? frames.indirectCommandsBuffers[parity] : frames.indirectCommandsBuffersPass2[parity];
         Vk::WriteHeapBindings(
             heapManager, ctx, cullingHeapBindings, idx, frames.instanceDataBuffers[parity], indirect,

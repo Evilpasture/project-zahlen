@@ -45,9 +45,9 @@ struct RenderTarget {
 
 template <VkFormat F>
 struct RenderTarget3D {
-    Image      image;
-    ImageView  view;
-    VkExtent3D extent {};
+    Image                 image;
+    ImageView             view;
+    VkExtent3D            extent {};
     VkImageViewCreateInfo viewInfo {};
 
     RenderTarget3D()  = default;
@@ -70,12 +70,12 @@ struct RenderTarget3D {
 
 template <VkFormat F>
 struct MipmappedRenderTarget {
-    Image                  image;
-    ImageView              fullView;
-    std::vector<ImageView> mipViews;
-    VkExtent2D             extent {};
-    uint32_t               mipLevels = 1;
-    VkImageViewCreateInfo           fullViewInfo {};
+    Image                              image;
+    ImageView                          fullView;
+    std::vector<ImageView>             mipViews;
+    VkExtent2D                         extent {};
+    uint32_t                           mipLevels = 1;
+    VkImageViewCreateInfo              fullViewInfo {};
     std::vector<VkImageViewCreateInfo> mipViewInfos;
 
     MipmappedRenderTarget() = default;
@@ -120,7 +120,7 @@ struct MipmappedRenderTarget {
             target.mipViewInfos.reserve(target.mipLevels);
             for (uint32_t m = 0; m < target.mipLevels; ++m) {
                 target.mipViews.push_back(CreateViewSingleMip<F>(ctx.Device(), target.image.Handle(), m, GetFormatAspect(F)));
-                VkImageViewCreateInfo mipInfo = MakeViewCreateInfo2D(target.image.Handle(), F, 1, GetFormatAspect(F));
+                VkImageViewCreateInfo mipInfo         = MakeViewCreateInfo2D(target.image.Handle(), F, 1, GetFormatAspect(F));
                 mipInfo.subresourceRange.baseMipLevel = m;
                 target.mipViewInfos.push_back(mipInfo);
             }

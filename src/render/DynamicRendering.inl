@@ -431,14 +431,18 @@ inline void ExecutePasses(VkCommandBuffer cmd, std::span<const PassDesc> passes)
     }
 }
 
-
 // ============================================================================
 // Attachment Clear Helpers (wraps vkCmdClearAttachments for in-pass clears)
 // ============================================================================
 
 /// Clears one attachment region inside the current render pass instance.
 inline void ClearAttachment(
-    VkCommandBuffer cmd, VkImageAspectFlags aspectMask, VkExtent2D extent, const VkClearValue& value, uint32_t baseArrayLayer = 0, uint32_t layerCount = 1
+    VkCommandBuffer     cmd,
+    VkImageAspectFlags  aspectMask,
+    VkExtent2D          extent,
+    const VkClearValue& value,
+    uint32_t            baseArrayLayer = 0,
+    uint32_t            layerCount     = 1
 ) noexcept {
     const VkClearAttachment attachment = {
         .aspectMask      = aspectMask,

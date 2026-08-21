@@ -41,7 +41,8 @@ enum class DescriptorHeapsTestError : uint8_t {
     RenderOutputBlank[[= ZHLN::Reflect::Description("Rendered frame is blank or failed to capture.")]],
     HeapTextureArrayWrong[[= ZHLN::Reflect::Description("Not enough distinct texture colors resolved through the heap texture array.")]],
     BoundaryTextureIndexMissing[[= ZHLN::Reflect::Description("A texture beyond the static heap-slot boundary did not resolve.")]],
-    PushAddressFrameBlockStale[[= ZHLN::Reflect::Description("Camera movement did not change the frame, implying the per-frame push-address block was stale.")]],
+    PushAddressFrameBlockStale[
+        [= ZHLN::Reflect::Description("Camera movement did not change the frame, implying the per-frame push-address block was stale.")]],
 };
 
 struct DescriptorHeapsSuite {
@@ -186,29 +187,30 @@ struct DescriptorHeapsSuite {
                 std::array<uint32_t, 8 * 8> texelBlock {};
                 texelBlock.fill(texel);
 
-                const std::string texName = std::format("dheap_tex_{:02}", i);
-                ZHLN::TextureHandle tex   = rc.CreateProceduralTexture(texName, 8, 8, false, texelBlock.data());
+                const std::string   texName = std::format("dheap_tex_{:02}", i);
+                ZHLN::TextureHandle tex     = rc.CreateProceduralTexture(texName, 8, 8, false, texelBlock.data());
                 if (tex == ZHLN::TextureHandle::Invalid) {
                     return std::unexpected(DescriptorHeapsTestError::TextureCreationFailed);
                 }
 
                 auto matRes = ZHLN::CreativeWorksFactory::CreateMaterial(
-                    rc, ZHLN::CreativeWorksFactory::MaterialDesc {
-                            .metallic = 0.0f, .roughness = 1.0f, .baseColor = {1.0f, 1.0f, 1.0f, 1.0f}}
+                    rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 1.0f, .baseColor = {1.0f, 1.0f, 1.0f, 1.0f}}
                 );
                 if (!matRes) {
                     return std::unexpected(DescriptorHeapsTestError::MaterialCreationFailed);
                 }
-                ZHLN::Material mat    = *matRes;
-                mat.albedoMap         = tex;
+                ZHLN::Material mat = *matRes;
+                mat.albedoMap      = tex;
 
-                const uint32_t col = i % kGridCols;
-                const uint32_t row = i / kGridCols;
+                const uint32_t  col = i % kGridCols;
+                const uint32_t  row = i / kGridCols;
                 const JPH::Vec3 pos(firstCol + static_cast<float>(col) * spacing, firstRow + static_cast<float>(row) * spacing, 0.0f);
 
                 ZHLN::CreativeWorksFactory::CreateBox(
                     *engine, JPH::Vec3(halfExtent, halfExtent, halfExtent),
-                    ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(pos.GetX(), pos.GetY(), pos.GetZ()), .createPhysics = false, .materialOverride = mat}
+                    ZHLN::CreativeWorksFactory::SpawnParams {
+                        .position = JPH::RVec3(pos.GetX(), pos.GetY(), pos.GetZ()), .createPhysics = false, .materialOverride = mat
+                    }
                 );
             }
 
@@ -220,8 +222,8 @@ struct DescriptorHeapsSuite {
                 ZHLN::Test::ExpectEq(status, ZHLN::GameplayStatus::OK);
             }
 
-            uint32_t                   width = 0, height = 0;
-            auto                       pixelsRes = CapturePixels(rc, "headless_dheap_array.ppm", width, height);
+            uint32_t width = 0, height = 0;
+            auto     pixelsRes = CapturePixels(rc, "headless_dheap_array.ppm", width, height);
             if (!pixelsRes) {
                 return std::unexpected(pixelsRes.error());
             }
@@ -234,10 +236,10 @@ struct DescriptorHeapsSuite {
                 int      bestIdx = -1;
                 uint32_t bestDst = ~0U;
                 for (uint32_t i = 0; i < kTextureCount; ++i) {
-                    const int dr = static_cast<int>(pixels[px + 0]) - static_cast<int>(palette[i][0]);
-                    const int dg = static_cast<int>(pixels[px + 1]) - static_cast<int>(palette[i][1]);
-                    const int db = static_cast<int>(pixels[px + 2]) - static_cast<int>(palette[i][2]);
-                    const uint32_t d = static_cast<uint32_t>(dr * dr + dg * dg + db * db);
+                    const int      dr = static_cast<int>(pixels[px + 0]) - static_cast<int>(palette[i][0]);
+                    const int      dg = static_cast<int>(pixels[px + 1]) - static_cast<int>(palette[i][1]);
+                    const int      db = static_cast<int>(pixels[px + 2]) - static_cast<int>(palette[i][2]);
+                    const uint32_t d  = static_cast<uint32_t>(dr * dr + dg * dg + db * db);
                     if (d < bestDst) {
                         bestDst = d;
                         bestIdx = static_cast<int>(i);
@@ -305,7 +307,7 @@ struct DescriptorHeapsSuite {
             // Pin the main-camera entity to our values so the camera system
             // does not overwrite the mid-test pan.
             const auto applyCameraPose = [&](float yaw) {
-                cam.yaw = yaw;
+                cam.yaw      = yaw;
                 auto camEnts = reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>();
                 if (!camEnts.empty()) {
                     reg.Patch<ZHLN::Components::TargetCameraComponent>(camEnts[0], [yaw](auto& tc) {
@@ -370,8 +372,8 @@ struct DescriptorHeapsSuite {
             }
 
             // Count pixels that changed substantially between the two views.
-            uint64_t changed = 0;
-            const size_t count = std::min(frameA->size(), frameB->size());
+            uint64_t     changed = 0;
+            const size_t count   = std::min(frameA->size(), frameB->size());
             for (size_t i = 0; i < count; ++i) {
                 const int d = static_cast<int>((*frameA)[i]) - static_cast<int>((*frameB)[i]);
                 if (d < -24 || d > 24) {

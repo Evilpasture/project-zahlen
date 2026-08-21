@@ -78,7 +78,7 @@ class Context {
 
     [[nodiscard]] auto
         WriteResourceDescriptors(uint32_t count, const VkResourceDescriptorInfoEXT* resources, const VkHostAddressRangeEXT* descriptors) const noexcept
-            -> VkResult {
+        -> VkResult {
         if (_device.pfn_write_resource_descriptors == nullptr) {
             return VK_ERROR_EXTENSION_NOT_PRESENT;
         }

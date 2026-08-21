@@ -29,8 +29,8 @@ struct SecondaryInheritance {
 
     // Optional per-frame push-data block (e.g. the scene registry's device
     // addresses): pushed once into every secondary right after it begins.
-    uint32_t                                   pushDataFrameOffset = 0;
-    std::span<const VkDeviceAddress>           pushDataFrameAddresses;
+    uint32_t                         pushDataFrameOffset = 0;
+    std::span<const VkDeviceAddress> pushDataFrameAddresses;
 };
 
 namespace detail {

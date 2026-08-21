@@ -36,7 +36,7 @@ struct ReflectedSet {
 
 /// A single SPIR-V blob + stage to reflect over (union across stages).
 struct ReflectedStageInput {
-    ZHLN_ShaderDesc        shader;
+    ZHLN_ShaderDesc       shader;
     VkShaderStageFlagBits stage;
 };
 
@@ -48,11 +48,11 @@ class UnsafeReflectedLayoutBuilder {
   public:
     UnsafeReflectedLayoutBuilder() noexcept = default;
 
-    UnsafeReflectedLayoutBuilder(UnsafeReflectedLayoutBuilder&&)                         = delete;
-    UnsafeReflectedLayoutBuilder& operator=(UnsafeReflectedLayoutBuilder&&)              = delete;
-    UnsafeReflectedLayoutBuilder(const UnsafeReflectedLayoutBuilder&)                    = delete;
-    UnsafeReflectedLayoutBuilder& operator=(const UnsafeReflectedLayoutBuilder&)         = delete;
-    ~UnsafeReflectedLayoutBuilder() noexcept                                             = default;
+    UnsafeReflectedLayoutBuilder(UnsafeReflectedLayoutBuilder&&)                 = delete;
+    UnsafeReflectedLayoutBuilder& operator=(UnsafeReflectedLayoutBuilder&&)      = delete;
+    UnsafeReflectedLayoutBuilder(const UnsafeReflectedLayoutBuilder&)            = delete;
+    UnsafeReflectedLayoutBuilder& operator=(const UnsafeReflectedLayoutBuilder&) = delete;
+    ~UnsafeReflectedLayoutBuilder() noexcept                                     = default;
 
     /// Registers one shader stage for reflection.
     void AddStageUnsafe(const ZHLN_ShaderDesc& desc, VkShaderStageFlags stage) noexcept;

@@ -21,10 +21,10 @@ auto UnsafeReflectedLayoutBuilder::BuildUnsafe(std::array<ReflectedSet, 4>& out)
 
     // Sorted map: SetIndex -> BindingIndex -> binding (merged across stages).
     struct MergedBinding {
-        VkDescriptorType        type  = VK_DESCRIPTOR_TYPE_MAX_ENUM;
-        uint32_t                count = 0;
-        VkShaderStageFlags      stages = 0;
-        VkDescriptorBindingFlags flags = 0;
+        VkDescriptorType         type   = VK_DESCRIPTOR_TYPE_MAX_ENUM;
+        uint32_t                 count  = 0;
+        VkShaderStageFlags       stages = 0;
+        VkDescriptorBindingFlags flags  = 0;
     };
     std::map<uint32_t, std::map<uint32_t, MergedBinding>> merged_sets;
 
@@ -44,14 +44,14 @@ auto UnsafeReflectedLayoutBuilder::BuildUnsafe(std::array<ReflectedSet, 4>& out)
             for (uint32_t b = 0; b < reflected_set->binding_count; ++b) {
                 const auto* rb = reflected_set->bindings[b];
 
-                auto& merged     = merged_sets[reflected_set->set][rb->binding];
-                merged.type      = static_cast<VkDescriptorType>(rb->descriptor_type);
+                auto& merged = merged_sets[reflected_set->set][rb->binding];
+                merged.type  = static_cast<VkDescriptorType>(rb->descriptor_type);
                 // Runtime-sized arrays (Slang `T arr[]` in a ParameterBlock)
                 // reflect with count == 0; treat them as bindless pools.
                 const bool is_runtime_array = (rb->count == 0);
                 const bool is_bindless_pool = is_runtime_array || (rb->count >= 1024);
                 merged.count                = is_bindless_pool ? 4096 : rb->count;
-                merged.stages              |= stage.stage;
+                merged.stages |= stage.stage;
                 if (is_bindless_pool) {
                     merged.flags = VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
                 }

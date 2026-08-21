@@ -11,8 +11,7 @@ std::expected<void, Error> RenderContext::Impl::BuildProceduralBakePipeline() {
     // Reflect the bake layout out of the compiled shader instead of allocating
     // from a static C++ descriptor-layout typedef.
     if (!proceduralBakeDescLayout.Build(
-            ctx.Device(), Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::ProceduralBakeComp).vertex, "CSMain"),
-            VK_SHADER_STAGE_COMPUTE_BIT
+            ctx.Device(), Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::ProceduralBakeComp).vertex, "CSMain"), VK_SHADER_STAGE_COMPUTE_BIT
         )) {
         ZHLN::Log("[Shader] Failed to reflect procedural bake layout!");
         return std::unexpected(RenderInitError::PipelineCreationFailed);

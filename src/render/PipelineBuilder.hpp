@@ -41,9 +41,9 @@ struct PipelineConfig {
     // chain. `layout` must then be VK_NULL_HANDLE
     // (VUID-VkGraphicsPipelineCreateInfo-flags-11311); push data replaces
     // both descriptor set layouts and push constant ranges.
-    bool                                                     descriptor_heap = false;
-    const VkShaderDescriptorSetAndBindingMappingInfoEXT*     vs_mapping      = nullptr;
-    const VkShaderDescriptorSetAndBindingMappingInfoEXT*     ps_mapping      = nullptr;
+    bool                                                 descriptor_heap = false;
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT* vs_mapping      = nullptr;
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT* ps_mapping      = nullptr;
 
     // Vertex input (populated by Vertex<T>())
     const VkVertexInputBindingDescription*   bindings       = nullptr;
@@ -106,9 +106,8 @@ class PipelineBuilder {
     /// per-stage set/binding -> heap mappings (may be null for stages whose
     /// resources are all BDA/push-data backed). The layout must be
     /// VK_NULL_HANDLE (spec-required for heap pipelines).
-    auto HeapMappings(
-        const VkShaderDescriptorSetAndBindingMappingInfoEXT* vsMapping, const VkShaderDescriptorSetAndBindingMappingInfoEXT* psMapping
-    ) noexcept -> PipelineBuilder& {
+    auto HeapMappings(const VkShaderDescriptorSetAndBindingMappingInfoEXT* vsMapping, const VkShaderDescriptorSetAndBindingMappingInfoEXT* psMapping) noexcept
+        -> PipelineBuilder& {
         _cfg.descriptor_heap = true;
         _cfg.vs_mapping      = vsMapping;
         _cfg.ps_mapping      = psMapping;
@@ -347,13 +346,13 @@ class ComputePipelineBuilder {
   private:
     [[nodiscard]] auto Validate() const noexcept -> PipelineBuilderResult;
 
-    const uint32_t*             _code                = nullptr;
-    size_t                      _size                = 0;
-    const char*                 _entry               = nullptr;
-    VkPipelineLayout            _layout              = VK_NULL_HANDLE;
-    const VkSpecializationInfo* _specialization_info = nullptr;
-    bool                        _descriptor_heap     = false;
-    const VkShaderDescriptorSetAndBindingMappingInfoEXT* _mapping = nullptr;
+    const uint32_t*                                      _code                = nullptr;
+    size_t                                               _size                = 0;
+    const char*                                          _entry               = nullptr;
+    VkPipelineLayout                                     _layout              = VK_NULL_HANDLE;
+    const VkSpecializationInfo*                          _specialization_info = nullptr;
+    bool                                                 _descriptor_heap     = false;
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT* _mapping             = nullptr;
 };
 
 class PipelineLayoutBuilder {

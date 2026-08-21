@@ -260,7 +260,10 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> std::expected<Ma
             // globalTextures[] heap region via per-instance texIndices.
             const VkPipelineLayout layout = impl->emptyPipelineLayout;
             {
-                auto pipeline = Vk::PipelineBuilder {}.Shaders(shaders).Layout(layout).HeapMappings(&impl->sceneHeapMappings.info, &impl->sceneHeapMappings.info)
+                auto pipeline = Vk::PipelineBuilder {}
+                                    .Shaders(shaders)
+                                    .Layout(layout)
+                                    .HeapMappings(&impl->sceneHeapMappings.info, &impl->sceneHeapMappings.info)
                                     .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT);
 
                 if (desc.doubleSided) {
@@ -292,7 +295,7 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> std::expected<Ma
                     })
                     .transform([impl, layout, &desc](auto&& compiledPipeline) -> auto {
                         return Material {
-                            .pipeline = impl->materialPool.Create(std::forward<decltype(compiledPipeline)>(compiledPipeline), layout),
+                            .pipeline  = impl->materialPool.Create(std::forward<decltype(compiledPipeline)>(compiledPipeline), layout),
                             .alphaMode = (desc.alphaBlend || desc.additiveBlend) ? 2u : 0u
                         };
                     });
@@ -359,9 +362,9 @@ auto RenderContext::RegisterTexture(std::string_view name, uint32_t bindlessInde
 void RenderContext::Impl::WriteTextureSlotToHeap(uint32_t bindlessIndex, VkImage image, VkFormat format, uint32_t mipLevels, bool cube) noexcept {
     // The globalTextures[] array is pinned to a contiguous heap region by the
     // binding-11 mapping; index N lives at slot (textureHeapBase + N).
-    Vk::TextureHandle slot {textureHeapBase + bindlessIndex};
-    const VkImageViewCreateInfo info =
-        cube ? Vk::MakeViewCreateInfoCube(image, format, mipLevels) : Vk::MakeViewCreateInfo2D(image, format, mipLevels, VK_IMAGE_ASPECT_COLOR_BIT);
+    Vk::TextureHandle           slot {textureHeapBase + bindlessIndex};
+    const VkImageViewCreateInfo info = cube ? Vk::MakeViewCreateInfoCube(image, format, mipLevels) :
+                                              Vk::MakeViewCreateInfo2D(image, format, mipLevels, VK_IMAGE_ASPECT_COLOR_BIT);
     heapManager.WriteImage(slot, info, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 

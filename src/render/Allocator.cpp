@@ -146,8 +146,8 @@ auto Buffer::Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usag
     }
 
     Buffer b;
-    b._handle       = {allocator, buffer, alloc};
-    b._info         = info;
+    b._handle        = {allocator, buffer, alloc};
+    b._info          = info;
     b._requestedSize = size;
     return b;
 }
