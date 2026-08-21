@@ -297,7 +297,7 @@ add_shader_target(decal_shader
 # ============================================================================
 
 set(SHADER_CONSUMING_FILES
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/Resources.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/graphics/Resources.cpp"
 )
 
 # Expand target files to include both original and transpiled source paths
