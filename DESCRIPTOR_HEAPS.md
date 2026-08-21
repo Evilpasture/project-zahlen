@@ -147,7 +147,20 @@ These port by the same recipe: reflect the layout → allocate static heap slots
 + `VkDescriptorSetAndBindingMappingEXT` entries → `BuildHeap`/`HeapMappings` →
 `BindHeapsAndPushFrame` at segment start → `DrawHeap`/`DispatchHeap`.
 
-## 6. Follow-up Checklist
+## 6. Test Coverage
+
+* `tests/render/TestDescriptorHeaps.cpp` — 64 distinct procedural textures
+  rendered through the `globalTextures[]` CONSTANT_OFFSET heap region
+  (including indices past the static-slot boundary), plus a per-frame
+  PUSH_ADDRESS-block check (camera pan must change the image).
+* `tests/render/TestDescriptorHeapsParallel.cpp` — forces
+  `ZHLN_NO_GPU_CULLING` so MainPass1 records 400 heap-based draws into
+  parallel secondary command buffers that inherit the primary's heap
+  bindings and re-push the per-frame device-address block.
+* Both run with validation layers enabled (`ValidationMode::On`), so heap
+  VUID violations fail the suite.
+
+## 7. Follow-up Checklist
 
 - [ ] Port HiZ / culling / cluster passes (image + buffer bindings).
 - [ ] Port volumetric passes.
@@ -162,7 +175,7 @@ These port by the same recipe: reflect the layout → allocate static heap slots
 - [ ] Remove the now-unused `DescriptorLayout` DSL and `legacy/` pass helpers
       once no legacy pass references them.
 
-## 7. Requirements Bumped
+## 8. Requirements Bumped
 
 * Vulkan SDK ≥ 1.4.321 (headers/loader with `VK_EXT_descriptor_heap`).
 * Driver with `VK_EXT_descriptor_heap` + `VK_KHR_maintenance5`
