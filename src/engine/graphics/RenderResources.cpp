@@ -139,6 +139,10 @@ void RenderContext::SetMeshShadingEnabled(bool enabled) noexcept {
     Diag::SetMeshShadingDisabled(!enabled);
 }
 
+uint32_t RenderContext::ValidationErrorCount() noexcept {
+    return ZHLN_GetValidationErrorCount();
+}
+
 // ============================================================================
 // RenderContext Subsystem Implementation
 // ============================================================================

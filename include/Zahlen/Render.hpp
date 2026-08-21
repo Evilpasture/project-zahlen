@@ -201,7 +201,12 @@ class ZHLN_API RenderContext {
     [[nodiscard]] bool MeshShadingActive() const noexcept;
     /// Runtime override of ZHLN_NO_MESH_SHADING. Call between frames only;
     /// both pipelines are always built, so this only changes which is bound.
-    void         SetMeshShadingEnabled(bool enabled) noexcept;
+    void SetMeshShadingEnabled(bool enabled) noexcept;
+
+    /// Validation-layer errors seen so far (0 when validation is off). Snapshot
+    /// it around a workload to assert that the workload is VUID-clean.
+    [[nodiscard]] static uint32_t ValidationErrorCount() noexcept;
+
     RenderResult BuildMeshBLAS(Mesh& mesh) noexcept;
 
     [[nodiscard]] std::expected<void, Error> SetShadowResolution(uint32_t resolution);

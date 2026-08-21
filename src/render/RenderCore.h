@@ -171,6 +171,18 @@ typedef struct ZHLN_MeshShaderLimits {
  * `supported` is false when the device does not advertise VK_EXT_mesh_shader,
  * in which case all limits read back as zero.
  */
+/* --- VALIDATION DIAGNOSTICS --- */
+
+/**
+ * @brief Number of VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR messages reported by
+ * the validation layer since process start (or the last reset).
+ * Always 0 when validation is disabled.
+ */
+[[nodiscard]]
+uint32_t ZHLN_GetValidationErrorCount(void);
+
+void ZHLN_ResetValidationErrorCount(void);
+
 [[nodiscard]]
 ZHLN_MeshShaderLimits ZHLN_QueryMeshShaderLimits(VkPhysicalDevice physical);
 

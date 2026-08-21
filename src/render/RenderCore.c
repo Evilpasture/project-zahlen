@@ -9,6 +9,7 @@
 #include "RenderCore.h"
 #include <math.h>
 #include <spirv_reflect.h>
+#include <stdatomic.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -73,6 +74,19 @@ static inline uint64_t zhln_max_u64(uint64_t a, uint64_t b) {
 
 /* --- Start of procedural logic --- */
 
+// Validation-error accounting. Tests (and the console) can snapshot this around
+// a workload to assert that a feature does not introduce validation errors --
+// a suite that prints VUID violations and still reports PASS is not a test.
+static atomic_uint g_validation_error_count = 0;
+
+uint32_t ZHLN_GetValidationErrorCount(void) {
+    return atomic_load_explicit(&g_validation_error_count, memory_order_relaxed);
+}
+
+void ZHLN_ResetValidationErrorCount(void) {
+    atomic_store_explicit(&g_validation_error_count, 0, memory_order_relaxed);
+}
+
 static VkBool32 VKAPI_CALL ZHLN_Internal_DebugCallback(
     VkDebugUtilsMessageSeverityFlagBitsEXT      severity,
     VkDebugUtilsMessageTypeFlagsEXT             type,
@@ -86,6 +100,10 @@ static VkBool32 VKAPI_CALL ZHLN_Internal_DebugCallback(
         prefix = "VULKAN WARNING";
     } else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT) {
         prefix = "VULKAN INFO";
+    }
+
+    if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
+        atomic_fetch_add_explicit(&g_validation_error_count, 1, memory_order_relaxed);
     }
 
     fprintf(stderr, "[%s] %s\n", prefix, (data && data->pMessage) ? data->pMessage : "");

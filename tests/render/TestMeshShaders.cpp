@@ -49,6 +49,7 @@ enum class MeshShaderTestError : uint8_t {
     MeshletStreamsMissing[[= ZHLN::Reflect::Description("A mesh that must be meshletized carries no meshlet streams.")]],
     RenderOutputBlank[[= ZHLN::Reflect::Description("Rendered frame is blank or could not be captured.")]],
     PathDivergence[[= ZHLN::Reflect::Description("The mesh-shader path and the vertex path produced different images.")]],
+    ValidationErrorsRaised[[= ZHLN::Reflect::Description("The validation layer reported errors while rendering the comparison frames.")]],
     ToggleIneffective[[= ZHLN::Reflect::Description("SetMeshShadingEnabled() did not change the active geometry path.")]],
 };
 
@@ -110,6 +111,7 @@ struct Image {
 struct ImageDiff {
     uint32_t comparedPixels   = 0;
     uint32_t pixelsOverTol    = 0;
+    uint32_t pixelsOverHigh   = 0; // |delta| > 32: structural, not interpolation noise
     uint32_t maskMismatch     = 0;
     int      maxChannelDelta  = 0;
     double   meanChannelDelta = 0.0;
@@ -148,6 +150,9 @@ struct ImageDiff {
         if (worst > tolerance) {
             ++diff.pixelsOverTol;
         }
+        if (worst > 32) {
+            ++diff.pixelsOverHigh;
+        }
 
         // Silhouette comparison: a dropped meshlet, a flipped winding or a
         // mis-unpacked micro index puts geometry in DIFFERENT pixels, which
@@ -174,6 +179,26 @@ struct ImageDiff {
     return diff;
 }
 
+/// Writes an amplified absolute-difference image so a failing run leaves
+/// something inspectable behind instead of just a number.
+void WriteDiffImage(const std::string& path, const Image& a, const Image& b) {
+    if (!a.Valid() || !b.Valid() || a.width != b.width || a.height != b.height) {
+        return;
+    }
+    std::ofstream out(path, std::ios::binary);
+    if (!out.is_open()) {
+        return;
+    }
+    out << "P6\n" << a.width << " " << a.height << "\n255\n";
+
+    std::vector<uint8_t> amplified(a.rgb.size());
+    for (size_t i = 0; i < a.rgb.size(); ++i) {
+        const int d  = std::abs(static_cast<int>(a.rgb[i]) - static_cast<int>(b.rgb[i]));
+        amplified[i] = static_cast<uint8_t>(std::min(255, d * 4));
+    }
+    out.write(reinterpret_cast<const char*>(amplified.data()), static_cast<std::streamsize>(amplified.size()));
+}
+
 } // namespace
 
 // ============================================================================
@@ -182,6 +207,17 @@ struct ImageDiff {
 
 struct MeshShaderTestSuite {
     MeshShaderTestSuite() {
+        // Two-phase GPU culling is disabled process-wide (before any device
+        // exists, because the flag is latched into a static on first use).
+        //
+        // Rationale for the parity test: the mesh path bypasses the indirect
+        // culling pass by design, so leaving it on for the vertex path would
+        // compare two CULLING strategies rather than two geometry pipelines.
+        // Hi-Z culling is also temporal -- it tests against the previous
+        // frame's depth pyramid -- which injects frame-to-frame differences
+        // that have nothing to do with mesh shading.
+        setenv("ZHLN_NO_GPU_CULLING", "1", 1);
+
         ZHLN::Fiber::InitMainThread();
         ZHLN::TaskSystem::Init(2, 32, ZHLN::kMinimumFiberStackSize);
     }
@@ -435,11 +471,30 @@ struct MeshShaderTestSuite {
                 return {};
             }
 
-            // Determinism: fullbright removes lighting/shadow variance and TAA
-            // is disabled so no jitter history bleeds between the two phases.
+            // --- Determinism ---------------------------------------------
+            // fullBright bypasses lighting/shadow variance...
             auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
             if (!settingsEnts.empty()) {
                 reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) { pp.fullBright = 1; });
+            }
+
+            // ...and TAA has to be switched off AT ITS SOURCE. The camera's
+            // AASettingsComponent is authoritative: RenderSystem re-pushes it
+            // into the RenderContext every frame (so RenderContext::SetAAState
+            // alone is overwritten after one tick), and while it says TAA,
+            // CameraSystem jitters the projection matrix by a different
+            // sub-pixel offset every frame. Two captures taken at different
+            // jitter offsets differ on every high-contrast edge in the frame,
+            // which has nothing to do with the geometry pipeline.
+            for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::AASettingsComponent>()) {
+                reg.Patch<ZHLN::Components::AASettingsComponent>(e, [](auto& aa) {
+                    aa.state.mode        = ZHLN::AAMode::None;
+                    aa.state.jitterX     = 0.0f;
+                    aa.state.jitterY     = 0.0f;
+                    aa.state.prevJitterX = 0.0f;
+                    aa.state.prevJitterY = 0.0f;
+                    aa.state.frameIndex  = 0;
+                });
             }
             rc.SetAAState(ZHLN::AAState {.mode = ZHLN::AAMode::None});
 
@@ -471,24 +526,40 @@ struct MeshShaderTestSuite {
                 return LoadPPM(path);
             };
 
+            // --- Capture order: vertex, mesh, vertex ---------------------
+            // The two vertex captures bracket the mesh capture and establish a
+            // CONTROL: whatever the engine's own frame-to-frame nondeterminism
+            // is (residual temporal accumulation, driver scheduling), it shows
+            // up between them. Without this control there is no way to tell a
+            // real path divergence from engine noise -- an earlier revision of
+            // this test blamed the mesh path for TAA jitter for exactly that
+            // reason.
+            // Any VUID raised from here on is attributable to the frames this
+            // test renders. A suite that prints validation errors and still
+            // reports PASS is not verifying anything.
+            const uint32_t validationBefore = ZHLN::RenderContext::ValidationErrorCount();
+
+            const Image vertexA = renderAndCapture(false, "headless_meshshader_vertex_a.ppm");
+            ZHLN::Test::ExpectFalse(rc.MeshShadingActive());
+
             const Image meshImage = renderAndCapture(true, "headless_meshshader_mesh.ppm");
             ZHLN::Test::ExpectTrue(rc.MeshShadingActive());
 
-            const Image vertexImage = renderAndCapture(false, "headless_meshshader_vertex.ppm");
-            ZHLN::Test::ExpectFalse(rc.MeshShadingActive());
-
+            const Image vertexB = renderAndCapture(false, "headless_meshshader_vertex_b.ppm");
             rc.SetMeshShadingEnabled(true);
 
-            auto checkImages = ZHLN::Test::AssertTrue(meshImage.Valid() && vertexImage.Valid());
+            const uint32_t validationRaised = ZHLN::RenderContext::ValidationErrorCount() - validationBefore;
+
+            auto checkImages = ZHLN::Test::AssertTrue(meshImage.Valid() && vertexA.Valid() && vertexB.Valid());
             if (!checkImages) {
                 return std::unexpected(MeshShaderTestError::RenderOutputBlank);
             }
-            ZHLN::Test::ExpectEq(meshImage.width, vertexImage.width);
-            ZHLN::Test::ExpectEq(meshImage.height, vertexImage.height);
+            ZHLN::Test::ExpectEq(meshImage.width, vertexB.width);
+            ZHLN::Test::ExpectEq(meshImage.height, vertexB.height);
 
             // Guard against the degenerate pass: two blank frames match perfectly.
             const uint32_t meshShaded   = ShadedPixelCount(meshImage);
-            const uint32_t vertexShaded = ShadedPixelCount(vertexImage);
+            const uint32_t vertexShaded = ShadedPixelCount(vertexB);
             ZHLN::Test::ExpectTrue(meshShaded > 500u);
             ZHLN::Test::ExpectTrue(vertexShaded > 500u);
             if (meshShaded <= 500u || vertexShaded <= 500u) {
@@ -496,41 +567,64 @@ struct MeshShaderTestSuite {
                 return std::unexpected(MeshShaderTestError::RenderOutputBlank);
             }
 
-            // Geometric coverage must match closely: dropped meshlets, flipped
-            // winding or a broken micro-index unpack all show up here first.
             const uint32_t shadedMax     = std::max({meshShaded, vertexShaded, 1u});
             const double   coverageDelta = std::abs(static_cast<double>(meshShaded) - static_cast<double>(vertexShaded)) / static_cast<double>(shadedMax);
 
-            // Tolerance rationale: both paths transform identical vertices with
-            // identical math and feed the same rasteriser, so the frames should
-            // be essentially bit-identical. Only a +/-2 channel window is
-            // allowed, to absorb ULP-level interpolation differences from
-            // meshoptimizer reordering vertices inside a cluster.
-            //
-            // These thresholds are deliberately tight: validated against
-            // synthetic divergences, a 1 % pixel budget still let a 3-pixel
-            // geometry shift pass, so the silhouette mismatch rate below is the
-            // metric that actually catches misplaced geometry.
-            constexpr int    kChannelTolerance   = 2;
+            // +/-2 channels absorbs ULP-level interpolation differences caused
+            // by meshoptimizer reordering vertices inside a cluster.
+            constexpr int kChannelTolerance = 2;
+
+            // Absolute floors, used when the control is perfectly clean.
             constexpr double kMaxFractionOverTol = 0.001; // 0.1 % of pixels
             constexpr double kMaxCoverageDelta   = 0.005; // 0.5 % of shaded area
             constexpr double kMaxMaskMismatch    = 0.005; // 0.5 % of the silhouette
+            // How much worse than the engine's own noise floor the mesh path is
+            // allowed to be before we call it a divergence.
+            constexpr double kControlSlack = 2.0;
 
-            const ImageDiff diff = CompareImages(meshImage, vertexImage, kChannelTolerance);
+            const ImageDiff control = CompareImages(vertexA, vertexB, kChannelTolerance);
+            const ImageDiff diff    = CompareImages(vertexB, meshImage, kChannelTolerance);
 
             ZHLN::Println(
-                "    [INFO] mesh vs vertex: shaded {} / {}, coverage delta {}, silhouette mismatch {}, mean |delta| {}, max |delta| {}, over-tolerance "
-                "fraction {}.",
-                meshShaded, vertexShaded, coverageDelta, diff.maskMismatchRate, diff.meanChannelDelta, diff.maxChannelDelta, diff.fractionOverTol
+                "    [INFO] control (vertex vs vertex): over-tolerance {}, silhouette {}, mean |delta| {}, max |delta| {}, |delta|>32 pixels {}.",
+                control.fractionOverTol, control.maskMismatchRate, control.meanChannelDelta, control.maxChannelDelta, control.pixelsOverHigh
+            );
+            ZHLN::Println(
+                "    [INFO] mesh vs vertex: shaded {} / {}, coverage delta {}, over-tolerance {}, silhouette {}, mean |delta| {}, max |delta| {}, "
+                "|delta|>32 pixels {}.",
+                meshShaded, vertexShaded, coverageDelta, diff.fractionOverTol, diff.maskMismatchRate, diff.meanChannelDelta, diff.maxChannelDelta,
+                diff.pixelsOverHigh
             );
 
-            const bool coverageOk   = ZHLN::Test::ExpectTrue(coverageDelta <= kMaxCoverageDelta);
-            const bool pixelsOk     = ZHLN::Test::ExpectTrue(diff.fractionOverTol <= kMaxFractionOverTol);
-            const bool silhouetteOk = ZHLN::Test::ExpectTrue(diff.maskMismatchRate <= kMaxMaskMismatch);
+            const double pixelBudget    = std::max(kMaxFractionOverTol, control.fractionOverTol * kControlSlack);
+            const double maskBudget     = std::max(kMaxMaskMismatch, control.maskMismatchRate * kControlSlack);
+            const double coverageBudget = kMaxCoverageDelta;
+
+            const bool coverageOk   = ZHLN::Test::ExpectTrue(coverageDelta <= coverageBudget);
+            const bool pixelsOk     = ZHLN::Test::ExpectTrue(diff.fractionOverTol <= pixelBudget);
+            const bool silhouetteOk = ZHLN::Test::ExpectTrue(diff.maskMismatchRate <= maskBudget);
 
             if (!coverageOk || !pixelsOk || !silhouetteOk) {
-                ZHLN::Println("    [FAIL] Geometry paths diverged. Compare headless_meshshader_mesh.ppm against headless_meshshader_vertex.ppm.");
+                WriteDiffImage("headless_meshshader_diff.ppm", vertexB, meshImage);
+                ZHLN::Println(
+                    "    [FAIL] Geometry paths diverged beyond the engine's own noise floor (pixel budget {}, mask budget {}). "
+                    "Inspect headless_meshshader_diff.ppm (differences amplified 4x).",
+                    pixelBudget, maskBudget
+                );
                 return std::unexpected(MeshShaderTestError::PathDivergence);
+            }
+
+            // Checked last so a genuine image divergence is reported first, but
+            // still fatal: correct pixels produced through invalid API usage is
+            // not a pass.
+            if (validationRaised > 0) {
+                ZHLN::Println(
+                    "    [FAIL] {} validation error(s) raised while rendering the comparison frames. "
+                    "Re-run with ZHLN_NO_MESH_SHADING=1 to see whether they are specific to the mesh path.",
+                    validationRaised
+                );
+                ZHLN::Test::ExpectEq(validationRaised, 0u);
+                return std::unexpected(MeshShaderTestError::ValidationErrorsRaised);
             }
 
             return {};

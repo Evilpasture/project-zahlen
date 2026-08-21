@@ -190,8 +190,30 @@ and quietly stay on the vertex pipeline forever — the feature would look
 | `mesh_shading_runtime_toggle` | `SetMeshShadingEnabled()` actually flips the active path; unsupported devices never report the path as active. |
 | `mesh_and_vertex_paths_render_identically` | Renders the same scene twice in one process — once through task/mesh, once through the vertex pipeline — and compares the framebuffers. |
 
-The parity test is the real verification, so its comparator was itself
-validated against synthetic divergences (identical frames, a dropped cluster, a
+The parity test controls for engine nondeterminism explicitly:
+
+* **TAA must be disabled at its source.** The camera's `AASettingsComponent` is
+  authoritative — `RenderSystem` re-pushes it into the `RenderContext` every
+  frame (so `RenderContext::SetAAState` alone is overwritten after one tick),
+  and while it says TAA, `CameraSystem` jitters the projection by a different
+  sub-pixel offset every frame. The first revision of this test missed that and
+  blamed the mesh path for jitter: identical coverage (0.015 %) and silhouette
+  (0.083 %), but 1.14 % of pixels differing with a max delta of 196 — the exact
+  fingerprint of a half-pixel shift on high-contrast edges.
+* **Two-phase GPU culling is disabled process-wide** (`ZHLN_NO_GPU_CULLING`, set
+  before any device exists). The mesh path bypasses indirect culling by design,
+  so leaving it on would compare two *culling* strategies, and Hi-Z culling is
+  temporal (it tests against the previous frame's depth pyramid).
+* **A control measurement brackets the comparison.** The capture order is
+  vertex → mesh → vertex; the two vertex captures establish the engine's own
+  noise floor, and the mesh path is allowed to differ by at most twice that
+  (or the absolute floor, whichever is larger). Without a control there is no
+  way to distinguish a path divergence from engine noise.
+* **Validation errors fail the test.** `RenderContext::ValidationErrorCount()`
+  is snapshotted around the rendered frames; correct pixels produced through
+  invalid API usage is not a pass.
+
+The comparator was itself validated against synthetic divergences (identical frames, a dropped cluster, a
 1-pixel and a 3-pixel geometry shift, a ±2 ULP jitter, two blank frames, and a
 uniform shading change). Findings that shaped it:
 
