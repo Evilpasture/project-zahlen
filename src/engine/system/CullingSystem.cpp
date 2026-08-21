@@ -13,7 +13,6 @@
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Profiler.hpp>
 #include <Zahlen/ecs/ECS.hpp>
-#include <engine/Resources.hpp>
 #include <physics/PhysicsWorld.hpp>
 
 namespace ZHLN::Tests { namespace {

@@ -660,7 +660,7 @@ auto InstantiatePrefab(
                     if (opIt != instantiatedParts.end()) {
                         csgComp.modifiers.push_back({.operation = mod.operation, .operandEntity = opIt->second});
 
-                        Patch<Components::MeshComponent>(reg, opIt->second, [&](auto& cutMesh) -> auto { cutMesh.flags |= DrawFlags::Hidden; });
+                        reg.Patch<Components::MeshComponent>(opIt->second, [&](auto& cutMesh) -> auto { cutMesh.flags |= DrawFlags::Hidden; });
                     }
                 }
 
@@ -680,7 +680,7 @@ void SetupPlayerRagdoll(PhysicsContext& pc, ECS::Registry& reg, Entity playerEnt
 
     bool skeletonFound = false;
     for (Entity part: visualParts) {
-        Patch<Components::SkeletalMeshComponent>(reg, part, [&](auto& skelMesh) -> auto {
+        reg.Patch<Components::SkeletalMeshComponent>(part, [&](auto& skelMesh) -> auto {
             auto*  hier       = reg.Get<Components::HierarchyComponent>(part);
             Entity parentRoot = (hier != nullptr) ? hier->parent : NullEntity;
             if (parentRoot != NullEntity) {

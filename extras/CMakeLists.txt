@@ -52,7 +52,10 @@ if(ZHLN_EXTRAS_SOURCES)
     target_sources(zahlen_extras PRIVATE ${ZHLN_EXTRAS_SOURCES})
 endif()
 
-# 5. Link against engine core, reflection, and warning configurations
+# 5. Include directories for extras sub-modules (e.g. ALife headers)
+target_include_directories(zahlen_extras PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+# 6. Link against engine core, reflection, and warning configurations
 target_link_libraries(zahlen_extras PUBLIC zahlen_engine)
 target_link_libraries(zahlen_extras PRIVATE zahlen_warnings)
 

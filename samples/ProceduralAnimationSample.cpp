@@ -254,7 +254,7 @@ void SetFirstPersonMode(ZHLN::Engine& engine, ZHLN::Entity player, FirstPersonVi
         state.thirdPersonSaved = false;
     }
 
-    ZHLN::ECS::Patch<ZHLN::FirstPersonVisibilityComponent>(registry, player, [&](auto& visibility) -> auto {
+    registry.Patch<ZHLN::FirstPersonVisibilityComponent>(player, [&](auto& visibility) -> auto {
         visibility.eyeOffsetModel    = JPH::Vec3(0.0f, state.eyeUpOffset, state.eyeForwardOffset);
         visibility.lookYawDegrees    = state.lookYawOffset;
         visibility.lookPitchDegrees  = state.lookPitchOffset;
@@ -296,7 +296,7 @@ auto BuildProceduralArena(ZHLN::Engine& engine) -> void {
 
     // 1. Configure Post-Processing Atmosphere via ECS Patch
     for (ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
-        ZHLN::ECS::Patch<ZHLN::Components::PostProcessSettingsComponent>(reg, e, [](auto& pp) -> auto {
+        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(e, [](auto& pp) -> auto {
             pp.ambientExposure = kAmbientExposure;
             pp.skyZenith       = kSkyZenith;
             pp.skyHorizon      = kSkyHorizon;
@@ -398,11 +398,11 @@ auto CreateTestHandgun(ZHLN::Engine& engine, ZHLN::Entity player, float itemScal
             ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = material}
         );
         reg.Add(part, ZHLN::Components::HierarchyComponent {.parent = handgun});
-        ZHLN::ECS::Patch<ZHLN::Components::TransformComponent>(reg, part, [&](auto& transform) -> auto {
+        reg.Patch<ZHLN::Components::TransformComponent>(part, [&](auto& transform) -> auto {
             transform.position = JPH::Vec3(localPosition) * scale;
             transform.rotation = localRotation;
         });
-        ZHLN::ECS::Patch<ZHLN::Components::NameComponent>(reg, part, [&](auto& component) -> auto { component.name = ZHLN::String64(name); });
+        reg.Patch<ZHLN::Components::NameComponent>(part, [&](auto& component) -> auto { component.name = ZHLN::String64(name); });
     };
 
     const JPH::Vec4 darkMetal(0.10f, 0.12f, 0.15f, 1.0f);
@@ -574,7 +574,7 @@ auto AttachCharacterRig(
         // CharacterVirtual entity. Emissive VPLs have no hierarchy and are
         // safely ignored by Patch.
         for (uint32_t i = 1; i < writtenCount; ++i) {
-            ZHLN::ECS::Patch<ZHLN::Components::HierarchyComponent>(reg, parts[i], [&](auto& hier) -> auto { hier.parent = player; });
+            reg.Patch<ZHLN::Components::HierarchyComponent>(parts[i], [&](auto& hier) -> auto { hier.parent = player; });
         }
         if (writtenCount > 1) {
             CollectFirstPersonHeadMeshes(reg, *prefab, std::span<const ZHLN::Entity>(parts.data() + 1, writtenCount - 1), viewState);
@@ -707,7 +707,7 @@ auto main(int argc, char* argv[]) -> int {
         bool equipKeyDown = false;
         bool viewKeyDown  = false;
         for (ZHLN::Entity e: registry.GetEntitiesWith<ZHLN::Components::InputStateComponent>()) {
-            ZHLN::ECS::Patch<ZHLN::Components::InputStateComponent>(registry, e, [&](auto& st) -> auto {
+            registry.Patch<ZHLN::Components::InputStateComponent>(e, [&](auto& st) -> auto {
                 equipKeyDown = equipKeyDown || st.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::E));
                 viewKeyDown  = viewKeyDown || st.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::V));
                 if (viewState.enabled) {
@@ -730,7 +730,7 @@ auto main(int argc, char* argv[]) -> int {
         }
         if (equipKeyDown && !equipKeyWasDown) {
             handgunEquipped = !handgunEquipped;
-            ZHLN::ECS::Patch<ZHLN::Animation::ItemHandlingComponent>(registry, player, [&](auto& handling) -> auto {
+            registry.Patch<ZHLN::Animation::ItemHandlingComponent>(player, [&](auto& handling) -> auto {
                 handling.driverMode    = handgunEquipped ? ZHLN::Animation::ItemDriverMode::AimGuided : ZHLN::Animation::ItemDriverMode::BodyMounted;
                 handling.aimProgress   = handgunEquipped ? 1.0f : 0.0f;
                 const size_t gripCount = std::min(handling.gripCount, handling.grips.size());
@@ -746,7 +746,7 @@ auto main(int argc, char* argv[]) -> int {
         }
         viewState.toggleKeyWasDown = viewKeyDown;
         if (viewState.enabled) {
-            ZHLN::ECS::Patch<ZHLN::FirstPersonVisibilityComponent>(registry, player, [&](auto& visibility) -> auto {
+            registry.Patch<ZHLN::FirstPersonVisibilityComponent>(player, [&](auto& visibility) -> auto {
                 visibility.lookYawDegrees   = viewState.lookYawOffset;
                 visibility.lookPitchDegrees = viewState.lookPitchOffset;
             });
@@ -754,7 +754,7 @@ auto main(int argc, char* argv[]) -> int {
 
         // 2. Update Procedural Look-At Orbit via Multi-Component Patch
         sampleTime += dt;
-        ZHLN::ECS::Patch<ZHLN::Components::TransformComponent, ZHLN::ProceduralLookAtComponent>(registry, player, [&](const auto& trans, auto& lookAt) -> auto {
+        registry.Patch<ZHLN::Components::TransformComponent, ZHLN::ProceduralLookAtComponent>(player, [&](const auto& trans, auto& lookAt) -> auto {
             lookAt.targetWorldPos = trans.position + trans.rotation * JPH::Vec3(std::sin(sampleTime * 0.65f) * 2.2f, 1.65f, 4.0f);
         });
 
@@ -769,7 +769,7 @@ auto main(int argc, char* argv[]) -> int {
         // keeps the actual full body and arms without debug geometry at the face.
         if (!viewState.enabled) {
             ZHLN::Locomotion::RenderDebugRig(*engine, player, dualShapeConfig);
-            ZHLN::ECS::Patch<ZHLN::Components::TransformComponent, ZHLN::RigBoneMap>(registry, player, [&](const auto& trans, const auto& rig) -> auto {
+            registry.Patch<ZHLN::Components::TransformComponent, ZHLN::RigBoneMap>(player, [&](const auto& trans, const auto& rig) -> auto {
                 const auto* gait = registry.Get<ZHLN::ProceduralLocomotionComponent>(player);
                 ZHLN::ProceduralAnimation::DrawDebugRig(engine->GetRenderContext(), trans.position, trans.rotation, rig, gait);
             });

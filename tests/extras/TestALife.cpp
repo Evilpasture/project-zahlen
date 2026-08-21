@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
-#include <Zahlen/Components.hpp>
-#include <Zahlen/alife/Factions.hpp>
-#include <Zahlen/alife/GOAP.hpp>
-#include <Zahlen/alife/Graph.hpp>
-#include <Zahlen/alife/SpatialGrid.hpp>
+#include <ALife/ALifeComponents.hpp>
+#include <ALife/Factions.hpp>
+#include <ALife/GOAP.hpp>
+#include <ALife/Graph.hpp>
+#include <ALife/SpatialGrid.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <expected>
 #include <memory_resource>

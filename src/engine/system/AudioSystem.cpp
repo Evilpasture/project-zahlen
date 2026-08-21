@@ -73,7 +73,7 @@ ZHLN_API void AudioSystem(Engine& engine, [[maybe_unused]] float dt) {
         }
 
         if (soundHandle != nullptr) {
-            // Position resolution: WorldTransform -> Transform -> Physics -> ALife
+            // Position resolution: WorldTransform -> Transform -> Physics
             JPH::Vec3 position = JPH::Vec3::sZero();
 
             if (auto* worldTransform = reg.Get<Components::WorldTransformComponent>(e)) {
@@ -88,8 +88,6 @@ ZHLN_API void AudioSystem(Engine& engine, [[maybe_unused]] float dt) {
                         static_cast<float>(world.positions[base]), static_cast<float>(world.positions[base + 1]), static_cast<float>(world.positions[base + 2])
                     );
                 }
-            } else if (auto* alifeComp = reg.Get<Components::ALifeComponent>(e)) {
-                position = JPH::Vec3(alifeComp->position);
             }
 
             // Sync stream state

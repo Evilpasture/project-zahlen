@@ -283,7 +283,7 @@ class Context {
             );
         });
 
-        ECS::Patch<Components::UIRectComponent>(*m_reg, e, [&](auto& rect) {
+        m_reg->Patch<Components::UIRectComponent>(e, [&](auto& rect) {
             rect.x              = cfg.x;
             rect.y              = cfg.y;
             rect.width          = cfg.width;
@@ -380,7 +380,7 @@ class Context {
             );
         });
 
-        ECS::Patch<Components::TextComponent>(*m_reg, e, [&](auto& textComp) {
+        m_reg->Patch<Components::TextComponent>(e, [&](auto& textComp) {
             textComp.text.assign(text);
             textComp.color = cfg.color;
         });
@@ -428,7 +428,7 @@ class Context {
             );
         });
 
-        ECS::Patch<Components::UIButtonComponent>(*m_reg, e, [&](const auto& btn) {
+        m_reg->Patch<Components::UIButtonComponent>(e, [&](const auto& btn) {
             if (btn.Has(UIButton::Clicked)) {
                 std::forward<OnClickFn>(onClick)();
             }
@@ -476,9 +476,9 @@ class Context {
         });
 
         // Update the text in the TextComponent of the existing entity dynamically
-        ECS::Patch<Components::TextComponent>(*m_reg, e, [&](auto& textComp) { textComp.text.assign(text); });
+        m_reg->Patch<Components::TextComponent>(e, [&](auto& textComp) { textComp.text.assign(text); });
 
-        ECS::Patch<Components::UIButtonComponent>(*m_reg, e, [&](const auto& btn) {
+        m_reg->Patch<Components::UIButtonComponent>(e, [&](const auto& btn) {
             if (btn.Has(UIButton::Clicked)) {
                 std::forward<OnClickFn>(onClick)();
             }

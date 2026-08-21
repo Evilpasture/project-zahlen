@@ -52,11 +52,11 @@ void TargetCameraSystem::Update(ECS::Registry& reg, Camera& cam, float dt, float
 
     Entity camEnt = cameraEntities[0];
 
-    ECS::Patch<Components::TargetCameraComponent>(reg, camEnt, [&](auto& camComp) -> auto {
+    reg.Patch<Components::TargetCameraComponent>(camEnt, [&](auto& camComp) -> auto {
         // ========================================================================
         // 1. FREE-CAM INTERCEPTION BRANCH
         // ========================================================================
-        if (ECS::Patch<Components::FreeCamTagComponent>(reg, camEnt, [](const auto&) -> auto {})) {
+        if (reg.Patch<Components::FreeCamTagComponent>(camEnt, [](const auto&) -> auto {})) {
             auto  inputEnts = reg.GetEntitiesWith<Components::InputStateComponent>();
             auto* state     = inputEnts.empty() ? nullptr : reg.Get<Components::InputStateComponent>(inputEnts[0]);
             if (state == nullptr) {
@@ -65,7 +65,7 @@ void TargetCameraSystem::Update(ECS::Registry& reg, Camera& cam, float dt, float
 
             float baseSpeed = 12.0f;
             if (reg.IsAlive(camComp.target)) {
-                ECS::Patch<Components::MovementComponent>(reg, camComp.target, [&](const auto& targetMove) -> auto { baseSpeed = targetMove.speed; });
+                reg.Patch<Components::MovementComponent>(camComp.target, [&](const auto& targetMove) -> auto { baseSpeed = targetMove.speed; });
             }
 
             const float speed       = state->IsKeyDown(static_cast<uint8_t>(KeyCode::LShift)) ? (baseSpeed * 2.0f) : baseSpeed;
@@ -116,19 +116,19 @@ void TargetCameraSystem::Update(ECS::Registry& reg, Camera& cam, float dt, float
         // ========================================================================
         // 2. TARGET POSITION RESOLUTION (Always smoothly interpolate using alpha)
         // ========================================================================
-        bool foundPos = ECS::Patch<Components::PhysicsStateComponent>(reg, targetEnt, [&](const auto& state) -> auto {
+        bool foundPos = reg.Patch<Components::PhysicsStateComponent>(targetEnt, [&](const auto& state) -> auto {
             float clampedAlpha = std::clamp(alpha, 0.0f, 1.0f);
             targetPos          = state.prevPosition + clampedAlpha * (state.currPosition - state.prevPosition);
         });
 
         if (!foundPos) {
-            foundPos = ECS::Patch<Components::WorldTransformComponent>(reg, targetEnt, [&](const auto& worldTrans) -> auto {
+            foundPos = reg.Patch<Components::WorldTransformComponent>(targetEnt, [&](const auto& worldTrans) -> auto {
                 targetPos = worldTrans.world.GetTranslation();
             });
         }
 
         if (!foundPos) {
-            ECS::Patch<Components::TransformComponent>(reg, targetEnt, [&](const auto& trans) -> auto { targetPos = trans.position; });
+            reg.Patch<Components::TransformComponent>(targetEnt, [&](const auto& trans) -> auto { targetPos = trans.position; });
         }
 
         // ========================================================================

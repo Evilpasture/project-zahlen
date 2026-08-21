@@ -16,7 +16,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <engine/PBR.hpp>
+#include <engine/graphics/PBR.hpp>
 #include <expected>
 #include <fstream>
 #include <memory>
@@ -148,7 +148,7 @@ struct PBRTestSuite {
             // Set Fullbright = 0 to evaluate full PBR lighting and tonemapping
             auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
             if (!settingsEnts.empty()) {
-                ZHLN::ECS::Patch<ZHLN::Components::PostProcessSettingsComponent>(reg, settingsEnts[0], [](auto& pp) {
+                reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
                     pp.fullBright      = 0;
                     pp.ambientExposure = 12.0f;
                 });
@@ -340,7 +340,7 @@ struct PBRTestSuite {
             // Set Fullbright ON: Disables direct lighting/shadows and outputs raw G-buffer albedo directly
             auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
             if (!settingsEnts.empty()) {
-                ZHLN::ECS::Patch<ZHLN::Components::PostProcessSettingsComponent>(reg, settingsEnts[0], [](auto& pp) { pp.fullBright = 1; });
+                reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) { pp.fullBright = 1; });
             }
 
             // Create explicit bright green material

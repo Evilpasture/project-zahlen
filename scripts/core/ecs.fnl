@@ -16,7 +16,6 @@
         :MovementComponent true
         :MeshComponent true
         :PhysicsComponent true
-        :ALifeComponent true
         :RagdollComponent true
         :NameComponent true
         :TargetCameraComponent true

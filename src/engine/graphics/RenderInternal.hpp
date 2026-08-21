@@ -3,9 +3,9 @@
 
 // File: src/engine/RenderInternal.hpp
 #pragma once
-#include "FileWatcher.hpp"
+#include "../FileWatcher.hpp"
 #include "Rendering.hpp"
-#include "engine/TextureManager.hpp" // Private header
+#include "TextureManager.hpp" // Private header
 #include <GLFW/glfw3.h>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/ControlFlow.hpp>
@@ -681,6 +681,9 @@ struct RenderContext::Impl {
 
     std::expected<void, Error> BuildLinePipeline();
     std::expected<void, Error> InitLineBuffers() noexcept;
+    std::expected<void, Error> AllocateDynamicVertexBuffers(
+        size_t maxVertices, DoubleBuffered<Vk::Buffer>& bufs, DoubleBuffered<VkDeviceAddress>& addrs, VkBufferUsageFlags extraFlags, const char* label
+    ) noexcept;
     void                       FlushLineQueue();
 
     // --- Indirect-draw telemetry (enabled via ZHLN_DEBUG_INDIRECT=1) ---

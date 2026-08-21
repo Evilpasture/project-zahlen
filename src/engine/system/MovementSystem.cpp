@@ -79,7 +79,7 @@ void MovementSystem(Engine& engine, float dt) {
                 continue;
             }
 
-            ECS::Patch<Components::RagdollComponent>(reg, e, [&](auto& ragComp) {
+            reg.Patch<Components::RagdollComponent>(e, [&](auto& ragComp) {
                 if (ragComp.state == RagdollState::Dynamic || ragComp.state == RagdollState::Kinematic) {
                     return;
                 }

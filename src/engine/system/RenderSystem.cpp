@@ -19,7 +19,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
-#include <engine/Resources.hpp>
+
 #include <physics/PhysicsDebug.hpp>
 
 namespace ZHLN {
@@ -324,27 +324,14 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
         }
 
         if (debugLineMat.pipeline == PipelineHandle::Invalid) {
-            PipelineDesc lineDesc = {
-                .vertexShaderData = Resource::GetShaderProgram(Resource::ShaderID::Basic).vertex.data(),
-                .vertexShaderSize = static_cast<std::uint32_t>(Resource::GetShaderProgram(Resource::ShaderID::Basic).vertex.size()),
-                .fragShaderData   = Resource::forward_frag.data(),
-                .fragShaderSize   = static_cast<std::uint32_t>(Resource::forward_frag.size()),
-                .doubleSided      = true,
-                .alphaBlend       = true,
-                .isLineList       = true
-            };
-
-            auto debugLineMat_res = rc.CreateMaterial(lineDesc);
+            auto debugLineMat_res = rc.CreateDebugLineMaterial();
             if (!debugLineMat_res) {
                 ZHLN::Panic("Failed to compile debug line material: {}", debugLineMat_res.error().Message());
             }
             debugLineMat           = debugLineMat_res.value();
             debugLineMat.albedoMap = TextureHandle(1);
 
-            PipelineDesc solidDesc = lineDesc;
-            solidDesc.isLineList   = false;
-
-            auto debugSolidMat_res = rc.CreateMaterial(solidDesc);
+            auto debugSolidMat_res = rc.CreateDebugSolidMaterial();
             if (!debugSolidMat_res) {
                 ZHLN::Panic("Failed to compile debug solid material: {}", debugSolidMat_res.error().Message());
             }

@@ -319,6 +319,31 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> std::expected<Ma
         });
 }
 
+auto RenderContext::CreateDebugLineMaterial() -> std::expected<Material, Error> {
+    auto shaders = Resource::GetShaderProgram(Resource::ShaderID::Basic);
+    return CreateMaterial({
+        .vertexShaderData = shaders.vertex.data(),
+        .vertexShaderSize = shaders.vertex.size(),
+        .fragShaderData   = Resource::forward_frag.data(),
+        .fragShaderSize   = Resource::forward_frag.size(),
+        .doubleSided      = true,
+        .alphaBlend       = true,
+        .isLineList       = true,
+    });
+}
+
+auto RenderContext::CreateDebugSolidMaterial() -> std::expected<Material, Error> {
+    auto shaders = Resource::GetShaderProgram(Resource::ShaderID::Basic);
+    return CreateMaterial({
+        .vertexShaderData = shaders.vertex.data(),
+        .vertexShaderSize = shaders.vertex.size(),
+        .fragShaderData   = Resource::forward_frag.data(),
+        .fragShaderSize   = Resource::forward_frag.size(),
+        .doubleSided      = true,
+        .alphaBlend       = true,
+    });
+}
+
 void RenderContext::DrawLine(JPH::Vec3Arg start, JPH::Vec3Arg end, JPH::Vec4Arg colorStart, JPH::Vec4Arg colorEnd) noexcept {
     _impl->queues.lineQueue.push_back({.start = start, .end = end, .colorStart = colorStart, .colorEnd = colorEnd});
 }

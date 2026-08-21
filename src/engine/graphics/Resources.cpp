@@ -276,11 +276,11 @@ constexpr uint8_t procedural_bake_comp_raw[] = {
 };
 
 constexpr uint8_t ltc_mat_raw[] = {
-#embed "../../resources/shaders/ltc_mat.dds"
+#embed "../../../resources/shaders/ltc_mat.dds"
 };
 
 constexpr uint8_t ltc_amp_raw[] = {
-#embed "../../resources/shaders/ltc_amp.dds"
+#embed "../../../resources/shaders/ltc_amp.dds"
 };
 
 // NOLINTEND(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)

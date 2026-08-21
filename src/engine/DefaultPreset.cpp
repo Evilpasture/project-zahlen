@@ -64,7 +64,7 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
     auto   settingsEntities = reg.GetEntitiesWith<Components::GlobalSettingsTagComponent>();
     Entity settingsEnt      = settingsEntities.empty() ? reg.Create(Components::GlobalSettingsTagComponent {}) : settingsEntities[0];
 
-    ECS::Patch<Components::PostProcessSettingsComponent>(reg, settingsEnt, [&](auto& pp) {
+    reg.Patch<Components::PostProcessSettingsComponent>(settingsEnt, [&](auto& pp) {
         pp.enableRTR = 1;
         pp.enableSSR = 0;
     });
@@ -113,13 +113,13 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
     Entity planeEnt = CreativeWorksFactory::CreatePlane(
         engine, 35.0f, {0.12f, 0.14f, 0.18f, 1.0f}, CreativeWorksFactory::SpawnParams {.position = {0.0f, 0.0f, 0.0f}, .roughness = 0.05f, .metallic = 0.30f}
     );
-    ECS::Assign<Components::NameComponent>(reg, planeEnt, "FallbackGround");
+    reg.Assign<Components::NameComponent>(planeEnt, "FallbackGround");
 
     Entity boxEnt = CreativeWorksFactory::CreateBox(
         engine, JPH::Vec3(1.2f, 1.2f, 1.2f),
         CreativeWorksFactory::SpawnParams {.position = {0.0f, 2.0f, 0.0f}, .roughness = 0.15f, .metallic = 0.85f, .color = {0.1f, 0.6f, 0.95f, 1.0f}}
     );
-    ECS::Assign<Components::NameComponent>(reg, boxEnt, "FallbackEmblem");
+    reg.Assign<Components::NameComponent>(boxEnt, "FallbackEmblem");
     s_CubeEntity = boxEnt;
 
     auto& cam    = engine.GetCamera();
@@ -152,13 +152,13 @@ void DefaultPreset::Update(Engine& engine, float dt) {
 
     // 1. Animate 3D Emblem & Orbit Light
     if (s_AnimateScene) {
-        ECS::Patch<Components::TransformComponent>(reg, s_CubeEntity, [&](auto& trans) {
+        reg.Patch<Components::TransformComponent>(s_CubeEntity, [&](auto& trans) {
             JPH::Vec3 euler(s_AccumTime * 25.0f, s_AccumTime * 45.0f, s_AccumTime * 15.0f);
             trans.rotation = Math::EulerDegreesToQuat(euler);
             trans.position.SetY(2.0f + std::sin(s_AccumTime * 2.0f) * 0.25f);
         });
 
-        ECS::Patch<Components::TransformComponent>(reg, s_PointLight, [&](auto& trans) {
+        reg.Patch<Components::TransformComponent>(s_PointLight, [&](auto& trans) {
             float orbitX   = std::cos(s_AccumTime * 1.5f) * 3.5f;
             float orbitZ   = std::sin(s_AccumTime * 1.5f) * 3.5f;
             trans.position = JPH::Vec3(orbitX, 2.5f + std::sin(s_AccumTime * 3.0f) * 0.5f, orbitZ);
