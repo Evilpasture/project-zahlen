@@ -10,7 +10,8 @@ set(IMGUI_SOURCES
     imgui_demo.cpp
     backends/imgui_impl_glfw.cpp
     # NOTE: imgui_impl_vulkan.cpp is replaced by the descriptor-heap fork at
-    # src/engine/graphics/imgui_impl_vulkan_heap.cpp (VK_EXT_descriptor_heap).
+    # backends/imgui_impl_vulkan_heap.cpp (VK_EXT_descriptor_heap); the fork
+    # is compiled as part of zahlen_engine.
 )
 
 # 2. Create the static library
