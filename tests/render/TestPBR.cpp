@@ -16,7 +16,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <engine/PBR.hpp>
+#include <engine/graphics/PBR.hpp>
 #include <expected>
 #include <fstream>
 #include <memory>
