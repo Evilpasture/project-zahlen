@@ -1196,6 +1196,7 @@ std::expected<void, Error> RenderContext::Impl::BuildDecalPipeline() {
 }
 
 std::expected<void, Error> RenderContext::Impl::BuildTAAPipeline() {
+    using enum Resource::ShaderID;
     VkPushConstantRange taaPush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(float)};
 
     return BuildPassHelper(
@@ -1224,6 +1225,7 @@ std::expected<void, Error> RenderContext::Impl::BuildMLAAPipeline() {
 }
 
 std::expected<void, Error> RenderContext::Impl::BuildSMAAPipeline() {
+    using enum Resource::ShaderID;
     VkPushConstantRange smaaPush = {.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(float) * 4};
 
     return BuildPassHelper(
@@ -1248,6 +1250,7 @@ std::expected<void, Error> RenderContext::Impl::BuildSMAAPipeline() {
 }
 
 std::expected<void, Error> RenderContext::Impl::BuildAmbientPipeline() {
+    using enum Resource::ShaderID;
     VkPushConstantRange ppPush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = 192};
 
     return BuildPassHelper(
@@ -1258,6 +1261,7 @@ std::expected<void, Error> RenderContext::Impl::BuildAmbientPipeline() {
 }
 
 std::expected<void, Error> RenderContext::Impl::BuildLightingPipeline() {
+    using enum Resource::ShaderID;
     VkPushConstantRange ppPush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(PPPushConstants)};
 
     struct SpecData {
@@ -1285,6 +1289,7 @@ std::expected<void, Error> RenderContext::Impl::BuildLightingPipeline() {
 }
 
 std::expected<void, Error> RenderContext::Impl::BuildReflectionPipelines() {
+    using enum Resource::ShaderID;
     VkPushConstantRange ppPush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(PPPushConstants)};
 
     struct SpecData {
@@ -1360,6 +1365,7 @@ std::expected<void, Error> RenderContext::Impl::BuildBloomPipelines() {
 }
 
 std::expected<void, Error> RenderContext::Impl::BuildBlitPipeline() {
+    using enum Resource::ShaderID;
     VkPushConstantRange blitPush = {
         .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
         .offset     = 0,
@@ -1631,6 +1637,7 @@ std::expected<void, Error> RenderContext::Impl::InitCSGPipelines() {
 }
 
 std::expected<void, Error> RenderContext::Impl::SetupUI(GLFWwindow* window) {
+    using enum Resource::ShaderID;
     auto make_expected = [](bool success, Error err) -> std::expected<void, Error> {
         if (success) {
             return {};
