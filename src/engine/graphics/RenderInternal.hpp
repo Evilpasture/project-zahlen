@@ -765,7 +765,7 @@ struct RenderContext::Impl {
     // Binds both heaps and pushes the frame address block. Heap-using segments
     // call this first: legacy set/push-constant commands elsewhere in the frame
     // invalidate heap and push-data state, so every heap segment re-establishes it.
-    void BindHeapsAndPushFrame(VkCommandBuffer cmd) noexcept;
+    void BindHeapsAndPushFrame(VkCommandBuffer cmd) const noexcept;
 
     // --- VK_EXT_descriptor_heap init ---
     // Creates the heaps, allocates the static slots, and bakes the

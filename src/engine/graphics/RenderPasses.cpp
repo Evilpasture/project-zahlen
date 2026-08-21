@@ -478,6 +478,7 @@ struct CpuCullingPolicyPass2 {
     ) noexcept {
         // CPU Culling does everything in Pass 1. Pass 2 just draws CSG and Particles on top.
         VkCommandBuffer cmd = recorder.cmd;
+        auto&           ctx = recorder.ctx;
         Vk::DynamicPass(color_att.extent)
             .AddColor(color_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
             .AddColor(vel_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
