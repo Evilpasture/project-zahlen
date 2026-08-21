@@ -1289,7 +1289,7 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device, const ZHLN_Graphic
 
     const VkGraphicsPipelineCreateInfo pipeline_info = {
         .sType               = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-        .pNext               = desc->descriptor_heap ? &heap_flags2 : &rendering,
+        .pNext               = desc->descriptor_heap ? (const void*) &heap_flags2 : (const void*) &rendering,
         .stageCount          = stage_count,
         .pStages             = shader_stages,
         .pVertexInputState   = &vertex_input,
@@ -1775,7 +1775,7 @@ VkPipeline ZHLN_CreateComputePipeline(const VkDevice device, const ZHLN_ComputeP
 
     const VkComputePipelineCreateInfo pipeline_info = {
         .sType  = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
-        .pNext  = desc->descriptor_heap ? &heap_flags2 : NULL,
+        .pNext  = desc->descriptor_heap ? (const void*) &heap_flags2 : (const void*) NULL,
         .stage  = stage_info,
         .layout = desc->layout,
     };

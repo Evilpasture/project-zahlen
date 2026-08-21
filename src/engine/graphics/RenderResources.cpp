@@ -290,7 +290,7 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> std::expected<Ma
                         ZHLN::Log("Material pipeline creation error: {} (Category: {})", err.Message(), err.Category());
                         return MaterialCreationError::PipelineCreationFailed;
                     })
-                    .transform([impl, layout](auto&& compiledPipeline) -> auto {
+                    .transform([impl, layout, &desc](auto&& compiledPipeline) -> auto {
                         return Material {
                             .pipeline = impl->materialPool.Create(std::forward<decltype(compiledPipeline)>(compiledPipeline), layout),
                             .alphaMode = (desc.alphaBlend || desc.additiveBlend) ? 2u : 0u
