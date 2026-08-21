@@ -49,6 +49,20 @@ def safe_str(val) -> str:
     except Exception:
         return "Unknown Error"
 
+def is_fur_object(obj):
+    if not obj:
+        return False
+    name_l = obj.name.lower()
+    col_names = " ".join([c.name.lower() for c in obj.users_collection])
+    parent_names = []
+    curr = obj.parent
+    while curr:
+        parent_names.append(curr.name.lower())
+        curr = curr.parent
+    p_chain = " ".join(parent_names)
+    mat_names = " ".join([s.material.name.lower() for s in obj.material_slots if s.material])
+    return "fur" in col_names or "fur" in name_l or "fur" in p_chain or "fur" in mat_names or "clothes_fur" in col_names
+
 def should_hide_facial_element(obj_name):
     name_lower = obj_name.lower()
     return any(pat in name_lower for pat in FACIAL_HIDE_PATTERNS)
@@ -181,11 +195,11 @@ def convert_hair_curves_to_mesh():
             if any("tail" in col.name.lower() for col in obj.users_collection):
                 continue
 
-            is_hair = any("hair" in col.name.lower() for col in obj.users_collection) or \
-                      any(slot.material and "hair" in slot.material.name.lower() for slot in obj.material_slots) or \
-                      (hasattr(obj.data, "bevel_depth") and obj.data.bevel_depth > 0)
+            is_hair_or_fur = any(k in col.name.lower() for k in ["hair", "fur", "clothes_fur"] for col in obj.users_collection) or \
+                             any(slot.material and any(k in slot.material.name.lower() for k in ["hair", "fur"]) for slot in obj.material_slots) or \
+                             (hasattr(obj.data, "bevel_depth") and obj.data.bevel_depth > 0)
 
-            if is_hair:
+            if is_hair_or_fur:
                 deselect_all_objects()
                 obj.select_set(True)
                 bpy.context.view_layer.objects.active = obj
@@ -194,14 +208,14 @@ def convert_hair_curves_to_mesh():
                     obj.name = f"Hair_Mesh_{obj.name}"
                     obj.hide_render = False
                     obj.hide_viewport = False
-                    print(f"  [+] Converted hair curve to MESH: '{obj.name}'", flush=True)
+                    print(f"  [+] Converted strand curve to MESH: '{obj.name}'", flush=True)
                 except Exception as e:
                     print(f"  [-] Skipped '{obj.name}': {e}", flush=True)
 
     bpy.context.view_layer.update()
 
 def merge_and_setup_hair_rig(main_rig):
-    print("[*] Merging Hair_Rig into main rig and parenting all hair chains to DEF-Head...", flush=True)
+    print("[*] Merging Hair_Rig into main rig and renaming hair chains to DEF-Hair_SXX_YY...", flush=True)
     if not main_rig or not main_rig.data:
         return
 
@@ -252,15 +266,41 @@ def merge_and_setup_hair_rig(main_rig):
 
     head_eb = ebs.get(head_bone_name) or ebs.get("DEF-Head") or ebs.get("Head")
 
-    hair_bones = [b for b in ebs if b != head_eb and (b.name.startswith("Bone") or "hair" in b.name.lower() or b.name.startswith("DEF-Hair"))]
+    hair_root_bones = []
+    for b in list(ebs):
+        b_name = b.name
+        if b_name.startswith("Bone") or b_name.startswith("Hair") or "hair" in b_name.lower():
+            if b != head_eb:
+                if b.parent is None or b.parent == head_eb or not (b.parent.name.startswith("Bone") or "hair" in b.parent.name.lower()):
+                    hair_root_bones.append(b)
 
-    for b in hair_bones:
-        b.use_deform = True
-        if b.parent is None or b.parent == head_eb or not (b.parent.name.startswith("Bone") or "hair" in b.parent.name.lower() or b.parent.name.startswith("DEF-Hair")):
-            if head_eb:
-                b.parent = head_eb
-                b.use_connect = False
-                print(f"  [+] Parented hair root bone '{b.name}' to '{head_eb.name}'.", flush=True)
+    print(f"  [+] Found {len(hair_root_bones)} hair strand root bones.", flush=True)
+
+    strand_idx = 1
+    for root_b in hair_root_bones:
+        if head_eb:
+            root_b.parent = head_eb
+            root_b.use_connect = False
+
+        curr = root_b
+        depth = 1
+        while curr:
+            new_name = f"DEF-Hair_S{strand_idx:02d}_{depth:02d}"
+            old_name = curr.name
+            curr.name = new_name
+            curr.use_deform = True
+
+            for m_obj in bpy.data.objects:
+                if m_obj.type == 'MESH' and old_name in m_obj.vertex_groups:
+                    vg = m_obj.vertex_groups.get(old_name)
+                    if vg:
+                        vg.name = new_name
+
+            children = [c for c in curr.children if c.name.startswith("Bone") or "hair" in c.name.lower() or c.name.startswith("DEF-Hair")]
+            curr = children[0] if children else None
+            depth += 1
+
+        strand_idx += 1
 
     bpy.ops.object.mode_set(mode='OBJECT')
     bpy.context.view_layer.update()
@@ -278,6 +318,9 @@ def bind_hair_meshes_to_rig(main_rig):
 
     for obj in list(bpy.data.objects):
         if not (obj and getattr(obj, "type", None) == 'MESH' and not obj.hide_render):
+            continue
+
+        if is_fur_object(obj):
             continue
 
         name_lower = obj.name.lower()
@@ -410,7 +453,7 @@ def convert_and_rig_tail(main_rig):
     for b in tail_bones:
         b.use_deform = True
 
-    # 1. Convert syringe accessories curves (like NurbsPath.026 nanite fluid tube) to real MESH
+    # 1. Convert syringe accessories curves to real MESH
     for obj in list(bpy.data.objects):
         if obj and getattr(obj, "type", None) in {'CURVE', 'SURFACE'} and not obj.name.startswith("__"):
             name_l = obj.name.lower()
@@ -759,6 +802,9 @@ def bake_procedural_material(mat_name, target_objects, resolution=2048):
 def optimize_subsurf_modifiers(obj, max_level=1):
     if not (obj and getattr(obj, "type", None) == 'MESH'):
         return
+    name_l = obj.name.lower()
+    if any(k in name_l for k in ["symbol", "dd_symbol", "wd_symbol", "logo"]):
+        return
     subsurf_mods = [m for m in obj.modifiers if m.type == 'SUBSURF']
     if not subsurf_mods:
         return
@@ -1008,6 +1054,7 @@ def bind_mesh_to_head_deform_bone(obj, main_rig, bone_name="DEF-Head"):
 
 def resolve_accessory_bone(obj, bones):
     head_bone = bones["head"]
+    chest_bone = bones["chest"]
     thigh_r_bone = bones["thigh_r"]
     thigh_l_bone = bones["thigh_l"]
     forearm_l_bone = bones["forearm_l"]
@@ -1030,7 +1077,7 @@ def resolve_accessory_bone(obj, bones):
 
     col_names = " ".join([c.name.lower() for c in obj.users_collection])
 
-    if "hair" in col_names or "hair" in name_lower or (name_lower.startswith("nurbspath") and "tail" not in col_names and "tail" not in name_lower and "nurbspath.002" not in name_lower and "nurbspath.026" not in name_lower):
+    if "hair" in col_names or "hair" in name_lower or (name_lower.startswith("nurbspath") and "tail" not in col_names and "tail" not in name_lower and "nurbspath.002" not in name_lower and "nurbspath.026" not in name_lower and not is_fur_object(obj)):
         return None
     if name_lower in ["tail", "nurbspath.002"] or name_lower.startswith("__orig_curve"):
         return None
@@ -1038,32 +1085,37 @@ def resolve_accessory_bone(obj, bones):
     if "hand.l" in col_names or "hand.r" in col_names or any(k in name_lower for k in ["plane.037", "plane.128", "circle.074", "circle.076", "circle.077", "circle.044", "circle.045"]):
         return None
 
-    # 1. Tail Syringe Bulb, Needle & Nanite Fluid Tube (Tip, NurbsPath.026, Syringe, Nanite, Bulb)
+    # 1. Coat Buttons & Fasteners (Circle.002 on N_coat/Jacket)
+    if "circle.002" in name_lower or "button" in name_lower or (any(k in p_chain for k in ["n_coat", "coat", "jacket"]) and any(k in name_lower for k in ["circle", "button", "clasp"])):
+        if not is_fur_object(obj):
+            return chest_bone
+
+    # 2. Tail Syringe Bulb, Needle & Nanite Fluid Tube (Tip, NurbsPath.026, Syringe, Nanite, Bulb)
     if any(k == name_lower or k in name_lower for k in ["tip", "tail_bulb", "syringe", "nanite", "acid", "nurbspath.026"]) or \
        any(k in p_chain for k in ["tip", "tail_tip", "tail"]):
         if not any(k in name_lower for k in ["belt", "waist", "hips"]):
             return tail_tip_bone
 
-    # 2. Left Forearm Internals & Sockets (Sphere.014, Cylinder.005, AUX_Door.L, Circle.082, Circle.083, Circle.084, Cylinder.063)
+    # 3. Left Forearm Internals & Sockets (Sphere.014, Cylinder.005, AUX_Door.L, Circle.082, Circle.083, Circle.084, Cylinder.063)
     if "sphere.014" in name_lower or "cylinder.005" in p_chain or "aux_door.l" in p_chain or "cylinder.063" in name_lower or \
        any(k in name_lower for k in ["aux_door.l", "circle.082", "circle.083", "circle.084", "blade_parent.l", "smg_parent.l"]):
         return forearm_l_bone
 
-    # 3. Right Forearm Internals & Sockets (Sphere.015, AUX_Door.R, etc.)
+    # 4. Right Forearm Internals & Sockets (Sphere.015, AUX_Door.R, etc.)
     if "sphere.015" in name_lower or "aux_door.r" in p_chain or any(k in name_lower for k in ["aux_door.r", "blade_parent.r", "smg_parent.r", "plane.045"]):
         return forearm_r_bone
 
-    # 4. Left Boot / Foot / Sole Details (Cylinder.042, Cylinder.043, Circle.059, and all sole children of Cylinder.042)
+    # 5. Left Boot / Foot / Sole Details (Cylinder.042, Cylinder.043, Circle.059, and all sole children of Cylinder.042)
     if "cylinder.042" in p_chain or "cylinder.042" in name_lower or "cylinder.043" in name_lower or \
        "boot.l" in p_chain or "foot.l" in p_chain or "foot.l" in col_names or "boot.l" in col_names or "circle.059" in name_lower:
         return foot_l_bone
 
-    # 5. Right Boot / Foot / Sole Details (Cylinder.039, Cylinder.041, right boot sole details)
+    # 6. Right Boot / Foot / Sole Details (Cylinder.039, Cylinder.041, right boot sole details)
     if "cylinder.039" in p_chain or "cylinder.039" in name_lower or "cylinder.041" in name_lower or \
        "boot.r" in p_chain or "foot.r" in p_chain or "foot.r" in col_names or "boot.r" in col_names:
         return foot_r_bone
 
-    # 6. Head Accessories (Headband, Sockets like Cylinder.030 / Cylinder.038, Bulbs like Sphere.037, Hat Badge, Hat, Beanie)
+    # 7. Head Accessories (Headband, Sockets like Cylinder.030 / Cylinder.038, Bulbs like Sphere.037, Hat Badge, Hat, Beanie)
     if any(k in p_chain for k in ["headband", "head_parent", "head_accessories", "badge", "empty_badge", "headtop", "hat", "cap", "beanie"]) or \
        any(k in col_names for k in ["head accessories", "headband", "head", "hat"]) or \
        any(k in name_lower for k in ["headband", "badge", "cylinder.030", "cylinder.038", "sphere.037", "cylinder.017"]):
@@ -1073,24 +1125,24 @@ def resolve_accessory_bone(obj, bones):
         ]):
             return head_bone
 
-    # 7. Thigh Hazard Bands
+    # 8. Thigh Hazard Bands
     if "cylinder.040" in name_lower or "roundcube.030" in p_chain or "thigh_band.r" in name_lower:
         return thigh_r_bone
     if "cylinder.037" in name_lower or "roundcube.046" in p_chain or "thigh_band.l" in name_lower:
         return thigh_l_bone
 
-    # 8. Pilot Armband
+    # 9. Pilot Armband
     if "armband" in name_lower:
         return arm_l_bone
 
-    # 9. Waist / Belt
+    # 10. Waist / Belt
     if "waist" in name_lower or "belt_n" in name_lower:
         return hips_bone
 
     return None
 
 def fix_and_bind_sd_n_accessories(main_rig):
-    print("[*] Binding SD-N accessories (Tail Syringe, Arm Internals, Foot Soles, Forearm Doors, Headband Lights)...", flush=True)
+    print("[*] Binding SD-N accessories (Coat Button, Tail Syringe, Arm Internals, Foot Soles, Headband Lights)...", flush=True)
     if not main_rig or not main_rig.data:
         return
 
@@ -1113,6 +1165,7 @@ def fix_and_bind_sd_n_accessories(main_rig):
 
     bones = {
         "head": find_bone(["DEF-Head", "Head", "head"], "DEF-Head"),
+        "chest": find_bone(["DEF-Chest", "Chest", "chest", "DEF-Spine_02", "Spine_02"], "DEF-Chest"),
         "thigh_r": find_bone(["DEF-Thigh.R", "DEF-thigh.R", "DEF-UpLeg.R", "DEF-upleg.R", "Thigh.R", "thigh.R", "DEF-Leg.R"], "DEF-Thigh.R"),
         "thigh_l": find_bone(["DEF-Thigh.L", "DEF-thigh.L", "DEF-UpLeg.L", "DEF-upleg.L", "Thigh.L", "thigh.L", "DEF-Leg.L"], "DEF-Thigh.L"),
         "forearm_l": find_bone(["DEF-Forearm.L", "DEF-forearm.L", "DEF-ForeArm.L", "DEF-Hand.L", "Forearm.L", "forearm.L"], "DEF-Forearm.L"),
@@ -1393,32 +1446,40 @@ def apply_facial_gui_visibility_and_hide_anchors(main_rig):
     bpy.context.view_layer.update()
 
 def bake_clothing_modifiers_with_shapekeys():
-    print("[*] Baking Subdivision, Shrinkwrap, Solidify, and Displace modifiers into clothing & visor...", flush=True)
+    print("[*] Baking Subdivision, Mirror, Shrinkwrap, Solidify, and Displace modifiers into clothing, chestplate, and visor...", flush=True)
     for arm in [o for o in bpy.data.objects if o and o.type == 'ARMATURE']:
         if arm.data:
             arm.data.pose_position = 'REST'
     bpy.context.view_layer.update()
 
-    CLOTHING_EXACT_NAMES = [
-        "Cylinder.001", "Cylinder.002", "Jacket", "Coat", "Clothes", "Shirt", 
-        "DD_Symbol", "WD_Symbol", "Symbol", 
-        "Plane.130", "Plane.197", "Chestplate", "Shield",
-        "VisorExt", "VisorInt", "Visor", "Screen", "N_coat"
+    TARGET_MOD_TYPES = {'MIRROR', 'SUBSURF', 'SOLIDIFY', 'SHRINKWRAP', 'DISPLACE', 'CORRECTIVE_SMOOTH', 'BEVEL', 'MASK'}
+
+    CLOTHING_PATTERNS = [
+        "cylinder.001", "cylinder.002", "jacket", "coat", "clothes", "shirt", 
+        "dd_symbol", "wd_symbol", "symbol", "circle.060", "chest.001",
+        "plane.130", "plane.197", "plane.055", "chestplate", "shield",
+        "visorext", "visorint", "visor", "screen", "n_coat", "waist", "pelvis"
     ]
 
     for obj in list(bpy.data.objects):
         if not (obj and getattr(obj, "type", None) == 'MESH' and not obj.hide_render):
             continue
-        if not any(k.lower() == obj.name.lower() or k.lower() in obj.name.lower() for k in CLOTHING_EXACT_NAMES):
-            continue
-        if obj.name.startswith("Cylinder.") and obj.name not in ["Cylinder.001", "Cylinder.002"]:
-            continue
-        if "armband" in obj.name.lower():
+
+        name_lower = obj.name.lower()
+        if "armband" in name_lower or (name_lower.startswith("cylinder.") and name_lower not in ["cylinder.001", "cylinder.002"]):
             continue
 
-        target_mods = [m for m in obj.modifiers if m.type in {'SUBSURF', 'SOLIDIFY', 'SHRINKWRAP', 'DISPLACE', 'CORRECTIVE_SMOOTH'}]
+        has_mirror = any(m.type == 'MIRROR' for m in obj.modifiers)
+        is_clothing_match = any(k in name_lower for k in CLOTHING_PATTERNS)
+
+        if not (is_clothing_match or has_mirror):
+            continue
+
+        target_mods = [m for m in obj.modifiers if m.type in TARGET_MOD_TYPES]
         if not target_mods:
             continue
+
+        optimize_subsurf_modifiers(obj, max_level=1)
 
         arm_mods = [m for m in obj.modifiers if m.type == 'ARMATURE']
         for m in arm_mods:
@@ -1475,14 +1536,14 @@ def bake_clothing_modifiers_with_shapekeys():
                         bpy.data.meshes.remove(old_mesh)
 
                     for m in list(obj.modifiers):
-                        if m.type in {'SUBSURF', 'SOLIDIFY', 'SHRINKWRAP', 'DISPLACE', 'CORRECTIVE_SMOOTH'}:
+                        if m.type in TARGET_MOD_TYPES:
                             obj.modifiers.remove(m)
 
                     if obj.data.shape_keys:
                         for k_name, val in orig_values.items():
                             if k_name in obj.data.shape_keys.key_blocks:
                                 obj.data.shape_keys.key_blocks[k_name].value = val
-                    print(f"  [+] Baked modifiers into shape keys for: '{obj.name}'", flush=True)
+                    print(f"  [+] Baked modifiers (including Mirror/Subsurf) into shape keys for: '{obj.name}'", flush=True)
 
             else:
                 depsgraph = bpy.context.evaluated_depsgraph_get()
@@ -1493,8 +1554,10 @@ def bake_clothing_modifiers_with_shapekeys():
                 if old_mesh and old_mesh.users == 0:
                     bpy.data.meshes.remove(old_mesh)
                 for m in list(obj.modifiers):
-                    if m.type in {'SUBSURF', 'SOLIDIFY', 'SHRINKWRAP', 'DISPLACE', 'CORRECTIVE_SMOOTH'}:
+                    if m.type in TARGET_MOD_TYPES:
                         obj.modifiers.remove(m)
+                print(f"  [+] Baked modifiers (including Mirror/Subsurf) for: '{obj.name}'", flush=True)
+
         except Exception as e:
             print(f"  [~] Notice while baking '{obj.name}': {safe_str(e)}", flush=True)
         finally:
@@ -1781,6 +1844,12 @@ def hide_non_character_widgets_and_symbols():
     for obj in list(bpy.data.objects):
         if not obj:
             continue
+
+        if is_fur_object(obj):
+            obj.hide_render = False
+            obj.hide_viewport = False
+            continue
+
         name_lower = obj.name.lower()
         if name_lower == "nurbspath.002":
             obj.hide_render = True
@@ -1816,6 +1885,12 @@ def final_facial_and_widget_cleanup_pass():
     for obj in list(bpy.data.objects):
         if not obj:
             continue
+
+        if is_fur_object(obj):
+            obj.hide_render = False
+            obj.hide_viewport = False
+            continue
+
         if obj.name.lower() == "nurbspath.002":
             obj.hide_render = True
             obj.hide_viewport = True
@@ -1995,12 +2070,6 @@ def run_gltf_export(filepath):
     if main_rig and main_rig.data:
         main_rig.data.pose_position = 'POSE'
 
-    for obj in bpy.data.objects:
-        if obj and getattr(obj, "type", None) == 'MESH':
-            for m in list(obj.modifiers):
-                if m.type == 'SUBSURF':
-                    obj.modifiers.remove(m)
-
     patch_blender_52_gltf_cache_bug()
 
     bpy.ops.export_scene.gltf(
@@ -2042,10 +2111,10 @@ def main():
         main_rig.data.pose_position = 'REST'
     bpy.context.view_layer.update()
 
-    # 1. Convert hair curves to mesh (NurbsPath.002 & NurbsPath.026 are explicitly skipped)
+    # 1. Convert hair and fur curves to mesh (NurbsPath.002 & NurbsPath.026 are explicitly skipped)
     convert_hair_curves_to_mesh()
 
-    # 2. Setup Bone Hierarchy (Root, Shoulders, Hair Chains)
+    # 2. Setup Bone Hierarchy (Root, Shoulders, Hair Chains systematically renamed to DEF-Hair_SXX_YY)
     setup_root_bone(main_rig)
     setup_shoulder_bones(main_rig)
     merge_and_setup_hair_rig(main_rig)
@@ -2059,7 +2128,7 @@ def main():
 
     apply_facial_gui_visibility_and_hide_anchors(main_rig)
 
-    # 5. Attachments & SD-N Accessories (Tail Syringe, Arm Internals, Foot Soles, Forearm Doors, Headband Lights)
+    # 5. Attachments & SD-N Accessories (Coat Button, Tail Syringe, Arm Internals, Foot Soles, Headband Lights)
     fix_and_bind_sd_n_accessories(main_rig)
     bake_and_attach_teeth(main_rig)
 
@@ -2067,7 +2136,7 @@ def main():
     fix_head_hair_and_accessories_parenting(main_rig)
     fix_and_bake_mouth_shrink(main_rig)
 
-    # 7. Clothing, Particles & Limbs
+    # 7. Clothing, Particles & Limbs (Bakes Mirror, Solidify, Subsurf on Plane.130, DD_Symbol.001, Circle.060, Plane.055, etc.)
     bake_clothing_modifiers_with_shapekeys()
     convert_particle_systems_to_real_mesh(main_rig)
     bake_limb_modifiers()
