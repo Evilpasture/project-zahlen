@@ -20,6 +20,7 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -171,29 +172,81 @@ struct DescriptorHeapsParallelSuite {
             std::vector<uint8_t> pixels(static_cast<size_t>(width * height * 3));
             ppm.read(reinterpret_cast<char*>(pixels.data()), static_cast<std::streamsize>(pixels.size()));
 
-            std::array<uint32_t, 4> matched {};
-            for (size_t px = 0; px < pixels.size(); px += 3) {
-                int      bestIdx = -1;
-                uint32_t bestDst = ~0U;
-                for (uint32_t m = 0; m < 4; ++m) {
-                    const int dr = static_cast<int>(pixels[px + 0]) - static_cast<int>(materials[m].rgb[0]);
-                    const int dg = static_cast<int>(pixels[px + 1]) - static_cast<int>(materials[m].rgb[1]);
-                    const int db = static_cast<int>(pixels[px + 2]) - static_cast<int>(materials[m].rgb[2]);
-                    const uint32_t d = static_cast<uint32_t>(dr * dr + dg * dg + db * db);
-                    if (d < bestDst) {
-                        bestDst = d;
-                        bestIdx = static_cast<int>(m);
+            // ====================================================================
+            // Verification: fixed expected-RGB matching is too rigid for a lit
+            // scene (uniform lighting/exposure scaling moves every color, and
+            // tone mapping reshapes them). Instead, classify each pixel by HUE
+            // over the central grid region (skipping the sky/floor): uniform
+            // scaling and mild tone mapping preserve hue order, so each
+            // material must light up its own hue bucket.
+            // ====================================================================
+            struct Bucket {
+                const char* name;
+                int         lo; // inclusive hue range [lo, hi]
+                int         hi;
+                uint32_t    count = 0;
+            };
+            std::array<Bucket, 4> buckets {{
+                {"red", 0, 24},
+                {"yellow", 36, 84},
+                {"green", 96, 150},
+                {"blue", 200, 280},
+            }};
+
+            constexpr int kCropTop    = 85;
+            constexpr int kCropBottom = 395;
+            constexpr int kCropLeft   = 150;
+            constexpr int kCropRight  = 490;
+
+            uint64_t saturated = 0;
+            uint64_t totalPx   = 0;
+            for (int py = kCropTop; py < kCropBottom; ++py) {
+                for (int px = kCropLeft; px < kCropRight; ++px) {
+                    const size_t idx = (static_cast<size_t>(py) * static_cast<size_t>(width) + static_cast<size_t>(px)) * 3;
+                    const int    r = pixels[idx + 0];
+                    const int    g = pixels[idx + 1];
+                    const int    b = pixels[idx + 2];
+                    totalPx++;
+
+                    const int mx = std::max({r, g, b});
+                    const int mn = std::min({r, g, b});
+                    if (mx - mn < 24) {
+                        continue; // Near-gray (background/floor): skip.
                     }
-                }
-                if (bestIdx >= 0 && bestDst < 60 * 60) {
-                    matched[static_cast<uint32_t>(bestIdx)]++;
+                    saturated++;
+
+                    float h = 0.0f;
+                    if (mx == r) {
+                        h = 60.0f * static_cast<float>(g - b) / static_cast<float>(mx - mn);
+                    } else if (mx == g) {
+                        h = 60.0f * (2.0f + static_cast<float>(b - r) / static_cast<float>(mx - mn));
+                    } else {
+                        h = 60.0f * (4.0f + static_cast<float>(r - g) / static_cast<float>(mx - mn));
+                    }
+                    if (h < 0.0f) {
+                        h += 360.0f;
+                    }
+
+                    for (auto& bucket: buckets) {
+                        const float hc = (h > 180.0f) ? h - 360.0f : h; // red wraps around 0/360
+                        if (static_cast<int>(hc) >= bucket.lo && static_cast<int>(hc) <= bucket.hi) {
+                            bucket.count++;
+                        }
+                    }
                 }
             }
 
-            for (uint32_t m = 0; m < 4; ++m) {
-                ZHLN::Println("    [INFO] Material {} resolved {} pixels through secondary heap draws.", m, matched[m]);
-                ZHLN::Test::ExpectTrue(matched[m] >= 200);
-                if (matched[m] < 200) {
+            for (const auto& bucket: buckets) {
+                ZHLN::Println("    [INFO] hue bucket '{}' [{}..{}]: {} pixels", bucket.name, bucket.lo, bucket.hi, bucket.count);
+            }
+            ZHLN::Println("    [INFO] crop region {} px, saturated {} px", totalPx, saturated);
+
+            // 100 cubes per material, ~250 px each in the cropped region: a
+            // 2000-px floor per bucket is extremely conservative while still
+            // failing if a material's draws never execute.
+            for (const auto& bucket: buckets) {
+                ZHLN::Test::ExpectTrue(bucket.count >= 2000);
+                if (bucket.count < 2000) {
                     return std::unexpected(DescriptorHeapsParallelTestError::SecondaryHeapPathFailed);
                 }
             }

@@ -12,6 +12,11 @@ namespace ZHLN::Vk {
 struct SecondaryInheritance {
     std::span<const VkFormat> colorFormats;
     VkFormat                  depthFormat = VK_FORMAT_UNDEFINED;
+    // Must match the render pass the secondary is executed in:
+    // VUID-vkCmdExecuteCommands-pStencilAttachment-06775. Only set this when
+    // the pass actually binds a stencil attachment (the depth format alone is
+    // NOT enough — most depth passes have pStencilAttachment == NULL).
+    VkFormat stencilFormat = VK_FORMAT_UNDEFINED;
 
     // VK_EXT_descriptor_heap: when non-null, the secondary inherits the
     // primary's bound heaps so it can draw with heap-based pipelines.
@@ -82,7 +87,7 @@ inline void ParallelDrawDispatch(
         .colorAttachmentCount    = static_cast<uint32_t>(inheritDesc.colorFormats.size()),
         .pColorAttachmentFormats = inheritDesc.colorFormats.data(),
         .depthAttachmentFormat   = inheritDesc.depthFormat,
-        .stencilAttachmentFormat = (inheritDesc.depthFormat == VK_FORMAT_D32_SFLOAT_S8_UINT) ? VK_FORMAT_D32_SFLOAT_S8_UINT : VK_FORMAT_UNDEFINED,
+        .stencilAttachmentFormat = inheritDesc.stencilFormat,
         .rasterizationSamples    = VK_SAMPLE_COUNT_1_BIT
     };
     if (inheritDesc.samplerHeapBindInfo != nullptr || inheritDesc.resourceHeapBindInfo != nullptr) {
