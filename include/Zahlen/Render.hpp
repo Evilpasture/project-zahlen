@@ -136,6 +136,8 @@ class ZHLN_API RenderContext {
     void                                         UpdateBuffer(BufferHandle handle, const void* data, size_t size) noexcept;
     auto                                         CreateConstantBuffer(size_t size) -> BufferHandle;
     [[nodiscard]] std::expected<Material, Error> CreateMaterial(const PipelineDesc& desc);
+    [[nodiscard]] std::expected<Material, Error> CreateDebugLineMaterial();
+    [[nodiscard]] std::expected<Material, Error> CreateDebugSolidMaterial();
 
     auto CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle;
 
