@@ -83,8 +83,6 @@ VSOutput VSMain(uint vertexId: SV_VulkanVertexID, uint instanceId: SV_VulkanInst
         output.tangent.xyz = normalize(mul(world3x3, localTangent.xyz));
     }
 
-    output.worldPos = worldPos.xyz;
-
     float4 baseColorFactor = inst.baseColorFactor;
     float4 emissiveFactor  = inst.emissiveFactor;
     float metallicFactor   = inst.metallicFactor;
@@ -103,12 +101,11 @@ VSOutput VSMain(uint vertexId: SV_VulkanVertexID, uint instanceId: SV_VulkanInst
         output.alphaMode       = inst.alphaMode;
         output.materialIndices = uint4(inst.albedoIndex, 0, 0, 0);
 
-        output.currClip  = 0;
-        output.prevClip  = 0;
-        output.normal    = 0;
-        output.tangent   = 0;
-        output.shadowPos = 0;
-        output.color     = localColor;
+        output.currClip = 0;
+        output.prevClip = 0;
+        output.normal   = 0;
+        output.tangent  = 0;
+        output.color    = localColor;
         return output;
     }
 
@@ -126,7 +123,6 @@ VSOutput VSMain(uint vertexId: SV_VulkanVertexID, uint instanceId: SV_VulkanInst
     output.tangent.w = localTangent.w;
     output.uv        = localUV;
 
-    output.shadowPos       = mul(scene.frame.lightSpaceMatrices[0], worldPos);
     output.color           = localColor;
     output.materialIndices = uint4(inst.albedoIndex, inst.normalIndex, inst.pbrIndex, inst.emissiveIndex);
     output.baseColorFactor = baseColorFactor;

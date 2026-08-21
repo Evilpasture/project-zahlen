@@ -461,11 +461,9 @@ public struct SceneGeometryOutput {
     public float4 pos : SV_Position;
     public float4 currClip : TEXCOORD0;
     public float4 prevClip : TEXCOORD1;
-    public float3 worldPos : POSITION;
     public float3 normal : NORMAL;
     public float4 tangent : TANGENT;
     public float2 uv : TEXCOORD2;
-    public float4 shadowPos : TEXCOORD3;
     public float4 color : COLOR;
     public nointerpolation uint4 materialIndices : TEXCOORD4;
     public nointerpolation float4 baseColorFactor : TEXCOORD5;

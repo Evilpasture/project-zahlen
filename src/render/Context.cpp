@@ -130,10 +130,13 @@ std::expected<Context, Error> Context::Builder::Build() const noexcept {
 
     // Hook the persistent messenger so runtime validation messages reach
     // ZHLN_Internal_DebugCallback (error counter + GPU-AV abort hook).
+    // Errors AND warnings: a warning the engine cannot explain is a warning
+    // worth fixing at the source, not filtering here.
     if (_validationMode != ZHLN_VALIDATION_OFF) {
         ctx._debugMessenger =
             ZHLN_CreateDebugMessenger(ctx._instance, VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT);
     }
+
     return ctx;
 }
 
