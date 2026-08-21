@@ -285,11 +285,12 @@ struct GpuCullingPolicyPass1 {
             .AddColor(norm_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorNormalRoughness)
             .AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearDepthValue)
             .Execute(cmd, [&]() {
-                // The culling dispatch above is a legacy descriptor-set +
-                // push-constant pass, which invalidated heap state: re-bind
-                // the heaps and re-push the frame address block for the
+                // The culling dispatch above is a heap pass using push data at
+                // offsets 0/176, which invalidated the push-data state: re-bind
+                // the heaps (primary segments only — inherited secondaries keep
+                // theirs) and re-push the frame address block for the
                 // heap-based geometry draws.
-                ctx.BindHeapsAndPushFrame(cmd);
+                recorder.EnsureHeapState(cmd);
 
                 for (const auto& group: groups) {
                     if (!group.material->pipeline.Valid()) {
@@ -378,8 +379,9 @@ struct GpuCullingPolicyPass2 {
             .AddColor(norm_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
             .AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
             .Execute(cmd, [&]() {
-                // Re-establish heap + push-data state after the legacy culling dispatch.
-                ctx.BindHeapsAndPushFrame(cmd);
+                // Re-establish heap + push-data state after the culling dispatch
+                // (push data was updated for the dispatch).
+                recorder.EnsureHeapState(cmd);
 
                 for (const auto& group: groups) {
                     if (!group.material->pipeline.Valid()) {
@@ -507,9 +509,10 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
 
     // VK_EXT_descriptor_heap: the shadow pass runs entirely on heap pipelines.
     // It records into either the primary (serial fallback) or a secondary
-    // command buffer (parallel recorder); binding the heaps + pushing the
-    // frame addresses is valid in both.
-    ctx.BindHeapsAndPushFrame(cmd);
+    // command buffer (parallel recorder). In the secondary case the heaps are
+    // inherited from the primary and the frame addresses were re-pushed by
+    // the recorder, so only the primary path self-binds.
+    recorder.EnsureHeapState(cmd);
 
     std::array<Frustum, RenderContext::Impl::NUM_CASCADES> cascadeFrustums {};
     for (uint32_t c = 0; c < RenderContext::Impl::NUM_CASCADES; ++c) {

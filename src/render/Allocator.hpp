@@ -213,7 +213,10 @@ class Buffer {
         return _handle.Get();
     }
     [[nodiscard]] auto Size() const noexcept -> size_t {
-        return _info.size;
+        // The size REQUESTED at creation (VkBufferCreateInfo::size), not the
+        // VMA allocation size: allocation sizes are rounded up, which would
+        // make descriptor address ranges overrun the buffer.
+        return _requestedSize;
     }
     [[nodiscard]] auto Valid() const noexcept -> bool {
         return _handle.Valid();
@@ -225,6 +228,7 @@ class Buffer {
   private:
     VmaHandle<VkBuffer, vmaDestroyBuffer> _handle;
     VmaAllocationInfo                     _info = {};
+    VkDeviceSize                          _requestedSize = 0;
 };
 
 [[nodiscard]] auto UploadToBuffer(VmaAllocator allocator, VkCommandBuffer cmd, Buffer& dst, const void* data, size_t size) noexcept -> Buffer;

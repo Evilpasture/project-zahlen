@@ -1121,13 +1121,28 @@ struct FrameRecorder {
     mutable Vk::CommandEncoder                 encoder;
     RenderContext::Impl&                       ctx;
     uint32_t                                   frameIndex;
+    // VK_EXT_descriptor_heap: true when recording into a SECONDARY command
+    // buffer that inherits the primary's heap bindings (ParallelCommandRecorder
+    // with SetHeapState). Such secondaries must not bind their own heaps —
+    // doing so would invalidate the primary's heap state after execution —
+    // and the recorder already re-pushed the per-frame device-address block.
+    bool                                       heapsInherited;
 
-    FrameRecorder(Vk::CommandBuffer<Vk::QueueType::Graphics> c, RenderContext::Impl& impl) noexcept:
-        cmd(c), encoder(c.handle, &impl.ctx), ctx(impl), frameIndex(impl.frame_index) {
+    FrameRecorder(Vk::CommandBuffer<Vk::QueueType::Graphics> c, RenderContext::Impl& impl, bool inherited = false) noexcept:
+        cmd(c), encoder(c.handle, &impl.ctx), ctx(impl), frameIndex(impl.frame_index), heapsInherited(inherited) {
     }
 
-    FrameRecorder(VkCommandBuffer c, RenderContext::Impl& impl) noexcept:
-        cmd({c}), encoder(c, &impl.ctx), ctx(impl), frameIndex(impl.frame_index) {
+    FrameRecorder(VkCommandBuffer c, RenderContext::Impl& impl, bool inherited = false) noexcept:
+        cmd({c}), encoder(c, &impl.ctx), ctx(impl), frameIndex(impl.frame_index), heapsInherited(inherited) {
+    }
+
+    /// Binds the heaps + pushes the per-frame address block, unless the
+    /// surrounding secondary already inherits the heaps (and received the
+    /// push block from the recorder).
+    void EnsureHeapState(VkCommandBuffer c) const noexcept {
+        if (!heapsInherited) {
+            ctx.BindHeapsAndPushFrame(c);
+        }
     }
 };
 

@@ -142,15 +142,28 @@ struct PassFactory {
             }
             auto& rec = self.parallelRecorder.Current();
             rec.Reset();
+
+            // VK_EXT_descriptor_heap: the primary binds the heaps so the
+            // secondaries can INHERIT the identical binding (binding their own
+            // heaps would invalidate the primary's heap state after
+            // vkCmdExecuteCommands; VUID-vkCmdDispatch-None-11308). The
+            // recorder re-pushes the per-frame device-address block into every
+            // secondary (push data is not inherited).
+            self.BindHeapsAndPushFrame(c);
+            const auto samplerBind  = self.heapManager.GetSamplerHeapBindInfo();
+            const auto resourceBind = self.heapManager.GetResourceHeapBindInfo();
+            const auto frameAddrs   = self.FrameHeapAddresses();
+            rec.SetHeapState(&samplerBind, &resourceBind, &self.ctx, kHeapFrameAddrPushOffset, std::span<const VkDeviceAddress> {frameAddrs.data(), frameAddrs.size()});
+
             TaskSystemScheduler scheduler;
             rec.Record(
                 scheduler,
                 [&](Vk::RecordingSlot slot) noexcept {
-                    FrameRecorder shadowRec(slot.cmd, self);
+                    FrameRecorder shadowRec(slot.cmd, self, true);
                     Passes::ShadowPass {}.Execute(shadowRec);
                 },
                 [&](Vk::RecordingSlot slot) noexcept {
-                    FrameRecorder mainRec(slot.cmd, self);
+                    FrameRecorder mainRec(slot.cmd, self, true);
                     Passes::MainPass1 {}.Execute(mainRec, BuildSceneResources());
                 }
             );

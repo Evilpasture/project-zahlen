@@ -427,21 +427,13 @@ std::expected<Vk::ExtensionResult, Error> GetDeviceExtensions(VkPhysicalDevice p
 
 template <typename LayoutT>
 [[nodiscard]] std::expected<void, Error> BuildPassHelper(
-    RenderContext::Impl*            self,
-    Vk::PostProcessPass<LayoutT>&   pass,
-    const char*                     passName,
-    VertexStageSource               vs,
-    FragmentStageSource             ps,
-    std::initializer_list<VkFormat> colorFormats,
-    const VkPushConstantRange*      pushConstants = nullptr,
-    uint32_t                        pushCount     = 0,
-    bool                            additive      = false
+    RenderContext::Impl* self, Vk::PostProcessPass<LayoutT>& pass, const char* passName, VertexStageSource vs, FragmentStageSource ps,
+    std::initializer_list<VkFormat> colorFormats, bool additive = false
 ) noexcept {
     return self->LoadAndCreateShaders(vs, ps).and_then([&](auto&& shaders) -> std::expected<void, Error> {
         // VK_EXT_descriptor_heap: the pass is a heap pipeline (null layout,
-        // PUSH_INDEX mapping table baked from the reflected set layout).
-        (void) pushConstants;
-        (void) pushCount;
+        // PUSH_INDEX mapping table baked from the reflected set layout). Per-
+        // draw data travels through push data, so no push ranges are declared.
         if (pass.BuildHeap(self->ctx.Device(), self->heapManager, shaders, colorFormats, additive)) {
             ZHLN::Log("[RenderInit] Successfully built pipeline for pass: {}", passName);
             return {};
@@ -453,22 +445,12 @@ template <typename LayoutT>
 
 template <typename LayoutT>
 [[nodiscard]] std::expected<void, Error> BuildPassVariants(
-    RenderContext::Impl*                  self,
-    Vk::PostProcessPass<LayoutT>&         pass,
-    const char*                           passName,
-    VertexStageSource                     vs,
-    FragmentStageSource                   ps,
-    std::initializer_list<VkFormat>       colorFormats,
-    std::span<const VkSpecializationInfo> specInfos,
-    const VkPushConstantRange*            pushConstants = nullptr,
-    uint32_t                              pushCount     = 0,
-    bool                                  additive      = false
+    RenderContext::Impl* self, Vk::PostProcessPass<LayoutT>& pass, const char* passName, VertexStageSource vs, FragmentStageSource ps,
+    std::initializer_list<VkFormat> colorFormats, std::span<const VkSpecializationInfo> specInfos, bool additive = false
 ) noexcept {
     return self->LoadAndCreateShaders(vs, ps).and_then([&](auto&& shaders) -> std::expected<void, Error> {
         // VK_EXT_descriptor_heap: specialization never changes the descriptor
         // interface, so one mapping table covers every variant.
-        (void) pushConstants;
-        (void) pushCount;
         if (pass.BuildHeapVariants(self->ctx.Device(), self->heapManager, shaders, colorFormats, specInfos, additive)) {
             ZHLN::Log("[RenderInit] Successfully built pipeline variants for pass: {}", passName);
             return {};
@@ -1421,12 +1403,10 @@ std::expected<void, Error> RenderContext::Impl::BuildDecalPipeline() {
 
 std::expected<void, Error> RenderContext::Impl::BuildTAAPipeline() {
     using enum Resource::ShaderID;
-    VkPushConstantRange taaPush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(float)};
 
     return BuildPassHelper(
         this, taaPass, "TAA", {.path = Resource::Paths::TaaVS, .fallback = Resource::GetShaderProgram(Taa).vertex, .entryPoint = "VSMain"},
-        {.path = Resource::Paths::TaaPS, .fallback = Resource::GetShaderProgram(Taa).fragment, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT},
-        &taaPush, 1
+        {.path = Resource::Paths::TaaPS, .fallback = Resource::GetShaderProgram(Taa).fragment, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT}
     );
 }
 
@@ -1450,43 +1430,38 @@ std::expected<void, Error> RenderContext::Impl::BuildMLAAPipeline() {
 
 std::expected<void, Error> RenderContext::Impl::BuildSMAAPipeline() {
     using enum Resource::ShaderID;
-    VkPushConstantRange smaaPush = {.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(float) * 4};
 
     return BuildPassHelper(
                this, smaaEdgePass, "SMAA Edge Detection", {.path = Resource::Paths::SmaaEdgeVS, .fallback = Resource::GetShaderProgram(SmaaEdge).vertex},
-               {.path = Resource::Paths::SmaaEdgePS, .fallback = Resource::GetShaderProgram(SmaaEdge).fragment}, {VK_FORMAT_R8G8_UNORM}, &smaaPush, 1
+               {.path = Resource::Paths::SmaaEdgePS, .fallback = Resource::GetShaderProgram(SmaaEdge).fragment}, {VK_FORMAT_R8G8_UNORM}
     )
         .and_then([&]() {
             return BuildPassHelper(
                 this, smaaWeightPass, "SMAA Blending Weight",
                 {.path = Resource::Paths::SmaaWeightVS, .fallback = Resource::GetShaderProgram(SmaaWeight).vertex},
-                {.path = Resource::Paths::SmaaWeightPS, .fallback = Resource::GetShaderProgram(SmaaWeight).fragment}, {VK_FORMAT_R8G8B8A8_UNORM}, &smaaPush, 1
+                {.path = Resource::Paths::SmaaWeightPS, .fallback = Resource::GetShaderProgram(SmaaWeight).fragment}, {VK_FORMAT_R8G8B8A8_UNORM}
             );
         })
         .and_then([&]() {
             return BuildPassHelper(
                 this, smaaBlendPass, "SMAA Neighborhood Blend",
                 {.path = Resource::Paths::SmaaBlendVS, .fallback = Resource::GetShaderProgram(SmaaBlend).vertex},
-                {.path = Resource::Paths::SmaaBlendPS, .fallback = Resource::GetShaderProgram(SmaaBlend).fragment}, {VK_FORMAT_R16G16B16A16_SFLOAT}, &smaaPush,
-                1
+                {.path = Resource::Paths::SmaaBlendPS, .fallback = Resource::GetShaderProgram(SmaaBlend).fragment}, {VK_FORMAT_R16G16B16A16_SFLOAT}
             );
         });
 }
 
 std::expected<void, Error> RenderContext::Impl::BuildAmbientPipeline() {
     using enum Resource::ShaderID;
-    VkPushConstantRange ppPush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = 192};
 
     return BuildPassHelper(
         this, ambientPass, "Ambient", {.path = Resource::Paths::AmbientVS, .fallback = Resource::GetShaderProgram(Ambient).vertex, .entryPoint = "VSMain"},
-        {.path = Resource::Paths::AmbientPS, .fallback = Resource::GetShaderProgram(Ambient).fragment, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT},
-        &ppPush, 1
+        {.path = Resource::Paths::AmbientPS, .fallback = Resource::GetShaderProgram(Ambient).fragment, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT}
     );
 }
 
 std::expected<void, Error> RenderContext::Impl::BuildLightingPipeline() {
     using enum Resource::ShaderID;
-    VkPushConstantRange ppPush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(PPPushConstants)};
 
     struct SpecData {
         int enableRTR;
@@ -1508,13 +1483,12 @@ std::expected<void, Error> RenderContext::Impl::BuildLightingPipeline() {
 
     return BuildPassVariants(
         this, lightingPass, "Lighting", {.path = vsPath, .fallback = vsSpan, .entryPoint = "VSMain"},
-        {.path = psPath, .fallback = psSpan, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos, &ppPush, 1
+        {.path = psPath, .fallback = psSpan, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
     );
 }
 
 std::expected<void, Error> RenderContext::Impl::BuildReflectionPipelines() {
     using enum Resource::ShaderID;
-    VkPushConstantRange ppPush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(PPPushConstants)};
 
     struct SpecData {
         int enableSSR;
@@ -1542,7 +1516,7 @@ std::expected<void, Error> RenderContext::Impl::BuildReflectionPipelines() {
 
     auto res = BuildPassVariants(
         this, reflectionPass, "Reflection", {.path = vsPath, .fallback = vsSpan, .entryPoint = "VSMain"},
-        {.path = psPath, .fallback = psSpan, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos, &ppPush, 1
+        {.path = psPath, .fallback = psSpan, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
     );
     if (!res) {
         return res;
@@ -1550,7 +1524,7 @@ std::expected<void, Error> RenderContext::Impl::BuildReflectionPipelines() {
 
     return BuildPassVariants(
         this, translucentReflectionPass, "Translucent Reflection", {.path = vsPath, .fallback = vsSpan, .entryPoint = "VSMain"},
-        {.path = psPath, .fallback = psSpan, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos, &ppPush, 1
+        {.path = psPath, .fallback = psSpan, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
     );
 }
 
@@ -1562,8 +1536,6 @@ std::expected<void, Error> RenderContext::Impl::BuildBloomPipelines() {
         {.path = Resource::Paths::BloomThresholdPS, .fallback = Resource::GetShaderProgram(BloomThreshold).fragment}, {VK_FORMAT_R16G16B16A16_SFLOAT}
     );
 
-    VkPushConstantRange kawasePush = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 0, .size = sizeof(KawasePushConstants)};
-
     for (int i = 0; i < 3; ++i) {
         res = res.and_then(
                      [&, i]() {
@@ -1572,15 +1544,14 @@ std::expected<void, Error> RenderContext::Impl::BuildBloomPipelines() {
                              this, bloomDownPass[i], downName.c_str(),
                              {.path = Resource::Paths::BloomBlurVS, .fallback = Resource::GetShaderProgram(BloomBlur).vertex},
                              {.path = Resource::Paths::BloomBlurPS, .fallback = Resource::GetShaderProgram(BloomBlur).fragment},
-                             {VK_FORMAT_R16G16B16A16_SFLOAT}, &kawasePush, 1
+                             {VK_FORMAT_R16G16B16A16_SFLOAT}
                          );
                      }
         ).and_then([&, i]() {
             std::string upName = std::format("Bloom Upsample {}", i);
             return BuildPassHelper(
                 this, bloomUpPass[i], upName.c_str(), {.path = Resource::Paths::BloomBlurVS, .fallback = Resource::GetShaderProgram(BloomBlur).vertex},
-                {.path = Resource::Paths::BloomBlurPS, .fallback = Resource::GetShaderProgram(BloomBlur).fragment}, {VK_FORMAT_R16G16B16A16_SFLOAT},
-                &kawasePush, 1
+                {.path = Resource::Paths::BloomBlurPS, .fallback = Resource::GetShaderProgram(BloomBlur).fragment}, {VK_FORMAT_R16G16B16A16_SFLOAT}
             );
         });
     }
@@ -1590,16 +1561,10 @@ std::expected<void, Error> RenderContext::Impl::BuildBloomPipelines() {
 
 std::expected<void, Error> RenderContext::Impl::BuildBlitPipeline() {
     using enum Resource::ShaderID;
-    VkPushConstantRange blitPush = {
-        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-        .offset     = 0,
-        .size       = sizeof(BlitPushConstants),
-    };
 
     return BuildPassHelper(
         this, blitPass, "Blit", {.path = Resource::Paths::BlitVS, .fallback = Resource::GetShaderProgram(Blit).vertex, .entryPoint = "VSMain"},
-        {.path = Resource::Paths::BlitPS, .fallback = Resource::GetShaderProgram(Blit).fragment, .entryPoint = "PSMain"}, {presentation.GetPresentFormat()},
-        &blitPush, 1
+        {.path = Resource::Paths::BlitPS, .fallback = Resource::GetShaderProgram(Blit).fragment, .entryPoint = "PSMain"}, {presentation.GetPresentFormat()}
     );
 }
 

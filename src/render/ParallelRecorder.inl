@@ -50,16 +50,37 @@ void ParallelCommandRecorder<ConcurrentSlots>::RecordImpl(SchedulerPolicy&& sche
     // Expand the lambda pack and dispatch them to the scheduler at compile-time.
     // Each lambda bakes the constant 'Is' directly into its generated class structure.
     std::forward<SchedulerPolicy>(scheduler).Dispatch([this, &task_tuple]() {
-        RecordingSlot                  slot {.cmd = _cmds[Is], .slotIndex = static_cast<uint32_t>(Is)};
+        RecordingSlot slot {.cmd = _cmds[Is], .slotIndex = static_cast<uint32_t>(Is)};
+
+        // VK_EXT_descriptor_heap: inherit the primary's heap bindings (binding
+        // our own would invalidate the primary's heap state after execution).
+        VkCommandBufferInheritanceInfo                    inherit_info = NullInheritanceInfo;
+        const VkCommandBufferInheritanceDescriptorHeapInfoEXT heap_inherit = {
+            .sType                 = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_DESCRIPTOR_HEAP_INFO_EXT,
+            .pNext                 = nullptr,
+            .pSamplerHeapBindInfo  = _samplerHeapBindInfo,
+            .pResourceHeapBindInfo = _resourceHeapBindInfo,
+        };
+        if (_samplerHeapBindInfo != nullptr || _resourceHeapBindInfo != nullptr) {
+            inherit_info.pNext = &heap_inherit;
+        }
+
         const VkCommandBufferBeginInfo begin_info = {
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
             .pNext = nullptr,
             .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, // Do not set CONTINUE_BIT
                                                                   // since they begin their own
                                                                   // render passes
-            .pInheritanceInfo = &NullInheritanceInfo
+            .pInheritanceInfo = &inherit_info
         };
         vkBeginCommandBuffer(slot.cmd, &begin_info);
+
+        // Push data does not carry over from the primary: re-push the
+        // per-frame device-address block in every secondary.
+        if (_ctx != nullptr && _frameAddressCount > 0) {
+            Vk::PushData(*_ctx, slot.cmd, _pushOffset, _frameAddresses.data(), _frameAddressCount * sizeof(VkDeviceAddress));
+        }
+
         std::get<Is>(task_tuple)(slot);
         vkEndCommandBuffer(slot.cmd);
     }...);
