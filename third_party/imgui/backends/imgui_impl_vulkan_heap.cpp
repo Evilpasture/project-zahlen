@@ -514,6 +514,7 @@ static void CreateOrResizeBuffer(VkBuffer& buffer, VkDeviceMemory& buffer_memory
 static void ImGui_ImplVulkanHeap_SetupRenderState(ImDrawData* draw_data, VkPipeline pipeline, VkCommandBuffer command_buffer, ImGui_ImplVulkanHeap_FrameRenderBuffers* rb, int fb_width, int fb_height)
 {
     ImGui_ImplVulkanHeap_Data* bd = ImGui_ImplVulkanHeap_GetBackendData();
+    ImGui_ImplVulkanHeap_InitInfo* v = &bd->VulkanInitInfo;
 
     // Bind pipeline:
     vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
@@ -1037,6 +1038,7 @@ typedef void VkPipelineRenderingCreateInfoKHR;
 static VkPipeline ImGui_ImplVulkanHeap_CreatePipeline(VkDevice device, const VkAllocationCallbacks* allocator, VkPipelineCache pipelineCache, const ImGui_ImplVulkanHeap_PipelineInfo* info)
 {
     ImGui_ImplVulkanHeap_Data* bd = ImGui_ImplVulkanHeap_GetBackendData();
+    ImGui_ImplVulkanHeap_InitInfo* v = &bd->VulkanInitInfo;
     ImGui_ImplVulkanHeap_CreateShaderModules(device, allocator);
 
     VkPipelineShaderStageCreateInfo stage[2] = {};
