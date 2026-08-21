@@ -132,12 +132,9 @@ std::expected<void, Error> RenderContext::Impl::BuildMeshParticlePipelines() {
     using enum Resource::ShaderID;
 
     // 1. Compute Simulation Pipeline (mesh_particle_update.hlsl)
-    auto                csMeshShader = Vk::CreateShaderDesc(Resource::GetShaderProgram(MeshParticleUpdate).vertex);
-    VkPushConstantRange mpUpdatePush = {
-        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
-        .offset     = 0,
-        .size       = sizeof(RenderContext::Impl::MeshParticleComputePush) // 176 bytes
-    };
+    //    VK_EXT_descriptor_heap: heap mappings + vkCmdPushDataEXT replace the
+    //    descriptor set + push constant range this pipeline used to declare.
+    auto csMeshShader = Vk::CreateShaderDesc(Resource::GetShaderProgram(MeshParticleUpdate).vertex);
 
     if (!meshParticleUpdatePass.BuildHeap(ctx.Device(), csMeshShader, &sceneHeapMappings.info)) {
         ZHLN::Log("ERROR: Failed to build 3D mesh particle update compute pipeline!");
