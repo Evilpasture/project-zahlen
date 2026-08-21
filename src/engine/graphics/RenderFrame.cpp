@@ -476,56 +476,63 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
             _impl->pools[_impl->frame_index].Reset();
 
             // RAII command-buffer scope: begin on construction, end on exit.
-            Vk::CommandBufferGuard recordGuard(cmd);
+            //
+            // The scope below is LOAD-BEARING. Without it the guard lives until the
+            // end of the enclosing block, i.e. past the vkQueueSubmit2 below, and the
+            // primary is submitted while still in the recording state:
+            //   VUID-vkQueueSubmit2-commandBuffer-03874, once per frame, on every
+            //   headless frame (which is every GPU test).
+            {
+                Vk::CommandBufferGuard recordGuard(cmd);
 
-            _impl->pendingAcquires.Drain(cmd);
-            _impl->DispatchSkinningPasses();
+                _impl->pendingAcquires.Drain(cmd);
+                _impl->DispatchSkinningPasses();
 
-            if (_impl->queues.drawQueue.size() > kGpuCullingMaxInstances) {
-                _impl->queues.drawQueue.resize(kGpuCullingMaxInstances);
-            }
-            _impl->FlushLineQueue();
-
-            _impl->SortDrawQueue();
-
-            auto drawCount = _impl->queues.drawQueue.size();
-            auto csgCount  = _impl->queues.csgDrawQueue.size();
-
-            if (drawCount > 0 || csgCount > 0) {
-                auto  mapped = _impl->frames.instanceDataBuffers[_impl->frame_index].Map();
-                auto* dst    = static_cast<InstanceData*>(mapped.data);
-
-                for (size_t i = 0; i < drawCount; ++i) {
-                    dst[i] = _impl->queues.drawQueue[i].instanceData;
+                if (_impl->queues.drawQueue.size() > kGpuCullingMaxInstances) {
+                    _impl->queues.drawQueue.resize(kGpuCullingMaxInstances);
                 }
+                _impl->FlushLineQueue();
 
-                uint32_t csgOffset = drawCount;
-                for (auto& csgCmd: _impl->queues.csgDrawQueue) {
-                    dst[csgOffset]        = csgCmd.eyeDraw.instanceData;
-                    csgCmd.eyeInstanceIdx = csgOffset++;
+                _impl->SortDrawQueue();
 
-                    for (auto& cutter: csgCmd.cutters) {
-                        dst[csgOffset]     = cutter.draw.instanceData;
-                        cutter.instanceIdx = csgOffset++;
+                auto drawCount = _impl->queues.drawQueue.size();
+                auto csgCount  = _impl->queues.csgDrawQueue.size();
+
+                if (drawCount > 0 || csgCount > 0) {
+                    auto  mapped = _impl->frames.instanceDataBuffers[_impl->frame_index].Map();
+                    auto* dst    = static_cast<InstanceData*>(mapped.data);
+
+                    for (size_t i = 0; i < drawCount; ++i) {
+                        dst[i] = _impl->queues.drawQueue[i].instanceData;
+                    }
+
+                    uint32_t csgOffset = drawCount;
+                    for (auto& csgCmd: _impl->queues.csgDrawQueue) {
+                        dst[csgOffset]        = csgCmd.eyeDraw.instanceData;
+                        csgCmd.eyeInstanceIdx = csgOffset++;
+
+                        for (auto& cutter: csgCmd.cutters) {
+                            dst[csgOffset]     = cutter.draw.instanceData;
+                            cutter.instanceIdx = csgOffset++;
+                        }
                     }
                 }
-            }
-            _impl->BuildTLAS(cmd);
+                _impl->BuildTLAS(cmd);
 
-            if (Diag::IndirectTelemetryEnabled()) {
-                static uint32_t s_TelemetryFrame = 0;
-                ++s_TelemetryFrame;
-                if (s_TelemetryFrame >= 4 && (s_TelemetryFrame % 120) == 4) {
-                    _impl->DumpIndirectTelemetry(s_TelemetryFrame);
+                if (Diag::IndirectTelemetryEnabled()) {
+                    static uint32_t s_TelemetryFrame = 0;
+                    ++s_TelemetryFrame;
+                    if (s_TelemetryFrame >= 4 && (s_TelemetryFrame % 120) == 4) {
+                        _impl->DumpIndirectTelemetry(s_TelemetryFrame);
+                    }
                 }
-            }
 
-            _impl->RecordSceneFrame({cmd});
+                _impl->RecordSceneFrame({cmd});
 
-            if (Diag::IndirectTelemetryEnabled()) {
-                _impl->RecordIndirectTelemetry(cmd);
-            }
-            // recordGuard destructor ends the command buffer here.
+                if (Diag::IndirectTelemetryEnabled()) {
+                    _impl->RecordIndirectTelemetry(cmd);
+                }
+            } // recordGuard destructor ends the command buffer HERE, before the submit.
 
             // Submit directly to the graphics queue with timeline semaphore sync.
             // Wait on the compute timeline (same as the windowed path) and signal

@@ -178,6 +178,16 @@ typedef struct ZHLN_MeshShaderLimits {
  * the validation layer since process start (or the last reset).
  * Always 0 when validation is disabled.
  */
+/**
+ * @brief Creates the persistent debug messenger. REQUIRED for runtime messages:
+ * the create-info chained into VkInstanceCreateInfo only covers instance
+ * creation/destruction, so without this the engine's debug callback never runs.
+ */
+[[nodiscard]]
+VkDebugUtilsMessengerEXT ZHLN_CreateDebugMessenger(VkInstance instance, VkDebugUtilsMessageSeverityFlagsEXT severity);
+
+void ZHLN_DestroyDebugMessenger(VkInstance instance, VkDebugUtilsMessengerEXT messenger);
+
 [[nodiscard]]
 uint32_t ZHLN_GetValidationErrorCount(void);
 

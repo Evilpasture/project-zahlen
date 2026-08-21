@@ -121,6 +121,46 @@ static VkBool32 VKAPI_CALL ZHLN_Internal_DebugCallback(
     return VK_FALSE;
 }
 
+VkDebugUtilsMessengerEXT ZHLN_CreateDebugMessenger(const VkInstance instance, const VkDebugUtilsMessageSeverityFlagsEXT severity) {
+    if (instance == VK_NULL_HANDLE) {
+        return VK_NULL_HANDLE;
+    }
+
+    // A VkDebugUtilsMessengerCreateInfoEXT chained into VkInstanceCreateInfo
+    // covers ONLY vkCreateInstance/vkDestroyInstance. Without a real messenger
+    // object, every runtime message goes to the layer's default logger instead
+    // of ZHLN_Internal_DebugCallback -- which silently disabled both the
+    // validation-error counter and the GPU-AV out-of-bounds abort hook.
+    PFN_vkCreateDebugUtilsMessengerEXT create_fn = (PFN_vkCreateDebugUtilsMessengerEXT) vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT");
+    if (create_fn == NULL) {
+        return VK_NULL_HANDLE;
+    }
+
+    const VkDebugUtilsMessengerCreateInfoEXT info = {
+        .sType           = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+        .messageSeverity = severity,
+        .messageType     = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
+                           VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
+        .pfnUserCallback = ZHLN_Internal_DebugCallback,
+    };
+
+    VkDebugUtilsMessengerEXT messenger = VK_NULL_HANDLE;
+    if (create_fn(instance, &info, NULL, &messenger) != VK_SUCCESS) {
+        return VK_NULL_HANDLE;
+    }
+    return messenger;
+}
+
+void ZHLN_DestroyDebugMessenger(const VkInstance instance, const VkDebugUtilsMessengerEXT messenger) {
+    if (instance == VK_NULL_HANDLE || messenger == VK_NULL_HANDLE) {
+        return;
+    }
+    PFN_vkDestroyDebugUtilsMessengerEXT destroy_fn = (PFN_vkDestroyDebugUtilsMessengerEXT) vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT");
+    if (destroy_fn != NULL) {
+        destroy_fn(instance, messenger, NULL);
+    }
+}
+
 static const char* ZHLN_Internal_FindSpirvEntryPoint(const uint32_t* code, size_t size_in_bytes) {
     if (!code || size_in_bytes < 20) {
         return nullptr;

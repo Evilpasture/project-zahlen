@@ -250,14 +250,39 @@ Verified in this repository:
       the heap mapping table reflected from `basic.slang` applies verbatim.
 - [x] The image comparator used by the parity test detects dropped clusters,
       1-pixel geometry shifts and shading changes, and rejects blank frames.
+- [x] **On hardware (RTX 3050, NVIDIA, 320x240 headless):** the mesh path and
+      the vertex path are **bit-identical** -- 67 346 shaded pixels each,
+      coverage delta 0, silhouette mismatch 0, max channel delta 0, with the
+      vertex-vs-vertex control also at 0.
 
 Still requires a GPU (cannot be checked without a Vulkan device):
 
-- [ ] Validation layers clean with `taskShader`/`meshShader` enabled.
+- [ ] Validation layers clean with `taskShader`/`meshShader` enabled -- blocked
+      until now by two pre-existing bugs found while running these tests (see
+      below); re-verify after the fix.
+
+### Pre-existing bugs surfaced by these tests
+
+Neither is related to mesh shading; both were found because the parity test
+asked "is this VUID-clean?" for the first time.
+
+1. **Headless frames submitted an unended command buffer.** In
+   `RenderFrame.cpp`, `Vk::CommandBufferGuard recordGuard(cmd)` lived in the
+   *same* block as the `vkQueueSubmit2` call, so `vkEndCommandBuffer` ran after
+   the submit -- `VUID-vkQueueSubmit2-commandBuffer-03874`, once per frame, in
+   every headless run (i.e. every GPU test). A comment even claimed "recordGuard
+   destructor ends the command buffer here"; the scope that would have made
+   that true was missing. Reproduced with mesh shading and GPU culling both
+   disabled, so it long predates this work.
+2. **The debug messenger was never created.** A
+   `VkDebugUtilsMessengerCreateInfoEXT` chained into `VkInstanceCreateInfo`
+   only covers `vkCreateInstance`/`vkDestroyInstance`;
+   `vkCreateDebugUtilsMessengerEXT` was never called, so no runtime message ever
+   reached `ZHLN_Internal_DebugCallback`. That silently disabled the new
+   validation-error counter *and* the GPU-AV out-of-bounds `abort()` hook -- the
+   engine has not been trapping shader OOB at runtime.
 - [ ] RenderDoc capture shows `AMP → MSH` replacing `IA → VS`.
 - [ ] Cone-culling effectiveness: >50 % of meshlets rejected when viewing a
       closed mesh from one side (pipeline statistics query on mesh invocations).
-- [ ] `GPU_TestMeshShaders` green on a mesh-shading device (this is what
-      `mesh_and_vertex_paths_render_identically` automates: UV seams, normal
-      smoothing and T-junctions all land in the silhouette/pixel diff).
+- [x] `GPU_TestMeshShaders` green on a mesh-shading device (4/4 on an RTX 3050).
 - [ ] Shadow cascades unchanged, BLAS/ray-traced reflections unaffected.

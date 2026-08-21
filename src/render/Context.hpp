@@ -136,10 +136,11 @@ class Context {
     }
 
   private:
-    VkInstance              _instance = VK_NULL_HANDLE;
-    VkSurfaceKHR            _surface  = VK_NULL_HANDLE;
-    ZHLN_PhysicalDeviceInfo _physical = {};
-    ZHLN_Device             _device   = {};
+    VkInstance               _instance       = VK_NULL_HANDLE;
+    VkSurfaceKHR             _surface        = VK_NULL_HANDLE;
+    ZHLN_PhysicalDeviceInfo  _physical       = {};
+    ZHLN_Device              _device         = {};
+    VkDebugUtilsMessengerEXT _debugMessenger = VK_NULL_HANDLE;
 };
 
 using ValidationMode = ZHLN_ValidationMode;

@@ -44,6 +44,11 @@ Context::~Context() noexcept {
     if (_device.handle != VK_NULL_HANDLE) {
         vkDestroyDevice(_device.handle, nullptr);
     }
+    // Must be destroyed before the instance that owns it.
+    if (_debugMessenger != VK_NULL_HANDLE) {
+        ZHLN_DestroyDebugMessenger(_instance, _debugMessenger);
+        _debugMessenger = VK_NULL_HANDLE;
+    }
     if (_instance != VK_NULL_HANDLE) {
         vkDestroyInstance(_instance, nullptr);
     }
@@ -51,7 +56,8 @@ Context::~Context() noexcept {
 
 Context::Context(Context&& other) noexcept:
     _instance(std::exchange(other._instance, VK_NULL_HANDLE)), _surface(std::exchange(other._surface, VK_NULL_HANDLE)),
-    _physical(std::exchange(other._physical, {})), _device(std::exchange(other._device, {})) {
+    _physical(std::exchange(other._physical, {})), _device(std::exchange(other._device, {})),
+    _debugMessenger(std::exchange(other._debugMessenger, VK_NULL_HANDLE)) {
 }
 
 auto Context::operator=(Context&& other) noexcept -> Context& {
@@ -59,14 +65,20 @@ auto Context::operator=(Context&& other) noexcept -> Context& {
         if (_device.handle != VK_NULL_HANDLE) {
             vkDestroyDevice(_device.handle, nullptr);
         }
+        // Destroy the messenger before its instance, exactly as the destructor does.
+        if (_debugMessenger != VK_NULL_HANDLE) {
+            ZHLN_DestroyDebugMessenger(_instance, _debugMessenger);
+            _debugMessenger = VK_NULL_HANDLE;
+        }
         if (_instance != VK_NULL_HANDLE) {
             vkDestroyInstance(_instance, nullptr);
         }
 
-        _instance = std::exchange(other._instance, VK_NULL_HANDLE);
-        _surface  = std::exchange(other._surface, VK_NULL_HANDLE);
-        _physical = other._physical;
-        _device   = other._device;
+        _instance       = std::exchange(other._instance, VK_NULL_HANDLE);
+        _surface        = std::exchange(other._surface, VK_NULL_HANDLE);
+        _physical       = other._physical;
+        _device         = other._device;
+        _debugMessenger = std::exchange(other._debugMessenger, VK_NULL_HANDLE);
 
         other._physical = {};
         other._device   = {};
@@ -115,6 +127,13 @@ std::expected<Context, Error> Context::Builder::Build() const noexcept {
 
     // Only take ownership of _instance once device creation succeeds
     ctx._instance = _instance;
+
+    // Hook the persistent messenger so runtime validation messages reach
+    // ZHLN_Internal_DebugCallback (error counter + GPU-AV abort hook).
+    if (_validationMode != ZHLN_VALIDATION_OFF) {
+        ctx._debugMessenger =
+            ZHLN_CreateDebugMessenger(ctx._instance, VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT);
+    }
     return ctx;
 }
 
