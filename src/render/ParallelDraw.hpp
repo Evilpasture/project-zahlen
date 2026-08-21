@@ -59,7 +59,7 @@ inline void ParallelDrawDispatch(
         .colorAttachmentCount    = static_cast<uint32_t>(inheritDesc.colorFormats.size()),
         .pColorAttachmentFormats = inheritDesc.colorFormats.data(),
         .depthAttachmentFormat   = inheritDesc.depthFormat,
-        .stencilAttachmentFormat = VK_FORMAT_UNDEFINED,
+        .stencilAttachmentFormat = (inheritDesc.depthFormat == VK_FORMAT_D32_SFLOAT_S8_UINT) ? VK_FORMAT_D32_SFLOAT_S8_UINT : VK_FORMAT_UNDEFINED,
         .rasterizationSamples    = VK_SAMPLE_COUNT_1_BIT
     };
 

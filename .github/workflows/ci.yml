@@ -2,9 +2,9 @@ name: Zahlen CI Pipeline
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [main, master]
   pull_request:
-    branches: [ main, master ]
+    branches: [main, master]
 
 jobs:
   build-and-test:
@@ -14,23 +14,28 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          submodules: recursive # Resolves LuaJIT, Jolt, and GLFW externals
+          submodules: recursive
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build Builder Stage and Run Tests
+      # Step 1: Build up to the builder stage and execute CTest
+      # If CTest encounters a failure, the action fails here
+      - name: Build Engine and Run CTest Suite
         uses: docker/build-push-action@v5
         with:
           context: .
-          target: builder # Runs compilation and 'ctest' internally
-          tags: zahlen:ci-temp
-          outputs: type=cacheonly # Cache intermediate layers without publishing
+          target: builder
+          load: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-      - name: Build and Package Runtime Image
+      # Step 2: Package runtime image (only reaches here if tests passed)
+      - name: Package Runtime Container Image
         uses: docker/build-push-action@v5
         with:
           context: .
-          target: runner # Packages the final, lightweight runtime container
+          target: runner
           tags: zahlen:latest
-          load: true # Loads the image locally for inspection or push targets
+          load: true
+          cache-from: type=gha

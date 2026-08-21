@@ -1,0 +1,36 @@
+// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+#include "DecalSystem.hpp"
+#include <Zahlen/Components.hpp>
+#include <Zahlen/Log.hpp>
+#include <Zahlen/Math3D.hpp>
+#include <Zahlen/Render.hpp>
+#include <Zahlen/ecs/ECS.hpp>
+
+namespace ZHLN {
+
+void DecalSystem::Update(Engine& engine) {
+    auto& rc  = engine.GetRenderContext();
+    auto& reg = engine.GetRegistry();
+
+    for (Entity e: reg.GetEntitiesWith<Components::DecalComponent>()) {
+        auto* decalComp  = reg.Get<Components::DecalComponent>(e);
+        auto* worldTrans = reg.Get<Components::WorldTransformComponent>(e);
+        if ((decalComp != nullptr) && (worldTrans != nullptr)) {
+            JPH::Mat44 worldMat = worldTrans->world;
+            JPH::Mat44 invWorld = worldMat.Inversed();
+
+            rc.DrawDecal(
+                {.transform    = worldMat,
+                 .invTransform = invWorld,
+                 .albedoMap    = decalComp->albedoMap,
+                 .normalMap    = decalComp->normalMap,
+                 .roughness    = decalComp->roughness,
+                 .metallic     = decalComp->metallic}
+            );
+        }
+    }
+}
+
+} // namespace ZHLN

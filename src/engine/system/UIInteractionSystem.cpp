@@ -1,3 +1,4 @@
+// src/engine/system/UIInteractionSystem.cpp
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -5,15 +6,33 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Input.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
-#include <ecs/ECS.hpp>
 
 namespace ZHLN {
 
-void UIInteractionSystem::Update(Engine& engine) {
-    auto& reg   = engine.GetRegistry();
-    auto& input = engine.GetInput();
-    auto  mouse = input.GetMouse();
+void UIInteractionSystem::Update(Engine& engine, float dt) {
+    auto& reg = engine.GetRegistry();
+
+    auto  inputEnts = reg.GetEntitiesWith<Components::InputStateComponent>();
+    auto* state     = inputEnts.empty() ? nullptr : reg.Get<Components::InputStateComponent>(inputEnts[0]);
+    if (state == nullptr) {
+        return;
+    }
+
+    auto IsEntityOrAncestorHidden = [&](Entity ent) -> bool {
+        Entity curr = ent;
+        while (curr != NullEntity && reg.IsAlive(curr)) {
+            if (auto* mesh = reg.Get<Components::MeshComponent>(curr)) {
+                if ((mesh->flags & DrawFlags::Hidden) != DrawFlags::None) {
+                    return true;
+                }
+            }
+            auto* rect = reg.Get<Components::UIRectComponent>(curr);
+            curr       = (rect != nullptr) ? rect->parentEntity : NullEntity;
+        }
+        return false;
+    };
 
     auto entities = reg.GetEntitiesWith<Components::UIRectComponent>();
     auto rects    = reg.GetRawArray<Components::UIRectComponent>();
@@ -22,7 +41,8 @@ void UIInteractionSystem::Update(Engine& engine) {
         return;
     }
 
-    bool leftMouseDown = input.IsMouseButtonDown(KeyCode::LButton);
+    // Native ECS UI uses raw button state so ImGui capture does not block in-world panels.
+    bool leftMouseDown = state->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
 
     // 1. Process active dragging
     for (Entity e: reg.GetEntitiesWith<Components::UIDragComponent>()) {
@@ -32,8 +52,9 @@ void UIInteractionSystem::Update(Engine& engine) {
                 drag->isDragging = false;
             } else {
                 if (auto* targetRect = reg.Get<Components::UIRectComponent>(drag->targetEntity)) {
-                    targetRect->x += mouse.deltaX;
-                    targetRect->y += mouse.deltaY;
+                    // Drag uses ungated deltas so ImGui capture does not stall an active drag.
+                    targetRect->x += state->mouseDeltaX;
+                    targetRect->y += state->mouseDeltaY;
                 }
             }
         }
@@ -54,16 +75,30 @@ void UIInteractionSystem::Update(Engine& engine) {
     bool clickConsumed = false;
     bool focusCaptured = false;
 
+    // Cache mouse coordinates once per pass
+    float mouseX = state->mouseX;
+    float mouseY = state->mouseY;
+
     for (const auto& entry: sortedEntries) {
         Entity      e      = entities[entry.rawIndex];
         const auto& rect   = rects[entry.rawIndex];
         auto*       button = reg.Get<Components::UIButtonComponent>(e);
 
-        if (button == nullptr) {
+        if (button == nullptr || IsEntityOrAncestorHidden(e)) {
+            if (button != nullptr) {
+                button->Set(UIButton::Hovered, false);
+                button->Set(UIButton::Pressed, false);
+            }
             continue;
         }
 
         button->Set(UIButton::Clicked, false);
+
+        if (button->Has(UIButton::Disabled)) {
+            button->Set(UIButton::Hovered, false);
+            button->Set(UIButton::Pressed, false);
+            continue;
+        }
 
         if (clickConsumed) {
             button->Set(UIButton::Hovered, false);
@@ -72,19 +107,17 @@ void UIInteractionSystem::Update(Engine& engine) {
         }
 
         bool inside =
-            (mouse.x >= rect.computedAbsMinX && mouse.x <= rect.computedAbsMaxX && mouse.y >= rect.computedAbsMinY && mouse.y <= rect.computedAbsMaxY);
+            (mouseX >= rect.computedAbsMinX && mouseX <= rect.computedAbsMaxX && mouseY >= rect.computedAbsMinY && mouseY <= rect.computedAbsMaxY); // Updated
 
         if (inside) {
             button->Set(UIButton::Hovered, true);
             if (leftMouseDown) {
                 button->Set(UIButton::Pressed, true);
 
-                // Handle drag start
                 if (auto* drag = reg.Get<Components::UIDragComponent>(e)) {
                     drag->isDragging = true;
                 }
 
-                // Handle focus capture
                 if (reg.Get<Components::UITextInputComponent>(e) != nullptr) {
                     focusCaptured = true;
                     for (Entity other: reg.GetEntitiesWith<Components::UITextInputComponent>()) {
@@ -108,11 +141,57 @@ void UIInteractionSystem::Update(Engine& engine) {
         }
     }
 
-    // If clicked blank space outside any text fields, clear active focus
     if (leftMouseDown && !focusCaptured) {
         for (Entity e: reg.GetEntitiesWith<Components::UITextInputComponent>()) {
             if (auto* inputComp = reg.Get<Components::UITextInputComponent>(e)) {
                 inputComp->isFocused = false;
+            }
+        }
+    }
+
+    // 3. Process State-Driven Style Transitions
+    for (Entity e: reg.GetEntitiesWith<Components::UIStyleComponent>()) {
+        auto* style = reg.Get<Components::UIStyleComponent>(e);
+        auto* btn   = reg.Get<Components::UIButtonComponent>(e);
+        if (style == nullptr) {
+            continue;
+        }
+
+        JPH::Vec4 targetPanelColor = style->normalColor;
+        JPH::Vec4 targetTextColor  = style->textColorNormal;
+
+        if (btn != nullptr) {
+            if (btn->Has(UIButton::Disabled)) {
+                targetPanelColor = style->disabledColor;
+            } else if (btn->Has(UIButton::Pressed)) {
+                targetPanelColor = style->pressedColor;
+                targetTextColor  = style->textColorPressed;
+            } else if (btn->Has(UIButton::Hovered)) {
+                targetPanelColor = style->hoverColor;
+                targetTextColor  = style->textColorHover;
+            }
+        }
+
+        // Animate Panel Color
+        if (auto* panel = reg.Get<Components::UIPanelComponent>(e)) {
+            if (style->transitionSpeed > 0.0f) {
+                float factor = std::clamp(style->transitionSpeed * dt, 0.0f, 1.0f);
+                panel->color = panel->color + factor * (targetPanelColor - panel->color);
+            } else {
+                panel->color = targetPanelColor;
+            }
+        }
+
+        // Animate Text Color (on self)
+        if (style->hasTextColor) {
+            auto* text = reg.Get<Components::TextComponent>(e);
+            if (text != nullptr) {
+                if (style->transitionSpeed > 0.0f) {
+                    float factor = std::clamp(style->transitionSpeed * dt, 0.0f, 1.0f);
+                    text->color  = text->color + factor * (targetTextColor - text->color);
+                } else {
+                    text->color = targetTextColor;
+                }
             }
         }
     }

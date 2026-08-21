@@ -140,6 +140,12 @@ auto Buffer::Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usag
     return b;
 }
 
+void Buffer::Flush(VkDeviceSize offset, VkDeviceSize size) noexcept {
+    if (_handle.Allocator() != nullptr && _handle.Allocation() != nullptr) {
+        vmaFlushAllocation(_handle.Allocator(), _handle.Allocation(), offset, size);
+    }
+}
+
 Buffer::MappedRegion::MappedRegion(VmaAllocator alloc, VmaAllocation allocation, void* ptr) noexcept: data(ptr), _handle(alloc, ptr, allocation) {
 }
 
@@ -182,9 +188,8 @@ auto UploadToBuffer(VmaAllocator allocator, VkCommandBuffer cmd, Buffer& dst, co
         }
     }
 
-    const ZHLN_BufferCopyDesc copy = {.src = staging.Handle(), .dst = dst.Handle(), .size = static_cast<VkDeviceSize>(size), .src_offset = 0, .dst_offset = 0};
-
-    ZHLN_CmdCopyBuffer(cmd, &copy);
+    // Cleaned up to utilize the updated CopyBuffer helper
+    CopyBuffer(cmd, staging, dst, static_cast<VkDeviceSize>(size));
     return staging;
 }
 
@@ -321,7 +326,7 @@ StagingRingBuffer::StagingRingBuffer(StagingRingBuffer&& other) noexcept:
     _queue(std::exchange(other._queue, VK_NULL_HANDLE)), _queueFamily(std::exchange(other._queueFamily, 0xFFFFFFFF)),
     _stagingBuffer(std::move(other._stagingBuffer)), _mappedRegion(std::move(other._mappedRegion)), _mappedPtr(std::exchange(other._mappedPtr, nullptr)),
     _capacity(std::exchange(other._capacity, 0)), _head(std::exchange(other._head, 0)), _tail(std::exchange(other._tail, 0)),
-    _timelineSemaphore(std::exchange(other._timelineSemaphore, VK_NULL_HANDLE)), _timelineValue(std::exchange(other._timelineValue, 0)),
+    _timelineSemaphore(std::move(other._timelineSemaphore)), _timelineValue(std::exchange(other._timelineValue, 0)),
     _activeAllocations(std::move(other._activeAllocations)), _retiredPools(std::move(other._retiredPools)) {
 }
 
@@ -338,7 +343,7 @@ auto StagingRingBuffer::operator=(StagingRingBuffer&& other) noexcept -> Staging
         _capacity          = std::exchange(other._capacity, 0);
         _head              = std::exchange(other._head, 0);
         _tail              = std::exchange(other._tail, 0);
-        _timelineSemaphore = std::exchange(other._timelineSemaphore, VK_NULL_HANDLE);
+        _timelineSemaphore = std::move(other._timelineSemaphore);
         _timelineValue     = std::exchange(other._timelineValue, 0);
         _activeAllocations = std::move(other._activeAllocations);
         _retiredPools      = std::move(other._retiredPools);
@@ -359,15 +364,16 @@ auto StagingRingBuffer::Init(VmaAllocator allocator, VkDevice device, VkQueue qu
     };
     VkSemaphoreCreateInfo sem_info = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = &type_info, .flags = 0};
 
-    auto res = vkCreateSemaphore(_device, &sem_info, nullptr, &_timelineSemaphore);
+    VkSemaphore raw_sem = VK_NULL_HANDLE;
+    auto        res     = vkCreateSemaphore(_device, &sem_info, nullptr, &raw_sem);
     if (res != VK_SUCCESS) {
         return std::unexpected(res);
     }
+    _timelineSemaphore = Semaphore(_device, raw_sem); // Adopt into RAII wrapper
 
     auto staging_res = Buffer::Create(_allocator, _capacity, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
     if (!staging_res.has_value()) {
-        vkDestroySemaphore(_device, _timelineSemaphore, nullptr);
-        _timelineSemaphore = VK_NULL_HANDLE;
+        _timelineSemaphore = {}; // Triggers automatic destruction logic
         return std::unexpected(RenderInitError::SubsystemAllocationFailed);
     }
     _stagingBuffer = std::move(*staging_res);
@@ -385,20 +391,17 @@ void StagingRingBuffer::Cleanup() noexcept {
             vkDestroyCommandPool(_device, rp.pool, nullptr);
         }
         _retiredPools.clear();
-        if (_timelineSemaphore != VK_NULL_HANDLE) {
-            vkDestroySemaphore(_device, _timelineSemaphore, nullptr);
-            _timelineSemaphore = VK_NULL_HANDLE;
-        }
+        _timelineSemaphore = {}; // Trigger automatic RAII cleanup
     }
 }
 
 void StagingRingBuffer::Recycle() noexcept {
-    if (_timelineSemaphore == VK_NULL_HANDLE) {
+    if (!_timelineSemaphore.Valid()) {
         return;
     }
 
     uint64_t completed_value = 0;
-    vkGetSemaphoreCounterValue(_device, _timelineSemaphore, &completed_value);
+    vkGetSemaphoreCounterValue(_device, _timelineSemaphore.Get(), &completed_value);
 
     // Guard against unsubmitted allocations (timelineValue == 0)
     while (!_activeAllocations.empty() && _activeAllocations.front().timelineValue > 0 && _activeAllocations.front().timelineValue <= completed_value) {
@@ -463,13 +466,9 @@ auto StagingRingBuffer::Allocate(VkDeviceSize size, VkDeviceSize alignment) noex
             break; // Avoid waiting on unsubmitted allocations
         }
 
-        VkSemaphoreWaitInfo wait_info = {
-            .sType          = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
-            .pNext          = nullptr,
-            .flags          = 0,
-            .semaphoreCount = 1,
-            .pSemaphores    = &_timelineSemaphore,
-            .pValues        = &wait_val
+        VkSemaphore         sem_handle = _timelineSemaphore.Get();
+        VkSemaphoreWaitInfo wait_info  = {
+            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO, .pNext = nullptr, .flags = 0, .semaphoreCount = 1, .pSemaphores = &sem_handle, .pValues = &wait_val
         };
         vkWaitSemaphores(_device, &wait_info, UINT64_MAX);
         Recycle();
@@ -481,7 +480,7 @@ auto StagingRingBuffer::Allocate(VkDeviceSize size, VkDeviceSize alignment) noex
     return {.buffer = _stagingBuffer.Handle(), .offset = aligned_head, .mappedData = static_cast<char*>(_mappedPtr) + aligned_head, .timelineValue = 0};
 }
 
-auto StagingRingBuffer::Submit(VkCommandBuffer cmd) noexcept -> uint64_t {
+auto StagingRingBuffer::Submit(VkCommandBuffer cmd, VkFence fence) noexcept -> uint64_t {
     _timelineValue++;
 
     for (auto& alloc: _activeAllocations) {
@@ -490,35 +489,13 @@ auto StagingRingBuffer::Submit(VkCommandBuffer cmd) noexcept -> uint64_t {
         }
     }
 
-    VkCommandBufferSubmitInfo cmd_info = {
-        .sType         = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-        .pNext         = {},
-        .commandBuffer = cmd,
-        .deviceMask    = {},
-    };
+    if (auto res = QueueSubmit(
+            _queue, cmd, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE, _timelineSemaphore.Get(), _timelineValue, VK_PIPELINE_STAGE_2_COPY_BIT, fence
+        );
+        !res) [[unlikely]] {
+        return 0;
+    }
 
-    VkSemaphoreSubmitInfo signal_info = {
-        .sType       = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-        .pNext       = {},
-        .semaphore   = _timelineSemaphore,
-        .value       = _timelineValue,
-        .stageMask   = VK_PIPELINE_STAGE_2_COPY_BIT,
-        .deviceIndex = {},
-    };
-
-    VkSubmitInfo2 submit = {
-        .sType                    = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-        .pNext                    = {},
-        .flags                    = {},
-        .waitSemaphoreInfoCount   = {},
-        .pWaitSemaphoreInfos      = {},
-        .commandBufferInfoCount   = 1,
-        .pCommandBufferInfos      = &cmd_info,
-        .signalSemaphoreInfoCount = 1,
-        .pSignalSemaphoreInfos    = &signal_info,
-    };
-
-    vkQueueSubmit2(_queue, 1, &submit, VK_NULL_HANDLE);
     return _timelineValue;
 }
 

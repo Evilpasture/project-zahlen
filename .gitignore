@@ -2,6 +2,9 @@
 # ZHLN Project - Master Ignore
 # ==========================================
 
+# --- Downloaded vendor files ---
+SMAA.hlsl
+
 # --- Compiled Shaders (Vulkan) ---
 *.spv
 *.vert.spv
@@ -11,17 +14,20 @@
 
 # --- Build Artifacts ---
 build/
+target/
 bin/
 obj/
 out/
 *.exe
 *.dll
 *.so
+*.shadow
 *.a
 *.lib
 *.pdb
 *.ilk
 *.exp
+*.ii
 compile_commands.json
 
 # --- C++ / MSVC / GCC Artifacts ---
@@ -59,3 +65,7 @@ resources/intermediate/
 
 # Blender source files and unpacked textures
 blender/
+
+# Others
+*.patch
+.Rhistory

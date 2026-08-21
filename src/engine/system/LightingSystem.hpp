@@ -4,7 +4,9 @@
 #pragma once
 
 #include "Zahlen/Engine.hpp"
+// clang-format off
 #include <Jolt/Jolt.h>
+// clang-format on
 #include <Jolt/Math/Vec3.h>
 #include <utility>
 namespace ZHLN {

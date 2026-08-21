@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
+#include <Zahlen/Common.h>
 #include <Zahlen/Error.hpp>
 #include <cstdint>
 #include <cstdlib>
@@ -13,20 +14,32 @@ namespace ZHLN {
 
 enum class LogLevel : uint8_t { Quiet, Moderate, Verbose };
 
+enum class ValidationMode : uint8_t { Off = 0, On = 1, GPU = 2 };
+
 enum class CommandLineError : uint8_t { Success = 0, InvalidValue, MissingValue, UnknownArgument };
+
+enum class GameplayDriver : uint8_t {
+    Fennel, // Fennel/LuaJIT owns the game loop & logic (Default)
+    Cpp,    // Native C++ (.so / .dll) owns the game loop
+    Hybrid  // Native C++ handles core loop/physics; Fennel handles UI & Dialogue
+};
 
 struct CommandLineOptions {
     std::span<char* const> args;
-    bool                   enableValidation = true;
-    bool                   launchEditor     = false;
-    bool                   vsync            = true;
-    bool                   fullscreen       = false;
-    LogLevel               logLevel         = LogLevel::Moderate;
-    uint32_t               fpsLimit         = 0;
-    bool                   enableRenderDoc  = false;
-    bool                   benchmark        = false;
+    ValidationMode         validationMode  = ValidationMode::On;
+    bool                   launchEditor    = false;
+    bool                   vsync           = true;
+    bool                   fullscreen      = false;
+    bool                   headless        = false;
+    LogLevel               logLevel        = LogLevel::Moderate;
+    uint32_t               fpsLimit        = 0;
+    bool                   enableRenderDoc = false;
+    bool                   benchmark       = false;
 
-    // User requests (successful early-exit paths)
+    // Configurable Game Loop Driver
+    GameplayDriver driver = GameplayDriver::Fennel;
+
+    // User requests
     bool helpRequested       = false;
     bool versionRequested    = false;
     bool printGraphRequested = false;
@@ -38,6 +51,6 @@ struct EngineError {
     bool        silent = false;
 };
 
-std::expected<CommandLineOptions, Error> HandleCommandLine(std::span<char* const> args);
+ZHLN_API std::expected<CommandLineOptions, Error> HandleCommandLine(std::span<char* const> args);
 
 } // namespace ZHLN

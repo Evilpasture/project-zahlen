@@ -1,0 +1,15 @@
+[package]
+name = "ecsc"
+version = "0.1.0"
+edition = "2024"
+authors = ["Evilpasture <evilpasture+github@proton.me>"]
+description = "Zahlen Engine ECS DSL Compiler and LSP Server"
+
+[dependencies]
+clap = { version = "4.4", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+tower-lsp = "0.20"
+dashmap = "5.5"
+regex = "1.10"

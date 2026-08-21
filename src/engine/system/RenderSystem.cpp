@@ -6,37 +6,35 @@
 #include "CullingSystem.hpp"
 #include "LightingSystem.hpp"
 #include "UIRenderSystem.hpp"
-#include "ecs/ECS.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
+#include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Profiler.hpp>
 #include <Zahlen/Render.hpp>
+#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
-#include <engine/Resources.hpp>
-#include <physics/Physics.hpp>
+
 #include <physics/PhysicsDebug.hpp>
 
 namespace ZHLN {
 
-std::expected<void, Error> RenderSystem::Update(Engine& engine) {
+std::expected<void, Error> RenderSystem::Update(Engine& engine, float dt) {
     int        physicsDrawMode = 0;
     JPH::Mat44 shadowProjView  = JPH::Mat44::sIdentity();
 
-    // 1. Process standard geometry draws and frame configurations
-    auto mainResult = RenderMain(engine, physicsDrawMode, shadowProjView);
+    auto mainResult = RenderMain(engine, physicsDrawMode, shadowProjView, dt);
     if (!mainResult) {
         return mainResult;
     }
 
-    // 2. Process secondary debug lines/solids drawing
     RenderDebug(engine, physicsDrawMode);
 
-    // 3. Resolve frame boundaries
     auto& rc      = engine.GetRenderContext();
     auto  end_res = rc.EndFrame();
     if (!end_res) {
@@ -46,7 +44,7 @@ std::expected<void, Error> RenderSystem::Update(Engine& engine) {
     return {};
 }
 
-std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& outShadowProjView) {
+std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& outShadowProjView, float dt) {
     auto&       rc              = engine.GetRenderContext();
     auto&       reg             = engine.GetRegistry();
     auto&       cam             = engine.GetCamera();
@@ -97,40 +95,27 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
         }
     }
 
-    // 1. Resolve primary sunlight parameters using the centralized GetSunDirectionAndIntensity
-    // helper
     auto [sunDirection, sunIntensity] = LightingSystem::GetSunDirectionAndIntensity(reg);
-
-    float     yawRad   = JPH::DegreesToRadians(cam.yaw);
-    float     pitchRad = JPH::DegreesToRadians(cam.pitch);
-    JPH::Vec3 forward(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad));
-    forward = forward.Normalized();
 
     float    shadowWidth      = 80.0f;
     uint32_t shadowResolution = 2048;
+    float    sunSize          = 0.05f;
 
     auto shadowEntities = reg.GetEntitiesWith<Components::ShadowSettingsComponent>();
     if (!shadowEntities.empty()) {
         auto* shadowSettings = reg.Get<Components::ShadowSettingsComponent>(shadowEntities[0]);
         shadowWidth          = shadowSettings->shadowWidth;
         shadowResolution     = shadowSettings->shadowResolution;
+        sunSize              = shadowSettings->sunSize;
     }
 
-    float texelSize = shadowWidth / static_cast<float>(shadowResolution);
+    float textelSize = shadowWidth / static_cast<float>(shadowResolution);
 
-    JPH::Vec3 shadowCenter   = JPH::Vec3::sZero();
-    auto      playerEntities = reg.GetEntitiesWith<Components::PlayerTagComponent>();
-    if (!playerEntities.empty()) {
-        if (auto* trans = reg.Get<Components::Components::TransformComponent>(playerEntities[0])) {
-            shadowCenter = trans->position;
-        }
-    }
+    JPH::Vec3 shadowCenter = cam.position;
+    shadowCenter.SetX(std::round(shadowCenter.GetX() / textelSize) * textelSize);
+    shadowCenter.SetY(std::round(shadowCenter.GetY() / textelSize) * textelSize);
+    shadowCenter.SetZ(std::round(shadowCenter.GetZ() / textelSize) * textelSize);
 
-    shadowCenter.SetX(std::round(shadowCenter.GetX() / texelSize) * texelSize);
-    shadowCenter.SetY(std::round(shadowCenter.GetY() / texelSize) * texelSize);
-    shadowCenter.SetZ(std::round(shadowCenter.GetZ() / texelSize) * texelSize);
-
-    // --- USE CENTRALIZED SHADOW CONSTANTS ---
     JPH::Vec3  lightPos  = shadowCenter + sunDirection * Shadows::FarOffset;
     JPH::Mat44 lightView = Math::CreateLookAt(lightPos, shadowCenter, JPH::Vec3::sAxisY());
 
@@ -164,17 +149,21 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
     uniforms.fullBright       = fullBright;
     uniforms.shadowWidth      = shadowWidth;
     uniforms.shadowResolution = shadowResolution;
+    uniforms.sunSize          = sunSize;
     if (!settingsEntities.empty()) {
         if (auto* pp = reg.Get<Components::PostProcessSettingsComponent>(settingsEntities[0])) {
             uniforms.ambientExposure = pp->ambientExposure;
+            uniforms.skyZenith       = pp->skyZenith;
+            uniforms.skyHorizon      = pp->skyHorizon;
+            uniforms.skyGround       = pp->skyGround;
         }
     }
     uniforms.zScale = 24.0f / std::log(1000.0f / 0.1f);
     uniforms.zBias  = -(24.0f * std::log(0.1f)) / std::log(1000.0f / 0.1f);
 
     rc.SetAAState(aaState);
-    Renderer::SetFrameData(rc, cam, uniforms, outShadowProjView);
-    Renderer::SetMatrices(rc, vp, unjitteredVp);
+    rc.SetFrameData(cam, uniforms, outShadowProjView, dt);
+    rc.SetMatrices(vp, unjitteredVp);
 
     const auto& mainVisible   = engine.GetVisibleEntities();
     const auto& shadowVisible = engine.GetVisibleShadowEntities();
@@ -187,12 +176,41 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
             bool inShadow = IsInList(shadowVisible, e);
 
             if (inMain || inShadow) {
-                auto* mesh = reg.Get<Components::MeshComponent>(e);
-                if (mesh == nullptr) {
+                auto* meshComp = reg.Get<Components::MeshComponent>(e);
+                if (meshComp == nullptr) {
                     continue;
                 }
 
-                DrawFlags drawFlags = mesh->flags;
+                auto gpuMeshOpt = rc.GetGPUMesh(meshComp->meshAsset);
+                auto gpuMatOpt  = rc.GetGPUMaterial(meshComp->materialAsset);
+
+                if (!gpuMeshOpt.has_value() || !gpuMatOpt.has_value()) {
+                    continue;
+                }
+
+                Mesh     gpuMesh = *gpuMeshOpt;
+                Material gpuMat  = *gpuMatOpt;
+
+                auto* skelMesh   = reg.Get<Components::SkeletalMeshComponent>(e);
+                auto* morphComp  = reg.Get<Components::MorphTargetComponent>(e);
+                auto* worldTrans = reg.Get<Components::WorldTransformComponent>(e);
+
+                JPH::Mat44 worldMat = (worldTrans != nullptr) ? worldTrans->world : JPH::Mat44::sIdentity();
+                JPH::Mat44 prevMat  = (worldTrans != nullptr) ? worldTrans->previous : worldMat;
+
+                bool     isSkinned   = (skelMesh != nullptr);
+                uint32_t jointOffset = isSkinned ? skelMesh->jointOffset : 0;
+
+                uint32_t     morphOffset      = (morphComp != nullptr) ? morphComp->offset : 0;
+                uint32_t     activeMorphCount = (morphComp != nullptr) ? morphComp->activeCount : 0;
+                const float* morphWeights     = (morphComp != nullptr) ? morphComp->weights.data() : nullptr;
+
+                BufferHandle scratchVbo = BufferHandle::Invalid;
+                if (isSkinned) {
+                    scratchVbo = rc.GetOrCreateSkinnedScratchBuffer(e.Pack(), gpuMesh.vertexCount);
+                }
+
+                DrawFlags drawFlags = meshComp->flags;
                 if (inMain) {
                     drawFlags |= DrawFlags::VisibleInMain;
                 }
@@ -202,23 +220,78 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
 
                 float roughness = -1.0f;
                 float metallic  = -1.0f;
-                if (auto* pbr = reg.Get<Components::Components::PBRComponent>(e)) {
+                if (auto* pbr = reg.Get<Components::PBRComponent>(e)) {
                     roughness = pbr->roughness;
                     metallic  = pbr->metallic;
                 }
 
-                Renderer::Draw(
-                    rc, mesh->material, mesh->mesh,
-                    {.transform           = mesh->worldTransform,
-                     .prevTransform       = mesh->prevTransform,
-                     .cullRadius          = mesh->cullRadius,
-                     .localCenter         = {mesh->localCenter.GetX(), mesh->localCenter.GetY(), mesh->localCenter.GetZ()},
-                     .jointOffset         = mesh->jointOffset,
-                     .morphOffset         = mesh->morphOffset,
-                     .activeMorphCount    = mesh->activeMorphCount,
-                     .morphWeights        = mesh->morphWeights.data(),
+                if (auto* csg = reg.Get<Components::CSGComponent>(e)) {
+                    CSGDrawParams csgParams;
+                    csgParams.eyeParams = {
+                        .transform           = worldMat,
+                        .prevTransform       = prevMat,
+                        .cullRadius          = meshComp->cullRadius,
+                        .localCenter         = {meshComp->localCenter.GetX(), meshComp->localCenter.GetY(), meshComp->localCenter.GetZ()},
+                        .jointOffset         = jointOffset,
+                        .morphOffset         = morphOffset,
+                        .activeMorphCount    = activeMorphCount,
+                        .morphWeights        = morphWeights,
+                        .flags               = drawFlags,
+                        .skinnedVertexBuffer = scratchVbo,
+                        .roughness           = roughness,
+                        .metallic            = metallic
+                    };
+
+                    for (const auto& mod: csg->modifiers) {
+                        if (reg.IsAlive(mod.operandEntity)) {
+                            if (auto* cutMesh = reg.Get<Components::MeshComponent>(mod.operandEntity)) {
+                                auto cutGpuMeshOpt = rc.GetGPUMesh(cutMesh->meshAsset);
+                                auto cutGpuMatOpt  = rc.GetGPUMaterial(cutMesh->materialAsset);
+                                if (cutGpuMeshOpt && cutGpuMatOpt) {
+                                    auto*      cutSkelMesh   = reg.Get<Components::SkeletalMeshComponent>(mod.operandEntity);
+                                    auto*      cutWorldTrans = reg.Get<Components::WorldTransformComponent>(mod.operandEntity);
+                                    JPH::Mat44 cutWorldMat   = (cutWorldTrans != nullptr) ? cutWorldTrans->world : JPH::Mat44::sIdentity();
+                                    JPH::Mat44 cutPrevMat    = (cutWorldTrans != nullptr) ? cutWorldTrans->previous : cutWorldMat;
+
+                                    BufferHandle cutScratchVbo = BufferHandle::Invalid;
+                                    if (cutSkelMesh != nullptr) {
+                                        cutScratchVbo = rc.GetOrCreateSkinnedScratchBuffer(mod.operandEntity.Pack(), cutGpuMeshOpt->vertexCount);
+                                    }
+
+                                    csgParams.cutters.push_back(
+                                        {.mesh                = *cutGpuMeshOpt,
+                                         .material            = *cutGpuMatOpt,
+                                         .transform           = cutWorldMat,
+                                         .prevTransform       = cutPrevMat,
+                                         .cullRadius          = cutMesh->cullRadius,
+                                         .operation           = mod.operation,
+                                         .jointOffset         = (cutSkelMesh != nullptr) ? cutSkelMesh->jointOffset : 0,
+                                         .skinnedVertexBuffer = cutScratchVbo,
+                                         .flags               = cutMesh->flags}
+                                    );
+                                }
+                            }
+                        }
+                    }
+
+                    if (!csgParams.cutters.empty()) {
+                        rc.DrawCSG(gpuMat, gpuMesh, csgParams);
+                        continue;
+                    }
+                }
+
+                rc.Draw(
+                    gpuMat, gpuMesh,
+                    {.transform           = worldMat,
+                     .prevTransform       = prevMat,
+                     .cullRadius          = meshComp->cullRadius,
+                     .localCenter         = {meshComp->localCenter.GetX(), meshComp->localCenter.GetY(), meshComp->localCenter.GetZ()},
+                     .jointOffset         = jointOffset,
+                     .morphOffset         = morphOffset,
+                     .activeMorphCount    = activeMorphCount,
+                     .morphWeights        = morphWeights,
                      .flags               = drawFlags,
-                     .skinnedVertexBuffer = mesh->skinnedVertexBuffer,
+                     .skinnedVertexBuffer = scratchVbo,
                      .roughness           = roughness,
                      .metallic            = metallic}
                 );
@@ -238,7 +311,7 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
     engine.GetCullingSystem().DrawDebugFrustum(engine);
 
     if (physicsDrawMode > 0) {
-        ZHLN_PROFILE_SCOPE("Physics Debug Extract & Upload");
+        ZHLN::ScopedTimer profTimer("Physics Debug Extract & Upload");
 
         static Material debugLineMat  = {.pipeline = PipelineHandle::Invalid};
         static Material debugSolidMat = {.pipeline = PipelineHandle::Invalid};
@@ -251,52 +324,41 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
         }
 
         if (debugLineMat.pipeline == PipelineHandle::Invalid) {
-            PipelineDesc lineDesc = {
-                .vertexShaderData = Resource::GetShaderProgram(Resource::ShaderID::Basic).vertex.data(),
-                .vertexShaderSize = static_cast<std::uint32_t>(Resource::GetShaderProgram(Resource::ShaderID::Basic).vertex.size()),
-                .fragShaderData   = Resource::forward_frag.data(),
-                .fragShaderSize   = static_cast<std::uint32_t>(Resource::forward_frag.size()),
-                .doubleSided      = true,
-                .alphaBlend       = true,
-                .isLineList       = true
-            };
-
-            auto debugLineMat_res = rc.CreateMaterial(lineDesc);
+            auto debugLineMat_res = rc.CreateDebugLineMaterial();
             if (!debugLineMat_res) {
                 ZHLN::Panic("Failed to compile debug line material: {}", debugLineMat_res.error().Message());
             }
-            debugLineMat             = debugLineMat_res.value();
-            debugLineMat.albedoIndex = 1;
+            debugLineMat           = debugLineMat_res.value();
+            debugLineMat.albedoMap = TextureHandle(1);
 
-            PipelineDesc solidDesc = lineDesc;
-            solidDesc.isLineList   = false;
-
-            auto debugSolidMat_res = rc.CreateMaterial(solidDesc);
+            auto debugSolidMat_res = rc.CreateDebugSolidMaterial();
             if (!debugSolidMat_res) {
                 ZHLN::Panic("Failed to compile debug solid material: {}", debugSolidMat_res.error().Message());
             }
-            debugSolidMat             = debugSolidMat_res.value();
-            debugSolidMat.albedoIndex = 1;
+            debugSolidMat           = debugSolidMat_res.value();
+            debugSolidMat.albedoMap = TextureHandle(1);
         }
 
         bool isWireframe = (physicsDrawMode == 1);
-        auto debugData   = Physics::GetDebugDrawData(engine.GetPhysicsContext(), true, true, isWireframe);
+        // FIXED: Replaced free-function Physics::GetDebugDrawData with context method call
+        auto debugData = engine.GetPhysicsContext().GetDebugDrawData(true, true, isWireframe);
 
         std::vector<VertexPosition>   debugPos;
         std::vector<VertexAttributes> debugAttr;
 
         if (isWireframe && debugData.lineCount > 0) {
-            debugPos.reserve(debugData.lineCount);
-            debugAttr.reserve(debugData.lineCount);
-            for (size_t i = 0; i < debugData.lineCount; ++i) {
-                const auto& jv = debugData.lines[i];
-                debugPos.push_back({.position = {jv.x, jv.y, jv.z}});
-                debugAttr.push_back(
-                    {.normal  = Math::PackNormal(0.0f, 1.0f, 0.0f),
-                     .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f),
-                     .uv      = Math::PackUV(0.0f, 0.0f),
-                     .color   = {.data = jv.color}}
-                );
+            auto UnpackColorVec4 = [](uint32_t packed) {
+                float r = static_cast<float>(packed & 0xFF) / 255.0f;
+                float g = static_cast<float>((packed >> 8) & 0xFF) / 255.0f;
+                float b = static_cast<float>((packed >> 16) & 0xFF) / 255.0f;
+                float a = static_cast<float>((packed >> 24) & 0xFF) / 255.0f;
+                return JPH::Vec4(r, g, b, a);
+            };
+
+            for (size_t i = 0; i + 1 < debugData.lineCount; i += 2) {
+                const auto& v0 = debugData.lines[i];
+                const auto& v1 = debugData.lines[i + 1];
+                rc.DrawLine(JPH::Vec3(v0.x, v0.y, v0.z), JPH::Vec3(v1.x, v1.y, v1.z), UnpackColorVec4(v0.color), UnpackColorVec4(v1.color));
             }
         } else if (!isWireframe && debugData.triangleCount > 0) {
             debugPos.reserve(debugData.triangleCount);
@@ -328,8 +390,8 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
                 .indexCount  = 0
             };
 
-            Renderer::Draw(
-                rc, isWireframe ? debugLineMat : debugSolidMat, debugMesh,
+            rc.Draw(
+                isWireframe ? debugLineMat : debugSolidMat, debugMesh,
                 {.transform = JPH::Mat44::sIdentity(), .prevTransform = JPH::Mat44::sIdentity(), .cullRadius = 10000.0f}
             );
         }

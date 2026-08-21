@@ -8,7 +8,10 @@
 #endif
 
 #include <Zahlen/render/RenderCode.hpp>
+
 namespace ZHLN::Vk {
+
+class Context; // Forward declaration
 
 [[nodiscard]] std::expected<VkResult, VulkanCallError> WaitIdle(VkQueue queue) noexcept;
 
@@ -40,36 +43,24 @@ enum class BarrierAccess : VkAccessFlags2 {
 };
 
 // Enable bitwise OR operations on the scoped enums
-[[nodiscard]] constexpr auto operator|(BarrierStage a, BarrierStage b) noexcept -> BarrierStage {
-    return static_cast<BarrierStage>(static_cast<std::underlying_type_t<BarrierStage>>(a) | static_cast<std::underlying_type_t<BarrierStage>>(b));
-}
+[[nodiscard]] constexpr auto operator|(BarrierStage a, BarrierStage b) noexcept -> BarrierStage;
+[[nodiscard]] constexpr auto operator|(BarrierAccess a, BarrierAccess b) noexcept -> BarrierAccess;
 
-[[nodiscard]] constexpr auto operator|(BarrierAccess a, BarrierAccess b) noexcept -> BarrierAccess {
-    return static_cast<BarrierAccess>(static_cast<std::underlying_type_t<BarrierAccess>>(a) | static_cast<std::underlying_type_t<BarrierAccess>>(b));
-}
+/**
+ * @brief Unified memory barrier dispatcher.
+ * Exposed early to resolve cyclic header dependencies between Queue and Core headers.
+ */
+inline void MemoryBarrier(VkCommandBuffer cmd, const ZHLN_MemoryBarrierDesc& desc) noexcept;
 
 struct BarrierBuilder {
-    VkPipelineStageFlags2 src_stage  = 0;
-    VkAccessFlags2        src_access = 0;
+    VkPipelineStageFlags2 srcStage  = 0;
+    VkAccessFlags2        srcAccess = 0;
 
-    constexpr BarrierBuilder() noexcept = default;
-
-    constexpr auto From(BarrierStage stage, BarrierAccess access) noexcept -> BarrierBuilder& {
-        src_stage |= static_cast<VkPipelineStageFlags2>(stage);
-        src_access |= static_cast<VkAccessFlags2>(access);
-        return *this;
-    }
-
-    void To(VkCommandBuffer cmd, BarrierStage dstStage, BarrierAccess dstAccess) const noexcept {
-        const ZHLN_MemoryBarrierDesc desc = {
-            .src_stage  = src_stage,
-            .src_access = src_access,
-            .dst_stage  = static_cast<VkPipelineStageFlags2>(dstStage),
-            .dst_access = static_cast<VkAccessFlags2>(dstAccess)
-        };
-        ZHLN_CmdMemoryBarrier(cmd, &desc);
-    }
+    constexpr BarrierBuilder() noexcept;
+    constexpr auto From(BarrierStage stage, BarrierAccess access) noexcept -> BarrierBuilder&;
+    void           To(VkCommandBuffer cmd, BarrierStage dstStage, BarrierAccess dstAccess) const noexcept;
 };
+
 enum class QueueType : uint8_t { Graphics, Compute, Transfer };
 
 // Primary templates (default to invalid/false)
@@ -125,12 +116,8 @@ struct CommandBuffer {
     static constexpr QueueType queue_type = QType;
 
     // Implicit conversion to raw handle for driver API calls
-    operator VkCommandBuffer() const noexcept {
-        return handle;
-    }
-    [[nodiscard]] bool Valid() const noexcept {
-        return handle != VK_NULL_HANDLE;
-    }
+                       operator VkCommandBuffer() const noexcept;
+    [[nodiscard]] bool Valid() const noexcept;
 };
 
 template <QueueType QType, BarrierStage SrcStage, BarrierAccess SrcAccess>
@@ -140,111 +127,63 @@ struct ConstrainedBarrier {
 
     template <BarrierStage DstStage, BarrierAccess DstAccess>
         requires ValidQueueOperation<QType, DstStage, DstAccess>
-    void TransitionTo() const noexcept {
-        const ZHLN_MemoryBarrierDesc desc = {
-            .src_stage  = static_cast<VkPipelineStageFlags2>(SrcStage),
-            .src_access = static_cast<VkAccessFlags2>(SrcAccess),
-            .dst_stage  = static_cast<VkPipelineStageFlags2>(DstStage),
-            .dst_access = static_cast<VkAccessFlags2>(DstAccess)
-        };
-        ZHLN_CmdMemoryBarrier(cmd.handle, &desc);
-    }
+    void TransitionTo() const noexcept;
 };
 
 // Fluent helper function to start a barrier
 template <BarrierStage SrcStage, BarrierAccess SrcAccess, QueueType QType>
-[[nodiscard]] constexpr auto BeginBarrier(CommandBuffer<QType> cmd) noexcept {
-    return ConstrainedBarrier<QType, SrcStage, SrcAccess> {cmd};
-}
+[[nodiscard]] constexpr auto BeginBarrier(CommandBuffer<QType> cmd) noexcept;
 
 struct BufferQueueBarrier {
     VkBufferMemoryBarrier2 release;
     VkBufferMemoryBarrier2 acquire;
 
-    [[nodiscard]] static auto Create(const ZHLN_BufferQueueBarrierDesc& desc) noexcept -> BufferQueueBarrier {
-        auto raw = ZHLN_CreateBufferQueueBarrier(&desc);
-        return {.release = raw.release, .acquire = raw.acquire};
-    }
+    [[nodiscard]] static auto Create(const ZHLN_BufferQueueBarrierDesc& desc) noexcept -> BufferQueueBarrier;
 };
 
-inline void BufferBarrier(VkCommandBuffer cmd, const VkBufferMemoryBarrier2& barrier) noexcept {
-    const VkDependencyInfo dep_info = {
-        .sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .pNext                    = nullptr,
-        .dependencyFlags          = 0,
-        .memoryBarrierCount       = 0,
-        .pMemoryBarriers          = nullptr,
-        .bufferMemoryBarrierCount = 1,
-        .pBufferMemoryBarriers    = &barrier,
-        .imageMemoryBarrierCount  = 0,
-        .pImageMemoryBarriers     = nullptr,
-    };
-    vkCmdPipelineBarrier2(cmd, &dep_info);
-}
+inline void BufferBarrier(VkCommandBuffer cmd, const VkBufferMemoryBarrier2& barrier) noexcept;
+inline void BufferBarrier(VkCommandBuffer cmd, std::span<const VkBufferMemoryBarrier2> barriers) noexcept;
 
-inline void BufferBarrier(VkCommandBuffer cmd, std::span<const VkBufferMemoryBarrier2> barriers) noexcept {
-    if (barriers.empty()) {
-        return;
-    }
-
-    const VkDependencyInfo dep_info = {
-        .sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .pNext                    = nullptr,
-        .dependencyFlags          = 0,
-        .memoryBarrierCount       = 0,
-        .pMemoryBarriers          = nullptr,
-        .bufferMemoryBarrierCount = static_cast<uint32_t>(barriers.size()),
-        .pBufferMemoryBarriers    = barriers.data(),
-        .imageMemoryBarrierCount  = 0,
-        .pImageMemoryBarriers     = nullptr,
+inline void BufferBarrier(
+    VkCommandBuffer cmd,
+    VkBuffer        buffer,
+    BarrierStage    srcStage,
+    BarrierAccess   srcAccess,
+    BarrierStage    dstStage,
+    BarrierAccess   dstAccess
+) noexcept {
+    VkBufferMemoryBarrier2 barrier = {
+        .sType               = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+        .pNext               = nullptr,
+        .srcStageMask        = static_cast<VkPipelineStageFlags2>(srcStage),
+        .srcAccessMask       = static_cast<VkAccessFlags2>(srcAccess),
+        .dstStageMask        = static_cast<VkPipelineStageFlags2>(dstStage),
+        .dstAccessMask       = static_cast<VkAccessFlags2>(dstAccess),
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .buffer              = buffer,
+        .offset              = 0,
+        .size                = VK_WHOLE_SIZE
     };
-    vkCmdPipelineBarrier2(cmd, &dep_info);
+    BufferBarrier(cmd, barrier);
 }
 
 template <QueueType QType>
-[[nodiscard]] constexpr auto ResolveQueue(const Context& ctx) noexcept -> VkQueue {
-    if constexpr (QType == QueueType::Graphics) {
-        return ctx.GraphicsQueue();
-    } else if constexpr (QType == QueueType::Compute) {
-        return ctx.ComputeQueue();
-    } else if constexpr (QType == QueueType::Transfer) {
-        return ctx.TransferQueue();
-    }
-}
+[[nodiscard]] constexpr auto ResolveQueue(const Context& ctx) noexcept -> VkQueue;
 
 /**
  * @brief Resolves the appropriate raw VkQueue from the context based on QueueType.
  */
 template <QueueType QType>
-[[nodiscard]] constexpr auto ResolveQueueFamily(const Context& ctx) noexcept -> uint32_t {
-    if constexpr (QType == QueueType::Graphics) {
-        return ctx.PhysicalInfo().graphics_family;
-    } else if constexpr (QType == QueueType::Compute) {
-        return ctx.PhysicalInfo().compute_family;
-    } else if constexpr (QType == QueueType::Transfer) {
-        return ctx.PhysicalInfo().transfer_family;
-    }
-}
+[[nodiscard]] constexpr auto ResolveQueueFamily(const Context& ctx) noexcept -> uint32_t;
 
 /**
  * @brief Submits a strongly-typed command buffer to its corresponding queue
  *        and blocks the CPU until execution completes.
  */
-// src/render/RenderCore.inl
-
 template <QueueType QType>
-[[nodiscard]] std::expected<void, Error> SubmitAndWait(const Context& ctx, CommandBuffer<QType> cmd) noexcept {
-    VkQueue queue      = ResolveQueue<QType>(ctx);
-    auto    submit_res = QueueSubmit(queue, cmd.handle);
-    if (!submit_res) [[unlikely]] {
-        return submit_res;
-    }
-
-    auto wait_res = WaitIdle(queue);
-    if (!wait_res) [[unlikely]] {
-        return std::unexpected(wait_res.error());
-    }
-    return {};
-}
+[[nodiscard]] std::expected<void, Error> SubmitAndWait(const Context& ctx, CommandBuffer<QType> cmd) noexcept;
 
 } // namespace ZHLN::Vk
+
+#include "RenderQueue.inl"

@@ -197,9 +197,17 @@ class ScopedRendering {
 };
 
 void ImageBarrier(const VkCommandBuffer cmd, const ZHLN_ImageBarrierDesc& desc) noexcept;
-void MemoryBarrier(const VkCommandBuffer cmd, const ZHLN_MemoryBarrierDesc& desc) noexcept;
 
 void CopyBufferToImage(const VkCommandBuffer cmd, const ZHLN_BufferImageCopyDesc& desc) noexcept;
+
+void CopyImageToBuffer(
+    VkCommandBuffer    cmd,
+    VkImage            srcImage,
+    VkBuffer           dstBuffer,
+    VkExtent2D         extent,
+    VkImageLayout      layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+    VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT
+) noexcept;
 
 template <size_t RegionCount>
 [[nodiscard]] constexpr auto CreateCopyRegions(
@@ -237,6 +245,8 @@ struct DrawFrameDesc {
     const SemaphorePool&   presentSemaphores;
     VkSemaphore            stagingSemaphore = VK_NULL_HANDLE;
     uint64_t               stagingWaitValue = 0;
+    VkSemaphore            computeSemaphore = VK_NULL_HANDLE;
+    uint64_t               computeWaitValue = 0;
 };
 
 template <uint32_t N, bool WaitOnFence = true, typename Record, typename Rebuild>

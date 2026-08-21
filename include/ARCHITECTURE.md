@@ -1,0 +1,231 @@
+# Zahlen Engine Architecture
+
+This document provides a technical overview of Project Zahlen's architecture, mathematical conventions, frame loop execution order, deferred render graph topology, scripting IPC protocol, asset pipeline, and Three.js porting guidelines.
+
+---
+
+## 1. Core Principles
+
+* **C++26 Static Reflection (`std::meta`)**: Eliminates manual binding glue code. ECS components, reflection metadata, JSON serialization, and scripting bindings are reflected automatically at compile-time.
+* **Data-Oriented & Lock-Free**: Custom, page-aligned, lock-free/atomic data structures (`ZHLN::Array`, `HashMap`, `SkipList`, `MemoryPool`) eliminate runtime heap allocations.
+* **PIMPL Encapsulation**: Public APIs (`RenderContext`, `PhysicsContext`, `Window`) hide internal Vulkan and Jolt headers behind opaque implementation pointers.
+* **Fiber Task Scheduler**: Cooperative, multi-threaded stackful fibers (`ZHLN::TaskSystem`) drive parallel system updates and worker thread GPU command recording.
+
+---
+
+## 1.1 Strict ECS Mandate & Architectural Constraints
+
+To preserve the engine's data-oriented design (DOD), cache locality, zero-allocation memory guarantees, and C++26 hot-reloadability, **ALL state in Zahlen MUST reside in ECS Components, and ALL logic MUST reside in ECS Systems.**
+
+### The Core Law
+> **There are no "Manager" or "Simulation" classes for gameplay or visual effects in Zahlen.**
+> Every entity, bolt, particle, projectile, sound, and light source is represented as a plain-data `struct` inside the `ZHLN::Components` namespace.
+
+---
+
+### Strict Development Rules
+
+#### 1. Zero Class-Based State
+* **NO `class` instances may hold simulation, timing, or visual state.**
+* Features MUST NOT wrap state inside private member variables (`m_phase`, `m_time`, `m_luminance`).
+* All state MUST be stored in `ZHLN::Components` as POD (Plain Old Data) structs and accessed via `reg.Get<Component>()` or `reg.GetRawArray<Component>()`.
+
+#### 2. The $N$-Concurrent Rule
+* **Every feature MUST support $N$ simultaneous instances out of the box.**
+* Hardcoding single-instance state assumes a feature will only happen once. By making state an ECS Component attached to an `Entity`, the engine automatically supports 1, 100, or 10,000 instances in contiguous memory without state collisions.
+
+#### 3. Pure System Functions
+* Logic MUST be written as pure, stateless system functions (`void SystemName(Engine& engine, float dt)`).
+* Systems MUST NOT store internal state across frames. If a calculation needs memory across frames, that memory belongs in a Component attached to an Entity or a Global Settings Entity.
+
+#### 4. Automated Component Resource Cleanup
+* Component GPU allocations (VBOs, IBOs, Textures) MUST be released via the `static void OnDestroy(Component* c)` hook declared on the Component struct.
+* Systems MUST NOT manually manage raw heap pointers or manage class destructors.
+
+#### 5. Environment & Global State Isolation
+* Systems modifying global engine state (e.g., Post-Processing, Exposure, Sky Gradients) MUST NOT overwrite global base values.
+* Global state changes MUST be applied as non-destructive deltas or read from an un-flashed baseline cached on the Global Settings entity.
+
+---
+
+### Anti-Pattern Reference Guide
+
+#### ❌ FORBIDDEN: Classic OOP Class Bypass
+```cpp
+// BAD: Stateful class holding simulation variables, non-DOD memory, single-instance lock
+class LightningSimulation {
+  private:
+    float  m_phaseTime    = 0.0f;
+    float  m_baseExposure = 4.5f; // Clobbers global exposure!
+    Entity m_flashLight;
+
+  public:
+    void TriggerStrike(Engine& engine, ...);
+    void Update(Engine& engine, float dt);
+};
+```
+
+#### ✅ MANDATED: Idiomatic Data-Oriented ECS
+```cpp
+// GOOD: Pure POD Component
+struct LightningComponent {
+    LightningConfig config {};
+    LightningPhase  phase               = LightningPhase::Idle;
+    float           phaseTime           = 0.0f;
+    float           baseAmbientExposure = 4.5f;
+
+    BufferHandle vboPos  = BufferHandle::Invalid;
+    BufferHandle vboAttr = BufferHandle::Invalid;
+
+    // Automated RAII cleanup on entity destruction
+    static void OnDestroy(LightningComponent* c) noexcept {
+        if (auto* engine = GetEngineContext()) {
+            engine->GetRenderContext().DestroyBuffer(c->vboPos);
+            engine->GetRenderContext().DestroyBuffer(c->vboAttr);
+        }
+    }
+};
+
+// GOOD: Stateless System Function
+namespace ZHLN::Lightning {
+Entity Spawn(Engine& engine, JPH::RVec3Arg cloudPos, JPH::RVec3Arg groundPos, const LightningConfig& cfg);
+void   Update(Engine& engine, float dt);
+} // namespace ZHLN::Lightning
+```
+
+---
+
+### Architectural Rationale
+
+| Requirement | Why OOP Fails | Why ECS Succeeds |
+| :--- | :--- | :--- |
+| **Hot-Reloading** | Reloading `.so`/`.dll` modules invalidates class vtables and member offsets, crashing active class instances. | Components reside in C++ host memory. Hot-reloaded code modules simply re-attach to existing Component arrays seamlessly. |
+| **Cache Locality** | Heap-allocated objects (`new MyClass()`) scatter data across RAM pages, causing CPU L1/L2 cache misses. | `SparseSet` arrays store components contiguously in RAM, allowing SIMD vectorization and prefetching. |
+| **Parallel Execution** | Mutable class methods introduce thread races when accessed concurrently by multiple workers. | `SystemGraph` inspects Component Read/Write access patterns (`Read<T>()`, `Write<T>()`) to execute systems in parallel on fibers safely. |
+| **State Save/Load** | Private class members cannot be serialized without custom, error-prone boilerplate. | Reflection (`std::meta`) automatically serializes all Component POD structs to disk or network instantly. |
+
+
+---
+
+## 2. Mathematical & Geometric Conventions
+
+Zahlen adheres strictly to standard Vulkan and Jolt Physics conventions across both CPU host code and GPU shaders:
+
+### Coordinate System (World Space)
+* **Handedness**: **Right-Handed**
+* **Axes**: 
+  * **$+X$**: Right
+  * **$+Y$**: Up
+  * **$-Z$**: Forward
+* **Camera Orientation**: Default forward vector looks down **$-Z$** (at `yaw = -90.0f` and `pitch = 0.0f`).
+
+### Matrix Layout & Multiplication Order
+* **Storage Layout**: **Column-Major** in both C++ (`JPH::Mat44`) and Slang (compiled with `-matrix-layout-column-major`).
+* **Multiplication Order**: **Column Vectors** ($M \cdot v$). Shaders and host code execute `mul(matrix, vector)` / `m * v`.
+
+### Winding Order & Culling
+* **Front-Face Winding**: **Counter-Clockwise (CCW)** (`VK_FRONT_FACE_COUNTER_CLOCKWISE`).
+* **Cull Mode**: **Back-Face Culling** (`VK_CULL_MODE_BACK_BIT`).
+
+### Extents & Bounding Volumes
+* **Box Convention**: **Half-Extents** ($\frac{\text{Width}}{2}, \frac{\text{Height}}{2}, \frac{\text{Depth}}{2}$).
+* **Usage**: `CreateBox(ctx, halfExtents)`, Jolt's `JPH::BoxShape`, and culling bounds all expect half-extents. Passing `(1.0, 1.0, 1.0)` creates a box of dimensions $2 \times 2 \times 2$.
+
+### Projection & Clip Space
+* **Depth Range**: **$[0, 1]$** (Vulkan Zero-to-One depth range).
+* **Y-Axis Clip Space**: **Y-Down** in clip space, handled natively inside `Math::CreatePerspective` and `Math::CreateOrtho` via a flipped Y-column.
+
+---
+
+## 3. Frame Lifecycle & Execution Order
+
+Each frame executes in a strict, deterministic sequence:
+
+```
+[ ProcessEvents ] ──> [ Physics System (60Hz Jolt Step) ] ──> [ Physics State Write-Back ]
+                                                                        │
+                                                                        ▼
+[ Render System ] <── [ ECS Update Graph ] <── [ Gameplay Update ] <── [ Visual Interpolation ]
+```
+
+1. **Input & OS Events**: `ProcessEvents()` pumps OS/window events and updates raw mouse/keyboard states.
+2. **Physics Simulation Step**: `PhysicsSystem::Update()` steps Jolt Physics at a semi-fixed 60 Hz timestep (`1/60s`).
+3. **Physics State Write-Back**: `PhysicsStateSystem::WriteBack()` writes new Jolt rigid body poses into double-buffered `PhysicsStateComponent` history structures.
+4. **Visual Interpolation**: `VisualInterpolationSystem::Update()` interpolates between previous and current physics transforms based on the remaining frame remainder (`alpha = accumulator / targetDt`).
+5. **Gameplay Scripting Update**: The active gameplay driver (Fennel/Lua or Native C++ `.so`/`.dll`) executes script update ticks.
+6. **ECS System Graph**: `SystemGraph::Execute()` runs parallel engine systems (Animation, Articulation, Transforms, Audio, Interaction).
+7. **Render Graph Execution**:
+   * `CullingSystem`: Performs frustum culling on main and shadow viewports.
+   * `LightingSystem`: Gathers active light sources and updates light cluster volumes.
+   * `RenderSystem`: Records multi-pass Vulkan commands and presents to the swapchain.
+
+---
+
+## 4. Deferred Render Graph Topology
+
+The renderer executes a multi-pass pipeline managed by a compile-time type-checked frame graph:
+
+```
+[ ShadowPass ] ──> [ MainPass (G-Buffer) ] ──> [ DecalPass ]
+                                                      │
+                                                      ▼
+[ TranslucentPrePass ] <── [ AmbientPass (AO/GI) ] <──┘
+         │
+         ▼
+[ LightingPass (Clustered/RTR) ] ──> [ ReflectionPass (SSR/RTR) ]
+                                             │
+                                             ▼
+[ ForwardPass (Particles/Fog) ] <── [ TranslucentReflectionPass ]
+         │
+         ▼
+[ BloomPass (Kawase Dual-Filter) ] ──> [ Anti-Aliasing (TAA/SMAA/FXAA/MLAA) ]
+                                                       │
+                                                       ▼
+                                              [ BlitPass & ImGui / UI ] ──> [ Swapchain ]
+```
+
+* **ShadowPass**: Renders directional Cascaded Shadow Maps (CSM) and punctual light shadow atlases.
+* **MainPass**: Writes primary G-Buffer channels (`SceneColor`, `Velocity`, `NormalRoughness`, `Depth`).
+* **DecalPass**: Projects screen-space decals directly onto the G-Buffer before lighting.
+* **AmbientPass**: Calculates SSAO/HBAO/GTAO or SSGI and spherical harmonic sky irradiance.
+* **LightingPass**: Computes direct sun lighting, clustered point/spot/area (LTC) lights, and ray-traced shadows.
+* **ReflectionPass**: Evaluates Screen-Space Reflections (SSR) or Hardware Ray-Traced Reflections (RTR).
+* **TranslucentPrePass & TranslucentReflectionPass**: Evaluates scene reflections for glass and refractive surfaces.
+* **ForwardPass**: Draws particle emitters, volumetric fog integration, and transparent quads.
+* **BloomPass**: Dual-Kawase downsampling and upsampling blur pyramid.
+* **Anti-Aliasing**: Applies TAA, SMAA, FXAA, or MLAA.
+* **BlitPass**: ACES tonemapping, vignette, immediate-mode UI rendering, and presentation.
+
+---
+
+## 5. C++ <-> Scripting FFI & Zero-Copy Buffer Protocol
+
+* **IPC Command Dispatch**: Scripting languages (Fennel/LuaJIT) communicate with the C++ core via `ZHLN_GetCommandID` and `ZHLN_DispatchCommand` using integer jump-table IDs.
+* **Zero-Copy Memory Protocol**: Scripts query native memory layouts through `ZHLN_BufferView`. A `BufferSync` atomic counter (`shadowLock`) locks C++ vector reallocations while raw FFI pointers are held in Lua land.
+
+---
+
+## 6. Asset Cooking & Virtual File System (VFS)
+
+1. **Source Models**: Blender `.blend` files in `./blender/` are scanned by `tools/export_metadata.py`.
+2. **Intermediate Extraction**: Uncompressed binary metadata (`.bin`) and textures are emitted into `resources/intermediate/`.
+3. **Ninja Parallel Compilation**: `zcook` compiles meshes (`.zmesh`), animations (`.zanim`), and textures (`.ztex`) in parallel.
+4. **Archive Packing**: `zcook pak` packs all cooked targets into `data/base.pak` (Zstandard compressed archive).
+5. **VFS Loading**: `CreativeWorksManager` mounts `.pak` files and streams assets via memory-mapped IO and fiber tasks.
+
+---
+
+## 7. Three.js / TypeScript Porting Reference Guide
+
+When porting prototype gameplay or math logic from a **TypeScript + Three.js + React** codebase into Zahlen:
+
+| Property | Three.js (TS / React) | Zahlen Engine (C++) | Porting Action |
+| :--- | :--- | :--- | :--- |
+| **World Coordinate System** | Right-Handed, $+Y$ Up | Right-Handed, $+Y$ Up | **Direct 1:1 Mapping** |
+| **Forward Vector** | $-Z$ | $-Z$ | **Direct 1:1 Mapping** |
+| **Matrix Storage Layout** | Column-Major (`Matrix4`) | Column-Major (`JPH::Mat44` / Slang) | **Direct 1:1 Mapping** |
+| **Matrix Vector Multiplication** | $M \cdot v$ (`v.applyMatrix4(m)`) | $M \cdot v$ (`m * v` / `mul(m, v)`) | **Direct 1:1 Mapping** |
+| **Winding Order** | Counter-Clockwise (CCW) | Counter-Clockwise (CCW) | **Direct 1:1 Mapping** |
+| **Box Geometry Sizes** | Full-Extents $(W, H, D)$ | **Half-Extents** $(X, Y, Z)$ | ⚠️ **Divide dimensions by 2** |
+| **Clip Depth Range** | $[-1, 1]$ (WebGL) | $[0, 1]$ (Vulkan) | ⚠️ **Use `Math::CreatePerspective`** |
+| **Euler Rotation Order** | Default: 'XYZ' | Default: 'YXZ' (Yaw, Pitch, Roll) | Use `MathUtils::EulerYXZ` or `EulerXYZ` |

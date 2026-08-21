@@ -41,6 +41,7 @@ struct TypedImage {
 struct UndefinedState {};
 struct ColorAttachmentState {};
 struct DepthAttachmentState {};
+struct DepthStencilAttachmentState {};
 struct ShaderReadState {};
 struct PresentState {};
 
@@ -60,6 +61,11 @@ struct LayoutMap<DepthAttachmentState> {
     static constexpr VkImageLayout value = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
 };
 template <>
+struct LayoutMap<DepthStencilAttachmentState> {
+    // Map the new state to the stencil-aware layout
+    static constexpr VkImageLayout value = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+};
+template <>
 struct LayoutMap<ShaderReadState> {
     static constexpr VkImageLayout value = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 };
@@ -72,7 +78,13 @@ template <VkImageLayout Layout>
 struct LayoutTraits;
 
 template <VkImageLayout OldLayout, VkImageLayout NewLayout>
-void TransitionLayout(VkCommandBuffer cmd, VkImage image, VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) noexcept;
+void TransitionLayout(
+    VkCommandBuffer    cmd,
+    VkImage            image,
+    VkImageAspectFlags aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
+    uint32_t           baseMip  = 0,
+    uint32_t           mipCount = VK_REMAINING_MIP_LEVELS
+) noexcept;
 
 template <typename InState, typename OutState, typename T>
 auto IssueBarrier(VkCommandBuffer cmd, const T& resource, VkImageAspectFlags aspectOverride = VK_IMAGE_ASPECT_NONE);
@@ -226,7 +238,8 @@ class DynamicPass {
     VkRenderingFlags                                            _flags = 0;
     std::array<VkRenderingAttachmentInfo, kMaxColorAttachments> _colors {};
     VkRenderingAttachmentInfo                                   _depth {};
-    uint32_t                                                    _viewMask = 0;
+    uint32_t                                                    _viewMask   = 0;
+    bool                                                        _hasStencil = false;
 };
 
 DynamicPass(VkExtent2D) -> DynamicPass<0, false>;

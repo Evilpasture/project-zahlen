@@ -8,8 +8,8 @@
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <algorithm>
-#include <ecs/ECS.hpp>
-#include <physics/Physics.hpp>
+#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/physics/Physics.hpp>
 #include <physics/PhysicsWorld.hpp>
 
 namespace ZHLN::Tests {

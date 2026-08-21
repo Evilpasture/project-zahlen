@@ -168,6 +168,8 @@ class Buffer {
     [[nodiscard]] static auto
         Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memUsage) noexcept -> std::expected<Buffer, VkResult>;
 
+    void Flush(VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept;
+
     struct MappedRegion {
         MappedRegion() = default;
         MappedRegion(VmaAllocator alloc, VmaAllocation allocation, void* ptr) noexcept;
@@ -284,12 +286,33 @@ template <typename T = uint32_t>
 void FillBuffer(VkCommandBuffer cmd, const Buffer& buffer, VkDeviceSize offset = 0, T data = 0) {
     static_assert(sizeof(T) % 4 == 0, "Type must be 4-byte aligned for vkCmdFillBuffer");
 
-    vkCmdFillBuffer(cmd, buffer.Handle(), offset, sizeof(T), data);
+    vkCmdFillBuffer(cmd, buffer.Handle(), offset, VK_WHOLE_SIZE, *reinterpret_cast<const uint32_t*>(&data));
 }
 
-inline void CopyBuffer(VkCommandBuffer cmd, const Buffer& src, const Buffer& dst, VkDeviceSize size) {
-    ZHLN_BufferCopyDesc copy = {.src = src.Handle(), .dst = dst.Handle(), .size = size, .src_offset = 0, .dst_offset = 0};
+/**
+ * @brief Base buffer copy helper utilizing raw VkBuffer handles.
+ */
+inline void CopyBuffer(VkCommandBuffer cmd, VkBuffer src, VkBuffer dst, VkDeviceSize size, VkDeviceSize srcOffset = 0, VkDeviceSize dstOffset = 0) {
+    const ZHLN_BufferCopyDesc copy = {.src = src, .dst = dst, .size = size, .src_offset = srcOffset, .dst_offset = dstOffset};
     ZHLN_CmdCopyBuffer(cmd, &copy);
+}
+
+/**
+ * @brief High-level buffer copy helper utilizing RAII Buffer wrappers.
+ */
+inline void CopyBuffer(VkCommandBuffer cmd, const Buffer& src, const Buffer& dst, VkDeviceSize size, VkDeviceSize srcOffset = 0, VkDeviceSize dstOffset = 0) {
+    CopyBuffer(cmd, src.Handle(), dst.Handle(), size, srcOffset, dstOffset);
+}
+
+inline void BufferBarrier(
+    VkCommandBuffer cmd,
+    const Buffer&   buffer,
+    BarrierStage    srcStage,
+    BarrierAccess   srcAccess,
+    BarrierStage    dstStage,
+    BarrierAccess   dstAccess
+) noexcept {
+    BufferBarrier(cmd, buffer.Handle(), srcStage, srcAccess, dstStage, dstAccess);
 }
 
 // ============================================================================
@@ -321,13 +344,13 @@ class StagingRingBuffer {
     void Cleanup() noexcept;
 
     [[nodiscard]] auto Allocate(VkDeviceSize size, VkDeviceSize alignment = 4) noexcept -> Allocation;
-    auto               Submit(VkCommandBuffer cmd) noexcept -> uint64_t;
+    auto               Submit(VkCommandBuffer cmd, VkFence fence = VK_NULL_HANDLE) noexcept -> uint64_t;
     void               Recycle() noexcept;
 
     void RetirePool(VkCommandPool pool, uint64_t timelineValue) noexcept;
 
     [[nodiscard]] auto GetSemaphore() const noexcept -> VkSemaphore {
-        return _timelineSemaphore;
+        return _timelineSemaphore.Get();
     }
     [[nodiscard]] auto GetCurrentValue() const noexcept -> uint64_t {
         return _timelineValue;
@@ -336,7 +359,7 @@ class StagingRingBuffer {
         return _queueFamily;
     }
     [[nodiscard]] auto Valid() const noexcept -> bool {
-        return _timelineSemaphore != VK_NULL_HANDLE;
+        return _timelineSemaphore.Valid();
     }
 
   private:
@@ -353,8 +376,8 @@ class StagingRingBuffer {
     VkDeviceSize _head = 0;
     VkDeviceSize _tail = 0;
 
-    VkSemaphore _timelineSemaphore = VK_NULL_HANDLE;
-    uint64_t    _timelineValue     = 0;
+    Semaphore _timelineSemaphore; // Upgraded to RAII handle
+    uint64_t  _timelineValue = 0;
 
     struct ActiveAllocation {
         VkDeviceSize offset;
@@ -371,8 +394,7 @@ class StagingRingBuffer {
 };
 
 inline void CopyRingBuffer(VkCommandBuffer cmd, StagingRingBuffer::Allocation stagingAlloc, const Vk::Buffer& buffer, VkDeviceSize size) {
-    const ZHLN_BufferCopyDesc copy = {.src = stagingAlloc.buffer, .dst = buffer.Handle(), .size = size, .src_offset = stagingAlloc.offset, .dst_offset = 0};
-    ZHLN_CmdCopyBuffer(cmd, &copy);
+    CopyBuffer(cmd, stagingAlloc.buffer, buffer.Handle(), size, stagingAlloc.offset, 0);
 }
 
 // ============================================================================

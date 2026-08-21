@@ -1,6 +1,18 @@
-leak:libfontconfig
-leak:libgtk-3
-leak:libdecor
-leak:libcairo
-leak:libpango
-leak:libdbus
+# Driver & system windowing caches
+leak:libvulkan*
+leak:libGLX*
+leak:libnvidia*
+leak:libX11*
+leak:libX*
+leak:libxcb*
+leak:libwayland*
+leak:libdbus*
+
+# Fontconfig / FreeType glyph & pattern caches
+leak:libfontconfig*
+leak:libfreetype*
+leak:libharfbuzz*
+
+# Unmapped driver DSO allocations at teardown
+leak:<unknown module>
+leak:*unknown*

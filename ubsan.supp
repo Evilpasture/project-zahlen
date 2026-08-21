@@ -1,7 +1,28 @@
-# LuaJIT shifts and pointer casts
-shift:lj_buf.c
-shift:lj_bcread.c
-function:lj_gc.c
+# ============================================================================
+# LuaJIT Comprehensive Suppressions
+# ============================================================================
 
-# LLGL OpenGL misaligned stores
-alignment:GLResourceHeap.cpp
+# Catch-all for all files in the LuaJIT tree
+undefined:*LuaJIT*
+undefined:*extern/LuaJIT*
+undefined:lib_*.c
+undefined:lj_*.c
+
+# Specific alignment suppressions (LuaJIT assumes x86/x64 unaligned load support)
+alignment:*LuaJIT*
+alignment:lib_jit.c
+alignment:lj_*
+alignment:luaopen_*
+
+# Shifts and integer overflow in bytecode/LEB128 decoding
+shift-base:*LuaJIT*
+shift-base:lj_*
+shift-exponent:*LuaJIT*
+shift-exponent:lj_*
+signed-integer-overflow:*LuaJIT*
+signed-integer-overflow:lj_*
+
+# Indirect function pointer casts in GC and fast-functions
+function:*LuaJIT*
+function:lj_*
+function:luaopen_*

@@ -31,6 +31,7 @@ struct RenderTarget {
         VkImageUsageFlags  usage       = 0;
         VkImageAspectFlags aspect      = GetFormatAspect(F);
         uint32_t           arrayLayers = 1;
+        uint32_t           mipLevels   = 1;
     };
 
     [[nodiscard]] static auto Create(Allocator& allocator, const Context& ctx, VkExtent2D extent, RenderTargetDescriptor desc) -> RenderTarget;
@@ -61,6 +62,67 @@ struct RenderTarget3D {
     }
 
     [[nodiscard]] static auto Create(Allocator& allocator, const Context& ctx, VkExtent3D extent, VkImageUsageFlags usage) -> RenderTarget3D;
+};
+
+template <VkFormat F>
+struct MipmappedRenderTarget {
+    Image                  image;
+    ImageView              fullView;
+    std::vector<ImageView> mipViews;
+    VkExtent2D             extent {};
+    uint32_t               mipLevels = 1;
+
+    MipmappedRenderTarget() = default;
+
+    MipmappedRenderTarget(const MipmappedRenderTarget&)                    = delete;
+    auto operator=(const MipmappedRenderTarget&) -> MipmappedRenderTarget& = delete;
+
+    MipmappedRenderTarget(MipmappedRenderTarget&& other) noexcept                    = default;
+    auto operator=(MipmappedRenderTarget&& other) noexcept -> MipmappedRenderTarget& = default;
+
+    ~MipmappedRenderTarget() = default;
+
+    [[nodiscard]] static auto Create(Allocator& allocator, const Context& ctx, VkExtent2D extent, VkImageUsageFlags usage) -> MipmappedRenderTarget {
+        MipmappedRenderTarget target;
+        target.extent    = extent;
+        target.mipLevels = std::bit_width(std::max(extent.width, extent.height));
+
+        const VkImageCreateInfo info = {
+            .sType                 = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+            .pNext                 = nullptr,
+            .flags                 = 0,
+            .imageType             = VK_IMAGE_TYPE_2D,
+            .format                = F,
+            .extent                = {.width = extent.width, .height = extent.height, .depth = 1},
+            .mipLevels             = target.mipLevels,
+            .arrayLayers           = 1,
+            .samples               = VK_SAMPLE_COUNT_1_BIT,
+            .tiling                = VK_IMAGE_TILING_OPTIMAL,
+            .usage                 = usage,
+            .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
+            .queueFamilyIndexCount = 0,
+            .pQueueFamilyIndices   = nullptr,
+            .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
+        };
+
+        auto img_res = Image::Create(allocator.Get(), info, VMA_MEMORY_USAGE_GPU_ONLY);
+        if (img_res.has_value()) {
+            target.image    = std::move(img_res.value());
+            target.fullView = CreateView<F>(ctx.Device(), target.image.Handle(), GetFormatAspect(F), target.mipLevels);
+            target.mipViews.reserve(target.mipLevels);
+            for (uint32_t m = 0; m < target.mipLevels; ++m) {
+                target.mipViews.push_back(CreateViewSingleMip<F>(ctx.Device(), target.image.Handle(), m, GetFormatAspect(F)));
+            }
+        }
+        return target;
+    }
+
+    [[nodiscard]] auto Valid() const noexcept -> bool {
+        return image.Valid() && fullView.Valid();
+    }
+    explicit operator bool() const noexcept {
+        return Valid();
+    }
 };
 
 // Define the Transition overload here where RenderTarget is fully complete
@@ -99,6 +161,28 @@ Vk::TypedImage<L> AssumeLayout(const Vk::RenderTarget<F>& rt, VkImageAspectFlags
 template <VkImageLayout L, VkFormat F>
 Vk::TypedImage<L> AssumeLayout(const Vk::RenderTarget3D<F>& rt, VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) {
     return {rt.image.Handle(), rt.view.Get(), rt.extent, aspect, F};
+}
+
+template <VkImageLayout L, VkFormat F>
+Vk::TypedImage<L> AssumeLayout(const Vk::MipmappedRenderTarget<F>& rt, VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) {
+    return {rt.image.Handle(), rt.fullView.Get(), {rt.extent.width, rt.extent.height, 1}, aspect, F};
+}
+
+template <typename Usage>
+struct UsageLayout {
+    static_assert(requires { typename Usage::Resource; }, "UsageLayout requires a valid Vk::Usage type.");
+
+    static constexpr VkImageLayout      layout = Usage::layout;
+    static constexpr VkImageAspectFlags aspect = Usage::Resource::aspect;
+};
+
+/**
+ * @brief Automatically resolves layout and aspect from compile-time Graph Usages.
+ */
+template <typename Usage, typename T>
+[[nodiscard]] constexpr auto Assume(const T& resource) noexcept {
+    using Layout = UsageLayout<Usage>;
+    return AssumeLayout<Layout::layout>(resource, Layout::aspect);
 }
 
 template <VkImageLayout TargetLayout, typename T>

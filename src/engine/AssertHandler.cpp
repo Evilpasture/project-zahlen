@@ -3,21 +3,21 @@
 
 #include "Zahlen/Camera.hpp"
 #include "engine/TTYBackend.hpp"
-#include "physics/Physics.hpp"
+#include <Zahlen/Core/Platform.hpp> // This handles windows.h and includes unistd.h on Unix
+#include <Zahlen/Core/Print.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/physics/Physics.hpp>
 #include <atomic>
 #include <cctype> // For std::isprint
 #include <cmath>  // For std::isnan, std::abs
 #include <csignal>
-#include <cstdarg>             // For va_list, va_start, va_end
-#include <cstdint>             // For uint8_t, uint32_t, uint64_t
-#include <cstdio>              // For FILE, stderr, stdout, vfprintf
-#include <cstdlib>             // For std::abort, std::free
-#include <cstring>             // For std::memcpy
-#include <detail/Platform.hpp> // This handles windows.h and includes unistd.h on Unix
-#include <detail/Print.hpp>
-#include <physics/PhysicsWorld.hpp> // Required to fully define PhysicsWorld for ZHLN_TRACE
+#include <cstdarg>                  // For va_list, va_start, va_end
+#include <cstdint>                  // For uint8_t, uint32_t, uint64_t
+#include <cstdio>                   // For FILE, stderr, stdout, vfprintf
+#include <cstdlib>                  // For std::abort, std::free
+#include <cstring>                  // For std::memcpy
+#include <physics/PhysicsWorld.hpp> // Required to fully define PhysicsWorld for ZHLN::Trace
 #include <print>                    // Restored for stable general-purpose printing
 #include <string>                   // For std::string
 #include <string_view>              // For std::string_view
@@ -39,6 +39,28 @@
 #undef IN
 #undef OUT
 #pragma comment(lib, "dbghelp.lib")
+#endif
+
+#if defined(__ASAN_ENABLED__) || defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+// NOLINTBEGIN(bugprone-reserved-identifier)
+extern "C" [[gnu::visibility("default")]] const char* __asan_default_options() {
+    // protect_shadow_gap=0 prevents NVIDIA driver ray tracing mmap collisions
+    return "protect_shadow_gap=0:detect_leaks=1:symbolize=1:halt_on_error=1";
+}
+
+extern "C" [[gnu::visibility("default")]] const char* __lsan_default_options() {
+    return "suppressions=" ZHLN_PROJECT_ROOT "/lsan.supp:print_suppressions=0";
+}
+
+extern "C" [[gnu::visibility("default")]] const char* __ubsan_default_options() {
+    return "suppressions=" ZHLN_PROJECT_ROOT "/ubsan.supp:print_stacktrace=1:halt_on_error=1";
+}
+
+extern "C" [[gnu::visibility("default")]] const char* __tsan_default_options() {
+    return "suppressions=" ZHLN_PROJECT_ROOT "/tsan.supp:halt_on_error=1";
+}
+// NOLINTEND(bugprone-reserved-identifier)
+
 #endif
 
 namespace ZHLN {
@@ -503,7 +525,7 @@ static void PerformDiagnosticDump(int sig, void* addr, Engine* engine) {
     }
 
     if (engine != nullptr) {
-        ZHLN_TRACE(*engine);
+        ZHLN::Trace(*engine);
 
         auto& cam     = engine->GetCamera();
         auto  cam_hdr = ZHLN::Format("\n{}--- CAMERA DEEP STATE ---{}\n", Color::Cyan, Color::Reset);
@@ -529,10 +551,10 @@ static void PerformDiagnosticDump(int sig, void* addr, Engine* engine) {
             WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), plane_str.string_view());
         }
 
-        ZHLN_DUMP(cam.frustum);
+        ZHLN::Dump(cam.frustum);
 
         if (engine->GetPhysicsContext().GetImpl() != nullptr) {
-            ZHLN_TRACE(engine->GetPhysicsContext().GetWorld());
+            ZHLN::Trace(engine->GetPhysicsContext().GetWorld());
         }
     }
 

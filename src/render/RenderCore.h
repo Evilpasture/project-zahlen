@@ -27,17 +27,19 @@ extern "C" {
 
 static constexpr auto maxInstanceExtensions = 128;
 
+typedef enum ZHLN_ValidationMode : uint8_t { ZHLN_VALIDATION_OFF = 0, ZHLN_VALIDATION_ON = 1, ZHLN_VALIDATION_GPU = 2 } ZHLN_ValidationMode;
+
 /**
  * @struct ZHLN_InstanceDesc
  * @brief Configuration for Vulkan Instance initialization.
  */
 typedef struct ZHLN_InstanceDesc {
-    char                                      app_name[64];      /**< Application name embedded to satisfy C23 constexpr */
-    const uint32_t                            version;           /**< Application-specific version (VK_MAKE_API_VERSION) */
-    uint32_t                                  extension_count;   /**< Number of additional extensions to enable */
-    const VkDebugUtilsMessageSeverityFlagsEXT severity_flags;    /**< Severity flags for the validation layer */
-    const char* const*                        extensions;        /**< Pointer to list of extension name strings */
-    const bool                                enable_validation; /**< Toggle for Khronos Validation Layers */
+    char                                      app_name[64];
+    const uint32_t                            version;
+    uint32_t                                  extension_count;
+    const VkDebugUtilsMessageSeverityFlagsEXT severity_flags;
+    const char* const*                        extensions;
+    const ZHLN_ValidationMode                 validation_mode;
 } ZHLN_InstanceDesc;
 
 /**
@@ -45,23 +47,23 @@ typedef struct ZHLN_InstanceDesc {
  * Uses C23 array-copy initialization for the application name.
  */
 static constexpr ZHLN_InstanceDesc ZHLN_DEFAULT_INSTANCE_DESC = {
-    .app_name          = "ZHLN Engine",
-    .version           = VK_MAKE_API_VERSION(0, 1, 0, 0),
-    .extension_count   = 0,
-    .severity_flags    = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
-    .extensions        = nullptr,
-    .enable_validation = true,
+    .app_name        = "ZHLN Engine",
+    .version         = VK_MAKE_API_VERSION(0, 1, 0, 0),
+    .extension_count = 0,
+    .severity_flags  = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
+    .extensions      = nullptr,
+    .validation_mode = ZHLN_VALIDATION_ON,
 };
 
 static constexpr ZHLN_InstanceDesc ZHLN_VERBOSE_INSTANCE_DESC = {
     .app_name = "ZHLN Engine",
     .version  = VK_MAKE_API_VERSION(0, 1, 0, 0),
 
-    .extension_count   = 0,
-    .severity_flags    = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT |
-                         VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT,
-    .extensions        = nullptr,
-    .enable_validation = true,
+    .extension_count = 0,
+    .severity_flags  = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT |
+                       VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT,
+    .extensions      = nullptr,
+    .validation_mode = ZHLN_VALIDATION_ON,
 };
 
 /**
@@ -253,8 +255,9 @@ ZHLN_FrameResult ZHLN_PresentFrame(const ZHLN_PresentDesc* ZHLN_RESTRICT desc);
 typedef struct ZHLN_ShaderDesc {
     const uint32_t*              code;        /**< SPIR-V bytecode */
     const size_t                 size;        /**< Size in bytes */
-    [[maybe_unused]] const char* entry_point; /**< Optional: defaults to SPIRV-Reflect, if fails
-                                             then defaults to "main" if NULL */
+    [[maybe_unused]] const char* entry_point; /**< Optional: if NULL the OpEntryPoint name is parsed
+                                             out of the SPIR-V bytecode; only when that fails is a
+                                             stage-conventional name (VSMain/PSMain/CSMain) used */
 } ZHLN_ShaderDesc;
 
 typedef struct ZHLN_Shader {
@@ -335,6 +338,12 @@ typedef struct ZHLN_GraphicsPipelineDesc {
     const bool                  additive_blend; // Explicitly route additive blend configuration
     const uint32_t              view_mask;      // Explicit Multiview mask (0 = disabled)
     const VkSpecializationInfo* specialization_info;
+
+    // --- CSG Extensions ---
+    const bool       stencil_test;
+    VkStencilOpState stencil_front;
+    VkStencilOpState stencil_back;
+    const bool       color_write_enable; // False = disables color writes (used to write masks to stencil)
 } ZHLN_GraphicsPipelineDesc;
 
 [[nodiscard]]
@@ -348,6 +357,7 @@ typedef struct ZHLN_RenderPassDesc {
     const VkImageView target_views[4]; // Array instead of single view
     const uint32_t    target_count;    // How many targets are we writing to?
     const VkImageView depth_view;
+    const VkImageView stencil_view;
     const VkExtent2D  extent;
     const float       clear_color[4];
     const float       clear_depth;
@@ -479,10 +489,11 @@ typedef struct ZHLN_ImageViewDesc {
     const VkImage            image;
     const VkFormat           format;
     const VkImageAspectFlags aspect;
-    const uint32_t           mip_levels;   // default 1
-    const uint32_t           array_layers; // default 1
+    const uint32_t           mip_levels;   /* default 1 */
+    const uint32_t           array_layers; /* default 1 */
     const VkImageViewType    view_type;
     const uint32_t           base_array_layer;
+    const uint32_t           base_mip; /* targeted base mip level (default 0) */
 } ZHLN_ImageViewDesc;
 
 [[nodiscard]]

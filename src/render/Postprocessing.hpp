@@ -11,7 +11,7 @@ namespace ZHLN::Vk {
 
 template <typename LayoutT>
 struct PostProcessPass {
-    DescriptorSetLayout                   descLayout;
+    [[no_unique_address]] LayoutT         layoutInstance {};
     DescriptorPool                        pool;
     ZHLN::DoubleBuffered<VkDescriptorSet> sets;
     PipelineLayout                        pipelineLayout;
@@ -51,7 +51,7 @@ struct PostProcessPass {
 
     template <typename... Args>
     void WriteIndex(VkDevice device, uint32_t idx, Args&&... args) noexcept {
-        LayoutT::Write(device, sets[idx], std::forward<Args>(args)...);
+        layoutInstance.Write(device, sets[idx], std::forward<Args>(args)...);
     }
 
     template <GpuTriviallyCopyable T>

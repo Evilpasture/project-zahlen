@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
+#include <Zahlen/CommandLine.hpp>
+#include <Zahlen/Core/String.hpp>
 #include <bit>
 #include <cstdint>
-#include <detail/String.hpp>
 #include <string_view>
 #include <version>
 
@@ -140,6 +141,12 @@ inline constexpr size_t CacheLineSize = 64; // Safe fallback
 inline constexpr bool isLittleEndian = (std::endian::native == std::endian::little);
 inline constexpr bool isBigEndian    = (std::endian::native == std::endian::big);
 
+#if defined(ZHLN_IN_DOCKER)
+inline constexpr bool isDocker = true;
+#else
+inline constexpr bool isDocker = false;
+#endif
+
 // Check if the compiler supports a standardized debug break hook
 inline void DebugBreak() noexcept {
 #if defined(_WIN32) || defined(_WIN64)
@@ -168,12 +175,13 @@ struct PhysicsConfig {
 };
 
 struct RenderConfig {
-    String64 appName;
-    uint32_t width            = 1280;
-    uint32_t height           = 720;
-    bool     vsync            = true;
-    bool     fullscreen       = false;
-    bool     enableValidation = true;
+    String64       appName;
+    uint32_t       width          = 1280;
+    uint32_t       height         = 720;
+    bool           vsync          = true;
+    bool           fullscreen     = false;
+    ValidationMode validationMode = ValidationMode::On;
+    bool           headless       = false;
 };
 
 struct EngineConfig {

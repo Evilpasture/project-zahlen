@@ -3,11 +3,14 @@
 
 // include/Zahlen/Format.hpp
 #pragma once
-#include "../../src/detail/Reflection.hpp"
 #include "Entity.hpp"
+// clang-format off
 #include <Jolt/Jolt.h>
+// clang-format on
+#include <Jolt/Core/Reference.h>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
+#include <Zahlen/Core/Reflection.hpp>
 #include <format>
 
 namespace ZHLN::Reflect {
@@ -41,6 +44,17 @@ template <>
 struct CustomFormatter<JPH::Quat> {
     static void format(const JPH::Quat& q, std::string& out) {
         out += std::format("({}, {}, {}, {})", q.GetX(), q.GetY(), q.GetZ(), q.GetW());
+    }
+};
+
+template <typename T>
+struct CustomFormatter<JPH::Ref<T>> {
+    static void format(const JPH::Ref<T>& val, std::string& out) {
+        if (val.GetPtr() != nullptr) {
+            out += "JPH::Ref(active)";
+        } else {
+            out += "JPH::Ref(null)";
+        }
     }
 };
 

@@ -1,46 +1,20 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "ECS.hpp"
-#include "detail/ControlFlow.hpp"
+#include <Zahlen/Core/ControlFlow.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 #include <cstdlib>
 #include <cstring>
 
 namespace ZHLN::ECS {
 
-static ZHLN::Mutex                         s_FamilyMutex;
+namespace {
+
+static ZHLN::Mutex                         s_FamilyMutex {};
 static uint32_t                            s_TypeCounter = 0;
 static HashMap<uint32_t, uint32_t>         s_HashToDense;
 static HashMap<std::string_view, uint32_t> s_NameToFamilyID;
-
-uint32_t ComponentFamily::ResolveDenseID(uint32_t typeHash) noexcept {
-    ZHLN_LOCK(s_FamilyMutex) {
-        const uint32_t* existing = s_HashToDense.Find(typeHash);
-        if (existing != nullptr) {
-            return *existing;
-        }
-        uint32_t id = s_TypeCounter++;
-        s_HashToDense.Insert(typeHash, id);
-        return id;
-    }
-}
-
-void Registry::MapNameToFamilyID(std::string_view name, uint32_t id) noexcept {
-    ZHLN_LOCK(s_FamilyMutex) {
-        s_NameToFamilyID.Insert(name, id);
-    }
-}
-
-uint32_t Registry::GetFamilyIDFromName(std::string_view name) noexcept {
-    ZHLN_LOCK(s_FamilyMutex) {
-        const uint32_t* id = s_NameToFamilyID.Find(name);
-        if (id != nullptr) {
-            return *id;
-        }
-    }
-    return 0xFFFFFFFF; // Invalid
-}
 
 // --- HELPER: Manual Aligned Realloc ---
 static void* ReallocAligned(void* oldPtr, size_t oldSize, size_t newSize, size_t alignment) {
@@ -50,6 +24,34 @@ static void* ReallocAligned(void* oldPtr, size_t oldSize, size_t newSize, size_t
         ::operator delete[](oldPtr, std::align_val_t {alignment});
     }
     return newPtr;
+}
+
+} // namespace
+
+uint32_t ComponentFamily::ResolveDenseID(uint32_t typeHash) noexcept {
+    return ZHLN::Lock(s_FamilyMutex, [&] {
+        const uint32_t* existing = s_HashToDense.Find(typeHash);
+        if (existing != nullptr) {
+            return *existing;
+        }
+        uint32_t id = s_TypeCounter++;
+        s_HashToDense.Insert(typeHash, id);
+        return id;
+    });
+}
+
+void Registry::MapNameToFamilyID(std::string_view name, uint32_t id) noexcept {
+    ZHLN::Lock(s_FamilyMutex, [&] { s_NameToFamilyID.Insert(name, id); });
+}
+
+uint32_t Registry::GetFamilyIDFromName(std::string_view name) noexcept {
+    return ZHLN::Lock(s_FamilyMutex, [&] -> uint32_t {
+        const uint32_t* id = s_NameToFamilyID.Find(name);
+        if (id != nullptr) {
+            return *id;
+        }
+        return 0xFFFFFFFF; // Invalid
+    });
 }
 
 // ============================================================================
@@ -279,17 +281,17 @@ void Registry::EnsureComponentCapacity(uint32_t id) {
 }
 
 Entity Registry::Create() {
-    ZHLN_LOCK(sync.shadowLock) {
+    return ZHLN::Lock(sync.shadowLock, [&] {
         if (_freeCount == 0) {
             EnsureEntityCapacity((uint32_t) _entityCapacity);
         }
         uint32_t index = _freeIndices[--_freeCount];
         return Entity {.index = index, .generation = _generations[index]};
-    }
+    });
 }
 
 void Registry::Destroy(Entity entity) {
-    ZHLN_LOCK(sync.shadowLock) {
+    ZHLN::Lock(sync.shadowLock, [&] {
         if (entity.index >= _entityCapacity || _generations[entity.index] != entity.generation) {
             return;
         }
@@ -300,7 +302,7 @@ void Registry::Destroy(Entity entity) {
         }
         _generations[entity.index]++;
         _freeIndices[_freeCount++] = entity.index;
-    }
+    });
 }
 
 bool Registry::IsAlive(Entity entity) const noexcept {
@@ -308,7 +310,7 @@ bool Registry::IsAlive(Entity entity) const noexcept {
 }
 
 void Registry::Clear() {
-    ZHLN_LOCK(sync.shadowLock) {
+    ZHLN::Lock(sync.shadowLock, [&] {
         for (size_t i = 0; i < _compCapacity; ++i) {
             if (_components[i] != nullptr) {
                 _components[i]->Clear();
@@ -320,18 +322,15 @@ void Registry::Clear() {
             _generations[i]++;
             _freeIndices[_freeCount++] = (uint32_t) i;
         }
-    }
+    });
 }
 
 uint32_t Registry::RegisterComponentDynamic(std::string_view name, size_t size, size_t alignment) {
     uint32_t id = GetFamilyIDFromName(name);
-    ZHLN_LOCK(sync.shadowLock) {
-        // Return early if already mapped
-        if (id != 0xFFFFFFFF) {
-            return id;
-        }
-
-        // Resolve a unique dynamic dense ID using the name hash
+    if (id != 0xFFFFFFFF) {
+        return id;
+    }
+    ZHLN::Lock(sync.shadowLock, [&] {
         uint32_t typeHash = HashTypeName(name);
         id                = ComponentFamily::ResolveDenseID(typeHash);
         MapNameToFamilyID(name, id);
@@ -341,22 +340,21 @@ uint32_t Registry::RegisterComponentDynamic(std::string_view name, size_t size, 
             _components[id] = new SparseSet(size, alignment, &this->sync);
         }
 
-        // Bind raw dynamic layout parameters with a safe, crash-immune fallback dumper
         _typeInfo[id] = {.name = name, .size = size, .alignment = alignment, .debugDump = [](const void*, std::string& out) {
                              out += "{}"; // Fallback representation for non-static dynamic components
                          }};
-    }
+    });
     return id;
 }
 
 void* Registry::AddDynamic(Entity entity, uint32_t familyID) {
-    ZHLN_LOCK(sync.shadowLock) {
+    return ZHLN::Lock(sync.shadowLock, [&] -> void* {
         EnsureComponentCapacity(familyID);
         if (familyID >= _compCapacity || (_components[familyID] == nullptr)) {
             return nullptr;
         }
-    }
-    return _components[familyID]->InsertEmpty(entity);
+        return _components[familyID]->InsertEmpty(entity);
+    });
 }
 
 } // namespace ZHLN::ECS

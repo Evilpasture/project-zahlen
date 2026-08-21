@@ -15,19 +15,7 @@ template <VkFormat F>
 [[nodiscard]] auto CreateView(VkDevice device, VkImage image, VkImageAspectFlags aspect = GetFormatAspect(F), uint32_t mips = 1) -> ImageView;
 
 template <VkFormat F>
-inline auto CreateView3D(VkDevice device, VkImage image, VkImageAspectFlags aspect, uint32_t mips) -> ImageView {
-    ZHLN_ImageViewDesc desc = {
-        .image            = image,
-        .format           = F,
-        .aspect           = aspect,
-        .mip_levels       = mips,
-        .array_layers     = 1,
-        .view_type        = VK_IMAGE_VIEW_TYPE_3D, // Standard 3D Type
-        .base_array_layer = 0,
-    };
-    VkImageView view = ZHLN_CreateImageView(device, &desc);
-    return ImageView {device, view};
-}
+[[nodiscard]] auto CreateView3D(VkDevice device, VkImage image, VkImageAspectFlags aspect, uint32_t mips) -> ImageView;
 
 template <VkFormat F>
 [[nodiscard]] auto CreateViewCube(VkDevice device, VkImage image, uint32_t mips = 1) -> ImageView;
@@ -45,5 +33,9 @@ template <VkFormat F>
 template <VkFormat F>
 [[nodiscard]] auto
     CreateViewCubeArray(VkDevice device, VkImage image, uint32_t arrayLayers, VkImageAspectFlags aspect = GetFormatAspect(F), uint32_t mips = 1) -> ImageView;
+
+template <VkFormat F>
+[[nodiscard]] auto CreateViewSingleMip(VkDevice device, VkImage image, uint32_t baseMip, VkImageAspectFlags aspect = GetFormatAspect(F)) -> ImageView;
+
 } // namespace ZHLN::Vk
 #include "ImageView.inl"

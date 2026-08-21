@@ -7,15 +7,15 @@ namespace ZHLN::Physics {
 
 void PhysicsDebugRenderer::DrawLine(JPH::RVec3Arg inFrom, JPH::RVec3Arg inTo, JPH::ColorArg inColor) {
     uint32_t color = inColor.GetUInt32();
-    lines.push_back({(float) inFrom.GetX(), (float) inFrom.GetY(), (float) inFrom.GetZ(), color});
-    lines.push_back({(float) inTo.GetX(), (float) inTo.GetY(), (float) inTo.GetZ(), color});
+    lines.push_back({.x = static_cast<float>(inFrom.GetX()), .y = static_cast<float>(inFrom.GetY()), .z = static_cast<float>(inFrom.GetZ()), .color = color});
+    lines.push_back({.x = static_cast<float>(inTo.GetX()), .y = static_cast<float>(inTo.GetY()), .z = static_cast<float>(inTo.GetZ()), .color = color});
 }
 
-void PhysicsDebugRenderer::DrawTriangle(JPH::RVec3Arg inV1, JPH::RVec3Arg inV2, JPH::RVec3Arg inV3, JPH::ColorArg inColor, ECastShadow inCastShadow) {
+void PhysicsDebugRenderer::DrawTriangle(JPH::RVec3Arg inV1, JPH::RVec3Arg inV2, JPH::RVec3Arg inV3, JPH::ColorArg inColor, ECastShadow /*inCastShadow*/) {
     uint32_t color = inColor.GetUInt32();
-    triangles.push_back({(float) inV1.GetX(), (float) inV1.GetY(), (float) inV1.GetZ(), color});
-    triangles.push_back({(float) inV2.GetX(), (float) inV2.GetY(), (float) inV2.GetZ(), color});
-    triangles.push_back({(float) inV3.GetX(), (float) inV3.GetY(), (float) inV3.GetZ(), color});
+    triangles.push_back({.x = static_cast<float>(inV1.GetX()), .y = static_cast<float>(inV1.GetY()), .z = static_cast<float>(inV1.GetZ()), .color = color});
+    triangles.push_back({.x = static_cast<float>(inV2.GetX()), .y = static_cast<float>(inV2.GetY()), .z = static_cast<float>(inV2.GetZ()), .color = color});
+    triangles.push_back({.x = static_cast<float>(inV3.GetX()), .y = static_cast<float>(inV3.GetY()), .z = static_cast<float>(inV3.GetZ()), .color = color});
 }
 
 void PhysicsDebugRenderer::DrawText3D(JPH::RVec3Arg inPosition, const std::string_view& inString, JPH::ColorArg inColor, float inHeight) {

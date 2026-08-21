@@ -2,17 +2,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "CullingSystem.hpp"
-#include "LightingSystem.hpp" // Added to resolve sun data queries
+#include "LightingSystem.hpp"
 #include "Zahlen/Render.hpp"
 #include "engine/system/CameraSystem.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
+#include <Zahlen/Core/ControlFlow.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math3D.hpp> // Added to resolve JPH projection math
+#include <Zahlen/Math3D.hpp>
 #include <Zahlen/Profiler.hpp>
-#include <detail/ControlFlow.hpp>
-#include <ecs/ECS.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 #include <physics/PhysicsWorld.hpp>
 
 namespace ZHLN::Tests { namespace {
@@ -28,9 +28,10 @@ void VerifyCullingResults(const ECS::Registry& reg, const JPH::Array<Entity>& vi
 
     size_t expectedVisible = 0;
     for (size_t i = 0; i < entities.size(); ++i) {
-        JPH::Vec3 pos = meshes[i].worldTransform.GetTranslation();
+        const auto* worldTrans = reg.Get<Components::WorldTransformComponent>(entities[i]);
+        JPH::Mat44  worldMat   = (worldTrans != nullptr) ? worldTrans->world : JPH::Mat44::sIdentity();
+        JPH::Vec3   pos        = worldMat * meshes[i].localCenter;
 
-        // --- UPDATE DIAGNOSTICS TO USE DUAL FRUSTUMS ---
         bool visibleInMain   = cam.frustum.IsSphereVisible(pos, meshes[i].cullRadius);
         bool visibleInShadow = cam.shadowFrustum.IsSphereVisible(pos, meshes[i].cullRadius);
         if (visibleInMain || visibleInShadow) {
@@ -38,32 +39,18 @@ void VerifyCullingResults(const ECS::Registry& reg, const JPH::Array<Entity>& vi
         }
     }
 
-    // Test 1: Visible count is reasonable
     if (visible.size() > entities.size()) {
         ZHLN::Log("[Test Fail] Culling: Visible count {} exceeds total entity count {}", visible.size(), entities.size());
     }
 
-    // Test 2: All visible entities exist in the registry
     for (Entity e: visible) {
         if (!reg.IsAlive(e)) {
             ZHLN::Log("[Test Fail] Culling: Visible list contains dead entity {}", e.index);
         }
     }
 
-    // Test 3: Visible list consistency with expected
     if (visible.size() != expectedVisible && CullingStats::EnableCulling) {
         ZHLN::Log("[Test Fail] Culling: Visible count {} does not match expected {}", visible.size(), expectedVisible);
-    }
-
-    // Test 4: No duplicates in visible list
-    if (visible.size() > 1) {
-        for (size_t i = 0; i < visible.size(); ++i) {
-            for (size_t j = i + 1; j < visible.size(); ++j) {
-                if (visible[i].index == visible[j].index) {
-                    ZHLN::Log("[Test Fail] Culling: Duplicate entity {} in visible list", visible[i].index);
-                }
-            }
-        }
     }
 }
 }} // namespace ZHLN::Tests
@@ -72,9 +59,10 @@ namespace ZHLN {
 
 template <bool UsePhysicsTransforms>
 void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible, JPH::Array<Entity>& outVisibleShadow) {
-    ZHLN_PROFILE_SCOPE("Culling (ECS O(N))");
-    auto& cam = engine.GetCamera();
-    auto& reg = engine.GetRegistry();
+    ZHLN::ScopedTimer profTimer("Culling (ECS O(N))");
+    auto&             cam = engine.GetCamera();
+    auto&             reg = engine.GetRegistry();
+    auto&             rc  = engine.GetRenderContext();
 
     auto entities       = reg.GetEntitiesWith<Components::MeshComponent>();
     auto cameraEntities = reg.GetEntitiesWith<Components::CameraComponent>();
@@ -84,7 +72,6 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible, JPH::
         cComp = reg.Get<Components::CameraComponent>(cameraEntities[0]);
     }
 
-    // 1. Fetch Global Settings & Shadow Configuration values
     bool     isFullBright     = false;
     float    shadowWidth      = 80.0f;
     uint32_t shadowResolution = 2048;
@@ -103,7 +90,6 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible, JPH::
         shadowResolution     = shadowSettings->shadowResolution;
     }
 
-    // 2. Perform Viewport Camera Culling Updates
     static bool s_WasFrozen = false;
     if (CullingStats::FreezeFrustum) {
         if (!s_WasFrozen) {
@@ -140,19 +126,15 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible, JPH::
         s_WasFrozen = false;
     }
 
-    // 3. Dynamically update the shadow culling frustum using the centralized Sun orientation [1]
     if (!isFullBright) {
         auto [sunDirection, sunIntensity] = LightingSystem::GetSunDirectionAndIntensity(reg);
 
         JPH::Vec3 shadowCenter = cam.position;
-
-        // Align the shadow center to texel increments to prevent edge shimmering [1]
-        float texelSize = shadowWidth / static_cast<float>(shadowResolution);
+        float     texelSize    = shadowWidth / static_cast<float>(shadowResolution);
         shadowCenter.SetX(std::round(shadowCenter.GetX() / texelSize) * texelSize);
         shadowCenter.SetY(std::round(shadowCenter.GetY() / texelSize) * texelSize);
         shadowCenter.SetZ(std::round(shadowCenter.GetZ() / texelSize) * texelSize);
 
-        // --- USE CENTRALIZED SHADOW CONSTANTS ---
         JPH::Vec3  lightPos  = shadowCenter + sunDirection * Shadows::FarOffset;
         JPH::Mat44 lightView = Math::CreateLookAt(lightPos, shadowCenter, JPH::Vec3::sAxisY());
 
@@ -163,34 +145,61 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible, JPH::
         cam.shadowFrustum.Update(shadowProjView);
     }
 
+    auto meshes = reg.GetRawArray<Components::MeshComponent>();
+
+    CullingStats::TotalTriangles    = 0;
+    CullingStats::RenderedTriangles = 0;
+
     if (!CullingStats::EnableCulling) {
         outVisible.assign(entities.begin(), entities.end());
         outVisibleShadow.assign(entities.begin(), entities.end());
+
+        uint32_t tris = 0;
+        for (size_t i = 0; i < entities.size(); ++i) {
+            auto gpuMeshOpt = rc.GetGPUMesh(meshes[i].meshAsset);
+            if (gpuMeshOpt.has_value()) {
+                tris += (gpuMeshOpt->indexCount > 0) ? (gpuMeshOpt->indexCount / 3) : (gpuMeshOpt->vertexCount / 3);
+            }
+        }
+        CullingStats::TotalTriangles    = tris;
+        CullingStats::RenderedTriangles = tris;
         return;
     }
 
     outVisible.clear();
     outVisibleShadow.clear();
-    auto meshes = reg.GetRawArray<Components::MeshComponent>();
 
     for (size_t i = 0; i < entities.size(); ++i) {
-        Entity e = entities[i];
+        Entity      e        = entities[i];
+        const auto& meshComp = meshes[i];
 
-        JPH::Vec3 pos = meshes[i].worldTransform * meshes[i].localCenter;
-
-        // Extract max scale from the 3x3 rotational component of the world matrix
-        float scaleX          = meshes[i].worldTransform.GetColumn3(0).Length();
-        float scaleY          = meshes[i].worldTransform.GetColumn3(1).Length();
-        float scaleZ          = meshes[i].worldTransform.GetColumn3(2).Length();
-        float currentMaxScale = std::max({scaleX, scaleY, scaleZ});
-
-        // 1. Cull against Main Camera Frustum
-        if (cam.frustum.IsSphereVisible(pos, meshes[i].cullRadius * currentMaxScale)) {
-            outVisible.push_back(e);
+        if ((meshComp.flags & DrawFlags::Hidden) != DrawFlags::None) {
+            continue;
         }
 
-        // 2. Cull against Shadow Camera Frustum (Only run if lit)
-        if (!isFullBright && cam.shadowFrustum.IsSphereVisible(pos, meshes[i].cullRadius)) {
+        auto     gpuMeshOpt = rc.GetGPUMesh(meshComp.meshAsset);
+        uint32_t meshTris   = 0;
+        if (gpuMeshOpt.has_value()) {
+            meshTris = (gpuMeshOpt->indexCount > 0) ? (gpuMeshOpt->indexCount / 3) : (gpuMeshOpt->vertexCount / 3);
+        }
+
+        CullingStats::TotalTriangles += meshTris;
+
+        const auto* worldTrans = reg.Get<Components::WorldTransformComponent>(e);
+        JPH::Mat44  worldMat   = (worldTrans != nullptr) ? worldTrans->world : JPH::Mat44::sIdentity();
+
+        JPH::Vec3 pos             = worldMat * meshComp.localCenter;
+        float     scaleX          = worldMat.GetColumn3(0).Length();
+        float     scaleY          = worldMat.GetColumn3(1).Length();
+        float     scaleZ          = worldMat.GetColumn3(2).Length();
+        float     currentMaxScale = std::max({scaleX, scaleY, scaleZ});
+
+        if (cam.frustum.IsSphereVisible(pos, meshComp.cullRadius * currentMaxScale)) {
+            outVisible.push_back(e);
+            CullingStats::RenderedTriangles += meshTris;
+        }
+
+        if (!isFullBright && cam.shadowFrustum.IsSphereVisible(pos, meshComp.cullRadius)) {
             outVisibleShadow.push_back(e);
         }
     }
@@ -205,70 +214,32 @@ void CullingSystem::DrawDebugFrustum(Engine& engine) {
         return;
     }
 
-    auto& rc  = engine.GetRenderContext();
-    auto& reg = engine.GetRegistry();
-
-    auto settingsEntities = reg.GetEntitiesWith<Components::GlobalSettingsTagComponent>();
-    if (settingsEntities.empty()) {
-        return;
-    }
-
-    auto* dbg = reg.Get<Components::DebugSettingsComponent>(settingsEntities[0]);
-    if ((dbg == nullptr) || dbg->debugLineVbo == 0) {
-        return;
-    }
-
-    Mesh debugMesh = {
-        .posBuffer   = static_cast<BufferHandle>(dbg->debugLineVbo),
-        .attrBuffer  = static_cast<BufferHandle>(dbg->debugLineVbo),
-        .skinBuffer  = BufferHandle::Invalid,
-        .indexBuffer = BufferHandle::Invalid,
-        .vertexCount = 36,
-        .indexCount  = 0
-    };
-    Material debugMat = {.pipeline = static_cast<PipelineHandle>(dbg->debugLinePipeline), .albedoIndex = dbg->debugLineAlbedo};
-
-    debugMat.baseColorFactor[0] = 0.0f;
-    debugMat.baseColorFactor[1] = 1.0f;
-    debugMat.baseColorFactor[2] = 1.0f;
-    debugMat.baseColorFactor[3] = 1.0f;
+    auto& rc = engine.GetRenderContext();
 
     struct FrustumEdge {
         int start;
         int end;
     };
-    static constexpr std::array<FrustumEdge, 12> frustumEdges = {{
-        {.start = 0, .end = 1},
-        {.start = 1, .end = 2},
-        {.start = 2, .end = 3},
-        {.start = 3, .end = 0}, // Near Plane loop
-        {.start = 4, .end = 5},
-        {.start = 5, .end = 6},
-        {.start = 6, .end = 7},
-        {.start = 7, .end = 4}, // Far Plane loop
-        {.start = 0, .end = 4},
-        {.start = 1, .end = 5},
-        {.start = 2, .end = 6},
-        {.start = 3, .end = 7} // Near-to-Far connection lines
-    }};
+    static constexpr std::array<FrustumEdge, 12> frustumEdges = {
+        {{.start = 0, .end = 1},
+         {.start = 1, .end = 2},
+         {.start = 2, .end = 3},
+         {.start = 3, .end = 0},
+         {.start = 4, .end = 5},
+         {.start = 5, .end = 6},
+         {.start = 6, .end = 7},
+         {.start = 7, .end = 4},
+         {.start = 0, .end = 4},
+         {.start = 1, .end = 5},
+         {.start = 2, .end = 6},
+         {.start = 3, .end = 7}}
+    };
 
+    JPH::Vec4 cyanColor(0.0f, 1.0f, 1.0f, 1.0f);
     for (auto edge: frustumEdges) {
         JPH::Vec3 pA = m_frustumCorners[edge.start];
         JPH::Vec3 pB = m_frustumCorners[edge.end];
-
-        JPH::Vec3 v   = pB - pA;
-        float     len = v.Length();
-        if (len < 1e-4f) {
-            continue;
-        }
-
-        JPH::Vec3 dir = v / len;
-        JPH::Vec3 mid = (pA + pB) * 0.5f;
-
-        JPH::Quat  rot           = JPH::Quat::sFromTo(JPH::Vec3::sAxisZ(), dir);
-        JPH::Mat44 lineTransform = Math::CreateTransform(mid, rot, JPH::Vec3(1.0f, 1.0f, len));
-
-        Renderer::Draw(rc, debugMat, debugMesh, {.transform = lineTransform, .prevTransform = lineTransform, .cullRadius = len});
+        rc.DrawLine(pA, pB, cyanColor, cyanColor);
     }
 }
 

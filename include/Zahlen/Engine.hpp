@@ -8,28 +8,27 @@
 #include <Jolt/Core/Array.h>
 // clang-format on
 
+#include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/EngineCode.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
+#include <Zahlen/Types.hpp>
 #include <expected>
+#include <functional>
 #include <memory>
 
 namespace ZHLN {
 
-class InputContext;
 class Window;
 class RenderContext;
 class PhysicsContext;
 class AudioContext;
 class CreativeWorksManager;
+class ScriptRunner;
 struct Camera;
 struct EngineImpl;
-
-namespace ALife {
-class Simulator;
-}
 
 namespace ECS {
 class Registry;
@@ -41,6 +40,8 @@ class CullingSystem;
 
 class ZHLN_API Engine {
   public:
+    using UICallback = std::function<void(Engine&)>;
+
     Engine();
     Engine(const EngineConfig& cfg);
     Engine(const EngineConfig& cfg, bool& outSuccess);
@@ -55,15 +56,15 @@ class ZHLN_API Engine {
     [[nodiscard]] bool BeginFrame(bool& outDeviceLost) noexcept;
     [[nodiscard]] bool EndFrame(bool& outDeviceLost) noexcept;
 
-    Window&               GetWindow();
-    PhysicsContext&       GetPhysicsContext();
-    RenderContext&        GetRenderContext();
-    InputContext&         GetInput();
-    Camera&               GetCamera();
-    ALife::Simulator&     GetALife();
-    CreativeWorksManager& GetCreativeWorksManager();
-    AudioContext&         GetAudioContext();
-    ECS::Registry&        GetRegistry();
+    Window&                            GetWindow();
+    PhysicsContext&                    GetPhysicsContext();
+    RenderContext&                     GetRenderContext();
+    Camera&                            GetCamera();
+    CreativeWorksManager&              GetCreativeWorksManager();
+    AudioContext&                      GetAudioContext();
+    ScriptRunner&                      GetScriptRunner();
+    [[nodiscard]] ECS::Registry&       GetRegistry();
+    [[nodiscard]] const ECS::Registry& GetRegistry() const;
 
     ECS::SystemGraph&         GetUpdateGraph();
     ECS::SystemGraph&         GetRenderGraph();
@@ -77,7 +78,28 @@ class ZHLN_API Engine {
     void                   SetGameState(void* state);
     [[nodiscard]] uint64_t GetCurrentFrame() const noexcept;
 
+    void SetUICallback(UICallback callback);
+
     void ProvokeDeviceLost();
+
+    /**
+     * @brief Registers default engine components, camera, lighting settings,
+     *        UI settings, and compiles internal System Graphs.
+     */
+    bool InitializeDefaultScene();
+
+    /**
+     * @brief Executes a single synchronized frame tick in canonical order.
+     * @param dt Frame delta time in seconds.
+     * @param driver Gameplay driver (Cpp, Fennel, or Hybrid).
+     */
+    GameplayStatus Tick(float dt, GameplayDriver driver = GameplayDriver::Cpp);
+
+    /**
+     * @brief Convenience entry point that manages the main loop, frame limiting,
+     *        and clean shutdown.
+     */
+    static int Run(const CommandLineOptions& options, UICallback uiCallback = nullptr);
 
   private:
     std::expected<void, Error>  InitInternal(const EngineConfig& cfg);

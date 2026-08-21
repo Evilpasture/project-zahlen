@@ -7,6 +7,9 @@
 #error "Please include <src/render/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include <array>
+#include <string_view>
+
 namespace ZHLN::Vk {
 
 // ============================================================================
@@ -18,7 +21,15 @@ struct ResourceName {
     std::array<char, N> value {};
 
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
-    constexpr ResourceName(const char (&str)[N]);
+    constexpr ResourceName(const char (&str)[N]) {
+        for (size_t i = 0; i < N; ++i) {
+            value[i] = str[i];
+        }
+    }
+
+    [[nodiscard]] constexpr std::string_view string_view() const noexcept {
+        return std::string_view(value.data(), N > 0 && value[N - 1] == '\0' ? N - 1 : N);
+    }
 };
 
 // Defined early so GraphPass and MakePass can resolve it during compilation
@@ -39,12 +50,25 @@ struct IsInList<Vk::TypeList<Ts...>, Target> {
     static constexpr bool value = (std::is_same_v<Ts, Target> || ...);
 };
 
+namespace detail {
+struct DummyResource {
+    static constexpr auto name = ResourceName("DummyResource");
+};
+// Dummy usage stub for zero-usage passes (e.g. BDA compute passes)
+struct DummyUsage {
+    using Resource                                = DummyResource;
+    static constexpr VkImageLayout         layout = VK_IMAGE_LAYOUT_UNDEFINED;
+    static constexpr VkPipelineStageFlags2 stage  = VK_PIPELINE_STAGE_2_NONE;
+    static constexpr VkAccessFlags2        access = 0;
+};
+} // namespace detail
+
 template <>
 struct TypeList<> {
     static constexpr size_t size = 0;
 
     template <size_t I>
-    using type = void; // Safe fallback, never indexed
+    using type = detail::DummyUsage; // Safe fallback struct instead of void
 };
 
 template <ResourceName Name, VkFormat Format, VkImageAspectFlags Aspect, bool IsSwapchain = false, bool IsPersistent = false>
@@ -78,6 +102,13 @@ template <typename Image>
 using DepthWrite = Usage<
     Image,
     VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+    VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+    VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT>;
+
+template <typename Image>
+using DepthStencilWrite = Usage<
+    Image,
+    VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
     VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT>;
 
@@ -187,14 +218,35 @@ consteval auto ComputeStateTable();
  * Triggers a static assertion if rasterization attachments are used directly.
  */
 template <ResourceName Name, typename... Usages, typename RecordFn>
-constexpr auto MakePass(RecordFn&& record);
+constexpr auto MakePass(RecordFn&& record) {
+    constexpr bool has_graphics = (detail::IsColorAttachment<Usages>::value || ...) || (detail::IsDepthAttachment<Usages>::value || ...);
+
+    if constexpr (has_graphics) {
+        static_assert(
+            !std::is_invocable_v<RecordFn, VkCommandBuffer>, "\n\n================================================================================\n"
+                                                             "  [COMPILER ERROR] Render pass safety violation detected!\n"
+                                                             "================================================================================\n\n"
+                                                             "  Direct use of MakePass with ColorWrite or DepthWrite is not allowed.\n"
+                                                             "  Recording draw calls outside of an active Vulkan RenderPass causes undefined "
+                                                             "behaviour.\n\n"
+                                                             "  Resolution:\n"
+                                                             "    - Write your lambdas to accept 'auto& ctx' instead of raw VkCommandBuffer.\n"
+                                                             "    - The graph executor will automatically open and close the RenderPass for you.\n\n"
+                                                             "================================================================================\n"
+        );
+    }
+
+    return GraphPass<Name, TypeList<Usages...>, std::decay_t<RecordFn>> {std::forward<RecordFn>(record)};
+}
 
 /**
  * @brief UNSAFE / Framework-only pass builder.
  * Required for internal wrappers that manually handle render pass boundaries.
  */
 template <ResourceName Name, typename... Usages, typename RecordFn>
-constexpr auto Passieren(RecordFn&& record, [[maybe_unused]] detail::BypassGraphicsCheckToken unused = {});
+constexpr auto Passieren(RecordFn&& record, detail::BypassGraphicsCheckToken /*unused*/ = {}) {
+    return GraphPass<Name, TypeList<Usages...>, std::decay_t<RecordFn>> {std::forward<RecordFn>(record)};
+}
 
 struct GraphResource {
     VkImage     handle = VK_NULL_HANDLE;
@@ -232,25 +284,30 @@ class CompileTimeFrameGraph {
 
     constexpr explicit CompileTimeFrameGraph(Passes&&... passes);
 
-    void Execute(VkCommandBuffer cmd, const Binder& binder) const;
+    template <typename ProfilerT = void*>
+    void Execute(VkCommandBuffer cmd, const Binder& binder, uint32_t frameIndex = 0, ProfilerT* profiler = nullptr) const;
 
   private:
     template <size_t PassIndex, typename PassType>
     static consteval size_t CountRequiredBarriers() {
         using Usages = typename PassType::Usages;
-        return []<size_t... Is>(std::index_sequence<Is...>) {
-            size_t count = 0;
-            ((count +=
-              []() {
-                  using UsageType                            = typename Usages::template type<Is>;
-                  using Img                                  = typename UsageType::Resource;
-                  constexpr size_t                r_idx      = detail::GetResourceIndex<Resources, Img>();
-                  constexpr detail::ResourceState prev_state = StateTable[PassIndex][r_idx];
-                  return detail::NeedsBarrier<prev_state, UsageType, PassIndex>::value ? 1 : 0;
-              }()),
-             ...);
-            return count;
-        }(std::make_index_sequence<Usages::size> {});
+        if constexpr (Usages::size == 0) {
+            return 0; // Short-circuit passes with zero image usages
+        } else {
+            return []<size_t... Is>(std::index_sequence<Is...>) {
+                size_t count = 0;
+                ((count +=
+                  []() {
+                      using UsageType                            = typename Usages::template type<Is>;
+                      using Img                                  = typename UsageType::Resource;
+                      constexpr size_t                r_idx      = detail::GetResourceIndex<Resources, Img>();
+                      constexpr detail::ResourceState prev_state = StateTable[PassIndex][r_idx];
+                      return detail::NeedsBarrier<prev_state, UsageType, PassIndex>::value ? 1 : 0;
+                  }()),
+                 ...);
+                return count;
+            }(std::make_index_sequence<Usages::size> {});
+        }
     }
 
     template <size_t PassIndex, typename PassType, size_t BarrierCount>
@@ -258,25 +315,35 @@ class CompileTimeFrameGraph {
         std::array<size_t, BarrierCount> indices {};
         using Usages = typename PassType::Usages;
 
-        [&]<size_t... Is>(std::index_sequence<Is...>) {
-            size_t write_idx = 0;
-            (([&]() {
-                 using UsageType                            = typename Usages::template type<Is>;
-                 using Img                                  = typename UsageType::Resource;
-                 constexpr size_t                r_idx      = detail::GetResourceIndex<Resources, Img>();
-                 constexpr detail::ResourceState prev_state = StateTable[PassIndex][r_idx];
-                 if constexpr (detail::NeedsBarrier<prev_state, UsageType, PassIndex>::value) {
-                     indices[write_idx++] = Is;
-                 }
-             }()),
-             ...);
-        }(std::make_index_sequence<Usages::size> {});
+        if constexpr (Usages::size == 0) {
+            return indices; // Short-circuit passes with zero image usages
+        } else {
+            [&]<size_t... Is>(std::index_sequence<Is...>) {
+                size_t write_idx = 0;
+                (([&]() {
+                     using UsageType                            = typename Usages::template type<Is>;
+                     using Img                                  = typename UsageType::Resource;
+                     constexpr size_t                r_idx      = detail::GetResourceIndex<Resources, Img>();
+                     constexpr detail::ResourceState prev_state = StateTable[PassIndex][r_idx];
+                     if constexpr (detail::NeedsBarrier<prev_state, UsageType, PassIndex>::value) {
+                         indices[write_idx++] = Is;
+                     }
+                 }()),
+                 ...);
+            }(std::make_index_sequence<Usages::size> {});
 
-        return indices;
+            return indices;
+        }
     }
 
-    template <size_t PassIndex, typename PassType>
-    void ExecutePass(VkCommandBuffer cmd, const std::array<GraphResource, NumResources>& bindings, const PassType& pass) const;
+    template <size_t PassIndex, typename PassType, typename ProfilerT>
+    void ExecutePass(
+        VkCommandBuffer                                cmd,
+        const std::array<GraphResource, NumResources>& bindings,
+        const PassType&                                pass,
+        uint32_t                                       frameIndex,
+        ProfilerT*                                     profiler
+    ) const;
 
     std::tuple<Passes...> _passes;
 };

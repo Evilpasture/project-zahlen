@@ -1,12 +1,16 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/engine/system/UILayoutSystem.hpp
 #pragma once
 
 #include "Zahlen/Components.hpp"
-#include "detail/HashMap.hpp"
-#include "ecs/ECS.hpp"
+#include "Zahlen/GUI.hpp"
+#include <Zahlen/Core/HashMap.hpp>
+#include <Zahlen/ecs/ECS.hpp>
+#include <algorithm>
+#include <unordered_map>
+#include <vector>
+#include <yoga/Yoga.h>
 
 namespace ZHLN {
 
@@ -16,6 +20,38 @@ class UILayoutSystem {
         float width;
         float height;
     };
+
+    struct TextMeasureContext {
+        const FontAtlas* font = nullptr;
+        std::string      text;
+        float            scale = 1.0f;
+    };
+
+    static YGSize MeasureTextNode(YGNodeConstRef node, float width, YGMeasureMode widthMode, float height, YGMeasureMode heightMode) {
+        auto* ctx = static_cast<TextMeasureContext*>(YGNodeGetContext(node));
+        if (ctx == nullptr || ctx->font == nullptr || ctx->text.empty()) {
+            return YGSize {.width = 0.0f, .height = 0.0f};
+        }
+
+        GUI::TextBounds bounds         = GUI::MeasureTextBounds(*ctx->font, ctx->text, ctx->scale);
+        float           measuredWidth  = bounds.width();
+        float           measuredHeight = bounds.height();
+
+        if (widthMode == YGMeasureModeExactly) {
+            measuredWidth = width;
+        } else if (widthMode == YGMeasureModeAtMost) {
+            measuredWidth = std::min(measuredWidth, width);
+        }
+
+        if (heightMode == YGMeasureModeExactly) {
+            measuredHeight = height;
+        } else if (heightMode == YGMeasureModeAtMost) {
+            measuredHeight = std::min(measuredHeight, height);
+        }
+
+        return YGSize {.width = measuredWidth, .height = measuredHeight};
+    }
+
     void ResolveLayouts(ECS::Registry& reg, const UIViewport& viewport) {
         auto entities = reg.GetEntitiesWith<Components::UIRectComponent>();
         auto rects    = reg.GetRawArray<Components::UIRectComponent>();
@@ -24,112 +60,253 @@ class UILayoutSystem {
             return;
         }
 
-        // 1. Gather and sort indices linearly by hierarchy depth
-        struct SortEntry {
-            size_t   rawIndex;
-            uint32_t depth;
-        };
-        JPH::Array<SortEntry> sortedEntries;
-        sortedEntries.reserve(entities.size());
-
-        for (size_t i = 0; i < entities.size(); ++i) {
-            sortedEntries.push_back({.rawIndex = i, .depth = rects[i].hierarchyDepth});
+        // 1. Fetch active Font Atlas for text measurement
+        const FontAtlas* activeFont     = nullptr;
+        auto             uiSettingsEnts = reg.GetEntitiesWith<Components::UISettingsComponent>();
+        if (!uiSettingsEnts.empty()) {
+            activeFont = &reg.Get<Components::UISettingsComponent>(uiSettingsEnts[0])->fontAtlas;
         }
 
-        std::ranges::sort(sortedEntries, [](const auto& a, const auto& b) { return a.depth < b.depth; });
+        // 2. Instantiate Yoga Nodes for every active UI Entity
+        std::unordered_map<uint64_t, YGNodeRef> nodeMap;
+        std::vector<TextMeasureContext*>        measureContexts;
 
-        // Fast, allocation-free offset accumulator map
-        HashMap<uint64_t, float> stackOffsets;
+        for (size_t i = 0; i < entities.size(); ++i) {
+            Entity    e       = entities[i];
+            YGNodeRef node    = YGNodeNew();
+            nodeMap[e.Pack()] = node;
 
-        // 2. Solve layouts linearly
-        for (const auto& entry: sortedEntries) {
-            Entity                       e      = entities[entry.rawIndex];
-            Components::UIRectComponent& rect   = rects[entry.rawIndex];
-            Entity                       parent = rect.parentEntity;
+            const auto& rect = rects[i];
+            auto*       flex = reg.Get<Components::UIFlexComponent>(e);
+            auto* parentRect = (rect.parentEntity != NullEntity && reg.IsAlive(rect.parentEntity)) ? reg.Get<Components::UIRectComponent>(rect.parentEntity) :
+                                                                                                     nullptr;
 
-            // Resolve parent bounds (default to viewport if root)
-            float pMinX = 0.0f;
-            float pMinY = 0.0f;
-            float pMaxX = viewport.width;
-            float pMaxY = viewport.height;
+            float pWidth  = (parentRect != nullptr) ?
+                                (parentRect->width > 0.0f ? parentRect->width : (parentRect->computedAbsMaxX - parentRect->computedAbsMinX)) :
+                                viewport.width;
+            float pHeight = (parentRect != nullptr) ?
+                                (parentRect->height > 0.0f ? parentRect->height : (parentRect->computedAbsMaxY - parentRect->computedAbsMinY)) :
+                                viewport.height;
 
-            if (parent != NullEntity && reg.IsAlive(parent)) {
-                if (auto* pRect = reg.Get<Components::UIRectComponent>(parent)) {
-                    pMinX = pRect->computedAbsMinX;
-                    pMinY = pRect->computedAbsMinY;
-                    pMaxX = pRect->computedAbsMaxX;
-                    pMaxY = pRect->computedAbsMaxY;
-                }
+            if (pWidth <= 0.0f) {
+                pWidth = viewport.width;
+            }
+            if (pHeight <= 0.0f) {
+                pHeight = viewport.height;
             }
 
-            float pWidth  = pMaxX - pMinX;
-            float pHeight = pMaxY - pMinY;
-
-            // --- STACK CONTAINER POSITION OVERRIDE ---
-            if (parent != NullEntity && reg.IsAlive(parent)) {
-                if (auto* stack = reg.Get<Components::UIStackComponent>(parent)) {
-                    const float* offsetPtr     = stackOffsets.Find(parent.Pack());
-                    float        currentOffset = (offsetPtr != nullptr) ? *offsetPtr : stack->padding;
-
-                    if (stack->direction == StackDirection::Vertical) {
-                        rect.y = currentOffset; // Override vertical coordinate
-                    } else {
-                        rect.x = currentOffset; // Override horizontal coordinate
-                    }
-                }
+            // Explicit Dimensions
+            if (rect.width > 0.0f) {
+                YGNodeStyleSetWidth(node, rect.width);
+            }
+            if (rect.height > 0.0f) {
+                YGNodeStyleSetHeight(node, rect.height);
             }
 
-            // Calculate anchor reference points in parent space
-            float anchorLeft   = pMinX + (pWidth * rect.anchorMinX);
-            float anchorRight  = pMinX + (pWidth * rect.anchorMaxX);
-            float anchorTop    = pMinY + (pHeight * rect.anchorMinY);
-            float anchorBottom = pMinY + (pHeight * rect.anchorMaxY);
+            // --- ANCHOR vs FLEX POSITIONING ---
+            bool isFlexChild =
+                (rect.parentEntity != NullEntity && reg.IsAlive(rect.parentEntity) && reg.Get<Components::UIFlexComponent>(rect.parentEntity) != nullptr);
 
-            // Cache previous absolute coordinates
-            float oldMinX = rect.computedAbsMinX;
-            float oldMinY = rect.computedAbsMinY;
-            float oldMaxX = rect.computedAbsMaxX;
-            float oldMaxY = rect.computedAbsMaxY;
+            if (!isFlexChild) {
+                // Anchor-based Canvas Positioning (e.g. Center popups, anchored HUDs)
+                YGNodeStyleSetPositionType(node, YGPositionTypeAbsolute);
 
-            // Resolve horizontal positioning
-            if (JPH::abs(rect.anchorMinX - rect.anchorMaxX) < 1e-5f) {
-                rect.computedAbsMinX = anchorLeft + rect.x;
-                rect.computedAbsMaxX = rect.computedAbsMinX + rect.width;
+                float anchorLeft = (pWidth * rect.anchorMinX) + rect.x;
+                float anchorTop  = (pHeight * rect.anchorMinY) + rect.y;
+
+                YGNodeStyleSetPosition(node, YGEdgeLeft, anchorLeft);
+                YGNodeStyleSetPosition(node, YGEdgeTop, anchorTop);
+            }
+
+            if (flex != nullptr) {
+                // Flexbox Style Configuration for laying out children
+                switch (flex->direction) {
+                    case FlexDirection::Column:
+                        YGNodeStyleSetFlexDirection(node, YGFlexDirectionColumn);
+                        break;
+                    case FlexDirection::ColumnReverse:
+                        YGNodeStyleSetFlexDirection(node, YGFlexDirectionColumnReverse);
+                        break;
+                    case FlexDirection::Row:
+                        YGNodeStyleSetFlexDirection(node, YGFlexDirectionRow);
+                        break;
+                    case FlexDirection::RowReverse:
+                        YGNodeStyleSetFlexDirection(node, YGFlexDirectionRowReverse);
+                        break;
+                }
+
+                switch (flex->justify) {
+                    case FlexJustify::FlexStart:
+                        YGNodeStyleSetJustifyContent(node, YGJustifyFlexStart);
+                        break;
+                    case FlexJustify::Center:
+                        YGNodeStyleSetJustifyContent(node, YGJustifyCenter);
+                        break;
+                    case FlexJustify::FlexEnd:
+                        YGNodeStyleSetJustifyContent(node, YGJustifyFlexEnd);
+                        break;
+                    case FlexJustify::SpaceBetween:
+                        YGNodeStyleSetJustifyContent(node, YGJustifySpaceBetween);
+                        break;
+                    case FlexJustify::SpaceAround:
+                        YGNodeStyleSetJustifyContent(node, YGJustifySpaceAround);
+                        break;
+                    case FlexJustify::SpaceEvenly:
+                        YGNodeStyleSetJustifyContent(node, YGJustifySpaceEvenly);
+                        break;
+                }
+
+                switch (flex->alignItems) {
+                    case FlexAlign::FlexStart:
+                        YGNodeStyleSetAlignItems(node, YGAlignFlexStart);
+                        break;
+                    case FlexAlign::Center:
+                        YGNodeStyleSetAlignItems(node, YGAlignCenter);
+                        break;
+                    case FlexAlign::FlexEnd:
+                        YGNodeStyleSetAlignItems(node, YGAlignFlexEnd);
+                        break;
+                    case FlexAlign::Stretch:
+                        YGNodeStyleSetAlignItems(node, YGAlignStretch);
+                        break;
+                    case FlexAlign::Baseline:
+                        YGNodeStyleSetAlignItems(node, YGAlignBaseline);
+                        break;
+                    default:
+                        YGNodeStyleSetAlignItems(node, YGAlignAuto);
+                        break;
+                }
+
+                switch (flex->alignSelf) {
+                    case FlexAlign::FlexStart:
+                        YGNodeStyleSetAlignSelf(node, YGAlignFlexStart);
+                        break;
+                    case FlexAlign::Center:
+                        YGNodeStyleSetAlignSelf(node, YGAlignCenter);
+                        break;
+                    case FlexAlign::FlexEnd:
+                        YGNodeStyleSetAlignSelf(node, YGAlignFlexEnd);
+                        break;
+                    case FlexAlign::Stretch:
+                        YGNodeStyleSetAlignSelf(node, YGAlignStretch);
+                        break;
+                    case FlexAlign::Baseline:
+                        YGNodeStyleSetAlignSelf(node, YGAlignBaseline);
+                        break;
+                    default:
+                        YGNodeStyleSetAlignSelf(node, YGAlignAuto);
+                        break;
+                }
+
+                switch (flex->wrap) {
+                    case FlexWrap::NoWrap:
+                        YGNodeStyleSetFlexWrap(node, YGWrapNoWrap);
+                        break;
+                    case FlexWrap::Wrap:
+                        YGNodeStyleSetFlexWrap(node, YGWrapWrap);
+                        break;
+                    case FlexWrap::WrapReverse:
+                        YGNodeStyleSetFlexWrap(node, YGWrapWrapReverse);
+                        break;
+                }
+
+                YGNodeStyleSetFlexGrow(node, flex->flexGrow);
+                YGNodeStyleSetFlexShrink(node, flex->flexShrink);
+                if (flex->flexBasis >= 0.0f) {
+                    YGNodeStyleSetFlexBasis(node, flex->flexBasis);
+                } else {
+                    YGNodeStyleSetFlexBasisAuto(node);
+                }
+
+                YGNodeStyleSetPadding(node, YGEdgeLeft, flex->paddingLeft);
+                YGNodeStyleSetPadding(node, YGEdgeTop, flex->paddingTop);
+                YGNodeStyleSetPadding(node, YGEdgeRight, flex->paddingRight);
+                YGNodeStyleSetPadding(node, YGEdgeBottom, flex->paddingBottom);
+
+                YGNodeStyleSetMargin(node, YGEdgeLeft, flex->marginLeft);
+                YGNodeStyleSetMargin(node, YGEdgeTop, flex->marginTop);
+                YGNodeStyleSetMargin(node, YGEdgeRight, flex->marginRight);
+                YGNodeStyleSetMargin(node, YGEdgeBottom, flex->marginBottom);
+
+                YGNodeStyleSetGap(node, YGGutterColumn, flex->gapX);
+                YGNodeStyleSetGap(node, YGGutterRow, flex->gapY);
+            }
+
+            // Intrinsic Content Measuring for Text Components
+            if (rect.width <= 0.0f || rect.height <= 0.0f) {
+                if (auto* textComp = reg.Get<Components::TextComponent>(e)) {
+                    auto* textCtx = new TextMeasureContext {.font = activeFont, .text = textComp->text.c_str(), .scale = textComp->scale};
+                    measureContexts.push_back(textCtx);
+                    YGNodeSetContext(node, textCtx);
+                    YGNodeSetMeasureFunc(node, &UILayoutSystem::MeasureTextNode);
+                }
+            }
+        }
+
+        // 3. Assemble Yoga Hierarchy Tree
+        std::vector<YGNodeRef> rootNodes;
+
+        for (size_t i = 0; i < entities.size(); ++i) {
+            Entity    e         = entities[i];
+            YGNodeRef childNode = nodeMap[e.Pack()];
+            Entity    parent    = rects[i].parentEntity;
+
+            if (parent != NullEntity && reg.IsAlive(parent) && nodeMap.contains(parent.Pack())) {
+                YGNodeRef parentNode = nodeMap[parent.Pack()];
+                uint32_t  childIndex = YGNodeGetChildCount(parentNode);
+                YGNodeInsertChild(parentNode, childNode, childIndex);
             } else {
-                rect.computedAbsMinX = anchorLeft + rect.x;
-                rect.computedAbsMaxX = anchorRight + rect.width;
+                rootNodes.push_back(childNode);
+            }
+        }
+
+        // 4. Wrap roots in a Top-Level Viewport Node & Calculate Layout
+        YGNodeRef viewportRoot = YGNodeNew();
+        YGNodeStyleSetWidth(viewportRoot, viewport.width);
+        YGNodeStyleSetHeight(viewportRoot, viewport.height);
+
+        for (size_t i = 0; i < rootNodes.size(); ++i) {
+            YGNodeInsertChild(viewportRoot, rootNodes[i], static_cast<uint32_t>(i));
+        }
+
+        YGNodeCalculateLayout(viewportRoot, viewport.width, viewport.height, YGDirectionLTR);
+
+        // 5. Read Back Computed Coordinates into UIRectComponent
+        auto ReadBackLayout = [&](auto& self, Entity e, float parentAbsMinX, float parentAbsMinY) -> void {
+            YGNodeRef node = nodeMap[e.Pack()];
+            auto*     rect = reg.Get<Components::UIRectComponent>(e);
+            if (rect == nullptr) {
+                return;
             }
 
-            // Resolve vertical positioning
-            if (JPH::abs(rect.anchorMinY - rect.anchorMaxY) < 1e-5f) {
-                rect.computedAbsMinY = anchorTop + rect.y;
-                rect.computedAbsMaxY = rect.computedAbsMinY + rect.height;
-            } else {
-                rect.computedAbsMinY = anchorTop + rect.y;
-                rect.computedAbsMaxY = anchorBottom + rect.height;
-            }
+            float left   = YGNodeLayoutGetLeft(node);
+            float top    = YGNodeLayoutGetTop(node);
+            float width  = YGNodeLayoutGetWidth(node);
+            float height = YGNodeLayoutGetHeight(node);
 
-            // --- UPDATE STACK ACCUMULATOR OFFSET ---
-            if (parent != NullEntity && reg.IsAlive(parent)) {
-                if (auto* stack = reg.Get<Components::UIStackComponent>(parent)) {
-                    float nextOffset = 0.0f;
-                    if (stack->direction == StackDirection::Vertical) {
-                        float height = rect.computedAbsMaxY - rect.computedAbsMinY;
-                        nextOffset   = rect.y + height + stack->spacing;
-                    } else {
-                        float width = rect.computedAbsMaxX - rect.computedAbsMinX;
-                        nextOffset  = rect.x + width + stack->spacing;
-                    }
-                    stackOffsets.Insert(parent.Pack(), nextOffset);
+            rect->computedAbsMinX = parentAbsMinX + left;
+            rect->computedAbsMinY = parentAbsMinY + top;
+            rect->computedAbsMaxX = rect->computedAbsMinX + width;
+            rect->computedAbsMaxY = rect->computedAbsMinY + height;
+
+            // Recurse children
+            for (size_t i = 0; i < entities.size(); ++i) {
+                if (rects[i].parentEntity == e) {
+                    self(self, entities[i], rect->computedAbsMinX, rect->computedAbsMinY);
                 }
             }
+        };
 
-            // If absolute position changed, mark the panel dirty to force a mesh rebuild
-            if (rect.computedAbsMinX != oldMinX || rect.computedAbsMinY != oldMinY || rect.computedAbsMaxX != oldMaxX || rect.computedAbsMaxY != oldMaxY) {
-                if (auto* panel = reg.Get<Components::UIPanelComponent>(e)) {
-                    panel->isDirty = true;
-                }
+        for (size_t i = 0; i < entities.size(); ++i) {
+            if (rects[i].parentEntity == NullEntity || !reg.IsAlive(rects[i].parentEntity)) {
+                ReadBackLayout(ReadBackLayout, entities[i], 0.0f, 0.0f);
             }
+        }
+
+        // 6. Memory Reclamation
+        YGNodeFreeRecursive(viewportRoot);
+        for (auto* textCtx: measureContexts) {
+            delete textCtx;
         }
     }
 };

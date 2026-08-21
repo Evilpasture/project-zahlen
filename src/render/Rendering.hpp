@@ -66,9 +66,9 @@ static constexpr auto isLegacy = false;
 // Zahlen Graphics Module (Topologically Sorted)
 // ============================================================================
 // clang-format off
-#include "Utils.hpp"
 #include "Extensions.hpp"
 #include "Features.hpp"
+#include "DebugNames.hpp"
 #include "Vertex.hpp"
 #include "Handles.hpp"
 #include "Context.hpp"
@@ -80,10 +80,12 @@ static constexpr auto isLegacy = false;
 #include "Surface.hpp"
 #include "ImageView.hpp"
 #include "RenderCore.hpp"    
+#include "DynamicRendering.hpp"
+#include "DescriptorLayout.hpp"
 #include "ReflectedLayout.hpp"
+#include "SlangReflectedLayout.hpp"
 #include "Raytracing.hpp"
 #include "SemaphorePool.hpp"
-#include "DynamicRendering.hpp"
 #include "Allocator.hpp"     
 #include "PipelineBuilder.hpp"
 #include "RenderTarget.hpp"
@@ -92,14 +94,11 @@ static constexpr auto isLegacy = false;
 #include "Commands.hpp"
 #include "ComputePass.hpp"
 #include "Postprocessing.hpp"
-#include "DescriptorLayout.hpp"
 #include "GpuProfiler.hpp"
 #include "PresentationContext.hpp"
 #include "Texture.hpp"
-#include "TextureUtils.hpp"
 #include "ParallelRecorder.hpp"
 #include "ParallelDraw.hpp"
-#include "DescriptorHeap.hpp"
 #include "RenderGraph.hpp"
 // clang-format on
 // IWYU pragma: end_exports

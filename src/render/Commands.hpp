@@ -102,24 +102,16 @@ class CommandRing {
     void Init(VkDevice device, uint32_t queueFamily) noexcept {
         _device = device;
         for (size_t i = 0; i < Capacity; ++i) {
-            VkCommandPoolCreateInfo pool_info = {
-                .sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-                .pNext            = nullptr,
-                .flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-                .queueFamilyIndex = queueFamily
-            };
-            if (vkCreateCommandPool(_device, &pool_info, nullptr, &_pools[i]) != VK_SUCCESS) {
+            _pools[i] = CommandPool<QType>(_device, queueFamily);
+            if (!_pools[i].Valid()) {
                 continue;
             }
 
-            VkCommandBufferAllocateInfo alloc_info = {
-                .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-                .pNext              = nullptr,
-                .commandPool        = _pools[i],
-                .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-                .commandBufferCount = 1
-            };
-            vkAllocateCommandBuffers(_device, &alloc_info, &_cmds[i]);
+            auto alloc_res = _pools[i].Allocate(1);
+            if (!alloc_res) {
+                continue;
+            }
+            _cmds[i] = _pools[i][0];
 
             VkFenceCreateInfo fence_info = {
                 .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
@@ -135,14 +127,12 @@ class CommandRing {
         if (_device != VK_NULL_HANDLE) {
             for (size_t i = 0; i < Capacity; ++i) {
                 if (_fences[i] != VK_NULL_HANDLE) {
+                    vkWaitForFences(_device, 1, &_fences[i], VK_TRUE, UINT64_MAX);
                     vkDestroyFence(_device, _fences[i], nullptr);
                     _fences[i] = VK_NULL_HANDLE;
                 }
-                if (_pools[i] != VK_NULL_HANDLE) {
-                    vkDestroyCommandPool(_device, _pools[i], nullptr);
-                    _pools[i] = VK_NULL_HANDLE;
-                }
-                _cmds[i] = VK_NULL_HANDLE;
+                _pools[i] = {}; // Safely calls destructor (triggers C-core CommandPool destruction)
+                _cmds[i]  = {};
             }
             _device = VK_NULL_HANDLE;
         }
@@ -161,17 +151,17 @@ class CommandRing {
         vkResetFences(_device, 1, &_fences[slot_idx]);
 
         // Recycle the command pool instantly without any driver reallocation
-        vkResetCommandPool(_device, _pools[slot_idx], 0);
+        _pools[slot_idx].Reset();
 
-        return {CommandBuffer<QType> {_cmds[slot_idx]}, _fences[slot_idx]};
+        return {_cmds[slot_idx], _fences[slot_idx]};
     }
 
   private:
-    VkDevice                              _device = VK_NULL_HANDLE;
-    std::array<VkCommandPool, Capacity>   _pools {};
-    std::array<VkCommandBuffer, Capacity> _cmds {};
-    std::array<VkFence, Capacity>         _fences {};
-    std::atomic<uint32_t>                 _index {0};
+    VkDevice                                   _device = VK_NULL_HANDLE;
+    std::array<CommandPool<QType>, Capacity>   _pools {};
+    std::array<CommandBuffer<QType>, Capacity> _cmds {};
+    std::array<VkFence, Capacity>              _fences {};
+    std::atomic<uint32_t>                      _index {0};
 };
 
 // Simple RAII wrapper.
@@ -211,30 +201,20 @@ void ExecuteImmediate(const Context& ctx, CommandRing<QType, Capacity>& ring, Re
         std::forward<RecordFn>(record)(cmd);
     }
 
-    VkCommandBufferSubmitInfo sub_info = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .pNext = nullptr, .commandBuffer = cmd, .deviceMask = 0};
-
-    VkSubmitInfo2 submit = {
-        .sType                    = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-        .pNext                    = nullptr,
-        .flags                    = 0,
-        .waitSemaphoreInfoCount   = 0,
-        .pWaitSemaphoreInfos      = nullptr,
-        .commandBufferInfoCount   = 1,
-        .pCommandBufferInfos      = &sub_info,
-        .signalSemaphoreInfoCount = 0,
-        .pSignalSemaphoreInfos    = nullptr
-    };
-
     VkQueue queue = ResolveQueue<QType>(ctx);
-    vkQueueSubmit2(queue, 1, &submit, fence);
+
+    // Bail early on submission failure to prevent vkWaitForFences from hanging
+    if (auto res =
+            QueueSubmit(queue, cmd, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, fence);
+        !res) [[unlikely]] {
+        return;
+    }
 
     // 2. Synchronization Strategy
     if (blockCPU) {
         // Hard stall: waits immediately (e.g. for synchronous debug hooks)
         vkWaitForFences(ctx.Device(), 1, &fence, VK_TRUE, UINT64_MAX);
     }
-    // If blockCPU is false, we return immediately! The ring buffer design
-    // ensures we won't overwrite this command buffer until it is safe to do so.
 }
 
 /**
@@ -244,29 +224,30 @@ void ExecuteImmediate(const Context& ctx, CommandRing<QType, Capacity>& ring, Re
  */
 template <QueueType QType = QueueType::Graphics, size_t Capacity = 8, typename RecordFn>
 void ExecuteImmediate(const Context& ctx, CommandRing<QType, Capacity>& ring, StagingRingBuffer& ringBuffer, RecordFn&& record) {
-    // 1. Recycle command buffer and fence from the ring (O(1) / Allocation-Free)
+    // 1. Recycle command buffer and fence from the ring
     auto [cmd, fence] = ring.Acquire();
     {
         CommandBufferGuard guard(cmd);
         std::forward<RecordFn>(record)(cmd);
     }
 
-    // 2. Submit via StagingRingBuffer to stamp active allocations and signal timeline
-    uint64_t submit_val = ringBuffer.Submit(cmd);
+    // 2. Submit command buffer and fence in a single submission
+    uint64_t submit_val = ringBuffer.Submit(cmd, fence);
 
-    // 3. Synchronously wait on the timeline semaphore to retire the staging memory
+    if (submit_val == 0) [[unlikely]] {
+        return;
+    }
+
+    // 3. Synchronously wait on the timeline semaphore to retire staging memory
     VkSemaphore         semaphore = ringBuffer.GetSemaphore();
     VkSemaphoreWaitInfo wait_info = {
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO, .pNext = nullptr, .flags = 0, .semaphoreCount = 1, .pSemaphores = &semaphore, .pValues = &submit_val
     };
     vkWaitSemaphores(ctx.Device(), &wait_info, UINT64_MAX);
-
-    // 4. Signal the associated fence so that CommandRing's next Acquire doesn't stall
-    vkQueueSubmit2(ResolveQueue<QType>(ctx), 0, nullptr, fence);
 }
 
 // ============================================================================
-// Command Encoder (Stateful Bind Filtering)
+// Command Encoder (Stateful Bind Filtering with Unified Push Constants)
 // ============================================================================
 
 class CommandEncoder {
@@ -296,63 +277,81 @@ class CommandEncoder {
         }
     }
 
+    void BindDescriptorSets(uint32_t firstSet, std::span<const VkDescriptorSet> sets) noexcept {
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, lastLayout, firstSet, static_cast<uint32_t>(sets.size()), sets.data(), 0, nullptr);
+        if (!sets.empty()) {
+            lastDescriptorSet = sets[0];
+        }
+    }
+
     template <GpuTriviallyCopyable T>
-    inline void DrawInstanced(
+    void Draw(
+        uint32_t           vertexCount,
+        uint32_t           instanceCount,
+        const T&           pushConstants,
+        VkShaderStageFlags stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+    ) noexcept {
+        Push(cmd, lastLayout, stages, pushConstants);
+        vkCmdDraw(cmd, vertexCount, instanceCount, 0, 0);
+    }
+
+    template <GpuTriviallyCopyable T>
+    void DrawInstanced(
         const DrawState&   state,
         const T&           pushConstants,
         VkShaderStageFlags stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
     ) noexcept {
         BindPipeline(state.pipeline, state.layout);
         BindDescriptorSet(state.set);
-        vkCmdPushConstants(cmd, state.layout, stages, 0, sizeof(T), &pushConstants);
+        Push(cmd, state.layout, stages, pushConstants);
         vkCmdDraw(cmd, state.vertexCount, state.instanceCount, state.firstVertex, state.firstInstance);
     }
 
     template <GpuTriviallyCopyable T>
-    inline void DrawIndirect(
+    void DrawIndirect(
         const DrawIndirectState& state,
         const T&                 pushConstants,
         VkShaderStageFlags       stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
     ) noexcept {
         BindPipeline(state.pipeline, state.layout);
         BindDescriptorSet(state.set);
-        vkCmdPushConstants(cmd, state.layout, stages, 0, sizeof(T), &pushConstants);
+        Push(cmd, state.layout, stages, pushConstants);
         vkCmdDrawIndirect(cmd, state.argumentBuffer, state.offset, state.drawCount, state.stride);
     }
 
     template <GpuTriviallyCopyable T>
-    inline void DrawIndirectCount(
+    void DrawIndirectCount(
         const DrawIndirectCountState& state,
         const T&                      pushConstants,
         VkShaderStageFlags            stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
     ) noexcept {
         BindPipeline(state.pipeline, state.layout);
         BindDescriptorSet(state.set);
-        vkCmdPushConstants(cmd, state.layout, stages, 0, sizeof(T), &pushConstants);
+        Push(cmd, state.layout, stages, pushConstants);
         vkCmdDrawIndirectCount(cmd, state.argumentBuffer, state.offset, state.countBuffer, state.countBufferOffset, state.maxDrawCount, state.stride);
     }
 
     template <GpuTriviallyCopyable T>
-    inline void DrawIndexedIndirect(
+    void DrawIndexedIndirect(
         const DrawIndexedIndirectState& state,
         const T&                        pushConstants,
         VkShaderStageFlags              stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
     ) noexcept {
         BindPipeline(state.pipeline, state.layout);
         BindDescriptorSet(state.set);
-        vkCmdPushConstants(cmd, state.layout, stages, 0, sizeof(T), &pushConstants);
+        Push(cmd, state.layout, stages, pushConstants);
         vkCmdDrawIndexedIndirect(cmd, state.argumentBuffer, state.offset, state.drawCount, state.stride);
     }
 
     template <GpuTriviallyCopyable T>
-    inline void DrawIndexedIndirectCount(
+    void DrawIndexedIndirectCount(
         const DrawIndexedIndirectCountState& state,
         const T&                             pushConstants,
         VkShaderStageFlags                   stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
     ) noexcept {
         BindPipeline(state.pipeline, state.layout);
         BindDescriptorSet(state.set);
-        vkCmdPushConstants(cmd, state.layout, stages, 0, sizeof(T), &pushConstants);
+        Push(cmd, state.layout, stages, pushConstants);
         vkCmdDrawIndexedIndirectCount(cmd, state.argumentBuffer, state.offset, state.countBuffer, state.countBufferOffset, state.maxDrawCount, state.stride);
     }
 };

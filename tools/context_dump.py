@@ -11,7 +11,13 @@ import argparse
 
 
 def get_git_tracked_files(
-    target=".", ignore_demo=False, ignore_tools=False, ignore_inlines=False
+    target=".",
+    ignore_demo=False,
+    ignore_tools=False,
+    ignore_inlines=False,
+    ignore_scripts=False,
+    ignore_tests=False,
+    ignore_extras=False,
 ):
     extensions = {
         ".cpp",
@@ -21,15 +27,18 @@ def get_git_tracked_files(
         ".h",
         ".S",
         ".glsl",
+        ".slang",
         ".vert",
         ".frag",
         ".metal",
         ".lua",
         ".hlsl",
+        ".slang",
         ".sh",
         ".py",
         ".inl",
         ".fnl",
+        ".cppm",
     }
     include_filenames = {"CMakeLists.txt"}
 
@@ -39,6 +48,12 @@ def get_git_tracked_files(
     ignore_paths = {"third_party", "extern"}
     if ignore_tools:
         ignore_paths.add("tools")
+    if ignore_scripts:
+        ignore_paths.add("scripts")
+    if ignore_tests:
+        ignore_paths.add("tests")
+    if ignore_extras:
+        ignore_paths.add("extras")
 
     # If the flag is set, remove .inl from the allowed extensions
     if ignore_inlines:
@@ -117,14 +132,16 @@ def generate_snapshot_string(tracked_files, target_dir):
         # Mapping highlighting
         if filename == "CMakeLists.txt":
             lang = "cmake"
-        elif ext in {".cpp", ".hpp", ".mm", ".inl"}:
+        elif ext in {".cpp", ".hpp", ".mm", ".inl", ".cppm"}:
             lang = "cpp"
         elif ext == ".S":
             lang = "asm"
         elif ext in {".glsl", ".vert", ".frag"}:
             lang = "glsl"
-        elif ext == ".hlsl":
+        elif ext in {".hlsl", ".slang"}:
             lang = "hlsl"
+        elif ext == "slang":
+            lang = "slang"
         elif ext == ".log":
             lang = "txt"
         elif ext == ".sh":
@@ -150,13 +167,22 @@ def generate_snapshot_string(tracked_files, target_dir):
 
 
 def run_project_manager(
-    target=".", ignore_demo=False, ignore_tools=False, ignore_inlines=False
+    target=".",
+    ignore_demo=False,
+    ignore_tools=False,
+    ignore_inlines=False,
+    ignore_scripts=False,
+    ignore_tests=False,
+    ignore_extras=False,
 ):
     tracked_files = get_git_tracked_files(
         target,
         ignore_demo=ignore_demo,
         ignore_tools=ignore_tools,
         ignore_inlines=ignore_inlines,
+        ignore_scripts=ignore_scripts,
+        ignore_tests=ignore_tests,
+        ignore_extras=ignore_extras,
     )
     if not tracked_files:
         print(f"No matching files found at '{target}'.")
@@ -231,22 +257,51 @@ if __name__ == "__main__":
         action="store_true",
         help="Ignore directories containing .DEMO files.",
     )
-    # NEW: Add the --ignore-tools flag
     parser.add_argument(
         "--ignore-tools", action="store_true", help="Ignore the tools/ directory."
     )
-
     parser.add_argument(
         "--ignore-inlines",
         action="store_true",
         help="Ignore .inl implementation files.",
     )
+    parser.add_argument(
+        "--ignore-scripts",
+        action="store_true",
+        help="Ignore the scripts/ directory.",
+    )
+    parser.add_argument(
+        "--ignore-tests",
+        action="store_true",
+        help="Ignore the tests/ directory.",
+    )
+    parser.add_argument(
+        "--ignore-extras",
+        action="store_true",
+        help="Ignore the extras/ directory.",
+    )
+    parser.add_argument(
+        "--ignore-all",
+        action="store_true",
+        help="Ignore tools, scripts, tests, extras, and .inl files altogether.",
+    )
 
     args = parser.parse_args()
-    # Pass the new argument into your main function
+
+    # If --ignore-all is set, enable all standard ignore flags
+    if args.ignore_all:
+        args.ignore_tools = True
+        args.ignore_scripts = True
+        args.ignore_tests = True
+        args.ignore_inlines = True
+        args.ignore_extras = True
+
     run_project_manager(
         args.target,
         ignore_demo=args.ignore_demo,
         ignore_tools=args.ignore_tools,
         ignore_inlines=args.ignore_inlines,
+        ignore_scripts=args.ignore_scripts,
+        ignore_tests=args.ignore_tests,
+        ignore_extras=args.ignore_extras,
     )

@@ -1,7 +1,6 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-
 # tools/asset_utils/cleaner.py
 import struct
 import json
@@ -9,7 +8,7 @@ import os
 
 
 def sanitize_glb(glb_path: str) -> bool:
-    """Clamps baseColorFactors and strips invalid morph weight animation channels to resolve validation issues."""
+    """Sanitizes GLB files to strictly conform to the glTF 2.0 specification."""
     if not os.path.exists(glb_path):
         print(f"[-] Cleaner Error: GLB file does not exist at '{glb_path}'.")
         return False
@@ -24,16 +23,12 @@ def sanitize_glb(glb_path: str) -> bool:
 
         magic, version, length = struct.unpack_from("<III", data, 0)
         if magic != 0x46546C67:
-            print(
-                f"[-] Cleaner Error: Invalid GLB magic signature. Expected 0x46546C67, got 0x{magic:08X}."
-            )
+            print(f"[-] Cleaner Error: Invalid GLB magic signature: 0x{magic:08X}.")
             return False
 
         chunk0_len, chunk0_type = struct.unpack_from("<II", data, 12)
         if chunk0_type != 0x4E4F534A:
-            print(
-                f"[-] Cleaner Error: Chunk 0 is not JSON. Expected 0x4E4F534A, got 0x{chunk0_type:08X}."
-            )
+            print(f"[-] Cleaner Error: Chunk 0 is not JSON: 0x{chunk0_type:08X}.")
             return False
 
         json_bytes = data[20 : 20 + chunk0_len]
@@ -45,9 +40,9 @@ def sanitize_glb(glb_path: str) -> bool:
 
     modified = False
 
-    # 1. Clamp alpha and color ranges to [0.0, 1.0] (Harmless and safe)
+    # 1. Spec Fix: Clamp baseColorFactor values to [0.0, 1.0]
     if "materials" in gltf:
-        for idx, mat in enumerate(gltf["materials"]):
+        for mat in gltf["materials"]:
             pbr = mat.get("pbrMetallicRoughness", {})
             if "baseColorFactor" in pbr:
                 factor = pbr["baseColorFactor"]
@@ -56,31 +51,29 @@ def sanitize_glb(glb_path: str) -> bool:
                     pbr["baseColorFactor"] = clamped
                     modified = True
 
-    # 2. Fix ANIMATION_CHANNEL_TARGET_NODE_WEIGHTS_NO_MORPHS error
-    # Remove animation channels that target "weights" on nodes that do not have morph targets.
+    # 2. Spec Fix: Validate animation channels against Armature Joints and Morph Targets
     if "animations" in gltf:
-        nodes_with_morphs = set()
-        meshes_with_targets = set()
+        # Collect all skeleton joint node indices
+        joint_nodes = set()
+        if "skins" in gltf:
+            for skin in gltf["skins"]:
+                joint_nodes.update(skin.get("joints", []))
 
-        # Identify meshes that actually have morph targets (targets attribute on primitives)
-        if "meshes" in gltf:
-            for idx, mesh in enumerate(gltf["meshes"]):
-                has_targets = False
-                for prim in mesh.get("primitives", []):
-                    if "targets" in prim and len(prim["targets"]) > 0:
-                        has_targets = True
-                        break
-                if has_targets:
-                    meshes_with_targets.add(idx)
-
-        # Identify nodes referencing a mesh with morph targets
-        if "nodes" in gltf:
-            for idx, node in enumerate(gltf["nodes"]):
+        # Collect all mesh node indices that have morph targets
+        morph_nodes = set()
+        if "nodes" in gltf and "meshes" in gltf:
+            for node_idx, node in enumerate(gltf["nodes"]):
                 mesh_idx = node.get("mesh")
-                if mesh_idx is not None and mesh_idx in meshes_with_targets:
-                    nodes_with_morphs.add(idx)
+                if mesh_idx is not None and 0 <= mesh_idx < len(gltf["meshes"]):
+                    mesh = gltf["meshes"][mesh_idx]
+                    has_targets = any(
+                        "targets" in prim and len(prim["targets"]) > 0
+                        for prim in mesh.get("primitives", [])
+                    )
+                    if has_targets:
+                        morph_nodes.add(node_idx)
 
-        # Filter animation channels
+        new_animations = []
         for anim in gltf["animations"]:
             channels = anim.get("channels", [])
             samplers = anim.get("samplers", [])
@@ -92,9 +85,19 @@ def sanitize_glb(glb_path: str) -> bool:
                 node_idx = target.get("node")
                 path = target.get("path")
 
-                if path == "weights" and node_idx not in nodes_with_morphs:
+                is_valid = False
+                if path in ("translation", "rotation", "scale"):
+                    # For skinned models, TRS channels must target skeleton joint nodes
+                    if node_idx in joint_nodes or not joint_nodes:
+                        is_valid = True
+                elif path == "weights":
+                    # Weight channels must target nodes with morph targets
+                    if node_idx in morph_nodes:
+                        is_valid = True
+
+                if not is_valid:
                     print(
-                        f"[~] Cleaner: Stripped invalid animation channel targeting weights on node {node_idx} (has no morph targets)"
+                        f"[~] Cleaner: Stripped non-skeletal channel targeting path '{path}' on node {node_idx}"
                     )
                     modified = True
                     continue
@@ -103,34 +106,36 @@ def sanitize_glb(glb_path: str) -> bool:
                 if "sampler" in chan:
                     used_sampler_indices.add(chan["sampler"])
 
-            # If any invalid channels were stripped, update channels and rebuild samplers to avoid warnings
-            if len(new_channels) != len(channels):
-                anim["channels"] = new_channels
+            # Only retain animation track if it contains valid skeleton channels
+            if len(new_channels) > 0:
+                if len(new_channels) != len(channels):
+                    anim["channels"] = new_channels
 
-                new_samplers = []
-                sampler_mapping = {}
-                for old_idx in sorted(list(used_sampler_indices)):
-                    sampler_mapping[old_idx] = len(new_samplers)
-                    new_samplers.append(samplers[old_idx])
+                    new_samplers = []
+                    sampler_mapping = {}
+                    for old_idx in sorted(list(used_sampler_indices)):
+                        sampler_mapping[old_idx] = len(new_samplers)
+                        new_samplers.append(samplers[old_idx])
 
-                for chan in new_channels:
-                    old_s_idx = chan["sampler"]
-                    chan["sampler"] = sampler_mapping[old_s_idx]
+                    for chan in new_channels:
+                        chan["sampler"] = sampler_mapping[chan["sampler"]]
 
-                anim["samplers"] = new_samplers
+                    anim["samplers"] = new_samplers
+                    modified = True
+                new_animations.append(anim)
+            else:
+                print(
+                    f"[~] Cleaner: Removed non-skeletal animation track '{anim.get('name', '')}'"
+                )
                 modified = True
 
-    # NOTE: Skinned mesh reparenting has been removed.
-    # Unparenting skinned meshes and deleting their 'translation', 'rotation', or 'scale'
-    # transforms breaks their relationship with the binary-stored 'inverseBindMatrices'.
-    # Because the inverse bind matrices are not updated to match, this causes "exploded vertices"
-    # in game engines. Blender already handles skinned mesh hierarchy correctly.
+        gltf["animations"] = new_animations
 
     if not modified:
         return True
 
     try:
-        # Repack the binary container
+        # Repack binary GLB container
         new_json_bytes = json.dumps(gltf, separators=(",", ":")).encode("utf-8")
         padding_len = (4 - (len(new_json_bytes) % 4)) % 4
         new_json_bytes += b" " * padding_len

@@ -2,49 +2,127 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "AnimationSystem.hpp"
-#include "Zahlen/Components.hpp"
-#include "Zahlen/Render.hpp"
-#include "ecs/ECS.hpp"
+// clang-format off
+#include <Jolt/Jolt.h>
+// clang-format on
+#include <Zahlen/Components.hpp>
+#include <Zahlen/IK.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math3D.hpp>
+#include <Zahlen/ModelPrefab.hpp>
+#include <Zahlen/Render.hpp>
+#include <Zahlen/SkeletalAnimation.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
-#include <cgltf.h>
 #include <cmath>
-#include <detail/ControlFlow.hpp>
-#include <threading/TaskSystem.hpp>
 
 namespace ZHLN {
+
 uint32_t JointAllocator::Allocate(uint32_t count) noexcept {
     uint32_t offset = nextOffset.fetch_add(count, std::memory_order::relaxed);
     if (offset + count > 8192) [[unlikely]] {
         ZHLN::Log("[JointAllocator] WARNING: Exceeded maximum joint matrix capacity (8192)!");
     }
-    return offset % 8192; // Wrap around safely if bounds are crossed
+    return offset % 8192;
 }
+
 namespace {
 
-JPH::Mat44 GetLocalMatrix(const cgltf_node* node, const AnimationSystem::SampledTransformMap& blended) {
-    JPH::Vec3 t(node->translation[0], node->translation[1], node->translation[2]);
-    JPH::Quat r(node->rotation[0], node->rotation[1], node->rotation[2], node->rotation[3]);
-    JPH::Vec3 s(node->scale[0], node->scale[1], node->scale[2]);
-
-    auto it = blended.find(node);
-    if (it != blended.end()) {
-        t = it->second.translation;
-        r = it->second.rotation;
-        s = it->second.scale;
+void SampleChannel(const AnimationChannel& channel, float time, JPH::Vec3& outT, JPH::Quat& outR, JPH::Vec3& outS) noexcept {
+    if (channel.keyTimes.empty()) {
+        return;
     }
 
-    if ((node->has_matrix != 0) && it == blended.end()) {
-        float m[16];
-        std::memcpy(m, node->matrix, sizeof(float) * 16);
-        return JPH::Mat44(
-            JPH::Vec4(m[0], m[1], m[2], m[3]), JPH::Vec4(m[4], m[5], m[6], m[7]), JPH::Vec4(m[8], m[9], m[10], m[11]), JPH::Vec4(m[12], m[13], m[14], m[15])
-        );
+    auto   it   = std::ranges::upper_bound(channel.keyTimes, time);
+    size_t idx1 = (it == channel.keyTimes.end()) ? channel.keyTimes.size() - 1 : std::distance(channel.keyTimes.begin(), it);
+    size_t idx0 = (idx1 > 0) ? idx1 - 1 : 0;
+
+    float t0     = channel.keyTimes[idx0];
+    float t1     = channel.keyTimes[idx1];
+    float factor = (t1 > t0) ? std::clamp((time - t0) / (t1 - t0), 0.0f, 1.0f) : 0.0f;
+
+    if (channel.interpolation == InterpolationType::Step) {
+        factor = 0.0f;
+    } else {
+        // Minimum-jerk interpolation avoids the constant velocity and hard
+        // derivative changes of a linear keyframe blend. Optional pose providers
+        // may add further temporal filtering through generic extension hooks.
+        factor = factor * factor * factor * (factor * (factor * 6.0f - 15.0f) + 10.0f);
     }
 
-    return JPH::Mat44::sRotationTranslation(r.Normalized(), t).PreScaled(s);
+    if (channel.path == AnimationPathType::Translation) {
+        const float* v0 = &channel.keyValues[idx0 * 3];
+        const float* v1 = &channel.keyValues[idx1 * 3];
+        outT            = JPH::Vec3(v0[0] + factor * (v1[0] - v0[0]), v0[1] + factor * (v1[1] - v0[1]), v0[2] + factor * (v1[2] - v0[2]));
+    } else if (channel.path == AnimationPathType::Rotation) {
+        const float* q0 = &channel.keyValues[idx0 * 4];
+        const float* q1 = &channel.keyValues[idx1 * 4];
+        JPH::Quat    rot0(q0[0], q0[1], q0[2], q0[3]);
+        JPH::Quat    rot1(q1[0], q1[1], q1[2], q1[3]);
+        outR = rot0.SLERP(rot1, factor).Normalized();
+    } else if (channel.path == AnimationPathType::Scale) {
+        const float* s0 = &channel.keyValues[idx0 * 3];
+        const float* s1 = &channel.keyValues[idx1 * 3];
+        outS            = JPH::Vec3(s0[0] + factor * (s1[0] - s0[0]), s0[1] + factor * (s1[1] - s0[1]), s0[2] + factor * (s1[2] - s0[2]));
+    }
 }
+
+void SampleWeightsChannel(const AnimationChannel& channel, float time, float* outWeights, uint32_t maxWeights) noexcept {
+    if (channel.keyTimes.empty() || maxWeights == 0) {
+        return;
+    }
+
+    auto   it   = std::ranges::upper_bound(channel.keyTimes, time);
+    size_t idx1 = (it == channel.keyTimes.end()) ? channel.keyTimes.size() - 1 : std::distance(channel.keyTimes.begin(), it);
+    size_t idx0 = (idx1 > 0) ? idx1 - 1 : 0;
+
+    float t0     = channel.keyTimes[idx0];
+    float t1     = channel.keyTimes[idx1];
+    float factor = (t1 > t0) ? (time - t0) / (t1 - t0) : 0.0f;
+
+    if (channel.interpolation == InterpolationType::Step) {
+        factor = 0.0f;
+    } else {
+        factor = std::clamp(factor, 0.0f, 1.0f);
+        factor = factor * factor * factor * (factor * (factor * 6.0f - 15.0f) + 10.0f);
+    }
+
+    auto     numWeights = static_cast<uint32_t>(channel.keyValues.size() / channel.keyTimes.size());
+    uint32_t count      = std::min(numWeights, maxWeights);
+
+    const float* v0 = &channel.keyValues[idx0 * numWeights];
+    const float* v1 = &channel.keyValues[idx1 * numWeights];
+
+    for (uint32_t w = 0; w < count; ++w) {
+        outWeights[w] = v0[w] + factor * (v1[w] - v0[w]);
+    }
+}
+
+auto Decompose = [](const JPH::Mat44& mat, JPH::Vec3& t, JPH::Quat& r, JPH::Vec3& s) {
+    t            = mat.GetTranslation();
+    JPH::Vec3 c0 = mat.GetColumn3(0);
+    JPH::Vec3 c1 = mat.GetColumn3(1);
+    JPH::Vec3 c2 = mat.GetColumn3(2);
+    s            = JPH::Vec3(c0.Length(), c1.Length(), c2.Length());
+
+    if (s.GetX() > 1e-5f) {
+        c0 /= s.GetX();
+    } else {
+        c0 = JPH::Vec3::sAxisX();
+    }
+    if (s.GetY() > 1e-5f) {
+        c1 /= s.GetY();
+    } else {
+        c1 = JPH::Vec3::sAxisY();
+    }
+    if (s.GetZ() > 1e-5f) {
+        c2 /= s.GetZ();
+    } else {
+        c2 = JPH::Vec3::sAxisZ();
+    }
+
+    r = JPH::Mat44(JPH::Vec4(c0, 0), JPH::Vec4(c1, 0), JPH::Vec4(c2, 0), JPH::Vec4(0, 0, 0, 1)).GetQuaternion().Normalized();
+};
 
 } // namespace
 
@@ -56,290 +134,268 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
         return;
     }
 
-    // 1. Find the total active joint capacity for the GPU upload batch
-    uint32_t totalJoints = 0;
-    for (auto e: entities) {
-        auto* mesh = reg.Get<Components::MeshComponent>(e);
-        if ((mesh != nullptr) && mesh->isSkinned && (mesh->gltfSkin != nullptr)) {
-            auto* skin  = static_cast<cgltf_skin*>(mesh->gltfSkin);
-            totalJoints = std::max(totalJoints, mesh->jointOffset + static_cast<uint32_t>(skin->joints_count));
+    uint32_t totalJoints        = 0;
+    auto     allSkinnedEntities = reg.GetEntitiesWith<Components::SkeletalMeshComponent>();
+
+    for (Entity e: allSkinnedEntities) {
+        auto* skelMesh = reg.Get<Components::SkeletalMeshComponent>(e);
+        if (skelMesh != nullptr && skelMesh->skeletonIndex >= 0) {
+            auto*  hier       = reg.Get<Components::HierarchyComponent>(e);
+            Entity parentRoot = (hier != nullptr) ? hier->parent : NullEntity;
+            if (auto* anim = reg.Get<Components::AnimatorComponent>(parentRoot)) {
+                if (anim->prefab != nullptr) {
+                    totalJoints =
+                        std::max(totalJoints, skelMesh->jointOffset + static_cast<uint32_t>(anim->prefab->skeletons[skelMesh->skeletonIndex].joints.size()));
+                }
+            }
         }
     }
 
-    if (totalJoints == 0) {
+    if (totalJoints == 0 && entities.empty()) {
         return;
     }
 
-    JPH::Array<JPH::Mat44> calculatedJoints;
-    calculatedJoints.resize(totalJoints, JPH::Mat44::sIdentity());
+    JPH::Array<JPH::Mat44> calculatedJoints(std::max(totalJoints, 1u), JPH::Mat44::sIdentity());
 
-    struct ThreadLocalData {
-        NodeWorldTransformMap worldTransforms;
-    };
-    JPH::Array<ThreadLocalData> localData;
-    localData.resize(entities.size()); // Correctly sized to entities.size()
-
-    // 2. Parallel loop over distinct active animators
     TaskSystem::ParallelFor(entities.size(), 1, [&](uint32_t start, uint32_t end, uint32_t) {
         for (uint32_t i = start; i < end; ++i) {
-            Entity                         e     = entities[i];
-            Components::AnimatorComponent& anim  = animators[i];
-            auto*                          mesh  = reg.Get<Components::MeshComponent>(e);
-            auto&                          local = localData[i];
+            Entity                         rootEntity = entities[i];
+            Components::AnimatorComponent& anim       = animators[i];
 
-            if (!mesh || !mesh->isSkinned || !mesh->gltfSkin || !anim.gltfData) {
+            if (!anim.prefab) {
                 continue;
             }
+            const ModelPrefab& prefab = *anim.prefab;
 
-            auto*    data        = static_cast<cgltf_data*>(anim.gltfData);
-            auto*    skin        = static_cast<cgltf_skin*>(mesh->gltfSkin);
-            uint32_t jointOffset = mesh->jointOffset;
+            std::vector<JPH::Vec3> baseT(prefab.nodes.size());
+            std::vector<JPH::Quat> baseR(prefab.nodes.size());
+            std::vector<JPH::Vec3> baseS(prefab.nodes.size());
+            for (size_t n = 0; n < prefab.nodes.size(); ++n) {
+                Decompose(prefab.nodes[n].localTransform, baseT[n], baseR[n], baseS[n]);
+            }
 
-            // Advance timeline & manage transitions
-            UpdateAnimatorState(anim, data, dt);
+            std::vector<std::array<float, 4>> nodeMorphWeights(prefab.nodes.size(), {0.0f, 0.0f, 0.0f, 0.0f});
+            std::vector<uint32_t>             nodeActiveMorphCounts(prefab.nodes.size(), 0);
 
-            // Sample active tracks and interpolate crossfades
-            SampledTransformMap blendedTransforms;
-            SampleAndBlendPose(anim, data, blendedTransforms);
+            if (anim.blendDuration > 0.0f && anim.prevTrackIdx >= 0) {
+                anim.blendFactor = std::min(1.0f, anim.blendFactor + (dt / anim.blendDuration));
+            } else {
+                anim.blendFactor = 1.0f;
+            }
 
-            // Solve hierarchical world transforms without modifying shared glTF nodes
-            for (cgltf_size n = 0; n < data->nodes_count; ++n) {
-                cgltf_node* node = &data->nodes[n];
-                if (node->parent == nullptr) {
-                    SolveWorldMatrix(node, JPH::Mat44::sIdentity(), blendedTransforms, local.worldTransforms);
+            std::vector<JPH::Vec3> prevT = baseT;
+            std::vector<JPH::Quat> prevR = baseR;
+            std::vector<JPH::Vec3> prevS = baseS;
+
+            if (anim.prevTrackIdx >= 0 && anim.blendFactor < 1.0f) {
+                anim.prevTrackTime += dt * anim.prevPlaybackSpeed;
+                const auto& prevClip = prefab.animations[anim.prevTrackIdx];
+                if (anim.prevTrackTime >= prevClip.duration) {
+                    anim.prevTrackTime = std::fmod(anim.prevTrackTime, std::max(prevClip.duration, 0.001f));
+                }
+
+                for (const auto& channel: prevClip.channels) {
+                    if (channel.targetNodeIndex < 0 || channel.targetNodeIndex >= static_cast<int32_t>(prefab.nodes.size())) {
+                        continue;
+                    }
+                    if (channel.path != AnimationPathType::Weights) {
+                        SampleChannel(
+                            channel, anim.prevTrackTime, prevT[channel.targetNodeIndex], prevR[channel.targetNodeIndex], prevS[channel.targetNodeIndex]
+                        );
+                    }
                 }
             }
 
-            // Generate bone matrices
-            JPH::Array<JPH::Mat44> ibms(skin->joints_count, JPH::Mat44::sIdentity());
-            if (skin->inverse_bind_matrices != nullptr) {
-                for (cgltf_size j = 0; j < skin->joints_count; ++j) {
-                    float ibmRaw[16];
-                    cgltf_accessor_read_float(skin->inverse_bind_matrices, j, ibmRaw, 16);
-                    ibms[j] = JPH::Mat44(
-                        JPH::Vec4(ibmRaw[0], ibmRaw[1], ibmRaw[2], ibmRaw[3]), JPH::Vec4(ibmRaw[4], ibmRaw[5], ibmRaw[6], ibmRaw[7]),
-                        JPH::Vec4(ibmRaw[8], ibmRaw[9], ibmRaw[10], ibmRaw[11]), JPH::Vec4(ibmRaw[12], ibmRaw[13], ibmRaw[14], ibmRaw[15])
-                    );
+            std::vector<JPH::Vec3> currT = baseT;
+            std::vector<JPH::Quat> currR = baseR;
+            std::vector<JPH::Vec3> currS = baseS;
+
+            if (anim.currentTrackIdx >= 0 && anim.currentTrackIdx < static_cast<int32_t>(prefab.animations.size())) {
+                const auto& clip = prefab.animations[anim.currentTrackIdx];
+                anim.currentTrackTime += dt * anim.currentPlaybackSpeed;
+
+                if (anim.currentTrackTime >= clip.duration) {
+                    anim.currentTrackTime = anim.currentLoop ? std::fmod(anim.currentTrackTime, std::max(clip.duration, 0.001f)) : clip.duration;
+                    if (!anim.currentLoop) {
+                        anim.isFinished = true;
+                    }
+                }
+
+                for (const auto& channel: clip.channels) {
+                    if (channel.targetNodeIndex < 0 || channel.targetNodeIndex >= static_cast<int32_t>(prefab.nodes.size())) {
+                        continue;
+                    }
+
+                    if (channel.path == AnimationPathType::Weights) {
+                        auto numWeights                                = static_cast<uint32_t>(channel.keyValues.size() / channel.keyTimes.size());
+                        nodeActiveMorphCounts[channel.targetNodeIndex] = std::min(numWeights, 4u);
+                        SampleWeightsChannel(channel, anim.currentTrackTime, nodeMorphWeights[channel.targetNodeIndex].data(), 4);
+                    } else {
+                        SampleChannel(
+                            channel, anim.currentTrackTime, currT[channel.targetNodeIndex], currR[channel.targetNodeIndex], currS[channel.targetNodeIndex]
+                        );
+                    }
                 }
             }
 
-            JPH::Mat44 invMeshWorld = JPH::Mat44::sIdentity();
-            if (mesh->gltfNode != nullptr) {
-                auto* skinnedNode = static_cast<cgltf_node*>(mesh->gltfNode);
-                auto  it          = local.worldTransforms.find(skinnedNode);
-                if (it != local.worldTransforms.end()) {
-                    invMeshWorld = it->second.Inversed();
+            std::vector<JPH::Mat44> localTransforms(prefab.nodes.size());
+            for (size_t n = 0; n < prefab.nodes.size(); ++n) {
+                if (anim.prevTrackIdx >= 0 && anim.blendFactor < 1.0f) {
+                    float     t        = anim.blendFactor;
+                    JPH::Vec3 blendedT = prevT[n] + t * (currT[n] - prevT[n]);
+                    JPH::Quat blendedR = prevR[n].SLERP(currR[n], t).Normalized();
+                    JPH::Vec3 blendedS = prevS[n] + t * (currS[n] - prevS[n]);
+                    localTransforms[n] = JPH::Mat44::sRotationTranslation(blendedR, blendedT).PreScaled(blendedS);
+                } else {
+                    localTransforms[n] = JPH::Mat44::sRotationTranslation(currR[n], currT[n]).PreScaled(currS[n]);
                 }
             }
 
-            for (cgltf_size j = 0; j < skin->joints_count; ++j) {
-                cgltf_node* jointNode  = skin->joints[j];
-                JPH::Mat44  jointWorld = JPH::Mat44::sIdentity();
-                auto        it         = local.worldTransforms.find(jointNode);
-                if (it != local.worldTransforms.end()) {
-                    jointWorld = it->second;
+            if (anim.blendFactor >= 1.0f) {
+                anim.prevTrackIdx = -1;
+            }
+
+            std::vector<JPH::Mat44> worldTransforms(prefab.nodes.size(), JPH::Mat44::sIdentity());
+            std::vector<bool>       computed(prefab.nodes.size(), false);
+
+            auto GetWorldTransform = [&](auto& self, int32_t nodeIdx) -> JPH::Mat44 {
+                if (nodeIdx < 0 || nodeIdx >= static_cast<int32_t>(prefab.nodes.size())) {
+                    return JPH::Mat44::sIdentity();
                 }
-                calculatedJoints[jointOffset + j] = invMeshWorld * jointWorld * ibms[j];
+                if (computed[nodeIdx]) {
+                    return worldTransforms[nodeIdx];
+                }
+
+                JPH::Mat44 local     = localTransforms[nodeIdx];
+                int32_t    parentIdx = prefab.nodes[nodeIdx].parentIndex;
+
+                JPH::Mat44 world         = (parentIdx >= 0) ? self(self, parentIdx) * local : local;
+                worldTransforms[nodeIdx] = world;
+                computed[nodeIdx]        = true;
+                return world;
+            };
+
+            for (size_t n = 0; n < prefab.nodes.size(); ++n) {
+                auto _ = GetWorldTransform(GetWorldTransform, static_cast<int32_t>(n));
+            }
+
+            if (auto* ikComp = reg.Get<Components::TwoBoneIKComponent>(rootEntity)) {
+                for (auto& chain: ikComp->chains) {
+                    if (chain.weight <= 0.001f || chain.upperNodeIndex < 0 || chain.lowerNodeIndex < 0 || chain.endNodeIndex < 0) {
+                        continue;
+                    }
+                    if (chain.upperNodeIndex >= static_cast<int32_t>(prefab.nodes.size()) ||
+                        chain.lowerNodeIndex >= static_cast<int32_t>(prefab.nodes.size()) || chain.endNodeIndex >= static_cast<int32_t>(prefab.nodes.size())) {
+                        continue;
+                    }
+
+                    JPH::Vec3 solvedTargetPos = chain.targetPosition;
+                    JPH::Quat solvedTargetRot = chain.targetRotation;
+
+                    if (chain.targetEntity != NullEntity && reg.IsAlive(chain.targetEntity)) {
+                        if (auto* tTrans = reg.Get<Components::TransformComponent>(chain.targetEntity)) {
+                            JPH::Mat44 tMat = tTrans->GetLocalMatrix();
+                            solvedTargetPos = tMat * chain.targetOffset;
+                            solvedTargetRot = tTrans->rotation;
+                        }
+                    }
+
+                    JPH::Mat44 upperWorld = worldTransforms[chain.upperNodeIndex];
+                    JPH::Mat44 lowerWorld = worldTransforms[chain.lowerNodeIndex];
+                    JPH::Mat44 endWorld   = worldTransforms[chain.endNodeIndex];
+
+                    JPH::Vec3 pUpper = upperWorld.GetTranslation();
+                    JPH::Vec3 pLower = lowerWorld.GetTranslation();
+                    JPH::Vec3 pEnd   = endWorld.GetTranslation();
+
+                    float l1 = (pLower - pUpper).Length();
+                    float l2 = (pEnd - pLower).Length();
+
+                    IK::TwoBoneIKSolverInput ikInput = {
+                        .upperPosition = pUpper, .targetPosition = solvedTargetPos, .poleVector = chain.poleVector, .upperLength = l1, .lowerLength = l2
+                    };
+
+                    IK::TwoBoneIKSolverOutput ikOutput = IK::SolveTwoBoneIK(ikInput);
+
+                    if (ikOutput.valid) {
+                        JPH::Vec3 localUpperDir = (localTransforms[chain.lowerNodeIndex].GetTranslation()).Normalized();
+                        JPH::Vec3 localLowerDir = (localTransforms[chain.endNodeIndex].GetTranslation()).Normalized();
+
+                        JPH::Mat44 newUpperWorld = IK::AlignNodeToDirection(upperWorld, localUpperDir, ikOutput.upperDirection);
+                        JPH::Mat44 newLowerWorld = JPH::Mat44::sRotationTranslation(lowerWorld.GetQuaternion(), ikOutput.midPosition);
+                        newLowerWorld            = IK::AlignNodeToDirection(newLowerWorld, localLowerDir, ikOutput.lowerDirection);
+
+                        JPH::Mat44 newEndWorld = endWorld;
+                        newEndWorld.SetTranslation(ikOutput.endPosition);
+                        if (chain.orientEndEffector) {
+                            newEndWorld = JPH::Mat44::sRotationTranslation(solvedTargetRot, ikOutput.endPosition);
+                        }
+
+                        float w        = std::clamp(chain.weight, 0.0f, 1.0f);
+                        auto  BlendMat = [](const JPH::Mat44& a, const JPH::Mat44& b, float t) {
+                            JPH::Vec3 tA = a.GetTranslation();
+                            JPH::Vec3 tB = b.GetTranslation();
+                            JPH::Quat rA = a.GetQuaternion().Normalized();
+                            JPH::Quat rB = b.GetQuaternion().Normalized();
+                            return JPH::Mat44::sRotationTranslation(rA.SLERP(rB, t), tA + t * (tB - tA));
+                        };
+
+                        worldTransforms[chain.upperNodeIndex] = BlendMat(upperWorld, newUpperWorld, w);
+                        worldTransforms[chain.lowerNodeIndex] = BlendMat(lowerWorld, newLowerWorld, w);
+                        worldTransforms[chain.endNodeIndex]   = BlendMat(endWorld, newEndWorld, w);
+                    }
+                }
+            }
+
+            auto allMeshEntities = reg.GetEntitiesWith<Components::MeshComponent>();
+            for (Entity childEnt: allMeshEntities) {
+                auto* hier = reg.Get<Components::HierarchyComponent>(childEnt);
+                if (!hier || hier->parent != rootEntity) {
+                    continue;
+                }
+
+                auto* mesh = reg.Get<Components::MeshComponent>(childEnt);
+                if (!mesh || mesh->nodeIndex < 0 || mesh->nodeIndex >= static_cast<int32_t>(prefab.nodes.size())) {
+                    continue;
+                }
+
+                if (nodeActiveMorphCounts[mesh->nodeIndex] > 0) {
+                    auto* morphComp = reg.Get<Components::MorphTargetComponent>(childEnt);
+                    if (morphComp == nullptr) {
+                        morphComp = &reg.Add<Components::MorphTargetComponent>(childEnt);
+                    }
+                    morphComp->activeCount = nodeActiveMorphCounts[mesh->nodeIndex];
+                    morphComp->weights     = nodeMorphWeights[mesh->nodeIndex];
+                }
+
+                auto* skelMesh = reg.Get<Components::SkeletalMeshComponent>(childEnt);
+                if (skelMesh != nullptr && skelMesh->skeletonIndex >= 0 && skelMesh->skeletonIndex < static_cast<int32_t>(prefab.skeletons.size())) {
+                    const Skeleton& skeleton = prefab.skeletons[skelMesh->skeletonIndex];
+
+                    // Compute pure Model-Space pose (no invMeshWorld!)
+                    for (size_t j = 0; j < skeleton.joints.size(); ++j) {
+                        const auto& joint                           = skeleton.joints[j];
+                        calculatedJoints[skelMesh->jointOffset + j] = worldTransforms[joint.nodeIndex] * joint.inverseBindMatrix;
+                    }
+                } else {
+                    // Non-skinned parts (attachments/accessories) follow their node hierarchy transform
+                    JPH::Vec3 t {};
+                    JPH::Vec3 s {};
+                    JPH::Quat r {};
+                    Decompose(worldTransforms[mesh->nodeIndex], t, r, s);
+
+                    if (auto* childTrans = reg.Get<Components::TransformComponent>(childEnt)) {
+                        childTrans->position = t;
+                        childTrans->rotation = r;
+                        childTrans->scale    = s;
+                    }
+                }
             }
         }
     });
 
-    // 3. Write world matrix offsets back to active MeshComponents sequentially
-    for (size_t i = 0; i < entities.size(); ++i) {
-        Entity e     = entities[i];
-        auto*  mesh  = reg.Get<Components::MeshComponent>(e);
-        auto&  local = localData[i];
-
-        if ((mesh != nullptr) && (mesh->gltfNode != nullptr)) {
-            auto* node = static_cast<cgltf_node*>(mesh->gltfNode);
-            if ((node->weights != nullptr) && node->weights_count > 0) {
-                mesh->activeMorphCount = std::min((uint32_t) node->weights_count, 4u);
-                for (uint32_t w = 0; w < mesh->activeMorphCount; ++w) {
-                    mesh->morphWeights[w] = node->weights[w];
-                }
-            }
-
-            if (mesh->isSkinned) {
-                mesh->localTransform = JPH::Mat44::sIdentity();
-            } else {
-                auto it = local.worldTransforms.find(node);
-                if (it != local.worldTransforms.end()) {
-                    mesh->localTransform = it->second;
-                }
-            }
-        }
-    }
-
-    ctx.UpdateJointMatrices(0, calculatedJoints.data(), totalJoints);
-}
-
-void AnimationSystem::UpdateAnimatorState(Components::AnimatorComponent& anim, cgltf_data* data, float dt) const noexcept {
-    if (anim.currentTrackIdx < 0 || anim.currentTrackIdx >= static_cast<int32_t>(data->animations_count)) {
-        return;
-    }
-
-    auto getTrackDuration = [](cgltf_animation& track) -> float {
-        float dur = 0.0f;
-        for (size_t c = 0; c < track.channels_count; ++c) {
-            if (track.channels[c].sampler->input->has_max) {
-                dur = std::max(dur, track.channels[c].sampler->input->max[0]);
-            }
-        }
-        return dur;
-    };
-
-    // 1. Advance Track 0
-    float currentDur = getTrackDuration(data->animations[anim.currentTrackIdx]);
-    anim.currentTrackTime += dt * anim.currentPlaybackSpeed;
-
-    if (anim.currentTrackTime >= currentDur) {
-        if (anim.currentLoop) {
-            anim.currentTrackTime = std::fmod(anim.currentTrackTime, currentDur);
-        } else {
-            anim.currentTrackTime = currentDur;
-            anim.isFinished       = true;
-        }
-    }
-
-    // 2. Advance Track 1 and decay blend factor
-    if (anim.blendFactor < 1.0f && anim.prevTrackIdx >= 0 && anim.prevTrackIdx < static_cast<int32_t>(data->animations_count)) {
-        float prevDur = getTrackDuration(data->animations[anim.prevTrackIdx]);
-        anim.prevTrackTime += dt * anim.prevPlaybackSpeed;
-        anim.prevTrackTime = std::fmod(anim.prevTrackTime, prevDur);
-
-        anim.blendFactor = std::min(1.0f, anim.blendFactor + (dt / std::max(anim.blendDuration, 0.001f)));
-    }
-}
-
-void AnimationSystem::SampleAndBlendPose(const Components::AnimatorComponent& anim, cgltf_data* data, SampledTransformMap& outTransforms) const noexcept {
-    if (anim.currentTrackIdx < 0 || anim.currentTrackIdx >= static_cast<int32_t>(data->animations_count)) {
-        return;
-    }
-
-    SampledTransformMap currentSampled;
-    SampleAnimation(data->animations[anim.currentTrackIdx], anim.currentTrackTime, currentSampled);
-
-    if (anim.blendFactor < 1.0f && anim.prevTrackIdx >= 0 && anim.prevTrackIdx < static_cast<int32_t>(data->animations_count)) {
-        SampledTransformMap prevSampled;
-        SampleAnimation(data->animations[anim.prevTrackIdx], anim.prevTrackTime, prevSampled);
-
-        for (const auto& pair: currentSampled) {
-            const cgltf_node* node         = pair.first;
-            const auto&       currentTrans = pair.second;
-            auto&             blend        = outTransforms[node];
-            auto              prevIt       = prevSampled.find(node);
-
-            if (prevIt != prevSampled.end()) {
-                const auto& prevTrans = prevIt->second;
-                blend.translation     = prevTrans.translation + anim.blendFactor * (currentTrans.translation - prevTrans.translation);
-                blend.rotation        = prevTrans.rotation.SLERP(currentTrans.rotation, anim.blendFactor).Normalized();
-                blend.scale           = prevTrans.scale + anim.blendFactor * (currentTrans.scale - prevTrans.scale);
-            } else {
-                JPH::Vec3 defT(node->translation[0], node->translation[1], node->translation[2]);
-                JPH::Quat defR(node->rotation[0], node->rotation[1], node->rotation[2], node->rotation[3]);
-                JPH::Vec3 defS(node->scale[0], node->scale[1], node->scale[2]);
-
-                blend.translation = defT + anim.blendFactor * (currentTrans.translation - defT);
-                blend.rotation    = defR.SLERP(currentTrans.rotation, anim.blendFactor).Normalized();
-                blend.scale       = defS + anim.blendFactor * (currentTrans.scale - defS);
-            }
-        }
-    } else {
-        for (const auto& pair: currentSampled) {
-            outTransforms.try_emplace(pair.first, pair.second);
-        }
-    }
-}
-
-void AnimationSystem::SampleAnimation(cgltf_animation& anim, float animTime, SampledTransformMap& outTransforms) noexcept {
-    for (size_t c = 0; c < anim.channels_count; ++c) {
-        cgltf_animation_channel& channel    = anim.channels[c];
-        cgltf_node*              targetNode = channel.target_node;
-        if (targetNode == nullptr) {
-            continue;
-        }
-
-        cgltf_animation_sampler* sampler = channel.sampler;
-        size_t                   numKeys = sampler->input->count;
-        if (numKeys == 0) {
-            continue;
-        }
-
-        auto  result = outTransforms.try_emplace(targetNode, SampledTransform {});
-        auto& sample = result.first->second;
-
-        if (result.second) {
-            sample.translation = JPH::Vec3(targetNode->translation[0], targetNode->translation[1], targetNode->translation[2]);
-            sample.rotation    = JPH::Quat(targetNode->rotation[0], targetNode->rotation[1], targetNode->rotation[2], targetNode->rotation[3]).Normalized();
-            sample.scale       = JPH::Vec3(targetNode->scale[0], targetNode->scale[1], targetNode->scale[2]);
-        }
-
-        float maxTime = 0.0f;
-        cgltf_accessor_read_float(sampler->input, numKeys - 1, &maxTime, 1);
-
-        float localAnimTime = animTime;
-        if (localAnimTime > maxTime) {
-            localAnimTime = std::fmod(localAnimTime, maxTime);
-        }
-
-        size_t k = 0;
-        for (; k < numKeys - 1; ++k) {
-            float t1 = 0.0f;
-            cgltf_accessor_read_float(sampler->input, k + 1, &t1, 1);
-            if (t1 > localAnimTime) {
-                break;
-            }
-        }
-        if (k >= numKeys - 1) {
-            k = numKeys - 2;
-        }
-
-        float t0 = 0.0f;
-        float t1 = 0.0f;
-        cgltf_accessor_read_float(sampler->input, k, &t0, 1);
-        cgltf_accessor_read_float(sampler->input, k + 1, &t1, 1);
-
-        float  factor  = (t1 > t0) ? (localAnimTime - t0) / (t1 - t0) : 0.0f;
-        bool   isCubic = (sampler->interpolation == cgltf_interpolation_type_cubic_spline);
-        size_t idx0    = isCubic ? (3 * k + 1) : k;
-        size_t idx1    = isCubic ? (3 * (k + 1) + 1) : (k + 1);
-
-        if (channel.target_path == cgltf_animation_path_type_translation) {
-            float v0[3];
-            float v1[3];
-            cgltf_accessor_read_float(sampler->output, idx0, v0, 3);
-            cgltf_accessor_read_float(sampler->output, idx1, v1, 3);
-            sample.translation = JPH::Vec3(v0[0] + factor * (v1[0] - v0[0]), v0[1] + factor * (v1[1] - v0[1]), v0[2] + factor * (v1[2] - v0[2]));
-        } else if (channel.target_path == cgltf_animation_path_type_rotation) {
-            float q0[4];
-            float q1[4];
-            cgltf_accessor_read_float(sampler->output, idx0, q0, 4);
-            cgltf_accessor_read_float(sampler->output, idx1, q1, 4);
-            JPH::Quat rot0(q0[0], q0[1], q0[2], q0[3]);
-            JPH::Quat rot1(q1[0], q1[1], q1[2], q1[3]);
-            sample.rotation = rot0.SLERP(rot1, factor).Normalized();
-        } else if (channel.target_path == cgltf_animation_path_type_scale) {
-            float s0[3];
-            float s1[3];
-            cgltf_accessor_read_float(sampler->output, idx0, s0, 3);
-            cgltf_accessor_read_float(sampler->output, idx1, s1, 3);
-            sample.scale = JPH::Vec3(s0[0] + factor * (s1[0] - s0[0]), s0[1] + factor * (s1[1] - s0[1]), s0[2] + factor * (s1[2] - s0[2]));
-        }
-    }
-}
-
-void AnimationSystem::SolveWorldMatrix(
-    const cgltf_node*          node,
-    const JPH::Mat44&          parentMatrix,
-    const SampledTransformMap& blended,
-    NodeWorldTransformMap&     outWorldTransforms
-) const noexcept {
-    JPH::Mat44 local = GetLocalMatrix(node, blended);
-    JPH::Mat44 world = parentMatrix * local;
-    outWorldTransforms.try_emplace(node, world);
-
-    for (cgltf_size c = 0; c < node->children_count; ++c) {
-        SolveWorldMatrix(node->children[c], world, blended, outWorldTransforms);
+    if (totalJoints > 0) {
+        ctx.UpdateJointMatrices(0, calculatedJoints.data(), totalJoints);
     }
 }
 

@@ -1,0 +1,182 @@
+// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+#pragma once
+
+#include <Zahlen/Common.h>
+#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Error.hpp>
+#include <Zahlen/Log.hpp>
+#include <expected>
+#include <memory>
+#include <string_view>
+#include <type_traits>
+
+namespace ZHLN {
+
+enum class JSONError : uint8_t { Success = 0, InvalidJSON, TypeMismatch, MissingField, UnknownError };
+
+namespace ReflectJSON {
+
+// Opaque non-template Value Reader
+class ZHLN_API ValueReader {
+  public:
+    ValueReader() = default;
+    explicit ValueReader(const void* internalNode);
+
+    [[nodiscard]] std::expected<int64_t, Error>          GetInt() const noexcept;
+    [[nodiscard]] std::expected<uint64_t, Error>         GetUInt() const noexcept;
+    [[nodiscard]] std::expected<double, Error>           GetDouble() const noexcept;
+    [[nodiscard]] std::expected<bool, Error>             GetBool() const noexcept;
+    [[nodiscard]] std::expected<std::string_view, Error> GetString() const noexcept;
+    [[nodiscard]] std::expected<ValueReader, Error>      GetKey(std::string_view key) const noexcept;
+
+    [[nodiscard]] size_t                            GetArraySize() const noexcept;
+    [[nodiscard]] std::expected<ValueReader, Error> GetArrayElement(size_t index) const noexcept;
+
+  private:
+    uint64_t _opaque[2] = {0, 0};
+    bool     _valid     = false;
+};
+
+// Opaque non-template Document Parser
+class ZHLN_API Document {
+  public:
+    Document();
+    ~Document();
+
+    Document(const Document&)            = delete;
+    Document& operator=(const Document&) = delete;
+    Document(Document&&) noexcept;
+    Document& operator=(Document&&) noexcept;
+
+    [[nodiscard]] static std::expected<Document, Error> Parse(std::string_view jsonString) noexcept;
+    [[nodiscard]] ValueReader                           GetRoot() const noexcept;
+
+  private:
+    struct Impl;
+    std::unique_ptr<Impl> _impl;
+};
+
+template <typename T>
+std::expected<T, Error> ParseObject(ValueReader reader);
+
+template <typename FieldType>
+std::expected<FieldType, Error> GetJSONValue(ValueReader reader) {
+    using Decayed = std::decay_t<FieldType>;
+
+    if constexpr (std::is_same_v<Decayed, int> || std::is_same_v<Decayed, int32_t>) {
+        auto res = reader.GetInt();
+        if (!res) {
+            return std::unexpected(res.error());
+        }
+        return static_cast<FieldType>(*res);
+    } else if constexpr (std::is_same_v<Decayed, uint32_t>) {
+        auto res = reader.GetUInt();
+        if (!res) {
+            return std::unexpected(res.error());
+        }
+        return static_cast<FieldType>(*res);
+    } else if constexpr (std::is_same_v<Decayed, float>) {
+        auto res = reader.GetDouble();
+        if (!res) {
+            return std::unexpected(res.error());
+        }
+        return static_cast<float>(*res);
+    } else if constexpr (std::is_same_v<Decayed, double>) {
+        return reader.GetDouble();
+    } else if constexpr (std::is_same_v<Decayed, bool>) {
+        return reader.GetBool();
+    } else if constexpr (std::is_same_v<Decayed, std::string_view>) {
+        return reader.GetString();
+    } else if constexpr (std::is_same_v<Decayed, std::string>) {
+        auto res = reader.GetString();
+        if (!res) {
+            return std::unexpected(res.error());
+        }
+        return std::string(*res);
+    } else if constexpr (std::is_enum_v<Decayed>) {
+        auto res = reader.GetString();
+        if (!res) {
+            return std::unexpected(res.error());
+        }
+        auto enum_opt = ZHLN::Reflect::StringToEnum<Decayed>(*res);
+        if (!enum_opt) {
+            return std::unexpected(JSONError::TypeMismatch);
+        }
+        return *enum_opt;
+    } else if constexpr (std::ranges::range<Decayed>) {
+        size_t  size = reader.GetArraySize();
+        Decayed container;
+        using ElementType = typename Decayed::value_type;
+        for (size_t i = 0; i < size; ++i) {
+            auto elemReader = reader.GetArrayElement(i);
+            if (!elemReader) {
+                return std::unexpected(elemReader.error());
+            }
+            auto parsed_item = GetJSONValue<ElementType>(*elemReader);
+            if (!parsed_item) {
+                return std::unexpected(parsed_item.error());
+            }
+            container.push_back(std::move(*parsed_item));
+        }
+        return container;
+    } else if constexpr (ZHLN::Reflect::FieldCount<Decayed>() > 0) {
+        return ParseObject<Decayed>(reader);
+    } else {
+        return std::unexpected(JSONError::UnknownError);
+    }
+}
+
+template <typename T>
+std::expected<T, Error> ParseObject(ValueReader reader) {
+    T     obj {};
+    Error err = JSONError::Success;
+
+    ZHLN::Reflect::ForEachFieldWithName(obj, [&](std::string_view fieldName, auto& fieldVal) {
+        if (err) {
+            return;
+        }
+        using FieldType = std::decay_t<decltype(fieldVal)>;
+
+        auto keyReader = reader.GetKey(fieldName);
+        if (!keyReader) {
+            err = JSONError::MissingField;
+            return;
+        }
+
+        auto value_res = GetJSONValue<FieldType>(*keyReader);
+        if (!value_res) {
+            err = value_res.error();
+            return;
+        }
+
+        fieldVal = std::move(*value_res);
+    });
+
+    if (err) {
+        return std::unexpected(err);
+    }
+    return obj;
+}
+
+template <typename T>
+std::expected<T, Error> TryParse(std::string_view jsonString) {
+    auto doc = Document::Parse(jsonString);
+    if (!doc) {
+        return std::unexpected(doc.error());
+    }
+    return ParseObject<T>(doc->GetRoot());
+}
+
+template <typename T>
+T Parse(std::string_view jsonString) {
+    auto res = TryParse<T>(jsonString);
+    if (!res) [[unlikely]] {
+        ZHLN::Panic("Failed to parse JSON for type '{}': {}", ZHLN::Reflect::TypeName<T>(), res.error().Message());
+    }
+    return std::move(*res);
+}
+
+} // namespace ReflectJSON
+} // namespace ZHLN

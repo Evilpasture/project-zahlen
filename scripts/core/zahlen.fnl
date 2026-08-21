@@ -488,31 +488,32 @@
 ;; ============================================================================
 ;; UNIFIED COMMAND DISPATCHER (Hyprland-style IPC)
 ;; ============================================================================
-(local COMMAND_STRUCTS
-       {:IsKeyDown :IsKeyDownArgs
-        :GetMouseDelta :GetMouseDeltaArgs
-        :GetCameraYaw :CameraFloatArgs
-        :GetCameraFOV :CameraFloatArgs
-        :SetCameraFOV :SetCameraFOVArgs
-        :PlayOneShot :PlayOneShotArgs
-        :PlayOneShot3D :PlayOneShot3DArgs
-        :PlayProceduralBeep :PlayProceduralBeepArgs
-        :CreateSoundInstance :CreateSoundInstanceArgs
-        :PlaySoundInstance :SoundInstanceArgs
-        :StopSoundInstance :SoundInstanceArgs
-        :DestroySoundInstance :SoundInstanceArgs
-        :SetCharacterVelocity :SetCharVelArgs
-        :SetLinearVelocity :SetCharVelArgs
-        :AddImpulse :SetCharVelArgs
-        :AddImpulseAt :AddImpulseAtArgs
-        :SetMovementInput :SetMoveInputArgs
-        :LogInventoryShell :LogInventoryArgs
-        :SetJumpIntent :EntityOnlyArgs
-        :DestroyEntity :EntityOnlyArgs
-        :IsCharacterOnGround :EntityOnlyArgs
-        :PlayAnimationTrack :PlayTrackArgs
-        :GetAnimationTrackCount :EntityOnlyArgs
-        :GetAnimationTrackName :GetTrackNameArgs})
+(local COMMAND_STRUCTS {:IsKeyDown :IsKeyDownArgs
+                        :GetMouseDelta :GetMouseDeltaArgs
+                        :GetCameraYaw :CameraFloatArgs
+                        :GetCameraFOV :CameraFloatArgs
+                        :SetCameraFOV :SetCameraFOVArgs
+                        :PlayOneShot :PlayOneShotArgs
+                        :PlayOneShot3D :PlayOneShot3DArgs
+                        :PlayProceduralBeep :PlayProceduralBeepArgs
+                        :CreateSoundInstance :CreateSoundInstanceArgs
+                        :PlaySoundInstance :SoundInstanceArgs
+                        :StopSoundInstance :SoundInstanceArgs
+                        :DestroySoundInstance :SoundInstanceArgs
+                        :SetCharacterVelocity :SetCharVelArgs
+                        :SetLinearVelocity :SetCharVelArgs
+                        :AddImpulse :SetCharVelArgs
+                        :AddImpulseAt :AddImpulseAtArgs
+                        :SetMovementInput :SetMoveInputArgs
+                        :LogInventoryShell :LogInventoryArgs
+                        :SetJumpIntent :EntityOnlyArgs
+                        :DestroyEntity :EntityOnlyArgs
+                        :IsCharacterOnGround :EntityOnlyArgs
+                        :PlayAnimationTrack :PlayTrackArgs
+                        :GetAnimationTrackCount :EntityOnlyArgs
+                        :GetAnimationTrackName :GetTrackNameArgs
+                        :CreateTexture :CreateTextureArgs
+                        :SpawnTerrain :SpawnTerrainArgs})
 
 (fn Engine.dispatch [self cmd_name args]
   (let [specialized (. SPECIALIZED_HANDLERS cmd_name)]
@@ -608,6 +609,27 @@
     (when (and (. cfg :taaFeedback) aa)
       (tset (. (. aa 0) :state) :taaFeedback (. cfg :taaFeedback)))))
 
+(fn Engine.spawn_terrain [self options]
+  (let [opts (or options {})
+        ffi-args (ffi.new :SpawnTerrainArgs
+                          {:sampleCount (or (. opts :sample_count) 128)
+                           :worldSize (or (. opts :world_size) 200.0)
+                           :maxHeight (or (. opts :max_height) 25.0)
+                           :heights (. opts :heights)
+                           :colorsRGBA (. opts :colors)
+                           :roughness (or (. opts :roughness) 0.85)
+                           :metallic (or (. opts :metallic) 0.05)})]
+    (self:dispatch :SpawnTerrain ffi-args)))
+
+(fn Engine.create_texture [self width height is-srgb callback]
+  (let [size (* width height)
+        pixels (ffi.new "uint32_t[?]" size)]
+    ;; Invoke user callback to fill the pixel buffer
+    (callback pixels width height)
+    ;; Dispatch the raw pointer to the C++ engine
+    (self:dispatch :CreateTexture
+                   {:data pixels : width : height :isSRGB (if is-srgb 1 0)})))
+
 ;; ============================================================================
 ;; Threading Task Scheduler
 ;; ============================================================================
@@ -651,6 +673,8 @@
            :cleanup Engine.cleanup
            :dispatch Engine.dispatch
            :spawn Engine.spawn
+           :spawn_terrain Engine.spawn_terrain
+           :create_texture Engine.create_texture
            :spawn_entity Engine.spawn_entity
            :spawn_light Engine.spawn_light
            :provoke_device_lost Engine.provoke_device_lost

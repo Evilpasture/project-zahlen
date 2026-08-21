@@ -10,27 +10,29 @@
 (local Registry {})
 (set Registry.__index Registry)
 
-(local NATIVE_COMPONENTS {:TransformComponent true
-                          :HierarchyComponent true
-                          :MovementComponent true
-                          :MeshComponent true
-                          :PhysicsComponent true
-                          :ALifeComponent true
-                          :RagdollComponent true
-                          :NameComponent true
-                          :TargetCameraComponent true
-                          :PhysicsStateComponent true
-                          :PBRComponent true
-                          :TextComponent true
-                          :UISettingsComponent true
-                          :SunTagComponent true
-                          :UIRectComponent true
-                          :UIPanelComponent true
-                          :UIButtonComponent true
-                          :UIDragComponent true
-                          :UIStackComponent true
-                          :UITextInputComponent true
-                          :AnimatorComponent true})
+(local NATIVE_COMPONENTS
+       {:TransformComponent true
+        :HierarchyComponent true
+        :MovementComponent true
+        :MeshComponent true
+        :PhysicsComponent true
+        :RagdollComponent true
+        :NameComponent true
+        :TargetCameraComponent true
+        :PhysicsStateComponent true
+        :PBRComponent true
+        :TextComponent true
+        :UISettingsComponent true
+        :SunTagComponent true
+        :UIRectComponent true
+        :UIPanelComponent true
+        :UIButtonComponent true
+        :UIDragComponent true
+        :UIStackComponent true
+        :UITextInputComponent true
+        :UIStyleComponent true
+        :AnimatorComponent true
+        :ParticleEmitterComponent true})
 
 (local DYNAMIC_COMPONENTS {})
 

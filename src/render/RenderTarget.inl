@@ -38,6 +38,8 @@ inline auto RenderTarget<F>::Create(Allocator& allocator, const Context& ctx, Vk
     RenderTarget rt;
     rt.extent = extent;
 
+    uint32_t mips = desc.mipLevels ? desc.mipLevels : 1;
+
     const VkImageCreateInfo info = {
         .sType                 = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .pNext                 = nullptr,
@@ -45,7 +47,7 @@ inline auto RenderTarget<F>::Create(Allocator& allocator, const Context& ctx, Vk
         .imageType             = VK_IMAGE_TYPE_2D,
         .format                = F,
         .extent                = {.width = extent.width, .height = extent.height, .depth = 1},
-        .mipLevels             = 1,
+        .mipLevels             = mips,
         .arrayLayers           = desc.arrayLayers,
         .samples               = VK_SAMPLE_COUNT_1_BIT,
         .tiling                = VK_IMAGE_TILING_OPTIMAL,
@@ -60,9 +62,9 @@ inline auto RenderTarget<F>::Create(Allocator& allocator, const Context& ctx, Vk
     if (img_res.has_value()) {
         rt.image = std::move(img_res.value());
         if (desc.arrayLayers > 1) {
-            rt.view = CreateView2DArray<F>(ctx.Device(), rt.image.Handle(), 0, desc.arrayLayers, desc.aspect, 1);
+            rt.view = CreateView2DArray<F>(ctx.Device(), rt.image.Handle(), 0, desc.arrayLayers, desc.aspect, mips);
         } else {
-            rt.view = CreateView<F>(ctx.Device(), rt.image.Handle(), desc.aspect, 1);
+            rt.view = CreateView<F>(ctx.Device(), rt.image.Handle(), desc.aspect, mips);
         }
     }
     return rt;

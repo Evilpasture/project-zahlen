@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // src/engine/WindowSurface.cpp
 #include "WindowInternal.hpp"
 #include <Rendering.hpp>
@@ -7,6 +10,14 @@
 namespace ZHLN {
 
 std::expected<void*, Error> Window::CreateVulkanSurface(void* instance, void* physicalDevice, int& outWidth, int& outHeight) noexcept {
+    if (_impl->headless) {
+        // True headless mode: no VkSurfaceKHR is needed. Return nullptr with the
+        // configured offscreen render dimensions.
+        outWidth  = static_cast<int>(_impl->width);
+        outHeight = static_cast<int>(_impl->height);
+        return nullptr;
+    }
+
     auto logger = [](const char* msg) { ZHLN::Log("{}", msg); };
 
     auto displaySelector = [](std::span<const VkDisplayPropertiesKHR> displays) -> VkDisplayPropertiesKHR { return displays[0]; };

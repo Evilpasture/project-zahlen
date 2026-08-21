@@ -1,13 +1,11 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/engine/Scripting.cpp
 #include "IScriptRuntime.hpp"
 #include "LuaScriptRuntime.hpp"
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Input.hpp"
-#include "ecs/ECS.hpp"
 #include "engine/system/AnimationSystem.hpp"
 #include "engine/system/InputSystem.hpp"
 #include <Zahlen/Audio.hpp>
@@ -21,22 +19,20 @@
 #include <Zahlen/Scripting.hpp>
 #include <Zahlen/Sync.hpp>
 #include <Zahlen/Window.hpp>
+#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <cgltf.h>
 #include <chrono>
 #include <cstring>
 #include <engine/system/LightingSystem.hpp>
 #include <functional>
-#include <physics/Physics.hpp>
 #include <physics/PhysicsWorld.hpp>
 #include <print>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
 
-// ============================================================================
-// PAYLOAD DEFINITIONS (Must exactly match ffi_cdef.lua)
-// ============================================================================
 namespace {
 #pragma pack(push, 1)
 
@@ -45,6 +41,19 @@ struct ZHLN_RaycastResult {
     double   px, py, pz;
     float    nx, ny, nz;
     float    fraction;
+    int      hasHit;
+};
+
+struct ZHLN_RaycastPenetrationResult {
+    uint64_t entity;
+    double   epx, epy, epz;
+    double   xpx, xpy, xpz;
+    float    enx, eny, enz;
+    float    xnx, xny, xnz;
+    float    entryFraction;
+    float    exitFraction;
+    float    thickness;
+    uint32_t materialID;
     int      hasHit;
 };
 
@@ -122,6 +131,13 @@ struct RaycastArgs {
     uint64_t            ignoreEntity;
     ZHLN_RaycastResult* outResult;
 };
+struct RaycastPenetrationArgs {
+    double                         ox, oy, oz;
+    float                          dx, dy, dz;
+    float                          maxDist;
+    uint64_t                       ignoreEntity;
+    ZHLN_RaycastPenetrationResult* outResult;
+};
 struct SetMoveInputArgs {
     uint64_t entityRaw;
     float    x;
@@ -179,14 +195,14 @@ struct RegisterDynamicComponentArgs {
 };
 
 struct SpawnLightArgs {
-    float           px, py, pz;     // Position
-    float           rx, ry, rz, rw; // Rotation (Quaternion)
-    float           r, g, b;        // Color
+    float           px, py, pz;
+    float           rx, ry, rz, rw;
+    float           r, g, b;
     float           intensity;
     float           radius;
-    float           dx, dy, dz; // Direction
+    float           dx, dy, dz;
     float           range;
-    ZHLN::LightType type; // 0=Dir, 1=Point, 2=Spot, 3=Area
+    ZHLN::LightType type;
     uint32_t        twoSided;
 };
 
@@ -213,12 +229,127 @@ struct GetTrackNameArgs {
     char     outName[64];
 };
 
+struct PlayNoiseBurstArgs {
+    uint8_t filterType;
+    float   freq;
+    float   q;
+    float   volume;
+    float   duration;
+    uint8_t noiseType;
+};
+
+struct PlayNoiseBurst3DArgs {
+    uint8_t filterType;
+    float   freq;
+    float   q;
+    float   volume;
+    float   duration;
+    float   x;
+    float   y;
+    float   z;
+    uint8_t noiseType;
+};
+
+struct PlayToneSweepArgs {
+    uint8_t waveType;
+    float   startFreq;
+    float   endFreq;
+    float   volume;
+    float   duration;
+};
+
+struct PlayToneSweep3DArgs {
+    uint8_t waveType;
+    float   startFreq;
+    float   endFreq;
+    float   volume;
+    float   duration;
+    float   x;
+    float   y;
+    float   z;
+};
+
+struct CreateLoopSynthArgs {
+    uint8_t waveType1;
+    uint8_t waveType2;
+    uint8_t filterType;
+};
+
+struct SetLoopSynthParamsArgs {
+    uint64_t handle;
+    float    charge;
+    float    baseFreq;
+    float    filterFreq;
+    float    volume;
+};
+
+struct StopLoopSynthArgs {
+    uint64_t handle;
+    float    fadeOutTime;
+};
+
+struct SpawnTerrainArgs {
+    uint32_t     sampleCount;
+    float        worldSize;
+    float        maxHeight;
+    const float* heights;
+    const float* colorsRGBA;
+    float        roughness;
+    float        metallic;
+};
+
+struct CreateTextureArgs {
+    const void* data;
+    uint32_t    width;
+    uint32_t    height;
+    uint32_t    isSRGB;
+};
+
+struct AddIKChainArgs {
+    uint64_t entityRaw;
+    int32_t  upperNodeIndex;
+    int32_t  lowerNodeIndex;
+    int32_t  endNodeIndex;
+    float    targetX, targetY, targetZ;
+    float    poleX, poleY, poleZ;
+    float    weight;
+};
+
+struct SetIKTargetArgs {
+    uint64_t entityRaw;
+    uint32_t chainIndex;
+    float    tx, ty, tz;
+    float    rx, ry, rz, rw;
+    float    weight;
+};
+
+struct SetIKTargetEntityArgs {
+    uint64_t entityRaw;
+    uint32_t chainIndex;
+    uint64_t targetEntityRaw;
+    float    offsetX, offsetY, offsetZ;
+    float    weight;
+};
+
+struct DrawLineArgs {
+    float ox, oy, oz;
+    float dx, dy, dz;
+    float r1, g1, b1, a1;
+    float r2, g2, b2, a2;
+};
+
+struct SetLODArgs {
+    uint64_t    entityRaw;
+    uint32_t    index;
+    const char* meshName;
+    float       distance;
+};
+
 #pragma pack(pop)
 
 void SafeDestroyEntity(ZHLN::Engine* engine, ZHLN::Entity entity) {
     using namespace ZHLN;
     using namespace ZHLN::ECS;
-    using enum BufferHandle;
     auto& reg = engine->GetRegistry();
 
     std::vector<Entity> childrenToDestroy;
@@ -245,36 +376,6 @@ void SafeDestroyEntity(ZHLN::Engine* engine, ZHLN::Entity entity) {
 
     for (ZHLN::Entity child: childrenToDestroy) {
         SafeDestroyEntity(engine, child);
-    }
-
-    auto* text = reg.Get<ZHLN::Components::TextComponent>(entity);
-    if (text != nullptr) {
-        if (text->mesh.posBuffer != Invalid) {
-            engine->GetRenderContext().DestroyBuffer(text->mesh.posBuffer);
-        }
-        if (text->mesh.attrBuffer != Invalid) {
-            engine->GetRenderContext().DestroyBuffer(text->mesh.attrBuffer);
-        }
-        if (text->mesh.indexBuffer != Invalid) {
-            engine->GetRenderContext().DestroyBuffer(text->mesh.indexBuffer);
-        }
-    }
-
-    auto* panel = reg.Get<ZHLN::Components::UIPanelComponent>(entity);
-    if (panel != nullptr) {
-        if (panel->mesh.posBuffer != Invalid) {
-            engine->GetRenderContext().DestroyBuffer(panel->mesh.posBuffer);
-        }
-        if (panel->mesh.attrBuffer != Invalid) {
-            engine->GetRenderContext().DestroyBuffer(panel->mesh.attrBuffer);
-        }
-    }
-
-    auto* mesh = reg.Get<ZHLN::Components::MeshComponent>(entity);
-    if (mesh != nullptr) {
-        if (mesh->skinnedVertexBuffer != Invalid) {
-            engine->GetRenderContext().DestroyBuffer(mesh->skinnedVertexBuffer);
-        }
     }
 
     reg.Destroy(entity);
@@ -334,20 +435,14 @@ struct ViewComposer {
 
 using CommandHandler = std::function<uint64_t(ZHLN::Engine*, const void*)>;
 
-// 1. The O(1) Fast Path arrays
 static std::vector<CommandHandler>                    s_JumpTable;
 static std::unordered_map<std::string_view, uint32_t> s_StringToIntMap;
 
-// Helper to push lambdas into the flat array
 static void RegisterCmd(std::string_view name, CommandHandler handler) {
     auto id = static_cast<uint32_t>(s_JumpTable.size());
     s_JumpTable.push_back(std::move(handler));
     s_StringToIntMap[name] = id;
 }
-
-// ============================================================================
-// UNIFIED COMMAND WRAPPER TEMPLATE
-// ============================================================================
 
 template <typename TArgs = void, bool RequireEngine = true, typename Fn>
 CommandHandler MakeCmd(Fn fn) {
@@ -368,9 +463,6 @@ CommandHandler MakeCmd(Fn fn) {
     };
 }
 
-// ============================================================================
-// GENERALIZED TYPE-SAFE ECS COMPONENT REGISTRY
-// ============================================================================
 struct ComponentRegistryEntry {
     void* (*add)(ZHLN::ECS::Registry&, ZHLN::Entity) = nullptr;
     std::function<ZHLN_BufferView(ZHLN::ECS::Registry&)> getBuffer;
@@ -395,17 +487,14 @@ void RegisterComponentType(std::string_view name, const char* format, Dims... di
 
 template <typename T, typename... Dims>
 void RegisterComponentTypeReadOnly(std::string_view name, const char* format, Dims... dims) {
-    s_ComponentRegistry[name] = ComponentRegistryEntry {
-        .add       = nullptr, // Block manual generic instantiations (for Physics components)
-        .getBuffer = [format, ... dims = dims](ZHLN::ECS::Registry& reg) -> ZHLN_BufferView {
-            auto raw = reg.GetRawArray<T>();
-            if constexpr (sizeof...(Dims) > 0) {
-                return ZHLN::ViewComposer::Build(&reg, raw.data(), format, raw.size(), dims...);
-            } else {
-                return ZHLN::ViewComposer::Build(&reg, raw.data(), format, raw.size());
-            }
-        }
-    };
+    s_ComponentRegistry[name] = ComponentRegistryEntry {.add = nullptr, .getBuffer = [format, ... dims = dims](ZHLN::ECS::Registry& reg) -> ZHLN_BufferView {
+                                                            auto raw = reg.GetRawArray<T>();
+                                                            if constexpr (sizeof...(Dims) > 0) {
+                                                                return ZHLN::ViewComposer::Build(&reg, raw.data(), format, raw.size(), dims...);
+                                                            } else {
+                                                                return ZHLN::ViewComposer::Build(&reg, raw.data(), format, raw.size());
+                                                            }
+                                                        }};
 }
 
 void InitComponentRegistry() {
@@ -413,29 +502,36 @@ void InitComponentRegistry() {
         return;
     }
 
-    RegisterComponentType<Components::HierarchyComponent>("HierarchyComponent", "B");
-    RegisterComponentType<Components::TransformComponent>("TransformComponent", "B");
-    RegisterComponentType<Components::MovementComponent>("MovementComponent", "B");
-    RegisterComponentType<Components::PhysicsStateComponent>("PhysicsStateComponent", "B");
-    RegisterComponentType<Components::TargetCameraComponent>("TargetCameraComponent", "B");
-    RegisterComponentType<Components::PBRComponent>("PBRComponent", "f", 2);
-    RegisterComponentType<Components::TextComponent>("TextComponent", "B");
-    RegisterComponentType<Components::PostProcessSettingsComponent>("PostProcessSettingsComponent", "B");
-    RegisterComponentType<Components::DebugSettingsComponent>("DebugSettingsComponent", "B");
-    RegisterComponentType<Components::AASettingsComponent>("AASettingsComponent", "B");
-    RegisterComponentType<Components::SunTagComponent>("SunTagComponent", "B");
-    RegisterComponentType<Components::ShadowSettingsComponent>("ShadowSettingsComponent", "B");
-    RegisterComponentType<Components::UIRectComponent>("UIRectComponent", "B");
-    RegisterComponentType<Components::UIPanelComponent>("UIPanelComponent", "B");
-    RegisterComponentType<Components::UIButtonComponent>("UIButtonComponent", "B");
-    RegisterComponentType<Components::UIDragComponent>("UIDragComponent", "B");
-    RegisterComponentType<Components::UIStackComponent>("UIStackComponent", "B");
-    RegisterComponentTypeReadOnly<Components::PhysicsComponent>("PhysicsComponent", "Q");
-}
+    ZHLN::Reflect::ForEachNestedType<Components>([]<typename Comp>() {
+        std::string_view name = ZHLN::Reflect::TypeName<Comp>();
 
-// ============================================================================
-// DECOUPLED SUBSYSTEM COMMAND REGISTERS
-// ============================================================================
+        s_ComponentRegistry[name] = ComponentRegistryEntry {
+            .add = [](ZHLN::ECS::Registry& reg, ZHLN::Entity entity) -> void* {
+                if constexpr (std::is_same_v<Comp, Components::PhysicsComponent>) {
+                    return nullptr; // Read-only physics handle
+                } else if constexpr (std::is_default_constructible_v<Comp>) {
+                    return &reg.template Add<Comp>(entity, Comp {});
+                } else {
+                    return nullptr;
+                }
+            },
+            .getBuffer = [](ZHLN::ECS::Registry& reg) -> ZHLN_BufferView {
+                auto             raw        = reg.GetRawArray<Comp>();
+                constexpr size_t floatCount = ZHLN::Reflect::GetFloatFieldsCount<Comp>();
+
+                if constexpr (std::is_same_v<Comp, Components::PhysicsComponent>) {
+                    return ZHLN::ViewComposer::Build(&reg, raw.data(), "Q", raw.size());
+                } else if constexpr (floatCount > 0) {
+                    // Auto-detected float-only struct (e.g. PBRComponent) -> 2D float view ("f")
+                    return ZHLN::ViewComposer::Build(&reg, raw.data(), "f", raw.size(), floatCount);
+                } else {
+                    // General struct -> 1D byte buffer view ("B")
+                    return ZHLN::ViewComposer::Build(&reg, raw.data(), "B", raw.size());
+                }
+            }
+        };
+    });
+}
 
 void RegisterCreativeWorkCommands() {
     RegisterCmd("SpawnPrefab", MakeCmd<SpawnPrefabArgs>([](ZHLN::Engine* engine, const SpawnPrefabArgs& a) -> uint64_t {
@@ -465,20 +561,56 @@ void RegisterCreativeWorkCommands() {
                     return writtenCount;
                 }));
 
-    RegisterCmd("SetupRagdoll", MakeCmd<SetupRagdollArgs>([](ZHLN::Engine* engine, const SetupRagdollArgs& a) -> uint64_t {
-                    std::vector<ZHLN::Entity> parts(a.count);
-                    for (uint32_t i = 0; i < a.count; ++i) {
-                        parts[i] = ZHLN::Entity::Unpack(a.visualParts[i]);
+    RegisterCmd("SetLODLevel", MakeCmd<SetLODArgs>([](ZHLN::Engine* engine, const SetLODArgs& a) -> uint64_t {
+                    auto  e   = ZHLN::Entity::Unpack(a.entityRaw);
+                    auto& reg = engine->GetRegistry();
+
+                    auto* lod = reg.Get<ZHLN::Components::LODComponent>(e);
+                    if (!lod) {
+                        lod = &reg.Add(e, ZHLN::Components::LODComponent {});
                     }
-                    ZHLN::CreativeWorksFactory::SetupPlayerRagdoll(
-                        engine->GetRenderContext(), engine->GetPhysicsContext(), engine->GetRegistry(), ZHLN::Entity::Unpack(a.playerEntity), parts
-                    );
+
+                    if (a.index < ZHLN::Components::LODComponent::MAX_LODS) {
+                        lod->levels[a.index].meshAsset = HashAssetID(a.meshName);
+                        lod->levels[a.index].distance  = a.distance;
+                        lod->count                     = std::max(lod->count, static_cast<uint8_t>(a.index + 1));
+                    }
                     return 1;
                 }));
 
+    RegisterCmd(
+        "SpawnTerrain", MakeCmd<SpawnTerrainArgs>([](ZHLN::Engine* engine, const SpawnTerrainArgs& a) -> uint64_t {
+            uint32_t samples   = (a.sampleCount > 0) ? a.sampleCount : 128;
+            float    worldSize = (a.worldSize > 0.0f) ? a.worldSize : 200.0f;
+            float    maxHeight = (a.maxHeight > 0.0f) ? a.maxHeight : 25.0f;
+
+            ZHLN::CreativeWorksFactory::SpawnParams params {.createPhysics = true, .isStaticPhysics = true, .roughness = a.roughness, .metallic = a.metallic};
+
+            ZHLN::Entity e = ZHLN::NullEntity;
+            if (a.heights != nullptr && a.colorsRGBA != nullptr) {
+                e = ZHLN::CreativeWorksFactory::CreateTerrainFromData(*engine, samples, worldSize, a.heights, a.colorsRGBA, params);
+            } else {
+                e = ZHLN::CreativeWorksFactory::CreateTerrain(*engine, samples, worldSize, maxHeight, ZHLN::CreativeWorksFactory::TerrainType::Default, params);
+            }
+
+            return e.Pack();
+        })
+    );
+
+    RegisterCmd(
+        "SetupRagdoll", MakeCmd<SetupRagdollArgs>([](ZHLN::Engine* engine, const SetupRagdollArgs& a) -> uint64_t {
+            std::vector<ZHLN::Entity> parts(a.count);
+            for (uint32_t i = 0; i < a.count; ++i) {
+                parts[i] = ZHLN::Entity::Unpack(a.visualParts[i]);
+            }
+            ZHLN::CreativeWorksFactory::SetupPlayerRagdoll(engine->GetPhysicsContext(), engine->GetRegistry(), ZHLN::Entity::Unpack(a.playerEntity), parts);
+            return 1;
+        })
+    );
+
     RegisterCmd("CreateBox", MakeCmd<CreateBoxArgs>([](ZHLN::Engine* engine, const CreateBoxArgs& a) -> uint64_t {
                     ZHLN::Mesh mesh =
-                        ZHLN::CreativeWorksFactory::CreateBox(engine->GetRenderContext(), JPH::Vec3(a.hx, a.hy, a.hz), JPH::Vec4(a.r, a.g, a.b, a.a));
+                        ZHLN::CreativeWorksFactory::CreateBoxMesh(engine->GetRenderContext(), JPH::Vec3(a.hx, a.hy, a.hz), JPH::Vec4(a.r, a.g, a.b, a.a));
                     return static_cast<uint64_t>(mesh.posBuffer);
                 }));
 
@@ -494,86 +626,91 @@ void RegisterCreativeWorkCommands() {
                     mat.baseColorFactor[2] = a.b;
                     mat.baseColorFactor[3] = a.a;
                     *a.outPipeline         = static_cast<uint64_t>(mat.pipeline);
-                    *a.outAlbedo           = mat.albedoIndex;
+                    *a.outAlbedo           = static_cast<uint64_t>(mat.albedoMap);
                     return 1;
                 }));
 
-    RegisterCmd("SpawnEntity", MakeCmd<SpawnEntityArgs>([](ZHLN::Engine* engine, const SpawnEntityArgs& a) -> uint64_t {
-                    auto& rc  = engine->GetRenderContext();
-                    auto& pc  = engine->GetPhysicsContext();
-                    auto& reg = engine->GetRegistry();
+    RegisterCmd(
+        "SpawnEntity", MakeCmd<SpawnEntityArgs>([](ZHLN::Engine* engine, const SpawnEntityArgs& a) -> uint64_t {
+            auto type = static_cast<ZHLN::Physics::ShapeType>(a.shapeType);
 
-                    ZHLN::Mesh     mesh;
-                    JPH::ShapeRefC shape;
-                    float          cullRadius = 1.0f;
-                    auto           type       = static_cast<ZHLN::Physics::ShapeType>(a.shapeType);
-
-                    switch (type) {
-                        case ZHLN::Physics::ShapeType::Sphere:
-                            mesh       = ZHLN::CreativeWorksFactory::CreateBox(rc, JPH::Vec3(a.p1, a.p1, a.p1), {a.r, a.g, a.b, a.a});
-                            shape      = ZHLN::Physics::GetOrCreateShape(pc, type, a.p1);
-                            cullRadius = a.p1 * 2.0f;
-                            break;
-                        case ZHLN::Physics::ShapeType::Plane:
-                            mesh       = ZHLN::CreativeWorksFactory::CreatePlane(rc, a.p1, {a.r, a.g, a.b, a.a});
-                            shape      = ZHLN::Physics::GetOrCreateShape(pc, type, 0.0f, 1.0f, 0.0f, 0.0f);
-                            cullRadius = a.p1 * 2.0f;
-                            break;
-                        case ZHLN::Physics::ShapeType::Box:
-                        default:
-                            mesh       = ZHLN::CreativeWorksFactory::CreateBox(rc, JPH::Vec3(a.p1, a.p2, a.p3), {a.r, a.g, a.b, a.a});
-                            shape      = ZHLN::Physics::GetOrCreateShape(pc, ZHLN::Physics::ShapeType::Box, a.p1, a.p2, a.p3);
-                            cullRadius = std::max({a.p1, a.p2, a.p3}) * 2.0f;
-                            break;
-                    }
-
-                    bool isTransparent = (a.a < 1.0f);
-
-                    auto mat_res = ZHLN::CreativeWorksFactory::CreateBasicMaterial(rc, false, isTransparent);
-                    if (!mat_res) {
-                        ZHLN::Panic("Failed to create basic material inside SpawnEntity: {}", mat_res.error().Message());
-                    }
-                    ZHLN::Material mat     = mat_res.value();
-                    mat.baseColorFactor[0] = a.r;
-                    mat.baseColorFactor[1] = a.g;
-                    mat.baseColorFactor[2] = a.b;
-                    mat.baseColorFactor[3] = a.a;
-                    ZHLN::Entity e         = reg.Create();
-                    reg.Add(
-                        e,
-                        ZHLN::Components::TransformComponent {.position = {a.px, a.py, a.pz}, .rotation = {a.rx, a.ry, a.rz, a.rw}, .scale = {1.0f, 1.0f, 1.0f}}
-                    );
-                    ZHLN::DrawFlags flags = ZHLN::DrawFlags::None;
-                    if (isTransparent) {
-                        flags |= ZHLN::DrawFlags::ExcludeFromTLAS;
-                    }
-
-                    reg.Add(
-                        e, ZHLN::Components::MeshComponent {
-                               .mesh           = mesh,
-                               .material       = mat,
-                               .cullRadius     = cullRadius,
-                               .localTransform = JPH::Mat44::sIdentity(),
-                               .prevTransform  = JPH::Mat44::sIdentity(),
-                               .flags          = flags
+            if (type == ZHLN::Physics::ShapeType::Plane) {
+                return ZHLN::CreativeWorksFactory::CreatePlane(
+                           *engine, a.p1, {a.r, a.g, a.b, a.a},
+                           ZHLN::CreativeWorksFactory::SpawnParams {
+                               .position = {a.px, a.py, a.pz}, .rotation = {a.rx, a.ry, a.rz, a.rw}, .createPhysics = true, .isStaticPhysics = (a.isStatic != 0)
                            }
-                    );
-
-                    JPH::Quat rotation(a.rx, a.ry, a.rz, a.rw);
-                    reg.Add(
-                        e, ZHLN::Components::PhysicsComponent {ZHLN::Physics::CreateRigidBody(
-                               pc, shape, JPH::RVec3(a.px, a.py, a.pz), rotation, a.isStatic ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
-                               a.isStatic ? static_cast<JPH::ObjectLayer>(0) : static_cast<JPH::ObjectLayer>(1), 0
-                           )}
-                    );
-                    reg.Add(
-                        e, ZHLN::Components::PhysicsStateComponent {
-                               .currPosition = {a.px, a.py, a.pz}, .prevPosition = {a.px, a.py, a.pz}, .currRotation = rotation, .prevRotation = rotation
+                )
+                    .Pack();
+            } else if (type == ZHLN::Physics::ShapeType::Box) {
+                return ZHLN::CreativeWorksFactory::CreateBox(
+                           *engine, JPH::Vec3(a.p1, a.p2, a.p3),
+                           ZHLN::CreativeWorksFactory::SpawnParams {
+                               .position        = {a.px, a.py, a.pz},
+                               .rotation        = {a.rx, a.ry, a.rz, a.rw},
+                               .createPhysics   = true,
+                               .isStaticPhysics = (a.isStatic != 0),
+                               .color           = {a.r, a.g, a.b, a.a}
                            }
-                    );
+                ).Pack();
+            }
 
-                    return e.Pack();
-                }));
+            auto& rc  = engine->GetRenderContext();
+            auto& pc  = engine->GetPhysicsContext();
+            auto& reg = engine->GetRegistry();
+
+            ZHLN::Mesh mesh          = ZHLN::CreativeWorksFactory::CreateBoxMesh(rc, JPH::Vec3(a.p1, a.p1, a.p1), {a.r, a.g, a.b, a.a});
+            auto       shape         = pc.GetOrCreateShape(type, a.p1);
+            float      cullRadius    = a.p1 * 2.0f;
+            bool       isTransparent = (a.a < 1.0f);
+
+            auto mat_res = ZHLN::CreativeWorksFactory::CreateBasicMaterial(rc, false, isTransparent);
+            if (!mat_res) {
+                ZHLN::Panic("Failed to create basic material inside SpawnEntity: {}", mat_res.error().Message());
+            }
+            ZHLN::Material mat     = mat_res.value();
+            mat.baseColorFactor[0] = a.r;
+            mat.baseColorFactor[1] = a.g;
+            mat.baseColorFactor[2] = a.b;
+            mat.baseColorFactor[3] = a.a;
+
+            ZHLN::Entity e = reg.Create();
+
+            AssetID    entityMeshAsset = HashAssetID("procedural_mesh_" + std::to_string(e.index));
+            MaterialID entityMatAsset  = HashAssetID("procedural_mat_" + std::to_string(e.index));
+            rc.RegisterGPUMesh(entityMeshAsset, mesh);
+            rc.RegisterGPUMaterial(entityMatAsset, mat);
+
+            JPH::Quat  rotation(a.rx, a.ry, a.rz, a.rw);
+            JPH::Mat44 worldMat = ZHLN::Math::CreateTransform(JPH::Vec3(a.px, a.py, a.pz), rotation, JPH::Vec3(1.0f, 1.0f, 1.0f));
+
+            reg.Add(e, ZHLN::Components::TransformComponent {.position = {a.px, a.py, a.pz}, .rotation = rotation, .scale = {1.0f, 1.0f, 1.0f}});
+            reg.Add(e, ZHLN::Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
+
+            ZHLN::DrawFlags flags = ZHLN::DrawFlags::None;
+            if (isTransparent) {
+                flags |= ZHLN::DrawFlags::ExcludeFromTLAS;
+            }
+
+            reg.Add(
+                e, ZHLN::Components::MeshComponent {.meshAsset = entityMeshAsset, .materialAsset = entityMatAsset, .cullRadius = cullRadius, .flags = flags}
+            );
+
+            reg.Add(
+                e, ZHLN::Components::PhysicsComponent {pc.CreateRigidBody(
+                       shape, JPH::RVec3(a.px, a.py, a.pz), rotation, a.isStatic ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
+                       a.isStatic ? static_cast<JPH::ObjectLayer>(0) : static_cast<JPH::ObjectLayer>(1), 0
+                   )}
+            );
+            reg.Add(
+                e, ZHLN::Components::PhysicsStateComponent {
+                       .currPosition = {a.px, a.py, a.pz}, .prevPosition = {a.px, a.py, a.pz}, .currRotation = rotation, .prevRotation = rotation
+                   }
+            );
+
+            return e.Pack();
+        })
+    );
 
     RegisterCmd("SpawnLight", MakeCmd<SpawnLightArgs>([](ZHLN::Engine* engine, const SpawnLightArgs& a) -> uint64_t {
                     auto& reg = engine->GetRegistry();
@@ -599,6 +736,14 @@ void RegisterCreativeWorkCommands() {
                     );
                     return e.Pack();
                 }));
+
+    RegisterCmd("CreateTexture", MakeCmd<CreateTextureArgs>([](ZHLN::Engine* engine, const CreateTextureArgs& a) -> uint64_t {
+                    if (a.data == nullptr || a.width == 0 || a.height == 0) {
+                        return 1; // Fallback to white texture on invalid data
+                    }
+                    auto res = engine->GetRenderContext().CreateTexture(a.data, a.width, a.height, a.isSRGB != 0);
+                    return res.value_or(1);
+                }));
 }
 
 void RegisterPhysicsCommands() {
@@ -615,42 +760,39 @@ void RegisterPhysicsCommands() {
                 }));
 
     RegisterCmd("GetPhysicsContactEvents", MakeCmd<GetBufferArgs>([](ZHLN::Engine* engine, const GetBufferArgs& a) -> uint64_t {
-                    auto        events = ZHLN::Physics::GetContactEvents(engine->GetPhysicsContext());
+                    auto        events = engine->GetPhysicsContext().GetContactEvents();
                     const char* fmt    = (sizeof(JPH::Real) == 8) ? "EvtD" : "EvtF";
                     *a.outView         = ZHLN::ViewComposer::Build(&engine->GetPhysicsContext().GetWorld(), events.first, fmt, events.second);
                     return 0;
                 }));
 
     RegisterCmd("SetCharacterVelocity", MakeCmd<SetCharVelArgs>([](ZHLN::Engine* engine, const SetCharVelArgs& a) -> uint64_t {
-                    ZHLN::Physics::SetCharacterVelocity(engine->GetPhysicsContext(), ZHLN::Entity::Unpack(a.entityRaw), JPH::Vec3(a.x, a.y, a.z));
+                    engine->GetPhysicsContext().SetCharacterVelocity(ZHLN::Entity::Unpack(a.entityRaw), JPH::Vec3(a.x, a.y, a.z));
                     return 0;
                 }));
 
     RegisterCmd("IsCharacterOnGround", MakeCmd<EntityOnlyArgs>([](ZHLN::Engine* engine, const EntityOnlyArgs& a) -> uint64_t {
-                    return ZHLN::Physics::IsCharacterOnGround(engine->GetPhysicsContext(), ZHLN::Entity::Unpack(a.entityRaw)) ? 1 : 0;
+                    return engine->GetPhysicsContext().IsCharacterOnGround(ZHLN::Entity::Unpack(a.entityRaw)) ? 1 : 0;
                 }));
 
     RegisterCmd("SetLinearVelocity", MakeCmd<SetCharVelArgs>([](ZHLN::Engine* engine, const SetCharVelArgs& a) -> uint64_t {
-                    ZHLN::Physics::SetLinearVelocity(engine->GetPhysicsContext(), ZHLN::Entity::Unpack(a.entityRaw), JPH::Vec3(a.x, a.y, a.z));
+                    engine->GetPhysicsContext().SetLinearVelocity(ZHLN::Entity::Unpack(a.entityRaw), JPH::Vec3(a.x, a.y, a.z));
                     return 0;
                 }));
 
     RegisterCmd("AddImpulse", MakeCmd<SetCharVelArgs>([](ZHLN::Engine* engine, const SetCharVelArgs& a) -> uint64_t {
-                    ZHLN::Physics::AddImpulse(engine->GetPhysicsContext(), ZHLN::Entity::Unpack(a.entityRaw), JPH::Vec3(a.x, a.y, a.z));
+                    engine->GetPhysicsContext().AddImpulse(ZHLN::Entity::Unpack(a.entityRaw), JPH::Vec3(a.x, a.y, a.z));
                     return 0;
                 }));
 
     RegisterCmd("AddImpulseAt", MakeCmd<AddImpulseAtArgs>([](ZHLN::Engine* engine, const AddImpulseAtArgs& a) -> uint64_t {
-                    ZHLN::Physics::AddImpulse(
-                        engine->GetPhysicsContext(), ZHLN::Entity::Unpack(a.entityRaw), JPH::Vec3(a.ix, a.iy, a.iz), JPH::RVec3(a.px, a.py, a.pz)
-                    );
+                    engine->GetPhysicsContext().AddImpulse(ZHLN::Entity::Unpack(a.entityRaw), JPH::Vec3(a.ix, a.iy, a.iz), JPH::RVec3(a.px, a.py, a.pz));
                     return 0;
                 }));
 
     RegisterCmd("Raycast", MakeCmd<RaycastArgs>([](ZHLN::Engine* engine, const RaycastArgs& a) -> uint64_t {
                     ZHLN::Entity ignore = a.ignoreEntity != 0 ? ZHLN::Entity::Unpack(a.ignoreEntity) : ZHLN::Entity {};
-                    auto         res =
-                        ZHLN::Physics::Raycast(engine->GetPhysicsContext(), JPH::RVec3(a.ox, a.oy, a.oz), JPH::Vec3(a.dx, a.dy, a.dz), a.maxDist, ignore);
+                    auto         res    = engine->GetPhysicsContext().Raycast(JPH::RVec3(a.ox, a.oy, a.oz), JPH::Vec3(a.dx, a.dy, a.dz), a.maxDist, ignore);
                     a.outResult->hasHit = res.hasHit ? 1 : 0;
                     if (res.hasHit) {
                         a.outResult->entity   = res.handle.Pack();
@@ -661,6 +803,32 @@ void RegisterPhysicsCommands() {
                         a.outResult->ny       = res.normal.GetY();
                         a.outResult->nz       = res.normal.GetZ();
                         a.outResult->fraction = res.fraction;
+                    }
+                    return 0;
+                }));
+
+    RegisterCmd("RaycastPenetration", MakeCmd<RaycastPenetrationArgs>([](ZHLN::Engine* engine, const RaycastPenetrationArgs& a) -> uint64_t {
+                    ZHLN::Entity ignore = a.ignoreEntity != 0 ? ZHLN::Entity::Unpack(a.ignoreEntity) : ZHLN::Entity {};
+                    auto res = engine->GetPhysicsContext().RaycastPenetration(JPH::RVec3(a.ox, a.oy, a.oz), JPH::Vec3(a.dx, a.dy, a.dz), a.maxDist, ignore);
+                    a.outResult->hasHit = res.hasHit ? 1 : 0;
+                    if (res.hasHit) {
+                        a.outResult->entity        = res.handle.Pack();
+                        a.outResult->epx           = res.entryPosition.GetX();
+                        a.outResult->epy           = res.entryPosition.GetY();
+                        a.outResult->epz           = res.entryPosition.GetZ();
+                        a.outResult->xpx           = res.exitPosition.GetX();
+                        a.outResult->xpy           = res.exitPosition.GetY();
+                        a.outResult->xpz           = res.exitPosition.GetZ();
+                        a.outResult->enx           = res.entryNormal.GetX();
+                        a.outResult->eny           = res.entryNormal.GetY();
+                        a.outResult->enz           = res.entryNormal.GetZ();
+                        a.outResult->xnx           = res.exitNormal.GetX();
+                        a.outResult->xny           = res.exitNormal.GetY();
+                        a.outResult->xnz           = res.exitNormal.GetZ();
+                        a.outResult->entryFraction = res.entryFraction;
+                        a.outResult->exitFraction  = res.exitFraction;
+                        a.outResult->thickness     = res.thickness;
+                        a.outResult->materialID    = res.materialID;
                     }
                     return 0;
                 }));
@@ -706,12 +874,26 @@ void RegisterPhysicsCommands() {
 
 void RegisterInputAndCameraCommands() {
     RegisterCmd("IsKeyDown", MakeCmd<IsKeyDownArgs>([](ZHLN::Engine* engine, const IsKeyDownArgs& a) -> uint64_t {
-                    return engine->GetInput().IsKeyDown(static_cast<ZHLN::KeyCode>(a.key)) ? 1 : 0;
+                    auto& reg  = engine->GetRegistry();
+                    auto  ents = reg.GetEntitiesWith<ZHLN::Components::InputStateComponent>();
+                    if (ents.empty()) {
+                        return 0;
+                    }
+                    auto* state = reg.Get<ZHLN::Components::InputStateComponent>(ents[0]);
+                    return (state != nullptr && state->IsKeyDown(a.key)) ? 1 : 0;
                 }));
 
     RegisterCmd("GetMouseDelta", MakeCmd<GetMouseDeltaArgs>([](ZHLN::Engine* engine, const GetMouseDeltaArgs& a) -> uint64_t {
-                    *a.outX = engine->GetInput().GetMouse().deltaX;
-                    *a.outY = engine->GetInput().GetMouse().deltaY;
+                    auto& reg  = engine->GetRegistry();
+                    auto  ents = reg.GetEntitiesWith<ZHLN::Components::InputStateComponent>();
+                    if (ents.empty()) {
+                        *a.outX = 0.0f;
+                        *a.outY = 0.0f;
+                        return 0;
+                    }
+                    auto* state = reg.Get<ZHLN::Components::InputStateComponent>(ents[0]);
+                    *a.outX     = (state != nullptr) ? state->GetMouseDeltaX() : 0.0f;
+                    *a.outY     = (state != nullptr) ? state->GetMouseDeltaY() : 0.0f;
                     return 0;
                 }));
 
@@ -761,8 +943,9 @@ void RegisterAudioCommands() {
                 }));
 
     RegisterCmd("CreateSoundInstance", MakeCmd<CreateSoundInstanceArgs>([](ZHLN::Engine* engine, const CreateSoundInstanceArgs& a) -> uint64_t {
-                    if (!a.filepath)
+                    if (!a.filepath) {
                         return 0;
+                    }
                     void* handle = engine->GetAudioContext().CreateSoundInstance(a.filepath, a.spatialized != 0);
                     return reinterpret_cast<uint64_t>(handle);
                 }));
@@ -779,6 +962,53 @@ void RegisterAudioCommands() {
 
     RegisterCmd("DestroySoundInstance", MakeCmd<SoundInstanceArgs>([](ZHLN::Engine* engine, const SoundInstanceArgs& a) -> uint64_t {
                     engine->GetAudioContext().DestroySoundInstance(reinterpret_cast<void*>(a.handle));
+                    return 0;
+                }));
+
+    // --- Procedural Synthesis & Filter Commands ---
+
+    RegisterCmd("PlayNoiseBurst", MakeCmd<PlayNoiseBurstArgs>([](ZHLN::Engine* engine, const PlayNoiseBurstArgs& a) -> uint64_t {
+                    engine->GetAudioContext().PlayNoiseBurst(
+                        static_cast<ZHLN::AudioFilterType>(a.filterType), a.freq, a.q, a.volume, a.duration, static_cast<ZHLN::AudioNoiseType>(a.noiseType)
+                    );
+                    return 0;
+                }));
+
+    RegisterCmd("PlayNoiseBurst3D", MakeCmd<PlayNoiseBurst3DArgs>([](ZHLN::Engine* engine, const PlayNoiseBurst3DArgs& a) -> uint64_t {
+                    engine->GetAudioContext().PlayNoiseBurst3D(
+                        static_cast<ZHLN::AudioFilterType>(a.filterType), a.freq, a.q, a.volume, a.duration, JPH::Vec3(a.x, a.y, a.z),
+                        static_cast<ZHLN::AudioNoiseType>(a.noiseType)
+                    );
+                    return 0;
+                }));
+
+    RegisterCmd("PlayToneSweep", MakeCmd<PlayToneSweepArgs>([](ZHLN::Engine* engine, const PlayToneSweepArgs& a) -> uint64_t {
+                    engine->GetAudioContext().PlayToneSweep(static_cast<ZHLN::AudioWaveformType>(a.waveType), a.startFreq, a.endFreq, a.volume, a.duration);
+                    return 0;
+                }));
+
+    RegisterCmd("PlayToneSweep3D", MakeCmd<PlayToneSweep3DArgs>([](ZHLN::Engine* engine, const PlayToneSweep3DArgs& a) -> uint64_t {
+                    engine->GetAudioContext().PlayToneSweep3D(
+                        static_cast<ZHLN::AudioWaveformType>(a.waveType), a.startFreq, a.endFreq, a.volume, a.duration, JPH::Vec3(a.x, a.y, a.z)
+                    );
+                    return 0;
+                }));
+
+    RegisterCmd("CreateLoopSynth", MakeCmd<CreateLoopSynthArgs>([](ZHLN::Engine* engine, const CreateLoopSynthArgs& a) -> uint64_t {
+                    void* handle = engine->GetAudioContext().CreateLoopSynth(
+                        static_cast<ZHLN::AudioWaveformType>(a.waveType1), static_cast<ZHLN::AudioWaveformType>(a.waveType2),
+                        static_cast<ZHLN::AudioFilterType>(a.filterType)
+                    );
+                    return reinterpret_cast<uint64_t>(handle);
+                }));
+
+    RegisterCmd("SetLoopSynthParams", MakeCmd<SetLoopSynthParamsArgs>([](ZHLN::Engine* engine, const SetLoopSynthParamsArgs& a) -> uint64_t {
+                    engine->GetAudioContext().SetLoopSynthParams(reinterpret_cast<void*>(a.handle), a.charge, a.baseFreq, a.filterFreq, a.volume);
+                    return 0;
+                }));
+
+    RegisterCmd("StopLoopSynth", MakeCmd<StopLoopSynthArgs>([](ZHLN::Engine* engine, const StopLoopSynthArgs& a) -> uint64_t {
+                    engine->GetAudioContext().StopLoopSynth(reinterpret_cast<void*>(a.handle), a.fadeOutTime);
                     return 0;
                 }));
 }
@@ -890,31 +1120,31 @@ void RegisterSystemCommands() {
                     return 1;
                 }));
 
+    RegisterCmd("DrawLine", MakeCmd<DrawLineArgs>([](ZHLN::Engine* engine, const DrawLineArgs& a) -> uint64_t {
+                    engine->GetRenderContext().DrawLine(
+                        JPH::Vec3(a.ox, a.oy, a.oz), JPH::Vec3(a.dx, a.dy, a.dz), JPH::Vec4(a.r1, a.g1, a.b1, a.a1), JPH::Vec4(a.r2, a.g2, a.b2, a.a2)
+                    );
+                    return 1;
+                }));
+
     RegisterCmd("InitPlayer", MakeCmd<void>([](ZHLN::Engine* engine) -> uint64_t {
                     using namespace ZHLN;
                     auto& reg = engine->GetRegistry();
-                    auto& pc  = engine->GetPhysicsContext();
 
-                    // 1. Spawn infinite physical ground plane
-                    auto         groundShape = ZHLN::Physics::GetOrCreateShape(pc, ZHLN::Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);
-                    ZHLN::Entity ground      = reg.Create();
-                    reg.Add(
-                        ground,
-                        Components::PhysicsComponent {Physics::CreateRigidBody(pc, groundShape, {0, 0, 0}, JPH::Quat::sIdentity(), JPH::EMotionType::Static, 0)}
+                    auto _ = CreativeWorksFactory::CreatePlane(
+                        *engine, 1000.0f, {0.6f, 0.6f, 0.6f, 1.0f},
+                        CreativeWorksFactory::SpawnParams {.position = {0.0f, 0.0f, 0.0f}, .createPhysics = true, .isStaticPhysics = true}
                     );
-                    reg.Add(ground, Components::PhysicsStateComponent {});
 
-                    // 2. Spawn the Player Character Controller
                     ZHLN::Entity playerEntity = reg.Create();
                     reg.Add(playerEntity, Components::PlayerTagComponent {});
                     reg.Add(playerEntity, Components::TransformComponent {.position = {0.0f, 3.0f, 0.0f}});
                     reg.Add(playerEntity, Components::MovementComponent {});
                     reg.Add(playerEntity, ZHLN::Components::InputComponent {});
-                    ZHLN::Entity charPhys = ZHLN::Physics::CreateCharacter(pc, JPH::RVec3(0.0f, 3.0f, 0.0f));
+                    ZHLN::Entity charPhys = engine->GetPhysicsContext().CreateCharacter(JPH::RVec3(0.0f, 3.0f, 0.0f));
                     reg.Add(playerEntity, Components::PhysicsComponent {charPhys});
                     reg.Add(playerEntity, Components::PhysicsStateComponent {.currPosition = {0.0f, 3.0f, 0.0f}, .prevPosition = {0.0f, 3.0f, 0.0f}});
 
-                    // 3. Attach Camera Tracking logic to the blank menu camera
                     auto camEnts = reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>();
                     if (!camEnts.empty()) {
                         ZHLN::Entity camEnt = camEnts[0];
@@ -938,29 +1168,22 @@ void RegisterSystemCommands() {
                 }));
 
     RegisterCmd("GetAnimationTrackCount", MakeCmd<EntityOnlyArgs>([](ZHLN::Engine* engine, const EntityOnlyArgs& a) -> uint64_t {
-                    auto& reg = engine->GetRegistry();
-
                     auto entity = ZHLN::Entity::Unpack(a.entityRaw);
-                    if (auto* anim = reg.Get<ZHLN::Components::AnimatorComponent>(entity)) {
-                        if (anim->gltfData != nullptr) {
-                            auto* data = static_cast<cgltf_data*>(anim->gltfData);
-                            return static_cast<uint64_t>(data->animations_count);
+                    if (auto* anim = engine->GetRegistry().Get<ZHLN::Components::AnimatorComponent>(entity)) {
+                        if (anim->prefab != nullptr) {
+                            return static_cast<uint64_t>(anim->prefab->animations.size());
                         }
                     }
                     return 0;
                 }));
 
     RegisterCmd("GetAnimationTrackName", MakeCmd<GetTrackNameArgs>([](ZHLN::Engine* engine, const GetTrackNameArgs& a) -> uint64_t {
-                    auto& reg = engine->GetRegistry();
-
                     auto entity = ZHLN::Entity::Unpack(a.entityRaw);
-                    if (auto* anim = reg.Get<ZHLN::Components::AnimatorComponent>(entity)) {
-                        if (anim->gltfData != nullptr) {
-                            auto* data = static_cast<cgltf_data*>(anim->gltfData);
-                            if (a.trackIndex >= 0 && a.trackIndex < static_cast<int32_t>(data->animations_count)) {
-                                const char* name = data->animations[a.trackIndex].name;
-                                // Safely write to the flat array
-                                std::strncpy(const_cast<char*>(a.outName), name ? name : "Unnamed", 63);
+                    if (auto* anim = engine->GetRegistry().Get<ZHLN::Components::AnimatorComponent>(entity)) {
+                        if (anim->prefab != nullptr) {
+                            if (a.trackIndex >= 0 && a.trackIndex < static_cast<int32_t>(anim->prefab->animations.size())) {
+                                const auto& name = anim->prefab->animations[a.trackIndex].name;
+                                std::strncpy(const_cast<char*>(a.outName), name.c_str(), 63);
                                 const_cast<char*>(a.outName)[63] = '\0';
                                 return 1;
                             }
@@ -970,14 +1193,10 @@ void RegisterSystemCommands() {
                 }));
 
     RegisterCmd("PlayAnimationTrack", MakeCmd<PlayTrackArgs>([](ZHLN::Engine* engine, const PlayTrackArgs& a) -> uint64_t {
-                    auto& reg = engine->GetRegistry();
-
                     auto entity = ZHLN::Entity::Unpack(a.entityRaw);
-                    if (auto* anim = reg.Get<ZHLN::Components::AnimatorComponent>(entity)) {
-                        if (anim->gltfData != nullptr) {
-                            auto* data = static_cast<cgltf_data*>(anim->gltfData);
-                            if (a.trackIndex >= 0 && a.trackIndex < static_cast<int32_t>(data->animations_count)) {
-                                // Manage the crossfading transition state machine
+                    if (auto* anim = engine->GetRegistry().Get<ZHLN::Components::AnimatorComponent>(entity)) {
+                        if (anim->prefab != nullptr) {
+                            if (a.trackIndex >= 0 && a.trackIndex < static_cast<int32_t>(anim->prefab->animations.size())) {
                                 if (anim->currentTrackIdx != a.trackIndex) {
                                     anim->prevTrackIdx      = anim->currentTrackIdx;
                                     anim->prevTrackTime     = anim->currentTrackTime;
@@ -992,7 +1211,6 @@ void RegisterSystemCommands() {
                                     anim->blendDuration = a.blendDuration;
                                     anim->isFinished    = false;
                                 } else {
-                                    // If targeting the same track, update playback properties
                                     anim->currentLoop          = (a.loop != 0);
                                     anim->currentPlaybackSpeed = a.playbackSpeed;
                                     if (anim->isFinished && anim->currentLoop) {
@@ -1002,6 +1220,55 @@ void RegisterSystemCommands() {
                                 }
                                 return 1;
                             }
+                        }
+                    }
+                    return 0;
+                }));
+
+    RegisterCmd("AddIKChain", MakeCmd<AddIKChainArgs>([](ZHLN::Engine* engine, const AddIKChainArgs& a) -> uint64_t {
+                    auto  entity = ZHLN::Entity::Unpack(a.entityRaw);
+                    auto& reg    = engine->GetRegistry();
+
+                    auto* ikComp = reg.Get<Components::TwoBoneIKComponent>(entity);
+                    if (ikComp == nullptr) {
+                        ikComp = &reg.Add(entity, Components::TwoBoneIKComponent {});
+                    }
+
+                    Components::TwoBoneIKChain chain;
+                    chain.upperNodeIndex = a.upperNodeIndex;
+                    chain.lowerNodeIndex = a.lowerNodeIndex;
+                    chain.endNodeIndex   = a.endNodeIndex;
+                    chain.targetPosition = JPH::Vec3(a.targetX, a.targetY, a.targetZ);
+                    chain.poleVector     = JPH::Vec3(a.poleX, a.poleY, a.poleZ);
+                    chain.weight         = a.weight;
+
+                    ikComp->chains.push_back(chain);
+                    return static_cast<uint64_t>(ikComp->chains.size() - 1);
+                }));
+
+    RegisterCmd("SetIKTarget", MakeCmd<SetIKTargetArgs>([](ZHLN::Engine* engine, const SetIKTargetArgs& a) -> uint64_t {
+                    auto entity = ZHLN::Entity::Unpack(a.entityRaw);
+                    if (auto* ikComp = engine->GetRegistry().Get<Components::TwoBoneIKComponent>(entity)) {
+                        if (a.chainIndex < ikComp->chains.size()) {
+                            auto& chain          = ikComp->chains[a.chainIndex];
+                            chain.targetPosition = JPH::Vec3(a.tx, a.ty, a.tz);
+                            chain.targetRotation = JPH::Quat(a.rx, a.ry, a.rz, a.rw);
+                            chain.weight         = a.weight;
+                            return 1;
+                        }
+                    }
+                    return 0;
+                }));
+
+    RegisterCmd("SetIKTargetEntity", MakeCmd<SetIKTargetEntityArgs>([](ZHLN::Engine* engine, const SetIKTargetEntityArgs& a) -> uint64_t {
+                    auto entity = ZHLN::Entity::Unpack(a.entityRaw);
+                    if (auto* ikComp = engine->GetRegistry().Get<Components::TwoBoneIKComponent>(entity)) {
+                        if (a.chainIndex < ikComp->chains.size()) {
+                            auto& chain        = ikComp->chains[a.chainIndex];
+                            chain.targetEntity = ZHLN::Entity::Unpack(a.targetEntityRaw);
+                            chain.targetOffset = JPH::Vec3(a.offsetX, a.offsetY, a.offsetZ);
+                            chain.weight       = a.weight;
+                            return 1;
                         }
                     }
                     return 0;
@@ -1035,7 +1302,7 @@ ZHLN_API uint32_t ZHLN_GetCommandID(const char* cmdName) {
     if (cmdName == nullptr) {
         return 0xFFFFFFFF;
     }
-    RegisterFFICommands(); // Lazily ensure the jump table is built on first request
+    RegisterFFICommands();
 
     std::string_view view(cmdName);
     auto             it = s_StringToIntMap.find(view);
@@ -1049,11 +1316,8 @@ ZHLN_API uint32_t ZHLN_GetCommandID(const char* cmdName) {
 
 ZHLN_API uint64_t ZHLN_DispatchCommand(ZHLN_Engine* engine_handle, uint32_t cmdID, const void* args) {
     if (cmdID >= s_JumpTable.size()) [[unlikely]] {
-        return 0; // Out of bounds
+        return 0;
     }
-
-    // 100% Branchless O(1) jump directly into the closure.
-    // Null pointer safety checks are handled individually by the lambda's inner closure scopes.
     return s_JumpTable[cmdID](reinterpret_cast<ZHLN::Engine*>(engine_handle), args);
 }
 

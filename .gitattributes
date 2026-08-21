@@ -1,2 +1,5 @@
 *.glb filter=lfs diff=lfs merge=lfs -text lockable
 resources/assets/Circus[[:space:]]Lobby[[:space:]]V9.glb filter=lfs diff=lfs merge=lfs -text
+# The generated reference rig is intentionally tiny and must be available in
+# source-only checkouts even when Git LFS is not installed.
+resources/assets/ProceduralAnimationBaseRig.glb -filter -diff -merge -text

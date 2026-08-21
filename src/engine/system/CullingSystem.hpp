@@ -3,7 +3,9 @@
 
 #pragma once
 
+// clang-format off
 #include <Jolt/Jolt.h>
+// clang-format on
 #include <Zahlen/Common.h>
 #include <Zahlen/Entity.hpp>
 #include <array>

@@ -1,27 +1,26 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "EntityCommandBuffer.hpp"
-#include <unordered_map>
+#include <Zahlen/ecs/EntityCommandBuffer.hpp>
+#include <Zahlen/Core/HashMap.hpp>
 
 namespace ZHLN::ECS {
 
 void EntityCommandBuffer::Playback() {
-    std::unordered_map<uint32_t, Entity> tempToRealMap;
+    ZHLN::HashMap<uint32_t, Entity> tempToRealMap;
 
-    for (const auto& cmd: _commands) {
+    for (auto& cmd: _commands) { // Use non-const reference so we can mutate cmd
         Entity target = cmd.entity;
 
         if (target.generation == 0xFFFFFFFF) {
-            auto it = tempToRealMap.find(target.index);
-            if (it != tempToRealMap.end()) {
-                target = it->second;
+            if (const auto* realEntity = tempToRealMap.Find(target.index)) {
+                target = *realEntity;
             }
         }
 
         switch (cmd.type) {
             case CommandType::Create: {
-                tempToRealMap[cmd.entity.index] = _registry->Create();
+                tempToRealMap.Insert(cmd.entity.index, _registry->Create());
                 break;
             }
             case CommandType::Destroy: {
@@ -29,13 +28,12 @@ void EntityCommandBuffer::Playback() {
                 break;
             }
             case CommandType::AddComponent: {
-                _registry->EnsureComponentCapacity(cmd.familyId);
-                SparseSet* set = (_registry->GetRawByFamily(target, cmd.familyId) != nullptr) ? nullptr : _registry->_components[cmd.familyId];
-                if (set != nullptr) {
-                    set->Insert(target, cmd.componentData);
+                if (cmd.applyFn != nullptr && cmd.componentData != nullptr) {
+                    cmd.applyFn(*_registry, target, cmd.componentData);
                 }
                 if (cmd.destructor != nullptr && cmd.componentData != nullptr) {
                     cmd.destructor(cmd.componentData);
+                    cmd.componentData = nullptr; // Prevent double-free in Reset()
                 }
                 break;
             }
@@ -49,6 +47,7 @@ void EntityCommandBuffer::Reset() noexcept {
         if (cmd.type == CommandType::AddComponent && cmd.componentData != nullptr) {
             if (cmd.destructor != nullptr) {
                 cmd.destructor(cmd.componentData);
+                cmd.componentData = nullptr;
             }
         }
     }

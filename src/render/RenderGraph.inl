@@ -7,17 +7,6 @@
 namespace ZHLN::Vk {
 
 // ============================================================================
-// ResourceName Template Definitions
-// ============================================================================
-
-template <size_t N>
-constexpr ResourceName<N>::ResourceName(const char (&str)[N]) {
-    for (size_t i = 0; i < N; ++i) {
-        value[i] = str[i];
-    }
-}
-
-// ============================================================================
 // detail Metaprogramming & Simulation Definitions
 // ============================================================================
 
@@ -108,47 +97,42 @@ constexpr auto ConstexprString<Capacity>::string_view() const noexcept -> std::s
 
 template <typename ResourceList, typename Target>
 consteval auto GetResourceIndex() -> size_t {
-    constexpr size_t idx = GetResourceIndexImpl<Target>(ResourceList {});
+    if constexpr (std::is_same_v<Target, detail::DummyResource>) {
+        return 0; // Dummy resources bypass index lookup safely
+    } else {
+        constexpr size_t idx = GetResourceIndexImpl<Target>(ResourceList {});
 
-    if constexpr (idx >= ResourceList::size) {
-        constexpr auto error_message = []() consteval {
-            ConstexprString<2048> msg {};
-            msg.append("\n\n");
-            msg.append(
-                "==========================================================================="
-                "=====\n"
-            );
-            msg.append("  [GRAPH COMPILATION ERROR]\n");
-            msg.append(
-                "==========================================================================="
-                "=====\n\n"
-            );
-            msg.append("  The requested resource is not registered in this Frame Graph!\n\n");
-            msg.append("  Missing Resource:\n");
-            msg.append("    - \"");
-            msg.append(std::string_view(Target::name.value.data(), Target::name.value.size()));
-            msg.append("\"\n\n");
-            msg.append("  Registered Resources in this Graph:\n");
-
-            auto append_name = [&]<typename R>() {
+        if constexpr (idx >= ResourceList::size) {
+            constexpr auto error_message = []() consteval {
+                ConstexprString<2048> msg {};
+                msg.append("\n\n");
+                msg.append("================================================================================\n");
+                msg.append("  [GRAPH COMPILATION ERROR]\n");
+                msg.append("================================================================================\n\n");
+                msg.append("  The requested resource is not registered in this Frame Graph!\n\n");
+                msg.append("  Missing Resource:\n");
                 msg.append("    - \"");
-                msg.append(std::string_view(R::name.value.data(), R::name.value.size()));
-                msg.append("\"\n");
-            };
+                msg.append(std::string_view(Target::name.value.data(), Target::name.value.size()));
+                msg.append("\"\n\n");
+                msg.append("  Registered Resources in this Graph:\n");
 
-            [&]<typename... Us>(TypeList<Us...>) { (append_name.template operator()<Us>(), ...); }(ResourceList {});
+                auto append_name = [&]<typename R>() {
+                    msg.append("    - \"");
+                    msg.append(std::string_view(R::name.value.data(), R::name.value.size()));
+                    msg.append("\"\n");
+                };
 
-            msg.append(
-                "==========================================================================="
-                "=====\n\n"
-            );
-            return msg;
-        }();
+                [&]<typename... Us>(TypeList<Us...>) { (append_name.template operator()<Us>(), ...); }(ResourceList {});
 
-        static_assert(idx < ResourceList::size, error_message.string_view());
+                msg.append("================================================================================\n\n");
+                return msg;
+            }();
+
+            static_assert(idx < ResourceList::size, error_message.string_view());
+        }
+
+        return idx;
     }
-
-    return idx;
 }
 
 template <typename ResourceList, typename... Passes>
@@ -171,10 +155,15 @@ consteval auto ComputeStateTable() {
                     auto check_pass = [&]<typename Pass>() {
                         using Usages = typename Pass::Usages;
                         written |= []<size_t... Js>(std::index_sequence<Js...>) {
-                            return (
-                                (std::is_same_v<typename Usages::template type<Js>::Resource, R> && ((Usages::template type<Js>::access & WriteMask) != 0)) ||
-                                ...
-                            );
+                            if constexpr (sizeof...(Js) == 0) {
+                                return false; // Short-circuit passes with no image usages
+                            } else {
+                                return (
+                                    (std::is_same_v<typename Usages::template type<Js>::Resource, R> &&
+                                     ((Usages::template type<Js>::access & WriteMask) != 0)) ||
+                                    ...
+                                );
+                            }
                         }(std::make_index_sequence<Usages::size> {});
                     };
                     (check_pass.template operator()<Passes>(), ...);
@@ -196,19 +185,21 @@ consteval auto ComputeStateTable() {
                             }
                             using Usages = typename Pass::Usages;
                             [&]<size_t... Js>(std::index_sequence<Js...>) {
-                                (([&]() {
-                                     if (found) {
-                                         return;
-                                     }
-                                     using U = typename Usages::template type<Js>;
-                                     if constexpr (std::is_same_v<typename U::Resource, R>) {
-                                         layout = U::layout;
-                                         stage  = U::stage;
-                                         access = U::access;
-                                         found  = true;
-                                     }
-                                 }()),
-                                 ...);
+                                if constexpr (sizeof...(Js) > 0) {
+                                    (([&]() {
+                                         if (found) {
+                                             return;
+                                         }
+                                         using U = typename Usages::template type<Js>;
+                                         if constexpr (std::is_same_v<typename U::Resource, R>) {
+                                             layout = U::layout;
+                                             stage  = U::stage;
+                                             access = U::access;
+                                             found  = true;
+                                         }
+                                     }()),
+                                     ...);
+                                }
                             }(std::make_index_sequence<Usages::size> {});
                         };
                         (check_pass.template operator()<Passes>(), ...);
@@ -239,26 +230,27 @@ consteval auto ComputeStateTable() {
 
             using Usages = typename Pass::Usages;
 
-            [&]<size_t... Is>(std::index_sequence<Is...>) {
-                (
-                    [&]<size_t I>() {
-                        using U                = typename Usages::template type<I>;
-                        using Img              = typename U::Resource;
-                        constexpr size_t r_idx = GetResourceIndex<ResourceList, Img>();
+            if constexpr (Usages::size > 0) {
+                [&]<size_t... Is>(std::index_sequence<Is...>) {
+                    (
+                        [&]<size_t I>() {
+                            using U                = typename Usages::template type<I>;
+                            using Img              = typename U::Resource;
+                            constexpr size_t r_idx = GetResourceIndex<ResourceList, Img>();
 
-                        constexpr bool is_write = (U::access & WriteMask) != 0;
+                            constexpr bool is_write = (U::access & WriteMask) != 0;
 
-                        current_states[r_idx] = ResourceState {
-                            .layout = U::layout,
-                            .stage  = U::stage,
-                            .access = U::access,
-                            // Track when the resource was last modified in this frame cycle
-                            .lastWritePass     = is_write ? pass_idx : current_states[r_idx].lastWritePass,
-                            .fromPreviousFrame = is_write ? false : current_states[r_idx].fromPreviousFrame
-                        };
-                    }.template operator()<Is>(),
-                    ...);
-            }(std::make_index_sequence<Usages::size> {});
+                            current_states[r_idx] = ResourceState {
+                                .layout            = U::layout,
+                                .stage             = U::stage,
+                                .access            = U::access,
+                                .lastWritePass     = is_write ? pass_idx : current_states[r_idx].lastWritePass,
+                                .fromPreviousFrame = is_write ? false : current_states[r_idx].fromPreviousFrame
+                            };
+                        }.template operator()<Is>(),
+                        ...);
+                }(std::make_index_sequence<Usages::size> {});
+            }
 
             pass_idx++;
         };
@@ -279,10 +271,15 @@ consteval auto ComputeStateTable() {
                     auto check_pass = [&]<typename Pass>() {
                         using Usages = typename Pass::Usages;
                         written |= []<size_t... Js>(std::index_sequence<Js...>) {
-                            return (
-                                (std::is_same_v<typename Usages::template type<Js>::Resource, R> && ((Usages::template type<Js>::access & WriteMask) != 0)) ||
-                                ...
-                            );
+                            if constexpr (sizeof...(Js) == 0) {
+                                return false; // Short-circuit passes with no image usages
+                            } else {
+                                return (
+                                    (std::is_same_v<typename Usages::template type<Js>::Resource, R> &&
+                                     ((Usages::template type<Js>::access & WriteMask) != 0)) ||
+                                    ...
+                                );
+                            }
                         }(std::make_index_sequence<Usages::size> {});
                     };
                     (check_pass.template operator()<Passes>(), ...);
@@ -290,7 +287,6 @@ consteval auto ComputeStateTable() {
                 }();
 
                 if constexpr (R::is_swapchain) {
-                    // Swapchain must synchronize with the acquire semaphore wait stage
                     current_states[I] = ResourceState {
                         .layout            = VK_IMAGE_LAYOUT_UNDEFINED,
                         .stage             = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -305,7 +301,6 @@ consteval auto ComputeStateTable() {
                 } else if constexpr (!is_written) {
                     // Keep the external read-only input state intact
                 } else {
-                    // If the resource was written in the previous frame, flag it
                     if (current_states[I].lastWritePass < 999999) {
                         current_states[I].fromPreviousFrame = true;
                     }
@@ -329,37 +324,6 @@ template <typename T>
 }
 
 } // namespace detail
-
-// ============================================================================
-// Pass Builder Definitions
-// ============================================================================
-
-template <ResourceName Name, typename... Usages, typename RecordFn>
-constexpr auto MakePass(RecordFn&& record) {
-    constexpr bool has_graphics = (detail::IsColorAttachment<Usages>::value || ...) || (detail::IsDepthAttachment<Usages>::value || ...);
-
-    if constexpr (has_graphics) {
-        static_assert(
-            !std::is_invocable_v<RecordFn, VkCommandBuffer>, "\n\n================================================================================\n"
-                                                             "  [COMPILER ERROR] Render pass safety violation detected!\n"
-                                                             "================================================================================\n\n"
-                                                             "  Direct use of MakePass with ColorWrite or DepthWrite is not allowed.\n"
-                                                             "  Recording draw calls outside of an active Vulkan RenderPass causes undefined "
-                                                             "behaviour.\n\n"
-                                                             "  Resolution:\n"
-                                                             "    - Write your lambdas to accept 'auto& ctx' instead of raw VkCommandBuffer.\n"
-                                                             "    - The graph executor will automatically open and close the RenderPass for you.\n\n"
-                                                             "================================================================================\n"
-        );
-    }
-
-    return GraphPass<Name, TypeList<Usages...>, RecordFn> {std::forward<RecordFn>(record)};
-}
-
-template <ResourceName Name, typename... Usages, typename RecordFn>
-constexpr auto Passieren(RecordFn&& record, detail::BypassGraphicsCheckToken /*unused*/) {
-    return GraphPass<Name, TypeList<Usages...>, RecordFn> {std::forward<RecordFn>(record)};
-}
 
 // ============================================================================
 // ResourceBinder Definition
@@ -386,13 +350,14 @@ constexpr CompileTimeFrameGraph<Passes...>::CompileTimeFrameGraph(Passes&&... pa
 }
 
 template <typename... Passes>
-void CompileTimeFrameGraph<Passes...>::Execute(VkCommandBuffer cmd, const Binder& binder) const {
+template <typename ProfilerT>
+void CompileTimeFrameGraph<Passes...>::Execute(VkCommandBuffer cmd, const Binder& binder, uint32_t frameIndex, ProfilerT* profiler) const {
     const auto& bindings = binder.GetBindings();
 
     std::apply(
         [&](const auto&... passPack) noexcept(false) {
             [&]<size_t... Is>(std::index_sequence<Is...>) noexcept(false) {
-                (ExecutePass<Is>(cmd, bindings, passPack...[Is]), ...);
+                (ExecutePass<Is>(cmd, bindings, passPack...[Is], frameIndex, profiler), ...);
             }(std::make_index_sequence<NumPasses> {});
         },
         _passes
@@ -400,8 +365,21 @@ void CompileTimeFrameGraph<Passes...>::Execute(VkCommandBuffer cmd, const Binder
 }
 
 template <typename... Passes>
-template <size_t PassIndex, typename PassType>
-void CompileTimeFrameGraph<Passes...>::ExecutePass(VkCommandBuffer cmd, const std::array<GraphResource, NumResources>& bindings, const PassType& pass) const {
+template <size_t PassIndex, typename PassType, typename ProfilerT>
+void CompileTimeFrameGraph<Passes...>::ExecutePass(
+    VkCommandBuffer                                cmd,
+    const std::array<GraphResource, NumResources>& bindings,
+    const PassType&                                pass,
+    uint32_t                                       frameIndex,
+    ProfilerT*                                     profiler
+) const {
+    // AUTOMATED GPU PROFILING TIMER (Zero-overhead: only active when profiler pointer is passed)
+    if constexpr (!std::is_same_v<ProfilerT, void*>) {
+        if (profiler != nullptr) {
+            profiler->WriteStart(cmd, frameIndex, static_cast<uint32_t>(PassIndex));
+        }
+    }
+
     using Usages   = typename PassType::Usages;
     using RecordFn = typename PassType::RecordFn;
 
@@ -473,6 +451,12 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(VkCommandBuffer cmd, const st
         }
     } else {
         pass.record(cmd);
+    }
+
+    if constexpr (!std::is_same_v<ProfilerT, void*>) {
+        if (profiler != nullptr) {
+            profiler->WriteEnd(cmd, frameIndex, static_cast<uint32_t>(PassIndex));
+        }
     }
 }
 
@@ -629,18 +613,12 @@ bool RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes
 
 template <typename Tag, typename T>
 constexpr auto MakeRef(const T& resource) noexcept {
-    if constexpr (requires { resource.image.Handle(); }) {
-        return GraphImageRef<Tag> {
-            .handle = resource.image.Handle(),
-            .view   = resource.view.Get(),
-            .extent = detail::ToExtent3D(resource.extent) // Unified 3D adapter
-        };
+    if constexpr (requires { resource.fullView.Get(); }) {
+        return GraphImageRef<Tag> {.handle = resource.image.Handle(), .view = resource.fullView.Get(), .extent = detail::ToExtent3D(resource.extent)};
+    } else if constexpr (requires { resource.image.Handle(); }) {
+        return GraphImageRef<Tag> {.handle = resource.image.Handle(), .view = resource.view.Get(), .extent = detail::ToExtent3D(resource.extent)};
     } else if constexpr (requires { resource.handle; }) {
-        return GraphImageRef<Tag> {
-            .handle = resource.handle,
-            .view   = resource.view,
-            .extent = detail::ToExtent3D(resource.extent) // Unified 3D adapter
-        };
+        return GraphImageRef<Tag> {.handle = resource.handle, .view = resource.view, .extent = detail::ToExtent3D(resource.extent)};
     } else {
         static_assert(sizeof(T) == 0, "Unsupported resource type while making a graph reference");
     }
@@ -870,7 +848,7 @@ constexpr void PrintResources(VisualizerStringT& msg, std::index_sequence<ResIdx
 
 // 3. Standalone helper to print a single pass state
 template <typename GraphT, size_t PassIdx, typename Pass, typename Resources, size_t NumResources, typename VisualizerStringT>
-constexpr void PrintPassState(VisualizerStringT& msg) noexcept {
+constexpr void PrintPassState(VisualizerStringT& msg, std::index_sequence<0> /*unused*/) noexcept {
     msg.append("  ● Pass [");
     msg.append_int(PassIdx);
     msg.append("]: \"");
@@ -883,7 +861,9 @@ constexpr void PrintPassState(VisualizerStringT& msg) noexcept {
 // 4. Standalone helper to fold over pass index sequence
 template <typename GraphT, typename PassesTuple, typename Resources, size_t NumResources, typename VisualizerStringT, size_t... PassIdxs>
 constexpr void PrintPasses(VisualizerStringT& msg, std::index_sequence<PassIdxs...> /*unused*/) noexcept {
-    ((PrintPassState<GraphT, PassIdxs, std::tuple_element_t<PassIdxs, PassesTuple>, Resources, NumResources>(msg), msg.append("\n")), ...);
+    ((PrintPassState<GraphT, PassIdxs, std::tuple_element_t<PassIdxs, PassesTuple>, Resources, NumResources>(msg, std::make_index_sequence<1> {}),
+      msg.append("\n")),
+     ...);
 }
 
 // 5. Standalone helper to print registered resource list

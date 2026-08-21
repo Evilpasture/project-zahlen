@@ -1,6 +1,9 @@
+// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // include/Zahlen/RenderCode.hpp
 #pragma once
-#include "../Error.hpp"
+#include <Zahlen/Error.hpp>
 #include <cstdint>
 
 namespace ZHLN {

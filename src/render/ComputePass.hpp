@@ -91,24 +91,62 @@ struct ComputePass {
 
 template <typename LayoutT>
 struct DoubleBufferedComputePass {
-    DescriptorSetLayout                   descLayout;
+    [[no_unique_address]] LayoutT         layoutInstance {};
     DescriptorPool                        pool;
     ZHLN::DoubleBuffered<VkDescriptorSet> sets;
     PipelineLayout                        pipelineLayout;
     Pipeline                              pipeline;
 
     [[nodiscard]] bool
-        Build(VkDevice device, const ZHLN_ShaderDesc& shader, const VkPushConstantRange* pushConstants = nullptr, uint32_t pushCount = 0) noexcept;
+        Build(VkDevice device, const ZHLN_ShaderDesc& shader, const VkPushConstantRange* pushConstants = nullptr, uint32_t pushCount = 0) noexcept {
+        // Layout authority lives in the compiled shader: reflect the set layout.
+        if (!layoutInstance.Build(device, shader, VK_SHADER_STAGE_COMPUTE_BIT)) {
+            return false;
+        }
+        pool    = layoutInstance.CreatePool(device, 2);
+        sets[0] = layoutInstance.Allocate(device, pool.Get(), layoutInstance.GetSetLayout());
+        sets[1] = layoutInstance.Allocate(device, pool.Get(), layoutInstance.GetSetLayout());
+
+        PipelineLayoutBuilder builder(device);
+        builder.AddDescriptorSetLayout(layoutInstance.GetSetLayout());
+        for (uint32_t i = 0; i < pushCount; ++i) {
+            builder.AddPushConstant(pushConstants[i].stageFlags, pushConstants[i].size, pushConstants[i].offset);
+        }
+
+        auto layout_res = builder.Build();
+        if (!layout_res) {
+            return false;
+        }
+        pipelineLayout = std::move(layout_res.value());
+
+        auto p_res = ComputePipelineBuilder().Shader(shader).Layout(pipelineLayout.Get()).Build(device);
+        if (!p_res) {
+            return false;
+        }
+        pipeline = std::move(*p_res);
+        return true;
+    }
 
     template <typename... Args>
     void WriteNext(VkDevice device, Args&&... args) const noexcept {
-        LayoutT::Write(device, sets.Next(), std::forward<Args>(args)...);
+        layoutInstance.Write(device, sets.Next(), std::forward<Args>(args)...);
     }
 
-    void Dispatch(VkCommandBuffer cmd, uint32_t x, uint32_t y, uint32_t z) const noexcept;
+    void Dispatch(VkCommandBuffer cmd, uint32_t x, uint32_t y, uint32_t z) const noexcept {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.Get());
+        VkDescriptorSet set = sets.Next();
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout.Get(), 0, 1, &set, 0, nullptr);
+        vkCmdDispatch(cmd, x, y, z);
+    }
 
     template <GpuTriviallyCopyable T>
-    void Dispatch(VkCommandBuffer cmd, uint32_t x, uint32_t y, uint32_t z, const T& pushData) const noexcept;
+    void Dispatch(VkCommandBuffer cmd, uint32_t x, uint32_t y, uint32_t z, const T& pushData) const noexcept {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.Get());
+        VkDescriptorSet set = sets.Next();
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout.Get(), 0, 1, &set, 0, nullptr);
+        Push(cmd, pipelineLayout.Get(), VK_SHADER_STAGE_COMPUTE_BIT, pushData);
+        vkCmdDispatch(cmd, x, y, z);
+    }
 
     void Flip() noexcept {
         sets.Flip();
@@ -116,5 +154,3 @@ struct DoubleBufferedComputePass {
 };
 
 } // namespace ZHLN::Vk
-
-#include "ComputePass.inl"

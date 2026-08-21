@@ -4,7 +4,6 @@
 
 add_library(zahlen_physics STATIC
     Physics.cpp
-    Physics.hpp
     PhysicsWorld.hpp
     PhysicsWorld.cpp
     PhysicsContactEvents.hpp
@@ -16,25 +15,35 @@ add_library(zahlen_physics STATIC
     PhysicsDebug.hpp
     RagdollFactory.cpp
 )
-set_target_properties(zahlen_physics PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_target_properties(zahlen_physics PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    CXX_STANDARD 26
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+)
 
-target_link_libraries(zahlen_physics 
-    PRIVATE 
-        Jolt 
+target_link_libraries(zahlen_physics
+    PRIVATE
+        Jolt
         zahlen_threading
 )
 
-target_include_directories(zahlen_physics PUBLIC 
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/src
+target_include_directories(zahlen_physics PUBLIC
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/src
 )
 
 # Pass Jolt specific configurations down
-target_compile_definitions(zahlen_physics PRIVATE 
+target_compile_definitions(zahlen_physics PRIVATE
     JPH_DOUBLE_PRECISION
     JPH_NO_CUSTOM_DETERMINISTIC_OPERATIONS
+    JPH_DEBUG_RENDERER
     $<$<CONFIG:Debug>:JPH_DEBUG>
     $<$<CONFIG:Release>:JPH_RELEASE>
+)
+
+target_compile_definitions(zahlen_physics PUBLIC
+    JPH_DEBUG_RENDERER
 )
 
 if(NOT MSVC)
@@ -49,3 +58,5 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
         set_target_properties(zahlen_physics PROPERTIES COMPILE_OPTIONS "${PHYS_OPTIONS}")
     endif()
 endif()
+
+target_link_libraries(zahlen_physics PRIVATE zahlen_warnings)

@@ -5,7 +5,7 @@
 
 #pragma once
 #include <cstdint>
-#include <detail/Platform.hpp>
+#include <Zahlen/Core/Platform.hpp>
 
 namespace ZHLN {
 class Window;
@@ -45,5 +45,10 @@ float GetDisplayScale(Window& window);
  * @brief High-precision sleep (wraps std::this_thread or OS-specific).
  */
 void Sleep(uint32_t milliseconds);
+
+// --- Dynamic Library Loading ---
+[[nodiscard]] void* LoadSharedLibrary(const char* path) noexcept;
+[[nodiscard]] void* GetSymbolAddress(void* handle, const char* symbol) noexcept;
+void                UnloadSharedLibrary(void* handle) noexcept;
 
 } // namespace ZHLN::Platform

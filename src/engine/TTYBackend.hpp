@@ -10,7 +10,7 @@
 #include <vulkan/vulkan.h>
 
 namespace ZHLN {
-class InputContext;
+struct WindowInputReceiver;
 }
 
 namespace ZHLN::TTYBackend {
@@ -26,7 +26,8 @@ void Shutdown(void* context);
 
 bool IsRunning(void* context);
 
-void ProcessEvents(void* context, InputContext* input);
+// Pump libevdev events into the same WindowInputReceiver used by GLFW.
+void ProcessEvents(void* context, const WindowInputReceiver& receiver);
 
 // Required extensions for VK_KHR_display
 std::vector<std::string_view> GetRequiredInstanceExtensions();

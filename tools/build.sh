@@ -28,7 +28,73 @@ while [[ "$#" -gt 0 ]]; do
                 COMPILER_CXX="clang++"
             fi
             ;;
-        --gcc)   COMPILER_CC="gcc";   COMPILER_CXX="g++" ;;
+        --gcc)
+            # On macOS, check for Homebrew GCC 16 binaries first; fallback to system gcc/g++
+            if [[ "$OSTYPE" == "darwin"* ]]; then
+                if [[ -x "/opt/homebrew/bin/g++-16" ]]; then
+                    COMPILER_CC="/opt/homebrew/bin/gcc-16"
+                    COMPILER_CXX="/opt/homebrew/bin/g++-16"
+                elif [[ -x "/usr/local/bin/g++-16" ]]; then
+                    COMPILER_CC="/usr/local/bin/gcc-16"
+                    COMPILER_CXX="/usr/local/bin/g++-16"
+                elif command -v gcc-16 &> /dev/null; then
+                    COMPILER_CC="gcc-16"
+                    COMPILER_CXX="g++-16"
+                else
+                    COMPILER_CC="gcc"
+                    COMPILER_CXX="g++"
+                fi
+            else
+                # Linux and other Unix-like systems retain default behavior
+                COMPILER_CC="gcc"
+                COMPILER_CXX="g++"
+            fi
+            ;;
+        --p2996)
+            # Find the root directory (either clang-p2996 or llvm-p2996)
+            P2996_ROOT=""
+            for dir in "$HOME/clang-p2996" "$HOME/llvm-p2996" "../clang-p2996" "../llvm-p2996"; do
+                if [[ -d "$dir" ]]; then
+                    P2996_ROOT="$(cd "$dir" && pwd)"
+                    break
+                fi
+            done
+
+            if [[ -z "$P2996_ROOT" ]]; then
+                echo "Error: Could not find custom p2996 directory (~/llvm-p2996 or ~/clang-p2996)." >&2
+                exit 1
+            fi
+
+            # Determine install vs build-tree paths
+            if [[ -d "$P2996_ROOT/install" ]]; then
+                P2996_INSTALL="$P2996_ROOT/install"
+                P2996_BUILD="$P2996_ROOT/build"
+            elif [[ -x "$P2996_ROOT/build/bin/clang" ]]; then
+                # Handle in-tree build directories on Linux
+                P2996_INSTALL="$P2996_ROOT/build"
+                P2996_BUILD="$P2996_ROOT/build"
+            else
+                echo "Error: Found $P2996_ROOT, but could not find compiled binaries in install/ or build/bin/." >&2
+                exit 1
+            fi
+
+            COMPILER_CC="$P2996_INSTALL/bin/clang"
+            COMPILER_CXX="$P2996_INSTALL/bin/clang++"
+
+            # Dynamic library loader flag: -Wl,-rpath on Linux vs -Wl,-rpath on macOS
+            LIB_DIR="$P2996_INSTALL/lib"
+            [[ -d "$P2996_INSTALL/lib64" ]] && LIB_DIR="$P2996_INSTALL/lib64"
+
+            CMAKE_CONF_ARGS+=(
+                "-DCMAKE_PREFIX_PATH=$P2996_INSTALL"
+                "-DCMAKE_CXX_FLAGS=-stdlib=libc++ -Wno-unused-command-line-argument -L$LIB_DIR"
+                "-DCMAKE_EXE_LINKER_FLAGS=-Wl,-rpath,$LIB_DIR -L$LIB_DIR"
+                "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-rpath,$LIB_DIR -L$LIB_DIR"
+                "-DZHLN_USE_CUSTOM_LIBCXX=ON"
+                "-DLLVM_BLOOMBERG_ROOT=$P2996_ROOT"
+                "-DLLVM_BLOOMBERG_BUILD=$P2996_BUILD"
+            )
+            ;;
         # Anything else is treated as a build flag
         *) BUILD_FLAGS+=("$1") ;;
     esac
@@ -37,8 +103,8 @@ done
 
 # 2. Configuration (Only runs if needed)
 if [[ -n "$COMPILER_CC" && -f "$BUILD_DIR/CMakeCache.txt" ]]; then
-    echo "--- Compiler switch requested: Clearing existing CMake cache ---"
-    rm -f "$BUILD_DIR/CMakeCache.txt"
+    echo "--- Compiler switch requested: Resetting CMake cache (preserving Ninja state & assets) ---"
+    rm -rf "$BUILD_DIR/CMakeCache.txt" "$BUILD_DIR/CMakeFiles"
 fi
 
 if [ ! -f "$BUILD_DIR/CMakeCache.txt" ]; then
@@ -52,7 +118,8 @@ if [ ! -f "$BUILD_DIR/CMakeCache.txt" ]; then
     
     cmake -GNinja -B"$BUILD_DIR" \
         -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_CXX_FLAGS="-g"
+        -DCMAKE_CXX_FLAGS="-g" \
+        "${CMAKE_CONF_ARGS[@]}"
 fi
 
 # 3. Detect available CPU cores across platforms

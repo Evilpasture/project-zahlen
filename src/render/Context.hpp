@@ -46,6 +46,10 @@ class Context {
         return _physical;
     }
 
+    [[nodiscard]] auto BufferAddress(VkBuffer buffer) const noexcept -> VkDeviceAddress {
+        return ZHLN_GetBufferDeviceAddress(_device.handle, buffer);
+    }
+
     [[nodiscard("Always verify context initialization; check Valid() before use")]]
     auto Valid() const noexcept -> bool {
         return _device.handle != VK_NULL_HANDLE;
@@ -61,6 +65,8 @@ class Context {
     ZHLN_Device             _device   = {};
 };
 
+using ValidationMode = ZHLN_ValidationMode;
+
 class Context::Builder {
   public:
     constexpr Builder() noexcept = default;
@@ -75,8 +81,8 @@ class Context::Builder {
         return *this;
     }
 
-    constexpr Builder& EnableValidation(bool enable) noexcept {
-        _enableValidation = enable;
+    constexpr Builder& ValidationMode(ValidationMode mode) noexcept {
+        _validationMode = mode;
         return *this;
     }
 
@@ -129,9 +135,9 @@ class Context::Builder {
     [[nodiscard]] std::expected<Context, ZHLN::Error>                 Build() const noexcept;
 
   private:
-    std::string_view _appName          = "ZHLN Engine";
-    uint32_t         _appVersion       = VK_MAKE_API_VERSION(0, 1, 0, 0);
-    bool             _enableValidation = true;
+    std::string_view   _appName        = "ZHLN Engine";
+    uint32_t           _appVersion     = VK_MAKE_API_VERSION(0, 1, 0, 0);
+    Vk::ValidationMode _validationMode = ZHLN_VALIDATION_ON;
 
     VkInstance              _instance = VK_NULL_HANDLE;
     VkSurfaceKHR            _surface  = VK_NULL_HANDLE;

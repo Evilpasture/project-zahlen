@@ -1,10 +1,9 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-cmake_minimum_required(VERSION 3.25)
+cmake_minimum_required(VERSION 3.28)
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
-# include(AppleShim)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 # 1. Force the compiler selection BEFORE project()
 if(WIN32 AND NOT DEFINED CMAKE_C_COMPILER)
@@ -12,14 +11,34 @@ if(WIN32 AND NOT DEFINED CMAKE_C_COMPILER)
     set(CMAKE_CXX_COMPILER clang++)
 endif()
 
+set(CMAKE_CXX_STANDARD 26)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+set(CMAKE_CXX_SCAN_FOR_MODULES ON)
+
+set(CMAKE_C_STANDARD 23)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_EXTENSIONS OFF)
 project(zahlen LANGUAGES C CXX ASM)
+
+include(CompilerWarnings)
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    add_compile_options(-Qunused-arguments)
+    add_link_options(-Qunused-arguments)
+endif()
+
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
+endif()
 
 # --- RETRIEVE GIT COMMIT HASH ---
 find_package(Git QUIET)
 if(GIT_FOUND)
     execute_process(
         COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
-        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
         OUTPUT_VARIABLE ZHLN_GIT_HASH
         OUTPUT_STRIP_TRAILING_WHITESPACE
         ERROR_QUIET
@@ -41,14 +60,6 @@ if(APPLE)
     set(CMAKE_SYSROOT ${MACOS_SDK_PATH})
 endif()
 
-set(CMAKE_CXX_STANDARD 26)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
-
-set(CMAKE_C_STANDARD 23)
-set(CMAKE_C_STANDARD_REQUIRED ON)
-set(CMAKE_C_EXTENSIONS OFF)
-
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # --- DETECT C++26 REFLECTION SUPPORT ---
@@ -58,8 +69,77 @@ check_cxx_compiler_flag("-freflection" COMPILER_HAS_REFLECTION)
 if(COMPILER_HAS_REFLECTION)
     message(STATUS "C++26 Static Reflection supported via -freflection")
 else()
-    message(STATUS "C++26 Static Reflection not supported by current compiler. Using manual macro fallback.")
+    message(STATUS "C++26 Static Reflection not supported by current compiler. Using generated script for source code flattening.")
 endif()
+
+# --- PYTHON INTERPRETER SELECTION ---
+# Prioritize local virtual environment (.venv) if present
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.venv")
+    set(Python3_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/.venv")
+    set(Python3_FIND_REGISTRY LAST)
+endif()
+
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+# Enforce the one-way dependency boundary: optional extras may consume core,
+# while src/, include/, and modules/ must never consume extras.
+execute_process(
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_core_extras_boundary.py"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    RESULT_VARIABLE ZHLN_CORE_EXTRAS_BOUNDARY_RESULT
+    OUTPUT_VARIABLE ZHLN_CORE_EXTRAS_BOUNDARY_OUTPUT
+    ERROR_VARIABLE ZHLN_CORE_EXTRAS_BOUNDARY_ERROR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_STRIP_TRAILING_WHITESPACE
+)
+if(NOT ZHLN_CORE_EXTRAS_BOUNDARY_RESULT EQUAL 0)
+    message(FATAL_ERROR "${ZHLN_CORE_EXTRAS_BOUNDARY_ERROR}")
+endif()
+message(STATUS "${ZHLN_CORE_EXTRAS_BOUNDARY_OUTPUT}")
+
+set(ZHLN_TRANSPILER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/tools/transpile_reflection.py")
+
+function(zahlen_transpile_sources OUT_SOURCES_VAR)
+    if(COMPILER_HAS_REFLECTION)
+        # Native support: Return sources untouched
+        set(${OUT_SOURCES_VAR} ${ARGN} PARENT_SCOPE)
+        return()
+    endif()
+
+    set(PROCESSED_SRCS "")
+    set(ORIG_SOURCE_DIRS "")
+
+    foreach(SRC IN LISTS ARGN)
+        get_filename_component(ABS_SRC "${SRC}" ABSOLUTE)
+        get_filename_component(ABS_DIR "${ABS_SRC}" DIRECTORY)
+        list(APPEND ORIG_SOURCE_DIRS "${ABS_DIR}")
+
+        file(RELATIVE_PATH REL_SRC "${CMAKE_SOURCE_DIR}" "${ABS_SRC}")
+        set(OUT_SRC "${CMAKE_BINARY_DIR}/transpiled/${REL_SRC}")
+        get_filename_component(OUT_DIR "${OUT_SRC}" DIRECTORY)
+
+        file(MAKE_DIRECTORY "${OUT_DIR}")
+
+        # At build time, run the Python transpiler using the compilation database
+        add_custom_command(
+            OUTPUT "${OUT_SRC}"
+            COMMAND Python3::Interpreter "${ZHLN_TRANSPILER_SCRIPT}"
+                    --input "${ABS_SRC}"
+                    --output "${OUT_SRC}"
+                    --compdb "${CMAKE_BINARY_DIR}"
+            DEPENDS "${ABS_SRC}" "${ZHLN_TRANSPILER_SCRIPT}"
+            COMMENT "Flattening Reflection in ${REL_SRC}..."
+            VERBATIM
+        )
+        list(APPEND PROCESSED_SRCS "${OUT_SRC}")
+    endforeach()
+
+    # Register original source directories so transpiled files in build/ can locate relative headers
+    list(REMOVE_DUPLICATES ORIG_SOURCE_DIRS)
+    include_directories(${ORIG_SOURCE_DIRS})
+
+    set(${OUT_SOURCES_VAR} ${PROCESSED_SRCS} PARENT_SCOPE)
+endfunction()
 
 execute_process(
     COMMAND ${CMAKE_CXX_COMPILER} -dumpmachine
@@ -104,12 +184,35 @@ option(USE_SANITIZERS "Enable ASan and UBSan" OFF)
 if(USE_SANITIZERS)
     add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
     add_link_options(-fsanitize=address,undefined)
-    add_definitions(-D__ASAN_ENABLED__)
+    add_definitions(
+        -D__ASAN_ENABLED__
+        -DZHLN_PROJECT_ROOT="${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+
+    # Centralized test environment string for CTest
+    set(ZHLN_TEST_ENVIRONMENT
+        "ASAN_OPTIONS=protect_shadow_gap=0:detect_leaks=1:symbolize=1:halt_on_error=1"
+        "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp:print_suppressions=0"
+        "UBSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/ubsan.supp:print_stacktrace=1:halt_on_error=1"
+        "TSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tsan.supp:halt_on_error=1"
+    )
 endif()
 
 option(ZHLN_DEV_MODE "Enable raw loose-file asset loading for development" ON)
 if(ZHLN_DEV_MODE)
     add_compile_definitions(ZHLN_DEV_MODE)
+endif()
+
+option(ZHLN_IN_DOCKER "Build running inside a Docker container" OFF)
+if(ZHLN_IN_DOCKER)
+    add_compile_definitions(ZHLN_IN_DOCKER=1)
+    message(STATUS "Docker container build mode enabled.")
+endif()
+
+option(ZHLN_BUILD_TESTS "Build engine test suite" ON)
+
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    add_compile_definitions(ZHLN_DEBUG=1)
 endif()
 
 if(APPLE)
@@ -121,88 +224,88 @@ endif()
 set(MI_BUILD_SHARED OFF CACHE BOOL "" FORCE) # Build static lib for easy embedding
 set(MI_BUILD_OBJECT OFF CACHE BOOL "" FORCE)
 set(MI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-add_subdirectory(extern/mimalloc EXCLUDE_FROM_ALL)
-
-
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/mimalloc EXCLUDE_FROM_ALL)
 
 set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-add_subdirectory(${CMAKE_SOURCE_DIR}/extern/glfw SYSTEM)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/glfw SYSTEM)
 
-add_subdirectory(${CMAKE_SOURCE_DIR}/extern/LuaJIT SYSTEM)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/LuaJIT SYSTEM)
 
 set(DOUBLE_PRECISION ON CACHE BOOL "" FORCE)
 set(USE_STD_INCLUDES ON CACHE BOOL "" FORCE)
-set(JPH_BUILD_SHARED_LIBS ON CACHE BOOL "Build Jolt as shared library" FORCE)
-add_subdirectory(${CMAKE_SOURCE_DIR}/extern/JoltPhysics/Build SYSTEM)
+set(USE_RTTI OFF CACHE BOOL "" FORCE)
+set(TARGET_UNIT_TESTS OFF CACHE BOOL "Build Jolt Unit Tests" FORCE)
+set(JPH_BUILD_TESTS OFF CACHE BOOL "Build Jolt Unit Tests" FORCE)
 
-add_subdirectory(${CMAKE_SOURCE_DIR}/extern/VulkanMemoryAllocator SYSTEM)
-add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/SPIRV-Reflect)
-add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/imgui)
+# Force the debug renderer to compile globally, even in Release configurations
+add_compile_definitions(JPH_DEBUG_RENDERER)
+
+set(JPH_BUILD_SHARED_LIBS ON CACHE BOOL "Build Jolt as shared library" FORCE)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/JoltPhysics/Build SYSTEM)
+
+# Force Jolt to export all symbols
+target_compile_definitions(Jolt PUBLIC JPH_SHARED_LIBRARY)
+set_target_properties(Jolt PROPERTIES
+    CXX_VISIBILITY_PRESET default
+    C_VISIBILITY_PRESET default
+    VISIBILITY_INLINES_HIDDEN OFF
+    WINDOWS_EXPORT_ALL_SYMBOLS ON
+)
+
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/VulkanMemoryAllocator SYSTEM)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/SPIRV-Reflect)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui)
 set_target_properties(imgui PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+set(YOGA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(YOGA_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
+
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/yoga EXCLUDE_FROM_ALL SYSTEM)
 
 if(APPLE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-enum-enum-conversion -Wno-deprecated-anon-enum-enum-conversion")
 endif()
 
-add_subdirectory(${CMAKE_SOURCE_DIR}/src/render)
-add_subdirectory(${CMAKE_SOURCE_DIR}/src/threading)
-add_subdirectory(${CMAKE_SOURCE_DIR}/src/physics)
-add_subdirectory(${CMAKE_SOURCE_DIR}/src/ecs)
-add_subdirectory(${CMAKE_SOURCE_DIR}/src/alife)
-add_subdirectory(${CMAKE_SOURCE_DIR}/src/audio)
 
-option(BUILD_TESTING "Build the test suite" OFF)
 
-if(BUILD_TESTING)
-    message(STATUS "Building the test suites...")
-    enable_testing()
-    find_package(GTest REQUIRED)
-    add_executable(zahlen_ssr_test src/ssr_test.cpp)
-    target_link_libraries(zahlen_ssr_test PRIVATE GTest::gtest_main Jolt)
-    target_include_directories(zahlen_ssr_test PRIVATE
-        ${CMAKE_SOURCE_DIR}
-        ${CMAKE_SOURCE_DIR}/include
-        ${CMAKE_SOURCE_DIR}/src
-    )
-    target_compile_definitions(zahlen_ssr_test PRIVATE JPH_DOUBLE_PRECISION)
-    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-        target_compile_options(zahlen_ssr_test PRIVATE -Wno-attributes)
-    endif()
-    add_test(NAME ssr_cpu_test COMMAND zahlen_ssr_test)
-endif()
-
-set(ENGINE_SOURCES
+set(RAW_ENGINE_SOURCES
     src/engine/AssertHandler.cpp
-    src/engine/RenderFrame.cpp
-    src/engine/RenderInit.cpp
-    src/engine/RenderResources.cpp
+    src/engine/DefaultPreset.cpp
+    src/engine/graphics/RenderFrame.cpp
+    src/engine/graphics/RenderGraphBuilder.cpp
+    src/engine/graphics/RenderDrawCommands.cpp
+    src/engine/graphics/RenderInit.cpp
+    src/engine/graphics/RenderResources.cpp
     src/engine/Engine.cpp
     src/engine/CreativeWorksFactory.cpp
-    src/engine/MeshBuilder.cpp
-    src/engine/glTFImporter.cpp
+    src/engine/graphics/MeshBuilder.cpp
+    src/engine/graphics/TextureManager.cpp
+    src/engine/system/TextureSystem.cpp
     src/engine/system/AnimationSystem.cpp
     src/engine/CreativeWorksManager.cpp
     src/engine/Window.cpp
-    src/engine/Input.cpp
     src/engine/Platform.cpp
     src/engine/Scripting.cpp
     src/engine/LuaScriptRuntime.cpp
-    src/engine/ConsoleUI.cpp
-    src/engine/ProfilerUI.cpp
-    src/engine/DiagnosticUI.cpp
+    src/engine/Console.cpp
+    src/engine/Profiler.cpp
     src/engine/Text.cpp
-    src/engine/Resources.cpp
+    src/engine/graphics/Resources.cpp
     src/engine/system/RenderSystem.cpp
+    src/engine/system/DecalSystem.cpp
     src/engine/system/MovementSystem.cpp
     src/engine/system/AudioSystem.cpp
     src/engine/system/ArticulationSystem.cpp
     src/engine/system/CullingSystem.cpp
-    src/engine/Sky.cpp
-    src/engine/BRDFLUT.cpp
-    src/engine/GizmoUI.cpp
+    src/engine/graphics/Sky.cpp
+    src/engine/graphics/BRDFLUT.cpp
     src/engine/system/PhysicsSystem.cpp
+    src/engine/system/TerrainSystem.cpp
+    src/engine/system/LODSystem.cpp
+    src/engine/system/ParticleSystem.cpp
     src/engine/CommandLine.cpp
     src/engine/system/TargetCameraSystem.cpp
     src/engine/TTYBackend.cpp
@@ -211,14 +314,16 @@ set(ENGINE_SOURCES
     src/engine/system/LightingSystem.cpp
     src/engine/system/InputSystem.cpp
     src/engine/system/CameraSystem.cpp
-    src/engine/RenderDocInit.cpp
+    src/engine/graphics/RenderDocInit.cpp
     src/engine/system/InteractionSystem.cpp
     src/engine/system/UIRenderSystem.cpp
     src/engine/system/UIInteractionSystem.cpp
     src/engine/WindowSurface.cpp
-    src/engine/RenderProcedural.cpp
-    src/engine/RenderPasses.cpp
-    src/engine/RenderSetup.cpp
+    src/engine/graphics/RenderProcedural.cpp
+    src/engine/graphics/RenderPasses.cpp
+    src/engine/graphics/RenderSetup.cpp
+    src/engine/ScriptECSBridge.cpp
+    src/engine/JSON.cpp
 )
 
 find_library(ZSTD_LIBRARY NAMES zstd zstd_static HINTS "/opt/homebrew/lib" "/usr/local/lib" "/usr/lib")
@@ -229,6 +334,7 @@ endif()
 if(APPLE)
     # Ensure CMake searches Homebrew's prefix for packages, headers, and libraries
     list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew")
+    link_directories(/opt/homebrew/lib)
 endif()
 
 # Find PkgConfig on both Linux and macOS
@@ -243,8 +349,22 @@ endif()
 # Dependencies needed on both Linux and macOS
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR APPLE)
     pkg_check_modules(FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig)
+    pkg_check_modules(SIMDJSON REQUIRED IMPORTED_TARGET simdjson)
+
+    # Ensure alias exists for consistent linking
+    if(TARGET PkgConfig::SIMDJSON AND NOT TARGET simdjson::simdjson)
+        add_library(simdjson::simdjson ALIAS PkgConfig::SIMDJSON)
+    endif()
 endif()
 
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/render)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/threading)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/physics)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/ecs)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/gltf)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/audio)
+
+# --- ASSEMBLE COMPILER FLAGS METADATA ---
 set(COMPILER_FLAGS_LIST "${CMAKE_CXX_FLAGS}")
 if(CMAKE_BUILD_TYPE)
     string(TOUPPER "${CMAKE_BUILD_TYPE}" UPPER_BUILD_TYPE)
@@ -253,17 +373,48 @@ else()
     set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} ${CMAKE_CXX_FLAGS_DEBUG}")
 endif()
 
-if(NOT MSVC)
-    set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti")
-    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
-        set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} --param=destructive-interference-size=64")
-    endif()
+set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} ${ZHLN_COMPILE_WARNINGS_STR} -fno-exceptions -fno-rtti")
+
+if(COMPILER_HAS_REFLECTION)
+    set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} -freflection")
 endif()
 
 string(STRIP "${COMPILER_FLAGS_LIST}" COMPILER_FLAGS_LIST)
 string(REGEX REPLACE " +" " " COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST}")
 
+zahlen_transpile_sources(ENGINE_SOURCES ${RAW_ENGINE_SOURCES})
+
 add_library(zahlen_engine SHARED ${ENGINE_SOURCES})
+
+target_precompile_headers(zahlen_engine PRIVATE
+    "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/src/render/Rendering.hpp>"
+)
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    set_target_properties(zahlen_engine PROPERTIES DISABLE_PRECOMPILE_HEADERS ON)
+endif()
+
+set_target_properties(zahlen_engine PROPERTIES
+    CXX_STANDARD 26
+    CXX_STANDARD_REQUIRED ON
+)
+
+# --- COMPILE-TIME PROFILING ---
+option(ZHLN_PROFILE_RENDER_FRAME_COMPILE "Enable GCC compile-time profiling for RenderFrame.cpp" OFF)
+
+if(ZHLN_PROFILE_RENDER_FRAME_COMPILE)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        set_source_files_properties(src/engine/graphics/RenderFrame.cpp PROPERTIES
+            COMPILE_OPTIONS "-ftime-report"
+        )
+        message(STATUS "GCC compile-time profiling enabled for RenderFrame.cpp")
+    elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        set_source_files_properties(src/engine/graphics/RenderFrame.cpp PROPERTIES
+            COMPILE_OPTIONS "-ftime-trace"
+        )
+        message(STATUS "Clang time-trace profiling enabled for RenderFrame.cpp")
+    endif()
+endif()
 
 target_compile_definitions(zahlen_engine PRIVATE
     ZHLN_ENGINE_BUILD
@@ -275,12 +426,37 @@ target_compile_definitions(zahlen_engine PRIVATE
     ZHLN_BUILD_TOOL="${CMAKE_GENERATOR}"
     ZHLN_TARGET_TRIPLE="${ZHLN_TARGET_TRIPLE}"
     ZHLN_LINKER_NAME="${ZHLN_LINKER}"
-    ZHLN_COMPILED_SCRIPTS_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+    ZHLN_COMPILED_SCRIPTS_DIR="${CMAKE_BINARY_DIR}"
 )
 
 target_sources(zahlen_engine PRIVATE
-    ${CMAKE_SOURCE_DIR}/extern/stbi_impl.c
-    ${CMAKE_SOURCE_DIR}/extern/cgltf_impl.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/extern/stbi_impl.c
+)
+
+# List all module interface files
+set(ZHLN_MODULE_FILES
+    modules/zahlen-core.cppm
+    modules/zahlen-threading.cppm
+    modules/zahlen-math.cppm
+    modules/zahlen-ecs.cppm
+    modules/zahlen-physics.cppm
+    modules/zahlen-render.cppm
+    modules/zahlen-audio.cppm
+    modules/zahlen-scripting.cppm
+    modules/zahlen-engine.cppm
+    modules/zahlen.cppm
+)
+
+# Prevent CMake from injecting PCH before 'module;' on .cppm files
+set_source_files_properties(${ZHLN_MODULE_FILES} PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+
+# Register C++20/26 module file set
+target_sources(zahlen_engine
+    PUBLIC
+        FILE_SET CXX_MODULES
+        TYPE CXX_MODULES
+        BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/modules
+        FILES ${ZHLN_MODULE_FILES}
 )
 
 target_link_libraries(zahlen_engine PRIVATE
@@ -288,22 +464,22 @@ target_link_libraries(zahlen_engine PRIVATE
     zahlen_physics
     zahlen_threading
     zahlen_ecs
-    zahlen_alife
+    zahlen_gltf
     zahlen_audio
     glfw
     LuaJIT
     spirv_reflect
     imgui
     mimalloc-static
+    yogacore
     ${ZSTD_LIBRARY}
+    PkgConfig::SIMDJSON
 )
 
-# Link Linux-only dependencies
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(zahlen_engine PRIVATE PkgConfig::LIBEVDEV PkgConfig::LIBSEAT)
 endif()
 
-# Link Fontconfig on both Linux and macOS
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR APPLE)
     target_link_libraries(zahlen_engine PRIVATE PkgConfig::FONTCONFIG)
 endif()
@@ -311,40 +487,27 @@ endif()
 target_link_libraries(zahlen_engine PUBLIC Jolt)
 
 target_include_directories(zahlen_engine SYSTEM PRIVATE
-    ${CMAKE_SOURCE_DIR}/extern/JoltPhysics
-    ${CMAKE_SOURCE_DIR}/third_party/renderdoc
+    ${CMAKE_CURRENT_SOURCE_DIR}/extern/JoltPhysics
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/renderdoc
 )
-target_include_directories(zahlen_engine PUBLIC
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/extern/LuaJIT/src
-    ${CMAKE_CURRENT_BINARY_DIR}/generated_shaders
+target_include_directories(zahlen_engine SYSTEM PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/extern/LuaJIT/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/extern/yoga
+    ${CMAKE_BINARY_DIR}/generated_shaders
 )
-target_include_directories(zahlen_engine PRIVATE
-    ${CMAKE_SOURCE_DIR}/extern/cgltf
-    ${CMAKE_SOURCE_DIR}/extern/stb
+target_include_directories(zahlen_engine SYSTEM PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/extern/cgltf
+    ${CMAKE_CURRENT_SOURCE_DIR}/extern/stb
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
-
-if(NOT EXISTS "${CMAKE_SOURCE_DIR}/resources/shaders/SMAA.hlsl")
-    message(STATUS "SMAA.hlsl not found. Downloading from official iryoku/smaa repository...")
-    file(DOWNLOAD
-        "https://raw.githubusercontent.com/iryoku/smaa/master/SMAA.hlsl"
-        "${CMAKE_SOURCE_DIR}/resources/shaders/SMAA.hlsl"
-        SHOW_PROGRESS
-        STATUS DOWNLOAD_STATUS
-    )
-    list(GET DOWNLOAD_STATUS 0 DOWNLOAD_CODE)
-    if(NOT DOWNLOAD_CODE EQUAL 0)
-        message(FATAL_ERROR "Failed to download SMAA.hlsl: ${DOWNLOAD_STATUS}")
-    endif()
-endif()
 
 # --- AUTOMATIC FENNEL BOOTSTRAP DOWNLOADER ---
-if(NOT EXISTS "${CMAKE_SOURCE_DIR}/scripts/core/fennel.lua")
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/fennel.lua")
     message(STATUS "fennel.lua not found. Downloading from official fennel-lang.org...")
     file(DOWNLOAD
         "https://fennel-lang.org/downloads/fennel-1.6.1.lua"
-        "${CMAKE_SOURCE_DIR}/scripts/core/fennel.lua"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/fennel.lua"
         SHOW_PROGRESS
         STATUS DOWNLOAD_STATUS
     )
@@ -356,19 +519,19 @@ endif()
 
 # --- SHADER COMPILATION ---
 include(ShaderCompilation)
+include(ECSCompiler)
 
-# --- FENNEL COMPILER INTEGRATION ---
+# --- FENNEL COMPILER INTEGRATION & EXPORTED HELPERS ---
 find_program(FENNEL_BIN NAMES fennel)
 
-function(compile_fennel TARGET_NAME OUTPUT_LUA_FILES_VAR)
+function(zahlen_compile_fennel TARGET_NAME OUTPUT_LUA_FILES_VAR)
     set(LUA_OUTPUTS "")
     foreach(FNL_SRC IN LISTS ARGN)
         get_filename_component(FILE_NAME_WE ${FNL_SRC} NAME_WLE)
         get_filename_component(FILE_DIR ${FNL_SRC} DIRECTORY)
 
-        # Maintain relative directory structures from the source folder
         file(RELATIVE_PATH REL_PATH "${CMAKE_SOURCE_DIR}" "${FILE_DIR}")
-        set(OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/${REL_PATH}")
+        set(OUT_DIR "${CMAKE_BINARY_DIR}/${REL_PATH}")
         file(MAKE_DIRECTORY "${OUT_DIR}")
 
         set(OUTPUT_LUA "${OUT_DIR}/${FILE_NAME_WE}.lua")
@@ -389,53 +552,45 @@ function(compile_fennel TARGET_NAME OUTPUT_LUA_FILES_VAR)
     set(${OUTPUT_LUA_FILES_VAR} ${LUA_OUTPUTS} PARENT_SCOPE)
 endfunction()
 
-# --- PREVENT CIRCULAR DIRECTORY SYMLINKS ---
-# If the build directory has a stale directory symlink, remove it so it can be
-# generated as a real folder with individual script links instead.
-if(IS_SYMLINK "${CMAKE_CURRENT_BINARY_DIR}/scripts")
-    message(STATUS "Removing stale scripts directory symlink: ${CMAKE_CURRENT_BINARY_DIR}/scripts")
-    file(REMOVE "${CMAKE_CURRENT_BINARY_DIR}/scripts")
+if(IS_SYMLINK "${CMAKE_BINARY_DIR}/scripts")
+    message(STATUS "Removing stale scripts directory symlink: ${CMAKE_BINARY_DIR}/scripts")
+    file(REMOVE "${CMAKE_BINARY_DIR}/scripts")
 endif()
 
-# 1. Compile all Fennel files directly into the build folder
-compile_fennel(zahlen_engine COMPILED_LUA_FILES
-    "${CMAKE_SOURCE_DIR}/scripts/core/memoryview.fnl"
-    "${CMAKE_SOURCE_DIR}/scripts/core/zahlen.fnl"
-    "${CMAKE_SOURCE_DIR}/scripts/core/ecs.fnl"
-    "${CMAKE_SOURCE_DIR}/scripts/core/dialogue.fnl"
-    "${CMAKE_SOURCE_DIR}/scripts/core/inventory.fnl"
-    "${CMAKE_SOURCE_DIR}/scripts/core/ffi_cdef.fnl"
-    "${CMAKE_SOURCE_DIR}/scripts/gameplay.fnl"
-    "${CMAKE_SOURCE_DIR}/scripts/gameplay_template.fnl"
-    "${CMAKE_SOURCE_DIR}/scripts/main_menu.fnl"
-    "${CMAKE_SOURCE_DIR}/scripts/dialogue_db.fnl"
+# 1. Compile Engine Core Fennel files
+zahlen_compile_fennel(zahlen_engine COMPILED_CORE_LUA_FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/memoryview.fnl"
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/zahlen.fnl"
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/ecs.fnl"
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/dialogue.fnl"
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/inventory.fnl"
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/ffi_cdef.fnl"
 )
 
-# 2. Selectively copy or link static non-Fennel files (e.g. boot.lua, fennel.lua)
-file(GLOB_RECURSE STATIC_SCRIPT_FILES
+# 2. Selectively copy or link static non-Fennel core script files
+file(GLOB_RECURSE STATIC_CORE_SCRIPT_FILES
     LIST_DIRECTORIES false
-    "${CMAKE_SOURCE_DIR}/scripts/*.lua"
-    "${CMAKE_SOURCE_DIR}/scripts/*.sh"
-    "${CMAKE_SOURCE_DIR}/scripts/*.txt"
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/*.lua"
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/*.sh"
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/*.txt"
 )
 
 set(STATIC_SCRIPT_SYMLINKS "")
-foreach(STATIC_SRC IN LISTS STATIC_SCRIPT_FILES)
-    file(RELATIVE_PATH REL_FILE "${CMAKE_SOURCE_DIR}/scripts" "${STATIC_SRC}")
+foreach(STATIC_SRC IN LISTS STATIC_CORE_SCRIPT_FILES)
+    file(RELATIVE_PATH REL_FILE "${CMAKE_CURRENT_SOURCE_DIR}/scripts" "${STATIC_SRC}")
     get_filename_component(REL_DIR "${REL_FILE}" DIRECTORY)
 
-    set(OUT_FILE "${CMAKE_CURRENT_BINARY_DIR}/scripts/${REL_FILE}")
-    set(OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/scripts/${REL_DIR}")
+    set(OUT_FILE "${CMAKE_BINARY_DIR}/scripts/${REL_FILE}")
+    set(OUT_DIR "${CMAKE_BINARY_DIR}/scripts/${REL_DIR}")
 
     file(MAKE_DIRECTORY "${OUT_DIR}")
 
     if(WIN32)
-        # Windows symlinking often requires elevation; copy is safer for local dev
         add_custom_command(
             OUTPUT "${OUT_FILE}"
             COMMAND ${CMAKE_COMMAND} -E copy "${STATIC_SRC}" "${OUT_FILE}"
             DEPENDS "${STATIC_SRC}"
-            COMMENT "Copying static script: ${REL_FILE}"
+            COMMENT "Copying static core script: ${REL_FILE}"
             VERBATIM
         )
     else()
@@ -443,28 +598,33 @@ foreach(STATIC_SRC IN LISTS STATIC_SCRIPT_FILES)
             OUTPUT "${OUT_FILE}"
             COMMAND ${CMAKE_COMMAND} -E create_symlink "${STATIC_SRC}" "${OUT_FILE}"
             DEPENDS "${STATIC_SRC}"
-            COMMENT "Symlinking static script: ${REL_FILE}"
+            COMMENT "Symlinking static core script: ${REL_FILE}"
             VERBATIM
         )
     endif()
     list(APPEND STATIC_SCRIPT_SYMLINKS "${OUT_FILE}")
 endforeach()
 
-add_custom_target(sync_static_scripts DEPENDS ${STATIC_SCRIPT_SYMLINKS})
+add_custom_target(sync_static_core_scripts DEPENDS ${STATIC_SCRIPT_SYMLINKS})
 
-# 3. Create a target blocking engine compilation until all scripts are generated
-add_custom_target(zahlen_fennel_compilation ALL DEPENDS ${COMPILED_LUA_FILES})
-add_dependencies(zahlen_fennel_compilation sync_static_scripts)
+# 3. Create a target blocking engine compilation until all core scripts are generated
+add_custom_target(zahlen_fennel_compilation ALL DEPENDS ${COMPILED_CORE_LUA_FILES})
+add_dependencies(zahlen_fennel_compilation sync_static_core_scripts)
 add_dependencies(zahlen_engine zahlen_fennel_compilation)
 
+# --- ENGINE LAUNCHER & EDITOR EXECUTABLE ---
 add_executable(zahlen
     src/main.cpp
-    src/game_main.cpp
-    src/editor_main.cpp
 )
-target_link_libraries(zahlen PRIVATE zahlen_engine imgui)
+target_link_libraries(zahlen PRIVATE zahlen_engine imgui Jolt)
 target_compile_definitions(zahlen PRIVATE JPH_DOUBLE_PRECISION)
 
+set_target_properties(zahlen PROPERTIES
+    CXX_STANDARD 26
+    CXX_STANDARD_REQUIRED ON
+)
+
+# --- ASSET COMPILER (ZCOOK) ---
 add_executable(zcook
     src/zcook/main.cpp
     src/zcook/Transform.cpp
@@ -472,53 +632,53 @@ add_executable(zcook
     src/zcook/Cook.cpp
 )
 target_link_libraries(zcook PRIVATE zahlen_engine)
-target_include_directories(zcook PRIVATE
-    ${CMAKE_SOURCE_DIR}/extern/cgltf
-    ${CMAKE_SOURCE_DIR}/src/zcook
+target_include_directories(zcook SYSTEM PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/extern/cgltf
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/zcook
 )
 
-# Generates the safe, non-colliding assets.ninja blueprint
-add_custom_command(
-    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/assets.ninja"
-    COMMAND python3 "${CMAKE_SOURCE_DIR}/configure_assets.py" "${CMAKE_CURRENT_BINARY_DIR}/assets.ninja" "$<TARGET_FILE:zcook>" "${CMAKE_SOURCE_DIR}"
-    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
-    DEPENDS "${CMAKE_SOURCE_DIR}/configure_assets.py"
-            "${CMAKE_SOURCE_DIR}/tools/export_metadata.py" # Track changes to the exporter script
-    COMMENT "Scanning asset folders and generating assets.ninja..."
-)
+# Function for consumer Game projects to configure asset cooking via Ninja
+function(zahlen_configure_game_assets GAME_SOURCE_DIR)
+    add_custom_command(
+        OUTPUT "${CMAKE_BINARY_DIR}/assets.ninja"
+        COMMAND python3 "${zahlen_SOURCE_DIR}/configure_assets.py"
+                "${CMAKE_BINARY_DIR}/assets.ninja"
+                "$<TARGET_FILE:zcook>"
+                "${GAME_SOURCE_DIR}"
+        WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+        DEPENDS "${zahlen_SOURCE_DIR}/configure_assets.py"
+                "${zahlen_SOURCE_DIR}/tools/export_metadata.py"
+        COMMENT "Scanning asset folders and generating assets.ninja..."
+    )
 
-# Executes the Ninja asset build pipeline in parallel
-add_custom_target(cook_assets ALL
-    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:zahlen>/data"
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/build_assets"
-    COMMAND ninja -f "${CMAKE_CURRENT_BINARY_DIR}/assets.ninja"
-    COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_BINARY_DIR}/data/base.pak" "$<TARGET_FILE_DIR:zahlen>/data/base.pak"
-    DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/assets.ninja"
-    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
-    COMMENT "Cooking assets in parallel using Ninja..."
-    USES_TERMINAL
-)
+    add_custom_target(cook_assets ALL
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:zahlen>/data"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/build_assets"
+        COMMAND ninja -f "${CMAKE_BINARY_DIR}/assets.ninja"
+        COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_BINARY_DIR}/data/base.pak" "$<TARGET_FILE_DIR:zahlen>/data/base.pak"
+        DEPENDS "${CMAKE_BINARY_DIR}/assets.ninja"
+        WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+        COMMENT "Cooking assets in parallel using Ninja..."
+        USES_TERMINAL
+    )
+    add_dependencies(cook_assets zcook)
+    add_dependencies(zahlen cook_assets)
+endfunction()
 
-add_dependencies(cook_assets zcook)
+# If building engine standalone (not as a submodule), cook local engine assets
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    zahlen_configure_game_assets("${CMAKE_CURRENT_SOURCE_DIR}")
+endif()
 
 if(NOT MSVC)
-    # Define flags that should ONLY apply to GNU/GCC
-    set(GCC_ONLY_FLAGS
-        "--param=destructive-interference-size=64"
-        "-Wno-interference-size"
-        "-fno-exceptions"
-        "-fno-rtti"
-    )
-
-    target_compile_options(zahlen_engine PRIVATE
-        $<$<AND:$<CXX_COMPILER_ID:GNU>,$<COMPILE_LANGUAGE:CXX>>:${GCC_ONLY_FLAGS}>
-
-        # General warnings (always applied to non-MSVC)
-        $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic>
-    )
-
-    target_compile_options(zahlen PRIVATE
-        $<$<AND:$<CXX_COMPILER_ID:GNU>,$<COMPILE_LANGUAGE:CXX>>:-fno-exceptions -fno-rtti>
+    # Module producers and every transitive consumer must agree on these ABI
+    # modes. Publish them from the engine target so core/extras PCMs, tools,
+    # samples, and tests cannot drift into incompatible configurations.
+    target_compile_options(zahlen_engine
+        PUBLIC $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>
+        PRIVATE
+            $<$<AND:$<CXX_COMPILER_ID:GNU>,$<COMPILE_LANGUAGE:CXX>>:${GCC_ONLY_FLAGS}>
+            $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic>
     )
     if(WIN32)
         target_link_options(zahlen_engine PRIVATE -Xlinker /subsystem:console)
@@ -534,13 +694,12 @@ target_compile_options(zahlen_render PRIVATE
 
 add_custom_target(link_resources ALL
     COMMAND ${CMAKE_COMMAND}
-        -D SRC="${CMAKE_SOURCE_DIR}/resources"
-        -D DST="${CMAKE_CURRENT_BINARY_DIR}/resources"
-        -P "${CMAKE_SOURCE_DIR}/cmake/CreateSymlinks.cmake"
+        -D SRC="${CMAKE_CURRENT_SOURCE_DIR}/resources"
+        -D DST="${CMAKE_BINARY_DIR}/resources"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CreateSymlinks.cmake"
     COMMENT "Creating zero-copy symlinks for resources..."
 )
 
-add_dependencies(zahlen cook_assets)
 add_dependencies(zahlen link_resources)
 
 if(USE_SANITIZERS)
@@ -558,9 +717,89 @@ if(USE_SANITIZERS)
 endif()
 
 # --- APPLY TARGET-SPECIFIC REFLECTION FLAGS ---
-if(COMPILER_HAS_REFLECTION)
-    # Target-specific C++ only flags via generator expressions ($<COMPILE_LANGUAGE:CXX>)
-    target_compile_options(zahlen_render PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
-    target_compile_options(zahlen_engine PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
-    target_compile_options(zahlen PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
+
+function(zahlen_use_custom_libcxx TARGET_NAME)
+    option(ZHLN_USE_CUSTOM_LIBCXX "Link against Bloomberg custom libc++" OFF)
+
+    # Only apply custom LLVM libc++ when explicitly enabled on Clang
+    if(NOT ZHLN_USE_CUSTOM_LIBCXX OR CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+        return()
+    endif()
+
+    get_filename_component(_DEFAULT_LLVM_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../llvm-p2996" ABSOLUTE)
+    set(LLVM_BLOOMBERG_ROOT "${_DEFAULT_LLVM_ROOT}" CACHE PATH "Path to Bloomberg LLVM monorepo")
+    set(LLVM_BLOOMBERG_BUILD "${LLVM_BLOOMBERG_ROOT}/build" CACHE PATH "Path to Bloomberg LLVM build directory")
+
+    if(NOT EXISTS "${LLVM_BLOOMBERG_ROOT}")
+        message(FATAL_ERROR "ZHLN_USE_CUSTOM_LIBCXX is ON, but LLVM root was not found at: ${LLVM_BLOOMBERG_ROOT}\n"
+                           "Pass -DLLVM_BLOOMBERG_ROOT=/path/to/llvm-p2996 to configure manually.")
+    endif()
+
+    file(GLOB _LLVM_LIB_SUBDIRS LIST_DIRECTORIES true "${LLVM_BLOOMBERG_BUILD}/lib/*")
+    set(_ALL_LLVM_LIB_DIRS "${LLVM_BLOOMBERG_BUILD}/lib")
+    foreach(_DIR IN LISTS _LLVM_LIB_SUBDIRS)
+        if(IS_DIRECTORY "${_DIR}")
+            list(APPEND _ALL_LLVM_LIB_DIRS "${_DIR}")
+        endif()
+    endforeach()
+
+    target_compile_options(${TARGET_NAME} PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>
+    )
+
+    foreach(_LIB_DIR IN LISTS _ALL_LLVM_LIB_DIRS)
+        target_link_options(${TARGET_NAME} PRIVATE
+            $<$<PLATFORM_ID:Linux>:-L${_LIB_DIR}>
+            $<$<PLATFORM_ID:Linux>:-Wl,-rpath,${_LIB_DIR}>
+        )
+    endforeach()
+
+    target_link_options(${TARGET_NAME} PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>
+    )
+
+    target_link_libraries(${TARGET_NAME} PRIVATE
+        c++
+        c++abi
+        unwind
+    )
+endfunction()
+
+function(zahlen_enable_reflection TARGET_NAME)
+    if(COMPILER_HAS_REFLECTION)
+        target_compile_options(${TARGET_NAME} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
+        if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+            target_compile_options(${TARGET_NAME} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-fannotation-attributes>")
+        endif()
+        target_compile_definitions(${TARGET_NAME} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:__cpp_impl_reflection=202603L>")
+    endif()
+    zahlen_use_custom_libcxx(${TARGET_NAME})
+endfunction()
+
+zahlen_enable_reflection(zahlen_render)
+zahlen_enable_reflection(zahlen_engine)
+zahlen_enable_reflection(zahlen_gltf)
+zahlen_enable_reflection(zahlen)
+zahlen_enable_reflection(zcook)
+
+option(ZHLN_BUILD_EXTRAS "Build first-party engine feature modules and VFX toolkits" ON)
+
+if(ZHLN_BUILD_EXTRAS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extras")
+    add_subdirectory(extras)
 endif()
+
+# --- TESTS ---
+if(ZHLN_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
+
+# --- SAMPLES ---
+option(ZHLN_BUILD_SAMPLES "Build engine sample applications" ON)
+
+if(ZHLN_BUILD_SAMPLES AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/samples")
+    add_subdirectory(samples)
+endif()
+
+
+target_link_libraries(zahlen_engine PRIVATE zahlen_warnings)

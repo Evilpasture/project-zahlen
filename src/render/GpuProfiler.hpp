@@ -9,42 +9,19 @@
 #error "Please include <src/render/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include <Zahlen/Core/Reflection.hpp>
+
 namespace ZHLN::Profiler {
 
 // ============================================================================
-// Compile-Time Type Helpers (TMP)
+// Double-Buffered Reflection-Driven GPU Profiler
 // ============================================================================
 
-template <typename T, typename... List>
-concept ContainsType = (std::same_as<T, List> || ...);
-
-template <typename T, typename... Us>
-struct TypeIndex;
-
-template <typename T, typename... Us>
-struct TypeIndex<T, T, Us...> {
-    static constexpr size_t value = 0;
-};
-
-template <typename T, typename U, typename... Us>
-struct TypeIndex<T, U, Us...> {
-    static constexpr size_t value = 1 + TypeIndex<T, Us...>::value;
-};
-
-// Concept for Stage Tags
-template <typename T>
-concept GpuStageTag = requires {
-    { T::name } -> std::convertible_to<std::string_view>;
-};
-
-// ============================================================================
-// Double-Buffered TMP GPU Profiler
-// ============================================================================
-
-template <GpuStageTag... Stages>
+template <typename EnumT>
+    requires std::is_enum_v<EnumT>
 class GpuProfiler {
   public:
-    static constexpr uint32_t kStageCount = sizeof...(Stages);
+    static constexpr uint32_t kStageCount = static_cast<uint32_t>(Reflect::EnumCount<EnumT>());
     static constexpr uint32_t kQueryCount = kStageCount * 2; // Start & End for each stage
 
     GpuProfiler() noexcept = default;
@@ -64,13 +41,10 @@ class GpuProfiler {
      */
     void Reset(uint32_t frameIndex) noexcept;
 
-    // --- Compile-Time Resolved Writes ---
+    // --- Writes ---
 
-    template <GpuStageTag Stage>
-    void WriteStart(VkCommandBuffer cmd, uint32_t frameIndex) const noexcept;
-
-    template <GpuStageTag Stage>
-    void WriteEnd(VkCommandBuffer cmd, uint32_t frameIndex) const noexcept;
+    void WriteStart(VkCommandBuffer cmd, uint32_t frameIndex, EnumT stage) const noexcept;
+    void WriteEnd(VkCommandBuffer cmd, uint32_t frameIndex, EnumT stage) const noexcept;
 
     // --- Results Extraction ---
     template <typename Func>
@@ -87,20 +61,25 @@ class GpuProfiler {
 // RAII Compile-Time Scope Guard
 // ============================================================================
 
-template <GpuStageTag Stage, typename ProfilerT>
+template <typename EnumT>
 class ScopedGpuProfile {
   public:
-    ScopedGpuProfile(VkCommandBuffer cmd, uint32_t frameIndex, const ProfilerT& profiler) noexcept;
+    ScopedGpuProfile(VkCommandBuffer cmd, uint32_t frameIndex, const GpuProfiler<EnumT>& profiler, EnumT stage) noexcept;
     ~ScopedGpuProfile() noexcept;
 
     ScopedGpuProfile(const ScopedGpuProfile&)                    = delete;
     auto operator=(const ScopedGpuProfile&) -> ScopedGpuProfile& = delete;
 
   private:
-    VkCommandBuffer  _cmd;
-    uint32_t         _frameIndex;
-    const ProfilerT& _profiler;
+    VkCommandBuffer           _cmd;
+    uint32_t                  _frameIndex;
+    const GpuProfiler<EnumT>& _profiler;
+    EnumT                     _stage;
 };
+
+// CTAD Deduction Guide
+template <typename EnumT>
+ScopedGpuProfile(VkCommandBuffer, uint32_t, const GpuProfiler<EnumT>&, EnumT) -> ScopedGpuProfile<EnumT>;
 
 } // namespace ZHLN::Profiler
 
