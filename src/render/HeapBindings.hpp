@@ -112,7 +112,12 @@ inline void BuildHeapPassBindings(
                     entry.resourceMask = VK_SPIRV_RESOURCE_TYPE_UNIFORM_BUFFER_BIT_EXT;
                     break;
                 case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
-                    entry.resourceMask = VK_SPIRV_RESOURCE_TYPE_READ_ONLY_STORAGE_BUFFER_BIT_EXT;
+                    // Slang decorates neither StructuredBuffer (read-only) nor
+                    // RWStructuredBuffer with NonWritable/NonReadable, so a
+                    // READ_ONLY mask never matches (VUID-...-flags-11312) and
+                    // RW vs RO is indistinguishable from the reflected
+                    // VkDescriptorType. Accept every storage-buffer variable.
+                    entry.resourceMask = VK_SPIRV_RESOURCE_TYPE_ALL_EXT;
                     break;
                 case VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR:
                     entry.resourceMask = VK_SPIRV_RESOURCE_TYPE_ACCELERATION_STRUCTURE_BIT_EXT;

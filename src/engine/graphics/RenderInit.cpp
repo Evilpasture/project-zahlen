@@ -929,7 +929,9 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
 
                     auto make_cluster_set = [&](uint32_t i) -> std::expected<void, Error> {
                         return Vk::Buffer::Create(
-                                   allocator.Get(), sizeof(ClusterVolume) * numClusters, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                   allocator.Get(), sizeof(ClusterVolume) * numClusters,
+                                   // VK_EXT_descriptor_heap: heap buffer descriptors need device addresses.
+                                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                                    VMA_MEMORY_USAGE_GPU_ONLY
                         )
                             .transform_error([](VkResult res) -> Error { return res; })

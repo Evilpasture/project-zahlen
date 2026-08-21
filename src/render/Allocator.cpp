@@ -135,8 +135,8 @@ auto Buffer::Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usag
     }
 
     // VMA 3.1+: honor additional alignment requirements of the allocation
-    // (only honored on VMA versions that support VmaAllocationCreateInfo::minAlignment).
-#if VMA_VERSION_NUMBER >= 3010000
+    // (VmaAllocationCreateInfo::minAlignment only exists from VMA 3.1.0).
+#if defined(VMA_VERSION_MAJOR) && defined(VMA_VERSION_MINOR) && (VMA_VERSION_MAJOR > 3 || (VMA_VERSION_MAJOR == 3 && VMA_VERSION_MINOR >= 1))
     alloc_info.minAlignment = minAlignment;
 #endif
 

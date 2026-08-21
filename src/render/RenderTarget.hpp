@@ -113,11 +113,16 @@ struct MipmappedRenderTarget {
 
         auto img_res = Image::Create(allocator.Get(), info, VMA_MEMORY_USAGE_GPU_ONLY);
         if (img_res.has_value()) {
-            target.image    = std::move(img_res.value());
-            target.fullView = CreateView<F>(ctx.Device(), target.image.Handle(), GetFormatAspect(F), target.mipLevels);
+            target.image        = std::move(img_res.value());
+            target.fullView     = CreateView<F>(ctx.Device(), target.image.Handle(), GetFormatAspect(F), target.mipLevels);
+            target.fullViewInfo = MakeViewCreateInfo2D(target.image.Handle(), F, target.mipLevels, GetFormatAspect(F));
             target.mipViews.reserve(target.mipLevels);
+            target.mipViewInfos.reserve(target.mipLevels);
             for (uint32_t m = 0; m < target.mipLevels; ++m) {
                 target.mipViews.push_back(CreateViewSingleMip<F>(ctx.Device(), target.image.Handle(), m, GetFormatAspect(F)));
+                VkImageViewCreateInfo mipInfo = MakeViewCreateInfo2D(target.image.Handle(), F, 1, GetFormatAspect(F));
+                mipInfo.subresourceRange.baseMipLevel = m;
+                target.mipViewInfos.push_back(mipInfo);
             }
         }
         return target;
