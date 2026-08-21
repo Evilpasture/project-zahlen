@@ -452,9 +452,11 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
             const auto cmd     = _impl->pools.Cmd(_impl->frame_index);
             _impl->current_cmd = cmd;
 
-            vkResetFences(_impl->ctx.Device(), 1, &_impl->sync[_impl->frame_index].in_flight);
+            _impl->sync.ResetFence(_impl->frame_index);
             _impl->pools[_impl->frame_index].Reset();
-            ZHLN_BeginCommandBuffer(cmd);
+
+            // RAII command-buffer scope: begin on construction, end on exit.
+            Vk::CommandBufferGuard recordGuard(cmd);
 
             _impl->pendingAcquires.Drain(cmd);
             _impl->DispatchSkinningPasses();
@@ -503,8 +505,7 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
             if (Diag::IndirectTelemetryEnabled()) {
                 _impl->RecordIndirectTelemetry(cmd);
             }
-
-            ZHLN_EndCommandBuffer(cmd);
+            // recordGuard destructor ends the command buffer here.
 
             // Submit directly to the graphics queue with timeline semaphore sync.
             // Wait on the compute timeline (same as the windowed path) and signal

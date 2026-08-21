@@ -1,5 +1,20 @@
 // dear imgui: Renderer Backend for Vulkan
 // This needs to be used along with a Platform Backend (e.g. GLFW, SDL, Win32, custom..)
+//
+// -----------------------------------------------------------------------------
+// ZAHLEN FORK — MAINTENANCE NOTE
+// This is a patched copy of imgui_impl_vulkan.{h,cpp} from Dear ImGui 1.92.8
+// that adds a VK_EXT_descriptor_heap rendering mode. The original file is kept
+// unmodified at third_party/imgui/backends/imgui_impl_vulkan.{h,cpp} (not
+// compiled); diff against it to see the exact delta.
+//
+// Every fork-specific change is guarded by bd->HeapMode (default off) so the
+// legacy descriptor-set path still compiles and matches upstream behavior.
+// To upgrade: copy the new upstream files over the *_vulkan.* pair, re-copy
+// them to *_vulkan_heap.*, run the symbol rename, and re-apply the hunks
+// tagged "ZAHLN FORK" in the .cpp. A `git diff --no-index imgui_impl_vulkan.cpp
+// imgui_impl_vulkan_heap.cpp` against the new upstream shows what to re-apply.
+// -----------------------------------------------------------------------------
 
 // Implemented features:
 //  [!] Renderer: User texture binding. Use a VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE 'VkDescriptorSet' as texture identifier. Call ImGui_ImplVulkanHeap_AddTexture() to register one. Read the FAQ about ImTextureID/ImTextureRef + https://github.com/ocornut/imgui/pull/914 for discussions.

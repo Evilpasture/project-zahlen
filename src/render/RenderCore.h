@@ -545,8 +545,6 @@ void ZHLN_DestroyImageView(VkDevice device, VkImageView view);
 [[nodiscard]]
 VkSampler ZHLN_CreateSampler(VkDevice device, const VkSamplerCreateInfo* desc);
 void      ZHLN_DestroySampler(VkDevice device, VkSampler sampler);
-void      ZHLN_DestroyDescriptorSetLayout(VkDevice device, VkDescriptorSetLayout layout);
-void      ZHLN_DestroyDescriptorPool(VkDevice device, VkDescriptorPool pool);
 
 /* --- COMPUTE PIPELINE --- */
 

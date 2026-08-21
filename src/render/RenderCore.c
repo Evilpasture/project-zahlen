@@ -1735,12 +1735,6 @@ VkSampler ZHLN_CreateSampler(VkDevice device, const VkSamplerCreateInfo* desc) {
 void ZHLN_DestroySampler(const VkDevice device, const VkSampler sampler) {
     vkDestroySampler(device, sampler, nullptr);
 }
-void ZHLN_DestroyDescriptorSetLayout(const VkDevice device, const VkDescriptorSetLayout layout) {
-    vkDestroyDescriptorSetLayout(device, layout, nullptr);
-}
-void ZHLN_DestroyDescriptorPool(const VkDevice device, const VkDescriptorPool pool) {
-    vkDestroyDescriptorPool(device, pool, nullptr);
-}
 
 [[nodiscard]]
 VkPipeline ZHLN_CreateComputePipeline(const VkDevice device, const ZHLN_ComputePipelineDesc* const restrict desc) {

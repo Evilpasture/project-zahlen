@@ -112,11 +112,6 @@ auto ComputePipelineBuilder::Validate() const noexcept -> PipelineBuilderResult 
 PipelineLayoutBuilder::PipelineLayoutBuilder(VkDevice device) noexcept: _device(device) {
 }
 
-PipelineLayoutBuilder& PipelineLayoutBuilder::AddDescriptorSetLayout(VkDescriptorSetLayout layout) noexcept {
-    _setLayouts.push_back(layout);
-    return *this;
-}
-
 PipelineLayoutBuilder& PipelineLayoutBuilder::AddPushConstant(VkShaderStageFlags stages, uint32_t size, uint32_t offset) noexcept {
     _pushConstants.push_back({.stageFlags = stages, .offset = offset, .size = size});
     return *this;
@@ -124,8 +119,8 @@ PipelineLayoutBuilder& PipelineLayoutBuilder::AddPushConstant(VkShaderStageFlags
 
 auto PipelineLayoutBuilder::Build() const noexcept -> std::expected<PipelineLayout, ZHLN::Error> {
     const ZHLN_PipelineLayoutDesc desc = {
-        .set_layouts         = _setLayouts.empty() ? nullptr : _setLayouts.data(),
-        .set_layout_count    = static_cast<uint32_t>(_setLayouts.size()),
+        .set_layouts         = nullptr,
+        .set_layout_count    = 0,
         .push_constants      = _pushConstants.empty() ? nullptr : _pushConstants.data(),
         .push_constant_count = static_cast<uint32_t>(_pushConstants.size())
     };

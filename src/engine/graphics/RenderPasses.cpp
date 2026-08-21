@@ -77,13 +77,7 @@ void DrawCSGMeshes(const FrameRecorder& recorder, VkExtent3D extent) noexcept {
     ZHLN::ScopedTimer profTimer("GPU Stencil CSG Passes");
 
     for (const auto& csgCmd: ctx.queues.csgDrawQueue) {
-        VkClearAttachment clearAttachment = {
-            .aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT, .colorAttachment = {}, .clearValue = {.depthStencil = {.depth = 1.0f, .stencil = 0}}
-        };
-        VkClearRect clearRect = {
-            .rect = {.offset = {.x = 0, .y = 0}, .extent = {.width = extent.width, .height = extent.height}}, .baseArrayLayer = 0, .layerCount = 1
-        };
-        vkCmdClearAttachments(cmd, 1, &clearAttachment, 1, &clearRect);
+        Vk::ClearStencilAttachment(cmd, {.width = extent.width, .height = extent.height});
 
         for (const auto& cutter: csgCmd.cutters) {
             const ObjectConstants push = {.instanceId = cutter.instanceIdx, .isShadowPass = 0};

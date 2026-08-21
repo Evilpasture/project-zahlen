@@ -431,4 +431,31 @@ inline void ExecutePasses(VkCommandBuffer cmd, std::span<const PassDesc> passes)
     }
 }
 
+
+// ============================================================================
+// Attachment Clear Helpers (wraps vkCmdClearAttachments for in-pass clears)
+// ============================================================================
+
+/// Clears one attachment region inside the current render pass instance.
+inline void ClearAttachment(
+    VkCommandBuffer cmd, VkImageAspectFlags aspectMask, VkExtent2D extent, const VkClearValue& value, uint32_t baseArrayLayer = 0, uint32_t layerCount = 1
+) noexcept {
+    const VkClearAttachment attachment = {
+        .aspectMask      = aspectMask,
+        .colorAttachment = 0,
+        .clearValue      = value,
+    };
+    const VkClearRect rect = {
+        .rect           = {.offset = {0, 0}, .extent = extent},
+        .baseArrayLayer = baseArrayLayer,
+        .layerCount     = layerCount,
+    };
+    vkCmdClearAttachments(cmd, 1, &attachment, 1, &rect);
+}
+
+/// Clears the stencil aspect of the bound depth/stencil attachment (CSG passes).
+inline void ClearStencilAttachment(VkCommandBuffer cmd, VkExtent2D extent, uint32_t stencil = 0) noexcept {
+    ClearAttachment(cmd, VK_IMAGE_ASPECT_STENCIL_BIT, extent, {.depthStencil = {.depth = 1.0f, .stencil = stencil}});
+}
+
 } // namespace ZHLN::Vk

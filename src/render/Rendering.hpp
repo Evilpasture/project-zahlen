@@ -6,8 +6,7 @@
 #pragma once
 
 #if defined(ZHLN_LEGACY_VULKAN_1_1)
-#include "legacy/DynamicPass.hpp"
-#include "legacy/PassCache.hpp"
+// (legacy dynamic-pass/framebuffer cache removed with the descriptor-set model)
 // Alias modern namespace target to the legacy Vulkan 1.1 implementation
 namespace ZHLN::Vk {
 static constexpr auto isLegacy = true;
@@ -81,7 +80,7 @@ static constexpr auto isLegacy = false;
 #include "ImageView.hpp"
 #include "RenderCore.hpp"    
 #include "DynamicRendering.hpp"
-#include "DescriptorLayout.hpp"
+#include "DescriptorWrites.hpp"
 #include "ReflectedLayout.hpp"
 #include "SlangReflectedLayout.hpp"
 #include "Raytracing.hpp"
@@ -98,7 +97,6 @@ static constexpr auto isLegacy = false;
 #include "Postprocessing.hpp"
 #include "GpuProfiler.hpp"
 #include "PresentationContext.hpp"
-#include "Texture.hpp"
 #include "ParallelRecorder.hpp"
 #include "ParallelDraw.hpp"
 #include "RenderGraph.hpp"

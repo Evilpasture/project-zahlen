@@ -138,22 +138,14 @@ call `BindHeapsAndPushFrame()` at the start of their segment; the remaining
 legacy passes (HiZ, cluster culling, volumetric, post-processing, ImGui) still
 use descriptor sets and are ordered so their invalidations are harmless.
 
-### Legacy Descriptor Set Definition (unported passes)
-Unported passes still declare descriptor sets using a static template DSL,
-defining binding slots, types, and shader stages at compile-time:
-```cpp
-using MaterialLayout = Vk::DescriptorLayout<
-    Vk::SampledImageSlot<0, VK_SHADER_STAGE_FRAGMENT_BIT>, // Texture binding at slot 0
-    Vk::SamplerSlot<1, VK_SHADER_STAGE_FRAGMENT_BIT>       // Sampler binding at slot 1
->;
-```
-You write updates to these descriptor sets using the `Write` interface, which uses compile-time checks to ensure that only `ImageWrite` structs are passed to Image slots, and `SamplerWrite` structs are passed to Sampler slots:
-```cpp
-MaterialLayout::Write(device, descriptorSet, 
-    Vk::ImageWrite{.view = textureView},
-    Vk::SamplerWrite{.sampler = linearSampler}
-);
-```
+### Descriptor Bindings (heaps only)
+The descriptor-set DSL (`DescriptorLayout<...>`, descriptor pools, set
+layouts) has been removed: every pass now reflects its binding structure from
+SPIR-V (SPIRV-Reflect in `UnsafeReflectedLayoutBuilder`), bakes it into a
+`VkDescriptorSetAndBindingMappingEXT` table (`HeapBindings.hpp`), and writes
+descriptors into the heaps via `WriteHeapBindings` /
+`vkWriteResourceDescriptorsEXT`. Pass argument order mirrors the shader's
+set-0 declaration order; `SkipWrite` marks trailing sampler slots.
 
 ---
 

@@ -38,6 +38,15 @@ class FrameSync {
         return vkWaitForFences(_device, 1, &_frames[frameIndex % N].in_flight, VK_TRUE, UINT64_MAX);
     }
 
+    /**
+     * @brief Resets the target frame's in-flight fence (reuse before recording).
+     */
+    void ResetFence(uint32_t frameIndex) const noexcept {
+        if (_device != VK_NULL_HANDLE) {
+            vkResetFences(_device, 1, &_frames[frameIndex % N].in_flight);
+        }
+    }
+
     uint64_t StepTimeline(uint32_t frameIndex) noexcept {
         return ++_timelineValues[frameIndex % N];
     }

@@ -158,8 +158,12 @@ the old bindless set array.
 
 * Skinning only: a BDA + push-constant compute pass recorded before the
   frame's heap segments (it binds no descriptor sets).
-* `src/render/DescriptorLayout.hpp` (the compile-time DSL) remains for API
-  compatibility but has no frame-path consumers.
+* Everything descriptor-set related was deleted from the render layer after
+  the migration: the `DescriptorLayout` DSL, the descriptor-pool builders,
+  the legacy dynamic-pass/framebuffer cache, `Texture.hpp`'s staged uploader,
+  and all pool/set members on the pass structs. Only the write-POD argument
+  types survive (`DescriptorWrites.hpp`: `ImageWrite`, `BufferWrite`,
+  `SkipWrite`, `IsTypedImage`).
 
 ## 6. Test Coverage
 
@@ -187,10 +191,21 @@ the old bindless set array.
 - [ ] Optional: direct descriptor access (`layout(descriptor_heap)`) for hot
       bindless paths once slangc with `-capability spvDescriptorHeapEXT` is
       the build requirement.
-- [ ] Remove the now-unused `DescriptorLayout` DSL and `legacy/` pass helpers
-      once no legacy pass references them.
+- [x] Remove the now-unused `DescriptorLayout` DSL, the legacy pass helpers,
+      and the per-pass pool/set members.
 
-## 8. Requirements Bumped
+## 8. ImGui Fork Maintenance
+
+`third_party/imgui/backends/imgui_impl_vulkan_heap.{h,cpp}` is a patched copy
+of the upstream `imgui_impl_vulkan.{h,cpp}` (ImGui 1.92.8) that adds a
+`VK_EXT_descriptor_heap` mode. The original files are kept unmodified and
+uncompiled for diffing. All fork hunks are guarded by `bd->HeapMode` (default
+off), so the legacy path still matches upstream. Upgrade procedure: copy the
+new upstream files over `imgui_impl_vulkan.*`, re-copy + rename to the `_heap`
+pair, then re-apply the hunks tagged "ZAHLN FORK" (see the maintenance note
+at the top of the fork header).
+
+## 9. Requirements Bumped
 
 * Vulkan SDK ≥ 1.4.321 (headers/loader with `VK_EXT_descriptor_heap`).
 * Driver with `VK_EXT_descriptor_heap` + `VK_KHR_maintenance5` +

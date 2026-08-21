@@ -609,10 +609,6 @@ struct RenderContext::Impl {
         ZHLN::DoubleBuffered<Vk::Buffer>                                secondPassCountBuffers;
         ZHLN::DoubleBuffered<Vk::Buffer>                                shadowIndirectBuffers;
         ZHLN::DoubleBuffered<Vk::Buffer>                                jointBuffers;
-        ZHLN::DoubleBuffered<VkDescriptorSet>                           cullingSetsPass1;
-        ZHLN::DoubleBuffered<VkDescriptorSet>                           cullingSetsPass2;
-        ZHLN::DoubleBuffered<VkDescriptorSet>                           clusterCullingSets;
-        ZHLN::DoubleBuffered<VkDescriptorSet>                           clusterBoundsSets;
         DoubleBuffered<VkAccelerationStructureKHR>                      tlas;
         DoubleBuffered<Vk::Buffer>                                      tlasBuffer;
         DoubleBuffered<Vk::Buffer>                                      tlasScratchBuffer;
@@ -812,22 +808,14 @@ struct RenderContext::Impl {
     void                       WriteTextureSlotToHeap(uint32_t bindlessIndex, VkImage image, VkFormat format, uint32_t mipLevels, bool cube) noexcept;
     void                       InitPassSamplerDescriptors() noexcept;
 
-    Vk::SlangReflectedLayout      cullingLayout;
-    Vk::DescriptorPool           cullingPool;
+    Vk::SlangReflectedLayout      cullingLayout;  // Reflection only: drives the heap binding table
     Vk::ComputePass              hizGeneratePass;
-    Vk::SlangReflectedLayout      hizDescLayout;
-    Vk::DescriptorPool           hizPool;
-    ZHLN::Array<VkDescriptorSet> hizSets;
+    Vk::SlangReflectedLayout      hizDescLayout;  // Reflection only
 
-    Vk::SlangReflectedLayout clusterCullingDescLayout;
-    Vk::DescriptorPool      clusterCullingPool;
+    Vk::SlangReflectedLayout clusterCullingDescLayout; // Reflection only
+    Vk::SlangReflectedLayout clusterBoundsDescLayout;  // Reflection only
 
-    Vk::SlangReflectedLayout clusterBoundsDescLayout;
-    Vk::DescriptorPool      clusterBoundsPool;
-
-    Vk::SlangReflectedLayout proceduralBakeDescLayout;
-    Vk::DescriptorPool      proceduralBakeDescPool;
-    VkDescriptorSet         proceduralBakeSet = VK_NULL_HANDLE;
+    Vk::SlangReflectedLayout proceduralBakeDescLayout; // Reflection only
 
     ZHLN::Array<Vk::ImageView> shadowCascadeViews;
     Vk::ImageView              shadowAtlasCubeView;
@@ -861,7 +849,6 @@ struct RenderContext::Impl {
     Vk::Pipeline       csgIntersectionPipeline;
     VkPipelineLayout   csgPipelineLayout = VK_NULL_HANDLE; // Raw alias of the spec-required null heap layout
 
-    Vk::DescriptorPool uiPool;
     Vk::Pipeline       uiPipeline;
     VkPipelineLayout   uiPipelineLayout = VK_NULL_HANDLE; // Raw alias of the spec-required null heap layout
 
