@@ -241,6 +241,49 @@ struct DescriptorHeapsParallelSuite {
             }
             ZHLN::Println("    [INFO] crop region {} px, saturated {} px", totalPx, saturated);
 
+            // --- Diagnostics: where did the unaccounted saturated pixels go? ---
+            std::array<uint32_t, 12> hueHist {};
+            for (int py = kCropTop; py < kCropBottom; ++py) {
+                for (int px = kCropLeft; px < kCropRight; ++px) {
+                    const size_t idx = (static_cast<size_t>(py) * static_cast<size_t>(width) + static_cast<size_t>(px)) * 3;
+                    const int    r = pixels[idx + 0];
+                    const int    g = pixels[idx + 1];
+                    const int    b = pixels[idx + 2];
+                    const int    mx = std::max({r, g, b});
+                    const int    mn = std::min({r, g, b});
+                    if (mx - mn < 24) {
+                        continue;
+                    }
+                    float h = 0.0f;
+                    if (mx == r) {
+                        h = 60.0f * static_cast<float>(g - b) / static_cast<float>(mx - mn);
+                    } else if (mx == g) {
+                        h = 60.0f * (2.0f + static_cast<float>(b - r) / static_cast<float>(mx - mn));
+                    } else {
+                        h = 60.0f * (4.0f + static_cast<float>(r - g) / static_cast<float>(mx - mn));
+                    }
+                    if (h < 0.0f) {
+                        h += 360.0f;
+                    }
+                    hueHist[static_cast<uint32_t>(h) / 30]++;
+                }
+            }
+            ZHLN::Println("    [INFO] hue histogram (30-deg bins):");
+            for (uint32_t bin = 0; bin < 12; ++bin) {
+                ZHLN::Println("      [{:3}..{:3}): {:>6}", bin * 30, (bin + 1) * 30, hueHist[bin]);
+            }
+
+            // Sample the expected centers of one cube per material (grid is
+            // deterministic; focal = 32 px/m at z = 0 for this camera).
+            const auto sampleRgb = [&](int sx, int sy) {
+                const size_t idx = (static_cast<size_t>(sy) * static_cast<size_t>(width) + static_cast<size_t>(sx)) * 3;
+                ZHLN::Println("    [INFO] sample({}, {}) rgb = ({}, {}, {})", sx, sy, (int) pixels[idx + 0], (int) pixels[idx + 1], (int) pixels[idx + 2]);
+            };
+            sampleRgb(153, 237); // red    (col 0, row 10)
+            sampleRgb(171, 237); // green  (col 1, row 10)
+            sampleRgb(188, 237); // blue   (col 2, row 10)
+            sampleRgb(206, 237); // yellow (col 3, row 10)
+
             // 100 cubes per material, ~250 px each in the cropped region: a
             // 2000-px floor per bucket is extremely conservative while still
             // failing if a material's draws never execute.

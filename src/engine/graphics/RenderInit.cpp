@@ -367,6 +367,13 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
         // descriptor heaps; the legacy set path remains only for passes that
         // have not been ported yet (post-processing, volumetric, ImGui, ...).
         .Require<VkPhysicalDeviceDescriptorHeapFeaturesEXT>([](auto& f) { f.descriptorHeap = VK_TRUE; })
+        // Pipelines declare a stencil attachment format derived from the depth
+        // format, but only some passes actually bind stencil; this feature lets
+        // them draw inside stencil-less render passes (and stencil-less
+        // secondary command buffers) without format-mismatch VUIDs.
+        .Require<VkPhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT>([](auto& f) {
+            f.dynamicRenderingUnusedAttachments = VK_TRUE;
+        })
         .Require<VkPhysicalDeviceFeatures2>([&](auto& f) {
             f.features.multiDrawIndirect         = VK_TRUE;
             f.features.samplerAnisotropy         = VK_TRUE;
@@ -404,8 +411,13 @@ std::expected<Vk::ExtensionResult, Error> GetDeviceExtensions(VkPhysicalDevice p
         // scene path. VK_KHR_maintenance5 (or Vulkan 1.4) provides
         // VkPipelineCreateFlags2CreateInfoKHR for the mandatory
         // VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT pipeline flag.
+        // VK_EXT_extended_dynamic_state3 provides dynamicRenderingUnusedAttachments:
+        // without it, the material pipelines' stencilAttachmentFormat
+        // (D32_SFLOAT_S8_UINT) cannot legally be drawn inside the stencil-less
+        // MainPass1 secondary command buffers (VUID-...-08917/06775).
         .Require(VK_EXT_DESCRIPTOR_HEAP_EXTENSION_NAME)
         .Require(VK_KHR_MAINTENANCE_5_EXTENSION_NAME)
+        .Require(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME)
         .Build()
         .transform_error([](auto err) -> Error { return err; });
 }

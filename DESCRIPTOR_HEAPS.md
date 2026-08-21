@@ -24,10 +24,17 @@ needed** (this is the spec-sanctioned "binding interface" migration path).
 
 ### Device enablement
 
-* Device extension: `VK_EXT_descriptor_heap` (required now) and
+* Device extension: `VK_EXT_descriptor_heap` (required now),
   `VK_KHR_maintenance5` (required; supplies `VkPipelineCreateFlags2CreateInfoKHR`
-  for the mandatory `VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT` on 1.3 devices).
-* Feature: `VkPhysicalDeviceDescriptorHeapFeaturesEXT::descriptorHeap = VK_TRUE`.
+  for the mandatory `VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT` on 1.3 devices),
+  and `VK_EXT_extended_dynamic_state3` (required; its
+  `dynamicRenderingUnusedAttachments` feature lets pipelines that declare a
+  stencil format draw inside stencil-less passes/secondaries — otherwise
+  VUID-vkCmdExecuteCommands-pStencilAttachment-06775 /
+  VUID-vkCmdDraw-dynamicRenderingUnusedAttachments-08917 fire for the
+  parallel-recorded MainPass1 secondaries).
+* Features: `VkPhysicalDeviceDescriptorHeapFeaturesEXT::descriptorHeap = VK_TRUE`,
+  `VkPhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT::dynamicRenderingUnusedAttachments = VK_TRUE`.
 * Entry points are resolved once in `ZHLN_CreateDevice` and stored on
   `ZHLN_Device`; `ZHLN::Vk::Context` forwards to them.
 
@@ -178,6 +185,6 @@ These port by the same recipe: reflect the layout → allocate static heap slots
 ## 8. Requirements Bumped
 
 * Vulkan SDK ≥ 1.4.321 (headers/loader with `VK_EXT_descriptor_heap`).
-* Driver with `VK_EXT_descriptor_heap` + `VK_KHR_maintenance5`
-  (NVIDIA ≥ 610, recent RADV/ANV/AMD/Intel drivers).
+* Driver with `VK_EXT_descriptor_heap` + `VK_KHR_maintenance5` +
+  `VK_EXT_extended_dynamic_state3` (NVIDIA ≥ 610, recent RADV/ANV/AMD/Intel drivers).
 * Slang shaders unchanged; no new slangc capability required.
