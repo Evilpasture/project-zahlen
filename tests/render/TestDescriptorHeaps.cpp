@@ -354,8 +354,10 @@ struct DescriptorHeapsSuite {
             }
 
             // Pan the camera hard to the left: both boxes exit, sky fills in.
-            applyCameraPose(-20.0f);
+            // Re-apply the pose every tick so any camera-system overwrite of
+            // the component/pose cannot silently produce an identical frame.
             for (uint32_t frame = 0; frame < 6; ++frame) {
+                applyCameraPose(-20.0f);
                 engine->ProcessEvents();
                 const auto status = engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
                 ZHLN::Test::ExpectEq(status, ZHLN::GameplayStatus::OK);

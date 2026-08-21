@@ -84,6 +84,7 @@ struct ComputePass {
     template <GpuTriviallyCopyable T>
     void DispatchHeapIndexed(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex, uint32_t x, uint32_t y, uint32_t z, const T& pushData)
         const noexcept {
+        static_assert(sizeof(T) <= kHeapIndexPushOffset, "Pass push struct overruns the descriptor-index word");
         Bind(cmd);
         PushData(ctx, cmd, 0, pushData);
         PushHeapIndex(ctx, cmd, kHeapIndexPushOffset, heapIndex);

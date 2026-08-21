@@ -55,10 +55,11 @@ struct HeapPassBindings {
 };
 
 // Default offset of the per-dispatch descriptor-index word inside the
-// push-data blob. It must clear the largest pass push struct
-// (PPPushConstants, 176 bytes) and the scene registry's per-frame
-// device-address block (192..240).
-inline constexpr uint32_t kHeapIndexPushOffset = 176;
+// push-data blob. It must clear the largest pass push struct (PPPushConstants,
+// 192 bytes with its alignas(16) member) AND the scene registry's per-frame
+// device-address block (192..240), so it sits at 240..244. Any pass pushing a
+// larger struct trips the static_asserts in the Execute*/Dispatch* helpers.
+inline constexpr uint32_t kHeapIndexPushOffset = 240;
 
 inline constexpr auto IsHeapSamplerType(VkDescriptorType t) noexcept -> bool {
     return t == VK_DESCRIPTOR_TYPE_SAMPLER;

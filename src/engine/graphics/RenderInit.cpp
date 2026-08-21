@@ -1145,11 +1145,12 @@ std::expected<void, Error> RenderContext::Impl::InitSceneHeaps(const VkSamplerCr
     }
 
     // The push-data budget must fit the per-frame device-address block that
-    // feeds the scene registry's PUSH_ADDRESS mappings.
-    if (heapManager.PushDataMaxSize() < (kHeapFrameAddrPushOffset + kHeapFrameAddrBlockSize)) [[unlikely]] {
+    // feeds the scene registry's PUSH_ADDRESS mappings PLUS the per-dispatch
+    // descriptor-index word (kHeapIndexPushOffset + 4).
+    if (heapManager.PushDataMaxSize() < (Vk::kHeapIndexPushOffset + 4)) [[unlikely]] {
         ZHLN::Log(
-            "[RenderInit] ERROR: maxPushDataSize ({}) too small for the frame device-address block (needs {})",
-            heapManager.PushDataMaxSize(), kHeapFrameAddrPushOffset + kHeapFrameAddrBlockSize
+            "[RenderInit] ERROR: maxPushDataSize ({}) too small for the push-data layout (needs {})",
+            heapManager.PushDataMaxSize(), Vk::kHeapIndexPushOffset + 4
         );
         return std::unexpected(RenderInitError::PipelineCreationFailed);
     }

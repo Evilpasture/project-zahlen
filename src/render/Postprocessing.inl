@@ -277,6 +277,7 @@ template <typename LayoutT>
 template <GpuTriviallyCopyable T>
 void PostProcessPass<LayoutT>::ExecuteHeap(const Context& ctx, VkCommandBuffer cmd, const T& pushData, uint32_t heapIndex, VkShaderStageFlags stages)
     const noexcept {
+    static_assert(sizeof(T) <= kHeapIndexPushOffset, "Pass push struct overruns the descriptor-index word");
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Get());
     PushData(ctx, cmd, 0, pushData);
     PushHeapIndex(ctx, cmd, kHeapIndexPushOffset, heapIndex);
@@ -288,6 +289,7 @@ template <GpuTriviallyCopyable T>
 void PostProcessPass<LayoutT>::ExecuteVariantHeap(
     const Context& ctx, VkCommandBuffer cmd, uint32_t variantIdx, const T& pushData, uint32_t heapIndex, VkShaderStageFlags stages
 ) const noexcept {
+    static_assert(sizeof(T) <= kHeapIndexPushOffset, "Pass push struct overruns the descriptor-index word");
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines[variantIdx].Get());
     PushData(ctx, cmd, 0, pushData);
     PushHeapIndex(ctx, cmd, kHeapIndexPushOffset, heapIndex);
