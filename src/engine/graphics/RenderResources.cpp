@@ -132,65 +132,49 @@ auto RenderContext::GetTracked3DEmitters() noexcept -> ZHLN::Array<ZHLN::Pair<ui
 // ============================================================================
 
 auto RenderContext::Impl::CompileShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData) -> std::expected<void, Error> {
+    // VK_EXT_descriptor_heap: the shadow pass reads the scene registry through
+    // the heap; per-draw ObjectConstants travel via vkCmdPushDataEXT.
+    shadowPipelineLayout = emptyPipelineLayout;
     return Vk::ShaderStages::Create(device, shaderData, "VSMain", "PSShadow")
         .transform_error([](auto err) -> Error { return err; })
         .and_then([&, device](auto&& shaders) -> std::expected<void, Error> {
-            return Vk::PipelineLayoutBuilder(device)
-                .AddDescriptorSetLayout(bindlessLayout.GetSetLayout())
-                .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(ObjectConstants))
-                .Build()
+            return Vk::PipelineBuilder {}
+                .Shaders(shaders)
+                .Layout(emptyPipelineLayout)
+                .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
+                .DepthOnly()
+                .DepthFormat(VK_FORMAT_D32_SFLOAT)
+                .CullNone()
+                .Build(device)
                 .transform_error([](auto err) -> Error {
-                    ZHLN::Log("Shadow pipeline layout creation error: {} (Category: {})", err.Message(), err.Category());
-                    return RenderInitError::PipelineLayoutCreationFailed;
+                    ZHLN::Log("Shadow pipeline compilation error: {} (Category: {})", err.Message(), err.Category());
+                    return RenderInitError::PipelineCreationFailed;
                 })
-                .and_then([&, device, shaders = std::forward<decltype(shaders)>(shaders)](auto&& layout) -> std::expected<void, Error> {
-                    shadowPipelineLayout = std::forward<decltype(layout)>(layout);
-
-                    return Vk::PipelineBuilder {}
-                        .Shaders(shaders)
-                        .Layout(shadowPipelineLayout.Get())
-                        .DepthOnly()
-                        .DepthFormat(VK_FORMAT_D32_SFLOAT)
-                        .CullNone()
-                        .Build(device)
-                        .transform_error([](auto err) -> Error {
-                            ZHLN::Log("Shadow pipeline compilation error: {} (Category: {})", err.Message(), err.Category());
-                            return RenderInitError::PipelineCreationFailed;
-                        })
-                        .transform([&](auto&& pipeline) -> auto { shadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
-                });
+                .transform([&](auto&& pipeline) -> auto { shadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
         });
 }
 
 auto RenderContext::Impl::CompilePunctualShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData) -> std::expected<void, Error> {
+    // VK_EXT_descriptor_heap variant of the shadow path (same mappings, the
+    // per-draw light index travels through push data).
+    punctualShadowPipelineLayout = emptyPipelineLayout;
     return Vk::ShaderStages::Create(device, shaderData)
         .transform_error([](auto err) -> Error { return err; })
         .and_then([&, device](auto&& shaders) -> std::expected<void, Error> {
-            return Vk::PipelineLayoutBuilder(device)
-                .AddDescriptorSetLayout(bindlessLayout.GetSetLayout())
-                .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT, sizeof(uint32_t))
-                .Build()
+            return Vk::PipelineBuilder {}
+                .Shaders(shaders)
+                .Layout(emptyPipelineLayout)
+                .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
+                .DepthOnly()
+                .DepthFormat(VK_FORMAT_D32_SFLOAT)
+                .ViewMask(0x3F)
+                .CullNone()
+                .Build(device)
                 .transform_error([](auto err) -> Error {
-                    ZHLN::Log("Punctual shadow pipeline layout creation error: {} (Category: {})", err.Message(), err.Category());
-                    return RenderInitError::PipelineLayoutCreationFailed;
+                    ZHLN::Log("Punctual shadow pipeline compilation error: {} (Category: {})", err.Message(), err.Category());
+                    return RenderInitError::PipelineCreationFailed;
                 })
-                .and_then([&, device, shaders = std::forward<decltype(shaders)>(shaders)](auto&& layout) -> std::expected<void, Error> {
-                    punctualShadowPipelineLayout = std::forward<decltype(layout)>(layout);
-
-                    return Vk::PipelineBuilder {}
-                        .Shaders(shaders)
-                        .Layout(punctualShadowPipelineLayout.Get())
-                        .DepthOnly()
-                        .DepthFormat(VK_FORMAT_D32_SFLOAT)
-                        .ViewMask(0x3F)
-                        .CullNone()
-                        .Build(device)
-                        .transform_error([](auto err) -> Error {
-                            ZHLN::Log("Punctual shadow pipeline compilation error: {} (Category: {})", err.Message(), err.Category());
-                            return RenderInitError::PipelineCreationFailed;
-                        })
-                        .transform([&](auto&& pipeline) -> auto { punctualShadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
-                });
+                .transform([&](auto&& pipeline) -> auto { punctualShadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
         });
 }
 
@@ -269,53 +253,53 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> std::expected<Ma
             return MaterialCreationError::ShaderCompilationFailed;
         })
         .and_then([impl, &desc](auto&& shaders) -> std::expected<Material, Error> {
-            return Vk::PipelineLayoutBuilder(impl->ctx.Device())
-                .AddDescriptorSetLayout(impl->bindlessLayout.GetSetLayout())
-                .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(ObjectConstants))
-                .Build()
-                .transform_error([](auto err) -> Error {
-                    ZHLN::Log("Material pipeline layout creation error: {} (Category: {})", err.Message(), err.Category());
-                    return MaterialCreationError::PipelineLayoutCreationFailed;
-                })
-                .and_then([impl, &desc, &shaders](auto&& layout) -> std::expected<Material, Error> {
-                    auto pipeline = Vk::PipelineBuilder {}.Shaders(shaders).Layout(layout.Get()).DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT);
+            // VK_EXT_descriptor_heap: materials are heap pipelines sharing the
+            // empty layout + the scene registry mappings.
+            // Materials are heap pipelines sharing the empty layout + the scene
+            // registry mappings; material textures bind through the
+            // globalTextures[] heap region via per-instance texIndices.
+            const VkPipelineLayout layout = impl->emptyPipelineLayout;
+            {
+                auto pipeline = Vk::PipelineBuilder {}
+                                    .Shaders(shaders)
+                                    .Layout(layout)
+                                    .HeapMappings(&impl->sceneHeapMappings.info, &impl->sceneHeapMappings.info)
+                                    .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT);
 
-                    if (desc.doubleSided) {
-                        pipeline.CullNone();
+                if (desc.doubleSided) {
+                    pipeline.CullNone();
+                } else {
+                    pipeline.CullBack();
+                }
+
+                if (desc.alphaBlend || desc.additiveBlend) {
+                    pipeline.ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT});
+                    pipeline.DepthWrite(false);
+                    if (desc.additiveBlend) {
+                        pipeline.AdditiveBlend();
                     } else {
-                        pipeline.CullBack();
+                        pipeline.AlphaBlend();
                     }
+                } else {
+                    pipeline.ColorFormats(ActiveGBuffer::array);
+                }
 
-                    if (desc.alphaBlend || desc.additiveBlend) {
-                        pipeline.ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT});
-                        pipeline.DepthWrite(false);
-                        if (desc.additiveBlend) {
-                            pipeline.AdditiveBlend();
-                        } else {
-                            pipeline.AlphaBlend();
-                        }
-                    } else {
-                        pipeline.ColorFormats(ActiveGBuffer::array);
-                    }
+                if (desc.isLineList) {
+                    pipeline.Topology(VK_PRIMITIVE_TOPOLOGY_LINE_LIST);
+                }
 
-                    if (desc.isLineList) {
-                        pipeline.Topology(VK_PRIMITIVE_TOPOLOGY_LINE_LIST);
-                    }
-
-                    return pipeline.Build(impl->ctx.Device())
-                        .transform_error([](auto err) -> Error {
-                            ZHLN::Log("Material pipeline creation error: {} (Category: {})", err.Message(), err.Category());
-                            return MaterialCreationError::PipelineCreationFailed;
-                        })
-                        .transform([impl, &desc, &layout](auto&& compiledPipeline) -> auto {
-                            return Material {
-                                .pipeline = impl->materialPool.Create(
-                                    std::forward<decltype(compiledPipeline)>(compiledPipeline), std::forward<decltype(layout)>(layout)
-                                ),
-                                .alphaMode = (desc.alphaBlend || desc.additiveBlend) ? 2u : 0u
-                            };
-                        });
-                });
+                return pipeline.Build(impl->ctx.Device())
+                    .transform_error([](auto err) -> Error {
+                        ZHLN::Log("Material pipeline creation error: {} (Category: {})", err.Message(), err.Category());
+                        return MaterialCreationError::PipelineCreationFailed;
+                    })
+                    .transform([impl, layout, &desc](auto&& compiledPipeline) -> auto {
+                        return Material {
+                            .pipeline  = impl->materialPool.Create(std::forward<decltype(compiledPipeline)>(compiledPipeline), layout),
+                            .alphaMode = (desc.alphaBlend || desc.additiveBlend) ? 2u : 0u
+                        };
+                    });
+            }
         });
 }
 
@@ -375,6 +359,15 @@ auto RenderContext::RegisterTexture(std::string_view name, uint32_t bindlessInde
     return _impl->textureManager.RegisterUploaded(name, bindlessIndex, isSRGB);
 }
 
+void RenderContext::Impl::WriteTextureSlotToHeap(uint32_t bindlessIndex, VkImage image, VkFormat format, uint32_t mipLevels, bool cube) noexcept {
+    // The globalTextures[] array is pinned to a contiguous heap region by the
+    // binding-11 mapping; index N lives at slot (textureHeapBase + N).
+    Vk::TextureHandle           slot {textureHeapBase + bindlessIndex};
+    const VkImageViewCreateInfo info = cube ? Vk::MakeViewCreateInfoCube(image, format, mipLevels) :
+                                              Vk::MakeViewCreateInfo2D(image, format, mipLevels, VK_IMAGE_ASPECT_COLOR_BIT);
+    heapManager.WriteImage(slot, info, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+}
+
 auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> std::expected<uint32_t, Error> {
     auto* const  device    = ctx.Device();
     const size_t imageSize = static_cast<size_t>(width) * height * 4;
@@ -412,7 +405,7 @@ auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width
                                     Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, mipLevels);
 
             uint32_t index = nextTextureIndex++;
-            Vk::UpdateBindlessTextureSlot(device, index, gpuView.Get(), frames.bindlessSets, 11);
+            WriteTextureSlotToHeap(index, gpuImage.Handle(), format, mipLevels, false);
 
             Vk::Debug::SetImageName(ctx, gpuImage.Handle(), std::format("BindlessCubeTexture{:03}", index));
 
@@ -450,7 +443,7 @@ auto RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceData,
             auto gpuView = Vk::CreateViewCube<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), 1);
 
             uint32_t index = nextTextureIndex++;
-            Vk::UpdateBindlessTextureSlot(device, index, gpuView.Get(), frames.bindlessSets, 11);
+            WriteTextureSlotToHeap(index, gpuImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, true);
 
             std::array<char, 32> buf {};
             Vk::Debug::SetImageName(ctx, gpuImage.Handle(), FormatTo(buf, "BindlessCubeTexture{:03}", index));

@@ -5,8 +5,8 @@
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/Math3D.hpp"
 #include "Zahlen/Profiler.hpp"
-#include "backends/imgui_impl_vulkan.h"
 #include "imgui.h"
+#include "imgui_impl_vulkan_heap.h"
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <array>
 
@@ -41,7 +41,6 @@ inline void SubmitDrawInstanced(
     Vk::CommandEncoder& encoder,
     const DrawCommand&  drawCmd,
     uint32_t            instanceIdx,
-    VkDescriptorSet     bindlessSet,
     const T&            pushConstants,
     VkPipeline          pipelineOverride = VK_NULL_HANDLE,
     VkPipelineLayout    layoutOverride   = VK_NULL_HANDLE,
@@ -49,18 +48,14 @@ inline void SubmitDrawInstanced(
 ) noexcept {
     const auto* nativeMat = drawCmd.material;
     auto* const pipeline  = (pipelineOverride != VK_NULL_HANDLE) ? pipelineOverride : nativeMat->pipeline.Get();
-    auto* const layout    = (layoutOverride != VK_NULL_HANDLE) ? layoutOverride : nativeMat->layout.Get();
+    auto* const layout    = (layoutOverride != VK_NULL_HANDLE) ? layoutOverride : nativeMat->layout;
 
     const uint32_t vertexCount = drawCmd.instanceData.iboAddress != 0 ? drawCmd.instanceData.indexCount : drawCmd.instanceData.vertexCount;
 
+    // VK_EXT_descriptor_heap: heaps are bound on the command buffer; per-draw
+    // data travels through push data (offset 0).
     encoder.DrawInstanced(
-        {.pipeline      = pipeline,
-         .layout        = layout,
-         .set           = bindlessSet,
-         .vertexCount   = vertexCount,
-         .instanceCount = 1,
-         .firstVertex   = 0,
-         .firstInstance = instanceIdx},
+        {.pipeline = pipeline, .layout = layout, .heap = true, .vertexCount = vertexCount, .instanceCount = 1, .firstVertex = 0, .firstInstance = instanceIdx},
         pushConstants, stages
     );
 }
@@ -76,19 +71,11 @@ void DrawCSGMeshes(const FrameRecorder& recorder, VkExtent3D extent) noexcept {
     ZHLN::ScopedTimer profTimer("GPU Stencil CSG Passes");
 
     for (const auto& csgCmd: ctx.queues.csgDrawQueue) {
-        VkClearAttachment clearAttachment = {
-            .aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT, .colorAttachment = {}, .clearValue = {.depthStencil = {.depth = 1.0f, .stencil = 0}}
-        };
-        VkClearRect clearRect = {
-            .rect = {.offset = {.x = 0, .y = 0}, .extent = {.width = extent.width, .height = extent.height}}, .baseArrayLayer = 0, .layerCount = 1
-        };
-        vkCmdClearAttachments(cmd, 1, &clearAttachment, 1, &clearRect);
+        Vk::ClearStencilAttachment(cmd, {.width = extent.width, .height = extent.height});
 
         for (const auto& cutter: csgCmd.cutters) {
             const ObjectConstants push = {.instanceId = cutter.instanceIdx, .isShadowPass = 0};
-            SubmitDrawInstanced(
-                recorder.encoder, cutter.draw, cutter.instanceIdx, recorder.bindlessSet, push, ctx.csgWritePipeline.Get(), ctx.csgPipelineLayout.Get()
-            );
+            SubmitDrawInstanced(recorder.encoder, cutter.draw, cutter.instanceIdx, push, ctx.csgWritePipeline.Get(), ctx.csgPipelineLayout);
         }
 
         VkPipeline activePipeline = ctx.csgDifferencePipeline.Get();
@@ -97,7 +84,7 @@ void DrawCSGMeshes(const FrameRecorder& recorder, VkExtent3D extent) noexcept {
         }
 
         const ObjectConstants push = {.instanceId = csgCmd.eyeInstanceIdx, .isShadowPass = 0};
-        SubmitDrawInstanced(recorder.encoder, csgCmd.eyeDraw, csgCmd.eyeInstanceIdx, recorder.bindlessSet, push, activePipeline, ctx.csgPipelineLayout.Get());
+        SubmitDrawInstanced(recorder.encoder, csgCmd.eyeDraw, csgCmd.eyeInstanceIdx, push, activePipeline, ctx.csgPipelineLayout);
     }
 }
 
@@ -145,8 +132,8 @@ void Draw3DParticles(const FrameRecorder& recorder) noexcept {
 
         recorder.encoder.DrawInstanced(
             {.pipeline      = ctx.meshParticleRenderPipeline.Get(),
-             .layout        = ctx.meshParticleRenderLayout.Get(),
-             .set           = recorder.bindlessSet,
+             .layout        = ctx.meshParticleRenderLayout,
+             .heap          = true,
              .vertexCount   = drawVertexCount,
              .instanceCount = emitter.maxParticles,
              .firstVertex   = 0,
@@ -198,8 +185,8 @@ void Draw3DParticleShadows(const FrameRecorder& recorder, uint32_t cascadeIndex)
 
         recorder.encoder.DrawInstanced(
             {.pipeline      = ctx.meshParticleShadowPipeline.Get(),
-             .layout        = ctx.meshParticleRenderLayout.Get(),
-             .set           = recorder.bindlessSet,
+             .layout        = ctx.meshParticleRenderLayout,
+             .heap          = true,
              .vertexCount   = drawVertexCount,
              .instanceCount = emitter.maxParticles,
              .firstVertex   = 0,
@@ -271,7 +258,7 @@ struct GpuCullingPolicyPass1 {
         pc.drawCount        = drawCount;
         pc.passIndex        = 0; // PASS 1
 
-        ctx.cullingPass.Dispatch(cmd, ctx.frames.cullingSetsPass1[recorder.frameIndex], (drawCount + 63) / 64, 1, 1, pc);
+        ctx.cullingPass.DispatchHeapIndexed(ctx.ctx, cmd, 0 * 2 + recorder.frameIndex, (drawCount + 63) / 64, 1, 1, pc);
 
         using enum Vk::BarrierStage;
         using enum Vk::BarrierAccess;
@@ -284,6 +271,13 @@ struct GpuCullingPolicyPass1 {
             .AddColor(norm_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorNormalRoughness)
             .AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearDepthValue)
             .Execute(cmd, [&]() {
+                // The culling dispatch above is a heap pass using push data at
+                // offsets 0/176, which invalidated the push-data state: re-bind
+                // the heaps (primary segments only — inherited secondaries keep
+                // theirs) and re-push the frame address block for the
+                // heap-based geometry draws.
+                recorder.EnsureHeapState(cmd);
+
                 for (const auto& group: groups) {
                     if (!group.material->pipeline.Valid()) {
                         continue;
@@ -291,8 +285,8 @@ struct GpuCullingPolicyPass1 {
                     recorder.encoder.DrawIndirect(
                         {
                             .pipeline       = group.material->pipeline.Get(),
-                            .layout         = group.material->layout.Get(),
-                            .set            = recorder.bindlessSet,
+                            .layout         = group.material->layout,
+                            .heap           = true,
                             .argumentBuffer = ctx.frames.indirectCommandsBuffers[recorder.frameIndex].Handle(),
                             .offset         = Vk::DrawIndirectState::OffsetForIndex(group.start),
                             .drawCount      = group.count,
@@ -358,7 +352,7 @@ struct GpuCullingPolicyPass2 {
             .drawCount      = drawCount,
             .passIndex      = 1,
         };
-        ctx.cullingPass.Dispatch(cmd, ctx.frames.cullingSetsPass2[recorder.frameIndex], (drawCount + 63) / 64, 1, 1, pc);
+        ctx.cullingPass.DispatchHeapIndexed(ctx.ctx, cmd, 1 * 2 + recorder.frameIndex, (drawCount + 63) / 64, 1, 1, pc);
 
         using enum Vk::BarrierStage;
         using enum Vk::BarrierAccess;
@@ -371,6 +365,10 @@ struct GpuCullingPolicyPass2 {
             .AddColor(norm_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
             .AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
             .Execute(cmd, [&]() {
+                // Re-establish heap + push-data state after the culling dispatch
+                // (push data was updated for the dispatch).
+                recorder.EnsureHeapState(cmd);
+
                 for (const auto& group: groups) {
                     if (!group.material->pipeline.Valid()) {
                         continue;
@@ -378,8 +376,8 @@ struct GpuCullingPolicyPass2 {
                     recorder.encoder.DrawIndirect(
                         {
                             .pipeline       = group.material->pipeline.Get(),
-                            .layout         = group.material->layout.Get(),
-                            .set            = recorder.bindlessSet,
+                            .layout         = group.material->layout,
+                            .heap           = true,
                             .argumentBuffer = ctx.frames.indirectCommandsBuffersPass2[recorder.frameIndex].Handle(),
                             .offset         = Vk::DrawIndirectState::OffsetForIndex(group.start),
                             .drawCount      = group.count,
@@ -415,8 +413,25 @@ struct CpuCullingPolicyPass1 {
             .AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearDepthValue)
             .Flags(VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT)
             .Execute(cmd, [&]() {
+                // Heap + push-data state for the parallel geometry secondaries.
+                // The secondaries inherit the heap binding and each pushes the
+                // per-frame device-address block once before its draws.
+                ctx.BindHeapsAndPushFrame(cmd);
+                const auto frameAddresses = ctx.FrameHeapAddresses();
+                const auto samplerBind    = ctx.heapManager.GetSamplerHeapBindInfo();
+                const auto resourceBind   = ctx.heapManager.GetResourceHeapBindInfo();
+
                 Vk::ParallelDrawDispatch(
-                    cmd, Vk::SecondaryInheritance {.colorFormats = colorFormats, .depthFormat = VK_FORMAT_D32_SFLOAT_S8_UINT},
+                    cmd,
+                    Vk::SecondaryInheritance {
+                        .colorFormats           = colorFormats,
+                        .depthFormat            = VK_FORMAT_D32_SFLOAT_S8_UINT,
+                        .samplerHeapBindInfo    = &samplerBind,
+                        .resourceHeapBindInfo   = &resourceBind,
+                        .context                = &ctx.ctx,
+                        .pushDataFrameOffset    = kHeapFrameAddrPushOffset,
+                        .pushDataFrameAddresses = std::span<const VkDeviceAddress> {frameAddresses.data(), frameAddresses.size()},
+                    },
                     {.width = color_att.extent.width, .height = color_att.extent.height}, drawCount, kParallelChunkSize, TaskSystemSchedulerAdapter {},
                     [&](uint32_t /*chunkIdx*/) -> VkCommandBuffer {
                         uint32_t wIdx = TaskSystem::GetWorkerIndex();
@@ -432,7 +447,7 @@ struct CpuCullingPolicyPass1 {
                             !drawCmd.material->pipeline.Valid() || IsForwardOnly(drawCmd.instanceData.flags)) {
                             return;
                         }
-                        SubmitDrawInstanced(encoder, drawCmd, i, recorder.bindlessSet, ObjectConstants {.instanceId = i, .isShadowPass = 0});
+                        SubmitDrawInstanced(encoder, drawCmd, i, ObjectConstants {.instanceId = i, .isShadowPass = 0});
                     }
                 );
             });
@@ -451,12 +466,14 @@ struct CpuCullingPolicyPass2 {
     ) noexcept {
         // CPU Culling does everything in Pass 1. Pass 2 just draws CSG and Particles on top.
         VkCommandBuffer cmd = recorder.cmd;
+        auto&           ctx = recorder.ctx;
         Vk::DynamicPass(color_att.extent)
             .AddColor(color_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
             .AddColor(vel_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
             .AddColor(norm_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
             .AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
             .Execute(cmd, [&]() {
+                ctx.BindHeapsAndPushFrame(cmd);
                 DrawCSGMeshes(recorder, color_att.extent);
                 Draw3DParticles(recorder);
             });
@@ -475,6 +492,13 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
     using enum RenderPassType;
     VkCommandBuffer cmd = recorder.cmd;
     auto&           ctx = recorder.ctx;
+
+    // VK_EXT_descriptor_heap: the shadow pass runs entirely on heap pipelines.
+    // It records into either the primary (serial fallback) or a secondary
+    // command buffer (parallel recorder). In the secondary case the heaps are
+    // inherited from the primary and the frame addresses were re-pushed by
+    // the recorder, so only the primary path self-binds.
+    recorder.EnsureHeapState(cmd);
 
     std::array<Frustum, RenderContext::Impl::NUM_CASCADES> cascadeFrustums {};
     for (uint32_t c = 0; c < RenderContext::Impl::NUM_CASCADES; ++c) {
@@ -566,8 +590,8 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
                     if (csmDrawCount > 0) {
                         recorder.encoder.DrawIndirect(
                             {.pipeline       = ctx.shadowPipeline.Get(),
-                             .layout         = ctx.shadowPipelineLayout.Get(),
-                             .set            = recorder.bindlessSet,
+                             .layout         = ctx.shadowPipelineLayout,
+                             .heap           = true,
                              .argumentBuffer = ctx.frames.shadowIndirectBuffers->Handle(),
                              .offset         = Vk::DrawIndirectState::OffsetForIndex(passWriteOffsets[c]),
                              .drawCount      = csmDrawCount},
@@ -620,8 +644,8 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
                     recorder.encoder.DrawIndirect(
                         {
                             .pipeline       = ctx.punctualShadowPipeline.Get(),
-                            .layout         = ctx.punctualShadowPipelineLayout.Get(),
-                            .set            = recorder.bindlessSet,
+                            .layout         = ctx.punctualShadowPipelineLayout,
+                            .heap           = true,
                             .argumentBuffer = ctx.frames.shadowIndirectBuffers->Handle(),
                             .offset         = Vk::DrawIndirectState::OffsetForIndex(passWriteOffsets[slotIdx]),
                             .drawCount      = drawCount,
@@ -734,6 +758,8 @@ void TranslucentPrePass::Execute(
     VkCommandBuffer cmd = recorder.cmd;
     auto&           ctx = recorder.ctx;
 
+    ctx.BindHeapsAndPushFrame(cmd);
+
     Vk::DynamicPass(norm_att.extent)
         .AddColor(norm_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorNormalRoughness)
         .AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearDepthValue)
@@ -752,8 +778,7 @@ void TranslucentPrePass::Execute(
                 const ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
 
                 SubmitDrawInstanced(
-                    recorder.encoder, drawCmd, static_cast<uint32_t>(i), recorder.bindlessSet, push, drawCmd.prePassMaterial->pipeline.Get(),
-                    drawCmd.prePassMaterial->layout.Get()
+                    recorder.encoder, drawCmd, static_cast<uint32_t>(i), push, drawCmd.prePassMaterial->pipeline.Get(), drawCmd.prePassMaterial->layout
                 );
             }
         });
@@ -766,6 +791,8 @@ void ForwardPass::Execute(
 ) const noexcept {
     VkCommandBuffer cmd = recorder.cmd;
     const auto&     ctx = recorder.ctx;
+
+    ctx.BindHeapsAndPushFrame(cmd);
 
     Vk::DynamicPass(litColor.extent)
         .AddColor(litColor, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
@@ -784,12 +811,10 @@ void ForwardPass::Execute(
 
                 const ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
 
-                SubmitDrawInstanced(recorder.encoder, drawCmd, static_cast<uint32_t>(i), recorder.bindlessSet, push);
+                SubmitDrawInstanced(recorder.encoder, drawCmd, static_cast<uint32_t>(i), push);
             }
 
             if (ctx.particleRenderPipeline.Valid() && !ctx.queues.particleEmittersQueue.empty()) {
-                auto* bindlessSet = ctx.frames.bindlessSets[ctx.frame_index];
-
                 for (const auto& emitter: ctx.queues.particleEmittersQueue) {
                     auto* buffer = ctx.meshPool.Resolve(emitter.gpuBuffer).value_or(nullptr);
                     if (!buffer) {
@@ -804,8 +829,8 @@ void ForwardPass::Execute(
 
                     recorder.encoder.DrawInstanced(
                         {.pipeline      = ctx.particleRenderPipeline.Get(),
-                         .layout        = ctx.particleRenderLayout.Get(),
-                         .set           = bindlessSet,
+                         .layout        = ctx.particleRenderLayout,
+                         .heap          = true,
                          .vertexCount   = 6,
                          .instanceCount = emitter.maxParticles,
                          .firstVertex   = 0,
@@ -820,8 +845,8 @@ void ForwardPass::Execute(
 
                 recorder.encoder.DrawInstanced(
                     {.pipeline      = ctx.linePipeline.Get(),
-                     .layout        = ctx.linePipelineLayout.Get(),
-                     .set           = recorder.bindlessSet,
+                     .layout        = ctx.linePipelineLayout,
+                     .heap          = true,
                      .vertexCount   = ctx.activeLineVertexCount,
                      .instanceCount = 1,
                      .firstVertex   = 0,
@@ -851,9 +876,12 @@ void BlitPass::Execute(
 
     if (ctx.blitPass.pipeline.Valid()) {
         Vk::DynamicPass(inColor.extent).AddColor(swapchainTarget, VK_ATTACHMENT_LOAD_OP_DONT_CARE).Execute(cmd, [&]() {
-            ctx.blitPass.Execute(cmd, pc);
+            ctx.blitPass.ExecuteHeap(ctx.ctx, cmd, pc, recorder.frameIndex);
 
             if (!ctx.queues.uiBatches.empty()) {
+                // blitPass is a legacy descriptor-set + push-constant pass; the
+                // UI batch pipeline is heap-based, so re-establish heap state.
+                ctx.BindHeapsAndPushFrame(cmd);
                 UIObjectConstants uipc {};
                 uipc.orthoMatrix = Math::CreateOrthoMatrix(inColor.extent.width, inColor.extent.height);
 
@@ -880,8 +908,8 @@ void BlitPass::Execute(
 
                     recorder.encoder.DrawInstanced(
                         {.pipeline      = ctx.uiPipeline.Get(),
-                         .layout        = ctx.uiPipelineLayout.Get(),
-                         .set           = recorder.bindlessSet,
+                         .layout        = ctx.uiPipelineLayout,
+                         .heap          = true,
                          .vertexCount   = batch.vertexCount,
                          .instanceCount = 1,
                          .firstVertex   = 0,
@@ -892,7 +920,7 @@ void BlitPass::Execute(
             }
             if (!ctx.window.IsTTY() && !ctx.window.IsHeadless()) {
                 ImGui::Render();
-                ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
+                ImGui_ImplVulkanHeap_RenderDrawData(ImGui::GetDrawData(), cmd);
             }
         });
     }
@@ -922,6 +950,8 @@ void ViewmodelPass::Execute(
 
     Profiler::ScopedGpuProfile timer(cmd, recorder.frameIndex, ctx.gpuProfiler, Stage::ViewmodelPass);
 
+    ctx.BindHeapsAndPushFrame(cmd);
+
     Vk::DynamicPass(in.sceneColor.extent)
         .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .AddColor(in.velocity, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
@@ -940,7 +970,7 @@ void ViewmodelPass::Execute(
                 }
 
                 const ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
-                SubmitDrawInstanced(recorder.encoder, drawCmd, static_cast<uint32_t>(i), recorder.bindlessSet, push);
+                SubmitDrawInstanced(recorder.encoder, drawCmd, static_cast<uint32_t>(i), push);
             }
         });
 }

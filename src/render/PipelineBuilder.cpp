@@ -64,6 +64,17 @@ auto ComputePipelineBuilder::Specialization(const VkSpecializationInfo* info) no
     return *this;
 }
 
+auto ComputePipelineBuilder::HeapMappings(const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping) noexcept -> ComputePipelineBuilder& {
+    _descriptor_heap = true;
+    _mapping         = mapping;
+    return *this;
+}
+
+auto ComputePipelineBuilder::HeapPipeline() noexcept -> ComputePipelineBuilder& {
+    _descriptor_heap = true;
+    return *this;
+}
+
 auto ComputePipelineBuilder::Build(const VkDevice device) const noexcept -> std::expected<Pipeline, ZHLN::Error> {
     const auto result = Validate();
     if (result != PipelineBuilderResult::Succeeded) {
@@ -75,6 +86,8 @@ auto ComputePipelineBuilder::Build(const VkDevice device) const noexcept -> std:
         .shader              = {.code = _code, .size = _size, .entry_point = _entry},
         .layout              = _layout,
         .specialization_info = _specialization_info,
+        .descriptor_heap     = _descriptor_heap,
+        .cs_mapping          = _mapping,
     };
 
     return Pipeline(device, ZHLN_CreateComputePipeline(device, &desc));
@@ -84,7 +97,9 @@ auto ComputePipelineBuilder::Validate() const noexcept -> PipelineBuilderResult 
     if ((_code == nullptr) || _size == 0) {
         return PipelineBuilderResult::MissingShaders;
     }
-    if (_layout == VK_NULL_HANDLE) {
+    // VUID-VkComputePipelineCreateInfo-flags-11311: heap pipelines require
+    // layout == VK_NULL_HANDLE.
+    if (_layout == VK_NULL_HANDLE && !_descriptor_heap) {
         return PipelineBuilderResult::MissingLayout;
     }
     return PipelineBuilderResult::Succeeded;
@@ -97,11 +112,6 @@ auto ComputePipelineBuilder::Validate() const noexcept -> PipelineBuilderResult 
 PipelineLayoutBuilder::PipelineLayoutBuilder(VkDevice device) noexcept: _device(device) {
 }
 
-PipelineLayoutBuilder& PipelineLayoutBuilder::AddDescriptorSetLayout(VkDescriptorSetLayout layout) noexcept {
-    _setLayouts.push_back(layout);
-    return *this;
-}
-
 PipelineLayoutBuilder& PipelineLayoutBuilder::AddPushConstant(VkShaderStageFlags stages, uint32_t size, uint32_t offset) noexcept {
     _pushConstants.push_back({.stageFlags = stages, .offset = offset, .size = size});
     return *this;
@@ -109,8 +119,8 @@ PipelineLayoutBuilder& PipelineLayoutBuilder::AddPushConstant(VkShaderStageFlags
 
 auto PipelineLayoutBuilder::Build() const noexcept -> std::expected<PipelineLayout, ZHLN::Error> {
     const ZHLN_PipelineLayoutDesc desc = {
-        .set_layouts         = _setLayouts.empty() ? nullptr : _setLayouts.data(),
-        .set_layout_count    = static_cast<uint32_t>(_setLayouts.size()),
+        .set_layouts         = nullptr,
+        .set_layout_count    = 0,
         .push_constants      = _pushConstants.empty() ? nullptr : _pushConstants.data(),
         .push_constant_count = static_cast<uint32_t>(_pushConstants.size())
     };

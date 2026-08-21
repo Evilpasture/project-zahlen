@@ -56,6 +56,26 @@ template <typename... Ptrs>
 // RenderContext Infrastructure & Lifecycles
 // ============================================================================
 
+auto RenderContext::Impl::FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, 6> {
+    // Order must match the PUSH_ADDRESS mapping offsets baked in
+    // BuildSceneHeapMappings: {frame, lights, instances, joints, prevJoints, morphDeltas}.
+    return {
+        ctx.BufferAddress(frames.frameUniformBuffers[frame_index].Handle()), ctx.BufferAddress(frames.lightStorageBuffers[frame_index].Handle()),
+        ctx.BufferAddress(frames.instanceDataBuffers[frame_index].Handle()), ctx.BufferAddress(frames.jointBuffers[frame_index].Handle()),
+        ctx.BufferAddress(frames.jointBuffers[frame_index ^ 1].Handle()),    ctx.BufferAddress(morphDeltasBuffer.Handle()),
+    };
+}
+
+void RenderContext::Impl::BindHeapsAndPushFrame(VkCommandBuffer cmd) const noexcept {
+    // Legacy descriptor-set and push-constant commands elsewhere in the frame
+    // invalidate heap + push-data state (and vice versa), so every heap-based
+    // segment re-binds both heaps and re-pushes the per-frame device-address
+    // block that backs the scene registry's PUSH_ADDRESS mappings.
+    heapManager.BindHeaps(cmd);
+    const auto addresses = FrameHeapAddresses();
+    Vk::PushData(ctx, cmd, kHeapFrameAddrPushOffset, addresses.data(), kHeapFrameAddrBlockSize);
+}
+
 auto RenderContext::GetFramebufferSize() const -> std::optional<Extent2D> {
     Extent2D size = _impl->window.GetSize();
     if (size.width == 0 || size.height == 0) {
@@ -401,6 +421,9 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
         // ====================================================================
         // 1. RECORD & SUBMIT COMPUTE QUEUE (Async Compute Phase)
         // ====================================================================
+        // VK_EXT_descriptor_heap: reset the per-frame dynamic region budget.
+        _impl->heapManager.BeginFrame(_impl->frame_index);
+
         _impl->current_compute_cmd = _impl->computePools[_impl->frame_index][0];
 
         _impl->RecordComputeFrame(_impl->current_compute_cmd);
@@ -426,9 +449,11 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
             const auto cmd     = _impl->pools.Cmd(_impl->frame_index);
             _impl->current_cmd = cmd;
 
-            vkResetFences(_impl->ctx.Device(), 1, &_impl->sync[_impl->frame_index].in_flight);
+            _impl->sync.ResetFence(_impl->frame_index);
             _impl->pools[_impl->frame_index].Reset();
-            ZHLN_BeginCommandBuffer(cmd);
+
+            // RAII command-buffer scope: begin on construction, end on exit.
+            Vk::CommandBufferGuard recordGuard(cmd);
 
             _impl->pendingAcquires.Drain(cmd);
             _impl->DispatchSkinningPasses();
@@ -477,8 +502,7 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
             if (Diag::IndirectTelemetryEnabled()) {
                 _impl->RecordIndirectTelemetry(cmd);
             }
-
-            ZHLN_EndCommandBuffer(cmd);
+            // recordGuard destructor ends the command buffer here.
 
             // Submit directly to the graphics queue with timeline semaphore sync.
             // Wait on the compute timeline (same as the windowed path) and signal

@@ -573,12 +573,37 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
     vkGetDeviceQueue(handle, desc->physical->transfer_family, 0, &transfer_queue);
     vkGetDeviceQueue(handle, desc->physical->compute_family, 0, &compute_queue);
 
+    // --- VK_EXT_descriptor_heap entry points ---
+    // The loader's static trampolines may predate the extension, so always
+    // resolve through vkGetDeviceProcAddr. All five are required together:
+    // an extension that exposes some but not all would be a broken driver.
+    // The C++ side dispatches through ZHLN::Vk::Context, which forwards to
+    // these pointers; no wrappers are needed in this stateless C layer.
+    PFN_vkCmdBindResourceHeapEXT      pfn_bind_resource_heap = (PFN_vkCmdBindResourceHeapEXT) vkGetDeviceProcAddr(handle, "vkCmdBindResourceHeapEXT");
+    PFN_vkCmdBindSamplerHeapEXT       pfn_bind_sampler_heap  = (PFN_vkCmdBindSamplerHeapEXT) vkGetDeviceProcAddr(handle, "vkCmdBindSamplerHeapEXT");
+    PFN_vkCmdPushDataEXT              pfn_push_data          = (PFN_vkCmdPushDataEXT) vkGetDeviceProcAddr(handle, "vkCmdPushDataEXT");
+    PFN_vkWriteResourceDescriptorsEXT pfn_write_resource_descs =
+        (PFN_vkWriteResourceDescriptorsEXT) vkGetDeviceProcAddr(handle, "vkWriteResourceDescriptorsEXT");
+    PFN_vkWriteSamplerDescriptorsEXT pfn_write_sampler_descs = (PFN_vkWriteSamplerDescriptorsEXT) vkGetDeviceProcAddr(handle, "vkWriteSamplerDescriptorsEXT");
+    const bool heap_available = pfn_bind_resource_heap != NULL && pfn_bind_sampler_heap != NULL && pfn_push_data != NULL && pfn_write_resource_descs != NULL &&
+                                pfn_write_sampler_descs != NULL;
+
+    if (!heap_available) {
+        fprintf(stderr, "[VULKAN] WARNING: VK_EXT_descriptor_heap entry points missing; descriptor-heap paths are disabled.\n");
+    }
+
     return (ZHLN_Device) {
-        .handle         = handle,
-        .graphics_queue = graphics_queue,
-        .present_queue  = present_queue,
-        .transfer_queue = transfer_queue,
-        .compute_queue  = compute_queue,
+        .handle                         = handle,
+        .graphics_queue                 = graphics_queue,
+        .present_queue                  = present_queue,
+        .transfer_queue                 = transfer_queue,
+        .compute_queue                  = compute_queue,
+        .pfn_cmd_bind_resource_heap     = pfn_bind_resource_heap,
+        .pfn_cmd_bind_sampler_heap      = pfn_bind_sampler_heap,
+        .pfn_cmd_push_data              = pfn_push_data,
+        .pfn_write_resource_descriptors = pfn_write_resource_descs,
+        .pfn_write_sampler_descriptors  = pfn_write_sampler_descs,
+        .descriptor_heap_enabled        = heap_available,
     };
 }
 
@@ -1079,12 +1104,15 @@ void ZHLN_DestroyShaderStages(const VkDevice device, ZHLN_ShaderStages* const re
 uint32_t ZHLN_PopulateShaderStageInfos(
     const ZHLN_ShaderStages* const restrict stages,
     VkPipelineShaderStageCreateInfo* const restrict out_stages,
-    const VkSpecializationInfo* spec_info
+    const VkSpecializationInfo*                                spec_info,
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT* const vs_mapping,
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT* const ps_mapping
 ) {
     uint32_t count = 0;
     if (stages->vert.handle != VK_NULL_HANDLE) {
         out_stages[count++] = (VkPipelineShaderStageCreateInfo) {
             .sType               = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .pNext               = vs_mapping, // VK_EXT_descriptor_heap: set/binding -> heap mapping (NULL = none)
             .stage               = stages->vert.stage,
             .module              = stages->vert.handle,
             .pName               = stages->vert.entry_point,
@@ -1095,6 +1123,7 @@ uint32_t ZHLN_PopulateShaderStageInfos(
     if (stages->frag.handle != VK_NULL_HANDLE) {
         out_stages[count++] = (VkPipelineShaderStageCreateInfo) {
             .sType               = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .pNext               = ps_mapping, // VK_EXT_descriptor_heap: set/binding -> heap mapping (NULL = none)
             .stage               = stages->frag.stage,
             .module              = stages->frag.handle,
             .pName               = stages->frag.entry_point,
@@ -1129,7 +1158,19 @@ void ZHLN_DestroyPipelineLayout(const VkDevice device, const VkPipelineLayout la
 VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device, const ZHLN_GraphicsPipelineDesc* const restrict desc) {
     // --- Shader Stages ---
     VkPipelineShaderStageCreateInfo shader_stages[2];
-    uint32_t                        stage_count = ZHLN_PopulateShaderStageInfos(desc->stages, shader_stages, desc->specialization_info);
+    uint32_t                        stage_count = ZHLN_PopulateShaderStageInfos(
+        desc->stages, shader_stages, desc->specialization_info, desc->descriptor_heap ? desc->vs_mapping : NULL, desc->descriptor_heap ? desc->ps_mapping : NULL
+    );
+
+    // --- VK_EXT_descriptor_heap: pipelines consuming heaps must be created
+    // with VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT (via the
+    // VkPipelineCreateFlags2CreateInfoKHR chain; requires Vulkan 1.4 or
+    // VK_KHR_maintenance5 on 1.3 devices).
+    VkPipelineCreateFlags2CreateInfoKHR heap_flags2 = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR,
+        .pNext = NULL, // Filled below: chains onto the dynamic-rendering info
+        .flags = VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT,
+    };
 
     // --- Vertex Input ---
     const VkPipelineVertexInputStateCreateInfo vertex_input = {
@@ -1243,9 +1284,13 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device, const ZHLN_Graphic
         .viewMask                = desc->view_mask,
     };
 
+    if (desc->descriptor_heap) {
+        heap_flags2.pNext = &rendering;
+    }
+
     const VkGraphicsPipelineCreateInfo pipeline_info = {
         .sType               = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-        .pNext               = &rendering,
+        .pNext               = desc->descriptor_heap ? (const void*) &heap_flags2 : (const void*) &rendering,
         .stageCount          = stage_count,
         .pStages             = shader_stages,
         .pVertexInputState   = &vertex_input,
@@ -1256,7 +1301,9 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device, const ZHLN_Graphic
         .pDepthStencilState  = &depth_stencil,
         .pColorBlendState    = &color_blend,
         .pDynamicState       = &dynamic_state,
-        .layout              = desc->layout,
+        // VUID-VkGraphicsPipelineCreateInfo-flags-11311: descriptor-heap
+        // pipelines must use VK_NULL_HANDLE as their pipeline layout.
+        .layout = desc->descriptor_heap ? VK_NULL_HANDLE : desc->layout,
     };
 
     VkPipeline pipeline = VK_NULL_HANDLE;
@@ -1689,12 +1736,6 @@ VkSampler ZHLN_CreateSampler(VkDevice device, const VkSamplerCreateInfo* desc) {
 void ZHLN_DestroySampler(const VkDevice device, const VkSampler sampler) {
     vkDestroySampler(device, sampler, nullptr);
 }
-void ZHLN_DestroyDescriptorSetLayout(const VkDevice device, const VkDescriptorSetLayout layout) {
-    vkDestroyDescriptorSetLayout(device, layout, nullptr);
-}
-void ZHLN_DestroyDescriptorPool(const VkDevice device, const VkDescriptorPool pool) {
-    vkDestroyDescriptorPool(device, pool, nullptr);
-}
 
 [[nodiscard]]
 VkPipeline ZHLN_CreateComputePipeline(const VkDevice device, const ZHLN_ComputePipelineDesc* const restrict desc) {
@@ -1715,16 +1756,26 @@ VkPipeline ZHLN_CreateComputePipeline(const VkDevice device, const ZHLN_ComputeP
 
     const VkPipelineShaderStageCreateInfo stage_info = {
         .sType               = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        .pNext               = desc->descriptor_heap ? desc->cs_mapping : NULL,
         .stage               = VK_SHADER_STAGE_COMPUTE_BIT,
         .module              = comp_module,
         .pName               = entry_name,
         .pSpecializationInfo = desc->specialization_info,
     };
 
+    // VK_EXT_descriptor_heap: mark the compute pipeline as a heap consumer.
+    const VkPipelineCreateFlags2CreateInfoKHR heap_flags2 = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR,
+        .pNext = NULL,
+        .flags = VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT,
+    };
+
     const VkComputePipelineCreateInfo pipeline_info = {
-        .sType  = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
-        .stage  = stage_info,
-        .layout = desc->layout,
+        .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+        .pNext = desc->descriptor_heap ? (const void*) &heap_flags2 : (const void*) NULL,
+        .stage = stage_info,
+        // VUID-VkComputePipelineCreateInfo-flags-11311: same null-layout rule.
+        .layout = desc->descriptor_heap ? VK_NULL_HANDLE : desc->layout,
     };
 
     VkPipeline pipeline = VK_NULL_HANDLE;

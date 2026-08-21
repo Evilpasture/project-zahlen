@@ -9,15 +9,17 @@ namespace ZHLN::Vk {
 // ============================================================================
 
 template <VkFormat F>
-inline RenderTarget<F>::RenderTarget(RenderTarget&& other) noexcept: image(std::move(other.image)), view(std::move(other.view)), extent(other.extent) {
+inline RenderTarget<F>::RenderTarget(RenderTarget&& other) noexcept:
+    image(std::move(other.image)), view(std::move(other.view)), extent(other.extent), viewInfo(other.viewInfo) {
 }
 
 template <VkFormat F>
 inline auto RenderTarget<F>::operator=(RenderTarget&& other) noexcept -> RenderTarget& {
     if (this != &other) {
-        image  = std::move(other.image);
-        view   = std::move(other.view);
-        extent = other.extent;
+        image    = std::move(other.image);
+        view     = std::move(other.view);
+        extent   = other.extent;
+        viewInfo = other.viewInfo;
     }
     return *this;
 }
@@ -62,9 +64,11 @@ inline auto RenderTarget<F>::Create(Allocator& allocator, const Context& ctx, Vk
     if (img_res.has_value()) {
         rt.image = std::move(img_res.value());
         if (desc.arrayLayers > 1) {
-            rt.view = CreateView2DArray<F>(ctx.Device(), rt.image.Handle(), 0, desc.arrayLayers, desc.aspect, mips);
+            rt.view     = CreateView2DArray<F>(ctx.Device(), rt.image.Handle(), 0, desc.arrayLayers, desc.aspect, mips);
+            rt.viewInfo = MakeViewCreateInfo2DArray(rt.image.Handle(), F, 0, desc.arrayLayers, desc.aspect, mips);
         } else {
-            rt.view = CreateView<F>(ctx.Device(), rt.image.Handle(), desc.aspect, mips);
+            rt.view     = CreateView<F>(ctx.Device(), rt.image.Handle(), desc.aspect, mips);
+            rt.viewInfo = MakeViewCreateInfo2D(rt.image.Handle(), F, mips, desc.aspect);
         }
     }
     return rt;
@@ -104,8 +108,18 @@ inline auto RenderTarget3D<F>::Create(Allocator& allocator, const Context& ctx, 
 
     auto img_res = Image::Create(allocator.Get(), info, VMA_MEMORY_USAGE_GPU_ONLY);
     if (img_res.has_value()) {
-        rt.image = std::move(img_res.value());
-        rt.view  = CreateView3D<F>(ctx.Device(), rt.image.Handle(), GetFormatAspect(F), 1);
+        rt.image    = std::move(img_res.value());
+        rt.view     = CreateView3D<F>(ctx.Device(), rt.image.Handle(), GetFormatAspect(F), 1);
+        rt.viewInfo = {
+            .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .pNext            = nullptr,
+            .flags            = 0,
+            .image            = rt.image.Handle(),
+            .viewType         = VK_IMAGE_VIEW_TYPE_3D,
+            .format           = F,
+            .components       = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY},
+            .subresourceRange = {.aspectMask = GetFormatAspect(F), .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1},
+        };
     }
     return rt;
 }

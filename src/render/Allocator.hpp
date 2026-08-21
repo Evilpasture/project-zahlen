@@ -168,6 +168,12 @@ class Buffer {
     [[nodiscard]] static auto
         Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memUsage) noexcept -> std::expected<Buffer, VkResult>;
 
+    /// Creates a buffer whose memory block obeys an additional minimum alignment
+    /// (e.g. VkPhysicalDeviceDescriptorHeapPropertiesEXT::{sampler,resource}HeapAlignment
+    /// for descriptor-heap backing buffers, whose device address must be aligned).
+    [[nodiscard]] static auto Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memUsage, VkDeviceSize minAlignment) noexcept
+        -> std::expected<Buffer, VkResult>;
+
     void Flush(VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept;
 
     struct MappedRegion {
@@ -206,7 +212,10 @@ class Buffer {
         return _handle.Get();
     }
     [[nodiscard]] auto Size() const noexcept -> size_t {
-        return _info.size;
+        // The size REQUESTED at creation (VkBufferCreateInfo::size), not the
+        // VMA allocation size: allocation sizes are rounded up, which would
+        // make descriptor address ranges overrun the buffer.
+        return _requestedSize;
     }
     [[nodiscard]] auto Valid() const noexcept -> bool {
         return _handle.Valid();
@@ -217,7 +226,8 @@ class Buffer {
 
   private:
     VmaHandle<VkBuffer, vmaDestroyBuffer> _handle;
-    VmaAllocationInfo                     _info = {};
+    VmaAllocationInfo                     _info          = {};
+    VkDeviceSize                          _requestedSize = 0;
 };
 
 [[nodiscard]] auto UploadToBuffer(VmaAllocator allocator, VkCommandBuffer cmd, Buffer& dst, const void* data, size_t size) noexcept -> Buffer;

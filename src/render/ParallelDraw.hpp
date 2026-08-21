@@ -12,6 +12,25 @@ namespace ZHLN::Vk {
 struct SecondaryInheritance {
     std::span<const VkFormat> colorFormats;
     VkFormat                  depthFormat = VK_FORMAT_UNDEFINED;
+    // Must match the render pass the secondary is executed in:
+    // VUID-vkCmdExecuteCommands-pStencilAttachment-06775. Only set this when
+    // the pass actually binds a stencil attachment (the depth format alone is
+    // NOT enough — most depth passes have pStencilAttachment == NULL).
+    VkFormat stencilFormat = VK_FORMAT_UNDEFINED;
+
+    // VK_EXT_descriptor_heap: when non-null, the secondary inherits the
+    // primary's bound heaps so it can draw with heap-based pipelines.
+    const VkBindHeapInfoEXT* samplerHeapBindInfo  = nullptr;
+    const VkBindHeapInfoEXT* resourceHeapBindInfo = nullptr;
+
+    // Required for heap-mode draws: vkCmdPushDataEXT dispatch goes through the
+    // context's loaded entry points.
+    const Context* context = nullptr;
+
+    // Optional per-frame push-data block (e.g. the scene registry's device
+    // addresses): pushed once into every secondary right after it begins.
+    uint32_t                         pushDataFrameOffset = 0;
+    std::span<const VkDeviceAddress> pushDataFrameAddresses;
 };
 
 namespace detail {
@@ -51,7 +70,16 @@ inline void ParallelDrawDispatch(
 
     std::vector<VkCommandBuffer> secondaries(num_chunks, VK_NULL_HANDLE);
 
-    const VkCommandBufferInheritanceRenderingInfo inherit = {
+    // VK_EXT_descriptor_heap: heap-binding inheritance for heap-based pipelines.
+    // Only chain it when the caller actually supplies heap bind descriptors.
+    const VkCommandBufferInheritanceDescriptorHeapInfoEXT heap_inherit = {
+        .sType                 = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_DESCRIPTOR_HEAP_INFO_EXT,
+        .pNext                 = nullptr,
+        .pSamplerHeapBindInfo  = inheritDesc.samplerHeapBindInfo,
+        .pResourceHeapBindInfo = inheritDesc.resourceHeapBindInfo,
+    };
+
+    VkCommandBufferInheritanceRenderingInfo inherit = {
         .sType                   = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
         .pNext                   = nullptr,
         .flags                   = 0,
@@ -59,9 +87,12 @@ inline void ParallelDrawDispatch(
         .colorAttachmentCount    = static_cast<uint32_t>(inheritDesc.colorFormats.size()),
         .pColorAttachmentFormats = inheritDesc.colorFormats.data(),
         .depthAttachmentFormat   = inheritDesc.depthFormat,
-        .stencilAttachmentFormat = (inheritDesc.depthFormat == VK_FORMAT_D32_SFLOAT_S8_UINT) ? VK_FORMAT_D32_SFLOAT_S8_UINT : VK_FORMAT_UNDEFINED,
+        .stencilAttachmentFormat = inheritDesc.stencilFormat,
         .rasterizationSamples    = VK_SAMPLE_COUNT_1_BIT
     };
+    if (inheritDesc.samplerHeapBindInfo != nullptr || inheritDesc.resourceHeapBindInfo != nullptr) {
+        inherit.pNext = &heap_inherit;
+    }
 
     const VkCommandBufferInheritanceInfo p_inherit = {
         .sType                = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO,
@@ -88,9 +119,18 @@ inline void ParallelDrawDispatch(
 
         vkBeginCommandBuffer(sec_cmd, &begin_info);
 
+        // VK_EXT_descriptor_heap: push data does not carry over from the
+        // primary, so re-push the per-frame block once per secondary.
+        if (!inheritDesc.pushDataFrameAddresses.empty() && inheritDesc.context != nullptr) {
+            Vk::PushData(
+                *inheritDesc.context, sec_cmd, inheritDesc.pushDataFrameOffset, inheritDesc.pushDataFrameAddresses.data(),
+                static_cast<uint32_t>(inheritDesc.pushDataFrameAddresses.size_bytes())
+            );
+        }
+
         // Instantiated locally on the thread's stack.
         // No thread_local, no global shared state.
-        CommandEncoder encoder(sec_cmd);
+        CommandEncoder encoder(sec_cmd, inheritDesc.context);
 
         // Standard, un-flipped viewport
         const VkViewport viewport = {.x = 0.0F, .y = 0.0F, .width = (float) extent.width, .height = (float) extent.height, .minDepth = 0.0F, .maxDepth = 1.0F};

@@ -14,6 +14,9 @@ struct RenderTarget {
     Image      image;
     ImageView  view;
     VkExtent2D extent {};
+    // VK_EXT_descriptor_heap: the parameters used to create `view` — image
+    // descriptors in the heaps consume VkImageViewCreateInfo instead of handles.
+    VkImageViewCreateInfo viewInfo {};
 
     RenderTarget() = default;
 
@@ -42,9 +45,10 @@ struct RenderTarget {
 
 template <VkFormat F>
 struct RenderTarget3D {
-    Image      image;
-    ImageView  view;
-    VkExtent3D extent {};
+    Image                 image;
+    ImageView             view;
+    VkExtent3D            extent {};
+    VkImageViewCreateInfo viewInfo {};
 
     RenderTarget3D()  = default;
     ~RenderTarget3D() = default;
@@ -66,11 +70,13 @@ struct RenderTarget3D {
 
 template <VkFormat F>
 struct MipmappedRenderTarget {
-    Image                  image;
-    ImageView              fullView;
-    std::vector<ImageView> mipViews;
-    VkExtent2D             extent {};
-    uint32_t               mipLevels = 1;
+    Image                              image;
+    ImageView                          fullView;
+    std::vector<ImageView>             mipViews;
+    VkExtent2D                         extent {};
+    uint32_t                           mipLevels = 1;
+    VkImageViewCreateInfo              fullViewInfo {};
+    std::vector<VkImageViewCreateInfo> mipViewInfos;
 
     MipmappedRenderTarget() = default;
 
@@ -107,11 +113,16 @@ struct MipmappedRenderTarget {
 
         auto img_res = Image::Create(allocator.Get(), info, VMA_MEMORY_USAGE_GPU_ONLY);
         if (img_res.has_value()) {
-            target.image    = std::move(img_res.value());
-            target.fullView = CreateView<F>(ctx.Device(), target.image.Handle(), GetFormatAspect(F), target.mipLevels);
+            target.image        = std::move(img_res.value());
+            target.fullView     = CreateView<F>(ctx.Device(), target.image.Handle(), GetFormatAspect(F), target.mipLevels);
+            target.fullViewInfo = MakeViewCreateInfo2D(target.image.Handle(), F, target.mipLevels, GetFormatAspect(F));
             target.mipViews.reserve(target.mipLevels);
+            target.mipViewInfos.reserve(target.mipLevels);
             for (uint32_t m = 0; m < target.mipLevels; ++m) {
                 target.mipViews.push_back(CreateViewSingleMip<F>(ctx.Device(), target.image.Handle(), m, GetFormatAspect(F)));
+                VkImageViewCreateInfo mipInfo         = MakeViewCreateInfo2D(target.image.Handle(), F, 1, GetFormatAspect(F));
+                mipInfo.subresourceRange.baseMipLevel = m;
+                target.mipViewInfos.push_back(mipInfo);
             }
         }
         return target;
@@ -155,17 +166,17 @@ struct GBufferLayout {
 
 template <VkImageLayout L, VkFormat F>
 Vk::TypedImage<L> AssumeLayout(const Vk::RenderTarget<F>& rt, VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) {
-    return {rt.image.Handle(), rt.view.Get(), {rt.extent.width, rt.extent.height, 1}, aspect, F};
+    return {rt.image.Handle(), rt.view.Get(), {rt.extent.width, rt.extent.height, 1}, aspect, F, &rt.viewInfo};
 }
 
 template <VkImageLayout L, VkFormat F>
 Vk::TypedImage<L> AssumeLayout(const Vk::RenderTarget3D<F>& rt, VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) {
-    return {rt.image.Handle(), rt.view.Get(), rt.extent, aspect, F};
+    return {rt.image.Handle(), rt.view.Get(), rt.extent, aspect, F, &rt.viewInfo};
 }
 
 template <VkImageLayout L, VkFormat F>
 Vk::TypedImage<L> AssumeLayout(const Vk::MipmappedRenderTarget<F>& rt, VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) {
-    return {rt.image.Handle(), rt.fullView.Get(), {rt.extent.width, rt.extent.height, 1}, aspect, F};
+    return {rt.image.Handle(), rt.fullView.Get(), {rt.extent.width, rt.extent.height, 1}, aspect, F, &rt.fullViewInfo};
 }
 
 template <typename Usage>

@@ -47,7 +47,8 @@ class IBLProcessor {
             return std::unexpected(upload_res.error());
         }
 
-        payload.brdfLutView = CreateView<VK_FORMAT_R8G8B8A8_UNORM>(impl.ctx.Device(), payload.brdfLutImage.Handle());
+        payload.brdfLutView     = CreateView<VK_FORMAT_R8G8B8A8_UNORM>(impl.ctx.Device(), payload.brdfLutImage.Handle());
+        payload.brdfLutViewInfo = MakeViewCreateInfo2D(payload.brdfLutImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
 
         // Pass 2: Spherical Harmonics Generation
         ZHLN::Log("[IBL] Generating Diffuse Spherical Harmonics...");
@@ -94,7 +95,8 @@ class IBLProcessor {
             staging.UploadPrefilteredCubeMap(payload.prefilteredImage.Handle(), stagingBuf.Handle(), kBaseSize, kMipLevels);
             staging.AddBuffer(std::forward<decltype(stagingBuf)>(stagingBuf));
 
-            payload.prefilteredView = CreateViewCube<VK_FORMAT_R8G8B8A8_UNORM>(impl.ctx.Device(), payload.prefilteredImage.Handle(), kMipLevels);
+            payload.prefilteredView     = CreateViewCube<VK_FORMAT_R8G8B8A8_UNORM>(impl.ctx.Device(), payload.prefilteredImage.Handle(), kMipLevels);
+            payload.prefilteredViewInfo = MakeViewCreateInfoCube(payload.prefilteredImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, kMipLevels);
             return std::move(payload); // <-- Explicitly move to resolve the deleted copy constructor error
         });
     }

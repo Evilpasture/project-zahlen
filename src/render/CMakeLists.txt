@@ -31,11 +31,10 @@ add_library(zahlen_render STATIC
     RenderCore.cpp
     Commands.cpp
     PipelineBuilder.cpp
-    DescriptorLayout.cpp
+    DescriptorHeap.cpp
     Allocator.cpp
     SamplerBuilder.cpp
     StagingContext.cpp
-    Texture.cpp
     Context.cpp
     Swapchain.cpp
     ShaderStages.cpp

@@ -35,6 +35,16 @@ struct PipelineConfig {
     const ZHLN_ShaderStages* stages = nullptr;
     VkPipelineLayout         layout = VK_NULL_HANDLE;
 
+    // VK_EXT_descriptor_heap: when true the pipeline is created with
+    // VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT and each stage maps its
+    // legacy set/binding decorations onto the bound heaps via its mapping
+    // chain. `layout` must then be VK_NULL_HANDLE
+    // (VUID-VkGraphicsPipelineCreateInfo-flags-11311); push data replaces
+    // both descriptor set layouts and push constant ranges.
+    bool                                                 descriptor_heap = false;
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT* vs_mapping      = nullptr;
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT* ps_mapping      = nullptr;
+
     // Vertex input (populated by Vertex<T>())
     const VkVertexInputBindingDescription*   bindings       = nullptr;
     const VkVertexInputAttributeDescription* attributes     = nullptr;
@@ -89,6 +99,23 @@ class PipelineBuilder {
 
     auto Layout(VkPipelineLayout l) noexcept -> PipelineBuilder& {
         _cfg.layout = l;
+        return *this;
+    }
+
+    /// Marks the pipeline as a VK_EXT_descriptor_heap consumer and supplies the
+    /// per-stage set/binding -> heap mappings (may be null for stages whose
+    /// resources are all BDA/push-data backed). The layout must be
+    /// VK_NULL_HANDLE (spec-required for heap pipelines).
+    auto HeapMappings(const VkShaderDescriptorSetAndBindingMappingInfoEXT* vsMapping, const VkShaderDescriptorSetAndBindingMappingInfoEXT* psMapping) noexcept
+        -> PipelineBuilder& {
+        _cfg.descriptor_heap = true;
+        _cfg.vs_mapping      = vsMapping;
+        _cfg.ps_mapping      = psMapping;
+        return *this;
+    }
+
+    auto HeapPipeline() noexcept -> PipelineBuilder& {
+        _cfg.descriptor_heap = true;
         return *this;
     }
 
@@ -252,7 +279,10 @@ class PipelineBuilder {
         if (_cfg.stages == nullptr) {
             return PipelineBuilderResult::MissingShaders;
         }
-        if (_cfg.layout == VK_NULL_HANDLE) {
+        // VUID-VkGraphicsPipelineCreateInfo-flags-11311: descriptor-heap
+        // pipelines require layout == VK_NULL_HANDLE, so a null layout is
+        // valid (and in fact required) in heap mode.
+        if (_cfg.layout == VK_NULL_HANDLE && !_cfg.descriptor_heap) {
             return PipelineBuilderResult::MissingLayout;
         }
         return PipelineBuilderResult::Succeeded;
@@ -262,6 +292,9 @@ class PipelineBuilder {
         return {
             .stages               = _cfg.stages,
             .layout               = _cfg.layout,
+            .descriptor_heap      = _cfg.descriptor_heap,
+            .vs_mapping           = _cfg.vs_mapping,
+            .ps_mapping           = _cfg.ps_mapping,
             .vertex_bindings      = _cfg.bindings,
             .vertex_attributes    = _cfg.attributes,
             .vertex_binding_count = _cfg.bindingCount,
@@ -303,31 +336,39 @@ class ComputePipelineBuilder {
     auto Layout(VkPipelineLayout l) noexcept -> ComputePipelineBuilder&;
     auto Specialization(const VkSpecializationInfo* info) noexcept -> ComputePipelineBuilder&;
 
+    /// Marks the pipeline as a VK_EXT_descriptor_heap consumer with the given
+    /// set/binding -> heap mapping for the compute stage.
+    auto HeapMappings(const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping) noexcept -> ComputePipelineBuilder&;
+    auto HeapPipeline() noexcept -> ComputePipelineBuilder&;
+
     [[nodiscard]] auto Build(VkDevice device) const noexcept -> std::expected<Pipeline, ZHLN::Error>;
 
   private:
     [[nodiscard]] auto Validate() const noexcept -> PipelineBuilderResult;
 
-    const uint32_t*             _code                = nullptr;
-    size_t                      _size                = 0;
-    const char*                 _entry               = nullptr;
-    VkPipelineLayout            _layout              = VK_NULL_HANDLE;
-    const VkSpecializationInfo* _specialization_info = nullptr;
+    const uint32_t*                                      _code                = nullptr;
+    size_t                                               _size                = 0;
+    const char*                                          _entry               = nullptr;
+    VkPipelineLayout                                     _layout              = VK_NULL_HANDLE;
+    const VkSpecializationInfo*                          _specialization_info = nullptr;
+    bool                                                 _descriptor_heap     = false;
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT* _mapping             = nullptr;
 };
 
 class PipelineLayoutBuilder {
   public:
     explicit PipelineLayoutBuilder(VkDevice device) noexcept;
 
-    PipelineLayoutBuilder& AddDescriptorSetLayout(VkDescriptorSetLayout layout) noexcept;
+    // NOTE: AddDescriptorSetLayout was removed with the descriptor-set model;
+    // heap pipelines use a null layout and only push ranges remain relevant
+    // (skinning).
     PipelineLayoutBuilder& AddPushConstant(VkShaderStageFlags stages, uint32_t size, uint32_t offset = 0) noexcept;
 
     [[nodiscard]] auto Build() const noexcept -> std::expected<PipelineLayout, ZHLN::Error>;
 
   private:
-    VkDevice                           _device;
-    std::vector<VkDescriptorSetLayout> _setLayouts;
-    std::vector<VkPushConstantRange>   _pushConstants;
+    VkDevice                         _device;
+    std::vector<VkPushConstantRange> _pushConstants;
 };
 
 } // namespace ZHLN::Vk

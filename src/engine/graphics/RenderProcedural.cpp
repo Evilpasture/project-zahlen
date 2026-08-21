@@ -11,20 +11,15 @@ std::expected<void, Error> RenderContext::Impl::BuildProceduralBakePipeline() {
     // Reflect the bake layout out of the compiled shader instead of allocating
     // from a static C++ descriptor-layout typedef.
     if (!proceduralBakeDescLayout.Build(
-            ctx.Device(), Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::ProceduralBakeComp).vertex, "CSMain"),
-            VK_SHADER_STAGE_COMPUTE_BIT
+            ctx.Device(), Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::ProceduralBakeComp).vertex, "CSMain"), VK_SHADER_STAGE_COMPUTE_BIT
         )) {
         ZHLN::Log("[Shader] Failed to reflect procedural bake layout!");
         return std::unexpected(RenderInitError::PipelineCreationFailed);
     }
-    proceduralBakeDescPool = proceduralBakeDescLayout.CreatePool(ctx.Device(), 1);
-    proceduralBakeSet      = proceduralBakeDescLayout.Allocate(ctx.Device(), proceduralBakeDescPool.Get(), proceduralBakeDescLayout.GetSetLayout());
-
-    VkPushConstantRange push = {
-        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
-        .offset     = 0,
-        .size       = sizeof(BakePush),
-    };
+    // VK_EXT_descriptor_heap: the bake output image is written into a static
+    // heap slot pair right before each dispatch (ExecuteImmediate is
+    // synchronous, so the slot can be reused per bake call).
+    Vk::BuildHeapPassBindings(heapManager, proceduralBakeDescLayout.reflectedSets[0], 0, Vk::kHeapIndexPushOffset, 2, bakeHeapBindings);
 
     const void*           cs_code = nullptr;
     size_t                cs_size = 0;
@@ -46,7 +41,7 @@ std::expected<void, Error> RenderContext::Impl::BuildProceduralBakePipeline() {
         specInfos[i] = {.mapEntryCount = 1, .pMapEntries = specEntries.data(), .dataSize = sizeof(int), .pData = &variants[i]};
     }
 
-    auto build_res = proceduralBakePass.BuildVariants(ctx.Device(), proceduralBakeDescLayout.GetSetLayout(), shaderDesc, specInfos, &push, 1);
+    auto build_res = proceduralBakePass.BuildHeapVariants(ctx.Device(), shaderDesc, specInfos, bakeHeapBindings.GetInfo());
     if (!build_res) {
         ZHLN::Log("[Shader] Failed to build specialized Procedural Bake Compute variants: {}", build_res.error().Message());
         return std::unexpected(build_res.error());
@@ -86,26 +81,36 @@ std::expected<uint32_t, Error>
         .and_then([&, device, width, height, variantIdx, scale, randomness, distortion](auto&& gpuImage) -> std::expected<uint32_t, Error> {
             auto writeView = Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 1);
 
-            // Write to compute descriptor set
-            proceduralBakeDescLayout.Write(device, proceduralBakeSet, Vk::ImageWrite {.view = writeView.Get()});
+            // VK_EXT_descriptor_heap: write the bake output's storage-image
+            // descriptor into the static heap slot.
+            const auto writeViewInfo = Vk::MakeViewCreateInfo2D(gpuImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
+            Vk::WriteHeapBindings(heapManager, ctx, bakeHeapBindings, 0, Vk::ImageWrite {.view = writeView.Get(), .viewInfo = &writeViewInfo});
 
             // Dispatch the Compute Shader via allocation-free ExecuteImmediate
             Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
+                // VK_EXT_descriptor_heap: this command buffer records a heap
+                // pipeline, so the heaps must be bound on it (push data also
+                // does not carry over from other command buffers).
+                BindHeapsAndPushFrame(cmd);
+
                 // Transition Undefined -> General (Safe for Compute storage writes)
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, gpuImage.Handle());
 
-                proceduralBakePass.DispatchVariant(
-                    cmd, proceduralBakeSet, variantIdx, (width + 15) / 16, (height + 15) / 16, 1,
+                proceduralBakePass.BindVariant(cmd, variantIdx);
+                Vk::PushData(
+                    ctx, cmd, 0,
                     BakePush {.width = width, .height = height, .scale = scale, .randomness = randomness, .distortion = distortion, .bakeType = variantIdx}
                 );
+                Vk::PushHeapIndex(ctx, cmd, Vk::kHeapIndexPushOffset, 0);
+                Vk::ComputePass::Dispatch(cmd, (width + 15) / 16, (height + 15) / 16, 1);
 
                 // Transition General -> Shader Read Only (Ready for Bindless fragment reads)
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, gpuImage.Handle());
             });
 
-            // Register our generated view into the Bindless Set
+            // Register our generated image into the bindless texture heap region.
             uint32_t index = nextTextureIndex++;
-            Vk::UpdateBindlessTextureSlot(device, index, writeView.Get(), frames.bindlessSets, 11);
+            WriteTextureSlotToHeap(index, gpuImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, false);
 
             textureImages.push_back(std::forward<decltype(gpuImage)>(gpuImage));
             textureViews.push_back(std::move(writeView));

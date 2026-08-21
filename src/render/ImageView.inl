@@ -132,4 +132,52 @@ inline auto CreateViewSingleMip(VkDevice device, VkImage image, uint32_t baseMip
     VkImageView view = ZHLN_CreateImageView(device, &desc);
     return ImageView {device, view};
 }
+
+// ============================================================================
+// VK_EXT_descriptor_heap: view-create-info helpers
+// ============================================================================
+// vkWriteResourceDescriptorsEXT consumes VkImageViewCreateInfo (not view
+// handles), so descriptor-heap image writes carry the same parameters used to
+// create the matching VkImageView above.
+
+inline auto MakeViewCreateInfo2D(VkImage image, VkFormat format, uint32_t mipLevels, VkImageAspectFlags aspect) noexcept -> VkImageViewCreateInfo {
+    return {
+        .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .pNext            = nullptr,
+        .flags            = 0,
+        .image            = image,
+        .viewType         = VK_IMAGE_VIEW_TYPE_2D,
+        .format           = format,
+        .components       = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY},
+        .subresourceRange = {.aspectMask = aspect, .baseMipLevel = 0, .levelCount = mipLevels, .baseArrayLayer = 0, .layerCount = 1},
+    };
+}
+
+inline auto MakeViewCreateInfoCube(VkImage image, VkFormat format, uint32_t mipLevels) noexcept -> VkImageViewCreateInfo {
+    return {
+        .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .pNext            = nullptr,
+        .flags            = 0,
+        .image            = image,
+        .viewType         = VK_IMAGE_VIEW_TYPE_CUBE,
+        .format           = format,
+        .components       = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY},
+        .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = mipLevels, .baseArrayLayer = 0, .layerCount = 6},
+    };
+}
+
+inline auto
+    MakeViewCreateInfo2DArray(VkImage image, VkFormat format, uint32_t baseLayer, uint32_t layerCount, VkImageAspectFlags aspect, uint32_t mipLevels) noexcept
+    -> VkImageViewCreateInfo {
+    return {
+        .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .pNext            = nullptr,
+        .flags            = 0,
+        .image            = image,
+        .viewType         = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+        .format           = format,
+        .components       = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY},
+        .subresourceRange = {.aspectMask = aspect, .baseMipLevel = 0, .levelCount = mipLevels, .baseArrayLayer = baseLayer, .layerCount = layerCount},
+    };
+}
 } // namespace ZHLN::Vk

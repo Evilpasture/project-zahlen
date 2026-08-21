@@ -11,9 +11,9 @@
 // clang-format on
 #include "TTYBackend.hpp"
 #include "backends/imgui_impl_glfw.h"
-#include "backends/imgui_impl_vulkan.h"
 #include "engine/system/LODSystem.hpp"
 #include "imgui.h"
+#include "imgui_impl_vulkan_heap.h"
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/CommandLine.hpp>
@@ -464,7 +464,7 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
                 if (codepoint >= 32 && codepoint <= 126 && inputComp->text.size() < 255) {
                     std::string_view curr = inputComp->text;
                     std::string      next = std::string(curr.substr(0, inputComp->cursorIndex)) + static_cast<char>(codepoint) +
-                                       std::string(curr.substr(inputComp->cursorIndex));
+                                            std::string(curr.substr(inputComp->cursorIndex));
                     inputComp->text.assign(next);
                     inputComp->cursorIndex++;
                 }
@@ -507,7 +507,7 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
 
     _impl->physicsContext = std::make_unique<PhysicsContext>(cfg.physics);
     _impl->audioContext   = std::make_unique<AudioContext>();
-    _impl->assetManager = std::make_unique<CreativeWorksManager>();
+    _impl->assetManager   = std::make_unique<CreativeWorksManager>();
 
     _impl->updateGraph   = std::make_unique<ECS::SystemGraph>();
     _impl->renderGraph   = std::make_unique<ECS::SystemGraph>();
@@ -579,7 +579,7 @@ void Engine::ProcessEvents() {
     }
 
     glfwPollEvents();
-    ImGui_ImplVulkan_NewFrame();
+    ImGui_ImplVulkanHeap_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
 
@@ -844,13 +844,13 @@ auto Engine::Run(const CommandLineOptions& options, UICallback uiCallback) -> in
     EngineConfig config {
         .physics = {.maxBodies = 5000, .maxBodyPairs = 10000, .maxContactConstraints = 10000, .tempAllocatorSize = 64 * 1024 * 1024},
         .render  = {
-             .appName        = options.launchEditor ? "Zahlen World Editor" : "Zahlen Engine",
-             .width          = w,
-             .height         = h,
-             .vsync          = options.vsync,
-             .fullscreen     = options.fullscreen,
-             .validationMode = options.validationMode,
-             .headless       = options.headless,
+            .appName        = options.launchEditor ? "Zahlen World Editor" : "Zahlen Engine",
+            .width          = w,
+            .height         = h,
+            .vsync          = options.vsync,
+            .fullscreen     = options.fullscreen,
+            .validationMode = options.validationMode,
+            .headless       = options.headless,
         },
     };
 

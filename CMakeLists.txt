@@ -283,6 +283,7 @@ set(RAW_ENGINE_SOURCES
     src/engine/CreativeWorksFactory.cpp
     src/engine/graphics/MeshBuilder.cpp
     src/engine/graphics/TextureManager.cpp
+    third_party/imgui/backends/imgui_impl_vulkan_heap.cpp
     src/engine/system/TextureSystem.cpp
     src/engine/system/AnimationSystem.cpp
     src/engine/CreativeWorksManager.cpp
