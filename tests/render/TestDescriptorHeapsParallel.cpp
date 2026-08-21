@@ -19,6 +19,7 @@
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -140,7 +141,7 @@ struct DescriptorHeapsParallelSuite {
                     ZHLN::CreativeWorksFactory::CreateBox(
                         *engine, JPH::Vec3(halfExtent, halfExtent, halfExtent),
                         ZHLN::CreativeWorksFactory::SpawnParams {
-                            .position = JPH::RVec3(pos), .createPhysics = false, .materialOverride = gpuMaterials[matIdx]}
+                            .position = JPH::RVec3(pos.GetX(), pos.GetY(), pos.GetZ()), .createPhysics = false, .materialOverride = gpuMaterials[matIdx]}
                     );
                 }
             }
