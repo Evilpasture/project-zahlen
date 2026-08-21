@@ -163,6 +163,12 @@ buffer it just filled.
 
 ## 6. What is *not* on the mesh path
 
+Procedural geometry (`CreateBoxMesh`, `CreatePlaneMesh`, `CreateTetrahedronMesh`,
+both terrain builders) is meshletized in `MeshBuilder.cpp` via `AttachMeshlets()`.
+Without it, a scene assembled from `CreateBox()` would carry `meshletCount == 0`
+and quietly stay on the vertex pipeline forever — the feature would look
+"working" while never actually running. `TestMeshShaders` guards this.
+
 | Case | Path | Reason |
 | --- | --- | --- |
 | GPU-skinned draws | vertex | meshlet vertex indices address the pre-skinning pool |
@@ -173,7 +179,35 @@ buffer it just filled.
 
 ---
 
-## 7. Verification status
+## 7. Tests
+
+`tests/render/TestMeshShaders.cpp` (ctest: `GPU_TestMeshShaders`):
+
+| Test | What it proves |
+| --- | --- |
+| `meshlet_partitioning_invariants` | CPU only. Degenerate input falls back; one triangle → one meshlet; on a 48×48 grid no primitive is lost or duplicated, every micro index resolves inside its cluster, every referenced vertex lies inside the baked bounding sphere (cluster culling is only sound if it does), every `triangleOffset` is 4-byte aligned. |
+| `procedural_meshes_carry_meshlet_streams` | Box/plane/tetrahedron all upload the three meshlet streams **and** keep their raw vertex pool intact (BLAS + vertex fallback). Regression guard for the "feature silently never runs" failure mode. |
+| `mesh_shading_runtime_toggle` | `SetMeshShadingEnabled()` actually flips the active path; unsupported devices never report the path as active. |
+| `mesh_and_vertex_paths_render_identically` | Renders the same scene twice in one process — once through task/mesh, once through the vertex pipeline — and compares the framebuffers. |
+
+The parity test is the real verification, so its comparator was itself
+validated against synthetic divergences (identical frames, a dropped cluster, a
+1-pixel and a 3-pixel geometry shift, a ±2 ULP jitter, two blank frames, and a
+uniform shading change). Findings that shaped it:
+
+* A "1 % of pixels over tolerance" budget **passed** a 3-pixel geometry shift —
+  far too lax. The decisive metric is therefore the **silhouette mismatch rate**
+  (pixels that are geometry in one image and background in the other, over the
+  union), which flags even a 1-pixel shift at 1.3 % against a 0.5 % budget.
+* Two blank frames match perfectly, so the test independently requires both
+  frames to contain >500 shaded pixels before comparing them.
+* TAA is switched off and `fullBright` enabled for the comparison, otherwise
+  jitter history and lighting noise dominate the diff.
+
+Every GPU test **skips** (does not fail) when the device lacks mesh shading, so
+the binary stays green on lavapipe and pre-Turing/pre-RDNA2 hardware.
+
+## 8. Verification status
 
 Verified in this repository:
 
@@ -192,6 +226,8 @@ Verified in this repository:
 - [x] Binding parity: `TaskMain`/`MeshMain` decorate the `scene` resources with
       the *same* set/binding pairs as `VSMain` (set 0, bindings 1/3/4/5/6), so
       the heap mapping table reflected from `basic.slang` applies verbatim.
+- [x] The image comparator used by the parity test detects dropped clusters,
+      1-pixel geometry shifts and shading changes, and rejects blank frames.
 
 Still requires a GPU (cannot be checked without a Vulkan device):
 
@@ -199,6 +235,7 @@ Still requires a GPU (cannot be checked without a Vulkan device):
 - [ ] RenderDoc capture shows `AMP → MSH` replacing `IA → VS`.
 - [ ] Cone-culling effectiveness: >50 % of meshlets rejected when viewing a
       closed mesh from one side (pipeline statistics query on mesh invocations).
-- [ ] Pixel-identical output versus `ZHLN_NO_MESH_SHADING=1` (UV seams, normal
-      smoothing, T-junctions).
+- [ ] `GPU_TestMeshShaders` green on a mesh-shading device (this is what
+      `mesh_and_vertex_paths_render_identically` automates: UV seams, normal
+      smoothing and T-junctions all land in the silhouette/pixel diff).
 - [ ] Shadow cascades unchanged, BLAS/ray-traced reflections unaffected.

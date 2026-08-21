@@ -190,7 +190,18 @@ class ZHLN_API RenderContext {
     ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& GetTracked2DEmitters() noexcept;
     ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& GetTracked3DEmitters() noexcept;
 
-    void         SetAAState(const AAState& state);
+    void SetAAState(const AAState& state);
+
+    // --- VK_EXT_mesh_shader ---
+    /// True when the device exposes mesh shading with limits sufficient for the
+    /// engine's meshlet budget (independent of whether it is currently in use).
+    [[nodiscard]] bool MeshShadingSupported() const noexcept;
+    /// True when scene geometry is actually being drawn through task/mesh
+    /// shaders this frame (supported AND not disabled).
+    [[nodiscard]] bool MeshShadingActive() const noexcept;
+    /// Runtime override of ZHLN_NO_MESH_SHADING. Call between frames only;
+    /// both pipelines are always built, so this only changes which is bound.
+    void         SetMeshShadingEnabled(bool enabled) noexcept;
     RenderResult BuildMeshBLAS(Mesh& mesh) noexcept;
 
     [[nodiscard]] std::expected<void, Error> SetShadowResolution(uint32_t resolution);

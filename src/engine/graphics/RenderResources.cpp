@@ -127,6 +127,18 @@ auto RenderContext::GetTracked3DEmitters() noexcept -> ZHLN::Array<ZHLN::Pair<ui
     return _impl->tracked3DEmitters;
 }
 
+bool RenderContext::MeshShadingSupported() const noexcept {
+    return _impl->ctx.MeshShadersSupported();
+}
+
+bool RenderContext::MeshShadingActive() const noexcept {
+    return _impl->MeshShadingActive();
+}
+
+void RenderContext::SetMeshShadingEnabled(bool enabled) noexcept {
+    Diag::SetMeshShadingDisabled(!enabled);
+}
+
 // ============================================================================
 // RenderContext Subsystem Implementation
 // ============================================================================

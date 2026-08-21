@@ -54,6 +54,8 @@ namespace Diag {
 [[nodiscard]] bool DisableGpuCulling() noexcept;
 /// ZHLN_NO_MESH_SHADING=1 forces the legacy vertex pipeline (VK_EXT_mesh_shader).
 [[nodiscard]] bool DisableMeshShading() noexcept;
+/// Runtime override of the above. Only call between frames.
+void               SetMeshShadingDisabled(bool disabled) noexcept;
 [[nodiscard]] bool IndirectTelemetryEnabled() noexcept;
 } // namespace Diag
 
