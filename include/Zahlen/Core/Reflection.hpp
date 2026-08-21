@@ -670,12 +670,22 @@ constexpr void ForEachMethodPointer(F&& f) {
     };
 }
 
+template <typename Tag>
+consteval bool AnnotationHasType(std::meta::info annotation) {
+    const auto actualType = std::meta::dealias(std::meta::type_of(annotation));
+    // P3394 annotations represent constant values. GCC therefore reports
+    // `const Tag`, while the Bloomberg/Clang implementation historically
+    // reported `Tag`. Accept both without making either compiler's behavior
+    // leak into callers.
+    return actualType == std::meta::dealias(^^Tag) || actualType == std::meta::dealias(^^std::add_const_t<Tag>);
+}
+
 template <auto ScopeInfo, typename Tag, typename F>
 constexpr void ForEachAnnotatedTypeInScope(F&& f) {
     constexpr auto members = std::define_static_array(std::meta::members_of(ScopeInfo, std::meta::access_context::current()));
     [:Expand(members):] >> [&]<auto m>() {
         if constexpr (std::meta::is_type(m)) {
-            if constexpr (std::ranges::any_of(std::meta::annotations_of(m), [](auto a) { return std::meta::type_of(a) == ^^Tag; })) {
+            if constexpr (std::ranges::any_of(std::meta::annotations_of(m), [](auto a) { return AnnotationHasType<Tag>(a); })) {
                 using TargetType = typename[:m:];
                 f.template operator()<TargetType>();
             }
@@ -686,7 +696,7 @@ constexpr void ForEachAnnotatedTypeInScope(F&& f) {
 template <typename Tag, auto EntityInfo>
 consteval std::optional<Tag> GetAnnotation() {
     for (auto a: std::meta::annotations_of(EntityInfo)) {
-        if (std::meta::type_of(a) == ^^Tag) {
+        if (AnnotationHasType<Tag>(a)) {
             return std::meta::extract<Tag>(a);
         }
     }
