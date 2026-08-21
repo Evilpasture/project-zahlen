@@ -112,6 +112,12 @@ auto DescriptorHeap<Type>::Init(const Context& ctx, Allocator& allocator, uint32
         max_heap_size                = props.maxResourceHeapSize;
     }
 
+    if (_stride == 0) [[unlikely]] {
+        // A well-formed implementation always advertises non-zero descriptor
+        // sizes; treat zero as "extension unusable".
+        return std::unexpected(DescriptorHeapError::ExtensionUnavailable);
+    }
+
     const VkDeviceSize used_bytes  = _stride * _capacity;
     const VkDeviceSize total_bytes = AlignUp(used_bytes + _reservedSize, std::max<VkDeviceSize>(heap_alignment, 1));
 
