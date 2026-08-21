@@ -191,6 +191,11 @@ struct alignas(64) RigBoneMap {
     size_t             synchronizedSkinPaletteCount = 0;
     bool               initialized                  = false;
     bool               poseValid                    = false;
+    // Baked control rigs animate CTR/FK/IK/MCH/ORG and DEF nodes together.
+    // Filtering only the semantic DEF nodes through independent springs breaks
+    // those authored relationships, so their complete hierarchy is sampled as
+    // one coherent bicubic pose before procedural model-space passes.
+    bool preserveAuthoredHierarchy = false;
 
     void Reset() noexcept {
         std::destroy_at(this);
@@ -646,6 +651,7 @@ void Register(Engine& engine);
 void   Update(Engine& engine, float dt) noexcept;
 void   ResolveModelTransforms(RigBoneMap& boneMap) noexcept;
 void   CaptureChildOfPoseDeltas(RigBoneMap& boneMap) noexcept;
+void   CaptureAuthoredConstraintPoseDeltas(RigBoneMap& boneMap) noexcept;
 void   CaptureFingerPoseDeltas(RigBoneMap& boneMap) noexcept;
 size_t ApplyFingerRelationConstraints(RigBoneMap& boneMap) noexcept;
 size_t ApplyChildOfConstraints(

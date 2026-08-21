@@ -126,7 +126,7 @@ struct ProceduralAnimationTestSuite {
             const size_t     hairSlot = ZHLN::BoneSlot(ZHLN::CharacterBone::HairStart) + 23 * ZHLN::HairStrandsComponent::kLinksPerStrand + 3;
             const std::array expectedFingerNodes {finger1, finger2, finger3};
             if (map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::HandL)] != hand || map.sourceHairStrandCount != 24 || map.nodeIndices[hairSlot] != hair24 ||
-                map.fingerJointConstraintCount != expectedFingerNodes.size()) {
+                map.fingerJointConstraintCount != expectedFingerNodes.size() || !map.preserveAuthoredHierarchy) {
                 return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
             for (size_t index = 0; index < map.fingerJointConstraintCount; ++index) {
@@ -356,9 +356,6 @@ struct ProceduralAnimationTestSuite {
             const JPH::Mat44 rigidFootRPartRelative   = importedMap.modelTransforms[rigidFootR.root].Inversed() * importedMap.modelTransforms[rigidFootR.part];
             const JPH::Mat44 secondaryFootLBefore     = importedMap.modelTransforms[secondaryFootLNode];
             const JPH::Mat44 secondaryFootRBefore     = importedMap.modelTransforms[secondaryFootRNode];
-            importedMap.localTransforms[thighL] = importedMap.localTransforms[thighL] * JPH::Mat44::sRotation(JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), 0.35f));
-            importedMap.localTransforms[thighR] = importedMap.localTransforms[thighR] *
-                                                  JPH::Mat44::sRotation(JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), -0.30f));
             importedMap.localTransforms[forearmL] = importedMap.localTransforms[forearmL] *
                                                     JPH::Mat44::sRotation(JPH::Quat::sRotation(JPH::Vec3::sAxisY(), 0.45f));
             importedMap.localTransforms[supSpine] = importedMap.localTransforms[supSpine] *
@@ -396,10 +393,37 @@ struct ProceduralAnimationTestSuite {
             if (kneeLConstraint == nullptr || kneeRConstraint == nullptr) {
                 return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
+            // Baked control rigs may author a knee anchor that is not the bind
+            // translation. Capture that evaluated model relation verbatim.
+            auto offsetAuthoredShin = [&](ZHLN::RigNodeIndex shin, JPH::Vec3Arg offset) {
+                JPH::Mat44 authored = importedMap.modelTransforms[shin];
+                authored.SetTranslation(authored.GetTranslation() + offset);
+                ZHLN::Animation::SetModelTransformAndCarrySubtree(importedMap.modelTransforms.data(), importedMap, shin, authored);
+            };
+            offsetAuthoredShin(shinL, JPH::Vec3(0.025f, 0.010f, 0.0f));
+            offsetAuthoredShin(shinR, JPH::Vec3(-0.025f, 0.010f, 0.0f));
+            ZHLN::ProceduralAnimation::CaptureAuthoredConstraintPoseDeltas(importedMap);
+
+            // Simulate a model-space procedural thigh correction after the
+            // authored GLB hierarchy has been evaluated. Flattened shins are
+            // not imported descendants, so this creates the gap Stage 7 must
+            // close without discarding the captured authored knee relation.
+            auto rotateDetachedThigh = [&](ZHLN::RigNodeIndex thigh, float angle) {
+                const JPH::Mat44 current = importedMap.modelTransforms[thigh];
+                const JPH::Mat44 target  = JPH::Mat44::sRotationTranslation(
+                    (JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), angle) * current.GetQuaternion()).Normalized(), current.GetTranslation()
+                );
+                ZHLN::Animation::SetModelTransformAndCarrySubtree(importedMap.modelTransforms.data(), importedMap, thigh, target);
+            };
+            rotateDetachedThigh(thighL, 0.35f);
+            rotateDetachedThigh(thighR, -0.30f);
+
             const JPH::Mat44 detachedShinL = importedMap.modelTransforms[shinL];
             const JPH::Mat44 detachedShinR = importedMap.modelTransforms[shinR];
-            const JPH::Vec3  expectedKneeL = (importedMap.modelTransforms[thighL] * kneeLConstraint->bindRelative).GetTranslation();
-            const JPH::Vec3  expectedKneeR = (importedMap.modelTransforms[thighR] * kneeRConstraint->bindRelative).GetTranslation();
+            const JPH::Vec3  expectedKneeL =
+                (importedMap.modelTransforms[thighL] * kneeLConstraint->bindRelative * kneeLConstraint->localPoseDelta).GetTranslation();
+            const JPH::Vec3 expectedKneeR =
+                (importedMap.modelTransforms[thighR] * kneeRConstraint->bindRelative * kneeRConstraint->localPoseDelta).GetTranslation();
 
             // Knee joints are structural and remain active even when every
             // optional child-of relationship is disabled. They pin position

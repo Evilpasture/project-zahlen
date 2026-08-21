@@ -199,6 +199,13 @@ ZHLN_POSE_INTERPOLATION=spring ZHLN_SPRING_STIFFNESS=2500 \
     ZHLN_SPRING_DAMPING_FACTOR=0.9 ./build/samples/ProceduralAnimationSample
 ```
 
+Baked control-heavy exports animate `CTR`/`FK`/`IK`/`MCH`/`ORG` and `DEF`
+nodes as one transform graph. Filtering only the mapped `DEF` nodes through
+independent springs makes that graph internally inconsistent. These rigs are
+detected automatically and their complete authored hierarchy is evaluated with
+bicubic interpolation before procedural model-space layers are applied. Direct
+DEF hierarchies continue to use the selected spring-damper mode.
+
 Configure synchronized locomotion tracks for another GLB with:
 
 ```cpp
@@ -284,7 +291,17 @@ ZHLN_MAX_ANKLE_SIDEWAYS_DEGREES=15 ./build/samples/ProceduralAnimationSample
 ZHLN_MAX_ANKLE_FORWARD_DEGREES=35 ./build/samples/ProceduralAnimationSample
 ZHLN_WORLD_LOCK_FEET=1 ./build/samples/ProceduralAnimationSample
 ZHLN_DISABLE_IK=1 ./build/samples/ProceduralAnimationSample
+ZHLN_DISABLE_GAIT=1 ./build/samples/ProceduralAnimationSample
+ZHLN_DISABLE_GRAVITY_BOUNCE=1 ./build/samples/ProceduralAnimationSample
+ZHLN_DISABLE_ACCELERATION_TILT=1 ./build/samples/ProceduralAnimationSample
+ZHLN_DISABLE_UPPER_BODY=1 ./build/samples/ProceduralAnimationSample
+ZHLN_DISABLE_SECONDARY_MOTION=1 ./build/samples/ProceduralAnimationSample
 ```
+
+`ZHLN_DISABLE_IK` disables only terrain contact and two-bone leg IK; gait pelvis
+motion and acceleration tilt remain separate layers. Use
+`ZHLN_AUTHORED_POSE_ONLY=1` for a strict GLB-only comparison, or the individual
+switches above to isolate one procedural pass.
 
 `legIKWeight=0` preserves authored legs; `1` gives full terrain correction at the
 center of the plant interval. Touchdown and toe-off use smooth nonlinear fades.
@@ -334,13 +351,15 @@ SupSpine -> Chest -> Neck -> Head
 ThighL/R -> ShinL/R (when the exported deform hierarchy is detached)
 ```
 
-Each constraint preserves its bind-relative offset and authored local animation,
-and each node carries its own descendants and attachments. Knee constraints pin
-only the shin origin to the thigh endpoint, preserving authored knee bend and
-procedural IK rotation while making separation impossible. They are structural
-and cannot be disabled. Detached semantic foot copies in secondary skins are
-attached to the primary `FootL`/`FootR` controls. Foot IK carries its model-space
-correction through every imported child transform, so mesh parts below a `DEF-Foot.*` transform stay coherent.
+Each constraint preserves authored animation, and each node carries its own
+descendants and attachments. Knee constraints capture the evaluated GLB's exact
+thigh-relative anchor every frame, then pin only the shin origin after procedural
+passes. This preserves authored knee bend and procedural IK rotation without
+forcing the bind pose over a baked control hierarchy. Knee integrity is
+structural and cannot be disabled. Detached semantic foot copies in secondary
+skins are attached to the primary `FootL`/`FootR` controls. Foot IK carries its
+model-space correction through every imported child transform, so mesh parts
+below a `DEF-Foot.*` transform stay coherent.
 
 For detached footwear, compact mesh bounds are aggregated at their highest
 non-rig transform ancestor. That owning transform is attached after IK and moves

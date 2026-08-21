@@ -73,6 +73,18 @@ struct CanonicalName {
     return canonicalName.starts_with("def");
 }
 
+[[nodiscard]] bool IsRigControlNode(std::string_view canonicalName) noexcept {
+    return canonicalName.starts_with("ctr") || canonicalName.starts_with("fk") || canonicalName.starts_with("ik") ||
+           canonicalName.starts_with("mch") || canonicalName.starts_with("org");
+}
+
+template <typename Range>
+[[nodiscard]] bool ContainsRigControlNodes(const Range& entries) noexcept {
+    return std::ranges::any_of(entries, [](const auto& entry) {
+        return IsRigControlNode(Canonicalize(std::string_view(entry.name)).View());
+    });
+}
+
 [[nodiscard]] std::string_view StripKnownRigPrefix(std::string_view value) noexcept {
     if (value.size() > 3 && (value.starts_with("def") || value.starts_with("org"))) {
         value.remove_prefix(3);
@@ -188,23 +200,27 @@ template <size_t N>
 
 template <typename Range>
 [[nodiscard]] bool UsesDeformBoneConvention(const Range& entries) noexcept {
-    size_t matches = 0;
+    size_t deformCoreMatches = 0;
+    bool   hasRigControls    = false;
     for (const auto& entry: entries) {
-        const CanonicalName canonical = Canonicalize(std::string_view(entry.name));
-        if (!IsDeformNode(canonical.View())) {
+        const CanonicalName    canonical = Canonicalize(std::string_view(entry.name));
+        const std::string_view name      = canonical.View();
+        hasRigControls                   = hasRigControls || IsRigControlNode(name);
+        if (!IsDeformNode(name)) {
             continue;
         }
-        const std::string_view normalized = StripKnownRigPrefix(canonical.View());
+        const std::string_view normalized = StripKnownRigPrefix(name);
         for (size_t semantic = 1; semantic < kCoreBoneCount; ++semantic) {
             if (MatchesBone(normalized, static_cast<CharacterBone>(semantic), false)) {
-                if (++matches >= 3) {
-                    return true;
-                }
+                ++deformCoreMatches;
                 break;
             }
         }
     }
-    return false;
+    // Three semantic DEF nodes identify an ordinary deform convention. A
+    // partial rig fixture or split skin can identify it with one DEF semantic
+    // node when explicit control nodes prove this is a control-heavy export.
+    return deformCoreMatches >= 3 || (deformCoreMatches > 0 && hasRigControls);
 }
 
 [[nodiscard]] bool IsHairNode(std::string_view name) noexcept {
@@ -408,8 +424,15 @@ void ApplyAuthoredPose(const Components::AnimatorComponent* animator, const Proc
     std::array<JPH::Quat, kMaxRigNodes> targetRotations {};
     std::array<JPH::Vec3, kMaxRigNodes> targetScales {};
 
-    const PoseInterpolationMode mode                = config != nullptr ? config->poseInterpolation : PoseInterpolationMode::SpringDamper;
-    const float                 springStiffness     = config != nullptr ? config->springStiffness : map.poseSpringStiffness;
+    const PoseInterpolationMode requestedMode = config != nullptr ? config->poseInterpolation : PoseInterpolationMode::SpringDamper;
+    // A baked control rig is one authored transform graph. Spring-filtering only
+    // its mapped DEF nodes while CTR/FK/IK/MCH parents advance directly creates
+    // a second, conflicting pose and visibly separates joints even with IK off.
+    // Sample the complete graph coherently instead; procedural passes still
+    // layer over this bicubic authored pose in model space.
+    const PoseInterpolationMode mode =
+        map.preserveAuthoredHierarchy && requestedMode == PoseInterpolationMode::SpringDamper ? PoseInterpolationMode::Bicubic : requestedMode;
+    const float springStiffness = config != nullptr ? config->springStiffness : map.poseSpringStiffness;
     const float                 springDampingFactor = config != nullptr ? config->springDampingFactor : map.poseSpringDampingFactor;
     const float                 bicubicTension      = config != nullptr ? config->bicubicTension : 0.0f;
 
@@ -1196,7 +1219,9 @@ bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMa
         outMap.localTransforms[node]     = prefab.nodes[node].localTransform;
     }
 
-    const bool deformOnlyRig = UsesDeformBoneConvention(std::span(prefab.nodes.data(), outMap.nodeCount));
+    const auto nodeWindow             = std::span(prefab.nodes.data(), outMap.nodeCount);
+    const bool deformOnlyRig           = UsesDeformBoneConvention(nodeWindow);
+    outMap.preserveAuthoredHierarchy   = deformOnlyRig && ContainsRigControlNodes(nodeWindow);
 
     std::array<bool, kMaxRigNodes> claimed {};
     size_t                         coreMapped = 0;
@@ -1489,10 +1514,37 @@ void ProceduralAnimation::ResolveModelTransforms(RigBoneMap& boneMap) noexcept {
 void ProceduralAnimation::CaptureChildOfPoseDeltas(RigBoneMap& boneMap) noexcept {
     for (size_t index = 0; index < boneMap.childOfConstraintCount; ++index) {
         RigChildOfConstraint& constraint = boneMap.childOfConstraints[index];
-        if (!IsValidRigNode(constraint.child, boneMap.nodeCount)) {
+        if (constraint.kind == RigChildOfKind::Knee || !IsValidRigNode(constraint.child, boneMap.nodeCount)) {
             continue;
         }
         constraint.localPoseDelta = boneMap.bindLocalTransforms[constraint.child].Inversed() * boneMap.localTransforms[constraint.child];
+    }
+}
+
+void ProceduralAnimation::CaptureAuthoredConstraintPoseDeltas(RigBoneMap& boneMap) noexcept {
+    for (size_t index = 0; index < boneMap.childOfConstraintCount; ++index) {
+        RigChildOfConstraint& constraint = boneMap.childOfConstraints[index];
+        const bool captureModelRelation  = constraint.kind == RigChildOfKind::Knee || boneMap.preserveAuthoredHierarchy;
+        if (!captureModelRelation || !IsValidRigNode(constraint.parent, boneMap.nodeCount) || !IsValidRigNode(constraint.child, boneMap.nodeCount)) {
+            continue;
+        }
+        // A baked control hierarchy is authoritative for the authored semantic
+        // relation. Save its exact parent-relative model pose before any
+        // procedural pass instead of composing unrelated control-local deltas.
+        const JPH::Mat44 authoredRelative = boneMap.modelTransforms[constraint.parent].Inversed() * boneMap.modelTransforms[constraint.child];
+        constraint.localPoseDelta         = constraint.bindRelative.Inversed() * authoredRelative;
+    }
+
+    if (!boneMap.preserveAuthoredHierarchy) {
+        return;
+    }
+    for (size_t index = 0; index < boneMap.fingerJointConstraintCount; ++index) {
+        RigFingerJointConstraint& constraint = boneMap.fingerJointConstraints[index];
+        if (!constraint.repairRelation || !IsValidRigNode(constraint.parent, boneMap.nodeCount) || !IsValidRigNode(constraint.child, boneMap.nodeCount)) {
+            continue;
+        }
+        const JPH::Mat44 authoredRelative = boneMap.modelTransforms[constraint.parent].Inversed() * boneMap.modelTransforms[constraint.child];
+        constraint.localPoseDelta         = constraint.bindRelative.Inversed() * authoredRelative;
     }
 }
 
@@ -1567,10 +1619,11 @@ size_t ProceduralAnimation::ApplyChildOfConstraints(
                 // This is a ball-joint position constraint, not a rigid
                 // child-of transform. Keep the evaluated shin basis (including
                 // its authored knee bend and procedural IK correction) and pin
-                // only its origin to the thigh's fixed bind-space endpoint.
-                // Ignoring child translation channels here makes upper-leg
-                // length invariant even in a flattened control hierarchy.
-                const JPH::Vec3 jointPosition = (boneMap.modelTransforms[constraint.parent] * constraint.bindRelative).GetTranslation();
+                // only its origin to the authored thigh-relative endpoint.
+                // The per-frame delta was captured before procedural passes, so
+                // this cannot fight baked control-rig translation channels.
+                const JPH::Vec3 jointPosition =
+                    (boneMap.modelTransforms[constraint.parent] * constraint.bindRelative * constraint.localPoseDelta).GetTranslation();
                 constrainedChild.SetTranslation(jointPosition);
             } else {
                 constrainedChild = boneMap.modelTransforms[constraint.parent] * constraint.bindRelative * constraint.localPoseDelta;
@@ -1730,6 +1783,11 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
                 "[ProceduralAnimation] Rig '{}': {}; mapped {}/{} core bones and {}/{} hair strands ({} deform hair bones).", prefab->virtualPath,
                 complete ? "complete" : "partial", mappedCoreBones, kCoreBoneCount, mappedHairStrands, boneMap->sourceHairStrandCount, mappedHairBones
             );
+            if (boneMap->preserveAuthoredHierarchy) {
+                ZHLN::Log(
+                    "[ProceduralAnimation] Control-heavy DEF rig detected; evaluating the complete authored hierarchy coherently before procedural passes."
+                );
+            }
             if (boneMap->childOfConstraintCount > 0) {
                 size_t kneeJoints      = 0;
                 size_t footAttachments = 0;
@@ -1862,10 +1920,10 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
         }
         ProceduralAnimation::CaptureFingerPoseDeltas(*boneMap);
         ResolveForwardKinematics(*boneMap);
-        if (hasKneeConstraints) {
-            // Normalize detached export hierarchies before any solver measures
-            // leg lengths. The final Stage 7 pass pins the knees again after IK.
-            ProceduralAnimation::ApplyChildOfConstraints(*boneMap, false, false, false, false, false);
+        if (hasKneeConstraints || boneMap->preserveAuthoredHierarchy) {
+            // Capture the exact authored semantic relations before procedural
+            // model-space passes. Stage 7 restores these moving anchors.
+            ProceduralAnimation::CaptureAuthoredConstraintPoseDeltas(*boneMap);
         }
 
         // Stages 1-2: apply optional gait and whole-body COM layers after the
