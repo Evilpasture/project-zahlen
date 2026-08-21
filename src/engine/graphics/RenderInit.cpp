@@ -1688,14 +1688,12 @@ std::expected<void, Error> RenderContext::Impl::InitPostProcessing() {
             return std::unexpected(RenderInitError::PipelineCreationFailed);
         }
 
-        VkPushConstantRange fogPush     = {.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .offset = 0, .size = sizeof(VolumetricFogInjectPushConstants)};
-        auto                csFogInject = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricFogInject).vertex);
+        auto csFogInject = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricFogInject).vertex);
         if (!volumetricFogInjectPass.BuildHeap(ctx.Device(), heapManager, csFogInject)) {
             return std::unexpected(RenderInitError::PipelineCreationFailed);
         }
 
-        VkPushConstantRange lightPush     = {.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .offset = 0, .size = sizeof(VolumetricLightInjectPushConstants)};
-        auto                csLightInject = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricLightInject).vertex);
+        auto csLightInject = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricLightInject).vertex);
         if (!volumetricLightInjectPass.BuildHeap(ctx.Device(), heapManager, csLightInject)) {
             return std::unexpected(RenderInitError::PipelineCreationFailed);
         }
@@ -1705,8 +1703,7 @@ std::expected<void, Error> RenderContext::Impl::InitPostProcessing() {
             return std::unexpected(RenderInitError::PipelineCreationFailed);
         }
 
-        VkPushConstantRange tempPush   = {.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .offset = 0, .size = sizeof(VolumetricTemporalPushConstants)};
-        auto                csTemporal = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricTemporal).vertex);
+        auto csTemporal = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricTemporal).vertex);
         if (!volumetricTemporalPass.BuildHeap(ctx.Device(), heapManager, csTemporal)) {
             return std::unexpected(RenderInitError::PipelineCreationFailed);
         }
