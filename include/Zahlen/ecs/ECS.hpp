@@ -398,17 +398,6 @@ class ZHLN_API Registry {
         return _components[familyID]->Get(entity);
     }
 
-  private:
-    uint32_t* _generations    = nullptr;
-    uint32_t* _freeIndices    = nullptr;
-    size_t    _entityCount    = 0;
-    size_t    _entityCapacity = 0;
-    size_t    _freeCount      = 0;
-
-    SparseSet**                    _components   = nullptr;
-    size_t                         _compCapacity = 0;
-    std::vector<ComponentTypeInfo> _typeInfo;
-
     // Patch combinator: collapses the repetitive null-check dance.
     // Stop writing `if (auto* c = reg.Get<T>(e))` manually.
     template <typename T, typename Fn>
@@ -467,6 +456,16 @@ class ZHLN_API Registry {
     }
 
   private:
+    uint32_t* _generations    = nullptr;
+    uint32_t* _freeIndices    = nullptr;
+    size_t    _entityCount    = 0;
+    size_t    _entityCapacity = 0;
+    size_t    _freeCount      = 0;
+
+    SparseSet**                    _components   = nullptr;
+    size_t                         _compCapacity = 0;
+    std::vector<ComponentTypeInfo> _typeInfo;
+
     void EnsureEntityCapacity(uint32_t index);
     void EnsureComponentCapacity(uint32_t id);
 };
