@@ -214,8 +214,13 @@ std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfi
 
             return InitShadowResources();
         })
-        .and_then([&]() { return InitCullingResources(); })
+        // VK_EXT_descriptor_heap ordering: InitBindless must run FIRST. It
+        // initializes the heaps and reserves the globalTextures[] region, and
+        // every later pass binding allocates its slots AFTER that region.
+        // Allocating pass slots first (the old order) let culling/cluster
+        // descriptors land inside the texture array and clobber it.
         .and_then([&]() { return InitBindless(); })
+        .and_then([&]() { return InitCullingResources(); })
         .and_then([&]() { return InitLineBuffers(); })
         .and_then([&]() { return BuildLinePipeline(); })
         .and_then([&]() { return BuildHangGpuPipeline(); })
@@ -1185,8 +1190,18 @@ std::expected<void, Error> RenderContext::Impl::InitSceneHeaps(const VkSamplerCr
     // Advance the allocator cursors past the offset-addressed regions:
     //   resource heap: [scene static 16) [globalTextures 32768) [pass slots ...)
     //   sampler heap:  [scene static 16) [pass sampler slots ...)
-    heapManager.SkipStaticResourceSlots(kGlobalTextureSlots + (kSceneStaticResourceSlots - 4)); // 4 scene slots allocated above
-    heapManager.SkipStaticSamplerSlots(kSceneStaticSamplerSlots - 3);                            // 3 scene samplers allocated above
+    //
+    // The skips assume exactly the scene allocations above; anything else
+    // allocating before this point would silently overlap the texture region.
+    if (heapManager.StaticResourceCursor() != 4 || heapManager.StaticSamplerCursor() != 3) [[unlikely]] {
+        ZHLN::Log(
+            "[RenderInit] ERROR: Heap cursors ({}/{}) drifted before region reservation — pass slots would overlap the texture array",
+            heapManager.StaticResourceCursor(), heapManager.StaticSamplerCursor()
+        );
+        return std::unexpected(RenderInitError::PipelineCreationFailed);
+    }
+    heapManager.SkipStaticResourceSlots(kGlobalTextureSlots + (kSceneStaticResourceSlots - 4));
+    heapManager.SkipStaticSamplerSlots(kSceneStaticSamplerSlots - 3);
 
     // The ImGui texture region sits at the tail of the pass slot region.
     imguiTextureHeapBase = kPassResourceHeapBase + kPassStaticResourceSlots - kImGuiTextureSlots;

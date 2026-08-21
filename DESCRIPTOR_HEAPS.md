@@ -72,6 +72,10 @@ sampler heap buffer: same partitioning for samplers
 * One unified resource stride =
   `AlignUp(max(bufferDescriptorSize, imageDescriptorSize), max(bufferDescriptorAlignment, imageDescriptorAlignment))`
   so every slot fits every resource type and all spec alignment VUIDs hold.
+* **Ordering invariant**: `InitBindless` (heap init + the globalTextures[]
+  region reservation) must run before any pass binding bakes its slots;
+  `InitSceneHeaps` asserts the allocator cursors so a future reorder cannot
+  silently let pass descriptors land inside the texture array.
 * The heap base address is aligned to `resourceHeapAlignment` /
   `samplerHeapAlignment` (VMA `minAlignment` + runtime check).
 * `VkBindHeapInfoEXT::reservedRangeOffset/size` point at the reserved tail;
