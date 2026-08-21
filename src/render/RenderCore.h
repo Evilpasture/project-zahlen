@@ -137,10 +137,34 @@ typedef struct ZHLN_Device {
     VkQueue  present_queue;  /**< Present queue */
     VkQueue  transfer_queue; /**< Dedicated async transfer queue */
     VkQueue  compute_queue;  /**< Compute queue */
+
+    // --- VK_EXT_descriptor_heap entry points (loaded at device creation; NULL when unsupported) ---
+    PFN_vkCmdBindResourceHeapEXT      pfn_cmd_bind_resource_heap;
+    PFN_vkCmdBindSamplerHeapEXT       pfn_cmd_bind_sampler_heap;
+    PFN_vkCmdPushDataEXT              pfn_cmd_push_data;
+    PFN_vkWriteResourceDescriptorsEXT pfn_write_resource_descriptors;
+    PFN_vkWriteSamplerDescriptorsEXT  pfn_write_sampler_descriptors;
+    bool                              descriptor_heap_enabled;
 } ZHLN_Device;
 
 [[nodiscard]]
 ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* ZHLN_RESTRICT desc);
+
+/* --- DESCRIPTOR HEAPS (VK_EXT_descriptor_heap) ---
+ *
+ * The engine binds one resource heap and one sampler heap per command buffer
+ * segment instead of descriptor sets. Heaps are plain device-addressable
+ * buffers; descriptors are produced on the host with the vkWrite*DescriptorsEXT
+ * commands and the application copies them into the heap memory.
+ *
+ * State-model note: recording any heap or push-data command invalidates all
+ * legacy descriptor-set state and vkCmdPushConstants in that command buffer
+ * (and vice versa), so heap-using passes must (re)bind the heaps before use
+ * and push all per-draw data through vkCmdPushDataEXT.
+ *
+ * Entry points are resolved once in ZHLN_CreateDevice and stored in
+ * ZHLN_Device; ZHLN::Vk::Context forwards to them (see Context.hpp).
+ */
 
 /* --- SWAPCHAIN --- */
 
@@ -293,10 +317,15 @@ void ZHLN_DestroyShaderStages(VkDevice device, ZHLN_ShaderStages* ZHLN_RESTRICT 
 
 // Populates the two VkPipelineShaderStageCreateInfo entries the pipeline builder needs.
 // out_stages must point to an array of 2.
+// When heap mode is used (descriptor_heap == true), each stage's pNext receives the
+// corresponding VkShaderDescriptorSetAndBindingMappingInfoEXT so legacy set/binding
+// decorations in the SPIR-V are remapped onto the bound descriptor heaps.
 [[nodiscard]] uint32_t ZHLN_PopulateShaderStageInfos(
-    const ZHLN_ShaderStages* ZHLN_RESTRICT         stages,
-    VkPipelineShaderStageCreateInfo* ZHLN_RESTRICT out_stages,
-    const VkSpecializationInfo*                    spec_info
+    const ZHLN_ShaderStages* ZHLN_RESTRICT              stages,
+    VkPipelineShaderStageCreateInfo* ZHLN_RESTRICT      out_stages,
+    const VkSpecializationInfo*                         spec_info,
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT* vs_mapping,
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT* ps_mapping
 );
 
 /* --- PIPELINE LAYOUT --- */
@@ -318,6 +347,16 @@ void ZHLN_DestroyPipelineLayout(VkDevice device, VkPipelineLayout layout);
 typedef struct ZHLN_GraphicsPipelineDesc {
     const ZHLN_ShaderStages* const ZHLN_RESTRICT stages;
     const VkPipelineLayout                       layout;
+
+    // --- VK_EXT_descriptor_heap (binding-interface mapping) ---
+    // When descriptor_heap is true the pipeline is created with
+    // VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT, `layout` must hold no
+    // descriptor set layouts, and each stage maps its legacy set/binding
+    // decorations onto heap offsets through its mapping chain. Push constants
+    // are replaced by vkCmdPushDataEXT for such pipelines.
+    const bool                                                     descriptor_heap;
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT* const     vs_mapping;
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT* const     ps_mapping;
 
     const VkVertexInputBindingDescription* const ZHLN_RESTRICT   vertex_bindings;
     const VkVertexInputAttributeDescription* const ZHLN_RESTRICT vertex_attributes;
@@ -514,6 +553,10 @@ typedef struct ZHLN_ComputePipelineDesc {
     const ZHLN_ShaderDesc       shader;
     const VkPipelineLayout      layout;
     const VkSpecializationInfo* specialization_info;
+
+    // VK_EXT_descriptor_heap binding-interface mapping (see ZHLN_GraphicsPipelineDesc).
+    const bool                                                 descriptor_heap;
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT* const cs_mapping;
 } ZHLN_ComputePipelineDesc;
 
 [[nodiscard]]

@@ -102,8 +102,45 @@ ZHLN_REFLECT_VERTEX(CustomVertex, position, uv);
 ```
 This automatically registers the vertex stride, input rate, and attribute locations (mapping `position` to `location = 0` and `uv` to `location = 1`) with any pipeline configured to use `CustomVertex`.
 
-### Descriptor Set Definition
-Descriptor sets are declared using a static template DSL, defining binding slots, types, and shader stages at compile-time:
+### Descriptor Heaps (VK_EXT_descriptor_heap)
+The scene binding model no longer uses descriptor sets, pools, or set layouts.
+Instead the engine owns **one resource heap and one sampler heap** — plain,
+device-addressable buffers created with `VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT`
+(see `Vk::HeapManager` / `Vk::DescriptorHeap` in `src/render/`):
+
+* Descriptors are produced on the host with `vkWriteResourceDescriptorsEXT` /
+  `vkWriteSamplerDescriptorsEXT` and written directly into the mapped heap
+  memory (with a cache flush). They are opaque bytes — there are no
+  `VkDescriptorSet` objects at all.
+* Command buffers consume the heaps after `vkCmdBindResourceHeapEXT` /
+  `vkCmdBindSamplerHeapEXT`. The tail of each heap buffer is reserved for the
+  implementation (`minResourceHeapReservedRange` / `minSamplerHeapReservedRange`).
+* Legacy set/binding decorations in the (unchanged) Slang shaders are remapped
+  onto the heaps at **pipeline creation** through
+  `VkShaderDescriptorSetAndBindingMappingEXT` chains
+  (`ZHLN_GraphicsPipelineDesc::descriptor_heap`, `PipelineBuilder::HeapMappings`).
+  No shader changes were required.
+* Per-draw data travels through `vkCmdPushDataEXT` (`Vk::PushData` /
+  `CommandEncoder::PushDrawData`); legacy `push_constant` blocks in SPIR-V read
+  the push-data blob directly.
+* The per-frame scene buffers (frame UBO, lights, instances, joints, morph
+  deltas) are selected with `VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT`
+  mappings: each heap segment pushes their device addresses once at
+  `kHeapFrameAddrPushOffset` (`RenderContext::Impl::BindHeapsAndPushFrame`).
+* The bindless `globalTextures[]` array is a contiguous region of the resource
+  heap pinned by a `HEAP_WITH_CONSTANT_OFFSET` mapping
+  (`RenderContext::Impl::WriteTextureSlotToHeap`); instance-data texture
+  indices remain unchanged.
+
+State-model caveat: heap/push-data commands and legacy descriptor-set/push-
+constant commands invalidate each other within a command buffer. Ported passes
+call `BindHeapsAndPushFrame()` at the start of their segment; the remaining
+legacy passes (HiZ, cluster culling, volumetric, post-processing, ImGui) still
+use descriptor sets and are ordered so their invalidations are harmless.
+
+### Legacy Descriptor Set Definition (unported passes)
+Unported passes still declare descriptor sets using a static template DSL,
+defining binding slots, types, and shader stages at compile-time:
 ```cpp
 using MaterialLayout = Vk::DescriptorLayout<
     Vk::SampledImageSlot<0, VK_SHADER_STAGE_FRAGMENT_BIT>, // Texture binding at slot 0

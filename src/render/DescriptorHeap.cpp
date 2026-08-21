@@ -6,6 +6,7 @@
 #include "DescriptorHeap.hpp"
 #include "Allocator.hpp"
 #include "Rendering.hpp"
+#include <algorithm>
 #include <utility>
 #include <vector>
 
@@ -23,8 +24,9 @@ DescriptorHeap<Type>::~DescriptorHeap() noexcept {
 template <DescriptorHeapType Type>
 DescriptorHeap<Type>::DescriptorHeap(DescriptorHeap&& other) noexcept:
     _device(std::exchange(other._device, VK_NULL_HANDLE)), _capacity(std::exchange(other._capacity, 0)), _stride(std::exchange(other._stride, 0)),
-    _buffer(std::move(other._buffer)), _mappedRegion(std::move(other._mappedRegion)), _mappedPtr(std::exchange(other._mappedPtr, nullptr)),
-    _deviceAddress(std::exchange(other._deviceAddress, 0)), _vkCmdBindHeapEXT(std::exchange(other._vkCmdBindHeapEXT, nullptr)),
+    _reservedSize(std::exchange(other._reservedSize, 0)), _buffer(std::move(other._buffer)), _mappedRegion(std::move(other._mappedRegion)),
+    _mappedPtr(std::exchange(other._mappedPtr, nullptr)), _bindInfo(std::exchange(other._bindInfo, VkBindHeapInfoEXT {})),
+    _vkCmdBindHeapEXT(std::exchange(other._vkCmdBindHeapEXT, nullptr)),
     _vkWriteDescriptorsEXT(std::exchange(other._vkWriteDescriptorsEXT, nullptr)) {
 }
 
@@ -35,10 +37,11 @@ auto DescriptorHeap<Type>::operator=(DescriptorHeap&& other) noexcept -> Descrip
         _device                = std::exchange(other._device, VK_NULL_HANDLE);
         _capacity              = std::exchange(other._capacity, 0);
         _stride                = std::exchange(other._stride, 0);
+        _reservedSize          = std::exchange(other._reservedSize, 0);
         _buffer                = std::move(other._buffer);
         _mappedRegion          = std::move(other._mappedRegion);
         _mappedPtr             = std::exchange(other._mappedPtr, nullptr);
-        _deviceAddress         = std::exchange(other._deviceAddress, 0);
+        _bindInfo              = std::exchange(other._bindInfo, VkBindHeapInfoEXT {});
         _vkCmdBindHeapEXT      = std::exchange(other._vkCmdBindHeapEXT, nullptr);
         _vkWriteDescriptorsEXT = std::exchange(other._vkWriteDescriptorsEXT, nullptr);
     }
@@ -50,15 +53,20 @@ void DescriptorHeap<Type>::Cleanup() noexcept {
     _mappedRegion  = {};
     _buffer        = {};
     _mappedPtr     = nullptr;
-    _deviceAddress = 0;
     _capacity      = 0;
     _stride        = 0;
+    _reservedSize  = 0;
+    _bindInfo      = {};
 }
 
 template <DescriptorHeapType Type>
 auto DescriptorHeap<Type>::Init(const Context& ctx, Allocator& allocator, uint32_t capacity) noexcept -> std::expected<void, DescriptorHeapError> {
     _device   = ctx.Device();
     _capacity = capacity;
+
+    if (!ctx.DescriptorHeapsSupported()) [[unlikely]] {
+        return std::unexpected(DescriptorHeapError::ExtensionUnavailable);
+    }
 
     // Load only the specific, required entry points for this specialization
     if constexpr (Type == DescriptorHeapType::Sampler) {
@@ -74,27 +82,8 @@ auto DescriptorHeap<Type>::Init(const Context& ctx, Allocator& allocator, uint32
     }
 
     VkPhysicalDeviceDescriptorHeapPropertiesEXT props = {
-        .sType                                   = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_HEAP_PROPERTIES_EXT,
-        .pNext                                   = nullptr,
-        .samplerHeapAlignment                    = {},
-        .resourceHeapAlignment                   = {},
-        .maxSamplerHeapSize                      = {},
-        .maxResourceHeapSize                     = {},
-        .minSamplerHeapReservedRange             = {},
-        .minSamplerHeapReservedRangeWithEmbedded = {},
-        .minResourceHeapReservedRange            = {},
-        .samplerDescriptorSize                   = {},
-        .imageDescriptorSize                     = {},
-        .bufferDescriptorSize                    = {},
-        .samplerDescriptorAlignment              = {},
-        .imageDescriptorAlignment                = {},
-        .bufferDescriptorAlignment               = {},
-        .maxPushDataSize                         = {},
-        .imageCaptureReplayOpaqueDataSize        = {},
-        .maxDescriptorHeapEmbeddedSamplers       = {},
-        .samplerYcbcrConversionCount             = {},
-        .sparseDescriptorHeaps                   = {},
-        .protectedDescriptorHeaps                = {},
+        .sType             = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_HEAP_PROPERTIES_EXT,
+        .pNext             = nullptr,
     };
 
     VkPhysicalDeviceProperties2 props2 = {
@@ -104,19 +93,35 @@ auto DescriptorHeap<Type>::Init(const Context& ctx, Allocator& allocator, uint32
     };
     vkGetPhysicalDeviceProperties2(ctx.Physical(), &props2);
 
-    // Optimized branch evaluation at compile time via constexpr
+    VkDeviceSize heap_alignment  = 0;
+    VkDeviceSize max_heap_size   = 0;
     if constexpr (Type == DescriptorHeapType::Sampler) {
-        _stride = AlignUp(props.samplerDescriptorSize, props.samplerDescriptorAlignment);
+        _stride        = AlignUp(props.samplerDescriptorSize, props.samplerDescriptorAlignment);
+        _reservedSize  = props.minSamplerHeapReservedRange;
+        heap_alignment = props.samplerHeapAlignment;
+        max_heap_size  = props.maxSamplerHeapSize;
     } else {
+        // Unified stride: every resource slot must be able to hold any resource
+        // descriptor and stay aligned for both image and buffer descriptors
+        // (the reservedRangeOffset VUIDs demand multiples of BOTH alignments).
         const VkDeviceSize max_size  = std::max(props.bufferDescriptorSize, props.imageDescriptorSize);
         const VkDeviceSize max_align = std::max(props.bufferDescriptorAlignment, props.imageDescriptorAlignment);
         _stride                      = AlignUp(max_size, max_align);
+        _reservedSize                = props.minResourceHeapReservedRange;
+        heap_alignment               = props.resourceHeapAlignment;
+        max_heap_size                = props.maxResourceHeapSize;
     }
 
-    const VkDeviceSize total_bytes = _stride * _capacity;
+    const VkDeviceSize used_bytes  = _stride * _capacity;
+    const VkDeviceSize total_bytes = AlignUp(used_bytes + _reservedSize, std::max<VkDeviceSize>(heap_alignment, 1));
+
+    if (total_bytes > max_heap_size) [[unlikely]] {
+        return std::unexpected(DescriptorHeapError::HeapTooLarge);
+    }
 
     auto buffer_res = Buffer::Create(
-        allocator.Get(), total_bytes, VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU
+        allocator.Get(), total_bytes, VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU,
+        std::max<VkDeviceSize>(heap_alignment, 1)
     );
 
     if (!buffer_res.has_value()) [[unlikely]] {
@@ -130,12 +135,36 @@ auto DescriptorHeap<Type>::Init(const Context& ctx, Allocator& allocator, uint32
         return std::unexpected(DescriptorHeapError::MappingFailed);
     }
 
-    _deviceAddress = GetBufferAddress(_device, _buffer.Handle());
-    if (_deviceAddress == 0) [[unlikely]] {
+    const VkDeviceAddress address = GetBufferAddress(_device, _buffer.Handle());
+    if (address == 0) [[unlikely]] {
         return std::unexpected(DescriptorHeapError::DeviceAddressFailed);
     }
 
+    // The heap binding VUIDs demand heapRange.address be a multiple of the
+    // heap alignment. VMA honors minAlignment on VMA >= 3.1; verify at runtime
+    // so older VMA builds fail loudly instead of binding a misaligned heap.
+    if ((address % std::max<VkDeviceSize>(heap_alignment, 1)) != 0) [[unlikely]] {
+        return std::unexpected(DescriptorHeapError::DeviceAddressFailed);
+    }
+
+    // Cache the bind descriptor; the heap layout never changes after init.
+    // Secondary command buffers reuse it for heap-state inheritance.
+    _bindInfo = {
+        .sType               = VK_STRUCTURE_TYPE_BIND_HEAP_INFO_EXT,
+        .pNext               = nullptr,
+        .heapRange           = {.address = address, .size = total_bytes},
+        .reservedRangeOffset = used_bytes,
+        .reservedRangeSize   = _reservedSize,
+    };
+
     return {};
+}
+
+template <DescriptorHeapType Type>
+void DescriptorHeap<Type>::FlushHostCache(VkDeviceSize offset, VkDeviceSize size) noexcept {
+    // Descriptors are written by the driver directly into our persistent
+    // mapping; make them coherent before the GPU binds this heap.
+    _buffer.Flush(offset, size);
 }
 
 template <DescriptorHeapType Type>
@@ -143,16 +172,7 @@ void DescriptorHeap<Type>::Bind(VkCommandBuffer cmd) const noexcept {
     if (!Valid()) {
         return;
     }
-
-    const VkBindHeapInfoEXT info = {
-        .sType               = VK_STRUCTURE_TYPE_BIND_HEAP_INFO_EXT,
-        .pNext               = nullptr,
-        .heapRange           = {.address = _deviceAddress, .size = _capacity * _stride},
-        .reservedRangeOffset = 0,
-        .reservedRangeSize   = 0
-    };
-
-    _vkCmdBindHeapEXT(cmd, &info);
+    _vkCmdBindHeapEXT(cmd, &_bindInfo);
 }
 
 template <DescriptorHeapType Type>
@@ -161,6 +181,7 @@ void DescriptorHeap<Type>::Flush(ResourceWriteBatch& batch) noexcept
 {
     if (Valid() && _vkWriteDescriptorsEXT != nullptr) {
         batch.Flush(_device, _vkWriteDescriptorsEXT, _mappedPtr, _stride);
+        FlushHostCache(0, _stride * _capacity);
     }
 }
 
@@ -170,6 +191,7 @@ void DescriptorHeap<Type>::Flush(SamplerWriteBatch& batch) noexcept
 {
     if (Valid() && _vkWriteDescriptorsEXT != nullptr) {
         batch.Flush(_device, _vkWriteDescriptorsEXT, _mappedPtr, _stride);
+        FlushHostCache(0, _stride * _capacity);
     }
 }
 
@@ -191,6 +213,10 @@ ResourceWriteBatch::~ResourceWriteBatch() noexcept = default;
 
 ResourceWriteBatch::ResourceWriteBatch(ResourceWriteBatch&& other) noexcept                    = default;
 auto ResourceWriteBatch::operator=(ResourceWriteBatch&& other) noexcept -> ResourceWriteBatch& = default;
+
+auto ResourceWriteBatch::Empty() const noexcept -> bool {
+    return _impl->slots.empty();
+}
 
 void ResourceWriteBatch::AddImage(TextureHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept {
     // 1. Store the structure by value to keep it alive until Flush() completes
@@ -225,7 +251,8 @@ void ResourceWriteBatch::AddBuffer(UniformBufferHandle handle, VkDeviceAddress a
 }
 
 void ResourceWriteBatch::AddAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address) noexcept {
-    // Size is validated but not strictly utilized by AS structures under the new extension (safe to write as 0)
+    // Acceleration structure descriptors ignore the range size (only the
+    // 256-byte address alignment is validated), so a zero size is safe.
     _impl->addressRanges.push_back({.address = address, .size = 0});
     _impl->slots.push_back(handle.index);
     _impl->types.push_back(VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR);
@@ -286,6 +313,10 @@ SamplerWriteBatch::~SamplerWriteBatch() noexcept = default;
 // Impl has non-trivial elements, so we must support explicit moving
 SamplerWriteBatch::SamplerWriteBatch(SamplerWriteBatch&& other) noexcept                    = default;
 auto SamplerWriteBatch::operator=(SamplerWriteBatch&& other) noexcept -> SamplerWriteBatch& = default;
+
+auto SamplerWriteBatch::Empty() const noexcept -> bool {
+    return _impl->slots.empty();
+}
 
 void SamplerWriteBatch::AddSampler(SamplerHandle handle, const VkSamplerCreateInfo& createInfo) noexcept {
     _impl->createInfos.push_back(createInfo);
@@ -393,6 +424,19 @@ auto HeapManager::Init(
         return std::unexpected(samp_heap_init.error());
     }
 
+    // Capture push-data budget (vkCmdPushDataEXT limit) for the engine.
+    VkPhysicalDeviceDescriptorHeapPropertiesEXT props = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_HEAP_PROPERTIES_EXT,
+        .pNext = nullptr,
+    };
+    VkPhysicalDeviceProperties2 props2 = {
+        .sType      = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+        .pNext      = &props,
+        .properties = {},
+    };
+    vkGetPhysicalDeviceProperties2(ctx.Physical(), &props2);
+    _maxPushDataSize = props.maxPushDataSize;
+
     return {};
 }
 
@@ -447,6 +491,64 @@ void HeapManager::FlushSamplerBatch(SamplerWriteBatch& batch) noexcept {
 void HeapManager::BindHeaps(VkCommandBuffer cmd) const noexcept {
     _resourceHeap.Bind(cmd);
     _samplerHeap.Bind(cmd);
+}
+
+// ============================================================================
+// Host-Side Descriptor Writes
+// ============================================================================
+
+void HeapManager::WriteImage(TextureHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept {
+    if (!handle.Valid()) {
+        return;
+    }
+    ResourceWriteBatch batch;
+    batch.AddImage(handle, viewInfo, layout);
+    FlushResourceBatch(batch);
+}
+
+void HeapManager::WriteStorageImage(StorageImageHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept {
+    if (!handle.Valid()) {
+        return;
+    }
+    ResourceWriteBatch batch;
+    batch.AddStorageImage(handle, viewInfo, layout);
+    FlushResourceBatch(batch);
+}
+
+void HeapManager::WriteBuffer(StorageBufferHandle handle, VkDeviceAddress address, VkDeviceSize size) noexcept {
+    if (!handle.Valid()) {
+        return;
+    }
+    ResourceWriteBatch batch;
+    batch.AddBuffer(handle, address, size);
+    FlushResourceBatch(batch);
+}
+
+void HeapManager::WriteBuffer(UniformBufferHandle handle, VkDeviceAddress address, VkDeviceSize size) noexcept {
+    if (!handle.Valid()) {
+        return;
+    }
+    ResourceWriteBatch batch;
+    batch.AddBuffer(handle, address, size);
+    FlushResourceBatch(batch);
+}
+
+void HeapManager::WriteAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address) noexcept {
+    if (!handle.Valid()) {
+        return;
+    }
+    ResourceWriteBatch batch;
+    batch.AddAccelerationStructure(handle, address);
+    FlushResourceBatch(batch);
+}
+
+void HeapManager::WriteSampler(SamplerHandle handle, const VkSamplerCreateInfo& createInfo) noexcept {
+    if (!handle.Valid()) {
+        return;
+    }
+    SamplerWriteBatch batch;
+    batch.AddSampler(handle, createInfo);
+    FlushSamplerBatch(batch);
 }
 
 // Explicit template instantiations for class-level compilation protection

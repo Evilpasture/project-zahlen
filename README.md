@@ -297,7 +297,7 @@ See [here](https://en.cppreference.com/cpp/compiler_support/26) for detailed com
 
 These packages are expected to be installed on the host operating system:
 
-* **Vulkan SDK (>= 1.3)**: Core graphics API, validation layers, and the Slang compiler (`slangc`) used for SPIR-V shader compilation.
+* **Vulkan SDK (>= 1.4.321)**: Core graphics API, validation layers, and the Slang compiler (`slangc`) used for SPIR-V shader compilation. The renderer requires the `VK_EXT_descriptor_heap` extension (headers + driver support; see [DESCRIPTOR_HEAPS.md](DESCRIPTOR_HEAPS.md)).
 * **zstd (Zstandard)**: Compression algorithm used to build and decompress custom `.pak` assets.
 * **Windows SDK** *(Windows only)*: Windows API headers and libraries. It's expected that you should have the SDK installed on your system.
 * **Visual Studio Build Tools** *(Windows only)*: Required to build the project with Clang/LLVM when targeting Windows.

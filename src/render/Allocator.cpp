@@ -97,6 +97,11 @@ std::expected<void, ZHLN::Error> Allocator::Init(const Context& ctx) noexcept {
 // Buffer RAII
 // ============================================================================
 auto Buffer::Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memUsage) noexcept -> std::expected<Buffer, VkResult> {
+    return Create(allocator, size, usage, memUsage, 0);
+}
+
+auto Buffer::Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memUsage, VkDeviceSize minAlignment) noexcept
+    -> std::expected<Buffer, VkResult> {
     VkBuffer          buffer = VK_NULL_HANDLE;
     VmaAllocation     alloc  = nullptr;
     VmaAllocationInfo info   = {};
@@ -128,6 +133,12 @@ auto Buffer::Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usag
     if (memUsage == VMA_MEMORY_USAGE_CPU_ONLY || memUsage == VMA_MEMORY_USAGE_CPU_TO_GPU || memUsage == VMA_MEMORY_USAGE_GPU_TO_CPU) {
         alloc_info.flags |= VMA_ALLOCATION_CREATE_MAPPED_BIT;
     }
+
+    // VMA 3.1+: honor additional alignment requirements of the allocation
+    // (only honored on VMA versions that support VmaAllocationCreateInfo::minAlignment).
+#if VMA_VERSION_NUMBER >= 3010000
+    alloc_info.minAlignment = minAlignment;
+#endif
 
     VkResult res = vmaCreateBuffer(allocator, &buffer_info, &alloc_info, &buffer, &alloc, &info);
     if (res != VK_SUCCESS) {

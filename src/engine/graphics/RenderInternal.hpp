@@ -177,6 +177,25 @@ static constexpr Color4 kClearColorBlack = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a 
 static constexpr uint32_t kMainPassColorAttachmentCount = 2;
 static constexpr uint32_t kParallelChunkSize            = 256;
 
+// ----------------------------------------------------------------------------
+// VK_EXT_descriptor_heap sizing. The resource heap holds:
+//   [0, kSceneStaticResourceSlots)                    static slots (IBL/LUT/AS)
+//   [kSceneStaticResourceSlots, +kGlobalTextureSlots) the bindless texture array
+//   + dynamic per-frame slots
+// The sampler heap mirrors the same partitioning for samplers.
+// ----------------------------------------------------------------------------
+static constexpr uint32_t kSceneStaticResourceSlots  = 16;
+static constexpr uint32_t kSceneDynamicResourceSlots = 32;
+static constexpr uint32_t kSceneStaticSamplerSlots   = 16;
+static constexpr uint32_t kSceneDynamicSamplerSlots  = 8;
+static constexpr uint32_t kGlobalTextureSlots        = 32768; // bindless globalTextures[] region
+
+// Push-data layout (vkCmdPushDataEXT): per-draw struct at offset 0; the
+// per-frame scene-buffer device-address block (6 x uint64) lives at this
+// offset and feeds the PUSH_ADDRESS mappings of scene set 0 bindings 1..6.
+static constexpr uint32_t kHeapFrameAddrPushOffset = 192;
+static constexpr uint32_t kHeapFrameAddrBlockSize  = 6 * sizeof(uint64_t);
+
 static constexpr Color4 kClearColorScene    = {.r = 0.08f, .g = 0.09f, .b = 0.12f, .a = 1.0f}; // G-Buffer background theme
 static constexpr Color4 kClearColorVelocity = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
 static constexpr float  kClearDepthValue    = 1.0f;
@@ -297,8 +316,8 @@ using FragmentStageSource = ShaderStageSource<ShaderStage::Fragment>;
 using ComputeStageSource  = ShaderStageSource<ShaderStage::Compute>;
 
 struct NativeMaterial {
-    Vk::Pipeline       pipeline;
-    Vk::PipelineLayout layout;
+    Vk::Pipeline     pipeline;
+    VkPipelineLayout layout = VK_NULL_HANDLE; // Non-owning alias of the shared empty heap layout
 };
 
 static constexpr uint32_t kGpuCullingMaxInstances        = 8192;
@@ -566,7 +585,6 @@ struct RenderContext::Impl {
     // ============================================================================
     struct PerFrameResources {
         DoubleBuffered<Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>> accumBuffers;
-        ZHLN::DoubleBuffered<VkDescriptorSet>                           bindlessSets;
         ZHLN::DoubleBuffered<Vk::Buffer>                                lineVbos;
         ZHLN::DoubleBuffered<VkDeviceAddress>                           lineVboAddresses;
         ZHLN::DoubleBuffered<Vk::Buffer>                                uiVbos;
@@ -606,7 +624,48 @@ struct RenderContext::Impl {
     Vk::Buffer morphDeltasBuffer;
 
     Vk::SlangReflectedLayout bindlessLayout;
-    Vk::DescriptorPool      bindlessPool;
+
+    // ============================================================================
+    // VK_EXT_descriptor_heap state. The global scene registry (common.slang's
+    // GlobalSceneRegistry parameter block) no longer lives in a descriptor set:
+    // its bindings are mapped onto the heaps at pipeline creation time and its
+    // per-frame buffers are selected through a push-data device-address block.
+    // ============================================================================
+    Vk::HeapManager heapManager;
+
+    struct HeapMappingSet {
+        std::vector<VkDescriptorSetAndBindingMappingEXT> entries;
+        VkShaderDescriptorSetAndBindingMappingInfoEXT    info {};
+
+        void Finalize() noexcept {
+            info = {
+                .sType        = VK_STRUCTURE_TYPE_SHADER_DESCRIPTOR_SET_AND_BINDING_MAPPING_INFO_EXT,
+                .pNext        = nullptr,
+                .mappingCount = static_cast<uint32_t>(entries.size()),
+                .pMappings    = entries.empty() ? nullptr : entries.data(),
+            };
+        }
+        [[nodiscard]] auto Valid() const noexcept -> bool {
+            return info.mappingCount > 0;
+        }
+    };
+
+    HeapMappingSet sceneHeapMappings;      // descriptorSet = 0 (GlobalSceneRegistry)
+    HeapMappingSet decalSceneHeapMappings; // descriptorSet = 1 (decal.slang's scene subset)
+    HeapMappingSet decalHeapMappings;      // descriptorSet = 0 (texDepth + pointSampler)
+
+    // Static heap slots (allocated once at init).
+    Vk::SamplerHandle globalSamplerSlot;
+    Vk::SamplerHandle clampSamplerSlot;
+    Vk::SamplerHandle pointSamplerSlot;
+    Vk::TextureHandle iblPrefilteredSlot;
+    Vk::TextureHandle iblBrdfLutSlot;
+    Vk::TextureHandle transLightingSlot;
+    Vk::TextureHandle decalDepthSlot;
+    uint32_t          textureHeapBase = 0; // first slot of the globalTextures[] region
+
+    Vk::PipelineLayout emptyLayoutOwner;            // RAII owner of the shared empty layout
+    VkPipelineLayout   emptyPipelineLayout = VK_NULL_HANDLE; // Shared by every descriptor-heap pipeline
 
     Vk::Sampler globalSampler;
     Vk::Sampler clampSampler;
@@ -648,8 +707,8 @@ struct RenderContext::Impl {
     ZHLN::Array<Vk::ImageView>             shadowCascadeViewsPrev;
 
     Vk::PipelineLayout skinningPipelineLayout;
-    Vk::PipelineLayout shadowPipelineLayout;
-    Vk::PipelineLayout punctualShadowPipelineLayout;
+    VkPipelineLayout   shadowPipelineLayout = VK_NULL_HANDLE; // Raw alias of the shared empty heap layout
+    VkPipelineLayout   punctualShadowPipelineLayout = VK_NULL_HANDLE; // Raw alias of the shared empty heap layout
 
     Vk::TypedPipeline<0, true> shadowPipeline;
     Vk::TypedPipeline<0, true> punctualShadowPipeline;
@@ -659,22 +718,19 @@ struct RenderContext::Impl {
 
     Vk::Buffer                  particleBuffer;
     Vk::ComputePass             particleUpdatePass;
-    Vk::PipelineLayout          particleRenderLayout;
+    VkPipelineLayout            particleRenderLayout = VK_NULL_HANDLE; // Raw alias of the shared empty heap layout
     Vk::TypedPipeline<1, false> particleRenderPipeline;
 
     Vk::ComputePass    meshParticleUpdatePass;
-    Vk::PipelineLayout meshParticleRenderLayout;
+    VkPipelineLayout   meshParticleRenderLayout = VK_NULL_HANDLE; // Raw alias of the shared empty heap layout
     Vk::Pipeline       meshParticleRenderPipeline;
     Vk::Pipeline       meshParticleShadowPipeline;
 
-    Vk::SlangReflectedLayout decalDescLayout;
-    Vk::DescriptorPool      decalDescPool;
-    VkDescriptorSet         decalSet = VK_NULL_HANDLE;
+    Vk::SlangReflectedLayout decalDescLayout; // Reflection only: decal bindings map onto the heaps
+    VkPipelineLayout         decalPipelineLayout = VK_NULL_HANDLE; // Raw alias of the shared empty heap layout
+    Vk::Pipeline             decalPipeline;
 
-    Vk::PipelineLayout decalPipelineLayout;
-    Vk::Pipeline       decalPipeline;
-
-    Vk::PipelineLayout linePipelineLayout;
+    VkPipelineLayout   linePipelineLayout = VK_NULL_HANDLE; // Raw alias of the shared empty heap layout
     Vk::Pipeline       linePipeline;
     uint32_t           activeLineVertexCount = 0;
     uint32_t           lineInstanceId        = 0;
@@ -701,6 +757,26 @@ struct RenderContext::Impl {
 
     void RecordIndirectTelemetry(VkCommandBuffer cmd) noexcept;
     void DumpIndirectTelemetry(uint32_t frameNo) noexcept;
+
+    // --- VK_EXT_descriptor_heap frame bookkeeping ---
+    // Device addresses of the current frame's scene buffers, in
+    // GlobalSceneRegistry order {frame, lights, instances, joints, prevJoints, morphDeltas}.
+    [[nodiscard]] auto FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, 6>;
+    // Binds both heaps and pushes the frame address block. Heap-using segments
+    // call this first: legacy set/push-constant commands elsewhere in the frame
+    // invalidate heap and push-data state, so every heap segment re-establishes it.
+    void BindHeapsAndPushFrame(VkCommandBuffer cmd) noexcept;
+
+    // --- VK_EXT_descriptor_heap init ---
+    // Creates the heaps, allocates the static slots, and bakes the
+    // VkDescriptorSetAndBindingMappingEXT tables used at pipeline creation.
+    std::expected<void, Error> InitSceneHeaps(const VkSamplerCreateInfo& globalSamplerInfo, const VkSamplerCreateInfo& clampSamplerInfo) noexcept;
+    void                       BuildSceneHeapMappings() noexcept;
+    void                       BuildDecalHeapMappings() noexcept;
+    void                       WriteSceneStaticImageDescriptors() noexcept;
+    void                       WritePointSamplerToHeap(const VkSamplerCreateInfo& info) noexcept;
+    void                       WriteTransLightingToHeap() noexcept;
+    void                       WriteTextureSlotToHeap(uint32_t bindlessIndex, VkImage image, VkFormat format, uint32_t mipLevels, bool cube) noexcept;
 
     Vk::SlangReflectedLayout      cullingLayout;
     Vk::DescriptorPool           cullingPool;
@@ -749,11 +825,11 @@ struct RenderContext::Impl {
     Vk::Pipeline       csgWritePipeline;
     Vk::Pipeline       csgDifferencePipeline;
     Vk::Pipeline       csgIntersectionPipeline;
-    Vk::PipelineLayout csgPipelineLayout;
+    VkPipelineLayout   csgPipelineLayout = VK_NULL_HANDLE; // Raw alias of the shared empty heap layout
 
     Vk::DescriptorPool uiPool;
     Vk::Pipeline       uiPipeline;
-    Vk::PipelineLayout uiPipelineLayout;
+    VkPipelineLayout   uiPipelineLayout = VK_NULL_HANDLE; // Raw alias of the shared empty heap layout
 
     std::expected<void, Error> InitUIDynamicBuffers() noexcept;
 
@@ -1011,14 +1087,13 @@ struct FrameRecorder {
     mutable Vk::CommandEncoder                 encoder;
     RenderContext::Impl&                       ctx;
     uint32_t                                   frameIndex;
-    VkDescriptorSet                            bindlessSet;
 
     FrameRecorder(Vk::CommandBuffer<Vk::QueueType::Graphics> c, RenderContext::Impl& impl) noexcept:
-        cmd(c), encoder(c.handle), ctx(impl), frameIndex(impl.frame_index), bindlessSet(impl.frames.bindlessSets[impl.frame_index]) {
+        cmd(c), encoder(c.handle, &impl.ctx), ctx(impl), frameIndex(impl.frame_index) {
     }
 
     FrameRecorder(VkCommandBuffer c, RenderContext::Impl& impl) noexcept:
-        cmd({c}), encoder(c), ctx(impl), frameIndex(impl.frame_index), bindlessSet(impl.frames.bindlessSets[impl.frame_index]) {
+        cmd({c}), encoder(c, &impl.ctx), ctx(impl), frameIndex(impl.frame_index) {
     }
 };
 

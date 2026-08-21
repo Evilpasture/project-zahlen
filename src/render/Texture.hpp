@@ -133,12 +133,7 @@ inline auto UploadTexture(Allocator& allocator, const Context& ctx, const VkImag
     return result;
 }
 
-void UpdateBindlessTextureSlot(
-    VkDevice                                     device,
-    uint32_t                                     slotIndex,
-    VkImageView                                  view,
-    const ZHLN::DoubleBuffered<VkDescriptorSet>& bindlessSets,
-    uint32_t                                     dstBinding = 0
-);
+// NOTE: UpdateBindlessTextureSlot was removed with the VK_EXT_descriptor_heap
+// migration; textures register through RenderContext::Impl::WriteTextureSlotToHeap.
 
 } // namespace ZHLN::Vk

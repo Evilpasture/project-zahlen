@@ -35,6 +35,15 @@ struct PipelineConfig {
     const ZHLN_ShaderStages* stages = nullptr;
     VkPipelineLayout         layout = VK_NULL_HANDLE;
 
+    // VK_EXT_descriptor_heap: when true the pipeline is created with
+    // VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT and each stage maps its
+    // legacy set/binding decorations onto the bound heaps via its mapping
+    // chain. `layout` must then be an empty pipeline layout (no descriptor
+    // set layouts, no push constant ranges — push data replaces both).
+    bool                                                     descriptor_heap = false;
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT*     vs_mapping      = nullptr;
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT*     ps_mapping      = nullptr;
+
     // Vertex input (populated by Vertex<T>())
     const VkVertexInputBindingDescription*   bindings       = nullptr;
     const VkVertexInputAttributeDescription* attributes     = nullptr;
@@ -89,6 +98,23 @@ class PipelineBuilder {
 
     auto Layout(VkPipelineLayout l) noexcept -> PipelineBuilder& {
         _cfg.layout = l;
+        return *this;
+    }
+
+    /// Marks the pipeline as a VK_EXT_descriptor_heap consumer and supplies the
+    /// per-stage set/binding -> heap mappings (may be null for stages whose
+    /// resources are all BDA/push-data backed). The layout must be empty.
+    auto HeapMappings(
+        const VkShaderDescriptorSetAndBindingMappingInfoEXT* vsMapping, const VkShaderDescriptorSetAndBindingMappingInfoEXT* psMapping
+    ) noexcept -> PipelineBuilder& {
+        _cfg.descriptor_heap = true;
+        _cfg.vs_mapping      = vsMapping;
+        _cfg.ps_mapping      = psMapping;
+        return *this;
+    }
+
+    auto HeapPipeline() noexcept -> PipelineBuilder& {
+        _cfg.descriptor_heap = true;
         return *this;
     }
 
@@ -262,6 +288,9 @@ class PipelineBuilder {
         return {
             .stages               = _cfg.stages,
             .layout               = _cfg.layout,
+            .descriptor_heap      = _cfg.descriptor_heap,
+            .vs_mapping           = _cfg.vs_mapping,
+            .ps_mapping           = _cfg.ps_mapping,
             .vertex_bindings      = _cfg.bindings,
             .vertex_attributes    = _cfg.attributes,
             .vertex_binding_count = _cfg.bindingCount,
@@ -303,6 +332,11 @@ class ComputePipelineBuilder {
     auto Layout(VkPipelineLayout l) noexcept -> ComputePipelineBuilder&;
     auto Specialization(const VkSpecializationInfo* info) noexcept -> ComputePipelineBuilder&;
 
+    /// Marks the pipeline as a VK_EXT_descriptor_heap consumer with the given
+    /// set/binding -> heap mapping for the compute stage.
+    auto HeapMappings(const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping) noexcept -> ComputePipelineBuilder&;
+    auto HeapPipeline() noexcept -> ComputePipelineBuilder&;
+
     [[nodiscard]] auto Build(VkDevice device) const noexcept -> std::expected<Pipeline, ZHLN::Error>;
 
   private:
@@ -313,6 +347,8 @@ class ComputePipelineBuilder {
     const char*                 _entry               = nullptr;
     VkPipelineLayout            _layout              = VK_NULL_HANDLE;
     const VkSpecializationInfo* _specialization_info = nullptr;
+    bool                        _descriptor_heap     = false;
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT* _mapping = nullptr;
 };
 
 class PipelineLayoutBuilder {

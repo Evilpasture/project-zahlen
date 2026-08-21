@@ -2,6 +2,27 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // src/render/DescriptorHeap.hpp
+//
+// VK_EXT_descriptor_heap backing infrastructure.
+//
+// Model: the engine owns ONE sampler heap and ONE resource heap, each backed
+// by a single host-visible, persistently mapped, device-addressable buffer
+// created with VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT. Descriptors are not
+// Vulkan objects: they are opaque bit patterns produced on the host by
+// vkWriteResourceDescriptorsEXT / vkWriteSamplerDescriptorsEXT and written
+// into the heap buffer at a slot-aligned offset. Command buffers see the
+// heaps after vkCmdBindResourceHeapEXT / vkCmdBindSamplerHeapEXT.
+//
+// Slot layout (resource heap): every slot uses one unified stride
+//   stride = AlignUp(max(bufferDescriptorSize, imageDescriptorSize),
+//                    max(bufferDescriptorAlignment, imageDescriptorAlignment))
+// so any descriptor type fits any slot and the spec's alignment VUIDs for
+// both the write ranges and reservedRangeOffset hold.
+//
+// The tail of each heap buffer is reserved for the implementation
+// (minResourceHeapReservedRange / minSamplerHeapReservedRange); the
+// reservedRangeOffset/reservedRangeSize fields of VkBindHeapInfoEXT point at
+// it and the application must never touch it while bound.
 
 #pragma once
 
@@ -22,6 +43,7 @@ enum class DescriptorHeapType : uint8_t {
 };
 
 enum class DescriptorHeapError : uint8_t {
+    ExtensionUnavailable,
     ResourceSlotsExhausted,
     SamplerSlotsExhausted,
     DynamicResourceOverflow,
@@ -29,7 +51,8 @@ enum class DescriptorHeapError : uint8_t {
     FunctionLoaderFailed,
     AllocationFailed,
     MappingFailed,
-    DeviceAddressFailed
+    DeviceAddressFailed,
+    HeapTooLarge
 };
 
 template <DescriptorHeapType Heap, VkDescriptorType Type>
@@ -95,17 +118,6 @@ template <typename T, typename U>
 }
 
 // ============================================================================
-// Function Pointer Signatures
-// ============================================================================
-
-using PFN_vkCmdBindSamplerHeapEXT  = void(VKAPI_PTR*)(VkCommandBuffer commandBuffer, const VkBindHeapInfoEXT* pBindInfo);
-using PFN_vkCmdBindResourceHeapEXT = void(VKAPI_PTR*)(VkCommandBuffer commandBuffer, const VkBindHeapInfoEXT* pBindInfo);
-using PFN_vkWriteSamplerDescriptorsEXT =
-    VkResult(VKAPI_PTR*)(VkDevice device, uint32_t samplerCount, const VkSamplerCreateInfo* pSamplers, const VkHostAddressRangeEXT* pDescriptors);
-using PFN_vkWriteResourceDescriptorsEXT =
-    VkResult(VKAPI_PTR*)(VkDevice device, uint32_t resourceCount, const VkResourceDescriptorInfoEXT* pResources, const VkHostAddressRangeEXT* pDescriptors);
-
-// ============================================================================
 // Descriptor Heap Abstraction
 // ============================================================================
 
@@ -124,7 +136,17 @@ class DescriptorHeap {
     [[nodiscard]] auto Init(const Context& ctx, Allocator& allocator, uint32_t capacity) noexcept -> std::expected<void, DescriptorHeapError>;
     void               Cleanup() noexcept;
 
+    /// Binds this heap to a command buffer. Recording this invalidates all
+    /// legacy descriptor-set and push-constant state (and vice versa).
     void Bind(VkCommandBuffer cmd) const noexcept;
+
+    /// The cached VkBindHeapInfoEXT for this heap (address/size/reserved
+    /// range). Secondary command buffers chain it into
+    /// VkCommandBufferInheritanceDescriptorHeapInfoEXT to inherit the
+    /// primary's binding.
+    [[nodiscard]] auto GetBindInfo() const noexcept -> VkBindHeapInfoEXT {
+        return _bindInfo;
+    }
 
     // Enforce C++ type safety with compile-time template constraints
     void Flush(ResourceWriteBatch& batch) noexcept
@@ -139,17 +161,9 @@ class DescriptorHeap {
         return Valid();
     }
 
-  private:
-    friend class HeapManager;
-
-    [[nodiscard]] auto GetDevice() const noexcept -> VkDevice {
-        return _device;
-    }
-    [[nodiscard]] auto GetBuffer() const noexcept -> VkBuffer {
-        return _buffer.Handle();
-    }
-    [[nodiscard]] auto GetDeviceAddress() const noexcept -> VkDeviceAddress {
-        return _deviceAddress;
+    /// Byte offset of a slot inside the heap (what the shader mappings use).
+    [[nodiscard]] auto SlotOffset(uint32_t slot) const noexcept -> VkDeviceSize {
+        return static_cast<VkDeviceSize>(slot) * _stride;
     }
     [[nodiscard]] auto GetStride() const noexcept -> VkDeviceSize {
         return _stride;
@@ -157,18 +171,31 @@ class DescriptorHeap {
     [[nodiscard]] auto GetCapacity() const noexcept -> uint32_t {
         return _capacity;
     }
+    [[nodiscard]] auto GetReservedSize() const noexcept -> VkDeviceSize {
+        return _reservedSize;
+    }
+
+  private:
+    friend class HeapManager;
+
+    [[nodiscard]] auto GetDevice() const noexcept -> VkDevice {
+        return _device;
+    }
     [[nodiscard]] auto GetMappedPtr() const noexcept -> void* {
         return _mappedPtr;
     }
 
-    VkDevice     _device   = VK_NULL_HANDLE;
-    uint32_t     _capacity = 0;
-    VkDeviceSize _stride   = 0;
+    void FlushHostCache(VkDeviceSize offset, VkDeviceSize size) noexcept;
+
+    VkDevice     _device       = VK_NULL_HANDLE;
+    uint32_t     _capacity     = 0;
+    VkDeviceSize _stride       = 0;
+    VkDeviceSize _reservedSize = 0;
 
     Buffer               _buffer;
     Buffer::MappedRegion _mappedRegion;
-    void*                _mappedPtr     = nullptr;
-    VkDeviceAddress      _deviceAddress = 0;
+    void*                _mappedPtr   = nullptr;
+    VkBindHeapInfoEXT    _bindInfo    = {};
 
     // Compile-time conditional members via Type matching
     using BindHeapFn  = std::conditional_t<Type == DescriptorHeapType::Sampler, PFN_vkCmdBindSamplerHeapEXT, PFN_vkCmdBindResourceHeapEXT>;
@@ -202,6 +229,8 @@ class ResourceWriteBatch {
 
     void Flush(VkDevice device, PFN_vkWriteResourceDescriptorsEXT writeFn, void* mappedPtr, VkDeviceSize stride) noexcept;
 
+    [[nodiscard]] auto Empty() const noexcept -> bool;
+
   private:
     struct Impl;
     std::unique_ptr<Impl> _impl;
@@ -221,6 +250,8 @@ class SamplerWriteBatch {
     void AddSampler(SamplerHandle handle, const VkSamplerCreateInfo& createInfo) noexcept;
 
     void Flush(VkDevice device, PFN_vkWriteSamplerDescriptorsEXT writeFn, void* mappedPtr, VkDeviceSize stride) noexcept;
+
+    [[nodiscard]] auto Empty() const noexcept -> bool;
 
   private:
     struct Impl;
@@ -267,6 +298,11 @@ class HeapManager {
     HeapManager(HeapManager&&) noexcept                    = default;
     auto operator=(HeapManager&&) noexcept -> HeapManager& = default;
 
+    /// Creates both heaps. Layout:
+    ///   [0, staticResourceCount)               static resource slots
+    ///   [staticResourceCount, +dynamic*double) per-frame dynamic resource slots
+    /// with an identical partition for the sampler heap. The tail of each
+    /// buffer holds the implementation-reserved range.
     [[nodiscard]] auto Init(
         const Context& ctx,
         Allocator&     allocator,
@@ -278,6 +314,10 @@ class HeapManager {
     ) noexcept -> std::expected<void, DescriptorHeapError>;
 
     void BeginFrame(uint32_t frameIndex) noexcept;
+
+    [[nodiscard]] auto Valid() const noexcept -> bool {
+        return _resourceHeap.Valid() && _samplerHeap.Valid();
+    }
 
     // --- Type-Safe Static Resource Allocation ---
     template <VkDescriptorType Type>
@@ -312,12 +352,44 @@ class HeapManager {
         FreeStaticSamplerSlot(handle.index);
     }
 
-    // --- Updates ---
+    // --- Host-Side Descriptor Writes (immediately flushed into the heap) ---
+    void WriteImage(TextureHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept;
+    void WriteStorageImage(StorageImageHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept;
+    void WriteBuffer(StorageBufferHandle handle, VkDeviceAddress address, VkDeviceSize size) noexcept;
+    void WriteBuffer(UniformBufferHandle handle, VkDeviceAddress address, VkDeviceSize size) noexcept;
+    void WriteAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address) noexcept;
+    void WriteSampler(SamplerHandle handle, const VkSamplerCreateInfo& createInfo) noexcept;
+
     void FlushResourceBatch(ResourceWriteBatch& batch) noexcept;
     void FlushSamplerBatch(SamplerWriteBatch& batch) noexcept;
 
+    // --- Mapping Support (VkDescriptorSetAndBindingMappingEXT) ---
+    [[nodiscard]] auto ResourceStride() const noexcept -> VkDeviceSize {
+        return _resourceHeap.GetStride();
+    }
+    [[nodiscard]] auto SamplerStride() const noexcept -> VkDeviceSize {
+        return _samplerHeap.GetStride();
+    }
+    [[nodiscard]] auto ResourceOffset(uint32_t slot) const noexcept -> VkDeviceSize {
+        return _resourceHeap.SlotOffset(slot);
+    }
+    [[nodiscard]] auto SamplerOffset(uint32_t slot) const noexcept -> VkDeviceSize {
+        return _samplerHeap.SlotOffset(slot);
+    }
+    [[nodiscard]] auto PushDataMaxSize() const noexcept -> VkDeviceSize {
+        return _maxPushDataSize;
+    }
+
     // --- Command Binding ---
     void BindHeaps(VkCommandBuffer cmd) const noexcept;
+
+    // Cached bind descriptors for secondary-command-buffer inheritance.
+    [[nodiscard]] auto GetResourceHeapBindInfo() const noexcept -> VkBindHeapInfoEXT {
+        return _resourceHeap.GetBindInfo();
+    }
+    [[nodiscard]] auto GetSamplerHeapBindInfo() const noexcept -> VkBindHeapInfoEXT {
+        return _samplerHeap.GetBindInfo();
+    }
 
   private:
     [[nodiscard]] auto AllocateStaticResourceSlot() noexcept -> std::expected<uint32_t, DescriptorHeapError>;
@@ -337,6 +409,8 @@ class HeapManager {
     uint32_t _dynamicSamplerCount  = 0;
     uint32_t _doubleBufferCount    = 2;
     uint32_t _currentFrameIndex    = 0;
+
+    VkDeviceSize _maxPushDataSize = 0;
 
     SlotAllocator _staticResourceAlloc;
     SlotAllocator _staticSamplerAlloc;

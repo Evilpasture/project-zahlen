@@ -56,6 +56,29 @@ template <typename... Ptrs>
 // RenderContext Infrastructure & Lifecycles
 // ============================================================================
 
+auto RenderContext::Impl::FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, 6> {
+    // Order must match the PUSH_ADDRESS mapping offsets baked in
+    // BuildSceneHeapMappings: {frame, lights, instances, joints, prevJoints, morphDeltas}.
+    return {
+        ctx.BufferAddress(frames.frameUniformBuffers[frame_index].Handle()),
+        ctx.BufferAddress(frames.lightStorageBuffers[frame_index].Handle()),
+        ctx.BufferAddress(frames.instanceDataBuffers[frame_index].Handle()),
+        ctx.BufferAddress(frames.jointBuffers[frame_index].Handle()),
+        ctx.BufferAddress(frames.jointBuffers[frame_index ^ 1].Handle()),
+        ctx.BufferAddress(morphDeltasBuffer.Handle()),
+    };
+}
+
+void RenderContext::Impl::BindHeapsAndPushFrame(VkCommandBuffer cmd) noexcept {
+    // Legacy descriptor-set and push-constant commands elsewhere in the frame
+    // invalidate heap + push-data state (and vice versa), so every heap-based
+    // segment re-binds both heaps and re-pushes the per-frame device-address
+    // block that backs the scene registry's PUSH_ADDRESS mappings.
+    heapManager.BindHeaps(cmd);
+    const auto addresses = FrameHeapAddresses();
+    Vk::PushData(ctx, cmd, kHeapFrameAddrPushOffset, addresses.data(), kHeapFrameAddrBlockSize);
+}
+
 auto RenderContext::GetFramebufferSize() const -> std::optional<Extent2D> {
     Extent2D size = _impl->window.GetSize();
     if (size.width == 0 || size.height == 0) {
@@ -401,6 +424,9 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
         // ====================================================================
         // 1. RECORD & SUBMIT COMPUTE QUEUE (Async Compute Phase)
         // ====================================================================
+        // VK_EXT_descriptor_heap: reset the per-frame dynamic region budget.
+        _impl->heapManager.BeginFrame(_impl->frame_index);
+
         _impl->current_compute_cmd = _impl->computePools[_impl->frame_index][0];
 
         _impl->RecordComputeFrame(_impl->current_compute_cmd);

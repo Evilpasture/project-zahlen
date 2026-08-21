@@ -22,6 +22,12 @@ struct ComputePass {
         uint32_t                   pushCount     = 0
     ) noexcept;
 
+    /// VK_EXT_descriptor_heap variant: empty pipeline layout + set/binding ->
+    /// heap mapping. Dispatch through DispatchHeap (vkCmdPushDataEXT).
+    [[nodiscard]] std::expected<void, ZHLN::Error> BuildHeap(
+        VkDevice device, const ZHLN_ShaderDesc& shader, const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping
+    ) noexcept;
+
     [[nodiscard]] std::expected<void, ZHLN::Error> BuildVariants(
         VkDevice                              device,
         VkDescriptorSetLayout                 descriptorLayout,
@@ -56,6 +62,15 @@ struct ComputePass {
     template <GpuTriviallyCopyable T>
     void PushConstants(VkCommandBuffer cmd, const T& pushData) const noexcept {
         Push(cmd, pipelineLayout.Get(), VK_SHADER_STAGE_COMPUTE_BIT, pushData);
+    }
+
+    // VK_EXT_descriptor_heap dispatch: no descriptor set (heaps are bound on
+    // the command buffer), per-dispatch data via vkCmdPushDataEXT at offset 0.
+    template <GpuTriviallyCopyable T>
+    void DispatchHeap(const Context& ctx, VkCommandBuffer cmd, uint32_t x, uint32_t y, uint32_t z, const T& pushData) const noexcept {
+        Bind(cmd);
+        PushData(ctx, cmd, 0, pushData);
+        Dispatch(cmd, x, y, z);
     }
 
     static void Dispatch(VkCommandBuffer cmd, uint32_t x, uint32_t y, uint32_t z) noexcept {

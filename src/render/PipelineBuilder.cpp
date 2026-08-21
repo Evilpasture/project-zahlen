@@ -64,6 +64,17 @@ auto ComputePipelineBuilder::Specialization(const VkSpecializationInfo* info) no
     return *this;
 }
 
+auto ComputePipelineBuilder::HeapMappings(const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping) noexcept -> ComputePipelineBuilder& {
+    _descriptor_heap = true;
+    _mapping         = mapping;
+    return *this;
+}
+
+auto ComputePipelineBuilder::HeapPipeline() noexcept -> ComputePipelineBuilder& {
+    _descriptor_heap = true;
+    return *this;
+}
+
 auto ComputePipelineBuilder::Build(const VkDevice device) const noexcept -> std::expected<Pipeline, ZHLN::Error> {
     const auto result = Validate();
     if (result != PipelineBuilderResult::Succeeded) {
@@ -75,6 +86,8 @@ auto ComputePipelineBuilder::Build(const VkDevice device) const noexcept -> std:
         .shader              = {.code = _code, .size = _size, .entry_point = _entry},
         .layout              = _layout,
         .specialization_info = _specialization_info,
+        .descriptor_heap     = _descriptor_heap,
+        .cs_mapping          = _mapping,
     };
 
     return Pipeline(device, ZHLN_CreateComputePipeline(device, &desc));

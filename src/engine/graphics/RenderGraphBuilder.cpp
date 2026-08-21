@@ -163,7 +163,11 @@ struct PassFactory {
                 return;
             }
 
-            auto* bindlessSet = self.frames.bindlessSets[self.frame_index];
+            // VK_EXT_descriptor_heap: bind the heaps + push the frame address
+            // block in this (compute-queue) command buffer. The particle
+            // update shaders read `scene.frame` through the PUSH_ADDRESS
+            // mapping; per-dispatch data travels via push data.
+            self.BindHeapsAndPushFrame(c);
 
             for (const auto& emitter: self.queues.particleEmittersQueue) {
                 auto* buffer = self.meshPool.Resolve(emitter.gpuBuffer).value_or(nullptr);
@@ -178,7 +182,7 @@ struct PassFactory {
                     .p                  = emitter.params
                 };
 
-                self.particleUpdatePass.Dispatch(c, bindlessSet, (emitter.maxParticles + 63) / 64, 1, 1, pc);
+                self.particleUpdatePass.DispatchHeap(self.ctx, c, (emitter.maxParticles + 63) / 64, 1, 1, pc);
             }
         });
     }
@@ -189,7 +193,7 @@ struct PassFactory {
                 return;
             }
 
-            auto* bindlessSet = self.frames.bindlessSets[self.frame_index];
+            self.BindHeapsAndPushFrame(c);
 
             for (const auto& emitter: self.queues.meshParticleQueue) {
                 auto* buffer = self.meshPool.Resolve(emitter.gpuBuffer).value_or(nullptr);
@@ -204,7 +208,7 @@ struct PassFactory {
                     .p                  = emitter.params
                 };
 
-                self.meshParticleUpdatePass.Dispatch(c, bindlessSet, (emitter.maxParticles + 63) / 64, 1, 1, pushPC);
+                self.meshParticleUpdatePass.DispatchHeap(self.ctx, c, (emitter.maxParticles + 63) / 64, 1, 1, pushPC);
             }
         });
     }
@@ -451,13 +455,12 @@ struct PassFactory {
 
             Profiler::ScopedGpuProfile timer(c, fIdx, self.gpuProfiler, Stage::DecalPass);
 
-            self.decalDescLayout.Write(self.ctx.Device(), self.decalSet, self.presentation.depthTarget.view.Get(), self.pointSampler.Get());
+            // VK_EXT_descriptor_heap: decal bindings live in the heaps; the
+            // decal pipeline carries the merged set-0/set-1 mappings.
+            self.BindHeapsAndPushFrame(c);
 
             FrameRecorder recorder(c, self);
-            recorder.encoder.BindPipeline(self.decalPipeline.Get(), self.decalPipelineLayout.Get());
-
-            std::array sets = {self.decalSet, self.frames.bindlessSets[fIdx]};
-            recorder.encoder.BindDescriptorSets(0, sets);
+            recorder.encoder.BindPipeline(self.decalPipeline.Get(), self.decalPipelineLayout);
 
             for (const auto& decalCmd: self.queues.decalQueue) {
                 RenderContext::Impl::DecalPushConstants pc {
@@ -469,7 +472,8 @@ struct PassFactory {
                     .metallic    = decalCmd.metallic
                 };
 
-                recorder.encoder.Draw(36, 1, pc);
+                recorder.encoder.BindPipeline(self.decalPipeline.Get(), self.decalPipelineLayout);
+                recorder.encoder.DrawHeap(36, 1, pc);
             }
         });
     }

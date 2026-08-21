@@ -95,47 +95,36 @@ std::expected<void, Error> RenderContext::Impl::BuildParticlePipelines() {
     particleBuffer = std::move(*pb_res);
 
     // 2. Build GPU Compute Simulation Pipeline (particle_update.hlsl)
+    //    VK_EXT_descriptor_heap: `scene.frame` reads via the PUSH_ADDRESS
+    //    mapping; per-dispatch data travels through vkCmdPushDataEXT.
     auto csShader = Vk::CreateShaderDesc(Resource::GetShaderProgram(ParticleUpdate).vertex);
 
-    VkPushConstantRange updatePush = {
-        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
-        .offset     = 0,
-        .size       = sizeof(ComputePushConstants) // 176 Bytes
-    };
-
-    if (!particleUpdatePass.Build(ctx.Device(), bindlessLayout.GetSetLayout(), csShader, &updatePush, 1)) {
+    if (!particleUpdatePass.BuildHeap(ctx.Device(), csShader, &sceneHeapMappings.info)) {
         ZHLN::Log("ERROR: Failed to build particle update compute pipeline!");
         return std::unexpected(RenderInitError::PipelineCreationFailed);
     }
 
     // 3. Build Billboard Graphics Pipeline (particle_render.hlsl)
-    return Vk::PipelineLayoutBuilder(ctx.Device())
-        .AddDescriptorSetLayout(bindlessLayout.GetSetLayout())
-        .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(ParticleRenderPushConstants))
-        .Build()
-        .transform_error([](auto) -> Error { return RenderInitError::PipelineLayoutCreationFailed; })
-        .and_then([&](auto&& layout) -> std::expected<void, Error> {
-            particleRenderLayout = std::forward<decltype(layout)>(layout);
-
-            auto renderShaders = Resource::GetShaderProgram(ParticleRender);
-            return LoadAndCreateShaders(
-                       {.path = Resource::Paths::ParticleRenderVS, .fallback = renderShaders.vertex, .entryPoint = "VSMain"},
-                       {.path = Resource::Paths::ParticleRenderPS, .fallback = renderShaders.fragment, .entryPoint = "PSMain"}
-            )
-                .and_then([&](auto&& shaders) -> std::expected<void, Error> {
-                    return Vk::PipelineBuilder {}
-                        .Shaders(shaders)
-                        .Layout(particleRenderLayout.Get())
-                        .ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT}) // <-- FIXED: Changed from R16G16B16_SFLOAT
-                        .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
-                        .DepthTest(true)
-                        .DepthWrite(false)
-                        .AdditiveBlend()
-                        .AlphaBlend()
-                        .CullNone()
-                        .Build(ctx.Device())
-                        .transform([&](auto&& pipeline) { particleRenderPipeline = std::forward<decltype(pipeline)>(pipeline); });
-                });
+    particleRenderLayout = emptyPipelineLayout;
+    auto renderShaders   = Resource::GetShaderProgram(ParticleRender);
+    return LoadAndCreateShaders(
+               {.path = Resource::Paths::ParticleRenderVS, .fallback = renderShaders.vertex, .entryPoint = "VSMain"},
+               {.path = Resource::Paths::ParticleRenderPS, .fallback = renderShaders.fragment, .entryPoint = "PSMain"}
+    )
+        .and_then([&](auto&& shaders) -> std::expected<void, Error> {
+            return Vk::PipelineBuilder {}
+                .Shaders(shaders)
+                .Layout(emptyPipelineLayout)
+                .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
+                .ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT}) // <-- FIXED: Changed from R16G16B16_SFLOAT
+                .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
+                .DepthTest(true)
+                .DepthWrite(false)
+                .AdditiveBlend()
+                .AlphaBlend()
+                .CullNone()
+                .Build(ctx.Device())
+                .transform([&](auto&& pipeline) { particleRenderPipeline = std::forward<decltype(pipeline)>(pipeline); });
         });
 }
 
@@ -150,38 +139,33 @@ std::expected<void, Error> RenderContext::Impl::BuildMeshParticlePipelines() {
         .size       = sizeof(RenderContext::Impl::MeshParticleComputePush) // 176 bytes
     };
 
-    if (!meshParticleUpdatePass.Build(ctx.Device(), bindlessLayout.GetSetLayout(), csMeshShader, &mpUpdatePush, 1)) {
+    if (!meshParticleUpdatePass.BuildHeap(ctx.Device(), csMeshShader, &sceneHeapMappings.info)) {
         ZHLN::Log("ERROR: Failed to build 3D mesh particle update compute pipeline!");
         return std::unexpected(RenderInitError::PipelineCreationFailed);
     }
 
-    // 2. Pipeline Layout for 3D Mesh Particle Graphics Pipelines
-    return Vk::PipelineLayoutBuilder(ctx.Device())
-        .AddDescriptorSetLayout(bindlessLayout.GetSetLayout())
-        .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(MeshParticleRenderPush))
-        .Build()
-        .transform_error([](auto) -> Error { return RenderInitError::PipelineLayoutCreationFailed; })
-        .and_then([&](auto&& layout) -> std::expected<void, Error> {
-            meshParticleRenderLayout = std::forward<decltype(layout)>(layout);
+    // 2. All 3D mesh particle graphics pipelines are descriptor-heap pipelines
+    //    sharing the empty layout + the scene registry mappings.
+    meshParticleRenderLayout = emptyPipelineLayout;
 
-            // 3. G-Buffer Deferred Graphics Pipeline (mesh_particle_render.hlsl)
-            auto mpRenderShaders = Resource::GetShaderProgram(MeshParticleRender);
-            return LoadAndCreateShaders(
-                       {.path = Resource::Paths::MeshParticleRenderVS, .fallback = mpRenderShaders.vertex, .entryPoint = "VSMain"},
-                       {.path = Resource::Paths::MeshParticleRenderPS, .fallback = mpRenderShaders.fragment, .entryPoint = "PSMain"}
-            )
-                .and_then([&](auto&& shaders) -> std::expected<void, Error> {
-                    return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
-                        .Shaders(shaders)
-                        .Layout(meshParticleRenderLayout.Get())
-                        .ColorFormats(ActiveGBuffer::array) // Writes to SceneColor, Velocity, NormRough
-                        .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
-                        .DepthTest(true)
-                        .DepthWrite(true) // Solid 3D geometry writes depth
-                        .CullBack()
-                        .Build(ctx.Device())
-                        .transform([&](auto&& pipeline) { meshParticleRenderPipeline = std::forward<decltype(pipeline)>(pipeline); });
-                });
+    // 3. G-Buffer Deferred Graphics Pipeline (mesh_particle_render.hlsl)
+    auto mpRenderShaders = Resource::GetShaderProgram(MeshParticleRender);
+    return LoadAndCreateShaders(
+               {.path = Resource::Paths::MeshParticleRenderVS, .fallback = mpRenderShaders.vertex, .entryPoint = "VSMain"},
+               {.path = Resource::Paths::MeshParticleRenderPS, .fallback = mpRenderShaders.fragment, .entryPoint = "PSMain"}
+    )
+        .and_then([&](auto&& shaders) -> std::expected<void, Error> {
+            return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
+                .Shaders(shaders)
+                .Layout(emptyPipelineLayout)
+                .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
+                .ColorFormats(ActiveGBuffer::array) // Writes to SceneColor, Velocity, NormRough
+                .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
+                .DepthTest(true)
+                .DepthWrite(true) // Solid 3D geometry writes depth
+                .CullBack()
+                .Build(ctx.Device())
+                .transform([&](auto&& pipeline) { meshParticleRenderPipeline = std::forward<decltype(pipeline)>(pipeline); });
         })
         .and_then([&]() -> std::expected<void, Error> {
             // 4. Directional Shadow Cascade Pipeline (mesh_particle_shadow.hlsl)
@@ -193,7 +177,8 @@ std::expected<void, Error> RenderContext::Impl::BuildMeshParticlePipelines() {
                 .and_then([&](auto&& shaders) -> std::expected<void, Error> {
                     return Vk::PipelineBuilder<0, true> {}
                         .Shaders(shaders)
-                        .Layout(meshParticleRenderLayout.Get())
+                        .Layout(emptyPipelineLayout)
+                        .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
                         .DepthOnly()
                         .DepthFormat(VK_FORMAT_D32_SFLOAT)
                         .CullNone()
@@ -381,6 +366,10 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
                 f.robustImageAccess2  = VK_TRUE;
             }
         })
+        // VK_EXT_descriptor_heap: the whole scene binding model now lives in
+        // descriptor heaps; the legacy set path remains only for passes that
+        // have not been ported yet (post-processing, volumetric, ImGui, ...).
+        .Require<VkPhysicalDeviceDescriptorHeapFeaturesEXT>([](auto& f) { f.descriptorHeap = VK_TRUE; })
         .Require<VkPhysicalDeviceFeatures2>([&](auto& f) {
             f.features.multiDrawIndirect         = VK_TRUE;
             f.features.samplerAnisotropy         = VK_TRUE;
@@ -414,6 +403,12 @@ std::expected<Vk::ExtensionResult, Error> GetDeviceExtensions(VkPhysicalDevice p
             {VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_RAY_QUERY_EXTENSION_NAME, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME},
             CheckRayTracingSupport(physicalDevice)
         )
+        // VK_EXT_descriptor_heap replaces descriptor sets/pools/layouts for the
+        // scene path. VK_KHR_maintenance5 (or Vulkan 1.4) provides
+        // VkPipelineCreateFlags2CreateInfoKHR for the mandatory
+        // VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT pipeline flag.
+        .Require(VK_EXT_DESCRIPTOR_HEAP_EXTENSION_NAME)
+        .Require(VK_KHR_MAINTENANCE_5_EXTENSION_NAME)
         .Build()
         .transform_error([](auto err) -> Error { return err; });
 }
@@ -646,34 +641,28 @@ std::expected<void, Error> RenderContext::Impl::InitLineBuffers() noexcept {
 }
 
 std::expected<void, Error> RenderContext::Impl::BuildLinePipeline() {
-    return Vk::PipelineLayoutBuilder(ctx.Device())
-        .AddDescriptorSetLayout(bindlessLayout.GetSetLayout())
-        .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(ObjectConstants))
-        .Build()
-        .transform_error([](auto) -> Error { return RenderInitError::PipelineLayoutCreationFailed; })
-        .and_then([&](auto&& layout) -> std::expected<void, Error> {
-            linePipelineLayout = std::forward<decltype(layout)>(layout);
+    linePipelineLayout = emptyPipelineLayout;
 
-            auto basicShaders = Resource::GetShaderProgram(Resource::ShaderID::Basic);
+    auto basicShaders = Resource::GetShaderProgram(Resource::ShaderID::Basic);
 
-            return LoadAndCreateShaders(
-                       {.path = Resource::Paths::BasicVS, .fallback = basicShaders.vertex, .entryPoint = "VSMain"},
-                       {.path = Resource::Paths::ForwardPS, .fallback = Resource::forward_frag, .entryPoint = "PSForward"}
-            )
-                .and_then([&](auto&& shaders) -> std::expected<void, Error> {
-                    return Vk::PipelineBuilder<1, true> {}
-                        .Shaders(shaders)
-                        .Layout(linePipelineLayout.Get())
-                        .ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT})
-                        .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
-                        .DepthTest(true)
-                        .DepthWrite(false)
-                        .Topology(VK_PRIMITIVE_TOPOLOGY_LINE_LIST)
-                        .CullNone()
-                        .AlphaBlend()
-                        .Build(ctx.Device())
-                        .transform([&](auto&& pipeline) { linePipeline = std::forward<decltype(pipeline)>(pipeline); });
-                });
+    return LoadAndCreateShaders(
+               {.path = Resource::Paths::BasicVS, .fallback = basicShaders.vertex, .entryPoint = "VSMain"},
+               {.path = Resource::Paths::ForwardPS, .fallback = Resource::forward_frag, .entryPoint = "PSForward"}
+    )
+        .and_then([&](auto&& shaders) -> std::expected<void, Error> {
+            return Vk::PipelineBuilder<1, true> {}
+                .Shaders(shaders)
+                .Layout(emptyPipelineLayout)
+                .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
+                .ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT})
+                .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
+                .DepthTest(true)
+                .DepthWrite(false)
+                .Topology(VK_PRIMITIVE_TOPOLOGY_LINE_LIST)
+                .CullNone()
+                .AlphaBlend()
+                .Build(ctx.Device())
+                .transform([&](auto&& pipeline) { linePipeline = std::forward<decltype(pipeline)>(pipeline); });
         });
 }
 
@@ -1037,14 +1026,16 @@ std::expected<void, Error> RenderContext::Impl::InitBindless() {
     // Reflect the authoritative GlobalSceneRegistry layout out of the compiled
     // scene shaders. The union across every `scene`-consuming entry point
     // (basic VS/PS, forward PS, punctual-shadow VS) covers exactly the registry
-    // members in live use: {0,1,2,3,4,5,6,10,11}, with the runtime texture
-    // array (11) picking up partially-bound / update-after-bind flags.
+    // members in live use: {0,1,2,3,4,5,6,10,11}. Under the descriptor-heap
+    // model the reflection no longer produces descriptor set layouts — it only
+    // reports which set-0 bindings exist, and the engine maps them onto the
+    // heaps below (see BuildSceneHeapMappings).
     auto basicShaders = Resource::GetShaderProgram(Basic);
     return LoadAndCreateShaders(
                {.path = Resource::Paths::BasicVS, .fallback = basicShaders.vertex, .entryPoint = "VSMain"},
                {.path = Resource::Paths::BasicPS, .fallback = basicShaders.fragment, .entryPoint = "PSMain"}
     )
-        .and_then([&](auto&& basicStages) -> std::expected<Vk::Sampler, Error> {
+        .and_then([&](auto&& basicStages) -> std::expected<void, Error> {
             const Vk::ReflectedStageInput reflectInputs[6] = {
                 {.shader = Vk::CreateShaderDesc(basicStages.GetVertSpv()), .stage = VK_SHADER_STAGE_VERTEX_BIT},
                 {.shader = Vk::CreateShaderDesc(basicStages.GetFragSpv()), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
@@ -1052,41 +1043,61 @@ std::expected<void, Error> RenderContext::Impl::InitBindless() {
                 {.shader = Vk::CreateShaderDesc(Resource::forward_frag), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
                 // Compute consumers widen the stage flags of the members they
                 // touch (`scene.frame` for both particle simulations). Without
-                // them the union layout carries only VS|FS stage flags and
-                // vkCreateComputePipelines trips VUID-07988.
+                // them the union reflection would only carry VS|FS stages and
+                // the compute-side mappings would be incomplete.
                 {.shader = Vk::CreateShaderDesc(Resource::GetShaderProgram(ParticleUpdate).vertex), .stage = VK_SHADER_STAGE_COMPUTE_BIT},
                 {.shader = Vk::CreateShaderDesc(Resource::GetShaderProgram(MeshParticleUpdate).vertex), .stage = VK_SHADER_STAGE_COMPUTE_BIT},
             };
             if (!bindlessLayout.Build(ctx.Device(), std::span {reflectInputs})) {
-                ZHLN::Log("[RenderInit] ERROR: Failed to reflect the global bindless layout!");
+                ZHLN::Log("[RenderInit] ERROR: Failed to reflect the global scene registry layout!");
                 return std::unexpected(RenderInitError::PipelineCreationFailed);
             }
 
-            bindlessPool           = bindlessLayout.CreatePool(ctx.Device(), 2);
-            frames.bindlessSets[0] = bindlessLayout.Allocate(ctx.Device(), bindlessPool.Get(), bindlessLayout.GetSetLayout());
-            frames.bindlessSets[1] = bindlessLayout.Allocate(ctx.Device(), bindlessPool.Get(), bindlessLayout.GetSetLayout());
-
-            return Vk::SamplerBuilder {}
-                .Linear()
-                .Repeat()
-                .Anisotropy(ctx.PhysicalInfo().properties.properties.limits.maxSamplerAnisotropy)
-                .LodRange(0.0f, 0.0f)
-                .Build(ctx.Device())
-                .transform_error([](auto err) -> Error { return err; });
+            // Every descriptor-heap pipeline shares one empty pipeline layout:
+            // no descriptor set layouts (heaps replace them) and no push
+            // constant ranges (vkCmdPushDataEXT replaces them).
+            auto layout = Vk::PipelineLayoutBuilder(ctx.Device()).Build();
+            if (!layout) {
+                ZHLN::Log("[RenderInit] ERROR: Failed to create the empty descriptor-heap pipeline layout!");
+                return std::unexpected(RenderInitError::PipelineLayoutCreationFailed);
+            }
+            emptyLayoutOwner    = std::move(*layout);
+            emptyPipelineLayout = emptyLayoutOwner.Get();
+            return {};
         })
-        .and_then([&](auto&& globalRes) -> std::expected<void, Error> {
-            globalSampler = std::forward<decltype(globalRes)>(globalRes);
+        .and_then([&]() -> std::expected<void, Error> {
+            // Build the samplers first: their VkSamplerCreateInfo values are
+            // what vkWriteSamplerDescriptorsEXT consumes for the sampler heap.
+            auto globalBuilder = Vk::SamplerBuilder {}
+                                     .Linear()
+                                     .Repeat()
+                                     .Anisotropy(ctx.PhysicalInfo().properties.properties.limits.maxSamplerAnisotropy)
+                                     .LodRange(0.0f, 0.0f);
+            auto clampBuilder = Vk::SamplerBuilder {}.Linear().ClampToEdge();
 
-            return Vk::SamplerBuilder {}
-                .Linear()
-                .ClampToEdge()
-                .Build(ctx.Device())
+            return globalBuilder.Build(ctx.Device())
                 .transform_error([](auto err) -> Error { return err; })
-                .transform([&](auto&& clampRes) { clampSampler = std::forward<decltype(clampRes)>(clampRes); });
+                .and_then([&](auto&& globalRes) -> std::expected<void, Error> {
+                    globalSampler = std::forward<decltype(globalRes)>(globalRes);
+                    return clampBuilder.Build(ctx.Device())
+                        .transform_error([](auto err) -> Error { return err; })
+                        .and_then([&](auto&& clampRes) -> std::expected<void, Error> {
+                            clampSampler = std::forward<decltype(clampRes)>(clampRes);
+                            return InitSceneHeaps(globalBuilder.Info(), clampBuilder.Info());
+                        });
+                });
         })
         .and_then([&]() -> std::expected<void, Error> { return InitSkeletalAnimationResources(); })
         .and_then([&]() -> std::expected<void, Error> { return InitLightingLUTs(); })
         .and_then([&]() -> std::expected<void, Error> { return InitializeSystemTextures(); })
+        .and_then([&]() -> std::expected<void, Error> {
+            // IBL images exist after InitLightingLUTs; write their heap
+            // descriptors once (they never change after init). The translucent
+            // lighting + decal depth descriptors are (re)written whenever the
+            // targets are recreated.
+            WriteSceneStaticImageDescriptors();
+            return {};
+        })
         .and_then([&]() -> std::expected<void, Error> {
             ZHLN::Log("[RenderInit] Pre-allocating persistently mapped Double-Buffered Debug VBOs...");
             size_t bufferSize = kMaxDebugVertices * (sizeof(VertexPosition) + sizeof(VertexAttributes));
@@ -1102,59 +1113,225 @@ std::expected<void, Error> RenderContext::Impl::InitBindless() {
                 auto address               = ctx.BufferAddress(gpu_buf.Handle());
                 frames.debugMeshHandles[i] = meshPool.Create(std::move(gpu_buf), kMaxDebugVertices, address);
             }
-
-            // Update global descriptor bindings. The binding numbers mirror the
-            // GlobalSceneRegistry member order in common.slang. Writes are gated
-            // by HasBinding() because prefilteredMap/brdfLUT/clampSampler are
-            // only declared (never sampled via `scene`) and are stripped from
-            // the reflected layout by dead-code elimination.
-            Vk::DescriptorUpdater bindlessRegistry;
-            for (int i = 0; i < 2; ++i) {
-                if (bindlessLayout.HasBinding(0, 0)) {
-                    bindlessRegistry.BindSampler(0, globalSampler.Get());
-                }
-                bindlessRegistry.BindUniformBuffer(1, frames.frameUniformBuffers[i].Handle());
-                bindlessRegistry.BindStorageBuffer(2, frames.lightStorageBuffers[i].Handle());
-                bindlessRegistry.BindStorageBuffer(3, frames.instanceDataBuffers[i].Handle());
-                bindlessRegistry.BindStorageBuffer(4, frames.jointBuffers[i].Handle());
-                bindlessRegistry.BindStorageBuffer(5, frames.jointBuffers[1 - i].Handle());
-                bindlessRegistry.BindStorageBuffer(6, morphDeltasBuffer.Handle());
-
-                if (bindlessLayout.HasBinding(0, 7)) {
-                    bindlessRegistry.BindSampledImage(7, iblPayload.prefilteredView.Get(), VK_NULL_HANDLE, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-                }
-                if (bindlessLayout.HasBinding(0, 8)) {
-                    bindlessRegistry.BindSampledImage(8, iblPayload.brdfLutView.Get(), VK_NULL_HANDLE, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-                }
-                if (bindlessLayout.HasBinding(0, 9)) {
-                    bindlessRegistry.BindSampler(9, clampSampler.Get());
-                }
-                // Binding 10 (texTransLighting) is written by RecreateTargets once
-                // the translucent-lighting target exists. Binding 11 is the dynamic
-                // globalTextures pool (UpdateBindlessTextureSlot).
-
-                bindlessRegistry.UpdateSet(ctx.Device(), frames.bindlessSets[i]);
-            }
             return {};
         });
 }
 
+std::expected<void, Error> RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSamplerInfo, const VkSamplerCreateInfo& clampSamplerInfo) noexcept {
+    auto init_res = heapManager.Init(
+        ctx, allocator, kSceneStaticResourceSlots + kGlobalTextureSlots, kSceneDynamicResourceSlots, kSceneStaticSamplerSlots, kSceneDynamicSamplerSlots, 2
+    );
+    if (!init_res) {
+        ZHLN::Log("[RenderInit] ERROR: Descriptor heap initialization failed (error code {})", static_cast<uint32_t>(init_res.error()));
+        return std::unexpected(RenderInitError::SubsystemAllocationFailed);
+    }
+
+    // The push-data budget must fit the per-frame device-address block that
+    // feeds the scene registry's PUSH_ADDRESS mappings.
+    if (heapManager.PushDataMaxSize() < (kHeapFrameAddrPushOffset + kHeapFrameAddrBlockSize)) [[unlikely]] {
+        ZHLN::Log(
+            "[RenderInit] ERROR: maxPushDataSize ({}) too small for the frame device-address block (needs {})",
+            heapManager.PushDataMaxSize(), kHeapFrameAddrPushOffset + kHeapFrameAddrBlockSize
+        );
+        return std::unexpected(RenderInitError::PipelineCreationFailed);
+    }
+
+    // --- Static slot allocation (sampler heap) ---
+    auto globalSlot = heapManager.AllocateStaticSampler();
+    auto clampSlot  = heapManager.AllocateStaticSampler();
+    auto pointSlot  = heapManager.AllocateStaticSampler();
+    if (!globalSlot || !clampSlot || !pointSlot) {
+        ZHLN::Log("[RenderInit] ERROR: Sampler heap slot exhaustion during init.");
+        return std::unexpected(RenderInitError::SubsystemAllocationFailed);
+    }
+    globalSamplerSlot = *globalSlot;
+    clampSamplerSlot  = *clampSlot;
+    pointSamplerSlot  = *pointSlot;
+
+    // --- Static slot allocation (resource heap) ---
+    auto iblSlot   = heapManager.AllocateStaticResource<VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE>();
+    auto brdfSlot  = heapManager.AllocateStaticResource<VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE>();
+    auto transSlot = heapManager.AllocateStaticResource<VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE>();
+    auto depthSlot = heapManager.AllocateStaticResource<VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE>();
+    if (!iblSlot || !brdfSlot || !transSlot || !depthSlot) {
+        ZHLN::Log("[RenderInit] ERROR: Resource heap slot exhaustion during init.");
+        return std::unexpected(RenderInitError::SubsystemAllocationFailed);
+    }
+    iblPrefilteredSlot = *iblSlot;
+    iblBrdfLutSlot     = *brdfSlot;
+    transLightingSlot  = *transSlot;
+    decalDepthSlot     = *depthSlot;
+    textureHeapBase    = kSceneStaticResourceSlots; // globalTextures[] region starts after the static slots
+
+    // --- Write the static sampler descriptors into the sampler heap ---
+    heapManager.WriteSampler(globalSamplerSlot, globalSamplerInfo);
+    heapManager.WriteSampler(clampSamplerSlot, clampSamplerInfo);
+    // pointSamplerSlot is written by WritePointSamplerToHeap once the sampler exists.
+
+    // --- Bake the set/binding -> heap mapping tables for pipeline creation ---
+    BuildSceneHeapMappings();
+
+    return {};
+}
+
+void RenderContext::Impl::BuildSceneHeapMappings() noexcept {
+    // May run more than once (initial bake + decal-pipeline bake after the
+    // decal reflection exists), so rebuild both tables from scratch.
+    sceneHeapMappings.entries.clear();
+    decalSceneHeapMappings.entries.clear();
+
+    // GlobalSceneRegistry (common.slang) member order -> binding numbers:
+    //   0 defaultSampler    4 g_joints        8 brdfLUT
+    //   1 frame             5 g_prevJoints    9 clampSampler
+    //   2 lights            6 g_morphDeltas  10 texTransLighting
+    //   3 g_instances       7 prefilteredMap 11 globalTextures[]
+    //
+    // Per-frame buffers (1..6) use VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT:
+    // the push-data block at kHeapFrameAddrPushOffset carries their current
+    // device addresses, selected per frame. Images and samplers sit in static
+    // heap slots via VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_CONSTANT_OFFSET_EXT.
+    const auto add_scene_set = [&](uint32_t setIndex, HeapMappingSet& out) {
+        using enum VkDescriptorMappingSourceEXT;
+        const auto& set = (setIndex == 0) ? bindlessLayout.reflectedSets[0] : decalDescLayout.reflectedSets[setIndex];
+
+        for (const auto& b: set.bindings) {
+            VkDescriptorSetAndBindingMappingEXT entry = {
+                .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_AND_BINDING_MAPPING_EXT,
+                .pNext         = nullptr,
+                .descriptorSet = setIndex,
+                .firstBinding  = b.binding,
+                .bindingCount  = 1,
+                .resourceMask  = 0,
+                .source        = VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_CONSTANT_OFFSET_EXT,
+                .sourceData    = {},
+            };
+
+            switch (b.binding) {
+                case 0: // defaultSampler
+                    entry.resourceMask                         = VK_SPIRV_RESOURCE_TYPE_SAMPLER_BIT_EXT;
+                    entry.sourceData.constantOffset.heapOffset = static_cast<uint32_t>(heapManager.SamplerOffset(globalSamplerSlot.index));
+                    break;
+                case 1: // frame (uniform buffer)
+                    entry.resourceMask                  = VK_SPIRV_RESOURCE_TYPE_UNIFORM_BUFFER_BIT_EXT;
+                    entry.source                        = VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT;
+                    entry.sourceData.pushAddressOffset  = kHeapFrameAddrPushOffset + 0 * sizeof(uint64_t);
+                    break;
+                case 2: // lights
+                case 3: // g_instances
+                case 4: // g_joints
+                case 5: // g_prevJoints
+                case 6: // g_morphDeltas
+                    entry.resourceMask                 = VK_SPIRV_RESOURCE_TYPE_READ_ONLY_STORAGE_BUFFER_BIT_EXT;
+                    entry.source                       = VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT;
+                    entry.sourceData.pushAddressOffset = kHeapFrameAddrPushOffset + (b.binding - 1) * sizeof(uint64_t);
+                    break;
+                case 7: // prefilteredMap
+                    entry.resourceMask                         = VK_SPIRV_RESOURCE_TYPE_SAMPLED_IMAGE_BIT_EXT;
+                    entry.sourceData.constantOffset.heapOffset = static_cast<uint32_t>(heapManager.ResourceOffset(iblPrefilteredSlot.index));
+                    break;
+                case 8: // brdfLUT
+                    entry.resourceMask                         = VK_SPIRV_RESOURCE_TYPE_SAMPLED_IMAGE_BIT_EXT;
+                    entry.sourceData.constantOffset.heapOffset = static_cast<uint32_t>(heapManager.ResourceOffset(iblBrdfLutSlot.index));
+                    break;
+                case 9: // clampSampler
+                    entry.resourceMask                         = VK_SPIRV_RESOURCE_TYPE_SAMPLER_BIT_EXT;
+                    entry.sourceData.constantOffset.heapOffset = static_cast<uint32_t>(heapManager.SamplerOffset(clampSamplerSlot.index));
+                    break;
+                case 10: // texTransLighting
+                    entry.resourceMask                         = VK_SPIRV_RESOURCE_TYPE_SAMPLED_IMAGE_BIT_EXT;
+                    entry.sourceData.constantOffset.heapOffset = static_cast<uint32_t>(heapManager.ResourceOffset(transLightingSlot.index));
+                    break;
+                case 11: // globalTextures[] - the bindless texture array
+                    entry.resourceMask = VK_SPIRV_RESOURCE_TYPE_SAMPLED_IMAGE_BIT_EXT;
+                    entry.sourceData.constantOffset.heapOffset       = static_cast<uint32_t>(heapManager.ResourceOffset(textureHeapBase));
+                    entry.sourceData.constantOffset.heapArrayStride  = static_cast<uint32_t>(heapManager.ResourceStride());
+                    break;
+                default:
+                    continue; // Unknown binding: nothing to map
+            }
+
+            out.entries.push_back(entry);
+        }
+        out.Finalize();
+    };
+
+    add_scene_set(0, sceneHeapMappings);
+    add_scene_set(1, decalSceneHeapMappings);
+}
+
+void RenderContext::Impl::BuildDecalHeapMappings() noexcept {
+    // Re-run the scene mapping bake: at initial init time decalDescLayout had
+    // not been reflected yet, so the decal's scene-subset (set 1) entries are
+    // empty. After reflection this picks them up.
+    BuildSceneHeapMappings();
+
+    // decal.slang set 0: {binding 0 = texDepth (sampled image), binding 1 = pointSampler}.
+    decalHeapMappings.entries.clear();
+    for (const auto& b: decalDescLayout.reflectedSets[0].bindings) {
+        VkDescriptorSetAndBindingMappingEXT entry = {
+            .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_AND_BINDING_MAPPING_EXT,
+            .pNext         = nullptr,
+            .descriptorSet = 0,
+            .firstBinding  = b.binding,
+            .bindingCount  = 1,
+            .resourceMask  = 0,
+            .source        = VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_CONSTANT_OFFSET_EXT,
+            .sourceData    = {},
+        };
+        switch (b.binding) {
+            case 0: // texDepth
+                entry.resourceMask                         = VK_SPIRV_RESOURCE_TYPE_SAMPLED_IMAGE_BIT_EXT;
+                entry.sourceData.constantOffset.heapOffset = static_cast<uint32_t>(heapManager.ResourceOffset(decalDepthSlot.index));
+                break;
+            case 1: // pointSampler
+                entry.resourceMask                         = VK_SPIRV_RESOURCE_TYPE_SAMPLER_BIT_EXT;
+                entry.sourceData.constantOffset.heapOffset = static_cast<uint32_t>(heapManager.SamplerOffset(pointSamplerSlot.index));
+                break;
+            default:
+                continue;
+        }
+        decalHeapMappings.entries.push_back(entry);
+    }
+    decalHeapMappings.Finalize();
+}
+
+void RenderContext::Impl::WriteSceneStaticImageDescriptors() noexcept {
+    if (bindlessLayout.HasBinding(0, 7) && iblPayload.prefilteredView.Valid()) {
+        constexpr uint32_t kIblMipLevels = 6; // Mirrors the IBL processor's prefiltered cube chain
+        const auto         info          = Vk::MakeViewCreateInfoCube(iblPayload.prefilteredImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, kIblMipLevels);
+        heapManager.WriteImage(iblPrefilteredSlot, info, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    }
+    if (bindlessLayout.HasBinding(0, 8) && iblPayload.brdfLutView.Valid()) {
+        const auto info = Vk::MakeViewCreateInfo2D(iblPayload.brdfLutImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
+        heapManager.WriteImage(iblBrdfLutSlot, info, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    }
+}
+
+void RenderContext::Impl::WritePointSamplerToHeap(const VkSamplerCreateInfo& info) noexcept {
+    heapManager.WriteSampler(pointSamplerSlot, info);
+}
+
+void RenderContext::Impl::WriteTransLightingToHeap() noexcept {
+    if (!graphResources.transLightingTarget.Valid() || !transLightingSlot.Valid()) {
+        return;
+    }
+    const auto info = Vk::MakeViewCreateInfo2D(
+        graphResources.transLightingTarget.image.Handle(), VK_FORMAT_R16G16B16A16_SFLOAT, 1, VK_IMAGE_ASPECT_COLOR_BIT
+    );
+    heapManager.WriteImage(transLightingSlot, info, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+}
+
 std::expected<void, Error> RenderContext::Impl::BuildDecalPipeline() {
     using enum Resource::ShaderID;
-
-    VkPushConstantRange push = {
-        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-        .offset     = 0,
-        .size       = sizeof(DecalPushConstants) // 144 bytes
-    };
 
     static constexpr std::array<VkFormat, 2> decalFormats = {VK_FORMAT_B10G11R11_UFLOAT_PACK32, VK_FORMAT_R8G8B8A8_UNORM};
 
     auto decalShaders = Resource::GetShaderProgram(Decal);
 
     // Reflects decal.slang set 0 ({texDepth, pointSampler}) and set 1 (the scene
-    // parameter block subset). The pipeline layout is assembled BY HAND below so
-    // set 1 gets the FULL bindless layout handle (subset is compatible).
+    // parameter block subset). VK_EXT_descriptor_heap: the reflection feeds the
+    // mapping tables (decalHeapMappings + decalSceneHeapMappings) that remap
+    // both sets onto the heaps at pipeline creation; no descriptor sets exist.
     const Vk::ReflectedStageInput reflectInputs[2] = {
         {.shader = Vk::CreateShaderDesc(decalShaders.vertex), .stage = VK_SHADER_STAGE_VERTEX_BIT},
         {.shader = Vk::CreateShaderDesc(decalShaders.fragment), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
@@ -1163,35 +1340,37 @@ std::expected<void, Error> RenderContext::Impl::BuildDecalPipeline() {
         ZHLN::Log("[RenderInit] ERROR: Failed to reflect decal descriptor layout!");
         return std::unexpected(RenderInitError::PipelineCreationFailed);
     }
-    decalDescPool = decalDescLayout.CreatePool(ctx.Device(), 1);
-    decalSet      = decalDescLayout.Allocate(ctx.Device(), decalDescPool.Get(), decalDescLayout.GetSetLayout());
+    BuildDecalHeapMappings();
+    decalPipelineLayout = emptyPipelineLayout;
 
-    return Vk::PipelineLayoutBuilder(ctx.Device())
-        .AddDescriptorSetLayout(decalDescLayout.GetSetLayout()) // Set 0: Decal (texDepth, pointSampler)
-        .AddDescriptorSetLayout(bindlessLayout.GetSetLayout())  // Set 1: Global Bindless Layout
-        .AddPushConstant(push.stageFlags, push.size, push.offset)
-        .Build()
-        .transform_error([](auto) -> Error { return RenderInitError::PipelineLayoutCreationFailed; })
-        .and_then([&](auto&& layout) -> std::expected<void, Error> {
-            decalPipelineLayout = std::forward<decltype(layout)>(layout);
+    // Merge decal set 0 + scene set 1 into one mapping chain per stage.
+    std::vector<VkDescriptorSetAndBindingMappingEXT> mergedEntries;
+    mergedEntries.insert(mergedEntries.end(), decalHeapMappings.entries.begin(), decalHeapMappings.entries.end());
+    mergedEntries.insert(mergedEntries.end(), decalSceneHeapMappings.entries.begin(), decalSceneHeapMappings.entries.end());
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT mergedInfo = {
+        .sType        = VK_STRUCTURE_TYPE_SHADER_DESCRIPTOR_SET_AND_BINDING_MAPPING_INFO_EXT,
+        .pNext        = nullptr,
+        .mappingCount = static_cast<uint32_t>(mergedEntries.size()),
+        .pMappings    = mergedEntries.empty() ? nullptr : mergedEntries.data(),
+    };
 
-            return LoadAndCreateShaders(
-                       {.path = Resource::Paths::DecalVS, .fallback = decalShaders.vertex, .entryPoint = "VSMain"},
-                       {.path = Resource::Paths::DecalPS, .fallback = decalShaders.fragment, .entryPoint = "PSMain"}
-            )
-                .and_then([&](auto&& shaders) -> std::expected<void, Error> {
-                    return Vk::PipelineBuilder<2, true> {} // Updated from 3 to 2 attachments
-                        .Shaders(shaders)
-                        .Layout(decalPipelineLayout.Get())
-                        .ColorFormats(decalFormats) // Explicit 2-format array
-                        .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
-                        .DepthTest(true)
-                        .DepthWrite(false)
-                        .CullFront()
-                        .AlphaBlend()
-                        .Build(ctx.Device())
-                        .transform([&](auto&& pipeline) { decalPipeline = std::forward<decltype(pipeline)>(pipeline); });
-                });
+    return LoadAndCreateShaders(
+               {.path = Resource::Paths::DecalVS, .fallback = decalShaders.vertex, .entryPoint = "VSMain"},
+               {.path = Resource::Paths::DecalPS, .fallback = decalShaders.fragment, .entryPoint = "PSMain"}
+    )
+        .and_then([&](auto&& shaders) -> std::expected<void, Error> {
+            return Vk::PipelineBuilder<2, true> {} // Updated from 3 to 2 attachments
+                .Shaders(shaders)
+                .Layout(emptyPipelineLayout)
+                .HeapMappings(&mergedInfo, &mergedInfo)
+                .ColorFormats(decalFormats) // Explicit 2-format array
+                .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
+                .DepthTest(true)
+                .DepthWrite(false)
+                .CullFront()
+                .AlphaBlend()
+                .Build(ctx.Device())
+                .transform([&](auto&& pipeline) { decalPipeline = std::forward<decltype(pipeline)>(pipeline); });
         });
 }
 
@@ -1440,12 +1619,15 @@ std::expected<void, Error> RenderContext::Impl::InitPostProcessing() {
         .transform_error([](auto err) -> Error { return err; })
         .and_then([&](auto defaultResult) -> std::expected<void, Error> {
             defaultSampler = std::move(defaultResult);
-            return Vk::SamplerBuilder {}
-                .Nearest()
-                .ClampToEdge()
-                .Build(ctx.Device())
+            auto pointBuilder = Vk::SamplerBuilder {}.Nearest().ClampToEdge();
+            return pointBuilder.Build(ctx.Device())
                 .transform_error([](auto err) -> Error { return err; })
-                .transform([&](auto pointResult) { pointSampler = std::move(pointResult); });
+                .transform([&](auto pointResult) {
+                    pointSampler = std::move(pointResult);
+                    // The decal pass samples through the sampler heap: write the
+                    // point-sampler descriptor into its static heap slot.
+                    WritePointSamplerToHeap(pointBuilder.Info());
+                });
         })
         .and_then([&]() { return register_and_check("TAA", [this]() { return BuildTAAPipeline(); }, {Resource::Paths::TaaVS, Resource::Paths::TaaPS}); })
         .and_then([&]() { return register_and_check("FXAA", [this]() { return BuildFXAAPipeline(); }, {Resource::Paths::FxaaVS, Resource::Paths::FxaaPS}); })
@@ -1535,15 +1717,7 @@ std::expected<void, Error> RenderContext::Impl::InitCSGPipelines() {
         .and_then([&](auto&& compiledShaders) {
             shaders = std::forward<decltype(compiledShaders)>(compiledShaders);
 
-            return Vk::PipelineLayoutBuilder(ctx.Device())
-                .AddDescriptorSetLayout(bindlessLayout.GetSetLayout())
-                .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(ObjectConstants))
-                .Build()
-                .transform_error([](auto) -> Error { return RenderInitError::PipelineLayoutCreationFailed; });
-        })
-        .and_then([&](auto&& layout) {
-            csgPipelineLayout = std::forward<decltype(layout)>(layout);
-
+            csgPipelineLayout = emptyPipelineLayout;
             VkStencilOpState writeStencil = {
                 .failOp      = VK_STENCIL_OP_KEEP,
                 .passOp      = VK_STENCIL_OP_REPLACE,
@@ -1556,7 +1730,8 @@ std::expected<void, Error> RenderContext::Impl::InitCSGPipelines() {
 
             return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
                 .Shaders(shaders)
-                .Layout(csgPipelineLayout.Get())
+                .Layout(emptyPipelineLayout)
+                .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
                 .ColorFormats(ActiveGBuffer::array)
                 .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
                 .DepthTest(true)
@@ -1583,7 +1758,8 @@ std::expected<void, Error> RenderContext::Impl::InitCSGPipelines() {
 
             return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
                 .Shaders(shaders)
-                .Layout(csgPipelineLayout.Get())
+                .Layout(emptyPipelineLayout)
+                .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
                 .ColorFormats(ActiveGBuffer::array)
                 .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
                 .DepthTest(true)
@@ -1610,7 +1786,8 @@ std::expected<void, Error> RenderContext::Impl::InitCSGPipelines() {
 
             return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
                 .Shaders(shaders)
-                .Layout(csgPipelineLayout.Get())
+                .Layout(emptyPipelineLayout)
+                .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
                 .ColorFormats(ActiveGBuffer::array)
                 .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
                 .DepthTest(true)
@@ -1671,19 +1848,17 @@ std::expected<void, Error> RenderContext::Impl::SetupUI(GLFWwindow* window) {
                 .transform([&](auto&& shaders) -> void { uiShaders = std::forward<decltype(shaders)>(shaders); });
         })
         .and_then([&]() -> std::expected<void, Error> {
-            return Vk::PipelineLayoutBuilder(ctx.Device())
-                .AddDescriptorSetLayout(bindlessLayout.GetSetLayout())
-                .AddPushConstant(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(UIObjectConstants))
-                .Build()
-                .transform_error([](auto) -> Error { return RenderInitError::UISetupFailed; })
-                .transform([&](auto&& layout) { uiPipelineLayout = std::forward<decltype(layout)>(layout); });
-        })
-        .and_then([&]() -> std::expected<void, Error> {
+            // The UI batch pipeline is a descriptor-heap pipeline (scene
+            // registry + push data). ImGui itself keeps its own legacy
+            // descriptor pool (rendered last, after all heap segments).
+            uiPipelineLayout = emptyPipelineLayout;
+
             VkFormat swapchainFormat = presentation.GetPresentFormat();
 
             return Vk::PipelineBuilder {}
                 .Shaders(uiShaders)
-                .Layout(uiPipelineLayout.Get())
+                .Layout(emptyPipelineLayout)
+                .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
                 .ColorFormats(std::array {swapchainFormat})
                 .NoDepth()
                 .AlphaBlend()
@@ -1998,8 +2173,15 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
             Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
         }
 
-        if (decalSet != VK_NULL_HANDLE) {
-            decalDescLayout.Write(ctx.Device(), decalSet, presentation.depthTarget.view.Get(), pointSampler.Get());
+        // VK_EXT_descriptor_heap: the decal pass samples the depth target
+        // through the heap, so rewrite its descriptor whenever the target is
+        // recreated (the old view was destroyed).
+        if (decalDepthSlot.Valid()) {
+            const auto info = Vk::MakeViewCreateInfo2D(
+                presentation.depthTarget.image.Handle(), VK_FORMAT_D32_SFLOAT_S8_UINT, 1,
+                VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
+            );
+            heapManager.WriteImage(decalDepthSlot, info, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         }
 
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>(
@@ -2041,12 +2223,8 @@ bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
     });
 
     // Translucency input is a plain Texture2D at registry slot 10 (sampler split).
-    Vk::DescriptorUpdater bindlessRegistry;
-    for (int i = 0; i < 2; ++i) {
-        bindlessRegistry.BindSampledImage(10, graphResources.transLightingTarget.view.Get(), VK_NULL_HANDLE, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        bindlessRegistry.UpdateSet(ctx.Device(), frames.bindlessSets[i]);
-        bindlessRegistry.Clear();
-    }
+    // VK_EXT_descriptor_heap: rewrite its static heap descriptor for the new target.
+    WriteTransLightingToHeap();
 
     if (hizPool.Valid()) {
         hizPool = {};

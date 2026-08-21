@@ -33,6 +33,26 @@ std::expected<void, ZHLN::Error> ComputePass::Build(
     return {};
 }
 
+std::expected<void, ZHLN::Error> ComputePass::BuildHeap(
+    VkDevice device, const ZHLN_ShaderDesc& shader, const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping
+) noexcept {
+    // VK_EXT_descriptor_heap: an empty pipeline layout (no set layouts, no
+    // push constant ranges) and the set/binding -> heap mapping for the
+    // compute stage. Per-dispatch data travels through vkCmdPushDataEXT.
+    auto layout_res = PipelineLayoutBuilder(device).Build();
+    if (!layout_res) {
+        return std::unexpected(RenderInitError::PipelineLayoutCreationFailed);
+    }
+    pipelineLayout = std::move(layout_res.value());
+
+    auto p_res = ComputePipelineBuilder().Shader(shader).Layout(pipelineLayout.Get()).HeapMappings(mapping).Build(device);
+    if (!p_res) {
+        return std::unexpected(p_res.error());
+    }
+    pipeline = std::move(*p_res);
+    return {};
+}
+
 std::expected<void, ZHLN::Error> ComputePass::BuildVariants(
     VkDevice                              device,
     VkDescriptorSetLayout                 descriptorLayout,

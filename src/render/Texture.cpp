@@ -3,33 +3,9 @@
 #include "Texture.hpp"
 
 namespace ZHLN::Vk {
-void UpdateBindlessTextureSlot(
-    VkDevice                                     device,
-    uint32_t                                     slotIndex,
-    VkImageView                                  view,
-    const ZHLN::DoubleBuffered<VkDescriptorSet>& bindlessSets,
-    uint32_t                                     dstBinding
-) {
-    // We know it's always 2 for double buffering
-    constexpr size_t num_sets = 2;
-
-    VkDescriptorImageInfo bindless_update = {.sampler = VK_NULL_HANDLE, .imageView = view, .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-
-    std::array<VkWriteDescriptorSet, num_sets> writes {};
-    for (size_t i = 0; i < num_sets; ++i) {
-        writes[i] = {
-            .sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .pNext            = {},
-            .dstSet           = bindlessSets[i],
-            .dstBinding       = dstBinding,
-            .dstArrayElement  = slotIndex,
-            .descriptorCount  = 1,
-            .descriptorType   = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-            .pImageInfo       = &bindless_update,
-            .pBufferInfo      = {},
-            .pTexelBufferView = {},
-        };
-    }
-    vkUpdateDescriptorSets(device, num_sets, writes.data(), 0, nullptr);
-}
+// NOTE: The legacy UpdateBindlessTextureSlot (descriptor-set based bindless
+// texture registration) has been removed with the VK_EXT_descriptor_heap
+// migration. Textures now register through
+// RenderContext::Impl::WriteTextureSlotToHeap, which writes an image
+// descriptor directly into the globalTextures[] region of the resource heap.
 } // namespace ZHLN::Vk

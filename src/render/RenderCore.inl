@@ -112,6 +112,38 @@ inline void Push(const VkCommandBuffer cmd, const VkPipelineLayout layout, const
     ZHLN_PushConstants(cmd, layout, stages, &value, sizeof(T));
 }
 
+// ============================================================================
+// VK_EXT_descriptor_heap: Push Data (replaces push constants for heap pipelines)
+// ============================================================================
+//
+// Legacy push-constant blocks in SPIR-V read the push-data blob starting at
+// offset 0, so per-draw structs are pushed at offset 0. The engine reserves
+// higher offsets (e.g. RenderContext::Impl::kHeapFrameAddrPushOffset) for
+// per-frame data consumed by VkDescriptorSetAndBindingMappingEXT sources such
+// as VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT.
+
+template <GpuTriviallyCopyable T>
+inline void PushData(const Context& ctx, const VkCommandBuffer cmd, const uint32_t offset, const T& value) noexcept {
+    static_assert(sizeof(T) % 4 == 0, "Push data size must be a multiple of 4 bytes");
+    const VkPushDataInfoEXT info = {
+        .sType  = VK_STRUCTURE_TYPE_PUSH_DATA_INFO_EXT,
+        .pNext  = nullptr,
+        .offset = offset,
+        .data   = {.address = &value, .size = sizeof(T)},
+    };
+    ctx.CmdPushData(cmd, &info);
+}
+
+inline void PushData(const Context& ctx, const VkCommandBuffer cmd, const uint32_t offset, const void* data, const uint32_t size) noexcept {
+    const VkPushDataInfoEXT info = {
+        .sType  = VK_STRUCTURE_TYPE_PUSH_DATA_INFO_EXT,
+        .pNext  = nullptr,
+        .offset = offset,
+        .data   = {.address = data, .size = size},
+    };
+    ctx.CmdPushData(cmd, &info);
+}
+
 template <uint32_t N, bool WaitOnFence, typename Record, typename Rebuild>
     requires RecordFn<Record> && RebuildFn<Rebuild>
 inline auto DrawFrame(const DrawFrameDesc<N>& desc, uint32_t& frameIndex, Record&& record, Rebuild&& rebuild) noexcept -> ZHLN_FrameResult {

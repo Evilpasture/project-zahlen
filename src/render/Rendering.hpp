@@ -82,6 +82,7 @@ static constexpr auto isLegacy = false;
 #include "RenderCore.hpp"    
 #include "DynamicRendering.hpp"
 #include "DescriptorLayout.hpp"
+#include "DescriptorHeap.hpp"
 #include "ReflectedLayout.hpp"
 #include "SlangReflectedLayout.hpp"
 #include "Raytracing.hpp"

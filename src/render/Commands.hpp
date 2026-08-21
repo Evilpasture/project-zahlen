@@ -257,8 +257,11 @@ class CommandEncoder {
     VkPipelineLayout lastLayout        = VK_NULL_HANDLE;
     VkDescriptorSet  lastDescriptorSet = VK_NULL_HANDLE;
 
+    // Context is required when recording heap-mode draws (vkCmdPushDataEXT).
+    const Context* ctx = nullptr;
+
     CommandEncoder() = default;
-    explicit CommandEncoder(VkCommandBuffer c) noexcept: cmd(c) {
+    explicit CommandEncoder(VkCommandBuffer c, const Context* context = nullptr) noexcept: cmd(c), ctx(context) {
     }
 
     void BindPipeline(VkPipeline pipeline, VkPipelineLayout layout) noexcept {
@@ -295,6 +298,24 @@ class CommandEncoder {
         vkCmdDraw(cmd, vertexCount, instanceCount, 0, 0);
     }
 
+    // VK_EXT_descriptor_heap draw: heaps are bound on the command buffer, the
+    // pipeline was bound with BindPipeline, and per-draw data travels through
+    // vkCmdPushDataEXT at offset 0.
+    template <GpuTriviallyCopyable T>
+    void DrawHeap(uint32_t vertexCount, uint32_t instanceCount, const T& pushConstants) noexcept {
+        PushDrawData(pushConstants);
+        vkCmdDraw(cmd, vertexCount, instanceCount, 0, 0);
+    }
+
+    // Heap mode (VK_EXT_descriptor_heap): the resource/sampler heaps are bound
+    // on the command buffer itself, so no descriptor set is bound here, and
+    // per-draw data travels through vkCmdPushDataEXT at offset 0 (legacy
+    // PushConstant blocks in the SPIR-V read the push-data blob directly).
+    template <GpuTriviallyCopyable T>
+    void PushDrawData(const T& pushConstants, VkShaderStageFlags /*stages*/ = 0) noexcept {
+        PushData(*ctx, cmd, 0, pushConstants);
+    }
+
     template <GpuTriviallyCopyable T>
     void DrawInstanced(
         const DrawState&   state,
@@ -302,8 +323,12 @@ class CommandEncoder {
         VkShaderStageFlags stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
     ) noexcept {
         BindPipeline(state.pipeline, state.layout);
-        BindDescriptorSet(state.set);
-        Push(cmd, state.layout, stages, pushConstants);
+        if (state.heap) {
+            PushDrawData(pushConstants);
+        } else {
+            BindDescriptorSet(state.set);
+            Push(cmd, state.layout, stages, pushConstants);
+        }
         vkCmdDraw(cmd, state.vertexCount, state.instanceCount, state.firstVertex, state.firstInstance);
     }
 
@@ -314,8 +339,12 @@ class CommandEncoder {
         VkShaderStageFlags       stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
     ) noexcept {
         BindPipeline(state.pipeline, state.layout);
-        BindDescriptorSet(state.set);
-        Push(cmd, state.layout, stages, pushConstants);
+        if (state.heap) {
+            PushDrawData(pushConstants);
+        } else {
+            BindDescriptorSet(state.set);
+            Push(cmd, state.layout, stages, pushConstants);
+        }
         vkCmdDrawIndirect(cmd, state.argumentBuffer, state.offset, state.drawCount, state.stride);
     }
 
@@ -326,8 +355,12 @@ class CommandEncoder {
         VkShaderStageFlags            stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
     ) noexcept {
         BindPipeline(state.pipeline, state.layout);
-        BindDescriptorSet(state.set);
-        Push(cmd, state.layout, stages, pushConstants);
+        if (state.heap) {
+            PushDrawData(pushConstants);
+        } else {
+            BindDescriptorSet(state.set);
+            Push(cmd, state.layout, stages, pushConstants);
+        }
         vkCmdDrawIndirectCount(cmd, state.argumentBuffer, state.offset, state.countBuffer, state.countBufferOffset, state.maxDrawCount, state.stride);
     }
 
@@ -338,8 +371,12 @@ class CommandEncoder {
         VkShaderStageFlags              stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
     ) noexcept {
         BindPipeline(state.pipeline, state.layout);
-        BindDescriptorSet(state.set);
-        Push(cmd, state.layout, stages, pushConstants);
+        if (state.heap) {
+            PushDrawData(pushConstants);
+        } else {
+            BindDescriptorSet(state.set);
+            Push(cmd, state.layout, stages, pushConstants);
+        }
         vkCmdDrawIndexedIndirect(cmd, state.argumentBuffer, state.offset, state.drawCount, state.stride);
     }
 
@@ -350,8 +387,12 @@ class CommandEncoder {
         VkShaderStageFlags                   stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
     ) noexcept {
         BindPipeline(state.pipeline, state.layout);
-        BindDescriptorSet(state.set);
-        Push(cmd, state.layout, stages, pushConstants);
+        if (state.heap) {
+            PushDrawData(pushConstants);
+        } else {
+            BindDescriptorSet(state.set);
+            Push(cmd, state.layout, stages, pushConstants);
+        }
         vkCmdDrawIndexedIndirectCount(cmd, state.argumentBuffer, state.offset, state.countBuffer, state.countBufferOffset, state.maxDrawCount, state.stride);
     }
 };
