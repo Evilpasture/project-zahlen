@@ -274,15 +274,15 @@ endif()
 set(RAW_ENGINE_SOURCES
     src/engine/AssertHandler.cpp
     src/engine/DefaultPreset.cpp
-    src/engine/RenderFrame.cpp
-    src/engine/RenderGraphBuilder.cpp
-    src/engine/RenderDrawCommands.cpp
-    src/engine/RenderInit.cpp
-    src/engine/RenderResources.cpp
+    src/engine/graphics/RenderFrame.cpp
+    src/engine/graphics/RenderGraphBuilder.cpp
+    src/engine/graphics/RenderDrawCommands.cpp
+    src/engine/graphics/RenderInit.cpp
+    src/engine/graphics/RenderResources.cpp
     src/engine/Engine.cpp
     src/engine/CreativeWorksFactory.cpp
-    src/engine/MeshBuilder.cpp
-    src/engine/TextureManager.cpp
+    src/engine/graphics/MeshBuilder.cpp
+    src/engine/graphics/TextureManager.cpp
     src/engine/system/TextureSystem.cpp
     src/engine/system/AnimationSystem.cpp
     src/engine/CreativeWorksManager.cpp
@@ -293,15 +293,15 @@ set(RAW_ENGINE_SOURCES
     src/engine/Console.cpp
     src/engine/Profiler.cpp
     src/engine/Text.cpp
-    src/engine/Resources.cpp
+    src/engine/graphics/Resources.cpp
     src/engine/system/RenderSystem.cpp
     src/engine/system/DecalSystem.cpp
     src/engine/system/MovementSystem.cpp
     src/engine/system/AudioSystem.cpp
     src/engine/system/ArticulationSystem.cpp
     src/engine/system/CullingSystem.cpp
-    src/engine/Sky.cpp
-    src/engine/BRDFLUT.cpp
+    src/engine/graphics/Sky.cpp
+    src/engine/graphics/BRDFLUT.cpp
     src/engine/system/PhysicsSystem.cpp
     src/engine/system/TerrainSystem.cpp
     src/engine/system/LODSystem.cpp
@@ -314,14 +314,14 @@ set(RAW_ENGINE_SOURCES
     src/engine/system/LightingSystem.cpp
     src/engine/system/InputSystem.cpp
     src/engine/system/CameraSystem.cpp
-    src/engine/RenderDocInit.cpp
+    src/engine/graphics/RenderDocInit.cpp
     src/engine/system/InteractionSystem.cpp
     src/engine/system/UIRenderSystem.cpp
     src/engine/system/UIInteractionSystem.cpp
     src/engine/WindowSurface.cpp
-    src/engine/RenderProcedural.cpp
-    src/engine/RenderPasses.cpp
-    src/engine/RenderSetup.cpp
+    src/engine/graphics/RenderProcedural.cpp
+    src/engine/graphics/RenderPasses.cpp
+    src/engine/graphics/RenderSetup.cpp
     src/engine/ScriptECSBridge.cpp
     src/engine/JSON.cpp
 )
@@ -404,12 +404,12 @@ option(ZHLN_PROFILE_RENDER_FRAME_COMPILE "Enable GCC compile-time profiling for 
 
 if(ZHLN_PROFILE_RENDER_FRAME_COMPILE)
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-        set_source_files_properties(src/engine/RenderFrame.cpp PROPERTIES
+        set_source_files_properties(src/engine/graphics/RenderFrame.cpp PROPERTIES
             COMPILE_OPTIONS "-ftime-report"
         )
         message(STATUS "GCC compile-time profiling enabled for RenderFrame.cpp")
     elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-        set_source_files_properties(src/engine/RenderFrame.cpp PROPERTIES
+        set_source_files_properties(src/engine/graphics/RenderFrame.cpp PROPERTIES
             COMPILE_OPTIONS "-ftime-trace"
         )
         message(STATUS "Clang time-trace profiling enabled for RenderFrame.cpp")

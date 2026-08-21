@@ -19,7 +19,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
-#include <engine/Resources.hpp>
+#include <engine/graphics/Resources.hpp>
 #include <physics/PhysicsDebug.hpp>
 
 namespace ZHLN {

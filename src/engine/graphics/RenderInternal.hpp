@@ -3,9 +3,9 @@
 
 // File: src/engine/RenderInternal.hpp
 #pragma once
-#include "FileWatcher.hpp"
+#include "../FileWatcher.hpp"
 #include "Rendering.hpp"
-#include "engine/TextureManager.hpp" // Private header
+#include "TextureManager.hpp" // Private header
 #include <GLFW/glfw3.h>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/ControlFlow.hpp>
