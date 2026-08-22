@@ -251,6 +251,15 @@ void RenderContext::SetResolution([[maybe_unused]] const Extent2D& res) {
     _impl->resized = true;
 }
 
+auto RenderContext::CreateStorageBuffer(const void* data, size_t size, uint32_t stride) -> BufferHandle {
+    const uint32_t safeStride = (stride > 0) ? stride : 1u;
+    return _impl->CreateGPUBuffer(size, data, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+        .transform([this, size, safeStride](auto&& pair) -> auto {
+            return _impl->meshPool.Create(std::move(pair.first), static_cast<uint32_t>(size / safeStride), pair.second);
+        })
+        .value_or(BufferHandle::Invalid);
+}
+
 auto RenderContext::CreateVertexBuffer(const void* data, size_t size, uint32_t stride) -> BufferHandle {
     return _impl->CreateGPUBuffer(size, data, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)
         .transform([this, size, stride](auto&& pair) -> auto {

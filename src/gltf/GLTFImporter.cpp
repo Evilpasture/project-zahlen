@@ -567,13 +567,13 @@ auto GetOrCreateCompiledPrimitive(
     const bool hasMeshlets = !primJob.meshlets.Empty();
 
     const BufferHandle meshletVbo =
-        hasMeshlets ? ctx.CreateVertexBuffer(primJob.meshlets.meshlets.data(), primJob.meshlets.meshlets.size() * sizeof(GPUMeshlet), sizeof(GPUMeshlet)) :
+        hasMeshlets ? ctx.CreateStorageBuffer(primJob.meshlets.meshlets.data(), primJob.meshlets.meshlets.size() * sizeof(GPUMeshlet), sizeof(GPUMeshlet)) :
                       BufferHandle::Invalid;
     const BufferHandle meshletVertexVbo =
-        hasMeshlets ? ctx.CreateVertexBuffer(primJob.meshlets.vertices.data(), primJob.meshlets.vertices.size() * sizeof(uint32_t), sizeof(uint32_t)) :
+        hasMeshlets ? ctx.CreateStorageBuffer(primJob.meshlets.vertices.data(), primJob.meshlets.vertices.size() * sizeof(uint32_t), sizeof(uint32_t)) :
                       BufferHandle::Invalid;
     const BufferHandle meshletTriVbo =
-        hasMeshlets ? ctx.CreateVertexBuffer(primJob.meshlets.triangles.data(), primJob.meshlets.triangles.size(), sizeof(uint32_t)) : BufferHandle::Invalid;
+        hasMeshlets ? ctx.CreateStorageBuffer(primJob.meshlets.triangles.data(), primJob.meshlets.triangles.size(), sizeof(uint8_t)) : BufferHandle::Invalid;
 
     Mesh subMesh = {
         .posBuffer           = posVbo,

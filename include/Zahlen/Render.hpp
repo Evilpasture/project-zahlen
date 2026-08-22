@@ -140,6 +140,19 @@ class ZHLN_API RenderContext {
     void SubmitMeshParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const MeshParticleEmitterParams& params, AssetID mesh, MaterialID mat);
 
     // --- Opaque Resource Creation API ---
+    /// Uploads immutable data that shaders reach only through its device
+    /// address (VK_BUFFER_USAGE_STORAGE_BUFFER_BIT). Use this, not
+    /// CreateVertexBuffer, for BDA-only streams such as the VK_EXT_mesh_shader
+    /// meshlet descriptors: they are never bound as vertex or index buffers,
+    /// so tagging them VERTEX_BUFFER_BIT misdescribes them to the driver and
+    /// to tooling.
+    ///
+    /// Note that STORAGE_BUFFER_BIT is not what makes a BDA read legal --
+    /// SHADER_DEVICE_ADDRESS_BIT is, and CreateGPUBuffer always sets it. This
+    /// exists for correct intent, and so the streams can be bound as storage
+    /// descriptors later (e.g. a compute pass writing meshlet indirect args).
+    auto CreateStorageBuffer(const void* data, size_t size, uint32_t stride = sizeof(uint32_t)) -> BufferHandle;
+
     auto                                         CreateVertexBuffer(const void* data, size_t size, uint32_t stride = sizeof(VertexPosition)) -> BufferHandle;
     auto                                         CreateIndexBuffer(const void* data, size_t size) -> BufferHandle;
     void                                         DestroyBuffer(BufferHandle handle);

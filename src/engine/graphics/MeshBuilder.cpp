@@ -55,9 +55,11 @@ void AttachMeshlets(RenderContext& ctx, Mesh& mesh, std::span<const VertexPositi
         return;
     }
 
-    mesh.meshletBuffer       = ctx.CreateVertexBuffer(built.meshlets.data(), built.meshlets.size() * sizeof(GPUMeshlet), sizeof(GPUMeshlet));
-    mesh.meshletVertexBuffer = ctx.CreateVertexBuffer(built.vertices.data(), built.vertices.size() * sizeof(uint32_t), sizeof(uint32_t));
-    mesh.meshletTriBuffer    = ctx.CreateVertexBuffer(built.triangles.data(), built.triangles.size(), sizeof(uint32_t));
+    // Storage, not vertex data: the task/mesh shaders reach these only through
+    // their device address, they are never bound to the input assembler.
+    mesh.meshletBuffer       = ctx.CreateStorageBuffer(built.meshlets.data(), built.meshlets.size() * sizeof(GPUMeshlet), sizeof(GPUMeshlet));
+    mesh.meshletVertexBuffer = ctx.CreateStorageBuffer(built.vertices.data(), built.vertices.size() * sizeof(uint32_t), sizeof(uint32_t));
+    mesh.meshletTriBuffer    = ctx.CreateStorageBuffer(built.triangles.data(), built.triangles.size(), sizeof(uint8_t));
 
     if (mesh.meshletBuffer == BufferHandle::Invalid || mesh.meshletVertexBuffer == BufferHandle::Invalid || mesh.meshletTriBuffer == BufferHandle::Invalid) {
         mesh.meshletBuffer       = BufferHandle::Invalid;

@@ -23,6 +23,14 @@ skinned meshes, debug line lists and CSG stencil draws keep working unchanged.
 ```
 
 Meshlet streams are an *additional index view* over the existing vertex pool.
+They are uploaded through `RenderContext::CreateStorageBuffer()`
+(`VK_BUFFER_USAGE_STORAGE_BUFFER_BIT`), not `CreateVertexBuffer()`: nothing ever
+binds them to the input assembler. Note that the flag that actually makes the
+BDA reads legal is `VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT`, which
+`CreateGPUBuffer` sets on every buffer -- accessing memory through a
+`PhysicalStorageBuffer` pointer has no usage-flag requirement of its own, since
+usage flags govern descriptor binding. `STORAGE_BUFFER_BIT` is for correct
+intent and for binding these as descriptors later.
 The raw position/attribute/index buffers are still uploaded and still used by
 BLAS builds (`ZHLN_CmdBuildBlas`) and by the vertex pipeline.
 
