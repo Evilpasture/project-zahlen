@@ -139,6 +139,10 @@ void RenderContext::SetMeshShadingEnabled(bool enabled) noexcept {
     Diag::SetMeshShadingDisabled(!enabled);
 }
 
+bool RenderContext::RayTracingSupported() const noexcept {
+    return _impl->rtCtx.Valid();
+}
+
 uint32_t RenderContext::ValidationErrorCount() noexcept {
     return ZHLN_GetValidationErrorCount();
 }
