@@ -220,6 +220,87 @@ struct FrameDiff {
     double   frac32  = 0.0;
 };
 
+/// Where the changed pixels live. `count==0` and 0/0 bounds mean no change.
+/// Used to attribute a frame-parity oscillation: whole-frame (target/tone-map
+/// parity), a specific object (geometry/culling parity) or the light patch
+/// (cluster/light-buffer parity).
+struct ChangedRegion {
+    uint32_t count    = 0;
+    int      minX     = 0;
+    int      maxX     = 0;
+    int      minY     = 0;
+    int      maxY     = 0;
+    int      maxDelta = 0;
+    double   meanDelta = 0.0;
+};
+
+[[nodiscard]] ChangedRegion DiffRegion(const RgbImage& a, const RgbImage& b, int threshold = 32) {
+    ChangedRegion r;
+    if (!a.Valid() || !b.Valid() || a.width != b.width || a.height != b.height) {
+        return r;
+    }
+
+    r.minX      = a.width;
+    r.minY      = a.height;
+    r.maxX      = -1;
+    r.maxY      = -1;
+    uint64_t sum = 0;
+    bool     first = true;
+
+    for (size_t i = 0; i < a.rgb.size(); i += 3) {
+        const int dr    = std::abs(static_cast<int>(a.rgb[i + 0]) - static_cast<int>(b.rgb[i + 0]));
+        const int dg    = std::abs(static_cast<int>(a.rgb[i + 1]) - static_cast<int>(b.rgb[i + 1]));
+        const int db    = std::abs(static_cast<int>(a.rgb[i + 2]) - static_cast<int>(b.rgb[i + 2]));
+        const int worst = std::max({dr, dg, db});
+        if (first) {
+            r.meanDelta = static_cast<double>(worst);
+            first       = false;
+        } else {
+            r.meanDelta = r.meanDelta + (static_cast<double>(worst) - r.meanDelta) / static_cast<double>(i / 3 + 1);
+        }
+        r.maxDelta = std::max(r.maxDelta, worst);
+        if (worst > threshold) {
+            const size_t pixel = i / 3;
+            const int    x     = static_cast<int>(pixel % static_cast<size_t>(a.width));
+            const int    y     = static_cast<int>(pixel / static_cast<size_t>(a.width));
+            ++r.count;
+            r.minX    = std::min(r.minX, x);
+            r.maxX    = std::max(r.maxX, x);
+            r.minY    = std::min(r.minY, y);
+            r.maxY    = std::max(r.maxY, y);
+            sum += static_cast<uint64_t>(worst);
+        }
+    }
+
+    if (r.count == 0) {
+        r.minX = r.maxX = r.minY = r.maxY = 0;
+    }
+    if (r.count > 0 && r.meanDelta > 0.0) {
+        r.meanDelta = static_cast<double>(sum) / static_cast<double>(r.count);
+    }
+    return r;
+}
+
+/// Writes an amplified absolute-difference image so the parity region is
+/// inspectable: `headless_lighting_rt_cull_parity_diff.ppm`.
+void WriteAmplifiedDiff(const std::string& path, const RgbImage& a, const RgbImage& b) {
+    if (!a.Valid() || !b.Valid() || a.width != b.width || a.height != b.height) {
+        return;
+    }
+    std::ofstream out(path, std::ios::binary);
+    if (!out.is_open()) {
+        return;
+    }
+    out << "P6\n" << a.width << " " << a.height << "\n255\n";
+
+    std::vector<uint8_t> amplified(a.rgb.size());
+    for (size_t i = 0; i < a.rgb.size(); ++i) {
+        const int  d        = std::abs(static_cast<int>(a.rgb[i]) - static_cast<int>(b.rgb[i]));
+        amplified[i]        = static_cast<uint8_t>(std::min(255, d * 4));
+    }
+    out.write(reinterpret_cast<const char*>(amplified.data()), static_cast<std::streamsize>(amplified.size()));
+}
+
 [[nodiscard]] FrameDiff CompareFrames(const RgbImage& a, const RgbImage& b) {
     FrameDiff d;
     if (!a.Valid() || !b.Valid() || a.width != b.width || a.height != b.height) {
@@ -877,19 +958,34 @@ struct LightingRTTestSuite {
                 // settles by the last two and passes. The full sequence is
                 // printed so an oscillation is distinguishable from a one-off.
                 TickFrames(eng, 1); // settle after the sweep
-                std::vector<double> stableCounts;
-                std::vector<double> stableLuma;
+                std::array<RgbImage, 4> stableFrames {};
+                std::vector<double>     stableCounts;
+                std::vector<double>     stableLuma;
+                std::vector<double>     stableLit;
                 for (uint32_t r = 0; r < 4; ++r) {
-                    const RgbImage frame = Capture(eng, "headless_lighting_rt_cull_stable_" + std::to_string(r) + ".ppm");
-                    auto checkStable = ZHLN::Test::AssertTrue(frame.Valid());
+                    stableFrames[r] = Capture(eng, "headless_lighting_rt_cull_stable_" + std::to_string(r) + ".ppm");
+                    auto checkStable = ZHLN::Test::AssertTrue(stableFrames[r].Valid());
                     if (!checkStable) {
                         return false;
                     }
-                    const FrameMetrics m = MeasureImage(frame);
+                    const FrameMetrics m = MeasureImage(stableFrames[r]);
                     stableCounts.push_back(static_cast<double>(m.red));
                     stableLuma.push_back(m.meanLuma);
+                    stableLit.push_back(static_cast<double>(m.lit));
                     TickFrames(eng, 1);
                 }
+
+                // Attribute the oscillation: adjacent-pair diffs (the parity
+                // signal) vs same-parity diffs (should be ~0 for a strict
+                // A/B/A/B), plus the bounding box of changed pixels so the
+                // failing region is identifiable in the log and as an
+                // amplified diff image.
+                const FrameDiff adjAB   = CompareFrames(stableFrames[0], stableFrames[1]);
+                const FrameDiff adjCD   = CompareFrames(stableFrames[2], stableFrames[3]);
+                const FrameDiff sameAC  = CompareFrames(stableFrames[0], stableFrames[2]);
+                const FrameDiff sameBD  = CompareFrames(stableFrames[1], stableFrames[3]);
+                const ChangedRegion reg = DiffRegion(stableFrames[0], stableFrames[1]);
+                WriteAmplifiedDiff("headless_lighting_rt_cull_parity_diff.ppm", stableFrames[0], stableFrames[1]);
 
                 const double lastRelDiff =
                     (stableCounts[2] > 1.0 && stableCounts[3] > 1.0)
@@ -913,9 +1009,12 @@ struct LightingRTTestSuite {
 
                 ZHLN::Println(
                     "    [INFO] light sweep: red pixels min={:.0f} max={:.0f} across {} samples, red peak floor={}, isolated dips={} | "
-                    "stable sequence: {:.0f} {:.0f} {:.0f} {:.0f} (last-pair rel diff {:.4f}, parity oscillation {})",
+                    "stable red {:.0f}/{:.0f}/{:.0f}/{:.0f} (lit {:.0f}/{:.0f}/{:.0f}/{:.0f}, luma {:.3f}/{:.3f}/{:.3f}/{:.3f}) | "
+                    "adj |d|>32 {:.6f}/{:.6f} vs same-parity {:.6f}/{:.6f} | changed region [{},{}]-[{},{}] px={} mean|d|={:.1f} max|d|={}",
                     minRed, maxRed, redCounts.size(), minPeak, isolatedDips, stableCounts[0], stableCounts[1], stableCounts[2], stableCounts[3],
-                    lastRelDiff, parityOscillation
+                    stableLit[0], stableLit[1], stableLit[2], stableLit[3], stableLuma[0], stableLuma[1], stableLuma[2], stableLuma[3],
+                    adjAB.frac32, adjCD.frac32, sameAC.frac32, sameBD.frac32, reg.minX, reg.minY, reg.maxX, reg.maxY, reg.count, reg.meanDelta,
+                    reg.maxDelta
                 );
 
                 // Invariant 1: the light stays within range and on screen for the
