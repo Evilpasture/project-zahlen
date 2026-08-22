@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdio>
+#include <cstring>
 #include <utility>
 
 namespace ZHLN {
@@ -1148,6 +1149,115 @@ void RenderContext::Impl::UploadClusterBounds(const JPH::Mat44& proj) {
                   .dst_access = VK_ACCESS_2_SHADER_READ_BIT}
         );
     });
+}
+
+// ============================================================================
+// Test-only GPU state diagnostics
+// ============================================================================
+
+namespace {
+
+/// Copies `bytes` from a GPU buffer into host memory. Waits for the whole
+/// device first (diagnostic path only; never used in the frame loop).
+[[nodiscard]] std::expected<std::vector<uint8_t>, Error> ReadbackGPUBuffer(
+    RenderContext::Impl* impl, VkBuffer src, size_t bytes
+) noexcept {
+    if (src == VK_NULL_HANDLE || bytes == 0) {
+        return std::unexpected(RenderInitError::UnknownError);
+    }
+
+    // Device-wide sync: the diagnostics must observe the state of the frame
+    // that was just submitted, including the async compute queue.
+    if (vkDeviceWaitIdle(impl->ctx.Device()) != VK_SUCCESS) {
+        return std::unexpected(RenderInitError::UnknownError);
+    }
+
+    auto stagingRes =
+        Vk::Buffer::Create(impl->allocator.Get(), bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_TO_CPU);
+    if (!stagingRes) {
+        return std::unexpected(stagingRes.error());
+    }
+    auto stagingBuffer = std::move(*stagingRes);
+
+    Vk::ExecuteImmediate(impl->ctx, impl->graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
+        Vk::CopyBuffer(cmd, src, stagingBuffer.Handle(), bytes);
+
+        Vk::MemoryBarrier(
+            cmd, {.src_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                  .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                  .dst_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                  .dst_access = VK_ACCESS_2_TRANSFER_READ_BIT}
+        );
+    });
+
+    auto mapped = stagingBuffer.Map();
+    if (mapped.data == nullptr) {
+        return std::unexpected(RenderInitError::UnknownError);
+    }
+
+    std::vector<uint8_t> out(bytes);
+    std::memcpy(out.data(), mapped.data, bytes);
+    return out;
+}
+
+} // namespace
+
+auto RenderContext::DebugReadClusterLights() noexcept -> std::expected<std::vector<DebugClusterCell>, Error> {
+    auto* const impl = _impl.get();
+
+    // The frame most recently submitted used the slot we just flipped AWAY
+    // from (EndFrame flips frame_index after submit).
+    const uint32_t slot = impl->frame_index ^ 1u;
+
+    constexpr size_t kNumClusters = 16u * 9u * 24u;
+
+    auto gridBytes = ReadbackGPUBuffer(impl, impl->frames.clusterGridBuffers[slot].Handle(), sizeof(ClusterVolume) * kNumClusters);
+    if (!gridBytes) {
+        return std::unexpected(gridBytes.error());
+    }
+    auto listBytes =
+        ReadbackGPUBuffer(impl, impl->frames.lightIndexListBuffers[slot].Handle(), sizeof(uint32_t) * kNumClusters * 64u);
+    if (!listBytes) {
+        return std::unexpected(listBytes.error());
+    }
+
+    const auto* grid = reinterpret_cast<const ClusterVolume*>(gridBytes->data());
+    const auto* list = reinterpret_cast<const uint32_t*>(listBytes->data());
+
+    std::vector<DebugClusterCell> cells;
+    cells.reserve(256);
+    for (uint32_t i = 0; i < kNumClusters; ++i) {
+        if (grid[i].count == 0) {
+            continue;
+        }
+        DebugClusterCell cell {.index = i, .count = grid[i].count, .offset = grid[i].offset};
+        const uint32_t    n = std::min(grid[i].count, 4u);
+        for (uint32_t k = 0; k < n; ++k) {
+            const uint32_t li = grid[i].offset + k;
+            cell.lightIndices[k] = (li < kNumClusters * 64u) ? list[li] : 0xFFFFFFFFu;
+        }
+        cells.push_back(cell);
+    }
+    return cells;
+}
+
+void RenderContext::DebugCopyLightBuffers(std::array<GPULight, 128>& slot0, std::array<GPULight, 128>& slot1) noexcept {
+    auto* const impl = _impl.get();
+    std::memset(slot0.data(), 0, sizeof(slot0));
+    std::memset(slot1.data(), 0, sizeof(slot1));
+
+    if (vkDeviceWaitIdle(impl->ctx.Device()) != VK_SUCCESS) {
+        return;
+    }
+
+    for (uint32_t s = 0; s < 2; ++s) {
+        auto mapped = impl->frames.lightStorageBuffers[s].Map();
+        if (mapped.data == nullptr) {
+            continue;
+        }
+        auto* dst = (s == 0) ? slot0.data() : slot1.data();
+        std::memcpy(dst, mapped.data, sizeof(GPULight) * 128u);
+    }
 }
 
 } // namespace ZHLN

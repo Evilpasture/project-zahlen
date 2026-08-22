@@ -77,6 +77,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <expected>
 #include <fstream>
 #include <memory>
@@ -568,6 +569,70 @@ struct LightingRTTestSuite {
             (void) SavePNG(PngPathOf(path), img);
         }
         return img;
+    }
+
+    /// Test-only GPU state dump: what the renderer ACTUALLY wrote for the
+    /// frame just captured. Prints, per frame:
+    ///   * both parity light slots (range/type/positionView of each light),
+    ///   * the cluster cells whose light list references the point light
+    ///     (light index 1), aggregated by (x,y,z) plus the exact strip cells
+    ///     (columns 0-4, row 5).
+    /// This is what pins whether the cluster grid itself flips, or the light
+    /// buffers flip, per frame.
+    static void DumpLightState(ZHLN::RenderContext& rc, uint64_t frame) {
+        std::array<ZHLN::GPULight, 128> slot0 {};
+        std::array<ZHLN::GPULight, 128> slot1 {};
+        rc.DebugCopyLightBuffers(slot0, slot1);
+
+        ZHLN::Println(
+            "      [gpu:{}] lights: s0[{}] range={} type={} pos=({:.2f},{:.2f},{:.2f}) | s0[{}] range={} type={} pos=({:.2f},{:.2f},{:.2f}) | "
+            "s1[{}] range={} type={}",
+            frame, 0u, slot0[0].range, static_cast<uint32_t>(slot0[0].type), slot0[0].position[0], slot0[0].position[1],
+            slot0[0].position[2], 1u, slot0[1].range, static_cast<uint32_t>(slot0[1].type), slot0[1].position[0], slot0[1].position[1],
+            slot0[1].position[2], 1u, slot1[1].range, static_cast<uint32_t>(slot1[1].type)
+        );
+        ZHLN::Println(
+            "      [gpu:{}] slots identical (light data): {}",
+            frame, std::memcmp(slot0.data(), slot1.data(), sizeof(slot0)) == 0 ? 1 : 0
+        );
+
+        auto cells = rc.DebugReadClusterLights();
+        if (!cells) {
+            ZHLN::Println("      [gpu:{}] cluster readback failed", frame);
+            return;
+        }
+
+        uint32_t cellsWithPl = 0;
+        uint32_t stripCells   = 0;
+        uint32_t minX = 99, maxX = 0, minY = 99, maxY = 0, minZ = 99, maxZ = 0;
+        for (const auto& c: *cells) {
+            const uint32_t x = c.index % 16u;
+            const uint32_t y = (c.index / 16u) % 9u;
+            const uint32_t z = c.index / 144u;
+            bool           hasPl = false;
+            for (uint32_t k = 0; k < std::min(c.count, 4u); ++k) {
+                if (c.lightIndices[k] == 1u) {
+                    hasPl = true;
+                }
+            }
+            if (!hasPl) {
+                continue;
+            }
+            ++cellsWithPl;
+            minX = std::min(minX, x);
+            maxX = std::max(maxX, x);
+            minY = std::min(minY, y);
+            maxY = std::max(maxY, y);
+            minZ = std::min(minZ, z);
+            maxZ = std::max(maxZ, z);
+            if (x <= 4u && y == 5u) {
+                ++stripCells;
+            }
+        }
+        ZHLN::Println(
+            "      [gpu:{}] cluster cells with point light: {} (x{}-{} y{}-{} z{}-{}), strip stripCells={}", frame, cellsWithPl, minX, maxX, minY,
+            maxY, minZ, maxZ, stripCells
+        );
     }
 
     /// Runs `sceneFn` after `warmupFrames` (to warm Hi-Z history, TLAS, cluster
@@ -1093,6 +1158,11 @@ struct LightingRTTestSuite {
                     stableCounts.push_back(static_cast<double>(m.red));
                     stableLuma.push_back(m.meanLuma);
                     stableLit.push_back(static_cast<double>(m.lit));
+
+                    // Live GPU readback: is the cluster grid or the light data
+                    // what changes between these frames?
+                    DumpLightState(eng.GetRenderContext(), eng.GetCurrentFrame());
+
                     TickFrames(eng, 1);
                 }
 
@@ -1304,6 +1374,11 @@ struct LightingRTTestSuite {
                         return false;
                     }
                     counts.push_back(static_cast<double>(MeasureImage(frames[r]).red));
+
+                    // Live GPU readback: is the cluster grid or the light data
+                    // what changes between these frames?
+                    DumpLightState(eng.GetRenderContext(), eng.GetCurrentFrame());
+
                     TickFrames(eng, 1);
                 }
 
