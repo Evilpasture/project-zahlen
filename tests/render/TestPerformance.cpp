@@ -1166,9 +1166,13 @@ struct PerformanceTestSuite {
         ZHLN::Fiber::InitMainThread();
         ZHLN::TaskSystem::Init(2, 32, ZHLN::kMinimumFiberStackSize);
 
-        // The GPU stress test below runs for minutes; lift the framework's
-        // 15-second per-method alarm for the lifetime of this suite.
-        ZHLN::Test::SetGlobalTimeoutSeconds(3600);
+        // Watchdog: the GPU stress test below runs for tens of seconds, but a
+        // hung run (e.g. the known post-device-loss fiber-pool deadlock: a
+        // worker fiber wedged in a blocking Vulkan call on the destroyed
+        // device, so TaskSystem::Dispatch's root PopOrWait can never be fed
+        // a free fiber) must FAIL after a bounded time, not hang forever.
+        // A healthy run finishes in well under 60 seconds.
+        ZHLN::Test::SetGlobalTimeoutSeconds(600);
     }
 
     ~PerformanceTestSuite() {
@@ -1361,6 +1365,12 @@ struct PerformanceTestSuite {
                     lastDeviceLost = dl;
                     ZHLN::Println("    [Perf] DEVICE LOST (total {}) at {} frame {} — engine hot-rebuilt; re-registering test assets...", dl,
                                   phase, frame);
+                    ZHLN::Println("    [Perf] NOTE: check `dmesg | grep -iE 'xid|nvidia'` for the driver reset cause.");
+                    ZHLN::Println(
+                        "    [Perf] WARNING: if a worker fiber was blocked in a Vulkan call on the dying device, it never unblocks and the");
+                    ZHLN::Println(
+                        "    [Perf] fiber pool stays poisoned — later frames can deadlock in TaskSystem::Dispatch (the 600s watchdog will fail the");
+                    ZHLN::Println("    [Perf] test with 'timed out (deadlock)' instead of hanging). That is an engine recovery-path bug, not a test bug.");
                     ReRegisterPerfAssets(*engine, scene);
                 }
             };
