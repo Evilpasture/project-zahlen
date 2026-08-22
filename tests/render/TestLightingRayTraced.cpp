@@ -743,6 +743,14 @@ struct LightingRTTestSuite {
             {
                 auto& reg = engine->GetRegistry();
                 auto& rc  = engine->GetRenderContext();
+                // Dim ambient + dim sun so the red point light owns the frame.
+                // GI/AO are disabled (giMode=0) so the sweep isolates CLUSTERED
+                // DIRECT LIGHTING: ambient.slang rotates its AO/GI sample
+                // pattern by a per-frame time offset, and around a pixel-count
+                // classification boundary that rotating noise alone produces a
+                // sizable frame-to-frame delta. The point-light red patch is
+                // the signal under test; the static flicker scenario covers
+                // the full GI path separately.
                 const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
                 if (!settingsEnts.empty()) {
                     reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
@@ -750,6 +758,7 @@ struct LightingRTTestSuite {
                         pp.ambientExposure = 2.0f;
                         pp.enableSSR       = 1;
                         pp.enableRTR       = 1;
+                        pp.giMode          = 0;
                     });
                 }
 
@@ -861,7 +870,10 @@ struct LightingRTTestSuite {
                 // Same-position repeat control: a frame-alternating cull (e.g.
                 // cluster buffer ping-pong) changes the signature between two
                 // captures of an IDENTICAL light position. Two genuine frames
-                // must be near-identical; the backend only differs by dither.
+                // must be near-identical. GI/AO are disabled above so the two
+                // frames share all inputs except the engine's constant
+                // per-frame dither; any remaining delta against the static-
+                // scene noise floor is a real alternation.
                 const RgbImage repeatA = Capture(eng, "headless_lighting_rt_cull_repeat_a.ppm");
                 TickFrames(eng, 1);
                 const RgbImage repeatB = Capture(eng, "headless_lighting_rt_cull_repeat_b.ppm");
