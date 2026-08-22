@@ -216,6 +216,13 @@ class ZHLN_API RenderContext {
     /// both pipelines are always built, so this only changes which is bound.
     void SetMeshShadingEnabled(bool enabled) noexcept;
 
+    /// True when the device exposes acceleration structures (BLAS/TLAS) and the
+    /// engine's raytracing context initialised. The RTR reflection and
+    /// ray-traced shadow paths are only active when this is true AND
+    /// PostProcessSettingsComponent::enableRTR is set; callers use this to skip
+    /// RTR-only verification on devices without support (e.g. lavapipe).
+    [[nodiscard]] bool RayTracingSupported() const noexcept;
+
     /// Validation-layer errors seen so far (0 when validation is off). Snapshot
     /// it around a workload to assert that the workload is VUID-clean.
     [[nodiscard]] static uint32_t ValidationErrorCount() noexcept;

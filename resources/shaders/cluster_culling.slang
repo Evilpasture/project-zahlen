@@ -47,6 +47,14 @@ bool ConeBehindPlane(float3 T, float3 D, float R, float r, float3 N, float d) {
 
 [numthreads(16, 9, 1)]
 void CSMain(uint3 id: SV_DispatchThreadID) {
+    // Defense-in-depth: with [numthreads(16,9,1)] the correct dispatch is
+    // (1,1,24) workgroups. If it is ever launched larger, threads outside the
+    // 16x9x24 grid MUST not index in_Bounds/out_Grid (out of bounds) or
+    // InterlockedAdd the shared counter.
+    if (id.x >= 16u || id.y >= 9u || id.z >= 24u) {
+        return;
+    }
+
     uint cIdx       = id.x + (id.y * 16) + (id.z * 144);
     ClusterBounds b = in_Bounds[cIdx]; // These are now static view-space bounds!
 

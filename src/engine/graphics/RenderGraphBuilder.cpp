@@ -105,7 +105,32 @@ struct PassFactory {
                 Vk::BarrierAccess::ShaderRead | Vk::BarrierAccess::ShaderWrite
             );
 
-            self.clusterCullingPass.DispatchHeapIndexed(self.ctx, c, fIdx, 16, 9, 24);
+            // CRITICAL: the grid is 16x9x24 = 3456 CELLS and the shader is
+            // [numthreads(16, 9, 1)] (144 threads == one 16x9 z-slice), so the
+            // correct dispatch is (1, 1, 24) workgroups -> exactly one thread
+            // per cell. The previous (16, 9, 24) launched 16x9x24 workgroups x
+            // 144 threads = 497,664 threads, so:
+            //   * every cell ran 144x, inflating the shared counter from ~1800
+            //     to ~336k and pushing cell offsets past the 221k index-list
+            //     capacity, where the shader's clamp zeroes count -> the light
+            //     list flickered in/out at marginal cells, and
+            //   * cIdx = id.x + id.y*16 + id.z*144 reached 4847 (> 3456),
+            //     reading/writing in_Bounds/out_Grid OUT OF BOUNDS.
+            self.clusterCullingPass.DispatchHeapIndexed(self.ctx, c, fIdx, 1, 1, 24);
+
+            // clusterGrid / lightIndexList / globalCounter are structured
+            // buffers, not graph resources, so CompileTimeFrameGraph inserts no
+            // automatic barrier between this pass and the later compute passes
+            // that READ them (volumetric light injection) in the same
+            // submission. A compute->compute write/read dependency is required
+            // here so those passes see this frame's lists, not the previous
+            // frame's.
+            Vk::MemoryBarrier(
+                c, {.src_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                    .src_access = VK_ACCESS_2_SHADER_WRITE_BIT,
+                    .dst_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                    .dst_access = VK_ACCESS_2_SHADER_READ_BIT}
+            );
         });
     }
 

@@ -27,6 +27,7 @@ foreach(TEST_SRC IN LISTS RENDER_TEST_SOURCES)
         ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_SOURCE_DIR}/src
         ${PROJECT_SOURCE_DIR}/tests
+        ${PROJECT_SOURCE_DIR}/extern/stb
     )
 
     zahlen_enable_reflection(${TARGET_NAME})
