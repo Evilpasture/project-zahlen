@@ -78,13 +78,26 @@ static inline uint64_t zhln_max_u64(uint64_t a, uint64_t b) {
 // a workload to assert that a feature does not introduce validation errors --
 // a suite that prints VUID violations and still reports PASS is not a test.
 static atomic_uint g_validation_error_count = 0;
+static atomic_uint g_device_lost_count      = 0;
 
-uint32_t ZHLN_GetValidationErrorCount(void) {
+uint32_t ZHLN_GetValidationErrorCount() {
     return atomic_load_explicit(&g_validation_error_count, memory_order_relaxed);
 }
 
-void ZHLN_ResetValidationErrorCount(void) {
+void ZHLN_ResetValidationErrorCount() {
     atomic_store_explicit(&g_validation_error_count, 0, memory_order_relaxed);
+}
+
+uint32_t ZHLN_GetDeviceLostCount() {
+    return atomic_load_explicit(&g_device_lost_count, memory_order_relaxed);
+}
+
+void ZHLN_ResetDeviceLostCount() {
+    atomic_store_explicit(&g_device_lost_count, 0, memory_order_relaxed);
+}
+
+void ZHLN_NotifyDeviceLost() {
+    atomic_fetch_add_explicit(&g_device_lost_count, 1, memory_order_relaxed);
 }
 
 static VkBool32 VKAPI_CALL ZHLN_Internal_DebugCallback(

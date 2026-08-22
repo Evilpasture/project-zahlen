@@ -188,10 +188,16 @@ VkDebugUtilsMessengerEXT ZHLN_CreateDebugMessenger(VkInstance instance, VkDebugU
 
 void ZHLN_DestroyDebugMessenger(VkInstance instance, VkDebugUtilsMessengerEXT messenger);
 
-[[nodiscard]]
-uint32_t ZHLN_GetValidationErrorCount(void);
+/* --- VALIDATION & DEVICE ERROR DIAGNOSTICS --- */
 
-void ZHLN_ResetValidationErrorCount(void);
+[[nodiscard]]
+uint32_t ZHLN_GetValidationErrorCount();
+
+void ZHLN_ResetValidationErrorCount();
+
+[[nodiscard]] uint32_t ZHLN_GetDeviceLostCount();
+void                   ZHLN_ResetDeviceLostCount();
+void                   ZHLN_NotifyDeviceLost();
 
 [[nodiscard]]
 ZHLN_MeshShaderLimits ZHLN_QueryMeshShaderLimits(VkPhysicalDevice physical);

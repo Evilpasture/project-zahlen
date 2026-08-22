@@ -147,6 +147,10 @@ uint32_t RenderContext::ValidationErrorCount() noexcept {
     return ZHLN_GetValidationErrorCount();
 }
 
+uint32_t RenderContext::DeviceLostCount() noexcept {
+    return ZHLN_GetDeviceLostCount();
+}
+
 // ============================================================================
 // RenderContext Subsystem Implementation
 // ============================================================================

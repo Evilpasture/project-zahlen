@@ -10,9 +10,16 @@
 #include <concepts>
 #include <expected>
 #include <source_location>
+#include <string>
 #include <string_view>
 #include <type_traits>
 #include <vector>
+
+// Lightweight C hooks into RenderCore.c
+extern "C" {
+uint32_t ZHLN_GetValidationErrorCount() noexcept;
+uint32_t ZHLN_GetDeviceLostCount() noexcept;
+}
 
 #if defined(__unix__) || defined(__APPLE__) || defined(__linux__)
 #define ZHLN_TEST_TIMEOUT_SUPPORTED 1
@@ -54,7 +61,6 @@ inline bool IsDebuggerAttached() noexcept {
 }
 #endif
 
-// Inline global jump buffer for timeout recovery
 inline sigjmp_buf g_testTimeoutJmpBuf;
 
 inline void TestTimeoutSignalHandler(int sig) {
@@ -76,16 +82,20 @@ struct AssertionFailure {
     uint32_t         line;
     std::string      actualValue;
     std::string      expectedValue;
-    std::string_view op; // "==" or "!=" or "true" or "false"
+    std::string_view op; // "==" or "!=" or "true" or "false" or "ValidationError" or "DeviceLost"
 };
 
 struct TestContext {
     std::string_view              currentTestName;
     std::vector<AssertionFailure> failures;
+    bool                          allowValidationErrors = false;
+    bool                          allowDeviceLost       = false;
 
     void Reset(std::string_view testName) {
         currentTestName = testName;
         failures.clear();
+        allowValidationErrors = false;
+        allowDeviceLost       = false;
     }
 };
 
@@ -94,7 +104,15 @@ inline TestContext& GetThreadLocalContext() noexcept {
     return ctx;
 }
 
-// Convert types to debug strings using Reflection formatter
+// Escape-hatches for tests deliberately provoking errors/hangs (e.g. testing recovery)
+inline void AllowValidationErrors(bool allow = true) noexcept {
+    GetThreadLocalContext().allowValidationErrors = allow;
+}
+
+inline void AllowDeviceLost(bool allow = true) noexcept {
+    GetThreadLocalContext().allowDeviceLost = allow;
+}
+
 template <typename T>
 std::string FormatValue(const T& val) {
     return ZHLN::Reflect::ToDebugString(val);
@@ -217,10 +235,13 @@ TestStats RunSuite() {
             auto& ctx = GetThreadLocalContext();
             ctx.Reset(name);
 
+            // 1. Snapshot telemetry before test begins
+            const uint32_t valErrorsBefore = ZHLN_GetValidationErrorCount();
+            const uint32_t devLostBefore   = ZHLN_GetDeviceLostCount();
+
             ReturnType result = std::unexpected(ZHLN::Error(TestFrameworkError::AssertionFailed));
 
 #if defined(ZHLN_TEST_TIMEOUT_SUPPORTED)
-            // Register SIGALRM handler to recover from deadlocks
             struct sigaction sa {};
             sa.sa_handler = TestTimeoutSignalHandler;
             sigemptyset(&sa.sa_mask);
@@ -228,21 +249,17 @@ TestStats RunSuite() {
             struct sigaction old_sa;
             sigaction(SIGALRM, &sa, &old_sa);
 
-            // Bypass alarm completely if running under a debugger (stepping/inspecting locks takes time)
             if (IsDebuggerAttached()) {
                 alarm(0);
             } else {
-                alarm(15); // Standard 15-second timeout for typical CLI/CI environment runs
+                alarm(15);
             }
 
             if (sigsetjmp(g_testTimeoutJmpBuf, 1) == 0) {
                 result = (target.*pmf)();
-
-                // Clear alarm and restore old signal handler on success
                 alarm(0);
                 sigaction(SIGALRM, &old_sa, nullptr);
             } else {
-                // Timeout fired! Clear alarm and record diagnostics
                 alarm(0);
                 sigaction(SIGALRM, &old_sa, nullptr);
 
@@ -256,10 +273,36 @@ TestStats RunSuite() {
                 result = std::unexpected(ZHLN::Error(TestFrameworkError::AssertionFailed));
             }
 #else
-            // Fallback for non-POSIX platforms
             result = (target.*pmf)();
 #endif
 
+            // 2. Fail if new Vulkan Validation Errors occurred
+            const uint32_t valErrorsAfter = ZHLN_GetValidationErrorCount();
+            if (valErrorsAfter > valErrorsBefore && !ctx.allowValidationErrors) {
+                const uint32_t count = valErrorsAfter - valErrorsBefore;
+                ctx.failures.push_back(
+                    {.file          = "Vulkan Validation Layer",
+                     .line          = 0,
+                     .actualValue   = std::to_string(count) + " Vulkan validation layer error(s) logged",
+                     .expectedValue = "0 validation errors",
+                     .op            = "ValidationError"}
+                );
+            }
+
+            // 3. Fail if GPU Device Lost / Hang occurred
+            const uint32_t devLostAfter = ZHLN_GetDeviceLostCount();
+            if (devLostAfter > devLostBefore && !ctx.allowDeviceLost) {
+                const uint32_t count = devLostAfter - devLostBefore;
+                ctx.failures.push_back(
+                    {.file          = "Vulkan Device",
+                     .line          = 0,
+                     .actualValue   = std::to_string(count) + " GPU device lost / hang event(s) detected",
+                     .expectedValue = "0 device lost events",
+                     .op            = "DeviceLost"}
+                );
+            }
+
+            // 4. Evaluate overall test pass/fail
             bool testPassed = result.has_value() && ctx.failures.empty();
 
             if (testPassed) {
@@ -273,6 +316,8 @@ TestStats RunSuite() {
                 for (const auto& f: ctx.failures) {
                     if (f.op == "Timeout") {
                         ZHLN::Println("    {}Timeout Error: {}{}", Color::Red, f.actualValue, Color::Reset);
+                    } else if (f.op == "ValidationError" || f.op == "DeviceLost") {
+                        ZHLN::Println("    {}GPU Failure: {}{}", Color::Red, f.actualValue, Color::Reset);
                     } else {
                         ZHLN::Println("    {}Location: {}:{}{}", Color::Gray, f.file, f.line, Color::Reset);
                         if (f.op == "true" || f.op == "false") {

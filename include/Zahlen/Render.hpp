@@ -227,6 +227,8 @@ class ZHLN_API RenderContext {
     /// it around a workload to assert that the workload is VUID-clean.
     [[nodiscard]] static uint32_t ValidationErrorCount() noexcept;
 
+    [[nodiscard]] static uint32_t DeviceLostCount() noexcept;
+
     RenderResult BuildMeshBLAS(Mesh& mesh) noexcept;
 
     [[nodiscard]] std::expected<void, Error> SetShadowResolution(uint32_t resolution);
