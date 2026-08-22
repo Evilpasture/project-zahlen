@@ -984,7 +984,7 @@ struct LightingRTTestSuite {
                 const FrameDiff adjCD   = CompareFrames(stableFrames[2], stableFrames[3]);
                 const FrameDiff sameAC  = CompareFrames(stableFrames[0], stableFrames[2]);
                 const FrameDiff sameBD  = CompareFrames(stableFrames[1], stableFrames[3]);
-                const ChangedRegion reg = DiffRegion(stableFrames[0], stableFrames[1]);
+                const ChangedRegion region = DiffRegion(stableFrames[0], stableFrames[1]);
                 WriteAmplifiedDiff("headless_lighting_rt_cull_parity_diff.ppm", stableFrames[0], stableFrames[1]);
 
                 const double lastRelDiff =
@@ -1013,8 +1013,8 @@ struct LightingRTTestSuite {
                     "adj |d|>32 {:.6f}/{:.6f} vs same-parity {:.6f}/{:.6f} | changed region [{},{}]-[{},{}] px={} mean|d|={:.1f} max|d|={}",
                     minRed, maxRed, redCounts.size(), minPeak, isolatedDips, stableCounts[0], stableCounts[1], stableCounts[2], stableCounts[3],
                     stableLit[0], stableLit[1], stableLit[2], stableLit[3], stableLuma[0], stableLuma[1], stableLuma[2], stableLuma[3],
-                    adjAB.frac32, adjCD.frac32, sameAC.frac32, sameBD.frac32, reg.minX, reg.minY, reg.maxX, reg.maxY, reg.count, reg.meanDelta,
-                    reg.maxDelta
+                    adjAB.frac32, adjCD.frac32, sameAC.frac32, sameBD.frac32, region.minX, region.minY, region.maxX, region.maxY, region.count,
+                    region.meanDelta, region.maxDelta
                 );
 
                 // Invariant 1: the light stays within range and on screen for the
