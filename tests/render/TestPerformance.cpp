@@ -1286,7 +1286,7 @@ struct PerformanceTestSuite {
 
             // Physics must stay finite and inside world bounds.
             {
-                auto&        pc      = engine.GetPhysicsContext();
+                auto&        pc      = engine->GetPhysicsContext();
                 const auto   posView = pc.GetPositionBuffer();
                 const auto*  posData = static_cast<const JPH::Real*>(posView.buf);
                 const size_t bodyCount = posView.shape[0]; // total bodies, from the BufferView
