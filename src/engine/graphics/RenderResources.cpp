@@ -1242,6 +1242,10 @@ auto RenderContext::DebugReadClusterSnapshot() noexcept -> std::expected<DebugCl
     if (!counterBytes) {
         return std::unexpected(counterBytes.error());
     }
+    auto uniformBytes = ReadbackGPUBuffer(impl, impl->frames.frameUniformBuffers[slot].Handle(), sizeof(FrameUniforms));
+    if (!uniformBytes) {
+        return std::unexpected(uniformBytes.error());
+    }
 
     DebugClusterSnapshot snapshot;
     snapshot.gridHash    = FnvHash(gridBytes->data(), gridBytes->size());
@@ -1249,6 +1253,7 @@ auto RenderContext::DebugReadClusterSnapshot() noexcept -> std::expected<DebugCl
     snapshot.boundsHash  = FnvHash(boundsBytes->data(), boundsBytes->size());
     snapshot.counterHash = FnvHash(counterBytes->data(), counterBytes->size());
     snapshot.counterValue = *reinterpret_cast<const uint32_t*>(counterBytes->data());
+    snapshot.lightCount   = reinterpret_cast<const FrameUniforms*>(uniformBytes->data())->lightCount;
 
     const auto* grid = reinterpret_cast<const ClusterVolume*>(gridBytes->data());
     const auto* list = reinterpret_cast<const uint32_t*>(listBytes->data());
@@ -1260,12 +1265,13 @@ auto RenderContext::DebugReadClusterSnapshot() noexcept -> std::expected<DebugCl
             const uint32_t li = grid[i].offset + k;
             cell.lightIndices[k] = (li < kIndexEntries) ? list[li] : 0xFFFFFFFFu;
         }
-        // Clamp indicator: the shader zeroes count when offset+count would
-        // exceed the index list capacity, which is exactly the mechanism that
-        // would make a cell's light inclusion flip between frames.
-        if (grid[i].count > 0 && static_cast<uint64_t>(grid[i].offset) + grid[i].count > kIndexEntries) {
+        if (grid[i].offset >= kIndexEntries) {
+            // The shader's clamp zeroes count whenever the atomically-reserved
+            // offset is at or past capacity. Any such cell proves the counter
+            // overflowed the index list this frame (the light-drop mechanism).
             snapshot.counterTruncated = true;
         }
+        snapshot.maxOffset = std::max(snapshot.maxOffset, grid[i].offset);
         return cell;
     };
 

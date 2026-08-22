@@ -257,7 +257,9 @@ class ZHLN_API RenderContext {
         uint64_t                          boundsHash = 0;
         uint64_t                          counterHash = 0;
         uint32_t                          counterValue = 0;  // raw final counter (pre-clamp)
-        bool                              counterTruncated = false; // any cell hit the 221184 clamp
+        uint32_t                          maxOffset = 0;     // largest offset seen in ANY grid cell
+        uint32_t                          lightCount = 0;    // frame.lightCount the shader saw (from the UBO)
+        bool                              counterTruncated = false; // any cell with offset >= 221184
         std::vector<DebugClusterCell>     cells;             // every cell with count > 0
         // Always-present view of the strip cells (x 0..4, y=5, z 0..12) so a
         // cell that flips to count=0 is still visible with its offset/count.
