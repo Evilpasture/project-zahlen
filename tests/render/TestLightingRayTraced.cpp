@@ -49,6 +49,11 @@
 //   * Assertions are RELATIVE (contrast/dip based) rather than absolute
 //     pixel-count cutoffs, because the ACES/tonemap mapping is
 //     exposure-dependent and differs between scenes.
+//   * Every captured frame is written as PPM (engine-native, used by the
+//     metrics) AND as a .png twin via stb_image_write.h, so diagnostics can
+//     be attached to issues directly. Run
+//       TestLightingRayTraced --convert-ppm old_capture_*.ppm
+//     to convert captures from a previous run without re-running the suite.
 
 #include "TestsFramework.hpp"
 #include "engine/system/LightingSystem.hpp"
@@ -68,12 +73,22 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <expected>
 #include <fstream>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
+
+// stb_image_write is the only image writer the diagnostics need; the header
+// is C and self-contained (no dynamic dependency). Defining the
+// implementation here means the exported PNG helper lives only in this test
+// binary and cannot collide with the engine's stb_image (read-only)
+// implementation in libzahlen_engine.
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include <stb_image_write.h>
 
 // ============================================================================
 // Test Error Types
@@ -132,6 +147,26 @@ struct RgbImage {
     img.rgb.resize(static_cast<size_t>(img.width) * static_cast<size_t>(img.height) * 3u);
     ppm.read(reinterpret_cast<char*>(img.rgb.data()), static_cast<std::streamsize>(img.rgb.size()));
     return img;
+}
+
+/// Replaces a trailing ".ppm"/".PPM" with ".png"; appends ".png" otherwise.
+[[nodiscard]] std::string PngPathOf(std::string_view ppmPath) {
+    std::string png(ppmPath);
+    if (png.size() >= 4 && (png.ends_with(".ppm") || png.ends_with(".PPM"))) {
+        png.resize(png.size() - 4);
+    }
+    png += ".png";
+    return png;
+}
+
+/// Writes an RGB image as PNG via stb_image_write. Every captured frame is
+/// exported as both PPM (engine-native, kept for the test metrics) and PNG
+/// (browser/mail friendly, for attaching to bug reports).
+[[nodiscard]] bool SavePNG(const std::string& path, const RgbImage& img) {
+    if (!img.Valid()) {
+        return false;
+    }
+    return stbi_write_png(path.c_str(), img.width, img.height, 3, img.rgb.data(), img.width * 3) != 0;
 }
 
 inline double Luma(uint8_t r, uint8_t g, uint8_t b) noexcept {
@@ -328,10 +363,14 @@ void WriteRegionCrop(const std::string& path, const RgbImage& img, const Changed
         }
     }
     out.write(reinterpret_cast<const char*>(crop.data()), static_cast<std::streamsize>(crop.size()));
+
+    // PNG twin (browser/mail friendly) for attaching to bug reports.
+    RgbImage pngCrop {.width = w, .height = h, .rgb = crop};
+    SavePNG(PngPathOf(path), pngCrop);
 }
 
 /// Writes an amplified absolute-difference image so the parity region is
-/// inspectable: `headless_lighting_rt_cull_parity_diff.ppm`.
+/// inspectable: `headless_lighting_rt_cull_parity_diff.ppm` (plus .png twin).
 void WriteAmplifiedDiff(const std::string& path, const RgbImage& a, const RgbImage& b) {
     if (!a.Valid() || !b.Valid() || a.width != b.width || a.height != b.height) {
         return;
@@ -348,6 +387,10 @@ void WriteAmplifiedDiff(const std::string& path, const RgbImage& a, const RgbIma
         amplified[i]        = static_cast<uint8_t>(std::min(255, d * 4));
     }
     out.write(reinterpret_cast<const char*>(amplified.data()), static_cast<std::streamsize>(amplified.size()));
+
+    // PNG twin.
+    RgbImage pngDiff {.width = a.width, .height = a.height, .rgb = amplified};
+    SavePNG(PngPathOf(path), pngDiff);
 }
 
 [[nodiscard]] FrameDiff CompareFrames(const RgbImage& a, const RgbImage& b) {
@@ -522,11 +565,20 @@ struct LightingRTTestSuite {
 
     /// Captures through Engine::GetRenderContext() so the call always uses the
     /// CURRENT context, never a reference that may dangle after a hot-rebuild.
+    /// Captures through Engine::GetRenderContext() so the call always uses the
+    /// CURRENT context, never a reference that may dangle after a hot-rebuild.
+    /// Every capture is exported as PPM (engine-native, used by the metrics)
+    /// plus a PNG twin for viewing/attaching (browsers and most apps reject
+    /// PPM; see stb_image_write above).
     static auto Capture(ZHLN::Engine& engine, const std::string& path) -> RgbImage {
         if (!engine.GetRenderContext().CaptureScreenshotPPM(path)) {
             return {};
         }
-        return LoadPPM(path);
+        const RgbImage img = LoadPPM(path);
+        if (img.Valid()) {
+            SavePNG(PngPathOf(path), img);
+        }
+        return img;
     }
 
     /// Runs `sceneFn` after `warmupFrames` (to warm Hi-Z history, TLAS, cluster
@@ -1675,6 +1727,29 @@ struct LightingRTTestSuite {
     };
 };
 
-int main() {
+int main(int argc, char** argv) {
+    // --convert-ppm FILE...  : convert already-captured PPM frames to PNG
+    // without running the suite (handy for attaching the existing debug
+    // captures from a prior failing run).
+    if (argc >= 3 && std::string_view(argv[1]) == "--convert-ppm") {
+        bool allOk = true;
+        for (int i = 2; i < argc; ++i) {
+            const RgbImage img = LoadPPM(argv[i]);
+            if (!img.Valid()) {
+                std::fprintf(stderr, "Failed to read: %s\n", argv[i]);
+                allOk = false;
+                continue;
+            }
+            const std::string png = PngPathOf(argv[i]);
+            if (!SavePNG(png, img)) {
+                std::fprintf(stderr, "Failed to write: %s\n", png.c_str());
+                allOk = false;
+                continue;
+            }
+            std::printf("converted %s -> %s\n", argv[i], png.c_str());
+        }
+        return allOk ? 0 : 1;
+    }
+
     return ZHLN::Test::Runner::Run<LightingRTTestSuite>();
 }
