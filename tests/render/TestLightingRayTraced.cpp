@@ -1218,6 +1218,25 @@ struct LightingRTTestSuite {
 
             DisableTAA(*engine);
 
+            // Bisect knobs (test-only): the strip that flips is exactly at the
+            // light's range cutoff (~40m), so raising the range moves the
+            // marginal cells. If the flapping disappears (or moves with the
+            // glow edge), range-boundary inclusion is confirmed as the flip
+            // point of the race.
+            //   ZHLN_TEST_LIGHT_RANGE=60        (point light range)
+            //   ZHLN_TEST_LIGHT_POS="4,2.4,5"   (point light position)
+            const char* rangeEnv = std::getenv("ZHLN_TEST_LIGHT_RANGE");
+            const float lightRange = rangeEnv != nullptr ? std::strtof(rangeEnv, nullptr) : 40.0f;
+            const char* posEnv     = std::getenv("ZHLN_TEST_LIGHT_POS");
+            float       posX = 6.4f, posY = 2.4f, posZ = 5.0f;
+            if (posEnv != nullptr) {
+                char* end = nullptr;
+                posX      = std::strtof(posEnv, &end);
+                posY      = std::strtof(end, &end);
+                posZ      = std::strtof(end, nullptr);
+            }
+            const JPH::Vec3 lightPos(posX, posY, posZ);
+
             {
                 auto& reg = engine->GetRegistry();
                 auto& rc  = engine->GetRenderContext();
@@ -1269,12 +1288,12 @@ struct LightingRTTestSuite {
                 const ZHLN::Entity redLight = reg.Create();
                 reg.Add(
                     redLight,
-                    ZHLN::Components::TransformComponent {.position = JPH::Vec3(6.4f, 2.4f, 5.0f)},
+                    ZHLN::Components::TransformComponent {.position = lightPos},
                     ZHLN::Components::LightComponent {
-                        .type = ZHLN::LightType::Point, .color = JPH::Vec3(1.0f, 0.06f, 0.03f), .intensity = 1600.0f, .range = 40.0f
+                        .type = ZHLN::LightType::Point, .color = JPH::Vec3(1.0f, 0.06f, 0.03f),
+                        .intensity = 1600.0f, .range = lightRange
                     }
                 );
-
                 auto& cam    = engine->GetCamera();
                 cam.position = JPH::Vec3(0.0f, 2.6f, -4.0f);
                 cam.yaw      = 90.0f;
@@ -1314,11 +1333,12 @@ struct LightingRTTestSuite {
                 WriteRegionCrop("headless_lighting_rt_ref_region_b.ppm", frames[worstPair + 1], region);
 
                 ZHLN::Println(
-                    "    [INFO] static reference (no history): red {:.0f} {:.0f} {:.0f} {:.0f} {:.0f} {:.0f} {:.0f} {:.0f}, worst adj |d|>32={:.6f} | "
-                    "changed region [{},{}]-[{},{}] px={} mean|d|={:.1f} max|d|={} | stateA rgb=({:.1f},{:.1f},{:.1f}) stateB rgb=({:.1f},{:.1f},{:.1f})",
-                    counts[0], counts[1], counts[2], counts[3], counts[4], counts[5], counts[6], counts[7], worstFrac, region.minX, region.minY,
-                    region.maxX, region.maxY, region.count, region.meanDelta, region.maxDelta, region.aR, region.aG, region.aB, region.bR, region.bG,
-                    region.bB
+                    "    [INFO] static reference (no history): light range={:.1f} pos=({:.1f},{:.1f},{:.1f}) | red {:.0f} {:.0f} {:.0f} {:.0f} "
+                    "{:.0f} {:.0f} {:.0f} {:.0f}, worst adj |d|>32={:.6f} | changed region [{},{}]-[{},{}] px={} mean|d|={:.1f} max|d|={} | "
+                    "stateA rgb=({:.1f},{:.1f},{:.1f}) stateB rgb=({:.1f},{:.1f},{:.1f})",
+                    lightRange, lightPos.GetX(), lightPos.GetY(), lightPos.GetZ(), counts[0], counts[1], counts[2], counts[3], counts[4], counts[5],
+                    counts[6], counts[7], worstFrac, region.minX, region.minY, region.maxX, region.maxY, region.count, region.meanDelta,
+                    region.maxDelta, region.aR, region.aG, region.aB, region.bR, region.bG, region.bB
                 );
 
                 // Same KNOWN ENGINE BUG as the sweep scenario: the reference
