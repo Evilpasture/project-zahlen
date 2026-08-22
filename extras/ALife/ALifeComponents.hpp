@@ -14,7 +14,12 @@
 #include <Jolt/Math/Vec3.h>
 #include <cstdint>
 
-namespace ZHLN::Components {
+// NOTE: ALifeComponent deliberately lives in ZHLN::ALife, NOT ZHLN::Components.
+// The core declares ZHLN::Components as a *struct* (include/Zahlen/Components.hpp)
+// as a grouping type; this used to be declared as `namespace ZHLN::Components`,
+// which is a hard redefinition conflict and makes it impossible for a
+// translation unit to include both the core Components header and this one.
+namespace ZHLN::ALife {
 
 struct ALifeComponent {
     using enum ALife::State;
@@ -49,4 +54,4 @@ struct ALifeComponent {
     uint64_t        script_handle = 0;
 };
 
-} // namespace ZHLN::Components
+} // namespace ZHLN::ALife

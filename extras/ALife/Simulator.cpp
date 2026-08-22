@@ -56,8 +56,8 @@ void Simulator::Update(Engine& engine, float dt, JPH::RVec3Arg observer_pos) {
     const float dist_sq_threshold = _tuning.switch_distance * _tuning.switch_distance;
 
     ECS::Registry&                           reg      = engine.GetRegistry();
-    std::span<const Entity>                  entities = reg.GetEntitiesWith<Components::ALifeComponent>();
-    RestrictSpan<Components::ALifeComponent> comps    = reg.GetRawArray<Components::ALifeComponent>();
+    std::span<const Entity>                  entities = reg.GetEntitiesWith<ALifeComponent>();
+    RestrictSpan<ALifeComponent> comps    = reg.GetRawArray<ALifeComponent>();
 
     if (entities.empty()) {
         return;
@@ -67,7 +67,7 @@ void Simulator::Update(Engine& engine, float dt, JPH::RVec3Arg observer_pos) {
     TaskSystem::ParallelFor(entities.size(), 256, [&](uint32_t start, uint32_t end, uint32_t) {
         for (uint32_t i = start; i < end; ++i) {
             Entity                      e    = entities[i];
-            Components::ALifeComponent& comp = comps[i];
+            ALifeComponent& comp = comps[i];
 
             if (comp.state == State::Dead) {
                 continue;
@@ -160,7 +160,7 @@ void Simulator::Update(Engine& engine, float dt, JPH::RVec3Arg observer_pos) {
 
             for (uint32_t i = start; i < end; ++i) {
                 Entity                      e    = entities[i];
-                Components::ALifeComponent& comp = comps[i];
+                ALifeComponent& comp = comps[i];
 
                 if (comp.state != State::Offline || comp.state == State::Dead) {
                     continue;
@@ -185,8 +185,8 @@ void Simulator::Update(Engine& engine, float dt, JPH::RVec3Arg observer_pos) {
 // --- Interaction Math ---
 
 void Simulator::ResolveOfflineInteraction(ECS::Registry& reg, Entity e1, Entity e2) {
-    auto* c1 = reg.Get<Components::ALifeComponent>(e1);
-    auto* c2 = reg.Get<Components::ALifeComponent>(e2);
+    auto* c1 = reg.Get<ALifeComponent>(e1);
+    auto* c2 = reg.Get<ALifeComponent>(e2);
     if ((c1 == nullptr) || (c2 == nullptr)) {
         return;
     }
@@ -255,7 +255,7 @@ struct SaveHeader {
 
 struct SaveRecord {
     Entity                     entity {};
-    Components::ALifeComponent comp;
+    ALifeComponent comp;
 };
 
 bool Simulator::Save(const char* /*filename*/) const {
@@ -294,7 +294,7 @@ bool Simulator::Load(ECS::Registry& reg, const char* filename) {
 
         // Either update existing or add new
         if (reg.IsAlive(rec.entity)) {
-            if (auto* existing = reg.Get<Components::ALifeComponent>(rec.entity)) {
+            if (auto* existing = reg.Get<ALifeComponent>(rec.entity)) {
                 *existing = rec.comp;
             } else {
                 reg.Add(rec.entity, rec.comp);
@@ -303,7 +303,7 @@ bool Simulator::Load(ECS::Registry& reg, const char* filename) {
     }
 
     _grid.Clear();
-    auto entities = reg.GetEntitiesWith<Components::ALifeComponent>();
+    auto entities = reg.GetEntitiesWith<ALifeComponent>();
     for (Entity e: entities) {
         _grid.UpdateEntity(reg, e, JPH::RVec3(-1, -1, -1));
     }
