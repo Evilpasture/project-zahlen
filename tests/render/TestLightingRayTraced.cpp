@@ -231,13 +231,17 @@ struct FrameDiff {
 /// parity), a specific object (geometry/culling parity) or the light patch
 /// (cluster/light-buffer parity).
 struct ChangedRegion {
-    uint32_t count    = 0;
-    int      minX     = 0;
-    int      maxX     = 0;
-    int      minY     = 0;
-    int      maxY     = 0;
+    uint32_t count = 0;
+    int      minX  = 0;
+    int      maxX  = 0;
+    int      minY  = 0;
+    int      maxY  = 0;
     int      maxDelta = 0;
     double   meanDelta = 0.0;
+    // Mean channel values of the changed pixels in each state, so the region's
+    // identity is unambiguous: gray floor vs red glow vs sky vs box silhouette.
+    double aR = 0.0, aG = 0.0, aB = 0.0;
+    double bR = 0.0, bG = 0.0, bB = 0.0;
 };
 
 [[nodiscard]] ChangedRegion DiffRegion(const RgbImage& a, const RgbImage& b, int threshold = 32) {
@@ -246,45 +250,83 @@ struct ChangedRegion {
         return r;
     }
 
-    r.minX      = a.width;
-    r.minY      = a.height;
-    r.maxX      = -1;
-    r.maxY      = -1;
-    uint64_t sum = 0;
-    bool     first = true;
+    r.minX = a.width;
+    r.minY = a.height;
+    r.maxX = -1;
+    r.maxY = -1;
+    uint64_t sum = 0, sumAr = 0, sumAg = 0, sumAb = 0, sumBr = 0, sumBg = 0, sumBb = 0;
 
     for (size_t i = 0; i < a.rgb.size(); i += 3) {
         const int dr    = std::abs(static_cast<int>(a.rgb[i + 0]) - static_cast<int>(b.rgb[i + 0]));
         const int dg    = std::abs(static_cast<int>(a.rgb[i + 1]) - static_cast<int>(b.rgb[i + 1]));
         const int db    = std::abs(static_cast<int>(a.rgb[i + 2]) - static_cast<int>(b.rgb[i + 2]));
         const int worst = std::max({dr, dg, db});
-        if (first) {
-            r.meanDelta = static_cast<double>(worst);
-            first       = false;
-        } else {
-            r.meanDelta = r.meanDelta + (static_cast<double>(worst) - r.meanDelta) / static_cast<double>(i / 3 + 1);
-        }
         r.maxDelta = std::max(r.maxDelta, worst);
         if (worst > threshold) {
             const size_t pixel = i / 3;
             const int    x     = static_cast<int>(pixel % static_cast<size_t>(a.width));
             const int    y     = static_cast<int>(pixel / static_cast<size_t>(a.width));
             ++r.count;
-            r.minX    = std::min(r.minX, x);
-            r.maxX    = std::max(r.maxX, x);
-            r.minY    = std::min(r.minY, y);
-            r.maxY    = std::max(r.maxY, y);
+            r.minX = std::min(r.minX, x);
+            r.maxX = std::max(r.maxX, x);
+            r.minY = std::min(r.minY, y);
+            r.maxY = std::max(r.maxY, y);
             sum += static_cast<uint64_t>(worst);
+            sumAr += a.rgb[i + 0];
+            sumAg += a.rgb[i + 1];
+            sumAb += a.rgb[i + 2];
+            sumBr += b.rgb[i + 0];
+            sumBg += b.rgb[i + 1];
+            sumBb += b.rgb[i + 2];
         }
     }
 
     if (r.count == 0) {
         r.minX = r.maxX = r.minY = r.maxY = 0;
-    }
-    if (r.count > 0 && r.meanDelta > 0.0) {
+    } else {
         r.meanDelta = static_cast<double>(sum) / static_cast<double>(r.count);
+        r.aR = static_cast<double>(sumAr) / r.count;
+        r.aG = static_cast<double>(sumAg) / r.count;
+        r.aB = static_cast<double>(sumAb) / r.count;
+        r.bR = static_cast<double>(sumBr) / r.count;
+        r.bG = static_cast<double>(sumBg) / r.count;
+        r.bB = static_cast<double>(sumBb) / r.count;
     }
     return r;
+}
+
+/// Writes a small PPM crop of `region` from `img` (clamped to bounds) so the
+/// toggling region can be inspected directly without full-frame files.
+void WriteRegionCrop(const std::string& path, const RgbImage& img, const ChangedRegion& region) {
+    if (!img.Valid() || region.count == 0) {
+        return;
+    }
+    const int x0 = std::max(0, region.minX);
+    const int y0 = std::max(0, region.minY);
+    const int x1 = std::min(img.width - 1, region.maxX);
+    const int y1 = std::min(img.height - 1, region.maxY);
+    if (x1 < x0 || y1 < y0) {
+        return;
+    }
+
+    const int    w = x1 - x0 + 1;
+    const int    h = y1 - y0 + 1;
+    std::ofstream out(path, std::ios::binary);
+    if (!out.is_open()) {
+        return;
+    }
+    out << "P6\n" << w << " " << h << "\n255\n";
+    std::vector<uint8_t> crop(static_cast<size_t>(w) * h * 3);
+    for (int y = y0; y <= y1; ++y) {
+        for (int x = x0; x <= x1; ++x) {
+            const size_t src = (static_cast<size_t>(y) * img.width + static_cast<size_t>(x)) * 3u;
+            const size_t dst = (static_cast<size_t>(y - y0) * w + static_cast<size_t>(x - x0)) * 3u;
+            crop[dst + 0] = img.rgb[src + 0];
+            crop[dst + 1] = img.rgb[src + 1];
+            crop[dst + 2] = img.rgb[src + 2];
+        }
+    }
+    out.write(reinterpret_cast<const char*>(crop.data()), static_cast<std::streamsize>(crop.size()));
 }
 
 /// Writes an amplified absolute-difference image so the parity region is
@@ -1004,6 +1046,8 @@ struct LightingRTTestSuite {
                 WriteAmplifiedDiff(
                     "headless_lighting_rt_cull_parity_diff.ppm", stableFrames[worstPair], stableFrames[worstPair + 1]
                 );
+                WriteRegionCrop("headless_lighting_rt_cull_region_a.ppm", stableFrames[worstPair], region);
+                WriteRegionCrop("headless_lighting_rt_cull_region_b.ppm", stableFrames[worstPair + 1], region);
 
                 const double minRed = *std::ranges::min_element(redCounts);
                 const double maxRed = *std::ranges::max_element(redCounts);
@@ -1021,9 +1065,10 @@ struct LightingRTTestSuite {
                     );
                 }
                 ZHLN::Println(
-                    "      worst adjacent pair {}-{}: |d|>32={:.6f} mean|d|={:.5f} | changed region [{},{}]-[{},{}] px={} mean|d|={:.1f} max|d|={}",
+                    "      worst adjacent pair {}-{}: |d|>32={:.6f} mean|d|={:.5f} | changed region [{},{}]-[{},{}] px={} mean|d|={:.1f} max|d|={} | "
+                    "stateA rgb=({:.1f},{:.1f},{:.1f}) stateB rgb=({:.1f},{:.1f},{:.1f})",
                     worstPair, worstPair + 1, worstPairFrac, worstDiffs[worstPair].meanAbs, region.minX, region.minY, region.maxX, region.maxY,
-                    region.count, region.meanDelta, region.maxDelta
+                    region.count, region.meanDelta, region.maxDelta, region.aR, region.aG, region.aB, region.bR, region.bG, region.bB
                 );
 
                 // Invariant 1: the light stays within range and on screen for the
@@ -1160,13 +1205,28 @@ struct LightingRTTestSuite {
                     TickFrames(eng, 1);
                 }
 
-                double worstFrac = 0.0;
+                double worstFrac  = 0.0;
+                size_t worstPair  = 0;
                 for (uint32_t i = 0; i + 1 < kStableFrames; ++i) {
-                    worstFrac = std::max(worstFrac, CompareFrames(frames[i], frames[i + 1]).frac32);
+                    const double f = CompareFrames(frames[i], frames[i + 1]).frac32;
+                    if (f > worstFrac) {
+                        worstFrac = f;
+                        worstPair = i;
+                    }
                 }
 
-                ZHLN::Println("    [INFO] static reference (no history): red {:.0f} {:.0f} {:.0f} {:.0f} {:.0f} {:.0f} {:.0f} {:.0f}, worst adj |d|>32={:.6f}",
-                              counts[0], counts[1], counts[2], counts[3], counts[4], counts[5], counts[6], counts[7], worstFrac);
+                const ChangedRegion region = DiffRegion(frames[worstPair], frames[worstPair + 1]);
+                WriteAmplifiedDiff("headless_lighting_rt_ref_parity_diff.ppm", frames[worstPair], frames[worstPair + 1]);
+                WriteRegionCrop("headless_lighting_rt_ref_region_a.ppm", frames[worstPair], region);
+                WriteRegionCrop("headless_lighting_rt_ref_region_b.ppm", frames[worstPair + 1], region);
+
+                ZHLN::Println(
+                    "    [INFO] static reference (no history): red {:.0f} {:.0f} {:.0f} {:.0f} {:.0f} {:.0f} {:.0f} {:.0f}, worst adj |d|>32={:.6f} | "
+                    "changed region [{},{}]-[{},{}] px={} mean|d|={:.1f} max|d|={} | stateA rgb=({:.1f},{:.1f},{:.1f}) stateB rgb=({:.1f},{:.1f},{:.1f})",
+                    counts[0], counts[1], counts[2], counts[3], counts[4], counts[5], counts[6], counts[7], worstFrac, region.minX, region.minY,
+                    region.maxX, region.maxY, region.count, region.meanDelta, region.maxDelta, region.aR, region.aG, region.aB, region.bR, region.bG,
+                    region.bB
+                );
 
                 return ZHLN::Test::ExpectTrue(worstFrac < 0.005) && ZHLN::Test::ExpectTrue(Mean(counts) > 16.0);
             }, &validationRaised);
