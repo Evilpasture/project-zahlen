@@ -72,10 +72,13 @@
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
+#include <Zahlen/ecs/SystemGraph.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #if defined(ZHLN_PERF_WITH_EXTRAS)
+#include <ALife/ALifeComponents.hpp>
 #include <ALife/Simulator.hpp>
 #endif
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -83,7 +86,9 @@
 #include <cstdlib>
 #include <expected>
 #include <fstream>
+#include <memory>
 #include <random>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -180,7 +185,7 @@ struct PerfDispatchComponent {
     uint32_t ticks = 0;
 };
 
-void PerfFiberDispatchSystem(ZHLN::Engine& engine, float dt) {
+static void PerfFiberDispatchSystem(ZHLN::Engine& engine, float dt) {
     auto& reg  = engine.GetRegistry();
     auto  ents = reg.GetEntitiesWith<PerfDispatchComponent>();
     auto  comps = reg.GetRawArray<PerfDispatchComponent>();
@@ -322,7 +327,7 @@ bool BuildPerfScene(ZHLN::Engine& engine, const PerfConfig& cfg, PerfScene& scen
     // --- Ground: physics plane + large visual floor ---
     const Entity ground = CreativeWorksFactory::CreatePlane(
         engine, 120.0f, {0.42f, 0.42f, 0.45f, 1.0f},
-        SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = true, .isStaticPhysics = true}
+        CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = true, .isStaticPhysics = true}
     );
     if (!reg.IsAlive(ground)) {
         return false;
@@ -331,7 +336,7 @@ bool BuildPerfScene(ZHLN::Engine& engine, const PerfConfig& cfg, PerfScene& scen
     // --- Terrain (visual only, off to the side) ---
     const Entity terrain = CreativeWorksFactory::CreateTerrain(
         engine, 128, 280.0f, 35.0f, CreativeWorksFactory::TerrainType::Default,
-        SpawnParams {.position = JPH::RVec3(160, 0, 0), .createPhysics = false}
+        CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(160, 0, 0), .createPhysics = false}
     );
     if (!reg.IsAlive(terrain)) {
         return false;
@@ -593,11 +598,13 @@ bool BuildPerfScene(ZHLN::Engine& engine, const PerfConfig& cfg, PerfScene& scen
             const Entity    e = reg.Create(
                 Components::TransformComponent {.position = pos},
                 Components::TriggerComponent {.radius = 1.5f},
-                Components::PickupComponent {},
-                (i == 0) ? Components::ContainerComponent {} : Components::UsableComponent {}
+                Components::PickupComponent {}
             );
             if (i == 0) {
+                reg.Add(e, Components::ContainerComponent {});
                 containerEnt = e;
+            } else {
+                reg.Add(e, Components::UsableComponent {});
             }
         }
 
@@ -667,7 +674,7 @@ bool BuildPerfScene(ZHLN::Engine& engine, const PerfConfig& cfg, PerfScene& scen
             std::vector<Entity> parts(1024);
             const uint32_t      spawned = CreativeWorksFactory::InstantiatePrefabFromMemory(
                 engine, std::span<const uint8_t>(bytes), "UziProc.glb",
-                SpawnParams {
+                CreativeWorksFactory::SpawnParams {
                     .position = JPH::RVec3(2.0, 0.0, 2.0), .createPhysics = false, .isStaticPhysics = true, .isAnimated = true
                 },
                 parts.data(), 1024
@@ -679,7 +686,7 @@ bool BuildPerfScene(ZHLN::Engine& engine, const PerfConfig& cfg, PerfScene& scen
                 const float ang = static_cast<float>(copy) * 1.5708f;
                 CreativeWorksFactory::InstantiatePrefabFromMemory(
                     engine, std::span<const uint8_t>(bytes), "UziProc.glb",
-                    SpawnParams {
+                    CreativeWorksFactory::SpawnParams {
                         .position = JPH::RVec3(static_cast<double>(std::cos(ang) * 4.0f), 0.0, static_cast<double>(std::sin(ang) * 4.0f)),
                         .rotation = JPH::Quat::sRotation(JPH::Vec3::sAxisY(), ang),
                         .createPhysics = false, .isStaticPhysics = true, .isAnimated = true
@@ -722,10 +729,12 @@ bool BuildPerfScene(ZHLN::Engine& engine, const PerfConfig& cfg, PerfScene& scen
     // creature population (and its roaming waypoints) inside [0, 120] x [0, 120].
     for (uint32_t i = 0; i < cfg.alifeCount; ++i) {
         const JPH::RVec3 pos(static_cast<double>(rng() % 120), 0.0, static_cast<double>(rng() % 120));
+        // self_entity is left as NullEntity; the ALife SpatialGrid caches the
+        // real handle into it on first UpdateEntity.
         const Entity     e = reg.Create(
             Components::ALifeComponent {
                 .position = pos, .state = ALife::State::Offline, .travel_speed = 5.0f + static_cast<float>(rng() % 700) * 0.01f,
-                .faction_id = i % 4, .self_entity = e, .health = 100, .power = 10, .energy = 100
+                .faction_id = i % 4, .health = 100, .power = 10, .energy = 100
             },
             Components::TransformComponent {.position = JPH::Vec3(pos)},
             PerfDispatchComponent {}
@@ -1276,15 +1285,15 @@ struct PerformanceTestSuite {
 
             // Physics must stay finite and inside world bounds.
             {
-                auto&        pc     = engine->GetPhysicsContext();
+                auto&        pc      = engine.GetPhysicsContext();
                 const auto   posView = pc.GetPositionBuffer();
                 const auto*  posData = static_cast<const JPH::Real*>(posView.buf);
-                const uint32_t bodyCount = pc.GetWorld().count.load(std::memory_order_relaxed);
+                const size_t bodyCount = posView.shape[0]; // total bodies, from the BufferView
 
                 bool finite = (posData != nullptr);
-                for (uint32_t d = 0; finite && d < bodyCount; ++d) {
+                for (size_t d = 0; finite && d < bodyCount; ++d) {
                     for (int k = 0; k < 3; ++k) {
-                        const float v = static_cast<float>(posData[static_cast<size_t>(d) * 4 + k]);
+                        const float v = static_cast<float>(posData[d * 4 + k]);
                         if (!std::isfinite(v) || std::abs(v) > 2000.0f) {
                             finite = false;
                             break;
