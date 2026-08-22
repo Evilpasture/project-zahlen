@@ -257,6 +257,9 @@ class ZHLN_API RenderContext {
         uint64_t                          boundsHash = 0;
         uint64_t                          counterHash = 0;
         uint32_t                          counterValue = 0;  // raw final counter (pre-clamp)
+        uint32_t                          gridSum = 0;       // sum of count over ALL cells (recomputed from grid)
+        uint32_t                          cellsWithAny = 0;  // cells with count > 0
+        uint32_t                          maxCellCount = 0;  // largest single-cell count (should be <= 2 here)
         uint32_t                          maxOffset = 0;     // largest offset seen in ANY grid cell
         uint32_t                          lightCount = 0;    // frame.lightCount the shader saw (from the UBO)
         bool                              counterTruncated = false; // any cell with offset >= 221184

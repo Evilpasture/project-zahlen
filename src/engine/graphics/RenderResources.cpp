@@ -1281,6 +1281,9 @@ auto RenderContext::DebugReadClusterSnapshot() noexcept -> std::expected<DebugCl
             continue;
         }
         snapshot.cells.push_back(fillCell(i));
+        snapshot.gridSum += grid[i].count;
+        ++snapshot.cellsWithAny;
+        snapshot.maxCellCount = std::max(snapshot.maxCellCount, grid[i].count);
     }
 
     // Always capture the strip cells (x 0..4, y=5, z 0..12), including those

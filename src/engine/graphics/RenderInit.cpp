@@ -900,7 +900,9 @@ std::expected<void, Error> RenderContext::Impl::InitShadowResources() {
         //    VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT.
         .and_then([&]() {
             return CreateDoubleBuffered(
-                       allocator, sizeof(FrameUniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                       allocator, sizeof(FrameUniforms),
+                       // TRANSFER_SRC_BIT: test-only diagnostics read the UBO back (DebugReadClusterSnapshot).
+                       VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                        VMA_MEMORY_USAGE_CPU_TO_GPU
             )
                 .transform_error([](auto err) -> Error { return err; });

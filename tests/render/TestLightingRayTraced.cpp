@@ -610,10 +610,10 @@ struct LightingRTTestSuite {
         // changes while gridHash is constant, only the ordering/orphaned tail
         // differs (harmless) -- the grid count is what governs inclusion.
         ZHLN::Println(
-            "      [gpu:{}] cluster hashes: grid={:016x} list={:016x} bounds={:016x} counter={:016x} | lightCount={} counterVal={} maxOffset={} "
-            "truncated={}",
-            frame, snap->gridHash, snap->listHash, snap->boundsHash, snap->counterHash, snap->lightCount, snap->counterValue, snap->maxOffset,
-            snap->counterTruncated ? 1 : 0
+            "      [gpu:{}] cluster hashes: grid={:016x} list={:016x} bounds={:016x} counter={:016x} | lightCount={} counterVal={} gridSum={} "
+            "cells={} maxCellCount={} maxOffset={} truncated={}",
+            frame, snap->gridHash, snap->listHash, snap->boundsHash, snap->counterHash, snap->lightCount, snap->counterValue, snap->gridSum,
+            snap->cellsWithAny, snap->maxCellCount, snap->maxOffset, snap->counterTruncated ? 1 : 0
         );
 
         uint32_t cellsWithPl = 0;
