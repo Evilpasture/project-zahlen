@@ -1230,10 +1230,19 @@ struct LightingRTTestSuite {
             const char* posEnv     = std::getenv("ZHLN_TEST_LIGHT_POS");
             float       posX = 6.4f, posY = 2.4f, posZ = 5.0f;
             if (posEnv != nullptr) {
-                char* end = nullptr;
-                posX      = std::strtof(posEnv, &end);
-                posY      = std::strtof(end, &end);
-                posZ      = std::strtof(end, nullptr);
+                char* end    = nullptr;
+                posX         = std::strtof(posEnv, &end);
+                posY         = std::strtof(end, &end);
+                posZ         = std::strtof(end, nullptr);
+                // Guard against a malformed variable (e.g. "4,2.4,15" with a
+                // locale that stops at the first non-digit): fall back to the
+                // default position so a bad env var can never silently place
+                // the light at the world origin.
+                if (end == posEnv || posX == 0.0f && posY == 0.0f && posZ == 0.0f) {
+                    posX = 6.4f;
+                    posY = 2.4f;
+                    posZ = 5.0f;
+                }
             }
             const JPH::Vec3 lightPos(posX, posY, posZ);
 
