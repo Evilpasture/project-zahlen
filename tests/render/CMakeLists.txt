@@ -71,6 +71,30 @@ foreach(TEST_SRC IN LISTS RENDER_TEST_SOURCES)
     endif()
 endforeach()
 
+# --- TestPerformance: long-running full-engine stress benchmark ---
+# Runs hundreds of full engine frames (physics churn, fiber dispatch, ECS
+# churn, overdraw, RT/TLAS rebuilds) so the generic 60s ctest timeout would
+# kill it mid-run on slower hardware.
+if(TARGET TestPerformance)
+    set_tests_properties(GPU_TestPerformance PROPERTIES
+        TIMEOUT 1800
+    )
+
+    # Resolve repo assets (e.g. resources/assets/UziProc.glb) relative to the
+    # source tree, mirroring the extras test harness.
+    target_compile_definitions(TestPerformance PRIVATE
+        ZHLN_TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+    )
+
+    # Optionally pull in the first-party "extras" toolkit (ALife simulation)
+    # so the stress scene can drive it as well when it is built.
+    if(ZHLN_BUILD_EXTRAS AND TARGET zahlen_extras)
+        target_link_libraries(TestPerformance PRIVATE zahlen_extras)
+        target_include_directories(TestPerformance PRIVATE ${PROJECT_SOURCE_DIR}/extras)
+        target_compile_definitions(TestPerformance PRIVATE ZHLN_PERF_WITH_EXTRAS=1)
+    endif()
+endif()
+
 # --- Extras VFX & Render Tests ---
 if(ZHLN_BUILD_EXTRAS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extras")
     add_subdirectory(extras)

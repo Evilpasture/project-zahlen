@@ -109,6 +109,23 @@ inline void AllowValidationErrors(bool allow = true) noexcept {
     GetThreadLocalContext().allowValidationErrors = allow;
 }
 
+// ---------------------------------------------------------------------------
+// Long-running benchmarks:
+// Every test method is normally guarded by a hard 15-second alarm to catch
+// deadlocks and infinite loops. Stress benchmarks that intentionally run for
+// minutes raise this limit for the lifetime of their suite (set it in the
+// suite constructor, restore 15 in the suite destructor).
+// ---------------------------------------------------------------------------
+inline uint32_t s_GlobalTimeoutSeconds = 15;
+
+inline void SetGlobalTimeoutSeconds(uint32_t seconds) noexcept {
+    s_GlobalTimeoutSeconds = (seconds > 0) ? seconds : 15;
+}
+
+[[nodiscard]] inline uint32_t GetGlobalTimeoutSeconds() noexcept {
+    return s_GlobalTimeoutSeconds;
+}
+
 inline void AllowDeviceLost(bool allow = true) noexcept {
     GetThreadLocalContext().allowDeviceLost = allow;
 }
@@ -235,6 +252,9 @@ TestStats RunSuite() {
             auto& ctx = GetThreadLocalContext();
             ctx.Reset(name);
 
+            // Snapshot the (possibly benchmark-extended) timeout before the alarm is armed.
+            const uint32_t timeoutSeconds = (GetGlobalTimeoutSeconds() > 0) ? GetGlobalTimeoutSeconds() : 15;
+
             // 1. Snapshot telemetry before test begins
             const uint32_t valErrorsBefore = ZHLN_GetValidationErrorCount();
             const uint32_t devLostBefore   = ZHLN_GetDeviceLostCount();
@@ -252,7 +272,7 @@ TestStats RunSuite() {
             if (IsDebuggerAttached()) {
                 alarm(0);
             } else {
-                alarm(15);
+                alarm(timeoutSeconds);
             }
 
             if (sigsetjmp(g_testTimeoutJmpBuf, 1) == 0) {
@@ -264,11 +284,13 @@ TestStats RunSuite() {
                 sigaction(SIGALRM, &old_sa, nullptr);
 
                 ctx.failures.push_back(
-                    {.file          = "Unknown",
-                     .line          = 0,
-                     .actualValue   = "Test execution timed out (deadlock or infinite loop)",
-                     .expectedValue = "Test execution completes under 15 seconds",
-                     .op            = "Timeout"}
+                    {
+                        .file          = "Unknown",
+                        .line          = 0,
+                        .actualValue   = "Test execution timed out (deadlock or infinite loop)",
+                        .expectedValue = "Test execution completes under " + std::to_string(timeoutSeconds) + " seconds",
+                        .op            = "Timeout"
+                    }
                 );
                 result = std::unexpected(ZHLN::Error(TestFrameworkError::AssertionFailed));
             }
