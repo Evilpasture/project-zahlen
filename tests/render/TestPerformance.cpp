@@ -37,6 +37,8 @@
 //   ZHLN_PERF_SCALE       float   (default 1.0; 0.5 to lighten the load on weak
 //                                 GPUs, 2.0 to push harder)
 //   ZHLN_PERF_SCREENSHOT  0/1     (default 1 — captures test_perf_output.ppm)
+//   ZHLN_PERF_RTR         0/1/2   (default 2 = follow RayTracingSupported;
+//                                 0/1 force the RTR path off/on for A/B)
 //
 // Example:
 //   ZHLN_PERF_WIDTH=1920 ZHLN_PERF_HEIGHT=1080 ZHLN_PERF_FRAMES=900 ./TestPerformance
@@ -143,6 +145,19 @@ namespace {
     return (v < 1.0f) ? 1u : static_cast<uint32_t>(std::lround(v));
 }
 
+// ZHLN_PERF_RTR: 0 = force RTR off, 1 = force on, 2/unset = follow
+// RayTracingSupported(). Useful for A/B'ing whether the RT path is the
+// trigger of first-frame driver resets.
+[[nodiscard]] int PerfEnvRtrMode() noexcept {
+    if (const char* raw = std::getenv("ZHLN_PERF_RTR")) {
+        const int v = std::atoi(raw);
+        if (v == 0 || v == 1) {
+            return v;
+        }
+    }
+    return 2;
+}
+
 struct PerfConfig {
     uint32_t width        = PerfEnvU32("ZHLN_PERF_WIDTH", 1280);
     uint32_t height       = PerfEnvU32("ZHLN_PERF_HEIGHT", 720);
@@ -151,6 +166,7 @@ struct PerfConfig {
     bool     validation   = (PerfEnvU32("ZHLN_PERF_VALIDATION", 0) != 0);
     bool     screenshot   = (PerfEnvU32("ZHLN_PERF_SCREENSHOT", 1) != 0);
     float    scale        = PerfEnvF32("ZHLN_PERF_SCALE", 1.0f);
+    int      rtrMode      = PerfEnvRtrMode();
 
     // --- Scene population (all scaled by `scale`) ---
     uint32_t dynamicBoxes   = PerfScaled(320, scale);
@@ -232,6 +248,18 @@ struct PerfScene {
     // frame (churned entities are born mid-window and legitimately have fewer
     // ticks, so they must NOT be part of this check).
     std::vector<ZHLN::Entity> dispatchSentinels;
+
+    // Snapshot of every GPU asset this test registered directly (the engine's
+    // device-loss recovery only re-registers CreativeWorksManager assets, so
+    // after a hot rebuild we must re-register these ourselves or the scene
+    // renders empty).
+    std::vector<ZHLN::AssetID>     meshAssets;
+    std::vector<ZHLN::Mesh>        meshData;
+    std::vector<ZHLN::MaterialID>  matAssets;
+    std::vector<ZHLN::Material>    matData;
+    std::vector<uint32_t>          decalPixels; // albedo (128x128) then normal (128x128)
+    ZHLN::TextureHandle            decalAlbedo = ZHLN::TextureHandle::Invalid;
+    ZHLN::TextureHandle            decalNormal = ZHLN::TextureHandle::Invalid;
 
 #if defined(ZHLN_PERF_WITH_EXTRAS)
     std::unique_ptr<ZHLN::ALife::Simulator> alife;
@@ -510,6 +538,9 @@ bool BuildPerfScene(ZHLN::Engine& engine, const PerfConfig& cfg, PerfScene& scen
         }
         const TextureHandle decalTex  = rc.CreateProceduralTexture("perf_decal", 128, 128, true, px.data());
         const TextureHandle decalNorm = rc.CreateProceduralTexture("perf_decal_norm", 128, 128, false, px.data());
+        scene.decalPixels = px; // kept so the textures can be recreated after a device-loss hot rebuild
+        scene.decalAlbedo = decalTex;
+        scene.decalNormal = decalNorm;
 
         for (uint32_t i = 0; i < cfg.decals; ++i) {
             const float ang = static_cast<float>(i) * 0.7f;
@@ -649,7 +680,7 @@ bool BuildPerfScene(ZHLN::Engine& engine, const PerfConfig& cfg, PerfScene& scen
                 pp->giSamples    = 8;
                 pp->giIntensity  = 1.2f;
                 pp->enableSSR    = 1;
-                pp->enableRTR    = rc.RayTracingSupported() ? 1 : 0;
+                pp->enableRTR    = (cfg.rtrMode == 1) ? 1 : (cfg.rtrMode == 0) ? 0 : (rc.RayTracingSupported() ? 1 : 0);
                 pp->fullBright   = 0;
                 pp->useLocalProbe = 1;
             }
@@ -760,7 +791,60 @@ bool BuildPerfScene(ZHLN::Engine& engine, const PerfConfig& cfg, PerfScene& scen
     const std::span<const ZHLN::Entity> sentinelSpan = reg.GetEntitiesWith<PerfDispatchComponent>();
     scene.dispatchSentinels.assign(sentinelSpan.begin(), sentinelSpan.end());
 
+    // Snapshot the GPU assets this test registered directly. The engine's
+    // device-loss recovery only re-registers CreativeWorksManager assets, so
+    // after a hot rebuild these must be re-registered by the test or the
+    // scene renders empty (crates/ground/terrain/decals vanish).
+    if (auto m = rc.GetGPUMesh(scene.crateMeshAsset)) {
+        scene.meshAssets.push_back(scene.crateMeshAsset);
+        scene.meshData.push_back(*m);
+    }
+    for (uint32_t i = 0; i < scene.crateMatCount; ++i) {
+        if (auto mat = rc.GetGPUMaterial(scene.crateMatAssets[i])) {
+            scene.matAssets.push_back(scene.crateMatAssets[i]);
+            scene.matData.push_back(*mat);
+        }
+    }
+    for (const Entity e: {ground, terrain}) {
+        const auto* mc = reg.Get<Components::MeshComponent>(e);
+        if (mc == nullptr) {
+            continue;
+        }
+        if (auto m = rc.GetGPUMesh(mc->meshAsset)) {
+            scene.meshAssets.push_back(mc->meshAsset);
+            scene.meshData.push_back(*m);
+        }
+        if (auto mat = rc.GetGPUMaterial(mc->materialAsset)) {
+            scene.matAssets.push_back(mc->materialAsset);
+            scene.matData.push_back(*mat);
+        }
+    }
+
     return true;
+}
+
+// Re-registers the test-owned GPU assets after a device-loss hot rebuild.
+// Called from the frame loop when ZHLN_GetDeviceLostCount() increases.
+void ReRegisterPerfAssets(ZHLN::Engine& engine, PerfScene& scene) {
+    auto& rc  = engine.GetRenderContext();
+    auto& reg = engine.GetRegistry();
+
+    for (size_t i = 0; i < scene.meshAssets.size(); ++i) {
+        rc.RegisterGPUMesh(scene.meshAssets[i], scene.meshData[i]);
+    }
+    for (size_t i = 0; i < scene.matAssets.size(); ++i) {
+        rc.RegisterGPUMaterial(scene.matAssets[i], scene.matData[i]);
+    }
+    if (!scene.decalPixels.empty()) {
+        scene.decalAlbedo = rc.CreateProceduralTexture("perf_decal", 128, 128, true, scene.decalPixels.data());
+        scene.decalNormal = rc.CreateProceduralTexture("perf_decal_norm", 128, 128, false, scene.decalPixels.data());
+        for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::DecalComponent>()) {
+            reg.Patch<ZHLN::Components::DecalComponent>(e, [&](auto& d) {
+                d.albedoMap = scene.decalAlbedo;
+                d.normalMap = scene.decalNormal;
+            });
+        }
+    }
 }
 
 } // namespace
@@ -1205,14 +1289,16 @@ struct PerformanceTestSuite {
             using namespace ZHLN;
 
             const PerfConfig cfg {};
-            ZHLN::Println("    [Perf] Config: {}x{} | warmup {} | measured {} | scale {}x | validation {}", cfg.width, cfg.height, cfg.warmupFrames,
-                          cfg.measured, cfg.scale, (cfg.validation ? "ON" : "OFF"));
+            ZHLN::Println("    [Perf] Config: {}x{} | warmup {} | measured {} | scale {}x | validation {} | RTR {}", cfg.width, cfg.height,
+                          cfg.warmupFrames, cfg.measured, cfg.scale, (cfg.validation ? "ON" : "OFF"),
+                          (cfg.rtrMode == 1) ? "forced ON" : (cfg.rtrMode == 0) ? "forced OFF" : "auto");
 
             // A GPU hang under stress is an expected outcome of this test. The
             // engine has a dedicated hot-rebuild recovery path (device lost ->
             // full re-init -> asset rebind), so a *recovered* device loss is
             // reported in the perf report instead of failing the run.
             ZHLN::Test::AllowDeviceLost(true);
+            const uint32_t initialDeviceLost = ZHLN_GetDeviceLostCount();
 
             // 1. Engine (headless, no window server required).
             const EngineConfig engineCfg {
@@ -1264,6 +1350,21 @@ struct PerformanceTestSuite {
             ZHLN::Println("    [Perf] Scene ready: {} dynamic crates | {} static | {} point lights | {} particle emitters ({} each) | {} decals",
                           cfg.dynamicBoxes, cfg.staticBoxes, cfg.pointLights, cfg.particleEmits, cfg.particlesEach, cfg.decals);
 
+            // Device-loss tracking: the hot rebuild happens inside Tick, so
+            // detect it right after and re-register the assets the engine's
+            // recovery does not cover (everything this test registered
+            // directly — see ReRegisterPerfAssets).
+            uint32_t lastDeviceLost = ZHLN_GetDeviceLostCount();
+            auto     noteDeviceLoss = [&](std::string_view phase, uint32_t frame) {
+                const uint32_t dl = ZHLN_GetDeviceLostCount();
+                if (dl > lastDeviceLost) {
+                    lastDeviceLost = dl;
+                    ZHLN::Println("    [Perf] DEVICE LOST (total {}) at {} frame {} — engine hot-rebuilt; re-registering test assets...", dl,
+                                  phase, frame);
+                    ReRegisterPerfAssets(*engine, scene);
+                }
+            };
+
             // 3. Warmup (shader compile, TLAS warm, pipeline cache fills).
             constexpr float kDt = 1.0f / 60.0f;
             {
@@ -1275,6 +1376,7 @@ struct PerformanceTestSuite {
                     if (engine->Tick(kDt, GameplayDriver::Cpp) != GameplayStatus::OK) {
                         return std::unexpected(PerfTestError::TickFailed);
                     }
+                    noteDeviceLoss("warmup", frame);
                 }
             }
 
@@ -1294,6 +1396,7 @@ struct PerformanceTestSuite {
                     }
                     const auto t1 = std::chrono::steady_clock::now();
                     frameMs.push_back(std::chrono::duration<double, std::milli>(t1 - t0).count());
+                    noteDeviceLoss("measured", frame);
 
                     // Heartbeat: pinpoints the frame index where the run dies
                     // if the GPU hangs or the driver resets mid-measurement.
@@ -1402,10 +1505,10 @@ struct PerformanceTestSuite {
 #else
             const uint64_t alifeEvents = 0;
 #endif
-            const uint32_t deviceLost = ZHLN_GetDeviceLostCount();
+            const uint32_t deviceLost = lastDeviceLost - initialDeviceLost;
             if (deviceLost > 0) {
-                ZHLN::Println("    [Perf] WARNING: {} GPU device-lost event(s) during the run — the engine hot-rebuilt and", deviceLost);
-                ZHLN::Println("    [Perf] continued. FPS numbers above include the rebuild spike; a hang-free run is a cleaner baseline.");
+                ZHLN::Println("    [Perf] NOTE: {} GPU device-lost event(s) during the run — the engine hot-rebuilt and", deviceLost);
+                ZHLN::Println("    [Perf] the test re-registered its assets. See the DEVICE LOST lines above for which frames were hit.");
             }
             PrintPerfReport(rc, cfg, SummarizeFrames(frameMs), counters, reg, cfg.measured, alifeEvents);
 
