@@ -250,6 +250,44 @@ void ExecuteImmediate(const Context& ctx, CommandRing<QType, Capacity>& ring, St
 // Command Encoder (Stateful Bind Filtering with Unified Push Constants)
 // ============================================================================
 
+/// Push-constant stages for the mesh path (the fragment stage keeps reading the
+/// same block, and the task stage needs the instance id to cull against).
+inline constexpr VkShaderStageFlags kMeshTaskPushStages = VK_SHADER_STAGE_TASK_BIT_EXT | VK_SHADER_STAGE_MESH_BIT_EXT | VK_SHADER_STAGE_FRAGMENT_BIT;
+
+struct MeshTaskState {
+    VkPipeline       pipeline    = VK_NULL_HANDLE;
+    VkPipelineLayout layout      = VK_NULL_HANDLE;
+    bool             heap        = false;
+    VkDescriptorSet  set         = VK_NULL_HANDLE;
+    uint32_t         groupCountX = 1;
+    uint32_t         groupCountY = 1;
+    uint32_t         groupCountZ = 1;
+};
+
+struct MeshTaskIndirectState {
+    VkPipeline       pipeline       = VK_NULL_HANDLE;
+    VkPipelineLayout layout         = VK_NULL_HANDLE;
+    bool             heap           = false;
+    VkDescriptorSet  set            = VK_NULL_HANDLE;
+    VkBuffer         argumentBuffer = VK_NULL_HANDLE;
+    VkDeviceSize     offset         = 0;
+    uint32_t         drawCount      = 1;
+    uint32_t         stride         = sizeof(VkDrawMeshTasksIndirectCommandEXT);
+};
+
+struct MeshTaskIndirectCountState {
+    VkPipeline       pipeline          = VK_NULL_HANDLE;
+    VkPipelineLayout layout            = VK_NULL_HANDLE;
+    bool             heap              = false;
+    VkDescriptorSet  set               = VK_NULL_HANDLE;
+    VkBuffer         argumentBuffer    = VK_NULL_HANDLE;
+    VkDeviceSize     offset            = 0;
+    VkBuffer         countBuffer       = VK_NULL_HANDLE;
+    VkDeviceSize     countBufferOffset = 0;
+    uint32_t         maxDrawCount      = 1;
+    uint32_t         stride            = sizeof(VkDrawMeshTasksIndirectCommandEXT);
+};
+
 class CommandEncoder {
   public:
     VkCommandBuffer  cmd               = VK_NULL_HANDLE;
@@ -378,6 +416,61 @@ class CommandEncoder {
             Push(cmd, state.layout, stages, pushConstants);
         }
         vkCmdDrawIndexedIndirect(cmd, state.argumentBuffer, state.offset, state.drawCount, state.stride);
+    }
+
+    // ========================================================================
+    // VK_EXT_mesh_shader
+    // ========================================================================
+
+    /// Dispatches task (or, without amplification, mesh) workgroups. The bound
+    /// pipeline must be a mesh pipeline; per-draw data travels through push
+    /// data at offset 0 exactly like the vertex path, so the task and mesh
+    /// stages read the same ObjectConstants block the vertex shader used to.
+    template <GpuTriviallyCopyable T>
+    void DrawMeshTasks(const MeshTaskState& state, const T& pushConstants, VkShaderStageFlags stages = kMeshTaskPushStages) noexcept {
+        BindPipeline(state.pipeline, state.layout);
+        if (state.heap) {
+            PushDrawData(pushConstants);
+        } else {
+            BindDescriptorSet(state.set);
+            Push(cmd, state.layout, stages, pushConstants);
+        }
+        if (ctx != nullptr) {
+            ctx->CmdDrawMeshTasks(cmd, state.groupCountX, state.groupCountY, state.groupCountZ);
+        }
+    }
+
+    /// Indirect variant. `argumentBuffer` must hold VkDrawMeshTasksIndirectCommandEXT
+    /// records (groupCountX/Y/Z) — note there is no firstInstance field, so the
+    /// instance index has to be supplied through push data.
+    template <GpuTriviallyCopyable T>
+    void DrawMeshTasksIndirect(const MeshTaskIndirectState& state, const T& pushConstants, VkShaderStageFlags stages = kMeshTaskPushStages) noexcept {
+        BindPipeline(state.pipeline, state.layout);
+        if (state.heap) {
+            PushDrawData(pushConstants);
+        } else {
+            BindDescriptorSet(state.set);
+            Push(cmd, state.layout, stages, pushConstants);
+        }
+        if (ctx != nullptr) {
+            ctx->CmdDrawMeshTasksIndirect(cmd, state.argumentBuffer, state.offset, state.drawCount, state.stride);
+        }
+    }
+
+    template <GpuTriviallyCopyable T>
+    void DrawMeshTasksIndirectCount(const MeshTaskIndirectCountState& state, const T& pushConstants, VkShaderStageFlags stages = kMeshTaskPushStages) noexcept {
+        BindPipeline(state.pipeline, state.layout);
+        if (state.heap) {
+            PushDrawData(pushConstants);
+        } else {
+            BindDescriptorSet(state.set);
+            Push(cmd, state.layout, stages, pushConstants);
+        }
+        if (ctx != nullptr) {
+            ctx->CmdDrawMeshTasksIndirectCount(
+                cmd, state.argumentBuffer, state.offset, state.countBuffer, state.countBufferOffset, state.maxDrawCount, state.stride
+            );
+        }
     }
 
     template <GpuTriviallyCopyable T>

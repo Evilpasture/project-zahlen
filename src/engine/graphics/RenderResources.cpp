@@ -127,6 +127,22 @@ auto RenderContext::GetTracked3DEmitters() noexcept -> ZHLN::Array<ZHLN::Pair<ui
     return _impl->tracked3DEmitters;
 }
 
+bool RenderContext::MeshShadingSupported() const noexcept {
+    return _impl->ctx.MeshShadersSupported();
+}
+
+bool RenderContext::MeshShadingActive() const noexcept {
+    return _impl->MeshShadingActive();
+}
+
+void RenderContext::SetMeshShadingEnabled(bool enabled) noexcept {
+    Diag::SetMeshShadingDisabled(!enabled);
+}
+
+uint32_t RenderContext::ValidationErrorCount() noexcept {
+    return ZHLN_GetValidationErrorCount();
+}
+
 // ============================================================================
 // RenderContext Subsystem Implementation
 // ============================================================================
@@ -151,6 +167,41 @@ auto RenderContext::Impl::CompileShadowPipeline(VkDevice device, const Resource:
                     return RenderInitError::PipelineCreationFailed;
                 })
                 .transform([&](auto&& pipeline) -> auto { shadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
+        })
+        .and_then([&, device]() -> std::expected<void, Error> {
+            // VK_EXT_mesh_shader twin of the shadow pipeline. Optional by
+            // design: a failure here only means the cascades keep using the
+            // indirect vertex draws, so it never fails pipeline compilation.
+            if (!ctx.MeshShadersSupported()) {
+                return {};
+            }
+
+            const ZHLN_ShaderDesc taskDesc = {.code = Vk::AsSpirV(Resource::basic_task.data()), .size = Resource::basic_task.size(), .entry_point = nullptr};
+            // Shadow variant: its varying set must match PSShadow exactly.
+            const auto            shadowSet = Resource::GetSceneShaders(Resource::SceneShaderVariant::Shadow);
+            const ZHLN_ShaderDesc meshDesc  = {.code = Vk::AsSpirV(shadowSet.mesh.data()), .size = shadowSet.mesh.size(), .entry_point = nullptr};
+            const ZHLN_ShaderDesc fragDesc  = {.code = Vk::AsSpirV(shaderData.fragment.data()), .size = shaderData.fragment.size(), .entry_point = "PSShadow"};
+
+            auto shaders = Vk::ShaderStages::CreateMesh(device, taskDesc, meshDesc, fragDesc);
+            if (!shaders) {
+                ZHLN::Log("[RenderResources] Shadow mesh-stage creation failed; cascades keep the vertex pipeline.");
+                return {};
+            }
+
+            auto pipeline = Vk::PipelineBuilder {}
+                                .Shaders(*shaders)
+                                .Layout(emptyPipelineLayout)
+                                .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
+                                .DepthOnly()
+                                .DepthFormat(VK_FORMAT_D32_SFLOAT)
+                                .CullNone()
+                                .Build(device);
+            if (!pipeline) {
+                ZHLN::Log("[RenderResources] Shadow mesh pipeline creation failed; cascades keep the vertex pipeline.");
+                return {};
+            }
+            shadowMeshPipeline = std::move(*pipeline);
+            return {};
         });
 }
 
@@ -200,6 +251,15 @@ void RenderContext::SetResolution([[maybe_unused]] const Extent2D& res) {
     _impl->resized = true;
 }
 
+auto RenderContext::CreateStorageBuffer(const void* data, size_t size, uint32_t stride) -> BufferHandle {
+    const uint32_t safeStride = (stride > 0) ? stride : 1u;
+    return _impl->CreateGPUBuffer(size, data, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+        .transform([this, size, safeStride](auto&& pair) -> auto {
+            return _impl->meshPool.Create(std::move(pair.first), static_cast<uint32_t>(size / safeStride), pair.second);
+        })
+        .value_or(BufferHandle::Invalid);
+}
+
 auto RenderContext::CreateVertexBuffer(const void* data, size_t size, uint32_t stride) -> BufferHandle {
     return _impl->CreateGPUBuffer(size, data, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)
         .transform([this, size, stride](auto&& pair) -> auto {
@@ -240,6 +300,65 @@ void RenderContext::UpdateBuffer(BufferHandle handle, const void* data, size_t s
         Vk::CopyRingBuffer(cmd, stagingAlloc, nativeMesh->buffer, size);
     });
 }
+
+namespace {
+
+/// VK_EXT_mesh_shader: builds the task+mesh+fragment twin of a material's
+/// graphics pipeline. Returns an invalid pipeline (not an error) whenever mesh
+/// shading is unavailable or the material did not provide mesh stages: the
+/// vertex pipeline built by CreateMaterial always remains the fallback.
+[[nodiscard]] Vk::Pipeline BuildMeshVariant(RenderContext::Impl* impl, const PipelineDesc& desc) noexcept {
+    if (!impl->ctx.MeshShadersSupported() || desc.meshShaderData == nullptr || desc.meshShaderSize == 0) {
+        return {};
+    }
+
+    const ZHLN_ShaderDesc taskDesc = {.code = Vk::AsSpirV(desc.taskShaderData), .size = desc.taskShaderSize, .entry_point = nullptr};
+    const ZHLN_ShaderDesc meshDesc = {.code = Vk::AsSpirV(desc.meshShaderData), .size = desc.meshShaderSize, .entry_point = nullptr};
+    const ZHLN_ShaderDesc fragDesc = {.code = Vk::AsSpirV(desc.fragShaderData), .size = desc.fragShaderSize, .entry_point = nullptr};
+
+    auto shaders = Vk::ShaderStages::CreateMesh(impl->ctx.Device(), taskDesc, meshDesc, fragDesc);
+    if (!shaders) {
+        ZHLN::Log("[RenderResources] Mesh-shader stage creation failed ({}); this material keeps the vertex pipeline.", shaders.error().Message());
+        return {};
+    }
+
+    // Same heap mappings as the vertex pipeline: task/mesh consume the exact
+    // same `scene` parameter block, so the reflected mapping table is shared.
+    auto builder = Vk::PipelineBuilder {}
+                       .Shaders(*shaders)
+                       .Layout(impl->emptyPipelineLayout)
+                       .HeapMappings(&impl->sceneHeapMappings.info, &impl->sceneHeapMappings.info)
+                       .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT);
+
+    if (desc.doubleSided) {
+        builder.CullNone();
+    } else {
+        builder.CullBack();
+    }
+
+    if (desc.alphaBlend || desc.additiveBlend) {
+        builder.ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT});
+        builder.DepthWrite(false);
+        if (desc.additiveBlend) {
+            builder.AdditiveBlend();
+        } else {
+            builder.AlphaBlend();
+        }
+    } else {
+        builder.ColorFormats(ActiveGBuffer::array);
+    }
+
+    // NOTE: no Topology() call -- mesh pipelines have no input assembler, the
+    // topology is declared by the mesh shader itself ([outputtopology]).
+    auto pipeline = builder.Build(impl->ctx.Device());
+    if (!pipeline) {
+        ZHLN::Log("[RenderResources] Mesh pipeline creation failed ({}); this material keeps the vertex pipeline.", pipeline.error().Message());
+        return {};
+    }
+    return std::move(*pipeline);
+}
+
+} // namespace
 
 auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> std::expected<Material, Error> {
     ZHLN_ShaderDesc v_desc = {.code = Vk::AsSpirV(desc.vertexShaderData), .size = desc.vertexShaderSize, .entry_point = nullptr};
@@ -294,8 +413,12 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> std::expected<Ma
                         return MaterialCreationError::PipelineCreationFailed;
                     })
                     .transform([impl, layout, &desc](auto&& compiledPipeline) -> auto {
+                        // VK_EXT_mesh_shader: the meshlet twin lives in the same
+                        // NativeMaterial, so a draw can pick either path per call.
+                        Vk::Pipeline meshPipeline = BuildMeshVariant(impl, desc);
+
                         return Material {
-                            .pipeline  = impl->materialPool.Create(std::forward<decltype(compiledPipeline)>(compiledPipeline), layout),
+                            .pipeline  = impl->materialPool.Create(std::forward<decltype(compiledPipeline)>(compiledPipeline), layout, std::move(meshPipeline)),
                             .alphaMode = (desc.alphaBlend || desc.additiveBlend) ? 2u : 0u
                         };
                     });
@@ -304,12 +427,14 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> std::expected<Ma
 }
 
 auto RenderContext::CreateDebugLineMaterial() -> std::expected<Material, Error> {
-    auto shaders = Resource::GetShaderProgram(Resource::ShaderID::Basic);
+    // PSForward => the Forward geometry variant. No mesh stages: a LINE_LIST
+    // has no mesh-shader equivalent (mesh pipelines declare their own topology).
+    const auto shaders = Resource::GetSceneShaders(Resource::SceneShaderVariant::Forward);
     return CreateMaterial({
         .vertexShaderData = shaders.vertex.data(),
         .vertexShaderSize = shaders.vertex.size(),
-        .fragShaderData   = Resource::forward_frag.data(),
-        .fragShaderSize   = Resource::forward_frag.size(),
+        .fragShaderData   = shaders.fragment.data(),
+        .fragShaderSize   = shaders.fragment.size(),
         .doubleSided      = true,
         .alphaBlend       = true,
         .isLineList       = true,
@@ -317,14 +442,21 @@ auto RenderContext::CreateDebugLineMaterial() -> std::expected<Material, Error> 
 }
 
 auto RenderContext::CreateDebugSolidMaterial() -> std::expected<Material, Error> {
-    auto shaders = Resource::GetShaderProgram(Resource::ShaderID::Basic);
+    const auto shaders = Resource::GetSceneShaders(Resource::SceneShaderVariant::Forward);
     return CreateMaterial({
         .vertexShaderData = shaders.vertex.data(),
         .vertexShaderSize = shaders.vertex.size(),
-        .fragShaderData   = Resource::forward_frag.data(),
-        .fragShaderSize   = Resource::forward_frag.size(),
-        .doubleSided      = true,
-        .alphaBlend       = true,
+        .fragShaderData   = shaders.fragment.data(),
+        .fragShaderSize   = shaders.fragment.size(),
+        // Designator order must follow PipelineDesc's declaration order: the
+        // task/mesh members sit between the fragment stage and the state flags.
+        // GCC rejects any other order outright (ISO C++ [dcl.init.aggr]/3.1).
+        .taskShaderData = shaders.task.data(),
+        .taskShaderSize = shaders.task.size(),
+        .meshShaderData = shaders.mesh.data(),
+        .meshShaderSize = shaders.mesh.size(),
+        .doubleSided    = true,
+        .alphaBlend     = true,
     });
 }
 

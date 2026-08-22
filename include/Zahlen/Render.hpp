@@ -34,10 +34,20 @@ struct PipelineDesc {
     size_t      vertexShaderSize = 0;
     const void* fragShaderData   = nullptr;
     size_t      fragShaderSize   = 0;
-    bool        doubleSided      = false;
-    bool        alphaBlend       = false;
-    bool        additiveBlend    = false; // ADDED: Support for emissive particles
-    bool        isLineList       = false;
+
+    // VK_EXT_mesh_shader: optional task/mesh stages. When both the device
+    // supports mesh shading and `meshShaderData` is set, the material gets a
+    // SECOND pipeline built from task+mesh+fragment. The vertex pipeline is
+    // always built as well, so the renderer can fall back per draw call
+    // (skinned meshes, meshes without meshlet streams, unsupported devices).
+    const void* taskShaderData = nullptr;
+    size_t      taskShaderSize = 0;
+    const void* meshShaderData = nullptr;
+    size_t      meshShaderSize = 0;
+    bool        doubleSided    = false;
+    bool        alphaBlend     = false;
+    bool        additiveBlend  = false; // ADDED: Support for emissive particles
+    bool        isLineList     = false;
 };
 
 struct DrawParams {
@@ -130,6 +140,19 @@ class ZHLN_API RenderContext {
     void SubmitMeshParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const MeshParticleEmitterParams& params, AssetID mesh, MaterialID mat);
 
     // --- Opaque Resource Creation API ---
+    /// Uploads immutable data that shaders reach only through its device
+    /// address (VK_BUFFER_USAGE_STORAGE_BUFFER_BIT). Use this, not
+    /// CreateVertexBuffer, for BDA-only streams such as the VK_EXT_mesh_shader
+    /// meshlet descriptors: they are never bound as vertex or index buffers,
+    /// so tagging them VERTEX_BUFFER_BIT misdescribes them to the driver and
+    /// to tooling.
+    ///
+    /// Note that STORAGE_BUFFER_BIT is not what makes a BDA read legal --
+    /// SHADER_DEVICE_ADDRESS_BIT is, and CreateGPUBuffer always sets it. This
+    /// exists for correct intent, and so the streams can be bound as storage
+    /// descriptors later (e.g. a compute pass writing meshlet indirect args).
+    auto CreateStorageBuffer(const void* data, size_t size, uint32_t stride = sizeof(uint32_t)) -> BufferHandle;
+
     auto                                         CreateVertexBuffer(const void* data, size_t size, uint32_t stride = sizeof(VertexPosition)) -> BufferHandle;
     auto                                         CreateIndexBuffer(const void* data, size_t size) -> BufferHandle;
     void                                         DestroyBuffer(BufferHandle handle);
@@ -180,7 +203,23 @@ class ZHLN_API RenderContext {
     ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& GetTracked2DEmitters() noexcept;
     ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& GetTracked3DEmitters() noexcept;
 
-    void         SetAAState(const AAState& state);
+    void SetAAState(const AAState& state);
+
+    // --- VK_EXT_mesh_shader ---
+    /// True when the device exposes mesh shading with limits sufficient for the
+    /// engine's meshlet budget (independent of whether it is currently in use).
+    [[nodiscard]] bool MeshShadingSupported() const noexcept;
+    /// True when scene geometry is actually being drawn through task/mesh
+    /// shaders this frame (supported AND not disabled).
+    [[nodiscard]] bool MeshShadingActive() const noexcept;
+    /// Runtime override of ZHLN_NO_MESH_SHADING. Call between frames only;
+    /// both pipelines are always built, so this only changes which is bound.
+    void SetMeshShadingEnabled(bool enabled) noexcept;
+
+    /// Validation-layer errors seen so far (0 when validation is off). Snapshot
+    /// it around a workload to assert that the workload is VUID-clean.
+    [[nodiscard]] static uint32_t ValidationErrorCount() noexcept;
+
     RenderResult BuildMeshBLAS(Mesh& mesh) noexcept;
 
     [[nodiscard]] std::expected<void, Error> SetShadowResolution(uint32_t resolution);

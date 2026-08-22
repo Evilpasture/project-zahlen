@@ -255,6 +255,15 @@ set_target_properties(Jolt PROPERTIES
 )
 
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/VulkanMemoryAllocator SYSTEM)
+
+# --- meshoptimizer (VK_EXT_mesh_shader meshlet generation) ---
+# Used by the offline cooker (zcook) and by the runtime glTF importer through
+# include/Zahlen/Meshlet.hpp, so both produce identical meshlet streams.
+set(MESHOPT_BUILD_DEMO OFF CACHE BOOL "" FORCE)
+set(MESHOPT_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+set(MESHOPT_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/meshoptimizer EXCLUDE_FROM_ALL SYSTEM)
+set_target_properties(meshoptimizer PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/SPIRV-Reflect)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui)
 set_target_properties(imgui PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -472,6 +481,7 @@ target_link_libraries(zahlen_engine PRIVATE
     spirv_reflect
     imgui
     mimalloc-static
+    meshoptimizer
     yogacore
     ${ZSTD_LIBRARY}
     PkgConfig::SIMDJSON
@@ -632,7 +642,7 @@ add_executable(zcook
     src/zcook/GLB.cpp
     src/zcook/Cook.cpp
 )
-target_link_libraries(zcook PRIVATE zahlen_engine)
+target_link_libraries(zcook PRIVATE zahlen_engine meshoptimizer)
 target_include_directories(zcook SYSTEM PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/cgltf
     ${CMAKE_CURRENT_SOURCE_DIR}/src/zcook

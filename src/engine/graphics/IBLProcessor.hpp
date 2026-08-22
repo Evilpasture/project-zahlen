@@ -13,7 +13,7 @@ namespace ZHLN::Vk {
 
 class IBLProcessor {
   public:
-    static std::expected<IBLPayload, VkResult> Bake(RenderContext::Impl& impl, StagingContext& staging) {
+    static auto Bake(RenderContext::Impl& impl, StagingContext& staging) -> std::expected<IBLPayload, VkResult> {
         IBLPayload payload;
 
         // Pass 1: BRDF LUT Generation
@@ -76,29 +76,30 @@ class IBLProcessor {
             totalBytes += (static_cast<size_t>(s * s * 4 * 6));
         }
 
-        return Buffer::Create(impl.allocator.Get(), totalBytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY).transform([&](auto&& stagingBuf) {
-            auto   mapped        = stagingBuf.Map();
-            char*  writePtr      = static_cast<char*>(mapped.data);
-            size_t currentOffset = 0;
+        return Buffer::Create(impl.allocator.Get(), totalBytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY)
+            .transform([&](auto&& stagingBuf) -> auto {
+                auto   mapped        = stagingBuf.Map();
+                char*  writePtr      = static_cast<char*>(mapped.data);
+                size_t currentOffset = 0;
 
-            for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
-                uint32_t mipSize   = kBaseSize >> mip;
-                float    roughness = static_cast<float>(mip) / static_cast<float>(kMipLevels - 1);
-                auto     mipData   = ZHLN::PBR::GenerateSpecularMip(mipSize, roughness);
-                auto     faceBytes = static_cast<size_t>(mipSize) * mipSize * 4;
-                for (int face = 0; face < 6; ++face) {
-                    std::memcpy(writePtr + currentOffset + (face * faceBytes), mipData[face].data(), faceBytes);
+                for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
+                    uint32_t mipSize   = kBaseSize >> mip;
+                    float    roughness = static_cast<float>(mip) / static_cast<float>(kMipLevels - 1);
+                    auto     mipData   = ZHLN::PBR::GenerateSpecularMip(mipSize, roughness);
+                    auto     faceBytes = static_cast<size_t>(mipSize) * mipSize * 4;
+                    for (int face = 0; face < 6; ++face) {
+                        std::memcpy(writePtr + currentOffset + (face * faceBytes), mipData[face].data(), faceBytes);
+                    }
+                    currentOffset += (faceBytes * 6);
                 }
-                currentOffset += (faceBytes * 6);
-            }
 
-            staging.UploadPrefilteredCubeMap(payload.prefilteredImage.Handle(), stagingBuf.Handle(), kBaseSize, kMipLevels);
-            staging.AddBuffer(std::forward<decltype(stagingBuf)>(stagingBuf));
+                staging.UploadPrefilteredCubeMap(payload.prefilteredImage.Handle(), stagingBuf.Handle(), kBaseSize, kMipLevels);
+                staging.AddBuffer(std::forward<decltype(stagingBuf)>(stagingBuf));
 
-            payload.prefilteredView     = CreateViewCube<VK_FORMAT_R8G8B8A8_UNORM>(impl.ctx.Device(), payload.prefilteredImage.Handle(), kMipLevels);
-            payload.prefilteredViewInfo = MakeViewCreateInfoCube(payload.prefilteredImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, kMipLevels);
-            return std::move(payload); // <-- Explicitly move to resolve the deleted copy constructor error
-        });
+                payload.prefilteredView     = CreateViewCube<VK_FORMAT_R8G8B8A8_UNORM>(impl.ctx.Device(), payload.prefilteredImage.Handle(), kMipLevels);
+                payload.prefilteredViewInfo = MakeViewCreateInfoCube(payload.prefilteredImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, kMipLevels);
+                return std::move(payload); // <-- Explicitly move to resolve the deleted copy constructor error
+            });
     }
 };
 

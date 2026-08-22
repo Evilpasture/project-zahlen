@@ -36,6 +36,20 @@ enum class RenderPassType : uint8_t { Main, Shadow };
     return (passType == RenderPassType::Main) ? hasMain : hasShadow;
 }
 
+/// VK_EXT_mesh_shader: a draw takes the meshlet path only when the material
+/// carries a mesh pipeline, the instance carries meshlet streams and no
+/// pipeline override (CSG stencil passes) is in play.
+[[nodiscard]] inline bool UseMeshPath(const DrawCommand& drawCmd, VkPipeline pipelineOverride) noexcept {
+    return pipelineOverride == VK_NULL_HANDLE && drawCmd.material != nullptr && drawCmd.material->HasMeshPipeline() && drawCmd.instanceData.meshletCount > 0 &&
+           !Diag::DisableMeshShading();
+}
+
+/// Number of task workgroups needed to screen every meshlet of an instance;
+/// each workgroup evaluates kMeshletsPerTaskGroup clusters (basic_task.slang).
+[[nodiscard]] inline constexpr uint32_t TaskGroupCount(uint32_t meshletCount) noexcept {
+    return (meshletCount + kMeshletsPerTaskGroup - 1) / kMeshletsPerTaskGroup;
+}
+
 template <typename T>
 inline void SubmitDrawInstanced(
     Vk::CommandEncoder& encoder,
@@ -47,8 +61,28 @@ inline void SubmitDrawInstanced(
     VkShaderStageFlags  stages           = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
 ) noexcept {
     const auto* nativeMat = drawCmd.material;
-    auto* const pipeline  = (pipelineOverride != VK_NULL_HANDLE) ? pipelineOverride : nativeMat->pipeline.Get();
     auto* const layout    = (layoutOverride != VK_NULL_HANDLE) ? layoutOverride : nativeMat->layout;
+
+    // --- VK_EXT_mesh_shader path -------------------------------------------
+    // The task shader reads the instance id out of push data (exactly like the
+    // vertex shader does), performs per-cluster frustum + normal-cone culling
+    // and amplifies into one mesh workgroup per surviving meshlet. There is no
+    // firstInstance to encode here, which is precisely why the mesh path runs
+    // through this per-draw submission rather than the indirect one.
+    if (UseMeshPath(drawCmd, pipelineOverride)) {
+        encoder.DrawMeshTasks(
+            {.pipeline    = nativeMat->meshPipeline.Get(),
+             .layout      = layout,
+             .heap        = true,
+             .groupCountX = TaskGroupCount(drawCmd.instanceData.meshletCount),
+             .groupCountY = 1,
+             .groupCountZ = 1},
+            pushConstants
+        );
+        return;
+    }
+
+    auto* const pipeline = (pipelineOverride != VK_NULL_HANDLE) ? pipelineOverride : nativeMat->pipeline.Get();
 
     const uint32_t vertexCount = drawCmd.instanceData.iboAddress != 0 ? drawCmd.instanceData.indexCount : drawCmd.instanceData.vertexCount;
 
@@ -573,6 +607,8 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
         Profiler::ScopedGpuProfile timer(cmd, recorder.frameIndex, ctx.gpuProfiler, Stage::ShadowPass);
         bool                       hasMeshParticles = !ctx.queues.meshParticleQueue.empty();
 
+        const bool useMeshShadowPath = ctx.MeshShadingActive() && ctx.shadowMeshPipeline.Valid();
+
         for (uint32_t c = 0; c < RenderContext::Impl::NUM_CASCADES; ++c) {
             uint32_t csmDrawCount = passDrawCounts[c];
 
@@ -587,7 +623,49 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
             Vk::DynamicPass(cascadeLayerImage.extent)
                 .AddDepth(cascadeLayerImage, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kShadowClearDepth)
                 .Execute(cmd, [&]() {
-                    if (csmDrawCount > 0) {
+                    // VK_EXT_mesh_shader: VkDrawMeshTasksIndirectCommandEXT has
+                    // no firstInstance, so the instance id can no longer ride
+                    // along in the indirect record. The cascade visibility list
+                    // was just written to a host-visible buffer above, so the
+                    // mesh path simply replays it as direct dispatches -- the
+                    // per-cluster culling that matters now happens in the task
+                    // shader against lightSpaceMatrices[c].
+                    const bool useMeshShadows = useMeshShadowPath && csmDrawCount > 0;
+
+                    if (useMeshShadows) {
+                        for (uint32_t d = 0; d < csmDrawCount; ++d) {
+                            const uint32_t instanceIdx = indirectCmdsBase[passWriteOffsets[c] + d].firstInstance;
+                            if (instanceIdx >= ctx.queues.drawQueue.size()) {
+                                continue;
+                            }
+                            const auto& shadowDraw = ctx.queues.drawQueue[instanceIdx];
+                            if (shadowDraw.instanceData.meshletCount == 0) {
+                                // Skinned / non-meshletized geometry: one vertex draw.
+                                recorder.encoder.DrawInstanced(
+                                    {.pipeline      = ctx.shadowPipeline.Get(),
+                                     .layout        = ctx.shadowPipelineLayout,
+                                     .heap          = true,
+                                     .vertexCount   = indirectCmdsBase[passWriteOffsets[c] + d].vertexCount,
+                                     .instanceCount = 1,
+                                     .firstVertex   = 0,
+                                     .firstInstance = instanceIdx},
+                                    ObjectConstants {.instanceId = instanceIdx, .isShadowPass = 1 + c},
+                                    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+                                );
+                                continue;
+                            }
+
+                            recorder.encoder.DrawMeshTasks(
+                                {.pipeline    = ctx.shadowMeshPipeline.Get(),
+                                 .layout      = ctx.shadowPipelineLayout,
+                                 .heap        = true,
+                                 .groupCountX = TaskGroupCount(shadowDraw.instanceData.meshletCount),
+                                 .groupCountY = 1,
+                                 .groupCountZ = 1},
+                                ObjectConstants {.instanceId = instanceIdx, .isShadowPass = 1 + c}
+                            );
+                        }
+                    } else if (csmDrawCount > 0) {
                         recorder.encoder.DrawIndirect(
                             {.pipeline       = ctx.shadowPipeline.Get(),
                              .layout         = ctx.shadowPipelineLayout,
@@ -698,8 +776,15 @@ void MainPass1::Execute(
         }
     }
 
+    // VK_EXT_mesh_shader: the two-phase GPU culling path drives the geometry
+    // through vkCmdDrawIndirect, whose VkDrawIndirectCommand::firstInstance
+    // carries the instance id. The mesh equivalent
+    // (VkDrawMeshTasksIndirectCommandEXT) has no such field, so while mesh
+    // shading is active the passes take the per-draw recording policy and the
+    // culling work moves into the task shader (per-cluster frustum + normal
+    // cone) instead of the instance-level culling compute pass.
     const bool useGpuCulling = ctx.cullingPass.pipeline.Valid() && ctx.frames.indirectCommandsBuffers->Valid() && (drawCount <= kGpuCullingMaxInstances) &&
-                               !Diag::DisableGpuCulling();
+                               !Diag::DisableGpuCulling() && !ctx.MeshShadingActive();
     if (useGpuCulling) {
         ExecutePass<GpuCullingPolicyPass1>(recorder, groups, drawCount, in.sceneColor, in.velocity, in.normRough, in.depth);
     } else {
@@ -741,8 +826,10 @@ void MainPass2::Execute(
         }
     }
 
+    // See MainPass1: mesh shading and the indirect culling path are mutually
+    // exclusive because the mesh indirect command has no firstInstance field.
     const bool useGpuCulling = ctx.cullingPass.pipeline.Valid() && ctx.frames.indirectCommandsBuffers->Valid() && (drawCount <= kGpuCullingMaxInstances) &&
-                               !Diag::DisableGpuCulling();
+                               !Diag::DisableGpuCulling() && !ctx.MeshShadingActive();
     if (useGpuCulling) {
         ExecutePass<GpuCullingPolicyPass2>(recorder, groups, drawCount, in.sceneColor, in.velocity, in.normRough, in.depth);
     } else {

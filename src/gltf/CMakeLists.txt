@@ -30,6 +30,7 @@ target_link_libraries(zahlen_gltf PRIVATE
     zahlen_render
     zahlen_physics
     zahlen_threading
+    meshoptimizer
     Jolt
     PkgConfig::SIMDJSON # <-- ADD THIS
 )

@@ -94,6 +94,15 @@ class PipelineBuilder {
 
     auto Shaders(const ShaderStages& s) noexcept -> PipelineBuilder& {
         _cfg.stages = s.Get();
+        // VK_EXT_mesh_shader: a mesh stage set has no vertex input at all, so
+        // clear anything a previous Vertex<V>() call installed. The C layer
+        // additionally passes pVertexInputState/pInputAssemblyState as NULL.
+        if (s.IsMeshPipeline()) {
+            _cfg.bindings       = nullptr;
+            _cfg.attributes     = nullptr;
+            _cfg.bindingCount   = 0;
+            _cfg.attributeCount = 0;
+        }
         return *this;
     }
 
@@ -277,6 +286,11 @@ class PipelineBuilder {
   private:
     [[nodiscard]] auto Validate() const noexcept -> PipelineBuilderResult {
         if (_cfg.stages == nullptr) {
+            return PipelineBuilderResult::MissingShaders;
+        }
+        // Either a vertex stage or a mesh stage must be present; the C layer
+        // rejects a set that has neither.
+        if (_cfg.stages->vert.handle == VK_NULL_HANDLE && _cfg.stages->mesh.handle == VK_NULL_HANDLE) {
             return PipelineBuilderResult::MissingShaders;
         }
         // VUID-VkGraphicsPipelineCreateInfo-flags-11311: descriptor-heap

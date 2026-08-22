@@ -28,7 +28,8 @@ struct PackagingTestSuite {
             ZHLN::Test::ExpectEq(sizeof(ZHLN::PakHeader), 20u);
             ZHLN::Test::ExpectEq(sizeof(ZHLN::PakEntry), 36u);
             ZHLN::Test::ExpectEq(sizeof(ZHLN::CookedTextureHeader), 28u);
-            ZHLN::Test::ExpectEq(sizeof(ZHLN::CookedMeshHeader), 44u);
+            // v4 header: +12 bytes of VK_EXT_mesh_shader stream counts
+            ZHLN::Test::ExpectEq(sizeof(ZHLN::CookedMeshHeader), 56u);
             ZHLN::Test::ExpectEq(sizeof(ZHLN::CookedAnimHeader), 20u);
 
             return {};

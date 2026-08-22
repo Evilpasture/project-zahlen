@@ -2,22 +2,11 @@
 import common;
 import pbr_helpers;
 
-struct VSOutput {
-    float4 pos : SV_Position;
-    float4 currClip : TEXCOORD0;
-    float4 prevClip : TEXCOORD1;
-    float3 worldPos : POSITION;
-    float3 normal : NORMAL;
-    float4 tangent : TANGENT;
-    float2 uv : TEXCOORD2;
-    float4 shadowPos : TEXCOORD3;
-    float4 color : COLOR;
-    nointerpolation uint4 materialIndices : TEXCOORD4;
-    nointerpolation float4 baseColorFactor : TEXCOORD5;
-    nointerpolation float3 pbrFactors : TEXCOORD6;
-    nointerpolation uint alphaMode : TEXCOORD7;
-    nointerpolation float4 emissiveFactor : TEXCOORD8;
-};
+// The geometry->fragment interface now lives in common.slang so the vertex path
+// (VSMain below) and the VK_EXT_mesh_shader path (basic_mesh.slang: MeshMain)
+// feed the fragment shaders in this file through one single, shared
+// declaration. The local alias keeps this file (and its diffs) unchanged.
+typealias VSOutput = SceneGeometryOutput;
 
 struct PSOutput {
     float4 color : SV_Target0;
@@ -32,7 +21,9 @@ struct PSOutput {
 // (see kGpuCullingSentinel handling below), so the raw Vulkan builtins are
 // required. Same argument applies to SV_VertexID/SV_VulkanVertexID.
 VSOutput VSMain(uint vertexId: SV_VulkanVertexID, uint instanceId: SV_VulkanInstanceID, uint viewId: SV_ViewID) {
-    VSOutput output;
+    // Filled unconditionally; PackGeometryOutput drops whatever this pass's
+    // fragment stage does not read.
+    SceneGeometryVertex output;
 
     uint instId       = (obj.instanceId != 4294967295u) ? obj.instanceId : instanceId;
     InstanceData inst = scene.g_instances[instId];
@@ -94,8 +85,6 @@ VSOutput VSMain(uint vertexId: SV_VulkanVertexID, uint instanceId: SV_VulkanInst
         output.tangent.xyz = normalize(mul(world3x3, localTangent.xyz));
     }
 
-    output.worldPos = worldPos.xyz;
-
     float4 baseColorFactor = inst.baseColorFactor;
     float4 emissiveFactor  = inst.emissiveFactor;
     float metallicFactor   = inst.metallicFactor;
@@ -114,13 +103,12 @@ VSOutput VSMain(uint vertexId: SV_VulkanVertexID, uint instanceId: SV_VulkanInst
         output.alphaMode       = inst.alphaMode;
         output.materialIndices = uint4(inst.albedoIndex, 0, 0, 0);
 
-        output.currClip  = 0;
-        output.prevClip  = 0;
-        output.normal    = 0;
-        output.tangent   = 0;
-        output.shadowPos = 0;
-        output.color     = localColor;
-        return output;
+        output.currClip = 0;
+        output.prevClip = 0;
+        output.normal   = 0;
+        output.tangent  = 0;
+        output.color    = localColor;
+        return PackGeometryOutput(output);
     }
 
     output.pos      = mul(activeVP, worldPos);
@@ -137,16 +125,19 @@ VSOutput VSMain(uint vertexId: SV_VulkanVertexID, uint instanceId: SV_VulkanInst
     output.tangent.w = localTangent.w;
     output.uv        = localUV;
 
-    output.shadowPos       = mul(scene.frame.lightSpaceMatrices[0], worldPos);
     output.color           = localColor;
     output.materialIndices = uint4(inst.albedoIndex, inst.normalIndex, inst.pbrIndex, inst.emissiveIndex);
     output.baseColorFactor = baseColorFactor;
     output.emissiveFactor  = emissiveFactor;
     output.pbrFactors      = float3(metallicFactor, roughnessFactor, alphaCutoff);
     output.alphaMode       = inst.alphaMode;
-    return output;
+    return PackGeometryOutput(output);
 }
 
+// Each fragment entry point is gated to its own variant: Slang type-checks the
+// whole module, so PSMain referencing G-buffer-only members would break the
+// shadow/forward compiles even though only one entry point is requested.
+#if defined(ZHLN_PASS_SHADOW)
 void PSShadow(VSOutput input) {
     uint4 indices          = input.materialIndices;
     float4 baseColorFactor = input.baseColorFactor;
@@ -160,6 +151,9 @@ void PSShadow(VSOutput input) {
     }
 }
 
+#endif // ZHLN_PASS_SHADOW
+
+#if !defined(ZHLN_PASS_SHADOW) && !defined(FORWARD_PASS)
 PSOutput PSMain(VSOutput input) {
     PSOutput output;
 
@@ -216,6 +210,8 @@ PSOutput PSMain(VSOutput input) {
 
     return output;
 }
+
+#endif // G-buffer variant
 
 #ifdef FORWARD_PASS
 

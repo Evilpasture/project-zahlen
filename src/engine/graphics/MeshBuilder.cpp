@@ -8,15 +8,71 @@
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
+#include <Zahlen/Meshlet.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstring>
+#include <span>
 #include <vector>
 
 namespace ZHLN::CreativeWorksFactory {
+
+namespace {
+
+/// VK_EXT_mesh_shader: partitions a procedurally generated mesh and uploads the
+/// three meshlet streams onto `mesh`. Without this, procedural geometry (boxes,
+/// planes, terrain) carries meshletCount == 0 and silently stays on the vertex
+/// pipeline forever, even on hardware that supports mesh shading -- only
+/// glTF-imported and zcook-cooked meshes would ever take the mesh path.
+///
+/// `indices` may be empty for the non-indexed builders below: meshlet micro
+/// indices address the vertex pool directly, so a trivial 0..n-1 index stream
+/// produces exactly the same clusters and leaves the (absent) IBO alone.
+void AttachMeshlets(RenderContext& ctx, Mesh& mesh, std::span<const VertexPosition> positions, std::span<const uint32_t> indices) {
+    if (positions.empty()) {
+        return;
+    }
+
+    std::vector<uint32_t> sequential;
+    if (indices.empty()) {
+        sequential.resize(positions.size());
+        for (uint32_t i = 0; i < sequential.size(); ++i) {
+            sequential[i] = i;
+        }
+        indices = sequential;
+    }
+
+    // Triangle lists only: anything else has no meshlet representation.
+    if (indices.size() < 3 || (indices.size() % 3) != 0) {
+        return;
+    }
+
+    const auto built = BuildMeshlets(indices, positions);
+    if (built.Empty()) {
+        return;
+    }
+
+    // Storage, not vertex data: the task/mesh shaders reach these only through
+    // their device address, they are never bound to the input assembler.
+    mesh.meshletBuffer       = ctx.CreateStorageBuffer(built.meshlets.data(), built.meshlets.size() * sizeof(GPUMeshlet), sizeof(GPUMeshlet));
+    mesh.meshletVertexBuffer = ctx.CreateStorageBuffer(built.vertices.data(), built.vertices.size() * sizeof(uint32_t), sizeof(uint32_t));
+    mesh.meshletTriBuffer    = ctx.CreateStorageBuffer(built.triangles.data(), built.triangles.size(), sizeof(uint8_t));
+
+    if (mesh.meshletBuffer == BufferHandle::Invalid || mesh.meshletVertexBuffer == BufferHandle::Invalid || mesh.meshletTriBuffer == BufferHandle::Invalid) {
+        mesh.meshletBuffer       = BufferHandle::Invalid;
+        mesh.meshletVertexBuffer = BufferHandle::Invalid;
+        mesh.meshletTriBuffer    = BufferHandle::Invalid;
+        mesh.meshletCount        = 0;
+        return;
+    }
+
+    mesh.meshletCount = static_cast<uint32_t>(built.meshlets.size());
+}
+
+} // namespace
 
 auto CreateTetrahedronMesh(RenderContext& ctx) -> Mesh {
     std::vector<VertexPosition>   positions = {{{1.0f, 1.0f, 1.0f}}, {{-1.0f, -1.0f, 1.0f}}, {{-1.0f, 1.0f, -1.0f}}, {{1.0f, -1.0f, -1.0f}}};
@@ -42,6 +98,7 @@ auto CreateTetrahedronMesh(RenderContext& ctx) -> Mesh {
         .vertexCount = static_cast<uint32_t>(positions.size()),
         .indexCount  = static_cast<uint32_t>(indices.size())
     };
+    AttachMeshlets(ctx, finalMesh, positions, indices);
     auto res = ctx.BuildMeshBLAS(finalMesh);
     if (!res) [[unlikely]] {
         if (!res.error().Is(VulkanCallError::FeatureNotPresent)) {
@@ -52,18 +109,27 @@ auto CreateTetrahedronMesh(RenderContext& ctx) -> Mesh {
 }
 
 auto CreateBasicMaterial(RenderContext& ctx, bool doubleSided, bool alphaBlend, bool additiveBlend) -> std::expected<Material, Error> {
-    using enum Resource::ShaderID;
     PipelineDesc desc;
-    desc.vertexShaderData = Resource::GetShaderProgram(Basic).vertex.data();
-    desc.vertexShaderSize = static_cast<std::uint32_t>(Resource::GetShaderProgram(Basic).vertex.size());
 
-    if (alphaBlend || additiveBlend) {
-        desc.fragShaderData = Resource::forward_frag.data();
-        desc.fragShaderSize = static_cast<std::uint32_t>(Resource::forward_frag.size());
-    } else {
-        desc.fragShaderData = Resource::GetShaderProgram(Basic).fragment.data();
-        desc.fragShaderSize = static_cast<std::uint32_t>(Resource::GetShaderProgram(Basic).fragment.size());
-    }
+    // One lookup picks the geometry AND fragment stages together: the scene
+    // interface is compiled per pass, so a hand-rolled pairing of, say, the
+    // G-buffer vertex shader with PSForward would mismatch varying locations.
+    const bool translucent = alphaBlend || additiveBlend;
+    const auto shaders     = Resource::GetSceneShaders(translucent ? Resource::SceneShaderVariant::Forward : Resource::SceneShaderVariant::GBuffer);
+
+    desc.vertexShaderData = shaders.vertex.data();
+    desc.vertexShaderSize = shaders.vertex.size();
+    desc.fragShaderData   = shaders.fragment.data();
+    desc.fragShaderSize   = shaders.fragment.size();
+
+    // VK_EXT_mesh_shader: CreateMaterial builds the meshlet pipeline only when
+    // the device supports mesh shading; the vertex pipeline above is always
+    // built and stays the fallback for skinned meshes and meshes without
+    // meshlet streams.
+    desc.taskShaderData = shaders.task.data();
+    desc.taskShaderSize = shaders.task.size();
+    desc.meshShaderData = shaders.mesh.data();
+    desc.meshShaderSize = shaders.mesh.size();
 
     desc.doubleSided   = doubleSided;
     desc.alphaBlend    = alphaBlend;
@@ -129,6 +195,7 @@ auto CreatePlaneMesh(RenderContext& ctx, float extent, const JPH::Vec4& color) -
         .vertexCount = static_cast<uint32_t>(positions.size()),
         .indexCount  = 0
     };
+    AttachMeshlets(ctx, finalMesh, positions, {});
     auto res = ctx.BuildMeshBLAS(finalMesh);
     if (!res) [[unlikely]] {
         if (!res.error().Is(VulkanCallError::FeatureNotPresent)) {
@@ -264,6 +331,7 @@ auto CreateBoxMesh(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4
         .vertexCount = static_cast<uint32_t>(positions.size()),
         .indexCount  = 0
     };
+    AttachMeshlets(ctx, finalMesh, positions, {});
     auto res = ctx.BuildMeshBLAS(finalMesh);
     if (!res) [[unlikely]] {
         if (!res.error().Is(VulkanCallError::FeatureNotPresent)) {
@@ -378,6 +446,7 @@ auto CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldS
     BufferHandle attrVbo = ctx.CreateVertexBuffer(attributes.data(), attributes.size() * sizeof(VertexAttributes));
 
     Mesh finalMesh {.posBuffer = posVbo, .attrBuffer = attrVbo, .vertexCount = static_cast<uint32_t>(positions.size())};
+    AttachMeshlets(ctx, finalMesh, positions, {});
     if (auto res = ctx.BuildMeshBLAS(finalMesh); !res) [[unlikely]] {
         if (!res.error().Is(VulkanCallError::FeatureNotPresent)) {
             ZHLN::Log("WARNING: CreateTerrainMeshFromData: Failed to build mesh BLAS: {}", res.error().Message());
@@ -603,6 +672,7 @@ auto CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, flo
         .vertexCount = static_cast<uint32_t>(positions.size()),
         .indexCount  = 0
     };
+    AttachMeshlets(ctx, finalMesh, positions, {});
     auto res = ctx.BuildMeshBLAS(finalMesh);
     if (!res) [[unlikely]] {
         if (!res.error().Is(VulkanCallError::FeatureNotPresent)) {

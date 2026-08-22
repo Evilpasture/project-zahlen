@@ -71,6 +71,16 @@ struct CookedMeshHeader {
     uint32_t vertexCount;
     uint32_t indexCount;
     uint32_t hasSkin;
+    // --- version 4: VK_EXT_mesh_shader streams -------------------------------
+    // Appended after the index stream, in this order:
+    //   GPUMeshlet[meshletCount]        (64B each)
+    //   uint32_t  [meshletVertexCount]  unique vertex indices
+    //   uint8_t   [meshletTriByteCount] micro-indices (4-byte padded)
+    // All three are zero for meshes that could not be partitioned; readers must
+    // then fall back to the classic indexed draw path.
+    uint32_t meshletCount;
+    uint32_t meshletVertexCount;
+    uint32_t meshletTriByteCount;
 };
 
 struct CookedAnimHeader {

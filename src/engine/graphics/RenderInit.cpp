@@ -25,6 +25,14 @@ namespace {
 struct HardwareCaps {
     bool supportsDrawIndirectCount = false;
     bool supportsInt64             = false;
+    // VK_EXT_mesh_shader: extension + features + the hardware limits the
+    // Zahlen task/mesh shaders were authored against.
+    bool supportsMeshShader = false;
+    // Requested separately: FeatureChain::Optional drops the WHOLE feature
+    // struct when any single requested bit is unsupported, so asking for
+    // multiviewMeshShader unconditionally would silently disable taskShader
+    // and meshShader too on a device that lacks only the multiview bit.
+    bool supportsMultiviewMeshShader = false;
 };
 
 class HardwareCapsProber {
@@ -62,10 +70,70 @@ class HardwareCapsProber {
     uint32_t         _apiVersion;
 };
 
+bool CheckMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept;
+bool CheckMultiviewMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept;
+
 HardwareCaps ProbeHardware(VkPhysicalDevice physicalDevice, uint32_t apiVersion) noexcept {
     HardwareCaps caps {};
     HardwareCapsProber(physicalDevice, apiVersion).ProbeInt64(caps.supportsInt64).ProbeDrawIndirectCount(caps.supportsDrawIndirectCount);
+    caps.supportsMeshShader          = CheckMeshShaderSupport(physicalDevice);
+    caps.supportsMultiviewMeshShader = caps.supportsMeshShader && CheckMultiviewMeshShaderSupport(physicalDevice);
     return caps;
+}
+
+// VK_EXT_mesh_shader is only usable when the extension is present, the two
+// feature bits are advertised AND the device's mesh-shader limits cover the
+// geometry budget baked into basic_task.slang / basic_mesh.slang. Anything
+// less and the engine silently keeps the vertex pipeline.
+bool CheckMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept {
+    if (!ZHLN::Vk::IsDeviceExtensionSupported(physicalDevice, VK_EXT_MESH_SHADER_EXTENSION_NAME)) {
+        // Log the count too: a suspiciously round number here (128, 256...)
+        // means something is truncating the enumeration again.
+        ZHLN::Log(
+            "[RenderInit] VK_EXT_mesh_shader not present among the {} device extensions reported; using the vertex pipeline.",
+            ZHLN::Vk::EnumerateDeviceExtensions(physicalDevice).size()
+        );
+        return false;
+    }
+
+    VkPhysicalDeviceMeshShaderFeaturesEXT meshFeatures {};
+    meshFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT;
+    VkPhysicalDeviceFeatures2 features2 {};
+    features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    features2.pNext = &meshFeatures;
+    vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
+
+    if (meshFeatures.taskShader != VK_TRUE || meshFeatures.meshShader != VK_TRUE) {
+        ZHLN::Log(
+            "[RenderInit] VK_EXT_mesh_shader present but its features are not advertised (taskShader={}, meshShader={}); using the vertex pipeline.",
+            meshFeatures.taskShader, meshFeatures.meshShader
+        );
+        return false;
+    }
+
+    const ZHLN_MeshShaderLimits limits = ZHLN_QueryMeshShaderLimits(physicalDevice);
+    if (!ZHLN_MeshShaderLimitsSufficient(&limits)) {
+        ZHLN::Log(
+            "[RenderInit] VK_EXT_mesh_shader present but limits are insufficient "
+            "(maxMeshOutputVertices={}, maxMeshOutputPrimitives={}, maxTaskWorkGroupInvocations={}); using the vertex pipeline.",
+            limits.max_mesh_output_vertices, limits.max_mesh_output_primitives, limits.max_task_work_group_invocations
+        );
+        return false;
+    }
+
+    // Deliberately silent on success: a working feature is not news. Every
+    // return false above explains itself.
+    return true;
+}
+
+bool CheckMultiviewMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept {
+    VkPhysicalDeviceMeshShaderFeaturesEXT meshFeatures {};
+    meshFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT;
+    VkPhysicalDeviceFeatures2 features2 {};
+    features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    features2.pNext = &meshFeatures;
+    vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
+    return meshFeatures.multiviewMeshShader == VK_TRUE;
 }
 
 bool CheckRayTracingSupport(VkPhysicalDevice physicalDevice) noexcept {
@@ -227,9 +295,10 @@ std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfi
         .and_then([&]() { return BuildHiZPipeline(); })
         .and_then([&]() { return BuildProceduralBakePipeline(); })
         .and_then([&]() {
-            return CompileShadowPipeline(
-                       ctx.Device(), Resource::ShaderPair {.vertex = Resource::GetShaderProgram(Basic).vertex, .fragment = Resource::shadow_frag}
-            )
+            // Shadow variant: geometry + fragment stages from one lookup so
+            // their varying locations cannot drift apart.
+            const auto shadowShaders = Resource::GetSceneShaders(Resource::SceneShaderVariant::Shadow);
+            return CompileShadowPipeline(ctx.Device(), Resource::ShaderPair {.vertex = shadowShaders.vertex, .fragment = shadowShaders.fragment})
                 .transform_error([](auto e) -> Error { return e; });
         })
         .and_then([&]() {
@@ -380,6 +449,18 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
         // them draw inside stencil-less render passes (and stencil-less
         // secondary command buffers) without format-mismatch VUIDs.
         .Require<VkPhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT>([](auto& f) { f.dynamicRenderingUnusedAttachments = VK_TRUE; })
+        // VK_EXT_mesh_shader. multiviewMeshShader lets the shadow pass render
+        // all cascades from a single dispatch; it is only requested when the
+        // device actually supports mesh shading, because the feature struct
+        // must not be chained on a device that lacks the extension.
+        .Optional<VkPhysicalDeviceMeshShaderFeaturesEXT>([&caps](auto& f) {
+            f.taskShader = caps.supportsMeshShader ? VK_TRUE : VK_FALSE;
+            f.meshShader = caps.supportsMeshShader ? VK_TRUE : VK_FALSE;
+            // Only requested when the device actually has it: one unsupported
+            // bit would make FeatureChain::Optional discard the entire struct,
+            // leaving the extension enabled but task/mesh shading OFF.
+            f.multiviewMeshShader = caps.supportsMultiviewMeshShader ? VK_TRUE : VK_FALSE;
+        })
         .Require<VkPhysicalDeviceFeatures2>([&](auto& f) {
             f.features.multiDrawIndirect         = VK_TRUE;
             f.features.samplerAnisotropy         = VK_TRUE;
@@ -398,7 +479,7 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
         .Build();
 }
 
-std::expected<Vk::ExtensionResult, Error> GetDeviceExtensions(VkPhysicalDevice physicalDevice, bool isHeadless) noexcept {
+std::expected<Vk::ExtensionResult, Error> GetDeviceExtensions(VkPhysicalDevice physicalDevice, bool isHeadless, bool meshShaderSupported) noexcept {
     auto builder = Vk::ExtensionBuilder::ForDevice(physicalDevice);
 
     if (!isHeadless) {
@@ -424,6 +505,13 @@ std::expected<Vk::ExtensionResult, Error> GetDeviceExtensions(VkPhysicalDevice p
         .Require(VK_EXT_DESCRIPTOR_HEAP_EXTENSION_NAME)
         .Require(VK_KHR_MAINTENANCE_5_EXTENSION_NAME)
         .Require(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME)
+        // VK_EXT_mesh_shader replaces the input assembler + vertex stage of the
+        // geometry passes with task/mesh shaders. It stays OPTIONAL: the vertex
+        // pipeline is still built for every material, so devices without mesh
+        // shading (or with limits below our meshlet budget) keep rendering.
+        // Support was already probed once into HardwareCaps; re-probing here
+        // would repeat the diagnostics for every failure.
+        .OptionalGroup({VK_EXT_MESH_SHADER_EXTENSION_NAME}, meshShaderSupported)
         .Build()
         .transform_error([](auto err) -> Error { return err; });
 }
@@ -583,17 +671,18 @@ std::expected<std::unique_ptr<RenderContext>, Error> RenderContext::Create(Windo
             HardwareCaps caps     = ProbeHardware(physicalInfo.handle, physicalInfo.properties.properties.apiVersion);
             auto         features = BuildFeatureChain(physicalInfo.handle, caps, cfg.validationMode);
 
-            return GetDeviceExtensions(physicalInfo.handle, window.IsHeadless()).and_then([&](auto&& dev_exts) -> std::expected<void, Error> {
-                return Vk::Context::Builder()
-                    .Instance(instance)
-                    .Surface(raw_surface)
-                    .PhysicalDevice(physicalInfo)
-                    .DeviceExtensions(dev_exts)
-                    .DeviceFeatures(features.GetRoot())
-                    .ValidationMode(static_cast<Vk::ValidationMode>(cfg.validationMode))
-                    .Build()
-                    .transform([&](auto&& context) { impl->ctx = std::forward<decltype(context)>(context); });
-            });
+            return GetDeviceExtensions(physicalInfo.handle, window.IsHeadless(), caps.supportsMeshShader)
+                .and_then([&](auto&& dev_exts) -> std::expected<void, Error> {
+                    return Vk::Context::Builder()
+                        .Instance(instance)
+                        .Surface(raw_surface)
+                        .PhysicalDevice(physicalInfo)
+                        .DeviceExtensions(dev_exts)
+                        .DeviceFeatures(features.GetRoot())
+                        .ValidationMode(static_cast<Vk::ValidationMode>(cfg.validationMode))
+                        .Build()
+                        .transform([&](auto&& context) { impl->ctx = std::forward<decltype(context)>(context); });
+                });
         })
         .and_then([&]() { return impl->InitSubsystems(cfg, width, height); })
         .transform([&]() { return std::make_unique<RenderContext>(PrivateToken {}, std::move(impl)); });
@@ -663,11 +752,14 @@ std::expected<void, Error> RenderContext::Impl::InitLineBuffers() noexcept {
 std::expected<void, Error> RenderContext::Impl::BuildLinePipeline() {
     linePipelineLayout = emptyPipelineLayout;
 
-    auto basicShaders = Resource::GetShaderProgram(Resource::ShaderID::Basic);
+    // The debug line pipeline rasterises through PSForward, so it needs the
+    // Forward geometry variant (the G-buffer one emits motion vectors and a
+    // normal frame that PSForward does not read).
+    const auto forwardShaders = Resource::GetSceneShaders(Resource::SceneShaderVariant::Forward);
 
     return LoadAndCreateShaders(
-               {.path = Resource::Paths::BasicVS, .fallback = basicShaders.vertex, .entryPoint = "VSMain"},
-               {.path = Resource::Paths::ForwardPS, .fallback = Resource::forward_frag, .entryPoint = "PSForward"}
+               {.path = Resource::Paths::BasicVSForward, .fallback = forwardShaders.vertex, .entryPoint = "VSMain"},
+               {.path = Resource::Paths::ForwardPS, .fallback = forwardShaders.fragment, .entryPoint = "PSForward"}
     )
         .and_then([&](auto&& shaders) -> std::expected<void, Error> {
             return Vk::PipelineBuilder<1, true> {}

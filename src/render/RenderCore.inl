@@ -225,17 +225,56 @@ inline std::expected<VkResult, std::string> CheckResult(const VkResult result, c
     return result;
 }
 
+// NOTE: these probes MUST enumerate the complete extension list.
+// They used to read into a fixed std::array<..., maxInstanceExtensions> (128)
+// and clamp the count, which silently hid every extension the driver reported
+// past index 127. Current desktop drivers expose far more than that (NVIDIA
+// ships >200 device extensions), and the truncation was order-dependent: the
+// KHR ray-tracing trio survived the cut while VK_EXT_mesh_shader did not, so
+// mesh shading was reported as unsupported on hardware that fully supports it.
+// ExtensionBuilder::ForDevice() always used a growable vector, which is why
+// Require(VK_EXT_descriptor_heap) kept working and masked the bug.
+
+inline auto EnumerateInstanceExtensions() noexcept -> std::vector<VkExtensionProperties> {
+    std::vector<VkExtensionProperties> available;
+    VkResult                           result = VK_INCOMPLETE;
+
+    // Loop: the count can grow between the sizing call and the fetch call.
+    while (result == VK_INCOMPLETE) {
+        uint32_t count = 0;
+        if (vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr) != VK_SUCCESS || count == 0) {
+            return {};
+        }
+        available.resize(count);
+        result = vkEnumerateInstanceExtensionProperties(nullptr, &count, available.data());
+        if (result == VK_SUCCESS) {
+            available.resize(count);
+        }
+    }
+    return available;
+}
+
+inline auto EnumerateDeviceExtensions(VkPhysicalDevice physical) noexcept -> std::vector<VkExtensionProperties> {
+    std::vector<VkExtensionProperties> available;
+    VkResult                           result = VK_INCOMPLETE;
+
+    while (result == VK_INCOMPLETE) {
+        uint32_t count = 0;
+        if (vkEnumerateDeviceExtensionProperties(physical, nullptr, &count, nullptr) != VK_SUCCESS || count == 0) {
+            return {};
+        }
+        available.resize(count);
+        result = vkEnumerateDeviceExtensionProperties(physical, nullptr, &count, available.data());
+        if (result == VK_SUCCESS) {
+            available.resize(count);
+        }
+    }
+    return available;
+}
+
 inline auto IsInstanceExtensionSupported(std::string_view extension) noexcept -> bool {
-    uint32_t count = 0;
-    vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr);
-
-    std::array<VkExtensionProperties, maxInstanceExtensions> available {};
-    count = ZHLN::Min<uint32_t>(count, maxInstanceExtensions);
-
-    vkEnumerateInstanceExtensionProperties(nullptr, &count, available.data());
-
-    for (uint32_t i = 0; i < count; ++i) {
-        if (extension == available[i].extensionName) {
+    for (const auto& available: EnumerateInstanceExtensions()) {
+        if (extension == available.extensionName) {
             return true;
         }
     }
@@ -243,16 +282,8 @@ inline auto IsInstanceExtensionSupported(std::string_view extension) noexcept ->
 }
 
 inline auto IsDeviceExtensionSupported(VkPhysicalDevice physical, std::string_view extension) noexcept -> bool {
-    uint32_t count = 0;
-    vkEnumerateDeviceExtensionProperties(physical, nullptr, &count, nullptr);
-
-    std::array<VkExtensionProperties, maxInstanceExtensions> available {};
-    count = ZHLN::Min<uint32_t>(count, maxInstanceExtensions);
-
-    vkEnumerateDeviceExtensionProperties(physical, nullptr, &count, available.data());
-
-    for (uint32_t i = 0; i < count; ++i) {
-        if (extension == available[i].extensionName) {
+    for (const auto& available: EnumerateDeviceExtensions(physical)) {
+        if (extension == available.extensionName) {
             return true;
         }
     }

@@ -456,6 +456,12 @@ void DrawIndexedIndirectCount(
 // Extension Query Utilities
 // ============================================================================
 
+// Full, untruncated enumerations. Never size these with a fixed array: drivers
+// routinely report >200 device extensions and clamping the count silently
+// hides everything past the cut-off (see the note in RenderCore.inl).
+[[nodiscard]] auto EnumerateInstanceExtensions() noexcept -> std::vector<VkExtensionProperties>;
+[[nodiscard]] auto EnumerateDeviceExtensions(VkPhysicalDevice physical) noexcept -> std::vector<VkExtensionProperties>;
+
 [[nodiscard]] auto IsInstanceExtensionSupported(std::string_view extension) noexcept -> bool;
 [[nodiscard]] auto IsDeviceExtensionSupported(VkPhysicalDevice physical, std::string_view extension) noexcept -> bool;
 

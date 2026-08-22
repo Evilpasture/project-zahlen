@@ -6,9 +6,9 @@
 #include "BinaryReader.hpp"
 #include "GLB.hpp"
 #include "Transform.hpp"
-#include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/CreativeWorksManager.hpp>
 #include <Zahlen/Math3D.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Types.hpp>
 #include <algorithm>
 #include <chrono>
@@ -64,7 +64,7 @@ int CookMesh(int argc, char** argv) {
 
     CookedMeshHeader meshHeader {};
     meshHeader.magic   = 0x3048534D;
-    meshHeader.version = 3; // Version 3 for separated SoA layouts
+    meshHeader.version = 4; // Version 4: separated SoA layouts + meshlet streams
 
     if (compiled.positions.empty()) {
         meshHeader.boundingBoxMin[0] = meshHeader.boundingBoxMin[1] = meshHeader.boundingBoxMax[0] = meshHeader.boundingBoxMax[1] =
@@ -83,6 +83,10 @@ int CookMesh(int argc, char** argv) {
         meshHeader.hasSkin           = compiled.isSkinned ? 1 : 0;
     }
 
+    meshHeader.meshletCount        = static_cast<uint32_t>(compiled.meshlets.size());
+    meshHeader.meshletVertexCount  = static_cast<uint32_t>(compiled.meshletVertices.size());
+    meshHeader.meshletTriByteCount = static_cast<uint32_t>(compiled.meshletTriangles.size());
+
     fs::create_directories(fs::path(outPath).parent_path());
     FILE* out = std::fopen(outPath.c_str(), "wb");
     if (out != nullptr) {
@@ -100,6 +104,14 @@ int CookMesh(int argc, char** argv) {
         }
         if (!compiled.indices.empty()) {
             std::fwrite(compiled.indices.data(), 1, compiled.indices.size() * sizeof(uint32_t), out);
+        }
+
+        // VK_EXT_mesh_shader streams (version 4). Written last so that a v3
+        // reader that stops after the index stream still sees a valid mesh.
+        if (!compiled.meshlets.empty()) {
+            std::fwrite(compiled.meshlets.data(), 1, compiled.meshlets.size() * sizeof(GPUMeshlet), out);
+            std::fwrite(compiled.meshletVertices.data(), 1, compiled.meshletVertices.size() * sizeof(uint32_t), out);
+            std::fwrite(compiled.meshletTriangles.data(), 1, compiled.meshletTriangles.size(), out);
         }
         std::fclose(out);
     }

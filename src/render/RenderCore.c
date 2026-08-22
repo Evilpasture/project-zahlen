@@ -9,6 +9,7 @@
 #include "RenderCore.h"
 #include <math.h>
 #include <spirv_reflect.h>
+#include <stdatomic.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -73,6 +74,19 @@ static inline uint64_t zhln_max_u64(uint64_t a, uint64_t b) {
 
 /* --- Start of procedural logic --- */
 
+// Validation-error accounting. Tests (and the console) can snapshot this around
+// a workload to assert that a feature does not introduce validation errors --
+// a suite that prints VUID violations and still reports PASS is not a test.
+static atomic_uint g_validation_error_count = 0;
+
+uint32_t ZHLN_GetValidationErrorCount(void) {
+    return atomic_load_explicit(&g_validation_error_count, memory_order_relaxed);
+}
+
+void ZHLN_ResetValidationErrorCount(void) {
+    atomic_store_explicit(&g_validation_error_count, 0, memory_order_relaxed);
+}
+
 static VkBool32 VKAPI_CALL ZHLN_Internal_DebugCallback(
     VkDebugUtilsMessageSeverityFlagBitsEXT      severity,
     VkDebugUtilsMessageTypeFlagsEXT             type,
@@ -88,6 +102,10 @@ static VkBool32 VKAPI_CALL ZHLN_Internal_DebugCallback(
         prefix = "VULKAN INFO";
     }
 
+    if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
+        atomic_fetch_add_explicit(&g_validation_error_count, 1, memory_order_relaxed);
+    }
+
     fprintf(stderr, "[%s] %s\n", prefix, (data && data->pMessage) ? data->pMessage : "");
 
     // Intercept actual shader Out-of-Bounds violations detected by GPU-AV
@@ -101,6 +119,46 @@ static VkBool32 VKAPI_CALL ZHLN_Internal_DebugCallback(
     }
 
     return VK_FALSE;
+}
+
+VkDebugUtilsMessengerEXT ZHLN_CreateDebugMessenger(const VkInstance instance, const VkDebugUtilsMessageSeverityFlagsEXT severity) {
+    if (instance == VK_NULL_HANDLE) {
+        return VK_NULL_HANDLE;
+    }
+
+    // A VkDebugUtilsMessengerCreateInfoEXT chained into VkInstanceCreateInfo
+    // covers ONLY vkCreateInstance/vkDestroyInstance. Without a real messenger
+    // object, every runtime message goes to the layer's default logger instead
+    // of ZHLN_Internal_DebugCallback -- which silently disabled both the
+    // validation-error counter and the GPU-AV out-of-bounds abort hook.
+    PFN_vkCreateDebugUtilsMessengerEXT create_fn = (PFN_vkCreateDebugUtilsMessengerEXT) vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT");
+    if (create_fn == NULL) {
+        return VK_NULL_HANDLE;
+    }
+
+    const VkDebugUtilsMessengerCreateInfoEXT info = {
+        .sType           = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+        .messageSeverity = severity,
+        .messageType     = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
+                           VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
+        .pfnUserCallback = ZHLN_Internal_DebugCallback,
+    };
+
+    VkDebugUtilsMessengerEXT messenger = VK_NULL_HANDLE;
+    if (create_fn(instance, &info, NULL, &messenger) != VK_SUCCESS) {
+        return VK_NULL_HANDLE;
+    }
+    return messenger;
+}
+
+void ZHLN_DestroyDebugMessenger(const VkInstance instance, const VkDebugUtilsMessengerEXT messenger) {
+    if (instance == VK_NULL_HANDLE || messenger == VK_NULL_HANDLE) {
+        return;
+    }
+    PFN_vkDestroyDebugUtilsMessengerEXT destroy_fn = (PFN_vkDestroyDebugUtilsMessengerEXT) vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT");
+    if (destroy_fn != NULL) {
+        destroy_fn(instance, messenger, NULL);
+    }
 }
 
 static const char* ZHLN_Internal_FindSpirvEntryPoint(const uint32_t* code, size_t size_in_bytes) {
@@ -147,11 +205,24 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
     static const char* const validation_layers[] = {"VK_LAYER_KHRONOS_validation"};
 
     // --- Query available instance extensions to filter out unsupported ones ---
+    // Heap-allocated and unclamped on purpose: a fixed 128-entry array silently
+    // drops everything the loader reports past that index, which turns a
+    // perfectly supported extension into "unsupported" depending only on the
+    // driver's enumeration order.
     uint32_t available_count = 0;
     vkEnumerateInstanceExtensionProperties(nullptr, &available_count, nullptr);
-    available_count = ZHLN_Min(available_count, maxInstanceExtensions);
-    VkExtensionProperties available_exts[maxInstanceExtensions];
-    vkEnumerateInstanceExtensionProperties(nullptr, &available_count, available_exts);
+
+    VkExtensionProperties* available_exts = NULL;
+    if (available_count > 0) {
+        available_exts = (VkExtensionProperties*) calloc(available_count, sizeof(VkExtensionProperties));
+        if (available_exts == NULL) {
+            available_count = 0;
+        } else if (vkEnumerateInstanceExtensionProperties(nullptr, &available_count, available_exts) != VK_SUCCESS) {
+            free(available_exts);
+            available_exts  = NULL;
+            available_count = 0;
+        }
+    }
 
     const char* final_extensions[32];
     uint32_t    final_count = 0;
@@ -222,6 +293,13 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
                 }
             }
         }
+    }
+
+    // The availability table is no longer needed: final_extensions holds
+    // pointers into the caller's strings, not into available_exts.
+    if (available_exts != NULL) {
+        free(available_exts);
+        available_exts = NULL;
     }
 
     VkInstanceCreateInfo create_info = {
@@ -592,6 +670,47 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
         fprintf(stderr, "[VULKAN] WARNING: VK_EXT_descriptor_heap entry points missing; descriptor-heap paths are disabled.\n");
     }
 
+    // --- VK_EXT_mesh_shader entry points ---
+    // Resolved unconditionally: a NULL pointer here is the single source of
+    // truth for "this device cannot mesh-shade", which keeps every call site
+    // from having to re-check the extension list.
+    PFN_vkCmdDrawMeshTasksEXT         pfn_draw_mesh_tasks = (PFN_vkCmdDrawMeshTasksEXT) vkGetDeviceProcAddr(handle, "vkCmdDrawMeshTasksEXT");
+    PFN_vkCmdDrawMeshTasksIndirectEXT pfn_draw_mesh_tasks_indirect =
+        (PFN_vkCmdDrawMeshTasksIndirectEXT) vkGetDeviceProcAddr(handle, "vkCmdDrawMeshTasksIndirectEXT");
+    PFN_vkCmdDrawMeshTasksIndirectCountEXT pfn_draw_mesh_tasks_indirect_count =
+        (PFN_vkCmdDrawMeshTasksIndirectCountEXT) vkGetDeviceProcAddr(handle, "vkCmdDrawMeshTasksIndirectCountEXT");
+
+    const ZHLN_MeshShaderLimits mesh_limits    = ZHLN_QueryMeshShaderLimits(desc->physical->handle);
+    const bool                  mesh_available = pfn_draw_mesh_tasks != NULL && pfn_draw_mesh_tasks_indirect != NULL && mesh_limits.supported &&
+                                                 ZHLN_MeshShaderLimitsSufficient(&mesh_limits);
+
+    if (!mesh_available) {
+        // Say WHICH gate failed: "unavailable or below limits" is useless when
+        // the real cause is that the extension never made it into the enabled
+        // list (the entry points are then NULL even on capable hardware).
+        if (!mesh_limits.supported) {
+            fprintf(stderr, "[VULKAN] INFO: VK_EXT_mesh_shader not reported by the physical device; using the vertex pipeline.\n");
+        } else if (pfn_draw_mesh_tasks == NULL || pfn_draw_mesh_tasks_indirect == NULL) {
+            fprintf(
+                stderr,
+                "[VULKAN] WARNING: VK_EXT_mesh_shader is supported by the device but its entry points did not resolve "
+                "(vkCmdDrawMeshTasksEXT=%p, vkCmdDrawMeshTasksIndirectEXT=%p). The extension was almost certainly not "
+                "enabled at device creation.\n",
+                (void*) pfn_draw_mesh_tasks, (void*) pfn_draw_mesh_tasks_indirect
+            );
+        } else {
+            fprintf(
+                stderr,
+                "[VULKAN] INFO: VK_EXT_mesh_shader limits below the engine's meshlet budget "
+                "(maxMeshOutputVertices=%u/64, maxMeshOutputPrimitives=%u/124, maxTaskWorkGroupInvocations=%u/32, "
+                "maxMeshWorkGroupInvocations=%u/64); using the vertex pipeline.\n",
+                mesh_limits.max_mesh_output_vertices, mesh_limits.max_mesh_output_primitives, mesh_limits.max_task_work_group_invocations,
+                mesh_limits.max_mesh_work_group_invocations
+            );
+        }
+    }
+    // No success message on purpose: only the fallback is worth a line.
+
     return (ZHLN_Device) {
         .handle                         = handle,
         .graphics_queue                 = graphics_queue,
@@ -604,7 +723,114 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
         .pfn_write_resource_descriptors = pfn_write_resource_descs,
         .pfn_write_sampler_descriptors  = pfn_write_sampler_descs,
         .descriptor_heap_enabled        = heap_available,
+
+        .pfn_cmd_draw_mesh_tasks                = pfn_draw_mesh_tasks,
+        .pfn_cmd_draw_mesh_tasks_indirect       = pfn_draw_mesh_tasks_indirect,
+        .pfn_cmd_draw_mesh_tasks_indirect_count = pfn_draw_mesh_tasks_indirect_count,
+        .mesh_shader_enabled                    = mesh_available,
     };
+}
+
+ZHLN_MeshShaderLimits ZHLN_QueryMeshShaderLimits(const VkPhysicalDevice physical) {
+    ZHLN_MeshShaderLimits out = {};
+
+    if (physical == VK_NULL_HANDLE) {
+        return out;
+    }
+
+    // Querying VkPhysicalDeviceMeshShaderPropertiesEXT on a device that does
+    // not expose the extension is undefined, so gate on the extension list.
+    uint32_t ext_count = 0;
+    vkEnumerateDeviceExtensionProperties(physical, NULL, &ext_count, NULL);
+    if (ext_count == 0) {
+        return out;
+    }
+
+    VkExtensionProperties* exts = (VkExtensionProperties*) calloc(ext_count, sizeof(VkExtensionProperties));
+    if (exts == NULL) {
+        return out;
+    }
+    vkEnumerateDeviceExtensionProperties(physical, NULL, &ext_count, exts);
+
+    bool has_extension = false;
+    for (uint32_t i = 0; i < ext_count; ++i) {
+        if (strcmp(exts[i].extensionName, VK_EXT_MESH_SHADER_EXTENSION_NAME) == 0) {
+            has_extension = true;
+            break;
+        }
+    }
+    free(exts);
+
+    if (!has_extension) {
+        return out;
+    }
+
+    VkPhysicalDeviceMeshShaderPropertiesEXT mesh_props = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_PROPERTIES_EXT};
+    VkPhysicalDeviceProperties2             props2     = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &mesh_props};
+    vkGetPhysicalDeviceProperties2(physical, &props2);
+
+    out.max_mesh_output_vertices                  = mesh_props.maxMeshOutputVertices;
+    out.max_mesh_output_primitives                = mesh_props.maxMeshOutputPrimitives;
+    out.max_task_work_group_invocations           = mesh_props.maxTaskWorkGroupInvocations;
+    out.max_mesh_work_group_invocations           = mesh_props.maxMeshWorkGroupInvocations;
+    out.max_preferred_task_work_group_invocations = mesh_props.maxPreferredTaskWorkGroupInvocations;
+    out.max_preferred_mesh_work_group_invocations = mesh_props.maxPreferredMeshWorkGroupInvocations;
+    out.prefers_compact_vertex_output             = mesh_props.prefersCompactVertexOutput;
+    out.supported                                 = true;
+    return out;
+}
+
+bool ZHLN_MeshShaderLimitsSufficient(const ZHLN_MeshShaderLimits* const restrict limits) {
+    if (limits == NULL || !limits->supported) {
+        return false;
+    }
+    // Mirrors the hard-coded geometry budget of resources/shaders/basic_mesh.slang
+    // (64 vertices / 124 primitives per meshlet, 32 task threads, 64 mesh threads).
+    return limits->max_mesh_output_vertices >= 64u && limits->max_mesh_output_primitives >= 124u && limits->max_task_work_group_invocations >= 32u &&
+           limits->max_mesh_work_group_invocations >= 64u;
+}
+
+void ZHLN_CmdDrawMeshTasks(
+    const ZHLN_Device* const restrict device,
+    const VkCommandBuffer cmd,
+    const uint32_t        group_count_x,
+    const uint32_t        group_count_y,
+    const uint32_t        group_count_z
+) {
+    if (device == NULL || device->pfn_cmd_draw_mesh_tasks == NULL || group_count_x == 0) {
+        return;
+    }
+    device->pfn_cmd_draw_mesh_tasks(cmd, group_count_x, group_count_y, group_count_z);
+}
+
+void ZHLN_CmdDrawMeshTasksIndirect(
+    const ZHLN_Device* const restrict device,
+    const VkCommandBuffer cmd,
+    const VkBuffer        buffer,
+    const VkDeviceSize    offset,
+    const uint32_t        draw_count,
+    const uint32_t        stride
+) {
+    if (device == NULL || device->pfn_cmd_draw_mesh_tasks_indirect == NULL || buffer == VK_NULL_HANDLE || draw_count == 0) {
+        return;
+    }
+    device->pfn_cmd_draw_mesh_tasks_indirect(cmd, buffer, offset, draw_count, stride);
+}
+
+void ZHLN_CmdDrawMeshTasksIndirectCount(
+    const ZHLN_Device* const restrict device,
+    const VkCommandBuffer cmd,
+    const VkBuffer        buffer,
+    const VkDeviceSize    offset,
+    const VkBuffer        count_buffer,
+    const VkDeviceSize    count_buffer_offset,
+    const uint32_t        max_draw_count,
+    const uint32_t        stride
+) {
+    if (device == NULL || device->pfn_cmd_draw_mesh_tasks_indirect_count == NULL || buffer == VK_NULL_HANDLE || count_buffer == VK_NULL_HANDLE) {
+        return;
+    }
+    device->pfn_cmd_draw_mesh_tasks_indirect_count(cmd, buffer, offset, count_buffer, count_buffer_offset, max_draw_count, stride);
 }
 
 [[nodiscard]]
@@ -1035,13 +1261,40 @@ VkShaderModule ZHLN_CreateShaderModule(const VkDevice device, const ZHLN_ShaderD
 
 [[nodiscard]]
 bool ZHLN_CreateShaderStages(const ZHLN_ShaderStagesDesc* const restrict desc, ZHLN_ShaderStages* const restrict out) {
-    out->vert.handle = ZHLN_CreateShaderModule(desc->device, &desc->vert);
+    // VK_EXT_mesh_shader: a mesh pipeline has no vertex stage at all, so the
+    // vertex module is only mandatory when no mesh module was supplied.
+    const bool has_mesh = desc->mesh.code != NULL && desc->mesh.size > 0;
 
-    if (out->vert.handle == VK_NULL_HANDLE) {
+    if (desc->vert.code != NULL && desc->vert.size > 0) {
+        out->vert.handle = ZHLN_CreateShaderModule(desc->device, &desc->vert);
+        if (out->vert.handle == VK_NULL_HANDLE) {
+            return false;
+        }
+        out->vert.stage     = VK_SHADER_STAGE_VERTEX_BIT;
+        out->vert.view_mask = 0;
+    } else if (!has_mesh) {
         return false;
     }
-    out->vert.stage     = VK_SHADER_STAGE_VERTEX_BIT;
-    out->vert.view_mask = 0;
+
+    if (has_mesh) {
+        out->mesh.handle = ZHLN_CreateShaderModule(desc->device, &desc->mesh);
+        if (out->mesh.handle == VK_NULL_HANDLE) {
+            ZHLN_DestroyShaderStages(desc->device, out);
+            return false;
+        }
+        out->mesh.stage     = VK_SHADER_STAGE_MESH_BIT_EXT;
+        out->mesh.view_mask = 0;
+
+        if (desc->task.code != NULL && desc->task.size > 0) {
+            out->task.handle = ZHLN_CreateShaderModule(desc->device, &desc->task);
+            if (out->task.handle == VK_NULL_HANDLE) {
+                ZHLN_DestroyShaderStages(desc->device, out);
+                return false;
+            }
+            out->task.stage     = VK_SHADER_STAGE_TASK_BIT_EXT;
+            out->task.view_mask = 0;
+        }
+    }
 
     if (desc->frag.code && desc->frag.size > 0) {
         out->frag.handle = ZHLN_CreateShaderModule(desc->device, &desc->frag);
@@ -1058,10 +1311,10 @@ bool ZHLN_CreateShaderStages(const ZHLN_ShaderStagesDesc* const restrict desc, Z
     }
 
     // --- SAFELY RESOLVE ENTRY POINTS ---
-    const ZHLN_ShaderDesc* descs[2]   = {&desc->vert, &desc->frag};
-    ZHLN_Shader*           targets[2] = {&out->vert, &out->frag};
+    const ZHLN_ShaderDesc* descs[4]   = {&desc->vert, &desc->frag, &desc->task, &desc->mesh};
+    ZHLN_Shader*           targets[4] = {&out->vert, &out->frag, &out->task, &out->mesh};
 
-    for (int i = 0; i < 2; ++i) {
+    for (int i = 0; i < 4; ++i) {
         if (targets[i]->handle == VK_NULL_HANDLE) {
             continue;
         }
@@ -1079,6 +1332,10 @@ bool ZHLN_CreateShaderStages(const ZHLN_ShaderStagesDesc* const restrict desc, Z
                     strncpy(targets[i]->entry_point, "VSMain", 63);
                 } else if (targets[i]->stage == VK_SHADER_STAGE_FRAGMENT_BIT) {
                     strncpy(targets[i]->entry_point, "PSMain", 63);
+                } else if (targets[i]->stage == VK_SHADER_STAGE_TASK_BIT_EXT) {
+                    strncpy(targets[i]->entry_point, "TaskMain", 63);
+                } else if (targets[i]->stage == VK_SHADER_STAGE_MESH_BIT_EXT) {
+                    strncpy(targets[i]->entry_point, "MeshMain", 63);
                 } else {
                     strncpy(targets[i]->entry_point, "main", 63);
                 }
@@ -1097,6 +1354,8 @@ void ZHLN_DestroyShaderModule(const VkDevice device, const VkShaderModule module
 void ZHLN_DestroyShaderStages(const VkDevice device, ZHLN_ShaderStages* const restrict stages) {
     ZHLN_DestroyShaderModule(device, stages->vert.handle);
     ZHLN_DestroyShaderModule(device, stages->frag.handle);
+    ZHLN_DestroyShaderModule(device, stages->task.handle);
+    ZHLN_DestroyShaderModule(device, stages->mesh.handle);
     *stages = (ZHLN_ShaderStages) {};
 }
 
@@ -1109,7 +1368,31 @@ uint32_t ZHLN_PopulateShaderStageInfos(
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* const ps_mapping
 ) {
     uint32_t count = 0;
-    if (stages->vert.handle != VK_NULL_HANDLE) {
+
+    // VK_EXT_mesh_shader: task+mesh REPLACE the vertex stage. A pipeline that
+    // declared both would be invalid (VUID-VkGraphicsPipelineCreateInfo-pStages-02095).
+    const bool mesh_pipeline = stages->mesh.handle != VK_NULL_HANDLE;
+
+    if (mesh_pipeline) {
+        if (stages->task.handle != VK_NULL_HANDLE) {
+            out_stages[count++] = (VkPipelineShaderStageCreateInfo) {
+                .sType               = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                .pNext               = vs_mapping, // same `scene` parameter block as the vertex stage
+                .stage               = stages->task.stage,
+                .module              = stages->task.handle,
+                .pName               = stages->task.entry_point,
+                .pSpecializationInfo = spec_info,
+            };
+        }
+        out_stages[count++] = (VkPipelineShaderStageCreateInfo) {
+            .sType               = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .pNext               = vs_mapping,
+            .stage               = stages->mesh.stage,
+            .module              = stages->mesh.handle,
+            .pName               = stages->mesh.entry_point,
+            .pSpecializationInfo = spec_info,
+        };
+    } else if (stages->vert.handle != VK_NULL_HANDLE) {
         out_stages[count++] = (VkPipelineShaderStageCreateInfo) {
             .sType               = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
             .pNext               = vs_mapping, // VK_EXT_descriptor_heap: set/binding -> heap mapping (NULL = none)
@@ -1157,10 +1440,15 @@ void ZHLN_DestroyPipelineLayout(const VkDevice device, const VkPipelineLayout la
 
 VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device, const ZHLN_GraphicsPipelineDesc* const restrict desc) {
     // --- Shader Stages ---
-    VkPipelineShaderStageCreateInfo shader_stages[2];
+    VkPipelineShaderStageCreateInfo shader_stages[ZHLN_MAX_SHADER_STAGES];
     uint32_t                        stage_count = ZHLN_PopulateShaderStageInfos(
         desc->stages, shader_stages, desc->specialization_info, desc->descriptor_heap ? desc->vs_mapping : NULL, desc->descriptor_heap ? desc->ps_mapping : NULL
     );
+
+    // VK_EXT_mesh_shader: mesh pipelines have no input assembler at all.
+    // pVertexInputState/pInputAssemblyState must be ignored (the spec allows
+    // NULL, and passing the states anyway would be misleading state).
+    const bool mesh_pipeline = desc->stages != NULL && desc->stages->mesh.handle != VK_NULL_HANDLE;
 
     // --- VK_EXT_descriptor_heap: pipelines consuming heaps must be created
     // with VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT (via the
@@ -1293,8 +1581,8 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device, const ZHLN_Graphic
         .pNext               = desc->descriptor_heap ? (const void*) &heap_flags2 : (const void*) &rendering,
         .stageCount          = stage_count,
         .pStages             = shader_stages,
-        .pVertexInputState   = &vertex_input,
-        .pInputAssemblyState = &input_assembly,
+        .pVertexInputState   = mesh_pipeline ? NULL : &vertex_input,
+        .pInputAssemblyState = mesh_pipeline ? NULL : &input_assembly,
         .pViewportState      = &viewport_state,
         .pRasterizationState = &rasterizer,
         .pMultisampleState   = &multisampling,

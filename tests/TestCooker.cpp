@@ -42,7 +42,7 @@ constexpr size_t kExpectedEntries3 = 3;
 
 constexpr uint32_t kZmetVersion          = 1u;
 constexpr uint32_t kMeshMagic            = 0x3048534Du; // 'MSH0'
-constexpr uint32_t kMeshVersion          = 3u;
+constexpr uint32_t kMeshVersion          = 4u;
 constexpr uint32_t kAnimMagic            = 0x304D4E41u; // 'ANM0'
 constexpr uint32_t kAnimVersion          = 1u;
 constexpr uint32_t kGlbMagic             = 0x46546C67u; // 'glTF'
@@ -548,8 +548,15 @@ struct CookerTestSuite {
             ZHLN::Test::ExpectEq(header.boundingBoxMin[0], -1.0f);
             ZHLN::Test::ExpectEq(header.boundingBoxMax[0], 1.0f);
 
+            // A single triangle must still produce exactly one meshlet.
+            ZHLN::Test::ExpectEq(header.meshletCount, 1u);
+            ZHLN::Test::ExpectEq(header.meshletVertexCount, 3u);
+            ZHLN::Test::ExpectEq(header.meshletTriByteCount, 4u); // 3 micro-indices, padded to 4B
+
             size_t expectedSize = sizeof(ZHLN::CookedMeshHeader) + (header.vertexCount * sizeof(ZHLN::VertexPosition)) +
-                                  (header.vertexCount * sizeof(ZHLN::VertexAttributes)) + (header.indexCount * sizeof(uint32_t));
+                                  (header.vertexCount * sizeof(ZHLN::VertexAttributes)) + (header.indexCount * sizeof(uint32_t)) +
+                                  (header.meshletCount * sizeof(ZHLN::GPUMeshlet)) + (header.meshletVertexCount * sizeof(uint32_t)) +
+                                  header.meshletTriByteCount;
 
             ZHLN::Test::ExpectEq(static_cast<size_t>(fileSize), expectedSize);
             return {};

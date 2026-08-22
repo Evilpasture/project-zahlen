@@ -129,9 +129,13 @@ struct PassFactory {
             // whenever GPU culling won't be used -- including the
             // ZHLN_NO_GPU_CULLING bisect toggle -- record shadow + main
             // serially into the primary command buffer instead.
-            const auto drawCount      = static_cast<uint32_t>(self.queues.drawQueue.size());
+            const auto drawCount = static_cast<uint32_t>(self.queues.drawQueue.size());
+            // NOTE: this predicate MUST stay identical to the one in
+            // MainPass1/MainPass2 (RenderPasses.cpp) -- it selects the command
+            // buffer topology those passes then record into. VK_EXT_mesh_shader
+            // disables the indirect culling path, so it belongs here too.
             const bool gpuCullingUsed = self.cullingPass.pipeline.Valid() && self.frames.indirectCommandsBuffers->Valid() &&
-                                        (drawCount <= kGpuCullingMaxInstances) && !Diag::DisableGpuCulling();
+                                        (drawCount <= kGpuCullingMaxInstances) && !Diag::DisableGpuCulling() && !self.MeshShadingActive();
 
             if (!gpuCullingUsed) {
                 FrameRecorder shadowRec(c, self);

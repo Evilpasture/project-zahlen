@@ -13,10 +13,8 @@ ShaderStages::~ShaderStages() {
 }
 
 ShaderStages::ShaderStages(ShaderStages&& other) noexcept:
-    _device(std::exchange(other._device, VK_NULL_HANDLE)),
-    _raw(std::exchange(other._raw, {})),
-    _vertSpv(std::move(other._vertSpv)),
-    _fragSpv(std::move(other._fragSpv)) {
+    _device(std::exchange(other._device, VK_NULL_HANDLE)), _raw(std::exchange(other._raw, {})), _vertSpv(std::move(other._vertSpv)),
+    _fragSpv(std::move(other._fragSpv)), _taskSpv(std::move(other._taskSpv)), _meshSpv(std::move(other._meshSpv)) {
 }
 
 auto ShaderStages::operator=(ShaderStages&& other) noexcept -> ShaderStages& {
@@ -28,6 +26,8 @@ auto ShaderStages::operator=(ShaderStages&& other) noexcept -> ShaderStages& {
         _raw     = std::exchange(other._raw, {});
         _vertSpv = std::move(other._vertSpv);
         _fragSpv = std::move(other._fragSpv);
+        _taskSpv = std::move(other._taskSpv);
+        _meshSpv = std::move(other._meshSpv);
     }
     return *this;
 }
@@ -105,6 +105,38 @@ auto ShaderStages::Create(VkDevice device, const ZHLN_ShaderDesc& vert, const ZH
         fragSpv.assign(frag.code, frag.code + (frag.size / sizeof(uint32_t)));
     }
     return ShaderStages {device, stages, std::move(vertSpv), std::move(fragSpv)};
+}
+
+auto ShaderStages::CreateMesh(VkDevice device, const ZHLN_ShaderDesc& task, const ZHLN_ShaderDesc& mesh, const ZHLN_ShaderDesc& frag)
+    -> std::expected<ShaderStages, ZHLN::Error> {
+    if (mesh.code == nullptr || mesh.size == 0) {
+        return std::unexpected(ShaderStageCreationError::VertexShaderEmpty);
+    }
+
+    // No vertex stage: a graphics pipeline may not mix VERTEX with MESH.
+    const ZHLN_ShaderStagesDesc desc = {.device = device, .vert = {}, .frag = frag, .task = task, .mesh = mesh};
+
+    ZHLN_ShaderStages stages {};
+    if (!ZHLN_CreateShaderStages(&desc, &stages)) {
+        return std::unexpected(ShaderStageCreationError::ShaderModuleCreationFailed);
+    }
+
+    // Multiview: the shadow pass renders all cascades from one dispatch, so the
+    // view mask lives on the mesh stage exactly like it did on the vertex one.
+    stages.mesh.view_mask = ZHLN_DetectShaderViewMask(&mesh);
+    stages.frag.view_mask = ZHLN_DetectShaderViewMask(&frag);
+    if (stages.task.handle != VK_NULL_HANDLE) {
+        stages.task.view_mask = ZHLN_DetectShaderViewMask(&task);
+    }
+
+    const auto copy = [](const ZHLN_ShaderDesc& d) -> std::vector<uint32_t> {
+        if (d.code == nullptr || d.size == 0) {
+            return {};
+        }
+        return std::vector<uint32_t>(d.code, d.code + (d.size / sizeof(uint32_t)));
+    };
+
+    return ShaderStages {device, stages, {}, copy(frag), copy(task), copy(mesh)};
 }
 
 } // namespace ZHLN::Vk

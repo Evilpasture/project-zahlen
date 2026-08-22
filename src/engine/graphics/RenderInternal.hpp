@@ -52,6 +52,10 @@ namespace ZHLN {
 //                          GPU indirect commands and instance buffer data.
 namespace Diag {
 [[nodiscard]] bool DisableGpuCulling() noexcept;
+/// ZHLN_NO_MESH_SHADING=1 forces the legacy vertex pipeline (VK_EXT_mesh_shader).
+[[nodiscard]] bool DisableMeshShading() noexcept;
+/// Runtime override of the above. Only call between frames.
+void               SetMeshShadingDisabled(bool disabled) noexcept;
 [[nodiscard]] bool IndirectTelemetryEnabled() noexcept;
 } // namespace Diag
 
@@ -318,6 +322,15 @@ using ComputeStageSource  = ShaderStageSource<ShaderStage::Compute>;
 struct NativeMaterial {
     Vk::Pipeline     pipeline;
     VkPipelineLayout layout = VK_NULL_HANDLE; // Non-owning alias of the spec-required null heap layout
+
+    // VK_EXT_mesh_shader variant of the same material (task+mesh+fragment).
+    // Invalid when the device cannot mesh-shade or the material opted out; the
+    // draw submission then falls back to `pipeline`.
+    Vk::Pipeline meshPipeline;
+
+    [[nodiscard]] bool HasMeshPipeline() const noexcept {
+        return meshPipeline.Valid();
+    }
 };
 
 static constexpr uint32_t kGpuCullingMaxInstances        = 8192;
@@ -733,6 +746,16 @@ struct RenderContext::Impl {
 
     Vk::TypedPipeline<0, true> shadowPipeline;
     Vk::TypedPipeline<0, true> punctualShadowPipeline;
+
+    // VK_EXT_mesh_shader twin of `shadowPipeline` (basic_task + basic_mesh +
+    // PSShadow). Invalid when the device cannot mesh-shade, in which case the
+    // cascade loop keeps issuing the indirect vertex draws.
+    Vk::TypedPipeline<0, true> shadowMeshPipeline;
+
+    /// True when the meshlet path should be used for scene geometry this frame.
+    [[nodiscard]] bool MeshShadingActive() const noexcept {
+        return ctx.MeshShadersSupported() && !Diag::DisableMeshShading();
+    }
 
     // Encapsulated Texture Lifecycle Manager
     TextureManager textureManager;

@@ -7,6 +7,7 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdlib>
 #include <cstring>
 #include <utility>
@@ -18,6 +19,28 @@ namespace Diag {
 auto DisableGpuCulling() noexcept -> bool {
     static const bool enabled = std::getenv("ZHLN_NO_GPU_CULLING") != nullptr;
     return enabled;
+}
+
+namespace {
+/// Seeded from ZHLN_NO_MESH_SHADING, then overridable at runtime so the two
+/// paths can be A/B-compared inside a single process (see TestMeshShaders).
+auto MeshShadingDisabledFlag() noexcept -> std::atomic<bool>& {
+    static std::atomic<bool> disabled {std::getenv("ZHLN_NO_MESH_SHADING") != nullptr};
+    return disabled;
+}
+} // namespace
+
+auto DisableMeshShading() noexcept -> bool {
+    // Escape hatch mirroring ZHLN_NO_GPU_CULLING: forces every draw back onto
+    // the vertex pipeline even on hardware that supports VK_EXT_mesh_shader,
+    // which makes A/B-ing the two paths (and bisecting driver bugs) trivial.
+    return MeshShadingDisabledFlag().load(std::memory_order_relaxed);
+}
+
+void SetMeshShadingDisabled(bool disabled) noexcept {
+    // Safe between frames only: MainPass1/MainPass2 and RenderGraphBuilder read
+    // this once per frame to pick the command-buffer topology.
+    MeshShadingDisabledFlag().store(disabled, std::memory_order_relaxed);
 }
 
 auto IndirectTelemetryEnabled() noexcept -> bool {
@@ -327,9 +350,9 @@ void RenderContext::Impl::DumpIndirectTelemetry(uint32_t frameNo) noexcept {
     const auto drawCount = static_cast<uint32_t>(queues.drawQueue.size());
 
     const bool useGpuCulling = cullingPass.pipeline.Valid() && frames.indirectCommandsBuffers->Valid() && (drawCount <= kGpuCullingMaxInstances) &&
-                               !Diag::DisableGpuCulling();
+                               !Diag::DisableGpuCulling() && !MeshShadingActive();
 
-    ZHLN::Log("[Diag] ---- frame {}: draws={} gpuCulling={} ----", frameNo, drawCount, useGpuCulling ? 1 : 0);
+    ZHLN::Log("[Diag] ---- frame {}: draws={} gpuCulling={} meshShading={} ----", frameNo, drawCount, useGpuCulling ? 1 : 0, MeshShadingActive() ? 1 : 0);
 
     if (drawCount == 0) {
         return;
@@ -453,56 +476,63 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
             _impl->pools[_impl->frame_index].Reset();
 
             // RAII command-buffer scope: begin on construction, end on exit.
-            Vk::CommandBufferGuard recordGuard(cmd);
+            //
+            // The scope below is LOAD-BEARING. Without it the guard lives until the
+            // end of the enclosing block, i.e. past the vkQueueSubmit2 below, and the
+            // primary is submitted while still in the recording state:
+            //   VUID-vkQueueSubmit2-commandBuffer-03874, once per frame, on every
+            //   headless frame (which is every GPU test).
+            {
+                Vk::CommandBufferGuard recordGuard(cmd);
 
-            _impl->pendingAcquires.Drain(cmd);
-            _impl->DispatchSkinningPasses();
+                _impl->pendingAcquires.Drain(cmd);
+                _impl->DispatchSkinningPasses();
 
-            if (_impl->queues.drawQueue.size() > kGpuCullingMaxInstances) {
-                _impl->queues.drawQueue.resize(kGpuCullingMaxInstances);
-            }
-            _impl->FlushLineQueue();
-
-            _impl->SortDrawQueue();
-
-            auto drawCount = _impl->queues.drawQueue.size();
-            auto csgCount  = _impl->queues.csgDrawQueue.size();
-
-            if (drawCount > 0 || csgCount > 0) {
-                auto  mapped = _impl->frames.instanceDataBuffers[_impl->frame_index].Map();
-                auto* dst    = static_cast<InstanceData*>(mapped.data);
-
-                for (size_t i = 0; i < drawCount; ++i) {
-                    dst[i] = _impl->queues.drawQueue[i].instanceData;
+                if (_impl->queues.drawQueue.size() > kGpuCullingMaxInstances) {
+                    _impl->queues.drawQueue.resize(kGpuCullingMaxInstances);
                 }
+                _impl->FlushLineQueue();
 
-                uint32_t csgOffset = drawCount;
-                for (auto& csgCmd: _impl->queues.csgDrawQueue) {
-                    dst[csgOffset]        = csgCmd.eyeDraw.instanceData;
-                    csgCmd.eyeInstanceIdx = csgOffset++;
+                _impl->SortDrawQueue();
 
-                    for (auto& cutter: csgCmd.cutters) {
-                        dst[csgOffset]     = cutter.draw.instanceData;
-                        cutter.instanceIdx = csgOffset++;
+                auto drawCount = _impl->queues.drawQueue.size();
+                auto csgCount  = _impl->queues.csgDrawQueue.size();
+
+                if (drawCount > 0 || csgCount > 0) {
+                    auto  mapped = _impl->frames.instanceDataBuffers[_impl->frame_index].Map();
+                    auto* dst    = static_cast<InstanceData*>(mapped.data);
+
+                    for (size_t i = 0; i < drawCount; ++i) {
+                        dst[i] = _impl->queues.drawQueue[i].instanceData;
+                    }
+
+                    uint32_t csgOffset = drawCount;
+                    for (auto& csgCmd: _impl->queues.csgDrawQueue) {
+                        dst[csgOffset]        = csgCmd.eyeDraw.instanceData;
+                        csgCmd.eyeInstanceIdx = csgOffset++;
+
+                        for (auto& cutter: csgCmd.cutters) {
+                            dst[csgOffset]     = cutter.draw.instanceData;
+                            cutter.instanceIdx = csgOffset++;
+                        }
                     }
                 }
-            }
-            _impl->BuildTLAS(cmd);
+                _impl->BuildTLAS(cmd);
 
-            if (Diag::IndirectTelemetryEnabled()) {
-                static uint32_t s_TelemetryFrame = 0;
-                ++s_TelemetryFrame;
-                if (s_TelemetryFrame >= 4 && (s_TelemetryFrame % 120) == 4) {
-                    _impl->DumpIndirectTelemetry(s_TelemetryFrame);
+                if (Diag::IndirectTelemetryEnabled()) {
+                    static uint32_t s_TelemetryFrame = 0;
+                    ++s_TelemetryFrame;
+                    if (s_TelemetryFrame >= 4 && (s_TelemetryFrame % 120) == 4) {
+                        _impl->DumpIndirectTelemetry(s_TelemetryFrame);
+                    }
                 }
-            }
 
-            _impl->RecordSceneFrame({cmd});
+                _impl->RecordSceneFrame({cmd});
 
-            if (Diag::IndirectTelemetryEnabled()) {
-                _impl->RecordIndirectTelemetry(cmd);
-            }
-            // recordGuard destructor ends the command buffer here.
+                if (Diag::IndirectTelemetryEnabled()) {
+                    _impl->RecordIndirectTelemetry(cmd);
+                }
+            } // recordGuard destructor ends the command buffer HERE, before the submit.
 
             // Submit directly to the graphics queue with timeline semaphore sync.
             // Wait on the compute timeline (same as the windowed path) and signal

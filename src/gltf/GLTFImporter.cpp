@@ -11,6 +11,7 @@
 #include <Zahlen/JSON.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
+#include <Zahlen/Meshlet.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/physics/Physics.hpp>
@@ -83,6 +84,10 @@ struct CPUPrimitiveJob {
 
     JPH::ShapeRefC meshCollider = nullptr;
     JPH::ShapeRefC boxCollider  = nullptr;
+
+    // VK_EXT_mesh_shader: meshlets are built JIT on the same worker threads
+    // that decode the primitive, using the exact same partitioning as zcook.
+    MeshletBuildResult meshlets;
 };
 
 struct CompiledPrimitive {
@@ -412,6 +417,13 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job) {
     if (prim.type == cgltf_primitive_type_triangles && jointsAcc == nullptr) {
         job.meshCollider = Physics::CreateMeshShape(job.positions.data(), static_cast<uint32_t>(job.positions.size()), job.indices.data(), job.indexCount);
     }
+
+    // VK_EXT_mesh_shader: partition the primitive into meshlets. Only triangle
+    // lists can be clustered; everything else keeps the legacy vertex path
+    // (meshletCount == 0 makes the renderer fall back automatically).
+    if (prim.type == cgltf_primitive_type_triangles) {
+        job.meshlets = BuildMeshlets(job.indices, job.positions);
+    }
 }
 
 void GatherImagesAndPrimitiveJobs(const cgltf_data* data, std::vector<cgltf_image*>& outUniqueImages, std::vector<CPUPrimitiveJob>& outPrimitiveJobs) {
@@ -549,13 +561,31 @@ auto GetOrCreateCompiledPrimitive(
     const BufferHandle ibo = (primJob.indexCount > 0) ? ctx.CreateIndexBuffer(primJob.indices.data(), primJob.indexCount * sizeof(uint32_t)) :
                                                         BufferHandle::Invalid;
 
+    // VK_EXT_mesh_shader streams. They are plain storage buffers read through
+    // BDA by the task/mesh shaders; the vertex/index buffers above stay live
+    // for BLAS builds and for the legacy vertex pipeline.
+    const bool hasMeshlets = !primJob.meshlets.Empty();
+
+    const BufferHandle meshletVbo =
+        hasMeshlets ? ctx.CreateStorageBuffer(primJob.meshlets.meshlets.data(), primJob.meshlets.meshlets.size() * sizeof(GPUMeshlet), sizeof(GPUMeshlet)) :
+                      BufferHandle::Invalid;
+    const BufferHandle meshletVertexVbo =
+        hasMeshlets ? ctx.CreateStorageBuffer(primJob.meshlets.vertices.data(), primJob.meshlets.vertices.size() * sizeof(uint32_t), sizeof(uint32_t)) :
+                      BufferHandle::Invalid;
+    const BufferHandle meshletTriVbo =
+        hasMeshlets ? ctx.CreateStorageBuffer(primJob.meshlets.triangles.data(), primJob.meshlets.triangles.size(), sizeof(uint8_t)) : BufferHandle::Invalid;
+
     Mesh subMesh = {
-        .posBuffer   = posVbo,
-        .attrBuffer  = attrVbo,
-        .skinBuffer  = skinVbo,
-        .indexBuffer = ibo,
-        .vertexCount = static_cast<uint32_t>(primJob.positions.size()),
-        .indexCount  = primJob.indexCount
+        .posBuffer           = posVbo,
+        .attrBuffer          = attrVbo,
+        .skinBuffer          = skinVbo,
+        .indexBuffer         = ibo,
+        .vertexCount         = static_cast<uint32_t>(primJob.positions.size()),
+        .indexCount          = primJob.indexCount,
+        .meshletBuffer       = meshletVbo,
+        .meshletVertexBuffer = meshletVertexVbo,
+        .meshletTriBuffer    = meshletTriVbo,
+        .meshletCount        = hasMeshlets ? static_cast<uint32_t>(primJob.meshlets.meshlets.size()) : 0u
     };
 
     if (auto res = ctx.BuildMeshBLAS(subMesh); !res) [[unlikely]] {
