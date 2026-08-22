@@ -686,12 +686,11 @@ bool BuildPerfScene(ZHLN::Engine& engine, const PerfConfig& cfg, PerfScene& scen
             }
             if (auto* sh = reg.Get<Components::ShadowSettingsComponent>(gEnts[0])) {
                 sh->shadowWidth        = 200.0f;
-                sh->shadowResolution   = 2048;
-                sh->maxPunctualShadows = 2;
-                sh->sunSize            = 0.05f;
+                sh->shadowResolution   = 2048; // RenderSystem reads this every frame and
+                sh->maxPunctualShadows = 2;    // resizes the shadow map dynamically — no
+                sh->sunSize            = 0.05f; // explicit SetShadowResolution call needed.
             }
         }
-        (void) rc.SetShadowResolution(2048);
     }
 
     // --- Skeletal animation: instantiate the real Uzi GLB when the asset is
