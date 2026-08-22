@@ -18,7 +18,9 @@
 //   3b. Bisect for the above: the same static light on a FRESH engine with no
 //      motion history pins whether an observed instability is carried over
 //      from the sweep (stale double-buffered state) or is a pure per-frame
-//      race.
+//      race. Both scenarios are HARD gates: if an identical light position
+//      renders differently on adjacent frames the suite fails (this is the
+//      regression guard for the cluster light-list inclusion race).
 //   4. Ray-traced shadows: an occluder between the sun and the ground must
 //      carve a real, stable shadow (not a full-scene blackout, not nothing),
 //      and removing it must restore a near-uniformly lit floor.
@@ -514,32 +516,19 @@ struct LightingRTTestSuite {
     /// camera's AA state into the RenderContext every tick, so a SetAAState
     /// call alone gets overwritten, and TAA jitter would dominate the
     /// frame-to-frame comparison.
-    /// The frame-parity / light-patch bistability reproduced by the sweep and
-    /// no-history reference scenarios is a KNOWN ENGINE BUG:
     ///
-    ///   * A cluster-aligned strip of floor ([0,133]-[100,144] at 320x240,
-    ///     i.e. cluster columns 0-4 along a cell row boundary) toggles between
-    ///     the point light being INCLUDED in and EXCLUDED from the cell's
-    ///     light list. The two states are deterministic (1601 vs 2260 red
-    ///     pixels) but the flip phase varies run to run (dwell of 1-3 frames).
-    ///   * It reproduces on a FRESH engine with a static light (no motion
-    ///     history), with GI/RTR/TAA disabled, so it is a per-frame race in
-    ///     the cluster-light assignment for marginal cells -- the light's
-    ///     range AABB just barely overlaps those cells, making inclusion the
-    ///     flip point. Prime suspects: host write -> compute read visibility
-    ///     of the light storage buffer (SetLights memcpy vs cluster culling
-    ///     dispatch) or compute -> fragment visibility of clusterGrid /
-    ///     lightIndexList across the compute<->graphics handoff.
-    ///
-    /// The tests DETECT and REPORT this loudly (WARN + parity diff/crop
-    /// artifacts) but do not hard-fail by default, so the suite can serve as
-    /// a regression gate for everything else while this bug is fixed. Set
-    /// ZHLN_TEST_REQUIRE_LIGHT_STABILITY=1 to make the stability checks a
-    /// hard failure (use it to verify a future engine fix).
-    [[nodiscard]] static bool RequireLightStability() noexcept {
-        return std::getenv("ZHLN_TEST_REQUIRE_LIGHT_STABILITY") != nullptr;
-    }
-
+    /// Stability guard: an identical light position must render identically on
+    /// every frame. This is the hard gate for the clustered light-list
+    /// inclusion race (a point light flickering in/out at its range boundary),
+    /// which is fixed by:
+    ///   * SetFrameData mirroring the light/uniform data into BOTH parity slots
+    ///     each frame (after the previous frame is retired), so no consumer can
+    ///     ever observe a stale or empty alternate slot,
+    ///   * a compute-queue memory barrier after cluster culling so
+    ///     volumetric injection cannot read the previous frame's lists,
+    ///   * the graphics submission waiting on the compute timeline across
+    ///     ALL_COMMANDS (previously FRAGMENT_SHADER only), so graphics-side
+    ///     compute/vertex stages cannot race the async compute queue.
     static void DisableTAA(ZHLN::Engine& engine) {
         auto& reg = engine.GetRegistry();
         for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::AASettingsComponent>()) {
@@ -1159,28 +1148,18 @@ struct LightingRTTestSuite {
                 const bool noIsolatedCull = ZHLN::Test::ExpectTrue(isolatedDips == 0u);
                 // Invariant 3: once settled, an identical light position must
                 // render identically. Any adjacent-pair change above the
-                // engine's noise floor is the KNOWN ENGINE BUG documented on
-                // RequireLightStability(). It is detected and reported (see
-                // WARN below) but only hard-fails when explicitly demanded.
-                if (worstPairFrac >= 0.005) {
-                    if (RequireLightStability()) {
-                        ZHLN::Test::ExpectTrue(false);
-                    } else {
-                        ZHLN::Println(
-                            "    [WARN] KNOWN ENGINE BUG: identical light position renders differently on adjacent frames "
-                            "(worst-pair |d|>32 {:.6f}). Set ZHLN_TEST_REQUIRE_LIGHT_STABILITY=1 to fail the suite on this; "
-                            "inspect headless_lighting_rt_cull_parity_diff.ppm and the region crops. This is the cluster "
-                            "light-list inclusion race, not a cull failure.",
-                            worstPairFrac
-                        );
-                    }
-                }
+                // engine's noise floor is a hard failure -- this is what
+                // catches the clustered light-list inclusion race (light
+                // flickering in/out at its range boundary). Diagnostics
+                // (parity diff + region crops) are always written so a failing
+                // run is immediately inspectable.
+                const bool noStaticStep = ZHLN::Test::ExpectTrue(worstPairFrac < 0.005);
 
-                return neverCulled && brightEverywhere && noIsolatedCull;
+                return neverCulled && brightEverywhere && noIsolatedCull && noStaticStep;
             }, &validationRaised);
 
             if (stable == StableRunResult::AssertionsFailed) {
-                return std::unexpected(LightingRTTestError::LightCullingPopDetected);
+                return std::unexpected(LightingRTTestError::TemporalFlickerDetected);
             }
             if (stable != StableRunResult::Ok) {
                 return std::unexpected(LightingRTTestError::DeviceLostDuringTest);
@@ -1352,29 +1331,19 @@ struct LightingRTTestSuite {
                     region.maxDelta, region.aR, region.aG, region.aB, region.bR, region.bG, region.bB
                 );
 
-                // Same KNOWN ENGINE BUG as the sweep scenario: the reference
-                // proves the flip exists with zero motion history. Detected
-                // and reported, hard-fails only when explicitly demanded.
-                if (worstFrac >= 0.005) {
-                    if (RequireLightStability()) {
-                        ZHLN::Test::ExpectTrue(false);
-                    } else {
-                        ZHLN::Println(
-                            "    [WARN] KNOWN ENGINE BUG: no-history static light flips light-list inclusion on adjacent frames "
-                            "(worst-pair |d|>32 {:.6f}). Set ZHLN_TEST_REQUIRE_LIGHT_STABILITY=1 to fail the suite; inspect "
-                            "headless_lighting_rt_ref_parity_diff.ppm and the region crops.",
-                            worstFrac
-                        );
-                    }
-                }
+                // Hard invariant: a no-history static light must render
+                // identically on every frame. This is the bisect that pins the
+                // light-list inclusion race (see sweep scenario).
+                const bool noStaticStep  = ZHLN::Test::ExpectTrue(worstFrac < 0.005);
+                const bool lightVisible  = ZHLN::Test::ExpectTrue(Mean(counts) > 16.0);
 
-                return ZHLN::Test::ExpectTrue(Mean(counts) > 16.0);
+                return noStaticStep && lightVisible;
                 },
                 &validationRaised
             );
 
             if (stable == StableRunResult::AssertionsFailed) {
-                return std::unexpected(LightingRTTestError::LightCullingPopDetected);
+                return std::unexpected(LightingRTTestError::TemporalFlickerDetected);
             }
             if (stable != StableRunResult::Ok) {
                 return std::unexpected(LightingRTTestError::DeviceLostDuringTest);

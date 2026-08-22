@@ -126,7 +126,35 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniform
             ComputeCascadeLightSpaceMatrix(cam, lightView, sunDir, nearDist, farDist, aspect, tanHalfFov, uniforms.shadowResolution);
     }
 
-    std::memcpy(_impl->frames.frameUniformBuffers->Map().data, &gpuUniforms, sizeof(FrameUniforms));
+    // Host writes to the frame-uniform buffer must be visible to BOTH parity
+    // slots: the cluster culling compute dispatch, the volumetric light
+    // injection and the fragment lighting pass all sample the same slot set
+    // and a stale/empty alternate slot previously made a static scene render
+    // different frames (light included vs excluded at the range boundary).
+    // This runs after BeginFrame, which means the previous frame is retired,
+    // so both slots are idle and safe to write.
+    for (uint32_t slot = 0; slot < 2; ++slot) {
+        auto mapped = _impl->frames.frameUniformBuffers[slot].Map();
+        if (mapped.data != nullptr) {
+            std::memcpy(mapped.data, &gpuUniforms, sizeof(FrameUniforms));
+        }
+    }
+
+    // Mirror the current light set into BOTH parity slots for the same
+    // reason. SetLights itself cannot do this safely (it runs before
+    // BeginFrame, while the previous frame may still be sampling the other
+    // slot); here the previous frame is guaranteed retired by the fence wait.
+    for (uint32_t slot = 0; slot < 2; ++slot) {
+        auto mapped = _impl->frames.lightStorageBuffers[slot].Map();
+        if (mapped.data == nullptr) {
+            continue;
+        }
+        if (!_impl->mappedLights.empty()) {
+            std::memcpy(mapped.data, _impl->mappedLights.data(), sizeof(GPULight) * _impl->mappedLights.size());
+        } else {
+            std::memset(mapped.data, 0, sizeof(GPULight) * 128u);
+        }
+    }
 }
 
 void RenderContext::SetGISettings(const GISettings& settings) noexcept {
@@ -136,6 +164,10 @@ void RenderContext::SetGISettings(const GISettings& settings) noexcept {
 void RenderContext::SetLights(const GPULight* lights, uint32_t count) noexcept {
     uint32_t safeCount = std::min(count, 128u);
     if (safeCount > 0 && lights != nullptr) {
+        // Only the CURRENT parity slot is written here: SetLights runs before
+        // BeginFrame, and the other slot may still be sampled by the
+        // in-flight previous frame. SetFrameData mirrors the full light set
+        // into both slots after the frame is retired.
         std::memcpy(_impl->frames.lightStorageBuffers->Map().data, lights, sizeof(GPULight) * safeCount);
         _impl->mappedLights.assign(lights, lights + safeCount);
     } else {

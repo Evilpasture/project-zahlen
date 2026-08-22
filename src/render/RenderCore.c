@@ -1694,12 +1694,18 @@ ZHLN_FrameResult ZHLN_SubmitAndPresent(const ZHLN_FrameSubmitDesc* const restric
     }
 
     // Wait 3: Async Compute synchronization
+    // Wait on ALL stages, not only fragment shader: the graphics submission
+    // contains its own compute dispatches (Hi-Z, GPU culling) and vertex work
+    // that consume buffers written by the compute queue (cluster grid, light
+    // lists, instance data). A fragment-only wait let those stages race the
+    // compute queue and produced per-frame flicker of clustered light
+    // inclusion (light in/out of list) at marginal range-boundary cells.
     if (desc->computeSemaphore != VK_NULL_HANDLE && desc->computeWaitValue > 0) {
         wait_infos[wait_count++] = (VkSemaphoreSubmitInfo) {
             .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
             .semaphore = desc->computeSemaphore,
             .value     = desc->computeWaitValue,
-            .stageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT
+            .stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT
         };
     }
 
