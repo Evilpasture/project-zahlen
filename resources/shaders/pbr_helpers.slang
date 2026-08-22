@@ -449,3 +449,37 @@ public float2 RaymarchSSR(float3 worldPos, float3 startPosWS, float3 dirWS, floa
     }
     return float2(0.0f, 0.0f);
 }
+
+// ============================================================================
+// GGX VNDF SAMPLING (Heitz 2018 / Dupuy 2023)
+// ============================================================================
+
+public float3 SampleGGX_VNDF(float3 V_local, float alpha, float2 u) {
+    // 1. Stretch view vector to hemisphere configuration
+    float3 Vh = normalize(float3(alpha * V_local.x, alpha * V_local.y, max(V_local.z, 0.001f)));
+
+    // 2. Orthonormal basis around Vh
+    float lensq = Vh.x * Vh.x + Vh.y * Vh.y;
+    float3 T1   = (lensq > 1e-7f) ? float3(-Vh.y, Vh.x, 0.0f) * rsqrt(lensq) : float3(1.0f, 0.0f, 0.0f);
+    float3 T2   = cross(Vh, T1);
+
+    // 3. Parameterize projected area
+    float r   = sqrt(u.x);
+    float phi = 2.0f * 3.141592653589793f * u.y;
+    float t1  = r * cos(phi);
+    float t2  = r * sin(phi);
+    float s   = 0.5f * (1.0f + Vh.z);
+    t2        = (1.0f - s) * sqrt(max(0.0f, 1.0f - t1 * t1)) + s * t2;
+
+    // 4. Reprojection onto hemisphere
+    float3 Nh = t1 * T1 + t2 * T2 + sqrt(max(0.0f, 1.0f - t1 * t1 - t2 * t2)) * Vh;
+
+    // 5. Unstretch to retrieve final microfacet normal
+    return normalize(float3(alpha * Nh.x, alpha * Nh.y, max(Nh.z, 0.0f)));
+}
+
+public float3 EvaluateVNDFWeight(float NdotV, float NdotL, float VdotH, float roughness, float3 F0) {
+    float G2_over_G1V = GeometrySchlickGGX(NdotL, roughness);
+    float3 F          = FresnelSchlick(VdotH, F0);
+    return F * G2_over_G1V;
+}

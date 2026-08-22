@@ -1,4 +1,4 @@
-// resources/shaders/reflection.hlsl
+// resources/shaders/reflection.slang
 
 import pbr_helpers;
 import uniforms;
@@ -90,22 +90,27 @@ SamplerState clampSampler;
 Texture2D<float4> texLighting;
 Texture3D<float4> texVoxelIntegrated;
 StructuredBuffer<InstanceData> g_instances;
-// The TLAS binding is declared LAST on purpose (see lighting.slang).
-#ifndef DISABLE_RTR
-RaytracingAccelerationStructure tlas;
-#endif
 
 #ifndef DISABLE_RTR
-float2 RaytraceRTR(float3 worldPos, float3 N, float3 R, out float confidence, out float3 fallbackColor, RaytracingAccelerationStructure tlas,
-                   Texture2D<float> texDepth, SamplerState pointSampler, float4x4 viewProj, float4 camPos, float4x4 invViewProj) {
+RaytracingAccelerationStructure tlas;
+
+float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out float confidence, out float3 fallbackColor, uint2 pixelPos) {
     confidence    = 0.0f;
     fallbackColor = float3(0.0f, 0.0f, 0.0f);
 
+    float NdotV = dot(N, V);
+    if (NdotV <= 1e-4f) {
+        return float2(-1.0f, -1.0f);
+    }
+
+    float3 R      = reflect(-V, N);
+    float maxDist = lerp(50.0f, 16.0f, roughness);
+
     RayDesc ray;
-    ray.Origin    = worldPos + N * 0.05f;
+    ray.Origin    = worldPos + N * 0.02f;
     ray.Direction = R;
     ray.TMin      = 0.01f;
-    ray.TMax      = 50.0f;
+    ray.TMax      = maxDist;
 
     RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_FORCE_OPAQUE> q;
     q.TraceRayInline(tlas, RAY_FLAG_NONE, 0xFF, ray);
@@ -115,45 +120,89 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 R, out float confidence, ou
     if (q.CommittedStatus() == COMMITTED_TRIANGLE_HIT) {
         float rayT         = q.CommittedRayT();
         float3 hitWorldPos = ray.Origin + ray.Direction * rayT;
-        float4 hitClip     = mul(viewProj, float4(hitWorldPos, 1.0f));
 
-        if (hitClip.w < 0.1f)
+        uint instanceID      = q.CommittedInstanceID();
+        InstanceData hitInst = g_instances[instanceID];
+
+        // 1. Reconstruct exact geometric hit normal from mesh vertices
+        float3 hitNormal = float3(0.0f, 1.0f, 0.0f);
+        if (hitInst.posAddress != 0) {
+            uint primIdx = q.CommittedPrimitiveIndex();
+            uint i0      = primIdx * 3 + 0;
+            uint i1      = primIdx * 3 + 1;
+            uint i2      = primIdx * 3 + 2;
+
+            if (hitInst.iboAddress != 0) {
+                uint* indices = (uint*) hitInst.iboAddress;
+                i0            = indices[i0];
+                i1            = indices[i1];
+                i2            = indices[i2];
+            }
+
+            float* posValues = (float*) hitInst.posAddress;
+            float3 p0        = float3(posValues[i0 * 3 + 0], posValues[i0 * 3 + 1], posValues[i0 * 3 + 2]);
+            float3 p1        = float3(posValues[i1 * 3 + 0], posValues[i1 * 3 + 1], posValues[i1 * 3 + 2]);
+            float3 p2        = float3(posValues[i2 * 3 + 0], posValues[i2 * 3 + 1], posValues[i2 * 3 + 2]);
+
+            float3 wp0 = mul(hitInst.world, float4(p0, 1.0f)).xyz;
+            float3 wp1 = mul(hitInst.world, float4(p1, 1.0f)).xyz;
+            float3 wp2 = mul(hitInst.world, float4(p2, 1.0f)).xyz;
+
+            float3 crossN = cross(wp1 - wp0, wp2 - wp0);
+            float lenSq   = dot(crossN, crossN);
+            if (lenSq > 1e-7f) {
+                hitNormal = crossN * rsqrt(lenSq);
+            }
+        }
+
+        // Ensure normal opposes incoming ray
+        if (dot(hitNormal, ray.Direction) > 0.0f) {
+            hitNormal = -hitNormal;
+        }
+
+        // 2. Full PBR Lighting on the Hit Point (Sun Directional + SH Ambient)
+        float3 hitBaseColor = hitInst.baseColorFactor.rgb;
+        float3 L_sun        = normalize(frame.lightDir.xyz);
+        float NdotL         = saturate(dot(hitNormal, L_sun));
+        float3 directSun    = frame.lightDir.w * NdotL * (1.0f / 3.14159265f);
+        float3 ambientLight = EvaluateSH(hitNormal, frame.sh) * frame.ambientExposure;
+
+        fallbackColor = hitBaseColor * (directSun + ambientLight);
+        confidence    = 1.0f;
+
+        // 3. Project to Screen Space for high-res specular/reflection caching
+        float4 hitClip = mul(frame.viewProj, float4(hitWorldPos, 1.0f));
+        if (hitClip.w < 0.1f) {
             return float2(-1.0f, -1.0f);
+        }
 
         float2 hitNDC = hitClip.xy / hitClip.w;
         float2 hitUV  = hitNDC * 0.5f + 0.5f;
 
-        float2 edgeFactor = smoothstep(0.0f, 0.03f, hitUV) * smoothstep(1.0f, 0.97f, hitUV);
+        float2 edgeFactor = smoothstep(0.0f, 0.05f, hitUV) * smoothstep(1.0f, 0.95f, hitUV);
         float onScreen    = edgeFactor.x * edgeFactor.y;
 
         if (onScreen > 0.0f) {
-            float sampledRawDepth  = texDepth.SampleLevel(pointSampler, hitUV, 0);
-            float3 sampledWorldPos = ReconstructWorldPos(hitUV, sampledRawDepth, invViewProj);
+            float sampledRawDepth  = texDepth.SampleLevel(smp, hitUV, 0);
+            float3 sampledWorldPos = ReconstructWorldPos(hitUV, sampledRawDepth, frame.invViewProj);
 
             float distToHit     = hitClip.w;
-            float distToSampled = mul(viewProj, float4(sampledWorldPos, 1.0f)).w;
+            float distToSampled = mul(frame.viewProj, float4(sampledWorldPos, 1.0f)).w;
             float depthDiff     = abs(distToHit - distToSampled);
 
-            float maxDiff   = 0.50f + rayT * 0.08f;
-            float depthMask = smoothstep(maxDiff, 0.0f, depthDiff);
+            // 4. Normal-Orientation Check (Stops front-face bleeding onto back/side faces)
+            float4 normRough      = texNormalRoughness.SampleLevel(smp, hitUV, 0);
+            float3 sampledNorm    = UnpackNormalOctahedron(normRough.xy * 2.0f - 1.0f);
+            float normalAlignment = saturate(dot(hitNormal, sampledNorm));
 
-            if (depthMask > 0.0f) {
-                // Front-facing & on-screen: sample high-res G-buffer lighting
-                confidence = onScreen * depthMask;
+            float maxDiff   = max(0.5f, distToHit * 0.05f);
+            float depthMask = smoothstep(maxDiff * 1.5f, maxDiff * 0.2f, depthDiff) * smoothstep(0.4f, 0.8f, normalAlignment);
+
+            if (depthMask > 0.1f) {
+                confidence = lerp(0.8f, 1.0f, onScreen * depthMask);
                 return hitUV;
             }
         }
-
-        // --- BACKFACING / OFF-SCREEN FALLBACK ---
-        // Fetch instance base color directly from SSBO!
-        uint instanceID      = q.CommittedInstanceID();
-        InstanceData hitInst = g_instances[instanceID];
-
-        float3 hitBaseColor = hitInst.baseColorFactor.rgb;
-        float3 ambientLight = EvaluateSH(float3(0.0f, 1.0f, 0.0f), frame.sh) * frame.ambientExposure;
-
-        fallbackColor = hitBaseColor * ambientLight;
-        confidence    = 1.0f; // High-confidence solid reflection
 
         return float2(-1.0f, -1.0f);
     }
@@ -209,11 +258,6 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         float3 V = normalize(pc.camPos.xyz - worldPos);
         float3 R = reflect(-V, N);
 
-        if (R.y < 0.05f) {
-            R.y = 0.05f;
-            R   = normalize(R);
-        }
-
         float3 F0      = lerp(float3(0.04f, 0.04f, 0.04f), albedoRaw.rgb, metallic);
         float NdotV    = saturate(dot(N, V));
         float2 envBRDF = brdfLUT.SampleLevel(clampSampler, float2(NdotV, roughness), 0.0f).rg;
@@ -244,41 +288,42 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
         if (roughness <= 0.4f && (ENABLE_SSR != 0 || ENABLE_RTR != 0)) {
             float confidence       = 0.0f;
-            float debugValue       = 0.0f;
             float3 reflectionColor = float3(0.0f, 0.0f, 0.0f);
-            float2 hitUV           = float2(-1.0f, -1.0f);
-            float3 biasedStartPos  = worldPos + N * 0.05f;
-
-            if (ENABLE_SSR != 0) {
-                hitUV = RaymarchSSR(worldPos, biasedStartPos, R, N, confidence, debugValue, texDepth, pointSampler, pc.viewProj, pc.camPos, pc.invViewProj);
-            }
 
 #ifndef DISABLE_RTR
-            if (confidence < 0.1f && ENABLE_RTR != 0) {
-                float3 rtrFallbackColor = float3(0.0f, 0.0f, 0.0f);
-                hitUV = RaytraceRTR(worldPos, N, R, confidence, rtrFallbackColor, tlas, texDepth, pointSampler, pc.viewProj, pc.camPos, pc.invViewProj);
+            if (ENABLE_RTR != 0) {
+                float3 rtrFallback = float3(0.0f, 0.0f, 0.0f);
+                float2 hitUV       = RaytraceRTR(worldPos, N, V, roughness, confidence, rtrFallback, uint2(input.pos.xy));
 
-                if (confidence > 0.0f && hitUV.x < 0.0f) {
-                    reflectionColor = rtrFallbackColor;
-                }
-            }
-#endif
-
-            if (confidence > 0.0f) {
-                if (hitUV.x >= 0.0f) {
-                    float4 hitNormRough = texNormalRoughness.SampleLevel(smp, hitUV, 0);
-                    if (hitNormRough.z == 0.0f) {
-                        confidence = 0.0f;
+                if (confidence > 0.0f) {
+                    if (hitUV.x >= 0.0f) {
+                        float4 hitNormRough = texNormalRoughness.SampleLevel(smp, hitUV, 0);
+                        if (hitNormRough.z == 0.0f) {
+                            reflectionColor = rtrFallback;
+                        } else {
+                            float3 screenColor = texLighting.SampleLevel(smp, hitUV, 0).rgb;
+                            reflectionColor    = lerp(rtrFallback, screenColor, confidence);
+                        }
                     } else {
-                        confidence *= saturate(dot(R, N) * 10.0f);
-                        reflectionColor = texLighting.SampleLevel(smp, hitUV, 0).rgb;
+                        reflectionColor = rtrFallback;
                     }
+                }
+            } else
+#endif
+                if (ENABLE_SSR != 0) {
+                float debugValue      = 0.0f;
+                float3 biasedStartPos = worldPos + N * 0.05f;
+                float2 hitUV =
+                    RaymarchSSR(worldPos, biasedStartPos, R, N, confidence, debugValue, texDepth, pointSampler, pc.viewProj, pc.camPos, pc.invViewProj);
+
+                if (confidence > 0.0f) {
+                    reflectionColor = texLighting.SampleLevel(smp, hitUV, 0).rgb;
                 }
             }
 
             float3 specReflect = lerp(specularIBL, reflectionColor * FssEss, confidence);
 
-            float roughnessFade    = saturate(1.0f - roughness);
+            float roughnessFade    = saturate(1.0f - roughness * 2.0f);
             float horizonOcclusion = saturate(1.0f + dot(R, N));
             horizonOcclusion *= horizonOcclusion;
 
