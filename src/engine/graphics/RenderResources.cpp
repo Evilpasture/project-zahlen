@@ -448,12 +448,15 @@ auto RenderContext::CreateDebugSolidMaterial() -> std::expected<Material, Error>
         .vertexShaderSize = shaders.vertex.size(),
         .fragShaderData   = shaders.fragment.data(),
         .fragShaderSize   = shaders.fragment.size(),
-        .doubleSided      = true,
-        .alphaBlend       = true,
-        .taskShaderData   = shaders.task.data(),
-        .taskShaderSize   = shaders.task.size(),
-        .meshShaderData   = shaders.mesh.data(),
-        .meshShaderSize   = shaders.mesh.size(),
+        // Designator order must follow PipelineDesc's declaration order: the
+        // task/mesh members sit between the fragment stage and the state flags.
+        // GCC rejects any other order outright (ISO C++ [dcl.init.aggr]/3.1).
+        .taskShaderData = shaders.task.data(),
+        .taskShaderSize = shaders.task.size(),
+        .meshShaderData = shaders.mesh.data(),
+        .meshShaderSize = shaders.mesh.size(),
+        .doubleSided    = true,
+        .alphaBlend     = true,
     });
 }
 
