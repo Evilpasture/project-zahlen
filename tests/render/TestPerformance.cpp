@@ -1350,7 +1350,6 @@ struct PerformanceTestSuite {
                 return std::unexpected(PerfTestError::SceneBuildFailed);
             }
 
-            auto& rc = engine->GetRenderContext();
             ZHLN::Println("    [Perf] Scene ready: {} dynamic crates | {} static | {} point lights | {} particle emitters ({} each) | {} decals",
                           cfg.dynamicBoxes, cfg.staticBoxes, cfg.pointLights, cfg.particleEmits, cfg.particlesEach, cfg.decals);
 
@@ -1477,9 +1476,12 @@ struct PerformanceTestSuite {
             }
 
             // 6. Screenshot sanity (non-blank output).
+            // NOTE: fetch the context fresh — HandleDeviceLost replaces the
+            // RenderContext object entirely, so any reference captured before
+            // the frame loop is dangling after a hot rebuild.
             if (cfg.screenshot) {
                 const std::string ppmPath = "test_perf_output.ppm";
-                const auto        captureRes = rc.CaptureScreenshotPPM(ppmPath);
+                const auto        captureRes = engine->GetRenderContext().CaptureScreenshotPPM(ppmPath);
                 const auto checkCapture = ZHLN::Test::AssertTrue(captureRes.has_value());
                 if (!checkCapture) {
                     return std::unexpected(PerfTestError::BlankFrame);
@@ -1520,7 +1522,8 @@ struct PerformanceTestSuite {
                 ZHLN::Println("    [Perf] NOTE: {} GPU device-lost event(s) during the run — the engine hot-rebuilt and", deviceLost);
                 ZHLN::Println("    [Perf] the test re-registered its assets. See the DEVICE LOST lines above for which frames were hit.");
             }
-            PrintPerfReport(rc, cfg, SummarizeFrames(frameMs), counters, reg, cfg.measured, alifeEvents);
+            // Same rule as above: fresh context fetch for the post-loop report.
+            PrintPerfReport(engine->GetRenderContext(), cfg, SummarizeFrames(frameMs), counters, reg, cfg.measured, alifeEvents);
 
             return {};
         }
