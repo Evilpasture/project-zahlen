@@ -744,20 +744,21 @@ struct LightingRTTestSuite {
                 auto& reg = engine->GetRegistry();
                 auto& rc  = engine->GetRenderContext();
                 // Dim ambient + dim sun so the red point light owns the frame.
-                // GI/AO are disabled (giMode=0) so the sweep isolates CLUSTERED
-                // DIRECT LIGHTING: ambient.slang rotates its AO/GI sample
-                // pattern by a per-frame time offset, and around a pixel-count
-                // classification boundary that rotating noise alone produces a
-                // sizable frame-to-frame delta. The point-light red patch is
-                // the signal under test; the static flicker scenario covers
-                // the full GI path separately.
+                // GI/AO are disabled (giMode=0) and RTR is disabled (enableRTR=0)
+                // so the sweep isolates CLUSTERED DIRECT LIGHTING -- the only
+                // pass under test. ambient.slang otherwise rotates its AO/GI
+                // pattern by a per-frame time offset and lighting.slang switches
+                // the sun onto the ray-traced shadow path (CalculateShadowRay
+                // Traced); both are covered by the static flicker and RT shadow
+                // scenarios respectively and add unrelated per-frame variation
+                // to a pixel-count metric.
                 const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
                 if (!settingsEnts.empty()) {
                     reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
                         pp.fullBright      = 0;
                         pp.ambientExposure = 2.0f;
                         pp.enableSSR       = 1;
-                        pp.enableRTR       = 1;
+                        pp.enableRTR       = 0;
                         pp.giMode          = 0;
                     });
                 }
@@ -867,31 +868,54 @@ struct LightingRTTestSuite {
                     }
                 }
 
-                // Same-position repeat control: a frame-alternating cull (e.g.
-                // cluster buffer ping-pong) changes the signature between two
-                // captures of an IDENTICAL light position. Two genuine frames
-                // must be near-identical. GI/AO are disabled above so the two
-                // frames share all inputs except the engine's constant
-                // per-frame dither; any remaining delta against the static-
-                // scene noise floor is a real alternation.
-                const RgbImage repeatA = Capture(eng, "headless_lighting_rt_cull_repeat_a.ppm");
-                TickFrames(eng, 1);
-                const RgbImage repeatB = Capture(eng, "headless_lighting_rt_cull_repeat_b.ppm");
-                const auto     repeatCheck = ZHLN::Test::AssertTrue(repeatA.Valid() && repeatB.Valid());
-                const bool     repeatValid = repeatCheck.has_value();
-                const double   repeatRedA  = repeatValid ? static_cast<double>(MeasureImage(repeatA).red) : -1.0;
-                const double   repeatRedB  = repeatValid ? static_cast<double>(MeasureImage(repeatB).red) : -1.0;
-                const double   repeatRelDiff =
-                    (repeatRedA > 1.0 && repeatRedB > 1.0) ? std::abs(repeatRedA - repeatRedB) / std::max(repeatRedA, repeatRedB) : 0.0;
+                // Same-position stability: four captures at the FIXED final
+                // position, one frame apart, after an explicit settling tick.
+                // A genuine frame-alternating artifact (cluster buffer
+                // ping-pong, double-buffered resource parity) shows up as a
+                // persistent A/B/A/B oscillation and even the last two frames
+                // differ; a transient (history convergence, dither warm-up)
+                // settles by the last two and passes. The full sequence is
+                // printed so an oscillation is distinguishable from a one-off.
+                TickFrames(eng, 1); // settle after the sweep
+                std::vector<double> stableCounts;
+                std::vector<double> stableLuma;
+                for (uint32_t r = 0; r < 4; ++r) {
+                    const RgbImage frame = Capture(eng, "headless_lighting_rt_cull_stable_" + std::to_string(r) + ".ppm");
+                    auto checkStable = ZHLN::Test::AssertTrue(frame.Valid());
+                    if (!checkStable) {
+                        return false;
+                    }
+                    const FrameMetrics m = MeasureImage(frame);
+                    stableCounts.push_back(static_cast<double>(m.red));
+                    stableLuma.push_back(m.meanLuma);
+                    TickFrames(eng, 1);
+                }
+
+                const double lastRelDiff =
+                    (stableCounts[2] > 1.0 && stableCounts[3] > 1.0)
+                        ? std::abs(stableCounts[2] - stableCounts[3]) / std::max(stableCounts[2], stableCounts[3])
+                        : 0.0;
+                // Parity oscillation detector: even/odd frames form two
+                // clusters that differ from each other.
+                const double evenClusterDelta =
+                    (stableCounts[0] > 1.0 && stableCounts[2] > 1.0)
+                        ? std::abs(stableCounts[0] - stableCounts[2]) / std::max(stableCounts[0], stableCounts[2])
+                        : 0.0;
+                const double oddClusterDelta =
+                    (stableCounts[1] > 1.0 && stableCounts[3] > 1.0)
+                        ? std::abs(stableCounts[1] - stableCounts[3]) / std::max(stableCounts[1], stableCounts[3])
+                        : 0.0;
+                const bool parityOscillation = evenClusterDelta < 0.15 && oddClusterDelta < 0.15 && lastRelDiff > 0.15;
 
                 const double   minRed    = *std::ranges::min_element(redCounts);
                 const double   maxRed    = *std::ranges::max_element(redCounts);
                 const uint32_t minPeak   = *std::ranges::min_element(redPeaks);
 
                 ZHLN::Println(
-                    "    [INFO] light sweep: red pixels min={:.0f} max={:.0f} across {} samples, red peak floor={}, isolated dips={}, "
-                    "same-position rel diff={:.3f}",
-                    minRed, maxRed, redCounts.size(), minPeak, isolatedDips, repeatRelDiff
+                    "    [INFO] light sweep: red pixels min={:.0f} max={:.0f} across {} samples, red peak floor={}, isolated dips={} | "
+                    "stable sequence: {:.0f} {:.0f} {:.0f} {:.0f} (last-pair rel diff {:.4f}, parity oscillation {})",
+                    minRed, maxRed, redCounts.size(), minPeak, isolatedDips, stableCounts[0], stableCounts[1], stableCounts[2], stableCounts[3],
+                    lastRelDiff, parityOscillation
                 );
 
                 // Invariant 1: the light stays within range and on screen for the
@@ -901,8 +925,10 @@ struct LightingRTTestSuite {
                 // Invariant 2: no single-frame culling holes between healthy
                 // neighbours.
                 const bool noIsolatedCull = ZHLN::Test::ExpectTrue(isolatedDips == 0u);
-                // Invariant 3: identical light position renders identically.
-                const bool noAlternatingCull = ZHLN::Test::ExpectTrue(repeatRelDiff < 0.25);
+                // Invariant 3: once settled, an identical light position must
+                // render identically. A persistent alternation (even/odd frames
+                // each internally consistent) is a real artifact, not noise.
+                const bool noAlternatingCull = ZHLN::Test::ExpectTrue(!parityOscillation && lastRelDiff < 0.15);
 
                 return neverCulled && brightEverywhere && noIsolatedCull && noAlternatingCull;
             }, &validationRaised);
