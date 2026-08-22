@@ -245,6 +245,8 @@ struct PerfCounters {
     uint32_t queries     = 0;
 };
 
+} // namespace
+
 // ============================================================================
 // Scene Construction
 // ============================================================================
@@ -748,6 +750,8 @@ bool BuildPerfScene(ZHLN::Engine& engine, const PerfConfig& cfg, PerfScene& scen
 
     return true;
 }
+
+} // namespace
 
 // ============================================================================
 // Per-Frame Drive (churn, steering, events)
