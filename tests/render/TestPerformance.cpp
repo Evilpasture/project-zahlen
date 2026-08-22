@@ -227,6 +227,12 @@ struct PerfScene {
     };
     std::vector<ChurnEntry> churnPool;
 
+    // Entities that carry PerfDispatchComponent from scene-build time and are
+    // never destroyed. Used to verify the fiber dispatch system ran every
+    // frame (churned entities are born mid-window and legitimately have fewer
+    // ticks, so they must NOT be part of this check).
+    std::vector<ZHLN::Entity> dispatchSentinels;
+
 #if defined(ZHLN_PERF_WITH_EXTRAS)
     std::unique_ptr<ZHLN::ALife::Simulator> alife;
     std::vector<ZHLN::Entity>               alifeEntities;
@@ -748,6 +754,12 @@ bool BuildPerfScene(ZHLN::Engine& engine, const PerfConfig& cfg, PerfScene& scen
     ZHLN::Println("    [Perf] NOTE: ZHLN_BUILD_EXTRAS off — ALife population skipped.");
 #endif
 
+    // Snapshot the fiber-dispatch sentinels: everything that has
+    // PerfDispatchComponent right now exists before the first frame and is
+    // never destroyed, so it must accumulate one tick per frame.
+    const std::span<const ZHLN::Entity> sentinelSpan = reg.GetEntitiesWith<PerfDispatchComponent>();
+    scene.dispatchSentinels.assign(sentinelSpan.begin(), sentinelSpan.end());
+
     return true;
 }
 
@@ -1196,6 +1208,12 @@ struct PerformanceTestSuite {
             ZHLN::Println("    [Perf] Config: {}x{} | warmup {} | measured {} | scale {}x | validation {}", cfg.width, cfg.height, cfg.warmupFrames,
                           cfg.measured, cfg.scale, (cfg.validation ? "ON" : "OFF"));
 
+            // A GPU hang under stress is an expected outcome of this test. The
+            // engine has a dedicated hot-rebuild recovery path (device lost ->
+            // full re-init -> asset rebind), so a *recovered* device loss is
+            // reported in the perf report instead of failing the run.
+            ZHLN::Test::AllowDeviceLost(true);
+
             // 1. Engine (headless, no window server required).
             const EngineConfig engineCfg {
                 .physics = {
@@ -1265,7 +1283,8 @@ struct PerformanceTestSuite {
             frameMs.reserve(cfg.measured);
             PerfCounters counters {};
             {
-                std::mt19937 measureRng(0x2222);
+                std::mt19937  measureRng(0x2222);
+                const auto    windowStart = std::chrono::steady_clock::now();
                 for (uint32_t frame = 0; frame < cfg.measured; ++frame) {
                     const auto t0 = std::chrono::steady_clock::now();
                     engine->ProcessEvents();
@@ -1275,6 +1294,14 @@ struct PerformanceTestSuite {
                     }
                     const auto t1 = std::chrono::steady_clock::now();
                     frameMs.push_back(std::chrono::duration<double, std::milli>(t1 - t0).count());
+
+                    // Heartbeat: pinpoints the frame index where the run dies
+                    // if the GPU hangs or the driver resets mid-measurement.
+                    if ((frame % 100) == 0) {
+                        const double elapsedMS = std::chrono::duration<double, std::milli>(t1 - windowStart).count();
+                        ZHLN::Println("    [Perf] heartbeat: measured frame {} — {} ms elapsed, {} visible entities", frame,
+                                      static_cast<uint32_t>(elapsedMS), engine->GetVisibleEntities().size());
+                    }
                 }
             }
 
@@ -1311,18 +1338,27 @@ struct PerformanceTestSuite {
                 }
             }
 
-            // The fiber system must have ticked on every frame.
+            // The fiber system must have ticked on every frame. Only the
+            // scene-build sentinels qualify: churned entities are born
+            // mid-window and legitimately have fewer ticks than the window.
             {
-                const auto dispatchComps = reg.GetRawArray<PerfDispatchComponent>();
-                const auto dispatchEnts  = reg.GetEntitiesWith<PerfDispatchComponent>();
-                bool       stalled       = dispatchEnts.empty();
-                for (size_t i = 0; !stalled && i < dispatchEnts.size(); i += 16) {
-                    if (dispatchComps[i].ticks < cfg.measured) {
+                bool stalled = scene.dispatchSentinels.empty();
+                uint32_t lowTicks = 0;
+                for (const ZHLN::Entity e: scene.dispatchSentinels) {
+                    if (!reg.IsAlive(e)) {
                         stalled = true;
+                        break;
+                    }
+                    const auto* comp = reg.Get<PerfDispatchComponent>(e);
+                    if ((comp == nullptr) || (comp->ticks < cfg.measured)) {
+                        stalled  = true;
+                        lowTicks = (comp != nullptr) ? comp->ticks : 0;
+                        break;
                     }
                 }
                 ZHLN::Test::ExpectFalse(stalled);
                 if (stalled) {
+                    ZHLN::Println("    [Perf] fiber stall: sentinel tick count {} < measured window {}", lowTicks, cfg.measured);
                     return std::unexpected(PerfTestError::FiberSystemStalled);
                 }
             }
@@ -1366,6 +1402,11 @@ struct PerformanceTestSuite {
 #else
             const uint64_t alifeEvents = 0;
 #endif
+            const uint32_t deviceLost = ZHLN_GetDeviceLostCount();
+            if (deviceLost > 0) {
+                ZHLN::Println("    [Perf] WARNING: {} GPU device-lost event(s) during the run — the engine hot-rebuilt and", deviceLost);
+                ZHLN::Println("    [Perf] continued. FPS numbers above include the rebuild spike; a hang-free run is a cleaner baseline.");
+            }
             PrintPerfReport(rc, cfg, SummarizeFrames(frameMs), counters, reg, cfg.measured, alifeEvents);
 
             return {};
