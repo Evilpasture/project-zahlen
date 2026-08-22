@@ -1248,22 +1248,43 @@ auto RenderContext::DebugReadClusterSnapshot() noexcept -> std::expected<DebugCl
     snapshot.listHash    = FnvHash(listBytes->data(), listBytes->size());
     snapshot.boundsHash  = FnvHash(boundsBytes->data(), boundsBytes->size());
     snapshot.counterHash = FnvHash(counterBytes->data(), counterBytes->size());
+    snapshot.counterValue = *reinterpret_cast<const uint32_t*>(counterBytes->data());
 
     const auto* grid = reinterpret_cast<const ClusterVolume*>(gridBytes->data());
     const auto* list = reinterpret_cast<const uint32_t*>(listBytes->data());
 
-    snapshot.cells.reserve(256);
-    for (uint32_t i = 0; i < kNumClusters; ++i) {
-        if (grid[i].count == 0) {
-            continue;
-        }
+    auto fillCell = [&](uint32_t i) -> DebugClusterCell {
         DebugClusterCell cell {.index = i, .count = grid[i].count, .offset = grid[i].offset};
         const uint32_t    n = std::min(grid[i].count, 4u);
         for (uint32_t k = 0; k < n; ++k) {
             const uint32_t li = grid[i].offset + k;
             cell.lightIndices[k] = (li < kIndexEntries) ? list[li] : 0xFFFFFFFFu;
         }
-        snapshot.cells.push_back(cell);
+        // Clamp indicator: the shader zeroes count when offset+count would
+        // exceed the index list capacity, which is exactly the mechanism that
+        // would make a cell's light inclusion flip between frames.
+        if (grid[i].count > 0 && static_cast<uint64_t>(grid[i].offset) + grid[i].count > kIndexEntries) {
+            snapshot.counterTruncated = true;
+        }
+        return cell;
+    };
+
+    snapshot.cells.reserve(256);
+    for (uint32_t i = 0; i < kNumClusters; ++i) {
+        if (grid[i].count == 0) {
+            continue;
+        }
+        snapshot.cells.push_back(fillCell(i));
+    }
+
+    // Always capture the strip cells (x 0..4, y=5, z 0..12), including those
+    // whose count flipped to 0, so a truncation at the z-plane boundary is
+    // visible in a single frame's dump. stripCells[z][x].
+    for (uint32_t z = 0; z < 13u; ++z) {
+        for (uint32_t x = 0; x < 5u; ++x) {
+            const uint32_t idx = x + (5u * 16u) + (z * 144u);
+            snapshot.stripCells[z][x] = fillCell(idx);
+        }
     }
     return snapshot;
 }

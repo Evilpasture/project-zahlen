@@ -610,8 +610,9 @@ struct LightingRTTestSuite {
         // changes while gridHash is constant, only the ordering/orphaned tail
         // differs (harmless) -- the grid count is what governs inclusion.
         ZHLN::Println(
-            "      [gpu:{}] cluster hashes: grid={:016x} list={:016x} bounds={:016x} counter={:016x}",
-            frame, snap->gridHash, snap->listHash, snap->boundsHash, snap->counterHash
+            "      [gpu:{}] cluster hashes: grid={:016x} list={:016x} bounds={:016x} counter={:016x} | counterVal={} truncated={}",
+            frame, snap->gridHash, snap->listHash, snap->boundsHash, snap->counterHash, snap->counterValue,
+            snap->counterTruncated ? 1 : 0
         );
 
         uint32_t cellsWithPl = 0;
@@ -644,6 +645,17 @@ struct LightingRTTestSuite {
         ZHLN::Println(
             "      [gpu:{}] cluster cells with point light: {} (x{}-{} y{}-{} z{}-{}), strip stripCells={}", frame, cellsWithPl, minX, maxX, minY,
             maxY, minZ, maxZ, stripCells
+        );
+
+        // The z=12 strip row explicitly (always present, even when count=0):
+        // this is the row that flips between 60/65 and where the 221184-entry
+        // index-list clamp would land.
+        ZHLN::Println(
+            "      [gpu:{}] strip z=12: x0(c={} o={}) x1(c={} o={}) x2(c={} o={}) x3(c={} o={}) x4(c={} o={})",
+            frame, snap->stripCells[12][0].count, snap->stripCells[12][0].offset, snap->stripCells[12][1].count,
+            snap->stripCells[12][1].offset, snap->stripCells[12][2].count, snap->stripCells[12][2].offset,
+            snap->stripCells[12][3].count, snap->stripCells[12][3].offset, snap->stripCells[12][4].count,
+            snap->stripCells[12][4].offset
         );
 
         // Optional per-cell dump (env-gated): every strip cell (x 0-4, y=5)

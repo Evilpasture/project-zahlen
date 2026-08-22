@@ -256,7 +256,12 @@ class ZHLN_API RenderContext {
         uint64_t                          listHash = 0;
         uint64_t                          boundsHash = 0;
         uint64_t                          counterHash = 0;
-        std::vector<DebugClusterCell>     cells;
+        uint32_t                          counterValue = 0;  // raw final counter (pre-clamp)
+        bool                              counterTruncated = false; // any cell hit the 221184 clamp
+        std::vector<DebugClusterCell>     cells;             // every cell with count > 0
+        // Always-present view of the strip cells (x 0..4, y=5, z 0..12) so a
+        // cell that flips to count=0 is still visible with its offset/count.
+        std::array<std::array<DebugClusterCell, 5>, 13> stripCells {};
     };
 
     /// Full cluster snapshot (grid + index list + shared bounds + counter) of
