@@ -251,10 +251,19 @@ class ZHLN_API RenderContext {
         std::array<uint32_t, 4> lightIndices {};
     };
 
-    /// Cluster grid + light index list of the frame most recently submitted.
-    /// `cells` is filled for every cell where count > 0; the caller maps
-    /// cell index to (x + y*16 + z*144).
-    [[nodiscard]] std::expected<std::vector<DebugClusterCell>, Error> DebugReadClusterLights() noexcept;
+    struct DebugClusterSnapshot {
+        uint64_t                          gridHash = 0;
+        uint64_t                          listHash = 0;
+        uint64_t                          boundsHash = 0;
+        uint64_t                          counterHash = 0;
+        std::vector<DebugClusterCell>     cells;
+    };
+
+    /// Full cluster snapshot (grid + index list + shared bounds + counter) of
+    /// the frame most recently submitted, with hashes so consecutive frames
+    /// can be compared without dumping megabytes. `cells` contains every cell
+    /// with count > 0; cell index is (x + y*16 + z*144).
+    [[nodiscard]] std::expected<DebugClusterSnapshot, Error> DebugReadClusterSnapshot() noexcept;
 
     /// Copies both parity slots of the light storage buffer (host-visible),
     /// for verifying that every consumer sees identical light data.

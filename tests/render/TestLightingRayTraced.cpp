@@ -585,27 +585,39 @@ struct LightingRTTestSuite {
         rc.DebugCopyLightBuffers(slot0, slot1);
 
         ZHLN::Println(
-            "      [gpu:{}] lights: s0[{}] range={} type={} pos=({:.2f},{:.2f},{:.2f}) | s0[{}] range={} type={} pos=({:.2f},{:.2f},{:.2f}) | "
-            "s1[{}] range={} type={}",
-            frame, 0u, slot0[0].range, static_cast<uint32_t>(slot0[0].type), slot0[0].position[0], slot0[0].position[1],
-            slot0[0].position[2], 1u, slot0[1].range, static_cast<uint32_t>(slot0[1].type), slot0[1].position[0], slot0[1].position[1],
-            slot0[1].position[2], 1u, slot1[1].range, static_cast<uint32_t>(slot1[1].type)
+            "      [gpu:{}] lights: s0[{}] range={} type={} pos=({:.2f},{:.2f},{:.2f}) posView=({:.4f},{:.4f},{:.4f}) | s0[{}] range={} type={} "
+            "pos=({:.2f},{:.2f},{:.2f}) posView=({:.4f},{:.4f},{:.4f}) | s1[{}] posView=({:.4f},{:.4f},{:.4f})",
+            frame, 0u, slot0[0].range, static_cast<uint32_t>(slot0[0].type), slot0[0].position[0], slot0[0].position[1], slot0[0].position[2],
+            slot0[0].positionView[0], slot0[0].positionView[1], slot0[0].positionView[2], 1u, slot0[1].range, static_cast<uint32_t>(slot0[1].type),
+            slot0[1].position[0], slot0[1].position[1], slot0[1].position[2], slot0[1].positionView[0], slot0[1].positionView[1],
+            slot0[1].positionView[2], 1u, slot1[1].positionView[0], slot1[1].positionView[1], slot1[1].positionView[2]
         );
         ZHLN::Println(
             "      [gpu:{}] slots identical (light data): {}",
             frame, std::memcmp(slot0.data(), slot1.data(), sizeof(slot0)) == 0 ? 1 : 0
         );
 
-        auto cells = rc.DebugReadClusterLights();
-        if (!cells) {
+        auto snap = rc.DebugReadClusterSnapshot();
+        if (!snap) {
             ZHLN::Println("      [gpu:{}] cluster readback failed", frame);
             return;
         }
 
+        // Hashes: if gridHash changes while boundsHash and the light slots are
+        // constant, the culling shader produced different output from the same
+        // input (dispatch/descriptor nondeterminism). If boundsHash changes,
+        // the shared bounds buffer is being rewritten per frame. If listHash
+        // changes while gridHash is constant, only the ordering/orphaned tail
+        // differs (harmless) -- the grid count is what governs inclusion.
+        ZHLN::Println(
+            "      [gpu:{}] cluster hashes: grid={:016x} list={:016x} bounds={:016x} counter={:016x}",
+            frame, snap->gridHash, snap->listHash, snap->boundsHash, snap->counterHash
+        );
+
         uint32_t cellsWithPl = 0;
         uint32_t stripCells   = 0;
         uint32_t minX = 99, maxX = 0, minY = 99, maxY = 0, minZ = 99, maxZ = 0;
-        for (const auto& c: *cells) {
+        for (const auto& c: snap->cells) {
             const uint32_t x = c.index % 16u;
             const uint32_t y = (c.index / 16u) % 9u;
             const uint32_t z = c.index / 144u;
@@ -633,6 +645,23 @@ struct LightingRTTestSuite {
             "      [gpu:{}] cluster cells with point light: {} (x{}-{} y{}-{} z{}-{}), strip stripCells={}", frame, cellsWithPl, minX, maxX, minY,
             maxY, minZ, maxZ, stripCells
         );
+
+        // Optional per-cell dump (env-gated): every strip cell (x 0-4, y=5)
+        // with its count/offset/indices, so the exact z-planes that flip are
+        // visible. ZHLN_TEST_DUMP_CELLS=1
+        if (std::getenv("ZHLN_TEST_DUMP_CELLS") != nullptr) {
+            for (const auto& c: snap->cells) {
+                const uint32_t x = c.index % 16u;
+                const uint32_t y = (c.index / 16u) % 9u;
+                if (x <= 4u && y == 5u) {
+                    ZHLN::Println(
+                        "        cell x={} y={} z={} idx={:04d} count={} off={} list=[{} {} {} {}]",
+                        x, y, c.index / 144u, c.index, c.count, c.offset, c.lightIndices[0], c.lightIndices[1], c.lightIndices[2],
+                        c.lightIndices[3]
+                    );
+                }
+            }
+        }
     }
 
     /// Runs `sceneFn` after `warmupFrames` (to warm Hi-Z history, TLAS, cluster

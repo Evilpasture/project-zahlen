@@ -1202,30 +1202,57 @@ namespace {
 
 } // namespace
 
-auto RenderContext::DebugReadClusterLights() noexcept -> std::expected<std::vector<DebugClusterCell>, Error> {
+namespace {
+
+/// FNV-1a over raw bytes (diagnostics only).
+[[nodiscard]] uint64_t FnvHash(const uint8_t* data, size_t bytes) noexcept {
+    uint64_t h = 14695981039346656037ull;
+    for (size_t i = 0; i < bytes; ++i) {
+        h ^= data[i];
+        h *= 1099511628211ull;
+    }
+    return h;
+}
+
+} // namespace
+
+auto RenderContext::DebugReadClusterSnapshot() noexcept -> std::expected<DebugClusterSnapshot, Error> {
     auto* const impl = _impl.get();
 
     // The frame most recently submitted used the slot we just flipped AWAY
     // from (EndFrame flips frame_index after submit).
     const uint32_t slot = impl->frame_index ^ 1u;
 
-    constexpr size_t kNumClusters = 16u * 9u * 24u;
+    constexpr size_t kNumClusters  = 16u * 9u * 24u;
+    constexpr size_t kIndexEntries = kNumClusters * 64u;
 
     auto gridBytes = ReadbackGPUBuffer(impl, impl->frames.clusterGridBuffers[slot].Handle(), sizeof(ClusterVolume) * kNumClusters);
     if (!gridBytes) {
         return std::unexpected(gridBytes.error());
     }
-    auto listBytes =
-        ReadbackGPUBuffer(impl, impl->frames.lightIndexListBuffers[slot].Handle(), sizeof(uint32_t) * kNumClusters * 64u);
+    auto listBytes = ReadbackGPUBuffer(impl, impl->frames.lightIndexListBuffers[slot].Handle(), sizeof(uint32_t) * kIndexEntries);
     if (!listBytes) {
         return std::unexpected(listBytes.error());
     }
+    auto boundsBytes = ReadbackGPUBuffer(impl, impl->clusterBoundsBuffer.Handle(), sizeof(ClusterBounds) * kNumClusters);
+    if (!boundsBytes) {
+        return std::unexpected(boundsBytes.error());
+    }
+    auto counterBytes = ReadbackGPUBuffer(impl, impl->frames.globalCounterBuffers[slot].Handle(), sizeof(uint32_t));
+    if (!counterBytes) {
+        return std::unexpected(counterBytes.error());
+    }
+
+    DebugClusterSnapshot snapshot;
+    snapshot.gridHash    = FnvHash(gridBytes->data(), gridBytes->size());
+    snapshot.listHash    = FnvHash(listBytes->data(), listBytes->size());
+    snapshot.boundsHash  = FnvHash(boundsBytes->data(), boundsBytes->size());
+    snapshot.counterHash = FnvHash(counterBytes->data(), counterBytes->size());
 
     const auto* grid = reinterpret_cast<const ClusterVolume*>(gridBytes->data());
     const auto* list = reinterpret_cast<const uint32_t*>(listBytes->data());
 
-    std::vector<DebugClusterCell> cells;
-    cells.reserve(256);
+    snapshot.cells.reserve(256);
     for (uint32_t i = 0; i < kNumClusters; ++i) {
         if (grid[i].count == 0) {
             continue;
@@ -1234,11 +1261,11 @@ auto RenderContext::DebugReadClusterLights() noexcept -> std::expected<std::vect
         const uint32_t    n = std::min(grid[i].count, 4u);
         for (uint32_t k = 0; k < n; ++k) {
             const uint32_t li = grid[i].offset + k;
-            cell.lightIndices[k] = (li < kNumClusters * 64u) ? list[li] : 0xFFFFFFFFu;
+            cell.lightIndices[k] = (li < kIndexEntries) ? list[li] : 0xFFFFFFFFu;
         }
-        cells.push_back(cell);
+        snapshot.cells.push_back(cell);
     }
-    return cells;
+    return snapshot;
 }
 
 void RenderContext::DebugCopyLightBuffers(std::array<GPULight, 128>& slot0, std::array<GPULight, 128>& slot1) noexcept {
