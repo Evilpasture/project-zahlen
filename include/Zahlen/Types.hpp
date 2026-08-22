@@ -151,10 +151,12 @@ struct alignas(16) InstanceData {
     uint32_t meshletCount;
     uint32_t _paddingMeshlet;
 };
-
+// NOLINTBEGIN(performance-enum-size)
 enum class TextureHandle : uint64_t { Invalid = 0 };
 enum class TerrainHandle : uint64_t { Invalid = 0 };
-
+enum class AudioHandle : uint64_t { Invalid = 0 };
+enum class SynthHandle : uint64_t { Invalid = 0 };
+// NOLINTEND(performance-enum-size)
 namespace SystemTextures {
 inline constexpr TextureHandle Invalid    = TextureHandle(0);
 inline constexpr TextureHandle Black      = TextureHandle(1);

@@ -235,9 +235,18 @@ class System {
             );
         }
 
-        // 3. Acoustic Audio Feedback
+        // 3. Acoustic Audio Feedback via Unified Fire-and-Forget Event Queue
         if (cfg.hasAudio) {
-            engine.GetAudioContext().PlayNoiseBurst3D(AudioFilterType::BandPass, cfg.soundFreq, 2.5f, 0.65f, cfg.soundDuration, point, AudioNoiseType::Pink);
+            engine.GetAudioContext().PostEvent(
+                {.type       = AudioEventType::NoiseBurst3D,
+                 .position   = point,
+                 .volume     = 0.65f,
+                 .param1     = cfg.soundFreq,
+                 .param2     = 2.5f,
+                 .duration   = cfg.soundDuration,
+                 .filterType = AudioFilterType::BandPass,
+                 .noiseType  = AudioNoiseType::Pink}
+            );
         }
     }
 

@@ -1049,7 +1049,7 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
 
 } // namespace
 
-int main(int argc, char* argv[]) {
+auto main(int argc, char* argv[]) -> int {
     return ZHLN::HandleCommandLine(std::span(argv, static_cast<size_t>(argc)))
         .transform_error([](const ZHLN::Error& err) -> int {
             ZHLN::Log("CommandLine Error: {}", err.Message());

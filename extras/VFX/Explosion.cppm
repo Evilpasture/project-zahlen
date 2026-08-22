@@ -460,9 +460,37 @@ export class ExplosionSystem {
 
         // Procedural Audio DSP
         auto& audio = engine.GetAudioContext();
-        audio.PlayNoiseBurst3D(AudioFilterType::LowPass, 60.0f, 3.5f, 1.0f, 0.85f, origin, AudioNoiseType::Brownian);
-        audio.PlayToneSweep3D(AudioWaveformType::Sawtooth, 150.0f, 30.0f, 0.85f, 0.45f, origin);
-        audio.PlayNoiseBurst3D(AudioFilterType::BandPass, 320.0f, 1.4f, 0.65f, 0.30f, origin, AudioNoiseType::Pink);
+        audio.PostEvent(
+            {.type       = AudioEventType::NoiseBurst3D,
+             .position   = origin,
+             .volume     = 1.0f,
+             .param1     = 60.0f, // Low pass cutoff frequency
+             .param2     = 3.5f,  // Q factor
+             .duration   = 0.85f,
+             .filterType = AudioFilterType::LowPass,
+             .noiseType  = AudioNoiseType::Brownian}
+        );
+
+        audio.PostEvent(
+            {.type     = AudioEventType::ToneSweep3D,
+             .position = origin,
+             .volume   = 0.85f,
+             .param1   = 150.0f, // Start frequency
+             .param2   = 30.0f,  // End frequency
+             .duration = 0.45f,
+             .waveType = AudioWaveformType::Sawtooth}
+        );
+
+        audio.PostEvent(
+            {.type       = AudioEventType::NoiseBurst3D,
+             .position   = origin,
+             .volume     = 0.65f,
+             .param1     = 320.0f, // Band pass center frequency
+             .param2     = 1.4f,   // Q factor
+             .duration   = 0.30f,
+             .filterType = AudioFilterType::BandPass,
+             .noiseType  = AudioNoiseType::Pink}
+        );
 
         return root;
     }

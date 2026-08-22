@@ -3,21 +3,21 @@
 
 // src/audio/AudioContext.cpp
 
+#include "Zahlen/ecs/ECS.hpp"
 #define MINIAUDIO_IMPLEMENTATION
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Core/ControlFlow.hpp>
 #include <Zahlen/Core/MemoryPool.hpp>
-#include <Zahlen/Core/Ranges.hpp> // <-- Added for ZHLN::Ranges
+#include <Zahlen/Core/Ranges.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <algorithm>
 #include <atomic>
 #include <cmath>
-#include <filesystem>
 #include <miniaudio.h>
 #include <numbers>
-#include <type_traits>
+#include <string>
 #include <vector>
 
 namespace ZHLN {
@@ -33,6 +33,18 @@ constexpr size_t LOOP_SYNTH_POOL_SIZE = 32;
 constexpr float MIN_FREQUENCY = 20.0f;
 constexpr float MIN_Q         = 0.01f;
 constexpr float DECAY_TARGET  = 0.0001f;
+
+constexpr float    kDefaultFadeOut         = 0.05f;
+constexpr float    kVoiceMinFadeOut        = 0.001f;
+constexpr float    kSynthMinFadeOut        = 0.01f;
+constexpr float    kSynthChargeSmoothing   = 0.15f;
+constexpr float    kDefaultQ               = 3.0f;
+constexpr float    kSynthFilterFreqDefault = 500.0f;
+constexpr uint32_t kSampleRate             = 48000;
+constexpr double   kSynthBaseFreq1         = 40.0;
+constexpr double   kSynthBaseFreq2         = 60.0;
+constexpr uint32_t kHandleGenerationShift  = 32;
+constexpr uint64_t kHandleIndexMask        = 0xFFFFFFFF;
 
 struct ProceduralBeep {
     ma_waveform waveform {};
@@ -82,7 +94,7 @@ struct LoopSynthData {
     std::atomic<bool>  isFinished {false};
 };
 
-ma_noise_type MapNoiseType(AudioNoiseType type) {
+auto MapNoiseType(AudioNoiseType type) -> ma_noise_type {
     switch (type) {
         case AudioNoiseType::Pink:
             return ma_noise_type_pink;
@@ -94,7 +106,7 @@ ma_noise_type MapNoiseType(AudioNoiseType type) {
     }
 }
 
-ma_waveform_type MapWaveformType(AudioWaveformType type) {
+auto MapWaveformType(AudioWaveformType type) -> ma_waveform_type {
     switch (type) {
         case AudioWaveformType::Square:
             return ma_waveform_type_square;
@@ -108,7 +120,8 @@ ma_waveform_type MapWaveformType(AudioWaveformType type) {
     }
 }
 
-ma_biquad_config CalculateBiquadConfig(AudioFilterType type, uint32_t sampleRate, float frequency, float q) {
+// NOLINTBEGIN(bugprone-easily-swappable-parameters)
+auto CalculateBiquadConfig(AudioFilterType type, uint32_t sampleRate, float frequency, float q) -> ma_biquad_config {
     const auto  Fs      = static_cast<float>(sampleRate);
     const float maxFreq = Fs * 0.49f;
     const float f0      = std::clamp(frequency, MIN_FREQUENCY, maxFreq);
@@ -149,12 +162,17 @@ ma_biquad_config CalculateBiquadConfig(AudioFilterType type, uint32_t sampleRate
             break;
     }
 
-    return ma_biquad_config_init(ma_format_f32, 1, b0 / a0, b1 / a0, b2 / a0, 1.0f, a1 / a0, a2 / a0);
+    return ma_biquad_config_init(
+        ma_format_f32, 1, static_cast<double>(b0 / a0), static_cast<double>(b1 / a0), static_cast<double>(b2 / a0), 1.0, static_cast<double>(a1 / a0),
+        static_cast<double>(a2 / a0)
+    );
 }
+// NOLINTEND(bugprone-easily-swappable-parameters)
 
 // --- NOISE BURST VTABLE ---
-ma_result noise_burst_read_pcm_frames(ma_data_source* pDataSource, void* pFramesOut, ma_uint64 frameCount, ma_uint64* pFramesRead) {
-    auto* pSource = reinterpret_cast<NoiseBurstData*>(pDataSource);
+// NOLINTBEGIN(bugprone-easily-swappable-parameters)
+auto noise_burst_read_pcm_frames(ma_data_source* pDataSource, void* pFramesOut, ma_uint64 frameCount, ma_uint64* pFramesRead) -> ma_result {
+    auto* pSource = static_cast<NoiseBurstData*>(static_cast<void*>(pDataSource));
     if (pSource->currentFrame >= pSource->totalFrames) {
         if (pFramesRead != nullptr) {
             *pFramesRead = 0;
@@ -187,22 +205,24 @@ ma_result noise_burst_read_pcm_frames(ma_data_source* pDataSource, void* pFrames
     }
     return MA_SUCCESS;
 }
+// NOLINTEND(bugprone-easily-swappable-parameters)
 
-ma_result noise_burst_seek_pcm_frames(ma_data_source* pDataSource, ma_uint64 frameIndex) {
-    auto* pSource         = reinterpret_cast<NoiseBurstData*>(pDataSource);
+auto noise_burst_seek_pcm_frames(ma_data_source* pDataSource, ma_uint64 frameIndex) -> ma_result {
+    auto* pSource         = static_cast<NoiseBurstData*>(static_cast<void*>(pDataSource));
     pSource->currentFrame = frameIndex;
     return MA_SUCCESS;
 }
 
-ma_result noise_burst_get_data_format(
+// NOLINTBEGIN(bugprone-easily-swappable-parameters)
+auto noise_burst_get_data_format(
     ma_data_source* pDataSource,
     ma_format*      pFormat,
     ma_uint32*      pChannels,
     ma_uint32*      pSampleRate,
     ma_channel*     pChannelMap,
     size_t          channelMapCap
-) {
-    auto* pSource = reinterpret_cast<NoiseBurstData*>(pDataSource);
+) -> ma_result {
+    auto* pSource = static_cast<NoiseBurstData*>(static_cast<void*>(pDataSource));
     if (pFormat != nullptr) {
         *pFormat = ma_format_f32;
     }
@@ -217,17 +237,18 @@ ma_result noise_burst_get_data_format(
     }
     return MA_SUCCESS;
 }
+// NOLINTEND(bugprone-easily-swappable-parameters)
 
-ma_result noise_burst_get_cursor(ma_data_source* pDataSource, ma_uint64* pCursor) {
-    auto* pSource = reinterpret_cast<NoiseBurstData*>(pDataSource);
+auto noise_burst_get_cursor(ma_data_source* pDataSource, ma_uint64* pCursor) -> ma_result {
+    auto* pSource = static_cast<NoiseBurstData*>(static_cast<void*>(pDataSource));
     if (pCursor != nullptr) {
         *pCursor = pSource->currentFrame;
     }
     return MA_SUCCESS;
 }
 
-ma_result noise_burst_get_length(ma_data_source* pDataSource, ma_uint64* pLength) {
-    auto* pSource = reinterpret_cast<NoiseBurstData*>(pDataSource);
+auto noise_burst_get_length(ma_data_source* pDataSource, ma_uint64* pLength) -> ma_result {
+    auto* pSource = static_cast<NoiseBurstData*>(static_cast<void*>(pDataSource));
     if (pLength != nullptr) {
         *pLength = pSource->totalFrames;
     }
@@ -243,8 +264,9 @@ ma_data_source_vtable g_noise_burst_vtable = {
 };
 
 // --- TONE SWEEP VTABLE ---
-ma_result tone_sweep_read_pcm_frames(ma_data_source* pDataSource, void* pFramesOut, ma_uint64 frameCount, ma_uint64* pFramesRead) {
-    auto* pSource = reinterpret_cast<ToneSweepData*>(pDataSource);
+// NOLINTBEGIN(bugprone-easily-swappable-parameters)
+auto tone_sweep_read_pcm_frames(ma_data_source* pDataSource, void* pFramesOut, ma_uint64 frameCount, ma_uint64* pFramesRead) -> ma_result {
+    auto* pSource = static_cast<ToneSweepData*>(static_cast<void*>(pDataSource));
     if (pSource->currentFrame >= pSource->totalFrames) {
         if (pFramesRead != nullptr) {
             *pFramesRead = 0;
@@ -265,7 +287,8 @@ ma_result tone_sweep_read_pcm_frames(ma_data_source* pDataSource, void* pFramesO
 
         const float progress    = static_cast<float>(pSource->currentFrame + totalRead) / static_cast<float>(pSource->totalFrames);
         const float currentFreq = pSource->startFreq * std::pow(pSource->endFreq / std::max(pSource->startFreq, 0.001f), progress);
-        ma_waveform_set_frequency(&pSource->waveform, currentFreq);
+
+        ma_waveform_set_frequency(&pSource->waveform, static_cast<double>(currentFreq));
 
         ma_uint64 chunkRead = 0;
         ma_waveform_read_pcm_frames(&pSource->waveform, pOut + totalRead, chunk, &chunkRead);
@@ -293,22 +316,24 @@ ma_result tone_sweep_read_pcm_frames(ma_data_source* pDataSource, void* pFramesO
     }
     return MA_SUCCESS;
 }
+// NOLINTEND(bugprone-easily-swappable-parameters)
 
-ma_result tone_sweep_seek_pcm_frames(ma_data_source* pDataSource, ma_uint64 frameIndex) {
-    auto* pSource         = reinterpret_cast<ToneSweepData*>(pDataSource);
+auto tone_sweep_seek_pcm_frames(ma_data_source* pDataSource, ma_uint64 frameIndex) -> ma_result {
+    auto* pSource         = static_cast<ToneSweepData*>(static_cast<void*>(pDataSource));
     pSource->currentFrame = frameIndex;
     return MA_SUCCESS;
 }
 
-ma_result tone_sweep_get_data_format(
+// NOLINTBEGIN(bugprone-easily-swappable-parameters)
+auto tone_sweep_get_data_format(
     ma_data_source* pDataSource,
     ma_format*      pFormat,
     ma_uint32*      pChannels,
     ma_uint32*      pSampleRate,
     ma_channel*     pChannelMap,
     size_t          channelMapCap
-) {
-    auto* pSource = reinterpret_cast<ToneSweepData*>(pDataSource);
+) -> ma_result {
+    auto* pSource = static_cast<ToneSweepData*>(static_cast<void*>(pDataSource));
     if (pFormat != nullptr) {
         *pFormat = ma_format_f32;
     }
@@ -323,17 +348,18 @@ ma_result tone_sweep_get_data_format(
     }
     return MA_SUCCESS;
 }
+// NOLINTEND(bugprone-easily-swappable-parameters)
 
-ma_result tone_sweep_get_cursor(ma_data_source* pDataSource, ma_uint64* pCursor) {
-    auto* pSource = reinterpret_cast<ToneSweepData*>(pDataSource);
+auto tone_sweep_get_cursor(ma_data_source* pDataSource, ma_uint64* pCursor) -> ma_result {
+    auto* pSource = static_cast<ToneSweepData*>(static_cast<void*>(pDataSource));
     if (pCursor != nullptr) {
         *pCursor = pSource->currentFrame;
     }
     return MA_SUCCESS;
 }
 
-ma_result tone_sweep_get_length(ma_data_source* pDataSource, ma_uint64* pLength) {
-    auto* pSource = reinterpret_cast<ToneSweepData*>(pDataSource);
+auto tone_sweep_get_length(ma_data_source* pDataSource, ma_uint64* pLength) -> ma_result {
+    auto* pSource = static_cast<ToneSweepData*>(static_cast<void*>(pDataSource));
     if (pLength != nullptr) {
         *pLength = pSource->totalFrames;
     }
@@ -349,8 +375,9 @@ ma_data_source_vtable g_tone_sweep_vtable = {
 };
 
 // --- LOOP SYNTH VTABLE ---
-ma_result loop_synth_read_pcm_frames(ma_data_source* pDataSource, void* pFramesOut, ma_uint64 frameCount, ma_uint64* pFramesRead) {
-    auto* pSource = reinterpret_cast<LoopSynthData*>(pDataSource);
+// NOLINTBEGIN(bugprone-easily-swappable-parameters)
+auto loop_synth_read_pcm_frames(ma_data_source* pDataSource, void* pFramesOut, ma_uint64 frameCount, ma_uint64* pFramesRead) -> ma_result {
+    auto* pSource = static_cast<LoopSynthData*>(static_cast<void*>(pDataSource));
     if (pSource->isFinished.load(std::memory_order::acquire)) {
         if (pFramesRead != nullptr) {
             *pFramesRead = 0;
@@ -360,15 +387,15 @@ ma_result loop_synth_read_pcm_frames(ma_data_source* pDataSource, void* pFramesO
 
     const float targetC  = pSource->targetCharge.load(std::memory_order::relaxed);
     float       currentC = pSource->currentCharge.load(std::memory_order::relaxed);
-    currentC += (targetC - currentC) * 0.15f;
+    currentC += (targetC - currentC) * kSynthChargeSmoothing;
     pSource->currentCharge.store(currentC, std::memory_order::relaxed);
 
     const float baseF = pSource->baseFreq.load(std::memory_order::relaxed);
     const float f1    = baseF + currentC * 145.0f;
     const float f2    = f1 * 1.5f;
 
-    ma_waveform_set_frequency(&pSource->waveform1, f1);
-    ma_waveform_set_frequency(&pSource->waveform2, f2);
+    ma_waveform_set_frequency(&pSource->waveform1, static_cast<double>(f1));
+    ma_waveform_set_frequency(&pSource->waveform2, static_cast<double>(f2));
 
     auto*              pOut = static_cast<float*>(pFramesOut);
     std::vector<float> tempBuf(frameCount);
@@ -383,7 +410,7 @@ ma_result loop_synth_read_pcm_frames(ma_data_source* pDataSource, void* pFramesO
     }
 
     const float      filtF = pSource->filterFreq.load(std::memory_order::relaxed) + currentC * 2200.0f;
-    ma_biquad_config bqCfg = CalculateBiquadConfig(pSource->filterType, pSource->sampleRate, filtF, 3.0f);
+    ma_biquad_config bqCfg = CalculateBiquadConfig(pSource->filterType, pSource->sampleRate, filtF, kDefaultQ);
     ma_biquad_reinit(&bqCfg, &pSource->biquad);
 
     ma_biquad_process_pcm_frames(&pSource->biquad, pOut, pOut, read1);
@@ -415,20 +442,22 @@ ma_result loop_synth_read_pcm_frames(ma_data_source* pDataSource, void* pFramesO
     }
     return MA_SUCCESS;
 }
+// NOLINTEND(bugprone-easily-swappable-parameters)
 
-ma_result loop_synth_seek_pcm_frames(ma_data_source* /*pDataSource*/, ma_uint64 /*frameIndex*/) {
+auto loop_synth_seek_pcm_frames(ma_data_source* /*pDataSource*/, ma_uint64 /*frameIndex*/) -> ma_result {
     return MA_SUCCESS;
 }
 
-ma_result loop_synth_get_data_format(
+// NOLINTBEGIN(bugprone-easily-swappable-parameters)
+auto loop_synth_get_data_format(
     ma_data_source* pDataSource,
     ma_format*      pFormat,
     ma_uint32*      pChannels,
     ma_uint32*      pSampleRate,
     ma_channel*     pChannelMap,
     size_t          channelMapCap
-) {
-    auto* pSource = reinterpret_cast<LoopSynthData*>(pDataSource);
+) -> ma_result {
+    auto* pSource = static_cast<LoopSynthData*>(static_cast<void*>(pDataSource));
     if (pFormat != nullptr) {
         *pFormat = ma_format_f32;
     }
@@ -443,15 +472,16 @@ ma_result loop_synth_get_data_format(
     }
     return MA_SUCCESS;
 }
+// NOLINTEND(bugprone-easily-swappable-parameters)
 
-ma_result loop_synth_get_cursor(ma_data_source* /*pDataSource*/, ma_uint64* pCursor) {
+auto loop_synth_get_cursor(ma_data_source* /*pDataSource*/, ma_uint64* pCursor) -> ma_result {
     if (pCursor != nullptr) {
         *pCursor = 0;
     }
     return MA_SUCCESS;
 }
 
-ma_result loop_synth_get_length(ma_data_source* /*pDataSource*/, ma_uint64* pLength) {
+auto loop_synth_get_length(ma_data_source* /*pDataSource*/, ma_uint64* pLength) -> ma_result {
     if (pLength != nullptr) {
         *pLength = 0;
     }
@@ -466,17 +496,34 @@ ma_data_source_vtable g_loop_synth_vtable = {
     .onGetLength     = loop_synth_get_length
 };
 
-template <typename Func>
-auto WithSound(void* soundHandle, Func&& func) {
-    using ReturnType = std::invoke_result_t<Func, ma_sound*>;
-    if (soundHandle == nullptr) {
-        if constexpr (std::is_void_v<ReturnType>) {
-            return;
-        } else {
-            return ReturnType {};
-        }
-    }
-    return std::forward<Func>(func)(static_cast<ma_sound*>(soundHandle));
+constexpr size_t MAX_VOICE_SLOTS = 256;
+constexpr size_t MAX_SYNTH_SLOTS = 32;
+
+struct VoiceSlot {
+    ma_sound               sound {};
+    Entity                 owner = NullEntity;
+    ZHLN::Atomic<uint32_t> generation {1};
+    ZHLN::Atomic<bool>     inUse {false};
+
+    bool  isStopping      = false;
+    float currentFade     = 1.0f;
+    float fadeOutDuration = kDefaultFadeOut;
+    float baseVolume      = 1.0f;
+};
+
+struct SynthSlot {
+    LoopSynthData*         synthData = nullptr;
+    Entity                 owner     = NullEntity;
+    ZHLN::Atomic<uint32_t> generation {1};
+    ZHLN::Atomic<bool>     inUse {false};
+};
+
+[[nodiscard]] constexpr auto PackHandle(uint32_t slotIdx, uint32_t gen) noexcept -> uint64_t {
+    return (static_cast<uint64_t>(gen) << kHandleGenerationShift) | static_cast<uint64_t>(slotIdx);
+}
+
+[[nodiscard]] constexpr auto UnpackHandle(uint64_t raw) noexcept -> std::pair<uint32_t, uint32_t> {
+    return {static_cast<uint32_t>(raw & kHandleIndexMask), static_cast<uint32_t>(raw >> kHandleGenerationShift)};
 }
 
 } // namespace
@@ -485,75 +532,179 @@ struct AudioContext::Impl {
     ma_engine engine {};
     bool      initialized = false;
 
-    // Page-aligned lockless-ready memory pools
+    // Transient memory pools for Fire-And-Forget DSP Events
     ZHLN::ObjectPool<ma_sound, SOUND_POOL_SIZE>           soundPool;
     ZHLN::ObjectPool<ProceduralBeep, BEEP_POOL_SIZE>      beepPool;
     ZHLN::ObjectPool<NoiseBurstData, BURST_POOL_SIZE>     burstPool;
     ZHLN::ObjectPool<ToneSweepData, SWEEP_POOL_SIZE>      sweepPool;
     ZHLN::ObjectPool<LoopSynthData, LOOP_SYNTH_POOL_SIZE> loopSynthPool;
 
-    std::vector<ma_sound*> activeOneShots;
-    ZHLN::Mutex            oneShotMutex {};
-
+    std::vector<ma_sound*>       activeOneShots;
     std::vector<ProceduralBeep*> activeBeeps;
-    ZHLN::Mutex                  beepMutex {};
-
     std::vector<NoiseBurstData*> activeBursts;
-    ZHLN::Mutex                  burstMutex {};
+    std::vector<ToneSweepData*>  activeSweeps;
 
-    std::vector<ToneSweepData*> activeSweeps;
-    ZHLN::Mutex                 sweepMutex {};
+    // Generational Tables for Stateful Components
+    std::array<VoiceSlot, MAX_VOICE_SLOTS> voiceSlots {};
+    std::array<SynthSlot, MAX_SYNTH_SLOTS> synthSlots {};
 
-    std::vector<LoopSynthData*> activeLoopSynths;
-    ZHLN::Mutex                 loopSynthMutex {};
+    std::vector<AudioEvent> eventQueue;
+
+    ZHLN::Mutex transientMutex {};
+    ZHLN::Mutex voiceMutex {};
+    ZHLN::Mutex synthMutex {};
+    ZHLN::Mutex eventMutex {};
+
+    // --- Direct Event Dispatchers on Impl ---
+
+    void DispatchOneShot2D(const char* filepath, float volume) {
+        if (!initialized || filepath == nullptr || filepath[0] == '\0') {
+            return;
+        }
+        auto* sound = soundPool.Create();
+        if (ma_sound_init_from_file(&engine, filepath, MA_SOUND_FLAG_NO_SPATIALIZATION, nullptr, nullptr, sound) == MA_SUCCESS) {
+            ma_sound_set_volume(sound, volume);
+            ma_sound_start(sound);
+            Lock(transientMutex, [&] -> void { activeOneShots.push_back(sound); });
+        } else {
+            soundPool.Destroy(sound);
+        }
+    }
+
+    void DispatchOneShot3D(const char* filepath, const JPH::Vec3& pos, float volume) {
+        if (!initialized || filepath == nullptr || filepath[0] == '\0') {
+            return;
+        }
+        auto* sound = soundPool.Create();
+        if (ma_sound_init_from_file(&engine, filepath, 0, nullptr, nullptr, sound) == MA_SUCCESS) {
+            ma_sound_set_position(sound, pos.GetX(), pos.GetY(), pos.GetZ());
+            ma_sound_set_volume(sound, volume);
+            ma_sound_start(sound);
+            Lock(transientMutex, [&] -> void { activeOneShots.push_back(sound); });
+        } else {
+            soundPool.Destroy(sound);
+        }
+    }
+
+    // NOLINTBEGIN(bugprone-easily-swappable-parameters)
+    void DispatchProceduralBeep(float frequency, float duration, float volume) {
+        if (!initialized) {
+            return;
+        }
+        auto*              beep = beepPool.Create();
+        ma_waveform_config wc =
+            ma_waveform_config_init(ma_format_f32, 1, kSampleRate, ma_waveform_type_sine, static_cast<double>(volume), static_cast<double>(frequency));
+        ma_waveform_init(&wc, &beep->waveform);
+
+        if (ma_sound_init_from_data_source(&engine, &beep->waveform, 0, nullptr, &beep->sound) == MA_SUCCESS) {
+            ma_uint32 sr = ma_engine_get_sample_rate(&engine);
+            ma_sound_set_stop_time_in_pcm_frames(
+                &beep->sound, ma_engine_get_time_in_pcm_frames(&engine) + static_cast<ma_uint64>(static_cast<float>(sr) * duration)
+            );
+            ma_sound_start(&beep->sound);
+            Lock(transientMutex, [&] -> void { activeBeeps.push_back(beep); });
+        } else {
+            beepPool.Destroy(beep);
+        }
+    }
+
+    void DispatchNoiseBurst3D(AudioFilterType filterType, float freq, float q, float volume, float duration, const JPH::Vec3& pos, AudioNoiseType noiseType) {
+        if (!initialized) {
+            return;
+        }
+        auto* burst         = burstPool.Create();
+        burst->sampleRate   = ma_engine_get_sample_rate(&engine);
+        burst->startVolume  = volume;
+        burst->currentFrame = 0;
+        burst->totalFrames  = static_cast<ma_uint64>(static_cast<float>(burst->sampleRate) * duration);
+
+        ma_data_source_config dsConfig = ma_data_source_config_init();
+        dsConfig.vtable                = &g_noise_burst_vtable;
+        ma_data_source_init(&dsConfig, &burst->base);
+
+        ma_noise_config nc = ma_noise_config_init(ma_format_f32, 1, MapNoiseType(noiseType), 0, 1.0);
+        ma_noise_init(&nc, nullptr, &burst->noise);
+
+        ma_biquad_config bqCfg = CalculateBiquadConfig(filterType, burst->sampleRate, freq, q);
+        ma_biquad_init(&bqCfg, nullptr, &burst->biquad);
+
+        if (ma_sound_init_from_data_source(&engine, &burst->base, 0, nullptr, &burst->sound) == MA_SUCCESS) {
+            ma_sound_set_position(&burst->sound, pos.GetX(), pos.GetY(), pos.GetZ());
+            ma_sound_start(&burst->sound);
+            Lock(transientMutex, [&] -> void { activeBursts.push_back(burst); });
+        } else {
+            burstPool.Destroy(burst);
+        }
+    }
+
+    void DispatchToneSweep3D(AudioWaveformType waveType, float startFreq, float endFreq, float volume, float duration, const JPH::Vec3& pos) {
+        if (!initialized) {
+            return;
+        }
+        auto* sweep         = sweepPool.Create();
+        sweep->sampleRate   = ma_engine_get_sample_rate(&engine);
+        sweep->startFreq    = startFreq;
+        sweep->endFreq      = endFreq;
+        sweep->startVolume  = volume;
+        sweep->currentFrame = 0;
+        sweep->totalFrames  = static_cast<ma_uint64>(static_cast<float>(sweep->sampleRate) * duration);
+
+        ma_data_source_config dsConfig = ma_data_source_config_init();
+        dsConfig.vtable                = &g_tone_sweep_vtable;
+        ma_data_source_init(&dsConfig, &sweep->base);
+
+        ma_waveform_config wc = ma_waveform_config_init(ma_format_f32, 1, sweep->sampleRate, MapWaveformType(waveType), 1.0, static_cast<double>(startFreq));
+        ma_waveform_init(&wc, &sweep->waveform);
+
+        if (ma_sound_init_from_data_source(&engine, &sweep->base, 0, nullptr, &sweep->sound) == MA_SUCCESS) {
+            ma_sound_set_position(&sweep->sound, pos.GetX(), pos.GetY(), pos.GetZ());
+            ma_sound_start(&sweep->sound);
+            Lock(transientMutex, [&] -> void { activeSweeps.push_back(sweep); });
+        } else {
+            sweepPool.Destroy(sweep);
+        }
+    }
+    // NOLINTEND(bugprone-easily-swappable-parameters)
 };
 
 AudioContext::AudioContext(const AudioConfig& /*cfg*/): _impl(std::make_unique<Impl>()) {
     ma_result result = ma_engine_init(nullptr, &_impl->engine);
-    if (result != MA_SUCCESS) {
-        ZHLN::Log("ERROR: Failed to initialize miniaudio engine! Result code: {}", (int) result);
-        return;
+    if (result == MA_SUCCESS) {
+        _impl->initialized = true;
+        ZHLN::Log("miniaudio Engine initialized successfully.");
+    } else {
+        ZHLN::Log("ERROR: Failed to initialize miniaudio engine! Result code: {}", static_cast<int>(result));
     }
-    _impl->initialized = true;
-    ZHLN::Log("miniaudio Engine initialized successfully.");
 }
 
 AudioContext::~AudioContext() {
     if (_impl->initialized) {
-        // Clean up active one-shots
+        for (auto& slot: _impl->voiceSlots) {
+            if (slot.inUse.load(std::memory_order::relaxed)) {
+                ma_sound_uninit(&slot.sound);
+            }
+        }
+        for (auto& slot: _impl->synthSlots) {
+            if (slot.inUse.load(std::memory_order::relaxed) && (slot.synthData != nullptr)) {
+                ma_sound_uninit(&slot.synthData->sound);
+                ma_biquad_uninit(&slot.synthData->biquad, nullptr);
+                ma_waveform_uninit(&slot.synthData->waveform1);
+                ma_waveform_uninit(&slot.synthData->waveform2);
+                ma_data_source_uninit(&slot.synthData->base);
+                _impl->loopSynthPool.Destroy(slot.synthData);
+            }
+        }
+        // Cleanup transients
         for (auto* sound: _impl->activeOneShots) {
             ma_sound_uninit(sound);
             _impl->soundPool.Destroy(sound);
         }
-        // Clean up active beeps
-        for (auto* beep: _impl->activeBeeps) {
-            ma_sound_uninit(&beep->sound);
-            ma_waveform_uninit(&beep->waveform);
-            _impl->beepPool.Destroy(beep);
-        }
-        // Clean up active bursts
         for (auto* burst: _impl->activeBursts) {
             ma_sound_uninit(&burst->sound);
             ma_biquad_uninit(&burst->biquad, nullptr);
             ma_noise_uninit(&burst->noise, nullptr);
             ma_data_source_uninit(&burst->base);
             _impl->burstPool.Destroy(burst);
-        }
-        // Clean up active sweeps
-        for (auto* sweep: _impl->activeSweeps) {
-            ma_sound_uninit(&sweep->sound);
-            ma_waveform_uninit(&sweep->waveform);
-            ma_data_source_uninit(&sweep->base);
-            _impl->sweepPool.Destroy(sweep);
-        }
-        // Clean up active loop synths
-        for (auto* synth: _impl->activeLoopSynths) {
-            ma_sound_uninit(&synth->sound);
-            ma_biquad_uninit(&synth->biquad, nullptr);
-            ma_waveform_uninit(&synth->waveform1);
-            ma_waveform_uninit(&synth->waveform2);
-            ma_data_source_uninit(&synth->base);
-            _impl->loopSynthPool.Destroy(synth);
         }
         ma_engine_uninit(&_impl->engine);
     }
@@ -563,16 +714,266 @@ void AudioContext::UpdateListener(const JPH::Vec3& position, const JPH::Vec3& di
     if (!_impl->initialized) {
         return;
     }
-
     ma_engine_listener_set_position(&_impl->engine, 0, position.GetX(), position.GetY(), position.GetZ());
     ma_engine_listener_set_direction(&_impl->engine, 0, direction.GetX(), direction.GetY(), direction.GetZ());
     ma_engine_listener_set_world_up(&_impl->engine, 0, up.GetX(), up.GetY(), up.GetZ());
+}
 
-    using namespace ZHLN::Ranges;
+// ============================================================================
+// Fire and Forget Events
+// ============================================================================
 
-    // Prune finished 3D one-shots
-    ZHLN::Lock(_impl->oneShotMutex, [&] {
-        _impl->activeOneShots | EraseIf([&](ma_sound* sound) {
+void AudioContext::PostEvent(const AudioEvent& event) noexcept {
+    Lock(_impl->eventMutex, [&] -> void { _impl->eventQueue.push_back(event); });
+}
+
+void AudioContext::FlushEvents() noexcept {
+    std::vector<AudioEvent> localBatch;
+    Lock(_impl->eventMutex, [&] -> void { localBatch.swap(_impl->eventQueue); });
+
+    for (const auto& ev: localBatch) {
+        switch (ev.type) {
+            case AudioEventType::OneShot2D:
+                _impl->DispatchOneShot2D(ev.filepath.c_str(), ev.volume);
+                break;
+            case AudioEventType::OneShot3D:
+                _impl->DispatchOneShot3D(ev.filepath.c_str(), ev.position, ev.volume);
+                break;
+            case AudioEventType::ProceduralBeep:
+                _impl->DispatchProceduralBeep(ev.param1, ev.duration, ev.volume);
+                break;
+            case AudioEventType::NoiseBurst3D:
+                _impl->DispatchNoiseBurst3D(ev.filterType, ev.param1, ev.param2, ev.volume, ev.duration, ev.position, ev.noiseType);
+                break;
+            case AudioEventType::ToneSweep3D:
+                _impl->DispatchToneSweep3D(ev.waveType, ev.param1, ev.param2, ev.volume, ev.duration, ev.position);
+                break;
+        }
+    }
+}
+
+// ============================================================================
+// Generational Voice Management
+// ============================================================================
+
+auto AudioContext::CreateVoice(Entity owner, std::string_view filepath, bool spatialized, bool looping, float volume) -> AudioHandle {
+    if (!_impl->initialized || filepath.empty()) {
+        return AudioHandle::Invalid;
+    }
+
+    std::string path_str(filepath);
+
+    return Lock(_impl->voiceMutex, [&]() -> AudioHandle {
+        for (uint32_t i = 0; i < MAX_VOICE_SLOTS; ++i) {
+            auto& slot = _impl->voiceSlots[i];
+            if (!slot.inUse.load(std::memory_order::relaxed)) {
+                ma_uint32 flags = spatialized ? 0 : MA_SOUND_FLAG_NO_SPATIALIZATION;
+                if (ma_sound_init_from_file(&_impl->engine, path_str.c_str(), flags, nullptr, nullptr, &slot.sound) != MA_SUCCESS) {
+                    return AudioHandle::Invalid;
+                }
+
+                ma_sound_set_looping(&slot.sound, looping ? MA_TRUE : MA_FALSE);
+                ma_sound_set_volume(&slot.sound, volume);
+
+                slot.owner       = owner;
+                slot.baseVolume  = volume;
+                slot.isStopping  = false;
+                slot.currentFade = 1.0f;
+                slot.inUse.store(true, std::memory_order::release);
+
+                uint32_t gen = slot.generation.load(std::memory_order::relaxed);
+                return static_cast<AudioHandle>(PackHandle(i, gen));
+            }
+        }
+        return AudioHandle::Invalid;
+    });
+}
+
+void AudioContext::SetVoicePosition(AudioHandle handle, const JPH::Vec3& position) {
+    auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+    if (idx < MAX_VOICE_SLOTS) {
+        auto& slot = _impl->voiceSlots[idx];
+        if (slot.inUse.load(std::memory_order::relaxed) && slot.generation.load(std::memory_order::relaxed) == gen) {
+            ma_sound_set_position(&slot.sound, position.GetX(), position.GetY(), position.GetZ());
+        }
+    }
+}
+
+void AudioContext::SetVoiceVolume(AudioHandle handle, float volume) {
+    auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+    if (idx < MAX_VOICE_SLOTS) {
+        auto& slot = _impl->voiceSlots[idx];
+        if (slot.inUse.load(std::memory_order::relaxed) && slot.generation.load(std::memory_order::relaxed) == gen) {
+            slot.baseVolume = volume;
+            ma_sound_set_volume(&slot.sound, volume * slot.currentFade);
+        }
+    }
+}
+
+void AudioContext::SetVoicePitch(AudioHandle handle, float pitch) {
+    auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+    if (idx < MAX_VOICE_SLOTS) {
+        auto& slot = _impl->voiceSlots[idx];
+        if (slot.inUse.load(std::memory_order::relaxed) && slot.generation.load(std::memory_order::relaxed) == gen) {
+            ma_sound_set_pitch(&slot.sound, pitch);
+        }
+    }
+}
+
+void AudioContext::SetVoiceLooping(AudioHandle handle, bool looping) {
+    auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+    if (idx < MAX_VOICE_SLOTS) {
+        auto& slot = _impl->voiceSlots[idx];
+        if (slot.inUse.load(std::memory_order::relaxed) && slot.generation.load(std::memory_order::relaxed) == gen) {
+            ma_sound_set_looping(&slot.sound, looping ? MA_TRUE : MA_FALSE);
+        }
+    }
+}
+
+void AudioContext::PlayVoice(AudioHandle handle) {
+    auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+    if (idx < MAX_VOICE_SLOTS) {
+        auto& slot = _impl->voiceSlots[idx];
+        if (slot.inUse.load(std::memory_order::relaxed) && slot.generation.load(std::memory_order::relaxed) == gen) {
+            ma_sound_start(&slot.sound);
+        }
+    }
+}
+
+void AudioContext::StopVoice(AudioHandle handle, float fadeOutSeconds) {
+    if (handle == AudioHandle::Invalid) {
+        return;
+    }
+    auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+    if (idx >= MAX_VOICE_SLOTS) {
+        return;
+    }
+
+    Lock(_impl->voiceMutex, [&] -> void {
+        auto& slot = _impl->voiceSlots[idx];
+        if (slot.inUse.load(std::memory_order::relaxed) && slot.generation.load(std::memory_order::relaxed) == gen) {
+            if (fadeOutSeconds <= kVoiceMinFadeOut) {
+                ma_sound_stop(&slot.sound);
+                ma_sound_uninit(&slot.sound);
+                slot.inUse.store(false, std::memory_order::release);
+                slot.generation.fetch_add(1, std::memory_order::relaxed);
+            } else {
+                slot.isStopping      = true;
+                slot.fadeOutDuration = fadeOutSeconds;
+            }
+        }
+    });
+}
+
+auto AudioContext::IsVoicePlaying(AudioHandle handle) const noexcept -> bool {
+    auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+    if (idx < MAX_VOICE_SLOTS) {
+        auto& slot = _impl->voiceSlots[idx];
+        if (slot.inUse.load(std::memory_order::relaxed) && slot.generation.load(std::memory_order::relaxed) == gen) {
+            return ma_sound_is_playing(&slot.sound) == MA_TRUE;
+        }
+    }
+    return false;
+}
+
+auto AudioContext::IsVoiceValid(AudioHandle handle) const noexcept -> bool {
+    if (handle == AudioHandle::Invalid) {
+        return false;
+    }
+    auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+    if (idx >= MAX_VOICE_SLOTS) {
+        return false;
+    }
+    const auto& slot = _impl->voiceSlots[idx];
+    return slot.inUse.load(std::memory_order::acquire) && slot.generation.load(std::memory_order::relaxed) == gen;
+}
+
+// ============================================================================
+// Generational Synth Management
+// ============================================================================
+
+auto AudioContext::CreateLoopSynth(Entity owner, AudioWaveformType wave1, AudioWaveformType wave2, AudioFilterType filter) -> SynthHandle {
+    if (!_impl->initialized) {
+        return SynthHandle::Invalid;
+    }
+
+    return Lock(_impl->synthMutex, [&]() -> SynthHandle {
+        for (uint32_t i = 0; i < MAX_SYNTH_SLOTS; ++i) {
+            auto& slot = _impl->synthSlots[i];
+            if (!slot.inUse.load(std::memory_order::relaxed)) {
+                LoopSynthData* data = _impl->loopSynthPool.Create();
+                data->sampleRate    = ma_engine_get_sample_rate(&_impl->engine);
+                data->filterType    = filter;
+
+                ma_data_source_config dsConfig = ma_data_source_config_init();
+                dsConfig.vtable                = &g_loop_synth_vtable;
+                ma_data_source_init(&dsConfig, &data->base);
+
+                ma_waveform_config wc1 = ma_waveform_config_init(ma_format_f32, 1, data->sampleRate, MapWaveformType(wave1), 1.0, kSynthBaseFreq1);
+                ma_waveform_init(&wc1, &data->waveform1);
+
+                ma_waveform_config wc2 = ma_waveform_config_init(ma_format_f32, 1, data->sampleRate, MapWaveformType(wave2), 1.0, kSynthBaseFreq2);
+                ma_waveform_init(&wc2, &data->waveform2);
+
+                ma_biquad_config bqCfg = CalculateBiquadConfig(filter, data->sampleRate, kSynthFilterFreqDefault, kDefaultQ);
+                ma_biquad_init(&bqCfg, nullptr, &data->biquad);
+
+                if (ma_sound_init_from_data_source(&_impl->engine, &data->base, MA_SOUND_FLAG_NO_SPATIALIZATION, nullptr, &data->sound) != MA_SUCCESS) {
+                    _impl->loopSynthPool.Destroy(data);
+                    return SynthHandle::Invalid;
+                }
+
+                ma_sound_start(&data->sound);
+
+                slot.synthData = data;
+                slot.owner     = owner;
+                slot.inUse.store(true, std::memory_order::release);
+                uint32_t gen = slot.generation.load(std::memory_order::relaxed);
+                return static_cast<SynthHandle>(PackHandle(i, gen));
+            }
+        }
+        return SynthHandle::Invalid;
+    });
+}
+
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
+void AudioContext::SetLoopSynthParams(SynthHandle handle, float charge, float baseFreq, float filterFreq, float volume) {
+    auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+    if (idx < MAX_SYNTH_SLOTS) {
+        auto& slot = _impl->synthSlots[idx];
+        if (slot.inUse.load(std::memory_order::relaxed) && slot.generation.load(std::memory_order::relaxed) == gen) {
+            auto* s = slot.synthData;
+            s->targetCharge.store(std::clamp(charge, 0.0f, 1.0f), std::memory_order::relaxed);
+            s->baseFreq.store(baseFreq, std::memory_order::relaxed);
+            s->filterFreq.store(filterFreq, std::memory_order::relaxed);
+            s->volume.store(volume, std::memory_order::relaxed);
+        }
+    }
+}
+
+void AudioContext::StopLoopSynth(SynthHandle handle, float fadeOutSeconds) {
+    if (handle == SynthHandle::Invalid) {
+        return;
+    }
+    auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+    if (idx >= MAX_SYNTH_SLOTS) {
+        return;
+    }
+
+    Lock(_impl->synthMutex, [&] -> void {
+        auto& slot = _impl->synthSlots[idx];
+        if (slot.inUse.load(std::memory_order::relaxed) && slot.generation.load(std::memory_order::relaxed) == gen) {
+            slot.synthData->fadeOutTime.store(std::max(fadeOutSeconds, kSynthMinFadeOut), std::memory_order::relaxed);
+            slot.synthData->isStopping.store(true, std::memory_order::release);
+        }
+    });
+}
+
+void AudioContext::ReconcileVoices(ECS::Registry& reg, float dt) {
+    // 1. Clean Transients
+    Lock(_impl->transientMutex, [&] -> void {
+        using namespace ZHLN::Ranges;
+        _impl->activeOneShots | EraseIf([&](ma_sound* sound) -> bool {
             if (ma_sound_at_end(sound) == MA_TRUE) {
                 ma_sound_uninit(sound);
                 _impl->soundPool.Destroy(sound);
@@ -580,24 +981,7 @@ void AudioContext::UpdateListener(const JPH::Vec3& position, const JPH::Vec3& di
             }
             return false;
         });
-    });
-
-    // Prune finished procedural beeps
-    ZHLN::Lock(_impl->beepMutex, [&] {
-        _impl->activeBeeps | EraseIf([&](ProceduralBeep* beep) {
-            if (ma_sound_at_end(&beep->sound) == MA_TRUE) {
-                ma_sound_uninit(&beep->sound);
-                ma_waveform_uninit(&beep->waveform);
-                _impl->beepPool.Destroy(beep);
-                return true;
-            }
-            return false;
-        });
-    });
-
-    // Prune finished noise bursts
-    ZHLN::Lock(_impl->burstMutex, [&] {
-        _impl->activeBursts | EraseIf([&](NoiseBurstData* burst) {
+        _impl->activeBursts | EraseIf([&](NoiseBurstData* burst) -> bool {
             if (ma_sound_at_end(&burst->sound) == MA_TRUE || burst->currentFrame >= burst->totalFrames) {
                 ma_sound_uninit(&burst->sound);
                 ma_biquad_uninit(&burst->biquad, nullptr);
@@ -610,419 +994,80 @@ void AudioContext::UpdateListener(const JPH::Vec3& position, const JPH::Vec3& di
         });
     });
 
-    // Prune finished tone sweeps
-    ZHLN::Lock(_impl->sweepMutex, [&] {
-        _impl->activeSweeps | EraseIf([&](ToneSweepData* sweep) {
-            if (ma_sound_at_end(&sweep->sound) == MA_TRUE || sweep->currentFrame >= sweep->totalFrames) {
-                ma_sound_uninit(&sweep->sound);
-                ma_waveform_uninit(&sweep->waveform);
-                ma_data_source_uninit(&sweep->base);
-                _impl->sweepPool.Destroy(sweep);
-                return true;
+    // 2. Reconcile Stateful Voices
+    Lock(_impl->voiceMutex, [&] -> void {
+        for (uint32_t i = 0; i < MAX_VOICE_SLOTS; ++i) {
+            auto& slot = _impl->voiceSlots[i];
+            if (!slot.inUse.load(std::memory_order::relaxed)) {
+                continue;
             }
-            return false;
-        });
-    });
 
-    // Prune finished loop synths
-    ZHLN::Lock(_impl->loopSynthMutex, [&] {
-        _impl->activeLoopSynths | EraseIf([&](LoopSynthData* synth) {
-            if (ma_sound_at_end(&synth->sound) == MA_TRUE || synth->isFinished.load(std::memory_order::relaxed)) {
-                ma_sound_uninit(&synth->sound);
-                ma_biquad_uninit(&synth->biquad, nullptr);
-                ma_waveform_uninit(&synth->waveform1);
-                ma_waveform_uninit(&synth->waveform2);
-                ma_data_source_uninit(&synth->base);
-                _impl->loopSynthPool.Destroy(synth);
-                return true;
+            if (slot.owner != NullEntity && !reg.IsAlive(slot.owner)) {
+                slot.isStopping = true;
+                slot.owner      = NullEntity;
             }
-            return false;
-        });
-    });
-}
 
-void AudioContext::PlayProceduralBeep(float frequency, float duration, float volume) {
-    if (!_impl->initialized) {
-        return;
-    }
+            if (slot.isStopping) {
+                slot.currentFade -= (dt / slot.fadeOutDuration);
+                if (slot.currentFade <= 0.0f) {
+                    ma_sound_stop(&slot.sound);
+                    ma_sound_uninit(&slot.sound);
+                    slot.inUse.store(false, std::memory_order::release);
+                    slot.generation.fetch_add(1, std::memory_order::relaxed);
+                    continue;
+                }
+                ma_sound_set_volume(&slot.sound, slot.baseVolume * slot.currentFade);
+            }
 
-    auto* beep = _impl->beepPool.Create();
-
-    ma_waveform_config waveConfig = ma_waveform_config_init(ma_format_f32, 1, 48000, ma_waveform_type_sine, volume, frequency);
-
-    ma_result result = ma_waveform_init(&waveConfig, &beep->waveform);
-    if (result != MA_SUCCESS) {
-        _impl->beepPool.Destroy(beep);
-        return;
-    }
-
-    result = ma_sound_init_from_data_source(&_impl->engine, &beep->waveform, 0, nullptr, &beep->sound);
-    if (result != MA_SUCCESS) {
-        ma_waveform_uninit(&beep->waveform);
-        _impl->beepPool.Destroy(beep);
-        return;
-    }
-
-    ma_uint32 sampleRate        = ma_engine_get_sample_rate(&_impl->engine);
-    ma_uint64 currentEngineTime = ma_engine_get_time_in_pcm_frames(&_impl->engine);
-    ma_uint64 stopTime          = currentEngineTime + static_cast<ma_uint64>(sampleRate * duration);
-
-    ma_sound_set_stop_time_in_pcm_frames(&beep->sound, stopTime);
-    ma_sound_start(&beep->sound);
-
-    ZHLN::Lock(_impl->beepMutex, [&] {
-        _impl->activeBeeps.push_back(beep);
-    });
-}
-
-void AudioContext::PlayNoiseBurst(AudioFilterType filterType, float freq, float q, float volume, float duration, AudioNoiseType noiseType) {
-    PlayNoiseBurst3D(filterType, freq, q, volume, duration, JPH::Vec3::sZero(), noiseType);
-}
-
-void AudioContext::PlayNoiseBurst3D(
-    AudioFilterType  filterType,
-    float            freq,
-    float            q,
-    float            volume,
-    float            duration,
-    const JPH::Vec3& position,
-    AudioNoiseType   noiseType
-) {
-    if (!_impl->initialized) {
-        return;
-    }
-
-    auto* burst         = _impl->burstPool.Create();
-    burst->sampleRate   = ma_engine_get_sample_rate(&_impl->engine);
-    burst->startVolume  = volume;
-    burst->currentFrame = 0;
-    burst->totalFrames  = static_cast<ma_uint64>(burst->sampleRate * duration);
-
-    ma_data_source_config dsConfig = ma_data_source_config_init();
-    dsConfig.vtable                = &g_noise_burst_vtable;
-    ma_data_source_init(&dsConfig, &burst->base);
-
-    ma_noise_config noiseConfig = ma_noise_config_init(ma_format_f32, 1, MapNoiseType(noiseType), 0, 1.0f);
-    ma_noise_init(&noiseConfig, nullptr, &burst->noise);
-
-    ma_biquad_config bqCfg = CalculateBiquadConfig(filterType, burst->sampleRate, freq, q);
-    ma_biquad_init(&bqCfg, nullptr, &burst->biquad);
-
-    bool      isSpatialized = position.LengthSq() > 1e-4f;
-    ma_uint32 flags         = isSpatialized ? 0 : MA_SOUND_FLAG_NO_SPATIALIZATION;
-
-    ma_result result = ma_sound_init_from_data_source(&_impl->engine, &burst->base, flags, nullptr, &burst->sound);
-    if (result != MA_SUCCESS) {
-        ma_biquad_uninit(&burst->biquad, nullptr);
-        ma_noise_uninit(&burst->noise, nullptr);
-        ma_data_source_uninit(&burst->base);
-        _impl->burstPool.Destroy(burst);
-        return;
-    }
-
-    if (isSpatialized) {
-        ma_sound_set_position(&burst->sound, position.GetX(), position.GetY(), position.GetZ());
-    }
-
-    ma_sound_start(&burst->sound);
-
-    ZHLN::Lock(_impl->burstMutex, [&] {
-        _impl->activeBursts.push_back(burst);
-    });
-}
-
-void AudioContext::PlayToneSweep(AudioWaveformType waveType, float startFreq, float endFreq, float volume, float duration) {
-    PlayToneSweep3D(waveType, startFreq, endFreq, volume, duration, JPH::Vec3::sZero());
-}
-
-void AudioContext::PlayToneSweep3D(AudioWaveformType waveType, float startFreq, float endFreq, float volume, float duration, const JPH::Vec3& position) {
-    if (!_impl->initialized) {
-        return;
-    }
-
-    auto* sweep         = _impl->sweepPool.Create();
-    sweep->sampleRate   = ma_engine_get_sample_rate(&_impl->engine);
-    sweep->startFreq    = startFreq;
-    sweep->endFreq      = endFreq;
-    sweep->startVolume  = volume;
-    sweep->currentFrame = 0;
-    sweep->totalFrames  = static_cast<ma_uint64>(sweep->sampleRate * duration);
-
-    ma_data_source_config dsConfig = ma_data_source_config_init();
-    dsConfig.vtable                = &g_tone_sweep_vtable;
-    ma_data_source_init(&dsConfig, &sweep->base);
-
-    ma_waveform_config waveConfig = ma_waveform_config_init(ma_format_f32, 1, sweep->sampleRate, MapWaveformType(waveType), 1.0f, startFreq);
-    ma_waveform_init(&waveConfig, &sweep->waveform);
-
-    bool      isSpatialized = position.LengthSq() > 1e-4f;
-    ma_uint32 flags         = isSpatialized ? 0 : MA_SOUND_FLAG_NO_SPATIALIZATION;
-
-    ma_result result = ma_sound_init_from_data_source(&_impl->engine, &sweep->base, flags, nullptr, &sweep->sound);
-    if (result != MA_SUCCESS) {
-        ma_waveform_uninit(&sweep->waveform);
-        ma_data_source_uninit(&sweep->base);
-        _impl->sweepPool.Destroy(sweep);
-        return;
-    }
-
-    if (isSpatialized) {
-        ma_sound_set_position(&sweep->sound, position.GetX(), position.GetY(), position.GetZ());
-    }
-
-    ma_sound_start(&sweep->sound);
-
-    ZHLN::Lock(_impl->sweepMutex, [&] {
-        _impl->activeSweeps.push_back(sweep);
-    });
-}
-
-auto AudioContext::CreateLoopSynth(AudioWaveformType waveType1, AudioWaveformType waveType2, AudioFilterType filterType) -> void* {
-    if (!_impl->initialized) {
-        return nullptr;
-    }
-
-    auto* synth       = _impl->loopSynthPool.Create();
-    synth->sampleRate = ma_engine_get_sample_rate(&_impl->engine);
-    synth->filterType = filterType;
-
-    ma_data_source_config dsConfig = ma_data_source_config_init();
-    dsConfig.vtable                = &g_loop_synth_vtable;
-    ma_data_source_init(&dsConfig, &synth->base);
-
-    ma_waveform_config wc1 = ma_waveform_config_init(ma_format_f32, 1, synth->sampleRate, MapWaveformType(waveType1), 1.0f, 40.0f);
-    ma_waveform_init(&wc1, &synth->waveform1);
-
-    ma_waveform_config wc2 = ma_waveform_config_init(ma_format_f32, 1, synth->sampleRate, MapWaveformType(waveType2), 1.0f, 60.0f);
-    ma_waveform_init(&wc2, &synth->waveform2);
-
-    ma_biquad_config bqCfg = CalculateBiquadConfig(filterType, synth->sampleRate, 500.0f, 3.0f);
-    ma_biquad_init(&bqCfg, nullptr, &synth->biquad);
-
-    ma_result result = ma_sound_init_from_data_source(&_impl->engine, &synth->base, MA_SOUND_FLAG_NO_SPATIALIZATION, nullptr, &synth->sound);
-    if (result != MA_SUCCESS) {
-        ma_biquad_uninit(&synth->biquad, nullptr);
-        ma_waveform_uninit(&synth->waveform1);
-        ma_waveform_uninit(&synth->waveform2);
-        ma_data_source_uninit(&synth->base);
-        _impl->loopSynthPool.Destroy(synth);
-        return nullptr;
-    }
-
-    ma_sound_start(&synth->sound);
-
-    ZHLN::Lock(_impl->loopSynthMutex, [&] {
-        _impl->activeLoopSynths.push_back(synth);
+            if (!slot.isStopping && ma_sound_at_end(&slot.sound) == MA_TRUE) {
+                ma_sound_uninit(&slot.sound);
+                slot.inUse.store(false, std::memory_order::release);
+                slot.generation.fetch_add(1, std::memory_order::relaxed);
+            }
+        }
     });
 
-    return static_cast<void*>(synth);
-}
+    // 3. Reconcile Stateful Synths
+    Lock(_impl->synthMutex, [&] -> void {
+        for (uint32_t i = 0; i < MAX_SYNTH_SLOTS; ++i) {
+            auto& slot = _impl->synthSlots[i];
+            if (!slot.inUse.load(std::memory_order::relaxed)) {
+                continue;
+            }
 
-void AudioContext::SetLoopSynthParams(void* handle, float charge, float baseFreq, float filterFreq, float volume) {
-    if (handle == nullptr) {
-        return;
-    }
-    auto* synth = static_cast<LoopSynthData*>(handle);
-    synth->targetCharge.store(std::clamp(charge, 0.0f, 1.0f), std::memory_order::relaxed);
-    synth->baseFreq.store(baseFreq, std::memory_order::relaxed);
-    synth->filterFreq.store(filterFreq, std::memory_order::relaxed);
-    synth->volume.store(volume, std::memory_order::relaxed);
-}
+            if (slot.owner != NullEntity && !reg.IsAlive(slot.owner)) {
+                slot.synthData->isStopping.store(true, std::memory_order::release);
+                slot.owner = NullEntity;
+            }
 
-void AudioContext::StopLoopSynth(void* handle, float fadeOutTime) {
-    if (handle == nullptr) {
-        return;
-    }
-    auto* synth = static_cast<LoopSynthData*>(handle);
-    synth->fadeOutTime.store(std::max(fadeOutTime, 0.01f), std::memory_order::relaxed);
-    synth->isStopping.store(true, std::memory_order::release);
-}
+            if (slot.synthData->isFinished.load(std::memory_order::acquire)) {
+                ma_sound_uninit(&slot.synthData->sound);
+                ma_biquad_uninit(&slot.synthData->biquad, nullptr);
+                ma_waveform_uninit(&slot.synthData->waveform1);
+                ma_waveform_uninit(&slot.synthData->waveform2);
+                ma_data_source_uninit(&slot.synthData->base);
+                _impl->loopSynthPool.Destroy(slot.synthData);
 
-void AudioContext::DestroyLoopSynth(void* handle) {
-    if (handle == nullptr) {
-        return;
-    }
-    auto* synth = static_cast<LoopSynthData*>(handle);
-
-    ZHLN::Lock(_impl->loopSynthMutex, [&] {
-        using namespace ZHLN::Ranges;
-        _impl->activeLoopSynths | EraseIf([&](LoopSynthData* s) { return s == synth; });
+                slot.inUse.store(false, std::memory_order::release);
+                slot.generation.fetch_add(1, std::memory_order::relaxed);
+            }
+        }
     });
-
-    ma_sound_uninit(&synth->sound);
-    ma_biquad_uninit(&synth->biquad, nullptr);
-    ma_waveform_uninit(&synth->waveform1);
-    ma_waveform_uninit(&synth->waveform2);
-    ma_data_source_uninit(&synth->base);
-    _impl->loopSynthPool.Destroy(synth);
-}
-
-void AudioContext::PlayOneShot(const std::string& filepath, float /*volume*/) {
-    if (!_impl->initialized || !std::filesystem::exists(filepath)) {
-        return;
-    }
-
-    ma_engine_play_sound(&_impl->engine, filepath.c_str(), nullptr);
-}
-
-void AudioContext::PlayOneShot3D(const std::string& filepath, const JPH::Vec3& position, float volume) {
-    if (!_impl->initialized || !std::filesystem::exists(filepath)) {
-        return;
-    }
-
-    auto*     sound  = _impl->soundPool.Create();
-    ma_result result = ma_sound_init_from_file(&_impl->engine, filepath.c_str(), 0, nullptr, nullptr, sound);
-    if (result == MA_SUCCESS) {
-        ma_sound_set_position(sound, position.GetX(), position.GetY(), position.GetZ());
-        ma_sound_set_volume(sound, volume);
-        ma_sound_start(sound);
-
-        ZHLN::Lock(_impl->oneShotMutex, [&] {
-            _impl->activeOneShots.push_back(sound);
-        });
-    } else {
-        _impl->soundPool.Destroy(sound);
-        ZHLN::Log("ERROR: Failed to play 3D one-shot: {}", filepath);
-    }
-}
-
-auto AudioContext::CreateSoundInstance(const std::string& filepath, bool spatialized) -> void* {
-    if (!_impl->initialized) {
-        return nullptr;
-    }
-
-    auto*     sound = _impl->soundPool.Create();
-    ma_uint32 flags = spatialized ? 0 : MA_SOUND_FLAG_NO_SPATIALIZATION;
-
-    ma_result result = ma_sound_init_from_file(&_impl->engine, filepath.c_str(), flags, nullptr, nullptr, sound);
-    if (result != MA_SUCCESS) {
-        ZHLN::Log("ERROR: Failed to load sound file: {}", filepath);
-        _impl->soundPool.Destroy(sound);
-        return nullptr;
-    }
-
-    return static_cast<void*>(sound);
-}
-
-void AudioContext::DestroySoundInstance(void* soundHandle) {
-    if (soundHandle == nullptr) {
-        return;
-    }
-    auto* sound = static_cast<ma_sound*>(soundHandle);
-    ma_sound_uninit(sound);
-    _impl->soundPool.Destroy(sound);
-}
-
-void AudioContext::PlaySoundInstance(void* soundHandle) {
-    WithSound(soundHandle, [](ma_sound* sound) { ma_sound_start(sound); });
-}
-
-void AudioContext::StopSoundInstance(void* soundHandle) {
-    WithSound(soundHandle, [](ma_sound* sound) { ma_sound_stop(sound); });
-}
-
-void AudioContext::SetSoundInstancePosition(void* soundHandle, const JPH::Vec3& position) {
-    WithSound(soundHandle, [&](ma_sound* sound) { ma_sound_set_position(sound, position.GetX(), position.GetY(), position.GetZ()); });
-}
-
-void AudioContext::SetSoundInstanceVolume(void* soundHandle, float volume) {
-    WithSound(soundHandle, [=](ma_sound* sound) { ma_sound_set_volume(sound, volume); });
-}
-
-void AudioContext::SetSoundInstanceLooping(void* soundHandle, bool looping) {
-    WithSound(soundHandle, [=](ma_sound* sound) { ma_sound_set_looping(sound, looping ? MA_TRUE : MA_FALSE); });
-}
-
-auto AudioContext::IsSoundInstancePlaying(void* soundHandle) -> bool {
-    return WithSound(soundHandle, [](ma_sound* sound) { return ma_sound_is_playing(sound) == MA_TRUE; });
 }
 
 } // namespace ZHLN
 
+// --- FFI Exporter overrides for Lua Bindings ---
 extern "C" {
 
-void ZHLN_PlayOneShot(ZHLN_Engine* engine_handle, const char* filepath, float volume) {
-    auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
-    engine->GetAudioContext().PlayOneShot(filepath, volume);
-}
+using namespace ZHLN;
 
-void ZHLN_PlayOneShot3D(ZHLN_Engine* engine_handle, const char* filepath, float x, float y, float z, float volume) {
+void ZHLN_PostAudioEvent(ZHLN_Engine* engine_handle, const AudioEvent* event) {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
     auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
-    engine->GetAudioContext().PlayOneShot3D(filepath, JPH::Vec3(x, y, z), volume);
-}
-
-void ZHLN_PlayProceduralBeep(ZHLN_Engine* engine_handle, float frequency, float duration, float volume) {
-    auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
-    engine->GetAudioContext().PlayProceduralBeep(frequency, duration, volume);
-}
-
-ZHLN_API void ZHLN_PlayNoiseBurst(ZHLN_Engine* engine_handle, uint8_t filterType, float freq, float q, float volume, float duration, uint8_t noiseType) {
-    auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
-    engine->GetAudioContext().PlayNoiseBurst(
-        static_cast<ZHLN::AudioFilterType>(filterType), freq, q, volume, duration, static_cast<ZHLN::AudioNoiseType>(noiseType)
-    );
-}
-
-ZHLN_API void ZHLN_PlayNoiseBurst3D(
-    ZHLN_Engine* engine_handle,
-    uint8_t      filterType,
-    float        freq,
-    float        q,
-    float        volume,
-    float        duration,
-    float        x,
-    float        y,
-    float        z,
-    uint8_t      noiseType
-) {
-    auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
-    engine->GetAudioContext().PlayNoiseBurst3D(
-        static_cast<ZHLN::AudioFilterType>(filterType), freq, q, volume, duration, JPH::Vec3(x, y, z), static_cast<ZHLN::AudioNoiseType>(noiseType)
-    );
-}
-
-ZHLN_API void ZHLN_PlayToneSweep(ZHLN_Engine* engine_handle, uint8_t waveType, float startFreq, float endFreq, float volume, float duration) {
-    auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
-    engine->GetAudioContext().PlayToneSweep(static_cast<ZHLN::AudioWaveformType>(waveType), startFreq, endFreq, volume, duration);
-}
-
-ZHLN_API void ZHLN_PlayToneSweep3D(
-    ZHLN_Engine* engine_handle,
-    uint8_t      waveType,
-    float        startFreq,
-    float        endFreq,
-    float        volume,
-    float        duration,
-    float        x,
-    float        y,
-    float        z
-) {
-    auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
-    engine->GetAudioContext().PlayToneSweep3D(static_cast<ZHLN::AudioWaveformType>(waveType), startFreq, endFreq, volume, duration, JPH::Vec3(x, y, z));
-}
-
-ZHLN_API void* ZHLN_CreateLoopSynth(ZHLN_Engine* engine_handle, uint8_t waveType1, uint8_t waveType2, uint8_t filterType) {
-    auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
-    return engine->GetAudioContext().CreateLoopSynth(
-        static_cast<ZHLN::AudioWaveformType>(waveType1), static_cast<ZHLN::AudioWaveformType>(waveType2), static_cast<ZHLN::AudioFilterType>(filterType)
-    );
-}
-
-ZHLN_API void ZHLN_SetLoopSynthParams(void* handle, float charge, float baseFreq, float filterFreq, float volume) {
-    if (auto* engine = ZHLN::GetEngineContext()) {
-        engine->GetAudioContext().SetLoopSynthParams(handle, charge, baseFreq, filterFreq, volume);
+    if (engine != nullptr && event != nullptr) {
+        engine->GetAudioContext().PostEvent(*event);
     }
-}
-
-ZHLN_API void ZHLN_StopLoopSynth(void* handle, float fadeOutTime) {
-    if (auto* engine = ZHLN::GetEngineContext()) {
-        engine->GetAudioContext().StopLoopSynth(handle, fadeOutTime);
-    }
-}
-
-ZHLN_API void ZHLN_DestroyLoopSynth(ZHLN_Engine* engine_handle, void* handle) {
-    auto* engine = reinterpret_cast<ZHLN::Engine*>(engine_handle);
-    engine->GetAudioContext().DestroyLoopSynth(handle);
 }
 
 } // extern "C"

@@ -4,7 +4,9 @@
 module;
 
 // --- Global Module Fragment: Engine & Physics Headers ---
+// clang-format off
 #include <Jolt/Jolt.h>
+// clang-format on
 #include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
@@ -289,32 +291,34 @@ export auto Spawn(Engine& engine, JPH::RVec3Arg cloudPos, JPH::RVec3Arg groundPo
         rc.RegisterGPUMaterial(matAssetId, *matRes);
     }
 
-    // 4. Point lights for local flash and ground strike impact
+    // 4. Point lights for local flash and ground strike impact (Attached via HierarchyComponent)
     const JPH::Vec3 flashPos  = engine.GetCamera().position + JPH::Vec3(0.0f, 25.0f, 0.0f);
     const JPH::Vec3 impactPos = groundTarget + JPH::Vec3(0.0f, 20.0f, 0.0f);
 
     const Entity flashLight = reg.Create(
-        Components::TransformComponent {.position = flashPos}, Components::LightComponent {
-                                                                   .type        = LightType::Point,
-                                                                   .color       = JPH::Vec3(0.88f, 0.95f, 1.0f),
-                                                                   .intensity   = 0.0f,
-                                                                   .radius      = 12.0f,
-                                                                   .direction   = JPH::Vec3(0.0f, -1.0f, 0.0f),
-                                                                   .range       = 2000.0f,
-                                                                   .shadowLayer = -1
-                                                               }
+        Components::TransformComponent {.position = flashPos}, Components::HierarchyComponent {.parent = boltEntity},
+        Components::LightComponent {
+            .type        = LightType::Point,
+            .color       = JPH::Vec3(0.88f, 0.95f, 1.0f),
+            .intensity   = 0.0f,
+            .radius      = 12.0f,
+            .direction   = JPH::Vec3(0.0f, -1.0f, 0.0f),
+            .range       = 2000.0f,
+            .shadowLayer = -1
+        }
     );
 
     const Entity impactLight = reg.Create(
-        Components::TransformComponent {.position = impactPos}, Components::LightComponent {
-                                                                    .type        = LightType::Point,
-                                                                    .color       = JPH::Vec3(1.0f, 1.0f, 1.0f),
-                                                                    .intensity   = 0.0f,
-                                                                    .radius      = 8.0f,
-                                                                    .direction   = JPH::Vec3(0.0f, 1.0f, 0.0f),
-                                                                    .range       = 500.0f,
-                                                                    .shadowLayer = -1
-                                                                }
+        Components::TransformComponent {.position = impactPos}, Components::HierarchyComponent {.parent = boltEntity},
+        Components::LightComponent {
+            .type        = LightType::Point,
+            .color       = JPH::Vec3(1.0f, 1.0f, 1.0f),
+            .intensity   = 0.0f,
+            .radius      = 8.0f,
+            .direction   = JPH::Vec3(0.0f, 1.0f, 0.0f),
+            .range       = 500.0f,
+            .shadowLayer = -1
+        }
     );
 
     // 5. Attach root bolt components atomically
@@ -385,7 +389,13 @@ export auto Update(Engine& engine, float dt) -> void {
                     bolt.phase           = LightningPhase::ReturnStroke;
                     bolt.phaseTime       = 0.0f;
 
-                    engine.GetAudioContext().PlayOneShot3D("resources/assets/audio/lightning.wav", bolt.groundTarget, bolt.config.soundVolume);
+                    // Unified Fire-and-Forget Audio Event
+                    engine.GetAudioContext().PostEvent(
+                        {.type     = AudioEventType::OneShot3D,
+                         .filepath = "resources/assets/audio/lightning.wav",
+                         .position = bolt.groundTarget,
+                         .volume   = bolt.config.soundVolume}
+                    );
                 }
                 break;
             }
@@ -440,14 +450,10 @@ export auto Update(Engine& engine, float dt) -> void {
         }
 
         if (reg.IsAlive(bolt.flashLightEntity)) {
-            reg.Patch<Components::LightComponent>(bolt.flashLightEntity, [&](auto& light) -> auto {
-                light.intensity = bolt.flashLuminance * 8000000.0f;
-            });
+            reg.Patch<Components::LightComponent>(bolt.flashLightEntity, [&](auto& light) -> auto { light.intensity = bolt.flashLuminance * 8000000.0f; });
         }
         if (reg.IsAlive(bolt.impactLightEntity)) {
-            reg.Patch<Components::LightComponent>(bolt.impactLightEntity, [&](auto& light) -> auto {
-                light.intensity = bolt.flashLuminance * 4000000.0f;
-            });
+            reg.Patch<Components::LightComponent>(bolt.impactLightEntity, [&](auto& light) -> auto { light.intensity = bolt.flashLuminance * 4000000.0f; });
         }
     }
 
@@ -459,7 +465,7 @@ export auto Update(Engine& engine, float dt) -> void {
         });
     }
 
-    // Clean up expired entities
+    // Clean up expired entities (Child lights cascade via HierarchyComponent / SafeDestroyEntity)
     for (const Entity deadEnt: deadEntities) {
         if (const auto* bolt = reg.Get<LightningComponent>(deadEnt)) {
             if (bolt->flashLightEntity != NullEntity && reg.IsAlive(bolt->flashLightEntity)) {

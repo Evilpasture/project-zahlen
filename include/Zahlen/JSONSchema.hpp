@@ -18,7 +18,7 @@ constexpr void SkipWhitespace(std::string_view& src) noexcept {
     }
 }
 
-constexpr std::string_view ParseString(std::string_view& src) noexcept {
+constexpr auto ParseString(std::string_view& src) noexcept -> std::string_view {
     SkipWhitespace(src);
     if (src.empty() || src[0] != '"') {
         return {};
@@ -41,7 +41,7 @@ constexpr std::string_view ParseString(std::string_view& src) noexcept {
     return str;
 }
 
-constexpr bool IsFloatNumber(std::string_view src) noexcept {
+constexpr auto IsFloatNumber(std::string_view src) noexcept -> bool {
     SkipWhitespace(src);
     size_t i = 0;
     if (i < src.size() && (src[i] == '-' || src[i] == '+')) {
@@ -94,13 +94,13 @@ constexpr size_t NullLength  = 4;
 
 // Forward declarations with compile-time depth bound
 template <typename SchemaContext, size_t Depth = 0>
-consteval TypeDescriptor InferValueType(std::string_view& src);
+consteval auto InferValueType(std::string_view& src) -> TypeDescriptor;
 
 template <typename SchemaContext, size_t Depth = 0>
-consteval TypeDescriptor ParseObjectToBuilder(std::string_view& src);
+consteval auto ParseObjectToBuilder(std::string_view& src) -> TypeDescriptor;
 
 template <typename SchemaContext, size_t Depth = 0>
-consteval TypeDescriptor ParseArrayType(std::string_view& src) {
+consteval auto ParseArrayType(std::string_view& src) -> TypeDescriptor {
     if constexpr (Depth >= 4) {
         SkipValue(src);
         return TypeDescriptor::Void();
@@ -140,7 +140,7 @@ consteval TypeDescriptor ParseArrayType(std::string_view& src) {
 }
 
 template <typename SchemaContext, size_t Depth>
-consteval TypeDescriptor ParseObjectToBuilder(std::string_view& src) {
+consteval auto ParseObjectToBuilder(std::string_view& src) -> TypeDescriptor {
     if constexpr (Depth >= 4) {
         SkipValue(src);
         return TypeDescriptor::Void();
@@ -184,7 +184,7 @@ consteval TypeDescriptor ParseObjectToBuilder(std::string_view& src) {
 }
 
 template <typename SchemaContext, size_t Depth>
-consteval TypeDescriptor InferValueType(std::string_view& src) {
+consteval auto InferValueType(std::string_view& src) -> TypeDescriptor {
     if constexpr (Depth >= 4) {
         SkipValue(src);
         return TypeDescriptor::Void();
@@ -252,7 +252,7 @@ consteval void PopulateObjectFromJSON(std::string_view& src, TargetStruct& obj) 
         }
         SkipWhitespace(src); // Ensure whitespace after ':' is consumed
 
-        bool found = VisitFieldByName(obj, keyName, [&](auto& fieldVal) {
+        bool found = VisitFieldByName(obj, keyName, [&](auto& fieldVal) -> auto {
             using FieldType = std::decay_t<decltype(fieldVal)>;
 
             SkipWhitespace(src);
@@ -339,7 +339,6 @@ struct JSONSchema {
 template <StringLiteral JSONStr>
 using JSONType = typename JSONSchema<JSONStr>::type;
 
-// Overloaded Compile-Time Value Parser
 template <StringLiteral JSONStr>
 consteval auto ParseJSONConst() {
     using ConfigType = JSONType<JSONStr>;

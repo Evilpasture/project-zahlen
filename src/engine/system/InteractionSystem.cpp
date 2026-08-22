@@ -90,10 +90,11 @@ void InteractionSystem::Update(Engine& engine, float dt) {
                             processed = true;
 
                             Log("Picked up item hash ID: {}", itemBase->id);
-                            engine.GetAudioContext().PlayProceduralBeep(880.0f, 0.1f, 0.25f);
+                            engine.GetAudioContext().PostEvent({.type = AudioEventType::ProceduralBeep, .volume = 0.25f, .param1 = 880.0f, .duration = 0.1f});
+
                         } else {
                             Log("Inventory full!");
-                            engine.GetAudioContext().PlayProceduralBeep(220.0f, 0.15f, 0.25f);
+                            engine.GetAudioContext().PostEvent({.type = AudioEventType::ProceduralBeep, .volume = 0.25f, .param1 = 220.0f, .duration = 0.15f});
                         }
                     }
                 }
@@ -102,7 +103,7 @@ void InteractionSystem::Update(Engine& engine, float dt) {
                     if (auto* usable = reg.Get<Components::UsableComponent>(triggerEnt)) {
                         if (usable->scriptHash != 0) {
                             Log("Interacted! Dispatching event for script hash: {:#X}", usable->scriptHash);
-                            engine.GetAudioContext().PlayProceduralBeep(550.0f, 0.08f, 0.20f);
+                            engine.GetAudioContext().PostEvent({.type = AudioEventType::ProceduralBeep, .volume = 0.20f, .param1 = 550.0f, .duration = 0.08f});
                         }
                     }
                 }

@@ -40,6 +40,10 @@ enum class FlexWrap : uint8_t { NoWrap = 0, Wrap, WrapReverse };
 enum class FlexJustify : uint8_t { FlexStart = 0, Center, FlexEnd, SpaceBetween, SpaceAround, SpaceEvenly };
 enum class FlexAlign : uint8_t { Auto = 0, FlexStart, Center, FlexEnd, Stretch, Baseline };
 
+enum class AudioWaveformType : uint8_t { Sine = 0, Square = 1, Triangle = 2, Sawtooth = 3 };
+enum class AudioFilterType : uint8_t { LowPass = 0, HighPass = 1, BandPass = 2, Notch = 3 };
+enum class AudioNoiseType : uint8_t { White = 0, Pink = 1, Brownian = 2 };
+
 struct Components {
     struct TextComponent {
         ZHLN::String256 text;
@@ -427,6 +431,10 @@ struct Components {
         const ModelPrefab* prefab = nullptr;
     };
 
+    struct AudioListenerComponent {
+        bool isPrimary = true;
+    };
+
     struct AudioSourceComponent {
         String128 filepath;
         float     volume        = 1.0f;
@@ -435,6 +443,23 @@ struct Components {
         bool      isSpatialized = true;
         bool      playOnStart   = true;
         bool      isPaused      = false;
+
+        AudioHandle voiceHandle = AudioHandle::Invalid; // Pure POD handle
+    };
+
+    struct LoopSynthComponent {
+        AudioWaveformType waveType1  = AudioWaveformType::Sawtooth;
+        AudioWaveformType waveType2  = AudioWaveformType::Square;
+        AudioFilterType   filterType = AudioFilterType::LowPass;
+
+        float charge     = 0.0f;
+        float baseFreq   = 40.0f;
+        float filterFreq = 500.0f;
+        float volume     = 0.16f;
+        float fadeOut    = 0.08f;
+        bool  isStopping = false;
+
+        SynthHandle synthHandle = SynthHandle::Invalid; // Pure POD handle
     };
     struct InputComponent {
         float localMoveX     = 0.0f;

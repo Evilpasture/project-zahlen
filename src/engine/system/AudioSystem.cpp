@@ -1,130 +1,120 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/audio/AudioSystem.cpp
+#include <Zahlen/Audio.hpp>
+#include <Zahlen/Camera.hpp>
+#include <Zahlen/Components.hpp>
+#include <Zahlen/Engine.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
 #include <Jolt/Math/Math.h>
-#include <Zahlen/Audio.hpp>
-#include <Zahlen/Components.hpp>
-#include <Zahlen/Core/Array.hpp>
-#include <Zahlen/Core/HashMap.hpp>
-#include <Zahlen/Engine.hpp>
-#include <Zahlen/Log.hpp>
-#include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/physics/Physics.hpp>
-#include <physics/PhysicsWorld.hpp>
 
 namespace ZHLN {
 
-ZHLN_API void AudioSystem(Engine& engine, [[maybe_unused]] float dt) {
-    auto&       reg   = engine.GetRegistry();
-    auto&       audio = engine.GetAudioContext();
-    const auto& world = engine.GetPhysicsContext().GetWorld();
+ZHLN_API void AudioSystem(Engine& engine, float dt) {
+    auto& reg   = engine.GetRegistry();
+    auto& audio = engine.GetAudioContext();
 
-    // Persistent O(1) active sound map
-    static HashMap<uint64_t, void*> activeSounds;
+    // ========================================================================
+    // 1. UPDATE LISTENER (Ears)
+    // ========================================================================
+    bool listenerFound = false;
+    for (Entity e: reg.GetEntitiesWith<Components::AudioListenerComponent>()) {
+        auto* listener = reg.Get<Components::AudioListenerComponent>(e);
+        if ((listener != nullptr) && listener->isPrimary) {
+            JPH::Vec3 pos = JPH::Vec3::sZero();
+            JPH::Vec3 dir = JPH::Vec3::sAxisZ();
+            JPH::Vec3 up  = JPH::Vec3::sAxisY();
 
-    // ------------------------------------------------------------------------
-    // 1. Sync Audio Listener Position & Orientation with Main Camera
-    // ------------------------------------------------------------------------
-    const auto& cam = engine.GetCamera();
-
-    const float yawRad   = JPH::DegreesToRadians(cam.yaw);
-    const float pitchRad = JPH::DegreesToRadians(cam.pitch);
-
-    JPH::Vec3 direction(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad));
-    audio.UpdateListener(cam.position, direction.Normalized(), JPH::Vec3::sAxisY());
-
-    // ------------------------------------------------------------------------
-    // 2. Process Active AudioSourceComponent Instances (O(1) Lookups & Inserts)
-    // ------------------------------------------------------------------------
-    auto entities     = reg.GetEntitiesWith<Components::AudioSourceComponent>();
-    auto audioSources = reg.GetRawArray<Components::AudioSourceComponent>();
-
-    ZHLN::Array<uint64_t> currentFrameKeys;
-    currentFrameKeys.reserve(entities.size());
-
-    for (size_t i = 0; i < entities.size(); ++i) {
-        Entity                            e      = entities[i];
-        Components::AudioSourceComponent& source = audioSources[i];
-        const uint64_t                    key    = e.Pack();
-
-        currentFrameKeys.push_back(key);
-
-        void* soundHandle = nullptr;
-
-        if (void** found = activeSounds.Find(key)) {
-            soundHandle = *found;
-        } else {
-            soundHandle = audio.CreateSoundInstance(source.filepath.c_str(), source.isSpatialized);
-            if (soundHandle != nullptr) {
-                audio.SetSoundInstanceLooping(soundHandle, source.isLooping);
-                audio.SetSoundInstanceVolume(soundHandle, source.volume);
-
-                if (source.playOnStart) {
-                    audio.PlaySoundInstance(soundHandle);
-                }
-
-                activeSounds.Insert(key, soundHandle);
-            }
-        }
-
-        if (soundHandle != nullptr) {
-            // Position resolution: WorldTransform -> Transform -> Physics
-            JPH::Vec3 position = JPH::Vec3::sZero();
-
-            if (auto* worldTransform = reg.Get<Components::WorldTransformComponent>(e)) {
-                position = worldTransform->world.GetTranslation();
-            } else if (auto* transform = reg.Get<Components::TransformComponent>(e)) {
-                position = transform->position;
-            } else if (auto* phys = reg.Get<Components::PhysicsComponent>(e)) {
-                if (phys->physicsHandle.index < world.slotToDense.size()) {
-                    uint32_t     dense = world.slotToDense[phys->physicsHandle.index];
-                    const size_t base  = static_cast<size_t>(dense) * 4;
-                    position           = JPH::Vec3(
-                        static_cast<float>(world.positions[base]), static_cast<float>(world.positions[base + 1]), static_cast<float>(world.positions[base + 2])
-                    );
-                }
+            if (auto* wt = reg.Get<Components::WorldTransformComponent>(e)) {
+                pos = wt->world.GetTranslation();
+                dir = -wt->world.GetColumn3(2).Normalized();
+                up  = wt->world.GetColumn3(1).Normalized();
+            } else if (auto* t = reg.Get<Components::TransformComponent>(e)) {
+                pos = t->position;
+                dir = t->rotation * JPH::Vec3::sAxisZ();
+                up  = t->rotation * JPH::Vec3::sAxisY();
             }
 
-            // Sync stream state
-            audio.SetSoundInstancePosition(soundHandle, position);
-            audio.SetSoundInstanceVolume(soundHandle, source.volume);
-            audio.SetSoundInstanceLooping(soundHandle, source.isLooping);
+            audio.UpdateListener(pos, dir, up);
+            listenerFound = true;
+            break;
         }
     }
 
-    // ------------------------------------------------------------------------
-    // 3. Reconcile & Destroy Dead Streams using O(1) HashMap::Erase
-    // ------------------------------------------------------------------------
-    ZHLN::Array<uint64_t> deadKeys;
+    if (!listenerFound) {
+        const auto& cam      = engine.GetCamera();
+        float       yawRad   = JPH::DegreesToRadians(cam.yaw);
+        float       pitchRad = JPH::DegreesToRadians(cam.pitch);
+        JPH::Vec3   dir(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad));
+        audio.UpdateListener(cam.position, dir.Normalized(), JPH::Vec3::sAxisY());
+    }
 
-    activeSounds.ForEach([&](uint64_t key, void*) {
-        bool alive = false;
-        for (uint64_t aliveKey: currentFrameKeys) {
-            if (aliveKey == key) {
-                alive = true;
-                break;
+    // ========================================================================
+    // 2. RECONCILE PERSISTENT AUDIO SOURCES
+    // ========================================================================
+    auto srcEntities = reg.GetEntitiesWith<Components::AudioSourceComponent>();
+    auto sources     = reg.GetRawArray<Components::AudioSourceComponent>();
+
+    for (size_t i = 0; i < srcEntities.size(); ++i) {
+        Entity                            e   = srcEntities[i];
+        Components::AudioSourceComponent& src = sources[i];
+
+        if (!audio.IsVoiceValid(src.voiceHandle)) {
+            if (src.playOnStart && !src.filepath.empty()) {
+                src.voiceHandle = audio.CreateVoice(e, src.filepath.c_str(), src.isSpatialized, src.isLooping, src.volume);
+                if (src.voiceHandle != AudioHandle::Invalid) {
+                    audio.PlayVoice(src.voiceHandle);
+                }
             }
         }
-        if (!alive) {
-            deadKeys.push_back(key);
-        }
-    });
 
-    for (uint64_t deadKey: deadKeys) {
-        if (void** found = activeSounds.Find(deadKey)) {
-            void* handle = *found;
-            if (handle != nullptr) {
-                audio.StopSoundInstance(handle);
-                audio.DestroySoundInstance(handle);
+        if (src.voiceHandle != AudioHandle::Invalid) {
+            if (src.isSpatialized) {
+                JPH::Vec3 pos = JPH::Vec3::sZero();
+                if (auto* wt = reg.Get<Components::WorldTransformComponent>(e)) {
+                    pos = wt->world.GetTranslation();
+                } else if (auto* t = reg.Get<Components::TransformComponent>(e)) {
+                    pos = t->position;
+                }
+                audio.SetVoicePosition(src.voiceHandle, pos);
             }
-            activeSounds.Erase(deadKey); // O(1) Tombstone Erasure
+            audio.SetVoiceVolume(src.voiceHandle, src.volume);
+            audio.SetVoicePitch(src.voiceHandle, src.pitch);
+            audio.SetVoiceLooping(src.voiceHandle, src.isLooping);
         }
     }
+
+    // ========================================================================
+    // 3. RECONCILE LOOP SYNTHESIZERS
+    // ========================================================================
+    auto synthEntities = reg.GetEntitiesWith<Components::LoopSynthComponent>();
+    auto synths        = reg.GetRawArray<Components::LoopSynthComponent>();
+
+    for (size_t i = 0; i < synthEntities.size(); ++i) {
+        Entity                          e     = synthEntities[i];
+        Components::LoopSynthComponent& synth = synths[i];
+
+        if (!audio.IsVoiceValid(static_cast<AudioHandle>(synth.synthHandle))) { // Re-using validation underlying check is fine
+            synth.synthHandle = audio.CreateLoopSynth(e, synth.waveType1, synth.waveType2, synth.filterType);
+        }
+
+        if (synth.synthHandle != SynthHandle::Invalid) {
+            audio.SetLoopSynthParams(synth.synthHandle, synth.charge, synth.baseFreq, synth.filterFreq, synth.volume);
+            if (synth.isStopping) {
+                audio.StopLoopSynth(synth.synthHandle, synth.fadeOut);
+            }
+        }
+    }
+
+    // ========================================================================
+    // 4. FIRE AND FORGET DISPATCH & ORPHAN FADEOUT
+    // ========================================================================
+    audio.FlushEvents();
+    audio.ReconcileVoices(reg, dt);
 }
 
 } // namespace ZHLN
