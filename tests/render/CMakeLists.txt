@@ -87,8 +87,14 @@ if(TARGET TestPerformance)
     )
 
     # Optionally pull in the first-party "extras" toolkit (ALife simulation)
-    # so the stress scene can drive it as well when it is built.
+    # so the stress scene can drive it as well when it is built. PerfALife.cpp
+    # is a deliberate second translation unit (it must not see the core
+    # Zahlen/Components.hpp — see PerfALife.hpp), and its name avoids the
+    # Test*.cpp glob so it is never auto-registered as its own test target.
     if(ZHLN_BUILD_EXTRAS AND TARGET zahlen_extras)
+        target_sources(TestPerformance PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/PerfALife.cpp
+        )
         target_link_libraries(TestPerformance PRIVATE zahlen_extras)
         target_include_directories(TestPerformance PRIVATE ${PROJECT_SOURCE_DIR}/extras)
         target_compile_definitions(TestPerformance PRIVATE ZHLN_PERF_WITH_EXTRAS=1)

@@ -75,8 +75,10 @@
 #include <Zahlen/ecs/SystemGraph.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #if defined(ZHLN_PERF_WITH_EXTRAS)
-#include <ALife/ALifeComponents.hpp>
-#include <ALife/Simulator.hpp>
+// ALife lives in its own translation unit (PerfALife.cpp) — the extras declare
+// ZHLN::Components as a namespace while the core declares it as a struct, so
+// the two headers can never be included in the same translation unit.
+#include "PerfALife.hpp"
 #endif
 #include <algorithm>
 #include <atomic>
@@ -226,13 +228,6 @@ struct PerfScene {
         bool         entityGone = false;
     };
     std::vector<ChurnEntry> churnPool;
-
-#if defined(ZHLN_PERF_WITH_EXTRAS)
-    std::unique_ptr<ZHLN::ALife::Simulator> alife;
-    std::vector<ZHLN::Entity>               alifeEntities;
-    std::vector<JPH::RVec3>                 alifeWaypoints;
-    std::atomic<uint64_t>                   alifeEventCounter {0};
-#endif
 };
 
 struct PerfCounters {
@@ -699,52 +694,8 @@ bool BuildPerfScene(ZHLN::Engine& engine, const PerfConfig& cfg, PerfScene& scen
         }
     }
 
-    // --- ALife (first-party extras): creature population with parallel
-    // --- think/move/interaction phases + faction combat churn. ---
-#if defined(ZHLN_PERF_WITH_EXTRAS)
-    reg.RegisterComponent<Components::ALifeComponent>("ALifeComponent");
-
-    ALife::SimConfig simCfg {};
-    simCfg.max_factions = 8;
-    simCfg.grid_width   = 100;
-    simCfg.grid_height  = 100;
-    simCfg.cell_size    = 50.0f;
-    simCfg.default_tuning.time_factor     = 2.0f;
-    simCfg.default_tuning.switch_distance = 30.0f;
-
-    scene.alife = std::make_unique<ALife::Simulator>(simCfg);
-    scene.alife->SetRelation(0, 1, -1.0f);
-    scene.alife->SetRelation(2, 3, -1.0f);
-    scene.alife->on_event = [&scene](ALife::Simulator&, const ALife::Event&) {
-        scene.alifeEventCounter.fetch_add(1, std::memory_order_relaxed);
-    };
-    scene.alife->on_think = [](ALife::Simulator&, Entity) {
-        // Think load: a small amount of branching per think tick.
-    };
-    scene.alife->on_interaction = [&reg](ALife::Simulator& sim, Entity e1, Entity e2) {
-        sim.ResolveOfflineInteraction(reg, e1, e2);
-    };
-
-    // The ALife spatial grid only indexes the positive quadrant, so keep the
-    // creature population (and its roaming waypoints) inside [0, 120] x [0, 120].
-    for (uint32_t i = 0; i < cfg.alifeCount; ++i) {
-        const JPH::RVec3 pos(static_cast<double>(rng() % 120), 0.0, static_cast<double>(rng() % 120));
-        // self_entity is left as NullEntity; the ALife SpatialGrid caches the
-        // real handle into it on first UpdateEntity.
-        const Entity     e = reg.Create(
-            Components::ALifeComponent {
-                .position = pos, .state = ALife::State::Offline, .travel_speed = 5.0f + static_cast<float>(rng() % 700) * 0.01f,
-                .faction_id = i % 4, .health = 100, .power = 10, .energy = 100
-            },
-            Components::TransformComponent {.position = JPH::Vec3(pos)},
-            PerfDispatchComponent {}
-        );
-        scene.alifeEntities.push_back(e);
-        scene.alifeWaypoints.push_back(pos);
-    }
-#else
-    ZHLN::Println("    [Perf] NOTE: ZHLN_BUILD_EXTRAS off — ALife population skipped.");
-#endif
+    // --- ALife (first-party extras) is initialized separately in the test
+    // --- method via ZHLN::Perf::ALife_Init (see PerfALife.hpp for why). ---
 
     return true;
 }
@@ -898,54 +849,12 @@ void DriveFrame(ZHLN::Engine& engine, PerfScene& scene, PerfCounters& counters, 
     }
 
     // ------------------------------------------------------------------
-    // 5. ALife (extras): drive creature movement, then run the simulator
-    //    (parallel phases: think/switch/move + spatial grid rebuild +
-    //    offline faction interactions).
+    // 5. ALife (extras): waypoint movement + simulator parallel phases
+    //    (think/state-switch + spatial-grid rebuild + offline faction
+    //    interactions). Lives in PerfALife.cpp (separate translation unit).
     // ------------------------------------------------------------------
 #if defined(ZHLN_PERF_WITH_EXTRAS)
-    if (scene.alife != nullptr && !scene.alifeEntities.empty()) {
-        auto  ents  = reg.GetEntitiesWith<Components::ALifeComponent>();
-        auto  comps = reg.GetRawArray<Components::ALifeComponent>();
-        auto& wps   = scene.alifeWaypoints;
-
-        TaskSystem::ParallelFor(static_cast<uint32_t>(ents.size()), 128, [&](uint32_t start, uint32_t end, uint32_t) {
-            thread_local std::mt19937 localRng(0xC0FFEE);
-            for (uint32_t i = start; i < end && i < wps.size(); ++i) {
-                Components::ALifeComponent& c = comps[i];
-                if (c.state == ALife::State::Dead) {
-                    continue;
-                }
-
-                // Respawn dead creatures (population churn).
-                if (c.health <= 0) {
-                    c.state       = ALife::State::Offline;
-                    c.health      = 100;
-                    c.is_fleeing  = false;
-                    c.is_looted   = false;
-                    c.wait_time   = 0;
-                    c.position    = JPH::RVec3(static_cast<double>(localRng() % 120), 0.0, static_cast<double>(localRng() % 120));
-                    wps[i]        = c.position;
-                }
-
-                // Steer toward the current waypoint (sim time factor 2.0x).
-                JPH::RVec3   delta  = wps[i] - c.position;
-                const double dist2  = delta.LengthSq();
-                if (dist2 < 4.0) { // arrived: pick a new waypoint
-                    wps[i] = JPH::RVec3(static_cast<double>(localRng() % 120), 0.0, static_cast<double>(localRng() % 120));
-                    continue;
-                }
-                const double dist = std::sqrt(dist2);
-                const double step = static_cast<double>(c.travel_speed) * 0.033333;
-                if (step >= dist) {
-                    c.position = wps[i];
-                } else {
-                    c.position += delta * (step / dist);
-                }
-            }
-        });
-
-        scene.alife->Update(engine, 0.016666f, JPH::RVec3(engine.GetCamera().position));
-    }
+    ZHLN::Perf::ALife_DriveFrame(engine);
 #endif
 }
 
@@ -1237,6 +1146,18 @@ struct PerformanceTestSuite {
                 return std::unexpected(PerfTestError::SceneBuildFailed);
             }
 
+#if defined(ZHLN_PERF_WITH_EXTRAS)
+            // 2b. ALife extras: creature population + simulator.
+            const bool alifeOK = ZHLN::Perf::ALife_Init(*engine, cfg.alifeCount);
+            const auto checkAlife = ZHLN::Test::AssertTrue(alifeOK);
+            if (!checkAlife) {
+                return std::unexpected(PerfTestError::SceneBuildFailed);
+            }
+            ZHLN::Println("    [Perf] ALife population ready: {} creatures (4 factions, 2 hostile pairs).", cfg.alifeCount);
+#else
+            ZHLN::Println("    [Perf] NOTE: ZHLN_BUILD_EXTRAS off — ALife population skipped.");
+#endif
+
             auto& rc = engine->GetRenderContext();
             ZHLN::Println("    [Perf] Scene ready: {} dynamic crates | {} static | {} point lights | {} particle emitters ({} each) | {} decals",
                           cfg.dynamicBoxes, cfg.staticBoxes, cfg.pointLights, cfg.particleEmits, cfg.particlesEach, cfg.decals);
@@ -1357,7 +1278,7 @@ struct PerformanceTestSuite {
 
             // 7. Report.
 #if defined(ZHLN_PERF_WITH_EXTRAS)
-            const uint64_t alifeEvents = (scene.alife != nullptr) ? scene.alifeEventCounter.load(std::memory_order_relaxed) : 0;
+            const uint64_t alifeEvents = ZHLN::Perf::ALife_EventCount();
 #else
             const uint64_t alifeEvents = 0;
 #endif
