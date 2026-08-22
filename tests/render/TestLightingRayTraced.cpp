@@ -77,7 +77,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <expected>
 #include <fstream>
 #include <memory>
@@ -569,112 +568,6 @@ struct LightingRTTestSuite {
             (void) SavePNG(PngPathOf(path), img);
         }
         return img;
-    }
-
-    /// Test-only GPU state dump: what the renderer ACTUALLY wrote for the
-    /// frame just captured. Prints, per frame:
-    ///   * both parity light slots (range/type/positionView of each light),
-    ///   * the cluster cells whose light list references the point light
-    ///     (light index 1), aggregated by (x,y,z) plus the exact strip cells
-    ///     (columns 0-4, row 5).
-    /// This is what pins whether the cluster grid itself flips, or the light
-    /// buffers flip, per frame.
-    static void DumpLightState(ZHLN::RenderContext& rc, uint64_t frame) {
-        std::array<ZHLN::GPULight, 128> slot0 {};
-        std::array<ZHLN::GPULight, 128> slot1 {};
-        rc.DebugCopyLightBuffers(slot0, slot1);
-
-        ZHLN::Println(
-            "      [gpu:{}] lights: s0[{}] range={} type={} pos=({:.2f},{:.2f},{:.2f}) posView=({:.4f},{:.4f},{:.4f}) | s0[{}] range={} type={} "
-            "pos=({:.2f},{:.2f},{:.2f}) posView=({:.4f},{:.4f},{:.4f}) | s1[{}] posView=({:.4f},{:.4f},{:.4f})",
-            frame, 0u, slot0[0].range, static_cast<uint32_t>(slot0[0].type), slot0[0].position[0], slot0[0].position[1], slot0[0].position[2],
-            slot0[0].positionView[0], slot0[0].positionView[1], slot0[0].positionView[2], 1u, slot0[1].range, static_cast<uint32_t>(slot0[1].type),
-            slot0[1].position[0], slot0[1].position[1], slot0[1].position[2], slot0[1].positionView[0], slot0[1].positionView[1],
-            slot0[1].positionView[2], 1u, slot1[1].positionView[0], slot1[1].positionView[1], slot1[1].positionView[2]
-        );
-        ZHLN::Println(
-            "      [gpu:{}] slots identical (light data): {}",
-            frame, std::memcmp(slot0.data(), slot1.data(), sizeof(slot0)) == 0 ? 1 : 0
-        );
-
-        auto snap = rc.DebugReadClusterSnapshot();
-        if (!snap) {
-            ZHLN::Println("      [gpu:{}] cluster readback failed", frame);
-            return;
-        }
-
-        // Hashes: if gridHash changes while boundsHash and the light slots are
-        // constant, the culling shader produced different output from the same
-        // input (dispatch/descriptor nondeterminism). If boundsHash changes,
-        // the shared bounds buffer is being rewritten per frame. If listHash
-        // changes while gridHash is constant, only the ordering/orphaned tail
-        // differs (harmless) -- the grid count is what governs inclusion.
-        ZHLN::Println(
-            "      [gpu:{}] cluster hashes: grid={:016x} list={:016x} bounds={:016x} counter={:016x} | lightCount={} counterVal={} gridSum={} "
-            "cells={} maxCellCount={} maxOffset={} truncated={}",
-            frame, snap->gridHash, snap->listHash, snap->boundsHash, snap->counterHash, snap->lightCount, snap->counterValue, snap->gridSum,
-            snap->cellsWithAny, snap->maxCellCount, snap->maxOffset, snap->counterTruncated ? 1 : 0
-        );
-
-        uint32_t cellsWithPl = 0;
-        uint32_t stripCells   = 0;
-        uint32_t minX = 99, maxX = 0, minY = 99, maxY = 0, minZ = 99, maxZ = 0;
-        for (const auto& c: snap->cells) {
-            const uint32_t x = c.index % 16u;
-            const uint32_t y = (c.index / 16u) % 9u;
-            const uint32_t z = c.index / 144u;
-            bool           hasPl = false;
-            for (uint32_t k = 0; k < std::min(c.count, 4u); ++k) {
-                if (c.lightIndices[k] == 1u) {
-                    hasPl = true;
-                }
-            }
-            if (!hasPl) {
-                continue;
-            }
-            ++cellsWithPl;
-            minX = std::min(minX, x);
-            maxX = std::max(maxX, x);
-            minY = std::min(minY, y);
-            maxY = std::max(maxY, y);
-            minZ = std::min(minZ, z);
-            maxZ = std::max(maxZ, z);
-            if (x <= 4u && y == 5u) {
-                ++stripCells;
-            }
-        }
-        ZHLN::Println(
-            "      [gpu:{}] cluster cells with point light: {} (x{}-{} y{}-{} z{}-{}), strip stripCells={}", frame, cellsWithPl, minX, maxX, minY,
-            maxY, minZ, maxZ, stripCells
-        );
-
-        // The z=12 strip row explicitly (always present, even when count=0):
-        // this is the row that flips between 60/65 and where the 221184-entry
-        // index-list clamp would land.
-        ZHLN::Println(
-            "      [gpu:{}] strip z=12: x0(c={} o={}) x1(c={} o={}) x2(c={} o={}) x3(c={} o={}) x4(c={} o={})",
-            frame, snap->stripCells[12][0].count, snap->stripCells[12][0].offset, snap->stripCells[12][1].count,
-            snap->stripCells[12][1].offset, snap->stripCells[12][2].count, snap->stripCells[12][2].offset,
-            snap->stripCells[12][3].count, snap->stripCells[12][3].offset, snap->stripCells[12][4].count,
-            snap->stripCells[12][4].offset
-        );
-
-        // Optional per-cell dump (env-gated): every strip cell (x 0-4, y=5)
-        // with its count/offset/indices, so the exact z-planes that flip are
-        // visible. ZHLN_TEST_DUMP_CELLS=1
-        if (std::getenv("ZHLN_TEST_DUMP_CELLS") != nullptr) {
-            for (const auto& c: snap->cells) {
-                const uint32_t x = c.index % 16u;
-                const uint32_t y = (c.index / 16u) % 9u;
-                if (x <= 4u && y == 5u) {
-                    ZHLN::Println(
-                        "        cell x={} y={} z={} idx={:04d} count={} off={} list=[{} {} {} {}]",
-                        x, y, c.index / 144u, c.index, c.count, c.offset, c.lightIndices[0], c.lightIndices[1], c.lightIndices[2],
-                        c.lightIndices[3]
-                    );
-                }
-            }
-        }
     }
 
     /// Runs `sceneFn` after `warmupFrames` (to warm Hi-Z history, TLAS, cluster
@@ -1201,10 +1094,6 @@ struct LightingRTTestSuite {
                     stableLuma.push_back(m.meanLuma);
                     stableLit.push_back(static_cast<double>(m.lit));
 
-                    // Live GPU readback: is the cluster grid or the light data
-                    // what changes between these frames?
-                    DumpLightState(eng.GetRenderContext(), eng.GetCurrentFrame());
-
                     TickFrames(eng, 1);
                 }
 
@@ -1416,10 +1305,6 @@ struct LightingRTTestSuite {
                         return false;
                     }
                     counts.push_back(static_cast<double>(MeasureImage(frames[r]).red));
-
-                    // Live GPU readback: is the cluster grid or the light data
-                    // what changes between these frames?
-                    DumpLightState(eng.GetRenderContext(), eng.GetCurrentFrame());
 
                     TickFrames(eng, 1);
                 }

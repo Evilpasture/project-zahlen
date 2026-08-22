@@ -900,9 +900,7 @@ std::expected<void, Error> RenderContext::Impl::InitShadowResources() {
         //    VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT.
         .and_then([&]() {
             return CreateDoubleBuffered(
-                       allocator, sizeof(FrameUniforms),
-                       // TRANSFER_SRC_BIT: test-only diagnostics read the UBO back (DebugReadClusterSnapshot).
-                       VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                       allocator, sizeof(FrameUniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                        VMA_MEMORY_USAGE_CPU_TO_GPU
             )
                 .transform_error([](auto err) -> Error { return err; });
@@ -1007,9 +1005,8 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
             constexpr auto numClusters = static_cast<size_t>(16 * 9 * 24);
 
             return Vk::Buffer::Create(
-                        allocator.Get(), sizeof(struct ClusterBounds) * numClusters,
-                       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-                           VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                       allocator.Get(), sizeof(struct ClusterBounds) * numClusters,
+                       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                        VMA_MEMORY_USAGE_GPU_ONLY
             )
                 .transform_error([](VkResult res) -> Error { return res; })
@@ -1031,9 +1028,7 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
                         return Vk::Buffer::Create(
                                    allocator.Get(), sizeof(ClusterVolume) * numClusters,
                                    // VK_EXT_descriptor_heap: heap buffer descriptors need device addresses.
-                                   // TRANSFER_SRC_BIT: test-only diagnostics read these back (DebugReadClusterSnapshot).
-                                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-                                       VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                                    VMA_MEMORY_USAGE_GPU_ONLY
                         )
                             .transform_error([](VkResult res) -> Error { return res; })
@@ -1041,9 +1036,7 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
                                 frames.clusterGridBuffers[i] = std::forward<decltype(cgb)>(cgb);
                                 return Vk::Buffer::Create(
                                            allocator.Get(), sizeof(uint32_t) * numClusters * 64,
-                                           // TRANSFER_SRC_BIT: test-only diagnostics read these back.
-                                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                                           VMA_MEMORY_USAGE_GPU_ONLY
+                                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY
                                 )
                                     .transform_error([](VkResult res) -> Error { return res; });
                             })
@@ -1051,8 +1044,7 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
                                 frames.lightIndexListBuffers[i] = std::forward<decltype(lsb)>(lsb);
                                 return Vk::Buffer::Create(
                                            allocator.Get(), sizeof(uint32_t),
-                                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-                                               VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                                            VMA_MEMORY_USAGE_GPU_ONLY
                                 )
                                     .transform_error([](VkResult res) -> Error { return res; });

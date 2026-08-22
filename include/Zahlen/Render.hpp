@@ -11,11 +11,9 @@
 #include <Zahlen/Types.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/render/RenderCode.hpp>
-#include <array>
 #include <expected>
 #include <memory>
 #include <optional>
-#include <vector>
 
 namespace ZHLN {
 
@@ -238,46 +236,6 @@ class ZHLN_API RenderContext {
     TextureHandle CreateProceduralTexture(std::string_view name, uint32_t width, uint32_t height, bool isSRGB, const uint32_t* pixels);
 
     [[nodiscard]] std::expected<void, Error> CaptureScreenshotPPM(std::string_view outputPath) noexcept;
-
-    // --- Test-only GPU state diagnostics ------------------------------------
-    // Read back what the renderer actually wrote, for pinpointing per-frame
-    // flicker in the clustered lighting path. These are deliberately separate
-    // from the render API: they synchronise the device (vkDeviceWaitIdle) and
-    // are intended for tests/tooling, never for the frame loop.
-    struct DebugClusterCell {
-        uint32_t              index = 0;
-        uint32_t              count = 0;
-        uint32_t              offset = 0;
-        std::array<uint32_t, 4> lightIndices {};
-    };
-
-    struct DebugClusterSnapshot {
-        uint64_t                          gridHash = 0;
-        uint64_t                          listHash = 0;
-        uint64_t                          boundsHash = 0;
-        uint64_t                          counterHash = 0;
-        uint32_t                          counterValue = 0;  // raw final counter (pre-clamp)
-        uint32_t                          gridSum = 0;       // sum of count over ALL cells (recomputed from grid)
-        uint32_t                          cellsWithAny = 0;  // cells with count > 0
-        uint32_t                          maxCellCount = 0;  // largest single-cell count (should be <= 2 here)
-        uint32_t                          maxOffset = 0;     // largest offset seen in ANY grid cell
-        uint32_t                          lightCount = 0;    // frame.lightCount the shader saw (from the UBO)
-        bool                              counterTruncated = false; // any cell with offset >= 221184
-        std::vector<DebugClusterCell>     cells;             // every cell with count > 0
-        // Always-present view of the strip cells (x 0..4, y=5, z 0..12) so a
-        // cell that flips to count=0 is still visible with its offset/count.
-        std::array<std::array<DebugClusterCell, 5>, 13> stripCells {};
-    };
-
-    /// Full cluster snapshot (grid + index list + shared bounds + counter) of
-    /// the frame most recently submitted, with hashes so consecutive frames
-    /// can be compared without dumping megabytes. `cells` contains every cell
-    /// with count > 0; cell index is (x + y*16 + z*144).
-    [[nodiscard]] std::expected<DebugClusterSnapshot, Error> DebugReadClusterSnapshot() noexcept;
-
-    /// Copies both parity slots of the light storage buffer (host-visible),
-    /// for verifying that every consumer sees identical light data.
-    void DebugCopyLightBuffers(std::array<GPULight, 128>& slot0, std::array<GPULight, 128>& slot1) noexcept;
 
     // --- OOP Idiomatic State & Command Submission APIs ---
     void SetMatrices(const JPH::Mat44& viewProj, const JPH::Mat44& unjitteredViewProj) noexcept;

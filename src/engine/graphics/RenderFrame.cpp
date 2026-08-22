@@ -537,17 +537,9 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
             // Submit directly to the graphics queue with timeline semaphore sync.
             // Wait on the compute timeline (same as the windowed path) and signal
             // the in-flight fence so BeginFrame can wait on it next frame.
-            //
-            // The wait must cover ALL graphics stages: the graphics command
-            // buffer contains its own compute dispatches (Hi-Z generation, GPU
-            // two-phase culling) and vertex work, and a FRAGMENT_SHADER_BIT-only
-            // wait lets those stages race ahead of the compute queue's cluster
-            // culling / volumetric writes, which is what made a static light
-            // alternate between in-list and out-of-list on the frames the
-            // lighting pass sampled (light flicker at the range boundary).
             auto submit_res = Vk::QueueSubmit(
                 _impl->ctx.GraphicsQueue(), static_cast<VkCommandBuffer>(cmd), _impl->sync[_impl->frame_index].compute_timeline, computeSignalValue,
-                VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE, _impl->sync[_impl->frame_index].in_flight
+                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE, _impl->sync[_impl->frame_index].in_flight
             );
 
             if (!submit_res) {

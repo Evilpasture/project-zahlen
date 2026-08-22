@@ -122,11 +122,9 @@ struct PassFactory {
             // buffers, not graph resources, so CompileTimeFrameGraph inserts no
             // automatic barrier between this pass and the later compute passes
             // that READ them (volumetric light injection) in the same
-            // submission. Without this barrier those reads could observe the
-            // previous frame's list, flipping marginal range-boundary cells
-            // between "light included" and "light excluded" from frame to
-            // frame. Cross-queue fragment reads are additionally covered by
-            // the graphics wait now being ALL_COMMANDS.
+            // submission. A compute->compute write/read dependency is required
+            // here so those passes see this frame's lists, not the previous
+            // frame's.
             Vk::MemoryBarrier(
                 c, {.src_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                     .src_access = VK_ACCESS_2_SHADER_WRITE_BIT,
