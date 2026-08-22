@@ -366,7 +366,7 @@ void WriteRegionCrop(const std::string& path, const RgbImage& img, const Changed
 
     // PNG twin (browser/mail friendly) for attaching to bug reports.
     RgbImage pngCrop {.width = w, .height = h, .rgb = crop};
-    SavePNG(PngPathOf(path), pngCrop);
+    (void) SavePNG(PngPathOf(path), pngCrop);
 }
 
 /// Writes an amplified absolute-difference image so the parity region is
@@ -390,7 +390,7 @@ void WriteAmplifiedDiff(const std::string& path, const RgbImage& a, const RgbIma
 
     // PNG twin.
     RgbImage pngDiff {.width = a.width, .height = a.height, .rgb = amplified};
-    SavePNG(PngPathOf(path), pngDiff);
+    (void) SavePNG(PngPathOf(path), pngDiff);
 }
 
 [[nodiscard]] FrameDiff CompareFrames(const RgbImage& a, const RgbImage& b) {
@@ -576,7 +576,7 @@ struct LightingRTTestSuite {
         }
         const RgbImage img = LoadPPM(path);
         if (img.Valid()) {
-            SavePNG(PngPathOf(path), img);
+            (void) SavePNG(PngPathOf(path), img);
         }
         return img;
     }
@@ -1303,11 +1303,13 @@ struct LightingRTTestSuite {
 
             uint32_t validationRaised = 0;
 
-            const auto stable = RunStableScene(*engine, 8, "point_light_static_reference_no_history", [](ZHLN::Engine& eng) -> bool {
-                constexpr uint32_t kStableFrames = 8;
-                std::array<RgbImage, kStableFrames> frames {};
-                std::vector<double>                 counts;
-                for (uint32_t r = 0; r < kStableFrames; ++r) {
+            const auto stable = RunStableScene(
+                *engine, 8, "point_light_static_reference_no_history",
+                [&](ZHLN::Engine& eng) -> bool {
+                    constexpr uint32_t kStableFrames = 8;
+                    std::array<RgbImage, kStableFrames> frames {};
+                    std::vector<double>                 counts;
+                    for (uint32_t r = 0; r < kStableFrames; ++r) {
                     frames[r] = Capture(eng, "headless_lighting_rt_ref_stable_" + std::to_string(r) + ".ppm");
                     auto checkFrame = ZHLN::Test::AssertTrue(frames[r].Valid());
                     if (!checkFrame) {
@@ -1358,7 +1360,9 @@ struct LightingRTTestSuite {
                 }
 
                 return ZHLN::Test::ExpectTrue(Mean(counts) > 16.0);
-            }, &validationRaised);
+                },
+                &validationRaised
+            );
 
             if (stable == StableRunResult::AssertionsFailed) {
                 return std::unexpected(LightingRTTestError::LightCullingPopDetected);
