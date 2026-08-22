@@ -383,7 +383,7 @@ struct LightingRTTestSuite {
     ///    assertions themselves failed; that is reported without a retry so real
     ///    regressions are never masked by the recovery logic.
     template <typename SceneFn>
-    static [[nodiscard]] StableRunResult RunStableScene(
+    [[nodiscard]] static StableRunResult RunStableScene(
         ZHLN::Engine& engine, uint32_t warmupFrames, const char* label, SceneFn&& sceneFn, uint32_t* outValidationDelta = nullptr
     ) {
         auto&        ctx         = ZHLN::Test::GetThreadLocalContext();
