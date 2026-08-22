@@ -314,7 +314,7 @@ struct LightingRTTestSuite {
     /// call alone gets overwritten, and TAA jitter would dominate the
     /// frame-to-frame comparison.
     static void DisableTAA(ZHLN::Engine& engine) {
-        auto& reg = engine->GetRegistry();
+        auto& reg = engine.GetRegistry();
         for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::AASettingsComponent>()) {
             reg.Patch<ZHLN::Components::AASettingsComponent>(e, [](auto& aa) {
                 aa.state.mode        = ZHLN::AAMode::None;
