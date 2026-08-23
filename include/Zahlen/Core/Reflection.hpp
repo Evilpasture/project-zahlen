@@ -69,7 +69,7 @@ namespace detail {
 template <auto... vals>
 struct ReplicatorType {
     template <typename F>
-    constexpr void operator>>([[maybe_unused]] F body) const {
+    inline void operator>>([[maybe_unused]] F body) const {
         (body.template operator()<vals>(), ...);
     }
 };
