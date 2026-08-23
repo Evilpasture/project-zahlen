@@ -69,7 +69,7 @@ namespace detail {
 template <auto... vals>
 struct ReplicatorType {
     template <typename F>
-    inline void operator>>([[maybe_unused]] F body) const {
+    constexpr void operator>>([[maybe_unused]] F body) const {
         (body.template operator()<vals>(), ...);
     }
 };
@@ -704,7 +704,7 @@ consteval auto GetAnnotation() -> std::optional<Tag> {
 
 template <typename Tag, typename E>
     requires std::is_enum_v<E>
-inline auto GetEnumeratorAnnotation(E value) -> std::optional<Tag> {
+constexpr auto GetEnumeratorAnnotation(E value) -> std::optional<Tag> {
     std::optional<Tag> result = std::nullopt;
     [:Expand(detail::EnumeratorsOf<E>()):] >> [&]<auto enumerator>() -> auto {
         auto annotation = GetAnnotation<Tag, enumerator>();
@@ -1101,7 +1101,7 @@ auto ToDebugString(const T& t) -> std::string {
 
 template <typename E>
     requires std::is_enum_v<E>
-inline auto EnumToMessage(E value) -> std::string_view {
+constexpr auto EnumToMessage(E value) -> std::string_view {
     if (auto desc = GetEnumeratorAnnotation<MetaDescription>(value)) {
         return desc->text;
     }
