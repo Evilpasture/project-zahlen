@@ -1030,8 +1030,8 @@ ZHLN_Swapchain ZHLN_CreateSwapchain(const ZHLN_SwapchainDesc* const restrict des
             .base_array_layer = 0,
         };
 
-        swapchain.views[i] = ZHLN_CreateImageView(desc->device->handle, &view_desc);
-        if (swapchain.views[i] == VK_NULL_HANDLE) {
+        if (ZHLN_CreateImageView(desc->device->handle, &view_desc, &swapchain.views[i]) != VK_SUCCESS) {
+            swapchain.views[i] = VK_NULL_HANDLE;
             // Destroy already-created views before bailing
             for (uint32_t j = 0; j < i; ++j) {
                 ZHLN_DestroyImageView(desc->device->handle, swapchain.views[j]);
@@ -1999,7 +1999,7 @@ void ZHLN_DestroySemaphore(const VkDevice device, const VkSemaphore semaphore) {
     }
 }
 
-VkImageView ZHLN_CreateImageView(const VkDevice device, const ZHLN_ImageViewDesc* const restrict desc) {
+VkResult ZHLN_CreateImageView(const VkDevice device, const ZHLN_ImageViewDesc* const restrict desc, VkImageView* const restrict out_view) {
     const VkImageViewCreateInfo info = {
         .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
         .image            = desc->image,
@@ -2014,11 +2014,7 @@ VkImageView ZHLN_CreateImageView(const VkDevice device, const ZHLN_ImageViewDesc
         },
     };
 
-    VkImageView view = VK_NULL_HANDLE;
-    if (vkCreateImageView(device, &info, nullptr, &view) != VK_SUCCESS) {
-        return VK_NULL_HANDLE;
-    }
-    return view;
+    return vkCreateImageView(device, &info, nullptr, out_view);
 }
 
 void ZHLN_DestroyImageView(const VkDevice device, const VkImageView view) {

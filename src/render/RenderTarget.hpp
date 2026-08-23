@@ -37,7 +37,8 @@ struct RenderTarget {
         uint32_t           mipLevels   = 1;
     };
 
-    [[nodiscard]] static auto Create(Allocator& allocator, const Context& ctx, VkExtent2D extent, RenderTargetDescriptor desc) -> RenderTarget;
+    [[nodiscard]] static auto Create(Allocator& allocator, const Context& ctx, VkExtent2D extent, RenderTargetDescriptor desc)
+        -> std::expected<RenderTarget, VkResult>;
 
     [[nodiscard]] auto Valid() const noexcept -> bool;
     explicit           operator bool() const noexcept;
@@ -65,7 +66,8 @@ struct RenderTarget3D {
         return Valid();
     }
 
-    [[nodiscard]] static auto Create(Allocator& allocator, const Context& ctx, VkExtent3D extent, VkImageUsageFlags usage) -> RenderTarget3D;
+    [[nodiscard]] static auto Create(Allocator& allocator, const Context& ctx, VkExtent3D extent, VkImageUsageFlags usage)
+        -> std::expected<RenderTarget3D, VkResult>;
 };
 
 template <VkFormat F>
@@ -88,7 +90,8 @@ struct MipmappedRenderTarget {
 
     ~MipmappedRenderTarget() = default;
 
-    [[nodiscard]] static auto Create(Allocator& allocator, const Context& ctx, VkExtent2D extent, VkImageUsageFlags usage) -> MipmappedRenderTarget {
+    [[nodiscard]] static auto Create(Allocator& allocator, const Context& ctx, VkExtent2D extent, VkImageUsageFlags usage)
+        -> std::expected<MipmappedRenderTarget, VkResult> {
         MipmappedRenderTarget target;
         target.extent    = extent;
         target.mipLevels = std::bit_width(std::max(extent.width, extent.height));
@@ -112,18 +115,27 @@ struct MipmappedRenderTarget {
         };
 
         auto img_res = Image::Create(allocator.Get(), info, VMA_MEMORY_USAGE_GPU_ONLY);
-        if (img_res.has_value()) {
-            target.image        = std::move(img_res.value());
-            target.fullView     = CreateView<F>(ctx.Device(), target.image.Handle(), GetFormatAspect(F), target.mipLevels);
-            target.fullViewInfo = MakeViewCreateInfo2D(target.image.Handle(), F, target.mipLevels, GetFormatAspect(F));
-            target.mipViews.reserve(target.mipLevels);
-            target.mipViewInfos.reserve(target.mipLevels);
-            for (uint32_t m = 0; m < target.mipLevels; ++m) {
-                target.mipViews.push_back(CreateViewSingleMip<F>(ctx.Device(), target.image.Handle(), m, GetFormatAspect(F)));
-                VkImageViewCreateInfo mipInfo         = MakeViewCreateInfo2D(target.image.Handle(), F, 1, GetFormatAspect(F));
-                mipInfo.subresourceRange.baseMipLevel = m;
-                target.mipViewInfos.push_back(mipInfo);
+        if (!img_res.has_value()) {
+            return std::unexpected(img_res.error());
+        }
+        target.image = std::move(img_res.value());
+
+        auto view_res = CreateView<F>(ctx.Device(), target.image.Handle(), GetFormatAspect(F), target.mipLevels);
+        if (!view_res.has_value()) {
+            return std::unexpected(view_res.error());
+        }
+        target.fullView     = std::move(*view_res);
+        target.fullViewInfo = MakeViewCreateInfo2D(target.image.Handle(), F, target.mipLevels, GetFormatAspect(F));
+        target.mipViews.reserve(target.mipLevels);
+        target.mipViewInfos.reserve(target.mipLevels);
+        for (uint32_t m = 0; m < target.mipLevels; ++m) {
+            auto mip_res = CreateViewSingleMip<F>(ctx.Device(), target.image.Handle(), m, GetFormatAspect(F));
+            if (mip_res.has_value()) {
+                target.mipViews.push_back(std::move(*mip_res));
             }
+            VkImageViewCreateInfo mipInfo         = MakeViewCreateInfo2D(target.image.Handle(), F, 1, GetFormatAspect(F));
+            mipInfo.subresourceRange.baseMipLevel = m;
+            target.mipViewInfos.push_back(mipInfo);
         }
         return target;
     }

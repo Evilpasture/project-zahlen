@@ -790,6 +790,7 @@ endfunction()
 zahlen_enable_reflection(zahlen_render)
 zahlen_enable_reflection(zahlen_engine)
 zahlen_enable_reflection(zahlen_gltf)
+zahlen_enable_reflection(zahlen_audio)
 zahlen_enable_reflection(zahlen)
 zahlen_enable_reflection(zcook)
 

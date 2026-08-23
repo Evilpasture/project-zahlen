@@ -13,7 +13,6 @@ std::expected<void, Error> RenderContext::Impl::BuildProceduralBakePipeline() {
     if (!proceduralBakeDescLayout.Build(
             ctx.Device(), Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::ProceduralBakeComp).vertex, "CSMain"), VK_SHADER_STAGE_COMPUTE_BIT
         )) {
-        ZHLN::Log("[Shader] Failed to reflect procedural bake layout!");
         return std::unexpected(RenderInitError::PipelineCreationFailed);
     }
     // VK_EXT_descriptor_heap: the bake output image is written into a static
@@ -43,7 +42,6 @@ std::expected<void, Error> RenderContext::Impl::BuildProceduralBakePipeline() {
 
     auto build_res = proceduralBakePass.BuildHeapVariants(ctx.Device(), shaderDesc, specInfos, bakeHeapBindings.GetInfo());
     if (!build_res) {
-        ZHLN::Log("[Shader] Failed to build specialized Procedural Bake Compute variants: {}", build_res.error().Message());
         return std::unexpected(build_res.error());
     }
 
@@ -79,7 +77,11 @@ std::expected<uint32_t, Error>
     return Vk::Image::Create(allocator.Get(), imgInfo, VMA_MEMORY_USAGE_GPU_ONLY)
         .transform_error([](VkResult res) -> Error { return res; })
         .and_then([&, device, width, height, variantIdx, scale, randomness, distortion](auto&& gpuImage) -> std::expected<uint32_t, Error> {
-            auto writeView = Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 1);
+            auto view_res = Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 1);
+            if (!view_res) {
+                return std::unexpected(Error(view_res.error()));
+            }
+            auto writeView = std::move(*view_res);
 
             // VK_EXT_descriptor_heap: write the bake output's storage-image
             // descriptor into the static heap slot.

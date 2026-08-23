@@ -326,26 +326,17 @@ Engine::Engine(const EngineConfig& cfg): _impl(nullptr) {
     }
 }
 
-void Engine::HandleDeviceLost() noexcept {
-    ZHLN::Log("[Engine] CRITICAL: Vulkan Device Lost detected! Initiating hardware hot-rebuild...");
+auto Engine::HandleDeviceLost() noexcept -> std::expected<void, Error> {
     _impl->renderContext->OnDeviceLost();
-
-    // 1. Reset and Recreate Render Context (New Vulkan Device)
     _impl->renderContext.reset();
 
     auto rc_res = RenderContext::Create(*_impl->window, _impl->config.render);
     if (!rc_res) {
-        ZHLN::Panic("FATAL: Failed to recreate RenderContext during hot-rebuild: {}", rc_res.error().Message());
+        return std::unexpected(rc_res.error());
     }
     _impl->renderContext = std::move(rc_res.value());
-
-    // 2. Perform True Rebinding Recovery (Zero physics/registry/scripting resets)
     CreativeWorksFactory::RebuildVulkanResources(*_impl->renderContext, *_impl->assetManager, _impl->registry);
-
-    ZHLN::Log(
-        "[Engine] Hardware hot-rebuild completed successfully. All visual assets rebound to "
-        "new GPU."
-    );
+    return {};
 }
 
 Engine::Engine(const EngineConfig& cfg, bool& outSuccess): _impl(nullptr) {
@@ -359,7 +350,6 @@ Engine::Engine(const EngineConfig& cfg, bool& outSuccess): _impl(nullptr) {
 auto Engine::Create(const EngineConfig& cfg) -> std::expected<std::unique_ptr<Engine>, Error> {
     auto engine = std::unique_ptr<Engine>(new (std::nothrow) Engine());
     if (!engine) {
-        ZHLN::Log("Failed to allocate memory for the Engine context.");
         return std::unexpected(EngineInitError::UnknownError);
     }
 
@@ -400,7 +390,6 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
                 ZHLN::Log("GLFW failed to initialize. Falling back to native TTY Display Mode.");
                 use_tty = true;
             } else {
-                ZHLN::Log("GLFW failed to initialize, and native KMS/TTY display mode is not supported on this platform.");
                 return std::unexpected(EngineInitError::WindowCreationFailed);
             }
         }
@@ -484,7 +473,6 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
     _impl->registry.Create(Components::InputStateComponent {});
 
     if (use_tty && _impl->window->GetTTYContext() == nullptr) {
-        ZHLN::Log("[Engine] FATAL: TTY Input initialization failed (libseat session rejected).");
         return std::unexpected(EngineInitError::TTYInitializationFailed);
     }
 
@@ -501,7 +489,6 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
 
     auto rc_res = RenderContext::Create(*_impl->window, cfg.render);
     if (!rc_res) {
-        ZHLN::Log("RenderContext initialization failed: {}", rc_res.error().Message());
         return std::unexpected(rc_res.error());
     }
     _impl->renderContext = std::move(rc_res.value());
@@ -599,7 +586,7 @@ auto Engine::BeginFrame(bool& outDeviceLost) noexcept -> bool {
     if (!res) {
         if (res.error() == RenderFrameResult::DeviceLost) {
             outDeviceLost = true;
-            HandleDeviceLost();
+            { [[maybe_unused]] auto _ = HandleDeviceLost(); }
         }
         return false;
     }
@@ -612,7 +599,7 @@ auto Engine::EndFrame(bool& outDeviceLost) noexcept -> bool {
     if (!res) {
         if (res.error() == RenderFrameResult::DeviceLost) {
             outDeviceLost = true;
-            HandleDeviceLost();
+            { [[maybe_unused]] auto _ = HandleDeviceLost(); }
         }
         return false;
     }
@@ -802,7 +789,7 @@ auto Engine::Tick(float dt, GameplayDriver driver) -> GameplayStatus {
     auto render_res = RenderSystem::Update(*this, dt);
     if (!render_res) {
         if (render_res.error().Is<RenderFrameResult>() && render_res.error().As<RenderFrameResult>() == RenderFrameResult::DeviceLost) {
-            HandleDeviceLost();
+{ [[maybe_unused]] auto _ = HandleDeviceLost(); }
         }
     }
 

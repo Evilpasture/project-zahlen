@@ -180,10 +180,7 @@ auto RenderContext::Impl::CompileShadowPipeline(VkDevice device, const Resource:
                 .DepthFormat(VK_FORMAT_D32_SFLOAT)
                 .CullNone()
                 .Build(device)
-                .transform_error([](auto err) -> Error {
-                    ZHLN::Log("Shadow pipeline compilation error: {} (Category: {})", err.Message(), err.Category());
-                    return RenderInitError::PipelineCreationFailed;
-                })
+                .transform_error([](auto) -> Error { return RenderInitError::PipelineCreationFailed; })
                 .transform([&](auto&& pipeline) -> auto { shadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
         })
         .and_then([&, device]() -> std::expected<void, Error> {
@@ -239,10 +236,7 @@ auto RenderContext::Impl::CompilePunctualShadowPipeline(VkDevice device, const R
                 .ViewMask(0x3F)
                 .CullNone()
                 .Build(device)
-                .transform_error([](auto err) -> Error {
-                    ZHLN::Log("Punctual shadow pipeline compilation error: {} (Category: {})", err.Message(), err.Category());
-                    return RenderInitError::PipelineCreationFailed;
-                })
+                .transform_error([](auto) -> Error { return RenderInitError::PipelineCreationFailed; })
                 .transform([&](auto&& pipeline) -> auto { punctualShadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
         });
 }
@@ -385,10 +379,7 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> std::expected<Ma
     auto* impl = _impl.get();
 
     return Vk::ShaderStages::Create(impl->ctx.Device(), v_desc, f_desc)
-        .transform_error([](auto err) -> Error {
-            ZHLN::Log("Material shader compilation error: {} (Category: {})", err.Message(), err.Category());
-            return MaterialCreationError::ShaderCompilationFailed;
-        })
+        .transform_error([](auto) -> Error { return MaterialCreationError::ShaderCompilationFailed; })
         .and_then([impl, &desc, v_desc, f_desc](auto&& shaders) -> std::expected<Material, Error> {
             // Register vertex & fragment shaders with GPU diagnostics
             impl->gpuDiagnostics.RegisterShader(v_desc, "VSMain");
@@ -425,10 +416,7 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> std::expected<Ma
             }
 
             return pipeline.Build(impl->ctx.Device())
-                .transform_error([](auto err) -> Error {
-                    ZHLN::Log("Material pipeline creation error: {} (Category: {})", err.Message(), err.Category());
-                    return MaterialCreationError::PipelineCreationFailed;
-                })
+                .transform_error([](auto) -> Error { return MaterialCreationError::PipelineCreationFailed; })
                 .transform([impl, layout, &desc](auto&& compiledPipeline) -> auto {
                     Vk::Pipeline meshPipeline = BuildMeshVariant(impl, desc);
 
@@ -547,8 +535,13 @@ auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width
                 Vk::GenerateMipmaps(cmd, gpuImage.Handle(), width, height);
             });
 
-            auto gpuView = isSRGB ? Vk::CreateView<VK_FORMAT_R8G8B8A8_SRGB>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, mipLevels) :
-                                    Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, mipLevels);
+            auto view_res = isSRGB
+                ? Vk::CreateView<VK_FORMAT_R8G8B8A8_SRGB>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, mipLevels)
+                : Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, mipLevels);
+            if (!view_res) {
+                return std::unexpected(Error(view_res.error()));
+            }
+            auto gpuView = std::move(*view_res);
 
             uint32_t index = nextTextureIndex++;
             WriteTextureSlotToHeap(index, gpuImage.Handle(), format, mipLevels, false);
@@ -586,7 +579,11 @@ auto RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceData,
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, gpuImage.Handle());
             });
 
-            auto gpuView = Vk::CreateViewCube<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), 1);
+            auto cube_view_res = Vk::CreateViewCube<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), 1);
+            if (!cube_view_res) {
+                return std::unexpected(Error(cube_view_res.error()));
+            }
+            auto gpuView = std::move(*cube_view_res);
 
             uint32_t index = nextTextureIndex++;
             WriteTextureSlotToHeap(index, gpuImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, true);
@@ -799,28 +796,42 @@ auto RenderContext::SetShadowResolution(uint32_t resolution) -> std::expected<vo
     auto* device = impl->ctx.Device();
 
     return Vk::WaitIdle(device)
-        .transform_error([](auto err) -> Error {
-            ZHLN::Log("SetShadowResolution WaitIdle failed: {}", ToString(err));
-            return ShadowResolutionError::RecreationFailed;
-        })
-        .transform([&](VkResult) -> void {
-            impl->graphResources.shadowMap = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
+        .transform_error([](auto) -> Error { return ShadowResolutionError::RecreationFailed; })
+        .and_then([&](VkResult) -> std::expected<void, Error> {
+            auto sm_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
                 impl->allocator, impl->ctx, {.width = resolution, .height = resolution},
                 {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, .arrayLayers = RenderContext::Impl::NUM_CASCADES}
             );
-            impl->shadowMapPrev = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
+            if (!sm_res) {
+                return std::unexpected(Error(sm_res.error()));
+            }
+            impl->graphResources.shadowMap = std::move(*sm_res);
+
+            auto smp_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
                 impl->allocator, impl->ctx, {.width = resolution, .height = resolution},
                 {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, .arrayLayers = RenderContext::Impl::NUM_CASCADES}
             );
+            if (!smp_res) {
+                return std::unexpected(Error(smp_res.error()));
+            }
+            impl->shadowMapPrev = std::move(*smp_res);
 
             impl->shadowCascadeViews.clear();
             impl->shadowCascadeViews.resize(RenderContext::Impl::NUM_CASCADES);
             impl->shadowCascadeViewsPrev.clear();
             impl->shadowCascadeViewsPrev.resize(RenderContext::Impl::NUM_CASCADES);
             for (uint32_t i = 0; i < RenderContext::Impl::NUM_CASCADES; ++i) {
-                impl->shadowCascadeViews[i] =
-                    Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(impl->ctx.Device(), impl->graphResources.shadowMap.image.Handle(), i, 1);
-                impl->shadowCascadeViewsPrev[i] = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(impl->ctx.Device(), impl->shadowMapPrev.image.Handle(), i, 1);
+                auto view_res = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(impl->ctx.Device(), impl->graphResources.shadowMap.image.Handle(), i, 1);
+                if (!view_res) {
+                    return std::unexpected(Error(view_res.error()));
+                }
+                impl->shadowCascadeViews[i] = std::move(*view_res);
+
+                auto prev_res = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(impl->ctx.Device(), impl->shadowMapPrev.image.Handle(), i, 1);
+                if (!prev_res) {
+                    return std::unexpected(Error(prev_res.error()));
+                }
+                impl->shadowCascadeViewsPrev[i] = std::move(*prev_res);
             }
 
             Vk::ExecuteImmediate(impl->ctx, impl->graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
@@ -842,6 +853,7 @@ auto RenderContext::SetShadowResolution(uint32_t resolution) -> std::expected<vo
             });
 
             ZHLN::Log("Shadow map dynamically resized on the GPU to {}x{}", resolution, resolution);
+            return {};
         });
 }
 

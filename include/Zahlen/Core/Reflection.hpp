@@ -707,7 +707,7 @@ template <typename Tag, typename E>
 constexpr auto GetEnumeratorAnnotation(E value) -> std::optional<Tag> {
     std::optional<Tag> result = std::nullopt;
     [:Expand(detail::EnumeratorsOf<E>()):] >> [&]<auto enumerator>() -> auto {
-        constexpr auto annotation = GetAnnotation<Tag, enumerator>();
+        auto annotation = GetAnnotation<Tag, enumerator>();
         if (value == static_cast<E>([:enumerator:])) {
             result = annotation;
         }
