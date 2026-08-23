@@ -2300,65 +2300,83 @@ std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) 
         return std::unexpected(RenderInitError::PresentationFailed);
     }
 
-    auto assign_target = [this](auto& member, auto expected) -> std::expected<void, Error> {
-        if (!expected) {
-            return std::unexpected(RenderInitError::SubsystemAllocationFailed);
-        }
-        member = std::move(*expected);
+    const VkExtent2D ext2  = {.width = std::max(1u, ext.width / 2), .height = std::max(1u, ext.height / 2)};
+    const VkExtent2D ext4  = {.width = std::max(1u, ext.width / 4), .height = std::max(1u, ext.height / 4)};
+    const VkExtent2D ext8  = {.width = std::max(1u, ext.width / 8), .height = std::max(1u, ext.height / 8)};
+    const VkExtent2D ext16 = {.width = std::max(1u, ext.width / 16), .height = std::max(1u, ext.height / 16)};
+    const VkExtent3D voxelExt = {.width = 160, .height = 90, .depth = 64};
+
+    // Helper: assign from expected or propagate error
+    auto assign = [&](auto& member, auto e) -> std::expected<void, Error> {
+        if (!e) { return std::unexpected(RenderInitError::SubsystemAllocationFailed); }
+        member = std::move(*e);
         return {};
     };
 
-    auto assign_target3d = [this](auto& member, auto expected) -> std::expected<void, Error> {
-        if (!expected) {
-            return std::unexpected(RenderInitError::SubsystemAllocationFailed);
-        }
-        member = std::move(*expected);
-        return {};
-    };
-
-    return assign_target(graphResources.sceneColor, CreateDefaultTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32>(ext))
-        .and_then([&]() { return assign_target(graphResources.velocityBuffer, CreateDefaultTarget<VK_FORMAT_R16G16_SFLOAT>(ext)); })
-        .and_then([&]() { return assign_target(frames.accumBuffers[0], CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext, VK_IMAGE_USAGE_TRANSFER_DST_BIT)); })
-        .and_then([&]() { return assign_target(frames.accumBuffers[1], CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext, VK_IMAGE_USAGE_TRANSFER_DST_BIT)); })
-        .and_then([&]() { return assign_target(graphResources.normalRoughnessBuffer, CreateDefaultTarget<VK_FORMAT_R8G8B8A8_UNORM>(ext)); })
-        .and_then([&]() { return assign_target(graphResources.hdrSceneColor, CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext, VK_IMAGE_USAGE_TRANSFER_SRC_BIT)); })
-        .and_then([&]() { return assign_target(graphResources.ambientTarget, CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext)); })
-        .and_then([&]() { return assign_target(graphResources.lightingTarget, CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext)); })
-        .and_then([&]() { return assign_target(graphResources.smaaEdgeTarget, CreateDefaultTarget<VK_FORMAT_R8G8_UNORM>(ext)); })
-        .and_then([&]() { return assign_target(graphResources.smaaWeightTarget, CreateDefaultTarget<VK_FORMAT_R8G8B8A8_UNORM>(ext)); })
-
-    .and_then([&]() {
-            VkExtent2D ext2  = {.width = std::max(1u, ext.width / 2), .height = std::max(1u, ext.height / 2)};
-            VkExtent2D ext4  = {.width = std::max(1u, ext.width / 4), .height = std::max(1u, ext.height / 4)};
-            VkExtent2D ext8  = {.width = std::max(1u, ext.width / 8), .height = std::max(1u, ext.height / 8)};
-            VkExtent2D ext16 = {.width = std::max(1u, ext.width / 16), .height = std::max(1u, ext.height / 16)};
-            return assign_target(graphResources.bloomThresholdTarget, CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext2));
-        })
-        .and_then([&]() { return assign_target(graphResources.bloomDown1, CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext4)); })
-        .and_then([&]() { return assign_target(graphResources.bloomDown2, CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext8)); })
-        .and_then([&]() { return assign_target(graphResources.bloomDown3, CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext16)); })
-        .and_then([&]() { return assign_target(graphResources.bloomUp2, CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext8)); })
-        .and_then([&]() { return assign_target(graphResources.bloomUp1, CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext4)); })
-        .and_then([&]() { return assign_target(graphResources.bloomFinalTarget, CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext2)); })
-        .and_then([&]() { return assign_target(graphResources.transNormalBuffer, CreateDefaultTarget<VK_FORMAT_R8G8B8A8_UNORM>(ext)); })
-        .and_then([&]() { return assign_target(graphResources.transLightingTarget, CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext)); })
+    return assign(graphResources.sceneColor, CreateDefaultTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32>(ext))
+        .and_then([&]() { return assign(graphResources.velocityBuffer, CreateDefaultTarget<VK_FORMAT_R16G16_SFLOAT>(ext)); })
+        .and_then([&]() { return assign(frames.accumBuffers[0], CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext, VK_IMAGE_USAGE_TRANSFER_DST_BIT)); })
+        .and_then([&]() { return assign(frames.accumBuffers[1], CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext, VK_IMAGE_USAGE_TRANSFER_DST_BIT)); })
+        .and_then([&]() { return assign(graphResources.normalRoughnessBuffer, CreateDefaultTarget<VK_FORMAT_R8G8B8A8_UNORM>(ext)); })
+        .and_then([&]() { return assign(graphResources.hdrSceneColor, CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext, VK_IMAGE_USAGE_TRANSFER_SRC_BIT)); })
+        .and_then([&]() { return assign(graphResources.ambientTarget, CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext)); })
+        .and_then([&]() { return assign(graphResources.lightingTarget, CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext)); })
+        .and_then([&]() { return assign(graphResources.smaaEdgeTarget, CreateDefaultTarget<VK_FORMAT_R8G8_UNORM>(ext)); })
+        .and_then([&]() { return assign(graphResources.smaaWeightTarget, CreateDefaultTarget<VK_FORMAT_R8G8B8A8_UNORM>(ext)); })
+        .and_then([&]() { return assign(graphResources.bloomThresholdTarget, CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext2)); })
+        .and_then([&]() { return assign(graphResources.bloomDown1, CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext4)); })
+        .and_then([&]() { return assign(graphResources.bloomDown2, CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext8)); })
+        .and_then([&]() { return assign(graphResources.bloomDown3, CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext16)); })
+        .and_then([&]() { return assign(graphResources.bloomUp2, CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext8)); })
+        .and_then([&]() { return assign(graphResources.bloomUp1, CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext4)); })
+        .and_then([&]() { return assign(graphResources.bloomFinalTarget, CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext2)); })
+        .and_then([&]() { return assign(graphResources.transNormalBuffer, CreateDefaultTarget<VK_FORMAT_R8G8B8A8_UNORM>(ext)); })
+        .and_then([&]() { return assign(graphResources.transLightingTarget, CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext)); })
         .and_then([&]() {
-            return assign_target(graphResources.transDepthBuffer,
+            return assign(graphResources.transDepthBuffer,
                 Vk::RenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>::Create(
                     allocator, ctx, ext, {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT}
                 ));
         })
         .and_then([&]() {
-            return assign_target(graphResources.hizMap,
+            return assign(graphResources.hizMap,
                 Vk::MipmappedRenderTarget<VK_FORMAT_R32_SFLOAT>::Create(
                     allocator, ctx, ext,
                     VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
                         VK_IMAGE_USAGE_TRANSFER_DST_BIT
                 ));
         })
-        .transform([&]() { RecreatePunctualShadowViews(); })
-
-    .transform([&]() {
+        .and_then([&]() {
+            return assign(graphResources.voxelMedia,
+                Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
+                    allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
+                ));
+        })
+        .and_then([&]() {
+            return assign(graphResources.voxelLight,
+                Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
+                    allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
+                ));
+        })
+        .and_then([&]() {
+            return assign(graphResources.voxelIntegrated,
+                Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
+                    allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
+                ));
+        })
+        .and_then([&]() {
+            return assign(graphResources.voxelHistory,
+                Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
+                    allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
+                ));
+        })
+        .and_then([&]() {
+            return assign(graphResources.voxelResolved,
+                Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
+                    allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
+                ));
+        })
+        .transform([&]() {
             RecreatePunctualShadowViews();
 
             // Transition all newly allocated render targets to their correct default layouts
@@ -2451,8 +2469,6 @@ std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) 
                 );
             });
 
-            // Translucency input is a plain Texture2D at registry slot 10 (sampler split).
-            // VK_EXT_descriptor_heap: rewrite its static heap descriptor for the new target.
             WriteTransLightingToHeap();
 
             // VK_EXT_descriptor_heap: rewrite the Hi-Z descriptor slots.
@@ -2483,7 +2499,6 @@ std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) 
                 }
             }
 
-            // Culling: one slot span per {pass 0/1} x {frame parity}.
             for (uint32_t idx = 0; idx < 4; ++idx) {
                 const uint32_t pass     = idx >> 1;
                 const uint32_t parity   = idx & 1;
