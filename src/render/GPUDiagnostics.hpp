@@ -1,13 +1,11 @@
 // src/render/GPUDiagnostics.hpp
 #pragma once
 
-#include <Zahlen/Common.h>
 #include <concepts>
 #include <span>
 #include <string_view>
 #include <variant>
 #include <vector>
-#include <vulkan/vulkan.h>
 
 namespace ZHLN::Vk {
 
