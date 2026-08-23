@@ -9,6 +9,11 @@
 
 find_package(Vulkan REQUIRED)
 
+set(ZHLN_GPU_DIAGNOSTICS_BACKEND_SOURCE "" CACHE FILEPATH
+    "Optional renderer-internal source implementing ZHLN::Vk::CreateConfiguredGPUCrashTracker")
+set(ZHLN_GPU_DIAGNOSTICS_BACKEND_LIBRARIES "" CACHE STRING
+    "Optional libraries linked only by the configured GPU diagnostics backend")
+
 find_package(slang CONFIG QUIET HINTS
     "$ENV{VULKAN_SDK}/lib/cmake"
     "$ENV{VULKAN_SDK}/lib/cmake/slang"
@@ -46,8 +51,17 @@ add_library(zahlen_render STATIC
     ComputePass.cpp
     Extensions.cpp
     PresentationContext.cpp
+    GPUDiagnostics.cpp
 )
 set_target_properties(zahlen_render PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+if(ZHLN_GPU_DIAGNOSTICS_BACKEND_SOURCE)
+    target_sources(zahlen_render PRIVATE "${ZHLN_GPU_DIAGNOSTICS_BACKEND_SOURCE}")
+    target_compile_definitions(zahlen_render PRIVATE ZHLN_CUSTOM_GPU_DIAGNOSTICS_BACKEND=1)
+    if(ZHLN_GPU_DIAGNOSTICS_BACKEND_LIBRARIES)
+        target_link_libraries(zahlen_render PRIVATE ${ZHLN_GPU_DIAGNOSTICS_BACKEND_LIBRARIES})
+    endif()
+endif()
 
 # --- OPTIONAL CLANG-TIDY SUPPORT ---
 option(ZHLN_ENABLE_CLANG_TIDY "Run Clang-Tidy analysis during compilation" OFF)

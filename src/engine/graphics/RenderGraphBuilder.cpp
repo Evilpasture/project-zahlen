@@ -4,7 +4,6 @@
 #include "../Scheduler.hpp"
 #include "RenderInternal.hpp"
 #include "Zahlen/Math3D.hpp"
-#include "Zahlen/Profiler.hpp"
 #include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <array>
@@ -59,8 +58,6 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeHiZGeneratePass() const noexcept {
         return Vk::MakePass<"HiZGenerate", Vk::ShaderRead<Res_Depth>, Vk::ComputeWrite<Res_HiZ>>([this](VkCommandBuffer cmd) noexcept {
-            Profiler::ScopedGpuProfile timer(cmd, fIdx, self.gpuProfiler, Stage::HiZPass);
-
             uint32_t width  = self.graphResources.hizMap.extent.width;
             uint32_t height = self.graphResources.hizMap.extent.height;
             uint32_t mips   = self.graphResources.hizMap.mipLevels;
@@ -94,8 +91,6 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeClusterCullingPass() const noexcept {
         return Vk::MakePass<"ClusterCulling">([this](VkCommandBuffer c) noexcept {
-            Profiler::ScopedGpuProfile timer(c, fIdx, self.gpuProfiler, Stage::ClusterCullingPass);
-
             const auto& counterBuffer = self.frames.globalCounterBuffers[fIdx];
 
             Vk::FillBuffer(c, counterBuffer, 0, 0u);
@@ -260,7 +255,6 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeVolumetricClearPass() const noexcept {
         return Vk::MakePass<"VolumetricClear", Vk::ComputeWrite<Res_VoxelMedia>, Vk::ComputeWrite<Res_VoxelLight>>([this](VkCommandBuffer c) noexcept {
-            Profiler::ScopedGpuProfile timer(c, fIdx, self.gpuProfiler, Stage::VolumetricClearPass);
             self.volumetricClearPass.WriteHeap(
                 self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ComputeWrite<Res_VoxelMedia>>(self.graphResources.voxelMedia),
                 Vk::Assume<Vk::ComputeWrite<Res_VoxelLight>>(self.graphResources.voxelLight)
@@ -271,7 +265,6 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeVolumetricFogInjectPass() const noexcept {
         return Vk::MakePass<"VolumetricFogInject", Vk::ComputeWrite<Res_VoxelMedia>>([this](VkCommandBuffer c) noexcept {
-            Profiler::ScopedGpuProfile timer(c, fIdx, self.gpuProfiler, Stage::VolumetricFogInjectPass);
             self.volumetricFogInjectPass.WriteHeap(
                 self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ComputeWrite<Res_VoxelMedia>>(self.graphResources.voxelMedia),
                 self.frames.frameUniformBuffers[fIdx], self.frames.fogVolumesBuffer[fIdx]
@@ -285,7 +278,6 @@ struct PassFactory {
     [[nodiscard]] auto MakeVolumetricLightInjectPass() const noexcept {
         return Vk::MakePass<"VolumetricLightInject", Vk::ComputeReadGeneral<Res_VoxelMedia>, Vk::ComputeWrite<Res_VoxelLight>, Vk::ComputeRead<Res_ShadowMap>>(
             [this](VkCommandBuffer c) noexcept {
-                Profiler::ScopedGpuProfile timer(c, fIdx, self.gpuProfiler, Stage::VolumetricLightInjectPass);
                 self.volumetricLightInjectPass.WriteHeap(
                     self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelMedia>>(self.graphResources.voxelMedia),
                     Vk::Assume<Vk::ComputeWrite<Res_VoxelLight>>(self.graphResources.voxelLight), self.frames.frameUniformBuffers[fIdx],
@@ -300,7 +292,6 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeVolumetricIntegrationPass() const noexcept {
         return Vk::MakePass<"VolumetricIntegrate", Vk::ComputeReadGeneral<Res_VoxelLight>, Vk::ComputeWrite<Res_VoxelInt>>([this](VkCommandBuffer c) noexcept {
-            Profiler::ScopedGpuProfile timer(c, fIdx, self.gpuProfiler, Stage::VolumetricIntegratePass);
             self.volumetricIntegrationPass.WriteHeap(
                 self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelLight>>(self.graphResources.voxelLight),
                 Vk::Assume<Vk::ComputeWrite<Res_VoxelInt>>(self.graphResources.voxelIntegrated)
@@ -313,7 +304,6 @@ struct PassFactory {
         return Vk::MakePass<
             "VolumetricTemporal", Vk::ComputeReadGeneral<Res_VoxelInt>, Vk::ComputeReadGeneral<Res_VoxelHist>, Vk::ComputeWrite<Res_VoxelResolved>>(
             [this](VkCommandBuffer c) noexcept {
-                Profiler::ScopedGpuProfile timer(c, fIdx, self.gpuProfiler, Stage::VolumetricTemporalPass);
                 self.volumetricTemporalPass.WriteHeap(
                     self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelInt>>(self.graphResources.voxelIntegrated),
                     Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelHist>>(self.graphResources.voxelHistory),
@@ -405,7 +395,6 @@ struct PassFactory {
             "Reflection", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_Lighting>,
             Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ShaderReadGeneral<Res_VoxelResolved>, Vk::ColorWrite<Res_HdrSceneColor>>(
             [this](auto& ctx) noexcept {
-                Profiler::ScopedGpuProfile timer(ctx.Cmd(), fIdx, self.gpuProfiler, Stage::PostProcessPass);
                 // Order must mirror reflection.slang's set-0 declaration order
                 // (g_instances and the RT-only tlas trail at the tail).
                 self.reflectionPass.WriteHeap(
@@ -458,8 +447,6 @@ struct PassFactory {
             "TransReflection", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_TransNorm>, Vk::ShaderRead<Res_TransDepth>, Vk::ShaderRead<Res_Lighting>,
             Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ShaderReadGeneral<Res_VoxelResolved>, Vk::ColorWrite<Res_TransLighting>>(
             [this](auto& ctx) noexcept {
-                Profiler::ScopedGpuProfile timer(ctx.Cmd(), fIdx, self.gpuProfiler, Stage::TransReflection);
-
                 self.translucentReflectionPass.WriteHeap(
                     self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor), self.defaultSampler,
                     Vk::Assume<Vk::ShaderRead<Res_TransDepth>>(self.graphResources.transDepthBuffer),
@@ -505,7 +492,6 @@ struct PassFactory {
         // statically-used descriptor).
         return Vk::Passieren<"Forward", Vk::ColorWrite<Res_HdrSceneColor>, Vk::DepthStencilWrite<Res_Depth>, Vk::ShaderRead<Res_TransLighting>>(
             [this, &targetImage](VkCommandBuffer c) noexcept {
-                Profiler::ScopedGpuProfile timer(c, fIdx, self.gpuProfiler, Stage::ForwardPass);
                 FrameRecorder              fwdRecorder(c, self);
                 Passes::ForwardPass {}.Execute(
                     fwdRecorder, Vk::Assume<Vk::ColorWrite<Res_HdrSceneColor>>(targetImage),
@@ -518,7 +504,6 @@ struct PassFactory {
     [[nodiscard]] auto MakeBloomThresholdPass() const noexcept {
         const auto& inputColor = self.graphResources.hdrSceneColor;
         return Vk::MakePass<"BloomThreshold", Vk::ShaderRead<Res_HdrSceneColor>, Vk::ColorWrite<Res_BloomThresh>>([this, &inputColor](auto& ctx) noexcept {
-            Profiler::ScopedGpuProfile timer(ctx.Cmd(), fIdx, self.gpuProfiler, Stage::BloomThreshPass);
             self.bloomThresholdPass.WriteHeap(self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor), self.defaultSampler);
             self.bloomThresholdPass.ExecuteHeap(self.ctx, ctx.Cmd(), fIdx);
         });
@@ -572,8 +557,6 @@ struct PassFactory {
             if (!self.decalPipeline.Valid() || self.queues.decalQueue.empty()) {
                 return;
             }
-
-            Profiler::ScopedGpuProfile timer(c, fIdx, self.gpuProfiler, Stage::DecalPass);
 
             // VK_EXT_descriptor_heap: decal bindings live in the heaps; the
             // decal pipeline carries the merged set-0/set-1 mappings.
@@ -918,7 +901,8 @@ void ExecuteFrameGraph(RenderContext::Impl& self, VkCommandBuffer cmd, const Pas
         }
     }
 
-    graph.Execute(cmd, binder);
+    auto* diagnostics = self.gpuDiagnostics.IsActive() ? &self.gpuDiagnostics : nullptr;
+    graph.Execute(cmd, binder, self.frame_index, &self.gpuProfiler, diagnostics);
 }
 
 template <typename Self, typename GetSwapchainImageT>
@@ -1004,7 +988,8 @@ void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Co
         compBinder.template Bind<Res_ShadowMap>(ref.handle, ref.view, ref.extent);
     }
 
-    compGraph.Execute(compCmd, compBinder);
+    auto* diagnostics = gpuDiagnostics.IsActive() ? &gpuDiagnostics : nullptr;
+    compGraph.Execute(compCmd, compBinder, frame_index, &gpuProfiler, diagnostics);
 }
 
 void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd) {

@@ -112,8 +112,9 @@ void GpuProfiler<EnumT>::WriteStart(VkCommandBuffer cmd, uint32_t frameIndex, En
     auto     stage_idx = static_cast<uint32_t>(stage);
     uint32_t query_idx = stage_idx * 2;
 
-    _recordedMasks[frameIndex] |= (1U << stage_idx);
-    vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_NONE, _pools[frameIndex], query_idx);
+    const uint32_t slot = frameIndex % static_cast<uint32_t>(_pools.size());
+    _recordedMasks[slot] |= (uint64_t {1} << stage_idx);
+    vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_NONE, _pools[slot], query_idx);
 }
 
 template <typename EnumT>
@@ -125,7 +126,8 @@ void GpuProfiler<EnumT>::WriteEnd(VkCommandBuffer cmd, uint32_t frameIndex, Enum
     auto     stage_idx = static_cast<uint32_t>(stage);
     uint32_t query_idx = (stage_idx * 2) + 1;
 
-    vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_NONE, _pools[frameIndex], query_idx);
+    const uint32_t slot = frameIndex % static_cast<uint32_t>(_pools.size());
+    vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_NONE, _pools[slot], query_idx);
 }
 
 template <typename EnumT>
@@ -136,7 +138,7 @@ inline void GpuProfiler<EnumT>::RetrieveResults(uint32_t frameIndex, float times
         return;
     }
     uint32_t slot = frameIndex % 2;
-    uint32_t mask = _recordedMasks[slot];
+    uint64_t mask = _recordedMasks[slot];
     if (mask == 0) {
         return;
     }
@@ -144,7 +146,7 @@ inline void GpuProfiler<EnumT>::RetrieveResults(uint32_t frameIndex, float times
     VkQueryPool pool = _pools[slot];
 
     for (uint32_t i = 0; i < kStageCount; ++i) {
-        if (mask & (1U << i)) {
+        if (mask & (uint64_t {1} << i)) {
             uint32_t                start_idx = i * 2;
             std::array<uint64_t, 2> stage_results {};
 

@@ -360,7 +360,7 @@ std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfi
 
 namespace {
 
-std::expected<Vk::ExtensionResult, Error> GetPlatformInstanceExtensions(Window& window, ZHLN::ValidationMode validationMode) noexcept {
+std::expected<Vk::ExtensionResult, Error> GetPlatformInstanceExtensions(Window& window) noexcept {
     auto builder = Vk::ExtensionBuilder::ForInstance();
 
     if (window.IsHeadless()) {
@@ -389,7 +389,7 @@ std::expected<Vk::ExtensionResult, Error> GetPlatformInstanceExtensions(Window& 
     }
 
     return std::move(builder)
-        .Debug(validationMode != ZHLN::ValidationMode::Off)
+        .Debug(true) // Render-graph checkpoints use VK_EXT_debug_utils when available.
         .OptionalIf("VK_KHR_portability_enumeration", isMac)
         .Build()
         .transform_error([](auto err) -> Error { return err; });
@@ -629,7 +629,7 @@ std::expected<std::unique_ptr<RenderContext>, Error> RenderContext::Create(Windo
     int                     height      = 0;
     ZHLN_PhysicalDeviceInfo physicalInfo {};
 
-    return GetPlatformInstanceExtensions(window, cfg.validationMode)
+    return GetPlatformInstanceExtensions(window)
         .and_then([&](auto&& inst_exts) -> std::expected<void, Error> {
             return Vk::Context::Builder()
                 .AppName(impl->appName)
@@ -681,7 +681,11 @@ std::expected<std::unique_ptr<RenderContext>, Error> RenderContext::Create(Windo
                         .DeviceFeatures(features.GetRoot())
                         .ValidationMode(static_cast<Vk::ValidationMode>(cfg.validationMode))
                         .Build()
-                        .transform([&](auto&& context) { impl->ctx = std::forward<decltype(context)>(context); });
+                        .transform([&](auto&& context) {
+                            impl->ctx = std::forward<decltype(context)>(context);
+                            const auto vendor = static_cast<Vk::GPUVendor>(physicalInfo.properties.properties.vendorID);
+                            impl->gpuDiagnostics.Create(vendor, impl->ctx.Device(), impl->ctx.Physical());
+                        });
                 });
         })
         .and_then([&]() { return impl->InitSubsystems(cfg, width, height); })

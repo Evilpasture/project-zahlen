@@ -21,8 +21,11 @@ template <typename EnumT>
     requires std::is_enum_v<EnumT>
 class GpuProfiler {
   public:
+    using StageType = EnumT;
+
     static constexpr uint32_t kStageCount = static_cast<uint32_t>(Reflect::EnumCount<EnumT>());
     static constexpr uint32_t kQueryCount = kStageCount * 2; // Start & End for each stage
+    static_assert(kStageCount <= 64, "GpuProfiler currently supports at most 64 reflected stages.");
 
     GpuProfiler() noexcept = default;
     ~GpuProfiler() noexcept;
@@ -53,7 +56,7 @@ class GpuProfiler {
   private:
     VkDevice                        _device        = VK_NULL_HANDLE;
     std::array<VkQueryPool, 2>      _pools         = {VK_NULL_HANDLE, VK_NULL_HANDLE};
-    mutable std::array<uint32_t, 2> _recordedMasks = {0, 0};
+    mutable std::array<uint64_t, 2> _recordedMasks = {0, 0};
     bool                            _enabled       = false;
 };
 

@@ -95,6 +95,7 @@ static constexpr auto isLegacy = false;
 #include "Commands.hpp"
 #include "ComputePass.hpp"
 #include "Postprocessing.hpp"
+#include "GPUDiagnostics.hpp"
 #include "GpuProfiler.hpp"
 #include "PresentationContext.hpp"
 #include "ParallelRecorder.hpp"
