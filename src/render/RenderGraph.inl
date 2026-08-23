@@ -350,14 +350,20 @@ constexpr CompileTimeFrameGraph<Passes...>::CompileTimeFrameGraph(Passes&&... pa
 }
 
 template <typename... Passes>
-template <typename ProfilerT>
-void CompileTimeFrameGraph<Passes...>::Execute(VkCommandBuffer cmd, const Binder& binder, uint32_t frameIndex, ProfilerT* profiler) const {
+template <typename ProfilerT, typename DiagnosticsT>
+void CompileTimeFrameGraph<Passes...>::Execute(
+    VkCommandBuffer cmd,
+    const Binder&   binder,
+    uint32_t        frameIndex,
+    ProfilerT*      profiler,
+    DiagnosticsT*   diagnostics
+) const {
     const auto& bindings = binder.GetBindings();
 
     std::apply(
         [&](const auto&... passPack) noexcept(false) {
             [&]<size_t... Is>(std::index_sequence<Is...>) noexcept(false) {
-                (ExecutePass<Is>(cmd, bindings, passPack...[Is], frameIndex, profiler), ...);
+                (ExecutePass<Is>(cmd, bindings, passPack...[Is], frameIndex, profiler, diagnostics), ...);
             }(std::make_index_sequence<NumPasses> {});
         },
         _passes
@@ -365,18 +371,51 @@ void CompileTimeFrameGraph<Passes...>::Execute(VkCommandBuffer cmd, const Binder
 }
 
 template <typename... Passes>
-template <size_t PassIndex, typename PassType, typename ProfilerT>
+template <size_t PassIndex, typename PassType, typename ProfilerT, typename DiagnosticsT>
 void CompileTimeFrameGraph<Passes...>::ExecutePass(
     VkCommandBuffer                                cmd,
     const std::array<GraphResource, NumResources>& bindings,
     const PassType&                                pass,
     uint32_t                                       frameIndex,
-    ProfilerT*                                     profiler
+    ProfilerT*                                     profiler,
+    DiagnosticsT*                                  diagnostics
 ) const {
-    // AUTOMATED GPU PROFILING TIMER (Zero-overhead: only active when profiler pointer is passed)
-    if constexpr (!std::is_same_v<ProfilerT, void*>) {
-        if (profiler != nullptr) {
-            profiler->WriteStart(cmd, frameIndex, static_cast<uint32_t>(PassIndex));
+    constexpr std::string_view pass_name = PassType::name.string_view();
+
+    // Every backend sees the exact name already carried by the graph's pass type.
+    // No per-pass breadcrumb calls are needed in client recording lambdas.
+    if constexpr (!std::is_void_v<DiagnosticsT>) {
+        static_assert(
+            requires(DiagnosticsT& backend) { backend.WriteCheckpoint(cmd, pass_name); },
+            "Frame graph diagnostics must provide WriteCheckpoint(VkCommandBuffer, std::string_view)."
+        );
+        if (diagnostics != nullptr) {
+            diagnostics->WriteCheckpoint(cmd, pass_name);
+        }
+    }
+
+    // Profiler stage enums are deliberately resolved by name rather than by pass
+    // index: graph composition can reorder or omit passes without corrupting query
+    // slots. An enum may be a subset of the graph; unmatched passes cost nothing.
+    if constexpr (!std::is_void_v<ProfilerT>) {
+        static_assert(
+            requires { typename ProfilerT::StageType; },
+            "Frame graph profilers must expose their reflected enum as StageType."
+        );
+        using ProfileStage                  = typename ProfilerT::StageType;
+        constexpr auto profile_stage        = Reflect::StringToEnum<ProfileStage>(pass_name);
+        constexpr bool has_profile_stage    = profile_stage.has_value();
+        if constexpr (has_profile_stage) {
+            static_assert(
+                requires(ProfilerT& backend, ProfileStage stage) {
+                    backend.WriteStart(cmd, frameIndex, stage);
+                    backend.WriteEnd(cmd, frameIndex, stage);
+                },
+                "Frame graph profilers must provide WriteStart/WriteEnd(VkCommandBuffer, uint32_t, StageType)."
+            );
+            if (profiler != nullptr) {
+                profiler->WriteStart(cmd, frameIndex, *profile_stage);
+            }
         }
     }
 
@@ -453,9 +492,13 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
         pass.record(cmd);
     }
 
-    if constexpr (!std::is_same_v<ProfilerT, void*>) {
-        if (profiler != nullptr) {
-            profiler->WriteEnd(cmd, frameIndex, static_cast<uint32_t>(PassIndex));
+    if constexpr (!std::is_void_v<ProfilerT>) {
+        using ProfileStage           = typename ProfilerT::StageType;
+        constexpr auto profile_stage = Reflect::StringToEnum<ProfileStage>(pass_name);
+        if constexpr (profile_stage.has_value()) {
+            if (profiler != nullptr) {
+                profiler->WriteEnd(cmd, frameIndex, *profile_stage);
+            }
         }
     }
 }

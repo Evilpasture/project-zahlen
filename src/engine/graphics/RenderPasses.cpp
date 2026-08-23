@@ -604,8 +604,7 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
     }
 
     {
-        Profiler::ScopedGpuProfile timer(cmd, recorder.frameIndex, ctx.gpuProfiler, Stage::ShadowPass);
-        bool                       hasMeshParticles = !ctx.queues.meshParticleQueue.empty();
+        bool hasMeshParticles = !ctx.queues.meshParticleQueue.empty();
 
         const bool useMeshShadowPath = ctx.MeshShadingActive() && ctx.shadowMeshPipeline.Valid();
 
@@ -742,8 +741,6 @@ void MainPass1::Execute(
 ) const noexcept {
     auto                       cmd = recorder.cmd;
     auto&                      ctx = recorder.ctx;
-    Profiler::ScopedGpuProfile timer(cmd, recorder.frameIndex, ctx.gpuProfiler, Stage::MainPass1);
-
     const auto drawCount = static_cast<uint32_t>(ctx.queues.drawQueue.size());
     if (drawCount == 0) {
         Vk::DynamicPass(in.sceneColor.extent)
@@ -798,8 +795,6 @@ void MainPass2::Execute(
 ) const noexcept {
     auto                       cmd = recorder.cmd;
     auto&                      ctx = recorder.ctx;
-    Profiler::ScopedGpuProfile timer(cmd, recorder.frameIndex, ctx.gpuProfiler, Stage::MainPass2);
-
     const auto drawCount = static_cast<uint32_t>(ctx.queues.drawQueue.size());
     if (drawCount == 0 && ctx.queues.meshParticleQueue.empty() && ctx.queues.csgDrawQueue.empty()) {
         return;
@@ -953,8 +948,6 @@ void BlitPass::Execute(
     VkCommandBuffer cmd = recorder.cmd;
     auto&           ctx = recorder.ctx;
 
-    Profiler::ScopedGpuProfile timer(cmd, recorder.frameIndex, ctx.gpuProfiler, Stage::BlitPass);
-
     struct BlitPushConstants {
         float vignetteIntensity;
         float vignettePower;
@@ -1034,8 +1027,6 @@ void ViewmodelPass::Execute(
     if (!hasViewmodelDraws) {
         return;
     }
-
-    Profiler::ScopedGpuProfile timer(cmd, recorder.frameIndex, ctx.gpuProfiler, Stage::ViewmodelPass);
 
     ctx.BindHeapsAndPushFrame(cmd);
 

@@ -1,76 +1,127 @@
-// src/render/GPUDiagnostics.hpp
+// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #pragma once
 
 #include <concepts>
+#include <cstdint>
+#include <functional>
+#include <memory>
 #include <span>
 #include <string_view>
+#include <type_traits>
+#include <utility>
 #include <variant>
-#include <vector>
 
 namespace ZHLN::Vk {
 
 enum class GPUVendor : uint16_t { Unknown = 0, NVIDIA = 0x10DE, AMD = 0x1002, Intel = 0x8086, ARM = 0x13B5, Qualcomm = 0x5143 };
 
 struct DiagnosticConfig {
-    bool enableMarkers     = true; // Breadcrumbs per pass/draw
-    bool enableShaderDebug = true; // Line-level fault tracking
-    bool enableCrashDumps  = true; // Write .nv-gpudmp / log artifacts
+    bool enableMarkers     = true;
+    bool enableShaderDebug = true;
+    bool enableCrashDumps  = true;
 };
 
-// Compile-time concept verifying that all tracker types satisfy the interface
+/** Renderer-internal interface implemented by an already-created backend. */
 template <typename T>
 concept GPUCrashTrackerBackend = requires(
     T                         t,
-    VkPhysicalDevice          physical,
-    VkDevice                  device,
-    void**                    ppNext,
-    std::vector<const char*>& exts,
     VkCommandBuffer           cmd,
     std::string_view          name,
     std::span<const uint32_t> spv
 ) {
-    { t.PreDeviceCreate(physical, ppNext, exts) } -> std::same_as<void>;
-    { t.PostDeviceCreate(device, physical) } -> std::same_as<void>;
     { t.WriteCheckpoint(cmd, name) } -> std::same_as<void>;
     { t.RegisterShader(spv, name) } -> std::same_as<void>;
     { t.OnDeviceLost() } -> std::same_as<void>;
     { t.Shutdown() } -> std::same_as<void>;
 };
 
-struct NvidiaAftermathTracker {
-    explicit NvidiaAftermathTracker(DiagnosticConfig cfg = {}): config(cfg) {
+struct GPUCrashTrackerCallbacks {
+    std::function<void(VkCommandBuffer, std::string_view)>           writeCheckpoint;
+    std::function<void(std::span<const uint32_t>, std::string_view)> registerShader;
+    std::function<void()>                                            onDeviceLost;
+    std::function<void()>                                            shutdown;
+
+    [[nodiscard]] bool Empty() const noexcept {
+        return !writeCheckpoint && !registerShader && !onDeviceLost && !shutdown;
+    }
+};
+
+template <GPUCrashTrackerBackend Backend>
+[[nodiscard]] GPUCrashTrackerCallbacks MakeGPUCrashTrackerCallbacks(std::shared_ptr<Backend> backend) {
+    if (!backend) {
+        return {};
     }
 
-    void PreDeviceCreate(VkPhysicalDevice physical, void** ppNext, std::vector<const char*>& exts);
-    void PostDeviceCreate(VkDevice device, VkPhysicalDevice physical);
+    return {
+        .writeCheckpoint = [backend](VkCommandBuffer cmd, std::string_view name) { backend->WriteCheckpoint(cmd, name); },
+        .registerShader  = [backend](std::span<const uint32_t> spirv, std::string_view name) { backend->RegisterShader(spirv, name); },
+        .onDeviceLost    = [backend] { backend->OnDeviceLost(); },
+        .shutdown        = [backend] { backend->Shutdown(); },
+    };
+}
+
+template <typename Backend>
+    requires GPUCrashTrackerBackend<std::remove_cvref_t<Backend>>
+[[nodiscard]] GPUCrashTrackerCallbacks MakeGPUCrashTrackerCallbacks(Backend&& backend) {
+    using BackendT = std::remove_cvref_t<Backend>;
+    return MakeGPUCrashTrackerCallbacks(std::make_shared<BackendT>(std::forward<Backend>(backend)));
+}
+
+/**
+ * Build-time extension point. A configured source creates and initializes its
+ * native backend here; Zahlen supplies a null implementation by default.
+ */
+[[nodiscard]] GPUCrashTrackerCallbacks CreateConfiguredGPUCrashTracker(
+    GPUVendor vendor,
+    VkDevice device,
+    VkPhysicalDevice physical,
+    DiagnosticConfig config
+);
+
+struct CallbackCrashTracker {
+    explicit CallbackCrashTracker(GPUCrashTrackerCallbacks hooks): callbacks(std::move(hooks)) {
+    }
+
+    void WriteCheckpoint(VkCommandBuffer cmd, std::string_view name) {
+        if (callbacks.writeCheckpoint) {
+            callbacks.writeCheckpoint(cmd, name);
+        }
+    }
+    void RegisterShader(std::span<const uint32_t> spirv, std::string_view entryPoint) {
+        if (callbacks.registerShader) {
+            callbacks.registerShader(spirv, entryPoint);
+        }
+    }
+    void OnDeviceLost() {
+        if (callbacks.onDeviceLost) {
+            callbacks.onDeviceLost();
+        }
+    }
+    void Shutdown() {
+        if (callbacks.shutdown) {
+            callbacks.shutdown();
+        }
+    }
+
+    GPUCrashTrackerCallbacks callbacks;
+};
+static_assert(GPUCrashTrackerBackend<CallbackCrashTracker>);
+
+struct DebugUtilsTracker {
+    DebugUtilsTracker(VkDevice device, DiagnosticConfig config);
+
     void WriteCheckpoint(VkCommandBuffer cmd, std::string_view name);
     void RegisterShader(std::span<const uint32_t> spirv, std::string_view entryPoint);
     void OnDeviceLost();
     void Shutdown();
 
-    DiagnosticConfig config;
-    VkDevice         device = VK_NULL_HANDLE;
+    DiagnosticConfig                  config;
+    VkDevice                          device              = VK_NULL_HANDLE;
+    PFN_vkCmdInsertDebugUtilsLabelEXT cmdInsertDebugLabel = nullptr;
 };
 
-struct AmdBreadcrumbTracker {
-    explicit AmdBreadcrumbTracker(DiagnosticConfig cfg = {}): config(cfg) {
-    }
-
-    void PreDeviceCreate(VkPhysicalDevice physical, void** ppNext, std::vector<const char*>& exts);
-    void PostDeviceCreate(VkDevice device, VkPhysicalDevice physical);
-    void WriteCheckpoint(VkCommandBuffer cmd, std::string_view name);
-    void RegisterShader(std::span<const uint32_t> spirv, std::string_view entryPoint);
-    void OnDeviceLost();
-    void Shutdown();
-
-    DiagnosticConfig              config;
-    VkDevice                      device               = VK_NULL_HANDLE;
-    PFN_vkCmdWriteBufferMarkerAMD cmdWriteBufferMarker = nullptr;
-};
-
-// ----------------------------------------------------------------------------
-// The Unified Variant Manager
-// ----------------------------------------------------------------------------
 class GPUDiagnostics {
   public:
     GPUDiagnostics() = default;
@@ -78,28 +129,20 @@ class GPUDiagnostics {
         Shutdown();
     }
 
-    void SelectBackend(GPUVendor vendor, DiagnosticConfig config = {}) {
-        switch (vendor) {
-            case GPUVendor::NVIDIA:
-                _tracker.emplace<NvidiaAftermathTracker>(config);
-                break;
-            case GPUVendor::AMD:
-                _tracker.emplace<AmdBreadcrumbTracker>(config);
-                break;
-            default:
-                _tracker.emplace<NullTracker>();
-                break;
+    GPUDiagnostics(const GPUDiagnostics&)                    = delete;
+    auto operator=(const GPUDiagnostics&) -> GPUDiagnostics& = delete;
+    GPUDiagnostics(GPUDiagnostics&&)                         = delete;
+    auto operator=(GPUDiagnostics&&) -> GPUDiagnostics&      = delete;
+
+    void Create(GPUVendor vendor, VkDevice device, VkPhysicalDevice physical, DiagnosticConfig config = {}) {
+        Shutdown();
+
+        auto configured = CreateConfiguredGPUCrashTracker(vendor, device, physical, config);
+        if (!configured.Empty()) {
+            _tracker.emplace<CallbackCrashTracker>(std::move(configured));
+        } else {
+            _tracker.emplace<DebugUtilsTracker>(device, config);
         }
-    }
-
-    [[gnu::always_inline]]
-    void PreDeviceCreate(VkPhysicalDevice physical, void** ppNextChain, std::vector<const char*>& exts) noexcept {
-        std::visit([&](auto& backend) noexcept { backend.PreDeviceCreate(physical, ppNextChain, exts); }, _tracker);
-    }
-
-    [[gnu::always_inline]]
-    void PostDeviceCreate(VkDevice device, VkPhysicalDevice physical) noexcept {
-        std::visit([&](auto& backend) noexcept { backend.PostDeviceCreate(device, physical); }, _tracker);
     }
 
     [[gnu::always_inline]]
@@ -128,12 +171,7 @@ class GPUDiagnostics {
     }
 
   private:
-    // Hidden private implementation detail
     struct NullTracker {
-        void PreDeviceCreate(VkPhysicalDevice /*unused*/, void** /*unused*/, std::vector<const char*>& /*unused*/) noexcept {
-        }
-        void PostDeviceCreate(VkDevice /*unused*/, VkPhysicalDevice /*unused*/) noexcept {
-        }
         void WriteCheckpoint(VkCommandBuffer /*unused*/, std::string_view /*unused*/) noexcept {
         }
         void RegisterShader(std::span<const uint32_t> /*unused*/, std::string_view /*unused*/) noexcept {
@@ -145,9 +183,7 @@ class GPUDiagnostics {
     };
     static_assert(GPUCrashTrackerBackend<NullTracker>);
 
-    using TrackerVariant = std::variant<NullTracker, NvidiaAftermathTracker, AmdBreadcrumbTracker>;
-
-    // Automatically default-constructs into index 0 (NullTracker)
+    using TrackerVariant = std::variant<NullTracker, CallbackCrashTracker, DebugUtilsTracker>;
     TrackerVariant _tracker;
 };
 

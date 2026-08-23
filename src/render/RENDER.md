@@ -87,6 +87,68 @@ Vk::DynamicPass(colorRenderTarget.extent)
 ```
 This encapsulates `vkCmdBeginRendering`, sets up the dynamic viewports, scissors, and execution states, and automatically calls `vkCmdEndRendering` when the lambda finishes executing.
 
+### Automatic frame-graph instrumentation
+
+`CompileTimeFrameGraph` can instrument every pass at its execution boundary. Pass
+recording lambdas should not contain profiler scopes or breadcrumb calls:
+
+```cpp
+enum class Stage : uint8_t { GBuffer, Lighting, PostProcess };
+Profiler::GpuProfiler<Stage> profiler;
+Vk::GPUDiagnostics diagnostics;
+
+// The pass name is the single source of truth for both systems.
+auto graph = Vk::CompileTimeFrameGraph(
+    Vk::MakePass<"Lighting", Vk::ShaderRead<GBuffer>, Vk::ColorWrite<Hdr>>(
+        [](auto& ctx) { RecordLighting(ctx.Cmd()); }
+    )
+);
+
+graph.Execute(cmd, binder, frameIndex, &profiler, &diagnostics);
+```
+
+Immediately before each pass, the graph writes a checkpoint with
+`PassType::name`. It then uses `Reflect::StringToEnum<Profiler::StageType>` to
+resolve a profiling stage with the same name, writes its start timestamp,
+records graph barriers and pass commands, and writes the end timestamp. A stage
+enum may intentionally be a subset of the graph: a pass with no matching enum
+still receives a breadcrumb but consumes no timestamp queries. Both pointers are
+optional, so an uninstrumented execution has no runtime instrumentation calls.
+
+The built-in path uses allocation-free `VK_EXT_debug_utils` labels. It creates
+no marker buffers and consumes no VRAM. No proprietary diagnostics SDK is
+included or linked, and none of this native machinery is exposed through
+`Render.hpp` or gameplay code.
+
+A renderer integrator can provide a native backend at build time with
+`ZHLN_GPU_DIAGNOSTICS_BACKEND_SOURCE`; optional SDK binaries are supplied via
+`ZHLN_GPU_DIAGNOSTICS_BACKEND_LIBRARIES`. Both remain outside source control.
+The backend source is compiled as part of `zahlen_render`, where Vulkan handles
+already belong, and implements the single internal factory:
+
+```cpp
+#include "Rendering.hpp" // Renderer integration code only.
+
+namespace ZHLN::Vk {
+GPUCrashTrackerCallbacks CreateConfiguredGPUCrashTracker(
+    GPUVendor vendor,
+    VkDevice device,
+    VkPhysicalDevice physical,
+    DiagnosticConfig config
+) {
+    if (vendor == GPUVendor::NVIDIA) {
+        return MakeGPUCrashTrackerCallbacks(
+            MyAftermathBackend::Create(device, physical, config)
+        );
+    }
+    return {};
+}
+} // namespace ZHLN::Vk
+```
+
+The renderer invokes this factory once, after native device creation. Gameplay
+only sees the original object API: `RenderContext::Create(window, config)`.
+
 ---
 
 ## 4. Resource Binding & Layouts

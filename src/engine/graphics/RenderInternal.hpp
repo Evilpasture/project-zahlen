@@ -246,30 +246,44 @@ using ActiveGBuffer = Vk::GBufferLayout<
     Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>           // Index 2: normalRoughnessBuffer
     >;
 
+// Keep these enumerator names identical to the compile-time graph pass names.
+// CompileTimeFrameGraph resolves them through reflection and injects timestamps;
+// adding a graph pass therefore requires no profiling code in its record lambda.
 enum class Stage : uint8_t {
-    ShadowPass,
     MainPass1,
+    HiZGenerate,
+    ClusterCulling,
     MainPass2,
-    HiZPass,
-    DecalPass,
-    ViewmodelPass,
+    MainShadow,
+    ParticleUpdate,
+    MeshParticleUpdate,
+    VolumetricClear,
+    VolumetricFogInject,
+    VolumetricLightInject,
+    VolumetricIntegrate,
+    VolumetricTemporal,
+    Ambient,
+    Lighting,
+    Reflection,
     TransPrePass,
     TransReflection,
-    AAPass,
-    ForwardPass,
-    BloomThreshPass,
-    BloomBlurHPass,
-    BloomBlurVPass,
-    BlitPass,
-    PostProcessPass,
-    VolumetricClearPass,
-    VolumetricFogInjectPass,
-    VolumetricLightInjectPass,
-    VolumetricIntegratePass,
-    VolumetricTemporalPass,
-    ClusterCullingPass,
-    ParticleUpdatePass,
-    MeshParticleUpdatePass,
+    Forward,
+    BloomThreshold,
+    BloomDown0,
+    BloomDown1,
+    BloomDown2,
+    BloomUp2,
+    BloomUp1,
+    BloomUp0,
+    DecalPass,
+    TAA,
+    FXAA,
+    MLAA,
+    SmaaEdge,
+    SmaaWeight,
+    SmaaBlend,
+    Blit,
+    Viewmodel,
 };
 
 using FrameProfiler = Profiler::GpuProfiler<Stage>;
@@ -881,9 +895,10 @@ struct RenderContext::Impl {
     FrameUniforms currentUniforms {};
     float         currentDt = 0.0166f;
 
-    GISettings    giSettings {};
-    AAState       aaState {};
-    FrameProfiler gpuProfiler;
+    GISettings         giSettings {};
+    AAState            aaState {};
+    FrameProfiler      gpuProfiler;
+    Vk::GPUDiagnostics gpuDiagnostics;
 
     struct WatchableShader {
         std::string           path;

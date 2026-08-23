@@ -284,8 +284,21 @@ class CompileTimeFrameGraph {
 
     constexpr explicit CompileTimeFrameGraph(Passes&&... passes);
 
-    template <typename ProfilerT = void*>
-    void Execute(VkCommandBuffer cmd, const Binder& binder, uint32_t frameIndex = 0, ProfilerT* profiler = nullptr) const;
+    /**
+     * @brief Record every pass, automatically injecting optional diagnostics and profiling.
+     *
+     * A diagnostics backend receives the compile-time pass name before barriers are
+     * recorded. A profiler maps that same name to its reflected StageType enum; passes
+     * without a matching enumerator are simply left unprofiled.
+     */
+    template <typename ProfilerT = void, typename DiagnosticsT = void>
+    void Execute(
+        VkCommandBuffer cmd,
+        const Binder&   binder,
+        uint32_t        frameIndex  = 0,
+        ProfilerT*      profiler    = nullptr,
+        DiagnosticsT*   diagnostics = nullptr
+    ) const;
 
   private:
     template <size_t PassIndex, typename PassType>
@@ -336,13 +349,14 @@ class CompileTimeFrameGraph {
         }
     }
 
-    template <size_t PassIndex, typename PassType, typename ProfilerT>
+    template <size_t PassIndex, typename PassType, typename ProfilerT, typename DiagnosticsT>
     void ExecutePass(
         VkCommandBuffer                                cmd,
         const std::array<GraphResource, NumResources>& bindings,
         const PassType&                                pass,
         uint32_t                                       frameIndex,
-        ProfilerT*                                     profiler
+        ProfilerT*                                     profiler,
+        DiagnosticsT*                                  diagnostics
     ) const;
 
     std::tuple<Passes...> _passes;
