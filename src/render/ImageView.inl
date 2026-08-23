@@ -38,7 +38,7 @@ constexpr auto GetFormatAspect(VkFormat format) noexcept -> VkImageAspectFlags {
 }
 
 template <VkFormat F>
-inline auto CreateView(VkDevice device, VkImage image, VkImageAspectFlags aspect, uint32_t mips) -> ImageView {
+inline auto CreateView(VkDevice device, VkImage image, VkImageAspectFlags aspect, uint32_t mips) -> std::expected<ImageView, VkResult> {
     ZHLN_ImageViewDesc desc = {
         .image            = image,
         .format           = F,
@@ -49,12 +49,16 @@ inline auto CreateView(VkDevice device, VkImage image, VkImageAspectFlags aspect
         .base_array_layer = 0,
         .base_mip         = {},
     };
-    VkImageView view = ZHLN_CreateImageView(device, &desc);
+    VkImageView view = VK_NULL_HANDLE;
+    VkResult    res  = ZHLN_CreateImageView(device, &desc, &view);
+    if (res != VK_SUCCESS) {
+        return std::unexpected(res);
+    }
     return ImageView {device, view};
 }
 
 template <VkFormat F>
-inline auto CreateView3D(VkDevice device, VkImage image, VkImageAspectFlags aspect, uint32_t mips) -> ImageView {
+inline auto CreateView3D(VkDevice device, VkImage image, VkImageAspectFlags aspect, uint32_t mips) -> std::expected<ImageView, VkResult> {
     ZHLN_ImageViewDesc desc = {
         .image            = image,
         .format           = F,
@@ -65,12 +69,16 @@ inline auto CreateView3D(VkDevice device, VkImage image, VkImageAspectFlags aspe
         .base_array_layer = 0,
         .base_mip         = {},
     };
-    VkImageView view = ZHLN_CreateImageView(device, &desc);
+    VkImageView view = VK_NULL_HANDLE;
+    VkResult    res  = ZHLN_CreateImageView(device, &desc, &view);
+    if (res != VK_SUCCESS) {
+        return std::unexpected(res);
+    }
     return ImageView {device, view};
 }
 
 template <VkFormat F>
-inline auto CreateViewCube(VkDevice device, VkImage image, uint32_t mips) -> ImageView {
+inline auto CreateViewCube(VkDevice device, VkImage image, uint32_t mips) -> std::expected<ImageView, VkResult> {
     ZHLN_ImageViewDesc desc = {
         .image            = image,
         .format           = F,
@@ -81,12 +89,17 @@ inline auto CreateViewCube(VkDevice device, VkImage image, uint32_t mips) -> Ima
         .base_array_layer = 0,
         .base_mip         = {},
     };
-    VkImageView view = ZHLN_CreateImageView(device, &desc);
+    VkImageView view = VK_NULL_HANDLE;
+    VkResult    res  = ZHLN_CreateImageView(device, &desc, &view);
+    if (res != VK_SUCCESS) {
+        return std::unexpected(res);
+    }
     return ImageView {device, view};
 }
 
 template <VkFormat F>
-inline auto CreateView2DArray(VkDevice device, VkImage image, uint32_t baseLayer, uint32_t layerCount, VkImageAspectFlags aspect, uint32_t mips) -> ImageView {
+inline auto CreateView2DArray(VkDevice device, VkImage image, uint32_t baseLayer, uint32_t layerCount, VkImageAspectFlags aspect, uint32_t mips)
+    -> std::expected<ImageView, VkResult> {
     ZHLN_ImageViewDesc desc = {
         .image            = image,
         .format           = F,
@@ -97,12 +110,17 @@ inline auto CreateView2DArray(VkDevice device, VkImage image, uint32_t baseLayer
         .base_array_layer = baseLayer,
         .base_mip         = {},
     };
-    VkImageView view = ZHLN_CreateImageView(device, &desc);
+    VkImageView view = VK_NULL_HANDLE;
+    VkResult    res  = ZHLN_CreateImageView(device, &desc, &view);
+    if (res != VK_SUCCESS) {
+        return std::unexpected(res);
+    }
     return ImageView {device, view};
 }
 
 template <VkFormat F>
-inline auto CreateViewCubeArray(VkDevice device, VkImage image, uint32_t arrayLayers, VkImageAspectFlags aspect, uint32_t mips) -> ImageView {
+inline auto CreateViewCubeArray(VkDevice device, VkImage image, uint32_t arrayLayers, VkImageAspectFlags aspect, uint32_t mips)
+    -> std::expected<ImageView, VkResult> {
     ZHLN_ImageViewDesc desc = {
         .image            = image,
         .format           = F,
@@ -113,12 +131,16 @@ inline auto CreateViewCubeArray(VkDevice device, VkImage image, uint32_t arrayLa
         .base_array_layer = 0,
         .base_mip         = {},
     };
-    VkImageView view = ZHLN_CreateImageView(device, &desc);
+    VkImageView view = VK_NULL_HANDLE;
+    VkResult    res  = ZHLN_CreateImageView(device, &desc, &view);
+    if (res != VK_SUCCESS) {
+        return std::unexpected(res);
+    }
     return ImageView {device, view};
 }
 
 template <VkFormat F>
-inline auto CreateViewSingleMip(VkDevice device, VkImage image, uint32_t baseMip, VkImageAspectFlags aspect) -> ImageView {
+inline auto CreateViewSingleMip(VkDevice device, VkImage image, uint32_t baseMip, VkImageAspectFlags aspect) -> std::expected<ImageView, VkResult> {
     ZHLN_ImageViewDesc desc = {
         .image            = image,
         .format           = F,
@@ -129,7 +151,11 @@ inline auto CreateViewSingleMip(VkDevice device, VkImage image, uint32_t baseMip
         .base_array_layer = 0,
         .base_mip         = baseMip
     };
-    VkImageView view = ZHLN_CreateImageView(device, &desc);
+    VkImageView view = VK_NULL_HANDLE;
+    VkResult    res  = ZHLN_CreateImageView(device, &desc, &view);
+    if (res != VK_SUCCESS) {
+        return std::unexpected(res);
+    }
     return ImageView {device, view};
 }
 

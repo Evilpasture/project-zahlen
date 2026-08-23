@@ -1123,11 +1123,11 @@ struct RenderContext::Impl {
     void CheckShaderWatchers() noexcept;
 
     template <VkFormat F>
-    [[nodiscard]] auto CreateDefaultTarget(VkExtent2D ext, VkImageUsageFlags extraFlags = 0) {
+    [[nodiscard]] auto CreateDefaultTarget(VkExtent2D ext, VkImageUsageFlags extraFlags = 0) -> std::expected<Vk::RenderTarget<F>, VkResult> {
         return Vk::RenderTarget<F>::Create(allocator, ctx, ext, {.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | extraFlags});
     }
 
-    bool RecreateTargets(VkExtent2D ext);
+    [[nodiscard]] std::expected<void, Error> RecreateTargets(VkExtent2D ext);
 
     void                                     RecreatePunctualShadowViews() noexcept;
     [[nodiscard]] std::expected<void, Error> InitSkeletalAnimationResources();

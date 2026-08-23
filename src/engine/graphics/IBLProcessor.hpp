@@ -47,7 +47,13 @@ class IBLProcessor {
             return std::unexpected(upload_res.error());
         }
 
-        payload.brdfLutView     = CreateView<VK_FORMAT_R8G8B8A8_UNORM>(impl.ctx.Device(), payload.brdfLutImage.Handle());
+        {
+            auto view_res = CreateView<VK_FORMAT_R8G8B8A8_UNORM>(impl.ctx.Device(), payload.brdfLutImage.Handle());
+            if (!view_res) {
+                return std::unexpected(view_res.error());
+            }
+            payload.brdfLutView = std::move(*view_res);
+        }
         payload.brdfLutViewInfo = MakeViewCreateInfo2D(payload.brdfLutImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
 
         // Pass 2: Spherical Harmonics Generation
@@ -77,7 +83,7 @@ class IBLProcessor {
         }
 
         return Buffer::Create(impl.allocator.Get(), totalBytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY)
-            .transform([&](auto&& stagingBuf) -> auto {
+            .and_then([&](auto&& stagingBuf) -> std::expected<IBLPayload, VkResult> {
                 auto   mapped        = stagingBuf.Map();
                 char*  writePtr      = static_cast<char*>(mapped.data);
                 size_t currentOffset = 0;
@@ -96,7 +102,11 @@ class IBLProcessor {
                 staging.UploadPrefilteredCubeMap(payload.prefilteredImage.Handle(), stagingBuf.Handle(), kBaseSize, kMipLevels);
                 staging.AddBuffer(std::forward<decltype(stagingBuf)>(stagingBuf));
 
-                payload.prefilteredView     = CreateViewCube<VK_FORMAT_R8G8B8A8_UNORM>(impl.ctx.Device(), payload.prefilteredImage.Handle(), kMipLevels);
+                auto view_res = CreateViewCube<VK_FORMAT_R8G8B8A8_UNORM>(impl.ctx.Device(), payload.prefilteredImage.Handle(), kMipLevels);
+                if (!view_res) {
+                    return std::unexpected(view_res.error());
+                }
+                payload.prefilteredView     = std::move(*view_res);
                 payload.prefilteredViewInfo = MakeViewCreateInfoCube(payload.prefilteredImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, kMipLevels);
                 return std::move(payload); // <-- Explicitly move to resolve the deleted copy constructor error
             });

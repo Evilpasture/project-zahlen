@@ -79,7 +79,11 @@ std::expected<uint32_t, Error>
     return Vk::Image::Create(allocator.Get(), imgInfo, VMA_MEMORY_USAGE_GPU_ONLY)
         .transform_error([](VkResult res) -> Error { return res; })
         .and_then([&, device, width, height, variantIdx, scale, randomness, distortion](auto&& gpuImage) -> std::expected<uint32_t, Error> {
-            auto writeView = Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 1);
+            auto view_res = Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 1);
+            if (!view_res) {
+                return std::unexpected(Error(view_res.error()));
+            }
+            auto writeView = std::move(*view_res);
 
             // VK_EXT_descriptor_heap: write the bake output's storage-image
             // descriptor into the static heap slot.

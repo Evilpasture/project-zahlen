@@ -617,7 +617,7 @@ typedef struct ZHLN_ImageViewDesc {
 } ZHLN_ImageViewDesc;
 
 [[nodiscard]]
-VkImageView ZHLN_CreateImageView(VkDevice device, const ZHLN_ImageViewDesc* ZHLN_RESTRICT desc);
+VkResult ZHLN_CreateImageView(VkDevice device, const ZHLN_ImageViewDesc* ZHLN_RESTRICT desc, VkImageView* ZHLN_RESTRICT out_view);
 
 void ZHLN_DestroyImageView(VkDevice device, VkImageView view);
 

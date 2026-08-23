@@ -806,17 +806,23 @@ std::expected<void, Error> RenderContext::Impl::InitShadowResources() {
 
         // 2. Allocate Cascaded Shadow Map Render Target
         .and_then([&]() -> std::expected<void, Error> {
-            graphResources.shadowMap = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
+            auto sm_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
                 allocator, ctx, {.width = SHADOW_RES, .height = SHADOW_RES},
                 {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, .arrayLayers = NUM_CASCADES}
             );
-            shadowMapPrev = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
-                allocator, ctx, {.width = SHADOW_RES, .height = SHADOW_RES},
-                {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, .arrayLayers = NUM_CASCADES}
-            );
-            if (!graphResources.shadowMap.Valid() || !shadowMapPrev.Valid()) [[unlikely]] {
+            if (!sm_res) {
                 return std::unexpected(SubsystemAllocationFailed);
             }
+            graphResources.shadowMap = std::move(*sm_res);
+
+            auto smp_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
+                allocator, ctx, {.width = SHADOW_RES, .height = SHADOW_RES},
+                {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, .arrayLayers = NUM_CASCADES}
+            );
+            if (!smp_res) {
+                return std::unexpected(SubsystemAllocationFailed);
+            }
+            shadowMapPrev = std::move(*smp_res);
             return {};
         })
 
@@ -825,8 +831,20 @@ std::expected<void, Error> RenderContext::Impl::InitShadowResources() {
             shadowCascadeViews.resize(NUM_CASCADES);
             shadowCascadeViewsPrev.resize(NUM_CASCADES);
             for (uint32_t i = 0; i < NUM_CASCADES; ++i) {
-                shadowCascadeViews[i]     = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), graphResources.shadowMap.image.Handle(), i, 1);
-                shadowCascadeViewsPrev[i] = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), shadowMapPrev.image.Handle(), i, 1);
+                {
+                    auto view_res = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), graphResources.shadowMap.image.Handle(), i, 1);
+                    if (!view_res) {
+                        return std::unexpected(SubsystemAllocationFailed);
+                    }
+                    shadowCascadeViews[i] = std::move(*view_res);
+                }
+                {
+                    auto prev_res = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), shadowMapPrev.image.Handle(), i, 1);
+                    if (!prev_res) {
+                        return std::unexpected(SubsystemAllocationFailed);
+                    }
+                    shadowCascadeViewsPrev[i] = std::move(*prev_res);
+                }
                 if (!shadowCascadeViews[i].Valid() || !shadowCascadeViewsPrev[i].Valid()) [[unlikely]] {
                     return std::unexpected(SubsystemAllocationFailed);
                 }
@@ -836,20 +854,33 @@ std::expected<void, Error> RenderContext::Impl::InitShadowResources() {
 
         // 4. Allocate Punctual Shadow Atlas Render Target
         .and_then([&]() -> std::expected<void, Error> {
-            graphResources.shadowAtlas = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
+            auto sa_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
                 allocator, ctx, {.width = 1024, .height = 1024},
                 {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, .arrayLayers = 24}
             );
-            if (!graphResources.shadowAtlas.Valid()) [[unlikely]] {
+            if (!sa_res) [[unlikely]] {
                 return std::unexpected(SubsystemAllocationFailed);
             }
+            graphResources.shadowAtlas = std::move(*sa_res);
             return {};
         })
 
         // 5. Create Atlas Image Views
         .and_then([&]() -> std::expected<void, Error> {
-            shadowAtlasCubeView     = Vk::CreateViewCubeArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), graphResources.shadowAtlas.image.Handle(), 24);
-            shadowAtlas2DView       = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), graphResources.shadowAtlas.image.Handle(), 0, 24);
+            {
+                auto cube_res = Vk::CreateViewCubeArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), graphResources.shadowAtlas.image.Handle(), 24);
+                if (!cube_res) {
+                    return std::unexpected(SubsystemAllocationFailed);
+                }
+                shadowAtlasCubeView = std::move(*cube_res);
+            }
+            {
+                auto array_res = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), graphResources.shadowAtlas.image.Handle(), 0, 24);
+                if (!array_res) {
+                    return std::unexpected(SubsystemAllocationFailed);
+                }
+                shadowAtlas2DView = std::move(*array_res);
+            }
             shadowAtlasCubeViewInfo = {
                 .sType      = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
                 .pNext      = nullptr,
@@ -2122,12 +2153,15 @@ void RenderContext::Impl::RecreatePunctualShadowViews() noexcept {
     punctualShadowViews.clear();
     punctualShadowViews.resize(MAX_PUNCTUAL_LIGHTS);
     for (uint32_t i = 0; i < MAX_PUNCTUAL_LIGHTS; ++i) {
-        punctualShadowViews[i] = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(
+        auto view_res = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(
             ctx.Device(), graphResources.shadowAtlas.image.Handle(),
             i * 6,                    // baseLayer
             6,                        // layerCount
             VK_IMAGE_ASPECT_DEPTH_BIT // aspect
         );
+        if (view_res.has_value()) {
+            punctualShadowViews[i] = std::move(*view_res);
+        }
     }
 }
 
@@ -2248,8 +2282,12 @@ std::expected<void, Error> RenderContext::Impl::InitLightingLUTs() {
 
             stagingContext->ExecuteAsync();
 
-            ltcMatView     = Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcMatImage.Handle());
-            ltcAmpView     = Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcAmpImage.Handle());
+            if (auto mat_view = Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcMatImage.Handle())) {
+                ltcMatView = std::move(*mat_view);
+            }
+            if (auto amp_view = Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcAmpImage.Handle())) {
+                ltcAmpView = std::move(*amp_view);
+            }
             ltcMatViewInfo = Vk::MakeViewCreateInfo2D(ltcMatImage.Handle(), VK_FORMAT_R16G16B16A16_SFLOAT, 1, VK_IMAGE_ASPECT_COLOR_BIT);
             ltcAmpViewInfo = Vk::MakeViewCreateInfo2D(ltcAmpImage.Handle(), VK_FORMAT_R16G16B16A16_SFLOAT, 1, VK_IMAGE_ASPECT_COLOR_BIT);
 
@@ -2257,227 +2295,208 @@ std::expected<void, Error> RenderContext::Impl::InitLightingLUTs() {
         });
 }
 
-bool RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
+std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
     if (!presentation.Rebuild(ext.width, ext.height)) {
-        return false;
+        return std::unexpected(RenderInitError::PresentationFailed);
     }
 
-    graphResources.sceneColor            = CreateDefaultTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32>(ext);
-    graphResources.velocityBuffer        = CreateDefaultTarget<VK_FORMAT_R16G16_SFLOAT>(ext);
-    frames.accumBuffers[0]               = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext, VK_IMAGE_USAGE_TRANSFER_DST_BIT);
-    frames.accumBuffers[1]               = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext, VK_IMAGE_USAGE_TRANSFER_DST_BIT);
-    graphResources.normalRoughnessBuffer = CreateDefaultTarget<VK_FORMAT_R8G8B8A8_UNORM>(ext);
-    graphResources.hdrSceneColor         = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext, VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
-    graphResources.ambientTarget         = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
-    graphResources.lightingTarget        = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
-    graphResources.smaaEdgeTarget        = CreateDefaultTarget<VK_FORMAT_R8G8_UNORM>(ext);
-    graphResources.smaaWeightTarget      = CreateDefaultTarget<VK_FORMAT_R8G8B8A8_UNORM>(ext);
-
-    VkExtent2D ext2  = {.width = std::max(1u, ext.width / 2), .height = std::max(1u, ext.height / 2)};
-    VkExtent2D ext4  = {.width = std::max(1u, ext.width / 4), .height = std::max(1u, ext.height / 4)};
-    VkExtent2D ext8  = {.width = std::max(1u, ext.width / 8), .height = std::max(1u, ext.height / 8)};
-    VkExtent2D ext16 = {.width = std::max(1u, ext.width / 16), .height = std::max(1u, ext.height / 16)};
-    // 160x90 aligns cleanly with 16x9 light clusters, maintaining 10x subdivision.
-    VkExtent3D voxelExt = {.width = 160, .height = 90, .depth = 64};
-
-    graphResources.voxelMedia = Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
-        allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
-    );
-
-    graphResources.voxelLight = Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
-        allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
-    );
-
-    graphResources.voxelIntegrated = Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
-        allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
-    );
-
-    graphResources.voxelHistory = Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
-        allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
-    );
-
-    graphResources.voxelResolved = Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>::Create(
-        allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
-    );
-
-    graphResources.bloomThresholdTarget = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext2);
-    graphResources.bloomDown1           = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext4);
-    graphResources.bloomDown2           = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext8);
-    graphResources.bloomDown3           = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext16);
-    graphResources.bloomUp2             = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext8);
-    graphResources.bloomUp1             = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext4);
-    graphResources.bloomFinalTarget     = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext2);
-    graphResources.transNormalBuffer    = CreateDefaultTarget<VK_FORMAT_R8G8B8A8_UNORM>(ext);
-    graphResources.transLightingTarget  = CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext);
-    graphResources.transDepthBuffer     = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>::Create(
-        allocator, ctx, ext, {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT}
-    );
-    graphResources.hizMap = Vk::MipmappedRenderTarget<VK_FORMAT_R32_SFLOAT>::Create(
-        allocator, ctx, ext,
-        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-            VK_IMAGE_USAGE_TRANSFER_DST_BIT
-    );
-
-    RecreatePunctualShadowViews();
-
-    // Transition all newly allocated render targets to their correct default layouts
-    Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
-        // History-bearing targets are READ before their first full-coverage
-        // write: TAA samples AccumCurr on frame 0, and the volumetric
-        // temporal filter samples VoxelHist before it ever wrote it (and the
-        // graphics queue reads VoxelResolved one compute-submission early).
-        // Leaving the content as VRAM garbage made the very first frames
-        // differ between runs — worse, NaN bit patterns survive the
-        // neighborhood clamps and poison temporal accumulation indefinitely.
-        // Clear every target whose first definition is a read.
-        const VkClearColorValue       clearBlack = {.float32 = {0.0F, 0.0F, 0.0F, 0.0F}};
-        const VkImageSubresourceRange clearRange = {
-            .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel   = 0,
-            .levelCount     = VK_REMAINING_MIP_LEVELS,
-            .baseArrayLayer = 0,
-            .layerCount     = VK_REMAINING_ARRAY_LAYERS
-        };
-        const std::array accumImages = {frames.accumBuffers[0].image.Handle(), frames.accumBuffers[1].image.Handle()};
-        for (const auto img: accumImages) {
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
-            vkCmdClearColorImage(cmd, img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearBlack, 1, &clearRange);
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
+    auto assign_target = [this](auto& member, auto expected) -> std::expected<void, Error> {
+        if (!expected) {
+            return std::unexpected(RenderInitError::SubsystemAllocationFailed);
         }
-        const std::array targets3D = {
-            graphResources.voxelMedia.image.Handle(), graphResources.voxelLight.image.Handle(), graphResources.voxelIntegrated.image.Handle(),
-            graphResources.voxelHistory.image.Handle(), graphResources.voxelResolved.image.Handle()
-        };
-        for (auto* const img: targets3D) {
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
-            vkCmdClearColorImage(cmd, img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearBlack, 1, &clearRange);
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
+        member = std::move(*expected);
+        return {};
+    };
+
+    auto assign_target3d = [this](auto& member, auto expected) -> std::expected<void, Error> {
+        if (!expected) {
+            return std::unexpected(RenderInitError::SubsystemAllocationFailed);
         }
+        member = std::move(*expected);
+        return {};
+    };
 
-        std::array colorTargets = {graphResources.sceneColor.image.Handle(),
-                                   graphResources.velocityBuffer.image.Handle(),
-                                   graphResources.normalRoughnessBuffer.image.Handle(),
-                                   graphResources.hdrSceneColor.image.Handle(),
-                                   graphResources.ambientTarget.image.Handle(),
-                                   graphResources.lightingTarget.image.Handle(),
-                                   graphResources.smaaEdgeTarget.image.Handle(),
-                                   graphResources.smaaWeightTarget.image.Handle(),
-                                   graphResources.bloomThresholdTarget.image.Handle(),
-                                   graphResources.bloomDown1.image.Handle(),
-                                   graphResources.bloomDown2.image.Handle(),
-                                   graphResources.bloomDown3.image.Handle(),
-                                   graphResources.bloomUp2.image.Handle(),
-                                   graphResources.bloomUp1.image.Handle(),
-                                   graphResources.bloomFinalTarget.image.Handle(),
-                                   graphResources.transNormalBuffer.image.Handle(),
-                                   graphResources.transLightingTarget.image.Handle()};
+    return assign_target(graphResources.sceneColor, CreateDefaultTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32>(ext))
+        .and_then([&]() { return assign_target(graphResources.velocityBuffer, CreateDefaultTarget<VK_FORMAT_R16G16_SFLOAT>(ext)); })
+        .and_then([&]() { return assign_target(frames.accumBuffers[0], CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext, VK_IMAGE_USAGE_TRANSFER_DST_BIT)); })
+        .and_then([&]() { return assign_target(frames.accumBuffers[1], CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext, VK_IMAGE_USAGE_TRANSFER_DST_BIT)); })
+        .and_then([&]() { return assign_target(graphResources.normalRoughnessBuffer, CreateDefaultTarget<VK_FORMAT_R8G8B8A8_UNORM>(ext)); })
+        .and_then([&]() { return assign_target(graphResources.hdrSceneColor, CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext, VK_IMAGE_USAGE_TRANSFER_SRC_BIT)); })
+        .and_then([&]() { return assign_target(graphResources.ambientTarget, CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext)); })
+        .and_then([&]() { return assign_target(graphResources.lightingTarget, CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext)); })
+        .and_then([&]() { return assign_target(graphResources.smaaEdgeTarget, CreateDefaultTarget<VK_FORMAT_R8G8_UNORM>(ext)); })
+        .and_then([&]() { return assign_target(graphResources.smaaWeightTarget, CreateDefaultTarget<VK_FORMAT_R8G8B8A8_UNORM>(ext)); })
 
-        for (auto* const img: colorTargets) {
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
-        }
+    .and_then([&]() {
+            VkExtent2D ext2  = {.width = std::max(1u, ext.width / 2), .height = std::max(1u, ext.height / 2)};
+            VkExtent2D ext4  = {.width = std::max(1u, ext.width / 4), .height = std::max(1u, ext.height / 4)};
+            VkExtent2D ext8  = {.width = std::max(1u, ext.width / 8), .height = std::max(1u, ext.height / 8)};
+            VkExtent2D ext16 = {.width = std::max(1u, ext.width / 16), .height = std::max(1u, ext.height / 16)};
+            return assign_target(graphResources.bloomThresholdTarget, CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext2));
+        })
+        .and_then([&]() { return assign_target(graphResources.bloomDown1, CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext4)); })
+        .and_then([&]() { return assign_target(graphResources.bloomDown2, CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext8)); })
+        .and_then([&]() { return assign_target(graphResources.bloomDown3, CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext16)); })
+        .and_then([&]() { return assign_target(graphResources.bloomUp2, CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext8)); })
+        .and_then([&]() { return assign_target(graphResources.bloomUp1, CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext4)); })
+        .and_then([&]() { return assign_target(graphResources.bloomFinalTarget, CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext2)); })
+        .and_then([&]() { return assign_target(graphResources.transNormalBuffer, CreateDefaultTarget<VK_FORMAT_R8G8B8A8_UNORM>(ext)); })
+        .and_then([&]() { return assign_target(graphResources.transLightingTarget, CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext)); })
+        .and_then([&]() {
+            return assign_target(graphResources.transDepthBuffer,
+                Vk::RenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>::Create(
+                    allocator, ctx, ext, {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT}
+                ));
+        })
+        .and_then([&]() {
+            return assign_target(graphResources.hizMap,
+                Vk::MipmappedRenderTarget<VK_FORMAT_R32_SFLOAT>::Create(
+                    allocator, ctx, ext,
+                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                        VK_IMAGE_USAGE_TRANSFER_DST_BIT
+                ));
+        })
+        .transform([&]() { RecreatePunctualShadowViews(); })
 
-        // VK_EXT_descriptor_heap: the decal pass samples the depth target
-        // through the heap, so rewrite its descriptor whenever the target is
-        // recreated (the old view was destroyed). Depth/stencil sampled-image
-        // descriptors must select exactly one aspect (VUID-VkImageDescriptorInfoEXT-pView-11430);
-        // decal.slang only reads the depth value.
-        if (decalDepthSlot.Valid()) {
-            const auto info = Vk::MakeViewCreateInfo2D(presentation.depthTarget.image.Handle(), VK_FORMAT_D32_SFLOAT_S8_UINT, 1, VK_IMAGE_ASPECT_DEPTH_BIT);
-            heapManager.WriteImage(decalDepthSlot, info, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        }
+    .transform([&]() {
+            RecreatePunctualShadowViews();
 
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>(
-            cmd, presentation.depthTarget.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
-        );
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-            cmd, presentation.depthTarget.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
-        );
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>(
-            cmd, graphResources.transDepthBuffer.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
-        );
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-            cmd, graphResources.transDepthBuffer.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
-        );
-        // (The five voxel volumes above end their clear sequence in GENERAL,
-        // matching every consumer: ComputeWrite/ComputeReadGeneral in the
-        // compute graph, ShaderReadGeneral in the frame graph's Reflection
-        // passes. The frame graph seeds resources it never writes as external
-        // read-only inputs at their first-usage layout and emits no barrier
-        // for them, so GENERAL must be their rest layout.)
+            // Transition all newly allocated render targets to their correct default layouts
+            Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
+                // History-bearing targets are READ before their first full-coverage
+                // write: TAA samples AccumCurr on frame 0, and the volumetric
+                // temporal filter samples VoxelHist before it ever wrote it (and the
+                // graphics queue reads VoxelResolved one compute-submission early).
+                // Leaving the content as VRAM garbage made the very first frames
+                // differ between runs — worse, NaN bit patterns survive the
+                // neighborhood clamps and poison temporal accumulation indefinitely.
+                // Clear every target whose first definition is a read.
+                const VkClearColorValue       clearBlack = {.float32 = {0.0F, 0.0F, 0.0F, 0.0F}};
+                const VkImageSubresourceRange clearRange = {
+                    .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+                    .baseMipLevel   = 0,
+                    .levelCount     = VK_REMAINING_MIP_LEVELS,
+                    .baseArrayLayer = 0,
+                    .layerCount     = VK_REMAINING_ARRAY_LAYERS
+                };
+                const std::array accumImages = {frames.accumBuffers[0].image.Handle(), frames.accumBuffers[1].image.Handle()};
+                for (const auto img: accumImages) {
+                    Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
+                    vkCmdClearColorImage(cmd, img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearBlack, 1, &clearRange);
+                    Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
+                }
+                const std::array targets3D = {
+                    graphResources.voxelMedia.image.Handle(), graphResources.voxelLight.image.Handle(), graphResources.voxelIntegrated.image.Handle(),
+                    graphResources.voxelHistory.image.Handle(), graphResources.voxelResolved.image.Handle()
+                };
+                for (auto* const img: targets3D) {
+                    Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
+                    vkCmdClearColorImage(cmd, img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearBlack, 1, &clearRange);
+                    Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
+                }
 
-        // The HiZ pyramid is the only render target not covered by the lists
-        // above: without this warm-up its whole mip chain sits in UNDEFINED
-        // until the first HiZGenerate, yet the two occlusion culling sets
-        // sample the full-chain view (written READ_ONLY) before that — pass 1
-        // already runs inside MainShadow, one pass earlier than HiZGenerate.
-        // Clear it to far depth so frame-0 culling conservatively occludes
-        // nothing instead of consuming raw VRAM garbage, and land it in its
-        // per-frame steady state (MainPass2's ComputeRead leaves it
-        // READ_ONLY) so every culling read is always well-defined.
-        const VkClearColorValue clearFarDepth = {.float32 = {1.0F, 1.0F, 1.0F, 1.0F}};
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
-            cmd, graphResources.hizMap.image.Handle(), VK_IMAGE_ASPECT_COLOR_BIT
-        );
-        vkCmdClearColorImage(cmd, graphResources.hizMap.image.Handle(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearFarDepth, 1, &clearRange);
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-            cmd, graphResources.hizMap.image.Handle(), VK_IMAGE_ASPECT_COLOR_BIT
-        );
-    });
+                std::array colorTargets = {graphResources.sceneColor.image.Handle(),
+                                           graphResources.velocityBuffer.image.Handle(),
+                                           graphResources.normalRoughnessBuffer.image.Handle(),
+                                           graphResources.hdrSceneColor.image.Handle(),
+                                           graphResources.ambientTarget.image.Handle(),
+                                           graphResources.lightingTarget.image.Handle(),
+                                           graphResources.smaaEdgeTarget.image.Handle(),
+                                           graphResources.smaaWeightTarget.image.Handle(),
+                                           graphResources.bloomThresholdTarget.image.Handle(),
+                                           graphResources.bloomDown1.image.Handle(),
+                                           graphResources.bloomDown2.image.Handle(),
+                                           graphResources.bloomDown3.image.Handle(),
+                                           graphResources.bloomUp2.image.Handle(),
+                                           graphResources.bloomUp1.image.Handle(),
+                                           graphResources.bloomFinalTarget.image.Handle(),
+                                           graphResources.transNormalBuffer.image.Handle(),
+                                           graphResources.transLightingTarget.image.Handle()};
 
-    // Translucency input is a plain Texture2D at registry slot 10 (sampler split).
-    // VK_EXT_descriptor_heap: rewrite its static heap descriptor for the new target.
-    WriteTransLightingToHeap();
+                for (auto* const img: colorTargets) {
+                    Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
+                    Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
+                }
 
-    // VK_EXT_descriptor_heap: rewrite the Hi-Z descriptor slots. One span per
-    // mip (the pushed index is the mip level); mip 0 samples the depth target,
-    // every later mip samples the previous mip in GENERAL (the whole pyramid
-    // is ComputeWrite for the duration of the pass).
-    const uint32_t mips = std::min<uint32_t>(graphResources.hizMap.mipLevels, 16);
-    for (uint32_t m = 0; m < mips; ++m) {
-        const Vk::TypedImage<VK_IMAGE_LAYOUT_GENERAL> outMip {
-            .handle   = graphResources.hizMap.image.Handle(),
-            .view     = graphResources.hizMap.mipViews[m].Get(),
-            .extent   = {.width = graphResources.hizMap.extent.width, .height = graphResources.hizMap.extent.height, .depth = 1},
-            .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
-            .format   = VK_FORMAT_R32_SFLOAT,
-            .viewInfo = &graphResources.hizMap.mipViewInfos[m]
-        };
-        if (m == 0) {
-            Vk::WriteHeapBindings(
-                heapManager, ctx, hizHeapBindings, m, Vk::Assume<Vk::ComputeRead<Res_Depth>>(presentation.depthTarget), outMip, Vk::SkipWrite {}
-            );
-        } else {
-            const Vk::TypedImage<VK_IMAGE_LAYOUT_GENERAL> inMip {
-                .handle   = graphResources.hizMap.image.Handle(),
-                .view     = graphResources.hizMap.mipViews[m - 1].Get(),
-                .extent   = {.width = graphResources.hizMap.extent.width, .height = graphResources.hizMap.extent.height, .depth = 1},
-                .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
-                .format   = VK_FORMAT_R32_SFLOAT,
-                .viewInfo = &graphResources.hizMap.mipViewInfos[m - 1]
-            };
-            Vk::WriteHeapBindings(heapManager, ctx, hizHeapBindings, m, inMip, outMip, Vk::SkipWrite {});
-        }
-    }
+                // VK_EXT_descriptor_heap: the decal pass samples the depth target
+                // through the heap, so rewrite its descriptor whenever the target is
+                // recreated (the old view was destroyed). Depth/stencil sampled-image
+                // descriptors must select exactly one aspect (VUID-VkImageDescriptorInfoEXT-pView-11430);
+                // decal.slang only reads the depth value.
+                if (decalDepthSlot.Valid()) {
+                    const auto info = Vk::MakeViewCreateInfo2D(presentation.depthTarget.image.Handle(), VK_FORMAT_D32_SFLOAT_S8_UINT, 1, VK_IMAGE_ASPECT_DEPTH_BIT);
+                    heapManager.WriteImage(decalDepthSlot, info, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                }
 
-    // Culling: one slot span per {pass 0/1} x {frame parity}. Binding order
-    // mirrors culling.slang's set-0 declaration order: g_instances,
-    // g_indirectCommands, g_hizTexture, g_pointSampler,
-    // secondPassCandidates, secondPassCount.
-    for (uint32_t idx = 0; idx < 4; ++idx) {
-        const uint32_t pass     = idx >> 1;
-        const uint32_t parity   = idx & 1;
-        const auto&    indirect = (pass == 0) ? frames.indirectCommandsBuffers[parity] : frames.indirectCommandsBuffersPass2[parity];
-        Vk::WriteHeapBindings(
-            heapManager, ctx, cullingHeapBindings, idx, frames.instanceDataBuffers[parity], indirect,
-            Vk::Assume<Vk::ComputeRead<Res_HiZ>>(graphResources.hizMap), Vk::SkipWrite {}, frames.secondPassCandidatesBuffers[parity],
-            frames.secondPassCountBuffers[parity]
-        );
-    }
+                Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>(
+                    cmd, presentation.depthTarget.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
+                );
+                Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+                    cmd, presentation.depthTarget.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
+                );
+                Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>(
+                    cmd, graphResources.transDepthBuffer.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
+                );
+                Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+                    cmd, graphResources.transDepthBuffer.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
+                );
 
-    ApplyImageDebugNames(*this);
+                const VkClearColorValue clearFarDepth = {.float32 = {1.0F, 1.0F, 1.0F, 1.0F}};
+                Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
+                    cmd, graphResources.hizMap.image.Handle(), VK_IMAGE_ASPECT_COLOR_BIT
+                );
+                vkCmdClearColorImage(cmd, graphResources.hizMap.image.Handle(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearFarDepth, 1, &clearRange);
+                Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+                    cmd, graphResources.hizMap.image.Handle(), VK_IMAGE_ASPECT_COLOR_BIT
+                );
+            });
 
-    return true;
+            // Translucency input is a plain Texture2D at registry slot 10 (sampler split).
+            // VK_EXT_descriptor_heap: rewrite its static heap descriptor for the new target.
+            WriteTransLightingToHeap();
+
+            // VK_EXT_descriptor_heap: rewrite the Hi-Z descriptor slots.
+            const uint32_t mips = std::min<uint32_t>(graphResources.hizMap.mipLevels, 16);
+            for (uint32_t m = 0; m < mips; ++m) {
+                const Vk::TypedImage<VK_IMAGE_LAYOUT_GENERAL> outMip {
+                    .handle   = graphResources.hizMap.image.Handle(),
+                    .view     = graphResources.hizMap.mipViews[m].Get(),
+                    .extent   = {.width = graphResources.hizMap.extent.width, .height = graphResources.hizMap.extent.height, .depth = 1},
+                    .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
+                    .format   = VK_FORMAT_R32_SFLOAT,
+                    .viewInfo = &graphResources.hizMap.mipViewInfos[m]
+                };
+                if (m == 0) {
+                    Vk::WriteHeapBindings(
+                        heapManager, ctx, hizHeapBindings, m, Vk::Assume<Vk::ComputeRead<Res_Depth>>(presentation.depthTarget), outMip, Vk::SkipWrite {}
+                    );
+                } else {
+                    const Vk::TypedImage<VK_IMAGE_LAYOUT_GENERAL> inMip {
+                        .handle   = graphResources.hizMap.image.Handle(),
+                        .view     = graphResources.hizMap.mipViews[m - 1].Get(),
+                        .extent   = {.width = graphResources.hizMap.extent.width, .height = graphResources.hizMap.extent.height, .depth = 1},
+                        .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
+                        .format   = VK_FORMAT_R32_SFLOAT,
+                        .viewInfo = &graphResources.hizMap.mipViewInfos[m - 1]
+                    };
+                    Vk::WriteHeapBindings(heapManager, ctx, hizHeapBindings, m, inMip, outMip, Vk::SkipWrite {});
+                }
+            }
+
+            // Culling: one slot span per {pass 0/1} x {frame parity}.
+            for (uint32_t idx = 0; idx < 4; ++idx) {
+                const uint32_t pass     = idx >> 1;
+                const uint32_t parity   = idx & 1;
+                const auto&    indirect = (pass == 0) ? frames.indirectCommandsBuffers[parity] : frames.indirectCommandsBuffersPass2[parity];
+                Vk::WriteHeapBindings(
+                    heapManager, ctx, cullingHeapBindings, idx, frames.instanceDataBuffers[parity], indirect,
+                    Vk::Assume<Vk::ComputeRead<Res_HiZ>>(graphResources.hizMap), Vk::SkipWrite {}, frames.secondPassCandidatesBuffers[parity],
+                    frames.secondPassCountBuffers[parity]
+                );
+            }
+
+            ApplyImageDebugNames(*this);
+        });
 }
 
 std::expected<void, Error> RenderContext::Impl::BuildHangGpuPipeline() {
