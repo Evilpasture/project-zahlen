@@ -15,7 +15,7 @@ std::expected<void, ZHLN::Error> ComputePass::BuildHeap(
     // VK_EXT_descriptor_heap: heap pipelines require layout == VK_NULL_HANDLE
     // (VUID-VkComputePipelineCreateInfo-flags-11311). Per-dispatch data
     // travels through vkCmdPushDataEXT.
-    if (!ReflectThreadGroupSize(shader)) {
+    if (!ReflectDispatchLayout(shader)) {
         return std::unexpected(RenderInitError::PipelineCreationFailed);
     }
     pipelineLayout      = {};
@@ -36,7 +36,7 @@ std::expected<void, ZHLN::Error> ComputePass::BuildHeapVariants(
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping,
     uint32_t                                             indexPushOffset
 ) noexcept {
-    if (!ReflectThreadGroupSize(shader)) {
+    if (!ReflectDispatchLayout(shader)) {
         return std::unexpected(RenderInitError::PipelineCreationFailed);
     }
     heapIndexPushOffset = indexPushOffset;

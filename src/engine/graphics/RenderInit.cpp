@@ -590,7 +590,7 @@ std::expected<Vk::Pipeline, Error>
 
     const ZHLN_ShaderDesc shader = {.code = Vk::AsSpirV(cs_code), .size = cs_size, .entry_point = cs.entryPoint};
     gpuDiagnostics.RegisterShader(shader, "CSMain");
-    if (!pass.ReflectThreadGroupSize(shader)) {
+    if (!pass.ReflectDispatchLayout(shader)) {
         return std::unexpected(RenderInitError::ShaderCompilationFailed);
     }
 

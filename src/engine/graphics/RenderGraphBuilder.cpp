@@ -100,11 +100,9 @@ struct PassFactory {
                 Vk::BarrierAccess::ShaderRead | Vk::BarrierAccess::ShaderWrite
             );
 
-            // Dispatch the logical 16x9x24 cell domain. ComputePass converts
-            // it to workgroup counts using the LocalSize reflected from Slang's
-            // [numthreads], so the host cannot accidentally multiply the grid
-            // dimensions by the shader's thread-group dimensions again.
-            self.clusterCullingPass.DispatchHeapIndexed(self.ctx, c, fIdx, 16, 9, 24);
+            // Both the logical grid and [numthreads] are reflected from Slang;
+            // the host supplies no shader-specific dimensions.
+            self.clusterCullingPass.DispatchHeapIndexed(self.ctx, c, fIdx);
 
             // clusterGrid / lightIndexList / globalCounter are structured
             // buffers, not graph resources, so CompileTimeFrameGraph inserts no

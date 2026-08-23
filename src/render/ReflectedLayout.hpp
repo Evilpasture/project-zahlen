@@ -49,6 +49,13 @@ struct ReflectedStageInput {
 [[nodiscard]] auto ReflectComputeThreadGroupSize(const ZHLN_ShaderDesc& shader) noexcept -> std::optional<std::array<uint32_t, 3>>;
 
 /**
+ * Reflects an optional fixed logical dispatch domain declared by the shader
+ * through Zahlen's reserved specialization-constant metadata IDs. Dynamic
+ * kernels omit this metadata and receive their domain from the caller.
+ */
+[[nodiscard]] auto ReflectComputeDispatchSize(const ZHLN_ShaderDesc& shader) noexcept -> std::optional<std::array<uint32_t, 3>>;
+
+/**
  * @brief Standalone SPIR-V parser that extracts binding structure only.
  * @note [UNSAFE] Populated by parsing untrusted SPIR-V bytecode at runtime.
  */

@@ -38,16 +38,20 @@ struct ComputePass {
     Pipeline                pipeline;
     std::vector<Pipeline>   pipelines; // Specialization variants share one mapping table
     std::array<uint32_t, 3> threadGroupSize {};
+    std::array<uint32_t, 3> fixedDispatchSize {};
     uint32_t                heapIndexPushOffset = 0;
 
-    /// Reflects Slang's `[numthreads]` from the compiled compute entry point.
-    [[nodiscard]] bool ReflectThreadGroupSize(const ZHLN_ShaderDesc& shader) noexcept {
+    /// Reflects Slang's `[numthreads]` and optional fixed dispatch metadata
+    /// from the compiled compute entry point.
+    [[nodiscard]] bool ReflectDispatchLayout(const ZHLN_ShaderDesc& shader) noexcept {
         auto reflected = ReflectComputeThreadGroupSize(shader);
         if (!reflected) {
-            threadGroupSize = {};
+            threadGroupSize   = {};
+            fixedDispatchSize = {};
             return false;
         }
-        threadGroupSize = *reflected;
+        threadGroupSize   = *reflected;
+        fixedDispatchSize = ReflectComputeDispatchSize(shader).value_or(std::array<uint32_t, 3> {});
         return true;
     }
 
@@ -138,6 +142,12 @@ struct ComputePass {
         Bind(cmd);
         PushHeapIndex(ctx, cmd, heapIndexPushOffset, heapIndex);
         Dispatch(cmd, threadCountX, threadCountY, threadCountZ);
+    }
+
+    /// Dispatches the fixed logical domain declared by the Slang shader.
+    void DispatchHeapIndexed(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex) const noexcept {
+        assert(fixedDispatchSize[0] > 0 && fixedDispatchSize[1] > 0 && fixedDispatchSize[2] > 0 && "Shader does not declare a reflected fixed dispatch domain");
+        DispatchHeapIndexed(ctx, cmd, heapIndex, fixedDispatchSize[0], fixedDispatchSize[1], fixedDispatchSize[2]);
     }
 };
 
