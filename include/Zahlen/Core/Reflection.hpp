@@ -49,6 +49,16 @@ struct MetaDescription {
     const char* text;
 };
 
+// ZHLN_ANNOTATE(expr) — P2996 annotation syntax [[= expr]].
+// Expands to the annotation when the compiler supports reflection + annotations,
+// empty otherwise. This lets error-code headers use annotations without requiring
+// -freflection -fannotation-attributes on every TU that includes them.
+#if defined(__cpp_impl_reflection) || (defined(__has_feature) && __has_feature(reflection))
+#define ZHLN_ANNOTATE(...) [[= __VA_ARGS__ ]]
+#else
+#define ZHLN_ANNOTATE(...)
+#endif
+
 } // namespace ZHLN::Reflect
 
 // ============================================================================
