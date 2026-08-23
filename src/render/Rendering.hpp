@@ -67,6 +67,7 @@ static constexpr auto isLegacy = false;
 // clang-format off
 #include "Extensions.hpp"
 #include "Features.hpp"
+#include "GPUDiagnostics.hpp"
 #include "DebugNames.hpp"
 #include "Vertex.hpp"
 #include "Handles.hpp"

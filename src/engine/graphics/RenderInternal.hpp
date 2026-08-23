@@ -928,6 +928,15 @@ struct RenderContext::Impl {
     ZHLN::Array<SortItem>                           sortTempScratch;
     ZHLN::Array<DrawCommand>                        sortDrawQueueScratch;
 
+    Vk::GPUDiagnostics gpuDiagnostics;
+
+    void WriteCheckpoint(VkCommandBuffer cmd, std::string_view name) const noexcept {
+        gpuDiagnostics.WriteCheckpoint(cmd, name);
+    }
+    void RegisterShader(const ZHLN_ShaderDesc& desc, std::string_view fallbackEntry = "main") const noexcept {
+        gpuDiagnostics.RegisterShader(desc, fallbackEntry);
+    }
+
     Impl(Window& win): window(win) {
     }
 
@@ -1164,6 +1173,10 @@ struct FrameRecorder {
         if (!heapsInherited) {
             ctx.BindHeapsAndPushFrame(c);
         }
+    }
+
+    void WriteCheckpoint(std::string_view name) const noexcept {
+        ctx.WriteCheckpoint(cmd, name);
     }
 };
 

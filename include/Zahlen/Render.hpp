@@ -229,6 +229,12 @@ class ZHLN_API RenderContext {
 
     [[nodiscard]] static uint32_t DeviceLostCount() noexcept;
 
+    /// Injects a diagnostic GPU breadcrumb into the active frame's command stream.
+    void WriteCheckpoint(std::string_view name) noexcept;
+
+    /// Triggers hardware fault diagnostic dumps and unblocks GPU crash handlers.
+    void OnDeviceLost() noexcept;
+
     RenderResult BuildMeshBLAS(Mesh& mesh) noexcept;
 
     [[nodiscard]] std::expected<void, Error> SetShadowResolution(uint32_t resolution);

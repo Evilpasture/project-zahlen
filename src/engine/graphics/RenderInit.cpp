@@ -575,6 +575,9 @@ std::expected<Vk::ShaderStages, Error> RenderContext::Impl::LoadAndCreateShaders
     LoadShaderData(vs, vs_code, vs_size, disk_vs);
     LoadShaderData(ps, ps_code, ps_size, disk_ps);
 
+    gpuDiagnostics.RegisterShader({.code = Vk::AsSpirV(vs_code), .size = vs_size, .entry_point = vs.entryPoint}, "VSMain");
+    gpuDiagnostics.RegisterShader({.code = Vk::AsSpirV(ps_code), .size = ps_size, .entry_point = ps.entryPoint}, "PSMain");
+
     return Vk::ShaderStages::Create(
                ctx.Device(), {.code = Vk::AsSpirV(vs_code), .size = vs_size, .entry_point = vs.entryPoint},
                {.code = Vk::AsSpirV(ps_code), .size = ps_size, .entry_point = ps.entryPoint}
@@ -588,6 +591,8 @@ std::expected<Vk::Pipeline, Error> RenderContext::Impl::LoadAndCreateComputeShad
     std::vector<uint32_t> disk_cs;
 
     LoadShaderData(cs, cs_code, cs_size, disk_cs);
+
+    gpuDiagnostics.RegisterShader({.code = Vk::AsSpirV(cs_code), .size = cs_size, .entry_point = cs.entryPoint}, "CSMain");
 
     return Vk::ComputePipelineBuilder()
         .Shader(Vk::AsSpirV(cs_code), cs_size, cs.entryPoint)
@@ -666,23 +671,53 @@ std::expected<std::unique_ptr<RenderContext>, Error> RenderContext::Create(Windo
             return {};
         })
         .and_then([&]() -> std::expected<void, Error> {
-            // Adopt surface into RAII container (VK_NULL_HANDLE is safe for headless)
             impl->surface         = Vk::Surface(instance, raw_surface);
             HardwareCaps caps     = ProbeHardware(physicalInfo.handle, physicalInfo.properties.properties.apiVersion);
             auto         features = BuildFeatureChain(physicalInfo.handle, caps, cfg.validationMode);
 
             return GetDeviceExtensions(physicalInfo.handle, window.IsHeadless(), caps.supportsMeshShader)
                 .and_then([&](auto&& dev_exts) -> std::expected<void, Error> {
+                    // 1. Select vendor backend via PCI Vendor ID
+                    const uint32_t vendorID = physicalInfo.properties.properties.vendorID;
+                    Vk::GPUVendor  vendor   = Vk::GPUVendor::Unknown;
+                    if (vendorID == static_cast<uint32_t>(Vk::GPUVendor::NVIDIA))
+                        vendor = Vk::GPUVendor::NVIDIA;
+                    else if (vendorID == static_cast<uint32_t>(Vk::GPUVendor::AMD))
+                        vendor = Vk::GPUVendor::AMD;
+                    else if (vendorID == static_cast<uint32_t>(Vk::GPUVendor::Intel))
+                        vendor = Vk::GPUVendor::Intel;
+                    else if (vendorID == static_cast<uint32_t>(Vk::GPUVendor::ARM))
+                        vendor = Vk::GPUVendor::ARM;
+                    else if (vendorID == static_cast<uint32_t>(Vk::GPUVendor::Qualcomm))
+                        vendor = Vk::GPUVendor::Qualcomm;
+
+                    impl->gpuDiagnostics.SelectBackend(vendor);
+
+                    // 2. Execute PreDeviceCreate hook to inject required extensions/pNext structures
+                    std::vector<const char*> devExtList  = dev_exts;
+                    void*                    ppNextChain = nullptr;
+                    impl->gpuDiagnostics.PreDeviceCreate(physicalInfo.handle, &ppNextChain, devExtList);
+
+                    if (ppNextChain != nullptr) {
+                        auto*  root = const_cast<VkPhysicalDeviceFeatures2*>(features.GetRoot());
+                        void** curr = &root->pNext;
+                        while (*curr != nullptr) {
+                            auto* header = static_cast<VkBaseOutStructure*>(*curr);
+                            curr         = reinterpret_cast<void**>(&header->pNext);
+                        }
+                        *curr = ppNextChain;
+                    }
+
                     return Vk::Context::Builder()
                         .Instance(instance)
                         .Surface(raw_surface)
                         .PhysicalDevice(physicalInfo)
-                        .DeviceExtensions(dev_exts)
+                        .DeviceExtensions(devExtList)
                         .DeviceFeatures(features.GetRoot())
                         .ValidationMode(static_cast<Vk::ValidationMode>(cfg.validationMode))
                         .Build()
                         .transform([&](auto&& context) {
-                            impl->ctx = std::forward<decltype(context)>(context);
+                            impl->ctx         = std::forward<decltype(context)>(context);
                             const auto vendor = static_cast<Vk::GPUVendor>(physicalInfo.properties.properties.vendorID);
                             impl->gpuDiagnostics.Create(vendor, impl->ctx.Device(), impl->ctx.Physical());
                         });
@@ -710,6 +745,7 @@ std::expected<void, Error> RenderContext::Impl::BuildSkinningPipeline() {
 
 RenderContext::~RenderContext() {
     if (_impl && (_impl->ctx.Device() != nullptr)) {
+        _impl->gpuDiagnostics.Shutdown();
         auto res = Vk::WaitIdle(_impl->ctx.Device());
         if (res != VK_SUCCESS) {
             ZHLN::Log("ERROR: Failed to wait for idle on device destruction.");

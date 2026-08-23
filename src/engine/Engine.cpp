@@ -328,6 +328,7 @@ Engine::Engine(const EngineConfig& cfg): _impl(nullptr) {
 
 void Engine::HandleDeviceLost() noexcept {
     ZHLN::Log("[Engine] CRITICAL: Vulkan Device Lost detected! Initiating hardware hot-rebuild...");
+    _impl->renderContext->OnDeviceLost();
 
     // 1. Reset and Recreate Render Context (New Vulkan Device)
     _impl->renderContext.reset();
