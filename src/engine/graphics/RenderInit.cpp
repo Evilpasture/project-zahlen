@@ -580,17 +580,22 @@ std::expected<Vk::ShaderStages, Error> RenderContext::Impl::LoadAndCreateShaders
         .transform_error([](auto err) -> Error { return err; });
 }
 
-std::expected<Vk::Pipeline, Error> RenderContext::Impl::LoadAndCreateComputeShader(ComputeStageSource cs, VkPipelineLayout layout) const noexcept {
+std::expected<Vk::Pipeline, Error>
+    RenderContext::Impl::LoadAndCreateComputeShader(ComputeStageSource cs, VkPipelineLayout layout, Vk::ComputePass& pass) const noexcept {
     const void*           cs_code = nullptr;
     size_t                cs_size = 0;
     std::vector<uint32_t> disk_cs;
 
     LoadShaderData(cs, cs_code, cs_size, disk_cs);
 
-    gpuDiagnostics.RegisterShader({.code = Vk::AsSpirV(cs_code), .size = cs_size, .entry_point = cs.entryPoint}, "CSMain");
+    const ZHLN_ShaderDesc shader = {.code = Vk::AsSpirV(cs_code), .size = cs_size, .entry_point = cs.entryPoint};
+    gpuDiagnostics.RegisterShader(shader, "CSMain");
+    if (!pass.ReflectThreadGroupSize(shader)) {
+        return std::unexpected(RenderInitError::ShaderCompilationFailed);
+    }
 
     return Vk::ComputePipelineBuilder()
-        .Shader(Vk::AsSpirV(cs_code), cs_size, cs.entryPoint)
+        .Shader(shader)
         .Layout(layout)
         .Build(ctx.Device())
         .transform_error([](ZHLN::Error err) -> Error {
@@ -704,7 +709,9 @@ std::expected<void, Error> RenderContext::Impl::BuildSkinningPipeline() {
         .transform_error([](auto) -> Error { return RenderInitError::PipelineLayoutCreationFailed; })
         .and_then([&](auto&& layout) -> std::expected<void, Error> {
             skinningPass.pipelineLayout = std::forward<decltype(layout)>(layout);
-            return LoadAndCreateComputeShader({.path = Resource::Paths::SkinningCS, .fallback = Resource::skinning_comp}, skinningPass.pipelineLayout.Get())
+            return LoadAndCreateComputeShader(
+                       {.path = Resource::Paths::SkinningCS, .fallback = Resource::skinning_comp}, skinningPass.pipelineLayout.Get(), skinningPass
+                   )
                 .transform([&](auto&& pipeline) { skinningPass.pipeline = std::forward<decltype(pipeline)>(pipeline); });
         });
 }
@@ -2507,7 +2514,8 @@ std::expected<void, Error> RenderContext::Impl::BuildHangGpuPipeline() {
         .and_then([&](auto&& layout) -> std::expected<void, Error> {
             hangGpuPass.pipelineLayout = std::forward<decltype(layout)>(layout);
             return LoadAndCreateComputeShader(
-                       ComputeStageSource {.path = Resource::Paths::HangGpuCS, .fallback = Resource::hang_gpu_comp}, hangGpuPass.pipelineLayout.Get()
+                       ComputeStageSource {.path = Resource::Paths::HangGpuCS, .fallback = Resource::hang_gpu_comp},
+                       hangGpuPass.pipelineLayout.Get(), hangGpuPass
             )
                 .transform([&](auto&& pipeline) { hangGpuPass.pipeline = std::forward<decltype(pipeline)>(pipeline); });
         });

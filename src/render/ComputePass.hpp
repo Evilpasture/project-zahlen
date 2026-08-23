@@ -16,11 +16,40 @@
 
 namespace ZHLN::Vk {
 
+namespace detail {
+
+inline void DispatchThreads(
+    VkCommandBuffer                cmd,
+    const std::array<uint32_t, 3>& threadGroupSize,
+    uint32_t                       threadCountX,
+    uint32_t                       threadCountY,
+    uint32_t                       threadCountZ
+) noexcept {
+    assert(threadGroupSize[0] > 0 && threadGroupSize[1] > 0 && threadGroupSize[2] > 0 && "Missing reflected compute thread-group size");
+    ZHLN::Vk::Dispatch(cmd, threadCountX, threadCountY, threadCountZ, threadGroupSize[0], threadGroupSize[1], threadGroupSize[2]);
+}
+
+} // namespace detail
+
 struct ComputePass {
-    PipelineLayout        pipelineLayout; // Skinning only: legacy push-constant layout
-    Pipeline              pipeline;
-    std::vector<Pipeline> pipelines; // Specialization variants share one mapping table
-    uint32_t              heapIndexPushOffset = 0;
+    // Every Dispatch* API accepts logical thread counts, never raw Vulkan
+    // workgroup counts. DispatchGroups() is the deliberately explicit escape.
+    PipelineLayout          pipelineLayout; // Skinning only: legacy push-constant layout
+    Pipeline                pipeline;
+    std::vector<Pipeline>   pipelines; // Specialization variants share one mapping table
+    std::array<uint32_t, 3> threadGroupSize {};
+    uint32_t                heapIndexPushOffset = 0;
+
+    /// Reflects Slang's `[numthreads]` from the compiled compute entry point.
+    [[nodiscard]] bool ReflectThreadGroupSize(const ZHLN_ShaderDesc& shader) noexcept {
+        auto reflected = ReflectComputeThreadGroupSize(shader);
+        if (!reflected) {
+            threadGroupSize = {};
+            return false;
+        }
+        threadGroupSize = *reflected;
+        return true;
+    }
 
     /// VK_EXT_descriptor_heap: null pipeline layout (spec-required) +
     /// set/binding -> heap mapping.
@@ -54,44 +83,61 @@ struct ComputePass {
         Push(cmd, pipelineLayout.Get(), VK_SHADER_STAGE_COMPUTE_BIT, pushData);
     }
 
-    static void Dispatch(VkCommandBuffer cmd, uint32_t x, uint32_t y, uint32_t z) noexcept {
-        ZHLN_CmdDispatch(cmd, x, y, z);
+    /// Dispatches a logical thread domain. Workgroup counts are derived from
+    /// the reflected Slang `[numthreads]`; callers never repeat local sizes.
+    void Dispatch(VkCommandBuffer cmd, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ) const noexcept {
+        detail::DispatchThreads(cmd, threadGroupSize, threadCountX, threadCountY, threadCountZ);
+    }
+
+    /// Escape hatch for algorithms that intentionally specify raw workgroup
+    /// counts. Prefer Dispatch() for ordinary compute domains.
+    static void DispatchGroups(VkCommandBuffer cmd, uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) noexcept {
+        ZHLN::Vk::DispatchGroups(cmd, groupCountX, groupCountY, groupCountZ);
     }
 
     // Dispatch with push data only (BDA/skinning-style compute).
     template <GpuTriviallyCopyable T>
-    void Dispatch(VkCommandBuffer cmd, uint32_t x, uint32_t y, uint32_t z, const T& pushData) const noexcept {
+    void Dispatch(VkCommandBuffer cmd, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ, const T& pushData) const noexcept {
         Bind(cmd);
         PushConstants(cmd, pushData);
-        Dispatch(cmd, x, y, z);
+        Dispatch(cmd, threadCountX, threadCountY, threadCountZ);
     }
 
     // VK_EXT_descriptor_heap dispatch: heaps are bound on the command buffer,
     // per-dispatch data via vkCmdPushDataEXT at offset 0.
     template <GpuTriviallyCopyable T>
-    void DispatchHeap(const Context& ctx, VkCommandBuffer cmd, uint32_t x, uint32_t y, uint32_t z, const T& pushData) const noexcept {
+    void DispatchHeap(const Context& ctx, VkCommandBuffer cmd, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ, const T& pushData)
+        const noexcept {
         Bind(cmd);
         PushData(ctx, cmd, 0, pushData);
-        Dispatch(cmd, x, y, z);
+        Dispatch(cmd, threadCountX, threadCountY, threadCountZ);
     }
 
     // Like DispatchHeap, but also pushes the descriptor-index word consumed by
     // HEAP_WITH_PUSH_INDEX mappings (frame parity / mip level / pass id).
     template <GpuTriviallyCopyable T>
-    void
-        DispatchHeapIndexed(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex, uint32_t x, uint32_t y, uint32_t z, const T& pushData) const noexcept {
+    void DispatchHeapIndexed(
+        const Context&  ctx,
+        VkCommandBuffer cmd,
+        uint32_t        heapIndex,
+        uint32_t        threadCountX,
+        uint32_t        threadCountY,
+        uint32_t        threadCountZ,
+        const T&        pushData
+    ) const noexcept {
         assert(heapIndexPushOffset > 0 && sizeof(T) <= heapIndexPushOffset && "Pass push struct overruns the reflected descriptor-index word");
         Bind(cmd);
         PushData(ctx, cmd, 0, pushData);
         PushHeapIndex(ctx, cmd, heapIndexPushOffset, heapIndex);
-        Dispatch(cmd, x, y, z);
+        Dispatch(cmd, threadCountX, threadCountY, threadCountZ);
     }
 
-    void DispatchHeapIndexed(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex, uint32_t x, uint32_t y, uint32_t z) const noexcept {
+    void DispatchHeapIndexed(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ)
+        const noexcept {
         assert(heapIndexPushOffset > 0 && "Missing reflected descriptor-index offset");
         Bind(cmd);
         PushHeapIndex(ctx, cmd, heapIndexPushOffset, heapIndex);
-        Dispatch(cmd, x, y, z);
+        Dispatch(cmd, threadCountX, threadCountY, threadCountZ);
     }
 };
 
@@ -99,16 +145,21 @@ struct ComputePass {
 /// binding table; frame-parity slot spans via the pushed index word.
 template <typename LayoutT>
 struct DoubleBufferedComputePass {
+    // DispatchHeap dimensions are logical thread counts; reflected LocalSize
+    // determines the vkCmdDispatch workgroup counts.
     [[no_unique_address]] LayoutT layoutInstance {};
     Pipeline                      pipeline;
     HeapPassBindings              heapBindings;
+    std::array<uint32_t, 3>       threadGroupSize {};
 
     [[nodiscard]] bool BuildHeap(VkDevice device, HeapManager& heap, const ZHLN_ShaderDesc& shader, uint32_t indexPushOffset) noexcept {
-        // Reflect the binding structure (drives the mapping table), then build
-        // a heap pipeline with a null layout + push data.
-        if (!layoutInstance.Build(device, shader, VK_SHADER_STAGE_COMPUTE_BIT)) {
+        // Reflect both the binding structure and Slang's [numthreads], then
+        // build a heap pipeline with a null layout + push data.
+        auto reflectedGroupSize = ReflectComputeThreadGroupSize(shader);
+        if (!layoutInstance.Build(device, shader, VK_SHADER_STAGE_COMPUTE_BIT) || !reflectedGroupSize) {
             return false;
         }
+        threadGroupSize = *reflectedGroupSize;
 
         BuildHeapPassBindings(heap, layoutInstance.reflectedSets[0], 0, indexPushOffset, 2, heapBindings);
 
@@ -125,23 +176,31 @@ struct DoubleBufferedComputePass {
         WriteHeapBindings(heap, ctx, heapBindings, heapIndex, std::forward<Args>(args)...);
     }
 
-    void DispatchHeap(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex, uint32_t x, uint32_t y, uint32_t z) const noexcept {
+    void DispatchHeap(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ)
+        const noexcept {
         assert(heapBindings.indexPushOffset > 0 && "Missing reflected descriptor-index offset");
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.Get());
         PushHeapIndex(ctx, cmd, heapBindings.indexPushOffset, heapIndex);
-        vkCmdDispatch(cmd, x, y, z);
+        detail::DispatchThreads(cmd, threadGroupSize, threadCountX, threadCountY, threadCountZ);
     }
 
     template <GpuTriviallyCopyable T>
-    void DispatchHeap(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex, uint32_t x, uint32_t y, uint32_t z, const T& pushData) const noexcept {
+    void DispatchHeap(
+        const Context&  ctx,
+        VkCommandBuffer cmd,
+        uint32_t        heapIndex,
+        uint32_t        threadCountX,
+        uint32_t        threadCountY,
+        uint32_t        threadCountZ,
+        const T&        pushData
+    ) const noexcept {
         assert(
-            heapBindings.indexPushOffset > 0 && sizeof(T) <= heapBindings.indexPushOffset &&
-            "Pass push struct overruns the reflected descriptor-index word"
+            heapBindings.indexPushOffset > 0 && sizeof(T) <= heapBindings.indexPushOffset && "Pass push struct overruns the reflected descriptor-index word"
         );
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.Get());
         PushData(ctx, cmd, 0, pushData);
         PushHeapIndex(ctx, cmd, heapBindings.indexPushOffset, heapIndex);
-        vkCmdDispatch(cmd, x, y, z);
+        detail::DispatchThreads(cmd, threadGroupSize, threadCountX, threadCountY, threadCountZ);
     }
 };
 

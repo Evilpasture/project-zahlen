@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include "engine/graphics/Resources.hpp"
+#include "render/Rendering.hpp"
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -19,6 +21,22 @@ struct RenderComputeTestSuite {
     }
 
     struct Tests {
+        std::expected<void, ZHLN::Error> slang_numthreads_reflection_controls_dispatch_layout() {
+            const auto shader = ZHLN::Vk::CreateShaderDesc(
+                ZHLN::Resource::GetShaderProgram(ZHLN::Resource::ShaderID::ClusterCulling).vertex, "CSMain"
+            );
+            const auto groupSize = ZHLN::Vk::ReflectComputeThreadGroupSize(shader);
+            auto       reflected = ZHLN::Test::AssertTrue(groupSize.has_value());
+            if (!reflected) {
+                return reflected;
+            }
+
+            ZHLN::Test::ExpectTrue((*groupSize)[0] > 0);
+            ZHLN::Test::ExpectTrue((*groupSize)[1] > 0);
+            ZHLN::Test::ExpectTrue((*groupSize)[2] > 0);
+            return {};
+        }
+
         std::expected<void, ZHLN::Error> procedural_bake_compute_execution() {
             const ZHLN::EngineConfig cfg {
                 .render = {

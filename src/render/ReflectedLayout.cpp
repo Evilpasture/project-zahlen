@@ -8,6 +8,48 @@
 
 namespace ZHLN::Vk {
 
+auto ReflectComputeThreadGroupSize(const ZHLN_ShaderDesc& shader) noexcept -> std::optional<std::array<uint32_t, 3>> {
+    if (shader.code == nullptr || shader.size == 0) {
+        return std::nullopt;
+    }
+
+    SpvReflectShaderModule module;
+    if (spvReflectCreateShaderModule(shader.size, shader.code, &module) != SPV_REFLECT_RESULT_SUCCESS) {
+        return std::nullopt;
+    }
+
+    const SpvReflectEntryPoint* entryPoint = nullptr;
+    if (shader.entry_point != nullptr && shader.entry_point[0] != '\0') {
+        entryPoint = spvReflectGetEntryPoint(&module, shader.entry_point);
+    } else {
+        // A descriptor with no explicit name is valid only when its module has
+        // one compute entry point. Refuse ambiguity rather than reflecting a
+        // different kernel's LocalSize by accident.
+        for (uint32_t i = 0; i < module.entry_point_count; ++i) {
+            const auto& candidate = module.entry_points[i];
+            if (candidate.shader_stage != SPV_REFLECT_SHADER_STAGE_COMPUTE_BIT) {
+                continue;
+            }
+            if (entryPoint != nullptr) {
+                entryPoint = nullptr;
+                break;
+            }
+            entryPoint = &candidate;
+        }
+    }
+
+    const auto isConcreteSize = [](uint32_t value) { return value > 0 && value != SPV_REFLECT_EXECUTION_MODE_SPEC_CONSTANT; };
+
+    std::optional<std::array<uint32_t, 3>> result;
+    if (entryPoint != nullptr && entryPoint->shader_stage == SPV_REFLECT_SHADER_STAGE_COMPUTE_BIT && isConcreteSize(entryPoint->local_size.x) &&
+        isConcreteSize(entryPoint->local_size.y) && isConcreteSize(entryPoint->local_size.z)) {
+        result = std::array<uint32_t, 3> {entryPoint->local_size.x, entryPoint->local_size.y, entryPoint->local_size.z};
+    }
+
+    spvReflectDestroyShaderModule(&module);
+    return result;
+}
+
 void UnsafeReflectedLayoutBuilder::AddStageUnsafe(const ZHLN_ShaderDesc& desc, VkShaderStageFlags stage) noexcept {
     if ((desc.code != nullptr) && desc.size > 0 && _stageCount < _stages.size()) {
         _stages[_stageCount++] = {.code = desc.code, .size = desc.size, .stage = stage};

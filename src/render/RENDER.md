@@ -185,6 +185,9 @@ device-addressable buffers created with `VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT
 * Per-draw data travels through `vkCmdPushDataEXT` (`Vk::PushData` /
   `CommandEncoder::PushDrawData`); legacy `push_constant` blocks in SPIR-V read
   the push-data blob directly.
+* Compute dispatch APIs take logical thread counts. `ComputePass` reflects the
+  SPIR-V `LocalSize` emitted from Slang's `[numthreads]` and derives Vulkan
+  workgroup counts, so host code never duplicates shader-local dimensions.
 * The per-frame scene buffers (frame UBO, lights, instances, joints, morph
   deltas) are selected with `VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT`
   mappings. Each heap segment pushes their device addresses once at the field

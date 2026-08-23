@@ -143,7 +143,7 @@ void RenderContext::Impl::DispatchSkinningPasses() {
             };
 
             skinningPass.PushConstants(cmd, pcs);
-            Vk::ComputePass::Dispatch(cmd, (posMesh->vertexCount + 63) / 64, 1, 1);
+            skinningPass.Dispatch(cmd, posMesh->vertexCount, 1, 1);
         }
     }
 
@@ -654,11 +654,11 @@ void RenderContext::Impl::ProvokeDeviceLostInternal() const {
 
     if (current_cmd != VK_NULL_HANDLE) {
         hangGpuPass.Bind(current_cmd);
-        Vk::ComputePass::Dispatch(current_cmd, 512, 512, 1);
+        hangGpuPass.DispatchGroups(current_cmd, 512, 512, 1);
     } else {
         Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](auto cmd) -> auto {
             hangGpuPass.Bind(cmd);
-            hangGpuPass.Dispatch(cmd, 512, 512, 1);
+            hangGpuPass.DispatchGroups(cmd, 512, 512, 1);
         });
     }
 }

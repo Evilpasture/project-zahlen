@@ -47,10 +47,10 @@ bool ConeBehindPlane(float3 T, float3 D, float R, float r, float3 N, float d) {
 
 [numthreads(16, 9, 1)]
 void CSMain(uint3 id: SV_DispatchThreadID) {
-    // Defense-in-depth: with [numthreads(16,9,1)] the correct dispatch is
-    // (1,1,24) workgroups. If it is ever launched larger, threads outside the
-    // 16x9x24 grid MUST not index in_Bounds/out_Grid (out of bounds) or
-    // InterlockedAdd the shared counter.
+    // Defense-in-depth: the host dispatches the logical 16x9x24 cell domain
+    // and derives workgroup counts from this entry point's reflected
+    // [numthreads]. Still reject every thread outside the domain before it can
+    // index in_Bounds/out_Grid or update the shared counter.
     if (id.x >= 16u || id.y >= 9u || id.z >= 24u) {
         return;
     }

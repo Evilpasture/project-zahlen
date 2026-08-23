@@ -1130,7 +1130,8 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<void, Error> InitLightingLUTs();
 
     [[nodiscard]] std::expected<Vk::ShaderStages, Error> LoadAndCreateShaders(VertexStageSource vs, FragmentStageSource ps) const noexcept;
-    [[nodiscard]] std::expected<Vk::Pipeline, Error>     LoadAndCreateComputeShader(ComputeStageSource cs, VkPipelineLayout layout) const noexcept;
+    [[nodiscard]] std::expected<Vk::Pipeline, Error>
+        LoadAndCreateComputeShader(ComputeStageSource cs, VkPipelineLayout layout, Vk::ComputePass& pass) const noexcept;
 
     void WatchPipeline(const char* vsPath, const char* psPath, std::function<void()> rebuild_fn) noexcept;
     void UploadClusterBounds(const JPH::Mat44& proj);
