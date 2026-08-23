@@ -14,7 +14,7 @@
 //    of adjacent resource-heap slots and a
 //    VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_PUSH_INDEX_EXT mapping: the
 //    caller pushes a small index word (frame parity, mip level, pass id, ...)
-//    at a fixed push-data offset before dispatch, and the shader resolves
+//    at the Slang-reflected push-data offset before dispatch, and the shader
 //    descriptor `base + index` at runtime. Per-frame descriptor updates
 //    therefore never disturb descriptors still in flight (double-buffered
 //    parity slots), and passes like Hi-Z can select arbitrary descriptor
@@ -38,7 +38,8 @@ struct HeapPassBindings {
     //   types[i]     = the reflected VkDescriptorType of binding i.
     std::vector<uint32_t>         slotBase;
     std::vector<VkDescriptorType> types;
-    uint32_t                      setIndex = 0;
+    uint32_t                      setIndex        = 0;
+    uint32_t                      indexPushOffset = 0;
 
     void Finalize() noexcept {
         info = {
@@ -53,13 +54,6 @@ struct HeapPassBindings {
         return info.mappingCount > 0 ? &info : nullptr;
     }
 };
-
-// Default offset of the per-dispatch descriptor-index word inside the
-// push-data blob. It must clear the largest pass push struct (PPPushConstants,
-// 192 bytes with its alignas(16) member) AND the scene registry's per-frame
-// device-address block (192..240), so it sits at 240..244. Any pass pushing a
-// larger struct trips the static_asserts in the Execute*/Dispatch* helpers.
-inline constexpr uint32_t kHeapIndexPushOffset = 240;
 
 inline constexpr auto IsHeapSamplerType(VkDescriptorType t) noexcept -> bool {
     return t == VK_DESCRIPTOR_TYPE_SAMPLER;
@@ -80,8 +74,9 @@ inline void BuildHeapPassBindings(
     out.entries.clear();
     out.slotBase.clear();
     out.types.clear();
-    out.setIndex = setIndex;
-    out.info     = {};
+    out.setIndex        = setIndex;
+    out.indexPushOffset = indexPushOffset;
+    out.info            = {};
 
     for (const auto& b: set.bindings) {
         out.types.push_back(b.descriptorType);
@@ -178,6 +173,24 @@ inline void InitHeapPassSamplers(HeapManager& heap, const HeapPassBindings& b, s
         }
         s++;
     }
+}
+
+/// Pushes the per-frame addresses at their independently reflected offsets.
+/// Keeping these as individual writes remains correct if Slang inserts padding
+/// between fields under a future target layout.
+inline void PushHeapFrameAddresses(
+    const Context& ctx, VkCommandBuffer cmd, std::span<const uint32_t> offsets, std::span<const VkDeviceAddress> addresses
+) noexcept {
+    const size_t count = std::min(addresses.size(), offsets.size());
+    for (size_t i = 0; i < count; ++i) {
+        PushData(ctx, cmd, offsets[i], addresses[i]);
+    }
+}
+
+inline void PushHeapFrameAddresses(
+    const Context& ctx, VkCommandBuffer cmd, const HeapPushDataLayout& layout, std::span<const VkDeviceAddress> addresses
+) noexcept {
+    PushHeapFrameAddresses(ctx, cmd, layout.frameAddressOffsets, addresses);
 }
 
 /// Pushes the descriptor-index word that PUSH_INDEX mappings read.

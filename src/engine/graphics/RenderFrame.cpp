@@ -79,7 +79,7 @@ template <typename... Ptrs>
 // RenderContext Infrastructure & Lifecycles
 // ============================================================================
 
-auto RenderContext::Impl::FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, 6> {
+auto RenderContext::Impl::FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, Vk::kHeapFrameAddressCount> {
     // Order must match the PUSH_ADDRESS mapping offsets baked in
     // BuildSceneHeapMappings: {frame, lights, instances, joints, prevJoints, morphDeltas}.
     return {
@@ -92,11 +92,11 @@ auto RenderContext::Impl::FrameHeapAddresses() const noexcept -> std::array<VkDe
 void RenderContext::Impl::BindHeapsAndPushFrame(VkCommandBuffer cmd) const noexcept {
     // Legacy descriptor-set and push-constant commands elsewhere in the frame
     // invalidate heap + push-data state (and vice versa), so every heap-based
-    // segment re-binds both heaps and re-pushes the per-frame device-address
-    // block that backs the scene registry's PUSH_ADDRESS mappings.
+    // segment re-binds both heaps and re-pushes the per-frame device addresses
+    // that back the scene registry's PUSH_ADDRESS mappings.
     heapManager.BindHeaps(cmd);
     const auto addresses = FrameHeapAddresses();
-    Vk::PushData(ctx, cmd, kHeapFrameAddrPushOffset, addresses.data(), kHeapFrameAddrBlockSize);
+    Vk::PushHeapFrameAddresses(ctx, cmd, heapPushDataLayout, addresses);
 }
 
 auto RenderContext::GetFramebufferSize() const -> std::optional<Extent2D> {

@@ -12,24 +12,32 @@
 #error "Please include <src/render/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include <cassert>
+
 namespace ZHLN::Vk {
 
 struct ComputePass {
     PipelineLayout        pipelineLayout; // Skinning only: legacy push-constant layout
     Pipeline              pipeline;
     std::vector<Pipeline> pipelines; // Specialization variants share one mapping table
+    uint32_t              heapIndexPushOffset = 0;
 
     /// VK_EXT_descriptor_heap: null pipeline layout (spec-required) +
     /// set/binding -> heap mapping.
-    [[nodiscard]] std::expected<void, ZHLN::Error>
-        BuildHeap(VkDevice device, const ZHLN_ShaderDesc& shader, const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping) noexcept;
+    [[nodiscard]] std::expected<void, ZHLN::Error> BuildHeap(
+        VkDevice                                             device,
+        const ZHLN_ShaderDesc&                               shader,
+        const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping,
+        uint32_t                                             indexPushOffset = 0
+    ) noexcept;
 
     /// Heap-mode specialized variants (same mapping covers every variant).
     [[nodiscard]] std::expected<void, ZHLN::Error> BuildHeapVariants(
         VkDevice                                             device,
         const ZHLN_ShaderDesc&                               shader,
         std::span<const VkSpecializationInfo>                specInfos,
-        const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping
+        const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping,
+        uint32_t                                             indexPushOffset = 0
     ) noexcept;
 
     void Bind(VkCommandBuffer cmd) const noexcept {
@@ -72,16 +80,17 @@ struct ComputePass {
     template <GpuTriviallyCopyable T>
     void
         DispatchHeapIndexed(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex, uint32_t x, uint32_t y, uint32_t z, const T& pushData) const noexcept {
-        static_assert(sizeof(T) <= kHeapIndexPushOffset, "Pass push struct overruns the descriptor-index word");
+        assert(heapIndexPushOffset > 0 && sizeof(T) <= heapIndexPushOffset && "Pass push struct overruns the reflected descriptor-index word");
         Bind(cmd);
         PushData(ctx, cmd, 0, pushData);
-        PushHeapIndex(ctx, cmd, kHeapIndexPushOffset, heapIndex);
+        PushHeapIndex(ctx, cmd, heapIndexPushOffset, heapIndex);
         Dispatch(cmd, x, y, z);
     }
 
     void DispatchHeapIndexed(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex, uint32_t x, uint32_t y, uint32_t z) const noexcept {
+        assert(heapIndexPushOffset > 0 && "Missing reflected descriptor-index offset");
         Bind(cmd);
-        PushHeapIndex(ctx, cmd, kHeapIndexPushOffset, heapIndex);
+        PushHeapIndex(ctx, cmd, heapIndexPushOffset, heapIndex);
         Dispatch(cmd, x, y, z);
     }
 };
@@ -94,14 +103,14 @@ struct DoubleBufferedComputePass {
     Pipeline                      pipeline;
     HeapPassBindings              heapBindings;
 
-    [[nodiscard]] bool BuildHeap(VkDevice device, HeapManager& heap, const ZHLN_ShaderDesc& shader) noexcept {
+    [[nodiscard]] bool BuildHeap(VkDevice device, HeapManager& heap, const ZHLN_ShaderDesc& shader, uint32_t indexPushOffset) noexcept {
         // Reflect the binding structure (drives the mapping table), then build
         // a heap pipeline with a null layout + push data.
         if (!layoutInstance.Build(device, shader, VK_SHADER_STAGE_COMPUTE_BIT)) {
             return false;
         }
 
-        BuildHeapPassBindings(heap, layoutInstance.reflectedSets[0], 0, kHeapIndexPushOffset, 2, heapBindings);
+        BuildHeapPassBindings(heap, layoutInstance.reflectedSets[0], 0, indexPushOffset, 2, heapBindings);
 
         auto p_res = ComputePipelineBuilder().Shader(shader).Layout(VK_NULL_HANDLE).HeapMappings(heapBindings.GetInfo()).Build(device);
         if (!p_res) {
@@ -117,17 +126,21 @@ struct DoubleBufferedComputePass {
     }
 
     void DispatchHeap(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex, uint32_t x, uint32_t y, uint32_t z) const noexcept {
+        assert(heapBindings.indexPushOffset > 0 && "Missing reflected descriptor-index offset");
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.Get());
-        PushHeapIndex(ctx, cmd, kHeapIndexPushOffset, heapIndex);
+        PushHeapIndex(ctx, cmd, heapBindings.indexPushOffset, heapIndex);
         vkCmdDispatch(cmd, x, y, z);
     }
 
     template <GpuTriviallyCopyable T>
     void DispatchHeap(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex, uint32_t x, uint32_t y, uint32_t z, const T& pushData) const noexcept {
-        static_assert(sizeof(T) <= kHeapIndexPushOffset, "Pass push struct overruns the descriptor-index word");
+        assert(
+            heapBindings.indexPushOffset > 0 && sizeof(T) <= heapBindings.indexPushOffset &&
+            "Pass push struct overruns the reflected descriptor-index word"
+        );
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.Get());
         PushData(ctx, cmd, 0, pushData);
-        PushHeapIndex(ctx, cmd, kHeapIndexPushOffset, heapIndex);
+        PushHeapIndex(ctx, cmd, heapBindings.indexPushOffset, heapIndex);
         vkCmdDispatch(cmd, x, y, z);
     }
 };

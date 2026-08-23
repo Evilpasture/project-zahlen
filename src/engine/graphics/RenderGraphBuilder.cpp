@@ -178,7 +178,8 @@ struct PassFactory {
             const auto resourceBind = self.heapManager.GetResourceHeapBindInfo();
             const auto frameAddrs   = self.FrameHeapAddresses();
             rec.SetHeapState(
-                &samplerBind, &resourceBind, &self.ctx, kHeapFrameAddrPushOffset, std::span<const VkDeviceAddress> {frameAddrs.data(), frameAddrs.size()}
+                &samplerBind, &resourceBind, &self.ctx, self.heapPushDataLayout.frameAddressOffsets,
+                std::span<const VkDeviceAddress> {frameAddrs.data(), frameAddrs.size()}
             );
 
             TaskSystemScheduler scheduler;

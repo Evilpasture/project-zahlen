@@ -27,9 +27,10 @@ struct SecondaryInheritance {
     // context's loaded entry points.
     const Context* context = nullptr;
 
-    // Optional per-frame push-data block (e.g. the scene registry's device
+    // Optional per-frame push-data fields (e.g. the scene registry's device
     // addresses): pushed once into every secondary right after it begins.
-    uint32_t                         pushDataFrameOffset = 0;
+    // Offsets are reflected independently so Slang-inserted padding is kept.
+    std::span<const uint32_t>        pushDataFrameOffsets;
     std::span<const VkDeviceAddress> pushDataFrameAddresses;
 };
 
@@ -122,10 +123,7 @@ inline void ParallelDrawDispatch(
         // VK_EXT_descriptor_heap: push data does not carry over from the
         // primary, so re-push the per-frame block once per secondary.
         if (!inheritDesc.pushDataFrameAddresses.empty() && inheritDesc.context != nullptr) {
-            Vk::PushData(
-                *inheritDesc.context, sec_cmd, inheritDesc.pushDataFrameOffset, inheritDesc.pushDataFrameAddresses.data(),
-                static_cast<uint32_t>(inheritDesc.pushDataFrameAddresses.size_bytes())
-            );
+            PushHeapFrameAddresses(*inheritDesc.context, sec_cmd, inheritDesc.pushDataFrameOffsets, inheritDesc.pushDataFrameAddresses);
         }
 
         // Instantiated locally on the thread's stack.

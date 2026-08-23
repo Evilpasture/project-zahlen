@@ -463,7 +463,7 @@ struct CpuCullingPolicyPass1 {
                         .samplerHeapBindInfo    = &samplerBind,
                         .resourceHeapBindInfo   = &resourceBind,
                         .context                = &ctx.ctx,
-                        .pushDataFrameOffset    = kHeapFrameAddrPushOffset,
+                        .pushDataFrameOffsets   = ctx.heapPushDataLayout.frameAddressOffsets,
                         .pushDataFrameAddresses = std::span<const VkDeviceAddress> {frameAddresses.data(), frameAddresses.size()},
                     },
                     {.width = color_att.extent.width, .height = color_att.extent.height}, drawCount, kParallelChunkSize, TaskSystemSchedulerAdapter {},

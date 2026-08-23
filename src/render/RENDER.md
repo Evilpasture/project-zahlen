@@ -187,8 +187,9 @@ device-addressable buffers created with `VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT
   the push-data blob directly.
 * The per-frame scene buffers (frame UBO, lights, instances, joints, morph
   deltas) are selected with `VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT`
-  mappings: each heap segment pushes their device addresses once at
-  `kHeapFrameAddrPushOffset` (`RenderContext::Impl::BindHeapsAndPushFrame`).
+  mappings. Each heap segment pushes their device addresses once at the field
+  offsets reflected from `DescriptorHeapPushData` in
+  `descriptor_heap_layout.slang` (`RenderContext::Impl::BindHeapsAndPushFrame`).
 * The bindless `globalTextures[]` array is a contiguous region of the resource
   heap pinned by a `HEAP_WITH_CONSTANT_OFFSET` mapping
   (`RenderContext::Impl::WriteTextureSlotToHeap`); instance-data texture

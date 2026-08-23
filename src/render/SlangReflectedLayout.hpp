@@ -9,6 +9,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -29,6 +30,26 @@ struct SlangReflectedSet {
 };
 
 struct ReflectedStageInput;
+
+inline constexpr uint32_t kHeapFrameAddressCount = 6;
+
+/**
+ * Byte offsets in the vkCmdPushDataEXT blob, reflected from
+ * DescriptorHeapPushData in descriptor_heap_layout.slang.
+ *
+ * Keeping every frame address offset (rather than assuming a packed array)
+ * makes the host obey whatever padding the active Slang SPIR-V layout rules
+ * select.
+ */
+struct HeapPushDataLayout {
+    std::array<uint32_t, kHeapFrameAddressCount> frameAddressOffsets {};
+    uint32_t                                     heapIndexOffset = 0;
+    uint32_t                                     requiredSize    = 0;
+};
+
+/// Uses Slang's target-specific type-layout reflection to obtain the push-data
+/// offsets shared by descriptor-heap mappings and vkCmdPushDataEXT calls.
+[[nodiscard]] auto ReflectHeapPushDataLayout() noexcept -> std::optional<HeapPushDataLayout>;
 
 /**
  * @brief Binding structure reflected from compiled SPIR-V.
