@@ -20,7 +20,7 @@ DebugUtilsTracker::DebugUtilsTracker(VkDevice inDevice, DiagnosticConfig inConfi
     cmdInsertDebugLabel = reinterpret_cast<PFN_vkCmdInsertDebugUtilsLabelEXT>(vkGetDeviceProcAddr(device, "vkCmdInsertDebugUtilsLabelEXT"));
 }
 
-void DebugUtilsTracker::WriteCheckpoint(VkCommandBuffer cmd, std::string_view name) {
+void DebugUtilsTracker::WriteCheckpoint(VkCommandBuffer cmd, std::string_view name) const {
     if (!config.enableMarkers || cmdInsertDebugLabel == nullptr || cmd == VK_NULL_HANDLE || name.empty()) {
         return;
     }
@@ -34,10 +34,10 @@ void DebugUtilsTracker::WriteCheckpoint(VkCommandBuffer cmd, std::string_view na
     cmdInsertDebugLabel(cmd, &label);
 }
 
-void DebugUtilsTracker::RegisterShader(std::span<const uint32_t> /*spirv*/, std::string_view /*entryPoint*/) {
+void DebugUtilsTracker::RegisterShader(std::span<const uint32_t> /*spirv*/, std::string_view /*entryPoint*/) const {
 }
 
-void DebugUtilsTracker::OnDeviceLost() {
+void DebugUtilsTracker::OnDeviceLost() const {
 }
 
 void DebugUtilsTracker::Shutdown() {

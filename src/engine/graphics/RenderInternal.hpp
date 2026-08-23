@@ -928,8 +928,6 @@ struct RenderContext::Impl {
     ZHLN::Array<SortItem>                           sortTempScratch;
     ZHLN::Array<DrawCommand>                        sortDrawQueueScratch;
 
-    Vk::GPUDiagnostics gpuDiagnostics;
-
     void WriteCheckpoint(VkCommandBuffer cmd, std::string_view name) const noexcept {
         gpuDiagnostics.WriteCheckpoint(cmd, name);
     }

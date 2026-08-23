@@ -677,36 +677,7 @@ std::expected<std::unique_ptr<RenderContext>, Error> RenderContext::Create(Windo
 
             return GetDeviceExtensions(physicalInfo.handle, window.IsHeadless(), caps.supportsMeshShader)
                 .and_then([&](auto&& dev_exts) -> std::expected<void, Error> {
-                    // 1. Select vendor backend via PCI Vendor ID
-                    const uint32_t vendorID = physicalInfo.properties.properties.vendorID;
-                    Vk::GPUVendor  vendor   = Vk::GPUVendor::Unknown;
-                    if (vendorID == static_cast<uint32_t>(Vk::GPUVendor::NVIDIA))
-                        vendor = Vk::GPUVendor::NVIDIA;
-                    else if (vendorID == static_cast<uint32_t>(Vk::GPUVendor::AMD))
-                        vendor = Vk::GPUVendor::AMD;
-                    else if (vendorID == static_cast<uint32_t>(Vk::GPUVendor::Intel))
-                        vendor = Vk::GPUVendor::Intel;
-                    else if (vendorID == static_cast<uint32_t>(Vk::GPUVendor::ARM))
-                        vendor = Vk::GPUVendor::ARM;
-                    else if (vendorID == static_cast<uint32_t>(Vk::GPUVendor::Qualcomm))
-                        vendor = Vk::GPUVendor::Qualcomm;
-
-                    impl->gpuDiagnostics.SelectBackend(vendor);
-
-                    // 2. Execute PreDeviceCreate hook to inject required extensions/pNext structures
-                    std::vector<const char*> devExtList  = dev_exts;
-                    void*                    ppNextChain = nullptr;
-                    impl->gpuDiagnostics.PreDeviceCreate(physicalInfo.handle, &ppNextChain, devExtList);
-
-                    if (ppNextChain != nullptr) {
-                        auto*  root = const_cast<VkPhysicalDeviceFeatures2*>(features.GetRoot());
-                        void** curr = &root->pNext;
-                        while (*curr != nullptr) {
-                            auto* header = static_cast<VkBaseOutStructure*>(*curr);
-                            curr         = reinterpret_cast<void**>(&header->pNext);
-                        }
-                        *curr = ppNextChain;
-                    }
+                    std::vector<const char*> devExtList = dev_exts;
 
                     return Vk::Context::Builder()
                         .Instance(instance)
