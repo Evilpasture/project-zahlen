@@ -984,6 +984,14 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
     if (!cullingLayout.Build(ctx.Device(), cullingShader, VK_SHADER_STAGE_COMPUTE_BIT)) {
         return std::unexpected(RenderInitError::PipelineCreationFailed);
     }
+
+    auto clusterCullingShader = Vk::CreateShaderDesc(Resource::GetShaderProgram(ClusterCulling).vertex);
+    auto clusterDispatch      = Vk::ReflectComputeDispatchSize(clusterCullingShader);
+    if (!clusterDispatch) {
+        return std::unexpected(RenderInitError::PipelineCreationFailed);
+    }
+    const size_t numClusters = static_cast<size_t>((*clusterDispatch)[0]) * (*clusterDispatch)[1] * (*clusterDispatch)[2];
+
     Vk::BuildHeapPassBindings(heapManager, cullingLayout.reflectedSets[0], 0, heapPushDataLayout.heapIndexOffset, 4, cullingHeapBindings);
 
     auto make_instance_set = [&](uint32_t i) -> std::expected<void, Error> {
@@ -1045,8 +1053,6 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
         .and_then([&]() { return make_instance_set(1); })
         .and_then([&]() { return cullingPass.BuildHeap(ctx.Device(), cullingShader, cullingHeapBindings.GetInfo(), cullingHeapBindings.indexPushOffset); })
         .and_then([&]() -> std::expected<void, Error> {
-            constexpr auto numClusters = static_cast<size_t>(16 * 9 * 24);
-
             return Vk::Buffer::Create(
                        allocator.Get(), sizeof(struct ClusterBounds) * numClusters,
                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
@@ -1058,8 +1064,7 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
 
                     // VK_EXT_descriptor_heap: reflect the set layout and bake the
                     // binding table (frame-parity slot spans).
-                    auto ccShader = Vk::CreateShaderDesc(Resource::GetShaderProgram(ClusterCulling).vertex);
-                    if (!clusterCullingDescLayout.Build(ctx.Device(), ccShader, VK_SHADER_STAGE_COMPUTE_BIT)) {
+                    if (!clusterCullingDescLayout.Build(ctx.Device(), clusterCullingShader, VK_SHADER_STAGE_COMPUTE_BIT)) {
                         return std::unexpected(RenderInitError::PipelineCreationFailed);
                     }
                     Vk::BuildHeapPassBindings(
@@ -1133,8 +1138,9 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
             return clusterBoundsPass.BuildHeap(ctx.Device(), bDesc, clusterBoundsHeapBindings.GetInfo(), clusterBoundsHeapBindings.indexPushOffset);
         })
         .and_then([&]() {
-            auto cDesc = Vk::CreateShaderDesc(Resource::GetShaderProgram(ClusterCulling).vertex);
-            return clusterCullingPass.BuildHeap(ctx.Device(), cDesc, clusterCullingHeapBindings.GetInfo(), clusterCullingHeapBindings.indexPushOffset);
+            return clusterCullingPass.BuildHeap(
+                ctx.Device(), clusterCullingShader, clusterCullingHeapBindings.GetInfo(), clusterCullingHeapBindings.indexPushOffset
+            );
         })
         .and_then([&]() -> std::expected<void, Error> {
             if (rtCtx.Valid()) {
@@ -2297,7 +2303,12 @@ std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) 
     const VkExtent2D ext4  = {.width = std::max(1u, ext.width / 4), .height = std::max(1u, ext.height / 4)};
     const VkExtent2D ext8  = {.width = std::max(1u, ext.width / 8), .height = std::max(1u, ext.height / 8)};
     const VkExtent2D ext16 = {.width = std::max(1u, ext.width / 16), .height = std::max(1u, ext.height / 16)};
-    const VkExtent3D voxelExt = {.width = 160, .height = 90, .depth = 64};
+
+    const auto& voxelDispatch = volumetricClearPass.fixedDispatchSize;
+    if (voxelDispatch[0] == 0 || voxelDispatch[1] == 0 || voxelDispatch[2] == 0) {
+        return std::unexpected(RenderInitError::PipelineCreationFailed);
+    }
+    const VkExtent3D voxelExt = {.width = voxelDispatch[0], .height = voxelDispatch[1], .depth = voxelDispatch[2]};
 
     // Helper: assign from expected or propagate error
     auto assign = [&](auto& member, auto e) -> std::expected<void, Error> {

@@ -1,9 +1,6 @@
 
+import cluster_grid;
 import uniforms;
-
-static const uint CLUSTER_GRID_WIDTH  = 16;
-static const uint CLUSTER_GRID_HEIGHT = 9;
-static const uint CLUSTER_GRID_DEPTH  = 24;
 
 // Reserved metadata IDs consumed by ReflectComputeDispatchSize. They make this
 // shader the authority for its fixed logical dispatch domain as well as its
@@ -70,9 +67,9 @@ void CSMain(uint3 id: SV_DispatchThreadID) {
     ClusterBounds b = in_Bounds[cIdx]; // These are now static view-space bounds!
 
     uint count = 0;
-    uint list[64];
+    uint list[MAX_LIGHTS_PER_CLUSTER];
 
-    for (uint i = 0; i < frame.lightCount && count < 64; ++i) {
+    for (uint i = 0; i < frame.lightCount && count < MAX_LIGHTS_PER_CLUSTER; ++i) {
         if (lights[i].type == 0 || lights[i].type == 4) {
             continue; // Skip global Sun / Dir lights
         }
@@ -87,12 +84,12 @@ void CSMain(uint3 id: SV_DispatchThreadID) {
     if (count > 0) {
         InterlockedAdd(out_Counter[0], count, offset);
 
-        if (offset + count <= 221184) {
+        if (offset + count <= CLUSTER_LIGHT_LIST_CAPACITY) {
             for (uint j = 0; j < count; ++j) {
                 out_IndexList[offset + j] = list[j];
             }
         } else {
-            uint safeCount = (offset < 221184) ? (221184 - offset) : 0;
+            uint safeCount = (offset < CLUSTER_LIGHT_LIST_CAPACITY) ? (CLUSTER_LIGHT_LIST_CAPACITY - offset) : 0;
             for (uint j = 0; j < safeCount; ++j) {
                 out_IndexList[offset + j] = list[j];
             }

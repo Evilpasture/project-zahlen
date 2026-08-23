@@ -84,7 +84,7 @@ struct PassFactory {
                 } pc = {1.0f / (float) srcW, 1.0f / (float) srcH, srcW, srcH, mip == 0 ? 1u : 0u};
 
                 // VK_EXT_descriptor_heap: the pushed index selects the mip slot span.
-                self.hizGeneratePass.DispatchHeapIndexed(self.ctx, cmd, mip, dstW, dstH, 1, pc);
+                self.hizGeneratePass.DispatchHeapIndexedThreads(self.ctx, cmd, mip, dstW, dstH, 1, pc);
             }
         });
     }
@@ -214,7 +214,7 @@ struct PassFactory {
                     .p                  = emitter.params
                 };
 
-                self.particleUpdatePass.DispatchHeap(self.ctx, c, emitter.maxParticles, 1, 1, pc);
+                self.particleUpdatePass.DispatchHeapThreads(self.ctx, c, emitter.maxParticles, 1, 1, pc);
             }
         });
     }
@@ -240,7 +240,7 @@ struct PassFactory {
                     .p                  = emitter.params
                 };
 
-                self.meshParticleUpdatePass.DispatchHeap(self.ctx, c, emitter.maxParticles, 1, 1, pushPC);
+                self.meshParticleUpdatePass.DispatchHeapThreads(self.ctx, c, emitter.maxParticles, 1, 1, pushPC);
             }
         });
     }
@@ -251,7 +251,7 @@ struct PassFactory {
                 self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ComputeWrite<Res_VoxelMedia>>(self.graphResources.voxelMedia),
                 Vk::Assume<Vk::ComputeWrite<Res_VoxelLight>>(self.graphResources.voxelLight)
             );
-            self.volumetricClearPass.DispatchHeap(self.ctx, c, fIdx, 160, 90, 64);
+            self.volumetricClearPass.DispatchHeap(self.ctx, c, fIdx);
         });
     }
 
@@ -263,7 +263,7 @@ struct PassFactory {
             );
 
             VolumetricFogInjectPushConstants pc = {};
-            self.volumetricFogInjectPass.DispatchHeap(self.ctx, c, fIdx, 160, 90, 64, pc);
+            self.volumetricFogInjectPass.DispatchHeap(self.ctx, c, fIdx, pc);
         });
     }
 
@@ -277,7 +277,7 @@ struct PassFactory {
                     Vk::Assume<Vk::ComputeRead<Res_ShadowMap>>(self.graphResources.shadowMap), self.shadowSampler
                 );
                 VolumetricLightInjectPushConstants pc = {};
-                self.volumetricLightInjectPass.DispatchHeap(self.ctx, c, fIdx, 160, 90, 64, pc);
+                self.volumetricLightInjectPass.DispatchHeap(self.ctx, c, fIdx, pc);
             }
         );
     }
@@ -288,7 +288,7 @@ struct PassFactory {
                 self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelLight>>(self.graphResources.voxelLight),
                 Vk::Assume<Vk::ComputeWrite<Res_VoxelInt>>(self.graphResources.voxelIntegrated)
             );
-            self.volumetricIntegrationPass.DispatchHeap(self.ctx, c, fIdx, 160, 90, 1);
+            self.volumetricIntegrationPass.DispatchHeap(self.ctx, c, fIdx);
         });
     }
 
@@ -304,7 +304,7 @@ struct PassFactory {
                 );
                 VolumetricTemporalPushConstants pc = {};
 
-                self.volumetricTemporalPass.DispatchHeap(self.ctx, c, fIdx, 160, 90, 64, pc);
+                self.volumetricTemporalPass.DispatchHeap(self.ctx, c, fIdx, pc);
             }
         );
     }

@@ -1,6 +1,8 @@
 // File: resources/shaders/cluster_bounds.hlsl
 
+import cluster_grid;
 import uniforms;
+
 struct ClusterBounds {
     float4 minPoint;
     float4 maxPoint;
@@ -14,16 +16,16 @@ float4 Unproject(float4 coord) {
     return res / res.w;
 }
 
-[numthreads(16, 9, 1)]
+[numthreads(CLUSTER_GRID_WIDTH, CLUSTER_GRID_HEIGHT, 1)]
 void CSMain(uint3 tid: SV_DispatchThreadID) {
-    if (tid.x >= 16 || tid.y >= 9)
+    if (tid.x >= CLUSTER_GRID_WIDTH || tid.y >= CLUSTER_GRID_HEIGHT || tid.z >= CLUSTER_GRID_DEPTH)
         return;
-    uint cIdx = tid.x + (tid.y * 16) + (tid.z * 144);
+    uint cIdx = tid.x + (tid.y * CLUSTER_GRID_WIDTH) + (tid.z * CLUSTER_GRID_WIDTH * CLUSTER_GRID_HEIGHT);
 
-    float2 ts = float2(2.0f / 16.0f, 2.0f / 9.0f);
+    float2 ts = float2(2.0f / float(CLUSTER_GRID_WIDTH), 2.0f / float(CLUSTER_GRID_HEIGHT));
 
     // UN-FLIPPED: NDC Y coordinates now map natively to Vulkan Y-down
-    // tid.y = 0 (Top) maps to -1.0f, and tid.y = 9 (Bottom) maps to +1.0f
+    // tid.y = 0 maps to the top and CLUSTER_GRID_HEIGHT maps to the bottom.
     float4 ndc[4] = { float4(-1.0f + tid.x * ts.x, -1.0f + tid.y * ts.y, 0.0f, 1.0f), float4(-1.0f + (tid.x + 1) * ts.x, -1.0f + tid.y * ts.y, 0.0f, 1.0f),
                       float4(-1.0f + (tid.x + 1) * ts.x, -1.0f + (tid.y + 1) * ts.y, 0.0f, 1.0f),
                       float4(-1.0f + tid.x * ts.x, -1.0f + (tid.y + 1) * ts.y, 0.0f, 1.0f) };
@@ -37,8 +39,8 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
 
     float n     = 0.1f;
     float f     = 1000.0f;
-    float sNear = n * pow(f / n, (float) tid.z / 24.0f);
-    float sFar  = n * pow(f / n, (float) (tid.z + 1) / 24.0f);
+    float sNear = n * pow(f / n, float(tid.z) / float(CLUSTER_GRID_DEPTH));
+    float sFar  = n * pow(f / n, float(tid.z + 1) / float(CLUSTER_GRID_DEPTH));
 
     float tNear = (sNear - n) / (f - n);
     float tFar  = (sFar - n) / (f - n);

@@ -1,5 +1,11 @@
 // resources/shaders/volumetric_integration.slang
 
+import volumetric_grid;
+
+[[vk::constant_id(1000)]] const uint ZHLN_DISPATCH_SIZE_X = VOLUMETRIC_GRID_WIDTH;
+[[vk::constant_id(1001)]] const uint ZHLN_DISPATCH_SIZE_Y = VOLUMETRIC_GRID_HEIGHT;
+[[vk::constant_id(1002)]] const uint ZHLN_DISPATCH_SIZE_Z = 1;
+
 Texture3D<float4> inVoxelLight;
 RWTexture3D<float4> outVoxelIntegrated;
 
@@ -8,7 +14,7 @@ RWTexture3D<float4> outVoxelIntegrated;
 void CSMain(uint3 tid: SV_DispatchThreadID) {
     uint3 gridDim;
     inVoxelLight.GetDimensions(gridDim.x, gridDim.y, gridDim.z);
-    if (tid.x >= gridDim.x || tid.y >= gridDim.y)
+    if (tid.x >= gridDim.x || tid.y >= gridDim.y || tid.x >= ZHLN_DISPATCH_SIZE_X || tid.y >= ZHLN_DISPATCH_SIZE_Y || tid.z >= ZHLN_DISPATCH_SIZE_Z)
         return;
 
     float3 accumulatedScattering   = float3(0.0f, 0.0f, 0.0f);
@@ -22,7 +28,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         float3 inScattering = rawLight.rgb;
         float extinction    = rawLight.a;
 
-        float nextDepth  = 0.1f * pow(10000.0f, (float(z) + 1.0f) / 64.0f);
+        float nextDepth  = 0.1f * pow(10000.0f, (float(z) + 1.0f) / float(VOLUMETRIC_GRID_DEPTH));
         float stepLength = nextDepth - prevDepth;
         prevDepth        = nextDepth;
 

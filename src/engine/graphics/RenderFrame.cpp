@@ -143,7 +143,7 @@ void RenderContext::Impl::DispatchSkinningPasses() {
             };
 
             skinningPass.PushConstants(cmd, pcs);
-            skinningPass.Dispatch(cmd, posMesh->vertexCount, 1, 1);
+            skinningPass.DispatchThreads(cmd, posMesh->vertexCount, 1, 1);
         }
     }
 

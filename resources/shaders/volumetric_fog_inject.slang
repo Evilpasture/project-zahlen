@@ -1,6 +1,11 @@
 // resources/shaders/volumetric_fog_inject.hlsl
 
 import uniforms;
+import volumetric_grid;
+
+[[vk::constant_id(1000)]] const uint ZHLN_DISPATCH_SIZE_X = VOLUMETRIC_GRID_WIDTH;
+[[vk::constant_id(1001)]] const uint ZHLN_DISPATCH_SIZE_Y = VOLUMETRIC_GRID_HEIGHT;
+[[vk::constant_id(1002)]] const uint ZHLN_DISPATCH_SIZE_Z = VOLUMETRIC_GRID_DEPTH;
 
 struct GPUVolumetricVolume {
     float4x4 invTransform;
@@ -88,7 +93,7 @@ float TemporalHash2D(uint2 tid, float timeOffset) {
 float3 GetVoxelWorldPos(uint3 tid, float2 resolution, out float outDepthVS) {
     float2 uv     = (float2(tid.xy) + 0.5f) / resolution;
     float jitter  = TemporalHash2D(tid.xy, frame.camPos.w) - 0.5f;
-    float depthVS = 0.1f * pow(10000.0f, (float(tid.z) + 0.5f + jitter * 0.5f) / 64.0f);
+    float depthVS = 0.1f * pow(10000.0f, (float(tid.z) + 0.5f + jitter * 0.5f) / float(VOLUMETRIC_GRID_DEPTH));
     outDepthVS    = depthVS;
 
     float4 clip          = float4(uv.x * 2.0f - 1.0f, uv.y * 2.0f - 1.0f, 0.5f, 1.0f);
@@ -101,7 +106,7 @@ float3 GetVoxelWorldPos(uint3 tid, float2 resolution, out float outDepthVS) {
 void CSMain(uint3 tid: SV_DispatchThreadID) {
     uint3 gridDim;
     outVoxelMedia.GetDimensions(gridDim.x, gridDim.y, gridDim.z);
-    if (any(tid >= gridDim))
+    if (any(tid >= gridDim) || any(tid >= uint3(ZHLN_DISPATCH_SIZE_X, ZHLN_DISPATCH_SIZE_Y, ZHLN_DISPATCH_SIZE_Z)))
         return;
 
     float depthVS   = 0.0f;

@@ -106,7 +106,7 @@ std::expected<uint32_t, Error>
                     BakePush {.width = width, .height = height, .scale = scale, .randomness = randomness, .distortion = distortion, .bakeType = variantIdx}
                 );
                 Vk::PushHeapIndex(ctx, cmd, bakeHeapBindings.indexPushOffset, 0);
-                proceduralBakePass.Dispatch(cmd, width, height, 1);
+                proceduralBakePass.DispatchThreads(cmd, width, height, 1);
 
                 // Transition General -> Shader Read Only (Ready for Bindless fragment reads)
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, gpuImage.Handle());

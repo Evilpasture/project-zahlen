@@ -185,11 +185,11 @@ device-addressable buffers created with `VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT
 * Per-draw data travels through `vkCmdPushDataEXT` (`Vk::PushData` /
   `CommandEncoder::PushDrawData`); legacy `push_constant` blocks in SPIR-V read
   the push-data blob directly.
-* Compute dispatch APIs take logical thread counts. `ComputePass` reflects the
-  SPIR-V `LocalSize` emitted from Slang's `[numthreads]` and derives Vulkan
-  workgroup counts, so host code never duplicates shader-local dimensions.
-  Fixed-domain kernels can also publish their logical dispatch size through
-  reserved specialization-constant metadata, removing the domain from C++.
+* `Dispatch`, `DispatchHeap`, and `DispatchHeapIndexed` use fixed logical
+  domains reflected from reserved Slang specialization-constant metadata.
+  Dynamic kernels use explicitly named `*Threads` overloads with runtime
+  logical counts. Both paths reflect SPIR-V `LocalSize` from `[numthreads]` and
+  derive Vulkan workgroup counts; raw groups require `DispatchGroups`.
 * The per-frame scene buffers (frame UBO, lights, instances, joints, morph
   deltas) are selected with `VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT`
   mappings. Each heap segment pushes their device addresses once at the field

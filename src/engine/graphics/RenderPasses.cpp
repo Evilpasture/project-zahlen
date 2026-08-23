@@ -292,7 +292,7 @@ struct GpuCullingPolicyPass1 {
         pc.drawCount        = drawCount;
         pc.passIndex        = 0; // PASS 1
 
-        ctx.cullingPass.DispatchHeapIndexed(ctx.ctx, cmd, 0 * 2 + recorder.frameIndex, drawCount, 1, 1, pc);
+        ctx.cullingPass.DispatchHeapIndexedThreads(ctx.ctx, cmd, 0 * 2 + recorder.frameIndex, drawCount, 1, 1, pc);
 
         using enum Vk::BarrierStage;
         using enum Vk::BarrierAccess;
@@ -386,7 +386,7 @@ struct GpuCullingPolicyPass2 {
             .drawCount      = drawCount,
             .passIndex      = 1,
         };
-        ctx.cullingPass.DispatchHeapIndexed(ctx.ctx, cmd, 1 * 2 + recorder.frameIndex, drawCount, 1, 1, pc);
+        ctx.cullingPass.DispatchHeapIndexedThreads(ctx.ctx, cmd, 1 * 2 + recorder.frameIndex, drawCount, 1, 1, pc);
 
         using enum Vk::BarrierStage;
         using enum Vk::BarrierAccess;

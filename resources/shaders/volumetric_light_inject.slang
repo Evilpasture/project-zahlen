@@ -2,6 +2,11 @@
 
 import pbr_helpers;
 import uniforms;
+import volumetric_grid;
+
+[[vk::constant_id(1000)]] const uint ZHLN_DISPATCH_SIZE_X = VOLUMETRIC_GRID_WIDTH;
+[[vk::constant_id(1001)]] const uint ZHLN_DISPATCH_SIZE_Y = VOLUMETRIC_GRID_HEIGHT;
+[[vk::constant_id(1002)]] const uint ZHLN_DISPATCH_SIZE_Z = VOLUMETRIC_GRID_DEPTH;
 
 struct ClusterVolume {
     uint offset;
@@ -73,7 +78,7 @@ float SampleShadowPCF3x3(float3 projCoords, float cascade, float angle) {
 void CSMain(uint3 tid: SV_DispatchThreadID) {
     uint3 gridDim;
     outVoxelLight.GetDimensions(gridDim.x, gridDim.y, gridDim.z);
-    if (any(tid >= gridDim))
+    if (any(tid >= gridDim) || any(tid >= uint3(ZHLN_DISPATCH_SIZE_X, ZHLN_DISPATCH_SIZE_Y, ZHLN_DISPATCH_SIZE_Z)))
         return;
 
     float4 media      = inVoxelMedia[tid];
@@ -87,7 +92,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
 
     float2 uv     = (float2(tid.xy) + 0.5f) / float2(gridDim.xy);
     float jitter  = TemporalHash2D(tid.xy, frame.camPos.w) - 0.5f;
-    float depthVS = 0.1f * pow(10000.0f, (float(tid.z) + 0.5f + jitter * 0.5f) / 64.0f);
+    float depthVS = 0.1f * pow(10000.0f, (float(tid.z) + 0.5f + jitter * 0.5f) / float(VOLUMETRIC_GRID_DEPTH));
 
     float4 clip          = float4(uv.x * 2.0f - 1.0f, uv.y * 2.0f - 1.0f, 0.5f, 1.0f);
     float4 worldSpacePos = mul(frame.invViewProj, clip);

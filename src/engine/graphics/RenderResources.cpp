@@ -1105,29 +1105,34 @@ void RenderContext::Impl::RegisterPipeline(const PipelineRegistration& reg) noex
 }
 
 void RenderContext::Impl::UploadClusterBounds(const JPH::Mat44& proj) {
-    ZHLN::Array<ClusterBounds> cpuBounds(static_cast<size_t>(16 * 9 * 24));
+    const auto [gridWidth, gridHeight, gridDepth] = clusterCullingPass.fixedDispatchSize;
+    if (gridWidth == 0 || gridHeight == 0 || gridDepth == 0) {
+        return;
+    }
+
+    ZHLN::Array<ClusterBounds> cpuBounds(static_cast<size_t>(gridWidth) * gridHeight * gridDepth);
     JPH::Mat44                 invProj = proj.Inversed();
 
-    float tsX = 2.0f / 16.0f;
-    float tsY = 2.0f / 9.0f;
+    float tsX = 2.0f / static_cast<float>(gridWidth);
+    float tsY = 2.0f / static_cast<float>(gridHeight);
 
     auto Unproject = [&](const JPH::Vec4& coord) -> JPH::Vec3 {
         JPH::Vec4 res = invProj * coord;
         return {res.GetX() / res.GetW(), res.GetY() / res.GetW(), res.GetZ() / res.GetW()};
     };
 
-    for (uint32_t z = 0; z < 24; ++z) {
+    for (uint32_t z = 0; z < gridDepth; ++z) {
         float n     = 0.1f;
         float f     = 1000.0f;
-        float sNear = n * std::pow(f / n, static_cast<float>(z) / 24.0f);
-        float sFar  = n * std::pow(f / n, static_cast<float>(z + 1) / 24.0f);
+        float sNear = n * std::pow(f / n, static_cast<float>(z) / static_cast<float>(gridDepth));
+        float sFar  = n * std::pow(f / n, static_cast<float>(z + 1) / static_cast<float>(gridDepth));
 
         float tNear = (sNear - n) / (f - n);
         float tFar  = (sFar - n) / (f - n);
 
-        for (uint32_t y = 0; y < 9; ++y) {
-            for (uint32_t x = 0; x < 16; ++x) {
-                uint32_t cIdx = x + (y * 16) + (z * 144);
+        for (uint32_t y = 0; y < gridHeight; ++y) {
+            for (uint32_t x = 0; x < gridWidth; ++x) {
+                uint32_t cIdx = x + (y * gridWidth) + (z * gridWidth * gridHeight);
 
                 std::array<JPH::Vec4, 4> ndc {
                     {JPH::Vec4(-1.0f + x * tsX, -1.0f + y * tsY, 0.0f, 1.0f), JPH::Vec4(-1.0f + (x + 1) * tsX, -1.0f + y * tsY, 0.0f, 1.0f),
