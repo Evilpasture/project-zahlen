@@ -180,10 +180,7 @@ auto RenderContext::Impl::CompileShadowPipeline(VkDevice device, const Resource:
                 .DepthFormat(VK_FORMAT_D32_SFLOAT)
                 .CullNone()
                 .Build(device)
-                .transform_error([](auto err) -> Error {
-                    ZHLN::Log("Shadow pipeline compilation error: {} (Category: {})", err.Message(), err.Category());
-                    return RenderInitError::PipelineCreationFailed;
-                })
+                .transform_error([](auto) -> Error { return RenderInitError::PipelineCreationFailed; })
                 .transform([&](auto&& pipeline) -> auto { shadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
         })
         .and_then([&, device]() -> std::expected<void, Error> {
@@ -239,10 +236,7 @@ auto RenderContext::Impl::CompilePunctualShadowPipeline(VkDevice device, const R
                 .ViewMask(0x3F)
                 .CullNone()
                 .Build(device)
-                .transform_error([](auto err) -> Error {
-                    ZHLN::Log("Punctual shadow pipeline compilation error: {} (Category: {})", err.Message(), err.Category());
-                    return RenderInitError::PipelineCreationFailed;
-                })
+                .transform_error([](auto) -> Error { return RenderInitError::PipelineCreationFailed; })
                 .transform([&](auto&& pipeline) -> auto { punctualShadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
         });
 }
@@ -385,10 +379,7 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> std::expected<Ma
     auto* impl = _impl.get();
 
     return Vk::ShaderStages::Create(impl->ctx.Device(), v_desc, f_desc)
-        .transform_error([](auto err) -> Error {
-            ZHLN::Log("Material shader compilation error: {} (Category: {})", err.Message(), err.Category());
-            return MaterialCreationError::ShaderCompilationFailed;
-        })
+        .transform_error([](auto) -> Error { return MaterialCreationError::ShaderCompilationFailed; })
         .and_then([impl, &desc, v_desc, f_desc](auto&& shaders) -> std::expected<Material, Error> {
             // Register vertex & fragment shaders with GPU diagnostics
             impl->gpuDiagnostics.RegisterShader(v_desc, "VSMain");
@@ -425,10 +416,7 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> std::expected<Ma
             }
 
             return pipeline.Build(impl->ctx.Device())
-                .transform_error([](auto err) -> Error {
-                    ZHLN::Log("Material pipeline creation error: {} (Category: {})", err.Message(), err.Category());
-                    return MaterialCreationError::PipelineCreationFailed;
-                })
+                .transform_error([](auto) -> Error { return MaterialCreationError::PipelineCreationFailed; })
                 .transform([impl, layout, &desc](auto&& compiledPipeline) -> auto {
                     Vk::Pipeline meshPipeline = BuildMeshVariant(impl, desc);
 
@@ -808,10 +796,7 @@ auto RenderContext::SetShadowResolution(uint32_t resolution) -> std::expected<vo
     auto* device = impl->ctx.Device();
 
     return Vk::WaitIdle(device)
-        .transform_error([](auto err) -> Error {
-            ZHLN::Log("SetShadowResolution WaitIdle failed: {}", ToString(err));
-            return ShadowResolutionError::RecreationFailed;
-        })
+        .transform_error([](auto) -> Error { return ShadowResolutionError::RecreationFailed; })
         .and_then([&](VkResult) -> std::expected<void, Error> {
             auto sm_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
                 impl->allocator, impl->ctx, {.width = resolution, .height = resolution},

@@ -13,7 +13,6 @@ std::expected<void, Error> RenderContext::Impl::BuildProceduralBakePipeline() {
     if (!proceduralBakeDescLayout.Build(
             ctx.Device(), Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::ProceduralBakeComp).vertex, "CSMain"), VK_SHADER_STAGE_COMPUTE_BIT
         )) {
-        ZHLN::Log("[Shader] Failed to reflect procedural bake layout!");
         return std::unexpected(RenderInitError::PipelineCreationFailed);
     }
     // VK_EXT_descriptor_heap: the bake output image is written into a static
@@ -43,7 +42,6 @@ std::expected<void, Error> RenderContext::Impl::BuildProceduralBakePipeline() {
 
     auto build_res = proceduralBakePass.BuildHeapVariants(ctx.Device(), shaderDesc, specInfos, bakeHeapBindings.GetInfo());
     if (!build_res) {
-        ZHLN::Log("[Shader] Failed to build specialized Procedural Bake Compute variants: {}", build_res.error().Message());
         return std::unexpected(build_res.error());
     }
 

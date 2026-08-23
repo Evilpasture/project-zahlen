@@ -157,7 +157,6 @@ std::expected<void, Error> RenderContext::Impl::BuildParticlePipelines() {
         VMA_MEMORY_USAGE_GPU_ONLY
     );
     if (!pb_res) {
-        ZHLN::Log("ERROR: Failed to allocate global particle buffer!");
         return std::unexpected(pb_res.error());
     }
     particleBuffer = std::move(*pb_res);
@@ -168,7 +167,6 @@ std::expected<void, Error> RenderContext::Impl::BuildParticlePipelines() {
     auto csShader = Vk::CreateShaderDesc(Resource::GetShaderProgram(ParticleUpdate).vertex);
 
     if (!particleUpdatePass.BuildHeap(ctx.Device(), csShader, &sceneHeapMappings.info)) {
-        ZHLN::Log("ERROR: Failed to build particle update compute pipeline!");
         return std::unexpected(RenderInitError::PipelineCreationFailed);
     }
 
@@ -205,7 +203,6 @@ std::expected<void, Error> RenderContext::Impl::BuildMeshParticlePipelines() {
     auto csMeshShader = Vk::CreateShaderDesc(Resource::GetShaderProgram(MeshParticleUpdate).vertex);
 
     if (!meshParticleUpdatePass.BuildHeap(ctx.Device(), csMeshShader, &sceneHeapMappings.info)) {
-        ZHLN::Log("ERROR: Failed to build 3D mesh particle update compute pipeline!");
         return std::unexpected(RenderInitError::PipelineCreationFailed);
     }
 
@@ -530,12 +527,10 @@ template <typename LayoutT>
         // VK_EXT_descriptor_heap: the pass is a heap pipeline (null layout,
         // PUSH_INDEX mapping table baked from the reflected set layout). Per-
         // draw data travels through push data, so no push ranges are declared.
-        if (pass.BuildHeap(self->ctx.Device(), self->heapManager, shaders, colorFormats, additive)) {
-            ZHLN::Log("[RenderInit] Successfully built pipeline for pass: {}", passName);
-            return {};
+        if (!pass.BuildHeap(self->ctx.Device(), self->heapManager, shaders, colorFormats, additive)) {
+            return std::unexpected(RenderInitError::PipelineCreationFailed);
         }
-        ZHLN::Log("[RenderInit] ERROR: Failed to build pipeline for pass: {}", passName);
-        return std::unexpected(RenderInitError::PipelineCreationFailed);
+        return {};
     });
 }
 
@@ -553,12 +548,10 @@ template <typename LayoutT>
     return self->LoadAndCreateShaders(vs, ps).and_then([&](auto&& shaders) -> std::expected<void, Error> {
         // VK_EXT_descriptor_heap: specialization never changes the descriptor
         // interface, so one mapping table covers every variant.
-        if (pass.BuildHeapVariants(self->ctx.Device(), self->heapManager, shaders, colorFormats, specInfos, additive)) {
-            ZHLN::Log("[RenderInit] Successfully built pipeline variants for pass: {}", passName);
-            return {};
+        if (!pass.BuildHeapVariants(self->ctx.Device(), self->heapManager, shaders, colorFormats, specInfos, additive)) {
+            return std::unexpected(RenderInitError::PipelineCreationFailed);
         }
-        ZHLN::Log("[RenderInit] ERROR: Failed to build pipeline variants for pass: {}", passName);
-        return std::unexpected(RenderInitError::PipelineCreationFailed);
+        return {};
     });
 }
 
@@ -980,7 +973,6 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
     //    both frames in flight.
     auto cullingShader = Vk::CreateShaderDesc(Resource::culling_comp);
     if (!cullingLayout.Build(ctx.Device(), cullingShader, VK_SHADER_STAGE_COMPUTE_BIT)) {
-        ZHLN::Log("[RenderInit] ERROR: Failed to reflect culling layout from culling SPV!");
         return std::unexpected(RenderInitError::PipelineCreationFailed);
     }
     Vk::BuildHeapPassBindings(heapManager, cullingLayout.reflectedSets[0], 0, Vk::kHeapIndexPushOffset, 4, cullingHeapBindings);
@@ -1059,7 +1051,6 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
                     // binding table (frame-parity slot spans).
                     auto ccShader = Vk::CreateShaderDesc(Resource::GetShaderProgram(ClusterCulling).vertex);
                     if (!clusterCullingDescLayout.Build(ctx.Device(), ccShader, VK_SHADER_STAGE_COMPUTE_BIT)) {
-                        ZHLN::Log("[RenderInit] ERROR: Failed to reflect cluster-culling layout!");
                         return std::unexpected(RenderInitError::PipelineCreationFailed);
                     }
                     Vk::BuildHeapPassBindings(
@@ -1121,7 +1112,6 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
             // its own reflected layout rather than sharing clusterCullingDescLayout.
             auto bDesc = Vk::CreateShaderDesc(Resource::GetShaderProgram(ClusterBounds).vertex);
             if (!clusterBoundsDescLayout.Build(ctx.Device(), bDesc, VK_SHADER_STAGE_COMPUTE_BIT)) {
-                ZHLN::Log("[RenderInit] ERROR: Failed to reflect cluster-bounds layout!");
                 return std::unexpected(RenderInitError::PipelineCreationFailed);
             }
             Vk::BuildHeapPassBindings(heapManager, clusterBoundsDescLayout.reflectedSets[0], 0, Vk::kHeapIndexPushOffset, 2, clusterBoundsHeapBindings);
@@ -1228,7 +1218,6 @@ std::expected<void, Error> RenderContext::Impl::InitBindless() {
                 {.shader = Vk::CreateShaderDesc(Resource::GetShaderProgram(MeshParticleUpdate).vertex), .stage = VK_SHADER_STAGE_COMPUTE_BIT},
             };
             if (!bindlessLayout.Build(ctx.Device(), std::span {reflectInputs})) {
-                ZHLN::Log("[RenderInit] ERROR: Failed to reflect the global scene registry layout!");
                 return std::unexpected(RenderInitError::PipelineCreationFailed);
             }
 
@@ -1295,7 +1284,6 @@ std::expected<void, Error>
         kSceneStaticSamplerSlots + kPassStaticSamplerSlots, kSceneDynamicSamplerSlots, 2
     );
     if (!init_res) {
-        ZHLN::Log("[RenderInit] ERROR: Descriptor heap initialization failed (error code {})", static_cast<uint32_t>(init_res.error()));
         return std::unexpected(RenderInitError::SubsystemAllocationFailed);
     }
 
@@ -1303,10 +1291,6 @@ std::expected<void, Error>
     // feeds the scene registry's PUSH_ADDRESS mappings PLUS the per-dispatch
     // descriptor-index word (kHeapIndexPushOffset + 4).
     if (heapManager.PushDataMaxSize() < (Vk::kHeapIndexPushOffset + 4)) [[unlikely]] {
-        ZHLN::Log(
-            "[RenderInit] ERROR: maxPushDataSize ({}) too small for the push-data layout (needs {})", heapManager.PushDataMaxSize(),
-            Vk::kHeapIndexPushOffset + 4
-        );
         return std::unexpected(RenderInitError::PipelineCreationFailed);
     }
 
@@ -1315,7 +1299,6 @@ std::expected<void, Error>
     auto clampSlot  = heapManager.AllocateStaticSampler();
     auto pointSlot  = heapManager.AllocateStaticSampler();
     if (!globalSlot || !clampSlot || !pointSlot) {
-        ZHLN::Log("[RenderInit] ERROR: Sampler heap slot exhaustion during init.");
         return std::unexpected(RenderInitError::SubsystemAllocationFailed);
     }
     globalSamplerSlot = *globalSlot;
@@ -1328,7 +1311,6 @@ std::expected<void, Error>
     auto transSlot = heapManager.AllocateStaticResource<VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE>();
     auto depthSlot = heapManager.AllocateStaticResource<VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE>();
     if (!iblSlot || !brdfSlot || !transSlot || !depthSlot) {
-        ZHLN::Log("[RenderInit] ERROR: Resource heap slot exhaustion during init.");
         return std::unexpected(RenderInitError::SubsystemAllocationFailed);
     }
     iblPrefilteredSlot = *iblSlot;
@@ -1344,10 +1326,6 @@ std::expected<void, Error>
     // The skips assume exactly the scene allocations above; anything else
     // allocating before this point would silently overlap the texture region.
     if (heapManager.StaticResourceCursor() != 4 || heapManager.StaticSamplerCursor() != 3) [[unlikely]] {
-        ZHLN::Log(
-            "[RenderInit] ERROR: Heap cursors ({}/{}) drifted before region reservation — pass slots would overlap the texture array",
-            heapManager.StaticResourceCursor(), heapManager.StaticSamplerCursor()
-        );
         return std::unexpected(RenderInitError::PipelineCreationFailed);
     }
     heapManager.SkipStaticResourceSlots(kGlobalTextureSlots + (kSceneStaticResourceSlots - 4));
@@ -1528,7 +1506,6 @@ std::expected<void, Error> RenderContext::Impl::BuildDecalPipeline() {
         {.shader = Vk::CreateShaderDesc(decalShaders.fragment), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
     };
     if (!decalDescLayout.Build(ctx.Device(), std::span {reflectInputs})) {
-        ZHLN::Log("[RenderInit] ERROR: Failed to reflect decal descriptor layout!");
         return std::unexpected(RenderInitError::PipelineCreationFailed);
     }
     BuildDecalHeapMappings();
@@ -1792,7 +1769,6 @@ std::expected<void, Error> RenderContext::Impl::InitPostProcessing() {
     auto register_and_check = [&](const char* name, auto&& build_fn, std::initializer_list<const char*> watchPaths) -> std::expected<void, Error> {
         auto res = build_fn();
         if (!res) {
-            ZHLN::Log("Pipeline '{}' failed to compile: {}", name, res.error().Message());
             return std::unexpected(res.error());
         }
         if constexpr (isDev) {
@@ -2530,7 +2506,6 @@ std::expected<void, Error> RenderContext::Impl::BuildHangGpuPipeline() {
 std::expected<void, Error> RenderContext::Impl::BuildHiZPipeline() {
     auto shader = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::HizGenerateComp).vertex);
     if (!hizDescLayout.Build(ctx.Device(), shader, VK_SHADER_STAGE_COMPUTE_BIT)) {
-        ZHLN::Log("[RenderInit] ERROR: Failed to reflect Hi-Z layout from hiz_generate SPV!");
         return std::unexpected(RenderInitError::PipelineCreationFailed);
     }
 
