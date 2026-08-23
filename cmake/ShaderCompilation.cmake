@@ -56,6 +56,9 @@ function(compile_slang SHADER_PATH ENTRY STAGE OUTPUT_VAR)
                 "${SHADER_SRC_DIR}/uniforms.slang"
                 "${SHADER_SRC_DIR}/pbr_helpers.slang"
                 "${SHADER_SRC_DIR}/common.slang"
+                "${SHADER_SRC_DIR}/descriptor_heap_layout.slang"
+                "${SHADER_SRC_DIR}/cluster_grid.slang"
+                "${SHADER_SRC_DIR}/volumetric_grid.slang"
         COMMENT "Slang: Generating ${FILE_NAME}.${ENTRY}.${OUTPUT_VAR}.spv"
         VERBATIM
     )

@@ -117,10 +117,10 @@ inline void Push(const VkCommandBuffer cmd, const VkPipelineLayout layout, const
 // ============================================================================
 //
 // Legacy push-constant blocks in SPIR-V read the push-data blob starting at
-// offset 0, so per-draw structs are pushed at offset 0. The engine reserves
-// higher offsets (e.g. RenderContext::Impl::kHeapFrameAddrPushOffset) for
-// per-frame data consumed by VkDescriptorSetAndBindingMappingEXT sources such
-// as VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT.
+// offset 0, so per-draw structs are pushed at offset 0. Higher offsets are
+// reflected from the shared Slang push-data layout and hold per-frame data
+// consumed by VkDescriptorSetAndBindingMappingEXT sources such as
+// VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT.
 
 template <GpuTriviallyCopyable T>
 inline void PushData(const Context& ctx, const VkCommandBuffer cmd, const uint32_t offset, const T& value) noexcept {

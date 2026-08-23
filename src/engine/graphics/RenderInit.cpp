@@ -527,7 +527,7 @@ template <typename LayoutT>
         // VK_EXT_descriptor_heap: the pass is a heap pipeline (null layout,
         // PUSH_INDEX mapping table baked from the reflected set layout). Per-
         // draw data travels through push data, so no push ranges are declared.
-        if (!pass.BuildHeap(self->ctx.Device(), self->heapManager, shaders, colorFormats, additive)) {
+        if (!pass.BuildHeap(self->ctx.Device(), self->heapManager, shaders, colorFormats, self->heapPushDataLayout.heapIndexOffset, additive)) {
             return std::unexpected(RenderInitError::PipelineCreationFailed);
         }
         return {};
@@ -548,7 +548,9 @@ template <typename LayoutT>
     return self->LoadAndCreateShaders(vs, ps).and_then([&](auto&& shaders) -> std::expected<void, Error> {
         // VK_EXT_descriptor_heap: specialization never changes the descriptor
         // interface, so one mapping table covers every variant.
-        if (!pass.BuildHeapVariants(self->ctx.Device(), self->heapManager, shaders, colorFormats, specInfos, additive)) {
+        if (!pass.BuildHeapVariants(
+                self->ctx.Device(), self->heapManager, shaders, colorFormats, specInfos, self->heapPushDataLayout.heapIndexOffset, additive
+            )) {
             return std::unexpected(RenderInitError::PipelineCreationFailed);
         }
         return {};
@@ -578,17 +580,22 @@ std::expected<Vk::ShaderStages, Error> RenderContext::Impl::LoadAndCreateShaders
         .transform_error([](auto err) -> Error { return err; });
 }
 
-std::expected<Vk::Pipeline, Error> RenderContext::Impl::LoadAndCreateComputeShader(ComputeStageSource cs, VkPipelineLayout layout) const noexcept {
+std::expected<Vk::Pipeline, Error>
+    RenderContext::Impl::LoadAndCreateComputeShader(ComputeStageSource cs, VkPipelineLayout layout, Vk::ComputePass& pass) const noexcept {
     const void*           cs_code = nullptr;
     size_t                cs_size = 0;
     std::vector<uint32_t> disk_cs;
 
     LoadShaderData(cs, cs_code, cs_size, disk_cs);
 
-    gpuDiagnostics.RegisterShader({.code = Vk::AsSpirV(cs_code), .size = cs_size, .entry_point = cs.entryPoint}, "CSMain");
+    const ZHLN_ShaderDesc shader = {.code = Vk::AsSpirV(cs_code), .size = cs_size, .entry_point = cs.entryPoint};
+    gpuDiagnostics.RegisterShader(shader, "CSMain");
+    if (!pass.ReflectDispatchLayout(shader)) {
+        return std::unexpected(RenderInitError::ShaderCompilationFailed);
+    }
 
     return Vk::ComputePipelineBuilder()
-        .Shader(Vk::AsSpirV(cs_code), cs_size, cs.entryPoint)
+        .Shader(shader)
         .Layout(layout)
         .Build(ctx.Device())
         .transform_error([](ZHLN::Error err) -> Error {
@@ -702,7 +709,9 @@ std::expected<void, Error> RenderContext::Impl::BuildSkinningPipeline() {
         .transform_error([](auto) -> Error { return RenderInitError::PipelineLayoutCreationFailed; })
         .and_then([&](auto&& layout) -> std::expected<void, Error> {
             skinningPass.pipelineLayout = std::forward<decltype(layout)>(layout);
-            return LoadAndCreateComputeShader({.path = Resource::Paths::SkinningCS, .fallback = Resource::skinning_comp}, skinningPass.pipelineLayout.Get())
+            return LoadAndCreateComputeShader(
+                       {.path = Resource::Paths::SkinningCS, .fallback = Resource::skinning_comp}, skinningPass.pipelineLayout.Get(), skinningPass
+                   )
                 .transform([&](auto&& pipeline) { skinningPass.pipeline = std::forward<decltype(pipeline)>(pipeline); });
         });
 }
@@ -975,7 +984,15 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
     if (!cullingLayout.Build(ctx.Device(), cullingShader, VK_SHADER_STAGE_COMPUTE_BIT)) {
         return std::unexpected(RenderInitError::PipelineCreationFailed);
     }
-    Vk::BuildHeapPassBindings(heapManager, cullingLayout.reflectedSets[0], 0, Vk::kHeapIndexPushOffset, 4, cullingHeapBindings);
+
+    auto clusterCullingShader = Vk::CreateShaderDesc(Resource::GetShaderProgram(ClusterCulling).vertex);
+    auto clusterDispatch      = Vk::ReflectComputeDispatchSize(clusterCullingShader);
+    if (!clusterDispatch) {
+        return std::unexpected(RenderInitError::PipelineCreationFailed);
+    }
+    const size_t numClusters = static_cast<size_t>((*clusterDispatch)[0]) * (*clusterDispatch)[1] * (*clusterDispatch)[2];
+
+    Vk::BuildHeapPassBindings(heapManager, cullingLayout.reflectedSets[0], 0, heapPushDataLayout.heapIndexOffset, 4, cullingHeapBindings);
 
     auto make_instance_set = [&](uint32_t i) -> std::expected<void, Error> {
         return Vk::Buffer::Create(
@@ -1034,10 +1051,8 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
 
     return make_instance_set(0)
         .and_then([&]() { return make_instance_set(1); })
-        .and_then([&]() { return cullingPass.BuildHeap(ctx.Device(), cullingShader, cullingHeapBindings.GetInfo()); })
+        .and_then([&]() { return cullingPass.BuildHeap(ctx.Device(), cullingShader, cullingHeapBindings.GetInfo(), cullingHeapBindings.indexPushOffset); })
         .and_then([&]() -> std::expected<void, Error> {
-            constexpr auto numClusters = static_cast<size_t>(16 * 9 * 24);
-
             return Vk::Buffer::Create(
                        allocator.Get(), sizeof(struct ClusterBounds) * numClusters,
                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
@@ -1049,12 +1064,11 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
 
                     // VK_EXT_descriptor_heap: reflect the set layout and bake the
                     // binding table (frame-parity slot spans).
-                    auto ccShader = Vk::CreateShaderDesc(Resource::GetShaderProgram(ClusterCulling).vertex);
-                    if (!clusterCullingDescLayout.Build(ctx.Device(), ccShader, VK_SHADER_STAGE_COMPUTE_BIT)) {
+                    if (!clusterCullingDescLayout.Build(ctx.Device(), clusterCullingShader, VK_SHADER_STAGE_COMPUTE_BIT)) {
                         return std::unexpected(RenderInitError::PipelineCreationFailed);
                     }
                     Vk::BuildHeapPassBindings(
-                        heapManager, clusterCullingDescLayout.reflectedSets[0], 0, Vk::kHeapIndexPushOffset, 2, clusterCullingHeapBindings
+                        heapManager, clusterCullingDescLayout.reflectedSets[0], 0, heapPushDataLayout.heapIndexOffset, 2, clusterCullingHeapBindings
                     );
 
                     auto make_cluster_set = [&](uint32_t i) -> std::expected<void, Error> {
@@ -1114,16 +1128,19 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
             if (!clusterBoundsDescLayout.Build(ctx.Device(), bDesc, VK_SHADER_STAGE_COMPUTE_BIT)) {
                 return std::unexpected(RenderInitError::PipelineCreationFailed);
             }
-            Vk::BuildHeapPassBindings(heapManager, clusterBoundsDescLayout.reflectedSets[0], 0, Vk::kHeapIndexPushOffset, 2, clusterBoundsHeapBindings);
+            Vk::BuildHeapPassBindings(
+                heapManager, clusterBoundsDescLayout.reflectedSets[0], 0, heapPushDataLayout.heapIndexOffset, 2, clusterBoundsHeapBindings
+            );
             for (int i = 0; i < 2; ++i) {
                 // Order mirrors cluster_bounds.slang's set-0 declaration order: out_Bounds, frame.
                 Vk::WriteHeapBindings(heapManager, ctx, clusterBoundsHeapBindings, i, clusterBoundsBuffer, frames.frameUniformBuffers[i]);
             }
-            return clusterBoundsPass.BuildHeap(ctx.Device(), bDesc, clusterBoundsHeapBindings.GetInfo());
+            return clusterBoundsPass.BuildHeap(ctx.Device(), bDesc, clusterBoundsHeapBindings.GetInfo(), clusterBoundsHeapBindings.indexPushOffset);
         })
         .and_then([&]() {
-            auto cDesc = Vk::CreateShaderDesc(Resource::GetShaderProgram(ClusterCulling).vertex);
-            return clusterCullingPass.BuildHeap(ctx.Device(), cDesc, clusterCullingHeapBindings.GetInfo());
+            return clusterCullingPass.BuildHeap(
+                ctx.Device(), clusterCullingShader, clusterCullingHeapBindings.GetInfo(), clusterCullingHeapBindings.indexPushOffset
+            );
         })
         .and_then([&]() -> std::expected<void, Error> {
             if (rtCtx.Valid()) {
@@ -1279,6 +1296,12 @@ std::expected<void, Error> RenderContext::Impl::InitBindless() {
 
 std::expected<void, Error>
     RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSamplerInfo, const VkSamplerCreateInfo& clampSamplerInfo) noexcept {
+    auto reflectedPushLayout = Vk::ReflectHeapPushDataLayout();
+    if (!reflectedPushLayout || reflectedPushLayout->frameAddressOffsets.front() < sizeof(PPPushConstants)) [[unlikely]] {
+        return std::unexpected(RenderInitError::PipelineCreationFailed);
+    }
+    heapPushDataLayout = *reflectedPushLayout;
+
     auto init_res = heapManager.Init(
         ctx, allocator, kSceneStaticResourceSlots + kGlobalTextureSlots + kPassStaticResourceSlots, kSceneDynamicResourceSlots,
         kSceneStaticSamplerSlots + kPassStaticSamplerSlots, kSceneDynamicSamplerSlots, 2
@@ -1287,10 +1310,10 @@ std::expected<void, Error>
         return std::unexpected(RenderInitError::SubsystemAllocationFailed);
     }
 
-    // The push-data budget must fit the per-frame device-address block that
-    // feeds the scene registry's PUSH_ADDRESS mappings PLUS the per-dispatch
-    // descriptor-index word (kHeapIndexPushOffset + 4).
-    if (heapManager.PushDataMaxSize() < (Vk::kHeapIndexPushOffset + 4)) [[unlikely]] {
+    // Slang is the layout authority for the frame-address fields and the
+    // per-dispatch descriptor index. Reject devices whose push-data budget
+    // cannot fit the reflected layout.
+    if (heapManager.PushDataMaxSize() < heapPushDataLayout.requiredSize) [[unlikely]] {
         return std::unexpected(RenderInitError::PipelineCreationFailed);
     }
 
@@ -1357,10 +1380,10 @@ void RenderContext::Impl::BuildSceneHeapMappings() noexcept {
     //   2 lights            6 g_morphDeltas  10 texTransLighting
     //   3 g_instances       7 prefilteredMap 11 globalTextures[]
     //
-    // Per-frame buffers (1..6) use VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT:
-    // the push-data block at kHeapFrameAddrPushOffset carries their current
-    // device addresses, selected per frame. Images and samplers sit in static
-    // heap slots via VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_CONSTANT_OFFSET_EXT.
+    // Per-frame buffers (1..6) use VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT.
+    // Their push-data offsets come from DescriptorHeapPushData's Slang layout;
+    // images and samplers sit in static heap slots via
+    // VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_CONSTANT_OFFSET_EXT.
     const auto add_scene_set = [&](uint32_t setIndex, HeapMappingSet& out) {
         using enum VkDescriptorMappingSourceEXT;
         const auto& set = (setIndex == 0) ? bindlessLayout.reflectedSets[0] : decalDescLayout.reflectedSets[setIndex];
@@ -1385,7 +1408,7 @@ void RenderContext::Impl::BuildSceneHeapMappings() noexcept {
                 case 1: // frame (uniform buffer)
                     entry.resourceMask                 = VK_SPIRV_RESOURCE_TYPE_UNIFORM_BUFFER_BIT_EXT;
                     entry.source                       = VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT;
-                    entry.sourceData.pushAddressOffset = kHeapFrameAddrPushOffset + 0 * sizeof(uint64_t);
+                    entry.sourceData.pushAddressOffset = heapPushDataLayout.frameAddressOffsets[0];
                     break;
                 case 2: // lights
                 case 3: // g_instances
@@ -1394,7 +1417,7 @@ void RenderContext::Impl::BuildSceneHeapMappings() noexcept {
                 case 6: // g_morphDeltas
                     entry.resourceMask                 = VK_SPIRV_RESOURCE_TYPE_READ_ONLY_STORAGE_BUFFER_BIT_EXT;
                     entry.source                       = VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT;
-                    entry.sourceData.pushAddressOffset = kHeapFrameAddrPushOffset + (b.binding - 1) * sizeof(uint64_t);
+                    entry.sourceData.pushAddressOffset = heapPushDataLayout.frameAddressOffsets[b.binding - 1];
                     break;
                 case 7: // prefilteredMap
                     entry.resourceMask                         = VK_SPIRV_RESOURCE_TYPE_SAMPLED_IMAGE_BIT_EXT;
@@ -1788,27 +1811,27 @@ std::expected<void, Error> RenderContext::Impl::InitPostProcessing() {
 
     auto buildVolumetrics = [&]() -> std::expected<void, Error> {
         auto csClear = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricClear).vertex);
-        if (!volumetricClearPass.BuildHeap(ctx.Device(), heapManager, csClear)) {
+        if (!volumetricClearPass.BuildHeap(ctx.Device(), heapManager, csClear, heapPushDataLayout.heapIndexOffset)) {
             return std::unexpected(RenderInitError::PipelineCreationFailed);
         }
 
         auto csFogInject = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricFogInject).vertex);
-        if (!volumetricFogInjectPass.BuildHeap(ctx.Device(), heapManager, csFogInject)) {
+        if (!volumetricFogInjectPass.BuildHeap(ctx.Device(), heapManager, csFogInject, heapPushDataLayout.heapIndexOffset)) {
             return std::unexpected(RenderInitError::PipelineCreationFailed);
         }
 
         auto csLightInject = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricLightInject).vertex);
-        if (!volumetricLightInjectPass.BuildHeap(ctx.Device(), heapManager, csLightInject)) {
+        if (!volumetricLightInjectPass.BuildHeap(ctx.Device(), heapManager, csLightInject, heapPushDataLayout.heapIndexOffset)) {
             return std::unexpected(RenderInitError::PipelineCreationFailed);
         }
 
         auto csIntegrate = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricIntegration).vertex);
-        if (!volumetricIntegrationPass.BuildHeap(ctx.Device(), heapManager, csIntegrate)) {
+        if (!volumetricIntegrationPass.BuildHeap(ctx.Device(), heapManager, csIntegrate, heapPushDataLayout.heapIndexOffset)) {
             return std::unexpected(RenderInitError::PipelineCreationFailed);
         }
 
         auto csTemporal = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricTemporal).vertex);
-        if (!volumetricTemporalPass.BuildHeap(ctx.Device(), heapManager, csTemporal)) {
+        if (!volumetricTemporalPass.BuildHeap(ctx.Device(), heapManager, csTemporal, heapPushDataLayout.heapIndexOffset)) {
             return std::unexpected(RenderInitError::PipelineCreationFailed);
         }
 
@@ -2280,7 +2303,12 @@ std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) 
     const VkExtent2D ext4  = {.width = std::max(1u, ext.width / 4), .height = std::max(1u, ext.height / 4)};
     const VkExtent2D ext8  = {.width = std::max(1u, ext.width / 8), .height = std::max(1u, ext.height / 8)};
     const VkExtent2D ext16 = {.width = std::max(1u, ext.width / 16), .height = std::max(1u, ext.height / 16)};
-    const VkExtent3D voxelExt = {.width = 160, .height = 90, .depth = 64};
+
+    const auto& voxelDispatch = volumetricClearPass.fixedDispatchSize;
+    if (voxelDispatch[0] == 0 || voxelDispatch[1] == 0 || voxelDispatch[2] == 0) {
+        return std::unexpected(RenderInitError::PipelineCreationFailed);
+    }
+    const VkExtent3D voxelExt = {.width = voxelDispatch[0], .height = voxelDispatch[1], .depth = voxelDispatch[2]};
 
     // Helper: assign from expected or propagate error
     auto assign = [&](auto& member, auto e) -> std::expected<void, Error> {
@@ -2497,7 +2525,8 @@ std::expected<void, Error> RenderContext::Impl::BuildHangGpuPipeline() {
         .and_then([&](auto&& layout) -> std::expected<void, Error> {
             hangGpuPass.pipelineLayout = std::forward<decltype(layout)>(layout);
             return LoadAndCreateComputeShader(
-                       ComputeStageSource {.path = Resource::Paths::HangGpuCS, .fallback = Resource::hang_gpu_comp}, hangGpuPass.pipelineLayout.Get()
+                       ComputeStageSource {.path = Resource::Paths::HangGpuCS, .fallback = Resource::hang_gpu_comp},
+                       hangGpuPass.pipelineLayout.Get(), hangGpuPass
             )
                 .transform([&](auto&& pipeline) { hangGpuPass.pipeline = std::forward<decltype(pipeline)>(pipeline); });
         });
@@ -2513,9 +2542,9 @@ std::expected<void, Error> RenderContext::Impl::BuildHiZPipeline() {
     // mip level). The span is fixed at 16: the HiZ map does not exist yet at
     // pipeline-build time (it is created on the first RecreateTargets).
     constexpr uint32_t kMaxHiZMips = 16;
-    Vk::BuildHeapPassBindings(heapManager, hizDescLayout.reflectedSets[0], 0, Vk::kHeapIndexPushOffset, kMaxHiZMips, hizHeapBindings);
+    Vk::BuildHeapPassBindings(heapManager, hizDescLayout.reflectedSets[0], 0, heapPushDataLayout.heapIndexOffset, kMaxHiZMips, hizHeapBindings);
 
-    return hizGeneratePass.BuildHeap(ctx.Device(), shader, hizHeapBindings.GetInfo());
+    return hizGeneratePass.BuildHeap(ctx.Device(), shader, hizHeapBindings.GetInfo(), hizHeapBindings.indexPushOffset);
 }
 
 std::expected<void, Error> RenderContext::Impl::InitUIDynamicBuffers() noexcept {

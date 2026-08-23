@@ -1,5 +1,14 @@
 
+import cluster_grid;
 import uniforms;
+
+// Reserved metadata IDs consumed by ReflectComputeDispatchSize. They make this
+// shader the authority for its fixed logical dispatch domain as well as its
+// local [numthreads] dimensions.
+[[vk::constant_id(1000)]] const uint ZHLN_DISPATCH_SIZE_X = CLUSTER_GRID_WIDTH;
+[[vk::constant_id(1001)]] const uint ZHLN_DISPATCH_SIZE_Y = CLUSTER_GRID_HEIGHT;
+[[vk::constant_id(1002)]] const uint ZHLN_DISPATCH_SIZE_Z = CLUSTER_GRID_DEPTH;
+
 struct ClusterBounds {
     float4 minPoint;
     float4 maxPoint;
@@ -45,23 +54,22 @@ bool ConeBehindPlane(float3 T, float3 D, float R, float r, float3 N, float d) {
     return (valTip < 0.0f) && (valBase < 0.0f);
 }
 
-[numthreads(16, 9, 1)]
+[numthreads(CLUSTER_GRID_WIDTH, CLUSTER_GRID_HEIGHT, 1)]
 void CSMain(uint3 id: SV_DispatchThreadID) {
-    // Defense-in-depth: with [numthreads(16,9,1)] the correct dispatch is
-    // (1,1,24) workgroups. If it is ever launched larger, threads outside the
-    // 16x9x24 grid MUST not index in_Bounds/out_Grid (out of bounds) or
-    // InterlockedAdd the shared counter.
-    if (id.x >= 16u || id.y >= 9u || id.z >= 24u) {
+    // Defense-in-depth: the host reflects the logical domain above and derives
+    // workgroup counts from [numthreads]. Still reject every thread outside the
+    // domain before it can index in_Bounds/out_Grid or update the counter.
+    if (id.x >= ZHLN_DISPATCH_SIZE_X || id.y >= ZHLN_DISPATCH_SIZE_Y || id.z >= ZHLN_DISPATCH_SIZE_Z) {
         return;
     }
 
-    uint cIdx       = id.x + (id.y * 16) + (id.z * 144);
+    uint cIdx       = id.x + (id.y * ZHLN_DISPATCH_SIZE_X) + (id.z * ZHLN_DISPATCH_SIZE_X * ZHLN_DISPATCH_SIZE_Y);
     ClusterBounds b = in_Bounds[cIdx]; // These are now static view-space bounds!
 
     uint count = 0;
-    uint list[64];
+    uint list[MAX_LIGHTS_PER_CLUSTER];
 
-    for (uint i = 0; i < frame.lightCount && count < 64; ++i) {
+    for (uint i = 0; i < frame.lightCount && count < MAX_LIGHTS_PER_CLUSTER; ++i) {
         if (lights[i].type == 0 || lights[i].type == 4) {
             continue; // Skip global Sun / Dir lights
         }
@@ -76,12 +84,12 @@ void CSMain(uint3 id: SV_DispatchThreadID) {
     if (count > 0) {
         InterlockedAdd(out_Counter[0], count, offset);
 
-        if (offset + count <= 221184) {
+        if (offset + count <= CLUSTER_LIGHT_LIST_CAPACITY) {
             for (uint j = 0; j < count; ++j) {
                 out_IndexList[offset + j] = list[j];
             }
         } else {
-            uint safeCount = (offset < 221184) ? (221184 - offset) : 0;
+            uint safeCount = (offset < CLUSTER_LIGHT_LIST_CAPACITY) ? (CLUSTER_LIGHT_LIST_CAPACITY - offset) : 0;
             for (uint j = 0; j < safeCount; ++j) {
                 out_IndexList[offset + j] = list[j];
             }

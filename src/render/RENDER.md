@@ -185,10 +185,16 @@ device-addressable buffers created with `VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT
 * Per-draw data travels through `vkCmdPushDataEXT` (`Vk::PushData` /
   `CommandEncoder::PushDrawData`); legacy `push_constant` blocks in SPIR-V read
   the push-data blob directly.
+* `Dispatch`, `DispatchHeap`, and `DispatchHeapIndexed` use fixed logical
+  domains reflected from reserved Slang specialization-constant metadata.
+  Dynamic kernels use explicitly named `*Threads` overloads with runtime
+  logical counts. Both paths reflect SPIR-V `LocalSize` from `[numthreads]` and
+  derive Vulkan workgroup counts; raw groups require `DispatchGroups`.
 * The per-frame scene buffers (frame UBO, lights, instances, joints, morph
   deltas) are selected with `VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT`
-  mappings: each heap segment pushes their device addresses once at
-  `kHeapFrameAddrPushOffset` (`RenderContext::Impl::BindHeapsAndPushFrame`).
+  mappings. Each heap segment pushes their device addresses once at the field
+  offsets reflected from `DescriptorHeapPushData` in
+  `descriptor_heap_layout.slang` (`RenderContext::Impl::BindHeapsAndPushFrame`).
 * The bindless `globalTextures[]` array is a contiguous region of the resource
   heap pinned by a `HEAP_WITH_CONSTANT_OFFSET` mapping
   (`RenderContext::Impl::WriteTextureSlotToHeap`); instance-data texture

@@ -16,6 +16,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace ZHLN::Vk {
@@ -39,6 +40,20 @@ struct ReflectedStageInput {
     ZHLN_ShaderDesc       shader;
     VkShaderStageFlagBits stage;
 };
+
+/**
+ * Reflects the LocalSize execution mode emitted by Slang for a compute entry
+ * point. This is the compiled form of `[numthreads(x, y, z)]` and is therefore
+ * the dispatch-layout authority for the host.
+ */
+[[nodiscard]] auto ReflectComputeThreadGroupSize(const ZHLN_ShaderDesc& shader) noexcept -> std::optional<std::array<uint32_t, 3>>;
+
+/**
+ * Reflects an optional fixed logical dispatch domain declared by the shader
+ * through Zahlen's reserved specialization-constant metadata IDs. Dynamic
+ * kernels omit this metadata and receive their domain from the caller.
+ */
+[[nodiscard]] auto ReflectComputeDispatchSize(const ZHLN_ShaderDesc& shader) noexcept -> std::optional<std::array<uint32_t, 3>>;
 
 /**
  * @brief Standalone SPIR-V parser that extracts binding structure only.

@@ -79,7 +79,7 @@ template <typename... Ptrs>
 // RenderContext Infrastructure & Lifecycles
 // ============================================================================
 
-auto RenderContext::Impl::FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, 6> {
+auto RenderContext::Impl::FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, Vk::kHeapFrameAddressCount> {
     // Order must match the PUSH_ADDRESS mapping offsets baked in
     // BuildSceneHeapMappings: {frame, lights, instances, joints, prevJoints, morphDeltas}.
     return {
@@ -92,11 +92,11 @@ auto RenderContext::Impl::FrameHeapAddresses() const noexcept -> std::array<VkDe
 void RenderContext::Impl::BindHeapsAndPushFrame(VkCommandBuffer cmd) const noexcept {
     // Legacy descriptor-set and push-constant commands elsewhere in the frame
     // invalidate heap + push-data state (and vice versa), so every heap-based
-    // segment re-binds both heaps and re-pushes the per-frame device-address
-    // block that backs the scene registry's PUSH_ADDRESS mappings.
+    // segment re-binds both heaps and re-pushes the per-frame device addresses
+    // that back the scene registry's PUSH_ADDRESS mappings.
     heapManager.BindHeaps(cmd);
     const auto addresses = FrameHeapAddresses();
-    Vk::PushData(ctx, cmd, kHeapFrameAddrPushOffset, addresses.data(), kHeapFrameAddrBlockSize);
+    Vk::PushHeapFrameAddresses(ctx, cmd, heapPushDataLayout, addresses);
 }
 
 auto RenderContext::GetFramebufferSize() const -> std::optional<Extent2D> {
@@ -143,7 +143,7 @@ void RenderContext::Impl::DispatchSkinningPasses() {
             };
 
             skinningPass.PushConstants(cmd, pcs);
-            Vk::ComputePass::Dispatch(cmd, (posMesh->vertexCount + 63) / 64, 1, 1);
+            skinningPass.DispatchThreads(cmd, posMesh->vertexCount, 1, 1);
         }
     }
 
@@ -654,11 +654,11 @@ void RenderContext::Impl::ProvokeDeviceLostInternal() const {
 
     if (current_cmd != VK_NULL_HANDLE) {
         hangGpuPass.Bind(current_cmd);
-        Vk::ComputePass::Dispatch(current_cmd, 512, 512, 1);
+        hangGpuPass.DispatchGroups(current_cmd, 512, 512, 1);
     } else {
         Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](auto cmd) -> auto {
             hangGpuPass.Bind(cmd);
-            hangGpuPass.Dispatch(cmd, 512, 512, 1);
+            hangGpuPass.DispatchGroups(cmd, 512, 512, 1);
         });
     }
 }

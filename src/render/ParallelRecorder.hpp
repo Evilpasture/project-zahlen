@@ -34,22 +34,24 @@ class ParallelCommandRecorder {
 
     /// VK_EXT_descriptor_heap: secondaries must INHERIT the primary's heap
     /// bindings (binding their own would invalidate the primary's heap state
-    /// after vkCmdExecuteCommands). The per-frame push-data block is re-pushed
+    /// after vkCmdExecuteCommands). The per-frame push-data fields are re-pushed
     /// into every secondary right after it begins (push data is not inherited).
     void SetHeapState(
         const VkBindHeapInfoEXT*         samplerHeapBindInfo,
         const VkBindHeapInfoEXT*         resourceHeapBindInfo,
         const Context*                   ctx,
-        uint32_t                         pushOffset,
+        std::span<const uint32_t>        frameAddressOffsets,
         std::span<const VkDeviceAddress> frameAddresses
     ) noexcept {
         _samplerHeapBindInfo  = samplerHeapBindInfo;
         _resourceHeapBindInfo = resourceHeapBindInfo;
         _ctx                  = ctx;
-        _pushOffset           = pushOffset;
-        _frameAddressCount    = static_cast<uint32_t>(frameAddresses.size() > _frameAddresses.size() ? _frameAddresses.size() : frameAddresses.size());
+        _frameAddressCount    = static_cast<uint32_t>(
+            std::min({frameAddresses.size(), frameAddressOffsets.size(), _frameAddresses.size()})
+        );
         for (uint32_t i = 0; i < _frameAddressCount; ++i) {
-            _frameAddresses[i] = frameAddresses[i];
+            _frameAddressOffsets[i] = frameAddressOffsets[i];
+            _frameAddresses[i]      = frameAddresses[i];
         }
     }
 
@@ -74,12 +76,12 @@ class ParallelCommandRecorder {
     std::array<VkCommandBuffer, ConcurrentSlots>                  _cmds;
 
     // VK_EXT_descriptor_heap: secondary inheritance + per-secondary push data.
-    const VkBindHeapInfoEXT*       _samplerHeapBindInfo  = nullptr;
-    const VkBindHeapInfoEXT*       _resourceHeapBindInfo = nullptr;
-    const Context*                 _ctx                  = nullptr;
-    uint32_t                       _pushOffset           = 0;
-    std::array<VkDeviceAddress, 6> _frameAddresses {};
-    uint32_t                       _frameAddressCount = 0;
+    const VkBindHeapInfoEXT*                            _samplerHeapBindInfo  = nullptr;
+    const VkBindHeapInfoEXT*                            _resourceHeapBindInfo = nullptr;
+    const Context*                                      _ctx                  = nullptr;
+    std::array<uint32_t, kHeapFrameAddressCount>        _frameAddressOffsets {};
+    std::array<VkDeviceAddress, kHeapFrameAddressCount> _frameAddresses {};
+    uint32_t                                            _frameAddressCount = 0;
 };
 
 } // namespace ZHLN::Vk

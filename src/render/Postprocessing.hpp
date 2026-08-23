@@ -27,6 +27,7 @@ struct PostProcessPass {
         HeapManager&                    heap,
         const ShaderStages&             shaders,
         std::initializer_list<VkFormat> colorFormats,
+        uint32_t                        indexPushOffset,
         bool                            additive = false
     ) noexcept;
 
@@ -36,6 +37,7 @@ struct PostProcessPass {
         const ShaderStages&                   shaders,
         std::initializer_list<VkFormat>       colorFormats,
         std::span<const VkSpecializationInfo> specInfos,
+        uint32_t                              indexPushOffset,
         bool                                  additive = false
     ) noexcept;
 

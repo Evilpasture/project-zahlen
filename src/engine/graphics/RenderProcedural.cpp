@@ -18,7 +18,7 @@ std::expected<void, Error> RenderContext::Impl::BuildProceduralBakePipeline() {
     // VK_EXT_descriptor_heap: the bake output image is written into a static
     // heap slot pair right before each dispatch (ExecuteImmediate is
     // synchronous, so the slot can be reused per bake call).
-    Vk::BuildHeapPassBindings(heapManager, proceduralBakeDescLayout.reflectedSets[0], 0, Vk::kHeapIndexPushOffset, 2, bakeHeapBindings);
+    Vk::BuildHeapPassBindings(heapManager, proceduralBakeDescLayout.reflectedSets[0], 0, heapPushDataLayout.heapIndexOffset, 2, bakeHeapBindings);
 
     const void*           cs_code = nullptr;
     size_t                cs_size = 0;
@@ -40,7 +40,9 @@ std::expected<void, Error> RenderContext::Impl::BuildProceduralBakePipeline() {
         specInfos[i] = {.mapEntryCount = 1, .pMapEntries = specEntries.data(), .dataSize = sizeof(int), .pData = &variants[i]};
     }
 
-    auto build_res = proceduralBakePass.BuildHeapVariants(ctx.Device(), shaderDesc, specInfos, bakeHeapBindings.GetInfo());
+    auto build_res = proceduralBakePass.BuildHeapVariants(
+        ctx.Device(), shaderDesc, specInfos, bakeHeapBindings.GetInfo(), bakeHeapBindings.indexPushOffset
+    );
     if (!build_res) {
         return std::unexpected(build_res.error());
     }
@@ -103,8 +105,8 @@ std::expected<uint32_t, Error>
                     ctx, cmd, 0,
                     BakePush {.width = width, .height = height, .scale = scale, .randomness = randomness, .distortion = distortion, .bakeType = variantIdx}
                 );
-                Vk::PushHeapIndex(ctx, cmd, Vk::kHeapIndexPushOffset, 0);
-                Vk::ComputePass::Dispatch(cmd, (width + 15) / 16, (height + 15) / 16, 1);
+                Vk::PushHeapIndex(ctx, cmd, bakeHeapBindings.indexPushOffset, 0);
+                proceduralBakePass.DispatchThreads(cmd, width, height, 1);
 
                 // Transition General -> Shader Read Only (Ready for Bindless fragment reads)
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, gpuImage.Handle());

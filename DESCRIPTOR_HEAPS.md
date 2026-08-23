@@ -92,12 +92,12 @@ Set-0 bindings map as follows (baked by `BuildSceneHeapMappings`):
 | binding | member          | mapping source |
 | ------- | --------------- | -------------- |
 | 0       | defaultSampler  | `HEAP_WITH_CONSTANT_OFFSET` → static sampler slot |
-| 1       | frame           | `PUSH_ADDRESS` → push data @ `kHeapFrameAddrPushOffset + 0` |
-| 2       | lights          | `PUSH_ADDRESS` → + 8 |
-| 3       | g_instances     | `PUSH_ADDRESS` → + 16 |
-| 4       | g_joints        | `PUSH_ADDRESS` → + 24 |
-| 5       | g_prevJoints    | `PUSH_ADDRESS` → + 32 |
-| 6       | g_morphDeltas   | `PUSH_ADDRESS` → + 40 |
+| 1       | frame           | `PUSH_ADDRESS` → reflected `frameAddress` offset |
+| 2       | lights          | `PUSH_ADDRESS` → reflected `lightsAddress` offset |
+| 3       | g_instances     | `PUSH_ADDRESS` → reflected `instancesAddress` offset |
+| 4       | g_joints        | `PUSH_ADDRESS` → reflected `jointsAddress` offset |
+| 5       | g_prevJoints    | `PUSH_ADDRESS` → reflected `previousJointsAddress` offset |
+| 6       | g_morphDeltas   | `PUSH_ADDRESS` → reflected `morphDeltasAddress` offset |
 | 7       | prefilteredMap  | `HEAP_WITH_CONSTANT_OFFSET` → static image slot |
 | 8       | brdfLUT         | `HEAP_WITH_CONSTANT_OFFSET` → static image slot |
 | 9       | clampSampler    | `HEAP_WITH_CONSTANT_OFFSET` → static sampler slot |
@@ -106,11 +106,13 @@ Set-0 bindings map as follows (baked by `BuildSceneHeapMappings`):
 
 ### Push-data layout
 
-```
-offset 0 .. sizeof(push struct)     per-draw data (legacy push_constant blocks read this)
-offset kHeapFrameAddrPushOffset (=192) .. +48   six uint64 device addresses
-                                 (frame, lights, instances, joints, jointsPrev, morphDeltas)
-```
+`resources/shaders/descriptor_heap_layout.slang` is the layout authority. Its
+`DescriptorHeapPushData` type places the largest ordinary per-pass block first,
+then the six frame addresses and the descriptor index. At startup,
+`ReflectHeapPushDataLayout()` queries every field with Slang's target-specific
+`VariableLayoutReflection::getOffset()` API. Both mapping creation and
+`vkCmdPushDataEXT` use those reflected offsets, including any padding selected
+by Slang's SPIR-V layout rules.
 
 Per-frame buffers keep their double-buffered allocations; their *stable* device
 addresses are pushed per frame instead of re-writing descriptors per frame.

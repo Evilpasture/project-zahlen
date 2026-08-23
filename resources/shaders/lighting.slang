@@ -1,23 +1,11 @@
 // resources/shaders/lighting.hlsl
 
+import descriptor_heap_layout;
 import pbr_helpers;
 import uniforms;
-struct PushConstants {
-    float4x4 invViewProj;
-    float4x4 viewProj;
-    float4 camPos;
-    int giMode;
-    float aoRadius;
-    float aoBias;
-    float aoPower;
-    float giIntensity;
-    int giSamples;
-    int enableSSR;
-    int enableRTR;
-    int _pad;
-};
+
 [vk::push_constant]
-PushConstants pc;
+ScenePassPushConstants pc;
 
 struct ClusterVolume {
     uint offset;

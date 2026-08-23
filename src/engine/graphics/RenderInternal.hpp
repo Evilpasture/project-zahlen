@@ -196,12 +196,6 @@ static constexpr uint32_t kPassResourceHeapBase      = kSceneStaticResourceSlots
 static constexpr uint32_t kPassSamplerHeapBase       = kSceneStaticSamplerSlots;
 static constexpr uint32_t kImGuiTextureSlots         = 512; // ImGui texture region (tail of the pass slots)
 
-// Push-data layout (vkCmdPushDataEXT): per-draw struct at offset 0; the
-// per-frame scene-buffer device-address block (6 x uint64) lives at this
-// offset and feeds the PUSH_ADDRESS mappings of scene set 0 bindings 1..6.
-static constexpr uint32_t kHeapFrameAddrPushOffset = 192;
-static constexpr uint32_t kHeapFrameAddrBlockSize  = 6 * sizeof(uint64_t);
-
 static constexpr Color4 kClearColorScene    = {.r = 0.08f, .g = 0.09f, .b = 0.12f, .a = 1.0f}; // G-Buffer background theme
 static constexpr Color4 kClearColorVelocity = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
 static constexpr float  kClearDepthValue    = 1.0f;
@@ -654,7 +648,8 @@ struct RenderContext::Impl {
     // its bindings are mapped onto the heaps at pipeline creation time and its
     // per-frame buffers are selected through a push-data device-address block.
     // ============================================================================
-    Vk::HeapManager heapManager;
+    Vk::HeapManager        heapManager;
+    Vk::HeapPushDataLayout heapPushDataLayout;
 
     struct HeapMappingSet {
         std::vector<VkDescriptorSetAndBindingMappingEXT> entries;
@@ -823,10 +818,11 @@ struct RenderContext::Impl {
     // --- VK_EXT_descriptor_heap frame bookkeeping ---
     // Device addresses of the current frame's scene buffers, in
     // GlobalSceneRegistry order {frame, lights, instances, joints, prevJoints, morphDeltas}.
-    [[nodiscard]] auto FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, 6>;
-    // Binds both heaps and pushes the frame address block. Heap-using segments
-    // call this first: legacy set/push-constant commands elsewhere in the frame
-    // invalidate heap and push-data state, so every heap segment re-establishes it.
+    [[nodiscard]] auto FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, Vk::kHeapFrameAddressCount>;
+    // Binds both heaps and pushes the frame addresses at their reflected offsets.
+    // Heap-using segments call this first: legacy set/push-constant commands
+    // elsewhere in the frame invalidate heap and push-data state, so every
+    // heap segment re-establishes it.
     void BindHeapsAndPushFrame(VkCommandBuffer cmd) const noexcept;
 
     // --- VK_EXT_descriptor_heap init ---
@@ -1134,7 +1130,8 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<void, Error> InitLightingLUTs();
 
     [[nodiscard]] std::expected<Vk::ShaderStages, Error> LoadAndCreateShaders(VertexStageSource vs, FragmentStageSource ps) const noexcept;
-    [[nodiscard]] std::expected<Vk::Pipeline, Error>     LoadAndCreateComputeShader(ComputeStageSource cs, VkPipelineLayout layout) const noexcept;
+    [[nodiscard]] std::expected<Vk::Pipeline, Error>
+        LoadAndCreateComputeShader(ComputeStageSource cs, VkPipelineLayout layout, Vk::ComputePass& pass) const noexcept;
 
     void WatchPipeline(const char* vsPath, const char* psPath, std::function<void()> rebuild_fn) noexcept;
     void UploadClusterBounds(const JPH::Mat44& proj);

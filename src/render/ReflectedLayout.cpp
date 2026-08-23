@@ -2,11 +2,93 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "ReflectedLayout.hpp"
+#include <cstring>
 #include <map>
 #include <spirv_reflect.h>
 #include <vector>
 
 namespace ZHLN::Vk {
+
+namespace {
+
+// Reserved specialization-constant IDs used only as reflected metadata for a
+// shader-owned fixed logical dispatch domain.
+constexpr std::array<uint32_t, 3> kDispatchSizeConstantIds = {1000, 1001, 1002};
+
+} // namespace
+
+auto ReflectComputeThreadGroupSize(const ZHLN_ShaderDesc& shader) noexcept -> std::optional<std::array<uint32_t, 3>> {
+    if (shader.code == nullptr || shader.size == 0) {
+        return std::nullopt;
+    }
+
+    SpvReflectShaderModule module;
+    if (spvReflectCreateShaderModule(shader.size, shader.code, &module) != SPV_REFLECT_RESULT_SUCCESS) {
+        return std::nullopt;
+    }
+
+    const SpvReflectEntryPoint* entryPoint = nullptr;
+    if (shader.entry_point != nullptr && shader.entry_point[0] != '\0') {
+        entryPoint = spvReflectGetEntryPoint(&module, shader.entry_point);
+    } else {
+        // A descriptor with no explicit name is valid only when its module has
+        // one compute entry point. Refuse ambiguity rather than reflecting a
+        // different kernel's LocalSize by accident.
+        for (uint32_t i = 0; i < module.entry_point_count; ++i) {
+            const auto& candidate = module.entry_points[i];
+            if (candidate.shader_stage != SPV_REFLECT_SHADER_STAGE_COMPUTE_BIT) {
+                continue;
+            }
+            if (entryPoint != nullptr) {
+                entryPoint = nullptr;
+                break;
+            }
+            entryPoint = &candidate;
+        }
+    }
+
+    const auto isConcreteSize = [](uint32_t value) { return value > 0 && value != SPV_REFLECT_EXECUTION_MODE_SPEC_CONSTANT; };
+
+    std::optional<std::array<uint32_t, 3>> result;
+    if (entryPoint != nullptr && entryPoint->shader_stage == SPV_REFLECT_SHADER_STAGE_COMPUTE_BIT && isConcreteSize(entryPoint->local_size.x) &&
+        isConcreteSize(entryPoint->local_size.y) && isConcreteSize(entryPoint->local_size.z)) {
+        result = std::array<uint32_t, 3> {entryPoint->local_size.x, entryPoint->local_size.y, entryPoint->local_size.z};
+    }
+
+    spvReflectDestroyShaderModule(&module);
+    return result;
+}
+
+auto ReflectComputeDispatchSize(const ZHLN_ShaderDesc& shader) noexcept -> std::optional<std::array<uint32_t, 3>> {
+    if (shader.code == nullptr || shader.size == 0) {
+        return std::nullopt;
+    }
+
+    SpvReflectShaderModule module;
+    if (spvReflectCreateShaderModule(shader.size, shader.code, &module) != SPV_REFLECT_RESULT_SUCCESS) {
+        return std::nullopt;
+    }
+
+    std::array<uint32_t, 3> dispatchSize {};
+    std::array<bool, 3>     found {};
+    for (uint32_t i = 0; i < module.spec_constant_count; ++i) {
+        const auto& constant = module.spec_constants[i];
+        for (size_t axis = 0; axis < kDispatchSizeConstantIds.size(); ++axis) {
+            if (constant.constant_id != kDispatchSizeConstantIds[axis] || constant.default_value == nullptr ||
+                constant.default_value_size != sizeof(uint32_t)) {
+                continue;
+            }
+            std::memcpy(&dispatchSize[axis], constant.default_value, sizeof(uint32_t));
+            found[axis] = dispatchSize[axis] > 0;
+        }
+    }
+
+    spvReflectDestroyShaderModule(&module);
+    if (!found[0] || !found[1] || !found[2]) {
+        return std::nullopt;
+    }
+    return dispatchSize;
+}
 
 void UnsafeReflectedLayoutBuilder::AddStageUnsafe(const ZHLN_ShaderDesc& desc, VkShaderStageFlags stage) noexcept {
     if ((desc.code != nullptr) && desc.size > 0 && _stageCount < _stages.size()) {
