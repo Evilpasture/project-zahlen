@@ -3,9 +3,13 @@
 
 #pragma once
 
-#include "Types.hpp"
 #include <Zahlen/Common.h>
+// clang-format off
+#include <Jolt/Jolt.h>
+// clang-format on
+#include <Jolt/Math/Vec3.h>
 #include <Zahlen/Entity.hpp>
+#include <cstdint>
 #include <vector>
 
 // Forward declare engine registry
@@ -24,9 +28,9 @@ class ZHLN_API SpatialGrid {
     void RemoveEntity(ECS::Registry& reg, Entity handle);
 
     // Returns number of items found and populates out_buffer
-    uint32_t Query(const ECS::Registry& reg, JPH::RVec3Arg pos, float radius, std::vector<Entity>& out_buffer) const;
+    auto Query(const ECS::Registry& reg, JPH::RVec3Arg pos, float radius, std::vector<Entity>& out_buffer) const -> uint32_t;
 
-    [[nodiscard]] int32_t GetCellIndex(JPH::RVec3Arg pos) const noexcept;
+    [[nodiscard]] auto GetCellIndex(JPH::RVec3Arg pos) const noexcept -> int32_t;
 
     std::vector<uint32_t> _cellHeads;
     uint32_t              _width;

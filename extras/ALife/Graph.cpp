@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "Graph.hpp"
+#include "ALife/Types.hpp"
 #include <algorithm>
-#include <cmath>
 #include <limits>
 
 namespace ZHLN::ALife {
@@ -24,10 +24,10 @@ struct MinHeap {
             data[i] = data[p];
             i       = p;
         }
-        data[i] = HeapNode {node_idx, f_score};
+        data[i] = HeapNode {.node_idx = node_idx, .f_score = f_score};
     }
 
-    HeapNode Pop() noexcept {
+    auto Pop() noexcept -> HeapNode {
         HeapNode top  = data[0];
         HeapNode last = data[--count];
         uint32_t i    = 0;
@@ -46,7 +46,7 @@ struct MinHeap {
         return top;
     }
 
-    [[nodiscard]] bool Empty() const noexcept {
+    [[nodiscard]] auto Empty() const noexcept -> bool {
         return count == 0;
     }
 };
@@ -56,7 +56,7 @@ struct MinHeap {
 LevelGraph::LevelGraph(uint32_t node_count) {
     _nodes.resize(node_count);
     for (auto& node: _nodes) {
-        std::fill(std::begin(node.neighbors), std::end(node.neighbors), INVALID_GRAPH_NODE);
+        std::ranges::fill(node.neighbors, INVALID_GRAPH_NODE);
         node.neighbor_count = 0;
     }
 }
@@ -77,7 +77,7 @@ void LevelGraph::Connect(uint32_t a, uint32_t b) {
     }
 }
 
-uint32_t LevelGraph::FindClosest(JPH::RVec3Arg pos) const {
+auto LevelGraph::FindClosest(JPH::RVec3Arg pos) const -> uint32_t {
     uint32_t best_idx    = INVALID_GRAPH_NODE;
     float    min_dist_sq = std::numeric_limits<float>::max();
 
@@ -93,7 +93,7 @@ uint32_t LevelGraph::FindClosest(JPH::RVec3Arg pos) const {
     return best_idx;
 }
 
-uint32_t LevelGraph::FindPath(uint32_t start, uint32_t end, uint32_t* out_path, PathWorkspace& ws) const {
+auto LevelGraph::FindPath(uint32_t start, uint32_t end, uint32_t* out_path, PathWorkspace& ws) const -> uint32_t {
     if (start == end || start >= _nodes.size() || end >= _nodes.size()) {
         return 0;
     }

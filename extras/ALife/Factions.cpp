@@ -15,20 +15,20 @@ FactionRegistry::FactionRegistry(uint32_t capacity): _capacity(capacity) {
     }
 }
 
-uint32_t FactionRegistry::Register(std::string_view name) {
+auto FactionRegistry::Register(std::string_view name) -> uint32_t {
     uint32_t existing = GetID(name);
     if (existing != 0xFFFFFFFF) {
         return existing;
     }
     if (_definitions.size() < _capacity) {
-        uint32_t id = static_cast<uint32_t>(_definitions.size());
+        auto id = static_cast<uint32_t>(_definitions.size());
         _definitions.push_back({String32(name), id});
         return id;
     }
     return 0xFFFFFFFF; // Registry full
 }
 
-uint32_t FactionRegistry::GetID(std::string_view name) const {
+auto FactionRegistry::GetID(std::string_view name) const -> uint32_t {
     for (const auto& def: _definitions) {
         // Explicitly cast to std::string_view to avoid Clang conversion ambiguity
         if (std::string_view(def.name) == name) {
@@ -38,7 +38,7 @@ uint32_t FactionRegistry::GetID(std::string_view name) const {
     return 0xFFFFFFFF; // Not found
 }
 
-const char* FactionRegistry::GetName(uint32_t id) const {
+auto FactionRegistry::GetName(uint32_t id) const -> const char* {
     if (id < _definitions.size()) {
         return _definitions[id].name.c_str();
     }
@@ -53,7 +53,7 @@ void FactionRegistry::SetRelation(uint32_t a, uint32_t b, float value) {
     }
 }
 
-float FactionRegistry::GetRelation(uint32_t a, uint32_t b) const {
+auto FactionRegistry::GetRelation(uint32_t a, uint32_t b) const -> float {
     if (a == b) {
         return 1.0f; // Self is always allied
     }

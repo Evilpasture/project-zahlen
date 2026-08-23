@@ -13,19 +13,19 @@ namespace ZHLN::ALife {
 
 struct FactionDef {
     String32 name;
-    uint32_t id;
+    uint32_t id {};
 };
 
 class ZHLN_API FactionRegistry {
   public:
     explicit FactionRegistry(uint32_t capacity);
 
-    uint32_t                  Register(std::string_view name);
-    [[nodiscard]] uint32_t    GetID(std::string_view name) const;
-    [[nodiscard]] const char* GetName(uint32_t id) const;
+    auto               Register(std::string_view name) -> uint32_t;
+    [[nodiscard]] auto GetID(std::string_view name) const -> uint32_t;
+    [[nodiscard]] auto GetName(uint32_t id) const -> const char*;
 
-    void                SetRelation(uint32_t a, uint32_t b, float value);
-    [[nodiscard]] float GetRelation(uint32_t a, uint32_t b) const;
+    void               SetRelation(uint32_t a, uint32_t b, float value);
+    [[nodiscard]] auto GetRelation(uint32_t a, uint32_t b) const -> float;
 
   private:
     std::vector<FactionDef> _definitions;

@@ -1,9 +1,10 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "ALifeComponents.hpp"
 #include "SpatialGrid.hpp"
+#include "ALifeComponents.hpp"
 #include <Zahlen/ecs/ECS.hpp>
+#include <algorithm>
 #include <cmath>
 
 namespace ZHLN::ALife {
@@ -13,16 +14,16 @@ SpatialGrid::SpatialGrid(uint32_t w, uint32_t h, float cell_size): _width(w), _h
 }
 
 void SpatialGrid::Clear() noexcept {
-    std::fill(_cellHeads.begin(), _cellHeads.end(), END_OF_LIST);
+    std::ranges::fill(_cellHeads, END_OF_LIST);
 }
 
-int32_t SpatialGrid::GetCellIndex(JPH::RVec3Arg pos) const noexcept {
+auto SpatialGrid::GetCellIndex(JPH::RVec3Arg pos) const noexcept -> int32_t {
     if (pos.GetX() < 0.0f || pos.GetZ() < 0.0f) {
         return -1;
     }
 
-    int32_t gx = static_cast<int32_t>(pos.GetX() / _cellSize);
-    int32_t gz = static_cast<int32_t>(pos.GetZ() / _cellSize);
+    auto gx = static_cast<int32_t>(pos.GetX() / _cellSize);
+    auto gz = static_cast<int32_t>(pos.GetZ() / _cellSize);
 
     if (gx >= static_cast<int32_t>(_width) || gz >= static_cast<int32_t>(_height)) {
         return -1;
@@ -31,9 +32,10 @@ int32_t SpatialGrid::GetCellIndex(JPH::RVec3Arg pos) const noexcept {
 }
 
 void SpatialGrid::UpdateEntity(ECS::Registry& reg, Entity handle, JPH::RVec3Arg old_pos) {
-    auto* comp = reg.Get<Components::ALifeComponent>(handle);
-    if (!comp)
+    auto* comp = reg.Get<ALifeComponent>(handle);
+    if (comp == nullptr) {
         return;
+    }
 
     // Cache the entity handle inside the component if not already done
     if (comp->self_entity == NullEntity) {
@@ -43,8 +45,9 @@ void SpatialGrid::UpdateEntity(ECS::Registry& reg, Entity handle, JPH::RVec3Arg 
     int32_t old_idx = GetCellIndex(old_pos);
     int32_t new_idx = GetCellIndex(comp->position);
 
-    if (old_idx == new_idx)
+    if (old_idx == new_idx) {
         return;
+    }
 
     // 1. Unlink from old cell list
     if (old_idx != -1) {
@@ -52,14 +55,15 @@ void SpatialGrid::UpdateEntity(ECS::Registry& reg, Entity handle, JPH::RVec3Arg 
         while (*curr != END_OF_LIST) {
             if (*curr == handle.index) {
                 Entity dummy {.index = *curr, .generation = 0};
-                auto*  curr_comp = reg.Get<Components::ALifeComponent>(dummy);
-                *curr            = curr_comp ? curr_comp->next_in_grid : END_OF_LIST;
+                auto*  curr_comp = reg.Get<ALifeComponent>(dummy);
+                *curr            = (curr_comp != nullptr) ? curr_comp->next_in_grid : END_OF_LIST;
                 break;
             }
             Entity dummy {.index = *curr, .generation = 0};
-            auto*  curr_comp = reg.Get<Components::ALifeComponent>(dummy);
-            if (!curr_comp)
+            auto*  curr_comp = reg.Get<ALifeComponent>(dummy);
+            if (curr_comp == nullptr) {
                 break;
+            }
             curr = &curr_comp->next_in_grid;
         }
     }
@@ -72,9 +76,10 @@ void SpatialGrid::UpdateEntity(ECS::Registry& reg, Entity handle, JPH::RVec3Arg 
 }
 
 void SpatialGrid::RemoveEntity(ECS::Registry& reg, Entity handle) {
-    auto* comp = reg.Get<Components::ALifeComponent>(handle);
-    if (!comp)
+    auto* comp = reg.Get<ALifeComponent>(handle);
+    if (comp == nullptr) {
         return;
+    }
 
     int32_t idx = GetCellIndex(comp->position);
     if (idx != -1) {
@@ -82,31 +87,32 @@ void SpatialGrid::RemoveEntity(ECS::Registry& reg, Entity handle) {
         while (*curr != END_OF_LIST) {
             if (*curr == handle.index) {
                 Entity dummy {.index = handle.index, .generation = 0};
-                auto*  curr_comp = reg.Get<Components::ALifeComponent>(dummy);
+                auto*  curr_comp = reg.Get<ALifeComponent>(dummy);
 
-                *curr = curr_comp ? curr_comp->next_in_grid : END_OF_LIST;
+                *curr = (curr_comp != nullptr) ? curr_comp->next_in_grid : END_OF_LIST;
 
-                if (curr_comp) {
+                if (curr_comp != nullptr) {
                     curr_comp->next_in_grid = END_OF_LIST;
                 }
                 break;
             }
             Entity dummy {.index = *curr, .generation = 0};
-            auto*  curr_comp = reg.Get<Components::ALifeComponent>(dummy);
-            if (!curr_comp)
+            auto*  curr_comp = reg.Get<ALifeComponent>(dummy);
+            if (curr_comp == nullptr) {
                 break;
+            }
             curr = &curr_comp->next_in_grid;
         }
     }
 }
 
-uint32_t SpatialGrid::Query(const ECS::Registry& reg, JPH::RVec3Arg pos, float radius, std::vector<Entity>& out_buffer) const {
+auto SpatialGrid::Query(const ECS::Registry& reg, JPH::RVec3Arg pos, float radius, std::vector<Entity>& out_buffer) const -> uint32_t {
     uint32_t count = 0;
 
-    int32_t min_x = static_cast<int32_t>(std::floor((pos.GetX() - radius) / _cellSize));
-    int32_t max_x = static_cast<int32_t>(std::floor((pos.GetX() + radius) / _cellSize));
-    int32_t min_z = static_cast<int32_t>(std::floor((pos.GetZ() - radius) / _cellSize));
-    int32_t max_z = static_cast<int32_t>(std::floor((pos.GetZ() + radius) / _cellSize));
+    auto min_x = static_cast<int32_t>(std::floor((pos.GetX() - radius) / _cellSize));
+    auto max_x = static_cast<int32_t>(std::floor((pos.GetX() + radius) / _cellSize));
+    auto min_z = static_cast<int32_t>(std::floor((pos.GetZ() - radius) / _cellSize));
+    auto max_z = static_cast<int32_t>(std::floor((pos.GetZ() + radius) / _cellSize));
 
     const float radius_sq = radius * radius;
 
@@ -121,9 +127,10 @@ uint32_t SpatialGrid::Query(const ECS::Registry& reg, JPH::RVec3Arg pos, float r
             while (slot_idx != END_OF_LIST) {
                 // Generational bypass: we can lookup safely by index only
                 Entity dummy {.index = slot_idx, .generation = 0};
-                auto*  comp = reg.Get<Components::ALifeComponent>(dummy);
-                if (!comp)
+                auto*  comp = reg.Get<ALifeComponent>(dummy);
+                if (comp == nullptr) {
                     break;
+                }
 
                 float dist_sq = (comp->position - pos).LengthSq();
                 if (dist_sq <= radius_sq) {

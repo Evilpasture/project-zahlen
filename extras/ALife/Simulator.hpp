@@ -45,8 +45,8 @@ class ZHLN_API Simulator {
     void BroadcastEvent(const Event& event);
     void ResolveOfflineInteraction(ECS::Registry& reg, Entity e1, Entity e2);
 
-    bool Save(const char* filename) const;
-    bool Load(ECS::Registry& reg, const char* filename);
+    auto Save(const char* filename) const -> bool;
+    auto Load(ECS::Registry& reg, const char* filename) -> bool;
 
     // Callbacks
     std::function<void(Simulator&, Entity, Entity)> on_interaction;
@@ -55,24 +55,24 @@ class ZHLN_API Simulator {
     std::function<void(Simulator&, Entity)>         on_task_completed;
 
     // Encapsulated state accessors
-    [[nodiscard]] SpatialGrid& GetGrid() noexcept {
+    [[nodiscard]] auto GetGrid() noexcept -> SpatialGrid& {
         return _grid;
     }
-    [[nodiscard]] LevelGraph& GetGraph() noexcept {
+    [[nodiscard]] auto GetGraph() noexcept -> LevelGraph& {
         return _levelGraph;
     }
-    [[nodiscard]] FactionRegistry& GetFactions() noexcept {
+    [[nodiscard]] auto GetFactions() noexcept -> FactionRegistry& {
         return _factionRegistry;
     }
 
-    [[nodiscard]] SimTuning& GetTuning() noexcept {
+    [[nodiscard]] auto GetTuning() noexcept -> SimTuning& {
         return _tuning;
     }
-    [[nodiscard]] const SimTuning& GetTuning() const noexcept {
+    [[nodiscard]] auto GetTuning() const noexcept -> const SimTuning& {
         return _tuning;
     }
 
-    [[nodiscard]] uint64_t GetGameTimeMS() const noexcept {
+    [[nodiscard]] auto GetGameTimeMS() const noexcept -> uint64_t {
         return _gameTimeMS;
     }
 

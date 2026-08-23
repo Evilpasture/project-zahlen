@@ -27,15 +27,15 @@ struct WorldState {
         mask |= bit_mask;
     }
 
-    [[nodiscard]] bool Matches(const WorldState& goal) const noexcept {
+    [[nodiscard]] auto Matches(const WorldState& goal) const noexcept -> bool {
         return (values & goal.mask) == (goal.values & goal.mask);
     }
 };
 
 class ZHLN_API WorldStateRegistry {
   public:
-    uint32_t               RegisterKey(std::string_view name);
-    [[nodiscard]] uint32_t GetID(std::string_view name) const;
+    auto               RegisterKey(std::string_view name) -> uint32_t;
+    [[nodiscard]] auto GetID(std::string_view name) const -> uint32_t;
 
   private:
     std::vector<String32> _keyNames;
@@ -45,8 +45,8 @@ struct Action {
     String32   name;
     WorldState preconditions;
     WorldState effects;
-    int        cost;
-    uint32_t   task_id;
+    int        cost {};
+    uint32_t   task_id {};
 };
 
 struct Plan {
@@ -59,6 +59,6 @@ struct PlanRequest {
     WorldState goal;
 };
 
-[[nodiscard]] ZHLN_API Plan SolvePlan(const PlanRequest& request, const std::vector<Action>& actions);
+[[nodiscard]] ZHLN_API auto SolvePlan(const PlanRequest& request, const std::vector<Action>& actions) -> Plan;
 
 } // namespace ZHLN::ALife

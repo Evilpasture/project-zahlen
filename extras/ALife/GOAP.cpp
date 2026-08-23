@@ -2,9 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "GOAP.hpp"
-#include <algorithm>
 #include <bit>
-#include <limits>
 
 namespace ZHLN::ALife {
 
@@ -13,10 +11,10 @@ constexpr size_t GOAP_MAX_NODES = 256;
 // Internal State-Space A* Node
 struct GOAPNode {
     WorldState state;
-    uint32_t   g_score;
-    uint32_t   f_score;
-    uint32_t   parent_idx;
-    uint32_t   action_idx;
+    uint32_t   g_score {};
+    uint32_t   f_score {};
+    uint32_t   parent_idx {};
+    uint32_t   action_idx {};
 };
 
 // Internal Helper: Open List Min-Heap
@@ -38,7 +36,7 @@ struct GOAPHeap {
         heap[i] = node_idx;
     }
 
-    uint32_t Pop() noexcept {
+    auto Pop() noexcept -> uint32_t {
         uint32_t top  = heap[0];
         uint32_t last = heap[--count];
         uint32_t i    = 0;
@@ -57,21 +55,21 @@ struct GOAPHeap {
         return top;
     }
 
-    [[nodiscard]] bool Empty() const noexcept {
+    [[nodiscard]] auto Empty() const noexcept -> bool {
         return count == 0;
     }
 };
 
 // --- Heuristic & State Math ---
 
-static inline uint32_t CalculateHeuristic(WorldState current, WorldState goal) noexcept {
+static inline auto CalculateHeuristic(WorldState current, WorldState goal) noexcept -> uint32_t {
     uint64_t unmet_bits = (current.values ^ goal.values) & goal.mask;
 
     // Modern C++23 standard way to get fast hardware popcount
     return static_cast<uint32_t>(std::popcount(unmet_bits));
 }
 
-static inline WorldState ApplyAction(WorldState state, WorldState effects) noexcept {
+static inline auto ApplyAction(WorldState state, WorldState effects) noexcept -> WorldState {
     WorldState next = state;
     next.values     = (next.values & ~effects.mask) | (effects.values & effects.mask);
     next.mask |= effects.mask;
@@ -80,7 +78,7 @@ static inline WorldState ApplyAction(WorldState state, WorldState effects) noexc
 
 // --- The A* Solver ---
 
-Plan SolvePlan(const PlanRequest& request, const std::vector<Action>& actions) {
+auto SolvePlan(const PlanRequest& request, const std::vector<Action>& actions) -> Plan {
     // Allocation-free static pools (Perfect for Fiber task safety)
     GOAPNode pool[GOAP_MAX_NODES];
     uint32_t pool_count = 0;
@@ -172,7 +170,7 @@ Plan SolvePlan(const PlanRequest& request, const std::vector<Action>& actions) {
 
 // --- Registry Implementation ---
 
-uint32_t WorldStateRegistry::RegisterKey(std::string_view name) {
+auto WorldStateRegistry::RegisterKey(std::string_view name) -> uint32_t {
     for (uint32_t i = 0; i < static_cast<uint32_t>(_keyNames.size()); ++i) {
         if (std::string_view(_keyNames[i]) == name) { // Explicitly cast to prevent conversion ambiguity
             return i;
@@ -180,15 +178,15 @@ uint32_t WorldStateRegistry::RegisterKey(std::string_view name) {
     }
 
     if (_keyNames.size() < MAX_GOAP_STATES) {
-        uint32_t id = static_cast<uint32_t>(_keyNames.size());
-        _keyNames.push_back(String32(name));
+        auto id = static_cast<uint32_t>(_keyNames.size());
+        _keyNames.emplace_back(name);
         return id;
     }
 
     return 0xFFFFFFFF; // Registry Full
 }
 
-uint32_t WorldStateRegistry::GetID(std::string_view name) const {
+auto WorldStateRegistry::GetID(std::string_view name) const -> uint32_t {
     for (uint32_t i = 0; i < static_cast<uint32_t>(_keyNames.size()); ++i) {
         if (std::string_view(_keyNames[i]) == name) { // Explicitly cast to prevent conversion ambiguity
             return i;

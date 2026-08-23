@@ -1,8 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "ALifeComponents.hpp"
 #include "Simulator.hpp"
+#include "ALifeComponents.hpp"
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Profiler.hpp>
@@ -15,16 +15,16 @@
 namespace ZHLN::ALife {
 
 // --- Package-Safe Math Helper ---
-static JPH::RVec3 MoveTowards(JPH::RVec3Arg current, JPH::RVec3Arg target, float max_dist) {
+static auto MoveTowards(JPH::RVec3Arg current, JPH::RVec3Arg target, float max_dist) -> JPH::RVec3 {
     JPH::RVec3 diff = target - current; // Keep as RVec3 to handle single/double precision correctly
     double     d2   = diff.LengthSq();
 
-    if (d2 < (double) (max_dist * max_dist) || d2 < 0.0001) {
+    if (d2 < static_cast<double>(max_dist * max_dist) || d2 < 0.0001) {
         return target;
     }
 
     double d = std::sqrt(d2);
-    return current + diff / d * (double) max_dist;
+    return current + diff / d * static_cast<double>(max_dist);
 }
 
 // --- Simulator Initialization ---
@@ -55,19 +55,19 @@ void Simulator::Update(Engine& engine, float dt, JPH::RVec3Arg observer_pos) {
     const float game_dt           = dt * _tuning.time_factor;
     const float dist_sq_threshold = _tuning.switch_distance * _tuning.switch_distance;
 
-    ECS::Registry&                           reg      = engine.GetRegistry();
-    std::span<const Entity>                  entities = reg.GetEntitiesWith<Components::ALifeComponent>();
-    RestrictSpan<Components::ALifeComponent> comps    = reg.GetRawArray<Components::ALifeComponent>();
+    ECS::Registry&               reg      = engine.GetRegistry();
+    std::span<const Entity>      entities = reg.GetEntitiesWith<ALifeComponent>();
+    RestrictSpan<ALifeComponent> comps    = reg.GetRawArray<ALifeComponent>();
 
     if (entities.empty()) {
         return;
     }
 
     // --- PHASE 1: MOVEMENT & STATE SWITCHING (Parallel) ---
-    TaskSystem::ParallelFor(entities.size(), 256, [&](uint32_t start, uint32_t end, uint32_t) {
+    TaskSystem::ParallelFor(entities.size(), 256, [&](uint32_t start, uint32_t end, uint32_t) -> void {
         for (uint32_t i = start; i < end; ++i) {
-            Entity                      e    = entities[i];
-            Components::ALifeComponent& comp = comps[i];
+            Entity          e    = entities[i];
+            ALifeComponent& comp = comps[i];
 
             if (comp.state == State::Dead) {
                 continue;
@@ -154,13 +154,13 @@ void Simulator::Update(Engine& engine, float dt, JPH::RVec3Arg observer_pos) {
 
     // --- PHASE 3: OFFLINE INTERACTIONS (Parallel) ---
     if (on_interaction) {
-        TaskSystem::ParallelFor(entities.size(), 256, [&](uint32_t start, uint32_t end, uint32_t) {
+        TaskSystem::ParallelFor(entities.size(), 256, [&](uint32_t start, uint32_t end, uint32_t) -> void {
             std::vector<Entity> neighbors;
             neighbors.reserve(8);
 
             for (uint32_t i = start; i < end; ++i) {
-                Entity                      e    = entities[i];
-                Components::ALifeComponent& comp = comps[i];
+                Entity          e    = entities[i];
+                ALifeComponent& comp = comps[i];
 
                 if (comp.state != State::Offline || comp.state == State::Dead) {
                     continue;
@@ -185,8 +185,8 @@ void Simulator::Update(Engine& engine, float dt, JPH::RVec3Arg observer_pos) {
 // --- Interaction Math ---
 
 void Simulator::ResolveOfflineInteraction(ECS::Registry& reg, Entity e1, Entity e2) {
-    auto* c1 = reg.Get<Components::ALifeComponent>(e1);
-    auto* c2 = reg.Get<Components::ALifeComponent>(e2);
+    auto* c1 = reg.Get<ALifeComponent>(e1);
+    auto* c2 = reg.Get<ALifeComponent>(e2);
     if ((c1 == nullptr) || (c2 == nullptr)) {
         return;
     }
@@ -254,11 +254,11 @@ struct SaveHeader {
 };
 
 struct SaveRecord {
-    Entity                     entity {};
-    Components::ALifeComponent comp;
+    Entity         entity {};
+    ALifeComponent comp;
 };
 
-bool Simulator::Save(const char* /*filename*/) const {
+auto Simulator::Save(const char* /*filename*/) const -> bool {
     // Note: This only saves the ALife component data, not the full ECS registry.
     // In a real engine, ECS serialization is usually handled holistically.
     // But this fulfills the A-Life specific save requirement.
@@ -272,7 +272,7 @@ bool Simulator::Save(const char* /*filename*/) const {
     return false;
 }
 
-bool Simulator::Load(ECS::Registry& reg, const char* filename) {
+auto Simulator::Load(ECS::Registry& reg, const char* filename) -> bool {
     std::ifstream file(filename, std::ios::binary);
     if (!file.is_open()) {
         return false;
@@ -294,7 +294,7 @@ bool Simulator::Load(ECS::Registry& reg, const char* filename) {
 
         // Either update existing or add new
         if (reg.IsAlive(rec.entity)) {
-            if (auto* existing = reg.Get<Components::ALifeComponent>(rec.entity)) {
+            if (auto* existing = reg.Get<ALifeComponent>(rec.entity)) {
                 *existing = rec.comp;
             } else {
                 reg.Add(rec.entity, rec.comp);
@@ -303,7 +303,7 @@ bool Simulator::Load(ECS::Registry& reg, const char* filename) {
     }
 
     _grid.Clear();
-    auto entities = reg.GetEntitiesWith<Components::ALifeComponent>();
+    auto entities = reg.GetEntitiesWith<ALifeComponent>();
     for (Entity e: entities) {
         _grid.UpdateEntity(reg, e, JPH::RVec3(-1, -1, -1));
     }

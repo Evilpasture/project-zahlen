@@ -3,8 +3,12 @@
 
 #pragma once
 
-#include "Types.hpp"
 #include <Zahlen/Common.h>
+// clang-format off
+#include <Jolt/Jolt.h>
+// clang-format on
+#include <Jolt/Math/Vec3.h>
+#include <cstddef>
 #include <memory_resource>
 #include <vector>
 
@@ -36,7 +40,8 @@ struct PathWorkspace {
     std::pmr::vector<AStarData> node_data;
     std::pmr::vector<HeapNode>  heap_mem;
 
-    PathWorkspace(uint32_t node_count, std::pmr::memory_resource* arena): node_data(node_count, arena), heap_mem(node_count * MAX_NODE_NEIGHBORS, arena) {
+    PathWorkspace(uint32_t node_count, std::pmr::memory_resource* arena):
+        node_data(node_count, arena), heap_mem(static_cast<size_t>(node_count * MAX_NODE_NEIGHBORS), arena) {
     }
 };
 
@@ -44,23 +49,23 @@ class ZHLN_API LevelGraph {
   public:
     explicit LevelGraph(uint32_t node_count);
 
-    void                   Connect(uint32_t a, uint32_t b);
-    [[nodiscard]] uint32_t FindClosest(JPH::RVec3Arg pos) const;
+    void               Connect(uint32_t a, uint32_t b);
+    [[nodiscard]] auto FindClosest(JPH::RVec3Arg pos) const -> uint32_t;
 
     // No locks required. Safe to call concurrently.
-    uint32_t FindPath(uint32_t start, uint32_t end, uint32_t* out_path, PathWorkspace& ws) const;
+    auto FindPath(uint32_t start, uint32_t end, uint32_t* out_path, PathWorkspace& ws) const -> uint32_t;
 
     // Encapsulated accessors
-    [[nodiscard]] const std::vector<Node>& GetNodes() const noexcept {
+    [[nodiscard]] auto GetNodes() const noexcept -> const std::vector<Node>& {
         return _nodes;
     }
-    [[nodiscard]] Node& GetNode(uint32_t index) {
+    [[nodiscard]] auto GetNode(uint32_t index) -> Node& {
         return _nodes[index];
     }
-    [[nodiscard]] const Node& GetNode(uint32_t index) const {
+    [[nodiscard]] auto GetNode(uint32_t index) const -> const Node& {
         return _nodes[index];
     }
-    [[nodiscard]] size_t GetNodeCount() const noexcept {
+    [[nodiscard]] auto GetNodeCount() const noexcept -> size_t {
         return _nodes.size();
     }
 

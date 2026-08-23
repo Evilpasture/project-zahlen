@@ -11,7 +11,7 @@
 #include <expected>
 #include <memory_resource>
 
-enum class ALifeTestError : uint32_t {
+enum class ALifeTestError : uint8_t {
     Success = 0,
     GOAPPlanFailed[[= ZHLN::Reflect::Description("GOAP solver failed to compute valid action sequence.")]],
     PathfindingFailed[[= ZHLN::Reflect::Description("LevelGraph A* failed to find shortest path.")]],
@@ -121,28 +121,28 @@ struct ALifeTestSuite {
         // --- 4. Spatial Grid Partitioning & Radial Query ---
         std::expected<void, ZHLN::Error> spatial_grid_queries() {
             ZHLN::ECS::Registry reg;
-            reg.RegisterComponent<ZHLN::Components::ALifeComponent>("ALifeComponent");
+            reg.RegisterComponent<ZHLN::ALife::ALifeComponent>("ALifeComponent");
 
             // 100x100 grid with 50.0m cells
             ZHLN::ALife::SpatialGrid grid(100, 100, 50.0f);
 
             // Entity 1 at (100, 0, 100) -> Cell (2, 2)
             ZHLN::Entity e1 = reg.Create();
-            auto&        c1 = reg.Add<ZHLN::Components::ALifeComponent>(e1);
+            auto&        c1 = reg.Add<ZHLN::ALife::ALifeComponent>(e1);
             c1.position     = JPH::RVec3(100.0, 0.0, 100.0);
             c1.self_entity  = e1;
             grid.UpdateEntity(reg, e1, JPH::RVec3(-1, -1, -1));
 
             // Entity 2 at (110, 0, 100) (Distance 10m from e1)
             ZHLN::Entity e2 = reg.Create();
-            auto&        c2 = reg.Add<ZHLN::Components::ALifeComponent>(e2);
+            auto&        c2 = reg.Add<ZHLN::ALife::ALifeComponent>(e2);
             c2.position     = JPH::RVec3(110.0, 0.0, 100.0);
             c2.self_entity  = e2;
             grid.UpdateEntity(reg, e2, JPH::RVec3(-1, -1, -1));
 
             // Entity 3 at (800, 0, 800) (Far away)
             ZHLN::Entity e3 = reg.Create();
-            auto&        c3 = reg.Add<ZHLN::Components::ALifeComponent>(e3);
+            auto&        c3 = reg.Add<ZHLN::ALife::ALifeComponent>(e3);
             c3.position     = JPH::RVec3(800.0, 0.0, 800.0);
             c3.self_entity  = e3;
             grid.UpdateEntity(reg, e3, JPH::RVec3(-1, -1, -1));

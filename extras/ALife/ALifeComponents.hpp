@@ -14,7 +14,7 @@
 #include <Jolt/Math/Vec3.h>
 #include <cstdint>
 
-namespace ZHLN::Components {
+namespace ZHLN::ALife {
 
 struct ALifeComponent {
     using enum ALife::State;
@@ -49,4 +49,4 @@ struct ALifeComponent {
     uint64_t        script_handle = 0;
 };
 
-} // namespace ZHLN::Components
+} // namespace ZHLN::ALife
