@@ -326,15 +326,17 @@ Engine::Engine(const EngineConfig& cfg): _impl(nullptr) {
     }
 }
 
-void Engine::HandleDeviceLost() noexcept {
+auto Engine::HandleDeviceLost() noexcept -> std::expected<void, Error> {
     _impl->renderContext->OnDeviceLost();
     _impl->renderContext.reset();
 
     auto rc_res = RenderContext::Create(*_impl->window, _impl->config.render);
-    if (rc_res) {
-        _impl->renderContext = std::move(rc_res.value());
-        CreativeWorksFactory::RebuildVulkanResources(*_impl->renderContext, *_impl->assetManager, _impl->registry);
+    if (!rc_res) {
+        return std::unexpected(rc_res.error());
     }
+    _impl->renderContext = std::move(rc_res.value());
+    CreativeWorksFactory::RebuildVulkanResources(*_impl->renderContext, *_impl->assetManager, _impl->registry);
+    return {};
 }
 
 Engine::Engine(const EngineConfig& cfg, bool& outSuccess): _impl(nullptr) {
@@ -584,7 +586,7 @@ auto Engine::BeginFrame(bool& outDeviceLost) noexcept -> bool {
     if (!res) {
         if (res.error() == RenderFrameResult::DeviceLost) {
             outDeviceLost = true;
-            HandleDeviceLost();
+            { [[maybe_unused]] auto _ = HandleDeviceLost(); }
         }
         return false;
     }
@@ -597,7 +599,7 @@ auto Engine::EndFrame(bool& outDeviceLost) noexcept -> bool {
     if (!res) {
         if (res.error() == RenderFrameResult::DeviceLost) {
             outDeviceLost = true;
-            HandleDeviceLost();
+            { [[maybe_unused]] auto _ = HandleDeviceLost(); }
         }
         return false;
     }
@@ -787,7 +789,7 @@ auto Engine::Tick(float dt, GameplayDriver driver) -> GameplayStatus {
     auto render_res = RenderSystem::Update(*this, dt);
     if (!render_res) {
         if (render_res.error().Is<RenderFrameResult>() && render_res.error().As<RenderFrameResult>() == RenderFrameResult::DeviceLost) {
-            HandleDeviceLost();
+{ [[maybe_unused]] auto _ = HandleDeviceLost(); }
         }
     }
 

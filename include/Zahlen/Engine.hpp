@@ -47,7 +47,7 @@ class ZHLN_API Engine {
     Engine(const EngineConfig& cfg, bool& outSuccess);
     ~Engine();
 
-    void HandleDeviceLost() noexcept;
+    auto HandleDeviceLost() noexcept -> std::expected<void, Error>;
 
     static std::expected<std::unique_ptr<Engine>, Error> Create(const EngineConfig& cfg);
 
