@@ -1101,7 +1101,7 @@ auto ToDebugString(const T& t) -> std::string {
 
 template <typename E>
     requires std::is_enum_v<E>
-constexpr auto EnumToMessage(E value) -> std::string_view {
+inline auto EnumToMessage(E value) -> std::string_view {
     if (auto desc = GetEnumeratorAnnotation<MetaDescription>(value)) {
         return desc->text;
     }
