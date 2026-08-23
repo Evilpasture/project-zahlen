@@ -704,7 +704,7 @@ consteval auto GetAnnotation() -> std::optional<Tag> {
 
 template <typename Tag, typename E>
     requires std::is_enum_v<E>
-constexpr auto GetEnumeratorAnnotation(E value) -> std::optional<Tag> {
+inline auto GetEnumeratorAnnotation(E value) -> std::optional<Tag> {
     std::optional<Tag> result = std::nullopt;
     [:Expand(detail::EnumeratorsOf<E>()):] >> [&]<auto enumerator>() -> auto {
         auto annotation = GetAnnotation<Tag, enumerator>();
