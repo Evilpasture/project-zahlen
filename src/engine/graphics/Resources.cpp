@@ -297,8 +297,6 @@ constexpr uint8_t hang_gpu_comp_raw[] = {
 #embed SHADER_HANG_GPU_SLANG_CS_PATH
 };
 
-static auto procedural_bake_comp_path = SHADER_PROCEDURAL_BAKE_SLANG_CS_PATH;
-
 constexpr uint8_t procedural_bake_comp_raw[] = {
 #embed SHADER_PROCEDURAL_BAKE_SLANG_CS_PATH
 };

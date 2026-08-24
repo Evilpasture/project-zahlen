@@ -266,13 +266,13 @@ static constexpr float TWO_PI      = 6.28318530717958647692F;
 }
 [[nodiscard]]
 constexpr float Worley(float x, float y) {
-    int   ix       = (int) Floor(x);
-    int   iy       = (int) Floor(y);
+    int   ix       = static_cast<int>(Floor(x));
+    int   iy       = static_cast<int>(Floor(y));
     float min_dist = 1e9F;
     for (int dy = -1; dy <= 1; ++dy) {
         for (int dx = -1; dx <= 1; ++dx) {
-            float fx   = (float) (ix + dx) + Hash((float) (ix + dx), (float) (iy + dy));
-            float fy   = (float) (iy + dy) + Hash((float) (ix + dx) + 7.3F, (float) (iy + dy) + 3.1F);
+            float fx   = static_cast<float>(ix + dx) + Hash(static_cast<float>(ix + dx), static_cast<float>(iy + dy));
+            float fy   = static_cast<float>(iy + dy) + Hash(static_cast<float>(ix + dx) + 7.3F, static_cast<float>(iy + dy) + 3.1F);
             float dist = Sqrt(((x - fx) * (x - fx)) + ((y - fy) * (y - fy)));
             min_dist   = Min(min_dist, dist);
         }

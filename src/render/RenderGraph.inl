@@ -351,13 +351,8 @@ constexpr CompileTimeFrameGraph<Passes...>::CompileTimeFrameGraph(Passes&&... pa
 
 template <typename... Passes>
 template <typename ProfilerT, typename DiagnosticsT>
-void CompileTimeFrameGraph<Passes...>::Execute(
-    VkCommandBuffer cmd,
-    const Binder&   binder,
-    uint32_t        frameIndex,
-    ProfilerT*      profiler,
-    DiagnosticsT*   diagnostics
-) const {
+void CompileTimeFrameGraph<
+    Passes...>::Execute(VkCommandBuffer cmd, const Binder& binder, uint32_t frameIndex, ProfilerT* profiler, DiagnosticsT* diagnostics) const {
     const auto& bindings = binder.GetBindings();
 
     std::apply(
@@ -398,20 +393,16 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
     // index: graph composition can reorder or omit passes without corrupting query
     // slots. An enum may be a subset of the graph; unmatched passes cost nothing.
     if constexpr (!std::is_void_v<ProfilerT>) {
-        static_assert(
-            requires { typename ProfilerT::StageType; },
-            "Frame graph profilers must expose their reflected enum as StageType."
-        );
-        using ProfileStage                  = typename ProfilerT::StageType;
-        constexpr auto profile_stage        = Reflect::StringToEnum<ProfileStage>(pass_name);
-        constexpr bool has_profile_stage    = profile_stage.has_value();
+        static_assert(requires { typename ProfilerT::StageType; }, "Frame graph profilers must expose their reflected enum as StageType.");
+        using ProfileStage               = typename ProfilerT::StageType;
+        constexpr auto profile_stage     = Reflect::StringToEnum<ProfileStage>(pass_name);
+        constexpr bool has_profile_stage = profile_stage.has_value();
         if constexpr (has_profile_stage) {
             static_assert(
                 requires(ProfilerT& backend, ProfileStage stage) {
                     backend.WriteStart(cmd, frameIndex, stage);
                     backend.WriteEnd(cmd, frameIndex, stage);
-                },
-                "Frame graph profilers must provide WriteStart/WriteEnd(VkCommandBuffer, uint32_t, StageType)."
+                }, "Frame graph profilers must provide WriteStart/WriteEnd(VkCommandBuffer, uint32_t, StageType)."
             );
             if (profiler != nullptr) {
                 profiler->WriteStart(cmd, frameIndex, *profile_stage);
@@ -536,8 +527,10 @@ RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>:
 
     vkCmdBeginRendering(m_cmd, &rendering_info);
 
-    const VkViewport viewport = {.x = 0.0F, .y = 0.0F, .width = (float) m_extent.width, .height = (float) m_extent.height, .minDepth = 0.0F, .maxDepth = 1.0F};
-    const VkRect2D   scissor  = {.offset = {.x = 0, .y = 0}, .extent = m_extent};
+    const VkViewport viewport = {
+        .x = 0.0F, .y = 0.0F, .width = static_cast<float>(m_extent.width), .height = static_cast<float>(m_extent.height), .minDepth = 0.0F, .maxDepth = 1.0F
+    };
+    const VkRect2D scissor = {.offset = {.x = 0, .y = 0}, .extent = m_extent};
     vkCmdSetViewport(m_cmd, 0, 1, &viewport);
     vkCmdSetScissor(m_cmd, 0, 1, &scissor);
 }

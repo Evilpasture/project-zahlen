@@ -54,7 +54,7 @@ struct TTYState {
 TTYState* g_CrashState = nullptr;
 
 // 1. Consteval mapping (Natural forward direction)
-[[maybe_unused]] consteval uint16_t KeyCodeToEvdev(KeyCode key) noexcept {
+[[maybe_unused]] consteval auto KeyCodeToEvdev(KeyCode key) noexcept -> uint16_t {
     using enum KeyCode;
     switch (key) {
         // Numbers 0 - 9
@@ -215,7 +215,7 @@ consteval auto BuildEvdevToKeyCodeTable() noexcept {
     std::array<KeyCode, KEY_MAX + 1> table {};
     table.fill(KeyCode::Unknown);
 
-    ZHLN::Reflect::ForEachEnumerator<KeyCode>([&]<KeyCode Key>() {
+    ZHLN::Reflect::ForEachEnumerator<KeyCode>([&]<KeyCode Key>() -> auto {
         constexpr uint16_t evdevCode = KeyCodeToEvdev(Key);
         if constexpr (evdevCode > 0 && evdevCode <= KEY_MAX) {
             table[evdevCode] = Key;
@@ -226,7 +226,7 @@ consteval auto BuildEvdevToKeyCodeTable() noexcept {
 }
 
 // 3. Runtime function: Single instruction array access (O(1) / Branchless)
-KeyCode MapEvdevKey(uint16_t code) noexcept {
+auto MapEvdevKey(uint16_t code) noexcept -> KeyCode {
     static constexpr auto Table = BuildEvdevToKeyCodeTable();
     if (code <= KEY_MAX) [[likely]] {
         return Table[code];
@@ -234,7 +234,7 @@ KeyCode MapEvdevKey(uint16_t code) noexcept {
     return KeyCode::Unknown;
 }
 
-void handle_enable_seat(struct libseat* seat, void* data) {
+void handle_enable_seat(struct libseat* /*seat*/, void* data) {
     auto* state   = static_cast<TTYState*>(data);
     state->active = true;
     ZHLN::Log("[TTY] libseat: Seat session enabled and active.");
@@ -253,11 +253,11 @@ struct libseat_seat_listener seat_listener = {
 };
 } // namespace
 
-bool IsSupported() {
+auto IsSupported() -> bool {
     return access("/dev/tty", R_OK | W_OK) == 0;
 }
 
-void* Init(uint32_t width, uint32_t height) {
+auto Init(uint32_t width, uint32_t height) -> void* {
     auto* state   = new TTYState();
     state->width  = width;
     state->height = height;
@@ -404,7 +404,7 @@ void Shutdown(void* context) {
     }
 }
 
-bool IsRunning(void* context) {
+auto IsRunning(void* context) -> bool {
     auto* state = static_cast<TTYState*>(context);
     return (state != nullptr) ? state->running : false;
 }
@@ -437,8 +437,8 @@ void ProcessEvents(void* context, const WindowInputReceiver& receiver) {
         return;
     }
 
-    epoll_event events[16];
-    int         n = epoll_wait(state->epoll_fd, events, 16, 0);
+    std::array<epoll_event, 16> events {};
+    int                         n = epoll_wait(state->epoll_fd, events.data(), 16, 0);
 
     float mouseAccumX = 0.0f;
     float mouseAccumY = 0.0f;
@@ -491,7 +491,7 @@ void ProcessEvents(void* context, const WindowInputReceiver& receiver) {
                 }
 
                 KeyCode key = MapEvdevKey(ev.code);
-                if (key != KeyCode::Unknown && receiver.onKey) {
+                if (key != KeyCode::Unknown && (receiver.onKey != nullptr)) {
                     if (ev.value == 1 || ev.value == 2) {
                         receiver.onKey(receiver.userdata, key, true);
                     } else if (ev.value == 0) {
@@ -506,21 +506,21 @@ void ProcessEvents(void* context, const WindowInputReceiver& receiver) {
 
             if (ev.type == EV_REL) {
                 if (ev.code == REL_X) {
-                    mouseAccumX += (float) ev.value;
+                    mouseAccumX += static_cast<float>(ev.value);
                     mouseMoved = true;
                 } else if (ev.code == REL_Y) {
-                    mouseAccumY += (float) ev.value;
+                    mouseAccumY += static_cast<float>(ev.value);
                     mouseMoved = true;
                 }
 
-                if (ev.code == REL_WHEEL && receiver.onMouseScroll) {
-                    receiver.onMouseScroll(receiver.userdata, (float) ev.value);
+                if (ev.code == REL_WHEEL && (receiver.onMouseScroll != nullptr)) {
+                    receiver.onMouseScroll(receiver.userdata, static_cast<float>(ev.value));
                 }
             }
         }
     }
 
-    if (mouseMoved && receiver.onMouseMove) {
+    if (mouseMoved && (receiver.onMouseMove != nullptr)) {
         static float virtualMouseX = 960.0f;
         static float virtualMouseY = 540.0f;
 
@@ -531,7 +531,7 @@ void ProcessEvents(void* context, const WindowInputReceiver& receiver) {
     }
 }
 
-std::vector<std::string_view> GetRequiredInstanceExtensions() {
+auto GetRequiredInstanceExtensions() -> std::vector<std::string_view> {
     return {
         VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_DISPLAY_EXTENSION_NAME, VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME,
         VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME

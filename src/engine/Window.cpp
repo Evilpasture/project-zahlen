@@ -15,7 +15,7 @@ namespace ZHLN {
 
 namespace {
 
-[[maybe_unused]] consteval int KeyCodeToGLFW(KeyCode key) noexcept {
+[[maybe_unused]] consteval auto KeyCodeToGLFW(KeyCode key) noexcept -> int {
     using enum KeyCode;
     switch (key) {
         // Numbers 0 - 9
@@ -167,7 +167,7 @@ consteval auto BuildGLFWToKeyCodeTable() noexcept {
     std::array<KeyCode, GLFW_KEY_LAST + 1> table {};
     table.fill(KeyCode::Unknown);
 
-    ZHLN::Reflect::ForEachEnumerator<KeyCode>([&]<KeyCode Key>() {
+    ZHLN::Reflect::ForEachEnumerator<KeyCode>([&]<KeyCode Key>() -> auto {
         static constexpr int glfwCode = KeyCodeToGLFW(Key);
         if constexpr (glfwCode >= 0 && glfwCode <= GLFW_KEY_LAST) {
             table[glfwCode] = Key;
@@ -177,7 +177,7 @@ consteval auto BuildGLFWToKeyCodeTable() noexcept {
     return table;
 }
 
-KeyCode MapGLFWKey(int key) noexcept {
+auto MapGLFWKey(int key) noexcept -> KeyCode {
     static constexpr auto Table = BuildGLFWToKeyCodeTable();
     if (key >= 0 && key <= GLFW_KEY_LAST) [[likely]] {
         return Table[key];
@@ -234,7 +234,7 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, bool full
         }
 
         // Register window-level callbacks routing through the generic receiver
-        glfwSetKeyCallback(_impl->handle, [](GLFWwindow* win, int key, int scancode, int action, int mods) {
+        glfwSetKeyCallback(_impl->handle, [](GLFWwindow* win, int key, int /*scancode*/, int action, int /*mods*/) -> void {
             auto*   self   = static_cast<Window*>(glfwGetWindowUserPointer(win));
             KeyCode mapped = MapGLFWKey(key);
 
@@ -244,7 +244,7 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, bool full
             }
         });
 
-        glfwSetMouseButtonCallback(_impl->handle, [](GLFWwindow* win, int button, int action, int mods) {
+        glfwSetMouseButtonCallback(_impl->handle, [](GLFWwindow* win, int button, int action, int /*mods*/) -> void {
             auto* self = static_cast<Window*>(glfwGetWindowUserPointer(win));
             if (self->_impl->receiver.onKey) {
                 bool pressed = (action == GLFW_PRESS);
@@ -258,23 +258,25 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, bool full
             }
         });
 
-        glfwSetCursorPosCallback(_impl->handle, [](GLFWwindow* win, double xpos, double ypos) {
+        glfwSetCursorPosCallback(_impl->handle, [](GLFWwindow* win, double xpos, double ypos) -> void {
             auto* self = static_cast<Window*>(glfwGetWindowUserPointer(win));
             if (self->_impl->receiver.onMouseMove) {
-                int winWidth = 0, winHeight = 0;
+                int winWidth  = 0;
+                int winHeight = 0;
                 glfwGetWindowSize(win, &winWidth, &winHeight);
 
-                int fbWidth = 0, fbHeight = 0;
+                int fbWidth  = 0;
+                int fbHeight = 0;
                 glfwGetFramebufferSize(win, &fbWidth, &fbHeight);
 
-                float scaleX = (winWidth > 0) ? (float) fbWidth / (float) winWidth : 1.0f;
-                float scaleY = (winHeight > 0) ? (float) fbHeight / (float) winHeight : 1.0f;
+                float scaleX = (winWidth > 0) ? static_cast<float>(fbWidth) / static_cast<float>(winWidth) : 1.0f;
+                float scaleY = (winHeight > 0) ? static_cast<float>(fbHeight) / static_cast<float>(winHeight) : 1.0f;
 
                 self->_impl->receiver.onMouseMove(self->_impl->receiver.userdata, static_cast<float>(xpos) * scaleX, static_cast<float>(ypos) * scaleY);
             }
         });
 
-        glfwSetFramebufferSizeCallback(_impl->handle, [](GLFWwindow* win, int width, int height) {
+        glfwSetFramebufferSizeCallback(_impl->handle, [](GLFWwindow* win, int width, int height) -> void {
             auto* self = static_cast<Window*>(glfwGetWindowUserPointer(win));
             if (self->_impl->receiver.onResize) {
                 self->_impl->receiver.onResize(
@@ -283,14 +285,14 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, bool full
             }
         });
 
-        glfwSetScrollCallback(_impl->handle, [](GLFWwindow* win, double xoffset, double yoffset) {
+        glfwSetScrollCallback(_impl->handle, [](GLFWwindow* win, double /*xoffset*/, double yoffset) -> void {
             auto* self = static_cast<Window*>(glfwGetWindowUserPointer(win));
             if (self->_impl->receiver.onMouseScroll) {
                 self->_impl->receiver.onMouseScroll(self->_impl->receiver.userdata, static_cast<float>(yoffset));
             }
         });
 
-        glfwSetCharCallback(_impl->handle, [](GLFWwindow* win, unsigned int codepoint) {
+        glfwSetCharCallback(_impl->handle, [](GLFWwindow* win, unsigned int codepoint) -> void {
             auto* self = static_cast<Window*>(glfwGetWindowUserPointer(win));
             if (self->_impl->receiver.onChar) {
                 self->_impl->receiver.onChar(self->_impl->receiver.userdata, codepoint);
@@ -307,7 +309,7 @@ Window::~Window() {
     }
 }
 
-bool Window::IsRunning() const {
+auto Window::IsRunning() const -> bool {
     if (_impl->headless) {
         return _impl->is_running;
     }
@@ -320,7 +322,7 @@ bool Window::IsRunning() const {
 void Window::ProcessEvents() {
 }
 
-Extent2D Window::GetSize() const {
+auto Window::GetSize() const -> Extent2D {
     if (_impl->headless || _impl->is_tty) {
         return {.width = _impl->width, .height = _impl->height};
     }
@@ -342,7 +344,7 @@ void Window::Focus() {
     }
 }
 
-void* Window::GetNativeHandle() const {
+auto Window::GetNativeHandle() const -> void* {
     return _impl->handle;
 }
 
@@ -362,23 +364,23 @@ void Window::CaptureMouse(bool captured) {
     }
 }
 
-bool Window::IsTTY() const {
+auto Window::IsTTY() const -> bool {
     return _impl->is_tty;
 }
 
-bool Window::IsHeadless() const {
+auto Window::IsHeadless() const -> bool {
     return _impl->headless;
 }
 
-void* Window::GetTTYContext() const {
+auto Window::GetTTYContext() const -> void* {
     return _impl->tty_context;
 }
 
-const WindowInputReceiver& Window::GetInputReceiver() const noexcept {
+auto Window::GetInputReceiver() const noexcept -> const WindowInputReceiver& {
     return _impl->receiver;
 }
 
-bool Window::ReinitTTY() {
+auto Window::ReinitTTY() -> bool {
     if (_impl->is_tty && _impl->tty_context == nullptr) {
         _impl->tty_context = TTYBackend::Init(_impl->width, _impl->height);
         return _impl->tty_context != nullptr;

@@ -18,9 +18,7 @@ namespace {
 
 struct PassFactory {
     RenderContext::Impl&                        self;
-    VkCommandBuffer                             cmd;
     uint32_t                                    fIdx;
-    VkDevice                                    device;
     const RenderContext::Impl::PPPushConstants& pc;
     uint32_t                                    lightVariant;
     uint32_t                                    reflVariant;
@@ -34,7 +32,7 @@ struct PassFactory {
     }
 
     [[nodiscard]] auto RcpExtent(VkExtent2D e) const noexcept {
-        return std::pair {1.0f / (float) e.width, 1.0f / (float) e.height};
+        return std::pair {1.0f / static_cast<float>(e.width), 1.0f / static_cast<float>(e.height)};
     }
 
     [[nodiscard]] auto BuildSceneResources() const noexcept {
@@ -57,7 +55,7 @@ struct PassFactory {
     }
 
     [[nodiscard]] auto MakeHiZGeneratePass() const noexcept {
-        return Vk::MakePass<"HiZGenerate", Vk::ShaderRead<Res_Depth>, Vk::ComputeWrite<Res_HiZ>>([this](VkCommandBuffer cmd) noexcept {
+        return Vk::MakePass<"HiZGenerate", Vk::ShaderRead<Res_Depth>, Vk::ComputeWrite<Res_HiZ>>([this](VkCommandBuffer c) noexcept {
             uint32_t width  = self.graphResources.hizMap.extent.width;
             uint32_t height = self.graphResources.hizMap.extent.height;
             uint32_t mips   = self.graphResources.hizMap.mipLevels;
@@ -65,10 +63,10 @@ struct PassFactory {
             for (uint32_t mip = 0; mip < mips; ++mip) {
                 if (mip > 0) {
                     Vk::MemoryBarrier(
-                        cmd, {.src_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                              .src_access = VK_ACCESS_2_SHADER_WRITE_BIT,
-                              .dst_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                              .dst_access = VK_ACCESS_2_SHADER_READ_BIT}
+                        c, {.src_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                            .src_access = VK_ACCESS_2_SHADER_WRITE_BIT,
+                            .dst_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                            .dst_access = VK_ACCESS_2_SHADER_READ_BIT}
                     );
                 }
 
@@ -81,10 +79,10 @@ struct PassFactory {
                     float    rcpW, rcpH;
                     uint32_t resW, resH;
                     uint32_t isFirstPass;
-                } pc = {1.0f / (float) srcW, 1.0f / (float) srcH, srcW, srcH, mip == 0 ? 1u : 0u};
+                } hizPC = {1.0f / static_cast<float>(srcW), 1.0f / static_cast<float>(srcH), srcW, srcH, mip == 0 ? 1u : 0u};
 
                 // VK_EXT_descriptor_heap: the pushed index selects the mip slot span.
-                self.hizGeneratePass.DispatchHeapIndexedThreads(self.ctx, cmd, mip, dstW, dstH, 1, pc);
+                self.hizGeneratePass.DispatchHeapIndexedThreads(self.ctx, c, mip, dstW, dstH, 1, hizPC);
             }
         });
     }
@@ -104,13 +102,6 @@ struct PassFactory {
             // the host supplies no shader-specific dimensions.
             self.clusterCullingPass.DispatchHeapIndexed(self.ctx, c, fIdx);
 
-            // clusterGrid / lightIndexList / globalCounter are structured
-            // buffers, not graph resources, so CompileTimeFrameGraph inserts no
-            // automatic barrier between this pass and the later compute passes
-            // that READ them (volumetric light injection) in the same
-            // submission. A compute->compute write/read dependency is required
-            // here so those passes see this frame's lists, not the previous
-            // frame's.
             Vk::MemoryBarrier(
                 c, {.src_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                     .src_access = VK_ACCESS_2_SHADER_WRITE_BIT,
@@ -133,18 +124,7 @@ struct PassFactory {
         return Vk::Passieren<
             "MainShadow", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::DepthStencilWrite<Res_Depth>,
             Vk::DepthWrite<Res_ShadowMap>, Vk::DepthWrite<Res_ShadowAtlas>>([this](VkCommandBuffer c) noexcept {
-            // The CPU culling policy inside MainPass1 records its own
-            // secondaries (ParallelDrawDispatch), and Vulkan forbids nesting
-            // secondaries without the nestedCommandBuffer feature
-            // (VUID-vkCmdBeginRendering-commandBuffer-06068 and friends). So
-            // whenever GPU culling won't be used -- including the
-            // ZHLN_NO_GPU_CULLING bisect toggle -- record shadow + main
-            // serially into the primary command buffer instead.
-            const auto drawCount = static_cast<uint32_t>(self.queues.drawQueue.size());
-            // NOTE: this predicate MUST stay identical to the one in
-            // MainPass1/MainPass2 (RenderPasses.cpp) -- it selects the command
-            // buffer topology those passes then record into. VK_EXT_mesh_shader
-            // disables the indirect culling path, so it belongs here too.
+            const auto drawCount      = static_cast<uint32_t>(self.queues.drawQueue.size());
             const bool gpuCullingUsed = self.cullingPass.pipeline.Valid() && self.frames.indirectCommandsBuffers->Valid() &&
                                         (drawCount <= kGpuCullingMaxInstances) && !Diag::DisableGpuCulling() && !self.MeshShadingActive();
 
@@ -158,12 +138,6 @@ struct PassFactory {
             auto& rec = self.parallelRecorder.Current();
             rec.Reset();
 
-            // VK_EXT_descriptor_heap: the primary binds the heaps so the
-            // secondaries can INHERIT the identical binding (binding their own
-            // heaps would invalidate the primary's heap state after
-            // vkCmdExecuteCommands; VUID-vkCmdDispatch-None-11308). The
-            // recorder re-pushes the per-frame device-address block into every
-            // secondary (push data is not inherited).
             self.BindHeapsAndPushFrame(c);
             const auto samplerBind  = self.heapManager.GetSamplerHeapBindInfo();
             const auto resourceBind = self.heapManager.GetResourceHeapBindInfo();
@@ -195,10 +169,6 @@ struct PassFactory {
                 return;
             }
 
-            // VK_EXT_descriptor_heap: bind the heaps + push the frame address
-            // block in this (compute-queue) command buffer. The particle
-            // update shaders read `scene.frame` through the PUSH_ADDRESS
-            // mapping; per-dispatch data travels via push data.
             self.BindHeapsAndPushFrame(c);
 
             for (const auto& emitter: self.queues.particleEmittersQueue) {
@@ -207,14 +177,14 @@ struct PassFactory {
                     continue;
                 }
 
-                RenderContext::Impl::ComputePushConstants pc = {
+                RenderContext::Impl::ComputePushConstants particlePC = {
                     .particleBufferAddr = self.ctx.BufferAddress(buffer->buffer.Handle()),
                     .particleCount      = emitter.maxParticles,
                     .deltaTime          = self.currentDt,
                     .p                  = emitter.params
                 };
 
-                self.particleUpdatePass.DispatchHeapThreads(self.ctx, c, emitter.maxParticles, 1, 1, pc);
+                self.particleUpdatePass.DispatchHeapThreads(self.ctx, c, emitter.maxParticles, 1, 1, particlePC);
             }
         });
     }
@@ -262,8 +232,8 @@ struct PassFactory {
                 self.frames.frameUniformBuffers[fIdx], self.frames.fogVolumesBuffer[fIdx]
             );
 
-            VolumetricFogPushConstants pc = {};
-            self.volumetricFogInjectPass.DispatchHeap(self.ctx, c, fIdx, pc);
+            VolumetricFogPushConstants fogPC = {};
+            self.volumetricFogInjectPass.DispatchHeap(self.ctx, c, fIdx, fogPC);
         });
     }
 
@@ -276,8 +246,8 @@ struct PassFactory {
                     self.frames.lightStorageBuffers[fIdx], self.frames.clusterGridBuffers[fIdx], self.frames.lightIndexListBuffers[fIdx],
                     Vk::Assume<Vk::ComputeRead<Res_ShadowMap>>(self.graphResources.shadowMap), self.shadowSampler
                 );
-                VolumetricLightInjectPushConstants pc = {};
-                self.volumetricLightInjectPass.DispatchHeap(self.ctx, c, fIdx, pc);
+                VolumetricLightInjectPushConstants lightInjectPC = {};
+                self.volumetricLightInjectPass.DispatchHeap(self.ctx, c, fIdx, lightInjectPC);
             }
         );
     }
@@ -302,9 +272,9 @@ struct PassFactory {
                     Vk::Assume<Vk::ComputeWrite<Res_VoxelResolved>>(self.graphResources.voxelResolved), self.frames.frameUniformBuffers[fIdx],
                     self.defaultSampler
                 );
-                VolumetricTemporalPushConstants pc = {};
+                VolumetricTemporalPushConstants temporalPC = {};
 
-                self.volumetricTemporalPass.DispatchHeap(self.ctx, c, fIdx, pc);
+                self.volumetricTemporalPass.DispatchHeap(self.ctx, c, fIdx, temporalPC);
             }
         );
     }
@@ -312,8 +282,6 @@ struct PassFactory {
     [[nodiscard]] auto MakeAmbientPass() const noexcept {
         return Vk::MakePass<"Ambient", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>, Vk::ColorWrite<Res_Ambient>>(
             [this](auto& ctx) noexcept {
-                // Order must mirror ambient.slang's set-0 declaration order:
-                // texInput, smp, texDepth, texNormalRoughness, pointSampler, frame.
                 self.ambientPass.WriteHeap(
                     self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor), self.defaultSampler,
                     Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget),
@@ -329,10 +297,6 @@ struct PassFactory {
         return Vk::MakePass<
             "Lighting", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_Ambient>,
             Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ColorWrite<Res_Lighting>>([this](auto& ctx) noexcept {
-            // Order must mirror lighting.slang's set-0 declaration order.
-            // NOTE: GetTLAS() is LAST (binding 17 in the RT variant; absent in
-            // the NoRT variant), so the trailing NORT-only hole never shifts
-            // any other binding's positional write.
             const auto ltcMatHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
                 .handle   = self.ltcMatImage.Handle(),
                 .view     = self.ltcMatView.Get(),
@@ -387,8 +351,6 @@ struct PassFactory {
             "Reflection", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_Lighting>,
             Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ShaderReadGeneral<Res_VoxelResolved>, Vk::ColorWrite<Res_HdrSceneColor>>(
             [this](auto& ctx) noexcept {
-                // Order must mirror reflection.slang's set-0 declaration order
-                // (g_instances and the RT-only tlas trail at the tail).
                 self.reflectionPass.WriteHeap(
                     self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor), self.defaultSampler,
                     Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget),
@@ -475,16 +437,9 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeForwardPass() const noexcept {
         auto& targetImage = self.graphResources.hdrSceneColor;
-        // Translucent draws in this pass sample texTransLighting through the
-        // global bindless set (basic.slang), whose descriptor is written once
-        // with SHADER_READ_ONLY_OPTIMAL at target-recreate time. TransReflection
-        // leaves that image in COLOR_ATTACHMENT_OPTIMAL, so declare the read
-        // here and let the graph barrier it back to a sampled layout before
-        // the draws (and before next frame's early mesh draws with the same
-        // statically-used descriptor).
         return Vk::Passieren<"Forward", Vk::ColorWrite<Res_HdrSceneColor>, Vk::DepthStencilWrite<Res_Depth>, Vk::ShaderRead<Res_TransLighting>>(
             [this, &targetImage](VkCommandBuffer c) noexcept {
-                FrameRecorder              fwdRecorder(c, self);
+                FrameRecorder fwdRecorder(c, self);
                 Passes::ForwardPass {}.Execute(
                     fwdRecorder, Vk::Assume<Vk::ColorWrite<Res_HdrSceneColor>>(targetImage),
                     Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(self.presentation.depthTarget)
@@ -505,15 +460,15 @@ struct PassFactory {
     [[nodiscard]] auto MakeBloomDownPass() const noexcept {
         if constexpr (Index == 0) {
             return Vk::MakePass<"BloomDown0", Vk::ShaderRead<Res_BloomThresh>, Vk::ColorWrite<Res_BloomDown1>>([this](auto& ctx) noexcept {
-                RunKawasePass(device, ctx.Cmd(), self.bloomDownPass[0], self.graphResources.bloomThresholdTarget, self.defaultSampler);
+                RunKawasePass(ctx.Cmd(), self.bloomDownPass[0], self.graphResources.bloomThresholdTarget, self.defaultSampler);
             });
         } else if constexpr (Index == 1) {
             return Vk::MakePass<"BloomDown1", Vk::ShaderRead<Res_BloomDown1>, Vk::ColorWrite<Res_BloomDown2>>([this](auto& ctx) noexcept {
-                RunKawasePass(device, ctx.Cmd(), self.bloomDownPass[1], self.graphResources.bloomDown1, self.defaultSampler);
+                RunKawasePass(ctx.Cmd(), self.bloomDownPass[1], self.graphResources.bloomDown1, self.defaultSampler);
             });
         } else {
             return Vk::MakePass<"BloomDown2", Vk::ShaderRead<Res_BloomDown2>, Vk::ColorWrite<Res_BloomDown3>>([this](auto& ctx) noexcept {
-                RunKawasePass(device, ctx.Cmd(), self.bloomDownPass[2], self.graphResources.bloomDown2, self.defaultSampler);
+                RunKawasePass(ctx.Cmd(), self.bloomDownPass[2], self.graphResources.bloomDown2, self.defaultSampler);
             });
         }
     }
@@ -523,21 +478,19 @@ struct PassFactory {
         if constexpr (Index == 2) {
             return Vk::MakePass<"BloomUp2", Vk::ShaderRead<Res_BloomDown3>, Vk::ShaderRead<Res_BloomDown2>, Vk::ColorWrite<Res_BloomUp2>>(
                 [this](auto& ctx) noexcept {
-                    RunKawasePass(device, ctx.Cmd(), self.bloomUpPass[2], self.graphResources.bloomDown3, self.defaultSampler, self.graphResources.bloomDown2);
+                    RunKawasePass(ctx.Cmd(), self.bloomUpPass[2], self.graphResources.bloomDown3, self.defaultSampler, self.graphResources.bloomDown2);
                 }
             );
         } else if constexpr (Index == 1) {
             return Vk::MakePass<"BloomUp1", Vk::ShaderRead<Res_BloomUp2>, Vk::ShaderRead<Res_BloomDown1>, Vk::ColorWrite<Res_BloomUp1>>(
                 [this](auto& ctx) noexcept {
-                    RunKawasePass(device, ctx.Cmd(), self.bloomUpPass[1], self.graphResources.bloomUp2, self.defaultSampler, self.graphResources.bloomDown1);
+                    RunKawasePass(ctx.Cmd(), self.bloomUpPass[1], self.graphResources.bloomUp2, self.defaultSampler, self.graphResources.bloomDown1);
                 }
             );
         } else {
             return Vk::MakePass<"BloomUp0", Vk::ShaderRead<Res_BloomUp1>, Vk::ShaderRead<Res_BloomThresh>, Vk::ColorWrite<Res_BloomFinal>>(
                 [this](auto& ctx) noexcept {
-                    RunKawasePass(
-                        device, ctx.Cmd(), self.bloomUpPass[0], self.graphResources.bloomUp1, self.defaultSampler, self.graphResources.bloomThresholdTarget
-                    );
+                    RunKawasePass(ctx.Cmd(), self.bloomUpPass[0], self.graphResources.bloomUp1, self.defaultSampler, self.graphResources.bloomThresholdTarget);
                 }
             );
         }
@@ -550,15 +503,13 @@ struct PassFactory {
                 return;
             }
 
-            // VK_EXT_descriptor_heap: decal bindings live in the heaps; the
-            // decal pipeline carries the merged set-0/set-1 mappings.
             self.BindHeapsAndPushFrame(c);
 
             FrameRecorder recorder(c, self);
             recorder.encoder.BindPipeline(self.decalPipeline.Get(), self.decalPipelineLayout);
 
             for (const auto& decalCmd: self.queues.decalQueue) {
-                RenderContext::Impl::DecalPushConstants pc {
+                RenderContext::Impl::DecalPushConstants decalPC {
                     .world       = decalCmd.transform,
                     .invWorld    = decalCmd.invTransform,
                     .albedoIndex = decalCmd.albedoIndex,
@@ -568,7 +519,7 @@ struct PassFactory {
                 };
 
                 recorder.encoder.BindPipeline(self.decalPipeline.Get(), self.decalPipelineLayout);
-                recorder.encoder.DrawHeap(36, 1, pc);
+                recorder.encoder.DrawHeap(36, 1, decalPC);
             }
         });
     }
@@ -652,7 +603,7 @@ struct PassFactory {
                 auto [rcpW, rcpH] = RcpExtent(inputColor.extent);
                 struct SMAAMetrics {
                     float rcpWidth, rcpHeight, width, height;
-                } metrics = {rcpW, rcpH, (float) inputColor.extent.width, (float) inputColor.extent.height};
+                } metrics = {rcpW, rcpH, static_cast<float>(inputColor.extent.width), static_cast<float>(inputColor.extent.height)};
 
                 self.smaaEdgePass.WriteHeap(self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor), self.defaultSampler);
                 self.smaaEdgePass.ExecuteHeap(self.ctx, c, metrics, fIdx);
@@ -667,7 +618,10 @@ struct PassFactory {
                 auto [rcpW, rcpH] = RcpExtent(self.graphResources.smaaWeightTarget.extent);
                 struct SMAAMetrics {
                     float rcpWidth, rcpHeight, width, height;
-                } metrics = {rcpW, rcpH, (float) self.graphResources.smaaWeightTarget.extent.width, (float) self.graphResources.smaaWeightTarget.extent.height};
+                } metrics = {
+                    rcpW, rcpH, static_cast<float>(self.graphResources.smaaWeightTarget.extent.width),
+                    static_cast<float>(self.graphResources.smaaWeightTarget.extent.height)
+                };
 
                 const auto& [areaView, searchView] = std::tie(self.textureViews[self.smaaAreaTexIdx], self.textureViews[self.smaaSearchTexIdx]);
                 const auto areaInfo =
@@ -708,7 +662,7 @@ struct PassFactory {
                     auto [rcpW, rcpH] = RcpExtent(inputColor.extent);
                     struct SMAAMetrics {
                         float rcpWidth, rcpHeight, width, height;
-                    } metrics = {rcpW, rcpH, (float) inputColor.extent.width, (float) inputColor.extent.height};
+                    } metrics = {rcpW, rcpH, static_cast<float>(inputColor.extent.width), static_cast<float>(inputColor.extent.height)};
 
                     self.smaaBlendPass.WriteHeap(
                         self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor),
@@ -760,43 +714,30 @@ struct PassFactory {
     }
 
     template <typename SrcImgT, typename PassT>
-    void RunKawasePass(VkDevice device, VkCommandBuffer cmd, PassT& pass, const SrcImgT& src, const Vk::Sampler& defaultSampler) const noexcept {
-        // bloom_blur.slang's `texLow` is statically reachable (mode is a runtime
-        // push constant, not a specialization), so every compiled Kawase
-        // pipeline has binding 2 in its layout even though the downsample
-        // branch never samples it at runtime. Write the source image into that
-        // slot to keep the descriptor valid; the upsample draws below bind the
-        // real lower-resolution input there.
+    void RunKawasePass(VkCommandBuffer c, PassT& pass, const SrcImgT& src, const Vk::Sampler& defaultSampler) const noexcept {
         pass.WriteHeap(
             self.ctx, self.heapManager, fIdx, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(src), defaultSampler,
             Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(src)
         );
         pass.ExecuteHeap(
-            self.ctx, cmd,
+            self.ctx, c,
             RenderContext::Impl::KawasePushConstants {
-                .mode = 0, .rcpWidth = 1.0f / (float) src.extent.width, .rcpHeight = 1.0f / (float) src.extent.height, .padding = 0.0f
+                .mode = 0, .rcpWidth = 1.0f / static_cast<float>(src.extent.width), .rcpHeight = 1.0f / static_cast<float>(src.extent.height), .padding = 0.0f
             },
             fIdx
         );
     }
 
     template <typename SrcImgT, typename SrcImg2T, typename PassT>
-    void RunKawasePass(
-        VkDevice           device,
-        VkCommandBuffer    cmd,
-        PassT&             pass,
-        const SrcImgT&     src,
-        const Vk::Sampler& defaultSampler,
-        const SrcImg2T&    src2
-    ) const noexcept {
+    void RunKawasePass(VkCommandBuffer c, PassT& pass, const SrcImgT& src, const Vk::Sampler& defaultSampler, const SrcImg2T& src2) const noexcept {
         pass.WriteHeap(
             self.ctx, self.heapManager, fIdx, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(src), defaultSampler,
             Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(src2)
         );
         pass.ExecuteHeap(
-            self.ctx, cmd,
+            self.ctx, c,
             RenderContext::Impl::KawasePushConstants {
-                .mode = 1, .rcpWidth = 1.0f / (float) src.extent.width, .rcpHeight = 1.0f / (float) src.extent.height, .padding = 0.0f
+                .mode = 1, .rcpWidth = 1.0f / static_cast<float>(src.extent.width), .rcpHeight = 1.0f / static_cast<float>(src.extent.height), .padding = 0.0f
             },
             fIdx
         );
@@ -884,7 +825,6 @@ void ExecuteFrameGraph(RenderContext::Impl& self, VkCommandBuffer cmd, const Pas
                 Vk::MakeRef<Res_Swapchain>(sc.images[self.current_image_index], sc.views[self.current_image_index], self.graphResources.sceneColor.extent);
             binder.template Bind<Res_Swapchain>(ref.handle, ref.view, ref.extent);
         } else {
-            // Headless mode: bind the offscreen color target in place of the swapchain
             auto ref = Vk::MakeRef<Res_Swapchain>(
                 self.presentation.headlessColorTarget.image.Handle(), self.presentation.headlessColorTarget.view.Get(),
                 self.presentation.headlessColorTarget.extent
@@ -948,14 +888,8 @@ void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Co
     Vk::CommandBufferGuard guard(current_compute_cmd);
     uint32_t               fIdx = frame_index;
 
-    // Every pass in the compute graph now consumes the descriptor heaps; bind
-    // them once for this command buffer (the pushed per-frame device-address
-    // block backs the scene registry's PUSH_ADDRESS mappings).
     BindHeapsAndPushFrame(compCmd);
 
-    // Cluster bounds read frame.invProj. FOV/aspect changes mark the pass dirty
-    // in SetFrameData; record it here so a zoom never inserts an out-of-band
-    // ExecuteImmediate stall on the main thread.
     if (clusterBoundsDirty && clusterBoundsPass.pipeline.Valid() && clusterBoundsPass.fixedDispatchSize[0] != 0) {
         clusterBoundsPass.DispatchHeapIndexed(ctx, compCmd, fIdx);
         Vk::MemoryBarrier(
@@ -967,15 +901,7 @@ void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Co
         clusterBoundsDirty = false;
     }
 
-    PassFactory factory {
-        .self         = *this,
-        .cmd          = VK_NULL_HANDLE,
-        .fIdx         = fIdx,
-        .device       = ctx.Device(),
-        .pc           = {},
-        .lightVariant = (giSettings.enableRTR && rtCtx.Valid()) ? 1u : 0u,
-        .reflVariant  = 0
-    };
+    PassFactory factory {.self = *this, .fIdx = fIdx, .pc = {}, .lightVariant = (giSettings.enableRTR && rtCtx.Valid()) ? 1u : 0u, .reflVariant = 0};
 
     auto                                 compGraph = BuildComputeGraph(factory);
     typename decltype(compGraph)::Binder compBinder;
@@ -1000,7 +926,6 @@ void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Co
 
 void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd) {
     uint32_t imageIdx = current_image_index;
-    VkDevice device   = ctx.Device();
     uint32_t fIdx     = frame_index;
 
     using namespace ZHLN::Vk;
@@ -1016,7 +941,6 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
                 .format = presentation.swapchain.Get().format
             };
         }
-        // Headless mode: use the offscreen color target
         return {
             .handle = presentation.headlessColorTarget.image.Handle(),
             .view   = presentation.headlessColorTarget.view.Get(),
@@ -1030,10 +954,8 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
     uint32_t reflVariant  = (giSettings.enableSSR ? 1 : 0) | ((giSettings.enableRTR && rtCtx.Valid()) ? 2 : 0);
 
     PassFactory factory {
-        .self   = *this,
-        .cmd    = cmd,
-        .fIdx   = fIdx,
-        .device = device,
+        .self = *this,
+        .fIdx = fIdx,
         .pc =
             {.invViewProj = current_view_proj.Inversed(),
              .viewProj    = current_view_proj,

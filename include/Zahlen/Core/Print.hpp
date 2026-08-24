@@ -281,7 +281,7 @@ inline size_t FormatDouble(char* buf, size_t max_len, double val, int precision 
         val = -val;
     }
 
-    double ipart = NAN;
+    double ipart = 0.0;
     double fpart = SafeModfPositive(val, &ipart);
 
     auto   i_val = static_cast<uint64_t>(ipart);

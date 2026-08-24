@@ -229,7 +229,7 @@ void LuaScriptRuntime::TickUpdate(Engine* engine, float dt) {
     lua_getglobal(L, "update");
     if (lua_isfunction(L, -1)) {
         lua_pushlightuserdata(L, engine);
-        lua_pushnumber(L, dt);
+        lua_pushnumber(L, static_cast<double>(dt));
 
         if (lua_pcall(L, 2, 0, 0) != LUA_OK) {
             Log("Lua Error during update: {}", lua_tostring(L, -1));

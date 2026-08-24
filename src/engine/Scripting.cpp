@@ -407,8 +407,8 @@ struct ViewComposer {
         SyncPolicy::Acquire(sync);
 
         ZHLN_BufferView view = {};
-        view.buf             = (void*) data;
-        view.obj             = (void*) sync;
+        view.buf             = const_cast<void*>(static_cast<const void*>(data));
+        view.obj             = static_cast<void*>(sync);
         view.itemsize        = sizeof(TData);
         std::strncpy(view.format, format, 7);
         view.readonly = 0;
@@ -417,7 +417,7 @@ struct ViewComposer {
         size_t d_array[] = {static_cast<size_t>(dims)...};
 
         size_t stride = sizeof(TData);
-        for (int i = (int) view.ndim - 1; i >= 0; --i) {
+        for (int i = static_cast<int>(view.ndim) - 1; i >= 0; --i) {
             view.shape[i]   = d_array[i];
             view.strides[i] = stride;
             stride *= d_array[i];
@@ -425,7 +425,7 @@ struct ViewComposer {
 
         view.len   = stride;
         view.flags = ZHLN_BUFFER_CONTIGUOUS | ZHLN_BUFFER_WRITABLE;
-        if (((uintptr_t) view.buf % 32) == 0) {
+        if ((reinterpret_cast<uintptr_t>(view.buf) % 32) == 0) {
             view.flags |= ZHLN_BUFFER_ALIGNED_32;
         }
 
@@ -522,10 +522,8 @@ void InitComponentRegistry() {
                 if constexpr (std::is_same_v<Comp, Components::PhysicsComponent>) {
                     return ZHLN::ViewComposer::Build(&reg, raw.data(), "Q", raw.size());
                 } else if constexpr (floatCount > 0) {
-                    // Auto-detected float-only struct (e.g. PBRComponent) -> 2D float view ("f")
                     return ZHLN::ViewComposer::Build(&reg, raw.data(), "f", raw.size(), floatCount);
                 } else {
-                    // General struct -> 1D byte buffer view ("B")
                     return ZHLN::ViewComposer::Build(&reg, raw.data(), "B", raw.size());
                 }
             }
@@ -545,7 +543,7 @@ void RegisterCreativeWorkCommands() {
                     }
 
                     ZHLN::CreativeWorksFactory::SpawnParams params;
-                    params.position        = JPH::RVec3(a.px, a.py, a.pz);
+                    params.position        = JPH::RVec3(static_cast<double>(a.px), static_cast<double>(a.py), static_cast<double>(a.pz));
                     params.createPhysics   = (a.createPhysics != 0);
                     params.isStaticPhysics = (a.isStatic != 0);
                     params.isAnimated      = (a.isAnimated != 0);
@@ -638,7 +636,10 @@ void RegisterCreativeWorkCommands() {
                 return ZHLN::CreativeWorksFactory::CreatePlane(
                            *engine, a.p1, {a.r, a.g, a.b, a.a},
                            ZHLN::CreativeWorksFactory::SpawnParams {
-                               .position = {a.px, a.py, a.pz}, .rotation = {a.rx, a.ry, a.rz, a.rw}, .createPhysics = true, .isStaticPhysics = (a.isStatic != 0)
+                               .position        = {static_cast<double>(a.px), static_cast<double>(a.py), static_cast<double>(a.pz)},
+                               .rotation        = {a.rx, a.ry, a.rz, a.rw},
+                               .createPhysics   = true,
+                               .isStaticPhysics = (a.isStatic != 0)
                            }
                 )
                     .Pack();
@@ -646,7 +647,7 @@ void RegisterCreativeWorkCommands() {
                 return ZHLN::CreativeWorksFactory::CreateBox(
                            *engine, JPH::Vec3(a.p1, a.p2, a.p3),
                            ZHLN::CreativeWorksFactory::SpawnParams {
-                               .position        = {a.px, a.py, a.pz},
+                               .position        = {static_cast<double>(a.px), static_cast<double>(a.py), static_cast<double>(a.pz)},
                                .rotation        = {a.rx, a.ry, a.rz, a.rw},
                                .createPhysics   = true,
                                .isStaticPhysics = (a.isStatic != 0),
@@ -698,7 +699,8 @@ void RegisterCreativeWorkCommands() {
 
             reg.Add(
                 e, ZHLN::Components::PhysicsComponent {pc.CreateRigidBody(
-                       shape, JPH::RVec3(a.px, a.py, a.pz), rotation, a.isStatic ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
+                       shape, JPH::RVec3(static_cast<double>(a.px), static_cast<double>(a.py), static_cast<double>(a.pz)), rotation,
+                       a.isStatic ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
                        a.isStatic ? static_cast<JPH::ObjectLayer>(0) : static_cast<JPH::ObjectLayer>(1), 0
                    )}
             );
@@ -739,7 +741,7 @@ void RegisterCreativeWorkCommands() {
 
     RegisterCmd("CreateTexture", MakeCmd<CreateTextureArgs>([](ZHLN::Engine* engine, const CreateTextureArgs& a) -> uint64_t {
                     if (a.data == nullptr || a.width == 0 || a.height == 0) {
-                        return 1; // Fallback to white texture on invalid data
+                        return 1;
                     }
                     auto res = engine->GetRenderContext().CreateTexture(a.data, a.width, a.height, a.isSRGB != 0);
                     return res.value_or(1);
@@ -796,9 +798,9 @@ void RegisterPhysicsCommands() {
                     a.outResult->hasHit = res.hasHit ? 1 : 0;
                     if (res.hasHit) {
                         a.outResult->entity   = res.handle.Pack();
-                        a.outResult->px       = res.position.GetX();
-                        a.outResult->py       = res.position.GetY();
-                        a.outResult->pz       = res.position.GetZ();
+                        a.outResult->px       = static_cast<double>(res.position.GetX());
+                        a.outResult->py       = static_cast<double>(res.position.GetY());
+                        a.outResult->pz       = static_cast<double>(res.position.GetZ());
                         a.outResult->nx       = res.normal.GetX();
                         a.outResult->ny       = res.normal.GetY();
                         a.outResult->nz       = res.normal.GetZ();
@@ -813,12 +815,12 @@ void RegisterPhysicsCommands() {
                     a.outResult->hasHit = res.hasHit ? 1 : 0;
                     if (res.hasHit) {
                         a.outResult->entity        = res.handle.Pack();
-                        a.outResult->epx           = res.entryPosition.GetX();
-                        a.outResult->epy           = res.entryPosition.GetY();
-                        a.outResult->epz           = res.entryPosition.GetZ();
-                        a.outResult->xpx           = res.exitPosition.GetX();
-                        a.outResult->xpy           = res.exitPosition.GetY();
-                        a.outResult->xpz           = res.exitPosition.GetZ();
+                        a.outResult->epx           = static_cast<double>(res.entryPosition.GetX());
+                        a.outResult->epy           = static_cast<double>(res.entryPosition.GetY());
+                        a.outResult->epz           = static_cast<double>(res.entryPosition.GetZ());
+                        a.outResult->xpx           = static_cast<double>(res.exitPosition.GetX());
+                        a.outResult->xpy           = static_cast<double>(res.exitPosition.GetY());
+                        a.outResult->xpz           = static_cast<double>(res.exitPosition.GetZ());
                         a.outResult->enx           = res.entryNormal.GetX();
                         a.outResult->eny           = res.entryNormal.GetY();
                         a.outResult->enz           = res.entryNormal.GetZ();
@@ -853,7 +855,7 @@ void RegisterPhysicsCommands() {
                     if (winSize.width == 0 || winSize.height == 0)
                         return 0;
 
-                    float       aspect    = (float) winSize.width / (float) winSize.height;
+                    float       aspect    = static_cast<float>(winSize.width) / static_cast<float>(winSize.height);
                     const auto& cam       = engine->GetCamera();
                     JPH::Mat44  invVP     = (cam.GetProjectionMatrix(aspect) * cam.GetViewMatrix()).Inversed();
                     JPH::Vec4   nearWorld = invVP * JPH::Vec4(a.ndcX, a.ndcY, 0.0f, 1.0f);
@@ -862,9 +864,9 @@ void RegisterPhysicsCommands() {
                     JPH::Vec3 pFar  = JPH::Vec3(farWorld.GetX() / farWorld.GetW(), farWorld.GetY() / farWorld.GetW(), farWorld.GetZ() / farWorld.GetW());
                     JPH::Vec3 dir   = (pFar - pNear).Normalized();
 
-                    *a.ox = pNear.GetX();
-                    *a.oy = pNear.GetY();
-                    *a.oz = pNear.GetZ();
+                    *a.ox = static_cast<double>(pNear.GetX());
+                    *a.oy = static_cast<double>(pNear.GetY());
+                    *a.oz = static_cast<double>(pNear.GetZ());
                     *a.dx = dir.GetX();
                     *a.dy = dir.GetY();
                     *a.dz = dir.GetZ();
@@ -921,13 +923,11 @@ void RegisterInputAndCameraCommands() {
 }
 
 void RegisterAudioCommands() {
-    // Generates Fire and Forget Events directly to the Thread-Safe queue
     RegisterCmd("PostAudioEvent", MakeCmd<AudioEvent>([](ZHLN::Engine* engine, const AudioEvent& a) -> uint64_t {
                     engine->GetAudioContext().PostEvent(a);
                     return 1;
                 }));
 
-    // Stateful Voice Handles
     struct CreateVoiceArgs {
         uint64_t    entityRaw;
         const char* filepath;
@@ -1084,7 +1084,7 @@ void RegisterSystemCommands() {
 
                     auto _ = CreativeWorksFactory::CreatePlane(
                         *engine, 1000.0f, {0.6f, 0.6f, 0.6f, 1.0f},
-                        CreativeWorksFactory::SpawnParams {.position = {0.0f, 0.0f, 0.0f}, .createPhysics = true, .isStaticPhysics = true}
+                        CreativeWorksFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = true, .isStaticPhysics = true}
                     );
 
                     ZHLN::Entity playerEntity = reg.Create();
@@ -1092,7 +1092,7 @@ void RegisterSystemCommands() {
                     reg.Add(playerEntity, Components::TransformComponent {.position = {0.0f, 3.0f, 0.0f}});
                     reg.Add(playerEntity, Components::MovementComponent {});
                     reg.Add(playerEntity, ZHLN::Components::InputComponent {});
-                    ZHLN::Entity charPhys = engine->GetPhysicsContext().CreateCharacter(JPH::RVec3(0.0f, 3.0f, 0.0f));
+                    ZHLN::Entity charPhys = engine->GetPhysicsContext().CreateCharacter(JPH::RVec3(0.0, 3.0, 0.0));
                     reg.Add(playerEntity, Components::PhysicsComponent {charPhys});
                     reg.Add(playerEntity, Components::PhysicsStateComponent {.currPosition = {0.0f, 3.0f, 0.0f}, .prevPosition = {0.0f, 3.0f, 0.0f}});
 

@@ -143,7 +143,7 @@ auto LevelGraph::FindPath(uint32_t start, uint32_t end, uint32_t* out_path, Path
                 ws.node_data[neighbor_idx].parent  = current.node_idx;
                 ws.node_data[neighbor_idx].g_score = tentative_g;
 
-                float f_score = tentative_g + (_nodes[neighbor_idx].position - _nodes[end].position).Length();
+                float f_score = tentative_g + static_cast<float>((_nodes[neighbor_idx].position - _nodes[end].position).Length());
                 open_list.Push(neighbor_idx, f_score);
             }
         }

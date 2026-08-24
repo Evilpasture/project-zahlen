@@ -18,12 +18,13 @@ void SpatialGrid::Clear() noexcept {
 }
 
 auto SpatialGrid::GetCellIndex(JPH::RVec3Arg pos) const noexcept -> int32_t {
-    if (pos.GetX() < 0.0f || pos.GetZ() < 0.0f) {
+    if (pos.GetX() < 0.0 || pos.GetZ() < 0.0) {
         return -1;
     }
 
-    auto gx = static_cast<int32_t>(pos.GetX() / _cellSize);
-    auto gz = static_cast<int32_t>(pos.GetZ() / _cellSize);
+    const auto cell_size = static_cast<double>(_cellSize);
+    auto       gx        = static_cast<int32_t>(pos.GetX() / cell_size);
+    auto       gz        = static_cast<int32_t>(pos.GetZ() / cell_size);
 
     if (gx >= static_cast<int32_t>(_width) || gz >= static_cast<int32_t>(_height)) {
         return -1;
@@ -109,10 +110,13 @@ void SpatialGrid::RemoveEntity(ECS::Registry& reg, Entity handle) {
 auto SpatialGrid::Query(const ECS::Registry& reg, JPH::RVec3Arg pos, float radius, std::vector<Entity>& out_buffer) const -> uint32_t {
     uint32_t count = 0;
 
-    auto min_x = static_cast<int32_t>(std::floor((pos.GetX() - radius) / _cellSize));
-    auto max_x = static_cast<int32_t>(std::floor((pos.GetX() + radius) / _cellSize));
-    auto min_z = static_cast<int32_t>(std::floor((pos.GetZ() - radius) / _cellSize));
-    auto max_z = static_cast<int32_t>(std::floor((pos.GetZ() + radius) / _cellSize));
+    const auto cell_size = static_cast<double>(_cellSize);
+    const auto rad       = static_cast<double>(radius);
+
+    auto min_x = static_cast<int32_t>(std::floor((pos.GetX() - rad) / cell_size));
+    auto max_x = static_cast<int32_t>(std::floor((pos.GetX() + rad) / cell_size));
+    auto min_z = static_cast<int32_t>(std::floor((pos.GetZ() - rad) / cell_size));
+    auto max_z = static_cast<int32_t>(std::floor((pos.GetZ() + rad) / cell_size));
 
     const float radius_sq = radius * radius;
 

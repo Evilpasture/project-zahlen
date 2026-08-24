@@ -22,20 +22,20 @@ namespace ZHLN {
 namespace {
 
 struct TextBounds {
-    float               minX = 0.0f;
-    float               maxX = 0.0f;
-    float               minY = 0.0f;
-    float               maxY = 0.0f;
-    [[nodiscard]] float width() const noexcept {
+    float              minX = 0.0f;
+    float              maxX = 0.0f;
+    float              minY = 0.0f;
+    float              maxY = 0.0f;
+    [[nodiscard]] auto width() const noexcept -> float {
         return maxX - minX;
     }
-    [[nodiscard]] float height() const noexcept {
+    [[nodiscard]] auto height() const noexcept -> float {
         return maxY - minY;
     }
 };
 
 // Measures the exact visual ink bounding box of the rendered glyphs
-TextBounds MeasureTextBounds(const FontAtlas& font, std::string_view text, float scale) noexcept {
+auto MeasureTextBounds(const FontAtlas& font, std::string_view text, float scale) noexcept -> TextBounds {
     if (text.empty()) {
         return {};
     }
@@ -82,7 +82,7 @@ TextBounds MeasureTextBounds(const FontAtlas& font, std::string_view text, float
 }
 
 // Computes the intersection [x0, y0, x1, y1] between two scissor rectangles
-ScissorRect IntersectScissor(const ScissorRect& a, const ScissorRect& b) noexcept {
+auto IntersectScissor(const ScissorRect& a, const ScissorRect& b) noexcept -> ScissorRect {
     int32_t x0 = std::max(a.x, b.x);
     int32_t y0 = std::max(a.y, b.y);
     int32_t x1 = std::min(a.x + static_cast<int32_t>(a.width), b.x + static_cast<int32_t>(b.width));
@@ -120,7 +120,7 @@ void UIRenderSystem::Update(Engine& engine) {
 
     // 1. Resolve UI Hierarchy Layouts (Anchors, Offsets, Stacks)
     UILayoutSystem layoutSystem;
-    layoutSystem.ResolveLayouts(reg, {.width = (float) windowSize.width, .height = (float) windowSize.height});
+    layoutSystem.ResolveLayouts(reg, {.width = static_cast<float>(windowSize.width), .height = static_cast<float>(windowSize.height)});
 
     // 2. Collect ALL Unique UI Entities (Panels, Text, Rects)
     std::unordered_set<uint64_t> uniqueEntities;
@@ -160,7 +160,7 @@ void UIRenderSystem::Update(Engine& engine) {
     }
 
     // Sort ALL UI Entities by Hierarchy Depth (Ascending: Parents & lower layers first)
-    std::ranges::sort(sortedEntries, [](const auto& a, const auto& b) { return a.depth < b.depth; });
+    std::ranges::sort(sortedEntries, [](const auto& a, const auto& b) -> auto { return a.depth < b.depth; });
 
     // ========================================================================
     // 3. PRE-PASS: TOP-DOWN MULTI-ANCESTOR SCISSOR PROPAGATION & INTERSECTION
@@ -191,10 +191,10 @@ void UIRenderSystem::Update(Engine& engine) {
 
         if (parentRect->clipChildren) {
             ScissorRect parentClip = {
-                .x      = (int32_t) std::max(0.0f, parentRect->computedAbsMinX),
-                .y      = (int32_t) std::max(0.0f, parentRect->computedAbsMinY),
-                .width  = (uint32_t) std::max(0.0f, parentRect->computedAbsMaxX - parentRect->computedAbsMinX),
-                .height = (uint32_t) std::max(0.0f, parentRect->computedAbsMaxY - parentRect->computedAbsMinY)
+                .x      = static_cast<int32_t>(std::max(0.0f, parentRect->computedAbsMinX)),
+                .y      = static_cast<int32_t>(std::max(0.0f, parentRect->computedAbsMinY)),
+                .width  = static_cast<uint32_t>(std::max(0.0f, parentRect->computedAbsMaxX - parentRect->computedAbsMinX)),
+                .height = static_cast<uint32_t>(std::max(0.0f, parentRect->computedAbsMaxY - parentRect->computedAbsMinY))
             };
 
             if (parentScissorPtr != nullptr) {
@@ -221,7 +221,7 @@ void UIRenderSystem::Update(Engine& engine) {
 
     uint32_t currentVertexOffset = 0;
 
-    auto QueueBatch = [&](TextureHandle textureHandle, uint32_t count, bool useScissor, ScissorRect scissor, bool isSDF = false) {
+    auto QueueBatch = [&](TextureHandle textureHandle, uint32_t count, bool useScissor, ScissorRect scissor, bool isSDF = false) -> void {
         if (count == 0) {
             return;
         }

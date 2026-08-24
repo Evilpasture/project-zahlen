@@ -76,9 +76,9 @@ static void InitRenderDocAPI() {
     }
 #elif defined(__linux__)
     if (void* mod = dlopen("librenderdoc.so", RTLD_NOW | RTLD_NOLOAD)) {
-        auto R_GetAPI = (pRENDERDOC_GetAPI) dlsym(mod, "RENDERDOC_GetAPI");
+        auto R_GetAPI = reinterpret_cast<pRENDERDOC_GetAPI>(dlsym(mod, "RENDERDOC_GetAPI"));
         if (R_GetAPI != nullptr) {
-            R_GetAPI(eRENDERDOC_API_Version_1_5_0, (void**) &s_RDocAPI);
+            R_GetAPI(eRENDERDOC_API_Version_1_5_0, reinterpret_cast<void**>(&s_RDocAPI));
         }
     }
 #endif
@@ -582,7 +582,9 @@ auto Engine::BeginFrame(bool& outDeviceLost) noexcept -> bool {
     if (!res) {
         if (res.error() == RenderFrameResult::DeviceLost) {
             outDeviceLost = true;
-            { [[maybe_unused]] auto _ = HandleDeviceLost(); }
+            {
+                [[maybe_unused]] auto _ = HandleDeviceLost();
+            }
         }
         return false;
     }
@@ -595,7 +597,9 @@ auto Engine::EndFrame(bool& outDeviceLost) noexcept -> bool {
     if (!res) {
         if (res.error() == RenderFrameResult::DeviceLost) {
             outDeviceLost = true;
-            { [[maybe_unused]] auto _ = HandleDeviceLost(); }
+            {
+                [[maybe_unused]] auto _ = HandleDeviceLost();
+            }
         }
         return false;
     }
@@ -785,7 +789,9 @@ auto Engine::Tick(float dt, GameplayDriver driver) -> GameplayStatus {
     auto render_res = RenderSystem::Update(*this, dt);
     if (!render_res) {
         if (render_res.error().Is<RenderFrameResult>() && render_res.error().As<RenderFrameResult>() == RenderFrameResult::DeviceLost) {
-{ [[maybe_unused]] auto _ = HandleDeviceLost(); }
+            {
+                [[maybe_unused]] auto _ = HandleDeviceLost();
+            }
         }
     }
 

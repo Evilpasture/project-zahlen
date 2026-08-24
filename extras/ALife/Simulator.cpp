@@ -96,7 +96,7 @@ void Simulator::Update(Engine& engine, float dt, JPH::RVec3Arg observer_pos) {
 
                 comp.position = MoveTowards(comp.position, target_pos, speed * game_dt);
 
-                if (comp.position.IsClose(target_pos, 0.01f)) {
+                if (comp.position.IsClose(target_pos, 0.01)) {
                     comp.current_node = target_node;
                     comp.path_index++;
 
@@ -119,7 +119,7 @@ void Simulator::Update(Engine& engine, float dt, JPH::RVec3Arg observer_pos) {
 
                 comp.position = MoveTowards(comp.position, target_pos, speed * game_dt);
 
-                if (comp.position.IsClose(target_pos, 0.01f)) {
+                if (comp.position.IsClose(target_pos, 0.01)) {
                     comp.current_node = comp.target_node;
                     comp.target_node  = INVALID_GRAPH_NODE;
                     if (on_task_completed) {

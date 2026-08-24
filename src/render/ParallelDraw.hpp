@@ -131,8 +131,10 @@ inline void ParallelDrawDispatch(
         CommandEncoder encoder(sec_cmd, inheritDesc.context);
 
         // Standard, un-flipped viewport
-        const VkViewport viewport = {.x = 0.0F, .y = 0.0F, .width = (float) extent.width, .height = (float) extent.height, .minDepth = 0.0F, .maxDepth = 1.0F};
-        const VkRect2D   scissor  = {.offset = {.x = 0, .y = 0}, .extent = extent};
+        const VkViewport viewport = {
+            .x = 0.0F, .y = 0.0F, .width = static_cast<float>(extent.width), .height = static_cast<float>(extent.height), .minDepth = 0.0F, .maxDepth = 1.0F
+        };
+        const VkRect2D scissor = {.offset = {.x = 0, .y = 0}, .extent = extent};
         vkCmdSetViewport(sec_cmd, 0, 1, &viewport);
         vkCmdSetScissor(sec_cmd, 0, 1, &scissor);
 
