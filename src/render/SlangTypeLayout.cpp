@@ -50,17 +50,6 @@ constexpr uint32_t kDecorationArrayStride  = 6;
 constexpr uint32_t kDecorationMatrixStride = 7;
 constexpr uint32_t kDecorationOffset       = 35;
 
-[[nodiscard]] bool TypeNameMatches(const char* candidate, std::string_view want) noexcept {
-    if (candidate == nullptr || candidate[0] == '\0' || want.empty()) {
-        return false;
-    }
-    if (want == candidate) {
-        return true;
-    }
-    const char* dot = std::strrchr(candidate, '.');
-    return dot != nullptr && want == (dot + 1);
-}
-
 [[nodiscard]] bool TypeNameMatches(std::string_view candidate, std::string_view want) noexcept {
     if (candidate.empty() || want.empty()) {
         return false;
@@ -69,7 +58,15 @@ constexpr uint32_t kDecorationOffset       = 35;
         return true;
     }
     const auto dot = candidate.rfind('.');
-    return dot != std::string_view::npos && candidate.substr(dot + 1) == want;
+    if (dot != std::string_view::npos && candidate.substr(dot + 1) == want) {
+        return true;
+    }
+    // slangc emits a layout-specialized copy as TypeName_std140 / _std430 / _scalar.
+    return candidate.size() > want.size() + 1 && candidate.starts_with(want) && candidate[want.size()] == '_';
+}
+
+[[nodiscard]] bool TypeNameMatches(const char* candidate, std::string_view want) noexcept {
+    return candidate != nullptr && TypeNameMatches(std::string_view(candidate), want);
 }
 
 [[nodiscard]] auto LayoutFromBlock(const SpvReflectBlockVariable& block) noexcept -> SlangTypeLayout {
