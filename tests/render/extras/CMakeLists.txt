@@ -24,9 +24,9 @@ foreach(TEST_SRC IN LISTS EXTRAS_RENDER_TEST_SOURCES)
         zahlen_extras
     )
 
+    # Public headers only. src/ is banned — see tools/check_tests_public_api.py.
     target_include_directories(${TARGET_NAME} PRIVATE
         ${PROJECT_SOURCE_DIR}/include
-        ${PROJECT_SOURCE_DIR}/src
         ${PROJECT_SOURCE_DIR}/tests
         ${PROJECT_SOURCE_DIR}/extras
     )

@@ -6,8 +6,6 @@
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
-#include "engine/system/CameraSystem.hpp"
-#include "engine/system/TargetCameraSystem.hpp"
 #include <Jolt/Core/Factory.h>
 #include <Jolt/RegisterTypes.h>
 #include <Zahlen/Buffer.h>
@@ -449,57 +447,6 @@ struct CharacterMovementTestSuite {
 
             if (!rayHit.hasHit || rayHit.position.GetZ() <= 2.6f) {
                 return std::unexpected(CharacterTestError::DynamicPushFailed);
-            }
-            return {};
-        }
-
-        // ====================================================================
-        // PROOF TEST: TargetCameraSystem Alpha Interpolation (Pure CPU)
-        // Tests directly on registry & camera without creating an Engine/GPU!
-        // ====================================================================
-        auto test_proof_target_camera_alpha_interpolation_on_cpu() -> std::expected<void, ZHLN::Error> {
-            ZHLN::ECS::Registry reg;
-            ZHLN::Camera        cam;
-
-            ZHLN::Entity target = reg.Create(
-                ZHLN::Components::TransformComponent {},
-                ZHLN::Components::PhysicsStateComponent {.currPosition = JPH::Vec3(0.0f, 0.0f, 10.0f), .prevPosition = JPH::Vec3(0.0f, 0.0f, 0.0f)}
-            );
-
-            reg.Create(
-                ZHLN::Components::TargetCameraComponent {
-                    .target              = target,
-                    .distance            = 5.0f,
-                    .targetDistance      = 5.0f,
-                    .yaw                 = -90.0f,
-                    .pitch               = 0.0f,
-                    .targetOffset        = JPH::Vec3::sZero(),
-                    .stiffness           = 15.0f,
-                    .smoothTargetPos     = JPH::Vec3::sZero(),
-                    .hasInitSmoothTarget = 1
-                },
-                ZHLN::Components::InputComponent {}
-            );
-
-            ZHLN::TargetCameraSystem targetCamSys;
-            constexpr float          dt    = 0.01666f;
-            constexpr float          alpha = 0.5f; // Halfway between 0m and 10m -> 5.0m
-
-            // Run camera system directly on CPU with pure Registry & Camera!
-            targetCamSys.Update(reg, cam, dt, alpha);
-
-            // Sub-frame target position at alpha=0.5 is 5.0m.
-            // Smoothing factor: f = 1 - exp(-15 * 0.01666) ≈ 0.2212
-            // Expected smoothed target: 0.0 + 0.2212 * 5.0 ≈ 1.106m
-            // Buggy code without alpha interpolation produces: 0.0 + 0.2212 * 10.0 ≈ 2.212m
-            auto        camEnts       = reg.GetEntitiesWith<ZHLN::Components::TargetCameraComponent>();
-            const auto* camComp       = reg.Get<ZHLN::Components::TargetCameraComponent>(camEnts[0]);
-            float       actualSmoothZ = camComp->smoothTargetPos.GetZ();
-
-            ZHLN::Test::ExpectTrue(std::abs(actualSmoothZ - 1.106f) < 0.05f);
-
-            if (std::abs(actualSmoothZ - 1.106f) >= 0.05f) {
-                return std::unexpected(ZHLN::Error(CharacterTestError::SubFrameJitterDetected));
             }
             return {};
         }

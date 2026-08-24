@@ -1,6 +1,10 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+# Tests exercise public behaviour only. They must not include engine internals
+# from src/ (systems, render/Vulkan guts, cooker headers, ...). Configure-time
+# enforcement lives in tools/check_tests_public_api.py.
+
 # 1. Enable CTest testing framework
 enable_testing()
 
@@ -23,9 +27,9 @@ foreach(TEST_SRC IN LISTS TEST_SOURCES)
     target_link_libraries(${TARGET_NAME} PRIVATE
         zahlen_engine
     )
+    # Public headers only. src/ is banned — see tools/check_tests_public_api.py.
     target_include_directories(${TARGET_NAME} PRIVATE
         ${PROJECT_SOURCE_DIR}/include
-        ${PROJECT_SOURCE_DIR}/src
         ${PROJECT_SOURCE_DIR}/tests
     )
 
