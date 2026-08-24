@@ -836,6 +836,13 @@ struct RenderContext::Impl {
     void                       WriteTransLightingToHeap() noexcept;
     void                       WriteTextureSlotToHeap(uint32_t bindlessIndex, VkImage image, VkFormat format, uint32_t mipLevels, bool cube) noexcept;
     void                       InitPassSamplerDescriptors() noexcept;
+    [[nodiscard]] std::expected<void, Error> InitBakeHeapBindings() noexcept;
+    [[nodiscard]] auto AdoptBindlessTexture(Vk::Image&& image, Vk::ImageView&& view, VkFormat format, uint32_t mipLevels = 1, bool cube = false)
+        -> uint32_t;
+    template <typename PushT>
+    [[nodiscard]] auto BakeComputeTexture2D(const ZHLN_ShaderDesc& shader, uint32_t width, uint32_t height, VkFormat format, const PushT& push)
+        -> std::expected<uint32_t, Error>;
+    [[nodiscard]] auto BuildOneShotComputeHeap(const ZHLN_ShaderDesc& shader) noexcept -> std::expected<Vk::ComputePass, Error>;
 
     Vk::SlangReflectedLayout cullingLayout; // Reflection only: drives the heap binding table
     Vk::ComputePass          hizGeneratePass;
@@ -1371,20 +1378,6 @@ std::expected<DoubleBuffered<T>, VkResult> CreateDoubleBuffered(Vk::Allocator& a
 template <>
 struct ZHLN::Vk::FormatOf<float[3]> {
     static constexpr auto value = VK_FORMAT_R32G32B32_SFLOAT;
-};
-template <>
-struct ZHLN::Vk::FormatOf<::ZHLN::Packed1010102> {
-    static constexpr auto value = VK_FORMAT_A2B10G10R10_UNORM_PACK32;
-};
-template <>
-struct ZHLN::Vk::FormatOf<::ZHLN::PackedHalf2> {
-    static constexpr auto value = VK_FORMAT_R16G16_SFLOAT;
-};
-template <>
-struct ZHLN::Vk::FormatOf<::ZHLN::PackedRGBA8> {
-    static constexpr auto value = VK_FORMAT_R8G8B8A8_UNORM;
-};
-SFLOAT;
 };
 template <>
 struct ZHLN::Vk::FormatOf<::ZHLN::Packed1010102> {
