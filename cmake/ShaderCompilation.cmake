@@ -254,6 +254,7 @@ add_shader_target(gpu_scene
 
 add_shader_target(gpu_abi
     STAGES "${SHADER_SRC_DIR}/gpu_abi.slang|CSMain|cs_6_0|SHADER_GPU_ABI_CS_PATH"
+    EXTRA_ARGS -g -O0
 )
 
 add_shader_target(vol_clear_shader

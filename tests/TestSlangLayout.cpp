@@ -25,10 +25,12 @@ struct SlangLayoutTestSuite {
     struct Tests {
         std::expected<void, ZHLN::Error> gpu_uniform_and_light_layouts_match_cpp() {
             auto frame = ReflectAbi<ZHLN::FrameUniforms>();
+            if (!frame) {
+                return std::unexpected(frame.error());
+            }
             auto light = ReflectAbi<ZHLN::GPULight>();
-            auto check = ZHLN::Test::AssertTrue(frame.has_value() && light.has_value());
-            if (!check) {
-                return check;
+            if (!light) {
+                return std::unexpected(light.error());
             }
             ZHLN::Test::ExpectEq(frame->size, static_cast<uint32_t>(sizeof(ZHLN::FrameUniforms)));
             ZHLN::Test::ExpectEq(light->size, static_cast<uint32_t>(sizeof(ZHLN::GPULight)));
@@ -40,13 +42,21 @@ struct SlangLayoutTestSuite {
         }
 
         std::expected<void, ZHLN::Error> particle_and_emitter_layouts_match_cpp() {
-            auto particle   = ReflectAbi<ZHLN::Particle>();
+            auto particle = ReflectAbi<ZHLN::Particle>();
+            if (!particle) {
+                return std::unexpected(particle.error());
+            }
             auto particle3d = ReflectAbi<ZHLN::Particle3D>();
-            auto emitter    = ReflectAbi<ZHLN::ParticleEmitterParams>();
-            auto meshEmit   = ReflectAbi<ZHLN::MeshParticleEmitterParams>();
-            auto check      = ZHLN::Test::AssertTrue(particle && particle3d && emitter && meshEmit);
-            if (!check) {
-                return check;
+            if (!particle3d) {
+                return std::unexpected(particle3d.error());
+            }
+            auto emitter = ReflectAbi<ZHLN::ParticleEmitterParams>();
+            if (!emitter) {
+                return std::unexpected(emitter.error());
+            }
+            auto meshEmit = ReflectAbi<ZHLN::MeshParticleEmitterParams>();
+            if (!meshEmit) {
+                return std::unexpected(meshEmit.error());
             }
             ZHLN::Test::ExpectEq(particle->size, static_cast<uint32_t>(sizeof(ZHLN::Particle)));
             ZHLN::Test::ExpectEq(particle3d->size, static_cast<uint32_t>(sizeof(ZHLN::Particle3D)));
@@ -57,12 +67,20 @@ struct SlangLayoutTestSuite {
 
         std::expected<void, ZHLN::Error> instance_and_cluster_layouts_match_cpp() {
             auto instance = ReflectAbi<ZHLN::InstanceData>();
-            auto meshlet  = ReflectAbi<ZHLN::GPUMeshlet>();
-            auto bounds   = ReflectAbi<ZHLN::ClusterBounds>();
-            auto volume   = ReflectAbi<ZHLN::ClusterVolume>();
-            auto check    = ZHLN::Test::AssertTrue(instance && meshlet && bounds && volume);
-            if (!check) {
-                return check;
+            if (!instance) {
+                return std::unexpected(instance.error());
+            }
+            auto meshlet = ReflectAbi<ZHLN::GPUMeshlet>();
+            if (!meshlet) {
+                return std::unexpected(meshlet.error());
+            }
+            auto bounds = ReflectAbi<ZHLN::ClusterBounds>();
+            if (!bounds) {
+                return std::unexpected(bounds.error());
+            }
+            auto volume = ReflectAbi<ZHLN::ClusterVolume>();
+            if (!volume) {
+                return std::unexpected(volume.error());
             }
             ZHLN::Test::ExpectEq(instance->size, static_cast<uint32_t>(sizeof(ZHLN::InstanceData)));
             ZHLN::Test::ExpectEq(meshlet->size, static_cast<uint32_t>(sizeof(ZHLN::GPUMeshlet)));
@@ -73,13 +91,21 @@ struct SlangLayoutTestSuite {
         }
 
         std::expected<void, ZHLN::Error> push_constant_layouts_match_cpp() {
-            auto fog   = ReflectAbi<ZHLN::VolumetricFogPushConstants>();
+            auto fog = ReflectAbi<ZHLN::VolumetricFogPushConstants>();
+            if (!fog) {
+                return std::unexpected(fog.error());
+            }
             auto light = ReflectAbi<ZHLN::VolumetricLightInjectPushConstants>();
-            auto temp  = ReflectAbi<ZHLN::VolumetricTemporalPushConstants>();
-            auto obj   = ReflectAbi<ZHLN::ObjectConstants>();
-            auto check = ZHLN::Test::AssertTrue(fog && light && temp && obj);
-            if (!check) {
-                return check;
+            if (!light) {
+                return std::unexpected(light.error());
+            }
+            auto temp = ReflectAbi<ZHLN::VolumetricTemporalPushConstants>();
+            if (!temp) {
+                return std::unexpected(temp.error());
+            }
+            auto obj = ReflectAbi<ZHLN::ObjectConstants>();
+            if (!obj) {
+                return std::unexpected(obj.error());
             }
             ZHLN::Test::ExpectEq(fog->size, static_cast<uint32_t>(sizeof(ZHLN::VolumetricFogPushConstants)));
             ZHLN::Test::ExpectEq(light->size, static_cast<uint32_t>(sizeof(ZHLN::VolumetricLightInjectPushConstants)));
@@ -103,10 +129,9 @@ struct SlangLayoutTestSuite {
         }
 
         std::expected<void, ZHLN::Error> heap_push_data_layout_is_present_in_abi_spirv() {
-            auto heap  = ZHLN::Vk::ReflectHeapPushDataLayout(ZHLN::Resource::gpu_abi_comp.data(), ZHLN::Resource::gpu_abi_comp.size());
-            auto check = ZHLN::Test::AssertTrue(heap.has_value());
-            if (!check) {
-                return check;
+            auto heap = ZHLN::Vk::ReflectHeapPushDataLayout(ZHLN::Resource::gpu_abi_comp.data(), ZHLN::Resource::gpu_abi_comp.size());
+            if (!heap) {
+                return std::unexpected(heap.error());
             }
             ZHLN::Test::ExpectTrue((heap->frameAddressOffsets[0] % 8) == 0);
             ZHLN::Test::ExpectTrue(heap->frameAddressOffsets[1] >= heap->frameAddressOffsets[0] + 8);
@@ -117,9 +142,8 @@ struct SlangLayoutTestSuite {
 
         std::expected<void, ZHLN::Error> reflected_field_writer_honors_offsets() {
             auto layout = ReflectAbi<ZHLN::ObjectConstants>();
-            auto check  = ZHLN::Test::AssertTrue(layout.has_value());
-            if (!check) {
-                return check;
+            if (!layout) {
+                return std::unexpected(layout.error());
             }
             std::array<std::byte, 16> blob {};
             const uint32_t            instanceId   = 7;
