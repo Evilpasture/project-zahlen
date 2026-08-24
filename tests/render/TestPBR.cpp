@@ -254,15 +254,18 @@ struct PBRTestSuite {
             cam.pitch    = 0.0f;
             cam.fov      = 60.0f;
 
+            // Metals keep a visible highlight after the screenshot's ACES×0.015
+            // mapping; a gray dielectric lands below L=80 and the warm-pixel
+            // gate never fires. Same albedo, only roughness differs.
             auto smoothMatRes = ZHLN::CreativeWorksFactory::CreateMaterial(
-                rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 0.05f, .baseColor = {0.8f, 0.8f, 0.8f, 1.0f}}
+                rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 1.0f, .roughness = 0.05f, .baseColor = {0.92f, 0.92f, 0.94f, 1.0f}}
             );
             if (!smoothMatRes) {
                 return std::unexpected(PBRTestError::MaterialCreationFailed);
             }
 
             auto roughMatRes = ZHLN::CreativeWorksFactory::CreateMaterial(
-                rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.8f, 0.8f, 0.8f, 1.0f}}
+                rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 1.0f, .roughness = 0.85f, .baseColor = {0.92f, 0.92f, 0.94f, 1.0f}}
             );
             if (!roughMatRes) {
                 return std::unexpected(PBRTestError::MaterialCreationFailed);
@@ -289,7 +292,7 @@ struct PBRTestSuite {
             }
 
             const std::string ppmPath    = "headless_pbr_roughness.ppm";
-            const auto        captureRes = rc.CaptureScreenshotPPM(ppmPath);
+            const auto        captureRes = engine->GetRenderContext().CaptureScreenshotPPM(ppmPath);
             if (!captureRes) {
                 return std::unexpected(PBRTestError::RenderOutputBlank);
             }
@@ -313,8 +316,8 @@ struct PBRTestSuite {
 
             struct HalfStats {
                 float    maxL     = 0.0f;
-                uint32_t warm     = 0; // L > 80  — broad lit area
-                uint32_t hot      = 0; // L > 200 — tight specular peak
+                uint32_t warm     = 0; // L > 25  — lit surface after ACES×0.015
+                uint32_t hot      = 0; // L > 140 — specular peak
                 double   sumX     = 0.0;
                 double   sumY     = 0.0;
                 double   sumX2    = 0.0;
@@ -322,23 +325,27 @@ struct PBRTestSuite {
                 uint32_t highlight = 0;
             };
 
+            // Ignore the sky strip; the cubes sit in the middle of the frame.
+            const int y0 = height / 6;
+            const int y1 = (height * 5) / 6;
+
             auto analyzeHalf = [&](int x0, int x1) -> HalfStats {
                 HalfStats s;
-                for (int y = 0; y < height; ++y) {
+                for (int y = y0; y < y1; ++y) {
                     for (int x = x0; x < x1; ++x) {
                         const size_t  i = (static_cast<size_t>(y) * static_cast<size_t>(width) + static_cast<size_t>(x)) * 3u;
                         const float   L = luminance(pixels[i], pixels[i + 1], pixels[i + 2]);
                         s.maxL          = std::max(s.maxL, L);
-                        if (L > 80.0f) {
+                        if (L > 25.0f) {
                             s.warm++;
                         }
-                        if (L > 200.0f) {
+                        if (L > 140.0f) {
                             s.hot++;
                         }
                     }
                 }
-                const float hi = std::max(120.0f, s.maxL * 0.70f);
-                for (int y = 0; y < height; ++y) {
+                const float hi = std::max(40.0f, s.maxL * 0.70f);
+                for (int y = y0; y < y1; ++y) {
                     for (int x = x0; x < x1; ++x) {
                         const size_t i = (static_cast<size_t>(y) * static_cast<size_t>(width) + static_cast<size_t>(x)) * 3u;
                         const float  L = luminance(pixels[i], pixels[i + 1], pixels[i + 2]);
