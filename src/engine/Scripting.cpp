@@ -1133,9 +1133,11 @@ void RegisterSystemCommands() {
                     if (auto* anim = engine->GetRegistry().Get<ZHLN::Components::AnimatorComponent>(entity)) {
                         if (anim->prefab != nullptr) {
                             if (a.trackIndex >= 0 && a.trackIndex < static_cast<int32_t>(anim->prefab->animations.size())) {
-                                const auto& name = anim->prefab->animations[a.trackIndex].name;
-                                std::strncpy(const_cast<char*>(a.outName), name.c_str(), 63);
-                                const_cast<char*>(a.outName)[63] = '\0';
+                                const auto& name    = anim->prefab->animations[a.trackIndex].name;
+                                auto*       outName = const_cast<char*>(a.outName);
+                                size_t      copyLen = std::min(name.size(), sizeof(a.outName) - 1);
+                                std::memcpy(outName, name.data(), copyLen);
+                                outName[copyLen] = '\0';
                                 return 1;
                             }
                         }

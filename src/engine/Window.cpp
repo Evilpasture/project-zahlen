@@ -276,11 +276,11 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, bool full
             }
         });
 
-        glfwSetFramebufferSizeCallback(_impl->handle, [](GLFWwindow* win, int width, int height) -> void {
+        glfwSetFramebufferSizeCallback(_impl->handle, [](GLFWwindow* win, int fbWidth, int fbHeight) -> void {
             auto* self = static_cast<Window*>(glfwGetWindowUserPointer(win));
             if (self->_impl->receiver.onResize) {
                 self->_impl->receiver.onResize(
-                    self->_impl->receiver.userdata, {.width = static_cast<uint32_t>(width), .height = static_cast<uint32_t>(height)}
+                    self->_impl->receiver.userdata, {.width = static_cast<uint32_t>(fbWidth), .height = static_cast<uint32_t>(fbHeight)}
                 );
             }
         });

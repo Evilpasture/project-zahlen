@@ -19,7 +19,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
-
 #include <physics/PhysicsDebug.hpp>
 
 namespace ZHLN {
@@ -103,10 +102,11 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
 
     auto shadowEntities = reg.GetEntitiesWith<Components::ShadowSettingsComponent>();
     if (!shadowEntities.empty()) {
-        auto* shadowSettings = reg.Get<Components::ShadowSettingsComponent>(shadowEntities[0]);
-        shadowWidth          = shadowSettings->shadowWidth;
-        shadowResolution     = shadowSettings->shadowResolution;
-        sunSize              = shadowSettings->sunSize;
+        if (auto* shadowSettings = reg.Get<Components::ShadowSettingsComponent>(shadowEntities[0])) {
+            shadowWidth      = shadowSettings->shadowWidth;
+            shadowResolution = shadowSettings->shadowResolution;
+            sunSize          = shadowSettings->sunSize;
+        }
     }
 
     float textelSize = shadowWidth / static_cast<float>(shadowResolution);
@@ -338,8 +338,7 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
         }
 
         bool isWireframe = (physicsDrawMode == 1);
-        // FIXED: Replaced free-function Physics::GetDebugDrawData with context method call
-        auto debugData = engine.GetPhysicsContext().GetDebugDrawData(true, true, isWireframe);
+        auto debugData   = engine.GetPhysicsContext().GetDebugDrawData(true, true, isWireframe);
 
         std::vector<VertexPosition>   debugPos;
         std::vector<VertexAttributes> debugAttr;

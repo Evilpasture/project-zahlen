@@ -1,5 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
+
+// File: src/engine/graphics/RenderProcedural.cpp
 #include "RenderInternal.hpp"
 #include "Resources.hpp"
 #include <Zahlen/Error.hpp>
@@ -7,7 +9,7 @@
 
 namespace ZHLN {
 
-std::expected<void, Error> RenderContext::Impl::BuildProceduralBakePipeline() {
+auto RenderContext::Impl::BuildProceduralBakePipeline() -> std::expected<void, Error> {
     // Reflect the bake layout out of the compiled shader instead of allocating
     // from a static C++ descriptor-layout typedef.
     if (!proceduralBakeDescLayout.Build(
@@ -15,9 +17,6 @@ std::expected<void, Error> RenderContext::Impl::BuildProceduralBakePipeline() {
         )) {
         return std::unexpected(RenderInitError::PipelineCreationFailed);
     }
-    // bakeHeapBindings is allocated once in InitBakeHeapBindings (slot span
-    // covers IBL specular mips too). Re-reflect here so hot-reload still
-    // rebuilds the pipeline against the same mapping table.
 
     const void*           cs_code = nullptr;
     size_t                cs_size = 0;
@@ -39,9 +38,7 @@ std::expected<void, Error> RenderContext::Impl::BuildProceduralBakePipeline() {
         specInfos[i] = {.mapEntryCount = 1, .pMapEntries = specEntries.data(), .dataSize = sizeof(int), .pData = &variants[i]};
     }
 
-    auto build_res = proceduralBakePass.BuildHeapVariants(
-        ctx.Device(), shaderDesc, specInfos, bakeHeapBindings.GetInfo(), bakeHeapBindings.indexPushOffset
-    );
+    auto build_res = proceduralBakePass.BuildHeapVariants(ctx.Device(), shaderDesc, specInfos, bakeHeapBindings.GetInfo(), bakeHeapBindings.indexPushOffset);
     if (!build_res) {
         return std::unexpected(build_res.error());
     }
@@ -53,8 +50,13 @@ std::expected<void, Error> RenderContext::Impl::BuildProceduralBakePipeline() {
     return {};
 }
 
-std::expected<uint32_t, Error>
-    RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness, float distortion) {
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
+
+auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness, float distortion)
+    -> std::expected<uint32_t, Error> {
     auto* const device = ctx.Device();
 
     const VkImageCreateInfo imgInfo = {
@@ -90,7 +92,7 @@ std::expected<uint32_t, Error>
             heapManager.WriteBindings(ctx, bakeHeapBindings, kBake2DHeapIndex, Vk::ImageWrite {.view = writeView.Get(), .viewInfo = &writeViewInfo});
 
             // Dispatch the Compute Shader via allocation-free ExecuteImmediate
-            Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
+            Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
                 // VK_EXT_descriptor_heap: this command buffer records a heap
                 // pipeline, so the heaps must be bound on it (push data also
                 // does not carry over from other command buffers).
@@ -114,5 +116,9 @@ std::expected<uint32_t, Error>
             return AdoptBindlessTexture(std::forward<decltype(gpuImage)>(gpuImage), std::move(writeView), VK_FORMAT_R8G8B8A8_UNORM);
         });
 }
+
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 } // namespace ZHLN

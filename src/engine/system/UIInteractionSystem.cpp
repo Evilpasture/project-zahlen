@@ -46,15 +46,15 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
 
     // 1. Process active dragging
     for (Entity e: reg.GetEntitiesWith<Components::UIDragComponent>()) {
-        auto* drag = reg.Get<Components::UIDragComponent>(e);
-        if (drag->isDragging) {
-            if (!leftMouseDown) {
-                drag->isDragging = false;
-            } else {
-                if (auto* targetRect = reg.Get<Components::UIRectComponent>(drag->targetEntity)) {
-                    // Drag uses ungated deltas so ImGui capture does not stall an active drag.
-                    targetRect->x += state->mouseDeltaX;
-                    targetRect->y += state->mouseDeltaY;
+        if (auto* drag = reg.Get<Components::UIDragComponent>(e)) {
+            if (drag->isDragging) {
+                if (!leftMouseDown) {
+                    drag->isDragging = false;
+                } else {
+                    if (auto* targetRect = reg.Get<Components::UIRectComponent>(drag->targetEntity)) {
+                        targetRect->x += state->mouseDeltaX;
+                        targetRect->y += state->mouseDeltaY;
+                    }
                 }
             }
         }

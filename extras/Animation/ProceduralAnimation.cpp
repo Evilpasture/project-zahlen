@@ -74,15 +74,13 @@ struct CanonicalName {
 }
 
 [[nodiscard]] bool IsRigControlNode(std::string_view canonicalName) noexcept {
-    return canonicalName.starts_with("ctr") || canonicalName.starts_with("fk") || canonicalName.starts_with("ik") ||
-           canonicalName.starts_with("mch") || canonicalName.starts_with("org");
+    return canonicalName.starts_with("ctr") || canonicalName.starts_with("fk") || canonicalName.starts_with("ik") || canonicalName.starts_with("mch") ||
+           canonicalName.starts_with("org");
 }
 
 template <typename Range>
 [[nodiscard]] bool ContainsRigControlNodes(const Range& entries) noexcept {
-    return std::ranges::any_of(entries, [](const auto& entry) {
-        return IsRigControlNode(Canonicalize(std::string_view(entry.name)).View());
-    });
+    return std::ranges::any_of(entries, [](const auto& entry) { return IsRigControlNode(Canonicalize(std::string_view(entry.name)).View()); });
 }
 
 [[nodiscard]] std::string_view StripKnownRigPrefix(std::string_view value) noexcept {
@@ -430,9 +428,9 @@ void ApplyAuthoredPose(const Components::AnimatorComponent* animator, const Proc
     // a second, conflicting pose and visibly separates joints even with IK off.
     // Sample the complete graph coherently instead; procedural passes still
     // layer over this bicubic authored pose in model space.
-    const PoseInterpolationMode mode =
-        map.preserveAuthoredHierarchy && requestedMode == PoseInterpolationMode::SpringDamper ? PoseInterpolationMode::Bicubic : requestedMode;
-    const float springStiffness = config != nullptr ? config->springStiffness : map.poseSpringStiffness;
+    const PoseInterpolationMode mode = map.preserveAuthoredHierarchy && requestedMode == PoseInterpolationMode::SpringDamper ? PoseInterpolationMode::Bicubic :
+                                                                                                                               requestedMode;
+    const float                 springStiffness     = config != nullptr ? config->springStiffness : map.poseSpringStiffness;
     const float                 springDampingFactor = config != nullptr ? config->springDampingFactor : map.poseSpringDampingFactor;
     const float                 bicubicTension      = config != nullptr ? config->bicubicTension : 0.0f;
 
@@ -811,7 +809,7 @@ void ConfigureFingerConstraints(const ModelPrefab& prefab, RigBoneMap& map) noex
                         chain[chainCount++] = candidates[index];
                     }
                 }
-                std::sort(chain.begin(), chain.begin() + static_cast<std::ptrdiff_t>(chainCount), [](const Candidate& lhs, const Candidate& rhs) {
+                std::stable_sort(chain.begin(), chain.begin() + static_cast<std::ptrdiff_t>(chainCount), [](const Candidate& lhs, const Candidate& rhs) {
                     if (lhs.nameOrder != 0 && rhs.nameOrder != 0 && lhs.nameOrder != rhs.nameOrder) {
                         return lhs.nameOrder < rhs.nameOrder;
                     }
@@ -1219,9 +1217,9 @@ bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMa
         outMap.localTransforms[node]     = prefab.nodes[node].localTransform;
     }
 
-    const auto nodeWindow             = std::span(prefab.nodes.data(), outMap.nodeCount);
-    const bool deformOnlyRig           = UsesDeformBoneConvention(nodeWindow);
-    outMap.preserveAuthoredHierarchy   = deformOnlyRig && ContainsRigControlNodes(nodeWindow);
+    const auto nodeWindow            = std::span(prefab.nodes.data(), outMap.nodeCount);
+    const bool deformOnlyRig         = UsesDeformBoneConvention(nodeWindow);
+    outMap.preserveAuthoredHierarchy = deformOnlyRig && ContainsRigControlNodes(nodeWindow);
 
     std::array<bool, kMaxRigNodes> claimed {};
     size_t                         coreMapped = 0;
@@ -1523,8 +1521,8 @@ void ProceduralAnimation::CaptureChildOfPoseDeltas(RigBoneMap& boneMap) noexcept
 
 void ProceduralAnimation::CaptureAuthoredConstraintPoseDeltas(RigBoneMap& boneMap) noexcept {
     for (size_t index = 0; index < boneMap.childOfConstraintCount; ++index) {
-        RigChildOfConstraint& constraint = boneMap.childOfConstraints[index];
-        const bool captureModelRelation  = constraint.kind == RigChildOfKind::Knee || boneMap.preserveAuthoredHierarchy;
+        RigChildOfConstraint& constraint           = boneMap.childOfConstraints[index];
+        const bool            captureModelRelation = constraint.kind == RigChildOfKind::Knee || boneMap.preserveAuthoredHierarchy;
         if (!captureModelRelation || !IsValidRigNode(constraint.parent, boneMap.nodeCount) || !IsValidRigNode(constraint.child, boneMap.nodeCount)) {
             continue;
         }

@@ -85,9 +85,10 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible, JPH::
 
     auto shadowEntities = reg.GetEntitiesWith<Components::ShadowSettingsComponent>();
     if (!shadowEntities.empty()) {
-        auto* shadowSettings = reg.Get<Components::ShadowSettingsComponent>(shadowEntities[0]);
-        shadowWidth          = shadowSettings->shadowWidth;
-        shadowResolution     = shadowSettings->shadowResolution;
+        if (auto* shadowSettings = reg.Get<Components::ShadowSettingsComponent>(shadowEntities[0])) {
+            shadowWidth      = shadowSettings->shadowWidth;
+            shadowResolution = shadowSettings->shadowResolution;
+        }
     }
 
     static bool s_WasFrozen = false;
