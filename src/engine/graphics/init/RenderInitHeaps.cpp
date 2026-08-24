@@ -13,7 +13,7 @@
 
 namespace ZHLN {
 
-std::expected<void, Error> RenderContext::Impl::InitBindless() {
+auto RenderContext::Impl::InitBindless() -> std::expected<void, Error> {
     using enum Resource::ShaderID;
 
     // Reflect the authoritative GlobalSceneRegistry layout out of the compiled
@@ -102,8 +102,8 @@ std::expected<void, Error> RenderContext::Impl::InitBindless() {
         });
 }
 
-std::expected<void, Error>
-    RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSamplerInfo, const VkSamplerCreateInfo& clampSamplerInfo) noexcept {
+auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSamplerInfo, const VkSamplerCreateInfo& clampSamplerInfo) noexcept
+    -> std::expected<void, Error> {
     auto reflectedPushLayout = Vk::ReflectHeapPushDataLayout(Resource::gpu_abi_comp.data(), Resource::gpu_abi_comp.size());
     if (!reflectedPushLayout) [[unlikely]] {
         return std::unexpected(reflectedPushLayout.error());
@@ -195,7 +195,7 @@ void RenderContext::Impl::BuildSceneHeapMappings() noexcept {
     // Their push-data offsets come from DescriptorHeapPushData's Slang layout;
     // images and samplers sit in static heap slots via
     // VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_CONSTANT_OFFSET_EXT.
-    const auto add_scene_set = [&](uint32_t setIndex, HeapMappingSet& out) {
+    const auto add_scene_set = [&](uint32_t setIndex, HeapMappingSet& out) -> void {
         using enum VkDescriptorMappingSourceEXT;
         const auto& set = (setIndex == 0) ? bindlessLayout.reflectedSets[0] : decalDescLayout.reflectedSets[setIndex];
 
@@ -332,7 +332,7 @@ void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
     const VkSamplerCreateInfo defaultInfo = defaultSamplerInfo;
     const VkSamplerCreateInfo pointInfo   = pointSamplerInfo;
     const VkSamplerCreateInfo shadowInfo  = shadowSamplerInfo;
-    const VkSamplerCreateInfo clampInfo   = [&]() {
+    const VkSamplerCreateInfo clampInfo   = [&]() -> VkSamplerCreateInfo {
         // clampSampler is the linear clamp-to-edge sampler; its create info was
         // captured at InitBindless time (kept in the heap slot already) — for
         // pass slots we re-derive it identically.
@@ -381,7 +381,7 @@ void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
     }
 }
 
-std::expected<void, Error> RenderContext::Impl::InitSkeletalAnimationResources() {
+auto RenderContext::Impl::InitSkeletalAnimationResources() -> std::expected<void, Error> {
     JPH::Array<JPH::Mat44> identities(8192, JPH::Mat44::sIdentity());
     for (int i = 0; i < 2; ++i) {
         auto jb_res = Vk::Buffer::Create(
@@ -408,7 +408,7 @@ std::expected<void, Error> RenderContext::Impl::InitSkeletalAnimationResources()
     return {};
 }
 
-std::expected<void, Error> RenderContext::Impl::InitLightingLUTs() {
+auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, Error> {
     stagingContext = std::make_unique<Vk::StagingContext>(allocator, ctx);
 
     using namespace Resource;
@@ -416,15 +416,15 @@ std::expected<void, Error> RenderContext::Impl::InitLightingLUTs() {
     const size_t ampRawSize = ltc_amp.size() - 128;
 
     return stagingContext->Begin()
-        .and_then([&]() { return Vk::IBLProcessor::Bake(*this); })
-        .and_then([&, matRawSize, ampRawSize](auto&& ibl) {
+        .and_then([&]() -> std::expected<Vk::IBLPayload, ZHLN::Error> { return Vk::IBLProcessor::Bake(*this); })
+        .and_then([&, matRawSize, ampRawSize](auto&& ibl) -> auto {
             iblPayload = std::forward<decltype(ibl)>(ibl);
             ZHLN::Log("[IBL] Uploading Linearly Transformed Cosines (LTC) LUTs...");
 
             return Vk::Buffer::Create(allocator.Get(), matRawSize + ampRawSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY)
                 .transform_error([](auto res) -> Error { return res; });
         })
-        .and_then([&, matRawSize](auto&& ltcStaging) {
+        .and_then([&, matRawSize](auto&& ltcStaging) -> auto {
             const VkImageCreateInfo ltcInfo = {
                 .sType                 = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
                 .pNext                 = {},
@@ -445,16 +445,19 @@ std::expected<void, Error> RenderContext::Impl::InitLightingLUTs() {
 
             return Vk::Image::Create(allocator.Get(), ltcInfo, VMA_MEMORY_USAGE_GPU_ONLY)
                 .transform_error([](auto res) -> Error { return res; })
-                .and_then([&, ltcInfo, ltcStaging = std::forward<decltype(ltcStaging)>(ltcStaging), matRawSize](auto&& matImg) mutable {
+                .and_then([&, ltcInfo, ltcStaging = std::forward<decltype(ltcStaging)>(ltcStaging), matRawSize](auto&& matImg) mutable -> auto {
                     return Vk::Image::Create(allocator.Get(), ltcInfo, VMA_MEMORY_USAGE_GPU_ONLY)
                         .transform_error([](auto res) -> Error { return res; })
-                        .transform([&, matImg = std::forward<decltype(matImg)>(matImg), ltcStaging = std::move(ltcStaging), matRawSize](auto&& ampImg) mutable {
-                            stagingContext->UploadImage2DBuffer(matImg.Handle(), 64, 64, 1, ltcStaging.Handle(), 0);
-                            stagingContext->UploadImage2DBuffer(ampImg.Handle(), 64, 64, 1, ltcStaging.Handle(), matRawSize);
+                        .transform(
+                            [&, matImg = std::forward<decltype(matImg)>(matImg), ltcStaging = std::move(ltcStaging),
+                             matRawSize](auto&& ampImg) mutable -> auto {
+                                stagingContext->UploadImage2DBuffer(matImg.Handle(), 64, 64, 1, ltcStaging.Handle(), 0);
+                                stagingContext->UploadImage2DBuffer(ampImg.Handle(), 64, 64, 1, ltcStaging.Handle(), matRawSize);
 
-                            stagingContext->AddBuffer(std::move(ltcStaging));
-                            return std::make_pair(std::move(matImg), std::forward<decltype(ampImg)>(ampImg));
-                        });
+                                stagingContext->AddBuffer(std::move(ltcStaging));
+                                return std::make_pair(std::move(matImg), std::forward<decltype(ampImg)>(ampImg));
+                            }
+                        );
                 });
         })
         .and_then([&](auto&& images) -> std::expected<void, Error> {
@@ -469,7 +472,7 @@ std::expected<void, Error> RenderContext::Impl::InitLightingLUTs() {
                     ltcMatView = std::forward<decltype(matView)>(matView);
                     return Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcAmpImage.Handle())
                         .transform_error([](auto res) -> Error { return res; })
-                        .transform([&](auto&& ampView) {
+                        .transform([&](auto&& ampView) -> auto {
                             ltcAmpView     = std::forward<decltype(ampView)>(ampView);
                             ltcMatViewInfo = Vk::MakeViewCreateInfo2D(ltcMatImage.Handle(), VK_FORMAT_R16G16B16A16_SFLOAT, 1, VK_IMAGE_ASPECT_COLOR_BIT);
                             ltcAmpViewInfo = Vk::MakeViewCreateInfo2D(ltcAmpImage.Handle(), VK_FORMAT_R16G16B16A16_SFLOAT, 1, VK_IMAGE_ASPECT_COLOR_BIT);
@@ -487,7 +490,7 @@ auto RenderContext::Impl::AdoptBindlessTexture(Vk::Image&& image, Vk::ImageView&
     return index;
 }
 
-std::expected<void, Error> RenderContext::Impl::InitBakeHeapBindings() noexcept {
+auto RenderContext::Impl::InitBakeHeapBindings() noexcept -> std::expected<void, Error> {
     // One shared storage-image slot span for every one-shot compute bake
     // (SMAA / BRDF / IBL specular / procedural). ExecuteImmediate is
     // synchronous, so the same slots are rewritten per bake.

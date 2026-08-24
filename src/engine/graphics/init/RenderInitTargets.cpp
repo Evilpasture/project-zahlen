@@ -97,7 +97,10 @@ std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) 
                         allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
                     )
             );
-        } else if constexpr (requires { rt.mipLevels; rt.mipViews; }) {
+        } else if constexpr (requires {
+                                 rt.mipLevels;
+                                 rt.mipViews;
+                             }) {
             result = assign(
                 rt, Vk::MipmappedRenderTarget<Tag::format>::Create(
                         allocator, ctx, ext,
@@ -107,20 +110,16 @@ std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) 
             );
         } else if constexpr ((Tag::aspect & VK_IMAGE_ASPECT_DEPTH_BIT) != 0) {
             result = assign(
-                rt, Vk::RenderTarget<Tag::format>::Create(
-                        allocator, ctx, ext, {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT}
-                    )
+                rt,
+                Vk::RenderTarget<Tag::format>::Create(allocator, ctx, ext, {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT})
             );
         } else {
             VkImageUsageFlags extra = 0;
             if constexpr (std::is_same_v<Tag, Res_HdrSceneColor>) {
                 extra = VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
             }
-            const VkExtent2D scaled = {
-                .width  = std::max(1u, ext.width / Tag::scale_divisor),
-                .height = std::max(1u, ext.height / Tag::scale_divisor)
-            };
-            result = assign(rt, CreateDefaultTarget<Tag::format>(scaled, extra));
+            const VkExtent2D scaled = {.width = std::max(1u, ext.width / Tag::scale_divisor), .height = std::max(1u, ext.height / Tag::scale_divisor)};
+            result                  = assign(rt, CreateDefaultTarget<Tag::format>(scaled, extra));
         }
     });
 
@@ -234,9 +233,7 @@ std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) 
             .viewInfo = &graphResources.hizMap.mipViewInfos[m]
         };
         if (m == 0) {
-            heapManager.WriteBindings(
-                ctx, hizHeapBindings, m, Vk::Assume<Vk::ComputeRead<Res_Depth>>(presentation.depthTarget), outMip, Vk::SkipWrite {}
-            );
+            heapManager.WriteBindings(ctx, hizHeapBindings, m, Vk::Assume<Vk::ComputeRead<Res_Depth>>(presentation.depthTarget), outMip, Vk::SkipWrite {});
         } else {
             const Vk::TypedImage<VK_IMAGE_LAYOUT_GENERAL> inMip {
                 .handle   = graphResources.hizMap.image.Handle(),

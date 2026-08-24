@@ -11,7 +11,7 @@
 
 namespace ZHLN {
 
-std::expected<void, Error> RenderContext::Impl::SetupUI(GLFWwindow* window) {
+auto RenderContext::Impl::SetupUI(GLFWwindow* window) -> std::expected<void, Error> {
     using enum Resource::ShaderID;
     auto make_expected = [](bool success, Error err) -> std::expected<void, Error> {
         if (success) {
@@ -55,7 +55,7 @@ std::expected<void, Error> RenderContext::Impl::SetupUI(GLFWwindow* window) {
                 .CullNone()
                 .Build(ctx.Device())
                 .transform_error([](auto) -> Error { return RenderInitError::UISetupFailed; })
-                .transform([&](auto&& pipeline) { uiPipeline = std::forward<decltype(pipeline)>(pipeline); });
+                .transform([&](auto&& pipeline) -> auto { uiPipeline = std::forward<decltype(pipeline)>(pipeline); });
         })
         .and_then([&]() -> std::expected<void, Error> {
             if (window != nullptr) {
@@ -116,7 +116,7 @@ std::expected<void, Error> RenderContext::Impl::SetupUI(GLFWwindow* window) {
         });
 }
 
-std::expected<void, Error> RenderContext::Impl::InitUIDynamicBuffers() noexcept {
+auto RenderContext::Impl::InitUIDynamicBuffers() noexcept -> std::expected<void, Error> {
     return AllocateDynamicVertexBuffers(kMaxUiVertices, frames.uiVbos, frames.uiVboAddresses, 0, "UI");
 }
 

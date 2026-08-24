@@ -62,10 +62,10 @@ class HardwareCapsProber {
     uint32_t         _apiVersion;
 };
 
-bool CheckMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept;
-bool CheckMultiviewMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept;
+auto CheckMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept -> bool;
+auto CheckMultiviewMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept -> bool;
 
-HardwareCaps ProbeHardware(VkPhysicalDevice physicalDevice, uint32_t apiVersion) noexcept {
+auto ProbeHardware(VkPhysicalDevice physicalDevice, uint32_t apiVersion) noexcept -> HardwareCaps {
     HardwareCaps caps {};
     HardwareCapsProber(physicalDevice, apiVersion).ProbeInt64(caps.supportsInt64).ProbeDrawIndirectCount(caps.supportsDrawIndirectCount);
     caps.supportsMeshShader          = CheckMeshShaderSupport(physicalDevice);
@@ -77,7 +77,7 @@ HardwareCaps ProbeHardware(VkPhysicalDevice physicalDevice, uint32_t apiVersion)
 // feature bits are advertised AND the device's mesh-shader limits cover the
 // geometry budget baked into basic_task.slang / basic_mesh.slang. Anything
 // less and the engine silently keeps the vertex pipeline.
-bool CheckMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept {
+auto CheckMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept -> bool {
     if (!ZHLN::Vk::IsDeviceExtensionSupported(physicalDevice, VK_EXT_MESH_SHADER_EXTENSION_NAME)) {
         // Log the count too: a suspiciously round number here (128, 256...)
         // means something is truncating the enumeration again.
@@ -118,7 +118,7 @@ bool CheckMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept {
     return true;
 }
 
-bool CheckMultiviewMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept {
+auto CheckMultiviewMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept -> bool {
     VkPhysicalDeviceMeshShaderFeaturesEXT meshFeatures {};
     meshFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT;
     VkPhysicalDeviceFeatures2 features2 {};
@@ -128,12 +128,11 @@ bool CheckMultiviewMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept {
     return meshFeatures.multiviewMeshShader == VK_TRUE;
 }
 
-
 } // namespace
 
 namespace ZHLN {
 
-bool CheckRayTracingSupport(VkPhysicalDevice physicalDevice) noexcept {
+auto CheckRayTracingSupport(VkPhysicalDevice physicalDevice) noexcept -> bool {
     return ZHLN::Vk::IsDeviceExtensionSupported(physicalDevice, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
            ZHLN::Vk::IsDeviceExtensionSupported(physicalDevice, VK_KHR_RAY_QUERY_EXTENSION_NAME) &&
            ZHLN::Vk::IsDeviceExtensionSupported(physicalDevice, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
@@ -141,7 +140,7 @@ bool CheckRayTracingSupport(VkPhysicalDevice physicalDevice) noexcept {
 
 namespace {
 
-std::expected<Vk::ExtensionResult, Error> GetPlatformInstanceExtensions(Window& window) noexcept {
+auto GetPlatformInstanceExtensions(Window& window) noexcept -> std::expected<Vk::ExtensionResult, Error> {
     auto builder = Vk::ExtensionBuilder::ForInstance();
 
     if (window.IsHeadless()) {
@@ -152,7 +151,7 @@ std::expected<Vk::ExtensionResult, Error> GetPlatformInstanceExtensions(Window& 
             builder.Require(ext);
         }
     } else {
-        glfwSetErrorCallback([](int error, const char* description) { ZHLN::Log("[GLFW Error] Code {}: {}", error, description); });
+        glfwSetErrorCallback([](int error, const char* description) -> void { ZHLN::Log("[GLFW Error] Code {}: {}", error, description); });
 
         uint32_t     glfwExtensionCount = 0;
         const char** glfwExtensions     = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
@@ -178,19 +177,19 @@ std::expected<Vk::ExtensionResult, Error> GetPlatformInstanceExtensions(Window& 
 
 auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps, ValidationMode validationMode) noexcept {
     return Vk::FeatureChainBuilder(physicalDevice)
-        .Optional<VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR>([](auto& f) { f.swapchainMaintenance1 = VK_TRUE; })
-        .Require<VkPhysicalDeviceVulkan11Features>([](auto& f) {
+        .Optional<VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR>([](auto& f) -> auto { f.swapchainMaintenance1 = VK_TRUE; })
+        .Require<VkPhysicalDeviceVulkan11Features>([](auto& f) -> auto {
             f.multiview                          = VK_TRUE;
             f.storageBuffer16BitAccess           = VK_TRUE;
             f.uniformAndStorageBuffer16BitAccess = VK_TRUE;
             f.shaderDrawParameters               = VK_TRUE;
         })
-        .Require<VkPhysicalDeviceVulkan13Features>([](auto& f) {
+        .Require<VkPhysicalDeviceVulkan13Features>([](auto& f) -> auto {
             f.synchronization2               = VK_TRUE;
             f.dynamicRendering               = VK_TRUE;
             f.shaderDemoteToHelperInvocation = VK_TRUE;
         })
-        .Require<VkPhysicalDeviceVulkan12Features>([&](auto& f) {
+        .Require<VkPhysicalDeviceVulkan12Features>([&](auto& f) -> auto {
             f.descriptorIndexing                           = VK_TRUE;
             f.shaderSampledImageArrayNonUniformIndexing    = VK_TRUE;
             f.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
@@ -211,9 +210,9 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
                 f.vulkanMemoryModelDeviceScope = VK_TRUE;
             }
         })
-        .Optional<VkPhysicalDeviceAccelerationStructureFeaturesKHR>([](auto& f) { f.accelerationStructure = VK_TRUE; })
-        .Optional<VkPhysicalDeviceRayQueryFeaturesKHR>([](auto& f) { f.rayQuery = VK_TRUE; })
-        .Optional<VkPhysicalDeviceRobustness2FeaturesEXT>([validationMode](auto& f) {
+        .Optional<VkPhysicalDeviceAccelerationStructureFeaturesKHR>([](auto& f) -> auto { f.accelerationStructure = VK_TRUE; })
+        .Optional<VkPhysicalDeviceRayQueryFeaturesKHR>([](auto& f) -> auto { f.rayQuery = VK_TRUE; })
+        .Optional<VkPhysicalDeviceRobustness2FeaturesEXT>([validationMode](auto& f) -> auto {
             f.nullDescriptor = VK_TRUE;
 
             if (validationMode == ZHLN::ValidationMode::GPU) {
@@ -224,17 +223,17 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
         // VK_EXT_descriptor_heap: the whole scene binding model now lives in
         // descriptor heaps; the legacy set path remains only for passes that
         // have not been ported yet (post-processing, volumetric, ImGui, ...).
-        .Require<VkPhysicalDeviceDescriptorHeapFeaturesEXT>([](auto& f) { f.descriptorHeap = VK_TRUE; })
+        .Require<VkPhysicalDeviceDescriptorHeapFeaturesEXT>([](auto& f) -> auto { f.descriptorHeap = VK_TRUE; })
         // Pipelines declare a stencil attachment format derived from the depth
         // format, but only some passes actually bind stencil; this feature lets
         // them draw inside stencil-less render passes (and stencil-less
         // secondary command buffers) without format-mismatch VUIDs.
-        .Require<VkPhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT>([](auto& f) { f.dynamicRenderingUnusedAttachments = VK_TRUE; })
+        .Require<VkPhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT>([](auto& f) -> auto { f.dynamicRenderingUnusedAttachments = VK_TRUE; })
         // VK_EXT_mesh_shader. multiviewMeshShader lets the shadow pass render
         // all cascades from a single dispatch; it is only requested when the
         // device actually supports mesh shading, because the feature struct
         // must not be chained on a device that lacks the extension.
-        .Optional<VkPhysicalDeviceMeshShaderFeaturesEXT>([&caps](auto& f) {
+        .Optional<VkPhysicalDeviceMeshShaderFeaturesEXT>([&caps](auto& f) -> auto {
             f.taskShader = caps.supportsMeshShader ? VK_TRUE : VK_FALSE;
             f.meshShader = caps.supportsMeshShader ? VK_TRUE : VK_FALSE;
             // Only requested when the device actually has it: one unsupported
@@ -242,7 +241,7 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
             // leaving the extension enabled but task/mesh shading OFF.
             f.multiviewMeshShader = caps.supportsMultiviewMeshShader ? VK_TRUE : VK_FALSE;
         })
-        .Require<VkPhysicalDeviceFeatures2>([&](auto& f) {
+        .Require<VkPhysicalDeviceFeatures2>([&](auto& f) -> auto {
             f.features.multiDrawIndirect         = VK_TRUE;
             f.features.samplerAnisotropy         = VK_TRUE;
             f.features.drawIndirectFirstInstance = VK_TRUE;
@@ -260,7 +259,7 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
         .Build();
 }
 
-std::expected<Vk::ExtensionResult, Error> GetDeviceExtensions(VkPhysicalDevice physicalDevice, bool isHeadless, bool meshShaderSupported) noexcept {
+auto GetDeviceExtensions(VkPhysicalDevice physicalDevice, bool isHeadless, bool meshShaderSupported) noexcept -> std::expected<Vk::ExtensionResult, Error> {
     auto builder = Vk::ExtensionBuilder::ForDevice(physicalDevice);
 
     if (!isHeadless) {
@@ -302,7 +301,7 @@ std::expected<Vk::ExtensionResult, Error> GetDeviceExtensions(VkPhysicalDevice p
 RenderContext::RenderContext(PrivateToken /*unused*/, std::unique_ptr<Impl> impl) noexcept: _impl(std::move(impl)) {
 }
 
-std::expected<std::unique_ptr<RenderContext>, Error> RenderContext::Create(Window& window, const RenderConfig& cfg) noexcept {
+auto RenderContext::Create(Window& window, const RenderConfig& cfg) noexcept -> std::expected<std::unique_ptr<RenderContext>, Error> {
     auto impl     = std::make_unique<Impl>(window);
     impl->appName = cfg.appName;
 
@@ -319,32 +318,34 @@ std::expected<std::unique_ptr<RenderContext>, Error> RenderContext::Create(Windo
                 .ValidationMode(static_cast<Vk::ValidationMode>(cfg.validationMode))
                 .InstanceExtensions(inst_exts)
                 .BuildInstance()
-                .transform([&](VkInstance inst) { instance = inst; });
+                .transform([&](VkInstance inst) -> void { instance = inst; });
         })
         .and_then([&]() -> std::expected<void, Error> {
             if (!window.IsTTY() && !window.IsHeadless()) {
                 return window.CreateVulkanSurface(instance, nullptr, width, height)
                     .transform_error([](auto) -> Error { return RenderInitError::SurfaceCreationFailed; })
-                    .transform([&](void* surface) { raw_surface = static_cast<VkSurfaceKHR>(surface); });
+                    .transform([&](void* surface) -> void { raw_surface = static_cast<VkSurfaceKHR>(surface); });
             }
             if (window.IsHeadless()) {
                 // Headless: obtain offscreen dimensions without creating a VkSurfaceKHR
                 return window.CreateVulkanSurface(instance, nullptr, width, height)
                     .transform_error([](auto) -> Error { return RenderInitError::SurfaceCreationFailed; })
-                    .transform([&](void* /*surface*/) { raw_surface = VK_NULL_HANDLE; });
+                    .transform([&](void* /*surface*/) -> void { raw_surface = VK_NULL_HANDLE; });
             }
             return {};
         })
         .and_then([&]() -> std::expected<void, Error> {
-            return Vk::Context::Builder().Instance(instance).Surface(raw_surface).SelectPhysicalDevice().transform([&](const ZHLN_PhysicalDeviceInfo& info) {
-                physicalInfo = info;
-            });
+            return Vk::Context::Builder()
+                .Instance(instance)
+                .Surface(raw_surface)
+                .SelectPhysicalDevice()
+                .transform([&](const ZHLN_PhysicalDeviceInfo& info) -> void { physicalInfo = info; });
         })
         .and_then([&]() -> std::expected<void, Error> {
             if (window.IsTTY()) {
                 return window.CreateVulkanSurface(instance, physicalInfo.handle, width, height)
                     .transform_error([](auto) -> Error { return RenderInitError::SurfaceCreationFailed; })
-                    .transform([&](void* surface) { raw_surface = static_cast<VkSurfaceKHR>(surface); });
+                    .transform([&](void* surface) -> void { raw_surface = static_cast<VkSurfaceKHR>(surface); });
             }
             return {};
         })
@@ -355,7 +356,7 @@ std::expected<std::unique_ptr<RenderContext>, Error> RenderContext::Create(Windo
 
             return GetDeviceExtensions(physicalInfo.handle, window.IsHeadless(), caps.supportsMeshShader)
                 .and_then([&](auto&& dev_exts) -> std::expected<void, Error> {
-                    std::vector<const char*> devExtList = dev_exts;
+                    const std::vector<const char*>& devExtList = dev_exts;
 
                     return Vk::Context::Builder()
                         .Instance(instance)
@@ -365,15 +366,15 @@ std::expected<std::unique_ptr<RenderContext>, Error> RenderContext::Create(Windo
                         .DeviceFeatures(features.GetRoot())
                         .ValidationMode(static_cast<Vk::ValidationMode>(cfg.validationMode))
                         .Build()
-                        .transform([&](auto&& context) {
+                        .transform([&](auto&& context) -> auto {
                             impl->ctx         = std::forward<decltype(context)>(context);
                             const auto vendor = static_cast<Vk::GPUVendor>(physicalInfo.properties.properties.vendorID);
                             impl->gpuDiagnostics.Create(vendor, impl->ctx.Device(), impl->ctx.Physical());
                         });
                 });
         })
-        .and_then([&]() { return impl->InitSubsystems(cfg, width, height); })
-        .transform([&]() { return std::make_unique<RenderContext>(PrivateToken {}, std::move(impl)); });
+        .and_then([&]() -> std::expected<void, Error> { return impl->InitSubsystems(cfg, width, height); })
+        .transform([&]() -> std::unique_ptr<ZHLN::RenderContext> { return std::make_unique<RenderContext>(PrivateToken {}, std::move(impl)); });
 }
 
 RenderContext::~RenderContext() {
