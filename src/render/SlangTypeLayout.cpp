@@ -413,6 +413,17 @@ auto ReflectTypeLayout(const void* spirv, size_t sizeBytes, std::string_view typ
         return std::unexpected(SpirvLayoutError::InvalidArguments);
     }
 
+    // Named OpTypeStruct first. SPIRV-Reflect reports these types as
+    // std140 UBO members, so ObjectConstants / ClusterVolume come back as
+    // 16-byte slots. The type's own members + alignment keep them at 8
+    // and still round UIObjectConstants to 96.
+    if ((sizeBytes % sizeof(uint32_t)) == 0) {
+        auto fromSpv = ReflectNamedStruct(static_cast<const uint32_t*>(spirv), sizeBytes / sizeof(uint32_t), typeName);
+        if (fromSpv && AcceptLayout(*fromSpv)) {
+            return std::move(*fromSpv);
+        }
+    }
+
     SpvReflectShaderModule module;
     if (spvReflectCreateShaderModule(sizeBytes, spirv, &module) != SPV_REFLECT_RESULT_SUCCESS) {
         return std::unexpected(SpirvLayoutError::ModuleParseFailed);
@@ -455,24 +466,13 @@ auto ReflectTypeLayout(const void* spirv, size_t sizeBytes, std::string_view typ
     }
 
     spvReflectDestroyShaderModule(&module);
-    if (result && AcceptLayout(*result)) {
-        return std::move(*result);
-    }
-
-    // slangc names UBO copies TypeName_std140 and can hide nested ABI structs
-    // from SPIRV-Reflect's binding walk. Named OpTypeStruct + Offset decorations
-    // remain the fallback so a rename of the C++ type / Description still matches.
-    if ((sizeBytes % sizeof(uint32_t)) == 0) {
-        auto fromSpv = ReflectNamedStruct(static_cast<const uint32_t*>(spirv), sizeBytes / sizeof(uint32_t), typeName);
-        if (fromSpv && AcceptLayout(*fromSpv)) {
-            return std::move(*fromSpv);
-        }
-    }
-
     if (!result) {
         return std::unexpected(SpirvLayoutError::TypeNotFound);
     }
-    return std::unexpected(SpirvLayoutError::EmptyLayout);
+    if (!AcceptLayout(*result)) {
+        return std::unexpected(SpirvLayoutError::EmptyLayout);
+    }
+    return std::move(*result);
 }
 
 } // namespace ZHLN::Vk
