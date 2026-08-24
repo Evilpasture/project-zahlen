@@ -37,11 +37,10 @@ constexpr auto GetFormatAspect(VkFormat format) noexcept -> VkImageAspectFlags {
     return VK_IMAGE_ASPECT_NONE;
 }
 
-template <VkFormat F>
-inline auto CreateView(VkDevice device, VkImage image, VkImageAspectFlags aspect, uint32_t mips) -> std::expected<ImageView, VkResult> {
+inline auto CreateView(VkDevice device, VkImage image, VkFormat format, VkImageAspectFlags aspect, uint32_t mips) -> std::expected<ImageView, VkResult> {
     ZHLN_ImageViewDesc desc = {
         .image            = image,
-        .format           = F,
+        .format           = format,
         .aspect           = aspect,
         .mip_levels       = mips,
         .array_layers     = 1,
@@ -55,6 +54,11 @@ inline auto CreateView(VkDevice device, VkImage image, VkImageAspectFlags aspect
         return std::unexpected(res);
     }
     return ImageView {device, view};
+}
+
+template <VkFormat F>
+inline auto CreateView(VkDevice device, VkImage image, VkImageAspectFlags aspect, uint32_t mips) -> std::expected<ImageView, VkResult> {
+    return CreateView(device, image, F, aspect, mips);
 }
 
 template <VkFormat F>
@@ -192,9 +196,15 @@ inline auto MakeViewCreateInfoCube(VkImage image, VkFormat format, uint32_t mipL
     };
 }
 
-inline auto
-    MakeViewCreateInfo2DArray(VkImage image, VkFormat format, uint32_t baseLayer, uint32_t layerCount, VkImageAspectFlags aspect, uint32_t mipLevels) noexcept
-    -> VkImageViewCreateInfo {
+inline auto MakeViewCreateInfo2DArray(
+    VkImage            image,
+    VkFormat           format,
+    uint32_t           baseLayer,
+    uint32_t           layerCount,
+    VkImageAspectFlags aspect,
+    uint32_t           mipLevels,
+    uint32_t           baseMip = 0
+) noexcept -> VkImageViewCreateInfo {
     return {
         .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
         .pNext            = nullptr,
@@ -203,7 +213,7 @@ inline auto
         .viewType         = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
         .format           = format,
         .components       = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY},
-        .subresourceRange = {.aspectMask = aspect, .baseMipLevel = 0, .levelCount = mipLevels, .baseArrayLayer = baseLayer, .layerCount = layerCount},
+        .subresourceRange = {.aspectMask = aspect, .baseMipLevel = baseMip, .levelCount = mipLevels, .baseArrayLayer = baseLayer, .layerCount = layerCount},
     };
 }
 } // namespace ZHLN::Vk

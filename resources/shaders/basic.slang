@@ -1,5 +1,6 @@
 // resources/shaders/basic.slang
 import common;
+import material_model;
 import pbr_helpers;
 
 // The geometry->fragment interface now lives in common.slang so the vertex path

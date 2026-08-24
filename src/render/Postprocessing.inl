@@ -91,7 +91,7 @@ bool PostProcessPass<LayoutT>::BuildHeapVariants(
 template <typename LayoutT>
 template <typename... Args>
 void PostProcessPass<LayoutT>::WriteHeap(const Context& ctx, HeapManager& heap, uint32_t heapIndex, Args&&... args) const noexcept {
-    WriteHeapBindings(heap, ctx, heapBindings, heapIndex, std::forward<Args>(args)...);
+    heap.WriteBindings(ctx, heapBindings, heapIndex, std::forward<Args>(args)...);
 }
 
 template <typename LayoutT>

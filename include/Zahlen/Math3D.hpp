@@ -134,6 +134,7 @@ inline auto CreateOrthoMatrix(float width, float height) -> JPH::Mat44 {
     };
 }
 
+// Bit layout is owned by resources/shaders/vertex_format.slang (Unpack1010102).
 constexpr Packed1010102 PackNormal(float x, float y, float z, float w = 0.0f) {
     uint32_t xs = static_cast<uint32_t>((x * 0.5f + 0.5f) * 1023.0f) & 0x3FF;
     uint32_t ys = static_cast<uint32_t>((y * 0.5f + 0.5f) * 1023.0f) & 0x3FF;

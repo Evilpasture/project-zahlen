@@ -83,6 +83,7 @@ static constexpr auto isLegacy = false;
 #include "DynamicRendering.hpp"
 #include "DescriptorWrites.hpp"
 #include "ReflectedLayout.hpp"
+#include "SlangTypeLayout.hpp"
 #include "SlangReflectedLayout.hpp"
 #include "Raytracing.hpp"
 #include "SemaphorePool.hpp"

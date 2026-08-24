@@ -5,8 +5,8 @@
 //
 // Argument types consumed by the VK_EXT_descriptor_heap write helpers
 // (HeapBindings.hpp). These are the survivors of the old descriptor-set DSL:
-// the engine passes descriptor updates to WriteHeapBindings in declaration
-// order, and the helper translates each argument into a
+// the engine passes descriptor updates to HeapManager::WriteBindings in
+// declaration order, and the helper translates each argument into a
 // vkWriteResourceDescriptorsEXT / vkWriteSamplerDescriptorsEXT write.
 
 #pragma once

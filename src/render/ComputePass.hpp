@@ -3,9 +3,9 @@
 
 // src/render/ComputePass.hpp
 //
-// VK_EXT_descriptor_heap compute pass wrappers. Skinning keeps a legacy
-// push-constant path (pipeline layout + PushConstants) because it binds no
-// descriptors; everything else dispatches through the heaps + push data.
+// VK_EXT_descriptor_heap compute pass wrappers. Skinning still has a
+// leftover push-constant helper for its no-descriptor BDA path; bake /
+// one-shot compute and every heap pass push through vkCmdPushDataEXT.
 
 #pragma once
 #ifndef ZHLN_RENDERING_HPP_INCLUDED
@@ -224,7 +224,7 @@ struct DoubleBufferedComputePass {
 
     template <typename... Args>
     void WriteHeap(const Context& ctx, HeapManager& heap, uint32_t heapIndex, Args&&... args) const noexcept {
-        WriteHeapBindings(heap, ctx, heapBindings, heapIndex, std::forward<Args>(args)...);
+        heap.WriteBindings(ctx, heapBindings, heapIndex, std::forward<Args>(args)...);
     }
 
     void DispatchHeapThreads(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ)
@@ -265,5 +265,74 @@ struct DoubleBufferedComputePass {
         DispatchHeapThreads(ctx, cmd, heapIndex, fixedDispatchSize[0], fixedDispatchSize[1], fixedDispatchSize[2], pushData);
     }
 };
+
+/// Builds a standalone descriptor-heap compute pass from compiled SPIR-V.
+/// Reflects `[numthreads]` and optional `Dispatch.SizeX/Y/Z` metadata.
+[[nodiscard]] inline auto CreateHeapComputePass(VkDevice device, const ZHLN_ShaderDesc& shader) noexcept -> std::expected<ComputePass, Error> {
+    if (shader.code == nullptr || shader.size == 0) {
+        return std::unexpected(ShaderStageCreationError::ShaderLoadingFailed);
+    }
+
+    ComputePass pass;
+    if (!pass.ReflectDispatchLayout(shader)) {
+        return std::unexpected(SpirvLayoutError::ModuleParseFailed);
+    }
+
+    return ComputePipelineBuilder()
+        .Shader(shader)
+        .Layout(VK_NULL_HANDLE)
+        .HeapPipeline()
+        .Build(device)
+        .transform([&](Pipeline&& pipeline) {
+            pass.pipeline = std::move(pipeline);
+            return std::move(pass);
+        });
+}
+
+/// Same as above, with a PUSH_INDEX mapping table (bake / pass slot spans).
+[[nodiscard]] inline auto CreateHeapComputePass(
+    VkDevice                                             device,
+    const ZHLN_ShaderDesc&                               shader,
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping,
+    uint32_t                                             indexPushOffset
+) noexcept -> std::expected<ComputePass, Error> {
+    if (shader.code == nullptr || shader.size == 0) {
+        return std::unexpected(ShaderStageCreationError::ShaderLoadingFailed);
+    }
+
+    ComputePass pass;
+    if (!pass.ReflectDispatchLayout(shader)) {
+        return std::unexpected(SpirvLayoutError::ModuleParseFailed);
+    }
+    return pass.BuildHeap(device, shader, mapping, indexPushOffset).transform([&] { return std::move(pass); });
+}
+
+/// Builds and synchronously executes a heap compute shader on an immediate command ring.
+template <GpuTriviallyCopyable PushT = std::monostate, QueueType QType = QueueType::Graphics, size_t Capacity = 8>
+inline auto ExecuteImmediateCompute(
+    const Context&              ctx,
+    CommandRing<QType, Capacity>& ring,
+    const ZHLN_ShaderDesc&      shader,
+    uint32_t                    threadsX,
+    uint32_t                    threadsY = 1,
+    uint32_t                    threadsZ = 1,
+    const PushT&                pushData = {}
+) noexcept -> std::expected<void, Error> {
+    return CreateHeapComputePass(ctx.Device(), shader).transform([&](ComputePass pass) {
+        ExecuteImmediate(ctx, ring, [&](VkCommandBuffer cmd) {
+            pass.Bind(cmd);
+            if constexpr (!std::is_same_v<PushT, std::monostate>) {
+                PushData(ctx, cmd, 0, pushData);
+            }
+            pass.DispatchThreads(cmd, threadsX, threadsY, threadsZ);
+            MemoryBarrier(
+                cmd, {.src_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                      .src_access = VK_ACCESS_2_SHADER_WRITE_BIT,
+                      .dst_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                      .dst_access = VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT}
+            );
+        });
+    });
+}
 
 } // namespace ZHLN::Vk

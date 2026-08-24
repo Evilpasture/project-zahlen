@@ -58,6 +58,13 @@ function(compile_slang SHADER_PATH ENTRY STAGE OUTPUT_VAR)
                 "${SHADER_SRC_DIR}/common.slang"
                 "${SHADER_SRC_DIR}/descriptor_heap_layout.slang"
                 "${SHADER_SRC_DIR}/cluster_grid.slang"
+                "${SHADER_SRC_DIR}/cluster_math.slang"
+                "${SHADER_SRC_DIR}/sampling.slang"
+                "${SHADER_SRC_DIR}/vertex_format.slang"
+                "${SHADER_SRC_DIR}/particles.slang"
+                "${SHADER_SRC_DIR}/material_model.slang"
+                "${SHADER_SRC_DIR}/push_layouts.slang"
+                "${SHADER_SRC_DIR}/instance_data.slang"
                 "${SHADER_SRC_DIR}/volumetric_grid.slang"
         COMMENT "Slang: Generating ${FILE_NAME}.${ENTRY}.${OUTPUT_VAR}.spv"
         VERBATIM
@@ -223,6 +230,31 @@ add_shader_target(hang_gpu_shader
 
 add_shader_target(procedural_bake
     STAGES "${SHADER_SRC_DIR}/procedural_bake.slang|CSMain|cs_6_0|SHADER_PROCEDURAL_BAKE_SLANG_CS_PATH"
+)
+
+add_shader_target(brdf_lut
+    STAGES "${SHADER_SRC_DIR}/brdf_lut.slang|CSMain|cs_6_0|SHADER_BRDF_LUT_CS_PATH"
+)
+
+add_shader_target(ibl_specular
+    STAGES "${SHADER_SRC_DIR}/ibl_bake.slang|SpecularMain|cs_6_0|SHADER_IBL_SPECULAR_CS_PATH"
+)
+
+add_shader_target(ibl_sh
+    STAGES "${SHADER_SRC_DIR}/ibl_bake.slang|SHMain|cs_6_0|SHADER_IBL_SH_CS_PATH"
+)
+
+add_shader_target(smaa_lut
+    STAGES "${SHADER_SRC_DIR}/smaa_lut.slang|CSMain|cs_6_0|SHADER_SMAA_LUT_CS_PATH"
+)
+
+add_shader_target(gpu_scene
+    STAGES "${SHADER_SRC_DIR}/gpu_scene.slang|CompactMain|cs_6_0|SHADER_GPU_SCENE_CS_PATH"
+)
+
+add_shader_target(gpu_abi
+    STAGES "${SHADER_SRC_DIR}/gpu_abi.slang|CSMain|cs_6_0|SHADER_GPU_ABI_CS_PATH"
+    EXTRA_ARGS -g -O0
 )
 
 add_shader_target(vol_clear_shader

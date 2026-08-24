@@ -4,8 +4,9 @@
 // Authoritative vkCmdPushDataEXT byte layout for descriptor-heap metadata.
 //
 // The Vulkan mapping table consumes these values directly from push data; the
-// fields are not read by shader code. The host reflects this type with Slang
-// and uses the returned field offsets for both vkCmdPushDataEXT and
+// fields are not read by shader code. slangc compiles this type into the
+// gpu_abi SPIR-V blob; the host reflects field offsets from that bytecode
+// (never from this source) for both vkCmdPushDataEXT and
 // VkDescriptorSetAndBindingMappingEXT. Keep the largest ordinary per-pass push
 // type as the first member so descriptor-heap metadata cannot overlap it.
 module descriptor_heap_layout;

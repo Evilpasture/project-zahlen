@@ -1,78 +1,12 @@
 // resources/shaders/common.slang
 module common;
 
-import uniforms;
-
-public struct InstanceData {
-    public float4x4 world;
-    public float4x4 prevWorld;
-    public uint64_t posAddress;
-    public uint64_t attrAddress;
-    public uint64_t skinAddress;
-    public uint64_t iboAddress;
-
-    public uint vertexCount;
-    public uint indexCount;
-    public uint texIndices0;
-    public uint texIndices1;
-
-    public float cullRadius;
-    public float metallicFactor;
-    public float roughnessFactor;
-    public float alphaCutoff;
-
-    public uint flags;
-    public uint jointOffset;
-    public uint morphOffset;
-    public uint activeMorphCount;
-
-    public float3 localCenter;
-    public uint _paddingCenter;
-
-    public float4 morphWeights;
-    public float4 baseColorFactor;
-
-    public float4 emissiveFactor;
-
-    // --- VK_EXT_mesh_shader meshlet streams (0 => no meshlets for this mesh) ---
-    // Mirrors the tail of ZHLN::InstanceData (include/Zahlen/Types.hpp):
-    //   offset 272: meshletAddress, 280: meshletVertexAddress,
-    //   offset 288: meshletTriAddress, 296: meshletCount, 300: padding.
-    public uint64_t meshletAddress;
-    public uint64_t meshletVertexAddress;
-    public uint64_t meshletTriAddress;
-    public uint meshletCount;
-    public uint _paddingMeshlet;
-};
-
-/// 64-byte meshlet descriptor. Kept in lockstep with ZHLN::GPUMeshlet.
-public struct GPUMeshlet {
-    public uint vertexOffset;
-    public uint triangleOffset;
-    public uint vertexCount;
-    public uint triangleCount;
-
-    public float3 sphereCenter;
-    public float sphereRadius;
-
-    public float3 coneApex;
-    public float3 coneAxis;
-    public float coneCutoff;
-};
-
-// These transient views describe the existing BDA element layouts. They are never
-// reflected in InstanceData, so the C++ ABI remains unchanged.
-public struct VertexAttributes {
-    public uint normal;
-    public uint tangent;
-    public uint uv;
-    public uint color;
-};
-
-public struct SkinVertex {
-    public uint2 joints;
-    public uint weights;
-};
+// Re-export: consumers of `common` name InstanceData / VertexAttributes /
+// SkinVertex / FrameUniforms / Light directly. Slang `import` is not
+// transitive unless the intermediate module re-exports.
+__exported import instance_data;
+__exported import uniforms;
+__exported import vertex_format;
 
 // Extensions deliberately add behavior only: no fields, padding, or descriptor bindings.
 public extension InstanceData {
@@ -257,51 +191,46 @@ public ParameterBlock<GlobalSceneRegistry> scene;
 [vk::push_constant]
 public ObjectConstants obj;
 
-// --- Attribute Unpackers ---
+// --- Attribute Unpackers (owned by vertex_format.slang) ---
 public float4 UnpackNormal(uint packed) {
-    float x = (float(packed & 0x3FF) / 1023.0f) * 2.0f - 1.0f;
-    float y = (float((packed >> 10) & 0x3FF) / 1023.0f) * 2.0f - 1.0f;
-    float z = (float((packed >> 20) & 0x3FF) / 1023.0f) * 2.0f - 1.0f;
-    float w = (packed >> 30) > 0 ? 1.0f : -1.0f;
-    return float4(x, y, z, w);
+    return Unpack1010102(packed);
 }
 
 public float2 UnpackUV(uint packed) {
-    return float2(f16tof32(packed & 0xFFFF), f16tof32(packed >> 16));
+    return UnpackHalf2(packed);
 }
 
 public float4 UnpackColor(uint packed) {
-    return float4(float(packed & 0xFF) / 255.0f, float((packed >> 8) & 0xFF) / 255.0f, float((packed >> 16) & 0xFF) / 255.0f,
-                  float((packed >> 24) & 0xFF) / 255.0f);
+    return UnpackRGBA8(packed);
 }
 
 public uint4 UnpackJoints(uint2 packed) {
-    return uint4(packed.x & 0xFFFF, packed.x >> 16, packed.y & 0xFFFF, packed.y >> 16);
+    return UnpackJoints16(packed);
 }
 
 public extension VertexAttributes {
     public property float4 unpackedNormal {
         [ForceInline]
         get {
-            return UnpackNormal(this.normal);
+            return Unpack1010102(this.normal);
         }
     }
     public property float4 unpackedTangent {
         [ForceInline]
         get {
-            return UnpackNormal(this.tangent);
+            return Unpack1010102(this.tangent);
         }
     }
     public property float2 unpackedUV {
         [ForceInline]
         get {
-            return UnpackUV(this.uv);
+            return UnpackHalf2(this.uv);
         }
     }
     public property float4 unpackedColor {
         [ForceInline]
         get {
-            return UnpackColor(this.color);
+            return UnpackRGBA8(this.color);
         }
     }
 }
@@ -310,13 +239,13 @@ public extension SkinVertex {
     public property uint4 unpackedJoints {
         [ForceInline]
         get {
-            return UnpackJoints(this.joints);
+            return UnpackJoints16(this.joints);
         }
     }
     public property float4 unpackedWeights {
         [ForceInline]
         get {
-            return UnpackColor(this.weights);
+            return UnpackRGBA8(this.weights);
         }
     }
 }

@@ -7,6 +7,7 @@
 #include "Zahlen/Types.hpp"
 #include <Zahlen/Core/ControlFlow.hpp>
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdio>
 #include <utility>
@@ -164,82 +165,6 @@ void RenderContext::OnDeviceLost() noexcept {
 // ============================================================================
 // RenderContext Subsystem Implementation
 // ============================================================================
-
-auto RenderContext::Impl::CompileShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData) -> std::expected<void, Error> {
-    // VK_EXT_descriptor_heap: the shadow pass reads the scene registry through
-    // the heap; per-draw ObjectConstants travel via vkCmdPushDataEXT.
-    shadowPipelineLayout = emptyPipelineLayout;
-    return Vk::ShaderStages::Create(device, shaderData, "VSMain", "PSShadow")
-        .transform_error([](auto err) -> Error { return err; })
-        .and_then([&, device](auto&& shaders) -> std::expected<void, Error> {
-            return Vk::PipelineBuilder {}
-                .Shaders(shaders)
-                .Layout(emptyPipelineLayout)
-                .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
-                .DepthOnly()
-                .DepthFormat(VK_FORMAT_D32_SFLOAT)
-                .CullNone()
-                .Build(device)
-                .transform_error([](auto) -> Error { return RenderInitError::PipelineCreationFailed; })
-                .transform([&](auto&& pipeline) -> auto { shadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
-        })
-        .and_then([&, device]() -> std::expected<void, Error> {
-            // VK_EXT_mesh_shader twin of the shadow pipeline. Optional by
-            // design: a failure here only means the cascades keep using the
-            // indirect vertex draws, so it never fails pipeline compilation.
-            if (!ctx.MeshShadersSupported()) {
-                return {};
-            }
-
-            const ZHLN_ShaderDesc taskDesc = {.code = Vk::AsSpirV(Resource::basic_task.data()), .size = Resource::basic_task.size(), .entry_point = nullptr};
-            // Shadow variant: its varying set must match PSShadow exactly.
-            const auto            shadowSet = Resource::GetSceneShaders(Resource::SceneShaderVariant::Shadow);
-            const ZHLN_ShaderDesc meshDesc  = {.code = Vk::AsSpirV(shadowSet.mesh.data()), .size = shadowSet.mesh.size(), .entry_point = nullptr};
-            const ZHLN_ShaderDesc fragDesc  = {.code = Vk::AsSpirV(shaderData.fragment.data()), .size = shaderData.fragment.size(), .entry_point = "PSShadow"};
-
-            auto shaders = Vk::ShaderStages::CreateMesh(device, taskDesc, meshDesc, fragDesc);
-            if (!shaders) {
-                ZHLN::Log("[RenderResources] Shadow mesh-stage creation failed; cascades keep the vertex pipeline.");
-                return {};
-            }
-
-            auto pipeline = Vk::PipelineBuilder {}
-                                .Shaders(*shaders)
-                                .Layout(emptyPipelineLayout)
-                                .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
-                                .DepthOnly()
-                                .DepthFormat(VK_FORMAT_D32_SFLOAT)
-                                .CullNone()
-                                .Build(device);
-            if (!pipeline) {
-                ZHLN::Log("[RenderResources] Shadow mesh pipeline creation failed; cascades keep the vertex pipeline.");
-                return {};
-            }
-            shadowMeshPipeline = std::move(*pipeline);
-            return {};
-        });
-}
-
-auto RenderContext::Impl::CompilePunctualShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData) -> std::expected<void, Error> {
-    // VK_EXT_descriptor_heap variant of the shadow path (same mappings, the
-    // per-draw light index travels through push data).
-    punctualShadowPipelineLayout = emptyPipelineLayout;
-    return Vk::ShaderStages::Create(device, shaderData)
-        .transform_error([](auto err) -> Error { return err; })
-        .and_then([&, device](auto&& shaders) -> std::expected<void, Error> {
-            return Vk::PipelineBuilder {}
-                .Shaders(shaders)
-                .Layout(emptyPipelineLayout)
-                .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
-                .DepthOnly()
-                .DepthFormat(VK_FORMAT_D32_SFLOAT)
-                .ViewMask(0x3F)
-                .CullNone()
-                .Build(device)
-                .transform_error([](auto) -> Error { return RenderInitError::PipelineCreationFailed; })
-                .transform([&](auto&& pipeline) -> auto { punctualShadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
-        });
-}
 
 auto RenderContext::GetRendererName() const -> const char* {
     return _impl->appName.data();
@@ -493,15 +418,6 @@ auto RenderContext::RegisterTexture(std::string_view name, uint32_t bindlessInde
     return _impl->textureManager.RegisterUploaded(name, bindlessIndex, isSRGB);
 }
 
-void RenderContext::Impl::WriteTextureSlotToHeap(uint32_t bindlessIndex, VkImage image, VkFormat format, uint32_t mipLevels, bool cube) noexcept {
-    // The globalTextures[] array is pinned to a contiguous heap region by the
-    // binding-11 mapping; index N lives at slot (textureHeapBase + N).
-    Vk::TextureHandle           slot {textureHeapBase + bindlessIndex};
-    const VkImageViewCreateInfo info = cube ? Vk::MakeViewCreateInfoCube(image, format, mipLevels) :
-                                              Vk::MakeViewCreateInfo2D(image, format, mipLevels, VK_IMAGE_ASPECT_COLOR_BIT);
-    heapManager.WriteImage(slot, info, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-}
-
 auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> std::expected<uint32_t, Error> {
     auto* const  device    = ctx.Device();
     const size_t imageSize = static_cast<size_t>(width) * height * 4;
@@ -543,14 +459,8 @@ auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width
             }
             auto gpuView = std::move(*view_res);
 
-            uint32_t index = nextTextureIndex++;
-            WriteTextureSlotToHeap(index, gpuImage.Handle(), format, mipLevels, false);
-
-            Vk::Debug::SetImageName(ctx, gpuImage.Handle(), std::format("BindlessCubeTexture{:03}", index));
-
-            textureImages.push_back(std::forward<decltype(gpuImage)>(gpuImage));
-            textureViews.push_back(std::move(gpuView));
-
+            const uint32_t index = AdoptBindlessTexture(std::forward<decltype(gpuImage)>(gpuImage), std::move(gpuView), format, mipLevels, false);
+            Vk::Debug::SetImageName(ctx, textureImages.back().Handle(), std::format("BindlessTexture{:03}", index));
             return index;
         });
 }
@@ -585,15 +495,9 @@ auto RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceData,
             }
             auto gpuView = std::move(*cube_view_res);
 
-            uint32_t index = nextTextureIndex++;
-            WriteTextureSlotToHeap(index, gpuImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, true);
-
+            const uint32_t index = AdoptBindlessTexture(std::forward<decltype(gpuImage)>(gpuImage), std::move(gpuView), VK_FORMAT_R8G8B8A8_UNORM, 1, true);
             std::array<char, 32> buf {};
-            Vk::Debug::SetImageName(ctx, gpuImage.Handle(), FormatTo(buf, "BindlessCubeTexture{:03}", index));
-
-            textureImages.push_back(std::forward<decltype(gpuImage)>(gpuImage));
-            textureViews.push_back(std::move(gpuView));
-
+            Vk::Debug::SetImageName(ctx, textureImages.back().Handle(), FormatTo(buf, "BindlessCubeTexture{:03}", index));
             return index;
         });
 }
@@ -968,25 +872,6 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
         });
 }
 
-auto RenderContext::Impl::InitializeSystemTextures() noexcept -> std::expected<void, Error> {
-    ZHLN::Log("[Resource Factory] Registering fallback system texture slots...");
-
-    std::array<uint8_t, 4> blackPixel  = {0, 0, 0, 0};
-    std::array<uint8_t, 4> whitePixel  = {255, 255, 255, 255};
-    std::array<uint8_t, 4> normalPixel = {128, 128, 255, 255};
-
-    return CreateTextureInternal(blackPixel.data(), 1, 1, false).and_then([&, whitePixel, normalPixel](uint32_t blackIdx) -> std::expected<void, Error> {
-        return CreateTextureInternal(whitePixel.data(), 1, 1, true).and_then([&, blackIdx, normalPixel](uint32_t whiteIdx) -> std::expected<void, Error> {
-            return CreateTextureInternal(normalPixel.data(), 1, 1, false).and_then([&, blackIdx, whiteIdx](uint32_t normalIdx) -> std::expected<void, Error> {
-                if (blackIdx != 0 || whiteIdx != 1 || normalIdx != 2) {
-                    return std::unexpected(RenderInitError::SubsystemAllocationFailed);
-                }
-                return {};
-            });
-        });
-    });
-}
-
 void RenderContext::Impl::RegisterShaderWatcher(const char* path, std::function<void()> callback) {
     if constexpr (isDev) {
         shaderWatchers.push_back({.path = path, .watcher = FileWatcher(path), .reloadCallback = std::move(callback)});
@@ -1104,77 +989,25 @@ void RenderContext::Impl::RegisterPipeline(const PipelineRegistration& reg) noex
     }
 }
 
-void RenderContext::Impl::UploadClusterBounds(const JPH::Mat44& proj) {
-    const auto [gridWidth, gridHeight, gridDepth] = clusterCullingPass.fixedDispatchSize;
-    if (gridWidth == 0 || gridHeight == 0 || gridDepth == 0) {
-        return;
-    }
+std::expected<void, Error> RenderContext::Impl::ValidateSlangTypeLayouts() noexcept {
+    const void*  spirv   = Resource::gpu_abi_comp.data();
+    const size_t spirvSz = Resource::gpu_abi_comp.size();
 
-    ZHLN::Array<ClusterBounds> cpuBounds(static_cast<size_t>(gridWidth) * gridHeight * gridDepth);
-    JPH::Mat44                 invProj = proj.Inversed();
-
-    float tsX = 2.0f / static_cast<float>(gridWidth);
-    float tsY = 2.0f / static_cast<float>(gridHeight);
-
-    auto Unproject = [&](const JPH::Vec4& coord) -> JPH::Vec3 {
-        JPH::Vec4 res = invProj * coord;
-        return {res.GetX() / res.GetW(), res.GetY() / res.GetW(), res.GetZ() / res.GetW()};
-    };
-
-    for (uint32_t z = 0; z < gridDepth; ++z) {
-        float n     = 0.1f;
-        float f     = 1000.0f;
-        float sNear = n * std::pow(f / n, static_cast<float>(z) / static_cast<float>(gridDepth));
-        float sFar  = n * std::pow(f / n, static_cast<float>(z + 1) / static_cast<float>(gridDepth));
-
-        float tNear = (sNear - n) / (f - n);
-        float tFar  = (sFar - n) / (f - n);
-
-        for (uint32_t y = 0; y < gridHeight; ++y) {
-            for (uint32_t x = 0; x < gridWidth; ++x) {
-                uint32_t cIdx = x + (y * gridWidth) + (z * gridWidth * gridHeight);
-
-                std::array<JPH::Vec4, 4> ndc {
-                    {JPH::Vec4(-1.0f + x * tsX, -1.0f + y * tsY, 0.0f, 1.0f), JPH::Vec4(-1.0f + (x + 1) * tsX, -1.0f + y * tsY, 0.0f, 1.0f),
-                     JPH::Vec4(-1.0f + (x + 1) * tsX, -1.0f + (y + 1) * tsY, 0.0f, 1.0f), JPH::Vec4(-1.0f + x * tsX, -1.0f + (y + 1) * tsY, 0.0f, 1.0f)}
-                };
-
-                std::array<JPH::Vec3, 4> pNear {};
-                std::array<JPH::Vec3, 4> pFar {};
-                for (int i = 0; i < 4; ++i) {
-                    pNear[i] = Unproject(JPH::Vec4(ndc[i].GetX(), ndc[i].GetY(), 0.0f, 1.0f));
-                    pFar[i]  = Unproject(JPH::Vec4(ndc[i].GetX(), ndc[i].GetY(), 1.0f, 1.0f));
-                }
-
-                JPH::Vec3 pMin(1e30f, 1e30f, 1e30f);
-                JPH::Vec3 pMax(-1e30f, -1e30f, -1e30f);
-
-                for (int j = 0; j < 4; ++j) {
-                    JPH::Vec3 ptNear = pNear[j] + (pFar[j] - pNear[j]) * tNear;
-                    JPH::Vec3 ptFar  = pNear[j] + (pFar[j] - pNear[j]) * tFar;
-                    pMin             = JPH::Vec3::sMin(pMin, JPH::Vec3::sMin(ptNear, ptFar));
-                    pMax             = JPH::Vec3::sMax(pMax, JPH::Vec3::sMax(ptNear, ptFar));
-                }
-
-                cpuBounds[cIdx].minPoint = JPH::Vec4(pMin.GetX(), pMin.GetY(), pMin.GetZ(), 1.0f);
-                cpuBounds[cIdx].maxPoint = JPH::Vec4(pMax.GetX(), pMax.GetY(), pMax.GetZ(), 1.0f);
+    std::expected<void, Error> result {};
+    Reflect::ForEachNestedType<GPUTypes>([&]<typename Group>() {
+        Reflect::ForEachNestedType<Group>([&]<typename T>() {
+            if (!result) {
+                return;
             }
-        }
-    }
-
-    auto stagingAlloc = stagingRingBuffer.Allocate(cpuBounds.size() * sizeof(ClusterBounds));
-    std::memcpy(stagingAlloc.mappedData, cpuBounds.data(), cpuBounds.size() * sizeof(ClusterBounds));
-
-    Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) -> void {
-        Vk::CopyRingBuffer(cmd, stagingAlloc, clusterBoundsBuffer, cpuBounds.size() * sizeof(ClusterBounds));
-
-        Vk::MemoryBarrier(
-            cmd, {.src_stage  = VK_PIPELINE_STAGE_2_COPY_BIT,
-                  .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                  .dst_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                  .dst_access = VK_ACCESS_2_SHADER_READ_BIT}
-        );
+            result = Vk::ReflectTypeLayout(spirv, spirvSz, Reflect::AnnotatedName<T>()).and_then([](const Vk::SlangTypeLayout& layout) -> std::expected<void, Error> {
+                if (layout.size != sizeof(T)) {
+                    return std::unexpected(Vk::SpirvLayoutError::TypeSizeMismatch);
+                }
+                return {};
+            });
+        });
     });
+    return result.and_then([&]() -> std::expected<void, Error> { return Vk::ReflectHeapPushDataLayout(spirv, spirvSz).transform([](const auto&) {}); });
 }
 
 } // namespace ZHLN

@@ -1,37 +1,8 @@
 // resources/shaders/particle_update.hlsl
 
 import common;
+import particles;
 import uniforms;
-
-struct Particle {
-    float4 position; // xyz = position, w = unused
-    float4 velocity; // xyz = velocity, w = unused
-    float4 color;    // evaluated color
-    float4 params;   // x = age, y = lifetime, z = size, w = rotation
-};
-
-struct ParticleEmitterParams {
-    float3 gravity;
-    float drag;
-    float3 turbulence;
-    float turbulenceFreq;
-    float3 spawnOrigin;
-    float spawnRadius;
-    float3 spawnBoxExtent;
-    float loopBoundary;
-    float3 initVelMin;
-    float lifetimeMin;
-    float3 initVelMax;
-    float lifetimeMax;
-    float4 startColor;
-    float4 endColor;
-    float2 startSize;
-    float2 endSize;
-    float spinSpeed;
-    uint textureIndex;
-    uint alignment;
-    uint blendMode;
-};
 
 struct ComputePushConstants {
     uint64_t particleBufferAddr;
@@ -41,36 +12,20 @@ struct ComputePushConstants {
 };
 [vk::push_constant]
 ComputePushConstants pc;
-// Fast GPU 3D Hash
-float Hash13(float3 p) {
-    p = frac(p * 0.1031f);
-    p += dot(p, p.zyx + 31.32f);
-    return frac((p.x + p.y) * p.z);
-}
 
-float3 Hash33(float3 p) {
-    return float3(Hash13(p), Hash13(p + float3(17.1f, 9.3f, 27.5f)), Hash13(p + float3(31.4f, 45.2f, 11.8f)));
-}
-
-// Procedural 3D turbulence force using sine-cosine offsets
-float3 SampleTurbulence(float3 pos) {
-    float time = scene.frame.camPos.w;
-    float3 p   = pos * pc.p.turbulenceFreq + float3(time * 0.2f, time * 0.3f, time * 0.1f);
-    return float3(sin(p.y * 3.2f + p.z * 1.5f), cos(p.x * 2.1f + p.z * 1.5f), sin(p.x * 4.0f + p.y * 1.5f)) * pc.p.turbulence;
-}
 
 [numthreads(64, 1, 1)]
 void CSMain(uint3 tid: SV_DispatchThreadID) {
     uint idx = tid.x;
     if (idx >= pc.particleCount)
         return;
-    Particle* particles = (Particle*) pc.particleBufferAddr;
-    Particle part       = particles[idx];
+    Particle* particleList = (Particle*) pc.particleBufferAddr;
+    Particle part          = particleList[idx];
 
     float dt = pc.deltaTime;
 
     // 1. Advance Motion
-    float3 accel = pc.p.gravity + SampleTurbulence(part.position.xyz);
+    float3 accel = pc.p.gravity + SampleTurbulence(part.position.xyz, pc.p.turbulence, pc.p.turbulenceFreq, scene.frame.camPos.w);
     part.velocity.xyz += accel * dt;
     part.velocity.xyz *= exp(-pc.p.drag * dt);
     part.position.xyz += part.velocity.xyz * dt;
@@ -81,7 +36,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
 
     // 3. Evaluate Interpolation Curves (Normalized Age: 0.0 -> 1.0)
     float lifetime = max(part.params.y, 0.0001f);
-    float t        = saturate(part.params.x / lifetime);
+    float t        = LifetimeAlpha(part.params.x, lifetime);
     part.color     = lerp(pc.p.startColor, pc.p.endColor, t);
     part.params.z  = lerp(pc.p.startSize.x, pc.p.endSize.x, t); // uniform size width
 
@@ -126,5 +81,5 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         part.params.z     = pc.p.startSize.x;
     }
 
-    particles[idx] = part;
+    particleList[idx] = part;
 }

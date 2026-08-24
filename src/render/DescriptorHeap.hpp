@@ -36,6 +36,7 @@ namespace ZHLN::Vk {
 class ResourceWriteBatch;
 class SamplerWriteBatch;
 class HeapManager;
+struct HeapPassBindings;
 
 enum class DescriptorHeapType : uint8_t {
     Resource, // Storage Buffers, Uniform Buffers, Sampled Images, Storage Images, AS
@@ -373,6 +374,11 @@ class HeapManager {
     void WriteBuffer(UniformBufferHandle handle, VkDeviceAddress address, VkDeviceSize size) noexcept;
     void WriteAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address) noexcept;
     void WriteSampler(SamplerHandle handle, const VkSamplerCreateInfo& createInfo) noexcept;
+
+    /// Writes every non-sampler binding of `b` at `index`. Argument order
+    /// mirrors the reflected set; sampler positions are skipped.
+    template <typename... Args>
+    void WriteBindings(const Context& ctx, const HeapPassBindings& b, uint32_t index, Args&&... args) noexcept;
 
     void FlushResourceBatch(ResourceWriteBatch& batch) noexcept;
     void FlushSamplerBatch(SamplerWriteBatch& batch) noexcept;

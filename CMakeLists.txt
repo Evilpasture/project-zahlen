@@ -265,7 +265,7 @@ set(MESHOPT_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/meshoptimizer EXCLUDE_FROM_ALL SYSTEM)
 set_target_properties(meshoptimizer PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/SPIRV-Reflect)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui SYSTEM)
 set_target_properties(imgui PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
@@ -287,6 +287,12 @@ set(RAW_ENGINE_SOURCES
     src/engine/graphics/RenderGraphBuilder.cpp
     src/engine/graphics/RenderDrawCommands.cpp
     src/engine/graphics/RenderInit.cpp
+    src/engine/graphics/init/RenderInitDevice.cpp
+    src/engine/graphics/init/RenderInitHeaps.cpp
+    src/engine/graphics/init/RenderInitTargets.cpp
+    src/engine/graphics/init/RenderInitScenePipelines.cpp
+    src/engine/graphics/init/RenderInitPostProcess.cpp
+    src/engine/graphics/init/RenderInitUI.cpp
     src/engine/graphics/RenderResources.cpp
     src/engine/Engine.cpp
     src/engine/CreativeWorksFactory.cpp
@@ -791,6 +797,9 @@ zahlen_enable_reflection(zahlen_render)
 zahlen_enable_reflection(zahlen_engine)
 zahlen_enable_reflection(zahlen_gltf)
 zahlen_enable_reflection(zahlen_audio)
+zahlen_enable_reflection(zahlen_physics)
+zahlen_enable_reflection(zahlen_ecs)
+zahlen_enable_reflection(zahlen_threading)
 zahlen_enable_reflection(zahlen)
 zahlen_enable_reflection(zcook)
 

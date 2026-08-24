@@ -17,10 +17,10 @@ Document::Document(): _impl(std::make_unique<Impl>()) {
 }
 Document::~Document() = default;
 
-Document::Document(Document&&) noexcept            = default;
-Document& Document::operator=(Document&&) noexcept = default;
+Document::Document(Document&&) noexcept                    = default;
+auto Document::operator=(Document&&) noexcept -> Document& = default;
 
-std::expected<Document, Error> Document::Parse(std::string_view jsonString) noexcept {
+auto Document::Parse(std::string_view jsonString) noexcept -> std::expected<Document, Error> {
     Document docObj;
     docObj._impl->padded = simdjson::padded_string(jsonString);
     auto error           = docObj._impl->parser.parse(docObj._impl->padded).get(docObj._impl->doc);
@@ -30,9 +30,9 @@ std::expected<Document, Error> Document::Parse(std::string_view jsonString) noex
     return docObj;
 }
 
-ValueReader Document::GetRoot() const noexcept {
+auto Document::GetRoot() const noexcept -> ValueReader {
     if (!_impl) {
-        return ValueReader();
+        return {};
     }
     return ValueReader(&_impl->doc);
 }
@@ -48,9 +48,10 @@ ValueReader::ValueReader(const void* internalNode) {
     }
 }
 
-std::expected<int64_t, Error> ValueReader::GetInt() const noexcept {
-    if (!_valid)
+auto ValueReader::GetInt() const noexcept -> std::expected<int64_t, Error> {
+    if (!_valid) {
         return std::unexpected(JSONError::TypeMismatch);
+    }
     const auto& elem = *reinterpret_cast<const simdjson::dom::element*>(_opaque);
 
     int64_t val = 0;
@@ -64,9 +65,10 @@ std::expected<int64_t, Error> ValueReader::GetInt() const noexcept {
     return std::unexpected(JSONError::TypeMismatch);
 }
 
-std::expected<uint64_t, Error> ValueReader::GetUInt() const noexcept {
-    if (!_valid)
+auto ValueReader::GetUInt() const noexcept -> std::expected<uint64_t, Error> {
+    if (!_valid) {
         return std::unexpected(JSONError::TypeMismatch);
+    }
     const auto& elem = *reinterpret_cast<const simdjson::dom::element*>(_opaque);
 
     uint64_t uval = 0;
@@ -80,9 +82,10 @@ std::expected<uint64_t, Error> ValueReader::GetUInt() const noexcept {
     return std::unexpected(JSONError::TypeMismatch);
 }
 
-std::expected<double, Error> ValueReader::GetDouble() const noexcept {
-    if (!_valid)
+auto ValueReader::GetDouble() const noexcept -> std::expected<double, Error> {
+    if (!_valid) {
         return std::unexpected(JSONError::TypeMismatch);
+    }
     const auto& elem = *reinterpret_cast<const simdjson::dom::element*>(_opaque);
 
     double val = 0.0;
@@ -100,9 +103,10 @@ std::expected<double, Error> ValueReader::GetDouble() const noexcept {
     return std::unexpected(JSONError::TypeMismatch);
 }
 
-std::expected<bool, Error> ValueReader::GetBool() const noexcept {
-    if (!_valid)
+auto ValueReader::GetBool() const noexcept -> std::expected<bool, Error> {
+    if (!_valid) {
         return std::unexpected(JSONError::TypeMismatch);
+    }
     const auto& elem = *reinterpret_cast<const simdjson::dom::element*>(_opaque);
 
     bool val = false;
@@ -112,9 +116,10 @@ std::expected<bool, Error> ValueReader::GetBool() const noexcept {
     return std::unexpected(JSONError::TypeMismatch);
 }
 
-std::expected<std::string_view, Error> ValueReader::GetString() const noexcept {
-    if (!_valid)
+auto ValueReader::GetString() const noexcept -> std::expected<std::string_view, Error> {
+    if (!_valid) {
         return std::unexpected(JSONError::TypeMismatch);
+    }
     const auto& elem = *reinterpret_cast<const simdjson::dom::element*>(_opaque);
 
     std::string_view val;
@@ -124,9 +129,10 @@ std::expected<std::string_view, Error> ValueReader::GetString() const noexcept {
     return std::unexpected(JSONError::TypeMismatch);
 }
 
-std::expected<ValueReader, Error> ValueReader::GetKey(std::string_view key) const noexcept {
-    if (!_valid)
+auto ValueReader::GetKey(std::string_view key) const noexcept -> std::expected<ValueReader, Error> {
+    if (!_valid) {
         return std::unexpected(JSONError::TypeMismatch);
+    }
     const auto& elem = *reinterpret_cast<const simdjson::dom::element*>(_opaque);
 
     simdjson::dom::element field_elem;
@@ -141,9 +147,10 @@ std::expected<ValueReader, Error> ValueReader::GetKey(std::string_view key) cons
     return ValueReader(&field_elem);
 }
 
-size_t ValueReader::GetArraySize() const noexcept {
-    if (!_valid)
+auto ValueReader::GetArraySize() const noexcept -> size_t {
+    if (!_valid) {
         return 0;
+    }
     const auto& elem = *reinterpret_cast<const simdjson::dom::element*>(_opaque);
 
     simdjson::dom::array arr;
@@ -153,9 +160,10 @@ size_t ValueReader::GetArraySize() const noexcept {
     return arr.size();
 }
 
-std::expected<ValueReader, Error> ValueReader::GetArrayElement(size_t index) const noexcept {
-    if (!_valid)
+auto ValueReader::GetArrayElement(size_t index) const noexcept -> std::expected<ValueReader, Error> {
+    if (!_valid) {
         return std::unexpected(JSONError::TypeMismatch);
+    }
     const auto& elem = *reinterpret_cast<const simdjson::dom::element*>(_opaque);
 
     simdjson::dom::array arr;

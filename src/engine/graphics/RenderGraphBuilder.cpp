@@ -262,7 +262,7 @@ struct PassFactory {
                 self.frames.frameUniformBuffers[fIdx], self.frames.fogVolumesBuffer[fIdx]
             );
 
-            VolumetricFogInjectPushConstants pc = {};
+            VolumetricFogPushConstants pc = {};
             self.volumetricFogInjectPass.DispatchHeap(self.ctx, c, fIdx, pc);
         });
     }
@@ -952,6 +952,20 @@ void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Co
     // them once for this command buffer (the pushed per-frame device-address
     // block backs the scene registry's PUSH_ADDRESS mappings).
     BindHeapsAndPushFrame(compCmd);
+
+    // Cluster bounds read frame.invProj. FOV/aspect changes mark the pass dirty
+    // in SetFrameData; record it here so a zoom never inserts an out-of-band
+    // ExecuteImmediate stall on the main thread.
+    if (clusterBoundsDirty && clusterBoundsPass.pipeline.Valid() && clusterBoundsPass.fixedDispatchSize[0] != 0) {
+        clusterBoundsPass.DispatchHeapIndexed(ctx, compCmd, fIdx);
+        Vk::MemoryBarrier(
+            compCmd, {.src_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                      .src_access = VK_ACCESS_2_SHADER_WRITE_BIT,
+                      .dst_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                      .dst_access = VK_ACCESS_2_SHADER_READ_BIT}
+        );
+        clusterBoundsDirty = false;
+    }
 
     PassFactory factory {
         .self         = *this,

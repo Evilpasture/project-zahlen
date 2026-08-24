@@ -90,6 +90,45 @@ auto ReflectComputeDispatchSize(const ZHLN_ShaderDesc& shader) noexcept -> std::
     return dispatchSize;
 }
 
+namespace {
+
+template <typename T>
+auto ReflectSpecializationConstant(const ZHLN_ShaderDesc& shader, uint32_t constantId) noexcept -> std::optional<T> {
+    if (shader.code == nullptr || shader.size == 0) {
+        return std::nullopt;
+    }
+
+    SpvReflectShaderModule module;
+    if (spvReflectCreateShaderModule(shader.size, shader.code, &module) != SPV_REFLECT_RESULT_SUCCESS) {
+        return std::nullopt;
+    }
+
+    std::optional<T> result;
+    for (uint32_t i = 0; i < module.spec_constant_count; ++i) {
+        const auto& constant = module.spec_constants[i];
+        if (constant.constant_id != constantId || constant.default_value == nullptr || constant.default_value_size != sizeof(T)) {
+            continue;
+        }
+        T value {};
+        std::memcpy(&value, constant.default_value, sizeof(T));
+        result = value;
+        break;
+    }
+
+    spvReflectDestroyShaderModule(&module);
+    return result;
+}
+
+} // namespace
+
+auto ReflectSpecializationConstantU32(const ZHLN_ShaderDesc& shader, uint32_t constantId) noexcept -> std::optional<uint32_t> {
+    return ReflectSpecializationConstant<uint32_t>(shader, constantId);
+}
+
+auto ReflectSpecializationConstantF32(const ZHLN_ShaderDesc& shader, uint32_t constantId) noexcept -> std::optional<float> {
+    return ReflectSpecializationConstant<float>(shader, constantId);
+}
+
 void UnsafeReflectedLayoutBuilder::AddStageUnsafe(const ZHLN_ShaderDesc& desc, VkShaderStageFlags stage) noexcept {
     if ((desc.code != nullptr) && desc.size > 0 && _stageCount < _stages.size()) {
         _stages[_stageCount++] = {.code = desc.code, .size = desc.size, .stage = stage};

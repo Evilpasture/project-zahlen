@@ -692,6 +692,13 @@ constexpr void ForEachAnnotatedTypeInScope(F&& f) {
     };
 }
 
+// Walk every type annotated with Tag in the namespace (or class) that declared Tag.
+// A namespace is not a type, so this cannot be ForEachAnnotatedType<SomeNamespace, Tag>.
+template <typename Tag, typename F>
+constexpr void ForEachAnnotatedType(F&& f) {
+    ForEachAnnotatedTypeInScope<std::meta::parent_of(^^Tag), Tag>(std::forward<F>(f));
+}
+
 template <typename Tag, auto EntityInfo>
 consteval auto GetAnnotation() -> std::optional<Tag> {
     for (auto a: std::meta::annotations_of(EntityInfo)) {
@@ -700,6 +707,15 @@ consteval auto GetAnnotation() -> std::optional<Tag> {
         }
     }
     return std::nullopt;
+}
+
+template <typename T>
+consteval auto AnnotatedName() -> std::string_view {
+    constexpr auto info = ^^std::remove_cvref_t<T>;
+    if (auto name = GetAnnotation<MetaDescription, info>()) {
+        return name->text;
+    }
+    return TypeName<T>();
 }
 
 template <typename Tag, typename E>
@@ -948,9 +964,18 @@ template <auto ScopeInfo, typename Tag, typename F>
 constexpr void ForEachAnnotatedTypeInScope(F&& /*unused*/) {
 }
 
+template <typename Tag, typename F>
+constexpr void ForEachAnnotatedType(F&& /*unused*/) {
+}
+
 template <typename Tag, typename T>
 consteval std::optional<Tag> GetAnnotation() {
     return std::nullopt;
+}
+
+template <typename T>
+consteval std::string_view AnnotatedName() {
+    return TypeName<T>();
 }
 
 template <typename Tag, typename E>

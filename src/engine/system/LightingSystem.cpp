@@ -126,22 +126,22 @@ void LightingSystem::Update(Engine& engine, [[maybe_unused]] float dt) {
     }
 
     // 2. COMPILE GPU LIGHTS
-    ZHLN::Array<GPULight> sceneLights;
-    JPH::Mat44            viewMatrix    = engine.GetCamera().GetViewMatrix();
-    auto                  lightEntities = reg.GetEntitiesWith<Components::LightComponent>();
+    ZHLN::Array<Light> sceneLights;
+    JPH::Mat44         viewMatrix    = engine.GetCamera().GetViewMatrix();
+    auto               lightEntities = reg.GetEntitiesWith<Components::LightComponent>();
     sceneLights.reserve(lightEntities.size());
 
     for (Entity e: lightEntities) {
         reg.Patch<Components::LightComponent>(e, [&](const auto& light) {
-            GPULight gpuLight {};
-            gpuLight.type        = light.type;
-            gpuLight.intensity   = light.intensity;
-            gpuLight.radius      = light.radius;
-            gpuLight.twoSided    = light.twoSided;
-            gpuLight.range       = (light.range > 0.0f) ? light.range : 1000.0f;
-            gpuLight.shadowLayer = light.shadowLayer;
-            std::memcpy(gpuLight.direction, &light.direction, sizeof(float) * 3);
-            std::memcpy(gpuLight.color, &light.color, sizeof(float) * 3);
+            Light packed {};
+            packed.type        = light.type;
+            packed.intensity   = light.intensity;
+            packed.radius      = light.radius;
+            packed.twoSided    = light.twoSided;
+            packed.range       = (light.range > 0.0f) ? light.range : 1000.0f;
+            packed.shadowLayer = light.shadowLayer;
+            std::memcpy(packed.direction, &light.direction, sizeof(float) * 3);
+            std::memcpy(packed.color, &light.color, sizeof(float) * 3);
 
             JPH::Vec3  pos          = JPH::Vec3::sZero();
             JPH::Mat44 worldMat     = JPH::Mat44::sIdentity();
@@ -158,27 +158,27 @@ void LightingSystem::Update(Engine& engine, [[maybe_unused]] float dt) {
             }
 
             if (hasTransform) {
-                std::memcpy(gpuLight.position, &pos, sizeof(float) * 3);
+                std::memcpy(packed.position, &pos, sizeof(float) * 3);
 
                 // Transform position to view-space for cluster culling
-                JPH::Vec3 posView        = viewMatrix * pos;
-                gpuLight.positionView[0] = posView.GetX();
-                gpuLight.positionView[1] = posView.GetY();
-                gpuLight.positionView[2] = posView.GetZ();
+                JPH::Vec3 posView      = viewMatrix * pos;
+                packed.positionView[0] = posView.GetX();
+                packed.positionView[1] = posView.GetY();
+                packed.positionView[2] = posView.GetZ();
 
                 if (light.type == LightType::Directional || light.type == LightType::Spot || light.type == LightType::Sun) {
-                    JPH::Vec3 dir         = -worldMat.GetColumn3(2).Normalized();
-                    gpuLight.direction[0] = dir.GetX();
-                    gpuLight.direction[1] = dir.GetY();
-                    gpuLight.direction[2] = dir.GetZ();
+                    JPH::Vec3 dir       = -worldMat.GetColumn3(2).Normalized();
+                    packed.direction[0] = dir.GetX();
+                    packed.direction[1] = dir.GetY();
+                    packed.direction[2] = dir.GetZ();
                 }
             }
 
-            if (gpuLight.type == LightType::Area) {
-                std::memcpy(gpuLight.points, &light.points, sizeof(JPH::Mat44));
+            if (packed.type == LightType::Area) {
+                std::memcpy(packed.points, &light.points, sizeof(JPH::Mat44));
             }
 
-            sceneLights.push_back(gpuLight);
+            sceneLights.push_back(packed);
         });
     }
 

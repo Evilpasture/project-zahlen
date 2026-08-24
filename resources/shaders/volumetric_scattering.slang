@@ -1,11 +1,7 @@
 // resources/shaders/volumetric_scattering.hlsl
 
+import cluster_math;
 import uniforms;
-
-struct ClusterVolume {
-    uint offset;
-    uint count;
-};
 
 Texture3D<float4> inVoxelMedia;
 RWTexture3D<float4> outVoxelLight;
@@ -122,8 +118,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
 
     accumulatedLight += frame.lightDir.w * phaseSun * shadow * scattering;
 
-    uint3 clusterCoords   = uint3(uint(uv.x * 16.0f), uint(uv.y * 9.0f), uint(max(0.0f, log(depthVS) * frame.zScale + frame.zBias)));
-    uint clusterIdx       = clusterCoords.x + (clusterCoords.y * 16) + (min(clusterCoords.z, 23u) * 144);
+    uint clusterIdx = ClusterIndexFromUV(uv, depthVS);
     ClusterVolume cluster = clusterGrid[clusterIdx];
     uint lightListCount   = min(cluster.count, 64u); // Defense-in-depth bounds clamp
 

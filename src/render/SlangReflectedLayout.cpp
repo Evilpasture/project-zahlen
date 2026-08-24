@@ -4,29 +4,13 @@
 #include "SlangReflectedLayout.hpp"
 #include "ReflectedLayout.hpp"
 #include "ShaderStages.hpp"
+#include "SlangTypeLayout.hpp"
+#include <Zahlen/Core/Reflection.hpp>
 #include <limits>
-#include <slang-com-ptr.h>
-#include <slang.h>
 
 namespace ZHLN::Vk {
 
 namespace {
-
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wc23-extensions"
-#endif
-constexpr char kDescriptorHeapLayoutSource[] = {
-#embed "../../resources/shaders/descriptor_heap_layout.slang"
-    , '\0'
-};
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#endif
-
-constexpr std::array<const char*, kHeapFrameAddressCount> kFrameAddressFieldNames = {
-    "frameAddress", "lightsAddress", "instancesAddress", "jointsAddress", "previousJointsAddress", "morphDeltasAddress",
-};
 
 /// Copies the SPIRV-Reflect output into the Slang-typed binding structure.
 void AdoptReflectedSets(const std::array<ReflectedSet, 4>& src, SlangReflectedLayout& dst) noexcept {
@@ -47,86 +31,44 @@ void AdoptReflectedSets(const std::array<ReflectedSet, 4>& src, SlangReflectedLa
 
 } // namespace
 
-auto ReflectHeapPushDataLayout() noexcept -> std::optional<HeapPushDataLayout> {
-    Slang::ComPtr<slang::IGlobalSession> globalSession;
-    if (SLANG_FAILED(slang::createGlobalSession(globalSession.writeRef()))) {
-        return std::nullopt;
+auto ReflectHeapPushDataLayout(const void* spirv, size_t sizeBytes) noexcept -> std::expected<HeapPushDataLayout, ZHLN::Error> {
+    auto typeLayout = ReflectTypeLayout(spirv, sizeBytes, ZHLN::Reflect::TypeName<DescriptorHeapPushData>());
+    if (!typeLayout) {
+        return std::unexpected(typeLayout.error());
     }
-
-    const slang::TargetDesc target = {
-        .format  = SLANG_SPIRV,
-        .profile = globalSession->findProfile("spirv_1_5"),
-    };
-    const slang::SessionDesc sessionDesc = {
-        .targets                 = &target,
-        .targetCount             = 1,
-        .defaultMatrixLayoutMode = SLANG_MATRIX_LAYOUT_COLUMN_MAJOR,
-    };
-
-    Slang::ComPtr<slang::ISession> session;
-    if (SLANG_FAILED(globalSession->createSession(sessionDesc, session.writeRef()))) {
-        return std::nullopt;
-    }
-
-    Slang::ComPtr<slang::IBlob> diagnostics;
-    Slang::ComPtr<slang::IModule> module;
-    module = session->loadModuleFromSourceString(
-        "descriptor_heap_layout", "descriptor_heap_layout.slang", kDescriptorHeapLayoutSource, diagnostics.writeRef()
-    );
-    if (!module) {
-        return std::nullopt;
-    }
-
-    auto* programLayout = module->getLayout(0, diagnostics.writeRef());
-    if (programLayout == nullptr) {
-        return std::nullopt;
-    }
-
-    auto* type = programLayout->findTypeByName("DescriptorHeapPushData");
-    if (type == nullptr) {
-        return std::nullopt;
-    }
-
-    auto* typeLayout = session->getTypeLayout(type, 0, slang::LayoutRules::Default, diagnostics.writeRef());
-    if (typeLayout == nullptr) {
-        return std::nullopt;
-    }
-
-    const auto field_offset = [typeLayout](const char* name) -> std::optional<uint32_t> {
-        const SlangInt fieldIndex = typeLayout->findFieldIndexByName(name);
-        if (fieldIndex < 0) {
-            return std::nullopt;
-        }
-        auto* field = typeLayout->getFieldByIndex(static_cast<unsigned>(fieldIndex));
-        if (field == nullptr) {
-            return std::nullopt;
-        }
-        const size_t offset = field->getOffset(slang::ParameterCategory::Uniform);
-        if (offset > std::numeric_limits<uint32_t>::max()) {
-            return std::nullopt;
-        }
-        return static_cast<uint32_t>(offset);
-    };
 
     HeapPushDataLayout result;
-    for (size_t i = 0; i < kFrameAddressFieldNames.size(); ++i) {
-        auto offset = field_offset(kFrameAddressFieldNames[i]);
-        if (!offset || (*offset % alignof(uint64_t)) != 0) {
-            return std::nullopt;
+    uint32_t           addrCount = 0;
+    for (const auto& field: typeLayout->fields) {
+        if (field.size != sizeof(uint64_t) || (field.offset % alignof(uint64_t)) != 0) {
+            continue;
         }
-        result.frameAddressOffsets[i] = *offset;
-        if (i > 0 && result.frameAddressOffsets[i] < result.frameAddressOffsets[i - 1] + sizeof(uint64_t)) {
-            return std::nullopt;
+        if (addrCount >= kHeapFrameAddressCount) {
+            return std::unexpected(SpirvLayoutError::HeapPushAddressCount);
         }
+        if (addrCount > 0 && field.offset < result.frameAddressOffsets[addrCount - 1] + sizeof(uint64_t)) {
+            return std::unexpected(SpirvLayoutError::HeapPushAddressCount);
+        }
+        result.frameAddressOffsets[addrCount++] = field.offset;
+    }
+    if (addrCount != kHeapFrameAddressCount) {
+        return std::unexpected(SpirvLayoutError::HeapPushAddressCount);
     }
 
-    auto heapIndexOffset = field_offset("heapIndex");
-    if (!heapIndexOffset || (*heapIndexOffset % alignof(uint32_t)) != 0 ||
-        *heapIndexOffset < result.frameAddressOffsets.back() + sizeof(uint64_t) ||
-        *heapIndexOffset > std::numeric_limits<uint32_t>::max() - sizeof(uint32_t)) {
-        return std::nullopt;
+    const uint32_t afterAddrs = result.frameAddressOffsets.back() + sizeof(uint64_t);
+    uint32_t       heapIndex  = std::numeric_limits<uint32_t>::max();
+    for (const auto& field: typeLayout->fields) {
+        if (field.offset < afterAddrs || field.size < sizeof(uint32_t) || (field.offset % alignof(uint32_t)) != 0) {
+            continue;
+        }
+        if (field.offset < heapIndex) {
+            heapIndex = field.offset;
+        }
     }
-    result.heapIndexOffset = *heapIndexOffset;
+    if (heapIndex == std::numeric_limits<uint32_t>::max() || heapIndex > std::numeric_limits<uint32_t>::max() - sizeof(uint32_t)) {
+        return std::unexpected(SpirvLayoutError::HeapPushIndexMissing);
+    }
+    result.heapIndexOffset = heapIndex;
     result.requiredSize    = result.heapIndexOffset + sizeof(uint32_t);
     return result;
 }

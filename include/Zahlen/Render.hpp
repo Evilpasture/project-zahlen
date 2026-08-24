@@ -249,7 +249,7 @@ class ZHLN_API RenderContext {
     void SetMatrices(const JPH::Mat44& viewProj, const JPH::Mat44& unjitteredViewProj) noexcept;
     void SetFrameData(const Camera& cam, const FrameUniforms& uniforms, const JPH::Mat44& shadowProjView, float dt = 0.0166f) noexcept;
     void SetGISettings(const GISettings& settings) noexcept;
-    void SetLights(const GPULight* lights, uint32_t count) noexcept;
+    void SetLights(const Light* lights, uint32_t count) noexcept;
     void Draw(const Material& material, const Mesh& mesh, const DrawParams& params) noexcept;
     void DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, const CSGDrawParams& params) noexcept;
     void DrawDecal(const DecalParams& params) noexcept;

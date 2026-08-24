@@ -186,15 +186,16 @@ device-addressable buffers created with `VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT
   `CommandEncoder::PushDrawData`); legacy `push_constant` blocks in SPIR-V read
   the push-data blob directly.
 * `Dispatch`, `DispatchHeap`, and `DispatchHeapIndexed` use fixed logical
-  domains reflected from reserved Slang specialization-constant metadata.
+  domains reflected from `Dispatch.SizeX/Y/Z` (spec-constant IDs 1000-1002).
   Dynamic kernels use explicitly named `*Threads` overloads with runtime
   logical counts. Both paths reflect SPIR-V `LocalSize` from `[numthreads]` and
   derive Vulkan workgroup counts; raw groups require `DispatchGroups`.
-* The per-frame scene buffers (frame UBO, lights, instances, joints, morph
-  deltas) are selected with `VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT`
-  mappings. Each heap segment pushes their device addresses once at the field
-  offsets reflected from `DescriptorHeapPushData` in
-  `descriptor_heap_layout.slang` (`RenderContext::Impl::BindHeapsAndPushFrame`).
+* Named UBO / SSBO / push structs are reflected from compiled SPIR-V
+  (`ReflectTypeLayout`). This leaf never sees `.slang` source and does not
+  own engine type names, cluster math, or LUT bake policy.
+* Per-draw device addresses travel through
+  `VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT`. Offsets come from the
+  compiled `DescriptorHeapPushData` layout via `ReflectHeapPushDataLayout`.
 * The bindless `globalTextures[]` array is a contiguous region of the resource
   heap pinned by a `HEAP_WITH_CONSTANT_OFFSET` mapping
   (`RenderContext::Impl::WriteTextureSlotToHeap`); instance-data texture
@@ -211,7 +212,7 @@ The descriptor-set DSL (`DescriptorLayout<...>`, descriptor pools, set
 layouts) has been removed: every pass now reflects its binding structure from
 SPIR-V (SPIRV-Reflect in `UnsafeReflectedLayoutBuilder`), bakes it into a
 `VkDescriptorSetAndBindingMappingEXT` table (`HeapBindings.hpp`), and writes
-descriptors into the heaps via `WriteHeapBindings` /
+descriptors into the heaps via `HeapManager::WriteBindings` /
 `vkWriteResourceDescriptorsEXT`. Pass argument order mirrors the shader's
 set-0 declaration order; `SkipWrite` marks trailing sampler slots.
 
@@ -251,7 +252,7 @@ renderContext.BeginFrame();
 Renderer::SetMatrices(renderContext, camera.GetViewProj(), camera.GetUnjitteredViewProj());
 
 // 3. Populate and submit lights
-GPULight lights[1] = { ... };
+Light lights[1] = { ... };
 Renderer::SetLights(renderContext, lights, 1);
 
 // 4. Submit active meshes to the dynamic draw queue
