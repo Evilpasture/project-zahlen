@@ -7,6 +7,7 @@
 #include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Render.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <algorithm>
