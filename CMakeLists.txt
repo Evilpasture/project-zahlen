@@ -265,7 +265,7 @@ set(MESHOPT_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/meshoptimizer EXCLUDE_FROM_ALL SYSTEM)
 set_target_properties(meshoptimizer PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/SPIRV-Reflect)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui SYSTEM)
 set_target_properties(imgui PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
