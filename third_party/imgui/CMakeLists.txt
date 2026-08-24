@@ -9,32 +9,29 @@ set(IMGUI_SOURCES
     imgui_widgets.cpp
     imgui_demo.cpp
     backends/imgui_impl_glfw.cpp
-    # NOTE: imgui_impl_vulkan.cpp is replaced by the descriptor-heap fork at
-    # backends/imgui_impl_vulkan_heap.cpp (VK_EXT_descriptor_heap); the fork
-    # is compiled as part of zahlen_engine.
 )
 
 # 2. Create the static library
 add_library(imgui STATIC ${IMGUI_SOURCES})
 
-# ISOLATE LANGUAGE STANDARD FOR THIRD-PARTY CODE
-# This forces ImGui and its Apple dependencies to use C++26.
-# Your main project target can still freely use C++26.
 set_target_properties(imgui PROPERTIES
     CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
+    POSITION_INDEPENDENT_CODE ON
 )
 
-# 3. Public includes so the engine can find <imgui.h>
-target_include_directories(imgui PUBLIC .)
-target_include_directories(imgui PUBLIC backends)
+# 3. Mark include directories as SYSTEM PUBLIC so consumers treat imgui.h as system headers
+target_include_directories(imgui SYSTEM PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/backends"
+)
 
-# 4. Link dependencies 
+# 4. Link dependencies
 find_package(Vulkan REQUIRED)
 target_link_libraries(imgui PUBLIC glfw Vulkan::Vulkan)
 
-# 5. Disable compiler warnings for third-party code
+# 5. Disable compiler warnings when compiling ImGui .cpp files
 if(NOT MSVC)
     target_compile_options(imgui PRIVATE -w)
 else()
