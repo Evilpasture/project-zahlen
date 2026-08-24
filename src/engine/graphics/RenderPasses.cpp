@@ -839,8 +839,7 @@ void MainPass1::Execute(
     const FrameRecorder&                                                                                       recorder,
     SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> in
 ) const noexcept {
-    auto                       cmd = recorder.cmd;
-    auto&                      ctx = recorder.ctx;
+    auto&      ctx       = recorder.ctx;
     const auto drawCount = static_cast<uint32_t>(ctx.queues.drawQueue.size());
     if (drawCount == 0) {
         Vk::DynamicPass(in.sceneColor.extent)
@@ -893,8 +892,7 @@ void MainPass2::Execute(
     const FrameRecorder&                                                                                       recorder,
     SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> in
 ) const noexcept {
-    auto                       cmd = recorder.cmd;
-    auto&                      ctx = recorder.ctx;
+    auto&      ctx       = recorder.ctx;
     const auto drawCount = static_cast<uint32_t>(ctx.queues.drawQueue.size());
     if (drawCount == 0 && ctx.queues.meshParticleQueue.empty() && ctx.queues.csgDrawQueue.empty()) {
         return;
@@ -1057,7 +1055,7 @@ void BlitPass::Execute(
     if (ctx.blitPass.pipeline.Valid()) {
         Vk::DynamicPass(inColor.extent).AddColor(swapchainTarget, VK_ATTACHMENT_LOAD_OP_DONT_CARE).Execute(cmd, [&]() {
             ctx.blitPass.ExecuteHeap(ctx.ctx, cmd, pc, recorder.frameIndex);
-            AppendImGuiBatches(ctx, recorder.frameIndex, inColor.extent);
+            AppendImGuiBatches(ctx, recorder.frameIndex, {.width = inColor.extent.width, .height = inColor.extent.height});
 
             if (!ctx.queues.uiBatches.empty()) {
                 // blitPass is a legacy descriptor-set + push-constant pass; the
