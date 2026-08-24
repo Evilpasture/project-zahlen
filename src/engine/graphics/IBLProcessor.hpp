@@ -94,7 +94,7 @@ class IBLProcessor {
                                 return std::move(state);
                             });
                     })
-                    .and_then([&](State state) -> std::expected<State, ZHLN::Error> {
+                    .and_then([&](State state) -> std::expected<State, VkResult> {
                         size_t totalBytes = 0;
                         for (uint32_t m = 0; m < kMipLevels; ++m) {
                             const uint32_t s = kBaseSize >> m;
