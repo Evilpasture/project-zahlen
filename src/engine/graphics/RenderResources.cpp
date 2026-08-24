@@ -888,8 +888,51 @@ auto RenderContext::CreateProceduralTexture(std::string_view name, uint32_t widt
 }
 
 auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -> std::expected<void, Error> {
-    auto* const impl   = _impl.get();
-    const auto  extent = impl->graphResources.hdrSceneColor.extent;
+    auto* const impl = _impl.get();
+
+    if (!impl->presentation.swapchain.Valid()) {
+        const auto extent     = impl->presentation.headlessColorTarget.extent;
+        const auto imageBytes = static_cast<size_t>(extent.width) * extent.height * 4u;
+
+        auto stagingRes = Vk::Buffer::Create(impl->allocator.Get(), imageBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_TO_CPU);
+        if (!stagingRes) {
+            return std::unexpected(stagingRes.error());
+        }
+        auto stagingBuffer = std::move(*stagingRes);
+
+        Vk::ExecuteImmediate(impl->ctx, impl->graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
+            auto* const targetImg = impl->presentation.headlessColorTarget.image.Handle();
+
+            Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL>(cmd, targetImg);
+            Vk::CopyImageToBuffer(cmd, targetImg, stagingBuffer.Handle(), extent);
+            Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, targetImg);
+        });
+
+        auto mapped = stagingBuffer.Map();
+        if (mapped.data == nullptr) {
+            return std::unexpected(RenderInitError::SubsystemAllocationFailed);
+        }
+
+        std::ofstream ofs(std::string(outputPath), std::ios::binary);
+        if (!ofs.is_open()) {
+            return std::unexpected(RenderInitError::UnknownError);
+        }
+
+        ofs << "P6\n" << extent.width << " " << extent.height << "\n255\n";
+
+        const auto* rgba = mapped.As<const uint8_t>();
+        for (size_t i = 0; i < static_cast<size_t>(extent.width) * extent.height; ++i) {
+            ofs.put(static_cast<char>(rgba[i * 4 + 0]));
+            ofs.put(static_cast<char>(rgba[i * 4 + 1]));
+            ofs.put(static_cast<char>(rgba[i * 4 + 2]));
+        }
+        ofs.close();
+
+        ZHLN::Log("[Test Capture] Rendered frame written to: {}", outputPath);
+        return {};
+    }
+
+    const auto extent = impl->graphResources.hdrSceneColor.extent;
 
     const size_t imageBytes = static_cast<size_t>(extent.width) * extent.height * sizeof(uint16_t) * 4;
 

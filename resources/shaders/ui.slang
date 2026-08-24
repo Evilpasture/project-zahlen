@@ -6,6 +6,7 @@ struct UIObjectConstants {
     uint64_t attrAddress;
     uint albedoIdx;
     uint isSDF;
+    uint useTextureColor;
 };
 
 [vk::push_constant]
@@ -49,5 +50,6 @@ float4 PSMain(UIVSOutput input) : SV_Target0 {
         alpha           = smoothstep(0.5f - smoothing, 0.5f + smoothing, distance);
     }
 
-    return float4(input.color.rgb, input.color.a * alpha);
+    float3 color = uiObj.useTextureColor != 0 ? texSample.rgb * input.color.rgb : input.color.rgb;
+    return float4(color, input.color.a * alpha);
 }

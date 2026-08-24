@@ -137,10 +137,10 @@ the old bindless set array.
   bounds/culling, all five volumetric passes, procedural bake.
 * Post-processing: ambient, lighting (variants), reflection (variants),
   translucent reflection, bloom, TAA/FXAA/MLAA/SMAA, blit.
-* ImGui: the backend is forked to
-  `src/engine/graphics/imgui_impl_vulkan_heap.*` and renders through the
-  heaps (texture slots + linear/nearest sampler slots selected by push-data
-  index words) with a null pipeline layout.
+* ImGui: there is no renderer backend or ImGui-owned GPU state. Dear ImGui is
+  treated as a CPU-side producer; `BlitPass` consumes `ImDrawData`, expands it
+  into the current frame `uiVbos`, and draws it with the normal `uiPipeline` and
+  bindless texture indices.
 * `PipelineBuilder::HeapMappings` / `ComputePipelineBuilder::HeapMappings` set
   `descriptor_heap` on the pipeline desc; `RenderCore.c` chains the mapping
   structs into each `VkPipelineShaderStageCreateInfo` and adds
@@ -188,7 +188,7 @@ the old bindless set array.
 - [x] Port post-processing (TAA/FXAA/MLAA/SMAA, bloom, blit).
 - [x] Port ambient/lighting/reflection passes.
 - [x] Port procedural bake compute.
-- [x] Port the ImGui backend (forked to a descriptor-heap backend).
+- [x] Remove the ImGui renderer backend; render `ImDrawData` directly in Blit/UI.
 - [ ] Consider `VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_PUSH_INDEX_EXT` for
       per-draw material descriptor selection instead of push data fields.
 - [ ] Optional: direct descriptor access (`layout(descriptor_heap)`) for hot
@@ -197,16 +197,14 @@ the old bindless set array.
 - [x] Remove the now-unused `DescriptorLayout` DSL, the legacy pass helpers,
       and the per-pass pool/set members.
 
-## 8. ImGui Fork Maintenance
+## 8. ImGui Rendering
 
-`third_party/imgui/backends/imgui_impl_vulkan_heap.{h,cpp}` is a patched copy
-of the upstream `imgui_impl_vulkan.{h,cpp}` (ImGui 1.92.8) that adds a
-`VK_EXT_descriptor_heap` mode. The original files are kept unmodified and
-uncompiled for diffing. All fork hunks are guarded by `bd->HeapMode` (default
-off), so the legacy path still matches upstream. Upgrade procedure: copy the
-new upstream files over `imgui_impl_vulkan.*`, re-copy + rename to the `_heap`
-pair, then re-apply the hunks tagged "ZAHLN FORK" (see the maintenance note
-at the top of the fork header).
+`third_party/imgui/backends/imgui_impl_vulkan_heap.{h,cpp}` was removed, and no
+replacement renderer backend exists. Dear ImGui owns no Vulkan objects, upload
+pools, descriptor slots, or geometry buffers. The engine uploads the font atlas
+through its texture path, stores bindless texture indices in `ImTextureID`, and
+consumes `ImDrawData` directly in the Blit/UI pass using the same frame UI VBOs
+and `uiPipeline` as native UI batches.
 
 ## 9. Requirements Bumped
 

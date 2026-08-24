@@ -3,6 +3,8 @@
 
 #include "RenderInternal.hpp"
 #include "Zahlen/Profiler.hpp"
+#include "backends/imgui_impl_glfw.h"
+#include "imgui.h"
 #include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <algorithm>
@@ -246,6 +248,23 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
               .dst_stage  = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
               .dst_access = VK_ACCESS_2_SHADER_READ_BIT}
     );
+}
+
+void RenderContext::BeginImGuiFrame() noexcept {
+    if (ImGui::GetCurrentContext() == nullptr || _impl->window.IsTTY()) {
+        return;
+    }
+
+    if (!_impl->window.IsHeadless()) {
+        ImGui_ImplGlfw_NewFrame();
+    } else {
+        const Extent2D size = _impl->window.GetSize();
+        ImGuiIO&       io   = ImGui::GetIO();
+        io.DisplaySize      = ImVec2(static_cast<float>(size.width), static_cast<float>(size.height));
+        io.DeltaTime        = io.DeltaTime > 0.0f ? io.DeltaTime : (1.0f / 60.0f);
+    }
+    ImGui::NewFrame();
+    _impl->imguiFrameOpen = true;
 }
 
 auto RenderContext::BeginFrame() noexcept -> RenderResult {

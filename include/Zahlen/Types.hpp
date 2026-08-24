@@ -107,12 +107,14 @@ inline constexpr TextureHandle FlatNormal = TextureHandle(3);
 } // namespace SystemTextures
 
 struct UIBatch {
-    TextureHandle texture     = TextureHandle::Invalid;
-    uint32_t      vertexStart = 0;
+    TextureHandle texture              = TextureHandle::Invalid;
+    uint32_t      bindlessTextureIndex = 0; // Non-zero bypasses TextureManager lookup (ImGui/user bindless IDs)
+    uint32_t      vertexStart          = 0;
     uint32_t      vertexCount = 0;
-    bool          useScissor  = false;
-    bool          isSDF       = false;
-    ScissorRect   scissorRect = {};
+    bool          useScissor      = false;
+    bool          isSDF           = false;
+    bool          useTextureColor = false;
+    ScissorRect   scissorRect     = {};
 };
 
 struct alignas(16) GPUVolumetricVolume {
@@ -433,6 +435,7 @@ struct GPUTypes {
             uint64_t   attrAddress;
             uint32_t   albedoIdx;
             uint32_t   isSDF;
+            uint32_t   useTextureColor;
         };
         static_assert(sizeof(UIObjectConstants) == 96);
     };
