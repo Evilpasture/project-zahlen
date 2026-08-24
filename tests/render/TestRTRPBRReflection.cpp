@@ -1,22 +1,18 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Public-API GPU suite: reflection *colour* must follow PBR.
+// Public-API GPU suite: ray-traced reflection *colour* must follow PBR.
 //
-// The reflection pass (resources/shaders/reflection.slang) only traces when
-// roughness <= 0.4, then multiplies the hit colour by FssEss where
-//   F0 = lerp(0.04, albedo, metallic)
-// so a gold metal must yellow-tint a white source, a dielectric of the same
-// albedo must stay much dimmer, and raising roughness past the threshold
-// must kill the traced signature. All of that is judged from captured PPM
-// pixels — no src/ includes.
+// The reflection pass only traces when roughness <= 0.4, then multiplies the
+// hit colour by FssEss where F0 = lerp(0.04, albedo, metallic). A gold metal
+// must yellow-tint a white source, a dielectric of the same albedo must stay
+// dimmer, and roughness past the threshold must kill the traced signature.
+// Judged from captured PPM pixels — no src/ includes.
 //
-// Device-lost handling: HandleDeviceLost() clears the GPU mesh cache, so
-// geometry spawned before a TDR becomes invisible and every later capture is
-// black. Each attempt therefore boots a *fresh* Engine, warms it, then
-// spawns. RTR is requested first; if that attempt captures a blank frame we
-// fall back to SSR (same F0 composite). Never reuse a RenderContext& across
-// Tick.
+// Device-lost is a hard failure. The framework already fails the test if
+// DeviceLostCount rises; this suite does not AllowDeviceLost and does not
+// fall back to SSR. No RT support → skip. A blank capture after RTR is on
+// is a failure, not a retry.
 
 #include "TestsFramework.hpp"
 #include <Zahlen/Camera.hpp>
@@ -48,6 +44,7 @@ enum class RTRPBRError : uint8_t {
     RenderOutputBlank[[= ZHLN::Reflect::Description("Rendered frame is blank or could not be captured.")]],
     MaterialCreationFailed[[= ZHLN::Reflect::Description("CreativeWorksFactory::CreateMaterial failed.")]],
     ReflectionColorMismatch[[= ZHLN::Reflect::Description("Ray-traced reflection colour does not follow the surface PBR values.")]],
+    DeviceLostDuringTest[[= ZHLN::Reflect::Description("Vulkan device was lost while ray-traced reflections were enabled.")]],
 };
 
 namespace {
@@ -76,7 +73,6 @@ struct RegionStats {
     uint32_t redDom   = 0;
     uint32_t greenDom = 0;
     uint32_t yellow   = 0;
-    uint32_t cyan     = 0;
 };
 
 [[nodiscard]] RgbImage LoadPPM(const std::string& path) {
@@ -137,9 +133,6 @@ struct RegionStats {
             if (r > 55.0 && g > 40.0 && b < 0.62 * std::min(r, g) && r >= g * 0.85) {
                 ++s.yellow;
             }
-            if (g > 55.0 && b > 55.0 && r < 0.70 * std::min(g, b)) {
-                ++s.cyan;
-            }
         }
     }
     if (s.pixels > 0) {
@@ -153,19 +146,17 @@ struct RegionStats {
 }
 
 [[nodiscard]] double BlueRatio(const RegionStats& s) noexcept {
-    const double denom = std::max(s.meanR, 1.0);
-    return s.meanB / denom;
+    return s.meanB / std::max(s.meanR, 1.0);
 }
 
 [[nodiscard]] double GreenRatio(const RegionStats& s) noexcept {
-    const double denom = std::max(s.meanR, 1.0);
-    return s.meanG / denom;
+    return s.meanG / std::max(s.meanR, 1.0);
 }
 
 void LogRegion(std::string_view name, const RegionStats& s) {
     ZHLN::Println(
-        "    [INFO] {} px={} meanRGB=({:.1f},{:.1f},{:.1f}) L={:.1f} maxL={:.1f} red={} green={} yellow={} cyan={} B/R={:.3f} G/R={:.3f}", name, s.pixels,
-        s.meanR, s.meanG, s.meanB, s.meanL, s.maxL, s.redDom, s.greenDom, s.yellow, s.cyan, BlueRatio(s), GreenRatio(s)
+        "    [INFO] {} px={} meanRGB=({:.1f},{:.1f},{:.1f}) L={:.1f} maxL={:.1f} red={} green={} yellow={} B/R={:.3f} G/R={:.3f}", name, s.pixels, s.meanR,
+        s.meanG, s.meanB, s.meanL, s.maxL, s.redDom, s.greenDom, s.yellow, BlueRatio(s), GreenRatio(s)
     );
 }
 
@@ -192,14 +183,14 @@ struct RTRPBRReflectionTestSuite {
         ZHLN::TaskSystem::Shutdown();
     }
 
-    static auto CreateTestEngine(uint32_t width = 640, uint32_t height = 480) -> std::unique_ptr<ZHLN::Engine> {
+    static auto CreateTestEngine() -> std::unique_ptr<ZHLN::Engine> {
         ZHLN::DefaultPreset::SetDisabled(true);
         const ZHLN::EngineConfig cfg {
             .physics = {.maxBodies = 256, .maxBodyPairs = 512, .maxContactConstraints = 512, .tempAllocatorSize = 8 * 1024 * 1024},
             .render  = {
                 .appName        = "Headless RTR PBR Colour",
-                .width          = width,
-                .height         = height,
+                .width          = 640,
+                .height         = 480,
                 .vsync          = false,
                 .fullscreen     = false,
                 .validationMode = ZHLN::ValidationMode::On,
@@ -231,26 +222,23 @@ struct RTRPBRReflectionTestSuite {
         engine.GetRenderContext().SetAAState(ZHLN::AAState {.mode = ZHLN::AAMode::None});
     }
 
-    static void ConfigureReflections(ZHLN::Engine& engine, bool wantRTR) {
+    static void SetReflectionFlags(ZHLN::Engine& engine, int enableSSR, int enableRTR) {
         auto&      reg      = engine.GetRegistry();
         const auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
         if (settings.empty()) {
             return;
         }
-        const bool rtr = wantRTR && engine.GetRenderContext().RayTracingSupported();
-        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [rtr](auto& pp) {
+        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [enableSSR, enableRTR](auto& pp) {
             pp.fullBright        = 0;
             pp.ambientExposure   = 6.0f;
             pp.vignetteIntensity = 0.0f;
-            // F0 tint lives in the shared composite; SSR is the stable default
-            // path, RTR is requested when the device can take it.
-            pp.enableSSR   = 1;
-            pp.enableRTR   = rtr ? 1 : 0;
-            pp.giMode      = 0;
-            pp.giIntensity = 0.0f;
-            pp.skyZenith   = JPH::Vec4(0.001f, 0.002f, 0.006f, 1.0f);
-            pp.skyHorizon  = JPH::Vec4(0.004f, 0.006f, 0.012f, 1.0f);
-            pp.skyGround   = JPH::Vec4(0.001f, 0.001f, 0.002f, 1.0f);
+            pp.enableSSR         = enableSSR;
+            pp.enableRTR         = enableRTR;
+            pp.giMode            = 0;
+            pp.giIntensity       = 0.0f;
+            pp.skyZenith         = JPH::Vec4(0.001f, 0.002f, 0.006f, 1.0f);
+            pp.skyHorizon        = JPH::Vec4(0.004f, 0.006f, 0.012f, 1.0f);
+            pp.skyGround         = JPH::Vec4(0.001f, 0.001f, 0.002f, 1.0f);
         });
     }
 
@@ -294,13 +282,17 @@ struct RTRPBRReflectionTestSuite {
         );
     }
 
-    static void TickFrames(ZHLN::Engine& engine, uint32_t frames) {
+    static bool TickFrames(ZHLN::Engine& engine, uint32_t frames, uint32_t lostBefore) {
         constexpr float dt = 1.0f / 60.0f;
         for (uint32_t i = 0; i < frames; ++i) {
             engine.ProcessEvents();
-            // Do not ExpectEq: a device-lost Tick must not poison a later retry.
-            (void) engine.Tick(dt, ZHLN::GameplayDriver::Cpp);
+            const auto status = engine.Tick(dt, ZHLN::GameplayDriver::Cpp);
+            if (ZHLN::RenderContext::DeviceLostCount() != lostBefore) {
+                return false;
+            }
+            ZHLN::Test::ExpectEq(status, ZHLN::GameplayStatus::OK);
         }
+        return true;
     }
 
     static auto Capture(ZHLN::Engine& engine, const std::string& path) -> RgbImage {
@@ -310,348 +302,378 @@ struct RTRPBRReflectionTestSuite {
         return LoadPPM(path);
     }
 
-    [[nodiscard]] static bool LostSince(ZHLN::Engine& engine, ZHLN::RenderContext* expected, uint32_t lostBefore) {
-        return &engine.GetRenderContext() != expected || ZHLN::RenderContext::DeviceLostCount() != lostBefore;
-    }
-
-    // Lower half of the frame is the polished floor (source sits in the upper half).
     static constexpr NormRect kFloor {.x0 = 0.10, .y0 = 0.55, .x1 = 0.90, .y1 = 0.95};
     static constexpr NormRect kFloorLeft {.x0 = 0.08, .y0 = 0.55, .x1 = 0.42, .y1 = 0.95};
     static constexpr NormRect kFloorRight {.x0 = 0.58, .y0 = 0.55, .x1 = 0.92, .y1 = 0.95};
     static constexpr NormRect kSource {.x0 = 0.30, .y0 = 0.08, .x1 = 0.70, .y1 = 0.42};
 
-    struct Attempt {
+    struct Session {
         std::unique_ptr<ZHLN::Engine> engine;
-        ZHLN::RenderContext*          ctx        = nullptr;
         uint32_t                      lostBefore = 0;
-        bool                          usedRTR    = false;
     };
 
-    static auto BeginAttempt(uint32_t attempt) -> Attempt {
-        Attempt a;
-        a.engine = CreateTestEngine();
-        if (!a.engine) {
-            return a;
+    static auto Boot() -> std::expected<Session, ZHLN::Error> {
+        Session s;
+        s.engine = CreateTestEngine();
+        if (!s.engine) {
+            return std::unexpected(RTRPBRError::EngineInitFailed);
         }
-        a.usedRTR = (attempt == 0) && a.engine->GetRenderContext().RayTracingSupported();
-        DisableTAAAndFreeCam(*a.engine);
-        ConfigureReflections(*a.engine, a.usedRTR);
-        PlaceSunAndCamera(*a.engine);
-        a.lostBefore = ZHLN::RenderContext::DeviceLostCount();
-        a.ctx        = &a.engine->GetRenderContext();
-        TickFrames(*a.engine, 5);
-        if (LostSince(*a.engine, a.ctx, a.lostBefore)) {
-            ZHLN::Println("    [WARN] Device lost during warmup (attempt {}).", attempt);
-            a.engine.reset();
-            return a;
+        if (!s.engine->GetRenderContext().RayTracingSupported()) {
+            ZHLN::Println("    [SKIP] Device has no raytracing; RTR PBR colour checks are not applicable.");
+            s.engine.reset();
+            return s;
         }
-        a.ctx        = &a.engine->GetRenderContext();
-        a.lostBefore = ZHLN::RenderContext::DeviceLostCount();
-        ZHLN::Println("    [INFO] attempt {} using {}.", attempt, a.usedRTR ? "SSR+RTR" : "SSR");
-        return a;
+
+        DisableTAAAndFreeCam(*s.engine);
+        // Build the TLAS on the default (SSR) path first. Flipping RTR on a
+        // cold context with no acceleration structure is how the previous
+        // suite TDR'd; that is a hang, not a colour bug.
+        SetReflectionFlags(*s.engine, 1, 0);
+        PlaceSunAndCamera(*s.engine);
+        s.lostBefore = ZHLN::RenderContext::DeviceLostCount();
+        if (!TickFrames(*s.engine, 4, s.lostBefore)) {
+            return std::unexpected(RTRPBRError::DeviceLostDuringTest);
+        }
+        return s;
     }
 
-    static auto CaptureOrBlank(Attempt& a, const std::string& path) -> RgbImage {
-        if (!a.engine || LostSince(*a.engine, a.ctx, a.lostBefore)) {
-            return {};
+    static auto EnableRTR(Session& s) -> std::expected<void, ZHLN::Error> {
+        SetReflectionFlags(*s.engine, 0, 1);
+        if (!TickFrames(*s.engine, 4, s.lostBefore)) {
+            return std::unexpected(RTRPBRError::DeviceLostDuringTest);
         }
-        TickFrames(*a.engine, 4);
-        if (LostSince(*a.engine, a.ctx, a.lostBefore)) {
-            return {};
+        return {};
+    }
+
+    static auto CaptureRTR(Session& s, const std::string& path) -> std::expected<RgbImage, ZHLN::Error> {
+        if (!TickFrames(*s.engine, 2, s.lostBefore)) {
+            return std::unexpected(RTRPBRError::DeviceLostDuringTest);
         }
-        const RgbImage img = Capture(*a.engine, path);
-        if (ImageIsBlank(img) || LostSince(*a.engine, a.ctx, a.lostBefore)) {
-            ZHLN::Println("    [WARN] Blank or lost capture {}.", path);
-            return {};
+        const RgbImage img = Capture(*s.engine, path);
+        if (ZHLN::RenderContext::DeviceLostCount() != s.lostBefore) {
+            return std::unexpected(RTRPBRError::DeviceLostDuringTest);
+        }
+        if (ImageIsBlank(img)) {
+            ZHLN::Println("    [FAIL] Blank RTR capture {} (device-lost aftermath or empty TLAS).", path);
+            return std::unexpected(RTRPBRError::RenderOutputBlank);
         }
         return img;
     }
 
     struct Tests {
         std::expected<void, ZHLN::Error> rtr_metallic_f0_tints_white_source() {
-            ZHLN::Test::AllowDeviceLost(true);
-            for (uint32_t attempt = 0; attempt < 2; ++attempt) {
-                Attempt a = BeginAttempt(attempt);
-                if (!a.engine) {
-                    continue;
-                }
-
-                auto chromeRes = MakeMat(*a.engine, 1.0f, 0.03f, {0.92f, 0.92f, 0.94f, 1.0f});
-                auto goldRes   = MakeMat(*a.engine, 1.0f, 0.03f, {1.00f, 0.76f, 0.14f, 1.0f});
-                auto dielRes   = MakeMat(*a.engine, 0.0f, 0.03f, {0.92f, 0.92f, 0.94f, 1.0f});
-                auto whiteEm   = MakeMat(*a.engine, 0.0f, 0.45f, {1.0f, 1.0f, 1.0f, 1.0f}, {6.0f, 6.0f, 6.0f, 1.0f});
-                if (!chromeRes || !goldRes || !dielRes || !whiteEm) {
-                    return std::unexpected(RTRPBRError::MaterialCreationFailed);
-                }
-
-                SpawnEmitter(*a.engine, *whiteEm);
-                auto&              reg    = a.engine->GetRegistry();
-                const ZHLN::Entity chrome = SpawnMirror(*a.engine, *chromeRes);
-                const RgbImage     imgC   = CaptureOrBlank(a, "headless_rtr_pbr_f0_chrome.ppm");
-                if (ImageIsBlank(imgC)) {
-                    continue;
-                }
-                reg.Destroy(chrome);
-
-                const ZHLN::Entity gold = SpawnMirror(*a.engine, *goldRes);
-                const RgbImage     imgG = CaptureOrBlank(a, "headless_rtr_pbr_f0_gold.ppm");
-                if (ImageIsBlank(imgG)) {
-                    continue;
-                }
-                reg.Destroy(gold);
-
-                SpawnMirror(*a.engine, *dielRes);
-                const RgbImage imgD = CaptureOrBlank(a, "headless_rtr_pbr_f0_diel.ppm");
-                if (ImageIsBlank(imgD)) {
-                    continue;
-                }
-
-                const RegionStats chromeS = MeasureRegion(imgC, kFloor);
-                const RegionStats goldS   = MeasureRegion(imgG, kFloor);
-                const RegionStats dielS   = MeasureRegion(imgD, kFloor);
-                const RegionStats src     = MeasureRegion(imgC, kSource);
-                LogRegion("chrome metal", chromeS);
-                LogRegion("gold metal", goldS);
-                LogRegion("white dielectric", dielS);
-                LogRegion("white emitter", src);
-
-                const bool sourceLit     = ZHLN::Test::ExpectTrue(src.meanL > 18.0);
-                const bool chromeLit     = ZHLN::Test::ExpectTrue(chromeS.meanL > 8.0);
-                const bool goldYellow    = ZHLN::Test::ExpectTrue(
-                    goldS.yellow > 40u || (goldS.meanR > 28.0 && goldS.meanG > 18.0 && BlueRatio(goldS) + 0.08 < BlueRatio(chromeS))
-                );
-                const bool goldBluerLess = ZHLN::Test::ExpectTrue(BlueRatio(goldS) + 0.06 < BlueRatio(chromeS));
-                const bool metalBrighter = ZHLN::Test::ExpectTrue(chromeS.meanL > dielS.meanL * 1.35 + 2.0);
-                const bool goldNotBlue   = ZHLN::Test::ExpectTrue(goldS.meanB + 6.0 < goldS.meanR);
-
-                if (!sourceLit || !chromeLit || !goldYellow || !goldBluerLess || !metalBrighter || !goldNotBlue) {
-                    return std::unexpected(RTRPBRError::ReflectionColorMismatch);
-                }
-                ZHLN::Println("    [PASS] Metallic F0 tints the reflected white source; dielectric stays dimmer.");
+            auto session = Boot();
+            if (!session) {
+                return std::unexpected(session.error());
+            }
+            if (!session->engine) {
                 return {};
             }
-            return std::unexpected(RTRPBRError::RenderOutputBlank);
+            Session& s = *session;
+
+            auto chromeRes = MakeMat(*s.engine, 1.0f, 0.03f, {0.92f, 0.92f, 0.94f, 1.0f});
+            auto goldRes   = MakeMat(*s.engine, 1.0f, 0.03f, {1.00f, 0.76f, 0.14f, 1.0f});
+            auto dielRes   = MakeMat(*s.engine, 0.0f, 0.03f, {0.92f, 0.92f, 0.94f, 1.0f});
+            auto whiteEm   = MakeMat(*s.engine, 0.0f, 0.45f, {1.0f, 1.0f, 1.0f, 1.0f}, {6.0f, 6.0f, 6.0f, 1.0f});
+            if (!chromeRes || !goldRes || !dielRes || !whiteEm) {
+                return std::unexpected(RTRPBRError::MaterialCreationFailed);
+            }
+
+            SpawnEmitter(*s.engine, *whiteEm);
+            auto&              reg    = s.engine->GetRegistry();
+            const ZHLN::Entity chrome = SpawnMirror(*s.engine, *chromeRes);
+            auto               rtrOn  = EnableRTR(s);
+            if (!rtrOn) {
+                return rtrOn;
+            }
+
+            auto imgC = CaptureRTR(s, "headless_rtr_pbr_f0_chrome.ppm");
+            if (!imgC) {
+                return std::unexpected(imgC.error());
+            }
+            reg.Destroy(chrome);
+
+            const ZHLN::Entity gold = SpawnMirror(*s.engine, *goldRes);
+            auto               imgG = CaptureRTR(s, "headless_rtr_pbr_f0_gold.ppm");
+            if (!imgG) {
+                return std::unexpected(imgG.error());
+            }
+            (void) gold;
+            reg.Destroy(gold);
+
+            SpawnMirror(*s.engine, *dielRes);
+            auto imgD = CaptureRTR(s, "headless_rtr_pbr_f0_diel.ppm");
+            if (!imgD) {
+                return std::unexpected(imgD.error());
+            }
+
+            const RegionStats chromeS = MeasureRegion(*imgC, kFloor);
+            const RegionStats goldS   = MeasureRegion(*imgG, kFloor);
+            const RegionStats dielS   = MeasureRegion(*imgD, kFloor);
+            const RegionStats src     = MeasureRegion(*imgC, kSource);
+            LogRegion("chrome metal", chromeS);
+            LogRegion("gold metal", goldS);
+            LogRegion("white dielectric", dielS);
+            LogRegion("white emitter", src);
+
+            const bool sourceLit     = ZHLN::Test::ExpectTrue(src.meanL > 18.0);
+            const bool chromeLit     = ZHLN::Test::ExpectTrue(chromeS.meanL > 8.0);
+            const bool goldYellow    = ZHLN::Test::ExpectTrue(
+                goldS.yellow > 40u || (goldS.meanR > 28.0 && goldS.meanG > 18.0 && BlueRatio(goldS) + 0.08 < BlueRatio(chromeS))
+            );
+            const bool goldBluerLess = ZHLN::Test::ExpectTrue(BlueRatio(goldS) + 0.06 < BlueRatio(chromeS));
+            const bool metalBrighter = ZHLN::Test::ExpectTrue(chromeS.meanL > dielS.meanL * 1.35 + 2.0);
+            const bool goldNotBlue   = ZHLN::Test::ExpectTrue(goldS.meanB + 6.0 < goldS.meanR);
+
+            if (!sourceLit || !chromeLit || !goldYellow || !goldBluerLess || !metalBrighter || !goldNotBlue) {
+                return std::unexpected(RTRPBRError::ReflectionColorMismatch);
+            }
+            ZHLN::Println("    [PASS] RTR metallic F0 tints the white source; dielectric stays dimmer.");
+            return {};
         }
 
         std::expected<void, ZHLN::Error> rtr_roughness_monotone_reflection_energy() {
-            ZHLN::Test::AllowDeviceLost(true);
-            for (uint32_t attempt = 0; attempt < 2; ++attempt) {
-                Attempt a = BeginAttempt(attempt);
-                if (!a.engine) {
-                    continue;
-                }
-
-                auto smooth = MakeMat(*a.engine, 1.0f, 0.02f, {0.90f, 0.90f, 0.92f, 1.0f});
-                auto mid    = MakeMat(*a.engine, 1.0f, 0.22f, {0.90f, 0.90f, 0.92f, 1.0f});
-                auto rough  = MakeMat(*a.engine, 1.0f, 0.70f, {0.90f, 0.90f, 0.92f, 1.0f});
-                auto redEm  = MakeMat(*a.engine, 0.0f, 0.40f, {1.0f, 0.05f, 0.04f, 1.0f}, {8.0f, 0.0f, 0.0f, 1.0f});
-                if (!smooth || !mid || !rough || !redEm) {
-                    return std::unexpected(RTRPBRError::MaterialCreationFailed);
-                }
-
-                SpawnEmitter(*a.engine, *redEm);
-                auto&              reg      = a.engine->GetRegistry();
-                const ZHLN::Entity eSmooth  = SpawnMirror(*a.engine, *smooth);
-                const RgbImage     imgS     = CaptureOrBlank(a, "headless_rtr_pbr_rough_s.ppm");
-                if (ImageIsBlank(imgS)) {
-                    continue;
-                }
-                reg.Destroy(eSmooth);
-
-                const ZHLN::Entity eMid = SpawnMirror(*a.engine, *mid);
-                const RgbImage     imgM = CaptureOrBlank(a, "headless_rtr_pbr_rough_m.ppm");
-                if (ImageIsBlank(imgM)) {
-                    continue;
-                }
-                reg.Destroy(eMid);
-
-                SpawnMirror(*a.engine, *rough);
-                const RgbImage imgR = CaptureOrBlank(a, "headless_rtr_pbr_rough_r.ppm");
-                if (ImageIsBlank(imgR)) {
-                    continue;
-                }
-
-                const RegionStats sSmooth = MeasureRegion(imgS, kFloor);
-                const RegionStats sMid    = MeasureRegion(imgM, kFloor);
-                const RegionStats sRough  = MeasureRegion(imgR, kFloor);
-                LogRegion("roughness 0.02", sSmooth);
-                LogRegion("roughness 0.22", sMid);
-                LogRegion("roughness 0.70", sRough);
-
-                const bool monotoneL = ZHLN::Test::ExpectTrue(sSmooth.meanL + 1.5 > sMid.meanL && sMid.meanL + 0.5 > sRough.meanL * 0.85);
-                const bool sharpHot  = ZHLN::Test::ExpectTrue(sSmooth.maxL + 4.0 > sRough.maxL);
-                const bool rtrOn     = ZHLN::Test::ExpectTrue(sSmooth.redDom > 20u || sSmooth.meanR > sRough.meanR * 1.20 + 3.0);
-                const bool rtrOff    = ZHLN::Test::ExpectTrue(sSmooth.redDom + 8u > sRough.redDom && sSmooth.meanL > sRough.meanL + 2.0);
-
-                if (!monotoneL || !sharpHot || !rtrOn || !rtrOff) {
-                    return std::unexpected(RTRPBRError::ReflectionColorMismatch);
-                }
-                ZHLN::Println("    [PASS] Reflection energy falls with roughness; r=0.70 drops the traced red.");
+            auto session = Boot();
+            if (!session) {
+                return std::unexpected(session.error());
+            }
+            if (!session->engine) {
                 return {};
             }
-            return std::unexpected(RTRPBRError::RenderOutputBlank);
+            Session& s = *session;
+
+            auto smooth = MakeMat(*s.engine, 1.0f, 0.02f, {0.90f, 0.90f, 0.92f, 1.0f});
+            auto mid    = MakeMat(*s.engine, 1.0f, 0.22f, {0.90f, 0.90f, 0.92f, 1.0f});
+            auto rough  = MakeMat(*s.engine, 1.0f, 0.70f, {0.90f, 0.90f, 0.92f, 1.0f});
+            auto redEm  = MakeMat(*s.engine, 0.0f, 0.40f, {1.0f, 0.05f, 0.04f, 1.0f}, {8.0f, 0.0f, 0.0f, 1.0f});
+            if (!smooth || !mid || !rough || !redEm) {
+                return std::unexpected(RTRPBRError::MaterialCreationFailed);
+            }
+
+            SpawnEmitter(*s.engine, *redEm);
+            auto&              reg     = s.engine->GetRegistry();
+            const ZHLN::Entity eSmooth = SpawnMirror(*s.engine, *smooth);
+            auto               rtrOn   = EnableRTR(s);
+            if (!rtrOn) {
+                return rtrOn;
+            }
+
+            auto imgS = CaptureRTR(s, "headless_rtr_pbr_rough_s.ppm");
+            if (!imgS) {
+                return std::unexpected(imgS.error());
+            }
+            reg.Destroy(eSmooth);
+
+            const ZHLN::Entity eMid = SpawnMirror(*s.engine, *mid);
+            auto               imgM = CaptureRTR(s, "headless_rtr_pbr_rough_m.ppm");
+            if (!imgM) {
+                return std::unexpected(imgM.error());
+            }
+            (void) eMid;
+            reg.Destroy(eMid);
+
+            SpawnMirror(*s.engine, *rough);
+            auto imgR = CaptureRTR(s, "headless_rtr_pbr_rough_r.ppm");
+            if (!imgR) {
+                return std::unexpected(imgR.error());
+            }
+
+            const RegionStats sSmooth = MeasureRegion(*imgS, kFloor);
+            const RegionStats sMid    = MeasureRegion(*imgM, kFloor);
+            const RegionStats sRough  = MeasureRegion(*imgR, kFloor);
+            LogRegion("roughness 0.02", sSmooth);
+            LogRegion("roughness 0.22", sMid);
+            LogRegion("roughness 0.70", sRough);
+
+            const bool monotoneL = ZHLN::Test::ExpectTrue(sSmooth.meanL + 1.5 > sMid.meanL && sMid.meanL + 0.5 > sRough.meanL * 0.85);
+            const bool sharpHot  = ZHLN::Test::ExpectTrue(sSmooth.maxL + 4.0 > sRough.maxL);
+            const bool rtrOnSig  = ZHLN::Test::ExpectTrue(sSmooth.redDom > 20u || sSmooth.meanR > sRough.meanR * 1.20 + 3.0);
+            const bool rtrOff    = ZHLN::Test::ExpectTrue(sSmooth.redDom + 8u > sRough.redDom && sSmooth.meanL > sRough.meanL + 2.0);
+
+            if (!monotoneL || !sharpHot || !rtrOnSig || !rtrOff) {
+                return std::unexpected(RTRPBRError::ReflectionColorMismatch);
+            }
+            ZHLN::Println("    [PASS] RTR energy falls with roughness; r=0.70 drops the traced red.");
+            return {};
         }
 
         std::expected<void, ZHLN::Error> rtr_chrome_preserves_emitter_hue() {
-            ZHLN::Test::AllowDeviceLost(true);
-            for (uint32_t attempt = 0; attempt < 2; ++attempt) {
-                Attempt a = BeginAttempt(attempt);
-                if (!a.engine) {
-                    continue;
-                }
-
-                auto chrome  = MakeMat(*a.engine, 1.0f, 0.025f, {0.94f, 0.94f, 0.96f, 1.0f});
-                auto redEm   = MakeMat(*a.engine, 0.0f, 0.40f, {1.0f, 0.04f, 0.03f, 1.0f}, {8.0f, 0.0f, 0.0f, 1.0f});
-                auto greenEm = MakeMat(*a.engine, 0.0f, 0.40f, {0.04f, 1.0f, 0.04f, 1.0f}, {0.0f, 8.0f, 0.0f, 1.0f});
-                if (!chrome || !redEm || !greenEm) {
-                    return std::unexpected(RTRPBRError::MaterialCreationFailed);
-                }
-
-                SpawnMirror(*a.engine, *chrome);
-                SpawnEmitter(*a.engine, *redEm, -2.4f);
-                SpawnEmitter(*a.engine, *greenEm, 2.4f);
-
-                const RgbImage img = CaptureOrBlank(a, "headless_rtr_pbr_emitter_hue.ppm");
-                if (ImageIsBlank(img)) {
-                    continue;
-                }
-
-                const RegionStats left  = MeasureRegion(img, kFloorLeft);
-                const RegionStats right = MeasureRegion(img, kFloorRight);
-                LogRegion("chrome under red", left);
-                LogRegion("chrome under green", right);
-
-                const bool leftRedder   = ZHLN::Test::ExpectTrue(left.meanR > left.meanG + 4.0 && left.meanR > left.meanB + 4.0);
-                const bool rightGreener = ZHLN::Test::ExpectTrue(right.meanG > right.meanR + 4.0 && right.meanG > right.meanB + 2.0);
-                const bool splitHue     = ZHLN::Test::ExpectTrue(left.meanR > right.meanR + 6.0 && right.meanG > left.meanG + 6.0);
-                const bool counts       = ZHLN::Test::ExpectTrue(left.redDom + 10u > right.redDom && right.greenDom + 10u > left.greenDom);
-
-                if (!leftRedder || !rightGreener || !splitHue || !counts) {
-                    return std::unexpected(RTRPBRError::ReflectionColorMismatch);
-                }
-                ZHLN::Println("    [PASS] Chrome reflection preserves emitter hue (red left / green right).");
+            auto session = Boot();
+            if (!session) {
+                return std::unexpected(session.error());
+            }
+            if (!session->engine) {
                 return {};
             }
-            return std::unexpected(RTRPBRError::RenderOutputBlank);
+            Session& s = *session;
+
+            auto chrome  = MakeMat(*s.engine, 1.0f, 0.025f, {0.94f, 0.94f, 0.96f, 1.0f});
+            auto redEm   = MakeMat(*s.engine, 0.0f, 0.40f, {1.0f, 0.04f, 0.03f, 1.0f}, {8.0f, 0.0f, 0.0f, 1.0f});
+            auto greenEm = MakeMat(*s.engine, 0.0f, 0.40f, {0.04f, 1.0f, 0.04f, 1.0f}, {0.0f, 8.0f, 0.0f, 1.0f});
+            if (!chrome || !redEm || !greenEm) {
+                return std::unexpected(RTRPBRError::MaterialCreationFailed);
+            }
+
+            SpawnMirror(*s.engine, *chrome);
+            SpawnEmitter(*s.engine, *redEm, -2.4f);
+            SpawnEmitter(*s.engine, *greenEm, 2.4f);
+            auto rtrOn = EnableRTR(s);
+            if (!rtrOn) {
+                return rtrOn;
+            }
+
+            auto img = CaptureRTR(s, "headless_rtr_pbr_emitter_hue.ppm");
+            if (!img) {
+                return std::unexpected(img.error());
+            }
+
+            const RegionStats left  = MeasureRegion(*img, kFloorLeft);
+            const RegionStats right = MeasureRegion(*img, kFloorRight);
+            LogRegion("chrome under red", left);
+            LogRegion("chrome under green", right);
+
+            const bool leftRedder   = ZHLN::Test::ExpectTrue(left.meanR > left.meanG + 4.0 && left.meanR > left.meanB + 4.0);
+            const bool rightGreener = ZHLN::Test::ExpectTrue(right.meanG > right.meanR + 4.0 && right.meanG > right.meanB + 2.0);
+            const bool splitHue     = ZHLN::Test::ExpectTrue(left.meanR > right.meanR + 6.0 && right.meanG > left.meanG + 6.0);
+            const bool counts       = ZHLN::Test::ExpectTrue(left.redDom + 10u > right.redDom && right.greenDom + 10u > left.greenDom);
+
+            if (!leftRedder || !rightGreener || !splitHue || !counts) {
+                return std::unexpected(RTRPBRError::ReflectionColorMismatch);
+            }
+            ZHLN::Println("    [PASS] Chrome RTR preserves emitter hue (red left / green right).");
+            return {};
         }
 
         std::expected<void, ZHLN::Error> rtr_live_pbr_patch_retints_same_tile() {
-            for (uint32_t attempt = 0; attempt < 3; ++attempt) {
-                Attempt a = BeginAttempt(attempt);
-                if (!a.engine) {
-                    continue;
-                }
-
-                auto gold    = MakeMat(*a.engine, 1.0f, 0.03f, {1.00f, 0.76f, 0.14f, 1.0f});
-                auto whiteEm = MakeMat(*a.engine, 0.0f, 0.45f, {1.0f, 1.0f, 1.0f, 1.0f}, {6.0f, 6.0f, 6.0f, 1.0f});
-                if (!gold || !whiteEm) {
-                    return std::unexpected(RTRPBRError::MaterialCreationFailed);
-                }
-
-                const ZHLN::Entity tile = SpawnMirror(*a.engine, *gold);
-                SpawnEmitter(*a.engine, *whiteEm);
-                auto& reg = a.engine->GetRegistry();
-
-                auto captureTile = [&](const char* path, float metallic, float roughness) -> RegionStats {
-                    if (!a.engine || LostSince(*a.engine, a.ctx, a.lostBefore)) {
-                        return {};
-                    }
-                    reg.Patch<ZHLN::Components::PBRComponent>(tile, [&](auto& pbr) {
-                        pbr.metallic  = metallic;
-                        pbr.roughness = roughness;
-                    });
-                    const RgbImage img = CaptureOrBlank(a, path);
-                    return MeasureRegion(img, kFloor);
-                };
-
-                const RegionStats metalSmooth = captureTile("headless_rtr_pbr_patch_metal.ppm", 1.0f, 0.03f);
-                if (metalSmooth.pixels == 0) {
-                    continue;
-                }
-                const RegionStats dielectric = captureTile("headless_rtr_pbr_patch_diel.ppm", 0.0f, 0.03f);
-                if (dielectric.pixels == 0) {
-                    continue;
-                }
-                const RegionStats metalRough = captureTile("headless_rtr_pbr_patch_rough.ppm", 1.0f, 0.75f);
-                if (metalRough.pixels == 0) {
-                    continue;
-                }
-                LogRegion("patch metal r=0.03", metalSmooth);
-                LogRegion("patch dielectric r=0.03", dielectric);
-                LogRegion("patch metal r=0.75", metalRough);
-
-                const bool metalEnergy   = ZHLN::Test::ExpectTrue(metalSmooth.meanL > dielectric.meanL * 1.30 + 2.0);
-                const bool metalYellower =
-                    ZHLN::Test::ExpectTrue(BlueRatio(metalSmooth) + 0.05 < BlueRatio(dielectric) || metalSmooth.yellow > dielectric.yellow + 15u);
-                const bool roughKills    = ZHLN::Test::ExpectTrue(metalSmooth.meanL > metalRough.meanL + 2.0 && metalSmooth.yellow + 8u > metalRough.yellow);
-                const bool roughLessGold = ZHLN::Test::ExpectTrue(metalSmooth.maxL + 2.0 >= metalRough.maxL);
-
-                if (!metalEnergy || !metalYellower || !roughKills || !roughLessGold) {
-                    return std::unexpected(RTRPBRError::ReflectionColorMismatch);
-                }
-                ZHLN::Println("    [PASS] Live PBR patches retint / kill the same tile's reflection colour.");
+            auto session = Boot();
+            if (!session) {
+                return std::unexpected(session.error());
+            }
+            if (!session->engine) {
                 return {};
             }
-            return std::unexpected(RTRPBRError::RenderOutputBlank);
+            Session& s = *session;
+
+            auto gold    = MakeMat(*s.engine, 1.0f, 0.03f, {1.00f, 0.76f, 0.14f, 1.0f});
+            auto whiteEm = MakeMat(*s.engine, 0.0f, 0.45f, {1.0f, 1.0f, 1.0f, 1.0f}, {6.0f, 6.0f, 6.0f, 1.0f});
+            if (!gold || !whiteEm) {
+                return std::unexpected(RTRPBRError::MaterialCreationFailed);
+            }
+
+            const ZHLN::Entity tile = SpawnMirror(*s.engine, *gold);
+            SpawnEmitter(*s.engine, *whiteEm);
+            auto rtrOn = EnableRTR(s);
+            if (!rtrOn) {
+                return rtrOn;
+            }
+
+            auto& reg         = s.engine->GetRegistry();
+            auto  captureTile = [&](const char* path, float metallic, float roughness) -> std::expected<RegionStats, ZHLN::Error> {
+                if (!reg.Patch<ZHLN::Components::PBRComponent>(tile, [&](auto& pbr) {
+                        pbr.metallic  = metallic;
+                        pbr.roughness = roughness;
+                    })) {
+                    return std::unexpected(RTRPBRError::MaterialCreationFailed);
+                }
+                auto img = CaptureRTR(s, path);
+                if (!img) {
+                    return std::unexpected(img.error());
+                }
+                return MeasureRegion(*img, kFloor);
+            };
+
+            auto metalSmooth = captureTile("headless_rtr_pbr_patch_metal.ppm", 1.0f, 0.03f);
+            if (!metalSmooth) {
+                return std::unexpected(metalSmooth.error());
+            }
+            auto dielectric = captureTile("headless_rtr_pbr_patch_diel.ppm", 0.0f, 0.03f);
+            if (!dielectric) {
+                return std::unexpected(dielectric.error());
+            }
+            auto metalRough = captureTile("headless_rtr_pbr_patch_rough.ppm", 1.0f, 0.75f);
+            if (!metalRough) {
+                return std::unexpected(metalRough.error());
+            }
+            LogRegion("patch metal r=0.03", *metalSmooth);
+            LogRegion("patch dielectric r=0.03", *dielectric);
+            LogRegion("patch metal r=0.75", *metalRough);
+
+            const bool metalEnergy = ZHLN::Test::ExpectTrue(metalSmooth->meanL > dielectric->meanL * 1.30 + 2.0);
+            const bool metalYellower =
+                ZHLN::Test::ExpectTrue(BlueRatio(*metalSmooth) + 0.05 < BlueRatio(*dielectric) || metalSmooth->yellow > dielectric->yellow + 15u);
+            const bool roughKills    = ZHLN::Test::ExpectTrue(metalSmooth->meanL > metalRough->meanL + 2.0 && metalSmooth->yellow + 8u > metalRough->yellow);
+            const bool roughLessGold = ZHLN::Test::ExpectTrue(metalSmooth->maxL + 2.0 >= metalRough->maxL);
+
+            if (!metalEnergy || !metalYellower || !roughKills || !roughLessGold) {
+                return std::unexpected(RTRPBRError::ReflectionColorMismatch);
+            }
+            ZHLN::Println("    [PASS] Live PBR patches retint / kill the same tile's RTR colour.");
+            return {};
         }
 
         std::expected<void, ZHLN::Error> rtr_metal_palette_channel_order() {
-            ZHLN::Test::AllowDeviceLost(true);
-            for (uint32_t attempt = 0; attempt < 2; ++attempt) {
-                Attempt a = BeginAttempt(attempt);
-                if (!a.engine) {
-                    continue;
-                }
-
-                auto silver  = MakeMat(*a.engine, 1.0f, 0.03f, {0.97f, 0.96f, 0.93f, 1.0f});
-                auto gold    = MakeMat(*a.engine, 1.0f, 0.03f, {1.00f, 0.76f, 0.14f, 1.0f});
-                auto copper  = MakeMat(*a.engine, 1.0f, 0.03f, {0.95f, 0.64f, 0.54f, 1.0f});
-                auto whiteEm = MakeMat(*a.engine, 0.0f, 0.45f, {1.0f, 1.0f, 1.0f, 1.0f}, {6.0f, 6.0f, 6.0f, 1.0f});
-                if (!silver || !gold || !copper || !whiteEm) {
-                    return std::unexpected(RTRPBRError::MaterialCreationFailed);
-                }
-
-                SpawnEmitter(*a.engine, *whiteEm);
-                auto&              reg    = a.engine->GetRegistry();
-                const ZHLN::Entity eSil   = SpawnMirror(*a.engine, *silver);
-                const RgbImage     imgSil = CaptureOrBlank(a, "headless_rtr_pbr_silver.ppm");
-                if (ImageIsBlank(imgSil)) {
-                    continue;
-                }
-                reg.Destroy(eSil);
-
-                const ZHLN::Entity eAu   = SpawnMirror(*a.engine, *gold);
-                const RgbImage     imgAu = CaptureOrBlank(a, "headless_rtr_pbr_gold.ppm");
-                if (ImageIsBlank(imgAu)) {
-                    continue;
-                }
-                reg.Destroy(eAu);
-
-                SpawnMirror(*a.engine, *copper);
-                const RgbImage imgCu = CaptureOrBlank(a, "headless_rtr_pbr_copper.ppm");
-                if (ImageIsBlank(imgCu)) {
-                    continue;
-                }
-
-                const RegionStats sil = MeasureRegion(imgSil, kFloor);
-                const RegionStats au  = MeasureRegion(imgAu, kFloor);
-                const RegionStats cu  = MeasureRegion(imgCu, kFloor);
-                LogRegion("silver", sil);
-                LogRegion("gold", au);
-                LogRegion("copper", cu);
-
-                const bool goldLeastBlue  = ZHLN::Test::ExpectTrue(BlueRatio(au) + 0.04 < BlueRatio(sil) && BlueRatio(au) + 0.03 < BlueRatio(cu));
-                const bool goldMoreYellow = ZHLN::Test::ExpectTrue(GreenRatio(au) > GreenRatio(cu) + 0.03 && au.yellow + 5u >= cu.yellow);
-                const bool silverNeutral  = ZHLN::Test::ExpectTrue(std::abs(sil.meanR - sil.meanG) < 28.0 && BlueRatio(sil) > 0.45);
-                const bool allReflect     = ZHLN::Test::ExpectTrue(sil.meanL > 6.0 && au.meanL > 6.0 && cu.meanL > 6.0);
-
-                if (!goldLeastBlue || !goldMoreYellow || !silverNeutral || !allReflect) {
-                    return std::unexpected(RTRPBRError::ReflectionColorMismatch);
-                }
-                ZHLN::Println("    [PASS] Silver / gold / copper reflection channel order matches F0.");
+            auto session = Boot();
+            if (!session) {
+                return std::unexpected(session.error());
+            }
+            if (!session->engine) {
                 return {};
             }
-            return std::unexpected(RTRPBRError::RenderOutputBlank);
+            Session& s = *session;
+
+            auto silver  = MakeMat(*s.engine, 1.0f, 0.03f, {0.97f, 0.96f, 0.93f, 1.0f});
+            auto gold    = MakeMat(*s.engine, 1.0f, 0.03f, {1.00f, 0.76f, 0.14f, 1.0f});
+            auto copper  = MakeMat(*s.engine, 1.0f, 0.03f, {0.95f, 0.64f, 0.54f, 1.0f});
+            auto whiteEm = MakeMat(*s.engine, 0.0f, 0.45f, {1.0f, 1.0f, 1.0f, 1.0f}, {6.0f, 6.0f, 6.0f, 1.0f});
+            if (!silver || !gold || !copper || !whiteEm) {
+                return std::unexpected(RTRPBRError::MaterialCreationFailed);
+            }
+
+            SpawnEmitter(*s.engine, *whiteEm);
+            auto&              reg  = s.engine->GetRegistry();
+            const ZHLN::Entity eSil = SpawnMirror(*s.engine, *silver);
+            auto               rtrOn = EnableRTR(s);
+            if (!rtrOn) {
+                return rtrOn;
+            }
+
+            auto imgSil = CaptureRTR(s, "headless_rtr_pbr_silver.ppm");
+            if (!imgSil) {
+                return std::unexpected(imgSil.error());
+            }
+            reg.Destroy(eSil);
+
+            const ZHLN::Entity eAu   = SpawnMirror(*s.engine, *gold);
+            auto               imgAu = CaptureRTR(s, "headless_rtr_pbr_gold.ppm");
+            if (!imgAu) {
+                return std::unexpected(imgAu.error());
+            }
+            (void) eAu;
+            reg.Destroy(eAu);
+
+            SpawnMirror(*s.engine, *copper);
+            auto imgCu = CaptureRTR(s, "headless_rtr_pbr_copper.ppm");
+            if (!imgCu) {
+                return std::unexpected(imgCu.error());
+            }
+
+            const RegionStats sil = MeasureRegion(*imgSil, kFloor);
+            const RegionStats au  = MeasureRegion(*imgAu, kFloor);
+            const RegionStats cu  = MeasureRegion(*imgCu, kFloor);
+            LogRegion("silver", sil);
+            LogRegion("gold", au);
+            LogRegion("copper", cu);
+
+            const bool goldLeastBlue  = ZHLN::Test::ExpectTrue(BlueRatio(au) + 0.04 < BlueRatio(sil) && BlueRatio(au) + 0.03 < BlueRatio(cu));
+            const bool goldMoreYellow = ZHLN::Test::ExpectTrue(GreenRatio(au) > GreenRatio(cu) + 0.03 && au.yellow + 5u >= cu.yellow);
+            const bool silverNeutral  = ZHLN::Test::ExpectTrue(std::abs(sil.meanR - sil.meanG) < 28.0 && BlueRatio(sil) > 0.45);
+            const bool allReflect     = ZHLN::Test::ExpectTrue(sil.meanL > 6.0 && au.meanL > 6.0 && cu.meanL > 6.0);
+
+            if (!goldLeastBlue || !goldMoreYellow || !silverNeutral || !allReflect) {
+                return std::unexpected(RTRPBRError::ReflectionColorMismatch);
+            }
+            ZHLN::Println("    [PASS] Silver / gold / copper RTR channel order matches F0.");
+            return {};
         }
     };
 };

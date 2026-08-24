@@ -459,6 +459,10 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
         );
 
         if (!comp_submit_res) [[unlikely]] {
+            if (comp_submit_res.error().Is<VkResult>() && comp_submit_res.error().As<VkResult>() == VK_ERROR_DEVICE_LOST) {
+                ZHLN_NotifyDeviceLost();
+                return std::unexpected(DeviceLost);
+            }
             return std::unexpected(comp_submit_res.error());
         }
 
@@ -543,6 +547,10 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
             );
 
             if (!submit_res) {
+                if (submit_res.error().Is<VkResult>() && submit_res.error().As<VkResult>() == VK_ERROR_DEVICE_LOST) {
+                    ZHLN_NotifyDeviceLost();
+                    return std::unexpected(DeviceLost);
+                }
                 return std::unexpected(Error);
             }
 
