@@ -819,10 +819,6 @@ struct RenderContext::Impl {
     // Device addresses of the current frame's scene buffers, in
     // GlobalSceneRegistry order {frame, lights, instances, joints, prevJoints, morphDeltas}.
     [[nodiscard]] auto FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, Vk::kHeapFrameAddressCount>;
-    // Binds both heaps. Offline compute bakes use this: they do not read the
-    // scene registry and must not query per-frame buffer addresses that do
-    // not exist yet (IBL runs inside InitBindless, before InitCullingResources).
-    void BindHeaps(VkCommandBuffer cmd) const noexcept;
     // Binds both heaps and pushes the frame addresses at their reflected offsets.
     // Heap-using segments call this first: legacy set/push-constant commands
     // elsewhere in the frame invalidate heap and push-data state, so every
@@ -1145,7 +1141,6 @@ struct RenderContext::Impl {
         LoadAndCreateComputeShader(ComputeStageSource cs, VkPipelineLayout layout, Vk::ComputePass& pass) const noexcept;
 
     void WatchPipeline(const char* vsPath, const char* psPath, std::function<void()> rebuild_fn) noexcept;
-    void                                     UploadClusterBounds();
     [[nodiscard]] std::expected<void, Error> ValidateSlangTypeLayouts() noexcept;
     static constexpr uint32_t kBakeHeapSlotSpan   = 7; // slot 0 = 2D bake; slots 1..6 = IBL specular mips
     static constexpr uint32_t kBake2DHeapIndex    = 0;

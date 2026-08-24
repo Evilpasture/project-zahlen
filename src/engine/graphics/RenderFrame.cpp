@@ -89,16 +89,12 @@ auto RenderContext::Impl::FrameHeapAddresses() const noexcept -> std::array<VkDe
     };
 }
 
-void RenderContext::Impl::BindHeaps(VkCommandBuffer cmd) const noexcept {
-    heapManager.BindHeaps(cmd);
-}
-
 void RenderContext::Impl::BindHeapsAndPushFrame(VkCommandBuffer cmd) const noexcept {
     // Legacy descriptor-set and push-constant commands elsewhere in the frame
     // invalidate heap + push-data state (and vice versa), so every heap-based
     // segment re-binds both heaps and re-pushes the per-frame device addresses
     // that back the scene registry's PUSH_ADDRESS mappings.
-    BindHeaps(cmd);
+    heapManager.BindHeaps(cmd);
     const auto addresses = FrameHeapAddresses();
     Vk::PushHeapFrameAddresses(ctx, cmd, heapPushDataLayout, addresses);
 }

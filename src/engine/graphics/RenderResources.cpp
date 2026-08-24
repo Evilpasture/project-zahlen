@@ -1115,10 +1115,6 @@ void RenderContext::Impl::RegisterPipeline(const PipelineRegistration& reg) noex
     }
 }
 
-void RenderContext::Impl::UploadClusterBounds() {
-    clusterBoundsDirty = true;
-}
-
 std::expected<void, Error> RenderContext::Impl::ValidateSlangTypeLayouts() noexcept {
     const void*  spirv   = Resource::gpu_abi_comp.data();
     const size_t spirvSz = Resource::gpu_abi_comp.size();
