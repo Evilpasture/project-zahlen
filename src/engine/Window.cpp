@@ -10,6 +10,9 @@
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Window.hpp>
 #include <array>
+#include <cctype>
+#include <filesystem>
+#include <fstream>
 
 namespace ZHLN {
 
@@ -185,6 +188,45 @@ auto MapGLFWKey(int key) noexcept -> KeyCode {
     return KeyCode::Unknown;
 }
 
+// Reads a dropped file from disk into a FileDrop. Tolerates missing/unreadable
+// paths by returning a struct with empty data (the caller may skip it).
+auto ReadDroppedFile(const char* path) -> FileDrop {
+    FileDrop result;
+    if (path == nullptr) {
+        return result;
+    }
+    result.sourcePath = path;
+
+    const std::filesystem::path p(path);
+    result.fileName = p.filename().string();
+
+    std::string ext = p.extension().string();
+    for (char& c: ext) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    if (!ext.empty() && ext.front() == '.') {
+        ext.erase(ext.begin());
+    }
+    result.format = ext;
+
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    if (!file) {
+        return result;
+    }
+    const std::streamsize size = file.tellg();
+    if (size <= 0) {
+        return result;
+    }
+    file.seekg(0, std::ios::beg);
+    result.data.resize(static_cast<size_t>(size));
+    if (!file.read(reinterpret_cast<char*>(result.data.data()), size)) {
+        result.data.clear();
+        return result;
+    }
+    result.byteSize = static_cast<uint64_t>(size);
+    return result;
+}
+
 } // namespace
 
 Window::Window(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver, bool useTTY, bool headless):
@@ -298,6 +340,27 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, bool full
                 self->_impl->receiver.onChar(self->_impl->receiver.userdata, codepoint);
             }
         });
+
+        // Abstract file-drop handler: read every dropped file into a FileDrop and
+        // forward the batch to the registered onFileDrop receiver callback.
+        glfwSetDropCallback(_impl->handle, [](GLFWwindow* win, int count, const char** paths) -> void {
+            auto* self = static_cast<Window*>(glfwGetWindowUserPointer(win));
+            if (self == nullptr || self->_impl->receiver.onFileDrop == nullptr || paths == nullptr || count <= 0) {
+                return;
+            }
+
+            std::vector<FileDrop> drops;
+            drops.reserve(static_cast<size_t>(count));
+            for (int i = 0; i < count; ++i) {
+                FileDrop d = ReadDroppedFile(paths[i]);
+                if (!d.data.empty()) {
+                    drops.push_back(std::move(d));
+                }
+            }
+            if (!drops.empty()) {
+                self->_impl->receiver.onFileDrop(self->_impl->receiver.fileDropUserdata, drops.data(), static_cast<uint32_t>(drops.size()));
+            }
+        });
     }
 }
 
@@ -378,6 +441,11 @@ auto Window::GetTTYContext() const -> void* {
 
 auto Window::GetInputReceiver() const noexcept -> const WindowInputReceiver& {
     return _impl->receiver;
+}
+
+void Window::SetFileDropHandler(void (*handler)(void* userdata, const FileDrop* files, uint32_t count), void* userdata) noexcept {
+    _impl->receiver.onFileDrop        = handler;
+    _impl->receiver.fileDropUserdata  = userdata;
 }
 
 auto Window::ReinitTTY() -> bool {
