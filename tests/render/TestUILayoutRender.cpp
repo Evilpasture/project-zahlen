@@ -61,8 +61,8 @@ struct PpmImage {
 }
 
 void Sample(const PpmImage& image, int x, int y, uint8_t& r, uint8_t& g, uint8_t& b) {
-    x = std::clamp(x, 0, image.width - 1);
-    y = std::clamp(y, 0, image.height - 1);
+    x              = std::clamp(x, 0, image.width - 1);
+    y              = std::clamp(y, 0, image.height - 1);
     const size_t i = (static_cast<size_t>(y) * static_cast<size_t>(image.width) + static_cast<size_t>(x)) * 3u;
     r              = image.pixels[i + 0];
     g              = image.pixels[i + 1];
@@ -170,7 +170,8 @@ struct UILayoutRenderTestSuite {
                 };
 
                 ui.BeginPanel("layout_root", rootCfg, [&] {
-                    ui.BeginBox("band_red", ZHLN::GUI::BoxConfig {.height = 50.0f, .color = {1.0f, 0.0f, 0.0f, 1.0f}, .edgeWidth = 0.0f, .padding = 0.0f}, [] {});
+                    ui.BeginBox("band_red", ZHLN::GUI::BoxConfig {.height = 50.0f, .color = {1.0f, 0.0f, 0.0f, 1.0f}, .edgeWidth = 0.0f, .padding = 0.0f}, [] {
+                    });
                     ui.BeginBox(
                         "band_green", ZHLN::GUI::BoxConfig {.height = 50.0f, .color = {0.0f, 1.0f, 0.0f, 1.0f}, .edgeWidth = 0.0f, .padding = 0.0f}, [] {}
                     );
@@ -188,7 +189,6 @@ struct UILayoutRenderTestSuite {
             // the presented / headless target in BlitPass, so the PPM cannot
             // show the bands. Layout is still public: Yoga writes computedAbs*
             // on UIRectComponent during Tick.
-            (void) rc;
             const std::string ppmPath    = "headless_ui_layout.ppm";
             const auto        captureRes = engine->GetRenderContext().CaptureScreenshotPPM(ppmPath);
             if (!captureRes) {
@@ -211,11 +211,11 @@ struct UILayoutRenderTestSuite {
                 return ZHLN::NullEntity;
             };
 
-            const ZHLN::Entity rootEnt  = findNamed("layout_root");
-            const ZHLN::Entity redEnt   = findNamed("band_red");
-            const ZHLN::Entity greenEnt = findNamed("band_green");
-            const auto*        rootRect = reg.Get<ZHLN::Components::UIRectComponent>(rootEnt);
-            const auto*        redRect  = reg.Get<ZHLN::Components::UIRectComponent>(redEnt);
+            const ZHLN::Entity rootEnt   = findNamed("layout_root");
+            const ZHLN::Entity redEnt    = findNamed("band_red");
+            const ZHLN::Entity greenEnt  = findNamed("band_green");
+            const auto*        rootRect  = reg.Get<ZHLN::Components::UIRectComponent>(rootEnt);
+            const auto*        redRect   = reg.Get<ZHLN::Components::UIRectComponent>(redEnt);
             const auto*        greenRect = reg.Get<ZHLN::Components::UIRectComponent>(greenEnt);
             if (rootRect == nullptr || redRect == nullptr || greenRect == nullptr) {
                 ZHLN::Println("    [FAIL] Named UI widgets missing after Tick.");
@@ -263,8 +263,10 @@ struct UILayoutRenderTestSuite {
             const uint32_t redInGreen   = CountInRect(image, gx0, gy0, gx1, gy1, IsRed);
             const uint32_t greenInRed   = CountInRect(image, rx0, ry0, rx1, ry1, IsGreen);
             const uint32_t redOffCanvas = CountInRect(image, 500, 200, 630, 460, IsRed);
-            ZHLN::Println("    [INFO] HDR PPM bands (UI is presented, not HDR): redIn={} greenIn={} crossRG={} crossGR={} off={}", redInBand, greenInBand,
-                          redInGreen, greenInRed, redOffCanvas);
+            ZHLN::Println(
+                "    [INFO] HDR PPM bands (UI is presented, not HDR): redIn={} greenIn={} crossRG={} crossGR={} off={}", redInBand, greenInBand, redInGreen,
+                greenInRed, redOffCanvas
+            );
 
             const bool noSwap = ZHLN::Test::ExpectTrue(redInGreen < 40u && greenInRed < 40u);
             const bool noOff  = ZHLN::Test::ExpectTrue(redOffCanvas < 40u);
@@ -281,6 +283,4 @@ struct UILayoutRenderTestSuite {
 
 int main() {
     return ZHLN::Test::Runner::Run<UILayoutRenderTestSuite>();
-}
-ILayoutRenderTestSuite>();
 }
