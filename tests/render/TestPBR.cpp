@@ -244,7 +244,9 @@ struct PBRTestSuite {
                     .type      = ZHLN::LightType::Sun,
                     .color     = JPH::Vec3(1.0f, 1.0f, 1.0f),
                     .intensity = 220.0f,
-                    .direction = JPH::Vec3(0.0f, 0.35f, 0.93f).Normalized()
+                    // Behind the camera so N≈V≈L on the +Z cube faces; a
+                    // 20° elevation misses the GGX peak of a 0.05 chrome.
+                    .direction = JPH::Vec3(0.0f, 0.08f, 0.997f).Normalized()
                 }
             );
 
@@ -382,6 +384,12 @@ struct PBRTestSuite {
             const double roughSpread  = compactness(rough);
             const double smoothPeak   = (smooth.warm > 0) ? static_cast<double>(smooth.hot) / static_cast<double>(smooth.warm) : 0.0;
             const double roughPeak    = (rough.warm > 0) ? static_cast<double>(rough.hot) / static_cast<double>(rough.warm) : 0.0;
+
+            ZHLN::Println(
+                "    [INFO] PBR roughness: smooth warm={} hot={} maxL={:.1f} spread={:.1f} peak={:.3f}; "
+                "rough warm={} hot={} maxL={:.1f} spread={:.1f} peak={:.3f}",
+                smooth.warm, smooth.hot, smooth.maxL, smoothSpread, smoothPeak, rough.warm, rough.hot, rough.maxL, roughSpread, roughPeak
+            );
 
             ZHLN::Test::ExpectTrue(smooth.warm > 50u && rough.warm > 50u);
             // Low roughness concentrates energy (tighter / hotter highlight).

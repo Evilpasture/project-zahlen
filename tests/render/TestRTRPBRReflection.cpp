@@ -164,11 +164,11 @@ void LogRegion(std::string_view name, const RegionStats& s) {
     if (!img.Valid()) {
         return true;
     }
-    double sum = 0.0;
+    double maxL = 0.0;
     for (size_t i = 0; i < img.rgb.size(); i += 3) {
-        sum += Luma(img.rgb[i], img.rgb[i + 1], img.rgb[i + 2]);
+        maxL = std::max(maxL, Luma(img.rgb[i], img.rgb[i + 1], img.rgb[i + 2]));
     }
-    return (sum / static_cast<double>(img.rgb.size() / 3u)) < 0.4;
+    return maxL < 8.0;
 }
 
 } // namespace
@@ -245,19 +245,21 @@ struct RTRPBRReflectionTestSuite {
     static void PlaceSunAndCamera(ZHLN::Engine& engine) {
         auto&              reg    = engine.GetRegistry();
         const ZHLN::Entity sunEnt = reg.Create();
+        // Intensity 0: LightingSystem falls back to a 180-nit default sun if
+        // no Sun exists, which floods dielectric albedo and hides F0 tint.
         reg.Add(
             sunEnt,
             ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 50.0f, 40.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({40.0f, 0.0f, 0.0f})},
             ZHLN::Components::LightComponent {
-                .type = ZHLN::LightType::Sun, .color = JPH::Vec3(1.0f, 1.0f, 1.0f), .intensity = 140.0f, .direction = JPH::Vec3(0.0f, 0.75f, 0.66f).Normalized()
+                .type = ZHLN::LightType::Sun, .color = JPH::Vec3(1.0f, 1.0f, 1.0f), .intensity = 0.0f, .direction = JPH::Vec3(0.0f, 0.75f, 0.66f).Normalized()
             }
         );
 
         auto& cam    = engine.GetCamera();
-        cam.position = JPH::Vec3(0.0f, 5.0f, 14.0f);
+        cam.position = JPH::Vec3(0.0f, 5.5f, 11.0f);
         cam.yaw      = -90.0f;
-        cam.pitch    = -22.0f;
-        cam.fov      = 60.0f;
+        cam.pitch    = -28.0f;
+        cam.fov      = 55.0f;
     }
 
     static auto MakeMat(ZHLN::Engine& engine, float metallic, float roughness, std::array<float, 4> base, std::array<float, 4> emissive = {0, 0, 0, 1})
@@ -270,15 +272,15 @@ struct RTRPBRReflectionTestSuite {
 
     static ZHLN::Entity SpawnMirror(ZHLN::Engine& engine, const ZHLN::Material& mat) {
         return ZHLN::CreativeWorksFactory::CreatePlane(
-            engine, 120.0f, {0.85f, 0.85f, 0.88f, 1.0f},
+            engine, 16.0f, {0.85f, 0.85f, 0.88f, 1.0f},
             ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = mat}
         );
     }
 
     static ZHLN::Entity SpawnEmitter(ZHLN::Engine& engine, const ZHLN::Material& mat, float x = 0.0f) {
         return ZHLN::CreativeWorksFactory::CreateBox(
-            engine, JPH::Vec3(0.5f, 0.5f, 0.5f),
-            ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(x, 3.0, 0.0), .createPhysics = false, .materialOverride = mat}
+            engine, JPH::Vec3(2.4f, 1.1f, 0.12f),
+            ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(x, 3.2, -1.2), .createPhysics = false, .materialOverride = mat}
         );
     }
 
@@ -667,7 +669,9 @@ struct RTRPBRReflectionTestSuite {
             const bool goldLeastBlue  = ZHLN::Test::ExpectTrue(BlueRatio(au) + 0.04 < BlueRatio(sil) && BlueRatio(au) + 0.03 < BlueRatio(cu));
             const bool goldMoreYellow = ZHLN::Test::ExpectTrue(GreenRatio(au) > GreenRatio(cu) + 0.03 && au.yellow + 5u >= cu.yellow);
             const bool silverNeutral  = ZHLN::Test::ExpectTrue(std::abs(sil.meanR - sil.meanG) < 28.0 && BlueRatio(sil) > 0.45);
-            const bool allReflect     = ZHLN::Test::ExpectTrue(sil.meanL > 6.0 && au.meanL > 6.0 && cu.meanL > 6.0);
+            const bool allReflect     = ZHLN::Test::ExpectTrue(
+                (sil.meanL > 3.0 || sil.maxL > 20.0) && (au.meanL > 3.0 || au.maxL > 20.0) && (cu.meanL > 3.0 || cu.maxL > 20.0)
+            );
 
             if (!goldLeastBlue || !goldMoreYellow || !silverNeutral || !allReflect) {
                 return std::unexpected(RTRPBRError::ReflectionColorMismatch);

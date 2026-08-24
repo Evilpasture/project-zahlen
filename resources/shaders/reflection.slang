@@ -1,38 +1,8 @@
 // resources/shaders/reflection.slang
 
+import instance_data;
 import pbr_helpers;
 import uniforms;
-
-struct InstanceData {
-    float4x4 world;
-    float4x4 prevWorld;
-    uint64_t posAddress;
-    uint64_t attrAddress;
-    uint64_t skinAddress;
-    uint64_t iboAddress;
-
-    uint vertexCount;
-    uint indexCount;
-    uint texIndices0;
-    uint texIndices1;
-
-    float cullRadius;
-    float metallicFactor;
-    float roughnessFactor;
-    float alphaCutoff;
-
-    uint flags;
-    uint jointOffset;
-    uint morphOffset;
-    uint activeMorphCount;
-
-    float3 localCenter;
-    uint _paddingCenter;
-
-    float4 morphWeights;
-    float4 baseColorFactor;
-    float4 emissiveFactor;
-};
 
 [[vk::constant_id(0)]]
 const int ENABLE_SSR = 1;
@@ -112,7 +82,7 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
     ray.TMin      = 0.01f;
     ray.TMax      = maxDist;
 
-    RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_FORCE_OPAQUE> q;
+    RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> q;
     q.TraceRayInline(tlas, RAY_FLAG_NONE, 0xFF, ray);
     while (q.Proceed()) {
     }
@@ -121,7 +91,10 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
         float rayT         = q.CommittedRayT();
         float3 hitWorldPos = ray.Origin + ray.Direction * rayT;
 
-        uint instanceID      = q.CommittedInstanceID();
+        // CustomIndex is the draw-queue slot written into g_instances.
+        // InstanceID is the compacted TLAS slot and will mis-index (and
+        // page-fault) whenever any draw is omitted from the TLAS.
+        uint instanceID = q.CommittedInstanceCustomIndex();
         InstanceData hitInst = g_instances[instanceID];
 
         // 1. Reconstruct exact geometric hit normal from mesh vertices
@@ -167,7 +140,7 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
         float3 directSun    = frame.lightDir.w * NdotL * (1.0f / 3.14159265f);
         float3 ambientLight = EvaluateSH(hitNormal, frame.sh) * frame.ambientExposure;
 
-        fallbackColor = hitBaseColor * (directSun + ambientLight);
+        fallbackColor = hitBaseColor * (directSun + ambientLight) + hitInst.emissiveFactor.rgb;
         confidence    = 1.0f;
 
         // 3. Project to Screen Space for high-res specular/reflection caching
@@ -286,31 +259,35 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         float ao = litColorRaw.a;
         litColor = litColorRaw.rgb;
 
-        if (roughness <= 0.4f && (ENABLE_SSR != 0 || ENABLE_RTR != 0)) {
+        const bool wantRTR = (ENABLE_RTR != 0) && (pc.enableRTR_dynamic != 0);
+        const bool wantSSR = (ENABLE_SSR != 0) && (pc.enableSSR_dynamic != 0);
+
+        if (roughness <= 0.4f && (wantSSR || wantRTR)) {
             float confidence       = 0.0f;
             float3 reflectionColor = float3(0.0f, 0.0f, 0.0f);
 
 #ifndef DISABLE_RTR
-            if (ENABLE_RTR != 0) {
+            if (wantRTR) {
                 float3 rtrFallback = float3(0.0f, 0.0f, 0.0f);
                 float2 hitUV       = RaytraceRTR(worldPos, N, V, roughness, confidence, rtrFallback, uint2(input.pos.xy));
 
                 if (confidence > 0.0f) {
+                    reflectionColor = rtrFallback;
                     if (hitUV.x >= 0.0f) {
                         float4 hitNormRough = texNormalRoughness.SampleLevel(smp, hitUV, 0);
-                        if (hitNormRough.z == 0.0f) {
-                            reflectionColor = rtrFallback;
-                        } else {
+                        if (hitNormRough.z != 0.0f) {
                             float3 screenColor = texLighting.SampleLevel(smp, hitUV, 0).rgb;
-                            reflectionColor    = lerp(rtrFallback, screenColor, confidence);
+                            // Screen lighting bakes emissive into albedo then
+                            // multiplies by ambient, so a bright emitter can
+                            // look dimmer than the analytic fallback. Keep
+                            // the brighter of the two.
+                            reflectionColor = max(rtrFallback, lerp(rtrFallback, screenColor, confidence));
                         }
-                    } else {
-                        reflectionColor = rtrFallback;
                     }
                 }
             } else
 #endif
-                if (ENABLE_SSR != 0) {
+                if (wantSSR) {
                 float debugValue      = 0.0f;
                 float3 biasedStartPos = worldPos + N * 0.05f;
                 float2 hitUV =

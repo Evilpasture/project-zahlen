@@ -381,7 +381,7 @@ RenderContext::~RenderContext() {
     if (_impl && (_impl->ctx.Device() != nullptr)) {
         _impl->gpuDiagnostics.Shutdown();
         auto res = Vk::WaitIdle(_impl->ctx.Device());
-        if (res != VK_SUCCESS) {
+        if (!res) {
             ZHLN::Log("ERROR: Failed to wait for idle on device destruction.");
         }
         _impl->stagingContext.reset();
