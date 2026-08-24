@@ -81,7 +81,7 @@ struct SlangLayoutTestSuite {
             if (!check) {
                 return check;
             }
-            ZHLN::Test::ExpectEq(fog->size, static_cast<uint32_t>(sizeof(ZHLN::VolumetricFogInjectPushConstants)));
+            ZHLN::Test::ExpectEq(fog->size, static_cast<uint32_t>(sizeof(ZHLN::VolumetricFogPushConstants)));
             ZHLN::Test::ExpectEq(light->size, static_cast<uint32_t>(sizeof(ZHLN::VolumetricLightInjectPushConstants)));
             ZHLN::Test::ExpectEq(temp->size, static_cast<uint32_t>(sizeof(ZHLN::VolumetricTemporalPushConstants)));
             ZHLN::Test::ExpectEq(obj->size, static_cast<uint32_t>(sizeof(ZHLN::ObjectConstants)));
