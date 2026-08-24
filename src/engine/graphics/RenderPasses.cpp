@@ -552,7 +552,7 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
 
     std::array<uint32_t, 8> passDrawCounts {};
 
-    std::array<const GPULight*, RenderContext::Impl::MAX_PUNCTUAL_LIGHTS> activeShadowLights {};
+    std::array<const Light*, RenderContext::Impl::MAX_PUNCTUAL_LIGHTS> activeShadowLights {};
     uint32_t                                                              activeShadowLightCount = 0;
     for (const auto& light: ctx.mappedLights) {
         if (light.shadowLayer >= 0 && light.type == Point) {

@@ -252,7 +252,7 @@ renderContext.BeginFrame();
 Renderer::SetMatrices(renderContext, camera.GetViewProj(), camera.GetUnjitteredViewProj());
 
 // 3. Populate and submit lights
-GPULight lights[1] = { ... };
+Light lights[1] = { ... };
 Renderer::SetLights(renderContext, lights, 1);
 
 // 4. Submit active meshes to the dynamic draw queue

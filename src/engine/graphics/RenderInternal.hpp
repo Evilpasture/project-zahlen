@@ -877,7 +877,7 @@ struct RenderContext::Impl {
     ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>> tracked3DEmitters;
 
     RenderQueues          queues;
-    ZHLN::Array<GPULight> mappedLights;
+    ZHLN::Array<Light> mappedLights;
 
     Vk::Pipeline     csgWritePipeline;
     Vk::Pipeline     csgDifferencePipeline;

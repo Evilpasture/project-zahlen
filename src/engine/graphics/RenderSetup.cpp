@@ -134,10 +134,10 @@ void RenderContext::SetGISettings(const GISettings& settings) noexcept {
     _impl->giSettings = settings;
 }
 
-void RenderContext::SetLights(const GPULight* lights, uint32_t count) noexcept {
+void RenderContext::SetLights(const Light* lights, uint32_t count) noexcept {
     uint32_t safeCount = std::min(count, 128u);
     if (safeCount > 0 && lights != nullptr) {
-        std::memcpy(_impl->frames.lightStorageBuffers->Map().data, lights, sizeof(GPULight) * safeCount);
+        std::memcpy(_impl->frames.lightStorageBuffers->Map().data, lights, sizeof(Light) * safeCount);
         _impl->mappedLights.assign(lights, lights + safeCount);
     } else {
         _impl->mappedLights.clear();

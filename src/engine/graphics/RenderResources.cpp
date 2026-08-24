@@ -1119,34 +1119,21 @@ std::expected<void, Error> RenderContext::Impl::ValidateSlangTypeLayouts() noexc
     const void*  spirv   = Resource::gpu_abi_comp.data();
     const size_t spirvSz = Resource::gpu_abi_comp.size();
 
-    auto checkOne = [&]<typename T>() -> std::expected<void, Error> {
-        return Vk::ReflectTypeLayout(spirv, spirvSz, Reflect::AnnotatedName<T>()).and_then([](const Vk::SlangTypeLayout& layout) -> std::expected<void, Error> {
-            if (layout.size != sizeof(T)) {
-                return std::unexpected(Vk::SpirvLayoutError::TypeSizeMismatch);
+    std::expected<void, Error> result {};
+    Reflect::ForEachNestedType<GPUTypes>([&]<typename Group>() {
+        Reflect::ForEachNestedType<Group>([&]<typename T>() {
+            if (!result) {
+                return;
             }
-            return {};
+            result = Vk::ReflectTypeLayout(spirv, spirvSz, Reflect::AnnotatedName<T>()).and_then([](const Vk::SlangTypeLayout& layout) -> std::expected<void, Error> {
+                if (layout.size != sizeof(T)) {
+                    return std::unexpected(Vk::SpirvLayoutError::TypeSizeMismatch);
+                }
+                return {};
+            });
         });
-    };
-
-    // Explicit pack: llvm-p2996 does not yet expose EnableABI annotations
-    // through members_of(parent_of(^^EnableABI)), so ForEachAnnotatedType
-    // returns no types and would skip every ABI size check.
-    return checkOne.template operator()<GPUMeshlet>()
-        .and_then([&]() -> std::expected<void, Error> { return checkOne.template operator()<InstanceData>(); })
-        .and_then([&]() -> std::expected<void, Error> { return checkOne.template operator()<UIObjectConstants>(); })
-        .and_then([&]() -> std::expected<void, Error> { return checkOne.template operator()<ClusterBounds>(); })
-        .and_then([&]() -> std::expected<void, Error> { return checkOne.template operator()<ClusterVolume>(); })
-        .and_then([&]() -> std::expected<void, Error> { return checkOne.template operator()<VolumetricFogPushConstants>(); })
-        .and_then([&]() -> std::expected<void, Error> { return checkOne.template operator()<VolumetricLightInjectPushConstants>(); })
-        .and_then([&]() -> std::expected<void, Error> { return checkOne.template operator()<VolumetricTemporalPushConstants>(); })
-        .and_then([&]() -> std::expected<void, Error> { return checkOne.template operator()<ObjectConstants>(); })
-        .and_then([&]() -> std::expected<void, Error> { return checkOne.template operator()<ParticleEmitterParams>(); })
-        .and_then([&]() -> std::expected<void, Error> { return checkOne.template operator()<MeshParticleEmitterParams>(); })
-        .and_then([&]() -> std::expected<void, Error> { return checkOne.template operator()<Particle>(); })
-        .and_then([&]() -> std::expected<void, Error> { return checkOne.template operator()<Particle3D>(); })
-        .and_then([&]() -> std::expected<void, Error> { return checkOne.template operator()<GPULight>(); })
-        .and_then([&]() -> std::expected<void, Error> { return checkOne.template operator()<FrameUniforms>(); })
-        .and_then([&]() -> std::expected<void, Error> { return Vk::ReflectHeapPushDataLayout(spirv, spirvSz).transform([](const auto&) {}); });
+    });
+    return result.and_then([&]() -> std::expected<void, Error> { return Vk::ReflectHeapPushDataLayout(spirv, spirvSz).transform([](const auto&) {}); });
 }
 
 } // namespace ZHLN

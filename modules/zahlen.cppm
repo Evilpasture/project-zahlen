@@ -301,7 +301,7 @@ using ZHLN::Frustum;
 using ZHLN::GameplayStatus;
 using ZHLN::GISettings;
 using ZHLN::GlyphMetric;
-using ZHLN::GPULight;
+using ZHLN::Light;
 using ZHLN::HashAssetID;
 using ZHLN::InstanceData;
 using ZHLN::InvalidAssetID;

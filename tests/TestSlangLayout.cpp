@@ -27,12 +27,12 @@ struct SlangLayoutTestSuite {
             if (!frame) {
                 return std::unexpected(frame.error());
             }
-            auto light = ReflectAbi<ZHLN::GPULight>();
+            auto light = ReflectAbi<ZHLN::Light>();
             if (!light) {
                 return std::unexpected(light.error());
             }
             ZHLN::Test::ExpectEq(frame->size, static_cast<uint32_t>(sizeof(ZHLN::FrameUniforms)));
-            ZHLN::Test::ExpectEq(light->size, static_cast<uint32_t>(sizeof(ZHLN::GPULight)));
+            ZHLN::Test::ExpectEq(light->size, static_cast<uint32_t>(sizeof(ZHLN::Light)));
             ZHLN::Test::ExpectTrue(frame->FieldOffset("viewProj").value_or(1) == 0);
             ZHLN::Test::ExpectTrue(frame->FieldOffset("invProj").has_value());
             ZHLN::Test::ExpectTrue(light->FieldOffset("position").value_or(1) == 0);

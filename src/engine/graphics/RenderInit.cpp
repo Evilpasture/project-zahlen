@@ -958,7 +958,7 @@ std::expected<void, Error> RenderContext::Impl::InitShadowResources() {
         .and_then([&](auto&& fub) {
             frames.frameUniformBuffers = std::forward<decltype(fub)>(fub);
             return CreateDoubleBuffered(
-                       allocator, sizeof(GPULight) * 128, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                       allocator, sizeof(Light) * 128, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                        VMA_MEMORY_USAGE_CPU_TO_GPU
             )
                 .transform_error([](auto err) -> Error { return err; });
