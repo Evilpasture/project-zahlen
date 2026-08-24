@@ -4,7 +4,6 @@
 #pragma once
 #include "RenderInternal.hpp"
 #include "Resources.hpp"
-#include <StagingContext.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
@@ -17,8 +16,7 @@ namespace ZHLN::Vk {
 
 class IBLProcessor {
   public:
-    static auto Bake(RenderContext::Impl& impl, StagingContext& staging, const Components::PostProcessSettingsComponent& sky = {})
-        -> std::expected<IBLPayload, ZHLN::Error> {
+    static auto Bake(RenderContext::Impl& impl, const Components::PostProcessSettingsComponent& sky = {}) -> std::expected<IBLPayload, ZHLN::Error> {
         using enum ZHLN::Resource::ShaderID;
         constexpr uint32_t kLutSize   = 512;
         constexpr uint32_t kBaseSize  = 256;
@@ -110,6 +108,24 @@ class IBLProcessor {
                                 return std::move(state);
                             });
                     })
+                    .and_then([&](State state) -> std::expected<State, VkResult> {
+                        return ImageBuilder {}
+                            .Texture2D(kLutSize, kLutSize, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 1)
+                            .Build(impl.allocator.Get())
+                            .transform([state = std::move(state)](Image lutImg) mutable {
+                                state.payload.brdfLutImage = std::move(lutImg);
+                                return std::move(state);
+                            });
+                    })
+                    .and_then([&](State state) -> std::expected<State, VkResult> {
+                        return ImageBuilder {}
+                            .TextureCube(kBaseSize, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, kMipLevels)
+                            .Build(impl.allocator.Get())
+                            .transform([state = std::move(state)](Image specImg) mutable {
+                                state.payload.prefilteredImage = std::move(specImg);
+                                return std::move(state);
+                            });
+                    })
                     .transform([pipes = std::move(pipes)](State state) mutable { return std::make_pair(std::move(pipes), std::move(state)); });
             })
             .and_then([&](std::pair<Pipelines, State> packed) -> std::expected<State, ZHLN::Error> {
@@ -119,9 +135,9 @@ class IBLProcessor {
                 const BRDFLUTPush     lutPush {
                     .outAddr = impl.ctx.BufferAddress(state.lutBuf.Handle()), .width = kLutSize, .height = kLutSize, .sampleCount = 128
                 };
-                IBLBakePush shPush     = skyPush;
-                shPush.outAddr         = impl.ctx.BufferAddress(state.shGpu.Handle());
-                shPush.sampleCount     = 16384;
+                IBLBakePush shPush = skyPush;
+                shPush.outAddr     = impl.ctx.BufferAddress(state.shGpu.Handle());
+                shPush.sampleCount = 16384;
 
                 ExecuteImmediate(impl.ctx, impl.graphicsCmdRing, [&](VkCommandBuffer cmd) {
                     pipes.brdf.Bind(cmd);
@@ -155,10 +171,41 @@ class IBLProcessor {
                     MemoryBarrier(
                         cmd, {.src_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                               .src_access = VK_ACCESS_2_SHADER_WRITE_BIT,
-                              .dst_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                              .dst_access = VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT}
+                              .dst_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                              .dst_access = VK_ACCESS_2_TRANSFER_READ_BIT}
                     );
+
+                    TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, state.payload.brdfLutImage.Handle());
+                    TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, state.payload.prefilteredImage.Handle());
+
+                    CopyBufferToImage(
+                        cmd, {.buffer           = state.lutBuf.Handle(),
+                              .image            = state.payload.brdfLutImage.Handle(),
+                              .layout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                              .width            = kLutSize,
+                              .height           = kLutSize,
+                              .buffer_offset    = 0,
+                              .mip_level        = 0,
+                              .base_array_layer = 0}
+                    );
+
+                    byteOffset = 0;
+                    for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
+                        const uint32_t mipSize   = kBaseSize >> mip;
+                        const auto     faceBytes = static_cast<size_t>(mipSize) * mipSize * 4;
+                        const auto     regions   = CreateCopyRegions<6>(
+                            byteOffset, faceBytes, {.width = mipSize, .height = mipSize, .depth = 1}, VK_IMAGE_ASPECT_COLOR_BIT, mip, 0
+                        );
+                        CopyBufferToImage(cmd, state.specBuf.Handle(), state.payload.prefilteredImage.Handle(), regions);
+                        byteOffset += faceBytes * 6;
+                    }
+
                     CopyBuffer(cmd, state.shGpu, state.shCpu, kSHBytes);
+
+                    TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, state.payload.brdfLutImage.Handle());
+                    TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+                        cmd, state.payload.prefilteredImage.Handle()
+                    );
                 });
 
                 auto mappedSH = state.shCpu.Map();
@@ -166,34 +213,11 @@ class IBLProcessor {
                     return std::unexpected(ZHLN::RenderInitError::SubsystemAllocationFailed);
                 }
                 std::memcpy(state.payload.shCoeffs.data(), mappedSH.data, kSHBytes);
+                state.lutBuf  = {};
+                state.specBuf = {};
                 return std::move(state);
             })
             .and_then([&](State state) -> std::expected<State, ZHLN::Error> {
-                const VkImageCreateInfo lutInfo = {
-                    .sType                 = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-                    .pNext                 = nullptr,
-                    .flags                 = 0,
-                    .imageType             = VK_IMAGE_TYPE_2D,
-                    .format                = VK_FORMAT_R8G8B8A8_UNORM,
-                    .extent                = {.width = kLutSize, .height = kLutSize, .depth = 1},
-                    .mipLevels             = 1,
-                    .arrayLayers           = 1,
-                    .samples               = VK_SAMPLE_COUNT_1_BIT,
-                    .tiling                = VK_IMAGE_TILING_OPTIMAL,
-                    .usage                 = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-                    .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
-                    .queueFamilyIndexCount = 0,
-                    .pQueueFamilyIndices   = nullptr,
-                    .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED
-                };
-                return Image::Create(impl.allocator.Get(), lutInfo, VMA_MEMORY_USAGE_GPU_ONLY).transform([state = std::move(state)](Image lutImg) mutable {
-                    state.payload.brdfLutImage = std::move(lutImg);
-                    return std::move(state);
-                });
-            })
-            .and_then([&](State state) -> std::expected<State, ZHLN::Error> {
-                staging.UploadImage2DBuffer(state.payload.brdfLutImage.Handle(), kLutSize, kLutSize, 1, state.lutBuf.Handle(), 0);
-                staging.AddBuffer(std::move(state.lutBuf));
                 return CreateView<VK_FORMAT_R8G8B8A8_UNORM>(impl.ctx.Device(), state.payload.brdfLutImage.Handle())
                     .transform([state = std::move(state)](ImageView lutView) mutable {
                         state.payload.brdfLutView     = std::move(lutView);
@@ -202,31 +226,6 @@ class IBLProcessor {
                     });
             })
             .and_then([&](State state) -> std::expected<State, ZHLN::Error> {
-                const VkImageCreateInfo specInfo = {
-                    .sType                 = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-                    .pNext                 = nullptr,
-                    .flags                 = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
-                    .imageType             = VK_IMAGE_TYPE_2D,
-                    .format                = VK_FORMAT_R8G8B8A8_UNORM,
-                    .extent                = {.width = kBaseSize, .height = kBaseSize, .depth = 1},
-                    .mipLevels             = kMipLevels,
-                    .arrayLayers           = 6,
-                    .samples               = VK_SAMPLE_COUNT_1_BIT,
-                    .tiling                = VK_IMAGE_TILING_OPTIMAL,
-                    .usage                 = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-                    .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
-                    .queueFamilyIndexCount = 0,
-                    .pQueueFamilyIndices   = nullptr,
-                    .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED
-                };
-                return Image::Create(impl.allocator.Get(), specInfo, VMA_MEMORY_USAGE_GPU_ONLY).transform([state = std::move(state)](Image specImg) mutable {
-                    state.payload.prefilteredImage = std::move(specImg);
-                    return std::move(state);
-                });
-            })
-            .and_then([&](State state) -> std::expected<State, ZHLN::Error> {
-                staging.UploadPrefilteredCubeMap(state.payload.prefilteredImage.Handle(), state.specBuf.Handle(), kBaseSize, kMipLevels);
-                staging.AddBuffer(std::move(state.specBuf));
                 return CreateViewCube<VK_FORMAT_R8G8B8A8_UNORM>(impl.ctx.Device(), state.payload.prefilteredImage.Handle(), kMipLevels)
                     .transform([state = std::move(state)](ImageView cubeView) mutable {
                         state.payload.prefilteredView     = std::move(cubeView);

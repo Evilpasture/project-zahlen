@@ -2333,7 +2333,7 @@ std::expected<void, Error> RenderContext::Impl::InitLightingLUTs() {
     const size_t ampRawSize = ltc_amp.size() - 128;
 
     return stagingContext->Begin()
-        .and_then([&]() { return Vk::IBLProcessor::Bake(*this, *stagingContext); })
+        .and_then([&]() { return Vk::IBLProcessor::Bake(*this); })
         .and_then([&, matRawSize, ampRawSize](auto&& ibl) {
             iblPayload = std::forward<decltype(ibl)>(ibl);
             ZHLN::Log("[IBL] Uploading Linearly Transformed Cosines (LTC) LUTs...");
