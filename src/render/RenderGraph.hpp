@@ -71,13 +71,22 @@ struct TypeList<> {
     using type = detail::DummyUsage; // Safe fallback struct instead of void
 };
 
-template <ResourceName Name, VkFormat Format, VkImageAspectFlags Aspect, bool IsSwapchain = false, bool IsPersistent = false>
+template <
+    ResourceName         Name,
+    VkFormat             Format,
+    VkImageAspectFlags   Aspect,
+    bool                 IsSwapchain  = false,
+    bool                 IsPersistent = false,
+    uint32_t             ScaleDivisor = 1,
+    bool                 Is3D         = false>
 struct GraphImage {
-    static constexpr auto               name          = Name;
-    static constexpr VkFormat           format        = Format;
-    static constexpr VkImageAspectFlags aspect        = Aspect;
-    static constexpr bool               is_swapchain  = IsSwapchain;
-    static constexpr bool               is_persistent = IsPersistent;
+    static constexpr auto               name           = Name;
+    static constexpr VkFormat           format         = Format;
+    static constexpr VkImageAspectFlags aspect         = Aspect;
+    static constexpr bool               is_swapchain   = IsSwapchain;
+    static constexpr bool               is_persistent  = IsPersistent;
+    static constexpr uint32_t           scale_divisor  = ScaleDivisor;
+    static constexpr bool               is_3d          = Is3D;
 };
 
 template <typename Image, VkImageLayout Layout, VkPipelineStageFlags2 Stage, VkAccessFlags2 Access>

@@ -287,6 +287,12 @@ set(RAW_ENGINE_SOURCES
     src/engine/graphics/RenderGraphBuilder.cpp
     src/engine/graphics/RenderDrawCommands.cpp
     src/engine/graphics/RenderInit.cpp
+    src/engine/graphics/init/RenderInitDevice.cpp
+    src/engine/graphics/init/RenderInitHeaps.cpp
+    src/engine/graphics/init/RenderInitTargets.cpp
+    src/engine/graphics/init/RenderInitScenePipelines.cpp
+    src/engine/graphics/init/RenderInitPostProcess.cpp
+    src/engine/graphics/init/RenderInitUI.cpp
     src/engine/graphics/RenderResources.cpp
     src/engine/Engine.cpp
     src/engine/CreativeWorksFactory.cpp

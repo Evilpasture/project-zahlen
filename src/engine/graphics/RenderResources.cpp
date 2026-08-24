@@ -166,82 +166,6 @@ void RenderContext::OnDeviceLost() noexcept {
 // RenderContext Subsystem Implementation
 // ============================================================================
 
-auto RenderContext::Impl::CompileShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData) -> std::expected<void, Error> {
-    // VK_EXT_descriptor_heap: the shadow pass reads the scene registry through
-    // the heap; per-draw ObjectConstants travel via vkCmdPushDataEXT.
-    shadowPipelineLayout = emptyPipelineLayout;
-    return Vk::ShaderStages::Create(device, shaderData, "VSMain", "PSShadow")
-        .transform_error([](auto err) -> Error { return err; })
-        .and_then([&, device](auto&& shaders) -> std::expected<void, Error> {
-            return Vk::PipelineBuilder {}
-                .Shaders(shaders)
-                .Layout(emptyPipelineLayout)
-                .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
-                .DepthOnly()
-                .DepthFormat(VK_FORMAT_D32_SFLOAT)
-                .CullNone()
-                .Build(device)
-                .transform_error([](auto) -> Error { return RenderInitError::PipelineCreationFailed; })
-                .transform([&](auto&& pipeline) -> auto { shadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
-        })
-        .and_then([&, device]() -> std::expected<void, Error> {
-            // VK_EXT_mesh_shader twin of the shadow pipeline. Optional by
-            // design: a failure here only means the cascades keep using the
-            // indirect vertex draws, so it never fails pipeline compilation.
-            if (!ctx.MeshShadersSupported()) {
-                return {};
-            }
-
-            const ZHLN_ShaderDesc taskDesc = {.code = Vk::AsSpirV(Resource::basic_task.data()), .size = Resource::basic_task.size(), .entry_point = nullptr};
-            // Shadow variant: its varying set must match PSShadow exactly.
-            const auto            shadowSet = Resource::GetSceneShaders(Resource::SceneShaderVariant::Shadow);
-            const ZHLN_ShaderDesc meshDesc  = {.code = Vk::AsSpirV(shadowSet.mesh.data()), .size = shadowSet.mesh.size(), .entry_point = nullptr};
-            const ZHLN_ShaderDesc fragDesc  = {.code = Vk::AsSpirV(shaderData.fragment.data()), .size = shaderData.fragment.size(), .entry_point = "PSShadow"};
-
-            auto shaders = Vk::ShaderStages::CreateMesh(device, taskDesc, meshDesc, fragDesc);
-            if (!shaders) {
-                ZHLN::Log("[RenderResources] Shadow mesh-stage creation failed; cascades keep the vertex pipeline.");
-                return {};
-            }
-
-            auto pipeline = Vk::PipelineBuilder {}
-                                .Shaders(*shaders)
-                                .Layout(emptyPipelineLayout)
-                                .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
-                                .DepthOnly()
-                                .DepthFormat(VK_FORMAT_D32_SFLOAT)
-                                .CullNone()
-                                .Build(device);
-            if (!pipeline) {
-                ZHLN::Log("[RenderResources] Shadow mesh pipeline creation failed; cascades keep the vertex pipeline.");
-                return {};
-            }
-            shadowMeshPipeline = std::move(*pipeline);
-            return {};
-        });
-}
-
-auto RenderContext::Impl::CompilePunctualShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData) -> std::expected<void, Error> {
-    // VK_EXT_descriptor_heap variant of the shadow path (same mappings, the
-    // per-draw light index travels through push data).
-    punctualShadowPipelineLayout = emptyPipelineLayout;
-    return Vk::ShaderStages::Create(device, shaderData)
-        .transform_error([](auto err) -> Error { return err; })
-        .and_then([&, device](auto&& shaders) -> std::expected<void, Error> {
-            return Vk::PipelineBuilder {}
-                .Shaders(shaders)
-                .Layout(emptyPipelineLayout)
-                .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
-                .DepthOnly()
-                .DepthFormat(VK_FORMAT_D32_SFLOAT)
-                .ViewMask(0x3F)
-                .CullNone()
-                .Build(device)
-                .transform_error([](auto) -> Error { return RenderInitError::PipelineCreationFailed; })
-                .transform([&](auto&& pipeline) -> auto { punctualShadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
-        });
-}
-
 auto RenderContext::GetRendererName() const -> const char* {
     return _impl->appName.data();
 }
@@ -492,37 +416,6 @@ auto RenderContext::CreateTextureCube(const void* const* faceData, uint32_t widt
 
 auto RenderContext::RegisterTexture(std::string_view name, uint32_t bindlessIndex, bool isSRGB) -> TextureHandle {
     return _impl->textureManager.RegisterUploaded(name, bindlessIndex, isSRGB);
-}
-
-auto RenderContext::Impl::AdoptBindlessTexture(Vk::Image&& image, Vk::ImageView&& view, VkFormat format, uint32_t mipLevels, bool cube) -> uint32_t {
-    const uint32_t index = nextTextureIndex++;
-    WriteTextureSlotToHeap(index, image.Handle(), format, mipLevels, cube);
-    textureImages.push_back(std::move(image));
-    textureViews.push_back(std::move(view));
-    return index;
-}
-
-std::expected<void, Error> RenderContext::Impl::InitBakeHeapBindings() noexcept {
-    // One shared storage-image slot span for every one-shot compute bake
-    // (SMAA / BRDF / IBL specular / procedural). ExecuteImmediate is
-    // synchronous, so the same slots are rewritten per bake.
-    const auto shader = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::ProceduralBakeComp).vertex, "CSMain");
-    if (!proceduralBakeDescLayout.Build(ctx.Device(), shader, VK_SHADER_STAGE_COMPUTE_BIT)) {
-        return std::unexpected(RenderInitError::PipelineCreationFailed);
-    }
-    Vk::BuildHeapPassBindings(
-        heapManager, proceduralBakeDescLayout.reflectedSets[0], 0, heapPushDataLayout.heapIndexOffset, kBakeHeapSlotSpan, bakeHeapBindings
-    );
-    return {};
-}
-
-void RenderContext::Impl::WriteTextureSlotToHeap(uint32_t bindlessIndex, VkImage image, VkFormat format, uint32_t mipLevels, bool cube) noexcept {
-    // The globalTextures[] array is pinned to a contiguous heap region by the
-    // binding-11 mapping; index N lives at slot (textureHeapBase + N).
-    Vk::TextureHandle           slot {textureHeapBase + bindlessIndex};
-    const VkImageViewCreateInfo info = cube ? Vk::MakeViewCreateInfoCube(image, format, mipLevels) :
-                                              Vk::MakeViewCreateInfo2D(image, format, mipLevels, VK_IMAGE_ASPECT_COLOR_BIT);
-    heapManager.WriteImage(slot, info, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 
 auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> std::expected<uint32_t, Error> {
@@ -977,25 +870,6 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
                     b.posMesh->rtCtx       = &impl->rtCtx;
                 });
         });
-}
-
-auto RenderContext::Impl::InitializeSystemTextures() noexcept -> std::expected<void, Error> {
-    ZHLN::Log("[Resource Factory] Registering fallback system texture slots...");
-
-    std::array<uint8_t, 4> blackPixel  = {0, 0, 0, 0};
-    std::array<uint8_t, 4> whitePixel  = {255, 255, 255, 255};
-    std::array<uint8_t, 4> normalPixel = {128, 128, 255, 255};
-
-    return CreateTextureInternal(blackPixel.data(), 1, 1, false).and_then([&, whitePixel, normalPixel](uint32_t blackIdx) -> std::expected<void, Error> {
-        return CreateTextureInternal(whitePixel.data(), 1, 1, true).and_then([&, blackIdx, normalPixel](uint32_t whiteIdx) -> std::expected<void, Error> {
-            return CreateTextureInternal(normalPixel.data(), 1, 1, false).and_then([&, blackIdx, whiteIdx](uint32_t normalIdx) -> std::expected<void, Error> {
-                if (blackIdx != 0 || whiteIdx != 1 || normalIdx != 2) {
-                    return std::unexpected(RenderInitError::SubsystemAllocationFailed);
-                }
-                return {};
-            });
-        });
-    });
 }
 
 void RenderContext::Impl::RegisterShaderWatcher(const char* path, std::function<void()> callback) {
