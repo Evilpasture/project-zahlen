@@ -839,6 +839,7 @@ void MainPass1::Execute(
     const FrameRecorder&                                                                                       recorder,
     SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> in
 ) const noexcept {
+    auto       cmd       = recorder.cmd;
     auto&      ctx       = recorder.ctx;
     const auto drawCount = static_cast<uint32_t>(ctx.queues.drawQueue.size());
     if (drawCount == 0) {
