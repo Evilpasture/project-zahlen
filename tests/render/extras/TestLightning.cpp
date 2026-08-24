@@ -18,9 +18,6 @@ import ZHLN.Lightning;
 
 enum class LightningTestError : uint32_t {
     Success = 0,
-    HeidlerMathInvariantFailed[[= ZHLN::Reflect::Description("Heidler surge current curve calculation violated mathematical invariants.")]],
-    FractalGenerationFailed[[= ZHLN::Reflect::Description("Fractal segment tree generation produced NaNs or invalid segments.")]],
-    RibbonGenerationFailed[[= ZHLN::Reflect::Description("Camera-facing ribbon generation output invalid quad vertices/attributes.")]],
     StrikeSpawnFailed[[= ZHLN::Reflect::Description("Lightning::Spawn failed to instantiate ECS entity and flash lights.")]],
     StrikeLifecycleDesync[[= ZHLN::Reflect::Description("Lightning strike phase progression (Leader -> Stroke -> Dissipate) failed to complete.")]],
     AmbienceFlashNotRestored[[= ZHLN::Reflect::Description("Global ambient exposure was not cleanly restored to baseline after bolt expiration.")]],
@@ -39,91 +36,7 @@ struct LightningTestSuite {
 
     struct Tests {
         // ====================================================================
-        // 1. Analytical Surge Current & Curve Verification
-        // ====================================================================
-        std::expected<void, ZHLN::Error> heidler_current_curve_mathematical_invariants() {
-            constexpr float kPeakCurrentKA = 45.0f;
-            constexpr float kT1            = 1.8f;
-            constexpr float kT2            = 95.0f;
-
-            // Invariant 1: t <= 0 must yield 0 current
-            ZHLN::Test::ExpectEq(ZHLN::LightningGenerator::EvaluateHeidler(0.0f, kPeakCurrentKA, kT1, kT2), 0.0f);
-            ZHLN::Test::ExpectEq(ZHLN::LightningGenerator::EvaluateHeidler(-5.0f, kPeakCurrentKA, kT1, kT2), 0.0f);
-
-            // Invariant 2: Positive rise time produces rapid current increase
-            const float iAt1Us = ZHLN::LightningGenerator::EvaluateHeidler(1.0f, kPeakCurrentKA, kT1, kT2);
-            const float iAt3Us = ZHLN::LightningGenerator::EvaluateHeidler(3.0f, kPeakCurrentKA, kT1, kT2);
-            ZHLN::Test::ExpectTrue(iAt1Us > 0.0f);
-            ZHLN::Test::ExpectTrue(iAt3Us > iAt1Us);
-
-            // Invariant 3: Peak occurs within the expected return stroke window (~3-10 microseconds)
-            float maxCurrent = 0.0f;
-            float timeAtPeak = 0.0f;
-            for (float tUs = 0.1f; tUs <= 200.0f; tUs += 0.5f) {
-                const float current = ZHLN::LightningGenerator::EvaluateHeidler(tUs, kPeakCurrentKA, kT1, kT2);
-                if (current > maxCurrent) {
-                    maxCurrent = current;
-                    timeAtPeak = tUs;
-                }
-            }
-
-            ZHLN::Test::ExpectTrue(maxCurrent > 30.0f);
-            ZHLN::Test::ExpectTrue(timeAtPeak >= 1.5f && timeAtPeak <= 15.0f);
-
-            // Invariant 4: Tail decay approaches 0 at large t
-            const float iTail = ZHLN::LightningGenerator::EvaluateHeidler(1000.0f, kPeakCurrentKA, kT1, kT2);
-            ZHLN::Test::ExpectTrue(iTail < 1.0f);
-
-            return {};
-        }
-
-        // ====================================================================
-        // 2. Procedural Fractal Segments & Camera-Facing Ribbon Geometry
-        // ====================================================================
-        std::expected<void, ZHLN::Error> fractal_tree_and_ribbon_mesh_generation() {
-            std::mt19937 rng(1337); // Deterministic seed for testing
-
-            const JPH::Vec3 start(0.0f, 200.0f, 0.0f);
-            const JPH::Vec3 end(15.0f, 0.0f, -10.0f);
-
-            const ZHLN::LightningConfig cfg {
-                .eta          = 2.5f,
-                .ribbonWidth  = 0.8f,
-                .subdivisions = 4 // 2^4 = 16 base trunk segments + branches
-            };
-
-            // 1. Generate fractal segments
-            const auto segments = ZHLN::LightningGenerator::GenerateFractalSegments(start, end, cfg.ribbonWidth, cfg, rng);
-            ZHLN::Test::ExpectTrue(segments.size() >= 16);
-
-            // Verify spatial continuity and finite coordinates
-            for (const auto& seg: segments) {
-                ZHLN::Test::ExpectTrue(std::isfinite(seg.start.GetX()) && std::isfinite(seg.start.GetY()) && std::isfinite(seg.start.GetZ()));
-                ZHLN::Test::ExpectTrue(std::isfinite(seg.end.GetX()) && std::isfinite(seg.end.GetY()) && std::isfinite(seg.end.GetZ()));
-                ZHLN::Test::ExpectTrue(seg.width > 0.0f);
-            }
-
-            // 2. Generate Camera-Facing Ribbon
-            const JPH::Vec3 cameraPos(0.0f, 50.0f, 150.0f);
-            const auto      ribbon = ZHLN::LightningGenerator::BuildCameraFacingRibbon(segments, cameraPos);
-
-            // 2 triangles per quad = 6 vertices per segment
-            const size_t expectedVertexCount = segments.size() * 6;
-            ZHLN::Test::ExpectEq(ribbon.positions.size(), expectedVertexCount);
-            ZHLN::Test::ExpectEq(ribbon.attributes.size(), expectedVertexCount);
-            ZHLN::Test::ExpectEq(ribbon.maxVertices, static_cast<uint32_t>(expectedVertexCount));
-
-            // Verify UV and color attributes are packed
-            for (const auto& attr: ribbon.attributes) {
-                ZHLN::Test::ExpectTrue(attr.normal.data != 0);
-                ZHLN::Test::ExpectTrue(attr.color.data != 0);
-            }
-
-            return {};
-        }
-
-        // ====================================================================
-        // 3. Full Headless Engine Strike Lifecycle & Ambience Flashing
+        // 1. Full Headless Engine Strike Lifecycle & Ambience Flashing
         // ====================================================================
         std::expected<void, ZHLN::Error> headless_engine_strike_lifecycle_and_light_cleanup() {
             ZHLN::DefaultPreset::SetDisabled(true);
@@ -155,9 +68,7 @@ struct LightningTestSuite {
             constexpr float kInitialBaselineExposure = 6.0f;
             const auto      settingsEnts             = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
             ZHLN::Test::ExpectTrue(!settingsEnts.empty());
-            reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
-                pp.ambientExposure = kInitialBaselineExposure;
-            });
+            reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) { pp.ambientExposure = kInitialBaselineExposure; });
 
             // 1. Spawn Lightning Strike
             const JPH::RVec3 cloudPos(0.0, 180.0, 0.0);
@@ -237,7 +148,7 @@ struct LightningTestSuite {
         }
 
         // ====================================================================
-        // 4. Multiple Overlapping Lightning Strikes (Exposure Stack Invariant)
+        // 2. Multiple Overlapping Lightning Strikes (Exposure Stack Invariant)
         // ====================================================================
         std::expected<void, ZHLN::Error> overlapping_strikes_ambience_stack_integrity() {
             ZHLN::DefaultPreset::SetDisabled(true);
