@@ -15,6 +15,7 @@
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
+#include <Zahlen/Window.hpp>
 
 import ZHLN.glTF;
 
