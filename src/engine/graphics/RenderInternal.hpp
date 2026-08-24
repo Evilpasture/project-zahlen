@@ -819,6 +819,10 @@ struct RenderContext::Impl {
     // Device addresses of the current frame's scene buffers, in
     // GlobalSceneRegistry order {frame, lights, instances, joints, prevJoints, morphDeltas}.
     [[nodiscard]] auto FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, Vk::kHeapFrameAddressCount>;
+    // Binds both heaps. Offline compute bakes use this: they do not read the
+    // scene registry and must not query per-frame buffer addresses that do
+    // not exist yet (IBL runs inside InitBindless, before InitCullingResources).
+    void BindHeaps(VkCommandBuffer cmd) const noexcept;
     // Binds both heaps and pushes the frame addresses at their reflected offsets.
     // Heap-using segments call this first: legacy set/push-constant commands
     // elsewhere in the frame invalidate heap and push-data state, so every
@@ -1192,7 +1196,7 @@ auto RenderContext::Impl::BakeComputeTexture2D(
                 Vk::WriteHeapBindings(heapManager, ctx, bakeHeapBindings, kBake2DHeapIndex, Vk::ImageWrite {.view = view.Get(), .viewInfo = &writeInfo});
 
                 Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
-                    BindHeapsAndPushFrame(cmd);
+                    BindHeaps(cmd);
                     Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, image.Handle());
                     pass.DispatchHeapIndexedThreads(ctx, cmd, kBake2DHeapIndex, width, height, 1, push);
                     Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());

@@ -94,7 +94,7 @@ std::expected<uint32_t, Error>
                 // VK_EXT_descriptor_heap: this command buffer records a heap
                 // pipeline, so the heaps must be bound on it (push data also
                 // does not carry over from other command buffers).
-                BindHeapsAndPushFrame(cmd);
+                BindHeaps(cmd);
 
                 // Transition Undefined -> General (Safe for Compute storage writes)
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, gpuImage.Handle());
