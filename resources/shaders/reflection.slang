@@ -91,10 +91,10 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
         float rayT         = q.CommittedRayT();
         float3 hitWorldPos = ray.Origin + ray.Direction * rayT;
 
-        // CustomIndex is the draw-queue slot written into g_instances.
-        // InstanceID is the compacted TLAS slot and will mis-index (and
-        // page-fault) whenever any draw is omitted from the TLAS.
-        uint instanceID = q.CommittedInstanceCustomIndex();
+        // HLSL/Slang CommittedInstanceID is the instanceCustomIndex we write
+        // as the draw-queue slot. CommittedInstanceIndex is the compacted
+        // TLAS slot and must not be used to index g_instances.
+        uint instanceID = q.CommittedInstanceID();
         InstanceData hitInst = g_instances[instanceID];
 
         // 1. Reconstruct exact geometric hit normal from mesh vertices
