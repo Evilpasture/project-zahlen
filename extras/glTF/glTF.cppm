@@ -289,8 +289,8 @@ void DrawDropPrompt(ZHLN::Engine& engine) {
     ui.BeginPanel(
         "glTFInspectorPrompt",
         ZHLN::GUI::PanelConfig {
-            .width = 560.0f, .height = 200.0f, .x = -280.0f, .y = -100.0f, .padding = 24.0f, .gap = 12.0f,
-            .color = {0.06f, 0.09f, 0.14f, 0.95f}
+            .width = 560.0f, .height = 200.0f, .x = -280.0f, .y = -100.0f,
+            .color = {0.06f, 0.09f, 0.14f, 0.95f}, .gap = 12.0f, .padding = 24.0f
         },
         [&]() -> void {
             ui.Label(
