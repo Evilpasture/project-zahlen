@@ -165,9 +165,6 @@ auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSample
     heapManager.SkipStaticResourceSlots(kGlobalTextureSlots + (kSceneStaticResourceSlots - 4));
     heapManager.SkipStaticSamplerSlots(kSceneStaticSamplerSlots - 3);
 
-    // The ImGui texture region sits at the tail of the pass slot region.
-    imguiTextureHeapBase = kPassResourceHeapBase + kPassStaticResourceSlots - kImGuiTextureSlots;
-
     // --- Write the static sampler descriptors into the sampler heap ---
     heapManager.WriteSampler(globalSamplerSlot, globalSamplerInfo);
     heapManager.WriteSampler(clampSamplerSlot, clampSamplerInfo);

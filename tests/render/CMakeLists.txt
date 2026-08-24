@@ -17,6 +17,7 @@ foreach(TEST_SRC IN LISTS RENDER_TEST_SOURCES)
     target_link_libraries(${TARGET_NAME} PRIVATE
         zahlen_engine
         zahlen_render
+        imgui
         # TestMeshShaders.cpp exercises Zahlen/Meshlet.hpp (the shared cooker
         # partitioning) directly; zahlen_engine links meshoptimizer privately,
         # so the tests need their own INTERFACE include/link.

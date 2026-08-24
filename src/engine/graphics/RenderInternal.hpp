@@ -197,7 +197,6 @@ static constexpr uint32_t kPassStaticResourceSlots   = 1024;  // descriptor-heap
 static constexpr uint32_t kPassStaticSamplerSlots    = 64;
 static constexpr uint32_t kPassResourceHeapBase      = kSceneStaticResourceSlots + kGlobalTextureSlots;
 static constexpr uint32_t kPassSamplerHeapBase       = kSceneStaticSamplerSlots;
-static constexpr uint32_t kImGuiTextureSlots         = 512; // ImGui texture region (tail of the pass slots)
 
 static constexpr Color4 kClearColorScene    = {.r = 0.08f, .g = 0.09f, .b = 0.12f, .a = 1.0f}; // G-Buffer background theme
 static constexpr Color4 kClearColorVelocity = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
@@ -579,6 +578,7 @@ struct RenderContext::Impl {
 
     VkCommandBuffer                           current_cmd = VK_NULL_HANDLE;
     Vk::CommandBuffer<Vk::QueueType::Compute> current_compute_cmd;
+    bool                                      imguiFrameOpen = false;
 
     std::unique_ptr<Vk::StagingContext>    stagingContext;
     Vk::DeletionQueue                      deletionQueue;
@@ -697,9 +697,6 @@ struct RenderContext::Impl {
     VkImageViewCreateInfo shadowAtlas2DViewInfo {};
     VkImageViewCreateInfo ltcMatViewInfo {};
     VkImageViewCreateInfo ltcAmpViewInfo {};
-
-    // ImGui heap region (the backend fork sub-allocates slots from here).
-    uint32_t imguiTextureHeapBase = 0;
 
     // Static heap slots (allocated once at init).
     Vk::SamplerHandle globalSamplerSlot;

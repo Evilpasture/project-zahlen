@@ -325,6 +325,14 @@ class CommandEncoder {
         }
     }
 
+    void SetViewport(const VkViewport& viewport) noexcept {
+        vkCmdSetViewport(cmd, 0, 1, &viewport);
+    }
+
+    void SetScissor(const VkRect2D& scissor) noexcept {
+        vkCmdSetScissor(cmd, 0, 1, &scissor);
+    }
+
     template <GpuTriviallyCopyable T>
     void Draw(
         uint32_t           vertexCount,

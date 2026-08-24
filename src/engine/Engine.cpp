@@ -10,10 +10,8 @@
 #include <Jolt/RegisterTypes.h>
 // clang-format on
 #include "TTYBackend.hpp"
-#include "backends/imgui_impl_glfw.h"
 #include "engine/system/LODSystem.hpp"
 #include "imgui.h"
-#include "imgui_impl_vulkan_heap.h"
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/CommandLine.hpp>
@@ -567,9 +565,7 @@ void Engine::ProcessEvents() {
     }
 
     glfwPollEvents();
-    ImGui_ImplVulkanHeap_NewFrame();
-    ImGui_ImplGlfw_NewFrame();
-    ImGui::NewFrame();
+    _impl->renderContext->BeginImGuiFrame();
 
     // Mirror ImGui capture into ECS so gameplay systems stay ImGui-free.
     // High-level ImGui UI remains in main.cpp; only the capture flags cross here.

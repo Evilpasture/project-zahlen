@@ -20,6 +20,7 @@ public struct UIObjectConstants {
     public uint64_t attrAddress;
     public uint albedoIdx;
     public uint isSDF;
+    public uint useTextureColor;
 };
 
 public struct CullingConstants {

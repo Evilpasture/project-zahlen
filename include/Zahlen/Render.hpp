@@ -120,6 +120,7 @@ class ZHLN_API RenderContext {
 
     [[nodiscard]] RenderResult BeginFrame() noexcept;
     [[nodiscard]] RenderResult EndFrame() noexcept;
+    void                       BeginImGuiFrame() noexcept;
     void                       SetResolution(const Extent2D& resolution);
     [[nodiscard]] const char*  GetRendererName() const;
     [[nodiscard]] const char*  GetGPUName() const;

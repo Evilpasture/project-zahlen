@@ -6,7 +6,6 @@
 #include "../RenderInternal.hpp"
 #include "backends/imgui_impl_glfw.h"
 #include "imgui.h"
-#include "imgui_impl_vulkan_heap.h"
 #include <Features.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
@@ -392,9 +391,10 @@ RenderContext::~RenderContext() {
         _impl->stagingContext.reset();
 
         // --- SAFETY: Only shut down ImGui if it was actually initialized ---
-        if (!_impl->window.IsTTY() && !_impl->window.IsHeadless()) {
-            ImGui_ImplVulkanHeap_Shutdown();
-            ImGui_ImplGlfw_Shutdown();
+        if (ImGui::GetCurrentContext() != nullptr) {
+            if (!_impl->window.IsHeadless() && !_impl->window.IsTTY()) {
+                ImGui_ImplGlfw_Shutdown();
+            }
             ImGui::DestroyContext();
         }
     }
