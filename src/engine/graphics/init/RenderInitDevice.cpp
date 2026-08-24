@@ -301,6 +301,11 @@ auto GetDeviceExtensions(VkPhysicalDevice physicalDevice, bool isHeadless, bool 
 RenderContext::RenderContext(PrivateToken /*unused*/, std::unique_ptr<Impl> impl) noexcept: _impl(std::move(impl)) {
 }
 
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
+
 auto RenderContext::Create(Window& window, const RenderConfig& cfg) noexcept -> std::expected<std::unique_ptr<RenderContext>, Error> {
     auto impl     = std::make_unique<Impl>(window);
     impl->appName = cfg.appName;
