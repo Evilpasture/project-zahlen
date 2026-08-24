@@ -1106,30 +1106,10 @@ void RenderContext::Impl::RegisterPipeline(const PipelineRegistration& reg) noex
 }
 
 void RenderContext::Impl::UploadClusterBounds() {
-    if (!clusterBoundsPass.pipeline.Valid() || clusterBoundsPass.fixedDispatchSize[0] == 0) {
-        return;
-    }
-
-    Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
-        BindHeapsAndPushFrame(cmd);
-        clusterBoundsPass.DispatchHeapIndexed(ctx, cmd, frame_index);
-        Vk::MemoryBarrier(
-            cmd, {.src_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                  .src_access = VK_ACCESS_2_SHADER_WRITE_BIT,
-                  .dst_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                  .dst_access = VK_ACCESS_2_SHADER_READ_BIT}
-        );
-    });
+    clusterBoundsDirty = true;
 }
 
-auto RenderContext::Impl::DispatchOneShotCompute(
-    const ZHLN_ShaderDesc& shader,
-    const void*            pushData,
-    uint32_t               pushSize,
-    uint32_t               threadsX,
-    uint32_t               threadsY,
-    uint32_t               threadsZ
-) noexcept -> std::expected<void, Error> {
+auto RenderContext::Impl::BuildOneShotCompute(const ZHLN_ShaderDesc& shader) noexcept -> std::expected<Vk::ComputePass, Error> {
     if (shader.code == nullptr || shader.size == 0) {
         return std::unexpected(ShaderStageCreationError::ShaderLoadingFailed);
     }
@@ -1144,21 +1124,33 @@ auto RenderContext::Impl::DispatchOneShotCompute(
         .Build(ctx.Device())
         .transform([&](auto&& pipeline) {
             pass.pipeline = std::forward<decltype(pipeline)>(pipeline);
-
-            Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
-                pass.Bind(cmd);
-                if (pushData != nullptr && pushSize > 0) {
-                    Vk::PushData(ctx, cmd, 0, pushData, pushSize);
-                }
-                pass.DispatchThreads(cmd, threadsX, threadsY, threadsZ);
-                Vk::MemoryBarrier(
-                    cmd, {.src_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                          .src_access = VK_ACCESS_2_SHADER_WRITE_BIT,
-                          .dst_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                          .dst_access = VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT}
-                );
-            });
+            return std::move(pass);
         });
+}
+
+auto RenderContext::Impl::DispatchOneShotCompute(
+    const ZHLN_ShaderDesc& shader,
+    const void*            pushData,
+    uint32_t               pushSize,
+    uint32_t               threadsX,
+    uint32_t               threadsY,
+    uint32_t               threadsZ
+) noexcept -> std::expected<void, Error> {
+    return BuildOneShotCompute(shader).transform([&](Vk::ComputePass pass) {
+        Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
+            pass.Bind(cmd);
+            if (pushData != nullptr && pushSize > 0) {
+                Vk::PushData(ctx, cmd, 0, pushData, pushSize);
+            }
+            pass.DispatchThreads(cmd, threadsX, threadsY, threadsZ);
+            Vk::MemoryBarrier(
+                cmd, {.src_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                      .src_access = VK_ACCESS_2_SHADER_WRITE_BIT,
+                      .dst_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                      .dst_access = VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT}
+            );
+        });
+    });
 }
 
 std::expected<void, Error> RenderContext::Impl::ValidateSlangTypeLayouts() noexcept {

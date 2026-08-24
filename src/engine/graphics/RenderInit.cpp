@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <functional>
 #include <stb_image.h>
+#include <tuple>
 #include <vector>
 namespace {
 
@@ -1917,65 +1918,110 @@ std::expected<void, Error> RenderContext::Impl::InitPostProcessing() {
         .and_then([&]() { return register_and_check("Blit", [this]() { return BuildBlitPipeline(); }, {Resource::Paths::BlitVS, Resource::Paths::BlitPS}); })
         // CHANGED: Converted to .and_then to handle expected texture allocations monadically
         .and_then([&]() -> std::expected<void, Error> {
-            auto bakeSmaaLut = [&](uint32_t width, uint32_t height, uint32_t mode) -> std::expected<uint32_t, Error> {
-                struct SMAALUTPush {
-                    uint64_t outAddr = 0;
-                    uint32_t width   = 0;
-                    uint32_t height  = 0;
-                    uint32_t mode    = 0;
-                };
-                struct State {
-                    Vk::Buffer gpu;
-                    Vk::Buffer cpu;
-                };
-                const size_t          bytes  = static_cast<size_t>(width) * height * 4;
-                const ZHLN_ShaderDesc shader = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::SMAALUTComp).vertex, "CSMain");
+            struct SMAALUTPush {
+                uint64_t outAddr = 0;
+                uint32_t width   = 0;
+                uint32_t height  = 0;
+                uint32_t mode    = 0;
+            };
+            struct Lut {
+                uint32_t   width  = 0;
+                uint32_t   height = 0;
+                uint32_t   mode   = 0;
+                Vk::Buffer gpu;
+                Vk::Image  image;
+            };
 
-                auto requireShader = [](const ZHLN_ShaderDesc& desc) -> std::expected<ZHLN_ShaderDesc, Error> {
-                    if (desc.code == nullptr || desc.size == 0) {
-                        return std::unexpected(ShaderStageCreationError::ShaderLoadingFailed);
-                    }
-                    return desc;
-                };
-
-                return requireShader(shader)
-                    .and_then([&](auto) -> std::expected<Vk::Buffer, Error> {
-                        return Vk::Buffer::Create(
-                            allocator.Get(), bytes,
-                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                            VMA_MEMORY_USAGE_GPU_ONLY
-                        );
-                    })
-                    .and_then([&](Vk::Buffer gpu) {
-                        const SMAALUTPush push {.outAddr = ctx.BufferAddress(gpu.Handle()), .width = width, .height = height, .mode = mode};
-                        return DispatchOneShotCompute(shader, &push, sizeof(push), width, height, 1).transform([gpu = std::move(gpu)]() mutable {
-                            return State {.gpu = std::move(gpu)};
-                        });
-                    })
-                    .and_then([&](State state) -> std::expected<State, Error> {
-                        return Vk::Buffer::Create(allocator.Get(), bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_TO_CPU)
-                            .transform([state = std::move(state)](Vk::Buffer cpu) mutable {
-                                state.cpu = std::move(cpu);
-                                return std::move(state);
+            const ZHLN_ShaderDesc shader = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::SMAALUTComp).vertex, "CSMain");
+            auto                  makeLut = [&](uint32_t width, uint32_t height, uint32_t mode) -> std::expected<Lut, Error> {
+                const size_t bytes = static_cast<size_t>(width) * height * 4;
+                return Vk::Buffer::Create(
+                           allocator.Get(), bytes,
+                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                           VMA_MEMORY_USAGE_GPU_ONLY
+                )
+                    .and_then([&, width, height, mode](Vk::Buffer gpu) {
+                        return Vk::ImageBuilder {}
+                            .Texture2D(width, height, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 1)
+                            .Build(allocator.Get())
+                            .transform([gpu = std::move(gpu), width, height, mode](Vk::Image image) mutable {
+                                return Lut {.width = width, .height = height, .mode = mode, .gpu = std::move(gpu), .image = std::move(image)};
                             });
-                    })
-                    .and_then([&](State state) -> std::expected<uint32_t, Error> {
-                        Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) { Vk::CopyBuffer(cmd, state.gpu, state.cpu, bytes); });
-                        auto mapped = state.cpu.Map();
-                        if (mapped.data == nullptr) {
-                            return std::unexpected(RenderInitError::SubsystemAllocationFailed);
-                        }
-                        return CreateTextureInternal(mapped.data, width, height, false);
                     });
             };
 
-            return bakeSmaaLut(160, 560, 0).and_then([&](uint32_t area) -> std::expected<void, Error> {
-                smaaAreaTexIdx = area;
-                return bakeSmaaLut(64, 16, 1).transform([&](uint32_t search) {
-                    smaaSearchTexIdx = search;
-                    ZHLN::Log("[SMAA] Area and search LUTs baked on GPU.");
+            auto adopt = [&](Lut& lut) -> std::expected<uint32_t, Error> {
+                return Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(ctx.Device(), lut.image.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 1)
+                    .transform([&](Vk::ImageView view) {
+                        const uint32_t index = nextTextureIndex++;
+                        WriteTextureSlotToHeap(index, lut.image.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, false);
+                        textureImages.push_back(std::move(lut.image));
+                        textureViews.push_back(std::move(view));
+                        return index;
+                    });
+            };
+
+            return BuildOneShotCompute(shader)
+                .and_then([&](Vk::ComputePass pass) {
+                    return makeLut(160, 560, 0).and_then([&](Lut area) {
+                        return makeLut(64, 16, 1).transform([pass = std::move(pass), area = std::move(area)](Lut search) mutable {
+                            return std::tuple {std::move(pass), std::move(area), std::move(search)};
+                        });
+                    });
+                })
+                .and_then([&](auto packed) -> std::expected<void, Error> {
+                    auto [pass, area, search] = std::move(packed);
+                    Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
+                        const SMAALUTPush areaPush {
+                            .outAddr = ctx.BufferAddress(area.gpu.Handle()), .width = area.width, .height = area.height, .mode = area.mode
+                        };
+                        const SMAALUTPush searchPush {
+                            .outAddr = ctx.BufferAddress(search.gpu.Handle()), .width = search.width, .height = search.height, .mode = search.mode
+                        };
+                        pass.Bind(cmd);
+                        Vk::PushData(ctx, cmd, 0, areaPush);
+                        pass.DispatchThreads(cmd, area.width, area.height, 1);
+                        Vk::PushData(ctx, cmd, 0, searchPush);
+                        pass.DispatchThreads(cmd, search.width, search.height, 1);
+                        Vk::MemoryBarrier(
+                            cmd, {.src_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                                  .src_access = VK_ACCESS_2_SHADER_WRITE_BIT,
+                                  .dst_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                                  .dst_access = VK_ACCESS_2_TRANSFER_READ_BIT}
+                        );
+                        Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, area.image.Handle());
+                        Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, search.image.Handle());
+                        Vk::CopyBufferToImage(
+                            cmd, {.buffer           = area.gpu.Handle(),
+                                  .image            = area.image.Handle(),
+                                  .layout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                  .width            = area.width,
+                                  .height           = area.height,
+                                  .buffer_offset    = 0,
+                                  .mip_level        = 0,
+                                  .base_array_layer = 0}
+                        );
+                        Vk::CopyBufferToImage(
+                            cmd, {.buffer           = search.gpu.Handle(),
+                                  .image            = search.image.Handle(),
+                                  .layout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                  .width            = search.width,
+                                  .height           = search.height,
+                                  .buffer_offset    = 0,
+                                  .mip_level        = 0,
+                                  .base_array_layer = 0}
+                        );
+                        Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, area.image.Handle());
+                        Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, search.image.Handle());
+                    });
+                    return adopt(area).and_then([&](uint32_t areaIdx) {
+                        smaaAreaTexIdx = areaIdx;
+                        return adopt(search).transform([&](uint32_t searchIdx) {
+                            smaaSearchTexIdx = searchIdx;
+                            ZHLN::Log("[SMAA] Area and search LUTs baked on GPU.");
+                        });
+                    });
                 });
-            });
         })
         .and_then([&]() -> std::expected<void, Error> {
             // Every pass pipeline + binding table now exists: write the static

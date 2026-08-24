@@ -70,19 +70,22 @@ public float3 EvaluateProceduralSky(float3 D, float3 zenith, float3 horizon, flo
     return color;
 }
 
+// Fallbacks for tools that do not push a scene palette. Production IBL
+// reads skyZenith / skyHorizon / skyGround / sunDir from IBLBakePush so
+// the prefilter matches PostProcessSettingsComponent.
 [ForceInline]
 public float3 DefaultSkyZenith() {
-    return float3(0.12f, 0.38f, 0.85f);
+    return float3(0.003f, 0.008f, 0.020f);
 }
 
 [ForceInline]
 public float3 DefaultSkyHorizon() {
-    return float3(0.55f, 0.82f, 1.00f);
+    return float3(0.015f, 0.035f, 0.080f);
 }
 
 [ForceInline]
 public float3 DefaultSkyGround() {
-    return float3(0.20f, 0.15f, 0.10f);
+    return float3(0.001f, 0.001f, 0.003f);
 }
 
 [ForceInline]

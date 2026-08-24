@@ -13,6 +13,11 @@ public struct IBLBakePush {
     public float roughness;
     public uint face;
     public uint sampleCount;
+    public uint _pad;
+    public float4 skyZenith;
+    public float4 skyHorizon;
+    public float4 skyGround;
+    public float4 sunDir;
 };
 
 [vk::push_constant]
@@ -30,7 +35,7 @@ void SpecularMain(uint3 tid: SV_DispatchThreadID) {
 
     float3 color = float3(0.0f, 0.0f, 0.0f);
     if (pc.roughness == 0.0f) {
-        color = EvaluateProceduralSky(R, DefaultSkyZenith(), DefaultSkyHorizon(), DefaultSkyGround(), DefaultSunDir());
+        color = EvaluateProceduralSky(R, pc.skyZenith.xyz, pc.skyHorizon.xyz, pc.skyGround.xyz, pc.sunDir.xyz);
     } else {
         float3 N           = R;
         float3 V           = R;
@@ -43,7 +48,7 @@ void SpecularMain(uint3 tid: SV_DispatchThreadID) {
             float3 L    = normalize(2.0f * dot(V, H) * H - V);
             float NdotL = max(dot(L, N), 0.0f);
             if (NdotL > 0.0f) {
-                acc += EvaluateProceduralSky(L, DefaultSkyZenith(), DefaultSkyHorizon(), DefaultSkyGround(), DefaultSunDir()) * NdotL;
+                acc += EvaluateProceduralSky(L, pc.skyZenith.xyz, pc.skyHorizon.xyz, pc.skyGround.xyz, pc.sunDir.xyz) * NdotL;
                 totalWeight += NdotL;
             }
         }
@@ -75,7 +80,7 @@ void SHMain(uint3 tid: SV_DispatchThreadID, uint gtid: SV_GroupThreadID) {
         float r    = sqrt(max(0.0f, 1.0f - z * z));
         float phi  = 2.0f * PI * xi.y;
         float3 dir = float3(r * cos(phi), r * sin(phi), z);
-        float3 Lin = EvaluateProceduralSky(dir, DefaultSkyZenith(), DefaultSkyHorizon(), DefaultSkyGround(), DefaultSunDir());
+        float3 Lin = EvaluateProceduralSky(dir, pc.skyZenith.xyz, pc.skyHorizon.xyz, pc.skyGround.xyz, pc.sunDir.xyz);
         float Y[9];
         EvalSHBasis(dir, Y);
         [unroll]

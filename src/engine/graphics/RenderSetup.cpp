@@ -124,9 +124,9 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniform
     std::memcpy(_impl->frames.frameUniformBuffers->Map().data, &gpuUniforms, sizeof(FrameUniforms));
 
     if (aspect != _impl->lastAspectRatio || cam.fov != _impl->lastFov) {
-        _impl->lastAspectRatio = aspect;
-        _impl->lastFov         = cam.fov;
-        _impl->UploadClusterBounds();
+        _impl->lastAspectRatio    = aspect;
+        _impl->lastFov            = cam.fov;
+        _impl->clusterBoundsDirty = true;
     }
 }
 

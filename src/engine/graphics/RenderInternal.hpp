@@ -911,8 +911,9 @@ struct RenderContext::Impl {
     uint32_t smaaAreaTexIdx      = 0;
     uint32_t smaaSearchTexIdx    = 0;
 
-    float lastAspectRatio = 0.0f;
-    float lastFov         = 0.0f;
+    float lastAspectRatio    = 0.0f;
+    float lastFov            = 0.0f;
+    bool  clusterBoundsDirty = true;
 
     bool resized             = true;
     bool needsInitialClear   = true;
@@ -1136,6 +1137,7 @@ struct RenderContext::Impl {
     void WatchPipeline(const char* vsPath, const char* psPath, std::function<void()> rebuild_fn) noexcept;
     void                                     UploadClusterBounds();
     [[nodiscard]] std::expected<void, Error> ValidateSlangTypeLayouts() noexcept;
+    [[nodiscard]] auto BuildOneShotCompute(const ZHLN_ShaderDesc& shader) noexcept -> std::expected<Vk::ComputePass, Error>;
     [[nodiscard]] auto DispatchOneShotCompute(
         const ZHLN_ShaderDesc& shader,
         const void*            pushData,
