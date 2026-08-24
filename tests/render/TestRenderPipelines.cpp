@@ -37,10 +37,9 @@ struct RenderPipelinesTestSuite {
                 }
             };
 
-            auto       engineRes   = ZHLN::Engine::Create(cfg);
-            const auto checkEngine = ZHLN::Test::AssertTrue(engineRes.has_value());
-            if (!checkEngine) {
-                return checkEngine;
+            auto engineRes = ZHLN::Engine::Create(cfg);
+            if (!engineRes) {
+                return std::unexpected(engineRes.error());
             }
 
             const auto engine = std::move(engineRes.value());
