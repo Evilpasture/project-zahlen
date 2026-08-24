@@ -172,7 +172,7 @@ struct GPUTypes {
     struct Instance {
         // 64-byte meshlet descriptor. basic_task / basic_mesh index it through
         // a raw BDA pointer, so this layout is the authoritative GPU type.
-        struct [[ = EnableABI{} ]] alignas(16) GPUMeshlet {
+        struct alignas(16) GPUMeshlet {
             uint32_t vertexOffset;
             uint32_t triangleOffset;
             uint32_t vertexCount;
@@ -189,7 +189,7 @@ struct GPUTypes {
         static_assert(sizeof(GPUMeshlet) == 64);
         static_assert(alignof(GPUMeshlet) == 16);
 
-        struct [[ = EnableABI{} ]] alignas(16) InstanceData {
+        struct alignas(16) InstanceData {
             JPH::Mat44 world;
             JPH::Mat44 prevWorld;
             uint64_t   posAddress;
@@ -225,7 +225,7 @@ struct GPUTypes {
 
     // uniforms.slang
     struct Frame {
-        struct [[ = EnableABI{} ]] alignas(16) Light {
+        struct alignas(16) Light {
             float     position[3];
             LightType type;
             float     color[3];
@@ -245,7 +245,7 @@ struct GPUTypes {
         };
         static_assert(sizeof(Light) == 160);
 
-        struct [[ = EnableABI{} ]] alignas(16) FrameUniforms {
+        struct alignas(16) FrameUniforms {
             JPH::Mat44 viewProj;
             JPH::Mat44 unjitteredViewProj;
             JPH::Mat44 prevUnjitteredViewProj;
@@ -285,11 +285,11 @@ struct GPUTypes {
 
     // cluster_math.slang
     struct Cluster {
-        struct [[ = EnableABI{} ]] ClusterBounds {
+        struct ClusterBounds {
             JPH::Vec4 minPoint;
             JPH::Vec4 maxPoint;
         };
-        struct [[ = EnableABI{} ]] ClusterVolume {
+        struct ClusterVolume {
             uint32_t offset;
             uint32_t count;
         };
@@ -297,7 +297,7 @@ struct GPUTypes {
 
     // particles.slang
     struct Particles {
-        struct [[ = EnableABI{} ]] alignas(16) Particle {
+        struct alignas(16) Particle {
             JPH::Vec4 position = JPH::Vec4::sZero();
             JPH::Vec4 velocity = JPH::Vec4::sZero();
             JPH::Vec4 color    = JPH::Vec4::sReplicate(1.0f);
@@ -305,7 +305,7 @@ struct GPUTypes {
         };
         static_assert(sizeof(Particle) == 64);
 
-        struct [[ = EnableABI{} ]] alignas(16) Particle3D {
+        struct alignas(16) Particle3D {
             JPH::Vec4 position;
             JPH::Vec4 velocity;
             JPH::Quat rotation;
@@ -315,7 +315,7 @@ struct GPUTypes {
         };
         static_assert(sizeof(Particle3D) == 96);
 
-        struct [[ = EnableABI{} ]] alignas(16) ParticleEmitterParams {
+        struct alignas(16) ParticleEmitterParams {
             std::array<float, 3> gravity = {0.0f, -9.81f, 0.0f};
             float                drag    = 0.2f;
 
@@ -347,7 +347,7 @@ struct GPUTypes {
         };
         static_assert(sizeof(ParticleEmitterParams) == 160);
 
-        struct [[ = EnableABI{} ]] alignas(16) MeshParticleEmitterParams {
+        struct alignas(16) MeshParticleEmitterParams {
             std::array<float, 3> gravity = {0.0f, -9.81f, 0.0f};
             float                drag    = 0.2f;
 
@@ -380,7 +380,7 @@ struct GPUTypes {
 
     // volumetric_* + push_layouts.slang fog/inject/temporal
     struct Volume {
-        struct [[ = EnableABI{} ]] alignas(16) VolumetricFogPushConstants {
+        struct alignas(16) VolumetricFogPushConstants {
             float density;
             float heightFalloff;
             float heightOffset;
@@ -402,7 +402,7 @@ struct GPUTypes {
         };
         static_assert(sizeof(VolumetricFogPushConstants) == 80);
 
-        struct [[ = EnableABI{} ]] alignas(16) VolumetricLightInjectPushConstants {
+        struct alignas(16) VolumetricLightInjectPushConstants {
             float    scatteringIntensity;
             float    ambientIntensity;
             float    phaseAnisotropy;
@@ -410,7 +410,7 @@ struct GPUTypes {
         };
         static_assert(sizeof(VolumetricLightInjectPushConstants) == 16);
 
-        struct [[ = EnableABI{} ]] alignas(16) VolumetricTemporalPushConstants {
+        struct alignas(16) VolumetricTemporalPushConstants {
             float    temporalWeight;
             float    clampStrength;
             uint32_t resetHistory;
@@ -421,13 +421,13 @@ struct GPUTypes {
 
     // push_layouts.slang per-draw / UI
     struct Draw {
-        struct [[ = EnableABI{} ]] ObjectConstants {
+        struct ObjectConstants {
             uint32_t instanceId;
             uint32_t isShadowPass;
         };
         static_assert(sizeof(ObjectConstants) == 8);
 
-        struct [[ = EnableABI{} ]] UIObjectConstants {
+        struct UIObjectConstants {
             JPH::Mat44 orthoMatrix;
             uint64_t   posAddress;
             uint64_t   attrAddress;
