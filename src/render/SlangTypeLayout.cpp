@@ -71,7 +71,7 @@ constexpr uint32_t kDecorationOffset       = 35;
 
 [[nodiscard]] auto LayoutFromBlock(const SpvReflectBlockVariable& block) noexcept -> SlangTypeLayout {
     SlangTypeLayout layout;
-    layout.size      = block.padded_size > 0 ? block.padded_size : block.size;
+    layout.size      = block.size;
     layout.alignment = 0;
     layout.fields.reserve(block.member_count);
     uint32_t maxEnd = block.size;
