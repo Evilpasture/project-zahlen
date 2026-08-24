@@ -413,10 +413,10 @@ auto ReflectTypeLayout(const void* spirv, size_t sizeBytes, std::string_view typ
         return std::unexpected(SpirvLayoutError::InvalidArguments);
     }
 
-    // Named OpTypeStruct first. SPIRV-Reflect reports these types as
-    // std140 UBO members, so ObjectConstants / ClusterVolume come back as
-    // 16-byte slots. The type's own members + alignment keep them at 8
-    // and still round UIObjectConstants to 96.
+    // Named OpTypeStruct first. SPIRV-Reflect reports nested UBO members
+    // with the parent's std140 slot size, which is not the type's own
+    // size. The type's members + TypeAlign keep tightly packed structs
+    // at their real size and still round alignas(16) hosts up.
     if ((sizeBytes % sizeof(uint32_t)) == 0) {
         auto fromSpv = ReflectNamedStruct(static_cast<const uint32_t*>(spirv), sizeBytes / sizeof(uint32_t), typeName);
         if (fromSpv && AcceptLayout(*fromSpv)) {

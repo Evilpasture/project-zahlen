@@ -5,7 +5,6 @@
 
 #include <Zahlen/Error.hpp>
 #include <array>
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -25,7 +24,6 @@ enum class SpirvLayoutError : uint8_t {
     TypeNotFound[[= ZHLN::Reflect::Description("Type was not found in compiled SPIR-V")]],
     EmptyLayout[[= ZHLN::Reflect::Description("Reflected type has zero size")]],
     TypeSizeMismatch[[= ZHLN::Reflect::Description("GPU type size does not match the C++ host type")]],
-    NoAbiTypes[[= ZHLN::Reflect::Description("No EnableABI-annotated host types were found to validate")]],
     HeapPushAddressCount[[= ZHLN::Reflect::Description("DescriptorHeapPushData device-address count does not match the host")]],
     HeapPushIndexMissing[[= ZHLN::Reflect::Description("DescriptorHeapPushData is missing a descriptor-index word after the frame addresses")]],
     HeapPushOverlapsPassData[[= ZHLN::Reflect::Description("DescriptorHeapPushData frame addresses overlap the per-pass push blob")]],
@@ -69,20 +67,6 @@ struct SlangTypeLayout {
 /// the engine already embeds — this file never sees `.slang` source.
 [[nodiscard]] auto ReflectTypeLayout(const void* spirv, size_t sizeBytes, std::string_view typeName) noexcept
     -> std::expected<SlangTypeLayout, ZHLN::Error>;
-
-struct ClusterSliceParams {
-    float    nearZ = 0.1f;
-    float    farZ  = 1000.0f;
-    uint32_t depth = 24;
-};
-
-[[nodiscard]] inline float ClusterZScale(const ClusterSliceParams& p) noexcept {
-    return static_cast<float>(p.depth) / std::log(p.farZ / p.nearZ);
-}
-
-[[nodiscard]] inline float ClusterZBias(const ClusterSliceParams& p) noexcept {
-    return -(static_cast<float>(p.depth) * std::log(p.nearZ)) / std::log(p.farZ / p.nearZ);
-}
 
 /// Writes `value` at the reflected field offset inside a push-data blob.
 template <typename T>

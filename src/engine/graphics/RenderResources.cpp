@@ -1188,7 +1188,7 @@ std::expected<void, Error> RenderContext::Impl::ValidateSlangTypeLayouts() noexc
 
     // Explicit pack: llvm-p2996 does not yet expose EnableABI annotations
     // through members_of(parent_of(^^EnableABI)), so ForEachAnnotatedType
-    // returns no types and would abort init with NoAbiTypes.
+    // returns no types and would skip every ABI size check.
     return checkOne.template operator()<GPUMeshlet>()
         .and_then([&]() -> std::expected<void, Error> { return checkOne.template operator()<InstanceData>(); })
         .and_then([&]() -> std::expected<void, Error> { return checkOne.template operator()<UIObjectConstants>(); })

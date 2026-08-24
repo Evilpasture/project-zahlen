@@ -14,8 +14,6 @@ namespace {
 // Reserved specialization-constant IDs used only as reflected metadata for a
 // shader-owned fixed logical dispatch domain.
 constexpr std::array<uint32_t, 3> kDispatchSizeConstantIds = {1000, 1001, 1002};
-constexpr uint32_t                kClusterNearConstantId   = 1100;
-constexpr uint32_t                kClusterFarConstantId    = 1101;
 
 } // namespace
 
@@ -129,15 +127,6 @@ auto ReflectSpecializationConstantU32(const ZHLN_ShaderDesc& shader, uint32_t co
 
 auto ReflectSpecializationConstantF32(const ZHLN_ShaderDesc& shader, uint32_t constantId) noexcept -> std::optional<float> {
     return ReflectSpecializationConstant<float>(shader, constantId);
-}
-
-auto ReflectClusterSliceParams(const ZHLN_ShaderDesc& shader) noexcept -> std::optional<ClusterSliceParams> {
-    const auto nearZ = ReflectSpecializationConstantF32(shader, kClusterNearConstantId);
-    const auto farZ  = ReflectSpecializationConstantF32(shader, kClusterFarConstantId);
-    if (!nearZ || !farZ || *nearZ <= 0.0f || *farZ <= *nearZ) {
-        return std::nullopt;
-    }
-    return ClusterSliceParams {.nearZ = *nearZ, .farZ = *farZ};
 }
 
 void UnsafeReflectedLayoutBuilder::AddStageUnsafe(const ZHLN_ShaderDesc& desc, VkShaderStageFlags stage) noexcept {

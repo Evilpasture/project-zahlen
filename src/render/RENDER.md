@@ -190,23 +190,12 @@ device-addressable buffers created with `VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT
   Dynamic kernels use explicitly named `*Threads` overloads with runtime
   logical counts. Both paths reflect SPIR-V `LocalSize` from `[numthreads]` and
   derive Vulkan workgroup counts; raw groups require `DispatchGroups`.
-* Uniform / storage / push-data structs (`FrameUniforms`, `Light`, `Particle`,
-  `InstanceData`, volumetric push blobs, ...) are authored in Slang and compiled
-  into `gpu_abi.slang`. The host reflects sizes and field offsets from that
-  SPIR-V (`ReflectTypeLayout`) and rejects ABI drift at init. Cluster
-  slice math lives in `cluster_math.slang`; shaders call
-  `ClusterIndexFromUV` / `ViewDepthToClusterZ` there instead of reading
-  copied scale/bias words from the frame UBO. Cluster-bounds generation
-  is the same module, not a duplicated C++ loop.
-* Offline IBL / BRDF / SMAA LUT generation is dispatched as Slang compute.
-  A failed bake is an init failure; the CPU integrators exist only as
-  numerical references in `TestPBR`.
-* The per-frame scene buffers (frame UBO, lights, instances, joints, morph
-  deltas) are selected with `VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT`
-  mappings. Each heap segment pushes their device addresses once at the field
-  offsets reflected from compiled `gpu_abi` SPIR-V (`DescriptorHeapPushData`,
-  authored in `descriptor_heap_layout.slang`) via `ReflectHeapPushDataLayout`
-  (`RenderContext::Impl::BindHeapsAndPushFrame`).
+* Named UBO / SSBO / push structs are reflected from compiled SPIR-V
+  (`ReflectTypeLayout`). This leaf never sees `.slang` source and does not
+  own engine type names, cluster math, or LUT bake policy.
+* Per-draw device addresses travel through
+  `VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT`. Offsets come from the
+  compiled `DescriptorHeapPushData` layout via `ReflectHeapPushDataLayout`.
 * The bindless `globalTextures[]` array is a contiguous region of the resource
   heap pinned by a `HEAP_WITH_CONSTANT_OFFSET` mapping
   (`RenderContext::Impl::WriteTextureSlotToHeap`); instance-data texture

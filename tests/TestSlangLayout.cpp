@@ -4,7 +4,6 @@
 #include "TestsFramework.hpp"
 #include <Zahlen/Types.hpp>
 #include <array>
-#include <cmath>
 #include <cstddef>
 #include <cstring>
 #include <engine/graphics/Resources.hpp>
@@ -116,20 +115,6 @@ struct SlangLayoutTestSuite {
             ZHLN::Test::ExpectEq(temp->size, static_cast<uint32_t>(sizeof(ZHLN::VolumetricTemporalPushConstants)));
             ZHLN::Test::ExpectEq(obj->size, static_cast<uint32_t>(sizeof(ZHLN::ObjectConstants)));
             ZHLN::Test::ExpectEq(ui->size, static_cast<uint32_t>(sizeof(ZHLN::UIObjectConstants)));
-            return {};
-        }
-
-        std::expected<void, ZHLN::Error> cluster_slice_math_matches_host_helper() {
-            const ZHLN::Vk::ClusterSliceParams slice {};
-            const float                        scale = ZHLN::Vk::ClusterZScale(slice);
-            const float                        bias  = ZHLN::Vk::ClusterZBias(slice);
-            ZHLN::Test::ExpectTrue(scale > 0.0f);
-            ZHLN::Test::ExpectTrue(bias != 0.0f);
-
-            const float expectedScale = 24.0f / std::log(1000.0f / 0.1f);
-            const float expectedBias  = -(24.0f * std::log(0.1f)) / std::log(1000.0f / 0.1f);
-            ZHLN::Test::ExpectTrue(std::abs(scale - expectedScale) < 1e-5f);
-            ZHLN::Test::ExpectTrue(std::abs(bias - expectedBias) < 1e-5f);
             return {};
         }
 

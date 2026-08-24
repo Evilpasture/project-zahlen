@@ -3,13 +3,14 @@
 
 // Authoritative clustered-lighting slice math. Lighting, volumetric inject,
 // and cluster-bounds generation all import this module so the logarithmic
-// depth mapping cannot drift between host and GPU.
+// depth mapping cannot drift across shaders.
 module cluster_math;
 
 import cluster_grid;
 
-// Slice near/far are specialization constants so a host helper can recompute
-// the same log mapping the shaders already evaluate in-place.
+// Slice near/far are specialization constants so a pipeline can override the
+// defaults without rewriting this module. Shaders evaluate the log mapping
+// in-place from these values.
 namespace Cluster {
     [[vk::constant_id(1100)]] public const float Near = 0.1f;
     [[vk::constant_id(1101)]] public const float Far  = 1000.0f;
