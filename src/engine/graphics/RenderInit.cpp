@@ -2608,7 +2608,3 @@ std::expected<void, Error> RenderContext::Impl::InitUIDynamicBuffers() noexcept 
 }
 
 } // namespace ZHLN
-uiVbos, frames.uiVboAddresses, 0, "UI");
-}
-
-} // namespace ZHLN
