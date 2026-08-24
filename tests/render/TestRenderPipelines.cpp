@@ -5,6 +5,7 @@
 #include "Zahlen/Render.hpp"
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -24,6 +25,12 @@ struct RenderPipelinesTestSuite {
 
     struct Tests {
         std::expected<void, ZHLN::Error> full_pipeline_multi_frame_simulation() {
+            // Same contract as every other GPU test: this suite owns the scene.
+            // Leaving the fallback preset on engages RTR + a second ground/box/UI
+            // on the first Tick (no libgameplay.so), which device-lost the GPU
+            // and rebuilt the whole renderer inside the 15s test alarm.
+            ZHLN::DefaultPreset::SetDisabled(true);
+
             const ZHLN::EngineConfig cfg {
                 .physics = {.maxBodies = 512, .maxBodyPairs = 1024, .maxContactConstraints = 1024, .tempAllocatorSize = 16 * 1024 * 1024},
                 .render  = {
