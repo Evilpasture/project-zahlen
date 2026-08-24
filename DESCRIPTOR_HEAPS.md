@@ -108,11 +108,12 @@ Set-0 bindings map as follows (baked by `BuildSceneHeapMappings`):
 
 `resources/shaders/descriptor_heap_layout.slang` is the layout authority. Its
 `DescriptorHeapPushData` type places the largest ordinary per-pass block first,
-then the six frame addresses and the descriptor index. At startup,
-`ReflectHeapPushDataLayout()` queries every field with Slang's target-specific
-`VariableLayoutReflection::getOffset()` API. Both mapping creation and
-`vkCmdPushDataEXT` use those reflected offsets, including any padding selected
-by Slang's SPIR-V layout rules.
+then the six frame addresses and the descriptor index. slangc compiles that
+type into the `gpu_abi` SPIR-V blob; at startup `ReflectHeapPushDataLayout()`
+reads the field offsets from that bytecode with SPIRV-Reflect. Both mapping
+creation and `vkCmdPushDataEXT` use those reflected offsets, including any
+padding selected by slangc's SPIR-V layout rules. `src/render` never sees the
+`.slang` source.
 
 Per-frame buffers keep their double-buffered allocations; their *stable* device
 addresses are pushed per frame instead of re-writing descriptors per frame.

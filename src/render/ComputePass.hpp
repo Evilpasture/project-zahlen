@@ -3,9 +3,9 @@
 
 // src/render/ComputePass.hpp
 //
-// VK_EXT_descriptor_heap compute pass wrappers. Skinning keeps a legacy
-// push-constant path (pipeline layout + PushConstants) because it binds no
-// descriptors; everything else dispatches through the heaps + push data.
+// VK_EXT_descriptor_heap compute pass wrappers. Skinning still has a
+// leftover push-constant helper for its no-descriptor BDA path; bake /
+// one-shot compute and every heap pass push through vkCmdPushDataEXT.
 
 #pragma once
 #ifndef ZHLN_RENDERING_HPP_INCLUDED

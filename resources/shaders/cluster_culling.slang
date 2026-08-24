@@ -1,23 +1,14 @@
 
 import cluster_grid;
+import cluster_math;
 import uniforms;
 
-// Reserved metadata IDs consumed by ReflectComputeDispatchSize. They make this
-// shader the authority for its fixed logical dispatch domain as well as its
-// local [numthreads] dimensions.
-[[vk::constant_id(1000)]] const uint ZHLN_DISPATCH_SIZE_X = CLUSTER_GRID_WIDTH;
-[[vk::constant_id(1001)]] const uint ZHLN_DISPATCH_SIZE_Y = CLUSTER_GRID_HEIGHT;
-[[vk::constant_id(1002)]] const uint ZHLN_DISPATCH_SIZE_Z = CLUSTER_GRID_DEPTH;
-
-struct ClusterBounds {
-    float4 minPoint;
-    float4 maxPoint;
-};
-
-struct ClusterVolume {
-    uint offset;
-    uint count;
-};
+// Host reflects IDs 1000-1002 as this kernel's logical dispatch domain.
+namespace Dispatch {
+    [[vk::constant_id(1000)]] const uint SizeX = Cluster.Width;
+    [[vk::constant_id(1001)]] const uint SizeY = Cluster.Height;
+    [[vk::constant_id(1002)]] const uint SizeZ = Cluster.Depth;
+}
 
 StructuredBuffer<ClusterBounds> in_Bounds;
 RWStructuredBuffer<ClusterVolume> out_Grid;
@@ -54,22 +45,19 @@ bool ConeBehindPlane(float3 T, float3 D, float R, float r, float3 N, float d) {
     return (valTip < 0.0f) && (valBase < 0.0f);
 }
 
-[numthreads(CLUSTER_GRID_WIDTH, CLUSTER_GRID_HEIGHT, 1)]
+[numthreads(Cluster.Width, Cluster.Height, 1)]
 void CSMain(uint3 id: SV_DispatchThreadID) {
-    // Defense-in-depth: the host reflects the logical domain above and derives
-    // workgroup counts from [numthreads]. Still reject every thread outside the
-    // domain before it can index in_Bounds/out_Grid or update the counter.
-    if (id.x >= ZHLN_DISPATCH_SIZE_X || id.y >= ZHLN_DISPATCH_SIZE_Y || id.z >= ZHLN_DISPATCH_SIZE_Z) {
+    if (id.x >= Dispatch.SizeX || id.y >= Dispatch.SizeY || id.z >= Dispatch.SizeZ) {
         return;
     }
 
-    uint cIdx       = id.x + (id.y * ZHLN_DISPATCH_SIZE_X) + (id.z * ZHLN_DISPATCH_SIZE_X * ZHLN_DISPATCH_SIZE_Y);
+    uint cIdx       = ClusterIndex(id.x, id.y, id.z);
     ClusterBounds b = in_Bounds[cIdx]; // These are now static view-space bounds!
 
     uint count = 0;
-    uint list[MAX_LIGHTS_PER_CLUSTER];
+    uint list[Cluster.MaxLights];
 
-    for (uint i = 0; i < frame.lightCount && count < MAX_LIGHTS_PER_CLUSTER; ++i) {
+    for (uint i = 0; i < frame.lightCount && count < Cluster.MaxLights; ++i) {
         if (lights[i].type == 0 || lights[i].type == 4) {
             continue; // Skip global Sun / Dir lights
         }
@@ -84,12 +72,12 @@ void CSMain(uint3 id: SV_DispatchThreadID) {
     if (count > 0) {
         InterlockedAdd(out_Counter[0], count, offset);
 
-        if (offset + count <= CLUSTER_LIGHT_LIST_CAPACITY) {
+        if (offset + count <= Cluster.LightListCapacity) {
             for (uint j = 0; j < count; ++j) {
                 out_IndexList[offset + j] = list[j];
             }
         } else {
-            uint safeCount = (offset < CLUSTER_LIGHT_LIST_CAPACITY) ? (CLUSTER_LIGHT_LIST_CAPACITY - offset) : 0;
+            uint safeCount = (offset < Cluster.LightListCapacity) ? (Cluster.LightListCapacity - offset) : 0;
             for (uint j = 0; j < safeCount; ++j) {
                 out_IndexList[offset + j] = list[j];
             }

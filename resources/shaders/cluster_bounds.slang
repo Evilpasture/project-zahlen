@@ -1,31 +1,35 @@
-// File: resources/shaders/cluster_bounds.hlsl
+// File: resources/shaders/cluster_bounds.slang
 
 import cluster_grid;
+import cluster_math;
 import uniforms;
 
-struct ClusterBounds {
-    float4 minPoint;
-    float4 maxPoint;
-};
+// Host reflects IDs 1000-1002 as this kernel's logical dispatch domain.
+namespace Dispatch {
+    [[vk::constant_id(1000)]] const uint SizeX = Cluster.Width;
+    [[vk::constant_id(1001)]] const uint SizeY = Cluster.Height;
+    [[vk::constant_id(1002)]] const uint SizeZ = Cluster.Depth;
+}
 
 RWStructuredBuffer<ClusterBounds> out_Bounds;
 ConstantBuffer<FrameUniforms> frame;
 
-float4 Unproject(float4 coord) {
-    float4 res = mul(frame.invViewProj, coord);
+float4 UnprojectView(float4 coord) {
+    // View-space bounds: cluster culling tests lights[i].positionView.
+    float4 res = mul(frame.invProj, coord);
     return res / res.w;
 }
 
-[numthreads(CLUSTER_GRID_WIDTH, CLUSTER_GRID_HEIGHT, 1)]
+[numthreads(Cluster.Width, Cluster.Height, 1)]
 void CSMain(uint3 tid: SV_DispatchThreadID) {
-    if (tid.x >= CLUSTER_GRID_WIDTH || tid.y >= CLUSTER_GRID_HEIGHT || tid.z >= CLUSTER_GRID_DEPTH)
+    if (tid.x >= Dispatch.SizeX || tid.y >= Dispatch.SizeY || tid.z >= Dispatch.SizeZ)
         return;
-    uint cIdx = tid.x + (tid.y * CLUSTER_GRID_WIDTH) + (tid.z * CLUSTER_GRID_WIDTH * CLUSTER_GRID_HEIGHT);
+    uint cIdx = ClusterIndex(tid.x, tid.y, tid.z);
 
-    float2 ts = float2(2.0f / float(CLUSTER_GRID_WIDTH), 2.0f / float(CLUSTER_GRID_HEIGHT));
+    float2 ts = float2(2.0f / float(Cluster.Width), 2.0f / float(Cluster.Height));
 
     // UN-FLIPPED: NDC Y coordinates now map natively to Vulkan Y-down
-    // tid.y = 0 maps to the top and CLUSTER_GRID_HEIGHT maps to the bottom.
+    // tid.y = 0 maps to the top and Cluster.Height maps to the bottom.
     float4 ndc[4] = { float4(-1.0f + tid.x * ts.x, -1.0f + tid.y * ts.y, 0.0f, 1.0f), float4(-1.0f + (tid.x + 1) * ts.x, -1.0f + tid.y * ts.y, 0.0f, 1.0f),
                       float4(-1.0f + (tid.x + 1) * ts.x, -1.0f + (tid.y + 1) * ts.y, 0.0f, 1.0f),
                       float4(-1.0f + tid.x * ts.x, -1.0f + (tid.y + 1) * ts.y, 0.0f, 1.0f) };
@@ -33,14 +37,14 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     float3 pNear[4];
     float3 pFar[4];
     for (int i = 0; i < 4; ++i) {
-        pNear[i] = Unproject(float4(ndc[i].xy, 0.0f, 1.0f)).xyz;
-        pFar[i]  = Unproject(float4(ndc[i].xy, 1.0f, 1.0f)).xyz;
+        pNear[i] = UnprojectView(float4(ndc[i].xy, 0.0f, 1.0f)).xyz;
+        pFar[i]  = UnprojectView(float4(ndc[i].xy, 1.0f, 1.0f)).xyz;
     }
 
-    float n     = 0.1f;
-    float f     = 1000.0f;
-    float sNear = n * pow(f / n, float(tid.z) / float(CLUSTER_GRID_DEPTH));
-    float sFar  = n * pow(f / n, float(tid.z + 1) / float(CLUSTER_GRID_DEPTH));
+    float n     = Cluster.Near;
+    float f     = Cluster.Far;
+    float sNear = ClusterSliceNear(tid.z);
+    float sFar  = ClusterSliceFar(tid.z);
 
     float tNear = (sNear - n) / (f - n);
     float tFar  = (sFar - n) / (f - n);

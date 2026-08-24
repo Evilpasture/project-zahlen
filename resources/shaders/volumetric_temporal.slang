@@ -3,9 +3,11 @@
 import uniforms;
 import volumetric_grid;
 
-[[vk::constant_id(1000)]] const uint ZHLN_DISPATCH_SIZE_X = VOLUMETRIC_GRID_WIDTH;
-[[vk::constant_id(1001)]] const uint ZHLN_DISPATCH_SIZE_Y = VOLUMETRIC_GRID_HEIGHT;
-[[vk::constant_id(1002)]] const uint ZHLN_DISPATCH_SIZE_Z = VOLUMETRIC_GRID_DEPTH;
+namespace Dispatch {
+    [[vk::constant_id(1000)]] const uint SizeX = Volumetric.Width;
+    [[vk::constant_id(1001)]] const uint SizeY = Volumetric.Height;
+    [[vk::constant_id(1002)]] const uint SizeZ = Volumetric.Depth;
+}
 
 struct VolumetricTemporalPushConstants {
     float temporalWeight;
@@ -38,7 +40,7 @@ float3 GetVoxelWorldPos(uint3 tid, float3 gridDim, out float outDepthVS) {
 void CSMain(uint3 tid: SV_DispatchThreadID) {
     uint3 gridDim;
     outVoxelIntegratedResolved.GetDimensions(gridDim.x, gridDim.y, gridDim.z);
-    if (any(tid >= gridDim) || any(tid >= uint3(ZHLN_DISPATCH_SIZE_X, ZHLN_DISPATCH_SIZE_Y, ZHLN_DISPATCH_SIZE_Z)))
+    if (any(tid >= gridDim) || any(tid >= uint3(Dispatch.SizeX, Dispatch.SizeY, Dispatch.SizeZ)))
         return;
 
     float4 current = inVoxelIntegratedCurrent[tid];

@@ -1,37 +1,8 @@
 // resources/shaders/mesh_particle_update.hlsl
 
 import common;
+import particles;
 import uniforms;
-
-struct Particle3D {
-    float4 position; // xyz = pos, w = scale
-    float4 velocity; // xyz = vel, w = unused
-    float4 rotation; // xyzw = quaternion
-    float4 rotVel;   // xyz = angular velocity, w = unused
-    float4 color;    // rgba
-    float4 params;   // x = age, y = life
-};
-
-struct MeshParticleEmitterParams {
-    float3 gravity;
-    float drag;
-    float3 turbulence;
-    float turbulenceFreq;
-    float3 spawnOrigin;
-    float spawnRadius;
-    float3 spawnBoxExtent;
-    float loopBoundary; // 0.0 = One-Shot Burst, 1.0 = Continuous Loop
-    float3 initVelMin;
-    float lifetimeMin;
-    float3 initVelMax;
-    float lifetimeMax;
-    float3 rotVelMin;
-    float scaleMin;
-    float3 rotVelMax;
-    float scaleMax;
-    float4 startColor;
-    float4 endColor;
-};
 
 struct ComputePushConstants {
     uint64_t particleBufferAddr;
@@ -42,16 +13,6 @@ struct ComputePushConstants {
 
 [vk::push_constant]
 ComputePushConstants pc;
-float Hash13(float3 p) {
-    p = frac(p * 0.1031f);
-    p += dot(p, p.zyx + 31.32f);
-    return frac((p.x + p.y) * p.z);
-}
-
-float3 Hash33(float3 p) {
-    return float3(Hash13(p), Hash13(p + float3(17.1f, 9.3f, 27.5f)), Hash13(p + float3(31.4f, 45.2f, 11.8f)));
-}
-
 public struct Quaternion {
     public float4 value;
     public __init(float4 value) {
@@ -140,5 +101,5 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         p.color      = pc.p.startColor;
     }
 
-    particles[idx] = p;
+    particleList[idx] = p;
 }

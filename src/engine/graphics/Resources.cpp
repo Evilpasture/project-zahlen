@@ -303,6 +303,30 @@ constexpr uint8_t procedural_bake_comp_raw[] = {
 #embed SHADER_PROCEDURAL_BAKE_SLANG_CS_PATH
 };
 
+constexpr uint8_t brdf_lut_comp_raw[] = {
+#embed SHADER_BRDF_LUT_CS_PATH
+};
+
+constexpr uint8_t ibl_specular_comp_raw[] = {
+#embed SHADER_IBL_SPECULAR_CS_PATH
+};
+
+constexpr uint8_t ibl_sh_comp_raw[] = {
+#embed SHADER_IBL_SH_CS_PATH
+};
+
+constexpr uint8_t smaa_lut_comp_raw[] = {
+#embed SHADER_SMAA_LUT_CS_PATH
+};
+
+constexpr uint8_t gpu_scene_comp_raw[] = {
+#embed SHADER_GPU_SCENE_CS_PATH
+};
+
+constexpr uint8_t gpu_abi_comp_raw[] = {
+#embed SHADER_GPU_ABI_CS_PATH
+};
+
 constexpr uint8_t ltc_mat_raw[] = {
 #embed "../../../resources/shaders/ltc_mat.dds"
 };
@@ -325,6 +349,12 @@ extern const std::span<const uint8_t> skinning_comp {skinning_comp_raw, sizeof(s
 extern const std::span<const uint8_t> forward_frag {forward_frag_raw, sizeof(forward_frag_raw)};
 extern const std::span<const uint8_t> hang_gpu_comp {hang_gpu_comp_raw, sizeof(hang_gpu_comp_raw)};
 extern const std::span<const uint8_t> procedural_bake_comp {procedural_bake_comp_raw, sizeof(procedural_bake_comp_raw)};
+extern const std::span<const uint8_t> brdf_lut_comp {brdf_lut_comp_raw, sizeof(brdf_lut_comp_raw)};
+extern const std::span<const uint8_t> ibl_specular_comp {ibl_specular_comp_raw, sizeof(ibl_specular_comp_raw)};
+extern const std::span<const uint8_t> ibl_sh_comp {ibl_sh_comp_raw, sizeof(ibl_sh_comp_raw)};
+extern const std::span<const uint8_t> smaa_lut_comp {smaa_lut_comp_raw, sizeof(smaa_lut_comp_raw)};
+extern const std::span<const uint8_t> gpu_scene_comp {gpu_scene_comp_raw, sizeof(gpu_scene_comp_raw)};
+extern const std::span<const uint8_t> gpu_abi_comp {gpu_abi_comp_raw, sizeof(gpu_abi_comp_raw)};
 extern const std::span<const uint8_t> ltc_mat {ltc_mat_raw, sizeof(ltc_mat_raw)};
 extern const std::span<const uint8_t> ltc_amp {ltc_amp_raw, sizeof(ltc_amp_raw)};
 
@@ -393,6 +423,12 @@ const char* const SkinningCS              = SHADER_SKINNING_SLANG_CS_PATH;
 const char* const ForwardPS               = SHADER_FORWARD_SLANG_PS_PATH;
 const char* const HangGpuCS               = SHADER_HANG_GPU_SLANG_CS_PATH;
 const char* const ProceduralBakeCS        = SHADER_PROCEDURAL_BAKE_SLANG_CS_PATH;
+const char* const BRDFLUTCS               = SHADER_BRDF_LUT_CS_PATH;
+const char* const IBLSpecularCS           = SHADER_IBL_SPECULAR_CS_PATH;
+const char* const IBLSHCS                 = SHADER_IBL_SH_CS_PATH;
+const char* const SMAALUTCS               = SHADER_SMAA_LUT_CS_PATH;
+const char* const GPUSceneCS              = SHADER_GPU_SCENE_CS_PATH;
+const char* const GPUABICS                = SHADER_GPU_ABI_CS_PATH;
 } // namespace Paths
 
 SceneShaderSet GetSceneShaders(SceneShaderVariant variant) noexcept {

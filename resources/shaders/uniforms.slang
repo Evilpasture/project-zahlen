@@ -21,8 +21,6 @@ public struct FrameUniforms {
     public float4 probePos;
     public float4 jitterParams;
     public int enableRTR;
-    public float zScale;
-    public float zBias;
     public float sunSize;
 
     public float4 cascadeSplits;
@@ -35,6 +33,35 @@ public struct FrameUniforms {
     public float4 skyGround;
 
     public float4x4 viewmodelViewProj; // Appended at the end!
+    public float4x4 invProj;           // View-space unprojection for cluster bounds
+};
+
+public struct GISettings {
+    public int mode;
+    public float aoRadius;
+    public float aoBias;
+    public float aoPower;
+    public float giIntensity;
+    public int giSamples;
+    public float vignetteIntensity;
+    public float vignettePower;
+    public int enableSSR;
+    public int enableRTR;
+};
+
+public struct AAState {
+    public uint mode;
+    public float taaFeedback;
+    public float jitterX;
+    public float jitterY;
+    public float prevJitterX;
+    public float prevJitterY;
+    public uint frameIndex;
+    public float fxaaSubpix;
+    public float fxaaEdgeThreshold;
+    public float fxaaEdgeThresholdMin;
+    public float mlaaThreshold;
+    public uint mlaaMaxSearchSteps;
 };
 
 public struct Light {

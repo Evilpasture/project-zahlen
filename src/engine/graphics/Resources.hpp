@@ -72,6 +72,12 @@ extern const char* const SkinningCS;
 extern const char* const ForwardPS;
 extern const char* const HangGpuCS;
 extern const char* const ProceduralBakeCS;
+extern const char* const BRDFLUTCS;
+extern const char* const IBLSpecularCS;
+extern const char* const IBLSHCS;
+extern const char* const SMAALUTCS;
+extern const char* const GPUSceneCS;
+extern const char* const GPUABICS;
 } // namespace Paths
 
 struct ShaderPair {
@@ -121,6 +127,12 @@ enum class ShaderID : uint8_t {
     MeshParticleUpdate,
     MeshParticleRender,
     MeshParticleShadow,
+    BRDFLUTComp,
+    IBLSpecularComp,
+    IBLSHComp,
+    SMAALUTComp,
+    GPUSceneComp,
+    GPUABIComp,
 };
 
 // Extern declarations of individual programs to avoid header bloat and allow compile-time routing
@@ -170,6 +182,12 @@ extern const std::span<const uint8_t> basic_vs_forward;
 extern const std::span<const uint8_t> basic_mesh_forward;
 extern const std::span<const uint8_t> hang_gpu_comp;
 extern const std::span<const uint8_t> procedural_bake_comp;
+extern const std::span<const uint8_t> brdf_lut_comp;
+extern const std::span<const uint8_t> ibl_specular_comp;
+extern const std::span<const uint8_t> ibl_sh_comp;
+extern const std::span<const uint8_t> smaa_lut_comp;
+extern const std::span<const uint8_t> gpu_scene_comp;
+extern const std::span<const uint8_t> gpu_abi_comp;
 extern const std::span<const uint8_t> ltc_mat;
 extern const std::span<const uint8_t> ltc_amp;
 
@@ -240,6 +258,12 @@ struct ShaderMapping {
         ShaderMapping {.id = ShaderID::MeshParticleUpdate, .pair = mesh_particle_update_shaders},
         ShaderMapping {.id = ShaderID::MeshParticleRender, .pair = mesh_particle_render_shaders},
         ShaderMapping {.id = ShaderID::MeshParticleShadow, .pair = mesh_particle_shadow_shaders},
+        {.id = ShaderID::BRDFLUTComp, .pair = ShaderPair {.vertex = brdf_lut_comp, .fragment = {}}},
+        {.id = ShaderID::IBLSpecularComp, .pair = ShaderPair {.vertex = ibl_specular_comp, .fragment = {}}},
+        {.id = ShaderID::IBLSHComp, .pair = ShaderPair {.vertex = ibl_sh_comp, .fragment = {}}},
+        {.id = ShaderID::SMAALUTComp, .pair = ShaderPair {.vertex = smaa_lut_comp, .fragment = {}}},
+        {.id = ShaderID::GPUSceneComp, .pair = ShaderPair {.vertex = gpu_scene_comp, .fragment = {}}},
+        {.id = ShaderID::GPUABIComp, .pair = ShaderPair {.vertex = gpu_abi_comp, .fragment = {}}},
     };
 
     for (const auto& mapping: table) {

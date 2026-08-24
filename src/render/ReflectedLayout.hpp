@@ -14,6 +14,7 @@
 #error "Please include <src/render/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "SlangTypeLayout.hpp"
 #include <array>
 #include <cstdint>
 #include <optional>
@@ -50,10 +51,17 @@ struct ReflectedStageInput {
 
 /**
  * Reflects an optional fixed logical dispatch domain declared by the shader
- * through Zahlen's reserved specialization-constant metadata IDs. Dynamic
- * kernels omit this metadata and receive their domain from the caller.
+ * as `namespace Dispatch { SizeX/Y/Z }` (SPIR-V spec-constant IDs 1000-1002).
+ * Dynamic kernels omit this metadata and receive their domain from the caller.
  */
 [[nodiscard]] auto ReflectComputeDispatchSize(const ZHLN_ShaderDesc& shader) noexcept -> std::optional<std::array<uint32_t, 3>>;
+
+/// Reflects a u32 / f32 specialization constant default by SPIR-V ID.
+[[nodiscard]] auto ReflectSpecializationConstantU32(const ZHLN_ShaderDesc& shader, uint32_t constantId) noexcept -> std::optional<uint32_t>;
+[[nodiscard]] auto ReflectSpecializationConstantF32(const ZHLN_ShaderDesc& shader, uint32_t constantId) noexcept -> std::optional<float>;
+
+/// Cluster near/far/depth reflected from cluster_bounds.slang metadata IDs.
+[[nodiscard]] auto ReflectClusterSliceParams(const ZHLN_ShaderDesc& shader) noexcept -> std::optional<ClusterSliceParams>;
 
 /**
  * @brief Standalone SPIR-V parser that extracts binding structure only.

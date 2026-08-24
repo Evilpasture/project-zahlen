@@ -158,8 +158,6 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
             uniforms.skyGround       = pp->skyGround;
         }
     }
-    uniforms.zScale = 24.0f / std::log(1000.0f / 0.1f);
-    uniforms.zBias  = -(24.0f * std::log(0.1f)) / std::log(1000.0f / 0.1f);
 
     rc.SetAAState(aaState);
     rc.SetFrameData(cam, uniforms, outShadowProjView, dt);

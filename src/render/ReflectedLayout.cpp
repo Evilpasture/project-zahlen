@@ -14,6 +14,8 @@ namespace {
 // Reserved specialization-constant IDs used only as reflected metadata for a
 // shader-owned fixed logical dispatch domain.
 constexpr std::array<uint32_t, 3> kDispatchSizeConstantIds = {1000, 1001, 1002};
+constexpr uint32_t                kClusterNearConstantId   = 1100;
+constexpr uint32_t                kClusterFarConstantId    = 1101;
 
 } // namespace
 

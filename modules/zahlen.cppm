@@ -246,9 +246,12 @@ using ZHLN::String64;
 using ZHLN::Trace;
 
 namespace Reflect {
+using ZHLN::Reflect::AnnotatedName;
 using ZHLN::Reflect::CustomFormatter;
+using ZHLN::Reflect::Description;
 using ZHLN::Reflect::EnumToString;
 using ZHLN::Reflect::FieldCount;
+using ZHLN::Reflect::ForEachAnnotatedType;
 using ZHLN::Reflect::ForEachField;
 using ZHLN::Reflect::ForEachFieldWithName;
 using ZHLN::Reflect::GetField;
@@ -389,6 +392,7 @@ using ZHLN::Physics::ShapeType;
 // Render
 using ZHLN::BufferHandle;
 using ZHLN::DrawFlags;
+using ZHLN::EnableABI;
 using ZHLN::DrawParams;
 using ZHLN::Material;
 using ZHLN::Mesh;

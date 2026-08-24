@@ -1134,7 +1134,16 @@ struct RenderContext::Impl {
         LoadAndCreateComputeShader(ComputeStageSource cs, VkPipelineLayout layout, Vk::ComputePass& pass) const noexcept;
 
     void WatchPipeline(const char* vsPath, const char* psPath, std::function<void()> rebuild_fn) noexcept;
-    void UploadClusterBounds(const JPH::Mat44& proj);
+    void                                     UploadClusterBounds();
+    [[nodiscard]] std::expected<void, Error> ValidateSlangTypeLayouts() noexcept;
+    [[nodiscard]] auto DispatchOneShotCompute(
+        const ZHLN_ShaderDesc& shader,
+        const void*            pushData,
+        uint32_t               pushSize,
+        uint32_t               threadsX,
+        uint32_t               threadsY,
+        uint32_t               threadsZ
+    ) noexcept -> std::expected<void, Error>;
 
     [[nodiscard]] auto BufferAddress(VkBuffer buffer) const noexcept -> VkDeviceAddress {
         return ctx.BufferAddress(buffer);

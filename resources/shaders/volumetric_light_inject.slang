@@ -1,17 +1,15 @@
 // resources/shaders/volumetric_light_inject.hlsl
 
+import cluster_math;
 import pbr_helpers;
 import uniforms;
 import volumetric_grid;
 
-[[vk::constant_id(1000)]] const uint ZHLN_DISPATCH_SIZE_X = VOLUMETRIC_GRID_WIDTH;
-[[vk::constant_id(1001)]] const uint ZHLN_DISPATCH_SIZE_Y = VOLUMETRIC_GRID_HEIGHT;
-[[vk::constant_id(1002)]] const uint ZHLN_DISPATCH_SIZE_Z = VOLUMETRIC_GRID_DEPTH;
-
-struct ClusterVolume {
-    uint offset;
-    uint count;
-};
+namespace Dispatch {
+    [[vk::constant_id(1000)]] const uint SizeX = Volumetric.Width;
+    [[vk::constant_id(1001)]] const uint SizeY = Volumetric.Height;
+    [[vk::constant_id(1002)]] const uint SizeZ = Volumetric.Depth;
+}
 
 struct VolumetricLightInjectPushConstants {
     float scatteringIntensity;
@@ -78,7 +76,7 @@ float SampleShadowPCF3x3(float3 projCoords, float cascade, float angle) {
 void CSMain(uint3 tid: SV_DispatchThreadID) {
     uint3 gridDim;
     outVoxelLight.GetDimensions(gridDim.x, gridDim.y, gridDim.z);
-    if (any(tid >= gridDim) || any(tid >= uint3(ZHLN_DISPATCH_SIZE_X, ZHLN_DISPATCH_SIZE_Y, ZHLN_DISPATCH_SIZE_Z)))
+    if (any(tid >= gridDim) || any(tid >= uint3(Dispatch.SizeX, Dispatch.SizeY, Dispatch.SizeZ)))
         return;
 
     float4 media      = inVoxelMedia[tid];
@@ -92,7 +90,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
 
     float2 uv     = (float2(tid.xy) + 0.5f) / float2(gridDim.xy);
     float jitter  = TemporalHash2D(tid.xy, frame.camPos.w) - 0.5f;
-    float depthVS = 0.1f * pow(10000.0f, (float(tid.z) + 0.5f + jitter * 0.5f) / float(VOLUMETRIC_GRID_DEPTH));
+    float depthVS = 0.1f * pow(10000.0f, (float(tid.z) + 0.5f + jitter * 0.5f) / float(Volumetric.Depth));
 
     float4 clip          = float4(uv.x * 2.0f - 1.0f, uv.y * 2.0f - 1.0f, 0.5f, 1.0f);
     float4 worldSpacePos = mul(frame.invViewProj, clip);
@@ -136,8 +134,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     accumulatedLight += frame.lightDir.w * phaseSun * shadow * scattering * lightPC.scatteringIntensity;
 
     // --- 3. Clustered Point/Spot/Area Lights (Shared Cluster Grid Assignment) ---
-    uint3 clusterCoords   = uint3(uint(uv.x * 16.0f), uint(uv.y * 9.0f), uint(max(0.0f, log(depthVS) * frame.zScale + frame.zBias)));
-    uint clusterIdx       = clusterCoords.x + (clusterCoords.y * 16) + (min(clusterCoords.z, 23u) * 144);
+    uint clusterIdx = ClusterIndexFromUV(uv, depthVS);
     ClusterVolume cluster = clusterGrid[clusterIdx];
     uint lightListCount   = min(cluster.count, 64u); // Defense-in-depth bounds clamp
 

@@ -1,16 +1,12 @@
 // resources/shaders/lighting.hlsl
 
+import cluster_math;
 import descriptor_heap_layout;
 import pbr_helpers;
 import uniforms;
 
 [vk::push_constant]
 ScenePassPushConstants pc;
-
-struct ClusterVolume {
-    uint offset;
-    uint count;
-};
 
 // --- G-Buffer & Lighting Inputs ---
 Texture2D<float4> texInput;
@@ -128,8 +124,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     // --- 2. Punctual and Area Lights (Clustered) ---
     float3 directPunctual = float3(0.0f, 0.0f, 0.0f);
 
-    uint sliceZ = uint(max(0.0f, log(viewDepth) * frame.zScale + frame.zBias));
-    uint cIdx   = min(uint(input.uv.x * 16.0f), 15u) + (min(uint(input.uv.y * 9.0f), 8u) * 16) + (min(sliceZ, 23u) * 144);
+    uint cIdx = ClusterIndexFromUV(input.uv, viewDepth);
 
     ClusterVolume cluster = clusterGrid[cIdx];
     uint lightListCount   = min(cluster.count, 64u); // Safety clamp against out-of-bounds reads

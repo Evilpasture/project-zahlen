@@ -91,12 +91,6 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniform
     VkExtent2D res    = _impl->graphResources.sceneColor.extent;
     float      aspect = (res.height > 0) ? static_cast<float>(res.width) / res.height : 1.777f;
 
-    if (aspect != _impl->lastAspectRatio || cam.fov != _impl->lastFov) {
-        _impl->lastAspectRatio = aspect;
-        _impl->lastFov         = cam.fov;
-        _impl->UploadClusterBounds(cam.GetProjectionMatrix(aspect));
-    }
-
     std::array<float, 4> cascadeSplits {};
     cascadeSplits[0] = cam.nearZ + (cam.farZ - cam.nearZ) * 0.08f;
     cascadeSplits[1] = cam.nearZ + (cam.farZ - cam.nearZ) * 0.22f;
@@ -109,6 +103,7 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniform
 
     JPH::Mat44 viewmodelProj      = Math::CreatePerspective(JPH::DegreesToRadians(58.0f), aspect, cam.nearZ, cam.farZ);
     gpuUniforms.viewmodelViewProj = viewmodelProj * cam.GetViewMatrix();
+    gpuUniforms.invProj           = cam.GetProjectionMatrix(aspect).Inversed();
 
     std::memcpy(gpuUniforms.cascadeSplits, cascadeSplits.data(), sizeof(float) * 4);
     std::memcpy(gpuUniforms.sh, _impl->iblPayload.shCoeffs.data(), sizeof(JPH::Vec4) * 9);
@@ -127,6 +122,12 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniform
     }
 
     std::memcpy(_impl->frames.frameUniformBuffers->Map().data, &gpuUniforms, sizeof(FrameUniforms));
+
+    if (aspect != _impl->lastAspectRatio || cam.fov != _impl->lastFov) {
+        _impl->lastAspectRatio = aspect;
+        _impl->lastFov         = cam.fov;
+        _impl->UploadClusterBounds();
+    }
 }
 
 void RenderContext::SetGISettings(const GISettings& settings) noexcept {

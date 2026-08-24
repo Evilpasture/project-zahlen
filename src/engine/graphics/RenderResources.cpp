@@ -7,6 +7,7 @@
 #include "Zahlen/Types.hpp"
 #include <Zahlen/Core/ControlFlow.hpp>
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdio>
 #include <utility>
@@ -1104,77 +1105,89 @@ void RenderContext::Impl::RegisterPipeline(const PipelineRegistration& reg) noex
     }
 }
 
-void RenderContext::Impl::UploadClusterBounds(const JPH::Mat44& proj) {
-    const auto [gridWidth, gridHeight, gridDepth] = clusterCullingPass.fixedDispatchSize;
-    if (gridWidth == 0 || gridHeight == 0 || gridDepth == 0) {
+void RenderContext::Impl::UploadClusterBounds() {
+    if (!clusterBoundsPass.pipeline.Valid() || clusterBoundsPass.fixedDispatchSize[0] == 0) {
         return;
     }
 
-    ZHLN::Array<ClusterBounds> cpuBounds(static_cast<size_t>(gridWidth) * gridHeight * gridDepth);
-    JPH::Mat44                 invProj = proj.Inversed();
-
-    float tsX = 2.0f / static_cast<float>(gridWidth);
-    float tsY = 2.0f / static_cast<float>(gridHeight);
-
-    auto Unproject = [&](const JPH::Vec4& coord) -> JPH::Vec3 {
-        JPH::Vec4 res = invProj * coord;
-        return {res.GetX() / res.GetW(), res.GetY() / res.GetW(), res.GetZ() / res.GetW()};
-    };
-
-    for (uint32_t z = 0; z < gridDepth; ++z) {
-        float n     = 0.1f;
-        float f     = 1000.0f;
-        float sNear = n * std::pow(f / n, static_cast<float>(z) / static_cast<float>(gridDepth));
-        float sFar  = n * std::pow(f / n, static_cast<float>(z + 1) / static_cast<float>(gridDepth));
-
-        float tNear = (sNear - n) / (f - n);
-        float tFar  = (sFar - n) / (f - n);
-
-        for (uint32_t y = 0; y < gridHeight; ++y) {
-            for (uint32_t x = 0; x < gridWidth; ++x) {
-                uint32_t cIdx = x + (y * gridWidth) + (z * gridWidth * gridHeight);
-
-                std::array<JPH::Vec4, 4> ndc {
-                    {JPH::Vec4(-1.0f + x * tsX, -1.0f + y * tsY, 0.0f, 1.0f), JPH::Vec4(-1.0f + (x + 1) * tsX, -1.0f + y * tsY, 0.0f, 1.0f),
-                     JPH::Vec4(-1.0f + (x + 1) * tsX, -1.0f + (y + 1) * tsY, 0.0f, 1.0f), JPH::Vec4(-1.0f + x * tsX, -1.0f + (y + 1) * tsY, 0.0f, 1.0f)}
-                };
-
-                std::array<JPH::Vec3, 4> pNear {};
-                std::array<JPH::Vec3, 4> pFar {};
-                for (int i = 0; i < 4; ++i) {
-                    pNear[i] = Unproject(JPH::Vec4(ndc[i].GetX(), ndc[i].GetY(), 0.0f, 1.0f));
-                    pFar[i]  = Unproject(JPH::Vec4(ndc[i].GetX(), ndc[i].GetY(), 1.0f, 1.0f));
-                }
-
-                JPH::Vec3 pMin(1e30f, 1e30f, 1e30f);
-                JPH::Vec3 pMax(-1e30f, -1e30f, -1e30f);
-
-                for (int j = 0; j < 4; ++j) {
-                    JPH::Vec3 ptNear = pNear[j] + (pFar[j] - pNear[j]) * tNear;
-                    JPH::Vec3 ptFar  = pNear[j] + (pFar[j] - pNear[j]) * tFar;
-                    pMin             = JPH::Vec3::sMin(pMin, JPH::Vec3::sMin(ptNear, ptFar));
-                    pMax             = JPH::Vec3::sMax(pMax, JPH::Vec3::sMax(ptNear, ptFar));
-                }
-
-                cpuBounds[cIdx].minPoint = JPH::Vec4(pMin.GetX(), pMin.GetY(), pMin.GetZ(), 1.0f);
-                cpuBounds[cIdx].maxPoint = JPH::Vec4(pMax.GetX(), pMax.GetY(), pMax.GetZ(), 1.0f);
-            }
-        }
-    }
-
-    auto stagingAlloc = stagingRingBuffer.Allocate(cpuBounds.size() * sizeof(ClusterBounds));
-    std::memcpy(stagingAlloc.mappedData, cpuBounds.data(), cpuBounds.size() * sizeof(ClusterBounds));
-
-    Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) -> void {
-        Vk::CopyRingBuffer(cmd, stagingAlloc, clusterBoundsBuffer, cpuBounds.size() * sizeof(ClusterBounds));
-
+    Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
+        BindHeapsAndPushFrame(cmd);
+        clusterBoundsPass.DispatchHeapIndexed(ctx, cmd, frame_index);
         Vk::MemoryBarrier(
-            cmd, {.src_stage  = VK_PIPELINE_STAGE_2_COPY_BIT,
-                  .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+            cmd, {.src_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                  .src_access = VK_ACCESS_2_SHADER_WRITE_BIT,
                   .dst_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                   .dst_access = VK_ACCESS_2_SHADER_READ_BIT}
         );
     });
+}
+
+auto RenderContext::Impl::DispatchOneShotCompute(
+    const ZHLN_ShaderDesc& shader,
+    const void*            pushData,
+    uint32_t               pushSize,
+    uint32_t               threadsX,
+    uint32_t               threadsY,
+    uint32_t               threadsZ
+) noexcept -> std::expected<void, Error> {
+    if (shader.code == nullptr || shader.size == 0) {
+        return std::unexpected(ShaderStageCreationError::ShaderLoadingFailed);
+    }
+    Vk::ComputePass pass;
+    if (!pass.ReflectDispatchLayout(shader)) {
+        return std::unexpected(Vk::SpirvLayoutError::ModuleParseFailed);
+    }
+    return Vk::ComputePipelineBuilder()
+        .Shader(shader)
+        .Layout(VK_NULL_HANDLE)
+        .HeapPipeline()
+        .Build(ctx.Device())
+        .transform([&](auto&& pipeline) {
+            pass.pipeline = std::forward<decltype(pipeline)>(pipeline);
+
+            Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
+                pass.Bind(cmd);
+                if (pushData != nullptr && pushSize > 0) {
+                    Vk::PushData(ctx, cmd, 0, pushData, pushSize);
+                }
+                pass.DispatchThreads(cmd, threadsX, threadsY, threadsZ);
+                Vk::MemoryBarrier(
+                    cmd, {.src_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                          .src_access = VK_ACCESS_2_SHADER_WRITE_BIT,
+                          .dst_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                          .dst_access = VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT}
+                );
+            });
+        });
+}
+
+std::expected<void, Error> RenderContext::Impl::ValidateSlangTypeLayouts() noexcept {
+    const void*  spirv   = Resource::gpu_abi_comp.data();
+    const size_t spirvSz = Resource::gpu_abi_comp.size();
+
+    std::expected<void, Error> result {};
+    uint32_t                   checked = 0;
+    Reflect::ForEachAnnotatedType<ZHLN, EnableABI>([&]<typename T>() {
+        if (!result) {
+            return;
+        }
+        ++checked;
+        auto layout = Vk::ReflectTypeLayout(spirv, spirvSz, Reflect::AnnotatedName<T>());
+        if (!layout) {
+            result = std::unexpected(layout.error());
+            return;
+        }
+        if (layout->size != sizeof(T)) {
+            result = std::unexpected(Vk::SpirvLayoutError::TypeSizeMismatch);
+        }
+    });
+    if (!result) {
+        return result;
+    }
+    if (checked == 0) {
+        return std::unexpected(Vk::SpirvLayoutError::NoAbiTypes);
+    }
+    return Vk::ReflectHeapPushDataLayout(spirv, spirvSz).transform([](const auto&) {});
 }
 
 } // namespace ZHLN

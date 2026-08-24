@@ -30,7 +30,7 @@
 enum class PBRTestError : uint8_t {
     Success = 0,
     EngineInitFailed[[= ZHLN::Reflect::Description("Failed to initialize headless Engine context for PBR test.")]],
-    BrdfLutGenerationFailed[[= ZHLN::Reflect::Description("Generated 2D BRDF LUT failed numerical or boundary invariants.")]],
+    BRDFLUTGenerationFailed[[= ZHLN::Reflect::Description("Generated 2D BRDF LUT failed numerical or boundary invariants.")]],
     SphericalHarmonicsFailed[[= ZHLN::Reflect::Description("Diffuse Spherical Harmonics coefficients violated positive energy conservation.")]],
     SpecularMipGenerationFailed[[= ZHLN::Reflect::Description("Specular pre-filtered environment cubemap mips failed validation.")]],
     RenderOutputBlank[[= ZHLN::Reflect::Description("Rendered frame is blank or failed to capture.")]],
@@ -89,7 +89,7 @@ struct PBRTestSuite {
 
             ZHLN::Test::ExpectEq(lutData.size(), static_cast<size_t>(lutDim * lutDim));
             if (lutData.size() != static_cast<size_t>(lutDim * lutDim)) {
-                return std::unexpected(PBRTestError::BrdfLutGenerationFailed);
+                return std::unexpected(PBRTestError::BRDFLUTGenerationFailed);
             }
 
             // In BRDFLUT.cpp:

@@ -8,11 +8,16 @@
 #include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
+#include <Zahlen/Core/Reflection.hpp>
 #include <array>
 #include <cstdint>
 #include <string_view>
 
 namespace ZHLN {
+
+/// Compile-time marker. Reflection never names this — callers pass the tag
+/// into `ForEachAnnotatedType`.
+struct EnableABI {};
 
 // --- High-Level Persistent Asset Identifiers ---
 using AssetID    = uint64_t;
@@ -82,7 +87,7 @@ struct VertexSkin {
 // vertex/primitive unpack). Both index it through a raw BDA pointer, so the
 // layout below is the authoritative ABI: keep it in sync with `GPUMeshlet`
 // in resources/shaders/common.slang.
-struct alignas(16) GPUMeshlet {
+struct alignas(16) GPUMeshlet [[ = ZHLN::EnableABI{} ]] {
     uint32_t vertexOffset;   // First entry in the unique-vertex index array
     uint32_t triangleOffset; // First byte in the 8-bit micro-index array
     uint32_t vertexCount;    // <= kMeshletMaxVertices
@@ -113,7 +118,7 @@ inline constexpr uint32_t kMeshletsPerTaskGroup = 32;
 // Threads per mesh-shader workgroup (one vertex per thread, 2 prims per thread).
 inline constexpr uint32_t kMeshShaderGroupSize = 64;
 
-struct alignas(16) InstanceData {
+struct alignas(16) InstanceData [[ = ZHLN::EnableABI{} ]] {
     JPH::Mat44 world;
     JPH::Mat44 prevWorld;
     uint64_t   posAddress;
@@ -164,7 +169,7 @@ inline constexpr TextureHandle White      = TextureHandle(2);
 inline constexpr TextureHandle FlatNormal = TextureHandle(3);
 } // namespace SystemTextures
 
-struct UIObjectConstants {
+struct UIObjectConstants [[ = ZHLN::EnableABI{} ]] {
     JPH::Mat44 orthoMatrix;
     uint64_t   posAddress;
     uint64_t   attrAddress;
@@ -181,11 +186,11 @@ struct UIBatch {
     ScissorRect   scissorRect = {};
 };
 
-struct ClusterBounds {
+struct ClusterBounds [[ = ZHLN::EnableABI{} ]] {
     JPH::Vec4 minPoint;
     JPH::Vec4 maxPoint;
 };
-struct ClusterVolume {
+struct ClusterVolume [[ = ZHLN::EnableABI{} ]] {
     uint32_t offset;
     uint32_t count;
 };
@@ -198,7 +203,7 @@ struct alignas(16) GPUVolumetricVolume {
 };
 static_assert(sizeof(GPUVolumetricVolume) == 112);
 
-struct alignas(16) VolumetricFogInjectPushConstants {
+struct alignas(16) VolumetricFogPushConstants [[ = ZHLN::EnableABI{} ]] {
     float density;
     float heightFalloff;
     float heightOffset;
@@ -218,9 +223,9 @@ struct alignas(16) VolumetricFogInjectPushConstants {
     uint32_t _pad0;
     uint32_t _pad1;
 };
-static_assert(sizeof(VolumetricFogInjectPushConstants) == 80);
+static_assert(sizeof(VolumetricFogPushConstants) == 80);
 
-struct alignas(16) VolumetricLightInjectPushConstants {
+struct alignas(16) VolumetricLightInjectPushConstants [[ = ZHLN::EnableABI{} ]] {
     float    scatteringIntensity;
     float    ambientIntensity;
     float    phaseAnisotropy;
@@ -228,7 +233,7 @@ struct alignas(16) VolumetricLightInjectPushConstants {
 };
 static_assert(sizeof(VolumetricLightInjectPushConstants) == 16);
 
-struct alignas(16) VolumetricTemporalPushConstants {
+struct alignas(16) VolumetricTemporalPushConstants [[ = ZHLN::EnableABI{} ]] {
     float    temporalWeight;
     float    clampStrength;
     uint32_t resetHistory;
@@ -236,7 +241,7 @@ struct alignas(16) VolumetricTemporalPushConstants {
 };
 static_assert(sizeof(VolumetricTemporalPushConstants) == 16);
 
-struct ObjectConstants {
+struct ObjectConstants [[ = ZHLN::EnableABI{} ]] {
     uint32_t instanceId;
     uint32_t isShadowPass;
 };
@@ -285,7 +290,7 @@ static_assert(sizeof(LightType) == sizeof(uint32_t));
 
 enum class ParticleAlignment : uint32_t { CameraBillboard = 0, VelocityStretched = 1, GroundFlat = 2 };
 
-struct alignas(16) ParticleEmitterParams {
+struct alignas(16) ParticleEmitterParams [[ = ZHLN::EnableABI{} ]] {
     std::array<float, 3> gravity = {0.0f, -9.81f, 0.0f};
     float                drag    = 0.2f;
 
@@ -317,7 +322,7 @@ struct alignas(16) ParticleEmitterParams {
 };
 static_assert(sizeof(ParticleEmitterParams) == 160, "ParticleEmitterParams alignment mismatch!");
 
-struct alignas(16) MeshParticleEmitterParams {
+struct alignas(16) MeshParticleEmitterParams [[ = ZHLN::EnableABI{} ]] {
     std::array<float, 3> gravity = {0.0f, -9.81f, 0.0f};
     float                drag    = 0.2f;
 
@@ -347,7 +352,7 @@ struct alignas(16) MeshParticleEmitterParams {
 };
 static_assert(sizeof(MeshParticleEmitterParams) == 160);
 
-struct alignas(16) Particle {
+struct alignas(16) Particle [[ = ZHLN::EnableABI{} ]] {
     JPH::Vec4 position = JPH::Vec4::sZero();
     JPH::Vec4 velocity = JPH::Vec4::sZero();
     JPH::Vec4 color    = JPH::Vec4::sReplicate(1.0f);
@@ -356,7 +361,7 @@ struct alignas(16) Particle {
 
 static_assert(sizeof(Particle) == 64);
 
-struct alignas(16) Particle3D {
+struct alignas(16) Particle3D [[ = ZHLN::EnableABI{} ]] {
     JPH::Vec4 position;
     JPH::Vec4 velocity;
     JPH::Quat rotation;
@@ -366,7 +371,7 @@ struct alignas(16) Particle3D {
 };
 static_assert(sizeof(Particle3D) == 96);
 
-struct alignas(16) GPULight {
+struct alignas(16) GPULight [[ = ZHLN::EnableABI{}, = ZHLN::Reflect::Description("Light") ]] {
     float     position[3];
     LightType type;
     float     color[3];
@@ -386,7 +391,7 @@ struct alignas(16) GPULight {
 };
 static_assert(sizeof(GPULight) == 160);
 
-struct alignas(16) FrameUniforms {
+struct alignas(16) FrameUniforms [[ = ZHLN::EnableABI{} ]] {
     JPH::Mat44 viewProj;
     JPH::Mat44 unjitteredViewProj;
     JPH::Mat44 prevUnjitteredViewProj;
@@ -406,10 +411,8 @@ struct alignas(16) FrameUniforms {
     JPH::Vec4 probeMax;
     JPH::Vec4 probePos;
     JPH::Vec4 jitterParams;
-    int       enableRTR;
-    float     zScale;
-    float     zBias;
-    float     sunSize;
+    int   enableRTR;
+    float sunSize;
 
     alignas(16) float cascadeSplits[4];
     int   numCascades;
@@ -421,7 +424,9 @@ struct alignas(16) FrameUniforms {
     JPH::Vec4 skyGround;
 
     JPH::Mat44 viewmodelViewProj;
+    JPH::Mat44 invProj; // Slang-owned; cluster_bounds.slang unprojects in view space
 };
+static_assert(sizeof(FrameUniforms) % 16 == 0);
 
 struct Material {
     PipelineHandle      pipeline           = PipelineHandle::Invalid;

@@ -6,7 +6,6 @@
 #include "IBLProcessor.hpp"
 #include "RenderInternal.hpp"
 #include "Resources.hpp"
-#include "SMAALUTGenerator.hpp"
 #include "backends/imgui_impl_glfw.h"
 #include "imgui.h"
 #include "imgui_impl_vulkan_heap.h"
@@ -284,6 +283,7 @@ std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfi
         // every later pass binding allocates its slots AFTER that region.
         // Allocating pass slots first (the old order) let culling/cluster
         // descriptors land inside the texture array and clobber it.
+        .and_then([&]() { return ValidateSlangTypeLayouts(); })
         .and_then([&]() { return InitBindless(); })
         .and_then([&]() { return InitCullingResources(); })
         .and_then([&]() { return InitLineBuffers(); })
@@ -590,8 +590,11 @@ std::expected<Vk::Pipeline, Error>
 
     const ZHLN_ShaderDesc shader = {.code = Vk::AsSpirV(cs_code), .size = cs_size, .entry_point = cs.entryPoint};
     gpuDiagnostics.RegisterShader(shader, "CSMain");
+    if (shader.code == nullptr || shader.size == 0) {
+        return std::unexpected(ShaderStageCreationError::ShaderLoadingFailed);
+    }
     if (!pass.ReflectDispatchLayout(shader)) {
-        return std::unexpected(RenderInitError::ShaderCompilationFailed);
+        return std::unexpected(Vk::SpirvLayoutError::ModuleParseFailed);
     }
 
     return Vk::ComputePipelineBuilder()
@@ -600,7 +603,7 @@ std::expected<Vk::Pipeline, Error>
         .Build(ctx.Device())
         .transform_error([](ZHLN::Error err) -> Error {
             if (err.Is(Vk::PipelineBuilderResult::MissingShaders)) {
-                return RenderInitError::ShaderCompilationFailed;
+                return ShaderStageCreationError::ShaderLoadingFailed;
             }
             if (err.Is(Vk::PipelineBuilderResult::MissingLayout)) {
                 return RenderInitError::PipelineLayoutCreationFailed;
@@ -1296,9 +1299,12 @@ std::expected<void, Error> RenderContext::Impl::InitBindless() {
 
 std::expected<void, Error>
     RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSamplerInfo, const VkSamplerCreateInfo& clampSamplerInfo) noexcept {
-    auto reflectedPushLayout = Vk::ReflectHeapPushDataLayout();
-    if (!reflectedPushLayout || reflectedPushLayout->frameAddressOffsets.front() < sizeof(PPPushConstants)) [[unlikely]] {
-        return std::unexpected(RenderInitError::PipelineCreationFailed);
+    auto reflectedPushLayout = Vk::ReflectHeapPushDataLayout(Resource::gpu_abi_comp.data(), Resource::gpu_abi_comp.size());
+    if (!reflectedPushLayout) [[unlikely]] {
+        return std::unexpected(reflectedPushLayout.error());
+    }
+    if (reflectedPushLayout->frameAddressOffsets.front() < sizeof(PPPushConstants)) [[unlikely]] {
+        return std::unexpected(Vk::SpirvLayoutError::HeapPushOverlapsPassData);
     }
     heapPushDataLayout = *reflectedPushLayout;
 
@@ -1911,18 +1917,65 @@ std::expected<void, Error> RenderContext::Impl::InitPostProcessing() {
         .and_then([&]() { return register_and_check("Blit", [this]() { return BuildBlitPipeline(); }, {Resource::Paths::BlitVS, Resource::Paths::BlitPS}); })
         // CHANGED: Converted to .and_then to handle expected texture allocations monadically
         .and_then([&]() -> std::expected<void, Error> {
-            ZHLN::Array<uint32_t> smaaAreaPixels(static_cast<size_t>(160 * 560));
-            ZHLN::PBR::FillSmaaAreaTex(smaaAreaPixels);
-            ZHLN::Array<uint32_t> smaaSearchPixels(static_cast<size_t>(64 * 16));
-            ZHLN::PBR::FillSmaaSearchTex(smaaSearchPixels);
+            auto bakeSmaaLut = [&](uint32_t width, uint32_t height, uint32_t mode) -> std::expected<uint32_t, Error> {
+                struct SMAALUTPush {
+                    uint64_t outAddr = 0;
+                    uint32_t width   = 0;
+                    uint32_t height  = 0;
+                    uint32_t mode    = 0;
+                };
+                struct State {
+                    Vk::Buffer gpu;
+                    Vk::Buffer cpu;
+                };
+                const size_t          bytes  = static_cast<size_t>(width) * height * 4;
+                const ZHLN_ShaderDesc shader = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::SMAALUTComp).vertex, "CSMain");
 
-            return CreateTextureInternal(smaaAreaPixels.data(), 160, 560, false)
-                .and_then([&, smaaSearchPixels](uint32_t areaIdx) -> std::expected<void, Error> {
-                    smaaAreaTexIdx = areaIdx;
-                    return CreateTextureInternal(smaaSearchPixels.data(), 64, 16, false).transform([&](uint32_t searchIdx) -> void {
-                        smaaSearchTexIdx = searchIdx;
+                auto requireShader = [](const ZHLN_ShaderDesc& desc) -> std::expected<ZHLN_ShaderDesc, Error> {
+                    if (desc.code == nullptr || desc.size == 0) {
+                        return std::unexpected(ShaderStageCreationError::ShaderLoadingFailed);
+                    }
+                    return desc;
+                };
+
+                return requireShader(shader)
+                    .and_then([&](auto) -> std::expected<Vk::Buffer, Error> {
+                        return Vk::Buffer::Create(
+                            allocator.Get(), bytes,
+                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                            VMA_MEMORY_USAGE_GPU_ONLY
+                        );
+                    })
+                    .and_then([&](Vk::Buffer gpu) {
+                        const SMAALUTPush push {.outAddr = ctx.BufferAddress(gpu.Handle()), .width = width, .height = height, .mode = mode};
+                        return DispatchOneShotCompute(shader, &push, sizeof(push), width, height, 1).transform([gpu = std::move(gpu)]() mutable {
+                            return State {.gpu = std::move(gpu)};
+                        });
+                    })
+                    .and_then([&](State state) -> std::expected<State, Error> {
+                        return Vk::Buffer::Create(allocator.Get(), bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_TO_CPU)
+                            .transform([state = std::move(state)](Vk::Buffer cpu) mutable {
+                                state.cpu = std::move(cpu);
+                                return std::move(state);
+                            });
+                    })
+                    .and_then([&](State state) -> std::expected<uint32_t, Error> {
+                        Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) { Vk::CopyBuffer(cmd, state.gpu, state.cpu, bytes); });
+                        auto mapped = state.cpu.Map();
+                        if (mapped.data == nullptr) {
+                            return std::unexpected(RenderInitError::SubsystemAllocationFailed);
+                        }
+                        return CreateTextureInternal(mapped.data, width, height, false);
                     });
+            };
+
+            return bakeSmaaLut(160, 560, 0).and_then([&](uint32_t area) -> std::expected<void, Error> {
+                smaaAreaTexIdx = area;
+                return bakeSmaaLut(64, 16, 1).transform([&](uint32_t search) {
+                    smaaSearchTexIdx = search;
+                    ZHLN::Log("[SMAA] Area and search LUTs baked on GPU.");
                 });
+            });
         })
         .and_then([&]() -> std::expected<void, Error> {
             // Every pass pipeline + binding table now exists: write the static
@@ -2234,7 +2287,7 @@ std::expected<void, Error> RenderContext::Impl::InitLightingLUTs() {
     const size_t ampRawSize = ltc_amp.size() - 128;
 
     return stagingContext->Begin()
-        .and_then([&]() { return Vk::IBLProcessor::Bake(*this, *stagingContext).transform_error([](auto res) -> Error { return res; }); })
+        .and_then([&]() { return Vk::IBLProcessor::Bake(*this, *stagingContext); })
         .and_then([&, matRawSize, ampRawSize](auto&& ibl) {
             iblPayload = std::forward<decltype(ibl)>(ibl);
             ZHLN::Log("[IBL] Uploading Linearly Transformed Cosines (LTC) LUTs...");
@@ -2275,22 +2328,25 @@ std::expected<void, Error> RenderContext::Impl::InitLightingLUTs() {
                         });
                 });
         })
-        .transform([&](auto&& images) -> void {
+        .and_then([&](auto&& images) -> std::expected<void, Error> {
             ltcMatImage = std::move(images.first);
             ltcAmpImage = std::move(images.second);
 
             stagingContext->ExecuteAsync();
 
-            if (auto mat_view = Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcMatImage.Handle())) {
-                ltcMatView = std::move(*mat_view);
-            }
-            if (auto amp_view = Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcAmpImage.Handle())) {
-                ltcAmpView = std::move(*amp_view);
-            }
-            ltcMatViewInfo = Vk::MakeViewCreateInfo2D(ltcMatImage.Handle(), VK_FORMAT_R16G16B16A16_SFLOAT, 1, VK_IMAGE_ASPECT_COLOR_BIT);
-            ltcAmpViewInfo = Vk::MakeViewCreateInfo2D(ltcAmpImage.Handle(), VK_FORMAT_R16G16B16A16_SFLOAT, 1, VK_IMAGE_ASPECT_COLOR_BIT);
-
-            ApplyImageDebugNames(*this);
+            return Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcMatImage.Handle())
+                .transform_error([](auto res) -> Error { return res; })
+                .and_then([&](auto&& matView) -> std::expected<void, Error> {
+                    ltcMatView = std::forward<decltype(matView)>(matView);
+                    return Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcAmpImage.Handle())
+                        .transform_error([](auto res) -> Error { return res; })
+                        .transform([&](auto&& ampView) {
+                            ltcAmpView     = std::forward<decltype(ampView)>(ampView);
+                            ltcMatViewInfo = Vk::MakeViewCreateInfo2D(ltcMatImage.Handle(), VK_FORMAT_R16G16B16A16_SFLOAT, 1, VK_IMAGE_ASPECT_COLOR_BIT);
+                            ltcAmpViewInfo = Vk::MakeViewCreateInfo2D(ltcAmpImage.Handle(), VK_FORMAT_R16G16B16A16_SFLOAT, 1, VK_IMAGE_ASPECT_COLOR_BIT);
+                            ApplyImageDebugNames(*this);
+                        });
+                });
         });
 }
 
@@ -2549,6 +2605,10 @@ std::expected<void, Error> RenderContext::Impl::BuildHiZPipeline() {
 
 std::expected<void, Error> RenderContext::Impl::InitUIDynamicBuffers() noexcept {
     return AllocateDynamicVertexBuffers(kMaxUiVertices, frames.uiVbos, frames.uiVboAddresses, 0, "UI");
+}
+
+} // namespace ZHLN
+uiVbos, frames.uiVboAddresses, 0, "UI");
 }
 
 } // namespace ZHLN

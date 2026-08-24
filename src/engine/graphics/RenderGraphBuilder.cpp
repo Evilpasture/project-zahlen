@@ -262,7 +262,7 @@ struct PassFactory {
                 self.frames.frameUniformBuffers[fIdx], self.frames.fogVolumesBuffer[fIdx]
             );
 
-            VolumetricFogInjectPushConstants pc = {};
+            VolumetricFogPushConstants pc = {};
             self.volumetricFogInjectPass.DispatchHeap(self.ctx, c, fIdx, pc);
         });
     }
