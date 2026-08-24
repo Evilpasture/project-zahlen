@@ -102,7 +102,7 @@ inline auto QuatToEulerDegrees(JPH::QuatArg quat) {
  * @brief Generates a world-space AABB from a View-Projection matrix.
  * Used to query Jolt's Broadphase.
  */
-inline JPH::AABox CalculateFrustumAABB(const JPH::Mat44& viewProj) {
+inline auto CalculateFrustumAABB(const JPH::Mat44& viewProj) -> JPH::AABox {
     JPH::Mat44 invVP = viewProj.Inversed();
     JPH::AABox bounds;
 
@@ -135,7 +135,7 @@ inline auto CreateOrthoMatrix(float width, float height) -> JPH::Mat44 {
 }
 
 // Bit layout is owned by resources/shaders/vertex_format.slang (Unpack1010102).
-constexpr Packed1010102 PackNormal(float x, float y, float z, float w = 0.0f) {
+constexpr auto PackNormal(float x, float y, float z, float w = 0.0f) -> Packed1010102 {
     uint32_t xs = static_cast<uint32_t>((x * 0.5f + 0.5f) * 1023.0f) & 0x3FF;
     uint32_t ys = static_cast<uint32_t>((y * 0.5f + 0.5f) * 1023.0f) & 0x3FF;
     uint32_t zs = static_cast<uint32_t>((z * 0.5f + 0.5f) * 1023.0f) & 0x3FF;
@@ -144,7 +144,7 @@ constexpr Packed1010102 PackNormal(float x, float y, float z, float w = 0.0f) {
 }
 
 // Simple Color packer
-constexpr PackedRGBA8 PackColor(float r, float g, float b, float a = 1.0f) {
+constexpr auto PackColor(float r, float g, float b, float a = 1.0f) -> PackedRGBA8 {
     uint32_t rs = static_cast<uint32_t>(r * 255.0f) & 0xFF;
     uint32_t gs = static_cast<uint32_t>(g * 255.0f) & 0xFF;
     uint32_t bs = static_cast<uint32_t>(b * 255.0f) & 0xFF;
@@ -152,7 +152,7 @@ constexpr PackedRGBA8 PackColor(float r, float g, float b, float a = 1.0f) {
     return {(as << 24) | (bs << 16) | (gs << 8) | rs};
 }
 
-inline uint16_t FloatToHalf(float f) {
+inline auto FloatToHalf(float f) -> uint16_t {
     // Use memcpy to avoid strict aliasing issues
     uint32_t i = 0;
     std::memcpy(&i, &f, 4);
@@ -183,7 +183,7 @@ inline void PackFloatsToHalf(const float* src, uint16_t* dst) {
     // 0 = Round to nearest even
     __m128i h_vec = _mm_cvtps_ph(f_vec, 0);
     // Store the lower 64 bits (4 halves)
-    _mm_storel_epi64((__m128i*) dst, h_vec);
+    _mm_storel_epi64(reinterpret_cast<__m128i*>(dst), h_vec);
 
 #elif defined(__aarch64__)
     // ARM64 NEON
@@ -199,7 +199,7 @@ inline void PackFloatsToHalf(const float* src, uint16_t* dst) {
 #endif
 }
 
-inline PackedHalf2 PackUV(float u, float v) {
+inline auto PackUV(float u, float v) -> PackedHalf2 {
     return {static_cast<uint32_t>(FloatToHalf(v) << 16) | FloatToHalf(u)};
 }
 

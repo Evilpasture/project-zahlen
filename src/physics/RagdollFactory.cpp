@@ -58,7 +58,7 @@ auto PhysicsContext::CreateSkeletalRagdoll(JPH::Ref<JPH::Skeleton> skeleton, con
             }
         }
 
-        for (size_t i = 1; i < skeleton->GetJointCount(); ++i) {
+        for (auto i = 1; i < skeleton->GetJointCount(); ++i) {
             int parentIdx = skeleton->GetJoint(i).mParentJointIndex;
             if (parentIdx >= 0 && settings->mParts[i].GetShape() != nullptr && settings->mParts[i].mToParent == nullptr) {
                 auto* twist       = new JPH::SwingTwistConstraintSettings();

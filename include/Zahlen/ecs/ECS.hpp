@@ -38,7 +38,7 @@ struct ComponentTypeInfo {
     void (*debugDump)(const void*, std::string&) = nullptr;
 };
 
-constexpr uint32_t HashTypeName(std::string_view str) {
+constexpr auto HashTypeName(std::string_view str) -> uint32_t {
     uint32_t hash = 2166136261u;
     for (char c: str) {
         hash ^= static_cast<uint8_t>(c);
@@ -48,7 +48,7 @@ constexpr uint32_t HashTypeName(std::string_view str) {
 }
 
 template <typename T>
-consteval uint32_t GetTypeHash() {
+consteval auto GetTypeHash() -> uint32_t {
     if constexpr (requires { ZHLN::Reflect::TypeName<T>(); }) {
         return HashTypeName(ZHLN::Reflect::TypeName<T>());
     } else {
@@ -57,7 +57,7 @@ consteval uint32_t GetTypeHash() {
 }
 
 template <typename T>
-constexpr std::string_view BoxedName() {
+constexpr auto BoxedName() -> std::string_view {
     if constexpr (requires { ZHLN::Reflect::GetSchemaNameOf(static_cast<T*>(nullptr)); }) {
         return ZHLN::Reflect::GetSchemaNameOf(static_cast<T*>(nullptr));
     } else if constexpr (requires { ZHLN::Reflect::TypeName<T>(); }) {
@@ -73,26 +73,26 @@ class ZHLN_API SparseSet {
     SparseSet(size_t elementSize, size_t alignment, BufferSync* syncPtr, DestructorFn destructor = nullptr);
     ~SparseSet();
 
-    SparseSet(const SparseSet&)            = delete;
-    SparseSet& operator=(const SparseSet&) = delete;
+    SparseSet(const SparseSet&)                    = delete;
+    auto operator=(const SparseSet&) -> SparseSet& = delete;
 
-    void                Insert(Entity entity, const void* data);
-    [[nodiscard]] void* InsertEmpty(Entity entity);
-    void                Remove(Entity entity);
-    [[nodiscard]] bool  Contains(Entity entity) const noexcept;
-    [[nodiscard]] void* Get(Entity entity) const noexcept;
-    void                Clear() noexcept;
+    void               Insert(Entity entity, const void* data);
+    [[nodiscard]] auto InsertEmpty(Entity entity) -> void*;
+    void               Remove(Entity entity);
+    [[nodiscard]] auto Contains(Entity entity) const noexcept -> bool;
+    [[nodiscard]] auto Get(Entity entity) const noexcept -> void*;
+    void               Clear() noexcept;
 
-    BufferView GetBufferView(const void* owner, const char* format) const noexcept;
-    BufferView GetEntityView(const void* owner) const noexcept;
+    auto GetBufferView(const void* owner, const char* format) const noexcept -> BufferView;
+    auto GetEntityView(const void* owner) const noexcept -> BufferView;
 
-    [[nodiscard]] size_t Count() const noexcept {
+    [[nodiscard]] auto Count() const noexcept -> size_t {
         return _count;
     }
-    [[nodiscard]] Entity* GetDenseArray() const noexcept {
+    [[nodiscard]] auto GetDenseArray() const noexcept -> Entity* {
         return _dense;
     }
-    [[nodiscard]] std::byte* GetDataArray() const noexcept {
+    [[nodiscard]] auto GetDataArray() const noexcept -> std::byte* {
         return _data;
     }
 
@@ -118,11 +118,11 @@ class ZHLN_API SparseSet {
 
 class ZHLN_API ComponentFamily {
   public:
-    static uint32_t ResolveDenseID(uint32_t typeHash) noexcept;
+    static auto ResolveDenseID(uint32_t typeHash) noexcept -> uint32_t;
 
     template <typename T>
         requires CompleteType<T>
-    static uint32_t GetTypeID() noexcept {
+    static auto GetTypeID() noexcept -> uint32_t {
         static uint32_t denseID = ResolveDenseID(GetTypeHash<T>());
         return denseID;
     }
@@ -137,7 +137,7 @@ class ZHLN_API Registry {
     Registry();
     ~Registry();
 
-    Entity Create();
+    auto Create() -> Entity;
 
     /**
      * @brief Creates an entity and attaches component instances in a single atomic lock.
@@ -149,8 +149,8 @@ class ZHLN_API Registry {
      *   );
      */
     template <typename C1, typename... Cs>
-    Entity Create(C1&& c1, Cs&&... cs) {
-        return ZHLN::Lock(sync.shadowLock, [&] {
+    auto Create(C1&& c1, Cs&&... cs) -> Entity {
+        return ZHLN::Lock(sync.shadowLock, [&] -> auto {
             if (_freeCount == 0) {
                 EnsureEntityCapacity(static_cast<uint32_t>(_entityCapacity));
             }
@@ -172,8 +172,8 @@ class ZHLN_API Registry {
      */
     template <typename T1, typename... Ts>
         requires(std::is_default_constructible_v<T1> && (std::is_default_constructible_v<Ts> && ...))
-    Entity Create() {
-        return ZHLN::Lock(sync.shadowLock, [&] {
+    auto Create() -> Entity {
+        return ZHLN::Lock(sync.shadowLock, [&] -> auto {
             if (_freeCount == 0) {
                 EnsureEntityCapacity(static_cast<uint32_t>(_entityCapacity));
             }
@@ -187,15 +187,15 @@ class ZHLN_API Registry {
         });
     }
 
-    void Destroy(Entity entity);
-    bool IsAlive(Entity entity) const noexcept;
-    void Clear();
+    void               Destroy(Entity entity);
+    [[nodiscard]] auto IsAlive(Entity entity) const noexcept -> bool;
+    void               Clear();
 
-    uint32_t RegisterComponentDynamic(std::string_view name, size_t size, size_t alignment);
-    void*    AddDynamic(Entity entity, uint32_t familyID);
+    auto RegisterComponentDynamic(std::string_view name, size_t size, size_t alignment) -> uint32_t;
+    auto AddDynamic(Entity entity, uint32_t familyID) -> void*;
 
-    static void     MapNameToFamilyID(std::string_view name, uint32_t id) noexcept;
-    static uint32_t GetFamilyIDFromName(std::string_view name) noexcept;
+    static void MapNameToFamilyID(std::string_view name, uint32_t id) noexcept;
+    static auto GetFamilyIDFromName(std::string_view name) noexcept -> uint32_t;
 
     template <typename T>
     void RegisterComponent() {
@@ -214,12 +214,12 @@ class ZHLN_API Registry {
      */
     template <typename Container>
     void RegisterAllComponentsIn() {
-        ZHLN::Reflect::ForEachNestedType<Container>([this]<typename Comp>() { this->RegisterComponent<Comp>(BoxedName<Comp>()); });
+        ZHLN::Reflect::ForEachNestedType<Container>([this]<typename Comp>() -> auto { this->RegisterComponent<Comp>(BoxedName<Comp>()); });
     }
 
     template <typename T>
         requires std::is_default_constructible_v<T>
-    T& Add(Entity entity) {
+    auto Add(Entity entity) -> T& {
         return Add(entity, T {});
     }
 
@@ -232,7 +232,7 @@ class ZHLN_API Registry {
     }
 
     template <typename T>
-    T& Add(Entity entity, T&& component) {
+    auto Add(Entity entity, T&& component) -> T& {
         using DecayedT = std::decay_t<T>;
         uint32_t id    = ComponentFamily::GetTypeID<DecayedT>();
         EnsureComponentCapacity(id);
@@ -240,7 +240,7 @@ class ZHLN_API Registry {
         if (!_components[id]) {
             typename SparseSet::DestructorFn dt = nullptr;
             if constexpr (requires(DecayedT* t) { DecayedT::OnDestroy(t); }) {
-                dt = [](void* ptr) {
+                dt = [](void* ptr) -> auto {
                     auto* obj = static_cast<DecayedT*>(ptr);
                     DecayedT::OnDestroy(obj);
                     if constexpr (!std::is_trivially_destructible_v<DecayedT>) {
@@ -248,7 +248,7 @@ class ZHLN_API Registry {
                     }
                 };
             } else if constexpr (!std::is_trivially_destructible_v<DecayedT>) {
-                dt = [](void* ptr) { static_cast<DecayedT*>(ptr)->~DecayedT(); };
+                dt = [](void* ptr) -> auto { static_cast<DecayedT*>(ptr)->~DecayedT(); };
             }
             _components[id] = new SparseSet(sizeof(DecayedT), alignof(DecayedT), &this->sync, dt);
         }
@@ -287,7 +287,7 @@ class ZHLN_API Registry {
 
     template <typename T>
         requires CompleteType<T>
-    T* Get(Entity entity) const noexcept {
+    auto Get(Entity entity) const noexcept -> T* {
         uint32_t id = ComponentFamily::GetTypeID<T>();
         if (id >= _compCapacity || !_components[id]) {
             return nullptr;
@@ -297,7 +297,7 @@ class ZHLN_API Registry {
 
     template <typename T>
         requires CompleteType<T>
-    ZHLN::RestrictSpan<T> GetRawArray() const noexcept {
+    auto GetRawArray() const noexcept -> ZHLN::RestrictSpan<T> {
         uint32_t id = ComponentFamily::GetTypeID<T>();
         if (id >= _compCapacity || !_components[id]) {
             ZHLN::Log("Unknown component: {}", BoxedName<T>());
@@ -309,7 +309,7 @@ class ZHLN_API Registry {
 
     template <typename T>
         requires CompleteType<T>
-    std::span<const Entity> GetEntitiesWith() const noexcept {
+    [[nodiscard]] auto GetEntitiesWith() const noexcept -> std::span<const Entity> {
         uint32_t id = ComponentFamily::GetTypeID<T>();
         if (id >= _compCapacity || !_components[id]) {
             return {};
@@ -319,7 +319,7 @@ class ZHLN_API Registry {
 
     template <typename T, typename Pred>
         requires CompleteType<T>
-    T* FindWhere(Pred&& pred) const noexcept {
+    auto FindWhere(Pred&& pred) const noexcept -> T* {
         uint32_t id = ComponentFamily::GetTypeID<T>();
         if (id >= _compCapacity || !_components[id]) {
             return nullptr;
@@ -346,7 +346,7 @@ class ZHLN_API Registry {
         if (!_components[id]) {
             typename SparseSet::DestructorFn dt = nullptr;
             if constexpr (requires(T* t) { T::OnDestroy(t); }) {
-                dt = [](void* ptr) {
+                dt = [](void* ptr) -> auto {
                     auto* obj = static_cast<T*>(ptr);
                     T::OnDestroy(obj);
                     if constexpr (!std::is_trivially_destructible_v<T>) {
@@ -354,7 +354,7 @@ class ZHLN_API Registry {
                     }
                 };
             } else if constexpr (!std::is_trivially_destructible_v<T>) {
-                dt = [](void* ptr) { static_cast<T*>(ptr)->~T(); };
+                dt = [](void* ptr) -> auto { static_cast<T*>(ptr)->~T(); };
             }
             _components[id] = new SparseSet(sizeof(T), alignof(T), &this->sync, dt);
         }
@@ -363,7 +363,7 @@ class ZHLN_API Registry {
             .name      = name,
             .size      = sizeof(T),
             .alignment = alignof(T),
-            .debugDump = [](const void* data, std::string& out) { out += ZHLN::Reflect::ToDebugString(*static_cast<const T*>(data)); },
+            .debugDump = [](const void* data, std::string& out) -> auto { out += ZHLN::Reflect::ToDebugString(*static_cast<const T*>(data)); },
         };
     }
 
@@ -383,7 +383,7 @@ class ZHLN_API Registry {
         }
     }
 
-    std::span<const Entity> GetEntitiesByFamilyID(uint32_t familyID) const noexcept {
+    [[nodiscard]] auto GetEntitiesByFamilyID(uint32_t familyID) const noexcept -> std::span<const Entity> {
         if (familyID >= _compCapacity || (_components[familyID] == nullptr)) {
             return {};
         }
@@ -391,7 +391,7 @@ class ZHLN_API Registry {
     }
 
     // Direct constant-time pointer fetch
-    void* GetRawByFamily(Entity entity, uint32_t familyID) const noexcept {
+    [[nodiscard]] auto GetRawByFamily(Entity entity, uint32_t familyID) const noexcept -> void* {
         if (familyID >= _compCapacity || (_components[familyID] == nullptr)) {
             return nullptr;
         }
@@ -401,7 +401,7 @@ class ZHLN_API Registry {
     // Patch combinator: collapses the repetitive null-check dance.
     // Stop writing `if (auto* c = reg.Get<T>(e))` manually.
     template <typename T, typename Fn>
-    bool Patch(Entity e, Fn&& fn) {
+    auto Patch(Entity e, Fn&& fn) -> bool {
         if (auto* c = Get<T>(e)) {
             std::forward<Fn>(fn)(*c);
             return true;
@@ -410,7 +410,7 @@ class ZHLN_API Registry {
     }
 
     template <typename T, typename Fn>
-    bool Patch(Entity e, Fn&& fn) const {
+    auto Patch(Entity e, Fn&& fn) const -> bool {
         if (const auto* c = Get<T>(e)) {
             std::forward<Fn>(fn)(*c);
             return true;
@@ -420,11 +420,11 @@ class ZHLN_API Registry {
 
     template <typename... Ts, typename Fn>
         requires(sizeof...(Ts) > 1)
-    bool Patch(Entity e, Fn&& fn) {
+    auto Patch(Entity e, Fn&& fn) -> bool {
         auto ptrs     = std::make_tuple(Get<Ts>(e)...);
-        bool allValid = std::apply([](auto*... p) { return (p && ...); }, ptrs);
+        bool allValid = std::apply([](auto*... p) -> auto { return (p && ...); }, ptrs);
         if (allValid) {
-            std::apply([&](auto*... p) { std::forward<Fn>(fn)(*p...); }, ptrs);
+            std::apply([&](auto*... p) -> auto { std::forward<Fn>(fn)(*p...); }, ptrs);
             return true;
         }
         return false;
@@ -432,19 +432,19 @@ class ZHLN_API Registry {
 
     template <typename... Ts, typename Fn>
         requires(sizeof...(Ts) > 1)
-    bool Patch(Entity e, Fn&& fn) const {
+    auto Patch(Entity e, Fn&& fn) const -> bool {
         auto ptrs     = std::make_tuple(Get<Ts>(e)...);
-        bool allValid = std::apply([](const auto*... p) { return (p && ...); }, ptrs);
+        bool allValid = std::apply([](const auto*... p) -> auto { return (p && ...); }, ptrs);
         if (allValid) {
-            std::apply([&](const auto*... p) { std::forward<Fn>(fn)(*p...); }, ptrs);
+            std::apply([&](const auto*... p) -> auto { std::forward<Fn>(fn)(*p...); }, ptrs);
             return true;
         }
         return false;
     }
 
     template <typename T, typename... Args>
-    bool Assign(Entity e, Args&&... args) {
-        return Patch<T>(e, [&](auto& c) {
+    auto Assign(Entity e, Args&&... args) -> bool {
+        return Patch<T>(e, [&](auto& c) -> auto {
             if constexpr (sizeof...(Args) == 1 && (std::is_assignable_v<T&, Args> && ...)) {
                 c = (std::forward<Args>(args), ...);
             } else if constexpr (requires { c = T {std::forward<Args>(args)...}; }) {

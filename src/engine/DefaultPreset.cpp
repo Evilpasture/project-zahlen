@@ -72,10 +72,10 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
     TextureHandle fontHandle     = TextureHandle::Invalid;
     auto          uiSettingsEnts = reg.GetEntitiesWith<Components::UISettingsComponent>();
     if (!uiSettingsEnts.empty()) {
-        fontHandle = reg.Get<Components::UISettingsComponent>(uiSettingsEnts[0])->fontAtlas.texture;
-        if (fontHandle == TextureHandle::Invalid) {
-            fontHandle = CreativeWorksFactory::CreateFontAtlasTexture(rc);
-            if (auto* settings = reg.Get<Components::UISettingsComponent>(uiSettingsEnts[0])) {
+        if (auto* settings = reg.Get<Components::UISettingsComponent>(uiSettingsEnts[0])) {
+            fontHandle = settings->fontAtlas.texture;
+            if (fontHandle == TextureHandle::Invalid) {
+                fontHandle                  = CreativeWorksFactory::CreateFontAtlasTexture(rc);
                 settings->fontAtlas.texture = fontHandle;
                 settings->defaultFontAtlas  = fontHandle;
             }

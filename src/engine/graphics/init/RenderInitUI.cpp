@@ -11,7 +11,7 @@
 
 namespace ZHLN {
 
-auto RenderContext::Impl::SetupUI(GLFWwindow* window) -> std::expected<void, Error> {
+auto RenderContext::Impl::SetupUI(GLFWwindow* glfwWindow) -> std::expected<void, Error> {
     using enum Resource::ShaderID;
     auto make_expected = [](bool success, Error err) -> std::expected<void, Error> {
         if (success) {
@@ -58,10 +58,10 @@ auto RenderContext::Impl::SetupUI(GLFWwindow* window) -> std::expected<void, Err
                 .transform([&](auto&& pipeline) -> auto { uiPipeline = std::forward<decltype(pipeline)>(pipeline); });
         })
         .and_then([&]() -> std::expected<void, Error> {
-            if (window != nullptr) {
+            if (glfwWindow != nullptr) {
                 IMGUI_CHECKVERSION();
                 ImGui::CreateContext();
-                ImGui_ImplGlfw_InitForVulkan(window, true);
+                ImGui_ImplGlfw_InitForVulkan(glfwWindow, true);
 
                 VkFormat swapchainFormat = presentation.GetPresentFormat();
 

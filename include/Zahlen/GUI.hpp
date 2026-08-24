@@ -362,7 +362,9 @@ class Context {
         TextureHandle fontHandle = TextureHandle::Invalid;
         auto          uiSettings = m_reg->GetEntitiesWith<Components::UISettingsComponent>();
         if (!uiSettings.empty()) {
-            fontHandle = m_reg->Get<Components::UISettingsComponent>(uiSettings[0])->fontAtlas.texture;
+            if (const auto* s = m_reg->Get<Components::UISettingsComponent>(uiSettings[0])) {
+                fontHandle = s->fontAtlas.texture;
+            }
         }
 
         Entity e = GetOrCreateEntity(key, [&]() {
@@ -400,7 +402,9 @@ class Context {
         TextureHandle fontHandle = TextureHandle::Invalid;
         auto          uiSettings = m_reg->GetEntitiesWith<Components::UISettingsComponent>();
         if (!uiSettings.empty()) {
-            fontHandle = m_reg->Get<Components::UISettingsComponent>(uiSettings[0])->fontAtlas.texture;
+            if (const auto* s = m_reg->Get<Components::UISettingsComponent>(uiSettings[0])) {
+                fontHandle = s->fontAtlas.texture;
+            }
         }
 
         Entity e = GetOrCreateEntity(key, [&]() {
@@ -447,7 +451,9 @@ class Context {
         TextureHandle fontHandle = TextureHandle::Invalid;
         auto          uiSettings = m_reg->GetEntitiesWith<Components::UISettingsComponent>();
         if (!uiSettings.empty()) {
-            fontHandle = m_reg->Get<Components::UISettingsComponent>(uiSettings[0])->fontAtlas.texture;
+            if (const auto* s = m_reg->Get<Components::UISettingsComponent>(uiSettings[0])) {
+                fontHandle = s->fontAtlas.texture;
+            }
         }
 
         Entity e = GetOrCreateEntity(key, [&]() {

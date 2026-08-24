@@ -27,8 +27,8 @@ auto GetCustomLogFile(FILE* overrideFile = nullptr) -> FILE*;
 auto GetPoorMansStacktrace() -> std::string;
 
 enum class LogChannel : uint8_t { StdErr, StdOut, File };
-void     SetLogLevel(LogLevel level) noexcept;
-LogLevel GetLogLevel() noexcept;
+void SetLogLevel(LogLevel level) noexcept;
+auto GetLogLevel() noexcept -> LogLevel;
 
 struct LogContext {
     std::string_view     fmt;
@@ -130,41 +130,45 @@ inline constexpr char Red[]    = "\033[31m";
 
 void LogManual(std::string_view file, int line, std::string_view message, const char* color = "");
 
-int  TraceStructCallback(const char* fmt, ...);
+auto TraceStructCallback(const char* fmt, ...) -> int;
 void TraceStructHeader(std::string_view name, std::string_view label, const char* file, uint32_t line);
 void TraceStructFooter();
 
-#if defined(__clang__)
 template <typename T>
 inline void TraceStructInternal(const T& obj, std::string_view name, LogContext ctx) {
     TraceStructHeader(name, ctx.fmt, ctx.loc.file_name(), ctx.loc.line());
 
-    // Helper lambda to handle both raw pointers and smart pointers
-    auto dump = [](const auto* ptr) {
-        if (ptr) {
-            __builtin_dump_struct(ptr, &TraceStructCallback);
+    auto dumpObject = [](const auto& val) -> auto {
+        using Decayed = std::remove_cvref_t<decltype(val)>;
+        if constexpr (Reflect::FieldCount<Decayed>() > 0) {
+            Reflect::ForEachFieldWithName(val, [](std::string_view fieldName, const auto& fieldVal) -> auto {
+                std::string debugVal = Reflect::ToDebugString(fieldVal);
+                Println(stderr, "│   {}: {}", fieldName, debugVal);
+            });
         } else {
-            ZHLN::Println(stderr, "  (null pointer)");
+            std::string debugVal = Reflect::ToDebugString(val);
+            Println(stderr, "│   {}", debugVal);
         }
     };
 
     if constexpr (std::is_pointer_v<T>) {
-        dump(obj);
+        if (obj != nullptr) {
+            dumpObject(*obj);
+        } else {
+            Println(stderr, "│   (null pointer)");
+        }
     } else if constexpr (requires { obj.get(); }) {
-        dump(obj.get());
+        if (obj.get() != nullptr) {
+            dumpObject(*obj.get());
+        } else {
+            Println(stderr, "│   (null pointer)");
+        }
     } else {
-        __builtin_dump_struct(&obj, &TraceStructCallback);
+        dumpObject(obj);
     }
 
     TraceStructFooter();
 }
-#else
-template <typename T>
-inline void TraceStructInternal(const T& obj, std::string_view name, LogContext ctx) {
-    std::fprintf(stderr, "[%s:%d] TraceStruct not supported on this compiler. Falling back to MemoryDump.\n", ctx.loc.file_name(), (int) ctx.loc.line());
-    SmartDumpInternal(obj, name, ctx);
-}
-#endif
 
 void MemoryDump(const void* ptr, size_t size, std::string_view label, LogContext ctx, DumpOptions opts = {});
 

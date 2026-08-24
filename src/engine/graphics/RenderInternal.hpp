@@ -42,9 +42,8 @@ struct IBLPayload {
 
 namespace ZHLN {
 
-void ApplyImageDebugNames(RenderContext::Impl& impl) noexcept;
+void               ApplyImageDebugNames(RenderContext::Impl& impl) noexcept;
 [[nodiscard]] bool CheckRayTracingSupport(VkPhysicalDevice physicalDevice) noexcept;
-
 
 // ============================================================================
 // Environment-Toggleable Render Diagnostics (Impl in RenderFrame.cpp)
@@ -81,7 +80,7 @@ class GenerationalPool {
     GenerationalPool() {
         _freeIndices.reserve(MaxObjects);
         for (size_t i = 0; i < MaxObjects; ++i) {
-            _freeIndices.push_back((uint32_t) (MaxObjects - 1 - i));
+            _freeIndices.push_back(MaxObjects - 1 - i);
         }
         _generations.fill(1); // Generations start at 1
     }
@@ -841,8 +840,7 @@ struct RenderContext::Impl {
     void                       WriteTextureSlotToHeap(uint32_t bindlessIndex, VkImage image, VkFormat format, uint32_t mipLevels, bool cube) noexcept;
     void                       InitPassSamplerDescriptors() noexcept;
     [[nodiscard]] std::expected<void, Error> InitBakeHeapBindings() noexcept;
-    [[nodiscard]] auto AdoptBindlessTexture(Vk::Image&& image, Vk::ImageView&& view, VkFormat format, uint32_t mipLevels = 1, bool cube = false)
-        -> uint32_t;
+    [[nodiscard]] auto AdoptBindlessTexture(Vk::Image&& image, Vk::ImageView&& view, VkFormat format, uint32_t mipLevels = 1, bool cube = false) -> uint32_t;
     template <typename PushT>
     [[nodiscard]] auto BakeComputeTexture2D(const Vk::ComputePass& pass, uint32_t width, uint32_t height, VkFormat format, const PushT& push)
         -> std::expected<uint32_t, Error>;
@@ -880,7 +878,7 @@ struct RenderContext::Impl {
     ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>> tracked2DEmitters;
     ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>> tracked3DEmitters;
 
-    RenderQueues          queues;
+    RenderQueues       queues;
     ZHLN::Array<Light> mappedLights;
 
     Vk::Pipeline     csgWritePipeline;
@@ -1115,7 +1113,7 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<void, Error> BuildHangGpuPipeline();
     [[nodiscard]] std::expected<void, Error> InitPostProcessing();
     [[nodiscard]] std::expected<void, Error> InitCSGPipelines();
-    [[nodiscard]] std::expected<void, Error> SetupUI(GLFWwindow* window);
+    [[nodiscard]] std::expected<void, Error> SetupUI(GLFWwindow* glfwWindow);
     [[nodiscard]] std::expected<void, Error> BuildHiZPipeline();
 
     [[nodiscard]] auto CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> std::expected<uint32_t, Error>;
@@ -1150,11 +1148,11 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<Vk::Pipeline, Error>
         LoadAndCreateComputeShader(ComputeStageSource cs, VkPipelineLayout layout, Vk::ComputePass& pass) const noexcept;
 
-    void WatchPipeline(const char* vsPath, const char* psPath, std::function<void()> rebuild_fn) noexcept;
+    void                                     WatchPipeline(const char* vsPath, const char* psPath, std::function<void()> rebuild_fn) noexcept;
     [[nodiscard]] std::expected<void, Error> ValidateSlangTypeLayouts() noexcept;
-    static constexpr uint32_t kBakeHeapSlotSpan   = 7; // slot 0 = 2D bake; slots 1..6 = IBL specular mips
-    static constexpr uint32_t kBake2DHeapIndex    = 0;
-    static constexpr uint32_t kBakeSpecHeapIndex0 = 1;
+    static constexpr uint32_t                kBakeHeapSlotSpan   = 7; // slot 0 = 2D bake; slots 1..6 = IBL specular mips
+    static constexpr uint32_t                kBake2DHeapIndex    = 0;
+    static constexpr uint32_t                kBakeSpecHeapIndex0 = 1;
 
     [[nodiscard]] auto BufferAddress(VkBuffer buffer) const noexcept -> VkDeviceAddress {
         return ctx.BufferAddress(buffer);
@@ -1162,9 +1160,8 @@ struct RenderContext::Impl {
 };
 
 template <typename PushT>
-auto RenderContext::Impl::BakeComputeTexture2D(
-    const Vk::ComputePass& pass, uint32_t width, uint32_t height, VkFormat format, const PushT& push
-) -> std::expected<uint32_t, Error> {
+auto RenderContext::Impl::BakeComputeTexture2D(const Vk::ComputePass& pass, uint32_t width, uint32_t height, VkFormat format, const PushT& push)
+    -> std::expected<uint32_t, Error> {
     static_assert(Vk::GpuTriviallyCopyable<PushT>);
     return Vk::ImageBuilder {}
         .Texture2D(width, height, format, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 1)
@@ -1327,7 +1324,7 @@ inline std::vector<uint32_t> LoadShaderSpv(const std::string& path) noexcept {
     if (!file.is_open()) {
         return {};
     }
-    auto                  fileSize = (size_t) file.tellg();
+    auto                  fileSize = file.tellg();
     std::vector<uint32_t> buffer(fileSize / sizeof(uint32_t));
     file.seekg(0);
     file.read(reinterpret_cast<char*>(buffer.data()), fileSize);

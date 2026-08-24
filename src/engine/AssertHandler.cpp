@@ -69,7 +69,7 @@ namespace {
 
 // Safely reads memory without risking a crash/segmentation fault.
 // Returns true on success, false if the memory was unreadable or unmapped.
-inline bool SafeRead(const void* src, void* dest, size_t size) noexcept {
+inline auto SafeRead(const void* src, void* dest, size_t size) noexcept -> bool {
     if ((src == nullptr) || (dest == nullptr) || size == 0) {
         return false;
     }
@@ -89,7 +89,7 @@ inline bool SafeRead(const void* src, void* dest, size_t size) noexcept {
         ssize_t read_bytes = read(fd[0], dest, written);
         close(fd[0]);
         close(fd[1]);
-        return read_bytes == (ssize_t) size;
+        return read_bytes == static_cast<ssize_t>(size);
     }
     close(fd[0]);
     close(fd[1]);
@@ -97,22 +97,12 @@ inline bool SafeRead(const void* src, void* dest, size_t size) noexcept {
 #endif
 }
 
-} // namespace
-
-static std::atomic<int>      s_PendingSignal {0};
-static std::atomic<void*>    s_FaultAddr {nullptr};
-static std::atomic<LogLevel> s_LogLevel {LogLevel::Moderate};
-
-void SetLogLevel(LogLevel level) noexcept {
-    s_LogLevel.store(level, std::memory_order::release);
-}
-
-LogLevel GetLogLevel() noexcept {
-    return s_LogLevel.load(std::memory_order::acquire);
-}
+std::atomic<int>      s_PendingSignal {0};
+std::atomic<void*>    s_FaultAddr {nullptr};
+std::atomic<LogLevel> s_LogLevel {LogLevel::Moderate};
 
 // Low-level writer strictly dedicated to signal handler pathways
-static void WriteToChannel(uint8_t channel, std::string_view msg) noexcept {
+void WriteToChannel(uint8_t channel, std::string_view msg) noexcept {
     if (channel == static_cast<uint8_t>(LogChannel::StdOut)) {
 #if defined(_WIN32)
         ::_write(1, msg.data(), static_cast<unsigned int>(msg.size()));
@@ -134,6 +124,16 @@ static void WriteToChannel(uint8_t channel, std::string_view msg) noexcept {
     }
 }
 
+} // namespace
+
+void SetLogLevel(LogLevel level) noexcept {
+    s_LogLevel.store(level, std::memory_order::release);
+}
+
+auto GetLogLevel() noexcept -> LogLevel {
+    return s_LogLevel.load(std::memory_order::acquire);
+}
+
 // --- Log Implementation Helpers ---
 
 auto GetCustomLogFile(FILE* overrideFile) -> FILE* {
@@ -153,9 +153,9 @@ auto GetCustomLogFile(FILE* overrideFile) -> FILE* {
 auto GetPoorMansStacktrace() -> std::string {
     std::string out;
 #if defined(__APPLE__) || defined(__linux__)
-    void*  callstack[128];
-    int    frames = backtrace(callstack, 128);
-    char** strs   = backtrace_symbols(callstack, frames);
+    std::array<void*, 128> callstack {};
+    int                    frames = backtrace(callstack.data(), 128);
+    char**                 strs   = backtrace_symbols(callstack.data(), frames);
 
     for (int i = 0; i < frames; ++i) {
         std::string line = strs[i];
@@ -261,7 +261,7 @@ void LogManual(std::string_view file, int line, std::string_view message, const 
     }
 }
 
-int TraceStructCallback(const char* fmt, ...) {
+auto TraceStructCallback(const char* fmt, ...) -> int {
     va_list args;
     va_start(args, fmt);
 
@@ -281,9 +281,9 @@ void TraceStructHeader(std::string_view name, std::string_view label, const char
     if (auto pos = file_name.find_last_of("/\\"); pos != std::string_view::npos) {
         file_name.remove_prefix(pos + 1);
     }
-    auto line1 = ZHLN::Format("{}┌─── STRUCT TRACE: {} ({}) ───{}\n", Color::Cyan, name, label, Color::Reset);
-    auto line2 = ZHLN::Format("│ Source:  {}:{}\n", file_name, line);
-    auto line3 = "├──────────────────────────────────────────────────────────────────────────────\n";
+    auto        line1 = ZHLN::Format("{}┌─── STRUCT TRACE: {} ({}) ───{}\n", Color::Cyan, name, label, Color::Reset);
+    auto        line2 = ZHLN::Format("│ Source:  {}:{}\n", file_name, line);
+    const auto* line3 = "├──────────────────────────────────────────────────────────────────────────────\n";
 
     WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), line1.string_view());
     WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), line2.string_view());
@@ -317,15 +317,15 @@ void MemoryDump(const void* ptr, size_t size, std::string_view label, LogContext
         return count;
     };
 
-    auto header1 = ZHLN::Format("{}┌─── DUMP: {} ({}) ───{}\n", Color::Cyan, label, ctx.fmt, Color::Reset);
-    auto header2 = ZHLN::Format("│ Source:  {}:{}\n", file_name, ctx.loc.line());
-    auto header3 = ZHLN::Format("│ Address: {}{}{} ({} bytes)\n", Color::Yellow, ptr, Color::Reset, size);
-    auto header4 = "├──────────────────┬───────────────────────────────────────────────────────┬───"
-                   "───────────────┬─────────────────────────┤\n";
-    auto header5 = "│     Address      │ Hex Data                                              │ "
-                   "ASCII            │ Interpretation          │\n";
-    auto header6 = "├──────────────────┼───────────────────────────────────────────────────────┼───"
-                   "───────────────┼─────────────────────────┤\n";
+    auto        header1 = ZHLN::Format("{}┌─── DUMP: {} ({}) ───{}\n", Color::Cyan, label, ctx.fmt, Color::Reset);
+    auto        header2 = ZHLN::Format("│ Source:  {}:{}\n", file_name, ctx.loc.line());
+    auto        header3 = ZHLN::Format("│ Address: {}{}{} ({} bytes)\n", Color::Yellow, ptr, Color::Reset, size);
+    const auto* header4 = "├──────────────────┬───────────────────────────────────────────────────────┬───"
+                          "───────────────┬─────────────────────────┤\n";
+    const auto* header5 = "│     Address      │ Hex Data                                              │ "
+                          "ASCII            │ Interpretation          │\n";
+    const auto* header6 = "├──────────────────┼───────────────────────────────────────────────────────┼───"
+                          "───────────────┼─────────────────────────┤\n";
 
     WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), header1.string_view());
     WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), header2.string_view());
@@ -623,7 +623,7 @@ static LONG WINAPI VectoredCrashHandler(PEXCEPTION_POINTERS pExceptionInfo) {
     return EXCEPTION_CONTINUE_SEARCH;
 }
 #else
-static void PosixCrashHandler(int sig, siginfo_t* info, void* context) {
+static void PosixCrashHandler(int sig, siginfo_t* info, void* /*context*/) {
     // Intercept standard user terminations (Ctrl+C / Kill)
     if (sig == SIGINT || sig == SIGTERM) {
         ZHLN::TTYBackend::EmergencyRestore();

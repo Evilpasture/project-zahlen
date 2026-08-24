@@ -158,7 +158,7 @@ VkDebugUtilsMessengerEXT ZHLN_CreateDebugMessenger(const VkInstance instance, co
     };
 
     VkDebugUtilsMessengerEXT messenger = VK_NULL_HANDLE;
-    if (create_fn(instance, &info, NULL, &messenger) != VK_SUCCESS) {
+    if (create_fn(instance, &info, nullptr, &messenger) != VK_SUCCESS) {
         return VK_NULL_HANDLE;
     }
     return messenger;
@@ -170,7 +170,7 @@ void ZHLN_DestroyDebugMessenger(const VkInstance instance, const VkDebugUtilsMes
     }
     PFN_vkDestroyDebugUtilsMessengerEXT destroy_fn = (PFN_vkDestroyDebugUtilsMessengerEXT) vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT");
     if (destroy_fn != NULL) {
-        destroy_fn(instance, messenger, NULL);
+        destroy_fn(instance, messenger, nullptr);
     }
 }
 
@@ -225,14 +225,14 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
     uint32_t available_count = 0;
     vkEnumerateInstanceExtensionProperties(nullptr, &available_count, nullptr);
 
-    VkExtensionProperties* available_exts = NULL;
+    VkExtensionProperties* available_exts = nullptr;
     if (available_count > 0) {
         available_exts = (VkExtensionProperties*) calloc(available_count, sizeof(VkExtensionProperties));
         if (available_exts == NULL) {
             available_count = 0;
         } else if (vkEnumerateInstanceExtensionProperties(nullptr, &available_count, available_exts) != VK_SUCCESS) {
             free(available_exts);
-            available_exts  = NULL;
+            available_exts  = nullptr;
             available_count = 0;
         }
     }
@@ -312,7 +312,7 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
     // pointers into the caller's strings, not into available_exts.
     if (available_exts != NULL) {
         free(available_exts);
-        available_exts = NULL;
+        available_exts = nullptr;
     }
 
     VkInstanceCreateInfo create_info = {
@@ -709,7 +709,7 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
                 "[VULKAN] WARNING: VK_EXT_mesh_shader is supported by the device but its entry points did not resolve "
                 "(vkCmdDrawMeshTasksEXT=%p, vkCmdDrawMeshTasksIndirectEXT=%p). The extension was almost certainly not "
                 "enabled at device creation.\n",
-                (void*) pfn_draw_mesh_tasks, (void*) pfn_draw_mesh_tasks_indirect
+                pfn_draw_mesh_tasks != NULL ? "resolved" : "nullptr", pfn_draw_mesh_tasks_indirect != NULL ? "resolved" : "nullptr"
             );
         } else {
             fprintf(

@@ -77,7 +77,7 @@ set_target_properties(zahlen_render PROPERTIES
     CXX_EXTENSIONS OFF
 )
 if(NOT MSVC)
-    target_compile_options(zahlen_render PRIVATE -fno-exceptions -fno-rtti)
+    target_compile_options(zahlen_render PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>)
 endif()
 
 target_link_libraries(zahlen_render PUBLIC

@@ -8,11 +8,11 @@
 // clang-format on
 #include <Jolt/Physics/Body/Body.h>
 #include <Jolt/Physics/PhysicsSystem.h>
-#include <array>
 #include <Zahlen/Core/Loop.hpp>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Core/Prefetch.hpp>
 #include <Zahlen/Core/Span.hpp>
+#include <array>
 #include <memory>
 
 namespace ZHLN::Physics {
@@ -58,13 +58,14 @@ struct MappingDataCreateInfo {
 // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
 
 #ifdef JPH_DOUBLE_PRECISION
-inline constexpr bool                      IS_DOUBLE = true;
-using PosPointerType                                 = JPH::Double3* const ZHLN_RESTRICT;
+inline constexpr bool IS_DOUBLE = true;
+using PosPointerType            = JPH::Double3*;
 #else
 inline constexpr bool IS_DOUBLE = false;
+using PosPointerType            = JPH::Float3*;
 #endif
 
-using AuxPointerType = JPH::Float4* const ZHLN_RESTRICT;
+using AuxPointerType = JPH::Float4*;
 
 template <JPH::EBodyType TType>
 [[gnu::always_inline, gnu::nonnull(2)]]
@@ -81,7 +82,7 @@ inline void ProcessItem(const uint32_t D, const JPH::Body* const ZHLN_RESTRICT b
         translation.StoreDouble3(reinterpret_cast<PosPointerType>(targetPos));
         targetPos->w = 0.0;
     } else {
-        JPH::Vec4(JPH::Vec3(translation), 0.0f).StoreFloat4(reinterpret_cast<JPH::Float4* const ZHLN_RESTRICT>(targetPos));
+        JPH::Vec4(JPH::Vec3(translation), 0.0f).StoreFloat4(reinterpret_cast<AuxPointerType>(targetPos));
     }
 
     // 3. Write Current Rotation
@@ -109,7 +110,7 @@ inline void ProcessBatch(const WorldDataCreateInfo world, RestrictSpan<const Syn
     [[assume(count > 0)]];
     [[assume(count <= BATCH_SIZE)]];
 
-    ZHLN::UnrollLoop<4>(count, [&](auto j) {
+    ZHLN::UnrollLoop<4>(count, [&](auto j) -> auto {
         if (j + 2 < count) {
             const uint32_t next_idx = items[j + 2].dense_idx;
             ZHLN::Prefetch<AccessType::Write>(&world.shadow_pos[next_idx]);
@@ -127,7 +128,7 @@ template <JPH::EBodyType TType>
   gnu::nonnull(2)]]
 inline void ExecuteSyncPass(
     const uint32_t                                active_count,
-    const JPH::PhysicsSystem* const ZHLN_RESTRICT system,
+    const JPH::PhysicsSystem* const ZHLN_RESTRICT inSystem,
     MappingDataCreateInfo                         map,
     const WorldDataCreateInfo                     world
 ) noexcept {
@@ -135,12 +136,12 @@ inline void ExecuteSyncPass(
         return;
     }
 
-    const JPH::BodyID* const ZHLN_RESTRICT active_ids = system->GetActiveBodiesUnsafe(TType);
+    const JPH::BodyID* const ZHLN_RESTRICT active_ids = inSystem->GetActiveBodiesUnsafe(TType);
     if (active_ids == nullptr) [[unlikely]] {
         return;
     }
 
-    const auto* const ZHLN_RESTRICT lock_iface = &system->GetBodyLockInterfaceNoLock();
+    const auto* const ZHLN_RESTRICT lock_iface = &inSystem->GetBodyLockInterfaceNoLock();
 
     alignas(64) std::array<SyncWorkItem, BATCH_SIZE> worklist {};
     uint32_t                                         work_ptr = 0;
@@ -246,9 +247,9 @@ inline void SyncCharacters(const JPH::Array<JPH::CharacterVirtual*>& characters,
 #endif
     gnu::hot,
     gnu::nonnull(2)]]
-void PhysicsWorld::Synchronize(const JPH::PhysicsSystem* const system, const JPH::Array<JPH::CharacterVirtual*>& activeCharacters) noexcept {
+void PhysicsWorld::Synchronize(const JPH::PhysicsSystem* const inSystem, const JPH::Array<JPH::CharacterVirtual*>& activeCharacters) noexcept {
 
-    const uint32_t activeRigids = system->GetNumActiveBodies(JPH::EBodyType::RigidBody);
+    const uint32_t activeRigids = inSystem->GetNumActiveBodies(JPH::EBodyType::RigidBody);
 
     if (activeRigids == 0 && activeCharacters.empty()) [[unlikely]] {
         return;
@@ -256,12 +257,12 @@ void PhysicsWorld::Synchronize(const JPH::PhysicsSystem* const system, const JPH
 
     // Retrieve aligned raw pointers from the managed JPH::Arrays
     const WorldDataCreateInfo worldInfo = {
-        .shadow_pos  = std::assume_aligned<32>(reinterpret_cast<PosStride* const ZHLN_RESTRICT>(positions)),
-        .shadow_ppos = std::assume_aligned<32>(reinterpret_cast<PosStride* const ZHLN_RESTRICT>(prevPositions)),
-        .shadow_rot  = std::assume_aligned<16>(reinterpret_cast<AuxStride* const ZHLN_RESTRICT>(rotations)),
-        .shadow_prot = std::assume_aligned<16>(reinterpret_cast<AuxStride* const ZHLN_RESTRICT>(prevRotations)),
-        .shadow_lvel = std::assume_aligned<16>(reinterpret_cast<AuxStride* const ZHLN_RESTRICT>(linearVelocities)),
-        .shadow_avel = std::assume_aligned<16>(reinterpret_cast<AuxStride* const ZHLN_RESTRICT>(angularVelocities)),
+        .shadow_pos  = std::assume_aligned<32>(reinterpret_cast<PosStride*>(positions)),
+        .shadow_ppos = std::assume_aligned<32>(reinterpret_cast<PosStride*>(prevPositions)),
+        .shadow_rot  = std::assume_aligned<16>(reinterpret_cast<AuxStride*>(rotations)),
+        .shadow_prot = std::assume_aligned<16>(reinterpret_cast<AuxStride*>(prevRotations)),
+        .shadow_lvel = std::assume_aligned<16>(reinterpret_cast<AuxStride*>(linearVelocities)),
+        .shadow_avel = std::assume_aligned<16>(reinterpret_cast<AuxStride*>(angularVelocities)),
     };
 
     const MappingDataCreateInfo mapInfo = {
@@ -271,7 +272,7 @@ void PhysicsWorld::Synchronize(const JPH::PhysicsSystem* const system, const JPH
         .slot_to_dense = slotToDense.data(),
     };
 
-    ExecuteSyncPass<JPH::EBodyType::RigidBody>(activeRigids, system, mapInfo, worldInfo);
+    ExecuteSyncPass<JPH::EBodyType::RigidBody>(activeRigids, inSystem, mapInfo, worldInfo);
 
     if (!activeCharacters.empty()) {
         SyncCharacters(activeCharacters, mapInfo, worldInfo);

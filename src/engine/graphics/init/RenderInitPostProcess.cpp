@@ -211,6 +211,11 @@ auto RenderContext::Impl::BuildVolumetricPipelines() -> std::expected<void, Erro
     return {};
 }
 
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
+
 auto RenderContext::Impl::BakeSMAALUTs() -> std::expected<void, Error> {
     struct SMAALUTPush {
         uint32_t width  = 0;
@@ -231,6 +236,10 @@ auto RenderContext::Impl::BakeSMAALUTs() -> std::expected<void, Error> {
                 });
         });
 }
+
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, Error> {
     using enum Resource::ShaderID;

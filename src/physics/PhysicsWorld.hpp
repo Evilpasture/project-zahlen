@@ -16,7 +16,6 @@
 #include <Zahlen/physics/Physics.hpp>
 #include <cstdint>
 #include <type_traits>
-#include <utility>
 
 namespace ZHLN {
 class PhysicsContext;
@@ -28,9 +27,9 @@ struct WorldStateHeader {
     static constexpr uint64_t ZHLN    = 0x5A484C4E;
     const uint64_t            magic   = ZHLN;
     const uint32_t            version = 1;
-    uint32_t                  bodyCount;
-    uint32_t                  slotCapacity;
-    double                    worldTime;
+    uint32_t                  bodyCount {};
+    uint32_t                  slotCapacity {};
+    double                    worldTime {};
 };
 
 inline constexpr std::size_t CACHE_LINE = 64;
@@ -207,14 +206,14 @@ struct PhysicsWorld {
     void Shutdown();
 
     // Data Management
-    void         ResizeBuffers(size_t newCapacity);
-    ZHLN::Entity AllocateHandle();
-    void         RemoveBodySlot(uint32_t slot);
-    void         ResizeConstraintBuffers(size_t newCapacity);
+    void ResizeBuffers(size_t newCapacity);
+    auto AllocateHandle() -> ZHLN::Entity;
+    void RemoveBodySlot(uint32_t slot);
+    void ResizeConstraintBuffers(size_t newCapacity);
 
     // Constraints
-    ConstraintHandle AllocateConstraintHandle();
-    void             RemoveConstraintSlot(uint32_t slot);
+    auto AllocateConstraintHandle() -> ConstraintHandle;
+    void RemoveConstraintSlot(uint32_t slot);
 
     // Flush command buffer
     void FlushCommands(Command* capturedQueue, size_t capturedCount);
@@ -223,13 +222,13 @@ struct PhysicsWorld {
      * @brief Synchronizes all Jolt state to the SoA World.
      * Handles Rigid Bodies, Characters, and executes optimized SIMD batch copies.
      *
-     * @param system The active Jolt PhysicsSystem.
+     * @param inSystem The active Jolt PhysicsSystem.
      * @param activeCharacters The array of active CharacterVirtuals.
      */
-    void Synchronize(const JPH::PhysicsSystem* system, const JPH::Array<JPH::CharacterVirtual*>& activeCharacters) noexcept;
+    void Synchronize(const JPH::PhysicsSystem* inSystem, const JPH::Array<JPH::CharacterVirtual*>& activeCharacters) noexcept;
 
-    JPH::Array<std::byte> SaveState() const;
-    bool                  LoadState(const uint8_t* data, size_t size);
+    auto SaveState() const -> JPH::Array<std::byte>;
+    auto LoadState(const uint8_t* data, size_t size) -> bool;
 };
 
 // Guarantee predictable layout for raw memory mapping and SIMD logic
@@ -246,7 +245,7 @@ struct SlotPredicate {
     bool isDestructible; // Can be queued for destruction
 };
 
-[[nodiscard]] inline SlotPredicate GetSlotPredicate(uint8_t state) noexcept {
+[[nodiscard]] inline auto GetSlotPredicate(uint8_t state) noexcept -> SlotPredicate {
     const uint32_t stateBit     = 1U << (state & 0x7);
     bool           active       = (stateBit & MASK_ACTIVE) != 0;
     bool           destructible = (stateBit & MASK_DESTRUCTIBLE) != 0;
@@ -254,6 +253,6 @@ struct SlotPredicate {
 }
 
 // --- Constraints ---
-JPH::Constraint* CreateNativeConstraint(const ConstraintType type, JPH::Body* b1, JPH::Body* b2, const ConstraintParams& p);
+auto CreateNativeConstraint(ConstraintType type, JPH::Body* b1, JPH::Body* b2, const ConstraintParams& p) -> JPH::Constraint*;
 
 } // namespace ZHLN::Physics

@@ -11,13 +11,13 @@ namespace ZHLN::ECS {
 
 namespace {
 
-static ZHLN::Mutex                         s_FamilyMutex {};
-static uint32_t                            s_TypeCounter = 0;
-static HashMap<uint32_t, uint32_t>         s_HashToDense;
-static HashMap<std::string_view, uint32_t> s_NameToFamilyID;
+ZHLN::Mutex                         s_FamilyMutex {};
+uint32_t                            s_TypeCounter = 0;
+HashMap<uint32_t, uint32_t>         s_HashToDense;
+HashMap<std::string_view, uint32_t> s_NameToFamilyID;
 
 // --- HELPER: Manual Aligned Realloc ---
-static void* ReallocAligned(void* oldPtr, size_t oldSize, size_t newSize, size_t alignment) {
+auto ReallocAligned(void* oldPtr, size_t oldSize, size_t newSize, size_t alignment) -> void* {
     void* newPtr = ::operator new[](newSize, std::align_val_t {alignment});
     if (oldPtr != nullptr) {
         std::memcpy(newPtr, oldPtr, oldSize);
@@ -28,8 +28,8 @@ static void* ReallocAligned(void* oldPtr, size_t oldSize, size_t newSize, size_t
 
 } // namespace
 
-uint32_t ComponentFamily::ResolveDenseID(uint32_t typeHash) noexcept {
-    return ZHLN::Lock(s_FamilyMutex, [&] {
+auto ComponentFamily::ResolveDenseID(uint32_t typeHash) noexcept -> uint32_t {
+    return ZHLN::Lock(s_FamilyMutex, [&] -> uint32_t {
         const uint32_t* existing = s_HashToDense.Find(typeHash);
         if (existing != nullptr) {
             return *existing;
@@ -41,10 +41,10 @@ uint32_t ComponentFamily::ResolveDenseID(uint32_t typeHash) noexcept {
 }
 
 void Registry::MapNameToFamilyID(std::string_view name, uint32_t id) noexcept {
-    ZHLN::Lock(s_FamilyMutex, [&] { s_NameToFamilyID.Insert(name, id); });
+    ZHLN::Lock(s_FamilyMutex, [&] -> void { s_NameToFamilyID.Insert(name, id); });
 }
 
-uint32_t Registry::GetFamilyIDFromName(std::string_view name) noexcept {
+auto Registry::GetFamilyIDFromName(std::string_view name) noexcept -> uint32_t {
     return ZHLN::Lock(s_FamilyMutex, [&] -> uint32_t {
         const uint32_t* id = s_NameToFamilyID.Find(name);
         if (id != nullptr) {
@@ -90,7 +90,7 @@ void SparseSet::ResizeSparse(uint32_t required) {
         _sparseCapacity *= 2;
     }
 
-    _sparse = (uint32_t*) ReallocAligned(_sparse, oldCap * sizeof(uint32_t), _sparseCapacity * sizeof(uint32_t), alignof(uint32_t));
+    _sparse = static_cast<uint32_t*>(ReallocAligned(_sparse, oldCap * sizeof(uint32_t), _sparseCapacity * sizeof(uint32_t), alignof(uint32_t)));
 
     for (size_t i = oldCap; i < _sparseCapacity; ++i) {
         _sparse[i] = INVALID_DENSE;
@@ -105,8 +105,8 @@ void SparseSet::ResizeDense() {
     size_t oldCap  = _denseCapacity;
     _denseCapacity = oldCap == 0 ? 64 : oldCap * 2;
 
-    _dense = (Entity*) ReallocAligned(_dense, oldCap * sizeof(Entity), _denseCapacity * sizeof(Entity), alignof(Entity));
-    _data  = (std::byte*) ReallocAligned(_data, oldCap * _elementSize, _denseCapacity * _elementSize, _alignment);
+    _dense = static_cast<Entity*>(ReallocAligned(_dense, oldCap * sizeof(Entity), _denseCapacity * sizeof(Entity), alignof(Entity)));
+    _data  = static_cast<std::byte*>(ReallocAligned(_data, oldCap * _elementSize, _denseCapacity * _elementSize, _alignment));
 }
 
 void SparseSet::Insert(Entity entity, const void* data) {
@@ -119,14 +119,14 @@ void SparseSet::Insert(Entity entity, const void* data) {
         if (_count >= _denseCapacity) {
             ResizeDense();
         }
-        denseIdx              = (uint32_t) _count++;
+        denseIdx              = static_cast<uint32_t>(_count++);
         _dense[denseIdx]      = entity;
         _sparse[entity.index] = denseIdx;
     }
     std::memcpy(_data + (denseIdx * _elementSize), data, _elementSize);
 }
 
-void* SparseSet::InsertEmpty(Entity entity) {
+auto SparseSet::InsertEmpty(Entity entity) -> void* {
     if (entity.index >= _sparseCapacity) {
         ResizeSparse(entity.index);
     }
@@ -136,7 +136,7 @@ void* SparseSet::InsertEmpty(Entity entity) {
         if (_count >= _denseCapacity) {
             ResizeDense();
         }
-        denseIdx              = (uint32_t) _count++;
+        denseIdx              = static_cast<uint32_t>(_count++);
         _dense[denseIdx]      = entity;
         _sparse[entity.index] = denseIdx;
 
@@ -159,7 +159,7 @@ void SparseSet::Remove(Entity entity) {
         _destructor(_data + (denseIdx * _elementSize));
     }
 
-    uint32_t lastIdx = (uint32_t) _count - 1;
+    uint32_t lastIdx = static_cast<uint32_t>(_count) - 1;
     if (denseIdx != lastIdx) {
         Entity lastEntity = _dense[lastIdx];
         std::memcpy(_data + (denseIdx * _elementSize), _data + (lastIdx * _elementSize), _elementSize);
@@ -170,11 +170,11 @@ void SparseSet::Remove(Entity entity) {
     _count--;
 }
 
-bool SparseSet::Contains(Entity entity) const noexcept {
+auto SparseSet::Contains(Entity entity) const noexcept -> bool {
     return entity.index < _sparseCapacity && _sparse[entity.index] != INVALID_DENSE;
 }
 
-void* SparseSet::Get(Entity entity) const noexcept {
+auto SparseSet::Get(Entity entity) const noexcept -> void* {
     if (!Contains(entity)) {
         return nullptr;
     }
@@ -193,11 +193,11 @@ void SparseSet::Clear() noexcept {
     _count = 0;
 }
 
-BufferView SparseSet::GetBufferView(const void* owner, const char* format) const noexcept {
+auto SparseSet::GetBufferView(const void* owner, const char* format) const noexcept -> BufferView {
     BufferView view = {};
     view.buf        = _data;
     view.obj        = const_cast<void*>(owner);
-    view.itemsize   = (uint32_t) _elementSize;
+    view.itemsize   = static_cast<uint32_t>(_elementSize);
     std::strncpy(view.format, format, 7);
     view.readonly   = 0;
     view.ndim       = 1;
@@ -207,7 +207,7 @@ BufferView SparseSet::GetBufferView(const void* owner, const char* format) const
     return view;
 }
 
-BufferView SparseSet::GetEntityView(const void* owner) const noexcept {
+auto SparseSet::GetEntityView(const void* owner) const noexcept -> BufferView {
     BufferView view = {};
     view.buf        = _dense;
     view.obj        = const_cast<void*>(owner);
@@ -258,12 +258,12 @@ void Registry::EnsureEntityCapacity(uint32_t index) {
         _entityCapacity *= 2;
     }
 
-    _generations = (uint32_t*) std::realloc(_generations, _entityCapacity * sizeof(uint32_t));
-    _freeIndices = (uint32_t*) std::realloc(_freeIndices, _entityCapacity * sizeof(uint32_t));
+    _generations = static_cast<uint32_t*>(std::realloc(_generations, _entityCapacity * sizeof(uint32_t)));
+    _freeIndices = static_cast<uint32_t*>(std::realloc(_freeIndices, _entityCapacity * sizeof(uint32_t)));
 
     for (size_t i = oldCap; i < _entityCapacity; ++i) {
         _generations[i]            = 1;
-        _freeIndices[_freeCount++] = (uint32_t) i;
+        _freeIndices[_freeCount++] = static_cast<uint32_t>(i);
     }
 }
 
@@ -273,17 +273,17 @@ void Registry::EnsureComponentCapacity(uint32_t id) {
     }
     size_t oldCap = _compCapacity;
     _compCapacity = id + 8; // Small growth for component pointer array
-    _components   = (SparseSet**) std::realloc(static_cast<void*>(_components), _compCapacity * sizeof(SparseSet*));
+    _components   = static_cast<SparseSet**>(std::realloc(static_cast<void*>(_components), _compCapacity * sizeof(SparseSet*)));
     for (size_t i = oldCap; i < _compCapacity; ++i) {
         _components[i] = nullptr;
     }
     _typeInfo.resize(_compCapacity); // Resizes tracking metadata vector on demand
 }
 
-Entity Registry::Create() {
-    return ZHLN::Lock(sync.shadowLock, [&] {
+auto Registry::Create() -> Entity {
+    return ZHLN::Lock(sync.shadowLock, [&] -> Entity {
         if (_freeCount == 0) {
-            EnsureEntityCapacity((uint32_t) _entityCapacity);
+            EnsureEntityCapacity(static_cast<uint32_t>(_entityCapacity));
         }
         uint32_t index = _freeIndices[--_freeCount];
         return Entity {.index = index, .generation = _generations[index]};
@@ -291,7 +291,7 @@ Entity Registry::Create() {
 }
 
 void Registry::Destroy(Entity entity) {
-    ZHLN::Lock(sync.shadowLock, [&] {
+    ZHLN::Lock(sync.shadowLock, [&] -> void {
         if (entity.index >= _entityCapacity || _generations[entity.index] != entity.generation) {
             return;
         }
@@ -305,12 +305,12 @@ void Registry::Destroy(Entity entity) {
     });
 }
 
-bool Registry::IsAlive(Entity entity) const noexcept {
+auto Registry::IsAlive(Entity entity) const noexcept -> bool {
     return entity.index < _entityCapacity && _generations[entity.index] == entity.generation;
 }
 
 void Registry::Clear() {
-    ZHLN::Lock(sync.shadowLock, [&] {
+    ZHLN::Lock(sync.shadowLock, [&] -> void {
         for (size_t i = 0; i < _compCapacity; ++i) {
             if (_components[i] != nullptr) {
                 _components[i]->Clear();
@@ -320,17 +320,17 @@ void Registry::Clear() {
         _entityCount = 0; // Reset active entity tracking
         for (size_t i = 0; i < _entityCapacity; ++i) {
             _generations[i]++;
-            _freeIndices[_freeCount++] = (uint32_t) i;
+            _freeIndices[_freeCount++] = static_cast<uint32_t>(i);
         }
     });
 }
 
-uint32_t Registry::RegisterComponentDynamic(std::string_view name, size_t size, size_t alignment) {
+auto Registry::RegisterComponentDynamic(std::string_view name, size_t size, size_t alignment) -> uint32_t {
     uint32_t id = GetFamilyIDFromName(name);
     if (id != 0xFFFFFFFF) {
         return id;
     }
-    ZHLN::Lock(sync.shadowLock, [&] {
+    ZHLN::Lock(sync.shadowLock, [&] -> void {
         uint32_t typeHash = HashTypeName(name);
         id                = ComponentFamily::ResolveDenseID(typeHash);
         MapNameToFamilyID(name, id);
@@ -340,14 +340,14 @@ uint32_t Registry::RegisterComponentDynamic(std::string_view name, size_t size, 
             _components[id] = new SparseSet(size, alignment, &this->sync);
         }
 
-        _typeInfo[id] = {.name = name, .size = size, .alignment = alignment, .debugDump = [](const void*, std::string& out) {
+        _typeInfo[id] = {.name = name, .size = size, .alignment = alignment, .debugDump = [](const void*, std::string& out) -> void {
                              out += "{}"; // Fallback representation for non-static dynamic components
                          }};
     });
     return id;
 }
 
-void* Registry::AddDynamic(Entity entity, uint32_t familyID) {
+auto Registry::AddDynamic(Entity entity, uint32_t familyID) -> void* {
     return ZHLN::Lock(sync.shadowLock, [&] -> void* {
         EnsureComponentCapacity(familyID);
         if (familyID >= _compCapacity || (_components[familyID] == nullptr)) {
