@@ -45,8 +45,8 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     if (idx >= pc.particleCount)
         return;
 
-    Particle3D* particles = (Particle3D*) pc.particleBufferAddr;
-    Particle3D p          = particles[idx];
+    Particle3D* particleList = (Particle3D*) pc.particleBufferAddr;
+    Particle3D p             = particleList[idx];
     float dt              = pc.deltaTime;
 
     // --- 1. INITIAL SEED (UNINITIALIZED BRAND-NEW PARTICLE) ---

@@ -1,9 +1,12 @@
 // resources/shaders/common.slang
 module common;
 
-import instance_data;
-import uniforms;
-import vertex_format;
+// Re-export: consumers of `common` name InstanceData / VertexAttributes /
+// SkinVertex / FrameUniforms / Light directly. Slang `import` is not
+// transitive unless the intermediate module re-exports.
+__exported import instance_data;
+__exported import uniforms;
+__exported import vertex_format;
 
 // Extensions deliberately add behavior only: no fields, padding, or descriptor bindings.
 public extension InstanceData {
