@@ -15,8 +15,8 @@
 
 namespace ZHLN {
 
-/// Compile-time marker. Reflection never names this — callers pass the tag
-/// into `ForEachAnnotatedType`.
+/// Compile-time marker. `ForEachAnnotatedType<EnableABI>` walks every type
+/// annotated with this tag in the namespace that declared it.
 struct EnableABI {};
 
 // --- High-Level Persistent Asset Identifiers ---

@@ -692,9 +692,11 @@ constexpr void ForEachAnnotatedTypeInScope(F&& f) {
     };
 }
 
-template <typename Scope, typename Tag, typename F>
+// Walk every type annotated with Tag in the namespace (or class) that declared Tag.
+// A namespace is not a type, so this cannot be ForEachAnnotatedType<SomeNamespace, Tag>.
+template <typename Tag, typename F>
 constexpr void ForEachAnnotatedType(F&& f) {
-    ForEachAnnotatedTypeInScope<^^Scope, Tag>(std::forward<F>(f));
+    ForEachAnnotatedTypeInScope<std::meta::parent_of(^^Tag), Tag>(std::forward<F>(f));
 }
 
 template <typename Tag, auto EntityInfo>
@@ -962,7 +964,7 @@ template <auto ScopeInfo, typename Tag, typename F>
 constexpr void ForEachAnnotatedTypeInScope(F&& /*unused*/) {
 }
 
-template <typename Scope, typename Tag, typename F>
+template <typename Tag, typename F>
 constexpr void ForEachAnnotatedType(F&& /*unused*/) {
 }
 

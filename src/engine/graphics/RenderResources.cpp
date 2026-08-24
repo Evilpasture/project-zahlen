@@ -1167,7 +1167,7 @@ std::expected<void, Error> RenderContext::Impl::ValidateSlangTypeLayouts() noexc
 
     std::expected<void, Error> result {};
     uint32_t                   checked = 0;
-    Reflect::ForEachAnnotatedType<ZHLN, EnableABI>([&]<typename T>() {
+    Reflect::ForEachAnnotatedType<EnableABI>([&]<typename T>() {
         if (!result) {
             return;
         }
