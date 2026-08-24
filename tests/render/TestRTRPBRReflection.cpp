@@ -110,11 +110,11 @@ struct RegionStats {
     double sumR = 0.0, sumG = 0.0, sumB = 0.0, sumL = 0.0;
     for (int y = y0; y < y1; ++y) {
         for (int x = x0; x < x1; ++x) {
-            const size_t  i = (static_cast<size_t>(y) * static_cast<size_t>(img.width) + static_cast<size_t>(x)) * 3u;
-            const double  r = img.rgb[i + 0];
-            const double  g = img.rgb[i + 1];
-            const double  b = img.rgb[i + 2];
-            const double  l = Luma(r, g, b);
+            const size_t i = (static_cast<size_t>(y) * static_cast<size_t>(img.width) + static_cast<size_t>(x)) * 3u;
+            const double r = img.rgb[i + 0];
+            const double g = img.rgb[i + 1];
+            const double b = img.rgb[i + 2];
+            const double l = Luma(r, g, b);
             sumR += r;
             sumG += g;
             sumB += b;
@@ -234,18 +234,13 @@ struct RTRPBRReflectionTestSuite {
     }
 
     static void PlaceSunAndCamera(ZHLN::Engine& engine) {
-        auto&                  reg    = engine.GetRegistry();
-        const ZHLN::Entity     sunEnt = reg.Create();
+        auto&              reg    = engine.GetRegistry();
+        const ZHLN::Entity sunEnt = reg.Create();
         reg.Add(
             sunEnt,
-            ZHLN::Components::TransformComponent {
-                .position = JPH::Vec3(0.0f, 18.0f, 14.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({35.0f, 0.0f, 0.0f})
-            },
+            ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 18.0f, 14.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({35.0f, 0.0f, 0.0f})},
             ZHLN::Components::LightComponent {
-                .type      = ZHLN::LightType::Sun,
-                .color     = JPH::Vec3(1.0f, 1.0f, 1.0f),
-                .intensity = 90.0f,
-                .direction = JPH::Vec3(0.0f, 0.70f, 0.71f).Normalized()
+                .type = ZHLN::LightType::Sun, .color = JPH::Vec3(1.0f, 1.0f, 1.0f), .intensity = 90.0f, .direction = JPH::Vec3(0.0f, 0.70f, 0.71f).Normalized()
             }
         );
 
@@ -327,13 +322,12 @@ struct RTRPBRReflectionTestSuite {
             ConfigureDarkRTR(*engine);
             PlaceSunAndCamera(*engine);
 
-            auto& rc = engine->GetRenderContext();
-            auto  chromeRes =
-                MakeMat(rc, 1.0f, 0.03f, {0.92f, 0.92f, 0.94f, 1.0f});
-            auto goldRes = MakeMat(rc, 1.0f, 0.03f, {1.00f, 0.76f, 0.14f, 1.0f});
-            auto dielRes = MakeMat(rc, 0.0f, 0.03f, {0.92f, 0.92f, 0.94f, 1.0f});
-            auto whiteEm = MakeMat(rc, 0.0f, 0.45f, {1.0f, 1.0f, 1.0f, 1.0f}, {6.0f, 6.0f, 6.0f, 1.0f});
-            auto darkRes = MakeMat(rc, 0.0f, 0.95f, {0.04f, 0.04f, 0.045f, 1.0f});
+            auto& rc        = engine->GetRenderContext();
+            auto  chromeRes = MakeMat(rc, 1.0f, 0.03f, {0.92f, 0.92f, 0.94f, 1.0f});
+            auto  goldRes   = MakeMat(rc, 1.0f, 0.03f, {1.00f, 0.76f, 0.14f, 1.0f});
+            auto  dielRes   = MakeMat(rc, 0.0f, 0.03f, {0.92f, 0.92f, 0.94f, 1.0f});
+            auto  whiteEm   = MakeMat(rc, 0.0f, 0.45f, {1.0f, 1.0f, 1.0f, 1.0f}, {6.0f, 6.0f, 6.0f, 1.0f});
+            auto  darkRes   = MakeMat(rc, 0.0f, 0.95f, {0.04f, 0.04f, 0.045f, 1.0f});
             if (!chromeRes || !goldRes || !dielRes || !whiteEm || !darkRes) {
                 return std::unexpected(RTRPBRError::MaterialCreationFailed);
             }
@@ -362,9 +356,10 @@ struct RTRPBRReflectionTestSuite {
             LogRegion("white dielectric", diel);
             LogRegion("white emitter", src);
 
-            const bool sourceLit   = ZHLN::Test::ExpectTrue(src.meanL > 18.0);
-            const bool chromeLit   = ZHLN::Test::ExpectTrue(chrome.meanL > 8.0);
-            const bool goldYellow  = ZHLN::Test::ExpectTrue(gold.yellow > 40u || (gold.meanR > 28.0 && gold.meanG > 18.0 && BlueRatio(gold) + 0.08 < BlueRatio(chrome)));
+            const bool sourceLit = ZHLN::Test::ExpectTrue(src.meanL > 18.0);
+            const bool chromeLit = ZHLN::Test::ExpectTrue(chrome.meanL > 8.0);
+            const bool goldYellow =
+                ZHLN::Test::ExpectTrue(gold.yellow > 40u || (gold.meanR > 28.0 && gold.meanG > 18.0 && BlueRatio(gold) + 0.08 < BlueRatio(chrome)));
             const bool goldBluerLess = ZHLN::Test::ExpectTrue(BlueRatio(gold) + 0.06 < BlueRatio(chrome));
             const bool metalBrighter = ZHLN::Test::ExpectTrue(chrome.meanL > diel.meanL * 1.35 + 2.0);
             const bool goldNotBlue   = ZHLN::Test::ExpectTrue(gold.meanB + 6.0 < gold.meanR);
@@ -393,12 +388,12 @@ struct RTRPBRReflectionTestSuite {
             ConfigureDarkRTR(*engine);
             PlaceSunAndCamera(*engine);
 
-            auto& rc       = engine->GetRenderContext();
-            auto  smooth   = MakeMat(rc, 1.0f, 0.02f, {0.90f, 0.90f, 0.92f, 1.0f});
-            auto  mid      = MakeMat(rc, 1.0f, 0.22f, {0.90f, 0.90f, 0.92f, 1.0f});
-            auto  rough    = MakeMat(rc, 1.0f, 0.70f, {0.90f, 0.90f, 0.92f, 1.0f});
-            auto  redEm    = MakeMat(rc, 0.0f, 0.40f, {1.0f, 0.05f, 0.04f, 1.0f}, {8.0f, 0.0f, 0.0f, 1.0f});
-            auto  darkRes  = MakeMat(rc, 0.0f, 0.95f, {0.04f, 0.04f, 0.045f, 1.0f});
+            auto& rc      = engine->GetRenderContext();
+            auto  smooth  = MakeMat(rc, 1.0f, 0.02f, {0.90f, 0.90f, 0.92f, 1.0f});
+            auto  mid     = MakeMat(rc, 1.0f, 0.22f, {0.90f, 0.90f, 0.92f, 1.0f});
+            auto  rough   = MakeMat(rc, 1.0f, 0.70f, {0.90f, 0.90f, 0.92f, 1.0f});
+            auto  redEm   = MakeMat(rc, 0.0f, 0.40f, {1.0f, 0.05f, 0.04f, 1.0f}, {8.0f, 0.0f, 0.0f, 1.0f});
+            auto  darkRes = MakeMat(rc, 0.0f, 0.95f, {0.04f, 0.04f, 0.045f, 1.0f});
             if (!smooth || !mid || !rough || !redEm || !darkRes) {
                 return std::unexpected(RTRPBRError::MaterialCreationFailed);
             }
@@ -530,7 +525,7 @@ struct RTRPBRReflectionTestSuite {
             const ZHLN::Entity tile = SpawnTile(*engine, 0.0f, *gold);
             SpawnEmitter(*engine, 0.0f, *whiteEm);
 
-            auto& reg = engine->GetRegistry();
+            auto& reg         = engine->GetRegistry();
             auto  captureTile = [&](const char* path, float metallic, float roughness) -> RegionStats {
                 reg.Patch<ZHLN::Components::PBRComponent>(tile, [&](auto& pbr) {
                     pbr.metallic  = metallic;
@@ -548,8 +543,9 @@ struct RTRPBRReflectionTestSuite {
             LogRegion("patch dielectric r=0.03", dielectric);
             LogRegion("patch metal r=0.75", metalRough);
 
-            const bool metalEnergy   = ZHLN::Test::ExpectTrue(metalSmooth.meanL > dielectric.meanL * 1.30 + 2.0);
-            const bool metalYellower = ZHLN::Test::ExpectTrue(BlueRatio(metalSmooth) + 0.05 < BlueRatio(dielectric) || metalSmooth.yellow > dielectric.yellow + 15u);
+            const bool metalEnergy = ZHLN::Test::ExpectTrue(metalSmooth.meanL > dielectric.meanL * 1.30 + 2.0);
+            const bool metalYellower =
+                ZHLN::Test::ExpectTrue(BlueRatio(metalSmooth) + 0.05 < BlueRatio(dielectric) || metalSmooth.yellow > dielectric.yellow + 15u);
             const bool roughKills    = ZHLN::Test::ExpectTrue(metalSmooth.meanL > metalRough.meanL + 2.0 && metalSmooth.yellow + 8u > metalRough.yellow);
             const bool roughLessGold = ZHLN::Test::ExpectTrue(metalSmooth.maxL + 2.0 >= metalRough.maxL);
 
@@ -610,13 +606,12 @@ struct RTRPBRReflectionTestSuite {
             LogRegion("copper", cu);
 
             // Gold F0.b is tiny; copper F0.b is much higher; silver is near-neutral.
-            const bool goldLeastBlue = ZHLN::Test::ExpectTrue(BlueRatio(au) + 0.04 < BlueRatio(sil) && BlueRatio(au) + 0.03 < BlueRatio(cu));
-            const bool goldMoreYellow =
-                ZHLN::Test::ExpectTrue(GreenRatio(au) > GreenRatio(cu) + 0.03 && au.yellow + 5u >= cu.yellow);
-            const bool silverNeutral = ZHLN::Test::ExpectTrue(std::abs(sil.meanR - sil.meanG) < 28.0 && BlueRatio(sil) > 0.45);
-            const bool allReflect    = ZHLN::Test::ExpectTrue(sil.meanL > 6.0 && au.meanL > 6.0 && cu.meanL > 6.0);
+            const bool goldLeastBlue  = ZHLN::Test::ExpectTrue(BlueRatio(au) + 0.04 < BlueRatio(sil) && BlueRatio(au) + 0.03 < BlueRatio(cu));
+            const bool goldMoreYellow = ZHLN::Test::ExpectTrue(GreenRatio(au) > GreenRatio(cu) + 0.03 && au.yellow + 5u >= cu.yellow);
+            const bool silverNeutral  = ZHLN::Test::ExpectTrue(std::abs(sil.meanR - sil.meanG) < 28.0 && BlueRatio(sil) > 0.45);
+            const bool allReflect     = ZHLN::Test::ExpectTrue(sil.meanL > 6.0 && au.meanL > 6.0 && cu.meanL > 6.0);
 
-            if (!goldLeastBlue || !copperRedder || !silverNeutral || !allReflect) {
+            if (!goldLeastBlue || !goldMoreYellow || !silverNeutral || !allReflect) {
                 return std::unexpected(RTRPBRError::ReflectionColorMismatch);
             }
             ZHLN::Println("    [PASS] Silver / gold / copper RTR channel order matches F0.");
