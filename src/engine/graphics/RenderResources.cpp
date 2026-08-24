@@ -516,16 +516,6 @@ std::expected<void, Error> RenderContext::Impl::InitBakeHeapBindings() noexcept 
     return {};
 }
 
-auto RenderContext::Impl::BuildOneShotComputeHeap(const ZHLN_ShaderDesc& shader) noexcept -> std::expected<Vk::ComputePass, Error> {
-    if (shader.code == nullptr || shader.size == 0) {
-        return std::unexpected(ShaderStageCreationError::ShaderLoadingFailed);
-    }
-    Vk::ComputePass pass;
-    return pass.BuildHeap(ctx.Device(), shader, bakeHeapBindings.GetInfo(), bakeHeapBindings.indexPushOffset).transform([&]() {
-        return std::move(pass);
-    });
-}
-
 void RenderContext::Impl::WriteTextureSlotToHeap(uint32_t bindlessIndex, VkImage image, VkFormat format, uint32_t mipLevels, bool cube) noexcept {
     // The globalTextures[] array is pinned to a contiguous heap region by the
     // binding-11 mapping; index N lives at slot (textureHeapBase + N).
@@ -1127,50 +1117,6 @@ void RenderContext::Impl::RegisterPipeline(const PipelineRegistration& reg) noex
 
 void RenderContext::Impl::UploadClusterBounds() {
     clusterBoundsDirty = true;
-}
-
-auto RenderContext::Impl::BuildOneShotCompute(const ZHLN_ShaderDesc& shader) noexcept -> std::expected<Vk::ComputePass, Error> {
-    if (shader.code == nullptr || shader.size == 0) {
-        return std::unexpected(ShaderStageCreationError::ShaderLoadingFailed);
-    }
-    Vk::ComputePass pass;
-    if (!pass.ReflectDispatchLayout(shader)) {
-        return std::unexpected(Vk::SpirvLayoutError::ModuleParseFailed);
-    }
-    return Vk::ComputePipelineBuilder()
-        .Shader(shader)
-        .Layout(VK_NULL_HANDLE)
-        .HeapPipeline()
-        .Build(ctx.Device())
-        .transform([&](auto&& pipeline) {
-            pass.pipeline = std::forward<decltype(pipeline)>(pipeline);
-            return std::move(pass);
-        });
-}
-
-auto RenderContext::Impl::DispatchOneShotCompute(
-    const ZHLN_ShaderDesc& shader,
-    const void*            pushData,
-    uint32_t               pushSize,
-    uint32_t               threadsX,
-    uint32_t               threadsY,
-    uint32_t               threadsZ
-) noexcept -> std::expected<void, Error> {
-    return BuildOneShotCompute(shader).transform([&](Vk::ComputePass pass) {
-        Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
-            pass.Bind(cmd);
-            if (pushData != nullptr && pushSize > 0) {
-                Vk::PushData(ctx, cmd, 0, pushData, pushSize);
-            }
-            pass.DispatchThreads(cmd, threadsX, threadsY, threadsZ);
-            Vk::MemoryBarrier(
-                cmd, {.src_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                      .src_access = VK_ACCESS_2_SHADER_WRITE_BIT,
-                      .dst_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                      .dst_access = VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT}
-            );
-        });
-    });
 }
 
 std::expected<void, Error> RenderContext::Impl::ValidateSlangTypeLayouts() noexcept {

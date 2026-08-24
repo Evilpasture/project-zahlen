@@ -53,17 +53,21 @@ class IBLProcessor {
         return requireShader(brdfShader)
             .and_then([&](auto) { return requireShader(specShader); })
             .and_then([&](auto) { return requireShader(shShader); })
-            .and_then([&](auto) { return impl.BuildOneShotComputeHeap(brdfShader); })
+            .and_then([&](auto) {
+                return CreateHeapComputePass(impl.ctx.Device(), brdfShader, impl.bakeHeapBindings.GetInfo(), impl.bakeHeapBindings.indexPushOffset);
+            })
             .and_then([&](ComputePass brdf) {
-                return impl.BuildOneShotComputeHeap(specShader).transform([brdf = std::move(brdf)](ComputePass spec) mutable {
-                    return Pipelines {.brdf = std::move(brdf), .spec = std::move(spec), .sh = {}};
-                });
+                return CreateHeapComputePass(impl.ctx.Device(), specShader, impl.bakeHeapBindings.GetInfo(), impl.bakeHeapBindings.indexPushOffset)
+                    .transform([brdf = std::move(brdf)](ComputePass spec) mutable {
+                        return Pipelines {.brdf = std::move(brdf), .spec = std::move(spec), .sh = {}};
+                    });
             })
             .and_then([&](Pipelines pipes) {
-                return impl.BuildOneShotComputeHeap(shShader).transform([pipes = std::move(pipes)](ComputePass sh) mutable {
-                    pipes.sh = std::move(sh);
-                    return std::move(pipes);
-                });
+                return CreateHeapComputePass(impl.ctx.Device(), shShader, impl.bakeHeapBindings.GetInfo(), impl.bakeHeapBindings.indexPushOffset)
+                    .transform([pipes = std::move(pipes)](ComputePass sh) mutable {
+                        pipes.sh = std::move(sh);
+                        return std::move(pipes);
+                    });
             })
             .and_then([&](Pipelines pipes) -> std::expected<std::pair<Pipelines, State>, ZHLN::Error> {
                 return Buffer::Create(

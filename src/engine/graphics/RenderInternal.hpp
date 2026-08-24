@@ -846,7 +846,6 @@ struct RenderContext::Impl {
     template <typename PushT>
     [[nodiscard]] auto BakeComputeTexture2D(const ZHLN_ShaderDesc& shader, uint32_t width, uint32_t height, VkFormat format, const PushT& push)
         -> std::expected<uint32_t, Error>;
-    [[nodiscard]] auto BuildOneShotComputeHeap(const ZHLN_ShaderDesc& shader) noexcept -> std::expected<Vk::ComputePass, Error>;
 
     Vk::SlangReflectedLayout cullingLayout; // Reflection only: drives the heap binding table
     Vk::ComputePass          hizGeneratePass;
@@ -1152,16 +1151,6 @@ struct RenderContext::Impl {
     static constexpr uint32_t kBake2DHeapIndex    = 0;
     static constexpr uint32_t kBakeSpecHeapIndex0 = 1;
 
-    [[nodiscard]] auto BuildOneShotCompute(const ZHLN_ShaderDesc& shader) noexcept -> std::expected<Vk::ComputePass, Error>;
-    [[nodiscard]] auto DispatchOneShotCompute(
-        const ZHLN_ShaderDesc& shader,
-        const void*            pushData,
-        uint32_t               pushSize,
-        uint32_t               threadsX,
-        uint32_t               threadsY,
-        uint32_t               threadsZ
-    ) noexcept -> std::expected<void, Error>;
-
     [[nodiscard]] auto BufferAddress(VkBuffer buffer) const noexcept -> VkDeviceAddress {
         return ctx.BufferAddress(buffer);
     }
@@ -1172,38 +1161,15 @@ auto RenderContext::Impl::BakeComputeTexture2D(
     const ZHLN_ShaderDesc& shader, uint32_t width, uint32_t height, VkFormat format, const PushT& push
 ) -> std::expected<uint32_t, Error> {
     static_assert(Vk::GpuTriviallyCopyable<PushT>);
-    return BuildOneShotComputeHeap(shader).and_then([&](Vk::ComputePass pass) -> std::expected<uint32_t, Error> {
-        return Vk::ImageBuilder {}
-            .Texture2D(width, height, format, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 1)
-            .Build(allocator.Get())
-            .and_then([&, pass = std::move(pass)](Vk::Image image) mutable -> std::expected<uint32_t, VkResult> {
-                ZHLN_ImageViewDesc desc = {
-                    .image            = image.Handle(),
-                    .format           = format,
-                    .aspect           = VK_IMAGE_ASPECT_COLOR_BIT,
-                    .mip_levels       = 1,
-                    .array_layers     = 1,
-                    .view_type        = VK_IMAGE_VIEW_TYPE_2D,
-                    .base_array_layer = 0,
-                    .base_mip         = 0,
-                };
-                VkImageView raw = VK_NULL_HANDLE;
-                if (const VkResult res = ZHLN_CreateImageView(ctx.Device(), &desc, &raw); res != VK_SUCCESS) {
-                    return std::unexpected(res);
-                }
-                Vk::ImageView               view {ctx.Device(), raw};
-                const VkImageViewCreateInfo writeInfo = Vk::MakeViewCreateInfo2D(image.Handle(), format, 1, VK_IMAGE_ASPECT_COLOR_BIT);
-                Vk::WriteHeapBindings(heapManager, ctx, bakeHeapBindings, kBake2DHeapIndex, Vk::ImageWrite {.view = view.Get(), .viewInfo = &writeInfo});
-
-                Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
-                    BindHeaps(cmd);
-                    Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, image.Handle());
-                    pass.DispatchHeapIndexedThreads(ctx, cmd, kBake2DHeapIndex, width, height, 1, push);
-                    Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
+    return Vk::CreateHeapComputePass(ctx.Device(), shader, bakeHeapBindings.GetInfo(), bakeHeapBindings.indexPushOffset)
+        .and_then([&](Vk::ComputePass pass) -> std::expected<uint32_t, Error> {
+            return Vk::DispatchComputeToTexture2D(
+                       ctx, allocator, graphicsCmdRing, heapManager, bakeHeapBindings, kBake2DHeapIndex, pass, width, height, format, push
+            )
+                .transform([&](Vk::BakedImageResult baked) {
+                    return AdoptBindlessTexture(std::move(baked.image), std::move(baked.view), format);
                 });
-                return AdoptBindlessTexture(std::move(image), std::move(view), format);
-            });
-    });
+        });
 }
 
 struct FrameRecorder {

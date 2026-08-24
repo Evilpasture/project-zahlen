@@ -266,4 +266,128 @@ struct DoubleBufferedComputePass {
     }
 };
 
+/// Builds a standalone descriptor-heap compute pass from compiled SPIR-V.
+/// Reflects `[numthreads]` and optional `Dispatch.SizeX/Y/Z` metadata.
+[[nodiscard]] inline auto CreateHeapComputePass(VkDevice device, const ZHLN_ShaderDesc& shader) noexcept -> std::expected<ComputePass, Error> {
+    if (shader.code == nullptr || shader.size == 0) {
+        return std::unexpected(ShaderStageCreationError::ShaderLoadingFailed);
+    }
+
+    ComputePass pass;
+    if (!pass.ReflectDispatchLayout(shader)) {
+        return std::unexpected(SpirvLayoutError::ModuleParseFailed);
+    }
+
+    return ComputePipelineBuilder()
+        .Shader(shader)
+        .Layout(VK_NULL_HANDLE)
+        .HeapPipeline()
+        .Build(device)
+        .transform([&](Pipeline&& pipeline) {
+            pass.pipeline = std::move(pipeline);
+            return std::move(pass);
+        });
+}
+
+/// Same as above, with a PUSH_INDEX mapping table (bake / pass slot spans).
+[[nodiscard]] inline auto CreateHeapComputePass(
+    VkDevice                                             device,
+    const ZHLN_ShaderDesc&                               shader,
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping,
+    uint32_t                                             indexPushOffset
+) noexcept -> std::expected<ComputePass, Error> {
+    if (shader.code == nullptr || shader.size == 0) {
+        return std::unexpected(ShaderStageCreationError::ShaderLoadingFailed);
+    }
+
+    ComputePass pass;
+    if (!pass.ReflectDispatchLayout(shader)) {
+        return std::unexpected(SpirvLayoutError::ModuleParseFailed);
+    }
+    return pass.BuildHeap(device, shader, mapping, indexPushOffset).transform([&] { return std::move(pass); });
+}
+
+/// Builds and synchronously executes a heap compute shader on an immediate command ring.
+template <GpuTriviallyCopyable PushT = std::monostate, QueueType QType = QueueType::Graphics, size_t Capacity = 8>
+inline auto ExecuteImmediateCompute(
+    const Context&              ctx,
+    CommandRing<QType, Capacity>& ring,
+    const ZHLN_ShaderDesc&      shader,
+    uint32_t                    threadsX,
+    uint32_t                    threadsY = 1,
+    uint32_t                    threadsZ = 1,
+    const PushT&                pushData = {}
+) noexcept -> std::expected<void, Error> {
+    return CreateHeapComputePass(ctx.Device(), shader).transform([&](ComputePass pass) {
+        ExecuteImmediate(ctx, ring, [&](VkCommandBuffer cmd) {
+            pass.Bind(cmd);
+            if constexpr (!std::is_same_v<PushT, std::monostate>) {
+                PushData(ctx, cmd, 0, pushData);
+            }
+            pass.DispatchThreads(cmd, threadsX, threadsY, threadsZ);
+            MemoryBarrier(
+                cmd, {.src_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                      .src_access = VK_ACCESS_2_SHADER_WRITE_BIT,
+                      .dst_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                      .dst_access = VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT}
+            );
+        });
+    });
+}
+
+struct BakedImageResult {
+    Image     image;
+    ImageView view;
+};
+
+/// Creates a STORAGE|SAMPLED 2D image, writes it into a heap slot, and
+/// dispatches `pass` into it. Returns the image and view; the caller owns
+/// bindless adoption.
+template <GpuTriviallyCopyable PushT, size_t Capacity = 8>
+[[nodiscard]] inline auto DispatchComputeToTexture2D(
+    const Context&                             ctx,
+    Allocator&                                 allocator,
+    CommandRing<QueueType::Graphics, Capacity>& cmdRing,
+    HeapManager&                               heapManager,
+    const HeapPassBindings&                    heapBindings,
+    uint32_t                                   heapIndex,
+    const ComputePass&                         pass,
+    uint32_t                                   width,
+    uint32_t                                   height,
+    VkFormat                                   format,
+    const PushT&                               push
+) noexcept -> std::expected<BakedImageResult, Error> {
+    return ImageBuilder {}
+        .Texture2D(width, height, format, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 1)
+        .Build(allocator.Get())
+        .and_then([&](Image image) -> std::expected<BakedImageResult, VkResult> {
+            ZHLN_ImageViewDesc desc = {
+                .image            = image.Handle(),
+                .format           = format,
+                .aspect           = VK_IMAGE_ASPECT_COLOR_BIT,
+                .mip_levels       = 1,
+                .array_layers     = 1,
+                .view_type        = VK_IMAGE_VIEW_TYPE_2D,
+                .base_array_layer = 0,
+                .base_mip         = 0,
+            };
+            VkImageView raw = VK_NULL_HANDLE;
+            if (const VkResult res = ZHLN_CreateImageView(ctx.Device(), &desc, &raw); res != VK_SUCCESS) {
+                return std::unexpected(res);
+            }
+            ImageView                   view {ctx.Device(), raw};
+            const VkImageViewCreateInfo writeInfo = MakeViewCreateInfo2D(image.Handle(), format, 1, VK_IMAGE_ASPECT_COLOR_BIT);
+            WriteHeapBindings(heapManager, ctx, heapBindings, heapIndex, ImageWrite {.view = view.Get(), .viewInfo = &writeInfo});
+
+            ExecuteImmediate(ctx, cmdRing, [&](VkCommandBuffer cmd) {
+                heapManager.BindHeaps(cmd);
+                TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, image.Handle());
+                pass.DispatchHeapIndexedThreads(ctx, cmd, heapIndex, width, height, 1, push);
+                TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
+            });
+
+            return BakedImageResult {.image = std::move(image), .view = std::move(view)};
+        });
+}
+
 } // namespace ZHLN::Vk
