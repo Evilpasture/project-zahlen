@@ -86,20 +86,18 @@ std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) 
         if (!result) {
             return;
         }
+        // else-if so CreateDefaultTarget is discarded for 3D / Hi-Z / depth /
+        // atlas tags (a plain `return` after if constexpr still instantiates
+        // the 2D path for every Tag).
         if constexpr (Tag::is_swapchain || std::is_same_v<Tag, Res_ShadowAtlas> || std::is_same_v<Tag, Res_ShadowMap>) {
             return;
-        }
-
-        if constexpr (Tag::is_3d) {
+        } else if constexpr (Tag::is_3d) {
             result = assign(
                 rt, Vk::RenderTarget3D<Tag::format>::Create(
                         allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
                     )
             );
-            return;
-        }
-
-        if constexpr (requires { rt.mipLevels; rt.mipViews; }) {
+        } else if constexpr (requires { rt.mipLevels; rt.mipViews; }) {
             result = assign(
                 rt, Vk::MipmappedRenderTarget<Tag::format>::Create(
                         allocator, ctx, ext,
@@ -107,27 +105,23 @@ std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) 
                             VK_IMAGE_USAGE_TRANSFER_DST_BIT
                     )
             );
-            return;
-        }
-
-        if constexpr ((Tag::aspect & VK_IMAGE_ASPECT_DEPTH_BIT) != 0) {
+        } else if constexpr ((Tag::aspect & VK_IMAGE_ASPECT_DEPTH_BIT) != 0) {
             result = assign(
                 rt, Vk::RenderTarget<Tag::format>::Create(
                         allocator, ctx, ext, {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT}
                     )
             );
-            return;
+        } else {
+            VkImageUsageFlags extra = 0;
+            if constexpr (std::is_same_v<Tag, Res_HdrSceneColor>) {
+                extra = VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+            }
+            const VkExtent2D scaled = {
+                .width  = std::max(1u, ext.width / Tag::scale_divisor),
+                .height = std::max(1u, ext.height / Tag::scale_divisor)
+            };
+            result = assign(rt, CreateDefaultTarget<Tag::format>(scaled, extra));
         }
-
-        VkImageUsageFlags extra = 0;
-        if constexpr (std::is_same_v<Tag, Res_HdrSceneColor>) {
-            extra = VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-        }
-        const VkExtent2D scaled = {
-            .width  = std::max(1u, ext.width / Tag::scale_divisor),
-            .height = std::max(1u, ext.height / Tag::scale_divisor)
-        };
-        result = assign(rt, CreateDefaultTarget<Tag::format>(scaled, extra));
     });
 
     if (!result) {
