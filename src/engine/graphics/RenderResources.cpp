@@ -494,6 +494,38 @@ auto RenderContext::RegisterTexture(std::string_view name, uint32_t bindlessInde
     return _impl->textureManager.RegisterUploaded(name, bindlessIndex, isSRGB);
 }
 
+auto RenderContext::Impl::AdoptBindlessTexture(Vk::Image&& image, Vk::ImageView&& view, VkFormat format, uint32_t mipLevels, bool cube) -> uint32_t {
+    const uint32_t index = nextTextureIndex++;
+    WriteTextureSlotToHeap(index, image.Handle(), format, mipLevels, cube);
+    textureImages.push_back(std::move(image));
+    textureViews.push_back(std::move(view));
+    return index;
+}
+
+std::expected<void, Error> RenderContext::Impl::InitBakeHeapBindings() noexcept {
+    // One shared storage-image slot span for every one-shot compute bake
+    // (SMAA / BRDF / IBL specular / procedural). ExecuteImmediate is
+    // synchronous, so the same slots are rewritten per bake.
+    const auto shader = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::ProceduralBakeComp).vertex, "CSMain");
+    if (!proceduralBakeDescLayout.Build(ctx.Device(), shader, VK_SHADER_STAGE_COMPUTE_BIT)) {
+        return std::unexpected(RenderInitError::PipelineCreationFailed);
+    }
+    Vk::BuildHeapPassBindings(
+        heapManager, proceduralBakeDescLayout.reflectedSets[0], 0, heapPushDataLayout.heapIndexOffset, kBakeHeapSlotSpan, bakeHeapBindings
+    );
+    return {};
+}
+
+auto RenderContext::Impl::BuildOneShotComputeHeap(const ZHLN_ShaderDesc& shader) noexcept -> std::expected<Vk::ComputePass, Error> {
+    if (shader.code == nullptr || shader.size == 0) {
+        return std::unexpected(ShaderStageCreationError::ShaderLoadingFailed);
+    }
+    Vk::ComputePass pass;
+    return pass.BuildHeap(ctx.Device(), shader, bakeHeapBindings.GetInfo(), bakeHeapBindings.indexPushOffset).transform([&]() {
+        return std::move(pass);
+    });
+}
+
 void RenderContext::Impl::WriteTextureSlotToHeap(uint32_t bindlessIndex, VkImage image, VkFormat format, uint32_t mipLevels, bool cube) noexcept {
     // The globalTextures[] array is pinned to a contiguous heap region by the
     // binding-11 mapping; index N lives at slot (textureHeapBase + N).
@@ -544,14 +576,8 @@ auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width
             }
             auto gpuView = std::move(*view_res);
 
-            uint32_t index = nextTextureIndex++;
-            WriteTextureSlotToHeap(index, gpuImage.Handle(), format, mipLevels, false);
-
-            Vk::Debug::SetImageName(ctx, gpuImage.Handle(), std::format("BindlessCubeTexture{:03}", index));
-
-            textureImages.push_back(std::forward<decltype(gpuImage)>(gpuImage));
-            textureViews.push_back(std::move(gpuView));
-
+            const uint32_t index = AdoptBindlessTexture(std::forward<decltype(gpuImage)>(gpuImage), std::move(gpuView), format, mipLevels, false);
+            Vk::Debug::SetImageName(ctx, textureImages.back().Handle(), std::format("BindlessTexture{:03}", index));
             return index;
         });
 }
@@ -586,15 +612,9 @@ auto RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceData,
             }
             auto gpuView = std::move(*cube_view_res);
 
-            uint32_t index = nextTextureIndex++;
-            WriteTextureSlotToHeap(index, gpuImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, true);
-
+            const uint32_t index = AdoptBindlessTexture(std::forward<decltype(gpuImage)>(gpuImage), std::move(gpuView), VK_FORMAT_R8G8B8A8_UNORM, 1, true);
             std::array<char, 32> buf {};
-            Vk::Debug::SetImageName(ctx, gpuImage.Handle(), FormatTo(buf, "BindlessCubeTexture{:03}", index));
-
-            textureImages.push_back(std::forward<decltype(gpuImage)>(gpuImage));
-            textureViews.push_back(std::move(gpuView));
-
+            Vk::Debug::SetImageName(ctx, textureImages.back().Handle(), FormatTo(buf, "BindlessCubeTexture{:03}", index));
             return index;
         });
 }

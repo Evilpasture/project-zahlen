@@ -7,6 +7,7 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
+#include <array>
 #include <cstddef>
 #include <cstring>
 #include <expected>
@@ -22,7 +23,6 @@ class IBLProcessor {
         constexpr uint32_t kBaseSize  = 256;
         constexpr uint32_t kMipLevels = 6;
         constexpr size_t   kSHBytes   = sizeof(JPH::Vec4) * 9;
-        constexpr size_t   kLutBytes  = static_cast<size_t>(kLutSize) * kLutSize * 4;
 
         ZHLN::Log("[IBL] Baking BRDF LUT / SH / specular mips (Slang compute)...");
 
@@ -33,11 +33,10 @@ class IBLProcessor {
             return shader;
         };
 
-        const auto brdfShader = CreateShaderDesc(Resource::GetShaderProgram(BRDFLUTComp).vertex, "CSMain");
-        const auto specShader = CreateShaderDesc(Resource::GetShaderProgram(IBLSpecularComp).vertex, "SpecularMain");
-        const auto shShader   = CreateShaderDesc(Resource::GetShaderProgram(IBLSHComp).vertex, "SHMain");
-
-        const IBLBakePush skyPush = MakeSkyPush(sky);
+        const auto        brdfShader = CreateShaderDesc(Resource::GetShaderProgram(BRDFLUTComp).vertex, "CSMain");
+        const auto        specShader = CreateShaderDesc(Resource::GetShaderProgram(IBLSpecularComp).vertex, "SpecularMain");
+        const auto        shShader   = CreateShaderDesc(Resource::GetShaderProgram(IBLSHComp).vertex, "SHMain");
+        const JPH::Vec4   sunDir     = JPH::Vec4(JPH::Vec3(0.5f, 1.0f, 0.2f).Normalized(), 0.0f);
 
         struct Pipelines {
             ComputePass brdf;
@@ -46,71 +45,42 @@ class IBLProcessor {
         };
 
         struct State {
-            Buffer     lutBuf;
             Buffer     shGpu;
             Buffer     shCpu;
-            Buffer     specBuf;
             IBLPayload payload;
         };
 
         return requireShader(brdfShader)
             .and_then([&](auto) { return requireShader(specShader); })
             .and_then([&](auto) { return requireShader(shShader); })
-            .and_then([&](auto) { return impl.BuildOneShotCompute(brdfShader); })
+            .and_then([&](auto) { return impl.BuildOneShotComputeHeap(brdfShader); })
             .and_then([&](ComputePass brdf) {
-                return impl.BuildOneShotCompute(specShader).transform([brdf = std::move(brdf)](ComputePass spec) mutable {
+                return impl.BuildOneShotComputeHeap(specShader).transform([brdf = std::move(brdf)](ComputePass spec) mutable {
                     return Pipelines {.brdf = std::move(brdf), .spec = std::move(spec), .sh = {}};
                 });
             })
             .and_then([&](Pipelines pipes) {
-                return impl.BuildOneShotCompute(shShader).transform([pipes = std::move(pipes)](ComputePass sh) mutable {
+                return impl.BuildOneShotComputeHeap(shShader).transform([pipes = std::move(pipes)](ComputePass sh) mutable {
                     pipes.sh = std::move(sh);
                     return std::move(pipes);
                 });
             })
             .and_then([&](Pipelines pipes) -> std::expected<std::pair<Pipelines, State>, ZHLN::Error> {
                 return Buffer::Create(
-                           impl.allocator.Get(), kLutBytes,
-                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                           impl.allocator.Get(), kSHBytes,
+                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                               VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                            VMA_MEMORY_USAGE_GPU_ONLY
                 )
-                    .and_then([&](Buffer lutBuf) {
-                        return Buffer::Create(
-                                   impl.allocator.Get(), kSHBytes,
-                                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                                       VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                                   VMA_MEMORY_USAGE_GPU_ONLY
-                        )
-                            .transform([lutBuf = std::move(lutBuf)](Buffer shGpu) mutable {
-                                return State {.lutBuf = std::move(lutBuf), .shGpu = std::move(shGpu)};
-                            });
-                    })
-                    .and_then([&](State state) {
+                    .and_then([&](Buffer shGpu) {
                         return Buffer::Create(impl.allocator.Get(), kSHBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_TO_CPU)
-                            .transform([state = std::move(state)](Buffer shCpu) mutable {
-                                state.shCpu = std::move(shCpu);
-                                return std::move(state);
-                            });
-                    })
-                    .and_then([&](State state) -> std::expected<State, VkResult> {
-                        size_t totalBytes = 0;
-                        for (uint32_t m = 0; m < kMipLevels; ++m) {
-                            const uint32_t s = kBaseSize >> m;
-                            totalBytes += static_cast<size_t>(s) * s * 4 * 6;
-                        }
-                        return Buffer::Create(
-                                   impl.allocator.Get(), totalBytes,
-                                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                                   VMA_MEMORY_USAGE_GPU_ONLY
-                        )
-                            .transform([state = std::move(state)](Buffer specBuf) mutable {
-                                state.specBuf = std::move(specBuf);
-                                return std::move(state);
+                            .transform([shGpu = std::move(shGpu)](Buffer shCpu) mutable {
+                                return State {.shGpu = std::move(shGpu), .shCpu = std::move(shCpu)};
                             });
                     })
                     .and_then([&](State state) -> std::expected<State, VkResult> {
                         return ImageBuilder {}
-                            .Texture2D(kLutSize, kLutSize, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 1)
+                            .Texture2D(kLutSize, kLutSize, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 1)
                             .Build(impl.allocator.Get())
                             .transform([state = std::move(state)](Image lutImg) mutable {
                                 state.payload.brdfLutImage = std::move(lutImg);
@@ -119,7 +89,7 @@ class IBLProcessor {
                     })
                     .and_then([&](State state) -> std::expected<State, VkResult> {
                         return ImageBuilder {}
-                            .TextureCube(kBaseSize, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, kMipLevels)
+                            .TextureCube(kBaseSize, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, kMipLevels)
                             .Build(impl.allocator.Get())
                             .transform([state = std::move(state)](Image specImg) mutable {
                                 state.payload.prefilteredImage = std::move(specImg);
@@ -131,40 +101,60 @@ class IBLProcessor {
             .and_then([&](std::pair<Pipelines, State> packed) -> std::expected<State, ZHLN::Error> {
                 auto [pipes, state] = std::move(packed);
 
-                const VkDeviceAddress specAddr = impl.ctx.BufferAddress(state.specBuf.Handle());
-                const BRDFLUTPush     lutPush {
-                    .outAddr = impl.ctx.BufferAddress(state.lutBuf.Handle()), .width = kLutSize, .height = kLutSize, .sampleCount = 128
+                const BRDFLUTPush lutPush {.width = kLutSize, .height = kLutSize, .sampleCount = 128};
+                const IBLBakePush shPush {
+                    .outAddr     = impl.ctx.BufferAddress(state.shGpu.Handle()),
+                    .sampleCount = 16384,
+                    .skyZenith   = sky.skyZenith,
+                    .skyHorizon  = sky.skyHorizon,
+                    .skyGround   = sky.skyGround,
+                    .sunDir      = sunDir,
                 };
-                IBLBakePush shPush = skyPush;
-                shPush.outAddr     = impl.ctx.BufferAddress(state.shGpu.Handle());
-                shPush.sampleCount = 16384;
+
+                const auto brdfInfo = MakeViewCreateInfo2D(state.payload.brdfLutImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
+                WriteHeapBindings(
+                    impl.heapManager, impl.ctx, impl.bakeHeapBindings, RenderContext::Impl::kBake2DHeapIndex,
+                    ImageWrite {.viewInfo = &brdfInfo}
+                );
+
+                std::array<VkImageViewCreateInfo, kMipLevels> specMipInfos {};
+                for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
+                    specMipInfos[mip] = MakeViewCreateInfo2DArray(
+                        state.payload.prefilteredImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 0, 6, VK_IMAGE_ASPECT_COLOR_BIT, 1, mip
+                    );
+                    WriteHeapBindings(
+                        impl.heapManager, impl.ctx, impl.bakeHeapBindings, RenderContext::Impl::kBakeSpecHeapIndex0 + mip,
+                        ImageWrite {.viewInfo = &specMipInfos[mip]}
+                    );
+                }
 
                 ExecuteImmediate(impl.ctx, impl.graphicsCmdRing, [&](VkCommandBuffer cmd) {
-                    pipes.brdf.Bind(cmd);
-                    PushData(impl.ctx, cmd, 0, lutPush);
-                    pipes.brdf.DispatchThreads(cmd, kLutSize, kLutSize, 1);
+                    impl.BindHeapsAndPushFrame(cmd);
+                    TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, state.payload.brdfLutImage.Handle());
+                    TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, state.payload.prefilteredImage.Handle());
 
-                    pipes.sh.Bind(cmd);
-                    PushData(impl.ctx, cmd, 0, shPush);
-                    pipes.sh.DispatchThreads(cmd, 64, 1, 1);
+                    pipes.brdf.DispatchHeapIndexedThreads(impl.ctx, cmd, RenderContext::Impl::kBake2DHeapIndex, kLutSize, kLutSize, 1, lutPush);
 
-                    pipes.spec.Bind(cmd);
-                    size_t byteOffset = 0;
+                    pipes.sh.DispatchHeapIndexedThreads(impl.ctx, cmd, RenderContext::Impl::kBake2DHeapIndex, 64, 1, 1, shPush);
+
                     for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
                         const uint32_t mipSize   = kBaseSize >> mip;
                         const float    roughness = static_cast<float>(mip) / static_cast<float>(kMipLevels - 1);
-                        const auto     faceBytes = static_cast<size_t>(mipSize) * mipSize * 4;
                         for (uint32_t face = 0; face < 6; ++face) {
-                            IBLBakePush push = skyPush;
-                            push.outAddr     = specAddr + byteOffset;
-                            push.width       = mipSize;
-                            push.height      = mipSize;
-                            push.roughness   = roughness;
-                            push.face        = face;
-                            push.sampleCount = roughness == 0.0f ? 1u : 32u;
-                            PushData(impl.ctx, cmd, 0, push);
-                            pipes.spec.DispatchThreads(cmd, mipSize, mipSize, 1);
-                            byteOffset += faceBytes;
+                            const IBLBakePush push {
+                                .width       = mipSize,
+                                .height      = mipSize,
+                                .roughness   = roughness,
+                                .face        = face,
+                                .sampleCount = roughness == 0.0f ? 1u : 32u,
+                                .skyZenith   = sky.skyZenith,
+                                .skyHorizon  = sky.skyHorizon,
+                                .skyGround   = sky.skyGround,
+                                .sunDir      = sunDir,
+                            };
+                            pipes.spec.DispatchHeapIndexedThreads(
+                                impl.ctx, cmd, RenderContext::Impl::kBakeSpecHeapIndex0 + mip, mipSize, mipSize, 1, push
+                            );
                         }
                     }
 
@@ -174,38 +164,10 @@ class IBLProcessor {
                               .dst_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
                               .dst_access = VK_ACCESS_2_TRANSFER_READ_BIT}
                     );
-
-                    TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, state.payload.brdfLutImage.Handle());
-                    TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, state.payload.prefilteredImage.Handle());
-
-                    CopyBufferToImage(
-                        cmd, {.buffer           = state.lutBuf.Handle(),
-                              .image            = state.payload.brdfLutImage.Handle(),
-                              .layout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                              .width            = kLutSize,
-                              .height           = kLutSize,
-                              .buffer_offset    = 0,
-                              .mip_level        = 0,
-                              .base_array_layer = 0}
-                    );
-
-                    byteOffset = 0;
-                    for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
-                        const uint32_t mipSize   = kBaseSize >> mip;
-                        const auto     faceBytes = static_cast<size_t>(mipSize) * mipSize * 4;
-                        const auto     regions   = CreateCopyRegions<6>(
-                            byteOffset, faceBytes, {.width = mipSize, .height = mipSize, .depth = 1}, VK_IMAGE_ASPECT_COLOR_BIT, mip, 0
-                        );
-                        CopyBufferToImage(cmd, state.specBuf.Handle(), state.payload.prefilteredImage.Handle(), regions);
-                        byteOffset += faceBytes * 6;
-                    }
-
                     CopyBuffer(cmd, state.shGpu, state.shCpu, kSHBytes);
 
-                    TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, state.payload.brdfLutImage.Handle());
-                    TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-                        cmd, state.payload.prefilteredImage.Handle()
-                    );
+                    TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, state.payload.brdfLutImage.Handle());
+                    TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, state.payload.prefilteredImage.Handle());
                 });
 
                 auto mappedSH = state.shCpu.Map();
@@ -213,15 +175,15 @@ class IBLProcessor {
                     return std::unexpected(ZHLN::RenderInitError::SubsystemAllocationFailed);
                 }
                 std::memcpy(state.payload.shCoeffs.data(), mappedSH.data, kSHBytes);
-                state.lutBuf  = {};
-                state.specBuf = {};
                 return std::move(state);
             })
             .and_then([&](State state) -> std::expected<State, ZHLN::Error> {
                 return CreateView<VK_FORMAT_R8G8B8A8_UNORM>(impl.ctx.Device(), state.payload.brdfLutImage.Handle())
                     .transform([state = std::move(state)](ImageView lutView) mutable {
                         state.payload.brdfLutView     = std::move(lutView);
-                        state.payload.brdfLutViewInfo = MakeViewCreateInfo2D(state.payload.brdfLutImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
+                        state.payload.brdfLutViewInfo = MakeViewCreateInfo2D(
+                            state.payload.brdfLutImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT
+                        );
                         return std::move(state);
                     });
             })
@@ -229,7 +191,8 @@ class IBLProcessor {
                 return CreateViewCube<VK_FORMAT_R8G8B8A8_UNORM>(impl.ctx.Device(), state.payload.prefilteredImage.Handle(), kMipLevels)
                     .transform([state = std::move(state)](ImageView cubeView) mutable {
                         state.payload.prefilteredView     = std::move(cubeView);
-                        state.payload.prefilteredViewInfo = MakeViewCreateInfoCube(state.payload.prefilteredImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, kMipLevels);
+                        state.payload.prefilteredViewInfo =
+                            MakeViewCreateInfoCube(state.payload.prefilteredImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, kMipLevels);
                         return std::move(state);
                     });
             })
@@ -238,7 +201,6 @@ class IBLProcessor {
 
   private:
     struct BRDFLUTPush {
-        uint64_t outAddr     = 0;
         uint32_t width       = 0;
         uint32_t height      = 0;
         uint32_t sampleCount = 0;
@@ -258,16 +220,6 @@ class IBLProcessor {
         JPH::Vec4 sunDir      = JPH::Vec4::sZero();
     };
     static_assert(sizeof(IBLBakePush) == 96);
-
-    static auto MakeSkyPush(const Components::PostProcessSettingsComponent& sky) noexcept -> IBLBakePush {
-        const JPH::Vec3 sun = JPH::Vec3(0.5f, 1.0f, 0.2f).Normalized();
-        return IBLBakePush {
-            .skyZenith  = sky.skyZenith,
-            .skyHorizon = sky.skyHorizon,
-            .skyGround  = sky.skyGround,
-            .sunDir     = JPH::Vec4(sun, 0.0f),
-        };
-    }
 };
 
 } // namespace ZHLN::Vk

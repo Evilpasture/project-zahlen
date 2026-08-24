@@ -15,10 +15,9 @@ std::expected<void, Error> RenderContext::Impl::BuildProceduralBakePipeline() {
         )) {
         return std::unexpected(RenderInitError::PipelineCreationFailed);
     }
-    // VK_EXT_descriptor_heap: the bake output image is written into a static
-    // heap slot pair right before each dispatch (ExecuteImmediate is
-    // synchronous, so the slot can be reused per bake call).
-    Vk::BuildHeapPassBindings(heapManager, proceduralBakeDescLayout.reflectedSets[0], 0, heapPushDataLayout.heapIndexOffset, 2, bakeHeapBindings);
+    // bakeHeapBindings is allocated once in InitBakeHeapBindings (slot span
+    // covers IBL specular mips too). Re-reflect here so hot-reload still
+    // rebuilds the pipeline against the same mapping table.
 
     const void*           cs_code = nullptr;
     size_t                cs_size = 0;
@@ -88,7 +87,7 @@ std::expected<uint32_t, Error>
             // VK_EXT_descriptor_heap: write the bake output's storage-image
             // descriptor into the static heap slot.
             const auto writeViewInfo = Vk::MakeViewCreateInfo2D(gpuImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
-            Vk::WriteHeapBindings(heapManager, ctx, bakeHeapBindings, 0, Vk::ImageWrite {.view = writeView.Get(), .viewInfo = &writeViewInfo});
+            Vk::WriteHeapBindings(heapManager, ctx, bakeHeapBindings, kBake2DHeapIndex, Vk::ImageWrite {.view = writeView.Get(), .viewInfo = &writeViewInfo});
 
             // Dispatch the Compute Shader via allocation-free ExecuteImmediate
             Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
@@ -105,21 +104,14 @@ std::expected<uint32_t, Error>
                     ctx, cmd, 0,
                     BakePush {.width = width, .height = height, .scale = scale, .randomness = randomness, .distortion = distortion, .bakeType = variantIdx}
                 );
-                Vk::PushHeapIndex(ctx, cmd, bakeHeapBindings.indexPushOffset, 0);
+                Vk::PushHeapIndex(ctx, cmd, bakeHeapBindings.indexPushOffset, kBake2DHeapIndex);
                 proceduralBakePass.DispatchThreads(cmd, width, height, 1);
 
                 // Transition General -> Shader Read Only (Ready for Bindless fragment reads)
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, gpuImage.Handle());
             });
 
-            // Register our generated image into the bindless texture heap region.
-            uint32_t index = nextTextureIndex++;
-            WriteTextureSlotToHeap(index, gpuImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, false);
-
-            textureImages.push_back(std::forward<decltype(gpuImage)>(gpuImage));
-            textureViews.push_back(std::move(writeView));
-
-            return index;
+            return AdoptBindlessTexture(std::forward<decltype(gpuImage)>(gpuImage), std::move(writeView), VK_FORMAT_R8G8B8A8_UNORM);
         });
 }
 

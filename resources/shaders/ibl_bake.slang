@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // GPU IBL precomputation: diffuse SH projection and specular cubemap mips.
-// Entry points write through device addresses so the host can copy the
-// results into the target VkImages without a CPU integration loop.
+// Specular writes a storage image (one 2D-array mip, layer = face). SH still
+// writes nine float4 coefficients through a device address for the host array.
 import sampling;
 
 public struct IBLBakePush {
@@ -22,6 +22,8 @@ public struct IBLBakePush {
 
 [vk::push_constant]
 IBLBakePush pc;
+
+RWTexture2DArray<float4> outCube;
 
 [shader("compute")]
 [numthreads(8, 8, 1)]
@@ -56,8 +58,7 @@ void SpecularMain(uint3 tid: SV_DispatchThreadID) {
             color = acc / totalWeight;
     }
 
-    uint* pixels                     = (uint*) pc.outAddr;
-    pixels[tid.y * pc.width + tid.x] = PackColorU8(color);
+    outCube[uint3(tid.xy, pc.face)] = float4(color, 1.0f);
 }
 
 groupshared float3 gSH[9][64];

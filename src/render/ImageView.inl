@@ -192,9 +192,15 @@ inline auto MakeViewCreateInfoCube(VkImage image, VkFormat format, uint32_t mipL
     };
 }
 
-inline auto
-    MakeViewCreateInfo2DArray(VkImage image, VkFormat format, uint32_t baseLayer, uint32_t layerCount, VkImageAspectFlags aspect, uint32_t mipLevels) noexcept
-    -> VkImageViewCreateInfo {
+inline auto MakeViewCreateInfo2DArray(
+    VkImage            image,
+    VkFormat           format,
+    uint32_t           baseLayer,
+    uint32_t           layerCount,
+    VkImageAspectFlags aspect,
+    uint32_t           mipLevels,
+    uint32_t           baseMip = 0
+) noexcept -> VkImageViewCreateInfo {
     return {
         .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
         .pNext            = nullptr,
@@ -203,7 +209,7 @@ inline auto
         .viewType         = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
         .format           = format,
         .components       = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY},
-        .subresourceRange = {.aspectMask = aspect, .baseMipLevel = 0, .levelCount = mipLevels, .baseArrayLayer = baseLayer, .layerCount = layerCount},
+        .subresourceRange = {.aspectMask = aspect, .baseMipLevel = baseMip, .levelCount = mipLevels, .baseArrayLayer = baseLayer, .layerCount = layerCount},
     };
 }
 } // namespace ZHLN::Vk

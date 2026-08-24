@@ -2,11 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // GPU BRDF split-sum LUT. Same GGX / Schlick-Smith integration as the
-// historical CPU path, writing packed RG8 into a device-address buffer.
+// historical CPU path, writing RG into a storage image.
 import sampling;
 
 public struct BRDFLUTPush {
-    public uint64_t outAddr;
     public uint width;
     public uint height;
     public uint sampleCount;
@@ -14,6 +13,8 @@ public struct BRDFLUTPush {
 
 [vk::push_constant]
 BRDFLUTPush pc;
+
+RWTexture2D<float4> outTexture;
 
 [shader("compute")]
 [numthreads(16, 16, 1)]
@@ -50,6 +51,5 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     A /= float(samples);
     B /= float(samples);
 
-    uint* pixels                 = (uint*) pc.outAddr;
-    pixels[tid.y * pc.width + tid.x] = PackRG8(A, B);
+    outTexture[tid.xy] = float4(saturate(A), saturate(B), 0.0f, 1.0f);
 }
