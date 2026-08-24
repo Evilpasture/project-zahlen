@@ -212,7 +212,7 @@ The descriptor-set DSL (`DescriptorLayout<...>`, descriptor pools, set
 layouts) has been removed: every pass now reflects its binding structure from
 SPIR-V (SPIRV-Reflect in `UnsafeReflectedLayoutBuilder`), bakes it into a
 `VkDescriptorSetAndBindingMappingEXT` table (`HeapBindings.hpp`), and writes
-descriptors into the heaps via `WriteHeapBindings` /
+descriptors into the heaps via `HeapManager::WriteBindings` /
 `vkWriteResourceDescriptorsEXT`. Pass argument order mirrors the shader's
 set-0 declaration order; `SkipWrite` marks trailing sampler slots.
 

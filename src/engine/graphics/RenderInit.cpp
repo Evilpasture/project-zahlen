@@ -1114,10 +1114,9 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
                                 // mirrors cluster_culling.slang's set-0 declaration
                                 // order: in_Bounds, out_Grid, out_IndexList,
                                 // out_Counter, frame, lights.
-                                Vk::WriteHeapBindings(
-                                    heapManager, ctx, clusterCullingHeapBindings, i, clusterBoundsBuffer, frames.clusterGridBuffers[i],
-                                    frames.lightIndexListBuffers[i], frames.globalCounterBuffers[i], frames.frameUniformBuffers[i],
-                                    frames.lightStorageBuffers[i]
+                                heapManager.WriteBindings(
+                                    ctx, clusterCullingHeapBindings, i, clusterBoundsBuffer, frames.clusterGridBuffers[i], frames.lightIndexListBuffers[i],
+                                    frames.globalCounterBuffers[i], frames.frameUniformBuffers[i], frames.lightStorageBuffers[i]
                                 );
                             });
                     };
@@ -1137,7 +1136,7 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
             );
             for (int i = 0; i < 2; ++i) {
                 // Order mirrors cluster_bounds.slang's set-0 declaration order: out_Bounds, frame.
-                Vk::WriteHeapBindings(heapManager, ctx, clusterBoundsHeapBindings, i, clusterBoundsBuffer, frames.frameUniformBuffers[i]);
+                heapManager.WriteBindings(ctx, clusterBoundsHeapBindings, i, clusterBoundsBuffer, frames.frameUniformBuffers[i]);
             }
             return clusterBoundsPass.BuildHeap(ctx.Device(), bDesc, clusterBoundsHeapBindings.GetInfo(), clusterBoundsHeapBindings.indexPushOffset);
         })
@@ -2504,8 +2503,8 @@ std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) 
                     .viewInfo = &graphResources.hizMap.mipViewInfos[m]
                 };
                 if (m == 0) {
-                    Vk::WriteHeapBindings(
-                        heapManager, ctx, hizHeapBindings, m, Vk::Assume<Vk::ComputeRead<Res_Depth>>(presentation.depthTarget), outMip, Vk::SkipWrite {}
+                    heapManager.WriteBindings(
+                        ctx, hizHeapBindings, m, Vk::Assume<Vk::ComputeRead<Res_Depth>>(presentation.depthTarget), outMip, Vk::SkipWrite {}
                     );
                 } else {
                     const Vk::TypedImage<VK_IMAGE_LAYOUT_GENERAL> inMip {
@@ -2516,7 +2515,7 @@ std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) 
                         .format   = VK_FORMAT_R32_SFLOAT,
                         .viewInfo = &graphResources.hizMap.mipViewInfos[m - 1]
                     };
-                    Vk::WriteHeapBindings(heapManager, ctx, hizHeapBindings, m, inMip, outMip, Vk::SkipWrite {});
+                    heapManager.WriteBindings(ctx, hizHeapBindings, m, inMip, outMip, Vk::SkipWrite {});
                 }
             }
 
@@ -2524,10 +2523,9 @@ std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) 
                 const uint32_t pass     = idx >> 1;
                 const uint32_t parity   = idx & 1;
                 const auto&    indirect = (pass == 0) ? frames.indirectCommandsBuffers[parity] : frames.indirectCommandsBuffersPass2[parity];
-                Vk::WriteHeapBindings(
-                    heapManager, ctx, cullingHeapBindings, idx, frames.instanceDataBuffers[parity], indirect,
-                    Vk::Assume<Vk::ComputeRead<Res_HiZ>>(graphResources.hizMap), Vk::SkipWrite {}, frames.secondPassCandidatesBuffers[parity],
-                    frames.secondPassCountBuffers[parity]
+                heapManager.WriteBindings(
+                    ctx, cullingHeapBindings, idx, frames.instanceDataBuffers[parity], indirect, Vk::Assume<Vk::ComputeRead<Res_HiZ>>(graphResources.hizMap),
+                    Vk::SkipWrite {}, frames.secondPassCandidatesBuffers[parity], frames.secondPassCountBuffers[parity]
                 );
             }
 

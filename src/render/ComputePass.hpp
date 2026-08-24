@@ -224,7 +224,7 @@ struct DoubleBufferedComputePass {
 
     template <typename... Args>
     void WriteHeap(const Context& ctx, HeapManager& heap, uint32_t heapIndex, Args&&... args) const noexcept {
-        WriteHeapBindings(heap, ctx, heapBindings, heapIndex, std::forward<Args>(args)...);
+        heap.WriteBindings(ctx, heapBindings, heapIndex, std::forward<Args>(args)...);
     }
 
     void DispatchHeapThreads(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ)

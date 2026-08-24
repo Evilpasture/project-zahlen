@@ -324,11 +324,8 @@ void WriteHeapBinding(HeapManager& heap, const Context& ctx, uint32_t slotPairBa
 
 } // namespace detail
 
-/// Writes the descriptors of every NON-SAMPLER binding for the given index
-/// (frame parity, mip, ...). Argument order must mirror the reflected set's
-/// binding order; sampler positions may pass anything (they are skipped).
 template <typename... Args>
-void WriteHeapBindings(HeapManager& heap, const Context& ctx, const HeapPassBindings& b, uint32_t index, Args&&... args) noexcept {
+void HeapManager::WriteBindings(const Context& ctx, const HeapPassBindings& b, uint32_t index, Args&&... args) noexcept {
     size_t argIdx = 0;
     (
         [&](const auto& arg) {
@@ -336,7 +333,7 @@ void WriteHeapBindings(HeapManager& heap, const Context& ctx, const HeapPassBind
                 return;
             }
             if (!IsHeapSamplerType(b.types[argIdx])) {
-                detail::WriteHeapBinding(heap, ctx, b.slotBase[argIdx], index, b.types[argIdx], arg);
+                detail::WriteHeapBinding(*this, ctx, b.slotBase[argIdx], index, b.types[argIdx], arg);
             }
             argIdx++;
         }(args),
