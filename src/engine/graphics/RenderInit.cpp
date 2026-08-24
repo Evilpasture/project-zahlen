@@ -1058,7 +1058,7 @@ std::expected<void, Error> RenderContext::Impl::InitCullingResources() {
         .and_then([&]() { return cullingPass.BuildHeap(ctx.Device(), cullingShader, cullingHeapBindings.GetInfo(), cullingHeapBindings.indexPushOffset); })
         .and_then([&]() -> std::expected<void, Error> {
             return Vk::Buffer::Create(
-                       allocator.Get(), sizeof(struct ClusterBounds) * numClusters,
+                       allocator.Get(), sizeof(GPUTypes::Cluster::ClusterBounds) * numClusters,
                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                        VMA_MEMORY_USAGE_GPU_ONLY
             )
