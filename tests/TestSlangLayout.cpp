@@ -107,10 +107,15 @@ struct SlangLayoutTestSuite {
             if (!obj) {
                 return std::unexpected(obj.error());
             }
+            auto ui = ReflectAbi<ZHLN::UIObjectConstants>();
+            if (!ui) {
+                return std::unexpected(ui.error());
+            }
             ZHLN::Test::ExpectEq(fog->size, static_cast<uint32_t>(sizeof(ZHLN::VolumetricFogPushConstants)));
             ZHLN::Test::ExpectEq(light->size, static_cast<uint32_t>(sizeof(ZHLN::VolumetricLightInjectPushConstants)));
             ZHLN::Test::ExpectEq(temp->size, static_cast<uint32_t>(sizeof(ZHLN::VolumetricTemporalPushConstants)));
             ZHLN::Test::ExpectEq(obj->size, static_cast<uint32_t>(sizeof(ZHLN::ObjectConstants)));
+            ZHLN::Test::ExpectEq(ui->size, static_cast<uint32_t>(sizeof(ZHLN::UIObjectConstants)));
             return {};
         }
 

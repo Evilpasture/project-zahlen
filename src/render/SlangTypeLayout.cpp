@@ -163,7 +163,46 @@ struct SpvType {
     return out;
 }
 
+uint32_t TypeAlign(const std::unordered_map<uint32_t, SpvType>& types, uint32_t id);
 uint32_t TypeSize(const std::unordered_map<uint32_t, SpvType>& types, uint32_t id);
+
+[[nodiscard]] uint32_t AlignUp(uint32_t value, uint32_t alignment) noexcept {
+    if (alignment <= 1) {
+        return value;
+    }
+    return (value + alignment - 1u) / alignment * alignment;
+}
+
+uint32_t TypeAlign(const std::unordered_map<uint32_t, SpvType>& types, uint32_t id) {
+    const auto it = types.find(id);
+    if (it == types.end()) {
+        return 1;
+    }
+    const auto& t = it->second;
+    switch (t.op) {
+        case kOpTypeInt:
+        case kOpTypeFloat:
+            return std::max(1u, t.width / 8u);
+        case kOpTypeVector:
+            return t.count >= 3 ? 16u : (t.count == 2 ? 8u : TypeAlign(types, t.elem));
+        case kOpTypeMatrix:
+            return 16;
+        case kOpTypeArray:
+        case kOpTypeRuntimeArray:
+            return std::max(16u, TypeAlign(types, t.elem));
+        case kOpTypePointer:
+            return 8;
+        case kOpTypeStruct: {
+            uint32_t alignment = 1;
+            for (uint32_t member: t.members) {
+                alignment = std::max(alignment, TypeAlign(types, member));
+            }
+            return alignment;
+        }
+        default:
+            return 4;
+    }
+}
 
 uint32_t TypeSize(const std::unordered_map<uint32_t, SpvType>& types, uint32_t id) {
     const auto it = types.find(id);
@@ -197,14 +236,14 @@ uint32_t TypeSize(const std::unordered_map<uint32_t, SpvType>& types, uint32_t i
                 const uint32_t off = (i < t.memberOffsets.size()) ? t.memberOffsets[i] : end;
                 end                = std::max(end, off + TypeSize(types, t.members[i]));
             }
-            return end;
+            return AlignUp(end, TypeAlign(types, id));
         }
         default:
             return 0;
     }
 }
 
-[[nodiscard]] auto LayoutFromSpvStruct(const SpvType& t, const std::unordered_map<uint32_t, SpvType>& types) -> SlangTypeLayout {
+[[nodiscard]] auto LayoutFromSpvStruct(uint32_t id, const SpvType& t, const std::unordered_map<uint32_t, SpvType>& types) -> SlangTypeLayout {
     SlangTypeLayout layout;
     layout.fields.reserve(t.members.size());
     uint32_t end = 0;
@@ -217,7 +256,8 @@ uint32_t TypeSize(const std::unordered_map<uint32_t, SpvType>& types, uint32_t i
         }
         end = std::max(end, off + size);
     }
-    layout.size = end;
+    layout.size      = AlignUp(end, TypeAlign(types, id));
+    layout.alignment = TypeAlign(types, id);
     return layout;
 }
 
@@ -355,7 +395,7 @@ uint32_t TypeSize(const std::unordered_map<uint32_t, SpvType>& types, uint32_t i
         if (!decorated) {
             continue;
         }
-        auto layout = LayoutFromSpvStruct(t, types);
+        auto layout = LayoutFromSpvStruct(id, t, types);
         if (!AcceptLayout(layout)) {
             continue;
         }

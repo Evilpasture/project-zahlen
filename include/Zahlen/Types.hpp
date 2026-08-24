@@ -176,6 +176,7 @@ struct [[ = ZHLN::EnableABI{} ]] UIObjectConstants {
     uint32_t   albedoIdx;
     uint32_t   isSDF;
 };
+static_assert(sizeof(UIObjectConstants) == 96);
 
 struct UIBatch {
     TextureHandle texture     = TextureHandle::Invalid;
