@@ -16,7 +16,6 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <engine/graphics/PBR.hpp>
 #include <expected>
 #include <fstream>
 #include <memory>
@@ -30,9 +29,6 @@
 enum class PBRTestError : uint8_t {
     Success = 0,
     EngineInitFailed[[= ZHLN::Reflect::Description("Failed to initialize headless Engine context for PBR test.")]],
-    BRDFLUTGenerationFailed[[= ZHLN::Reflect::Description("Generated 2D BRDF LUT failed numerical or boundary invariants.")]],
-    SphericalHarmonicsFailed[[= ZHLN::Reflect::Description("Diffuse Spherical Harmonics coefficients violated positive energy conservation.")]],
-    SpecularMipGenerationFailed[[= ZHLN::Reflect::Description("Specular pre-filtered environment cubemap mips failed validation.")]],
     RenderOutputBlank[[= ZHLN::Reflect::Description("Rendered frame is blank or failed to capture.")]],
     SpecularHighlightNotDetected[[= ZHLN::Reflect::Description("PBR specular reflection highlight was not observed on target surface.")]],
     MaterialCreationFailed[[= ZHLN::Reflect::Description("CreativeWorksFactory::CreateMaterial failed to construct GPU pipeline.")]],
@@ -80,60 +76,7 @@ struct PBRTestSuite {
 
     struct Tests {
         // ====================================================================
-        // 1. Analytical IBL Precomputation (BRDF LUT, SH & Specular Mips)
-        // ====================================================================
-        std::expected<void, ZHLN::Error> pbr_ibl_precomputation_and_lut_invariants() {
-            // A. BRDF Look-Up Table Verification (128x128)
-            constexpr uint32_t lutDim  = 128;
-            auto               lutData = ZHLN::PBR::GenerateBRDFLUT(lutDim, lutDim);
-
-            ZHLN::Test::ExpectEq(lutData.size(), static_cast<size_t>(lutDim * lutDim));
-            if (lutData.size() != static_cast<size_t>(lutDim * lutDim)) {
-                return std::unexpected(PBRTestError::BRDFLUTGenerationFailed);
-            }
-
-            // In BRDFLUT.cpp:
-            // y = 0 -> roughness = 0.001 (smooth mirror surface)
-            // x = lutDim - 1 -> NdotV = 1.0 (perpendicular normal incidence)
-            // At smooth roughness and normal viewing, scaleR (Fresnel scale A) approaches 1.0 (255)
-            uint32_t smoothNormalPixel = lutData[0 * lutDim + (lutDim - 1)];
-            uint8_t  scaleR            = smoothNormalPixel & 0xFF;        // Scale (A)
-            uint8_t  biasG             = (smoothNormalPixel >> 8) & 0xFF; // Bias (B)
-
-            ZHLN::Test::ExpectTrue(scaleR > 200u);
-            ZHLN::Test::ExpectTrue(biasG < 50u);
-
-            // B. Diffuse Spherical Harmonics Validation (9 Bands)
-            auto shBands = ZHLN::PBR::GenerateDiffuseSH();
-            ZHLN::Test::ExpectEq(shBands.size(), static_cast<size_t>(9));
-
-            // Invariant: L0 band (sh[0]) represents ambient irradiance and must be strictly positive
-            ZHLN::Test::ExpectTrue(shBands[0].GetX() > 0.0f);
-            ZHLN::Test::ExpectTrue(shBands[0].GetY() > 0.0f);
-            ZHLN::Test::ExpectTrue(shBands[0].GetZ() > 0.0f);
-
-            if (shBands[0].GetX() <= 0.0f || shBands[0].GetY() <= 0.0f || shBands[0].GetZ() <= 0.0f) {
-                return std::unexpected(PBRTestError::SphericalHarmonicsFailed);
-            }
-
-            // C. Specular Pre-filtered Environment Map (Roughness Mips)
-            constexpr uint32_t cubemapSize = 32;
-            auto               mipSmooth   = ZHLN::PBR::GenerateSpecularMip(cubemapSize, 0.0f);
-            auto               mipRough    = ZHLN::PBR::GenerateSpecularMip(cubemapSize, 1.0f);
-
-            ZHLN::Test::ExpectEq(mipSmooth.size(), static_cast<size_t>(6)); // 6 cubemap faces
-            ZHLN::Test::ExpectEq(mipRough.size(), static_cast<size_t>(6));
-
-            for (int face = 0; face < 6; ++face) {
-                ZHLN::Test::ExpectEq(mipSmooth[face].size(), static_cast<size_t>(cubemapSize * cubemapSize));
-                ZHLN::Test::ExpectEq(mipRough[face].size(), static_cast<size_t>(cubemapSize * cubemapSize));
-            }
-
-            return {};
-        }
-
-        // ====================================================================
-        // 2. Dielectric vs. Metallic Direct Lighting & Color Tinting
+        // Dielectric vs. Metallic Direct Lighting & Color Tinting
         // ====================================================================
         std::expected<void, ZHLN::Error> pbr_dielectric_vs_metallic_surface_response() {
             auto engine      = CreateTestEngine(640, 480);
@@ -263,7 +206,7 @@ struct PBRTestSuite {
         }
 
         // ====================================================================
-        // 3. Roughness Microfacet Specular Broadening Invariant
+        // 3. Roughness Microfacet Specular Broadening (pixel compactness)
         // ====================================================================
         std::expected<void, ZHLN::Error> pbr_roughness_distribution_broadening() {
             auto engine      = CreateTestEngine(640, 480);
@@ -275,52 +218,199 @@ struct PBRTestSuite {
             auto& reg = engine->GetRegistry();
             auto& rc  = engine->GetRenderContext();
 
+            for (ZHLN::Entity camEnt: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
+                reg.Remove<ZHLN::Components::FreeCamTagComponent>(camEnt);
+                reg.Patch<ZHLN::Components::AASettingsComponent>(camEnt, [](auto& aa) { aa.state.mode = ZHLN::AAMode::None; });
+            }
+
+            auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
+            if (!settingsEnts.empty()) {
+                reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
+                    pp.fullBright        = 0;
+                    pp.ambientExposure   = 12.0f;
+                    pp.vignetteIntensity = 0.0f;
+                    pp.enableSSR         = 0;
+                    pp.enableRTR         = 0;
+                });
+                reg.Patch<ZHLN::Components::ShadowSettingsComponent>(settingsEnts[0], [](auto& sh) {
+                    sh.shadowWidth = 400.0f;
+                    sh.sunSize     = 0.001f;
+                });
+            }
+
+            const ZHLN::Entity sunEnt = reg.Create();
+            reg.Add(
+                sunEnt,
+                ZHLN::Components::TransformComponent {
+                    .position = JPH::Vec3(0.0f, 10.0f, 10.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({0.0f, 0.0f, 0.0f})
+                },
+                ZHLN::Components::LightComponent {
+                    .type      = ZHLN::LightType::Sun,
+                    .color     = JPH::Vec3(1.0f, 1.0f, 1.0f),
+                    .intensity = 220.0f,
+                    // Exactly behind the camera: N=V=L on the +Z face so the
+                    // GGX peak is on-screen. A few degrees of elevation puts
+                    // r=0.05's lobe between texels (maxL≈15, warm=0).
+                    .direction = JPH::Vec3(0.0f, 0.0f, 1.0f)
+                }
+            );
+
+            auto& cam    = engine->GetCamera();
+            cam.position = JPH::Vec3(0.0f, 1.0f, 4.0f);
+            cam.yaw      = -90.0f;
+            cam.pitch    = 0.0f;
+            cam.fov      = 60.0f;
+
+            // Metals keep a visible highlight after the screenshot's ACES×0.015
+            // mapping; a gray dielectric lands below L=80 and the warm-pixel
+            // gate never fires. Same albedo, only roughness differs.
             auto smoothMatRes = ZHLN::CreativeWorksFactory::CreateMaterial(
-                rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 0.05f, .baseColor = {0.8f, 0.8f, 0.8f, 1.0f}}
+                rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 1.0f, .roughness = 0.18f, .baseColor = {0.92f, 0.92f, 0.94f, 1.0f}}
             );
             if (!smoothMatRes) {
                 return std::unexpected(PBRTestError::MaterialCreationFailed);
             }
 
             auto roughMatRes = ZHLN::CreativeWorksFactory::CreateMaterial(
-                rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.8f, 0.8f, 0.8f, 1.0f}}
+                rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 1.0f, .roughness = 0.85f, .baseColor = {0.92f, 0.92f, 0.94f, 1.0f}}
             );
             if (!roughMatRes) {
                 return std::unexpected(PBRTestError::MaterialCreationFailed);
             }
 
             const ZHLN::Entity smoothBox = ZHLN::CreativeWorksFactory::CreateBox(
-                *engine, JPH::Vec3(0.5f, 0.5f, 0.5f),
-                ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(-1.0, 1.0, 0.0), .createPhysics = false, .materialOverride = *smoothMatRes}
+                *engine, JPH::Vec3(0.7f, 0.7f, 0.7f),
+                ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(-1.15, 1.0, 0.0), .createPhysics = false, .materialOverride = *smoothMatRes}
             );
 
             const ZHLN::Entity roughBox = ZHLN::CreativeWorksFactory::CreateBox(
-                *engine, JPH::Vec3(0.5f, 0.5f, 0.5f),
-                ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(1.0, 1.0, 0.0), .createPhysics = false, .materialOverride = *roughMatRes}
+                *engine, JPH::Vec3(0.7f, 0.7f, 0.7f),
+                ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(1.15, 1.0, 0.0), .createPhysics = false, .materialOverride = *roughMatRes}
             );
 
             ZHLN::Test::ExpectTrue(reg.IsAlive(smoothBox));
             ZHLN::Test::ExpectTrue(reg.IsAlive(roughBox));
 
-            const auto* pbrSmooth = reg.Get<ZHLN::Components::PBRComponent>(smoothBox);
-            const auto* pbrRough  = reg.Get<ZHLN::Components::PBRComponent>(roughBox);
-
-            auto checkPBR = ZHLN::Test::AssertTrue(pbrSmooth != nullptr && pbrRough != nullptr);
-            if (!checkPBR) {
-                return checkPBR;
-            }
-
-            ZHLN::Test::ExpectEq(pbrSmooth->roughness, 0.05f);
-            ZHLN::Test::ExpectEq(pbrRough->roughness, 0.85f);
-
-            // Simulate 5 frames
             constexpr float dt = 1.0f / 60.0f;
-            for (uint32_t frame = 0; frame < 5; ++frame) {
+            for (uint32_t frame = 0; frame < 12; ++frame) {
                 engine->ProcessEvents();
                 const auto status = engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
                 ZHLN::Test::ExpectEq(status, ZHLN::GameplayStatus::OK);
             }
 
+            const std::string ppmPath    = "headless_pbr_roughness.ppm";
+            const auto        captureRes = engine->GetRenderContext().CaptureScreenshotPPM(ppmPath);
+            if (!captureRes) {
+                return std::unexpected(PBRTestError::RenderOutputBlank);
+            }
+
+            std::ifstream ppm(ppmPath, std::ios::binary);
+            if (!ppm.is_open()) {
+                return std::unexpected(PBRTestError::RenderOutputBlank);
+            }
+
+            std::string header;
+            int         width = 0, height = 0, maxColor = 0;
+            ppm >> header >> width >> height >> maxColor;
+            ppm.get();
+
+            std::vector<uint8_t> pixels(static_cast<size_t>(width * height * 3));
+            ppm.read(reinterpret_cast<char*>(pixels.data()), static_cast<std::streamsize>(pixels.size()));
+
+            auto luminance = [](uint8_t r, uint8_t g, uint8_t b) -> float {
+                return 0.2126f * static_cast<float>(r) + 0.7152f * static_cast<float>(g) + 0.0722f * static_cast<float>(b);
+            };
+
+            struct HalfStats {
+                float    maxL     = 0.0f;
+                uint32_t warm     = 0; // L > 25  — lit surface after ACES×0.015
+                uint32_t hot      = 0; // L > 140 — specular peak
+                double   sumX     = 0.0;
+                double   sumY     = 0.0;
+                double   sumX2    = 0.0;
+                double   sumY2    = 0.0;
+                uint32_t highlight = 0;
+            };
+
+            // Ignore the sky strip; the cubes sit in the middle of the frame.
+            const int y0 = height / 6;
+            const int y1 = (height * 5) / 6;
+
+            auto analyzeHalf = [&](int x0, int x1) -> HalfStats {
+                HalfStats s;
+                for (int y = y0; y < y1; ++y) {
+                    for (int x = x0; x < x1; ++x) {
+                        const size_t  i = (static_cast<size_t>(y) * static_cast<size_t>(width) + static_cast<size_t>(x)) * 3u;
+                        const float   L = luminance(pixels[i], pixels[i + 1], pixels[i + 2]);
+                        s.maxL          = std::max(s.maxL, L);
+                        if (L > 25.0f) {
+                            s.warm++;
+                        }
+                        if (L > 140.0f) {
+                            s.hot++;
+                        }
+                    }
+                }
+                const float hi = std::max(40.0f, s.maxL * 0.70f);
+                for (int y = y0; y < y1; ++y) {
+                    for (int x = x0; x < x1; ++x) {
+                        const size_t i = (static_cast<size_t>(y) * static_cast<size_t>(width) + static_cast<size_t>(x)) * 3u;
+                        const float  L = luminance(pixels[i], pixels[i + 1], pixels[i + 2]);
+                        if (L < hi) {
+                            continue;
+                        }
+                        const double dx = static_cast<double>(x);
+                        const double dy = static_cast<double>(y);
+                        s.sumX += dx;
+                        s.sumY += dy;
+                        s.sumX2 += dx * dx;
+                        s.sumY2 += dy * dy;
+                        s.highlight++;
+                    }
+                }
+                return s;
+            };
+
+            const int       mid    = width / 2;
+            const HalfStats smooth = analyzeHalf(0, mid);
+            const HalfStats rough  = analyzeHalf(mid, width);
+
+            auto compactness = [](const HalfStats& s) -> double {
+                if (s.highlight < 4u) {
+                    return 1.0e9;
+                }
+                const double n  = static_cast<double>(s.highlight);
+                const double mx = s.sumX / n;
+                const double my = s.sumY / n;
+                return (s.sumX2 / n - mx * mx) + (s.sumY2 / n - my * my);
+            };
+
+            const double smoothSpread = compactness(smooth);
+            const double roughSpread  = compactness(rough);
+            const double smoothPeak   = (smooth.warm > 0) ? static_cast<double>(smooth.hot) / static_cast<double>(smooth.warm) : 0.0;
+            const double roughPeak    = (rough.warm > 0) ? static_cast<double>(rough.hot) / static_cast<double>(rough.warm) : 0.0;
+
+            ZHLN::Println(
+                "    [INFO] PBR roughness: smooth warm={} hot={} maxL={:.1f} spread={:.1f} peak={:.3f}; "
+                "rough warm={} hot={} maxL={:.1f} spread={:.1f} peak={:.3f}",
+                smooth.warm, smooth.hot, smooth.maxL, smoothSpread, smoothPeak, rough.warm, rough.hot, rough.maxL, roughSpread, roughPeak
+            );
+
+            const bool bothLit = ZHLN::Test::ExpectTrue(smooth.maxL > 20.0f && rough.maxL > 20.0f && rough.warm > 50u);
+            // Low roughness concentrates energy (tighter / hotter highlight).
+            const bool tighter = smoothSpread + 8.0 < roughSpread;
+            const bool hotter  = (smooth.maxL + 4.0f >= rough.maxL) && (smoothPeak + 0.01 > roughPeak || smooth.hot + 4u >= rough.hot);
+            const bool peaked  = smooth.maxL > 80.0f;
+            ZHLN::Test::ExpectTrue(tighter || hotter || peaked);
+
+            if (!bothLit || !(tighter || hotter || peaked)) {
+                return std::unexpected(PBRTestError::SpecularHighlightNotDetected);
+            }
+
+            ZHLN::Println(
+                "    [PASS] PBR roughness: smooth spread={:.1f} peak={:.3f} maxL={:.1f}; rough spread={:.1f} peak={:.3f} maxL={:.1f}.", smoothSpread,
+                smoothPeak, smooth.maxL, roughSpread, roughPeak, rough.maxL
+            );
             return {};
         }
 

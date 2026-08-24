@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "RenderCore.hpp"
+#include "RenderCore.h"
 #include "Zahlen/Core/Reflection.hpp"
 #include <Zahlen/render/RenderCode.hpp>
 #include <cstdlib>
@@ -9,6 +10,10 @@ namespace ZHLN::Vk {
 
 std::expected<VkResult, VulkanCallError> WaitIdle(VkDevice device) noexcept {
     auto res = vkDeviceWaitIdle(device);
+    if (res == VK_ERROR_DEVICE_LOST) {
+        ZHLN_NotifyDeviceLost();
+        return std::unexpected(VulkanCallError::VulkanCallFailed);
+    }
     if (res != VK_SUCCESS) {
         return std::unexpected(VulkanCallError::VulkanCallFailed);
     }
@@ -17,6 +22,10 @@ std::expected<VkResult, VulkanCallError> WaitIdle(VkDevice device) noexcept {
 
 std::expected<VkResult, VulkanCallError> WaitIdle(VkQueue queue) noexcept {
     auto res = vkQueueWaitIdle(queue);
+    if (res == VK_ERROR_DEVICE_LOST) {
+        ZHLN_NotifyDeviceLost();
+        return std::unexpected(VulkanCallError::VulkanCallFailed);
+    }
     if (res != VK_SUCCESS) {
         return std::unexpected(VulkanCallError::VulkanCallFailed);
     }

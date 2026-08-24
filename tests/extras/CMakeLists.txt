@@ -22,9 +22,9 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_extras
 )
 
+# Public headers only. src/ is banned — see tools/check_tests_public_api.py.
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
-    ${PROJECT_SOURCE_DIR}/src
     ${PROJECT_SOURCE_DIR}/tests
     ${PROJECT_SOURCE_DIR}/extern/cgltf
 )
@@ -64,9 +64,9 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_extras
 )
 
+# Public headers only. src/ is banned — see tools/check_tests_public_api.py.
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
-    ${PROJECT_SOURCE_DIR}/src
     ${PROJECT_SOURCE_DIR}/tests
     ${PROJECT_SOURCE_DIR}/extras
 )

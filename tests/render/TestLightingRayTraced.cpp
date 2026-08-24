@@ -5,9 +5,7 @@
 //
 // Verification for the lighting + raytracing pipeline:
 //
-//   1. CPU: the sun-light resolution logic (which sun wins, direction
-//      normalisation, SunTag fallback) -- the input to every lighting pass.
-//   2. Flicker: a fully static, fully lit scene must produce temporally
+//   1. Flicker: a fully static, fully lit scene must produce temporally
 //      stable frames. A light popping in/out of a cluster, a reflection
 //      cache missing for one frame or a TLAS rebuild hitch shows up here.
 //   3. Accidental light culling: a single point light glides across the
@@ -58,7 +56,6 @@
 //     to convert captures from a previous run without re-running the suite.
 
 #include "TestsFramework.hpp"
-#include "engine/system/LightingSystem.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
@@ -99,7 +96,6 @@
 enum class LightingRTTestError : uint8_t {
     Success = 0,
     EngineInitFailed[[= ZHLN::Reflect::Description("Failed to initialize headless Engine context for the lighting/raytracing test.")]],
-    SunResolutionFailed[[= ZHLN::Reflect::Description("LightingSystem::GetSunDirectionAndIntensity resolved the wrong sun or a non-normalized direction.")]],
     RenderOutputBlank[[= ZHLN::Reflect::Description("Rendered frame is blank or could not be captured.")]],
     TemporalFlickerDetected[[= ZHLN::Reflect::Description("A static fully-lit scene changed more frame-to-frame than the engine's own noise floor.")]],
     LightCullingPopDetected[[= ZHLN::Reflect::Description(
@@ -636,91 +632,6 @@ struct LightingRTTestSuite {
     struct Tests {
         // ====================================================================
         // 1. CPU: Sun-light resolution & normalisation
-        // ====================================================================
-        //
-        // This is the exact code path every lighting variant consumes, so a
-        // regression here (wrong sun picked when several exist, direction not
-        // normalized, SunTag fallback broken) silently changes every frame.
-        std::expected<void, ZHLN::Error> lighting_sun_resolution_and_normalization() {
-            ZHLN::ECS::Registry reg;
-            reg.RegisterComponents<
-                ZHLN::Components::LightComponent, ZHLN::Components::SunTagComponent, ZHLN::Components::TransformComponent,
-                ZHLN::Components::WorldTransformComponent>();
-
-            // --- a) Explicit direction: must be normalised and preserved ---
-            const ZHLN::Entity sunA = reg.Create();
-            reg.Add(
-                sunA, ZHLN::Components::LightComponent {
-                          .type      = ZHLN::LightType::Sun,
-                          .color     = JPH::Vec3(1.0f, 1.0f, 1.0f),
-                          .intensity = 111.0f,
-                          .direction = JPH::Vec3(0.0f, 3.0f, 4.0f)
-                      }
-            );
-
-            // --- b) A second sun must NOT silently override the first one ---
-            const ZHLN::Entity sunB = reg.Create();
-            reg.Add(
-                sunB, ZHLN::Components::LightComponent {
-                          .type      = ZHLN::LightType::Sun,
-                          .color     = JPH::Vec3(1.0f, 0.5f, 0.5f),
-                          .intensity = 222.0f,
-                          .direction = JPH::Vec3(0.0f, -1.0f, 1.0f)
-                      }
-            );
-
-            const auto [dir, intensity] = ZHLN::LightingSystem::GetSunDirectionAndIntensity(reg);
-
-            ZHLN::Test::ExpectTrue(std::abs(dir.GetX() - 0.0f) < 1e-5f);
-            ZHLN::Test::ExpectTrue(std::abs(dir.GetY() - 0.6f) < 1e-5f);
-            ZHLN::Test::ExpectTrue(std::abs(dir.GetZ() - 0.8f) < 1e-5f);
-            ZHLN::Test::ExpectTrue(std::abs(dir.Length() - 1.0f) < 1e-5f);
-            ZHLN::Test::ExpectEq(intensity, 111.0f);
-            if (std::abs(dir.GetY() - 0.6f) > 1e-5f || std::abs(dir.Length() - 1.0f) > 1e-5f || intensity != 111.0f) {
-                return std::unexpected(LightingRTTestError::SunResolutionFailed);
-            }
-
-            // --- c) SunTag fallback: no LightType::Sun -> transform Z axis ---
-            ZHLN::ECS::Registry fallbackReg;
-            fallbackReg.RegisterComponents<
-                ZHLN::Components::LightComponent, ZHLN::Components::SunTagComponent, ZHLN::Components::TransformComponent,
-                ZHLN::Components::WorldTransformComponent>();
-
-            const ZHLN::Entity tagged = fallbackReg.Create();
-            const JPH::Quat   yaw30   = JPH::Quat::sRotation(JPH::Vec3::sAxisY(), JPH::DegreesToRadians(30.0f));
-            fallbackReg.Add(
-                tagged,
-                ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 10.0f, 0.0f), .rotation = yaw30},
-                ZHLN::Components::LightComponent {
-                    .type      = ZHLN::LightType::Point,
-                    .color     = JPH::Vec3(1.0f, 1.0f, 1.0f),
-                    .intensity = 77.0f,
-                    .direction = JPH::Vec3::sZero()
-                },
-                ZHLN::Components::SunTagComponent {}
-            );
-
-            const auto [fallbackDir, fallbackIntensity] = ZHLN::LightingSystem::GetSunDirectionAndIntensity(fallbackReg);
-
-            // Yaw 30deg about Y: local Z axis (world transform column 2) = (sin30, 0, cos30).
-            ZHLN::Test::ExpectTrue(std::abs(fallbackDir.GetX() - 0.5f) < 1e-4f);
-            ZHLN::Test::ExpectTrue(std::abs(fallbackDir.GetZ() - 0.8660254f) < 1e-4f);
-            ZHLN::Test::ExpectTrue(std::abs(fallbackDir.Length() - 1.0f) < 1e-5f);
-            ZHLN::Test::ExpectEq(fallbackIntensity, 77.0f);
-            if (std::abs(fallbackDir.GetX() - 0.5f) > 1e-4f || std::abs(fallbackDir.Length() - 1.0f) > 1e-5f || fallbackIntensity != 77.0f) {
-                return std::unexpected(LightingRTTestError::SunResolutionFailed);
-            }
-
-            ZHLN::Println(
-                "    [PASS] Sun resolution: explicit dir normalized {:.4f}/{:.4f}/{:.4f}, first-sun wins, SunTag fallback ok.", dir.GetX(),
-                dir.GetY(), dir.GetZ()
-            );
-            return {};
-        }
-
-        // ====================================================================
-        // 2. GPU: static scene must not flicker
-        // ====================================================================
         std::expected<void, ZHLN::Error> lit_scene_static_frame_stability() {
             auto engine      = CreateTestEngine(640, 480);
             auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
