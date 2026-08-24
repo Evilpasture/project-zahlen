@@ -840,7 +840,7 @@ struct RenderContext::Impl {
     [[nodiscard]] auto AdoptBindlessTexture(Vk::Image&& image, Vk::ImageView&& view, VkFormat format, uint32_t mipLevels = 1, bool cube = false)
         -> uint32_t;
     template <typename PushT>
-    [[nodiscard]] auto BakeComputeTexture2D(const ZHLN_ShaderDesc& shader, uint32_t width, uint32_t height, VkFormat format, const PushT& push)
+    [[nodiscard]] auto BakeComputeTexture2D(const Vk::ComputePass& pass, uint32_t width, uint32_t height, VkFormat format, const PushT& push)
         -> std::expected<uint32_t, Error>;
 
     Vk::SlangReflectedLayout cullingLayout; // Reflection only: drives the heap binding table
@@ -1153,17 +1153,28 @@ struct RenderContext::Impl {
 
 template <typename PushT>
 auto RenderContext::Impl::BakeComputeTexture2D(
-    const ZHLN_ShaderDesc& shader, uint32_t width, uint32_t height, VkFormat format, const PushT& push
+    const Vk::ComputePass& pass, uint32_t width, uint32_t height, VkFormat format, const PushT& push
 ) -> std::expected<uint32_t, Error> {
     static_assert(Vk::GpuTriviallyCopyable<PushT>);
-    return Vk::CreateHeapComputePass(ctx.Device(), shader, bakeHeapBindings.GetInfo(), bakeHeapBindings.indexPushOffset)
-        .and_then([&](Vk::ComputePass pass) -> std::expected<uint32_t, Error> {
-            return Vk::DispatchComputeToTexture2D(
-                       ctx, allocator, graphicsCmdRing, heapManager, bakeHeapBindings, kBake2DHeapIndex, pass, width, height, format, push
-            )
-                .transform([&](Vk::BakedImageResult baked) {
-                    return AdoptBindlessTexture(std::move(baked.image), std::move(baked.view), format);
-                });
+    return Vk::ImageBuilder {}
+        .Texture2D(width, height, format, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 1)
+        .Build(allocator.Get())
+        .and_then([&](Vk::Image image) -> std::expected<uint32_t, VkResult> {
+            auto viewRes = Vk::CreateView(ctx.Device(), image.Handle(), format, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+            if (!viewRes) {
+                return std::unexpected(viewRes.error());
+            }
+            Vk::ImageView               view      = std::move(*viewRes);
+            const VkImageViewCreateInfo writeInfo = Vk::MakeViewCreateInfo2D(image.Handle(), format, 1, VK_IMAGE_ASPECT_COLOR_BIT);
+            Vk::WriteHeapBindings(heapManager, ctx, bakeHeapBindings, kBake2DHeapIndex, Vk::ImageWrite {.view = view.Get(), .viewInfo = &writeInfo});
+
+            Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
+                heapManager.BindHeaps(cmd);
+                Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, image.Handle());
+                pass.DispatchHeapIndexedThreads(ctx, cmd, kBake2DHeapIndex, width, height, 1, push);
+                Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
+            });
+            return AdoptBindlessTexture(std::move(image), std::move(view), format);
         });
 }
 

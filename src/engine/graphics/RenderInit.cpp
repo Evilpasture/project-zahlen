@@ -1925,14 +1925,17 @@ std::expected<void, Error> RenderContext::Impl::InitPostProcessing() {
                 uint32_t mode   = 0;
             };
             const ZHLN_ShaderDesc shader = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::SMAALUTComp).vertex, "CSMain");
-            return BakeComputeTexture2D(shader, 160, 560, VK_FORMAT_R8G8B8A8_UNORM, SMAALUTPush {.width = 160, .height = 560, .mode = 0})
-                .and_then([&](uint32_t areaIdx) {
-                    smaaAreaTexIdx = areaIdx;
-                    return BakeComputeTexture2D(shader, 64, 16, VK_FORMAT_R8G8B8A8_UNORM, SMAALUTPush {.width = 64, .height = 16, .mode = 1});
-                })
-                .transform([&](uint32_t searchIdx) {
-                    smaaSearchTexIdx = searchIdx;
-                    ZHLN::Log("[SMAA] Area and search LUTs baked on GPU.");
+            return Vk::CreateHeapComputePass(ctx.Device(), shader, bakeHeapBindings.GetInfo(), bakeHeapBindings.indexPushOffset)
+                .and_then([&](Vk::ComputePass pass) -> std::expected<void, Error> {
+                    return BakeComputeTexture2D(pass, 160, 560, VK_FORMAT_R8G8B8A8_UNORM, SMAALUTPush {.width = 160, .height = 560, .mode = 0})
+                        .and_then([&](uint32_t areaIdx) {
+                            smaaAreaTexIdx = areaIdx;
+                            return BakeComputeTexture2D(pass, 64, 16, VK_FORMAT_R8G8B8A8_UNORM, SMAALUTPush {.width = 64, .height = 16, .mode = 1});
+                        })
+                        .transform([&](uint32_t searchIdx) {
+                            smaaSearchTexIdx = searchIdx;
+                            ZHLN::Log("[SMAA] Area and search LUTs baked on GPU.");
+                        });
                 });
         })
         .and_then([&]() -> std::expected<void, Error> {

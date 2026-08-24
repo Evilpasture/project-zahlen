@@ -12,6 +12,9 @@ namespace ZHLN::Vk {
 
 [[nodiscard]] constexpr auto GetFormatAspect(VkFormat format) noexcept -> VkImageAspectFlags;
 
+[[nodiscard]] auto CreateView(VkDevice device, VkImage image, VkFormat format, VkImageAspectFlags aspect, uint32_t mips = 1)
+    -> std::expected<ImageView, VkResult>;
+
 template <VkFormat F>
 [[nodiscard]] auto CreateView(VkDevice device, VkImage image, VkImageAspectFlags aspect = GetFormatAspect(F), uint32_t mips = 1)
     -> std::expected<ImageView, VkResult>;

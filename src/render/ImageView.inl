@@ -37,11 +37,10 @@ constexpr auto GetFormatAspect(VkFormat format) noexcept -> VkImageAspectFlags {
     return VK_IMAGE_ASPECT_NONE;
 }
 
-template <VkFormat F>
-inline auto CreateView(VkDevice device, VkImage image, VkImageAspectFlags aspect, uint32_t mips) -> std::expected<ImageView, VkResult> {
+inline auto CreateView(VkDevice device, VkImage image, VkFormat format, VkImageAspectFlags aspect, uint32_t mips) -> std::expected<ImageView, VkResult> {
     ZHLN_ImageViewDesc desc = {
         .image            = image,
-        .format           = F,
+        .format           = format,
         .aspect           = aspect,
         .mip_levels       = mips,
         .array_layers     = 1,
@@ -55,6 +54,11 @@ inline auto CreateView(VkDevice device, VkImage image, VkImageAspectFlags aspect
         return std::unexpected(res);
     }
     return ImageView {device, view};
+}
+
+template <VkFormat F>
+inline auto CreateView(VkDevice device, VkImage image, VkImageAspectFlags aspect, uint32_t mips) -> std::expected<ImageView, VkResult> {
+    return CreateView(device, image, F, aspect, mips);
 }
 
 template <VkFormat F>
