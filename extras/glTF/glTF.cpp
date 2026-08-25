@@ -705,8 +705,8 @@ void UpdateOrbit(InspectorState& state, ZHLN::Engine& engine) {
         return;
     }
 
-    // The scene explorer panel owns input inside its screen region.
-    const bool overExplorer = (input->mouseX >= 0.0f) && (input->mouseX <= kExplorerWidth);
+    // The scene explorer panel owns input inside its screen region (once shown).
+    const bool overExplorer = state.loaded && (input->mouseX >= 0.0f) && (input->mouseX <= kExplorerWidth);
     if (overExplorer) {
         return;
     }
@@ -787,8 +787,10 @@ void RenderFrame(ZHLN::Engine& engine) {
     UpdateOrbit(*state, engine);
 
     ZHLN::GUI::Context ui(engine.GetRegistry(), engine.GetCurrentFrame());
-    DrawSceneExplorer(ui, *state, engine);
-    if (!state->loaded) {
+    // The scene explorer stays hidden until a glTF is actually loaded.
+    if (state->loaded) {
+        DrawSceneExplorer(ui, *state, engine);
+    } else {
         DrawDropPrompt(ui);
     }
     ui.SweepStaleChildren(ZHLN::NullEntity);
