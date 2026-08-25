@@ -423,7 +423,7 @@ auto RenderContext::RegisterTexture(std::string_view name, uint32_t bindlessInde
 }
 
 namespace {
-constexpr uint32_t kVolumetricNoiseSize = 32;
+constexpr uint32_t kVolumetricNoiseSize = 64;
 
 using Noise3 = std::array<float, 3>;
 
@@ -447,6 +447,10 @@ using Noise3 = std::array<float, 3>;
     return {a[0] * s, a[1] * s, a[2] * s};
 }
 
+[[nodiscard]] Noise3 MulAdd(Noise3 a, float s, Noise3 b) {
+    return {a[0] * s + b[0], a[1] * s + b[1], a[2] * s + b[2]};
+}
+
 [[nodiscard]] Noise3 Wrap(Noise3 p, Noise3 period) {
     for (uint32_t i = 0; i < 3; ++i) {
         p[i] = std::fmod(std::fmod(p[i], period[i]) + period[i], period[i]);
@@ -459,9 +463,12 @@ using Noise3 = std::array<float, 3>;
 }
 
 [[nodiscard]] float TileableHash3(Noise3 p, const Noise3& period) {
-    p = Fract(Wrap(p, period));
+    // Match the HLSL hash: p = frac(p * 0.1031); wrap must happen on the
+    // integer lattice point BEFORE the multiply so adjacent tile edges map to
+    // the same fractional hash cell.
+    p = Fract(Mul(Wrap(p, period), 0.1031F));
     const Noise3 shifted {p[1] + 33.33F, p[2] + 33.33F, p[0] + 33.33F};
-    p = Add(p, shifted);
+    p = MulAdd(p, 1.0F, shifted);
     return Fract((p[0] + p[1]) * p[2]);
 }
 
@@ -471,7 +478,6 @@ using Noise3 = std::array<float, 3>;
     const Noise3 u  = {fp[0] * fp[0] * (3.0F - 2.0F * fp[0]), fp[1] * fp[1] * (3.0F - 2.0F * fp[1]), fp[2] * fp[2] * (3.0F - 2.0F * fp[2])};
 
     const auto at = [&](float ox, float oy, float oz) { return TileableHash3(Add(ip, {ox, oy, oz}), period); };
-
     const float n000 = at(0, 0, 0);
     const float n100 = at(1, 0, 0);
     const float n010 = at(0, 1, 0);
@@ -489,17 +495,23 @@ using Noise3 = std::array<float, 3>;
 }
 
 [[nodiscard]] float TileableFbm3(Noise3 p) {
-    const Noise3 period {static_cast<float>(kVolumetricNoiseSize), static_cast<float>(kVolumetricNoiseSize), static_cast<float>(kVolumetricNoiseSize)};
-    float       value = 0.0F;
-    float       amp   = 0.5F;
-    float       norm  = 0.0F;
+    // Each octave doubles frequency; its tile period halves accordingly and
+    // must still divide the 64-cell texture so the composite is seamless.
+    const Noise3 periods[3] = {
+        {64.0F, 64.0F, 64.0F},
+        {32.0F, 32.0F, 32.0F},
+        {16.0F, 16.0F, 16.0F},
+    };
+    float value = 0.0F;
+    float amp   = 0.5F;
     for (uint32_t octave = 0; octave < 3; ++octave) {
-        value += amp * TileableNoise3(p, period);
-        norm += amp;
+        value += amp * TileableNoise3(p, periods[octave]);
         p = Mul(p, 2.0F);
         amp *= 0.5F;
     }
-    return value / norm;
+    // Match the original procedural FBM, which summed octave amplitudes
+    // without normalizing by their total.
+    return value;
 }
 } // namespace
 

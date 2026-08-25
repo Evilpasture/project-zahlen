@@ -91,6 +91,10 @@ auto DescriptorHeap<Type>::Init(const Context& ctx, Allocator& allocator, uint32
         .properties = {},
     };
     vkGetPhysicalDeviceProperties2(ctx.Physical(), &props2);
+    _nonCoherentAtomSize = props2.properties.limits.nonCoherentAtomSize;
+    if (_nonCoherentAtomSize == 0) {
+        _nonCoherentAtomSize = 1;
+    }
 
     VkDeviceSize heap_alignment = 0;
     VkDeviceSize max_heap_size  = 0;
@@ -181,26 +185,29 @@ void DescriptorHeap<Type>::Bind(VkCommandBuffer cmd) const noexcept {
 }
 
 template <DescriptorHeapType Type>
-void DescriptorHeap<Type>::FlushWrittenSlots(const uint32_t* slots, uint32_t count) noexcept {
-    if (!Valid() || count == 0 || slots == nullptr || _stride == 0) {
-        return;
-    }
-
-    const auto [minSlot, maxSlot] = std::minmax_element(slots, slots + count);
-    const VkDeviceSize offset     = static_cast<VkDeviceSize>(*minSlot) * _stride;
-    const VkDeviceSize end        = (static_cast<VkDeviceSize>(*maxSlot) + 1U) * _stride;
-    FlushHostCache(offset, end - offset);
-}
-
-template <DescriptorHeapType Type>
 void DescriptorHeap<Type>::Flush(ResourceWriteBatch& batch) noexcept
     requires(Type == DescriptorHeapType::Resource)
 {
     if (Valid() && _vkWriteDescriptorsEXT != nullptr) {
-        const auto* slots = batch.SlotsData();
         const auto  count = batch.SlotCount();
+        const auto* slots = batch.SlotsData();
+        // Resolve the dirty byte range BEFORE Flush() clears the batch's slot
+        // vector (clear() does not free but we don't want to rely on that).
+        VkDeviceSize flushOffset = 0;
+        VkDeviceSize flushSize   = 0;
+        if (count > 0 && slots != nullptr && _stride > 0) {
+            const auto [minIt, maxIt] = std::minmax_element(slots, slots + count);
+            flushOffset               = static_cast<VkDeviceSize>(*minIt) * _stride;
+            flushSize                 = (static_cast<VkDeviceSize>(*maxIt) + 1U) * _stride - flushOffset;
+            // vkFlushMappedMemoryRanges requires offsets/sizes aligned to
+            // nonCoherentAtomSize; round down the offset and extend the size.
+            flushOffset = AlignDown(flushOffset, _nonCoherentAtomSize);
+            flushSize   = AlignUp(flushSize, _nonCoherentAtomSize);
+        }
         batch.Flush(_device, _vkWriteDescriptorsEXT, _mappedPtr, _stride);
-        FlushWrittenSlots(slots, count);
+        if (flushSize > 0) {
+            FlushHostCache(flushOffset, flushSize);
+        }
     }
 }
 
@@ -209,10 +216,21 @@ void DescriptorHeap<Type>::Flush(SamplerWriteBatch& batch) noexcept
     requires(Type == DescriptorHeapType::Sampler)
 {
     if (Valid() && _vkWriteDescriptorsEXT != nullptr) {
-        const auto* slots = batch.SlotsData();
         const auto  count = batch.SlotCount();
+        const auto* slots = batch.SlotsData();
+        VkDeviceSize flushOffset = 0;
+        VkDeviceSize flushSize   = 0;
+        if (count > 0 && slots != nullptr && _stride > 0) {
+            const auto [minIt, maxIt] = std::minmax_element(slots, slots + count);
+            flushOffset               = static_cast<VkDeviceSize>(*minIt) * _stride;
+            flushSize                 = (static_cast<VkDeviceSize>(*maxIt) + 1U) * _stride - flushOffset;
+            flushOffset = AlignDown(flushOffset, _nonCoherentAtomSize);
+            flushSize   = AlignUp(flushSize, _nonCoherentAtomSize);
+        }
         batch.Flush(_device, _vkWriteDescriptorsEXT, _mappedPtr, _stride);
-        FlushWrittenSlots(slots, count);
+        if (flushSize > 0) {
+            FlushHostCache(flushOffset, flushSize);
+        }
     }
 }
 

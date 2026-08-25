@@ -118,6 +118,11 @@ template <typename T, typename U>
     return (value + alignment - 1) & ~(alignment - 1);
 }
 
+template <typename T, typename U>
+[[nodiscard]] constexpr auto AlignDown(T value, U alignment) noexcept -> T {
+    return value & ~(alignment - 1);
+}
+
 // ============================================================================
 // Descriptor Heap Abstraction
 // ============================================================================
@@ -154,9 +159,6 @@ class DescriptorHeap {
         requires(Type == DescriptorHeapType::Resource);
     void Flush(SamplerWriteBatch& batch) noexcept
         requires(Type == DescriptorHeapType::Sampler);
-
-  private:
-    void FlushWrittenSlots(const uint32_t* slots, uint32_t count) noexcept;
 
     [[nodiscard]] auto Valid() const noexcept -> bool {
         return _buffer.Valid();
@@ -195,6 +197,7 @@ class DescriptorHeap {
     uint32_t     _capacity     = 0;
     VkDeviceSize _stride       = 0;
     VkDeviceSize _reservedSize = 0;
+    VkDeviceSize _nonCoherentAtomSize = 1;
 
     Buffer               _buffer;
     Buffer::MappedRegion _mappedRegion;

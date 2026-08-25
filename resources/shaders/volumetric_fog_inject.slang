@@ -81,8 +81,13 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     if (fogPC.enableNoise != 0 && fogDensity > 0.00001f) {
         // Tileable 3D noise is baked at startup; one hardware trilinear fetch
         // replaces three octaves of procedural value noise per voxel.
-        float3 noisePos = worldPos * fogPC.noiseScale * (1.0f / 32.0f) +
+        // The baked 64^3 tile contains octaves at periods 64/32/16 cells, all
+        // integer divisors of the tile size, so the composite is fully tileable.
+        // Dividing p by 64 maps one original first-octave noise cell (1 unit in
+        // p) to one texel and one tile to 64 cells; the repeat sampler wraps.
+        float3 p        = worldPos * fogPC.noiseScale +
                           float3(time * fogPC.noiseSpeed * 0.2f, time * fogPC.noiseSpeed * 0.1f, time * fogPC.noiseSpeed * 0.15f);
+        float3 noisePos = p * (1.0f / 64.0f);
         float noiseVal  = noiseTexture.SampleLevel(noiseSampler, noisePos, 0).r;
         fogDensity *= lerp(1.0f, noiseVal * 2.0f, fogPC.noiseIntensity);
     }

@@ -76,24 +76,24 @@ void CSMain(uint3 id: SV_DispatchThreadID, uint3 gId: SV_GroupThreadID) {
     s_laneCounts[lane] = count;
     GroupMemoryBarrierWithGroupSync();
 
-    uint prefix = (lane > 0) ? s_laneCounts[lane - 1] : 0u;
-    for (uint step = 1; step < Cluster.Width * Cluster.Height; step <<= 1) {
-        uint read = (lane >= step) ? s_laneCounts[lane - step] : 0u;
-        GroupMemoryBarrierWithGroupSync();
-        if (lane >= step) {
-            s_laneCounts[lane] += read;
-        }
-        GroupMemoryBarrierWithGroupSync();
-    }
-
+    // Serial exclusive prefix scan over this 144-thread slice. The group is
+    // small (16x9) and this runs once per dispatch, so a simple scan by lane 0
+    // is both correct for non-power-of-two sizes and avoids extra atomics.
     if (lane == 0) {
-        InterlockedAdd(out_Counter[0], s_laneCounts[Cluster.Width * Cluster.Height - 1], s_groupBase);
+        uint running = 0;
+        for (uint i = 0; i < Cluster.Width * Cluster.Height; ++i) {
+            uint c = s_laneCounts[i];
+            s_laneCounts[i] = running;
+            running += c;
+        }
+        InterlockedAdd(out_Counter[0], running, s_groupBase);
     }
     GroupMemoryBarrierWithGroupSync();
 
-    const uint offset     = s_groupBase + prefix;
-    uint       safeCount  = (offset + count <= Cluster.LightListCapacity) ? count :
-                            (offset < Cluster.LightListCapacity ? Cluster.LightListCapacity - offset : 0u);
+    const uint prefix    = s_laneCounts[lane];
+    const uint offset    = s_groupBase + prefix;
+    uint       safeCount = (offset + count <= Cluster.LightListCapacity) ? count :
+                           (offset < Cluster.LightListCapacity ? Cluster.LightListCapacity - offset : 0u);
     for (uint j = 0; j < safeCount; ++j) {
         out_IndexList[offset + j] = list[j];
     }
