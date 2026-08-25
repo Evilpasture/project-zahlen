@@ -10,7 +10,6 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <array>
-#include <expected>
 #include <string_view>
 #include <utility>
 
@@ -58,9 +57,15 @@ struct UIScopeNode {
 
 // --- ERROR CODES & REPORTS ---
 //
-// Fallible GUI operations report failure through std::expected<T, ZHLN::Error>
-// return values. Successful work is silent (verbose-level traces aside): no
-// impure logging side effects on the hot path.
+// Fallible GUI operations return typed failure data (ZHLN::Error, or a report
+// struct embedding one). Success is silent - no logging side effects, and the
+// returned values are plain aggregates: freely ignorable at frame-loop call
+// sites, inspectable where a caller cares.
+//
+// NOTE: std::expected is deliberately NOT used here. Since C++26 the class
+// itself is declared [[nodiscard]], which turns every ignored return into
+// -Wunused-result and forces '(void)' ceremony at every fire-and-forget call
+// site under -Werror - the exact failure mode this policy exists to avoid.
 
 enum class GUIError : uint8_t {
     Success = 0,
@@ -69,10 +74,16 @@ enum class GUIError : uint8_t {
     ParentNotAlive[[= ZHLN::Reflect::Description("Parent entity for the GUI operation is not alive.")]],
 };
 
-// Pure result of a SweepStaleChildren call: what the GC reclaimed.
+// Pure result of a SweepStaleChildren call: what the GC reclaimed. .error is
+// GUIError::Success unless the sweep could not run at all.
 struct SweepReport {
-    uint32_t destroyedSubtrees = 0; // subtrees destroyed (widget not rebuilt this frame)
-    uint32_t purgedRecords     = 0; // dead cache records purged (entity destroyed outside the GUI)
+    uint32_t destroyedSubtrees = 0;          // subtrees destroyed (widget not rebuilt this frame)
+    uint32_t purgedRecords     = 0;          // dead cache records purged (entity destroyed outside the GUI)
+    Error    error {};                       // Success, or ParentNotAlive for a dead explicit parent
+
+    [[nodiscard]] constexpr bool Ok() const noexcept {
+        return !error;
+    }
 };
 
 // --- CONFIGURATION STRUCTS ---
@@ -152,16 +163,15 @@ class Context {
         return (m_stackTop > 0) ? m_stack[m_stackTop - 1].depth + 1 : 1;
     }
 
-    // Pushes a scope node. Fails (without side effects) past MAX_UI_STACK_DEPTH;
-    // the caller decides how to degrade - or ignores it, that's what the
-    // builders below do while recording the error via Status(). Not nodiscard
-    // by design: the error is data, checking it is opt-in, ignoring is free.
-    std::expected<void, Error> PushParent(Entity entity, uint32_t depth) noexcept {
+    // Pushes a scope node. Past MAX_UI_STACK_DEPTH it fails with
+    // GUIError::HierarchyTooDeep as returned data - no side effects. Success is
+    // GUIError::Success (Error evaluates false in boolean contexts).
+    Error PushParent(Entity entity, uint32_t depth) noexcept {
         if (m_stackTop < MAX_UI_STACK_DEPTH) {
             m_stack[m_stackTop++] = {.entity = entity, .depth = depth};
             return {};
         }
-        return std::unexpected(Error(GUIError::HierarchyTooDeep));
+        return Error(GUIError::HierarchyTooDeep);
     }
 
     void PopParent(bool wasPushed) noexcept {
@@ -172,13 +182,10 @@ class Context {
 
     // First structural error this context ran into while building (e.g. the
     // hierarchy grew past MAX_UI_STACK_DEPTH). Builders degrade gracefully and
-    // keep rendering instead of aborting, so inspect Status() when a tree
-    // looks wrong; success is expected-void, not a log line.
-    [[nodiscard]] std::expected<void, Error> Status() const noexcept {
-        if (m_error) {
-            return std::unexpected(m_error);
-        }
-        return {};
+    // keep rendering instead of aborting, so read Status() when a tree looks
+    // wrong; success is GUIError::Success, not a log line.
+    [[nodiscard]] Error Status() const noexcept {
+        return m_error;
     }
 
     void ClearStatus() noexcept {
@@ -236,12 +243,12 @@ class Context {
         return newEntity;
     }
 
-    // Destroys a UI entity and its whole subtree. A dead input entity is a
-    // typed failure; success is silent (verbose-level trace aside). Checking
-    // the result is opt-in - ignoring it is legitimate fire-and-forget GC.
-    std::expected<void, Error> DestroyUIEntity(Entity ent) noexcept {
+    // Destroys a UI entity and its whole subtree. Returns GUIError::Success on
+    // success (silent, verbose-level trace aside) or a typed code for a dead
+    // input entity. Ignoring the result is legitimate fire-and-forget GC.
+    Error DestroyUIEntity(Entity ent) noexcept {
         if (!m_reg->IsAlive(ent)) {
-            return std::unexpected(Error(GUIError::EntityNotAlive));
+            return Error(GUIError::EntityNotAlive);
         }
 
         ZHLN::Log<LogChannel::StdErr, LogLevel::Verbose>(
@@ -273,10 +280,10 @@ class Context {
     // when parentEntity is NullEntity. Returns a pure SweepReport for callers
     // that care (profilers, editors, tests); everyone else may ignore it -
     // that is the common case, and it costs nothing.
-    std::expected<SweepReport, Error> SweepStaleChildren(Entity parentEntity) {
+    SweepReport SweepStaleChildren(Entity parentEntity) {
         Entity cacheEntity = (parentEntity != NullEntity) ? parentEntity : GetRootCacheEntity();
         if (cacheEntity == NullEntity || !m_reg->IsAlive(cacheEntity)) {
-            return std::unexpected(Error(GUIError::ParentNotAlive));
+            return SweepReport {.error = Error(GUIError::ParentNotAlive)};
         }
 
         auto* cache = m_reg->Get<Components::UIChildCacheComponent>(cacheEntity);
@@ -386,14 +393,14 @@ class Context {
             rect.hierarchyDepth = depth;
         });
 
-        const auto pushResult = PushParent(e, depth);
-        if (!pushResult) {
-            RecordError(pushResult.error());
+        const Error pushError = PushParent(e, depth);
+        if (pushError) {
+            RecordError(pushError);
         }
         std::forward<Fn>(content)();
 
-        SweepStaleChildren(e); // result intentionally ignored
-        PopParent(pushResult.has_value());
+        SweepStaleChildren(e); // report intentionally ignored
+        PopParent(!pushError);
 
         return e;
     }
@@ -428,14 +435,14 @@ class Context {
             );
         });
 
-        const auto pushResult = PushParent(e, depth);
-        if (!pushResult) {
-            RecordError(pushResult.error());
+        const Error pushError = PushParent(e, depth);
+        if (pushError) {
+            RecordError(pushError);
         }
         std::forward<Fn>(content)();
 
-        SweepStaleChildren(e); // result intentionally ignored
-        PopParent(pushResult.has_value());
+        SweepStaleChildren(e); // report intentionally ignored
+        PopParent(!pushError);
 
         return e;
     }

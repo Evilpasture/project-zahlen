@@ -88,7 +88,7 @@ struct GUIContextTestSuite {
                     boxB2 = gui.BeginBox("b", GUI::BoxConfig {}, []() -> void {});
                 });
                 gui.SweepStaleChildren(NullEntity); // result intentionally ignored
-                buildSucceeded = gui.Status().has_value(); // clean build: no structural error recorded
+                buildSucceeded = !gui.Status(); // clean build: Error evaluates false on success
             }
 
             ZHLN::Test::ExpectEq(root1.Pack(), root2.Pack());
@@ -188,8 +188,8 @@ struct GUIContextTestSuite {
                 // The sweep's result is data, not a log line: exactly one stale
                 // subtree destroyed ("p2"), nothing orphaned.
                 const auto report = gui.SweepStaleChildren(NullEntity);
-                reportOk          = report.has_value();
-                reportCountsRight = report.has_value() && report->destroyedSubtrees == 1u && report->purgedRecords == 0u;
+                reportOk          = !report.error;
+                reportCountsRight = !report.error && report.destroyedSubtrees == 1u && report.purgedRecords == 0u;
             }
 
             ZHLN::Test::ExpectTrue(panel2 != NullEntity);
@@ -249,7 +249,7 @@ struct GUIContextTestSuite {
             });
 
             const auto destroyResult = gui.DestroyUIEntity(root);
-            ZHLN::Test::ExpectTrue(destroyResult.has_value()); // success: silent, expected-void
+            ZHLN::Test::ExpectFalse(static_cast<bool>(destroyResult)); // success: Error{} inactive
 
             ZHLN::Test::ExpectFalse(reg.IsAlive(root));
             ZHLN::Test::ExpectFalse(reg.IsAlive(boxB));
@@ -259,21 +259,16 @@ struct GUIContextTestSuite {
 
             // Destroying the same entity again is a typed failure, not a log.
             const auto destroyAgain = gui.DestroyUIEntity(root);
-            ZHLN::Test::ExpectFalse(destroyAgain.has_value());
-            if (!destroyAgain.has_value()) {
-                ZHLN::Test::ExpectTrue(destroyAgain.error().Is(GUIError::EntityNotAlive));
-            }
+            ZHLN::Test::ExpectTrue(destroyAgain.Is(GUIError::EntityNotAlive));
 
             // Root's own record lives in the root cache entity and points at a
             // destroyed entity now: the sweep must purge it, not keep it around
             // (this is the orphaned-record path). Exactly one purge, no destroys.
             ZHLN::Test::ExpectEq(CountCacheRecordsOn(reg, rootCache), 1u);
             const auto report = gui.SweepStaleChildren(NullEntity);
-            ZHLN::Test::ExpectTrue(report.has_value());
-            if (report.has_value()) {
-                ZHLN::Test::ExpectEq(report->destroyedSubtrees, 0u);
-                ZHLN::Test::ExpectEq(report->purgedRecords, 1u);
-            }
+            ZHLN::Test::ExpectTrue(!report.error);
+            ZHLN::Test::ExpectEq(report.destroyedSubtrees, 0u);
+            ZHLN::Test::ExpectEq(report.purgedRecords, 1u);
             ZHLN::Test::ExpectEq(CountCacheRecordsOn(reg, rootCache), 0u);
             ZHLN::Test::ExpectEq(CountTotalCacheRecords(reg), 0u);
 
@@ -339,9 +334,9 @@ struct GUIContextTestSuite {
 
                 // Overflowing the scope stack is a typed, queryable failure -
                 // not a log line. The build itself still completed above.
-                const auto status   = gui.Status();
-                statusIsError       = !status.has_value();
-                statusCodeIsRight   = (!status.has_value()) && status.error().Is(GUIError::HierarchyTooDeep);
+                const ZHLN::Error status = gui.Status();
+                statusIsError            = static_cast<bool>(status);
+                statusCodeIsRight        = status.Is(GUIError::HierarchyTooDeep);
             }
 
             ZHLN::Test::ExpectTrue(statusIsError);
@@ -376,8 +371,8 @@ struct GUIContextTestSuite {
             {
                 GUI::Context gui(reg, 2);
                 const auto report = gui.SweepStaleChildren(NullEntity);
-                sweepOk           = report.has_value();
-                sweepCountsRight  = report.has_value() && report->destroyedSubtrees == 1u && report->purgedRecords == 0u;
+                sweepOk           = !report.error;
+                sweepCountsRight  = !report.error && report.destroyedSubtrees == 1u && report.purgedRecords == 0u;
             }
             ZHLN::Test::ExpectTrue(sweepOk);
             ZHLN::Test::ExpectTrue(sweepCountsRight);
