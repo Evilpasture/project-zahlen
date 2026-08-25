@@ -8,6 +8,7 @@
 #include <Zahlen/Log.hpp>
 #include <array>
 #include <concepts>
+#include <cstdlib>
 #include <expected>
 #include <source_location>
 #include <string>
@@ -84,17 +85,33 @@ struct AssertionFailure {
     std::string_view op; // "==" or "!=" or "true" or "false" or "ValidationError" or "DeviceLost"
 };
 
+inline unsigned int GetDefaultTimeoutSeconds() noexcept {
+    static unsigned int defaultSec = []() -> unsigned int {
+        if (const char* env = std::getenv("ZHLN_TEST_TIMEOUT")) {
+            char* end = nullptr;
+            long  val = std::strtol(env, &end, 10);
+            if (end != env && val >= 0) {
+                return static_cast<unsigned int>(val);
+            }
+        }
+        return 15;
+    }();
+    return defaultSec;
+}
+
 struct TestContext {
     std::string_view              currentTestName;
     std::vector<AssertionFailure> failures;
     bool                          allowValidationErrors = false;
     bool                          allowDeviceLost       = false;
+    unsigned int                  timeoutSeconds        = 15;
 
     void Reset(std::string_view testName) {
         currentTestName = testName;
         failures.clear();
         allowValidationErrors = false;
         allowDeviceLost       = false;
+        timeoutSeconds        = GetDefaultTimeoutSeconds();
     }
 };
 
@@ -110,6 +127,20 @@ inline void AllowValidationErrors(bool allow = true) noexcept {
 
 inline void AllowDeviceLost(bool allow = true) noexcept {
     GetThreadLocalContext().allowDeviceLost = allow;
+}
+
+// Dynamic test timeout adjustment
+inline void SetTimeout(unsigned int seconds) noexcept {
+    GetThreadLocalContext().timeoutSeconds = seconds;
+#if defined(ZHLN_TEST_TIMEOUT_SUPPORTED)
+    if (!IsDebuggerAttached()) {
+        alarm(seconds);
+    }
+#endif
+}
+
+inline void DisableTimeout() noexcept {
+    SetTimeout(0);
 }
 
 template <typename T>
@@ -248,10 +279,10 @@ TestStats RunSuite() {
             struct sigaction old_sa;
             sigaction(SIGALRM, &sa, &old_sa);
 
-            if (IsDebuggerAttached()) {
+            if (IsDebuggerAttached() || ctx.timeoutSeconds == 0) {
                 alarm(0);
             } else {
-                alarm(15);
+                alarm(ctx.timeoutSeconds);
             }
 
             if (sigsetjmp(g_testTimeoutJmpBuf, 1) == 0) {
@@ -266,7 +297,7 @@ TestStats RunSuite() {
                     {.file          = "Unknown",
                      .line          = 0,
                      .actualValue   = "Test execution timed out (deadlock or infinite loop)",
-                     .expectedValue = "Test execution completes under 15 seconds",
+                     .expectedValue = "Test execution completes under " + std::to_string(ctx.timeoutSeconds) + " seconds",
                      .op            = "Timeout"}
                 );
                 result = std::unexpected(ZHLN::Error(TestFrameworkError::AssertionFailed));
