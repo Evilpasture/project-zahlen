@@ -428,7 +428,7 @@ def get_ordered_tail_bones(main_rig):
     return [b for b in main_rig.data.bones if "tail" in b.name.lower() and not any(p in b.name for p in ["WGT-", "MCH-"])]
 
 def convert_and_rig_tail(main_rig):
-    print("[*] Converting Tail cable to 3D mesh with 13-point CTR-Tail skinning...", flush=True)
+    print("[*] Converting Tail cable to 3D mesh with continuous tail skinning...", flush=True)
     if not (main_rig and main_rig.data):
         return
 
@@ -493,6 +493,7 @@ def convert_and_rig_tail(main_rig):
     if hips_name and hips_name in main_rig.data.bones:
         main_rig.data.bones[hips_name].use_deform = True
 
+    # 3. Find and convert tail curve objects
     tail_curves = [
         o for o in list(bpy.data.objects)
         if o and getattr(o, "type", None) in {'CURVE', 'SURFACE'} and 
@@ -662,6 +663,7 @@ def setup_cycles_gpu():
         print(f"[~] Notice setting up Cycles GPU: {e}", flush=True)
 
 def ensure_uv_unwrap(obj):
+    # Only generates UV if the object literally has 0 UV layers (preserves all existing artist UVs)
     if not (obj and getattr(obj, "data", None)):
         return
     if not obj.data.uv_layers:
@@ -688,7 +690,7 @@ def bake_procedural_material(mat_name, target_objects, resolution=2048):
         return False
 
     procedural_tex_types = {
-        "TEX_NOISE", "TEX_WAVE", "TEX_VORONOI", "TEX_BRICK", "TEX_GRADIENT", "TEX_CHECKER"
+        "TEX_NOISE", "TEX_WAVE", "TEX_VORONOI", "TEX_BRICK", "TEX_GRADIENT", "TEX_CHECKER", "TEX_MAGIC"
     }
 
     bake_color = False
@@ -1059,8 +1061,6 @@ def resolve_accessory_bone(obj, bones):
     thigh_l_bone = bones["thigh_l"]
     forearm_l_bone = bones["forearm_l"]
     forearm_r_bone = bones["forearm_r"]
-    hand_l_bone = bones["hand_l"]
-    hand_r_bone = bones["hand_r"]
     foot_r_bone = bones["foot_r"]
     foot_l_bone = bones["foot_l"]
     tail_tip_bone = bones["tail_tip"]
@@ -2111,16 +2111,16 @@ def main():
         main_rig.data.pose_position = 'REST'
     bpy.context.view_layer.update()
 
-    # 1. Convert hair and fur curves to mesh (NurbsPath.002 & NurbsPath.026 are explicitly skipped)
+    # 1. Convert hair and fur curves to mesh
     convert_hair_curves_to_mesh()
 
-    # 2. Setup Bone Hierarchy (Root, Shoulders, Hair Chains systematically renamed to DEF-Hair_SXX_YY)
+    # 2. Setup Bone Hierarchy
     setup_root_bone(main_rig)
     setup_shoulder_bones(main_rig)
     merge_and_setup_hair_rig(main_rig)
     bind_hair_meshes_to_rig(main_rig)
 
-    # 3. Convert & Rig Tail (Cable with 13-point CTR-Tail Skinning, NurbsPath.026 converted to mesh)
+    # 3. Convert & Rig Tail
     convert_and_rig_tail(main_rig)
 
     # 4. Enable Deform Flags on all Bone Chains
@@ -2128,22 +2128,22 @@ def main():
 
     apply_facial_gui_visibility_and_hide_anchors(main_rig)
 
-    # 5. Attachments & SD-N Accessories (Coat Button, Tail Syringe, Arm Internals, Foot Soles, Headband Lights)
+    # 5. Attachments & SD-N Accessories
     fix_and_bind_sd_n_accessories(main_rig)
     bake_and_attach_teeth(main_rig)
 
-    # 6. Rigid Accessories (Visor, Beanie/Hat, Headband Lights)
+    # 6. Rigid Accessories
     fix_head_hair_and_accessories_parenting(main_rig)
     fix_and_bake_mouth_shrink(main_rig)
 
-    # 7. Clothing, Particles & Limbs (Bakes Mirror, Solidify, Subsurf on Plane.130, DD_Symbol.001, Circle.060, Plane.055, etc.)
+    # 7. Clothing, Particles & Limbs
     bake_clothing_modifiers_with_shapekeys()
     convert_particle_systems_to_real_mesh(main_rig)
     bake_limb_modifiers()
 
-    # 8. Procedural Materials Bake Pass
+    # 8. Procedural Materials Bake Pass (Preserves all existing UV maps; includes TEX_MAGIC for Hat)
     procedural_and_group_node_types = {
-        "TEX_NOISE", "TEX_WAVE", "TEX_VORONOI", "TEX_BRICK", "TEX_GRADIENT", "TEX_CHECKER", "GROUP", "BUMP"
+        "TEX_NOISE", "TEX_WAVE", "TEX_VORONOI", "TEX_BRICK", "TEX_GRADIENT", "TEX_CHECKER", "TEX_MAGIC", "GROUP", "BUMP"
     }
 
     for mat in list(bpy.data.materials):
