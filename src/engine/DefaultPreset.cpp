@@ -169,7 +169,7 @@ void DefaultPreset::Update(Engine& engine, float dt) {
     if (s_PopupVisible) {
         GUI::Context ui(reg, engine.GetCurrentFrame());
 
-        s_UIPopupBox = ui.BeginPanel(
+        s_UIPopupBox = ui.Panel(
             "FallbackUIPopupBox", GUI::PanelConfig {.width = 700.0f, .height = 440.0f, .x = -350.0f, .y = -220.0f, .gap = 14.0f, .padding = 20.0f},
             [&]() -> void {
                 // Header Title (Fits perfectly at 0.70f scale)
@@ -183,7 +183,7 @@ void DefaultPreset::Update(Engine& engine, float dt) {
                                           (s_Reason == FallbackReason::MissingNativeModule) ? "[WARNING] MISSING NATIVE MODULE ('libgameplay.so')" :
                                                                                               "[WARNING] NO GAMEPLAY MODULE DETECTED";
 
-                ui.BeginBox(GUI::BoxConfig {.height = 72.0f, .color = {0.22f, 0.16f, 0.08f, 0.85f}, .gap = 4.0f, .padding = 10.0f}, [&]() -> void {
+                ui.Box(GUI::BoxConfig {.height = 72.0f, .color = {0.22f, 0.16f, 0.08f, 0.85f}, .gap = 4.0f, .padding = 10.0f}, [&]() -> void {
                     ui.Label(reasonTitle, GUI::LabelConfig {.color = {1.0f, 0.85f, 0.3f, 1.0f}});
                     ui.Label(s_DetailMsg, GUI::LabelConfig {.scale = 0.75f, .color = {0.9f, 0.85f, 0.7f, 1.0f}});
                 });
@@ -194,12 +194,12 @@ void DefaultPreset::Update(Engine& engine, float dt) {
                     ZHLN_TARGET_TRIPLE, rc.GetGPUName()
                 );
 
-                ui.BeginBox(GUI::BoxConfig {.height = 170.0f, .color = {0.05f, 0.07f, 0.11f, 0.85f}, .padding = 12.0f}, [&]() -> void {
+                ui.Box(GUI::BoxConfig {.height = 170.0f, .color = {0.05f, 0.07f, 0.11f, 0.85f}, .padding = 12.0f}, [&]() -> void {
                     ui.Label(envSummary, GUI::LabelConfig {.scale = 0.80f, .color = {0.65f, 0.75f, 0.85f, 1.0f}, .verticalAlign = TextVerticalAlignment::Top});
                 });
 
                 // Transparent Horizontal Button Bar
-                ui.BeginBox(
+                ui.Box(
                     GUI::BoxConfig {
                         .height    = 48.0f,
                         .color     = {0.0f, 0.0f, 0.0f, 0.0f},
@@ -229,10 +229,10 @@ void DefaultPreset::Update(Engine& engine, float dt) {
             }
         );
     } else {
-        GUI::Context ui(reg, engine.GetCurrentFrame());
-        if (const auto sweep = ui.SweepStaleChildren(NullEntity); !sweep) {
-            Log("[DefaultPreset] Preset UI sweep failed: {}", sweep.error().Message());
-        }
+        // Popup hidden this frame: a teardown-only context whose destructor
+        // sweeps the root cache (collects the stale popup widgets; a failure
+        // would latch into the context status instead of aborting the frame).
+        GUI::Context(reg, engine.GetCurrentFrame());
     }
 }
 

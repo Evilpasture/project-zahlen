@@ -10,6 +10,7 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <array>
+#include <concepts>
 #include <expected>
 #include <string_view>
 #include <utility>
@@ -46,28 +47,33 @@ uint32_t
     AppendPanelVertices(VertexPosition* outPos, VertexAttributes* outAttr, const Components::UIRectComponent& rect, const Components::UIPanelComponent& panel);
 
 // ============================================================================
-// FIBER-SAFE & ZERO-ALLOCATION GUI CONTEXT
+// FIBER-SAFE & ZERO-ALLOCATION GUI CONTEXT — HYBRID RAII + CLOSURE
 // ============================================================================
-
-constexpr size_t MAX_UI_STACK_DEPTH = 32;
-
-struct UIScopeNode {
-    Entity   entity = NullEntity;
-    uint32_t depth  = 1;
-};
-
-// --- ERROR CODES ---
 //
-// Fallible GUI operations return std::expected<void, ZHLN::Error>. The type is
-// [[nodiscard]] on its own since C++26, which is precisely the enforcement we
-// want: every failure point MUST be handled by the caller - no '(void)' casts,
-// no discarded 'auto', no [[maybe_unused]] escape hatches. Success carries no
-// payload and is silent (verbose-level traces aside): an engaged expected,
-// not an error code, and not a log line.
+// Two policies, applied by intent:
+//
+//  * TREE BUILDING (Panel/Box/Label/Button) is fault-tolerant. A UI must keep
+//    rendering even when a subtree overflows the stack or a parent vanished.
+//    Builders therefore never return errors; the first structural problem is
+//    latched as a sticky status, readable through Context::Status(). Forcing
+//    std::expected on every Label would be unusable boilerplate.
+//
+//  * STRUCTURAL OPS (DestroyUIEntity, SweepStaleChildren) are monadic:
+//    they return std::expected<void, Error>, which is [[nodiscard]] since
+//    C++26, so every failure point MUST be handled by the caller — no
+//    '(void)' casts, no 'auto _ =', no [[maybe_unused]] escape hatches.
+//
+// Scope management is RAII-first: Panel()/Box() return a [[nodiscard]]
+// UIScope whose lifetime is the push/pop pair (the pop also sweeps the
+// container's stale children). The three-argument closure overloads are thin
+// sugar over that guard. Context itself auto-sweeps the root cache from its
+// destructor, so per-frame "end of frame" sweeps at call sites are gone.
 //
 // GUIError deliberately has NO 'Success' enumerator: success is not an error.
 // Codes start at 1 because Error::operator bool treats only non-zero values
 // as active errors.
+
+constexpr size_t MAX_UI_STACK_DEPTH = 32;
 
 enum class GUIError : uint8_t {
     HierarchyTooDeep[
@@ -134,12 +140,89 @@ struct ButtonConfig {
     TextVerticalAlignment verticalAlign = TextVerticalAlignment::Center;
 };
 
+class Context;
+
+// --- RAII SCOPE GUARD ---
+//
+// The primary engine of scope management: constructing one pushes the widget
+// entity onto the context stack; destruction pops (and runs the container's
+// stale-child sweep). [[nodiscard]] by class so a discarded temporary guard —
+// which would pop the scope at the end of the full expression — is a compile
+// error. Move-only; moving transfers the pop duty exactly once.
+
+class [[nodiscard]] UIScope {
+  public:
+    UIScope() noexcept = default;
+    ~UIScope() {
+        Dismiss();
+    }
+
+    UIScope(const UIScope&)            = delete;
+    UIScope& operator=(const UIScope&) = delete;
+
+    UIScope(UIScope&& other) noexcept: m_ctx(other.m_ctx), m_entity(other.m_entity), m_pushed(other.m_pushed) {
+        other.m_ctx    = nullptr;
+        other.m_entity = NullEntity;
+        other.m_pushed = false;
+    }
+
+    UIScope& operator=(UIScope&& other) noexcept {
+        if (this != &other) {
+            Dismiss(); // a replaced guard still pops its own scope first
+            m_ctx          = other.m_ctx;
+            m_entity       = other.m_entity;
+            m_pushed       = other.m_pushed;
+            other.m_ctx    = nullptr;
+            other.m_entity = NullEntity;
+            other.m_pushed = false;
+        }
+        return *this;
+    }
+
+    [[nodiscard]] Entity GetEntity() const noexcept {
+        return m_entity;
+    }
+
+    // False when the hierarchy overflowed MAX_UI_STACK_DEPTH (the error is
+    // latched in the owning context) or the guard is disengaged/moved-from.
+    [[nodiscard]] bool IsPushed() const noexcept {
+        return m_pushed;
+    }
+
+    // Early pop; also the destructor's workhorse. Defined after Context.
+    void Dismiss() noexcept;
+
+  private:
+    friend class Context;
+
+    UIScope(Context* ctx, Entity entity, bool pushed) noexcept: m_ctx(ctx), m_entity(entity), m_pushed(pushed) {
+    }
+
+    Context* m_ctx    = nullptr;
+    Entity   m_entity = NullEntity;
+    bool     m_pushed = false;
+};
+
 // --- STACK-ALLOCATED FIBER-SAFE CONTEXT ---
 
 class Context {
   public:
     explicit Context(ECS::Registry& reg, uint64_t currentFrame = 0) noexcept: m_reg(&reg), m_currentFrame(currentFrame) {
     }
+
+    // Frame teardown: sweeping the root cache here makes a manual
+    // SweepStaleChildren(NullEntity) at every call site redundant. The sweep
+    // is idempotent — records visited this frame survive, re-sweeps are
+    // no-ops. Failure can only mean the root cache died mid-frame; latch it,
+    // never abort a destructor.
+    ~Context() noexcept {
+        if (const auto sweep = SweepStaleChildren(NullEntity); !sweep) {
+            RecordError(sweep.error());
+        }
+    }
+
+    Context(const Context&)            = delete;
+    Context& operator=(const Context&) = delete;
 
     [[nodiscard]] ECS::Registry& GetRegistry() const noexcept {
         return *m_reg;
@@ -151,22 +234,6 @@ class Context {
 
     [[nodiscard]] uint32_t GetCurrentDepth() const noexcept {
         return (m_stackTop > 0) ? m_stack[m_stackTop - 1].depth + 1 : 1;
-    }
-
-    // Pushes a scope node. Past MAX_UI_STACK_DEPTH it fails with
-    // GUIError::HierarchyTooDeep. The caller MUST handle the result.
-    [[nodiscard]] std::expected<void, Error> PushParent(Entity entity, uint32_t depth) noexcept {
-        if (m_stackTop < MAX_UI_STACK_DEPTH) {
-            m_stack[m_stackTop++] = {.entity = entity, .depth = depth};
-            return {};
-        }
-        return std::unexpected(Error(GUIError::HierarchyTooDeep));
-    }
-
-    void PopParent(bool wasPushed) noexcept {
-        if (wasPushed && m_stackTop > 0) {
-            m_stackTop--;
-        }
     }
 
     // First structural error this context ran into while building (e.g. the
@@ -184,61 +251,13 @@ class Context {
         m_error = Error {};
     }
 
-    // Resolves or creates the root cache entity (UISettingsComponent)
-    Entity GetRootCacheEntity() {
-        if (m_rootCacheEntity != NullEntity && m_reg->IsAlive(m_rootCacheEntity)) {
-            return m_rootCacheEntity;
-        }
+    // --- STRUCTURAL OPS (monadic; the caller MUST handle the result) ---
 
-        auto uiSettings = m_reg->GetEntitiesWith<Components::UISettingsComponent>();
-        if (!uiSettings.empty()) {
-            m_rootCacheEntity = uiSettings[0];
-            return m_rootCacheEntity;
-        }
-
-        // Fallback: create UISettingsComponent entity if missing
-        m_rootCacheEntity = m_reg->Create(Components::UISettingsComponent {});
-        return m_rootCacheEntity;
-    }
-
-    // O(1) Hash-based Entity Lookup with Mark-and-Sweep GC
-    template <typename CreateFn>
-    Entity GetOrCreateEntity(uint64_t widgetKey, CreateFn&& createFn) {
-        Entity parent      = GetCurrentParent();
-        Entity cacheEntity = (parent != NullEntity) ? parent : GetRootCacheEntity();
-
-        auto* cache = m_reg->Get<Components::UIChildCacheComponent>(cacheEntity);
-        if (cache == nullptr) {
-            cache = &m_reg->Add<Components::UIChildCacheComponent>(cacheEntity);
-        }
-
-        // 1. O(1) Lookup in cache
-        if (const auto* record = cache->children.Find(widgetKey)) {
-            if (m_reg->IsAlive(record->entity)) {
-                record->lastVisitedFrame = m_currentFrame;
-                return record->entity;
-            }
-            // The widget entity was destroyed outside the GUI context (e.g. a
-            // plain Registry::Destroy). We transparently respawn it below, and
-            // the insert overwrites the dead record. Recovery succeeds, so this
-            // stays a verbose-level trace rather than an error.
-            ZHLN::Log<LogChannel::StdErr, LogLevel::Verbose>(
-                "[GUI::Context] Cached UI entity ({}:{}) was destroyed externally; respawning widget under parent ({}:{}). Use DestroyUIEntity() for "
-                "intentional subtree removal.",
-                record->entity.index, record->entity.generation, cacheEntity.index, cacheEntity.generation
-            );
-        }
-
-        // 2. Not found -> Spawn new entity
-        Entity newEntity = createFn();
-        cache->children.Insert(widgetKey, Components::UIChildCacheComponent::ChildRecord {.entity = newEntity, .lastVisitedFrame = m_currentFrame});
-
-        return newEntity;
-    }
-
-    // Destroys a UI entity and its whole subtree. A dead input entity fails
-    // with GUIError::EntityNotAlive; success is engaged-void and silent
-    // (verbose-level trace aside). The caller MUST handle the result.
+    // Destroys a UI entity and its whole subtree, recursing through the
+    // entity's OWN child-cache records — O(K) in the subtree size instead of
+    // a registry-wide scan per level. A dead input entity fails with
+    // GUIError::EntityNotAlive; success is engaged-void and silent
+    // (verbose-level trace aside).
     [[nodiscard]] std::expected<void, Error> DestroyUIEntity(Entity ent) noexcept {
         if (!m_reg->IsAlive(ent)) {
             return std::unexpected(Error(GUIError::EntityNotAlive));
@@ -248,22 +267,18 @@ class Context {
             "[GUI::Context] DestroyUIEntity: destroying UI entity ({}:{}) and its subtree.", ent.index, ent.generation
         );
 
-        // Gather all child UI rects referencing 'ent' as their parent
-        auto                uiRects = m_reg->GetEntitiesWith<Components::UIRectComponent>();
-        ZHLN::Array<Entity> childrenToDestroy;
-
-        for (Entity e: uiRects) {
-            if (auto* rect = m_reg->Get<Components::UIRectComponent>(e)) {
-                if (rect->parentEntity == ent) {
-                    childrenToDestroy.push_back(e);
+        // First failure wins and propagates; a liveness-verified child that
+        // fails to die is a real failure, not a discarded temporary.
+        std::expected<void, Error> firstFailure {};
+        if (const auto* cache = m_reg->Get<Components::UIChildCacheComponent>(ent)) {
+            cache->children.ForEach([&](uint64_t, const Components::UIChildCacheComponent::ChildRecord& rec) {
+                if (firstFailure.has_value() && m_reg->IsAlive(rec.entity)) {
+                    firstFailure = DestroyUIEntity(rec.entity);
                 }
-            }
+            });
         }
-
-        for (Entity child: childrenToDestroy) {
-            if (auto res = DestroyUIEntity(child); !res) {
-                return res; // propagate: a child that failed to die is a real failure
-            }
+        if (!firstFailure) {
+            return firstFailure;
         }
 
         m_reg->Destroy(ent);
@@ -271,10 +286,10 @@ class Context {
     }
 
     // Sweeps child widgets that were not rebuilt this frame (or whose entities
-    // died outside the GUI) from under a parent node - or from the root cache
+    // died outside the GUI) from under a parent node — or from the root cache
     // when parentEntity is NullEntity. Fails only when an explicitly-passed
     // parent is dead; success is engaged-void and silent (verbose-level
-    // traces aside). The caller MUST handle the result.
+    // traces aside). Idempotent: a sweep right after a sweep is a no-op.
     [[nodiscard]] std::expected<void, Error> SweepStaleChildren(Entity parentEntity) {
         Entity cacheEntity = (parentEntity != NullEntity) ? parentEntity : GetRootCacheEntity();
         if (cacheEntity == NullEntity || !m_reg->IsAlive(cacheEntity)) {
@@ -305,8 +320,7 @@ class Context {
             if (const auto* rec = cache->children.Find(key)) {
                 wasAlive = m_reg->IsAlive(rec->entity);
                 if (wasAlive) {
-                    // Use recursive destruction instead of plain registry destroy
-                    if (auto res = DestroyUIEntity(rec->entity); !res) {
+                    if (const auto res = DestroyUIEntity(rec->entity); !res) {
                         return res; // propagate: a liveness-verified entity failing to die is a real failure
                     }
                 }
@@ -331,18 +345,47 @@ class Context {
         }
         if (purgedRecords > 0) {
             ZHLN::Log<LogChannel::StdErr, LogLevel::Verbose>(
-                "[GUI::Context] Purged {} orphaned UI cache record(s) under parent ({}:{}) pointing at entities destroyed outside the GUI.", purgedRecords,
-                cacheEntity.index, cacheEntity.generation
+                "[GUI::Context] Purged {} orphaned UI cache record(s) under parent ({}:{}) pointing at entities destroyed outside the GUI.",
+                purgedRecords, cacheEntity.index, cacheEntity.generation
             );
         }
 
         return {};
     }
 
-    // --- WIDGET BUILDER METHODS ---
+    // O(1) Hash-based Entity Lookup with Mark-and-Sweep GC
+    template <typename CreateFn>
+    Entity GetOrCreateEntity(uint64_t widgetKey, CreateFn&& createFn) {
+        Entity parent      = GetCurrentParent();
+        Entity cacheEntity = (parent != NullEntity) ? parent : GetRootCacheEntity();
 
-    template <typename Fn>
-    Entity BeginPanel(std::string_view name, const PanelConfig& cfg, Fn&& content) {
+        auto* cache = m_reg->Get<Components::UIChildCacheComponent>(cacheEntity);
+        if (cache == nullptr) {
+            cache = &m_reg->Add<Components::UIChildCacheComponent>(cacheEntity);
+        }
+
+        // 1. O(1) Lookup in cache. A record whose entity was destroyed outside
+        // the GUI (plain Registry::Destroy) is transparently respawned below;
+        // the insert overwrites the dead record and recovery stays silent.
+        if (const auto* record = cache->children.Find(widgetKey)) {
+            if (m_reg->IsAlive(record->entity)) {
+                record->lastVisitedFrame = m_currentFrame;
+                return record->entity;
+            }
+        }
+
+        // 2. Not found -> Spawn new entity
+        Entity newEntity = createFn();
+        cache->children.Insert(widgetKey, Components::UIChildCacheComponent::ChildRecord {.entity = newEntity, .lastVisitedFrame = m_currentFrame});
+
+        return newEntity;
+    }
+
+    // --- WIDGET BUILDERS (fault-tolerant; problems latch into Status()) ---
+
+    // RAII: the returned guard holds the scope open. Its destructor pops and
+    // sweeps the panel's stale children.
+    [[nodiscard]] UIScope Panel(std::string_view name, const PanelConfig& cfg = {}) {
         Entity   parent = GetCurrentParent();
         uint32_t depth  = GetCurrentDepth();
 
@@ -393,22 +436,20 @@ class Context {
             rect.hierarchyDepth = depth;
         });
 
-        const auto pushResult = PushParent(e, depth);
-        if (!pushResult) {
-            RecordError(pushResult.error()); // surfaced through Status()
-        }
-        std::forward<Fn>(content)();
-
-        if (const auto sweep = SweepStaleChildren(e); !sweep) {
-            RecordError(sweep.error()); // cannot fire for a live panel, but handled regardless
-        }
-        PopParent(pushResult.has_value());
-
-        return e;
+        return PushScope(e, depth);
     }
 
+    // Closure sugar: three lines over the guard. The pop + container sweep run
+    // on scope exit no matter what the callback does (early return, continue).
     template <typename Fn>
-    Entity BeginBox(std::string_view name, const BoxConfig& cfg, Fn&& content) {
+        requires std::invocable<Fn>
+    Entity Panel(std::string_view name, const PanelConfig& cfg, Fn&& content) {
+        auto scope = Panel(name, cfg);
+        std::forward<Fn>(content)();
+        return scope.GetEntity();
+    }
+
+    [[nodiscard]] UIScope Box(std::string_view name, const BoxConfig& cfg = {}) {
         Entity   parent = GetCurrentParent();
         uint32_t depth  = GetCurrentDepth();
 
@@ -437,25 +478,24 @@ class Context {
             );
         });
 
-        const auto pushResult = PushParent(e, depth);
-        if (!pushResult) {
-            RecordError(pushResult.error()); // surfaced through Status()
-        }
-        std::forward<Fn>(content)();
-
-        if (const auto sweep = SweepStaleChildren(e); !sweep) {
-            RecordError(sweep.error()); // cannot fire for a live box, but handled regardless
-        }
-        PopParent(pushResult.has_value());
-
-        return e;
+        return PushScope(e, depth);
     }
 
     template <typename Fn>
-    Entity BeginBox(const BoxConfig& cfg, Fn&& content) {
+        requires std::invocable<Fn>
+    Entity Box(std::string_view name, const BoxConfig& cfg, Fn&& content) {
+        auto scope = Box(name, cfg);
+        std::forward<Fn>(content)();
+        return scope.GetEntity();
+    }
+
+    // Anonymous box: stable per-frame auto-ID keeps the closure form a one-liner.
+    template <typename Fn>
+        requires std::invocable<Fn>
+    Entity Box(const BoxConfig& cfg, Fn&& content) {
         std::array<char, 64> nameBuf {};
-        std::string_view     autoName = FormatTo(nameBuf, "Box_D{}_{}", GetCurrentDepth(), m_autoIdCounter++);
-        return BeginBox(autoName, cfg, std::forward<Fn>(content));
+        const std::string_view autoName = FormatTo(nameBuf, "Box_D{}_{}", GetCurrentDepth(), m_autoIdCounter++);
+        return Box(autoName, cfg, std::forward<Fn>(content));
     }
 
     Entity Label(std::string_view text, const LabelConfig& cfg = {}) {
@@ -466,13 +506,7 @@ class Context {
         std::string_view      labelName = FormatTo(labelBuf, "Lbl_{}", text);
         uint64_t              key       = HashCombine(parent.Pack(), HashStringView(labelName));
 
-        TextureHandle fontHandle = TextureHandle::Invalid;
-        auto          uiSettings = m_reg->GetEntitiesWith<Components::UISettingsComponent>();
-        if (!uiSettings.empty()) {
-            if (const auto* s = m_reg->Get<Components::UISettingsComponent>(uiSettings[0])) {
-                fontHandle = s->fontAtlas.texture;
-            }
-        }
+        const TextureHandle fontHandle = ResolveFontTexture();
 
         Entity e = GetOrCreateEntity(key, [&]() {
             return m_reg->Create(
@@ -497,57 +531,8 @@ class Context {
         return e;
     }
 
-    template <typename OnClickFn>
-    Entity Button(std::string_view text, const ButtonConfig& cfg, OnClickFn&& onClick) {
-        Entity   parent = GetCurrentParent();
-        uint32_t depth  = GetCurrentDepth();
-
-        std::array<char, 128> btnBuf {};
-        std::string_view      btnName = FormatTo(btnBuf, "Btn_{}", text);
-        uint64_t              key     = HashCombine(parent.Pack(), HashStringView(btnName));
-
-        TextureHandle fontHandle = TextureHandle::Invalid;
-        auto          uiSettings = m_reg->GetEntitiesWith<Components::UISettingsComponent>();
-        if (!uiSettings.empty()) {
-            if (const auto* s = m_reg->Get<Components::UISettingsComponent>(uiSettings[0])) {
-                fontHandle = s->fontAtlas.texture;
-            }
-        }
-
-        Entity e = GetOrCreateEntity(key, [&]() {
-            return m_reg->Create(
-                Components::NameComponent {.name = String64(btnName)},
-                Components::UIRectComponent {.parentEntity = parent, .width = cfg.width, .height = cfg.height, .hierarchyDepth = depth},
-                Components::UIPanelComponent {.color = cfg.normalColor, .borderRadius = cfg.borderRadius}, Components::UIButtonComponent {},
-                Components::UIStyleComponent {
-                    .normalColor     = cfg.normalColor,
-                    .hoverColor      = cfg.hoverColor,
-                    .pressedColor    = cfg.pressedColor,
-                    .textColorNormal = cfg.textColor,
-                    .textColorHover  = {1.0f, 1.0f, 1.0f, 1.0f},
-                    .transitionSpeed = 16.0f,
-                    .hasTextColor    = true
-                },
-                Components::TextComponent {
-                    .text          = String256(text),
-                    .scale         = cfg.scale,
-                    .color         = cfg.textColor,
-                    .align         = cfg.align,
-                    .verticalAlign = cfg.verticalAlign,
-                    .fontIndex     = fontHandle
-                }
-            );
-        });
-
-        m_reg->Patch<Components::UIButtonComponent>(e, [&](const auto& btn) {
-            if (btn.Has(UIButton::Clicked)) {
-                std::forward<OnClickFn>(onClick)();
-            }
-        });
-
-        return e;
-    }
-
+    // id + text stays the only overload that hits the registry; the shorter
+    // forms all delegate to it so behavior (and cache keys) can never drift.
     template <typename OnClickFn>
     Entity Button(std::string_view id, std::string_view text, const ButtonConfig& cfg, OnClickFn&& onClick) {
         Entity   parent = GetCurrentParent();
@@ -555,13 +540,7 @@ class Context {
 
         uint64_t key = HashCombine(parent.Pack(), HashStringView(id));
 
-        TextureHandle fontHandle = TextureHandle::Invalid;
-        auto          uiSettings = m_reg->GetEntitiesWith<Components::UISettingsComponent>();
-        if (!uiSettings.empty()) {
-            if (const auto* s = m_reg->Get<Components::UISettingsComponent>(uiSettings[0])) {
-                fontHandle = s->fontAtlas.texture;
-            }
-        }
+        const TextureHandle fontHandle = ResolveFontTexture();
 
         Entity e = GetOrCreateEntity(key, [&]() {
             return m_reg->Create(
@@ -606,11 +585,79 @@ class Context {
     }
 
     template <typename OnClickFn>
+    Entity Button(std::string_view text, const ButtonConfig& cfg, OnClickFn&& onClick) {
+        return Button(text, text, cfg, std::forward<OnClickFn>(onClick));
+    }
+
+    template <typename OnClickFn>
     Entity Button(std::string_view text, OnClickFn&& onClick) {
-        return Button(text, ButtonConfig {}, std::forward<OnClickFn>(onClick));
+        return Button(text, text, ButtonConfig {}, std::forward<OnClickFn>(onClick));
     }
 
   private:
+    friend class UIScope;
+
+    struct UIScopeNode {
+        Entity   entity = NullEntity;
+        uint32_t depth  = 1;
+    };
+
+    // Resolves or creates the root cache entity (UISettingsComponent).
+    // Private by design: the cache root is an implementation detail of the GC;
+    // tests can derive it via GetEntitiesWith<UISettingsComponent>().
+    Entity GetRootCacheEntity() {
+        if (m_rootCacheEntity != NullEntity && m_reg->IsAlive(m_rootCacheEntity)) {
+            return m_rootCacheEntity;
+        }
+
+        auto uiSettings = m_reg->GetEntitiesWith<Components::UISettingsComponent>();
+        if (!uiSettings.empty()) {
+            m_rootCacheEntity = uiSettings[0];
+            return m_rootCacheEntity;
+        }
+
+        // Fallback: create UISettingsComponent entity if missing
+        m_rootCacheEntity = m_reg->Create(Components::UISettingsComponent {});
+        return m_rootCacheEntity;
+    }
+
+    // Push/pop are the scope guard's private plumbing — never public API.
+    // Exposing them let callers push without sweeping or pop twice; UIScope
+    // keeps the pair balanced by construction.
+    [[nodiscard]] bool InternalPush(Entity entity, uint32_t depth) noexcept {
+        if (m_stackTop < MAX_UI_STACK_DEPTH) {
+            m_stack[m_stackTop++] = {.entity = entity, .depth = depth};
+            return true;
+        }
+        RecordError(Error(GUIError::HierarchyTooDeep)); // surfaced through Status()
+        return false;
+    }
+
+    // The pop owns the container's stale-child sweep: closing a scope is the
+    // exact moment its final child list for the frame is known.
+    void InternalPop(bool wasPushed, Entity entity) noexcept {
+        if (wasPushed && m_stackTop > 0) {
+            --m_stackTop;
+        }
+        if (const auto sweep = SweepStaleChildren(entity); !sweep) {
+            RecordError(sweep.error()); // can only mean the container died mid-build
+        }
+    }
+
+    UIScope PushScope(Entity e, uint32_t depth) noexcept {
+        return UIScope(this, e, InternalPush(e, depth));
+    }
+
+    [[nodiscard]] TextureHandle ResolveFontTexture() const noexcept {
+        const auto uiSettings = m_reg->GetEntitiesWith<Components::UISettingsComponent>();
+        if (!uiSettings.empty()) {
+            if (const auto* s = m_reg->Get<Components::UISettingsComponent>(uiSettings[0])) {
+                return s->fontAtlas.texture;
+            }
+        }
+        return TextureHandle::Invalid;
+    }
+
     static constexpr uint64_t HashCombine(uint64_t seed, uint64_t v) noexcept {
         return seed ^ (v + 0x9e3779b97f4a7c15ull + (seed << 6) + (seed >> 2));
     }
@@ -639,5 +686,14 @@ class Context {
     Entity                                      m_rootCacheEntity = NullEntity;
     Error                                       m_error {};
 };
+
+inline void UIScope::Dismiss() noexcept {
+    if (m_ctx != nullptr) {
+        m_ctx->InternalPop(m_pushed, m_entity);
+        m_ctx    = nullptr;
+        m_entity = NullEntity;
+        m_pushed = false;
+    }
+}
 
 } // namespace ZHLN::GUI

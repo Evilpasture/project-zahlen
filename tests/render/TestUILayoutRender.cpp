@@ -168,10 +168,10 @@ struct UILayoutRenderTestSuite {
                     .padding    = 10.0f,
                 };
 
-                ui.BeginPanel("layout_root", rootCfg, [&] {
-                    ui.BeginBox("band_red", ZHLN::GUI::BoxConfig {.height = 50.0f, .color = {1.0f, 0.0f, 0.0f, 1.0f}, .edgeWidth = 0.0f, .padding = 0.0f}, [] {
+                ui.Panel("layout_root", rootCfg, [&] {
+                    ui.Box("band_red", ZHLN::GUI::BoxConfig {.height = 50.0f, .color = {1.0f, 0.0f, 0.0f, 1.0f}, .edgeWidth = 0.0f, .padding = 0.0f}, [] {
                     });
-                    ui.BeginBox(
+                    ui.Box(
                         "band_green", ZHLN::GUI::BoxConfig {.height = 50.0f, .color = {0.0f, 1.0f, 0.0f, 1.0f}, .edgeWidth = 0.0f, .padding = 0.0f}, [] {}
                     );
                 });

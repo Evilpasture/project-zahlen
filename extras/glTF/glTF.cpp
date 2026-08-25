@@ -535,7 +535,7 @@ void DrawModelContentRows(ZHLN::GUI::Context& ui, InspectorState& state, const Z
 void DrawSceneExplorer(ZHLN::GUI::Context& ui, InspectorState& state, ZHLN::Engine& engine) {
     const ZHLN::Extent2D winSize = engine.GetWindow().GetSize();
 
-    ui.BeginPanel(
+    ui.Panel(
         "glTFSceneExplorer",
         ZHLN::GUI::PanelConfig {
             .width      = kExplorerWidth,
@@ -604,7 +604,7 @@ void DrawSceneExplorer(ZHLN::GUI::Context& ui, InspectorState& state, ZHLN::Engi
             }
 
             // ---- SELECTION DETAILS ----
-            ui.BeginBox(
+            ui.Box(
                 ZHLN::GUI::BoxConfig {.height = 178.0f, .color = {0.05f, 0.07f, 0.11f, 0.85f}, .gap = 4.0f, .padding = 10.0f},
                 [&]() -> void {
                     ui.Label(
@@ -753,7 +753,7 @@ void UpdateOrbit(InspectorState& state, ZHLN::Engine& engine) {
 }
 
 void DrawDropPrompt(ZHLN::GUI::Context& ui) {
-    ui.BeginPanel(
+    ui.Panel(
         "glTFInspectorPrompt",
         ZHLN::GUI::PanelConfig {
             .width = 560.0f, .height = 200.0f, .x = -280.0f, .y = -100.0f, .color = {0.06f, 0.09f, 0.14f, 0.95f}, .gap = 12.0f, .padding = 24.0f
@@ -787,14 +787,12 @@ void RenderFrame(ZHLN::Engine& engine) {
     UpdateOrbit(*state, engine);
 
     ZHLN::GUI::Context ui(engine.GetRegistry(), engine.GetCurrentFrame());
-    // The scene explorer stays hidden until a glTF is actually loaded.
+    // ~Context() sweeps the root cache when 'ui' leaves scope, so no manual
+    // end-of-frame sweep is needed here.
     if (state->loaded) {
         DrawSceneExplorer(ui, *state, engine);
     } else {
         DrawDropPrompt(ui);
-    }
-    if (const auto sweep = ui.SweepStaleChildren(ZHLN::NullEntity); !sweep) {
-        ZHLN::Log("[glTF Inspector] UI sweep failed: {}", sweep.error().Message());
     }
 }
 

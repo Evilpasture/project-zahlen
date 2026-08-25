@@ -25,9 +25,9 @@ struct UILayoutTestSuite {
 
             ZHLN::Entity child1 = ZHLN::NullEntity;
             ZHLN::Entity child2 = ZHLN::NullEntity;
-            ZHLN::Entity root   = gui.BeginPanel("root", rootCfg, [&] {
-                child1 = gui.BeginBox("c1", childCfg, [] {});
-                child2 = gui.BeginBox("c2", childCfg, [] {});
+            ZHLN::Entity root   = gui.Panel("root", rootCfg, [&] {
+                child1 = gui.Box("c1", childCfg, [] {});
+                child2 = gui.Box("c2", childCfg, [] {});
             });
 
             const auto* rootRect = reg.Get<ZHLN::Components::UIRectComponent>(root);
