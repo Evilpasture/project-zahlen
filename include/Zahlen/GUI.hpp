@@ -136,7 +136,16 @@ class Context {
             m_stack[m_stackTop++] = {.entity = entity, .depth = depth};
             return true;
         }
-        ZHLN::Log("[GUI::Context] ERROR: Exceeded maximum UI hierarchy depth of {}", MAX_UI_STACK_DEPTH);
+        // Past the cap the content lambda still runs, but its widgets silently
+        // attach to the deepest live parent. Say so once per context instead of
+        // letting the tree look "buggy" with no explanation.
+        if (!m_stackOverflowLogged) {
+            m_stackOverflowLogged = true;
+            ZHLN::Log(
+                "[GUI::Context] ERROR: Exceeded maximum UI hierarchy depth of {}. Widgets below this depth will attach to the deepest live parent instead.",
+                MAX_UI_STACK_DEPTH
+            );
+        }
         return false;
     }
 
@@ -180,6 +189,14 @@ class Context {
                 record->lastVisitedFrame = m_currentFrame;
                 return record->entity;
             }
+            // The widget entity was destroyed outside the GUI context (e.g. a
+            // plain Registry::Destroy). We transparently respawn it below, and
+            // the insert overwrites the dead record - log it, because silent
+            // respawns are exactly how "flickering widget" bugs present.
+            ZHLN::Log(
+                "[GUI::Context] Cached UI entity ({}:{}) was destroyed externally; respawning widget under parent ({}:{}). Use DestroyUIEntity() for intentional subtree removal.",
+                record->entity.index, record->entity.generation, cacheEntity.index, cacheEntity.generation
+            );
         }
 
         // 2. Not found -> Spawn new entity
@@ -193,6 +210,10 @@ class Context {
         if (!m_reg->IsAlive(ent)) {
             return;
         }
+
+        ZHLN::Log<LogChannel::StdErr, LogLevel::Verbose>(
+            "[GUI::Context] DestroyUIEntity: destroying UI entity ({}:{}) and its subtree.", ent.index, ent.generation
+        );
 
         // Gather all child UI rects referencing 'ent' as their parent
         auto                uiRects = m_reg->GetEntitiesWith<Components::UIRectComponent>();
@@ -225,20 +246,50 @@ class Context {
             return;
         }
 
+        // A record is stale when its widget was not rebuilt this frame, OR when
+        // the entity died outside the GUI (orphaned record pointing at a dead
+        // entity, e.g. after a direct Registry::Destroy).
         ZHLN::Array<uint64_t> staleKeys;
         cache->children.ForEach([&](uint64_t key, const Components::UIChildCacheComponent::ChildRecord& rec) {
-            if (rec.lastVisitedFrame < m_currentFrame) {
+            if (!m_reg->IsAlive(rec.entity) || rec.lastVisitedFrame < m_currentFrame) {
                 staleKeys.push_back(key);
             }
         });
 
+        uint32_t destroyedSubtrees = 0;
+        uint32_t deadRecords       = 0;
         for (uint64_t key: staleKeys) {
+            bool wasAlive = false;
             if (const auto* rec = cache->children.Find(key)) {
-                if (m_reg->IsAlive(rec->entity)) {
+                wasAlive = m_reg->IsAlive(rec->entity);
+                if (wasAlive) {
                     // Use recursive destruction instead of plain registry destroy
                     DestroyUIEntity(rec->entity);
                 }
             }
+            // Erase the record as well as the entity: keeping it leaks one record
+            // per dynamic widget ever created (re-keyed tree rows, changing
+            // labels, ...), and every sweep then walks all of them every frame -
+            // which is the runtime lag this GC is supposed to prevent.
+            cache->children.Erase(key);
+            if (wasAlive) {
+                ++destroyedSubtrees;
+            } else {
+                ++deadRecords;
+            }
+        }
+
+        if (destroyedSubtrees > 0) {
+            ZHLN::Log(
+                "[GUI::Context] Swept {} stale UI subtree(s) under parent ({}:{}): widget(s) were not rebuilt this frame. Remaining records: {}.",
+                destroyedSubtrees, cacheEntity.index, cacheEntity.generation, cache->children.Size()
+            );
+        }
+        if (deadRecords > 0) {
+            ZHLN::Log<LogChannel::StdErr, LogLevel::Verbose>(
+                "[GUI::Context] Purged {} orphaned UI cache record(s) under parent ({}:{}) pointing at entities destroyed outside the GUI.", deadRecords,
+                cacheEntity.index, cacheEntity.generation
+            );
         }
     }
 
@@ -520,9 +571,10 @@ class Context {
     ECS::Registry*                              m_reg          = nullptr;
     uint64_t                                    m_currentFrame = 0;
     std::array<UIScopeNode, MAX_UI_STACK_DEPTH> m_stack {};
-    uint32_t                                    m_stackTop        = 0;
-    uint32_t                                    m_autoIdCounter   = 0;
-    Entity                                      m_rootCacheEntity = NullEntity;
+    uint32_t                                    m_stackTop            = 0;
+    uint32_t                                    m_autoIdCounter       = 0;
+    Entity                                      m_rootCacheEntity     = NullEntity;
+    bool                                        m_stackOverflowLogged = false;
 };
 
 } // namespace ZHLN::GUI
