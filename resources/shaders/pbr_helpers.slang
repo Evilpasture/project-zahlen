@@ -147,35 +147,25 @@ public float CalculateShadowRayTraced(float3 worldPos, float3 N, float3 L, float
     float cosA  = cos(angle);
     float sinA  = sin(angle);
 
-    float unblockedRays   = 0.0f;
-    const int RAY_SAMPLES = 4;
+    // One blue-noise dithered ray/pixel. TAA/spatial filtering reconstructs
+    // soft penumbras while avoiding four incoherent ray queries per pixel.
+    const float spread = max(sunSize, 0.00001f);
+    const float2 p     = PoissonDisk[0];
+    const float2 jitter =
+        float2(p.x * cosA - p.y * sinA, p.x * sinA + p.y * cosA) * spread;
 
-    float spread = max(sunSize, 0.00001f);
+    RayDesc ray;
+    ray.Origin    = worldPos + N * 0.04f;
+    ray.Direction = normalize(L + right * jitter.x + bitangent * jitter.y);
+    ray.TMin      = 0.01f;
+    ray.TMax      = 300.0f;
 
-    [unroll]
-    for (int i = 0; i < RAY_SAMPLES; ++i) {
-        float2 p      = PoissonDisk[i];
-        float2 jitter = float2(p.x * cosA - p.y * sinA, p.x * sinA + p.y * cosA) * spread;
-
-        float3 jitteredDir = normalize(L + right * jitter.x + bitangent * jitter.y);
-
-        RayDesc ray;
-        ray.Origin    = worldPos + N * 0.04f;
-        ray.Direction = jitteredDir;
-        ray.TMin      = 0.01f;
-        ray.TMax      = 300.0f;
-
-        RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> q;
-        q.TraceRayInline(tlas, RAY_FLAG_NONE, 0xFF, ray);
-        while (q.Proceed()) {
-        }
-
-        if (q.CommittedStatus() != COMMITTED_TRIANGLE_HIT) {
-            unblockedRays += 1.0f;
-        }
+    RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> q;
+    q.TraceRayInline(tlas, RAY_FLAG_NONE, 0xFF, ray);
+    while (q.Proceed()) {
     }
 
-    return unblockedRays / float(RAY_SAMPLES);
+    return q.CommittedStatus() != COMMITTED_TRIANGLE_HIT ? 1.0f : 0.0f;
 }
 #endif
 

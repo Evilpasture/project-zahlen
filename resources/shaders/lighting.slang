@@ -147,29 +147,9 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
             float3 diffLTC = LTC_Evaluate(N, V, worldPos, float3x3(1, 0, 0, 0, 1, 0, 0, 0, 1), light.points, light.twoSided == 1);
 
-            float shadowVisibility = 1.0f;
-#ifndef DISABLE_RTR
-            if (ENABLE_RTR != 0 && pc.enableRTR != 0) {
-                float3 L_center    = ((light.points[0].xyz + light.points[1].xyz + light.points[2].xyz + light.points[3].xyz) * 0.25f) - worldPos;
-                float distToCenter = length(L_center);
-                float3 L_p         = L_center / (distToCenter + 1e-5f);
-
-                RayDesc ray;
-                ray.Origin    = worldPos + N * 0.01f;
-                ray.Direction = L_p;
-                ray.TMin      = 0.01f;
-                ray.TMax      = distToCenter;
-
-                RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> q;
-                q.TraceRayInline(tlas, RAY_FLAG_NONE, 0xFF, ray);
-                while (q.Proceed()) {
-                }
-
-                if (q.CommittedStatus() == COMMITTED_TRIANGLE_HIT) {
-                    shadowVisibility = 0.0f;
-                }
-            }
-#endif
+            // Keep ray-traced inline queries reserved for the primary sun.
+            // Per-cluster area-light rays are the worst warp-divergence path.
+            const float shadowVisibility = 1.0f;
 
             directPunctual += ((1.0f - metallic) * albedoRaw.rgb * diffLTC + specLTC) * light.color * light.intensity * shadowVisibility;
         } else { // POINT/SPOT LIGHT
@@ -195,25 +175,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
                 float3 kD_p   = (1.0f - F_p) * (1.0f - metallic);
 
                 float shadowVisibility = 1.0f;
-#ifndef DISABLE_RTR
-                if (ENABLE_RTR != 0 && pc.enableRTR != 0) {
-                    RayDesc ray;
-                    ray.Origin    = worldPos + N * 0.01f;
-                    ray.Direction = L_p;
-                    ray.TMin      = 0.01f;
-                    ray.TMax      = distToCenter;
-
-                    RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> q;
-                    q.TraceRayInline(tlas, RAY_FLAG_NONE, 0xFF, ray);
-                    while (q.Proceed()) {
-                    }
-
-                    if (q.CommittedStatus() == COMMITTED_TRIANGLE_HIT) {
-                        shadowVisibility = 0.0f;
-                    }
-                } else
-#endif
-                    if (light.shadowLayer >= 0) {
+                if (light.shadowLayer >= 0) {
                     if (light.type == 1) { // POINT LIGHT (Omni-directional Cubemap)
                         float3 r = -L_unnorm;
 

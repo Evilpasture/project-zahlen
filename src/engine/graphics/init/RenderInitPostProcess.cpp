@@ -366,8 +366,10 @@ auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, Error> {
             );
         })
         .and_then([&]() -> std::expected<void, Error> { return BakeSMAALUTs(); })
+        .and_then([&]() -> std::expected<void, Error> { return InitializeVolumetricNoiseTexture(); })
         .and_then([&]() -> std::expected<void, Error> {
             InitPassSamplerDescriptors();
+            WriteVolumetricNoiseDescriptor();
             return {};
         });
 }

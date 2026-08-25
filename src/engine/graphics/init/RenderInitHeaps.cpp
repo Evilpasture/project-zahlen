@@ -373,6 +373,10 @@ void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
         Vk::InitHeapPassSamplers(heapManager, volumetricTemporalPass.heapBindings, infos);
     }
     {
+        std::array<VkSamplerCreateInfo, 1> infos = {defaultInfo};
+        Vk::InitHeapPassSamplers(heapManager, volumetricFogInjectPass.heapBindings, infos);
+    }
+    {
         std::array<VkSamplerCreateInfo, 1> infos = {shadowInfo};
         Vk::InitHeapPassSamplers(heapManager, volumetricLightInjectPass.heapBindings, infos);
     }

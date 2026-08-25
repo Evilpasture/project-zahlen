@@ -229,7 +229,11 @@ struct PassFactory {
         return Vk::MakePass<"VolumetricFogInject", Vk::ComputeWrite<Res_VoxelMedia>>([this](VkCommandBuffer c) noexcept {
             self.volumetricFogInjectPass.WriteHeap(
                 self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ComputeWrite<Res_VoxelMedia>>(self.graphResources.voxelMedia),
-                self.frames.frameUniformBuffers[fIdx], self.frames.fogVolumesBuffer[fIdx]
+                Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
+                    .handle = self.volumetricNoiseImage.Handle(), .view = self.volumetricNoiseView.Get(), .extent = {32, 32, 32},
+                    .aspect = VK_IMAGE_ASPECT_COLOR_BIT, .format = VK_FORMAT_R8G8B8A8_UNORM, .viewInfo = &self.volumetricNoiseViewInfo
+                },
+                Vk::SkipWrite {}, self.frames.frameUniformBuffers[fIdx], self.frames.fogVolumesBuffer[fIdx]
             );
 
             VolumetricFogPushConstants fogPC = {};

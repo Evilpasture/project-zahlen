@@ -41,51 +41,10 @@ struct VolumetricFogPushConstants {
 VolumetricFogPushConstants fogPC;
 
 RWTexture3D<float4> outVoxelMedia;
+Texture3D<float4> noiseTexture;
+SamplerState noiseSampler;
 ConstantBuffer<FrameUniforms> frame;
 StructuredBuffer<GPUVolumetricVolume> fogVolumes;
-
-float Hash3D(float3 p) {
-    p = frac(p * 0.1031f);
-    p += dot(p, p.yzx + 33.33f);
-    return frac((p.x + p.y) * p.z);
-}
-
-float Noise3D(float3 p) {
-    float3 ip = floor(p);
-    float3 fp = frac(p);
-    float3 u  = fp * fp * (3.0f - 2.0f * fp);
-
-    float n000 = Hash3D(ip + float3(0, 0, 0));
-    float n100 = Hash3D(ip + float3(1, 0, 0));
-    float n010 = Hash3D(ip + float3(0, 1, 0));
-    float n110 = Hash3D(ip + float3(1, 1, 0));
-    float n001 = Hash3D(ip + float3(0, 0, 1));
-    float n101 = Hash3D(ip + float3(1, 0, 1));
-    float n011 = Hash3D(ip + float3(0, 0, 1));
-    float n111 = Hash3D(ip + float3(1, 1, 1));
-
-    float r00 = lerp(n000, n100, u.x);
-    float r10 = lerp(n010, n110, u.x);
-    float r01 = lerp(n001, n101, u.x);
-    float r11 = lerp(n011, n111, u.x);
-
-    float r0 = lerp(r00, r10, u.y);
-    float r1 = lerp(r01, r11, u.y);
-
-    return lerp(r0, r1, u.z);
-}
-
-float FBM3D(float3 p) {
-    float val = 0.0f;
-    float amp = 0.5f;
-    [unroll]
-    for (int i = 0; i < 3; i++) {
-        val += amp * Noise3D(p);
-        p *= 2.05f;
-        amp *= 0.5f;
-    }
-    return val;
-}
 
 float TemporalHash2D(uint2 tid, float timeOffset) {
     float spatial = frac(float(tid.x * 12664589 + tid.y * 9546283) * 0.6180339887f);
@@ -120,8 +79,11 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     float fogDensity = fogPC.density * exp(-fogPC.heightFalloff * boundedY);
 
     if (fogPC.enableNoise != 0 && fogDensity > 0.00001f) {
-        float3 noisePos = worldPos * fogPC.noiseScale + float3(time * fogPC.noiseSpeed * 0.2f, time * fogPC.noiseSpeed * 0.1f, time * fogPC.noiseSpeed * 0.15f);
-        float noiseVal  = FBM3D(noisePos);
+        // Tileable 3D noise is baked at startup; one hardware trilinear fetch
+        // replaces three octaves of procedural value noise per voxel.
+        float3 noisePos = worldPos * fogPC.noiseScale * (1.0f / 32.0f) +
+                          float3(time * fogPC.noiseSpeed * 0.2f, time * fogPC.noiseSpeed * 0.1f, time * fogPC.noiseSpeed * 0.15f);
+        float noiseVal  = noiseTexture.SampleLevel(noiseSampler, noisePos, 0).r;
         fogDensity *= lerp(1.0f, noiseVal * 2.0f, fogPC.noiseIntensity);
     }
 

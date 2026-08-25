@@ -155,6 +155,9 @@ class DescriptorHeap {
     void Flush(SamplerWriteBatch& batch) noexcept
         requires(Type == DescriptorHeapType::Sampler);
 
+  private:
+    void FlushWrittenSlots(const uint32_t* slots, uint32_t count) noexcept;
+
     [[nodiscard]] auto Valid() const noexcept -> bool {
         return _buffer.Valid();
     }
@@ -231,6 +234,8 @@ class ResourceWriteBatch {
     void Flush(VkDevice device, PFN_vkWriteResourceDescriptorsEXT writeFn, void* mappedPtr, VkDeviceSize stride) noexcept;
 
     [[nodiscard]] auto Empty() const noexcept -> bool;
+    [[nodiscard]] auto SlotCount() const noexcept -> uint32_t;
+    [[nodiscard]] auto SlotsData() const noexcept -> const uint32_t*;
 
   private:
     struct Impl;
@@ -253,6 +258,8 @@ class SamplerWriteBatch {
     void Flush(VkDevice device, PFN_vkWriteSamplerDescriptorsEXT writeFn, void* mappedPtr, VkDeviceSize stride) noexcept;
 
     [[nodiscard]] auto Empty() const noexcept -> bool;
+    [[nodiscard]] auto SlotCount() const noexcept -> uint32_t;
+    [[nodiscard]] auto SlotsData() const noexcept -> const uint32_t*;
 
   private:
     struct Impl;

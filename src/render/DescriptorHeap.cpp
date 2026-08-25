@@ -181,12 +181,26 @@ void DescriptorHeap<Type>::Bind(VkCommandBuffer cmd) const noexcept {
 }
 
 template <DescriptorHeapType Type>
+void DescriptorHeap<Type>::FlushWrittenSlots(const uint32_t* slots, uint32_t count) noexcept {
+    if (!Valid() || count == 0 || slots == nullptr || _stride == 0) {
+        return;
+    }
+
+    const auto [minSlot, maxSlot] = std::minmax_element(slots, slots + count);
+    const VkDeviceSize offset     = static_cast<VkDeviceSize>(*minSlot) * _stride;
+    const VkDeviceSize end        = (static_cast<VkDeviceSize>(*maxSlot) + 1U) * _stride;
+    FlushHostCache(offset, end - offset);
+}
+
+template <DescriptorHeapType Type>
 void DescriptorHeap<Type>::Flush(ResourceWriteBatch& batch) noexcept
     requires(Type == DescriptorHeapType::Resource)
 {
     if (Valid() && _vkWriteDescriptorsEXT != nullptr) {
+        const auto* slots = batch.SlotsData();
+        const auto  count = batch.SlotCount();
         batch.Flush(_device, _vkWriteDescriptorsEXT, _mappedPtr, _stride);
-        FlushHostCache(0, _stride * _capacity);
+        FlushWrittenSlots(slots, count);
     }
 }
 
@@ -195,8 +209,10 @@ void DescriptorHeap<Type>::Flush(SamplerWriteBatch& batch) noexcept
     requires(Type == DescriptorHeapType::Sampler)
 {
     if (Valid() && _vkWriteDescriptorsEXT != nullptr) {
+        const auto* slots = batch.SlotsData();
+        const auto  count = batch.SlotCount();
         batch.Flush(_device, _vkWriteDescriptorsEXT, _mappedPtr, _stride);
-        FlushHostCache(0, _stride * _capacity);
+        FlushWrittenSlots(slots, count);
     }
 }
 
@@ -221,6 +237,14 @@ auto ResourceWriteBatch::operator=(ResourceWriteBatch&& other) noexcept -> Resou
 
 auto ResourceWriteBatch::Empty() const noexcept -> bool {
     return _impl->slots.empty();
+}
+
+auto ResourceWriteBatch::SlotCount() const noexcept -> uint32_t {
+    return static_cast<uint32_t>(_impl->slots.size());
+}
+
+auto ResourceWriteBatch::SlotsData() const noexcept -> const uint32_t* {
+    return _impl->slots.data();
 }
 
 void ResourceWriteBatch::AddImage(TextureHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept {
@@ -321,6 +345,14 @@ auto SamplerWriteBatch::operator=(SamplerWriteBatch&& other) noexcept -> Sampler
 
 auto SamplerWriteBatch::Empty() const noexcept -> bool {
     return _impl->slots.empty();
+}
+
+auto SamplerWriteBatch::SlotCount() const noexcept -> uint32_t {
+    return static_cast<uint32_t>(_impl->slots.size());
+}
+
+auto SamplerWriteBatch::SlotsData() const noexcept -> const uint32_t* {
+    return _impl->slots.data();
 }
 
 void SamplerWriteBatch::AddSampler(SamplerHandle handle, const VkSamplerCreateInfo& createInfo) noexcept {

@@ -17,6 +17,9 @@ RWStructuredBuffer<uint> out_Counter;
 ConstantBuffer<FrameUniforms> frame; // Bound to slot 4 matching C++ layout
 StructuredBuffer<Light> lights;      // Bound to slot 5 matching C++ layout
 
+groupshared uint s_laneCounts[Cluster.Width * Cluster.Height];
+groupshared uint s_groupBase;
+
 // --- Sphere vs Axis-Aligned Bounding Box (AABB) ---
 bool SphereAABB(float3 c, float r, float3 minB, float3 maxB) {
     float sq = 0.0f;
@@ -46,12 +49,13 @@ bool ConeBehindPlane(float3 T, float3 D, float R, float r, float3 N, float d) {
 }
 
 [numthreads(Cluster.Width, Cluster.Height, 1)]
-void CSMain(uint3 id: SV_DispatchThreadID) {
+void CSMain(uint3 id: SV_DispatchThreadID, uint3 gId: SV_GroupThreadID) {
     if (id.x >= Dispatch.SizeX || id.y >= Dispatch.SizeY || id.z >= Dispatch.SizeZ) {
         return;
     }
 
-    uint cIdx       = ClusterIndex(id.x, id.y, id.z);
+    const uint lane = gId.y * Cluster.Width + gId.x;
+    uint       cIdx = ClusterIndex(id.x, id.y, id.z);
     ClusterBounds b = in_Bounds[cIdx]; // These are now static view-space bounds!
 
     uint count = 0;
@@ -68,23 +72,32 @@ void CSMain(uint3 id: SV_DispatchThreadID) {
         }
     }
 
-    uint offset = 0;
-    if (count > 0) {
-        InterlockedAdd(out_Counter[0], count, offset);
+    // One global atomic per 16x9 cluster slice instead of one per cluster.
+    s_laneCounts[lane] = count;
+    GroupMemoryBarrierWithGroupSync();
 
-        if (offset + count <= Cluster.LightListCapacity) {
-            for (uint j = 0; j < count; ++j) {
-                out_IndexList[offset + j] = list[j];
-            }
-        } else {
-            uint safeCount = (offset < Cluster.LightListCapacity) ? (Cluster.LightListCapacity - offset) : 0;
-            for (uint j = 0; j < safeCount; ++j) {
-                out_IndexList[offset + j] = list[j];
-            }
-            count = safeCount;
+    uint prefix = (lane > 0) ? s_laneCounts[lane - 1] : 0u;
+    for (uint step = 1; step < Cluster.Width * Cluster.Height; step <<= 1) {
+        uint read = (lane >= step) ? s_laneCounts[lane - step] : 0u;
+        GroupMemoryBarrierWithGroupSync();
+        if (lane >= step) {
+            s_laneCounts[lane] += read;
         }
+        GroupMemoryBarrierWithGroupSync();
+    }
+
+    if (lane == 0) {
+        InterlockedAdd(out_Counter[0], s_laneCounts[Cluster.Width * Cluster.Height - 1], s_groupBase);
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    const uint offset     = s_groupBase + prefix;
+    uint       safeCount  = (offset + count <= Cluster.LightListCapacity) ? count :
+                            (offset < Cluster.LightListCapacity ? Cluster.LightListCapacity - offset : 0u);
+    for (uint j = 0; j < safeCount; ++j) {
+        out_IndexList[offset + j] = list[j];
     }
 
     out_Grid[cIdx].offset = offset;
-    out_Grid[cIdx].count  = count;
+    out_Grid[cIdx].count  = safeCount;
 }
