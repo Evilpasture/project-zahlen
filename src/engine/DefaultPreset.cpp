@@ -230,7 +230,9 @@ void DefaultPreset::Update(Engine& engine, float dt) {
         );
     } else {
         GUI::Context ui(reg, engine.GetCurrentFrame());
-        ui.SweepStaleChildren(NullEntity);
+        if (const auto sweep = ui.SweepStaleChildren(NullEntity); !sweep) {
+            Log("[DefaultPreset] Preset UI sweep failed: {}", sweep.error().Message());
+        }
     }
 }
 

@@ -10,6 +10,7 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <array>
+#include <expected>
 #include <string_view>
 #include <utility>
 
@@ -55,35 +56,23 @@ struct UIScopeNode {
     uint32_t depth  = 1;
 };
 
-// --- ERROR CODES & REPORTS ---
+// --- ERROR CODES ---
 //
-// Fallible GUI operations return typed failure data (ZHLN::Error, or a report
-// struct embedding one). Success is silent - no logging side effects, and the
-// returned values are plain aggregates: freely ignorable at frame-loop call
-// sites, inspectable where a caller cares.
+// Fallible GUI operations return std::expected<void, ZHLN::Error>. The type is
+// [[nodiscard]] on its own since C++26, which is precisely the enforcement we
+// want: every failure point MUST be handled by the caller - no '(void)' casts,
+// no discarded 'auto', no [[maybe_unused]] escape hatches. Success carries no
+// payload and is silent (verbose-level traces aside): an engaged expected,
+// not an error code, and not a log line.
 //
-// NOTE: std::expected is deliberately NOT used here. Since C++26 the class
-// itself is declared [[nodiscard]], which turns every ignored return into
-// -Wunused-result and forces '(void)' ceremony at every fire-and-forget call
-// site under -Werror - the exact failure mode this policy exists to avoid.
+// GUIError deliberately has NO 'Success' enumerator: success is not an error.
+// Codes start at 1 because Error::operator bool treats only non-zero values
+// as active errors.
 
 enum class GUIError : uint8_t {
-    Success = 0,
-    HierarchyTooDeep[[= ZHLN::Reflect::Description("UI hierarchy exceeded MAX_UI_STACK_DEPTH; overflowing widgets attached to the deepest live parent instead.")]],
+    HierarchyTooDeep[[= ZHLN::Reflect::Description("UI hierarchy exceeded MAX_UI_STACK_DEPTH; overflowing widgets attached to the deepest live parent instead.")]] = 1,
     EntityNotAlive[[= ZHLN::Reflect::Description("Target UI entity is not alive (already destroyed or never existed).")]],
     ParentNotAlive[[= ZHLN::Reflect::Description("Parent entity for the GUI operation is not alive.")]],
-};
-
-// Pure result of a SweepStaleChildren call: what the GC reclaimed. .error is
-// GUIError::Success unless the sweep could not run at all.
-struct SweepReport {
-    uint32_t destroyedSubtrees = 0;          // subtrees destroyed (widget not rebuilt this frame)
-    uint32_t purgedRecords     = 0;          // dead cache records purged (entity destroyed outside the GUI)
-    Error    error {};                       // Success, or ParentNotAlive for a dead explicit parent
-
-    [[nodiscard]] constexpr bool Ok() const noexcept {
-        return !error;
-    }
 };
 
 // --- CONFIGURATION STRUCTS ---
@@ -164,14 +153,13 @@ class Context {
     }
 
     // Pushes a scope node. Past MAX_UI_STACK_DEPTH it fails with
-    // GUIError::HierarchyTooDeep as returned data - no side effects. Success is
-    // GUIError::Success (Error evaluates false in boolean contexts).
-    Error PushParent(Entity entity, uint32_t depth) noexcept {
+    // GUIError::HierarchyTooDeep. The caller MUST handle the result.
+    [[nodiscard]] std::expected<void, Error> PushParent(Entity entity, uint32_t depth) noexcept {
         if (m_stackTop < MAX_UI_STACK_DEPTH) {
             m_stack[m_stackTop++] = {.entity = entity, .depth = depth};
             return {};
         }
-        return Error(GUIError::HierarchyTooDeep);
+        return std::unexpected(Error(GUIError::HierarchyTooDeep));
     }
 
     void PopParent(bool wasPushed) noexcept {
@@ -183,9 +171,12 @@ class Context {
     // First structural error this context ran into while building (e.g. the
     // hierarchy grew past MAX_UI_STACK_DEPTH). Builders degrade gracefully and
     // keep rendering instead of aborting, so read Status() when a tree looks
-    // wrong; success is GUIError::Success, not a log line.
-    [[nodiscard]] Error Status() const noexcept {
-        return m_error;
+    // wrong; an engaged expected means clean, never an error code.
+    [[nodiscard]] std::expected<void, Error> Status() const noexcept {
+        if (m_error) {
+            return std::unexpected(m_error);
+        }
+        return {};
     }
 
     void ClearStatus() noexcept {
@@ -243,12 +234,12 @@ class Context {
         return newEntity;
     }
 
-    // Destroys a UI entity and its whole subtree. Returns GUIError::Success on
-    // success (silent, verbose-level trace aside) or a typed code for a dead
-    // input entity. Ignoring the result is legitimate fire-and-forget GC.
-    Error DestroyUIEntity(Entity ent) noexcept {
+    // Destroys a UI entity and its whole subtree. A dead input entity fails
+    // with GUIError::EntityNotAlive; success is engaged-void and silent
+    // (verbose-level trace aside). The caller MUST handle the result.
+    [[nodiscard]] std::expected<void, Error> DestroyUIEntity(Entity ent) noexcept {
         if (!m_reg->IsAlive(ent)) {
-            return Error(GUIError::EntityNotAlive);
+            return std::unexpected(Error(GUIError::EntityNotAlive));
         }
 
         ZHLN::Log<LogChannel::StdErr, LogLevel::Verbose>(
@@ -268,7 +259,9 @@ class Context {
         }
 
         for (Entity child: childrenToDestroy) {
-            DestroyUIEntity(child); // recursive result intentionally ignored
+            if (auto res = DestroyUIEntity(child); !res) {
+                return res; // propagate: a child that failed to die is a real failure
+            }
         }
 
         m_reg->Destroy(ent);
@@ -277,18 +270,18 @@ class Context {
 
     // Sweeps child widgets that were not rebuilt this frame (or whose entities
     // died outside the GUI) from under a parent node - or from the root cache
-    // when parentEntity is NullEntity. Returns a pure SweepReport for callers
-    // that care (profilers, editors, tests); everyone else may ignore it -
-    // that is the common case, and it costs nothing.
-    SweepReport SweepStaleChildren(Entity parentEntity) {
+    // when parentEntity is NullEntity. Fails only when an explicitly-passed
+    // parent is dead; success is engaged-void and silent (verbose-level
+    // traces aside). The caller MUST handle the result.
+    [[nodiscard]] std::expected<void, Error> SweepStaleChildren(Entity parentEntity) {
         Entity cacheEntity = (parentEntity != NullEntity) ? parentEntity : GetRootCacheEntity();
         if (cacheEntity == NullEntity || !m_reg->IsAlive(cacheEntity)) {
-            return SweepReport {.error = Error(GUIError::ParentNotAlive)};
+            return std::unexpected(Error(GUIError::ParentNotAlive));
         }
 
         auto* cache = m_reg->Get<Components::UIChildCacheComponent>(cacheEntity);
         if (cache == nullptr) {
-            return SweepReport {};
+            return {};
         }
 
         // A record is stale when its widget was not rebuilt this frame, OR when
@@ -301,14 +294,19 @@ class Context {
             }
         });
 
-        SweepReport report;
+        // Counters feed the verbose traces below; the API itself carries no
+        // success payload.
+        uint32_t destroyedSubtrees = 0;
+        uint32_t purgedRecords     = 0;
         for (uint64_t key: staleKeys) {
             bool wasAlive = false;
             if (const auto* rec = cache->children.Find(key)) {
                 wasAlive = m_reg->IsAlive(rec->entity);
                 if (wasAlive) {
                     // Use recursive destruction instead of plain registry destroy
-                    DestroyUIEntity(rec->entity);
+                    if (auto res = DestroyUIEntity(rec->entity); !res) {
+                        return res; // propagate: a liveness-verified entity failing to die is a real failure
+                    }
                 }
             }
             // Erase the record as well as the entity: keeping it leaks one record
@@ -317,26 +315,26 @@ class Context {
             // which is the runtime lag this GC is supposed to prevent.
             cache->children.Erase(key);
             if (wasAlive) {
-                ++report.destroyedSubtrees;
+                ++destroyedSubtrees;
             } else {
-                ++report.purgedRecords;
+                ++purgedRecords;
             }
         }
 
-        if (report.destroyedSubtrees > 0) {
+        if (destroyedSubtrees > 0) {
             ZHLN::Log<LogChannel::StdErr, LogLevel::Verbose>(
                 "[GUI::Context] Swept {} stale UI subtree(s) under parent ({}:{}): widget(s) were not rebuilt this frame. Remaining records: {}.",
-                report.destroyedSubtrees, cacheEntity.index, cacheEntity.generation, cache->children.Size()
+                destroyedSubtrees, cacheEntity.index, cacheEntity.generation, cache->children.Size()
             );
         }
-        if (report.purgedRecords > 0) {
+        if (purgedRecords > 0) {
             ZHLN::Log<LogChannel::StdErr, LogLevel::Verbose>(
                 "[GUI::Context] Purged {} orphaned UI cache record(s) under parent ({}:{}) pointing at entities destroyed outside the GUI.",
-                report.purgedRecords, cacheEntity.index, cacheEntity.generation
+                purgedRecords, cacheEntity.index, cacheEntity.generation
             );
         }
 
-        return report;
+        return {};
     }
 
     // --- WIDGET BUILDER METHODS ---
@@ -393,14 +391,16 @@ class Context {
             rect.hierarchyDepth = depth;
         });
 
-        const Error pushError = PushParent(e, depth);
-        if (pushError) {
-            RecordError(pushError);
+        const auto pushResult = PushParent(e, depth);
+        if (!pushResult) {
+            RecordError(pushResult.error()); // surfaced through Status()
         }
         std::forward<Fn>(content)();
 
-        SweepStaleChildren(e); // report intentionally ignored
-        PopParent(!pushError);
+        if (const auto sweep = SweepStaleChildren(e); !sweep) {
+            RecordError(sweep.error()); // cannot fire for a live panel, but handled regardless
+        }
+        PopParent(pushResult.has_value());
 
         return e;
     }
@@ -435,14 +435,16 @@ class Context {
             );
         });
 
-        const Error pushError = PushParent(e, depth);
-        if (pushError) {
-            RecordError(pushError);
+        const auto pushResult = PushParent(e, depth);
+        if (!pushResult) {
+            RecordError(pushResult.error()); // surfaced through Status()
         }
         std::forward<Fn>(content)();
 
-        SweepStaleChildren(e); // report intentionally ignored
-        PopParent(!pushError);
+        if (const auto sweep = SweepStaleChildren(e); !sweep) {
+            RecordError(sweep.error()); // cannot fire for a live box, but handled regardless
+        }
+        PopParent(pushResult.has_value());
 
         return e;
     }

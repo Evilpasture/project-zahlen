@@ -793,7 +793,9 @@ void RenderFrame(ZHLN::Engine& engine) {
     } else {
         DrawDropPrompt(ui);
     }
-    ui.SweepStaleChildren(ZHLN::NullEntity);
+    if (const auto sweep = ui.SweepStaleChildren(ZHLN::NullEntity); !sweep) {
+        ZHLN::Log("[glTF Inspector] UI sweep failed: {}", sweep.error().Message());
+    }
 }
 
 } // namespace
