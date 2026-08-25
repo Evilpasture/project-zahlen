@@ -153,8 +153,10 @@ class Context {
     }
 
     // Pushes a scope node. Fails (without side effects) past MAX_UI_STACK_DEPTH;
-    // the caller decides how to degrade. Success is silent.
-    [[nodiscard]] std::expected<void, Error> PushParent(Entity entity, uint32_t depth) noexcept {
+    // the caller decides how to degrade - or ignores it, that's what the
+    // builders below do while recording the error via Status(). Not nodiscard
+    // by design: the error is data, checking it is opt-in, ignoring is free.
+    std::expected<void, Error> PushParent(Entity entity, uint32_t depth) noexcept {
         if (m_stackTop < MAX_UI_STACK_DEPTH) {
             m_stack[m_stackTop++] = {.entity = entity, .depth = depth};
             return {};
@@ -234,9 +236,10 @@ class Context {
         return newEntity;
     }
 
-    // Destroys a UI entity and its whole subtree. Failing on a dead entity is
-    // reported to the caller; success is silent (verbose-level trace aside).
-    [[nodiscard]] std::expected<void, Error> DestroyUIEntity(Entity ent) noexcept {
+    // Destroys a UI entity and its whole subtree. A dead input entity is a
+    // typed failure; success is silent (verbose-level trace aside). Checking
+    // the result is opt-in - ignoring it is legitimate fire-and-forget GC.
+    std::expected<void, Error> DestroyUIEntity(Entity ent) noexcept {
         if (!m_reg->IsAlive(ent)) {
             return std::unexpected(Error(GUIError::EntityNotAlive));
         }
@@ -258,9 +261,7 @@ class Context {
         }
 
         for (Entity child: childrenToDestroy) {
-            // Children come from a liveness-verified scan of a tree structure:
-            // recursive calls cannot fail here.
-            (void)DestroyUIEntity(child);
+            DestroyUIEntity(child); // recursive result intentionally ignored
         }
 
         m_reg->Destroy(ent);
@@ -269,9 +270,10 @@ class Context {
 
     // Sweeps child widgets that were not rebuilt this frame (or whose entities
     // died outside the GUI) from under a parent node - or from the root cache
-    // when parentEntity is NullEntity. Returns a pure SweepReport; fails only
-    // when an explicitly-passed parent is dead.
-    [[nodiscard]] std::expected<SweepReport, Error> SweepStaleChildren(Entity parentEntity) {
+    // when parentEntity is NullEntity. Returns a pure SweepReport for callers
+    // that care (profilers, editors, tests); everyone else may ignore it -
+    // that is the common case, and it costs nothing.
+    std::expected<SweepReport, Error> SweepStaleChildren(Entity parentEntity) {
         Entity cacheEntity = (parentEntity != NullEntity) ? parentEntity : GetRootCacheEntity();
         if (cacheEntity == NullEntity || !m_reg->IsAlive(cacheEntity)) {
             return std::unexpected(Error(GUIError::ParentNotAlive));
@@ -299,7 +301,7 @@ class Context {
                 wasAlive = m_reg->IsAlive(rec->entity);
                 if (wasAlive) {
                     // Use recursive destruction instead of plain registry destroy
-                    (void)DestroyUIEntity(rec->entity);
+                    DestroyUIEntity(rec->entity);
                 }
             }
             // Erase the record as well as the entity: keeping it leaks one record
@@ -390,7 +392,7 @@ class Context {
         }
         std::forward<Fn>(content)();
 
-        (void)SweepStaleChildren(e);
+        SweepStaleChildren(e); // result intentionally ignored
         PopParent(pushResult.has_value());
 
         return e;
@@ -432,7 +434,7 @@ class Context {
         }
         std::forward<Fn>(content)();
 
-        (void)SweepStaleChildren(e);
+        SweepStaleChildren(e); // result intentionally ignored
         PopParent(pushResult.has_value());
 
         return e;

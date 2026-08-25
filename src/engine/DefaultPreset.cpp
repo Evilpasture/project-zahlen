@@ -230,7 +230,7 @@ void DefaultPreset::Update(Engine& engine, float dt) {
         );
     } else {
         GUI::Context ui(reg, engine.GetCurrentFrame());
-        (void)ui.SweepStaleChildren(NullEntity);
+        ui.SweepStaleChildren(NullEntity);
     }
 }
 

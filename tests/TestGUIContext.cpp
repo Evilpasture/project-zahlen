@@ -76,7 +76,7 @@ struct GUIContextTestSuite {
                     boxA1 = gui.BeginBox("a", GUI::BoxConfig {}, []() -> void {});
                     boxB1 = gui.BeginBox("b", GUI::BoxConfig {}, []() -> void {});
                 });
-                (void)gui.SweepStaleChildren(NullEntity);
+                gui.SweepStaleChildren(NullEntity); // result intentionally ignored
             }
 
             Entity root2 = NullEntity, boxA2 = NullEntity, boxB2 = NullEntity;
@@ -87,7 +87,7 @@ struct GUIContextTestSuite {
                     boxA2 = gui.BeginBox("a", GUI::BoxConfig {}, []() -> void {});
                     boxB2 = gui.BeginBox("b", GUI::BoxConfig {}, []() -> void {});
                 });
-                (void)gui.SweepStaleChildren(NullEntity);
+                gui.SweepStaleChildren(NullEntity); // result intentionally ignored
                 buildSucceeded = gui.Status().has_value(); // clean build: no structural error recorded
             }
 
@@ -175,7 +175,7 @@ struct GUIContextTestSuite {
                 GUI::Context gui(reg, 1);
                 gui.BeginPanel("p1", GUI::PanelConfig {}, []() -> void {});
                 panel2 = gui.BeginPanel("p2", GUI::PanelConfig {}, []() -> void {});
-                (void)gui.SweepStaleChildren(NullEntity);
+                gui.SweepStaleChildren(NullEntity); // result intentionally ignored
             }
 
             Entity rootCache = NullEntity;
