@@ -28,7 +28,4 @@ struct Entity {
 
 static_assert((std::is_trivially_default_constructible_v<Entity> && std::is_trivially_copyable_v<Entity>) && sizeof(Entity) == 8);
 
-// Sentinel value
-inline constexpr Entity NullEntity = {.index = 0xFFFFFFFF, .generation = 0xFFFFFFFF};
-
 } // namespace ZHLN

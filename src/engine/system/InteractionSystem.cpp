@@ -14,13 +14,13 @@ namespace ZHLN {
 void InteractionSystem::Update(Engine& engine, float dt) {
     auto& reg = engine.GetRegistry();
 
-    Entity playerEnt = NullEntity;
+    Entity playerEnt = Entity::Null();
     for (Entity e: reg.GetEntitiesWith<Components::MovementComponent>()) {
         playerEnt = e;
         break;
     }
 
-    if (playerEnt == NullEntity) {
+    if (playerEnt == Entity::Null()) {
         return;
     }
 

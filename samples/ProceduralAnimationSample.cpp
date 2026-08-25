@@ -53,7 +53,7 @@ struct FirstPersonViewState {
     bool                                    enabled                 = false;
     bool                                    toggleKeyWasDown        = false;
     bool                                    thirdPersonSaved        = false;
-    ZHLN::Entity                            cameraEntity            = ZHLN::NullEntity;
+    ZHLN::Entity                            cameraEntity            = ZHLN::Entity::Null();
     float                                   thirdPersonNearZ        = 0.1f;
     float                                   lookYawOffset           = 0.0f;
     float                                   lookPitchOffset         = 0.0f;

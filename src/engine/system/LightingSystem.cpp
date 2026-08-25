@@ -62,13 +62,13 @@ void LightingSystem::Update(Engine& engine, [[maybe_unused]] float dt) {
     auto& rc  = engine.GetRenderContext();
 
     // 1. DYNAMIC SHADOW ALLOCATION FOR PUNCTUAL LIGHTS
-    Entity playerEnt = NullEntity;
+    Entity playerEnt = Entity::Null();
     for (Entity e: reg.GetEntitiesWith<Components::PlayerTagComponent>()) {
         playerEnt = e;
         break;
     }
 
-    if (playerEnt != NullEntity) {
+    if (playerEnt != Entity::Null()) {
         struct LightDistance {
             Entity entity;
             float  distSq;

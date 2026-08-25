@@ -207,7 +207,7 @@ struct UILayoutRenderTestSuite {
                         return e;
                     }
                 }
-                return ZHLN::NullEntity;
+                return ZHLN::Entity::Null();
             };
 
             const ZHLN::Entity rootEnt   = findNamed("layout_root");

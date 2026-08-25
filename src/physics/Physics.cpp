@@ -562,7 +562,7 @@ auto PhysicsContext::CreateMeshBody(
 ) -> ZHLN::Entity {
     JPH::ShapeRefC shape = Physics::CreateMeshShape(vertices, vertexCount, indices, indexCount);
     if (shape == nullptr) {
-        return ZHLN::NullEntity;
+        return ZHLN::Entity::Null();
     }
     return CreateRigidBody(shape, pos, rot, JPH::EMotionType::Static, Layers::NON_MOVING, 0, category, mask);
 }

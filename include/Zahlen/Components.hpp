@@ -60,7 +60,7 @@ struct Components {
 
     struct UIChildCacheComponent {
         struct ChildRecord {
-            Entity           entity           = NullEntity;
+            Entity           entity           = Entity::Null();
             mutable uint64_t lastVisitedFrame = 0;
         };
         HashMap<uint64_t, ChildRecord> children;
@@ -245,7 +245,7 @@ struct Components {
         uint32_t   frameCounter           = 0;
     };
     struct TargetCameraComponent {
-        Entity    target         = NullEntity;
+        Entity    target         = Entity::Null();
         float     distance       = 4.5f;
         float     targetDistance = 4.5f;
         float     yaw            = -90.0f;
@@ -265,7 +265,7 @@ struct Components {
         ZHLN::String64 name;
     };
     struct HierarchyComponent {
-        Entity parent = NullEntity;
+        Entity parent = Entity::Null();
     };
     struct PlayerTagComponent {};
     struct MainCameraTagComponent {};
@@ -325,8 +325,8 @@ struct Components {
     };
     struct ContainerComponent {
         static constexpr size_t       MAX_SLOTS = 16;
-        std::array<Entity, MAX_SLOTS> slots     = {NullEntity, NullEntity, NullEntity, NullEntity, NullEntity, NullEntity, NullEntity, NullEntity,
-                                                   NullEntity, NullEntity, NullEntity, NullEntity, NullEntity, NullEntity, NullEntity, NullEntity};
+        std::array<Entity, MAX_SLOTS> slots     = {Entity::Null(), Entity::Null(), Entity::Null(), Entity::Null(), Entity::Null(), Entity::Null(), Entity::Null(), Entity::Null(),
+                                                   Entity::Null(), Entity::Null(), Entity::Null(), Entity::Null(), Entity::Null(), Entity::Null(), Entity::Null(), Entity::Null()};
         uint32_t                      count     = 0;
         uint32_t                      _padding  = 0;
     };
@@ -625,7 +625,7 @@ struct Components {
         JPH::Quat targetRotation = JPH::Quat::sIdentity();
         JPH::Vec3 poleVector     = JPH::Vec3(0.0f, -1.0f, 0.0f);
 
-        Entity    targetEntity = NullEntity;
+        Entity    targetEntity = Entity::Null();
         JPH::Vec3 targetOffset = JPH::Vec3::sZero();
 
         float weight            = 1.0f;

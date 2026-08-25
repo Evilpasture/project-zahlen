@@ -78,7 +78,7 @@ class UILayoutSystem {
 
             const auto& rect = rects[i];
             auto*       flex = reg.Get<Components::UIFlexComponent>(e);
-            auto* parentRect = (rect.parentEntity != NullEntity && reg.IsAlive(rect.parentEntity)) ? reg.Get<Components::UIRectComponent>(rect.parentEntity) :
+            auto* parentRect = (rect.parentEntity != Entity::Null() && reg.IsAlive(rect.parentEntity)) ? reg.Get<Components::UIRectComponent>(rect.parentEntity) :
                                                                                                      nullptr;
 
             float pWidth  = (parentRect != nullptr) ?
@@ -105,7 +105,7 @@ class UILayoutSystem {
 
             // --- ANCHOR vs FLEX POSITIONING ---
             bool isFlexChild =
-                (rect.parentEntity != NullEntity && reg.IsAlive(rect.parentEntity) && reg.Get<Components::UIFlexComponent>(rect.parentEntity) != nullptr);
+                (rect.parentEntity != Entity::Null() && reg.IsAlive(rect.parentEntity) && reg.Get<Components::UIFlexComponent>(rect.parentEntity) != nullptr);
 
             if (!isFlexChild) {
                 // Anchor-based Canvas Positioning (e.g. Center popups, anchored HUDs)
@@ -251,7 +251,7 @@ class UILayoutSystem {
             YGNodeRef childNode = nodeMap[e.Pack()];
             Entity    parent    = rects[i].parentEntity;
 
-            if (parent != NullEntity && reg.IsAlive(parent) && nodeMap.contains(parent.Pack())) {
+            if (parent != Entity::Null() && reg.IsAlive(parent) && nodeMap.contains(parent.Pack())) {
                 YGNodeRef parentNode = nodeMap[parent.Pack()];
                 uint32_t  childIndex = YGNodeGetChildCount(parentNode);
                 YGNodeInsertChild(parentNode, childNode, childIndex);
@@ -298,7 +298,7 @@ class UILayoutSystem {
         };
 
         for (size_t i = 0; i < entities.size(); ++i) {
-            if (rects[i].parentEntity == NullEntity || !reg.IsAlive(rects[i].parentEntity)) {
+            if (rects[i].parentEntity == Entity::Null() || !reg.IsAlive(rects[i].parentEntity)) {
                 ReadBackLayout(ReadBackLayout, entities[i], 0.0f, 0.0f);
             }
         }

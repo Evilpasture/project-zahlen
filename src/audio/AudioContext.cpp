@@ -501,7 +501,7 @@ constexpr size_t MAX_SYNTH_SLOTS = 32;
 
 struct VoiceSlot {
     ma_sound               sound {};
-    Entity                 owner = NullEntity;
+    Entity                 owner = Entity::Null();
     ZHLN::Atomic<uint32_t> generation {1};
     ZHLN::Atomic<bool>     inUse {false};
 
@@ -513,7 +513,7 @@ struct VoiceSlot {
 
 struct SynthSlot {
     LoopSynthData*         synthData = nullptr;
-    Entity                 owner     = NullEntity;
+    Entity                 owner     = Entity::Null();
     ZHLN::Atomic<uint32_t> generation {1};
     ZHLN::Atomic<bool>     inUse {false};
 };
@@ -1002,9 +1002,9 @@ void AudioContext::ReconcileVoices(ECS::Registry& reg, float dt) {
                 continue;
             }
 
-            if (slot.owner != NullEntity && !reg.IsAlive(slot.owner)) {
+            if (slot.owner != Entity::Null() && !reg.IsAlive(slot.owner)) {
                 slot.isStopping = true;
-                slot.owner      = NullEntity;
+                slot.owner      = Entity::Null();
             }
 
             if (slot.isStopping) {
@@ -1035,9 +1035,9 @@ void AudioContext::ReconcileVoices(ECS::Registry& reg, float dt) {
                 continue;
             }
 
-            if (slot.owner != NullEntity && !reg.IsAlive(slot.owner)) {
+            if (slot.owner != Entity::Null() && !reg.IsAlive(slot.owner)) {
                 slot.synthData->isStopping.store(true, std::memory_order::release);
-                slot.owner = NullEntity;
+                slot.owner = Entity::Null();
             }
 
             if (slot.synthData->isFinished.load(std::memory_order::acquire)) {

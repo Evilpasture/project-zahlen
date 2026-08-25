@@ -49,8 +49,8 @@ export struct LightningComponent {
     uint32_t     maxVertices     = 0;
     uint32_t     visibleVertices = 0;
 
-    Entity flashLightEntity  = NullEntity;
-    Entity impactLightEntity = NullEntity;
+    Entity flashLightEntity  = Entity::Null();
+    Entity impactLightEntity = Entity::Null();
 
     float baseAmbientExposure = 4.5f;
 

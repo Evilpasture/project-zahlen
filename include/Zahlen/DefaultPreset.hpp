@@ -34,14 +34,14 @@ class ZHLN_API DefaultPreset {
     static inline char           s_DetailMsg[256] = "";
 
     // 3D Scene Entities
-    static inline Entity s_CubeEntity = NullEntity;
-    static inline Entity s_PointLight = NullEntity;
+    static inline Entity s_CubeEntity = Entity::Null();
+    static inline Entity s_PointLight = Entity::Null();
 
     // Native ECS UI Entities
-    static inline Entity s_UIPopupBox = NullEntity;
-    static inline Entity s_BtnReload  = NullEntity;
-    static inline Entity s_BtnAnimate = NullEntity;
-    static inline Entity s_BtnQuit    = NullEntity;
+    static inline Entity s_UIPopupBox = Entity::Null();
+    static inline Entity s_BtnReload  = Entity::Null();
+    static inline Entity s_BtnAnimate = Entity::Null();
+    static inline Entity s_BtnQuit    = Entity::Null();
 
     static inline float s_AccumTime    = 0.0f;
     static inline bool  s_AnimateScene = true;

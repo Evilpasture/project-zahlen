@@ -23,8 +23,8 @@ struct UILayoutTestSuite {
             };
             const ZHLN::GUI::BoxConfig childCfg {.height = 50.0f};
 
-            ZHLN::Entity child1 = ZHLN::NullEntity;
-            ZHLN::Entity child2 = ZHLN::NullEntity;
+            ZHLN::Entity child1 = ZHLN::Entity::Null();
+            ZHLN::Entity child2 = ZHLN::Entity::Null();
             ZHLN::Entity root   = gui.Panel("root", rootCfg, [&] {
                 child1 = gui.Box("c1", childCfg, [] {});
                 child2 = gui.Box("c2", childCfg, [] {});

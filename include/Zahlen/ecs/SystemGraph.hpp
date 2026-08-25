@@ -24,12 +24,12 @@ struct ComponentAccess {
 };
 
 template <typename T>
-constexpr ComponentAccess Read() noexcept {
+constexpr auto Read() noexcept -> ComponentAccess {
     return {ComponentFamily::GetTypeID<T>(), Access::Read};
 }
 
 template <typename T>
-constexpr ComponentAccess Write() noexcept {
+constexpr auto Write() noexcept -> ComponentAccess {
     return {ComponentFamily::GetTypeID<T>(), Access::Write};
 }
 
@@ -47,24 +47,24 @@ class ZHLN_API SystemGraph {
     SystemGraph()  = default;
     ~SystemGraph() = default;
 
-    SystemGraph(const SystemGraph&)                = delete;
-    SystemGraph& operator=(const SystemGraph&)     = delete;
-    SystemGraph(SystemGraph&&) noexcept            = default;
-    SystemGraph& operator=(SystemGraph&&) noexcept = default;
+    SystemGraph(const SystemGraph&)                        = delete;
+    auto operator=(const SystemGraph&) -> SystemGraph&     = delete;
+    SystemGraph(SystemGraph&&) noexcept                    = default;
+    auto operator=(SystemGraph&&) noexcept -> SystemGraph& = default;
 
     void AddSystem(SystemInfo info);
     /** Inserts an optional subsystem before a named phase; returns false on duplicate/missing anchor. */
-    bool AddSystemBefore(SystemInfo info, std::string_view beforeSystem);
+    auto AddSystemBefore(SystemInfo info, std::string_view beforeSystem) -> bool;
     void Compile();
     void Execute(ZHLN::Engine& engine, float dt);
 
-    void                 SetSystemEnabled(std::string_view name, bool enabled) noexcept;
-    [[nodiscard]] bool   IsSystemEnabled(std::string_view name) const noexcept;
-    [[nodiscard]] size_t GetSystemCount() const noexcept;
-    [[nodiscard]] bool   IsEmpty() const noexcept;
-    void                 Clear() noexcept;
+    void               SetSystemEnabled(std::string_view name, bool enabled) noexcept;
+    [[nodiscard]] auto IsSystemEnabled(std::string_view name) const noexcept -> bool;
+    [[nodiscard]] auto GetSystemCount() const noexcept -> size_t;
+    [[nodiscard]] auto IsEmpty() const noexcept -> bool;
+    void               Clear() noexcept;
 
-    [[nodiscard]] static bool HasConflict(const SystemInfo& systemA, const SystemInfo& systemB) noexcept;
+    [[nodiscard]] static auto HasConflict(const SystemInfo& systemA, const SystemInfo& systemB) noexcept -> bool;
 
   private:
     struct Node {

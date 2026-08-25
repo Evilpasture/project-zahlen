@@ -7,7 +7,7 @@ namespace ZHLN {
 
 auto ScriptECSBridge::ResolveBoxedPointer(const BoxedObject& obj) const -> std::expected<void*, Error> {
     // Path A: Stable ECS Handle Re-resolution
-    if (obj.ownerEntity != NullEntity) {
+    if (obj.ownerEntity != Entity::Null()) {
         if (!m_registry.IsAlive(obj.ownerEntity)) {
             return std::unexpected(ScriptError::EntityNotFound);
         }
@@ -109,7 +109,7 @@ auto ScriptECSBridge::GetProperty(Entity entity, std::string_view compName, std:
 auto ScriptECSBridge::GetPropertyOf(const ScriptVal& parentVal, std::string_view propName) const -> std::expected<ScriptVal, Error> {
     void*                 parentPtr = nullptr;
     std::string_view      typeName;
-    Entity                ownerEnt = NullEntity;
+    Entity                ownerEnt = Entity::Null();
     std::string_view      rootComp;
     std::shared_ptr<void> parentOwnedKeepAlive = nullptr;
 

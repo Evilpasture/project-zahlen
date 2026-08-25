@@ -141,7 +141,7 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
         auto* skelMesh = reg.Get<Components::SkeletalMeshComponent>(e);
         if (skelMesh != nullptr && skelMesh->skeletonIndex >= 0) {
             auto*  hier       = reg.Get<Components::HierarchyComponent>(e);
-            Entity parentRoot = (hier != nullptr) ? hier->parent : NullEntity;
+            Entity parentRoot = (hier != nullptr) ? hier->parent : Entity::Null();
             if (auto* anim = reg.Get<Components::AnimatorComponent>(parentRoot)) {
                 if (anim->prefab != nullptr) {
                     totalJoints =
@@ -292,7 +292,7 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
                     JPH::Vec3 solvedTargetPos = chain.targetPosition;
                     JPH::Quat solvedTargetRot = chain.targetRotation;
 
-                    if (chain.targetEntity != NullEntity && reg.IsAlive(chain.targetEntity)) {
+                    if (chain.targetEntity != Entity::Null() && reg.IsAlive(chain.targetEntity)) {
                         if (auto* tTrans = reg.Get<Components::TransformComponent>(chain.targetEntity)) {
                             JPH::Mat44 tMat = tTrans->GetLocalMatrix();
                             solvedTargetPos = tMat * chain.targetOffset;

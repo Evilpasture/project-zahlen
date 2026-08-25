@@ -849,7 +849,7 @@ struct LightingRTTestSuite {
 
             DisableTAA(*engine);
 
-            ZHLN::Entity redLight = ZHLN::NullEntity;
+            ZHLN::Entity redLight = ZHLN::Entity::Null();
             {
                 auto& reg = engine->GetRegistry();
                 auto& rc  = engine->GetRenderContext();

@@ -26,7 +26,7 @@ struct ALifeComponent {
     uint32_t     target_node  = ALife::INVALID_GRAPH_NODE;
     float        travel_speed = 0.0f;
     uint32_t     faction_id   = 0;
-    Entity       self_entity  = NullEntity;
+    Entity       self_entity  = Entity::Null();
 
     uint32_t path[ALife::MAX_PATH_LENGTH] {};
     uint32_t path_count = 0;

@@ -86,7 +86,7 @@ struct ExplosionTestSuite {
             }
 
             ZHLN::Test::ExpectEq(comp->type, ZHLN::OrdnanceType::StandardFireball);
-            ZHLN::Test::ExpectEq(comp->debrisEntity, ZHLN::NullEntity);
+            ZHLN::Test::ExpectEq(comp->debrisEntity, ZHLN::Entity::Null());
             ZHLN::Test::ExpectTrue(!comp->fireball.empty());
             ZHLN::Test::ExpectTrue(!comp->soilSmoke.empty());
             ZHLN::Test::ExpectTrue(reg.Get<ZHLN::Components::LightComponent>(expRoot) != nullptr);
@@ -129,13 +129,13 @@ struct ExplosionTestSuite {
             }
 
             const ZHLN::Entity debrisEnt = comp->debrisEntity;
-            ZHLN::Test::ExpectTrue(debrisEnt != ZHLN::NullEntity);
+            ZHLN::Test::ExpectTrue(debrisEnt != ZHLN::Entity::Null());
             ZHLN::Test::ExpectTrue(reg.IsAlive(debrisEnt));
             ZHLN::Test::ExpectTrue(reg.Get<ZHLN::Components::MeshParticleEmitterComponent>(debrisEnt) != nullptr);
 
             constexpr float dt             = 1.0f / 60.0f;
             bool            craterObserved = false;
-            ZHLN::Entity    foundCrater    = ZHLN::NullEntity;
+            ZHLN::Entity    foundCrater    = ZHLN::Entity::Null();
 
             // 3. Simulate 60 frames (1.0s) — crater should spawn at age >= 0.20s
             for (int i = 0; i < 60; ++i) {

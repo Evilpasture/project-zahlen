@@ -36,17 +36,16 @@
 namespace {
 
 using ZHLN::Entity;
-using ZHLN::NullEntity;
 using ZHLN::ECS::Registry;
 using ZHLN::GUI::GUIError;
 namespace GUI = ZHLN::GUI;
 using Comp    = ZHLN::Components; // NB: nested types of a struct, not a namespace
 
-[[nodiscard]] size_t CountUIRects(Registry& reg) {
+[[nodiscard]] auto CountUIRects(Registry& reg) -> size_t {
     return reg.GetEntitiesWith<Comp::UIRectComponent>().size();
 }
 
-[[nodiscard]] size_t CountTotalCacheRecords(Registry& reg) {
+[[nodiscard]] auto CountTotalCacheRecords(Registry& reg) -> size_t {
     size_t total = 0;
     for (Entity e: reg.GetEntitiesWith<Comp::UIChildCacheComponent>()) {
         if (const auto* cache = reg.Get<Comp::UIChildCacheComponent>(e)) {
@@ -56,7 +55,7 @@ using Comp    = ZHLN::Components; // NB: nested types of a struct, not a namespa
     return total;
 }
 
-[[nodiscard]] size_t CountCacheRecordsOn(Registry& reg, Entity e) {
+[[nodiscard]] auto CountCacheRecordsOn(Registry& reg, Entity e) -> size_t {
     if (const auto* cache = reg.Get<Comp::UIChildCacheComponent>(e)) {
         return cache->children.Size();
     }
@@ -66,34 +65,37 @@ using Comp    = ZHLN::Components; // NB: nested types of a struct, not a namespa
 // GUI::Context keeps the cache root private by design; the tests derive it as
 // "the UISettings entity", which the builder's fallback creates on first use.
 // NOTE: on a pristine registry this only resolves AFTER the first build.
-[[nodiscard]] Entity RootCacheEntity(Registry& reg) {
+[[nodiscard]] auto RootCacheEntity(Registry& reg) -> Entity {
     const auto settings = reg.GetEntitiesWith<Comp::UISettingsComponent>();
-    return settings.empty() ? NullEntity : settings[0];
+    return settings.empty() ? Entity::Null() : settings[0];
 }
 
 } // namespace
 
 struct GUIContextTestSuite {
     struct Tests {
-
         // ------------------------------------------------------------------
         // Rebuilding the identical tree next frame must reuse entities, never
         // respawn them (respawning per frame is what makes UIs flicker).
         // ------------------------------------------------------------------
-        std::expected<void, ZHLN::Error> widget_entities_are_reused_across_frames() {
+        auto widget_entities_are_reused_across_frames() -> std::expected<void, ZHLN::Error> {
             Registry reg;
 
-            Entity root1 = NullEntity, boxA1 = NullEntity, boxB1 = NullEntity;
+            Entity root1 = Entity::Null();
+            Entity boxA1 = Entity::Null();
+            Entity boxB1 = Entity::Null();
             {
                 GUI::Context gui(reg, 1);
                 root1 = gui.Panel("root", GUI::PanelConfig {}, [&]() -> void {
                     boxA1 = gui.Box("a", GUI::BoxConfig {}, []() -> void {});
                     boxB1 = gui.Box("b", GUI::BoxConfig {}, []() -> void {});
                 });
-                gui.SweepStaleChildren(NullEntity); // frame-1 no-op sweep
+                gui.SweepStaleChildren(Entity::Null()); // frame-1 no-op sweep
             }
 
-            Entity root2 = NullEntity, boxA2 = NullEntity, boxB2 = NullEntity;
+            Entity root2          = Entity::Null();
+            Entity boxA2          = Entity::Null();
+            Entity boxB2          = Entity::Null();
             bool   buildSucceeded = false;
             {
                 GUI::Context gui(reg, 2);
@@ -101,7 +103,7 @@ struct GUIContextTestSuite {
                     boxA2 = gui.Box("a", GUI::BoxConfig {}, []() -> void {});
                     boxB2 = gui.Box("b", GUI::BoxConfig {}, []() -> void {});
                 });
-                gui.SweepStaleChildren(NullEntity); // clean: nothing is stale on an identical rebuild
+                gui.SweepStaleChildren(Entity::Null());    // clean: nothing is stale on an identical rebuild
                 buildSucceeded = gui.Status().has_value(); // clean build: engaged expected, not an error code
             }
 
@@ -118,10 +120,10 @@ struct GUIContextTestSuite {
         // A widget the parent stops rebuilding is destroyed during the parent's
         // own sweep - immediately when the Panel scope closes, not "sometime".
         // ------------------------------------------------------------------
-        std::expected<void, ZHLN::Error> stale_child_is_destroyed_when_parent_rebuilds_without_it() {
+        auto stale_child_is_destroyed_when_parent_rebuilds_without_it() -> std::expected<void, ZHLN::Error> {
             Registry reg;
 
-            Entity boxB = NullEntity;
+            Entity boxB = Entity::Null();
             {
                 GUI::Context gui(reg, 1);
                 gui.Panel("root", GUI::PanelConfig {}, [&]() -> void {
@@ -130,7 +132,7 @@ struct GUIContextTestSuite {
                 });
             }
 
-            Entity root = NullEntity;
+            Entity root = Entity::Null();
             {
                 GUI::Context gui(reg, 2);
                 root = gui.Panel("root", GUI::PanelConfig {}, [&]() -> void {
@@ -139,7 +141,7 @@ struct GUIContextTestSuite {
                 });
             }
 
-            ZHLN::Test::ExpectTrue(boxB != NullEntity);
+            ZHLN::Test::ExpectTrue(boxB != Entity::Null());
             ZHLN::Test::ExpectFalse(reg.IsAlive(boxB));
             ZHLN::Test::ExpectEq(CountUIRects(reg), 2u);
             ZHLN::Test::ExpectEq(CountCacheRecordsOn(reg, root), 1u); // only "a" survives - no stale record for "b"
@@ -153,11 +155,11 @@ struct GUIContextTestSuite {
         // is born. If swept records are not erased from the HashMap, the cache
         // grows by 1/frame and every future sweep walks all of them.
         // ------------------------------------------------------------------
-        std::expected<void, ZHLN::Error> dynamic_widget_keys_do_not_leak_cache_records() {
+        auto dynamic_widget_keys_do_not_leak_cache_records() -> std::expected<void, ZHLN::Error> {
             Registry reg;
 
             constexpr uint64_t kFrames = 50;
-            Entity             root    = NullEntity;
+            Entity             root    = Entity::Null();
 
             for (uint64_t frame = 1; frame <= kFrames; ++frame) {
                 GUI::Context gui(reg, frame);
@@ -181,18 +183,18 @@ struct GUIContextTestSuite {
         // Root-level sweep: a panel never rebuilt gets destroyed and its record
         // purged from the root cache entity.
         // ------------------------------------------------------------------
-        std::expected<void, ZHLN::Error> root_sweep_removes_unvisited_panels_and_purges_records() {
+        auto root_sweep_removes_unvisited_panels_and_purges_records() -> std::expected<void, ZHLN::Error> {
             Registry reg;
 
-            Entity panel2 = NullEntity;
+            Entity panel2 = Entity::Null();
             {
                 GUI::Context gui(reg, 1);
                 gui.Panel("p1", GUI::PanelConfig {}, []() -> void {});
                 panel2 = gui.Panel("p2", GUI::PanelConfig {}, []() -> void {});
-                gui.SweepStaleChildren(NullEntity); // frame-1 no-op sweep
+                gui.SweepStaleChildren(Entity::Null()); // frame-1 no-op sweep
             }
 
-            Entity rootCache = NullEntity;
+            Entity rootCache = Entity::Null();
             {
                 GUI::Context gui(reg, 2);
                 rootCache = RootCacheEntity(reg); // created during the frame-1 build
@@ -200,10 +202,10 @@ struct GUIContextTestSuite {
 
                 // "p2" was not rebuilt this frame: the sweep collects it, and
                 // WHAT it did is verified through registry state below.
-                gui.SweepStaleChildren(NullEntity);
+                gui.SweepStaleChildren(Entity::Null());
             }
 
-            ZHLN::Test::ExpectTrue(panel2 != NullEntity);
+            ZHLN::Test::ExpectTrue(panel2 != Entity::Null());
             ZHLN::Test::ExpectFalse(reg.IsAlive(panel2));
             ZHLN::Test::ExpectEq(CountCacheRecordsOn(reg, rootCache), 1u); // only "p1" remains recorded
 
@@ -214,10 +216,12 @@ struct GUIContextTestSuite {
         // Sweeping a nested child panel must destroy its whole subtree, not
         // leave its labels/boxes orphaned in the registry.
         // ------------------------------------------------------------------
-        std::expected<void, ZHLN::Error> nested_sweep_destroys_child_panel_and_its_contents() {
+        auto nested_sweep_destroys_child_panel_and_its_contents() -> std::expected<void, ZHLN::Error> {
             Registry reg;
 
-            Entity childPanel = NullEntity, childLabel = NullEntity, childBox = NullEntity;
+            Entity childPanel = Entity::Null();
+            Entity childLabel = Entity::Null();
+            Entity childBox   = Entity::Null();
             {
                 GUI::Context gui(reg, 1);
                 gui.Panel("root", GUI::PanelConfig {}, [&]() -> void {
@@ -236,7 +240,7 @@ struct GUIContextTestSuite {
             ZHLN::Test::ExpectFalse(reg.IsAlive(childPanel));
             ZHLN::Test::ExpectFalse(reg.IsAlive(childLabel));
             ZHLN::Test::ExpectFalse(reg.IsAlive(childBox));
-            ZHLN::Test::ExpectEq(CountUIRects(reg), 1u); // root alone
+            ZHLN::Test::ExpectEq(CountUIRects(reg), 1u);           // root alone
             ZHLN::Test::ExpectEq(CountTotalCacheRecords(reg), 1u); // root's record at the root cache
 
             return {};
@@ -246,12 +250,15 @@ struct GUIContextTestSuite {
         // DestroyUIEntity removes an entire subtree on demand; the (now dead)
         // record the root cache still holds is purged by the next sweep.
         // ------------------------------------------------------------------
-        std::expected<void, ZHLN::Error> destroy_ui_entity_removes_whole_subtree() {
+        auto destroy_ui_entity_removes_whole_subtree() -> std::expected<void, ZHLN::Error> {
             Registry reg;
-            Entity   root = NullEntity, boxB = NullEntity, label = NullEntity, boxC = NullEntity;
+            Entity   root  = Entity::Null();
+            Entity   boxB  = Entity::Null();
+            Entity   label = Entity::Null();
+            Entity   boxC  = Entity::Null();
 
             GUI::Context gui(reg, 1);
-            root               = gui.Panel("root", GUI::PanelConfig {}, [&]() -> void {
+            root = gui.Panel("root", GUI::PanelConfig {}, [&]() -> void {
                 boxB = gui.Box("b", GUI::BoxConfig {}, [&]() -> void { label = gui.Label("inside"); });
                 boxC = gui.Box("c", GUI::BoxConfig {}, []() -> void {});
             });
@@ -278,7 +285,7 @@ struct GUIContextTestSuite {
             // destroyed entity now: the sweep must purge it, not keep it around
             // (this is the orphaned-record path). Exactly one purge, no destroys.
             ZHLN::Test::ExpectEq(CountCacheRecordsOn(reg, rootCache), 1u);
-            gui.SweepStaleChildren(NullEntity); // purges the dead record
+            gui.SweepStaleChildren(Entity::Null()); // purges the dead record
             // The orphaned record is gone afterwards.
             ZHLN::Test::ExpectEq(CountCacheRecordsOn(reg, rootCache), 0u);
             ZHLN::Test::ExpectEq(CountTotalCacheRecords(reg), 0u);
@@ -292,24 +299,21 @@ struct GUIContextTestSuite {
         // leaving a dead cached reference behind. The cache must not duplicate
         // the record either.
         // ------------------------------------------------------------------
-        std::expected<void, ZHLN::Error> externally_destroyed_widget_respawns_next_frame() {
+        auto externally_destroyed_widget_respawns_next_frame() -> std::expected<void, ZHLN::Error> {
             Registry reg;
 
-            Entity boxA1 = NullEntity, root = NullEntity;
+            Entity boxA1 = Entity::Null();
+            Entity root  = Entity::Null();
             {
                 GUI::Context gui(reg, 1);
-                root  = gui.Panel("root", GUI::PanelConfig {}, [&]() -> void {
-                    boxA1 = gui.Box("a", GUI::BoxConfig {}, []() -> void {});
-                });
+                root = gui.Panel("root", GUI::PanelConfig {}, [&]() -> void { boxA1 = gui.Box("a", GUI::BoxConfig {}, []() -> void {}); });
             }
             reg.Destroy(boxA1); // the external-mistake path
 
-            Entity boxA2 = NullEntity;
+            Entity boxA2 = Entity::Null();
             {
                 GUI::Context gui(reg, 2);
-                gui.Panel("root", GUI::PanelConfig {}, [&]() -> void {
-                    boxA2 = gui.Box("a", GUI::BoxConfig {}, []() -> void {});
-                });
+                gui.Panel("root", GUI::PanelConfig {}, [&]() -> void { boxA2 = gui.Box("a", GUI::BoxConfig {}, []() -> void {}); });
             }
 
             ZHLN::Test::ExpectFalse(reg.IsAlive(boxA1));
@@ -326,15 +330,16 @@ struct GUIContextTestSuite {
         // widgets past the cap attach to the deepest LIVE parent (documented
         // degradation), and a root sweep still reclaims the entire tree.
         // ------------------------------------------------------------------
-        std::expected<void, ZHLN::Error> hierarchy_deeper_than_stack_cap_degrades_but_survives() {
+        auto hierarchy_deeper_than_stack_cap_degrades_but_survives() -> std::expected<void, ZHLN::Error> {
             Registry reg;
 
-            constexpr size_t                 kDepth = GUI::MAX_UI_STACK_DEPTH + 8;
-            std::array<Entity, kDepth + 1>   boxes {}; // 1 index-based for readability (boxes[1] == outermost)
+            constexpr size_t               kDepth = GUI::MAX_UI_STACK_DEPTH + 8;
+            std::array<Entity, kDepth + 1> boxes {}; // 1 index-based for readability (boxes[1] == outermost)
 
-            bool statusIsError = false, statusCodeIsRight = false;
+            bool statusIsError     = false;
+            bool statusCodeIsRight = false;
             {
-                GUI::Context gui(reg, 1);
+                GUI::Context                gui(reg, 1);
                 std::function<void(size_t)> build = [&](size_t level) -> void {
                     if (level > kDepth) {
                         return;
@@ -345,9 +350,9 @@ struct GUIContextTestSuite {
 
                 // Overflowing the scope stack is a typed, queryable failure -
                 // not a log line. The build itself still completed above.
-                const auto status   = gui.Status();
-                statusIsError       = !status.has_value();
-                statusCodeIsRight   = (!status.has_value()) && status.error().Is(GUIError::HierarchyTooDeep);
+                const auto status = gui.Status();
+                statusIsError     = !status.has_value();
+                statusCodeIsRight = (!status.has_value()) && status.error().Is(GUIError::HierarchyTooDeep);
             }
 
             ZHLN::Test::ExpectTrue(statusIsError);
@@ -380,7 +385,7 @@ struct GUIContextTestSuite {
             // single root sweep: exactly one destroyed subtree, no orphans.
             {
                 GUI::Context gui(reg, 2);
-                gui.SweepStaleChildren(NullEntity);
+                gui.SweepStaleChildren(Entity::Null());
             }
             ZHLN::Test::ExpectEq(CountUIRects(reg), 0u);
             ZHLN::Test::ExpectEq(CountTotalCacheRecords(reg), 0u);
@@ -393,16 +398,16 @@ struct GUIContextTestSuite {
         // entity. Document the behaviour so the sweep keeps cleanup predictable
         // for dynamic text (and so nobody "fixes" it by accident).
         // ------------------------------------------------------------------
-        std::expected<void, ZHLN::Error> label_text_change_replaces_entity_and_sweeps_old_one() {
+        auto label_text_change_replaces_entity_and_sweeps_old_one() -> std::expected<void, ZHLN::Error> {
             Registry reg;
 
-            Entity label1 = NullEntity;
+            Entity label1 = Entity::Null();
             {
                 GUI::Context gui(reg, 1);
                 gui.Panel("root", GUI::PanelConfig {}, [&]() -> void { label1 = gui.Label("count 1"); });
             }
 
-            Entity label2 = NullEntity;
+            Entity label2 = Entity::Null();
             {
                 GUI::Context gui(reg, 2);
                 gui.Panel("root", GUI::PanelConfig {}, [&]() -> void { label2 = gui.Label("count 2"); });
@@ -417,6 +422,6 @@ struct GUIContextTestSuite {
     };
 };
 
-int main() {
+auto main() -> int {
     return ZHLN::Test::Runner::Run<GUIContextTestSuite>();
 }

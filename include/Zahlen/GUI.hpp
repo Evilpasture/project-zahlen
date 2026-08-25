@@ -166,7 +166,7 @@ class [[nodiscard]] UIScope {
 
     UIScope(UIScope&& other) noexcept: m_ctx(other.m_ctx), m_entity(other.m_entity), m_pushed(other.m_pushed) {
         other.m_ctx    = nullptr;
-        other.m_entity = NullEntity;
+        other.m_entity = Entity::Null();
         other.m_pushed = false;
     }
 
@@ -177,7 +177,7 @@ class [[nodiscard]] UIScope {
             m_entity       = other.m_entity;
             m_pushed       = other.m_pushed;
             other.m_ctx    = nullptr;
-            other.m_entity = NullEntity;
+            other.m_entity = Entity::Null();
             other.m_pushed = false;
         }
         return *this;
@@ -203,7 +203,7 @@ class [[nodiscard]] UIScope {
     }
 
     Context* m_ctx    = nullptr;
-    Entity   m_entity = NullEntity;
+    Entity   m_entity = Entity::Null();
     bool     m_pushed = false;
 };
 
@@ -215,12 +215,12 @@ class Context {
     }
 
     // Frame teardown: sweeping the root cache here makes a manual
-    // SweepStaleChildren(NullEntity) at every call site redundant. The sweep
+    // SweepStaleChildren(Entity::Null()) at every call site redundant. The sweep
     // is idempotent — records visited this frame survive, re-sweeps are
     // no-ops. It cannot throw out of here: failures latch into Status()
     // (queryable while the context lives), never abort a destructor.
     ~Context() noexcept {
-        SweepStaleChildren(NullEntity);
+        SweepStaleChildren(Entity::Null());
     }
 
     Context(const Context&)            = delete;
@@ -231,7 +231,7 @@ class Context {
     }
 
     [[nodiscard]] Entity GetCurrentParent() const noexcept {
-        return (m_stackTop > 0) ? m_stack[m_stackTop - 1].entity : NullEntity;
+        return (m_stackTop > 0) ? m_stack[m_stackTop - 1].entity : Entity::Null();
     }
 
     [[nodiscard]] uint32_t GetCurrentDepth() const noexcept {
@@ -291,14 +291,14 @@ class Context {
 
     // Sweeps child widgets that were not rebuilt this frame (or whose entities
     // died outside the GUI) from under a parent node — or from the root cache
-    // when parentEntity is NullEntity. Fault-tolerant like the builders: a
+    // when parentEntity is Entity::Null(). Fault-tolerant like the builders: a
     // dead parent, or an entity that refuses to die, latches a typed error
     // into Status() and the sweep stops there. Success is silent
     // (verbose-level traces aside). Idempotent: a sweep right after a sweep
     // is a no-op.
     void SweepStaleChildren(Entity parentEntity) {
-        Entity cacheEntity = (parentEntity != NullEntity) ? parentEntity : GetRootCacheEntity();
-        if (cacheEntity == NullEntity || !m_reg->IsAlive(cacheEntity)) {
+        Entity cacheEntity = (parentEntity != Entity::Null()) ? parentEntity : GetRootCacheEntity();
+        if (cacheEntity == Entity::Null() || !m_reg->IsAlive(cacheEntity)) {
             RecordError(Error(GUIError::ParentNotAlive));
             return;
         }
@@ -366,7 +366,7 @@ class Context {
     template <typename CreateFn>
     Entity GetOrCreateEntity(uint64_t widgetKey, CreateFn&& createFn) {
         Entity parent      = GetCurrentParent();
-        Entity cacheEntity = (parent != NullEntity) ? parent : GetRootCacheEntity();
+        Entity cacheEntity = (parent != Entity::Null()) ? parent : GetRootCacheEntity();
 
         auto* cache = m_reg->Get<Components::UIChildCacheComponent>(cacheEntity);
         if (cache == nullptr) {
@@ -607,7 +607,7 @@ class Context {
     friend class UIScope;
 
     struct UIScopeNode {
-        Entity   entity = NullEntity;
+        Entity   entity = Entity::Null();
         uint32_t depth  = 1;
     };
 
@@ -615,7 +615,7 @@ class Context {
     // Private by design: the cache root is an implementation detail of the GC;
     // tests can derive it via GetEntitiesWith<UISettingsComponent>().
     Entity GetRootCacheEntity() {
-        if (m_rootCacheEntity != NullEntity && m_reg->IsAlive(m_rootCacheEntity)) {
+        if (m_rootCacheEntity != Entity::Null() && m_reg->IsAlive(m_rootCacheEntity)) {
             return m_rootCacheEntity;
         }
 
@@ -690,7 +690,7 @@ class Context {
     std::array<UIScopeNode, MAX_UI_STACK_DEPTH> m_stack {};
     uint32_t                                    m_stackTop        = 0;
     uint32_t                                    m_autoIdCounter   = 0;
-    Entity                                      m_rootCacheEntity = NullEntity;
+    Entity                                      m_rootCacheEntity = Entity::Null();
     Error                                       m_error {};
 };
 
@@ -698,7 +698,7 @@ inline void UIScope::Dismiss() noexcept {
     if (m_ctx != nullptr) {
         m_ctx->InternalPop(m_pushed, m_entity);
         m_ctx    = nullptr;
-        m_entity = NullEntity;
+        m_entity = Entity::Null();
         m_pushed = false;
     }
 }

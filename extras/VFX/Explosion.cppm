@@ -334,7 +334,7 @@ export struct ExplosionComponent {
     std::vector<ExplosionParticle> soilSmoke;
     std::vector<ShockwaveParticle> shockwaves;
 
-    Entity debrisEntity  = NullEntity;
+    Entity debrisEntity  = Entity::Null();
     bool   craterSpawned = false;
 };
 
@@ -408,7 +408,7 @@ export class ExplosionSystem {
         }
 
         Entity root         = reg.Create();
-        Entity debrisEntity = (type == OrdnanceType::ArtilleryMortar) ? reg.Create() : NullEntity;
+        Entity debrisEntity = (type == OrdnanceType::ArtilleryMortar) ? reg.Create() : Entity::Null();
 
         initialExp.debrisEntity = debrisEntity;
 
@@ -431,7 +431,7 @@ export class ExplosionSystem {
             std::move(initialExp)
         );
 
-        if (debrisEntity != NullEntity) {
+        if (debrisEntity != Entity::Null()) {
             reg.Add(
                 debrisEntity, Components::NameComponent {.name = String64("Artillery3DDebris")}, Components::TransformComponent {.position = origin},
                 Components::MeshParticleEmitterComponent {
@@ -567,7 +567,7 @@ export class ExplosionSystem {
 
                 // Clean up explosion particle root and children when particles finish
                 if (exp.age > exp.duration) {
-                    if (exp.debrisEntity != NullEntity) {
+                    if (exp.debrisEntity != Entity::Null()) {
                         ecb.DestroyEntity(exp.debrisEntity);
                     }
                     ecb.DestroyEntity(e); // Atomically destroys root and its LightComponent

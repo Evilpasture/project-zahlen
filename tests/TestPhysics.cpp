@@ -48,7 +48,7 @@ struct PhysicsTestSuite {
             // Create static ground box at (0, 0, 0) with half-extents (10, 1, 10)
             auto         boxShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 10.0f, 1.0f, 10.0f);
             ZHLN::Entity ground = pc.CreateRigidBody(boxShape, JPH::RVec3(0, 0, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::NON_MOVING);
-            ZHLN::Test::ExpectTrue(ground != ZHLN::NullEntity);
+            ZHLN::Test::ExpectTrue(ground != ZHLN::Entity::Null());
 
             pc.OptimizeBroadphase();
 
@@ -78,7 +78,7 @@ struct PhysicsTestSuite {
             auto         sphereShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Sphere, 0.5f);
             ZHLN::Entity sphere =
                 pc.CreateRigidBody(sphereShape, JPH::RVec3(0, 10, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::MOVING);
-            ZHLN::Test::ExpectTrue(sphere != ZHLN::NullEntity);
+            ZHLN::Test::ExpectTrue(sphere != ZHLN::Entity::Null());
 
             pc.OptimizeBroadphase();
 

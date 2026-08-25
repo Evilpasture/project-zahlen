@@ -17,7 +17,7 @@ JPH::Mat44 GetLogicalWorldTransform(const ECS::Registry& reg, Entity e) noexcept
     JPH::Mat44  localMatrix = (trans != nullptr) ? trans->GetLocalMatrix() : JPH::Mat44::sIdentity();
 
     const auto* hierarchy = reg.Get<Components::HierarchyComponent>(e);
-    if ((hierarchy != nullptr) && hierarchy->parent != NullEntity && reg.IsAlive(hierarchy->parent)) {
+    if ((hierarchy != nullptr) && hierarchy->parent != Entity::Null() && reg.IsAlive(hierarchy->parent)) {
         static thread_local int recursionDepth = 0;
         if (recursionDepth > 16) {
             return localMatrix;
@@ -37,7 +37,7 @@ JPH::Mat44 TransformSystem::GetWorldTransform(const ECS::Registry& reg, Entity e
     JPH::Mat44  localMatrix = (trans != nullptr) ? trans->GetLocalMatrix() : JPH::Mat44::sIdentity();
 
     const auto* hierarchy = reg.Get<Components::HierarchyComponent>(e);
-    if ((hierarchy != nullptr) && hierarchy->parent != NullEntity && reg.IsAlive(hierarchy->parent)) {
+    if ((hierarchy != nullptr) && hierarchy->parent != Entity::Null() && reg.IsAlive(hierarchy->parent)) {
         JPH::Mat44 parentLogical = GetLogicalWorldTransform(reg, hierarchy->parent);
         return parentLogical * localMatrix;
     }

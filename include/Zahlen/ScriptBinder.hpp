@@ -39,7 +39,7 @@ struct ScriptArray {
 
 struct BoxedObject {
     std::string_view typeName;
-    Entity           ownerEntity = NullEntity;
+    Entity           ownerEntity = Entity::Null();
     std::string_view compName;
     std::string_view propName;
     size_t           elementIndex = SIZE_MAX;
@@ -84,7 +84,7 @@ auto ToScriptVal(const T& val) -> ScriptVal {
     } else if constexpr (std::is_class_v<Decayed>) {
         return BoxedObject {
             .typeName     = ZHLN::Reflect::TypeName<Decayed>(),
-            .ownerEntity  = NullEntity,
+            .ownerEntity  = Entity::Null(),
             .compName     = {},
             .propName     = {},
             .elementIndex = SIZE_MAX,

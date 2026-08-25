@@ -39,7 +39,7 @@ void SpatialGrid::UpdateEntity(ECS::Registry& reg, Entity handle, JPH::RVec3Arg 
     }
 
     // Cache the entity handle inside the component if not already done
-    if (comp->self_entity == NullEntity) {
+    if (comp->self_entity == Entity::Null()) {
         comp->self_entity = handle;
     }
 

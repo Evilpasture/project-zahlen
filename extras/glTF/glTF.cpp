@@ -168,7 +168,7 @@ void ClearInstances(InspectorState& state) {
     }
     auto& reg = state.engine->GetRegistry();
     for (ZHLN::Entity e: state.instances) {
-        if (e != ZHLN::NullEntity && reg.IsAlive(e)) {
+        if (e != ZHLN::Entity::Null() && reg.IsAlive(e)) {
             reg.Destroy(e);
         }
     }
@@ -195,7 +195,7 @@ void ToggleClipPlayback(InspectorState& state, int32_t clipIndex) {
     }
     auto&              reg  = state.engine->GetRegistry();
     const ZHLN::Entity root = state.instances[0];
-    if (root == ZHLN::NullEntity || !reg.IsAlive(root)) {
+    if (root == ZHLN::Entity::Null() || !reg.IsAlive(root)) {
         return;
     }
     if (reg.Get<ZHLN::Components::AnimatorComponent>(root) == nullptr) {

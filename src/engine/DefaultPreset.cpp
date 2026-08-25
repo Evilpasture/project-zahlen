@@ -30,12 +30,12 @@ void DefaultPreset::ClearFallback() noexcept {
     s_IsActive     = false;
     s_Reason       = FallbackReason::None;
     s_DetailMsg[0] = '\0';
-    s_CubeEntity   = NullEntity;
-    s_PointLight   = NullEntity;
-    s_UIPopupBox   = NullEntity;
-    s_BtnReload    = NullEntity;
-    s_BtnAnimate   = NullEntity;
-    s_BtnQuit      = NullEntity;
+    s_CubeEntity   = Entity::Null();
+    s_PointLight   = Entity::Null();
+    s_UIPopupBox   = Entity::Null();
+    s_BtnReload    = Entity::Null();
+    s_BtnAnimate   = Entity::Null();
+    s_BtnQuit      = Entity::Null();
     s_AccumTime    = 0.0f;
     s_PopupVisible = true;
 }

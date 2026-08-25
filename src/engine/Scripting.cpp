@@ -584,7 +584,7 @@ void RegisterCreativeWorkCommands() {
 
             ZHLN::CreativeWorksFactory::SpawnParams params {.createPhysics = true, .isStaticPhysics = true, .roughness = a.roughness, .metallic = a.metallic};
 
-            ZHLN::Entity e = ZHLN::NullEntity;
+            ZHLN::Entity e = ZHLN::Entity::Null();
             if (a.heights != nullptr && a.colorsRGBA != nullptr) {
                 e = ZHLN::CreativeWorksFactory::CreateTerrainFromData(*engine, samples, worldSize, a.heights, a.colorsRGBA, params);
             } else {

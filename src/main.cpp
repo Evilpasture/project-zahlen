@@ -516,13 +516,13 @@ void UISystem(ZHLN::Engine& engine) {
 
     ImGui::SetNextWindowPos({10.0f, 50.0f}, ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Coordinates HUD", nullptr, hudFlags)) {
-        ZHLN::Entity playerEnt = ZHLN::NullEntity;
+        ZHLN::Entity playerEnt = ZHLN::Entity::Null();
         for (ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::MovementComponent>()) {
             playerEnt = e;
             break;
         }
 
-        if (playerEnt != ZHLN::NullEntity) {
+        if (playerEnt != ZHLN::Entity::Null()) {
             if (auto* trans = reg.Get<ZHLN::Components::TransformComponent>(playerEnt)) {
                 ImGui::Text("Player Pos:  X: %.2f, Y: %.2f, Z: %.2f", trans->position.GetX(), trans->position.GetY(), trans->position.GetZ());
             }
@@ -708,7 +708,7 @@ void UISystem(ZHLN::Engine& engine) {
 
 struct EditorState {
     bool         simulationRunning = false;
-    ZHLN::Entity selectedEntity    = ZHLN::NullEntity;
+    ZHLN::Entity selectedEntity    = ZHLN::Entity::Null();
     bool         freeCamActive     = true;
     float        freeCamSpeed      = 25.0f;
 };
@@ -848,13 +848,13 @@ void DrawEditorPanels(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& opti
 
     // --- COMPONENT INSPECTOR PANEL ---
     ImGui::Begin("Component Inspector");
-    if (s_EditorState.selectedEntity != ZHLN::NullEntity && reg.IsAlive(s_EditorState.selectedEntity)) {
+    if (s_EditorState.selectedEntity != ZHLN::Entity::Null() && reg.IsAlive(s_EditorState.selectedEntity)) {
         ZHLN::Entity e = s_EditorState.selectedEntity;
         ImGui::TextUnformatted(std::format("Active Entity ID: {} (Gen: {})", e.index, e.generation).c_str());
         ImGui::SameLine();
         if (ImGui::Button("Delete Entity")) {
             reg.Destroy(e);
-            s_EditorState.selectedEntity = ZHLN::NullEntity;
+            s_EditorState.selectedEntity = ZHLN::Entity::Null();
             ImGui::End();
             return;
         }
@@ -995,7 +995,7 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
 
             if (isMouseDown && !wasMouseDown) {
                 auto hit                     = CastPickingRay(engine, cam);
-                s_EditorState.selectedEntity = hit.hasHit ? hit.handle : ZHLN::NullEntity;
+                s_EditorState.selectedEntity = hit.hasHit ? hit.handle : ZHLN::Entity::Null();
             }
             wasMouseDown = isMouseDown;
         }

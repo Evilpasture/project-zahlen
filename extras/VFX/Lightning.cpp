@@ -393,10 +393,10 @@ auto Update(Engine& engine, float dt) -> void {
 
     for (const Entity deadEnt: deadEntities) {
         if (const auto* bolt = reg.Get<LightningComponent>(deadEnt)) {
-            if (bolt->flashLightEntity != NullEntity && reg.IsAlive(bolt->flashLightEntity)) {
+            if (bolt->flashLightEntity != Entity::Null() && reg.IsAlive(bolt->flashLightEntity)) {
                 reg.Destroy(bolt->flashLightEntity);
             }
-            if (bolt->impactLightEntity != NullEntity && reg.IsAlive(bolt->impactLightEntity)) {
+            if (bolt->impactLightEntity != Entity::Null() && reg.IsAlive(bolt->impactLightEntity)) {
                 reg.Destroy(bolt->impactLightEntity);
             }
         }

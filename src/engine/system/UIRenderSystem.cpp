@@ -106,14 +106,14 @@ void UIRenderSystem::Update(Engine& engine) {
 
     auto IsEntityOrAncestorHidden = [&](Entity ent) -> bool {
         Entity curr = ent;
-        while (curr != NullEntity && reg.IsAlive(curr)) {
+        while (curr != Entity::Null() && reg.IsAlive(curr)) {
             if (auto* mesh = reg.Get<Components::MeshComponent>(curr)) {
                 if ((mesh->flags & DrawFlags::Hidden) != DrawFlags::None) {
                     return true;
                 }
             }
             auto* rect = reg.Get<Components::UIRectComponent>(curr);
-            curr       = (rect != nullptr) ? rect->parentEntity : NullEntity;
+            curr       = (rect != nullptr) ? rect->parentEntity : Entity::Null();
         }
         return false;
     };
@@ -177,7 +177,7 @@ void UIRenderSystem::Update(Engine& engine) {
             continue;
         }
 
-        if (rect->parentEntity == NullEntity || !reg.IsAlive(rect->parentEntity)) {
+        if (rect->parentEntity == Entity::Null() || !reg.IsAlive(rect->parentEntity)) {
             continue;
         }
 

@@ -18,13 +18,13 @@ class EntityCommandBuffer {
         Reset();
     }
 
-    EntityCommandBuffer(const EntityCommandBuffer&)            = delete;
-    EntityCommandBuffer& operator=(const EntityCommandBuffer&) = delete;
-    EntityCommandBuffer(EntityCommandBuffer&&)                 = delete;
-    EntityCommandBuffer& operator=(EntityCommandBuffer&&)      = delete;
+    EntityCommandBuffer(const EntityCommandBuffer&)                    = delete;
+    auto operator=(const EntityCommandBuffer&) -> EntityCommandBuffer& = delete;
+    EntityCommandBuffer(EntityCommandBuffer&&)                         = delete;
+    auto operator=(EntityCommandBuffer&&) -> EntityCommandBuffer&      = delete;
 
     // --- 1. Create Entity (Empty) ---
-    [[nodiscard]] Entity CreateEntity() {
+    [[nodiscard]] auto CreateEntity() -> Entity {
         Entity e = {.index = _tempIndexCounter++, .generation = 0xFFFFFFFF};
         _commands.push_back({CommandType::Create, e, 0, nullptr, nullptr, nullptr});
         return e;
@@ -32,7 +32,7 @@ class EntityCommandBuffer {
 
     // --- 2. Create Entity with Component Instances (Fold Expression) ---
     template <typename C1, typename... Cs>
-    Entity CreateEntity(C1&& c1, Cs&&... cs) {
+    auto CreateEntity(C1&& c1, Cs&&... cs) -> Entity {
         Entity e = CreateEntity();
         AddComponent(e, std::forward<C1>(c1));
         (AddComponent(e, std::forward<Cs>(cs)), ...);
@@ -42,7 +42,7 @@ class EntityCommandBuffer {
     // --- 3. Create Entity with Default-Constructed Components by Type (Fold Expression) ---
     template <typename T1, typename... Ts>
         requires(std::is_default_constructible_v<T1> && (std::is_default_constructible_v<Ts> && ...))
-    Entity CreateEntity() {
+    auto CreateEntity() -> Entity {
         Entity e = CreateEntity();
         AddComponent<T1>(e);
         (AddComponent<Ts>(e), ...);
@@ -62,12 +62,12 @@ class EntityCommandBuffer {
         void* storage = ::operator new(sizeof(ComponentType), std::align_val_t {alignof(ComponentType)});
         ::new (storage) ComponentType(std::forward<T>(component));
 
-        auto destructor = [](void* ptr) {
+        auto destructor = [](void* ptr) -> auto {
             static_cast<ComponentType*>(ptr)->~ComponentType();
             ::operator delete(ptr, std::align_val_t {alignof(ComponentType)});
         };
 
-        auto applyFn = [](Registry& reg, Entity target, void* ptr) { reg.Add<ComponentType>(target, std::move(*static_cast<ComponentType*>(ptr))); };
+        auto applyFn = [](Registry& reg, Entity target, void* ptr) -> auto { reg.Add<ComponentType>(target, std::move(*static_cast<ComponentType*>(ptr))); };
 
         _commands.push_back({CommandType::AddComponent, e, familyId, storage, destructor, applyFn});
     }

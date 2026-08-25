@@ -2070,7 +2070,7 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
                 const JPH::Mat44 worldItem = rootWorld * itemHandling->itemModelTransform;
                 JPH::Mat44       localItem = worldItem;
                 if (const auto* hierarchy = registry.Get<Components::HierarchyComponent>(itemHandling->itemEntity);
-                    hierarchy != nullptr && hierarchy->parent != NullEntity && registry.IsAlive(hierarchy->parent)) {
+                    hierarchy != nullptr && hierarchy->parent != Entity::Null() && registry.IsAlive(hierarchy->parent)) {
                     if (hierarchy->parent == entity) {
                         localItem = itemHandling->itemModelTransform;
                     } else if (const auto* parentWorld = registry.Get<Components::WorldTransformComponent>(hierarchy->parent)) {

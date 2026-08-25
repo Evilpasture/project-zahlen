@@ -432,7 +432,7 @@ auto TrySpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, const JPH::M
     const float* ef  = part.defaultMaterial.emissiveFactor;
     float        lum = ef[0] * 0.2126f + ef[1] * 0.7152f + ef[2] * 0.0722f;
     if (lum <= 0.01f) {
-        return NullEntity;
+        return Entity::Null();
     }
 
     JPH::Vec3 localCenter(
@@ -593,7 +593,7 @@ auto InstantiatePrefab(
     uint32_t           maxCount
 ) -> uint32_t {
     uint32_t spawnedCount = 0;
-    Entity   rootEntity   = NullEntity;
+    Entity   rootEntity   = Entity::Null();
     uint32_t startIndex   = 0;
 
     if (!params.createPhysics) {
@@ -639,7 +639,7 @@ auto InstantiatePrefab(
         spawnedCount++;
 
         Entity glowEnt = TrySpawnEmissiveVPL(reg, prefab.parts[i], baseTransform * GetNodeLogicalTransform(prefab, prefab.parts[i].nodeIndex), scaleMult);
-        if (glowEnt != NullEntity) {
+        if (glowEnt != Entity::Null()) {
             if (outBuffer != nullptr && spawnedCount < maxCount) {
                 outBuffer[spawnedCount] = glowEnt;
             }
@@ -682,8 +682,8 @@ void SetupPlayerRagdoll(PhysicsContext& pc, ECS::Registry& reg, Entity playerEnt
     for (Entity part: visualParts) {
         reg.Patch<Components::SkeletalMeshComponent>(part, [&](auto& skelMesh) -> auto {
             auto*  hier       = reg.Get<Components::HierarchyComponent>(part);
-            Entity parentRoot = (hier != nullptr) ? hier->parent : NullEntity;
-            if (parentRoot != NullEntity) {
+            Entity parentRoot = (hier != nullptr) ? hier->parent : Entity::Null();
+            if (parentRoot != Entity::Null()) {
                 if (auto* animComp = reg.Get<Components::AnimatorComponent>(parentRoot)) {
                     if ((animComp->prefab != nullptr) && skelMesh.skeletonIndex >= 0) {
                         targetSkeleton = &animComp->prefab->skeletons[skelMesh.skeletonIndex];
