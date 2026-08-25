@@ -52,24 +52,14 @@ float GetNoise3D(uint3 tid, float time) {
     return frac(spatial + time * 60.0f * 0.6180339887f);
 }
 
-float SampleShadowPCF3x3(float3 projCoords, float cascade, float angle) {
-    float shadow       = 0.0f;
-    float texelSize    = 1.0f / float(frame.shadowResolution);
-    float bias         = 0.0012f * (cascade + 1.0f);
-    float compareDepth = projCoords.z - bias;
-
-    float s = sin(angle);
-    float c = cos(angle);
-
-    float2 offsets[9] = { float2(-1.0f, -1.0f), float2(0.0f, -1.0f), float2(1.0f, -1.0f), float2(-1.0f, 0.0f), float2(0.0f, 0.0f),
-                          float2(1.0f, 0.0f),   float2(-1.0f, 1.0f), float2(0.0f, 1.0f),  float2(1.0f, 1.0f) };
-
-    [unroll]
-    for (int i = 0; i < 9; ++i) {
-        float2 rotatedOffset = float2(offsets[i].x * c - offsets[i].y * s, offsets[i].x * s + offsets[i].y * c) * texelSize;
-        shadow += shadowMap.SampleCmpLevelZero(shadowSampler, float3(projCoords.xy + rotatedOffset, cascade), compareDepth);
-    }
-    return shadow / 9.0f;
+float SampleShadowFast(float3 projCoords, float cascade, float angle) {
+    // Froxel scattering and temporal accumulation blur the result; use one
+    // comparison fetch instead of a 3x3 PCF kernel per voxel.
+    const float texelSize    = 1.0f / float(frame.shadowResolution);
+    const float bias         = 0.0012f * (cascade + 1.0f);
+    const float compareDepth = projCoords.z - bias;
+    const float2 jitter      = float2(cos(angle), sin(angle)) * texelSize;
+    return shadowMap.SampleCmpLevelZero(shadowSampler, float3(projCoords.xy + jitter, cascade), compareDepth);
 }
 
 [numthreads(8, 8, 1)]
@@ -124,7 +114,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     if (lightPC.enableShadows != 0 && projCoords.x >= 0.0f && projCoords.x <= 1.0f && projCoords.y >= 0.0f && projCoords.y <= 1.0f && projCoords.z >= 0.0f &&
         projCoords.z <= 1.0f) {
         float rotationAngle = GetNoise3D(tid, frame.camPos.w) * 2.0f * 3.14159265f;
-        shadow              = SampleShadowPCF3x3(projCoords, (float) cascadeIndex, rotationAngle);
+        shadow              = SampleShadowFast(projCoords, (float) cascadeIndex, rotationAngle);
 
         float3 boundaryDist = min(projCoords.xyz, 1.0f - projCoords.xyz);
         float fade          = saturate(min(boundaryDist.x, min(boundaryDist.y, boundaryDist.z)) * 8.0f);

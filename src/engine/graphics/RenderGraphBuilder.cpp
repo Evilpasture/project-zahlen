@@ -227,9 +227,11 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeVolumetricFogInjectPass() const noexcept {
         return Vk::MakePass<"VolumetricFogInject", Vk::ComputeWrite<Res_VoxelMedia>>([this](VkCommandBuffer c) noexcept {
+            // Noise texture/sampler are static and were written into both
+            // descriptor-heap frames during initialization.
             self.volumetricFogInjectPass.WriteHeap(
-                self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ComputeWrite<Res_VoxelMedia>>(self.graphResources.voxelMedia),
-                self.frames.frameUniformBuffers[fIdx], self.frames.fogVolumesBuffer[fIdx]
+                self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ComputeWrite<Res_VoxelMedia>>(self.graphResources.voxelMedia), Vk::SkipWrite {},
+                Vk::SkipWrite {}, self.frames.frameUniformBuffers[fIdx], self.frames.fogVolumesBuffer[fIdx]
             );
 
             VolumetricFogPushConstants fogPC = {};

@@ -714,6 +714,10 @@ struct RenderContext::Impl {
     Vk::Sampler defaultSampler;
     Vk::Sampler pointSampler;
 
+    Vk::Image      volumetricNoiseImage;
+    Vk::ImageView  volumetricNoiseView;
+    VkImageViewCreateInfo volumetricNoiseViewInfo {};
+
     ZHLN::Array<Vk::Image>     textureImages;
     ZHLN::Array<Vk::ImageView> textureViews;
 
@@ -1122,6 +1126,8 @@ struct RenderContext::Impl {
 
     void               SortDrawQueue();
     [[nodiscard]] auto InitializeSystemTextures() noexcept -> std::expected<void, Error>;
+    [[nodiscard]] auto InitializeVolumetricNoiseTexture() noexcept -> std::expected<void, Error>;
+    void               WriteVolumetricNoiseDescriptor() noexcept;
 
     void RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Compute> compCmd);
     void RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd);

@@ -118,6 +118,11 @@ template <typename T, typename U>
     return (value + alignment - 1) & ~(alignment - 1);
 }
 
+template <typename T, typename U>
+[[nodiscard]] constexpr auto AlignDown(T value, U alignment) noexcept -> T {
+    return value & ~(alignment - 1);
+}
+
 // ============================================================================
 // Descriptor Heap Abstraction
 // ============================================================================
@@ -192,6 +197,7 @@ class DescriptorHeap {
     uint32_t     _capacity     = 0;
     VkDeviceSize _stride       = 0;
     VkDeviceSize _reservedSize = 0;
+    VkDeviceSize _nonCoherentAtomSize = 1;
 
     Buffer               _buffer;
     Buffer::MappedRegion _mappedRegion;
@@ -231,6 +237,8 @@ class ResourceWriteBatch {
     void Flush(VkDevice device, PFN_vkWriteResourceDescriptorsEXT writeFn, void* mappedPtr, VkDeviceSize stride) noexcept;
 
     [[nodiscard]] auto Empty() const noexcept -> bool;
+    [[nodiscard]] auto SlotCount() const noexcept -> uint32_t;
+    [[nodiscard]] auto SlotsData() const noexcept -> const uint32_t*;
 
   private:
     struct Impl;
@@ -253,6 +261,8 @@ class SamplerWriteBatch {
     void Flush(VkDevice device, PFN_vkWriteSamplerDescriptorsEXT writeFn, void* mappedPtr, VkDeviceSize stride) noexcept;
 
     [[nodiscard]] auto Empty() const noexcept -> bool;
+    [[nodiscard]] auto SlotCount() const noexcept -> uint32_t;
+    [[nodiscard]] auto SlotsData() const noexcept -> const uint32_t*;
 
   private:
     struct Impl;

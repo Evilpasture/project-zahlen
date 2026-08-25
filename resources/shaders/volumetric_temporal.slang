@@ -79,18 +79,15 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     float4 minBox = current;
     float4 maxBox = current;
 
+    // Axis cross: 7 taps rather than a 3x3x3 27-tap neighborhood.
+    const int3 offsets[7] = {int3(0, 0, 0), int3(1, 0, 0),  int3(-1, 0, 0), int3(0, 1, 0),
+                             int3(0, -1, 0), int3(0, 0, 1), int3(0, 0, -1)};
     [unroll]
-    for (int dz = -1; dz <= 1; ++dz) {
-        [unroll]
-        for (int dy = -1; dy <= 1; ++dy) {
-            [unroll]
-            for (int dx = -1; dx <= 1; ++dx) {
-                int3 samplePos  = clamp(int3(tid) + int3(dx, dy, dz), int3(0, 0, 0), int3(gridDim) - int3(1, 1, 1));
-                float4 neighbor = inVoxelIntegratedCurrent[samplePos];
-                minBox          = min(minBox, neighbor);
-                maxBox          = max(maxBox, neighbor);
-            }
-        }
+    for (int i = 0; i < 7; ++i) {
+        int3 samplePos  = clamp(int3(tid) + offsets[i], int3(0, 0, 0), int3(gridDim) - int3(1, 1, 1));
+        float4 neighbor = inVoxelIntegratedCurrent[samplePos];
+        minBox          = min(minBox, neighbor);
+        maxBox          = max(maxBox, neighbor);
     }
 
     float4 boxCenter = (minBox + maxBox) * 0.5f;

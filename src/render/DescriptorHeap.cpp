@@ -91,6 +91,10 @@ auto DescriptorHeap<Type>::Init(const Context& ctx, Allocator& allocator, uint32
         .properties = {},
     };
     vkGetPhysicalDeviceProperties2(ctx.Physical(), &props2);
+    _nonCoherentAtomSize = props2.properties.limits.nonCoherentAtomSize;
+    if (_nonCoherentAtomSize == 0) {
+        _nonCoherentAtomSize = 1;
+    }
 
     VkDeviceSize heap_alignment = 0;
     VkDeviceSize max_heap_size  = 0;
@@ -185,8 +189,25 @@ void DescriptorHeap<Type>::Flush(ResourceWriteBatch& batch) noexcept
     requires(Type == DescriptorHeapType::Resource)
 {
     if (Valid() && _vkWriteDescriptorsEXT != nullptr) {
+        const auto  count = batch.SlotCount();
+        const auto* slots = batch.SlotsData();
+        // Resolve the dirty byte range BEFORE Flush() clears the batch's slot
+        // vector (clear() does not free but we don't want to rely on that).
+        VkDeviceSize flushOffset = 0;
+        VkDeviceSize flushSize   = 0;
+        if (count > 0 && slots != nullptr && _stride > 0) {
+            const auto [minIt, maxIt] = std::minmax_element(slots, slots + count);
+            flushOffset               = static_cast<VkDeviceSize>(*minIt) * _stride;
+            flushSize                 = (static_cast<VkDeviceSize>(*maxIt) + 1U) * _stride - flushOffset;
+            // vkFlushMappedMemoryRanges requires offsets/sizes aligned to
+            // nonCoherentAtomSize; round down the offset and extend the size.
+            flushOffset = AlignDown(flushOffset, _nonCoherentAtomSize);
+            flushSize   = AlignUp(flushSize, _nonCoherentAtomSize);
+        }
         batch.Flush(_device, _vkWriteDescriptorsEXT, _mappedPtr, _stride);
-        FlushHostCache(0, _stride * _capacity);
+        if (flushSize > 0) {
+            FlushHostCache(flushOffset, flushSize);
+        }
     }
 }
 
@@ -195,8 +216,21 @@ void DescriptorHeap<Type>::Flush(SamplerWriteBatch& batch) noexcept
     requires(Type == DescriptorHeapType::Sampler)
 {
     if (Valid() && _vkWriteDescriptorsEXT != nullptr) {
+        const auto  count = batch.SlotCount();
+        const auto* slots = batch.SlotsData();
+        VkDeviceSize flushOffset = 0;
+        VkDeviceSize flushSize   = 0;
+        if (count > 0 && slots != nullptr && _stride > 0) {
+            const auto [minIt, maxIt] = std::minmax_element(slots, slots + count);
+            flushOffset               = static_cast<VkDeviceSize>(*minIt) * _stride;
+            flushSize                 = (static_cast<VkDeviceSize>(*maxIt) + 1U) * _stride - flushOffset;
+            flushOffset = AlignDown(flushOffset, _nonCoherentAtomSize);
+            flushSize   = AlignUp(flushSize, _nonCoherentAtomSize);
+        }
         batch.Flush(_device, _vkWriteDescriptorsEXT, _mappedPtr, _stride);
-        FlushHostCache(0, _stride * _capacity);
+        if (flushSize > 0) {
+            FlushHostCache(flushOffset, flushSize);
+        }
     }
 }
 
@@ -221,6 +255,14 @@ auto ResourceWriteBatch::operator=(ResourceWriteBatch&& other) noexcept -> Resou
 
 auto ResourceWriteBatch::Empty() const noexcept -> bool {
     return _impl->slots.empty();
+}
+
+auto ResourceWriteBatch::SlotCount() const noexcept -> uint32_t {
+    return static_cast<uint32_t>(_impl->slots.size());
+}
+
+auto ResourceWriteBatch::SlotsData() const noexcept -> const uint32_t* {
+    return _impl->slots.data();
 }
 
 void ResourceWriteBatch::AddImage(TextureHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept {
@@ -321,6 +363,14 @@ auto SamplerWriteBatch::operator=(SamplerWriteBatch&& other) noexcept -> Sampler
 
 auto SamplerWriteBatch::Empty() const noexcept -> bool {
     return _impl->slots.empty();
+}
+
+auto SamplerWriteBatch::SlotCount() const noexcept -> uint32_t {
+    return static_cast<uint32_t>(_impl->slots.size());
+}
+
+auto SamplerWriteBatch::SlotsData() const noexcept -> const uint32_t* {
+    return _impl->slots.data();
 }
 
 void SamplerWriteBatch::AddSampler(SamplerHandle handle, const VkSamplerCreateInfo& createInfo) noexcept {

@@ -138,11 +138,14 @@ void RenderContext::Impl::SortDrawQueue() {
 
     RadixSort64(sortItemsScratch.data(), sortTempScratch.data(), drawCount);
 
+    // Gather sorted commands into scratch once, then swap ownership with the
+    // queue. The previous assignment copied every DrawCommand a second time and
+    // replaced the whole backing allocation.
     for (uint32_t i = 0; i < drawCount; ++i) {
         sortDrawQueueScratch[i] = queues.drawQueue[sortItemsScratch[i].payload];
     }
 
-    queues.drawQueue = sortDrawQueueScratch;
+    queues.drawQueue.swap(sortDrawQueueScratch);
 }
 
 void RenderContext::Impl::FlushLineQueue() {
