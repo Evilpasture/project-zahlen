@@ -23,39 +23,46 @@ class HashMap {
         ClearAndFree();
     }
 
-    HashMap(const HashMap&)            = delete;
-    HashMap& operator=(const HashMap&) = delete;
+    HashMap(const HashMap&)                    = delete;
+    auto operator=(const HashMap&) -> HashMap& = delete;
 
-    HashMap(HashMap&& other) noexcept: _states(other._states), _keys(other._keys), _values(other._values), _capacity(other._capacity), _size(other._size) {
-        other._states   = nullptr;
-        other._keys     = nullptr;
-        other._values   = nullptr;
-        other._capacity = 0;
-        other._size     = 0;
+    HashMap(HashMap&& other) noexcept:
+        _states(other._states), _keys(other._keys), _values(other._values), _capacity(other._capacity), _size(other._size), _tombstones(other._tombstones) {
+        other._states     = nullptr;
+        other._keys       = nullptr;
+        other._values     = nullptr;
+        other._capacity   = 0;
+        other._size       = 0;
+        other._tombstones = 0;
     }
 
-    HashMap& operator=(HashMap&& other) noexcept {
+    auto operator=(HashMap&& other) noexcept -> HashMap& {
         if (this != &other) {
             ClearAndFree();
 
-            _states   = other._states;
-            _keys     = other._keys;
-            _values   = other._values;
-            _capacity = other._capacity;
-            _size     = other._size;
+            _states     = other._states;
+            _keys       = other._keys;
+            _values     = other._values;
+            _capacity   = other._capacity;
+            _size       = other._size;
+            _tombstones = other._tombstones;
 
-            other._states   = nullptr;
-            other._keys     = nullptr;
-            other._values   = nullptr;
-            other._capacity = 0;
-            other._size     = 0;
+            other._states     = nullptr;
+            other._keys       = nullptr;
+            other._values     = nullptr;
+            other._capacity   = 0;
+            other._size       = 0;
+            other._tombstones = 0;
         }
         return *this;
     }
 
     void Insert(const Key& key, const Value& value) {
-        if (_size * 2 >= _capacity) {
-            Resize(_capacity * 2);
+        // Factor both active entries and tombstones into load factor calculation
+        if ((_size + _tombstones) * 2 >= _capacity) {
+            // If table has many tombstones but few active items, rehash in-place to purge tombstones
+            size_t new_capacity = (_size * 4 <= _capacity && _capacity >= InitialCapacity) ? _capacity : _capacity * 2;
+            Resize(new_capacity);
         }
 
         const size_t mask      = _capacity - 1;
@@ -77,13 +84,16 @@ class HashMap {
         // Reuse first tombstone slot if encountered, otherwise use empty slot
         size_t insertIdx = (firstTomb != static_cast<size_t>(-1)) ? firstTomb : idx;
 
+        if (_states[insertIdx] == 2) {
+            _tombstones--;
+        }
         _states[insertIdx] = 1;
         ::new (static_cast<void*>(&_keys[insertIdx])) Key(key);
         ::new (static_cast<void*>(&_values[insertIdx])) Value(value);
         _size++;
     }
 
-    [[nodiscard]] const Value* Find(const Key& key) const noexcept {
+    [[nodiscard]] auto Find(const Key& key) const noexcept -> const Value* {
         if (_capacity == 0 || _size == 0) {
             return nullptr;
         }
@@ -100,14 +110,14 @@ class HashMap {
         return nullptr;
     }
 
-    [[nodiscard]] Value* Find(const Key& key) noexcept {
+    [[nodiscard]] auto Find(const Key& key) noexcept -> Value* {
         return const_cast<Value*>(std::as_const(*this).Find(key));
     }
 
     /**
      * @brief O(1) Tombstone Erasure.
      */
-    bool Erase(const Key& key) noexcept {
+    auto Erase(const Key& key) noexcept -> bool {
         if (_capacity == 0 || _size == 0) {
             return false;
         }
@@ -121,6 +131,7 @@ class HashMap {
                 _values[idx].~Value();
                 _states[idx] = 2; // Tombstone / Deleted
                 _size--;
+                _tombstones++;
                 return true;
             }
             idx = (idx + 1) & mask;
@@ -140,13 +151,14 @@ class HashMap {
             }
             _states[i] = 0;
         }
-        _size = 0;
+        _size       = 0;
+        _tombstones = 0;
     }
 
-    [[nodiscard]] size_t Size() const noexcept {
+    [[nodiscard]] auto Size() const noexcept -> size_t {
         return _size;
     }
-    [[nodiscard]] size_t Capacity() const noexcept {
+    [[nodiscard]] auto Capacity() const noexcept -> size_t {
         return _capacity;
     }
 
@@ -198,7 +210,8 @@ class HashMap {
 
         _capacity = new_capacity;
         AllocateStorage(); // Fresh zeroed status array automatically purges tombstones
-        _size = 0;
+        _size       = 0;
+        _tombstones = 0;
 
         for (size_t i = 0; i < old_capacity; ++i) {
             if (old_states[i] == 1) {
@@ -213,7 +226,7 @@ class HashMap {
         ::operator delete[](old_values);
     }
 
-    [[nodiscard]] static constexpr size_t HashRawBytes(const char* str, size_t length) noexcept {
+    [[nodiscard]] static constexpr auto HashRawBytes(const char* str, size_t length) noexcept -> size_t {
 #if INTPTR_MAX == INT64_MAX
         constexpr size_t FNV_prime        = 1099511628211ULL;
         constexpr size_t FNV_offset_basis = 14695981039346656037ULL;
@@ -229,7 +242,7 @@ class HashMap {
         return hash;
     }
 
-    [[nodiscard]] size_t Hash(const Key& key) const noexcept {
+    [[nodiscard]] auto Hash(const Key& key) const noexcept -> size_t {
         if constexpr (sizeof(Key) <= 8 && (std::is_integral_v<Key> || std::is_enum_v<Key> || std::is_pointer_v<Key>) ) {
             uint64_t val = 0;
             if constexpr (std::is_pointer_v<Key>) {
@@ -251,11 +264,12 @@ class HashMap {
         }
     }
 
-    uint8_t* _states   = nullptr; // 0 = Empty, 1 = Active, 2 = Tombstone
-    Key*     _keys     = nullptr;
-    Value*   _values   = nullptr;
-    size_t   _capacity = 0;
-    size_t   _size     = 0;
+    uint8_t* _states     = nullptr; // 0 = Empty, 1 = Active, 2 = Tombstone
+    Key*     _keys       = nullptr;
+    Value*   _values     = nullptr;
+    size_t   _capacity   = 0;
+    size_t   _size       = 0;
+    size_t   _tombstones = 0;
 };
 
 } // namespace ZHLN
