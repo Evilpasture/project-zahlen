@@ -32,8 +32,7 @@
 #include <vector>
 
 enum class DescriptorHeapsParallelTestError : uint8_t {
-    Success = 0,
-    EngineInitFailed[[= ZHLN::Reflect::Description("Failed to initialize headless Engine context for parallel heap test.")]],
+    EngineInitFailed[[= ZHLN::Reflect::Description("Failed to initialize headless Engine context for parallel heap test.")]] = 1,
     MaterialCreationFailed[[= ZHLN::Reflect::Description("CreativeWorksFactory::CreateMaterial failed during parallel heap test.")]],
     RenderOutputBlank[[= ZHLN::Reflect::Description("Rendered frame is blank or failed to capture.")]],
     SecondaryHeapPathFailed[[= ZHLN::Reflect::Description("Not all material colors resolved through secondary-command-buffer heap draws.")]],

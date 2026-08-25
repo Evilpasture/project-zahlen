@@ -29,7 +29,7 @@ class StagingContext {
     [[nodiscard]] auto Begin() noexcept -> std::expected<void, Error>;
 
     [[nodiscard]] auto
-        UploadImage2D(VkImage dstImage, uint32_t w, uint32_t h, uint32_t mipLevels, const void* data, size_t bytes) noexcept -> std::expected<void, VkResult>;
+        UploadImage2D(VkImage dstImage, uint32_t w, uint32_t h, uint32_t mipLevels, const void* data, size_t bytes) noexcept -> std::expected<void, Error>;
 
     void UploadImage2DBuffer(VkImage dstImage, uint32_t w, uint32_t h, uint32_t mipLevels, VkBuffer stagingBuf, VkDeviceSize offset);
 

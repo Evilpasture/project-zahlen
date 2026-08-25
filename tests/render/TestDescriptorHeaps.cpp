@@ -34,8 +34,7 @@
 #include <vector>
 
 enum class DescriptorHeapsTestError : uint8_t {
-    Success = 0,
-    EngineInitFailed[[= ZHLN::Reflect::Description("Failed to initialize headless Engine context for descriptor-heap test.")]],
+    EngineInitFailed[[= ZHLN::Reflect::Description("Failed to initialize headless Engine context for descriptor-heap test.")]] = 1,
     MaterialCreationFailed[[= ZHLN::Reflect::Description("CreativeWorksFactory::CreateMaterial failed during heap stress test.")]],
     TextureCreationFailed[[= ZHLN::Reflect::Description("CreateProceduralTexture failed during heap stress test.")]],
     RenderOutputBlank[[= ZHLN::Reflect::Description("Rendered frame is blank or failed to capture.")]],

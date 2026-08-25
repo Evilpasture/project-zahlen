@@ -70,7 +70,8 @@ struct UIScopeNode {
 // as active errors.
 
 enum class GUIError : uint8_t {
-    HierarchyTooDeep[[= ZHLN::Reflect::Description("UI hierarchy exceeded MAX_UI_STACK_DEPTH; overflowing widgets attached to the deepest live parent instead.")]] = 1,
+    HierarchyTooDeep[
+        [= ZHLN::Reflect::Description("UI hierarchy exceeded MAX_UI_STACK_DEPTH; overflowing widgets attached to the deepest live parent instead.")]] = 1,
     EntityNotAlive[[= ZHLN::Reflect::Description("Target UI entity is not alive (already destroyed or never existed).")]],
     ParentNotAlive[[= ZHLN::Reflect::Description("Parent entity for the GUI operation is not alive.")]],
 };
@@ -222,7 +223,8 @@ class Context {
             // the insert overwrites the dead record. Recovery succeeds, so this
             // stays a verbose-level trace rather than an error.
             ZHLN::Log<LogChannel::StdErr, LogLevel::Verbose>(
-                "[GUI::Context] Cached UI entity ({}:{}) was destroyed externally; respawning widget under parent ({}:{}). Use DestroyUIEntity() for intentional subtree removal.",
+                "[GUI::Context] Cached UI entity ({}:{}) was destroyed externally; respawning widget under parent ({}:{}). Use DestroyUIEntity() for "
+                "intentional subtree removal.",
                 record->entity.index, record->entity.generation, cacheEntity.index, cacheEntity.generation
             );
         }
@@ -329,8 +331,8 @@ class Context {
         }
         if (purgedRecords > 0) {
             ZHLN::Log<LogChannel::StdErr, LogLevel::Verbose>(
-                "[GUI::Context] Purged {} orphaned UI cache record(s) under parent ({}:{}) pointing at entities destroyed outside the GUI.",
-                purgedRecords, cacheEntity.index, cacheEntity.generation
+                "[GUI::Context] Purged {} orphaned UI cache record(s) under parent ({}:{}) pointing at entities destroyed outside the GUI.", purgedRecords,
+                cacheEntity.index, cacheEntity.generation
             );
         }
 

@@ -23,8 +23,7 @@
 #include <vector>
 
 enum class UILayoutRenderError : uint8_t {
-    Success = 0,
-    EngineInitFailed[[= ZHLN::Reflect::Description("Failed to initialize headless Engine context for UI layout test.")]],
+    EngineInitFailed[[= ZHLN::Reflect::Description("Failed to initialize headless Engine context for UI layout test.")]] = 1,
     RenderOutputBlank[[= ZHLN::Reflect::Description("Rendered frame is blank or failed to capture.")]],
     LayoutMismatch[[= ZHLN::Reflect::Description("Colored UI bands are not in the expected flex-column positions.")]],
 };

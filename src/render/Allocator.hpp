@@ -166,13 +166,13 @@ class Buffer {
     auto operator=(Buffer&& other) noexcept -> Buffer& = default;
 
     [[nodiscard]] static auto
-        Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memUsage) noexcept -> std::expected<Buffer, VkResult>;
+        Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memUsage) noexcept -> std::expected<Buffer, Error>;
 
     /// Creates a buffer whose memory block obeys an additional minimum alignment
     /// (e.g. VkPhysicalDeviceDescriptorHeapPropertiesEXT::{sampler,resource}HeapAlignment
     /// for descriptor-heap backing buffers, whose device address must be aligned).
     [[nodiscard]] static auto Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memUsage, VkDeviceSize minAlignment) noexcept
-        -> std::expected<Buffer, VkResult>;
+        -> std::expected<Buffer, Error>;
 
     void Flush(VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept;
 
@@ -246,7 +246,7 @@ class Image {
     Image(Image&& other) noexcept                    = default;
     auto operator=(Image&& other) noexcept -> Image& = default;
 
-    [[nodiscard]] static auto Create(VmaAllocator allocator, const VkImageCreateInfo& info, VmaMemoryUsage memUsage) -> std::expected<Image, VkResult>;
+    [[nodiscard]] static auto Create(VmaAllocator allocator, const VkImageCreateInfo& info, VmaMemoryUsage memUsage) -> std::expected<Image, Error>;
 
     [[nodiscard]] auto Valid() const noexcept -> bool {
         return _handle.Valid();
@@ -282,7 +282,7 @@ class ImageBuilder {
     auto Texture2D(uint32_t width, uint32_t height, VkFormat format, VkImageUsageFlags usage, uint32_t mips = 1) noexcept -> ImageBuilder&;
     auto TextureCube(uint32_t size, VkFormat format, VkImageUsageFlags usage, uint32_t mips = 1) noexcept -> ImageBuilder&;
 
-    [[nodiscard]] auto Build(VmaAllocator allocator, VmaMemoryUsage memUsage = VMA_MEMORY_USAGE_GPU_ONLY) const noexcept -> std::expected<Image, VkResult>;
+    [[nodiscard]] auto Build(VmaAllocator allocator, VmaMemoryUsage memUsage = VMA_MEMORY_USAGE_GPU_ONLY) const noexcept -> std::expected<Image, Error>;
 
   private:
     VkImageCreateInfo _info {};

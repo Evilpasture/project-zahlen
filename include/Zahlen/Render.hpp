@@ -25,7 +25,7 @@ inline constexpr float FarOffset  = 500.0f;
 inline constexpr float FarDepth   = 1000.0f;
 } // namespace Shadows
 
-enum class RenderFrameResult : uint8_t { Success = 0, Suboptimal, OutOfDate, DeviceLost, Error };
+enum class RenderFrameResult : uint8_t { Success = 1, Suboptimal, OutOfDate, DeviceLost, Error };
 
 using RenderResult = std::expected<void, Error>;
 

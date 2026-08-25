@@ -14,7 +14,7 @@
 
 namespace ZHLN {
 
-enum class JSONError : uint8_t { Success = 0, InvalidJSON, TypeMismatch, MissingField, UnknownError };
+enum class JSONError : uint8_t { InvalidJSON = 1, TypeMismatch, MissingField, UnknownError };
 
 namespace ReflectJSON {
 
@@ -130,13 +130,14 @@ std::expected<FieldType, Error> GetJSONValue(ValueReader reader) {
 
 template <typename T>
 std::expected<T, Error> ParseObject(ValueReader reader) {
-    T     obj {};
-    Error err = JSONError::Success;
+    T                    obj {};
+    std::optional<Error> err;
 
     ZHLN::Reflect::ForEachFieldWithName(obj, [&](std::string_view fieldName, auto& fieldVal) {
         if (err) {
             return;
         }
+
         using FieldType = std::decay_t<decltype(fieldVal)>;
 
         auto keyReader = reader.GetKey(fieldName);
@@ -154,9 +155,12 @@ std::expected<T, Error> ParseObject(ValueReader reader) {
         fieldVal = std::move(*value_res);
     });
 
+    // Error Branch: Must explicitly use std::unexpected
     if (err) {
-        return std::unexpected(err);
+        return std::unexpected(*err);
     }
+
+    // Success Branch: Move constructed obj or value-initialize T with return {};
     return obj;
 }
 

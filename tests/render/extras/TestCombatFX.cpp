@@ -18,8 +18,7 @@
 import ZHLN.CombatFX;
 
 enum class CombatFXTestError : uint32_t {
-    Success = 0,
-    SystemInitFailed[[= ZHLN::Reflect::Description("CombatFX::System failed to initialize default surface presets or procedural textures.")]],
+    SystemInitFailed[[= ZHLN::Reflect::Description("CombatFX::System failed to initialize default surface presets or procedural textures.")]] = 1,
     DecalSpawnMismatch[[= ZHLN::Reflect::Description("Impact on decal-enabled surface failed to instantiate a DecalComponent entity.")]],
     NonDecalSurfaceSpawnedDecal[[= ZHLN::Reflect::Description("Impact on decal-disabled surface (e.g. Organic/Shield) incorrectly spawned a DecalComponent.")]],
     CustomPresetMismatch[[= ZHLN::Reflect::Description("Custom registered surface response preset failed to apply configured properties.")]],

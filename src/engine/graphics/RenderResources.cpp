@@ -434,7 +434,6 @@ auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width
     return Vk::ImageBuilder {}
         .Texture2D(width, height, format, usage, mipLevels)
         .Build(allocator.Get())
-        .transform_error([](VkResult res) -> Error { return res; })
         .and_then([&, device, width, height, isSRGB, mipLevels, data, imageSize](auto&& gpuImage) -> std::expected<uint32_t, Error> {
             auto stagingAlloc = stagingRingBuffer.Allocate(imageSize);
             std::memcpy(stagingAlloc.mappedData, data, imageSize);
@@ -459,7 +458,7 @@ auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width
             auto view_res = isSRGB ? Vk::CreateView<VK_FORMAT_R8G8B8A8_SRGB>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, mipLevels) :
                                      Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, mipLevels);
             if (!view_res) {
-                return std::unexpected(Error(view_res.error()));
+                return std::unexpected(view_res.error());
             }
             auto gpuView = std::move(*view_res);
 
@@ -477,7 +476,6 @@ auto RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceData,
     return Vk::ImageBuilder {}
         .TextureCube(width, VK_FORMAT_R8G8B8A8_UNORM, usage, 1)
         .Build(allocator.Get())
-        .transform_error([](VkResult res) -> Error { return res; })
         .and_then([&, device, width, height, faceData, faceSize](auto&& gpuImage) -> std::expected<uint32_t, Error> {
             auto stagingAlloc = stagingRingBuffer.Allocate(faceSize * 6);
             for (uint32_t i = 0; i < 6; ++i) {
@@ -495,7 +493,7 @@ auto RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceData,
 
             auto cube_view_res = Vk::CreateViewCube<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), 1);
             if (!cube_view_res) {
-                return std::unexpected(Error(cube_view_res.error()));
+                return std::unexpected(cube_view_res.error());
             }
             auto gpuView = std::move(*cube_view_res);
 
@@ -511,7 +509,7 @@ auto RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceData,
 #endif
 
 auto RenderContext::Impl::CreateGPUBuffer(size_t size, const void* data, VkBufferUsageFlags functionalUsage) const
-    -> std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, VkResult> {
+    -> std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, Error> {
     VkBufferUsageFlags usage = functionalUsage | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
 
     if (rtCtx.Valid()) {
@@ -709,13 +707,13 @@ auto RenderContext::SetShadowResolution(uint32_t resolution) -> std::expected<vo
 
     return Vk::WaitIdle(device).transform_error(
                                    [](auto) -> Error { return ShadowResolutionError::RecreationFailed; }
-    ).and_then([&](VkResult) -> std::expected<void, Error> {
+    ).and_then([&]() -> std::expected<void, Error> {
         auto sm_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
             impl->allocator, impl->ctx, {.width = resolution, .height = resolution},
             {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, .arrayLayers = RenderContext::Impl::NUM_CASCADES}
         );
         if (!sm_res) {
-            return std::unexpected(Error(sm_res.error()));
+            return std::unexpected(sm_res.error());
         }
         impl->graphResources.shadowMap = std::move(*sm_res);
 
@@ -724,7 +722,7 @@ auto RenderContext::SetShadowResolution(uint32_t resolution) -> std::expected<vo
             {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, .arrayLayers = RenderContext::Impl::NUM_CASCADES}
         );
         if (!smp_res) {
-            return std::unexpected(Error(smp_res.error()));
+            return std::unexpected(smp_res.error());
         }
         impl->shadowMapPrev = std::move(*smp_res);
 
@@ -735,13 +733,13 @@ auto RenderContext::SetShadowResolution(uint32_t resolution) -> std::expected<vo
         for (uint32_t i = 0; i < RenderContext::Impl::NUM_CASCADES; ++i) {
             auto view_res = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(impl->ctx.Device(), impl->graphResources.shadowMap.image.Handle(), i, 1);
             if (!view_res) {
-                return std::unexpected(Error(view_res.error()));
+                return std::unexpected(view_res.error());
             }
             impl->shadowCascadeViews[i] = std::move(*view_res);
 
             auto prev_res = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(impl->ctx.Device(), impl->shadowMapPrev.image.Handle(), i, 1);
             if (!prev_res) {
-                return std::unexpected(Error(prev_res.error()));
+                return std::unexpected(prev_res.error());
             }
             impl->shadowCascadeViewsPrev[i] = std::move(*prev_res);
         }
@@ -822,7 +820,6 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
                        impl->allocator.Get(), b.sizes.acceleration_structure_size,
                        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY
             )
-                .transform_error([](VkResult res) -> Error { return {res}; })
                 .transform([b = std::move(b)](auto&& buffer) mutable -> auto {
                     b.blasBuffer = std::forward<decltype(buffer)>(buffer);
                     return std::move(b);
@@ -838,7 +835,6 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
                        impl->allocator.Get(), b.sizes.build_scratch_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                        VMA_MEMORY_USAGE_GPU_ONLY
             )
-                .transform_error([](VkResult res) -> Error { return {res}; })
                 .transform([b = std::move(b)](auto&& buffer) mutable -> auto {
                     b.scratch = std::forward<decltype(buffer)>(buffer);
                     return std::move(b);
@@ -895,6 +891,11 @@ auto RenderContext::CreateProceduralTexture(std::string_view name, uint32_t widt
     return _impl->textureManager.CreateProcedural(*this, name, width, height, isSRGB, pixels);
 }
 
+enum class ScreenshotError : uint8_t {
+    FileOpenFailed[[= ZHLN::Reflect::Description("Failed to open screenshot output file for writing")]] = 1,
+    ReadbackFailed[[= ZHLN::Reflect::Description("GPU readback buffer mapping failed")]],
+};
+
 auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -> std::expected<void, Error> {
     auto* const impl = _impl.get();
 
@@ -918,12 +919,12 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
 
         auto mapped = stagingBuffer.Map();
         if (mapped.data == nullptr) {
-            return std::unexpected(RenderInitError::SubsystemAllocationFailed);
+            return std::unexpected(ScreenshotError::ReadbackFailed);
         }
 
         std::ofstream ofs(std::string(outputPath), std::ios::binary);
         if (!ofs.is_open()) {
-            return std::unexpected(RenderInitError::UnknownError);
+            return std::unexpected(ScreenshotError::FileOpenFailed);
         }
 
         ofs << "P6\n" << extent.width << " " << extent.height << "\n255\n";
@@ -963,14 +964,14 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
     // 3. Map memory with typed pointer accessor
     auto mapped = stagingBuffer.Map();
     if (mapped.data == nullptr) {
-        return std::unexpected(RenderInitError::SubsystemAllocationFailed);
+        return std::unexpected(ScreenshotError::ReadbackFailed);
     }
     const auto* const halfFloats = mapped.As<const uint16_t>();
 
     // 4. Output image file
     std::ofstream ofs(std::string(outputPath), std::ios::binary);
     if (!ofs.is_open()) {
-        return std::unexpected(RenderInitError::UnknownError);
+        return std::unexpected(ScreenshotError::FileOpenFailed);
     }
 
     ofs << "P6\n" << extent.width << " " << extent.height << "\n255\n";

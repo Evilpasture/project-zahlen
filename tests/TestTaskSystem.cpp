@@ -14,8 +14,7 @@
 // ============================================================================
 
 enum class TaskSystemError : uint32_t {
-    Success = 0,
-    DispatchFailed[[= ZHLN::Reflect::Description("Dispatched tasks failed to execute or update shared memory.")]],
+    DispatchFailed[[= ZHLN::Reflect::Description("Dispatched tasks failed to execute or update shared memory.")]] = 1,
     ParallelForFailed[[= ZHLN::Reflect::Description("ParallelFor processing failed to reach or verify all iterations.")]]
 };
 

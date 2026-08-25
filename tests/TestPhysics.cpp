@@ -15,8 +15,7 @@
 #include <expected>
 
 enum class PhysicsTestError : uint32_t {
-    Success = 0,
-    RaycastMissedExpectedBody[[= ZHLN::Reflect::Description("Raycast did not hit expected collider.")]],
+    RaycastMissedExpectedBody[[= ZHLN::Reflect::Description("Raycast did not hit expected collider.")]] = 1,
     OverlapQueryFailed[[= ZHLN::Reflect::Description("Broadphase overlap failed to detect sphere/AABB collision.")]],
 };
 

@@ -7,9 +7,9 @@
 #include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Render.hpp>
-#include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
 #include <cstdint>
 #include <expected>
@@ -19,8 +19,7 @@
 #include <vector>
 
 enum class ImGuiRenderTestError : uint8_t {
-    Success = 0,
-    EngineInitFailed[[= ZHLN::Reflect::Description("Failed to initialize headless Engine context for ImGui render test.")]],
+    EngineInitFailed[[= ZHLN::Reflect::Description("Failed to initialize headless Engine context for ImGui render test.")]] = 1,
     RenderOutputBlank[[= ZHLN::Reflect::Description("Rendered ImGui screenshot is blank or failed to capture.")]],
     MissingExpectedPixels[[= ZHLN::Reflect::Description("PPM analysis did not find the expected ImGui colored regions.")]],
 };
@@ -56,14 +55,7 @@ struct PpmImage {
     return image;
 }
 
-[[nodiscard]] uint32_t CountPixels(
-    const PpmImage& image,
-    int             x0,
-    int             y0,
-    int             x1,
-    int             y1,
-    bool (*predicate)(uint8_t, uint8_t, uint8_t)
-) {
+[[nodiscard]] uint32_t CountPixels(const PpmImage& image, int x0, int y0, int x1, int y1, bool (*predicate)(uint8_t, uint8_t, uint8_t)) {
     uint32_t count = 0;
     x0             = std::clamp(x0, 0, image.width);
     y0             = std::clamp(y0, 0, image.height);
@@ -159,8 +151,8 @@ struct ImGuiRenderTestSuite {
                         ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse
                 );
 
-                ImDrawList* drawList = ImGui::GetWindowDrawList();
-                const ImVec2 origin  = ImGui::GetWindowPos();
+                ImDrawList*  drawList = ImGui::GetWindowDrawList();
+                const ImVec2 origin   = ImGui::GetWindowPos();
                 drawList->AddRectFilled(ImVec2(origin.x + 12.0f, origin.y + 12.0f), ImVec2(origin.x + 172.0f, origin.y + 32.0f), IM_COL32(255, 0, 0, 255));
                 drawList->AddRectFilled(ImVec2(origin.x + 12.0f, origin.y + 38.0f), ImVec2(origin.x + 172.0f, origin.y + 58.0f), IM_COL32(0, 255, 0, 255));
                 drawList->AddRectFilled(ImVec2(origin.x + 12.0f, origin.y + 64.0f), ImVec2(origin.x + 172.0f, origin.y + 84.0f), IM_COL32(0, 0, 255, 255));

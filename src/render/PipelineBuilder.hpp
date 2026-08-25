@@ -17,14 +17,10 @@ namespace ZHLN::Vk {
 // Pipeline Builder Result Codes
 // ============================================================================
 
-enum class PipelineBuilderResult : uint8_t {
-    Succeeded      = 0,
-    MissingShaders = 1,
-    MissingLayout  = 2,
+enum class PipelineBuilderError : uint8_t {
+    MissingShaders[[= Reflect::Description("Missing shader stages.")]]  = 1,
+    MissingLayout[[= Reflect::Description("Missing pipeline layout.")]] = 2,
 };
-
-void ReportPipelineBuilderError(PipelineBuilderResult result) noexcept;
-void ReportComputePipelineBuilderError(PipelineBuilderResult result) noexcept;
 
 // ============================================================================
 // PipelineConfig — compile-time-friendly POD carrying all pipeline state
@@ -225,15 +221,15 @@ class PipelineBuilder {
     }
 
     [[nodiscard("Pipeline creation may fail; verify validity before use")]]
-    auto Build(VkDevice device) const& noexcept -> std::expected<Pipeline, ZHLN::Error> {
-        const auto result = Validate();
-        if (result != PipelineBuilderResult::Succeeded) {
-            ReportPipelineBuilderError(result);
-            return std::unexpected(result);
-        }
-
-        const ZHLN_GraphicsPipelineDesc desc = GetDesc();
-        return Pipeline(device, ZHLN_CreateGraphicsPipeline(device, &desc));
+    auto Build(VkDevice device) const& noexcept -> std::expected<Pipeline, Error> {
+        return Validate().and_then([&]() -> std::expected<Pipeline, Error> {
+            const ZHLN_GraphicsPipelineDesc desc     = GetDesc();
+            VkPipeline                      pipeline = ZHLN_CreateGraphicsPipeline(device, &desc);
+            if (pipeline == VK_NULL_HANDLE) {
+                return std::unexpected(RenderInitError::PipelineCreationFailed);
+            }
+            return Pipeline(device, pipeline);
+        });
     }
 
     [[nodiscard]] auto DepthOnly() && noexcept -> PipelineBuilder<0, true> {
@@ -272,34 +268,35 @@ class PipelineBuilder {
         return PipelineBuilder<N, HasDepth> {std::move(_cfg)};
     }
 
-    [[nodiscard]] auto Build(VkDevice device) const&& noexcept -> std::expected<TypedPipeline<ColorCount, HasDepth>, ZHLN::Error> {
-        const auto result = Validate();
-        if (result != PipelineBuilderResult::Succeeded) {
-            ReportPipelineBuilderError(result);
-            return std::unexpected(result);
-        }
-
-        const ZHLN_GraphicsPipelineDesc desc = GetDesc();
-        return TypedPipeline<ColorCount, HasDepth> {Pipeline(device, ZHLN_CreateGraphicsPipeline(device, &desc))};
+    [[nodiscard]] auto Build(VkDevice device) const&& noexcept -> std::expected<TypedPipeline<ColorCount, HasDepth>, Error> {
+        return Validate().and_then([&]() -> std::expected<TypedPipeline<ColorCount, HasDepth>, Error> {
+            const ZHLN_GraphicsPipelineDesc desc     = GetDesc();
+            VkPipeline                      pipeline = ZHLN_CreateGraphicsPipeline(device, &desc);
+            if (pipeline == VK_NULL_HANDLE) {
+                return std::unexpected(RenderInitError::PipelineCreationFailed);
+            }
+            return TypedPipeline<ColorCount, HasDepth> {Pipeline(device, pipeline)};
+        });
     }
 
   private:
-    [[nodiscard]] auto Validate() const noexcept -> PipelineBuilderResult {
+    [[nodiscard]] auto Validate() const noexcept -> std::expected<void, Error> {
+        using enum PipelineBuilderError;
         if (_cfg.stages == nullptr) {
-            return PipelineBuilderResult::MissingShaders;
+            return std::unexpected(MissingShaders);
         }
         // Either a vertex stage or a mesh stage must be present; the C layer
         // rejects a set that has neither.
         if (_cfg.stages->vert.handle == VK_NULL_HANDLE && _cfg.stages->mesh.handle == VK_NULL_HANDLE) {
-            return PipelineBuilderResult::MissingShaders;
+            return std::unexpected(MissingShaders);
         }
         // VUID-VkGraphicsPipelineCreateInfo-flags-11311: descriptor-heap
         // pipelines require layout == VK_NULL_HANDLE, so a null layout is
         // valid (and in fact required) in heap mode.
         if (_cfg.layout == VK_NULL_HANDLE && !_cfg.descriptor_heap) {
-            return PipelineBuilderResult::MissingLayout;
+            return std::unexpected(MissingLayout);
         }
-        return PipelineBuilderResult::Succeeded;
+        return {};
     }
 
     [[nodiscard]] constexpr auto GetDesc() const noexcept -> ZHLN_GraphicsPipelineDesc {
@@ -358,7 +355,7 @@ class ComputePipelineBuilder {
     [[nodiscard]] auto Build(VkDevice device) const noexcept -> std::expected<Pipeline, ZHLN::Error>;
 
   private:
-    [[nodiscard]] auto Validate() const noexcept -> PipelineBuilderResult;
+    [[nodiscard]] auto Validate() const noexcept -> std::expected<void, Error>;
 
     const uint32_t*                                      _code                = nullptr;
     size_t                                               _size                = 0;

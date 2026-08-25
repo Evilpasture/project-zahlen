@@ -14,8 +14,7 @@
 // ============================================================================
 
 enum class ScriptBinderTestError : uint32_t {
-    Success = 0,
-    ClassNotRegistered[[= ZHLN::Reflect::Description("The class was not found in the ScriptBinder registry.")]],
+    ClassNotRegistered[[= ZHLN::Reflect::Description("The class was not found in the ScriptBinder registry.")]] = 1,
     PropertyAccessFailed[[= ZHLN::Reflect::Description("Reading or writing a property via ScriptProperty failed.")]],
     MethodInvocationFailed[[= ZHLN::Reflect::Description("Invoking a registered method via ScriptMethod failed.")]],
     ValueConversionFailed[[= ZHLN::Reflect::Description("ToScriptVal or FromScriptVal conversion produced unexpected results.")]]

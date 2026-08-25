@@ -18,8 +18,7 @@
 import ZHLN.Explosions;
 
 enum class ExplosionTestError : uint32_t {
-    Success = 0,
-    ExplosionSpawnFailed[[= ZHLN::Reflect::Description("ExplosionSystem::Spawn failed to instantiate entity hierarchy.")]],
+    ExplosionSpawnFailed[[= ZHLN::Reflect::Description("ExplosionSystem::Spawn failed to instantiate entity hierarchy.")]] = 1,
     CraterDecalSpawnFailed[[= ZHLN::Reflect::Description("Autonomous crater decal was not spawned after ground impact delay.")]],
     CraterFadeFailed[[= ZHLN::Reflect::Description("Crater decal did not dissolve/scale down during the fade window.")]],
     EntityLeakDetected[[= ZHLN::Reflect::Description("Explosion root or debris entities remained alive after duration expired.")]],

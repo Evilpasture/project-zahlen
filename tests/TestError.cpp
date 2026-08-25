@@ -11,20 +11,17 @@
 // ============================================================================
 
 enum class CodecError : uint32_t {
-    Success = 0,
-    CorruptedStream[[= ZHLN::Reflect::Description("The input bitstream is corrupted or incomplete.")]],
+    CorruptedStream[[= ZHLN::Reflect::Description("The input bitstream is corrupted or incomplete.")]] = 1,
     UnsupportedVersion[[= ZHLN::Reflect::Description("The bitstream header version is not supported.")]]
 };
 
 enum class NetworkError : uint32_t {
-    Success = 0,
-    HostUnreachable[[= ZHLN::Reflect::Description("Remote host refused the connection or is offline.")]],
+    HostUnreachable[[= ZHLN::Reflect::Description("Remote host refused the connection or is offline.")]] = 1,
     ConnectionReset
 };
 
 enum class HandleError : uint32_t {
-    Success = 0,
-    GenerationMismatch[[= ZHLN::Reflect::Description("Recycled handle failed generation check. Expected generation {}, got {}")]],
+    GenerationMismatch[[= ZHLN::Reflect::Description("Recycled handle failed generation check. Expected generation {}, got {}")]] = 1,
     SlotOutOfBounds[[= ZHLN::Reflect::Description("Slot index {} exceeds maximum capacity of {}")]],
     EntityNull[[= ZHLN::Reflect::Description("Entity handle is null or uninitialized.")]]
 };
@@ -59,9 +56,6 @@ struct ErrorTestSuite {
                 return std::unexpected(CodecError::CorruptedStream);
             }
             if (!err.Is(CodecError::CorruptedStream)) {
-                return std::unexpected(CodecError::CorruptedStream);
-            }
-            if (err.Is(CodecError::Success)) {
                 return std::unexpected(CodecError::CorruptedStream);
             }
             if (err.Is<NetworkError>()) {

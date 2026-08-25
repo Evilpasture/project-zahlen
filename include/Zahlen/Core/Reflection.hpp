@@ -369,6 +369,18 @@ constexpr auto StringToEnum(std::string_view name) -> std::optional<E> {
     return result;
 }
 
+template <typename E>
+    requires std::is_enum_v<E>
+constexpr auto EnumHasValue(std::underlying_type_t<E> targetValue) noexcept -> bool {
+    bool found = false;
+    [:Expand(detail::EnumeratorsOf<E>()):] >> [&]<auto enumerator>() -> auto {
+        if (static_cast<std::underlying_type_t<E>>([:enumerator:]) == targetValue) {
+            found = true;
+        }
+    };
+    return found;
+}
+
 template <typename T>
 constexpr auto ZipFieldsWithNames(T&& t) {
     return [&]<auto... members>(detail::ReplicatorType<members...>) -> auto {
@@ -798,6 +810,12 @@ constexpr std::string_view EnumToString(E /*unused*/) {
 
 template <typename E>
     requires std::is_enum_v<E>
+consteval auto EnumHasValue(std::underlying_type_t<E> /*targetValue*/) noexcept -> bool {
+    return false; // Safe fallback when compiler reflection is disabled
+}
+
+template <typename E>
+    requires std::is_enum_v<E>
 constexpr std::optional<E> StringToEnum(std::string_view /*unused*/) {
     return std::nullopt;
 }
@@ -1131,6 +1149,12 @@ constexpr auto EnumToMessage(E value) -> std::string_view {
         return desc->text;
     }
     return EnumToString(value);
+}
+
+template <typename E>
+    requires std::is_enum_v<E>
+consteval auto EnumHasValue(E targetValue) noexcept -> bool {
+    return EnumHasValue<E>(static_cast<std::underlying_type_t<E>>(targetValue));
 }
 
 template <typename E, typename... Args>

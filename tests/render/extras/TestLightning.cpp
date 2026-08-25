@@ -17,8 +17,7 @@
 import ZHLN.Lightning;
 
 enum class LightningTestError : uint32_t {
-    Success = 0,
-    StrikeSpawnFailed[[= ZHLN::Reflect::Description("Lightning::Spawn failed to instantiate ECS entity and flash lights.")]],
+    StrikeSpawnFailed[[= ZHLN::Reflect::Description("Lightning::Spawn failed to instantiate ECS entity and flash lights.")]] = 1,
     StrikeLifecycleDesync[[= ZHLN::Reflect::Description("Lightning strike phase progression (Leader -> Stroke -> Dissipate) failed to complete.")]],
     AmbienceFlashNotRestored[[= ZHLN::Reflect::Description("Global ambient exposure was not cleanly restored to baseline after bolt expiration.")]],
     SubEntityMemoryLeak[[= ZHLN::Reflect::Description("Point-light flash entities were leaked after strike expiration.")]],

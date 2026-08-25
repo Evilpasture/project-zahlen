@@ -63,8 +63,7 @@ constexpr float kSampleMetallic = 0.2f;
 } // namespace
 
 enum class CookerTestError : uint8_t {
-    Success = 0,
-    ZcookExecutableNotFound[[= ZHLN::Reflect::Description("Could not find the 'zcook' compiler binary in the build tree.")]],
+    ZcookExecutableNotFound[[= ZHLN::Reflect::Description("Could not find the 'zcook' compiler binary in the build tree.")]] = 1,
     MetadataSerializationFailed[[= ZHLN::Reflect::Description("Failed to serialize intermediate binary metadata.")]],
     MeshCompilationFailed[[= ZHLN::Reflect::Description("zcook mesh subcommand failed to produce a valid .zmesh asset.")]],
     AnimationCompilationFailed[[= ZHLN::Reflect::Description("zcook anim subcommand failed to produce a valid .zanim asset.")]],

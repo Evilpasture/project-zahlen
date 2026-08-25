@@ -10,8 +10,7 @@
 namespace ZHLN {
 
 enum class RenderInitError : uint8_t {
-    Success = 0,
-    InstanceCreationFailed[[= ZHLN::Reflect::Description("Vulkan instance creation failed")]],
+    InstanceCreationFailed[[= ZHLN::Reflect::Description("Vulkan instance creation failed")]] = 1,
     SurfaceCreationFailed[[= ZHLN::Reflect::Description("Window surface creation failed")]],
     NoSuitableDeviceFound[[= ZHLN::Reflect::Description("No suitable Vulkan device found")]],
     DeviceCreationFailed[[= ZHLN::Reflect::Description("Vulkan logical device creation failed")]],
@@ -25,41 +24,59 @@ enum class RenderInitError : uint8_t {
     UISetupFailed[[= ZHLN::Reflect::Description("UI setup failed")]],
     WorkerCommandPoolSetupFailed[[= ZHLN::Reflect::Description("Worker command pool setup failed")]],
     ParallelRecorderInitializationFailed[[= ZHLN::Reflect::Description("Parallel command recorder init failed")]],
-    UnknownError[[= ZHLN::Reflect::Description("Unknown render initialization error")]],
+    OutOfHostMemory[[= ZHLN::Reflect::Description("Out of host memory")]],
+    OutOfDeviceMemory[[= ZHLN::Reflect::Description("Out of device memory")]],
+    DriverInitializationFailed[[= ZHLN::Reflect::Description("Driver initialization failed")]],
+};
+
+enum class BufferCreationError : uint8_t {
+    OutOfHostMemory[[= ZHLN::Reflect::Description("Out of host memory")]] = 1,
+    OutOfDeviceMemory[[= ZHLN::Reflect::Description("Out of device memory")]],
+    InvalidCaptureAddress[[= ZHLN::Reflect::Description("Invalid capture address")]],
+    VulkanSubsystemFailure[[= ZHLN::Reflect::Description("Vulkan subsystem failure")]],
+};
+
+enum class ImageCreationError : uint8_t {
+    OutOfHostMemory[[= ZHLN::Reflect::Description("Out of host memory")]] = 1,
+    OutOfDeviceMemory[[= ZHLN::Reflect::Description("Out of device memory")]],
+    InvalidCaptureAddress[[= ZHLN::Reflect::Description("Invalid capture address")]],
+    VulkanSubsystemFailure[[= ZHLN::Reflect::Description("Vulkan subsystem failure")]],
+};
+
+enum class StagingError : uint8_t {
+    OutOfHostMemory[[= ZHLN::Reflect::Description("Host memory allocation failed for staging buffer")]] = 1,
+    OutOfDeviceMemory[[= ZHLN::Reflect::Description("Device/Host-visible VRAM allocation failed for staging buffer")]],
+    MemoryMappingFailed[[= ZHLN::Reflect::Description("Failed to map staging buffer CPU pointer")]],
+    InvalidBufferDimensions[[= ZHLN::Reflect::Description("Image upload byte size or dimensions exceed limit")]]
 };
 
 enum class MaterialCreationError : uint8_t {
-    Success = 0,
-    ShaderCompilationFailed[[= ZHLN::Reflect::Description("Material shader compilation failed")]],
+    ShaderCompilationFailed[[= ZHLN::Reflect::Description("Material shader compilation failed")]] = 1,
     PipelineLayoutCreationFailed[[= ZHLN::Reflect::Description("Material pipeline layout creation failed")]],
     PipelineCreationFailed[[= ZHLN::Reflect::Description("Material pipeline creation failed")]],
     UnknownError[[= ZHLN::Reflect::Description("Unknown material creation error")]],
 };
 
 enum class ShadowResolutionError : uint8_t {
-    Success = 0,
-    DeviceLost[[= ZHLN::Reflect::Description("Device lost while resizing shadow map")]],
+    DeviceLost[[= ZHLN::Reflect::Description("Device lost while resizing shadow map")]] = 1,
     RecreationFailed[[= ZHLN::Reflect::Description("Shadow map recreation failed")]],
     UnknownError[[= ZHLN::Reflect::Description("Unknown shadow resolution error")]],
 };
 
 enum class SurfaceCreationError : uint8_t {
-    Success = 0,
-    WindowSurfaceUnsupported[[= ZHLN::Reflect::Description("Window surface unsupported")]],
+    WindowSurfaceUnsupported[[= ZHLN::Reflect::Description("Window surface unsupported")]] = 1,
     TTYSurfaceCreationFailed[[= ZHLN::Reflect::Description("TTY surface creation failed")]],
     GLFWSurfaceCreationFailed[[= ZHLN::Reflect::Description("GLFW surface creation failed")]],
     UnknownError[[= ZHLN::Reflect::Description("Unknown surface creation error")]],
 };
 
 enum class ExtensionBuilderError : uint8_t {
-    Success = 0,
-    MissingRequiredExtension[[= ZHLN::Reflect::Description("A required Vulkan extension is missing")]],
+    MissingRequiredExtension[[= ZHLN::Reflect::Description("A required Vulkan extension is missing")]] = 1,
     UnknownError[[= ZHLN::Reflect::Description("Unknown extension builder error")]],
 };
 
 enum class ShaderStageCreationError : uint8_t {
-    Success = 0,
-    FileOpenFailed[[= ZHLN::Reflect::Description("Shader file open failed")]],
+    FileOpenFailed[[= ZHLN::Reflect::Description("Shader file open failed")]] = 1,
     InvalidSpirvSize[[= ZHLN::Reflect::Description("Invalid SPIR-V size")]],
     ShaderLoadingFailed[[= ZHLN::Reflect::Description("Shader loading failed")]],
     VertexShaderEmpty[[= ZHLN::Reflect::Description("Vertex shader is empty")]],
@@ -68,17 +85,15 @@ enum class ShaderStageCreationError : uint8_t {
 };
 
 enum class SamplerCreationError : uint8_t {
-    Success = 0,
-    NullDevice[[= ZHLN::Reflect::Description("Null device for sampler creation")]],
+    NullDevice[[= ZHLN::Reflect::Description("Null device for sampler creation")]] = 1,
     CreationFailed[[= ZHLN::Reflect::Description("Sampler creation failed")]],
     UnknownError[[= ZHLN::Reflect::Description("Unknown sampler creation error")]],
 };
 
 enum class VulkanCallError : uint8_t {
-    Success = 0,
-    VulkanCallFailed[[= ZHLN::Reflect::Description("Vulkan call failed")]],
+    VulkanCallFailed[[= ZHLN::Reflect::Description("Vulkan call failed")]] = 1,
+    DeviceLost[[= ZHLN::Reflect::Description("Device lost")]],
     FeatureNotPresent[[= ZHLN::Reflect::Description("Required feature not present")]],
-    UnknownError[[= ZHLN::Reflect::Description("Unknown Vulkan call error")]],
 };
 
 } // namespace ZHLN

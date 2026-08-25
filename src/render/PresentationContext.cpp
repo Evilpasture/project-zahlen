@@ -16,7 +16,7 @@ auto PresentationContext::Init(const Context& ctx, Allocator& alloc, VkSurfaceKH
     return Rebuild(width, height);
 }
 
-auto PresentationContext::Rebuild(uint32_t width, uint32_t height) -> std::expected<void, ZHLN::Error> {
+auto PresentationContext::Rebuild(uint32_t width, uint32_t height) -> std::expected<void, Error> {
     if ((_ctx == nullptr) || (_alloc == nullptr)) {
         return std::unexpected(RenderInitError::SubsystemAllocationFailed);
     }
@@ -32,24 +32,24 @@ auto PresentationContext::Rebuild(uint32_t width, uint32_t height) -> std::expec
     if (_surface == VK_NULL_HANDLE) {
         const VkExtent2D renderExtent = {.width = width, .height = height};
         {
-            auto dt = RenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>::Create(
+            auto dt_res = RenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>::Create(
                 *_alloc, *_ctx, renderExtent, {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT}
             );
-            if (!dt) {
-                return std::unexpected(RenderInitError::SubsystemAllocationFailed);
+            if (!dt_res) {
+                return std::unexpected(dt_res.error());
             }
-            depthTarget = std::move(*dt);
+            depthTarget = std::move(*dt_res);
         }
 
         // Headless offscreen color target for the Blit pass output
         {
-            auto hct = RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>::Create(
+            auto hct_res = RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>::Create(
                 *_alloc, *_ctx, renderExtent, {.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT}
             );
-            if (!hct) {
-                return std::unexpected(RenderInitError::SubsystemAllocationFailed);
+            if (!hct_res) {
+                return std::unexpected(hct_res.error());
             }
-            headlessColorTarget = std::move(*hct);
+            headlessColorTarget = std::move(*hct_res);
         }
 
         return {};
@@ -80,13 +80,13 @@ auto PresentationContext::Rebuild(uint32_t width, uint32_t height) -> std::expec
 
     // Automatically recreate the depth buffer to match the new swapchain extent
     {
-        auto dt = RenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>::Create(
+        auto dt_res = RenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>::Create(
             *_alloc, *_ctx, swapchain.Get().extent, {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT}
         );
-        if (!dt) {
-            return std::unexpected(RenderInitError::SubsystemAllocationFailed);
+        if (!dt_res) {
+            return std::unexpected(dt_res.error());
         }
-        depthTarget = std::move(*dt);
+        depthTarget = std::move(*dt_res);
     }
 
     return {};

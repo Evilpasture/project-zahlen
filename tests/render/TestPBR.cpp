@@ -27,8 +27,7 @@
 // ============================================================================
 
 enum class PBRTestError : uint8_t {
-    Success = 0,
-    EngineInitFailed[[= ZHLN::Reflect::Description("Failed to initialize headless Engine context for PBR test.")]],
+    EngineInitFailed[[= ZHLN::Reflect::Description("Failed to initialize headless Engine context for PBR test.")]] = 1,
     RenderOutputBlank[[= ZHLN::Reflect::Description("Rendered frame is blank or failed to capture.")]],
     SpecularHighlightNotDetected[[= ZHLN::Reflect::Description("PBR specular reflection highlight was not observed on target surface.")]],
     MaterialCreationFailed[[= ZHLN::Reflect::Description("CreativeWorksFactory::CreateMaterial failed to construct GPU pipeline.")]],
@@ -322,13 +321,13 @@ struct PBRTestSuite {
             };
 
             struct HalfStats {
-                float    maxL     = 0.0f;
-                uint32_t warm     = 0; // L > 25  — lit surface after ACES×0.015
-                uint32_t hot      = 0; // L > 140 — specular peak
-                double   sumX     = 0.0;
-                double   sumY     = 0.0;
-                double   sumX2    = 0.0;
-                double   sumY2    = 0.0;
+                float    maxL      = 0.0f;
+                uint32_t warm      = 0; // L > 25  — lit surface after ACES×0.015
+                uint32_t hot       = 0; // L > 140 — specular peak
+                double   sumX      = 0.0;
+                double   sumY      = 0.0;
+                double   sumX2     = 0.0;
+                double   sumY2     = 0.0;
                 uint32_t highlight = 0;
             };
 
@@ -340,9 +339,9 @@ struct PBRTestSuite {
                 HalfStats s;
                 for (int y = y0; y < y1; ++y) {
                     for (int x = x0; x < x1; ++x) {
-                        const size_t  i = (static_cast<size_t>(y) * static_cast<size_t>(width) + static_cast<size_t>(x)) * 3u;
-                        const float   L = luminance(pixels[i], pixels[i + 1], pixels[i + 2]);
-                        s.maxL          = std::max(s.maxL, L);
+                        const size_t i = (static_cast<size_t>(y) * static_cast<size_t>(width) + static_cast<size_t>(x)) * 3u;
+                        const float  L = luminance(pixels[i], pixels[i + 1], pixels[i + 2]);
+                        s.maxL         = std::max(s.maxL, L);
                         if (L > 25.0f) {
                             s.warm++;
                         }

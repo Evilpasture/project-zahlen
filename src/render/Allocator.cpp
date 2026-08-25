@@ -84,7 +84,7 @@ std::expected<void, ZHLN::Error> Allocator::Init(VkInstance instance, VkPhysical
 
     VkResult res = vmaCreateAllocator(&info, &_handle);
     if (res != VK_SUCCESS) {
-        return std::unexpected(res);
+        return std::unexpected(RenderInitError::OutOfHostMemory);
     }
     return {};
 }
@@ -96,12 +96,12 @@ std::expected<void, ZHLN::Error> Allocator::Init(const Context& ctx) noexcept {
 // ============================================================================
 // Buffer RAII
 // ============================================================================
-auto Buffer::Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memUsage) noexcept -> std::expected<Buffer, VkResult> {
+auto Buffer::Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memUsage) noexcept -> std::expected<Buffer, Error> {
     return Create(allocator, size, usage, memUsage, 0);
 }
 
 auto Buffer::Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memUsage, VkDeviceSize minAlignment) noexcept
-    -> std::expected<Buffer, VkResult> {
+    -> std::expected<Buffer, Error> {
     VkBuffer          buffer = VK_NULL_HANDLE;
     VmaAllocation     alloc  = nullptr;
     VmaAllocationInfo info   = {};
@@ -141,8 +141,21 @@ auto Buffer::Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usag
 #endif
 
     VkResult res = vmaCreateBuffer(allocator, &buffer_info, &alloc_info, &buffer, &alloc, &info);
-    if (res != VK_SUCCESS) {
-        return std::unexpected(res);
+    if (res != VK_SUCCESS) [[unlikely]] {
+        switch (res) {
+            case VK_ERROR_OUT_OF_HOST_MEMORY:
+                return std::unexpected(BufferCreationError::OutOfHostMemory);
+
+            case VK_ERROR_OUT_OF_DEVICE_MEMORY:
+                return std::unexpected(BufferCreationError::OutOfDeviceMemory);
+
+            case VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS:
+                return std::unexpected(BufferCreationError::InvalidCaptureAddress);
+
+            default:
+                // Native driver/subsystem failure: preserve raw code in a dedicated failure state
+                return std::unexpected(BufferCreationError::VulkanSubsystemFailure);
+        }
     }
 
     Buffer b;
@@ -209,7 +222,7 @@ auto UploadToBuffer(VmaAllocator allocator, VkCommandBuffer cmd, Buffer& dst, co
 // Image RAII
 // ============================================================================
 
-auto Image::Create(VmaAllocator allocator, const VkImageCreateInfo& info, VmaMemoryUsage memUsage) -> std::expected<Image, VkResult> {
+auto Image::Create(VmaAllocator allocator, const VkImageCreateInfo& info, VmaMemoryUsage memUsage) -> std::expected<Image, Error> {
     VkImage                       img        = VK_NULL_HANDLE;
     VmaAllocation                 alloc      = nullptr;
     const VmaAllocationCreateInfo alloc_info = {
@@ -225,8 +238,20 @@ auto Image::Create(VmaAllocator allocator, const VkImageCreateInfo& info, VmaMem
     };
 
     VkResult res = vmaCreateImage(allocator, &info, &alloc_info, &img, &alloc, nullptr);
-    if (res != VK_SUCCESS) {
-        return std::unexpected(res);
+    if (res != VK_SUCCESS) [[unlikely]] {
+        switch (res) {
+            case VK_ERROR_OUT_OF_HOST_MEMORY:
+                return std::unexpected(ImageCreationError::OutOfHostMemory);
+
+            case VK_ERROR_OUT_OF_DEVICE_MEMORY:
+                return std::unexpected(ImageCreationError::OutOfDeviceMemory);
+
+            case VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS:
+                return std::unexpected(ImageCreationError::InvalidCaptureAddress);
+
+            default:
+                return std::unexpected(ImageCreationError::VulkanSubsystemFailure);
+        }
     }
 
     Image r;
@@ -325,7 +350,7 @@ auto ImageBuilder::TextureCube(uint32_t size, VkFormat format, VkImageUsageFlags
     return *this;
 }
 
-auto ImageBuilder::Build(VmaAllocator allocator, VmaMemoryUsage memUsage) const noexcept -> std::expected<Image, VkResult> {
+auto ImageBuilder::Build(VmaAllocator allocator, VmaMemoryUsage memUsage) const noexcept -> std::expected<Image, Error> {
     return Image::Create(allocator, _info, memUsage);
 }
 
@@ -379,7 +404,7 @@ auto StagingRingBuffer::Init(VmaAllocator allocator, VkDevice device, VkQueue qu
     VkSemaphore raw_sem = VK_NULL_HANDLE;
     auto        res     = vkCreateSemaphore(_device, &sem_info, nullptr, &raw_sem);
     if (res != VK_SUCCESS) {
-        return std::unexpected(res);
+        return std::unexpected(RenderInitError::OutOfHostMemory);
     }
     _timelineSemaphore = Semaphore(_device, raw_sem); // Adopt into RAII wrapper
 

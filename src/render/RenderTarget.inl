@@ -36,7 +36,8 @@ inline auto RenderTarget<F>::State() const noexcept -> TypedImage<VK_IMAGE_LAYOU
 }
 
 template <VkFormat F>
-inline auto RenderTarget<F>::Create(Allocator& allocator, const Context& ctx, VkExtent2D extent, RenderTargetDescriptor desc) -> std::expected<RenderTarget, VkResult> {
+inline auto
+    RenderTarget<F>::Create(Allocator& allocator, const Context& ctx, VkExtent2D extent, RenderTargetDescriptor desc) -> std::expected<RenderTarget, Error> {
     RenderTarget rt;
     rt.extent = extent;
 
@@ -95,8 +96,8 @@ inline RenderTarget<F>::operator bool() const noexcept {
 }
 
 template <VkFormat F>
-inline auto RenderTarget3D<F>::Create(Allocator& allocator, const Context& ctx, VkExtent3D extent, VkImageUsageFlags usage)
-    -> std::expected<RenderTarget3D, VkResult> {
+inline auto
+    RenderTarget3D<F>::Create(Allocator& allocator, const Context& ctx, VkExtent3D extent, VkImageUsageFlags usage) -> std::expected<RenderTarget3D, Error> {
     RenderTarget3D rt;
     rt.extent                    = extent;
     const VkImageCreateInfo info = {
@@ -127,15 +128,15 @@ inline auto RenderTarget3D<F>::Create(Allocator& allocator, const Context& ctx, 
     if (!view_res.has_value()) {
         return std::unexpected(view_res.error());
     }
-    rt.view = std::move(*view_res);
+    rt.view     = std::move(*view_res);
     rt.viewInfo = {
-        .sType      = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .pNext      = nullptr,
-        .flags      = 0,
-        .image      = rt.image.Handle(),
-        .viewType   = VK_IMAGE_VIEW_TYPE_3D,
-        .format     = F,
-        .components = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY},
+        .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .pNext            = nullptr,
+        .flags            = 0,
+        .image            = rt.image.Handle(),
+        .viewType         = VK_IMAGE_VIEW_TYPE_3D,
+        .format           = F,
+        .components       = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY},
         .subresourceRange = {.aspectMask = GetFormatAspect(F), .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1},
     };
     return rt;

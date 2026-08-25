@@ -12,8 +12,7 @@
 #include <memory_resource>
 
 enum class ALifeTestError : uint8_t {
-    Success = 0,
-    GOAPPlanFailed[[= ZHLN::Reflect::Description("GOAP solver failed to compute valid action sequence.")]],
+    GOAPPlanFailed[[= ZHLN::Reflect::Description("GOAP solver failed to compute valid action sequence.")]] = 1,
     PathfindingFailed[[= ZHLN::Reflect::Description("LevelGraph A* failed to find shortest path.")]],
     SpatialGridQueryFailed[[= ZHLN::Reflect::Description("SpatialGrid spatial query missed expected entity.")]]
 };

@@ -43,8 +43,7 @@
 // ============================================================================
 
 enum class MeshShaderTestError : uint8_t {
-    Success = 0,
-    EngineInitFailed[[= ZHLN::Reflect::Description("Failed to initialize headless Engine context for the mesh shader test.")]],
+    EngineInitFailed[[= ZHLN::Reflect::Description("Failed to initialize headless Engine context for the mesh shader test.")]] = 1,
     MeshletPartitioningFailed[[= ZHLN::Reflect::Description("meshoptimizer partitioning violated a GPU stream invariant.")]],
     MeshletStreamsMissing[[= ZHLN::Reflect::Description("A mesh that must be meshletized carries no meshlet streams.")]],
     RenderOutputBlank[[= ZHLN::Reflect::Description("Rendered frame is blank or could not be captured.")]],

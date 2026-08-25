@@ -23,8 +23,7 @@
 #include <vector>
 
 enum class DecalTestError : uint8_t {
-    Success = 0,
-    EngineInitFailed[[= ZHLN::Reflect::Description("Failed to initialize headless Engine context for Decal test.")]],
+    EngineInitFailed[[= ZHLN::Reflect::Description("Failed to initialize headless Engine context for Decal test.")]] = 1,
     ProceduralTextureFailed[[= ZHLN::Reflect::Description("Failed to allocate procedural decal texture.")]],
     DecalEntitySpawnFailed[[= ZHLN::Reflect::Description("Failed to create entity with DecalComponent.")]],
     RenderOutputBlank[[= ZHLN::Reflect::Description("Rendered frame is blank or failed to capture.")]],

@@ -20,8 +20,7 @@
 namespace ZHLN {
 
 enum class ScriptError : uint8_t {
-    Success = 0,
-    EntityNotFound,
+    EntityNotFound = 1,
     TypeNotFound,
     ComponentNotFound,
     PropertyNotFound,
@@ -59,14 +58,14 @@ struct ScriptVal: ScriptValVariant {
 };
 
 template <typename T>
-ScriptVal ToScriptValOwned(T&& val);
+auto ToScriptValOwned(T&& val) -> ScriptVal;
 
 // ----------------------------------------------------------------------------
 // Conversion Engine
 // ----------------------------------------------------------------------------
 
 template <typename T>
-ScriptVal ToScriptVal(const T& val) {
+auto ToScriptVal(const T& val) -> ScriptVal {
     using Decayed = std::decay_t<T>;
     if constexpr (std::is_same_v<Decayed, bool>) {
         return val;
@@ -97,7 +96,7 @@ ScriptVal ToScriptVal(const T& val) {
 }
 
 template <typename T>
-ScriptVal ToScriptValOwned(T&& val) {
+auto ToScriptValOwned(T&& val) -> ScriptVal {
     using Decayed = std::decay_t<T>;
     if constexpr (std::is_same_v<Decayed, bool>) {
         return val;
@@ -122,7 +121,7 @@ ScriptVal ToScriptValOwned(T&& val) {
 }
 
 template <typename T>
-std::expected<T, Error> FromScriptVal(const ScriptVal& sval) {
+auto FromScriptVal(const ScriptVal& sval) -> std::expected<T, Error> {
     using Decayed = std::decay_t<T>;
     if constexpr (std::is_same_v<Decayed, bool>) {
         if (const auto* b = std::get_if<bool>(&sval)) {
@@ -225,7 +224,7 @@ struct ScriptClassInfo {
     std::unordered_map<std::string_view, ScriptProperty>            properties;
     std::unordered_map<std::string_view, std::vector<ScriptMethod>> methods;
 
-    [[nodiscard]] std::expected<ScriptVal, Error> InvokeMethod(void* instance, std::string_view methodName, std::span<const ScriptVal> args) const {
+    [[nodiscard]] auto InvokeMethod(void* instance, std::string_view methodName, std::span<const ScriptVal> args) const -> std::expected<ScriptVal, Error> {
         auto it = methods.find(methodName);
         if (it == methods.end()) {
             return std::unexpected(ScriptError::MethodNotFound);
@@ -249,7 +248,7 @@ struct ScriptClassInfo {
 
 class ScriptBinder {
   public:
-    static ScriptBinder& Get() {
+    static auto Get() -> ScriptBinder& {
         static ScriptBinder instance;
         return instance;
     }
@@ -268,9 +267,9 @@ class ScriptBinder {
   private:
     template <typename ClassT, typename CurrentT>
     static void PopulateClassInfo(ScriptClassInfo& classInfo) {
-        ZHLN::Reflect::ForEachBase<CurrentT>([&]<typename Base>() { PopulateClassInfo<ClassT, Base>(classInfo); });
+        ZHLN::Reflect::ForEachBase<CurrentT>([&]<typename Base>() -> auto { PopulateClassInfo<ClassT, Base>(classInfo); });
 
-        ZHLN::Reflect::ForEachFieldAccessor<CurrentT>([&]<typename FieldT>(std::string_view name, auto const_getter, auto mut_getter, auto setter) {
+        ZHLN::Reflect::ForEachFieldAccessor<CurrentT>([&]<typename FieldT>(std::string_view name, auto const_getter, auto mut_getter, auto setter) -> auto {
             ScriptProperty prop {
                 .name = name,
                 .get  = [const_getter](const void* inst) -> std::expected<ScriptVal, Error> {
@@ -327,7 +326,7 @@ class ScriptBinder {
             classInfo.properties[name] = std::move(prop);
         });
 
-        ZHLN::Reflect::ForEachMethodPointer<CurrentT>([&](std::string_view name, auto pmf) {
+        ZHLN::Reflect::ForEachMethodPointer<CurrentT>([&](std::string_view name, auto pmf) -> auto {
             using Traits = function_traits<decltype(pmf)>;
 
             ScriptMethod method {
@@ -343,22 +342,18 @@ class ScriptBinder {
                             FromScriptVal<std::tuple_element_t<Is, typename Traits::args_tuple>>(args[Is])...
                         };
 
-                        Error firstError = ScriptError::Success;
-                        bool  hasError   = false;
+                        std::optional<Error> firstError;
 
                         (
-                            [&]<size_t I>() {
-                                if (!std::get<I>(convertedArgs)) {
-                                    if (!hasError) {
-                                        firstError = std::get<I>(convertedArgs).error();
-                                    }
-                                    hasError = true;
+                            [&]<size_t I>() -> auto {
+                                if (!std::get<I>(convertedArgs) && !firstError) {
+                                    firstError = std::get<I>(convertedArgs).error();
                                 }
                             }.template operator()<Is>(),
                             ...);
 
-                        if (hasError) {
-                            return std::unexpected(firstError);
+                        if (firstError) {
+                            return std::unexpected(*firstError);
                         }
 
                         using RetType = typename Traits::return_type;
@@ -389,7 +384,7 @@ class ScriptBinder {
 
 template <typename Manifest>
 void RegisterManifest() {
-    ZHLN::Reflect::ForEachNestedType<Manifest>([]<typename T>() { ScriptBinder::Get().Register<T>(); });
+    ZHLN::Reflect::ForEachNestedType<Manifest>([]<typename T>() -> auto { ScriptBinder::Get().Register<T>(); });
 }
 
 } // namespace ZHLN

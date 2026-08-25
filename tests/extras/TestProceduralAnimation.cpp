@@ -28,8 +28,7 @@ import ZHLN.Locomotion;
 import ZHLN.ProceduralAnimation;
 
 enum class ProceduralAnimationTestError : uint32_t {
-    Success = 0,
-    RigMappingFailed[[= ZHLN::Reflect::Description("The generated procedural rig did not map all core and secondary controls.")]],
+    RigMappingFailed[[= ZHLN::Reflect::Description("The generated procedural rig did not map all core and secondary controls.")]] = 1,
     GaitInvariantFailed[[= ZHLN::Reflect::Description("The distance-driven gait clock or alternating foot phases violated its invariant.")]],
     HairConstraintFailed[[= ZHLN::Reflect::Description("The XPBD hair solver produced a non-finite or excessively stretched segment.")]],
 };
@@ -356,10 +355,10 @@ struct ProceduralAnimationTestSuite {
             const JPH::Mat44 rigidFootRPartRelative   = importedMap.modelTransforms[rigidFootR.root].Inversed() * importedMap.modelTransforms[rigidFootR.part];
             const JPH::Mat44 secondaryFootLBefore     = importedMap.modelTransforms[secondaryFootLNode];
             const JPH::Mat44 secondaryFootRBefore     = importedMap.modelTransforms[secondaryFootRNode];
-            importedMap.localTransforms[forearmL] = importedMap.localTransforms[forearmL] *
-                                                    JPH::Mat44::sRotation(JPH::Quat::sRotation(JPH::Vec3::sAxisY(), 0.45f));
-            importedMap.localTransforms[supSpine] = importedMap.localTransforms[supSpine] *
-                                                    JPH::Mat44::sRotation(JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), 0.25f));
+            importedMap.localTransforms[forearmL]     = importedMap.localTransforms[forearmL] *
+                                                        JPH::Mat44::sRotation(JPH::Quat::sRotation(JPH::Vec3::sAxisY(), 0.45f));
+            importedMap.localTransforms[supSpine]     = importedMap.localTransforms[supSpine] *
+                                                        JPH::Mat44::sRotation(JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), 0.25f));
             importedMap.localTransforms[footL] = importedMap.localTransforms[footL] * JPH::Mat44::sRotation(JPH::Quat::sRotation(JPH::Vec3::sAxisX(), 0.30f));
             importedMap.localTransforms[footR] = importedMap.localTransforms[footR] * JPH::Mat44::sRotation(JPH::Quat::sRotation(JPH::Vec3::sAxisX(), -0.25f));
             ZHLN::ProceduralAnimation::CaptureChildOfPoseDeltas(importedMap);
