@@ -58,10 +58,14 @@ uint32_t
 //    latched as a sticky status, readable through Context::Status(). Forcing
 //    std::expected on every Label would be unusable boilerplate.
 //
-//  * STRUCTURAL OPS (DestroyUIEntity, SweepStaleChildren) are monadic:
-//    they return std::expected<void, Error>, which is [[nodiscard]] since
-//    C++26, so every failure point MUST be handled by the caller — no
-//    '(void)' casts, no 'auto _ =', no [[maybe_unused]] escape hatches.
+//  * STRUCTURAL CLEANUP: DestroyUIEntity is monadic — it returns
+//    std::expected<void, Error>, which is [[nodiscard]] since C++26, so
+//    every failure point MUST be handled by the caller — no '(void)' casts,
+//    no 'auto _ =', no [[maybe_unused]] escape hatches.
+//    SweepStaleChildren is best-effort GC and returns void: like the
+//    builders, a dead parent or an entity that refuses to die latches a
+//    typed error into Status() instead of forcing monadic plumbing through
+//    every destructor and pop path.
 //
 // Scope management is RAII-first: Panel()/Box() return a [[nodiscard]]
 // UIScope whose lifetime is the push/pop pair (the pop also sweeps the
@@ -213,12 +217,10 @@ class Context {
     // Frame teardown: sweeping the root cache here makes a manual
     // SweepStaleChildren(NullEntity) at every call site redundant. The sweep
     // is idempotent — records visited this frame survive, re-sweeps are
-    // no-ops. Failure can only mean the root cache died mid-frame; latch it,
-    // never abort a destructor.
+    // no-ops. It cannot throw out of here: failures latch into Status()
+    // (queryable while the context lives), never abort a destructor.
     ~Context() noexcept {
-        if (const auto sweep = SweepStaleChildren(NullEntity); !sweep) {
-            RecordError(sweep.error());
-        }
+        SweepStaleChildren(NullEntity);
     }
 
     Context(const Context&)            = delete;
@@ -251,7 +253,9 @@ class Context {
         m_error = Error {};
     }
 
-    // --- STRUCTURAL OPS (monadic; the caller MUST handle the result) ---
+    // --- STRUCTURAL CLEANUP ---
+    // DestroyUIEntity is monadic — the caller MUST handle its result.
+    // SweepStaleChildren is best-effort GC: failures latch into Status().
 
     // Destroys a UI entity and its whole subtree, recursing through the
     // entity's OWN child-cache records — O(K) in the subtree size instead of
@@ -287,18 +291,21 @@ class Context {
 
     // Sweeps child widgets that were not rebuilt this frame (or whose entities
     // died outside the GUI) from under a parent node — or from the root cache
-    // when parentEntity is NullEntity. Fails only when an explicitly-passed
-    // parent is dead; success is engaged-void and silent (verbose-level
-    // traces aside). Idempotent: a sweep right after a sweep is a no-op.
-    [[nodiscard]] std::expected<void, Error> SweepStaleChildren(Entity parentEntity) {
+    // when parentEntity is NullEntity. Fault-tolerant like the builders: a
+    // dead parent, or an entity that refuses to die, latches a typed error
+    // into Status() and the sweep stops there. Success is silent
+    // (verbose-level traces aside). Idempotent: a sweep right after a sweep
+    // is a no-op.
+    void SweepStaleChildren(Entity parentEntity) {
         Entity cacheEntity = (parentEntity != NullEntity) ? parentEntity : GetRootCacheEntity();
         if (cacheEntity == NullEntity || !m_reg->IsAlive(cacheEntity)) {
-            return std::unexpected(Error(GUIError::ParentNotAlive));
+            RecordError(Error(GUIError::ParentNotAlive));
+            return;
         }
 
         auto* cache = m_reg->Get<Components::UIChildCacheComponent>(cacheEntity);
         if (cache == nullptr) {
-            return {};
+            return;
         }
 
         // A record is stale when its widget was not rebuilt this frame, OR when
@@ -321,7 +328,11 @@ class Context {
                 wasAlive = m_reg->IsAlive(rec->entity);
                 if (wasAlive) {
                     if (const auto res = DestroyUIEntity(rec->entity); !res) {
-                        return res; // propagate: a liveness-verified entity failing to die is a real failure
+                        // Latch, never discard: a liveness-verified entity
+                        // failing to die is a real failure. Abort the sweep
+                        // here, exactly as the old propagation did.
+                        RecordError(res.error());
+                        return;
                     }
                 }
             }
@@ -349,8 +360,6 @@ class Context {
                 purgedRecords, cacheEntity.index, cacheEntity.generation
             );
         }
-
-        return {};
     }
 
     // O(1) Hash-based Entity Lookup with Mark-and-Sweep GC
@@ -639,9 +648,7 @@ class Context {
         if (wasPushed && m_stackTop > 0) {
             --m_stackTop;
         }
-        if (const auto sweep = SweepStaleChildren(entity); !sweep) {
-            RecordError(sweep.error()); // can only mean the container died mid-build
-        }
+        SweepStaleChildren(entity); // a failure latches into Status()
     }
 
     UIScope PushScope(Entity e, uint32_t depth) noexcept {

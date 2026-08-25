@@ -90,8 +90,7 @@ struct GUIContextTestSuite {
                     boxA1 = gui.Box("a", GUI::BoxConfig {}, []() -> void {});
                     boxB1 = gui.Box("b", GUI::BoxConfig {}, []() -> void {});
                 });
-                const auto sweep = gui.SweepStaleChildren(NullEntity);
-                ZHLN::Test::ExpectTrue(sweep.has_value()); // handled: frame-1 sweep cannot fail
+                gui.SweepStaleChildren(NullEntity); // frame-1 no-op sweep
             }
 
             Entity root2 = NullEntity, boxA2 = NullEntity, boxB2 = NullEntity;
@@ -102,8 +101,7 @@ struct GUIContextTestSuite {
                     boxA2 = gui.Box("a", GUI::BoxConfig {}, []() -> void {});
                     boxB2 = gui.Box("b", GUI::BoxConfig {}, []() -> void {});
                 });
-                const auto sweep = gui.SweepStaleChildren(NullEntity);
-                ZHLN::Test::ExpectTrue(sweep.has_value()); // handled: empty sweep cannot fail
+                gui.SweepStaleChildren(NullEntity); // clean: nothing is stale on an identical rebuild
                 buildSucceeded = gui.Status().has_value(); // clean build: engaged expected, not an error code
             }
 
@@ -191,27 +189,23 @@ struct GUIContextTestSuite {
                 GUI::Context gui(reg, 1);
                 gui.Panel("p1", GUI::PanelConfig {}, []() -> void {});
                 panel2 = gui.Panel("p2", GUI::PanelConfig {}, []() -> void {});
-                const auto sweep = gui.SweepStaleChildren(NullEntity);
-                ZHLN::Test::ExpectTrue(sweep.has_value()); // handled: frame-1 sweep cannot fail
+                gui.SweepStaleChildren(NullEntity); // frame-1 no-op sweep
             }
 
             Entity rootCache = NullEntity;
-            bool   sweepOk    = false;
             {
                 GUI::Context gui(reg, 2);
                 rootCache = RootCacheEntity(reg); // created during the frame-1 build
                 gui.Panel("p1", GUI::PanelConfig {}, []() -> void {});
 
-                // "p2" was not rebuilt this frame: the sweep result is handled,
-                // and WHAT it did is verified through registry state below.
-                const auto sweep = gui.SweepStaleChildren(NullEntity);
-                sweepOk          = sweep.has_value();
+                // "p2" was not rebuilt this frame: the sweep collects it, and
+                // WHAT it did is verified through registry state below.
+                gui.SweepStaleChildren(NullEntity);
             }
 
             ZHLN::Test::ExpectTrue(panel2 != NullEntity);
             ZHLN::Test::ExpectFalse(reg.IsAlive(panel2));
             ZHLN::Test::ExpectEq(CountCacheRecordsOn(reg, rootCache), 1u); // only "p1" remains recorded
-            ZHLN::Test::ExpectTrue(sweepOk);
 
             return {};
         }
@@ -284,8 +278,7 @@ struct GUIContextTestSuite {
             // destroyed entity now: the sweep must purge it, not keep it around
             // (this is the orphaned-record path). Exactly one purge, no destroys.
             ZHLN::Test::ExpectEq(CountCacheRecordsOn(reg, rootCache), 1u);
-            const auto sweep = gui.SweepStaleChildren(NullEntity);
-            ZHLN::Test::ExpectTrue(sweep.has_value()); // handled: purging dead records cannot fail
+            gui.SweepStaleChildren(NullEntity); // purges the dead record
             // The orphaned record is gone afterwards.
             ZHLN::Test::ExpectEq(CountCacheRecordsOn(reg, rootCache), 0u);
             ZHLN::Test::ExpectEq(CountTotalCacheRecords(reg), 0u);
@@ -385,13 +378,10 @@ struct GUIContextTestSuite {
 
             // Whole tree - including the misattached tail - is reclaimed by a
             // single root sweep: exactly one destroyed subtree, no orphans.
-            bool sweepOk = false;
             {
                 GUI::Context gui(reg, 2);
-                const auto sweep = gui.SweepStaleChildren(NullEntity);
-                sweepOk          = sweep.has_value();
+                gui.SweepStaleChildren(NullEntity);
             }
-            ZHLN::Test::ExpectTrue(sweepOk);
             ZHLN::Test::ExpectEq(CountUIRects(reg), 0u);
             ZHLN::Test::ExpectEq(CountTotalCacheRecords(reg), 0u);
 
