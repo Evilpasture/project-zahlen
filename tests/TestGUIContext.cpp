@@ -32,6 +32,7 @@ namespace {
 using ZHLN::Entity;
 using ZHLN::NullEntity;
 using ZHLN::ECS::Registry;
+using ZHLN::GUI::GUIError;
 namespace GUI  = ZHLN::GUI;
 namespace Comp = ZHLN::Components;
 
@@ -75,23 +76,26 @@ struct GUIContextTestSuite {
                     boxA1 = gui.BeginBox("a", GUI::BoxConfig {}, []() -> void {});
                     boxB1 = gui.BeginBox("b", GUI::BoxConfig {}, []() -> void {});
                 });
-                gui.SweepStaleChildren(NullEntity);
+                (void)gui.SweepStaleChildren(NullEntity);
             }
 
             Entity root2 = NullEntity, boxA2 = NullEntity, boxB2 = NullEntity;
+            bool   buildSucceeded = false;
             {
                 GUI::Context gui(reg, 2);
                 root2 = gui.BeginPanel("root", GUI::PanelConfig {}, [&]() -> void {
                     boxA2 = gui.BeginBox("a", GUI::BoxConfig {}, []() -> void {});
                     boxB2 = gui.BeginBox("b", GUI::BoxConfig {}, []() -> void {});
                 });
-                gui.SweepStaleChildren(NullEntity);
+                (void)gui.SweepStaleChildren(NullEntity);
+                buildSucceeded = gui.Status().has_value(); // clean build: no structural error recorded
             }
 
             ZHLN::Test::ExpectEq(root1.Pack(), root2.Pack());
             ZHLN::Test::ExpectEq(boxA1.Pack(), boxA2.Pack());
             ZHLN::Test::ExpectEq(boxB1.Pack(), boxB2.Pack());
             ZHLN::Test::ExpectEq(CountUIRects(reg), 3u);
+            ZHLN::Test::ExpectTrue(buildSucceeded);
 
             return {};
         }
@@ -171,20 +175,28 @@ struct GUIContextTestSuite {
                 GUI::Context gui(reg, 1);
                 gui.BeginPanel("p1", GUI::PanelConfig {}, []() -> void {});
                 panel2 = gui.BeginPanel("p2", GUI::PanelConfig {}, []() -> void {});
-                gui.SweepStaleChildren(NullEntity);
+                (void)gui.SweepStaleChildren(NullEntity);
             }
 
             Entity rootCache = NullEntity;
+            bool   reportOk = false, reportCountsRight = false;
             {
                 GUI::Context gui(reg, 2);
                 rootCache = gui.GetRootCacheEntity();
                 gui.BeginPanel("p1", GUI::PanelConfig {}, []() -> void {});
-                gui.SweepStaleChildren(NullEntity);
+
+                // The sweep's result is data, not a log line: exactly one stale
+                // subtree destroyed ("p2"), nothing orphaned.
+                const auto report = gui.SweepStaleChildren(NullEntity);
+                reportOk          = report.has_value();
+                reportCountsRight = report.has_value() && report->destroyedSubtrees == 1u && report->purgedRecords == 0u;
             }
 
             ZHLN::Test::ExpectTrue(panel2 != NullEntity);
             ZHLN::Test::ExpectFalse(reg.IsAlive(panel2));
             ZHLN::Test::ExpectEq(CountCacheRecordsOn(reg, rootCache), 1u); // only "p1"
+            ZHLN::Test::ExpectTrue(reportOk);
+            ZHLN::Test::ExpectTrue(reportCountsRight);
 
             return {};
         }
@@ -236,7 +248,8 @@ struct GUIContextTestSuite {
                 boxC = gui.BeginBox("c", GUI::BoxConfig {}, []() -> void {});
             });
 
-            gui.DestroyUIEntity(root);
+            const auto destroyResult = gui.DestroyUIEntity(root);
+            ZHLN::Test::ExpectTrue(destroyResult.has_value()); // success: silent, expected-void
 
             ZHLN::Test::ExpectFalse(reg.IsAlive(root));
             ZHLN::Test::ExpectFalse(reg.IsAlive(boxB));
@@ -244,11 +257,23 @@ struct GUIContextTestSuite {
             ZHLN::Test::ExpectFalse(reg.IsAlive(boxC));
             ZHLN::Test::ExpectEq(CountUIRects(reg), 0u);
 
+            // Destroying the same entity again is a typed failure, not a log.
+            const auto destroyAgain = gui.DestroyUIEntity(root);
+            ZHLN::Test::ExpectFalse(destroyAgain.has_value());
+            if (!destroyAgain.has_value()) {
+                ZHLN::Test::ExpectTrue(destroyAgain.error().Is(GUIError::EntityNotAlive));
+            }
+
             // Root's own record lives in the root cache entity and points at a
             // destroyed entity now: the sweep must purge it, not keep it around
-            // (this is the orphaned-record path).
+            // (this is the orphaned-record path). Exactly one purge, no destroys.
             ZHLN::Test::ExpectEq(CountCacheRecordsOn(reg, rootCache), 1u);
-            gui.SweepStaleChildren(NullEntity);
+            const auto report = gui.SweepStaleChildren(NullEntity);
+            ZHLN::Test::ExpectTrue(report.has_value());
+            if (report.has_value()) {
+                ZHLN::Test::ExpectEq(report->destroyedSubtrees, 0u);
+                ZHLN::Test::ExpectEq(report->purgedRecords, 1u);
+            }
             ZHLN::Test::ExpectEq(CountCacheRecordsOn(reg, rootCache), 0u);
             ZHLN::Test::ExpectEq(CountTotalCacheRecords(reg), 0u);
 
@@ -301,6 +326,7 @@ struct GUIContextTestSuite {
             constexpr size_t                 kDepth = GUI::MAX_UI_STACK_DEPTH + 8;
             std::array<Entity, kDepth + 1>   boxes {}; // 1 index-based for readability (boxes[1] == outermost)
 
+            bool statusIsError = false, statusCodeIsRight = false;
             {
                 GUI::Context gui(reg, 1);
                 std::function<void(size_t)> build = [&](size_t level) -> void {
@@ -310,7 +336,16 @@ struct GUIContextTestSuite {
                     boxes[level] = gui.BeginBox(GUI::BoxConfig {.height = 4.0f}, [&]() -> void { build(level + 1); });
                 };
                 build(1);
+
+                // Overflowing the scope stack is a typed, queryable failure -
+                // not a log line. The build itself still completed above.
+                const auto status   = gui.Status();
+                statusIsError       = !status.has_value();
+                statusCodeIsRight   = (!status.has_value()) && status.error().Is(GUIError::HierarchyTooDeep);
             }
+
+            ZHLN::Test::ExpectTrue(statusIsError);
+            ZHLN::Test::ExpectTrue(statusCodeIsRight);
 
             // Everything was actually created: no loss, no infinite loop.
             ZHLN::Test::ExpectEq(CountUIRects(reg), kDepth);
@@ -335,11 +370,17 @@ struct GUIContextTestSuite {
             // Depth stops growing past the cap (no unbounded counter).
             ZHLN::Test::ExpectEq(rectDeepest->hierarchyDepth, rectPastCap1->hierarchyDepth);
 
-            // Whole tree - including the misattached tail - is reclaimed.
+            // Whole tree - including the misattached tail - is reclaimed by a
+            // single root sweep: exactly one destroyed subtree, no orphans.
+            bool sweepOk = false, sweepCountsRight = false;
             {
                 GUI::Context gui(reg, 2);
-                gui.SweepStaleChildren(NullEntity);
+                const auto report = gui.SweepStaleChildren(NullEntity);
+                sweepOk           = report.has_value();
+                sweepCountsRight  = report.has_value() && report->destroyedSubtrees == 1u && report->purgedRecords == 0u;
             }
+            ZHLN::Test::ExpectTrue(sweepOk);
+            ZHLN::Test::ExpectTrue(sweepCountsRight);
             ZHLN::Test::ExpectEq(CountUIRects(reg), 0u);
             ZHLN::Test::ExpectEq(CountTotalCacheRecords(reg), 0u);
 

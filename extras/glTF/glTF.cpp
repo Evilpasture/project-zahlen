@@ -793,7 +793,7 @@ void RenderFrame(ZHLN::Engine& engine) {
     } else {
         DrawDropPrompt(ui);
     }
-    ui.SweepStaleChildren(ZHLN::NullEntity);
+    (void)ui.SweepStaleChildren(ZHLN::NullEntity);
 }
 
 } // namespace

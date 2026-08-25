@@ -6,9 +6,11 @@
 #include "Types.hpp"
 #include <Zahlen/Core/Print.hpp>
 #include <Zahlen/Core/String.hpp>
+#include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <array>
+#include <expected>
 #include <string_view>
 #include <utility>
 
@@ -52,6 +54,25 @@ constexpr size_t MAX_UI_STACK_DEPTH = 32;
 struct UIScopeNode {
     Entity   entity = NullEntity;
     uint32_t depth  = 1;
+};
+
+// --- ERROR CODES & REPORTS ---
+//
+// Fallible GUI operations report failure through std::expected<T, ZHLN::Error>
+// return values. Successful work is silent (verbose-level traces aside): no
+// impure logging side effects on the hot path.
+
+enum class GUIError : uint8_t {
+    Success = 0,
+    HierarchyTooDeep[[= ZHLN::Reflect::Description("UI hierarchy exceeded MAX_UI_STACK_DEPTH; overflowing widgets attached to the deepest live parent instead.")]],
+    EntityNotAlive[[= ZHLN::Reflect::Description("Target UI entity is not alive (already destroyed or never existed).")]],
+    ParentNotAlive[[= ZHLN::Reflect::Description("Parent entity for the GUI operation is not alive.")]],
+};
+
+// Pure result of a SweepStaleChildren call: what the GC reclaimed.
+struct SweepReport {
+    uint32_t destroyedSubtrees = 0; // subtrees destroyed (widget not rebuilt this frame)
+    uint32_t purgedRecords     = 0; // dead cache records purged (entity destroyed outside the GUI)
 };
 
 // --- CONFIGURATION STRUCTS ---
@@ -131,28 +152,35 @@ class Context {
         return (m_stackTop > 0) ? m_stack[m_stackTop - 1].depth + 1 : 1;
     }
 
-    bool PushParent(Entity entity, uint32_t depth) noexcept {
+    // Pushes a scope node. Fails (without side effects) past MAX_UI_STACK_DEPTH;
+    // the caller decides how to degrade. Success is silent.
+    [[nodiscard]] std::expected<void, Error> PushParent(Entity entity, uint32_t depth) noexcept {
         if (m_stackTop < MAX_UI_STACK_DEPTH) {
             m_stack[m_stackTop++] = {.entity = entity, .depth = depth};
-            return true;
+            return {};
         }
-        // Past the cap the content lambda still runs, but its widgets silently
-        // attach to the deepest live parent. Say so once per context instead of
-        // letting the tree look "buggy" with no explanation.
-        if (!m_stackOverflowLogged) {
-            m_stackOverflowLogged = true;
-            ZHLN::Log(
-                "[GUI::Context] ERROR: Exceeded maximum UI hierarchy depth of {}. Widgets below this depth will attach to the deepest live parent instead.",
-                MAX_UI_STACK_DEPTH
-            );
-        }
-        return false;
+        return std::unexpected(Error(GUIError::HierarchyTooDeep));
     }
 
     void PopParent(bool wasPushed) noexcept {
         if (wasPushed && m_stackTop > 0) {
             m_stackTop--;
         }
+    }
+
+    // First structural error this context ran into while building (e.g. the
+    // hierarchy grew past MAX_UI_STACK_DEPTH). Builders degrade gracefully and
+    // keep rendering instead of aborting, so inspect Status() when a tree
+    // looks wrong; success is expected-void, not a log line.
+    [[nodiscard]] std::expected<void, Error> Status() const noexcept {
+        if (m_error) {
+            return std::unexpected(m_error);
+        }
+        return {};
+    }
+
+    void ClearStatus() noexcept {
+        m_error = Error {};
     }
 
     // Resolves or creates the root cache entity (UISettingsComponent)
@@ -191,9 +219,9 @@ class Context {
             }
             // The widget entity was destroyed outside the GUI context (e.g. a
             // plain Registry::Destroy). We transparently respawn it below, and
-            // the insert overwrites the dead record - log it, because silent
-            // respawns are exactly how "flickering widget" bugs present.
-            ZHLN::Log(
+            // the insert overwrites the dead record. Recovery succeeds, so this
+            // stays a verbose-level trace rather than an error.
+            ZHLN::Log<LogChannel::StdErr, LogLevel::Verbose>(
                 "[GUI::Context] Cached UI entity ({}:{}) was destroyed externally; respawning widget under parent ({}:{}). Use DestroyUIEntity() for intentional subtree removal.",
                 record->entity.index, record->entity.generation, cacheEntity.index, cacheEntity.generation
             );
@@ -206,9 +234,11 @@ class Context {
         return newEntity;
     }
 
-    void DestroyUIEntity(Entity ent) noexcept {
+    // Destroys a UI entity and its whole subtree. Failing on a dead entity is
+    // reported to the caller; success is silent (verbose-level trace aside).
+    [[nodiscard]] std::expected<void, Error> DestroyUIEntity(Entity ent) noexcept {
         if (!m_reg->IsAlive(ent)) {
-            return;
+            return std::unexpected(Error(GUIError::EntityNotAlive));
         }
 
         ZHLN::Log<LogChannel::StdErr, LogLevel::Verbose>(
@@ -228,22 +258,28 @@ class Context {
         }
 
         for (Entity child: childrenToDestroy) {
-            DestroyUIEntity(child);
+            // Children come from a liveness-verified scan of a tree structure:
+            // recursive calls cannot fail here.
+            (void)DestroyUIEntity(child);
         }
 
         m_reg->Destroy(ent);
+        return {};
     }
 
-    // Sweep unvisited child entities under a parent node (or root)
-    void SweepStaleChildren(Entity parentEntity) {
+    // Sweeps child widgets that were not rebuilt this frame (or whose entities
+    // died outside the GUI) from under a parent node - or from the root cache
+    // when parentEntity is NullEntity. Returns a pure SweepReport; fails only
+    // when an explicitly-passed parent is dead.
+    [[nodiscard]] std::expected<SweepReport, Error> SweepStaleChildren(Entity parentEntity) {
         Entity cacheEntity = (parentEntity != NullEntity) ? parentEntity : GetRootCacheEntity();
         if (cacheEntity == NullEntity || !m_reg->IsAlive(cacheEntity)) {
-            return;
+            return std::unexpected(Error(GUIError::ParentNotAlive));
         }
 
         auto* cache = m_reg->Get<Components::UIChildCacheComponent>(cacheEntity);
         if (cache == nullptr) {
-            return;
+            return SweepReport {};
         }
 
         // A record is stale when its widget was not rebuilt this frame, OR when
@@ -256,15 +292,14 @@ class Context {
             }
         });
 
-        uint32_t destroyedSubtrees = 0;
-        uint32_t deadRecords       = 0;
+        SweepReport report;
         for (uint64_t key: staleKeys) {
             bool wasAlive = false;
             if (const auto* rec = cache->children.Find(key)) {
                 wasAlive = m_reg->IsAlive(rec->entity);
                 if (wasAlive) {
                     // Use recursive destruction instead of plain registry destroy
-                    DestroyUIEntity(rec->entity);
+                    (void)DestroyUIEntity(rec->entity);
                 }
             }
             // Erase the record as well as the entity: keeping it leaks one record
@@ -273,24 +308,26 @@ class Context {
             // which is the runtime lag this GC is supposed to prevent.
             cache->children.Erase(key);
             if (wasAlive) {
-                ++destroyedSubtrees;
+                ++report.destroyedSubtrees;
             } else {
-                ++deadRecords;
+                ++report.purgedRecords;
             }
         }
 
-        if (destroyedSubtrees > 0) {
-            ZHLN::Log(
-                "[GUI::Context] Swept {} stale UI subtree(s) under parent ({}:{}): widget(s) were not rebuilt this frame. Remaining records: {}.",
-                destroyedSubtrees, cacheEntity.index, cacheEntity.generation, cache->children.Size()
-            );
-        }
-        if (deadRecords > 0) {
+        if (report.destroyedSubtrees > 0) {
             ZHLN::Log<LogChannel::StdErr, LogLevel::Verbose>(
-                "[GUI::Context] Purged {} orphaned UI cache record(s) under parent ({}:{}) pointing at entities destroyed outside the GUI.", deadRecords,
-                cacheEntity.index, cacheEntity.generation
+                "[GUI::Context] Swept {} stale UI subtree(s) under parent ({}:{}): widget(s) were not rebuilt this frame. Remaining records: {}.",
+                report.destroyedSubtrees, cacheEntity.index, cacheEntity.generation, cache->children.Size()
             );
         }
+        if (report.purgedRecords > 0) {
+            ZHLN::Log<LogChannel::StdErr, LogLevel::Verbose>(
+                "[GUI::Context] Purged {} orphaned UI cache record(s) under parent ({}:{}) pointing at entities destroyed outside the GUI.",
+                report.purgedRecords, cacheEntity.index, cacheEntity.generation
+            );
+        }
+
+        return report;
     }
 
     // --- WIDGET BUILDER METHODS ---
@@ -347,11 +384,14 @@ class Context {
             rect.hierarchyDepth = depth;
         });
 
-        bool pushed = PushParent(e, depth);
+        const auto pushResult = PushParent(e, depth);
+        if (!pushResult) {
+            RecordError(pushResult.error());
+        }
         std::forward<Fn>(content)();
 
-        SweepStaleChildren(e);
-        PopParent(pushed);
+        (void)SweepStaleChildren(e);
+        PopParent(pushResult.has_value());
 
         return e;
     }
@@ -386,11 +426,14 @@ class Context {
             );
         });
 
-        bool pushed = PushParent(e, depth);
+        const auto pushResult = PushParent(e, depth);
+        if (!pushResult) {
+            RecordError(pushResult.error());
+        }
         std::forward<Fn>(content)();
 
-        SweepStaleChildren(e);
-        PopParent(pushed);
+        (void)SweepStaleChildren(e);
+        PopParent(pushResult.has_value());
 
         return e;
     }
@@ -568,13 +611,20 @@ class Context {
         return hash;
     }
 
+    // First-error-wins: the status surfaces through Status() instead of logs.
+    void RecordError(Error err) noexcept {
+        if (!m_error) {
+            m_error = err;
+        }
+    }
+
     ECS::Registry*                              m_reg          = nullptr;
     uint64_t                                    m_currentFrame = 0;
     std::array<UIScopeNode, MAX_UI_STACK_DEPTH> m_stack {};
-    uint32_t                                    m_stackTop            = 0;
-    uint32_t                                    m_autoIdCounter       = 0;
-    Entity                                      m_rootCacheEntity     = NullEntity;
-    bool                                        m_stackOverflowLogged = false;
+    uint32_t                                    m_stackTop        = 0;
+    uint32_t                                    m_autoIdCounter   = 0;
+    Entity                                      m_rootCacheEntity = NullEntity;
+    Error                                       m_error {};
 };
 
 } // namespace ZHLN::GUI
