@@ -26,8 +26,7 @@
 // ============================================================================
 
 enum class CharacterTestError : uint8_t {
-    Success = 0,
-    GroundedStateFailed[[= ZHLN::Reflect::Description("Character failed to maintain or establish a stable grounded state.")]],
+    GroundedStateFailed[[= ZHLN::Reflect::Description("Character failed to maintain or establish a stable grounded state.")]] = 1,
     DisplacementMismatch[[= ZHLN::Reflect::Description("Kinematic displacement did not match expected velocity integration.")]],
     SubFrameJitterDetected[[= ZHLN::Reflect::Description("Sub-frame alpha interpolation produced non-monotonic or jittery motion.")]],
     CameraDistanceVariance[[= ZHLN::Reflect::Description("Camera-to-character relative distance variance exceeded 0.1mm threshold.")]],

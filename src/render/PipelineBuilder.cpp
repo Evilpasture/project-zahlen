@@ -6,35 +6,8 @@
 #include "Rendering.hpp"
 // clang-format on
 #include "PipelineBuilder.hpp"
-#include <print>
 
 namespace ZHLN::Vk {
-
-void ReportPipelineBuilderError(PipelineBuilderResult result) noexcept {
-    switch (result) {
-        case PipelineBuilderResult::Succeeded:
-            break;
-        case PipelineBuilderResult::MissingShaders:
-            std::println(stderr, "[PipelineBuilder] Missing shader stages.");
-            break;
-        case PipelineBuilderResult::MissingLayout:
-            std::println(stderr, "[PipelineBuilder] Missing pipeline layout.");
-            break;
-    }
-}
-
-void ReportComputePipelineBuilderError(PipelineBuilderResult result) noexcept {
-    switch (result) {
-        case PipelineBuilderResult::Succeeded:
-            break;
-        case PipelineBuilderResult::MissingShaders:
-            std::println(stderr, "[ComputePipelineBuilder] Missing or invalid shader code.");
-            break;
-        case PipelineBuilderResult::MissingLayout:
-            std::println(stderr, "[ComputePipelineBuilder] Missing pipeline layout.");
-            break;
-    }
-}
 
 // ============================================================================
 // ComputePipelineBuilder Implementation
@@ -76,10 +49,9 @@ auto ComputePipelineBuilder::HeapPipeline() noexcept -> ComputePipelineBuilder& 
 }
 
 auto ComputePipelineBuilder::Build(const VkDevice device) const noexcept -> std::expected<Pipeline, ZHLN::Error> {
-    const auto result = Validate();
-    if (result != PipelineBuilderResult::Succeeded) {
-        ReportComputePipelineBuilderError(result);
-        return std::unexpected(result);
+    auto valid = Validate();
+    if (!valid) {
+        return std::unexpected(valid.error());
     }
 
     const ZHLN_ComputePipelineDesc desc = {
@@ -90,19 +62,23 @@ auto ComputePipelineBuilder::Build(const VkDevice device) const noexcept -> std:
         .cs_mapping          = _mapping,
     };
 
-    return Pipeline(device, ZHLN_CreateComputePipeline(device, &desc));
+    VkPipeline pipeline = ZHLN_CreateComputePipeline(device, &desc);
+    if (pipeline == VK_NULL_HANDLE) {
+        return std::unexpected(RenderInitError::PipelineCreationFailed);
+    }
+
+    return Pipeline(device, pipeline);
 }
 
-auto ComputePipelineBuilder::Validate() const noexcept -> PipelineBuilderResult {
-    if ((_code == nullptr) || _size == 0) {
-        return PipelineBuilderResult::MissingShaders;
+auto ComputePipelineBuilder::Validate() const noexcept -> std::expected<void, Error> {
+    using enum PipelineBuilderError;
+    if (_code == nullptr || _size == 0) {
+        return std::unexpected(MissingShaders);
     }
-    // VUID-VkComputePipelineCreateInfo-flags-11311: heap pipelines require
-    // layout == VK_NULL_HANDLE.
     if (_layout == VK_NULL_HANDLE && !_descriptor_heap) {
-        return PipelineBuilderResult::MissingLayout;
+        return std::unexpected(MissingLayout);
     }
-    return PipelineBuilderResult::Succeeded;
+    return {};
 }
 
 // ============================================================================
@@ -117,7 +93,7 @@ PipelineLayoutBuilder& PipelineLayoutBuilder::AddPushConstant(VkShaderStageFlags
     return *this;
 }
 
-auto PipelineLayoutBuilder::Build() const noexcept -> std::expected<PipelineLayout, ZHLN::Error> {
+auto PipelineLayoutBuilder::Build() const noexcept -> std::expected<PipelineLayout, Error> {
     const ZHLN_PipelineLayoutDesc desc = {
         .set_layouts         = nullptr,
         .set_layout_count    = 0,
@@ -127,7 +103,7 @@ auto PipelineLayoutBuilder::Build() const noexcept -> std::expected<PipelineLayo
 
     VkPipelineLayout layout = ZHLN_CreatePipelineLayout(_device, &desc);
     if (layout == VK_NULL_HANDLE) {
-        return std::unexpected(VK_ERROR_INITIALIZATION_FAILED);
+        return std::unexpected(RenderInitError::OutOfHostMemory);
     }
 
     return PipelineLayout(_device, layout);

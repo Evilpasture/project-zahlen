@@ -78,11 +78,10 @@ auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height,
     };
 
     return Vk::Image::Create(allocator.Get(), imgInfo, VMA_MEMORY_USAGE_GPU_ONLY)
-        .transform_error([](VkResult res) -> Error { return res; })
         .and_then([&, device, width, height, variantIdx, scale, randomness, distortion](auto&& gpuImage) -> std::expected<uint32_t, Error> {
             auto view_res = Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 1);
             if (!view_res) {
-                return std::unexpected(Error(view_res.error()));
+                return std::unexpected(view_res.error());
             }
             auto writeView = std::move(*view_res);
 
@@ -93,12 +92,8 @@ auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height,
 
             // Dispatch the Compute Shader via allocation-free ExecuteImmediate
             Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
-                // VK_EXT_descriptor_heap: this command buffer records a heap
-                // pipeline, so the heaps must be bound on it (push data also
-                // does not carry over from other command buffers).
                 heapManager.BindHeaps(cmd);
 
-                // Transition Undefined -> General (Safe for Compute storage writes)
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, gpuImage.Handle());
 
                 proceduralBakePass.BindVariant(cmd, variantIdx);
@@ -109,7 +104,6 @@ auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height,
                 Vk::PushHeapIndex(ctx, cmd, bakeHeapBindings.indexPushOffset, kBake2DHeapIndex);
                 proceduralBakePass.DispatchThreads(cmd, width, height, 1);
 
-                // Transition General -> Shader Read Only (Ready for Bindless fragment reads)
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, gpuImage.Handle());
             });
 

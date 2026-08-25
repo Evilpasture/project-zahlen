@@ -23,8 +23,7 @@
 #include <vector>
 
 enum class UILayoutRenderError : uint8_t {
-    Success = 0,
-    EngineInitFailed[[= ZHLN::Reflect::Description("Failed to initialize headless Engine context for UI layout test.")]],
+    EngineInitFailed[[= ZHLN::Reflect::Description("Failed to initialize headless Engine context for UI layout test.")]] = 1,
     RenderOutputBlank[[= ZHLN::Reflect::Description("Rendered frame is blank or failed to capture.")]],
     LayoutMismatch[[= ZHLN::Reflect::Description("Colored UI bands are not in the expected flex-column positions.")]],
 };
@@ -169,10 +168,10 @@ struct UILayoutRenderTestSuite {
                     .padding    = 10.0f,
                 };
 
-                ui.BeginPanel("layout_root", rootCfg, [&] {
-                    ui.BeginBox("band_red", ZHLN::GUI::BoxConfig {.height = 50.0f, .color = {1.0f, 0.0f, 0.0f, 1.0f}, .edgeWidth = 0.0f, .padding = 0.0f}, [] {
+                ui.Panel("layout_root", rootCfg, [&] {
+                    ui.Box("band_red", ZHLN::GUI::BoxConfig {.height = 50.0f, .color = {1.0f, 0.0f, 0.0f, 1.0f}, .edgeWidth = 0.0f, .padding = 0.0f}, [] {
                     });
-                    ui.BeginBox(
+                    ui.Box(
                         "band_green", ZHLN::GUI::BoxConfig {.height = 50.0f, .color = {0.0f, 1.0f, 0.0f, 1.0f}, .edgeWidth = 0.0f, .padding = 0.0f}, [] {}
                     );
                 });

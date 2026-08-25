@@ -36,8 +36,7 @@ constexpr uint8_t kUziGlbData[] = {
 #pragma clang diagnostic pop
 #endif
 enum class AnimatedMeshTestError : uint8_t {
-    Success = 0,
-    PrefabLoadFailed[[= ZHLN::Reflect::Description("CreativeWorksFactory failed to load or parse the in-memory GLB prefab.")]],
+    PrefabLoadFailed[[= ZHLN::Reflect::Description("CreativeWorksFactory failed to load or parse the in-memory GLB prefab.")]] = 1,
     NoSkeletalMeshSpawned[[= ZHLN::Reflect::Description("No entities with SkeletalMeshComponent were spawned.")]],
     NoAnimatorFound[[= ZHLN::Reflect::Description("Root entity does not contain an AnimatorComponent.")]],
     SimulationTickFailed[[= ZHLN::Reflect::Description("Engine::Tick failed during animated mesh playback.")]],

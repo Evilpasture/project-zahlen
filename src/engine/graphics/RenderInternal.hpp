@@ -70,11 +70,10 @@ template <typename T, size_t MaxObjects, typename HandleType = uint64_t>
 class GenerationalPool {
   public:
     enum class Error : uint8_t {
-        Success = 0,
-        InvalidHandle,    // The handle was 0/Null
-        StaleHandle,      // Generational mismatch (the resource was already destroyed)
-        OutOfBoundsIndex, // Index exceeds pool capacity
-        NullResource      // Internal error: slot points to null pointer
+        InvalidHandle = 1, // The handle was 0/Null
+        StaleHandle,       // Generational mismatch (the resource was already destroyed)
+        OutOfBoundsIndex,  // Index exceeds pool capacity
+        NullResource       // Internal error: slot points to null pointer
     };
 
     GenerationalPool() {
@@ -609,29 +608,29 @@ struct RenderContext::Impl {
     // ============================================================================
     struct PerFrameResources {
         DoubleBuffered<Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>> accumBuffers;
-        ZHLN::DoubleBuffered<Vk::Buffer>                                lineVbos;
-        ZHLN::DoubleBuffered<VkDeviceAddress>                           lineVboAddresses;
-        ZHLN::DoubleBuffered<Vk::Buffer>                                uiVbos;
-        ZHLN::DoubleBuffered<VkDeviceAddress>                           uiVboAddresses;
-        ZHLN::DoubleBuffered<Vk::Buffer>                                clusterGridBuffers;
-        ZHLN::DoubleBuffered<Vk::Buffer>                                lightIndexListBuffers;
-        ZHLN::DoubleBuffered<Vk::Buffer>                                globalCounterBuffers;
-        ZHLN::DoubleBuffered<Vk::Buffer>                                frameUniformBuffers;
-        ZHLN::DoubleBuffered<Vk::Buffer>                                lightStorageBuffers;
-        ZHLN::DoubleBuffered<Vk::Buffer>                                instanceDataBuffers;
-        ZHLN::DoubleBuffered<Vk::Buffer>                                indirectCommandsBuffers;
-        ZHLN::DoubleBuffered<Vk::Buffer>                                indirectCommandsBuffersPass2;
-        ZHLN::DoubleBuffered<Vk::Buffer>                                secondPassCandidatesBuffers;
-        ZHLN::DoubleBuffered<Vk::Buffer>                                secondPassCountBuffers;
-        ZHLN::DoubleBuffered<Vk::Buffer>                                shadowIndirectBuffers;
-        ZHLN::DoubleBuffered<Vk::Buffer>                                jointBuffers;
+        DoubleBuffered<Vk::Buffer>                                      lineVbos;
+        DoubleBuffered<VkDeviceAddress>                                 lineVboAddresses;
+        DoubleBuffered<Vk::Buffer>                                      uiVbos;
+        DoubleBuffered<VkDeviceAddress>                                 uiVboAddresses;
+        DoubleBuffered<Vk::Buffer>                                      clusterGridBuffers;
+        DoubleBuffered<Vk::Buffer>                                      lightIndexListBuffers;
+        DoubleBuffered<Vk::Buffer>                                      globalCounterBuffers;
+        DoubleBuffered<Vk::Buffer>                                      frameUniformBuffers;
+        DoubleBuffered<Vk::Buffer>                                      lightStorageBuffers;
+        DoubleBuffered<Vk::Buffer>                                      instanceDataBuffers;
+        DoubleBuffered<Vk::Buffer>                                      indirectCommandsBuffers;
+        DoubleBuffered<Vk::Buffer>                                      indirectCommandsBuffersPass2;
+        DoubleBuffered<Vk::Buffer>                                      secondPassCandidatesBuffers;
+        DoubleBuffered<Vk::Buffer>                                      secondPassCountBuffers;
+        DoubleBuffered<Vk::Buffer>                                      shadowIndirectBuffers;
+        DoubleBuffered<Vk::Buffer>                                      jointBuffers;
         DoubleBuffered<VkAccelerationStructureKHR>                      tlas;
         DoubleBuffered<Vk::Buffer>                                      tlasBuffer;
         DoubleBuffered<Vk::Buffer>                                      tlasScratchBuffer;
         DoubleBuffered<Vk::Buffer>                                      tlasInstanceBuffers;
         DoubleBuffered<Vk::Buffer>                                      tlasStagingBuffers;
-        ZHLN::DoubleBuffered<BufferHandle>                              debugMeshHandles;
-        ZHLN::DoubleBuffered<Vk::Buffer>                                fogVolumesBuffer;
+        DoubleBuffered<BufferHandle>                                    debugMeshHandles;
+        DoubleBuffered<Vk::Buffer>                                      fogVolumesBuffer;
 
         void FlipAll() noexcept {
             ZHLN::Reflect::ForEachField(*this, [](auto& field) { FlipObject(field); });
@@ -1116,8 +1115,8 @@ struct RenderContext::Impl {
     [[nodiscard]] auto CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> std::expected<uint32_t, Error>;
     [[nodiscard]] auto CreateTextureCubeInternal(const void* const* faceData, uint32_t width, uint32_t height) -> std::expected<uint32_t, Error>;
 
-    [[nodiscard]] std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, VkResult>
-        CreateGPUBuffer(size_t size, const void* data, VkBufferUsageFlags functionalUsage) const;
+    [[nodiscard]] auto CreateGPUBuffer(size_t size, const void* data, VkBufferUsageFlags functionalUsage) const
+        -> std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, Error>;
 
     void BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const DrawCommand& drawCmd, NativeMesh* scratchMesh) const;
 
@@ -1131,7 +1130,7 @@ struct RenderContext::Impl {
     void CheckShaderWatchers() noexcept;
 
     template <VkFormat F>
-    [[nodiscard]] auto CreateDefaultTarget(VkExtent2D ext, VkImageUsageFlags extraFlags = 0) -> std::expected<Vk::RenderTarget<F>, VkResult> {
+    [[nodiscard]] auto CreateDefaultTarget(VkExtent2D ext, VkImageUsageFlags extraFlags = 0) -> std::expected<Vk::RenderTarget<F>, Error> {
         return Vk::RenderTarget<F>::Create(allocator, ctx, ext, {.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | extraFlags});
     }
 
@@ -1163,7 +1162,7 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::ComputePass& pass, uint
     return Vk::ImageBuilder {}
         .Texture2D(width, height, format, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 1)
         .Build(allocator.Get())
-        .and_then([&](Vk::Image image) -> std::expected<uint32_t, VkResult> {
+        .and_then([&](Vk::Image image) -> std::expected<uint32_t, Error> {
             auto viewRes = Vk::CreateView(ctx.Device(), image.Handle(), format, VK_IMAGE_ASPECT_COLOR_BIT, 1);
             if (!viewRes) {
                 return std::unexpected(viewRes.error());
@@ -1172,7 +1171,7 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::ComputePass& pass, uint
             const VkImageViewCreateInfo writeInfo = Vk::MakeViewCreateInfo2D(image.Handle(), format, 1, VK_IMAGE_ASPECT_COLOR_BIT);
             heapManager.WriteBindings(ctx, bakeHeapBindings, kBake2DHeapIndex, Vk::ImageWrite {.view = view.Get(), .viewInfo = &writeInfo});
 
-            Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
+            Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
                 heapManager.BindHeaps(cmd);
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, image.Handle());
                 pass.DispatchHeapIndexedThreads(ctx, cmd, kBake2DHeapIndex, width, height, 1, push);
@@ -1345,9 +1344,9 @@ inline bool LoadShaderData(const ShaderStageSource<Stage>& src, const void*& out
 }
 
 template <typename T = Vk::Buffer, typename... Args>
-std::expected<DoubleBuffered<T>, VkResult> CreateDoubleBuffered(Vk::Allocator& alloc, Args&&... args) {
-    return T::Create(alloc.Get(), std::forward<Args>(args)...).and_then([&](auto&& first) -> std::expected<DoubleBuffered<T>, VkResult> {
-        return T::Create(alloc.Get(), std::forward<Args>(args)...).transform([&](auto&& second) {
+auto CreateDoubleBuffered(Vk::Allocator& alloc, Args&&... args) -> std::expected<DoubleBuffered<T>, Error> {
+    return T::Create(alloc.Get(), std::forward<Args>(args)...).and_then([&](auto&& first) -> auto {
+        return T::Create(alloc.Get(), std::forward<Args>(args)...).transform([&](auto&& second) -> auto {
             return DoubleBuffered<T> {std::forward<decltype(first)>(first), std::forward<decltype(second)>(second)};
         });
     });

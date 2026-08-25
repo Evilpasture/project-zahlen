@@ -8,28 +8,26 @@
 #include <print>
 namespace ZHLN::Vk {
 
-std::expected<VkResult, VulkanCallError> WaitIdle(VkDevice device) noexcept {
+std::expected<void, Error> WaitIdle(VkDevice device) noexcept {
     auto res = vkDeviceWaitIdle(device);
     if (res == VK_ERROR_DEVICE_LOST) {
-        ZHLN_NotifyDeviceLost();
-        return std::unexpected(VulkanCallError::VulkanCallFailed);
+        return std::unexpected(VulkanCallError::DeviceLost);
     }
     if (res != VK_SUCCESS) {
         return std::unexpected(VulkanCallError::VulkanCallFailed);
     }
-    return res;
+    return {};
 }
 
-std::expected<VkResult, VulkanCallError> WaitIdle(VkQueue queue) noexcept {
+std::expected<void, Error> WaitIdle(VkQueue queue) noexcept {
     auto res = vkQueueWaitIdle(queue);
     if (res == VK_ERROR_DEVICE_LOST) {
-        ZHLN_NotifyDeviceLost();
-        return std::unexpected(VulkanCallError::VulkanCallFailed);
+        return std::unexpected(VulkanCallError::DeviceLost);
     }
     if (res != VK_SUCCESS) {
         return std::unexpected(VulkanCallError::VulkanCallFailed);
     }
-    return res;
+    return {};
 }
 
 std::expected<void, Error> QueueSubmit(
@@ -88,7 +86,7 @@ std::expected<void, Error> QueueSubmit(
 
     VkResult res = vkQueueSubmit2(queue, 1, &submit, fence);
     if (res != VK_SUCCESS) [[unlikely]] {
-        return std::unexpected(res);
+        return std::unexpected(VulkanCallError::VulkanCallFailed);
     }
     return {};
 }

@@ -22,8 +22,7 @@
 #include <vector>
 
 enum class CameraLookAtError : uint8_t {
-    Success = 0,
-    EngineInitFailed[[= ZHLN::Reflect::Description("Failed to initialize headless Engine context for camera look-at test.")]],
+    EngineInitFailed[[= ZHLN::Reflect::Description("Failed to initialize headless Engine context for camera look-at test.")]] = 1,
     RenderOutputBlank[[= ZHLN::Reflect::Description("Rendered frame is blank or failed to capture.")]],
     TargetNotCentered[[= ZHLN::Reflect::Description("Target-colored pixels are not centered; camera is not looking at the target.")]],
 };
@@ -132,20 +131,16 @@ struct CameraLookAtTestSuite {
             // Default camera looks toward the origin. Put the subject well off that axis.
             const ZHLN::Entity target = ZHLN::CreativeWorksFactory::CreateBox(
                 *engine, JPH::Vec3(0.8f, 0.8f, 0.8f),
-                ZHLN::CreativeWorksFactory::SpawnParams {
-                    .position = JPH::RVec3(4.0, 1.0, 0.0), .createPhysics = false, .materialOverride = *redMatRes
-                }
+                ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(4.0, 1.0, 0.0), .createPhysics = false, .materialOverride = *redMatRes}
             );
             const ZHLN::Entity decoy = ZHLN::CreativeWorksFactory::CreateBox(
                 *engine, JPH::Vec3(0.8f, 0.8f, 0.8f),
-                ZHLN::CreativeWorksFactory::SpawnParams {
-                    .position = JPH::RVec3(0.0, 1.0, 0.0), .createPhysics = false, .materialOverride = *greenMatRes
-                }
+                ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 1.0, 0.0), .createPhysics = false, .materialOverride = *greenMatRes}
             );
             ZHLN::Test::ExpectTrue(reg.IsAlive(target));
             ZHLN::Test::ExpectTrue(reg.IsAlive(decoy));
 
-            auto cameras = reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>();
+            auto cameras  = reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>();
             auto checkCam = ZHLN::Test::AssertTrue(!cameras.empty());
             if (!checkCam) {
                 return checkCam;
@@ -221,9 +216,7 @@ struct CameraLookAtTestSuite {
                 return std::unexpected(CameraLookAtError::TargetNotCentered);
             }
 
-            ZHLN::Println(
-                "    [PASS] Target camera: {} red px centroid=({:.2f},{:.2f}), {} decoy green px.", redCount, nx, ny, greenCount
-            );
+            ZHLN::Println("    [PASS] Target camera: {} red px centroid=({:.2f},{:.2f}), {} decoy green px.", redCount, nx, ny, greenCount);
             return {};
         }
     };

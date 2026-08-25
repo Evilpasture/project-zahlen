@@ -3,10 +3,10 @@
 
 #pragma once
 
+#include "Zahlen/Core/String.hpp"
 #include <array>
 #include <atomic>
 #include <bit>
-#include <cmath>
 #include <cstdarg>
 #include <cstddef>
 #include <cstdint>
@@ -33,7 +33,7 @@ class SignalSafePool {
     static constexpr size_t BufferSize  = 2048;
     static constexpr size_t BufferCount = 16;
 
-    static char* Acquire(size_t& out_idx) noexcept {
+    static auto Acquire(size_t& out_idx) noexcept -> char* {
         uint32_t mask = s_allocatedMask.load(std::memory_order::relaxed);
         while (true) {
             uint32_t free_bit         = ~mask;
@@ -54,11 +54,11 @@ class SignalSafePool {
         s_allocatedMask.fetch_and(~(1u << idx), std::memory_order::release);
     }
 
-    static const char* GetBuffer(size_t idx) noexcept {
+    static auto GetBuffer(size_t idx) noexcept -> const char* {
         return s_pool[idx];
     }
 
-    static char* GetBufferMutable(size_t idx) noexcept {
+    static auto GetBufferMutable(size_t idx) noexcept -> char* {
         return s_pool[idx];
     }
 
@@ -84,14 +84,14 @@ class FormatResult {
         }
     }
 
-    FormatResult(const FormatResult&)            = delete;
-    FormatResult& operator=(const FormatResult&) = delete;
+    FormatResult(const FormatResult&)                    = delete;
+    auto operator=(const FormatResult&) -> FormatResult& = delete;
 
     FormatResult(FormatResult&& other) noexcept: _poolIdx(other._poolIdx), _len(other._len), _valid(other._valid) {
         other._valid = false;
     }
 
-    FormatResult& operator=(FormatResult&& other) noexcept {
+    auto operator=(FormatResult&& other) noexcept -> FormatResult& {
         if (this != &other) {
             if (_valid) {
                 SignalSafePool::Release(_poolIdx);
@@ -104,11 +104,11 @@ class FormatResult {
         return *this;
     }
 
-    [[nodiscard]] const char* c_str() const noexcept {
+    [[nodiscard]] auto c_str() const noexcept -> const char* {
         return _valid ? SignalSafePool::GetBuffer(_poolIdx) : "";
     }
 
-    [[nodiscard]] std::string_view string_view() const noexcept {
+    [[nodiscard]] auto string_view() const noexcept -> std::string_view {
         return _valid ? std::string_view(SignalSafePool::GetBuffer(_poolIdx), _len) : std::string_view();
     }
 
@@ -116,10 +116,10 @@ class FormatResult {
         return string_view();
     }
 
-    [[nodiscard]] size_t size() const noexcept {
+    [[nodiscard]] auto size() const noexcept -> size_t {
         return _len;
     }
-    [[nodiscard]] bool empty() const noexcept {
+    [[nodiscard]] auto empty() const noexcept -> bool {
         return _len == 0;
     }
 
@@ -146,7 +146,7 @@ inline void RawWrite(int fd, const char* buf, size_t len) noexcept {
 #endif
 }
 
-inline size_t SafeStrLen(const char* s) noexcept {
+constexpr auto SafeStrLen(const char* s) noexcept -> size_t {
     if (s == nullptr) {
         return 0;
     }
@@ -157,7 +157,7 @@ inline size_t SafeStrLen(const char* s) noexcept {
     return len;
 }
 
-inline void ReverseStr(char* buf, size_t len) noexcept {
+constexpr void ReverseStr(char* buf, size_t len) noexcept {
     if (len <= 1) {
         return;
     }
@@ -172,7 +172,7 @@ inline void ReverseStr(char* buf, size_t len) noexcept {
     }
 }
 
-inline size_t FormatInt(char* buf, size_t max_len, int64_t val) noexcept {
+constexpr auto FormatInt(char* buf, size_t max_len, int64_t val) noexcept -> size_t {
     if (max_len == 0) {
         return 0;
     }
@@ -205,7 +205,7 @@ inline size_t FormatInt(char* buf, size_t max_len, int64_t val) noexcept {
     return len;
 }
 
-inline size_t FormatUInt(char* buf, size_t max_len, uint64_t val, int base = 10, bool uppercase = false) noexcept {
+constexpr auto FormatUInt(char* buf, size_t max_len, uint64_t val, int base = 10, bool uppercase = false) noexcept -> size_t {
     if (max_len == 0) {
         return 0;
     }
@@ -227,23 +227,21 @@ inline size_t FormatUInt(char* buf, size_t max_len, uint64_t val, int base = 10,
     return len;
 }
 
-inline uint64_t DoubleToRaw(double d) noexcept {
-    uint64_t bits = 0;
-    std::memcpy(&bits, &d, sizeof(bits));
-    return bits;
+constexpr auto DoubleToRaw(double d) noexcept -> uint64_t {
+    return std::bit_cast<uint64_t>(d);
 }
 
-inline bool IsNaN(double d) noexcept {
+constexpr auto IsNaN(double d) noexcept -> bool {
     uint64_t bits = DoubleToRaw(d);
     return ((bits & 0x7FF0000000000000ULL) == 0x7FF0000000000000ULL) && ((bits & 0x000FFFFFFFFFFFFFULL) != 0);
 }
 
-inline bool IsInf(double d) noexcept {
+constexpr auto IsInf(double d) noexcept -> bool {
     uint64_t bits = DoubleToRaw(d);
     return ((bits & 0x7FF0000000000000ULL) == 0x7FF0000000000000ULL) && ((bits & 0x000FFFFFFFFFFFFFULL) == 0);
 }
 
-inline double SafeModfPositive(double val, double* ipart) noexcept {
+constexpr auto SafeModfPositive(double val, double* ipart) noexcept -> double {
     if (val >= 9223372036854775807.0) {
         *ipart = val;
         return 0.0;
@@ -253,7 +251,7 @@ inline double SafeModfPositive(double val, double* ipart) noexcept {
     return val - *ipart;
 }
 
-inline size_t FormatDouble(char* buf, size_t max_len, double val, int precision = 6) noexcept {
+constexpr auto FormatDouble(char* buf, size_t max_len, double val, int precision = 6) noexcept -> size_t {
     if (max_len == 0) {
         return 0;
     }
@@ -262,7 +260,9 @@ inline size_t FormatDouble(char* buf, size_t max_len, double val, int precision 
         const char* s    = "nan";
         size_t      slen = SafeStrLen(s);
         size_t      copy = slen < max_len - 1 ? slen : max_len - 1;
-        std::memcpy(buf, s, copy);
+        for (size_t i = 0; i < copy; ++i) {
+            buf[i] = s[i];
+        }
         buf[copy] = '\0';
         return copy;
     }
@@ -270,7 +270,9 @@ inline size_t FormatDouble(char* buf, size_t max_len, double val, int precision 
         const char* s    = val < 0 ? "-inf" : "inf";
         size_t      slen = SafeStrLen(s);
         size_t      copy = slen < max_len - 1 ? slen : max_len - 1;
-        std::memcpy(buf, s, copy);
+        for (size_t i = 0; i < copy; ++i) {
+            buf[i] = s[i];
+        }
         buf[copy] = '\0';
         return copy;
     }
@@ -285,7 +287,7 @@ inline size_t FormatDouble(char* buf, size_t max_len, double val, int precision 
     double fpart = SafeModfPositive(val, &ipart);
 
     auto   i_val = static_cast<uint64_t>(ipart);
-    char   int_buf[32];
+    char   int_buf[32] {};
     size_t int_len = FormatUInt(int_buf, sizeof(int_buf), i_val);
 
     if (neg && len < max_len - 1) {
@@ -310,7 +312,7 @@ inline size_t FormatDouble(char* buf, size_t max_len, double val, int precision 
 }
 
 template <typename T>
-inline size_t AppendValue(char* buf, size_t max_len, const T& val) noexcept {
+constexpr auto AppendValue(char* buf, size_t max_len, const T& val) noexcept -> size_t {
     if constexpr (
         std::is_same_v<std::decay_t<T>, int> || std::is_same_v<std::decay_t<T>, long> || std::is_same_v<std::decay_t<T>, long long> ||
         std::is_same_v<std::decay_t<T>, short> || std::is_same_v<std::decay_t<T>, signed char>
@@ -327,7 +329,9 @@ inline size_t AppendValue(char* buf, size_t max_len, const T& val) noexcept {
         const char* s    = val ? "true" : "false";
         size_t      slen = SafeStrLen(s);
         size_t      copy = slen < max_len - 1 ? slen : max_len - 1;
-        std::memcpy(buf, s, copy);
+        for (size_t i = 0; i < copy; ++i) {
+            buf[i] = s[i];
+        }
         buf[copy] = '\0';
         return copy;
     } else if constexpr (std::is_same_v<std::decay_t<T>, char>) {
@@ -340,7 +344,9 @@ inline size_t AppendValue(char* buf, size_t max_len, const T& val) noexcept {
     } else if constexpr (std::is_convertible_v<T, std::string_view>) {
         auto   sv   = static_cast<std::string_view>(val);
         size_t copy = sv.size() < max_len - 1 ? sv.size() : max_len - 1;
-        std::memcpy(buf, sv.data(), copy);
+        for (size_t i = 0; i < copy; ++i) {
+            buf[i] = sv[i];
+        }
         buf[copy] = '\0';
         return copy;
     } else if constexpr (std::is_pointer_v<std::decay_t<T>>) {
@@ -351,24 +357,38 @@ inline size_t AppendValue(char* buf, size_t max_len, const T& val) noexcept {
             }
             size_t slen = SafeStrLen(s);
             size_t copy = slen < max_len - 1 ? slen : max_len - 1;
-            std::memcpy(buf, s, copy);
+            for (size_t i = 0; i < copy; ++i) {
+                buf[i] = s[i];
+            }
             buf[copy] = '\0';
             return copy;
         } else {
-            auto uval = std::bit_cast<uintptr_t>(val);
-            if (max_len < 3) {
-                return 0;
+            if consteval {
+                const char* s    = "(pointer)";
+                size_t      slen = SafeStrLen(s);
+                size_t      copy = slen < max_len - 1 ? slen : max_len - 1;
+                for (size_t i = 0; i < copy; ++i) {
+                    buf[i] = s[i];
+                }
+                buf[copy] = '\0';
+                return copy;
+            } else {
+                auto uval = std::bit_cast<uintptr_t>(val);
+                if (max_len < 3) {
+                    return 0;
+                }
+                buf[0] = '0';
+                buf[1] = 'x';
+                return FormatUInt(buf + 2, max_len - 2, uval, 16, false) + 2;
             }
-            buf[0]         = '0';
-            buf[1]         = 'x';
-            size_t hex_len = FormatUInt(buf + 2, max_len - 2, uval, 16, false);
-            return hex_len + 2;
         }
     } else {
         const char* s    = "?";
         size_t      slen = SafeStrLen(s);
         size_t      copy = slen < max_len - 1 ? slen : max_len - 1;
-        std::memcpy(buf, s, copy);
+        for (size_t i = 0; i < copy; ++i) {
+            buf[i] = s[i];
+        }
         buf[copy] = '\0';
         return copy;
     }
@@ -386,7 +406,7 @@ struct FormatOptions {
 // ZHLN::BufferPrint (vsnprintf / snprintf Async-Signal Safe Replacement)
 // ============================================================================
 
-inline int BufferPrint(char* buf, size_t max_len, const char* fmt, va_list args) noexcept {
+inline auto BufferPrint(char* buf, size_t max_len, const char* fmt, va_list args) noexcept -> int {
     if ((buf == nullptr) || max_len == 0) {
         return 0;
     }
@@ -524,7 +544,7 @@ inline int BufferPrint(char* buf, size_t max_len, const char* fmt, va_list args)
     return static_cast<int>(buf_idx);
 }
 
-inline int BufferPrint(char* buf, size_t max_len, const char* fmt, ...) noexcept {
+inline auto BufferPrint(char* buf, size_t max_len, const char* fmt, ...) noexcept -> int {
     va_list args;
     va_start(args, fmt);
     int result = BufferPrint(buf, max_len, fmt, args);
@@ -537,7 +557,7 @@ inline int BufferPrint(char* buf, size_t max_len, const char* fmt, ...) noexcept
 // ============================================================================
 
 template <typename... Args>
-inline std::string_view FormatTo(char* buf, size_t max_len, std::string_view fmt, Args&&... args) noexcept {
+constexpr auto FormatTo(char* buf, size_t max_len, std::string_view fmt, Args&&... args) noexcept -> std::string_view {
     if (buf == nullptr || max_len == 0) {
         return {};
     }
@@ -570,7 +590,7 @@ inline std::string_view FormatTo(char* buf, size_t max_len, std::string_view fmt
         std::array<ErasedArg, argCount> erasedArgs   = {};
         size_t                          trackedCount = 0;
 
-        auto EraseOne = [&]<typename T>(const T& val) {
+        auto EraseOne = [&]<typename T>(const T& val) -> auto {
             erasedArgs[trackedCount++] = {
                 .ptr = std::addressof(val), .func = [](const void* ptr, char* b, size_t len, Detail::FormatOptions opts) -> size_t {
                     using DecayedT = std::decay_t<T>;
@@ -678,17 +698,17 @@ inline std::string_view FormatTo(char* buf, size_t max_len, std::string_view fmt
 }
 
 template <size_t N, typename... Args>
-inline std::string_view FormatTo(char (&buf)[N], std::string_view fmt, Args&&... args) noexcept {
+constexpr auto FormatTo(char (&buf)[N], std::string_view fmt, Args&&... args) noexcept -> std::string_view {
     return FormatTo(buf, N, fmt, std::forward<Args>(args)...);
 }
 
 template <typename... Args>
-inline std::string_view FormatTo(std::span<char> buf, std::string_view fmt, Args&&... args) noexcept {
+constexpr auto FormatTo(std::span<char> buf, std::string_view fmt, Args&&... args) noexcept -> std::string_view {
     return FormatTo(buf.data(), buf.size(), fmt, std::forward<Args>(args)...);
 }
 
 template <size_t N, typename... Args>
-inline std::string_view FormatTo(std::array<char, N>& buf, std::string_view fmt, Args&&... args) noexcept {
+constexpr auto FormatTo(std::array<char, N>& buf, std::string_view fmt, Args&&... args) noexcept -> std::string_view {
     return FormatTo(buf.data(), N, fmt, std::forward<Args>(args)...);
 }
 
@@ -697,7 +717,7 @@ inline std::string_view FormatTo(std::array<char, N>& buf, std::string_view fmt,
 // ============================================================================
 
 template <typename... Args>
-inline FormatResult Format(std::string_view fmt, Args&&... args) noexcept {
+inline auto Format(std::string_view fmt, Args&&... args) noexcept -> FormatResult {
     size_t poolIdx = 0;
     char*  buf     = SignalSafePool::Acquire(poolIdx);
     if (!buf) {
@@ -706,6 +726,15 @@ inline FormatResult Format(std::string_view fmt, Args&&... args) noexcept {
 
     std::string_view result = FormatTo(buf, SignalSafePool::BufferSize, fmt, std::forward<Args>(args)...);
     return {poolIdx, result.size()};
+}
+
+template <size_t Capacity = 256, typename... Args>
+constexpr auto FormatConst(std::string_view fmt, Args&&... args) noexcept {
+    FixedString<Capacity>      out {};
+    std::array<char, Capacity> buf {};
+    std::string_view           formatted = FormatTo(buf, fmt, std::forward<Args>(args)...);
+    out.assign(formatted);
+    return out;
 }
 
 // ============================================================================

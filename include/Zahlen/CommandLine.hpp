@@ -16,7 +16,7 @@ enum class LogLevel : uint8_t { Quiet, Moderate, Verbose };
 
 enum class ValidationMode : uint8_t { Off = 0, On = 1, GPU = 2 };
 
-enum class CommandLineError : uint8_t { Success = 0, InvalidValue, MissingValue, UnknownArgument };
+enum class CommandLineError : uint8_t { InvalidValue = 1, MissingValue, UnknownArgument };
 
 enum class GameplayDriver : uint8_t {
     Fennel, // Fennel/LuaJIT owns the game loop & logic (Default)
@@ -51,6 +51,6 @@ struct EngineError {
     bool        silent = false;
 };
 
-ZHLN_API std::expected<CommandLineOptions, Error> HandleCommandLine(std::span<char* const> args);
+ZHLN_API auto HandleCommandLine(std::span<char* const> args) -> std::expected<CommandLineOptions, Error>;
 
 } // namespace ZHLN

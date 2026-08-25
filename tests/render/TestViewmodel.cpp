@@ -23,8 +23,7 @@
 #include <vector>
 
 enum class ViewmodelTestError : uint8_t {
-    Success = 0,
-    EngineInitFailed[[= ZHLN::Reflect::Description("Failed to initialize headless Engine context for Viewmodel test.")]],
+    EngineInitFailed[[= ZHLN::Reflect::Description("Failed to initialize headless Engine context for Viewmodel test.")]] = 1,
     FOVDecouplingFailed[[= ZHLN::Reflect::Description("Camera FOV modifications altered the viewmodel projection matrix.")]],
     RenderOutputBlank[[= ZHLN::Reflect::Description("Rendered frame is blank or failed to capture.")]],
     ViewmodelNotRendered[[= ZHLN::Reflect::Description("Automated pixel analysis detected zero viewmodel pixels on screen.")]],

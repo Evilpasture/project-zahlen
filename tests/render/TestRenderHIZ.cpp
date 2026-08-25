@@ -22,8 +22,7 @@
 #include <vector>
 
 enum class HiZTestError : uint32_t {
-    Success = 0,
-    EngineInitFailed[[= ZHLN::Reflect::Description("Failed to initialize headless Engine context for Hi-Z test.")]],
+    EngineInitFailed[[= ZHLN::Reflect::Description("Failed to initialize headless Engine context for Hi-Z test.")]] = 1,
     PyramidDimensionMismatch[[= ZHLN::Reflect::Description("Hi-Z mip-chain level count or resolution hierarchy violated bit_width invariants.")]],
     ComputePassDispatchFailed[[= ZHLN::Reflect::Description("Hi-Z compute generation or occlusion culling pass failed during frame tick.")]],
     OcclusionCullingInvariantFailed[[= ZHLN::Reflect::Description("Hi-Z occlusion culling failed to classify occluded versus visible geometry.")]],

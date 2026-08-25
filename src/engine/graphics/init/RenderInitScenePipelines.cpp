@@ -664,25 +664,25 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, Error> {
     return std::expected<void, Error> {}
         .and_then([&]() -> std::expected<void, Error> {
             return CreateDoubleBuffered(allocator, sizeof(InstanceData) * kGpuCullingMaxInstances, kInstanceUsage, VMA_MEMORY_USAGE_CPU_TO_GPU)
-                .and_then([&](auto&& idb) -> std::expected<DoubleBuffered<Vk::Buffer>, VkResult> {
+                .and_then([&](auto&& idb) {
                     frames.instanceDataBuffers = std::forward<decltype(idb)>(idb);
                     return CreateDoubleBuffered(allocator, sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances, kIndirectUsage, VMA_MEMORY_USAGE_GPU_ONLY);
                 })
-                .and_then([&](auto&& icb1) -> std::expected<DoubleBuffered<Vk::Buffer>, VkResult> {
+                .and_then([&](auto&& icb1) {
                     frames.indirectCommandsBuffers = std::forward<decltype(icb1)>(icb1);
                     return CreateDoubleBuffered(allocator, sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances, kIndirectUsage, VMA_MEMORY_USAGE_GPU_ONLY);
                 })
-                .and_then([&](auto&& icb2) -> std::expected<DoubleBuffered<Vk::Buffer>, VkResult> {
+                .and_then([&](auto&& icb2) {
                     frames.indirectCommandsBuffersPass2 = std::forward<decltype(icb2)>(icb2);
                     return CreateDoubleBuffered(allocator, sizeof(uint32_t) * kGpuCullingMaxInstances, kCandidateUsage, VMA_MEMORY_USAGE_GPU_ONLY);
                 })
-                .and_then([&](auto&& spcb) -> std::expected<DoubleBuffered<Vk::Buffer>, VkResult> {
+                .and_then([&](auto&& spcb) {
                     frames.secondPassCandidatesBuffers = std::forward<decltype(spcb)>(spcb);
                     return CreateDoubleBuffered(allocator, sizeof(uint32_t), kCountUsage, VMA_MEMORY_USAGE_GPU_ONLY);
                 })
-                .transform([&](auto&& spcnt) -> auto { frames.secondPassCountBuffers = std::forward<decltype(spcnt)>(spcnt); });
+                .transform([&](auto&& spcnt) { frames.secondPassCountBuffers = std::forward<decltype(spcnt)>(spcnt); });
         })
-        .and_then([&]() -> std::expected<void, ZHLN::Error> {
+        .and_then([&]() -> std::expected<void, Error> {
             return cullingPass.BuildHeap(ctx.Device(), cullingShader, cullingHeapBindings.GetInfo(), cullingHeapBindings.indexPushOffset);
         })
         .and_then([&]() -> std::expected<void, Error> {
@@ -709,15 +709,15 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, Error> {
                                                                VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
 
             return CreateDoubleBuffered(allocator, sizeof(ClusterVolume) * numClusters, kClusterGridUsage, VMA_MEMORY_USAGE_GPU_ONLY)
-                .and_then([&](auto&& cgb) -> std::expected<DoubleBuffered<Vk::Buffer>, VkResult> {
+                .and_then([&](auto&& cgb) {
                     frames.clusterGridBuffers = std::forward<decltype(cgb)>(cgb);
                     return CreateDoubleBuffered(allocator, sizeof(uint32_t) * numClusters * 64, kLightIndexUsage, VMA_MEMORY_USAGE_GPU_ONLY);
                 })
-                .and_then([&](auto&& lsb) -> std::expected<DoubleBuffered<Vk::Buffer>, VkResult> {
+                .and_then([&](auto&& lsb) {
                     frames.lightIndexListBuffers = std::forward<decltype(lsb)>(lsb);
                     return CreateDoubleBuffered(allocator, sizeof(uint32_t), kGlobalCounterUsage, VMA_MEMORY_USAGE_GPU_ONLY);
                 })
-                .transform([&](auto&& gcb) -> auto {
+                .transform([&](auto&& gcb) {
                     frames.globalCounterBuffers = std::forward<decltype(gcb)>(gcb);
                     for (uint32_t i = 0; i < 2; ++i) {
                         Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
@@ -744,7 +744,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, Error> {
             }
             return clusterBoundsPass.BuildHeap(ctx.Device(), bDesc, clusterBoundsHeapBindings.GetInfo(), clusterBoundsHeapBindings.indexPushOffset);
         })
-        .and_then([&]() -> std::expected<void, ZHLN::Error> {
+        .and_then([&]() -> std::expected<void, Error> {
             return clusterCullingPass.BuildHeap(
                 ctx.Device(), clusterCullingShader, clusterCullingHeapBindings.GetInfo(), clusterCullingHeapBindings.indexPushOffset
             );
@@ -760,14 +760,14 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, Error> {
                        allocator, tlasSizes.acceleration_structure_size,
                        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY
             )
-                .and_then([&](auto&& tb) -> std::expected<DoubleBuffered<Vk::Buffer>, VkResult> {
+                .and_then([&](auto&& tb) {
                     frames.tlasBuffer = std::forward<decltype(tb)>(tb);
                     return CreateDoubleBuffered(
                         allocator, tlasSizes.build_scratch_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                         VMA_MEMORY_USAGE_GPU_ONLY
                     );
                 })
-                .and_then([&](auto&& tsb) -> std::expected<DoubleBuffered<Vk::Buffer>, VkResult> {
+                .and_then([&](auto&& tsb) {
                     frames.tlasScratchBuffer = std::forward<decltype(tsb)>(tsb);
                     return CreateDoubleBuffered(
                         allocator, sizeof(VkAccelerationStructureInstanceKHR) * kGpuCullingMaxInstances,
@@ -776,14 +776,14 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, Error> {
                         VMA_MEMORY_USAGE_GPU_ONLY
                     );
                 })
-                .and_then([&](auto&& tib) -> std::expected<DoubleBuffered<Vk::Buffer>, VkResult> {
+                .and_then([&](auto&& tib) {
                     frames.tlasInstanceBuffers = std::forward<decltype(tib)>(tib);
                     return CreateDoubleBuffered(
                         allocator, sizeof(VkAccelerationStructureInstanceKHR) * kGpuCullingMaxInstances, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                         VMA_MEMORY_USAGE_CPU_ONLY
                     );
                 })
-                .transform([&](auto&& tstb) -> auto {
+                .transform([&](auto&& tstb) {
                     frames.tlasStagingBuffers = std::forward<decltype(tstb)>(tstb);
                     for (uint32_t i = 0; i < 2; ++i) {
                         frames.tlas[i] =

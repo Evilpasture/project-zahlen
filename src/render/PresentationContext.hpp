@@ -37,10 +37,10 @@ class PresentationContext {
     PresentationContext(PresentationContext&&) noexcept                    = default;
     auto operator=(PresentationContext&&) noexcept -> PresentationContext& = default;
 
-    [[nodiscard]] auto Init(const Context& ctx, Allocator& alloc, VkSurfaceKHR surface, uint32_t width, uint32_t height, bool vsync = true)
-        -> std::expected<void, ZHLN::Error>;
+    [[nodiscard]] auto
+        Init(const Context& ctx, Allocator& alloc, VkSurfaceKHR surface, uint32_t width, uint32_t height, bool vsync = true) -> std::expected<void, Error>;
 
-    [[nodiscard]] auto Rebuild(uint32_t width, uint32_t height) -> std::expected<void, ZHLN::Error>;
+    [[nodiscard]] auto Rebuild(uint32_t width, uint32_t height) -> std::expected<void, Error>;
 
     /// @brief Returns the effective color format for the Blit pass output.
     ///        Uses the swapchain format when available, otherwise R8G8B8A8_UNORM

@@ -155,7 +155,7 @@ class TypedPipeline {
 
 inline constexpr auto& GetBufferAddress = ZHLN_GetBufferDeviceAddress;
 
-[[nodiscard]] std::expected<VkResult, VulkanCallError> WaitIdle(VkDevice device) noexcept;
+[[nodiscard]] std::expected<void, Error> WaitIdle(VkDevice device) noexcept;
 
 // ============================================================================
 // Scoped RAII Scissor State Guard

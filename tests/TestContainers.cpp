@@ -56,8 +56,7 @@ struct LifetimeTracker {
 // ============================================================================
 
 enum class CoreContainersTestError : uint32_t {
-    Success = 0,
-    MemoryLeakDetected[[= ZHLN::Reflect::Description("Resource lifetime mismatch: active memory leak detected.")]],
+    MemoryLeakDetected[[= ZHLN::Reflect::Description("Resource lifetime mismatch: active memory leak detected.")]] = 1,
     ArrayInvariantFailed[[= ZHLN::Reflect::Description("Array operation violated container invariants.")]],
     HashMapInvariantFailed[[= ZHLN::Reflect::Description("HashMap failed retrieval, tombstone, or resizing test.")]],
     ObjectPoolFailed[[= ZHLN::Reflect::Description("ObjectPool slot recycling or chunk growth failed.")]],

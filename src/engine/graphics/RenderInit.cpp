@@ -27,8 +27,8 @@ std::expected<Vk::ShaderStages, Error> RenderContext::Impl::LoadAndCreateShaders
     gpuDiagnostics.RegisterShader({.code = Vk::AsSpirV(ps_code), .size = ps_size, .entry_point = ps.entryPoint}, "PSMain");
 
     return Vk::ShaderStages::Create(
-               ctx.Device(), {.code = Vk::AsSpirV(vs_code), .size = vs_size, .entry_point = vs.entryPoint},
-               {.code = Vk::AsSpirV(ps_code), .size = ps_size, .entry_point = ps.entryPoint}
+        ctx.Device(), {.code = Vk::AsSpirV(vs_code), .size = vs_size, .entry_point = vs.entryPoint},
+        {.code = Vk::AsSpirV(ps_code), .size = ps_size, .entry_point = ps.entryPoint}
     );
 }
 
@@ -49,19 +49,7 @@ std::expected<Vk::Pipeline, Error>
         return std::unexpected(Vk::SpirvLayoutError::ModuleParseFailed);
     }
 
-    return Vk::ComputePipelineBuilder()
-        .Shader(shader)
-        .Layout(layout)
-        .Build(ctx.Device())
-        .transform_error([](ZHLN::Error err) -> Error {
-            if (err.Is(Vk::PipelineBuilderResult::MissingShaders)) {
-                return ShaderStageCreationError::ShaderLoadingFailed;
-            }
-            if (err.Is(Vk::PipelineBuilderResult::MissingLayout)) {
-                return RenderInitError::PipelineLayoutCreationFailed;
-            }
-            return RenderInitError::PipelineCreationFailed;
-        });
+    return Vk::ComputePipelineBuilder().Shader(shader).Layout(layout).Build(ctx.Device());
 }
 
 void RenderContext::Impl::WatchPipeline(const char* vsPath, const char* psPath, std::function<void()> rebuild_fn) noexcept {

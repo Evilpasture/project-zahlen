@@ -13,7 +13,7 @@ namespace ZHLN::Vk {
 
 class Context; // Forward declaration
 
-[[nodiscard]] std::expected<VkResult, VulkanCallError> WaitIdle(VkQueue queue) noexcept;
+[[nodiscard]] std::expected<void, Error> WaitIdle(VkQueue queue) noexcept;
 
 // NOLINTNEXTLINE(performance-enum-size)
 enum class BarrierStage : VkPipelineStageFlags2 {

@@ -18,8 +18,7 @@
 namespace ZHLN::Vk {
 
 enum class SpirvLayoutError : uint8_t {
-    Success = 0,
-    InvalidArguments[[= ZHLN::Reflect::Description("SPIR-V blob or type name is empty")]],
+    InvalidArguments[[= ZHLN::Reflect::Description("SPIR-V blob or type name is empty")]] = 1,
     ModuleParseFailed[[= ZHLN::Reflect::Description("Failed to parse SPIR-V module")]],
     TypeNotFound[[= ZHLN::Reflect::Description("Type was not found in compiled SPIR-V")]],
     EmptyLayout[[= ZHLN::Reflect::Description("Reflected type has zero size")]],
@@ -65,8 +64,7 @@ struct SlangTypeLayout {
 /// Reflects a named struct from compiled SPIR-V (UBO / SSBO / push-constant
 /// blocks and their nested members). Layout authority is the slangc output
 /// the engine already embeds — this file never sees `.slang` source.
-[[nodiscard]] auto ReflectTypeLayout(const void* spirv, size_t sizeBytes, std::string_view typeName) noexcept
-    -> std::expected<SlangTypeLayout, ZHLN::Error>;
+[[nodiscard]] auto ReflectTypeLayout(const void* spirv, size_t sizeBytes, std::string_view typeName) noexcept -> std::expected<SlangTypeLayout, ZHLN::Error>;
 
 /// Writes `value` at the reflected field offset inside a push-data blob.
 template <typename T>

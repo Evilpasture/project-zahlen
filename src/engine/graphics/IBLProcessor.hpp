@@ -33,10 +33,10 @@ class IBLProcessor {
             return shader;
         };
 
-        const auto        brdfShader = CreateShaderDesc(Resource::GetShaderProgram(BRDFLUTComp).vertex, "CSMain");
-        const auto        specShader = CreateShaderDesc(Resource::GetShaderProgram(IBLSpecularComp).vertex, "SpecularMain");
-        const auto        shShader   = CreateShaderDesc(Resource::GetShaderProgram(IBLSHComp).vertex, "SHMain");
-        const JPH::Vec4   sunDir     = JPH::Vec4(JPH::Vec3(0.5f, 1.0f, 0.2f).Normalized(), 0.0f);
+        const auto      brdfShader = CreateShaderDesc(Resource::GetShaderProgram(BRDFLUTComp).vertex, "CSMain");
+        const auto      specShader = CreateShaderDesc(Resource::GetShaderProgram(IBLSpecularComp).vertex, "SpecularMain");
+        const auto      shShader   = CreateShaderDesc(Resource::GetShaderProgram(IBLSHComp).vertex, "SHMain");
+        const JPH::Vec4 sunDir     = JPH::Vec4(JPH::Vec3(0.5f, 1.0f, 0.2f).Normalized(), 0.0f);
 
         struct Pipelines {
             ComputePass brdf;
@@ -51,38 +51,38 @@ class IBLProcessor {
         };
 
         return requireShader(brdfShader)
-            .and_then([&](auto) { return requireShader(specShader); })
-            .and_then([&](auto) { return requireShader(shShader); })
-            .and_then([&](auto) {
+            .and_then([&](auto) -> auto { return requireShader(specShader); })
+            .and_then([&](auto) -> auto { return requireShader(shShader); })
+            .and_then([&](auto) -> auto {
                 return CreateHeapComputePass(impl.ctx.Device(), brdfShader, impl.bakeHeapBindings.GetInfo(), impl.bakeHeapBindings.indexPushOffset);
             })
-            .and_then([&](ComputePass brdf) {
+            .and_then([&](ComputePass brdf) -> auto {
                 return CreateHeapComputePass(impl.ctx.Device(), specShader, impl.bakeHeapBindings.GetInfo(), impl.bakeHeapBindings.indexPushOffset)
                     .transform([brdf = std::move(brdf)](ComputePass spec) mutable {
                         return Pipelines {.brdf = std::move(brdf), .spec = std::move(spec), .sh = {}};
                     });
             })
-            .and_then([&](Pipelines pipes) {
+            .and_then([&](Pipelines pipes) -> auto {
                 return CreateHeapComputePass(impl.ctx.Device(), shShader, impl.bakeHeapBindings.GetInfo(), impl.bakeHeapBindings.indexPushOffset)
                     .transform([pipes = std::move(pipes)](ComputePass sh) mutable {
                         pipes.sh = std::move(sh);
                         return std::move(pipes);
                     });
             })
-            .and_then([&](Pipelines pipes) -> std::expected<std::pair<Pipelines, State>, ZHLN::Error> {
+            .and_then([&](Pipelines pipes) -> std::expected<std::pair<Pipelines, State>, Error> {
                 return Buffer::Create(
                            impl.allocator.Get(), kSHBytes,
                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                                VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                            VMA_MEMORY_USAGE_GPU_ONLY
                 )
-                    .and_then([&](Buffer shGpu) {
+                    .and_then([&](Buffer shGpu) -> auto {
                         return Buffer::Create(impl.allocator.Get(), kSHBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_TO_CPU)
                             .transform([shGpu = std::move(shGpu)](Buffer shCpu) mutable {
                                 return State {.shGpu = std::move(shGpu), .shCpu = std::move(shCpu)};
                             });
                     })
-                    .and_then([&](State state) -> std::expected<State, VkResult> {
+                    .and_then([&](State state) -> auto {
                         return ImageBuilder {}
                             .Texture2D(kLutSize, kLutSize, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 1)
                             .Build(impl.allocator.Get())
@@ -91,7 +91,7 @@ class IBLProcessor {
                                 return std::move(state);
                             });
                     })
-                    .and_then([&](State state) -> std::expected<State, VkResult> {
+                    .and_then([&](State state) -> auto {
                         return ImageBuilder {}
                             .TextureCube(kBaseSize, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, kMipLevels)
                             .Build(impl.allocator.Get())
@@ -102,7 +102,7 @@ class IBLProcessor {
                     })
                     .transform([pipes = std::move(pipes)](State state) mutable { return std::make_pair(std::move(pipes), std::move(state)); });
             })
-            .and_then([&](std::pair<Pipelines, State> packed) -> std::expected<State, ZHLN::Error> {
+            .and_then([&](std::pair<Pipelines, State> packed) -> std::expected<State, Error> {
                 auto [pipes, state] = std::move(packed);
 
                 const BRDFLUTPush lutPush {.width = kLutSize, .height = kLutSize, .sampleCount = 128};
@@ -120,15 +120,14 @@ class IBLProcessor {
 
                 std::array<VkImageViewCreateInfo, kMipLevels> specMipInfos {};
                 for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
-                    specMipInfos[mip] = MakeViewCreateInfo2DArray(
-                        state.payload.prefilteredImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 0, 6, VK_IMAGE_ASPECT_COLOR_BIT, 1, mip
-                    );
+                    specMipInfos[mip] =
+                        MakeViewCreateInfo2DArray(state.payload.prefilteredImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 0, 6, VK_IMAGE_ASPECT_COLOR_BIT, 1, mip);
                     impl.heapManager.WriteBindings(
                         impl.ctx, impl.bakeHeapBindings, RenderContext::Impl::kBakeSpecHeapIndex0 + mip, ImageWrite {.viewInfo = &specMipInfos[mip]}
                     );
                 }
 
-                ExecuteImmediate(impl.ctx, impl.graphicsCmdRing, [&](VkCommandBuffer cmd) {
+                ExecuteImmediate(impl.ctx, impl.graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
                     impl.heapManager.BindHeaps(cmd);
                     TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, state.payload.brdfLutImage.Handle());
                     TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, state.payload.prefilteredImage.Handle());
@@ -152,9 +151,7 @@ class IBLProcessor {
                                 .skyGround   = sky.skyGround,
                                 .sunDir      = sunDir,
                             };
-                            pipes.spec.DispatchHeapIndexedThreads(
-                                impl.ctx, cmd, RenderContext::Impl::kBakeSpecHeapIndex0 + mip, mipSize, mipSize, 1, push
-                            );
+                            pipes.spec.DispatchHeapIndexedThreads(impl.ctx, cmd, RenderContext::Impl::kBakeSpecHeapIndex0 + mip, mipSize, mipSize, 1, push);
                         }
                     }
 
@@ -179,24 +176,23 @@ class IBLProcessor {
             })
             .and_then([&](State state) -> std::expected<State, ZHLN::Error> {
                 return CreateView<VK_FORMAT_R8G8B8A8_UNORM>(impl.ctx.Device(), state.payload.brdfLutImage.Handle())
-                    .transform([state = std::move(state)](ImageView lutView) mutable {
-                        state.payload.brdfLutView     = std::move(lutView);
-                        state.payload.brdfLutViewInfo = MakeViewCreateInfo2D(
-                            state.payload.brdfLutImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT
-                        );
+                    .transform([state = std::move(state)](ImageView lutView) mutable -> auto {
+                        state.payload.brdfLutView = std::move(lutView);
+                        state.payload.brdfLutViewInfo =
+                            MakeViewCreateInfo2D(state.payload.brdfLutImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
                         return std::move(state);
                     });
             })
             .and_then([&](State state) -> std::expected<State, ZHLN::Error> {
                 return CreateViewCube<VK_FORMAT_R8G8B8A8_UNORM>(impl.ctx.Device(), state.payload.prefilteredImage.Handle(), kMipLevels)
-                    .transform([state = std::move(state)](ImageView cubeView) mutable {
-                        state.payload.prefilteredView     = std::move(cubeView);
+                    .transform([state = std::move(state)](ImageView cubeView) mutable -> auto {
+                        state.payload.prefilteredView = std::move(cubeView);
                         state.payload.prefilteredViewInfo =
                             MakeViewCreateInfoCube(state.payload.prefilteredImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, kMipLevels);
                         return std::move(state);
                     });
             })
-            .transform([](State state) { return std::move(state.payload); });
+            .transform([](State state) -> auto { return std::move(state.payload); });
     }
 
   private:

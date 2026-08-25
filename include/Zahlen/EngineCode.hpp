@@ -10,8 +10,7 @@
 namespace ZHLN {
 
 enum class EngineInitError : uint8_t {
-    Success = 0,
-    WindowCreationFailed[[= ZHLN::Reflect::Description("Window creation failed")]],
+    WindowCreationFailed[[= ZHLN::Reflect::Description("Window creation failed")]] = 1,
     TTYInitializationFailed[[= ZHLN::Reflect::Description("TTY initialization failed")]],
     RenderInitializationFailed[[= ZHLN::Reflect::Description("Render initialization failed")]],
     PhysicsInitializationFailed[[= ZHLN::Reflect::Description("Physics initialization failed")]],

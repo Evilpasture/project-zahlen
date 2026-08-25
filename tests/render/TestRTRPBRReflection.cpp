@@ -39,8 +39,7 @@
 #include <vector>
 
 enum class RTRPBRError : uint8_t {
-    Success = 0,
-    EngineInitFailed[[= ZHLN::Reflect::Description("Failed to initialize headless Engine for RTR PBR colour test.")]],
+    EngineInitFailed[[= ZHLN::Reflect::Description("Failed to initialize headless Engine for RTR PBR colour test.")]] = 1,
     RenderOutputBlank[[= ZHLN::Reflect::Description("Rendered frame is blank or could not be captured.")]],
     MaterialCreationFailed[[= ZHLN::Reflect::Description("CreativeWorksFactory::CreateMaterial failed.")]],
     ReflectionColorMismatch[[= ZHLN::Reflect::Description("Ray-traced reflection colour does not follow the surface PBR values.")]],
@@ -602,9 +601,8 @@ struct RTRPBRReflectionTestSuite {
             LogRegion("patch dielectric r=0.03", *dielectric);
             LogRegion("patch metal r=0.75", *metalRough);
 
-            const bool metalEnergy = ZHLN::Test::ExpectTrue(metalSmooth->meanL > dielectric->meanL * 4.0 && metalSmooth->maxL > dielectric->maxL * 2.0);
-            const bool metalYellower =
-                ZHLN::Test::ExpectTrue(metalSmooth->meanR > metalSmooth->meanB && metalSmooth->meanG > metalSmooth->meanB);
+            const bool metalEnergy   = ZHLN::Test::ExpectTrue(metalSmooth->meanL > dielectric->meanL * 4.0 && metalSmooth->maxL > dielectric->maxL * 2.0);
+            const bool metalYellower = ZHLN::Test::ExpectTrue(metalSmooth->meanR > metalSmooth->meanB && metalSmooth->meanG > metalSmooth->meanB);
             const bool roughKills    = ZHLN::Test::ExpectTrue(metalSmooth->meanL > metalRough->meanL && metalSmooth->maxL > metalRough->maxL);
             const bool roughLessGold = ZHLN::Test::ExpectTrue(metalSmooth->maxL + 0.5 >= metalRough->maxL);
 
@@ -634,8 +632,8 @@ struct RTRPBRReflectionTestSuite {
             }
 
             SpawnEmitter(*s.engine, *whiteEm);
-            auto&              reg  = s.engine->GetRegistry();
-            const ZHLN::Entity eSil = SpawnMirror(*s.engine, *silver);
+            auto&              reg   = s.engine->GetRegistry();
+            const ZHLN::Entity eSil  = SpawnMirror(*s.engine, *silver);
             auto               rtrOn = EnableRTR(s);
             if (!rtrOn) {
                 return rtrOn;
@@ -671,7 +669,7 @@ struct RTRPBRReflectionTestSuite {
             const bool goldLeastBlue  = ZHLN::Test::ExpectTrue(BlueRatio(au) + 0.04 < BlueRatio(sil) && BlueRatio(au) + 0.03 < BlueRatio(cu));
             const bool goldMoreYellow = ZHLN::Test::ExpectTrue(GreenRatio(au) > GreenRatio(cu) + 0.03 && au.yellow + 5u >= cu.yellow);
             const bool silverNeutral  = ZHLN::Test::ExpectTrue(std::abs(sil.meanR - sil.meanG) < 28.0 && BlueRatio(sil) > 0.45);
-            const bool allReflect = ZHLN::Test::ExpectTrue(sil.maxL > 6.0 && au.maxL > 6.0 && cu.maxL > 6.0);
+            const bool allReflect     = ZHLN::Test::ExpectTrue(sil.maxL > 6.0 && au.maxL > 6.0 && cu.maxL > 6.0);
 
             if (!goldLeastBlue || !goldMoreYellow || !silverNeutral || !allReflect) {
                 return std::unexpected(RTRPBRError::ReflectionColorMismatch);
