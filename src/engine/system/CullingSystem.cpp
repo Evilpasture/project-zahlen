@@ -70,6 +70,18 @@ namespace ZHLN {
 
 namespace {
 
+// This Jolt build exposes only GetX/GetY/GetZ/GetW on Vec4 (no per-lane
+// GetComponent like Vec3 has), so lane extraction goes through a switch that
+// the compiler folds on constant lane indices.
+[[nodiscard]] inline float GetLane(const JPH::Vec4& v, uint32_t lane) noexcept {
+    switch (lane) {
+        case 0:  return v.GetX();
+        case 1:  return v.GetY();
+        case 2:  return v.GetZ();
+        default: return v.GetW();
+    }
+}
+
 // ============================================================================
 // 4-wide SIMD frustum culling.
 //
@@ -95,10 +107,10 @@ struct BatchedFrustum {
         for (uint32_t p = 0; p < kPlaneCount; ++p) {
             const uint32_t block = (p < 4) ? 0 : 1;
             const uint32_t lane  = p & 3;
-            out.nx[p]            = frustum.mX[block].GetComponent(lane);
-            out.ny[p]            = frustum.mY[block].GetComponent(lane);
-            out.nz[p]            = frustum.mZ[block].GetComponent(lane);
-            out.pw[p]            = frustum.mW[block].GetComponent(lane);
+            out.nx[p]            = GetLane(frustum.mX[block], lane);
+            out.ny[p]            = GetLane(frustum.mY[block], lane);
+            out.nz[p]            = GetLane(frustum.mZ[block], lane);
+            out.pw[p]            = GetLane(frustum.mW[block], lane);
         }
         return out;
     }
@@ -117,7 +129,7 @@ struct BatchedFrustum {
         }
 
         for (uint32_t j = 0; j < 4; ++j) {
-            outVisible[j] = worstViolation.GetComponent(j) <= 0.0f;
+            outVisible[j] = GetLane(worstViolation, j) <= 0.0f;
         }
     }
 };
