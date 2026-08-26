@@ -325,6 +325,7 @@ set(RAW_ENGINE_SOURCES
     src/engine/Text.cpp
     src/engine/graphics/Resources.cpp
     src/engine/system/RenderSystem.cpp
+    src/engine/system/GraphicsSettingsSync.cpp
     src/engine/system/DecalSystem.cpp
     src/engine/system/MovementSystem.cpp
     src/engine/system/AudioSystem.cpp

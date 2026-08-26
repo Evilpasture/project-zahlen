@@ -1064,7 +1064,7 @@ void BlitPass::Execute(
         float vignetteIntensity;
         float vignettePower;
         int   fullBright;
-    } pc = {.vignetteIntensity = ctx.giSettings.vignetteIntensity, .vignettePower = ctx.giSettings.vignettePower, .fullBright = fullBright};
+    } pc = {.vignetteIntensity = ctx.settings.post.vignetteIntensity, .vignettePower = ctx.settings.post.vignettePower, .fullBright = fullBright};
 
     if (ctx.blitPass.pipeline.Valid()) {
         Vk::DynamicPass(inColor.extent).AddColor(swapchainTarget, VK_ATTACHMENT_LOAD_OP_DONT_CARE).Execute(cmd, [&]() {

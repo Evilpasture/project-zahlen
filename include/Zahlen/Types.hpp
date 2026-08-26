@@ -9,6 +9,7 @@
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
 #include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/GraphicsSettings.hpp>
 #include <array>
 #include <cstdint>
 #include <string_view>
@@ -439,6 +440,29 @@ struct GPUTypes {
         };
         static_assert(sizeof(UIObjectConstants) == 96);
     };
+
+    // descriptor_heap_layout.slang — the vkCmdPushDataEXT per-pass blob that
+    // leads DescriptorHeapPushData. This is the authoritative layout of what
+    // the lighting/reflection passes push each frame (the PPPushConstants
+    // alias in RenderInternal points here), size-checked against the compiled
+    // gpu_abi SPIR-V at startup together with every other GPU type.
+    struct Heap {
+        struct alignas(16) ScenePassPushConstants {
+            JPH::Mat44 invViewProj;
+            JPH::Mat44 viewProj;
+            alignas(16) std::array<float, 4> camPos;
+            int   giMode;
+            float aoRadius;
+            float aoBias;
+            float aoPower;
+            float giIntensity;
+            int   giSamples;
+            int   enableSSR;
+            int   enableRTR;
+            int   _pad;
+        };
+        static_assert(sizeof(ScenePassPushConstants) == 192);
+    };
 };
 
 using GPUMeshlet                         = GPUTypes::Instance::GPUMeshlet;
@@ -456,6 +480,7 @@ using VolumetricLightInjectPushConstants = GPUTypes::Volume::VolumetricLightInje
 using VolumetricTemporalPushConstants    = GPUTypes::Volume::VolumetricTemporalPushConstants;
 using ObjectConstants                    = GPUTypes::Draw::ObjectConstants;
 using UIObjectConstants                  = GPUTypes::Draw::UIObjectConstants;
+using ScenePassPushConstants             = GPUTypes::Heap::ScenePassPushConstants;
 
 struct Material {
     PipelineHandle      pipeline           = PipelineHandle::Invalid;
@@ -472,38 +497,6 @@ struct Material {
     float               roughnessFactor    = 1.0f;
     float               alphaCutoff        = 0.5f;
     uint32_t            alphaMode          = 0;
-};
-
-struct GISettings {
-    int   mode              = 1;
-    float aoRadius          = 0.5f;
-    float aoBias            = 0.05f;
-    float aoPower           = 1.8f;
-    float giIntensity       = 1.2f;
-    int   giSamples         = 8;
-    float vignetteIntensity = 1.1f;
-    float vignettePower     = 1.5f;
-    int   enableSSR         = 1;
-    int   enableRTR         = 0;
-};
-
-enum class AAMode : uint32_t { None = 0, FXAA, MLAA, TAA, SMAA };
-
-struct AAState {
-    AAMode mode = AAMode::TAA;
-
-    float    taaFeedback = 0.95f;
-    float    jitterX     = 0.0f;
-    float    jitterY     = 0.0f;
-    float    prevJitterX = 0.0f;
-    float    prevJitterY = 0.0f;
-    uint32_t frameIndex  = 0;
-
-    float    fxaaSubpix           = 0.75f;
-    float    fxaaEdgeThreshold    = 0.166f;
-    float    fxaaEdgeThresholdMin = 0.0833f;
-    float    mlaaThreshold        = 0.1f;
-    uint32_t mlaaMaxSearchSteps   = 16;
 };
 
 struct GlyphMetric {

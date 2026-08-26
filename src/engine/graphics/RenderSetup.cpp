@@ -149,7 +149,10 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniform
 }
 
 void RenderContext::SetGISettings(const GISettings& settings) noexcept {
-    _impl->giSettings = settings;
+    // Legacy bridge: splice into the canonical GraphicsSettings so the next
+    // frame's push constants and uniforms observe it. The ECS components
+    // (re-collected every frame by RenderSystem) remain authoritative.
+    _impl->settings.post = settings;
 }
 
 void RenderContext::SetLights(const Light* lights, uint32_t count) noexcept {

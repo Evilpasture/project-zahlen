@@ -585,7 +585,7 @@ struct PassFactory {
                     Vk::Assume<Vk::ShaderRead<Res_Velocity>>(self.graphResources.velocityBuffer), self.defaultSampler, self.frames.frameUniformBuffers[fIdx]
                 );
 
-                self.taaPass.ExecuteHeap(self.ctx, c, TAAPushConstants {.feedback = self.aaState.taaFeedback}, fIdx);
+                self.taaPass.ExecuteHeap(self.ctx, c, TAAPushConstants {.feedback = self.settings.antiAliasing.taaFeedback}, fIdx);
             }
         });
     }
@@ -610,7 +610,8 @@ struct PassFactory {
 
                 self.fxaaPass.ExecuteHeap(
                     self.ctx, c,
-                    FXAAPushConstants {rcpW, rcpH, self.aaState.fxaaSubpix, self.aaState.fxaaEdgeThreshold, self.aaState.fxaaEdgeThresholdMin, 0.0f}, fIdx
+                    FXAAPushConstants {rcpW, rcpH, self.settings.antiAliasing.fxaaSubpix, self.settings.antiAliasing.fxaaEdgeThreshold,
+                                     self.settings.antiAliasing.fxaaEdgeThresholdMin, 0.0f}, fIdx
                 );
             }
         });
@@ -633,7 +634,7 @@ struct PassFactory {
 
                 self.mlaaPass.WriteHeap(self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor), self.defaultSampler);
 
-                self.mlaaPass.ExecuteHeap(self.ctx, c, MLAAPushConstants {rcpW, rcpH, self.aaState.mlaaThreshold, self.aaState.mlaaMaxSearchSteps}, fIdx);
+                self.mlaaPass.ExecuteHeap(self.ctx, c, MLAAPushConstants {rcpW, rcpH, self.settings.antiAliasing.mlaaThreshold, self.settings.antiAliasing.mlaaMaxSearchSteps}, fIdx);
             }
         });
     }
@@ -912,7 +913,7 @@ void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Co
         clusterBoundsDirty = false;
     }
 
-    PassFactory factory {.self = *this, .fIdx = fIdx, .pc = {}, .lightVariant = (giSettings.enableRTR && rtCtx.Valid()) ? 1u : 0u, .reflVariant = 0};
+    PassFactory factory {.self = *this, .fIdx = fIdx, .pc = {}, .lightVariant = (settings.rayTracing.enableReflections && rtCtx.Valid()) ? 1u : 0u, .reflVariant = 0};
 
     auto                                 compGraph = BuildComputeGraph(factory);
     typename decltype(compGraph)::Binder compBinder;
@@ -961,8 +962,9 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
         };
     };
 
-    uint32_t lightVariant = (giSettings.enableRTR && rtCtx.Valid()) ? 1 : 0;
-    uint32_t reflVariant  = (giSettings.enableSSR ? 1 : 0) | ((giSettings.enableRTR && rtCtx.Valid()) ? 2 : 0);
+    const bool rtrActive = settings.rayTracing.enableReflections && rtCtx.Valid();
+    uint32_t lightVariant = rtrActive ? 1 : 0;
+    uint32_t reflVariant  = (settings.post.enableSSR ? 1 : 0) | (rtrActive ? 2 : 0);
 
     PassFactory factory {
         .self = *this,
@@ -971,20 +973,20 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
             {.invViewProj = current_view_proj.Inversed(),
              .viewProj    = current_view_proj,
              .camPos      = {currentUniforms.camPos[0], currentUniforms.camPos[1], currentUniforms.camPos[2], currentUniforms.camPos[3]},
-             .giMode      = giSettings.mode,
-             .aoRadius    = giSettings.aoRadius,
-             .aoBias      = giSettings.aoBias,
-             .aoPower     = giSettings.aoPower,
-             .giIntensity = giSettings.giIntensity,
-             .giSamples   = giSettings.giSamples,
-             .enableSSR   = giSettings.enableSSR,
-             .enableRTR   = (frames.tlas.Current() != VK_NULL_HANDLE) ? giSettings.enableRTR : 0,
+             .giMode      = settings.post.mode,
+             .aoRadius    = settings.post.aoRadius,
+             .aoBias      = settings.post.aoBias,
+             .aoPower     = settings.post.aoPower,
+             .giIntensity = settings.post.giIntensity,
+             .giSamples   = settings.post.giSamples,
+             .enableSSR   = settings.post.enableSSR,
+             .enableRTR   = (frames.tlas.Current() != VK_NULL_HANDLE && settings.rayTracing.enableReflections) ? settings.post.enableRTR : 0,
              ._pad        = {}},
         .lightVariant = lightVariant,
         .reflVariant  = reflVariant
     };
 
-    DispatchAAMode(*this, cmd, aaState.mode, factory, getSwapchainImage);
+    DispatchAAMode(*this, cmd, settings.antiAliasing.mode, factory, getSwapchainImage);
 }
 
 } // namespace ZHLN

@@ -3,6 +3,7 @@
 
 // File: src/main.cpp
 #include "engine/Platform.hpp"
+#include "engine/system/GraphicsSettingsSync.hpp"
 #include <GLFW/glfw3.h>
 // clang-format off
 #include <Jolt/Jolt.h>
@@ -290,11 +291,38 @@ void DrawProfiler(ZHLN::Engine& engine) {
             ImGui::PopStyleColor();
         }
 
+        if (ImGui::CollapsingHeader("Quality Preset", ImGuiTreeNodeFlags_DefaultOpen)) {
+            // The canonical GraphicsSettings live in the RenderContext; the
+            // preset writes back into the ECS editing surface and the next
+            // frame's sync applies it (delta-detected — the shadow-target
+            // resize happens reactively, with no manual renderer calls).
+            const ZHLN::GraphicsSettings& gfx = engine.GetRenderContext().GetSettings();
+
+            const char* presets[]  = {"Low", "Medium", "High", "Ultra", "Custom"};
+            const int   currentIdx = static_cast<int>(gfx.DetectPreset());
+            int         presetIdx  = currentIdx;
+            if (ImGui::Combo("Preset", &presetIdx, presets, IM_ARRAYSIZE(presets))) {
+                if (const auto level = static_cast<ZHLN::QualityLevel>(presetIdx); level != ZHLN::QualityLevel::Custom) {
+                    ZHLN::ApplyQualityPreset(engine, level);
+                }
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Tier pins AA mode, shadow resolution, GI samples, SSR/RTR and the RT sample budget. Manual tweaks switch to Custom.");
+            }
+
+            ImGui::TextDisabled("Shadow %ux%u | GI samples %d", gfx.shadows.resolution, gfx.shadows.resolution, gfx.post.giSamples);
+            ImGui::TextDisabled(
+                "RT: refl %s | shadows %s | %u SPP | denoiser %s | %u bounce(s)", gfx.rayTracing.enableReflections ? "on" : "off",
+                gfx.rayTracing.enableShadows ? "on" : "off", gfx.rayTracing.shadowSamples,
+                gfx.rayTracing.denoiserPasses == 0 ? "off" : (gfx.rayTracing.denoiserPasses == 1 ? "spatial" : "spatio-temporal"),
+                gfx.rayTracing.maxBounces
+            );
+        }
+
         if (ImGui::CollapsingHeader("Anti-Aliasing", ImGuiTreeNodeFlags_DefaultOpen)) {
             auto aaEnts = engine.GetRegistry().GetEntitiesWith<ZHLN::Components::AASettingsComponent>();
             if (!aaEnts.empty()) {
                 auto* aaSettings = engine.GetRegistry().Get<ZHLN::Components::AASettingsComponent>(aaEnts[0]);
-
                 const char* aaModesList[]  = {"Disabled", "FXAA (Fast Approximate)", "MLAA (Morphological)", "TAA (Temporal)", "SMAA (Subpixel Morphological)"};
                 int         currentModeIdx = static_cast<int>(aaSettings->state.mode);
 
@@ -496,11 +524,10 @@ void UISystem(ZHLN::Engine& engine) {
                 newRes = 4096;
             }
 
+            // Reactive: writing the component is enough. The per-frame
+            // ECS → GraphicsSettings sync (RenderContext::ApplySettings)
+            // detects the resolution delta and resizes the cascade targets.
             shadowSettings->shadowResolution = newRes;
-
-            if (auto res = engine.GetRenderContext().SetShadowResolution(newRes); !res) {
-                ZHLN::Log("ERROR: Failed to update shadow resolution: {}", res.error().Message());
-            }
         }
 
         ImGui::DragFloat("Raytraced Sun Softness", &shadowSettings->sunSize, 0.005f, 0.001f, 0.05f, "%.3f");
