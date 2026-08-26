@@ -58,7 +58,7 @@ JPH::Mat44 ComputeCascadeLightSpaceMatrix(
         nearCenter += corners[static_cast<size_t>(i)];
         farCenter  += corners[4 + static_cast<size_t>(i)];
     }
-    const JPH::Vec3 center = (nearCenter + farCenter) * 0.125f;
+    JPH::Vec3 center = (nearCenter + farCenter) * 0.125f;
 
     float radius = 0.0f;
     for (const auto& corner: corners) {
