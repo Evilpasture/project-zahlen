@@ -41,7 +41,6 @@ struct LightingPassParams {
     VkSampler                                                clampSampler         = VK_NULL_HANDLE;
     VkBuffer                                                 clusterGridBuffer    = VK_NULL_HANDLE;
     VkBuffer                                                 lightIndexListBuffer = VK_NULL_HANDLE;
-    Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> ambientTarget;
     VkSampler                                                pointSampler = VK_NULL_HANDLE;
     EngineASType                                             tlas {};
     VkImageView                                              shadowAtlasCubeView = VK_NULL_HANDLE;
@@ -50,7 +49,7 @@ struct LightingPassParams {
     [[nodiscard]] constexpr auto AsTuple() const noexcept {
         return std::tuple {sceneColor,           defaultSampler, depth,        normRough,  lightStorageBuffer,  frameUniformBuffer,
                            shadowMapView,        shadowSampler,  ltcMatView,   ltcAmpView, clampSampler,        clusterGridBuffer,
-                           lightIndexListBuffer, ambientTarget,  pointSampler, tlas,       shadowAtlasCubeView, shadowAtlas2DView};
+                           lightIndexListBuffer, pointSampler,   tlas,         shadowAtlasCubeView, shadowAtlas2DView};
     }
 };
 

@@ -97,7 +97,14 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
         uint instanceID = q.CommittedInstanceID();
         InstanceData hitInst = g_instances[instanceID];
 
-        // 1. Reconstruct exact geometric hit normal from mesh vertices
+        // 1. Reconstruct exact geometric hit normal from mesh vertices.
+        //
+        // The hit position itself is already known analytically (origin +
+        // t * dir), and translation cancels inside the edge cross product, so
+        // only the linear part of the instance matrix ever matters here:
+        // transforming the two edges with the 3x3 and crossing them is
+        // mathematically identical to transforming all three points with the
+        // full 4x4 -- at two 3x3 multiplies instead of three 4x4 ones.
         float3 hitNormal = float3(0.0f, 1.0f, 0.0f);
         if (hitInst.posAddress != 0) {
             uint primIdx = q.CommittedPrimitiveIndex();
@@ -117,11 +124,8 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
             float3 p1        = float3(posValues[i1 * 3 + 0], posValues[i1 * 3 + 1], posValues[i1 * 3 + 2]);
             float3 p2        = float3(posValues[i2 * 3 + 0], posValues[i2 * 3 + 1], posValues[i2 * 3 + 2]);
 
-            float3 wp0 = mul(hitInst.world, float4(p0, 1.0f)).xyz;
-            float3 wp1 = mul(hitInst.world, float4(p1, 1.0f)).xyz;
-            float3 wp2 = mul(hitInst.world, float4(p2, 1.0f)).xyz;
-
-            float3 crossN = cross(wp1 - wp0, wp2 - wp0);
+            float3x3 world3x3 = (float3x3) hitInst.world;
+            float3   crossN   = cross(mul(world3x3, p1 - p0), mul(world3x3, p2 - p0));
             float lenSq   = dot(crossN, crossN);
             if (lenSq > 1e-7f) {
                 hitNormal = crossN * rsqrt(lenSq);

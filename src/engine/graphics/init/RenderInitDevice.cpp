@@ -356,7 +356,11 @@ auto RenderContext::Create(Window& window, const RenderConfig& cfg) noexcept -> 
         .and_then([&]() -> std::expected<void, Error> {
             impl->surface         = Vk::Surface(instance, raw_surface);
             HardwareCaps caps     = ProbeHardware(physicalInfo.handle, physicalInfo.properties.properties.apiVersion);
-            auto         features = BuildFeatureChain(physicalInfo.handle, caps, cfg.validationMode);
+            // Plumb through to the render passes: the multiview cascade shadow
+            // pass may only bind task/mesh pipelines that read SV_ViewID when
+            // the multiviewMeshShader feature was actually enabled.
+            impl->multiviewMeshShaderEnabled = caps.supportsMultiviewMeshShader;
+            auto         features            = BuildFeatureChain(physicalInfo.handle, caps, cfg.validationMode);
 
             return GetDeviceExtensions(physicalInfo.handle, window.IsHeadless(), caps.supportsMeshShader)
                 .and_then([&](auto&& dev_exts) -> std::expected<void, Error> {

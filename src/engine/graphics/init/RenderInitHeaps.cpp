@@ -342,8 +342,10 @@ void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
         Vk::InitHeapPassSamplers(heapManager, cullingHeapBindings, infos);
     }
     {
-        std::array<VkSamplerCreateInfo, 2> infos = {defaultInfo, pointInfo};
-        Vk::InitHeapPassSamplers(heapManager, ambientPass.heapBindings, infos);
+        std::array<VkSamplerCreateInfo, 1> infos = {defaultInfo};
+        Vk::InitHeapPassSamplers(heapManager, bloomThresholdHeapBindings, infos);
+        Vk::InitHeapPassSamplers(heapManager, bloomDownHeapBindings, infos);
+        Vk::InitHeapPassSamplers(heapManager, bloomUpHeapBindings, infos);
     }
     {
         std::array<VkSamplerCreateInfo, 4> infos = {defaultInfo, shadowInfo, clampInfo, pointInfo};
@@ -362,13 +364,6 @@ void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
         Vk::InitHeapPassSamplers(heapManager, smaaEdgePass.heapBindings, infos);
         Vk::InitHeapPassSamplers(heapManager, smaaWeightPass.heapBindings, infos);
         Vk::InitHeapPassSamplers(heapManager, smaaBlendPass.heapBindings, infos);
-        Vk::InitHeapPassSamplers(heapManager, bloomThresholdPass.heapBindings, infos);
-        for (auto& kawase: bloomDownPass) {
-            Vk::InitHeapPassSamplers(heapManager, kawase.heapBindings, infos);
-        }
-        for (auto& kawase: bloomUpPass) {
-            Vk::InitHeapPassSamplers(heapManager, kawase.heapBindings, infos);
-        }
         Vk::InitHeapPassSamplers(heapManager, blitPass.heapBindings, infos);
         Vk::InitHeapPassSamplers(heapManager, volumetricTemporalPass.heapBindings, infos);
     }

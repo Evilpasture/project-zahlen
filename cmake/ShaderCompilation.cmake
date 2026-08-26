@@ -157,9 +157,6 @@ compile_shaders(zahlen_engine
     "${SHADER_SRC_DIR}/ui.slang"
     "${SHADER_SRC_DIR}/fxaa.slang"
     "${SHADER_SRC_DIR}/mlaa.slang"
-    "${SHADER_SRC_DIR}/ambient.slang"
-    "${SHADER_SRC_DIR}/bloom_threshold.slang"
-    "${SHADER_SRC_DIR}/bloom_blur.slang"
     "${SHADER_SRC_DIR}/punctual_shadows.slang"
 )
 
@@ -192,16 +189,15 @@ add_shader_target(hiz_generate_shader
     STAGES "${SHADER_SRC_DIR}/hiz_generate.slang|CSMain|cs_6_0|SHADER_HIZ_GENERATE_SLANG_CS_PATH"
 )
 
-# Per-pass variants of the scene geometry interface. The geometry stage and the
-# fragment stage of one pipeline MUST share the same defines, otherwise their
-# varying locations disagree; Resource::GetSceneShaders() enforces the pairing
-# on the C++ side.
+# Per-pass scene variants. Each pass compiles its own named entry points
+# against its own varying struct (common.slang), so the geometry and fragment
+# stages of one pipeline agree on the SPIR-V interface by construction.
+# Resource::GetSceneShaders() still enforces the pairing on the C++ side.
 add_shader_target(shadow_shader
     STAGES
-        "${SHADER_SRC_DIR}/basic.slang|VSMain|vs_6_5|SHADER_BASIC_SLANG_VS_SHADOW_PATH"
+        "${SHADER_SRC_DIR}/basic.slang|VSMainShadow|vs_6_5|SHADER_BASIC_SLANG_VS_SHADOW_PATH"
         "${SHADER_SRC_DIR}/basic.slang|PSShadow|ps_6_0|SHADER_SHADOW_SLANG_PS_PATH"
-        "${SHADER_SRC_DIR}/basic_mesh.slang|MeshMain|ms_6_5|SHADER_BASIC_SLANG_MESH_SHADOW_PATH"
-    EXTRA_ARGS -DZHLN_PASS_SHADOW
+        "${SHADER_SRC_DIR}/basic_mesh.slang|MeshMainShadow|ms_6_5|SHADER_BASIC_SLANG_MESH_SHADOW_PATH"
 )
 
 add_shader_target(cluster_bounds
@@ -218,14 +214,30 @@ add_shader_target(skinning_shader
 
 add_shader_target(forward_shader
     STAGES
-        "${SHADER_SRC_DIR}/basic.slang|VSMain|vs_6_5|SHADER_BASIC_SLANG_VS_FORWARD_PATH"
+        "${SHADER_SRC_DIR}/basic.slang|VSMainForward|vs_6_5|SHADER_BASIC_SLANG_VS_FORWARD_PATH"
         "${SHADER_SRC_DIR}/basic.slang|PSForward|ps_6_0|SHADER_FORWARD_SLANG_PS_PATH"
-        "${SHADER_SRC_DIR}/basic_mesh.slang|MeshMain|ms_6_5|SHADER_BASIC_SLANG_MESH_FORWARD_PATH"
-    EXTRA_ARGS -DFORWARD_PASS
+        "${SHADER_SRC_DIR}/basic_mesh.slang|MeshMainForward|ms_6_5|SHADER_BASIC_SLANG_MESH_FORWARD_PATH"
 )
 
 add_shader_target(hang_gpu_shader
     STAGES "${SHADER_SRC_DIR}/hang_gpu.slang|CSMain|cs_6_0|SHADER_HANG_GPU_SLANG_CS_PATH"
+)
+
+# --- DUAL KAWASE BLOOM (single compute dispatch chain) ---
+# One file per entry point: the heap binding tables are reflected positionally
+# from each module's set-0 declaration order, so every pipeline must see
+# exactly the bindings it consumes.
+
+add_shader_target(bloom_threshold_cs
+    STAGES "${SHADER_SRC_DIR}/bloom_threshold_cs.slang|CSMain|cs_6_0|SHADER_BLOOM_THRESHOLD_CS_SLANG_CS_PATH"
+)
+
+add_shader_target(bloom_down_cs
+    STAGES "${SHADER_SRC_DIR}/bloom_down_cs.slang|CSMain|cs_6_0|SHADER_BLOOM_DOWN_CS_SLANG_CS_PATH"
+)
+
+add_shader_target(bloom_up_cs
+    STAGES "${SHADER_SRC_DIR}/bloom_up_cs.slang|CSMain|cs_6_0|SHADER_BLOOM_UP_CS_SLANG_CS_PATH"
 )
 
 add_shader_target(procedural_bake

@@ -856,8 +856,8 @@ struct LightingRTTestSuite {
                 // Dim ambient + dim sun so the red point light owns the frame.
                 // GI/AO are disabled (giMode=0) and RTR is disabled (enableRTR=0)
                 // so the sweep isolates CLUSTERED DIRECT LIGHTING -- the only
-                // pass under test. ambient.slang otherwise rotates its AO/GI
-                // pattern by a per-frame time offset and lighting.slang switches
+                // pass under test. The merged lighting pass otherwise rotates
+                // its AO/GI pattern by a per-frame time offset and switches
                 // the sun onto the ray-traced shadow path (CalculateShadowRay
                 // Traced); both are covered by the static flicker and RT shadow
                 // scenarios respectively and add unrelated per-frame variation

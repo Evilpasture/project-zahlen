@@ -92,7 +92,7 @@ public float FindBlocker(float2 uv, float zReceiver, float searchRadius, Texture
 }
 
 public float CalculateShadowPCSS(float4 shadowPos, float3 N, float3 L, float2 screenPos, Texture2DArray<float> shadowMap, SamplerComparisonState shadowSampler,
-                                 SamplerState linearSampler, float shadowResolution, uint cascadeIndex) {
+                                 SamplerState linearSampler, float shadowResolution, uint cascadeIndex, float worldDepthPerNdc) {
     float3 projCoords = shadowPos.xyz / shadowPos.w;
 
     if (projCoords.x < 0.0 || projCoords.x > 1.0 || projCoords.y < 0.0 || projCoords.y > 1.0 || projCoords.z < 0.0 || projCoords.z > 1.0) {
@@ -114,7 +114,11 @@ public float CalculateShadowPCSS(float4 shadowPos, float3 N, float3 L, float2 sc
         return 1.0f;
 
     // 2. Penumbra Estimation
-    float worldDepthDiff = (zReceiver - avgBlockerDepth) * 400.0f;
+    // NDC depth deltas converted with the cascade's own ortho depth range
+    // (world metres per unit of NDC z). The old constant 400 was only right
+    // for the near cascades: the outer ones span up to 1000 m, so penumbras
+    // there collapsed 2.5x too sharp.
+    float worldDepthDiff = (zReceiver - avgBlockerDepth) * worldDepthPerNdc;
     float penumbraWidth  = worldDepthDiff * 0.5f;
     float filterRadius   = clamp(penumbraWidth, 2.5f, 16.0f) * texelSize;
 

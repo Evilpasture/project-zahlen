@@ -12,18 +12,16 @@ extern const char* const BasicVS;
 extern const char* const BasicPS;
 extern const char* const BasicTask;        // VK_EXT_mesh_shader amplification stage
 extern const char* const BasicMesh;        // VK_EXT_mesh_shader mesh stage
-extern const char* const BasicVSShadow;    // -DZHLN_PASS_SHADOW variant
-extern const char* const BasicMeshShadow;  // -DZHLN_PASS_SHADOW variant
-extern const char* const BasicVSForward;   // -DFORWARD_PASS variant
-extern const char* const BasicMeshForward; // -DFORWARD_PASS variant
+extern const char* const BasicVSShadow;    // shadow-pass entry points (VSMainShadow)
+extern const char* const BasicMeshShadow;  //   ... (MeshMainShadow)
+extern const char* const BasicVSForward;   // forward-pass entry points (VSMainForward)
+extern const char* const BasicMeshForward; //   ... (MeshMainForward)
 extern const char* const BlitVS;
 extern const char* const BlitPS;
 extern const char* const TaaVS;
 extern const char* const TaaPS;
 extern const char* const UiVS;
 extern const char* const UiPS;
-extern const char* const AmbientVS;
-extern const char* const AmbientPS;
 extern const char* const LightingVS;
 extern const char* const LightingPS;
 extern const char* const ReflectionVS;
@@ -40,10 +38,9 @@ extern const char* const SmaaWeightVS;
 extern const char* const SmaaWeightPS;
 extern const char* const SmaaBlendVS;
 extern const char* const SmaaBlendPS;
-extern const char* const BloomThresholdVS;
-extern const char* const BloomThresholdPS;
-extern const char* const BloomBlurVS;
-extern const char* const BloomBlurPS;
+extern const char* const BloomThresholdCS;
+extern const char* const BloomDownCS;
+extern const char* const BloomUpCS;
 extern const char* const PunctualShadowsVS;
 extern const char* const PunctualShadowsPS;
 extern const char* const LightingNortVS;
@@ -90,7 +87,6 @@ enum class ShaderID : uint8_t {
     Blit,
     Taa,
     Ui,
-    Ambient,
     Lighting,
     Reflection,
     ReflectionNort,
@@ -99,8 +95,9 @@ enum class ShaderID : uint8_t {
     SmaaEdge,
     SmaaWeight,
     SmaaBlend,
-    BloomThreshold,
-    BloomBlur,
+    BloomThresholdCS,
+    BloomDownCS,
+    BloomUpCS,
     PunctualShadows,
     LightingNort,
     CullingComp,
@@ -140,7 +137,6 @@ extern const ShaderPair basic_shaders;
 extern const ShaderPair blit_shaders;
 extern const ShaderPair taa_shaders;
 extern const ShaderPair ui_shaders;
-extern const ShaderPair ambient_shaders;
 extern const ShaderPair lighting_shaders;
 extern const ShaderPair reflection_shaders;
 extern const ShaderPair reflection_nort_shaders;
@@ -149,8 +145,6 @@ extern const ShaderPair mlaa_shaders;
 extern const ShaderPair smaa_edge_shaders;
 extern const ShaderPair smaa_weight_shaders;
 extern const ShaderPair smaa_blend_shaders;
-extern const ShaderPair bloom_threshold_shaders;
-extern const ShaderPair bloom_blur_shaders;
 extern const ShaderPair punctual_shadows_shaders;
 extern const ShaderPair lighting_nort_shaders;
 extern const ShaderPair volumetric_clear_shaders;
@@ -182,6 +176,9 @@ extern const std::span<const uint8_t> basic_vs_forward;
 extern const std::span<const uint8_t> basic_mesh_forward;
 extern const std::span<const uint8_t> hang_gpu_comp;
 extern const std::span<const uint8_t> procedural_bake_comp;
+extern const std::span<const uint8_t> bloom_threshold_cs;
+extern const std::span<const uint8_t> bloom_down_cs;
+extern const std::span<const uint8_t> bloom_up_cs;
 extern const std::span<const uint8_t> brdf_lut_comp;
 extern const std::span<const uint8_t> ibl_specular_comp;
 extern const std::span<const uint8_t> ibl_sh_comp;
@@ -223,7 +220,6 @@ struct ShaderMapping {
         {.id = ShaderID::Blit, .pair = blit_shaders},
         {.id = ShaderID::Taa, .pair = taa_shaders},
         {.id = ShaderID::Ui, .pair = ui_shaders},
-        {.id = ShaderID::Ambient, .pair = ambient_shaders},
         {.id = ShaderID::Lighting, .pair = lighting_shaders},
         {.id = ShaderID::Reflection, .pair = reflection_shaders},
         {.id = ShaderID::ReflectionNort, .pair = reflection_nort_shaders},
@@ -232,8 +228,6 @@ struct ShaderMapping {
         {.id = ShaderID::SmaaEdge, .pair = smaa_edge_shaders},
         {.id = ShaderID::SmaaWeight, .pair = smaa_weight_shaders},
         {.id = ShaderID::SmaaBlend, .pair = smaa_blend_shaders},
-        {.id = ShaderID::BloomThreshold, .pair = bloom_threshold_shaders},
-        {.id = ShaderID::BloomBlur, .pair = bloom_blur_shaders},
         {.id = ShaderID::PunctualShadows, .pair = punctual_shadows_shaders},
         {.id = ShaderID::LightingNort, .pair = lighting_nort_shaders},
         {.id = ShaderID::CullingComp, .pair = ShaderPair {.vertex = culling_comp, .fragment = {}}},
@@ -247,6 +241,9 @@ struct ShaderMapping {
         {.id = ShaderID::ProceduralBakeComp, .pair = ShaderPair {.vertex = procedural_bake_comp, .fragment = {}}},
         {.id = ShaderID::LtcMat, .pair = ShaderPair {.vertex = ltc_mat, .fragment = {}}},
         {.id = ShaderID::LtcAmp, .pair = ShaderPair {.vertex = ltc_amp, .fragment = {}}},
+        {.id = ShaderID::BloomThresholdCS, .pair = ShaderPair {.vertex = bloom_threshold_cs, .fragment = {}}},
+        {.id = ShaderID::BloomDownCS, .pair = ShaderPair {.vertex = bloom_down_cs, .fragment = {}}},
+        {.id = ShaderID::BloomUpCS, .pair = ShaderPair {.vertex = bloom_up_cs, .fragment = {}}},
         {.id = ShaderID::VolumetricClear, .pair = volumetric_clear_shaders},
         {.id = ShaderID::VolumetricFogInject, .pair = volumetric_fog_inject_shaders},
         {.id = ShaderID::VolumetricLightInject, .pair = volumetric_light_inject_shaders},

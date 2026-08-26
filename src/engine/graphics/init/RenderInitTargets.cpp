@@ -118,6 +118,12 @@ std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) 
             if constexpr (std::is_same_v<Tag, Res_HdrSceneColor>) {
                 extra = VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
             }
+            // The Dual Kawase bloom chain writes every cascade level with
+            // compute imageStores, so all downscaled bloom targets need
+            // storage-image usage on top of the usual attachment/sampled bits.
+            if constexpr (Tag::scale_divisor > 1) {
+                extra |= VK_IMAGE_USAGE_STORAGE_BIT;
+            }
             const VkExtent2D scaled = {.width = std::max(1u, ext.width / Tag::scale_divisor), .height = std::max(1u, ext.height / Tag::scale_divisor)};
             result                  = assign(rt, CreateDefaultTarget<Tag::format>(scaled, extra));
         }
@@ -167,23 +173,31 @@ std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) 
                                    graphResources.velocityBuffer.image.Handle(),
                                    graphResources.normalRoughnessBuffer.image.Handle(),
                                    graphResources.hdrSceneColor.image.Handle(),
-                                   graphResources.ambientTarget.image.Handle(),
                                    graphResources.lightingTarget.image.Handle(),
                                    graphResources.smaaEdgeTarget.image.Handle(),
                                    graphResources.smaaWeightTarget.image.Handle(),
-                                   graphResources.bloomThresholdTarget.image.Handle(),
-                                   graphResources.bloomDown1.image.Handle(),
-                                   graphResources.bloomDown2.image.Handle(),
-                                   graphResources.bloomDown3.image.Handle(),
-                                   graphResources.bloomUp2.image.Handle(),
-                                   graphResources.bloomUp1.image.Handle(),
-                                   graphResources.bloomFinalTarget.image.Handle(),
                                    graphResources.transNormalBuffer.image.Handle(),
                                    graphResources.transLightingTarget.image.Handle()};
 
         for (auto* const img: colorTargets) {
             Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
             Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
+        }
+
+        // The Kawase bloom chain is pure compute now: every level is written
+        // with imageStore and re-read as a sampled image inside one graph pass,
+        // all in GENERAL layout. Park the targets in their steady-state layout
+        // right after allocation (the graph still transitions them from
+        // UNDEFINED on the first use of every frame).
+        const std::array bloomComputeTargets = {graphResources.bloomThresholdTarget.image.Handle(),
+                                                graphResources.bloomDown1.image.Handle(),
+                                                graphResources.bloomDown2.image.Handle(),
+                                                graphResources.bloomDown3.image.Handle(),
+                                                graphResources.bloomUp2.image.Handle(),
+                                                graphResources.bloomUp1.image.Handle(),
+                                                graphResources.bloomFinalTarget.image.Handle()};
+        for (auto* const img: bloomComputeTargets) {
+            Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
         }
 
         // VK_EXT_descriptor_heap: the decal pass samples the depth target

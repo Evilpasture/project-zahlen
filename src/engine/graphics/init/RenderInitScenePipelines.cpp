@@ -108,6 +108,7 @@ auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, Er
                         .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
                         .DepthOnly()
                         .DepthFormat(VK_FORMAT_D32_SFLOAT)
+                        .ViewMask(Passes::ShadowPass::kCascadeViewMask) // Drawn inside the multiview cascade pass.
                         .CullNone()
                         .Build(ctx.Device())
                         .transform([&](auto&& pipeline) -> auto { meshParticleShadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
@@ -166,7 +167,7 @@ auto RenderContext::Impl::BuildLinePipeline() -> std::expected<void, Error> {
     const auto forwardShaders = Resource::GetSceneShaders(Resource::SceneShaderVariant::Forward);
 
     return LoadAndCreateShaders(
-               {.path = Resource::Paths::BasicVSForward, .fallback = forwardShaders.vertex, .entryPoint = "VSMain"},
+               {.path = Resource::Paths::BasicVSForward, .fallback = forwardShaders.vertex, .entryPoint = "VSMainForward"},
                {.path = Resource::Paths::ForwardPS, .fallback = forwardShaders.fragment, .entryPoint = "PSForward"}
     )
         .and_then([&](auto&& shaders) -> std::expected<void, Error> {
@@ -564,7 +565,7 @@ auto RenderContext::Impl::CompileShadowPipeline(VkDevice device, const Resource:
     // VK_EXT_descriptor_heap: the shadow pass reads the scene registry through
     // the heap; per-draw ObjectConstants travel via vkCmdPushDataEXT.
     shadowPipelineLayout = emptyPipelineLayout;
-    return Vk::ShaderStages::Create(device, shaderData, "VSMain", "PSShadow")
+    return Vk::ShaderStages::Create(device, shaderData, "VSMainShadow", "PSShadow")
         .transform_error([](auto err) -> Error { return err; })
         .and_then([&, device](auto&& shaders) -> std::expected<void, Error> {
             return Vk::PipelineBuilder {}
@@ -573,6 +574,9 @@ auto RenderContext::Impl::CompileShadowPipeline(VkDevice device, const Resource:
                 .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
                 .DepthOnly()
                 .DepthFormat(VK_FORMAT_D32_SFLOAT)
+                // Multiview cascades: matches the single layered shadow render
+                // pass (viewMask 0x0F); ViewIndex drives the light matrix.
+                .ViewMask(Passes::ShadowPass::kCascadeViewMask)
                 .CullNone()
                 .Build(device)
                 .transform_error([](auto) -> Error { return RenderInitError::PipelineCreationFailed; })
@@ -582,7 +586,10 @@ auto RenderContext::Impl::CompileShadowPipeline(VkDevice device, const Resource:
             // VK_EXT_mesh_shader twin of the shadow pipeline. Optional by
             // design: a failure here only means the cascades keep using the
             // indirect vertex draws, so it never fails pipeline compilation.
-            if (!ctx.MeshShadersSupported()) {
+            // The twin renders inside the multiview cascade pass and its mesh
+            // stage reads SV_ViewID, which requires multiviewMeshShader --
+            // skip creation entirely when that feature is unavailable.
+            if (!ctx.MeshShadersSupported() || !MultiviewMeshShadingEnabled()) {
                 return {};
             }
 
@@ -604,6 +611,7 @@ auto RenderContext::Impl::CompileShadowPipeline(VkDevice device, const Resource:
                                 .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
                                 .DepthOnly()
                                 .DepthFormat(VK_FORMAT_D32_SFLOAT)
+                                .ViewMask(Passes::ShadowPass::kCascadeViewMask) // Multiview cascades (must match the render pass).
                                 .CullNone()
                                 .Build(device);
             if (!pipeline) {
