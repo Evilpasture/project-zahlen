@@ -685,7 +685,8 @@ struct DistanceStabilitySuite {
                 }
 
                 std::array<uint32_t, kRingCount> coverCounts {};
-                int  mirrorVotes = 0; // +1: hues at planned slots; -1: mirrored
+                int  homeOnly     = 0; // rings whose hue sits ONLY at the planned slot
+                int  mirroredOnly = 0; // rings whose hue sits ONLY at the mirrored slot
                 bool allRingsVisible = true;
                 for (uint32_t i = 0; i < kRingCount; ++i) {
                     const auto [ax0, ax1] = RingColumnWindow(rings[i], 0.0f, tanH, cover.width, +1.0f);
@@ -693,17 +694,20 @@ struct DistanceStabilitySuite {
                     const uint32_t homeCount     = CountHueInColumns(cover, RingHue(i), ax0, ax1);
                     const uint32_t mirroredCount = CountHueInColumns(cover, RingHue(i), bx0, bx1);
                     coverCounts[i] = std::max(homeCount, mirroredCount);
-                    // Orientation vote: the hue must sit at exactly one side.
+                    // Orientation vote: only an EXCLUSIVE sighting counts.
+                    // Stray hue-classified pixels (bloom/edge noise near a
+                    // neighbour box) can push both sides over the floor; an
+                    // ambiguous ring abstains rather than vetoing.
                     if (homeCount >= kMinRingPixels && mirroredCount < kMinRingPixels) {
-                        mirrorVotes += 1;
+                        ++homeOnly;
                     } else if (mirroredCount >= kMinRingPixels && homeCount < kMinRingPixels) {
-                        mirrorVotes -= 1;
+                        ++mirroredOnly;
                     }
                     // Window mean RGB + raw hue-match count: distinguishes
                     // "ring black" (sun/ambient dead) from "ring lit but
                     // unclassified hue" (tonemap/fog shift) from "ring
                     // absent" (culling/geometry).
-                    const auto [wx0, wx1] = (homeCount >= mirroredCount) ? std::pair<int, int>{ax0, ax1} : std::pair<int, int>{bx0, bx1};
+                    const auto [wx0, wx1] = (mirroredOnly >= homeOnly) ? std::pair<int, int>{bx0, bx1} : std::pair<int, int>{ax0, ax1};
                     uint64_t wr = 0, wg = 0, wb = 0;
                     uint32_t wn = 0;
                     for (int y = 0; y < cover.height; ++y) {
@@ -752,15 +756,18 @@ struct DistanceStabilitySuite {
                     }
                     return false;
                 }
-                // Every ring must agree on the world-x -> screen-x
-                // orientation; a split vote means hues are NOT consistently
-                // placed even allowing for a mirror (a real regression).
-                if (mirrorVotes != 0 && mirrorVotes != static_cast<int>(kRingCount) && mirrorVotes != -static_cast<int>(kRingCount)) {
-                    ZHLN::Println("    [FAIL] coverage: mixed slot orientation (vote {}) - ring hues are not consistently placed", mirrorVotes);
+                // Orientation consensus from EXCLUSIVE sightings only: a
+                // split (some rings home-only, others mirrored-only) means
+                // hues are NOT consistently placed even allowing for a
+                // mirror - a real regression. Ambiguous rings abstain.
+                if (homeOnly > 0 && mirroredOnly > 0) {
+                    ZHLN::Println("    [FAIL] coverage: mixed slot orientation (home-only {}, mirrored-only {}) - ring hues are not consistently placed", homeOnly, mirroredOnly);
                     return false;
                 }
-                const float mirrorSign = (mirrorVotes < 0) ? -1.0f : 1.0f;
-                ZHLN::Println("    [INFO] coverage orientation: {} (vote {})", (mirrorVotes < 0) ? "mirrored" : "home", mirrorVotes);
+                const float mirrorSign = (mirroredOnly > 0) ? -1.0f : 1.0f;
+                ZHLN::Println("    [INFO] coverage orientation: {} (home-only {}, mirrored-only {}, abstained {})",
+                              (mirroredOnly > 0) ? "mirrored" : "home", homeOnly, mirroredOnly,
+                              static_cast<int>(kRingCount) - homeOnly - mirroredOnly);
 
                 // ---------------- Phase B: static temporal stability --------
                 failedPhase = "static";
