@@ -93,8 +93,11 @@ VSOutput VSMain(uint vertexId: SV_VulkanVertexID, uint instanceId: SV_VulkanInst
     float alphaCutoff      = inst.alphaCutoff;
 
     if (obj.isShadowPass != 0) {
-        // Extract the cascade index mapped from the CPU
-        uint cascadeIndex = obj.isShadowPass - 1;
+        // Multiview cascades: the shadow render pass fans every draw out to all
+        // four cascade layers in one dispatch (viewMask 0x0F), so the
+        // light-space matrix -- and the destination layer, implicitly -- comes
+        // from ViewIndex instead of a per-draw push constant.
+        uint cascadeIndex = min(viewId, 3u);
 
         output.pos             = mul(scene.frame.lightSpaceMatrices[cascadeIndex], worldPos);
         output.uv              = localUV;

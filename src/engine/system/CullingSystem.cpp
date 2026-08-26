@@ -26,15 +26,26 @@ void VerifyCullingResults(const ECS::Registry& reg, const JPH::Array<Entity>& vi
     auto entities = reg.GetEntitiesWith<Components::MeshComponent>();
     auto meshes   = reg.GetRawArray<Components::MeshComponent>();
 
+    // The invariant must mirror the REAL culling predicate exactly:
+    //   * Hidden meshes are skipped before the frustum tests.
+    //   * `outVisible` holds MAIN-camera visibility only (the shadow list is
+    //     separate), so OR-ing the shadow frustum in here over-counted every
+    //     off-screen mesh that merely intersects the huge ortho shadow volume.
+    //   * The system inflates the test radius by the world-matrix max axis
+    //     scale; the old verifier compared against the unscaled local radius.
     size_t expectedVisible = 0;
     for (size_t i = 0; i < entities.size(); ++i) {
+        if ((meshes[i].flags & DrawFlags::Hidden) != DrawFlags::None) {
+            continue;
+        }
+
         const auto* worldTrans = reg.Get<Components::WorldTransformComponent>(entities[i]);
         JPH::Mat44  worldMat   = (worldTrans != nullptr) ? worldTrans->world : JPH::Mat44::sIdentity();
         JPH::Vec3   pos        = worldMat * meshes[i].localCenter;
 
-        bool visibleInMain   = cam.frustum.IsSphereVisible(pos, meshes[i].cullRadius);
-        bool visibleInShadow = cam.shadowFrustum.IsSphereVisible(pos, meshes[i].cullRadius);
-        if (visibleInMain || visibleInShadow) {
+        float currentMaxScale = std::max({worldMat.GetColumn3(0).Length(), worldMat.GetColumn3(1).Length(), worldMat.GetColumn3(2).Length()});
+
+        if (cam.frustum.IsSphereVisible(pos, meshes[i].cullRadius * currentMaxScale)) {
             expectedVisible++;
         }
     }
@@ -56,6 +67,63 @@ void VerifyCullingResults(const ECS::Registry& reg, const JPH::Array<Entity>& vi
 }} // namespace ZHLN::Tests
 
 namespace ZHLN {
+
+namespace {
+
+// ============================================================================
+// 4-wide SIMD frustum culling.
+//
+// Frustum::IsSphereVisible replicates ONE sphere across the SIMD lanes and
+// tests 4 planes per instruction, wasting 3 of 4 lanes per test. This helper
+// transposes the problem instead: 4 spheres ride in the lanes and each
+// instruction tests one plane against all 4 of them, cutting the plane-test
+// instruction count 4x. The predicate is bit-for-bit the one IsSphereVisible
+// implements: strict `<` against the plane distance, radius inflated by the
+// 0.5 m anti-flicker margin, and sentinel planes 6/7 that can never reject.
+// ============================================================================
+struct BatchedFrustum {
+    static constexpr uint32_t kPlaneCount = 8;
+
+    // Plane p: dot(n_p, center) + d_p < -(r + 0.5)  =>  sphere p rejected.
+    std::array<float, kPlaneCount> nx {};
+    std::array<float, kPlaneCount> ny {};
+    std::array<float, kPlaneCount> nz {};
+    std::array<float, kPlaneCount> pw {};
+
+    [[nodiscard]] static BatchedFrustum FromFrustum(const Frustum& frustum) noexcept {
+        BatchedFrustum out;
+        for (uint32_t p = 0; p < kPlaneCount; ++p) {
+            const uint32_t block = (p < 4) ? 0 : 1;
+            const uint32_t lane  = p & 3;
+            out.nx[p]            = frustum.mX[block].GetComponent(lane);
+            out.ny[p]            = frustum.mY[block].GetComponent(lane);
+            out.nz[p]            = frustum.mZ[block].GetComponent(lane);
+            out.pw[p]            = frustum.mW[block].GetComponent(lane);
+        }
+        return out;
+    }
+
+    /// Tests 4 spheres (SoA lanes). `outVisible[j]` mirrors
+    /// Frustum::IsSphereVisible(centers[j], radii[j]).
+    void Test4(const JPH::Vec4& centersX, const JPH::Vec4& centersY, const JPH::Vec4& centersZ, const JPH::Vec4& negInflatedRadii, bool* outVisible) const noexcept {
+        // Track the largest per-lane violation of `dist >= negRadius` across
+        // all planes; a lane is visible iff the violation never goes positive.
+        JPH::Vec4 worstViolation = JPH::Vec4::sReplicate(-1.0f);
+
+        for (uint32_t p = 0; p < kPlaneCount; ++p) {
+            JPH::Vec4 dist = JPH::Vec4::sReplicate(nx[p]) * centersX + JPH::Vec4::sReplicate(ny[p]) * centersY + JPH::Vec4::sReplicate(nz[p]) * centersZ +
+                             JPH::Vec4::sReplicate(pw[p]);
+            worstViolation = JPH::Vec4::sMax(worstViolation, negInflatedRadii - dist);
+        }
+
+        for (uint32_t j = 0; j < 4; ++j) {
+            outVisible[j] = worstViolation.GetComponent(j) <= 0.0f;
+        }
+    }
+};
+
+} // namespace
+
 
 template <bool UsePhysicsTransforms>
 void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible, JPH::Array<Entity>& outVisibleShadow) {
@@ -170,38 +238,79 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible, JPH::
     outVisible.clear();
     outVisibleShadow.clear();
 
-    for (size_t i = 0; i < entities.size(); ++i) {
-        Entity      e        = entities[i];
-        const auto& meshComp = meshes[i];
+    // SIMD batching: gather 4 entities at a time, run both frustum tests
+    // 4-wide, then do the per-entity bookkeeping from the visibility bits.
+    constexpr size_t     kBatch = 4;
+    const BatchedFrustum mainPlanes   = BatchedFrustum::FromFrustum(cam.frustum);
+    const BatchedFrustum shadowPlanes = BatchedFrustum::FromFrustum(cam.shadowFrustum);
 
-        if ((meshComp.flags & DrawFlags::Hidden) != DrawFlags::None) {
-            continue;
+    std::array<Entity, kBatch>  batchEntities {};
+    std::array<JPH::Vec3, kBatch> batchCenters {};
+    std::array<float, kBatch>   batchRadii {};       // shadow-frustum radius (unscaled, matches the original test)
+    std::array<float, kBatch>   batchScaledRadii {}; // main-frustum radius (inflated by world max scale)
+    std::array<uint32_t, kBatch> batchTris {};
+    std::array<bool, kBatch>    batchHidden {};
+    std::array<bool, 4>         mainVisible {};
+    std::array<bool, 4>         shadowVisible {};
+
+    size_t i = 0;
+    while (i < entities.size()) {
+        size_t n = 0;
+        while ((i < entities.size()) && (n < kBatch)) {
+            const Entity e          = entities[i];
+            const auto&  meshComp   = meshes[i];
+            const bool   hidden     = (meshComp.flags & DrawFlags::Hidden) != DrawFlags::None;
+            auto         gpuMeshOpt = rc.GetGPUMesh(meshComp.meshAsset);
+            uint32_t     meshTris   = 0;
+            if (gpuMeshOpt.has_value()) {
+                meshTris = (gpuMeshOpt->indexCount > 0) ? (gpuMeshOpt->indexCount / 3) : (gpuMeshOpt->vertexCount / 3);
+            }
+
+            const auto* worldTrans = reg.Get<Components::WorldTransformComponent>(e);
+            JPH::Mat44  worldMat   = (worldTrans != nullptr) ? worldTrans->world : JPH::Mat44::sIdentity();
+
+            batchEntities[n] = e;
+            batchCenters[n]  = worldMat * meshComp.localCenter;
+            batchRadii[n]    = meshComp.cullRadius;
+            batchScaledRadii[n] =
+                meshComp.cullRadius * std::max({worldMat.GetColumn3(0).Length(), worldMat.GetColumn3(1).Length(), worldMat.GetColumn3(2).Length()});
+            batchTris[n]   = meshTris;
+            batchHidden[n] = hidden;
+
+            CullingStats::TotalTriangles += hidden ? 0u : meshTris;
+
+            ++i;
+            ++n;
         }
 
-        auto     gpuMeshOpt = rc.GetGPUMesh(meshComp.meshAsset);
-        uint32_t meshTris   = 0;
-        if (gpuMeshOpt.has_value()) {
-            meshTris = (gpuMeshOpt->indexCount > 0) ? (gpuMeshOpt->indexCount / 3) : (gpuMeshOpt->vertexCount / 3);
+        // Lanes beyond `n` are padding: their results are never read.
+        const JPH::Vec4 centersX(batchCenters[0].GetX(), batchCenters[1].GetX(), batchCenters[2].GetX(), batchCenters[3].GetX());
+        const JPH::Vec4 centersY(batchCenters[0].GetY(), batchCenters[1].GetY(), batchCenters[2].GetY(), batchCenters[3].GetY());
+        const JPH::Vec4 centersZ(batchCenters[0].GetZ(), batchCenters[1].GetZ(), batchCenters[2].GetZ(), batchCenters[3].GetZ());
+        const JPH::Vec4 negScaled = JPH::Vec4(
+            -(batchScaledRadii[0] + 0.5f), -(batchScaledRadii[1] + 0.5f), -(batchScaledRadii[2] + 0.5f), -(batchScaledRadii[3] + 0.5f)
+        );
+
+        mainPlanes.Test4(centersX, centersY, centersZ, negScaled, mainVisible.data());
+
+        if (!isFullBright) {
+            const JPH::Vec4 negPlain = JPH::Vec4(-(batchRadii[0] + 0.5f), -(batchRadii[1] + 0.5f), -(batchRadii[2] + 0.5f), -(batchRadii[3] + 0.5f));
+            shadowPlanes.Test4(centersX, centersY, centersZ, negPlain, shadowVisible.data());
         }
 
-        CullingStats::TotalTriangles += meshTris;
+        for (size_t j = 0; j < n; ++j) {
+            if (batchHidden[j]) {
+                continue;
+            }
 
-        const auto* worldTrans = reg.Get<Components::WorldTransformComponent>(e);
-        JPH::Mat44  worldMat   = (worldTrans != nullptr) ? worldTrans->world : JPH::Mat44::sIdentity();
+            if (mainVisible[j]) {
+                outVisible.push_back(batchEntities[j]);
+                CullingStats::RenderedTriangles += batchTris[j];
+            }
 
-        JPH::Vec3 pos             = worldMat * meshComp.localCenter;
-        float     scaleX          = worldMat.GetColumn3(0).Length();
-        float     scaleY          = worldMat.GetColumn3(1).Length();
-        float     scaleZ          = worldMat.GetColumn3(2).Length();
-        float     currentMaxScale = std::max({scaleX, scaleY, scaleZ});
-
-        if (cam.frustum.IsSphereVisible(pos, meshComp.cullRadius * currentMaxScale)) {
-            outVisible.push_back(e);
-            CullingStats::RenderedTriangles += meshTris;
-        }
-
-        if (!isFullBright && cam.shadowFrustum.IsSphereVisible(pos, meshComp.cullRadius)) {
-            outVisibleShadow.push_back(e);
+            if (!isFullBright && shadowVisible[j]) {
+                outVisibleShadow.push_back(batchEntities[j]);
+            }
         }
     }
 

@@ -76,15 +76,6 @@ constexpr uint8_t ui_ps_raw[] = {
 };
 extern const ShaderPair ui_shaders {.vertex = ui_vs_raw, .fragment = ui_ps_raw};
 
-// --- Ambient Shaders ---
-constexpr uint8_t ambient_vs_raw[] = {
-#embed SHADER_AMBIENT_SLANG_VS_PATH
-};
-constexpr uint8_t ambient_ps_raw[] = {
-#embed SHADER_AMBIENT_SLANG_PS_PATH
-};
-extern const ShaderPair ambient_shaders {.vertex = ambient_vs_raw, .fragment = ambient_ps_raw};
-
 // --- Lighting Shaders ---
 constexpr uint8_t lighting_vs_raw[] = {
 #embed SHADER_LIGHTING_SLANG_VS_PATH
@@ -157,23 +148,19 @@ constexpr uint8_t smaa_blend_ps_raw[] = {
 };
 extern const ShaderPair smaa_blend_shaders {.vertex = smaa_blend_vs_raw, .fragment = smaa_blend_ps_raw};
 
-// --- Bloom Threshold Shaders ---
-constexpr uint8_t bloom_threshold_vs_raw[] = {
-#embed SHADER_BLOOM_THRESHOLD_SLANG_VS_PATH
+// --- Dual Kawase Bloom (single compute dispatch chain) ---
+constexpr uint8_t bloom_threshold_cs_raw[] = {
+#embed SHADER_BLOOM_THRESHOLD_CS_SLANG_CS_PATH
 };
-constexpr uint8_t bloom_threshold_ps_raw[] = {
-#embed SHADER_BLOOM_THRESHOLD_SLANG_PS_PATH
+constexpr uint8_t bloom_down_cs_raw[] = {
+#embed SHADER_BLOOM_DOWN_CS_SLANG_CS_PATH
 };
-extern const ShaderPair bloom_threshold_shaders {.vertex = bloom_threshold_vs_raw, .fragment = bloom_threshold_ps_raw};
-
-// --- Bloom Blur Shaders ---
-constexpr uint8_t bloom_blur_vs_raw[] = {
-#embed SHADER_BLOOM_BLUR_SLANG_VS_PATH
+constexpr uint8_t bloom_up_cs_raw[] = {
+#embed SHADER_BLOOM_UP_CS_SLANG_CS_PATH
 };
-constexpr uint8_t bloom_blur_ps_raw[] = {
-#embed SHADER_BLOOM_BLUR_SLANG_PS_PATH
-};
-extern const ShaderPair bloom_blur_shaders {.vertex = bloom_blur_vs_raw, .fragment = bloom_blur_ps_raw};
+extern const std::span<const uint8_t> bloom_threshold_cs {bloom_threshold_cs_raw, sizeof(bloom_threshold_cs_raw)};
+extern const std::span<const uint8_t> bloom_down_cs {bloom_down_cs_raw, sizeof(bloom_down_cs_raw)};
+extern const std::span<const uint8_t> bloom_up_cs {bloom_up_cs_raw, sizeof(bloom_up_cs_raw)};
 
 // --- Punctual Shadows Shaders ---
 constexpr uint8_t punctual_shadows_vs_raw[] = {
@@ -371,8 +358,6 @@ const char* const TaaVS                   = SHADER_TAA_SLANG_VS_PATH;
 const char* const TaaPS                   = SHADER_TAA_SLANG_PS_PATH;
 const char* const UiVS                    = SHADER_UI_SLANG_VS_PATH;
 const char* const UiPS                    = SHADER_UI_SLANG_PS_PATH;
-const char* const AmbientVS               = SHADER_AMBIENT_SLANG_VS_PATH;
-const char* const AmbientPS               = SHADER_AMBIENT_SLANG_PS_PATH;
 const char* const LightingVS              = SHADER_LIGHTING_SLANG_VS_PATH;
 const char* const LightingPS              = SHADER_LIGHTING_SLANG_PS_PATH;
 const char* const ReflectionVS            = SHADER_REFLECTION_SLANG_VS_PATH;
@@ -389,10 +374,9 @@ const char* const SmaaWeightVS            = SHADER_SMAA_WEIGHT_VS_PATH;
 const char* const SmaaWeightPS            = SHADER_SMAA_WEIGHT_PS_PATH;
 const char* const SmaaBlendVS             = SHADER_SMAA_BLEND_VS_PATH;
 const char* const SmaaBlendPS             = SHADER_SMAA_BLEND_PS_PATH;
-const char* const BloomThresholdVS        = SHADER_BLOOM_THRESHOLD_SLANG_VS_PATH;
-const char* const BloomThresholdPS        = SHADER_BLOOM_THRESHOLD_SLANG_PS_PATH;
-const char* const BloomBlurVS             = SHADER_BLOOM_BLUR_SLANG_VS_PATH;
-const char* const BloomBlurPS             = SHADER_BLOOM_BLUR_SLANG_PS_PATH;
+const char* const BloomThresholdCS        = SHADER_BLOOM_THRESHOLD_CS_SLANG_CS_PATH;
+const char* const BloomDownCS             = SHADER_BLOOM_DOWN_CS_SLANG_CS_PATH;
+const char* const BloomUpCS               = SHADER_BLOOM_UP_CS_SLANG_CS_PATH;
 const char* const PunctualShadowsVS       = SHADER_PUNCTUAL_SHADOWS_SLANG_VS_PATH;
 const char* const PunctualShadowsPS       = SHADER_PUNCTUAL_SHADOWS_SLANG_PS_PATH;
 const char* const LightingNortVS          = SHADER_LIGHTING_NORT_SLANG_VS_PATH;

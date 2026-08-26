@@ -62,15 +62,6 @@ auto RenderContext::Impl::BuildSMAAPipeline() -> std::expected<void, Error> {
         });
 }
 
-auto RenderContext::Impl::BuildAmbientPipeline() -> std::expected<void, Error> {
-    using enum Resource::ShaderID;
-
-    return BuildPassHelper(
-        this, ambientPass, "Ambient", {.path = Resource::Paths::AmbientVS, .fallback = Resource::GetShaderProgram(Ambient).vertex, .entryPoint = "VSMain"},
-        {.path = Resource::Paths::AmbientPS, .fallback = Resource::GetShaderProgram(Ambient).fragment, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT}
-    );
-}
-
 auto RenderContext::Impl::BuildLightingPipeline() -> std::expected<void, Error> {
     using enum Resource::ShaderID;
 
@@ -142,31 +133,25 @@ auto RenderContext::Impl::BuildReflectionPipelines() -> std::expected<void, Erro
 auto RenderContext::Impl::BuildBloomPipelines() -> std::expected<void, Error> {
     using enum Resource::ShaderID;
 
-    auto res = BuildPassHelper(
-        this, bloomThresholdPass, "Bloom Threshold", {.path = Resource::Paths::BloomThresholdVS, .fallback = Resource::GetShaderProgram(BloomThreshold).vertex},
-        {.path = Resource::Paths::BloomThresholdPS, .fallback = Resource::GetShaderProgram(BloomThreshold).fragment}, {VK_FORMAT_R16G16B16A16_SFLOAT}
-    );
+    // Dual Kawase bloom as a single compute dispatch chain. Layout authority
+    // lives in each compiled module: reflect set 0, bake the PUSH_INDEX
+    // mapping (frame-parity slot span of 2), and build three null-layout heap
+    // pipelines (threshold / down / up).
+    const auto buildCompute = [&](Vk::ComputePass& pass, Vk::SlangReflectedLayout& layout, Vk::HeapPassBindings& bindings, std::span<const uint8_t> spirv)
+        -> std::expected<void, Error> {
+        const auto shader = Vk::CreateShaderDesc(spirv);
+        if (!layout.Build(ctx.Device(), shader, VK_SHADER_STAGE_COMPUTE_BIT)) {
+            return std::unexpected(RenderInitError::PipelineCreationFailed);
+        }
+        Vk::BuildHeapPassBindings(heapManager, layout.reflectedSets[0], 0, heapPushDataLayout.heapIndexOffset, 2, bindings);
+        return pass.BuildHeap(ctx.Device(), shader, bindings.GetInfo(), bindings.indexPushOffset);
+    };
 
-    for (int i = 0; i < 3; ++i) {
-        res = res.and_then(
-                     [&, i]() -> std::expected<void, Error> {
-                         std::string downName = std::format("Bloom Downsample {}", i);
-                         return BuildPassHelper(
-                             this, bloomDownPass[i], downName.c_str(),
-                             {.path = Resource::Paths::BloomBlurVS, .fallback = Resource::GetShaderProgram(BloomBlur).vertex},
-                             {.path = Resource::Paths::BloomBlurPS, .fallback = Resource::GetShaderProgram(BloomBlur).fragment}, {VK_FORMAT_R16G16B16A16_SFLOAT}
-                         );
-                     }
-        ).and_then([&, i]() -> std::expected<void, Error> {
-            std::string upName = std::format("Bloom Upsample {}", i);
-            return BuildPassHelper(
-                this, bloomUpPass[i], upName.c_str(), {.path = Resource::Paths::BloomBlurVS, .fallback = Resource::GetShaderProgram(BloomBlur).vertex},
-                {.path = Resource::Paths::BloomBlurPS, .fallback = Resource::GetShaderProgram(BloomBlur).fragment}, {VK_FORMAT_R16G16B16A16_SFLOAT}
-            );
-        });
-    }
-
-    return res;
+    return buildCompute(bloomThresholdCS, bloomThresholdCSLayout, bloomThresholdHeapBindings, Resource::bloom_threshold_cs)
+        .and_then([&]() -> std::expected<void, Error> {
+            return buildCompute(bloomDownCS, bloomDownCSLayout, bloomDownHeapBindings, Resource::bloom_down_cs);
+        })
+        .and_then([&]() -> std::expected<void, Error> { return buildCompute(bloomUpCS, bloomUpCSLayout, bloomUpHeapBindings, Resource::bloom_up_cs); });
 }
 
 auto RenderContext::Impl::BuildBlitPipeline() -> std::expected<void, Error> {
@@ -304,13 +289,6 @@ auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, Error> {
                     .colorFormat = VK_FORMAT_R16G16B16A16_SFLOAT
                 },
                 GraphicsPassDesc {
-                    .pass        = ambientPass,
-                    .name        = "Ambient",
-                    .vs          = MakeStageSource<ShaderStage::Vertex>(Resource::Paths::AmbientVS, Resource::GetShaderProgram(Ambient).vertex, "VSMain"),
-                    .ps          = MakeStageSource<ShaderStage::Fragment>(Resource::Paths::AmbientPS, Resource::GetShaderProgram(Ambient).fragment, "PSMain"),
-                    .colorFormat = VK_FORMAT_R16G16B16A16_SFLOAT
-                },
-                GraphicsPassDesc {
                     .pass        = blitPass,
                     .name        = "Blit",
                     .vs          = MakeStageSource<ShaderStage::Vertex>(Resource::Paths::BlitVS, Resource::GetShaderProgram(Blit).vertex, "VSMain"),
@@ -337,7 +315,7 @@ auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, Error> {
         .and_then([&]() -> std::expected<void, Error> {
             return RegisterAndBuild(
                 this, "Bloom", [this]() -> std::expected<void, Error> { return BuildBloomPipelines(); },
-                {Resource::Paths::BloomThresholdVS, Resource::Paths::BloomThresholdPS, Resource::Paths::BloomBlurVS, Resource::Paths::BloomBlurPS}
+                {Resource::Paths::BloomThresholdCS, Resource::Paths::BloomDownCS, Resource::Paths::BloomUpCS}
             );
         })
         .and_then([&]() -> std::expected<void, Error> {

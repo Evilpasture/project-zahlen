@@ -277,7 +277,7 @@ void Draw3DParticles(const FrameRecorder& recorder) noexcept {
     }
 }
 
-void Draw3DParticleShadows(const FrameRecorder& recorder, uint32_t cascadeIndex) noexcept {
+void Draw3DParticleShadows(const FrameRecorder& recorder) noexcept {
     auto& ctx = recorder.ctx;
     if (!ctx.meshParticleShadowPipeline.Valid() || ctx.queues.meshParticleQueue.empty()) {
         return;
@@ -311,7 +311,7 @@ void Draw3DParticleShadows(const FrameRecorder& recorder, uint32_t cascadeIndex)
             .metallic           = 0.0f,
             .alphaCutoff        = gpuMat->alphaCutoff,
             .alphaMode          = gpuMat->alphaMode,
-            .cascadeIndex       = cascadeIndex
+            .cascadeIndex       = 0 // Legacy padding slot; the shader selects the cascade from ViewIndex.
         };
         std::memcpy(rpc.baseColorFactor, gpuMat->baseColorFactor, sizeof(float) * 4);
 
@@ -643,9 +643,11 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
     auto* indirectCmdsBase = static_cast<VkDrawIndirectCommand*>(mapped.data);
 
     std::array<uint32_t, 8> passWriteOffsets {};
-    for (uint32_t c = 0; c < RenderContext::Impl::NUM_CASCADES; ++c) {
-        passWriteOffsets[c] = c * kGpuCullingMaxInstances;
-    }
+    // Slot 0: the multiview cascade draw list. All four cascades render from
+    // ONE list now -- a mesh is listed once if ANY cascade intersects it, and
+    // each view (cascade) clips it in the vertex stage against its own
+    // light-space matrix. Slots 4..7 stay per-punctual-light.
+    passWriteOffsets[0] = 0;
     for (uint32_t l = 0; l < RenderContext::Impl::MAX_PUNCTUAL_LIGHTS; ++l) {
         passWriteOffsets[4 + l] = (4 + l) * kGpuCullingMaxInstances;
     }
@@ -674,13 +676,20 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
         JPH::Vec3 meshPos     = drawCmd.instanceData.world.GetTranslation();
         float     radius      = drawCmd.instanceData.cullRadius;
 
-        // Cascade Culling: Only assign to cascades that geometrically intersect the mesh!
+        // Cascade Culling: emit the mesh once if ANY cascade geometrically
+        // intersects it. The multiview pass re-tests per view in clip space,
+        // so this only decides which meshes enter the shared cascade list.
+        bool inAnyCascade = false;
         for (uint32_t c = 0; c < RenderContext::Impl::NUM_CASCADES; ++c) {
             if (cascadeFrustums[c].IsSphereVisible(meshPos, radius)) {
-                uint32_t writeIdx          = passWriteOffsets[c] + passDrawCounts[c];
-                indirectCmdsBase[writeIdx] = {.vertexCount = vertexCount, .instanceCount = 1, .firstVertex = 0, .firstInstance = i};
-                passDrawCounts[c]++;
+                inAnyCascade = true;
+                break;
             }
+        }
+        if (inAnyCascade) {
+            uint32_t writeIdx          = passWriteOffsets[0] + passDrawCounts[0];
+            indirectCmdsBase[writeIdx] = {.vertexCount = vertexCount, .instanceCount = 1, .firstVertex = 0, .firstInstance = i};
+            passDrawCounts[0]++;
         }
 
         // Punctual light logic
@@ -706,82 +715,86 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
     {
         bool hasMeshParticles = !ctx.queues.meshParticleQueue.empty();
 
-        const bool useMeshShadowPath = ctx.MeshShadingActive() && ctx.shadowMeshPipeline.Valid();
+        const bool useMeshShadowPath =
+            ctx.MeshShadingActive() && ctx.MultiviewMeshShadingEnabled() && ctx.shadowMeshPipeline.Valid();
 
-        for (uint32_t c = 0; c < RenderContext::Impl::NUM_CASCADES; ++c) {
-            uint32_t csmDrawCount = passDrawCounts[c];
+        uint32_t csmDrawCount = passDrawCounts[0];
 
-            // Render exclusively to this cascade's slice/layer
-            Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> cascadeLayerImage = {
-                .handle = ctx.graphResources.shadowMap.image.Handle(),
-                .view   = ctx.shadowCascadeViews[c].Get(),
-                .extent = {.width = ctx.graphResources.shadowMap.extent.width, .height = ctx.graphResources.shadowMap.extent.height, .depth = 1},
-                .aspect = VK_IMAGE_ASPECT_DEPTH_BIT
-            };
+        // ONE layered render pass for all four cascades: Vulkan multiview
+        // (viewMask 0x0F) fans every draw out to the shadow map's four array
+        // layers and hands ViewIndex to the shaders, replacing four sequential
+        // Vk::DynamicPass instances (four render-target switches, four clears,
+        // four begin/end cycles) with a single one.
+        Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> shadowMapArrayImage = {
+            .handle = ctx.graphResources.shadowMap.image.Handle(),
+            .view   = ctx.graphResources.shadowMap.view.Get(),
+            .extent = {.width = ctx.graphResources.shadowMap.extent.width, .height = ctx.graphResources.shadowMap.extent.height, .depth = 1},
+            .aspect = VK_IMAGE_ASPECT_DEPTH_BIT
+        };
 
-            Vk::DynamicPass(cascadeLayerImage.extent)
-                .AddDepth(cascadeLayerImage, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kShadowClearDepth)
-                .Execute(cmd, [&]() {
-                    // VK_EXT_mesh_shader: VkDrawMeshTasksIndirectCommandEXT has
-                    // no firstInstance, so the instance id can no longer ride
-                    // along in the indirect record. The cascade visibility list
-                    // was just written to a host-visible buffer above, so the
-                    // mesh path simply replays it as direct dispatches -- the
-                    // per-cluster culling that matters now happens in the task
-                    // shader against lightSpaceMatrices[c].
-                    const bool useMeshShadows = useMeshShadowPath && csmDrawCount > 0;
+        Vk::DynamicPass(shadowMapArrayImage.extent)
+            .ViewMask(kCascadeViewMask)
+            .AddDepth(shadowMapArrayImage, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kShadowClearDepth)
+            .Execute(cmd, [&]() {
+                // VK_EXT_mesh_shader: VkDrawMeshTasksIndirectCommandEXT has
+                // no firstInstance, so the instance id can no longer ride
+                // along in the indirect record. The cascade visibility list
+                // was just written to a host-visible buffer above, so the
+                // mesh path simply replays it as direct dispatches -- the
+                // per-cluster culling that matters now happens in the task
+                // shader against lightSpaceMatrices[ViewIndex].
+                const bool useMeshShadows = useMeshShadowPath && csmDrawCount > 0;
 
-                    if (useMeshShadows) {
-                        for (uint32_t d = 0; d < csmDrawCount; ++d) {
-                            const uint32_t instanceIdx = indirectCmdsBase[passWriteOffsets[c] + d].firstInstance;
-                            if (instanceIdx >= ctx.queues.drawQueue.size()) {
-                                continue;
-                            }
-                            const auto& shadowDraw = ctx.queues.drawQueue[instanceIdx];
-                            if (shadowDraw.instanceData.meshletCount == 0) {
-                                // Skinned / non-meshletized geometry: one vertex draw.
-                                recorder.encoder.DrawInstanced(
-                                    {.pipeline      = ctx.shadowPipeline.Get(),
-                                     .layout        = ctx.shadowPipelineLayout,
-                                     .heap          = true,
-                                     .vertexCount   = indirectCmdsBase[passWriteOffsets[c] + d].vertexCount,
-                                     .instanceCount = 1,
-                                     .firstVertex   = 0,
-                                     .firstInstance = instanceIdx},
-                                    ObjectConstants {.instanceId = instanceIdx, .isShadowPass = 1 + c},
-                                    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
-                                );
-                                continue;
-                            }
-
-                            recorder.encoder.DrawMeshTasks(
-                                {.pipeline    = ctx.shadowMeshPipeline.Get(),
-                                 .layout      = ctx.shadowPipelineLayout,
-                                 .heap        = true,
-                                 .groupCountX = TaskGroupCount(shadowDraw.instanceData.meshletCount),
-                                 .groupCountY = 1,
-                                 .groupCountZ = 1},
-                                ObjectConstants {.instanceId = instanceIdx, .isShadowPass = 1 + c}
-                            );
+                if (useMeshShadows) {
+                    for (uint32_t d = 0; d < csmDrawCount; ++d) {
+                        const uint32_t instanceIdx = indirectCmdsBase[passWriteOffsets[0] + d].firstInstance;
+                        if (instanceIdx >= ctx.queues.drawQueue.size()) {
+                            continue;
                         }
-                    } else if (csmDrawCount > 0) {
-                        recorder.encoder.DrawIndirect(
-                            {.pipeline       = ctx.shadowPipeline.Get(),
-                             .layout         = ctx.shadowPipelineLayout,
-                             .heap           = true,
-                             .argumentBuffer = ctx.frames.shadowIndirectBuffers->Handle(),
-                             .offset         = Vk::DrawIndirectState::OffsetForIndex(passWriteOffsets[c]),
-                             .drawCount      = csmDrawCount},
-                            ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 1 + c}, // Map: 1 -> Cas0, 2 -> Cas1, etc.
-                            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+                        const auto& shadowDraw = ctx.queues.drawQueue[instanceIdx];
+                        if (shadowDraw.instanceData.meshletCount == 0) {
+                            // Skinned / non-meshletized geometry: one vertex draw.
+                            recorder.encoder.DrawInstanced(
+                                {.pipeline      = ctx.shadowPipeline.Get(),
+                                 .layout        = ctx.shadowPipelineLayout,
+                                 .heap          = true,
+                                 .vertexCount   = indirectCmdsBase[passWriteOffsets[0] + d].vertexCount,
+                                 .instanceCount = 1,
+                                 .firstVertex   = 0,
+                                 .firstInstance = instanceIdx},
+                                ObjectConstants {.instanceId = instanceIdx, .isShadowPass = 1},
+                                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+                            );
+                            continue;
+                        }
+
+                        recorder.encoder.DrawMeshTasks(
+                            {.pipeline    = ctx.shadowMeshPipeline.Get(),
+                             .layout      = ctx.shadowPipelineLayout,
+                             .heap        = true,
+                             .groupCountX = TaskGroupCount(shadowDraw.instanceData.meshletCount),
+                             .groupCountY = 1,
+                             .groupCountZ = 1},
+                            ObjectConstants {.instanceId = instanceIdx, .isShadowPass = 1}
                         );
                     }
+                } else if (csmDrawCount > 0) {
+                    recorder.encoder.DrawIndirect(
+                        {.pipeline       = ctx.shadowPipeline.Get(),
+                         .layout         = ctx.shadowPipelineLayout,
+                         .heap           = true,
+                         .argumentBuffer = ctx.frames.shadowIndirectBuffers->Handle(),
+                         .offset         = Vk::DrawIndirectState::OffsetForIndex(passWriteOffsets[0]),
+                         .drawCount      = csmDrawCount},
+                        ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 1}, // Cascade index comes from ViewIndex.
+                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+                    );
+                }
 
-                    if (hasMeshParticles) {
-                        Draw3DParticleShadows(recorder, c);
-                    }
-                });
-        }
+                if (hasMeshParticles) {
+                    Draw3DParticleShadows(recorder);
+                }
+            });
     }
 
     if (ctx.punctualShadowPipeline.Valid() && !ctx.punctualShadowViews.empty()) {

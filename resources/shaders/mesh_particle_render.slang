@@ -123,6 +123,14 @@ VSOutput VSMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID, uint
     uint cascadeIndex = clamp(viewId, 0u, 3u);
     output.shadowPos  = mul(scene.frame.lightSpaceMatrices[cascadeIndex], float4(worldPos, 1.0f));
 
+#ifdef SHADOW_PASS
+    // Depth-only cascade variant: rasterize at the light-space position of the
+    // view being rendered. The camera-space output.pos above is meaningless
+    // for the shadow map, and the multiview cascade pass (viewMask 0x0F)
+    // implicitly writes each view into its own array layer.
+    output.pos = output.shadowPos;
+#endif
+
     if (mp_pc.attrAddress != 0) {
         VertexAttributes* attributes        = (VertexAttributes*) mp_pc.attrAddress;
         VertexAttributes attributesAtVertex = attributes[actualVertexId];

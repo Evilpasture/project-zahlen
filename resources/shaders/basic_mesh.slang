@@ -26,6 +26,13 @@ import common;
 void MeshMain(
     uint gtid: SV_GroupIndex,
     uint3 gid: SV_GroupID,
+#ifdef ZHLN_PASS_SHADOW
+    // Only the shadow twin is compiled with -DZHLN_PASS_SHADOW. Reading
+    // SV_ViewID in a mesh stage requires the multiviewMeshShader feature, and
+    // the shared non-shadow variants must stay buildable on devices without
+    // it, so the view index is declared only in the shadow compilation.
+    uint viewId: SV_ViewID,
+#endif
     in payload MeshletTaskPayload payload,
     out vertices SceneGeometryOutput outVertices[ZHLN_MESHLET_MAX_VERTICES],
     out indices uint3 outTriangles[ZHLN_MESHLET_MAX_TRIANGLES]
@@ -113,7 +120,15 @@ void MeshMain(
         float alphaCutoff      = inst.alphaCutoff;
 
         if (obj.isShadowPass != 0) {
-            uint cascadeIndex = obj.isShadowPass - 1;
+#ifdef ZHLN_PASS_SHADOW
+            // Multiview cascades: ViewIndex names the cascade/layer (the mesh
+            // shader runs once per view under viewMask 0x0F).
+            uint cascadeIndex = min(viewId, 3u);
+#else
+            // Dead code in the non-shadow variants (isShadowPass is never set
+            // outside the shadow pass); cascade 0 keeps the branch buildable.
+            uint cascadeIndex = 0;
+#endif
 
             output.pos             = mul(scene.frame.lightSpaceMatrices[cascadeIndex], worldPos);
             output.uv              = localUV;

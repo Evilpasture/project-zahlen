@@ -281,23 +281,9 @@ struct PassFactory {
         );
     }
 
-    [[nodiscard]] auto MakeAmbientPass() const noexcept {
-        return Vk::MakePass<"Ambient", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>, Vk::ColorWrite<Res_Ambient>>(
-            [this](auto& ctx) noexcept {
-                self.ambientPass.WriteHeap(
-                    self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor), self.defaultSampler,
-                    Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget),
-                    Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer), self.pointSampler,
-                    self.frames.frameUniformBuffers[fIdx]
-                );
-                self.ambientPass.ExecuteHeap(self.ctx, ctx.Cmd(), pc, fIdx);
-            }
-        );
-    }
-
     [[nodiscard]] auto MakeLightingPass() const noexcept {
         return Vk::MakePass<
-            "Lighting", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_Ambient>,
+            "Lighting", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>,
             Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ColorWrite<Res_Lighting>>([this](auto& ctx) noexcept {
             const auto ltcMatHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
                 .handle   = self.ltcMatImage.Handle(),
@@ -337,7 +323,7 @@ struct PassFactory {
                 Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer), self.frames.lightStorageBuffers[fIdx],
                 self.frames.frameUniformBuffers[fIdx], Vk::Assume<Vk::ShaderRead<Res_ShadowMap>>(self.graphResources.shadowMap), self.shadowSampler, ltcMatHeap,
                 ltcAmpHeap, self.clampSampler, self.frames.clusterGridBuffers[fIdx], self.frames.lightIndexListBuffers[fIdx],
-                Vk::Assume<Vk::ShaderRead<Res_Ambient>>(self.graphResources.ambientTarget), self.pointSampler, atlasCubeHeap, atlas2DHeap,
+                self.pointSampler, atlasCubeHeap, atlas2DHeap,
                 Vk::AsAddressWrite {
                     .address = (self.rtCtx.Valid() && self.frames.tlas.Current() != VK_NULL_HANDLE) ?
                                    self.rtCtx.GetAccelerationStructureAddress(self.frames.tlas.Current()) :
@@ -450,52 +436,110 @@ struct PassFactory {
         );
     }
 
-    [[nodiscard]] auto MakeBloomThresholdPass() const noexcept {
-        const auto& inputColor = self.graphResources.hdrSceneColor;
-        return Vk::MakePass<"BloomThreshold", Vk::ShaderRead<Res_HdrSceneColor>, Vk::ColorWrite<Res_BloomThresh>>([this, &inputColor](auto& ctx) noexcept {
-            self.bloomThresholdPass.WriteHeap(self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor), self.defaultSampler);
-            self.bloomThresholdPass.ExecuteHeap(self.ctx, ctx.Cmd(), fIdx);
+    [[nodiscard]] auto MakeBloomPass() const noexcept {
+        return Vk::MakePass<
+            "BloomKawase", Vk::ComputeReadGeneral<Res_HdrSceneColor>, Vk::ComputeWrite<Res_BloomThresh>, Vk::ComputeWrite<Res_BloomDown1>,
+            Vk::ComputeWrite<Res_BloomDown2>, Vk::ComputeWrite<Res_BloomDown3>, Vk::ComputeWrite<Res_BloomUp2>, Vk::ComputeWrite<Res_BloomUp1>,
+            Vk::ComputeWrite<Res_BloomFinal>>([this](VkCommandBuffer c) noexcept {
+            self.BindHeapsAndPushFrame(c);
+
+            const auto& heap = self.heapManager;
+
+            // Everything stays in GENERAL layout for the whole chain: each
+            // level is written by an imageStore and re-read as a sampled image
+            // by the next dispatch, so only in-pass compute->compute barriers
+            // separate the dispatches -- no render pass boundaries, no layout
+            // ping-pong.
+            const auto srcHdr = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.hdrSceneColor);
+            const auto thresh = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.bloomThresholdTarget);
+            const auto down1  = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.bloomDown1);
+            const auto down2  = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.bloomDown2);
+            const auto down3  = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.bloomDown3);
+            const auto up2    = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.bloomUp2);
+            const auto up1    = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.bloomUp1);
+            const auto bloomFinal = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.bloomFinalTarget);
+
+            const auto KawaseBarrier = [&c]() noexcept {
+                Vk::MemoryBarrier(
+                    c, {.src_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                        .src_access = VK_ACCESS_2_SHADER_WRITE_BIT,
+                        .dst_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                        .dst_access = VK_ACCESS_2_SHADER_READ_BIT}
+                );
+            };
+
+            const auto Dispatch = [&](Vk::ComputePass& pass, const Vk::HeapPassBindings& bindings, const auto& dst, const auto& src, int mode) noexcept {
+                heap.WriteBindings(
+                    self.ctx, bindings, fIdx, Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(src), self.defaultSampler,
+                    Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(dst)
+                );
+                pass.DispatchHeapIndexedThreads(
+                    self.ctx, c, fIdx, dst.extent.width, dst.extent.height, 1,
+                    RenderContext::Impl::KawasePushConstants {
+                        .mode      = mode,
+                        .rcpWidth  = 1.0f / static_cast<float>(src.extent.width),
+                        .rcpHeight = 1.0f / static_cast<float>(src.extent.height),
+                        .padding   = 0.0f
+                    }
+                );
+                KawaseBarrier();
+            };
+
+            // 0. Bright pass: HDR scene color -> half-res threshold target.
+            heap.WriteBindings(self.ctx, self.bloomThresholdHeapBindings, fIdx, srcHdr, self.defaultSampler, thresh);
+            self.bloomThresholdCS.DispatchHeapIndexedThreads(
+                self.ctx, c, fIdx, thresh.extent.width, thresh.extent.height, 1,
+                RenderContext::Impl::KawasePushConstants {
+                    .mode = 0,
+                    .rcpWidth  = 1.0f / static_cast<float>(self.graphResources.hdrSceneColor.extent.width),
+                    .rcpHeight = 1.0f / static_cast<float>(self.graphResources.hdrSceneColor.extent.height),
+                    .padding   = 0.0f
+                }
+            );
+            KawaseBarrier();
+
+            // 1-3. Downsample chain: thresh -> down1 -> down2 -> down3.
+            Dispatch(self.bloomDownCS, self.bloomDownHeapBindings, down1, thresh, 0);
+            Dispatch(self.bloomDownCS, self.bloomDownHeapBindings, down2, down1, 0);
+            Dispatch(self.bloomDownCS, self.bloomDownHeapBindings, down3, down2, 0);
+
+            // 4-6. Upsample chain with additive recombination of the same-
+            //      resolution downsample stages.
+            heap.WriteBindings(self.ctx, self.bloomUpHeapBindings, fIdx, down3, self.defaultSampler, down2, up2);
+            self.bloomUpCS.DispatchHeapIndexedThreads(
+                self.ctx, c, fIdx, up2.extent.width, up2.extent.height, 1,
+                RenderContext::Impl::KawasePushConstants {
+                    .mode      = 1,
+                    .rcpWidth  = 1.0f / static_cast<float>(down3.extent.width),
+                    .rcpHeight = 1.0f / static_cast<float>(down3.extent.height),
+                    .padding   = 0.0f
+                }
+            );
+            KawaseBarrier();
+
+            heap.WriteBindings(self.ctx, self.bloomUpHeapBindings, fIdx, up2, self.defaultSampler, down1, up1);
+            self.bloomUpCS.DispatchHeapIndexedThreads(
+                self.ctx, c, fIdx, up1.extent.width, up1.extent.height, 1,
+                RenderContext::Impl::KawasePushConstants {
+                    .mode      = 1,
+                    .rcpWidth  = 1.0f / static_cast<float>(up2.extent.width),
+                    .rcpHeight = 1.0f / static_cast<float>(up2.extent.height),
+                    .padding   = 0.0f
+                }
+            );
+            KawaseBarrier();
+
+            heap.WriteBindings(self.ctx, self.bloomUpHeapBindings, fIdx, up1, self.defaultSampler, thresh, bloomFinal);
+            self.bloomUpCS.DispatchHeapIndexedThreads(
+                self.ctx, c, fIdx, bloomFinal.extent.width, bloomFinal.extent.height, 1,
+                RenderContext::Impl::KawasePushConstants {
+                    .mode      = 1,
+                    .rcpWidth  = 1.0f / static_cast<float>(up1.extent.width),
+                    .rcpHeight = 1.0f / static_cast<float>(up1.extent.height),
+                    .padding   = 0.0f
+                }
+            );
         });
-    }
-
-    template <size_t Index>
-    [[nodiscard]] auto MakeBloomDownPass() const noexcept {
-        if constexpr (Index == 0) {
-            return Vk::MakePass<"BloomDown0", Vk::ShaderRead<Res_BloomThresh>, Vk::ColorWrite<Res_BloomDown1>>([this](auto& ctx) noexcept {
-                RunKawasePass(ctx.Cmd(), self.bloomDownPass[0], self.graphResources.bloomThresholdTarget, self.defaultSampler);
-            });
-        } else if constexpr (Index == 1) {
-            return Vk::MakePass<"BloomDown1", Vk::ShaderRead<Res_BloomDown1>, Vk::ColorWrite<Res_BloomDown2>>([this](auto& ctx) noexcept {
-                RunKawasePass(ctx.Cmd(), self.bloomDownPass[1], self.graphResources.bloomDown1, self.defaultSampler);
-            });
-        } else {
-            return Vk::MakePass<"BloomDown2", Vk::ShaderRead<Res_BloomDown2>, Vk::ColorWrite<Res_BloomDown3>>([this](auto& ctx) noexcept {
-                RunKawasePass(ctx.Cmd(), self.bloomDownPass[2], self.graphResources.bloomDown2, self.defaultSampler);
-            });
-        }
-    }
-
-    template <size_t Index>
-    [[nodiscard]] auto MakeBloomUpPass() const noexcept {
-        if constexpr (Index == 2) {
-            return Vk::MakePass<"BloomUp2", Vk::ShaderRead<Res_BloomDown3>, Vk::ShaderRead<Res_BloomDown2>, Vk::ColorWrite<Res_BloomUp2>>(
-                [this](auto& ctx) noexcept {
-                    RunKawasePass(ctx.Cmd(), self.bloomUpPass[2], self.graphResources.bloomDown3, self.defaultSampler, self.graphResources.bloomDown2);
-                }
-            );
-        } else if constexpr (Index == 1) {
-            return Vk::MakePass<"BloomUp1", Vk::ShaderRead<Res_BloomUp2>, Vk::ShaderRead<Res_BloomDown1>, Vk::ColorWrite<Res_BloomUp1>>(
-                [this](auto& ctx) noexcept {
-                    RunKawasePass(ctx.Cmd(), self.bloomUpPass[1], self.graphResources.bloomUp2, self.defaultSampler, self.graphResources.bloomDown1);
-                }
-            );
-        } else {
-            return Vk::MakePass<"BloomUp0", Vk::ShaderRead<Res_BloomUp1>, Vk::ShaderRead<Res_BloomThresh>, Vk::ColorWrite<Res_BloomFinal>>(
-                [this](auto& ctx) noexcept {
-                    RunKawasePass(ctx.Cmd(), self.bloomUpPass[0], self.graphResources.bloomUp1, self.defaultSampler, self.graphResources.bloomThresholdTarget);
-                }
-            );
-        }
     }
 
     [[nodiscard]] auto MakeDecalPass() const noexcept {
@@ -714,36 +758,6 @@ struct PassFactory {
             }
         );
     }
-
-    template <typename SrcImgT, typename PassT>
-    void RunKawasePass(VkCommandBuffer c, PassT& pass, const SrcImgT& src, const Vk::Sampler& defaultSampler) const noexcept {
-        pass.WriteHeap(
-            self.ctx, self.heapManager, fIdx, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(src), defaultSampler,
-            Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(src)
-        );
-        pass.ExecuteHeap(
-            self.ctx, c,
-            RenderContext::Impl::KawasePushConstants {
-                .mode = 0, .rcpWidth = 1.0f / static_cast<float>(src.extent.width), .rcpHeight = 1.0f / static_cast<float>(src.extent.height), .padding = 0.0f
-            },
-            fIdx
-        );
-    }
-
-    template <typename SrcImgT, typename SrcImg2T, typename PassT>
-    void RunKawasePass(VkCommandBuffer c, PassT& pass, const SrcImgT& src, const Vk::Sampler& defaultSampler, const SrcImg2T& src2) const noexcept {
-        pass.WriteHeap(
-            self.ctx, self.heapManager, fIdx, Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(src), defaultSampler,
-            Vk::AssumeLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(src2)
-        );
-        pass.ExecuteHeap(
-            self.ctx, c,
-            RenderContext::Impl::KawasePushConstants {
-                .mode = 1, .rcpWidth = 1.0f / static_cast<float>(src.extent.width), .rcpHeight = 1.0f / static_cast<float>(src.extent.height), .padding = 0.0f
-            },
-            fIdx
-        );
-    }
 };
 
 auto BuildComputeGraph(const PassFactory& factory) {
@@ -758,12 +772,10 @@ auto BuildFrameGraph(const PassFactory& factory, GetSwapchainImageT&& getSwapcha
     using enum AAMode;
 
     auto corePasses = std::tuple {factory.MakeShadowPass(),     factory.MakeHiZGeneratePass(),           factory.MakeMainPass2(),   factory.MakeDecalPass(),
-                                  factory.MakeViewmodelPass(),  factory.MakeTranslucentPrePass(),        factory.MakeAmbientPass(), factory.MakeLightingPass(),
+                                  factory.MakeViewmodelPass(),  factory.MakeTranslucentPrePass(),        factory.MakeLightingPass(),
                                   factory.MakeReflectionPass(), factory.MakeTranslucentReflectionPass(), factory.MakeForwardPass()};
 
-    auto bloomPasses = std::tuple {factory.MakeBloomThresholdPass(), factory.MakeBloomDownPass<0>(), factory.MakeBloomDownPass<1>(),
-                                   factory.MakeBloomDownPass<2>(),   factory.MakeBloomUpPass<2>(),   factory.MakeBloomUpPass<1>(),
-                                   factory.MakeBloomUpPass<0>()};
+    auto bloomPasses = std::tuple {factory.MakeBloomPass()};
 
     auto tailPasses = [&] {
         if constexpr (Mode == TAA) {

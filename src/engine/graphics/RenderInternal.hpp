@@ -218,12 +218,11 @@ using MLAALayout                  = Vk::SlangReflectedLayout;
 using SMAAEdgeLayout              = Vk::SlangReflectedLayout;
 using SMAAWeightLayout            = Vk::SlangReflectedLayout;
 using SMAABlendLayout             = Vk::SlangReflectedLayout;
-using AmbientLayout               = Vk::SlangReflectedLayout;
 using LightingLayout              = Vk::SlangReflectedLayout;
 using ReflectionLayout            = Vk::SlangReflectedLayout;
 using BlitLayout                  = Vk::SlangReflectedLayout;
-using BloomThresholdLayout        = Vk::SlangReflectedLayout;
-using KawaseLayout                = Vk::SlangReflectedLayout;
+using BloomThresholdCSLayout      = Vk::SlangReflectedLayout;
+using KawaseCSLayout              = Vk::SlangReflectedLayout;
 using VolumetricClearLayout       = Vk::SlangReflectedLayout;
 using VolumetricFogInjectLayout   = Vk::SlangReflectedLayout;
 using VolumetricLightInjectLayout = Vk::SlangReflectedLayout;
@@ -257,19 +256,12 @@ enum class Stage : uint8_t {
     VolumetricLightInject,
     VolumetricIntegrate,
     VolumetricTemporal,
-    Ambient,
     Lighting,
     Reflection,
     TransPrePass,
     TransReflection,
     Forward,
-    BloomThreshold,
-    BloomDown0,
-    BloomDown1,
-    BloomDown2,
-    BloomUp2,
-    BloomUp1,
-    BloomUp0,
+    BloomKawase,
     DecalPass,
     TAA,
     FXAA,
@@ -433,7 +425,6 @@ using Res_NormRough     = Vk::GraphImage<"NormRough", VK_FORMAT_R8G8B8A8_UNORM, 
 using Res_Depth         = Vk::GraphImage<"Depth", VK_FORMAT_D32_SFLOAT_S8_UINT, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT>;
 using Res_ShadowMap     = Vk::GraphImage<"ShadowMap", VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT>;
 using Res_ShadowAtlas   = Vk::GraphImage<"ShadowAtlas", VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT>;
-using Res_Ambient       = Vk::GraphImage<"Ambient", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_Lighting      = Vk::GraphImage<"Lighting", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_HdrSceneColor = Vk::GraphImage<"HdrSceneColor", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_BloomThresh   = Vk::GraphImage<"BloomThresh", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
@@ -493,7 +484,6 @@ struct RenderContext::Impl {
         Vk::RenderTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32> sceneColor;
         Vk::RenderTarget<VK_FORMAT_R16G16_SFLOAT>           velocityBuffer;
         Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>          normalRoughnessBuffer;
-        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     ambientTarget;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     lightingTarget;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     hdrSceneColor;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomThresholdTarget;
@@ -522,7 +512,6 @@ struct RenderContext::Impl {
             Res_SceneColor    sceneColor;
             Res_Velocity      velocityBuffer;
             Res_NormRough     normalRoughnessBuffer;
-            Res_Ambient       ambientTarget;
             Res_Lighting      lightingTarget;
             Res_HdrSceneColor hdrSceneColor;
             Res_BloomThresh   bloomThresholdTarget;
@@ -728,14 +717,20 @@ struct RenderContext::Impl {
     Vk::PostProcessPass<SMAAWeightLayout> smaaWeightPass;
     Vk::PostProcessPass<SMAABlendLayout>  smaaBlendPass;
 
-    Vk::PostProcessPass<AmbientLayout>               ambientPass;
-    Vk::PostProcessPass<LightingLayout>              lightingPass;
-    Vk::PostProcessPass<ReflectionLayout>            reflectionPass;
-    Vk::PostProcessPass<ReflectionLayout>            translucentReflectionPass;
-    Vk::PostProcessPass<BlitLayout>                  blitPass;
-    Vk::PostProcessPass<BloomThresholdLayout>        bloomThresholdPass;
-    std::array<Vk::PostProcessPass<KawaseLayout>, 3> bloomDownPass;
-    std::array<Vk::PostProcessPass<KawaseLayout>, 3> bloomUpPass;
+    Vk::PostProcessPass<LightingLayout>   lightingPass;
+    Vk::PostProcessPass<ReflectionLayout> reflectionPass;
+    Vk::PostProcessPass<ReflectionLayout> translucentReflectionPass;
+    Vk::PostProcessPass<BlitLayout>       blitPass;
+
+    // Dual Kawase bloom: one compute dispatch chain (threshold -> down x3 ->
+    // up x3) recorded inside a single frame-graph pass instead of seven raster
+    // render passes.
+    Vk::ComputePass     bloomThresholdCS;
+    Vk::ComputePass     bloomDownCS;
+    Vk::ComputePass     bloomUpCS;
+    Vk::HeapPassBindings bloomThresholdHeapBindings;
+    Vk::HeapPassBindings bloomDownHeapBindings;
+    Vk::HeapPassBindings bloomUpHeapBindings;
 
     Vk::ComputePass                                            clusterBoundsPass;
     Vk::ComputePass                                            clusterCullingPass;
@@ -767,6 +762,16 @@ struct RenderContext::Impl {
     /// True when the meshlet path should be used for scene geometry this frame.
     [[nodiscard]] bool MeshShadingActive() const noexcept {
         return ctx.MeshShadersSupported() && !Diag::DisableMeshShading();
+    }
+
+    // Reading SV_ViewID in task/mesh stages requires the multiviewMeshShader
+    // feature (unlike the vertex stage, which only needs core multiview). The
+    // multiview cascade shadow pass therefore gates its mesh path on this bit;
+    // false simply keeps cascade shadows on the vertex pipeline.
+    bool multiviewMeshShaderEnabled = false;
+
+    [[nodiscard]] bool MultiviewMeshShadingEnabled() const noexcept {
+        return multiviewMeshShaderEnabled;
     }
 
     // Encapsulated Texture Lifecycle Manager
@@ -848,6 +853,10 @@ struct RenderContext::Impl {
     Vk::SlangReflectedLayout cullingLayout; // Reflection only: drives the heap binding table
     Vk::ComputePass          hizGeneratePass;
     Vk::SlangReflectedLayout hizDescLayout; // Reflection only
+
+    Vk::SlangReflectedLayout bloomThresholdCSLayout; // Reflection only
+    Vk::SlangReflectedLayout bloomDownCSLayout;      // Reflection only
+    Vk::SlangReflectedLayout bloomUpCSLayout;        // Reflection only
 
     Vk::SlangReflectedLayout clusterCullingDescLayout; // Reflection only
     Vk::SlangReflectedLayout clusterBoundsDescLayout;  // Reflection only
@@ -1105,7 +1114,6 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<void, Error> BuildFXAAPipeline();
     [[nodiscard]] std::expected<void, Error> BuildMLAAPipeline();
     [[nodiscard]] std::expected<void, Error> BuildSMAAPipeline();
-    [[nodiscard]] std::expected<void, Error> BuildAmbientPipeline();
     [[nodiscard]] std::expected<void, Error> BuildLightingPipeline();
     [[nodiscard]] std::expected<void, Error> BuildReflectionPipelines();
     [[nodiscard]] std::expected<void, Error> BuildBlitPipeline();
@@ -1242,6 +1250,10 @@ namespace Passes {
 
 struct ShadowPass {
     static constexpr uint32_t kCubemapFaceMask  = 0x3F;
+    // One layered render pass fans every draw out to all four cascade layers
+    // (ViewIndex picks the light-space matrix and the implicit destination
+    // layer), replacing four sequential render-target switches.
+    static constexpr uint32_t kCascadeViewMask  = 0x0F;
     static constexpr float    kShadowClearDepth = 1.0f;
     void                      Execute(const FrameRecorder& recorder) const noexcept;
 };

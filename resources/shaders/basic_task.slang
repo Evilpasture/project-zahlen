@@ -55,11 +55,22 @@ void TaskMain(uint gtid: SV_GroupIndex, uint3 gid: SV_GroupID) {
             float radiusWorld   = m.sphereRadius * MatrixMaxScale(world);
 
             // The shadow pass rasterises from a light, so it must cull against
-            // that cascade's matrix -- and never against the normal cone,
-            // whose orientation is relative to the camera.
+            // the cascade matrices -- and never against the normal cone,
+            // whose orientation is relative to the camera. This stage is
+            // compiled variant-independent (no SV_ViewID here), and under the
+            // multiview cascade pass each draw fans out to every cascade
+            // layer anyway: admit a meshlet when ANY cascade frustum can
+            // still see it. The shadow mesh stage picks the actual cascade
+            // matrix via its own SV_ViewID, and the fixed-function multiview
+            // fan-out discards the geometry that lands outside a layer.
             if (obj.isShadowPass != 0) {
-                uint cascadeIndex = obj.isShadowPass - 1;
-                isVisible         = SphereFrustumVisible(scene.frame.lightSpaceMatrices[cascadeIndex], sphereWorld, radiusWorld);
+                isVisible = false;
+                for (uint c = 0; c < 4; ++c) {
+                    if (SphereFrustumVisible(scene.frame.lightSpaceMatrices[c], sphereWorld, radiusWorld)) {
+                        isVisible = true;
+                        break;
+                    }
+                }
             } else {
                 float4x4 activeVP = inst.isViewmodel ? scene.frame.viewmodelViewProj : scene.frame.viewProj;
                 isVisible         = SphereFrustumVisible(activeVP, sphereWorld, radiusWorld);
