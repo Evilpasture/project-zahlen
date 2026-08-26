@@ -686,12 +686,56 @@ struct DistanceStabilitySuite {
                 for (uint32_t i = 0; i < kRingCount; ++i) {
                     const auto [cx0, cx1] = RingColumnWindow(rings[i], 0.0f, tanH, cover.width);
                     coverCounts[i]        = CountHueInColumns(cover, RingHue(i), cx0, cx1);
-                    ZHLN::Println("    [INFO] ring {} ({}): {} signature px", i, kRingDistances[i], coverCounts[i]);
+                    // Window mean RGB + raw hue-match count: distinguishes
+                    // "ring black" (sun/ambient dead) from "ring lit but
+                    // unclassified hue" (tonemap/fog shift) from "ring
+                    // absent" (culling/geometry).
+                    uint64_t wr = 0, wg = 0, wb = 0;
+                    uint32_t wn = 0;
+                    for (int y = 0; y < cover.height; ++y) {
+                        for (int x = cx0; x < cx1; ++x) {
+                            const size_t pi = (static_cast<size_t>(y) * static_cast<size_t>(cover.width) + static_cast<size_t>(x)) * 3u;
+                            wr += cover.rgb[pi + 0];
+                            wg += cover.rgb[pi + 1];
+                            wb += cover.rgb[pi + 2];
+                            ++wn;
+                        }
+                    }
+                    if (wn > 0) {
+                        ZHLN::Println("    [INFO] ring {} ({}): {} signature px, window mean rgb ({}, {}, {})",
+                                      i, kRingDistances[i], coverCounts[i],
+                                      static_cast<uint32_t>(wr / wn), static_cast<uint32_t>(wg / wn), static_cast<uint32_t>(wb / wn));
+                    } else {
+                        ZHLN::Println("    [INFO] ring {} ({}): {} signature px, window empty", i, kRingDistances[i], coverCounts[i]);
+                    }
                     if (!ZHLN::Test::ExpectTrue(coverCounts[i] >= kMinRingPixels)) {
                         allRingsVisible = false;
                     }
                 }
                 if (!allRingsVisible) {
+                    // Coarse 8x4 block-luma map of the failing frame so the
+                    // log alone shows where light ended up.
+                    constexpr int kBlocksX = 8, kBlocksY = 4;
+                    for (int by = 0; by < kBlocksY; ++by) {
+                        std::string row = "    [INFO] luma map row " + std::to_string(by) + ":";
+                        for (int bx = 0; bx < kBlocksX; ++bx) {
+                            const int x0b = bx * cover.width / kBlocksX;
+                            const int x1b = (bx + 1) * cover.width / kBlocksX;
+                            const int y0b = by * cover.height / kBlocksY;
+                            const int y1b = (by + 1) * cover.height / kBlocksY;
+                            uint64_t sum  = 0;
+                            uint32_t n    = 0;
+                            for (int y = y0b; y < y1b; ++y) {
+                                for (int x = x0b; x < x1b; ++x) {
+                                    const size_t pi = (static_cast<size_t>(y) * static_cast<size_t>(cover.width) + static_cast<size_t>(x)) * 3u;
+                                    sum += (static_cast<uint64_t>(cover.rgb[pi + 0]) + cover.rgb[pi + 1] + cover.rgb[pi + 2]) / 3u;
+                                    ++n;
+                                }
+                            }
+                            row += " " + std::to_string(n > 0 ? static_cast<uint32_t>(sum / n) : 0u);
+                        }
+                        ZHLN::Println("{}", row);
+                    }
                     return false;
                 }
 
