@@ -122,6 +122,22 @@ constexpr std::array<float, kRingCount> kRingNdcX      = {-0.72f, -0.44f, -0.16f
 // footprint + bloom halo, narrow enough that same-hue rings never share a
 // window.
 constexpr float    kCountWindowNdc  = 0.12f;
+// --- Far-field ramp probe (large-surface shadow stability) -----------------
+// A 140 m red dielectric ramp rising away from the camera across
+// z ~ 180..330. Unlike the ring boxes (faces of a few dozen shadow-map
+// texels), a terrain-scale surface crosses thousands of texels AND the
+// ~220 m cascade seam, viewed at the grazing angle where shadow acne
+// lives. Its counting window is a fixed screen region chosen so that no
+// ring window's columns overlap it and the ramp face fills every row:
+// the hue FILL FRACTION of the window is then a direct acne metric
+// (self-shadow stripes displace classified pixels).
+constexpr int      kFarFieldX0      = 597;
+constexpr int      kFarFieldX1      = 683;
+constexpr int      kFarFieldY0      = 292;
+constexpr int      kFarFieldY1      = 324;
+constexpr uint32_t kMinFarFieldPx   = 400;
+constexpr float    kMinFarFieldFrac = 0.35f;
+
 // World size per metre of distance => constant projected footprint.
 constexpr float    kRingSizeOverDistance = 0.035f;
 constexpr float    kMinRingSize          = 0.06f;
@@ -331,6 +347,27 @@ struct RingLayout {
     uint32_t  count = 0;
     for (int y = 0; y < img.height; ++y) {
         for (int x = lo; x < hi; ++x) {
+            const size_t i = (static_cast<size_t>(y) * static_cast<size_t>(img.width) + static_cast<size_t>(x)) * 3u;
+            if (ClassifyPixel(img.rgb[i + 0], img.rgb[i + 1], img.rgb[i + 2]) == hue) {
+                ++count;
+            }
+        }
+    }
+    return count;
+}
+
+/// Counts hue pixels inside a rectangle of screen columns [x0, x1) x rows
+/// [y0, y1). Used for the far-field ramp probe, whose window is a fixed
+/// screen region (mirror-proof: the ramp is symmetric about x = 0).
+[[nodiscard]] uint32_t CountHueInRegion(const RgbImage& img, HueClass hue, int x0, int x1, int y0, int y1) {
+    if (!img.Valid()) {
+        return 0;
+    }
+    const int lox = std::max(0, x0), hix = std::min(img.width, x1);
+    const int loy = std::max(0, y0), hiy = std::min(img.height, y1);
+    uint32_t count = 0;
+    for (int y = loy; y < hiy; ++y) {
+        for (int x = lox; x < hix; ++x) {
             const size_t i = (static_cast<size_t>(y) * static_cast<size_t>(img.width) + static_cast<size_t>(x)) * 3u;
             if (ClassifyPixel(img.rgb[i + 0], img.rgb[i + 1], img.rgb[i + 2]) == hue) {
                 ++count;
@@ -579,6 +616,21 @@ struct DistanceStabilitySuite {
                 *engine, 220.0f, {0.55f, 0.55f, 0.58f, 1.0f}, ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false}
             );
 
+            // Far-field ramp probe: large red surface crossing the cascade
+            // seam at a grazing sun angle (see the constants block). Width
+            // scaled so its window avoids every ring window; matte roughness
+            // so the glossy floor streak cannot pollute its region.
+            ZHLN::CreativeWorksFactory::CreatePlane(
+                *engine, 140.0f, {0.90f, 0.10f, 0.08f, 1.0f},
+                ZHLN::CreativeWorksFactory::SpawnParams {
+                    .position      = JPH::RVec3(0.0, 0.05, 250.0),
+                    .rotation      = ZHLN::Math::EulerDegreesToQuat({24.0f, 0.0f, 0.0f}),
+                    .scale         = JPH::Vec3(0.26f, 1.0f, 1.0f),
+                    .createPhysics = false,
+                    .roughness     = 0.65f
+                }
+            );
+
             // One material per ring: alternating dielectric / metallic branches
             // of the PBR model, all hue-distinct after shading.
             struct RingMaterial {
@@ -769,6 +821,32 @@ struct DistanceStabilitySuite {
                               (mirroredOnly > 0) ? "mirrored" : "home", homeOnly, mirroredOnly,
                               static_cast<int>(kRingCount) - homeOnly - mirroredOnly);
 
+                // Far-field ramp: coverage + fill fraction (acne metric).
+                const uint32_t fieldRegionPx = static_cast<uint32_t>((kFarFieldX1 - kFarFieldX0) * (kFarFieldY1 - kFarFieldY0));
+                const uint32_t fieldCount    = CountHueInRegion(cover, HueClass::Red, kFarFieldX0, kFarFieldX1, kFarFieldY0, kFarFieldY1);
+                {
+                    uint64_t fr = 0, fg = 0, fb = 0;
+                    uint32_t fn = 0;
+                    for (int y = kFarFieldY0; y < kFarFieldY1; ++y) {
+                        for (int x = kFarFieldX0; x < kFarFieldX1; ++x) {
+                            const size_t pi = (static_cast<size_t>(y) * static_cast<size_t>(cover.width) + static_cast<size_t>(x)) * 3u;
+                            fr += cover.rgb[pi + 0];
+                            fg += cover.rgb[pi + 1];
+                            fb += cover.rgb[pi + 2];
+                            ++fn;
+                        }
+                    }
+                    ZHLN::Println("    [INFO] far-field ramp: {} signature px / {} region px (frac {:.3f}), mean rgb ({}, {}, {})",
+                                  fieldCount, fieldRegionPx,
+                                  fn > 0 ? static_cast<double>(fieldCount) / fn : 0.0,
+                                  static_cast<uint32_t>(fn > 0 ? fr / fn : 0),
+                                  static_cast<uint32_t>(fn > 0 ? fg / fn : 0),
+                                  static_cast<uint32_t>(fn > 0 ? fb / fn : 0));
+                }
+                if (!ZHLN::Test::ExpectTrue(fieldCount >= kMinFarFieldPx)) {
+                    return false;
+                }
+
                 // ---------------- Phase B: static temporal stability --------
                 failedPhase = "static";
                 // Repeat-capture control: two captures of the SAME frame give
@@ -782,6 +860,8 @@ struct DistanceStabilitySuite {
 
                 constexpr uint32_t             kStaticFrames = 6;
                 std::array<std::vector<double>, kRingCount> ringSeries;
+                std::vector<double>               fieldSeries;
+                std::vector<double>               fieldFracSeries;
                 std::vector<double>               litSeries;
                 std::vector<double>               lumaSeries;
                 std::vector<FrameDiff>            temporalDiffs;
@@ -799,6 +879,11 @@ struct DistanceStabilitySuite {
                     for (uint32_t i = 0; i < kRingCount; ++i) {
                         const auto [sx0, sx1]  = RingColumnWindow(rings[i], 0.0f, tanH, frame.width, mirrorSign);
                         ringSeries[i].push_back(static_cast<double>(CountHueInColumns(frame, RingHue(i), sx0, sx1)));
+                    }
+                    {
+                        const double fc = static_cast<double>(CountHueInRegion(frame, HueClass::Red, kFarFieldX0, kFarFieldX1, kFarFieldY0, kFarFieldY1));
+                        fieldSeries.push_back(fc);
+                        fieldFracSeries.push_back(fc / static_cast<double>((kFarFieldX1 - kFarFieldX0) * (kFarFieldY1 - kFarFieldY0)));
                     }
                     if (prev.Valid()) {
                         temporalDiffs.push_back(CompareFrames(prev, frame));
@@ -837,11 +922,17 @@ struct DistanceStabilitySuite {
                 // Thresholds mirror the lighting suite's static flicker gate:
                 // generous for dither/ACES rounding, but a light/cluster/cull
                 // pop on any ring moves far more.
-                const bool stableRings = ZHLN::Test::ExpectTrue(worstRingCV < 0.30);
-                const bool stableLit   = ZHLN::Test::ExpectTrue(litCV < 0.03);
-                const bool stableLuma  = ZHLN::Test::ExpectTrue(lumaCV < 0.01);
-                const bool noPixelPop  = ZHLN::Test::ExpectTrue(worstFrac32 < 0.01);
-                if (!stableRings || !stableLit || !stableLuma || !noPixelPop) {
+                const double fieldCV   = CoefficientOfVariation(fieldSeries);
+                const double fieldFrac = Mean(fieldFracSeries);
+                ZHLN::Println("    [INFO] static far-field: CV {:.4f}, fill fraction {:.3f}", fieldCV, fieldFrac);
+
+                const bool stableRings  = ZHLN::Test::ExpectTrue(worstRingCV < 0.30);
+                const bool stableField  = ZHLN::Test::ExpectTrue(fieldCV < 0.30);
+                const bool filledField  = ZHLN::Test::ExpectTrue(fieldFrac >= kMinFarFieldFrac);
+                const bool stableLit    = ZHLN::Test::ExpectTrue(litCV < 0.03);
+                const bool stableLuma   = ZHLN::Test::ExpectTrue(lumaCV < 0.01);
+                const bool noPixelPop   = ZHLN::Test::ExpectTrue(worstFrac32 < 0.01);
+                if (!stableRings || !stableField || !filledField || !stableLit || !stableLuma || !noPixelPop) {
                     return false;
                 }
 
@@ -908,6 +999,13 @@ struct DistanceStabilitySuite {
                             popped = true;
                         }
                     }
+                    {
+                        const uint32_t fieldCount = CountHueInRegion(frame, HueClass::Red, kFarFieldX0, kFarFieldX1, kFarFieldY0, kFarFieldY1);
+                        if (!ZHLN::Test::ExpectTrue(fieldCount >= 2)) {
+                            ZHLN::Println("    [FAIL] sweep frame {}: far-field ramp collapsed to {} px", f, fieldCount);
+                            popped = true;
+                        }
+                    }
                 }
                 if (popped) {
                     return false;
@@ -922,6 +1020,7 @@ struct DistanceStabilitySuite {
                 RgbImage           parityPrev;
                 double             parityWorstFrac32 = 0.0;
                 std::array<std::vector<double>, kRingCount> paritySeries;
+                std::vector<double>                          parityFieldSeries;
                 for (uint32_t f = 0; f < kParityFrames; ++f) {
                     TickFrames(eng, 1);
                     const RgbImage frame = Capture(eng, "headless_distance_parity_f" + std::to_string(f) + ".ppm");
@@ -932,6 +1031,7 @@ struct DistanceStabilitySuite {
                         const auto [px0, px1]  = RingColumnWindow(rings[i], 0.0f, tanH, frame.width, mirrorSign);
                         paritySeries[i].push_back(static_cast<double>(CountHueInColumns(frame, RingHue(i), px0, px1)));
                     }
+                    parityFieldSeries.push_back(static_cast<double>(CountHueInRegion(frame, HueClass::Red, kFarFieldX0, kFarFieldX1, kFarFieldY0, kFarFieldY1)));
                     if (parityPrev.Valid()) {
                         parityWorstFrac32 = std::max(parityWorstFrac32, CompareFrames(parityPrev, frame).frac32);
                     }
@@ -946,11 +1046,13 @@ struct DistanceStabilitySuite {
                     }
                 }
 
-                ZHLN::Println("    [INFO] parity: worst ring CV {:.4f}, |d|>32 frac {:.6f}", parityWorstRingCV, parityWorstFrac32);
+                const double parityFieldCV = CoefficientOfVariation(parityFieldSeries);
+                ZHLN::Println("    [INFO] parity: worst ring CV {:.4f}, far-field CV {:.4f}, |d|>32 frac {:.6f}", parityWorstRingCV, parityFieldCV, parityWorstFrac32);
 
                 const bool parityStable = ZHLN::Test::ExpectTrue(parityWorstRingCV < 0.30);
+                const bool parityField  = ZHLN::Test::ExpectTrue(parityFieldCV < 0.30);
                 const bool parityPixels = ZHLN::Test::ExpectTrue(parityWorstFrac32 < 0.01);
-                return parityStable && parityPixels;
+                return parityStable && parityField && parityPixels;
             },
             &validationRaised
         );
@@ -978,7 +1080,7 @@ struct DistanceStabilitySuite {
             return std::unexpected(DistanceStabilityTestError::DeviceLostDuringTest);
         }
 
-        ZHLN::Println("    [ PASS ] PBR surfaces stable at 3 m .. 96 m (static + sweep + parity)");
+        ZHLN::Println("    [ PASS ] PBR surfaces stable at 3 m .. 384 m + far-field ramp (static + sweep + parity)");
         return {};
     }
 
