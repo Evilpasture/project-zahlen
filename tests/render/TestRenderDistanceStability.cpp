@@ -537,13 +537,17 @@ struct DistanceStabilitySuite {
                 HueClass     hue;
                 const char*  name;
             };
+            // Metallic rings use rough >= 0.5: a metal shades ONLY specular,
+            // and a tight low-roughness lobe mirrors a mostly-dark scene,
+            // leaving the visible face below the signature floor. A broad
+            // lobe spreads the sun's albedo-tinted gloss across the face.
             static constexpr std::array<RingMaterial, kRingCount> kMaterials = {{
                 {{0.90f, 0.08f, 0.06f, 1.0f}, 0.0f, 0.65f, HueClass::Red,     "red@3m"},
-                {{0.10f, 0.85f, 0.08f, 1.0f}, 1.0f, 0.25f, HueClass::Green,   "green@6m"},
+                {{0.10f, 0.85f, 0.08f, 1.0f}, 1.0f, 0.55f, HueClass::Green,   "green@6m"},
                 {{0.10f, 0.12f, 0.90f, 1.0f}, 0.0f, 0.70f, HueClass::Blue,    "blue@12m"},
-                {{0.95f, 0.90f, 0.12f, 1.0f}, 1.0f, 0.35f, HueClass::Yellow,  "yellow@24m"},
+                {{0.95f, 0.90f, 0.12f, 1.0f}, 1.0f, 0.50f, HueClass::Yellow,  "yellow@24m"},
                 {{0.10f, 0.90f, 0.95f, 1.0f}, 0.0f, 0.60f, HueClass::Cyan,    "cyan@48m"},
-                {{0.90f, 0.10f, 0.90f, 1.0f}, 1.0f, 0.30f, HueClass::Magenta, "magenta@96m"},
+                {{0.90f, 0.10f, 0.90f, 1.0f}, 1.0f, 0.55f, HueClass::Magenta, "magenta@96m"},
             }};
 
             const auto rings = BuildRingLayout();
@@ -594,6 +598,7 @@ struct DistanceStabilitySuite {
                 const ZHLN::Entity e = reg.Create();
                 reg.Add(e, ZHLN::Components::TransformComponent {.position = pos}, ZHLN::Components::LightComponent {.type = ZHLN::LightType::Point, .color = color, .intensity = intensity, .range = range});
             };
+            addPointLight(JPH::Vec3(rings[1].x, 3.0f, rings[1].distance - 3.5f), JPH::Vec3(1.0f, 1.0f, 1.0f), 700.0f, 25.0f);
             addPointLight(JPH::Vec3(rings[3].x, 4.0f, rings[3].distance - 6.0f), JPH::Vec3(1.0f, 0.9f, 0.7f), 1200.0f, 60.0f);
             addPointLight(JPH::Vec3(rings[5].x, 5.0f, rings[5].distance - 6.0f), JPH::Vec3(0.7f, 0.85f, 1.0f), 2000.0f, 80.0f);
 
