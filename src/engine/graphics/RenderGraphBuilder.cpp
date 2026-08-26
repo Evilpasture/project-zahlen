@@ -443,7 +443,7 @@ struct PassFactory {
             Vk::ComputeWrite<Res_BloomFinal>>([this](VkCommandBuffer c) noexcept {
             self.BindHeapsAndPushFrame(c);
 
-            const auto& heap = self.heapManager;
+            auto& heap = self.heapManager;
 
             // Everything stays in GENERAL layout for the whole chain: each
             // level is written by an imageStore and re-read as a sampled image
@@ -469,10 +469,7 @@ struct PassFactory {
             };
 
             const auto Dispatch = [&](Vk::ComputePass& pass, const Vk::HeapPassBindings& bindings, const auto& dst, const auto& src, int mode) noexcept {
-                heap.WriteBindings(
-                    self.ctx, bindings, fIdx, Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(src), self.defaultSampler,
-                    Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(dst)
-                );
+                heap.WriteBindings(self.ctx, bindings, fIdx, src, self.defaultSampler, dst);
                 pass.DispatchHeapIndexedThreads(
                     self.ctx, c, fIdx, dst.extent.width, dst.extent.height, 1,
                     RenderContext::Impl::KawasePushConstants {
