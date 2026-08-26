@@ -342,8 +342,11 @@ struct RingLayout {
 
 /// Screen-column window for a ring seen from camera x-position `camX`:
 /// projects the ring's lateral offset into NDC, then to pixel columns.
-[[nodiscard]] std::pair<int, int> RingColumnWindow(const RingLayout& ring, float camX, float tanH, int width) {
-    const float ndc     = (ring.x - camX) / (ring.distance * tanH);
+/// `mirror` is the observed world-x -> screen-x orientation (+1 or -1),
+/// detected once from the coverage frame; the headless pipeline renders
+/// world +x on screen LEFT, so windows must not assume either by default.
+[[nodiscard]] std::pair<int, int> RingColumnWindow(const RingLayout& ring, float camX, float tanH, int width, float mirror = 1.0f) {
+    const float ndc     = (mirror * (ring.x - camX)) / (ring.distance * tanH);
     const float centerPx = (ndc * 0.5f + 0.5f) * static_cast<float>(width);
     const float halfPx   = kCountWindowNdc * 0.5f * static_cast<float>(width);
     return {static_cast<int>(centerPx - halfPx), static_cast<int>(centerPx + halfPx)};
@@ -682,18 +685,29 @@ struct DistanceStabilitySuite {
                 }
 
                 std::array<uint32_t, kRingCount> coverCounts {};
+                int  mirrorVotes = 0; // +1: hues at planned slots; -1: mirrored
                 bool allRingsVisible = true;
                 for (uint32_t i = 0; i < kRingCount; ++i) {
-                    const auto [cx0, cx1] = RingColumnWindow(rings[i], 0.0f, tanH, cover.width);
-                    coverCounts[i]        = CountHueInColumns(cover, RingHue(i), cx0, cx1);
+                    const auto [ax0, ax1] = RingColumnWindow(rings[i], 0.0f, tanH, cover.width, +1.0f);
+                    const auto [bx0, bx1] = RingColumnWindow(rings[i], 0.0f, tanH, cover.width, -1.0f);
+                    const uint32_t homeCount     = CountHueInColumns(cover, RingHue(i), ax0, ax1);
+                    const uint32_t mirroredCount = CountHueInColumns(cover, RingHue(i), bx0, bx1);
+                    coverCounts[i] = std::max(homeCount, mirroredCount);
+                    // Orientation vote: the hue must sit at exactly one side.
+                    if (homeCount >= kMinRingPixels && mirroredCount < kMinRingPixels) {
+                        mirrorVotes += 1;
+                    } else if (mirroredCount >= kMinRingPixels && homeCount < kMinRingPixels) {
+                        mirrorVotes -= 1;
+                    }
                     // Window mean RGB + raw hue-match count: distinguishes
                     // "ring black" (sun/ambient dead) from "ring lit but
                     // unclassified hue" (tonemap/fog shift) from "ring
                     // absent" (culling/geometry).
+                    const auto [wx0, wx1] = (homeCount >= mirroredCount) ? std::pair<int, int>{ax0, ax1} : std::pair<int, int>{bx0, bx1};
                     uint64_t wr = 0, wg = 0, wb = 0;
                     uint32_t wn = 0;
                     for (int y = 0; y < cover.height; ++y) {
-                        for (int x = cx0; x < cx1; ++x) {
+                        for (int x = wx0; x < wx1; ++x) {
                             const size_t pi = (static_cast<size_t>(y) * static_cast<size_t>(cover.width) + static_cast<size_t>(x)) * 3u;
                             wr += cover.rgb[pi + 0];
                             wg += cover.rgb[pi + 1];
@@ -702,8 +716,8 @@ struct DistanceStabilitySuite {
                         }
                     }
                     if (wn > 0) {
-                        ZHLN::Println("    [INFO] ring {} ({}): {} signature px, window mean rgb ({}, {}, {})",
-                                      i, kRingDistances[i], coverCounts[i],
+                        ZHLN::Println("    [INFO] ring {} ({}): {} signature px (home {}, mirrored {}), window mean rgb ({}, {}, {})",
+                                      i, kRingDistances[i], coverCounts[i], homeCount, mirroredCount,
                                       static_cast<uint32_t>(wr / wn), static_cast<uint32_t>(wg / wn), static_cast<uint32_t>(wb / wn));
                     } else {
                         ZHLN::Println("    [INFO] ring {} ({}): {} signature px, window empty", i, kRingDistances[i], coverCounts[i]);
@@ -738,6 +752,15 @@ struct DistanceStabilitySuite {
                     }
                     return false;
                 }
+                // Every ring must agree on the world-x -> screen-x
+                // orientation; a split vote means hues are NOT consistently
+                // placed even allowing for a mirror (a real regression).
+                if (mirrorVotes != 0 && mirrorVotes != static_cast<int>(kRingCount) && mirrorVotes != -static_cast<int>(kRingCount)) {
+                    ZHLN::Println("    [FAIL] coverage: mixed slot orientation (vote {}) - ring hues are not consistently placed", mirrorVotes);
+                    return false;
+                }
+                const float mirrorSign = (mirrorVotes < 0) ? -1.0f : 1.0f;
+                ZHLN::Println("    [INFO] coverage orientation: {} (vote {})", (mirrorVotes < 0) ? "mirrored" : "home", mirrorVotes);
 
                 // ---------------- Phase B: static temporal stability --------
                 failedPhase = "static";
@@ -767,7 +790,7 @@ struct DistanceStabilitySuite {
                     litSeries.push_back(static_cast<double>(CountLitPixels(frame)));
                     lumaSeries.push_back(MeanLuma(frame));
                     for (uint32_t i = 0; i < kRingCount; ++i) {
-                        const auto [sx0, sx1]  = RingColumnWindow(rings[i], 0.0f, tanH, frame.width);
+                        const auto [sx0, sx1]  = RingColumnWindow(rings[i], 0.0f, tanH, frame.width, mirrorSign);
                         ringSeries[i].push_back(static_cast<double>(CountHueInColumns(frame, RingHue(i), sx0, sx1)));
                     }
                     if (prev.Valid()) {
@@ -853,7 +876,7 @@ struct DistanceStabilitySuite {
                         // view-space depth is the ring distance itself.
                         const float angleDeg = JPH::RadiansToDegrees(std::atan2(rings[i].x - camX, rings[i].distance));
                         inCone[i]   = std::abs(angleDeg) <= kSweepConeDeg;
-                        windows[i]  = RingColumnWindow(rings[i], camX, tanH, frame.width);
+                        windows[i]  = RingColumnWindow(rings[i], camX, tanH, frame.width, mirrorSign);
                         ambiguous[i] = false;
                     }
                     for (uint32_t i = 0; i < kRingCount; ++i) {
@@ -899,7 +922,7 @@ struct DistanceStabilitySuite {
                         return false;
                     }
                     for (uint32_t i = 0; i < kRingCount; ++i) {
-                        const auto [px0, px1]  = RingColumnWindow(rings[i], 0.0f, tanH, frame.width);
+                        const auto [px0, px1]  = RingColumnWindow(rings[i], 0.0f, tanH, frame.width, mirrorSign);
                         paritySeries[i].push_back(static_cast<double>(CountHueInColumns(frame, RingHue(i), px0, px1)));
                     }
                     if (parityPrev.Valid()) {
