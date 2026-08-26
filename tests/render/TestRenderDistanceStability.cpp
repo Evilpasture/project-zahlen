@@ -843,6 +843,23 @@ struct DistanceStabilitySuite {
                                   static_cast<uint32_t>(fn > 0 ? fg / fn : 0),
                                   static_cast<uint32_t>(fn > 0 ? fb / fn : 0));
                 }
+                // Red-hue census over a 16x8 grid: localizes the ramp (and
+                // the red ring boxes) so a misplaced probe is recalibrated
+                // from this log alone.
+                {
+                    constexpr int kGridX = 16, kGridY = 8;
+                    for (int gy = 0; gy < kGridY; ++gy) {
+                        std::string row = "    [INFO] red map row " + std::to_string(gy) + ":";
+                        for (int gx = 0; gx < kGridX; ++gx) {
+                            const int x0g = gx * cover.width / kGridX;
+                            const int x1g = (gx + 1) * cover.width / kGridX;
+                            const int y0g = gy * cover.height / kGridY;
+                            const int y1g = (gy + 1) * cover.height / kGridY;
+                            row += " " + std::to_string(CountHueInRegion(cover, HueClass::Red, x0g, x1g, y0g, y1g));
+                        }
+                        ZHLN::Println("{}", row);
+                    }
+                }
                 if (!ZHLN::Test::ExpectTrue(fieldCount >= kMinFarFieldPx)) {
                     return false;
                 }
