@@ -313,6 +313,12 @@ enum class HueClass : uint8_t { Red, Green, Blue, Yellow, Cyan, Magenta, None };
     return count;
 }
 
+struct RingLayout {
+    float distance = 0.0f;
+    float x        = 0.0f; // world lateral offset
+    float size     = 0.0f; // box edge length
+};
+
 /// Counts hue pixels inside a horizontal band of screen columns [x0, x1), so
 /// two rings sharing a hue family (the outer rings reuse near hues) never
 /// pool their counts.
@@ -460,12 +466,6 @@ template <typename SceneFn>
 // ============================================================================
 // Ring Geometry
 // ============================================================================
-
-struct RingLayout {
-    float distance = 0.0f;
-    float x        = 0.0f; // world lateral offset
-    float size     = 0.0f; // box edge length
-};
 
 /// Horizontal half-tangent of the projection; with a fixed vertical FOV and
 /// 16:9 the horizontal FOV is ~91.8 degrees (half-tan ~1.026).
