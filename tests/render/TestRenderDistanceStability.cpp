@@ -124,16 +124,20 @@ constexpr std::array<float, kRingCount> kRingNdcX      = {-0.72f, -0.44f, -0.16f
 constexpr float    kCountWindowNdc  = 0.12f;
 // --- Far-field ramp probe (large-surface shadow stability) -----------------
 // A 140 m red dielectric ramp rising away from the camera across
-// z ~ 180..330. Unlike the ring boxes (faces of a few dozen shadow-map
-// texels), a terrain-scale surface crosses thousands of texels AND the
-// ~220 m cascade seam, viewed at the grazing angle where shadow acne
-// lives. Its counting window is a fixed screen region chosen so that no
-// ring window's columns overlap it and the ramp face fills every row:
-// the hue FILL FRACTION of the window is then a direct acne metric
-// (self-shadow stripes displace classified pixels).
+// z ~ 250..314 (visible part; the rest is buried under the ground
+// plane). Unlike the ring boxes (faces of a few dozen shadow-map
+// texels), a terrain-scale surface crosses hundreds of texels AND the
+// ~220-550 m cascade span, viewed at the grazing angle where shadow
+// acne lives. Its counting window is a fixed screen region chosen so
+// that no ring window's columns overlap it and the ramp face fills
+// every row: the hue FILL FRACTION of the window is then a direct acne
+// metric (self-shadow stripes displace classified pixels). The -24
+// degree X-roll faces the normal back toward the camera - the +24
+// variant renders its backface and is culled (confirmed by the red
+// census map).
 constexpr int      kFarFieldX0      = 597;
 constexpr int      kFarFieldX1      = 683;
-constexpr int      kFarFieldY0      = 292;
+constexpr int      kFarFieldY0      = 310;
 constexpr int      kFarFieldY1      = 324;
 constexpr uint32_t kMinFarFieldPx   = 400;
 constexpr float    kMinFarFieldFrac = 0.35f;
@@ -624,8 +628,8 @@ struct DistanceStabilitySuite {
                 *engine, 140.0f, {0.90f, 0.10f, 0.08f, 1.0f},
                 ZHLN::CreativeWorksFactory::SpawnParams {
                     .position      = JPH::RVec3(0.0, 0.05, 250.0),
-                    .rotation      = ZHLN::Math::EulerDegreesToQuat({24.0f, 0.0f, 0.0f}),
-                    .scale         = JPH::Vec3(0.26f, 1.0f, 1.0f),
+                    .rotation      = ZHLN::Math::EulerDegreesToQuat({-24.0f, 0.0f, 0.0f}),
+                    .scale         = JPH::Vec3(0.34f, 1.0f, 1.0f),
                     .createPhysics = false,
                     .roughness     = 0.65f
                 }
