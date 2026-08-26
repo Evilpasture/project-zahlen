@@ -231,7 +231,20 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         if (viewDepth > frame.cascadeSplits.z)
             cascadeIndex = 3;
 
-        float texelSizeWorld  = (frame.shadowWidth * (cascadeIndex + 1)) / frame.shadowResolution;
+        // True per-cascade ortho texel size, derived from the cascade matrix
+        // itself: for an ortho projection |M * dir| for a unit world direction
+        // is 1/radius (orthonormal light rotation scaled by 1/radius), so one
+        // shadow texel spans 2*radius/resolution world units. The old
+        // shadowWidth*(cascadeIndex+1)/resolution guess was 3-6x too small on
+        // the outer cascades, starving the normal offset and letting far
+        // surfaces acne-shimmer as they slide across the per-pixel dither.
+        // Equally, |M.z2| gives NDC depth per world metre for the cascade's
+        // own [NearClip, farClip] range, replacing PCSS's hardcoded 400.
+        float4 lightBasisX     = mul(frame.lightSpaceMatrices[cascadeIndex], float4(1.0f, 0.0f, 0.0f, 0.0f));
+        float4 lightBasisZ     = mul(frame.lightSpaceMatrices[cascadeIndex], float4(0.0f, 0.0f, 1.0f, 0.0f));
+        float  ndcPerWorldX    = max(length(lightBasisX.xyz), 1e-6f);
+        float  texelSizeWorld  = 2.0f / (ndcPerWorldX * float(frame.shadowResolution));
+        float  worldDepthPerNdc = 1.0f / max(abs(lightBasisZ.z), 1e-8f);
         float normalBias      = saturate(1.0 - dot(N, L_sun)) * 1.5 + 0.2;
         float3 biasedWorldPos = worldPos + N * (normalBias * texelSizeWorld);
 
@@ -239,7 +252,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
         shadowPos.xy = shadowPos.xy * 0.5f + 0.5f * shadowPos.w;
 
-        shadow = CalculateShadowPCSS(shadowPos, N, L_sun, input.pos.xy, shadowMap, shadowSampler, pointSampler, frame.shadowResolution, cascadeIndex);
+        shadow = CalculateShadowPCSS(shadowPos, N, L_sun, input.pos.xy, shadowMap, shadowSampler, pointSampler, frame.shadowResolution, cascadeIndex, worldDepthPerNdc);
     }
 
     float D      = DistributionGGX(N, H_sun, roughness);

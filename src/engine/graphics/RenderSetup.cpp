@@ -40,18 +40,36 @@ JPH::Mat44 ComputeCascadeLightSpaceMatrix(
     };
 
     JPH::Mat44 invCamView = cam.GetViewMatrix().Inversed();
-    JPH::Vec3  center     = JPH::Vec3::sZero();
     for (auto& corner: corners) {
         corner = invCamView * corner;
-        center += corner;
     }
-    center /= 8.0f;
+
+    // Orientation-invariant fit: center the ortho on the frustum slice's
+    // midpoint and take the radius as the farthest slice corner. Both depend
+    // only on (fov, aspect, nearDist, farDist), so the ortho size is CONSTANT
+    // under rigid camera motion. The previous AABB-centroid fit changed size
+    // with camera orientation, and the 1/16 m radius quantization let every
+    // texel edge crawl by up to half a texel (7.5-88 cm texels) on each step
+    // - visible shadow-edge shimmer while moving at any distance, worst on
+    // the far cascades.
+    JPH::Vec3 nearCenter = JPH::Vec3::sZero();
+    JPH::Vec3 farCenter  = JPH::Vec3::sZero();
+    for (int i = 0; i < 4; ++i) {
+        nearCenter += corners[static_cast<size_t>(i)];
+        farCenter  += corners[4 + static_cast<size_t>(i)];
+    }
+    const JPH::Vec3 center = (nearCenter + farCenter) * 0.125f;
 
     float radius = 0.0f;
     for (const auto& corner: corners) {
         radius = std::max(radius, (corner - center).Length());
     }
     radius = std::ceil(radius * 16.0f) / 16.0f;
+    // Snap the ortho half-extent to a whole number of shadow-map texels so
+    // split/far changes cannot shift the texel lattice by a sub-texel
+    // remainder either.
+    const float invTexels = 2.0f / static_cast<float>(shadowResolution);
+    radius                = std::ceil(radius / invTexels) * invTexels;
 
     JPH::Vec3 centerLight   = lightView * center;
     float     texelsPerUnit = static_cast<float>(shadowResolution) / (radius * 2.0f);
