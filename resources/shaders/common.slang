@@ -404,72 +404,136 @@ public struct SceneGeometryVertex {
     public float4 emissiveFactor;
 };
 
-// The actual varying interface, specialised per pass.
+// The per-pass varying interfaces.
 //
-// A geometry stage output that no fragment stage reads is legal but wasteful,
-// and the validation layer reports every one of them ("SPIR-V Interface ...
-// no corresponding Input declared"). Since the three fragment shaders consume
-// three different subsets, one shared interface cannot match them all -- so
-// the interface itself is compiled per pass. The geometry stage and the
-// fragment stage of a pipeline MUST be compiled with the same defines;
-// Resource::GetSceneShaders() is what guarantees that pairing.
-public struct SceneGeometryOutput {
+// Each scene pass rasterises a different subset of the vertex payload, and a
+// pipeline's geometry and fragment stages must agree on the exact SPIR-V
+// interface (the validation layer reports every dropped output: "SPIR-V
+// Interface ... no corresponding Input declared"). Slang cannot reshape one
+// struct per configuration - generics have no partial specialization - so each
+// pass owns a plain struct with exactly the varyings its fragment stage
+// consumes. Every struct and entry point lives in this module and is
+// type-checked together on every compile; a pipeline simply compiles the entry
+// point it needs (basic.slang: VSMain/PSShadow, VSMainGBuffer/PSMain,
+// VSMainForward/PSForward), with no preprocessor anywhere. The geometry and
+// fragment stages of one pipeline must still pick the same pass;
+// Resource::GetSceneShaders() enforces that pairing on the C++ side.
+// Semantic slots carry over the numbers the old single-struct variants used,
+// so the compiled interfaces are unchanged.
+
+/// Depth-only shadow pass: enough to alpha-test the fragment, nothing else.
+public struct ShadowGeometryOutput {
     public float4 pos : SV_Position;
-
-#if !defined(ZHLN_PASS_SHADOW) && !defined(FORWARD_PASS)
-    // G-buffer only: motion vectors and the normal/tangent frame.
-    public float4 currClip : TEXCOORD0;
-    public float4 prevClip : TEXCOORD1;
-    public float3 normal : NORMAL;
-    public float4 tangent : TANGENT;
-#endif
-
     public float2 uv : TEXCOORD2;
     public float4 color : COLOR;
     public nointerpolation uint4 materialIndices : TEXCOORD4;
     public nointerpolation float4 baseColorFactor : TEXCOORD5;
     public nointerpolation float3 pbrFactors : TEXCOORD6;
-
-#if !defined(FORWARD_PASS)
-    // Alpha-mask testing: PSMain and PSShadow, but not PSForward.
     public nointerpolation uint alphaMode : TEXCOORD7;
-#endif
+}
 
-#if !defined(ZHLN_PASS_SHADOW)
-    // Emissive: PSMain and PSForward, but not the depth-only shadow pass.
+/// Deferred G-buffer pass: motion vectors, the normal/tangent frame and
+/// emissive on top of the material varyings.
+public struct GBufferGeometryOutput {
+    public float4 pos : SV_Position;
+    public float4 currClip : TEXCOORD0;
+    public float4 prevClip : TEXCOORD1;
+    public float3 normal : NORMAL;
+    public float4 tangent : TANGENT;
+    public float2 uv : TEXCOORD2;
+    public float4 color : COLOR;
+    public nointerpolation uint4 materialIndices : TEXCOORD4;
+    public nointerpolation float4 baseColorFactor : TEXCOORD5;
+    public nointerpolation float3 pbrFactors : TEXCOORD6;
+    public nointerpolation uint alphaMode : TEXCOORD7;
     public nointerpolation float4 emissiveFactor : TEXCOORD8;
-#endif
-};
+}
 
-/// Narrows the full vertex payload down to the varyings this pass actually
+/// Forward/translucent pass: emissive but no motion vectors and no normal
+/// frame (lighting comes from the transmissibility texture). No alpha mode:
+/// translucent draws blend, they do not cut out.
+public struct ForwardGeometryOutput {
+    public float4 pos : SV_Position;
+    public float2 uv : TEXCOORD2;
+    public float4 color : COLOR;
+    public nointerpolation uint4 materialIndices : TEXCOORD4;
+    public nointerpolation float4 baseColorFactor : TEXCOORD5;
+    public nointerpolation float3 pbrFactors : TEXCOORD6;
+    public nointerpolation float4 emissiveFactor : TEXCOORD8;
+}
+
+/// Narrows the full vertex payload down to the varyings a pass actually
 /// rasterises. Stores to dropped members never happen, so the geometry stage
 /// pays nothing for values the fragment stage would have discarded.
-public SceneGeometryOutput PackGeometryOutput(SceneGeometryVertex v) {
-    SceneGeometryOutput o;
-    o.pos = v.pos;
-
-#if !defined(ZHLN_PASS_SHADOW) && !defined(FORWARD_PASS)
-    o.currClip = v.currClip;
-    o.prevClip = v.prevClip;
-    o.normal   = v.normal;
-    o.tangent  = v.tangent;
-#endif
-
-    o.uv              = v.uv;
-    o.color           = v.color;
-    o.materialIndices = v.materialIndices;
-    o.baseColorFactor = v.baseColorFactor;
-    o.pbrFactors      = v.pbrFactors;
-
-#if !defined(FORWARD_PASS)
-    o.alphaMode = v.alphaMode;
-#endif
-
-#if !defined(ZHLN_PASS_SHADOW)
-    o.emissiveFactor = v.emissiveFactor;
-#endif
-
+public ShadowGeometryOutput PackShadowOutput(SceneGeometryVertex v) {
+    ShadowGeometryOutput o;
+    o.pos              = v.pos;
+    o.uv               = v.uv;
+    o.color            = v.color;
+    o.materialIndices  = v.materialIndices;
+    o.baseColorFactor  = v.baseColorFactor;
+    o.pbrFactors       = v.pbrFactors;
+    o.alphaMode        = v.alphaMode;
     return o;
+}
+
+public GBufferGeometryOutput PackGBufferOutput(SceneGeometryVertex v) {
+    GBufferGeometryOutput o;
+    o.pos              = v.pos;
+    o.currClip         = v.currClip;
+    o.prevClip         = v.prevClip;
+    o.normal           = v.normal;
+    o.tangent          = v.tangent;
+    o.uv               = v.uv;
+    o.color            = v.color;
+    o.materialIndices  = v.materialIndices;
+    o.baseColorFactor  = v.baseColorFactor;
+    o.pbrFactors       = v.pbrFactors;
+    o.alphaMode        = v.alphaMode;
+    o.emissiveFactor   = v.emissiveFactor;
+    return o;
+}
+
+public ForwardGeometryOutput PackForwardOutput(SceneGeometryVertex v) {
+    ForwardGeometryOutput o;
+    o.pos              = v.pos;
+    o.uv               = v.uv;
+    o.color            = v.color;
+    o.materialIndices  = v.materialIndices;
+    o.baseColorFactor  = v.baseColorFactor;
+    o.pbrFactors       = v.pbrFactors;
+    o.emissiveFactor   = v.emissiveFactor;
+    return o;
+}
+
+/// Static dispatch from the (shared) mesh-shader body to its pass's output
+/// struct. The mesh stage writes one varying struct per thread; the emitter
+/// carries both the struct type and its narrowing function so the mesh body
+/// stays pass-agnostic without preprocessor selection.
+public interface IScenePassOutput {
+    associatedtype Output;
+    static Output Emit(SceneGeometryVertex v, uint viewId);
+}
+
+public struct ShadowPassOutput : IScenePassOutput {
+    typealias Output = ShadowGeometryOutput;
+    public static Output Emit(SceneGeometryVertex v, uint viewId) {
+        return PackShadowOutput(v);
+    }
+}
+
+public struct GBufferPassOutput : IScenePassOutput {
+    typealias Output = GBufferGeometryOutput;
+    public static Output Emit(SceneGeometryVertex v, uint viewId) {
+        return PackGBufferOutput(v);
+    }
+}
+
+public struct ForwardPassOutput : IScenePassOutput {
+    typealias Output = ForwardGeometryOutput;
+    public static Output Emit(SceneGeometryVertex v, uint viewId) {
+        return PackForwardOutput(v);
+    }
 }
 
 /// Payload handed from the task (amplification) stage to the mesh stage.

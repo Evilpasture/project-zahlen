@@ -3,11 +3,12 @@ import common;
 import material_model;
 import pbr_helpers;
 
-// The geometry->fragment interface now lives in common.slang so the vertex path
-// (VSMain below) and the VK_EXT_mesh_shader path (basic_mesh.slang: MeshMain)
-// feed the fragment shaders in this file through one single, shared
-// declaration. The local alias keeps this file (and its diffs) unchanged.
-typealias VSOutput = SceneGeometryOutput;
+// The geometry->fragment interfaces live in common.slang: one varying struct
+// per pass (ShadowGeometryOutput / GBufferGeometryOutput /
+// ForwardGeometryOutput), so the vertex path, the VK_EXT_mesh_shader path
+// (basic_mesh.slang) and the fragment shaders below type-check against the
+// exact interface each pass rasterises - no preprocessor, no pass defines.
+// Each pass compiles its own named entry points.
 
 struct PSOutput {
     float4 color : SV_Target0;
@@ -21,9 +22,14 @@ struct PSOutput {
 // of this engine's indirect draws encode the instance slot in firstInstance
 // (see kGpuCullingSentinel handling below), so the raw Vulkan builtins are
 // required. Same argument applies to SV_VertexID/SV_VulkanVertexID.
-VSOutput VSMain(uint vertexId: SV_VulkanVertexID, uint instanceId: SV_VulkanInstanceID, uint viewId: SV_ViewID) {
-    // Filled unconditionally; PackGeometryOutput drops whatever this pass's
-    // fragment stage does not read.
+/// Shared scene-vertex payload build: index fetch, skinning, morphing and the
+/// world transform, identical for every pass. Fills everything EXCEPT the
+/// clip-space position (each pass selects its own matrix) and, when
+/// withMotion is true, the motion-vector pair. Instantiations with
+/// withMotion == false fold the previous-frame skin evaluation away entirely.
+SceneGeometryVertex BuildSceneGeometryPayload<bool withMotion>(
+    uint vertexId, uint instanceId, out float4 worldPos, out float4 activeVPPos
+) {
     SceneGeometryVertex output;
 
     uint instId       = (obj.instanceId != 4294967295u) ? obj.instanceId : instanceId;
@@ -70,7 +76,6 @@ VSOutput VSMain(uint vertexId: SV_VulkanVertexID, uint instanceId: SV_VulkanInst
         localPos.xyz += GetMorphDisplacement(actualVertexId, vertexCount, morphOffset, activeMorphCount, morphWeights);
     }
 
-    float4 worldPos;
     float3x3 world3x3        = (float3x3) inst.world;
     float4x4 worldMatrix     = inst.world;
     float4x4 prevWorldMatrix = inst.prevWorld;
@@ -86,63 +91,62 @@ VSOutput VSMain(uint vertexId: SV_VulkanVertexID, uint instanceId: SV_VulkanInst
         output.tangent.xyz = normalize(mul(world3x3, localTangent.xyz));
     }
 
-    float4 baseColorFactor = inst.baseColorFactor;
-    float4 emissiveFactor  = inst.emissiveFactor;
-    float metallicFactor   = inst.metallicFactor;
-    float roughnessFactor  = inst.roughnessFactor;
-    float alphaCutoff      = inst.alphaCutoff;
-
-    if (obj.isShadowPass != 0) {
-        // Multiview cascades: the shadow render pass fans every draw out to all
-        // four cascade layers in one dispatch (viewMask 0x0F), so the
-        // light-space matrix -- and the destination layer, implicitly -- comes
-        // from ViewIndex instead of a per-draw push constant.
-        uint cascadeIndex = min(viewId, 3u);
-
-        output.pos             = mul(scene.frame.lightSpaceMatrices[cascadeIndex], worldPos);
-        output.uv              = localUV;
-        output.baseColorFactor = baseColorFactor;
-        output.emissiveFactor  = emissiveFactor;
-        output.pbrFactors      = float3(metallicFactor, roughnessFactor, alphaCutoff);
-        output.alphaMode       = inst.alphaMode;
-        output.materialIndices = uint4(inst.albedoIndex, 0, 0, 0);
-
-        output.currClip = 0;
-        output.prevClip = 0;
-        output.normal   = 0;
-        output.tangent  = 0;
-        output.color    = localColor;
-        return PackGeometryOutput(output);
-    }
-
-    output.pos      = mul(activeVP, worldPos);
-    output.currClip = mul(activeVP, worldPos);
-
-    float4 prevWorldPos;
-    if (inst.isSkinned) {
-        prevWorldPos = mul(prevWorldMatrix, SkinPositionPrev(localPos, localJoints, weights, jointOffset));
-    } else {
-        prevWorldPos = mul(prevWorldMatrix, localPos);
-    }
-    output.prevClip = mul(scene.frame.prevUnjitteredViewProj, prevWorldPos);
-
     output.tangent.w = localTangent.w;
     output.uv        = localUV;
 
     output.color           = localColor;
     output.materialIndices = uint4(inst.albedoIndex, inst.normalIndex, inst.pbrIndex, inst.emissiveIndex);
-    output.baseColorFactor = baseColorFactor;
-    output.emissiveFactor  = emissiveFactor;
-    output.pbrFactors      = float3(metallicFactor, roughnessFactor, alphaCutoff);
+    output.baseColorFactor = inst.baseColorFactor;
+    output.emissiveFactor  = inst.emissiveFactor;
+    output.pbrFactors      = float3(inst.metallicFactor, inst.roughnessFactor, inst.alphaCutoff);
     output.alphaMode       = inst.alphaMode;
-    return PackGeometryOutput(output);
+
+    if (withMotion) {
+        float4 prevWorldPos;
+        if (inst.isSkinned) {
+            prevWorldPos = mul(prevWorldMatrix, SkinPositionPrev(localPos, localJoints, weights, jointOffset));
+        } else {
+            prevWorldPos = mul(prevWorldMatrix, localPos);
+        }
+        output.currClip = mul(activeVP, worldPos);
+        output.prevClip = mul(scene.frame.prevUnjitteredViewProj, prevWorldPos);
+    }
+
+    activeVPPos = mul(activeVP, worldPos);
+    return output;
 }
 
-// Each fragment entry point is gated to its own variant: Slang type-checks the
-// whole module, so PSMain referencing G-buffer-only members would break the
-// shadow/forward compiles even though only one entry point is requested.
-#if defined(ZHLN_PASS_SHADOW)
-void PSShadow(VSOutput input) {
+[shader("vertex")]
+ShadowGeometryOutput VSMainShadow(uint vertexId: SV_VulkanVertexID, uint instanceId: SV_VulkanInstanceID, uint viewId: SV_ViewID) {
+    float4 worldPos, activeVPPos;
+    SceneGeometryVertex p = BuildSceneGeometryPayload<false>(vertexId, instanceId, worldPos, activeVPPos);
+    // Multiview cascades: the shadow render pass fans every draw out to all
+    // four cascade layers in one dispatch (viewMask 0x0F), so the light-space
+    // matrix -- and the destination layer, implicitly -- comes from ViewIndex.
+    p.pos = mul(scene.frame.lightSpaceMatrices[min(viewId, 3u)], worldPos);
+    return PackShadowOutput(p);
+}
+
+[shader("vertex")]
+GBufferGeometryOutput VSMain(uint vertexId: SV_VulkanVertexID, uint instanceId: SV_VulkanInstanceID) {
+    float4 worldPos, activeVPPos;
+    SceneGeometryVertex p = BuildSceneGeometryPayload<true>(vertexId, instanceId, worldPos, activeVPPos);
+    p.pos      = activeVPPos;
+    return PackGBufferOutput(p);
+}
+
+[shader("vertex")]
+ForwardGeometryOutput VSMainForward(uint vertexId: SV_VulkanVertexID, uint instanceId: SV_VulkanInstanceID) {
+    float4 worldPos, activeVPPos;
+    SceneGeometryVertex p = BuildSceneGeometryPayload<false>(vertexId, instanceId, worldPos, activeVPPos);
+    p.pos      = activeVPPos;
+    return PackForwardOutput(p);
+}
+
+// The three fragment shaders share this module and are type-checked together;
+// each consumes exactly the varying struct its pass rasterises (see
+// common.slang), so no fragment can accidentally read a dropped varying.
+void PSShadow(ShadowGeometryOutput input) {
     uint4 indices          = input.materialIndices;
     float4 baseColorFactor = input.baseColorFactor;
     float alphaCutoff      = input.pbrFactors.z;
@@ -155,10 +159,8 @@ void PSShadow(VSOutput input) {
     }
 }
 
-#endif // ZHLN_PASS_SHADOW
 
-#if !defined(ZHLN_PASS_SHADOW) && !defined(FORWARD_PASS)
-PSOutput PSMain(VSOutput input) {
+PSOutput PSMain(GBufferGeometryOutput input) {
     PSOutput output;
 
     uint4 indices          = input.materialIndices;
@@ -215,9 +217,7 @@ PSOutput PSMain(VSOutput input) {
     return output;
 }
 
-#endif // G-buffer variant
 
-#ifdef FORWARD_PASS
 
 float3 RotateVector(float3 V, float3 lightDir) {
     float lenB = length(lightDir);
@@ -236,7 +236,7 @@ float3 RotateVector(float3 V, float3 lightDir) {
     return V;
 }
 
-float4 PSForward(VSOutput input) : SV_Target0 {
+float4 PSForward(ForwardGeometryOutput input) : SV_Target0 {
     uint4 indices          = input.materialIndices;
     float4 baseColorFactor = input.baseColorFactor;
     float roughnessFactor  = input.pbrFactors.y;
@@ -263,4 +263,3 @@ float4 PSForward(VSOutput input) : SV_Target0 {
 
     return float4(finalColor, saturate(glassAlpha));
 }
-#endif

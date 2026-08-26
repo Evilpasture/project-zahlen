@@ -12,10 +12,10 @@ extern const char* const BasicVS;
 extern const char* const BasicPS;
 extern const char* const BasicTask;        // VK_EXT_mesh_shader amplification stage
 extern const char* const BasicMesh;        // VK_EXT_mesh_shader mesh stage
-extern const char* const BasicVSShadow;    // -DZHLN_PASS_SHADOW variant
-extern const char* const BasicMeshShadow;  // -DZHLN_PASS_SHADOW variant
-extern const char* const BasicVSForward;   // -DFORWARD_PASS variant
-extern const char* const BasicMeshForward; // -DFORWARD_PASS variant
+extern const char* const BasicVSShadow;    // shadow-pass entry points (VSMainShadow)
+extern const char* const BasicMeshShadow;  //   ... (MeshMainShadow)
+extern const char* const BasicVSForward;   // forward-pass entry points (VSMainForward)
+extern const char* const BasicMeshForward; //   ... (MeshMainForward)
 extern const char* const BlitVS;
 extern const char* const BlitPS;
 extern const char* const TaaVS;

@@ -8,7 +8,7 @@ A geometry-stage output that no fragment stage reads is legal, but the
 validation layer reports each one ("SPIR-V Interface ... no corresponding Input
 declared") and it wastes interpolation bandwidth. basic.slang / basic_mesh.slang
 therefore compile a per-pass variant of SceneGeometryOutput, and the geometry
-and fragment stages of a pipeline MUST be built with the same defines.
+and fragment stages of a pipeline must rasterise the same varying struct.
 
 This script compiles all three variants with slangc and reflects the resulting
 SPIR-V, so the invariant is checkable without a GPU (unlike the validation
@@ -31,17 +31,19 @@ import tempfile
 REPO = pathlib.Path(__file__).resolve().parent.parent
 SHADERS = REPO / "resources" / "shaders"
 
-# (label, defines, [(file, entry, stage), ...]) -- mirrors cmake/ShaderCompilation.cmake
+# (label, [(file, entry, stage), ...]) -- mirrors cmake/ShaderCompilation.cmake.
+# The passes share one module but compile distinct entry points against their
+# own varying structs, so there are no defines to replay.
 VARIANTS = [
-    ("G-buffer", [], [("basic.slang", "VSMain", "vertex"),
-                      ("basic_mesh.slang", "MeshMain", "mesh"),
-                      ("basic.slang", "PSMain", "fragment")]),
-    ("Shadow", ["ZHLN_PASS_SHADOW"], [("basic.slang", "VSMain", "vertex"),
-                                      ("basic_mesh.slang", "MeshMain", "mesh"),
-                                      ("basic.slang", "PSShadow", "fragment")]),
-    ("Forward", ["FORWARD_PASS"], [("basic.slang", "VSMain", "vertex"),
-                                   ("basic_mesh.slang", "MeshMain", "mesh"),
-                                   ("basic.slang", "PSForward", "fragment")]),
+    ("G-buffer", [("basic.slang", "VSMain", "vertex"),
+                  ("basic_mesh.slang", "MeshMain", "mesh"),
+                  ("basic.slang", "PSMain", "fragment")]),
+    ("Shadow",   [("basic.slang", "VSMainShadow", "vertex"),
+                  ("basic_mesh.slang", "MeshMainShadow", "mesh"),
+                  ("basic.slang", "PSShadow", "fragment")]),
+    ("Forward",  [("basic.slang", "VSMainForward", "vertex"),
+                  ("basic_mesh.slang", "MeshMainForward", "mesh"),
+                  ("basic.slang", "PSForward", "fragment")]),
 ]
 
 SPV_MAGIC = 0x07230203
@@ -61,15 +63,14 @@ def find_slangc(explicit: str | None) -> str:
     sys.exit("slangc not found; pass --slangc or set VULKAN_SDK / SLANG_BIN")
 
 
-def compile_stage(slangc: str, path: str, entry: str, stage: str, defines: list[str], out: str) -> None:
+def compile_stage(slangc: str, path: str, entry: str, stage: str, out: str) -> None:
     cmd = [slangc, str(SHADERS / path), "-entry", entry, "-stage", stage, "-target", "spirv",
            "-fvk-use-entrypoint-name", "-matrix-layout-column-major", "-I", str(SHADERS),
            "-I", str(REPO / "include")]
-    cmd += [f"-D{d}" for d in defines]
     cmd += ["-o", out]
     res = subprocess.run(cmd, capture_output=True, text=True)
     if res.returncode != 0:
-        sys.exit(f"slangc failed for {path}:{entry} ({' '.join(defines) or 'no defines'})\n{res.stderr}")
+        sys.exit(f"slangc failed for {path}:{entry}\n{res.stderr}")
 
 
 def reflect(spv_path: str) -> tuple[dict[int, str], dict[int, str]]:
@@ -109,11 +110,11 @@ def main() -> int:
 
     failures = 0
     with tempfile.TemporaryDirectory() as tmp:
-        for label, defines, stages in VARIANTS:
+        for label, stages in VARIANTS:
             spv = {}
             for path, entry, stage in stages:
                 out = os.path.join(tmp, f"{label}.{entry}.spv")
-                compile_stage(slangc, path, entry, stage, defines, out)
+                compile_stage(slangc, path, entry, stage, out)
                 spv[stage] = out
 
             vs_out, _ = reflect(spv["vertex"])
@@ -132,14 +133,13 @@ def main() -> int:
             if set(vs_out) != set(mesh_out):
                 problems.append(f"vertex and mesh stages disagree: {sorted(set(vs_out) ^ set(mesh_out))}")
 
-            defines_str = " ".join(f"-D{d}" for d in defines) or "(no defines)"
             if problems:
                 failures += 1
-                print(f"[FAIL] {label:9} {defines_str}")
+                print(f"[FAIL] {label:9}")
                 for p in problems:
                     print(f"        {p}")
             else:
-                print(f"[ ok ] {label:9} {defines_str}: {len(fs_in)} varyings, exact match")
+                print(f"[ ok ] {label:9}: {len(fs_in)} varyings, exact match")
 
     if failures:
         print(f"\n{failures} variant(s) have a mismatched shader interface.")

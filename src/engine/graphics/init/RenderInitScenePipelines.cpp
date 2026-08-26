@@ -167,7 +167,7 @@ auto RenderContext::Impl::BuildLinePipeline() -> std::expected<void, Error> {
     const auto forwardShaders = Resource::GetSceneShaders(Resource::SceneShaderVariant::Forward);
 
     return LoadAndCreateShaders(
-               {.path = Resource::Paths::BasicVSForward, .fallback = forwardShaders.vertex, .entryPoint = "VSMain"},
+               {.path = Resource::Paths::BasicVSForward, .fallback = forwardShaders.vertex, .entryPoint = "VSMainForward"},
                {.path = Resource::Paths::ForwardPS, .fallback = forwardShaders.fragment, .entryPoint = "PSForward"}
     )
         .and_then([&](auto&& shaders) -> std::expected<void, Error> {
@@ -565,7 +565,7 @@ auto RenderContext::Impl::CompileShadowPipeline(VkDevice device, const Resource:
     // VK_EXT_descriptor_heap: the shadow pass reads the scene registry through
     // the heap; per-draw ObjectConstants travel via vkCmdPushDataEXT.
     shadowPipelineLayout = emptyPipelineLayout;
-    return Vk::ShaderStages::Create(device, shaderData, "VSMain", "PSShadow")
+    return Vk::ShaderStages::Create(device, shaderData, "VSMainShadow", "PSShadow")
         .transform_error([](auto err) -> Error { return err; })
         .and_then([&, device](auto&& shaders) -> std::expected<void, Error> {
             return Vk::PipelineBuilder {}
