@@ -260,26 +260,30 @@ enum class HueClass : uint8_t { Red, Green, Blue, Yellow, Cyan, Magenta, None };
     const double r = static_cast<double>(r8);
     const double g = static_cast<double>(g8);
     const double b = static_cast<double>(b8);
-    if (r < 100.0 && g < 100.0 && b < 100.0) {
+    constexpr double kFloor = 60.0; // Matches the lighting suite's signature floor.
+    if (r < kFloor && g < kFloor && b < kFloor) {
         return HueClass::None; // Shadow / background floor.
     }
 
-    if (r >= 100.0 && r >= 1.6 * g && r >= 1.6 * b) {
+    if (r >= kFloor && r >= 1.6 * g && r >= 1.6 * b) {
         return HueClass::Red;
     }
-    if (g >= 100.0 && g >= 1.6 * r && g >= 1.6 * b) {
+    if (g >= kFloor && g >= 1.6 * r && g >= 1.6 * b) {
         return HueClass::Green;
     }
-    if (b >= 100.0 && b >= 1.6 * r && b >= 1.6 * g) {
+    if (b >= kFloor && b >= 1.6 * r && b >= 1.6 * g) {
         return HueClass::Blue;
     }
-    if (r >= 100.0 && g >= 100.0 && r >= 0.55 * g && g >= 0.55 * r && (r + g) >= 2.6 * b) {
+    // Pair hues additionally cap the complementary channel hard (0.45 of the
+    // weaker primary) so warm/cool tinted light pools on the neutral ground
+    // can never masquerade as a ring signature.
+    if (r >= kFloor && g >= kFloor && r >= 0.55 * g && g >= 0.55 * r && b <= 0.45 * std::min(r, g)) {
         return HueClass::Yellow;
     }
-    if (g >= 100.0 && b >= 100.0 && g >= 0.55 * b && b >= 0.55 * g && (g + b) >= 2.6 * r) {
+    if (g >= kFloor && b >= kFloor && g >= 0.55 * b && b >= 0.55 * g && r <= 0.45 * std::min(g, b)) {
         return HueClass::Cyan;
     }
-    if (r >= 100.0 && b >= 100.0 && r >= 0.55 * b && b >= 0.55 * r && (r + b) >= 2.6 * g) {
+    if (r >= kFloor && b >= kFloor && r >= 0.55 * b && b >= 0.55 * r && g <= 0.45 * std::min(r, b)) {
         return HueClass::Magenta;
     }
     return HueClass::None;
@@ -568,17 +572,21 @@ struct DistanceStabilitySuite {
 
             // Sun (cascade shadows) + two punctuals anchored at mid/far depth
             // so the cluster z-slices at depth carry light.
+            // The sun must sit BEHIND the camera (toward -Z): the camera
+            // looks along +Z, so the +Z faces of the rings are the visible
+            // ones and they must be the sunlit ones. (Direction is the
+            // "toward the sun" vector; LightingSystem consumes it directly.)
             const ZHLN::Entity sunEnt = reg.Create();
             reg.Add(
                 sunEnt,
                 ZHLN::Components::TransformComponent {
-                    .position = JPH::Vec3(0.0f, 60.0f, 40.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({50.0f, 0.0f, 0.0f})
+                    .position = JPH::Vec3(0.0f, 60.0f, -40.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({50.0f, 0.0f, 180.0f})
                 },
                 ZHLN::Components::LightComponent {
                     .type      = ZHLN::LightType::Sun,
                     .color     = JPH::Vec3(1.0f, 1.0f, 1.0f),
                     .intensity = 220.0f,
-                    .direction = JPH::Vec3(0.0f, 0.6f, 0.8f).Normalized()
+                    .direction = JPH::Vec3(0.0f, 0.6f, -0.8f).Normalized()
                 }
             );
 
@@ -586,7 +594,7 @@ struct DistanceStabilitySuite {
                 const ZHLN::Entity e = reg.Create();
                 reg.Add(e, ZHLN::Components::TransformComponent {.position = pos}, ZHLN::Components::LightComponent {.type = ZHLN::LightType::Point, .color = color, .intensity = intensity, .range = range});
             };
-            addPointLight(JPH::Vec3(rings[3].x, 4.0f, rings[3].distance), JPH::Vec3(1.0f, 0.9f, 0.7f), 1200.0f, 60.0f);
+            addPointLight(JPH::Vec3(rings[3].x, 4.0f, rings[3].distance - 6.0f), JPH::Vec3(1.0f, 0.9f, 0.7f), 1200.0f, 60.0f);
             addPointLight(JPH::Vec3(rings[5].x, 5.0f, rings[5].distance - 6.0f), JPH::Vec3(0.7f, 0.85f, 1.0f), 2000.0f, 80.0f);
 
             auto& cam    = engine->GetCamera();
@@ -596,15 +604,17 @@ struct DistanceStabilitySuite {
             cam.fov      = kVerticalFovDeg;
         }
 
-        uint32_t validationRaised = 0;
+        uint32_t    validationRaised = 0;
+        const char* failedPhase      = "unknown";
 
         const auto stable = RunStableScene(
             *engine, 20, "pbr_distance_stability",
-            [](ZHLN::Engine& eng) -> bool {
+            [&](ZHLN::Engine& eng) -> bool {
                 const auto rings = BuildRingLayout();
                 const float tanH = HorizontalHalfTan();
 
                 // ---------------- Phase A: coverage at every distance -------
+                failedPhase = "coverage";
                 TickFrames(eng, 1);
                 const RgbImage cover = Capture(eng, "headless_distance_coverage.ppm");
                 if (!ZHLN::Test::ExpectTrue(cover.Valid())) {
@@ -629,6 +639,7 @@ struct DistanceStabilitySuite {
                 }
 
                 // ---------------- Phase B: static temporal stability --------
+                failedPhase = "static";
                 // Repeat-capture control: two captures of the SAME frame give
                 // the readback noise floor.
                 const RgbImage  repeatA    = Capture(eng, "headless_distance_static_r0.ppm");
@@ -703,6 +714,7 @@ struct DistanceStabilitySuite {
                 }
 
                 // ---------------- Phase C: dolly sweep ----------------------
+                failedPhase = "sweep";
                 // Sinusoidal lateral dolly (there and back to the origin):
                 // every ring's viewer distance and shadow-cascade occupancy
                 // changes continuously. Only DISAPPEARANCE is gated during
@@ -745,6 +757,7 @@ struct DistanceStabilitySuite {
                 }
 
                 // ---------------- Phase D: post-sweep parity ---------------
+                failedPhase = "parity";
                 // The sweep ended back at x = 0 (sin returns to 0): the static
                 // view must return to Phase B's noise floor. Lingering change
                 // means stale history / double-buffered state survived motion.
@@ -789,8 +802,18 @@ struct DistanceStabilitySuite {
             return std::unexpected(DistanceStabilityTestError::ValidationErrorsRaised);
         }
         if (stable == StableRunResult::AssertionsFailed) {
-            // Attribute by phase: the diagnostics above print which gate died;
-            // the captures on disk show the offending frames.
+            // Attribute by phase; the diagnostics above print which gate died
+            // and the captures on disk show the offending frames.
+            ZHLN::Println("    [FAIL] scenario aborted in phase '{}'", failedPhase);
+            if (std::string_view(failedPhase) == "coverage") {
+                return std::unexpected(DistanceStabilityTestError::DistanceSurfaceMissing);
+            }
+            if (std::string_view(failedPhase) == "sweep") {
+                return std::unexpected(DistanceStabilityTestError::SweepPopDetected);
+            }
+            if (std::string_view(failedPhase) == "parity") {
+                return std::unexpected(DistanceStabilityTestError::PostSweepParityDetected);
+            }
             return std::unexpected(DistanceStabilityTestError::TemporalFlickerDetected);
         }
         if (stable != StableRunResult::Ok) {
