@@ -217,12 +217,15 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
     float shadow = 1.0f;
 
+    // Cascade shadow maps: analytic PCSS, deterministic per pixel. Computed
+    // whenever they will contribute (always, except for RT-shadow pixels
+    // nearer than the fade start, which never sample them).
+    float cascadeShadow = 1.0f;
+    bool  needCascade   = true;
 #ifndef DISABLE_RTR
-    if (ENABLE_RTR != 0 && pc.enableRTR != 0) {
-        shadow = CalculateShadowRayTraced(worldPos, N, L_sun, input.pos.xy, pc.camPos.w, tlas, frame.sunSize);
-    } else
+    needCascade = !(ENABLE_RTR != 0 && pc.enableRTR != 0 && viewDepth < 80.0f);
 #endif
-    {
+    if (needCascade) {
         uint cascadeIndex = 0;
         if (viewDepth > frame.cascadeSplits.x)
             cascadeIndex = 1;
@@ -252,8 +255,33 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
         shadowPos.xy = shadowPos.xy * 0.5f + 0.5f * shadowPos.w;
 
-        shadow = CalculateShadowPCSS(shadowPos, N, L_sun, input.pos.xy, shadowMap, shadowSampler, pointSampler, frame.shadowResolution, cascadeIndex, worldDepthPerNdc);
+        cascadeShadow = CalculateShadowPCSS(shadowPos, N, L_sun, input.pos.xy, shadowMap, shadowSampler, pointSampler, frame.shadowResolution, cascadeIndex, worldDepthPerNdc);
     }
+    shadow = cascadeShadow;
+
+#ifndef DISABLE_RTR
+    // RT shadow -> cascade blend. The RT shadow is a 1-bit estimate (one ray,
+    // binary hit/miss) with a fixed screen-space dither, and its penumbra
+    // width grows linearly with distance (spread = sunSize radians): a few
+    // pixels near the camera, but ~sunSize*distance wide at 200-300 m. Every
+    // pixel in that wide band is a coin flip that flips again as geometry
+    // slides across the per-pixel dither - the far shimmer reported in the
+    // preset scene. The cascade maps are deterministic and PCSS gives
+    // analytic soft shadows, so hand the sun shadow to them with distance:
+    // RT-only below 80 m, smoothstep blend across 80-160 m, cascade-only
+    // beyond (the RT ray is skipped there - it was pure noise). Dynamic
+    // casters are unaffected: the cascade pass re-renders them every frame.
+    if (ENABLE_RTR != 0 && pc.enableRTR != 0 && viewDepth < 160.0f) {
+        if (viewDepth < 80.0f) {
+            shadow = CalculateShadowRayTraced(worldPos, N, L_sun, input.pos.xy, pc.camPos.w, tlas, frame.sunSize);
+        } else {
+            float rtrShadow = CalculateShadowRayTraced(worldPos, N, L_sun, input.pos.xy, pc.camPos.w, tlas, frame.sunSize);
+            float t         = saturate((viewDepth - 80.0f) / 80.0f);
+            t               = t * t * (3.0f - 2.0f * t);
+            shadow          = lerp(rtrShadow, cascadeShadow, t);
+        }
+    }
+#endif
 
     float D      = DistributionGGX(N, H_sun, roughness);
     float G_term = GeometrySmith(N, V, L_sun, roughness);
