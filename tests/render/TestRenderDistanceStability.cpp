@@ -74,6 +74,7 @@
 #include <numbers>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -105,12 +106,22 @@ namespace {
 constexpr int      kWidth            = 1280;
 constexpr int      kHeight           = 720;
 constexpr float    kVerticalFovDeg   = 60.0f;
-constexpr uint32_t kRingCount        = 6;
-// Viewer distance of each ring, in metres.
-constexpr std::array<float, kRingCount> kRingDistances = {3.0f, 6.0f, 12.0f, 24.0f, 48.0f, 96.0f};
+constexpr uint32_t kRingCount        = 8;
+// Viewer distance of each ring, in metres. The two outer rings sit in the
+// 200-400 m band where real scenes showed distance flicker (cascade seam at
+// ~220 m, coarsest shadow texels, fog).
+constexpr std::array<float, kRingCount> kRingDistances = {3.0f, 6.0f, 12.0f, 24.0f, 48.0f, 96.0f, 192.0f, 384.0f};
 // Lateral position of each ring in NDC x ([-1, 1]); fans the rings across the
-// screen so none of them occludes another.
-constexpr std::array<float, kRingCount> kRingNdcX      = {-0.72f, -0.44f, -0.16f, 0.16f, 0.44f, 0.72f};
+// screen so no two rings share a view ray (a near box would occlude a far one
+// at the same NDC) and so the per-ring counting windows (kCountWindowNdc wide)
+// never overlap: adjacent centers are >= 0.14 NDC apart while each window is
+// 0.12 NDC wide. Rings 6/7 reuse hue families of rings 0/1 but sit at their
+// own NDC slots.
+constexpr std::array<float, kRingCount> kRingNdcX      = {-0.72f, -0.44f, -0.16f, 0.16f, 0.44f, 0.72f, -0.30f, 0.30f};
+// Half-width of the per-ring counting window, in NDC x. Wide enough for the
+// footprint + bloom halo, narrow enough that same-hue rings never share a
+// window.
+constexpr float    kCountWindowNdc  = 0.12f;
 // World size per metre of distance => constant projected footprint.
 constexpr float    kRingSizeOverDistance = 0.035f;
 constexpr float    kMinRingSize          = 0.06f;
@@ -302,6 +313,36 @@ enum class HueClass : uint8_t { Red, Green, Blue, Yellow, Cyan, Magenta, None };
     return count;
 }
 
+/// Counts hue pixels inside a horizontal band of screen columns [x0, x1), so
+/// two rings sharing a hue family (the outer rings reuse near hues) never
+/// pool their counts.
+[[nodiscard]] uint32_t CountHueInColumns(const RgbImage& img, HueClass hue, int x0, int x1) {
+    if (!img.Valid()) {
+        return 0;
+    }
+    const int lo = std::max(0, x0);
+    const int hi = std::min(img.width, x1);
+    uint32_t  count = 0;
+    for (int y = 0; y < img.height; ++y) {
+        for (int x = lo; x < hi; ++x) {
+            const size_t i = (static_cast<size_t>(y) * static_cast<size_t>(img.width) + static_cast<size_t>(x)) * 3u;
+            if (ClassifyPixel(img.rgb[i + 0], img.rgb[i + 1], img.rgb[i + 2]) == hue) {
+                ++count;
+            }
+        }
+    }
+    return count;
+}
+
+/// Screen-column window for a ring seen from camera x-position `camX`:
+/// projects the ring's lateral offset into NDC, then to pixel columns.
+[[nodiscard]] std::pair<int, int> RingColumnWindow(const RingLayout& ring, float camX, float tanH, int width) {
+    const float ndc     = (ring.x - camX) / (ring.distance * tanH);
+    const float centerPx = (ndc * 0.5f + 0.5f) * static_cast<float>(width);
+    const float halfPx   = kCountWindowNdc * 0.5f * static_cast<float>(width);
+    return {static_cast<int>(centerPx - halfPx), static_cast<int>(centerPx + halfPx)};
+}
+
 [[nodiscard]] uint32_t CountLitPixels(const RgbImage& img, uint8_t threshold = 15) {
     if (!img.Valid()) {
         return 0;
@@ -433,6 +474,13 @@ struct RingLayout {
     return tanV * (static_cast<float>(kWidth) / static_cast<float>(kHeight));
 }
 
+/// Hue family of each ring. There are only six hue classes, so the two outer
+/// rings reuse red and green; CountHueInColumns keeps their pixel counts
+/// separate.
+[[nodiscard]] constexpr HueClass RingHue(uint32_t ringIndex) noexcept {
+    return static_cast<HueClass>(ringIndex % 6u);
+}
+
 [[nodiscard]] std::array<RingLayout, kRingCount> BuildRingLayout() noexcept {
     const float tanH = HorizontalHalfTan();
     std::array<RingLayout, kRingCount> rings {};
@@ -548,6 +596,9 @@ struct DistanceStabilitySuite {
                 {{0.95f, 0.90f, 0.12f, 1.0f}, 1.0f, 0.50f, HueClass::Yellow,  "yellow@24m"},
                 {{0.10f, 0.90f, 0.95f, 1.0f}, 0.0f, 0.60f, HueClass::Cyan,    "cyan@48m"},
                 {{0.90f, 0.10f, 0.90f, 1.0f}, 1.0f, 0.55f, HueClass::Magenta, "magenta@96m"},
+                // Far rings reuse hue families (windows keep counts separate).
+                {{0.90f, 0.08f, 0.06f, 1.0f}, 0.0f, 0.65f, HueClass::Red,     "red@192m"},
+                {{0.10f, 0.85f, 0.08f, 1.0f}, 1.0f, 0.55f, HueClass::Green,   "green@384m"},
             }};
 
             const auto rings = BuildRingLayout();
@@ -633,7 +684,8 @@ struct DistanceStabilitySuite {
                 std::array<uint32_t, kRingCount> coverCounts {};
                 bool allRingsVisible = true;
                 for (uint32_t i = 0; i < kRingCount; ++i) {
-                    coverCounts[i] = CountHue(cover, static_cast<HueClass>(i));
+                    const auto [cx0, cx1] = RingColumnWindow(rings[i], 0.0f, tanH, cover.width);
+                    coverCounts[i]        = CountHueInColumns(cover, RingHue(i), cx0, cx1);
                     ZHLN::Println("    [INFO] ring {} ({}): {} signature px", i, kRingDistances[i], coverCounts[i]);
                     if (!ZHLN::Test::ExpectTrue(coverCounts[i] >= kMinRingPixels)) {
                         allRingsVisible = false;
@@ -671,7 +723,8 @@ struct DistanceStabilitySuite {
                     litSeries.push_back(static_cast<double>(CountLitPixels(frame)));
                     lumaSeries.push_back(MeanLuma(frame));
                     for (uint32_t i = 0; i < kRingCount; ++i) {
-                        ringSeries[i].push_back(static_cast<double>(CountHue(frame, static_cast<HueClass>(i))));
+                        const auto [sx0, sx1]  = RingColumnWindow(rings[i], 0.0f, tanH, frame.width);
+                        ringSeries[i].push_back(static_cast<double>(CountHueInColumns(frame, RingHue(i), sx0, sx1)));
                     }
                     if (prev.Valid()) {
                         temporalDiffs.push_back(CompareFrames(prev, frame));
@@ -743,16 +796,41 @@ struct DistanceStabilitySuite {
                     }
 
                     const float camX = cam.position.GetX();
+                    // Window pass first: same-hue rings can transiently share
+                    // screen columns mid-sweep (near rings swing across the
+                    // frame). Overlapping windows make attribution ambiguous,
+                    // so the ring is skipped for that frame instead of pooling
+                    // counts.
+                    std::array<std::pair<int, int>, kRingCount> windows {};
+                    std::array<bool, kRingCount>                inCone {};
+                    std::array<bool, kRingCount>                ambiguous {};
                     for (uint32_t i = 0; i < kRingCount; ++i) {
                         // Rings are at z = distance > 0, camera at z = 0, so the
                         // view-space depth is the ring distance itself.
                         const float angleDeg = JPH::RadiansToDegrees(std::atan2(rings[i].x - camX, rings[i].distance));
-                        if (std::abs(angleDeg) > kSweepConeDeg) {
-                            continue; // legitimately outside the frustum
+                        inCone[i]   = std::abs(angleDeg) <= kSweepConeDeg;
+                        windows[i]  = RingColumnWindow(rings[i], camX, tanH, frame.width);
+                        ambiguous[i] = false;
+                    }
+                    for (uint32_t i = 0; i < kRingCount; ++i) {
+                        if (!inCone[i]) {
+                            continue;
                         }
-                        const uint32_t count = CountHue(frame, static_cast<HueClass>(i));
+                        for (uint32_t j = 0; j < kRingCount; ++j) {
+                            if (j != i && inCone[j] && RingHue(i) == RingHue(j)
+                                && windows[i].second > windows[j].first && windows[j].second > windows[i].first) {
+                                ambiguous[i] = true;
+                                break;
+                            }
+                        }
+                    }
+                    for (uint32_t i = 0; i < kRingCount; ++i) {
+                        if (!inCone[i] || ambiguous[i]) {
+                            continue; // legitimately outside the frustum / ambiguous columns
+                        }
+                        const uint32_t count = CountHueInColumns(frame, RingHue(i), windows[i].first, windows[i].second);
                         if (!ZHLN::Test::ExpectTrue(count >= 2)) {
-                            ZHLN::Println("    [FAIL] sweep frame {}: ring {} ({} m, {:.1f} deg) collapsed to {} px", f, i, kRingDistances[i], angleDeg, count);
+                            ZHLN::Println("    [FAIL] sweep frame {}: ring {} ({} m) collapsed to {} px", f, i, kRingDistances[i], count);
                             popped = true;
                         }
                     }
@@ -777,7 +855,8 @@ struct DistanceStabilitySuite {
                         return false;
                     }
                     for (uint32_t i = 0; i < kRingCount; ++i) {
-                        paritySeries[i].push_back(static_cast<double>(CountHue(frame, static_cast<HueClass>(i))));
+                        const auto [px0, px1]  = RingColumnWindow(rings[i], 0.0f, tanH, frame.width);
+                        paritySeries[i].push_back(static_cast<double>(CountHueInColumns(frame, RingHue(i), px0, px1)));
                     }
                     if (parityPrev.Valid()) {
                         parityWorstFrac32 = std::max(parityWorstFrac32, CompareFrames(parityPrev, frame).frac32);
