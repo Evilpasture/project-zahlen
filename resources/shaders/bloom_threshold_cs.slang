@@ -11,7 +11,7 @@
 // padding}, which every dispatch of the chain pushes at offset 0. The
 // threshold stage ignores `mode` (it is always the first link).
 struct ThresholdPush {
-    int   mode;
+    int mode;
     float rcpWidth;
     float rcpHeight;
     float padding;
@@ -35,7 +35,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         return;
     }
 
-    float2 uv = (float2(tid.xy) + 0.5f) * float2(pc.rcpWidth, pc.rcpHeight);
+    float2 uv = (float2(tid.xy) + 0.5f) / float2(dstSize);
 
     float3 color = texInput.SampleLevel(smp, uv, 0).rgb;
 
