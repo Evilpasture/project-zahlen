@@ -204,8 +204,6 @@ class ZHLN_API RenderContext {
     ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& GetTracked2DEmitters() noexcept;
     ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& GetTracked3DEmitters() noexcept;
 
-    void SetAAState(const AAState& state);
-
     // --- VK_EXT_mesh_shader ---
     /// True when the device exposes mesh shading with limits sufficient for the
     /// engine's meshlet budget (independent of whether it is currently in use).
@@ -238,6 +236,9 @@ class ZHLN_API RenderContext {
 
     RenderResult BuildMeshBLAS(Mesh& mesh) noexcept;
 
+    /// Legacy explicit resize, kept for tools/tests. Equivalent to applying a
+    /// GraphicsSettings delta on shadows.resolution — the reactive path
+    /// RenderContext::ApplySettings uses internally.
     [[nodiscard]] std::expected<void, Error> SetShadowResolution(uint32_t resolution);
     void                                     ProvokeDeviceLost();
 
@@ -249,7 +250,26 @@ class ZHLN_API RenderContext {
     // --- OOP Idiomatic State & Command Submission APIs ---
     void SetMatrices(const JPH::Mat44& viewProj, const JPH::Mat44& unjitteredViewProj) noexcept;
     void SetFrameData(const Camera& cam, const FrameUniforms& uniforms, const JPH::Mat44& shadowProjView, float dt = 0.0166f) noexcept;
+
+    // --- Canonical graphics configuration ---------------------------------
+    /// Single entry point for graphics configuration. Diffs `newSettings`
+    /// against the current state and reacts to deltas (e.g. resizing the
+    /// cascade shadow targets when shadows.resolution changes); plain knob
+    /// changes simply flow into the next frame's uniforms, push constants and
+    /// pipeline-variant selection. Call between BeginFrame batches — the ECS
+    /// sync point in RenderSystem does this once per frame.
+    void ApplySettings(GraphicsSettings newSettings) noexcept;
+
+    /// Snapshot of the renderer's canonical GraphicsSettings (last applied).
+    [[nodiscard]] const GraphicsSettings& GetSettings() const noexcept;
+
+    /// Legacy bridge kept for tools/tests: overwrites only the post/GI slice.
+    /// Prefer mutating the ECS settings components (the editing surface) —
+    /// RenderSystem re-applies the collected state every frame.
     void SetGISettings(const GISettings& settings) noexcept;
+    /// Legacy bridge kept for tools/tests: overwrites the AA state. The ECS
+    /// AASettingsComponent is authoritative and is re-applied every frame.
+    void SetAAState(const AAState& state);
     void SetLights(const Light* lights, uint32_t count) noexcept;
     void Draw(const Material& material, const Mesh& mesh, const DrawParams& params) noexcept;
     void DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, const CSGDrawParams& params) noexcept;

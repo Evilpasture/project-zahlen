@@ -152,28 +152,6 @@ void Sys_Lighting(Engine& engine, float dt) {
     sys.Update(engine, dt);
 }
 
-void Sys_PostProcess(Engine& engine, float /*dt*/) {
-    auto& reg = engine.GetRegistry();
-    auto& rc  = engine.GetRenderContext();
-
-    for (Entity e: reg.GetEntitiesWith<Components::PostProcessSettingsComponent>()) {
-        if (auto* pp = reg.Get<Components::PostProcessSettingsComponent>(e)) {
-            rc.SetGISettings({
-                .mode              = pp->giMode,
-                .aoRadius          = pp->aoRadius,
-                .aoBias            = pp->aoBias,
-                .aoPower           = pp->aoPower,
-                .giIntensity       = pp->giIntensity,
-                .giSamples         = pp->giSamples,
-                .vignetteIntensity = pp->vignetteIntensity,
-                .vignettePower     = pp->vignettePower,
-                .enableSSR         = pp->enableSSR ? 1 : 0,
-                .enableRTR         = pp->enableRTR ? 1 : 0,
-            });
-        }
-    }
-}
-
 void Sys_Particle(Engine& engine, float dt) {
     static ParticleSystem sys;
     sys.Update(engine, dt);
@@ -234,12 +212,10 @@ void BuildSystemGraphs(Engine& engine) {
         .enabled        = true,
     });
 
-    updateGraph.AddSystem({
-        .update_func    = Sys_PostProcess,
-        .name           = "PostProcessSystem",
-        .access_pattern = {Read<Components::PostProcessSettingsComponent>()},
-        .enabled        = true,
-    });
+    // NOTE: the former PostProcessSystem bridge (ECS → SetGISettings) was
+    // removed: RenderSystem::RenderMain now performs the single
+    // ECS → GraphicsSettings → RenderContext::ApplySettings sync each frame
+    // (see system/GraphicsSettingsSync.hpp).
 
     updateGraph.AddSystem({
         .update_func    = Sys_Audio,

@@ -908,8 +908,12 @@ struct RenderContext::Impl {
     FrameUniforms currentUniforms {};
     float         currentDt = 0.0166f;
 
-    GISettings         giSettings {};
-    AAState            aaState {};
+    // Canonical graphics configuration (single renderer-side source of
+    // truth). Written exclusively through ApplySettings — never queried from
+    // ECS components inside the renderer. Replaces the former split
+    // `giSettings` + `aaState` members.
+    GraphicsSettings settings {};
+
     FrameProfiler      gpuProfiler;
     Vk::GPUDiagnostics gpuDiagnostics;
 
@@ -1023,20 +1027,10 @@ struct RenderContext::Impl {
     };
     static_assert(sizeof(MeshParticleRenderPush) == 104);
 
-    struct PPPushConstants {
-        JPH::Mat44 invViewProj;
-        JPH::Mat44 viewProj;
-        alignas(16) std::array<float, 4> camPos;
-        int   giMode;
-        float aoRadius;
-        float aoBias;
-        float aoPower;
-        float giIntensity;
-        int   giSamples;
-        int   enableSSR;
-        int   enableRTR;
-        int   _pad;
-    };
+    // vkCmdPushDataEXT per-pass blob mirrored by GPUTypes::Heap::ScenePassPushConstants
+    // (descriptor_heap_layout.slang) and size-validated against the compiled
+    // gpu_abi SPIR-V at startup.
+    using PPPushConstants = GPUTypes::Heap::ScenePassPushConstants;
 
     struct DecalPushConstants {
         JPH::Mat44 world;
@@ -1149,6 +1143,18 @@ struct RenderContext::Impl {
     }
 
     [[nodiscard]] std::expected<void, Error> RecreateTargets(VkExtent2D ext);
+
+    // --- Graphics settings application -----------------------------------
+    /// Delta-detected application of a new GraphicsSettings state: reacts to
+    /// resolution changes (cascade shadow target resize), then swaps in the
+    /// canonical state. Renderer-internal; the public entry point is
+    /// RenderContext::ApplySettings.
+    void ApplySettings(GraphicsSettings&& incoming) noexcept;
+
+    /// Rebuilds the cascade shadow map targets at a new resolution. Returns
+    /// failure (leaving the current targets intact) when waiting for the
+    /// device or the reallocation fails.
+    [[nodiscard]] std::expected<void, Error> ResizeShadowTargets(uint32_t resolution) noexcept;
 
     void                                     RecreatePunctualShadowViews() noexcept;
     [[nodiscard]] std::expected<void, Error> InitSkeletalAnimationResources();
@@ -1276,10 +1282,6 @@ struct DeferredLightingPass {
         const FrameRecorder&                                                                               recorder,
         SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> in
     ) const noexcept -> Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>;
-
-  private:
-    [[nodiscard]] constexpr uint32_t DetermineLightingVariant(const GISettings& gi, bool hasRt) const noexcept;
-    [[nodiscard]] constexpr uint32_t DetermineReflectionVariant(const GISettings& gi, bool hasRt) const noexcept;
 };
 
 struct TranslucentPrePass {

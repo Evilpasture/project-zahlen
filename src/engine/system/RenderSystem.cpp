@@ -4,6 +4,7 @@
 #include "RenderSystem.hpp"
 #include "CameraSystem.hpp"
 #include "CullingSystem.hpp"
+#include "GraphicsSettingsSync.hpp"
 #include "LightingSystem.hpp"
 #include "UIRenderSystem.hpp"
 #include <Zahlen/Camera.hpp>
@@ -58,6 +59,15 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
         return std::unexpected(RenderFrameResult::Error);
     }
 
+    // --- Single graphics-settings sync point --------------------------------
+    // ECS components are the editing surface (ImGui / scripts / presets);
+    // GraphicsSettings is the canonical model. One collect + delta-detected
+    // apply per frame replaces the former scattered SetGISettings /
+    // SetAAState / SetShadowResolution calls: anything that mutates the
+    // components — including Lua scripts — now gets reactive GPU updates
+    // (e.g. cascade shadow-target resizes) without calling the renderer.
+    const GraphicsSettings gfx = SyncGraphicsSettings(engine);
+
     auto begin_res = rc.BeginFrame();
     if (!begin_res) {
         return std::unexpected(begin_res.error());
@@ -73,22 +83,8 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
         return std::unexpected(RenderFrameResult::Error);
     }
 
-    int       enableRTR  = 0;
-    int       fullBright = 0;
-    JPH::Vec4 probeMin(0, 0, 0, 0);
-    JPH::Vec4 probeMax(0, 0, 0, 0);
-    JPH::Vec4 probePos(0, 0, 0, 0);
     outPhysicsDrawMode = 0;
-
-    auto settingsEntities = reg.GetEntitiesWith<Components::GlobalSettingsTagComponent>();
-    if (!settingsEntities.empty()) {
-        if (auto* pp = reg.Get<Components::PostProcessSettingsComponent>(settingsEntities[0])) {
-            enableRTR  = pp->enableRTR;
-            fullBright = pp->fullBright;
-            probeMin   = JPH::Vec4(pp->probeMin.GetX(), pp->probeMin.GetY(), pp->probeMin.GetZ(), pp->useLocalProbe ? 1.0f : 0.0f);
-            probeMax   = JPH::Vec4(pp->probeMax.GetX(), pp->probeMax.GetY(), pp->probeMax.GetZ(), 0.0f);
-            probePos   = JPH::Vec4(pp->probePos.GetX(), pp->probePos.GetY(), pp->probePos.GetZ(), 0.0f);
-        }
+    if (auto settingsEntities = reg.GetEntitiesWith<Components::GlobalSettingsTagComponent>(); !settingsEntities.empty()) {
         if (auto* dbg = reg.Get<Components::DebugSettingsComponent>(settingsEntities[0])) {
             outPhysicsDrawMode = dbg->physicsDrawMode;
         }
@@ -96,18 +92,8 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
 
     auto [sunDirection, sunIntensity] = LightingSystem::GetSunDirectionAndIntensity(reg);
 
-    float    shadowWidth      = 80.0f;
-    uint32_t shadowResolution = 2048;
-    float    sunSize          = 0.05f;
-
-    auto shadowEntities = reg.GetEntitiesWith<Components::ShadowSettingsComponent>();
-    if (!shadowEntities.empty()) {
-        if (auto* shadowSettings = reg.Get<Components::ShadowSettingsComponent>(shadowEntities[0])) {
-            shadowWidth      = shadowSettings->shadowWidth;
-            shadowResolution = shadowSettings->shadowResolution;
-            sunSize          = shadowSettings->sunSize;
-        }
-    }
+    const float    shadowWidth      = gfx.shadows.width;
+    const uint32_t shadowResolution = gfx.shadows.resolution;
 
     float textelSize = shadowWidth / static_cast<float>(shadowResolution);
 
@@ -125,10 +111,7 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
 
     cam.shadowFrustum.Update(outShadowProjView);
 
-    AAState aaState {};
-    if (auto* taaComp = reg.Get<Components::AASettingsComponent>(cameraEntity)) {
-        aaState = taaComp->state;
-    }
+    const AAState& aaState = gfx.antiAliasing;
 
     FrameUniforms uniforms {};
     uniforms.viewProj               = vp;
@@ -141,25 +124,26 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
     std::memcpy(&uniforms.lightDir[0], &shaderLightDir, sizeof(float) * 3);
     uniforms.lightDir[3]      = sunIntensity;
     uniforms.lightCount       = static_cast<uint32_t>(reg.GetEntitiesWith<Components::LightComponent>().size());
-    uniforms.probeMin         = probeMin;
-    uniforms.probeMax         = probeMax;
-    uniforms.probePos         = probePos;
+    uniforms.probeMin         = JPH::Vec4(
+        gfx.environment.probeMin[0], gfx.environment.probeMin[1], gfx.environment.probeMin[2], gfx.environment.useLocalProbe ? 1.0f : 0.0f
+    );
+    uniforms.probeMax         = JPH::Vec4(gfx.environment.probeMax[0], gfx.environment.probeMax[1], gfx.environment.probeMax[2], 0.0f);
+    uniforms.probePos         = JPH::Vec4(gfx.environment.probePos[0], gfx.environment.probePos[1], gfx.environment.probePos[2], 0.0f);
     uniforms.jitterParams     = JPH::Vec4(aaState.jitterX, aaState.jitterY, aaState.prevJitterX, aaState.prevJitterY);
-    uniforms.enableRTR        = enableRTR;
-    uniforms.fullBright       = fullBright;
-    uniforms.shadowWidth      = shadowWidth;
-    uniforms.shadowResolution = shadowResolution;
-    uniforms.sunSize          = sunSize;
-    if (!settingsEntities.empty()) {
-        if (auto* pp = reg.Get<Components::PostProcessSettingsComponent>(settingsEntities[0])) {
-            uniforms.ambientExposure = pp->ambientExposure;
-            uniforms.skyZenith       = pp->skyZenith;
-            uniforms.skyHorizon      = pp->skyHorizon;
-            uniforms.skyGround       = pp->skyGround;
-        }
-    }
+    uniforms.enableRTR        = gfx.post.enableRTR;
+    uniforms.fullBright       = gfx.environment.fullBright;
+    uniforms.shadowWidth      = gfx.shadows.width;
+    uniforms.shadowResolution = gfx.shadows.resolution;
+    uniforms.sunSize          = gfx.shadows.sunSize;
+    uniforms.ambientExposure  = gfx.environment.ambientExposure;
+    uniforms.skyZenith        = JPH::Vec4(
+        gfx.environment.skyZenith[0], gfx.environment.skyZenith[1], gfx.environment.skyZenith[2], gfx.environment.skyZenith[3]
+    );
+    uniforms.skyHorizon = JPH::Vec4(
+        gfx.environment.skyHorizon[0], gfx.environment.skyHorizon[1], gfx.environment.skyHorizon[2], gfx.environment.skyHorizon[3]
+    );
+    uniforms.skyGround = JPH::Vec4(gfx.environment.skyGround[0], gfx.environment.skyGround[1], gfx.environment.skyGround[2], gfx.environment.skyGround[3]);
 
-    rc.SetAAState(aaState);
     rc.SetFrameData(cam, uniforms, outShadowProjView, dt);
     rc.SetMatrices(vp, unjitteredVp);
 
