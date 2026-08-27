@@ -73,7 +73,36 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
         return float2(-1.0f, -1.0f);
     }
 
-    float3 R      = reflect(-V, N);
+    // Reflect about a *microfacet* normal drawn from the GGX VNDF instead of
+    // the geometric normal. Reflecting about N makes every roughness a mirror:
+    // one ray per pixel carries the whole lobe, so brushed metal and polished
+    // chrome differ only in how far the ray is allowed to travel. Sampling H
+    // from the visible-normal distribution makes the ray follow the actual
+    // specular lobe -- wide for rough surfaces, collapsing onto the mirror
+    // direction as roughness -> 0 (the unstretch step zeroes H.xy when
+    // alpha -> 0, so no separate sharp path is needed).
+    //
+    // Blue noise seeds the draw so the per-pixel residual is high frequency and
+    // the roughness-aware filter downstream can integrate it, rather than the
+    // diagonal lattice the old dither produced.
+    float3 up         = abs(N.y) < 0.999f ? float3(0.0f, 1.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f);
+    float3 tangentX   = normalize(cross(up, N));
+    float3 tangentY   = cross(N, tangentX);
+    float3x3 toLocal  = float3x3(tangentX, tangentY, N);
+    float3x3 toWorld  = transpose(toLocal);
+
+    float3 V_local  = mul(toLocal, V);
+    float2 u        = GetBlueNoise(pixelPos, FrameIndexFromCamPosW(frame.camPos.w));
+    float  alpha    = max(roughness * roughness, 1e-5f);
+    float3 H_local  = SampleGGX_VNDF(V_local, alpha, u);
+    float3 H        = normalize(mul(toWorld, H_local));
+
+    float3 R = reflect(-V, H);
+    // A microfacet normal tilted away from N can reflect below the surface;
+    // such a ray would only ever hit the surface it started on.
+    if (dot(R, N) <= 0.0f) {
+        R = reflect(-V, N);
+    }
     float maxDist = lerp(50.0f, 16.0f, roughness);
 
     RayDesc ray;

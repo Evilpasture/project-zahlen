@@ -1,7 +1,10 @@
 // resources/shaders/pbr_helpers.slang
 module pbr_helpers;
 
-import uniforms;
+__exported import blue_noise;
+__exported import instance_data;
+__exported import uniforms;
+__exported import vertex_format;
 
 // ============================================================================
 // CONSTANTS & NOISE
@@ -139,38 +142,62 @@ public float CalculateShadowPCSS(float4 shadowPos, float3 N, float3 L, float2 sc
 
 #ifndef DISABLE_RTR
 /**
- * @brief Computes a high-performance, stochastically dithered soft ray-traced shadow.
+ * @brief Stochastically sampled soft ray-traced shadow.
+ *
+ * Dithering moved from Interleaved Gradient Noise to the blue noise LUT, and
+ * the single rotated PoissonDisk[0] offset became a real Vogel disk over the
+ * sun. Two reasons:
+ *
+ *  - IGN is a fixed diagonal lattice. Any spatial filter downstream (A-Trous,
+ *    bilateral, TAA) blurs *along* that diagonal, so the 1-bit estimate turns
+ *    into visible streaking instead of averaging to grey. Blue noise has no
+ *    preferred direction, so the same filters integrate it cleanly.
+ *  - One rotated point per pixel is not a sun-disk sample at all -- it is a
+ *    single fixed direction per dither angle. The Vogel disk is uniform in
+ *    area, so even at 1 SPP the per-pixel estimate is unbiased over the disk
+ *    and penumbra width tracks `sunSize` instead of the lattice period.
+ *
+ * `samples` is the per-frame SPP budget (RayTracingConfig::shadowSamples).
+ * Extra samples decorrelate through GetBlueNoiseSample, so 2 SPP is two
+ * different disk points, not the same point twice.
+ *
+ * Returns 1.0 for fully lit, 0.0 for fully shadowed.
  */
 public float CalculateShadowRayTraced(float3 worldPos, float3 N, float3 L, float2 screenPos, float time, RaytracingAccelerationStructure tlas,
-                                      float sunSize = 0.001f) {
+                                      float sunSize = 0.001f, uint samples = 1u) {
     float3 up        = abs(L.y) < 0.999f ? float3(0.0f, 1.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f);
     float3 right     = normalize(cross(up, L));
     float3 bitangent = cross(L, right);
 
-    float angle = GetShadowDither(screenPos) * 2.0f * 3.14159265f;
-    float cosA  = cos(angle);
-    float sinA  = sin(angle);
+    uint2 pixelPos  = uint2(screenPos);
+    uint  frameIdx  = FrameIndexFromCamPosW(time);
+    float spread    = max(sunSize, 0.00001f);
+    uint  spp       = max(samples, 1u);
 
-    // One blue-noise dithered ray/pixel. TAA/spatial filtering reconstructs
-    // soft penumbras while avoiding four incoherent ray queries per pixel.
-    const float spread = max(sunSize, 0.00001f);
-    const float2 p     = PoissonDisk[0];
-    const float2 jitter =
-        float2(p.x * cosA - p.y * sinA, p.x * sinA + p.y * cosA) * spread;
+    float visibility = 0.0f;
+    for (uint i = 0u; i < spp; ++i) {
+        float2 u = GetBlueNoiseSample(pixelPos, frameIdx, i);
 
-    RayDesc ray;
-    ray.Origin    = worldPos + N * 0.04f;
-    ray.Direction = normalize(L + right * jitter.x + bitangent * jitter.y);
-    ray.TMin      = 0.01f;
-    ray.TMax      = 300.0f;
+        // Vogel disk: uniform in area over the sun's angular radius.
+        float2 disk    = VogelDisk(i, spp, u.x * 6.2831853f) * spread;
 
-    RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> q;
-    q.TraceRayInline(tlas, RAY_FLAG_NONE, 0xFF, ray);
-    while (q.Proceed()) {
+        RayDesc ray;
+        ray.Origin    = worldPos + N * 0.04f;
+        ray.Direction = normalize(L + right * disk.x + bitangent * disk.y);
+        ray.TMin      = 0.01f;
+        ray.TMax      = 300.0f;
+
+        RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> q;
+        q.TraceRayInline(tlas, RAY_FLAG_NONE, 0xFF, ray);
+        while (q.Proceed()) {
+        }
+
+        visibility += (q.CommittedStatus() != COMMITTED_TRIANGLE_HIT) ? 1.0f : 0.0f;
     }
 
-    return q.CommittedStatus() != COMMITTED_TRIANGLE_HIT ? 1.0f : 0.0f;
+    return visibility / float(spp);
 }
+
 #endif
 
 // ============================================================================

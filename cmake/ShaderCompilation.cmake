@@ -189,6 +189,18 @@ add_shader_target(hiz_generate_shader
     STAGES "${SHADER_SRC_DIR}/hiz_generate.slang|CSMain|cs_6_0|SHADER_HIZ_GENERATE_SLANG_CS_PATH"
 )
 
+# Ray-traced sun shadow mask and its edge-avoiding A-Trous wavelet denoiser.
+# The mask is traced at 1-2 SPP with blue-noise/Vogel-disk jitter and then
+# smoothed by `denoiserPasses` iterations of the wavelet before the lighting
+# pass reads a single load instead of a ray.
+add_shader_target(rt_shadow_shader
+    STAGES "${SHADER_SRC_DIR}/rt_shadow.slang|CSMain|cs_6_0|SHADER_RT_SHADOW_SLANG_CS_PATH"
+)
+
+add_shader_target(shadow_denoise_atrous_shader
+    STAGES "${SHADER_SRC_DIR}/shadow_denoise_atrous.slang|CSMain|cs_6_0|SHADER_SHADOW_DENOISE_ATROUS_SLANG_CS_PATH"
+)
+
 # Per-pass scene variants. Each pass compiles its own named entry points
 # against its own varying struct (common.slang), so the geometry and fragment
 # stages of one pipeline agree on the SPIR-V interface by construction.
