@@ -679,6 +679,7 @@ struct RenderContext::Impl {
     VkSamplerCreateInfo shadowSamplerInfo {};
     VkSamplerCreateInfo defaultSamplerInfo {};
     VkSamplerCreateInfo pointSamplerInfo {};
+    VkSamplerCreateInfo blueNoiseSamplerInfo {};
 
     // Static image create infos for views that are not plain RenderTargets.
     VkImageViewCreateInfo shadowAtlasCubeViewInfo {};
@@ -702,6 +703,12 @@ struct RenderContext::Impl {
     Vk::Sampler clampSampler;
     Vk::Sampler defaultSampler;
     Vk::Sampler pointSampler;
+
+    // NEAREST + REPEAT sampler for the blue noise tile. Repeat addressing is
+    // what lets the shader scroll the tile in hardware; nearest matters because
+    // filtering a noise texture averages neighbouring texels back toward the
+    // mean, destroying exactly the high-frequency content it exists to supply.
+    Vk::Sampler blueNoiseSampler;
 
     Vk::Image      volumetricNoiseImage;
     Vk::ImageView  volumetricNoiseView;
@@ -931,6 +938,14 @@ struct RenderContext::Impl {
     uint32_t nextMorphDeltaIndex = 0;
     uint32_t smaaAreaTexIdx      = 0;
     uint32_t smaaSearchTexIdx    = 0;
+    // Bindless index of the blue noise tile (resources/shaders/LDR_RGBA_0.png)
+    // and its extent, needed to build the per-pass TypedImage descriptor.
+    uint32_t blueNoiseTexIdx     = 0;
+    uint32_t blueNoiseWidth      = 0;
+    uint32_t blueNoiseHeight     = 0;
+    // Kept as a member (like iblPayload's view infos) because TypedImage holds
+    // a pointer to it and the reflection pass builds its descriptor inline.
+    VkImageViewCreateInfo blueNoiseViewInfo {};
 
     float lastAspectRatio    = 0.0f;
     float lastFov            = 0.0f;
@@ -1129,6 +1144,7 @@ struct RenderContext::Impl {
     void               SortDrawQueue();
     [[nodiscard]] auto InitializeSystemTextures() noexcept -> std::expected<void, Error>;
     [[nodiscard]] auto InitializeVolumetricNoiseTexture() noexcept -> std::expected<void, Error>;
+    [[nodiscard]] auto InitializeBlueNoiseTexture() -> std::expected<void, Error>;
     void               WriteVolumetricNoiseDescriptor() noexcept;
 
     void RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Compute> compCmd);

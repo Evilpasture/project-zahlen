@@ -187,6 +187,9 @@ extern const std::span<const uint8_t> gpu_scene_comp;
 extern const std::span<const uint8_t> gpu_abi_comp;
 extern const std::span<const uint8_t> ltc_mat;
 extern const std::span<const uint8_t> ltc_amp;
+/// Christoph Peters' LDR_RGBA_0 blue noise tile, embedded verbatim (PNG bytes).
+/// Decoded once at startup by RenderContext::Impl::InitializeBlueNoiseTexture.
+extern const std::span<const uint8_t> blue_noise_png;
 
 /// Which specialisation of the scene geometry interface a pipeline needs.
 /// basic.slang / basic_mesh.slang emit a different varying set per variant, so

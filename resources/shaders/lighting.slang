@@ -28,6 +28,11 @@ SamplerState pointSampler;
 TextureCubeArray<float> punctualShadowCube; //  Omni-directional shadows
 Texture2DArray<float> punctualShadow2D;     // Spotlight shadows
 
+// Blue noise tile for the RT shadow dither. Declared before the TLAS so the
+// NoRT variant still gets both bindings -- only the trailing hole moves.
+Texture2D<float4> blueNoiseTex;
+SamplerState blueNoiseSampler;
+
 // The TLAS binding is declared LAST on purpose: in the NoRT variant this
 // declaration disappears entirely, so the (never present) hole stays at the
 // tail of the binding table and positional descriptor writes stay aligned.
@@ -273,9 +278,9 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     // casters are unaffected: the cascade pass re-renders them every frame.
     if (ENABLE_RTR != 0 && pc.enableRTR != 0 && viewDepth < 160.0f) {
         if (viewDepth < 80.0f) {
-            shadow = CalculateShadowRayTraced(worldPos, N, L_sun, input.pos.xy, pc.camPos.w, tlas, frame.sunSize);
+            shadow = CalculateShadowRayTraced(worldPos, N, L_sun, input.pos.xy, pc.camPos.w, tlas, blueNoiseTex, blueNoiseSampler, frame.sunSize);
         } else {
-            float rtrShadow = CalculateShadowRayTraced(worldPos, N, L_sun, input.pos.xy, pc.camPos.w, tlas, frame.sunSize);
+            float rtrShadow = CalculateShadowRayTraced(worldPos, N, L_sun, input.pos.xy, pc.camPos.w, tlas, blueNoiseTex, blueNoiseSampler, frame.sunSize);
             float t         = saturate((viewDepth - 80.0f) / 80.0f);
             t               = t * t * (3.0f - 2.0f * t);
             shadow          = lerp(rtrShadow, cascadeShadow, t);

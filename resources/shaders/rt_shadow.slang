@@ -47,7 +47,15 @@ SamplerState pointSampler;
 
 RaytracingAccelerationStructure tlas;
 StructuredBuffer<InstanceData> g_instances;
+
+// Cutout alpha lookup. This is the engine's bindless array: the host must map
+// it onto the same reserved slot range WriteTextureSlotToHeap writes, so
+// inst.albedoIndex resolves to the same textures the raster path sees.
 Texture2D globalTextures[];
+
+// Blue noise tile for the sun-disk jitter (NEAREST + REPEAT sampler).
+Texture2D<float4> blueNoiseTex;
+SamplerState blueNoiseSampler;
 
 /**
  * @brief Visibility of one ray, honouring cutout alpha when enabled.
@@ -170,7 +178,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
 
     float visibility = 0.0f;
     for (uint i = 0u; i < spp; ++i) {
-        float2 u    = GetBlueNoiseSample(tid.xy, frameIdx, i);
+        float4 u    = SampleBlueNoiseAt(blueNoiseTex, blueNoiseSampler, tid.xy, frameIdx, i);
         // Vogel disk: uniform in area over the sun's angular radius, so even a
         // 1 SPP estimate is unbiased across the disk rather than sampling one
         // fixed direction per dither angle.

@@ -158,13 +158,13 @@ public float CalculateShadowPCSS(float4 shadowPos, float3 N, float3 L, float2 sc
  *    and penumbra width tracks `sunSize` instead of the lattice period.
  *
  * `samples` is the per-frame SPP budget (RayTracingConfig::shadowSamples).
- * Extra samples decorrelate through GetBlueNoiseSample, so 2 SPP is two
+ * Extra samples decorrelate through SampleBlueNoiseAt, so 2 SPP is two
  * different disk points, not the same point twice.
  *
  * Returns 1.0 for fully lit, 0.0 for fully shadowed.
  */
 public float CalculateShadowRayTraced(float3 worldPos, float3 N, float3 L, float2 screenPos, float time, RaytracingAccelerationStructure tlas,
-                                      float sunSize = 0.001f, uint samples = 1u) {
+                                      Texture2D<float4> blueNoiseTex, SamplerState blueNoiseSampler, float sunSize = 0.001f, uint samples = 1u) {
     float3 up        = abs(L.y) < 0.999f ? float3(0.0f, 1.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f);
     float3 right     = normalize(cross(up, L));
     float3 bitangent = cross(L, right);
@@ -176,10 +176,12 @@ public float CalculateShadowRayTraced(float3 worldPos, float3 N, float3 L, float
 
     float visibility = 0.0f;
     for (uint i = 0u; i < spp; ++i) {
-        float2 u = GetBlueNoiseSample(pixelPos, frameIdx, i);
+        // .xy drives the disk angle/radius; .zw is left free for a second
+        // consumer so one fetch can serve both the shadow and a glossy lobe.
+        float4 u    = SampleBlueNoiseAt(blueNoiseTex, blueNoiseSampler, pixelPos, frameIdx, i);
 
         // Vogel disk: uniform in area over the sun's angular radius.
-        float2 disk    = VogelDisk(i, spp, u.x * 6.2831853f) * spread;
+        float2 disk = VogelDisk(i, spp, u.x * 6.2831853f) * spread;
 
         RayDesc ray;
         ray.Origin    = worldPos + N * 0.04f;

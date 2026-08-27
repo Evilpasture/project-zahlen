@@ -6,6 +6,7 @@
 #include "Resources.hpp"
 #include "Zahlen/Types.hpp"
 #include <Zahlen/Core/ControlFlow.hpp>
+#include <stb_image.h>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -31,6 +32,10 @@ enum class MaterialCreationError : uint8_t {
     ShaderCompilationFailed[[= ZHLN::Reflect::Description("Material shader compilation failed")]] = 1,
     PipelineLayoutCreationFailed[[= ZHLN::Reflect::Description("Material pipeline layout creation failed")]],
     PipelineCreationFailed[[= ZHLN::Reflect::Description("Material pipeline creation failed")]],
+};
+
+enum class BlueNoiseError : uint8_t {
+    DecodeFailed[[= ZHLN::Reflect::Description("Blue noise PNG decode failed")]] = 1,
 };
 
 enum class ShadowResolutionError : uint8_t {
@@ -649,6 +654,91 @@ auto RenderContext::Impl::InitializeVolumetricNoiseTexture() noexcept -> std::ex
     });
 
     Vk::Debug::SetImageName(ctx, volumetricNoiseImage.Handle(), "Volumetric.Noise3D");
+    return {};
+}
+
+auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Error> {
+    // Single-mip on purpose. A noise texture must never be mipmapped: every
+    // level averages neighbouring texels toward the mean, so the high-frequency
+    // content the dither depends on is destroyed exactly where a filter would
+    // reach for it. The shader always samples LOD 0.
+    constexpr VkFormat kFormat = VK_FORMAT_R8G8B8A8_UNORM;
+
+    int width = 0, height = 0, channels = 0;
+    unsigned char* pixels = stbi_load_from_memory(
+        Resource::blue_noise_png.data(), static_cast<int>(Resource::blue_noise_png.size()), &width, &height, &channels, 4
+    );
+    if (pixels == nullptr || width <= 0 || height <= 0) {
+        if (pixels != nullptr) {
+            stbi_image_free(pixels);
+        }
+        return std::unexpected(Error {BlueNoiseError::DecodeFailed});
+    }
+
+    const uint32_t w     = static_cast<uint32_t>(width);
+    const uint32_t h     = static_cast<uint32_t>(height);
+    const size_t   bytes = static_cast<size_t>(w) * static_cast<size_t>(h) * 4;
+
+    auto imageRes = Vk::ImageBuilder {}
+                        .Texture2D(w, h, kFormat, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 1)
+                        .Build(allocator.Get());
+    if (!imageRes) {
+        stbi_image_free(pixels);
+        return std::unexpected(imageRes.error());
+    }
+
+    auto staging = stagingRingBuffer.Allocate(bytes);
+    if (staging.mappedData == nullptr) {
+        stbi_image_free(pixels);
+        return std::unexpected(Vk::StagingError::MemoryMappingFailed);
+    }
+    std::memcpy(staging.mappedData, pixels, bytes);
+    stbi_image_free(pixels);
+
+    Vk::Image image = std::move(*imageRes);
+
+    Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) {
+        Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, image.Handle());
+
+        const VkBufferImageCopy2 region = {
+            .sType             = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
+            .pNext             = nullptr,
+            .bufferOffset      = staging.offset,
+            .bufferRowLength   = 0,
+            .bufferImageHeight = 0,
+            .imageSubresource  = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1},
+            .imageOffset       = {0, 0, 0},
+            .imageExtent       = {w, h, 1},
+        };
+        Vk::CopyBufferToImage<1>(cmd, staging.buffer, image.Handle(), {region});
+        Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
+    });
+
+    auto viewRes = Vk::CreateView<kFormat>(ctx.Device(), image.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 1);
+    if (!viewRes) {
+        return std::unexpected(viewRes.error());
+    }
+    Vk::ImageView view = std::move(*viewRes);
+
+    Vk::Debug::SetImageName(ctx, image.Handle(), "BlueNoise.LDR_RGBA_0");
+
+    // NEAREST + REPEAT. Repeat lets the shader scroll the tile by adding an
+    // offset in UV space and letting the sampler wrap, so there is no integer
+    // mask in the hot path and the texture need not be power-of-two.
+    auto samplerBuilder = Vk::SamplerBuilder {}.Nearest().Repeat().LodRange(0.0F, 0.0F);
+    auto samplerRes     = samplerBuilder.Build(ctx.Device());
+    if (!samplerRes) {
+        return std::unexpected(samplerRes.error());
+    }
+
+    blueNoiseSampler     = std::move(*samplerRes);
+    blueNoiseSamplerInfo = samplerBuilder.Info();
+    blueNoiseWidth       = w;
+    blueNoiseHeight      = h;
+    blueNoiseViewInfo    = Vk::MakeViewCreateInfo2D(image.Handle(), kFormat, 1, VK_IMAGE_ASPECT_COLOR_BIT);
+    blueNoiseTexIdx      = AdoptBindlessTexture(std::move(image), std::move(view), kFormat, 1, false);
+
+    ZHLN::Log("[BlueNoise] LDR_RGBA_0 bound as bindless texture {} ({}x{}, single mip).", blueNoiseTexIdx, w, h);
     return {};
 }
 

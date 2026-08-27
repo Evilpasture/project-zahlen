@@ -61,6 +61,11 @@ Texture2D<float4> texLighting;
 Texture3D<float4> texVoxelIntegrated;
 StructuredBuffer<InstanceData> g_instances;
 
+// Blue noise tile for the VNDF lobe jitter. Declared before the TLAS so the
+// NoRT variant still receives both bindings.
+Texture2D<float4> blueNoiseTex;
+SamplerState blueNoiseSampler;
+
 #ifndef DISABLE_RTR
 RaytracingAccelerationStructure tlas;
 
@@ -92,7 +97,9 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
     float3x3 toWorld  = transpose(toLocal);
 
     float3 V_local  = mul(toLocal, V);
-    float2 u        = GetBlueNoise(pixelPos, FrameIndexFromCamPosW(frame.camPos.w));
+    // .zw is the second decorrelated pair from the same fetch: the shadow path
+    // uses .xy for its sun disk, so the two never share a lattice.
+    float2 u        = SampleBlueNoise(blueNoiseTex, blueNoiseSampler, pixelPos, FrameIndexFromCamPosW(frame.camPos.w)).zw;
     float  alpha    = max(roughness * roughness, 1e-5f);
     float3 H_local  = SampleGGX_VNDF(V_local, alpha, u);
     float3 H        = normalize(mul(toWorld, H_local));

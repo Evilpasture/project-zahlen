@@ -317,13 +317,23 @@ struct PassFactory {
                 .format   = VK_FORMAT_D32_SFLOAT,
                 .viewInfo = &self.shadowAtlas2DViewInfo
             };
+            // Blue noise tile, matching the tail declaration in lighting.slang
+            // (after pointSampler, before the reserved trailing TLAS slot).
+            const auto blueNoiseHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
+                .handle   = self.textureImages[self.blueNoiseTexIdx].Handle(),
+                .view     = self.textureViews[self.blueNoiseTexIdx].Get(),
+                .extent   = {.width = self.blueNoiseWidth, .height = self.blueNoiseHeight, .depth = 1},
+                .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
+                .format   = VK_FORMAT_R8G8B8A8_UNORM,
+                .viewInfo = &self.blueNoiseViewInfo
+            };
             self.lightingPass.WriteHeap(
                 self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor), self.defaultSampler,
                 Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget),
                 Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer), self.frames.lightStorageBuffers[fIdx],
                 self.frames.frameUniformBuffers[fIdx], Vk::Assume<Vk::ShaderRead<Res_ShadowMap>>(self.graphResources.shadowMap), self.shadowSampler, ltcMatHeap,
                 ltcAmpHeap, self.clampSampler, self.frames.clusterGridBuffers[fIdx], self.frames.lightIndexListBuffers[fIdx],
-                self.pointSampler, atlasCubeHeap, atlas2DHeap,
+                self.pointSampler, atlasCubeHeap, atlas2DHeap, blueNoiseHeap, self.blueNoiseSampler,
                 Vk::AsAddressWrite {
                     .address = (self.rtCtx.Valid() && self.frames.tlas.Current() != VK_NULL_HANDLE) ?
                                    self.rtCtx.GetAccelerationStructureAddress(self.frames.tlas.Current()) :
@@ -362,6 +372,15 @@ struct PassFactory {
                     },
                     self.clampSampler, Vk::Assume<Vk::ShaderRead<Res_Lighting>>(self.graphResources.lightingTarget),
                     Vk::Assume<Vk::ShaderReadGeneral<Res_VoxelResolved>>(self.graphResources.voxelResolved), self.frames.instanceDataBuffers[fIdx],
+                    Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
+                        .handle   = self.textureImages[self.blueNoiseTexIdx].Handle(),
+                        .view     = self.textureViews[self.blueNoiseTexIdx].Get(),
+                        .extent   = {.width = self.blueNoiseWidth, .height = self.blueNoiseHeight, .depth = 1},
+                        .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
+                        .format   = VK_FORMAT_R8G8B8A8_UNORM,
+                        .viewInfo = &self.blueNoiseViewInfo
+                    },
+                    self.blueNoiseSampler,
                     Vk::AsAddressWrite {
                         .address = (self.rtCtx.Valid() && self.frames.tlas.Current() != VK_NULL_HANDLE) ?
                                        self.rtCtx.GetAccelerationStructureAddress(self.frames.tlas.Current()) :
@@ -412,6 +431,15 @@ struct PassFactory {
                     },
                     self.clampSampler, Vk::Assume<Vk::ShaderRead<Res_Lighting>>(self.graphResources.lightingTarget),
                     Vk::Assume<Vk::ShaderReadGeneral<Res_VoxelResolved>>(self.graphResources.voxelResolved), self.frames.instanceDataBuffers[fIdx],
+                    Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
+                        .handle   = self.textureImages[self.blueNoiseTexIdx].Handle(),
+                        .view     = self.textureViews[self.blueNoiseTexIdx].Get(),
+                        .extent   = {.width = self.blueNoiseWidth, .height = self.blueNoiseHeight, .depth = 1},
+                        .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
+                        .format   = VK_FORMAT_R8G8B8A8_UNORM,
+                        .viewInfo = &self.blueNoiseViewInfo
+                    },
+                    self.blueNoiseSampler,
                     Vk::AsAddressWrite {
                         .address = (self.rtCtx.Valid() && self.frames.tlas.Current() != VK_NULL_HANDLE) ?
                                        self.rtCtx.GetAccelerationStructureAddress(self.frames.tlas.Current()) :

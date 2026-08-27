@@ -320,6 +320,13 @@ constexpr uint8_t ltc_amp_raw[] = {
 #embed "../../../resources/shaders/ltc_amp.dds"
 };
 
+// Blue noise tile for the ray-traced dither. Embedded rather than read from
+// disk so the packaged binary carries it and no working-directory assumption
+// is baked into the renderer (same treatment as the LTC tables above).
+constexpr uint8_t blue_noise_png_raw[] = {
+#embed "../../../resources/shaders/LDR_RGBA_0.png"
+};
+
 // NOLINTEND(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
 #if defined(__clang__)
 #pragma clang diagnostic pop
@@ -342,6 +349,7 @@ extern const std::span<const uint8_t> gpu_scene_comp {gpu_scene_comp_raw, sizeof
 extern const std::span<const uint8_t> gpu_abi_comp {gpu_abi_comp_raw, sizeof(gpu_abi_comp_raw)};
 extern const std::span<const uint8_t> ltc_mat {ltc_mat_raw, sizeof(ltc_mat_raw)};
 extern const std::span<const uint8_t> ltc_amp {ltc_amp_raw, sizeof(ltc_amp_raw)};
+extern const std::span<const uint8_t> blue_noise_png {blue_noise_png_raw, sizeof(blue_noise_png_raw)};
 
 namespace Paths {
 const char* const BasicVS                 = SHADER_BASIC_SLANG_VS_PATH;
