@@ -246,7 +246,7 @@ struct GraphicsSettings {
     /// gates those paths on device capability at execution time.
     [[nodiscard]] constexpr QualityLevel DetectPreset() const noexcept {
         const QualitySignature current = Signature();
-        for (const QualityLevel tier : {QualityLevel::Low, QualityLevel::Medium, QualityLevel::High, QualityLevel::Ultra}) {
+        for (const QualityLevel tier: {QualityLevel::Low, QualityLevel::Medium, QualityLevel::High, QualityLevel::Ultra}) {
             GraphicsSettings probe {};
             probe.ApplyPreset(tier);
             if (probe.Signature() == current) {
@@ -285,7 +285,7 @@ static_assert([] {
 static_assert([] {
     GraphicsSettings s {};
     s.ApplyPreset(QualityLevel::High);
-    s.shadows.sunSize = 0.02f; // non-signature tweaks keep the tier
+    s.shadows.sunSize        = 0.02f; // non-signature tweaks keep the tier
     s.post.vignetteIntensity = 1.4f;
     return s.DetectPreset() == QualityLevel::High;
 }());

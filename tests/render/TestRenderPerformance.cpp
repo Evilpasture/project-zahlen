@@ -21,6 +21,8 @@
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/Types.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ecs/EntityCommandBuffer.hpp>
+#include <Zahlen/ecs/SystemGraph.hpp>
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -149,21 +151,11 @@ struct RenderPerfEnvironment {
     static void Init() {
         ZHLN::Fiber::InitMainThread();
         ZHLN::TaskSystem::Init(4, 64, ZHLN::kMinimumFiberStackSize);
-
         JPH::RegisterDefaultAllocator();
-        if (JPH::Factory::sInstance == nullptr) {
-            JPH::Factory::sInstance = new JPH::Factory();
-            JPH::RegisterTypes();
-        }
     }
 
     static void Shutdown() {
         ZHLN::TaskSystem::Shutdown();
-        JPH::UnregisterTypes();
-        if (JPH::Factory::sInstance != nullptr) {
-            delete JPH::Factory::sInstance;
-            JPH::Factory::sInstance = nullptr;
-        }
     }
 };
 
@@ -193,6 +185,41 @@ auto CreateTestEngine(uint32_t width, uint32_t height, ZHLN::ValidationMode mode
     return engine;
 }
 
+void PrepareEngineForTest(ZHLN::Engine& engine) {
+    auto& reg = engine.GetRegistry();
+    auto& rc  = engine.GetRenderContext();
+
+    // 1. Reset UI callbacks
+    engine.SetUICallback(nullptr);
+
+    // 2. Clear ECS entities and Command Buffer
+    reg.Clear();
+    engine.GetMainECB().Reset();
+
+    // 3. Clear System Graphs before rebuilding default scene
+    engine.GetUpdateGraph().Clear();
+    engine.GetRenderGraph().Clear();
+
+    // 4. Clear GPU resource caches & temporary buffers
+    rc.ClearGPUCaches();
+    engine.GetVisibleEntities().clear();
+    engine.GetVisibleShadowEntities().clear();
+
+    // 5. Reset camera to defaults
+    engine.GetCamera() = ZHLN::Camera {};
+
+    // 6. Reset global culling statistics
+    ZHLN::CullingStats::TotalObjects      = 0;
+    ZHLN::CullingStats::CulledObjects     = 0;
+    ZHLN::CullingStats::EnableCulling     = true;
+    ZHLN::CullingStats::FreezeFrustum     = false;
+    ZHLN::CullingStats::TotalTriangles    = 0;
+    ZHLN::CullingStats::RenderedTriangles = 0;
+
+    // 7. Rebuild clean default scene (cameras, global settings tags, font atlas)
+    engine.InitializeDefaultScene();
+}
+
 void TickEngine(ZHLN::Engine& engine, uint32_t frameCount, float dt = 1.0f / 60.0f) {
     for (uint32_t i = 0; i < frameCount; ++i) {
         engine.ProcessEvents();
@@ -205,21 +232,17 @@ const char* GetModeLabel(ZHLN::ValidationMode mode) {
 }
 
 // ============================================================================
-// Non-Template Benchmark Execution Functions
+// Benchmark Execution Functions (Reusing Engine)
 // ============================================================================
 
-auto RunGeometryTest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::Error> {
-    ZHLN::Test::SetTimeout(90);
+auto RunGeometryTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::Error> {
+    ZHLN::Test::SetTimeout(30);
     ZHLN::Println("\n  {}--- GPU Subsystem 1: Mass Geometry & Culling [{}] ---{}", ZHLN::Color::Cyan, GetModeLabel(mode), ZHLN::Color::Reset);
 
-    auto engine = CreateTestEngine(1280, 720, mode);
-    auto check  = ZHLN::Test::AssertTrue(engine != nullptr);
-    if (!check) {
-        return check;
-    }
+    PrepareEngineForTest(engine);
 
-    auto& reg = engine->GetRegistry();
-    auto& rc  = engine->GetRenderContext();
+    auto& reg = engine.GetRegistry();
+    auto& rc  = engine.GetRenderContext();
 
     auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
     if (!settings.empty()) {
@@ -241,7 +264,7 @@ auto RunGeometryTest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::Err
             float posX = (static_cast<float>(c) - kGridCols * 0.5f) * 2.0f;
             float posZ = (static_cast<float>(r) - kGridRows * 0.5f) * 2.0f;
             ZHLN::CreativeWorksFactory::CreateBox(
-                *engine, JPH::Vec3(0.5f, 0.5f, 0.5f),
+                engine, JPH::Vec3(0.5f, 0.5f, 0.5f),
                 ZHLN::CreativeWorksFactory::SpawnParams {
                     .position = JPH::RVec3(posX, 0.5, posZ), .createPhysics = false, .materialOverride = (r % 2 == 0) ? *goldMat : *blueMat
                 }
@@ -249,7 +272,7 @@ auto RunGeometryTest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::Err
         }
     }
 
-    auto& cam    = engine->GetCamera();
+    auto& cam    = engine.GetCamera();
     cam.position = JPH::Vec3(0.0f, 25.0f, -50.0f);
     cam.yaw      = 90.0f;
     cam.pitch    = -30.0f;
@@ -264,8 +287,8 @@ auto RunGeometryTest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::Err
         cam.position = JPH::Vec3(std::sin(angle) * 50.0f, 25.0f, std::cos(angle) * 50.0f);
         cam.yaw      = JPH::RadiansToDegrees(std::atan2(-cam.position.GetZ(), -cam.position.GetX()));
 
-        engine->ProcessEvents();
-        engine->Tick(1.0f / 60.0f, ZHLN::GameplayDriver::Cpp);
+        engine.ProcessEvents();
+        engine.Tick(1.0f / 60.0f, ZHLN::GameplayDriver::Cpp);
     }
     double durationMs = timer.ElapsedMilliseconds();
 
@@ -274,7 +297,7 @@ auto RunGeometryTest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::Err
         ZHLN::Test::ExpectEq(valRaised, 0u);
     }
 
-    ZHLN::Test::ExpectTrue(!engine->GetVisibleEntities().empty());
+    ZHLN::Test::ExpectTrue(!engine.GetVisibleEntities().empty());
     ZHLN::Test::ExpectTrue(ZHLN::CullingStats::TotalTriangles > 0);
 
     ZHLN::Println(
@@ -285,17 +308,13 @@ auto RunGeometryTest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::Err
     return {};
 }
 
-auto RunLightingTest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::Error> {
-    ZHLN::Test::SetTimeout(90);
+auto RunLightingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::Error> {
+    ZHLN::Test::SetTimeout(30);
     ZHLN::Println("\n  {}--- GPU Subsystem 2: Clustered Forward+ Lighting [{}] ---{}", ZHLN::Color::Cyan, GetModeLabel(mode), ZHLN::Color::Reset);
 
-    auto engine = CreateTestEngine(1280, 720, mode);
-    auto check  = ZHLN::Test::AssertTrue(engine != nullptr);
-    if (!check) {
-        return check;
-    }
+    PrepareEngineForTest(engine);
 
-    auto& reg = engine->GetRegistry();
+    auto& reg = engine.GetRegistry();
 
     auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
     if (!settings.empty()) {
@@ -306,7 +325,7 @@ auto RunLightingTest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::Err
     }
 
     ZHLN::CreativeWorksFactory::CreatePlane(
-        *engine, 100.0f, {0.6f, 0.6f, 0.65f, 1.0f},
+        engine, 100.0f, {0.6f, 0.6f, 0.65f, 1.0f},
         ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = false, .roughness = 0.5f, .metallic = 0.0f}
     );
 
@@ -329,7 +348,7 @@ auto RunLightingTest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::Err
         lightEntities.push_back(l);
     }
 
-    auto& cam    = engine->GetCamera();
+    auto& cam    = engine.GetCamera();
     cam.position = JPH::Vec3(0.0f, 12.0f, -30.0f);
     cam.yaw      = 90.0f;
     cam.pitch    = -20.0f;
@@ -348,8 +367,8 @@ auto RunLightingTest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::Err
             (void) reg.Patch<ZHLN::Components::TransformComponent>(lightEntities[i], [&](auto& t) { t.position = JPH::Vec3(lx, ly, lz); });
         }
 
-        engine->ProcessEvents();
-        engine->Tick(1.0f / 60.0f, ZHLN::GameplayDriver::Cpp);
+        engine.ProcessEvents();
+        engine.Tick(1.0f / 60.0f, ZHLN::GameplayDriver::Cpp);
     }
     double durationMs = timer.ElapsedMilliseconds();
 
@@ -358,18 +377,14 @@ auto RunLightingTest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::Err
     return {};
 }
 
-auto RunParticlesTest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::Error> {
-    ZHLN::Test::SetTimeout(90);
+auto RunParticlesTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::Error> {
+    ZHLN::Test::SetTimeout(30);
     ZHLN::Println("\n  {}--- GPU Subsystem 3: GPU Particle System [{}] ---{}", ZHLN::Color::Cyan, GetModeLabel(mode), ZHLN::Color::Reset);
 
-    auto engine = CreateTestEngine(1280, 720, mode);
-    auto check  = ZHLN::Test::AssertTrue(engine != nullptr);
-    if (!check) {
-        return check;
-    }
+    PrepareEngineForTest(engine);
 
-    auto& reg = engine->GetRegistry();
-    auto& rc  = engine->GetRenderContext();
+    auto& reg = engine.GetRegistry();
+    auto& rc  = engine.GetRenderContext();
 
     constexpr uint32_t  kMaxParticles = 20000;
     ZHLN::TextureHandle fireTex       = rc.CreateProceduralTexture("vfx_perf_spark", 64, 64, true, GenerateProceduralDecalTexture(64, 255, 200, 50).data());
@@ -398,14 +413,14 @@ auto RunParticlesTest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::Er
                                                                                         }
     );
 
-    auto& cam    = engine->GetCamera();
+    auto& cam    = engine.GetCamera();
     cam.position = JPH::Vec3(0.0f, 8.0f, -20.0f);
     cam.yaw      = 90.0f;
     cam.pitch    = -15.0f;
 
     constexpr uint32_t   kFrames = 60;
     RenderBenchmarkTimer timer;
-    TickEngine(*engine, kFrames);
+    TickEngine(engine, kFrames);
     double durationMs = timer.ElapsedMilliseconds();
 
     ZHLN::Println("    [GPU Particles] 60 frames x 20,000 Active Particles in {:.2f} ms ({:.2f} FPS)", durationMs, (kFrames * 1000.0) / durationMs);
@@ -413,17 +428,13 @@ auto RunParticlesTest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::Er
     return {};
 }
 
-auto RunVolumetricsTest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::Error> {
-    ZHLN::Test::SetTimeout(90);
+auto RunVolumetricsTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::Error> {
+    ZHLN::Test::SetTimeout(30);
     ZHLN::Println("\n  {}--- GPU Subsystem 4: Volumetric Fog & Scattering [{}] ---{}", ZHLN::Color::Cyan, GetModeLabel(mode), ZHLN::Color::Reset);
 
-    auto engine = CreateTestEngine(1280, 720, mode);
-    auto check  = ZHLN::Test::AssertTrue(engine != nullptr);
-    if (!check) {
-        return check;
-    }
+    PrepareEngineForTest(engine);
 
-    auto& reg = engine->GetRegistry();
+    auto& reg = engine.GetRegistry();
 
     reg.Create(
         ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 40.0f, 0.0f)},
@@ -447,17 +458,17 @@ auto RunVolumetricsTest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::
     );
 
     ZHLN::CreativeWorksFactory::CreatePlane(
-        *engine, 80.0f, {0.3f, 0.3f, 0.35f, 1.0f}, ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = false}
+        engine, 80.0f, {0.3f, 0.3f, 0.35f, 1.0f}, ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = false}
     );
 
-    auto& cam    = engine->GetCamera();
+    auto& cam    = engine.GetCamera();
     cam.position = JPH::Vec3(0.0f, 3.0f, -25.0f);
     cam.yaw      = 90.0f;
     cam.pitch    = 0.0f;
 
     constexpr uint32_t   kFrames = 60;
     RenderBenchmarkTimer timer;
-    TickEngine(*engine, kFrames);
+    TickEngine(engine, kFrames);
     double durationMs = timer.ElapsedMilliseconds();
 
     ZHLN::Println("    [Volumetric Fog] 60 frames x 3D Noise Froxel Ray-Marching in {:.2f} ms ({:.2f} FPS)", durationMs, (kFrames * 1000.0) / durationMs);
@@ -465,21 +476,17 @@ auto RunVolumetricsTest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::
     return {};
 }
 
-auto RunDecalsTest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::Error> {
-    ZHLN::Test::SetTimeout(90);
+auto RunDecalsTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::Error> {
+    ZHLN::Test::SetTimeout(30);
     ZHLN::Println("\n  {}--- GPU Subsystem 5: Screen-Space Decal Projections [{}] ---{}", ZHLN::Color::Cyan, GetModeLabel(mode), ZHLN::Color::Reset);
 
-    auto engine = CreateTestEngine(1280, 720, mode);
-    auto check  = ZHLN::Test::AssertTrue(engine != nullptr);
-    if (!check) {
-        return check;
-    }
+    PrepareEngineForTest(engine);
 
-    auto& reg = engine->GetRegistry();
-    auto& rc  = engine->GetRenderContext();
+    auto& reg = engine.GetRegistry();
+    auto& rc  = engine.GetRenderContext();
 
     ZHLN::CreativeWorksFactory::CreateBox(
-        *engine, JPH::Vec3(25.0f, 15.0f, 0.5f),
+        engine, JPH::Vec3(25.0f, 15.0f, 0.5f),
         ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0, 7.5, 0), .createPhysics = false, .color = {0.2f, 0.2f, 0.2f, 1.0f}}
     );
 
@@ -492,23 +499,23 @@ auto RunDecalsTest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::Error
         float posY = 1.5f + static_cast<float>(i / 20) * 2.5f;
 
         const JPH::Vec3  pos(posX, posY, 0.0f);
-        const JPH::Mat44 world = ZHLN::Math::CreateTransform(pos, JPH::Quat::sIdentity(), JPH::Vec3(1.5f, 1.5f, 1.5f));
+        const JPH::Mat44 world = ZHLN::Math::CreateTransform(pos, JPH::Quat::sIdentity(), JPH::Vec3(2.5f, 2.5f, 2.5f));
 
         reg.Create(
-            ZHLN::Components::TransformComponent {.position = pos, .scale = JPH::Vec3(1.5f, 1.5f, 1.5f)},
+            ZHLN::Components::TransformComponent {.position = pos, .scale = JPH::Vec3(2.5f, 2.5f, 2.5f)},
             ZHLN::Components::WorldTransformComponent {.world = world, .previous = world},
             ZHLN::Components::DecalComponent {.albedoMap = decalTex, .roughness = 0.8f, .metallic = 0.1f}
         );
     }
 
-    auto& cam    = engine->GetCamera();
+    auto& cam    = engine.GetCamera();
     cam.position = JPH::Vec3(0.0f, 7.5f, -18.0f);
     cam.yaw      = 90.0f;
     cam.pitch    = 0.0f;
 
     constexpr uint32_t   kFrames = 60;
     RenderBenchmarkTimer timer;
-    TickEngine(*engine, kFrames);
+    TickEngine(engine, kFrames);
     double durationMs = timer.ElapsedMilliseconds();
 
     ZHLN::Println("    [Screen-Space Decals] 60 frames x 100 Projected Decals in {:.2f} ms ({:.2f} FPS)", durationMs, (kFrames * 1000.0) / durationMs);
@@ -516,17 +523,13 @@ auto RunDecalsTest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::Error
     return {};
 }
 
-auto RunUITest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::Error> {
-    ZHLN::Test::SetTimeout(90);
+auto RunUITest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::Error> {
+    ZHLN::Test::SetTimeout(30);
     ZHLN::Println("\n  {}--- GPU Subsystem 6: Immediate-Mode UI Compositing [{}] ---{}", ZHLN::Color::Cyan, GetModeLabel(mode), ZHLN::Color::Reset);
 
-    auto engine = CreateTestEngine(1280, 720, mode);
-    auto check  = ZHLN::Test::AssertTrue(engine != nullptr);
-    if (!check) {
-        return check;
-    }
+    PrepareEngineForTest(engine);
 
-    engine->SetUICallback([](ZHLN::Engine& eng) {
+    engine.SetUICallback([](ZHLN::Engine& eng) {
         ZHLN::GUI::Context ui(eng.GetRegistry(), eng.GetCurrentFrame());
 
         ui.Panel("PerfDashboard", ZHLN::GUI::PanelConfig {.width = 1200.0f, .height = 680.0f, .gap = 6.0f, .padding = 10.0f}, [&]() {
@@ -541,7 +544,7 @@ auto RunUITest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::Error> {
 
     constexpr uint32_t   kFrames = 60;
     RenderBenchmarkTimer timer;
-    TickEngine(*engine, kFrames);
+    TickEngine(engine, kFrames);
     double durationMs = timer.ElapsedMilliseconds();
 
     ZHLN::Println("    [UI Compositor] 60 frames x 10 Complex Panels + SDF Text in {:.2f} ms ({:.2f} FPS)", durationMs, (kFrames * 1000.0) / durationMs);
@@ -549,17 +552,13 @@ auto RunUITest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::Error> {
     return {};
 }
 
-auto RunPostProcessingTest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::Error> {
-    ZHLN::Test::SetTimeout(90);
+auto RunPostProcessingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::Error> {
+    ZHLN::Test::SetTimeout(30);
     ZHLN::Println("\n  {}--- GPU Subsystem 7: Post-Processing & TAA Stack [{}] ---{}", ZHLN::Color::Cyan, GetModeLabel(mode), ZHLN::Color::Reset);
 
-    auto engine = CreateTestEngine(1280, 720, mode);
-    auto check  = ZHLN::Test::AssertTrue(engine != nullptr);
-    if (!check) {
-        return check;
-    }
+    PrepareEngineForTest(engine);
 
-    auto& reg = engine->GetRegistry();
+    auto& reg = engine.GetRegistry();
 
     for (ZHLN::Entity camEnt: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
         (void) reg.Patch<ZHLN::Components::AASettingsComponent>(camEnt, [](auto& aa) {
@@ -580,13 +579,13 @@ auto RunPostProcessingTest(ZHLN::ValidationMode mode) -> std::expected<void, ZHL
     }
 
     ZHLN::CreativeWorksFactory::CreateBox(
-        *engine, JPH::Vec3(2.0f, 2.0f, 2.0f),
+        engine, JPH::Vec3(2.0f, 2.0f, 2.0f),
         ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0, 2, 0), .createPhysics = false, .roughness = 0.3f, .metallic = 0.8f}
     );
 
     constexpr uint32_t   kFrames = 60;
     RenderBenchmarkTimer timer;
-    TickEngine(*engine, kFrames);
+    TickEngine(engine, kFrames);
     double durationMs = timer.ElapsedMilliseconds();
 
     ZHLN::Println(
@@ -596,23 +595,19 @@ auto RunPostProcessingTest(ZHLN::ValidationMode mode) -> std::expected<void, ZHL
     return {};
 }
 
-auto RunRayTracingTest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::Error> {
-    ZHLN::Test::SetTimeout(90);
+auto RunRayTracingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::Error> {
+    ZHLN::Test::SetTimeout(30);
     ZHLN::Println("\n  {}--- GPU Subsystem 8: Hardware Ray Tracing (RTR / RT Shadows) [{}] ---{}", ZHLN::Color::Cyan, GetModeLabel(mode), ZHLN::Color::Reset);
 
-    auto engine = CreateTestEngine(1280, 720, mode);
-    auto check  = ZHLN::Test::AssertTrue(engine != nullptr);
-    if (!check) {
-        return check;
-    }
-
-    auto& rc = engine->GetRenderContext();
+    auto& rc = engine.GetRenderContext();
     if (!rc.RayTracingSupported()) {
         ZHLN::Println("    [SKIP] Device does not support Hardware Ray Tracing (VK_KHR_ray_tracing / VK_KHR_ray_query).");
         return {};
     }
 
-    auto& reg = engine->GetRegistry();
+    PrepareEngineForTest(engine);
+
+    auto& reg = engine.GetRegistry();
 
     auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
     if (!settings.empty()) {
@@ -636,7 +631,7 @@ auto RunRayTracingTest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::E
         rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 1.0f, .roughness = 0.02f, .baseColor = {0.92f, 0.92f, 0.95f, 1.0f}}
     );
     ZHLN::CreativeWorksFactory::CreatePlane(
-        *engine, 100.0f, {0.92f, 0.92f, 0.95f, 1.0f},
+        engine, 100.0f, {0.92f, 0.92f, 0.95f, 1.0f},
         ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = false, .materialOverride = *mirrorMat}
     );
 
@@ -654,7 +649,7 @@ auto RunRayTracingTest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::E
             float posZ = (static_cast<float>(r) - kGridDim * 0.5f) * 2.5f;
 
             ZHLN::CreativeWorksFactory::CreateBox(
-                *engine, JPH::Vec3(0.5f, 0.5f, 0.5f),
+                engine, JPH::Vec3(0.5f, 0.5f, 0.5f),
                 ZHLN::CreativeWorksFactory::SpawnParams {
                     .position = JPH::RVec3(posX, 0.5, posZ), .createPhysics = false, .materialOverride = (r % 2 == 0) ? *chromeMat : *goldMat
                 }
@@ -668,11 +663,11 @@ auto RunRayTracingTest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::E
             }
     );
     const ZHLN::Entity emissiveCube = ZHLN::CreativeWorksFactory::CreateBox(
-        *engine, JPH::Vec3(2.0f, 2.0f, 2.0f),
+        engine, JPH::Vec3(2.0f, 2.0f, 2.0f),
         ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 5.0, 0.0), .createPhysics = false, .materialOverride = *emissiveMat}
     );
 
-    auto& cam    = engine->GetCamera();
+    auto& cam    = engine.GetCamera();
     cam.position = JPH::Vec3(0.0f, 14.0f, -32.0f);
     cam.yaw      = 90.0f;
     cam.pitch    = -22.0f;
@@ -686,8 +681,8 @@ auto RunRayTracingTest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::E
             trans.position = JPH::Vec3(std::sin(t) * 15.0f, 4.0f + std::sin(t * 2.0f) * 2.0f, std::cos(t) * 15.0f);
         });
 
-        engine->ProcessEvents();
-        engine->Tick(1.0f / 60.0f, ZHLN::GameplayDriver::Cpp);
+        engine.ProcessEvents();
+        engine.Tick(1.0f / 60.0f, ZHLN::GameplayDriver::Cpp);
     }
     double durationMs = timer.ElapsedMilliseconds();
 
@@ -709,21 +704,17 @@ auto RunRayTracingTest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::E
     return {};
 }
 
-auto RunGrandMasterTest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::Error> {
-    ZHLN::Test::SetTimeout(120);
+auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::Error> {
+    ZHLN::Test::SetTimeout(60);
 
     ZHLN::Println("\n  {}================================================================{}", ZHLN::Color::Yellow, ZHLN::Color::Reset);
     ZHLN::Println("  {}--- UNIFIED GRAND MASTER GPU BENCHMARK [{}] ---{}", ZHLN::Color::Yellow, GetModeLabel(mode), ZHLN::Color::Reset);
     ZHLN::Println("  {}================================================================{}", ZHLN::Color::Yellow, ZHLN::Color::Reset);
 
-    auto engine = CreateTestEngine(1280, 720, mode);
-    auto check  = ZHLN::Test::AssertTrue(engine != nullptr);
-    if (!check) {
-        return check;
-    }
+    PrepareEngineForTest(engine);
 
-    auto& reg = engine->GetRegistry();
-    auto& rc  = engine->GetRenderContext();
+    auto& reg = engine.GetRegistry();
+    auto& rc  = engine.GetRenderContext();
 
     const bool useHardwareRT = rc.RayTracingSupported();
     ZHLN::Println("    [Pipeline Configuration] Hardware Ray Tracing Available: {}", useHardwareRT ? "YES (RTR Active)" : "NO (SSR Fallback)");
@@ -733,7 +724,7 @@ auto RunGrandMasterTest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::
         rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.8f, .roughness = 0.08f, .baseColor = {0.85f, 0.85f, 0.90f, 1.0f}}
     );
     ZHLN::CreativeWorksFactory::CreatePlane(
-        *engine, 120.0f, {0.85f, 0.85f, 0.90f, 1.0f},
+        engine, 120.0f, {0.85f, 0.85f, 0.90f, 1.0f},
         ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = false, .materialOverride = *floorMat}
     );
 
@@ -758,7 +749,7 @@ auto RunGrandMasterTest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::
             auto  mat  = (c % 3 == 0) ? *goldMat : ((c % 3 == 1) ? *redMat : *chromeMat);
 
             ZHLN::CreativeWorksFactory::CreateBox(
-                *engine, JPH::Vec3(0.6f, 0.6f, 0.6f),
+                engine, JPH::Vec3(0.6f, 0.6f, 0.6f),
                 ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(posX, 0.6, posZ), .createPhysics = false, .materialOverride = mat}
             );
         }
@@ -846,7 +837,7 @@ auto RunGrandMasterTest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::
     }
 
     // 7. Immediate-Mode UI HUD Callback
-    engine->SetUICallback([useHardwareRT, mode](ZHLN::Engine& eng) {
+    engine.SetUICallback([useHardwareRT, mode](ZHLN::Engine& eng) {
         ZHLN::GUI::Context ui(eng.GetRegistry(), eng.GetCurrentFrame());
         ui.Panel("GrandBenchmarkHUD", ZHLN::GUI::PanelConfig {.width = 380.0f, .height = 240.0f, .gap = 4.0f, .padding = 12.0f}, [&]() {
             ui.Label("GRAND MASTER RENDER BENCHMARK", ZHLN::GUI::LabelConfig {.scale = 0.85f, .color = {0.3f, 0.85f, 1.0f, 1.0f}});
@@ -875,12 +866,12 @@ auto RunGrandMasterTest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::
             pp.fullBright        = 0;
             pp.ambientExposure   = 10.0f;
             pp.vignetteIntensity = 1.15f;
-            pp.enableSSR         = useHardwareRT ? 0 : 1; // Pure Hardware RT when available
+            pp.enableSSR         = useHardwareRT ? 0 : 1;
             pp.enableRTR         = useHardwareRT ? 1 : 0;
         });
     }
 
-    auto& cam = engine->GetCamera();
+    auto& cam = engine.GetCamera();
     cam.fov   = 60.0f;
 
     uint32_t valBefore = ZHLN::RenderContext::ValidationErrorCount();
@@ -909,8 +900,8 @@ auto RunGrandMasterTest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::
             (void) reg.Patch<ZHLN::Components::TransformComponent>(dynamicLights[i], [&](auto& trans) { trans.position = JPH::Vec3(lx, ly, lz); });
         }
 
-        engine->ProcessEvents();
-        engine->Tick(1.0f / 60.0f, ZHLN::GameplayDriver::Cpp);
+        engine.ProcessEvents();
+        engine.Tick(1.0f / 60.0f, ZHLN::GameplayDriver::Cpp);
 
         frameTimesMs.push_back(frameTimer.ElapsedMilliseconds());
     }
@@ -968,79 +959,87 @@ auto RunGrandMasterTest(ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::
 // ============================================================================
 
 struct RenderPerformanceValidationSuite {
+    static inline std::unique_ptr<ZHLN::Engine> s_engine;
+
     RenderPerformanceValidationSuite() {
         RenderPerfEnvironment::Init();
+        s_engine = CreateTestEngine(1280, 720, ZHLN::ValidationMode::On);
     }
     ~RenderPerformanceValidationSuite() {
+        s_engine.reset();
         RenderPerfEnvironment::Shutdown();
     }
 
     struct Tests {
         auto isolated_01_mass_geometry_and_culling() {
-            return RunGeometryTest(ZHLN::ValidationMode::On);
+            return RunGeometryTest(*s_engine, ZHLN::ValidationMode::On);
         }
         auto isolated_02_clustered_lighting_stress() {
-            return RunLightingTest(ZHLN::ValidationMode::On);
+            return RunLightingTest(*s_engine, ZHLN::ValidationMode::On);
         }
         auto isolated_03_gpu_particle_simulation_throughput() {
-            return RunParticlesTest(ZHLN::ValidationMode::On);
+            return RunParticlesTest(*s_engine, ZHLN::ValidationMode::On);
         }
         auto isolated_04_volumetric_fog_throughput() {
-            return RunVolumetricsTest(ZHLN::ValidationMode::On);
+            return RunVolumetricsTest(*s_engine, ZHLN::ValidationMode::On);
         }
         auto isolated_05_screen_space_decals_throughput() {
-            return RunDecalsTest(ZHLN::ValidationMode::On);
+            return RunDecalsTest(*s_engine, ZHLN::ValidationMode::On);
         }
         auto isolated_06_gui_rendering_composition_throughput() {
-            return RunUITest(ZHLN::ValidationMode::On);
+            return RunUITest(*s_engine, ZHLN::ValidationMode::On);
         }
         auto isolated_07_post_processing_stack_throughput() {
-            return RunPostProcessingTest(ZHLN::ValidationMode::On);
+            return RunPostProcessingTest(*s_engine, ZHLN::ValidationMode::On);
         }
         auto isolated_08_hardware_ray_tracing_throughput() {
-            return RunRayTracingTest(ZHLN::ValidationMode::On);
+            return RunRayTracingTest(*s_engine, ZHLN::ValidationMode::On);
         }
         auto unified_09_grand_master_ray_traced_benchmark() {
-            return RunGrandMasterTest(ZHLN::ValidationMode::On);
+            return RunGrandMasterTest(*s_engine, ZHLN::ValidationMode::On);
         }
     };
 };
 
 struct RenderPerformanceThroughputSuite {
+    static inline std::unique_ptr<ZHLN::Engine> s_engine;
+
     RenderPerformanceThroughputSuite() {
         RenderPerfEnvironment::Init();
+        s_engine = CreateTestEngine(1280, 720, ZHLN::ValidationMode::Off);
     }
     ~RenderPerformanceThroughputSuite() {
+        s_engine.reset();
         RenderPerfEnvironment::Shutdown();
     }
 
     struct Tests {
         auto isolated_01_mass_geometry_and_culling() {
-            return RunGeometryTest(ZHLN::ValidationMode::Off);
+            return RunGeometryTest(*s_engine, ZHLN::ValidationMode::Off);
         }
         auto isolated_02_clustered_lighting_stress() {
-            return RunLightingTest(ZHLN::ValidationMode::Off);
+            return RunLightingTest(*s_engine, ZHLN::ValidationMode::Off);
         }
         auto isolated_03_gpu_particle_simulation_throughput() {
-            return RunParticlesTest(ZHLN::ValidationMode::Off);
+            return RunParticlesTest(*s_engine, ZHLN::ValidationMode::Off);
         }
         auto isolated_04_volumetric_fog_throughput() {
-            return RunVolumetricsTest(ZHLN::ValidationMode::Off);
+            return RunVolumetricsTest(*s_engine, ZHLN::ValidationMode::Off);
         }
         auto isolated_05_screen_space_decals_throughput() {
-            return RunDecalsTest(ZHLN::ValidationMode::Off);
+            return RunDecalsTest(*s_engine, ZHLN::ValidationMode::Off);
         }
         auto isolated_06_gui_rendering_composition_throughput() {
-            return RunUITest(ZHLN::ValidationMode::Off);
+            return RunUITest(*s_engine, ZHLN::ValidationMode::Off);
         }
         auto isolated_07_post_processing_stack_throughput() {
-            return RunPostProcessingTest(ZHLN::ValidationMode::Off);
+            return RunPostProcessingTest(*s_engine, ZHLN::ValidationMode::Off);
         }
         auto isolated_08_hardware_ray_tracing_throughput() {
-            return RunRayTracingTest(ZHLN::ValidationMode::Off);
+            return RunRayTracingTest(*s_engine, ZHLN::ValidationMode::Off);
         }
         auto unified_09_grand_master_ray_traced_benchmark() {
-            return RunGrandMasterTest(ZHLN::ValidationMode::Off);
+            return RunGrandMasterTest(*s_engine, ZHLN::ValidationMode::Off);
         }
     };
 };
@@ -1050,6 +1049,5 @@ struct RenderPerformanceThroughputSuite {
 // ============================================================================
 
 auto main() -> int {
-    // Automatically runs Validation ON first (asserts 0 VUID errors), then runs Validation OFF (measures peak FPS)
     return ZHLN::Test::Runner::Run<RenderPerformanceValidationSuite, RenderPerformanceThroughputSuite>();
 }

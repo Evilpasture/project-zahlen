@@ -205,8 +205,8 @@ void UIRenderSystem::Update(Engine& engine) {
                 activeScissors.Insert(e.Pack(), parentClip);
             }
         } else if (parentScissorPtr != nullptr) {
-            // Inherit the ancestor's scissor down the non-clipping node
-            activeScissors.Insert(e.Pack(), *parentScissorPtr);
+            ScissorRect parentScissor = *parentScissorPtr;
+            activeScissors.Insert(e.Pack(), parentScissor);
         }
     }
 

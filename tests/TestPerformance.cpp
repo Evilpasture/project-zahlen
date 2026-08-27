@@ -372,8 +372,8 @@ struct PerformanceTestSuite {
 
             graph.Compile();
 
-            constexpr uintptr_t FakeEnginePtr = 0xDEADBEEF;
-            auto*               fakeEngine    = reinterpret_cast<ZHLN::Engine*>(FakeEnginePtr);
+            alignas(ZHLN::Engine) std::byte fakeEngineStorage[sizeof(ZHLN::Engine)] {};
+            auto*                           fakeEngine = reinterpret_cast<ZHLN::Engine*>(fakeEngineStorage);
 
             BenchmarkTimer graphTimer;
             constexpr int  kGraphIterations = 2000;

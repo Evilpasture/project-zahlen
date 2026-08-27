@@ -198,3 +198,12 @@ constexpr auto ToString(T val) noexcept -> std::string_view {
 }
 
 } // namespace ZHLN
+
+namespace std {
+template <>
+struct formatter<ZHLN::Error, char>: formatter<string_view, char> {
+    auto format(const ZHLN::Error& err, format_context& ctx) const {
+        return formatter<string_view, char>::format(err.Message(), ctx);
+    }
+};
+} // namespace std

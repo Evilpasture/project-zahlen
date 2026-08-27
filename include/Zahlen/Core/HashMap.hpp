@@ -58,6 +58,9 @@ class HashMap {
     }
 
     void Insert(const Key& key, const Value& value) {
+        Key   keyCopy   = key;
+        Value valueCopy = value;
+
         // Factor both active entries and tombstones into load factor calculation
         if ((_size + _tombstones) * 2 >= _capacity) {
             // If table has many tombstones but few active items, rehash in-place to purge tombstones
@@ -88,8 +91,8 @@ class HashMap {
             _tombstones--;
         }
         _states[insertIdx] = 1;
-        ::new (static_cast<void*>(&_keys[insertIdx])) Key(key);
-        ::new (static_cast<void*>(&_values[insertIdx])) Value(value);
+        ::new (static_cast<void*>(&_keys[insertIdx])) Key(std::move(keyCopy));
+        ::new (static_cast<void*>(&_values[insertIdx])) Value(std::move(valueCopy));
         _size++;
     }
 

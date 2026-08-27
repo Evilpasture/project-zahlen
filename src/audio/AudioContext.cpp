@@ -4,6 +4,7 @@
 // src/audio/AudioContext.cpp
 
 #include "Zahlen/ecs/ECS.hpp"
+#include <filesystem>
 #define MINIAUDIO_IMPLEMENTATION
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Core/ControlFlow.hpp>
@@ -558,7 +559,7 @@ struct AudioContext::Impl {
     // --- Direct Event Dispatchers on Impl ---
 
     void DispatchOneShot2D(const char* filepath, float volume) {
-        if (!initialized || filepath == nullptr || filepath[0] == '\0') {
+        if (!initialized || filepath == nullptr || filepath[0] == '\0' || !std::filesystem::exists(filepath)) {
             return;
         }
         auto* sound = soundPool.Create();
@@ -572,7 +573,7 @@ struct AudioContext::Impl {
     }
 
     void DispatchOneShot3D(const char* filepath, const JPH::Vec3& pos, float volume) {
-        if (!initialized || filepath == nullptr || filepath[0] == '\0') {
+        if (!initialized || filepath == nullptr || filepath[0] == '\0' || !std::filesystem::exists(filepath)) {
             return;
         }
         auto* sound = soundPool.Create();
@@ -757,7 +758,7 @@ void AudioContext::FlushEvents() noexcept {
 // ============================================================================
 
 auto AudioContext::CreateVoice(Entity owner, std::string_view filepath, bool spatialized, bool looping, float volume) -> AudioHandle {
-    if (!_impl->initialized || filepath.empty()) {
+    if (!_impl->initialized || filepath.empty() || !std::filesystem::exists(filepath)) {
         return AudioHandle::Invalid;
     }
 

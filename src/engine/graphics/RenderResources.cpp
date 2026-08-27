@@ -125,27 +125,66 @@ auto RenderContext::GetBindlessIndex(TextureHandle handle) const noexcept -> uin
 }
 
 void RenderContext::ClearGPUCaches() noexcept {
+    // 1. Wait for GPU to finish all in-flight work before destroying any pipelines or buffers
+    if (_impl->ctx.Device() != VK_NULL_HANDLE) {
+        auto res = Vk::WaitIdle(_impl->ctx.Device());
+        if (!res) {
+            ZHLN::Log("GPU cache clear aborted due to reason: {}", res.error());
+            return;
+        }
+    }
+
+    // 2. Reclaim all buffer slots from registered meshes
+    _impl->assetMeshMap.ForEach([this](AssetID, const Mesh& mesh) {
+        if (mesh.posBuffer != BufferHandle::Invalid)
+            DestroyBuffer(mesh.posBuffer);
+        if (mesh.attrBuffer != BufferHandle::Invalid)
+            DestroyBuffer(mesh.attrBuffer);
+        if (mesh.skinBuffer != BufferHandle::Invalid)
+            DestroyBuffer(mesh.skinBuffer);
+        if (mesh.indexBuffer != BufferHandle::Invalid)
+            DestroyBuffer(mesh.indexBuffer);
+        if (mesh.meshletBuffer != BufferHandle::Invalid)
+            DestroyBuffer(mesh.meshletBuffer);
+        if (mesh.meshletVertexBuffer != BufferHandle::Invalid)
+            DestroyBuffer(mesh.meshletVertexBuffer);
+        if (mesh.meshletTriBuffer != BufferHandle::Invalid)
+            DestroyBuffer(mesh.meshletTriBuffer);
+    });
     _impl->assetMeshMap.Clear();
+
+    // 3. Reclaim all pipeline slots from registered materials (now safe because GPU is idle)
+    _impl->assetMaterialMap.ForEach([this](MaterialID, const Material& mat) {
+        if (mat.pipeline != PipelineHandle::Invalid) {
+            _impl->materialPool.Destroy(mat.pipeline);
+        }
+        if (mat.prePassPipeline != PipelineHandle::Invalid) {
+            _impl->materialPool.Destroy(mat.prePassPipeline);
+        }
+    });
     _impl->assetMaterialMap.Clear();
 
+    // 4. Reclaim scratch & particle buffers
     _impl->skinnedScratchMap.ForEach([this](uint64_t /*key*/, BufferHandle handle) -> void { DestroyBuffer(handle); });
     _impl->skinnedScratchMap.Clear();
     _impl->particleBufferMap.ForEach([this](uint64_t /*key*/, BufferHandle handle) -> void { DestroyBuffer(handle); });
     _impl->particleBufferMap.Clear();
 
-    // Destroy and clear tracked 2D particle buffers
     for (const auto& pair: _impl->tracked2DEmitters) {
         DestroyBuffer(pair.second);
     }
     _impl->tracked2DEmitters.clear();
 
-    // Destroy and clear tracked 3D particle buffers
     for (const auto& pair: _impl->tracked3DEmitters) {
         DestroyBuffer(pair.second);
     }
     _impl->tracked3DEmitters.clear();
 
     _impl->textureManager.Clear();
+
+    // 5. Drain the deferred deletion queues
+    _impl->deletionQueue.BeginFrame(0);
+    _impl->deletionQueue.BeginFrame(1);
 }
 
 auto RenderContext::GetTracked2DEmitters() noexcept -> ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& {
@@ -501,7 +540,7 @@ using Noise3 = std::array<float, 3>;
     const Noise3 fp = Fract(p);
     const Noise3 u  = {fp[0] * fp[0] * (3.0F - 2.0F * fp[0]), fp[1] * fp[1] * (3.0F - 2.0F * fp[1]), fp[2] * fp[2] * (3.0F - 2.0F * fp[2])};
 
-    const auto at = [&](float ox, float oy, float oz) { return TileableHash3(Add(ip, {ox, oy, oz}), period); };
+    const auto  at   = [&](float ox, float oy, float oz) { return TileableHash3(Add(ip, {ox, oy, oz}), period); };
     const float n000 = at(0, 0, 0);
     const float n100 = at(1, 0, 0);
     const float n010 = at(0, 1, 0);
@@ -548,13 +587,13 @@ auto RenderContext::Impl::InitializeVolumetricNoiseTexture() noexcept -> std::ex
     for (uint32_t z = 0; z < kVolumetricNoiseSize; ++z) {
         for (uint32_t y = 0; y < kVolumetricNoiseSize; ++y) {
             for (uint32_t x = 0; x < kVolumetricNoiseSize; ++x) {
-                const float n = TileableFbm3({static_cast<float>(x) + 0.5F, static_cast<float>(y) + 0.5F, static_cast<float>(z) + 0.5F});
-                const auto  v = static_cast<uint8_t>(std::clamp(n * 255.0F, 0.0F, 255.0F));
+                const float  n   = TileableFbm3({static_cast<float>(x) + 0.5F, static_cast<float>(y) + 0.5F, static_cast<float>(z) + 0.5F});
+                const auto   v   = static_cast<uint8_t>(std::clamp(n * 255.0F, 0.0F, 255.0F));
                 const size_t idx = static_cast<size_t>((z * kVolumetricNoiseSize + y) * kVolumetricNoiseSize + x) * 4;
-                pixels[idx + 0] = v;
-                pixels[idx + 1] = v;
-                pixels[idx + 2] = v;
-                pixels[idx + 3] = 255;
+                pixels[idx + 0]  = v;
+                pixels[idx + 1]  = v;
+                pixels[idx + 2]  = v;
+                pixels[idx + 3]  = 255;
             }
         }
     }
@@ -912,66 +951,66 @@ auto RenderContext::AllocateMorphDeltas(uint32_t count, const float* deltas) -> 
 std::expected<void, Error> RenderContext::Impl::ResizeShadowTargets(uint32_t resolution) noexcept {
     auto* device = ctx.Device();
 
-    return Vk::WaitIdle(device)
-        .transform_error([](auto) -> Error { return ShadowResolutionError::RecreationFailed; })
-        .and_then([&]() -> std::expected<void, Error> {
-            auto sm_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
-                allocator, ctx, {.width = resolution, .height = resolution},
-                {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, .arrayLayers = RenderContext::Impl::NUM_CASCADES}
+    return Vk::WaitIdle(device).transform_error(
+                                   [](auto) -> Error { return ShadowResolutionError::RecreationFailed; }
+    ).and_then([&]() -> std::expected<void, Error> {
+        auto sm_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
+            allocator, ctx, {.width = resolution, .height = resolution},
+            {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, .arrayLayers = RenderContext::Impl::NUM_CASCADES}
+        );
+        if (!sm_res) {
+            return std::unexpected(sm_res.error());
+        }
+        graphResources.shadowMap = std::move(*sm_res);
+
+        auto smp_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
+            allocator, ctx, {.width = resolution, .height = resolution},
+            {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, .arrayLayers = RenderContext::Impl::NUM_CASCADES}
+        );
+        if (!smp_res) {
+            return std::unexpected(smp_res.error());
+        }
+        shadowMapPrev = std::move(*smp_res);
+
+        shadowCascadeViews.clear();
+        shadowCascadeViews.resize(RenderContext::Impl::NUM_CASCADES);
+        shadowCascadeViewsPrev.clear();
+        shadowCascadeViewsPrev.resize(RenderContext::Impl::NUM_CASCADES);
+        for (uint32_t i = 0; i < RenderContext::Impl::NUM_CASCADES; ++i) {
+            auto view_res = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), graphResources.shadowMap.image.Handle(), i, 1);
+            if (!view_res) {
+                return std::unexpected(view_res.error());
+            }
+            shadowCascadeViews[i] = std::move(*view_res);
+
+            auto prev_res = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), shadowMapPrev.image.Handle(), i, 1);
+            if (!prev_res) {
+                return std::unexpected(prev_res.error());
+            }
+            shadowCascadeViewsPrev[i] = std::move(*prev_res);
+        }
+
+        Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
+            Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
+                cmd, graphResources.shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
             );
-            if (!sm_res) {
-                return std::unexpected(sm_res.error());
-            }
-            graphResources.shadowMap = std::move(*sm_res);
 
-            auto smp_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
-                allocator, ctx, {.width = resolution, .height = resolution},
-                {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, .arrayLayers = RenderContext::Impl::NUM_CASCADES}
+            Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+                cmd, graphResources.shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
             );
-            if (!smp_res) {
-                return std::unexpected(smp_res.error());
-            }
-            shadowMapPrev = std::move(*smp_res);
 
-            shadowCascadeViews.clear();
-            shadowCascadeViews.resize(RenderContext::Impl::NUM_CASCADES);
-            shadowCascadeViewsPrev.clear();
-            shadowCascadeViewsPrev.resize(RenderContext::Impl::NUM_CASCADES);
-            for (uint32_t i = 0; i < RenderContext::Impl::NUM_CASCADES; ++i) {
-                auto view_res = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), graphResources.shadowMap.image.Handle(), i, 1);
-                if (!view_res) {
-                    return std::unexpected(view_res.error());
-                }
-                shadowCascadeViews[i] = std::move(*view_res);
+            Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
+                cmd, shadowMapPrev.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
+            );
 
-                auto prev_res = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), shadowMapPrev.image.Handle(), i, 1);
-                if (!prev_res) {
-                    return std::unexpected(prev_res.error());
-                }
-                shadowCascadeViewsPrev[i] = std::move(*prev_res);
-            }
-
-            Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
-                Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
-                    cmd, graphResources.shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
-                );
-
-                Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-                    cmd, graphResources.shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
-                );
-
-                Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
-                    cmd, shadowMapPrev.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
-                );
-
-                Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-                    cmd, shadowMapPrev.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
-                );
-            });
-
-            ZHLN::Log("Shadow map dynamically resized on the GPU to {}x{}", resolution, resolution);
-            return {};
+            Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+                cmd, shadowMapPrev.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
+            );
         });
+
+        ZHLN::Log("Shadow map dynamically resized on the GPU to {}x{}", resolution, resolution);
+        return {};
+    });
 }
 
 auto RenderContext::SetShadowResolution(uint32_t resolution) -> std::expected<void, Error> {

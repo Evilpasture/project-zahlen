@@ -458,8 +458,10 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
     JPH::AssertFailed = JoltAssertBridge;
 #endif
 
-    JPH::Factory::sInstance = new JPH::Factory();
-    JPH::RegisterTypes();
+    if (JPH::Factory::sInstance == nullptr) {
+        JPH::Factory::sInstance = new JPH::Factory();
+        JPH::RegisterTypes();
+    }
 
     auto rc_res = RenderContext::Create(*_impl->window, cfg.render);
     if (!rc_res) {
