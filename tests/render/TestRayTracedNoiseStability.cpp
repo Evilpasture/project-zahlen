@@ -5,43 +5,45 @@
 //
 // GPU-side verification that the ray-traced dither behaves like blue noise.
 //
-// The ray-traced sun shadow used to dither with Interleaved Gradient Noise and
-// trace one rotated Poisson point per pixel. It now samples a blue noise tile
-// and a Vogel disk over the sun (pbr_helpers.slang:
-// CalculateShadowRayTraced, gated in lighting.slang on `pc.enableRTR != 0`).
-// Both old and new produce a stochastic 1-bit visibility, so a frame-comparison
-// test that only measures *magnitude* passes either way -- IGN is not louder
-// than blue noise, it is structured. What changed is the structure, and that is
-// what this suite measures, on real captured PPMs:
+// The ray-traced sun shadow used to dither with Interleaved Gradient Noise. It
+// now samples a blue noise tile and a Vogel disk over the sun
+// (pbr_helpers.slang:CalculateShadowRayTraced). Old and new both produce a
+// stochastic 1-bit visibility, so a test measuring only residual *magnitude*
+// passes either way -- IGN is not louder than blue noise, it is structured.
+// What changed is the structure:
 //
-//   1. PERIODICITY  - the frame-to-frame residual must not correlate positively
-//                     with itself at a short lag. An IGN lattice does, at its
-//                     own period, which is why an A-Trous wavelet or TAA smears
-//                     it into streaks instead of averaging it away.
-//   2. ISOTROPY     - the residual must not prefer a direction. IGN shares phase
-//                     along its lattice axes, so its diagonal gradient energy
-//                     drops and any spatial filter drags the residual along
-//                     those axes.
-//   3. CONVERGENCE  - with the temporal accumulator on, the residual in the
-//                     penumbra must shrink across frames. Noise that is
-//                     regenerated rather than converged holds its level.
-//   4. NO DEBRIS    - changed pixels must be spatially clustered. Single-pixel
-//                     outliers are ray debris / fireflies, not noise.
+//   1. LIVENESS    - the RT shadow must reach the image, and its dither must
+//                    actually change frame to frame.
+//   2. PERIODICITY - the residual must not correlate positively with itself at
+//                    a short lag. An IGN lattice does, at its own period, which
+//                    is why a wavelet denoiser or TAA smears it into streaks.
+//   3. ISOTROPY    - the residual must not prefer a direction. IGN shares phase
+//                    along its lattice axes, so its diagonal gradient energy
+//                    drops and spatial filters drag the residual along them.
+//   4. CONVERGENCE - under temporal accumulation the penumbra residual must
+//                    actually fall, not merely fail to grow.
+//   5. NO DEBRIS   - changed pixels must cluster; isolated ones are fireflies.
 //
-// The analysis lives in tests/RayTracedNoiseMetrics.hpp, which is validated
-// separately on the CPU (tests/TestRayTracedNoiseMetrics.cpp) against a real
-// IGN lattice, the shipped blue noise tile and white noise -- so the thresholds
-// below cannot be satisfied by an arbitrary noise pattern, and their margins
-// are measured rather than guessed.
+// Scenario 1 is a 2x2 diagnosis rather than a single assertion. A blank
+// "nothing changed" result has two completely different causes -- the RT path
+// is not executing at all, or it executes but its dither is temporally frozen
+// -- and the fixes are in different places. Capturing the same static scene
+// with the RT switch on, off, and on again separates them:
 //
-// Measurement region: the penumbra is a few dozen pixels wide in an otherwise
-// static 640x480 frame, so every structural metric is taken over the bounding
-// box of the pixels that actually changed. Feeding the metrics the whole frame
-// would dilute a narrow band with hundreds of thousands of exact zeros.
+//                     on-vs-off differ   on-vs-on differ
+//   yes / yes          RT live, dither varies        (expected)
+//   yes / no           RT live, dither frozen        shader-side bug
+//   no  / -            RT path not executing         settings/variant bug
 //
-// Scenario 1 runs with AA disabled on purpose: the temporal filter would blur
-// the very structure under test. Scenario 3 turns it back on to check the
-// opposite property.
+// The analysis lives in tests/RayTracedNoiseMetrics.hpp, validated separately
+// on the CPU (tests/TestRayTracedNoiseMetrics.cpp) against a real IGN lattice,
+// the shipped blue noise tile and white noise, so the thresholds below cannot
+// be satisfied by an arbitrary noise pattern.
+//
+// Measurement region: every structural metric is taken over the bounding box of
+// the pixels that actually changed. Zeros are direction- and
+// correlation-neutral, so feeding a mostly-static frame to the metrics reads
+// "perfect" regardless of what the dither does.
 
 #include "NoiseFrameCapture.hpp"
 #include "RayTracedNoiseMetrics.hpp"
@@ -63,22 +65,28 @@
 #include <cstdint>
 #include <cstdio>
 #include <expected>
-#include <fstream>
 #include <memory>
+#include <numeric>
 #include <string>
 #include <vector>
 
 enum class NoiseStabilityError : uint8_t {
     EngineInitFailed[[= ZHLN::Reflect::Description("Failed to initialize the headless Engine for the RT noise stability test.")]] = 1,
     CaptureFailed[[= ZHLN::Reflect::Description("A frame could not be captured or the PPM could not be read back.")]],
-    NoPenumbraFound[[= ZHLN::Reflect::Description(
-        "No usable per-frame variation was found; the ray-traced dither is not reaching the measured pixels, so the structural gates would pass vacuously."
+    RayTracedShadowPathInactive[[= ZHLN::Reflect::Description(
+        "Enabling enableRTR did not change a single pixel against a fully static scene, so the ray-traced shadow path is not executing: either pc.enableRTR reaches the shader as 0, the TLAS is null, or the DISABLE_RTR lighting variant was selected."
+    )]],
+    DitherTemporallyFrozen[[= ZHLN::Reflect::Description(
+        "The ray-traced shadow path executes but renders the identical image at two different frame indices, so the blue noise temporal scroll is not advancing: check FrameIndexFromCamPosW(pc.camPos.w) and the R2 UV offset in blue_noise.slang."
+    )]],
+    PenumbraTooSmallToMeasure[[= ZHLN::Reflect::Description(
+        "The per-frame variation covers too small a region for the structural metrics; widen the penumbra (sunSize / occluder height) rather than trusting a measurement over a handful of pixels."
     )]],
     DitherIsPeriodic[[= ZHLN::Reflect::Description(
         "The ray-traced dither repeats at a short spatial lag; the residual carries a lattice a spatial filter cannot integrate away."
     )]],
     DitherIsAnisotropic[[= ZHLN::Reflect::Description("The ray-traced dither residual has a preferred direction (structured lattice, not blue noise).")]],
-    ResidualDidNotConverge[[= ZHLN::Reflect::Description("With the temporal accumulator enabled the penumbra residual did not shrink across frames.")]],
+    ResidualDidNotConverge[[= ZHLN::Reflect::Description("Under temporal accumulation the penumbra residual oscillated instead of falling.")]],
     RayDebrisDetected[[= ZHLN::Reflect::Description("The residual is dominated by isolated single-pixel outliers (ray debris / fireflies).")]],
 };
 
@@ -103,6 +111,13 @@ constexpr double kChangeThreshold = 2.0;
 /// AutocorrelationSideLobe (which needs >= 2*maxLag+3 = 11 per side) and for
 /// the four-directional gradient energies to be statistically meaningful.
 constexpr int kMinRegion = 48;
+
+/// Sun disk half-angle in radians. The engine's ImGui slider clamps this to
+/// 0.05, which is a sane *visual* default but leaves a penumbra only ~11 px
+/// wide at this camera distance -- below kMinRegion. Nothing but the slider
+/// enforces that clamp, and the RT shadow is the only consumer of frame.sunSize,
+/// so the test widens it to get a measurable band.
+constexpr float kSunSize = 0.25f;
 
 } // namespace
 
@@ -142,9 +157,7 @@ struct RayTracedNoiseStabilityTestSuite {
     /// Pins the requested AA mode and zeroes sub-pixel jitter. Jitter must be
     /// off for the structural scenarios: camera jitter injects its own residual
     /// that has nothing to do with the shadow dither. `AAState::frameIndex` is
-    /// deliberately left alone -- the blue noise temporal scroll is derived from
-    /// `camPos.w`, which RenderSystem drives off GetCurrentFrame(), so the
-    /// dither advances whether or not the TAA counter is reset.
+    /// deliberately left alone.
     static void SetAA(ZHLN::Engine& engine, ZHLN::AAMode mode) {
         auto& reg = engine.GetRegistry();
         for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
@@ -160,21 +173,22 @@ struct RayTracedNoiseStabilityTestSuite {
         engine.GetRenderContext().SetAAState(ZHLN::AAState {.mode = mode});
     }
 
-    /// `enableRTR` is the switch lighting.slang actually reads to take the
-    /// ray-traced sun shadow instead of the cascade map. SSR is off so no
-    /// screen-space reflection contributes a residual of its own, and the sky /
-    /// vignette are flattened so the only thing moving between frames is the
-    /// shadow.
-    static void EnableRayTracedShadows(ZHLN::Engine& engine) {
+    /// `PostProcessSettingsComponent::enableRTR` is what
+    /// GraphicsSettingsSync.cpp:104 turns into rayTracing.enableReflections,
+    /// which RenderGraphBuilder.cpp:1003 then ANDs with a non-null TLAS to form
+    /// pc.enableRTR and to pick the lighting pipeline variant. SSR is off and
+    /// every material is rough (0.7-0.85, past the 0.4 RTR cutoff), so the only
+    /// thing the switch can change is the shadow.
+    static void SetRayTracedShadows(ZHLN::Engine& engine, int enableRTR) {
         auto&      reg      = engine.GetRegistry();
         const auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
         if (settings.empty()) {
             return;
         }
-        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [](auto& pp) {
+        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [enableRTR](auto& pp) {
             pp.fullBright        = 0;
             pp.enableSSR         = 0;
-            pp.enableRTR         = 1;
+            pp.enableRTR         = enableRTR;
             pp.giMode            = 0;
             pp.giIntensity       = 0.0f;
             pp.vignetteIntensity = 0.0f;
@@ -183,25 +197,17 @@ struct RayTracedNoiseStabilityTestSuite {
             pp.skyHorizon        = JPH::Vec4(0.004f, 0.006f, 0.012f, 1.0f);
             pp.skyGround         = JPH::Vec4(0.001f, 0.001f, 0.002f, 1.0f);
         });
-        // ShadowSettingsComponent shares the settings entity with the post
-        // process one (src/engine/Engine.cpp:688 adds GlobalSettingsTag,
-        // PostProcessSettings and ShadowSettings together), but look it up
-        // through its own archetype the way GraphicsSettingsSync does so a
-        // future split does not turn this into a silent no-op.
+        // Locate the shadow component by type the way the engine's own readers
+        // do, rather than assuming it shares the settings entity.
         const auto shadowEnts = reg.GetEntitiesWith<ZHLN::Components::ShadowSettingsComponent>();
         if (!shadowEnts.empty()) {
-            reg.Patch<ZHLN::Components::ShadowSettingsComponent>(shadowEnts[0], [](auto& sh) {
-                // Widest softness the engine's own UI offers (src/main.cpp
-                // clamps the slider to 0.05). A wide sun disk widens the
-                // penumbra, which is what puts enough per-frame-varying pixels
-                // on screen for the structural metrics to average over.
-                sh.sunSize = 0.05f;
-            });
+            reg.Patch<ZHLN::Components::ShadowSettingsComponent>(shadowEnts[0], [](auto& sh) { sh.sunSize = kSunSize; });
         }
     }
 
     /// Ground + a raised occluder + a raking sun, so a broad penumbra lands on
-    /// the floor inside the frame.
+    /// the floor inside the frame. Penumbra width tracks sunSize * height / L.y,
+    /// so the occluder sits high.
     static bool BuildShadowScene(ZHLN::Engine& engine) {
         auto& reg = engine.GetRegistry();
 
@@ -218,14 +224,12 @@ struct RayTracedNoiseStabilityTestSuite {
         }
 
         ZHLN::CreativeWorksFactory::CreatePlane(
-            engine, 60.0f, {0.8f, 0.8f, 0.82f, 1.0f},
+            engine, 80.0f, {0.8f, 0.8f, 0.82f, 1.0f},
             ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *floorMat}
         );
-        // Raised so the penumbra (sunSize * height-above-floor) is wide enough
-        // to span dozens of pixels.
         ZHLN::CreativeWorksFactory::CreateBox(
             engine, JPH::Vec3(1.5f, 1.5f, 1.5f),
-            ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 5.0, 0.0), .createPhysics = false, .materialOverride = *boxMat}
+            ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 10.0, 0.0), .createPhysics = false, .materialOverride = *boxMat}
         );
 
         const ZHLN::Entity sunEnt = reg.Create();
@@ -238,9 +242,9 @@ struct RayTracedNoiseStabilityTestSuite {
         );
 
         auto& cam    = engine.GetCamera();
-        cam.position = JPH::Vec3(0.0f, 6.0f, 14.0f);
+        cam.position = JPH::Vec3(0.0f, 8.0f, 26.0f);
         cam.yaw      = -90.0f;
-        cam.pitch    = -12.0f;
+        cam.pitch    = -14.0f;
         cam.fov      = 60.0f;
         return true;
     }
@@ -261,9 +265,66 @@ struct RayTracedNoiseStabilityTestSuite {
         return LoadPPM(name);
     }
 
+    /// Settles the scene, then grabs one frame. Two ticks after a settings
+    /// change so the delta-detected GraphicsSettings apply and the history
+    /// buffers have caught up before anything is measured.
+    static RgbImage SettleAndCapture(ZHLN::Engine& engine, const std::string& name) {
+        TickFrames(engine, 2);
+        return Capture(engine, name);
+    }
+
     struct Tests {
-        /// The residual must be aperiodic and isotropic. This is the direct
-        /// blue-noise-vs-lattice test on rendered output.
+        /// The 2x2 diagnosis: is the RT shadow in the image at all, and does its
+        /// dither move between frames? Every later scenario depends on both, so
+        /// this one names the failure instead of reporting a blank residual.
+        std::expected<void, ZHLN::Error> rt_shadow_is_live_and_its_dither_moves() {
+            auto engine = RayTracedNoiseStabilityTestSuite::CreateTestEngine();
+            if (!ZHLN::Test::AssertTrue(engine != nullptr)) {
+                return std::unexpected(NoiseStabilityError::EngineInitFailed);
+            }
+            if (!engine->GetRenderContext().RayTracingSupported()) {
+                ZHLN::Println("    [SKIP] Device has no ray tracing support; dither checks are not applicable.");
+                return {};
+            }
+            if (!RayTracedNoiseStabilityTestSuite::BuildShadowScene(*engine)) {
+                return std::unexpected(NoiseStabilityError::EngineInitFailed);
+            }
+            RayTracedNoiseStabilityTestSuite::SetAA(*engine, ZHLN::AAMode::None);
+
+            // A: RT on.  B: RT off.  C: RT on again, at a later frame index.
+            RayTracedNoiseStabilityTestSuite::SetRayTracedShadows(*engine, 1);
+            RgbImage a = RayTracedNoiseStabilityTestSuite::SettleAndCapture(*engine, "rt_noise_live_on.ppm");
+            RayTracedNoiseStabilityTestSuite::SetRayTracedShadows(*engine, 0);
+            RgbImage b = RayTracedNoiseStabilityTestSuite::SettleAndCapture(*engine, "rt_noise_live_off.ppm");
+            RayTracedNoiseStabilityTestSuite::SetRayTracedShadows(*engine, 1);
+            RgbImage c = RayTracedNoiseStabilityTestSuite::SettleAndCapture(*engine, "rt_noise_live_on2.ppm");
+            if (!ZHLN::Test::ExpectTrue(a.Valid() && b.Valid() && c.Valid())) {
+                return std::unexpected(NoiseStabilityError::CaptureFailed);
+            }
+
+            const auto onVsOff = ZHLN::Test::Noise::MeasureResidual(a.rgb.data(), b.rgb.data(), kWidth, kHeight, kChangeThreshold);
+            const auto onVsOn  = ZHLN::Test::Noise::MeasureResidual(a.rgb.data(), c.rgb.data(), kWidth, kHeight, kChangeThreshold);
+            ZHLN::Println(
+                "    [INFO] RT on vs off : meanAbs={:.3f} rms={:.3f} changed={:.5f}", onVsOff.meanAbs, onVsOff.rms, onVsOff.changedFraction
+            );
+            ZHLN::Println(
+                "    [INFO] RT on vs on  : meanAbs={:.3f} rms={:.3f} changed={:.5f}", onVsOn.meanAbs, onVsOn.rms, onVsOn.changedFraction
+            );
+
+            if (!ZHLN::Test::ExpectTrue(onVsOff.changedFraction > 0.0)) {
+                return std::unexpected(NoiseStabilityError::RayTracedShadowPathInactive);
+            }
+            if (!ZHLN::Test::ExpectTrue(onVsOn.changedFraction > 0.0)) {
+                return std::unexpected(NoiseStabilityError::DitherTemporallyFrozen);
+            }
+
+            ZHLN::Println("    [PASS] RT shadow reaches the image and its dither advances with the frame index.");
+            return {};
+        }
+
+        /// The residual must be aperiodic and isotropic -- the direct
+        /// blue-noise-vs-lattice test on rendered output. AA is off so the
+        /// temporal filter does not blur the structure under test.
         std::expected<void, ZHLN::Error> rt_dither_residual_is_aperiodic_and_isotropic() {
             auto engine = RayTracedNoiseStabilityTestSuite::CreateTestEngine();
             if (!ZHLN::Test::AssertTrue(engine != nullptr)) {
@@ -273,16 +334,13 @@ struct RayTracedNoiseStabilityTestSuite {
                 ZHLN::Println("    [SKIP] Device has no ray tracing support; dither structure checks are not applicable.");
                 return {};
             }
-
-            EnableRayTracedShadows(*engine);
             if (!RayTracedNoiseStabilityTestSuite::BuildShadowScene(*engine)) {
                 return std::unexpected(NoiseStabilityError::EngineInitFailed);
             }
-            // AA off: the temporal filter would blur the structure under test.
+            RayTracedNoiseStabilityTestSuite::SetRayTracedShadows(*engine, 1);
             RayTracedNoiseStabilityTestSuite::SetAA(*engine, ZHLN::AAMode::None);
-            RayTracedNoiseStabilityTestSuite::TickFrames(*engine, 4);
 
-            RgbImage prev = RayTracedNoiseStabilityTestSuite::Capture(*engine, "rt_noise_structure_a.ppm");
+            RgbImage prev = RayTracedNoiseStabilityTestSuite::SettleAndCapture(*engine, "rt_noise_structure_a.ppm");
             RayTracedNoiseStabilityTestSuite::TickFrames(*engine, 1);
             RgbImage cur = RayTracedNoiseStabilityTestSuite::Capture(*engine, "rt_noise_structure_b.ppm");
             if (!ZHLN::Test::ExpectTrue(prev.Valid() && cur.Valid())) {
@@ -295,26 +353,24 @@ struct RayTracedNoiseStabilityTestSuite {
             }
 
             const std::vector<double> diff = LumaDifference(prev, cur);
-            const BBox band = BBoxOfChangedPixels(diff.data(), kWidth, kHeight, kChangeThreshold, 4);
+            const BBox                band = BBoxOfChangedPixels(diff.data(), kWidth, kHeight, kChangeThreshold, 4);
 
             ZHLN::Println(
                 "    [INFO] full frame: meanAbs={:.3f} rms={:.3f} changed={:.5f} isolated={:.4f} maxAbs={:.1f}", res.meanAbs, res.rms,
                 res.changedFraction, res.isolatedFraction, res.maxAbs
             );
-
-            // Guard against a vacuous pass. A zero residual scores a perfect
-            // anisotropy of 1.0 and a side lobe of 0.0, so a dither that never
-            // reaches the screen would satisfy both gates below. One sample per
-            // pixel over a per-frame-varying Vogel disk flips roughly half the
-            // penumbra pixels every frame, so an empty or thread-like band
-            // means the ray-traced shadow is not in the image.
-            const bool regionUsable = !band.Empty() && band.Width() >= kMinRegion && band.Height() >= kMinRegion;
             ZHLN::Println(
                 "    [INFO] penumbra bbox = [{},{}) x [{},{})  ({}x{}), region rms={:.3f}", band.x0, band.x1, band.y0, band.y1, band.Width(),
                 band.Height(), RmsInRegion(diff.data(), kWidth, band)
             );
-            if (!ZHLN::Test::ExpectTrue(regionUsable)) {
-                return std::unexpected(NoiseStabilityError::NoPenumbraFound);
+
+            // A zero residual scores a perfect anisotropy of 1.0 and a side
+            // lobe of 0.0, so it would satisfy both gates below. Scenario 1
+            // already distinguishes "path inactive" from "dither frozen"; here
+            // the only remaining explanation for a usable-but-tiny band is that
+            // the penumbra is narrower than the metrics can average over.
+            if (!ZHLN::Test::ExpectTrue(!band.Empty() && band.Width() >= kMinRegion && band.Height() >= kMinRegion)) {
+                return std::unexpected(NoiseStabilityError::PenumbraTooSmallToMeasure);
             }
 
             const std::vector<double> region = Crop(diff.data(), kWidth, band);
@@ -327,21 +383,15 @@ struct RayTracedNoiseStabilityTestSuite {
             );
             ZHLN::Println("    [INFO] positive autocorrelation side lobe (lag<=4) = {:.4f}", lob);
 
-            // Thresholds are measured, not guessed. Running this exact
-            // pipeline (LumaDifference -> BBoxOfChangedPixels -> Crop ->
-            // MeasureDirectionalEnergy / AutocorrelationSideLobe) over a
-            // synthetic 406x189 penumbra built from the shipped tile and the
-            // engine's own GetShadowDither gives:
+            // Thresholds are measured, not guessed. Running this exact pipeline
+            // over a synthetic 406x189 penumbra built from the shipped tile and
+            // the engine's own GetShadowDither gives:
             //
             //                          anisotropy   positive side lobe
             //   IGN lattice dither       2.8658          0.9410
             //   blue noise dither        1.0382          0.0385
             //
-            // 1.60 and 0.30 sit between the two regimes: 1.5x above the blue
-            // noise result and 1.8x / 3.1x below the lattice one. The CPU
-            // suite (tests/TestRayTracedNoiseMetrics.cpp) independently
-            // validates that the underlying metrics separate the two on the
-            // real asset.
+            // 1.60 and 0.30 sit between the two regimes.
             if (!ZHLN::Test::ExpectTrue(dir.Anisotropy() < 1.60)) {
                 return std::unexpected(NoiseStabilityError::DitherIsAnisotropic);
             }
@@ -353,10 +403,7 @@ struct RayTracedNoiseStabilityTestSuite {
             return {};
         }
 
-        /// With the temporal accumulator on, the penumbra residual must fall.
-        /// This is what the blue noise temporal scroll is for: consecutive
-        /// frames land on well-separated R2 points, so the history converges
-        /// instead of revisiting the same offsets.
+        /// Under temporal accumulation the penumbra residual must actually fall.
         std::expected<void, ZHLN::Error> rt_residual_converges_with_temporal_accumulation() {
             auto engine = RayTracedNoiseStabilityTestSuite::CreateTestEngine();
             if (!ZHLN::Test::AssertTrue(engine != nullptr)) {
@@ -366,44 +413,36 @@ struct RayTracedNoiseStabilityTestSuite {
                 ZHLN::Println("    [SKIP] Device has no ray tracing support; convergence check is not applicable.");
                 return {};
             }
-
-            EnableRayTracedShadows(*engine);
             if (!RayTracedNoiseStabilityTestSuite::BuildShadowScene(*engine)) {
                 return std::unexpected(NoiseStabilityError::EngineInitFailed);
             }
+            RayTracedNoiseStabilityTestSuite::SetRayTracedShadows(*engine, 1);
             RayTracedNoiseStabilityTestSuite::SetAA(*engine, ZHLN::AAMode::TAA);
-            RayTracedNoiseStabilityTestSuite::TickFrames(*engine, 3);
 
-            // Captures reuse two filenames rather than accumulating one PPM per
-            // frame: only the current and previous frame are ever read, and
-            // *.ppm is not gitignored, so a suite that leaves eight files
-            // behind per run would dirty the working tree.
-            RgbImage prev = RayTracedNoiseStabilityTestSuite::Capture(*engine, "rt_noise_conv_prev.ppm");
+            RgbImage prev = RayTracedNoiseStabilityTestSuite::SettleAndCapture(*engine, "rt_noise_conv_prev.ppm");
             if (!ZHLN::Test::ExpectTrue(prev.Valid())) {
                 return std::unexpected(NoiseStabilityError::CaptureFailed);
             }
 
-            // Fix the measurement window on the first pair, then reuse it for
-            // every later pair: the shadow is static, so the window does not
-            // move, and holding it fixed keeps the series comparable.
+            // Fix the measurement window on the first pair and reuse it: the
+            // shadow is static, so the window does not move, and holding it
+            // fixed keeps the series comparable.
             RayTracedNoiseStabilityTestSuite::TickFrames(*engine, 1);
             RgbImage second = RayTracedNoiseStabilityTestSuite::Capture(*engine, "rt_noise_conv_cur.ppm");
             if (!ZHLN::Test::ExpectTrue(second.Valid())) {
                 return std::unexpected(NoiseStabilityError::CaptureFailed);
             }
-
             const std::vector<double> firstDiff = LumaDifference(prev, second);
-            const BBox band = BBoxOfChangedPixels(firstDiff.data(), kWidth, kHeight, kChangeThreshold, 4);
+            const BBox                band      = BBoxOfChangedPixels(firstDiff.data(), kWidth, kHeight, kChangeThreshold, 4);
             if (!ZHLN::Test::ExpectTrue(!band.Empty() && band.Width() >= kMinRegion && band.Height() >= kMinRegion)) {
-                return std::unexpected(NoiseStabilityError::NoPenumbraFound);
+                return std::unexpected(NoiseStabilityError::PenumbraTooSmallToMeasure);
             }
             ZHLN::Println("    [INFO] measuring convergence over [{},{}) x [{},{})", band.x0, band.x1, band.y0, band.y1);
 
             std::vector<double> rmsSeries;
             rmsSeries.push_back(RmsInRegion(firstDiff.data(), kWidth, band));
             prev = std::move(second);
-
-            for (uint32_t f = 2; f < 8; ++f) {
+            for (uint32_t f = 2; f < 10; ++f) {
                 RayTracedNoiseStabilityTestSuite::TickFrames(*engine, 1);
                 RgbImage cur = RayTracedNoiseStabilityTestSuite::Capture(*engine, "rt_noise_conv_cur.ppm");
                 if (!ZHLN::Test::ExpectTrue(cur.Valid())) {
@@ -415,18 +454,36 @@ struct RayTracedNoiseStabilityTestSuite {
             }
 
             const double slope = ZHLN::Test::Noise::LinearSlope(rmsSeries);
+            const double mean  = std::accumulate(rmsSeries.begin(), rmsSeries.end(), 0.0) / static_cast<double>(rmsSeries.size());
+            // Total fall the fitted line predicts across the whole window.
+            const double fittedDrop = -slope * static_cast<double>(rmsSeries.size() - 1);
             for (std::size_t i = 0; i < rmsSeries.size(); ++i) {
                 ZHLN::Println("    [INFO] penumbra residual RMS frame {} -> {}: {:.4f}", i + 1, i + 2, rmsSeries[i]);
             }
-            ZHLN::Println("    [INFO] least-squares slope = {:.6f} (negative = converging)", slope);
+            ZHLN::Println(
+                "    [INFO] mean={:.4f} slope={:.6f} predicted drop over window={:.4f} ({:.1f}% of mean)", mean, slope, fittedDrop,
+                mean > 0.0 ? 100.0 * fittedDrop / mean : 0.0
+            );
 
-            // A settled accumulator flattens out rather than driving the
-            // residual to zero, so the gate is "not growing" plus a real drop
-            // from the first frame -- a scene that is still resolving must
-            // actually improve.
-            const bool notGrowing = rmsSeries.back() <= rmsSeries.front() * 1.05;
-            const bool improved   = rmsSeries.back() < rmsSeries.front() * 0.95;
-            if (!ZHLN::Test::ExpectTrue(notGrowing && improved)) {
+            // An earlier gate of "last < first * 0.95" passed a flat, purely
+            // oscillating series. On the measured samples 4.26 2.47 3.81 3.56
+            // 4.38 2.97 3.22 the endpoints happened to differ by 25% while the
+            // fitted trend fell only 12.8% of the mean -- endpoint luck, not
+            // convergence. Requiring the *fitted* trend to account for a real
+            // fraction of the signal rejects that.
+            //
+            // 0.35 is set from running the candidate gate over synthetic
+            // series: pure 4/2/4/2 oscillation scores 22.2% of mean and a flat
+            // GPU-like series 12.8%, while genuine convergence from a fresh
+            // accumulator scores 130-150%. The cut sits 1.6x above the worst
+            // non-converging case and 3.7x below the worst converging one.
+            //
+            // A settled accumulator that flattened before the window opens
+            // would legitimately fail this, so the window is opened right
+            // after the settings change with only two settle ticks -- TAA
+            // feedback of 0.95 needs tens of frames, well outside it.
+            const bool converged = slope < 0.0 && fittedDrop > 0.35 * mean;
+            if (!ZHLN::Test::ExpectTrue(converged)) {
                 return std::unexpected(NoiseStabilityError::ResidualDidNotConverge);
             }
 
@@ -445,15 +502,13 @@ struct RayTracedNoiseStabilityTestSuite {
                 ZHLN::Println("    [SKIP] Device has no ray tracing support; debris check is not applicable.");
                 return {};
             }
-
-            EnableRayTracedShadows(*engine);
             if (!RayTracedNoiseStabilityTestSuite::BuildShadowScene(*engine)) {
                 return std::unexpected(NoiseStabilityError::EngineInitFailed);
             }
+            RayTracedNoiseStabilityTestSuite::SetRayTracedShadows(*engine, 1);
             RayTracedNoiseStabilityTestSuite::SetAA(*engine, ZHLN::AAMode::None);
-            RayTracedNoiseStabilityTestSuite::TickFrames(*engine, 4);
 
-            RgbImage prev = RayTracedNoiseStabilityTestSuite::Capture(*engine, "rt_noise_debris_a.ppm");
+            RgbImage prev = RayTracedNoiseStabilityTestSuite::SettleAndCapture(*engine, "rt_noise_debris_a.ppm");
             RayTracedNoiseStabilityTestSuite::TickFrames(*engine, 1);
             RgbImage cur = RayTracedNoiseStabilityTestSuite::Capture(*engine, "rt_noise_debris_b.ppm");
             if (!ZHLN::Test::ExpectTrue(prev.Valid() && cur.Valid())) {
@@ -465,18 +520,14 @@ struct RayTracedNoiseStabilityTestSuite {
                 "    [INFO] changed={:.5f} isolated-of-changed={:.4f} maxAbs={:.1f}", res.changedFraction, res.isolatedFraction, res.maxAbs
             );
 
-            // isolatedFraction is a ratio, so it is independent of where in
-            // the frame the noise sits; no crop needed. It is meaningless on a
-            // fully static pair, so skip rather than pass on nothing.
-            //
-            // This gate is deliberately loose and is not a discriminator: the
-            // synthetic blue noise penumbra scores 0.163 and the IGN lattice
-            // scores 0.038, i.e. a lattice is *more* clustered. What it catches
-            // is the other failure mode -- single-pixel ray debris or
-            // fireflies, which are isolated by definition.
-            if (res.changedFraction < 1e-5) {
-                ZHLN::Println("    [INFO] No changed pixels; debris classification skipped.");
-                return {};
+            // Not a discriminator -- the synthetic blue noise penumbra scores
+            // 0.163 and the IGN lattice 0.038, so a lattice is *more*
+            // clustered. What this catches is the other failure mode: isolated
+            // ray debris and fireflies. Scenario 1 already proved the dither
+            // moves, so a zero here would contradict it; treat that as a
+            // capture problem rather than passing on nothing.
+            if (!ZHLN::Test::ExpectTrue(res.changedFraction > 1e-5)) {
+                return std::unexpected(NoiseStabilityError::DitherTemporallyFrozen);
             }
             if (!ZHLN::Test::ExpectTrue(res.isolatedFraction < 0.6)) {
                 return std::unexpected(NoiseStabilityError::RayDebrisDetected);
