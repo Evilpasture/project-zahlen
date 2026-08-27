@@ -154,4 +154,207 @@ struct BBox {
     return std::sqrt(acc / static_cast<double>(b.Width() * b.Height()));
 }
 
+
+// ---------------------------------------------------------------------------
+// Temporal noise magnitude.
+//
+// The structural metrics above say what SHAPE the noise has. This says whether
+// there is the right AMOUNT of it.
+//
+// A one-sample-per-pixel stochastic shadow makes each penumbra pixel a
+// Bernoulli draw: the ray either sees the sun or it does not, so across frames
+// that pixel takes exactly two values, A (shadowed) and B (lit), with
+// probability p of landing on B. Therefore
+//
+//     mean     = A + p*d            where d = B - A
+//     variance = p*(1-p)*d^2
+//
+// and crucially this is exact whatever the tone curve does, because the tone
+// curve is applied before the draw -- it moves A and B but cannot create a
+// third value. So measuring mean and variance per pixel and comparing against
+// p*(1-p)*d^2 tests the estimator directly:
+//
+//     ratio ~= 1     the noise is exactly what 1 SPP must produce
+//     ratio ~= 0     the dither is not reaching the pixel at all
+//     ratio  > 1     more variance than Bernoulli allows -- instability,
+//                    fireflies, or a second noise source on top
+//
+// Validated on synthetic shadows with a known sample count: the fit returns
+// 1.0000 at 1 SPP both linear and tone-mapped, which is the case that matters
+// because lighting.slang calls CalculateShadowRayTraced without a `samples`
+// argument and so uses the 1u default. Above 1 SPP the model still holds
+// against the true coverage (measured variance / theory = 0.97, 1.05, 1.03 at
+// N = 1, 2, 4) but the *fitted* coverage drifts, so the ratio reads 0.55 and
+// 0.27 instead of 0.50 and 0.25. If the renderer ever goes multi-sample this
+// threshold must be recalibrated to 1/N -- that is a deliberate tripwire, not
+// a silent pass.
+//
+// `d` and `A` are estimated from the pixels themselves rather than assumed:
+// every penumbra pixel on a single material shares the same two levels, so `d`
+// is a high percentile of the per-pixel (max-min) range (a high percentile
+// because a pixel whose p is near 0 or 1 may never sample its rare value in a
+// finite run, which only ever *underestimates* the range).
+// ---------------------------------------------------------------------------
+
+/// Running per-pixel temporal statistics over a sequence of frames.
+struct TemporalMoments {
+    int                   width  = 0;
+    int                   height = 0;
+    std::vector<double>   sum;
+    std::vector<double>   sumSq;
+    std::vector<double>   lo;
+    std::vector<double>   hi;
+    std::vector<uint32_t> count;
+    /// Times a sample extended the running [lo, hi] by more than
+    /// `clusterTolerance`. This is a level-count probe, not an outlier count:
+    /// a pixel that only ever takes two values needs exactly one such event
+    /// (the first time its second level shows up), a three-valued pixel needs
+    /// two, and so on. So offCluster summed over a pixel is roughly
+    /// (distinct levels - 1), and divided by the frame count it should sit
+    /// near 1/frames for a clean 1 SPP shadow.
+    std::vector<uint32_t> offCluster;
+
+    void Reset(int w, int h) {
+        width  = w;
+        height = h;
+        const std::size_t n = static_cast<std::size_t>(w) * static_cast<std::size_t>(h);
+        sum.assign(n, 0.0);
+        sumSq.assign(n, 0.0);
+        lo.assign(n, 0.0);
+        hi.assign(n, 0.0);
+        count.assign(n, 0u);
+        offCluster.assign(n, 0u);
+    }
+
+    /// Folds in one frame's luma plane (row-major, width*height).
+    void AddLuma(const double* luma, double clusterTolerance) {
+        const std::size_t n = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+        for (std::size_t i = 0; i < n; ++i) {
+            const double v = luma[i];
+            if (count[i] == 0u) {
+                lo[i] = v;
+                hi[i] = v;
+            } else {
+                // Off-cluster is judged against the range seen so far; a value
+                // that extends the range is by definition on its new edge.
+                if (v < lo[i] - clusterTolerance || v > hi[i] + clusterTolerance) {
+                    ++offCluster[i];
+                }
+                lo[i] = std::min(lo[i], v);
+                hi[i] = std::max(hi[i], v);
+            }
+            sum[i] += v;
+            sumSq[i] += v * v;
+            ++count[i];
+        }
+    }
+};
+
+/// Luma plane of an RGB8 frame.
+[[nodiscard]] inline std::vector<double> LumaPlane(const RgbImage& img) {
+    const std::size_t n = static_cast<std::size_t>(img.width) * static_cast<std::size_t>(img.height);
+    std::vector<double> out(n, 0.0);
+    for (std::size_t i = 0; i < n; ++i) {
+        const std::size_t p = i * 3u;
+        out[i] = Noise::Luma(img.rgb[p], img.rgb[p + 1u], img.rgb[p + 2u]);
+    }
+    return out;
+}
+
+struct BernoulliFit {
+    double shadowedLevel  = 0.0; ///< A, the shadowed luma level.
+    double amplitude      = 0.0; ///< d = B - A, the full flip amplitude.
+    double measuredVarSum = 0.0; ///< Sum of per-pixel temporal variance.
+    double expectedVarSum = 0.0; ///< Sum of p*(1-p)*d^2 over the same pixels.
+    double ratio          = 0.0; ///< measured / expected; 1.0 means a true 1 SPP.
+    double offClusterFrac = 0.0; ///< Samples on neither level; ~0 means two-valued.
+    int    pixelsUsed     = 0;   ///< Pixels with pLo < p < pHi.
+    int    pixelsInRegion = 0;
+    bool   valid          = false;
+};
+
+namespace detail {
+[[nodiscard]] inline double Percentile(std::vector<double> v, double q) {
+    if (v.empty()) {
+        return 0.0;
+    }
+    std::sort(v.begin(), v.end());
+    const auto idx = static_cast<std::size_t>(q * static_cast<double>(v.size() - 1) + 0.5);
+    return v[std::min(idx, v.size() - 1)];
+}
+} // namespace detail
+
+/// Fits the two-level Bernoulli model over `b`, using only pixels whose implied
+/// coverage sits strictly inside (pLo, pHi). Near the ends a finite run may
+/// never sample the rare value, which corrupts both the range estimate and the
+/// variance, so those pixels are excluded rather than trusted.
+[[nodiscard]] inline BernoulliFit
+FitBernoulliNoise(const TemporalMoments& m, const BBox& b, double clusterTolerance, double pLo = 0.10, double pHi = 0.90) {
+    BernoulliFit out;
+    if (b.Empty() || m.width <= 0 || m.count.empty()) {
+        return out;
+    }
+
+    /// One row per usable pixel, in scan order.
+    struct Sample {
+        double mean;
+        double var;
+        double lo;
+        double hi;
+    };
+    std::vector<Sample> samples;
+    samples.reserve(static_cast<std::size_t>(b.Width()) * static_cast<std::size_t>(b.Height()));
+
+    double sampleTotal   = 0.0;
+    double offClusterAll = 0.0;
+    for (int y = 0; y < b.Height(); ++y) {
+        for (int x = 0; x < b.Width(); ++x) {
+            const std::size_t i = static_cast<std::size_t>(b.y0 + y) * static_cast<std::size_t>(m.width) + static_cast<std::size_t>(b.x0 + x);
+            sampleTotal += static_cast<double>(m.count[i]);
+            offClusterAll += static_cast<double>(m.offCluster[i]);
+            if (m.count[i] < 2u) {
+                continue;
+            }
+            const double n    = static_cast<double>(m.count[i]);
+            const double mean = m.sum[i] / n;
+            ++out.pixelsInRegion;
+            samples.push_back({mean, std::max(0.0, m.sumSq[i] / n - mean * mean), m.lo[i], m.hi[i]});
+        }
+    }
+    out.offClusterFrac = sampleTotal > 0.0 ? offClusterAll / sampleTotal : 0.0;
+    if (samples.empty()) {
+        return out;
+    }
+
+    std::vector<double> lows, ranges;
+    lows.reserve(samples.size());
+    ranges.reserve(samples.size());
+    for (const Sample& s: samples) {
+        lows.push_back(s.lo);
+        ranges.push_back(s.hi - s.lo);
+    }
+    out.shadowedLevel = detail::Percentile(lows, 0.05);
+    // 90th percentile of the per-pixel range: high enough to ignore pixels that
+    // never sampled their rare value (which only ever underestimates the
+    // range), low enough not to be dragged by a lone firefly.
+    out.amplitude = detail::Percentile(ranges, 0.90);
+    if (out.amplitude <= clusterTolerance) {
+        return out; // nothing is actually flipping
+    }
+
+    const double d2 = out.amplitude * out.amplitude;
+    for (const Sample& s: samples) {
+        const double p = (s.mean - out.shadowedLevel) / out.amplitude;
+        if (p <= pLo || p >= pHi) {
+            continue;
+        }
+        ++out.pixelsUsed;
+        out.measuredVarSum += s.var;
+        out.expectedVarSum += p * (1.0 - p) * d2;
+    }
+    out.valid = out.pixelsUsed > 0 && out.expectedVarSum > 0.0;
+    out.ratio = out.valid ? out.measuredVarSum / out.expectedVarSum : 0.0;
+    return out;
+}
+
 } // namespace ZHLN::Test::Frame

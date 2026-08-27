@@ -82,6 +82,9 @@ enum class NoiseStabilityError : uint8_t {
     PenumbraTooSmallToMeasure[[= ZHLN::Reflect::Description(
         "The per-frame variation covers too small a region for the structural metrics to be trustworthy; widen the penumbra (frame.sunSize, or raise the occluder) rather than gating on a measurement over a handful of pixels."
     )]],
+    NoiseMagnitudeMismatch[[= ZHLN::Reflect::Description(
+        "The per-pixel temporal variance does not match what a one-sample-per-pixel stochastic shadow must produce: near zero means the dither is not modulating visibility, above 1 means extra variance beyond Bernoulli (instability or fireflies), near 1/N means the shader is averaging N samples."
+    )]],
     DitherIsPeriodic[[= ZHLN::Reflect::Description(
         "The ray-traced dither repeats at a short spatial lag; the residual carries a lattice a spatial filter cannot integrate away."
     )]],
@@ -93,6 +96,10 @@ enum class NoiseStabilityError : uint8_t {
 namespace {
 
 using ZHLN::Test::Frame::BBox;
+using ZHLN::Test::Frame::BernoulliFit;
+using ZHLN::Test::Frame::FitBernoulliNoise;
+using ZHLN::Test::Frame::LumaPlane;
+using ZHLN::Test::Frame::TemporalMoments;
 using ZHLN::Test::Frame::BBoxOfChangedPixels;
 using ZHLN::Test::Frame::Crop;
 using ZHLN::Test::Frame::LoadPPM;
@@ -422,6 +429,98 @@ struct RayTracedNoiseStabilityTestSuite {
             }
 
             ZHLN::Println("    [PASS] RT dither residual is isotropic and aperiodic (blue noise, not a lattice).");
+            return {};
+        }
+
+        /// Is there the right AMOUNT of noise? The structural scenario says what
+        /// shape it has; this says whether the magnitude is what a 1 SPP
+        /// stochastic shadow must produce -- not too little (dither not actually
+        /// modulating visibility), not too much (instability on top).
+        ///
+        /// A one-sample shadow makes each penumbra pixel a Bernoulli draw, so
+        /// across frames it takes exactly two values and its temporal variance
+        /// must equal p*(1-p)*d^2. That is exact whatever the tone curve does,
+        /// because the curve is applied before the draw and cannot create a
+        /// third value -- verified: the estimator returns 1.0000 on synthetic
+        /// 1 SPP shadows both linear and tone-mapped.
+        std::expected<void, ZHLN::Error> rt_dither_noise_magnitude_matches_one_sample() {
+            auto engine = RayTracedNoiseStabilityTestSuite::CreateTestEngine();
+            if (!ZHLN::Test::AssertTrue(engine != nullptr)) {
+                return std::unexpected(NoiseStabilityError::EngineInitFailed);
+            }
+            if (!engine->GetRenderContext().RayTracingSupported()) {
+                ZHLN::Println("    [SKIP] Device has no ray tracing support; noise magnitude check is not applicable.");
+                return {};
+            }
+            if (!RayTracedNoiseStabilityTestSuite::BuildShadowScene(*engine)) {
+                return std::unexpected(NoiseStabilityError::EngineInitFailed);
+            }
+            RayTracedNoiseStabilityTestSuite::SetRayTracedShadows(*engine, 1);
+            RayTracedNoiseStabilityTestSuite::SetAA(*engine, ZHLN::AAMode::None);
+            RayTracedNoiseStabilityTestSuite::TickFrames(*engine, 2);
+
+            // Enough frames that the per-pixel mean and variance are stable but
+            // the run stays well inside the 60 s CTest timeout.
+            constexpr uint32_t kFrames         = 24;
+            constexpr double   kClusterTol     = 1.5;
+
+            TemporalMoments moments;
+            moments.Reset(kWidth, kHeight);
+            RgbImage first;
+            BBox     band;
+            for (uint32_t f = 0; f < kFrames; ++f) {
+                RgbImage img = RayTracedNoiseStabilityTestSuite::Capture(*engine, "rt_noise_magnitude.ppm");
+                if (!ZHLN::Test::ExpectTrue(img.Valid())) {
+                    return std::unexpected(NoiseStabilityError::CaptureFailed);
+                }
+                const std::vector<double> plane = LumaPlane(img);
+                if (f == 0) {
+                    first = img;
+                } else if (f == 1) {
+                    const std::vector<double> d = LumaDifference(first, img);
+                    band = BBoxOfChangedPixels(d.data(), kWidth, kHeight, kChangeThreshold, 4);
+                }
+                moments.AddLuma(plane.data(), kClusterTol);
+                if (f + 1 < kFrames) {
+                    RayTracedNoiseStabilityTestSuite::TickFrames(*engine, 1);
+                }
+            }
+            if (!ZHLN::Test::ExpectTrue(!band.Empty() && band.Width() >= kMinRegionWidth && band.Height() >= kMinRegionHeight)) {
+                return std::unexpected(NoiseStabilityError::PenumbraTooSmallToMeasure);
+            }
+
+            const BernoulliFit fit = FitBernoulliNoise(moments, band, kClusterTol);
+            ZHLN::Println(
+                "    [INFO] band [{},{}) x [{},{})  pixels used={} of {}", band.x0, band.x1, band.y0, band.y1, fit.pixelsUsed,
+                fit.pixelsInRegion
+            );
+            ZHLN::Println(
+                "    [INFO] shadowed level A={:.2f}  flip amplitude d={:.2f}  range-growth rate={:.4f} (two-valued implies ~{:.4f})",
+                fit.shadowedLevel, fit.amplitude, fit.offClusterFrac, 1.0 / static_cast<double>(kFrames)
+            );
+            ZHLN::Println(
+                "    [INFO] measured variance sum={:.1f}  expected p(1-p)d^2 sum={:.1f}  -> ratio={:.4f}", fit.measuredVarSum,
+                fit.expectedVarSum, fit.ratio
+            );
+
+            if (!ZHLN::Test::ExpectTrue(fit.valid)) {
+                return std::unexpected(NoiseStabilityError::NoiseMagnitudeMismatch);
+            }
+            // 1 SPP is not an assumption, it is what the shader does:
+            // lighting.slang calls CalculateShadowRayTraced without a `samples`
+            // argument, so the 1u default applies. The tolerance is the
+            // finite-sample error of a 24-frame variance estimate, not slack.
+            if (!ZHLN::Test::ExpectTrue(fit.ratio > 0.85 && fit.ratio < 1.15)) {
+                return std::unexpected(NoiseStabilityError::NoiseMagnitudeMismatch);
+            }
+            // A two-valued pixel needs exactly one range-growth event over the
+            // run; materially more means the pixel is taking more than two
+            // levels, i.e. something is filtering or adding noise on top.
+            if (!ZHLN::Test::ExpectTrue(fit.offClusterFrac < 0.12)) {
+                return std::unexpected(NoiseStabilityError::NoiseMagnitudeMismatch);
+            }
+
+            ZHLN::Println("    [PASS] Noise magnitude is exactly what a 1 SPP stochastic shadow must produce.");
             return {};
         }
 
