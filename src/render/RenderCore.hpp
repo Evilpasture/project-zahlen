@@ -40,12 +40,12 @@ enum class RenderInitError : uint8_t {
     DriverInitializationFailed[[= ZHLN::Reflect::Description("Driver initialization failed")]],
 };
 
-// Raised by low-level Vulkan wrappers and probed with Error::Is()/As() by
-// fallback paths (e.g. mesh/GLTF feature detection on FeatureNotPresent).
+// Raised by low-level Vulkan wrappers (e.g. WaitIdle). Stays inside the RHI
+// layer: content/asset code must not branch on it. Optional-feature fallback
+// signals (ray-tracing availability, etc.) are backend-neutral RenderFeatureError.
 enum class VulkanCallError : uint8_t {
     VulkanCallFailed[[= ZHLN::Reflect::Description("Vulkan call failed")]] = 1,
     DeviceLost[[= ZHLN::Reflect::Description("Device lost")]],
-    FeatureNotPresent[[= ZHLN::Reflect::Description("Required feature not present")]],
 };
 
 struct Color4 {

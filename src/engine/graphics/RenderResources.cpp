@@ -1045,7 +1045,7 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
     return std::expected<void, Error>()
         .and_then([&]() -> std::expected<BuildContext, Error> {
             if (!impl->rtCtx.Valid()) {
-                return std::unexpected(VulkanCallError::FeatureNotPresent);
+                return std::unexpected(RenderFeatureError::FeatureNotSupported);
             }
             return impl->meshPool.Resolve(mesh.posBuffer)
                 .transform_error([](auto err) -> Error { return err; })

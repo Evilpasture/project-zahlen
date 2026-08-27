@@ -6,15 +6,28 @@
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/Pair.hpp>
+#include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Types.hpp>
 #include <Zahlen/Window.hpp>
+#include <cstdint>
 #include <expected>
 #include <memory>
 #include <optional>
 
 namespace ZHLN {
+
+// ============================================================================
+// Renderer Capability Errors
+// Backend-neutral errors produced by the renderer's optional-feature paths
+// (e.g. ray-tracing BLAS builds). These deliberately model renderer-level
+// capabilities rather than any graphics API, so content/asset code can branch
+// on "this GPU lacks the optional feature" without knowing about Vulkan.
+// ============================================================================
+enum class RenderFeatureError : uint8_t {
+    FeatureNotSupported[[= ZHLN::Reflect::Description("The requested render feature is not supported on this device")]] = 1,
+};
 
 namespace Shadows {
 inline constexpr float NearClip   = 0.1f;

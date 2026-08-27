@@ -589,7 +589,7 @@ auto GetOrCreateCompiledPrimitive(
     };
 
     if (auto res = ctx.BuildMeshBLAS(subMesh); !res) [[unlikely]] {
-        if (!res.error().Is(VulkanCallError::FeatureNotPresent)) {
+        if (!res.error().Is(RenderFeatureError::FeatureNotSupported)) {
             ZHLN::Log("WARNING: GLTF Importer: Failed to build mesh BLAS: {}", res.error().Message());
         }
     }

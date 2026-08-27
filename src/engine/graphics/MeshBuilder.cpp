@@ -101,7 +101,7 @@ auto CreateTetrahedronMesh(RenderContext& ctx) -> Mesh {
     AttachMeshlets(ctx, finalMesh, positions, indices);
     auto res = ctx.BuildMeshBLAS(finalMesh);
     if (!res) [[unlikely]] {
-        if (!res.error().Is(VulkanCallError::FeatureNotPresent)) {
+        if (!res.error().Is(RenderFeatureError::FeatureNotSupported)) {
             ZHLN::Log("WARNING: CreateTetrahedronMesh: Failed to build mesh BLAS: {}", res.error().Message());
         }
     }
@@ -198,7 +198,7 @@ auto CreatePlaneMesh(RenderContext& ctx, float extent, const JPH::Vec4& color) -
     AttachMeshlets(ctx, finalMesh, positions, {});
     auto res = ctx.BuildMeshBLAS(finalMesh);
     if (!res) [[unlikely]] {
-        if (!res.error().Is(VulkanCallError::FeatureNotPresent)) {
+        if (!res.error().Is(RenderFeatureError::FeatureNotSupported)) {
             ZHLN::Log("WARNING: CreatePlaneMesh: Failed to build mesh BLAS: {}", res.error().Message());
         }
     }
@@ -334,7 +334,7 @@ auto CreateBoxMesh(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4
     AttachMeshlets(ctx, finalMesh, positions, {});
     auto res = ctx.BuildMeshBLAS(finalMesh);
     if (!res) [[unlikely]] {
-        if (!res.error().Is(VulkanCallError::FeatureNotPresent)) {
+        if (!res.error().Is(RenderFeatureError::FeatureNotSupported)) {
             ZHLN::Log("WARNING: CreateBoxMesh: Failed to build mesh BLAS: {}", res.error().Message());
         }
     }
@@ -448,7 +448,7 @@ auto CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldS
     Mesh finalMesh {.posBuffer = posVbo, .attrBuffer = attrVbo, .vertexCount = static_cast<uint32_t>(positions.size())};
     AttachMeshlets(ctx, finalMesh, positions, {});
     if (auto res = ctx.BuildMeshBLAS(finalMesh); !res) [[unlikely]] {
-        if (!res.error().Is(VulkanCallError::FeatureNotPresent)) {
+        if (!res.error().Is(RenderFeatureError::FeatureNotSupported)) {
             ZHLN::Log("WARNING: CreateTerrainMeshFromData: Failed to build mesh BLAS: {}", res.error().Message());
         }
     }
@@ -675,7 +675,7 @@ auto CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, flo
     AttachMeshlets(ctx, finalMesh, positions, {});
     auto res = ctx.BuildMeshBLAS(finalMesh);
     if (!res) [[unlikely]] {
-        if (!res.error().Is(VulkanCallError::FeatureNotPresent)) {
+        if (!res.error().Is(RenderFeatureError::FeatureNotSupported)) {
             ZHLN::Log("WARNING: CreateTerrainMesh: Failed to build mesh BLAS: {}", res.error().Message());
         }
     }
