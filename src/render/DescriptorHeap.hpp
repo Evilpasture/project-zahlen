@@ -44,7 +44,7 @@ enum class DescriptorHeapType : uint8_t {
 };
 
 enum class DescriptorHeapError : uint8_t {
-    ExtensionUnavailable,
+    ExtensionUnavailable = 1,
     ResourceSlotsExhausted,
     SamplerSlotsExhausted,
     DynamicResourceOverflow,
