@@ -11,7 +11,6 @@ namespace ZHLN {
 
 enum class ExtensionBuilderError : uint8_t {
     MissingRequiredExtension[[= ZHLN::Reflect::Description("A required Vulkan extension is missing")]] = 1,
-    UnknownError[[= ZHLN::Reflect::Description("Unknown extension builder error")]],
 };
 
 } // namespace ZHLN

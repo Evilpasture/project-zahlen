@@ -60,9 +60,9 @@ std::expected<void*, Error> Window::CreateVulkanSurface(void* instance, void* ph
         }
         VkSurfaceKHR surface = VK_NULL_HANDLE;
         VkResult     err     = glfwCreateWindowSurface(inst, _impl->handle, nullptr, &surface);
-        auto         check   = Vk::CheckResult(err, "Failed to create GLFW Vulkan window surface");
+        auto         check   = Vk::CheckResult(err, "Failed to create window Vulkan surface");
         if (!check) {
-            return std::unexpected(SurfaceCreationError::GLFWSurfaceCreationFailed);
+            return std::unexpected(SurfaceCreationError::WindowSurfaceCreationFailed);
         }
         int f_w = 0;
         int f_h = 0;

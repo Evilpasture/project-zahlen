@@ -22,7 +22,6 @@ enum class ShaderStageCreationError : uint8_t {
     ShaderLoadingFailed[[= ZHLN::Reflect::Description("Shader loading failed")]],
     VertexShaderEmpty[[= ZHLN::Reflect::Description("Vertex shader is empty")]],
     ShaderModuleCreationFailed[[= ZHLN::Reflect::Description("Shader module creation failed")]],
-    UnknownError[[= ZHLN::Reflect::Description("Unknown shader creation error")]],
 };
 
 } // namespace ZHLN

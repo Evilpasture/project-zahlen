@@ -14,7 +14,7 @@
 
 namespace ZHLN {
 
-enum class JSONError : uint8_t { InvalidJSON = 1, TypeMismatch, MissingField, UnknownError };
+enum class JSONError : uint8_t { InvalidJSON = 1, TypeMismatch, MissingField, UnsupportedType };
 
 namespace ReflectJSON {
 
@@ -124,7 +124,7 @@ std::expected<FieldType, Error> GetJSONValue(ValueReader reader) {
     } else if constexpr (ZHLN::Reflect::FieldCount<Decayed>() > 0) {
         return ParseObject<Decayed>(reader);
     } else {
-        return std::unexpected(JSONError::UnknownError);
+        return std::unexpected(JSONError::UnsupportedType);
     }
 }
 

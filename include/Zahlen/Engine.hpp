@@ -34,7 +34,7 @@ enum class EngineInitError : uint8_t {
     PhysicsInitializationFailed[[= ZHLN::Reflect::Description("Physics initialization failed")]],
     AudioInitializationFailed[[= ZHLN::Reflect::Description("Audio initialization failed")]],
     AssetInitializationFailed[[= ZHLN::Reflect::Description("Asset initialization failed")]],
-    UnknownError[[= ZHLN::Reflect::Description("Unknown engine initialization error")]],
+    EngineAllocationFailed[[= ZHLN::Reflect::Description("Engine instance allocation failed")]],
 };
 
 class Window;

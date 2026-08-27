@@ -31,13 +31,11 @@ enum class MaterialCreationError : uint8_t {
     ShaderCompilationFailed[[= ZHLN::Reflect::Description("Material shader compilation failed")]] = 1,
     PipelineLayoutCreationFailed[[= ZHLN::Reflect::Description("Material pipeline layout creation failed")]],
     PipelineCreationFailed[[= ZHLN::Reflect::Description("Material pipeline creation failed")]],
-    UnknownError[[= ZHLN::Reflect::Description("Unknown material creation error")]],
 };
 
 enum class ShadowResolutionError : uint8_t {
     DeviceLost[[= ZHLN::Reflect::Description("Device lost while resizing shadow map")]] = 1,
     RecreationFailed[[= ZHLN::Reflect::Description("Shadow map recreation failed")]],
-    UnknownError[[= ZHLN::Reflect::Description("Unknown shadow resolution error")]],
 };
 
 } // namespace ZHLN

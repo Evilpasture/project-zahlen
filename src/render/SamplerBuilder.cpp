@@ -14,7 +14,6 @@ namespace ZHLN {
 enum class SamplerCreationError : uint8_t {
     NullDevice[[= ZHLN::Reflect::Description("Null device for sampler creation")]] = 1,
     CreationFailed[[= ZHLN::Reflect::Description("Sampler creation failed")]],
-    UnknownError[[= ZHLN::Reflect::Description("Unknown sampler creation error")]],
 };
 
 } // namespace ZHLN
