@@ -16,6 +16,32 @@
 #include <utility>
 #include <vector>
 
+// ============================================================================
+// Private Resource Errors (Tier 1)
+// Produced only while building materials / resizing shadow targets inside
+// this translation unit; no header exposes them, so callers just log the
+// type-erased ZHLN::Error. Declared at file scope (not an anonymous
+// namespace) to keep reflected category names stable for both native
+// reflection and the AST transpiler fallback.
+// ============================================================================
+
+namespace ZHLN {
+
+enum class MaterialCreationError : uint8_t {
+    ShaderCompilationFailed[[= ZHLN::Reflect::Description("Material shader compilation failed")]] = 1,
+    PipelineLayoutCreationFailed[[= ZHLN::Reflect::Description("Material pipeline layout creation failed")]],
+    PipelineCreationFailed[[= ZHLN::Reflect::Description("Material pipeline creation failed")]],
+    UnknownError[[= ZHLN::Reflect::Description("Unknown material creation error")]],
+};
+
+enum class ShadowResolutionError : uint8_t {
+    DeviceLost[[= ZHLN::Reflect::Description("Device lost while resizing shadow map")]] = 1,
+    RecreationFailed[[= ZHLN::Reflect::Description("Shadow map recreation failed")]],
+    UnknownError[[= ZHLN::Reflect::Description("Unknown shadow resolution error")]],
+};
+
+} // namespace ZHLN
+
 namespace ZHLN {
 
 // ============================================================================

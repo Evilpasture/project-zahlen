@@ -10,7 +10,6 @@
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Types.hpp>
 #include <Zahlen/Window.hpp>
-#include <Zahlen/render/RenderCode.hpp>
 #include <expected>
 #include <memory>
 #include <optional>

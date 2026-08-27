@@ -3,11 +3,29 @@
 
 #pragma once
 
+#include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Error.hpp>
+#include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <span>
 #include <vector>
+
+namespace ZHLN {
+
+// Raised by shader module loading/creation paths (ShaderStages, compute pass
+// builders, IBL baking). Shared across those translation units, so it lives
+// with the ShaderStages subsystem rather than in a global error header.
+enum class ShaderStageCreationError : uint8_t {
+    FileOpenFailed[[= ZHLN::Reflect::Description("Shader file open failed")]] = 1,
+    InvalidSpirvSize[[= ZHLN::Reflect::Description("Invalid SPIR-V size")]],
+    ShaderLoadingFailed[[= ZHLN::Reflect::Description("Shader loading failed")]],
+    VertexShaderEmpty[[= ZHLN::Reflect::Description("Vertex shader is empty")]],
+    ShaderModuleCreationFailed[[= ZHLN::Reflect::Description("Shader module creation failed")]],
+    UnknownError[[= ZHLN::Reflect::Description("Unknown shader creation error")]],
+};
+
+} // namespace ZHLN
 
 namespace ZHLN::Vk {
 

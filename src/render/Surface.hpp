@@ -4,7 +4,27 @@
 // src/render/Surface.hpp
 #pragma once
 
-#include <Zahlen/render/RenderCode.hpp>
+#ifndef ZHLN_RENDERING_HPP_INCLUDED
+#error "Please include <src/render/Rendering.hpp> before including any other Zahlen render headers."
+#endif
+
+#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Error.hpp>
+#include <cstdint>
+
+namespace ZHLN {
+
+// Raised by the window/TTY surface creation railway. Lives in the surface
+// subsystem header because WindowSurface.cpp and the inline monadic surface
+// builders below both produce it.
+enum class SurfaceCreationError : uint8_t {
+    WindowSurfaceUnsupported[[= ZHLN::Reflect::Description("Window surface unsupported")]] = 1,
+    TTYSurfaceCreationFailed[[= ZHLN::Reflect::Description("TTY surface creation failed")]],
+    GLFWSurfaceCreationFailed[[= ZHLN::Reflect::Description("GLFW surface creation failed")]],
+    UnknownError[[= ZHLN::Reflect::Description("Unknown surface creation error")]],
+};
+
+} // namespace ZHLN
 
 namespace ZHLN::Vk {
 

@@ -9,6 +9,32 @@
 #include <sys/types.h>
 #include <vector>
 
+// ============================================================================
+// Private Allocator Errors (Tier 1)
+// Declared at file scope in this translation unit: no header exposes them, so
+// external code only ever logs the type-erased ZHLN::Error message. File scope
+// (rather than an anonymous namespace) keeps their reflected category names
+// stable for both native reflection and the AST transpiler fallback.
+// ============================================================================
+
+namespace ZHLN {
+
+enum class BufferCreationError : uint8_t {
+    OutOfHostMemory[[= ZHLN::Reflect::Description("Out of host memory")]] = 1,
+    OutOfDeviceMemory[[= ZHLN::Reflect::Description("Out of device memory")]],
+    InvalidCaptureAddress[[= ZHLN::Reflect::Description("Invalid capture address")]],
+    VulkanSubsystemFailure[[= ZHLN::Reflect::Description("Vulkan subsystem failure")]],
+};
+
+enum class ImageCreationError : uint8_t {
+    OutOfHostMemory[[= ZHLN::Reflect::Description("Out of host memory")]] = 1,
+    OutOfDeviceMemory[[= ZHLN::Reflect::Description("Out of device memory")]],
+    InvalidCaptureAddress[[= ZHLN::Reflect::Description("Invalid capture address")]],
+    VulkanSubsystemFailure[[= ZHLN::Reflect::Description("Vulkan subsystem failure")]],
+};
+
+} // namespace ZHLN
+
 namespace ZHLN::Vk {
 
 // ============================================================================
