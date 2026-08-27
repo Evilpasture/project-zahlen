@@ -28,9 +28,22 @@ foreach(TEST_SRC IN LISTS TEST_SOURCES)
         zahlen_engine
     )
     # Public headers only. src/ is banned — see tools/check_tests_public_api.py.
+    #
+    # extern/stb is here for the same reason it is in tests/render: the noise
+    # metric suite decodes the shipped LDR_RGBA_0 tile with stb_image so the
+    # discriminator is measured against the real asset rather than a synthetic
+    # stand-in.
+    #
+    # Only the header is wanted. STB_IMAGE_IMPLEMENTATION already lives in
+    # extern/stbi_impl.c, which is part of ENGINE_SOURCES, so the decode
+    # functions arrive through the zahlen_engine link below: no visibility
+    # preset is set on that target and no -fvisibility=hidden appears anywhere
+    # in the CMake tree, so its extern symbols are exported by the ELF default.
+    # Do not define STB_IMAGE_IMPLEMENTATION in a test TU.
     target_include_directories(${TARGET_NAME} PRIVATE
         ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_SOURCE_DIR}/tests
+        ${PROJECT_SOURCE_DIR}/extern/stb
     )
 
     # Applies the required reflection flags (-freflection / custom libc++) configured in the root
