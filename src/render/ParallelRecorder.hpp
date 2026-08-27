@@ -28,7 +28,7 @@ class ParallelCommandRecorder {
     ParallelCommandRecorder(ParallelCommandRecorder&&) noexcept                    = default;
     auto operator=(ParallelCommandRecorder&&) noexcept -> ParallelCommandRecorder& = default;
 
-    [[nodiscard]] auto Init(VkDevice device, uint32_t queueFamily) noexcept -> std::expected<void, VkResult>;
+    [[nodiscard]] auto Init(VkDevice device, uint32_t queueFamily) noexcept -> std::expected<void, Error>;
 
     void Reset() noexcept;
 
