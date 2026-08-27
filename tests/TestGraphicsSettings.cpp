@@ -9,6 +9,12 @@
 #include <Zahlen/GraphicsSettings.hpp>
 
 using namespace ZHLN;
+// Framework assert helpers live in a nested namespace; a using-directive for
+// ZHLN does not surface them. These name namespace members, which is legal
+// at file scope (unlike using-declarations for class members).
+using ZHLN::Test::AssertEq;
+using ZHLN::Test::AssertFalse;
+using ZHLN::Test::AssertTrue;
 
 struct GraphicsSettingsSuite {
     GraphicsSettingsSuite() {
