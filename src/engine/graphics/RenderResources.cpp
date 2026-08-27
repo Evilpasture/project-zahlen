@@ -588,7 +588,7 @@ auto RenderContext::Impl::InitializeVolumetricNoiseTexture() noexcept -> std::ex
 
     auto staging = stagingRingBuffer.Allocate(bytes);
     if (staging.mappedData == nullptr) {
-        return std::unexpected(StagingError::MemoryMappingFailed);
+        return std::unexpected(Vk::StagingError::MemoryMappingFailed);
     }
     std::memcpy(staging.mappedData, pixels.data(), bytes);
 
@@ -1081,7 +1081,7 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
         .and_then([&](BuildContext b) -> std::expected<BuildContext, Error> {
             b.blas = impl->rtCtx.CreateAccelerationStructure(b.blasBuffer.Handle(), b.sizes.acceleration_structure_size, ZHLN_AS_TYPE_BOTTOM_LEVEL);
             if (b.blas == VK_NULL_HANDLE) {
-                return std::unexpected(VulkanCallError::VulkanCallFailed);
+                return std::unexpected(Vk::VulkanCallError::VulkanCallFailed);
             }
 
             return Vk::Buffer::Create(

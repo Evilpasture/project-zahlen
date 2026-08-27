@@ -13,15 +13,6 @@
 
 namespace ZHLN {
 
-// Raised by low-level Vulkan call wrappers (WaitIdle, CheckResult paths).
-// Stays inside the RHI layer: content/asset code must not branch on it.
-// Backend-neutral, optional-feature fallback signals live in RenderFeatureError
-// (public Render.hpp), and subsystem failures use their own domain enums.
-enum class VulkanCallError : uint8_t {
-    VulkanCallFailed[[= ZHLN::Reflect::Description("Vulkan call failed")]] = 1,
-    DeviceLost[[= ZHLN::Reflect::Description("Device lost")]],
-};
-
 struct Color4 {
     float r, g, b, a;
 };
@@ -116,6 +107,15 @@ inline void FlipObject(auto& obj) noexcept {
 } // namespace ZHLN
 
 namespace ZHLN::Vk {
+
+// Raised by low-level Vulkan call wrappers (WaitIdle, CheckResult paths).
+// Stays inside the RHI layer: content/asset code must not branch on it.
+// Backend-neutral, optional-feature fallback signals live in RenderFeatureError
+// (public Render.hpp), and subsystem failures use their own domain enums.
+enum class VulkanCallError : uint8_t {
+    VulkanCallFailed[[= Reflect::Description("Vulkan call failed")]] = 1,
+    DeviceLost[[= Reflect::Description("Device lost")]],
+};
 
 // ============================================================================
 // TMP / Concepts

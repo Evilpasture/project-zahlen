@@ -11,22 +11,18 @@
 #include <span>
 #include <vector>
 
-namespace ZHLN {
+namespace ZHLN::Vk {
 
 // Raised by shader module loading/creation paths (ShaderStages, compute pass
 // builders, IBL baking). Shared across those translation units, so it lives
 // with the ShaderStages subsystem rather than in a global error header.
 enum class ShaderStageCreationError : uint8_t {
-    FileOpenFailed[[= ZHLN::Reflect::Description("Shader file open failed")]] = 1,
-    InvalidSpirvSize[[= ZHLN::Reflect::Description("Invalid SPIR-V size")]],
-    ShaderLoadingFailed[[= ZHLN::Reflect::Description("Shader loading failed")]],
-    VertexShaderEmpty[[= ZHLN::Reflect::Description("Vertex shader is empty")]],
-    ShaderModuleCreationFailed[[= ZHLN::Reflect::Description("Shader module creation failed")]],
+    FileOpenFailed[[= Reflect::Description("Shader file open failed")]] = 1,
+    InvalidSpirvSize[[= Reflect::Description("Invalid SPIR-V size")]],
+    ShaderLoadingFailed[[= Reflect::Description("Shader loading failed")]],
+    VertexShaderEmpty[[= Reflect::Description("Vertex shader is empty")]],
+    ShaderModuleCreationFailed[[= Reflect::Description("Shader module creation failed")]],
 };
-
-} // namespace ZHLN
-
-namespace ZHLN::Vk {
 
 // ============================================================================
 // ShaderStages RAII

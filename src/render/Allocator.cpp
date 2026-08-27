@@ -17,36 +17,36 @@
 // stable for both native reflection and the AST transpiler fallback.
 // ============================================================================
 
-namespace ZHLN {
+namespace ZHLN::Vk {
 
+// Private allocator/creation errors (Tier 1): declared at file scope in this
+// translation unit so no header exposes them; callers only log the
+// type-erased ZHLN::Error message.
 enum class BufferCreationError : uint8_t {
-    OutOfHostMemory[[= ZHLN::Reflect::Description("Out of host memory")]] = 1,
-    OutOfDeviceMemory[[= ZHLN::Reflect::Description("Out of device memory")]],
-    InvalidCaptureAddress[[= ZHLN::Reflect::Description("Invalid capture address")]],
-    VulkanSubsystemFailure[[= ZHLN::Reflect::Description("Vulkan subsystem failure")]],
+    OutOfHostMemory[[= Reflect::Description("Out of host memory")]] = 1,
+    OutOfDeviceMemory[[= Reflect::Description("Out of device memory")]],
+    InvalidCaptureAddress[[= Reflect::Description("Invalid capture address")]],
+    VulkanSubsystemFailure[[= Reflect::Description("Vulkan subsystem failure")]],
 };
 
 enum class ImageCreationError : uint8_t {
-    OutOfHostMemory[[= ZHLN::Reflect::Description("Out of host memory")]] = 1,
-    OutOfDeviceMemory[[= ZHLN::Reflect::Description("Out of device memory")]],
-    InvalidCaptureAddress[[= ZHLN::Reflect::Description("Invalid capture address")]],
-    VulkanSubsystemFailure[[= ZHLN::Reflect::Description("Vulkan subsystem failure")]],
+    OutOfHostMemory[[= Reflect::Description("Out of host memory")]] = 1,
+    OutOfDeviceMemory[[= Reflect::Description("Out of device memory")]],
+    InvalidCaptureAddress[[= Reflect::Description("Invalid capture address")]],
+    VulkanSubsystemFailure[[= Reflect::Description("Vulkan subsystem failure")]],
 };
 
 // VMA allocator instance bring-up failure.
 enum class AllocatorError : uint8_t {
-    InitializationFailed[[= ZHLN::Reflect::Description("Vulkan memory allocator initialization failed")]] = 1,
+    InitializationFailed[[= Reflect::Description("Vulkan memory allocator initialization failed")]] = 1,
 };
 
 // Staging ring buffer / persistent transfer buffer bring-up failures.
 enum class StagingRingBufferError : uint8_t {
-    OutOfHostMemory[[= ZHLN::Reflect::Description("Out of host memory")]] = 1,
-    StagingBufferCreationFailed[[= ZHLN::Reflect::Description("Staging ring buffer allocation failed")]],
+    OutOfHostMemory[[= Reflect::Description("Out of host memory")]] = 1,
+    StagingBufferCreationFailed[[= Reflect::Description("Staging ring buffer allocation failed")]],
 };
 
-} // namespace ZHLN
-
-namespace ZHLN::Vk {
 
 // ============================================================================
 // Allocator RAII

@@ -7,18 +7,14 @@
 // clang-format on
 #include "SamplerBuilder.hpp"
 
+namespace ZHLN::Vk {
+
 // Private sampler-creation error (Tier 1): declared at file scope in this
 // translation unit so no header exposes it.
-namespace ZHLN {
-
 enum class SamplerCreationError : uint8_t {
-    NullDevice[[= ZHLN::Reflect::Description("Null device for sampler creation")]] = 1,
-    CreationFailed[[= ZHLN::Reflect::Description("Sampler creation failed")]],
+    NullDevice[[= Reflect::Description("Null device for sampler creation")]] = 1,
+    CreationFailed[[= Reflect::Description("Sampler creation failed")]],
 };
-
-} // namespace ZHLN
-
-namespace ZHLN::Vk {
 
 SamplerBuilder::SamplerBuilder() noexcept {
     _info = {

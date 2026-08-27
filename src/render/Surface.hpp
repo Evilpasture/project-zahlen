@@ -12,21 +12,17 @@
 #include <Zahlen/Error.hpp>
 #include <cstdint>
 
-namespace ZHLN {
+namespace ZHLN::Vk {
 
 // Raised by the window/TTY surface creation railway. Lives in the surface
 // subsystem header because WindowSurface.cpp and the inline monadic surface
 // builders below both produce it. Backend-agnostic on purpose: the renderer
 // does not model windowing-implementation details such as GLFW here.
 enum class SurfaceCreationError : uint8_t {
-    WindowSurfaceUnsupported[[= ZHLN::Reflect::Description("Window surface unsupported")]] = 1,
-    WindowSurfaceCreationFailed[[= ZHLN::Reflect::Description("Windowed surface creation failed")]],
-    TTYSurfaceCreationFailed[[= ZHLN::Reflect::Description("TTY surface creation failed")]],
+    WindowSurfaceUnsupported[[= Reflect::Description("Window surface unsupported")]] = 1,
+    WindowSurfaceCreationFailed[[= Reflect::Description("Windowed surface creation failed")]],
+    TTYSurfaceCreationFailed[[= Reflect::Description("TTY surface creation failed")]],
 };
-
-} // namespace ZHLN
-
-namespace ZHLN::Vk {
 
 // --- Monadic Configuration Typestates ---
 

@@ -5,17 +5,13 @@
 
 #include "Extensions.hpp"
 
+namespace ZHLN::Vk {
+
 // Private extension-builder error (Tier 1): declared at file scope in this
 // translation unit so no header exposes it.
-namespace ZHLN {
-
 enum class ExtensionBuilderError : uint8_t {
-    MissingRequiredExtension[[= ZHLN::Reflect::Description("A required Vulkan extension is missing")]] = 1,
+    MissingRequiredExtension[[= Reflect::Description("A required Vulkan extension is missing")]] = 1,
 };
-
-} // namespace ZHLN
-
-namespace ZHLN::Vk {
 
 // ============================================================================
 // ExtensionResult Implementation

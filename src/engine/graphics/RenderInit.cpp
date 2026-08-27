@@ -43,7 +43,7 @@ std::expected<Vk::Pipeline, Error>
     const ZHLN_ShaderDesc shader = {.code = Vk::AsSpirV(cs_code), .size = cs_size, .entry_point = cs.entryPoint};
     gpuDiagnostics.RegisterShader(shader, "CSMain");
     if (shader.code == nullptr || shader.size == 0) {
-        return std::unexpected(ShaderStageCreationError::ShaderLoadingFailed);
+        return std::unexpected(Vk::ShaderStageCreationError::ShaderLoadingFailed);
     }
     if (!pass.ReflectDispatchLayout(shader)) {
         return std::unexpected(Vk::SpirvLayoutError::ModuleParseFailed);
