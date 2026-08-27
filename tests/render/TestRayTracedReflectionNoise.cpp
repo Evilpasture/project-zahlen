@@ -1,0 +1,536 @@
+// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+// tests/render/TestRayTracedReflectionNoise.cpp
+//
+// GPU-side verification that the ray-traced reflection (RTR) path behaves the
+// way its blue-noise GGX VNDF sampling promises, mirroring the shadow suite
+// (TestRayTracedNoiseStability.cpp) for the other ray query in the frame.
+//
+// reflection.slang:RaytraceRTR draws a microfacet normal from the GGX visible
+// normal distribution, seeded by the .zw pair of the same blue noise tile the
+// shadow path reads (.xy), and traces one ray per pixel. Where that ray lands
+// -- the object, the face, or a miss into the sky -- changes frame to frame,
+// so a rough mirror shows a stochastic residual with exactly the same
+// structural obligations as the shadow dither:
+//
+//   1. LIVENESS    - RTR must reach the image, its jitter must advance with
+//                    the frame index, and surfaces rougher than the 0.4
+//                    cutoff must be untouched by the switch (the cutoff is a
+//                    correctness contract, not a fade).
+//   2. PERIODICITY - the residual must not correlate with itself at short
+//                    lag; a lattice dither would smear under the roughness
+//                   -aware filter downstream.
+//   3. ISOTROPY    - no preferred direction in the residual.
+//   4. CONVERGENCE - under temporal accumulation the reflection residual must
+//                    actually fall.
+//   5. NO DEBRIS   - changed pixels cluster; isolated ones are ray debris.
+//
+// There is deliberately NO Bernoulli magnitude scenario here, unlike the
+// shadow suite. A 1 SPP shadow is a two-valued draw (sun or no sun) so its
+// temporal variance must equal p(1-p)d^2; a VNDF reflection ray is not
+// two-valued -- the reflected radiance is continuous in the draw direction --
+// so no closed-form variance exists to compare against. The roughness-cutoff
+// assertion in scenario 1 is the reflection-specific quantity check instead.
+//
+// Scene: a dark room. Every surface the ray can see is metal (no diffuse),
+// so the sun -- present but at zero intensity -- can contribute no shadow
+// dither and no specular highlight anywhere: the ONLY thing the enableRTR
+// switch can change is the reflection term. A glowing box hangs over a
+// glossy metal plate; its mirror image is the measurement region. The
+// surrounding floor is rough metal (0.8, past the cutoff) and must stay
+// byte-still when the switch flips.
+
+#include "NoiseFrameCapture.hpp"
+#include "RayTracedNoiseMetrics.hpp"
+#include "TestsFramework.hpp"
+#include <Zahlen/Camera.hpp>
+#include <Zahlen/Components.hpp>
+#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/DefaultPreset.hpp>
+#include <Zahlen/Engine.hpp>
+#include <Zahlen/Log.hpp>
+#include <Zahlen/Math3D.hpp>
+#include <Zahlen/Render.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
+#include <Zahlen/Threading/Thread.hpp>
+#include <Zahlen/Types.hpp>
+#include <Zahlen/ecs/ECS.hpp>
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <expected>
+#include <memory>
+#include <numeric>
+#include <string>
+#include <vector>
+
+enum class ReflectionNoiseError : uint8_t {
+    EngineInitFailed[[= ZHLN::Reflect::Description("Failed to initialize the headless Engine for the RTR noise test.")]] = 1,
+    CaptureFailed[[= ZHLN::Reflect::Description("A frame could not be captured or the PPM could not be read back.")]],
+    ReflectionPathInactive[[= ZHLN::Reflect::Description(
+        "Enabling enableRTR changed no pixels on the glossy plate against a fully static scene, so RaytraceRTR is not executing: check pc.enableRTR_dynamic, the TLAS, the reflVariant pipeline selection, or that the plate roughness is at or under the 0.4 cutoff."
+    )]],
+    JitterTemporallyFrozen[[= ZHLN::Reflect::Description(
+        "The RTR path executes but renders the identical image at two different frame indices, so the blue noise temporal scroll is not reaching SampleGGX_VNDF: check FrameIndexFromCamPosW(frame.camPos.w) and the .zw channel pair in blue_noise.slang."
+    )]],
+    RoughnessCutoffViolated[[= ZHLN::Reflect::Description(
+        "Pixels outside the glossy plate changed when enableRTR flipped; surfaces rougher than the 0.4 cutoff must be untouched by the reflection switch (reflection.slang gates the RTR branch on roughness <= 0.4). Either the cutoff moved or the switch is leaking into another term."
+    )]],
+    ReflectionRegionTooSmall[[= ZHLN::Reflect::Description(
+        "The per-frame reflection variation covers too small a region for the structural metrics; widen the VNDF lobe (raise the plate roughness toward the 0.4 cutoff) or enlarge the reflected object."
+    )]],
+    DitherIsPeriodic[[= ZHLN::Reflect::Description("The RTR residual repeats at a short spatial lag; the VNDF draw carries a lattice a spatial filter cannot integrate away.")]],
+    DitherIsAnisotropic[[= ZHLN::Reflect::Description("The RTR residual has a preferred direction (structured lattice, not blue noise).")]],
+    ResidualDidNotConverge[[= ZHLN::Reflect::Description("Under temporal accumulation the reflection residual oscillated instead of falling.")]],
+    RayDebrisDetected[[= ZHLN::Reflect::Description("The reflection residual is dominated by isolated single-pixel outliers (ray debris / fireflies).")]],
+};
+
+namespace {
+
+using ZHLN::Test::Frame::BBox;
+using ZHLN::Test::Frame::LumaPlane;
+using ZHLN::Test::Frame::TemporalMoments;
+using ZHLN::Test::Frame::BBoxOfChangedPixels;
+using ZHLN::Test::Frame::Crop;
+using ZHLN::Test::Frame::LoadPPM;
+using ZHLN::Test::Frame::LumaDifference;
+using ZHLN::Test::Frame::RgbImage;
+using ZHLN::Test::Frame::RmsInRegion;
+
+constexpr int kWidth  = 640;
+constexpr int kHeight = 480;
+
+/// Same convention as the shadow suite: luma units (0-255) above which a pixel
+/// counts as changed.
+constexpr double kChangeThreshold = 2.0;
+
+/// Same floors as the shadow suite; see the region-size sweep comment over
+/// there. The metrics need at least this many pixels of band to average over.
+constexpr int kMinRegionWidth  = 64;
+constexpr int kMinRegionHeight = 24;
+
+/// Plate roughness. Must sit at or under the shader's 0.4 RTR cutoff or the
+/// branch never runs; must sit far enough above 0 that the VNDF lobe is wide
+/// enough for the hit/miss flip band at the mirror silhouette to clear
+/// kMinRegionHeight. 0.35 gives alpha = 0.1225 and a roughnessFade of 0.3.
+constexpr float kPlateRoughness = 0.35f;
+
+/// Rows [0, kCutoffProbeRows) are sky, the (static) box and rough far floor:
+/// nothing the RTR switch may touch. Used to assert the roughness cutoff.
+constexpr int kCutoffProbeRows = 96;
+
+} // namespace
+
+struct RayTracedReflectionNoiseTestSuite {
+    RayTracedReflectionNoiseTestSuite() {
+        ZHLN::Fiber::InitMainThread();
+        ZHLN::TaskSystem::Init(2, 32, ZHLN::kMinimumFiberStackSize);
+    }
+
+    ~RayTracedReflectionNoiseTestSuite() {
+        ZHLN::TaskSystem::Shutdown();
+    }
+
+    static auto CreateTestEngine() -> std::unique_ptr<ZHLN::Engine> {
+        ZHLN::DefaultPreset::SetDisabled(true);
+        const ZHLN::EngineConfig cfg {
+            .physics = {.maxBodies = 256, .maxBodyPairs = 512, .maxContactConstraints = 512, .tempAllocatorSize = 8 * 1024 * 1024},
+            .render  = {
+                 .appName        = "Headless RTR Noise",
+                 .width          = kWidth,
+                 .height         = kHeight,
+                 .vsync          = false,
+                 .fullscreen     = false,
+                 .validationMode = ZHLN::ValidationMode::On,
+                 .headless       = true
+            }
+        };
+        auto engineRes = ZHLN::Engine::Create(cfg);
+        if (!engineRes) {
+            return nullptr;
+        }
+        auto engine = std::move(engineRes.value());
+        engine->InitializeDefaultScene();
+        return engine;
+    }
+
+    static void SetAA(ZHLN::Engine& engine, ZHLN::AAMode mode) {
+        auto& reg = engine.GetRegistry();
+        for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
+            reg.Remove<ZHLN::Components::FreeCamTagComponent>(e);
+            reg.Patch<ZHLN::Components::AASettingsComponent>(e, [mode](auto& aa) {
+                aa.state.mode        = mode;
+                aa.state.jitterX     = 0.0f;
+                aa.state.jitterY     = 0.0f;
+                aa.state.prevJitterX = 0.0f;
+                aa.state.prevJitterY = 0.0f;
+            });
+        }
+        engine.GetRenderContext().SetAAState(ZHLN::AAState {.mode = mode});
+    }
+
+    /// Same switch the shadow suite drives: GraphicsSettingsSync.cpp turns
+    /// PostProcessSettingsComponent::enableRTR into rayTracing.enableReflections,
+    /// which RenderGraphBuilder ANDs with a non-null TLAS to form pc.enableRTR
+    /// and to select the RTR pipeline variants for lighting and reflection.
+    static void SetRTR(ZHLN::Engine& engine, int enableRTR) {
+        auto&      reg      = engine.GetRegistry();
+        const auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
+        if (settings.empty()) {
+            return;
+        }
+        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [enableRTR](auto& pp) {
+            pp.fullBright        = 0;
+            pp.enableSSR         = 0;
+            pp.enableRTR         = enableRTR;
+            pp.giMode            = 0;
+            pp.giIntensity       = 0.0f;
+            pp.vignetteIntensity = 0.0f;
+            pp.ambientExposure   = 3.0f;
+            pp.skyZenith         = JPH::Vec4(0.001f, 0.002f, 0.006f, 1.0f);
+            pp.skyHorizon        = JPH::Vec4(0.004f, 0.006f, 0.012f, 1.0f);
+            pp.skyGround         = JPH::Vec4(0.001f, 0.001f, 0.002f, 1.0f);
+        });
+    }
+
+    /// A dark room of metal. The plate is the only surface at or under the 0.4
+    /// roughness cutoff, so it is the only surface the RTR switch may change;
+    /// the rough metal floor doubles as the cutoff probe. The emissive box is
+    /// what the plate mirrors -- a bright target against a near-black IBL, so
+    /// hit/miss flips of the VNDF ray are high contrast. The sun exists (the
+    /// frame uniforms want a light direction) but at zero intensity: metals
+    /// have no diffuse and there is no occlusion, so no shadow or highlight
+    /// term can leak into the on/off delta.
+    static bool BuildReflectionScene(ZHLN::Engine& engine) {
+        auto& reg = engine.GetRegistry();
+
+        auto floorMat = ZHLN::CreativeWorksFactory::CreateMaterial(
+            engine.GetRenderContext(),
+            ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 1.0f, .roughness = 0.8f, .baseColor = {0.05f, 0.05f, 0.06f, 1.0f}}
+        );
+        auto plateMat = ZHLN::CreativeWorksFactory::CreateMaterial(
+            engine.GetRenderContext(),
+            ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 1.0f, .roughness = kPlateRoughness, .baseColor = {0.5f, 0.5f, 0.5f, 1.0f}}
+        );
+        auto boxMat = ZHLN::CreativeWorksFactory::CreateMaterial(
+            engine.GetRenderContext(),
+            ZHLN::CreativeWorksFactory::MaterialDesc {
+                .metallic  = 0.0f,
+                .roughness = 0.5f,
+                .baseColor = {0.2f, 0.2f, 0.2f, 1.0f},
+                .emissive  = {4.0f, 4.0f, 4.0f, 1.0f}
+            }
+        );
+        if (!floorMat || !plateMat || !boxMat) {
+            return false;
+        }
+
+        ZHLN::CreativeWorksFactory::CreatePlane(
+            engine, 120.0f, {0.05f, 0.05f, 0.06f, 1.0f},
+            ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *floorMat}
+        );
+        // Just above the floor so it wins the depth test everywhere it covers.
+        ZHLN::CreativeWorksFactory::CreatePlane(
+            engine, 14.0f, {0.5f, 0.5f, 0.5f, 1.0f},
+            ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.02, 6.0), .createPhysics = false, .materialOverride = *plateMat}
+        );
+        ZHLN::CreativeWorksFactory::CreateBox(
+            engine, JPH::Vec3(2.0f, 2.0f, 2.0f),
+            ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 6.0, 6.0), .createPhysics = false, .materialOverride = *boxMat}
+        );
+
+        const ZHLN::Entity sunEnt = reg.Create();
+        reg.Add(
+            sunEnt,
+            ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 50.0f, 40.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({40.0f, 0.0f, 0.0f})},
+            ZHLN::Components::LightComponent {
+                .type = ZHLN::LightType::Sun, .color = JPH::Vec3(1.0f, 1.0f, 1.0f), .intensity = 0.0f, .direction = JPH::Vec3(0.0f, 0.75f, 0.66f).Normalized()
+            }
+        );
+
+        auto& cam    = engine.GetCamera();
+        cam.position = JPH::Vec3(0.0f, 5.0f, 20.0f);
+        cam.yaw      = -90.0f;
+        cam.pitch    = -22.0f;
+        cam.fov      = 60.0f;
+        return true;
+    }
+
+    static void TickFrames(ZHLN::Engine& engine, uint32_t frames) {
+        constexpr float dt = 1.0f / 60.0f;
+        for (uint32_t i = 0; i < frames; ++i) {
+            engine.ProcessEvents();
+            engine.Tick(dt, ZHLN::GameplayDriver::Cpp);
+        }
+    }
+
+    static RgbImage Capture(ZHLN::Engine& engine, const std::string& name) {
+        const auto res = engine.GetRenderContext().CaptureScreenshotPPM(name);
+        if (!res) {
+            return {};
+        }
+        return LoadPPM(name);
+    }
+
+    static RgbImage SettleAndCapture(ZHLN::Engine& engine, const std::string& name) {
+        TickFrames(engine, 2);
+        return Capture(engine, name);
+    }
+
+    /// Changed fraction restricted to the top probe rows (sky / box / rough
+    /// far floor): the part of the frame the RTR switch must not touch.
+    static double ChangedFractionInTopRows(const std::vector<double>& diff) {
+        std::size_t changed = 0;
+        for (int y = 0; y < kCutoffProbeRows; ++y) {
+            for (int x = 0; x < kWidth; ++x) {
+                if (std::abs(diff[static_cast<std::size_t>(y) * kWidth + x]) > kChangeThreshold) {
+                    ++changed;
+                }
+            }
+        }
+        return static_cast<double>(changed) / static_cast<double>(kCutoffProbeRows * kWidth);
+    }
+
+    struct Tests {
+        /// The 2x2 liveness diagnosis from the shadow suite, plus the cutoff
+        /// contract: the glossy plate must change when the switch flips, its
+        /// jitter must advance between two on-frames, and the rough top of the
+        /// frame must stay still.
+        std::expected<void, ZHLN::Error> rtr_is_live_and_rough_surfaces_stay_still() {
+            auto engine = RayTracedReflectionNoiseTestSuite::CreateTestEngine();
+            if (!ZHLN::Test::AssertTrue(engine != nullptr)) {
+                return std::unexpected(ReflectionNoiseError::EngineInitFailed);
+            }
+            if (!engine->GetRenderContext().RayTracingSupported()) {
+                ZHLN::Println("    [SKIP] Device has no ray tracing support; RTR checks are not applicable.");
+                return {};
+            }
+            if (!RayTracedReflectionNoiseTestSuite::BuildReflectionScene(*engine)) {
+                return std::unexpected(ReflectionNoiseError::EngineInitFailed);
+            }
+            RayTracedReflectionNoiseTestSuite::SetAA(*engine, ZHLN::AAMode::None);
+
+            RayTracedReflectionNoiseTestSuite::SetRTR(*engine, 1);
+            RgbImage a = RayTracedReflectionNoiseTestSuite::SettleAndCapture(*engine, "rt_refl_live_on.ppm");
+            RayTracedReflectionNoiseTestSuite::SetRTR(*engine, 0);
+            RgbImage b = RayTracedReflectionNoiseTestSuite::SettleAndCapture(*engine, "rt_refl_live_off.ppm");
+            RayTracedReflectionNoiseTestSuite::SetRTR(*engine, 1);
+            RgbImage c = RayTracedReflectionNoiseTestSuite::SettleAndCapture(*engine, "rt_refl_live_on2.ppm");
+            if (!ZHLN::Test::ExpectTrue(a.Valid() && b.Valid() && c.Valid())) {
+                return std::unexpected(ReflectionNoiseError::CaptureFailed);
+            }
+
+            const auto onVsOff = ZHLN::Test::Noise::MeasureResidual(a.rgb.data(), b.rgb.data(), kWidth, kHeight, kChangeThreshold);
+            const auto onVsOn  = ZHLN::Test::Noise::MeasureResidual(a.rgb.data(), c.rgb.data(), kWidth, kHeight, kChangeThreshold);
+            const double topChanged = ChangedFractionInTopRows(LumaDifference(a, b));
+            ZHLN::Println(
+                "    [INFO] RTR on vs off : meanAbs={:.3f} rms={:.3f} changed={:.5f}", onVsOff.meanAbs, onVsOff.rms, onVsOff.changedFraction
+            );
+            ZHLN::Println(
+                "    [INFO] RTR on vs on  : meanAbs={:.3f} rms={:.3f} changed={:.5f}", onVsOn.meanAbs, onVsOn.rms, onVsOn.changedFraction
+            );
+            ZHLN::Println("    [INFO] changed fraction in top {} probe rows (must be ~0) = {:.5f}", kCutoffProbeRows, topChanged);
+
+            if (!ZHLN::Test::ExpectTrue(onVsOff.changedFraction > 0.0)) {
+                return std::unexpected(ReflectionNoiseError::ReflectionPathInactive);
+            }
+            if (!ZHLN::Test::ExpectTrue(onVsOn.changedFraction > 0.0)) {
+                return std::unexpected(ReflectionNoiseError::JitterTemporallyFrozen);
+            }
+            // A few stray pixels are tolerated (variant switches can round
+            // differently); a changed rough floor is not.
+            if (!ZHLN::Test::ExpectTrue(topChanged < 0.002)) {
+                return std::unexpected(ReflectionNoiseError::RoughnessCutoffViolated);
+            }
+
+            ZHLN::Println("    [PASS] RTR reaches the mirror, its jitter moves, and rough surfaces ignore the switch.");
+            return {};
+        }
+
+        /// Blue-noise structure of the reflection residual, over the bounding
+        /// box of the pixels that actually vary between two on-frames.
+        std::expected<void, ZHLN::Error> rtr_residual_is_aperiodic_and_isotropic() {
+            auto engine = RayTracedReflectionNoiseTestSuite::CreateTestEngine();
+            if (!ZHLN::Test::AssertTrue(engine != nullptr)) {
+                return std::unexpected(ReflectionNoiseError::EngineInitFailed);
+            }
+            if (!engine->GetRenderContext().RayTracingSupported()) {
+                ZHLN::Println("    [SKIP] Device has no ray tracing support; dither structure checks are not applicable.");
+                return {};
+            }
+            if (!RayTracedReflectionNoiseTestSuite::BuildReflectionScene(*engine)) {
+                return std::unexpected(ReflectionNoiseError::EngineInitFailed);
+            }
+            RayTracedReflectionNoiseTestSuite::SetRTR(*engine, 1);
+            RayTracedReflectionNoiseTestSuite::SetAA(*engine, ZHLN::AAMode::None);
+
+            RgbImage prev = RayTracedReflectionNoiseTestSuite::SettleAndCapture(*engine, "rt_refl_structure_a.ppm");
+            RayTracedReflectionNoiseTestSuite::TickFrames(*engine, 1);
+            RgbImage cur = RayTracedReflectionNoiseTestSuite::Capture(*engine, "rt_refl_structure_b.ppm");
+            if (!ZHLN::Test::ExpectTrue(prev.Valid() && cur.Valid())) {
+                return std::unexpected(ReflectionNoiseError::CaptureFailed);
+            }
+
+            const auto res = ZHLN::Test::Noise::MeasureResidual(prev.rgb.data(), cur.rgb.data(), kWidth, kHeight, kChangeThreshold);
+            if (!ZHLN::Test::ExpectTrue(res.valid)) {
+                return std::unexpected(ReflectionNoiseError::CaptureFailed);
+            }
+
+            const std::vector<double> diff = LumaDifference(prev, cur);
+            const BBox                band = BBoxOfChangedPixels(diff.data(), kWidth, kHeight, kChangeThreshold, 4);
+
+            ZHLN::Println(
+                "    [INFO] full frame: meanAbs={:.3f} rms={:.3f} changed={:.5f} isolated={:.4f} maxAbs={:.1f}", res.meanAbs, res.rms,
+                res.changedFraction, res.isolatedFraction, res.maxAbs
+            );
+            ZHLN::Println(
+                "    [INFO] reflection bbox = [{},{}) x [{},{})  ({}x{}), region rms={:.3f}", band.x0, band.x1, band.y0, band.y1, band.Width(),
+                band.Height(), RmsInRegion(diff.data(), kWidth, band)
+            );
+
+            if (!ZHLN::Test::ExpectTrue(!band.Empty() && band.Width() >= kMinRegionWidth && band.Height() >= kMinRegionHeight)) {
+                return std::unexpected(ReflectionNoiseError::ReflectionRegionTooSmall);
+            }
+
+            const std::vector<double> region = Crop(diff.data(), kWidth, band);
+            const auto                dir    = ZHLN::Test::Noise::MeasureDirectionalEnergy(region.data(), band.Width(), band.Height());
+            const double              lob    = ZHLN::Test::Noise::AutocorrelationSideLobe(region.data(), band.Width(), band.Height(), 4);
+
+            ZHLN::Println(
+                "    [INFO] directional e0={:.4f} e45={:.4f} e90={:.4f} e135={:.4f} -> anisotropy={:.4f}", dir.e0, dir.e45, dir.e90, dir.e135,
+                dir.Anisotropy()
+            );
+            ZHLN::Println("    [INFO] positive autocorrelation side lobe (lag<=4) = {:.4f}", lob);
+
+            // Same measured thresholds as the shadow suite: the CPU sweep of
+            // the shipped tile vs the IGN lattice puts blue noise at
+            // anisotropy ~1.04-1.20 / lobe ~0.04-0.13 and the lattice at
+            // ~2.9-3.3 / ~0.8-0.94 over regions this size; 1.60 and 0.30 sit
+            // between the regimes.
+            if (!ZHLN::Test::ExpectTrue(dir.Anisotropy() < 1.60)) {
+                return std::unexpected(ReflectionNoiseError::DitherIsAnisotropic);
+            }
+            if (!ZHLN::Test::ExpectTrue(lob < 0.30)) {
+                return std::unexpected(ReflectionNoiseError::DitherIsPeriodic);
+            }
+
+            ZHLN::Println("    [PASS] RTR residual is isotropic and aperiodic (blue noise, not a lattice).");
+            return {};
+        }
+
+        /// Under temporal accumulation the reflection residual must fall.
+        std::expected<void, ZHLN::Error> rtr_residual_converges_with_temporal_accumulation() {
+            auto engine = RayTracedReflectionNoiseTestSuite::CreateTestEngine();
+            if (!ZHLN::Test::AssertTrue(engine != nullptr)) {
+                return std::unexpected(ReflectionNoiseError::EngineInitFailed);
+            }
+            if (!engine->GetRenderContext().RayTracingSupported()) {
+                ZHLN::Println("    [SKIP] Device has no ray tracing support; convergence check is not applicable.");
+                return {};
+            }
+            if (!RayTracedReflectionNoiseTestSuite::BuildReflectionScene(*engine)) {
+                return std::unexpected(ReflectionNoiseError::EngineInitFailed);
+            }
+            RayTracedReflectionNoiseTestSuite::SetRTR(*engine, 1);
+            RayTracedReflectionNoiseTestSuite::SetAA(*engine, ZHLN::AAMode::TAA);
+
+            RgbImage prev = RayTracedReflectionNoiseTestSuite::SettleAndCapture(*engine, "rt_refl_conv_prev.ppm");
+            if (!ZHLN::Test::ExpectTrue(prev.Valid())) {
+                return std::unexpected(ReflectionNoiseError::CaptureFailed);
+            }
+
+            RayTracedReflectionNoiseTestSuite::TickFrames(*engine, 1);
+            RgbImage second = RayTracedReflectionNoiseTestSuite::Capture(*engine, "rt_refl_conv_cur.ppm");
+            if (!ZHLN::Test::ExpectTrue(second.Valid())) {
+                return std::unexpected(ReflectionNoiseError::CaptureFailed);
+            }
+            const std::vector<double> firstDiff = LumaDifference(prev, second);
+            const BBox                band      = BBoxOfChangedPixels(firstDiff.data(), kWidth, kHeight, kChangeThreshold, 4);
+            if (!ZHLN::Test::ExpectTrue(!band.Empty() && band.Width() >= kMinRegionWidth && band.Height() >= kMinRegionHeight)) {
+                return std::unexpected(ReflectionNoiseError::ReflectionRegionTooSmall);
+            }
+            ZHLN::Println("    [INFO] measuring convergence over [{},{}) x [{},{})", band.x0, band.x1, band.y0, band.y1);
+
+            std::vector<double> rmsSeries;
+            rmsSeries.push_back(RmsInRegion(firstDiff.data(), kWidth, band));
+            prev = std::move(second);
+            for (uint32_t f = 2; f < 10; ++f) {
+                RayTracedReflectionNoiseTestSuite::TickFrames(*engine, 1);
+                RgbImage cur = RayTracedReflectionNoiseTestSuite::Capture(*engine, "rt_refl_conv_cur.ppm");
+                if (!ZHLN::Test::ExpectTrue(cur.Valid())) {
+                    return std::unexpected(ReflectionNoiseError::CaptureFailed);
+                }
+                const std::vector<double> d = LumaDifference(prev, cur);
+                rmsSeries.push_back(RmsInRegion(d.data(), kWidth, band));
+                prev = std::move(cur);
+            }
+
+            const double slope = ZHLN::Test::Noise::LinearSlope(rmsSeries);
+            const double mean  = std::accumulate(rmsSeries.begin(), rmsSeries.end(), 0.0) / static_cast<double>(rmsSeries.size());
+            const double fittedDrop = -slope * static_cast<double>(rmsSeries.size() - 1);
+            for (std::size_t i = 0; i < rmsSeries.size(); ++i) {
+                ZHLN::Println("    [INFO] reflection residual RMS frame {} -> {}: {:.4f}", i + 1, i + 2, rmsSeries[i]);
+            }
+            ZHLN::Println(
+                "    [INFO] mean={:.4f} slope={:.6f} predicted drop over window={:.4f} ({:.1f}% of mean)", mean, slope, fittedDrop,
+                mean > 0.0 ? 100.0 * fittedDrop / mean : 0.0
+            );
+
+            // Same fitted-trend gate as the shadow suite; see the oscillation
+            // analysis over there.
+            const bool converged = slope < 0.0 && fittedDrop > 0.35 * mean;
+            if (!ZHLN::Test::ExpectTrue(converged)) {
+                return std::unexpected(ReflectionNoiseError::ResidualDidNotConverge);
+            }
+
+            ZHLN::Println("    [PASS] Reflection residual falls under temporal accumulation.");
+            return {};
+        }
+
+        /// Changed pixels must cluster; isolated single-pixel changes are ray
+        /// debris, not VNDF jitter.
+        std::expected<void, ZHLN::Error> rtr_residual_has_no_isolated_ray_debris() {
+            auto engine = RayTracedReflectionNoiseTestSuite::CreateTestEngine();
+            if (!ZHLN::Test::AssertTrue(engine != nullptr)) {
+                return std::unexpected(ReflectionNoiseError::EngineInitFailed);
+            }
+            if (!engine->GetRenderContext().RayTracingSupported()) {
+                ZHLN::Println("    [SKIP] Device has no ray tracing support; debris check is not applicable.");
+                return {};
+            }
+            if (!RayTracedReflectionNoiseTestSuite::BuildReflectionScene(*engine)) {
+                return std::unexpected(ReflectionNoiseError::EngineInitFailed);
+            }
+            RayTracedReflectionNoiseTestSuite::SetRTR(*engine, 1);
+            RayTracedReflectionNoiseTestSuite::SetAA(*engine, ZHLN::AAMode::None);
+
+            RgbImage prev = RayTracedReflectionNoiseTestSuite::SettleAndCapture(*engine, "rt_refl_debris_a.ppm");
+            RayTracedReflectionNoiseTestSuite::TickFrames(*engine, 1);
+            RgbImage cur = RayTracedReflectionNoiseTestSuite::Capture(*engine, "rt_refl_debris_b.ppm");
+            if (!ZHLN::Test::ExpectTrue(prev.Valid() && cur.Valid())) {
+                return std::unexpected(ReflectionNoiseError::CaptureFailed);
+            }
+
+            const auto res = ZHLN::Test::Noise::MeasureResidual(prev.rgb.data(), cur.rgb.data(), kWidth, kHeight, kChangeThreshold);
+            ZHLN::Println(
+                "    [INFO] changed={:.5f} isolated-of-changed={:.4f} maxAbs={:.1f}", res.changedFraction, res.isolatedFraction, res.maxAbs
+            );
+
+            if (!ZHLN::Test::ExpectTrue(res.changedFraction > 1e-5)) {
+                return std::unexpected(ReflectionNoiseError::JitterTemporallyFrozen);
+            }
+            if (!ZHLN::Test::ExpectTrue(res.isolatedFraction < 0.6)) {
+                return std::unexpected(ReflectionNoiseError::RayDebrisDetected);
+            }
+
+            ZHLN::Println("    [PASS] Reflection changes cluster; no isolated ray debris.");
+            return {};
+        }
+    };
+};
+
+int main() {
+    return ZHLN::Test::Runner::Run<RayTracedReflectionNoiseTestSuite>();
+}
