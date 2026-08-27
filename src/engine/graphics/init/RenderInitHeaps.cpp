@@ -13,6 +13,12 @@
 
 namespace ZHLN {
 
+// Private bindless/heap setup failure (Tier 1): declared at file scope in this
+// translation unit so no header exposes it.
+enum class BindlessSetupError : uint8_t {
+    DefaultTextureRegistrationFailed[[= ZHLN::Reflect::Description("Default bindless texture registration returned unexpected indices")]] = 1,
+};
+
 auto RenderContext::Impl::InitBindless() -> std::expected<void, Error> {
     using enum Resource::ShaderID;
 
@@ -42,7 +48,7 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, Error> {
                 {.shader = Vk::CreateShaderDesc(Resource::GetShaderProgram(MeshParticleUpdate).vertex), .stage = VK_SHADER_STAGE_COMPUTE_BIT},
             };
             if (!bindlessLayout.Build(ctx.Device(), std::span {reflectInputs})) {
-                return std::unexpected(RenderInitError::PipelineCreationFailed);
+                return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
             }
 
             // Descriptor-heap pipelines are created with VK_NULL_HANDLE as
@@ -118,14 +124,14 @@ auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSample
         kSceneStaticSamplerSlots + kPassStaticSamplerSlots, kSceneDynamicSamplerSlots, 2
     );
     if (!init_res) {
-        return std::unexpected(RenderInitError::SubsystemAllocationFailed);
+        return std::unexpected(init_res.error());
     }
 
     // Slang is the layout authority for the frame-address fields and the
     // per-dispatch descriptor index. Reject devices whose push-data budget
     // cannot fit the reflected layout.
     if (heapManager.PushDataMaxSize() < heapPushDataLayout.requiredSize) [[unlikely]] {
-        return std::unexpected(RenderInitError::PipelineCreationFailed);
+        return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
     // --- Static slot allocation (sampler heap) ---
@@ -133,7 +139,7 @@ auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSample
     auto clampSlot  = heapManager.AllocateStaticSampler();
     auto pointSlot  = heapManager.AllocateStaticSampler();
     if (!globalSlot || !clampSlot || !pointSlot) {
-        return std::unexpected(RenderInitError::SubsystemAllocationFailed);
+        return std::unexpected(Vk::DescriptorHeapError::SamplerSlotsExhausted);
     }
     globalSamplerSlot = *globalSlot;
     clampSamplerSlot  = *clampSlot;
@@ -145,7 +151,7 @@ auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSample
     auto transSlot = heapManager.AllocateStaticResource<VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE>();
     auto depthSlot = heapManager.AllocateStaticResource<VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE>();
     if (!iblSlot || !brdfSlot || !transSlot || !depthSlot) {
-        return std::unexpected(RenderInitError::SubsystemAllocationFailed);
+        return std::unexpected(Vk::DescriptorHeapError::ResourceSlotsExhausted);
     }
     iblPrefilteredSlot = *iblSlot;
     iblBrdfLutSlot     = *brdfSlot;
@@ -160,7 +166,7 @@ auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSample
     // The skips assume exactly the scene allocations above; anything else
     // allocating before this point would silently overlap the texture region.
     if (heapManager.StaticResourceCursor() != 4 || heapManager.StaticSamplerCursor() != 3) [[unlikely]] {
-        return std::unexpected(RenderInitError::PipelineCreationFailed);
+        return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
     heapManager.SkipStaticResourceSlots(kGlobalTextureSlots + (kSceneStaticResourceSlots - 4));
     heapManager.SkipStaticSamplerSlots(kSceneStaticSamplerSlots - 3);
@@ -493,7 +499,7 @@ auto RenderContext::Impl::InitBakeHeapBindings() noexcept -> std::expected<void,
     // synchronous, so the same slots are rewritten per bake.
     const auto shader = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::ProceduralBakeComp).vertex, "CSMain");
     if (!proceduralBakeDescLayout.Build(ctx.Device(), shader, VK_SHADER_STAGE_COMPUTE_BIT)) {
-        return std::unexpected(RenderInitError::PipelineCreationFailed);
+        return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
     Vk::BuildHeapPassBindings(
         heapManager, proceduralBakeDescLayout.reflectedSets[0], 0, heapPushDataLayout.heapIndexOffset, kBakeHeapSlotSpan, bakeHeapBindings
@@ -521,7 +527,7 @@ auto RenderContext::Impl::InitializeSystemTextures() noexcept -> std::expected<v
         return CreateTextureInternal(whitePixel.data(), 1, 1, true).and_then([&, blackIdx, normalPixel](uint32_t whiteIdx) -> std::expected<void, Error> {
             return CreateTextureInternal(normalPixel.data(), 1, 1, false).and_then([&, blackIdx, whiteIdx](uint32_t normalIdx) -> std::expected<void, Error> {
                 if (blackIdx != 0 || whiteIdx != 1 || normalIdx != 2) {
-                    return std::unexpected(RenderInitError::SubsystemAllocationFailed);
+                    return std::unexpected(BindlessSetupError::DefaultTextureRegistrationFailed);
                 }
                 return {};
             });

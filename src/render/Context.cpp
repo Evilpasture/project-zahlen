@@ -3,7 +3,7 @@
 
 #include "Context.hpp"
 #include "RenderCore.h"
-#include <Zahlen/render/RenderCode.hpp>
+#include "RenderCore.hpp"
 
 namespace ZHLN::Vk {
 
@@ -93,7 +93,7 @@ auto Context::operator=(Context&& other) noexcept -> Context& {
 std::expected<VkInstance, ZHLN::Error> Context::Builder::BuildInstance() const noexcept {
     VkInstance instance = CreateInstance(_appName, _appVersion, _instanceExtensions, _validationMode);
     if (instance == VK_NULL_HANDLE) {
-        return std::unexpected(RenderInitError::InstanceCreationFailed);
+        return std::unexpected(ContextError::InstanceCreationFailed);
     }
     return instance;
 }
@@ -102,7 +102,7 @@ std::expected<ZHLN_PhysicalDeviceInfo, ZHLN::Error> Context::Builder::SelectPhys
     ZHLN_DeviceSelectDesc   select_desc = {.instance = _instance, .surface = _surface, .score_fn = _scoreFn, .score_userdata = _scoreUserdata};
     ZHLN_PhysicalDeviceInfo info        = ZHLN_SelectPhysicalDevice(&select_desc);
     if (info.handle == VK_NULL_HANDLE) {
-        return std::unexpected(RenderInitError::NoSuitableDeviceFound);
+        return std::unexpected(ContextError::NoSuitableDeviceFound);
     }
     return info;
 }
@@ -122,7 +122,7 @@ std::expected<Context, Error> Context::Builder::Build() const noexcept {
 
     ctx._device = ZHLN_CreateDevice(&device_desc);
     if (ctx._device.handle == VK_NULL_HANDLE) {
-        return std::unexpected(RenderInitError::DeviceCreationFailed);
+        return std::unexpected(ContextError::DeviceCreationFailed);
     }
 
     // Only take ownership of _instance once device creation succeeds

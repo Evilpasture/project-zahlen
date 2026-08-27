@@ -18,7 +18,7 @@ auto PresentationContext::Init(const Context& ctx, Allocator& alloc, VkSurfaceKH
 
 auto PresentationContext::Rebuild(uint32_t width, uint32_t height) -> std::expected<void, Error> {
     if ((_ctx == nullptr) || (_alloc == nullptr)) {
-        return std::unexpected(RenderInitError::SubsystemAllocationFailed);
+        return std::unexpected(PresentationError::ContextInvalid);
     }
 
     auto idle_res = Vk::WaitIdle(_ctx->Device());
@@ -74,7 +74,7 @@ auto PresentationContext::Rebuild(uint32_t width, uint32_t height) -> std::expec
     };
 
     if (!swapchain.Rebuild(s_desc)) {
-        return std::unexpected(RenderInitError::PresentationFailed);
+        return std::unexpected(PresentationError::SwapchainCreationFailed);
     }
     presentSemaphores.Rebuild(_ctx->Device(), swapchain.Get().image_count);
 

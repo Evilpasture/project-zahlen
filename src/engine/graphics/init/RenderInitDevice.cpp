@@ -327,13 +327,13 @@ auto RenderContext::Create(Window& window, const RenderConfig& cfg) noexcept -> 
         .and_then([&]() -> std::expected<void, Error> {
             if (!window.IsTTY() && !window.IsHeadless()) {
                 return window.CreateVulkanSurface(instance, nullptr, width, height)
-                    .transform_error([](auto) -> Error { return RenderInitError::SurfaceCreationFailed; })
+                    .transform_error([](auto err) -> Error { return err; })
                     .transform([&](void* surface) -> void { raw_surface = static_cast<VkSurfaceKHR>(surface); });
             }
             if (window.IsHeadless()) {
                 // Headless: obtain offscreen dimensions without creating a VkSurfaceKHR
                 return window.CreateVulkanSurface(instance, nullptr, width, height)
-                    .transform_error([](auto) -> Error { return RenderInitError::SurfaceCreationFailed; })
+                    .transform_error([](auto err) -> Error { return err; })
                     .transform([&](void* /*surface*/) -> void { raw_surface = VK_NULL_HANDLE; });
             }
             return {};
@@ -348,7 +348,7 @@ auto RenderContext::Create(Window& window, const RenderConfig& cfg) noexcept -> 
         .and_then([&]() -> std::expected<void, Error> {
             if (window.IsTTY()) {
                 return window.CreateVulkanSurface(instance, physicalInfo.handle, width, height)
-                    .transform_error([](auto) -> Error { return RenderInitError::SurfaceCreationFailed; })
+                    .transform_error([](auto err) -> Error { return err; })
                     .transform([&](void* surface) -> void { raw_surface = static_cast<VkSurfaceKHR>(surface); });
             }
             return {};

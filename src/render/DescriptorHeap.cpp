@@ -59,7 +59,7 @@ void DescriptorHeap<Type>::Cleanup() noexcept {
 }
 
 template <DescriptorHeapType Type>
-auto DescriptorHeap<Type>::Init(const Context& ctx, Allocator& allocator, uint32_t capacity) noexcept -> std::expected<void, DescriptorHeapError> {
+auto DescriptorHeap<Type>::Init(const Context& ctx, Allocator& allocator, uint32_t capacity) noexcept -> std::expected<void, Error> {
     _device   = ctx.Device();
     _capacity = capacity;
 
@@ -403,7 +403,7 @@ struct SlotAllocator::Impl {
     uint32_t              capacity = 0;
     uint32_t              nextSlot = 0;
     std::vector<uint32_t> freeSlots;
-    DescriptorHeapError   errorOnExhaustion = DescriptorHeapError::ResourceSlotsExhausted;
+    Error                 errorOnExhaustion {DescriptorHeapError::ResourceSlotsExhausted};
 };
 
 SlotAllocator::SlotAllocator() noexcept: _impl(std::make_unique<Impl>()) {
@@ -413,14 +413,14 @@ SlotAllocator::~SlotAllocator() noexcept = default;
 SlotAllocator::SlotAllocator(SlotAllocator&& other) noexcept                    = default;
 auto SlotAllocator::operator=(SlotAllocator&& other) noexcept -> SlotAllocator& = default;
 
-void SlotAllocator::Init(uint32_t capacity, DescriptorHeapError errorOnExhaustion) noexcept {
+void SlotAllocator::Init(uint32_t capacity, Error errorOnExhaustion) noexcept {
     _impl->capacity = capacity;
     _impl->nextSlot = 0;
     _impl->freeSlots.clear();
     _impl->errorOnExhaustion = errorOnExhaustion;
 }
 
-auto SlotAllocator::Allocate() noexcept -> std::expected<uint32_t, DescriptorHeapError> {
+auto SlotAllocator::Allocate() noexcept -> std::expected<uint32_t, Error> {
     if (!_impl->freeSlots.empty()) {
         const uint32_t slot = _impl->freeSlots.back();
         _impl->freeSlots.pop_back();
@@ -463,7 +463,7 @@ auto HeapManager::Init(
     uint32_t       staticSamplerCount,
     uint32_t       dynamicSamplerCount,
     uint32_t       doubleBufferCount
-) noexcept -> std::expected<void, DescriptorHeapError> {
+) noexcept -> std::expected<void, Error> {
     _staticResourceCount  = staticResourceCount;
     _dynamicResourceCount = dynamicResourceCount;
     _staticSamplerCount   = staticSamplerCount;
@@ -509,7 +509,7 @@ void HeapManager::BeginFrame(uint32_t frameIndex) noexcept {
     _dynamicSamplerAllocated  = 0;
 }
 
-auto HeapManager::AllocateStaticResourceSlot() noexcept -> std::expected<uint32_t, DescriptorHeapError> {
+auto HeapManager::AllocateStaticResourceSlot() noexcept -> std::expected<uint32_t, Error> {
     return _staticResourceAlloc.Allocate();
 }
 
@@ -517,7 +517,7 @@ void HeapManager::FreeStaticResourceSlot(uint32_t slot) noexcept {
     _staticResourceAlloc.Free(slot);
 }
 
-auto HeapManager::AllocateStaticSamplerSlot() noexcept -> std::expected<uint32_t, DescriptorHeapError> {
+auto HeapManager::AllocateStaticSamplerSlot() noexcept -> std::expected<uint32_t, Error> {
     return _staticSamplerAlloc.Allocate();
 }
 
@@ -525,7 +525,7 @@ void HeapManager::FreeStaticSamplerSlot(uint32_t slot) noexcept {
     _staticSamplerAlloc.Free(slot);
 }
 
-auto HeapManager::AllocateDynamicResourceRangeSlot(uint32_t count) noexcept -> std::expected<uint32_t, DescriptorHeapError> {
+auto HeapManager::AllocateDynamicResourceRangeSlot(uint32_t count) noexcept -> std::expected<uint32_t, Error> {
     const uint32_t base_slot = _staticResourceCount + (_currentFrameIndex * _dynamicResourceCount) + _dynamicResourceAllocated;
     if (_dynamicResourceAllocated + count > _dynamicResourceCount) [[unlikely]] {
         return std::unexpected(DescriptorHeapError::DynamicResourceOverflow);
@@ -534,7 +534,7 @@ auto HeapManager::AllocateDynamicResourceRangeSlot(uint32_t count) noexcept -> s
     return base_slot;
 }
 
-auto HeapManager::AllocateDynamicSamplerRangeSlot(uint32_t count) noexcept -> std::expected<uint32_t, DescriptorHeapError> {
+auto HeapManager::AllocateDynamicSamplerRangeSlot(uint32_t count) noexcept -> std::expected<uint32_t, Error> {
     const uint32_t base_slot = _staticSamplerCount + (_currentFrameIndex * _dynamicSamplerCount) + _dynamicSamplerAllocated;
     if (_dynamicSamplerAllocated + count > _dynamicSamplerCount) [[unlikely]] {
         return std::unexpected(DescriptorHeapError::DynamicSamplerOverflow);

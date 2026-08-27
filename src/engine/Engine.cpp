@@ -324,7 +324,7 @@ Engine::Engine(const EngineConfig& cfg, bool& outSuccess): _impl(nullptr) {
 auto Engine::Create(const EngineConfig& cfg) -> std::expected<std::unique_ptr<Engine>, Error> {
     auto engine = std::unique_ptr<Engine>(new (std::nothrow) Engine());
     if (!engine) {
-        return std::unexpected(EngineInitError::UnknownError);
+        return std::unexpected(EngineInitError::EngineAllocationFailed);
     }
 
     auto res = engine->InitInternal(cfg);

@@ -11,15 +11,31 @@
 #include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Config.hpp>
-#include <Zahlen/EngineCode.hpp>
+#include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Types.hpp>
+#include <cstdint>
 #include <expected>
 #include <functional>
 #include <memory>
 
 namespace ZHLN {
+
+// ============================================================================
+// Core Lifecycle Errors (Tier 3)
+// Application bootstrap code branches on these specific failure reasons.
+// ============================================================================
+
+enum class EngineInitError : uint8_t {
+    WindowCreationFailed[[= ZHLN::Reflect::Description("Window creation failed")]] = 1,
+    TTYInitializationFailed[[= ZHLN::Reflect::Description("TTY initialization failed")]],
+    RenderInitializationFailed[[= ZHLN::Reflect::Description("Render initialization failed")]],
+    PhysicsInitializationFailed[[= ZHLN::Reflect::Description("Physics initialization failed")]],
+    AudioInitializationFailed[[= ZHLN::Reflect::Description("Audio initialization failed")]],
+    AssetInitializationFailed[[= ZHLN::Reflect::Description("Asset initialization failed")]],
+    EngineAllocationFailed[[= ZHLN::Reflect::Description("Engine instance allocation failed")]],
+};
 
 class Window;
 class RenderContext;

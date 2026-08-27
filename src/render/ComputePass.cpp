@@ -16,7 +16,7 @@ std::expected<void, ZHLN::Error> ComputePass::BuildHeap(
     // (VUID-VkComputePipelineCreateInfo-flags-11311). Per-dispatch data
     // travels through vkCmdPushDataEXT.
     if (!ReflectDispatchLayout(shader)) {
-        return std::unexpected(RenderInitError::PipelineCreationFailed);
+        return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
     }
     pipelineLayout      = {};
     heapIndexPushOffset = indexPushOffset;
@@ -37,7 +37,7 @@ std::expected<void, ZHLN::Error> ComputePass::BuildHeapVariants(
     uint32_t                                             indexPushOffset
 ) noexcept {
     if (!ReflectDispatchLayout(shader)) {
-        return std::unexpected(RenderInitError::PipelineCreationFailed);
+        return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
     }
     heapIndexPushOffset = indexPushOffset;
     pipelines.clear();
@@ -52,7 +52,7 @@ std::expected<void, ZHLN::Error> ComputePass::BuildHeapVariants(
     }
 
     if (pipelines.empty()) {
-        return std::unexpected(RenderInitError::PipelineCreationFailed);
+        return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
     }
     return {};
 }

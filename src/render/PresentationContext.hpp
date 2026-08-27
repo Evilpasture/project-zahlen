@@ -6,7 +6,17 @@
 #error "Please include <src/render/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Error.hpp>
+#include <cstdint>
+
 namespace ZHLN::Vk {
+
+// Swapchain / presentation subsystem bring-up failures.
+enum class PresentationError : uint8_t {
+    ContextInvalid[[= Reflect::Description("Presentation context is missing a device or allocator")]] = 1,
+    SwapchainCreationFailed[[= Reflect::Description("Swapchain creation failed")]],
+};
 
 class Context;
 class Allocator;

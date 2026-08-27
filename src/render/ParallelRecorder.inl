@@ -9,15 +9,16 @@
 namespace ZHLN::Vk {
 
 template <size_t ConcurrentSlots>
-auto ParallelCommandRecorder<ConcurrentSlots>::Init(VkDevice device, uint32_t queueFamily) noexcept -> std::expected<void, VkResult> {
+auto ParallelCommandRecorder<ConcurrentSlots>::Init(VkDevice device, uint32_t queueFamily) noexcept -> std::expected<void, Error> {
     _device = device;
     for (size_t i = 0; i < ConcurrentSlots; ++i) {
         _pools[i] = CommandPool(_device, queueFamily);
-        if (!_pools[i].Valid()) {
-            return std::unexpected(VK_ERROR_INITIALIZATION_FAILED);
-        }
-        if (!_pools[i].AllocateSecondary(1)) {
-            return std::unexpected(VK_ERROR_OUT_OF_DEVICE_MEMORY);
+        // AllocateSecondary internally EnsureValid()s the pool, so this both
+        // reports PoolNotReady and CommandBufferAllocationFailed as domain
+        // errors instead of leaking raw VkResult.
+        auto alloc = _pools[i].AllocateSecondary(1);
+        if (!alloc) [[unlikely]] {
+            return std::unexpected(alloc.error());
         }
         _cmds[i] = _pools[i][0];
     }

@@ -28,7 +28,7 @@ class IBLProcessor {
 
         const auto requireShader = [](const ZHLN_ShaderDesc& shader) -> std::expected<ZHLN_ShaderDesc, ZHLN::Error> {
             if (shader.code == nullptr || shader.size == 0) {
-                return std::unexpected(ZHLN::ShaderStageCreationError::ShaderLoadingFailed);
+                return std::unexpected(ZHLN::Vk::ShaderStageCreationError::ShaderLoadingFailed);
             }
             return shader;
         };
@@ -169,7 +169,7 @@ class IBLProcessor {
 
                 auto mappedSH = state.shCpu.Map();
                 if (mappedSH.data == nullptr) {
-                    return std::unexpected(ZHLN::RenderInitError::SubsystemAllocationFailed);
+                    return std::unexpected(ZHLN::Vk::StagingError::MemoryMappingFailed);
                 }
                 std::memcpy(state.payload.shCoeffs.data(), mappedSH.data, kSHBytes);
                 return std::move(state);

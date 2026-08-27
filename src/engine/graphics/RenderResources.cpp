@@ -16,6 +16,30 @@
 #include <utility>
 #include <vector>
 
+// ============================================================================
+// Private Resource Errors (Tier 1)
+// Produced only while building materials / resizing shadow targets inside
+// this translation unit; no header exposes them, so callers just log the
+// type-erased ZHLN::Error. Declared at file scope (not an anonymous
+// namespace) to keep reflected category names stable for both native
+// reflection and the AST transpiler fallback.
+// ============================================================================
+
+namespace ZHLN {
+
+enum class MaterialCreationError : uint8_t {
+    ShaderCompilationFailed[[= ZHLN::Reflect::Description("Material shader compilation failed")]] = 1,
+    PipelineLayoutCreationFailed[[= ZHLN::Reflect::Description("Material pipeline layout creation failed")]],
+    PipelineCreationFailed[[= ZHLN::Reflect::Description("Material pipeline creation failed")]],
+};
+
+enum class ShadowResolutionError : uint8_t {
+    DeviceLost[[= ZHLN::Reflect::Description("Device lost while resizing shadow map")]] = 1,
+    RecreationFailed[[= ZHLN::Reflect::Description("Shadow map recreation failed")]],
+};
+
+} // namespace ZHLN
+
 namespace ZHLN {
 
 // ============================================================================
@@ -564,7 +588,7 @@ auto RenderContext::Impl::InitializeVolumetricNoiseTexture() noexcept -> std::ex
 
     auto staging = stagingRingBuffer.Allocate(bytes);
     if (staging.mappedData == nullptr) {
-        return std::unexpected(RenderInitError::SubsystemAllocationFailed);
+        return std::unexpected(Vk::StagingError::MemoryMappingFailed);
     }
     std::memcpy(staging.mappedData, pixels.data(), bytes);
 
@@ -1021,7 +1045,7 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
     return std::expected<void, Error>()
         .and_then([&]() -> std::expected<BuildContext, Error> {
             if (!impl->rtCtx.Valid()) {
-                return std::unexpected(VulkanCallError::FeatureNotPresent);
+                return std::unexpected(RenderFeatureError::FeatureNotSupported);
             }
             return impl->meshPool.Resolve(mesh.posBuffer)
                 .transform_error([](auto err) -> Error { return err; })
@@ -1057,7 +1081,7 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
         .and_then([&](BuildContext b) -> std::expected<BuildContext, Error> {
             b.blas = impl->rtCtx.CreateAccelerationStructure(b.blasBuffer.Handle(), b.sizes.acceleration_structure_size, ZHLN_AS_TYPE_BOTTOM_LEVEL);
             if (b.blas == VK_NULL_HANDLE) {
-                return std::unexpected(VulkanCallError::VulkanCallFailed);
+                return std::unexpected(Vk::VulkanCallError::VulkanCallFailed);
             }
 
             return Vk::Buffer::Create(

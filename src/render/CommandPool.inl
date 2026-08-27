@@ -38,7 +38,7 @@ inline auto CommandPool<QType>::operator=(CommandPool&& other) noexcept -> Comma
 template <Vk::QueueType QType>
 inline auto CommandPool<QType>::EnsureValid() const noexcept -> std::expected<void, Error> {
     if (!Valid()) [[unlikely]] {
-        return std::unexpected(RenderInitError::DriverInitializationFailed);
+        return std::unexpected(CommandPoolError::PoolNotReady);
     }
     return {};
 }
@@ -47,7 +47,7 @@ template <Vk::QueueType QType>
 inline auto CommandPool<QType>::Allocate(const uint32_t count) noexcept -> std::expected<void, Error> {
     return EnsureValid().and_then([this, count] {
         auto res = ZHLN_AllocateCommandBuffers(_device, &_raw, count);
-        return res == VK_SUCCESS ? std::expected<void, Error> {} : std::unexpected(RenderInitError::OutOfHostMemory);
+        return res == VK_SUCCESS ? std::expected<void, Error> {} : std::unexpected(CommandPoolError::CommandBufferAllocationFailed);
     });
 }
 
@@ -55,7 +55,7 @@ template <Vk::QueueType QType>
 inline auto CommandPool<QType>::AllocateSecondary(const uint32_t count) noexcept -> std::expected<void, Error> {
     return EnsureValid().and_then([this, count] {
         auto res = ZHLN_AllocateSecondaryCommandBuffers(_device, &_raw, count);
-        return res == VK_SUCCESS ? std::expected<void, Error> {} : std::unexpected(RenderInitError::OutOfHostMemory);
+        return res == VK_SUCCESS ? std::expected<void, Error> {} : std::unexpected(CommandPoolError::CommandBufferAllocationFailed);
     });
 }
 

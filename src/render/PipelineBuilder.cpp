@@ -64,7 +64,7 @@ auto ComputePipelineBuilder::Build(const VkDevice device) const noexcept -> std:
 
     VkPipeline pipeline = ZHLN_CreateComputePipeline(device, &desc);
     if (pipeline == VK_NULL_HANDLE) {
-        return std::unexpected(RenderInitError::PipelineCreationFailed);
+        return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
     }
 
     return Pipeline(device, pipeline);
@@ -103,7 +103,7 @@ auto PipelineLayoutBuilder::Build() const noexcept -> std::expected<PipelineLayo
 
     VkPipelineLayout layout = ZHLN_CreatePipelineLayout(_device, &desc);
     if (layout == VK_NULL_HANDLE) {
-        return std::unexpected(RenderInitError::OutOfHostMemory);
+        return std::unexpected(PipelineBuilderError::OutOfHostMemory);
     }
 
     return PipelineLayout(_device, layout);
