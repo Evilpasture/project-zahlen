@@ -117,8 +117,9 @@ constexpr int kMinRegionHeight = 24;
 /// kMinRegionHeight. 0.35 gives alpha = 0.1225 and a roughnessFade of 0.3.
 constexpr float kPlateRoughness = 0.35f;
 
-/// Rows [0, kCutoffProbeRows) are sky, the (static) box and rough far floor:
-/// nothing the RTR switch may touch. Used to assert the roughness cutoff.
+/// Rows [0, kCutoffProbeRows) are sky, the (static) box and the rough far
+/// floor beyond the plate's far edge (z>~90 at this camera): nothing the RTR
+/// switch may touch. Used to assert the roughness cutoff.
 constexpr int kCutoffProbeRows = 96;
 
 } // namespace
@@ -232,9 +233,17 @@ struct RayTracedReflectionNoiseTestSuite {
             ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *floorMat}
         );
         // Just above the floor so it wins the depth test everywhere it covers.
+        //
+        // Size matters: the mirror image of the box crosses the floor plane
+        // well beyond the box's own footprint (camera at z=20, box at z=6 ->
+        // the mirror band lands at z~12-15). An early 14-unit plate centred
+        // under the box caught only a sliver of that band and the on/off
+        // delta measured zero. Cover the whole near/mid floor instead; the
+        // rough floor then survives only past z~90, which is exactly the
+        // far strip inside the top probe rows.
         ZHLN::CreativeWorksFactory::CreatePlane(
-            engine, 14.0f, {0.5f, 0.5f, 0.5f, 1.0f},
-            ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.02, 6.0), .createPhysics = false, .materialOverride = *plateMat}
+            engine, 60.0f, {0.5f, 0.5f, 0.5f, 1.0f},
+            ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.02, 8.0), .createPhysics = false, .materialOverride = *plateMat}
         );
         ZHLN::CreativeWorksFactory::CreateBox(
             engine, JPH::Vec3(2.0f, 2.0f, 2.0f),
