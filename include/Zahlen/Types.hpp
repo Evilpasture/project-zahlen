@@ -16,12 +16,6 @@
 
 namespace ZHLN {
 
-/// Compile-time marker on GPU layout structs nested under `GPUTypes`.
-/// Walk a purpose group with `ForEachNestedType<GPUTypes::Frame>` (same
-/// pattern as `Components`). llvm-p2996 does not expose these annotations
-/// through namespace `members_of`.
-struct EnableABI {};
-
 // --- High-Level Persistent Asset Identifiers ---
 using AssetID    = uint64_t;
 using MaterialID = uint64_t;
@@ -111,11 +105,11 @@ struct UIBatch {
     TextureHandle texture              = TextureHandle::Invalid;
     uint32_t      bindlessTextureIndex = 0; // Non-zero bypasses TextureManager lookup (ImGui/user bindless IDs)
     uint32_t      vertexStart          = 0;
-    uint32_t      vertexCount = 0;
-    bool          useScissor      = false;
-    bool          isSDF           = false;
-    bool          useTextureColor = false;
-    ScissorRect   scissorRect     = {};
+    uint32_t      vertexCount          = 0;
+    bool          useScissor           = false;
+    bool          isSDF                = false;
+    bool          useTextureColor      = false;
+    ScissorRect   scissorRect          = {};
 };
 
 struct alignas(16) GPUVolumetricVolume {

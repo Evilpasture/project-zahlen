@@ -28,13 +28,13 @@ namespace ZHLN {
 // ============================================================================
 
 enum class EngineInitError : uint8_t {
-    WindowCreationFailed[[= ZHLN::Reflect::Description("Window creation failed")]] = 1,
-    TTYInitializationFailed[[= ZHLN::Reflect::Description("TTY initialization failed")]],
-    RenderInitializationFailed[[= ZHLN::Reflect::Description("Render initialization failed")]],
-    PhysicsInitializationFailed[[= ZHLN::Reflect::Description("Physics initialization failed")]],
-    AudioInitializationFailed[[= ZHLN::Reflect::Description("Audio initialization failed")]],
-    AssetInitializationFailed[[= ZHLN::Reflect::Description("Asset initialization failed")]],
-    EngineAllocationFailed[[= ZHLN::Reflect::Description("Engine instance allocation failed")]],
+    WindowCreationFailed[[= Reflect::Description("Window creation failed")]] = 1,
+    TTYInitializationFailed[[= Reflect::Description("TTY initialization failed")]],
+    RenderInitializationFailed[[= Reflect::Description("Render initialization failed")]],
+    PhysicsInitializationFailed[[= Reflect::Description("Physics initialization failed")]],
+    AudioInitializationFailed[[= Reflect::Description("Audio initialization failed")]],
+    AssetInitializationFailed[[= Reflect::Description("Asset initialization failed")]],
+    EngineAllocationFailed[[= Reflect::Description("Engine instance allocation failed")]],
 };
 
 class Window;
@@ -65,34 +65,34 @@ class ZHLN_API Engine {
 
     auto HandleDeviceLost() noexcept -> std::expected<void, Error>;
 
-    static std::expected<std::unique_ptr<Engine>, Error> Create(const EngineConfig& cfg);
+    static auto Create(const EngineConfig& cfg) -> std::expected<std::unique_ptr<Engine>, Error>;
 
-    [[nodiscard]] bool IsRunning() const;
+    [[nodiscard]] auto IsRunning() const -> bool;
     void               ProcessEvents();
-    [[nodiscard]] bool BeginFrame(bool& outDeviceLost) noexcept;
-    [[nodiscard]] bool EndFrame(bool& outDeviceLost) noexcept;
+    [[nodiscard]] auto BeginFrame(bool& outDeviceLost) noexcept -> bool;
+    [[nodiscard]] auto EndFrame(bool& outDeviceLost) noexcept -> bool;
 
-    Window&                            GetWindow();
-    PhysicsContext&                    GetPhysicsContext();
-    RenderContext&                     GetRenderContext();
-    Camera&                            GetCamera();
-    CreativeWorksManager&              GetCreativeWorksManager();
-    AudioContext&                      GetAudioContext();
-    ScriptRunner&                      GetScriptRunner();
-    [[nodiscard]] ECS::Registry&       GetRegistry();
-    [[nodiscard]] const ECS::Registry& GetRegistry() const;
+    auto               GetWindow() -> Window&;
+    auto               GetPhysicsContext() -> PhysicsContext&;
+    auto               GetRenderContext() -> RenderContext&;
+    auto               GetCamera() -> Camera&;
+    auto               GetCreativeWorksManager() -> CreativeWorksManager&;
+    auto               GetAudioContext() -> AudioContext&;
+    auto               GetScriptRunner() -> ScriptRunner&;
+    [[nodiscard]] auto GetRegistry() -> ECS::Registry&;
+    [[nodiscard]] auto GetRegistry() const -> const ECS::Registry&;
 
-    ECS::SystemGraph&         GetUpdateGraph();
-    ECS::SystemGraph&         GetRenderGraph();
-    ECS::EntityCommandBuffer& GetMainECB();
-    CullingSystem&            GetCullingSystem();
-    JPH::Array<Entity>&       GetVisibleEntities();
-    JPH::Array<Entity>&       GetVisibleShadowEntities();
-    float&                    GetCurrentAlpha();
+    auto GetUpdateGraph() -> ECS::SystemGraph&;
+    auto GetRenderGraph() -> ECS::SystemGraph&;
+    auto GetMainECB() -> ECS::EntityCommandBuffer&;
+    auto GetCullingSystem() -> CullingSystem&;
+    auto GetVisibleEntities() -> JPH::Array<Entity>&;
+    auto GetVisibleShadowEntities() -> JPH::Array<Entity>&;
+    auto GetCurrentAlpha() -> float&;
 
-    [[nodiscard]] void*    GetGameState() const;
-    void                   SetGameState(void* state);
-    [[nodiscard]] uint64_t GetCurrentFrame() const noexcept;
+    [[nodiscard]] auto GetGameState() const -> void*;
+    void               SetGameState(void* state);
+    [[nodiscard]] auto GetCurrentFrame() const noexcept -> uint64_t;
 
     void SetUICallback(UICallback callback);
 
@@ -102,25 +102,25 @@ class ZHLN_API Engine {
      * @brief Registers default engine components, camera, lighting settings,
      *        UI settings, and compiles internal System Graphs.
      */
-    bool InitializeDefaultScene();
+    auto InitializeDefaultScene() -> bool;
 
     /**
      * @brief Executes a single synchronized frame tick in canonical order.
      * @param dt Frame delta time in seconds.
      * @param driver Gameplay driver (Cpp, Fennel, or Hybrid).
      */
-    GameplayStatus Tick(float dt, GameplayDriver driver = GameplayDriver::Cpp);
+    auto Tick(float dt, GameplayDriver driver = GameplayDriver::Cpp) -> GameplayStatus;
 
     /**
      * @brief Convenience entry point that manages the main loop, frame limiting,
      *        and clean shutdown.
      */
-    static int Run(const CommandLineOptions& options, UICallback uiCallback = nullptr);
+    static auto Run(const CommandLineOptions& options, UICallback uiCallback = nullptr) -> std::expected<void, Error>;
 
   private:
-    std::expected<void, Error>  InitInternal(const EngineConfig& cfg);
+    auto                        InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>;
     std::unique_ptr<EngineImpl> _impl;
 };
 
-Engine* GetEngineContext();
+auto GetEngineContext() -> Engine*;
 } // namespace ZHLN

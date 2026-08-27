@@ -18,21 +18,21 @@
 namespace ZHLN::GUI {
 
 struct TextBounds {
-    float               minX = 0.0f;
-    float               maxX = 0.0f;
-    float               minY = 0.0f;
-    float               maxY = 0.0f;
-    [[nodiscard]] float width() const noexcept {
+    float              minX = 0.0f;
+    float              maxX = 0.0f;
+    float              minY = 0.0f;
+    float              maxY = 0.0f;
+    [[nodiscard]] auto width() const noexcept -> float {
         return maxX - minX;
     }
-    [[nodiscard]] float height() const noexcept {
+    [[nodiscard]] auto height() const noexcept -> float {
         return maxY - minY;
     }
 };
 
-TextBounds MeasureTextBounds(const FontAtlas& font, std::string_view text, float scale) noexcept;
+auto MeasureTextBounds(const FontAtlas& font, std::string_view text, float scale) noexcept -> TextBounds;
 
-uint32_t AppendTextVertices(
+auto AppendTextVertices(
     VertexPosition*    outPos,
     VertexAttributes*  outAttr,
     const FontAtlas&   font,
@@ -41,10 +41,10 @@ uint32_t AppendTextVertices(
     float              y,
     float              scale,
     const JPH::Vec4&   color
-);
+) -> uint32_t;
 
-uint32_t
-    AppendPanelVertices(VertexPosition* outPos, VertexAttributes* outAttr, const Components::UIRectComponent& rect, const Components::UIPanelComponent& panel);
+auto AppendPanelVertices(VertexPosition* outPos, VertexAttributes* outAttr, const Components::UIRectComponent& rect, const Components::UIPanelComponent& panel)
+    -> uint32_t;
 
 // ============================================================================
 // FIBER-SAFE & ZERO-ALLOCATION GUI CONTEXT — HYBRID RAII + CLOSURE
@@ -161,8 +161,8 @@ class [[nodiscard]] UIScope {
         Dismiss();
     }
 
-    UIScope(const UIScope&)            = delete;
-    UIScope& operator=(const UIScope&) = delete;
+    UIScope(const UIScope&)                    = delete;
+    auto operator=(const UIScope&) -> UIScope& = delete;
 
     UIScope(UIScope&& other) noexcept: m_ctx(other.m_ctx), m_entity(other.m_entity), m_pushed(other.m_pushed) {
         other.m_ctx    = nullptr;
@@ -170,7 +170,7 @@ class [[nodiscard]] UIScope {
         other.m_pushed = false;
     }
 
-    UIScope& operator=(UIScope&& other) noexcept {
+    auto operator=(UIScope&& other) noexcept -> UIScope& {
         if (this != &other) {
             Dismiss(); // a replaced guard still pops its own scope first
             m_ctx          = other.m_ctx;
@@ -183,13 +183,13 @@ class [[nodiscard]] UIScope {
         return *this;
     }
 
-    [[nodiscard]] Entity GetEntity() const noexcept {
+    [[nodiscard]] auto GetEntity() const noexcept -> Entity {
         return m_entity;
     }
 
     // False when the hierarchy overflowed MAX_UI_STACK_DEPTH (the error is
     // latched in the owning context) or the guard is disengaged/moved-from.
-    [[nodiscard]] bool IsPushed() const noexcept {
+    [[nodiscard]] auto IsPushed() const noexcept -> bool {
         return m_pushed;
     }
 
@@ -223,18 +223,18 @@ class Context {
         SweepStaleChildren(Entity::Null());
     }
 
-    Context(const Context&)            = delete;
-    Context& operator=(const Context&) = delete;
+    Context(const Context&)                    = delete;
+    auto operator=(const Context&) -> Context& = delete;
 
-    [[nodiscard]] ECS::Registry& GetRegistry() const noexcept {
+    [[nodiscard]] auto GetRegistry() const noexcept -> ECS::Registry& {
         return *m_reg;
     }
 
-    [[nodiscard]] Entity GetCurrentParent() const noexcept {
+    [[nodiscard]] auto GetCurrentParent() const noexcept -> Entity {
         return (m_stackTop > 0) ? m_stack[m_stackTop - 1].entity : Entity::Null();
     }
 
-    [[nodiscard]] uint32_t GetCurrentDepth() const noexcept {
+    [[nodiscard]] auto GetCurrentDepth() const noexcept -> uint32_t {
         return (m_stackTop > 0) ? m_stack[m_stackTop - 1].depth + 1 : 1;
     }
 
@@ -242,7 +242,7 @@ class Context {
     // hierarchy grew past MAX_UI_STACK_DEPTH). Builders degrade gracefully and
     // keep rendering instead of aborting, so read Status() when a tree looks
     // wrong; an engaged expected means clean, never an error code.
-    [[nodiscard]] std::expected<void, Error> Status() const noexcept {
+    [[nodiscard]] auto Status() const noexcept -> std::expected<void, Error> {
         if (m_error) {
             return std::unexpected(m_error);
         }
@@ -262,7 +262,7 @@ class Context {
     // a registry-wide scan per level. A dead input entity fails with
     // GUIError::EntityNotAlive; success is engaged-void and silent
     // (verbose-level trace aside).
-    [[nodiscard]] std::expected<void, Error> DestroyUIEntity(Entity ent) noexcept {
+    [[nodiscard]] auto DestroyUIEntity(Entity ent) noexcept -> std::expected<void, Error> {
         if (!m_reg->IsAlive(ent)) {
             return std::unexpected(Error(GUIError::EntityNotAlive));
         }
@@ -275,7 +275,7 @@ class Context {
         // fails to die is a real failure, not a discarded temporary.
         std::expected<void, Error> firstFailure {};
         if (const auto* cache = m_reg->Get<Components::UIChildCacheComponent>(ent)) {
-            cache->children.ForEach([&](uint64_t, const Components::UIChildCacheComponent::ChildRecord& rec) {
+            cache->children.ForEach([&](uint64_t, const Components::UIChildCacheComponent::ChildRecord& rec) -> void {
                 if (firstFailure.has_value() && m_reg->IsAlive(rec.entity)) {
                     firstFailure = DestroyUIEntity(rec.entity);
                 }
@@ -312,7 +312,7 @@ class Context {
         // the entity died outside the GUI (orphaned record pointing at a dead
         // entity, e.g. after a direct Registry::Destroy).
         ZHLN::Array<uint64_t> staleKeys;
-        cache->children.ForEach([&](uint64_t key, const Components::UIChildCacheComponent::ChildRecord& rec) {
+        cache->children.ForEach([&](uint64_t key, const Components::UIChildCacheComponent::ChildRecord& rec) -> void {
             if (!m_reg->IsAlive(rec.entity) || rec.lastVisitedFrame < m_currentFrame) {
                 staleKeys.push_back(key);
             }
@@ -356,15 +356,15 @@ class Context {
         }
         if (purgedRecords > 0) {
             ZHLN::Log<LogChannel::StdErr, LogLevel::Verbose>(
-                "[GUI::Context] Purged {} orphaned UI cache record(s) under parent ({}:{}) pointing at entities destroyed outside the GUI.",
-                purgedRecords, cacheEntity.index, cacheEntity.generation
+                "[GUI::Context] Purged {} orphaned UI cache record(s) under parent ({}:{}) pointing at entities destroyed outside the GUI.", purgedRecords,
+                cacheEntity.index, cacheEntity.generation
             );
         }
     }
 
     // O(1) Hash-based Entity Lookup with Mark-and-Sweep GC
     template <typename CreateFn>
-    Entity GetOrCreateEntity(uint64_t widgetKey, CreateFn&& createFn) {
+    auto GetOrCreateEntity(uint64_t widgetKey, CreateFn&& createFn) -> Entity {
         Entity parent      = GetCurrentParent();
         Entity cacheEntity = (parent != Entity::Null()) ? parent : GetRootCacheEntity();
 
@@ -394,13 +394,13 @@ class Context {
 
     // RAII: the returned guard holds the scope open. Its destructor pops and
     // sweeps the panel's stale children.
-    [[nodiscard]] UIScope Panel(std::string_view name, const PanelConfig& cfg = {}) {
+    [[nodiscard]] auto Panel(std::string_view name, const PanelConfig& cfg = {}) -> UIScope {
         Entity   parent = GetCurrentParent();
         uint32_t depth  = GetCurrentDepth();
 
         uint64_t key = HashCombine(parent.Pack(), HashStringView(name));
 
-        Entity e = GetOrCreateEntity(key, [&]() {
+        Entity e = GetOrCreateEntity(key, [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64(name)},
                 Components::UIRectComponent {
@@ -432,7 +432,7 @@ class Context {
             );
         });
 
-        m_reg->Patch<Components::UIRectComponent>(e, [&](auto& rect) {
+        m_reg->Patch<Components::UIRectComponent>(e, [&](auto& rect) -> auto {
             rect.x              = cfg.x;
             rect.y              = cfg.y;
             rect.width          = cfg.width;
@@ -452,19 +452,19 @@ class Context {
     // on scope exit no matter what the callback does (early return, continue).
     template <typename Fn>
         requires std::invocable<Fn>
-    Entity Panel(std::string_view name, const PanelConfig& cfg, Fn&& content) {
+    auto Panel(std::string_view name, const PanelConfig& cfg, Fn&& content) -> Entity {
         auto scope = Panel(name, cfg);
         std::forward<Fn>(content)();
         return scope.GetEntity();
     }
 
-    [[nodiscard]] UIScope Box(std::string_view name, const BoxConfig& cfg = {}) {
+    [[nodiscard]] auto Box(std::string_view name, const BoxConfig& cfg = {}) -> UIScope {
         Entity   parent = GetCurrentParent();
         uint32_t depth  = GetCurrentDepth();
 
         uint64_t key = HashCombine(parent.Pack(), HashStringView(name));
 
-        Entity e = GetOrCreateEntity(key, [&]() {
+        Entity e = GetOrCreateEntity(key, [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64(name)},
                 Components::UIRectComponent {.parentEntity = parent, .width = cfg.width, .height = cfg.height, .hierarchyDepth = depth},
@@ -492,7 +492,7 @@ class Context {
 
     template <typename Fn>
         requires std::invocable<Fn>
-    Entity Box(std::string_view name, const BoxConfig& cfg, Fn&& content) {
+    auto Box(std::string_view name, const BoxConfig& cfg, Fn&& content) -> Entity {
         auto scope = Box(name, cfg);
         std::forward<Fn>(content)();
         return scope.GetEntity();
@@ -501,13 +501,13 @@ class Context {
     // Anonymous box: stable per-frame auto-ID keeps the closure form a one-liner.
     template <typename Fn>
         requires std::invocable<Fn>
-    Entity Box(const BoxConfig& cfg, Fn&& content) {
-        std::array<char, 64> nameBuf {};
+    auto Box(const BoxConfig& cfg, Fn&& content) -> Entity {
+        std::array<char, 64>   nameBuf {};
         const std::string_view autoName = FormatTo(nameBuf, "Box_D{}_{}", GetCurrentDepth(), m_autoIdCounter++);
         return Box(autoName, cfg, std::forward<Fn>(content));
     }
 
-    Entity Label(std::string_view text, const LabelConfig& cfg = {}) {
+    auto Label(std::string_view text, const LabelConfig& cfg = {}) -> Entity {
         Entity   parent = GetCurrentParent();
         uint32_t depth  = GetCurrentDepth();
 
@@ -517,7 +517,7 @@ class Context {
 
         const TextureHandle fontHandle = ResolveFontTexture();
 
-        Entity e = GetOrCreateEntity(key, [&]() {
+        Entity e = GetOrCreateEntity(key, [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64(labelName)},
                 Components::UIRectComponent {.parentEntity = parent, .height = cfg.height, .hierarchyDepth = depth},
@@ -532,7 +532,7 @@ class Context {
             );
         });
 
-        m_reg->Patch<Components::TextComponent>(e, [&](auto& textComp) {
+        m_reg->Patch<Components::TextComponent>(e, [&](auto& textComp) -> auto {
             textComp.text.assign(text);
             textComp.color = cfg.color;
         });
@@ -543,7 +543,7 @@ class Context {
     // id + text stays the only overload that hits the registry; the shorter
     // forms all delegate to it so behavior (and cache keys) can never drift.
     template <typename OnClickFn>
-    Entity Button(std::string_view id, std::string_view text, const ButtonConfig& cfg, OnClickFn&& onClick) {
+    auto Button(std::string_view id, std::string_view text, const ButtonConfig& cfg, OnClickFn&& onClick) -> Entity {
         Entity   parent = GetCurrentParent();
         uint32_t depth  = GetCurrentDepth();
 
@@ -551,7 +551,7 @@ class Context {
 
         const TextureHandle fontHandle = ResolveFontTexture();
 
-        Entity e = GetOrCreateEntity(key, [&]() {
+        Entity e = GetOrCreateEntity(key, [&]() -> auto {
             return m_reg->Create(
                 Components::NameComponent {.name = String64(id)},
                 Components::UIRectComponent {.parentEntity = parent, .width = cfg.width, .height = cfg.height, .hierarchyDepth = depth},
@@ -577,9 +577,9 @@ class Context {
         });
 
         // Update the text in the TextComponent of the existing entity dynamically
-        m_reg->Patch<Components::TextComponent>(e, [&](auto& textComp) { textComp.text.assign(text); });
+        m_reg->Patch<Components::TextComponent>(e, [&](auto& textComp) -> auto { textComp.text.assign(text); });
 
-        m_reg->Patch<Components::UIButtonComponent>(e, [&](const auto& btn) {
+        m_reg->Patch<Components::UIButtonComponent>(e, [&](const auto& btn) -> auto {
             if (btn.Has(UIButton::Clicked)) {
                 std::forward<OnClickFn>(onClick)();
             }
@@ -589,17 +589,17 @@ class Context {
     }
 
     template <typename OnClickFn>
-    Entity Button(std::string_view id, std::string_view text, OnClickFn&& onClick) {
+    auto Button(std::string_view id, std::string_view text, OnClickFn&& onClick) -> Entity {
         return Button(id, text, ButtonConfig {}, std::forward<OnClickFn>(onClick));
     }
 
     template <typename OnClickFn>
-    Entity Button(std::string_view text, const ButtonConfig& cfg, OnClickFn&& onClick) {
+    auto Button(std::string_view text, const ButtonConfig& cfg, OnClickFn&& onClick) -> Entity {
         return Button(text, text, cfg, std::forward<OnClickFn>(onClick));
     }
 
     template <typename OnClickFn>
-    Entity Button(std::string_view text, OnClickFn&& onClick) {
+    auto Button(std::string_view text, OnClickFn&& onClick) -> Entity {
         return Button(text, text, ButtonConfig {}, std::forward<OnClickFn>(onClick));
     }
 
@@ -614,7 +614,7 @@ class Context {
     // Resolves or creates the root cache entity (UISettingsComponent).
     // Private by design: the cache root is an implementation detail of the GC;
     // tests can derive it via GetEntitiesWith<UISettingsComponent>().
-    Entity GetRootCacheEntity() {
+    auto GetRootCacheEntity() -> Entity {
         if (m_rootCacheEntity != Entity::Null() && m_reg->IsAlive(m_rootCacheEntity)) {
             return m_rootCacheEntity;
         }
@@ -633,7 +633,7 @@ class Context {
     // Push/pop are the scope guard's private plumbing — never public API.
     // Exposing them let callers push without sweeping or pop twice; UIScope
     // keeps the pair balanced by construction.
-    [[nodiscard]] bool InternalPush(Entity entity, uint32_t depth) noexcept {
+    [[nodiscard]] auto InternalPush(Entity entity, uint32_t depth) noexcept -> bool {
         if (m_stackTop < MAX_UI_STACK_DEPTH) {
             m_stack[m_stackTop++] = {.entity = entity, .depth = depth};
             return true;
@@ -651,11 +651,11 @@ class Context {
         SweepStaleChildren(entity); // a failure latches into Status()
     }
 
-    UIScope PushScope(Entity e, uint32_t depth) noexcept {
-        return UIScope(this, e, InternalPush(e, depth));
+    auto PushScope(Entity e, uint32_t depth) noexcept -> UIScope {
+        return {this, e, InternalPush(e, depth)};
     }
 
-    [[nodiscard]] TextureHandle ResolveFontTexture() const noexcept {
+    [[nodiscard]] auto ResolveFontTexture() const noexcept -> TextureHandle {
         const auto uiSettings = m_reg->GetEntitiesWith<Components::UISettingsComponent>();
         if (!uiSettings.empty()) {
             if (const auto* s = m_reg->Get<Components::UISettingsComponent>(uiSettings[0])) {
@@ -665,11 +665,11 @@ class Context {
         return TextureHandle::Invalid;
     }
 
-    static constexpr uint64_t HashCombine(uint64_t seed, uint64_t v) noexcept {
+    static constexpr auto HashCombine(uint64_t seed, uint64_t v) noexcept -> uint64_t {
         return seed ^ (v + 0x9e3779b97f4a7c15ull + (seed << 6) + (seed >> 2));
     }
 
-    static constexpr uint64_t HashStringView(std::string_view str) noexcept {
+    static constexpr auto HashStringView(std::string_view str) noexcept -> uint64_t {
         uint64_t hash = 0xcbf29ce484222325ull;
         for (char c: str) {
             hash ^= static_cast<uint64_t>(c);
@@ -691,7 +691,7 @@ class Context {
     uint32_t                                    m_stackTop        = 0;
     uint32_t                                    m_autoIdCounter   = 0;
     Entity                                      m_rootCacheEntity = Entity::Null();
-    Error                                       m_error {};
+    Error                                       m_error;
 };
 
 inline void UIScope::Dismiss() noexcept {

@@ -47,6 +47,7 @@ namespace ZHLN {
 // hand-rolled helpers.
 enum class QualityLevel : uint8_t { Low = 0, Medium, High, Ultra, Custom };
 
+// NOLINTNEXTLINE(performance-enum-size)
 enum class AAMode : uint32_t { None = 0, FXAA, MLAA, TAA, SMAA };
 
 /// Anti-aliasing configuration. Mixes designer-facing knobs (mode, feedback,
@@ -86,7 +87,7 @@ struct GISettings {
     int   enableSSR         = 1;
     int   enableRTR         = 0;
 
-    bool operator==(const GISettings&) const noexcept = default;
+    auto operator==(const GISettings&) const noexcept -> bool = default;
 };
 
 /// Directional shadow configuration. `resolution` is delta-detected by
@@ -98,7 +99,7 @@ struct ShadowSettings {
     uint32_t maxPunctualShadows = 1;
     float    sunSize            = 0.05f;
 
-    bool operator==(const ShadowSettings&) const noexcept = default;
+    auto operator==(const ShadowSettings&) const noexcept -> bool = default;
 };
 
 /// Ray-tracing configuration — the extension point for the upcoming passes:
@@ -119,7 +120,7 @@ struct RayTracingConfig {
     float    roughnessCutoff   = 0.4f;
     bool     alphaTestingInBVH = true;
 
-    bool operator==(const RayTracingConfig&) const noexcept = default;
+    auto operator==(const RayTracingConfig&) const noexcept -> bool = default;
 };
 
 /// Environment / sky / probe values that feed FrameUniforms every frame.
@@ -138,7 +139,7 @@ struct EnvironmentSettings {
     std::array<float, 4> skyHorizon = {0.015f, 0.035f, 0.080f, 1.0f};
     std::array<float, 4> skyGround  = {0.001f, 0.001f, 0.003f, 1.0f};
 
-    bool operator==(const EnvironmentSettings&) const noexcept = default;
+    auto operator==(const EnvironmentSettings&) const noexcept -> bool = default;
 };
 
 struct GraphicsSettings {
@@ -164,11 +165,11 @@ struct GraphicsSettings {
         uint32_t rtDenoiserPasses    = 2;
         uint32_t rtMaxBounces        = 1;
 
-        bool operator==(const QualitySignature&) const noexcept = default;
+        auto operator==(const QualitySignature&) const noexcept -> bool = default;
     };
 
     /// Quality-relevant projection of the settings (what presets control).
-    [[nodiscard]] constexpr QualitySignature Signature() const noexcept {
+    [[nodiscard]] constexpr auto Signature() const noexcept -> QualitySignature {
         return QualitySignature {
             .antiAliasMode       = antiAliasing.mode,
             .taaFeedback         = antiAliasing.taaFeedback,
@@ -244,7 +245,7 @@ struct GraphicsSettings {
     /// fields were tweaked by hand. Note: RTR-heavy tiers remain valid
     /// presets on devices without acceleration structures — the renderer
     /// gates those paths on device capability at execution time.
-    [[nodiscard]] constexpr QualityLevel DetectPreset() const noexcept {
+    [[nodiscard]] constexpr auto DetectPreset() const noexcept -> QualityLevel {
         const QualitySignature current = Signature();
         for (const QualityLevel tier: {QualityLevel::Low, QualityLevel::Medium, QualityLevel::High, QualityLevel::Ultra}) {
             GraphicsSettings probe {};
@@ -262,7 +263,7 @@ struct GraphicsSettings {
     /// renderer's reactive paths key off specific fields (shadow resolution,
     /// quality tier); this predicate covers whole-model comparisons for
     /// tools and tests.
-    [[nodiscard]] constexpr bool ConfigEquals(const GraphicsSettings& other) const noexcept {
+    [[nodiscard]] constexpr auto ConfigEquals(const GraphicsSettings& other) const noexcept -> bool {
         const bool aaMatches = antiAliasing.mode == other.antiAliasing.mode && antiAliasing.taaFeedback == other.antiAliasing.taaFeedback &&
                                antiAliasing.fxaaSubpix == other.antiAliasing.fxaaSubpix &&
                                antiAliasing.fxaaEdgeThreshold == other.antiAliasing.fxaaEdgeThreshold &&
@@ -276,13 +277,13 @@ struct GraphicsSettings {
 // The engine defaults (and therefore a freshly-created default scene) form
 // exactly the Medium tier; applying a preset pins its signature fields.
 static_assert(GraphicsSettings {}.DetectPreset() == QualityLevel::Medium);
-static_assert([] {
+static_assert([] -> bool {
     GraphicsSettings s {};
     s.ApplyPreset(QualityLevel::Ultra);
     return s.shadows.resolution == 4096 && s.post.enableRTR == 1 && s.post.giSamples == 16 && s.rayTracing.denoiserPasses == 2 &&
            s.rayTracing.shadowSamples == 2 && s.DetectPreset() == QualityLevel::Ultra;
 }());
-static_assert([] {
+static_assert([] -> bool {
     GraphicsSettings s {};
     s.ApplyPreset(QualityLevel::High);
     s.shadows.sunSize        = 0.02f; // non-signature tweaks keep the tier

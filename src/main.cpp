@@ -300,7 +300,7 @@ void DrawProfiler(ZHLN::Engine& engine) {
 
             // Labels come straight from the reflection machinery — no
             // hand-maintained preset string list that can drift from the enum.
-            static constexpr auto                                kPresetNames  = ZHLN::Reflect::EnumNames<ZHLN::QualityLevel>();
+            static constexpr auto                                     kPresetNames  = ZHLN::Reflect::EnumNames<ZHLN::QualityLevel>();
             static const std::array<std::string, kPresetNames.size()> kPresetLabels = [] {
                 std::array<std::string, kPresetNames.size()> labels {};
                 for (size_t i = 0; i < labels.size(); ++i) {
@@ -327,15 +327,14 @@ void DrawProfiler(ZHLN::Engine& engine) {
             ImGui::TextDisabled(
                 "RT: refl %s | shadows %s | %u SPP | denoiser %s | %u bounce(s)", gfx.rayTracing.enableReflections ? "on" : "off",
                 gfx.rayTracing.enableShadows ? "on" : "off", gfx.rayTracing.shadowSamples,
-                gfx.rayTracing.denoiserPasses == 0 ? "off" : (gfx.rayTracing.denoiserPasses == 1 ? "spatial" : "spatio-temporal"),
-                gfx.rayTracing.maxBounces
+                gfx.rayTracing.denoiserPasses == 0 ? "off" : (gfx.rayTracing.denoiserPasses == 1 ? "spatial" : "spatio-temporal"), gfx.rayTracing.maxBounces
             );
         }
 
         if (ImGui::CollapsingHeader("Anti-Aliasing", ImGuiTreeNodeFlags_DefaultOpen)) {
             auto aaEnts = engine.GetRegistry().GetEntitiesWith<ZHLN::Components::AASettingsComponent>();
             if (!aaEnts.empty()) {
-                auto* aaSettings = engine.GetRegistry().Get<ZHLN::Components::AASettingsComponent>(aaEnts[0]);
+                auto*       aaSettings     = engine.GetRegistry().Get<ZHLN::Components::AASettingsComponent>(aaEnts[0]);
                 const char* aaModesList[]  = {"Disabled", "FXAA (Fast Approximate)", "MLAA (Morphological)", "TAA (Temporal)", "SMAA (Subpixel Morphological)"};
                 int         currentModeIdx = static_cast<int>(aaSettings->state.mode);
 
@@ -1091,13 +1090,10 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
 
 auto main(int argc, char* argv[]) -> int {
     return ZHLN::HandleCommandLine(std::span(argv, static_cast<size_t>(argc)))
-        .transform_error([](const ZHLN::Error& err) -> int {
-            ZHLN::Log("CommandLine Error: {}", err.Message());
-            return EXIT_FAILURE;
-        })
-        .and_then([](const ZHLN::CommandLineOptions& options) -> std::expected<int, int> {
+        .and_then([](const ZHLN::CommandLineOptions& options) -> std::expected<void, ZHLN::Error> {
+            // Early exits (e.g. --help, --version, --print-graph) are successful runs
             if (options.helpRequested || options.versionRequested || options.printGraphRequested) {
-                return 0;
+                return {};
             }
 
             ZHLN::SetLogLevel(options.logLevel);
@@ -1119,26 +1115,37 @@ auto main(int argc, char* argv[]) -> int {
                         .vsync          = options.vsync,
                         .fullscreen     = options.fullscreen,
                         .validationMode = options.validationMode,
+                        .headless       = options.headless,
                     },
                 };
 
                 auto engine_res = ZHLN::Engine::Create(config);
                 if (!engine_res) {
-                    ZHLN::Log("Error initializing Engine: {}", engine_res.error().Message());
-                    return EXIT_FAILURE;
+                    ZHLN::TaskSystem::Shutdown();
+                    return std::unexpected(engine_res.error());
                 }
 
                 auto engine = std::move(engine_res.value());
                 engine->GetWindow().Focus();
                 engine->InitializeDefaultScene();
 
-                int ret = RunWorldEditor(*engine, options);
+                RunWorldEditor(*engine, options);
 
                 ZHLN::TaskSystem::Shutdown();
-                return ret;
+                return {};
             }
+
+            // Runs the engine game loop and propagates any initialization/runtime Error
             return ZHLN::Engine::Run(options, UISystem);
         })
-        .or_else([](int errorCode) -> std::expected<int, int> { return errorCode; })
+        .transform([]() -> int {
+            // Success path: mapped to EXIT_SUCCESS (0)
+            return EXIT_SUCCESS;
+        })
+        .or_else([](const ZHLN::Error& err) -> std::expected<int, ZHLN::Error> {
+            // Failure path: logs the rich error and maps to EXIT_FAILURE (1)
+            ZHLN::Log("Fatal Engine Error: {}", err.Message());
+            return EXIT_FAILURE;
+        })
         .value();
 }

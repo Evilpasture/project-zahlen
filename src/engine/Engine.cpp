@@ -801,7 +801,7 @@ auto Engine::Tick(float dt, GameplayDriver driver) -> GameplayStatus {
     return status;
 }
 
-auto Engine::Run(const CommandLineOptions& options, UICallback uiCallback) -> int {
+auto Engine::Run(const CommandLineOptions& options, UICallback uiCallback) -> std::expected<void, Error> {
     Platform::Init();
     ZHLN::SetupSignalHandler();
     TaskSystem::Init();
@@ -824,8 +824,8 @@ auto Engine::Run(const CommandLineOptions& options, UICallback uiCallback) -> in
 
     auto engine_res = Engine::Create(config);
     if (!engine_res) {
-        ZHLN::Log("Error initializing Engine: {}", engine_res.error().Message());
-        return EXIT_FAILURE;
+        TaskSystem::Shutdown();
+        return std::unexpected(engine_res.error()); // Propagate the exact Error!
     }
 
     auto engine = std::move(engine_res.value());
@@ -883,7 +883,7 @@ auto Engine::Run(const CommandLineOptions& options, UICallback uiCallback) -> in
     }
 
     TaskSystem::Shutdown();
-    return EXIT_SUCCESS;
+    return {}; // Success!
 }
 
 } // namespace ZHLN

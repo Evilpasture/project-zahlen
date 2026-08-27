@@ -24,15 +24,15 @@ class ZHLN_API ValueReader {
     ValueReader() = default;
     explicit ValueReader(const void* internalNode);
 
-    [[nodiscard]] std::expected<int64_t, Error>          GetInt() const noexcept;
-    [[nodiscard]] std::expected<uint64_t, Error>         GetUInt() const noexcept;
-    [[nodiscard]] std::expected<double, Error>           GetDouble() const noexcept;
-    [[nodiscard]] std::expected<bool, Error>             GetBool() const noexcept;
-    [[nodiscard]] std::expected<std::string_view, Error> GetString() const noexcept;
-    [[nodiscard]] std::expected<ValueReader, Error>      GetKey(std::string_view key) const noexcept;
+    [[nodiscard]] auto GetInt() const noexcept -> std::expected<int64_t, Error>;
+    [[nodiscard]] auto GetUInt() const noexcept -> std::expected<uint64_t, Error>;
+    [[nodiscard]] auto GetDouble() const noexcept -> std::expected<double, Error>;
+    [[nodiscard]] auto GetBool() const noexcept -> std::expected<bool, Error>;
+    [[nodiscard]] auto GetString() const noexcept -> std::expected<std::string_view, Error>;
+    [[nodiscard]] auto GetKey(std::string_view key) const noexcept -> std::expected<ValueReader, Error>;
 
-    [[nodiscard]] size_t                            GetArraySize() const noexcept;
-    [[nodiscard]] std::expected<ValueReader, Error> GetArrayElement(size_t index) const noexcept;
+    [[nodiscard]] auto GetArraySize() const noexcept -> size_t;
+    [[nodiscard]] auto GetArrayElement(size_t index) const noexcept -> std::expected<ValueReader, Error>;
 
   private:
     uint64_t _opaque[2] = {0, 0};
@@ -45,13 +45,13 @@ class ZHLN_API Document {
     Document();
     ~Document();
 
-    Document(const Document&)            = delete;
-    Document& operator=(const Document&) = delete;
+    Document(const Document&)                    = delete;
+    auto operator=(const Document&) -> Document& = delete;
     Document(Document&&) noexcept;
-    Document& operator=(Document&&) noexcept;
+    auto operator=(Document&&) noexcept -> Document&;
 
-    [[nodiscard]] static std::expected<Document, Error> Parse(std::string_view jsonString) noexcept;
-    [[nodiscard]] ValueReader                           GetRoot() const noexcept;
+    [[nodiscard]] static auto Parse(std::string_view jsonString) noexcept -> std::expected<Document, Error>;
+    [[nodiscard]] auto        GetRoot() const noexcept -> ValueReader;
 
   private:
     struct Impl;
@@ -59,10 +59,10 @@ class ZHLN_API Document {
 };
 
 template <typename T>
-std::expected<T, Error> ParseObject(ValueReader reader);
+auto ParseObject(ValueReader reader) -> std::expected<T, Error>;
 
 template <typename FieldType>
-std::expected<FieldType, Error> GetJSONValue(ValueReader reader) {
+auto GetJSONValue(ValueReader reader) -> std::expected<FieldType, Error> {
     using Decayed = std::decay_t<FieldType>;
 
     if constexpr (std::is_same_v<Decayed, int> || std::is_same_v<Decayed, int32_t>) {
@@ -129,11 +129,11 @@ std::expected<FieldType, Error> GetJSONValue(ValueReader reader) {
 }
 
 template <typename T>
-std::expected<T, Error> ParseObject(ValueReader reader) {
+auto ParseObject(ValueReader reader) -> std::expected<T, Error> {
     T                    obj {};
     std::optional<Error> err;
 
-    ZHLN::Reflect::ForEachFieldWithName(obj, [&](std::string_view fieldName, auto& fieldVal) {
+    ZHLN::Reflect::ForEachFieldWithName(obj, [&](std::string_view fieldName, auto& fieldVal) -> auto {
         if (err) {
             return;
         }
@@ -165,7 +165,7 @@ std::expected<T, Error> ParseObject(ValueReader reader) {
 }
 
 template <typename T>
-std::expected<T, Error> TryParse(std::string_view jsonString) {
+auto TryParse(std::string_view jsonString) -> std::expected<T, Error> {
     auto doc = Document::Parse(jsonString);
     if (!doc) {
         return std::unexpected(doc.error());
@@ -174,7 +174,7 @@ std::expected<T, Error> TryParse(std::string_view jsonString) {
 }
 
 template <typename T>
-T Parse(std::string_view jsonString) {
+auto Parse(std::string_view jsonString) -> T {
     auto res = TryParse<T>(jsonString);
     if (!res) [[unlikely]] {
         ZHLN::Panic("Failed to parse JSON for type '{}': {}", ZHLN::Reflect::TypeName<T>(), res.error().Message());
