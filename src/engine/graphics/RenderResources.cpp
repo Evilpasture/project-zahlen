@@ -588,7 +588,7 @@ auto RenderContext::Impl::InitializeVolumetricNoiseTexture() noexcept -> std::ex
 
     auto staging = stagingRingBuffer.Allocate(bytes);
     if (staging.mappedData == nullptr) {
-        return std::unexpected(RenderInitError::SubsystemAllocationFailed);
+        return std::unexpected(StagingError::MemoryMappingFailed);
     }
     std::memcpy(staging.mappedData, pixels.data(), bytes);
 

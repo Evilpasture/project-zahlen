@@ -33,6 +33,17 @@ enum class ImageCreationError : uint8_t {
     VulkanSubsystemFailure[[= ZHLN::Reflect::Description("Vulkan subsystem failure")]],
 };
 
+// VMA allocator instance bring-up failure.
+enum class AllocatorError : uint8_t {
+    InitializationFailed[[= ZHLN::Reflect::Description("Vulkan memory allocator initialization failed")]] = 1,
+};
+
+// Staging ring buffer / persistent transfer buffer bring-up failures.
+enum class StagingRingBufferError : uint8_t {
+    OutOfHostMemory[[= ZHLN::Reflect::Description("Out of host memory")]] = 1,
+    StagingBufferCreationFailed[[= ZHLN::Reflect::Description("Staging ring buffer allocation failed")]],
+};
+
 } // namespace ZHLN
 
 namespace ZHLN::Vk {
@@ -110,7 +121,7 @@ std::expected<void, ZHLN::Error> Allocator::Init(VkInstance instance, VkPhysical
 
     VkResult res = vmaCreateAllocator(&info, &_handle);
     if (res != VK_SUCCESS) {
-        return std::unexpected(RenderInitError::OutOfHostMemory);
+        return std::unexpected(AllocatorError::InitializationFailed);
     }
     return {};
 }
@@ -430,14 +441,14 @@ auto StagingRingBuffer::Init(VmaAllocator allocator, VkDevice device, VkQueue qu
     VkSemaphore raw_sem = VK_NULL_HANDLE;
     auto        res     = vkCreateSemaphore(_device, &sem_info, nullptr, &raw_sem);
     if (res != VK_SUCCESS) {
-        return std::unexpected(RenderInitError::OutOfHostMemory);
+        return std::unexpected(StagingRingBufferError::OutOfHostMemory);
     }
     _timelineSemaphore = Semaphore(_device, raw_sem); // Adopt into RAII wrapper
 
     auto staging_res = Buffer::Create(_allocator, _capacity, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
     if (!staging_res.has_value()) {
         _timelineSemaphore = {}; // Triggers automatic destruction logic
-        return std::unexpected(RenderInitError::SubsystemAllocationFailed);
+        return std::unexpected(StagingRingBufferError::StagingBufferCreationFailed);
     }
     _stagingBuffer = std::move(*staging_res);
 

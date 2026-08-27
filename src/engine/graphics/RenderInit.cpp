@@ -109,7 +109,7 @@ std::expected<void, Error> RenderContext::Impl::InitParallelRecorders() {
     return parallelRecorder[0]
         .Init(ctx.Device(), ctx.PhysicalInfo().graphics_family)
         .and_then([&]() { return parallelRecorder[1].Init(ctx.Device(), ctx.PhysicalInfo().graphics_family); })
-        .transform_error([](auto) -> Error { return RenderInitError::ParallelRecorderInitializationFailed; });
+        .transform_error([](auto err) -> Error { return err; });
 }
 
 std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfig& cfg, int width, int height) {

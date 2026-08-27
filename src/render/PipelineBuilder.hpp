@@ -18,8 +18,11 @@ namespace ZHLN::Vk {
 // ============================================================================
 
 enum class PipelineBuilderError : uint8_t {
-    MissingShaders[[= Reflect::Description("Missing shader stages.")]]  = 1,
-    MissingLayout[[= Reflect::Description("Missing pipeline layout.")]] = 2,
+    MissingShaders[[= Reflect::Description("Missing shader stages.")]]        = 1,
+    MissingLayout[[= Reflect::Description("Missing pipeline layout.")]]       = 2,
+    LayoutCreationFailed[[= Reflect::Description("Pipeline layout creation failed.")]],
+    PipelineCreationFailed[[= Reflect::Description("Pipeline creation failed.")]],
+    OutOfHostMemory[[= Reflect::Description("Out of host memory.")]],
 };
 
 // ============================================================================
@@ -226,7 +229,7 @@ class PipelineBuilder {
             const ZHLN_GraphicsPipelineDesc desc     = GetDesc();
             VkPipeline                      pipeline = ZHLN_CreateGraphicsPipeline(device, &desc);
             if (pipeline == VK_NULL_HANDLE) {
-                return std::unexpected(RenderInitError::PipelineCreationFailed);
+                return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
             }
             return Pipeline(device, pipeline);
         });
@@ -273,7 +276,7 @@ class PipelineBuilder {
             const ZHLN_GraphicsPipelineDesc desc     = GetDesc();
             VkPipeline                      pipeline = ZHLN_CreateGraphicsPipeline(device, &desc);
             if (pipeline == VK_NULL_HANDLE) {
-                return std::unexpected(RenderInitError::PipelineCreationFailed);
+                return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
             }
             return TypedPipeline<ColorCount, HasDepth> {Pipeline(device, pipeline)};
         });

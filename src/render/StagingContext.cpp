@@ -10,20 +10,6 @@
 #include <cstring>
 #include <utility>
 
-// Private staging-buffer error (Tier 1): declared at file scope in this
-// translation unit so no header exposes it; callers only log the type-erased
-// ZHLN::Error message.
-namespace ZHLN {
-
-enum class StagingError : uint8_t {
-    OutOfHostMemory[[= ZHLN::Reflect::Description("Host memory allocation failed for staging buffer")]] = 1,
-    OutOfDeviceMemory[[= ZHLN::Reflect::Description("Device/Host-visible VRAM allocation failed for staging buffer")]],
-    MemoryMappingFailed[[= ZHLN::Reflect::Description("Failed to map staging buffer CPU pointer")]],
-    InvalidBufferDimensions[[= ZHLN::Reflect::Description("Image upload byte size or dimensions exceed limit")]]
-};
-
-} // namespace ZHLN
-
 namespace ZHLN::Vk {
 
 StagingContext::StagingContext(Allocator& allocator, const Context& ctx): _allocator(&allocator), _ctx(&ctx) {

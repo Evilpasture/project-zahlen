@@ -169,7 +169,7 @@ class IBLProcessor {
 
                 auto mappedSH = state.shCpu.Map();
                 if (mappedSH.data == nullptr) {
-                    return std::unexpected(ZHLN::RenderInitError::SubsystemAllocationFailed);
+                    return std::unexpected(ZHLN::StagingError::MemoryMappingFailed);
                 }
                 std::memcpy(state.payload.shCoeffs.data(), mappedSH.data, kSHBytes);
                 return std::move(state);

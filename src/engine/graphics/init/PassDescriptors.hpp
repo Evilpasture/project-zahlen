@@ -47,7 +47,7 @@ template <typename LayoutT>
         // PUSH_INDEX mapping table baked from the reflected set layout). Per-
         // draw data travels through push data, so no push ranges are declared.
         if (!pass.BuildHeap(self->ctx.Device(), self->heapManager, shaders, colorFormats, self->heapPushDataLayout.heapIndexOffset, additive)) {
-            return std::unexpected(RenderInitError::PipelineCreationFailed);
+            return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
         }
         return {};
     });
@@ -70,7 +70,7 @@ template <typename LayoutT>
         if (!pass.BuildHeapVariants(
                 self->ctx.Device(), self->heapManager, shaders, colorFormats, specInfos, self->heapPushDataLayout.heapIndexOffset, additive
             )) {
-            return std::unexpected(RenderInitError::PipelineCreationFailed);
+            return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
         }
         return {};
     });

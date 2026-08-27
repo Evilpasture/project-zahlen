@@ -7,9 +7,20 @@
 #error "Please include <src/render/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Error.hpp>
 #include <cstdint>
 
 namespace ZHLN {
+
+// Raised by low-level Vulkan call wrappers (WaitIdle, CheckResult paths).
+// Stays inside the RHI layer: content/asset code must not branch on it.
+// Backend-neutral, optional-feature fallback signals live in RenderFeatureError
+// (public Render.hpp), and subsystem failures use their own domain enums.
+enum class VulkanCallError : uint8_t {
+    VulkanCallFailed[[= ZHLN::Reflect::Description("Vulkan call failed")]] = 1,
+    DeviceLost[[= ZHLN::Reflect::Description("Device lost")]],
+};
 
 struct Color4 {
     float r, g, b, a;

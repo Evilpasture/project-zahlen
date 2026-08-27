@@ -65,7 +65,6 @@ static constexpr auto isLegacy = false;
 // Zahlen Graphics Module (Topologically Sorted)
 // ============================================================================
 // clang-format off
-#include "RenderErrors.hpp"   // Shared renderer error categories (no render deps; first so early headers see them)
 #include "Extensions.hpp"
 #include "Features.hpp"
 #include "GPUDiagnostics.hpp"

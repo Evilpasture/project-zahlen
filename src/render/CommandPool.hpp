@@ -3,6 +3,20 @@
 
 #pragma once
 
+#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Error.hpp>
+#include <cstdint>
+
+namespace ZHLN {
+
+// Command-pool validity and command-buffer allocation failures.
+enum class CommandPoolError : uint8_t {
+    PoolNotReady[[= ZHLN::Reflect::Description("Command pool device handle is not initialized")]] = 1,
+    CommandBufferAllocationFailed[[= ZHLN::Reflect::Description("Command buffer allocation failed (out of memory)")]],
+};
+
+} // namespace ZHLN
+
 namespace ZHLN::Vk {
 
 template <Vk::QueueType QType>

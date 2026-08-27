@@ -11,12 +11,17 @@
 
 namespace ZHLN {
 
+// Private UI subsystem setup failure (Tier 1): file-local to this TU.
+enum class UISetupError : uint8_t {
+    SetupFailed[[= ZHLN::Reflect::Description("UI subsystem setup failed")]] = 1,
+};
+
 auto RenderContext::Impl::SetupUI(GLFWwindow* glfwWindow) -> std::expected<void, Error> {
     using enum Resource::ShaderID;
     Vk::ShaderStages uiShaders;
 
     return Vk::ShaderStages::Create(ctx.Device(), Resource::GetShaderProgram(Ui))
-        .transform_error([](auto) -> Error { return RenderInitError::UISetupFailed; })
+        .transform_error([](auto err) -> Error { return err; })
         .and_then([&](auto&& shaders) -> std::expected<void, Error> {
             uiShaders = std::forward<decltype(shaders)>(shaders);
             return {};
@@ -38,7 +43,7 @@ auto RenderContext::Impl::SetupUI(GLFWwindow* glfwWindow) -> std::expected<void,
                 .AlphaBlend()
                 .CullNone()
                 .Build(ctx.Device())
-                .transform_error([](auto) -> Error { return RenderInitError::UISetupFailed; })
+                .transform_error([](auto err) -> Error { return err; })
                 .transform([&](auto&& pipeline) -> auto { uiPipeline = std::forward<decltype(pipeline)>(pipeline); });
         })
         .and_then([&]() -> std::expected<void, Error> {
@@ -54,11 +59,11 @@ auto RenderContext::Impl::SetupUI(GLFWwindow* glfwWindow) -> std::expected<void,
             int            bytesPerPixel = 0;
             ImGui::GetIO().Fonts->GetTexDataAsRGBA32(&pixels, &width, &height, &bytesPerPixel);
             if (pixels == nullptr || width <= 0 || height <= 0 || bytesPerPixel != 4) {
-                return std::unexpected(RenderInitError::UISetupFailed);
+                return std::unexpected(UISetupError::SetupFailed);
             }
 
             return CreateTextureInternal(pixels, static_cast<uint32_t>(width), static_cast<uint32_t>(height), false)
-                .transform_error([](auto) -> Error { return RenderInitError::UISetupFailed; })
+                .transform_error([](auto err) -> Error { return err; })
                 .transform([&](uint32_t bindlessIndex) {
                     textureManager.RegisterUploaded("ImGui_FontAtlas", bindlessIndex, false);
                     ImGui::GetIO().Fonts->SetTexID(static_cast<ImTextureID>(static_cast<uintptr_t>(bindlessIndex)));

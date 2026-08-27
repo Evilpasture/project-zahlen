@@ -9,6 +9,22 @@
 #error "Please include <src/render/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Error.hpp>
+#include <cstdint>
+
+namespace ZHLN {
+
+// Staging buffer / host-mapped upload failures for the staging subsystem.
+enum class StagingError : uint8_t {
+    OutOfHostMemory[[= ZHLN::Reflect::Description("Host memory allocation failed for staging buffer")]] = 1,
+    OutOfDeviceMemory[[= ZHLN::Reflect::Description("Device/Host-visible VRAM allocation failed for staging buffer")]],
+    MemoryMappingFailed[[= ZHLN::Reflect::Description("Failed to map staging buffer CPU pointer")]],
+    InvalidBufferDimensions[[= ZHLN::Reflect::Description("Image upload byte size or dimensions exceed limit")]],
+};
+
+} // namespace ZHLN
+
 namespace ZHLN::Vk {
 
 class Allocator;

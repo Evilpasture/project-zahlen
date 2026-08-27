@@ -15,7 +15,7 @@ auto RenderContext::Impl::BuildProceduralBakePipeline() -> std::expected<void, E
     if (!proceduralBakeDescLayout.Build(
             ctx.Device(), Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::ProceduralBakeComp).vertex, "CSMain"), VK_SHADER_STAGE_COMPUTE_BIT
         )) {
-        return std::unexpected(RenderInitError::PipelineCreationFailed);
+        return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
     const void*           cs_code = nullptr;

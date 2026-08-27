@@ -56,18 +56,18 @@ void RenderContext::Impl::RecreatePunctualShadowViews() noexcept {
 
 std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
     if (!presentation.Rebuild(ext.width, ext.height)) {
-        return std::unexpected(RenderInitError::PresentationFailed);
+        return std::unexpected(Vk::PresentationError::SwapchainCreationFailed);
     }
 
     const auto& voxelDispatch = volumetricClearPass.fixedDispatchSize;
     if (voxelDispatch[0] == 0 || voxelDispatch[1] == 0 || voxelDispatch[2] == 0) {
-        return std::unexpected(RenderInitError::PipelineCreationFailed);
+        return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
     const VkExtent3D voxelExt = {.width = voxelDispatch[0], .height = voxelDispatch[1], .depth = voxelDispatch[2]};
 
     auto assign = [&](auto& member, auto e) -> std::expected<void, Error> {
         if (!e) {
-            return std::unexpected(RenderInitError::SubsystemAllocationFailed);
+            return std::unexpected(e.error());
         }
         member = std::move(*e);
         return {};

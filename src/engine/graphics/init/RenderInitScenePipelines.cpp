@@ -32,7 +32,7 @@ auto RenderContext::Impl::BuildParticlePipelines() -> std::expected<void, Error>
     auto csShader = Vk::CreateShaderDesc(Resource::GetShaderProgram(ParticleUpdate).vertex);
 
     if (!particleUpdatePass.BuildHeap(ctx.Device(), csShader, &sceneHeapMappings.info)) {
-        return std::unexpected(RenderInitError::PipelineCreationFailed);
+        return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
     // 3. Build Billboard Graphics Pipeline (particle_render.hlsl)
@@ -68,7 +68,7 @@ auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, Er
     auto csMeshShader = Vk::CreateShaderDesc(Resource::GetShaderProgram(MeshParticleUpdate).vertex);
 
     if (!meshParticleUpdatePass.BuildHeap(ctx.Device(), csMeshShader, &sceneHeapMappings.info)) {
-        return std::unexpected(RenderInitError::PipelineCreationFailed);
+        return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
     // 2. All 3D mesh particle graphics pipelines are descriptor-heap pipelines
@@ -120,7 +120,7 @@ auto RenderContext::Impl::BuildSkinningPipeline() -> std::expected<void, Error> 
     return Vk::PipelineLayoutBuilder(ctx.Device())
         .AddPushConstant(VK_SHADER_STAGE_COMPUTE_BIT, sizeof(SkinningConstants))
         .Build()
-        .transform_error([](auto) -> Error { return RenderInitError::PipelineLayoutCreationFailed; })
+        .transform_error([](auto) -> Error { return Vk::PipelineBuilderError::LayoutCreationFailed; })
         .and_then([&](auto&& layout) -> std::expected<void, Error> {
             skinningPass.pipelineLayout = std::forward<decltype(layout)>(layout);
             return LoadAndCreateComputeShader(
@@ -188,8 +188,6 @@ auto RenderContext::Impl::BuildLinePipeline() -> std::expected<void, Error> {
 }
 
 auto RenderContext::Impl::InitShadowResources() -> std::expected<void, Error> {
-    using enum RenderInitError;
-
     auto shadowSamplerBuilder = Vk::SamplerBuilder {}.Linear().ClampToBorder(VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE).DepthCompare();
 
     return shadowSamplerBuilder.Build(ctx.Device())
@@ -209,7 +207,7 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, Error> {
                 {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, .arrayLayers = NUM_CASCADES}
             );
             if (!sm_res) {
-                return std::unexpected(SubsystemAllocationFailed);
+                return std::unexpected(sm_res.error());
             }
             graphResources.shadowMap = std::move(*sm_res);
 
@@ -218,7 +216,7 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, Error> {
                 {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, .arrayLayers = NUM_CASCADES}
             );
             if (!smp_res) {
-                return std::unexpected(SubsystemAllocationFailed);
+                return std::unexpected(smp_res.error());
             }
             shadowMapPrev = std::move(*smp_res);
             return {};
@@ -232,19 +230,19 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, Error> {
                 {
                     auto view_res = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), graphResources.shadowMap.image.Handle(), i, 1);
                     if (!view_res) {
-                        return std::unexpected(SubsystemAllocationFailed);
+                        return std::unexpected(view_res.error());
                     }
                     shadowCascadeViews[i] = std::move(*view_res);
                 }
                 {
                     auto prev_res = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), shadowMapPrev.image.Handle(), i, 1);
                     if (!prev_res) {
-                        return std::unexpected(SubsystemAllocationFailed);
+                        return std::unexpected(prev_res.error());
                     }
                     shadowCascadeViewsPrev[i] = std::move(*prev_res);
                 }
                 if (!shadowCascadeViews[i].Valid() || !shadowCascadeViewsPrev[i].Valid()) [[unlikely]] {
-                    return std::unexpected(SubsystemAllocationFailed);
+                    return std::unexpected(Vk::ImageViewCreationError::CreationFailed);
                 }
             }
             return {};
@@ -257,7 +255,7 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, Error> {
                 {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, .arrayLayers = 24}
             );
             if (!sa_res) [[unlikely]] {
-                return std::unexpected(SubsystemAllocationFailed);
+                return std::unexpected(sa_res.error());
             }
             graphResources.shadowAtlas = std::move(*sa_res);
             return {};
@@ -268,14 +266,14 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, Error> {
             {
                 auto cube_res = Vk::CreateViewCubeArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), graphResources.shadowAtlas.image.Handle(), 24);
                 if (!cube_res) {
-                    return std::unexpected(SubsystemAllocationFailed);
+                    return std::unexpected(cube_res.error());
                 }
                 shadowAtlasCubeView = std::move(*cube_res);
             }
             {
                 auto array_res = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), graphResources.shadowAtlas.image.Handle(), 0, 24);
                 if (!array_res) {
-                    return std::unexpected(SubsystemAllocationFailed);
+                    return std::unexpected(array_res.error());
                 }
                 shadowAtlas2DView = std::move(*array_res);
             }
@@ -300,7 +298,7 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, Error> {
                 .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 24},
             };
             if (!shadowAtlasCubeView.Valid() || !shadowAtlas2DView.Valid()) [[unlikely]] {
-                return std::unexpected(SubsystemAllocationFailed);
+                return std::unexpected(Vk::ImageViewCreationError::CreationFailed);
             }
             return {};
         })
@@ -385,7 +383,7 @@ auto RenderContext::Impl::BuildDecalPipeline() -> std::expected<void, Error> {
         {.shader = Vk::CreateShaderDesc(decalShaders.fragment), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
     };
     if (!decalDescLayout.Build(ctx.Device(), std::span {reflectInputs})) {
-        return std::unexpected(RenderInitError::PipelineCreationFailed);
+        return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
     BuildDecalHeapMappings();
     decalPipelineLayout = emptyPipelineLayout;
@@ -535,7 +533,7 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, Error> {
 auto RenderContext::Impl::BuildHangGpuPipeline() -> std::expected<void, Error> {
     return Vk::PipelineLayoutBuilder(ctx.Device())
         .Build()
-        .transform_error([](auto) -> Error { return RenderInitError::PipelineLayoutCreationFailed; })
+        .transform_error([](auto) -> Error { return Vk::PipelineBuilderError::LayoutCreationFailed; })
         .and_then([&](auto&& layout) -> std::expected<void, Error> {
             hangGpuPass.pipelineLayout = std::forward<decltype(layout)>(layout);
             return LoadAndCreateComputeShader(
@@ -549,7 +547,7 @@ auto RenderContext::Impl::BuildHangGpuPipeline() -> std::expected<void, Error> {
 auto RenderContext::Impl::BuildHiZPipeline() -> std::expected<void, Error> {
     auto shader = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::HizGenerateComp).vertex);
     if (!hizDescLayout.Build(ctx.Device(), shader, VK_SHADER_STAGE_COMPUTE_BIT)) {
-        return std::unexpected(RenderInitError::PipelineCreationFailed);
+        return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
     // VK_EXT_descriptor_heap: one slot span per mip (the pushed index is the
@@ -579,7 +577,7 @@ auto RenderContext::Impl::CompileShadowPipeline(VkDevice device, const Resource:
                 .ViewMask(Passes::ShadowPass::kCascadeViewMask)
                 .CullNone()
                 .Build(device)
-                .transform_error([](auto) -> Error { return RenderInitError::PipelineCreationFailed; })
+                .transform_error([](auto) -> Error { return Vk::PipelineBuilderError::PipelineCreationFailed; })
                 .transform([&](auto&& pipeline) -> auto { shadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
         })
         .and_then([&, device]() -> std::expected<void, Error> {
@@ -639,7 +637,7 @@ auto RenderContext::Impl::CompilePunctualShadowPipeline(VkDevice device, const R
                 .ViewMask(0x3F)
                 .CullNone()
                 .Build(device)
-                .transform_error([](auto) -> Error { return RenderInitError::PipelineCreationFailed; })
+                .transform_error([](auto) -> Error { return Vk::PipelineBuilderError::PipelineCreationFailed; })
                 .transform([&](auto&& pipeline) -> auto { punctualShadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
         });
 }
@@ -649,13 +647,13 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, Error> {
 
     auto cullingShader = Vk::CreateShaderDesc(Resource::culling_comp);
     if (!cullingLayout.Build(ctx.Device(), cullingShader, VK_SHADER_STAGE_COMPUTE_BIT)) {
-        return std::unexpected(RenderInitError::PipelineCreationFailed);
+        return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
     auto clusterCullingShader = Vk::CreateShaderDesc(Resource::GetShaderProgram(ClusterCulling).vertex);
     auto clusterDispatch      = Vk::ReflectComputeDispatchSize(clusterCullingShader);
     if (!clusterDispatch) {
-        return std::unexpected(RenderInitError::PipelineCreationFailed);
+        return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
     const size_t numClusters = static_cast<size_t>((*clusterDispatch)[0]) * (*clusterDispatch)[1] * (*clusterDispatch)[2];
 
@@ -704,7 +702,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, Error> {
             clusterBoundsBuffer = std::move(*bounds);
 
             if (!clusterCullingDescLayout.Build(ctx.Device(), clusterCullingShader, VK_SHADER_STAGE_COMPUTE_BIT)) {
-                return std::unexpected(RenderInitError::PipelineCreationFailed);
+                return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
             }
             Vk::BuildHeapPassBindings(
                 heapManager, clusterCullingDescLayout.reflectedSets[0], 0, heapPushDataLayout.heapIndexOffset, 2, clusterCullingHeapBindings
@@ -742,7 +740,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, Error> {
         .and_then([&]() -> std::expected<void, Error> {
             auto bDesc = Vk::CreateShaderDesc(Resource::GetShaderProgram(ClusterBounds).vertex);
             if (!clusterBoundsDescLayout.Build(ctx.Device(), bDesc, VK_SHADER_STAGE_COMPUTE_BIT)) {
-                return std::unexpected(RenderInitError::PipelineCreationFailed);
+                return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
             }
             Vk::BuildHeapPassBindings(
                 heapManager, clusterBoundsDescLayout.reflectedSets[0], 0, heapPushDataLayout.heapIndexOffset, 2, clusterBoundsHeapBindings
