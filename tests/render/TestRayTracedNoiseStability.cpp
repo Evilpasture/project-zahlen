@@ -80,7 +80,7 @@ enum class NoiseStabilityError : uint8_t {
         "The ray-traced shadow path executes but renders the identical image at two different frame indices, so the blue noise temporal scroll is not advancing: check FrameIndexFromCamPosW(pc.camPos.w) and the R2 UV offset in blue_noise.slang."
     )]],
     PenumbraTooSmallToMeasure[[= ZHLN::Reflect::Description(
-        "The per-frame variation covers too small a region for the structural metrics; widen the penumbra (sunSize / occluder height) rather than trusting a measurement over a handful of pixels."
+        "The per-frame variation covers too small a region for the structural metrics to be trustworthy; widen the penumbra (frame.sunSize, or raise the occluder) rather than gating on a measurement over a handful of pixels."
     )]],
     DitherIsPeriodic[[= ZHLN::Reflect::Description(
         "The ray-traced dither repeats at a short spatial lag; the residual carries a lattice a spatial filter cannot integrate away."
@@ -107,16 +107,38 @@ constexpr int kHeight = 480;
 /// having changed between two frames.
 constexpr double kChangeThreshold = 2.0;
 
-/// Smallest penumbra bounding box that carries enough samples for
-/// AutocorrelationSideLobe (which needs >= 2*maxLag+3 = 11 per side) and for
-/// the four-directional gradient energies to be statistically meaningful.
-constexpr int kMinRegion = 48;
+/// Smallest penumbra bounding box the structural metrics are trustworthy on.
+///
+/// Deliberately NOT square. A shadow edge is a band, and demanding a square
+/// region rejected a perfectly good 104x41 measurement -- the width was fine
+/// and only the height fell short of a threshold that existed for no reason
+/// other than being one number applied to both axes.
+///
+/// The floor comes from sweeping 700 crop offsets of the shipped tile at each
+/// candidate size, thresholded to 1 bit the way the renderer's visibility is:
+///
+///   region      px    blue aniso max   blue lobe max   IGN aniso min   IGN lobe min
+///    48x16     768        1.2637           0.1732          3.2604         0.8008
+///    64x24    1536        1.1964           0.1269          3.3033         0.8379
+///   104x41    4264        1.1246           0.0945          3.3050         0.8696
+///   128x48    6144        1.1079           0.0870          3.3048         0.8778
+///
+/// 64x24 keeps the gates below at 1.34x / 2.36x clear of the worst noise crop
+/// while the lattice stays 2.07x / 2.79x beyond them. AutocorrelationSideLobe
+/// additionally needs >= 2*maxLag+3 = 11 per side, which 24 satisfies.
+constexpr int kMinRegionWidth  = 64;
+constexpr int kMinRegionHeight = 24;
 
-/// Sun disk half-angle in radians. The engine's ImGui slider clamps this to
-/// 0.05, which is a sane *visual* default but leaves a penumbra only ~11 px
-/// wide at this camera distance -- below kMinRegion. Nothing but the slider
-/// enforces that clamp, and the RT shadow is the only consumer of frame.sunSize,
-/// so the test widens it to get a measurable band.
+/// Sun disk half-angle in radians.
+///
+/// The engine's ImGui slider clamps this to 0.05, which is a sane *visual*
+/// default but leaves the penumbra narrower than a pixel at this camera
+/// distance: an earlier run at 0.05 produced two byte-identical frames and
+/// looked exactly like a dead dither, when in fact the ray path was live and
+/// simply had no gradient to act on. Nothing but the slider enforces that
+/// clamp, and frame.sunSize has exactly one consumer -- the RT shadow -- so
+/// the test widens it. Measured at 0.25: a 104x41 penumbra band with region
+/// RMS 44.7, comfortably above the kMinRegion* floor.
 constexpr float kSunSize = 0.25f;
 
 } // namespace
@@ -369,7 +391,7 @@ struct RayTracedNoiseStabilityTestSuite {
             // already distinguishes "path inactive" from "dither frozen"; here
             // the only remaining explanation for a usable-but-tiny band is that
             // the penumbra is narrower than the metrics can average over.
-            if (!ZHLN::Test::ExpectTrue(!band.Empty() && band.Width() >= kMinRegion && band.Height() >= kMinRegion)) {
+            if (!ZHLN::Test::ExpectTrue(!band.Empty() && band.Width() >= kMinRegionWidth && band.Height() >= kMinRegionHeight)) {
                 return std::unexpected(NoiseStabilityError::PenumbraTooSmallToMeasure);
             }
 
@@ -434,7 +456,7 @@ struct RayTracedNoiseStabilityTestSuite {
             }
             const std::vector<double> firstDiff = LumaDifference(prev, second);
             const BBox                band      = BBoxOfChangedPixels(firstDiff.data(), kWidth, kHeight, kChangeThreshold, 4);
-            if (!ZHLN::Test::ExpectTrue(!band.Empty() && band.Width() >= kMinRegion && band.Height() >= kMinRegion)) {
+            if (!ZHLN::Test::ExpectTrue(!band.Empty() && band.Width() >= kMinRegionWidth && band.Height() >= kMinRegionHeight)) {
                 return std::unexpected(NoiseStabilityError::PenumbraTooSmallToMeasure);
             }
             ZHLN::Println("    [INFO] measuring convergence over [{},{}) x [{},{})", band.x0, band.x1, band.y0, band.y1);
