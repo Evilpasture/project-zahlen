@@ -82,6 +82,9 @@ enum class NoiseStabilityError : uint8_t {
     PenumbraTooSmallToMeasure[[= ZHLN::Reflect::Description(
         "The per-frame variation covers too small a region for the structural metrics to be trustworthy; widen the penumbra (frame.sunSize, or raise the occluder) rather than gating on a measurement over a handful of pixels."
     )]],
+    ShadowTooWeakToTest[[= ZHLN::Reflect::Description(
+        "The shadow never develops from lit to shadowed: the fitted coverage does not span the 0..1 range. Usually the sun disk subtends a larger angle than the occluder, so no umbra forms and the penumbra degenerates into sparse speckle; reduce frame.sunSize or enlarge the occluder."
+    )]],
     NoiseMagnitudeMismatch[[= ZHLN::Reflect::Description(
         "The per-pixel temporal variance does not match what a one-sample-per-pixel stochastic shadow must produce: near zero means the dither is not modulating visibility, above 1 means extra variance beyond Bernoulli (instability or fireflies), near 1/N means the shader is averaging N samples."
     )]],
@@ -136,17 +139,21 @@ constexpr double kChangeThreshold = 2.0;
 constexpr int kMinRegionWidth  = 64;
 constexpr int kMinRegionHeight = 24;
 
-/// Sun disk half-angle in radians.
+/// Sun disk half-angle in radians. Two constraints fight over it:
 ///
-/// The engine's ImGui slider clamps this to 0.05, which is a sane *visual*
-/// default but leaves the penumbra narrower than a pixel at this camera
-/// distance: an earlier run at 0.05 produced two byte-identical frames and
-/// looked exactly like a dead dither, when in fact the ray path was live and
-/// simply had no gradient to act on. Nothing but the slider enforces that
-/// clamp, and frame.sunSize has exactly one consumer -- the RT shadow -- so
-/// the test widens it. Measured at 0.25: a 104x41 penumbra band with region
-/// RMS 44.7, comfortably above the kMinRegion* floor.
-constexpr float kSunSize = 0.25f;
+///  * small -- the sun disk must subtend a SMALLER angle than the occluder,
+///    or no umbra forms and the penumbra degenerates into sparse speckle.
+///    At a previous 0.25 the disk (0.25 rad) out-sized the cube (~0.13 rad)
+///    and the captured frame was exactly that speckle, with coverage stuck
+///    near the lit end.
+///  * large -- the penumbra width is sunSize * h / L.y and must stay above the
+///    kMinRegionHeight floor.
+///
+/// 0.15 with the enlarged occluder below threads both: penumbra ~2.4 units and
+/// an umbra that lets the coverage span reach the shadowed end. The engine's
+/// slider clamp (0.05) is ignored here because nothing else enforces it and
+/// frame.sunSize has exactly one consumer, the RT shadow.
+constexpr float kSunSize = 0.15f;
 
 } // namespace
 
@@ -253,12 +260,14 @@ struct RayTracedNoiseStabilityTestSuite {
         }
 
         ZHLN::CreativeWorksFactory::CreatePlane(
-            engine, 80.0f, {0.8f, 0.8f, 0.82f, 1.0f},
+            engine, 120.0f, {0.8f, 0.8f, 0.82f, 1.0f},
             ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *floorMat}
         );
+        // Large and raised so the cube's angular size exceeds the sun disk
+        // (an umbra forms) while the penumbra still clears the region floor.
         ZHLN::CreativeWorksFactory::CreateBox(
-            engine, JPH::Vec3(1.5f, 1.5f, 1.5f),
-            ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 10.0, 0.0), .createPhysics = false, .materialOverride = *boxMat}
+            engine, JPH::Vec3(3.0f, 3.0f, 3.0f),
+            ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 15.0, 0.0), .createPhysics = false, .materialOverride = *boxMat}
         );
 
         const ZHLN::Entity sunEnt = reg.Create();
@@ -271,9 +280,9 @@ struct RayTracedNoiseStabilityTestSuite {
         );
 
         auto& cam    = engine.GetCamera();
-        cam.position = JPH::Vec3(0.0f, 8.0f, 26.0f);
+        cam.position = JPH::Vec3(0.0f, 10.0f, 34.0f);
         cam.yaw      = -90.0f;
-        cam.pitch    = -14.0f;
+        cam.pitch    = -17.0f;
         cam.fov      = 60.0f;
         return true;
     }
@@ -502,9 +511,17 @@ struct RayTracedNoiseStabilityTestSuite {
                 "    [INFO] measured variance sum={:.1f}  expected p(1-p)d^2 sum={:.1f}  -> ratio={:.4f}", fit.measuredVarSum,
                 fit.expectedVarSum, fit.ratio
             );
+            ZHLN::Println("    [INFO] fitted coverage spans [{:.3f}, {:.3f}]", fit.coverageMin, fit.coverageMax);
 
             if (!ZHLN::Test::ExpectTrue(fit.valid)) {
                 return std::unexpected(NoiseStabilityError::NoiseMagnitudeMismatch);
+            }
+            // The shadow must actually develop: coverage reaching the lit end
+            // and the shadowed end. If the sun disk out-sizes the occluder the
+            // span collapses toward the lit end and the structural/magnitude
+            // gates would be measuring speckle rather than a shadow.
+            if (!ZHLN::Test::ExpectTrue(fit.coverageMin < 0.30 && fit.coverageMax > 0.70)) {
+                return std::unexpected(NoiseStabilityError::ShadowTooWeakToTest);
             }
             // 1 SPP is not an assumption, it is what the shader does:
             // lighting.slang calls CalculateShadowRayTraced without a `samples`

@@ -268,6 +268,8 @@ struct BernoulliFit {
     double expectedVarSum = 0.0; ///< Sum of p*(1-p)*d^2 over the same pixels.
     double ratio          = 0.0; ///< measured / expected; 1.0 means a true 1 SPP.
     double offClusterFrac = 0.0; ///< Samples on neither level; ~0 means two-valued.
+    double coverageMin    = 1.0; ///< Min fitted coverage p over used pixels.
+    double coverageMax    = 0.0; ///< Max fitted coverage p over used pixels.
     int    pixelsUsed     = 0;   ///< Pixels with pLo < p < pHi.
     int    pixelsInRegion = 0;
     bool   valid          = false;
@@ -343,6 +345,16 @@ FitBernoulliNoise(const TemporalMoments& m, const BBox& b, double clusterToleran
     }
 
     const double d2 = out.amplitude * out.amplitude;
+    // Coverage span is measured over EVERY pixel in the region (clamped), not
+    // just the fitted window: it is the test that the shadow actually develops
+    // from lit to shadowed. A sun disk larger than the occluder leaves p stuck
+    // near the lit end and this span collapses -- exactly the failure mode the
+    // captured speckle frame showed.
+    for (const Sample& s: samples) {
+        const double p = std::min(1.0, std::max(0.0, (s.mean - out.shadowedLevel) / out.amplitude));
+        out.coverageMin = std::min(out.coverageMin, p);
+        out.coverageMax = std::max(out.coverageMax, p);
+    }
     for (const Sample& s: samples) {
         const double p = (s.mean - out.shadowedLevel) / out.amplitude;
         if (p <= pLo || p >= pHi) {
