@@ -298,10 +298,23 @@ void DrawProfiler(ZHLN::Engine& engine) {
             // resize happens reactively, with no manual renderer calls).
             const ZHLN::GraphicsSettings& gfx = engine.GetRenderContext().GetSettings();
 
-            const char* presets[]  = {"Low", "Medium", "High", "Ultra", "Custom"};
-            const int   currentIdx = static_cast<int>(gfx.DetectPreset());
-            int         presetIdx  = currentIdx;
-            if (ImGui::Combo("Preset", &presetIdx, presets, IM_ARRAYSIZE(presets))) {
+            // Labels come straight from the reflection machinery — no
+            // hand-maintained preset string list that can drift from the enum.
+            static constexpr auto                                kPresetNames  = ZHLN::Reflect::EnumNames<ZHLN::QualityLevel>();
+            static const std::array<std::string, kPresetNames.size()> kPresetLabels = [] {
+                std::array<std::string, kPresetNames.size()> labels {};
+                for (size_t i = 0; i < labels.size(); ++i) {
+                    labels[i] = std::string(kPresetNames[i]);
+                }
+                return labels;
+            }();
+            const char* presetItems[kPresetNames.size()] = {};
+            for (size_t i = 0; i < kPresetNames.size(); ++i) {
+                presetItems[i] = kPresetLabels[i].c_str();
+            }
+
+            int presetIdx = static_cast<int>(gfx.DetectPreset());
+            if (ImGui::Combo("Preset", &presetIdx, presetItems, static_cast<int>(kPresetNames.size()))) {
                 if (const auto level = static_cast<ZHLN::QualityLevel>(presetIdx); level != ZHLN::QualityLevel::Custom) {
                     ZHLN::ApplyQualityPreset(engine, level);
                 }

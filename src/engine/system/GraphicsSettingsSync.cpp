@@ -7,16 +7,20 @@
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render.hpp>
+#include <Zahlen/ecs/ECS.hpp>
+#include <array>
 
 namespace ZHLN {
 
 namespace {
 
-using Components::AASettingsComponent;
-using Components::GlobalSettingsTagComponent;
-using Components::MainCameraTagComponent;
-using Components::PostProcessSettingsComponent;
-using Components::ShadowSettingsComponent;
+// Namespace-scope aliases (using-declarations cannot name class members
+// outside class scope).
+using AASettingsComponent       = Components::AASettingsComponent;
+using GlobalSettingsTagComponent = Components::GlobalSettingsTagComponent;
+using MainCameraTagComponent    = Components::MainCameraTagComponent;
+using PostProcessSettingsComponent = Components::PostProcessSettingsComponent;
+using ShadowSettingsComponent   = Components::ShadowSettingsComponent;
 
 [[nodiscard]] Entity FirstOrNull(std::span<const Entity> entities) noexcept {
     return entities.empty() ? Entity::Null() : entities[0];
@@ -30,6 +34,15 @@ using Components::ShadowSettingsComponent;
 /// Main camera entity (owns AASettingsComponent in the default scene).
 [[nodiscard]] Entity CameraEntity(ECS::Registry& reg) noexcept {
     return FirstOrNull(reg.GetEntitiesWith<MainCameraTagComponent>());
+}
+
+// std::array has no operator= from a braced list; build the array by value.
+[[nodiscard]] std::array<float, 3> ToArray3(const JPH::Vec3& v) noexcept {
+    return {v.GetX(), v.GetY(), v.GetZ()};
+}
+
+[[nodiscard]] std::array<float, 4> ToArray4(const JPH::Vec4& v) noexcept {
+    return {v.GetX(), v.GetY(), v.GetZ(), v.GetW()};
 }
 
 } // namespace
@@ -59,12 +72,12 @@ GraphicsSettings CollectGraphicsSettings(Engine& engine) {
         gfx.environment.ambientExposure = pp->ambientExposure;
         gfx.environment.fullBright      = pp->fullBright;
         gfx.environment.useLocalProbe   = pp->useLocalProbe;
-        gfx.environment.probeMin        = {pp->probeMin.GetX(), pp->probeMin.GetY(), pp->probeMin.GetZ()};
-        gfx.environment.probeMax        = {pp->probeMax.GetX(), pp->probeMax.GetY(), pp->probeMax.GetZ()};
-        gfx.environment.probePos        = {pp->probePos.GetX(), pp->probePos.GetY(), pp->probePos.GetZ()};
-        gfx.environment.skyZenith       = {pp->skyZenith.GetX(), pp->skyZenith.GetY(), pp->skyZenith.GetZ(), pp->skyZenith.GetW()};
-        gfx.environment.skyHorizon      = {pp->skyHorizon.GetX(), pp->skyHorizon.GetY(), pp->skyHorizon.GetZ(), pp->skyHorizon.GetW()};
-        gfx.environment.skyGround       = {pp->skyGround.GetX(), pp->skyGround.GetY(), pp->skyGround.GetZ(), pp->skyGround.GetW()};
+        gfx.environment.probeMin        = ToArray3(pp->probeMin);
+        gfx.environment.probeMax        = ToArray3(pp->probeMax);
+        gfx.environment.probePos        = ToArray3(pp->probePos);
+        gfx.environment.skyZenith       = ToArray4(pp->skyZenith);
+        gfx.environment.skyHorizon      = ToArray4(pp->skyHorizon);
+        gfx.environment.skyGround       = ToArray4(pp->skyGround);
     }
 
     // --- Shadows (ShadowSettingsComponent) ---
@@ -122,9 +135,9 @@ bool ApplyQualityPreset(Engine& engine, QualityLevel preset) {
     changed |= reg.Patch<PostProcessSettingsComponent>(
         ppEnt,
         [&gfx](PostProcessSettingsComponent& pp) {
-            pp.giSamples   = gfx.post.giSamples;
-            pp.enableSSR   = gfx.post.enableSSR;
-            pp.enableRTR   = gfx.post.enableRTR;
+            pp.giSamples = gfx.post.giSamples;
+            pp.enableSSR = gfx.post.enableSSR;
+            pp.enableRTR = gfx.post.enableRTR;
         }
     );
 
@@ -167,7 +180,7 @@ bool ApplyQualityPreset(Engine& engine, QualityLevel preset) {
     }
 
     if (changed) {
-        ZHLN::Log("Graphics quality preset applied: {}", ToString(preset));
+        ZHLN::Log("Graphics quality preset applied: {}", ZHLN::ToString(preset));
     }
     return changed;
 }

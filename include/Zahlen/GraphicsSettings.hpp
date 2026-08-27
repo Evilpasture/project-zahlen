@@ -34,7 +34,6 @@
 
 #include <array>
 #include <cstdint>
-#include <string_view>
 
 namespace ZHLN {
 
@@ -42,23 +41,11 @@ namespace ZHLN {
 // A preset pins the fields of GraphicsSettings::QualitySignature; every other
 // field (vignette, sky, probes, exposure, per-AA-knobs) stays user-tuned and
 // does not affect the detected tier.
+//
+// Names for UI/logging come from the reflection machinery like every other
+// engine enum: ZHLN::ToString / Reflect::EnumNames (identifier fallback), no
+// hand-rolled helpers.
 enum class QualityLevel : uint8_t { Low = 0, Medium, High, Ultra, Custom };
-
-[[nodiscard]] constexpr std::string_view ToString(QualityLevel level) noexcept {
-    switch (level) {
-        case QualityLevel::Low:
-            return "Low";
-        case QualityLevel::Medium:
-            return "Medium";
-        case QualityLevel::High:
-            return "High";
-        case QualityLevel::Ultra:
-            return "Ultra";
-        case QualityLevel::Custom:
-            break;
-    }
-    return "Custom";
-}
 
 enum class AAMode : uint32_t { None = 0, FXAA, MLAA, TAA, SMAA };
 

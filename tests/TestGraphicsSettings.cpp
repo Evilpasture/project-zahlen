@@ -126,7 +126,10 @@ struct GraphicsSettingsSuite {
             return AssertFalse(a.ConfigEquals(b));
         }
 
-        // --- 7. Tier labels ------------------------------------------------------
+        // --- 7. Tier labels come from the reflection machinery -----------------
+        // GraphicsSettings.hpp declares no hand-rolled ToString; the generic
+        // ZHLN::ToString (Reflect::EnumToMessage -> identifier fallback) names
+        // the tiers.
         std::expected<void, ZHLN::Error> quality_level_labels() {
             auto check = AssertTrue(ToString(QualityLevel::Low) == "Low" && ToString(QualityLevel::Medium) == "Medium");
             if (!check) {

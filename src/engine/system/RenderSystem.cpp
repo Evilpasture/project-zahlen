@@ -94,7 +94,6 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
 
     const float    shadowWidth      = gfx.shadows.width;
     const uint32_t shadowResolution = gfx.shadows.resolution;
-    const float    sunSize          = gfx.shadows.sunSize;
 
     float textelSize = shadowWidth / static_cast<float>(shadowResolution);
 
