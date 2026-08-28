@@ -23,28 +23,28 @@ namespace ZHLN::Vk {
 // translation unit so no header exposes them; callers only log the
 // type-erased ZHLN::Error message.
 enum class BufferCreationError : uint8_t {
-    OutOfHostMemory[[= Reflect::Description("Out of host memory")]] = 1,
-    OutOfDeviceMemory[[= Reflect::Description("Out of device memory")]],
-    InvalidCaptureAddress[[= Reflect::Description("Invalid capture address")]],
-    VulkanSubsystemFailure[[= Reflect::Description("Vulkan subsystem failure")]],
+    OutOfHostMemory[[= Reflect::Description<"Out of host memory">{}]] = 1,
+    OutOfDeviceMemory[[= Reflect::Description<"Out of device memory">{}]],
+    InvalidCaptureAddress[[= Reflect::Description<"Invalid capture address">{}]],
+    VulkanSubsystemFailure[[= Reflect::Description<"Vulkan subsystem failure">{}]],
 };
 
 enum class ImageCreationError : uint8_t {
-    OutOfHostMemory[[= Reflect::Description("Out of host memory")]] = 1,
-    OutOfDeviceMemory[[= Reflect::Description("Out of device memory")]],
-    InvalidCaptureAddress[[= Reflect::Description("Invalid capture address")]],
-    VulkanSubsystemFailure[[= Reflect::Description("Vulkan subsystem failure")]],
+    OutOfHostMemory[[= Reflect::Description<"Out of host memory">{}]] = 1,
+    OutOfDeviceMemory[[= Reflect::Description<"Out of device memory">{}]],
+    InvalidCaptureAddress[[= Reflect::Description<"Invalid capture address">{}]],
+    VulkanSubsystemFailure[[= Reflect::Description<"Vulkan subsystem failure">{}]],
 };
 
 // VMA allocator instance bring-up failure.
 enum class AllocatorError : uint8_t {
-    InitializationFailed[[= Reflect::Description("Vulkan memory allocator initialization failed")]] = 1,
+    InitializationFailed[[= Reflect::Description<"Vulkan memory allocator initialization failed">{}]] = 1,
 };
 
 // Staging ring buffer / persistent transfer buffer bring-up failures.
 enum class StagingRingBufferError : uint8_t {
-    OutOfHostMemory[[= Reflect::Description("Out of host memory")]] = 1,
-    StagingBufferCreationFailed[[= Reflect::Description("Staging ring buffer allocation failed")]],
+    OutOfHostMemory[[= Reflect::Description<"Out of host memory">{}]] = 1,
+    StagingBufferCreationFailed[[= Reflect::Description<"Staging ring buffer allocation failed">{}]],
 };
 
 

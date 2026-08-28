@@ -74,7 +74,7 @@ inline void TestTimeoutSignalHandler(int sig) {
 namespace ZHLN::Test {
 
 enum class TestFrameworkError : uint8_t {
-    AssertionFailed[[= ZHLN::Reflect::Description("One or more assertions failed in this test. ")]] = 1,
+    AssertionFailed[[= ZHLN::Reflect::Description<"One or more assertions failed in this test. ">{}]] = 1,
 };
 
 struct AssertionFailure {

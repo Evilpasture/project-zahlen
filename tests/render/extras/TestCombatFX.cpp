@@ -18,12 +18,12 @@
 import ZHLN.CombatFX;
 
 enum class CombatFXTestError : uint32_t {
-    SystemInitFailed[[= ZHLN::Reflect::Description("CombatFX::System failed to initialize default surface presets or procedural textures.")]] = 1,
-    DecalSpawnMismatch[[= ZHLN::Reflect::Description("Impact on decal-enabled surface failed to instantiate a DecalComponent entity.")]],
-    NonDecalSurfaceSpawnedDecal[[= ZHLN::Reflect::Description("Impact on decal-disabled surface (e.g. Organic/Shield) incorrectly spawned a DecalComponent.")]],
-    CustomPresetMismatch[[= ZHLN::Reflect::Description("Custom registered surface response preset failed to apply configured properties.")]],
-    TracerSimulationFailed[[= ZHLN::Reflect::Description("Ballistic bullet tracer failed to advance or terminate upon reaching target distance.")]],
-    TransientVfxCleanupFailed[[= ZHLN::Reflect::Description("Sparks or shockwave rings were not cleanly erased after exceeding max lifetime.")]],
+    SystemInitFailed[[= ZHLN::Reflect::Description<"CombatFX::System failed to initialize default surface presets or procedural textures.">{}]] = 1,
+    DecalSpawnMismatch[[= ZHLN::Reflect::Description<"Impact on decal-enabled surface failed to instantiate a DecalComponent entity.">{}]],
+    NonDecalSurfaceSpawnedDecal[[= ZHLN::Reflect::Description<"Impact on decal-disabled surface (e.g. Organic/Shield) incorrectly spawned a DecalComponent.">{}]],
+    CustomPresetMismatch[[= ZHLN::Reflect::Description<"Custom registered surface response preset failed to apply configured properties.">{}]],
+    TracerSimulationFailed[[= ZHLN::Reflect::Description<"Ballistic bullet tracer failed to advance or terminate upon reaching target distance.">{}]],
+    TransientVfxCleanupFailed[[= ZHLN::Reflect::Description<"Sparks or shockwave rings were not cleanly erased after exceeding max lifetime.">{}]],
 };
 
 struct CombatFXTestSuite {

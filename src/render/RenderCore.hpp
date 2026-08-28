@@ -113,8 +113,8 @@ namespace ZHLN::Vk {
 // Backend-neutral, optional-feature fallback signals live in RenderFeatureError
 // (public Render.hpp), and subsystem failures use their own domain enums.
 enum class VulkanCallError : uint8_t {
-    VulkanCallFailed[[= Reflect::Description("Vulkan call failed")]] = 1,
-    DeviceLost[[= Reflect::Description("Device lost")]],
+    VulkanCallFailed[[= Reflect::Description<"Vulkan call failed">{}]] = 1,
+    DeviceLost[[= Reflect::Description<"Device lost">{}]],
 };
 
 // ============================================================================

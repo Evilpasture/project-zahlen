@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "Print.hpp"
 #include <algorithm>
 #include <array>
 #include <format>
@@ -34,6 +33,9 @@ struct StringLiteral {
     }
 };
 
+template <std::size_t N>
+StringLiteral(const char (&)[N]) -> StringLiteral<N>;
+
 template <typename T, StringLiteral FieldName>
 struct Field {
     using type                             = T;
@@ -45,8 +47,9 @@ constexpr auto IsBracesConstructible() -> bool {
     return std::is_aggregate_v<std::remove_cvref_t<T>>;
 }
 
-struct MetaDescription {
-    const char* text;
+template <StringLiteral Text>
+struct Description {
+    static constexpr std::string_view message = Text;
 };
 
 } // namespace ZHLN::Reflect
@@ -59,10 +62,6 @@ struct MetaDescription {
 #include <meta>
 
 namespace ZHLN::Reflect {
-
-consteval auto Description(std::string_view text) -> MetaDescription {
-    return MetaDescription {std::define_static_string(text)};
-}
 
 namespace detail {
 
@@ -226,7 +225,7 @@ class TypeDescriptor {
 
     static consteval auto ArrayOf(TypeDescriptor elemType, size_t count) noexcept -> TypeDescriptor {
         std::vector<std::meta::info> template_args = {elemType.m_handle, std::meta::reflect_constant(count)};
-        return TypeDescriptor(std::meta::type_of(std::meta::substitute(^^detail::FixedArrayBinding, template_args)));
+        return TypeDescriptor(std::meta::substitute(^^std::array, template_args));
     }
 
     [[nodiscard]] consteval auto Handle() const noexcept {
@@ -399,7 +398,7 @@ consteval auto FieldCount() -> std::size_t {
 
 template <std::size_t N, typename T>
 constexpr auto GetField(T&& t) -> decltype(auto) {
-    return std::forward<T>(t).[:detail::NonStaticDataMembers<T>()[N]:];
+    return (std::forward<T>(t).[:detail::NonStaticDataMembers<T>()[N]:]);
 }
 
 template <typename T, typename F>
@@ -461,7 +460,7 @@ consteval auto HasTag(std::string_view field_name) -> bool {
 }
 
 template <std::size_t N, typename T>
-using FieldType = typename[:detail::NonStaticDataMembers<T>()[N]:];
+using FieldType = typename[:std::meta::type_of(detail::NonStaticDataMembers<T>()[N]):];
 
 template <typename T>
 consteval auto BaseClasses() {
@@ -478,7 +477,7 @@ template <StringLiteral NameConst, typename T>
 constexpr auto GetFieldByName(T&& t) -> decltype(auto) {
     constexpr auto found_member = detail::FindMember<NameConst, T>();
     static_assert(found_member != std::meta::info {}, "Field not found in type.");
-    return std::forward<T>(t).[:found_member:];
+    return (std::forward<T>(t).[:found_member:]);
 }
 
 template <typename T>
@@ -587,14 +586,14 @@ constexpr void ForEachFieldAdaptive(T&& t, F&& f) {
 template <typename Tag, typename T>
 consteval auto ValidateSerializability() -> bool {
     bool ok = true;
-    for (auto member: detail::NonStaticDataMembers<T>()) {
-        if (std::meta::type_of(member) == ^^Tag) {
+    [:Expand(detail::NonStaticDataMembers<T>()):] >> [&]<auto member>() {
+        if constexpr (std::meta::type_of(member) == ^^Tag) {
             using FieldT = typename[:std::meta::type_of(member):];
             if constexpr (!std::is_trivially_copyable_v<FieldT>) {
                 ok = false;
             }
         }
-    }
+    };
     return ok;
 }
 
@@ -691,12 +690,22 @@ consteval auto AnnotationHasType(std::meta::info annotation) -> bool {
     return actualType == std::meta::dealias(^^Tag) || actualType == std::meta::dealias(^^std::add_const_t<Tag>);
 }
 
+template <typename Tag, auto EntityInfo>
+consteval auto HasAnnotation() -> bool {
+    for (auto a: std::meta::annotations_of(EntityInfo)) {
+        if (AnnotationHasType<Tag>(a)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 template <auto ScopeInfo, typename Tag, typename F>
 constexpr void ForEachAnnotatedTypeInScope(F&& f) {
     constexpr auto members = std::define_static_array(std::meta::members_of(ScopeInfo, std::meta::access_context::current()));
     [:Expand(members):] >> [&]<auto m>() -> auto {
         if constexpr (std::meta::is_type(m)) {
-            if constexpr (std::ranges::any_of(std::meta::annotations_of(m), [](auto a) -> auto { return AnnotationHasType<Tag>(a); })) {
+            if constexpr (HasAnnotation<Tag, m>()) {
                 using TargetType = typename[:m:];
                 f.template operator()<TargetType>();
             }
@@ -733,15 +742,6 @@ consteval auto GetAnnotation() -> std::optional<Tag> {
     return std::nullopt;
 }
 
-template <typename T>
-consteval auto AnnotatedName() -> std::string_view {
-    constexpr auto info = ^^std::remove_cvref_t<T>;
-    if (auto name = GetAnnotation<MetaDescription, info>()) {
-        return name->text;
-    }
-    return TypeName<T>();
-}
-
 template <typename Tag, typename E>
     requires std::is_enum_v<E>
 constexpr auto GetEnumeratorAnnotation(E value) -> std::optional<Tag> {
@@ -755,62 +755,59 @@ constexpr auto GetEnumeratorAnnotation(E value) -> std::optional<Tag> {
     return result;
 }
 
-// ---------------------------------------------------------------------------
-// Compile-time enum message table.
-//
-// Annotation extraction (std::meta::extract -> std::optional) is evaluated
-// only in consteval contexts here; the runtime side reads a plain
-// std::array of {value, string_view} entries. Rationale: a constexpr
-// function whose body calls an immediate function with a non-constant
-// argument is itself reclassified as immediate, and immediate functions
-// get no out-of-line definition -- so a runtime call to such a function
-// (the error-category lambda in Error.hpp calls EnumToMessage with a
-// runtime value) links as an undefined symbol. Observed on macOS/arm64
-// when the extract's constant evaluation fails ('read of object outside
-// its lifetime' inside libc++'s optional). Taking the reflection calls
-// out of the runtime path entirely makes the link succeed regardless.
-//
-// On toolchains where annotation extraction itself fails constant
-// evaluation, define ZHLN_NO_ANNOTATION_EXTRACT (or configure CMake with
-// -DZHLN_NO_ANNOTATION_EXTRACT=ON): the table keeps the enumerator
-// values with empty messages and EnumToMessage falls back to
-// EnumToString.
-// ---------------------------------------------------------------------------
-
 template <typename E>
     requires std::is_enum_v<E>
 struct EnumMessageEntry {
     std::underlying_type_t<E> value {};
-    std::string_view          message {};
+    std::string_view          message;
 };
+
+template <auto a>
+consteval auto ExtractDescriptionText() -> std::string_view {
+    constexpr auto type = std::meta::remove_const(std::meta::dealias(std::meta::type_of(a)));
+    if constexpr (std::meta::has_template_arguments(type)) {
+        if constexpr (std::meta::template_of(type) == ^^Description) {
+            using DescType = typename[:type:];
+            return DescType::message;
+        }
+    }
+    return {};
+}
+
+template <auto EntityInfo>
+consteval auto GetDescriptionText() -> std::string_view {
+    std::string_view result {};
+    constexpr auto   annotations = std::define_static_array(std::meta::annotations_of(EntityInfo));
+    [:Expand(annotations):] >> [&]<auto a>() -> auto {
+        if (!result.empty()) {
+            return;
+        }
+        if (auto text = ExtractDescriptionText<a>(); !text.empty()) {
+            result = text;
+        }
+    };
+    return result;
+}
+
+template <typename T>
+consteval auto AnnotatedName() -> std::string_view {
+    constexpr auto info = ^^std::remove_cvref_t<T>;
+    constexpr auto desc = GetDescriptionText<info>();
+    if (!desc.empty()) {
+        return desc;
+    }
+    return TypeName<T>();
+}
 
 template <typename E>
     requires std::is_enum_v<E>
 consteval auto MakeEnumMessageTable() -> std::array<EnumMessageEntry<E>, detail::EnumeratorsOf<E>().size()> {
     std::array<EnumMessageEntry<E>, detail::EnumeratorsOf<E>().size()> table {};
-    std::size_t                i = 0;
+    std::size_t                                                        i = 0;
     [:Expand(detail::EnumeratorsOf<E>()):] >> [&]<auto enumerator>() -> auto {
         table[i].value = static_cast<std::underlying_type_t<E>>([:enumerator:]);
 #ifndef ZHLN_NO_ANNOTATION_EXTRACT
-        // Extract the annotation in place and read its text pointer
-        // immediately: no std::optional and no copy of the annotation
-        // object anywhere. On the macOS/arm64 Clang P2996 revision every
-        // copy of the extracted MetaDescription into libc++'s optional
-        // union storage fails constant evaluation with 'read of object
-        // outside its lifetime' -- both the direct-from-extract form and
-        // the copy from a named local (and the diagnostic shows the
-        // optional instantiated with a const value type, matching the
-        // P3394-style 'const Tag' annotation typing that
-        // AnnotationHasType already tolerates). Direct initialization
-        // from extract is proven to work on that toolchain; this keeps
-        // the value untouched after that.
-        for (auto a: std::meta::annotations_of(enumerator)) {
-            if (AnnotationHasType<MetaDescription>(a)) {
-                const MetaDescription desc = std::meta::extract<MetaDescription>(a);
-                table[i].message = desc.text;
-                break;
-            }
-        }
+        table[i].message = GetDescriptionText<enumerator>();
 #endif
         ++i;
     };
@@ -823,7 +820,7 @@ constexpr auto EnumMessageOf(E value) -> std::string_view {
     // MakeEnumMessageTable<E>() takes no runtime arguments, so the call is
     // always a constant expression and this function can never be
     // reclassified as immediate.
-    constexpr auto table = MakeEnumMessageTable<E>();
+    constexpr auto   table = MakeEnumMessageTable<E>();
     std::string_view last {};
     bool             matched = false;
     for (const auto& entry: table) {
@@ -861,10 +858,6 @@ constexpr auto CollectMethodResults(const T& inst) {
 #else // Standard C++26 Fallback (Stubs - Waiting for compiler reflection)
 
 namespace ZHLN::Reflect {
-
-constexpr auto Description(std::string_view text) -> MetaDescription {
-    return MetaDescription {text.data()};
-}
 
 template <std::ranges::range R>
 consteval int Expand(R&& /*unused*/) {
@@ -1262,9 +1255,13 @@ consteval auto EnumHasValue(E targetValue) noexcept -> bool {
 
 template <typename E, typename... Args>
     requires std::is_enum_v<E>
-inline auto FormatEnumMessage(E value, Args&&... args) {
+inline auto FormatEnumMessage(E value, Args&&... args) -> std::string {
     std::string_view fmt = EnumToMessage(value);
-    return ZHLN::Format(fmt, std::forward<Args>(args)...);
+    if constexpr (sizeof...(Args) == 0) {
+        return std::string(fmt);
+    } else {
+        return std::vformat(fmt, std::make_format_args(args...));
+    }
 }
 
 template <typename E, typename... Args>

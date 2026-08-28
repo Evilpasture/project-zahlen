@@ -28,13 +28,13 @@ namespace ZHLN {
 // ============================================================================
 
 enum class EngineInitError : uint8_t {
-    WindowCreationFailed[[= Reflect::Description("Window creation failed")]] = 1,
-    TTYInitializationFailed[[= Reflect::Description("TTY initialization failed")]],
-    RenderInitializationFailed[[= Reflect::Description("Render initialization failed")]],
-    PhysicsInitializationFailed[[= Reflect::Description("Physics initialization failed")]],
-    AudioInitializationFailed[[= Reflect::Description("Audio initialization failed")]],
-    AssetInitializationFailed[[= Reflect::Description("Asset initialization failed")]],
-    EngineAllocationFailed[[= Reflect::Description("Engine instance allocation failed")]],
+    WindowCreationFailed[[= Reflect::Description<"Window creation failed">{}]] = 1,
+    TTYInitializationFailed[[= Reflect::Description<"TTY initialization failed">{}]],
+    RenderInitializationFailed[[= Reflect::Description<"Render initialization failed">{}]],
+    PhysicsInitializationFailed[[= Reflect::Description<"Physics initialization failed">{}]],
+    AudioInitializationFailed[[= Reflect::Description<"Audio initialization failed">{}]],
+    AssetInitializationFailed[[= Reflect::Description<"Asset initialization failed">{}]],
+    EngineAllocationFailed[[= Reflect::Description<"Engine instance allocation failed">{}]],
 };
 
 class Window;

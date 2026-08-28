@@ -14,8 +14,8 @@ namespace ZHLN::Vk {
 
 // Swapchain / presentation subsystem bring-up failures.
 enum class PresentationError : uint8_t {
-    ContextInvalid[[= Reflect::Description("Presentation context is missing a device or allocator")]] = 1,
-    SwapchainCreationFailed[[= Reflect::Description("Swapchain creation failed")]],
+    ContextInvalid[[= Reflect::Description<"Presentation context is missing a device or allocator">{}]] = 1,
+    SwapchainCreationFailed[[= Reflect::Description<"Swapchain creation failed">{}]],
 };
 
 class Context;

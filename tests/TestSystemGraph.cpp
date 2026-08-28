@@ -13,8 +13,8 @@
 #include <thread>
 
 enum class SystemGraphTestError : uint8_t {
-    HazardMismatch[[= ZHLN::Reflect::Description("SystemGraph failed to detect a Read/Write or Write/Write component conflict.")]] = 1,
-    ExecutionOrderFailed[[= ZHLN::Reflect::Description("Systems were executed out of dependency order.")]],
+    HazardMismatch[[= ZHLN::Reflect::Description<"SystemGraph failed to detect a Read/Write or Write/Write component conflict.">{}]] = 1,
+    ExecutionOrderFailed[[= ZHLN::Reflect::Description<"Systems were executed out of dependency order.">{}]],
 };
 
 // Mock components for access hazard tracking
