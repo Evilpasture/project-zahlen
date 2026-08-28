@@ -33,13 +33,13 @@
 // so no closed-form variance exists to compare against. The roughness-cutoff
 // assertion in scenario 1 is the reflection-specific quantity check instead.
 //
-// Scene: a dark room. Every surface the ray can see is metal (no diffuse),
-// so the sun -- present but at zero intensity -- can contribute no shadow
-// dither and no specular highlight anywhere: the ONLY thing the enableRTR
-// switch can change is the reflection term. A glowing box hangs over a
-// glossy metal plate; its mirror image is the measurement region. The
-// surrounding floor is rough metal (0.8, past the cutoff) and must stay
-// byte-still when the switch flips.
+// Scene: a dark room of metal under a full-strength sun. Metals have no
+// diffuse, the floor's sun highlight is geometrically out of view, and
+// nothing occludes the box, so the ONLY thing the enableRTR switch can
+// change is the reflection term. A sun-lit box hangs over a glossy metal
+// plate; its mirror image is the measurement region. The surrounding floor
+// is rough metal (0.8, past the cutoff) and must stay byte-still when the
+// switch flips.
 
 #include "NoiseFrameCapture.hpp"
 #include "RayTracedNoiseMetrics.hpp"
