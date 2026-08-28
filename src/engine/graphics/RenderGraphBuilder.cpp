@@ -348,7 +348,10 @@ struct PassFactory {
         return Vk::MakePass<
             "RtrHalfTrace", Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Lighting>, Vk::ComputeWrite<Res_RtrHalf>>(
             [this](VkCommandBuffer c) noexcept {
-                if (!self.rtrHalfCS.Valid() || !self.rtCtx.Valid() || !self.settings.rayTracing.enableReflections || !self.settings.post.enableRTR) {
+                // The pass exists iff the RT context did (BuildBloomPipelines
+                // gates its creation the same way), so rtCtx is the validity
+                // guard; Vk::ComputePass has no Valid() of its own.
+                if (!self.rtCtx.Valid() || !self.settings.rayTracing.enableReflections || !self.settings.post.enableRTR) {
                     return;
                 }
                 self.BindHeapsAndPushFrame(c);
