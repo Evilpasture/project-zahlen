@@ -69,6 +69,15 @@
 enum class ReflectionNoiseError : uint8_t {
     EngineInitFailed[[= ZHLN::Reflect::Description("Failed to initialize the headless Engine for the RTR noise test.")]] = 1,
     CaptureFailed[[= ZHLN::Reflect::Description("A frame could not be captured or the PPM could not be read back.")]],
+    SceneNotLit[[= ZHLN::Reflect::Description(
+        "The off frame is black: the box is not lit or not in view, so there is nothing the reflection could show. Check the sun intensity/direction, the camera framing and the region luma stats printed by scenario 1 before suspecting the reflection path."
+    )]],
+    SsrWorksButRtrRaysDead[[= ZHLN::Reflect::Description(
+        "The SSR probe (same reflection pass, same roughness branch, same plate, depth-buffer hit test) changes the mirror but the RTR switch changes nothing: the reflection pass, branch and output are alive, so the dead layer is the TLAS ray query of RaytraceRTR -- check the tlas address bound to the reflection pass heap and the BLAS/instance flags."
+    )]],
+    ReflectionBranchOrOutputDead[[= ZHLN::Reflect::Description(
+        "The scene is lit but neither the SSR probe nor the RTR switch changes a pixel: the dead layer is below the hit test -- the roughness<=0.4 branch, the reflVariant selection, the push constants, or the Res_HdrSceneColor output not reaching the capture."
+    )]],
     ReflectionPathInactive[[= ZHLN::Reflect::Description(
         "Enabling enableRTR changed no pixels on the glossy plate against a fully static scene, so RaytraceRTR is not executing: check pc.enableRTR_dynamic, the TLAS, the reflVariant pipeline selection, or that the plate roughness is at or under the 0.4 cutoff."
     )]],
@@ -176,15 +185,15 @@ struct RayTracedReflectionNoiseTestSuite {
     /// PostProcessSettingsComponent::enableRTR into rayTracing.enableReflections,
     /// which RenderGraphBuilder ANDs with a non-null TLAS to form pc.enableRTR
     /// and to select the RTR pipeline variants for lighting and reflection.
-    static void SetRTR(ZHLN::Engine& engine, int enableRTR) {
+    static void SetRTR(ZHLN::Engine& engine, int enableSSR, int enableRTR) {
         auto&      reg      = engine.GetRegistry();
         const auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
         if (settings.empty()) {
             return;
         }
-        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [enableRTR](auto& pp) {
+        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [enableSSR, enableRTR](auto& pp) {
             pp.fullBright        = 0;
-            pp.enableSSR         = 0;
+            pp.enableSSR         = enableSSR;
             pp.enableRTR         = enableRTR;
             pp.giMode            = 0;
             pp.giIntensity       = 0.0f;
@@ -321,19 +330,58 @@ struct RayTracedReflectionNoiseTestSuite {
             }
             RayTracedReflectionNoiseTestSuite::SetAA(*engine, ZHLN::AAMode::None);
 
-            RayTracedReflectionNoiseTestSuite::SetRTR(*engine, 1);
-            RgbImage a = RayTracedReflectionNoiseTestSuite::SettleAndCapture(*engine, "rt_refl_live_on.ppm");
-            RayTracedReflectionNoiseTestSuite::SetRTR(*engine, 0);
+            // Off first: it doubles as the ground-truth frame. Three zero
+            // deltas in a row proved that a blanket "path inactive" verdict
+            // wastes a GPU round trip; this scenario now prints what the off
+            // frame actually contains and runs an SSR probe so the failure
+            // message names the dead layer instead of guessing.
+            RayTracedReflectionNoiseTestSuite::SetRTR(*engine, 0, 0);
             RgbImage b = RayTracedReflectionNoiseTestSuite::SettleAndCapture(*engine, "rt_refl_live_off.ppm");
-            RayTracedReflectionNoiseTestSuite::SetRTR(*engine, 1);
+
+            const std::vector<double> offLuma = LumaPlane(b);
+            double                    maxAll  = 0.0;
+            for (const double v: offLuma) {
+                maxAll = std::max(maxAll, v);
+            }
+            const auto meanOf = [&](int x0, int x1, int y0, int y1) {
+                double s = 0.0;
+                int    n = 0;
+                for (int y = y0; y < y1; ++y) {
+                    for (int x = x0; x < x1; ++x) {
+                        s += offLuma[static_cast<std::size_t>(y) * kWidth + x];
+                        ++n;
+                    }
+                }
+                return n > 0 ? s / n : 0.0;
+            };
+            ZHLN::Println(
+                "    [INFO] off frame: meanAll={:.3f} meanTopHalf={:.3f} maxAll={:.1f} predicted-band region={:.3f}", meanOf(0, kWidth, 0, kHeight),
+                meanOf(0, kWidth, 0, kHeight / 2), maxAll, meanOf(263, 376, 293, 435)
+            );
+
+            // SSR probe: same reflection pass, same roughness branch, same
+            // plate -- but the hit test is a depth-buffer raymarch, no TLAS.
+            // SSR changing the mirror while RTR does not isolates the dead
+            // layer to the ray query; neither changing it isolates the layer
+            // below the branch.
+            RayTracedReflectionNoiseTestSuite::SetRTR(*engine, 1, 0);
+            RgbImage ssr = RayTracedReflectionNoiseTestSuite::SettleAndCapture(*engine, "rt_refl_ssr_on.ppm");
+
+            RayTracedReflectionNoiseTestSuite::SetRTR(*engine, 0, 1);
+            RgbImage a = RayTracedReflectionNoiseTestSuite::SettleAndCapture(*engine, "rt_refl_live_on.ppm");
+            RayTracedReflectionNoiseTestSuite::SetRTR(*engine, 0, 1);
             RgbImage c = RayTracedReflectionNoiseTestSuite::SettleAndCapture(*engine, "rt_refl_live_on2.ppm");
-            if (!ZHLN::Test::ExpectTrue(a.Valid() && b.Valid() && c.Valid())) {
+            if (!ZHLN::Test::ExpectTrue(a.Valid() && b.Valid() && c.Valid() && ssr.Valid())) {
                 return std::unexpected(ReflectionNoiseError::CaptureFailed);
             }
 
-            const auto onVsOff = ZHLN::Test::Noise::MeasureResidual(a.rgb.data(), b.rgb.data(), kWidth, kHeight, kChangeThreshold);
-            const auto onVsOn  = ZHLN::Test::Noise::MeasureResidual(a.rgb.data(), c.rgb.data(), kWidth, kHeight, kChangeThreshold);
+            const auto onVsOff  = ZHLN::Test::Noise::MeasureResidual(a.rgb.data(), b.rgb.data(), kWidth, kHeight, kChangeThreshold);
+            const auto onVsOn   = ZHLN::Test::Noise::MeasureResidual(a.rgb.data(), c.rgb.data(), kWidth, kHeight, kChangeThreshold);
+            const auto ssrVsOff = ZHLN::Test::Noise::MeasureResidual(ssr.rgb.data(), b.rgb.data(), kWidth, kHeight, kChangeThreshold);
             const double topChanged = ChangedFractionInTopRows(LumaDifference(a, b));
+            ZHLN::Println(
+                "    [INFO] SSR probe vs off : meanAbs={:.3f} rms={:.3f} changed={:.5f}", ssrVsOff.meanAbs, ssrVsOff.rms, ssrVsOff.changedFraction
+            );
             ZHLN::Println(
                 "    [INFO] RTR on vs off : meanAbs={:.3f} rms={:.3f} changed={:.5f}", onVsOff.meanAbs, onVsOff.rms, onVsOff.changedFraction
             );
@@ -343,7 +391,13 @@ struct RayTracedReflectionNoiseTestSuite {
             ZHLN::Println("    [INFO] changed fraction in top {} probe rows (must be ~0) = {:.5f}", kCutoffProbeRows, topChanged);
 
             if (!ZHLN::Test::ExpectTrue(onVsOff.changedFraction > 0.0)) {
-                return std::unexpected(ReflectionNoiseError::ReflectionPathInactive);
+                if (maxAll < 4.0) {
+                    return std::unexpected(ReflectionNoiseError::SceneNotLit);
+                }
+                if (ssrVsOff.changedFraction > 0.0) {
+                    return std::unexpected(ReflectionNoiseError::SsrWorksButRtrRaysDead);
+                }
+                return std::unexpected(ReflectionNoiseError::ReflectionBranchOrOutputDead);
             }
             if (!ZHLN::Test::ExpectTrue(onVsOn.changedFraction > 0.0)) {
                 return std::unexpected(ReflectionNoiseError::JitterTemporallyFrozen);
@@ -372,7 +426,7 @@ struct RayTracedReflectionNoiseTestSuite {
             if (!RayTracedReflectionNoiseTestSuite::BuildReflectionScene(*engine)) {
                 return std::unexpected(ReflectionNoiseError::EngineInitFailed);
             }
-            RayTracedReflectionNoiseTestSuite::SetRTR(*engine, 1);
+            RayTracedReflectionNoiseTestSuite::SetRTR(*engine, 0, 1);
             RayTracedReflectionNoiseTestSuite::SetAA(*engine, ZHLN::AAMode::None);
 
             RgbImage prev = RayTracedReflectionNoiseTestSuite::SettleAndCapture(*engine, "rt_refl_structure_a.ppm");
@@ -442,7 +496,7 @@ struct RayTracedReflectionNoiseTestSuite {
             if (!RayTracedReflectionNoiseTestSuite::BuildReflectionScene(*engine)) {
                 return std::unexpected(ReflectionNoiseError::EngineInitFailed);
             }
-            RayTracedReflectionNoiseTestSuite::SetRTR(*engine, 1);
+            RayTracedReflectionNoiseTestSuite::SetRTR(*engine, 0, 1);
             RayTracedReflectionNoiseTestSuite::SetAA(*engine, ZHLN::AAMode::TAA);
 
             RgbImage prev = RayTracedReflectionNoiseTestSuite::SettleAndCapture(*engine, "rt_refl_conv_prev.ppm");
@@ -512,7 +566,7 @@ struct RayTracedReflectionNoiseTestSuite {
             if (!RayTracedReflectionNoiseTestSuite::BuildReflectionScene(*engine)) {
                 return std::unexpected(ReflectionNoiseError::EngineInitFailed);
             }
-            RayTracedReflectionNoiseTestSuite::SetRTR(*engine, 1);
+            RayTracedReflectionNoiseTestSuite::SetRTR(*engine, 0, 1);
             RayTracedReflectionNoiseTestSuite::SetAA(*engine, ZHLN::AAMode::None);
 
             RgbImage prev = RayTracedReflectionNoiseTestSuite::SettleAndCapture(*engine, "rt_refl_debris_a.ppm");
