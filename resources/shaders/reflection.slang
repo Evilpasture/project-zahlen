@@ -90,25 +90,41 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
     // Blue noise seeds the draw so the per-pixel residual is high frequency and
     // the roughness-aware filter downstream can integrate it, rather than the
     // diagonal lattice the old dither produced.
-    float3 up         = abs(N.y) < 0.999f ? float3(0.0f, 1.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f);
-    float3 tangentX   = normalize(cross(up, N));
-    float3 tangentY   = cross(N, tangentX);
-    float3x3 toLocal  = float3x3(tangentX, tangentY, N);
-    float3x3 toWorld  = transpose(toLocal);
-
-    float3 V_local  = mul(toLocal, V);
-    // .zw is the second decorrelated pair from the same fetch: the shadow path
-    // uses .xy for its sun disk, so the two never share a lattice.
-    float2 u        = SampleBlueNoise(blueNoiseTex, blueNoiseSampler, pixelPos, FrameIndexFromCamPosW(frame.camPos.w)).zw;
-    float  alpha    = max(roughness * roughness, 1e-5f);
-    float3 H_local  = SampleGGX_VNDF(V_local, alpha, u);
-    float3 H        = normalize(mul(toWorld, H_local));
-
-    float3 R = reflect(-V, H);
-    // A microfacet normal tilted away from N can reflect below the surface;
-    // such a ray would only ever hit the surface it started on.
-    if (dot(R, N) <= 0.0f) {
+    // Roughness tiering, the standard production concession:
+    //   roughness <  0.04 -> mirror ray about N (this branch)
+    //   0.04 .. 0.40      -> VNDF lobe ray (else branch)
+    //   > 0.40            -> never traced (gated in PSMain), IBL only.
+    // At roughness 0.04 the VNDF lobe is alpha = 0.0016, a near-delta
+    // distribution: the mirror ray is visually identical, but neighboring
+    // pixels on a polished surface then emit parallel rays that traverse
+    // the same BVH nodes in lockstep instead of fanning out per pixel and
+    // stalling the warp on the slowest divergent traversal. The tier also
+    // skips the blue-noise fetch, the tangent frame, and the VNDF math.
+    float3 R;
+    if (roughness < 0.04f) {
         R = reflect(-V, N);
+    } else {
+        float3 up        = abs(N.y) < 0.999f ? float3(0.0f, 1.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f);
+        float3 tangentX  = normalize(cross(up, N));
+        float3 tangentY  = cross(N, tangentX);
+        float3x3 toLocal = float3x3(tangentX, tangentY, N);
+        float3x3 toWorld = transpose(toLocal);
+
+        float3 V_local = mul(toLocal, V);
+        // .zw is the second decorrelated pair from the same fetch: the
+        // shadow path uses .xy for its sun disk, so the two never share a
+        // lattice.
+        float2 u       = SampleBlueNoise(blueNoiseTex, blueNoiseSampler, pixelPos, FrameIndexFromCamPosW(frame.camPos.w)).zw;
+        float  alpha   = max(roughness * roughness, 1e-5f);
+        float3 H_local = SampleGGX_VNDF(V_local, alpha, u);
+        float3 H       = normalize(mul(toWorld, H_local));
+
+        R = reflect(-V, H);
+        // A microfacet normal tilted away from N can reflect below the
+        // surface; such a ray would only ever hit the surface it started on.
+        if (dot(R, N) <= 0.0f) {
+            R = reflect(-V, N);
+        }
     }
     float maxDist = lerp(50.0f, 16.0f, roughness);
 
