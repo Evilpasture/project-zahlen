@@ -715,7 +715,19 @@ template <typename Tag, auto EntityInfo>
 consteval auto GetAnnotation() -> std::optional<Tag> {
     for (auto a: std::meta::annotations_of(EntityInfo)) {
         if (AnnotationHasType<Tag>(a)) {
-            return std::meta::extract<Tag>(a);
+            // Materialize into a named local before constructing the
+            // optional. Building std::optional<Tag> directly from the
+            // extract prvalue (return std::meta::extract<Tag>(a);) fails
+            // constant evaluation on some Clang-P2996/libc++ combinations
+            // with 'read of object outside its lifetime' inside the
+            // optional's inherited-constructor chain. The named local gets
+            // the prvalue via guaranteed copy elision and the optional then
+            // copies from a live object. This failure is not benign: it
+            // makes constexpr EnumToMessage an immediate function, and the
+            // runtime call in Error.hpp's category lambda then links as an
+            // undefined symbol (observed on macOS/arm64).
+            const Tag value = std::meta::extract<Tag>(a);
+            return value;
         }
     }
     return std::nullopt;
