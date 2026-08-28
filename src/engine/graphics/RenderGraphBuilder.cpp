@@ -581,8 +581,15 @@ struct PassFactory {
         return Vk::MakePass<
             "HdrDenoise", Vk::ComputeReadGeneral<Res_HdrSceneColor>, Vk::ComputeWrite<Res_DenoiseA>, Vk::ComputeWrite<Res_DenoiseB>,
             Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_NormRough>>([this](VkCommandBuffer c) noexcept {
+            // TEMPORARY bisect switch: the RT suites (TestLightingRayTraced,
+            // TestRTRPBRReflection, isolated_08) render black frames while the
+            // wavelet executes, but the mechanism is not yet pinned. Keep the
+            // whole pass inert until that run is green, then flip this back to
+            // true and iterate on the pass itself.
+            constexpr bool kDenoiseDispatchEnabled = false;
             const uint32_t passes = self.settings.rayTracing.denoiserPasses;
-            const bool active     = self.rtCtx.Valid() && passes > 0 && (self.settings.rayTracing.enableShadows || self.settings.rayTracing.enableReflections);
+            const bool active     = kDenoiseDispatchEnabled && self.rtCtx.Valid() && passes > 0 &&
+                                (self.settings.rayTracing.enableShadows || self.settings.rayTracing.enableReflections);
             if (!active) {
                 return;
             }
