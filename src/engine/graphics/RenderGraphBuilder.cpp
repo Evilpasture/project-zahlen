@@ -586,7 +586,7 @@ struct PassFactory {
             // wavelet executes, but the mechanism is not yet pinned. Keep the
             // whole pass inert until that run is green, then flip this back to
             // true and iterate on the pass itself.
-            constexpr bool kDenoiseDispatchEnabled = false;
+            constexpr bool kDenoiseDispatchEnabled = true; // diagnostic run: shader carries the banding
             const uint32_t passes = self.settings.rayTracing.denoiserPasses;
             const bool active     = kDenoiseDispatchEnabled && self.rtCtx.Valid() && passes > 0 &&
                                 (self.settings.rayTracing.enableShadows || self.settings.rayTracing.enableReflections);
