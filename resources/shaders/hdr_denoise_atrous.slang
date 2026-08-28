@@ -54,25 +54,6 @@ float LinearizeDepth(float ndcDepth) {
 
 [numthreads(8, 8, 1)]
 void CSMain(uint3 tid: SV_DispatchThreadID) {
-    // TEMPORARY diagnostic banding for the black-frame bisect -- remove once
-    // the fault is pinned. Reads top-to-bottom on a captured frame:
-    //   x in [0,32):  constant magenta -- do the UAV writes land at all?
-    //   x in [32,64): passthrough copy -- does the inColor binding read the
-    //                 real scene (or a zeroed image)?
-    //   x >= 64:      full wavelet    -- isolates the filter body itself
-    //                 (depth/normal/frame-CB reads and the weights).
-    // The bands survive the ping-pong chain: the final write-back shows the
-    // last dispatch's magenta stripe and the passthrough of the first
-    // dispatch's passthrough, i.e. scene content.
-    if (tid.x < 32u) {
-        outColor[tid.xy] = float4(1.0f, 0.0f, 1.0f, 1.0f);
-        return;
-    }
-    if (tid.x < 64u) {
-        outColor[tid.xy] = inColor.Load(int3(tid.xy, 0));
-        return;
-    }
-
     if (any(tid.xy >= uint2(frame.screenResolution))) {
         return;
     }

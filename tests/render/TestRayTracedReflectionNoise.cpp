@@ -663,14 +663,6 @@ struct RayTracedReflectionNoiseTestSuite {
         /// blue noise must shrink the per-frame difference by a wide margin;
         /// a frozen or bypassed denoiser leaves it untouched.
         std::expected<void, ZHLN::Error> hdr_denoiser_reduces_reflection_noise() {
-            // TEMPORARY: mirrors kDenoiseDispatchEnabled in
-            // RenderGraphBuilder.cpp -- the denoiser dispatch is disabled
-            // while the black-frame bisect runs; re-enable both together.
-            static const bool kDenoiseDispatchEnabled = false;
-            if (!kDenoiseDispatchEnabled) {
-                ZHLN::Println("    [SKIP] Denoiser dispatch is disabled pending the black-frame bisect.");
-                return {};
-            }
             auto engine = RayTracedReflectionNoiseTestSuite::CreateTestEngine();
             if (!ZHLN::Test::AssertTrue(engine != nullptr)) {
                 return std::unexpected(ReflectionNoiseError::EngineInitFailed);
