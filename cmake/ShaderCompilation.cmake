@@ -207,6 +207,12 @@ add_shader_target(hdr_denoise_atrous_shader
     STAGES "${SHADER_SRC_DIR}/hdr_denoise_atrous.slang|CSMain|cs_6_0|SHADER_HDR_DENOISE_ATROUS_SLANG_CS_PATH"
 )
 
+# Half-resolution RT reflection tracing for the VNDF roughness band; the
+# reflection pass upsamples the composed result.
+add_shader_target(rtr_half_shader
+    STAGES "${SHADER_SRC_DIR}/rtr_half.slang|CSMain|cs_6_0|SHADER_RTR_HALF_SLANG_CS_PATH"
+)
+
 # Per-pass scene variants. Each pass compiles its own named entry points
 # against its own varying struct (common.slang), so the geometry and fragment
 # stages of one pipeline agree on the SPIR-V interface by construction.

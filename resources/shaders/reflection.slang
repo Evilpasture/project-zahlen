@@ -66,6 +66,12 @@ StructuredBuffer<InstanceData> g_instances;
 Texture2D<float4> blueNoiseTex;
 SamplerState blueNoiseSampler;
 
+// Half-resolution composed RTR result for the roughness band (0.04, 0.40],
+// produced by the RtrHalfTrace compute pass: rgb = reflection color,
+// a = confidence. Declared before the TLAS so the NoRT variant (which drops
+// only the trailing AS slot) keeps the same positional table.
+Texture2D<float4> texRtrHalf;
+
 #ifndef DISABLE_RTR
 RaytracingAccelerationStructure tlas;
 
@@ -352,7 +358,8 @@ float4 PSMain(VSOutput input) : SV_Target0 {
             float3 reflectionColor = float3(0.0f, 0.0f, 0.0f);
 
 #ifndef DISABLE_RTR
-            if (wantRTR) {
+            if (wantRTR && roughness < 0.04f) {
+                // Mirror tier: warp-coherent rays, traced in-shader.
                 float3 rtrFallback = float3(0.0f, 0.0f, 0.0f);
                 float2 hitUV       = RaytraceRTR(worldPos, N, V, roughness, confidence, rtrFallback, uint2(input.pos.xy));
 
@@ -369,6 +376,19 @@ float4 PSMain(VSOutput input) : SV_Target0 {
                             reflectionColor = max(rtrFallback, lerp(rtrFallback, screenColor, confidence));
                         }
                     }
+                }
+            } else if (wantRTR) {
+                // Roughness band (0.04, 0.40]: the lobe rays diverge per
+                // pixel, so they are traced at half resolution by the
+                // RtrHalfTrace compute pass (75% fewer rays, traversal out
+                // of the fragment quads). Bilinear-upsample the composed
+                // result; a = 0 (sky, miss, outside band) leaves
+                // reflectionColor at zero and confidence at zero, so the
+                // lerp below falls back to specularIBL.
+                float4 halfRtr = texRtrHalf.SampleLevel(smp, input.uv, 0);
+                confidence    = halfRtr.a;
+                if (confidence > 0.0f) {
+                    reflectionColor = halfRtr.rgb;
                 }
             } else
 #endif

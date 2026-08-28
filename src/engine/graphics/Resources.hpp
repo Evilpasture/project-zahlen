@@ -47,6 +47,7 @@ extern const char* const LightingNortVS;
 extern const char* const LightingNortPS;
 extern const char* const VolumetricClearCS;
 extern const char* const HdrDenoiseAtrousCS;
+extern const char* const RtrHalfCS;
 extern const char* const VolumetricFogInjectCS;
 extern const char* const VolumetricLightInjectCS;
 extern const char* const VolumetricIntegrationCS;
@@ -132,6 +133,7 @@ enum class ShaderID : uint8_t {
     GPUSceneComp,
     GPUABIComp,
     HdrDenoiseAtrous,
+    RtrHalf,
 };
 
 // Extern declarations of individual programs to avoid header bloat and allow compile-time routing
@@ -182,6 +184,7 @@ extern const std::span<const uint8_t> bloom_threshold_cs;
 extern const std::span<const uint8_t> bloom_down_cs;
 extern const std::span<const uint8_t> bloom_up_cs;
 extern const std::span<const uint8_t> hdr_denoise_atrous_cs;
+extern const std::span<const uint8_t> rtr_half_cs;
 extern const std::span<const uint8_t> brdf_lut_comp;
 extern const std::span<const uint8_t> ibl_specular_comp;
 extern const std::span<const uint8_t> ibl_sh_comp;
@@ -251,6 +254,7 @@ struct ShaderMapping {
         {.id = ShaderID::BloomDownCS, .pair = ShaderPair {.vertex = bloom_down_cs, .fragment = {}}},
         {.id = ShaderID::BloomUpCS, .pair = ShaderPair {.vertex = bloom_up_cs, .fragment = {}}},
         {.id = ShaderID::HdrDenoiseAtrous, .pair = ShaderPair {.vertex = hdr_denoise_atrous_cs, .fragment = {}}},
+        {.id = ShaderID::RtrHalf, .pair = ShaderPair {.vertex = rtr_half_cs, .fragment = {}}},
         {.id = ShaderID::VolumetricClear, .pair = volumetric_clear_shaders},
         {.id = ShaderID::VolumetricFogInject, .pair = volumetric_fog_inject_shaders},
         {.id = ShaderID::VolumetricLightInject, .pair = volumetric_light_inject_shaders},

@@ -437,6 +437,10 @@ using Res_HdrSceneColor = Vk::GraphImage<"HdrSceneColor", VK_FORMAT_R16G16B16A16
 // the scene color it filters; final iteration writes back into hdrSceneColor).
 using Res_DenoiseA      = Vk::GraphImage<"DenoiseA", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_DenoiseB      = Vk::GraphImage<"DenoiseB", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+// Half-resolution composed RTR result for the VNDF roughness band (the
+// scale divisor also opts the target into storage-image usage in
+// RenderInitTargets, same as the bloom cascades).
+using Res_RtrHalf       = Vk::GraphImage<"RtrHalf", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
 using Res_BloomThresh   = Vk::GraphImage<"BloomThresh", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
 using Res_BloomDown1    = Vk::GraphImage<"BloomDown1", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 4>;
 using Res_BloomDown2    = Vk::GraphImage<"BloomDown2", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 8>;
@@ -498,6 +502,7 @@ struct RenderContext::Impl {
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     hdrSceneColor;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     denoiseA;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     denoiseB;
+        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     rtrHalf;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomThresholdTarget;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomDown1;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomDown2;
@@ -528,6 +533,7 @@ struct RenderContext::Impl {
             Res_HdrSceneColor hdrSceneColor;
             Res_DenoiseA      denoiseA;
             Res_DenoiseB      denoiseB;
+            Res_RtrHalf       rtrHalf;
             Res_BloomThresh   bloomThresholdTarget;
             Res_BloomDown1    bloomDown1;
             Res_BloomDown2    bloomDown2;
@@ -747,10 +753,12 @@ struct RenderContext::Impl {
     // render passes.
     Vk::ComputePass     bloomThresholdCS;
     Vk::ComputePass     hdrDenoiseCS;
+    Vk::ComputePass     rtrHalfCS;
     Vk::ComputePass     bloomDownCS;
     Vk::ComputePass     bloomUpCS;
     Vk::HeapPassBindings bloomThresholdHeapBindings;
     Vk::HeapPassBindings hdrDenoiseHeapBindings;
+    Vk::HeapPassBindings rtrHalfHeapBindings;
     Vk::HeapPassBindings bloomDownHeapBindings;
     Vk::HeapPassBindings bloomUpHeapBindings;
 
@@ -878,6 +886,7 @@ struct RenderContext::Impl {
 
     Vk::SlangReflectedLayout bloomThresholdCSLayout; // Reflection only
     Vk::SlangReflectedLayout hdrDenoiseCSLayout;     // Reflection only
+    Vk::SlangReflectedLayout rtrHalfCSLayout;        // Reflection only
     Vk::SlangReflectedLayout bloomDownCSLayout;      // Reflection only
     Vk::SlangReflectedLayout bloomUpCSLayout;        // Reflection only
 
@@ -1101,6 +1110,11 @@ struct RenderContext::Impl {
         float rcpWidth;
         float rcpHeight;
         float padding;
+    };
+
+    struct RtrHalfPushConstants {
+        uint32_t halfRes[2]; // half-res dispatch extent (target size)
+        uint32_t pad[2];
     };
 
     struct HdrAtrousPushConstants {

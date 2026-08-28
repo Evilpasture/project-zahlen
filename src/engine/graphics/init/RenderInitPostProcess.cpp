@@ -167,6 +167,16 @@ auto RenderContext::Impl::BuildBloomPipelines() -> std::expected<void, Error> {
         // (3 iterations x 2 parity frames).
         .and_then([&]() -> std::expected<void, Error> {
             return buildCompute(hdrDenoiseCS, hdrDenoiseCSLayout, hdrDenoiseHeapBindings, Resource::hdr_denoise_atrous_cs, 6);
+        })
+        // Half-resolution RTR band tracer: one dispatch per frame, so the
+        // slot span is just the frame parity. The shader binds an
+        // acceleration structure, so the pipeline is only built when the RT
+        // context exists.
+        .and_then([&]() -> std::expected<void, Error> {
+            if (!rtCtx.Valid()) {
+                return {};
+            }
+            return buildCompute(rtrHalfCS, rtrHalfCSLayout, rtrHalfHeapBindings, Resource::rtr_half_cs, 2);
         });
 }
 

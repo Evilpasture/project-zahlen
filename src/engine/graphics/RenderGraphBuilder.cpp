@@ -339,10 +339,63 @@ struct PassFactory {
         });
     }
 
+    [[nodiscard]] auto MakeRtrHalfTracePass() const noexcept {
+        // Half-resolution RT reflection tracing for the VNDF roughness band
+        // (0.04, 0.40]: the divergent lobe rays are traced here at quarter
+        // count instead of per fragment, and the reflection pass bilinearly
+        // upsamples the composed result. Runs after Lighting (the
+        // reprojection fast path reads Res_Lighting) and before Reflection.
+        return Vk::MakePass<
+            "RtrHalfTrace", Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Lighting>, Vk::ComputeWrite<Res_RtrHalf>>(
+            [this](VkCommandBuffer c) noexcept {
+                if (!self.rtrHalfCS.Valid() || !self.rtCtx.Valid() || !self.settings.rayTracing.enableReflections || !self.settings.post.enableRTR) {
+                    return;
+                }
+                self.BindHeapsAndPushFrame(c);
+
+                auto& heap = self.heapManager;
+
+                // Binding order mirrors rtr_half.slang's declaration order
+                // (the heap writes map positionally onto the reflected table).
+                heap.WriteBindings(
+                    self.ctx, self.rtrHalfHeapBindings, fIdx,
+                    Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget), self.pointSampler,
+                    Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer),
+                    Vk::Assume<Vk::ShaderRead<Res_Lighting>>(self.graphResources.lightingTarget), self.defaultSampler,
+                    self.frames.frameUniformBuffers[fIdx], self.frames.instanceDataBuffers[fIdx],
+                    Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
+                        .handle   = self.textureImages[self.blueNoiseTexIdx].Handle(),
+                        .view     = self.textureViews[self.blueNoiseTexIdx].Get(),
+                        .extent   = {.width = self.blueNoiseWidth, .height = self.blueNoiseHeight, .depth = 1},
+                        .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
+                        .format   = VK_FORMAT_R8G8B8A8_UNORM,
+                        .viewInfo = &self.blueNoiseViewInfo
+                    },
+                    self.blueNoiseSampler,
+                    Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.rtrHalf),
+                    Vk::AsAddressWrite {
+                        .address = self.frames.tlas.Current() != VK_NULL_HANDLE ?
+                                       self.rtCtx.GetAccelerationStructureAddress(self.frames.tlas.Current()) :
+                                       0
+                    }
+                );
+
+                RenderContext::Impl::RtrHalfPushConstants push {
+                    .halfRes = {self.graphResources.rtrHalf.extent.width, self.graphResources.rtrHalf.extent.height},
+                    .pad     = {}
+                };
+                self.rtrHalfCS.DispatchHeapIndexedThreads(
+                    self.ctx, c, fIdx, self.graphResources.rtrHalf.extent.width, self.graphResources.rtrHalf.extent.height, 1, push
+                );
+            }
+        );
+    }
+
     [[nodiscard]] auto MakeReflectionPass() const noexcept {
         return Vk::MakePass<
             "Reflection", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_Lighting>,
-            Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ShaderReadGeneral<Res_VoxelResolved>, Vk::ColorWrite<Res_HdrSceneColor>>(
+            Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ShaderReadGeneral<Res_VoxelResolved>, Vk::ShaderRead<Res_RtrHalf>,
+            Vk::ColorWrite<Res_HdrSceneColor>>(
             [this](auto& ctx) noexcept {
                 self.reflectionPass.WriteHeap(
                     self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor), self.defaultSampler,
@@ -375,7 +428,7 @@ struct PassFactory {
                         .format   = VK_FORMAT_R8G8B8A8_UNORM,
                         .viewInfo = &self.blueNoiseViewInfo
                     },
-                    self.blueNoiseSampler,
+                    self.blueNoiseSampler, Vk::Assume<Vk::ShaderRead<Res_RtrHalf>>(self.graphResources.rtrHalf),
                     Vk::AsAddressWrite {
                         .address = (self.rtCtx.Valid() && self.frames.tlas.Current() != VK_NULL_HANDLE) ?
                                        self.rtCtx.GetAccelerationStructureAddress(self.frames.tlas.Current()) :
@@ -401,7 +454,8 @@ struct PassFactory {
     [[nodiscard]] auto MakeTranslucentReflectionPass() const noexcept {
         return Vk::MakePass<
             "TransReflection", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_TransNorm>, Vk::ShaderRead<Res_TransDepth>, Vk::ShaderRead<Res_Lighting>,
-            Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ShaderReadGeneral<Res_VoxelResolved>, Vk::ColorWrite<Res_TransLighting>>(
+            Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ShaderReadGeneral<Res_VoxelResolved>, Vk::ShaderRead<Res_RtrHalf>,
+            Vk::ColorWrite<Res_TransLighting>>(
             [this](auto& ctx) noexcept {
                 self.translucentReflectionPass.WriteHeap(
                     self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor), self.defaultSampler,
@@ -434,7 +488,7 @@ struct PassFactory {
                         .format   = VK_FORMAT_R8G8B8A8_UNORM,
                         .viewInfo = &self.blueNoiseViewInfo
                     },
-                    self.blueNoiseSampler,
+                    self.blueNoiseSampler, Vk::Assume<Vk::ShaderRead<Res_RtrHalf>>(self.graphResources.rtrHalf),
                     Vk::AsAddressWrite {
                         .address = (self.rtCtx.Valid() && self.frames.tlas.Current() != VK_NULL_HANDLE) ?
                                        self.rtCtx.GetAccelerationStructureAddress(self.frames.tlas.Current()) :
@@ -891,7 +945,8 @@ auto BuildFrameGraph(const PassFactory& factory, GetSwapchainImageT&& getSwapcha
 
     auto corePasses = std::tuple {factory.MakeShadowPass(),     factory.MakeHiZGeneratePass(),           factory.MakeMainPass2(),   factory.MakeDecalPass(),
                                   factory.MakeViewmodelPass(),  factory.MakeTranslucentPrePass(),        factory.MakeLightingPass(),
-                                  factory.MakeReflectionPass(), factory.MakeTranslucentReflectionPass(), factory.MakeForwardPass(),
+                                  factory.MakeRtrHalfTracePass(), factory.MakeReflectionPass(),          factory.MakeTranslucentReflectionPass(),
+                                  factory.MakeForwardPass(),
                                   factory.MakeHdrDenoisePass()};
 
     auto bloomPasses = std::tuple {factory.MakeBloomPass()};

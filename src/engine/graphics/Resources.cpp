@@ -167,6 +167,11 @@ constexpr uint8_t hdr_denoise_atrous_cs_raw[] = {
 };
 extern const std::span<const uint8_t> hdr_denoise_atrous_cs {hdr_denoise_atrous_cs_raw, sizeof(hdr_denoise_atrous_cs_raw)};
 
+constexpr uint8_t rtr_half_cs_raw[] = {
+#embed SHADER_RTR_HALF_SLANG_CS_PATH
+};
+extern const std::span<const uint8_t> rtr_half_cs {rtr_half_cs_raw, sizeof(rtr_half_cs_raw)};
+
 // --- Punctual Shadows Shaders ---
 constexpr uint8_t punctual_shadows_vs_raw[] = {
 #embed SHADER_PUNCTUAL_SHADOWS_SLANG_VS_PATH
@@ -396,6 +401,7 @@ const char* const LightingNortVS          = SHADER_LIGHTING_NORT_SLANG_VS_PATH;
 const char* const LightingNortPS          = SHADER_LIGHTING_NORT_SLANG_PS_PATH;
 const char* const VolumetricClearCS       = SHADER_VOLUMETRIC_CLEAR_SLANG_CS_PATH;
 const char* const HdrDenoiseAtrousCS        = SHADER_HDR_DENOISE_ATROUS_SLANG_CS_PATH;
+const char* const RtrHalfCS                 = SHADER_RTR_HALF_SLANG_CS_PATH;
 const char* const VolumetricFogInjectCS   = SHADER_VOLUMETRIC_FOG_INJECT_CS_PATH;
 const char* const VolumetricLightInjectCS = SHADER_VOLUMETRIC_LIGHT_INJECT_CS_PATH;
 const char* const VolumetricIntegrationCS = SHADER_VOLUMETRIC_INTEGRATION_SLANG_CS_PATH;
