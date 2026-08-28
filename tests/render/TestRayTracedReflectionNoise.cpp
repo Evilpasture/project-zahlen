@@ -207,12 +207,23 @@ struct RayTracedReflectionNoiseTestSuite {
 
     /// A dark room of metal. The plate is the only surface at or under the 0.4
     /// roughness cutoff, so it is the only surface the RTR switch may change;
-    /// the rough metal floor doubles as the cutoff probe. The emissive box is
-    /// what the plate mirrors -- a bright target against a near-black IBL, so
-    /// hit/miss flips of the VNDF ray are high contrast. The sun exists (the
-    /// frame uniforms want a light direction) but at zero intensity: metals
-    /// have no diffuse and there is no occlusion, so no shadow or highlight
-    /// term can leak into the on/off delta.
+    /// the rough metal floor doubles as the cutoff probe. The box is what the
+    /// plate mirrors -- sun-lit faces against a near-black IBL, so hit/miss
+    /// flips of the VNDF ray are high contrast.
+    ///
+    /// The sun runs at full intensity, and the on/off delta still isolates the
+    /// reflection term:
+    ///   - metals have no diffuse, so the RT shadow dither can never modulate
+    ///     the plate or the floor;
+    ///   - the sun specular highlight on the floor is geometrically out of
+    ///     view (the reflected view direction carries -z while the sun
+    ///     direction carries +z, so reflect(-V,N) can never align with L);
+    ///   - nothing occludes the box, so its sun-lit color is identical in the
+    ///     RT and NoRT lighting variants.
+    /// An earlier revision set the sun to zero intensity "to be safe" and
+    /// measured a perfect zero: with sky and sun both black, every surface --
+    /// and the reflection of every surface -- rendered black, so the RTR term
+    /// had nothing to add. The switch worked; the scene was black-on-black.
     static bool BuildReflectionScene(ZHLN::Engine& engine) {
         auto& reg = engine.GetRegistry();
 
@@ -264,7 +275,7 @@ struct RayTracedReflectionNoiseTestSuite {
             sunEnt,
             ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 50.0f, 40.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({40.0f, 0.0f, 0.0f})},
             ZHLN::Components::LightComponent {
-                .type = ZHLN::LightType::Sun, .color = JPH::Vec3(1.0f, 1.0f, 1.0f), .intensity = 0.0f, .direction = JPH::Vec3(0.0f, 0.75f, 0.66f).Normalized()
+                .type = ZHLN::LightType::Sun, .color = JPH::Vec3(1.0f, 1.0f, 1.0f), .intensity = 120.0f, .direction = JPH::Vec3(0.0f, 0.75f, 0.66f).Normalized()
             }
         );
 
