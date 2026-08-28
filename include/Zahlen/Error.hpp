@@ -36,6 +36,12 @@ template <typename E>
 inline auto GetCategoryInstance() noexcept -> const ErrorCategory* {
     // Force compiler instantiation of EnumToString<E> via immediate invocation to prevent link-time undefined symbol errors in Clang
     [[maybe_unused]] auto dummy = Reflect::EnumToString(E {});
+    // Same workaround for EnumToMessage<E>: on some Clang P2996 builds the
+    // runtime call inside the category lambda below does not get a weak
+    // definition emitted in this TU (observed as an arm64/macOS link failure
+    // with undefined EnumToMessage<...Error> symbols); the immediate
+    // invocation forces the instantiation and emission here.
+    [[maybe_unused]] auto dummyMessage = Reflect::EnumToMessage(E {});
 
     static constexpr ErrorCategory cat = {.name = Reflect::TypeName<E>(), .to_string = [](uint32_t val) noexcept -> std::string_view {
                                               // Using abstracted EnumToMessage to fetch annotations, falling back to string names
