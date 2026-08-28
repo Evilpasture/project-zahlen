@@ -75,17 +75,61 @@ def writeheap_args(text: str, pass_name: str) -> list[str]:
     return args[3:]
 
 
+def writebindings_args(text: str, bindings_name: str) -> list[str]:
+    """Extract the resource args of a `heap.WriteBindings(ctx, <bindings>, fIdx, ...)` call."""
+    key = f"self.{bindings_name}, fIdx,"
+    i = text.index(key) + len(key)
+    depth, j = 1, i
+    while depth:
+        if text[j] in "([{":
+            depth += 1
+        elif text[j] in ")]}":
+            depth -= 1
+        j += 1
+    body = text[i : j - 1]
+    args, depth, cur = [], 0, ""
+    for ch in body:
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        if ch == "," and depth == 0:
+            args.append(cur.strip())
+            cur = ""
+        else:
+            cur += ch
+    if cur.strip():
+        args.append(cur.strip())
+    return [re.sub(r"\s+", " ", a) for a in args if a.strip()]
+
+
 def sampler_infos(text: str, pass_name: str) -> list[str]:
     """The infos array used for one pass in InitPassSamplerDescriptors."""
     m = re.search(
         r"std::array<VkSamplerCreateInfo,\s*\d+>\s*infos\s*=\s*\{([^}]*)\};[^}]*?"
-        + re.escape(pass_name) + r"\.heapBindings,\s*infos\)",
+        + r"(?:" + re.escape(pass_name) + r"\.heapBindings|" + re.escape(pass_name) + r")"
+        + r",\s*infos\)",
         text,
         re.S,
     )
     if not m:
         return []
     return [x.strip() for x in m.group(1).split(",") if x.strip()]
+
+
+def unused_declarations(path: Path) -> list[str]:
+    """Declared set-0 resources whose name appears nowhere else in the file.
+
+    Slang dead-strips unreferenced shader parameters, so the reflected table
+    silently loses the entry and every positional heap arg after it shifts
+    down one binding. Any unused declaration is therefore a hard error.
+    """
+    stripped = "\n".join(line.split("//")[0] for line in path.read_text().split("\n"))
+    return [
+        name
+        for _kind, name in shader_bindings(path)
+        if len(re.findall(rf"\b{re.escape(name)}\b", stripped)) < 2
+    ]
 
 
 def main() -> int:
@@ -98,12 +142,28 @@ def main() -> int:
         ("reflection.slang", "reflectionPass", "reflection.slang"),
         ("reflection.slang", "translucentReflectionPass", "reflection.slang"),
     ]
+    cases.append(("rtr_half.slang", "rtrHalfHeapBindings", "rtr_half.slang"))
+
+    seen_shaders = set()
+    for shader_file, pass_name, _label in cases:
+        if shader_file in seen_shaders:
+            continue
+        seen_shaders.add(shader_file)
+        unused = unused_declarations(REPO / "resources/shaders" / shader_file)
+        if unused:
+            print(f"\n!! {shader_file}: declared-but-unused resources {unused} "
+                  "(Slang strips these, shifting the positional heap table)")
+            ok = False
+
     for shader_file, pass_name, label in cases:
         for variant, disable_rtr in (("", False), ("-DDISABLE_RTR", True)):
-            if "reflection" in shader_file and disable_rtr:
-                continue  # reflection variant shares the same table
+            if shader_file in ("reflection.slang", "rtr_half.slang") and disable_rtr:
+                continue  # reflection variant shares the same table; rtr_half has one variant
             bindings = shader_bindings(REPO / "resources/shaders" / shader_file, disable_rtr)
-            args = writeheap_args(graph, pass_name)
+            if pass_name.endswith("HeapBindings"):
+                args = writebindings_args(graph, pass_name)
+            else:
+                args = writeheap_args(graph, pass_name)
             samplers_shader = [n for k, n in bindings if k in SAMPLER_TYPES]
             infos = sampler_infos(heaps, pass_name)
 

@@ -362,7 +362,7 @@ struct PassFactory {
                 // (the heap writes map positionally onto the reflected table).
                 heap.WriteBindings(
                     self.ctx, self.rtrHalfHeapBindings, fIdx,
-                    Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget), self.pointSampler,
+                    Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget),
                     Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer),
                     Vk::Assume<Vk::ShaderRead<Res_Lighting>>(self.graphResources.lightingTarget), self.defaultSampler,
                     self.frames.frameUniformBuffers[fIdx], self.frames.instanceDataBuffers[fIdx],

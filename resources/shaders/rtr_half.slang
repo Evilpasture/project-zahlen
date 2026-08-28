@@ -29,7 +29,6 @@ struct RtrHalfPushConstants {
 RtrHalfPushConstants pc;
 
 Texture2D<float> texDepth;
-SamplerState pointSampler;
 Texture2D<float4> texNormalRoughness;
 Texture2D<float4> texLighting;
 SamplerState smp;

@@ -369,6 +369,13 @@ void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
         Vk::InitHeapPassSamplers(heapManager, translucentReflectionPass.heapBindings, infos);
     }
     {
+        // rtr_half.slang declares exactly two samplers, smp and
+        // blueNoiseSampler, in that order. The pipeline builds only when the
+        // RT context exists; with empty bindings this is a no-op.
+        std::array<VkSamplerCreateInfo, 2> infos = {defaultInfo, blueNoiseInfo};
+        Vk::InitHeapPassSamplers(heapManager, rtrHalfHeapBindings, infos);
+    }
+    {
         std::array<VkSamplerCreateInfo, 1> infos = {defaultInfo};
         Vk::InitHeapPassSamplers(heapManager, taaPass.heapBindings, infos);
         Vk::InitHeapPassSamplers(heapManager, fxaaPass.heapBindings, infos);
