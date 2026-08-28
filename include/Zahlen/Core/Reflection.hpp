@@ -755,6 +755,71 @@ constexpr auto GetEnumeratorAnnotation(E value) -> std::optional<Tag> {
     return result;
 }
 
+// ---------------------------------------------------------------------------
+// Compile-time enum message table.
+//
+// Annotation extraction (std::meta::extract -> std::optional) is evaluated
+// only in consteval contexts here; the runtime side reads a plain
+// std::array of {value, string_view} entries. Rationale: a constexpr
+// function whose body calls an immediate function with a non-constant
+// argument is itself reclassified as immediate, and immediate functions
+// get no out-of-line definition -- so a runtime call to such a function
+// (the error-category lambda in Error.hpp calls EnumToMessage with a
+// runtime value) links as an undefined symbol. Observed on macOS/arm64
+// when the extract's constant evaluation fails ('read of object outside
+// its lifetime' inside libc++'s optional). Taking the reflection calls
+// out of the runtime path entirely makes the link succeed regardless.
+//
+// On toolchains where annotation extraction itself fails constant
+// evaluation, define ZHLN_NO_ANNOTATION_EXTRACT: the table keeps the
+// enumerator values with empty messages and EnumToMessage falls back to
+// EnumToString.
+// ---------------------------------------------------------------------------
+
+template <typename E>
+    requires std::is_enum_v<E>
+struct EnumMessageEntry {
+    std::underlying_type_t<E> value {};
+    std::string_view          message {};
+};
+
+template <typename E>
+    requires std::is_enum_v<E>
+consteval auto MakeEnumMessageTable() -> std::array<EnumMessageEntry<E>, detail::EnumeratorsOf<E>().size()> {
+    std::array<EnumMessageEntry<E>, detail::EnumeratorsOf<E>().size()> table {};
+    std::size_t                i = 0;
+    [:Expand(detail::EnumeratorsOf<E>()):] >> [&]<auto enumerator>() -> auto {
+        table[i].value = static_cast<std::underlying_type_t<E>>([:enumerator:]);
+#ifndef ZHLN_NO_ANNOTATION_EXTRACT
+        if (auto annotation = GetAnnotation<MetaDescription, enumerator>()) {
+            table[i].message = annotation->text;
+        }
+#endif
+        ++i;
+    };
+    return table;
+}
+
+template <typename E>
+    requires std::is_enum_v<E>
+constexpr auto EnumMessageOf(E value) -> std::string_view {
+    // MakeEnumMessageTable<E>() takes no runtime arguments, so the call is
+    // always a constant expression and this function can never be
+    // reclassified as immediate.
+    constexpr auto table = MakeEnumMessageTable<E>();
+    std::string_view last {};
+    bool             matched = false;
+    for (const auto& entry: table) {
+        if (static_cast<std::underlying_type_t<E>>(value) == entry.value) {
+            // Last matching enumerator wins, mirroring the overwrite
+            // semantics of GetEnumeratorAnnotation for aliased values.
+            last    = entry.message;
+            matched = true;
+        }
+    }
+    return matched ? last : std::string_view {};
+}
+
 template <typename T>
 consteval auto GetFloatFieldsCount() -> std::size_t {
     using U      = std::remove_cvref_t<T>;
@@ -1014,6 +1079,12 @@ constexpr std::optional<Tag> GetEnumeratorAnnotation(E /*unused*/) {
     return std::nullopt;
 }
 
+template <typename E>
+    requires std::is_enum_v<E>
+constexpr std::string_view EnumMessageOf(E /*unused*/) {
+    return {};
+}
+
 template <typename T>
 consteval std::size_t GetFloatFieldsCount() {
     return 0;
@@ -1157,8 +1228,11 @@ auto ToDebugString(const T& t) -> std::string {
 template <typename E>
     requires std::is_enum_v<E>
 constexpr auto EnumToMessage(E value) -> std::string_view {
-    if (auto desc = GetEnumeratorAnnotation<MetaDescription>(value)) {
-        return desc->text;
+    // Annotation lookup happens entirely at compile time inside
+    // EnumMessageOf's table; see the comment there for why no
+    // reflection-dependent call may remain in this runtime path.
+    if (auto message = EnumMessageOf(value); !message.empty()) {
+        return message;
     }
     return EnumToString(value);
 }
