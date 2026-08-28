@@ -61,6 +61,17 @@ Texture2D<float4> texLighting;
 Texture3D<float4> texVoxelIntegrated;
 StructuredBuffer<InstanceData> g_instances;
 
+// Blue noise tile for the VNDF lobe jitter. Declared before the TLAS so the
+// NoRT variant still receives both bindings.
+Texture2D<float4> blueNoiseTex;
+SamplerState blueNoiseSampler;
+
+// Half-resolution composed RTR result for the roughness band (0.04, 0.40],
+// produced by the RtrHalfTrace compute pass: rgb = reflection color,
+// a = confidence. Declared before the TLAS so the NoRT variant (which drops
+// only the trailing AS slot) keeps the same positional table.
+Texture2D<float4> texRtrHalf;
+
 #ifndef DISABLE_RTR
 RaytracingAccelerationStructure tlas;
 
@@ -73,7 +84,54 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
         return float2(-1.0f, -1.0f);
     }
 
-    float3 R      = reflect(-V, N);
+    // Reflect about a *microfacet* normal drawn from the GGX VNDF instead of
+    // the geometric normal. Reflecting about N makes every roughness a mirror:
+    // one ray per pixel carries the whole lobe, so brushed metal and polished
+    // chrome differ only in how far the ray is allowed to travel. Sampling H
+    // from the visible-normal distribution makes the ray follow the actual
+    // specular lobe -- wide for rough surfaces, collapsing onto the mirror
+    // direction as roughness -> 0 (the unstretch step zeroes H.xy when
+    // alpha -> 0, so no separate sharp path is needed).
+    //
+    // Blue noise seeds the draw so the per-pixel residual is high frequency and
+    // the roughness-aware filter downstream can integrate it, rather than the
+    // diagonal lattice the old dither produced.
+    // Roughness tiering, the standard production concession:
+    //   roughness <  0.04 -> mirror ray about N (this branch)
+    //   0.04 .. 0.40      -> VNDF lobe ray (else branch)
+    //   > 0.40            -> never traced (gated in PSMain), IBL only.
+    // At roughness 0.04 the VNDF lobe is alpha = 0.0016, a near-delta
+    // distribution: the mirror ray is visually identical, but neighboring
+    // pixels on a polished surface then emit parallel rays that traverse
+    // the same BVH nodes in lockstep instead of fanning out per pixel and
+    // stalling the warp on the slowest divergent traversal. The tier also
+    // skips the blue-noise fetch, the tangent frame, and the VNDF math.
+    float3 R;
+    if (roughness < 0.04f) {
+        R = reflect(-V, N);
+    } else {
+        float3 up        = abs(N.y) < 0.999f ? float3(0.0f, 1.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f);
+        float3 tangentX  = normalize(cross(up, N));
+        float3 tangentY  = cross(N, tangentX);
+        float3x3 toLocal = float3x3(tangentX, tangentY, N);
+        float3x3 toWorld = transpose(toLocal);
+
+        float3 V_local = mul(toLocal, V);
+        // .zw is the second decorrelated pair from the same fetch: the
+        // shadow path uses .xy for its sun disk, so the two never share a
+        // lattice.
+        float2 u       = SampleBlueNoise(blueNoiseTex, blueNoiseSampler, pixelPos, FrameIndexFromCamPosW(frame.camPos.w)).zw;
+        float  alpha   = max(roughness * roughness, 1e-5f);
+        float3 H_local = SampleGGX_VNDF(V_local, alpha, u);
+        float3 H       = normalize(mul(toWorld, H_local));
+
+        R = reflect(-V, H);
+        // A microfacet normal tilted away from N can reflect below the
+        // surface; such a ray would only ever hit the surface it started on.
+        if (dot(R, N) <= 0.0f) {
+            R = reflect(-V, N);
+        }
+    }
     float maxDist = lerp(50.0f, 16.0f, roughness);
 
     RayDesc ray;
@@ -90,6 +148,33 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
     if (q.CommittedStatus() == COMMITTED_TRIANGLE_HIT) {
         float rayT         = q.CommittedRayT();
         float3 hitWorldPos = ray.Origin + ray.Direction * rayT;
+
+        // Fast path: most in-view hits (mirrors, floors, metal) land on
+        // screen where the lighting pass already shaded the surface. Project
+        // first and take that shaded color directly; the BDA vertex fetch,
+        // geometric-normal reconstruction, and analytic sun+SH lighting below
+        // then only run for hits the reprojection rejects, instead of for
+        // every hit. Accepted hits resolve to pure screen lighting, without
+        // the analytic max-floor the slow path blends under it.
+        float4 fastClip = mul(frame.viewProj, float4(hitWorldPos, 1.0f));
+        if (fastClip.w > 0.1f) {
+            float2 fastUV = fastClip.xy / fastClip.w * 0.5f + 0.5f;
+            if (all(fastUV >= 0.02f) && all(fastUV <= 0.98f)) {
+                float sampledDepth = texDepth.SampleLevel(smp, fastUV, 0);
+                // Linear view depth of the sampled pixel, without the
+                // invViewProj -> world -> viewProj round-trip (M * M^-1):
+                // the same value for two 4x4s and a divide less. Jitter
+                // lives in the projection's column-2 xy entries, so the z/w
+                // linearization against the unjittered invProj is exact.
+                float4 linClip      = mul(frame.invProj, float4(0.0f, 0.0f, sampledDepth, 1.0f));
+                float distToSampled = abs(linClip.z / linClip.w);
+                if (abs(fastClip.w - distToSampled) < max(0.5f, fastClip.w * 0.05f)) {
+                    confidence    = 1.0f;
+                    fallbackColor = texLighting.SampleLevel(smp, fastUV, 0).rgb;
+                    return fastUV;
+                }
+            }
+        }
 
         // HLSL/Slang CommittedInstanceID is the instanceCustomIndex we write
         // as the draw-queue slot. CommittedInstanceIndex is the compacted
@@ -160,12 +245,14 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
         float onScreen    = edgeFactor.x * edgeFactor.y;
 
         if (onScreen > 0.0f) {
-            float sampledRawDepth  = texDepth.SampleLevel(smp, hitUV, 0);
-            float3 sampledWorldPos = ReconstructWorldPos(hitUV, sampledRawDepth, frame.invViewProj);
+            float sampledRawDepth = texDepth.SampleLevel(smp, hitUV, 0);
 
-            float distToHit     = hitClip.w;
-            float distToSampled = mul(frame.viewProj, float4(sampledWorldPos, 1.0f)).w;
-            float depthDiff     = abs(distToHit - distToSampled);
+            float distToHit = hitClip.w;
+            // Same round-trip removal as the fast path above: linearize the
+            // sampled depth instead of reconstructing and reprojecting it.
+            float4 linClip        = mul(frame.invProj, float4(0.0f, 0.0f, sampledRawDepth, 1.0f));
+            float distToSampled   = abs(linClip.z / linClip.w);
+            float depthDiff       = abs(distToHit - distToSampled);
 
             // 4. Normal-Orientation Check (Stops front-face bleeding onto back/side faces)
             float4 normRough      = texNormalRoughness.SampleLevel(smp, hitUV, 0);
@@ -271,7 +358,8 @@ float4 PSMain(VSOutput input) : SV_Target0 {
             float3 reflectionColor = float3(0.0f, 0.0f, 0.0f);
 
 #ifndef DISABLE_RTR
-            if (wantRTR) {
+            if (wantRTR && roughness < 0.04f) {
+                // Mirror tier: warp-coherent rays, traced in-shader.
                 float3 rtrFallback = float3(0.0f, 0.0f, 0.0f);
                 float2 hitUV       = RaytraceRTR(worldPos, N, V, roughness, confidence, rtrFallback, uint2(input.pos.xy));
 
@@ -288,6 +376,19 @@ float4 PSMain(VSOutput input) : SV_Target0 {
                             reflectionColor = max(rtrFallback, lerp(rtrFallback, screenColor, confidence));
                         }
                     }
+                }
+            } else if (wantRTR) {
+                // Roughness band (0.04, 0.40]: the lobe rays diverge per
+                // pixel, so they are traced at half resolution by the
+                // RtrHalfTrace compute pass (75% fewer rays, traversal out
+                // of the fragment quads). Bilinear-upsample the composed
+                // result; a = 0 (sky, miss, outside band) leaves
+                // reflectionColor at zero and confidence at zero, so the
+                // lerp below falls back to specularIBL.
+                float4 halfRtr = texRtrHalf.SampleLevel(smp, input.uv, 0);
+                confidence    = halfRtr.a;
+                if (confidence > 0.0f) {
+                    reflectionColor = halfRtr.rgb;
                 }
             } else
 #endif

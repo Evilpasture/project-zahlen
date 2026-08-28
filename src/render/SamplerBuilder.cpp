@@ -12,8 +12,8 @@ namespace ZHLN::Vk {
 // Private sampler-creation error (Tier 1): declared at file scope in this
 // translation unit so no header exposes it.
 enum class SamplerCreationError : uint8_t {
-    NullDevice[[= Reflect::Description("Null device for sampler creation")]] = 1,
-    CreationFailed[[= Reflect::Description("Sampler creation failed")]],
+    NullDevice[[= Reflect::Description<"Null device for sampler creation">{}]] = 1,
+    CreationFailed[[= Reflect::Description<"Sampler creation failed">{}]],
 };
 
 SamplerBuilder::SamplerBuilder() noexcept {

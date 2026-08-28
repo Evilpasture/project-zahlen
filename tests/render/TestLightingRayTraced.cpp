@@ -94,18 +94,16 @@
 // ============================================================================
 
 enum class LightingRTTestError : uint8_t {
-    EngineInitFailed[[= ZHLN::Reflect::Description("Failed to initialize headless Engine context for the lighting/raytracing test.")]] = 1,
-    RenderOutputBlank[[= ZHLN::Reflect::Description("Rendered frame is blank or could not be captured.")]],
-    TemporalFlickerDetected[[= ZHLN::Reflect::Description("A static fully-lit scene changed more frame-to-frame than the engine's own noise floor.")]],
+    EngineInitFailed[[= ZHLN::Reflect::Description<"Failed to initialize headless Engine context for the lighting/raytracing test.">{}]] = 1,
+    RenderOutputBlank[[= ZHLN::Reflect::Description<"Rendered frame is blank or could not be captured.">{}]],
+    TemporalFlickerDetected[[= ZHLN::Reflect::Description<"A static fully-lit scene changed more frame-to-frame than the engine's own noise floor.">{}]],
     LightCullingPopDetected[
-        [= ZHLN::Reflect::Description("A point light inside the frustum/range lost its lighting contribution for a frame (cluster culling).")]],
-    RayTracedShadowFailed[[= ZHLN::Reflect::Description("The ray-traced sun shadow did not appear, disappeared, or took out the whole frame.")]],
-    ReflectionMissing[[= ZHLN::Reflect::Description("The polished surface shows no reflection of the emissive object (RTR/SSR fell back to IBL).")]],
-    ReflectionArtifacts[[= ZHLN::Reflect::Description("The reflected region contains blowout, ray-debris speckles, or flicker.")]],
-    DeviceLostDuringTest[[= ZHLN::Reflect::Description(
-        "The Vulkan device was lost repeatedly during the scenario; the engine hot-rebuild recovered, but the GPU was not stable."
-    )]],
-    ValidationErrorsRaised[[= ZHLN::Reflect::Description("The validation layer reported errors while rendering the lighting/raytracing frames.")]],
+        [= ZHLN::Reflect::Description<"A point light inside the frustum/range lost its lighting contribution for a frame (cluster culling).">{}]],
+    RayTracedShadowFailed[[= ZHLN::Reflect::Description<"The ray-traced sun shadow did not appear, disappeared, or took out the whole frame.">{}]],
+    ReflectionMissing[[= ZHLN::Reflect::Description<"The polished surface shows no reflection of the emissive object (RTR/SSR fell back to IBL).">{}]],
+    ReflectionArtifacts[[= ZHLN::Reflect::Description<"The reflected region contains blowout, ray-debris speckles, or flicker.">{}]],
+    DeviceLostDuringTest[[= ZHLN::Reflect::Description<"The Vulkan device was lost repeatedly during the scenario; the engine hot-rebuild recovered, but the GPU was not stable.">{}]],
+    ValidationErrorsRaised[[= ZHLN::Reflect::Description<"The validation layer reported errors while rendering the lighting/raytracing frames.">{}]],
 };
 
 // ============================================================================

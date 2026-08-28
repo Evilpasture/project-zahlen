@@ -32,7 +32,10 @@ SamplerComparisonState shadowSampler;
 
 float PhaseHG(float cosTheta, float g) {
     float g2 = g * g;
-    return (1.0f - g2) / (12.5663706f * pow(1.0f + g2 - 2.0f * g * cosTheta, 1.5f));
+    // x^1.5 as x*sqrt(x): the general pow lowers to exp/log, and the
+    // denominator is strictly positive (>= (1-|g|)^2), so this is exact.
+    float d = 1.0f + g2 - 2.0f * g * cosTheta;
+    return (1.0f - g2) / (12.5663706f * d * sqrt(d));
 }
 
 float PhaseDualHG(float cosTheta, float g1, float g2, float k) {
@@ -138,17 +141,25 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         if (light.type == 0 || light.type == 4)
             continue; // Skip Sun/Dir
 
+        // Reject on squared distance before the sqrt: outside the light's
+        // sphere the window term saturates to exactly zero, so length,
+        // normalize, phase, and the accumulate only run for lights that can
+        // affect this voxel. (The old atten > 0 check tested the same
+        // condition after paying for all of it.)
         float3 L_unnorm = light.position - worldPos;
-        float dist      = length(L_unnorm);
+        float range     = max(light.range, 0.001f);
+        float distSq    = dot(L_unnorm, L_unnorm);
+        if (distSq >= range * range)
+            continue;
+
+        float dist      = sqrt(distSq);
         float3 L        = L_unnorm / max(dist, 1e-5f);
 
-        float distRatio = dist / max(light.range, 0.001f);
-        float atten     = saturate(1.0f - distRatio * distRatio) / (dist * dist + 1.0f);
+        float distRatio = dist / range;
+        float atten     = saturate(1.0f - distRatio * distRatio) / (distSq + 1.0f);
 
-        if (atten > 0.0f) {
-            float phase = PhaseDualHG(dot(-V, L), lightPC.phaseAnisotropy, -0.1f, 0.88f);
-            accumulatedLight += light.color * light.intensity * atten * phase * scattering;
-        }
+        float phase = PhaseDualHG(dot(-V, L), lightPC.phaseAnisotropy, -0.1f, 0.88f);
+        accumulatedLight += light.color * light.intensity * atten * phase * scattering;
     }
 
     outVoxelLight[tid] = float4(accumulatedLight, extinction);

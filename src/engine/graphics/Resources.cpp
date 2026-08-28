@@ -162,6 +162,16 @@ extern const std::span<const uint8_t> bloom_threshold_cs {bloom_threshold_cs_raw
 extern const std::span<const uint8_t> bloom_down_cs {bloom_down_cs_raw, sizeof(bloom_down_cs_raw)};
 extern const std::span<const uint8_t> bloom_up_cs {bloom_up_cs_raw, sizeof(bloom_up_cs_raw)};
 
+constexpr uint8_t hdr_denoise_atrous_cs_raw[] = {
+#embed SHADER_HDR_DENOISE_ATROUS_SLANG_CS_PATH
+};
+extern const std::span<const uint8_t> hdr_denoise_atrous_cs {hdr_denoise_atrous_cs_raw, sizeof(hdr_denoise_atrous_cs_raw)};
+
+constexpr uint8_t rtr_half_cs_raw[] = {
+#embed SHADER_RTR_HALF_SLANG_CS_PATH
+};
+extern const std::span<const uint8_t> rtr_half_cs {rtr_half_cs_raw, sizeof(rtr_half_cs_raw)};
+
 // --- Punctual Shadows Shaders ---
 constexpr uint8_t punctual_shadows_vs_raw[] = {
 #embed SHADER_PUNCTUAL_SHADOWS_SLANG_VS_PATH
@@ -320,6 +330,13 @@ constexpr uint8_t ltc_amp_raw[] = {
 #embed "../../../resources/shaders/ltc_amp.dds"
 };
 
+// Blue noise tile for the ray-traced dither. Embedded rather than read from
+// disk so the packaged binary carries it and no working-directory assumption
+// is baked into the renderer (same treatment as the LTC tables above).
+constexpr uint8_t blue_noise_png_raw[] = {
+#embed "../../../resources/shaders/LDR_RGBA_0.png"
+};
+
 // NOLINTEND(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
 #if defined(__clang__)
 #pragma clang diagnostic pop
@@ -342,6 +359,7 @@ extern const std::span<const uint8_t> gpu_scene_comp {gpu_scene_comp_raw, sizeof
 extern const std::span<const uint8_t> gpu_abi_comp {gpu_abi_comp_raw, sizeof(gpu_abi_comp_raw)};
 extern const std::span<const uint8_t> ltc_mat {ltc_mat_raw, sizeof(ltc_mat_raw)};
 extern const std::span<const uint8_t> ltc_amp {ltc_amp_raw, sizeof(ltc_amp_raw)};
+extern const std::span<const uint8_t> blue_noise_png {blue_noise_png_raw, sizeof(blue_noise_png_raw)};
 
 namespace Paths {
 const char* const BasicVS                 = SHADER_BASIC_SLANG_VS_PATH;
@@ -382,6 +400,8 @@ const char* const PunctualShadowsPS       = SHADER_PUNCTUAL_SHADOWS_SLANG_PS_PAT
 const char* const LightingNortVS          = SHADER_LIGHTING_NORT_SLANG_VS_PATH;
 const char* const LightingNortPS          = SHADER_LIGHTING_NORT_SLANG_PS_PATH;
 const char* const VolumetricClearCS       = SHADER_VOLUMETRIC_CLEAR_SLANG_CS_PATH;
+const char* const HdrDenoiseAtrousCS        = SHADER_HDR_DENOISE_ATROUS_SLANG_CS_PATH;
+const char* const RtrHalfCS                 = SHADER_RTR_HALF_SLANG_CS_PATH;
 const char* const VolumetricFogInjectCS   = SHADER_VOLUMETRIC_FOG_INJECT_CS_PATH;
 const char* const VolumetricLightInjectCS = SHADER_VOLUMETRIC_LIGHT_INJECT_CS_PATH;
 const char* const VolumetricIntegrationCS = SHADER_VOLUMETRIC_INTEGRATION_SLANG_CS_PATH;

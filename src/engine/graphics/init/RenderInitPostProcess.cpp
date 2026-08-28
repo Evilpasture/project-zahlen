@@ -137,21 +137,47 @@ auto RenderContext::Impl::BuildBloomPipelines() -> std::expected<void, Error> {
     // lives in each compiled module: reflect set 0, bake the PUSH_INDEX
     // mapping (frame-parity slot span of 2), and build three null-layout heap
     // pipelines (threshold / down / up).
-    const auto buildCompute = [&](Vk::ComputePass& pass, Vk::SlangReflectedLayout& layout, Vk::HeapPassBindings& bindings, std::span<const uint8_t> spirv)
+    // slotSpan must cover frame parity (2) times the number of dispatches the
+    // pass performs PER FRAME with this binding table: heap descriptor writes
+    // are immediate host writes, so every in-frame dispatch needs its own
+    // index-addressable slot or the later writes clobber the earlier
+    // dispatches' bindings before the GPU ever reads them.
+    const auto buildCompute =
+        [&](Vk::ComputePass& pass, Vk::SlangReflectedLayout& layout, Vk::HeapPassBindings& bindings, std::span<const uint8_t> spirv, uint32_t slotSpan)
         -> std::expected<void, Error> {
         const auto shader = Vk::CreateShaderDesc(spirv);
         if (!layout.Build(ctx.Device(), shader, VK_SHADER_STAGE_COMPUTE_BIT)) {
             return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
         }
-        Vk::BuildHeapPassBindings(heapManager, layout.reflectedSets[0], 0, heapPushDataLayout.heapIndexOffset, 2, bindings);
+        Vk::BuildHeapPassBindings(heapManager, layout.reflectedSets[0], 0, heapPushDataLayout.heapIndexOffset, slotSpan, bindings);
         return pass.BuildHeap(ctx.Device(), shader, bindings.GetInfo(), bindings.indexPushOffset);
     };
 
-    return buildCompute(bloomThresholdCS, bloomThresholdCSLayout, bloomThresholdHeapBindings, Resource::bloom_threshold_cs)
+    return buildCompute(bloomThresholdCS, bloomThresholdCSLayout, bloomThresholdHeapBindings, Resource::bloom_threshold_cs, 2)
         .and_then([&]() -> std::expected<void, Error> {
-            return buildCompute(bloomDownCS, bloomDownCSLayout, bloomDownHeapBindings, Resource::bloom_down_cs);
+            // 3 in-frame dispatches per chain x 2 parity frames.
+            return buildCompute(bloomDownCS, bloomDownCSLayout, bloomDownHeapBindings, Resource::bloom_down_cs, 6);
         })
-        .and_then([&]() -> std::expected<void, Error> { return buildCompute(bloomUpCS, bloomUpCSLayout, bloomUpHeapBindings, Resource::bloom_up_cs); });
+        .and_then([&]() -> std::expected<void, Error> {
+            return buildCompute(bloomUpCS, bloomUpCSLayout, bloomUpHeapBindings, Resource::bloom_up_cs, 6);
+        })
+        // HDR scene A-Trous wavelet denoiser: one pipeline reused for every
+        // iteration; tap spacing and edge-stops arrive as push constants and
+        // the source/destination swap through the shared heap binding table
+        // (3 iterations x 2 parity frames).
+        .and_then([&]() -> std::expected<void, Error> {
+            return buildCompute(hdrDenoiseCS, hdrDenoiseCSLayout, hdrDenoiseHeapBindings, Resource::hdr_denoise_atrous_cs, 6);
+        })
+        // Half-resolution RTR band tracer: one dispatch per frame, so the
+        // slot span is just the frame parity. The shader binds an
+        // acceleration structure, so the pipeline is only built when the RT
+        // context exists.
+        .and_then([&]() -> std::expected<void, Error> {
+            if (!rtCtx.Valid()) {
+                return {};
+            }
+            return buildCompute(rtrHalfCS, rtrHalfCSLayout, rtrHalfHeapBindings, Resource::rtr_half_cs, 2);
+        });
 }
 
 auto RenderContext::Impl::BuildBlitPipeline() -> std::expected<void, Error> {
@@ -315,7 +341,7 @@ auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, Error> {
         .and_then([&]() -> std::expected<void, Error> {
             return RegisterAndBuild(
                 this, "Bloom", [this]() -> std::expected<void, Error> { return BuildBloomPipelines(); },
-                {Resource::Paths::BloomThresholdCS, Resource::Paths::BloomDownCS, Resource::Paths::BloomUpCS}
+                {Resource::Paths::BloomThresholdCS, Resource::Paths::BloomDownCS, Resource::Paths::BloomUpCS, Resource::Paths::HdrDenoiseAtrousCS}
             );
         })
         .and_then([&]() -> std::expected<void, Error> {

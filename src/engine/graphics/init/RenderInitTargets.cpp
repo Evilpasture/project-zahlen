@@ -124,6 +124,12 @@ std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) 
             if constexpr (Tag::scale_divisor > 1) {
                 extra |= VK_IMAGE_USAGE_STORAGE_BIT;
             }
+            // The A-Trous HDR denoiser stores through a UAV: the two
+            // ping-pong scratch targets plus the final write-back into
+            // hdrSceneColor must all carry storage-image usage.
+            if constexpr (std::is_same_v<Tag, Res_HdrSceneColor> || std::is_same_v<Tag, Res_DenoiseA> || std::is_same_v<Tag, Res_DenoiseB>) {
+                extra |= VK_IMAGE_USAGE_STORAGE_BIT;
+            }
             const VkExtent2D scaled = {.width = std::max(1u, ext.width / Tag::scale_divisor), .height = std::max(1u, ext.height / Tag::scale_divisor)};
             result                  = assign(rt, CreateDefaultTarget<Tag::format>(scaled, extra));
         }
@@ -197,6 +203,13 @@ std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) 
                                                 graphResources.bloomUp1.image.Handle(),
                                                 graphResources.bloomFinalTarget.image.Handle()};
         for (auto* const img: bloomComputeTargets) {
+            Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
+        }
+
+        // The HDR A-Trous denoiser ping-pongs through the same GENERAL-layout
+        // compute-only pattern.
+        const std::array denoiseTargets = {graphResources.denoiseA.image.Handle(), graphResources.denoiseB.image.Handle()};
+        for (auto* const img: denoiseTargets) {
             Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
         }
 

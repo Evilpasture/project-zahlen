@@ -9,8 +9,8 @@
 #include <expected>
 
 enum class ChannelTestError : uint32_t {
-    FifoOrderingViolated[[= ZHLN::Reflect::Description("Channel popped messages out of chronological order.")]] = 1,
-    MessageLost[[= ZHLN::Reflect::Description("One or more messages were dropped during channel push/pop.")]],
+    FifoOrderingViolated[[= ZHLN::Reflect::Description<"Channel popped messages out of chronological order.">{}]] = 1,
+    MessageLost[[= ZHLN::Reflect::Description<"One or more messages were dropped during channel push/pop.">{}]],
 };
 
 struct ChannelTestSuite {

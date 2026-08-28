@@ -26,17 +26,17 @@
 // ============================================================================
 
 enum class CharacterTestError : uint8_t {
-    GroundedStateFailed[[= ZHLN::Reflect::Description("Character failed to maintain or establish a stable grounded state.")]] = 1,
-    DisplacementMismatch[[= ZHLN::Reflect::Description("Kinematic displacement did not match expected velocity integration.")]],
-    SubFrameJitterDetected[[= ZHLN::Reflect::Description("Sub-frame alpha interpolation produced non-monotonic or jittery motion.")]],
-    CameraDistanceVariance[[= ZHLN::Reflect::Description("Camera-to-character relative distance variance exceeded 0.1mm threshold.")]],
-    MotionNonMonotonic[[= ZHLN::Reflect::Description("Position hitching, backward movement, or teleportation detected.")]],
-    WallBreachDetected[[= ZHLN::Reflect::Description("Character penetrated into a solid obstacle collider.")]],
-    WallSlideFailed[[= ZHLN::Reflect::Description("Character failed to slide tangentially along an obstacle plane.")]],
-    JumpTrajectoryFailed[[= ZHLN::Reflect::Description("Jump trajectory, apex altitude, or landing transition failed.")]],
-    StepClimbFailed[[= ZHLN::Reflect::Description("Character failed to step up and traverse over an obstacle ledge.")]],
-    SlopeClimbFailed[[= ZHLN::Reflect::Description("Character failed to climb a walkable slope or slid unexpectedly.")]],
-    DynamicPushFailed[[= ZHLN::Reflect::Description("Character failed to impart momentum to a dynamic rigid body.")]],
+    GroundedStateFailed[[= ZHLN::Reflect::Description<"Character failed to maintain or establish a stable grounded state.">{}]] = 1,
+    DisplacementMismatch[[= ZHLN::Reflect::Description<"Kinematic displacement did not match expected velocity integration.">{}]],
+    SubFrameJitterDetected[[= ZHLN::Reflect::Description<"Sub-frame alpha interpolation produced non-monotonic or jittery motion.">{}]],
+    CameraDistanceVariance[[= ZHLN::Reflect::Description<"Camera-to-character relative distance variance exceeded 0.1mm threshold.">{}]],
+    MotionNonMonotonic[[= ZHLN::Reflect::Description<"Position hitching, backward movement, or teleportation detected.">{}]],
+    WallBreachDetected[[= ZHLN::Reflect::Description<"Character penetrated into a solid obstacle collider.">{}]],
+    WallSlideFailed[[= ZHLN::Reflect::Description<"Character failed to slide tangentially along an obstacle plane.">{}]],
+    JumpTrajectoryFailed[[= ZHLN::Reflect::Description<"Jump trajectory, apex altitude, or landing transition failed.">{}]],
+    StepClimbFailed[[= ZHLN::Reflect::Description<"Character failed to step up and traverse over an obstacle ledge.">{}]],
+    SlopeClimbFailed[[= ZHLN::Reflect::Description<"Character failed to climb a walkable slope or slid unexpectedly.">{}]],
+    DynamicPushFailed[[= ZHLN::Reflect::Description<"Character failed to impart momentum to a dynamic rigid body.">{}]],
 };
 
 // ============================================================================

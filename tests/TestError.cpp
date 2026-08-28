@@ -10,20 +10,20 @@
 // Local Test Enums (Self-Contained)
 // ============================================================================
 
-enum class CodecError : uint32_t {
-    CorruptedStream[[= ZHLN::Reflect::Description("The input bitstream is corrupted or incomplete.")]] = 1,
-    UnsupportedVersion[[= ZHLN::Reflect::Description("The bitstream header version is not supported.")]]
+enum class CodecError : uint8_t {
+    CorruptedStream[[= ZHLN::Reflect::Description<"The input bitstream is corrupted or incomplete."> {}]] = 1,
+    UnsupportedVersion[[= ZHLN::Reflect::Description<"The bitstream header version is not supported."> {}]]
 };
 
-enum class NetworkError : uint32_t {
-    HostUnreachable[[= ZHLN::Reflect::Description("Remote host refused the connection or is offline.")]] = 1,
+enum class NetworkError : uint8_t {
+    HostUnreachable[[= ZHLN::Reflect::Description<"Remote host refused the connection or is offline."> {}]] = 1,
     ConnectionReset
 };
 
-enum class HandleError : uint32_t {
-    GenerationMismatch[[= ZHLN::Reflect::Description("Recycled handle failed generation check. Expected generation {}, got {}")]] = 1,
-    SlotOutOfBounds[[= ZHLN::Reflect::Description("Slot index {} exceeds maximum capacity of {}")]],
-    EntityNull[[= ZHLN::Reflect::Description("Entity handle is null or uninitialized.")]]
+enum class HandleError : uint8_t {
+    GenerationMismatch[[= ZHLN::Reflect::Description<"Recycled handle failed generation check. Expected generation {}, got {}"> {}]] = 1,
+    SlotOutOfBounds[[= ZHLN::Reflect::Description<"Slot index {} exceeds maximum capacity of {}"> {}]],
+    EntityNull[[= ZHLN::Reflect::Description<"Entity handle is null or uninitialized."> {}]]
 };
 
 // ============================================================================
@@ -91,12 +91,11 @@ struct ErrorTestSuite {
             auto msg1 = ZHLN::Reflect::FormatEnumMessage(HandleError::GenerationMismatch, 2u, 1u);
             auto msg2 = ZHLN::Reflect::FormatEnumMessage(HandleError::SlotOutOfBounds, 1050, 1024);
 
-            ZHLN::Println("    [Formatted Message 1] {}", msg1.string_view());
-            ZHLN::Println("    [Formatted Message 2] {}", msg2.string_view());
+            ZHLN::Println("    [Formatted Message 1] {}", msg1);
+            ZHLN::Println("    [Formatted Message 2] {}", msg2);
 
-            ZHLN::Test::ExpectEq(msg1.string_view(), "Recycled handle failed generation check. Expected generation 2, got 1");
-
-            ZHLN::Test::ExpectEq(msg2.string_view(), "Slot index 1050 exceeds maximum capacity of 1024");
+            ZHLN::Test::ExpectEq(msg1, "Recycled handle failed generation check. Expected generation 2, got 1");
+            ZHLN::Test::ExpectEq(msg2, "Slot index 1050 exceeds maximum capacity of 1024");
 
             return {};
         }
@@ -105,9 +104,9 @@ struct ErrorTestSuite {
         std::expected<void, ZHLN::Error> formatted_description_without_arguments() {
             auto msg = ZHLN::Reflect::FormatEnumMessage(HandleError::EntityNull);
 
-            ZHLN::Println("    [Formatted Message (Zero-Arg)] {}", msg.string_view());
+            ZHLN::Println("    [Formatted Message (Zero-Arg)] {}", msg);
 
-            ZHLN::Test::ExpectEq(msg.string_view(), "Entity handle is null or uninitialized.");
+            ZHLN::Test::ExpectEq(msg, "Entity handle is null or uninitialized.");
             return {};
         }
 

@@ -16,7 +16,7 @@ namespace ZHLN {
 // Private bindless/heap setup failure (Tier 1): declared at file scope in this
 // translation unit so no header exposes it.
 enum class BindlessSetupError : uint8_t {
-    DefaultTextureRegistrationFailed[[= ZHLN::Reflect::Description("Default bindless texture registration returned unexpected indices")]] = 1,
+    DefaultTextureRegistrationFailed[[= ZHLN::Reflect::Description<"Default bindless texture registration returned unexpected indices">{}]] = 1,
 };
 
 auto RenderContext::Impl::InitBindless() -> std::expected<void, Error> {
@@ -81,6 +81,7 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, Error> {
         .and_then([&]() -> std::expected<void, Error> { return InitSkeletalAnimationResources(); })
         .and_then([&]() -> std::expected<void, Error> { return InitLightingLUTs(); })
         .and_then([&]() -> std::expected<void, Error> { return InitializeSystemTextures(); })
+        .and_then([&]() -> std::expected<void, Error> { return InitializeBlueNoiseTexture(); })
         .and_then([&]() -> std::expected<void, Error> {
             // IBL images exist after InitLightingLUTs; write their heap
             // descriptors once (they never change after init). The translucent
@@ -353,14 +354,26 @@ void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
         Vk::InitHeapPassSamplers(heapManager, bloomDownHeapBindings, infos);
         Vk::InitHeapPassSamplers(heapManager, bloomUpHeapBindings, infos);
     }
+    // Blue noise tile sampler, appended last to match the tail declaration
+    // position in lighting.slang / reflection.slang. Re-derived here rather
+    // than read from blueNoiseSamplerInfo for the same reason clampInfo is:
+    // it keeps sampler-slot init independent of texture-init ordering.
+    const VkSamplerCreateInfo blueNoiseInfo = Vk::SamplerBuilder {}.Nearest().Repeat().LodRange(0.0F, 0.0F).Info();
     {
-        std::array<VkSamplerCreateInfo, 4> infos = {defaultInfo, shadowInfo, clampInfo, pointInfo};
+        std::array<VkSamplerCreateInfo, 5> infos = {defaultInfo, shadowInfo, clampInfo, pointInfo, blueNoiseInfo};
         Vk::InitHeapPassSamplers(heapManager, lightingPass.heapBindings, infos);
     }
     {
-        std::array<VkSamplerCreateInfo, 3> infos = {defaultInfo, pointInfo, clampInfo};
+        std::array<VkSamplerCreateInfo, 4> infos = {defaultInfo, pointInfo, clampInfo, blueNoiseInfo};
         Vk::InitHeapPassSamplers(heapManager, reflectionPass.heapBindings, infos);
         Vk::InitHeapPassSamplers(heapManager, translucentReflectionPass.heapBindings, infos);
+    }
+    {
+        // rtr_half.slang declares exactly two samplers, smp and
+        // blueNoiseSampler, in that order. The pipeline builds only when the
+        // RT context exists; with empty bindings this is a no-op.
+        std::array<VkSamplerCreateInfo, 2> infos = {defaultInfo, blueNoiseInfo};
+        Vk::InitHeapPassSamplers(heapManager, rtrHalfHeapBindings, infos);
     }
     {
         std::array<VkSamplerCreateInfo, 1> infos = {defaultInfo};

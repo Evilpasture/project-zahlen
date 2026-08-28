@@ -46,6 +46,8 @@ extern const char* const PunctualShadowsPS;
 extern const char* const LightingNortVS;
 extern const char* const LightingNortPS;
 extern const char* const VolumetricClearCS;
+extern const char* const HdrDenoiseAtrousCS;
+extern const char* const RtrHalfCS;
 extern const char* const VolumetricFogInjectCS;
 extern const char* const VolumetricLightInjectCS;
 extern const char* const VolumetricIntegrationCS;
@@ -130,6 +132,8 @@ enum class ShaderID : uint8_t {
     SMAALUTComp,
     GPUSceneComp,
     GPUABIComp,
+    HdrDenoiseAtrous,
+    RtrHalf,
 };
 
 // Extern declarations of individual programs to avoid header bloat and allow compile-time routing
@@ -179,6 +183,8 @@ extern const std::span<const uint8_t> procedural_bake_comp;
 extern const std::span<const uint8_t> bloom_threshold_cs;
 extern const std::span<const uint8_t> bloom_down_cs;
 extern const std::span<const uint8_t> bloom_up_cs;
+extern const std::span<const uint8_t> hdr_denoise_atrous_cs;
+extern const std::span<const uint8_t> rtr_half_cs;
 extern const std::span<const uint8_t> brdf_lut_comp;
 extern const std::span<const uint8_t> ibl_specular_comp;
 extern const std::span<const uint8_t> ibl_sh_comp;
@@ -187,6 +193,9 @@ extern const std::span<const uint8_t> gpu_scene_comp;
 extern const std::span<const uint8_t> gpu_abi_comp;
 extern const std::span<const uint8_t> ltc_mat;
 extern const std::span<const uint8_t> ltc_amp;
+/// Christoph Peters' LDR_RGBA_0 blue noise tile, embedded verbatim (PNG bytes).
+/// Decoded once at startup by RenderContext::Impl::InitializeBlueNoiseTexture.
+extern const std::span<const uint8_t> blue_noise_png;
 
 /// Which specialisation of the scene geometry interface a pipeline needs.
 /// basic.slang / basic_mesh.slang emit a different varying set per variant, so
@@ -244,6 +253,8 @@ struct ShaderMapping {
         {.id = ShaderID::BloomThresholdCS, .pair = ShaderPair {.vertex = bloom_threshold_cs, .fragment = {}}},
         {.id = ShaderID::BloomDownCS, .pair = ShaderPair {.vertex = bloom_down_cs, .fragment = {}}},
         {.id = ShaderID::BloomUpCS, .pair = ShaderPair {.vertex = bloom_up_cs, .fragment = {}}},
+        {.id = ShaderID::HdrDenoiseAtrous, .pair = ShaderPair {.vertex = hdr_denoise_atrous_cs, .fragment = {}}},
+        {.id = ShaderID::RtrHalf, .pair = ShaderPair {.vertex = rtr_half_cs, .fragment = {}}},
         {.id = ShaderID::VolumetricClear, .pair = volumetric_clear_shaders},
         {.id = ShaderID::VolumetricFogInject, .pair = volumetric_fog_inject_shaders},
         {.id = ShaderID::VolumetricLightInject, .pair = volumetric_light_inject_shaders},

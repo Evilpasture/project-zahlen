@@ -3,6 +3,7 @@
 
 // include/Zahlen/Error.hpp
 #pragma once
+#include <Zahlen/Core/Print.hpp>
 #include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <atomic>

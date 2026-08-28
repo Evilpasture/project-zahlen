@@ -1,7 +1,10 @@
 // resources/shaders/pbr_helpers.slang
 module pbr_helpers;
 
-import uniforms;
+__exported import blue_noise;
+__exported import instance_data;
+__exported import uniforms;
+__exported import vertex_format;
 
 // ============================================================================
 // CONSTANTS & NOISE
@@ -70,13 +73,20 @@ public float SoftClamp(float x, float limit) {
 #define BLOCKER_SEARCH_SAMPLES 16
 #define PCF_SAMPLES 16
 
-public float FindBlocker(float2 uv, float zReceiver, float searchRadius, Texture2DArray<float> shadowMap, SamplerState linearSampler, uint cascadeIndex) {
+public float FindBlocker(float2 uv, float zReceiver, float searchRadius, Texture2DArray<float> shadowMap, SamplerState linearSampler, uint cascadeIndex,
+                         bool halved = false) {
     float blockerSum  = 0.0f;
     int numBlockers   = 0;
     float blockerBias = 0.0005f;
 
-    [unroll]
-    for (int i = 0; i < BLOCKER_SEARCH_SAMPLES; ++i) {
+    // The halved variant strides the fixed Poisson disk by two: same
+    // deterministic pattern at half the taps, for callers that blend this
+    // result against a higher-quality estimator anyway. The stride is
+    // runtime-selectable, so the loop stays dynamic; the fetches are
+    // independent and pipeline either way.
+    const int stride = halved ? 2 : 1;
+
+    for (int i = 0; i < BLOCKER_SEARCH_SAMPLES; i += stride) {
         float2 offset        = PoissonDisk[i] * searchRadius;
         float shadowMapDepth = shadowMap.SampleLevel(linearSampler, float3(uv + offset, cascadeIndex), 0);
 
@@ -92,7 +102,7 @@ public float FindBlocker(float2 uv, float zReceiver, float searchRadius, Texture
 }
 
 public float CalculateShadowPCSS(float4 shadowPos, float3 N, float3 L, float2 screenPos, Texture2DArray<float> shadowMap, SamplerComparisonState shadowSampler,
-                                 SamplerState linearSampler, float shadowResolution, uint cascadeIndex, float worldDepthPerNdc) {
+                                 SamplerState linearSampler, float shadowResolution, uint cascadeIndex, float worldDepthPerNdc, bool reduced = false) {
     float3 projCoords = shadowPos.xyz / shadowPos.w;
 
     if (projCoords.x < 0.0 || projCoords.x > 1.0 || projCoords.y < 0.0 || projCoords.y > 1.0 || projCoords.z < 0.0 || projCoords.z > 1.0) {
@@ -108,7 +118,7 @@ public float CalculateShadowPCSS(float4 shadowPos, float3 N, float3 L, float2 sc
 
     // 1. Blocker Search
     float searchRadius    = 4.0 * texelSize;
-    float avgBlockerDepth = FindBlocker(projCoords.xy, zReceiver, searchRadius, shadowMap, linearSampler, cascadeIndex);
+    float avgBlockerDepth = FindBlocker(projCoords.xy, zReceiver, searchRadius, shadowMap, linearSampler, cascadeIndex, reduced);
 
     if (avgBlockerDepth == -1.0f)
         return 1.0f;
@@ -128,49 +138,77 @@ public float CalculateShadowPCSS(float4 shadowPos, float3 N, float3 L, float2 sc
     float s      = sin(angle);
     float c      = cos(angle);
 
-    [unroll]
-    for (int i = 0; i < PCF_SAMPLES; ++i) {
+    const int pcfStride = reduced ? 2 : 1;
+    const int pcfCount  = reduced ? (PCF_SAMPLES / 2) : PCF_SAMPLES;
+
+    for (int i = 0; i < PCF_SAMPLES; i += pcfStride) {
         float2 offset = float2(PoissonDisk[i].x * c - PoissonDisk[i].y * s, PoissonDisk[i].x * s + PoissonDisk[i].y * c) * filterRadius;
         shadow += shadowMap.SampleCmpLevelZero(shadowSampler, float3(projCoords.xy + offset, cascadeIndex), zReceiver);
     }
 
-    return shadow / (float) PCF_SAMPLES;
+    return shadow / (float) pcfCount;
 }
 
 #ifndef DISABLE_RTR
 /**
- * @brief Computes a high-performance, stochastically dithered soft ray-traced shadow.
+ * @brief Stochastically sampled soft ray-traced shadow.
+ *
+ * Dithering moved from Interleaved Gradient Noise to the blue noise LUT, and
+ * the single rotated PoissonDisk[0] offset became a real Vogel disk over the
+ * sun. Two reasons:
+ *
+ *  - IGN is a fixed diagonal lattice. Any spatial filter downstream (A-Trous,
+ *    bilateral, TAA) blurs *along* that diagonal, so the 1-bit estimate turns
+ *    into visible streaking instead of averaging to grey. Blue noise has no
+ *    preferred direction, so the same filters integrate it cleanly.
+ *  - One rotated point per pixel is not a sun-disk sample at all -- it is a
+ *    single fixed direction per dither angle. The Vogel disk is uniform in
+ *    area, so even at 1 SPP the per-pixel estimate is unbiased over the disk
+ *    and penumbra width tracks `sunSize` instead of the lattice period.
+ *
+ * `samples` is the per-frame SPP budget (RayTracingConfig::shadowSamples).
+ * Extra samples decorrelate through SampleBlueNoiseAt, so 2 SPP is two
+ * different disk points, not the same point twice.
+ *
+ * Returns 1.0 for fully lit, 0.0 for fully shadowed.
  */
 public float CalculateShadowRayTraced(float3 worldPos, float3 N, float3 L, float2 screenPos, float time, RaytracingAccelerationStructure tlas,
-                                      float sunSize = 0.001f) {
+                                      Texture2D<float4> blueNoiseTex, SamplerState blueNoiseSampler, float sunSize = 0.001f, uint samples = 1u) {
     float3 up        = abs(L.y) < 0.999f ? float3(0.0f, 1.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f);
     float3 right     = normalize(cross(up, L));
     float3 bitangent = cross(L, right);
 
-    float angle = GetShadowDither(screenPos) * 2.0f * 3.14159265f;
-    float cosA  = cos(angle);
-    float sinA  = sin(angle);
+    uint2 pixelPos  = uint2(screenPos);
+    uint  frameIdx  = FrameIndexFromCamPosW(time);
+    float spread    = max(sunSize, 0.00001f);
+    uint  spp       = max(samples, 1u);
 
-    // One blue-noise dithered ray/pixel. TAA/spatial filtering reconstructs
-    // soft penumbras while avoiding four incoherent ray queries per pixel.
-    const float spread = max(sunSize, 0.00001f);
-    const float2 p     = PoissonDisk[0];
-    const float2 jitter =
-        float2(p.x * cosA - p.y * sinA, p.x * sinA + p.y * cosA) * spread;
+    float visibility = 0.0f;
+    for (uint i = 0u; i < spp; ++i) {
+        // .xy drives the disk angle/radius; .zw is left free for a second
+        // consumer so one fetch can serve both the shadow and a glossy lobe.
+        float4 u    = SampleBlueNoiseAt(blueNoiseTex, blueNoiseSampler, pixelPos, frameIdx, i);
 
-    RayDesc ray;
-    ray.Origin    = worldPos + N * 0.04f;
-    ray.Direction = normalize(L + right * jitter.x + bitangent * jitter.y);
-    ray.TMin      = 0.01f;
-    ray.TMax      = 300.0f;
+        // Vogel disk: uniform in area over the sun's angular radius.
+        float2 disk = VogelDisk(i, spp, u.x * 6.2831853f) * spread;
 
-    RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> q;
-    q.TraceRayInline(tlas, RAY_FLAG_NONE, 0xFF, ray);
-    while (q.Proceed()) {
+        RayDesc ray;
+        ray.Origin    = worldPos + N * 0.04f;
+        ray.Direction = normalize(L + right * disk.x + bitangent * disk.y);
+        ray.TMin      = 0.01f;
+        ray.TMax      = 300.0f;
+
+        RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> q;
+        q.TraceRayInline(tlas, RAY_FLAG_NONE, 0xFF, ray);
+        while (q.Proceed()) {
+        }
+
+        visibility += (q.CommittedStatus() != COMMITTED_TRIANGLE_HIT) ? 1.0f : 0.0f;
     }
 
-    return q.CommittedStatus() != COMMITTED_TRIANGLE_HIT ? 1.0f : 0.0f;
+    return visibility / float(spp);
 }
+
 #endif
 
 // ============================================================================

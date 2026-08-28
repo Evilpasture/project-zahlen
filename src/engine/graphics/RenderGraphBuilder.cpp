@@ -58,7 +58,12 @@ struct PassFactory {
         return Vk::MakePass<"HiZGenerate", Vk::ShaderRead<Res_Depth>, Vk::ComputeWrite<Res_HiZ>>([this](VkCommandBuffer c) noexcept {
             uint32_t width  = self.graphResources.hizMap.extent.width;
             uint32_t height = self.graphResources.hizMap.extent.height;
-            uint32_t mips   = self.graphResources.hizMap.mipLevels;
+            // Generate down to kMaxGeneratedHiZMips levels only: every level
+            // costs a full compute-to-compute pipeline barrier, and the
+            // culling consumer clamps its sample level to maxHiZMipLevel
+            // (derived from the same constant), so deeper mips were written
+            // but never read.
+            uint32_t mips   = std::min(self.graphResources.hizMap.mipLevels, kMaxGeneratedHiZMips);
 
             for (uint32_t mip = 0; mip < mips; ++mip) {
                 if (mip > 0) {
@@ -215,16 +220,6 @@ struct PassFactory {
         });
     }
 
-    [[nodiscard]] auto MakeVolumetricClearPass() const noexcept {
-        return Vk::MakePass<"VolumetricClear", Vk::ComputeWrite<Res_VoxelMedia>, Vk::ComputeWrite<Res_VoxelLight>>([this](VkCommandBuffer c) noexcept {
-            self.volumetricClearPass.WriteHeap(
-                self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ComputeWrite<Res_VoxelMedia>>(self.graphResources.voxelMedia),
-                Vk::Assume<Vk::ComputeWrite<Res_VoxelLight>>(self.graphResources.voxelLight)
-            );
-            self.volumetricClearPass.DispatchHeap(self.ctx, c, fIdx);
-        });
-    }
-
     [[nodiscard]] auto MakeVolumetricFogInjectPass() const noexcept {
         return Vk::MakePass<"VolumetricFogInject", Vk::ComputeWrite<Res_VoxelMedia>>([this](VkCommandBuffer c) noexcept {
             // Noise texture/sampler are static and were written into both
@@ -317,13 +312,23 @@ struct PassFactory {
                 .format   = VK_FORMAT_D32_SFLOAT,
                 .viewInfo = &self.shadowAtlas2DViewInfo
             };
+            // Blue noise tile, matching the tail declaration in lighting.slang
+            // (after pointSampler, before the reserved trailing TLAS slot).
+            const auto blueNoiseHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
+                .handle   = self.textureImages[self.blueNoiseTexIdx].Handle(),
+                .view     = self.textureViews[self.blueNoiseTexIdx].Get(),
+                .extent   = {.width = self.blueNoiseWidth, .height = self.blueNoiseHeight, .depth = 1},
+                .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
+                .format   = VK_FORMAT_R8G8B8A8_UNORM,
+                .viewInfo = &self.blueNoiseViewInfo
+            };
             self.lightingPass.WriteHeap(
                 self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor), self.defaultSampler,
                 Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget),
                 Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer), self.frames.lightStorageBuffers[fIdx],
                 self.frames.frameUniformBuffers[fIdx], Vk::Assume<Vk::ShaderRead<Res_ShadowMap>>(self.graphResources.shadowMap), self.shadowSampler, ltcMatHeap,
                 ltcAmpHeap, self.clampSampler, self.frames.clusterGridBuffers[fIdx], self.frames.lightIndexListBuffers[fIdx],
-                self.pointSampler, atlasCubeHeap, atlas2DHeap,
+                self.pointSampler, atlasCubeHeap, atlas2DHeap, blueNoiseHeap, self.blueNoiseSampler,
                 Vk::AsAddressWrite {
                     .address = (self.rtCtx.Valid() && self.frames.tlas.Current() != VK_NULL_HANDLE) ?
                                    self.rtCtx.GetAccelerationStructureAddress(self.frames.tlas.Current()) :
@@ -334,10 +339,66 @@ struct PassFactory {
         });
     }
 
+    [[nodiscard]] auto MakeRtrHalfTracePass() const noexcept {
+        // Half-resolution RT reflection tracing for the VNDF roughness band
+        // (0.04, 0.40]: the divergent lobe rays are traced here at quarter
+        // count instead of per fragment, and the reflection pass bilinearly
+        // upsamples the composed result. Runs after Lighting (the
+        // reprojection fast path reads Res_Lighting) and before Reflection.
+        return Vk::MakePass<
+            "RtrHalfTrace", Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Lighting>, Vk::ComputeWrite<Res_RtrHalf>>(
+            [this](VkCommandBuffer c) noexcept {
+                // The pass exists iff the RT context did (BuildBloomPipelines
+                // gates its creation the same way), so rtCtx is the validity
+                // guard; Vk::ComputePass has no Valid() of its own.
+                if (!self.rtCtx.Valid() || !self.settings.rayTracing.enableReflections || !self.settings.post.enableRTR) {
+                    return;
+                }
+                self.BindHeapsAndPushFrame(c);
+
+                auto& heap = self.heapManager;
+
+                // Binding order mirrors rtr_half.slang's declaration order
+                // (the heap writes map positionally onto the reflected table).
+                heap.WriteBindings(
+                    self.ctx, self.rtrHalfHeapBindings, fIdx,
+                    Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget),
+                    Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer),
+                    Vk::Assume<Vk::ShaderRead<Res_Lighting>>(self.graphResources.lightingTarget), self.defaultSampler,
+                    self.frames.frameUniformBuffers[fIdx], self.frames.instanceDataBuffers[fIdx],
+                    Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
+                        .handle   = self.textureImages[self.blueNoiseTexIdx].Handle(),
+                        .view     = self.textureViews[self.blueNoiseTexIdx].Get(),
+                        .extent   = {.width = self.blueNoiseWidth, .height = self.blueNoiseHeight, .depth = 1},
+                        .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
+                        .format   = VK_FORMAT_R8G8B8A8_UNORM,
+                        .viewInfo = &self.blueNoiseViewInfo
+                    },
+                    self.blueNoiseSampler,
+                    Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.rtrHalf),
+                    Vk::AsAddressWrite {
+                        .address = self.frames.tlas.Current() != VK_NULL_HANDLE ?
+                                       self.rtCtx.GetAccelerationStructureAddress(self.frames.tlas.Current()) :
+                                       0
+                    }
+                );
+
+                RenderContext::Impl::RtrHalfPushConstants push {
+                    .halfRes = {self.graphResources.rtrHalf.extent.width, self.graphResources.rtrHalf.extent.height},
+                    .pad     = {}
+                };
+                self.rtrHalfCS.DispatchHeapIndexedThreads(
+                    self.ctx, c, fIdx, self.graphResources.rtrHalf.extent.width, self.graphResources.rtrHalf.extent.height, 1, push
+                );
+            }
+        );
+    }
+
     [[nodiscard]] auto MakeReflectionPass() const noexcept {
         return Vk::MakePass<
             "Reflection", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_Lighting>,
-            Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ShaderReadGeneral<Res_VoxelResolved>, Vk::ColorWrite<Res_HdrSceneColor>>(
+            Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ShaderReadGeneral<Res_VoxelResolved>, Vk::ShaderRead<Res_RtrHalf>,
+            Vk::ColorWrite<Res_HdrSceneColor>>(
             [this](auto& ctx) noexcept {
                 self.reflectionPass.WriteHeap(
                     self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor), self.defaultSampler,
@@ -362,6 +423,15 @@ struct PassFactory {
                     },
                     self.clampSampler, Vk::Assume<Vk::ShaderRead<Res_Lighting>>(self.graphResources.lightingTarget),
                     Vk::Assume<Vk::ShaderReadGeneral<Res_VoxelResolved>>(self.graphResources.voxelResolved), self.frames.instanceDataBuffers[fIdx],
+                    Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
+                        .handle   = self.textureImages[self.blueNoiseTexIdx].Handle(),
+                        .view     = self.textureViews[self.blueNoiseTexIdx].Get(),
+                        .extent   = {.width = self.blueNoiseWidth, .height = self.blueNoiseHeight, .depth = 1},
+                        .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
+                        .format   = VK_FORMAT_R8G8B8A8_UNORM,
+                        .viewInfo = &self.blueNoiseViewInfo
+                    },
+                    self.blueNoiseSampler, Vk::Assume<Vk::ShaderRead<Res_RtrHalf>>(self.graphResources.rtrHalf),
                     Vk::AsAddressWrite {
                         .address = (self.rtCtx.Valid() && self.frames.tlas.Current() != VK_NULL_HANDLE) ?
                                        self.rtCtx.GetAccelerationStructureAddress(self.frames.tlas.Current()) :
@@ -387,7 +457,8 @@ struct PassFactory {
     [[nodiscard]] auto MakeTranslucentReflectionPass() const noexcept {
         return Vk::MakePass<
             "TransReflection", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_TransNorm>, Vk::ShaderRead<Res_TransDepth>, Vk::ShaderRead<Res_Lighting>,
-            Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ShaderReadGeneral<Res_VoxelResolved>, Vk::ColorWrite<Res_TransLighting>>(
+            Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ShaderReadGeneral<Res_VoxelResolved>, Vk::ShaderRead<Res_RtrHalf>,
+            Vk::ColorWrite<Res_TransLighting>>(
             [this](auto& ctx) noexcept {
                 self.translucentReflectionPass.WriteHeap(
                     self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor), self.defaultSampler,
@@ -412,6 +483,15 @@ struct PassFactory {
                     },
                     self.clampSampler, Vk::Assume<Vk::ShaderRead<Res_Lighting>>(self.graphResources.lightingTarget),
                     Vk::Assume<Vk::ShaderReadGeneral<Res_VoxelResolved>>(self.graphResources.voxelResolved), self.frames.instanceDataBuffers[fIdx],
+                    Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
+                        .handle   = self.textureImages[self.blueNoiseTexIdx].Handle(),
+                        .view     = self.textureViews[self.blueNoiseTexIdx].Get(),
+                        .extent   = {.width = self.blueNoiseWidth, .height = self.blueNoiseHeight, .depth = 1},
+                        .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
+                        .format   = VK_FORMAT_R8G8B8A8_UNORM,
+                        .viewInfo = &self.blueNoiseViewInfo
+                    },
+                    self.blueNoiseSampler, Vk::Assume<Vk::ShaderRead<Res_RtrHalf>>(self.graphResources.rtrHalf),
                     Vk::AsAddressWrite {
                         .address = (self.rtCtx.Valid() && self.frames.tlas.Current() != VK_NULL_HANDLE) ?
                                        self.rtCtx.GetAccelerationStructureAddress(self.frames.tlas.Current()) :
@@ -468,10 +548,16 @@ struct PassFactory {
                 );
             };
 
-            const auto Dispatch = [&](Vk::ComputePass& pass, const Vk::HeapPassBindings& bindings, const auto& dst, const auto& src, int mode) noexcept {
-                heap.WriteBindings(self.ctx, bindings, fIdx, src, self.defaultSampler, dst);
+            // Same slot discipline as the HDR denoiser: 3 in-frame dispatches
+            // share one binding table per chain, and heap descriptor writes
+            // are immediate -- each iteration binds and dispatches through
+            // its own slot (span 2 parity x 3 iterations) or the later
+            // WriteBindings clobber the earlier dispatches' descriptors.
+            const auto Dispatch = [&](Vk::ComputePass& pass, const Vk::HeapPassBindings& bindings, const auto& dst, const auto& src, int mode, uint32_t iteration) noexcept {
+                const uint32_t slotIndex = fIdx * 3u + iteration;
+                heap.WriteBindings(self.ctx, bindings, slotIndex, src, self.defaultSampler, dst);
                 pass.DispatchHeapIndexedThreads(
-                    self.ctx, c, fIdx, dst.extent.width, dst.extent.height, 1,
+                    self.ctx, c, slotIndex, dst.extent.width, dst.extent.height, 1,
                     RenderContext::Impl::KawasePushConstants {
                         .mode      = mode,
                         .rcpWidth  = 1.0f / static_cast<float>(src.extent.width),
@@ -496,15 +582,15 @@ struct PassFactory {
             KawaseBarrier();
 
             // 1-3. Downsample chain: thresh -> down1 -> down2 -> down3.
-            Dispatch(self.bloomDownCS, self.bloomDownHeapBindings, down1, thresh, 0);
-            Dispatch(self.bloomDownCS, self.bloomDownHeapBindings, down2, down1, 0);
-            Dispatch(self.bloomDownCS, self.bloomDownHeapBindings, down3, down2, 0);
+            Dispatch(self.bloomDownCS, self.bloomDownHeapBindings, down1, thresh, 0, 0);
+            Dispatch(self.bloomDownCS, self.bloomDownHeapBindings, down2, down1, 0, 1);
+            Dispatch(self.bloomDownCS, self.bloomDownHeapBindings, down3, down2, 0, 2);
 
             // 4-6. Upsample chain with additive recombination of the same-
             //      resolution downsample stages.
-            heap.WriteBindings(self.ctx, self.bloomUpHeapBindings, fIdx, down3, self.defaultSampler, down2, up2);
+            heap.WriteBindings(self.ctx, self.bloomUpHeapBindings, fIdx * 3u + 0u, down3, self.defaultSampler, down2, up2);
             self.bloomUpCS.DispatchHeapIndexedThreads(
-                self.ctx, c, fIdx, up2.extent.width, up2.extent.height, 1,
+                self.ctx, c, fIdx * 3u + 0u, up2.extent.width, up2.extent.height, 1,
                 RenderContext::Impl::KawasePushConstants {
                     .mode      = 1,
                     .rcpWidth  = 1.0f / static_cast<float>(down3.extent.width),
@@ -514,9 +600,9 @@ struct PassFactory {
             );
             KawaseBarrier();
 
-            heap.WriteBindings(self.ctx, self.bloomUpHeapBindings, fIdx, up2, self.defaultSampler, down1, up1);
+            heap.WriteBindings(self.ctx, self.bloomUpHeapBindings, fIdx * 3u + 1u, up2, self.defaultSampler, down1, up1);
             self.bloomUpCS.DispatchHeapIndexedThreads(
-                self.ctx, c, fIdx, up1.extent.width, up1.extent.height, 1,
+                self.ctx, c, fIdx * 3u + 1u, up1.extent.width, up1.extent.height, 1,
                 RenderContext::Impl::KawasePushConstants {
                     .mode      = 1,
                     .rcpWidth  = 1.0f / static_cast<float>(up2.extent.width),
@@ -526,9 +612,9 @@ struct PassFactory {
             );
             KawaseBarrier();
 
-            heap.WriteBindings(self.ctx, self.bloomUpHeapBindings, fIdx, up1, self.defaultSampler, thresh, bloomFinal);
+            heap.WriteBindings(self.ctx, self.bloomUpHeapBindings, fIdx * 3u + 2u, up1, self.defaultSampler, thresh, bloomFinal);
             self.bloomUpCS.DispatchHeapIndexedThreads(
-                self.ctx, c, fIdx, bloomFinal.extent.width, bloomFinal.extent.height, 1,
+                self.ctx, c, fIdx * 3u + 2u, bloomFinal.extent.width, bloomFinal.extent.height, 1,
                 RenderContext::Impl::KawasePushConstants {
                     .mode      = 1,
                     .rcpWidth  = 1.0f / static_cast<float>(up1.extent.width),
@@ -536,6 +622,91 @@ struct PassFactory {
                     .padding   = 0.0f
                 }
             );
+        });
+    }
+
+    // A-Trous wavelet denoise of the composited HDR color. Runs after the
+    // reflection/forward passes have deposited their 1 SPP ray-traced grain
+    // into hdrSceneColor and before bloom reads it. Ping-pongs through the
+    // DenoiseA/B scratch targets and writes the final iteration back into
+    // hdrSceneColor, so every downstream consumer (bloom, AA, blit) sees the
+    // denoised result without changes.
+    /// Must match the slotSpan of hdrDenoiseHeapBindings (2 parity frames x
+    /// this many iterations) in RenderInitPostProcess.cpp.
+    static constexpr uint32_t kDenoiseMaxIterations = 3;
+
+    [[nodiscard]] auto MakeHdrDenoisePass() const noexcept {
+        // HdrSceneColor is declared as a read (same as BloomKawase): the graph
+        // transitions it COLOR_ATTACHMENT -> GENERAL on entry, and the final
+        // write-back is ordered against bloom by the explicit compute barrier
+        // every dispatch ends with.
+        return Vk::MakePass<
+            "HdrDenoise", Vk::ComputeReadGeneral<Res_HdrSceneColor>, Vk::ComputeWrite<Res_DenoiseA>, Vk::ComputeWrite<Res_DenoiseB>,
+            Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_NormRough>>([this](VkCommandBuffer c) noexcept {
+            const uint32_t passes = self.settings.rayTracing.denoiserPasses;
+            const bool active     = self.rtCtx.Valid() && passes > 0 && (self.settings.rayTracing.enableShadows || self.settings.rayTracing.enableReflections);
+            if (!active) {
+                return;
+            }
+            self.BindHeapsAndPushFrame(c);
+
+            auto& heap = self.heapManager;
+
+            const auto hdr   = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.hdrSceneColor);
+            const auto dstA  = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.denoiseA);
+            const auto dstB  = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.denoiseB);
+            const auto depth = Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget);
+            const auto norm  = Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer);
+
+            const auto AtrousBarrier = [&c]() noexcept {
+                Vk::MemoryBarrier(
+                    c, {.src_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                        .src_access = VK_ACCESS_2_SHADER_WRITE_BIT,
+                        .dst_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                        .dst_access = VK_ACCESS_2_SHADER_READ_BIT}
+                );
+            };
+
+            // Heap descriptor writes are immediate host writes, so each
+            // in-frame iteration must bind+dispatch through its OWN slot
+            // (span was built as 2 parity x 3 iterations); reusing fIdx would
+            // let iteration N+1's WriteBindings clobber the descriptors of
+            // iteration N before the GPU ever reads them, and every dispatch
+            // would run against the last binding written.
+            const auto Dispatch = [&](const auto& src, const auto& dst, uint32_t step, uint32_t iteration) noexcept {
+                const uint32_t slotIndex = fIdx * kDenoiseMaxIterations + iteration;
+                heap.WriteBindings(self.ctx, self.hdrDenoiseHeapBindings, slotIndex, src, depth, norm, dst, self.frames.frameUniformBuffers[fIdx]);
+                self.hdrDenoiseCS.DispatchHeapIndexedThreads(
+                    self.ctx, c, slotIndex, dst.extent.width, dst.extent.height, 1,
+                    RenderContext::Impl::HdrAtrousPushConstants {
+                        .stepSize  = step,
+                        .phiDepth  = 0.02f,
+                        .phiNormal = 16.0f,
+                        .pad       = 0u
+                    }
+                );
+                AtrousBarrier();
+            };
+
+            // Wavelet ladder: doubling tap spacing reaches a wide footprint
+            // with narrow kernels. The last dispatch always lands back on
+            // hdrSceneColor.
+            switch (passes) {
+            case 1:
+                Dispatch(hdr, dstA, 1, 0);
+                Dispatch(dstA, hdr, 2, 1);
+                break;
+            case 2:
+                Dispatch(hdr, dstA, 1, 0);
+                Dispatch(dstA, dstB, 2, 1);
+                Dispatch(dstB, hdr, 2, 2);
+                break;
+            default:
+                Dispatch(hdr, dstA, 1, 0);
+                Dispatch(dstA, dstB, 2, 1);
+                Dispatch(dstB, hdr, 4, 2);
+                break;
+            }
         });
     }
 
@@ -551,10 +722,16 @@ struct PassFactory {
             FrameRecorder recorder(c, self);
             recorder.encoder.BindPipeline(self.decalPipeline.Get(), self.decalPipelineLayout);
 
+            // The decal PS needs invWorld * invViewProj per fragment; compose
+            // it once per decal on the CPU instead. Must use the same
+            // unjittered inverse the frame CB publishes, because that is the
+            // matrix the depth-reconstruction it replaces was using.
+            const JPH::Mat44 invViewProj = self.unjittered_view_proj.Inversed();
+
             for (const auto& decalCmd: self.queues.decalQueue) {
                 RenderContext::Impl::DecalPushConstants decalPC {
                     .world       = decalCmd.transform,
-                    .invWorld    = decalCmd.invTransform,
+                    .clipToLocal = decalCmd.invTransform * invViewProj,
                     .albedoIndex = decalCmd.albedoIndex,
                     .normalIndex = decalCmd.normalIndex,
                     .roughness   = decalCmd.roughness,
@@ -760,7 +937,7 @@ struct PassFactory {
 
 auto BuildComputeGraph(const PassFactory& factory) {
     return Vk::CompileTimeFrameGraph(
-        factory.MakeClusterCullingPass(), factory.MakeVolumetricClearPass(), factory.MakeVolumetricFogInjectPass(), factory.MakeVolumetricLightInjectPass(),
+        factory.MakeClusterCullingPass(), factory.MakeVolumetricFogInjectPass(), factory.MakeVolumetricLightInjectPass(),
         factory.MakeVolumetricIntegrationPass(), factory.MakeVolumetricTemporalPass(), factory.MakeParticleUpdatePass(), factory.MakeMeshParticleUpdatePass()
     );
 }
@@ -771,7 +948,9 @@ auto BuildFrameGraph(const PassFactory& factory, GetSwapchainImageT&& getSwapcha
 
     auto corePasses = std::tuple {factory.MakeShadowPass(),     factory.MakeHiZGeneratePass(),           factory.MakeMainPass2(),   factory.MakeDecalPass(),
                                   factory.MakeViewmodelPass(),  factory.MakeTranslucentPrePass(),        factory.MakeLightingPass(),
-                                  factory.MakeReflectionPass(), factory.MakeTranslucentReflectionPass(), factory.MakeForwardPass()};
+                                  factory.MakeRtrHalfTracePass(), factory.MakeReflectionPass(),          factory.MakeTranslucentReflectionPass(),
+                                  factory.MakeForwardPass(),
+                                  factory.MakeHdrDenoisePass()};
 
     auto bloomPasses = std::tuple {factory.MakeBloomPass()};
 

@@ -5,12 +5,14 @@
 
 #include "Extensions.hpp"
 
+#include <Zahlen/Log.hpp>
+
 namespace ZHLN::Vk {
 
 // Private extension-builder error (Tier 1): declared at file scope in this
 // translation unit so no header exposes it.
 enum class ExtensionBuilderError : uint8_t {
-    MissingRequiredExtension[[= Reflect::Description("A required Vulkan extension is missing")]] = 1,
+    MissingRequiredExtension[[= Reflect::Description<"A required Vulkan extension is missing">{}]] = 1,
 };
 
 // ============================================================================
@@ -124,6 +126,13 @@ auto ExtensionBuilder::OptionalGroup(std::initializer_list<std::string_view> nam
 
 auto ExtensionBuilder::Build() noexcept -> std::expected<ExtensionResult, ZHLN::Error> {
     if (!_missingRequired.empty()) {
+        // Name the culprits: the fatal-error path prints only the error
+        // enumerator, which says nothing about which extension the driver
+        // lacks (and says even less on builds compiled with
+        // ZHLN_NO_ANNOTATION_EXTRACT, where the Description text is gone).
+        for (const auto& name: _missingRequired) {
+            ZHLN::Log("[Extensions] Required Vulkan extension not supported by this driver: {}", name);
+        }
         return std::unexpected(ExtensionBuilderError::MissingRequiredExtension);
     }
     return ExtensionResult(std::move(_active));

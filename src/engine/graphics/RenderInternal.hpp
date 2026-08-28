@@ -419,6 +419,12 @@ struct ShaderPair;
 // ============================================================================
 // Frame Graph Resource Tags
 // ============================================================================
+/// Number of Hi-Z mip levels generated per frame. The culling consumer
+/// clamps its occlusion-test level to the deepest generated mip, so bounds
+/// smaller than one mip-(kMaxGeneratedHiZMips-1) texel are tested against
+/// that level's conservative max depth.
+inline constexpr uint32_t kMaxGeneratedHiZMips = 7;
+
 using Res_SceneColor    = Vk::GraphImage<"SceneColor", VK_FORMAT_B10G11R11_UFLOAT_PACK32, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_Velocity      = Vk::GraphImage<"Velocity", VK_FORMAT_R16G16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_NormRough     = Vk::GraphImage<"NormRough", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
@@ -427,6 +433,14 @@ using Res_ShadowMap     = Vk::GraphImage<"ShadowMap", VK_FORMAT_D32_SFLOAT, VK_I
 using Res_ShadowAtlas   = Vk::GraphImage<"ShadowAtlas", VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT>;
 using Res_Lighting      = Vk::GraphImage<"Lighting", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_HdrSceneColor = Vk::GraphImage<"HdrSceneColor", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+// A-Trous ping-pong scratch for the HDR scene denoiser (same size/format as
+// the scene color it filters; final iteration writes back into hdrSceneColor).
+using Res_DenoiseA      = Vk::GraphImage<"DenoiseA", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_DenoiseB      = Vk::GraphImage<"DenoiseB", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+// Half-resolution composed RTR result for the VNDF roughness band (the
+// scale divisor also opts the target into storage-image usage in
+// RenderInitTargets, same as the bloom cascades).
+using Res_RtrHalf       = Vk::GraphImage<"RtrHalf", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
 using Res_BloomThresh   = Vk::GraphImage<"BloomThresh", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
 using Res_BloomDown1    = Vk::GraphImage<"BloomDown1", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 4>;
 using Res_BloomDown2    = Vk::GraphImage<"BloomDown2", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 8>;
@@ -486,6 +500,9 @@ struct RenderContext::Impl {
         Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>          normalRoughnessBuffer;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     lightingTarget;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     hdrSceneColor;
+        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     denoiseA;
+        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     denoiseB;
+        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     rtrHalf;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomThresholdTarget;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomDown1;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomDown2;
@@ -514,6 +531,9 @@ struct RenderContext::Impl {
             Res_NormRough     normalRoughnessBuffer;
             Res_Lighting      lightingTarget;
             Res_HdrSceneColor hdrSceneColor;
+            Res_DenoiseA      denoiseA;
+            Res_DenoiseB      denoiseB;
+            Res_RtrHalf       rtrHalf;
             Res_BloomThresh   bloomThresholdTarget;
             Res_BloomDown1    bloomDown1;
             Res_BloomDown2    bloomDown2;
@@ -617,7 +637,6 @@ struct RenderContext::Impl {
         DoubleBuffered<Vk::Buffer>                                      tlasBuffer;
         DoubleBuffered<Vk::Buffer>                                      tlasScratchBuffer;
         DoubleBuffered<Vk::Buffer>                                      tlasInstanceBuffers;
-        DoubleBuffered<Vk::Buffer>                                      tlasStagingBuffers;
         DoubleBuffered<BufferHandle>                                    debugMeshHandles;
         DoubleBuffered<Vk::Buffer>                                      fogVolumesBuffer;
 
@@ -679,6 +698,7 @@ struct RenderContext::Impl {
     VkSamplerCreateInfo shadowSamplerInfo {};
     VkSamplerCreateInfo defaultSamplerInfo {};
     VkSamplerCreateInfo pointSamplerInfo {};
+    VkSamplerCreateInfo blueNoiseSamplerInfo {};
 
     // Static image create infos for views that are not plain RenderTargets.
     VkImageViewCreateInfo shadowAtlasCubeViewInfo {};
@@ -703,6 +723,12 @@ struct RenderContext::Impl {
     Vk::Sampler defaultSampler;
     Vk::Sampler pointSampler;
 
+    // NEAREST + REPEAT sampler for the blue noise tile. Repeat addressing is
+    // what lets the shader scroll the tile in hardware; nearest matters because
+    // filtering a noise texture averages neighbouring texels back toward the
+    // mean, destroying exactly the high-frequency content it exists to supply.
+    Vk::Sampler blueNoiseSampler;
+
     Vk::Image      volumetricNoiseImage;
     Vk::ImageView  volumetricNoiseView;
     VkImageViewCreateInfo volumetricNoiseViewInfo {};
@@ -726,9 +752,13 @@ struct RenderContext::Impl {
     // up x3) recorded inside a single frame-graph pass instead of seven raster
     // render passes.
     Vk::ComputePass     bloomThresholdCS;
+    Vk::ComputePass     hdrDenoiseCS;
+    Vk::ComputePass     rtrHalfCS;
     Vk::ComputePass     bloomDownCS;
     Vk::ComputePass     bloomUpCS;
     Vk::HeapPassBindings bloomThresholdHeapBindings;
+    Vk::HeapPassBindings hdrDenoiseHeapBindings;
+    Vk::HeapPassBindings rtrHalfHeapBindings;
     Vk::HeapPassBindings bloomDownHeapBindings;
     Vk::HeapPassBindings bloomUpHeapBindings;
 
@@ -855,6 +885,8 @@ struct RenderContext::Impl {
     Vk::SlangReflectedLayout hizDescLayout; // Reflection only
 
     Vk::SlangReflectedLayout bloomThresholdCSLayout; // Reflection only
+    Vk::SlangReflectedLayout hdrDenoiseCSLayout;     // Reflection only
+    Vk::SlangReflectedLayout rtrHalfCSLayout;        // Reflection only
     Vk::SlangReflectedLayout bloomDownCSLayout;      // Reflection only
     Vk::SlangReflectedLayout bloomUpCSLayout;        // Reflection only
 
@@ -931,6 +963,14 @@ struct RenderContext::Impl {
     uint32_t nextMorphDeltaIndex = 0;
     uint32_t smaaAreaTexIdx      = 0;
     uint32_t smaaSearchTexIdx    = 0;
+    // Bindless index of the blue noise tile (resources/shaders/LDR_RGBA_0.png)
+    // and its extent, needed to build the per-pass TypedImage descriptor.
+    uint32_t blueNoiseTexIdx     = 0;
+    uint32_t blueNoiseWidth      = 0;
+    uint32_t blueNoiseHeight     = 0;
+    // Kept as a member (like iblPayload's view infos) because TypedImage holds
+    // a pointer to it and the reflection pass builds its descriptor inline.
+    VkImageViewCreateInfo blueNoiseViewInfo {};
 
     float lastAspectRatio    = 0.0f;
     float lastFov            = 0.0f;
@@ -1034,7 +1074,7 @@ struct RenderContext::Impl {
 
     struct DecalPushConstants {
         JPH::Mat44 world;
-        JPH::Mat44 invWorld;
+        JPH::Mat44 clipToLocal; // invWorld * unjittered invViewProj (premultiplied per frame)
         uint32_t   albedoIndex;
         uint32_t   normalIndex;
         float      roughness;
@@ -1070,6 +1110,18 @@ struct RenderContext::Impl {
         float rcpWidth;
         float rcpHeight;
         float padding;
+    };
+
+    struct RtrHalfPushConstants {
+        uint32_t halfRes[2]; // half-res dispatch extent (target size)
+        uint32_t pad[2];
+    };
+
+    struct HdrAtrousPushConstants {
+        uint32_t stepSize;   // tap spacing in pixels (1, 2, 4)
+        float    phiDepth;   // depth edge-stop strength (relative to linear depth)
+        float    phiNormal;  // normal edge-stop exponent
+        uint32_t pad;
     };
 
     struct BlitPushConstants {
@@ -1129,6 +1181,7 @@ struct RenderContext::Impl {
     void               SortDrawQueue();
     [[nodiscard]] auto InitializeSystemTextures() noexcept -> std::expected<void, Error>;
     [[nodiscard]] auto InitializeVolumetricNoiseTexture() noexcept -> std::expected<void, Error>;
+    [[nodiscard]] auto InitializeBlueNoiseTexture() -> std::expected<void, Error>;
     void               WriteVolumetricNoiseDescriptor() noexcept;
 
     void RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Compute> compCmd);

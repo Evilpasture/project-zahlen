@@ -28,6 +28,11 @@ SamplerState pointSampler;
 TextureCubeArray<float> punctualShadowCube; //  Omni-directional shadows
 Texture2DArray<float> punctualShadow2D;     // Spotlight shadows
 
+// Blue noise tile for the RT shadow dither. Declared before the TLAS so the
+// NoRT variant still gets both bindings -- only the trailing hole moves.
+Texture2D<float4> blueNoiseTex;
+SamplerState blueNoiseSampler;
+
 // The TLAS binding is declared LAST on purpose: in the NoRT variant this
 // declaration disappears entirely, so the (never present) hole stays at the
 // tail of the binding table and positional descriptor writes stay aligned.
@@ -133,18 +138,25 @@ float4 ComputeAmbientAndAO(float2 uv, uint2 pixelPos, float3 N, float3 worldPos,
             float cosTheta = cos(angle * 2.0f * 3.14159265f);
             float sinTheta = sin(angle * 2.0f * 3.14159265f);
 
+            // Loop invariants, hoisted: the tangent frame depends only on N,
+            // the projection of the shading point and its camera-relative
+            // vector only on worldPos. Rebuilding these per sample was 8-16x
+            // redundant work; the per-sample projection of the offset point
+            // exploits linearity: viewProj*(P + r*d) = viewProj*P + r*(viewProj*d).
+            float3 up        = abs(N.y) < 0.999f ? float3(0.0f, 1.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f);
+            float3 tangent   = normalize(cross(up, N));
+            float3 bitangent = cross(N, tangent);
+            float4 centerClip = mul(pc.viewProj, float4(worldPos, 1.0f));
+
             int effectiveSamples = min(pc.giSamples, 16);
             for (int s = 0; s < effectiveSamples; ++s) {
                 float3 sampleOffset = HemisphereSamples[s % 8];
                 float3 rotatedSample =
                     float3(sampleOffset.x * cosTheta - sampleOffset.y * sinTheta, sampleOffset.x * sinTheta + sampleOffset.y * cosTheta, sampleOffset.z);
-                float3 up        = abs(N.y) < 0.999f ? float3(0.0f, 1.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f);
-                float3 tangent   = normalize(cross(up, N));
-                float3 bitangent = cross(N, tangent);
                 float3 dir       = rotatedSample.x * tangent + rotatedSample.y * bitangent + rotatedSample.z * N;
-                float3 testPos   = worldPos + dir * pc.aoRadius;
+                float3 offsetPos = dir * pc.aoRadius;
 
-                float4 clipPos = mul(pc.viewProj, float4(testPos, 1.0f));
+                float4 clipPos = centerClip + mul(pc.viewProj, float4(offsetPos, 0.0f));
                 // Native Vulkan positive coordinate mapping mapping [-1, 1] to [0, 1]
                 float2 uv_sample = (clipPos.xy / clipPos.w) * 0.5f + 0.5f;
 
@@ -155,11 +167,20 @@ float4 ComputeAmbientAndAO(float2 uv, uint2 pixelPos, float3 N, float3 worldPos,
                 if (sampleRawDepth >= 1.0f)
                     continue;
 
-                float3 sampleWorldPos = ReconstructWorldPos(uv_sample, sampleRawDepth, pc.invViewProj);
-                float diff            = length(testPos - pc.camPos.xyz) - length(sampleWorldPos - pc.camPos.xyz);
+                // Compare view-axis depths instead of Euclidean camera
+                // distances: the test point's linear view depth is the
+                // clip-space w already computed for its projection, and the
+                // sample's comes from the same invProj linearization the
+                // A-Trous denoiser uses. This drops the 4x4 world
+                // reconstruction and both square roots per sample. Near the
+                // screen edges the view axis diverges from the line of
+                // sight, so the occlusion threshold shifts slightly there --
+                // the standard depth-buffer AO approximation.
+                float4 linClip = mul(frame.invProj, float4(0.0f, 0.0f, sampleRawDepth, 1.0f));
+                float diff     = clipPos.w - abs(linClip.z / linClip.w);
 
                 if (diff > 0.0f) {
-                    float finalWeight = smoothstep(0.0f, pc.aoBias * 2.0f, diff - pc.aoBias) * smoothstep(0.0f, 1.0f, pc.aoRadius / abs(diff));
+                    float finalWeight = smoothstep(0.0f, pc.aoBias * 2.0f, diff - pc.aoBias) * smoothstep(0.0f, 1.0f, pc.aoRadius / max(abs(diff), 0.001f));
                     if (pc.giMode == 1)
                         occlusion += finalWeight;
                     else if (pc.giMode == 2)
@@ -222,8 +243,10 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     // nearer than the fade start, which never sample them).
     float cascadeShadow = 1.0f;
     bool  needCascade   = true;
+    bool  rtrBlendBand  = false;
 #ifndef DISABLE_RTR
-    needCascade = !(ENABLE_RTR != 0 && pc.enableRTR != 0 && viewDepth < 80.0f);
+    needCascade  = !(ENABLE_RTR != 0 && pc.enableRTR != 0 && viewDepth < 80.0f);
+    rtrBlendBand = (ENABLE_RTR != 0 && pc.enableRTR != 0 && viewDepth >= 80.0f && viewDepth < 160.0f);
 #endif
     if (needCascade) {
         uint cascadeIndex = 0;
@@ -255,7 +278,14 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
         shadowPos.xy = shadowPos.xy * 0.5f + 0.5f * shadowPos.w;
 
-        cascadeShadow = CalculateShadowPCSS(shadowPos, N, L_sun, input.pos.xy, shadowMap, shadowSampler, pointSampler, frame.shadowResolution, cascadeIndex, worldDepthPerNdc);
+        // In the 80-160 m RT-blend band the cascade result is lerped against
+        // the ray-traced shadow, so half the PCSS taps are invisible under
+        // the blend; >= 160 m keeps the full kernel. The reduced variant
+        // strides the same fixed Poisson disks -- deterministic, no new
+        // temporal noise.
+        cascadeShadow = CalculateShadowPCSS(
+            shadowPos, N, L_sun, input.pos.xy, shadowMap, shadowSampler, pointSampler, frame.shadowResolution, cascadeIndex, worldDepthPerNdc, rtrBlendBand
+        );
     }
     shadow = cascadeShadow;
 
@@ -273,9 +303,9 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     // casters are unaffected: the cascade pass re-renders them every frame.
     if (ENABLE_RTR != 0 && pc.enableRTR != 0 && viewDepth < 160.0f) {
         if (viewDepth < 80.0f) {
-            shadow = CalculateShadowRayTraced(worldPos, N, L_sun, input.pos.xy, pc.camPos.w, tlas, frame.sunSize);
+            shadow = CalculateShadowRayTraced(worldPos, N, L_sun, input.pos.xy, pc.camPos.w, tlas, blueNoiseTex, blueNoiseSampler, frame.sunSize);
         } else {
-            float rtrShadow = CalculateShadowRayTraced(worldPos, N, L_sun, input.pos.xy, pc.camPos.w, tlas, frame.sunSize);
+            float rtrShadow = CalculateShadowRayTraced(worldPos, N, L_sun, input.pos.xy, pc.camPos.w, tlas, blueNoiseTex, blueNoiseSampler, frame.sunSize);
             float t         = saturate((viewDepth - 80.0f) / 80.0f);
             t               = t * t * (3.0f - 2.0f * t);
             shadow          = lerp(rtrShadow, cascadeShadow, t);
@@ -327,15 +357,22 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         } else { // POINT/SPOT LIGHT
             if (light.type == 0 || light.type == 4)
                 continue;
-            float3 L_unnorm    = light.position - worldPos;
-            float distToCenter = length(L_unnorm);
+            float3 L_unnorm = light.position - worldPos;
+            float range     = max(light.range, 0.001f);
+            float distSq    = dot(L_unnorm, L_unnorm);
+            // Outside the light's sphere the squared window term is exactly
+            // zero, so reject before paying for the sqrt, the normalize, and
+            // the GGX evaluation gated on NdotL below.
+            if (distSq >= range * range)
+                continue;
+            float distToCenter = sqrt(distSq);
             float3 L_p         = L_unnorm / (distToCenter + 1e-5f);
             float NdotL        = max(dot(N, L_p), 0.0f);
 
-            float distRatio = distToCenter / max(light.range, 0.001f);
+            float distRatio = distToCenter / range;
             float window    = saturate(1.0f - distRatio * distRatio);
             window *= window;
-            float atten = window / (distToCenter * distToCenter + 1.0f);
+            float atten = window / (distSq + 1.0f);
 
             if (NdotL > 0.0f) {
                 float3 H   = normalize(V + L_p);

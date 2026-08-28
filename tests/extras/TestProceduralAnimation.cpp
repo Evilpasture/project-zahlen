@@ -28,9 +28,9 @@ import ZHLN.Locomotion;
 import ZHLN.ProceduralAnimation;
 
 enum class ProceduralAnimationTestError : uint32_t {
-    RigMappingFailed[[= ZHLN::Reflect::Description("The generated procedural rig did not map all core and secondary controls.")]] = 1,
-    GaitInvariantFailed[[= ZHLN::Reflect::Description("The distance-driven gait clock or alternating foot phases violated its invariant.")]],
-    HairConstraintFailed[[= ZHLN::Reflect::Description("The XPBD hair solver produced a non-finite or excessively stretched segment.")]],
+    RigMappingFailed[[= ZHLN::Reflect::Description<"The generated procedural rig did not map all core and secondary controls.">{}]] = 1,
+    GaitInvariantFailed[[= ZHLN::Reflect::Description<"The distance-driven gait clock or alternating foot phases violated its invariant.">{}]],
+    HairConstraintFailed[[= ZHLN::Reflect::Description<"The XPBD hair solver produced a non-finite or excessively stretched segment.">{}]],
 };
 
 struct ProceduralAnimationTestSuite {

@@ -11,8 +11,8 @@ namespace ZHLN::Vk {
 
 // Command-pool validity and command-buffer allocation failures.
 enum class CommandPoolError : uint8_t {
-    PoolNotReady[[= Reflect::Description("Command pool device handle is not initialized")]] = 1,
-    CommandBufferAllocationFailed[[= Reflect::Description("Command buffer allocation failed (out of memory)")]],
+    PoolNotReady[[= Reflect::Description<"Command pool device handle is not initialized">{}]] = 1,
+    CommandBufferAllocationFailed[[= Reflect::Description<"Command buffer allocation failed (out of memory)">{}]],
 };
 
 template <Vk::QueueType QType>

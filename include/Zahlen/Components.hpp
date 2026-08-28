@@ -176,6 +176,15 @@ struct Components {
     struct PhysicsComponent {
         Entity physicsHandle;
     };
+
+    /// Ray tracing feature flags and SPP budget. The graphics settings sync
+    /// rebuilds GraphicsSettings::rayTracing from this component every frame,
+    /// so anything written directly into settings.rayTracing (presets, debug
+    /// tools, tests) must go through this component to persist. The
+    /// reflection toggle remains owned by PostProcessSettings::enableRTR.
+    struct RayTracingSettingsComponent {
+        RayTracingConfig config {};
+    };
     struct PhysicsStateComponent {
         JPH::Vec3 currPosition         = JPH::Vec3::sZero();
         JPH::Vec3 prevPosition         = JPH::Vec3::sZero();

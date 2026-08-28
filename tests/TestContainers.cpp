@@ -56,17 +56,17 @@ struct LifetimeTracker {
 // ============================================================================
 
 enum class CoreContainersTestError : uint32_t {
-    MemoryLeakDetected[[= ZHLN::Reflect::Description("Resource lifetime mismatch: active memory leak detected.")]] = 1,
-    ArrayInvariantFailed[[= ZHLN::Reflect::Description("Array operation violated container invariants.")]],
-    HashMapInvariantFailed[[= ZHLN::Reflect::Description("HashMap failed retrieval, tombstone, or resizing test.")]],
-    ObjectPoolFailed[[= ZHLN::Reflect::Description("ObjectPool slot recycling or chunk growth failed.")]],
-    QueueOrderFailed[[= ZHLN::Reflect::Description("Queue FIFO ordering or concurrent popping failed.")]],
-    SkipListInvariantFailed[[= ZHLN::Reflect::Description("SkipList ordering or concurrent GC failed.")]],
-    RadixSortFailed[[= ZHLN::Reflect::Description("RadixSort64 produced unsorted or corrupted output.")]],
-    FixedStringFailed[[= ZHLN::Reflect::Description("FixedString capacity truncation or manipulation failed.")]],
-    AtomicInvariantFailed[[= ZHLN::Reflect::Description("Atomic POD operations returned incorrect values.")]],
-    RangesPipelineFailed[[= ZHLN::Reflect::Description("Ranges combinator returned unexpected output.")]],
-    LoopUnrollFailed[[= ZHLN::Reflect::Description("Compile-time loop unrolling failed to execute exact iteration count.")]]
+    MemoryLeakDetected[[= ZHLN::Reflect::Description<"Resource lifetime mismatch: active memory leak detected.">{}]] = 1,
+    ArrayInvariantFailed[[= ZHLN::Reflect::Description<"Array operation violated container invariants.">{}]],
+    HashMapInvariantFailed[[= ZHLN::Reflect::Description<"HashMap failed retrieval, tombstone, or resizing test.">{}]],
+    ObjectPoolFailed[[= ZHLN::Reflect::Description<"ObjectPool slot recycling or chunk growth failed.">{}]],
+    QueueOrderFailed[[= ZHLN::Reflect::Description<"Queue FIFO ordering or concurrent popping failed.">{}]],
+    SkipListInvariantFailed[[= ZHLN::Reflect::Description<"SkipList ordering or concurrent GC failed.">{}]],
+    RadixSortFailed[[= ZHLN::Reflect::Description<"RadixSort64 produced unsorted or corrupted output.">{}]],
+    FixedStringFailed[[= ZHLN::Reflect::Description<"FixedString capacity truncation or manipulation failed.">{}]],
+    AtomicInvariantFailed[[= ZHLN::Reflect::Description<"Atomic POD operations returned incorrect values.">{}]],
+    RangesPipelineFailed[[= ZHLN::Reflect::Description<"Ranges combinator returned unexpected output.">{}]],
+    LoopUnrollFailed[[= ZHLN::Reflect::Description<"Compile-time loop unrolling failed to execute exact iteration count.">{}]]
 };
 
 // ============================================================================
