@@ -20,6 +20,7 @@ using AASettingsComponent       = Components::AASettingsComponent;
 using GlobalSettingsTagComponent = Components::GlobalSettingsTagComponent;
 using MainCameraTagComponent    = Components::MainCameraTagComponent;
 using PostProcessSettingsComponent = Components::PostProcessSettingsComponent;
+using RayTracingSettingsComponent  = Components::RayTracingSettingsComponent;
 using ShadowSettingsComponent   = Components::ShadowSettingsComponent;
 
 [[nodiscard]] Entity FirstOrNull(std::span<const Entity> entities) noexcept {
@@ -101,6 +102,16 @@ GraphicsSettings CollectGraphicsSettings(Engine& engine) {
 
     // --- Ray tracing ---------------------------------------------------------
     // Single writer for the semantic toggle ↔ ABI integer pair.
+    // Ray tracing knobs live on their own component so presets and debug
+    // tools persist; without one, the struct defaults apply every frame.
+    if (const Entity rtEnt = FirstOrNull(reg.GetEntitiesWith<RayTracingSettingsComponent>()); rtEnt != Entity::Null()) {
+        if (const auto* rt = reg.Get<RayTracingSettingsComponent>(rtEnt); rt != nullptr) {
+            gfx.rayTracing = rt->config;
+        }
+    }
+    // The reflection toggle stays owned by PostProcessSettings::enableRTR
+    // (the in-game menu writes it there); sync it in last so the component
+    // cannot shadow the user's menu choice.
     gfx.rayTracing.enableReflections = gfx.post.enableRTR != 0;
     gfx.qualityPreset                = gfx.DetectPreset();
     return gfx;
@@ -178,6 +189,22 @@ bool ApplyQualityPreset(Engine& engine, QualityLevel preset) {
             }
         );
     }
+
+    // --- Write-back: ray tracing ----------------------------------------------
+    // Persist the ray tracing knobs the preset just wrote; without this they
+    // would be rebuilt from defaults on the next settings sync.
+    Entity rtEnt = FirstOrNull(reg.GetEntitiesWith<RayTracingSettingsComponent>());
+    if (rtEnt == Entity::Null()) {
+        rtEnt = reg.Create();
+        reg.Add(rtEnt, RayTracingSettingsComponent {});
+        changed = true;
+    }
+    changed |= reg.Patch<RayTracingSettingsComponent>(
+        rtEnt,
+        [&gfx](RayTracingSettingsComponent& c) {
+            c.config = gfx.rayTracing;
+        }
+    );
 
     if (changed) {
         ZHLN::Log("Graphics quality preset applied: {}", ZHLN::ToString(preset));

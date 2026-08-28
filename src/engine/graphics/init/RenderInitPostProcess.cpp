@@ -151,7 +151,13 @@ auto RenderContext::Impl::BuildBloomPipelines() -> std::expected<void, Error> {
         .and_then([&]() -> std::expected<void, Error> {
             return buildCompute(bloomDownCS, bloomDownCSLayout, bloomDownHeapBindings, Resource::bloom_down_cs);
         })
-        .and_then([&]() -> std::expected<void, Error> { return buildCompute(bloomUpCS, bloomUpCSLayout, bloomUpHeapBindings, Resource::bloom_up_cs); });
+        .and_then([&]() -> std::expected<void, Error> { return buildCompute(bloomUpCS, bloomUpCSLayout, bloomUpHeapBindings, Resource::bloom_up_cs); })
+        // HDR scene A-Trous wavelet denoiser: one pipeline reused for every
+        // iteration; tap spacing and edge-stops arrive as push constants and
+        // the source/destination swap through the shared heap binding table.
+        .and_then([&]() -> std::expected<void, Error> {
+            return buildCompute(hdrDenoiseCS, hdrDenoiseCSLayout, hdrDenoiseHeapBindings, Resource::hdr_denoise_atrous_cs);
+        });
 }
 
 auto RenderContext::Impl::BuildBlitPipeline() -> std::expected<void, Error> {
@@ -315,7 +321,7 @@ auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, Error> {
         .and_then([&]() -> std::expected<void, Error> {
             return RegisterAndBuild(
                 this, "Bloom", [this]() -> std::expected<void, Error> { return BuildBloomPipelines(); },
-                {Resource::Paths::BloomThresholdCS, Resource::Paths::BloomDownCS, Resource::Paths::BloomUpCS}
+                {Resource::Paths::BloomThresholdCS, Resource::Paths::BloomDownCS, Resource::Paths::BloomUpCS, Resource::Paths::HdrDenoiseAtrousCS}
             );
         })
         .and_then([&]() -> std::expected<void, Error> {

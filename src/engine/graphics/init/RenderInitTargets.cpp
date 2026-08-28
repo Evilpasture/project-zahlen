@@ -200,6 +200,13 @@ std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) 
             Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
         }
 
+        // The HDR A-Trous denoiser ping-pongs through the same GENERAL-layout
+        // compute-only pattern.
+        const std::array denoiseTargets = {graphResources.denoiseA.image.Handle(), graphResources.denoiseB.image.Handle()};
+        for (auto* const img: denoiseTargets) {
+            Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
+        }
+
         // VK_EXT_descriptor_heap: the decal pass samples the depth target
         // through the heap, so rewrite its descriptor whenever the target is
         // recreated (the old view was destroyed). Depth/stencil sampled-image

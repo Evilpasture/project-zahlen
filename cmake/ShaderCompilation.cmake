@@ -201,6 +201,12 @@ add_shader_target(shadow_denoise_atrous_shader
     STAGES "${SHADER_SRC_DIR}/shadow_denoise_atrous.slang|CSMain|cs_6_0|SHADER_SHADOW_DENOISE_ATROUS_SLANG_CS_PATH"
 )
 
+# Color A-Trous wavelet over the composited HDR scene color, run between the
+# reflection/forward passes and bloom to integrate the 1 SPP RT grain.
+add_shader_target(hdr_denoise_atrous_shader
+    STAGES "${SHADER_SRC_DIR}/hdr_denoise_atrous.slang|CSMain|cs_6_0|SHADER_HDR_DENOISE_ATROUS_SLANG_CS_PATH"
+)
+
 # Per-pass scene variants. Each pass compiles its own named entry points
 # against its own varying struct (common.slang), so the geometry and fragment
 # stages of one pipeline agree on the SPIR-V interface by construction.

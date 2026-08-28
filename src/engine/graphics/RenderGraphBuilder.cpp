@@ -567,6 +567,80 @@ struct PassFactory {
         });
     }
 
+    // A-Trous wavelet denoise of the composited HDR color. Runs after the
+    // reflection/forward passes have deposited their 1 SPP ray-traced grain
+    // into hdrSceneColor and before bloom reads it. Ping-pongs through the
+    // DenoiseA/B scratch targets and writes the final iteration back into
+    // hdrSceneColor, so every downstream consumer (bloom, AA, blit) sees the
+    // denoised result without changes.
+    [[nodiscard]] auto MakeHdrDenoisePass() const noexcept {
+        // HdrSceneColor is declared as a read (same as BloomKawase): the graph
+        // transitions it COLOR_ATTACHMENT -> GENERAL on entry, and the final
+        // write-back is ordered against bloom by the explicit compute barrier
+        // every dispatch ends with.
+        return Vk::MakePass<
+            "HdrDenoise", Vk::ComputeReadGeneral<Res_HdrSceneColor>, Vk::ComputeWrite<Res_DenoiseA>, Vk::ComputeWrite<Res_DenoiseB>,
+            Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_NormRough>>([this](VkCommandBuffer c) noexcept {
+            const uint32_t passes = self.settings.rayTracing.denoiserPasses;
+            const bool active     = self.rtCtx.Valid() && passes > 0 && (self.settings.rayTracing.enableShadows || self.settings.rayTracing.enableReflections);
+            if (!active) {
+                return;
+            }
+            self.BindHeapsAndPushFrame(c);
+
+            auto& heap = self.heapManager;
+
+            const auto hdr   = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.hdrSceneColor);
+            const auto dstA  = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.denoiseA);
+            const auto dstB  = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.denoiseB);
+            const auto depth = Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget);
+            const auto norm  = Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer);
+
+            const auto AtrousBarrier = [&c]() noexcept {
+                Vk::MemoryBarrier(
+                    c, {.src_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                        .src_access = VK_ACCESS_2_SHADER_WRITE_BIT,
+                        .dst_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                        .dst_access = VK_ACCESS_2_SHADER_READ_BIT}
+                );
+            };
+
+            const auto Dispatch = [&](const auto& src, const auto& dst, uint32_t step) noexcept {
+                heap.WriteBindings(self.ctx, self.hdrDenoiseHeapBindings, fIdx, src, depth, norm, dst, self.frames.frameUniformBuffers[fIdx]);
+                self.hdrDenoiseCS.DispatchHeapIndexedThreads(
+                    self.ctx, c, fIdx, dst.extent.width, dst.extent.height, 1,
+                    RenderContext::Impl::HdrAtrousPushConstants {
+                        .stepSize  = step,
+                        .phiDepth  = 0.02f,
+                        .phiNormal = 16.0f,
+                        .pad       = 0u
+                    }
+                );
+                AtrousBarrier();
+            };
+
+            // Wavelet ladder: doubling tap spacing reaches a wide footprint
+            // with narrow kernels. The last dispatch always lands back on
+            // hdrSceneColor.
+            switch (passes) {
+            case 1:
+                Dispatch(hdr, dstA, 1);
+                Dispatch(dstA, hdr, 2);
+                break;
+            case 2:
+                Dispatch(hdr, dstA, 1);
+                Dispatch(dstA, dstB, 2);
+                Dispatch(dstB, hdr, 2);
+                break;
+            default:
+                Dispatch(hdr, dstA, 1);
+                Dispatch(dstA, dstB, 2);
+                Dispatch(dstB, hdr, 4);
+                break;
+            }
+        });
+    }
+
     [[nodiscard]] auto MakeDecalPass() const noexcept {
         return Vk::MakePass<"DecalPass", Vk::ShaderRead<Res_Depth>, Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_NormRough>>([this](auto& ctx) noexcept {
             auto c = ctx.Cmd();
@@ -799,7 +873,8 @@ auto BuildFrameGraph(const PassFactory& factory, GetSwapchainImageT&& getSwapcha
 
     auto corePasses = std::tuple {factory.MakeShadowPass(),     factory.MakeHiZGeneratePass(),           factory.MakeMainPass2(),   factory.MakeDecalPass(),
                                   factory.MakeViewmodelPass(),  factory.MakeTranslucentPrePass(),        factory.MakeLightingPass(),
-                                  factory.MakeReflectionPass(), factory.MakeTranslucentReflectionPass(), factory.MakeForwardPass()};
+                                  factory.MakeReflectionPass(), factory.MakeTranslucentReflectionPass(), factory.MakeForwardPass(),
+                                  factory.MakeHdrDenoisePass()};
 
     auto bloomPasses = std::tuple {factory.MakeBloomPass()};
 

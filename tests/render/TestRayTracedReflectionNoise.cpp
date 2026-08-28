@@ -94,6 +94,9 @@ enum class ReflectionNoiseError : uint8_t {
     DitherIsAnisotropic[[= ZHLN::Reflect::Description("The RTR residual has a preferred direction (structured lattice, not blue noise).")]],
     ResidualDidNotConverge[[= ZHLN::Reflect::Description("Under temporal accumulation the reflection residual oscillated instead of falling.")]],
     RayDebrisDetected[[= ZHLN::Reflect::Description("The reflection residual is dominated by isolated single-pixel outliers (ray debris / fireflies).")]],
+    DenoiserDidNotReduceNoise[[= ZHLN::Reflect::Description(
+        "The A-Trous HDR wavelet did not cut the on/on residual over the reflection band by the required margin: the pass may be skipped (denoiserPasses/rtCtx/RT-enable gate), its edge-stops may be rejecting every tap, or the filtered result may not reach Res_HdrSceneColor before the capture."
+    )]],
 };
 
 namespace {
@@ -204,6 +207,25 @@ struct RayTracedReflectionNoiseTestSuite {
             pp.skyHorizon        = JPH::Vec4(0.004f, 0.006f, 0.012f, 1.0f);
             pp.skyGround         = JPH::Vec4(0.001f, 0.001f, 0.002f, 1.0f);
         });
+    }
+
+    /// The A-Trous HDR denoiser (RenderGraphBuilder MakeHdrDenoisePass) runs
+    /// whenever rayTracing.denoiserPasses > 0 and any RT path is on. These
+    /// suites measure RAW 1 SPP statistics -- the wavelet output is spatially
+    /// correlated, so every raw scenario pins the denoiser off through the
+    /// RayTracingSettingsComponent the settings sync reads.
+    static bool SetDenoiser(ZHLN::Engine& engine, uint32_t passes) {
+        auto&      reg  = engine.GetRegistry();
+        const auto ents = reg.GetEntitiesWith<ZHLN::Components::RayTracingSettingsComponent>();
+        if (ents.empty()) {
+            const ZHLN::Entity e = reg.Create();
+            if (e == ZHLN::Entity::Null()) {
+                return false;
+            }
+            reg.Add(e, ZHLN::Components::RayTracingSettingsComponent {.config = ZHLN::RayTracingConfig {.denoiserPasses = passes}});
+            return true;
+        }
+        return reg.Patch<ZHLN::Components::RayTracingSettingsComponent>(ents[0], [passes](auto& c) { c.config.denoiserPasses = passes; });
     }
 
     /// A dark room of metal. The plate is the only surface at or under the 0.4
@@ -341,6 +363,7 @@ struct RayTracedReflectionNoiseTestSuite {
                 return std::unexpected(ReflectionNoiseError::EngineInitFailed);
             }
             RayTracedReflectionNoiseTestSuite::SetAA(*engine, ZHLN::AAMode::None);
+            RayTracedReflectionNoiseTestSuite::SetDenoiser(*engine, 0);
 
             // Off first: it doubles as the ground-truth frame. Three zero
             // deltas in a row proved that a blanket "path inactive" verdict
@@ -440,6 +463,7 @@ struct RayTracedReflectionNoiseTestSuite {
             }
             RayTracedReflectionNoiseTestSuite::SetRTR(*engine, 0, 1);
             RayTracedReflectionNoiseTestSuite::SetAA(*engine, ZHLN::AAMode::None);
+            RayTracedReflectionNoiseTestSuite::SetDenoiser(*engine, 0);
 
             RgbImage prev = RayTracedReflectionNoiseTestSuite::SettleAndCapture(*engine, "rt_refl_structure_a.ppm");
             RayTracedReflectionNoiseTestSuite::TickFrames(*engine, 1);
@@ -516,6 +540,7 @@ struct RayTracedReflectionNoiseTestSuite {
             }
             RayTracedReflectionNoiseTestSuite::SetRTR(*engine, 0, 1);
             RayTracedReflectionNoiseTestSuite::SetAA(*engine, ZHLN::AAMode::None);
+            RayTracedReflectionNoiseTestSuite::SetDenoiser(*engine, 0);
             RayTracedReflectionNoiseTestSuite::TickFrames(*engine, 2);
 
             RgbImage first = RayTracedReflectionNoiseTestSuite::Capture(*engine, "rt_refl_conv_prev.ppm");
@@ -606,6 +631,7 @@ struct RayTracedReflectionNoiseTestSuite {
             }
             RayTracedReflectionNoiseTestSuite::SetRTR(*engine, 0, 1);
             RayTracedReflectionNoiseTestSuite::SetAA(*engine, ZHLN::AAMode::None);
+            RayTracedReflectionNoiseTestSuite::SetDenoiser(*engine, 0);
 
             RgbImage prev = RayTracedReflectionNoiseTestSuite::SettleAndCapture(*engine, "rt_refl_debris_a.ppm");
             RayTracedReflectionNoiseTestSuite::TickFrames(*engine, 1);
@@ -627,6 +653,73 @@ struct RayTracedReflectionNoiseTestSuite {
             }
 
             ZHLN::Println("    [PASS] Reflection changes cluster; no isolated ray debris.");
+            return {};
+        }
+
+        /// The A-Trous HDR denoiser must remove variance, not just relocate
+        /// it: same scene and the same on/on residual estimator as the raw
+        /// scenarios, measured once with the wavelet bypassed and once with
+        /// three iterations (steps 1/2/4). A symmetric kernel integrating
+        /// blue noise must shrink the per-frame difference by a wide margin;
+        /// a frozen or bypassed denoiser leaves it untouched.
+        std::expected<void, ZHLN::Error> hdr_denoiser_reduces_reflection_noise() {
+            auto engine = RayTracedReflectionNoiseTestSuite::CreateTestEngine();
+            if (!ZHLN::Test::AssertTrue(engine != nullptr)) {
+                return std::unexpected(ReflectionNoiseError::EngineInitFailed);
+            }
+            if (!engine->GetRenderContext().RayTracingSupported()) {
+                ZHLN::Println("    [SKIP] Device has no ray tracing support; denoiser check is not applicable.");
+                return {};
+            }
+            if (!RayTracedReflectionNoiseTestSuite::BuildReflectionScene(*engine)) {
+                return std::unexpected(ReflectionNoiseError::EngineInitFailed);
+            }
+            RayTracedReflectionNoiseTestSuite::SetRTR(*engine, 0, 1);
+            RayTracedReflectionNoiseTestSuite::SetAA(*engine, ZHLN::AAMode::None);
+
+            // Raw pair: denoiser bypassed.
+            RayTracedReflectionNoiseTestSuite::SetDenoiser(*engine, 0);
+            RgbImage rawA = RayTracedReflectionNoiseTestSuite::SettleAndCapture(*engine, "rt_denoise_raw_a.ppm");
+            RayTracedReflectionNoiseTestSuite::TickFrames(*engine, 1);
+            RgbImage rawB = RayTracedReflectionNoiseTestSuite::Capture(*engine, "rt_denoise_raw_b.ppm");
+            if (!ZHLN::Test::ExpectTrue(rawA.Valid() && rawB.Valid())) {
+                return std::unexpected(ReflectionNoiseError::CaptureFailed);
+            }
+            const std::vector<double> rawDiff = LumaDifference(rawA, rawB);
+            const BBox                band    = BBoxOfChangedPixels(rawDiff.data(), kWidth, kHeight, kChangeThreshold, 4);
+            if (!ZHLN::Test::ExpectTrue(!band.Empty() && band.Width() >= kMinRegionWidth && band.Height() >= kMinRegionHeight)) {
+                return std::unexpected(ReflectionNoiseError::ReflectionRegionTooSmall);
+            }
+            const double rawRms = RmsInRegion(rawDiff.data(), kWidth, band);
+            ZHLN::Println(
+                "    [INFO] denoiser OFF: on/on residual rms over [{},{}) x [{},{}) = {:.4f}", band.x0, band.x1, band.y0, band.y1, rawRms
+            );
+
+            // Denoised pair: three wavelet iterations.
+            RayTracedReflectionNoiseTestSuite::SetDenoiser(*engine, 3);
+            RgbImage denA = RayTracedReflectionNoiseTestSuite::SettleAndCapture(*engine, "rt_denoise_on_a.ppm");
+            RayTracedReflectionNoiseTestSuite::TickFrames(*engine, 1);
+            RgbImage denB = RayTracedReflectionNoiseTestSuite::Capture(*engine, "rt_denoise_on_b.ppm");
+            if (!ZHLN::Test::ExpectTrue(denA.Valid() && denB.Valid())) {
+                return std::unexpected(ReflectionNoiseError::CaptureFailed);
+            }
+            const std::vector<double> denDiff = LumaDifference(denA, denB);
+            const double              denRms  = RmsInRegion(denDiff.data(), kWidth, band);
+            ZHLN::Println("    [INFO] denoiser ON (3 passes): on/on residual rms over the same band = {:.4f}", denRms);
+
+            // A wide margin on purpose: spatially integrating blue noise
+            // should cut the residual far below 70%; anything close to 1.0
+            // means the pass never ran or its output never reached the
+            // capture. The raw floor rejects a degenerate scene where both
+            // residuals are ~0 and the ratio gate passes vacuously.
+            if (!ZHLN::Test::ExpectTrue(rawRms > 0.5)) {
+                return std::unexpected(ReflectionNoiseError::JitterTemporallyFrozen);
+            }
+            if (!ZHLN::Test::ExpectTrue(denRms < 0.7 * rawRms)) {
+                return std::unexpected(ReflectionNoiseError::DenoiserDidNotReduceNoise);
+            }
+
+            ZHLN::Println("    [PASS] A-Trous wavelet cuts the on/on residual on the reflection band.");
             return {};
         }
     };

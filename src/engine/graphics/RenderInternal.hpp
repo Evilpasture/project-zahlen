@@ -427,6 +427,10 @@ using Res_ShadowMap     = Vk::GraphImage<"ShadowMap", VK_FORMAT_D32_SFLOAT, VK_I
 using Res_ShadowAtlas   = Vk::GraphImage<"ShadowAtlas", VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT>;
 using Res_Lighting      = Vk::GraphImage<"Lighting", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_HdrSceneColor = Vk::GraphImage<"HdrSceneColor", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+// A-Trous ping-pong scratch for the HDR scene denoiser (same size/format as
+// the scene color it filters; final iteration writes back into hdrSceneColor).
+using Res_DenoiseA      = Vk::GraphImage<"DenoiseA", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_DenoiseB      = Vk::GraphImage<"DenoiseB", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_BloomThresh   = Vk::GraphImage<"BloomThresh", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
 using Res_BloomDown1    = Vk::GraphImage<"BloomDown1", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 4>;
 using Res_BloomDown2    = Vk::GraphImage<"BloomDown2", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 8>;
@@ -486,6 +490,8 @@ struct RenderContext::Impl {
         Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>          normalRoughnessBuffer;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     lightingTarget;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     hdrSceneColor;
+        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     denoiseA;
+        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     denoiseB;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomThresholdTarget;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomDown1;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomDown2;
@@ -514,6 +520,8 @@ struct RenderContext::Impl {
             Res_NormRough     normalRoughnessBuffer;
             Res_Lighting      lightingTarget;
             Res_HdrSceneColor hdrSceneColor;
+            Res_DenoiseA      denoiseA;
+            Res_DenoiseB      denoiseB;
             Res_BloomThresh   bloomThresholdTarget;
             Res_BloomDown1    bloomDown1;
             Res_BloomDown2    bloomDown2;
@@ -733,9 +741,11 @@ struct RenderContext::Impl {
     // up x3) recorded inside a single frame-graph pass instead of seven raster
     // render passes.
     Vk::ComputePass     bloomThresholdCS;
+    Vk::ComputePass     hdrDenoiseCS;
     Vk::ComputePass     bloomDownCS;
     Vk::ComputePass     bloomUpCS;
     Vk::HeapPassBindings bloomThresholdHeapBindings;
+    Vk::HeapPassBindings hdrDenoiseHeapBindings;
     Vk::HeapPassBindings bloomDownHeapBindings;
     Vk::HeapPassBindings bloomUpHeapBindings;
 
@@ -862,6 +872,7 @@ struct RenderContext::Impl {
     Vk::SlangReflectedLayout hizDescLayout; // Reflection only
 
     Vk::SlangReflectedLayout bloomThresholdCSLayout; // Reflection only
+    Vk::SlangReflectedLayout hdrDenoiseCSLayout;     // Reflection only
     Vk::SlangReflectedLayout bloomDownCSLayout;      // Reflection only
     Vk::SlangReflectedLayout bloomUpCSLayout;        // Reflection only
 
@@ -1085,6 +1096,13 @@ struct RenderContext::Impl {
         float rcpWidth;
         float rcpHeight;
         float padding;
+    };
+
+    struct HdrAtrousPushConstants {
+        uint32_t stepSize;   // tap spacing in pixels (1, 2, 4)
+        float    phiDepth;   // depth edge-stop strength (relative to linear depth)
+        float    phiNormal;  // normal edge-stop exponent
+        uint32_t pad;
     };
 
     struct BlitPushConstants {

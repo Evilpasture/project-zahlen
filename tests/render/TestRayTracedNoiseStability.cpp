@@ -241,6 +241,25 @@ struct RayTracedNoiseStabilityTestSuite {
         }
     }
 
+    /// The A-Trous HDR denoiser (RenderGraphBuilder MakeHdrDenoisePass) runs
+    /// whenever rayTracing.denoiserPasses > 0 and any RT path is on. These
+    /// suites measure RAW 1 SPP statistics -- the wavelet output is spatially
+    /// correlated, so every raw scenario pins the denoiser off through the
+    /// RayTracingSettingsComponent the settings sync reads.
+    static bool SetDenoiser(ZHLN::Engine& engine, uint32_t passes) {
+        auto&      reg  = engine.GetRegistry();
+        const auto ents = reg.GetEntitiesWith<ZHLN::Components::RayTracingSettingsComponent>();
+        if (ents.empty()) {
+            const ZHLN::Entity e = reg.Create();
+            if (e == ZHLN::Entity::Null()) {
+                return false;
+            }
+            reg.Add(e, ZHLN::Components::RayTracingSettingsComponent {.config = ZHLN::RayTracingConfig {.denoiserPasses = passes}});
+            return true;
+        }
+        return reg.Patch<ZHLN::Components::RayTracingSettingsComponent>(ents[0], [passes](auto& c) { c.config.denoiserPasses = passes; });
+    }
+
     /// Ground + a raised occluder + a raking sun, so a broad penumbra lands on
     /// the floor inside the frame. Penumbra width tracks sunSize * height / L.y,
     /// so the occluder sits high.
@@ -328,6 +347,7 @@ struct RayTracedNoiseStabilityTestSuite {
                 return std::unexpected(NoiseStabilityError::EngineInitFailed);
             }
             RayTracedNoiseStabilityTestSuite::SetAA(*engine, ZHLN::AAMode::None);
+            RayTracedNoiseStabilityTestSuite::SetDenoiser(*engine, 0);
 
             // A: RT on.  B: RT off.  C: RT on again, at a later frame index.
             RayTracedNoiseStabilityTestSuite::SetRayTracedShadows(*engine, 1);
@@ -377,6 +397,7 @@ struct RayTracedNoiseStabilityTestSuite {
             }
             RayTracedNoiseStabilityTestSuite::SetRayTracedShadows(*engine, 1);
             RayTracedNoiseStabilityTestSuite::SetAA(*engine, ZHLN::AAMode::None);
+            RayTracedNoiseStabilityTestSuite::SetDenoiser(*engine, 0);
 
             RgbImage prev = RayTracedNoiseStabilityTestSuite::SettleAndCapture(*engine, "rt_noise_structure_a.ppm");
             RayTracedNoiseStabilityTestSuite::TickFrames(*engine, 1);
@@ -466,6 +487,7 @@ struct RayTracedNoiseStabilityTestSuite {
             }
             RayTracedNoiseStabilityTestSuite::SetRayTracedShadows(*engine, 1);
             RayTracedNoiseStabilityTestSuite::SetAA(*engine, ZHLN::AAMode::None);
+            RayTracedNoiseStabilityTestSuite::SetDenoiser(*engine, 0);
             RayTracedNoiseStabilityTestSuite::TickFrames(*engine, 2);
 
             // Enough frames that the per-pixel mean and variance are stable but
@@ -556,6 +578,7 @@ struct RayTracedNoiseStabilityTestSuite {
             }
             RayTracedNoiseStabilityTestSuite::SetRayTracedShadows(*engine, 1);
             RayTracedNoiseStabilityTestSuite::SetAA(*engine, ZHLN::AAMode::TAA);
+            RayTracedNoiseStabilityTestSuite::SetDenoiser(*engine, 0);
 
             RgbImage prev = RayTracedNoiseStabilityTestSuite::SettleAndCapture(*engine, "rt_noise_conv_prev.ppm");
             if (!ZHLN::Test::ExpectTrue(prev.Valid())) {
@@ -645,6 +668,7 @@ struct RayTracedNoiseStabilityTestSuite {
             }
             RayTracedNoiseStabilityTestSuite::SetRayTracedShadows(*engine, 1);
             RayTracedNoiseStabilityTestSuite::SetAA(*engine, ZHLN::AAMode::None);
+            RayTracedNoiseStabilityTestSuite::SetDenoiser(*engine, 0);
 
             RgbImage prev = RayTracedNoiseStabilityTestSuite::SettleAndCapture(*engine, "rt_noise_debris_a.ppm");
             RayTracedNoiseStabilityTestSuite::TickFrames(*engine, 1);
