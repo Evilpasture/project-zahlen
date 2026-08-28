@@ -250,6 +250,35 @@ struct TemporalMoments {
     }
 };
 
+/// Temporal convergence of a stationary noise field, measured the way a
+/// denoiser would exploit it: RMS over `b` of (running mean after n samples)
+/// minus (final mean over N samples). Integrable noise falls like
+/// sigma*sqrt(1/n - 1/N); a frozen dither reads ~0 at every snapshot; a
+/// diverging field grows. Deliberately NOT consecutive-frame RMS: under the
+/// engine's exponential history feedback that metric has a floor of
+/// feedbackWeight * sigma and plateaus once the history is full, so a fitted
+/// trend can never account for much of the mean.
+[[nodiscard]] inline std::vector<double> RunningMeanResidualSeries(
+    const std::vector<std::pair<int, std::vector<double>>>& snapshots, const std::vector<double>& finalMean, int width, const BBox& b
+) {
+    std::vector<double> out;
+    out.reserve(snapshots.size());
+    for (const auto& [n, mean]: snapshots) {
+        (void) n;
+        double        sum   = 0.0;
+        std::size_t   count = 0;
+        for (int y = b.y0; y < b.y1; ++y) {
+            for (int x = b.x0; x < b.x1; ++x) {
+                const double d = mean[static_cast<std::size_t>(y) * width + x] - finalMean[static_cast<std::size_t>(y) * width + x];
+                sum += d * d;
+                ++count;
+            }
+        }
+        out.push_back(count > 0 ? std::sqrt(sum / static_cast<double>(count)) : 0.0);
+    }
+    return out;
+}
+
 /// Luma plane of an RGB8 frame.
 [[nodiscard]] inline std::vector<double> LumaPlane(const RgbImage& img) {
     const std::size_t n = static_cast<std::size_t>(img.width) * static_cast<std::size_t>(img.height);

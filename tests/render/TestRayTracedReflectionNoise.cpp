@@ -107,6 +107,7 @@ using ZHLN::Test::Frame::LoadPPM;
 using ZHLN::Test::Frame::LumaDifference;
 using ZHLN::Test::Frame::RgbImage;
 using ZHLN::Test::Frame::RmsInRegion;
+using ZHLN::Test::Frame::RunningMeanResidualSeries;
 
 constexpr int kWidth  = 640;
 constexpr int kHeight = 480;
@@ -494,7 +495,13 @@ struct RayTracedReflectionNoiseTestSuite {
             return {};
         }
 
-        /// Under temporal accumulation the reflection residual must fall.
+        /// The reflection noise must integrate away: the running mean over n
+        /// captures must approach the all-capture mean at the Monte Carlo
+        /// rate. Accumulation happens here on the CPU with AA off, because
+        /// the engine's TAA feedback gives consecutive-frame RMS a floor of
+        /// feedbackWeight * sigma -- it plateaus once the history is full,
+        /// which is exactly what sank the first version of this scenario on
+        /// real hardware (transient 2.03 -> 1.06, then a ~1.7 plateau).
         std::expected<void, ZHLN::Error> rtr_residual_converges_with_temporal_accumulation() {
             auto engine = RayTracedReflectionNoiseTestSuite::CreateTestEngine();
             if (!ZHLN::Test::AssertTrue(engine != nullptr)) {
@@ -508,58 +515,78 @@ struct RayTracedReflectionNoiseTestSuite {
                 return std::unexpected(ReflectionNoiseError::EngineInitFailed);
             }
             RayTracedReflectionNoiseTestSuite::SetRTR(*engine, 0, 1);
-            RayTracedReflectionNoiseTestSuite::SetAA(*engine, ZHLN::AAMode::TAA);
+            RayTracedReflectionNoiseTestSuite::SetAA(*engine, ZHLN::AAMode::None);
+            RayTracedReflectionNoiseTestSuite::TickFrames(*engine, 2);
 
-            RgbImage prev = RayTracedReflectionNoiseTestSuite::SettleAndCapture(*engine, "rt_refl_conv_prev.ppm");
-            if (!ZHLN::Test::ExpectTrue(prev.Valid())) {
-                return std::unexpected(ReflectionNoiseError::CaptureFailed);
-            }
-
+            RgbImage first = RayTracedReflectionNoiseTestSuite::Capture(*engine, "rt_refl_conv_prev.ppm");
             RayTracedReflectionNoiseTestSuite::TickFrames(*engine, 1);
             RgbImage second = RayTracedReflectionNoiseTestSuite::Capture(*engine, "rt_refl_conv_cur.ppm");
-            if (!ZHLN::Test::ExpectTrue(second.Valid())) {
+            if (!ZHLN::Test::ExpectTrue(first.Valid() && second.Valid())) {
                 return std::unexpected(ReflectionNoiseError::CaptureFailed);
             }
-            const std::vector<double> firstDiff = LumaDifference(prev, second);
+            const std::vector<double> firstDiff = LumaDifference(first, second);
             const BBox                band      = BBoxOfChangedPixels(firstDiff.data(), kWidth, kHeight, kChangeThreshold, 4);
             if (!ZHLN::Test::ExpectTrue(!band.Empty() && band.Width() >= kMinRegionWidth && band.Height() >= kMinRegionHeight)) {
                 return std::unexpected(ReflectionNoiseError::ReflectionRegionTooSmall);
             }
             ZHLN::Println("    [INFO] measuring convergence over [{},{}) x [{},{})", band.x0, band.x1, band.y0, band.y1);
 
-            std::vector<double> rmsSeries;
-            rmsSeries.push_back(RmsInRegion(firstDiff.data(), kWidth, band));
-            prev = std::move(second);
-            for (uint32_t f = 2; f < 10; ++f) {
+            constexpr int kFrames = 24;
+            std::vector<double>                              acc(static_cast<std::size_t>(kWidth) * kHeight, 0.0);
+            std::vector<std::pair<int, std::vector<double>>> snapshots;
+            int                                              total = 0;
+            const auto addFrame = [&](const RgbImage& img) {
+                const std::vector<double> pl = LumaPlane(img);
+                for (std::size_t i = 0; i < acc.size(); ++i) {
+                    acc[i] += pl[i];
+                }
+                ++total;
+                if (total % 4 == 0) {
+                    std::vector<double> mean = acc;
+                    for (double& v: mean) {
+                        v /= static_cast<double>(total);
+                    }
+                    snapshots.emplace_back(total, std::move(mean));
+                }
+            };
+            addFrame(first);
+            addFrame(second);
+            while (total < kFrames) {
                 RayTracedReflectionNoiseTestSuite::TickFrames(*engine, 1);
                 RgbImage cur = RayTracedReflectionNoiseTestSuite::Capture(*engine, "rt_refl_conv_cur.ppm");
                 if (!ZHLN::Test::ExpectTrue(cur.Valid())) {
                     return std::unexpected(ReflectionNoiseError::CaptureFailed);
                 }
-                const std::vector<double> d = LumaDifference(prev, cur);
-                rmsSeries.push_back(RmsInRegion(d.data(), kWidth, band));
-                prev = std::move(cur);
+                addFrame(cur);
+            }
+            std::vector<double> finalMean = acc;
+            for (double& v: finalMean) {
+                v /= static_cast<double>(total);
             }
 
-            const double slope = ZHLN::Test::Noise::LinearSlope(rmsSeries);
-            const double mean  = std::accumulate(rmsSeries.begin(), rmsSeries.end(), 0.0) / static_cast<double>(rmsSeries.size());
-            const double fittedDrop = -slope * static_cast<double>(rmsSeries.size() - 1);
-            for (std::size_t i = 0; i < rmsSeries.size(); ++i) {
-                ZHLN::Println("    [INFO] reflection residual RMS frame {} -> {}: {:.4f}", i + 1, i + 2, rmsSeries[i]);
+            const std::vector<double> series = RunningMeanResidualSeries(snapshots, finalMean, kWidth, band);
+            const double              slope  = ZHLN::Test::Noise::LinearSlope(series);
+            const double              mean   = std::accumulate(series.begin(), series.end(), 0.0) / static_cast<double>(series.size());
+            const double              fittedDrop = -slope * static_cast<double>(series.size() - 1);
+            for (std::size_t i = 0; i < series.size(); ++i) {
+                ZHLN::Println("    [INFO] running-mean residual after {} frames: {:.4f}", snapshots[i].first, series[i]);
             }
             ZHLN::Println(
                 "    [INFO] mean={:.4f} slope={:.6f} predicted drop over window={:.4f} ({:.1f}% of mean)", mean, slope, fittedDrop,
                 mean > 0.0 ? 100.0 * fittedDrop / mean : 0.0
             );
 
-            // Same fitted-trend gate as the shadow suite; see the oscillation
-            // analysis over there.
-            const bool converged = slope < 0.0 && fittedDrop > 0.35 * mean;
+            // The first snapshot (4 of 24 frames) sits near
+            // sigma*sqrt(1/4 - 1/24) ~= 0.46*sigma and the last at 0, so
+            // genuine integrable noise drops ~100% of the window mean; the
+            // >0.5 floor rejects a frozen dither whose series is ~0
+            // everywhere and would satisfy the fitted-drop gate vacuously.
+            const bool converged = series.front() > 0.5 && slope < 0.0 && fittedDrop > 0.35 * mean;
             if (!ZHLN::Test::ExpectTrue(converged)) {
                 return std::unexpected(ReflectionNoiseError::ResidualDidNotConverge);
             }
 
-            ZHLN::Println("    [PASS] Reflection residual falls under temporal accumulation.");
+            ZHLN::Println("    [PASS] Reflection noise integrates away under temporal accumulation.");
             return {};
         }
 
