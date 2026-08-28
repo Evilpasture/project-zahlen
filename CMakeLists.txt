@@ -224,6 +224,15 @@ if(ZHLN_IN_DOCKER)
     message(STATUS "Docker container build mode enabled.")
 endif()
 
+# Workaround for Clang P2996 revisions where copying a reflected
+# annotation value fails constant evaluation ('read of object outside
+# its lifetime' in libc++'s optional, observed on macOS/arm64): error
+# messages fall back to plain enumerator names.
+option(ZHLN_NO_ANNOTATION_EXTRACT "Disable compile-time reflection annotation extraction" OFF)
+if(ZHLN_NO_ANNOTATION_EXTRACT)
+    add_compile_definitions(ZHLN_NO_ANNOTATION_EXTRACT)
+endif()
+
 option(ZHLN_BUILD_TESTS "Build engine test suite" ON)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")

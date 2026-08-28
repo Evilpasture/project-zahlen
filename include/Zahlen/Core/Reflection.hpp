@@ -771,8 +771,9 @@ constexpr auto GetEnumeratorAnnotation(E value) -> std::optional<Tag> {
 // out of the runtime path entirely makes the link succeed regardless.
 //
 // On toolchains where annotation extraction itself fails constant
-// evaluation, define ZHLN_NO_ANNOTATION_EXTRACT: the table keeps the
-// enumerator values with empty messages and EnumToMessage falls back to
+// evaluation, define ZHLN_NO_ANNOTATION_EXTRACT (or configure CMake with
+// -DZHLN_NO_ANNOTATION_EXTRACT=ON): the table keeps the enumerator
+// values with empty messages and EnumToMessage falls back to
 // EnumToString.
 // ---------------------------------------------------------------------------
 
@@ -791,8 +792,24 @@ consteval auto MakeEnumMessageTable() -> std::array<EnumMessageEntry<E>, detail:
     [:Expand(detail::EnumeratorsOf<E>()):] >> [&]<auto enumerator>() -> auto {
         table[i].value = static_cast<std::underlying_type_t<E>>([:enumerator:]);
 #ifndef ZHLN_NO_ANNOTATION_EXTRACT
-        if (auto annotation = GetAnnotation<MetaDescription, enumerator>()) {
-            table[i].message = annotation->text;
+        // Extract the annotation in place and read its text pointer
+        // immediately: no std::optional and no copy of the annotation
+        // object anywhere. On the macOS/arm64 Clang P2996 revision every
+        // copy of the extracted MetaDescription into libc++'s optional
+        // union storage fails constant evaluation with 'read of object
+        // outside its lifetime' -- both the direct-from-extract form and
+        // the copy from a named local (and the diagnostic shows the
+        // optional instantiated with a const value type, matching the
+        // P3394-style 'const Tag' annotation typing that
+        // AnnotationHasType already tolerates). Direct initialization
+        // from extract is proven to work on that toolchain; this keeps
+        // the value untouched after that.
+        for (auto a: std::meta::annotations_of(enumerator)) {
+            if (AnnotationHasType<MetaDescription>(a)) {
+                const MetaDescription desc = std::meta::extract<MetaDescription>(a);
+                table[i].message = desc.text;
+                break;
+            }
         }
 #endif
         ++i;
