@@ -115,7 +115,10 @@ struct RayTracingConfig {
     bool     enableShadows     = false;
     uint32_t reflectionSamples = 1;
     uint32_t shadowSamples     = 1;
-    uint32_t denoiserPasses    = 1;
+    // 0 by default: the denoiser is opt-in until every RT scene has been
+    // verified with it (quality presets set 1/2/2/3 for Medium..Ultra; the
+    // ECS component or a direct write opts individual scenes in).
+    uint32_t denoiserPasses    = 0;
     uint32_t maxBounces        = 1;
     float    roughnessCutoff   = 0.4f;
     bool     alphaTestingInBVH = true;

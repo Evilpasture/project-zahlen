@@ -705,7 +705,14 @@ struct RayTracedReflectionNoiseTestSuite {
             }
             const std::vector<double> denDiff = LumaDifference(denA, denB);
             const double              denRms  = RmsInRegion(denDiff.data(), kWidth, band);
+            const auto                meanLumaOf = [](const RgbImage& img) {
+                const std::vector<double> pl = LumaPlane(img);
+                return std::accumulate(pl.begin(), pl.end(), 0.0) / static_cast<double>(pl.size());
+            };
+            const double rawMeanLuma = meanLumaOf(rawA);
+            const double denMeanLuma = meanLumaOf(denA);
             ZHLN::Println("    [INFO] denoiser ON (3 passes): on/on residual rms over the same band = {:.4f}", denRms);
+            ZHLN::Println("    [INFO] frame mean luma: raw={:.3f} denoised={:.3f}", rawMeanLuma, denMeanLuma);
 
             // A wide margin on purpose: spatially integrating blue noise
             // should cut the residual far below 70%; anything close to 1.0
@@ -714,6 +721,12 @@ struct RayTracedReflectionNoiseTestSuite {
             // residuals are ~0 and the ratio gate passes vacuously.
             if (!ZHLN::Test::ExpectTrue(rawRms > 0.5)) {
                 return std::unexpected(ReflectionNoiseError::JitterTemporallyFrozen);
+            }
+            // A spatial filter preserves the mean; if the denoised frame lost
+            // most of its luma the pass blackened the image, and a ~0 residual
+            // would otherwise sail through the variance gate below.
+            if (!ZHLN::Test::ExpectTrue(denMeanLuma > 0.25 * rawMeanLuma)) {
+                return std::unexpected(ReflectionNoiseError::DenoiserDidNotReduceNoise);
             }
             if (!ZHLN::Test::ExpectTrue(denRms < 0.7 * rawRms)) {
                 return std::unexpected(ReflectionNoiseError::DenoiserDidNotReduceNoise);
