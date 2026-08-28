@@ -1065,7 +1065,7 @@ struct RenderContext::Impl {
 
     struct DecalPushConstants {
         JPH::Mat44 world;
-        JPH::Mat44 invWorld;
+        JPH::Mat44 clipToLocal; // invWorld * unjittered invViewProj (premultiplied per frame)
         uint32_t   albedoIndex;
         uint32_t   normalIndex;
         float      roughness;

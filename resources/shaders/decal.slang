@@ -5,7 +5,12 @@ import pbr_helpers;
 
 struct DecalPushConstants {
     float4x4 worldMatrix;
-    float4x4 invWorldMatrix;
+    // invWorldMatrix * frameCB.invViewProj, premultiplied on the CPU per
+    // decal: one 4x4 takes the depth pixel straight to decal local space.
+    // The old shader path did invViewProj here (4x4 + divide) and then
+    // invWorld (another 4x4); the product is identical because the decal
+    // inverse is affine, so the divide commutes with it.
+    float4x4 clipToLocal;
     uint albedoIndex;
     uint normalIndex;
     float roughness;
@@ -62,11 +67,13 @@ PSOutput PSMain(VSOutput input) {
         discard;
     }
 
-    // 3. Reconstruct World Position of G-Buffer geometry
-    float3 worldPos = ReconstructWorldPos(uv, depth, scene.frame.invViewProj);
+    // 3. Depth pixel -> decal local space in one transform (composite of
+    //    invViewProj and the decal inverse, premultiplied on the CPU).
+    float4 clipPos = float4(uv.x * 2.0f - 1.0f, uv.y * 2.0f - 1.0f, depth, 1.0f);
 
-    // 4. Transform World Position to Decal's Local Space
-    float4 localPos = mul(pc.invWorldMatrix, float4(worldPos, 1.0f));
+    // 4. Transform to Decal's Local Space
+    float4 localPos = mul(pc.clipToLocal, clipPos);
+    localPos.xyz    = localPos.xyz / localPos.w;
 
     // 5. Clip pixel if it lies outside the projection cube bounds [-0.5, 0.5]
     clip(0.5f - abs(localPos.xyz));

@@ -665,10 +665,16 @@ struct PassFactory {
             FrameRecorder recorder(c, self);
             recorder.encoder.BindPipeline(self.decalPipeline.Get(), self.decalPipelineLayout);
 
+            // The decal PS needs invWorld * invViewProj per fragment; compose
+            // it once per decal on the CPU instead. Must use the same
+            // unjittered inverse the frame CB publishes, because that is the
+            // matrix the depth-reconstruction it replaces was using.
+            const JPH::Mat44 invViewProj = self.unjittered_view_proj.Inversed();
+
             for (const auto& decalCmd: self.queues.decalQueue) {
                 RenderContext::Impl::DecalPushConstants decalPC {
                     .world       = decalCmd.transform,
-                    .invWorld    = decalCmd.invTransform,
+                    .clipToLocal = decalCmd.invTransform * invViewProj,
                     .albedoIndex = decalCmd.albedoIndex,
                     .normalIndex = decalCmd.normalIndex,
                     .roughness   = decalCmd.roughness,

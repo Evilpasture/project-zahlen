@@ -138,9 +138,14 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
         if (fastClip.w > 0.1f) {
             float2 fastUV = fastClip.xy / fastClip.w * 0.5f + 0.5f;
             if (all(fastUV >= 0.02f) && all(fastUV <= 0.98f)) {
-                float sampledDepth  = texDepth.SampleLevel(smp, fastUV, 0);
-                float3 sampledWorld = ReconstructWorldPos(fastUV, sampledDepth, frame.invViewProj);
-                float distToSampled = mul(frame.viewProj, float4(sampledWorld, 1.0f)).w;
+                float sampledDepth = texDepth.SampleLevel(smp, fastUV, 0);
+                // Linear view depth of the sampled pixel, without the
+                // invViewProj -> world -> viewProj round-trip (M * M^-1):
+                // the same value for two 4x4s and a divide less. Jitter
+                // lives in the projection's column-2 xy entries, so the z/w
+                // linearization against the unjittered invProj is exact.
+                float4 linClip      = mul(frame.invProj, float4(0.0f, 0.0f, sampledDepth, 1.0f));
+                float distToSampled = abs(linClip.z / linClip.w);
                 if (abs(fastClip.w - distToSampled) < max(0.5f, fastClip.w * 0.05f)) {
                     confidence    = 1.0f;
                     fallbackColor = texLighting.SampleLevel(smp, fastUV, 0).rgb;
@@ -218,12 +223,14 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
         float onScreen    = edgeFactor.x * edgeFactor.y;
 
         if (onScreen > 0.0f) {
-            float sampledRawDepth  = texDepth.SampleLevel(smp, hitUV, 0);
-            float3 sampledWorldPos = ReconstructWorldPos(hitUV, sampledRawDepth, frame.invViewProj);
+            float sampledRawDepth = texDepth.SampleLevel(smp, hitUV, 0);
 
-            float distToHit     = hitClip.w;
-            float distToSampled = mul(frame.viewProj, float4(sampledWorldPos, 1.0f)).w;
-            float depthDiff     = abs(distToHit - distToSampled);
+            float distToHit = hitClip.w;
+            // Same round-trip removal as the fast path above: linearize the
+            // sampled depth instead of reconstructing and reprojecting it.
+            float4 linClip        = mul(frame.invProj, float4(0.0f, 0.0f, sampledRawDepth, 1.0f));
+            float distToSampled   = abs(linClip.z / linClip.w);
+            float depthDiff       = abs(distToHit - distToSampled);
 
             // 4. Normal-Orientation Check (Stops front-face bleeding onto back/side faces)
             float4 normRough      = texNormalRoughness.SampleLevel(smp, hitUV, 0);

@@ -147,7 +147,6 @@ float4 ComputeAmbientAndAO(float2 uv, uint2 pixelPos, float3 N, float3 worldPos,
             float3 tangent   = normalize(cross(up, N));
             float3 bitangent = cross(N, tangent);
             float4 centerClip = mul(pc.viewProj, float4(worldPos, 1.0f));
-            float3 worldToCam = worldPos - pc.camPos.xyz;
 
             int effectiveSamples = min(pc.giSamples, 16);
             for (int s = 0; s < effectiveSamples; ++s) {
@@ -168,11 +167,20 @@ float4 ComputeAmbientAndAO(float2 uv, uint2 pixelPos, float3 N, float3 worldPos,
                 if (sampleRawDepth >= 1.0f)
                     continue;
 
-                float3 sampleWorldPos = ReconstructWorldPos(uv_sample, sampleRawDepth, pc.invViewProj);
-                float diff            = length(worldToCam + offsetPos) - length(sampleWorldPos - pc.camPos.xyz);
+                // Compare view-axis depths instead of Euclidean camera
+                // distances: the test point's linear view depth is the
+                // clip-space w already computed for its projection, and the
+                // sample's comes from the same invProj linearization the
+                // A-Trous denoiser uses. This drops the 4x4 world
+                // reconstruction and both square roots per sample. Near the
+                // screen edges the view axis diverges from the line of
+                // sight, so the occlusion threshold shifts slightly there --
+                // the standard depth-buffer AO approximation.
+                float4 linClip = mul(frame.invProj, float4(0.0f, 0.0f, sampleRawDepth, 1.0f));
+                float diff     = clipPos.w - abs(linClip.z / linClip.w);
 
                 if (diff > 0.0f) {
-                    float finalWeight = smoothstep(0.0f, pc.aoBias * 2.0f, diff - pc.aoBias) * smoothstep(0.0f, 1.0f, pc.aoRadius / abs(diff));
+                    float finalWeight = smoothstep(0.0f, pc.aoBias * 2.0f, diff - pc.aoBias) * smoothstep(0.0f, 1.0f, pc.aoRadius / max(abs(diff), 0.001f));
                     if (pc.giMode == 1)
                         occlusion += finalWeight;
                     else if (pc.giMode == 2)
