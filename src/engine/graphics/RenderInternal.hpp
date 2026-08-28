@@ -419,6 +419,12 @@ struct ShaderPair;
 // ============================================================================
 // Frame Graph Resource Tags
 // ============================================================================
+/// Number of Hi-Z mip levels generated per frame. The culling consumer
+/// clamps its occlusion-test level to the deepest generated mip, so bounds
+/// smaller than one mip-(kMaxGeneratedHiZMips-1) texel are tested against
+/// that level's conservative max depth.
+inline constexpr uint32_t kMaxGeneratedHiZMips = 7;
+
 using Res_SceneColor    = Vk::GraphImage<"SceneColor", VK_FORMAT_B10G11R11_UFLOAT_PACK32, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_Velocity      = Vk::GraphImage<"Velocity", VK_FORMAT_R16G16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_NormRough     = Vk::GraphImage<"NormRough", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
@@ -625,7 +631,6 @@ struct RenderContext::Impl {
         DoubleBuffered<Vk::Buffer>                                      tlasBuffer;
         DoubleBuffered<Vk::Buffer>                                      tlasScratchBuffer;
         DoubleBuffered<Vk::Buffer>                                      tlasInstanceBuffers;
-        DoubleBuffered<Vk::Buffer>                                      tlasStagingBuffers;
         DoubleBuffered<BufferHandle>                                    debugMeshHandles;
         DoubleBuffered<Vk::Buffer>                                      fogVolumesBuffer;
 

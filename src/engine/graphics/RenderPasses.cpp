@@ -388,7 +388,8 @@ struct GpuCullingPolicyPass1 {
         pc.viewProj         = ctx.unjittered_view_proj;
         pc.hizScreenSize[0] = static_cast<float>(color_att.extent.width);
         pc.hizScreenSize[1] = static_cast<float>(color_att.extent.height);
-        pc.maxHiZMipLevel   = ctx.graphResources.hizMap.mipLevels > 0 ? ctx.graphResources.hizMap.mipLevels - 1 : 0;
+        const uint32_t hizMips = std::min(ctx.graphResources.hizMap.mipLevels, kMaxGeneratedHiZMips);
+        pc.maxHiZMipLevel   = hizMips > 0 ? hizMips - 1 : 0;
         pc.drawCount        = drawCount;
         pc.passIndex        = 0; // PASS 1
 
@@ -479,10 +480,11 @@ struct GpuCullingPolicyPass2 {
 
         // 2. Dispatch Culling Pass 2 (Current Frame Hi-Z Re-test)
 
+        const uint32_t hizMips2 = std::min(ctx.graphResources.hizMap.mipLevels, kMaxGeneratedHiZMips);
         RenderContext::Impl::CullingConstants pc {
             .viewProj       = ctx.unjittered_view_proj,
             .hizScreenSize  = {static_cast<float>(color_att.extent.width), static_cast<float>(color_att.extent.height)},
-            .maxHiZMipLevel = ctx.graphResources.hizMap.mipLevels > 0 ? ctx.graphResources.hizMap.mipLevels - 1 : 0,
+            .maxHiZMipLevel = hizMips2 > 0 ? hizMips2 - 1 : 0,
             .drawCount      = drawCount,
             .passIndex      = 1,
         };

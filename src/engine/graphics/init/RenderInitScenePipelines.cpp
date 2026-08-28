@@ -775,22 +775,20 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, Error> {
                 })
                 .and_then([&](auto&& tsb) {
                     frames.tlasScratchBuffer = std::forward<decltype(tsb)>(tsb);
+                    // Host-visible instance storage (CPU_TO_GPU, coherent):
+                    // BuildTLAS memcpys the scratch straight into the mapped
+                    // buffer, dropping the staging buffer, the per-frame
+                    // transfer copy, and its barrier. Same pattern as the
+                    // instance-data buffers: CPU_TO_GPU + device address +
+                    // double-buffered.
                     return CreateDoubleBuffered(
                         allocator, sizeof(VkAccelerationStructureInstanceKHR) * kGpuCullingMaxInstances,
-                        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-                            VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                        VMA_MEMORY_USAGE_GPU_ONLY
+                        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
+                        VMA_MEMORY_USAGE_CPU_TO_GPU
                     );
                 })
-                .and_then([&](auto&& tib) {
+                .transform([&](auto&& tib) {
                     frames.tlasInstanceBuffers = std::forward<decltype(tib)>(tib);
-                    return CreateDoubleBuffered(
-                        allocator, sizeof(VkAccelerationStructureInstanceKHR) * kGpuCullingMaxInstances, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                        VMA_MEMORY_USAGE_CPU_ONLY
-                    );
-                })
-                .transform([&](auto&& tstb) {
-                    frames.tlasStagingBuffers = std::forward<decltype(tstb)>(tstb);
                     for (uint32_t i = 0; i < 2; ++i) {
                         frames.tlas[i] =
                             rtCtx.CreateAccelerationStructure(frames.tlasBuffer[i].Handle(), tlasSizes.acceleration_structure_size, ZHLN_AS_TYPE_TOP_LEVEL);

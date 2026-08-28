@@ -224,19 +224,13 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
         return;
     }
 
-    auto& stagingBuf  = frames.tlasStagingBuffers[frame_index];
     auto& instanceBuf = frames.tlasInstanceBuffers[frame_index];
 
-    std::memcpy(stagingBuf.Map().data, tlasInstancesScratch.data(), tlasInstancesScratch.size() * sizeof(VkAccelerationStructureInstanceKHR));
-
-    Vk::CopyBuffer(cmd, stagingBuf, instanceBuf, tlasInstancesScratch.size() * sizeof(VkAccelerationStructureInstanceKHR));
-
-    Vk::MemoryBarrier(
-        cmd, {.src_stage  = VK_PIPELINE_STAGE_2_COPY_BIT,
-              .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-              .dst_stage  = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-              .dst_access = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_2_SHADER_READ_BIT}
-    );
+    // The instance buffer is host-visible and coherent (CPU_TO_GPU): write it
+    // directly while recording. The memcpy completes before submission, and
+    // the double-buffered parity means the previous TLAS build against this
+    // buffer finished frames ago -- no staging copy, no transfer barrier.
+    std::memcpy(instanceBuf.Map().data, tlasInstancesScratch.data(), tlasInstancesScratch.size() * sizeof(VkAccelerationStructureInstanceKHR));
 
     ZHLN_TlasGeometryDesc geom = {.instance_data = ctx.BufferAddress(instanceBuf.Handle())};
 

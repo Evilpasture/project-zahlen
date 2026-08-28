@@ -58,7 +58,12 @@ struct PassFactory {
         return Vk::MakePass<"HiZGenerate", Vk::ShaderRead<Res_Depth>, Vk::ComputeWrite<Res_HiZ>>([this](VkCommandBuffer c) noexcept {
             uint32_t width  = self.graphResources.hizMap.extent.width;
             uint32_t height = self.graphResources.hizMap.extent.height;
-            uint32_t mips   = self.graphResources.hizMap.mipLevels;
+            // Generate down to kMaxGeneratedHiZMips levels only: every level
+            // costs a full compute-to-compute pipeline barrier, and the
+            // culling consumer clamps its sample level to maxHiZMipLevel
+            // (derived from the same constant), so deeper mips were written
+            // but never read.
+            uint32_t mips   = std::min(self.graphResources.hizMap.mipLevels, kMaxGeneratedHiZMips);
 
             for (uint32_t mip = 0; mip < mips; ++mip) {
                 if (mip > 0) {
@@ -212,16 +217,6 @@ struct PassFactory {
 
                 self.meshParticleUpdatePass.DispatchHeapThreads(self.ctx, c, emitter.maxParticles, 1, 1, pushPC);
             }
-        });
-    }
-
-    [[nodiscard]] auto MakeVolumetricClearPass() const noexcept {
-        return Vk::MakePass<"VolumetricClear", Vk::ComputeWrite<Res_VoxelMedia>, Vk::ComputeWrite<Res_VoxelLight>>([this](VkCommandBuffer c) noexcept {
-            self.volumetricClearPass.WriteHeap(
-                self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ComputeWrite<Res_VoxelMedia>>(self.graphResources.voxelMedia),
-                Vk::Assume<Vk::ComputeWrite<Res_VoxelLight>>(self.graphResources.voxelLight)
-            );
-            self.volumetricClearPass.DispatchHeap(self.ctx, c, fIdx);
         });
     }
 
@@ -879,7 +874,7 @@ struct PassFactory {
 
 auto BuildComputeGraph(const PassFactory& factory) {
     return Vk::CompileTimeFrameGraph(
-        factory.MakeClusterCullingPass(), factory.MakeVolumetricClearPass(), factory.MakeVolumetricFogInjectPass(), factory.MakeVolumetricLightInjectPass(),
+        factory.MakeClusterCullingPass(), factory.MakeVolumetricFogInjectPass(), factory.MakeVolumetricLightInjectPass(),
         factory.MakeVolumetricIntegrationPass(), factory.MakeVolumetricTemporalPass(), factory.MakeParticleUpdatePass(), factory.MakeMeshParticleUpdatePass()
     );
 }

@@ -127,6 +127,28 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
         float rayT         = q.CommittedRayT();
         float3 hitWorldPos = ray.Origin + ray.Direction * rayT;
 
+        // Fast path: most in-view hits (mirrors, floors, metal) land on
+        // screen where the lighting pass already shaded the surface. Project
+        // first and take that shaded color directly; the BDA vertex fetch,
+        // geometric-normal reconstruction, and analytic sun+SH lighting below
+        // then only run for hits the reprojection rejects, instead of for
+        // every hit. Accepted hits resolve to pure screen lighting, without
+        // the analytic max-floor the slow path blends under it.
+        float4 fastClip = mul(frame.viewProj, float4(hitWorldPos, 1.0f));
+        if (fastClip.w > 0.1f) {
+            float2 fastUV = fastClip.xy / fastClip.w * 0.5f + 0.5f;
+            if (all(fastUV >= 0.02f) && all(fastUV <= 0.98f)) {
+                float sampledDepth  = texDepth.SampleLevel(smp, fastUV, 0);
+                float3 sampledWorld = ReconstructWorldPos(fastUV, sampledDepth, frame.invViewProj);
+                float distToSampled = mul(frame.viewProj, float4(sampledWorld, 1.0f)).w;
+                if (abs(fastClip.w - distToSampled) < max(0.5f, fastClip.w * 0.05f)) {
+                    confidence    = 1.0f;
+                    fallbackColor = texLighting.SampleLevel(smp, fastUV, 0).rgb;
+                    return fastUV;
+                }
+            }
+        }
+
         // HLSL/Slang CommittedInstanceID is the instanceCustomIndex we write
         // as the draw-queue slot. CommittedInstanceIndex is the compacted
         // TLAS slot and must not be used to index g_instances.

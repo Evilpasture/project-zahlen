@@ -44,6 +44,29 @@ ConstantBuffer<FrameUniforms> frame;
 // Separable 5x5 wavelet kernel, evaluated as the outer product of a 1D ramp.
 static const float WaveletKernel[5] = { 0.0625f, 0.25f, 0.375f, 0.25f, 0.0625f };
 
+/// One tap's contribution: separable kernel weight times the depth/normal
+/// edge-stop. Shared by the dense 5x5 pass and the wide-iteration cross.
+void AccumulateTap(int2 coord, float kernelW, float centerDepth, float depthTol, float3 centerNormal, inout float4 sum, inout float totalWeight) {
+    coord = clamp(coord, int2(0, 0), int2(frame.screenResolution) - int2(1, 1));
+
+    float sampleDepthRaw = texDepth.Load(int3(coord, 0)).r;
+    // Never let a sky tap contribute: its linear depth sits at the far
+    // plane and would otherwise dominate the weight at silhouettes.
+    if (sampleDepthRaw >= 1.0f) {
+        return;
+    }
+
+    float4 sampleValue  = inColor.Load(int3(coord, 0));
+    float3 sampleNormal = UnpackNormalOctahedron(texNormalRoughness.Load(int3(coord, 0)).xy * 2.0f - 1.0f);
+
+    float wDepth  = exp(-abs(centerDepth - LinearizeDepth(sampleDepthRaw)) / depthTol);
+    float wNormal = pow(saturate(dot(centerNormal, sampleNormal)), max(pc.phiNormal, 0.0f));
+    float weight  = kernelW * wDepth * wNormal;
+
+    sum         += sampleValue * weight;
+    totalWeight += weight;
+}
+
 /// NDC depth to view-space linear depth. Raw NDC z is hyperbolic, so a fixed
 /// phiDepth would mean a different physical tolerance per distance band;
 // linear view depth keeps the threshold meaningful everywhere.
@@ -78,28 +101,30 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     float4 sum         = float4(0.0f, 0.0f, 0.0f, 0.0f);
     float  totalWeight = 0.0f;
 
-    for (int y = -2; y <= 2; ++y) {
-        for (int x = -2; x <= 2; ++x) {
-            int2 coord = int2(tid.xy) + int2(x, y) * step;
-            coord      = clamp(coord, int2(0, 0), int2(frame.screenResolution) - int2(1, 1));
-
-            float sampleDepthRaw = texDepth.Load(int3(coord, 0)).r;
-            // Never let a sky tap contribute: its linear depth sits at the
-            // far plane and would otherwise dominate the weight at
-            // silhouettes.
-            if (sampleDepthRaw >= 1.0f) {
-                continue;
+    if (step >= 2) {
+        // Wide iterations run a 9-tap cross -- center, the four +-2-step
+        // axis taps, the four +-1-step diagonals -- instead of the dense
+        // 25 taps. At doubled tap spacing the dropped positions mostly
+        // re-read texels the previous iteration already merged, and cutting
+        // 25 taps x 3 texture loads to 9 removes two thirds of the pass's
+        // memory traffic; the totalWeight normalization keeps brightness
+        // unchanged.
+        static const int2 CrossOffsets[9] = {
+            int2(0, 0),
+            int2(-2, 0), int2(2, 0), int2(0, -2), int2(0, 2),
+            int2(-1, -1), int2(1, -1), int2(-1, 1), int2(1, 1)
+        };
+        for (int i = 0; i < 9; ++i) {
+            int2 off = CrossOffsets[i];
+            AccumulateTap(int2(tid.xy) + off * step, WaveletKernel[off.x + 2] * WaveletKernel[off.y + 2], centerDepth, depthTol, centerNormal, sum, totalWeight);
+        }
+    } else {
+        for (int y = -2; y <= 2; ++y) {
+            for (int x = -2; x <= 2; ++x) {
+                AccumulateTap(
+                    int2(tid.xy) + int2(x, y) * step, WaveletKernel[x + 2] * WaveletKernel[y + 2], centerDepth, depthTol, centerNormal, sum, totalWeight
+                );
             }
-
-            float4 sampleValue  = inColor.Load(int3(coord, 0));
-            float3 sampleNormal = UnpackNormalOctahedron(texNormalRoughness.Load(int3(coord, 0)).xy * 2.0f - 1.0f);
-
-            float wDepth  = exp(-abs(centerDepth - LinearizeDepth(sampleDepthRaw)) / depthTol);
-            float wNormal = pow(saturate(dot(centerNormal, sampleNormal)), max(pc.phiNormal, 0.0f));
-            float weight  = WaveletKernel[x + 2] * WaveletKernel[y + 2] * wDepth * wNormal;
-
-            sum         += sampleValue * weight;
-            totalWeight += weight;
         }
     }
 
