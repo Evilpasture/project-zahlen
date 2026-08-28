@@ -42,7 +42,12 @@ target_compile_definitions(zahlen_audio PRIVATE
 )
 
 if(NOT MSVC)
-    target_compile_options(zahlen_audio PRIVATE -fno-exceptions -fno-rtti)
+    target_compile_options(zahlen_audio PRIVATE
+        -fno-exceptions
+        -fno-rtti
+        $<$<CXX_COMPILER_ID:Clang>:-fblocks>
+        $<$<CXX_COMPILER_ID:AppleClang>:-fblocks>
+    )
 endif()
 
 target_link_libraries(zahlen_audio PRIVATE zahlen_warnings)
