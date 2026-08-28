@@ -73,13 +73,20 @@ public float SoftClamp(float x, float limit) {
 #define BLOCKER_SEARCH_SAMPLES 16
 #define PCF_SAMPLES 16
 
-public float FindBlocker(float2 uv, float zReceiver, float searchRadius, Texture2DArray<float> shadowMap, SamplerState linearSampler, uint cascadeIndex) {
+public float FindBlocker(float2 uv, float zReceiver, float searchRadius, Texture2DArray<float> shadowMap, SamplerState linearSampler, uint cascadeIndex,
+                         bool halved = false) {
     float blockerSum  = 0.0f;
     int numBlockers   = 0;
     float blockerBias = 0.0005f;
 
-    [unroll]
-    for (int i = 0; i < BLOCKER_SEARCH_SAMPLES; ++i) {
+    // The halved variant strides the fixed Poisson disk by two: same
+    // deterministic pattern at half the taps, for callers that blend this
+    // result against a higher-quality estimator anyway. The stride is
+    // runtime-selectable, so the loop stays dynamic; the fetches are
+    // independent and pipeline either way.
+    const int stride = halved ? 2 : 1;
+
+    for (int i = 0; i < BLOCKER_SEARCH_SAMPLES; i += stride) {
         float2 offset        = PoissonDisk[i] * searchRadius;
         float shadowMapDepth = shadowMap.SampleLevel(linearSampler, float3(uv + offset, cascadeIndex), 0);
 
@@ -95,7 +102,7 @@ public float FindBlocker(float2 uv, float zReceiver, float searchRadius, Texture
 }
 
 public float CalculateShadowPCSS(float4 shadowPos, float3 N, float3 L, float2 screenPos, Texture2DArray<float> shadowMap, SamplerComparisonState shadowSampler,
-                                 SamplerState linearSampler, float shadowResolution, uint cascadeIndex, float worldDepthPerNdc) {
+                                 SamplerState linearSampler, float shadowResolution, uint cascadeIndex, float worldDepthPerNdc, bool reduced = false) {
     float3 projCoords = shadowPos.xyz / shadowPos.w;
 
     if (projCoords.x < 0.0 || projCoords.x > 1.0 || projCoords.y < 0.0 || projCoords.y > 1.0 || projCoords.z < 0.0 || projCoords.z > 1.0) {
@@ -111,7 +118,7 @@ public float CalculateShadowPCSS(float4 shadowPos, float3 N, float3 L, float2 sc
 
     // 1. Blocker Search
     float searchRadius    = 4.0 * texelSize;
-    float avgBlockerDepth = FindBlocker(projCoords.xy, zReceiver, searchRadius, shadowMap, linearSampler, cascadeIndex);
+    float avgBlockerDepth = FindBlocker(projCoords.xy, zReceiver, searchRadius, shadowMap, linearSampler, cascadeIndex, reduced);
 
     if (avgBlockerDepth == -1.0f)
         return 1.0f;
@@ -131,13 +138,15 @@ public float CalculateShadowPCSS(float4 shadowPos, float3 N, float3 L, float2 sc
     float s      = sin(angle);
     float c      = cos(angle);
 
-    [unroll]
-    for (int i = 0; i < PCF_SAMPLES; ++i) {
+    const int pcfStride = reduced ? 2 : 1;
+    const int pcfCount  = reduced ? (PCF_SAMPLES / 2) : PCF_SAMPLES;
+
+    for (int i = 0; i < PCF_SAMPLES; i += pcfStride) {
         float2 offset = float2(PoissonDisk[i].x * c - PoissonDisk[i].y * s, PoissonDisk[i].x * s + PoissonDisk[i].y * c) * filterRadius;
         shadow += shadowMap.SampleCmpLevelZero(shadowSampler, float3(projCoords.xy + offset, cascadeIndex), zReceiver);
     }
 
-    return shadow / (float) PCF_SAMPLES;
+    return shadow / (float) pcfCount;
 }
 
 #ifndef DISABLE_RTR
