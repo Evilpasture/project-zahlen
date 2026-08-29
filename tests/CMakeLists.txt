@@ -46,6 +46,15 @@ foreach(TEST_SRC IN LISTS TEST_SOURCES)
         ${PROJECT_SOURCE_DIR}/extern/stb
     )
 
+    # include/Zahlen/Meshlet.hpp is a public header, but it includes
+    # <meshoptimizer.h> and its inline BuildMeshlets() calls into the library.
+    # zahlen_engine links meshoptimizer PRIVATE (root CMakeLists.txt:502), so
+    # neither the include path nor the symbols propagate to test targets through
+    # the engine link. Any test exercising BuildMeshlets must link it directly.
+    if(TARGET_NAME STREQUAL "TestMeshlets")
+        target_link_libraries(${TARGET_NAME} PRIVATE meshoptimizer)
+    endif()
+
     # Applies the required reflection flags (-freflection / custom libc++) configured in the root
     zahlen_enable_reflection(${TARGET_NAME})
 
