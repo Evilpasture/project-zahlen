@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "GraphicsSettingsSync.hpp"
-
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
@@ -16,25 +15,21 @@ namespace {
 
 // Namespace-scope aliases (using-declarations cannot name class members
 // outside class scope).
-using AASettingsComponent       = Components::AASettingsComponent;
-using GlobalSettingsTagComponent = Components::GlobalSettingsTagComponent;
-using MainCameraTagComponent    = Components::MainCameraTagComponent;
+using AASettingsComponent          = Components::AASettingsComponent;
+using GlobalSettingsTagComponent   = Components::GlobalSettingsTagComponent;
+using MainCameraTagComponent       = Components::MainCameraTagComponent;
 using PostProcessSettingsComponent = Components::PostProcessSettingsComponent;
 using RayTracingSettingsComponent  = Components::RayTracingSettingsComponent;
-using ShadowSettingsComponent   = Components::ShadowSettingsComponent;
-
-[[nodiscard]] Entity FirstOrNull(std::span<const Entity> entities) noexcept {
-    return entities.empty() ? Entity::Null() : entities[0];
-}
+using ShadowSettingsComponent      = Components::ShadowSettingsComponent;
 
 /// Global settings entity (owns the post-process / shadow components).
 [[nodiscard]] Entity SettingsEntity(ECS::Registry& reg) noexcept {
-    return FirstOrNull(reg.GetEntitiesWith<GlobalSettingsTagComponent>());
+    return reg.SingletonEntity<GlobalSettingsTagComponent>();
 }
 
 /// Main camera entity (owns AASettingsComponent in the default scene).
 [[nodiscard]] Entity CameraEntity(ECS::Registry& reg) noexcept {
-    return FirstOrNull(reg.GetEntitiesWith<MainCameraTagComponent>());
+    return reg.SingletonEntity<MainCameraTagComponent>();
 }
 
 // std::array has no operator= from a braced list; build the array by value.
@@ -58,7 +53,7 @@ GraphicsSettings CollectGraphicsSettings(Engine& engine) {
     // preserves the historical Sys_PostProcess / RenderSystem resolution.
     Entity ppEnt = SettingsEntity(reg);
     if (reg.Get<PostProcessSettingsComponent>(ppEnt) == nullptr) {
-        ppEnt = FirstOrNull(reg.GetEntitiesWith<PostProcessSettingsComponent>());
+        ppEnt = reg.SingletonEntity<PostProcessSettingsComponent>();
     }
     if (const auto* pp = reg.Get<PostProcessSettingsComponent>(ppEnt); pp != nullptr) {
         gfx.post.mode        = pp->giMode;
@@ -82,7 +77,7 @@ GraphicsSettings CollectGraphicsSettings(Engine& engine) {
     }
 
     // --- Shadows (ShadowSettingsComponent) ---
-    if (const Entity shadowEnt = FirstOrNull(reg.GetEntitiesWith<ShadowSettingsComponent>()); shadowEnt != Entity::Null()) {
+    if (const Entity shadowEnt = reg.SingletonEntity<ShadowSettingsComponent>(); shadowEnt != Entity::Null()) {
         if (const auto* shadow = reg.Get<ShadowSettingsComponent>(shadowEnt); shadow != nullptr) {
             gfx.shadows.width              = shadow->shadowWidth;
             gfx.shadows.resolution         = static_cast<uint32_t>(shadow->shadowResolution);
@@ -94,7 +89,7 @@ GraphicsSettings CollectGraphicsSettings(Engine& engine) {
     // --- Anti-aliasing (AASettingsComponent; camera-owned in default scene) ---
     Entity aaEnt = CameraEntity(reg);
     if (reg.Get<AASettingsComponent>(aaEnt) == nullptr) {
-        aaEnt = FirstOrNull(reg.GetEntitiesWith<AASettingsComponent>());
+        aaEnt = reg.SingletonEntity<AASettingsComponent>();
     }
     if (const auto* aa = reg.Get<AASettingsComponent>(aaEnt); aa != nullptr) {
         gfx.antiAliasing = aa->state;
@@ -104,7 +99,7 @@ GraphicsSettings CollectGraphicsSettings(Engine& engine) {
     // Single writer for the semantic toggle ↔ ABI integer pair.
     // Ray tracing knobs live on their own component so presets and debug
     // tools persist; without one, the struct defaults apply every frame.
-    if (const Entity rtEnt = FirstOrNull(reg.GetEntitiesWith<RayTracingSettingsComponent>()); rtEnt != Entity::Null()) {
+    if (const Entity rtEnt = reg.SingletonEntity<RayTracingSettingsComponent>(); rtEnt != Entity::Null()) {
         if (const auto* rt = reg.Get<RayTracingSettingsComponent>(rtEnt); rt != nullptr) {
             gfx.rayTracing = rt->config;
         }
@@ -136,75 +131,61 @@ bool ApplyQualityPreset(Engine& engine, QualityLevel preset) {
     // --- Write-back: post / GI (signature fields only) -----------------------
     Entity ppEnt = SettingsEntity(reg);
     if (reg.Get<PostProcessSettingsComponent>(ppEnt) == nullptr) {
-        ppEnt = FirstOrNull(reg.GetEntitiesWith<PostProcessSettingsComponent>());
+        ppEnt = reg.SingletonEntity<PostProcessSettingsComponent>();
     }
     if (ppEnt == Entity::Null()) {
         ppEnt = reg.Create(Components::GlobalSettingsTagComponent {});
-        reg.Add(ppEnt, PostProcessSettingsComponent{});
+        reg.Add(ppEnt, PostProcessSettingsComponent {});
         changed = true;
     }
-    changed |= reg.Patch<PostProcessSettingsComponent>(
-        ppEnt,
-        [&gfx](PostProcessSettingsComponent& pp) {
-            pp.giSamples = gfx.post.giSamples;
-            pp.enableSSR = gfx.post.enableSSR;
-            pp.enableRTR = gfx.post.enableRTR;
-        }
-    );
+    changed |= reg.Patch<PostProcessSettingsComponent>(ppEnt, [&gfx](PostProcessSettingsComponent& pp) {
+        pp.giSamples = gfx.post.giSamples;
+        pp.enableSSR = gfx.post.enableSSR;
+        pp.enableRTR = gfx.post.enableRTR;
+    });
 
     // --- Write-back: shadows --------------------------------------------------
-    Entity shadowEnt = FirstOrNull(reg.GetEntitiesWith<ShadowSettingsComponent>());
+    Entity shadowEnt = reg.SingletonEntity<ShadowSettingsComponent>();
     if (shadowEnt == Entity::Null()) {
         shadowEnt = SettingsEntity(reg);
         if (shadowEnt != Entity::Null()) {
-            reg.Add(shadowEnt, ShadowSettingsComponent{});
+            reg.Add(shadowEnt, ShadowSettingsComponent {});
         }
     }
     if (shadowEnt != Entity::Null()) {
-        changed |= reg.Patch<ShadowSettingsComponent>(
-            shadowEnt,
-            [&gfx](ShadowSettingsComponent& shadow) {
-                shadow.shadowResolution = static_cast<int>(gfx.shadows.resolution);
-            }
-        );
+        changed |= reg.Patch<ShadowSettingsComponent>(shadowEnt, [&gfx](ShadowSettingsComponent& shadow) {
+            shadow.shadowResolution = static_cast<int>(gfx.shadows.resolution);
+        });
     }
 
     // --- Write-back: anti-aliasing ---------------------------------------------
     Entity aaEnt = CameraEntity(reg);
     if (reg.Get<AASettingsComponent>(aaEnt) == nullptr) {
-        aaEnt = FirstOrNull(reg.GetEntitiesWith<AASettingsComponent>());
+        aaEnt = reg.SingletonEntity<AASettingsComponent>();
     }
     if (aaEnt == Entity::Null()) {
         aaEnt = CameraEntity(reg);
         if (aaEnt != Entity::Null()) {
-            reg.Add(aaEnt, AASettingsComponent{});
+            reg.Add(aaEnt, AASettingsComponent {});
         }
     }
     if (aaEnt != Entity::Null()) {
-        changed |= reg.Patch<AASettingsComponent>(
-            aaEnt,
-            [&gfx](AASettingsComponent& aa) {
-                aa.state.mode        = gfx.antiAliasing.mode;
-                aa.state.taaFeedback = gfx.antiAliasing.taaFeedback;
-            }
-        );
+        changed |= reg.Patch<AASettingsComponent>(aaEnt, [&gfx](AASettingsComponent& aa) {
+            aa.state.mode        = gfx.antiAliasing.mode;
+            aa.state.taaFeedback = gfx.antiAliasing.taaFeedback;
+        });
     }
 
     // --- Write-back: ray tracing ----------------------------------------------
     // Persist the ray tracing knobs the preset just wrote; without this they
     // would be rebuilt from defaults on the next settings sync.
-    Entity rtEnt = FirstOrNull(reg.GetEntitiesWith<RayTracingSettingsComponent>());
+    Entity rtEnt = reg.SingletonEntity<RayTracingSettingsComponent>();
     if (rtEnt == Entity::Null()) {
         rtEnt = reg.Create();
         reg.Add(rtEnt, RayTracingSettingsComponent {});
         changed = true;
     }
-    changed |= reg.Patch<RayTracingSettingsComponent>(
-        rtEnt,
-        [&gfx](RayTracingSettingsComponent& c) {
-            c.config = gfx.rayTracing;
-        }
-    );
+    changed |= reg.Patch<RayTracingSettingsComponent>(rtEnt, [&gfx](RayTracingSettingsComponent& c) { c.config = gfx.rayTracing; });
 
     if (changed) {
         ZHLN::Log("Graphics quality preset applied: {}", ZHLN::ToString(preset));

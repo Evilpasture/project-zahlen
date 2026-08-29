@@ -102,13 +102,12 @@ auto CreateFontAtlasTexture(RenderContext& ctx) -> TextureHandle {
     const uint32_t       atlasSize = 1024;
     std::vector<uint8_t> alphaBitmap(static_cast<size_t>(atlasSize * atlasSize), 0);
 
-    auto* engine             = GetEngineContext();
-    auto& reg                = engine->GetRegistry();
-    auto  uiSettingsEntities = reg.GetEntitiesWith<Components::UISettingsComponent>();
-    if (uiSettingsEntities.empty()) {
+    auto* engine     = GetEngineContext();
+    auto& reg        = engine->GetRegistry();
+    auto* uiSettings = reg.GetSingleton<Components::UISettingsComponent>();
+    if (uiSettings == nullptr) {
         return TextureHandle::Invalid;
     }
-    auto* uiSettings = reg.Get<Components::UISettingsComponent>(uiSettingsEntities[0]);
 
     const float   fontSize         = 32.0f;
     const float   scale            = stbtt_ScaleForPixelHeight(&fontInfo, fontSize);
@@ -268,22 +267,12 @@ void PreparePrefabPhysics(
             JPH::Mat44 nodeWorld  = GetNodeLogicalTransform(prefab, part.nodeIndex);
             JPH::Mat44 finalLocal = baseTransform * nodeWorld * part.localTransform;
 
-            prep.scale = JPH::Vec3(finalLocal.GetColumn3(0).Length(), finalLocal.GetColumn3(1).Length(), finalLocal.GetColumn3(2).Length());
+            const Math::TransformTRS trs = Math::Decompose(finalLocal);
 
-            if (finalLocal.GetDeterminant3x3() < 0.0f) {
-                prep.scale.SetX(-prep.scale.GetX());
-            }
-
-            prep.maxScale    = std::max({std::abs(prep.scale.GetX()), std::abs(prep.scale.GetY()), std::abs(prep.scale.GetZ())});
-            prep.translation = finalLocal.GetTranslation();
-
-            JPH::Vec3 absScale(std::abs(prep.scale.GetX()), std::abs(prep.scale.GetY()), std::abs(prep.scale.GetZ()));
-            JPH::Vec3 c0 = absScale.GetX() > 1e-6f ? finalLocal.GetColumn3(0) / prep.scale.GetX() : JPH::Vec3::sAxisX();
-            JPH::Vec3 c1 = absScale.GetY() > 1e-6f ? finalLocal.GetColumn3(1) / prep.scale.GetY() : JPH::Vec3::sAxisY();
-            JPH::Vec3 c2 = absScale.GetZ() > 1e-6f ? finalLocal.GetColumn3(2) / prep.scale.GetZ() : JPH::Vec3::sAxisZ();
-
-            JPH::Mat44 rotMat(JPH::Vec4(c0, 0), JPH::Vec4(c1, 0), JPH::Vec4(c2, 0), JPH::Vec4(0, 0, 0, 1));
-            prep.rotation = rotMat.GetQuaternion().Normalized();
+            prep.scale       = trs.scale;
+            prep.rotation    = trs.rotation;
+            prep.translation = trs.translation;
+            prep.maxScale    = std::max({std::abs(trs.scale.GetX()), std::abs(trs.scale.GetY()), std::abs(trs.scale.GetZ())});
 
             if (createPhysics) {
                 JPH::ShapeRefC rawShape = useBoxColliders ? part.boxCollider : part.meshCollider;
@@ -364,32 +353,11 @@ auto InstantiateMeshPart(
         reg.Add(e, Components::HierarchyComponent {.parent = rootEntity});
     } else {
         // Non-skinned accessories use their local node offset
-        JPH::Mat44 nodeLocal = GetNodeLogicalTransform(prefab, part.nodeIndex) * part.localTransform;
-        JPH::Vec3  localPos  = nodeLocal.GetTranslation();
-
-        JPH::Vec3 c0 = nodeLocal.GetColumn3(0);
-        JPH::Vec3 c1 = nodeLocal.GetColumn3(1);
-        JPH::Vec3 c2 = nodeLocal.GetColumn3(2);
-        JPH::Vec3 localScale(c0.Length(), c1.Length(), c2.Length());
-
-        if (localScale.GetX() > 1e-5f) {
-            c0 /= localScale.GetX();
-        } else {
-            c0 = JPH::Vec3::sAxisX();
-        }
-        if (localScale.GetY() > 1e-5f) {
-            c1 /= localScale.GetY();
-        } else {
-            c1 = JPH::Vec3::sAxisY();
-        }
-        if (localScale.GetZ() > 1e-5f) {
-            c2 /= localScale.GetZ();
-        } else {
-            c2 = JPH::Vec3::sAxisZ();
-        }
-
-        JPH::Mat44 rotMat(JPH::Vec4(c0, 0), JPH::Vec4(c1, 0), JPH::Vec4(c2, 0), JPH::Vec4(0, 0, 0, 1));
-        JPH::Quat  localRot = rotMat.GetQuaternion().Normalized();
+        const JPH::Mat44         nodeLocal  = GetNodeLogicalTransform(prefab, part.nodeIndex) * part.localTransform;
+        const Math::TransformTRS localTRS   = Math::Decompose(nodeLocal);
+        const JPH::Vec3&         localPos   = localTRS.translation;
+        const JPH::Quat&         localRot   = localTRS.rotation;
+        const JPH::Vec3&         localScale = localTRS.scale;
 
         reg.Add(e, Components::TransformComponent {.position = localPos, .rotation = localRot, .scale = localScale});
         reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});

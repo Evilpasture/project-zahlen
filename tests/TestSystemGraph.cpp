@@ -13,8 +13,9 @@
 #include <thread>
 
 enum class SystemGraphTestError : uint8_t {
-    HazardMismatch[[= ZHLN::Reflect::Description<"SystemGraph failed to detect a Read/Write or Write/Write component conflict.">{}]] = 1,
-    ExecutionOrderFailed[[= ZHLN::Reflect::Description<"Systems were executed out of dependency order.">{}]],
+    HazardMismatch[[= ZHLN::Description<"SystemGraph failed to detect a Read/Write or Write/Write component conflict."> {}]] = 1,
+    ExecutionOrderFailed[[= ZHLN::Description<"Systems were executed out of dependency order."> {}]],
+    ExternalWriteAnchorFailed[[= ZHLN::Description<"The external-write anchor did not register, or broke dispatch to its dependents."> {}]],
 };
 
 // Mock components for access hazard tracking
@@ -182,6 +183,73 @@ struct SystemGraphTestSuite {
             auto chkC = ZHLN::Test::AssertTrue(orderC.load() > orderA.load() && orderC.load() > orderB.load());
             if (!chkC) {
                 return chkC;
+            }
+
+            return {};
+        }
+
+        // --- 3. External writes performed outside the graph ---
+        // Mirrors the real engine: PhysicsStateSystem::WriteBack writes
+        // PhysicsStateComponent from the imperative Physics frame phase, then
+        // VisualInterpolationSystem inside the update graph reads it. Without a
+        // declared write the graph sees a reader with no writer and builds no
+        // edge, so the dependency lives only in the surrounding call order.
+        std::expected<void, ZHLN::Error> external_write_anchor_reaches_dependents() {
+            ZHLN::ECS::SystemGraph graph;
+
+            static std::atomic<int> executionCounter {1};
+            static std::atomic<int> orderReader {0};
+            static std::atomic<int> orderWriter {0};
+            executionCounter.store(1);
+            orderReader.store(0);
+            orderWriter.store(0);
+
+            // The write happens in an imperative phase, before Execute(). The
+            // anchor carries no update function, so DispatchNode() must skip it
+            // and still propagate to every dependent.
+            graph.DeclareExternalWrites("ExternalPreUpdateWrites", {ZHLN::ECS::Write<TestCompA>()});
+
+            graph.AddSystem(
+                {.update_func    = [](ZHLN::Engine&, float) { orderReader.store(executionCounter.fetch_add(1, std::memory_order::seq_cst)); },
+                 .name           = "ReaderOfExternal",
+                 .access_pattern = {ZHLN::ECS::Read<TestCompA>()},
+                 .enabled        = true}
+            );
+            graph.AddSystem(
+                {.update_func    = [](ZHLN::Engine&, float) { orderWriter.store(executionCounter.fetch_add(1, std::memory_order::seq_cst)); },
+                 .name           = "WriterOfExternal",
+                 .access_pattern = {ZHLN::ECS::Write<TestCompA>()},
+                 .enabled        = true}
+            );
+
+            // Anchor + reader + writer.
+            if (graph.GetSystemCount() != 3) {
+                return std::unexpected(SystemGraphTestError::ExternalWriteAnchorFailed);
+            }
+
+            graph.Compile();
+            auto* fakeEngine = reinterpret_cast<ZHLN::Engine*>(FakeEnginePtr);
+            graph.Execute(*fakeEngine, TestDeltaTime);
+
+            // Both systems ran exactly once: the null-function anchor neither
+            // crashed dispatch nor stranded its dependents.
+            auto ranBoth = ZHLN::Test::AssertTrue(orderReader.load() > 0 && orderWriter.load() > 0);
+            if (!ranBoth) {
+                return ranBoth;
+            }
+            // Registration order still decides the reader/writer tie-break.
+            auto ordered = ZHLN::Test::AssertTrue(orderWriter.load() > orderReader.load());
+            if (!ordered) {
+                return ordered;
+            }
+
+            // Guards: an empty access set or a null label must add no node, so a
+            // mis-built declaration cannot silently create a phantom dependency.
+            ZHLN::ECS::SystemGraph empty;
+            empty.DeclareExternalWrites("NothingWritten", {});
+            empty.DeclareExternalWrites(nullptr, {ZHLN::ECS::Write<TestCompA>()});
+            if (empty.GetSystemCount() != 0) {
+                return std::unexpected(SystemGraphTestError::ExternalWriteAnchorFailed);
             }
 
             return {};

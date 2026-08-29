@@ -16,8 +16,8 @@
 // ============================================================================
 
 enum class SyncPrimError : uint32_t {
-    ConcurrencyFailure[[= ZHLN::Reflect::Description<"A race condition was detected; mutual exclusion violated.">{}]] = 1,
-    SignalingFailure[[= ZHLN::Reflect::Description<"Condition variable signaling failed or timed out.">{}]],
+    ConcurrencyFailure[[= ZHLN::Description<"A race condition was detected; mutual exclusion violated.">{}]] = 1,
+    SignalingFailure[[= ZHLN::Description<"Condition variable signaling failed or timed out.">{}]],
 };
 
 // ============================================================================

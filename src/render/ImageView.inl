@@ -10,9 +10,9 @@ namespace ZHLN::Vk {
 // namespace (not the file-local block below) so callers across the renderer
 // can branch on it via the type-erased Error.
 enum class ImageViewCreationError : uint8_t {
-    OutOfHostMemory[[= ZHLN::Reflect::Description<"Out of host memory">{}]] = 1,
-    OutOfDeviceMemory[[= ZHLN::Reflect::Description<"Out of device memory">{}]],
-    CreationFailed[[= ZHLN::Reflect::Description<"Image view creation failed">{}]],
+    OutOfHostMemory[[= ZHLN::Description<"Out of host memory">{}]] = 1,
+    OutOfDeviceMemory[[= ZHLN::Description<"Out of device memory">{}]],
+    CreationFailed[[= ZHLN::Description<"Image view creation failed">{}]],
 };
 
 namespace {

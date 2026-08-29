@@ -37,7 +37,7 @@ struct ActorConfig {
 // ============================================================================
 
 #ifndef ZHLN_IN_DOCKER
-constexpr auto kStaticConfigJSON = ZHLN::Reflect::StringLiteral(R"({
+constexpr auto kStaticConfigJSON = ZHLN::StringLiteral(R"({
     "engine": "Zahlen",
     "version": 2026,
     "debug": true,

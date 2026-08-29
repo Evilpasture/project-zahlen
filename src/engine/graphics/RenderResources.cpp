@@ -29,18 +29,18 @@
 namespace ZHLN {
 
 enum class MaterialCreationError : uint8_t {
-    ShaderCompilationFailed[[= ZHLN::Reflect::Description<"Material shader compilation failed">{}]] = 1,
-    PipelineLayoutCreationFailed[[= ZHLN::Reflect::Description<"Material pipeline layout creation failed">{}]],
-    PipelineCreationFailed[[= ZHLN::Reflect::Description<"Material pipeline creation failed">{}]],
+    ShaderCompilationFailed[[= ZHLN::Description<"Material shader compilation failed">{}]] = 1,
+    PipelineLayoutCreationFailed[[= ZHLN::Description<"Material pipeline layout creation failed">{}]],
+    PipelineCreationFailed[[= ZHLN::Description<"Material pipeline creation failed">{}]],
 };
 
 enum class BlueNoiseError : uint8_t {
-    DecodeFailed[[= ZHLN::Reflect::Description<"Blue noise PNG decode failed">{}]] = 1,
+    DecodeFailed[[= ZHLN::Description<"Blue noise PNG decode failed">{}]] = 1,
 };
 
 enum class ShadowResolutionError : uint8_t {
-    DeviceLost[[= ZHLN::Reflect::Description<"Device lost while resizing shadow map">{}]] = 1,
-    RecreationFailed[[= ZHLN::Reflect::Description<"Shadow map recreation failed">{}]],
+    DeviceLost[[= ZHLN::Description<"Device lost while resizing shadow map">{}]] = 1,
+    RecreationFailed[[= ZHLN::Description<"Shadow map recreation failed">{}]],
 };
 
 } // namespace ZHLN
@@ -1235,10 +1235,8 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
                 impl->pendingAcquires.Drain(tempCmd);
 
                 Vk::MemoryBarrier(
-                    tempCmd, {.src_stage  = VK_PIPELINE_STAGE_2_COPY_BIT,
-                              .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                              .dst_stage  = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-                              .dst_access = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR}
+                    tempCmd, Vk::BarrierStage::Copy, Vk::BarrierAccess::TransferWrite,
+                    Vk::BarrierStage::AccelerationStructureBuild, Vk::BarrierAccess::AccelerationStructureRead
                 );
                 impl->rtCtx.BuildBLAS(tempCmd, b.geom, b.blas, Vk::GetBufferAddress(impl->ctx.Device(), b.scratch.Handle()), b.primitiveCount);
             }
@@ -1274,8 +1272,8 @@ auto RenderContext::CreateProceduralTexture(std::string_view name, uint32_t widt
 }
 
 enum class ScreenshotError : uint8_t {
-    FileOpenFailed[[= ZHLN::Reflect::Description<"Failed to open screenshot output file for writing">{}]] = 1,
-    ReadbackFailed[[= ZHLN::Reflect::Description<"GPU readback buffer mapping failed">{}]],
+    FileOpenFailed[[= ZHLN::Description<"Failed to open screenshot output file for writing">{}]] = 1,
+    ReadbackFailed[[= ZHLN::Description<"GPU readback buffer mapping failed">{}]],
 };
 
 auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -> std::expected<void, Error> {

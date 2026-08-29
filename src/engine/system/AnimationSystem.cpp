@@ -8,6 +8,7 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/IK.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/Math3D.hpp>
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/SkeletalAnimation.hpp>
@@ -98,32 +99,6 @@ void SampleWeightsChannel(const AnimationChannel& channel, float time, float* ou
     }
 }
 
-auto Decompose = [](const JPH::Mat44& mat, JPH::Vec3& t, JPH::Quat& r, JPH::Vec3& s) {
-    t            = mat.GetTranslation();
-    JPH::Vec3 c0 = mat.GetColumn3(0);
-    JPH::Vec3 c1 = mat.GetColumn3(1);
-    JPH::Vec3 c2 = mat.GetColumn3(2);
-    s            = JPH::Vec3(c0.Length(), c1.Length(), c2.Length());
-
-    if (s.GetX() > 1e-5f) {
-        c0 /= s.GetX();
-    } else {
-        c0 = JPH::Vec3::sAxisX();
-    }
-    if (s.GetY() > 1e-5f) {
-        c1 /= s.GetY();
-    } else {
-        c1 = JPH::Vec3::sAxisY();
-    }
-    if (s.GetZ() > 1e-5f) {
-        c2 /= s.GetZ();
-    } else {
-        c2 = JPH::Vec3::sAxisZ();
-    }
-
-    r = JPH::Mat44(JPH::Vec4(c0, 0), JPH::Vec4(c1, 0), JPH::Vec4(c2, 0), JPH::Vec4(0, 0, 0, 1)).GetQuaternion().Normalized();
-};
-
 } // namespace
 
 void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt) {
@@ -171,7 +146,10 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
             std::vector<JPH::Quat> baseR(prefab.nodes.size());
             std::vector<JPH::Vec3> baseS(prefab.nodes.size());
             for (size_t n = 0; n < prefab.nodes.size(); ++n) {
-                Decompose(prefab.nodes[n].localTransform, baseT[n], baseR[n], baseS[n]);
+                const Math::TransformTRS trs = Math::Decompose(prefab.nodes[n].localTransform);
+                baseT[n]                     = trs.translation;
+                baseR[n]                     = trs.rotation;
+                baseS[n]                     = trs.scale;
             }
 
             std::vector<std::array<float, 4>> nodeMorphWeights(prefab.nodes.size(), {0.0f, 0.0f, 0.0f, 0.0f});
@@ -379,15 +357,12 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
                     }
                 } else {
                     // Non-skinned parts (attachments/accessories) follow their node hierarchy transform
-                    JPH::Vec3 t {};
-                    JPH::Vec3 s {};
-                    JPH::Quat r {};
-                    Decompose(worldTransforms[mesh->nodeIndex], t, r, s);
+                    const Math::TransformTRS trs = Math::Decompose(worldTransforms[mesh->nodeIndex]);
 
                     if (auto* childTrans = reg.Get<Components::TransformComponent>(childEnt)) {
-                        childTrans->position = t;
-                        childTrans->rotation = r;
-                        childTrans->scale    = s;
+                        childTrans->position = trs.translation;
+                        childTrans->rotation = trs.rotation;
+                        childTrans->scale    = trs.scale;
                     }
                 }
             }

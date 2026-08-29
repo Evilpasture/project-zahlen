@@ -68,13 +68,13 @@ inline constexpr float INV_QUAT_SCALE = 1.0f / 32767.0f;
 // ============================================================================
 
 enum class NetworkError : uint8_t {
-    SocketError[[= ZHLN::Reflect::Description<"Socket operation failed"> {}]] = 1,
-    ConnectionFailed[[= ZHLN::Reflect::Description<"Failed to establish server connection"> {}]],
-    HandshakeFailed[[= ZHLN::Reflect::Description<"Server handshake or token verification failed"> {}]],
-    HandshakeTimeout[[= ZHLN::Reflect::Description<"Server did not respond to the handshake in time"> {}]],
-    ServerDisconnected[[= ZHLN::Reflect::Description<"Server closed the connection"> {}]],
-    ReplicationFailed[[= ZHLN::Reflect::Description<"Failed to apply a replicated server update"> {}]],
-    InvalidPayload[[= ZHLN::Reflect::Description<"Payload structure does not match expected protocol schema"> {}]]
+    SocketError[[= ZHLN::Description<"Socket operation failed"> {}]] = 1,
+    ConnectionFailed[[= ZHLN::Description<"Failed to establish server connection"> {}]],
+    HandshakeFailed[[= ZHLN::Description<"Server handshake or token verification failed"> {}]],
+    HandshakeTimeout[[= ZHLN::Description<"Server did not respond to the handshake in time"> {}]],
+    ServerDisconnected[[= ZHLN::Description<"Server closed the connection"> {}]],
+    ReplicationFailed[[= ZHLN::Description<"Failed to apply a replicated server update"> {}]],
+    InvalidPayload[[= ZHLN::Description<"Payload structure does not match expected protocol schema"> {}]]
 };
 
 // ============================================================================
@@ -82,55 +82,55 @@ enum class NetworkError : uint8_t {
 // ============================================================================
 
 enum class MessageType : uint8_t {
-    ClientHello[[= ZHLN::Reflect::Description<"Client to server: identity and auth token"> {}]] = 1,
-    ServerWelcome[[= ZHLN::Reflect::Description<"Server to client: session acceptance and realtime port"> {}]] = 2,
-    InitialSnapshot[[= ZHLN::Reflect::Description<"Server to client: full world snapshot"> {}]] = 3,
-    PhysicsBatch[[= ZHLN::Reflect::Description<"Server to client: realtime physics state batch"> {}]] = 4,
-    ClientInput[[= ZHLN::Reflect::Description<"Client to server: per-frame movement input"> {}]] = 5
+    ClientHello[[= ZHLN::Description<"Client to server: identity and auth token"> {}]] = 1,
+    ServerWelcome[[= ZHLN::Description<"Server to client: session acceptance and realtime port"> {}]] = 2,
+    InitialSnapshot[[= ZHLN::Description<"Server to client: full world snapshot"> {}]] = 3,
+    PhysicsBatch[[= ZHLN::Description<"Server to client: realtime physics state batch"> {}]] = 4,
+    ClientInput[[= ZHLN::Description<"Client to server: per-frame movement input"> {}]] = 5
 };
 
 struct ClientHello {
-    uint32_t    protocolVersion [[= ZHLN::Reflect::Description<"Wire protocol version the client speaks"> {}]];
-    uint64_t    userId [[= ZHLN::Reflect::Description<"Player identity issued by the server operator"> {}]];
-    std::string token [[= ZHLN::Reflect::Description<"Shared secret used for this login session"> {}]];
+    uint32_t    protocolVersion [[= ZHLN::Description<"Wire protocol version the client speaks"> {}]];
+    uint64_t    userId [[= ZHLN::Description<"Player identity issued by the server operator"> {}]];
+    std::string token [[= ZHLN::Description<"Shared secret used for this login session"> {}]];
 };
 
 struct ServerWelcome {
-    uint32_t serverTick [[= ZHLN::Reflect::Description<"Server simulation tick at handshake time"> {}]];
-    uint16_t realtimePort [[= ZHLN::Reflect::Description<"UDP port serving realtime physics and input traffic"> {}]];
-    uint8_t  tickRateHz [[= ZHLN::Reflect::Description<"Authoritative server tick rate in hertz"> {},
+    uint32_t serverTick [[= ZHLN::Description<"Server simulation tick at handshake time"> {}]];
+    uint16_t realtimePort [[= ZHLN::Description<"UDP port serving realtime physics and input traffic"> {}]];
+    uint8_t  tickRateHz [[= ZHLN::Description<"Authoritative server tick rate in hertz"> {},
                          = ZHLN::Wire::Range<1, 240> {}]];
 };
 
 struct ObjectSnapshot {
-    uint64_t  uid [[= ZHLN::Reflect::Description<"Server-assigned stable object identity"> {}]];
-    JPH::Vec3 position [[= ZHLN::Reflect::Description<"World-space position, quantized to 1/256 m"> {}]];
-    JPH::Vec3 size [[= ZHLN::Reflect::Description<"Axis-aligned object extents, quantized to 1/256 m"> {}]];
+    uint64_t  uid [[= ZHLN::Description<"Server-assigned stable object identity"> {}]];
+    JPH::Vec3 position [[= ZHLN::Description<"World-space position, quantized to 1/256 m"> {}]];
+    JPH::Vec3 size [[= ZHLN::Description<"Axis-aligned object extents, quantized to 1/256 m"> {}]];
 };
 
 struct [[= ZHLN::Wire::Version<2> {}]] InitialSnapshotMessage {
-    uint32_t                    serverTick [[= ZHLN::Reflect::Description<"Server simulation tick of this snapshot"> {}]];
-    std::vector<ObjectSnapshot> objects [[= ZHLN::Reflect::Description<"Every replicated object in the world"> {}]];
+    uint32_t                    serverTick [[= ZHLN::Description<"Server simulation tick of this snapshot"> {}]];
+    std::vector<ObjectSnapshot> objects [[= ZHLN::Description<"Every replicated object in the world"> {}]];
 };
 
 struct PhysicsBodyState {
-    uint64_t  uid [[= ZHLN::Reflect::Description<"Server-assigned stable object identity"> {}]];
-    JPH::Vec3 position [[= ZHLN::Reflect::Description<"World-space position, quantized to 1/256 m"> {}]];
-    JPH::Quat rotation [[= ZHLN::Reflect::Description<"Sign-canonical orientation, quantized to 1/32767 per component"> {}]];
-    JPH::Vec3 velocity [[= ZHLN::Reflect::Description<"Linear velocity in metres per second"> {}]];
+    uint64_t  uid [[= ZHLN::Description<"Server-assigned stable object identity"> {}]];
+    JPH::Vec3 position [[= ZHLN::Description<"World-space position, quantized to 1/256 m"> {}]];
+    JPH::Quat rotation [[= ZHLN::Description<"Sign-canonical orientation, quantized to 1/32767 per component"> {}]];
+    JPH::Vec3 velocity [[= ZHLN::Description<"Linear velocity in metres per second"> {}]];
 };
 
 struct [[= ZHLN::Wire::Version<2> {}]] PhysicsBatchMessage {
-    uint32_t                      serverTick [[= ZHLN::Reflect::Description<"Server simulation tick of this batch"> {}]];
-    std::vector<PhysicsBodyState> bodies [[= ZHLN::Reflect::Description<"One entry per moving replicated body"> {}]];
+    uint32_t                      serverTick [[= ZHLN::Description<"Server simulation tick of this batch"> {}]];
+    std::vector<PhysicsBodyState> bodies [[= ZHLN::Description<"One entry per moving replicated body"> {}]];
 };
 
 struct ClientInputMessage {
-    uint64_t userId [[= ZHLN::Reflect::Description<"Player identity issued by the server operator"> {}]];
-    uint32_t sequence [[= ZHLN::Reflect::Description<"Monotonically increasing input counter"> {}]];
-    uint8_t  moveFlags [[= ZHLN::Reflect::Description<"Movement bitfield: 1=forward 2=backward 4=left 8=right 16=jump"> {},
+    uint64_t userId [[= ZHLN::Description<"Player identity issued by the server operator"> {}]];
+    uint32_t sequence [[= ZHLN::Description<"Monotonically increasing input counter"> {}]];
+    uint8_t  moveFlags [[= ZHLN::Description<"Movement bitfield: 1=forward 2=backward 4=left 8=right 16=jump"> {},
                         = ZHLN::Wire::Range<0, 31> {}]];
-    float    yaw [[= ZHLN::Reflect::Description<"Camera yaw in degrees, clockwise positive"> {},
+    float    yaw [[= ZHLN::Description<"Camera yaw in degrees, clockwise positive"> {},
                = ZHLN::Wire::Range<-1000.0f, 1000.0f> {}]];
 };
 

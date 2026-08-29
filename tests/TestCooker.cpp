@@ -63,15 +63,15 @@ constexpr float kSampleMetallic = 0.2f;
 } // namespace
 
 enum class CookerTestError : uint8_t {
-    ZcookExecutableNotFound[[= ZHLN::Reflect::Description<"Could not find the 'zcook' compiler binary in the build tree.">{}]] = 1,
-    MetadataSerializationFailed[[= ZHLN::Reflect::Description<"Failed to serialize intermediate binary metadata.">{}]],
-    MeshCompilationFailed[[= ZHLN::Reflect::Description<"zcook mesh subcommand failed to produce a valid .zmesh asset.">{}]],
-    AnimationCompilationFailed[[= ZHLN::Reflect::Description<"zcook anim subcommand failed to produce a valid .zanim asset.">{}]],
-    TextureCookingFailed[[= ZHLN::Reflect::Description<"zcook tex subcommand failed to cook the texture asset.">{}]],
-    PakArchiveFailed[[= ZHLN::Reflect::Description<"zcook pak subcommand failed to compile the .pak archive.">{}]],
-    VfsMountVerificationFailed[[= ZHLN::Reflect::Description<"CreativeWorksManager failed to mount or load assets from zcook-generated .pak.">{}]],
-    GLBEmissionFailed[[= ZHLN::Reflect::Description<"zcook glb subcommand failed to produce a valid glTF 2.0 container.">{}]],
-    CLIErrorHandlingFailed[[= ZHLN::Reflect::Description<"zcook failed to return a non-zero exit code on malformed arguments.">{}]],
+    ZcookExecutableNotFound[[= ZHLN::Description<"Could not find the 'zcook' compiler binary in the build tree.">{}]] = 1,
+    MetadataSerializationFailed[[= ZHLN::Description<"Failed to serialize intermediate binary metadata.">{}]],
+    MeshCompilationFailed[[= ZHLN::Description<"zcook mesh subcommand failed to produce a valid .zmesh asset.">{}]],
+    AnimationCompilationFailed[[= ZHLN::Description<"zcook anim subcommand failed to produce a valid .zanim asset.">{}]],
+    TextureCookingFailed[[= ZHLN::Description<"zcook tex subcommand failed to cook the texture asset.">{}]],
+    PakArchiveFailed[[= ZHLN::Description<"zcook pak subcommand failed to compile the .pak archive.">{}]],
+    VfsMountVerificationFailed[[= ZHLN::Description<"CreativeWorksManager failed to mount or load assets from zcook-generated .pak.">{}]],
+    GLBEmissionFailed[[= ZHLN::Description<"zcook glb subcommand failed to produce a valid glTF 2.0 container.">{}]],
+    CLIErrorHandlingFailed[[= ZHLN::Description<"zcook failed to return a non-zero exit code on malformed arguments.">{}]],
 };
 
 // ============================================================================

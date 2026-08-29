@@ -20,6 +20,7 @@
 #include <Zahlen/CreativeWorksManager.hpp>
 #include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
+#include <Zahlen/FrameScheduler.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Profiler.hpp>
@@ -104,6 +105,7 @@ struct EngineImpl {
     Camera        mainCamera;
     ECS::Registry registry;
 
+    FrameScheduler                            scheduler;
     std::unique_ptr<ECS::SystemGraph>         updateGraph;
     std::unique_ptr<ECS::SystemGraph>         renderGraph;
     std::unique_ptr<ECS::EntityCommandBuffer> mainECB;
@@ -162,11 +164,197 @@ void Sys_Terrain(Engine& engine, float dt) {
     sys.Update(engine, dt);
 }
 
+// ============================================================================
+// FRAME PHASE STEPS
+//
+// Each function is one ordered unit of work in the frame. The two SystemGraphs
+// are steps like any other, so hazard analysis only ever orders systems *inside*
+// a graph -- never the phases around them, which run in fixed registration
+// order. Adding a system means adding a step here, not editing Engine::Tick.
+// ============================================================================
+
+/// The native gameplay module is shared by the Gameplay and Fallback steps
+/// (the latter checks IsLoaded()), so both must see the same instance.
+[[nodiscard]] NativeScriptModule& GameplayModule() {
+    static NativeScriptModule module("scripts/gameplay");
+    return module;
+}
+
+namespace Steps {
+
+void Input(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
+    static InputSystem inputSystem;
+    inputSystem.Update(engine);
+}
+
+void UIInteraction(Engine& engine, float dt, FrameContext& /*ctx*/) {
+    UIInteractionSystem::Update(engine, dt);
+}
+
+void HostUICallback(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
+    if (const auto* cb = engine.GetUICallback(); cb != nullptr && static_cast<bool>(*cb)) {
+        (*cb)(engine);
+    }
+}
+
+void HotReload(Engine& engine, float /*dt*/, FrameContext& ctx) {
+    static FileWatcher gameplayWatcher("scripts/boot.lua");
+    if (ctx.driver != GameplayDriver::Cpp && gameplayWatcher.CheckModified()) {
+        engine.GetScriptRunner().ReloadFile("scripts/boot.lua");
+    }
+    engine.GetRenderContext().CheckShaderReload();
+}
+
+/// Translate gameplay input using the previous resolved camera. Camera
+/// transforms are finalized after physics and the update graph so rig-driven
+/// first-person views cannot lag one simulation frame behind their body.
+void PlayerIntent(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
+    static InputSystem inputSystem;
+    inputSystem.PlayerInputTranslate(engine, engine.GetCamera());
+}
+
+void Physics(Engine& engine, float dt, FrameContext& /*ctx*/) {
+    static PhysicsSystem physicsSystem;
+    physicsSystem.Update(engine, dt);
+}
+
+void Gameplay(Engine& engine, float dt, FrameContext& ctx) {
+    switch (ctx.driver) {
+        using enum GameplayDriver;
+        case Cpp: {
+            ZHLN::ScopedTimer profTimer("ECS System: Native C++ Gameplay Update");
+            ctx.status = GameplayModule().Update(&engine, dt);
+            break;
+        }
+        case Fennel: {
+            ZHLN::ScopedTimer profTimer("ECS System: Script/Lua Update");
+            engine.GetScriptRunner().CallUpdate(&engine, dt);
+            break;
+        }
+        case Hybrid: {
+            {
+                ZHLN::ScopedTimer profTimer("ECS System: Native C++ Gameplay Update");
+                ctx.status = GameplayModule().Update(&engine, dt);
+            }
+            {
+                ZHLN::ScopedTimer profTimer("ECS System: Script/Lua Update");
+                engine.GetScriptRunner().CallUpdate(&engine, dt);
+            }
+            break;
+        }
+    }
+}
+
+void UpdateGraph(Engine& engine, float dt, FrameContext& /*ctx*/) {
+    engine.GetUpdateGraph().Execute(engine, dt);
+}
+
+void CommandPlayback(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
+    engine.GetMainECB().Playback();
+}
+
+/// Resolve target cameras and camera matrices from current physics and
+/// procedural rig poses immediately before visibility/render work.
+void Camera(Engine& engine, float dt, FrameContext& /*ctx*/) {
+    static TargetCameraSystem targetCamSys;
+    static CameraSystem       camSys;
+    targetCamSys.Update(engine, dt, engine.GetCurrentAlpha());
+    camSys.Update(engine, dt, engine.GetCurrentAlpha());
+}
+
+void LOD(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
+    LODSystem::Update(engine);
+}
+
+void RenderGraph(Engine& engine, float dt, FrameContext& /*ctx*/) {
+    engine.GetRenderGraph().Execute(engine, dt);
+}
+
+void Present(Engine& engine, float dt, FrameContext& ctx) {
+    auto render_res = RenderSystem::Update(engine, dt);
+    if (!render_res) {
+        if (render_res.error().Is<RenderFrameResult>() && render_res.error().As<RenderFrameResult>() == RenderFrameResult::DeviceLost) {
+            [[maybe_unused]] auto _ = engine.HandleDeviceLost();
+            ctx.deviceLost          = true;
+        }
+    }
+}
+
+/// Auto-detect missing gameplay scripts / modules and engage the Fallback Preset.
+void Fallback(Engine& engine, float dt, FrameContext& ctx) {
+    if (!DefaultPreset::IsActive()) {
+        if ((ctx.driver == GameplayDriver::Fennel || ctx.driver == GameplayDriver::Hybrid) && !std::filesystem::exists("scripts/boot.lua") &&
+            !std::filesystem::exists("scripts/boot.fnl")) {
+            DefaultPreset::BuildFallbackScene(engine, FallbackReason::MissingBootScript, "Script 'scripts/boot.lua' was not found in working directory.");
+        } else if (ctx.driver == GameplayDriver::Cpp && !GameplayModule().IsLoaded()) {
+            DefaultPreset::BuildFallbackScene(
+                engine, FallbackReason::MissingNativeModule, "Native gameplay module (libgameplay.so / gameplay.dll) was not found."
+            );
+        }
+    }
+
+    if (DefaultPreset::IsActive()) {
+        DefaultPreset::Update(engine, dt);
+    }
+}
+
+void TransformHistory(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
+    ZHLN::ScopedTimer      profTimer("ECS System: Update Transform History");
+    static TransformSystem transformSystem;
+    transformSystem.UpdateTransformHistory(engine.GetRegistry());
+}
+
+} // namespace Steps
+
+/// The frame, in order. Phase names are documentation: steps run strictly in
+/// registration order regardless of the phase they are tagged with.
+void BuildFrameScheduler(Engine& engine) {
+    using Phase     = FramePhase;
+    auto& scheduler = engine.GetFrameScheduler();
+
+    scheduler.Clear();
+    scheduler.Add(Phase::Input, "InputSystem", Steps::Input);
+    scheduler.Add(Phase::UI, "UIInteractionSystem", Steps::UIInteraction);
+    scheduler.Add(Phase::UI, "HostUICallback", Steps::HostUICallback);
+    scheduler.Add(Phase::HotReload, "ScriptAndShaderReload", Steps::HotReload);
+    scheduler.Add(Phase::PlayerIntent, "PlayerInputTranslate", Steps::PlayerIntent);
+    scheduler.Add(Phase::Physics, "PhysicsSystem", Steps::Physics);
+    scheduler.Add(Phase::Gameplay, "GameplayModule", Steps::Gameplay);
+    scheduler.Add(Phase::Simulation, "UpdateGraph", Steps::UpdateGraph);
+    scheduler.Add(Phase::Simulation, "MainECBPlayback", Steps::CommandPlayback);
+    scheduler.Add(Phase::Camera, "CameraSystems", Steps::Camera);
+    scheduler.Add(Phase::Camera, "LODSystem", Steps::LOD);
+    scheduler.Add(Phase::Visibility, "RenderGraph", Steps::RenderGraph);
+    scheduler.Add(Phase::Present, "RenderSystem", Steps::Present);
+    scheduler.Add(Phase::Fallback, "DefaultPreset", Steps::Fallback);
+    scheduler.Add(Phase::History, "TransformHistory", Steps::TransformHistory);
+}
+
 void BuildSystemGraphs(Engine& engine) {
     auto& updateGraph = engine.GetUpdateGraph();
     auto& renderGraph = engine.GetRenderGraph();
 
     using namespace ZHLN::ECS;
+
+    // Components written by imperative frame phases that run before this graph
+    // executes. No node inside the graph performs these writes, so without this
+    // anchor hazard analysis would see VisualInterpolationSystem reading
+    // PhysicsStateComponent and AnimationSystem/InteractionSystem reading
+    // MovementComponent with no writer to order against, and build no edge.
+    //   PhysicsStateComponent <- PhysicsStateSystem::WriteBack, called from the
+    //                            Physics phase's fixed-step accumulator.
+    //   MovementComponent     <- InputSystem::PlayerInputTranslate (PlayerIntent
+    //                            phase) and MovementSystem (Physics phase).
+    // Authored scene data with no per-frame writer (HierarchyComponent,
+    // SkeletalMeshComponent, PhysicsComponent, ItemBaseComponent, UsableComponent,
+    // KinematicPoseOverrideComponent) is deliberately not declared: there is no
+    // write to anchor, and claiming one would misdescribe the frame.
+    updateGraph.DeclareExternalWrites(
+        "ExternalPreUpdateWrites", {
+                                       Write<Components::PhysicsStateComponent>(),
+                                       Write<Components::MovementComponent>(),
+                                   }
+    );
 
     updateGraph.AddSystem({
         .update_func    = [](Engine& eng, float dt) -> void { TextureSystem::Update(eng, dt); },
@@ -257,6 +445,19 @@ void BuildSystemGraphs(Engine& engine) {
     });
 
     updateGraph.Compile();
+
+    // CameraSystem (Camera phase) writes CameraComponent::prevUnjitteredViewProj
+    // before this graph runs; CullingSystem reads CameraComponent. Same anchor
+    // rationale as updateGraph above.
+    //   CameraComponent      <- CameraSystem::Update (Camera phase).
+    // TransformComponent / WorldTransformComponent are written by updateGraph,
+    // not by an imperative phase, so they are cross-graph ordering rather than an
+    // undeclared external write -- left to the phase order on purpose.
+    renderGraph.DeclareExternalWrites(
+        "ExternalPreRenderWrites", {
+                                       Write<Components::CameraComponent>(),
+                                   }
+    );
 
     renderGraph.AddSystem({
         .update_func    = Sys_Culling,
@@ -371,9 +572,7 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
 
     auto onKey = [](void* userdata, KeyCode key, bool pressed) -> void {
         auto* reg   = static_cast<ECS::Registry*>(userdata);
-        auto  ents  = reg->GetEntitiesWith<Components::InputStateComponent>();
-        auto* state = ents.empty() ? reg->Get<Components::InputStateComponent>(reg->Create(Components::InputStateComponent {})) :
-                                     reg->Get<Components::InputStateComponent>(ents[0]);
+        auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
         state->SetKey(static_cast<uint8_t>(key), pressed);
 
         if (pressed) {
@@ -398,25 +597,19 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
 
     auto onMouseMove = [](void* userdata, float x, float y) -> void {
         auto* reg   = static_cast<ECS::Registry*>(userdata);
-        auto  ents  = reg->GetEntitiesWith<Components::InputStateComponent>();
-        auto* state = ents.empty() ? reg->Get<Components::InputStateComponent>(reg->Create(Components::InputStateComponent {})) :
-                                     reg->Get<Components::InputStateComponent>(ents[0]);
+        auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
         state->ApplyLocalMotion(x, y);
     };
 
     auto onMouseScroll = [](void* userdata, float delta) -> void {
         auto* reg   = static_cast<ECS::Registry*>(userdata);
-        auto  ents  = reg->GetEntitiesWith<Components::InputStateComponent>();
-        auto* state = ents.empty() ? reg->Get<Components::InputStateComponent>(reg->Create(Components::InputStateComponent {})) :
-                                     reg->Get<Components::InputStateComponent>(ents[0]);
+        auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
         state->ApplyWheel(delta);
     };
 
     auto onResize = [](void* userdata, Extent2D extent) -> void {
         auto* reg   = static_cast<ECS::Registry*>(userdata);
-        auto  ents  = reg->GetEntitiesWith<Components::InputStateComponent>();
-        auto* state = ents.empty() ? reg->Get<Components::InputStateComponent>(reg->Create(Components::InputStateComponent {})) :
-                                     reg->Get<Components::InputStateComponent>(ents[0]);
+        auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
         state->ApplyResize(extent);
     };
 
@@ -521,8 +714,7 @@ void Engine::ProcessEvents() {
     ZHLN::CheckForCrashes(this);
 
     auto&                            reg        = _impl->registry;
-    auto                             ents       = reg.GetEntitiesWith<Components::InputStateComponent>();
-    Components::InputStateComponent* inputState = ents.empty() ? nullptr : reg.Get<Components::InputStateComponent>(ents[0]);
+    Components::InputStateComponent* inputState = reg.GetSingleton<Components::InputStateComponent>();
     if (inputState != nullptr) {
         inputState->ResetDeltas();
     }
@@ -626,6 +818,9 @@ auto Engine::GetRenderGraph() -> ECS::SystemGraph& {
 auto Engine::GetMainECB() -> ECS::EntityCommandBuffer& {
     return *_impl->mainECB;
 }
+auto Engine::GetFrameScheduler() -> FrameScheduler& {
+    return _impl->scheduler;
+}
 auto Engine::GetCullingSystem() -> CullingSystem& {
     return *_impl->cullingSystem;
 }
@@ -648,6 +843,10 @@ void Engine::SetGameState(void* state) {
 
 void Engine::SetUICallback(UICallback callback) {
     _impl->uiCallback = std::move(callback);
+}
+
+auto Engine::GetUICallback() const noexcept -> const UICallback* {
+    return _impl->uiCallback ? &_impl->uiCallback : nullptr;
 }
 
 void Engine::ProvokeDeviceLost() {
@@ -693,112 +892,21 @@ auto Engine::InitializeDefaultScene() -> bool {
 
     CreativeWorksFactory::CreateFontAtlasTexture(rc);
     BuildSystemGraphs(*this);
+    BuildFrameScheduler(*this);
     return true;
 }
 
 auto Engine::Tick(float dt, GameplayDriver driver) -> GameplayStatus {
-    static FileWatcher        gameplayWatcher("scripts/boot.lua");
-    static NativeScriptModule nativeModule("scripts/gameplay");
-    static InputSystem        inputSystem;
-    static TargetCameraSystem targetCamSys;
-    static CameraSystem       camSys;
-    static PhysicsSystem      physicsSystem;
+    FrameContext ctx {.driver = driver, .status = GameplayStatus::OK, .deviceLost = false};
 
-    // 1. Process Input & UI Systems
-    inputSystem.Update(*this);
-    UIInteractionSystem::Update(*this, dt);
-
-    if (_impl->uiCallback) {
-        _impl->uiCallback(*this);
-    }
-
-    if (driver != GameplayDriver::Cpp && gameplayWatcher.CheckModified()) {
-        GetScriptRunner().ReloadFile("scripts/boot.lua");
-    }
-    GetRenderContext().CheckShaderReload();
-
-    // 2. Translate gameplay input using the previous resolved camera. Camera
-    // transforms are finalized after physics and the update graph so rig-driven
-    // first-person views cannot lag one simulation frame behind their body.
-    inputSystem.PlayerInputTranslate(*this, GetCamera());
-
-    // 3. Physics Fixed Step & WriteBack
-    physicsSystem.Update(*this, dt);
-
-    // 4. Gameplay Module Update
-    GameplayStatus status = GameplayStatus::OK;
-    switch (driver) {
-        using enum GameplayDriver;
-        case Cpp: {
-            ZHLN::ScopedTimer profTimer("ECS System: Native C++ Gameplay Update");
-            status = nativeModule.Update(this, dt);
-            break;
-        }
-        case Fennel: {
-            ZHLN::ScopedTimer profTimer("ECS System: Script/Lua Update");
-            GetScriptRunner().CallUpdate(this, dt);
-            break;
-        }
-        case Hybrid: {
-            {
-                ZHLN::ScopedTimer profTimer("ECS System: Native C++ Gameplay Update");
-                status = nativeModule.Update(this, dt);
-            }
-            {
-                ZHLN::ScopedTimer profTimer("ECS System: Script/Lua Update");
-                GetScriptRunner().CallUpdate(this, dt);
-            }
-            break;
-        }
-    }
-
-    // 5. Update Graph & Command Buffer Playback
-    GetUpdateGraph().Execute(*this, dt);
-    GetMainECB().Playback();
-
-    // Resolve target cameras and camera matrices from current physics and
-    // procedural rig poses immediately before visibility/render work.
-    targetCamSys.Update(*this, dt, GetCurrentAlpha());
-    camSys.Update(*this, dt, GetCurrentAlpha());
-    LODSystem::Update(*this);
-
-    // 6. Render Graph & Frame Submission
-    GetRenderGraph().Execute(*this, dt);
-    auto render_res = RenderSystem::Update(*this, dt);
-    if (!render_res) {
-        if (render_res.error().Is<RenderFrameResult>() && render_res.error().As<RenderFrameResult>() == RenderFrameResult::DeviceLost) {
-            {
-                [[maybe_unused]] auto _ = HandleDeviceLost();
-            }
-        }
-    }
-
-    // Auto-detect missing gameplay scripts / modules and engage Fallback Preset
-    if (!DefaultPreset::IsActive()) {
-        if ((driver == GameplayDriver::Fennel || driver == GameplayDriver::Hybrid) && !std::filesystem::exists("scripts/boot.lua") &&
-            !std::filesystem::exists("scripts/boot.fnl")) {
-            DefaultPreset::BuildFallbackScene(*this, FallbackReason::MissingBootScript, "Script 'scripts/boot.lua' was not found in working directory.");
-        } else if (driver == GameplayDriver::Cpp && !nativeModule.IsLoaded()) {
-            DefaultPreset::BuildFallbackScene(
-                *this, FallbackReason::MissingNativeModule, "Native gameplay module (libgameplay.so / gameplay.dll) was not found."
-            );
-        }
-    }
-
-    if (DefaultPreset::IsActive()) {
-        DefaultPreset::Update(*this, dt);
-    }
-
-    // 7. Motion Vectors & Transform History
-    {
-        ZHLN::ScopedTimer      profTimer("ECS System: Update Transform History");
-        static TransformSystem ts;
-        ts.UpdateTransformHistory(GetRegistry());
-    }
+    // The whole frame is the scheduler's ordered step list; the two SystemGraphs
+    // are steps inside it (see BuildFrameScheduler), so their hazard analysis
+    // only ever orders systems within a graph, never the phases around them.
+    _impl->scheduler.Execute(*this, dt, ctx);
 
     _impl->frameCounter++;
 
-    return status;
+    return ctx.status;
 }
 
 auto Engine::Run(const CommandLineOptions& options, UICallback uiCallback) -> std::expected<void, Error> {
@@ -849,14 +957,11 @@ auto Engine::Run(const CommandLineOptions& options, UICallback uiCallback) -> st
         float rawDt = std::min(static_cast<float>(elapsed), 0.1f);
 
         {
-            auto& r     = engine->GetRegistry();
-            auto  iEnts = r.GetEntitiesWith<Components::InputStateComponent>();
-            if (!iEnts.empty()) {
-                if (auto* st = r.Get<Components::InputStateComponent>(iEnts[0]); st != nullptr && st->needsResize) {
-                    engine->GetRenderContext().SetResolution(st->newSize);
-                    st->needsResize = false;
-                    continue;
-                }
+            auto& r = engine->GetRegistry();
+            if (auto* st = r.GetSingleton<Components::InputStateComponent>(); st != nullptr && st->needsResize) {
+                engine->GetRenderContext().SetResolution(st->newSize);
+                st->needsResize = false;
+                continue;
             }
         }
 

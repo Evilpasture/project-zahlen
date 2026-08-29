@@ -46,6 +46,21 @@ bool SystemGraph::AddSystemBefore(SystemInfo info, std::string_view beforeSystem
     return true;
 }
 
+void SystemGraph::DeclareExternalWrites(const char* label, std::vector<ComponentAccess> accesses) {
+    if (label == nullptr || accesses.empty()) {
+        return;
+    }
+    // update_func stays null: DispatchNode() already skips null functions and
+    // still propagates to dependents, so this node is a pure ordering anchor.
+    _nodes.push_back(
+        Node {
+            .info                   = SystemInfo {.update_func = nullptr, .name = label, .access_pattern = std::move(accesses), .enabled = true},
+            .dependents             = {},
+            .initialDependencyCount = 0,
+        }
+    );
+}
+
 [[nodiscard]] bool SystemGraph::HasConflict(const SystemInfo& systemA, const SystemInfo& systemB) noexcept {
     for (const auto& accA: systemA.access_pattern) {
         for (const auto& accB: systemB.access_pattern) {

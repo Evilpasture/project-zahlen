@@ -18,11 +18,11 @@ namespace ZHLN::Vk {
 // ============================================================================
 
 enum class PipelineBuilderError : uint8_t {
-    MissingShaders[[= Reflect::Description<"Missing shader stages.">{}]]        = 1,
-    MissingLayout[[= Reflect::Description<"Missing pipeline layout.">{}]]       = 2,
-    LayoutCreationFailed[[= Reflect::Description<"Pipeline layout creation failed.">{}]],
-    PipelineCreationFailed[[= Reflect::Description<"Pipeline creation failed.">{}]],
-    OutOfHostMemory[[= Reflect::Description<"Out of host memory.">{}]],
+    MissingShaders[[= ZHLN::Description<"Missing shader stages.">{}]]        = 1,
+    MissingLayout[[= ZHLN::Description<"Missing pipeline layout.">{}]]       = 2,
+    LayoutCreationFailed[[= ZHLN::Description<"Pipeline layout creation failed.">{}]],
+    PipelineCreationFailed[[= ZHLN::Description<"Pipeline creation failed.">{}]],
+    OutOfHostMemory[[= ZHLN::Description<"Out of host memory.">{}]],
 };
 
 // ============================================================================

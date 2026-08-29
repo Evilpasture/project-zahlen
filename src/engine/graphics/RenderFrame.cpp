@@ -150,10 +150,9 @@ void RenderContext::Impl::DispatchSkinningPasses() {
     }
 
     Vk::MemoryBarrier(
-        cmd, {.src_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-              .src_access = VK_ACCESS_2_SHADER_WRITE_BIT,
-              .dst_stage  = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
-              .dst_access = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_2_SHADER_READ_BIT}
+        cmd, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite,
+        Vk::BarrierStage::AccelerationStructureBuild | Vk::BarrierStage::Vertex,
+        Vk::BarrierAccess::AccelerationStructureRead | Vk::BarrierAccess::ShaderRead
     );
 
     if (rtCtx.Valid()) {
@@ -168,10 +167,8 @@ void RenderContext::Impl::DispatchSkinningPasses() {
         }
 
         Vk::MemoryBarrier(
-            cmd, {.src_stage  = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-                  .src_access = VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
-                  .dst_stage  = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-                  .dst_access = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR}
+            cmd, Vk::BarrierStage::AccelerationStructureBuild, Vk::BarrierAccess::AccelerationStructureWrite,
+            Vk::BarrierStage::AccelerationStructureBuild, Vk::BarrierAccess::AccelerationStructureRead
         );
     }
 }
@@ -237,10 +234,8 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
     rtCtx.BuildTLAS(cmd, geom, frames.tlas[frame_index], ctx.BufferAddress(frames.tlasScratchBuffer[frame_index].Handle()), tlasInstancesScratch.size());
 
     Vk::MemoryBarrier(
-        cmd, {.src_stage  = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-              .src_access = VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
-              .dst_stage  = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-              .dst_access = VK_ACCESS_2_SHADER_READ_BIT}
+        cmd, Vk::BarrierStage::AccelerationStructureBuild, Vk::BarrierAccess::AccelerationStructureWrite,
+        Vk::BarrierStage::Fragment, Vk::BarrierAccess::ShaderRead
     );
 }
 

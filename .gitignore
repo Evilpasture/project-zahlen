@@ -42,6 +42,13 @@ ipch/
 *.log
 *.db
 *.opendb
+# Stray object files. Note: `zig c++ -c file -o /dev/null` silently ignores
+# `-o /dev/null` and drops <basename>.o into the cwd, so ad-hoc compile probes
+# run from the repo root will litter these.
+*.o
+*.obj
+*.gcm
+*.pcm
 
 # --- Dependencies & Environment ---
 .venv/

@@ -435,9 +435,6 @@ constexpr auto MakeRef(VkImage handle, VkImageView view) noexcept;
 template <typename Tag>
 constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent2D extent) noexcept;
 
-template <typename BinderT, typename... Refs>
-constexpr void AutoBind(BinderT& binder, const Refs&... refs) noexcept;
-
 } // namespace ZHLN::Vk
 
 // ============================================================================

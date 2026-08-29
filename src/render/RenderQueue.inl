@@ -20,22 +20,21 @@ inline void MemoryBarrier(VkCommandBuffer cmd, const ZHLN_MemoryBarrierDesc& des
     ZHLN_CmdMemoryBarrier(cmd, &desc);
 }
 
-constexpr BarrierBuilder::BarrierBuilder() noexcept = default;
-
-constexpr auto BarrierBuilder::From(BarrierStage stage, BarrierAccess access) noexcept -> BarrierBuilder& {
-    srcStage |= static_cast<VkPipelineStageFlags2>(stage);
-    srcAccess |= static_cast<VkAccessFlags2>(access);
-    return *this;
-}
-
-inline void BarrierBuilder::To(VkCommandBuffer cmd, BarrierStage dstStage, BarrierAccess dstAccess) const noexcept {
+inline void MemoryBarrier(
+    VkCommandBuffer cmd, BarrierStage srcStage, BarrierAccess srcAccess, BarrierStage dstStage, BarrierAccess dstAccess
+) noexcept {
     MemoryBarrier(
-        cmd, {.src_stage  = srcStage,
-              .src_access = srcAccess,
+        cmd, {.src_stage  = static_cast<VkPipelineStageFlags2>(srcStage),
+              .src_access = static_cast<VkAccessFlags2>(srcAccess),
               .dst_stage  = static_cast<VkPipelineStageFlags2>(dstStage),
               .dst_access = static_cast<VkAccessFlags2>(dstAccess)}
     );
 }
+
+inline void ComputeToComputeBarrier(VkCommandBuffer cmd) noexcept {
+    MemoryBarrier(cmd, BarrierStage::Compute, BarrierAccess::ShaderWrite, BarrierStage::Compute, BarrierAccess::ShaderRead);
+}
+
 
 template <QueueType QType>
 CommandBuffer<QType>::operator VkCommandBuffer() const noexcept {

@@ -65,6 +65,94 @@ struct BindlessIndices {
     };
 }
 
+/// Inputs for one GPU instance record. `resolved` may be null: the line queue
+/// owns its vertex buffers itself and has no mesh material, so it contributes no
+/// skin / IBO / meshlet addresses.
+struct InstanceDataDesc {
+    const ResolvedMeshMaterial* resolved = nullptr;
+
+    JPH::Mat44 world     = JPH::Mat44::sIdentity();
+    JPH::Mat44 prevWorld = JPH::Mat44::sIdentity();
+
+    /// The line queue points at its own position/attribute pair; mesh draws take
+    /// theirs from the resolved mesh.
+    uint64_t posAddress  = 0;
+    uint64_t attrAddress = 0;
+
+    BindlessIndices indices {};
+
+    /// Mirrors `Material::alphaMode`: 0 opaque, 1 masked, 2 blend.
+    uint32_t alphaMode   = 0;
+    bool     isViewmodel = false;
+    bool     isSkinned   = false;
+
+    uint32_t vertexCount      = 0;
+    uint32_t indexCount       = 0;
+    uint32_t jointOffset      = 0;
+    uint32_t morphOffset      = 0;
+    uint32_t activeMorphCount = 0;
+
+    float cullRadius      = 0.0f;
+    float metallicFactor  = 0.0f;
+    float roughnessFactor = 1.0f;
+    float alphaCutoff     = 0.0f;
+
+    std::array<float, 3> localCenter     = {};
+    std::array<float, 4> morphWeights    = {};
+    std::array<float, 4> baseColorFactor = {1.0f, 1.0f, 1.0f, 1.0f};
+    std::array<float, 4> emissiveFactor  = {0.0f, 0.0f, 0.0f, 1.0f};
+};
+
+/**
+ * @brief Pack an `InstanceDataDesc` into the GPU instance record.
+ *
+ * The bit-packing (the two texture-index pairs, the viewmodel/skinned/alpha-mode
+ * flag word), the skin/IBO/meshlet address derivation and the two padding fields
+ * lived in three copies; this is the single place that knows them. The counts and
+ * the position/attribute addresses stay explicit because the call sites
+ * legitimately disagree: the line queue has no indices at all, and the CSG path
+ * draws `finalPosMesh` rather than `posMesh`.
+ */
+[[nodiscard]] inline auto BuildGPUInstanceData(const InstanceDataDesc& desc) noexcept -> InstanceData {
+    const ResolvedMeshMaterial* res = desc.resolved;
+
+    const uint32_t isViewmodel = desc.isViewmodel ? 1u : 0u;
+    const uint32_t isSkinned   = desc.isSkinned ? 1u : 0u;
+
+    return InstanceData {
+        .world            = desc.world,
+        .prevWorld        = desc.prevWorld,
+        .posAddress       = desc.posAddress,
+        .attrAddress      = desc.attrAddress,
+        .skinAddress      = (res != nullptr && res->skinMesh != nullptr) ? res->skinMesh->vboAddress : 0ull,
+        .iboAddress       = (res != nullptr && res->indexMesh != nullptr) ? res->indexMesh->vboAddress : 0ull,
+        .vertexCount      = desc.vertexCount,
+        .indexCount       = desc.indexCount,
+        .texIndices0      = (desc.indices.normal << 16) | (desc.indices.albedo & 0xFFFFu),
+        .texIndices1      = (desc.indices.emissive << 16) | (desc.indices.pbr & 0xFFFFu),
+        .cullRadius       = desc.cullRadius,
+        .metallicFactor   = desc.metallicFactor,
+        .roughnessFactor  = desc.roughnessFactor,
+        .alphaCutoff      = desc.alphaCutoff,
+        .flags            = (isViewmodel << 16) | (isSkinned << 8) | (desc.alphaMode & 0xFFu),
+        .jointOffset      = desc.jointOffset,
+        .morphOffset      = desc.morphOffset,
+        .activeMorphCount = desc.activeMorphCount,
+        .localCenter      = desc.localCenter,
+        ._paddingCenter   = 0,
+        .morphWeights     = desc.morphWeights,
+        .baseColorFactor  = desc.baseColorFactor,
+        .emissiveFactor   = desc.emissiveFactor,
+        // VK_EXT_mesh_shader streams (all zero => vertex pipeline). Debug lines
+        // are not meshletized: LINE_LIST topology has no mesh pipeline variant.
+        .meshletAddress       = (res != nullptr) ? res->meshletAddr : 0ull,
+        .meshletVertexAddress = (res != nullptr) ? res->meshletVertexAddr : 0ull,
+        .meshletTriAddress    = (res != nullptr) ? res->meshletTriAddr : 0ull,
+        .meshletCount         = (res != nullptr) ? res->meshletCount : 0u,
+        ._paddingMeshlet      = 0,
+    };
+}
+
 [[nodiscard]] std::optional<ResolvedMeshMaterial>
     ResolveDrawInputs(RenderContext::Impl* impl, const Material& material, const Mesh& mesh, BufferHandle skinnedVertexBuffer) noexcept {
     using enum BufferHandle;
@@ -201,38 +289,18 @@ void RenderContext::Impl::FlushLineQueue() {
     auto  mappedInst = frames.instanceDataBuffers[frame_index].Map();
     auto* dst        = static_cast<InstanceData*>(mappedInst.data);
 
-    dst[lineInstanceIdx] = {
-        .world            = JPH::Mat44::sIdentity(),
-        .prevWorld        = JPH::Mat44::sIdentity(),
-        .posAddress       = posAddr,
-        .attrAddress      = attrAddr,
-        .skinAddress      = 0,
-        .iboAddress       = 0,
-        .vertexCount      = vertIdx,
-        .indexCount       = 0,
-        .texIndices0      = (2 << 16) | 1,
-        .texIndices1      = (1 << 16) | 0,
-        .cullRadius       = 10000.0f,
-        .metallicFactor   = 0.0f,
-        .roughnessFactor  = 1.0f,
-        .alphaCutoff      = 0.0f,
-        .flags            = 2,
-        .jointOffset      = 0,
-        .morphOffset      = 0,
-        .activeMorphCount = 0,
-        .localCenter      = {0.0f, 0.0f, 0.0f},
-        ._paddingCenter   = 0,
-        .morphWeights     = {0.0f, 0.0f, 0.0f, 0.0f},
-        .baseColorFactor  = {1.0f, 1.0f, 1.0f, 1.0f},
-        .emissiveFactor   = {0.0f, 0.0f, 0.0f, 1.0f},
-        // Debug lines are not meshletized (LINE_LIST topology has no mesh
-        // pipeline variant); zero addresses keep them on the vertex path.
-        .meshletAddress       = 0,
-        .meshletVertexAddress = 0,
-        .meshletTriAddress    = 0,
-        .meshletCount         = 0,
-        ._paddingMeshlet      = 0,
-    };
+    // Debug lines run on their own position/attribute pair, carry no indices and
+    // are not meshletized (resolved == nullptr zeroes skin/IBO/meshlet).
+    dst[lineInstanceIdx] = BuildGPUInstanceData(
+        InstanceDataDesc {
+            .posAddress  = posAddr,
+            .attrAddress = attrAddr,
+            .indices     = BindlessIndices {.albedo = 1, .normal = 2, .pbr = 0, .emissive = 1},
+            .alphaMode   = 2,
+            .vertexCount = vertIdx,
+            .cullRadius  = 10000.0f,
+        }
+    );
 
     queues.lineQueue.clear();
 }
@@ -267,42 +335,40 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
     auto morphWeights = UnpackMorphWeights(params.morphWeights);
 
     _impl->queues.drawQueue.push_back(
-        {.instanceData =
-             {.world            = params.transform,
-              .prevWorld        = params.prevTransform,
-              .posAddress       = resolved->posAddr, // Points to scratchMesh for basic.slang
-              .attrAddress      = resolved->attrAddr,
-              .skinAddress      = (resolved->skinMesh != nullptr) ? resolved->skinMesh->vboAddress : 0,
-              .iboAddress       = (resolved->indexMesh != nullptr) ? resolved->indexMesh->vboAddress : 0,
-              .vertexCount      = (resolved->posMesh != nullptr) ? resolved->posMesh->vertexCount : 0,
-              .indexCount       = mesh.indexCount,
-              .texIndices0      = (tex.normal << 16) | (tex.albedo & 0xFFFF),
-              .texIndices1      = (tex.emissive << 16) | (tex.pbr & 0xFFFF),
-              .cullRadius       = params.cullRadius,
-              .metallicFactor   = params.metallic >= 0.0f ? params.metallic : material.metallicFactor,
-              .roughnessFactor  = params.roughness >= 0.0f ? params.roughness : material.roughnessFactor,
-              .alphaCutoff      = material.alphaCutoff,
-              .flags            = (isViewmodel << 16) | (isSkinned << 8) | (material.alphaMode & 0xFF),
-              .jointOffset      = params.jointOffset,
-              .morphOffset      = params.morphOffset,
-              .activeMorphCount = activeMorphCount,
-              .localCenter      = {params.localCenter[0], params.localCenter[1], params.localCenter[2]},
-              ._paddingCenter   = {},
-              .morphWeights     = morphWeights,
-              .baseColorFactor =
-                  (params.colorOverride[3] >= 0.0f) ?
-                      params.colorOverride :
-                      std::array<float, 4> {material.baseColorFactor[0], material.baseColorFactor[1], material.baseColorFactor[2], material.baseColorFactor[3]},
-              .emissiveFactor =
-                  (params.emissiveOverride[3] >= 0.0f) ?
-                      params.emissiveOverride :
-                      std::array<float, 4> {material.emissiveFactor[0], material.emissiveFactor[1], material.emissiveFactor[2], material.emissiveFactor[3]},
-              // VK_EXT_mesh_shader streams (all zero => vertex pipeline)
-              .meshletAddress       = resolved->meshletAddr,
-              .meshletVertexAddress = resolved->meshletVertexAddr,
-              .meshletTriAddress    = resolved->meshletTriAddr,
-              .meshletCount         = resolved->meshletCount,
-              ._paddingMeshlet      = 0},
+        {.instanceData = BuildGPUInstanceData(
+             InstanceDataDesc {
+                 .resolved  = &*resolved,
+                 .world     = params.transform,
+                 .prevWorld = params.prevTransform,
+                 // posAddress points at scratchMesh for basic.slang.
+                 .posAddress       = resolved->posAddr,
+                 .attrAddress      = resolved->attrAddr,
+                 .indices          = tex,
+                 .alphaMode        = static_cast<uint32_t>(material.alphaMode) & 0xFFu,
+                 .isViewmodel      = isViewmodel != 0u,
+                 .isSkinned        = isSkinned != 0u,
+                 .vertexCount      = (resolved->posMesh != nullptr) ? resolved->posMesh->vertexCount : 0u,
+                 .indexCount       = mesh.indexCount,
+                 .jointOffset      = params.jointOffset,
+                 .morphOffset      = params.morphOffset,
+                 .activeMorphCount = activeMorphCount,
+                 .cullRadius       = params.cullRadius,
+                 .metallicFactor   = params.metallic >= 0.0f ? params.metallic : material.metallicFactor,
+                 .roughnessFactor  = params.roughness >= 0.0f ? params.roughness : material.roughnessFactor,
+                 .alphaCutoff      = material.alphaCutoff,
+                 .localCenter      = {params.localCenter[0], params.localCenter[1], params.localCenter[2]},
+                 .morphWeights     = morphWeights,
+                 .baseColorFactor  = (params.colorOverride[3] >= 0.0f) ?
+                                         params.colorOverride :
+                                         std::array<float, 4> {
+                                             material.baseColorFactor[0], material.baseColorFactor[1], material.baseColorFactor[2], material.baseColorFactor[3]
+                                         },
+                 .emissiveFactor =
+                     (params.emissiveOverride[3] >= 0.0f) ?
+                         params.emissiveOverride :
+                         std::array<float, 4> {material.emissiveFactor[0], material.emissiveFactor[1], material.emissiveFactor[2], material.emissiveFactor[3]},
+             }
+         ),
          .material            = resolved->material,
          .prePassMaterial     = resolved->prePassMaterial,
          .posMesh             = resolved->posMesh,
@@ -331,38 +397,29 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
 
         return {
             .instanceData =
-                {
-                    .world            = transform,
-                    .prevWorld        = prevTransform,
-                    .posAddress       = resolved->posAddr,
-                    .attrAddress      = resolved->attrAddr,
-                    .skinAddress      = (resolved->skinMesh != nullptr) ? resolved->skinMesh->vboAddress : 0,
-                    .iboAddress       = (resolved->indexMesh != nullptr) ? resolved->indexMesh->vboAddress : 0,
-                    .vertexCount      = (resolved->finalPosMesh != nullptr) ? resolved->finalPosMesh->vertexCount : 0,
-                    .indexCount       = mesh.indexCount,
-                    .texIndices0      = (tex.normal << 16) | (tex.albedo & 0xFFFF),
-                    .texIndices1      = (tex.emissive << 16) | (tex.pbr & 0xFFFF),
-                    .cullRadius       = cullRadius,
-                    .metallicFactor   = material.metallicFactor,
-                    .roughnessFactor  = material.roughnessFactor,
-                    .alphaCutoff      = material.alphaCutoff,
-                    .flags            = (isSkinned << 8) | (material.alphaMode & 0xFF),
-                    .jointOffset      = jointOffset,
-                    .morphOffset      = 0,
-                    .activeMorphCount = 0,
-                    .localCenter      = {},
-                    ._paddingCenter   = {},
-                    .morphWeights     = {},
-                    .baseColorFactor  = {material.baseColorFactor[0], material.baseColorFactor[1], material.baseColorFactor[2], material.baseColorFactor[3]},
-                    .emissiveFactor   = {material.emissiveFactor[0], material.emissiveFactor[1], material.emissiveFactor[2], material.emissiveFactor[3]},
-                    // CSG cutters are stencil-only draws; they still carry the
-                    // meshlet streams so they can take the mesh path too.
-                    .meshletAddress       = resolved->meshletAddr,
-                    .meshletVertexAddress = resolved->meshletVertexAddr,
-                    .meshletTriAddress    = resolved->meshletTriAddr,
-                    .meshletCount         = resolved->meshletCount,
-                    ._paddingMeshlet      = 0,
-                },
+                // CSG cutters are stencil-only draws; they still carry the
+                // meshlet streams so they can take the mesh path too.
+            BuildGPUInstanceData(
+                InstanceDataDesc {
+                    .resolved        = &*resolved,
+                    .world           = transform,
+                    .prevWorld       = prevTransform,
+                    .posAddress      = resolved->posAddr,
+                    .attrAddress     = resolved->attrAddr,
+                    .indices         = tex,
+                    .alphaMode       = static_cast<uint32_t>(material.alphaMode) & 0xFFu,
+                    .isSkinned       = isSkinned != 0u,
+                    .vertexCount     = (resolved->finalPosMesh != nullptr) ? resolved->finalPosMesh->vertexCount : 0u,
+                    .indexCount      = mesh.indexCount,
+                    .jointOffset     = jointOffset,
+                    .cullRadius      = cullRadius,
+                    .metallicFactor  = material.metallicFactor,
+                    .roughnessFactor = material.roughnessFactor,
+                    .alphaCutoff     = material.alphaCutoff,
+                    .baseColorFactor = {material.baseColorFactor[0], material.baseColorFactor[1], material.baseColorFactor[2], material.baseColorFactor[3]},
+                    .emissiveFactor  = {material.emissiveFactor[0], material.emissiveFactor[1], material.emissiveFactor[2], material.emissiveFactor[3]},
+                }
+            ),
             .material            = resolved->material,
             .prePassMaterial     = resolved->prePassMaterial,
             .posMesh             = resolved->finalPosMesh,

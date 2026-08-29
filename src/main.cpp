@@ -575,14 +575,13 @@ void UISystem(ZHLN::Engine& engine) {
     }
     ImGui::End();
 
-    auto settingsEntities = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-    if (settingsEntities.empty()) {
+    ZHLN::Entity settingsEnt = reg.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
+    if (settingsEnt == ZHLN::Entity::Null()) {
         return;
     }
 
-    ZHLN::Entity settingsEnt = settingsEntities[0];
-    auto*        pp          = reg.Get<ZHLN::Components::PostProcessSettingsComponent>(settingsEnt);
-    auto*        dbg         = reg.Get<ZHLN::Components::DebugSettingsComponent>(settingsEnt);
+    auto* pp  = reg.Get<ZHLN::Components::PostProcessSettingsComponent>(settingsEnt);
+    auto* dbg = reg.Get<ZHLN::Components::DebugSettingsComponent>(settingsEnt);
 
     if ((pp == nullptr) || (dbg == nullptr)) {
         return;
@@ -615,10 +614,9 @@ void UISystem(ZHLN::Engine& engine) {
         pp->skyGround = JPH::Vec4(ground[0], ground[1], ground[2], 1.0f);
     }
 
-    auto camEnts = reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>();
-    if (!camEnts.empty()) {
-        ZHLN::Entity camEnt    = camEnts[0];
-        bool         isFreeCam = (reg.Get<ZHLN::Components::FreeCamTagComponent>(camEnt) != nullptr);
+    ZHLN::Entity camEnt = reg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
+    if (camEnt != ZHLN::Entity::Null()) {
+        bool isFreeCam = (reg.Get<ZHLN::Components::FreeCamTagComponent>(camEnt) != nullptr);
 
         ImGui::SeparatorText("Camera Controls");
         if (ImGui::Checkbox("Free Cam Mode (Fly)", &isFreeCam)) {
@@ -799,14 +797,11 @@ void UpdateEditorCamera(ZHLN::Camera& cam, const ZHLN::Components::InputStateCom
 
 ZHLN::Physics::RaycastResult CastPickingRay(ZHLN::Engine& engine, const ZHLN::Camera& cam) {
     auto& reg    = engine.GetRegistry();
-    auto  ents   = reg.GetEntitiesWith<ZHLN::Components::InputStateComponent>();
     float mouseX = 0.0f;
     float mouseY = 0.0f;
-    if (!ents.empty()) {
-        if (auto* st = reg.Get<ZHLN::Components::InputStateComponent>(ents[0])) {
-            mouseX = st->mouseX;
-            mouseY = st->mouseY;
-        }
+    if (auto* st = reg.GetSingleton<ZHLN::Components::InputStateComponent>()) {
+        mouseX = st->mouseX;
+        mouseY = st->mouseY;
     }
     auto winSize = engine.GetWindow().GetSize();
 
@@ -836,11 +831,12 @@ void DrawEditorPanels(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& opti
     auto&       pc    = engine.GetPhysicsContext();
     const auto& world = pc.GetWorld();
 
-    auto                                            settingsEntities = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-    ZHLN::Components::PostProcessSettingsComponent* pp               = nullptr;
+    ZHLN::Components::PostProcessSettingsComponent* pp = nullptr;
 
-    if (!settingsEntities.empty()) {
-        pp = reg.Get<ZHLN::Components::PostProcessSettingsComponent>(settingsEntities[0]);
+    // Post-process settings live on the tagged global settings entity, not on
+    // whichever entity happens to carry the component first.
+    if (ZHLN::Entity settingsEnt = reg.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>(); settingsEnt != ZHLN::Entity::Null()) {
+        pp = reg.Get<ZHLN::Components::PostProcessSettingsComponent>(settingsEnt);
     }
 
     // --- TOOLBAR PANEL ---
@@ -1017,8 +1013,7 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
         engine.ProcessEvents();
 
         auto& reg   = engine.GetRegistry();
-        auto  ents  = reg.GetEntitiesWith<ZHLN::Components::InputStateComponent>();
-        auto* state = ents.empty() ? nullptr : reg.Get<ZHLN::Components::InputStateComponent>(ents[0]);
+        auto* state = reg.GetSingleton<ZHLN::Components::InputStateComponent>();
 
         const bool imguiCapturesMouse    = ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureMouse;
         const bool imguiCapturesKeyboard = ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureKeyboard;

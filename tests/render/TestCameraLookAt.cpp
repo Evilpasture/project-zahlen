@@ -22,9 +22,9 @@
 #include <vector>
 
 enum class CameraLookAtError : uint8_t {
-    EngineInitFailed[[= ZHLN::Reflect::Description<"Failed to initialize headless Engine context for camera look-at test.">{}]] = 1,
-    RenderOutputBlank[[= ZHLN::Reflect::Description<"Rendered frame is blank or failed to capture.">{}]],
-    TargetNotCentered[[= ZHLN::Reflect::Description<"Target-colored pixels are not centered; camera is not looking at the target.">{}]],
+    EngineInitFailed[[= ZHLN::Description<"Failed to initialize headless Engine context for camera look-at test.">{}]] = 1,
+    RenderOutputBlank[[= ZHLN::Description<"Rendered frame is blank or failed to capture.">{}]],
+    TargetNotCentered[[= ZHLN::Description<"Target-colored pixels are not centered; camera is not looking at the target.">{}]],
 };
 
 namespace {

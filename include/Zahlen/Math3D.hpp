@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
+#include <cmath>
 #include <cstring>
 
 // clang-format off
@@ -67,6 +68,59 @@ inline auto CreateTransform(JPH::Vec3Arg translation, JPH::QuatArg rotation, JPH
  */
 inline auto CreateTransform(JPH::Vec3Arg translation, JPH::QuatArg rotation) {
     return JPH::Mat44::sRotationTranslation(rotation, translation);
+}
+
+/**
+ * @brief Translation / Rotation / Scale decomposition of an affine transform.
+ */
+struct TransformTRS {
+    JPH::Vec3 translation {0.0f, 0.0f, 0.0f};
+    JPH::Quat rotation = JPH::Quat::sIdentity();
+    JPH::Vec3 scale {1.0f, 1.0f, 1.0f};
+};
+
+/// Smallest column length still treated as a usable basis axis by `Decompose`.
+inline constexpr float kDecomposeEpsilon = 1e-5f;
+
+/**
+ * @brief Decompose a (possibly mirroring) affine transform into its TRS parts.
+ *
+ * Scale comes from the length of the three basis columns. A negative 3x3
+ * determinant means the matrix mirrors, which is reported as a negative X scale
+ * so a caller rebuilding the matrix from the result keeps the handedness.
+ * Degenerate (zero-length) columns fall back to the matching unit axis, which
+ * keeps the returned rotation a valid quaternion instead of a bag of NaNs.
+ */
+[[nodiscard]] inline auto Decompose(const JPH::Mat44& m) noexcept -> TransformTRS {
+    TransformTRS trs;
+
+    trs.translation = m.GetTranslation();
+
+    // GetColumn3 truncates the homogeneous W, which is exactly the basis vector
+    // whose length defines that axis' scale.
+    const JPH::Vec3 col0 = m.GetColumn3(0);
+    const JPH::Vec3 col1 = m.GetColumn3(1);
+    const JPH::Vec3 col2 = m.GetColumn3(2);
+
+    float       sx = col0.Length();
+    const float sy = col1.Length();
+    const float sz = col2.Length();
+
+    if (m.GetDeterminant3x3() < 0.0f) {
+        sx = -sx;
+    }
+    trs.scale = JPH::Vec3(sx, sy, sz);
+
+    // Normalise the basis back into a pure rotation. Divide by the (possibly
+    // negative) mirrored length so mirroring is preserved in the rotation.
+    const JPH::Vec3 axis0 = (std::abs(sx) > kDecomposeEpsilon) ? (col0 / sx) : JPH::Vec3::sAxisX();
+    const JPH::Vec3 axis1 = (std::abs(sy) > kDecomposeEpsilon) ? (col1 / sy) : JPH::Vec3::sAxisY();
+    const JPH::Vec3 axis2 = (std::abs(sz) > kDecomposeEpsilon) ? (col2 / sz) : JPH::Vec3::sAxisZ();
+
+    const JPH::Mat44 basis {JPH::Vec4(axis0, 0.0f), JPH::Vec4(axis1, 0.0f), JPH::Vec4(axis2, 0.0f), JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f)};
+    trs.rotation = basis.GetQuaternion().Normalized();
+
+    return trs;
 }
 
 /**

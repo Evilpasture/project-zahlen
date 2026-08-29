@@ -40,7 +40,7 @@ constexpr uint8_t kBlueNoisePng[] = {
 // NOLINTEND(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
 
 enum class NoiseMetricError : uint8_t {
-    BlueNoiseDecodeFailed[[= ZHLN::Reflect::Description<"The embedded LDR_RGBA_0 blue noise tile failed to decode.">{}]] = 1,
+    BlueNoiseDecodeFailed[[= ZHLN::Description<"The embedded LDR_RGBA_0 blue noise tile failed to decode.">{}]] = 1,
 };
 
 namespace {

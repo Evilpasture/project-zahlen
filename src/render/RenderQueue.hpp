@@ -17,13 +17,16 @@ class Context; // Forward declaration
 
 // NOLINTNEXTLINE(performance-enum-size)
 enum class BarrierStage : VkPipelineStageFlags2 {
-    StageNone = 0,
-    Compute   = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-    Fragment  = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-    Vertex    = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
-    Indirect  = VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
-    Transfer  = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-    Host      = VK_PIPELINE_STAGE_2_HOST_BIT
+    StageNone                  = 0,
+    Compute                    = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+    Fragment                   = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+    Vertex                     = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
+    Indirect                   = VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
+    Transfer                   = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+    Copy                       = VK_PIPELINE_STAGE_2_COPY_BIT,
+    Clear                      = VK_PIPELINE_STAGE_2_CLEAR_BIT,
+    Host                       = VK_PIPELINE_STAGE_2_HOST_BIT,
+    AccelerationStructureBuild = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR
 };
 
 // NOLINTNEXTLINE(performance-enum-size)
@@ -39,7 +42,12 @@ enum class BarrierAccess : VkAccessFlags2 {
     ColorRead     = VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT,
     ColorWrite    = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
     DepthRead     = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT,
-    DepthWrite    = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT
+    DepthWrite    = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+
+    // Ray tracing (VK_KHR_acceleration_structure). Without these the RT barriers
+    // in RenderFrame.cpp could not be expressed through the enums at all.
+    AccelerationStructureRead  = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR,
+    AccelerationStructureWrite = VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR
 };
 
 // Enable bitwise OR operations on the scoped enums
@@ -52,14 +60,35 @@ enum class BarrierAccess : VkAccessFlags2 {
  */
 inline void MemoryBarrier(VkCommandBuffer cmd, const ZHLN_MemoryBarrierDesc& desc) noexcept;
 
-struct BarrierBuilder {
-    VkPipelineStageFlags2 srcStage  = 0;
-    VkAccessFlags2        srcAccess = 0;
+/**
+ * @brief Global memory barrier expressed with the scoped enums.
+ *
+ * Mirrors the BufferBarrier overload below: callers name stages and accesses
+ * instead of raw VK_* flags, and the casts to the C descriptor's fields happen
+ * in one place. Combine flags with operator|, e.g.
+ * BarrierStage::Copy | BarrierStage::AccelerationStructureBuild.
+ */
+inline void MemoryBarrier(
+    VkCommandBuffer cmd,
+    BarrierStage    srcStage,
+    BarrierAccess   srcAccess,
+    BarrierStage    dstStage,
+    BarrierAccess   dstAccess
+) noexcept;
 
-    constexpr BarrierBuilder() noexcept;
-    constexpr auto From(BarrierStage stage, BarrierAccess access) noexcept -> BarrierBuilder&;
-    void           To(VkCommandBuffer cmd, BarrierStage dstStage, BarrierAccess dstAccess) const noexcept;
-};
+/**
+ * @brief Global compute -> compute dependency for consecutive dispatches.
+ *
+ * Code that issues several dispatches into scratch targets and reads each result
+ * in the next one (Kawase bloom, A-trous denoise, Hi-Z mip generation, cluster
+ * culling) needs one of these between them. The frame graph cannot supply it: it
+ * orders *passes* from their declared accesses, but a pass body is an opaque
+ * lambda, so dispatch-to-dispatch ordering inside one pass is invisible to it.
+ *
+ * Named for what it does rather than for any one caller -- Vk::ComputeChain is
+ * only one of several places that needs this.
+ */
+inline void ComputeToComputeBarrier(VkCommandBuffer cmd) noexcept;
 
 enum class QueueType : uint8_t { Graphics, Compute, Transfer };
 
