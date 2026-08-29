@@ -9,10 +9,8 @@
 #include <vector>
 
 namespace ZHLN {
-class Engine;
-}
 
-namespace ZHLN::ECS {
+class Engine;
 
 /**
  * @brief The frame's phases, in execution order.
@@ -128,4 +126,4 @@ class FrameScheduler {
     std::vector<FrameStep> _steps;
 };
 
-} // namespace ZHLN::ECS
+} // namespace ZHLN

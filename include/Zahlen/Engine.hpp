@@ -50,8 +50,9 @@ namespace ECS {
 class Registry;
 class SystemGraph;
 class EntityCommandBuffer;
-class FrameScheduler;
 } // namespace ECS
+
+class FrameScheduler;
 
 class CullingSystem;
 
@@ -87,7 +88,7 @@ class ZHLN_API Engine {
     auto GetRenderGraph() -> ECS::SystemGraph&;
     auto GetMainECB() -> ECS::EntityCommandBuffer&;
     /// The frame's ordered phase steps. `Tick` executes exactly this list.
-    [[nodiscard]] auto GetFrameScheduler() -> ECS::FrameScheduler&;
+    [[nodiscard]] auto GetFrameScheduler() -> FrameScheduler&;
     auto               GetCullingSystem() -> CullingSystem&;
     auto               GetVisibleEntities() -> JPH::Array<Entity>&;
     auto               GetVisibleShadowEntities() -> JPH::Array<Entity>&;

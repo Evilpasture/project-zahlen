@@ -20,6 +20,7 @@
 #include <Zahlen/CreativeWorksManager.hpp>
 #include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
+#include <Zahlen/FrameScheduler.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Profiler.hpp>
@@ -29,7 +30,6 @@
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
-#include <Zahlen/ecs/FrameScheduler.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <engine/FileWatcher.hpp>
@@ -105,7 +105,7 @@ struct EngineImpl {
     Camera        mainCamera;
     ECS::Registry registry;
 
-    ECS::FrameScheduler                       scheduler;
+    FrameScheduler                            scheduler;
     std::unique_ptr<ECS::SystemGraph>         updateGraph;
     std::unique_ptr<ECS::SystemGraph>         renderGraph;
     std::unique_ptr<ECS::EntityCommandBuffer> mainECB;
@@ -182,22 +182,22 @@ void Sys_Terrain(Engine& engine, float dt) {
 
 namespace Steps {
 
-void Input(Engine& engine, float /*dt*/, ECS::FrameContext& /*ctx*/) {
+void Input(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
     static InputSystem inputSystem;
     inputSystem.Update(engine);
 }
 
-void UIInteraction(Engine& engine, float dt, ECS::FrameContext& /*ctx*/) {
+void UIInteraction(Engine& engine, float dt, FrameContext& /*ctx*/) {
     UIInteractionSystem::Update(engine, dt);
 }
 
-void HostUICallback(Engine& engine, float /*dt*/, ECS::FrameContext& /*ctx*/) {
+void HostUICallback(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
     if (const auto* cb = engine.GetUICallback(); cb != nullptr && static_cast<bool>(*cb)) {
         (*cb)(engine);
     }
 }
 
-void HotReload(Engine& engine, float /*dt*/, ECS::FrameContext& ctx) {
+void HotReload(Engine& engine, float /*dt*/, FrameContext& ctx) {
     static FileWatcher gameplayWatcher("scripts/boot.lua");
     if (ctx.driver != GameplayDriver::Cpp && gameplayWatcher.CheckModified()) {
         engine.GetScriptRunner().ReloadFile("scripts/boot.lua");
@@ -208,17 +208,17 @@ void HotReload(Engine& engine, float /*dt*/, ECS::FrameContext& ctx) {
 /// Translate gameplay input using the previous resolved camera. Camera
 /// transforms are finalized after physics and the update graph so rig-driven
 /// first-person views cannot lag one simulation frame behind their body.
-void PlayerIntent(Engine& engine, float /*dt*/, ECS::FrameContext& /*ctx*/) {
+void PlayerIntent(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
     static InputSystem inputSystem;
     inputSystem.PlayerInputTranslate(engine, engine.GetCamera());
 }
 
-void Physics(Engine& engine, float dt, ECS::FrameContext& /*ctx*/) {
+void Physics(Engine& engine, float dt, FrameContext& /*ctx*/) {
     static PhysicsSystem physicsSystem;
     physicsSystem.Update(engine, dt);
 }
 
-void Gameplay(Engine& engine, float dt, ECS::FrameContext& ctx) {
+void Gameplay(Engine& engine, float dt, FrameContext& ctx) {
     switch (ctx.driver) {
         using enum GameplayDriver;
         case Cpp: {
@@ -245,32 +245,32 @@ void Gameplay(Engine& engine, float dt, ECS::FrameContext& ctx) {
     }
 }
 
-void UpdateGraph(Engine& engine, float dt, ECS::FrameContext& /*ctx*/) {
+void UpdateGraph(Engine& engine, float dt, FrameContext& /*ctx*/) {
     engine.GetUpdateGraph().Execute(engine, dt);
 }
 
-void CommandPlayback(Engine& engine, float /*dt*/, ECS::FrameContext& /*ctx*/) {
+void CommandPlayback(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
     engine.GetMainECB().Playback();
 }
 
 /// Resolve target cameras and camera matrices from current physics and
 /// procedural rig poses immediately before visibility/render work.
-void Camera(Engine& engine, float dt, ECS::FrameContext& /*ctx*/) {
+void Camera(Engine& engine, float dt, FrameContext& /*ctx*/) {
     static TargetCameraSystem targetCamSys;
     static CameraSystem       camSys;
     targetCamSys.Update(engine, dt, engine.GetCurrentAlpha());
     camSys.Update(engine, dt, engine.GetCurrentAlpha());
 }
 
-void LOD(Engine& engine, float /*dt*/, ECS::FrameContext& /*ctx*/) {
+void LOD(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
     LODSystem::Update(engine);
 }
 
-void RenderGraph(Engine& engine, float dt, ECS::FrameContext& /*ctx*/) {
+void RenderGraph(Engine& engine, float dt, FrameContext& /*ctx*/) {
     engine.GetRenderGraph().Execute(engine, dt);
 }
 
-void Present(Engine& engine, float dt, ECS::FrameContext& ctx) {
+void Present(Engine& engine, float dt, FrameContext& ctx) {
     auto render_res = RenderSystem::Update(engine, dt);
     if (!render_res) {
         if (render_res.error().Is<RenderFrameResult>() && render_res.error().As<RenderFrameResult>() == RenderFrameResult::DeviceLost) {
@@ -281,7 +281,7 @@ void Present(Engine& engine, float dt, ECS::FrameContext& ctx) {
 }
 
 /// Auto-detect missing gameplay scripts / modules and engage the Fallback Preset.
-void Fallback(Engine& engine, float dt, ECS::FrameContext& ctx) {
+void Fallback(Engine& engine, float dt, FrameContext& ctx) {
     if (!DefaultPreset::IsActive()) {
         if ((ctx.driver == GameplayDriver::Fennel || ctx.driver == GameplayDriver::Hybrid) && !std::filesystem::exists("scripts/boot.lua") &&
             !std::filesystem::exists("scripts/boot.fnl")) {
@@ -298,7 +298,7 @@ void Fallback(Engine& engine, float dt, ECS::FrameContext& ctx) {
     }
 }
 
-void TransformHistory(Engine& engine, float /*dt*/, ECS::FrameContext& /*ctx*/) {
+void TransformHistory(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
     ZHLN::ScopedTimer      profTimer("ECS System: Update Transform History");
     static TransformSystem transformSystem;
     transformSystem.UpdateTransformHistory(engine.GetRegistry());
@@ -309,7 +309,7 @@ void TransformHistory(Engine& engine, float /*dt*/, ECS::FrameContext& /*ctx*/) 
 /// The frame, in order. Phase names are documentation: steps run strictly in
 /// registration order regardless of the phase they are tagged with.
 void BuildFrameScheduler(Engine& engine) {
-    using Phase     = ECS::FramePhase;
+    using Phase     = FramePhase;
     auto& scheduler = engine.GetFrameScheduler();
 
     scheduler.Clear();
@@ -785,7 +785,7 @@ auto Engine::GetRenderGraph() -> ECS::SystemGraph& {
 auto Engine::GetMainECB() -> ECS::EntityCommandBuffer& {
     return *_impl->mainECB;
 }
-auto Engine::GetFrameScheduler() -> ECS::FrameScheduler& {
+auto Engine::GetFrameScheduler() -> FrameScheduler& {
     return _impl->scheduler;
 }
 auto Engine::GetCullingSystem() -> CullingSystem& {
@@ -864,7 +864,7 @@ auto Engine::InitializeDefaultScene() -> bool {
 }
 
 auto Engine::Tick(float dt, GameplayDriver driver) -> GameplayStatus {
-    ECS::FrameContext ctx {.driver = driver, .status = GameplayStatus::OK, .deviceLost = false};
+    FrameContext ctx {.driver = driver, .status = GameplayStatus::OK, .deviceLost = false};
 
     // The whole frame is the scheduler's ordered step list; the two SystemGraphs
     // are steps inside it (see BuildFrameScheduler), so their hazard analysis
