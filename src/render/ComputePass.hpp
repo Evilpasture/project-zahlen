@@ -314,33 +314,6 @@ struct DoubleBufferedComputePass {
     return pass.BuildHeap(device, shader, mapping, indexPushOffset).transform([&] { return std::move(pass); });
 }
 
-/// Builds and synchronously executes a heap compute shader on an immediate command ring.
-template <GpuTriviallyCopyable PushT = std::monostate, QueueType QType = QueueType::Graphics, size_t Capacity = 8>
-inline auto ExecuteImmediateCompute(
-    const Context&                ctx,
-    CommandRing<QType, Capacity>& ring,
-    const ZHLN_ShaderDesc&        shader,
-    uint32_t                      threadsX,
-    uint32_t                      threadsY = 1,
-    uint32_t                      threadsZ = 1,
-    const PushT&                  pushData = {}
-) noexcept -> std::expected<void, Error> {
-    return CreateHeapComputePass(ctx.Device(), shader).transform([&](ComputePass pass) {
-        ExecuteImmediate(ctx, ring, [&](VkCommandBuffer cmd) {
-            pass.Bind(cmd);
-            if constexpr (!std::is_same_v<PushT, std::monostate>) {
-                PushData(ctx, cmd, 0, pushData);
-            }
-            pass.DispatchThreads(cmd, threadsX, threadsY, threadsZ);
-            MemoryBarrier(
-                cmd, BarrierStage::Compute, BarrierAccess::ShaderWrite,
-                BarrierStage::Transfer | BarrierStage::Compute,
-                BarrierAccess::TransferRead | BarrierAccess::ShaderRead
-            );
-        });
-    });
-}
-
 /**
  * @brief Records a chain of dependent compute dispatches through one heap table.
  *
