@@ -69,3 +69,6 @@ blender/
 # Others
 *.patch
 .Rhistory
+
+# C++ module BMIs (GCC)
+gcm.cache/

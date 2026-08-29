@@ -32,7 +32,3 @@
 [submodule "extern/meshoptimizer"]
 	path = extern/meshoptimizer
 	url = https://github.com/zeux/meshoptimizer.git
-[submodule "extern/msgpack-c"]
-	path = extern/msgpack-c
-	url = https://github.com/msgpack/msgpack-c.git
-	branch = cpp_master
