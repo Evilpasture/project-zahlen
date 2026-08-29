@@ -25,19 +25,6 @@ inline constexpr uint32_t kKawaseMaxIterations = 3;
 /// RenderInitPostProcess.cpp.
 inline constexpr uint32_t kDenoiseMaxIterations = 3;
 
-/**
- * @brief Host descriptor slot for one in-frame dispatch of a multi-dispatch pass.
- *
- * Heap descriptor writes are immediate host writes, so every in-frame iteration
- * has to bind and dispatch through its own slot: reusing one lets iteration N+1's
- * WriteBindings clobber iteration N's descriptors before the GPU ever reads them,
- * and every dispatch would run against the last binding written. Spans are built
- * as (parity frames x per-pass iterations), hence the multiply.
- */
-[[nodiscard]] constexpr auto HeapSlot(uint32_t frameIndex, uint32_t iterations, uint32_t iteration) noexcept -> uint32_t {
-    return frameIndex * iterations + iteration;
-}
-
 struct PassFactory {
     RenderContext::Impl&                        self;
     uint32_t                                    fIdx;
@@ -542,81 +529,39 @@ struct PassFactory {
             const auto up1        = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.bloomUp1);
             const auto bloomFinal = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.bloomFinalTarget);
 
-            // Same slot discipline as the HDR denoiser: 3 in-frame dispatches
-            // share one binding table per chain, and heap descriptor writes
-            // are immediate -- each iteration binds and dispatches through
-            // its own slot (span 2 parity x 3 iterations) or the later
-            // WriteBindings clobber the earlier dispatches' descriptors.
-            const auto Dispatch = [&](Vk::ComputePass& pass, const Vk::HeapPassBindings& bindings, const auto& dst, const auto& src, int mode,
-                                      uint32_t iteration) noexcept {
-                const uint32_t slotIndex = HeapSlot(fIdx, kKawaseMaxIterations, iteration);
-                heap.WriteBindings(self.ctx, bindings, slotIndex, src, self.defaultSampler, dst);
-                pass.DispatchHeapIndexedThreads(
-                    self.ctx, c, slotIndex, dst.extent.width, dst.extent.height, 1,
-                    RenderContext::Impl::KawasePushConstants {
-                        .mode      = mode,
-                        .rcpWidth  = 1.0f / static_cast<float>(src.extent.width),
-                        .rcpHeight = 1.0f / static_cast<float>(src.extent.height),
-                        .padding   = 0.0f
-                    }
-                );
-                Vk::ComputeChainBarrier(c);
+            // One ComputeChain per binding table: each owns its slot span and the
+            // barriers between its own steps. The threshold table is one slot per
+            // frame; the down/up tables are kKawaseMaxIterations slots per frame.
+            Vk::ComputeChain thresholdChain(self.ctx, heap, c, fIdx, 1u);
+            Vk::ComputeChain downChain(self.ctx, heap, c, fIdx, kKawaseMaxIterations);
+            Vk::ComputeChain upChain(self.ctx, heap, c, fIdx, kKawaseMaxIterations);
+
+            const auto Kawase = [](int mode, const auto& src) noexcept {
+                return RenderContext::Impl::KawasePushConstants {
+                    .mode      = mode,
+                    .rcpWidth  = 1.0f / static_cast<float>(src.extent.width),
+                    .rcpHeight = 1.0f / static_cast<float>(src.extent.height),
+                    .padding   = 0.0f
+                };
             };
 
             // 0. Bright pass: HDR scene color -> half-res threshold target.
-            heap.WriteBindings(self.ctx, self.bloomThresholdHeapBindings, fIdx, srcHdr, self.defaultSampler, thresh);
-            self.bloomThresholdCS.DispatchHeapIndexedThreads(
-                self.ctx, c, fIdx, thresh.extent.width, thresh.extent.height, 1,
-                RenderContext::Impl::KawasePushConstants {
-                    .mode      = 0,
-                    .rcpWidth  = 1.0f / static_cast<float>(self.graphResources.hdrSceneColor.extent.width),
-                    .rcpHeight = 1.0f / static_cast<float>(self.graphResources.hdrSceneColor.extent.height),
-                    .padding   = 0.0f
-                }
+            thresholdChain.Step(
+                self.bloomThresholdCS, self.bloomThresholdHeapBindings, thresh.extent, Kawase(0, self.graphResources.hdrSceneColor), srcHdr,
+                self.defaultSampler, thresh
             );
-            Vk::ComputeChainBarrier(c);
 
             // 1-3. Downsample chain: thresh -> down1 -> down2 -> down3.
-            Dispatch(self.bloomDownCS, self.bloomDownHeapBindings, down1, thresh, 0, 0);
-            Dispatch(self.bloomDownCS, self.bloomDownHeapBindings, down2, down1, 0, 1);
-            Dispatch(self.bloomDownCS, self.bloomDownHeapBindings, down3, down2, 0, 2);
+            downChain.Step(self.bloomDownCS, self.bloomDownHeapBindings, down1.extent, Kawase(0, thresh), thresh, self.defaultSampler, down1);
+            downChain.Step(self.bloomDownCS, self.bloomDownHeapBindings, down2.extent, Kawase(0, down1), down1, self.defaultSampler, down2);
+            downChain.Step(self.bloomDownCS, self.bloomDownHeapBindings, down3.extent, Kawase(0, down2), down2, self.defaultSampler, down3);
 
             // 4-6. Upsample chain with additive recombination of the same-
-            //      resolution downsample stages.
-            heap.WriteBindings(self.ctx, self.bloomUpHeapBindings, HeapSlot(fIdx, kKawaseMaxIterations, 0u), down3, self.defaultSampler, down2, up2);
-            self.bloomUpCS.DispatchHeapIndexedThreads(
-                self.ctx, c, HeapSlot(fIdx, kKawaseMaxIterations, 0u), up2.extent.width, up2.extent.height, 1,
-                RenderContext::Impl::KawasePushConstants {
-                    .mode      = 1,
-                    .rcpWidth  = 1.0f / static_cast<float>(down3.extent.width),
-                    .rcpHeight = 1.0f / static_cast<float>(down3.extent.height),
-                    .padding   = 0.0f
-                }
-            );
-            Vk::ComputeChainBarrier(c);
-
-            heap.WriteBindings(self.ctx, self.bloomUpHeapBindings, HeapSlot(fIdx, kKawaseMaxIterations, 1u), up2, self.defaultSampler, down1, up1);
-            self.bloomUpCS.DispatchHeapIndexedThreads(
-                self.ctx, c, HeapSlot(fIdx, kKawaseMaxIterations, 1u), up1.extent.width, up1.extent.height, 1,
-                RenderContext::Impl::KawasePushConstants {
-                    .mode      = 1,
-                    .rcpWidth  = 1.0f / static_cast<float>(up2.extent.width),
-                    .rcpHeight = 1.0f / static_cast<float>(up2.extent.height),
-                    .padding   = 0.0f
-                }
-            );
-            Vk::ComputeChainBarrier(c);
-
-            heap.WriteBindings(self.ctx, self.bloomUpHeapBindings, HeapSlot(fIdx, kKawaseMaxIterations, 2u), up1, self.defaultSampler, thresh, bloomFinal);
-            self.bloomUpCS.DispatchHeapIndexedThreads(
-                self.ctx, c, HeapSlot(fIdx, kKawaseMaxIterations, 2u), bloomFinal.extent.width, bloomFinal.extent.height, 1,
-                RenderContext::Impl::KawasePushConstants {
-                    .mode      = 1,
-                    .rcpWidth  = 1.0f / static_cast<float>(up1.extent.width),
-                    .rcpHeight = 1.0f / static_cast<float>(up1.extent.height),
-                    .padding   = 0.0f
-                }
-            );
+            //      resolution downsample stages. The final dispatch ends the
+            //      chain, so it is left unbarriered exactly as before.
+            upChain.Step(self.bloomUpCS, self.bloomUpHeapBindings, up2.extent, Kawase(1, down3), down3, self.defaultSampler, down2, up2);
+            upChain.Step(self.bloomUpCS, self.bloomUpHeapBindings, up1.extent, Kawase(1, up2), up2, self.defaultSampler, down1, up1);
+            upChain.Step<false>(self.bloomUpCS, self.bloomUpHeapBindings, bloomFinal.extent, Kawase(1, up1), up1, self.defaultSampler, thresh, bloomFinal);
         });
     }
 
@@ -655,14 +600,17 @@ struct PassFactory {
             // let iteration N+1's WriteBindings clobber the descriptors of
             // iteration N before the GPU ever reads them, and every dispatch
             // would run against the last binding written.
-            const auto Dispatch = [&](const auto& src, const auto& dst, uint32_t step, uint32_t iteration) noexcept {
-                const uint32_t slotIndex = HeapSlot(fIdx, kDenoiseMaxIterations, iteration);
-                heap.WriteBindings(self.ctx, self.hdrDenoiseHeapBindings, slotIndex, src, depth, norm, dst, self.frames.frameUniformBuffers[fIdx]);
-                self.hdrDenoiseCS.DispatchHeapIndexedThreads(
-                    self.ctx, c, slotIndex, dst.extent.width, dst.extent.height, 1,
-                    RenderContext::Impl::HdrAtrousPushConstants {.stepSize = step, .phiDepth = 0.02f, .phiNormal = 16.0f, .pad = 0u}
+            Vk::ComputeChain atrousChain(self.ctx, heap, c, fIdx, kDenoiseMaxIterations);
+
+            const auto Atrous = [](uint32_t stepSize) noexcept {
+                return RenderContext::Impl::HdrAtrousPushConstants {.stepSize = stepSize, .phiDepth = 0.02f, .phiNormal = 16.0f, .pad = 0u};
+            };
+            // The chain advances its own slot, so the explicit iteration index the
+            // old lambda took is gone; every step barriers, including the last.
+            const auto Dispatch = [&](const auto& src, const auto& dst, uint32_t stepSize) noexcept {
+                atrousChain.Step(
+                    self.hdrDenoiseCS, self.hdrDenoiseHeapBindings, dst.extent, Atrous(stepSize), src, depth, norm, dst, self.frames.frameUniformBuffers[fIdx]
                 );
-                Vk::ComputeChainBarrier(c);
             };
 
             // Wavelet ladder: doubling tap spacing reaches a wide footprint
@@ -670,18 +618,18 @@ struct PassFactory {
             // hdrSceneColor.
             switch (passes) {
                 case 1:
-                    Dispatch(hdr, denoiseA, 1, 0);
-                    Dispatch(denoiseA, hdr, 2, 1);
+                    Dispatch(hdr, denoiseA, 1);
+                    Dispatch(denoiseA, hdr, 2);
                     break;
                 case 2:
-                    Dispatch(hdr, denoiseA, 1, 0);
-                    Dispatch(denoiseA, denoiseB, 2, 1);
-                    Dispatch(denoiseB, hdr, 2, 2);
+                    Dispatch(hdr, denoiseA, 1);
+                    Dispatch(denoiseA, denoiseB, 2);
+                    Dispatch(denoiseB, hdr, 2);
                     break;
                 default:
-                    Dispatch(hdr, denoiseA, 1, 0);
-                    Dispatch(denoiseA, denoiseB, 2, 1);
-                    Dispatch(denoiseB, hdr, 4, 2);
+                    Dispatch(hdr, denoiseA, 1);
+                    Dispatch(denoiseA, denoiseB, 2);
+                    Dispatch(denoiseB, hdr, 4);
                     break;
             }
         });

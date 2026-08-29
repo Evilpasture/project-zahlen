@@ -123,8 +123,14 @@ struct ComputePass {
     // VK_EXT_descriptor_heap dispatch: heaps are bound on the command buffer,
     // per-dispatch data via vkCmdPushDataEXT at offset 0.
     template <GpuTriviallyCopyable T>
-    void DispatchHeapThreads(const Context& ctx, VkCommandBuffer cmd, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ, const T& pushData)
-        const noexcept {
+    void DispatchHeapThreads(
+        const Context&  ctx,
+        VkCommandBuffer cmd,
+        uint32_t        threadCountX,
+        uint32_t        threadCountY,
+        uint32_t        threadCountZ,
+        const T&        pushData
+    ) const noexcept {
         Bind(cmd);
         PushData(ctx, cmd, 0, pushData);
         DispatchThreads(cmd, threadCountX, threadCountY, threadCountZ);
@@ -227,8 +233,14 @@ struct DoubleBufferedComputePass {
         heap.WriteBindings(ctx, heapBindings, heapIndex, std::forward<Args>(args)...);
     }
 
-    void DispatchHeapThreads(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ)
-        const noexcept {
+    void DispatchHeapThreads(
+        const Context&  ctx,
+        VkCommandBuffer cmd,
+        uint32_t        heapIndex,
+        uint32_t        threadCountX,
+        uint32_t        threadCountY,
+        uint32_t        threadCountZ
+    ) const noexcept {
         assert(heapBindings.indexPushOffset > 0 && "Missing reflected descriptor-index offset");
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.Get());
         PushHeapIndex(ctx, cmd, heapBindings.indexPushOffset, heapIndex);
@@ -278,15 +290,10 @@ struct DoubleBufferedComputePass {
         return std::unexpected(SpirvLayoutError::ModuleParseFailed);
     }
 
-    return ComputePipelineBuilder()
-        .Shader(shader)
-        .Layout(VK_NULL_HANDLE)
-        .HeapPipeline()
-        .Build(device)
-        .transform([&](Pipeline&& pipeline) {
-            pass.pipeline = std::move(pipeline);
-            return std::move(pass);
-        });
+    return ComputePipelineBuilder().Shader(shader).Layout(VK_NULL_HANDLE).HeapPipeline().Build(device).transform([&](Pipeline&& pipeline) {
+        pass.pipeline = std::move(pipeline);
+        return std::move(pass);
+    });
 }
 
 /// Same as above, with a PUSH_INDEX mapping table (bake / pass slot spans).
@@ -310,13 +317,13 @@ struct DoubleBufferedComputePass {
 /// Builds and synchronously executes a heap compute shader on an immediate command ring.
 template <GpuTriviallyCopyable PushT = std::monostate, QueueType QType = QueueType::Graphics, size_t Capacity = 8>
 inline auto ExecuteImmediateCompute(
-    const Context&              ctx,
+    const Context&                ctx,
     CommandRing<QType, Capacity>& ring,
-    const ZHLN_ShaderDesc&      shader,
-    uint32_t                    threadsX,
-    uint32_t                    threadsY = 1,
-    uint32_t                    threadsZ = 1,
-    const PushT&                pushData = {}
+    const ZHLN_ShaderDesc&        shader,
+    uint32_t                      threadsX,
+    uint32_t                      threadsY = 1,
+    uint32_t                      threadsZ = 1,
+    const PushT&                  pushData = {}
 ) noexcept -> std::expected<void, Error> {
     return CreateHeapComputePass(ctx.Device(), shader).transform([&](ComputePass pass) {
         ExecuteImmediate(ctx, ring, [&](VkCommandBuffer cmd) {
@@ -334,5 +341,62 @@ inline auto ExecuteImmediateCompute(
         });
     });
 }
+
+/**
+ * @brief Records a chain of dependent compute dispatches through one heap table.
+ *
+ * Two things every multi-dispatch pass was hand-rolling:
+ *
+ *  - Slot arithmetic. Heap descriptor writes are immediate host writes, so each
+ *    in-frame step must bind and dispatch through its own slot or a later
+ *    WriteBindings clobbers an earlier step's descriptors before the GPU reads
+ *    them. Slots run frameIndex * slotSpan + step, matching the spans built at
+ *    init time.
+ *  - The compute->compute barrier between steps. The frame graph cannot supply
+ *    it: it orders *passes* from their declared accesses, but a pass body is an
+ *    opaque lambda, so dispatch-to-dispatch ordering inside a pass is invisible
+ *    to it.
+ *
+ * `Step` takes the WriteBindings argument tail verbatim, because that order is
+ * the shader's reflected binding order (see BuildHeapPassBindings), not anything
+ * derivable from the pass's compile-time Usages list.
+ *
+ * A barrier is recorded after *every* step, including the last, preserving the
+ * behaviour of the hand-written chains this replaces.
+ */
+class ComputeChain {
+  public:
+    constexpr ComputeChain(const Context& ctx, HeapManager& heap, VkCommandBuffer cmd, uint32_t frameIndex, uint32_t slotSpan) noexcept:
+        _ctx(ctx), _heap(heap), _cmd(cmd), _frameIndex(frameIndex), _slotSpan(slotSpan) {
+    }
+
+    /// Bind, dispatch (sized from `extent`) and barrier one step of the chain.
+    /// Pass `Barrier = false` for the final dispatch of a chain, which the
+    /// hand-written code this replaces deliberately left unbarriered.
+    template <bool Barrier = true, typename PushT, typename... Args>
+    void Step(ComputePass& pass, const HeapPassBindings& bindings, VkExtent3D extent, const PushT& push, Args&&... args) noexcept {
+        const uint32_t slot = _frameIndex * _slotSpan + _step++;
+        _heap.WriteBindings(_ctx, bindings, slot, std::forward<Args>(args)...);
+        pass.DispatchHeapIndexedThreads(_ctx, _cmd, slot, extent.width, extent.height, 1, push);
+        if constexpr (Barrier) {
+            ComputeChainBarrier(_cmd);
+        }
+    }
+
+    [[nodiscard]] constexpr auto Slot() const noexcept -> uint32_t {
+        return _frameIndex * _slotSpan + _step;
+    }
+    [[nodiscard]] constexpr auto StepCount() const noexcept -> uint32_t {
+        return _step;
+    }
+
+  private:
+    const Context&  _ctx;
+    HeapManager&    _heap;
+    VkCommandBuffer _cmd;
+    uint32_t        _frameIndex;
+    uint32_t        _slotSpan;
+    uint32_t        _step = 0;
+};
 
 } // namespace ZHLN::Vk
