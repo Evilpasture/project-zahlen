@@ -34,35 +34,10 @@ enum class FramePhase : uint8_t {
     History,      ///< Motion vectors and transform history.
 };
 
-[[nodiscard]] constexpr auto PhaseName(FramePhase phase) noexcept -> const char* {
-    switch (phase) {
-        case FramePhase::Input:
-            return "Input";
-        case FramePhase::UI:
-            return "UI";
-        case FramePhase::HotReload:
-            return "HotReload";
-        case FramePhase::PlayerIntent:
-            return "PlayerIntent";
-        case FramePhase::Physics:
-            return "Physics";
-        case FramePhase::Gameplay:
-            return "Gameplay";
-        case FramePhase::Simulation:
-            return "Simulation";
-        case FramePhase::Camera:
-            return "Camera";
-        case FramePhase::Visibility:
-            return "Visibility";
-        case FramePhase::Present:
-            return "Present";
-        case FramePhase::Fallback:
-            return "Fallback";
-        case FramePhase::History:
-            return "History";
-    }
-    return "Unknown";
-}
+// Phase names come from ZHLN::Reflect::EnumToString(FramePhase) -- the codebase
+// convention (see src/render/RenderCore.cpp:95, include/Zahlen/Error.hpp:39,
+// include/Zahlen/ScriptBinder.hpp:77). A hand-rolled switch here would be the
+// only one in the tree and would silently drift when a phase is added.
 
 /**
  * @brief Values steps need to exchange across phase boundaries.
