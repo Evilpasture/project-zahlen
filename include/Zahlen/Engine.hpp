@@ -28,13 +28,13 @@ namespace ZHLN {
 // ============================================================================
 
 enum class EngineInitError : uint8_t {
-    WindowCreationFailed[[= ZHLN::Description<"Window creation failed">{}]] = 1,
-    TTYInitializationFailed[[= ZHLN::Description<"TTY initialization failed">{}]],
-    RenderInitializationFailed[[= ZHLN::Description<"Render initialization failed">{}]],
-    PhysicsInitializationFailed[[= ZHLN::Description<"Physics initialization failed">{}]],
-    AudioInitializationFailed[[= ZHLN::Description<"Audio initialization failed">{}]],
-    AssetInitializationFailed[[= ZHLN::Description<"Asset initialization failed">{}]],
-    EngineAllocationFailed[[= ZHLN::Description<"Engine instance allocation failed">{}]],
+    WindowCreationFailed[[= ZHLN::Description<"Window creation failed"> {}]] = 1,
+    TTYInitializationFailed[[= ZHLN::Description<"TTY initialization failed"> {}]],
+    RenderInitializationFailed[[= ZHLN::Description<"Render initialization failed"> {}]],
+    PhysicsInitializationFailed[[= ZHLN::Description<"Physics initialization failed"> {}]],
+    AudioInitializationFailed[[= ZHLN::Description<"Audio initialization failed"> {}]],
+    AssetInitializationFailed[[= ZHLN::Description<"Asset initialization failed"> {}]],
+    EngineAllocationFailed[[= ZHLN::Description<"Engine instance allocation failed"> {}]],
 };
 
 class Window;
@@ -50,6 +50,7 @@ namespace ECS {
 class Registry;
 class SystemGraph;
 class EntityCommandBuffer;
+class FrameScheduler;
 } // namespace ECS
 
 class CullingSystem;
@@ -85,16 +86,21 @@ class ZHLN_API Engine {
     auto GetUpdateGraph() -> ECS::SystemGraph&;
     auto GetRenderGraph() -> ECS::SystemGraph&;
     auto GetMainECB() -> ECS::EntityCommandBuffer&;
-    auto GetCullingSystem() -> CullingSystem&;
-    auto GetVisibleEntities() -> JPH::Array<Entity>&;
-    auto GetVisibleShadowEntities() -> JPH::Array<Entity>&;
-    auto GetCurrentAlpha() -> float&;
+    /// The frame's ordered phase steps. `Tick` executes exactly this list.
+    [[nodiscard]] auto GetFrameScheduler() -> ECS::FrameScheduler&;
+    auto               GetCullingSystem() -> CullingSystem&;
+    auto               GetVisibleEntities() -> JPH::Array<Entity>&;
+    auto               GetVisibleShadowEntities() -> JPH::Array<Entity>&;
+    auto               GetCurrentAlpha() -> float&;
 
     [[nodiscard]] auto GetGameState() const -> void*;
     void               SetGameState(void* state);
     [[nodiscard]] auto GetCurrentFrame() const noexcept -> uint64_t;
 
     void SetUICallback(UICallback callback);
+    /// The host editor callback, or nullptr when none is installed. Exposed so
+    /// the frame scheduler can run it as an ordinary phase step.
+    [[nodiscard]] auto GetUICallback() const noexcept -> const UICallback*;
 
     void ProvokeDeviceLost();
 
