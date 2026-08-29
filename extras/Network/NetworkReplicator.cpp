@@ -2,6 +2,13 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+// ============================================================================
+// ClientReplicator — applies ZHLN.Wire-decoded server state to the local ECS.
+// No third-party serialization: every payload goes through the annotated
+// reflection codecs exported by ZHLN.Network, and every failure is an
+// std::expected with a fully formatted, annotated diagnostic.
+// ============================================================================
+
 module;
 
 // clang-format off
@@ -16,237 +23,78 @@ module;
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
 #include <Zahlen/physics/Physics.hpp>
-#include <msgpack.hpp>
-#include <zlib.h>
-
-#if defined(_WIN32)
-#include <winsock2.h>
-#else
-#include <arpa/inet.h>
-#endif
+#include <algorithm>
+#include <cstdint>
+#include <expected>
+#include <span>
 
 module ZHLN.Network;
 
 namespace ZHLN::Net {
 
-namespace {
-
-constexpr uint8_t FLAG_COMPRESSED        = 0x01;
-constexpr size_t  MAX_STREAM_FRAME_BYTES = 128 * 1024 * 1024;
-constexpr size_t  COMPRESSION_MIN_BYTES  = 1024;
-
-// Module-internal framing: Encodes msgpack bytes with 4-byte BE length + compression flag
-auto EncodePackedFrame(std::span<const uint8_t> packed) noexcept -> std::expected<std::vector<uint8_t>, Error> {
-    try {
-        uint8_t              flags = 0;
-        std::vector<uint8_t> body;
-
-        if (packed.size() >= COMPRESSION_MIN_BYTES) {
-            uLongf               destLen = compressBound(static_cast<uLong>(packed.size()));
-            std::vector<uint8_t> compressed(destLen);
-            if (compress(compressed.data(), &destLen, packed.data(), static_cast<uLong>(packed.size())) == Z_OK) {
-                if (destLen + 32 < packed.size()) {
-                    compressed.resize(destLen);
-                    body = std::move(compressed);
-                    flags |= FLAG_COMPRESSED;
-                }
-            }
-        }
-
-        if (body.empty()) {
-            body.assign(packed.begin(), packed.end());
-        }
-
-        const uint32_t totalBodyLen = static_cast<uint32_t>(body.size() + 1);
-        const uint32_t netLen       = htonl(totalBodyLen);
-
-        std::vector<uint8_t> frame;
-        frame.reserve(4 + totalBodyLen);
-
-        const auto* lenBytes = reinterpret_cast<const uint8_t*>(&netLen);
-        frame.insert(frame.end(), lenBytes, lenBytes + 4);
-        frame.push_back(flags);
-        frame.insert(frame.end(), body.begin(), body.end());
-
-        return frame;
-    } catch (const std::bad_alloc&) {
-        return std::unexpected(Error(NetworkError::AllocationFailed));
-    } catch (...) {
-        return std::unexpected(Error(NetworkError::UnpackFailed));
-    }
-}
-
-// Module-internal framing: Decompresses zlib payload
-auto DecodePayloadBody(std::span<const uint8_t> framedBody) noexcept -> std::expected<std::vector<uint8_t>, Error> {
-    if (framedBody.empty()) {
-        return std::unexpected(Error(NetworkError::InvalidPayload));
-    }
-
-    try {
-        const uint8_t flags        = framedBody[0];
-        auto          payloadBytes = framedBody.subspan(1);
-
-        if ((flags & FLAG_COMPRESSED) != 0) {
-            z_stream stream {};
-            if (inflateInit(&stream) != Z_OK) {
-                return std::unexpected(Error(NetworkError::DecompressionFailed));
-            }
-
-            stream.avail_in = static_cast<uInt>(payloadBytes.size());
-            stream.next_in  = const_cast<Bytef*>(payloadBytes.data());
-
-            std::vector<uint8_t> decompressed(64 * 1024);
-            int                  ret = Z_OK;
-            while (ret == Z_OK) {
-                if (stream.total_out >= decompressed.size()) {
-                    decompressed.resize(decompressed.size() * 2);
-                }
-                stream.avail_out = static_cast<uInt>(decompressed.size() - stream.total_out);
-                stream.next_out  = decompressed.data() + stream.total_out;
-                ret              = inflate(&stream, Z_NO_FLUSH);
-            }
-            inflateEnd(&stream);
-
-            if (ret != Z_STREAM_END) {
-                return std::unexpected(Error(NetworkError::DecompressionFailed));
-            }
-
-            decompressed.resize(stream.total_out);
-            return decompressed;
-        }
-
-        return std::vector<uint8_t>(payloadBytes.begin(), payloadBytes.end());
-    } catch (const std::bad_alloc&) {
-        return std::unexpected(Error(NetworkError::AllocationFailed));
-    } catch (...) {
-        return std::unexpected(Error(NetworkError::DecompressionFailed));
-    }
-}
-
-// Module-internal MessagePack sandboxing
-auto SafeUnpack(std::span<const uint8_t> data) noexcept -> std::expected<msgpack::object_handle, Error> {
-    try {
-        return msgpack::unpack(reinterpret_cast<const char*>(data.data()), data.size());
-    } catch (const std::bad_alloc&) {
-        return std::unexpected(Error(NetworkError::AllocationFailed));
-    } catch (...) {
-        return std::unexpected(Error(NetworkError::UnpackFailed));
-    }
-}
-
-} // namespace
-
 // ============================================================================
-// ClientReplicator Definition
+// ClientReplicator — method bodies (class declared in the module interface)
 // ============================================================================
 
-class ClientReplicator {
-  public:
-    HashMap<uint64_t, Entity> uidToEntityMap;
-
-    auto ApplyInitialObjects(Engine& engine, std::span<const uint8_t> rawMsgPack) noexcept -> std::expected<void, Error> {
-        auto unpacked = SafeUnpack(rawMsgPack);
-        if (!unpacked) {
-            return std::unexpected(unpacked.error());
-        }
-
-        try {
-            const msgpack::object obj = unpacked->get();
-            if (obj.type != msgpack::type::MAP) {
-                return std::unexpected(Error(NetworkError::InvalidPayload));
-            }
-
-            const auto snapshot = obj.via.map;
-            auto&      reg      = engine.GetRegistry();
-
-            for (uint32_t i = 0; i < snapshot.size; ++i) {
-                const uint64_t uid   = std::stoull(snapshot.ptr[i].key.as<std::string>());
-                const auto     props = snapshot.ptr[i].val.as<std::map<uint8_t, msgpack::object>>();
-
-                const Entity e = GetOrCreateEntity(reg, uid);
-
-                JPH::Vec3 pos   = JPH::Vec3::sZero();
-                JPH::Vec3 scale = JPH::Vec3::sReplicate(1.0f);
-
-                if (props.contains(static_cast<uint8_t>(PropertyChannel::Position))) {
-                    auto v = props.at(static_cast<uint8_t>(PropertyChannel::Position)).as<std::vector<float>>();
-                    pos    = JPH::Vec3(v[0] * INV_VEC3_SCALE, v[1] * INV_VEC3_SCALE, v[2] * INV_VEC3_SCALE);
-                }
-                if (props.contains(static_cast<uint8_t>(PropertyChannel::Size))) {
-                    auto s = props.at(static_cast<uint8_t>(PropertyChannel::Size)).as<std::vector<float>>();
-                    scale  = JPH::Vec3(s[0] * INV_VEC3_SCALE, s[1] * INV_VEC3_SCALE, s[2] * INV_VEC3_SCALE);
-                }
-
-                const JPH::Mat44 worldMat = Math::CreateTransform(pos, JPH::Quat::sIdentity(), scale);
-
-                reg.Add(
-                    e, Components::NameComponent {.name = String64("ReplicatedObject")}, Components::TransformComponent {.position = pos, .scale = scale},
-                    Components::WorldTransformComponent {.world = worldMat, .previous = worldMat},
-                    NetworkIdentityComponent {.serverUID = uid, .isLocalOwner = false},
-                    NetworkInterpolationComponent {.targetPosition = pos, .targetRotation = JPH::Quat::sIdentity()}
-                );
-            }
-            return {};
-        } catch (const std::bad_alloc&) {
-            return std::unexpected(Error(NetworkError::AllocationFailed));
-        } catch (...) {
-            return std::unexpected(Error(NetworkError::UnpackFailed));
-        }
+auto ClientReplicator::ApplyInitialObjects(Engine& engine, std::span<const uint8_t> payload) noexcept
+    -> std::expected<void, Error> {
+    auto message = DecodeInitialSnapshot(payload);
+    if (!message) {
+        Log("Net: dropping initial snapshot — {}", message.error().Format());
+        return std::unexpected(Error(NetworkError::ReplicationFailed));
     }
 
-    auto ApplyPhysicsBatch(Engine& engine, std::span<const uint8_t> rawMsgPack) noexcept -> std::expected<void, Error> {
-        auto unpacked = SafeUnpack(rawMsgPack);
-        if (!unpacked) {
-            return std::unexpected(unpacked.error());
-        }
+    auto& reg = engine.GetRegistry();
 
-        try {
-            const msgpack::object obj = unpacked->get();
-            if (obj.type != msgpack::type::MAP) {
-                return std::unexpected(Error(NetworkError::InvalidPayload));
-            }
+    for (const ObjectSnapshot& object: message->objects) {
+        const Entity e = GetOrCreateEntity(reg, object.uid);
 
-            const auto physicsMap = obj.via.map;
-            auto&      reg        = engine.GetRegistry();
+        const JPH::Vec3  position = object.position;
+        const JPH::Vec3  scale    = object.size;
+        const JPH::Mat44 worldMat = Math::CreateTransform(position, JPH::Quat::sIdentity(), scale);
 
-            for (uint32_t i = 0; i < physicsMap.size; ++i) {
-                const uint64_t uid = std::stoull(physicsMap.ptr[i].key.as<std::string>());
-                const auto     raw = physicsMap.ptr[i].val.as<std::vector<int32_t>>();
-                if (raw.size() < 10) {
-                    continue;
-                }
+        reg.Add(
+            e, Components::NameComponent {.name = String64("ReplicatedObject")}, Components::TransformComponent {.position = position, .scale = scale},
+            Components::WorldTransformComponent {.world = worldMat, .previous = worldMat},
+            NetworkIdentityComponent {.serverUID = object.uid, .isLocalOwner = false},
+            NetworkInterpolationComponent {.targetPosition = position, .targetRotation = JPH::Quat::sIdentity()}
+        );
+    }
+    return {};
+}
 
-                const JPH::Vec3 pos(raw[0] * INV_VEC3_SCALE, raw[1] * INV_VEC3_SCALE, raw[2] * INV_VEC3_SCALE);
-                const JPH::Quat rot(raw[3] * INV_VEC3_SCALE, raw[4] * INV_VEC3_SCALE, raw[5] * INV_VEC3_SCALE, raw[6] * INV_VEC3_SCALE);
-                const JPH::Vec3 vel(raw[7] * INV_VEC3_SCALE, raw[8] * INV_VEC3_SCALE, raw[9] * INV_VEC3_SCALE);
-
-                if (const auto* e = uidToEntityMap.Find(uid)) {
-                    reg.Patch<NetworkInterpolationComponent>(*e, [&](auto& interp) {
-                        interp.targetPosition = pos;
-                        interp.targetRotation = rot.Normalized();
-                        interp.linearVelocity = vel;
-                    });
-                }
-            }
-            return {};
-        } catch (const std::bad_alloc&) {
-            return std::unexpected(Error(NetworkError::AllocationFailed));
-        } catch (...) {
-            return std::unexpected(Error(NetworkError::UnpackFailed));
-        }
+auto ClientReplicator::ApplyPhysicsBatch(Engine& engine, std::span<const uint8_t> payload) noexcept
+    -> std::expected<void, Error> {
+    auto message = DecodePhysicsBatch(payload);
+    if (!message) {
+        Log("Net: dropping physics batch — {}", message.error().Format());
+        return std::unexpected(Error(NetworkError::ReplicationFailed));
     }
 
-    Entity GetOrCreateEntity(ECS::Registry& reg, uint64_t uid) {
-        if (const auto* found = uidToEntityMap.Find(uid)) {
-            if (reg.IsAlive(*found)) {
-                return *found;
-            }
+    auto& reg = engine.GetRegistry();
+
+    for (const PhysicsBodyState& body: message->bodies) {
+        if (const auto* e = uidToEntityMap.Find(body.uid); e != nullptr) {
+            reg.Patch<NetworkInterpolationComponent>(*e, [&](NetworkInterpolationComponent& interp) {
+                interp.targetPosition = body.position;
+                interp.targetRotation = body.rotation;
+                interp.linearVelocity = body.velocity;
+            });
         }
-        const Entity newEntity = reg.Create();
-        uidToEntityMap.Insert(uid, newEntity);
-        return newEntity;
     }
-};
+    return {};
+}
+
+auto ClientReplicator::GetOrCreateEntity(ECS::Registry& reg, uint64_t uid) -> Entity {
+    if (const auto* found = uidToEntityMap.Find(uid); found != nullptr) {
+        if (reg.IsAlive(*found)) {
+            return *found;
+        }
+    }
+    const Entity newEntity = reg.Create();
+    uidToEntityMap.Insert(uid, newEntity);
+    return newEntity;
+}
 
 // ============================================================================
 // ECS Subsystem Registration
