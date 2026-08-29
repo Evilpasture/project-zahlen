@@ -4,7 +4,7 @@
 #pragma once
 #include "Components.hpp"
 #include "Types.hpp"
-#include <Zahlen/Core/Print.hpp>
+#include <Zahlen/Core/Format.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
@@ -81,9 +81,9 @@ constexpr size_t MAX_UI_STACK_DEPTH = 32;
 
 enum class GUIError : uint8_t {
     HierarchyTooDeep[
-        [= ZHLN::Reflect::Description<"UI hierarchy exceeded MAX_UI_STACK_DEPTH; overflowing widgets attached to the deepest live parent instead.">{}]] = 1,
-    EntityNotAlive[[= ZHLN::Reflect::Description<"Target UI entity is not alive (already destroyed or never existed).">{}]],
-    ParentNotAlive[[= ZHLN::Reflect::Description<"Parent entity for the GUI operation is not alive.">{}]],
+        [= ZHLN::Description<"UI hierarchy exceeded MAX_UI_STACK_DEPTH; overflowing widgets attached to the deepest live parent instead.">{}]] = 1,
+    EntityNotAlive[[= ZHLN::Description<"Target UI entity is not alive (already destroyed or never existed).">{}]],
+    ParentNotAlive[[= ZHLN::Description<"Parent entity for the GUI operation is not alive.">{}]],
 };
 
 // --- CONFIGURATION STRUCTS ---

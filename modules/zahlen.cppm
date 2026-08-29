@@ -132,6 +132,8 @@ module;
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Core/ControlFlow.hpp>
+#include <Zahlen/Core/Description.hpp>
+#include <Zahlen/Core/Format.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/Loop.hpp>
 #include <Zahlen/Core/MemoryPool.hpp>
@@ -220,6 +222,7 @@ using ZHLN::Array;
 using ZHLN::Assert;
 using ZHLN::Atomic;
 using ZHLN::DefaultAllocator;
+using ZHLN::Description;
 using ZHLN::Dump;
 using ZHLN::Error;
 using ZHLN::ErrorCategory;
@@ -246,7 +249,6 @@ using ZHLN::Trace;
 namespace Reflect {
 using ZHLN::Reflect::AnnotatedName;
 using ZHLN::Reflect::CustomFormatter;
-using ZHLN::Reflect::Description;
 using ZHLN::Reflect::EnumToString;
 using ZHLN::Reflect::FieldCount;
 using ZHLN::Reflect::ForEachAnnotatedType;

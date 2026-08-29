@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
+#include "Zahlen/Core/Description.hpp"
 #include <algorithm>
 #include <array>
 #include <format>
@@ -19,25 +20,13 @@ namespace ZHLN::Reflect {
 // ============================================================================
 // 1. COMPLETELY INDEPENDENT UTILITIES (Defined Once)
 // ============================================================================
+//
+// ZHLN::StringLiteral and ZHLN::Description live in
+// Zahlen/Core/Description.hpp so that annotation-only translation units never
+// pull in the reflection machinery. That header is included above, so both
+// remain reachable from here (they are in ZHLN, not ZHLN::Reflect).
 
-template <std::size_t N>
-struct StringLiteral {
-    std::array<char, N> value {};
-    constexpr StringLiteral(const char (&str)[N]) {
-        for (std::size_t i = 0; i < N; ++i) {
-            value[i] = str[i];
-        }
-    }
-
-    constexpr operator std::string_view() const {
-        return {value.data(), N - 1};
-    }
-};
-
-template <std::size_t N>
-StringLiteral(const char (&)[N]) -> StringLiteral<N>;
-
-template <typename T, StringLiteral FieldName>
+template <typename T, ZHLN::StringLiteral FieldName>
 struct Field {
     using type                             = T;
     static constexpr std::string_view name = FieldName;
@@ -47,11 +36,6 @@ template <typename T>
 constexpr auto IsBracesConstructible() -> bool {
     return std::is_aggregate_v<std::remove_cvref_t<T>>;
 }
-
-template <StringLiteral Text>
-struct Description {
-    static constexpr std::string_view message = Text;
-};
 
 } // namespace ZHLN::Reflect
 
@@ -771,7 +755,7 @@ template <auto a>
 consteval auto ExtractDescriptionText() -> std::string_view {
     constexpr auto type = std::meta::remove_const(std::meta::dealias(std::meta::type_of(a)));
     if constexpr (std::meta::has_template_arguments(type)) {
-        if constexpr (std::meta::template_of(type) == ^^Description) {
+        if constexpr (std::meta::template_of(type) == ^^ZHLN::Description) {
             using DescType = typename[:type:];
             return DescType::message;
         }

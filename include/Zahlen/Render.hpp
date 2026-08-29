@@ -5,8 +5,8 @@
 #include "Common.h"
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/Array.hpp>
+#include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Core/Pair.hpp>
-#include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Types.hpp>
@@ -26,7 +26,7 @@ namespace ZHLN {
 // on "this GPU lacks the optional feature" without knowing about Vulkan.
 // ============================================================================
 enum class RenderFeatureError : uint8_t {
-    FeatureNotSupported[[= ZHLN::Reflect::Description<"The requested render feature is not supported on this device">{}]] = 1,
+    FeatureNotSupported[[= ZHLN::Description<"The requested render feature is not supported on this device">{}]] = 1,
 };
 
 namespace Shadows {

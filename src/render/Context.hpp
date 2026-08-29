@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
 #include <cstdint>
 
@@ -11,9 +11,9 @@ namespace ZHLN::Vk {
 
 // Vulkan instance/device bring-up failures for the Context subsystem.
 enum class ContextError : uint8_t {
-    InstanceCreationFailed[[= Reflect::Description<"Vulkan instance creation failed">{}]] = 1,
-    NoSuitableDeviceFound[[= Reflect::Description<"No suitable Vulkan device found">{}]],
-    DeviceCreationFailed[[= Reflect::Description<"Vulkan logical device creation failed">{}]],
+    InstanceCreationFailed[[= ZHLN::Description<"Vulkan instance creation failed">{}]] = 1,
+    NoSuitableDeviceFound[[= ZHLN::Description<"No suitable Vulkan device found">{}]],
+    DeviceCreationFailed[[= ZHLN::Description<"Vulkan logical device creation failed">{}]],
 };
 
 class Context {

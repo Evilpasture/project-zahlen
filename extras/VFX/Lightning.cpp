@@ -16,7 +16,7 @@ module;
 #include <Zahlen/Common.h>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Array.hpp>
-#include <Zahlen/Core/Print.hpp>
+#include <Zahlen/Core/Format.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>

@@ -11,19 +11,19 @@
 // ============================================================================
 
 enum class CodecError : uint8_t {
-    CorruptedStream[[= ZHLN::Reflect::Description<"The input bitstream is corrupted or incomplete."> {}]] = 1,
-    UnsupportedVersion[[= ZHLN::Reflect::Description<"The bitstream header version is not supported."> {}]]
+    CorruptedStream[[= ZHLN::Description<"The input bitstream is corrupted or incomplete."> {}]] = 1,
+    UnsupportedVersion[[= ZHLN::Description<"The bitstream header version is not supported."> {}]]
 };
 
 enum class NetworkError : uint8_t {
-    HostUnreachable[[= ZHLN::Reflect::Description<"Remote host refused the connection or is offline."> {}]] = 1,
+    HostUnreachable[[= ZHLN::Description<"Remote host refused the connection or is offline."> {}]] = 1,
     ConnectionReset
 };
 
 enum class HandleError : uint8_t {
-    GenerationMismatch[[= ZHLN::Reflect::Description<"Recycled handle failed generation check. Expected generation {}, got {}"> {}]] = 1,
-    SlotOutOfBounds[[= ZHLN::Reflect::Description<"Slot index {} exceeds maximum capacity of {}"> {}]],
-    EntityNull[[= ZHLN::Reflect::Description<"Entity handle is null or uninitialized."> {}]]
+    GenerationMismatch[[= ZHLN::Description<"Recycled handle failed generation check. Expected generation {}, got {}"> {}]] = 1,
+    SlotOutOfBounds[[= ZHLN::Description<"Slot index {} exceeds maximum capacity of {}"> {}]],
+    EntityNull[[= ZHLN::Description<"Entity handle is null or uninitialized."> {}]]
 };
 
 // ============================================================================

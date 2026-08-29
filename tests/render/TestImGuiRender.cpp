@@ -19,9 +19,9 @@
 #include <vector>
 
 enum class ImGuiRenderTestError : uint8_t {
-    EngineInitFailed[[= ZHLN::Reflect::Description<"Failed to initialize headless Engine context for ImGui render test.">{}]] = 1,
-    RenderOutputBlank[[= ZHLN::Reflect::Description<"Rendered ImGui screenshot is blank or failed to capture.">{}]],
-    MissingExpectedPixels[[= ZHLN::Reflect::Description<"PPM analysis did not find the expected ImGui colored regions.">{}]],
+    EngineInitFailed[[= ZHLN::Description<"Failed to initialize headless Engine context for ImGui render test.">{}]] = 1,
+    RenderOutputBlank[[= ZHLN::Description<"Rendered ImGui screenshot is blank or failed to capture.">{}]],
+    MissingExpectedPixels[[= ZHLN::Description<"PPM analysis did not find the expected ImGui colored regions.">{}]],
 };
 
 namespace {

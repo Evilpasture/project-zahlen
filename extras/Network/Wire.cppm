@@ -17,7 +17,7 @@
 //     diagnostics.
 //
 //   * Annotated, formatted failures: WireError enumerators carry
-//     [[= ZHLN::Reflect::Description<"..."> {}]] messages that double as
+//     [[= ZHLN::Description<"..."> {}]] messages that double as
 //     std::format strings. A Failure records the category, the byte offset,
 //     the wire path ("snapshot.objects[3].position") and the formatted
 //     details — plus the schema annotation of the offending field.
@@ -68,28 +68,28 @@ export namespace ZHLN::Wire {
 // ============================================================================
 
 enum class WireError : uint8_t {
-    Truncated[[= ZHLN::Reflect::Description<"wire stream truncated: needed {} byte(s) at offset {} but only {} remain(s)"> {}]] = 1,
-    NonCanonicalVarint[[= ZHLN::Reflect::Description<"non-canonical varint at offset {}: trailing zero group (use the shortest encoding)"> {}]],
-    VarintOverflow[[= ZHLN::Reflect::Description<"varint at offset {} exceeds the 64-bit range"> {}]],
-    InvalidBoolean[[= ZHLN::Reflect::Description<"boolean byte {} at offset {} is neither 0 nor 1"> {}]],
-    InvalidEnumValue[[= ZHLN::Reflect::Description<"value {} is not a valid enumerator of '{}'"> {}]],
-    ValueOutOfRange[[= ZHLN::Reflect::Description<"value {} is outside the permitted range [{}, {}]"> {}]],
-    StringTooLong[[= ZHLN::Reflect::Description<"string of {} byte(s) exceeds the {} byte limit"> {}]],
-    FixedStringOverflow[[= ZHLN::Reflect::Description<"string of {} byte(s) does not fit FixedString<{}> ({} usable characters)"> {}]],
-    CollectionTooLarge[[= ZHLN::Reflect::Description<"collection of {} element(s) exceeds the {} element limit"> {}]],
-    ElementCountExceedsInput[[= ZHLN::Reflect::Description<"collection claims {} element(s) but only {} byte(s) of wire data remain"> {}]],
-    BufferOverflow[[= ZHLN::Reflect::Description<"byte limit of {} exceeded while writing {} additional byte(s)"> {}]],
-    AllocationFailed[[= ZHLN::Reflect::Description<"allocation of {} byte(s) failed"> {}]],
-    UnsupportedType[[= ZHLN::Reflect::Description<"type '{}' has no wire representation"> {}]],
-    TrailingBytes[[= ZHLN::Reflect::Description<"{} trailing byte(s) remain after the value ({} byte(s) total)"> {}]],
-    ChecksumMismatch[[= ZHLN::Reflect::Description<"CRC32 mismatch: computed 0x{:08x}, expected 0x{:08x}"> {}]],
-    DecompressionFailed[[= ZHLN::Reflect::Description<"decompression failed: {}"> {}]],
-    CompressionFailed[[= ZHLN::Reflect::Description<"compression failed: {}"> {}]],
-    InvalidFrame[[= ZHLN::Reflect::Description<"malformed frame: {}"> {}]],
-    FrameTooLarge[[= ZHLN::Reflect::Description<"frame length {} exceeds the {} byte stream limit"> {}]],
-    FrameLengthMismatch[[= ZHLN::Reflect::Description<"frame header declares {} byte(s) but {} byte(s) were provided"> {}]],
-    UnknownMessageType[[= ZHLN::Reflect::Description<"message type {} is not part of protocol version {}"> {}]],
-    ProtocolVersionMismatch[[= ZHLN::Reflect::Description<"protocol version mismatch: message carries {}, client speaks {}"> {}]]
+    Truncated[[= ZHLN::Description<"wire stream truncated: needed {} byte(s) at offset {} but only {} remain(s)"> {}]] = 1,
+    NonCanonicalVarint[[= ZHLN::Description<"non-canonical varint at offset {}: trailing zero group (use the shortest encoding)"> {}]],
+    VarintOverflow[[= ZHLN::Description<"varint at offset {} exceeds the 64-bit range"> {}]],
+    InvalidBoolean[[= ZHLN::Description<"boolean byte {} at offset {} is neither 0 nor 1"> {}]],
+    InvalidEnumValue[[= ZHLN::Description<"value {} is not a valid enumerator of '{}'"> {}]],
+    ValueOutOfRange[[= ZHLN::Description<"value {} is outside the permitted range [{}, {}]"> {}]],
+    StringTooLong[[= ZHLN::Description<"string of {} byte(s) exceeds the {} byte limit"> {}]],
+    FixedStringOverflow[[= ZHLN::Description<"string of {} byte(s) does not fit FixedString<{}> ({} usable characters)"> {}]],
+    CollectionTooLarge[[= ZHLN::Description<"collection of {} element(s) exceeds the {} element limit"> {}]],
+    ElementCountExceedsInput[[= ZHLN::Description<"collection claims {} element(s) but only {} byte(s) of wire data remain"> {}]],
+    BufferOverflow[[= ZHLN::Description<"byte limit of {} exceeded while writing {} additional byte(s)"> {}]],
+    AllocationFailed[[= ZHLN::Description<"allocation of {} byte(s) failed"> {}]],
+    UnsupportedType[[= ZHLN::Description<"type '{}' has no wire representation"> {}]],
+    TrailingBytes[[= ZHLN::Description<"{} trailing byte(s) remain after the value ({} byte(s) total)"> {}]],
+    ChecksumMismatch[[= ZHLN::Description<"CRC32 mismatch: computed 0x{:08x}, expected 0x{:08x}"> {}]],
+    DecompressionFailed[[= ZHLN::Description<"decompression failed: {}"> {}]],
+    CompressionFailed[[= ZHLN::Description<"compression failed: {}"> {}]],
+    InvalidFrame[[= ZHLN::Description<"malformed frame: {}"> {}]],
+    FrameTooLarge[[= ZHLN::Description<"frame length {} exceeds the {} byte stream limit"> {}]],
+    FrameLengthMismatch[[= ZHLN::Description<"frame header declares {} byte(s) but {} byte(s) were provided"> {}]],
+    UnknownMessageType[[= ZHLN::Description<"message type {} is not part of protocol version {}"> {}]],
+    ProtocolVersionMismatch[[= ZHLN::Description<"protocol version mismatch: message carries {}, client speaks {}"> {}]]
 };
 
 // ============================================================================

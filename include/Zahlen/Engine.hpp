@@ -11,7 +11,7 @@
 #include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Config.hpp>
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Types.hpp>
@@ -28,13 +28,13 @@ namespace ZHLN {
 // ============================================================================
 
 enum class EngineInitError : uint8_t {
-    WindowCreationFailed[[= Reflect::Description<"Window creation failed">{}]] = 1,
-    TTYInitializationFailed[[= Reflect::Description<"TTY initialization failed">{}]],
-    RenderInitializationFailed[[= Reflect::Description<"Render initialization failed">{}]],
-    PhysicsInitializationFailed[[= Reflect::Description<"Physics initialization failed">{}]],
-    AudioInitializationFailed[[= Reflect::Description<"Audio initialization failed">{}]],
-    AssetInitializationFailed[[= Reflect::Description<"Asset initialization failed">{}]],
-    EngineAllocationFailed[[= Reflect::Description<"Engine instance allocation failed">{}]],
+    WindowCreationFailed[[= ZHLN::Description<"Window creation failed">{}]] = 1,
+    TTYInitializationFailed[[= ZHLN::Description<"TTY initialization failed">{}]],
+    RenderInitializationFailed[[= ZHLN::Description<"Render initialization failed">{}]],
+    PhysicsInitializationFailed[[= ZHLN::Description<"Physics initialization failed">{}]],
+    AudioInitializationFailed[[= ZHLN::Description<"Audio initialization failed">{}]],
+    AssetInitializationFailed[[= ZHLN::Description<"Asset initialization failed">{}]],
+    EngineAllocationFailed[[= ZHLN::Description<"Engine instance allocation failed">{}]],
 };
 
 class Window;

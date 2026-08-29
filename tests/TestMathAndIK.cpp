@@ -9,10 +9,10 @@
 #include <expected>
 
 enum class MathTestError : uint32_t {
-    IKSolverFailed[[= ZHLN::Reflect::Description<"TwoBoneIK solver produced invalid joint orientations or positions.">{}]] = 1,
-    FrustumCullingFailed[[= ZHLN::Reflect::Description<"Frustum sphere culling falsely classified an inside/outside object.">{}]],
-    PackingLossyMismatch[[= ZHLN::Reflect::Description<"Bit-packed normal/UV/color compression lost excessive precision.">{}]],
-    MatrixProjectionFailed[[= ZHLN::Reflect::Description<"Perspective matrix did not conform to Vulkan Y-down or NDC clip depth.">{}]],
+    IKSolverFailed[[= ZHLN::Description<"TwoBoneIK solver produced invalid joint orientations or positions.">{}]] = 1,
+    FrustumCullingFailed[[= ZHLN::Description<"Frustum sphere culling falsely classified an inside/outside object.">{}]],
+    PackingLossyMismatch[[= ZHLN::Description<"Bit-packed normal/UV/color compression lost excessive precision.">{}]],
+    MatrixProjectionFailed[[= ZHLN::Description<"Perspective matrix did not conform to Vulkan Y-down or NDC clip depth.">{}]],
 };
 
 struct MathAndIKTestSuite {

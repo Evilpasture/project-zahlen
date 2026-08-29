@@ -18,14 +18,14 @@
 namespace ZHLN::Vk {
 
 enum class SpirvLayoutError : uint8_t {
-    InvalidArguments[[= ZHLN::Reflect::Description<"SPIR-V blob or type name is empty">{}]] = 1,
-    ModuleParseFailed[[= ZHLN::Reflect::Description<"Failed to parse SPIR-V module">{}]],
-    TypeNotFound[[= ZHLN::Reflect::Description<"Type was not found in compiled SPIR-V">{}]],
-    EmptyLayout[[= ZHLN::Reflect::Description<"Reflected type has zero size">{}]],
-    TypeSizeMismatch[[= ZHLN::Reflect::Description<"GPU type size does not match the C++ host type">{}]],
-    HeapPushAddressCount[[= ZHLN::Reflect::Description<"DescriptorHeapPushData device-address count does not match the host">{}]],
-    HeapPushIndexMissing[[= ZHLN::Reflect::Description<"DescriptorHeapPushData is missing a descriptor-index word after the frame addresses">{}]],
-    HeapPushOverlapsPassData[[= ZHLN::Reflect::Description<"DescriptorHeapPushData frame addresses overlap the per-pass push blob">{}]],
+    InvalidArguments[[= ZHLN::Description<"SPIR-V blob or type name is empty">{}]] = 1,
+    ModuleParseFailed[[= ZHLN::Description<"Failed to parse SPIR-V module">{}]],
+    TypeNotFound[[= ZHLN::Description<"Type was not found in compiled SPIR-V">{}]],
+    EmptyLayout[[= ZHLN::Description<"Reflected type has zero size">{}]],
+    TypeSizeMismatch[[= ZHLN::Description<"GPU type size does not match the C++ host type">{}]],
+    HeapPushAddressCount[[= ZHLN::Description<"DescriptorHeapPushData device-address count does not match the host">{}]],
+    HeapPushIndexMissing[[= ZHLN::Description<"DescriptorHeapPushData is missing a descriptor-index word after the frame addresses">{}]],
+    HeapPushOverlapsPassData[[= ZHLN::Description<"DescriptorHeapPushData frame addresses overlap the per-pass push blob">{}]],
 };
 
 /// Empty tag whose reflected identifier is the Slang type name

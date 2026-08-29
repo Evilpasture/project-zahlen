@@ -14,10 +14,10 @@
 // ============================================================================
 
 enum class ScriptBinderTestError : uint32_t {
-    ClassNotRegistered[[= ZHLN::Reflect::Description<"The class was not found in the ScriptBinder registry.">{}]] = 1,
-    PropertyAccessFailed[[= ZHLN::Reflect::Description<"Reading or writing a property via ScriptProperty failed.">{}]],
-    MethodInvocationFailed[[= ZHLN::Reflect::Description<"Invoking a registered method via ScriptMethod failed.">{}]],
-    ValueConversionFailed[[= ZHLN::Reflect::Description<"ToScriptVal or FromScriptVal conversion produced unexpected results.">{}]]
+    ClassNotRegistered[[= ZHLN::Description<"The class was not found in the ScriptBinder registry.">{}]] = 1,
+    PropertyAccessFailed[[= ZHLN::Description<"Reading or writing a property via ScriptProperty failed.">{}]],
+    MethodInvocationFailed[[= ZHLN::Description<"Invoking a registered method via ScriptMethod failed.">{}]],
+    ValueConversionFailed[[= ZHLN::Description<"ToScriptVal or FromScriptVal conversion produced unexpected results.">{}]]
 };
 
 enum class MockStatus : uint32_t { Idle = 0, Running, Attacking };

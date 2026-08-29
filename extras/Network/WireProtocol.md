@@ -43,7 +43,7 @@ values are explicitly byte-ordered below — the format is host-independent.
 * `[[= ZHLN::Wire::Skip {}]]` — field excluded from the wire format.
 * `[[= ZHLN::Wire::Version<N> {}]]` — schema version of the message type
   (informational; the envelope carries the actual version byte).
-* `[[= ZHLN::Reflect::Description<"…"> {}]]` — human description attached to
+* `[[= ZHLN::Description<"…"> {}]]` — human description attached to
   decode failures for that field.
 
 ---

@@ -39,11 +39,11 @@
 #include <vector>
 
 enum class RTRPBRError : uint8_t {
-    EngineInitFailed[[= ZHLN::Reflect::Description<"Failed to initialize headless Engine for RTR PBR colour test.">{}]] = 1,
-    RenderOutputBlank[[= ZHLN::Reflect::Description<"Rendered frame is blank or could not be captured.">{}]],
-    MaterialCreationFailed[[= ZHLN::Reflect::Description<"CreativeWorksFactory::CreateMaterial failed.">{}]],
-    ReflectionColorMismatch[[= ZHLN::Reflect::Description<"Ray-traced reflection colour does not follow the surface PBR values.">{}]],
-    DeviceLostDuringTest[[= ZHLN::Reflect::Description<"Vulkan device was lost while ray-traced reflections were enabled.">{}]],
+    EngineInitFailed[[= ZHLN::Description<"Failed to initialize headless Engine for RTR PBR colour test.">{}]] = 1,
+    RenderOutputBlank[[= ZHLN::Description<"Rendered frame is blank or could not be captured.">{}]],
+    MaterialCreationFailed[[= ZHLN::Description<"CreativeWorksFactory::CreateMaterial failed.">{}]],
+    ReflectionColorMismatch[[= ZHLN::Description<"Ray-traced reflection colour does not follow the surface PBR values.">{}]],
+    DeviceLostDuringTest[[= ZHLN::Description<"Vulkan device was lost while ray-traced reflections were enabled.">{}]],
 };
 
 namespace {

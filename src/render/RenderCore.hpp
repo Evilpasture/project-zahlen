@@ -7,7 +7,7 @@
 #error "Please include <src/render/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
 #include <cstdint>
 
@@ -113,8 +113,8 @@ namespace ZHLN::Vk {
 // Backend-neutral, optional-feature fallback signals live in RenderFeatureError
 // (public Render.hpp), and subsystem failures use their own domain enums.
 enum class VulkanCallError : uint8_t {
-    VulkanCallFailed[[= Reflect::Description<"Vulkan call failed">{}]] = 1,
-    DeviceLost[[= Reflect::Description<"Device lost">{}]],
+    VulkanCallFailed[[= ZHLN::Description<"Vulkan call failed">{}]] = 1,
+    DeviceLost[[= ZHLN::Description<"Device lost">{}]],
 };
 
 // ============================================================================
