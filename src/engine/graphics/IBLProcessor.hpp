@@ -155,12 +155,7 @@ class IBLProcessor {
                         }
                     }
 
-                    MemoryBarrier(
-                        cmd, {.src_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                              .src_access = VK_ACCESS_2_SHADER_WRITE_BIT,
-                              .dst_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                              .dst_access = VK_ACCESS_2_TRANSFER_READ_BIT}
-                    );
+                    MemoryBarrier(cmd, BarrierStage::Compute, BarrierAccess::ShaderWrite, BarrierStage::Transfer, BarrierAccess::TransferRead);
                     CopyBuffer(cmd, state.shGpu, state.shCpu, kSHBytes);
 
                     TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, state.payload.brdfLutImage.Handle());

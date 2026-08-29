@@ -333,10 +333,9 @@ inline auto ExecuteImmediateCompute(
             }
             pass.DispatchThreads(cmd, threadsX, threadsY, threadsZ);
             MemoryBarrier(
-                cmd, {.src_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                      .src_access = VK_ACCESS_2_SHADER_WRITE_BIT,
-                      .dst_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                      .dst_access = VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT}
+                cmd, BarrierStage::Compute, BarrierAccess::ShaderWrite,
+                BarrierStage::Transfer | BarrierStage::Compute,
+                BarrierAccess::TransferRead | BarrierAccess::ShaderRead
             );
         });
     });

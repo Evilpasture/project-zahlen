@@ -20,13 +20,19 @@ inline void MemoryBarrier(VkCommandBuffer cmd, const ZHLN_MemoryBarrierDesc& des
     ZHLN_CmdMemoryBarrier(cmd, &desc);
 }
 
-inline void ComputeToComputeBarrier(VkCommandBuffer cmd) noexcept {
+inline void MemoryBarrier(
+    VkCommandBuffer cmd, BarrierStage srcStage, BarrierAccess srcAccess, BarrierStage dstStage, BarrierAccess dstAccess
+) noexcept {
     MemoryBarrier(
-        cmd, {.src_stage  = static_cast<VkPipelineStageFlags2>(BarrierStage::Compute),
-              .src_access = static_cast<VkAccessFlags2>(BarrierAccess::ShaderWrite),
-              .dst_stage  = static_cast<VkPipelineStageFlags2>(BarrierStage::Compute),
-              .dst_access = static_cast<VkAccessFlags2>(BarrierAccess::ShaderRead)}
+        cmd, {.src_stage  = static_cast<VkPipelineStageFlags2>(srcStage),
+              .src_access = static_cast<VkAccessFlags2>(srcAccess),
+              .dst_stage  = static_cast<VkPipelineStageFlags2>(dstStage),
+              .dst_access = static_cast<VkAccessFlags2>(dstAccess)}
     );
+}
+
+inline void ComputeToComputeBarrier(VkCommandBuffer cmd) noexcept {
+    MemoryBarrier(cmd, BarrierStage::Compute, BarrierAccess::ShaderWrite, BarrierStage::Compute, BarrierAccess::ShaderRead);
 }
 
 

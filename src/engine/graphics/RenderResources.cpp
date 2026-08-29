@@ -1235,10 +1235,8 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
                 impl->pendingAcquires.Drain(tempCmd);
 
                 Vk::MemoryBarrier(
-                    tempCmd, {.src_stage  = VK_PIPELINE_STAGE_2_COPY_BIT,
-                              .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                              .dst_stage  = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-                              .dst_access = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR}
+                    tempCmd, Vk::BarrierStage::Copy, Vk::BarrierAccess::TransferWrite,
+                    Vk::BarrierStage::AccelerationStructureBuild, Vk::BarrierAccess::AccelerationStructureRead
                 );
                 impl->rtCtx.BuildBLAS(tempCmd, b.geom, b.blas, Vk::GetBufferAddress(impl->ctx.Device(), b.scratch.Handle()), b.primitiveCount);
             }
