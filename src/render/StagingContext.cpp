@@ -57,19 +57,9 @@ auto StagingContext::UploadImage2D(VkImage dstImage, uint32_t w, uint32_t h, uin
 }
 
 void StagingContext::UploadImage2DBuffer(VkImage dstImage, uint32_t w, uint32_t h, uint32_t mipLevels, VkBuffer stagingBuf, VkDeviceSize offset) {
-    ZHLN_ImageBarrierDesc initial_barrier = {
-        .image      = dstImage,
-        .src_access = 0,
-        .dst_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-        .src_layout = VK_IMAGE_LAYOUT_UNDEFINED,
-        .dst_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        .src_stage  = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
-        .dst_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-        .aspect     = VK_IMAGE_ASPECT_COLOR_BIT,
-        .base_mip   = 0,
-        .mip_count  = mipLevels
-    };
-    ZHLN_CmdImageBarrier(_cmd, &initial_barrier);
+    TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
+        _cmd, dstImage, VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels
+    );
 
     ZHLN_BufferImageCopyDesc copy_region = {
         .buffer           = stagingBuf,
@@ -86,36 +76,16 @@ void StagingContext::UploadImage2DBuffer(VkImage dstImage, uint32_t w, uint32_t 
     if (mipLevels > 1) {
         ZHLN_GenerateMipmaps(_cmd, dstImage, w, h, mipLevels);
     } else {
-        ZHLN_ImageBarrierDesc final_barrier = {
-            .image      = dstImage,
-            .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-            .dst_access = VK_ACCESS_2_SHADER_READ_BIT,
-            .src_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            .dst_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            .src_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-            .dst_stage  = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-            .aspect     = VK_IMAGE_ASPECT_COLOR_BIT,
-            .base_mip   = 0,
-            .mip_count  = 1
-        };
-        ZHLN_CmdImageBarrier(_cmd, &final_barrier);
+        TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+            _cmd, dstImage, VK_IMAGE_ASPECT_COLOR_BIT, 0, 1
+        );
     }
 }
 
 void StagingContext::UploadPrefilteredCubeMap(VkImage dstImage, VkBuffer stagingBuf, uint32_t baseSize, uint32_t mipLevels) {
-    ZHLN_ImageBarrierDesc initial_barrier = {
-        .image      = dstImage,
-        .src_access = 0,
-        .dst_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-        .src_layout = VK_IMAGE_LAYOUT_UNDEFINED,
-        .dst_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        .src_stage  = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
-        .dst_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-        .aspect     = VK_IMAGE_ASPECT_COLOR_BIT,
-        .base_mip   = 0,
-        .mip_count  = mipLevels
-    };
-    ZHLN_CmdImageBarrier(_cmd, &initial_barrier);
+    TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
+        _cmd, dstImage, VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels
+    );
 
     size_t current_offset = 0;
     for (uint32_t mip = 0; mip < mipLevels; ++mip) {
@@ -148,19 +118,9 @@ void StagingContext::UploadPrefilteredCubeMap(VkImage dstImage, VkBuffer staging
         current_offset += (face_size * 6);
     }
 
-    ZHLN_ImageBarrierDesc final_barrier = {
-        .image      = dstImage,
-        .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-        .dst_access = VK_ACCESS_2_SHADER_READ_BIT,
-        .src_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        .dst_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        .src_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-        .dst_stage  = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-        .aspect     = VK_IMAGE_ASPECT_COLOR_BIT,
-        .base_mip   = 0,
-        .mip_count  = mipLevels
-    };
-    ZHLN_CmdImageBarrier(_cmd, &final_barrier);
+    TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+        _cmd, dstImage, VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels
+    );
 }
 
 void StagingContext::AddBuffer(Buffer&& buf) {
