@@ -11,6 +11,7 @@
 #include <string_view>
 #include <tuple>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace ZHLN::Reflect {
@@ -187,6 +188,11 @@ struct MethodCollector {
 
     static constexpr auto method_handles = get_methods();
 };
+
+template <auto EntityInfo>
+consteval auto AnnotationsOf() {
+    return std::define_static_array(std::meta::annotations_of(EntityInfo));
+}
 
 } // namespace detail
 
@@ -702,8 +708,7 @@ consteval auto HasAnnotation() -> bool {
 
 template <auto ScopeInfo, typename Tag, typename F>
 constexpr void ForEachAnnotatedTypeInScope(F&& f) {
-    constexpr auto members = std::define_static_array(std::meta::members_of(ScopeInfo, std::meta::access_context::current()));
-    [:Expand(members):] >> [&]<auto m>() -> auto {
+    [:Expand(std::define_static_array(std::meta::members_of(ScopeInfo, std::meta::access_context::current()))):] >> [&]<auto m>() -> auto {
         if constexpr (std::meta::is_type(m)) {
             if constexpr (HasAnnotation<Tag, m>()) {
                 using TargetType = typename[:m:];
@@ -774,18 +779,35 @@ consteval auto ExtractDescriptionText() -> std::string_view {
     return {};
 }
 
+// GCC 16.1/16.2 reject the pack-expansion form of this loop:
+//     [:Expand(detail::AnnotationsOf<EntityInfo>()):] >> [&]<auto a>() -> auto {
+//         ... ExtractDescriptionText<a>() ...
+//     };
+// with "called in a constant expression / is not usable as a 'constexpr'
+// function". The cause is std::meta::annotations_of: on GCC its result is
+// backed by a heap allocation ("is not a constant expression because it refers
+// to a result of 'operator new'"), and -- unlike enumerators_of/members_of --
+// define_static_array does not repair that: an annotation info still cannot be
+// turned into a non-type template argument, whether written as <a> directly or
+// routed through reflect_constant + substitute. Every other [:Expand(...):]
+// site in this file is fine because those queries do not have the defect.
+//
+// Indexing sidesteps it: the index is a plain integer NTTP (always a constant
+// expression) and anns[I] is then usable, so the type can be spliced. This
+// form is equally valid on Clang's P2996 branch.
+template <auto EntityInfo, std::size_t Index>
+consteval auto ExtractDescriptionTextAt() -> std::string_view {
+    constexpr auto annotations = detail::AnnotationsOf<EntityInfo>();
+    return ExtractDescriptionText<annotations[Index]>();
+}
+
 template <auto EntityInfo>
 consteval auto GetDescriptionText() -> std::string_view {
-    std::string_view result {};
-    constexpr auto   annotations = std::define_static_array(std::meta::annotations_of(EntityInfo));
-    [:Expand(annotations):] >> [&]<auto a>() -> auto {
-        if (!result.empty()) {
-            return;
-        }
-        if (auto text = ExtractDescriptionText<a>(); !text.empty()) {
-            result = text;
-        }
-    };
+    constexpr std::size_t count = detail::AnnotationsOf<EntityInfo>().size();
+    std::string_view      result {};
+    [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+        ((result.empty() ? (result = ExtractDescriptionTextAt<EntityInfo, Is>(), 0) : 0), ...);
+    }(std::make_index_sequence<count> {});
     return result;
 }
 
