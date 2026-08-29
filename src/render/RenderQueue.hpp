@@ -24,6 +24,7 @@ enum class BarrierStage : VkPipelineStageFlags2 {
     Indirect                   = VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
     Transfer                   = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
     Copy                       = VK_PIPELINE_STAGE_2_COPY_BIT,
+    Clear                      = VK_PIPELINE_STAGE_2_CLEAR_BIT,
     Host                       = VK_PIPELINE_STAGE_2_HOST_BIT,
     AccelerationStructureBuild = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR
 };

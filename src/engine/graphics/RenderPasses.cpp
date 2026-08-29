@@ -344,37 +344,19 @@ struct GpuCullingPolicyPass1 {
         auto&           ctx = recorder.ctx;
 
         // Transition buffer access to CLEAR / TRANSFER_WRITE
-        VkBufferMemoryBarrier2 fillBarrier = {
-            .sType               = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
-            .pNext               = nullptr,
-            .srcStageMask        = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
-            .srcAccessMask       = VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT,
-            .dstStageMask        = VK_PIPELINE_STAGE_2_CLEAR_BIT,
-            .dstAccessMask       = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .buffer              = ctx.frames.secondPassCountBuffers[recorder.frameIndex].Handle(),
-            .offset              = 0,
-            .size                = VK_WHOLE_SIZE
-        };
-        Vk::BufferBarrier(cmd, fillBarrier);
+        Vk::BufferBarrier(
+            cmd, ctx.frames.secondPassCountBuffers[recorder.frameIndex].Handle(),
+            Vk::BarrierStage::Compute | Vk::BarrierStage::Indirect, Vk::BarrierAccess::ShaderWrite | Vk::BarrierAccess::IndirectRead,
+            Vk::BarrierStage::Clear, Vk::BarrierAccess::TransferWrite
+        );
 
         Vk::FillBuffer(cmd, ctx.frames.secondPassCountBuffers[recorder.frameIndex], 0, 0u);
 
-        VkBufferMemoryBarrier2 clearBarrier = {
-            .sType               = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
-            .pNext               = nullptr,
-            .srcStageMask        = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-            .srcAccessMask       = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-            .dstStageMask        = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-            .dstAccessMask       = VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .buffer              = ctx.frames.secondPassCountBuffers[recorder.frameIndex].Handle(),
-            .offset              = 0,
-            .size                = VK_WHOLE_SIZE
-        };
-        Vk::BufferBarrier(cmd, clearBarrier);
+        Vk::BufferBarrier(
+            cmd, ctx.frames.secondPassCountBuffers[recorder.frameIndex].Handle(),
+            Vk::BarrierStage::Transfer, Vk::BarrierAccess::TransferWrite,
+            Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite | Vk::BarrierAccess::ShaderRead
+        );
 
         // 2. Dispatch Culling Pass 1 (Frustum + Last Frame Hi-Z)
         struct CullingConstants {
@@ -446,37 +428,19 @@ struct GpuCullingPolicyPass2 {
         VkCommandBuffer cmd = recorder.cmd;
         auto&           ctx = recorder.ctx;
 
-        VkBufferMemoryBarrier2 fillBarrier = {
-            .sType               = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
-            .pNext               = nullptr,
-            .srcStageMask        = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
-            .srcAccessMask       = VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT,
-            .dstStageMask        = VK_PIPELINE_STAGE_2_CLEAR_BIT,
-            .dstAccessMask       = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .buffer              = ctx.frames.indirectCommandsBuffersPass2[recorder.frameIndex].Handle(),
-            .offset              = 0,
-            .size                = VK_WHOLE_SIZE
-        };
-        Vk::BufferBarrier(cmd, fillBarrier);
+        Vk::BufferBarrier(
+            cmd, ctx.frames.indirectCommandsBuffersPass2[recorder.frameIndex].Handle(),
+            Vk::BarrierStage::Compute | Vk::BarrierStage::Indirect, Vk::BarrierAccess::ShaderWrite | Vk::BarrierAccess::IndirectRead,
+            Vk::BarrierStage::Clear, Vk::BarrierAccess::TransferWrite
+        );
 
         Vk::FillBuffer(cmd, ctx.frames.indirectCommandsBuffersPass2[recorder.frameIndex], 0, 0u);
 
-        VkBufferMemoryBarrier2 clearBarrier = {
-            .sType               = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
-            .pNext               = nullptr,
-            .srcStageMask        = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-            .srcAccessMask       = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-            .dstStageMask        = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-            .dstAccessMask       = VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .buffer              = ctx.frames.indirectCommandsBuffersPass2[recorder.frameIndex].Handle(),
-            .offset              = 0,
-            .size                = VK_WHOLE_SIZE
-        };
-        Vk::BufferBarrier(cmd, clearBarrier);
+        Vk::BufferBarrier(
+            cmd, ctx.frames.indirectCommandsBuffersPass2[recorder.frameIndex].Handle(),
+            Vk::BarrierStage::Transfer, Vk::BarrierAccess::TransferWrite,
+            Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite | Vk::BarrierAccess::ShaderRead
+        );
 
         // 2. Dispatch Culling Pass 2 (Current Frame Hi-Z Re-test)
 
