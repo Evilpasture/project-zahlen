@@ -55,6 +55,30 @@ class ZHLN_API SystemGraph {
     void AddSystem(SystemInfo info);
     /** Inserts an optional subsystem before a named phase; returns false on duplicate/missing anchor. */
     auto AddSystemBefore(SystemInfo info, std::string_view beforeSystem) -> bool;
+
+    /**
+     * @brief Declares components written by work that runs *outside* this graph
+     *        but completes before Execute().
+     *
+     * Hazard analysis only ever sees the access patterns declared on nodes. When
+     * an imperative frame phase writes a component this graph later reads, the
+     * graph sees a reader with no writer and builds no edge at all -- the
+     * dependency then exists only in the surrounding call order, invisible to
+     * anything inspecting the graph.
+     *
+     * This inserts an anchor node carrying those writes. It has no update
+     * function, and DispatchNode() skips null functions, so it executes nothing
+     * and costs one scheduling hop; its only effect is to give hazard analysis a
+     * node to hang readers (and any later in-graph writers) off.
+     *
+     * @param label    Node name. Must point to static storage, like SystemInfo::name.
+     * @param accesses Components the external work writes.
+     *
+     * @note Compile() only builds edges from earlier nodes to later ones, so call
+     *       this *before* registering the systems that consume those components.
+     */
+    void DeclareExternalWrites(const char* label, std::vector<ComponentAccess> accesses);
+
     void Compile();
     void Execute(ZHLN::Engine& engine, float dt);
 

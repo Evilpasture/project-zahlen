@@ -336,6 +336,26 @@ void BuildSystemGraphs(Engine& engine) {
 
     using namespace ZHLN::ECS;
 
+    // Components written by imperative frame phases that run before this graph
+    // executes. No node inside the graph performs these writes, so without this
+    // anchor hazard analysis would see VisualInterpolationSystem reading
+    // PhysicsStateComponent and AnimationSystem/InteractionSystem reading
+    // MovementComponent with no writer to order against, and build no edge.
+    //   PhysicsStateComponent <- PhysicsStateSystem::WriteBack, called from the
+    //                            Physics phase's fixed-step accumulator.
+    //   MovementComponent     <- InputSystem::PlayerInputTranslate (PlayerIntent
+    //                            phase) and MovementSystem (Physics phase).
+    // Authored scene data with no per-frame writer (HierarchyComponent,
+    // SkeletalMeshComponent, PhysicsComponent, ItemBaseComponent, UsableComponent,
+    // KinematicPoseOverrideComponent) is deliberately not declared: there is no
+    // write to anchor, and claiming one would misdescribe the frame.
+    updateGraph.DeclareExternalWrites(
+        "ExternalPreUpdateWrites", {
+                                       Write<Components::PhysicsStateComponent>(),
+                                       Write<Components::MovementComponent>(),
+                                   }
+    );
+
     updateGraph.AddSystem({
         .update_func    = [](Engine& eng, float dt) -> void { TextureSystem::Update(eng, dt); },
         .name           = "TextureSystem",
@@ -425,6 +445,19 @@ void BuildSystemGraphs(Engine& engine) {
     });
 
     updateGraph.Compile();
+
+    // CameraSystem (Camera phase) writes CameraComponent::prevUnjitteredViewProj
+    // before this graph runs; CullingSystem reads CameraComponent. Same anchor
+    // rationale as updateGraph above.
+    //   CameraComponent      <- CameraSystem::Update (Camera phase).
+    // TransformComponent / WorldTransformComponent are written by updateGraph,
+    // not by an imperative phase, so they are cross-graph ordering rather than an
+    // undeclared external write -- left to the phase order on purpose.
+    renderGraph.DeclareExternalWrites(
+        "ExternalPreRenderWrites", {
+                                       Write<Components::CameraComponent>(),
+                                   }
+    );
 
     renderGraph.AddSystem({
         .update_func    = Sys_Culling,
