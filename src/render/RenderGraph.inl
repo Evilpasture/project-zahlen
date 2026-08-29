@@ -679,6 +679,20 @@ constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent3D extent) noex
     return GraphImageRef<Tag> {.handle = handle, .view = view, .extent = extent};
 }
 
+/**
+ * @brief Bind a pack of GraphImageRefs to a ResourceBinder in one call.
+ *
+ * Each ref carries its own tag, so the slot lookup stays compile-time. The fold
+ * is deliberately unguarded: refs are caller-supplied, so a tag missing from the
+ * binder's resource list is a mistake and should fail in GetResourceIndex rather
+ * than be silently dropped. (BindExternalReflected skips instead because it
+ * binds a fixed tag set against graphs that may not declare all of it.)
+ */
+template <typename BinderT, typename... Refs>
+constexpr void AutoBind(BinderT& binder, const Refs&... refs) noexcept {
+    (binder.template Bind<typename Refs::TagType>(refs.handle, refs.view, refs.extent), ...);
+}
+
 } // namespace ZHLN::Vk
 
 // ============================================================================
