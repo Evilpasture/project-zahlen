@@ -644,11 +644,11 @@ struct PassFactory {
 
             auto& heap = self.heapManager;
 
-            const auto hdr   = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.hdrSceneColor);
-            const auto dstA  = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.denoiseA);
-            const auto dstB  = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.denoiseB);
-            const auto depth = Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget);
-            const auto norm  = Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer);
+            const auto hdr      = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.hdrSceneColor);
+            const auto denoiseA = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.denoiseA);
+            const auto denoiseB = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.denoiseB);
+            const auto depth    = Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget);
+            const auto norm     = Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer);
 
             const auto AtrousBarrier = [&c]() noexcept {
                 Vk::MemoryBarrier(
@@ -680,18 +680,18 @@ struct PassFactory {
             // hdrSceneColor.
             switch (passes) {
                 case 1:
-                    Dispatch(hdr, dstA, 1, 0);
-                    Dispatch(dstA, hdr, 2, 1);
+                    Dispatch(hdr, denoiseA, 1, 0);
+                    Dispatch(denoiseA, hdr, 2, 1);
                     break;
                 case 2:
-                    Dispatch(hdr, dstA, 1, 0);
-                    Dispatch(dstA, dstB, 2, 1);
-                    Dispatch(dstB, hdr, 2, 2);
+                    Dispatch(hdr, denoiseA, 1, 0);
+                    Dispatch(denoiseA, denoiseB, 2, 1);
+                    Dispatch(denoiseB, hdr, 2, 2);
                     break;
                 default:
-                    Dispatch(hdr, dstA, 1, 0);
-                    Dispatch(dstA, dstB, 2, 1);
-                    Dispatch(dstB, hdr, 4, 2);
+                    Dispatch(hdr, denoiseA, 1, 0);
+                    Dispatch(denoiseA, denoiseB, 2, 1);
+                    Dispatch(denoiseB, hdr, 4, 2);
                     break;
             }
         });
