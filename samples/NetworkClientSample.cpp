@@ -219,7 +219,9 @@ auto main(int argc, char* argv[]) -> int {
         auto& reg = engine->GetRegistry();
 
         // ---- 1. INGEST NETWORK EVENTS (TCP stream frames, UDP physics datagrams) ----
-        netClient->PollEvents(*engine);
+        if (auto res = netClient->PollEvents(*engine); !res) {
+            ZHLN::Log("[Network] PollEvents error: {}", res.error().Message());
+        }
 
         // ---- 2. SAMPLE PLAYER INPUTS & TRANSMIT TO SERVER ----
         auto inputEnts = reg.GetEntitiesWith<ZHLN::Components::InputStateComponent>();
