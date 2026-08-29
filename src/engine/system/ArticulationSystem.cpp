@@ -11,6 +11,7 @@
 #include <Zahlen/Core/ControlFlow.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/Math3D.hpp>
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/SkeletalAnimation.hpp>
@@ -49,34 +50,6 @@ static void VerifyArticulationStateConsistency(const ECS::Registry& reg) noexcep
     }
 }
 } // namespace Tests
-
-namespace {
-void DecomposeMatrix(const JPH::Mat44& mat, JPH::Vec3& outT, JPH::Quat& outR, JPH::Vec3& outS) noexcept {
-    outT         = mat.GetTranslation();
-    JPH::Vec3 c0 = mat.GetColumn3(0);
-    JPH::Vec3 c1 = mat.GetColumn3(1);
-    JPH::Vec3 c2 = mat.GetColumn3(2);
-    outS         = JPH::Vec3(c0.Length(), c1.Length(), c2.Length());
-
-    if (outS.GetX() > 1e-5f) {
-        c0 /= outS.GetX();
-    } else {
-        c0 = JPH::Vec3::sAxisX();
-    }
-    if (outS.GetY() > 1e-5f) {
-        c1 /= outS.GetY();
-    } else {
-        c1 = JPH::Vec3::sAxisY();
-    }
-    if (outS.GetZ() > 1e-5f) {
-        c2 /= outS.GetZ();
-    } else {
-        c2 = JPH::Vec3::sAxisZ();
-    }
-
-    outR = JPH::Mat44(JPH::Vec4(c0, 0), JPH::Vec4(c1, 0), JPH::Vec4(c2, 0), JPH::Vec4(0, 0, 0, 1)).GetQuaternion().Normalized();
-}
-} // namespace
 
 void ArticulationSystem::BindSkeleton(uint32_t jointOffset, const Skeleton& skeleton) noexcept {
     for (size_t i = 0; i < skeleton.joints.size(); ++i) {
@@ -259,15 +232,15 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
                 } else if (blendWeight >= 0.999f) {
                     finalSkinningMatrices[j] = physModel * ibm;
                 } else {
-                    JPH::Vec3 tAnim {};
-                    JPH::Vec3 sAnim {};
-                    JPH::Vec3 tPhys {};
-                    JPH::Vec3 sPhys {};
-                    JPH::Quat rAnim {};
-                    JPH::Quat rPhys {};
-
-                    DecomposeMatrix(animModel, tAnim, rAnim, sAnim);
-                    DecomposeMatrix(physModel, tPhys, rPhys, sPhys);
+                    JPH::Vec3                tAnim {};
+                    const Math::TransformTRS animTRS = Math::Decompose(animModel);
+                    const Math::TransformTRS physTRS = Math::Decompose(physModel);
+                    const JPH::Vec3&         tAnim   = animTRS.translation;
+                    const JPH::Quat&         rAnim   = animTRS.rotation;
+                    const JPH::Vec3&         sAnim   = animTRS.scale;
+                    const JPH::Vec3&         tPhys   = physTRS.translation;
+                    const JPH::Quat&         rPhys   = physTRS.rotation;
+                    const JPH::Vec3&         sPhys   = physTRS.scale;
 
                     JPH::Vec3 tBlended = tAnim + blendWeight * (tPhys - tAnim);
                     JPH::Quat rBlended = rAnim.SLERP(rPhys, blendWeight).Normalized();

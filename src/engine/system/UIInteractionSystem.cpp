@@ -14,8 +14,7 @@ namespace ZHLN {
 void UIInteractionSystem::Update(Engine& engine, float dt) {
     auto& reg = engine.GetRegistry();
 
-    auto  inputEnts = reg.GetEntitiesWith<Components::InputStateComponent>();
-    auto* state     = inputEnts.empty() ? nullptr : reg.Get<Components::InputStateComponent>(inputEnts[0]);
+    auto* state = reg.GetSingleton<Components::InputStateComponent>();
     if (state == nullptr) {
         return;
     }

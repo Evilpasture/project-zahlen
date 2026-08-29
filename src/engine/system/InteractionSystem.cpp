@@ -34,8 +34,7 @@ void InteractionSystem::Update(Engine& engine, float dt) {
     auto triggerEntities = reg.GetEntitiesWith<Components::TriggerComponent>();
     auto triggers        = reg.GetRawArray<Components::TriggerComponent>();
 
-    auto        inputEnts           = reg.GetEntitiesWith<Components::InputStateComponent>();
-    auto*       inputState          = inputEnts.empty() ? nullptr : reg.Get<Components::InputStateComponent>(inputEnts[0]);
+    auto*       inputState          = reg.GetSingleton<Components::InputStateComponent>();
     bool        interactPressed     = (inputState != nullptr) && inputState->IsKeyDown(static_cast<uint8_t>(KeyCode::E));
     static bool wasInteractPressed  = false;
     bool        interactJustPressed = interactPressed && !wasInteractPressed;

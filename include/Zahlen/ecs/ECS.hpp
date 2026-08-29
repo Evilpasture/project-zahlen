@@ -317,6 +317,51 @@ class ZHLN_API Registry {
         return {_components[id]->GetDenseArray(), _components[id]->Count()};
     }
 
+    /**
+     * @brief The first entity carrying T, or Entity::Null() when none exists.
+     */
+    template <typename T>
+        requires CompleteType<T>
+    [[nodiscard]] auto SingletonEntity() const noexcept -> Entity {
+        auto entities = GetEntitiesWith<T>();
+        return entities.empty() ? Entity::Null() : entities[0];
+    }
+
+    /**
+     * @brief Engine-wide singleton lookup: the component on the first entity
+     * carrying T, or nullptr when no such entity exists.
+     */
+    template <typename T>
+        requires CompleteType<T>
+    [[nodiscard]] auto GetSingleton() const noexcept -> const T* {
+        auto entities = GetEntitiesWith<T>();
+        return entities.empty() ? nullptr : Get<T>(entities[0]);
+    }
+
+    template <typename T>
+        requires CompleteType<T>
+    [[nodiscard]] auto GetSingleton() noexcept -> T* {
+        auto entities = GetEntitiesWith<T>();
+        return entities.empty() ? nullptr : Get<T>(entities[0]);
+    }
+
+    /**
+     * @brief Like GetSingleton(), but creates the owning entity on first use.
+     *
+     * The returned reference is always valid: callers that treat a component as
+     * a process-wide singleton (input state, UI settings, the tagged settings
+     * entity) no longer have to hand-roll the "query, else create" dance.
+     */
+    template <typename T, typename... Args>
+        requires CompleteType<T> && std::is_constructible_v<T, Args...>
+    auto GetOrEmplaceSingleton(Args&&... args) -> T& {
+        if (auto entities = GetEntitiesWith<T>(); !entities.empty()) {
+            return *Get<T>(entities[0]);
+        }
+        Entity e = Create();
+        return Add<T>(e, T {std::forward<Args>(args)...});
+    }
+
     template <typename T, typename Pred>
         requires CompleteType<T>
     auto FindWhere(Pred&& pred) const noexcept -> T* {

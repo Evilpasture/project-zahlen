@@ -69,16 +69,13 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
         pp.enableSSR = 0;
     });
 
-    TextureHandle fontHandle     = TextureHandle::Invalid;
-    auto          uiSettingsEnts = reg.GetEntitiesWith<Components::UISettingsComponent>();
-    if (!uiSettingsEnts.empty()) {
-        if (auto* settings = reg.Get<Components::UISettingsComponent>(uiSettingsEnts[0])) {
-            fontHandle = settings->fontAtlas.texture;
-            if (fontHandle == TextureHandle::Invalid) {
-                fontHandle                  = CreativeWorksFactory::CreateFontAtlasTexture(rc);
-                settings->fontAtlas.texture = fontHandle;
-                settings->defaultFontAtlas  = fontHandle;
-            }
+    TextureHandle fontHandle = TextureHandle::Invalid;
+    if (auto* settings = reg.GetSingleton<Components::UISettingsComponent>()) {
+        fontHandle = settings->fontAtlas.texture;
+        if (fontHandle == TextureHandle::Invalid) {
+            fontHandle                  = CreativeWorksFactory::CreateFontAtlasTexture(rc);
+            settings->fontAtlas.texture = fontHandle;
+            settings->defaultFontAtlas  = fontHandle;
         }
     }
 
@@ -139,8 +136,7 @@ void DefaultPreset::Update(Engine& engine, float dt) {
     auto& rc  = engine.GetRenderContext();
 
     // --- TOGGLE POPUP VISIBILITY WITH ESCAPE KEY ---
-    auto        inputEnts  = reg.GetEntitiesWith<Components::InputStateComponent>();
-    auto*       inputState = inputEnts.empty() ? nullptr : reg.Get<Components::InputStateComponent>(inputEnts[0]);
+    auto*       inputState = reg.GetSingleton<Components::InputStateComponent>();
     bool        escDown    = (inputState != nullptr) && inputState->IsKeyDown(static_cast<uint8_t>(KeyCode::Escape));
     static bool wasEscDown = false;
 

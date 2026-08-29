@@ -876,24 +876,14 @@ void RegisterPhysicsCommands() {
 
 void RegisterInputAndCameraCommands() {
     RegisterCmd("IsKeyDown", MakeCmd<IsKeyDownArgs>([](ZHLN::Engine* engine, const IsKeyDownArgs& a) -> uint64_t {
-                    auto& reg  = engine->GetRegistry();
-                    auto  ents = reg.GetEntitiesWith<ZHLN::Components::InputStateComponent>();
-                    if (ents.empty()) {
-                        return 0;
-                    }
-                    auto* state = reg.Get<ZHLN::Components::InputStateComponent>(ents[0]);
+                    auto& reg   = engine->GetRegistry();
+                    auto* state = reg.GetSingleton<ZHLN::Components::InputStateComponent>();
                     return (state != nullptr && state->IsKeyDown(a.key)) ? 1 : 0;
                 }));
 
     RegisterCmd("GetMouseDelta", MakeCmd<GetMouseDeltaArgs>([](ZHLN::Engine* engine, const GetMouseDeltaArgs& a) -> uint64_t {
-                    auto& reg  = engine->GetRegistry();
-                    auto  ents = reg.GetEntitiesWith<ZHLN::Components::InputStateComponent>();
-                    if (ents.empty()) {
-                        *a.outX = 0.0f;
-                        *a.outY = 0.0f;
-                        return 0;
-                    }
-                    auto* state = reg.Get<ZHLN::Components::InputStateComponent>(ents[0]);
+                    auto& reg   = engine->GetRegistry();
+                    auto* state = reg.GetSingleton<ZHLN::Components::InputStateComponent>();
                     *a.outX     = (state != nullptr) ? state->GetMouseDeltaX() : 0.0f;
                     *a.outY     = (state != nullptr) ? state->GetMouseDeltaY() : 0.0f;
                     return 0;
@@ -1096,9 +1086,7 @@ void RegisterSystemCommands() {
                     reg.Add(playerEntity, Components::PhysicsComponent {charPhys});
                     reg.Add(playerEntity, Components::PhysicsStateComponent {.currPosition = {0.0f, 3.0f, 0.0f}, .prevPosition = {0.0f, 3.0f, 0.0f}});
 
-                    auto camEnts = reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>();
-                    if (!camEnts.empty()) {
-                        ZHLN::Entity camEnt = camEnts[0];
+                    if (ZHLN::Entity camEnt = reg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>(); camEnt != ZHLN::Entity::Null()) {
                         reg.Add(
                             camEnt, Components::TargetCameraComponent {
                                         .target            = playerEntity,

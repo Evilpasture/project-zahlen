@@ -371,9 +371,7 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
 
     auto onKey = [](void* userdata, KeyCode key, bool pressed) -> void {
         auto* reg   = static_cast<ECS::Registry*>(userdata);
-        auto  ents  = reg->GetEntitiesWith<Components::InputStateComponent>();
-        auto* state = ents.empty() ? reg->Get<Components::InputStateComponent>(reg->Create(Components::InputStateComponent {})) :
-                                     reg->Get<Components::InputStateComponent>(ents[0]);
+        auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
         state->SetKey(static_cast<uint8_t>(key), pressed);
 
         if (pressed) {
@@ -398,25 +396,19 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
 
     auto onMouseMove = [](void* userdata, float x, float y) -> void {
         auto* reg   = static_cast<ECS::Registry*>(userdata);
-        auto  ents  = reg->GetEntitiesWith<Components::InputStateComponent>();
-        auto* state = ents.empty() ? reg->Get<Components::InputStateComponent>(reg->Create(Components::InputStateComponent {})) :
-                                     reg->Get<Components::InputStateComponent>(ents[0]);
+        auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
         state->ApplyLocalMotion(x, y);
     };
 
     auto onMouseScroll = [](void* userdata, float delta) -> void {
         auto* reg   = static_cast<ECS::Registry*>(userdata);
-        auto  ents  = reg->GetEntitiesWith<Components::InputStateComponent>();
-        auto* state = ents.empty() ? reg->Get<Components::InputStateComponent>(reg->Create(Components::InputStateComponent {})) :
-                                     reg->Get<Components::InputStateComponent>(ents[0]);
+        auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
         state->ApplyWheel(delta);
     };
 
     auto onResize = [](void* userdata, Extent2D extent) -> void {
         auto* reg   = static_cast<ECS::Registry*>(userdata);
-        auto  ents  = reg->GetEntitiesWith<Components::InputStateComponent>();
-        auto* state = ents.empty() ? reg->Get<Components::InputStateComponent>(reg->Create(Components::InputStateComponent {})) :
-                                     reg->Get<Components::InputStateComponent>(ents[0]);
+        auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
         state->ApplyResize(extent);
     };
 
@@ -521,8 +513,7 @@ void Engine::ProcessEvents() {
     ZHLN::CheckForCrashes(this);
 
     auto&                            reg        = _impl->registry;
-    auto                             ents       = reg.GetEntitiesWith<Components::InputStateComponent>();
-    Components::InputStateComponent* inputState = ents.empty() ? nullptr : reg.Get<Components::InputStateComponent>(ents[0]);
+    Components::InputStateComponent* inputState = reg.GetSingleton<Components::InputStateComponent>();
     if (inputState != nullptr) {
         inputState->ResetDeltas();
     }
@@ -849,14 +840,11 @@ auto Engine::Run(const CommandLineOptions& options, UICallback uiCallback) -> st
         float rawDt = std::min(static_cast<float>(elapsed), 0.1f);
 
         {
-            auto& r     = engine->GetRegistry();
-            auto  iEnts = r.GetEntitiesWith<Components::InputStateComponent>();
-            if (!iEnts.empty()) {
-                if (auto* st = r.Get<Components::InputStateComponent>(iEnts[0]); st != nullptr && st->needsResize) {
-                    engine->GetRenderContext().SetResolution(st->newSize);
-                    st->needsResize = false;
-                    continue;
-                }
+            auto& r = engine->GetRegistry();
+            if (auto* st = r.GetSingleton<Components::InputStateComponent>(); st != nullptr && st->needsResize) {
+                engine->GetRenderContext().SetResolution(st->newSize);
+                st->needsResize = false;
+                continue;
             }
         }
 

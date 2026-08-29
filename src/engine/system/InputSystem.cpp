@@ -15,8 +15,7 @@ namespace ZHLN {
 
 namespace {
 [[nodiscard]] const Components::InputStateComponent* GetInputState(const ECS::Registry& reg) noexcept {
-    auto ents = reg.GetEntitiesWith<Components::InputStateComponent>();
-    return ents.empty() ? nullptr : reg.Get<Components::InputStateComponent>(ents[0]);
+    return reg.GetSingleton<Components::InputStateComponent>();
 }
 } // namespace
 
@@ -77,8 +76,8 @@ void InputSystem::Update(Engine& engine) {
 void InputSystem::PlayerInputTranslate(Engine& engine, const Camera& cam) {
     auto& reg = engine.GetRegistry();
 
-    auto camEnts = reg.GetEntitiesWith<Components::MainCameraTagComponent>();
-    if (!camEnts.empty() && reg.Get<Components::FreeCamTagComponent>(camEnts[0]) != nullptr) {
+    Entity camEnt = reg.SingletonEntity<Components::MainCameraTagComponent>();
+    if (camEnt != Entity::Null() && reg.Get<Components::FreeCamTagComponent>(camEnt) != nullptr) {
         // Zero out player intent so they stand frozen in an Idle pose
         for (Entity e: reg.GetEntitiesWith<Components::MovementComponent>()) {
             if (auto* move = reg.Get<Components::MovementComponent>(e)) {

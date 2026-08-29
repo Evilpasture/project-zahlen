@@ -57,8 +57,7 @@ void TargetCameraSystem::Update(ECS::Registry& reg, Camera& cam, float dt, float
         // 1. FREE-CAM INTERCEPTION BRANCH
         // ========================================================================
         if (reg.Patch<Components::FreeCamTagComponent>(camEnt, [](const auto&) -> auto {})) {
-            auto  inputEnts = reg.GetEntitiesWith<Components::InputStateComponent>();
-            auto* state     = inputEnts.empty() ? nullptr : reg.Get<Components::InputStateComponent>(inputEnts[0]);
+            auto* state = reg.GetSingleton<Components::InputStateComponent>();
             if (state == nullptr) {
                 return;
             }
@@ -134,8 +133,7 @@ void TargetCameraSystem::Update(ECS::Registry& reg, Camera& cam, float dt, float
         // ========================================================================
         // 3. ZOOM & FOV SMOOTHING
         // ========================================================================
-        auto  inputEnts  = reg.GetEntitiesWith<Components::InputStateComponent>();
-        auto* inputState = inputEnts.empty() ? nullptr : reg.Get<Components::InputStateComponent>(inputEnts[0]);
+        auto* inputState = reg.GetSingleton<Components::InputStateComponent>();
         float wheelDelta = (inputState != nullptr) ? inputState->GetMouseWheel() : 0.0f;
         if (std::abs(wheelDelta) > 0.01f) {
             camComp.targetDistance = JPH::Clamp(camComp.targetDistance - wheelDelta * 0.5f, 1.5f, 15.0f);
