@@ -232,7 +232,6 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
                 } else if (blendWeight >= 0.999f) {
                     finalSkinningMatrices[j] = physModel * ibm;
                 } else {
-                    JPH::Vec3                tAnim {};
                     const Math::TransformTRS animTRS = Math::Decompose(animModel);
                     const Math::TransformTRS physTRS = Math::Decompose(physModel);
                     const JPH::Vec3&         tAnim   = animTRS.translation;

@@ -358,14 +358,11 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
                 } else {
                     // Non-skinned parts (attachments/accessories) follow their node hierarchy transform
                     const Math::TransformTRS trs = Math::Decompose(worldTransforms[mesh->nodeIndex]);
-                    const JPH::Vec3          t   = trs.translation;
-                    const JPH::Quat          r   = trs.rotation;
-                    const JPH::Vec3          s   = trs.scale;
 
                     if (auto* childTrans = reg.Get<Components::TransformComponent>(childEnt)) {
-                        childTrans->position = t;
-                        childTrans->rotation = r;
-                        childTrans->scale    = s;
+                        childTrans->position = trs.translation;
+                        childTrans->rotation = trs.rotation;
+                        childTrans->scale    = trs.scale;
                     }
                 }
             }
