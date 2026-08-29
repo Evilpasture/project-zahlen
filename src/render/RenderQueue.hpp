@@ -53,15 +53,18 @@ enum class BarrierAccess : VkAccessFlags2 {
 inline void MemoryBarrier(VkCommandBuffer cmd, const ZHLN_MemoryBarrierDesc& desc) noexcept;
 
 /**
- * @brief Global compute -> compute dependency for chained dispatches.
+ * @brief Global compute -> compute dependency for consecutive dispatches.
  *
- * Passes that ping-pong through scratch targets (Kawase bloom, A-trous denoise)
- * need one of these after every dispatch so the next sees the previous writes.
- * The frame graph cannot supply it: it orders *passes* from their declared
- * accesses, but a pass body is an opaque lambda, so dispatch-to-dispatch
- * ordering inside one pass is invisible to it.
+ * Code that issues several dispatches into scratch targets and reads each result
+ * in the next one (Kawase bloom, A-trous denoise, Hi-Z mip generation, cluster
+ * culling) needs one of these between them. The frame graph cannot supply it: it
+ * orders *passes* from their declared accesses, but a pass body is an opaque
+ * lambda, so dispatch-to-dispatch ordering inside one pass is invisible to it.
+ *
+ * Named for what it does rather than for any one caller -- Vk::ComputeChain is
+ * only one of several places that needs this.
  */
-inline void ComputeChainBarrier(VkCommandBuffer cmd) noexcept;
+inline void ComputeToComputeBarrier(VkCommandBuffer cmd) noexcept;
 
 struct BarrierBuilder {
     VkPipelineStageFlags2 srcStage  = 0;

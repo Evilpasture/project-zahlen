@@ -76,7 +76,7 @@ struct PassFactory {
 
             for (uint32_t mip = 0; mip < mips; ++mip) {
                 if (mip > 0) {
-                    Vk::ComputeChainBarrier(c);
+                    Vk::ComputeToComputeBarrier(c);
                 }
 
                 uint32_t srcW = std::max(1u, width >> (mip == 0 ? 0 : mip - 1));
@@ -111,7 +111,7 @@ struct PassFactory {
             // the host supplies no shader-specific dimensions.
             self.clusterCullingPass.DispatchHeapIndexed(self.ctx, c, fIdx);
 
-            Vk::ComputeChainBarrier(c);
+            Vk::ComputeToComputeBarrier(c);
         });
     }
 
@@ -1021,7 +1021,7 @@ void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Co
 
     if (clusterBoundsDirty && clusterBoundsPass.pipeline.Valid() && clusterBoundsPass.fixedDispatchSize[0] != 0) {
         clusterBoundsPass.DispatchHeapIndexed(ctx, compCmd, fIdx);
-        Vk::ComputeChainBarrier(compCmd);
+        Vk::ComputeToComputeBarrier(compCmd);
         clusterBoundsDirty = false;
     }
 

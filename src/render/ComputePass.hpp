@@ -379,7 +379,7 @@ class ComputeChain {
         _heap.WriteBindings(_ctx, bindings, slot, std::forward<Args>(args)...);
         pass.DispatchHeapIndexedThreads(_ctx, _cmd, slot, extent.width, extent.height, 1, push);
         if constexpr (Barrier) {
-            ComputeChainBarrier(_cmd);
+            ComputeToComputeBarrier(_cmd);
         }
     }
 
