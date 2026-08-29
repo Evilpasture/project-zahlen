@@ -86,3 +86,45 @@ endif()
 
 add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
 set_tests_properties(${TARGET_NAME} PROPERTIES LABELS "CPU;Fast;Extras")
+
+# --- Network Wire / Serialization Test Suite ---
+# Exercises ZHLN.Wire (dependency-free reflection serialization) and the
+# ZHLN.Network protocol codecs: annotated round-trips, hostile input sweeps,
+# quantization, framing, CRC32 and block compression.
+set(TARGET_NAME TestNetworkWire)
+add_executable(${TARGET_NAME} TestNetworkWire.cpp)
+
+set_target_properties(${TARGET_NAME} PROPERTIES
+    CXX_STANDARD 26
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+    CXX_SCAN_FOR_MODULES ON
+)
+
+target_link_libraries(${TARGET_NAME} PRIVATE
+    zahlen_engine
+    zahlen_extras
+)
+
+# Public headers only. src/ is banned — see tools/check_tests_public_api.py.
+target_include_directories(${TARGET_NAME} PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/tests
+    ${PROJECT_SOURCE_DIR}/extras
+)
+
+zahlen_enable_reflection(${TARGET_NAME})
+
+if(USE_SANITIZERS)
+    target_compile_options(${TARGET_NAME} PRIVATE
+        -fsanitize=address,undefined
+        -fno-omit-frame-pointer
+    )
+    target_link_options(${TARGET_NAME} PRIVATE
+        -fsanitize=address,undefined
+    )
+    target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
+endif()
+
+add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
+set_tests_properties(${TARGET_NAME} PROPERTIES LABELS "CPU;Fast;Extras")

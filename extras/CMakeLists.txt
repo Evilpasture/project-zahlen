@@ -5,7 +5,11 @@ if(NOT ZHLN_BUILD_EXTRAS)
     return()
 endif()
 
-find_package(ZLIB REQUIRED)
+# The Network stack serializes through ZHLN.Wire (C++26 reflection + std::expected,
+# see extras/Network/Wire.cppm): no msgpack, no zlib, and — critically — no
+# per-file -fexceptions overrides. Mixed exception dialects between a module
+# interface and its importers make GCC reject the compiled BMI ("language
+# dialect differs"); every unit of ZHLN.* now builds -fno-exceptions.
 
 # 1. Discover all C++26 module interface files (.cppm)
 file(GLOB_RECURSE ZHLN_EXTRAS_MODULES
@@ -43,21 +47,10 @@ if(ZHLN_EXTRAS_SOURCES)
     target_sources(zahlen_extras PRIVATE ${ZHLN_EXTRAS_SOURCES})
 endif()
 
-# Enable exceptions specifically for Network implementation files to let msgpack compile internally
-set_source_files_properties(
-    "${CMAKE_CURRENT_SOURCE_DIR}/Network/NetworkReplicator.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/Network/NetworkClient.cpp"
-    PROPERTIES COMPILE_OPTIONS "-fexceptions"
-)
-
 target_include_directories(zahlen_extras PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_include_directories(zahlen_extras SYSTEM PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/../extern/msgpack-c/include
-)
 
 target_link_libraries(zahlen_extras PUBLIC
     zahlen_engine
-    ZLIB::ZLIB
 )
 
 target_link_libraries(zahlen_extras PRIVATE zahlen_warnings)
