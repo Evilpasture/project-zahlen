@@ -29,22 +29,6 @@ inline void ComputeToComputeBarrier(VkCommandBuffer cmd) noexcept {
     );
 }
 
-constexpr BarrierBuilder::BarrierBuilder() noexcept = default;
-
-constexpr auto BarrierBuilder::From(BarrierStage stage, BarrierAccess access) noexcept -> BarrierBuilder& {
-    srcStage |= static_cast<VkPipelineStageFlags2>(stage);
-    srcAccess |= static_cast<VkAccessFlags2>(access);
-    return *this;
-}
-
-inline void BarrierBuilder::To(VkCommandBuffer cmd, BarrierStage dstStage, BarrierAccess dstAccess) const noexcept {
-    MemoryBarrier(
-        cmd, {.src_stage  = srcStage,
-              .src_access = srcAccess,
-              .dst_stage  = static_cast<VkPipelineStageFlags2>(dstStage),
-              .dst_access = static_cast<VkAccessFlags2>(dstAccess)}
-    );
-}
 
 template <QueueType QType>
 CommandBuffer<QType>::operator VkCommandBuffer() const noexcept {

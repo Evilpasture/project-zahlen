@@ -66,15 +66,6 @@ inline void MemoryBarrier(VkCommandBuffer cmd, const ZHLN_MemoryBarrierDesc& des
  */
 inline void ComputeToComputeBarrier(VkCommandBuffer cmd) noexcept;
 
-struct BarrierBuilder {
-    VkPipelineStageFlags2 srcStage  = 0;
-    VkAccessFlags2        srcAccess = 0;
-
-    constexpr BarrierBuilder() noexcept;
-    constexpr auto From(BarrierStage stage, BarrierAccess access) noexcept -> BarrierBuilder&;
-    void           To(VkCommandBuffer cmd, BarrierStage dstStage, BarrierAccess dstAccess) const noexcept;
-};
-
 enum class QueueType : uint8_t { Graphics, Compute, Transfer };
 
 // Primary templates (default to invalid/false)
