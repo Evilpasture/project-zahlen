@@ -180,22 +180,24 @@ void Sys_Terrain(Engine& engine, float dt) {
     return module;
 }
 
-void Step_Input(Engine& engine, float /*dt*/, ECS::FrameContext& /*ctx*/) {
+namespace Steps {
+
+void Input(Engine& engine, float /*dt*/, ECS::FrameContext& /*ctx*/) {
     static InputSystem inputSystem;
     inputSystem.Update(engine);
 }
 
-void Step_UIInteraction(Engine& engine, float dt, ECS::FrameContext& /*ctx*/) {
+void UIInteraction(Engine& engine, float dt, ECS::FrameContext& /*ctx*/) {
     UIInteractionSystem::Update(engine, dt);
 }
 
-void Step_HostUICallback(Engine& engine, float /*dt*/, ECS::FrameContext& /*ctx*/) {
+void HostUICallback(Engine& engine, float /*dt*/, ECS::FrameContext& /*ctx*/) {
     if (const auto* cb = engine.GetUICallback(); cb != nullptr && static_cast<bool>(*cb)) {
         (*cb)(engine);
     }
 }
 
-void Step_HotReload(Engine& engine, float /*dt*/, ECS::FrameContext& ctx) {
+void HotReload(Engine& engine, float /*dt*/, ECS::FrameContext& ctx) {
     static FileWatcher gameplayWatcher("scripts/boot.lua");
     if (ctx.driver != GameplayDriver::Cpp && gameplayWatcher.CheckModified()) {
         engine.GetScriptRunner().ReloadFile("scripts/boot.lua");
@@ -206,17 +208,17 @@ void Step_HotReload(Engine& engine, float /*dt*/, ECS::FrameContext& ctx) {
 /// Translate gameplay input using the previous resolved camera. Camera
 /// transforms are finalized after physics and the update graph so rig-driven
 /// first-person views cannot lag one simulation frame behind their body.
-void Step_PlayerIntent(Engine& engine, float /*dt*/, ECS::FrameContext& /*ctx*/) {
+void PlayerIntent(Engine& engine, float /*dt*/, ECS::FrameContext& /*ctx*/) {
     static InputSystem inputSystem;
     inputSystem.PlayerInputTranslate(engine, engine.GetCamera());
 }
 
-void Step_Physics(Engine& engine, float dt, ECS::FrameContext& /*ctx*/) {
+void Physics(Engine& engine, float dt, ECS::FrameContext& /*ctx*/) {
     static PhysicsSystem physicsSystem;
     physicsSystem.Update(engine, dt);
 }
 
-void Step_Gameplay(Engine& engine, float dt, ECS::FrameContext& ctx) {
+void Gameplay(Engine& engine, float dt, ECS::FrameContext& ctx) {
     switch (ctx.driver) {
         using enum GameplayDriver;
         case Cpp: {
@@ -243,32 +245,32 @@ void Step_Gameplay(Engine& engine, float dt, ECS::FrameContext& ctx) {
     }
 }
 
-void Step_UpdateGraph(Engine& engine, float dt, ECS::FrameContext& /*ctx*/) {
+void UpdateGraph(Engine& engine, float dt, ECS::FrameContext& /*ctx*/) {
     engine.GetUpdateGraph().Execute(engine, dt);
 }
 
-void Step_CommandPlayback(Engine& engine, float /*dt*/, ECS::FrameContext& /*ctx*/) {
+void CommandPlayback(Engine& engine, float /*dt*/, ECS::FrameContext& /*ctx*/) {
     engine.GetMainECB().Playback();
 }
 
 /// Resolve target cameras and camera matrices from current physics and
 /// procedural rig poses immediately before visibility/render work.
-void Step_Camera(Engine& engine, float dt, ECS::FrameContext& /*ctx*/) {
+void Camera(Engine& engine, float dt, ECS::FrameContext& /*ctx*/) {
     static TargetCameraSystem targetCamSys;
     static CameraSystem       camSys;
     targetCamSys.Update(engine, dt, engine.GetCurrentAlpha());
     camSys.Update(engine, dt, engine.GetCurrentAlpha());
 }
 
-void Step_LOD(Engine& engine, float /*dt*/, ECS::FrameContext& /*ctx*/) {
+void LOD(Engine& engine, float /*dt*/, ECS::FrameContext& /*ctx*/) {
     LODSystem::Update(engine);
 }
 
-void Step_RenderGraph(Engine& engine, float dt, ECS::FrameContext& /*ctx*/) {
+void RenderGraph(Engine& engine, float dt, ECS::FrameContext& /*ctx*/) {
     engine.GetRenderGraph().Execute(engine, dt);
 }
 
-void Step_Present(Engine& engine, float dt, ECS::FrameContext& ctx) {
+void Present(Engine& engine, float dt, ECS::FrameContext& ctx) {
     auto render_res = RenderSystem::Update(engine, dt);
     if (!render_res) {
         if (render_res.error().Is<RenderFrameResult>() && render_res.error().As<RenderFrameResult>() == RenderFrameResult::DeviceLost) {
@@ -279,7 +281,7 @@ void Step_Present(Engine& engine, float dt, ECS::FrameContext& ctx) {
 }
 
 /// Auto-detect missing gameplay scripts / modules and engage the Fallback Preset.
-void Step_Fallback(Engine& engine, float dt, ECS::FrameContext& ctx) {
+void Fallback(Engine& engine, float dt, ECS::FrameContext& ctx) {
     if (!DefaultPreset::IsActive()) {
         if ((ctx.driver == GameplayDriver::Fennel || ctx.driver == GameplayDriver::Hybrid) && !std::filesystem::exists("scripts/boot.lua") &&
             !std::filesystem::exists("scripts/boot.fnl")) {
@@ -296,11 +298,13 @@ void Step_Fallback(Engine& engine, float dt, ECS::FrameContext& ctx) {
     }
 }
 
-void Step_TransformHistory(Engine& engine, float /*dt*/, ECS::FrameContext& /*ctx*/) {
+void TransformHistory(Engine& engine, float /*dt*/, ECS::FrameContext& /*ctx*/) {
     ZHLN::ScopedTimer      profTimer("ECS System: Update Transform History");
     static TransformSystem transformSystem;
     transformSystem.UpdateTransformHistory(engine.GetRegistry());
 }
+
+} // namespace Steps
 
 /// The frame, in order. Phase names are documentation: steps run strictly in
 /// registration order regardless of the phase they are tagged with.
@@ -309,21 +313,21 @@ void BuildFrameScheduler(Engine& engine) {
     auto& scheduler = engine.GetFrameScheduler();
 
     scheduler.Clear();
-    scheduler.Add(Phase::Input, "InputSystem", Step_Input);
-    scheduler.Add(Phase::UI, "UIInteractionSystem", Step_UIInteraction);
-    scheduler.Add(Phase::UI, "HostUICallback", Step_HostUICallback);
-    scheduler.Add(Phase::HotReload, "ScriptAndShaderReload", Step_HotReload);
-    scheduler.Add(Phase::PlayerIntent, "PlayerInputTranslate", Step_PlayerIntent);
-    scheduler.Add(Phase::Physics, "PhysicsSystem", Step_Physics);
-    scheduler.Add(Phase::Gameplay, "GameplayModule", Step_Gameplay);
-    scheduler.Add(Phase::Simulation, "UpdateGraph", Step_UpdateGraph);
-    scheduler.Add(Phase::Simulation, "MainECBPlayback", Step_CommandPlayback);
-    scheduler.Add(Phase::Camera, "CameraSystems", Step_Camera);
-    scheduler.Add(Phase::Camera, "LODSystem", Step_LOD);
-    scheduler.Add(Phase::Visibility, "RenderGraph", Step_RenderGraph);
-    scheduler.Add(Phase::Present, "RenderSystem", Step_Present);
-    scheduler.Add(Phase::Fallback, "DefaultPreset", Step_Fallback);
-    scheduler.Add(Phase::History, "TransformHistory", Step_TransformHistory);
+    scheduler.Add(Phase::Input, "InputSystem", Steps::Input);
+    scheduler.Add(Phase::UI, "UIInteractionSystem", Steps::UIInteraction);
+    scheduler.Add(Phase::UI, "HostUICallback", Steps::HostUICallback);
+    scheduler.Add(Phase::HotReload, "ScriptAndShaderReload", Steps::HotReload);
+    scheduler.Add(Phase::PlayerIntent, "PlayerInputTranslate", Steps::PlayerIntent);
+    scheduler.Add(Phase::Physics, "PhysicsSystem", Steps::Physics);
+    scheduler.Add(Phase::Gameplay, "GameplayModule", Steps::Gameplay);
+    scheduler.Add(Phase::Simulation, "UpdateGraph", Steps::UpdateGraph);
+    scheduler.Add(Phase::Simulation, "MainECBPlayback", Steps::CommandPlayback);
+    scheduler.Add(Phase::Camera, "CameraSystems", Steps::Camera);
+    scheduler.Add(Phase::Camera, "LODSystem", Steps::LOD);
+    scheduler.Add(Phase::Visibility, "RenderGraph", Steps::RenderGraph);
+    scheduler.Add(Phase::Present, "RenderSystem", Steps::Present);
+    scheduler.Add(Phase::Fallback, "DefaultPreset", Steps::Fallback);
+    scheduler.Add(Phase::History, "TransformHistory", Steps::TransformHistory);
 }
 
 void BuildSystemGraphs(Engine& engine) {
