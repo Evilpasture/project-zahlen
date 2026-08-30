@@ -64,6 +64,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # --- DETECT C++26 LANGUAGE FEATURE FLAGS ---
 include(CheckCXXCompilerFlag)
+include(CheckCXXSourceCompiles)
 check_cxx_compiler_flag("-freflection" COMPILER_HAS_REFLECTION)
 
 if(COMPILER_HAS_REFLECTION)
@@ -75,12 +76,28 @@ endif()
 set(ZHLN_CONTRACT_SEMANTIC "enforce" CACHE STRING "C++26 contract semantic for supported compilers")
 set_property(CACHE ZHLN_CONTRACT_SEMANTIC PROPERTY STRINGS ignore enforce observe quick-enforce)
 set(ZHLN_CONTRACT_FLAG_STRING "-fcontracts -fcontract-semantic=${ZHLN_CONTRACT_SEMANTIC}")
-check_cxx_compiler_flag("${ZHLN_CONTRACT_FLAG_STRING}" COMPILER_HAS_CONTRACTS)
+set(_ZHLN_SAVED_CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS}")
+set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} ${ZHLN_CONTRACT_FLAG_STRING}")
+check_cxx_source_compiles([[
+int f(int x)
+    pre(x > 0)
+    post(r: r > 0)
+{
+    contract_assert(x > 0);
+    return x;
+}
+
+int main() {
+    return f(1) - 1;
+}
+]] COMPILER_HAS_CONTRACTS)
+set(CMAKE_REQUIRED_FLAGS "${_ZHLN_SAVED_CMAKE_REQUIRED_FLAGS}")
+unset(_ZHLN_SAVED_CMAKE_REQUIRED_FLAGS)
 
 if(COMPILER_HAS_CONTRACTS)
     message(STATUS "C++26 Contracts supported via ${ZHLN_CONTRACT_FLAG_STRING}")
 else()
-    message(FATAL_ERROR "This branch uses C++26 contracts in public headers, but the compiler rejected: ${ZHLN_CONTRACT_FLAG_STRING}")
+    message(FATAL_ERROR "This branch uses C++26 contracts in public headers, but the compiler rejected either the syntax or flags: ${ZHLN_CONTRACT_FLAG_STRING}")
 endif()
 
 # --- PYTHON INTERPRETER SELECTION ---
