@@ -13,13 +13,21 @@
  * Localizing the renderer's symbols in the engine .so binds them internally
  * at link time (no PLT, no preemption): the engine always initializes and
  * uses its own table, and executable-embedded copies (if any) use theirs.
- * Everything else the engine exports is unchanged.
+ *
+ * Exceptions -- renderer symbols that ARE part of the engine's public
+ * surface and must stay exported (first match wins over the local globs
+ * below): the validation-accounting counters read by the test framework
+ * (tests/TestsFramework.hpp) around every suite. Note: if an executable
+ * embeds its own copy of RenderCore.c, its preempted read observes its own
+ * (zero) counters rather than the engine's; nothing in-tree does this.
  *
  * Windows PE and macOS two-level namespaces bind intra-image by default and
  * do not need this.
  */
 {
-    global: *;
+    global:
+        ZHLN_GetValidationErrorCount;
+        ZHLN_GetDeviceLostCount;
 
     local:
         volk*;
