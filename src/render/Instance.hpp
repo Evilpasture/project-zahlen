@@ -17,20 +17,49 @@
 namespace ZHLN::Vk {
 
 // ============================================================================
+// Caller-owned storage for render diagnostics. An observer that needs
+// diagnostic values to OUTLIVE an engine (e.g. a test framework bracketing
+// whole engine lifecycles) registers its sink via Instance::UseDiagnostics()
+// before creating engines; every instance created afterwards increments these
+// atomics directly -- including teardown-time events fired while the instance
+// is being destroyed. The library holds no post-mortem state of its own.
+// ============================================================================
+struct DiagnosticsSink {
+    std::atomic<uint32_t>* validation = nullptr;
+    std::atomic<uint32_t>* deviceLost  = nullptr;
+
+    [[nodiscard]] constexpr bool Valid() const noexcept {
+        return validation != nullptr && deviceLost != nullptr;
+    }
+};
+
+// ============================================================================
 // Vk::Instance — RAII owner of the Vulkan instance, its persistent debug
 // messenger, and the validation/device-lost diagnostics.
 //
-// The C layer (RenderCore.c) is stateless: this class owns the counters that
-// debug callbacks used to bump in C globals. The instance descriptor carries
-// a ZHLN_DebugForwarding pointing back here, so both the pNext messenger
-// (instance create/destroy coverage) and the persistent messenger (runtime
-// coverage) funnel error severities into these atomics.
+// The C layer (RenderCore.c) is stateless; the counters its debug callbacks
+// used to bump in C globals are routed into CALLER-OWNED storage:
 //
-// The engine is single-instance by design. Active() exposes the live instance
-// to engine-level diagnostics accessors (RenderContext statics); when an
-// instance is retired, its counts are folded into process totals so
-// before/after snapshots taken across an instance's full lifecycle (the test
-// framework's suite wrapper) still observe its errors.
+//   * With a registered sink, increments go straight to the caller's atomics
+//     (single source of truth -- nothing to fold at retirement, so totals
+//     are exact across any number of sequential create/destroy cycles).
+//   * Without one, each instance counts into its own members; those counts
+//     are a live view and die with the instance.
+//
+// The instance descriptor carries a ZHLN_DebugForwarding pointing back here,
+// so both the pNext messenger (instance create/destroy coverage) and the
+// persistent messenger (runtime coverage) funnel error severities in.
+//
+// The engine is single-instance by design: volk's dispatch tables are
+// process-global and cannot serve two live instances. Create() claims the
+// slot with a compare-and-swap and refuses -- returning an invalid Instance
+// -- while another instance is live, instead of letting a second one
+// silently steal the slot.
+//
+// Reads (ValidationErrorCount/DeviceLostCount) must not race the destruction
+// of the instance they observe. Callers bracketing engine lifetimes register
+// a sink and read their own storage instead -- that is exactly what it is
+// for.
 // ============================================================================
 class Instance {
   public:
@@ -45,10 +74,20 @@ class Instance {
 
     // Creates the Vulkan instance (acquiring the loader through Volk) and,
     // when validation is enabled, the persistent debug messenger. Returns an
-    // invalid Instance on failure (Valid() == false).
+    // invalid Instance on failure (Valid() == false) -- including when
+    // another instance is still live (single-instance engine; see above).
     [[nodiscard]] static auto
-        Create(std::string_view appName, uint32_t appVersion, std::span<const std::string_view> extensions, ZHLN_ValidationMode validation) noexcept
-            -> Instance;
+        Create(std::string_view appName, uint32_t appVersion, std::span<const std::string_view> extensions, ZHLN_ValidationMode validation) noexcept -> Instance;
+
+    // Registers caller-owned diagnostics storage (both or neither; pass a
+    // default-constructed sink to revert to per-instance counting). Engines
+    // created afterwards increment these atomics directly, including
+    // teardown-time events, so deltas across an engine's full lifecycle are
+    // exact. The storage must outlive every engine created after
+    // registration. Register before creating engines: the sink is resolved
+    // once per Create(), so it is not synchronised against concurrent engine
+    // creation.
+    static void UseDiagnostics(DiagnosticsSink sink) noexcept;
 
     [[nodiscard]] auto Handle() const noexcept -> VkInstance {
         return _handle;
@@ -57,15 +96,17 @@ class Instance {
         return _handle != VK_NULL_HANDLE;
     }
 
-    // --- Process-wide diagnostics (active instance + retired totals) ------
-    // Zero when no Vulkan instance has ever existed (CPU-only suites).
+    // --- Live diagnostics (the active instance's view) ---------------------
+    // Zero when no engine exists. These read the instance that is alive NOW;
+    // observers needing values across an engine's death hold a registered
+    // sink instead of polling these.
 
     [[nodiscard]] static auto ValidationErrorCount() noexcept -> uint32_t;
     [[nodiscard]] static auto DeviceLostCount() noexcept -> uint32_t;
 
     // Records a device-lost event observed by engine code (failed submits,
-    // VK_ERROR_DEVICE_LOST returns). Bumps the active instance when there is
-    // one, the retired totals otherwise (e.g. during teardown).
+    // VK_ERROR_DEVICE_LOST returns). Bumps the active instance's counting
+    // target; with no live instance the event is unobservable by design.
     static void NotifyDeviceLost() noexcept;
 
     // The single live instance, or null when none exists (engine is
@@ -77,13 +118,19 @@ class Instance {
   private:
     static void DebugHookTrampoline(void* userdata, VkDebugUtilsMessageSeverityFlagBitsEXT severity) noexcept;
 
-    VkInstance                   _handle    = VK_NULL_HANDLE;
-    VkDebugUtilsMessengerEXT     _messenger = VK_NULL_HANDLE;
-    ZHLN_DebugForwarding         _debugForwarding {};
-    std::atomic<uint32_t>        _validationErrors {0};
-    std::atomic<uint32_t>        _deviceLost {0};
+    VkInstance               _handle    = VK_NULL_HANDLE;
+    VkDebugUtilsMessengerEXT _messenger = VK_NULL_HANDLE;
+    ZHLN_DebugForwarding     _debugForwarding {};
 
-    static std::atomic<Instance*> _active;
+    // Counting targets: the registered sink when one was resolved at
+    // Create() time, else this instance's own members.
+    std::atomic<uint32_t>  _validationErrors {0};
+    std::atomic<uint32_t>  _deviceLost {0};
+    std::atomic<uint32_t>* _validationTarget = &_validationErrors;
+    std::atomic<uint32_t>* _deviceLostTarget = &_deviceLost;
+
+    static std::atomic<Instance*>       _active;
+    static std::atomic<DiagnosticsSink> _registeredSink;
 };
 
 } // namespace ZHLN::Vk

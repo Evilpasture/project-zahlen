@@ -7,6 +7,7 @@
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <array>
+#include <atomic>
 #include <concepts>
 #include <cstdlib>
 #include <expected>
@@ -16,9 +17,14 @@
 #include <type_traits>
 #include <vector>
 
-// Render diagnostics: static accessors on the public RenderContext. They read
-// the process totals owned by Vk::Instance (active instance + retired
-// instances), and report zero for suites that never bring up Vulkan.
+// Render diagnostics: the framework owns the persistent counters. They are
+// registered (RunSuite) as the process diagnostics sink, so every engine --
+// including its teardown, where the persistent messenger fires destroy-time
+// validation events -- increments them directly. That is what lets the
+// per-test before/after snapshots below bracket a WHOLE engine lifecycle and
+// stay exact, with no post-mortem state in the library. The public
+// RenderContext::ValidationErrorCount()/DeviceLostCount() are live views
+// (zero while no engine exists) and are meant for workload-scoped deltas.
 #include <Zahlen/Render.hpp>
 
 #if defined(__unix__) || defined(__APPLE__) || defined(__linux__)
@@ -71,6 +77,15 @@ inline void TestTimeoutSignalHandler(int sig) {
 #endif
 
 namespace ZHLN::Test {
+
+// Diagnostics totals owned by this framework. They outlast every engine in
+// the process, which is exactly why the engine increments them directly
+// (registered in RunSuite via RenderContext::UseDiagnostics): teardown-time
+// validation events land here too, and the per-test snapshots in RunSuite
+// observe a whole engine lifecycle without any post-mortem state in the
+// library.
+inline std::atomic<uint32_t> g_validationErrors {0};
+inline std::atomic<uint32_t> g_deviceLost {0};
 
 enum class TestFrameworkError : uint8_t {
     AssertionFailed[[= ZHLN::Description<"One or more assertions failed in this test. ">{}]] = 1,
@@ -249,6 +264,12 @@ concept HasNestedTests = requires { typename T::Tests; };
 
 template <typename Suite>
 TestStats RunSuite() {
+    // Take ownership of the process diagnostics: framework storage outlasts
+    // every engine, so engines increment it directly (teardown included) and
+    // per-test deltas below bracket whole engine lifecycles exactly.
+    // Idempotent: nested suites re-register the same storage.
+    RenderContext::UseDiagnostics(&g_validationErrors, &g_deviceLost);
+
     Suite     suite;
     TestStats stats;
 
@@ -264,9 +285,10 @@ TestStats RunSuite() {
             auto& ctx = GetThreadLocalContext();
             ctx.Reset(name);
 
-            // 1. Snapshot telemetry before test begins
-            const uint32_t valErrorsBefore = ZHLN::RenderContext::ValidationErrorCount();
-            const uint32_t devLostBefore   = ZHLN::RenderContext::DeviceLostCount();
+            // 1. Snapshot telemetry before test begins (framework-owned
+            // totals: they persist across engine lifetimes)
+            const uint32_t valErrorsBefore = g_validationErrors.load(std::memory_order_relaxed);
+            const uint32_t devLostBefore   = g_deviceLost.load(std::memory_order_relaxed);
 
             ReturnType result = std::unexpected(ZHLN::Error(TestFrameworkError::AssertionFailed));
 
@@ -306,7 +328,7 @@ TestStats RunSuite() {
 #endif
 
             // 2. Fail if new Vulkan Validation Errors occurred
-            const uint32_t valErrorsAfter = ZHLN::RenderContext::ValidationErrorCount();
+            const uint32_t valErrorsAfter = g_validationErrors.load(std::memory_order_relaxed);
             if (valErrorsAfter > valErrorsBefore && !ctx.allowValidationErrors) {
                 const uint32_t count = valErrorsAfter - valErrorsBefore;
                 ctx.failures.push_back(
@@ -319,7 +341,7 @@ TestStats RunSuite() {
             }
 
             // 3. Fail if GPU Device Lost / Hang occurred
-            const uint32_t devLostAfter = ZHLN::RenderContext::DeviceLostCount();
+            const uint32_t devLostAfter = g_deviceLost.load(std::memory_order_relaxed);
             if (devLostAfter > devLostBefore && !ctx.allowDeviceLost) {
                 const uint32_t count = devLostAfter - devLostBefore;
                 ctx.failures.push_back(

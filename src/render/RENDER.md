@@ -43,11 +43,14 @@ This keeps tools and executables runnable on machines without a loader installed
 
 ### Diagnostics Ownership (Vk::Instance)
 
-The C layer is **stateless** — no counters, no globals. `Vk::Instance` (src/render/Instance.hpp) owns the Vulkan instance, the persistent debug messenger, and the diagnostics that `RenderCore.c` used to accumulate in C globals:
+The C layer is **stateless** — no counters, no globals. `Vk::Instance` (src/render/Instance.hpp) owns the Vulkan instance and the persistent debug messenger, and routes diagnostics into **caller-owned storage**; the library keeps no post-mortem state:
 
-* The instance descriptor carries a `ZHLN_DebugForwarding` (hook + owner pointer); both the pNext messenger (instance create/destroy) and the persistent messenger (runtime) forward error severities into `Vk::Instance`'s atomics. The stateless behaviors (stderr logging, the GPU-AV out-of-bounds abort) stay in the C callback.
-* Engine code reads them through the public API — `RenderContext::ValidationErrorCount()` / `RenderContext::DeviceLostCount()` (include/Zahlen/Render.hpp) — which report the process totals: the live instance's counters plus the folded-in totals of retired instances. The retirement fold is what lets the test framework's before/after snapshots (which bracket an entire engine lifecycle) still observe errors. `Vk::Instance::NotifyDeviceLost()` is the explicit counterpart for `VK_ERROR_DEVICE_LOST` returns.
+* An observer that needs values to outlive an engine (the test framework) registers a sink — `RenderContext::UseDiagnostics(&validationErrors, &deviceLost)` — before creating engines. Every instance created afterwards increments those atomics **directly**, including teardown-time events fired while the instance is being destroyed, so per-test before/after snapshots bracketing a whole engine lifecycle are exact. There is no retirement fold and none is needed: the storage is the single source of truth and it already outlives the engine.
+* `RenderContext::ValidationErrorCount()` / `RenderContext::DeviceLostCount()` are **live views**: the active instance's counters, zero while no engine exists. Workload-scoped snapshots inside a running engine (RenderPerformance, RTR, mesh shaders, …) use these. Unregistered engines count into per-instance members, and those counts die with the instance.
+* The instance descriptor carries a `ZHLN_DebugForwarding` (hook + owner pointer); both the pNext messenger (instance create/destroy) and the persistent messenger (runtime) forward error severities into the counting target. The stateless behaviors (stderr logging, the GPU-AV out-of-bounds abort) stay in the C callback.
+* `Vk::Instance::NotifyDeviceLost()` is the explicit counterpart for `VK_ERROR_DEVICE_LOST` returns; it bumps the active instance's target and is unobservable when no engine is live.
 * `Vk::Instance` is move-aware: the C-side forwarding pointer is re-pointed on every move, so builder-to-context transfers keep the hook valid.
+* The engine is **single-instance** by design — volk's dispatch tables are process-global and cannot serve two live instances. `Instance::Create()` claims the slot with a compare-and-swap and refuses (returning an invalid instance) while another is live, instead of letting a second one silently steal it. Sequential create/destroy cycles lose nothing.
 
 ### One dispatch table per image
 

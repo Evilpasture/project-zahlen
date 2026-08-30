@@ -11,6 +11,7 @@
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Types.hpp>
 #include <Zahlen/Window.hpp>
+#include <atomic>
 #include <cstdint>
 #include <expected>
 #include <memory>
@@ -234,11 +235,28 @@ class ZHLN_API RenderContext {
     /// RTR-only verification on devices without support (e.g. lavapipe).
     [[nodiscard]] bool RayTracingSupported() const noexcept;
 
-    /// Validation-layer errors seen so far (0 when validation is off). Snapshot
-    /// it around a workload to assert that the workload is VUID-clean.
+    /// Validation-layer errors observed by the ACTIVE engine (live view:
+    /// zero when no engine exists). Snapshot it around a workload to assert
+    /// that the workload is VUID-clean. Observers that need values to
+    /// OUTLIVE an engine (test frameworks bracketing whole engine
+    /// lifecycles) register their own storage with UseDiagnostics() and read
+    /// that instead.
     [[nodiscard]] static uint32_t ValidationErrorCount() noexcept;
 
+    /// Device-lost / hang events observed by the ACTIVE engine (live view:
+    /// zero when no engine exists). See ValidationErrorCount().
     [[nodiscard]] static uint32_t DeviceLostCount() noexcept;
+
+    /// Registers caller-owned diagnostics storage (both or neither; pass
+    /// nullptrs to revert to per-instance counting). Every engine created
+    /// afterwards increments these atomics directly -- including
+    /// teardown-time validation events fired during instance destruction --
+    /// so deltas taken across an engine's full lifecycle are exact with no
+    /// post-mortem state in the library. The storage must outlive every
+    /// engine created after registration, and registration must happen
+    /// before engine creation (the sink is resolved once per instance, not
+    /// synchronised against concurrent engine creation).
+    static void UseDiagnostics(std::atomic<uint32_t>* validationErrors, std::atomic<uint32_t>* deviceLost) noexcept;
 
     /// Injects a diagnostic GPU breadcrumb into the active frame's command stream.
     void WriteCheckpoint(std::string_view name) noexcept;

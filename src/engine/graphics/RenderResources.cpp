@@ -217,6 +217,10 @@ bool RenderContext::RayTracingSupported() const noexcept {
     return _impl->rtCtx.Valid();
 }
 
+void RenderContext::UseDiagnostics(std::atomic<uint32_t>* validationErrors, std::atomic<uint32_t>* deviceLost) noexcept {
+    Vk::Instance::UseDiagnostics({validationErrors, deviceLost});
+}
+
 uint32_t RenderContext::ValidationErrorCount() noexcept {
     return Vk::Instance::ValidationErrorCount();
 }
