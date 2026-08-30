@@ -236,10 +236,14 @@ struct LightingRTTestSuite {
             }
 
             uint32_t validationRaised = 0;
+            // Set when the render could not be captured at all, which is not a
+            // lighting failure and must not be reported as one.
+            bool captureFailed = false;
 
             const auto stable = RunStableScene(
                 *engine, 14, "lit_scene_static_frame_stability",
-                [](ZHLN::Engine& eng) -> bool {
+                [&](ZHLN::Engine& eng) -> bool {
+                    captureFailed = false;
                     const RgbImage  repeatA    = Capture(eng, "headless_lighting_rt_static_r0.ppm");
                     const RgbImage  repeatB    = Capture(eng, "headless_lighting_rt_static_r1.ppm");
                     const FrameDiff repeatDiff = CompareFrames(repeatA, repeatB);
@@ -257,6 +261,7 @@ struct LightingRTTestSuite {
 
                         auto checkFrame = ZHLN::Test::AssertTrue(frame.Valid());
                         if (!checkFrame) {
+                            captureFailed = true;
                             return false;
                         }
 
@@ -278,6 +283,7 @@ struct LightingRTTestSuite {
                     const bool frameProduced   = ZHLN::Test::ExpectTrue(Mean(lumaSeries) > 1.0);
                     const bool geometryVisible = ZHLN::Test::ExpectTrue(Mean(litSeries) > 500.0);
                     if (!frameProduced || !geometryVisible) {
+                        captureFailed = !frameProduced;
                         return false;
                     }
 
@@ -312,6 +318,9 @@ struct LightingRTTestSuite {
             );
 
             if (stable == StableRunResult::AssertionsFailed) {
+                if (captureFailed) {
+                    return std::unexpected(LightingRTTestError::RenderOutputBlank);
+                }
                 return std::unexpected(LightingRTTestError::TemporalFlickerDetected);
             }
             if (stable != StableRunResult::Ok) {
@@ -401,6 +410,9 @@ struct LightingRTTestSuite {
             }
 
             uint32_t validationRaised = 0;
+            // Set when the render could not be captured at all, which is not a
+            // lighting failure and must not be reported as one.
+            bool captureFailed = false;
             // Which kind of failure the scene actually saw. A light losing its
             // contribution is a cluster-culling bug; ordinary frame-to-frame
             // change is a stability bug. Collapsing both into the single bool
@@ -411,6 +423,7 @@ struct LightingRTTestSuite {
             const auto stable = RunStableScene(
                 *engine, 8, "point_light_cluster_culling_sweep",
                 [&](ZHLN::Engine& eng) -> bool {
+                    captureFailed = false;
                     lightCullingPop = false;
                     auto& reg = eng.GetRegistry();
                     ZHLN::Test::ExpectTrue(reg.IsAlive(redLight));
@@ -432,6 +445,7 @@ struct LightingRTTestSuite {
                         const RgbImage frame      = Capture(eng, "headless_lighting_rt_cull_" + std::to_string(step) + ".ppm");
                         auto           checkFrame = ZHLN::Test::AssertTrue(frame.Valid());
                         if (!checkFrame) {
+                            captureFailed = true;
                             return false;
                         }
 
@@ -461,6 +475,7 @@ struct LightingRTTestSuite {
                         stableFrames[r]  = Capture(eng, "headless_lighting_rt_cull_stable_" + std::to_string(r) + ".ppm");
                         auto checkStable = ZHLN::Test::AssertTrue(stableFrames[r].Valid());
                         if (!checkStable) {
+                            captureFailed = true;
                             return false;
                         }
                         const FrameMetrics m = MeasureImage(stableFrames[r]);
@@ -506,6 +521,9 @@ struct LightingRTTestSuite {
             );
 
             if (stable == StableRunResult::AssertionsFailed) {
+                if (captureFailed) {
+                    return std::unexpected(LightingRTTestError::RenderOutputBlank);
+                }
                 return std::unexpected(lightCullingPop ? LightingRTTestError::LightCullingPopDetected
                                                        : LightingRTTestError::TemporalFlickerDetected);
             }
@@ -594,10 +612,14 @@ struct LightingRTTestSuite {
             }
 
             uint32_t validationRaised = 0;
+            // Set when the render could not be captured at all, which is not a
+            // lighting failure and must not be reported as one.
+            bool captureFailed = false;
 
             const auto stable = RunStableScene(
                 *engine, 8, "point_light_static_reference_no_history",
                 [&](ZHLN::Engine& eng) -> bool {
+                    captureFailed = false;
                     constexpr uint32_t                  kStableFrames = 8;
                     std::array<RgbImage, kStableFrames> frames {};
                     std::vector<double>                 counts;
@@ -605,6 +627,7 @@ struct LightingRTTestSuite {
                         frames[r]       = Capture(eng, "headless_lighting_rt_ref_stable_" + std::to_string(r) + ".ppm");
                         auto checkFrame = ZHLN::Test::AssertTrue(frames[r].Valid());
                         if (!checkFrame) {
+                            captureFailed = true;
                             return false;
                         }
                         counts.push_back(static_cast<double>(MeasureImage(frames[r]).red));
@@ -636,6 +659,9 @@ struct LightingRTTestSuite {
             );
 
             if (stable == StableRunResult::AssertionsFailed) {
+                if (captureFailed) {
+                    return std::unexpected(LightingRTTestError::RenderOutputBlank);
+                }
                 return std::unexpected(LightingRTTestError::TemporalFlickerDetected);
             }
             if (stable != StableRunResult::Ok) {
@@ -715,10 +741,14 @@ struct LightingRTTestSuite {
             }
 
             uint32_t validationRaised = 0;
+            // Set when the render could not be captured at all, which is not a
+            // lighting failure and must not be reported as one.
+            bool captureFailed = false;
 
             const auto stable = RunStableScene(
                 *engine, 8, "raytraced_shadow_occlusion_and_stability",
-                [](ZHLN::Engine& eng) -> bool {
+                [&](ZHLN::Engine& eng) -> bool {
+                    captureFailed = false;
                     auto& reg = eng.GetRegistry();
 
                     const ZHLN::Entity occluder = ZHLN::CreativeWorksFactory::CreateBox(
@@ -737,6 +767,7 @@ struct LightingRTTestSuite {
 
                     auto checkFrame = ZHLN::Test::AssertTrue(shadowA.Valid() && shadowARepeat.Valid() && shadowB.Valid());
                     if (!checkFrame) {
+                        captureFailed = true;
                         reg.Destroy(occluder);
                         return false;
                     }
@@ -748,6 +779,7 @@ struct LightingRTTestSuite {
                     const RgbImage shadowClear = Capture(eng, "headless_lighting_rt_shadow_clear.ppm");
                     checkFrame                 = ZHLN::Test::AssertTrue(shadowClear.Valid());
                     if (!checkFrame) {
+                        captureFailed = true;
                         return false;
                     }
 
@@ -785,6 +817,9 @@ struct LightingRTTestSuite {
             );
 
             if (stable == StableRunResult::AssertionsFailed) {
+                if (captureFailed) {
+                    return std::unexpected(LightingRTTestError::RenderOutputBlank);
+                }
                 return std::unexpected(LightingRTTestError::RayTracedShadowFailed);
             }
             if (stable != StableRunResult::Ok) {
@@ -873,6 +908,9 @@ struct LightingRTTestSuite {
             }
 
             uint32_t validationRaised = 0;
+            // Set when the render could not be captured at all, which is not a
+            // lighting failure and must not be reported as one.
+            bool captureFailed = false;
             // Which kind of failure the scene actually saw. "No reflection at
             // all" means RTR/SSR silently fell back to IBL, which is a
             // different bug from a reflection that is present but blown out or
@@ -882,6 +920,7 @@ struct LightingRTTestSuite {
             const auto stable = RunStableScene(
                 *engine, 10, "raytraced_reflection_coverage_and_artifacts",
                 [&](ZHLN::Engine& eng) -> bool {
+                    captureFailed = false;
                     reflectionMissing = false;
                     std::vector<double> reflectionSeries;
                     std::vector<double> saturationSeries;
@@ -891,6 +930,7 @@ struct LightingRTTestSuite {
                         const RgbImage frame      = Capture(eng, "headless_lighting_rt_reflect_f" + std::to_string(f) + ".ppm");
                         auto           checkFrame = ZHLN::Test::AssertTrue(frame.Valid());
                         if (!checkFrame) {
+                            captureFailed = true;
                             return false;
                         }
 
@@ -925,6 +965,9 @@ struct LightingRTTestSuite {
             );
 
             if (stable == StableRunResult::AssertionsFailed) {
+                if (captureFailed) {
+                    return std::unexpected(LightingRTTestError::RenderOutputBlank);
+                }
                 return std::unexpected(reflectionMissing ? LightingRTTestError::ReflectionMissing
                                                          : LightingRTTestError::ReflectionArtifacts);
             }
@@ -1046,13 +1089,18 @@ struct LightingRTTestSuite {
             }
 
             uint32_t validationRaised = 0;
+            // Set when the render could not be captured at all, which is not a
+            // lighting failure and must not be reported as one.
+            bool captureFailed = false;
 
             const auto stable = RunStableScene(
                 *engine, 8, "multi_light_cluster_accumulation_and_chromatic_interaction",
-                [](ZHLN::Engine& eng) -> bool {
+                [&](ZHLN::Engine& eng) -> bool {
+                    captureFailed = false;
                     const RgbImage frame      = Capture(eng, "headless_lighting_multi_cluster.ppm");
                     auto           checkFrame = ZHLN::Test::AssertTrue(frame.Valid());
                     if (!checkFrame) {
+                        captureFailed = true;
                         return false;
                     }
 
@@ -1145,6 +1193,9 @@ struct LightingRTTestSuite {
             );
 
             if (stable == StableRunResult::AssertionsFailed) {
+                if (captureFailed) {
+                    return std::unexpected(LightingRTTestError::RenderOutputBlank);
+                }
                 return std::unexpected(LightingRTTestError::MultiLightClusteringFailed);
             }
             if (stable != StableRunResult::Ok) {
@@ -1271,13 +1322,18 @@ struct LightingRTTestSuite {
             }
 
             uint32_t validationRaised = 0;
+            // Set when the render could not be captured at all, which is not a
+            // lighting failure and must not be reported as one.
+            bool captureFailed = false;
 
             const auto stable = RunStableScene(
                 *engine, 8, "multi_emissive_sources_and_surface_reflection_interaction",
-                [](ZHLN::Engine& eng) -> bool {
+                [&](ZHLN::Engine& eng) -> bool {
+                    captureFailed = false;
                     const RgbImage frame      = Capture(eng, "headless_lighting_multi_emissive.ppm");
                     auto           checkFrame = ZHLN::Test::AssertTrue(frame.Valid());
                     if (!checkFrame) {
+                        captureFailed = true;
                         return false;
                     }
 
@@ -1365,6 +1421,9 @@ struct LightingRTTestSuite {
             );
 
             if (stable == StableRunResult::AssertionsFailed) {
+                if (captureFailed) {
+                    return std::unexpected(LightingRTTestError::RenderOutputBlank);
+                }
                 return std::unexpected(LightingRTTestError::MultiEmissiveReflectionFailed);
             }
             if (stable != StableRunResult::Ok) {
@@ -1477,13 +1536,18 @@ struct LightingRTTestSuite {
             }
 
             uint32_t validationRaised = 0;
+            // Set when the render could not be captured at all, which is not a
+            // lighting failure and must not be reported as one.
+            bool captureFailed = false;
 
             const auto stable = RunStableScene(
                 *engine, 10, "dense_multi_light_emissive_materials_cross_interaction",
-                [](ZHLN::Engine& eng) -> bool {
+                [&](ZHLN::Engine& eng) -> bool {
+                    captureFailed = false;
                     const RgbImage frame      = Capture(eng, "headless_lighting_dense_interaction.ppm");
                     auto           checkFrame = ZHLN::Test::AssertTrue(frame.Valid());
                     if (!checkFrame) {
+                        captureFailed = true;
                         return false;
                     }
 
@@ -1506,6 +1570,9 @@ struct LightingRTTestSuite {
             );
 
             if (stable == StableRunResult::AssertionsFailed) {
+                if (captureFailed) {
+                    return std::unexpected(LightingRTTestError::RenderOutputBlank);
+                }
                 return std::unexpected(LightingRTTestError::DenseCrossInteractionFailed);
             }
             if (stable != StableRunResult::Ok) {
