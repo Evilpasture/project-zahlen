@@ -1077,45 +1077,57 @@ def resolve_accessory_bone(obj, bones):
 
     col_names = " ".join([c.name.lower() for c in obj.users_collection])
 
+    # 1. Skip curves, hair, tails, and already handled objects
     if "hair" in col_names or "hair" in name_lower or (name_lower.startswith("nurbspath") and "tail" not in col_names and "tail" not in name_lower and "nurbspath.002" not in name_lower and "nurbspath.026" not in name_lower and not is_fur_object(obj)):
         return None
     if name_lower in ["tail", "nurbspath.002"] or name_lower.startswith("__orig_curve"):
         return None
 
+    # 2. Skip hands and fingers (handled separately by hand skinning)
     if "hand.l" in col_names or "hand.r" in col_names or any(k in name_lower for k in ["plane.037", "plane.128", "circle.074", "circle.076", "circle.077", "circle.044", "circle.045"]):
         return None
 
-    # 1. Coat Buttons & Fasteners (Circle.002 on N_coat/Jacket)
+    # 3. DO NOT touch the main thigh meshes (preserves native Blender skinning)
+    if name_lower in ["roundcube.033", "roundcube.034"]:
+        return None
+
+    # 4. Thigh Hazard Bands & Rings (Accessories only)
+    if "roundcube.046" in name_lower or "cylinder.040" in name_lower or "thigh_band.r" in name_lower or ("roundcube.034" in p_chain and "roundcube" in name_lower):
+        return thigh_r_bone
+    if "roundcube.030" in name_lower or "cylinder.037" in name_lower or "thigh_band.l" in name_lower or ("roundcube.033" in p_chain and "roundcube" in name_lower):
+        return thigh_l_bone
+
+    # 5. Coat Buttons & Fasteners
     if "circle.002" in name_lower or "button" in name_lower or (any(k in p_chain for k in ["n_coat", "coat", "jacket"]) and any(k in name_lower for k in ["circle", "button", "clasp"])):
         if not is_fur_object(obj):
             return chest_bone
 
-    # 2. Tail Syringe Bulb, Needle & Nanite Fluid Tube (Tip, NurbsPath.026, Syringe, Nanite, Bulb)
+    # 6. Tail Syringe Bulb, Needle & Nanite Fluid Tube
     if any(k == name_lower or k in name_lower for k in ["tip", "tail_bulb", "syringe", "nanite", "acid", "nurbspath.026"]) or \
        any(k in p_chain for k in ["tip", "tail_tip", "tail"]):
         if not any(k in name_lower for k in ["belt", "waist", "hips"]):
             return tail_tip_bone
 
-    # 3. Left Forearm Internals & Sockets (Sphere.014, Cylinder.005, AUX_Door.L, Circle.082, Circle.083, Circle.084, Cylinder.063)
+    # 7. Left Forearm Internals & Sockets
     if "sphere.014" in name_lower or "cylinder.005" in p_chain or "aux_door.l" in p_chain or "cylinder.063" in name_lower or \
        any(k in name_lower for k in ["aux_door.l", "circle.082", "circle.083", "circle.084", "blade_parent.l", "smg_parent.l"]):
         return forearm_l_bone
 
-    # 4. Right Forearm Internals & Sockets (Sphere.015, AUX_Door.R, etc.)
+    # 8. Right Forearm Internals & Sockets
     if "sphere.015" in name_lower or "aux_door.r" in p_chain or any(k in name_lower for k in ["aux_door.r", "blade_parent.r", "smg_parent.r", "plane.045"]):
         return forearm_r_bone
 
-    # 5. Left Boot / Foot / Sole Details (Cylinder.042, Cylinder.043, Circle.059, and all sole children of Cylinder.042)
+    # 9. Left Boot / Foot / Sole Details
     if "cylinder.042" in p_chain or "cylinder.042" in name_lower or "cylinder.043" in name_lower or \
        "boot.l" in p_chain or "foot.l" in p_chain or "foot.l" in col_names or "boot.l" in col_names or "circle.059" in name_lower:
         return foot_l_bone
 
-    # 6. Right Boot / Foot / Sole Details (Cylinder.039, Cylinder.041, right boot sole details)
+    # 10. Right Boot / Foot / Sole Details
     if "cylinder.039" in p_chain or "cylinder.039" in name_lower or "cylinder.041" in name_lower or \
        "boot.r" in p_chain or "foot.r" in p_chain or "foot.r" in col_names or "boot.r" in col_names:
         return foot_r_bone
 
-    # 7. Head Accessories (Headband, Sockets like Cylinder.030 / Cylinder.038, Bulbs like Sphere.037, Hat Badge, Hat, Beanie)
+    # 11. Head Accessories (Headband, Hat, Badge, Beanie, Bulb Lights)
     if any(k in p_chain for k in ["headband", "head_parent", "head_accessories", "badge", "empty_badge", "headtop", "hat", "cap", "beanie"]) or \
        any(k in col_names for k in ["head accessories", "headband", "head", "hat"]) or \
        any(k in name_lower for k in ["headband", "badge", "cylinder.030", "cylinder.038", "sphere.037", "cylinder.017"]):
@@ -1125,17 +1137,11 @@ def resolve_accessory_bone(obj, bones):
         ]):
             return head_bone
 
-    # 8. Thigh Hazard Bands
-    if "cylinder.040" in name_lower or "roundcube.030" in p_chain or "thigh_band.r" in name_lower:
-        return thigh_r_bone
-    if "cylinder.037" in name_lower or "roundcube.046" in p_chain or "thigh_band.l" in name_lower:
-        return thigh_l_bone
-
-    # 9. Pilot Armband
+    # 12. Pilot Armband
     if "armband" in name_lower:
         return arm_l_bone
 
-    # 10. Waist / Belt
+    # 13. Waist / Belt
     if "waist" in name_lower or "belt_n" in name_lower:
         return hips_bone
 
@@ -1168,12 +1174,14 @@ def fix_and_bind_sd_n_accessories(main_rig):
         "chest": find_bone(["DEF-Chest", "Chest", "chest", "DEF-Spine_02", "Spine_02"], "DEF-Chest"),
         "thigh_r": find_bone(["DEF-Thigh.R", "DEF-thigh.R", "DEF-UpLeg.R", "DEF-upleg.R", "Thigh.R", "thigh.R", "DEF-Leg.R"], "DEF-Thigh.R"),
         "thigh_l": find_bone(["DEF-Thigh.L", "DEF-thigh.L", "DEF-UpLeg.L", "DEF-upleg.L", "Thigh.L", "thigh.L", "DEF-Leg.L"], "DEF-Thigh.L"),
+        "shin_r": find_bone(["DEF-Shin.R", "DEF-shin.R", "DEF-Leg.R", "Shin.R", "shin.R"], "DEF-Shin.R"),
+        "shin_l": find_bone(["DEF-Shin.L", "DEF-shin.L", "DEF-Leg.L", "Shin.L", "shin.L"], "DEF-Shin.L"),
+        "foot_r": find_bone(["DEF-Foot.R", "DEF-foot.R", "Foot.R", "DEF-Shin.R"], "DEF-Foot.R"),
+        "foot_l": find_bone(["DEF-Foot.L", "DEF-foot.L", "Foot.L", "DEF-Shin.L"], "DEF-Foot.L"),
         "forearm_l": find_bone(["DEF-Forearm.L", "DEF-forearm.L", "DEF-ForeArm.L", "DEF-Hand.L", "Forearm.L", "forearm.L"], "DEF-Forearm.L"),
         "forearm_r": find_bone(["DEF-Forearm.R", "DEF-forearm.R", "DEF-ForeArm.R", "DEF-Hand.R", "Forearm.R", "forearm.R"], "DEF-Forearm.R"),
         "hand_l": find_bone(["DEF-Hand.L", "DEF-hand.L", "DEF-Wrist.L", "Hand.L", "DEF-Forearm.L"], "DEF-Hand.L"),
         "hand_r": find_bone(["DEF-Hand.R", "DEF-hand.R", "DEF-Wrist.R", "Hand.R", "DEF-Forearm.R"], "DEF-Hand.R"),
-        "foot_r": find_bone(["DEF-Foot.R", "DEF-foot.R", "DEF-Shin.R", "DEF-shin.R", "Foot.R"], "DEF-Foot.R"),
-        "foot_l": find_bone(["DEF-Foot.L", "DEF-foot.L", "DEF-Shin.L", "DEF-shin.L", "Foot.L"], "DEF-Foot.L"),
         "tail_tip": find_bone([last_tail_bone, "CTR-Tail_13", "DEF-Tail_Tip", "DEF-Tail_4", "DEF-Tail.004", "DEF-Tail_5", "Tail_Tip"], last_tail_bone),
         "arm_l": find_bone(["DEF-Upper_arm.L", "DEF-upper_arm.L", "DEF-Forearm.L", "DEF-forearm.L", "Upper_Arm.L"], "DEF-Upper_arm.L"),
         "hips": find_bone(["DEF-Hips", "Hips", "hips", "DEF-Pelvis", "Pelvis"], "DEF-Hips"),
