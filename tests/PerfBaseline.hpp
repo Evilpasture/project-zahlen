@@ -143,21 +143,32 @@ struct PerfBaselineFile {
     return std::move(*parsed);
 }
 
-// Writes `text` to `path` atomically (tmp file + rename).
+// Writes `text` to `path` atomically (tmp file + rename). Uses only the
+// non-throwing filesystem overloads: the engine builds with -fno-exceptions,
+// so the throwing rename/remove are as banned as try/catch itself. Failures
+// are reported as stderr warnings — a stale cache file must never fail a test.
 inline void WriteBaselineAtomically(const std::filesystem::path& path, const std::string& text) {
-    try {
-        const std::filesystem::path temporary {path.string() + ".tmp"};
-        {
-            std::ofstream file {temporary, std::ios::binary | std::ios::trunc};
-            if (!file) {
-                ZHLN::Println(stderr, "[perf-baseline] cannot open {} for writing", temporary.string());
-                return;
-            }
-            file.write(text.data(), static_cast<std::streamsize>(text.size()));
+    const std::filesystem::path temporary {path.string() + ".tmp"};
+    {
+        std::ofstream file {temporary, std::ios::binary | std::ios::trunc};
+        if (!file) {
+            ZHLN::Println(stderr, "[perf-baseline] cannot open {} for writing", temporary.string());
+            return;
         }
-        std::filesystem::rename(temporary, path); // throws on failure
-    } catch (const std::filesystem::filesystem_error& error) {
-        ZHLN::Println(stderr, "[perf-baseline] writing {} failed: {}", path.string(), error.what());
+        file.write(text.data(), static_cast<std::streamsize>(text.size()));
+        if (!file) {
+            ZHLN::Println(stderr, "[perf-baseline] short write to {}", temporary.string());
+            return;
+        }
+    }
+    std::error_code ec;
+#if defined(_WIN32)
+    std::filesystem::remove(path, ec); // rename() refuses existing targets on Windows
+    ec.clear();
+#endif
+    std::filesystem::rename(temporary, path, ec);
+    if (ec) {
+        ZHLN::Println(stderr, "[perf-baseline] rename failed: {}", ec.message());
     }
 }
 
