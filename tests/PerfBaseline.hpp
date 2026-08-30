@@ -143,6 +143,24 @@ struct PerfBaselineFile {
     return std::move(*parsed);
 }
 
+// Writes `text` to `path` atomically (tmp file + rename).
+inline void WriteBaselineAtomically(const std::filesystem::path& path, const std::string& text) {
+    try {
+        const std::filesystem::path temporary {path.string() + ".tmp"};
+        {
+            std::ofstream file {temporary, std::ios::binary | std::ios::trunc};
+            if (!file) {
+                ZHLN::Println(stderr, "[perf-baseline] cannot open {} for writing", temporary.string());
+                return;
+            }
+            file.write(text.data(), static_cast<std::streamsize>(text.size()));
+        }
+        std::filesystem::rename(temporary, path); // throws on failure
+    } catch (const std::filesystem::filesystem_error& error) {
+        ZHLN::Println(stderr, "[perf-baseline] writing {} failed: {}", path.string(), error.what());
+    }
+}
+
 // ============================================================================
 // Store + Check
 // ============================================================================
@@ -178,7 +196,7 @@ namespace detail {
         }
 
         void SaveNow() {
-            const std::lock_guard<ZHLN::Mutex> lock {mutex};
+            const MutexGuard lock(mutex);
 
             // Read-modify-write through the reflected file struct: only OUR
             // machine's section is replaced, so other machines' baselines
@@ -206,8 +224,8 @@ namespace detail {
     Result result;
     result.limitPct = limitPct > 0.0 ? limitPct : DefaultLimitPercent();
 
-    auto&                             store = detail::Store();
-    const std::lock_guard<ZHLN::Mutex> lock {store.mutex};
+    auto&                store = detail::Store();
+    const MutexGuard     lock(store.mutex);
 
     if (!store.loaded) {
         const PerfBaselineFile file = LoadBaselineFile(BaselineFilePath());
