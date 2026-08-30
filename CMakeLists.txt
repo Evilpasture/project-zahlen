@@ -64,67 +64,12 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # --- DETECT C++26 LANGUAGE FEATURE FLAGS ---
 include(CheckCXXCompilerFlag)
-include(CheckCXXSourceCompiles)
 check_cxx_compiler_flag("-freflection" COMPILER_HAS_REFLECTION)
 
 if(COMPILER_HAS_REFLECTION)
     message(STATUS "C++26 Static Reflection supported via -freflection")
 else()
     message(STATUS "C++26 Static Reflection not supported by current compiler. Using generated script for source code flattening.")
-endif()
-
-set(ZHLN_CONTRACT_SEMANTIC "enforce" CACHE STRING "Preferred C++26 contract semantic for supported compilers")
-set_property(CACHE ZHLN_CONTRACT_SEMANTIC PROPERTY STRINGS ignore enforce observe quick-enforce quick_enforce)
-
-set(_ZHLN_CONTRACT_TEST_SOURCE [[
-int f(int x)
-    pre(x > 0)
-    post(r: r > 0)
-{
-    contract_assert(x > 0);
-    return x;
-}
-
-int main() {
-    return f(1) - 1;
-}
-]])
-
-function(zahlen_try_contract_flags OUT_VAR OUT_FLAGS)
-    set(_ZHLN_SAVED_CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS}")
-    foreach(_flags IN LISTS ARGN)
-        set(CMAKE_REQUIRED_FLAGS "${_ZHLN_SAVED_CMAKE_REQUIRED_FLAGS} ${_flags}")
-        unset(_ZHLN_CONTRACTS_COMPILE CACHE)
-        check_cxx_source_compiles("${_ZHLN_CONTRACT_TEST_SOURCE}" _ZHLN_CONTRACTS_COMPILE)
-        if(_ZHLN_CONTRACTS_COMPILE)
-            set(${OUT_VAR} TRUE PARENT_SCOPE)
-            set(${OUT_FLAGS} "${_flags}" PARENT_SCOPE)
-            set(CMAKE_REQUIRED_FLAGS "${_ZHLN_SAVED_CMAKE_REQUIRED_FLAGS}")
-            return()
-        endif()
-    endforeach()
-    set(CMAKE_REQUIRED_FLAGS "${_ZHLN_SAVED_CMAKE_REQUIRED_FLAGS}")
-    set(${OUT_VAR} FALSE PARENT_SCOPE)
-    set(${OUT_FLAGS} "" PARENT_SCOPE)
-endfunction()
-
-set(_ZHLN_CONTRACT_EVAL_SEMANTIC "${ZHLN_CONTRACT_SEMANTIC}")
-string(REPLACE "-" "_" _ZHLN_CONTRACT_EVAL_SEMANTIC "${_ZHLN_CONTRACT_EVAL_SEMANTIC}")
-set(_ZHLN_CONTRACT_FLAG_CANDIDATES "-fcontracts")
-list(PREPEND _ZHLN_CONTRACT_FLAG_CANDIDATES "-fcontracts -fcontract-semantic=${ZHLN_CONTRACT_SEMANTIC}")
-list(PREPEND _ZHLN_CONTRACT_FLAG_CANDIDATES "-fcontracts -fcontract-evaluation-semantic=${_ZHLN_CONTRACT_EVAL_SEMANTIC}")
-if(_ZHLN_CONTRACT_EVAL_SEMANTIC STREQUAL "observe")
-    list(PREPEND _ZHLN_CONTRACT_FLAG_CANDIDATES "-fcontracts -fcontract-evaluation-semantic=observed")
-elseif(_ZHLN_CONTRACT_EVAL_SEMANTIC STREQUAL "ignore")
-    list(PREPEND _ZHLN_CONTRACT_FLAG_CANDIDATES "-fcontracts -fcontract-evaluation-semantic=ignored")
-endif()
-
-zahlen_try_contract_flags(COMPILER_HAS_CONTRACTS ZHLN_CONTRACT_FLAG_STRING ${_ZHLN_CONTRACT_FLAG_CANDIDATES})
-if(COMPILER_HAS_CONTRACTS)
-    separate_arguments(ZHLN_CONTRACT_FLAG_ARGS NATIVE_COMMAND "${ZHLN_CONTRACT_FLAG_STRING}")
-    message(STATUS "C++26 Contracts supported via ${ZHLN_CONTRACT_FLAG_STRING}")
-else()
-    message(FATAL_ERROR "This branch uses C++26 contracts in public headers, but the compiler rejected every probed flag set: ${_ZHLN_CONTRACT_FLAG_CANDIDATES}")
 endif()
 
 # --- PYTHON INTERPRETER SELECTION ---
@@ -479,9 +424,6 @@ set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} ${ZHLN_COMPILE_WARNINGS_STR} -fn
 
 if(COMPILER_HAS_REFLECTION)
     set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} -freflection")
-endif()
-if(COMPILER_HAS_CONTRACTS)
-    set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} ${ZHLN_CONTRACT_FLAG_STRING}")
 endif()
 
 string(STRIP "${COMPILER_FLAGS_LIST}" COMPILER_FLAGS_LIST)
@@ -913,11 +855,6 @@ function(zahlen_enable_reflection TARGET_NAME)
             target_compile_options(${TARGET_NAME} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-fannotation-attributes>")
         endif()
         target_compile_definitions(${TARGET_NAME} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:__cpp_impl_reflection=202603L>")
-    endif()
-    if(COMPILER_HAS_CONTRACTS)
-        foreach(_contract_flag IN LISTS ZHLN_CONTRACT_FLAG_ARGS)
-            target_compile_options(${TARGET_NAME} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:${_contract_flag}>")
-        endforeach()
     endif()
     zahlen_use_custom_libcxx(${TARGET_NAME})
 endfunction()
