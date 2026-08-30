@@ -30,6 +30,12 @@
 //      interacting with an emissive monolith over a diverse PBR material grid.
 
 #include "TestsFramework.hpp"
+#include "helpers/HeadlessEngineFixture.hpp"
+// This TU owns the stb_image_write implementation for its binary. Exactly one
+// TU per test binary may define this -- a second is a duplicate-symbol link
+// error. See tests/helpers/ImageTesting.hpp.
+#define ZHLN_TEST_IMAGE_WRITE_IMPL
+#include "helpers/ImageTesting.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
@@ -55,8 +61,6 @@
 #include <string_view>
 #include <vector>
 
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include <stb_image_write.h>
 
 // ============================================================================
 // Test Error Types
@@ -80,448 +84,50 @@ enum class LightingRTTestError : uint8_t {
 };
 
 // ============================================================================
-// Image & Metric Helpers
+// Shared Helpers
 // ============================================================================
+//
+// Frame I/O, pixel statistics and the headless engine lifecycle live in
+// tests/helpers/. The using declarations below keep the call sites reading as
+// they did when every one of these was defined locally in this file.
 
 namespace {
 
-struct RgbImage {
-    int                  width  = 0;
-    int                  height = 0;
-    std::vector<uint8_t> rgb;
+using ZHLN::Test::Image::ChangedRegion;
+using ZHLN::Test::Image::CoefficientOfVariation;
+using ZHLN::Test::Image::CompareFrames;
+using ZHLN::Test::Image::DiffRegion;
+using ZHLN::Test::Image::FrameDiff;
+using ZHLN::Test::Image::FrameMetrics;
+using ZHLN::Test::Image::LoadPPM;
+using ZHLN::Test::Image::Luma;
+using ZHLN::Test::Image::Mean;
+using ZHLN::Test::Image::MeasureImage;
+using ZHLN::Test::Image::MeasureSubRegion;
+using ZHLN::Test::Image::PngPathOf;
+using ZHLN::Test::Image::RgbImage;
+using ZHLN::Test::Image::SavePNG;
+using ZHLN::Test::Image::WriteAmplifiedDiff;
+using ZHLN::Test::Image::WriteRegionCrop;
 
-    [[nodiscard]] bool Valid() const noexcept {
-        return width > 0 && height > 0 && rgb.size() == static_cast<size_t>(width) * static_cast<size_t>(height) * 3u;
-    }
-};
+using ZHLN::Test::Headless::Capture;
+using ZHLN::Test::Headless::DisableTAA;
+using ZHLN::Test::Headless::RunStableScene;
+using ZHLN::Test::Headless::StableRunResult;
+using ZHLN::Test::Headless::TickFrames;
 
-[[nodiscard]] RgbImage LoadPPM(const std::string& path) {
-    RgbImage      img;
-    std::ifstream ppm(path, std::ios::binary);
-    if (!ppm.is_open()) {
-        return img;
-    }
-
-    std::string header;
-    int         maxColor = 0;
-    ppm >> header >> img.width >> img.height >> maxColor;
-    ppm.get();
-
-    if (img.width <= 0 || img.height <= 0) {
-        return {};
-    }
-
-    img.rgb.resize(static_cast<size_t>(img.width) * static_cast<size_t>(img.height) * 3u);
-    ppm.read(reinterpret_cast<char*>(img.rgb.data()), static_cast<std::streamsize>(img.rgb.size()));
-    return img;
+/// This suite needs a larger physics slab than the fixture default, and the
+/// window title identifies it in a capture directory shared with other suites.
+[[nodiscard]] inline auto CreateTestEngine(uint32_t width = 640, uint32_t height = 480) -> std::unique_ptr<ZHLN::Engine> {
+    return ZHLN::Test::Headless::CreateEngine(ZHLN::Test::Headless::EngineOptions {
+        .appName               = "Headless Lighting RT Test",
+        .width                 = width,
+        .height                = height,
+        .maxBodies             = 512,
+        .maxBodyPairs          = 1024,
+        .maxContactConstraints = 1024,
+    });
 }
-
-[[nodiscard]] std::string PngPathOf(std::string_view ppmPath) {
-    std::string png(ppmPath);
-    if (png.size() >= 4 && (png.ends_with(".ppm") || png.ends_with(".PPM"))) {
-        png.resize(png.size() - 4);
-    }
-    png += ".png";
-    return png;
-}
-
-[[nodiscard]] bool SavePNG(const std::string& path, const RgbImage& img) {
-    if (!img.Valid()) {
-        return false;
-    }
-    return stbi_write_png(path.c_str(), img.width, img.height, 3, img.rgb.data(), img.width * 3) != 0;
-}
-
-inline double Luma(uint8_t r, uint8_t g, uint8_t b) noexcept {
-    return 0.2126 * static_cast<double>(r) + 0.7152 * static_cast<double>(g) + 0.0722 * static_cast<double>(b);
-}
-
-struct FrameMetrics {
-    uint32_t total       = 0;
-    uint32_t lit         = 0;
-    uint32_t dark        = 0;
-    uint32_t saturated   = 0;
-    uint32_t red         = 0;
-    uint32_t green       = 0;
-    uint32_t blue        = 0;
-    uint32_t yellow      = 0;
-    uint32_t cyan        = 0;
-    uint32_t redPeak     = 0;
-    uint32_t redIsolated = 0;
-    double   meanLuma    = 0.0;
-};
-
-struct NormalizedRect {
-    double x0 = 0.0, y0 = 0.0, x1 = 1.0, y1 = 1.0;
-};
-
-struct SubRegionStats {
-    uint32_t pixels      = 0;
-    double   meanR       = 0.0;
-    double   meanG       = 0.0;
-    double   meanB       = 0.0;
-    double   meanLuma    = 0.0;
-    double   maxLuma     = 0.0;
-    uint32_t dominantRed = 0;
-    uint32_t dominantGrn = 0;
-    uint32_t dominantBlu = 0;
-    uint32_t yellowMix   = 0;
-    uint32_t cyanMix     = 0;
-    uint32_t saturated   = 0;
-};
-
-[[nodiscard]] SubRegionStats MeasureSubRegion(const RgbImage& img, const NormalizedRect& rect) {
-    SubRegionStats stats;
-    if (!img.Valid()) {
-        return stats;
-    }
-
-    const int x0 = std::clamp(static_cast<int>(rect.x0 * img.width), 0, img.width - 1);
-    const int y0 = std::clamp(static_cast<int>(rect.y0 * img.height), 0, img.height - 1);
-    const int x1 = std::clamp(static_cast<int>(rect.x1 * img.width), x0 + 1, img.width);
-    const int y1 = std::clamp(static_cast<int>(rect.y1 * img.height), y0 + 1, img.height);
-
-    double sumR = 0.0, sumG = 0.0, sumB = 0.0, sumL = 0.0;
-
-    for (int y = y0; y < y1; ++y) {
-        for (int x = x0; x < x1; ++x) {
-            const size_t  i = (static_cast<size_t>(y) * static_cast<size_t>(img.width) + static_cast<size_t>(x)) * 3u;
-            const uint8_t r = img.rgb[i + 0];
-            const uint8_t g = img.rgb[i + 1];
-            const uint8_t b = img.rgb[i + 2];
-            const double  l = Luma(r, g, b);
-
-            sumR += r;
-            sumG += g;
-            sumB += b;
-            sumL += l;
-            stats.maxLuma = std::max(stats.maxLuma, l);
-            ++stats.pixels;
-
-            if (r >= 45 && r >= 1.35 * g && r >= 1.35 * b) {
-                ++stats.dominantRed;
-            }
-            if (g >= 45 && g >= 1.35 * r && g >= 1.35 * b) {
-                ++stats.dominantGrn;
-            }
-            if (b >= 45 && b >= 1.35 * r && b >= 1.35 * g) {
-                ++stats.dominantBlu;
-            }
-            if (r >= 45 && g >= 45 && b <= 0.60 * std::min(r, g)) {
-                ++stats.yellowMix;
-            }
-            if (g >= 45 && b >= 45 && r <= 0.60 * std::min(g, b)) {
-                ++stats.cyanMix;
-            }
-            if (r >= 250 && g >= 250 && b >= 250) {
-                ++stats.saturated;
-            }
-        }
-    }
-
-    if (stats.pixels > 0) {
-        const double n = static_cast<double>(stats.pixels);
-        stats.meanR    = sumR / n;
-        stats.meanG    = sumG / n;
-        stats.meanB    = sumB / n;
-        stats.meanLuma = sumL / n;
-    }
-
-    return stats;
-}
-
-[[nodiscard]] FrameMetrics MeasureImage(const RgbImage& img, double minRowFraction = 0.0) {
-    FrameMetrics m;
-    if (!img.Valid()) {
-        return m;
-    }
-
-    const int minRow = static_cast<int>(std::ceil(minRowFraction * static_cast<double>(img.height)));
-
-    double lumaSum = 0.0;
-    for (size_t i = 0; i < img.rgb.size(); i += 3) {
-        const size_t pixel = i / 3;
-        const int    y     = static_cast<int>(pixel / static_cast<size_t>(img.width));
-        if (y < minRow) {
-            continue;
-        }
-
-        const uint8_t r = img.rgb[i + 0];
-        const uint8_t g = img.rgb[i + 1];
-        const uint8_t b = img.rgb[i + 2];
-        const double  l = Luma(r, g, b);
-
-        ++m.total;
-        lumaSum += l;
-
-        if (l > 40.0) {
-            ++m.lit;
-        }
-        if (l < 24.0) {
-            ++m.dark;
-        }
-        if (r >= 250 && g >= 250 && b >= 250) {
-            ++m.saturated;
-        }
-        if (r >= 60 && r >= 1.6 * static_cast<double>(g) && r >= 1.6 * static_cast<double>(b)) {
-            ++m.red;
-            m.redPeak = std::max(m.redPeak, static_cast<uint32_t>(r));
-
-            const int  x               = static_cast<int>(pixel % static_cast<size_t>(img.width));
-            uint32_t   blackNeighbours = 0;
-            const auto isBlackAt       = [&](int nx, int ny) -> bool {
-                if (nx < 0 || ny < 0 || nx >= img.width || ny >= img.height) {
-                    return true;
-                }
-                const size_t ni = (static_cast<size_t>(ny) * static_cast<size_t>(img.width) + static_cast<size_t>(nx)) * 3u;
-                return static_cast<int>(img.rgb[ni + 0]) + static_cast<int>(img.rgb[ni + 1]) + static_cast<int>(img.rgb[ni + 2]) <= 6;
-            };
-            blackNeighbours += isBlackAt(x - 1, y) ? 1u : 0u;
-            blackNeighbours += isBlackAt(x + 1, y) ? 1u : 0u;
-            blackNeighbours += isBlackAt(x, y - 1) ? 1u : 0u;
-            blackNeighbours += isBlackAt(x, y + 1) ? 1u : 0u;
-            if (blackNeighbours >= 3) {
-                ++m.redIsolated;
-            }
-        }
-        if (g >= 60 && g >= 1.6 * static_cast<double>(r) && g >= 1.6 * static_cast<double>(b)) {
-            ++m.green;
-        }
-        if (b >= 60 && b >= 1.6 * static_cast<double>(r) && b >= 1.6 * static_cast<double>(g)) {
-            ++m.blue;
-        }
-        if (r >= 60 && g >= 60 && b <= 50) {
-            ++m.yellow;
-        }
-        if (g >= 60 && b >= 60 && r <= 50) {
-            ++m.cyan;
-        }
-    }
-
-    if (m.total > 0) {
-        m.meanLuma = lumaSum / static_cast<double>(m.total);
-    }
-    return m;
-}
-
-// ============================================================================
-// Named Expectations
-// ============================================================================
-
-// ExpectTrue files the failure against its file:line, which is all the summary
-// prints -- enough to locate the statement, not enough to tell which operand
-// missed or by how much. This wraps it and echoes the label plus the measured
-// operands, so a red run names the failed check and the frame statistics behind
-// it instead of a bare "Expected condition to be: true".
-template <typename... Args>
-[[nodiscard]] bool CheckCondition(bool condition, std::string_view label, std::string_view fmt, Args&&... args) {
-    if (ZHLN::Test::ExpectTrue(condition)) {
-        return true;
-    }
-    ZHLN::Println("      {}[CHECK FAILED]{} {}", ZHLN::Color::Red, ZHLN::Color::Reset, label);
-    ZHLN::Println("        {}", ZHLN::Format(fmt, std::forward<Args>(args)...).string_view());
-    return false;
-}
-
-struct FrameDiff {
-    uint32_t over12  = 0;
-    uint32_t over32  = 0;
-    double   meanAbs = 0.0;
-    double   frac12  = 0.0;
-    double   frac32  = 0.0;
-};
-
-struct ChangedRegion {
-    uint32_t count     = 0;
-    int      minX      = 0;
-    int      maxX      = 0;
-    int      minY      = 0;
-    int      maxY      = 0;
-    int      maxDelta  = 0;
-    double   meanDelta = 0.0;
-    double   aR = 0.0, aG = 0.0, aB = 0.0;
-    double   bR = 0.0, bG = 0.0, bB = 0.0;
-};
-
-[[nodiscard]] ChangedRegion DiffRegion(const RgbImage& a, const RgbImage& b, int threshold = 32) {
-    ChangedRegion r;
-    if (!a.Valid() || !b.Valid() || a.width != b.width || a.height != b.height) {
-        return r;
-    }
-
-    r.minX       = a.width;
-    r.minY       = a.height;
-    r.maxX       = -1;
-    r.maxY       = -1;
-    uint64_t sum = 0, sumAr = 0, sumAg = 0, sumAb = 0, sumBr = 0, sumBg = 0, sumBb = 0;
-
-    for (size_t i = 0; i < a.rgb.size(); i += 3) {
-        const int dr    = std::abs(static_cast<int>(a.rgb[i + 0]) - static_cast<int>(b.rgb[i + 0]));
-        const int dg    = std::abs(static_cast<int>(a.rgb[i + 1]) - static_cast<int>(b.rgb[i + 1]));
-        const int db    = std::abs(static_cast<int>(a.rgb[i + 2]) - static_cast<int>(b.rgb[i + 2]));
-        const int worst = std::max({dr, dg, db});
-        r.maxDelta      = std::max(r.maxDelta, worst);
-        if (worst > threshold) {
-            const size_t pixel = i / 3;
-            const int    x     = static_cast<int>(pixel % static_cast<size_t>(a.width));
-            const int    y     = static_cast<int>(pixel / static_cast<size_t>(a.width));
-            ++r.count;
-            r.minX = std::min(r.minX, x);
-            r.maxX = std::max(r.maxX, x);
-            r.minY = std::min(r.minY, y);
-            r.maxY = std::max(r.maxY, y);
-            sum += static_cast<uint64_t>(worst);
-            sumAr += a.rgb[i + 0];
-            sumAg += a.rgb[i + 1];
-            sumAb += a.rgb[i + 2];
-            sumBr += b.rgb[i + 0];
-            sumBg += b.rgb[i + 1];
-            sumBb += b.rgb[i + 2];
-        }
-    }
-
-    if (r.count == 0) {
-        r.minX = r.maxX = r.minY = r.maxY = 0;
-    } else {
-        r.meanDelta = static_cast<double>(sum) / static_cast<double>(r.count);
-        r.aR        = static_cast<double>(sumAr) / r.count;
-        r.aG        = static_cast<double>(sumAg) / r.count;
-        r.aB        = static_cast<double>(sumAb) / r.count;
-        r.bR        = static_cast<double>(sumBr) / r.count;
-        r.bG        = static_cast<double>(sumBg) / r.count;
-        r.bB        = static_cast<double>(sumBb) / r.count;
-    }
-    return r;
-}
-
-void WriteRegionCrop(const std::string& path, const RgbImage& img, const ChangedRegion& region) {
-    if (!img.Valid() || region.count == 0) {
-        return;
-    }
-    const int x0 = std::max(0, region.minX);
-    const int y0 = std::max(0, region.minY);
-    const int x1 = std::min(img.width - 1, region.maxX);
-    const int y1 = std::min(img.height - 1, region.maxY);
-    if (x1 < x0 || y1 < y0) {
-        return;
-    }
-
-    const int     w = x1 - x0 + 1;
-    const int     h = y1 - y0 + 1;
-    std::ofstream out(path, std::ios::binary);
-    if (!out.is_open()) {
-        return;
-    }
-    out << "P6\n" << w << " " << h << "\n255\n";
-    std::vector<uint8_t> crop(static_cast<size_t>(w) * h * 3);
-    for (int y = y0; y <= y1; ++y) {
-        for (int x = x0; x <= x1; ++x) {
-            const size_t src = (static_cast<size_t>(y) * img.width + static_cast<size_t>(x)) * 3u;
-            const size_t dst = (static_cast<size_t>(y - y0) * w + static_cast<size_t>(x - x0)) * 3u;
-            crop[dst + 0]    = img.rgb[src + 0];
-            crop[dst + 1]    = img.rgb[src + 1];
-            crop[dst + 2]    = img.rgb[src + 2];
-        }
-    }
-    out.write(reinterpret_cast<const char*>(crop.data()), static_cast<std::streamsize>(crop.size()));
-
-    RgbImage pngCrop {.width = w, .height = h, .rgb = crop};
-    (void) SavePNG(PngPathOf(path), pngCrop);
-}
-
-void WriteAmplifiedDiff(const std::string& path, const RgbImage& a, const RgbImage& b) {
-    if (!a.Valid() || !b.Valid() || a.width != b.width || a.height != b.height) {
-        return;
-    }
-    std::ofstream out(path, std::ios::binary);
-    if (!out.is_open()) {
-        return;
-    }
-    out << "P6\n" << a.width << " " << a.height << "\n255\n";
-
-    std::vector<uint8_t> amplified(a.rgb.size());
-    for (size_t i = 0; i < a.rgb.size(); ++i) {
-        const int d  = std::abs(static_cast<int>(a.rgb[i]) - static_cast<int>(b.rgb[i]));
-        amplified[i] = static_cast<uint8_t>(std::min(255, d * 4));
-    }
-    out.write(reinterpret_cast<const char*>(amplified.data()), static_cast<std::streamsize>(amplified.size()));
-
-    RgbImage pngDiff {.width = a.width, .height = a.height, .rgb = amplified};
-    (void) SavePNG(PngPathOf(path), pngDiff);
-}
-
-[[nodiscard]] FrameDiff CompareFrames(const RgbImage& a, const RgbImage& b) {
-    FrameDiff d;
-    if (!a.Valid() || !b.Valid() || a.width != b.width || a.height != b.height) {
-        return d;
-    }
-
-    uint64_t sum = 0;
-    for (size_t i = 0; i < a.rgb.size(); i += 3) {
-        const int dr    = std::abs(static_cast<int>(a.rgb[i + 0]) - static_cast<int>(b.rgb[i + 0]));
-        const int dg    = std::abs(static_cast<int>(a.rgb[i + 1]) - static_cast<int>(b.rgb[i + 1]));
-        const int db    = std::abs(static_cast<int>(a.rgb[i + 2]) - static_cast<int>(b.rgb[i + 2]));
-        const int worst = std::max({dr, dg, db});
-        sum += static_cast<uint64_t>(dr + dg + db);
-        if (worst > 12) {
-            ++d.over12;
-        }
-        if (worst > 32) {
-            ++d.over32;
-        }
-    }
-
-    const size_t pixels = a.rgb.size() / 3;
-    if (pixels > 0) {
-        d.meanAbs = static_cast<double>(sum) / (static_cast<double>(pixels) * 3.0);
-        d.frac12  = static_cast<double>(d.over12) / static_cast<double>(pixels);
-        d.frac32  = static_cast<double>(d.over32) / static_cast<double>(pixels);
-    }
-    return d;
-}
-
-[[nodiscard]] double Mean(const std::vector<double>& values) {
-    if (values.empty()) {
-        return 0.0;
-    }
-    double sum = 0.0;
-    for (double v: values) {
-        sum += v;
-    }
-    return sum / static_cast<double>(values.size());
-}
-
-[[nodiscard]] double StdDev(const std::vector<double>& values, double mean) {
-    if (values.size() < 2) {
-        return 0.0;
-    }
-    double sumSq = 0.0;
-    for (double v: values) {
-        const double d = v - mean;
-        sumSq += d * d;
-    }
-    return std::sqrt(sumSq / static_cast<double>(values.size() - 1));
-}
-
-[[nodiscard]] double CoefficientOfVariation(const std::vector<double>& values) {
-    const double mean = Mean(values);
-    if (mean <= 1e-9) {
-        return 0.0;
-    }
-    return StdDev(values, mean) / mean;
-}
-
-} // namespace
-
-// ============================================================================
-// Device-Lost-Aware Scenario Runner
-// ============================================================================
-
-namespace {
-
-enum class StableRunResult : uint8_t { Ok, AssertionsFailed, PersistentDeviceLost };
-
-constexpr uint32_t kMaxDeviceLostRecoveries = 2;
 
 } // namespace
 
@@ -537,104 +143,6 @@ struct LightingRTTestSuite {
 
     ~LightingRTTestSuite() {
         ZHLN::TaskSystem::Shutdown();
-    }
-
-    static auto CreateTestEngine(uint32_t width = 640, uint32_t height = 480) -> std::unique_ptr<ZHLN::Engine> {
-        ZHLN::DefaultPreset::SetDisabled(true);
-
-        const ZHLN::EngineConfig cfg {
-            .physics = {.maxBodies = 512, .maxBodyPairs = 1024, .maxContactConstraints = 1024, .tempAllocatorSize = 8 * 1024 * 1024},
-            .render  = {
-                .appName        = "Headless Lighting RT Test",
-                .width          = width,
-                .height         = height,
-                .vsync          = false,
-                .fullscreen     = false,
-                .validationMode = ZHLN::ValidationMode::On,
-                .headless       = true
-            }
-        };
-
-        auto engineRes = ZHLN::Engine::Create(cfg);
-        if (!engineRes) {
-            return nullptr;
-        }
-
-        auto engine = std::move(engineRes.value());
-        engine->InitializeDefaultScene();
-        return engine;
-    }
-
-    static void DisableTAA(ZHLN::Engine& engine) {
-        auto& reg = engine.GetRegistry();
-        for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::AASettingsComponent>()) {
-            reg.Patch<ZHLN::Components::AASettingsComponent>(e, [](auto& aa) {
-                aa.state.mode        = ZHLN::AAMode::None;
-                aa.state.jitterX     = 0.0f;
-                aa.state.jitterY     = 0.0f;
-                aa.state.prevJitterX = 0.0f;
-                aa.state.prevJitterY = 0.0f;
-                aa.state.frameIndex  = 0;
-            });
-        }
-        engine.GetRenderContext().SetAAState(ZHLN::AAState {.mode = ZHLN::AAMode::None});
-    }
-
-    static void TickFrames(ZHLN::Engine& engine, uint32_t frames, float dt = 1.0f / 60.0f) {
-        for (uint32_t i = 0; i < frames; ++i) {
-            engine.ProcessEvents();
-            const auto status = engine.Tick(dt, ZHLN::GameplayDriver::Cpp);
-            ZHLN::Test::ExpectEq(status, ZHLN::GameplayStatus::OK);
-        }
-    }
-
-    static auto Capture(ZHLN::Engine& engine, const std::string& path) -> RgbImage {
-        if (!engine.GetRenderContext().CaptureScreenshotPPM(path)) {
-            return {};
-        }
-        const RgbImage img = LoadPPM(path);
-        if (img.Valid()) {
-            (void) SavePNG(PngPathOf(path), img);
-        }
-        return img;
-    }
-
-    template <typename SceneFn>
-    [[nodiscard]] static StableRunResult
-        RunStableScene(ZHLN::Engine& engine, uint32_t warmupFrames, const char* label, SceneFn&& sceneFn, uint32_t* outValidationDelta = nullptr) {
-        auto&        ctx         = ZHLN::Test::GetThreadLocalContext();
-        const size_t failureMark = ctx.failures.size();
-
-        for (uint32_t attempt = 0; attempt <= kMaxDeviceLostRecoveries; ++attempt) {
-            if (attempt > 0) {
-                ctx.failures.resize(failureMark);
-                ZHLN::Println(
-                    "    [WARN] {}: Vulkan device lost; engine hot-rebuilt. Re-warming and retrying (attempt {}/{}).", label, attempt, kMaxDeviceLostRecoveries
-                );
-            }
-
-            const uint32_t validationBefore = ZHLN::RenderContext::ValidationErrorCount();
-
-            ZHLN::RenderContext* const preWarmup = &engine.GetRenderContext();
-            TickFrames(engine, warmupFrames);
-            if (&engine.GetRenderContext() != preWarmup) {
-                continue;
-            }
-
-            ZHLN::RenderContext* const preWork = &engine.GetRenderContext();
-            const bool                 ok      = sceneFn(engine);
-            if (ok && &engine.GetRenderContext() == preWork) {
-                if (outValidationDelta != nullptr) {
-                    *outValidationDelta = ZHLN::RenderContext::ValidationErrorCount() - validationBefore;
-                }
-                return StableRunResult::Ok;
-            }
-            if (&engine.GetRenderContext() == preWork) {
-                return StableRunResult::AssertionsFailed;
-            }
-        }
-
-        return StableRunResult::PersistentDeviceLost;
     }
 
     struct Tests {
@@ -1552,19 +1060,19 @@ struct LightingRTTestSuite {
                     // exposure/tone-map outputs, not lighting behaviour.
 
                     // 1. Quadrant Chromatic Purity
-                    const bool redDominant = CheckCondition(
+                    const bool redDominant = ZHLN_CHECK(
                         quadTL.meanR > 1.3 * quadTL.meanG && quadTL.meanR > 1.3 * quadTL.meanB && quadTL.dominantRed * 100 > quadTL.pixels,
                         "top-left quadrant is red-dominant",
                         "meanRGB=({:.1f},{:.1f},{:.1f}), dominantRed={}/{} px (need >1% of the quad)", quadTL.meanR, quadTL.meanG, quadTL.meanB,
                         quadTL.dominantRed, quadTL.pixels
                     );
-                    const bool greenDominant = CheckCondition(
+                    const bool greenDominant = ZHLN_CHECK(
                         quadTR.meanG > 1.3 * quadTR.meanR && quadTR.meanG > 1.3 * quadTR.meanB && quadTR.dominantGrn * 100 > quadTR.pixels,
                         "top-right quadrant is green-dominant",
                         "meanRGB=({:.1f},{:.1f},{:.1f}), dominantGreen={}/{} px (need >1% of the quad)", quadTR.meanR, quadTR.meanG, quadTR.meanB,
                         quadTR.dominantGrn, quadTR.pixels
                     );
-                    const bool blueDominant = CheckCondition(
+                    const bool blueDominant = ZHLN_CHECK(
                         quadBL.meanB > 1.3 * quadBL.meanR && quadBL.meanB > 1.3 * quadBL.meanG && quadBL.dominantBlu * 100 > quadBL.pixels,
                         "bottom-left quadrant is blue-dominant",
                         "meanRGB=({:.1f},{:.1f},{:.1f}), dominantBlue={}/{} px (need >1% of the quad)", quadBL.meanR, quadBL.meanG, quadBL.meanB,
@@ -1575,7 +1083,7 @@ struct LightingRTTestSuite {
                     // The pedestal sits under all four quadrants, so it must out-shine
                     // each pure quadrant in its own channel -- lights accumulating rather
                     // than the nearest one winning.
-                    const bool additiveMixing = CheckCondition(
+                    const bool additiveMixing = ZHLN_CHECK(
                         centerMix.meanR > 1.3 * centerMix.meanB && centerMix.meanG > 1.3 * centerMix.meanB && centerMix.meanR > 0.6 * centerMix.meanG &&
                             centerMix.meanG > 0.6 * centerMix.meanR && centerMix.meanR > 0.5 * quadTL.meanR && centerMix.meanG > 0.5 * quadTR.meanG &&
                             centerMix.yellowMix * 100 > centerMix.pixels,
@@ -1591,16 +1099,16 @@ struct LightingRTTestSuite {
                     // hue-aware and, as a share of the sampled area, exposure-relative.
                     const uint32_t chromaticPixels = quadTL.dominantRed + quadTR.dominantGrn + quadBL.dominantBlu + centerMix.yellowMix;
                     const uint32_t sampledPixels   = quadTL.pixels + quadTR.pixels + quadBL.pixels + centerMix.pixels;
-                    const bool     lightCovered    = CheckCondition(
+                    const bool     lightCovered    = ZHLN_CHECK(
                         chromaticPixels * 10 > sampledPixels, "clustered lights cover a meaningful share of the frame",
                         "chromaticPixels={}/{} sampled px (need >10%)", chromaticPixels, sampledPixels
                     );
 
                     const FrameMetrics fullFrame         = MeasureImage(frame);
-                    const bool         noBlackout        = CheckCondition(
+                    const bool         noBlackout        = ZHLN_CHECK(
                         fullFrame.meanLuma > 1.0, "frame is not blacked out", "meanLuma={:.2f} over {} px", fullFrame.meanLuma, fullFrame.total
                     );
-                    const bool         noExtremeOverflow = CheckCondition(
+                    const bool         noExtremeOverflow = ZHLN_CHECK(
                         fullFrame.saturated * 20 < fullFrame.total, "frame is not blown out", "saturated={}/{} px (need <5%)", fullFrame.saturated,
                         fullFrame.total
                     );
@@ -1782,21 +1290,21 @@ struct LightingRTTestSuite {
                     // the strips are not even the same width, so a shared absolute floor
                     // grades geometry rather than the reflection.
 
-                    const bool reflRedOk = CheckCondition(
+                    const bool reflRedOk = ZHLN_CHECK(
                         reflStripRed.dominantRed * 200 > reflStripRed.pixels && reflStripRed.meanR > 1.3 * reflStripRed.meanG &&
                             reflStripRed.meanR > 1.3 * reflStripRed.meanB,
                         "strip 1 mirrors the red emitter",
                         "meanRGB=({:.1f},{:.1f},{:.1f}), dominantRed={}/{} px (need >0.5% of the strip)", reflStripRed.meanR, reflStripRed.meanG,
                         reflStripRed.meanB, reflStripRed.dominantRed, reflStripRed.pixels
                     );
-                    const bool reflGrnOk = CheckCondition(
+                    const bool reflGrnOk = ZHLN_CHECK(
                         reflStripGrn.dominantGrn * 200 > reflStripGrn.pixels && reflStripGrn.meanG > 1.3 * reflStripGrn.meanR &&
                             reflStripGrn.meanG > 1.3 * reflStripGrn.meanB,
                         "strip 2 mirrors the green emitter",
                         "meanRGB=({:.1f},{:.1f},{:.1f}), dominantGreen={}/{} px (need >0.5% of the strip)", reflStripGrn.meanR, reflStripGrn.meanG,
                         reflStripGrn.meanB, reflStripGrn.dominantGrn, reflStripGrn.pixels
                     );
-                    const bool reflBluOk = CheckCondition(
+                    const bool reflBluOk = ZHLN_CHECK(
                         reflStripBlu.dominantBlu * 200 > reflStripBlu.pixels && reflStripBlu.meanB > 1.3 * reflStripBlu.meanR &&
                             reflStripBlu.meanB > 1.3 * reflStripBlu.meanG,
                         "strip 3 mirrors the blue emitter",
@@ -1806,7 +1314,7 @@ struct LightingRTTestSuite {
                     // Yellow has no single dominant channel to lean on, so its signature is
                     // the R+G mix count plus R and G clearing B by the same 1.3x the pure
                     // strips use and staying within 0.6x of each other (yellow, not amber).
-                    const bool reflYelOk = CheckCondition(
+                    const bool reflYelOk = ZHLN_CHECK(
                         reflStripYel.yellowMix * 200 > reflStripYel.pixels && reflStripYel.meanR > 1.3 * reflStripYel.meanB &&
                             reflStripYel.meanG > 1.3 * reflStripYel.meanB && reflStripYel.meanR > 0.6 * reflStripYel.meanG &&
                             reflStripYel.meanG > 0.6 * reflStripYel.meanR,
@@ -1820,7 +1328,7 @@ struct LightingRTTestSuite {
                     // somewhere in the upper frame, not that the scene is bright.
                     const auto     upperDirect      = MeasureSubRegion(frame, {.x0 = 0.0, .y0 = 0.05, .x1 = 1.0, .y1 = 0.45});
                     const uint32_t directChroma     = upperDirect.dominantRed + upperDirect.dominantGrn + upperDirect.dominantBlu + upperDirect.yellowMix;
-                    const bool     directVisible    = CheckCondition(
+                    const bool     directVisible    = ZHLN_CHECK(
                         upperDirect.maxLuma > 60.0 && directChroma * 1000 > upperDirect.pixels, "emitters are directly visible in the upper frame",
                         "maxLuma={:.1f} (need >60), chromaticPixels={}/{} px (need >0.1%)", upperDirect.maxLuma, directChroma, upperDirect.pixels
                     );
