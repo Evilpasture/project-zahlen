@@ -216,7 +216,7 @@ and quietly stay on the vertex pipeline forever — the feature would look
 
 ## 7. Tests
 
-`tests/render/TestMeshShaders.cpp` (ctest: `GPU_TestMeshShaders`):
+`tests/render/TestMeshShaders.cpp`, in the `GPU_Pipeline` group binary (ctest: `GPU_Pipeline`, or `ctest -R GPU_Pipeline`):
 
 | Test | What it proves |
 | --- | --- |
@@ -292,7 +292,7 @@ Verified in this repository:
 
 Verified on hardware (RTX 3050, NVIDIA, headless):
 
-- [x] `GPU_TestMeshShaders` green, 4/4.
+- [x] `TestMeshShaders` suites green, 4/4 (now in the `GPU_Pipeline` group).
 - [x] Zero validation errors across the whole suite (after the two pre-existing
       fixes below).
 
