@@ -751,28 +751,28 @@ struct RenderContext::Impl {
     // Dual Kawase bloom: one compute dispatch chain (threshold -> down x3 ->
     // up x3) recorded inside a single frame-graph pass instead of seven raster
     // render passes.
-    Vk::ComputePass     bloomThresholdCS;
-    Vk::ComputePass     hdrDenoiseCS;
-    Vk::ComputePass     rtrHalfCS;
-    Vk::ComputePass     bloomDownCS;
-    Vk::ComputePass     bloomUpCS;
+    Vk::DynamicComputePass bloomThresholdCS;
+    Vk::DynamicComputePass hdrDenoiseCS;
+    Vk::DynamicComputePass rtrHalfCS;
+    Vk::DynamicComputePass bloomDownCS;
+    Vk::DynamicComputePass bloomUpCS;
     Vk::HeapPassBindings bloomThresholdHeapBindings;
     Vk::HeapPassBindings hdrDenoiseHeapBindings;
     Vk::HeapPassBindings rtrHalfHeapBindings;
     Vk::HeapPassBindings bloomDownHeapBindings;
     Vk::HeapPassBindings bloomUpHeapBindings;
 
-    Vk::ComputePass                                            clusterBoundsPass;
-    Vk::ComputePass                                            clusterCullingPass;
-    Vk::ComputePass                                            cullingPass;
-    Vk::ComputePass                                            skinningPass;
-    Vk::ComputePass                                            proceduralBakePass;
-    Vk::ComputePass                                            hangGpuPass;
-    Vk::DoubleBufferedComputePass<VolumetricClearLayout>       volumetricClearPass;
-    Vk::DoubleBufferedComputePass<VolumetricFogInjectLayout>   volumetricFogInjectPass;
-    Vk::DoubleBufferedComputePass<VolumetricLightInjectLayout> volumetricLightInjectPass;
-    Vk::DoubleBufferedComputePass<VolumetricIntegrationLayout> volumetricIntegrationPass;
-    Vk::DoubleBufferedComputePass<VolumetricTemporalLayout>    volumetricTemporalPass;
+    Vk::FixedComputePass clusterBoundsPass;
+    Vk::FixedComputePass clusterCullingPass;
+    Vk::DynamicComputePass cullingPass;
+    Vk::DynamicComputePass skinningPass;
+    Vk::DynamicComputePass proceduralBakePass;
+    Vk::DynamicComputePass hangGpuPass;
+    Vk::FixedDoubleBufferedComputePass<VolumetricClearLayout> volumetricClearPass;
+    Vk::FixedDoubleBufferedComputePass<VolumetricFogInjectLayout> volumetricFogInjectPass;
+    Vk::FixedDoubleBufferedComputePass<VolumetricLightInjectLayout> volumetricLightInjectPass;
+    Vk::FixedDoubleBufferedComputePass<VolumetricIntegrationLayout> volumetricIntegrationPass;
+    Vk::FixedDoubleBufferedComputePass<VolumetricTemporalLayout> volumetricTemporalPass;
 
     Vk::RenderTarget<VK_FORMAT_D32_SFLOAT> shadowMapPrev;
     ZHLN::Array<Vk::ImageView>             shadowCascadeViewsPrev;
@@ -808,11 +808,11 @@ struct RenderContext::Impl {
     TextureManager textureManager;
 
     Vk::Buffer                  particleBuffer;
-    Vk::ComputePass             particleUpdatePass;
+    Vk::DynamicComputePass particleUpdatePass;
     VkPipelineLayout            particleRenderLayout = VK_NULL_HANDLE; // Raw alias of the spec-required null heap layout
     Vk::TypedPipeline<1, false> particleRenderPipeline;
 
-    Vk::ComputePass  meshParticleUpdatePass;
+    Vk::DynamicComputePass meshParticleUpdatePass;
     VkPipelineLayout meshParticleRenderLayout = VK_NULL_HANDLE; // Raw alias of the spec-required null heap layout
     Vk::Pipeline     meshParticleRenderPipeline;
     Vk::Pipeline     meshParticleShadowPipeline;
@@ -877,11 +877,11 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<void, Error> InitBakeHeapBindings() noexcept;
     [[nodiscard]] auto AdoptBindlessTexture(Vk::Image&& image, Vk::ImageView&& view, VkFormat format, uint32_t mipLevels = 1, bool cube = false) -> uint32_t;
     template <typename PushT>
-    [[nodiscard]] auto BakeComputeTexture2D(const Vk::ComputePass& pass, uint32_t width, uint32_t height, VkFormat format, const PushT& push)
+    [[nodiscard]] auto BakeComputeTexture2D(const Vk::DynamicComputePass& pass, uint32_t width, uint32_t height, VkFormat format, const PushT& push)
         -> std::expected<uint32_t, Error>;
 
     Vk::SlangReflectedLayout cullingLayout; // Reflection only: drives the heap binding table
-    Vk::ComputePass          hizGeneratePass;
+    Vk::DynamicComputePass hizGeneratePass;
     Vk::SlangReflectedLayout hizDescLayout; // Reflection only
 
     Vk::SlangReflectedLayout bloomThresholdCSLayout; // Reflection only
@@ -1071,6 +1071,7 @@ struct RenderContext::Impl {
     // (descriptor_heap_layout.slang) and size-validated against the compiled
     // gpu_abi SPIR-V at startup.
     using PPPushConstants = GPUTypes::Heap::ScenePassPushConstants;
+    static_assert(sizeof(PPPushConstants) == Vk::kScenePassPushPayloadBytes);
 
     struct DecalPushConstants {
         JPH::Mat44 world;
@@ -1215,7 +1216,7 @@ struct RenderContext::Impl {
 
     [[nodiscard]] std::expected<Vk::ShaderStages, Error> LoadAndCreateShaders(VertexStageSource vs, FragmentStageSource ps) const noexcept;
     [[nodiscard]] std::expected<Vk::Pipeline, Error>
-        LoadAndCreateComputeShader(ComputeStageSource cs, VkPipelineLayout layout, Vk::ComputePass& pass) const noexcept;
+        LoadAndCreateComputeShader(ComputeStageSource cs, VkPipelineLayout layout, Vk::DynamicComputePass& pass) const noexcept;
 
     void                                     WatchPipeline(const char* vsPath, const char* psPath, std::function<void()> rebuild_fn) noexcept;
     [[nodiscard]] std::expected<void, Error> ValidateSlangTypeLayouts() noexcept;
@@ -1229,7 +1230,7 @@ struct RenderContext::Impl {
 };
 
 template <typename PushT>
-auto RenderContext::Impl::BakeComputeTexture2D(const Vk::ComputePass& pass, uint32_t width, uint32_t height, VkFormat format, const PushT& push)
+auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pass, uint32_t width, uint32_t height, VkFormat format, const PushT& push)
     -> std::expected<uint32_t, Error> {
     static_assert(Vk::GpuTriviallyCopyable<PushT>);
     return Vk::ImageBuilder {}

@@ -33,7 +33,7 @@ std::expected<Vk::ShaderStages, Error> RenderContext::Impl::LoadAndCreateShaders
 }
 
 std::expected<Vk::Pipeline, Error>
-    RenderContext::Impl::LoadAndCreateComputeShader(ComputeStageSource cs, VkPipelineLayout layout, Vk::ComputePass& pass) const noexcept {
+    RenderContext::Impl::LoadAndCreateComputeShader(ComputeStageSource cs, VkPipelineLayout layout, Vk::DynamicComputePass& pass) const noexcept {
     const void*           cs_code = nullptr;
     size_t                cs_size = 0;
     std::vector<uint32_t> disk_cs;

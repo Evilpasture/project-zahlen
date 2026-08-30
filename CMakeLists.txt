@@ -62,7 +62,7 @@ endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# --- DETECT C++26 REFLECTION SUPPORT ---
+# --- DETECT C++26 LANGUAGE FEATURE FLAGS ---
 include(CheckCXXCompilerFlag)
 check_cxx_compiler_flag("-freflection" COMPILER_HAS_REFLECTION)
 

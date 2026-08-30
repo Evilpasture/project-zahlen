@@ -348,8 +348,9 @@ struct PassFactory {
             "RtrHalfTrace", Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Lighting>, Vk::ComputeWrite<Res_RtrHalf>>(
             [this](VkCommandBuffer c) noexcept {
                 // The pass exists iff the RT context did (BuildBloomPipelines
-                // gates its creation the same way), so rtCtx is the validity
-                // guard; Vk::ComputePass has no Valid() of its own.
+                // gates its creation the same way), so rtCtx remains the higher-
+                // level feature guard even though the compute wrapper now also
+                // exposes Valid().
                 if (!self.rtCtx.Valid() || !self.settings.rayTracing.enableReflections || !self.settings.post.enableRTR) {
                     return;
                 }
@@ -1019,7 +1020,7 @@ void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Co
 
     BindHeapsAndPushFrame(compCmd);
 
-    if (clusterBoundsDirty && clusterBoundsPass.pipeline.Valid() && clusterBoundsPass.fixedDispatchSize[0] != 0) {
+    if (clusterBoundsDirty && clusterBoundsPass.Valid() && clusterBoundsPass.HasFixedDispatchDomain()) {
         clusterBoundsPass.DispatchHeapIndexed(ctx, compCmd, fIdx);
         Vk::ComputeToComputeBarrier(compCmd);
         clusterBoundsDirty = false;

@@ -115,7 +115,7 @@ auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSample
     if (!reflectedPushLayout) [[unlikely]] {
         return std::unexpected(reflectedPushLayout.error());
     }
-    if (reflectedPushLayout->frameAddressOffsets.front() < sizeof(PPPushConstants)) [[unlikely]] {
+    if (reflectedPushLayout->frameAddressOffsets.front() < Vk::kScenePassPushPayloadBytes) [[unlikely]] {
         return std::unexpected(Vk::SpirvLayoutError::HeapPushOverlapsPassData);
     }
     heapPushDataLayout = *reflectedPushLayout;
