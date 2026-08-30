@@ -426,6 +426,19 @@ zahlen_transpile_sources(ENGINE_SOURCES ${RAW_ENGINE_SOURCES})
 
 add_library(zahlen_engine SHARED ${ENGINE_SOURCES})
 
+# The renderer (and Volk inside it) must bind to THIS image's symbols:
+# executables linking zahlen_render's static archive alongside the engine
+# (e.g. the extras GPU tests via zahlen_extras) embed their own copies of
+# volkInitialize & friends, and those preempt the engine's PLT calls --
+# leaving the engine's per-image dispatch table NULL after a "successful"
+# ZHLN_EnsureVulkanLoader(). The version script localizes the renderer's
+# symbols in this .so so they bind at link time. See cmake/zahlen_engine.map.
+if(UNIX AND NOT APPLE)
+    target_link_options(zahlen_engine PRIVATE
+        "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/cmake/zahlen_engine.map"
+    )
+endif()
+
 target_precompile_headers(zahlen_engine PRIVATE
     "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/src/render/Rendering.hpp>"
 )

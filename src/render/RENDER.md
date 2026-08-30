@@ -39,6 +39,13 @@ The renderer does **not** link the Vulkan loader. [Volk](https://github.com/zeux
 * `ZHLN_EnsureVulkanLoader()` (RenderCore.c) wraps `volkInitialize()` and is called by `ZHLN_CreateInstance()` **and** by the helpers that can legitimately query Vulkan before an instance exists (`ExtensionBuilder::ForInstance()`, `EnumerateInstanceExtensions()`).
 * `ZHLN_CreateInstance()` calls `volkLoadInstance()` right after instance creation; `ZHLN_CreateDevice()` calls `volkLoadDevice()` so device-level commands hit the driver's entry points directly, skipping the loader trampolines. The engine is single-device; multi-device would need `volkCreateDeviceTable()` per device.
 
+### One dispatch table per image
+
+Volk's table is **per-image** (`visibility(hidden)` on the pointers, by volk design), while its entry points (`volkInitialize`, `volkLoad*`) are exported. If an executable embeds `zahlen_render`'s archive *and* links `libzahlen_engine.so` (the extras GPU tests do, through `zahlen_extras`), the executable's copy of those entry points preempts the engine's calls: the engine's guard reports success while its own table stays `NULL`, and the first `vk*` call jumps to `0x0`. `cmake/zahlen_engine.map` therefore localizes the renderer's symbols (`volk*`, `ZHLN_*`, `vma*`, `ZHLN::Vk` mangled names) inside the engine `.so`, binding them at link time. Consequences:
+
+* The engine `.so` always initializes and dispatches through **its own** table, regardless of what an executable embeds.
+* An executable-embedded copy has its own table, global-level initialized on demand via `ZHLN_EnsureVulkanLoader()` — but it never sees the engine's instance/device pointers, so **executable-side code must not call device-level `vk*` directly**; it goes through the engine's (or renderer's exported) API. Windows PE and macOS two-level namespaces bind intra-image by default and don't need the script.
+
 This keeps tools and executables runnable on machines without a loader installed (clean `ZHLN_EnsureVulkanLoader()` failure instead of a missing-library abort at process start) and removes loader overhead from the hot paths.
 
 ---
