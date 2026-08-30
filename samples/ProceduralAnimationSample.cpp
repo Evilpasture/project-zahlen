@@ -378,6 +378,21 @@ auto BuildProceduralArena(ZHLN::Engine& engine) -> void {
     );
 }
 
+void SetHandgunVisibility(ZHLN::ECS::Registry& registry, ZHLN::Entity handgunRoot, bool visible) {
+    for (ZHLN::Entity e: registry.GetEntitiesWith<ZHLN::Components::MeshComponent>()) {
+        const auto* hier = registry.Get<ZHLN::Components::HierarchyComponent>(e);
+        if (hier != nullptr && hier->parent == handgunRoot) {
+            registry.Patch<ZHLN::Components::MeshComponent>(e, [visible](auto& mesh) {
+                if (visible) {
+                    mesh.flags &= ~ZHLN::DrawFlags::Hidden;
+                } else {
+                    mesh.flags |= ZHLN::DrawFlags::Hidden;
+                }
+            });
+        }
+    }
+}
+
 auto CreateTestHandgun(ZHLN::Engine& engine, ZHLN::Entity player, float itemScale) -> ZHLN::Entity {
     auto&              reg     = engine.GetRegistry();
     const float        scale   = std::clamp(itemScale, 0.10f, 4.0f);
@@ -688,6 +703,8 @@ auto main(int argc, char* argv[]) -> int {
     viewState.eyeForwardOffset = std::clamp(characterHeight * 0.040f, 0.04f, 0.10f);
     AttachCharacterRig(*engine, player, rigPath, prefab, BuildTestHandgunHandling(handgun, handgunScale), viewState);
 
+    SetHandgunVisibility(engine->GetRegistry(), handgun, false);
+
     ZHLN::Clock clock;
     float       sampleTime      = 0.0f;
     bool        handgunEquipped = false;
@@ -738,6 +755,7 @@ auto main(int argc, char* argv[]) -> int {
                     handling.grips[gripIndex].ikWeight = handgunEquipped ? 1.0f : 0.0f;
                 }
             });
+            SetHandgunVisibility(registry, handgun, handgunEquipped);
             ZHLN::Log("[Sample] Test handgun: {}.", handgunEquipped ? "EQUIPPED / AIM-GUIDED" : "RESTING / BODY-MOUNTED");
         }
         equipKeyWasDown = equipKeyDown;
