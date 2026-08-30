@@ -20,7 +20,9 @@
 #include "helpers/ImageTesting.hpp"
 #include <string_view>
 
-auto RunLightingRTSuite() -> ZHLN::Test::TestStats;
+auto RunClusteredLightingSuite() -> ZHLN::Test::TestStats;
+auto RunRayTracedShadowsSuite() -> ZHLN::Test::TestStats;
+auto RunReflectionsSuite() -> ZHLN::Test::TestStats;
 auto RunPBRSuite() -> ZHLN::Test::TestStats;
 auto RunRTRPBRReflectionSuite() -> ZHLN::Test::TestStats;
 auto RunRayTracedNoiseStabilitySuite() -> ZHLN::Test::TestStats;
@@ -35,7 +37,9 @@ auto main(int argc, char** argv) -> int {
     }
 
     return ZHLN::Test::Runner::RunDeferred(
-        RunLightingRTSuite,
+        RunClusteredLightingSuite,
+        RunRayTracedShadowsSuite,
+        RunReflectionsSuite,
         RunPBRSuite,
         RunRTRPBRReflectionSuite,
         RunRayTracedNoiseStabilitySuite,

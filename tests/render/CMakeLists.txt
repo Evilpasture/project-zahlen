@@ -91,7 +91,9 @@ endfunction()
 # Lighting, shading and ray-traced image quality.
 zahlen_add_gpu_test_group(GPU_Lighting 300
     RunLightingTests.cpp
-    TestLightingRayTraced.cpp
+    TestClusteredLighting.cpp
+    TestRayTracedShadows.cpp
+    TestReflections.cpp
     TestPBR.cpp
     TestRTRPBRReflection.cpp
     TestRayTracedNoiseStability.cpp
