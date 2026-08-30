@@ -239,6 +239,12 @@ inline auto EnumerateInstanceExtensions() noexcept -> std::vector<VkExtensionPro
     std::vector<VkExtensionProperties> available;
     VkResult                           result = VK_INCOMPLETE;
 
+    // Can run before any instance exists: acquire the Vulkan loader through
+    // Volk before touching the dispatch pointers.
+    if (ZHLN_EnsureVulkanLoader() != VK_SUCCESS) {
+        return {};
+    }
+
     // Loop: the count can grow between the sizing call and the fetch call.
     while (result == VK_INCOMPLETE) {
         uint32_t count = 0;

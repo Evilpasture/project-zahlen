@@ -3,6 +3,10 @@
 
 // src/engine/WindowInternal.hpp
 #pragma once
+// Volk before GLFW's Vulkan: preloads the headers with VK_NO_PROTOTYPES so
+// GLFW_INCLUDE_VULKAN cannot leak loader prototypes ahead of volk.h (which
+// refuses that mix) in PCH-less Clang builds.
+#include <volk.h>
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 #include <Zahlen/Window.hpp>

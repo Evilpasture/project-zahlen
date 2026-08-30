@@ -309,6 +309,7 @@ auto RenderContext::Create(Window& window, const RenderConfig& cfg) noexcept -> 
     auto impl     = std::make_unique<Impl>(window);
     impl->appName = cfg.appName;
 
+    Vk::Instance            instanceObject;
     VkInstance              instance    = VK_NULL_HANDLE;
     VkSurfaceKHR            raw_surface = VK_NULL_HANDLE;
     int                     width       = 0;
@@ -322,7 +323,10 @@ auto RenderContext::Create(Window& window, const RenderConfig& cfg) noexcept -> 
                 .ValidationMode(static_cast<Vk::ValidationMode>(cfg.validationMode))
                 .InstanceExtensions(inst_exts)
                 .BuildInstance()
-                .transform([&](VkInstance inst) -> void { instance = inst; });
+                .transform([&](Vk::Instance inst) -> void {
+                    instanceObject = std::move(inst);
+                    instance       = instanceObject.Handle();
+                });
         })
         .and_then([&]() -> std::expected<void, Error> {
             if (!window.IsTTY() && !window.IsHeadless()) {
@@ -367,7 +371,7 @@ auto RenderContext::Create(Window& window, const RenderConfig& cfg) noexcept -> 
                     const std::vector<const char*>& devExtList = dev_exts;
 
                     return Vk::Context::Builder()
-                        .Instance(instance)
+                        .Instance(std::move(instanceObject))
                         .Surface(raw_surface)
                         .PhysicalDevice(physicalInfo)
                         .DeviceExtensions(devExtList)

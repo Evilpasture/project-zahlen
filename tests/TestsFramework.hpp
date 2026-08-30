@@ -7,20 +7,30 @@
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <array>
+#include <atomic>
 #include <concepts>
 #include <cstdlib>
 #include <expected>
+#include <format>
 #include <source_location>
 #include <string>
 #include <string_view>
 #include <type_traits>
 #include <vector>
 
-// Lightweight C hooks into RenderCore.c
-extern "C" {
-uint32_t ZHLN_GetValidationErrorCount() noexcept;
-uint32_t ZHLN_GetDeviceLostCount() noexcept;
-}
+// Render diagnostics: the framework owns the persistent counters. They are
+// registered (RunSuite) as the process diagnostics sink, so every engine --
+// including its teardown, where the persistent messenger fires destroy-time
+// validation events -- increments them directly. That is what lets the
+// per-test before/after snapshots below bracket a WHOLE engine lifecycle and
+// stay exact, with no post-mortem state in the library. The public
+// RenderContext::ValidationErrorCount()/DeviceLostCount() are live views
+// (zero while no engine exists) and are meant for workload-scoped deltas.
+#include <Zahlen/Render.hpp>
+
+// Performance baseline caching, on the engine JSON module (see
+// PerfBaseline.hpp for the storage format and policy).
+#include "PerfBaseline.hpp"
 
 #if defined(__unix__) || defined(__APPLE__) || defined(__linux__)
 #define ZHLN_TEST_TIMEOUT_SUPPORTED 1
@@ -73,6 +83,15 @@ inline void TestTimeoutSignalHandler(int sig) {
 
 namespace ZHLN::Test {
 
+// Diagnostics totals owned by this framework. They outlast every engine in
+// the process, which is exactly why the engine increments them directly
+// (registered in RunSuite via RenderContext::UseDiagnostics): teardown-time
+// validation events land here too, and the per-test snapshots in RunSuite
+// observe a whole engine lifecycle without any post-mortem state in the
+// library.
+inline std::atomic<uint32_t> g_validationErrors {0};
+inline std::atomic<uint32_t> g_deviceLost {0};
+
 enum class TestFrameworkError : uint8_t {
     AssertionFailed[[= ZHLN::Description<"One or more assertions failed in this test. ">{}]] = 1,
 };
@@ -82,8 +101,9 @@ struct AssertionFailure {
     uint32_t         line;
     std::string      actualValue;
     std::string      expectedValue;
-    std::string_view op; // "==" or "!=" or "true" or "false" or "ValidationError" or "DeviceLost"
+    std::string_view op; // "==" or "!=" or "true" or "false" or "ValidationError" or "DeviceLost" or "PerfRegression"
 };
+
 
 inline unsigned int GetDefaultTimeoutSeconds() noexcept {
     static unsigned int defaultSec = []() -> unsigned int {
@@ -118,6 +138,50 @@ struct TestContext {
 inline TestContext& GetThreadLocalContext() noexcept {
     thread_local TestContext ctx;
     return ctx;
+}
+
+// ============================================================================
+// Performance baseline verification (see tests/PerfBaseline.hpp).
+//
+// Records the metric in perf-baseline.json (project root, per machine) and
+// fails the current test when it regressed beyond the limit versus the LAST
+// recorded run. First run of a metric records the baseline and passes.
+//
+//   VerifyBaseline("cpu.ecs_dense_iterate", iterDurationMs);
+//   VerifyBaseline("render.hw_ray_tracing", durationMs, 30.0); // limit %
+//
+// Limits can be overridden globally with ZHLN_PERF_REGRESSION_LIMIT
+// (percent); a fresh baseline can be forced with ZHLN_PERF_REBASELINE=1.
+// The stored value is only updated by PASSING runs, so a regression stays
+// visible until it is fixed (or explicitly re-baselined).
+// ============================================================================
+inline void VerifyBaseline(
+    std::string_view                    metric,
+    double                              value,
+    double                              limitPercent      = -1.0,
+    Perf::Direction                     direction         = Perf::Direction::LowerIsBetter,
+    std::source_location                location          = std::source_location::current()
+) {
+    const Perf::Result result = Perf::Check(metric, value, limitPercent, direction);
+
+    if (result.known) {
+        ZHLN::Println(
+            "    {}[Baseline]{} {} = {:.3f} (last run: {:.3f}, {:+.1f}% vs limit {:+.1f}%){}", result.regressed ? Color::Red : Color::Green,
+            Color::Reset, metric, value, result.previous, result.changePct, result.limitPct, result.regressed ? "  << REGRESSION" : ""
+        );
+    } else {
+        ZHLN::Println("    {}[Baseline]{} {} = {:.3f} (first run, baseline recorded)", Color::Green, Color::Reset, metric, value);
+    }
+
+    if (result.regressed) {
+        GetThreadLocalContext().failures.push_back(
+            {.file          = location.file_name(),
+             .line          = static_cast<uint32_t>(location.line()),
+             .actualValue   = std::format("{} = {:.3f} ({:+.1f}% vs last run {:.3f})", metric, value, result.changePct, result.previous),
+             .expectedValue = std::format("within {:+.1f}% of last run", result.limitPct),
+             .op            = "PerfRegression"}
+        );
+    }
 }
 
 // Escape-hatches for tests deliberately provoking errors/hangs (e.g. testing recovery)
@@ -250,6 +314,12 @@ concept HasNestedTests = requires { typename T::Tests; };
 
 template <typename Suite>
 TestStats RunSuite() {
+    // Take ownership of the process diagnostics: framework storage outlasts
+    // every engine, so engines increment it directly (teardown included) and
+    // per-test deltas below bracket whole engine lifecycles exactly.
+    // Idempotent: nested suites re-register the same storage.
+    RenderContext::UseDiagnostics(&g_validationErrors, &g_deviceLost);
+
     Suite     suite;
     TestStats stats;
 
@@ -265,9 +335,10 @@ TestStats RunSuite() {
             auto& ctx = GetThreadLocalContext();
             ctx.Reset(name);
 
-            // 1. Snapshot telemetry before test begins
-            const uint32_t valErrorsBefore = ZHLN_GetValidationErrorCount();
-            const uint32_t devLostBefore   = ZHLN_GetDeviceLostCount();
+            // 1. Snapshot telemetry before test begins (framework-owned
+            // totals: they persist across engine lifetimes)
+            const uint32_t valErrorsBefore = g_validationErrors.load(std::memory_order_relaxed);
+            const uint32_t devLostBefore   = g_deviceLost.load(std::memory_order_relaxed);
 
             ReturnType result = std::unexpected(ZHLN::Error(TestFrameworkError::AssertionFailed));
 
@@ -307,7 +378,7 @@ TestStats RunSuite() {
 #endif
 
             // 2. Fail if new Vulkan Validation Errors occurred
-            const uint32_t valErrorsAfter = ZHLN_GetValidationErrorCount();
+            const uint32_t valErrorsAfter = g_validationErrors.load(std::memory_order_relaxed);
             if (valErrorsAfter > valErrorsBefore && !ctx.allowValidationErrors) {
                 const uint32_t count = valErrorsAfter - valErrorsBefore;
                 ctx.failures.push_back(
@@ -320,7 +391,7 @@ TestStats RunSuite() {
             }
 
             // 3. Fail if GPU Device Lost / Hang occurred
-            const uint32_t devLostAfter = ZHLN_GetDeviceLostCount();
+            const uint32_t devLostAfter = g_deviceLost.load(std::memory_order_relaxed);
             if (devLostAfter > devLostBefore && !ctx.allowDeviceLost) {
                 const uint32_t count = devLostAfter - devLostBefore;
                 ctx.failures.push_back(

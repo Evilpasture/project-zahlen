@@ -31,6 +31,34 @@ ZHLN is built on a **Dual-Layer Compilation Model** to balance low-level driver 
 * **The C Backend (`RenderCore.h`):** Exposes a stateless, procedural C23 API. It handles the raw Vulkan boilerplates (instance creation, device selection, swapchain recreation, synchronization primitives). It does not allocate memory on the heap and remains independent of C++ engine structures.
 * **The C++ Frontend (`RenderCore.hpp`):** Wraps raw Vulkan handles in strongly-typed RAII structures. It leverages C++23 type-safety features to validate descriptor bindings, vertex layouts, and image transitions at compile time, eliminating runtime state validation.
 
+### Vulkan Loading (Volk)
+
+The renderer does **not** link the Vulkan loader. [Volk](https://github.com/zeux/volk) (pinned at `extern/volk`, tag matching the CI SDK version) acquires the loader at runtime and dispatches through its own function pointers:
+
+* `vk*` names are Volk dispatch pointers, not loader prototypes — call sites are unaffected, but every pointer is `NULL` until the loader is acquired. `volk.h` therefore owns the Vulkan includes everywhere (`RenderingPCH.h`, `RenderCore.h`) and must be included *before* any header that pulls in `<vulkan/vulkan.h>`.
+* `ZHLN_EnsureVulkanLoader()` (RenderCore.c) is a stateless `volkInitialize()` — idempotent, race-safe. `ZHLN_CreateInstance()` and the pre-instance helpers (`ExtensionBuilder::ForInstance()`, `EnumerateInstanceExtensions()`) call it before touching any dispatch pointer.
+* `ZHLN_CreateInstance()` calls `volkLoadInstance()` right after instance creation; `ZHLN_CreateDevice()` calls `volkLoadDevice()` so device-level commands hit the driver's entry points directly, skipping the loader trampolines. The engine is single-device; multi-device would need `volkCreateDeviceTable()` per device.
+
+This keeps tools and executables runnable on machines without a loader installed (clean `ZHLN_EnsureVulkanLoader()` failure instead of a missing-library abort at process start) and removes loader overhead from the hot paths.
+
+### Diagnostics Ownership (Vk::Instance)
+
+The C layer is **stateless** — no counters, no globals. `Vk::Instance` (src/render/Instance.hpp) owns the Vulkan instance and the persistent debug messenger, and routes diagnostics into **caller-owned storage**; the library keeps no post-mortem state:
+
+* An observer that needs values to outlive an engine (the test framework) registers a sink — `RenderContext::UseDiagnostics(&validationErrors, &deviceLost)` — before creating engines. Every instance created afterwards increments those atomics **directly**, including teardown-time events fired while the instance is being destroyed, so per-test before/after snapshots bracketing a whole engine lifecycle are exact. There is no retirement fold and none is needed: the storage is the single source of truth and it already outlives the engine.
+* `RenderContext::ValidationErrorCount()` / `RenderContext::DeviceLostCount()` are **live views**: the active instance's counters, zero while no engine exists. Workload-scoped snapshots inside a running engine (RenderPerformance, RTR, mesh shaders, …) use these. Unregistered engines count into per-instance members, and those counts die with the instance.
+* The instance descriptor carries a `ZHLN_DebugForwarding` (hook + owner pointer); both the pNext messenger (instance create/destroy) and the persistent messenger (runtime) forward error severities into the counting target. The stateless behaviors (stderr logging, the GPU-AV out-of-bounds abort) stay in the C callback.
+* `Vk::Instance::NotifyDeviceLost()` is the explicit counterpart for `VK_ERROR_DEVICE_LOST` returns; it bumps the active instance's target and is unobservable when no engine is live.
+* `Vk::Instance` is move-aware: the C-side forwarding pointer is re-pointed on every move, so builder-to-context transfers keep the hook valid.
+* The engine is **single-instance** by design — volk's dispatch tables are process-global and cannot serve two live instances. `Instance::Create()` claims the slot with a compare-and-swap and refuses (returning an invalid instance) while another is live, instead of letting a second one silently steal it. Sequential create/destroy cycles lose nothing.
+
+### One dispatch table per image
+
+Volk's table is **per-image** (`visibility(hidden)` on the pointers, by volk design), while its entry points (`volkInitialize`, `volkLoad*`) are exported. If an executable embeds `zahlen_render`'s archive *and* links `libzahlen_engine.so` (the extras GPU tests do, through `zahlen_extras`), the executable's copy of those entry points preempts the engine's calls: the loader gets acquired into the *executable's* table while the engine's stays `NULL`, and the first `vk*` call jumps to `0x0`. `cmake/zahlen_engine.map` therefore localizes the renderer's symbols (`volk*`, `ZHLN_*`, `vma*`, `ZHLN::Vk` mangled names) inside the engine `.so`, binding them at link time. Consequences:
+
+* The engine `.so` always initializes and dispatches through **its own** table, regardless of what an executable embeds.
+* An executable-embedded copy has its own table, global-level initialized on demand via `ZHLN_EnsureVulkanLoader()` — but it never sees the engine's instance/device pointers, so **executable-side code must not call device-level `vk*` directly**; it goes through the engine's (or renderer's exported) API. Windows PE and macOS two-level namespaces bind intra-image by default and don't need the script.
+
 ---
 
 ## 2. The Lifetime Model (RAII)

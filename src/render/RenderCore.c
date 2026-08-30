@@ -14,7 +14,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <vulkan/vulkan_core.h>
 
 // NOLINTBEGIN(misc-misplaced-const, readability-identifier-length)
 
@@ -74,30 +73,27 @@ static inline uint64_t zhln_max_u64(uint64_t a, uint64_t b) {
 
 /* --- Start of procedural logic --- */
 
-// Validation-error accounting. Tests (and the console) can snapshot this around
-// a workload to assert that a feature does not introduce validation errors --
-// a suite that prints VUID violations and still reports PASS is not a test.
-static atomic_uint g_validation_error_count = 0;
-static atomic_uint g_device_lost_count      = 0;
+/* --- Volk loader bootstrap --- */
+// Nothing in this binary links the Vulkan loader; Volk acquires it at runtime
+// (dlopen on Unix, LoadLibrary on Windows, MoltenVK-aware on macOS). Every
+// global-level command (vkEnumerateInstanceExtensionProperties,
+// vkCreateInstance, vkEnumerateInstanceLayerProperties, ...) is a Volk
+// dispatch pointer that stays NULL until the loader is acquired, so this must
+// run before any of them are touched. ZHLN_CreateInstance calls it, and so do
+// the helpers that can legally query Vulkan before an instance exists
+// (ExtensionBuilder::ForInstance, EnumerateInstanceExtensions).
+// Validation diagnostics are NOT accumulated here: the C layer is stateless
+// (RENDER.md). The C++ Vk::Instance registers a ZHLN_DebugForwarding in the
+// instance descriptor; the callback below forwards error severities to its
+// hook and keeps only the stateless behaviors (stderr logging and the GPU-AV
+// out-of-bounds abort).
 
-uint32_t ZHLN_GetValidationErrorCount() {
-    return atomic_load_explicit(&g_validation_error_count, memory_order_relaxed);
-}
-
-void ZHLN_ResetValidationErrorCount() {
-    atomic_store_explicit(&g_validation_error_count, 0, memory_order_relaxed);
-}
-
-uint32_t ZHLN_GetDeviceLostCount() {
-    return atomic_load_explicit(&g_device_lost_count, memory_order_relaxed);
-}
-
-void ZHLN_ResetDeviceLostCount() {
-    atomic_store_explicit(&g_device_lost_count, 0, memory_order_relaxed);
-}
-
-void ZHLN_NotifyDeviceLost() {
-    atomic_fetch_add_explicit(&g_device_lost_count, 1, memory_order_relaxed);
+// Stateless: volkInitialize() is idempotent (it only re-acquires the loader
+// handle and re-fetches the global pointers) and safe to race, so there is no
+// once-flag to guard. Call sites are bring-up paths where the dlopen
+// round-trip is noise.
+VkResult ZHLN_EnsureVulkanLoader(void) {
+    return volkInitialize();
 }
 
 static VkBool32 VKAPI_CALL ZHLN_Internal_DebugCallback(
@@ -115,8 +111,11 @@ static VkBool32 VKAPI_CALL ZHLN_Internal_DebugCallback(
         prefix = "VULKAN INFO";
     }
 
-    if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
-        atomic_fetch_add_explicit(&g_validation_error_count, 1, memory_order_relaxed);
+    if ((severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) && userdata != NULL) {
+        const ZHLN_DebugForwarding* const debug = (const ZHLN_DebugForwarding*) userdata;
+        if (debug->hook != NULL) {
+            debug->hook(debug->userdata, severity);
+        }
     }
 
     fprintf(stderr, "[%s] %s\n", prefix, (data && data->pMessage) ? data->pMessage : "");
@@ -134,7 +133,8 @@ static VkBool32 VKAPI_CALL ZHLN_Internal_DebugCallback(
     return VK_FALSE;
 }
 
-VkDebugUtilsMessengerEXT ZHLN_CreateDebugMessenger(const VkInstance instance, const VkDebugUtilsMessageSeverityFlagsEXT severity) {
+VkDebugUtilsMessengerEXT
+    ZHLN_CreateDebugMessenger(const VkInstance instance, const VkDebugUtilsMessageSeverityFlagsEXT severity, ZHLN_DebugForwarding* debug) {
     if (instance == VK_NULL_HANDLE) {
         return VK_NULL_HANDLE;
     }
@@ -155,6 +155,7 @@ VkDebugUtilsMessengerEXT ZHLN_CreateDebugMessenger(const VkInstance instance, co
         .messageType     = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
                            VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
         .pfnUserCallback = ZHLN_Internal_DebugCallback,
+        .pUserData       = debug,
     };
 
     VkDebugUtilsMessengerEXT messenger = VK_NULL_HANDLE;
@@ -210,6 +211,13 @@ static const char* ZHLN_Internal_FindSpirvEntryPoint(const uint32_t* code, size_
 VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
     bool enable_validation = (desc->validation_mode != ZHLN_VALIDATION_OFF);
     bool gpu_validation    = (desc->validation_mode == ZHLN_VALIDATION_GPU);
+
+    // Acquire the Vulkan loader before anything below touches a dispatch
+    // pointer (vkEnumerateInstanceExtensionProperties included).
+    if (ZHLN_EnsureVulkanLoader() != VK_SUCCESS) {
+        fprintf(stderr, "Zahlen: [VULKAN] No Vulkan loader available; volkInitialize() failed.\n");
+        return VK_NULL_HANDLE;
+    }
 
     const VkApplicationInfo app_info = {
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO, .pApplicationName = desc->app_name, .applicationVersion = desc->version, .apiVersion = VK_API_VERSION_1_3
@@ -380,6 +388,7 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
             .messageType     = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
                                VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
             .pfnUserCallback = ZHLN_Internal_DebugCallback,
+            .pUserData       = desc->debug,
         };
 
         create_info.pNext = &debug_info;
@@ -389,6 +398,13 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
     if (vkCreateInstance(&create_info, nullptr, &instance) != VK_SUCCESS) {
         return VK_NULL_HANDLE;
     }
+
+    // All instance-level commands (and the loader's trampolines for
+    // device-level ones) now dispatch through Volk's pointers. The debug
+    // messenger lookups below go through the freshly loaded
+    // vkGetInstanceProcAddr. ZHLN_CreateDevice() refines the device-level
+    // pointers with direct driver entry points.
+    volkLoadInstance(instance);
     return instance;
 }
 
@@ -652,6 +668,13 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
         fprintf(stderr, "=======================================================\n\n");
         return null_result;
     }
+
+    // Route device-level commands through the driver's own entry points
+    // (vkGetDeviceProcAddr) instead of the loader's trampolines: no loader
+    // overhead on the hot paths. The engine is single-device by design; with
+    // more than one live VkDevice the last load wins and per-device tables
+    // (volkCreateDeviceTable) would be needed instead.
+    volkLoadDevice(handle);
 
     // --- Queue Retrieval ---
     VkQueue graphics_queue = VK_NULL_HANDLE;

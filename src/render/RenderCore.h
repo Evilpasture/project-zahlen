@@ -13,7 +13,12 @@
 
 #pragma once
 #include <stdbool.h> // We use booleans as keyword but good to include nevertheless
-#include <vulkan/vulkan_core.h>
+// Volk owns the Vulkan headers from here on: it defines VK_NO_PROTOTYPES and
+// includes <vulkan/vulkan.h> itself, so every vk* name below (and in every
+// consumer of this header) refers to Volk's dispatch pointers instead of the
+// link-time loader's prototypes. Include volk.h before any direct
+// <vulkan/*.h> include or volk.h will refuse to compile the mix.
+#include <volk.h>
 
 #ifndef ZHLN_RESTRICT
 #define ZHLN_RESTRICT __restrict
@@ -26,6 +31,19 @@ extern "C" {
 /* --- INSTANCE MANAGEMENT --- */
 
 static constexpr auto maxInstanceExtensions = 128;
+
+typedef void (*ZHLN_DebugHookFn)(void* userdata, VkDebugUtilsMessageSeverityFlagBitsEXT severity);
+
+/*
+ * Diagnostics forwarding. The C layer is stateless by design (see RENDER.md):
+ * it owns no counters. The C++ Vk::Instance owns one of these and points the
+ * instance descriptor at it; the debug-messenger pUserData carries it back to
+ * the C callback, which forwards error severities to the hook.
+ */
+typedef struct ZHLN_DebugForwarding {
+    ZHLN_DebugHookFn hook;      /* NULL: no counting, logging only */
+    void*            userdata;  /* the Vk::Instance that owns the counters */
+} ZHLN_DebugForwarding;
 
 typedef enum ZHLN_ValidationMode : uint8_t { ZHLN_VALIDATION_OFF = 0, ZHLN_VALIDATION_ON = 1, ZHLN_VALIDATION_GPU = 2 } ZHLN_ValidationMode;
 
@@ -40,6 +58,9 @@ typedef struct ZHLN_InstanceDesc {
     const VkDebugUtilsMessageSeverityFlagsEXT severity_flags;
     const char* const*                        extensions;
     const ZHLN_ValidationMode                 validation_mode;
+    /* Diagnostics owner (C++ side); may be NULL when no counting is wanted.
+       Used as pUserData by both the pNext and the persistent messenger. */
+    ZHLN_DebugForwarding*                     debug;
 } ZHLN_InstanceDesc;
 
 /**
@@ -65,6 +86,21 @@ static constexpr ZHLN_InstanceDesc ZHLN_VERBOSE_INSTANCE_DESC = {
     .extensions      = nullptr,
     .validation_mode = ZHLN_VALIDATION_ON,
 };
+
+/**
+ * @brief Acquires the Vulkan loader through Volk.
+ *
+ * The engine does not link the Vulkan loader; Volk loads it at runtime
+ * (dlopen/LoadLibrary). Until this succeeds, every global-level vk* pointer
+ * (vkEnumerateInstanceExtensionProperties, vkCreateInstance, ...) is NULL.
+ * ZHLN_CreateInstance calls it, and so does every helper that can legally
+ * touch Vulkan before an instance exists. Calling it again after the loader
+ * is acquired is a no-op that returns VK_SUCCESS.
+ * @return VK_SUCCESS, or the VkResult volkInitialize() failed with (e.g.
+ * VK_ERROR_INITIALIZATION_FAILED when no loader is installed).
+ */
+[[nodiscard]]
+VkResult ZHLN_EnsureVulkanLoader(void);
 
 /**
  * @brief Creates a Vulkan Instance with debug messenger attached to pNext.
@@ -171,33 +207,21 @@ typedef struct ZHLN_MeshShaderLimits {
  * `supported` is false when the device does not advertise VK_EXT_mesh_shader,
  * in which case all limits read back as zero.
  */
-/* --- VALIDATION DIAGNOSTICS --- */
+/* --- DEBUG MESSENGER & ERROR FORWARDING --- */
 
-/**
- * @brief Number of VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR messages reported by
- * the validation layer since process start (or the last reset).
- * Always 0 when validation is disabled.
- */
 /**
  * @brief Creates the persistent debug messenger. REQUIRED for runtime messages:
  * the create-info chained into VkInstanceCreateInfo only covers instance
  * creation/destruction, so without this the engine's debug callback never runs.
+ * The hook/userdata pair receives error-severity notifications (counting is
+ * the C++ owner's business; the C layer stays stateless).
  */
 [[nodiscard]]
-VkDebugUtilsMessengerEXT ZHLN_CreateDebugMessenger(VkInstance instance, VkDebugUtilsMessageSeverityFlagsEXT severity);
+VkDebugUtilsMessengerEXT ZHLN_CreateDebugMessenger(
+    VkInstance instance, VkDebugUtilsMessageSeverityFlagsEXT severity, ZHLN_DebugForwarding* debug
+);
 
 void ZHLN_DestroyDebugMessenger(VkInstance instance, VkDebugUtilsMessengerEXT messenger);
-
-/* --- VALIDATION & DEVICE ERROR DIAGNOSTICS --- */
-
-[[nodiscard]]
-uint32_t ZHLN_GetValidationErrorCount();
-
-void ZHLN_ResetValidationErrorCount();
-
-[[nodiscard]] uint32_t ZHLN_GetDeviceLostCount();
-void                   ZHLN_ResetDeviceLostCount();
-void                   ZHLN_NotifyDeviceLost();
 
 [[nodiscard]]
 ZHLN_MeshShaderLimits ZHLN_QueryMeshShaderLimits(VkPhysicalDevice physical);

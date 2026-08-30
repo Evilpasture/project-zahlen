@@ -18,6 +18,7 @@ def get_git_tracked_files(
     ignore_scripts=False,
     ignore_tests=False,
     ignore_extras=False,
+    ignore_samples=False,
 ):
     extensions = {
         ".cpp",
@@ -54,6 +55,8 @@ def get_git_tracked_files(
         ignore_paths.add("tests")
     if ignore_extras:
         ignore_paths.add("extras")
+    if ignore_samples:
+        ignore_paths.add("samples")
 
     # If the flag is set, remove .inl from the allowed extensions
     if ignore_inlines:
@@ -174,6 +177,7 @@ def run_project_manager(
     ignore_scripts=False,
     ignore_tests=False,
     ignore_extras=False,
+    ignore_samples=False,
 ):
     tracked_files = get_git_tracked_files(
         target,
@@ -183,6 +187,7 @@ def run_project_manager(
         ignore_scripts=ignore_scripts,
         ignore_tests=ignore_tests,
         ignore_extras=ignore_extras,
+        ignore_samples=ignore_samples,
     )
     if not tracked_files:
         print(f"No matching files found at '{target}'.")
@@ -281,6 +286,11 @@ if __name__ == "__main__":
         help="Ignore the extras/ directory.",
     )
     parser.add_argument(
+        "--ignore-samples",
+        action="store_true",
+        help="Ignore the samples/ directory.",
+    )
+    parser.add_argument(
         "--ignore-all",
         action="store_true",
         help="Ignore tools, scripts, tests, extras, and .inl files altogether.",
@@ -295,6 +305,7 @@ if __name__ == "__main__":
         args.ignore_tests = True
         args.ignore_inlines = True
         args.ignore_extras = True
+        args.ignore_samples = True
 
     run_project_manager(
         args.target,
@@ -304,4 +315,5 @@ if __name__ == "__main__":
         ignore_scripts=args.ignore_scripts,
         ignore_tests=args.ignore_tests,
         ignore_extras=args.ignore_extras,
+        ignore_samples=args.ignore_samples,
     )

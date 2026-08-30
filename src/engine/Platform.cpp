@@ -7,7 +7,13 @@
 #include <chrono>
 #include <thread>
 
-// 1. Always include the base GLFW (and Vulkan if needed) for all platforms
+// 1. Always include the base GLFW (and Vulkan if needed) for all platforms.
+// volk.h comes first: it defines VK_NO_PROTOTYPES and preloads the Vulkan
+// headers, so GLFW_INCLUDE_VULKAN below cannot leak real loader prototypes
+// into a TU that later pulls in volk.h (which refuses that mix). This matters
+// on Clang builds, where the engine PCH (and its volk.h) is force-included
+// only after the TU's own headers have already been scanned.
+#include <volk.h>
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 // 2. Win32-specific plumbing (internally handles ifdef logic)

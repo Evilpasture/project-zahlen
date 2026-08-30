@@ -1,0 +1,34 @@
+/*
+ * Linker version script for libzahlen_engine.so (ELF only).
+ *
+ * The renderer (zahlen_render, which embeds Volk) is linked into the engine
+ * shared library AND can additionally end up -- via its static archive --
+ * inside executables that link both (tests, extras consumers). Volk's
+ * dispatch table is per-image by design (visibility hidden), and its loader
+ * entry points (volkInitialize, volkLoadInstance, ...) have default
+ * visibility, so in that topology the executable's copy silently preempts
+ * the engine's calls: the loader gets acquired into the executable's table
+ * while the engine's own stays NULL, and the first vk* call jumps to 0x0.
+ *
+ * Localizing the renderer's symbols in the engine .so binds them internally
+ * at link time (no PLT, no preemption): the engine always initializes and
+ * uses its own table, and executable-embedded copies (if any) use theirs.
+ *
+ * Nothing render-side needs to escape this library: diagnostics are owned by
+ * Vk::Instance and published through the engine's own API
+ * (RenderContext::ValidationErrorCount/DeviceLostCount), never through
+ * renderer symbols.
+ *
+ * Windows PE and macOS two-level namespaces bind intra-image by default and
+ * do not need this.
+ */
+{
+    global: *;
+
+    local:
+        volk*;
+        ZHLN_*;
+        vma*;
+        _ZN5ZHLN2Vk*;
+        _ZN5ZHLN4Vk11*;
+};

@@ -10,6 +10,20 @@ def escape_ninja(path):
     return path.replace(" ", "$ ")
 
 
+def write_if_changed(filepath, new_content):
+    """Writes to filepath ONLY if the content has changed, preserving mtime otherwise."""
+    if os.path.exists(filepath):
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                if f.read() == new_content:
+                    return False
+        except Exception:
+            pass
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(new_content)
+    return True
+
+
 class BinaryMetadataReader:
     """Helper to read the fast binary metadata stream directly in the build configure step."""
 
@@ -418,8 +432,7 @@ rule zpak
     manifest_target = os.path.join(manifest_dir, "manifest.txt").replace("\\", "/")
 
     manifest_entries.sort()
-    with open(manifest_target, "w") as f:
-        f.write("\n".join(manifest_entries))
+    write_if_changed(manifest_target, "\n".join(manifest_entries))
 
     # Final pack step
     escaped_targets = [escape_ninja(t) for t in sorted(compiled_targets)]

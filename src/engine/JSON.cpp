@@ -4,6 +4,7 @@
 #include <Zahlen/JSON.hpp>
 #include <cstring>
 #include <simdjson.h>
+#include <vector>
 
 namespace ZHLN::ReflectJSON {
 
@@ -180,6 +181,26 @@ auto ValueReader::GetArrayElement(size_t index) const noexcept -> std::expected<
         i++;
     }
     return std::unexpected(JSONError::MissingField);
+}
+
+auto ValueReader::GetObjectKeys() const -> std::expected<std::vector<std::string_view>, Error> {
+    if (!_valid) {
+        return std::unexpected(JSONError::TypeMismatch);
+    }
+    const auto& elem = *reinterpret_cast<const simdjson::dom::element*>(_opaque);
+
+    simdjson::dom::object obj;
+    if (elem.get_object().get(obj) != simdjson::SUCCESS) {
+        return std::unexpected(JSONError::TypeMismatch);
+    }
+
+    std::vector<std::string_view> keys;
+    keys.reserve(obj.size());
+    for (const auto [key, field]: obj) {
+        (void) field;
+        keys.push_back(key);
+    }
+    return keys;
 }
 
 } // namespace ZHLN::ReflectJSON

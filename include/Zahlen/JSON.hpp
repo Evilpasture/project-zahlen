@@ -7,10 +7,16 @@
 #include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
+#include <cmath>
 #include <expected>
+#include <format>
 #include <memory>
+#include <optional>
+#include <ranges>
+#include <string>
 #include <string_view>
 #include <type_traits>
+#include <vector>
 
 namespace ZHLN {
 
@@ -30,6 +36,10 @@ class ZHLN_API ValueReader {
     [[nodiscard]] auto GetBool() const noexcept -> std::expected<bool, Error>;
     [[nodiscard]] auto GetString() const noexcept -> std::expected<std::string_view, Error>;
     [[nodiscard]] auto GetKey(std::string_view key) const noexcept -> std::expected<ValueReader, Error>;
+
+    /// Object only (JSONError::TypeMismatch otherwise). Member keys in document
+    /// order; the views remain valid for the owning Document's lifetime.
+    [[nodiscard]] auto GetObjectKeys() const -> std::expected<std::vector<std::string_view>, Error>;
 
     [[nodiscard]] auto GetArraySize() const noexcept -> size_t;
     [[nodiscard]] auto GetArrayElement(size_t index) const noexcept -> std::expected<ValueReader, Error>;
@@ -105,6 +115,27 @@ auto GetJSONValue(ValueReader reader) -> std::expected<FieldType, Error> {
             return std::unexpected(JSONError::TypeMismatch);
         }
         return *enum_opt;
+    } else if constexpr (requires { typename Decayed::key_type; typename Decayed::mapped_type; }) {
+        // Maps (JSON objects with runtime keys). Must precede the range branch:
+        // a map is a range of pairs but has no push_back.
+        auto keys = reader.GetObjectKeys();
+        if (!keys) {
+            return std::unexpected(keys.error());
+        }
+        Decayed container;
+        using MappedType = typename Decayed::mapped_type;
+        for (const std::string_view key: *keys) {
+            auto field = reader.GetKey(key);
+            if (!field) {
+                return std::unexpected(field.error());
+            }
+            auto parsed = GetJSONValue<MappedType>(*field);
+            if (!parsed) {
+                return std::unexpected(parsed.error());
+            }
+            container.emplace(std::string {key}, std::move(*parsed));
+        }
+        return container;
     } else if constexpr (std::ranges::range<Decayed>) {
         size_t  size = reader.GetArraySize();
         Decayed container;
@@ -183,4 +214,183 @@ auto Parse(std::string_view jsonString) -> T {
 }
 
 } // namespace ReflectJSON
+
+// ============================================================================
+// Reflection-Driven JSON Serialisation
+//
+//   Player p {"Hero", 9999, true};
+//   std::string json = ZHLN::Reflect::SerializeJSON(p);
+//   // {"name":"Hero","score":9999,"isAlive":true}
+//
+// Field names come from the declarations themselves (the same
+// ForEachFieldWithName traversal ParseObject reads with), so every reflected
+// struct serialises and deserialises through one source of truth. This also
+// covers the compile-time schema parser: a ParseJSONConst<"...">() result
+// re-serialises losslessly.
+//
+// Supported field types: bool, integrals, floating point (non-finite emits
+// null), std::string_view/std::string/const char*/char arrays, enums (via
+// EnumToString), std::optional (empty emits null), maps with string keys
+// (JSON objects, key order = container order), ranges (JSON arrays), and
+// nested reflected structs. Anything else fails to compile with a
+// static_assert at the offending field.
+//
+// `indent` spaces per nesting level; 0 (default) emits one compact line.
+// ============================================================================
+namespace Reflect {
+
+namespace detail {
+
+    inline void AppendJSONString(std::string& out, std::string_view text) {
+        static constexpr std::string_view kHexDigits {"0123456789abcdef"};
+
+        out += '"';
+        for (const char c: text) {
+            switch (c) {
+                case '"':  out += "\\\""; break;
+                case '\\': out += "\\\\"; break;
+                case '\n': out += "\\n";  break;
+                case '\t': out += "\\t";  break;
+                case '\r': out += "\\r";  break;
+                case '\b': out += "\\b";  break;
+                case '\f': out += "\\f";  break;
+                default: {
+                    const auto byte = static_cast<unsigned char>(c);
+                    if (byte < 0x20) {
+                        out += "\\u00";
+                        out += kHexDigits[(byte >> 4) & 0xF];
+                        out += kHexDigits[byte & 0xF];
+                    } else {
+                        out += c;
+                    }
+                }
+            }
+        }
+        out += '"';
+    }
+
+    inline void AppendJSONSeparator(std::string& out, bool pretty, size_t indent, size_t depth) {
+        if (pretty) {
+            out += ",\n";
+            out.append((depth + 1) * indent, ' ');
+        } else {
+            out += ',';
+        }
+    }
+
+    template <typename T>
+    void AppendJSONValue(std::string& out, const T& value, size_t indent, size_t depth) {
+        using Decayed = std::remove_cvref_t<T>;
+
+        if constexpr (std::is_same_v<Decayed, bool>) {
+            out += value ? "true" : "false";
+        } else if constexpr (std::is_integral_v<Decayed>) {
+            out += std::format("{}", value);
+        } else if constexpr (std::is_floating_point_v<Decayed>) {
+            // JSON cannot express NaN/Inf; null keeps the document parseable.
+            if (std::isfinite(value)) {
+                out += std::format("{}", value); // shortest round-trippable form
+            } else {
+                out += "null";
+            }
+        } else if constexpr (std::is_same_v<Decayed, std::string_view> || std::is_same_v<Decayed, std::string>) {
+            AppendJSONString(out, value);
+        } else if constexpr (std::is_same_v<Decayed, const char*> || std::is_same_v<Decayed, char*>) {
+            AppendJSONString(out, value != nullptr ? std::string_view {value} : std::string_view {});
+        } else if constexpr (std::is_array_v<Decayed> && std::is_same_v<std::remove_extent_t<Decayed>, char>) {
+            // char buffers: strlen semantics (stops at the first NUL, so
+            // string literals never embed their terminator).
+            AppendJSONString(out, std::string_view {value});
+        } else if constexpr (std::is_enum_v<Decayed>) {
+            AppendJSONString(out, EnumToString(value));
+        } else if constexpr (requires { value.has_value(); }) {
+            // std::optional (and optional-likes): empty emits null.
+            if (value.has_value()) {
+                AppendJSONValue(out, *value, indent, depth);
+            } else {
+                out += "null";
+            }
+        } else if constexpr (requires { typename Decayed::key_type; typename Decayed::mapped_type; }) {
+            // Maps: JSON objects. Key order is the container's (std::map: sorted).
+            static_assert(std::is_convertible_v<const typename Decayed::key_type&, std::string_view>,
+                          "SerializeJSON: map keys must be string-like (JSON object keys are strings)");
+            const bool pretty = indent > 0;
+            out += pretty ? "{\n" : "{";
+            if (pretty) {
+                out.append((depth + 1) * indent, ' ');
+            }
+            bool first = true;
+            for (const auto& [key, mapped]: value) {
+                if (!first) {
+                    AppendJSONSeparator(out, pretty, indent, depth);
+                }
+                first = false;
+                AppendJSONString(out, key);
+                out += pretty ? ": " : ":";
+                AppendJSONValue(out, mapped, indent, depth + 1);
+            }
+            if (pretty) {
+                out += '\n';
+                out.append(depth * indent, ' ');
+            }
+            out += '}';
+        } else if constexpr (std::ranges::range<Decayed>) {
+            // Ranges: JSON arrays.
+            const bool pretty = indent > 0;
+            out += pretty ? "[\n" : "[";
+            if (pretty) {
+                out.append((depth + 1) * indent, ' ');
+            }
+            bool first = true;
+            for (const auto& element: value) {
+                if (!first) {
+                    AppendJSONSeparator(out, pretty, indent, depth);
+                }
+                first = false;
+                AppendJSONValue(out, element, indent, depth + 1);
+            }
+            if (pretty) {
+                out += '\n';
+                out.append(depth * indent, ' ');
+            }
+            out += ']';
+        } else if constexpr (ZHLN::Reflect::FieldCount<Decayed>() > 0) {
+            // Reflected structs: field names are the JSON keys, matching
+            // ParseObject/GetJSONValue on the read side.
+            const bool pretty = indent > 0;
+            out += pretty ? "{\n" : "{";
+            if (pretty) {
+                out.append((depth + 1) * indent, ' ');
+            }
+            bool first = true;
+            ForEachFieldWithName(value, [&](std::string_view fieldName, const auto& fieldVal) {
+                if (!first) {
+                    AppendJSONSeparator(out, pretty, indent, depth);
+                }
+                first = false;
+                AppendJSONString(out, fieldName);
+                out += pretty ? ": " : ":";
+                AppendJSONValue(out, fieldVal, indent, depth + 1);
+            });
+            if (pretty) {
+                out += '\n';
+                out.append(depth * indent, ' ');
+            }
+            out += '}';
+        } else {
+            static_assert(!sizeof(Decayed), "SerializeJSON: unsupported field type (see the supported set in Zahlen/JSON.hpp)");
+        }
+    }
+
+} // namespace detail
+
+template <typename T>
+[[nodiscard]] auto SerializeJSON(const T& value, size_t indent = 0) -> std::string {
+    std::string out;
+    out.reserve(256);
+    detail::AppendJSONValue(out, value, indent, 0);
+    return out;
+}
+
+} // namespace Reflect
 } // namespace ZHLN
