@@ -698,31 +698,53 @@ target_include_directories(zcook SYSTEM PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/zcook
 )
 
-# Function for consumer Game projects to configure asset cooking via Ninja
+
+# --- ASSET COMPILER (ZCOOK) ---
+set(ZHLN_SHARED_ASSET_DIR "${CMAKE_SOURCE_DIR}/build/shared_assets" CACHE PATH "Shared cooked asset cache")
+
 function(zahlen_configure_game_assets GAME_SOURCE_DIR)
+    file(MAKE_DIRECTORY "${ZHLN_SHARED_ASSET_DIR}")
+
+    set(SHARED_ZCOOK "${ZHLN_SHARED_ASSET_DIR}/zcook")
+
+    # 1. Symlink the current build's zcook to a STABLE shared location
     add_custom_command(
-        OUTPUT "${CMAKE_BINARY_DIR}/assets.ninja"
+        TARGET zcook POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E create_symlink "$<TARGET_FILE:zcook>" "${SHARED_ZCOOK}"
+        COMMENT "Updating stable shared zcook symlink..."
+    )
+
+    # 2. Generate assets.ninja using the FIXED path (${SHARED_ZCOOK})
+    add_custom_command(
+        OUTPUT "${ZHLN_SHARED_ASSET_DIR}/assets.ninja"
         COMMAND python3 "${zahlen_SOURCE_DIR}/configure_assets.py"
-                "${CMAKE_BINARY_DIR}/assets.ninja"
-                "$<TARGET_FILE:zcook>"
+                "${ZHLN_SHARED_ASSET_DIR}/assets.ninja"
+                "${SHARED_ZCOOK}"
                 "${GAME_SOURCE_DIR}"
-        WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+        WORKING_DIRECTORY "${ZHLN_SHARED_ASSET_DIR}"
         DEPENDS "${zahlen_SOURCE_DIR}/configure_assets.py"
                 "${zahlen_SOURCE_DIR}/tools/export_metadata.py"
         COMMENT "Scanning asset folders and generating assets.ninja..."
     )
 
+    # 3. Use symlink for base.pak
+    if(WIN32)
+        set(PAK_LINK_CMD ${CMAKE_COMMAND} -E copy "${ZHLN_SHARED_ASSET_DIR}/data/base.pak" "$<TARGET_FILE_DIR:zahlen>/data/base.pak")
+    else()
+        set(PAK_LINK_CMD ${CMAKE_COMMAND} -E create_symlink "${ZHLN_SHARED_ASSET_DIR}/data/base.pak" "$<TARGET_FILE_DIR:zahlen>/data/base.pak")
+    endif()
+
     add_custom_target(cook_assets ALL
         COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:zahlen>/data"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/build_assets"
-        COMMAND ninja -f "${CMAKE_BINARY_DIR}/assets.ninja"
-        COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_BINARY_DIR}/data/base.pak" "$<TARGET_FILE_DIR:zahlen>/data/base.pak"
-        DEPENDS "${CMAKE_BINARY_DIR}/assets.ninja"
-        WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${ZHLN_SHARED_ASSET_DIR}/build_assets"
+        # Run ninja inside the shared directory with persistent .ninja_log
+        COMMAND ninja -C "${ZHLN_SHARED_ASSET_DIR}" -f "${ZHLN_SHARED_ASSET_DIR}/assets.ninja"
+        COMMAND ${PAK_LINK_CMD}
+        DEPENDS "${ZHLN_SHARED_ASSET_DIR}/assets.ninja" zcook
+        WORKING_DIRECTORY "${ZHLN_SHARED_ASSET_DIR}"
         COMMENT "Cooking assets in parallel using Ninja..."
         USES_TERMINAL
     )
-    add_dependencies(cook_assets zcook)
     add_dependencies(zahlen cook_assets)
 endfunction()
 
