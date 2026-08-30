@@ -97,9 +97,9 @@ template <typename LayoutT>
 template <PostProcessPushPayload T>
 void PostProcessPass<LayoutT>::ExecuteHeap(const Context& ctx, VkCommandBuffer cmd, const T& pushData, uint32_t heapIndex) const noexcept {
     static_assert(sizeof(T) <= kScenePassPushPayloadBytes, "Pass push struct exceeds DescriptorHeapPushData::passData.");
-    detail::AssertValidCommandBuffer(cmd, "post-process fullscreen draw");
+    ZHLN::Assert(cmd != VK_NULL_HANDLE, "{} requires a valid VkCommandBuffer.", "post-process fullscreen draw");
     ZHLN::Assert(Valid(), "Attempted to bind an invalid post-process pipeline.");
-    detail::AssertHeapIndexOffset(heapBindings.indexPushOffset);
+    ZHLN::Assert(heapBindings.indexPushOffset > 0, "Missing reflected descriptor-index offset.");
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Get());
     PushData(ctx, cmd, 0, pushData);
     PushHeapIndex(ctx, cmd, heapBindings.indexPushOffset, heapIndex);
@@ -116,8 +116,8 @@ void PostProcessPass<LayoutT>::ExecuteVariantHeap(
     uint32_t        heapIndex
 ) const noexcept {
     static_assert(sizeof(T) <= kScenePassPushPayloadBytes, "Pass push struct exceeds DescriptorHeapPushData::passData.");
-    detail::AssertValidCommandBuffer(cmd, "post-process fullscreen draw");
-    detail::AssertHeapIndexOffset(heapBindings.indexPushOffset);
+    ZHLN::Assert(cmd != VK_NULL_HANDLE, "{} requires a valid VkCommandBuffer.", "post-process fullscreen draw");
+    ZHLN::Assert(heapBindings.indexPushOffset > 0, "Missing reflected descriptor-index offset.");
     ZHLN::Assert(variantIdx < pipelines.size(), "Post-process pipeline variant index {} is out of bounds ({} variants).", variantIdx, pipelines.size());
     ZHLN::Assert(pipelines[variantIdx].Valid(), "Attempted to bind an invalid post-process pipeline variant {}.", variantIdx);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines[variantIdx].Get());
@@ -128,9 +128,9 @@ void PostProcessPass<LayoutT>::ExecuteVariantHeap(
 
 template <typename LayoutT>
 void PostProcessPass<LayoutT>::ExecuteHeap(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex) const noexcept {
-    detail::AssertValidCommandBuffer(cmd, "post-process fullscreen draw");
+    ZHLN::Assert(cmd != VK_NULL_HANDLE, "{} requires a valid VkCommandBuffer.", "post-process fullscreen draw");
     ZHLN::Assert(Valid(), "Attempted to bind an invalid post-process pipeline.");
-    detail::AssertHeapIndexOffset(heapBindings.indexPushOffset);
+    ZHLN::Assert(heapBindings.indexPushOffset > 0, "Missing reflected descriptor-index offset.");
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Get());
     PushHeapIndex(ctx, cmd, heapBindings.indexPushOffset, heapIndex);
     vkCmdDraw(cmd, 3, 1, 0, 0);
