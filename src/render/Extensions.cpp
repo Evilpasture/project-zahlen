@@ -6,6 +6,7 @@
 #include "Extensions.hpp"
 
 #include <Zahlen/Log.hpp>
+#include "RenderCore.h"
 
 namespace ZHLN::Vk {
 
@@ -68,6 +69,14 @@ auto ExtensionBuilder::ForDevice(VkPhysicalDevice physical) noexcept -> Extensio
 }
 
 auto ExtensionBuilder::ForInstance() noexcept -> ExtensionBuilder {
+    // Runs before any instance exists: acquire the Vulkan loader through
+    // Volk first, or the enumeration pointer below is still NULL. On failure,
+    // return an empty builder so every Require() reports missing extensions
+    // instead of dereferencing a NULL dispatch pointer.
+    if (ZHLN_EnsureVulkanLoader() != VK_SUCCESS) {
+        return ExtensionBuilder{};
+    }
+
     uint32_t count = 0;
     vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr);
     std::vector<VkExtensionProperties> props(count);

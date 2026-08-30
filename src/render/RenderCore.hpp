@@ -11,6 +11,10 @@
 #include <Zahlen/Error.hpp>
 #include <cstdint>
 
+// C layer twin: brings Volk's declarations (and, through it, the Vulkan
+// headers) plus the ZHLN_* entry points used by the helpers below.
+#include "RenderCore.h"
+
 namespace ZHLN {
 
 struct Color4 {

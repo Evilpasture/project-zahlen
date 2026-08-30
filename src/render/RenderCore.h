@@ -13,7 +13,12 @@
 
 #pragma once
 #include <stdbool.h> // We use booleans as keyword but good to include nevertheless
-#include <vulkan/vulkan_core.h>
+// Volk owns the Vulkan headers from here on: it defines VK_NO_PROTOTYPES and
+// includes <vulkan/vulkan.h> itself, so every vk* name below (and in every
+// consumer of this header) refers to Volk's dispatch pointers instead of the
+// link-time loader's prototypes. Include volk.h before any direct
+// <vulkan/*.h> include or volk.h will refuse to compile the mix.
+#include <volk.h>
 
 #ifndef ZHLN_RESTRICT
 #define ZHLN_RESTRICT __restrict
@@ -65,6 +70,21 @@ static constexpr ZHLN_InstanceDesc ZHLN_VERBOSE_INSTANCE_DESC = {
     .extensions      = nullptr,
     .validation_mode = ZHLN_VALIDATION_ON,
 };
+
+/**
+ * @brief Acquires the Vulkan loader through Volk.
+ *
+ * The engine does not link the Vulkan loader; Volk loads it at runtime
+ * (dlopen/LoadLibrary). Until this succeeds, every global-level vk* pointer
+ * (vkEnumerateInstanceExtensionProperties, vkCreateInstance, ...) is NULL.
+ * ZHLN_CreateInstance calls it, and so does every helper that can legally
+ * touch Vulkan before an instance exists. Calling it again after the loader
+ * is acquired is a no-op that returns VK_SUCCESS.
+ * @return VK_SUCCESS, or the VkResult volkInitialize() failed with (e.g.
+ * VK_ERROR_INITIALIZATION_FAILED when no loader is installed).
+ */
+[[nodiscard]]
+VkResult ZHLN_EnsureVulkanLoader(void);
 
 /**
  * @brief Creates a Vulkan Instance with debug messenger attached to pNext.

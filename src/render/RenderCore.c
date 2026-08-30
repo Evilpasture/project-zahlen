@@ -14,7 +14,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <vulkan/vulkan_core.h>
 
 // NOLINTBEGIN(misc-misplaced-const, readability-identifier-length)
 
@@ -73,6 +72,34 @@ static inline uint64_t zhln_max_u64(uint64_t a, uint64_t b) {
     _Generic((a), int32_t: zhln_max_i32, uint32_t: zhln_max_u32, int64_t: zhln_max_i64, uint64_t: zhln_max_u64, default: zhln_max_i64)((a), (b))
 
 /* --- Start of procedural logic --- */
+
+/* --- Volk loader bootstrap --- */
+// Nothing in this binary links the Vulkan loader; Volk acquires it at runtime
+// (dlopen on Unix, LoadLibrary on Windows, MoltenVK-aware on macOS). Every
+// global-level command (vkEnumerateInstanceExtensionProperties,
+// vkCreateInstance, vkEnumerateInstanceLayerProperties, ...) is a Volk
+// dispatch pointer that stays NULL until the loader is acquired, so this must
+// run before any of them are touched. ZHLN_CreateInstance calls it, and so do
+// the helpers that can legally query Vulkan before an instance exists
+// (ExtensionBuilder::ForInstance, EnumerateInstanceExtensions).
+static atomic_bool g_volk_loaded = false;
+
+VkResult ZHLN_EnsureVulkanLoader(void) {
+    if (atomic_load_explicit(&g_volk_loaded, memory_order_acquire)) {
+        return VK_SUCCESS;
+    }
+
+    const VkResult result = volkInitialize();
+    if (result != VK_SUCCESS) {
+        return result;
+    }
+
+    // Benign race: two threads may run volkInitialize() concurrently; it only
+    // (re)acquires the loader handle and re-fetches global pointers, and
+    // never tears anything down, so double initialization is harmless.
+    atomic_store_explicit(&g_volk_loaded, true, memory_order_release);
+    return VK_SUCCESS;
+}
 
 // Validation-error accounting. Tests (and the console) can snapshot this around
 // a workload to assert that a feature does not introduce validation errors --
@@ -210,6 +237,13 @@ static const char* ZHLN_Internal_FindSpirvEntryPoint(const uint32_t* code, size_
 VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
     bool enable_validation = (desc->validation_mode != ZHLN_VALIDATION_OFF);
     bool gpu_validation    = (desc->validation_mode == ZHLN_VALIDATION_GPU);
+
+    // Acquire the Vulkan loader before anything below touches a dispatch
+    // pointer (vkEnumerateInstanceExtensionProperties included).
+    if (ZHLN_EnsureVulkanLoader() != VK_SUCCESS) {
+        fprintf(stderr, "Zahlen: [VULKAN] No Vulkan loader available; volkInitialize() failed.\n");
+        return VK_NULL_HANDLE;
+    }
 
     const VkApplicationInfo app_info = {
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO, .pApplicationName = desc->app_name, .applicationVersion = desc->version, .apiVersion = VK_API_VERSION_1_3
@@ -389,6 +423,13 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
     if (vkCreateInstance(&create_info, nullptr, &instance) != VK_SUCCESS) {
         return VK_NULL_HANDLE;
     }
+
+    // All instance-level commands (and the loader's trampolines for
+    // device-level ones) now dispatch through Volk's pointers. The debug
+    // messenger lookups below go through the freshly loaded
+    // vkGetInstanceProcAddr. ZHLN_CreateDevice() refines the device-level
+    // pointers with direct driver entry points.
+    volkLoadInstance(instance);
     return instance;
 }
 
@@ -652,6 +693,13 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
         fprintf(stderr, "=======================================================\n\n");
         return null_result;
     }
+
+    // Route device-level commands through the driver's own entry points
+    // (vkGetDeviceProcAddr) instead of the loader's trampolines: no loader
+    // overhead on the hot paths. The engine is single-device by design; with
+    // more than one live VkDevice the last load wins and per-device tables
+    // (volkCreateDeviceTable) would be needed instead.
+    volkLoadDevice(handle);
 
     // --- Queue Retrieval ---
     VkQueue graphics_queue = VK_NULL_HANDLE;

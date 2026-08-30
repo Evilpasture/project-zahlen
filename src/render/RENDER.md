@@ -31,6 +31,16 @@ ZHLN is built on a **Dual-Layer Compilation Model** to balance low-level driver 
 * **The C Backend (`RenderCore.h`):** Exposes a stateless, procedural C23 API. It handles the raw Vulkan boilerplates (instance creation, device selection, swapchain recreation, synchronization primitives). It does not allocate memory on the heap and remains independent of C++ engine structures.
 * **The C++ Frontend (`RenderCore.hpp`):** Wraps raw Vulkan handles in strongly-typed RAII structures. It leverages C++23 type-safety features to validate descriptor bindings, vertex layouts, and image transitions at compile time, eliminating runtime state validation.
 
+### Vulkan Loading (Volk)
+
+The renderer does **not** link the Vulkan loader. [Volk](https://github.com/zeux/volk) (pinned at `extern/volk`, tag matching the CI SDK version) acquires the loader at runtime and dispatches through its own function pointers:
+
+* `vk*` names are Volk dispatch pointers, not loader prototypes — call sites are unaffected, but every pointer is `NULL` until the loader is acquired. `volk.h` therefore owns the Vulkan includes everywhere (`RenderingPCH.h`, `RenderCore.h`) and must be included *before* any header that pulls in `<vulkan/vulkan.h>`.
+* `ZHLN_EnsureVulkanLoader()` (RenderCore.c) wraps `volkInitialize()` and is called by `ZHLN_CreateInstance()` **and** by the helpers that can legitimately query Vulkan before an instance exists (`ExtensionBuilder::ForInstance()`, `EnumerateInstanceExtensions()`).
+* `ZHLN_CreateInstance()` calls `volkLoadInstance()` right after instance creation; `ZHLN_CreateDevice()` calls `volkLoadDevice()` so device-level commands hit the driver's entry points directly, skipping the loader trampolines. The engine is single-device; multi-device would need `volkCreateDeviceTable()` per device.
+
+This keeps tools and executables runnable on machines without a loader installed (clean `ZHLN_EnsureVulkanLoader()` failure instead of a missing-library abort at process start) and removes loader overhead from the hot paths.
+
 ---
 
 ## 2. The Lifetime Model (RAII)

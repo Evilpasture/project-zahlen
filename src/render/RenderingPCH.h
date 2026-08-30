@@ -8,9 +8,15 @@
 // ============================================================================
 // External APIs & Library Config
 // ============================================================================
+// Volk owns the Vulkan headers for the whole renderer. volk.h must be the
+// FIRST Vulkan include in this PCH: it defines VK_NO_PROTOTYPES before
+// pulling in <vulkan/vulkan.h>, so vk_mem_alloc.h below sees the same
+// include mode. Including <vulkan/vulkan.h> (or any header that includes it,
+// like vk_mem_alloc.h) before volk.h leaks real loader prototypes into every
+// translation unit, and volk.h refuses to compile that mix.
+#include <volk.h>
 #include <spirv_reflect.h>
 #include <vk_mem_alloc.h>
-#include <vulkan/vulkan.h>
 
 // On Linux platforms, Vulkan implicitly includes X11 headers when utilizing XLIB.
 // These headers define global macros such as "None", "Success", "Bool", and "Status",

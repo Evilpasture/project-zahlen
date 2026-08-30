@@ -28,8 +28,10 @@ target_include_directories(imgui SYSTEM PUBLIC
 )
 
 # 4. Link dependencies
-find_package(Vulkan REQUIRED)
-target_link_libraries(imgui PUBLIC glfw Vulkan::Vulkan)
+# No Vulkan here: only the GLFW backend is compiled, and the engine resolves
+# all vk symbols through Volk at runtime. Linking Vulkan::Vulkan would
+# reintroduce exactly the load-time loader dependency Volk exists to remove.
+target_link_libraries(imgui PUBLIC glfw)
 
 # 5. Disable compiler warnings when compiling ImGui .cpp files
 if(NOT MSVC)
