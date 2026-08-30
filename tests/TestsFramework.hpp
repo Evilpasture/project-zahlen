@@ -377,8 +377,8 @@ TestStats RunSuite() {
 
             // 1. Snapshot telemetry before test begins (framework-owned
             // totals: they persist across engine lifetimes)
-            const uint32_t valErrorsBefore = g_validationErrors.load(std::memory_order_relaxed);
-            const uint32_t devLostBefore   = g_deviceLost.load(std::memory_order_relaxed);
+            const uint32_t valErrorsBefore = g_validationErrors.load(std::memory_order::relaxed);
+            const uint32_t devLostBefore   = g_deviceLost.load(std::memory_order::relaxed);
 
             ReturnType result = std::unexpected(ZHLN::Error(TestFrameworkError::AssertionFailed));
 
@@ -418,7 +418,7 @@ TestStats RunSuite() {
 #endif
 
             // 2. Fail if new Vulkan Validation Errors occurred
-            const uint32_t valErrorsAfter = g_validationErrors.load(std::memory_order_relaxed);
+            const uint32_t valErrorsAfter = g_validationErrors.load(std::memory_order::relaxed);
             if (valErrorsAfter > valErrorsBefore && !ctx.allowValidationErrors) {
                 const uint32_t count = valErrorsAfter - valErrorsBefore;
                 ctx.failures.push_back(
@@ -431,7 +431,7 @@ TestStats RunSuite() {
             }
 
             // 3. Fail if GPU Device Lost / Hang occurred
-            const uint32_t devLostAfter = g_deviceLost.load(std::memory_order_relaxed);
+            const uint32_t devLostAfter = g_deviceLost.load(std::memory_order::relaxed);
             if (devLostAfter > devLostBefore && !ctx.allowDeviceLost) {
                 const uint32_t count = devLostAfter - devLostBefore;
                 ctx.failures.push_back(

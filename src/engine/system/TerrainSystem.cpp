@@ -87,7 +87,7 @@ void TerrainSystem::UnregisterTerrainData(TerrainHandle handle) noexcept {
 
     Lock(s_LifecycleMutex, [&] {
         auto& slot = s_TerrainSlots[slotIdx];
-        if (slot.occupied.load(std::memory_order_relaxed) && slot.generation.load(std::memory_order_relaxed) == gen) {
+        if (slot.occupied.load(std::memory_order::relaxed) && slot.generation.load(std::memory_order::relaxed) == gen) {
             slot.occupied.store(false, std::memory_order::release);
             slot.generation.fetch_add(1, std::memory_order::relaxed);
 

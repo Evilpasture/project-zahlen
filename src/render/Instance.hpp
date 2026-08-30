@@ -115,7 +115,7 @@ class Instance {
     // The single live instance, or null when none exists (engine is
     // single-instance by design).
     [[nodiscard]] static auto Active() noexcept -> Instance* {
-        return _active.load(std::memory_order_acquire);
+        return _active.load(std::memory_order::acquire);
     }
 
   private:

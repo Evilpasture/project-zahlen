@@ -22,7 +22,7 @@ void Instance::UseDiagnostics(DiagnosticsSink sink) noexcept {
     if (!sink.Valid()) {
         sink = {};
     }
-    _registeredSink.store(sink, std::memory_order_release);
+    _registeredSink.store(sink, std::memory_order::release);
 }
 
 void Instance::DebugHookTrampoline(void* userdata, VkDebugUtilsMessageSeverityFlagBitsEXT severity) noexcept {
@@ -30,7 +30,7 @@ void Instance::DebugHookTrampoline(void* userdata, VkDebugUtilsMessageSeverityFl
     if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
         // Target is the caller's registered sink or this instance's own
         // member -- resolved once at Create() and immutable afterwards.
-        self._validationTarget->fetch_add(1, std::memory_order_relaxed);
+        self._validationTarget->fetch_add(1, std::memory_order::relaxed);
     }
 }
 
@@ -53,13 +53,13 @@ Instance::~Instance() noexcept {
     _handle = VK_NULL_HANDLE;
 
     Instance* expected = this;
-    _active.compare_exchange_strong(expected, nullptr, std::memory_order_release, std::memory_order_relaxed);
+    _active.compare_exchange_strong(expected, nullptr, std::memory_order::release, std::memory_order::relaxed);
 }
 
 Instance::Instance(Instance&& other) noexcept
     : _handle(std::exchange(other._handle, VK_NULL_HANDLE)), _messenger(std::exchange(other._messenger, VK_NULL_HANDLE)),
-      _debugForwarding(std::move(other._debugForwarding)), _validationErrors(other._validationErrors.load(std::memory_order_relaxed)),
-      _deviceLost(other._deviceLost.load(std::memory_order_relaxed)),
+      _debugForwarding(std::move(other._debugForwarding)), _validationErrors(other._validationErrors.load(std::memory_order::relaxed)),
+      _deviceLost(other._deviceLost.load(std::memory_order::relaxed)),
       _validationTarget(other._validationTarget == &other._validationErrors ? &_validationErrors : other._validationTarget),
       _deviceLostTarget(other._deviceLostTarget == &other._deviceLost ? &_deviceLost : other._deviceLostTarget) {
     // Vulkan stores the forwarding object pointer itself as pUserData, so the
@@ -68,11 +68,11 @@ Instance::Instance(Instance&& other) noexcept
     if (_debugForwarding && _debugForwarding->hook != nullptr) {
         _debugForwarding->userdata = this;
     }
-    if (_active.load(std::memory_order_acquire) == &other) {
-        _active.store(this, std::memory_order_release);
+    if (_active.load(std::memory_order::acquire) == &other) {
+        _active.store(this, std::memory_order::release);
     }
-    other._validationErrors.store(0, std::memory_order_relaxed);
-    other._deviceLost.store(0, std::memory_order_relaxed);
+    other._validationErrors.store(0, std::memory_order::relaxed);
+    other._deviceLost.store(0, std::memory_order::relaxed);
     other._validationTarget = &other._validationErrors;
     other._deviceLostTarget = &other._deviceLost;
 }
@@ -86,14 +86,14 @@ auto Instance::operator=(Instance&& other) noexcept -> Instance& {
             }
             vkDestroyInstance(_handle, nullptr);
             Instance* expected = this;
-            _active.compare_exchange_strong(expected, &other, std::memory_order_release, std::memory_order_relaxed);
+            _active.compare_exchange_strong(expected, &other, std::memory_order::release, std::memory_order::relaxed);
         }
 
         _handle           = std::exchange(other._handle, VK_NULL_HANDLE);
         _messenger        = std::exchange(other._messenger, VK_NULL_HANDLE);
         _debugForwarding  = std::move(other._debugForwarding);
-        _validationErrors = other._validationErrors.load(std::memory_order_relaxed);
-        _deviceLost       = other._deviceLost.load(std::memory_order_relaxed);
+        _validationErrors = other._validationErrors.load(std::memory_order::relaxed);
+        _deviceLost       = other._deviceLost.load(std::memory_order::relaxed);
         _validationTarget = other._validationTarget == &other._validationErrors ? &_validationErrors : other._validationTarget;
         _deviceLostTarget = other._deviceLostTarget == &other._deviceLost ? &_deviceLost : other._deviceLostTarget;
 
@@ -102,11 +102,11 @@ auto Instance::operator=(Instance&& other) noexcept -> Instance& {
         if (_debugForwarding && _debugForwarding->hook != nullptr) {
             _debugForwarding->userdata = this;
         }
-        if (_active.load(std::memory_order_acquire) == &other) {
-            _active.store(this, std::memory_order_release);
+        if (_active.load(std::memory_order::acquire) == &other) {
+            _active.store(this, std::memory_order::release);
         }
-        other._validationErrors.store(0, std::memory_order_relaxed);
-        other._deviceLost.store(0, std::memory_order_relaxed);
+        other._validationErrors.store(0, std::memory_order::relaxed);
+        other._deviceLost.store(0, std::memory_order::relaxed);
         other._validationTarget = &other._validationErrors;
         other._deviceLostTarget = &other._deviceLost;
     }
@@ -120,7 +120,7 @@ auto Instance::Create(
 
     // Resolve the counting target before anything can fire: the pNext
     // messenger delivers callbacks during vkCreateInstance itself.
-    const DiagnosticsSink sink = _registeredSink.load(std::memory_order_acquire);
+    const DiagnosticsSink sink = _registeredSink.load(std::memory_order::acquire);
     if (sink.Valid()) {
         result._validationTarget = sink.validation;
         result._deviceLostTarget = sink.deviceLost;
@@ -172,7 +172,7 @@ auto Instance::Create(
     // instead of letting a second instance silently steal the slot (which
     // would re-route the first one's notifications and break its retirement).
     Instance* claimed = nullptr;
-    if (!_active.compare_exchange_strong(claimed, &result, std::memory_order_release, std::memory_order_relaxed)) {
+    if (!_active.compare_exchange_strong(claimed, &result, std::memory_order::release, std::memory_order::relaxed)) {
         if (result._messenger != VK_NULL_HANDLE) {
             ZHLN_DestroyDebugMessenger(result._handle, result._messenger);
         }
@@ -188,18 +188,18 @@ auto Instance::Create(
 }
 
 auto Instance::ValidationErrorCount() noexcept -> uint32_t {
-    const Instance* const active = _active.load(std::memory_order_acquire);
-    return active != nullptr ? active->_validationTarget->load(std::memory_order_relaxed) : 0;
+    const Instance* const active = _active.load(std::memory_order::acquire);
+    return active != nullptr ? active->_validationTarget->load(std::memory_order::relaxed) : 0;
 }
 
 auto Instance::DeviceLostCount() noexcept -> uint32_t {
-    const Instance* const active = _active.load(std::memory_order_acquire);
-    return active != nullptr ? active->_deviceLostTarget->load(std::memory_order_relaxed) : 0;
+    const Instance* const active = _active.load(std::memory_order::acquire);
+    return active != nullptr ? active->_deviceLostTarget->load(std::memory_order::relaxed) : 0;
 }
 
 void Instance::NotifyDeviceLost() noexcept {
-    if (Instance* const active = _active.load(std::memory_order_acquire); active != nullptr) {
-        active->_deviceLostTarget->fetch_add(1, std::memory_order_relaxed);
+    if (Instance* const active = _active.load(std::memory_order::acquire); active != nullptr) {
+        active->_deviceLostTarget->fetch_add(1, std::memory_order::relaxed);
     }
     // No live instance: unobservable by design. Observers bracketing engine
     // lifetimes hold a registered sink; one that dies with no instance live
