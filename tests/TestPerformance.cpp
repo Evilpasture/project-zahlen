@@ -168,6 +168,7 @@ struct PerformanceTestSuite {
             }
 
             ZHLN::Println("    [RadixSort64] 65,536 keys sorted in {:.3f} ms ({:.2f} Mkeys/sec)", sortDurationMs, (kSortCount / 1000.0) / sortDurationMs);
+            ZHLN_PERF_CHECK("cpu.radix_sort_65536", sortDurationMs);
 
             // B. ZHLN::HashMap Stress (30,000 Inserts & Lookups)
             constexpr uint32_t                kMapOps = 30000;
@@ -187,6 +188,7 @@ struct PerformanceTestSuite {
             double mapDurationMs = mapTimer.ElapsedMilliseconds();
             ZHLN::Test::ExpectEq(foundCount, kMapOps);
             ZHLN::Println("    [HashMap] 30,000 Insert + Find operations in {:.3f} ms ({:.2f} kOps/sec)", mapDurationMs, (kMapOps * 2.0) / mapDurationMs);
+            ZHLN_PERF_CHECK("cpu.hashmap_30k_insert_find", mapDurationMs);
 
             // C. ZHLN::ObjectPool Recycling
             struct TrackedNode {
@@ -209,6 +211,7 @@ struct PerformanceTestSuite {
                 "    [ObjectPool] 50,000 Alloc + Destroy cycles in {:.3f} ms ({:.2f} Mops/sec)", poolDurationMs,
                 (kPoolAllocations * 2.0 / 1000.0) / poolDurationMs
             );
+                ZHLN_PERF_CHECK("cpu.object_pool_50k_cycles", poolDurationMs);
 
             return {};
         }
@@ -239,6 +242,7 @@ struct PerformanceTestSuite {
             ZHLN::Println(
                 "    [ParallelFor] 1,000,000 sqrt math iterations in {:.3f} ms ({:.2f} Mitems/sec)", pForDurationMs, (kParallelCount / 1000.0) / pForDurationMs
             );
+                ZHLN_PERF_CHECK("cpu.parallel_for_1m_items", pForDurationMs);
 
             // B. Nested Parallel Dispatch (Fibers executing child tasks)
             constexpr size_t      kOuterTasks = 32;
@@ -269,6 +273,7 @@ struct PerformanceTestSuite {
 
             ZHLN::Test::ExpectEq(nestedCounter.load(), static_cast<uint32_t>(kOuterTasks * kInnerTasks));
             ZHLN::Println("    [Nested Fibers] 32 x 256 child tasks dispatched & synced in {:.3f} ms", nestedDurationMs);
+            ZHLN_PERF_CHECK("cpu.nested_fibers_32x256", nestedDurationMs);
 
             return {};
         }
@@ -302,6 +307,7 @@ struct PerformanceTestSuite {
                 "    [ECS Create] 40,000 Entities (4 Components each) created in {:.3f} ms ({:.2f} kEntities/sec)", createDurationMs,
                 kTotalEntities / createDurationMs
             );
+                ZHLN_PERF_CHECK("cpu.ecs_create_40k_entities", createDurationMs);
 
             // B. Dense Array Direct Vectorized Iteration (GetRawArray & Patch)
             BenchmarkTimer iterTimer;
@@ -320,6 +326,7 @@ struct PerformanceTestSuite {
                 "    [ECS Dense Iterate] 10 Frames x 40,000 Entities updated in {:.3f} ms ({:.2f} Mupdates/sec)", iterDurationMs,
                 (10.0 * kTotalEntities / 1000.0) / iterDurationMs
             );
+                ZHLN_PERF_CHECK("cpu.ecs_dense_iterate_10x40k", iterDurationMs);
 
             // C. EntityCommandBuffer Bulk Playback
             ZHLN::ECS::EntityCommandBuffer ecb(reg);
@@ -333,6 +340,7 @@ struct PerformanceTestSuite {
             ecb.Playback();
             double ecbDurationMs = ecbTimer.ElapsedMilliseconds();
             ZHLN::Println("    [ECB Playback] 15,000 Deferred Creations + Mutations executed in {:.3f} ms", ecbDurationMs);
+            ZHLN_PERF_CHECK("cpu.ecb_playback_15k", ecbDurationMs);
 
             return {};
         }
@@ -387,6 +395,7 @@ struct PerformanceTestSuite {
                 "    [SystemGraph] 2,000 graph evaluations (5 systems each) in {:.3f} ms ({:.2f} cycles/sec)", graphDurationMs,
                 (kGraphIterations * 1000.0) / graphDurationMs
             );
+                ZHLN_PERF_CHECK("cpu.systemgraph_2000_evals", graphDurationMs);
 
             return {};
         }
@@ -422,6 +431,7 @@ struct PerformanceTestSuite {
             }
             double stepDurationMs = stepTimer.ElapsedMilliseconds();
             ZHLN::Println("    [Physics Step] 60 frames (256 dynamic bodies) simulated in {:.3f} ms ({:.2f} FPS)", stepDurationMs, 60000.0 / stepDurationMs);
+            ZHLN_PERF_CHECK("cpu.physics_step_60f_256bodies", stepDurationMs);
 
             // B. Mass Concurrent Raycast Queries (5,000 Raycasts via ParallelFor)
             constexpr uint32_t kRaycastCount = 5000;
@@ -447,6 +457,7 @@ struct PerformanceTestSuite {
                 "    [Raycast Fan-out] 5,000 Broadphase raycasts executed in {:.3f} ms ({:.2f} kRays/sec, Hits: {})", rayDurationMs,
                 kRaycastCount / rayDurationMs, hitCount.load()
             );
+                ZHLN_PERF_CHECK("cpu.raycast_5000", rayDurationMs);
 
             return {};
         }
@@ -485,6 +496,7 @@ struct PerformanceTestSuite {
                 "    [GUI Context] 100 frames of complex UI (20 rows x 2 widgets) built in {:.3f} ms ({:.2f} frames/sec)", uiDurationMs,
                 (kSimulatedFrames * 1000.0) / uiDurationMs
             );
+                ZHLN_PERF_CHECK("cpu.gui_100f_complex", uiDurationMs);
 
             return {};
         }
@@ -518,6 +530,7 @@ struct PerformanceTestSuite {
                 "    [Audio Context] 20,000 3D spatial events queued & flushed in {:.3f} ms ({:.2f} kEvents/sec)", audioDurationMs,
                 kAudioEvents / audioDurationMs
             );
+                ZHLN_PERF_CHECK("cpu.audio_20k_spatial", audioDurationMs);
 
             return {};
         }
@@ -716,6 +729,7 @@ struct PerformanceTestSuite {
                 "    [Results] Processed 120 frames in {:.3f} s (Average: {:.3f} ms/frame, Range: [{:.3f} - {:.3f}] ms)", totalBenchmarkDurationSec,
                 avgFrameTimeMs, minFrameTimeMs, maxFrameTimeMs
             );
+                ZHLN_PERF_CHECK("cpu.master_integrated.avg_frame_ms", avgFrameTimeMs);
             ZHLN::Println("    [Throughput] Simulation Speed: {:.2f} FPS (Target: >= 60.0 FPS)", kTotalFrames / totalBenchmarkDurationSec);
             ZHLN::Println("    [Telemetry] Total Raycasts: {}, Total Audio Events: {}", totalRaysCast.load(), totalAudioEvents.load());
 

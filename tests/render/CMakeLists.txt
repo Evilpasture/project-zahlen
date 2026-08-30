@@ -3,6 +3,10 @@
 
 file(GLOB RENDER_TEST_SOURCES CONFIGURE_DEPENDS "Test*.cpp")
 
+# Absolute project root with forward slashes (also on Windows), baked into the
+# test binaries for the perf-baseline.json location (see tests/PerfBaseline.hpp).
+string(REPLACE "\\" "/" ZHLN_PROJECT_ROOT_FWD "${PROJECT_SOURCE_DIR}")
+
 foreach(TEST_SRC IN LISTS RENDER_TEST_SOURCES)
     get_filename_component(TARGET_NAME ${TEST_SRC} NAME_WLE)
 
@@ -29,6 +33,14 @@ foreach(TEST_SRC IN LISTS RENDER_TEST_SOURCES)
         ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_SOURCE_DIR}/tests
         ${PROJECT_SOURCE_DIR}/extern/stb
+    )
+
+    # Performance baselines (TestRenderPerformance & friends, see
+    # tests/PerfBaseline.hpp) are cached in perf-baseline.json at the PROJECT
+    # ROOT so they survive build directory deletion/reconfiguration.
+    target_compile_definitions(${TARGET_NAME} PRIVATE
+        ZHLN_PROJECT_ROOT="${ZHLN_PROJECT_ROOT_FWD}"
+        ZHLN_BUILD_PROFILE="${CMAKE_BUILD_TYPE}"
     )
 
     zahlen_enable_reflection(${TARGET_NAME})

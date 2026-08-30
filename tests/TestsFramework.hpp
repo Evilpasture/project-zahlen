@@ -11,6 +11,7 @@
 #include <concepts>
 #include <cstdlib>
 #include <expected>
+#include <format>
 #include <source_location>
 #include <string>
 #include <string_view>
@@ -26,6 +27,9 @@
 // RenderContext::ValidationErrorCount()/DeviceLostCount() are live views
 // (zero while no engine exists) and are meant for workload-scoped deltas.
 #include <Zahlen/Render.hpp>
+
+// Performance baseline caching (self-contained; see PerfBaseline.hpp).
+#include "PerfBaseline.hpp"
 
 #if defined(__unix__) || defined(__APPLE__) || defined(__linux__)
 #define ZHLN_TEST_TIMEOUT_SUPPORTED 1
@@ -96,8 +100,47 @@ struct AssertionFailure {
     uint32_t         line;
     std::string      actualValue;
     std::string      expectedValue;
-    std::string_view op; // "==" or "!=" or "true" or "false" or "ValidationError" or "DeviceLost"
+    std::string_view op; // "==" or "!=" or "true" or "false" or "ValidationError" or "DeviceLost" or "PerfRegression"
 };
+
+// ============================================================================
+// Performance baseline check.
+//
+// Records the metric in perf-baseline.json (project root, per machine) and
+// fails the current test when it regressed beyond the limit versus the LAST
+// recorded run. First run of a metric records the baseline and passes.
+//
+//   ZHLN_PERF_CHECK("cpu.ecs_dense_iterate", iterDurationMs);
+//   ZHLN_PERF_CHECK("render.hw_ray_tracing", durationMs, 30.0); // limit %
+//
+// `value` is evaluated multiple times; pass a pure expression. Limits can
+// be overridden globally with ZHLN_PERF_REGRESSION_LIMIT (percent); a fresh
+// baseline can be forced with ZHLN_PERF_REBASELINE=1. The stored value is
+// only updated by PASSING runs, so a regression stays visible until it is
+// fixed (or explicitly re-baselined).
+// ============================================================================
+#define ZHLN_PERF_CHECK(metric, value, ...)                                                                                            \
+    do {                                                                                                                               \
+        const ::ZHLN::Test::Perf::Result _zhlnPerf = ::ZHLN::Test::Perf::Check((metric), static_cast<double>(value) __VA_OPT__(, __VA_ARGS__)); \
+        if (_zhlnPerf.known) {                                                                                                         \
+            ZHLN::Println(                                                                                                             \
+                "    {}[Baseline]{} {} -> {:.3f} (last run: {:.3f}, {:+.1f}% vs limit {:+.1f}%){}",                                     \
+                _zhlnPerf.regressed ? ZHLN::Color::Red : ZHLN::Color::Green, ZHLN::Color::Reset, (metric), (value), _zhlnPerf.previous, \
+                _zhlnPerf.changePct, _zhlnPerf.limitPct, _zhlnPerf.regressed ? "  << REGRESSION" : ""                                   \
+            );                                                                                                                         \
+        } else {                                                                                                                       \
+            ZHLN::Println("    {}[Baseline]{} {} = {:.3f} (first run, baseline recorded)", ZHLN::Color::Green, ZHLN::Color::Reset, (metric), (value)); \
+        }                                                                                                                              \
+        if (_zhlnPerf.regressed) {                                                                                                     \
+            ::ZHLN::Test::GetThreadLocalContext().failures.push_back(                                                                  \
+                {.file          = __FILE__,                                                                                            \
+                 .line          = static_cast<uint32_t>(__LINE__),                                                                     \
+                 .actualValue   = std::format("{} = {} ({:+.1f}% vs last run {})", (metric), (value), _zhlnPerf.changePct, _zhlnPerf.previous), \
+                 .expectedValue = std::format("within {:+.1f}% of last run", _zhlnPerf.limitPct),                                      \
+                 .op            = "PerfRegression"}                                                                                   \
+            );                                                                                                                         \
+        }                                                                                                                              \
+    } while (false)
 
 inline unsigned int GetDefaultTimeoutSeconds() noexcept {
     static unsigned int defaultSec = []() -> unsigned int {
