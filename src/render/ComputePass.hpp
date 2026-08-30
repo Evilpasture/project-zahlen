@@ -12,8 +12,6 @@
 #error "Please include <src/render/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
-#include <Zahlen/Log.hpp>
-
 namespace ZHLN::Vk {
 
 enum class ComputeDomain : uint8_t { Dynamic, Fixed };
@@ -27,28 +25,28 @@ namespace detail {
     return extent[0] > 0 && extent[1] > 0 && extent[2] > 0;
 }
 
-inline void AssertValidCommandBuffer(VkCommandBuffer cmd, std::string_view operation = "compute dispatch") noexcept {
-    ZHLN::Assert(cmd != VK_NULL_HANDLE, "{} requires a valid VkCommandBuffer.", operation);
+inline void RequireValidCommandBuffer(VkCommandBuffer cmd) noexcept {
+    contract_assert(cmd != VK_NULL_HANDLE);
 }
 
-inline void AssertNonZeroDispatchCounts(uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ) noexcept {
-    ZHLN::Assert(threadCountX > 0 && threadCountY > 0 && threadCountZ > 0, "Compute dispatch requires non-zero logical thread counts.");
+inline void RequireNonZeroDispatchCounts(uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ) noexcept {
+    contract_assert(threadCountX > 0 && threadCountY > 0 && threadCountZ > 0);
 }
 
-inline void AssertNonZeroGroupCounts(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) noexcept {
-    ZHLN::Assert(groupCountX > 0 && groupCountY > 0 && groupCountZ > 0, "Compute dispatch requires non-zero workgroup counts.");
+inline void RequireNonZeroGroupCounts(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) noexcept {
+    contract_assert(groupCountX > 0 && groupCountY > 0 && groupCountZ > 0);
 }
 
-inline void AssertReflectedThreadGroupSize(const std::array<uint32_t, 3>& threadGroupSize) noexcept {
-    ZHLN::Assert(HasPositiveExtent(threadGroupSize), "Missing reflected compute thread-group size.");
+inline void RequireReflectedThreadGroupSize(const std::array<uint32_t, 3>& threadGroupSize) noexcept {
+    contract_assert(HasPositiveExtent(threadGroupSize));
 }
 
-inline void AssertFixedDispatchDomain(const std::array<uint32_t, 3>& fixedDispatchSize) noexcept {
-    ZHLN::Assert(HasPositiveExtent(fixedDispatchSize), "Shader does not declare a reflected fixed dispatch domain.");
+inline void RequireFixedDispatchDomain(const std::array<uint32_t, 3>& fixedDispatchSize) noexcept {
+    contract_assert(HasPositiveExtent(fixedDispatchSize));
 }
 
-inline void AssertHeapIndexOffset(uint32_t heapIndexPushOffset) noexcept {
-    ZHLN::Assert(heapIndexPushOffset > 0, "Missing reflected descriptor-index offset.");
+inline void RequireHeapIndexOffset(uint32_t heapIndexPushOffset) noexcept {
+    contract_assert(heapIndexPushOffset > 0);
 }
 
 inline void DispatchThreads(
@@ -58,9 +56,9 @@ inline void DispatchThreads(
     uint32_t                       threadCountY,
     uint32_t                       threadCountZ
 ) noexcept {
-    AssertValidCommandBuffer(cmd);
-    AssertReflectedThreadGroupSize(threadGroupSize);
-    AssertNonZeroDispatchCounts(threadCountX, threadCountY, threadCountZ);
+    RequireValidCommandBuffer(cmd);
+    RequireReflectedThreadGroupSize(threadGroupSize);
+    RequireNonZeroDispatchCounts(threadCountX, threadCountY, threadCountZ);
     ZHLN::Vk::Dispatch(cmd, threadCountX, threadCountY, threadCountZ, threadGroupSize[0], threadGroupSize[1], threadGroupSize[2]);
 }
 
@@ -170,23 +168,23 @@ struct ComputePass {
     }
 
     void Bind(VkCommandBuffer cmd) const noexcept {
-        detail::AssertValidCommandBuffer(cmd, "vkCmdBindPipeline(compute)");
-        ZHLN::Assert(Valid(), "Attempted to bind an invalid compute pipeline.");
+        detail::RequireValidCommandBuffer(cmd);
+        contract_assert(Valid());
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.Get());
     }
 
     void BindVariant(VkCommandBuffer cmd, uint32_t variantIdx) const noexcept {
-        detail::AssertValidCommandBuffer(cmd, "vkCmdBindPipeline(compute)");
-        ZHLN::Assert(variantIdx < pipelines.size(), "Compute pipeline variant index {} is out of bounds ({} variants).", variantIdx, pipelines.size());
-        ZHLN::Assert(pipelines[variantIdx].Valid(), "Attempted to bind an invalid compute pipeline variant {}.", variantIdx);
+        detail::RequireValidCommandBuffer(cmd);
+        contract_assert(variantIdx < pipelines.size());
+        contract_assert(pipelines[variantIdx].Valid());
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines[variantIdx].Get());
     }
 
     // Skinning only: legacy push constants (no descriptors involved).
     template <GpuTriviallyCopyable T>
     void PushConstants(VkCommandBuffer cmd, const T& pushData) const noexcept {
-        detail::AssertValidCommandBuffer(cmd, "vkCmdPushConstants(compute)");
-        ZHLN::Assert(pipelineLayout.Valid(), "Attempted to push legacy compute constants through an invalid pipeline layout.");
+        detail::RequireValidCommandBuffer(cmd);
+        contract_assert(pipelineLayout.Valid());
         Push(cmd, pipelineLayout.Get(), VK_SHADER_STAGE_COMPUTE_BIT, pushData);
     }
 
@@ -201,8 +199,8 @@ struct ComputePass {
     /// Escape hatch for algorithms that intentionally specify raw workgroup
     /// counts. Prefer typed logical-domain dispatch for ordinary compute.
     static void DispatchGroups(VkCommandBuffer cmd, uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) noexcept {
-        detail::AssertValidCommandBuffer(cmd);
-        detail::AssertNonZeroGroupCounts(groupCountX, groupCountY, groupCountZ);
+        detail::RequireValidCommandBuffer(cmd);
+        detail::RequireNonZeroGroupCounts(groupCountX, groupCountY, groupCountZ);
         ZHLN::Vk::DispatchGroups(cmd, groupCountX, groupCountY, groupCountZ);
     }
 
@@ -264,7 +262,7 @@ struct ComputePass {
         requires(Domain == ComputeDomain::Dynamic)
     {
         static_assert(sizeof(T) <= kScenePassPushPayloadBytes, "Pass push struct exceeds DescriptorHeapPushData::passData.");
-        detail::AssertHeapIndexOffset(heapIndexPushOffset);
+        detail::RequireHeapIndexOffset(heapIndexPushOffset);
         Bind(cmd);
         PushData(ctx, cmd, 0, pushData);
         PushHeapIndex(ctx, cmd, heapIndexPushOffset, heapIndex);
@@ -281,7 +279,7 @@ struct ComputePass {
     ) const noexcept
         requires(Domain == ComputeDomain::Dynamic)
     {
-        detail::AssertHeapIndexOffset(heapIndexPushOffset);
+        detail::RequireHeapIndexOffset(heapIndexPushOffset);
         Bind(cmd);
         PushHeapIndex(ctx, cmd, heapIndexPushOffset, heapIndex);
         DispatchThreads(cmd, threadCountX, threadCountY, threadCountZ);
@@ -291,7 +289,7 @@ struct ComputePass {
     void Dispatch(VkCommandBuffer cmd) const noexcept
         requires(Domain == ComputeDomain::Fixed)
     {
-        detail::AssertFixedDispatchDomain(fixedDispatchSize);
+        detail::RequireFixedDispatchDomain(fixedDispatchSize);
         detail::DispatchThreads(cmd, threadGroupSize, fixedDispatchSize[0], fixedDispatchSize[1], fixedDispatchSize[2]);
     }
 
@@ -324,7 +322,7 @@ struct ComputePass {
     void DispatchHeapIndexed(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex) const noexcept
         requires(Domain == ComputeDomain::Fixed)
     {
-        detail::AssertHeapIndexOffset(heapIndexPushOffset);
+        detail::RequireHeapIndexOffset(heapIndexPushOffset);
         Bind(cmd);
         PushHeapIndex(ctx, cmd, heapIndexPushOffset, heapIndex);
         Dispatch(cmd);
@@ -335,7 +333,7 @@ struct ComputePass {
         requires(Domain == ComputeDomain::Fixed)
     {
         static_assert(sizeof(T) <= kScenePassPushPayloadBytes, "Pass push struct exceeds DescriptorHeapPushData::passData.");
-        detail::AssertHeapIndexOffset(heapIndexPushOffset);
+        detail::RequireHeapIndexOffset(heapIndexPushOffset);
         Bind(cmd);
         PushData(ctx, cmd, 0, pushData);
         PushHeapIndex(ctx, cmd, heapIndexPushOffset, heapIndex);
@@ -410,9 +408,9 @@ struct DoubleBufferedComputePass {
     ) const noexcept
         requires(Domain == ComputeDomain::Dynamic)
     {
-        detail::AssertValidCommandBuffer(cmd);
-        ZHLN::Assert(Valid(), "Attempted to bind an invalid double-buffered compute pipeline.");
-        detail::AssertHeapIndexOffset(heapBindings.indexPushOffset);
+        detail::RequireValidCommandBuffer(cmd);
+        contract_assert(Valid());
+        detail::RequireHeapIndexOffset(heapBindings.indexPushOffset);
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.Get());
         PushHeapIndex(ctx, cmd, heapBindings.indexPushOffset, heapIndex);
         detail::DispatchThreads(cmd, threadGroupSize, threadCountX, threadCountY, threadCountZ);
@@ -431,9 +429,9 @@ struct DoubleBufferedComputePass {
         requires(Domain == ComputeDomain::Dynamic)
     {
         static_assert(sizeof(T) <= kScenePassPushPayloadBytes, "Pass push struct exceeds DescriptorHeapPushData::passData.");
-        detail::AssertValidCommandBuffer(cmd);
-        ZHLN::Assert(Valid(), "Attempted to bind an invalid double-buffered compute pipeline.");
-        detail::AssertHeapIndexOffset(heapBindings.indexPushOffset);
+        detail::RequireValidCommandBuffer(cmd);
+        contract_assert(Valid());
+        detail::RequireHeapIndexOffset(heapBindings.indexPushOffset);
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.Get());
         PushData(ctx, cmd, 0, pushData);
         PushHeapIndex(ctx, cmd, heapBindings.indexPushOffset, heapIndex);
@@ -443,10 +441,10 @@ struct DoubleBufferedComputePass {
     void DispatchHeap(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex) const noexcept
         requires(Domain == ComputeDomain::Fixed)
     {
-        detail::AssertValidCommandBuffer(cmd);
-        ZHLN::Assert(Valid(), "Attempted to bind an invalid double-buffered compute pipeline.");
-        detail::AssertHeapIndexOffset(heapBindings.indexPushOffset);
-        detail::AssertFixedDispatchDomain(fixedDispatchSize);
+        detail::RequireValidCommandBuffer(cmd);
+        contract_assert(Valid());
+        detail::RequireHeapIndexOffset(heapBindings.indexPushOffset);
+        detail::RequireFixedDispatchDomain(fixedDispatchSize);
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.Get());
         PushHeapIndex(ctx, cmd, heapBindings.indexPushOffset, heapIndex);
         detail::DispatchThreads(cmd, threadGroupSize, fixedDispatchSize[0], fixedDispatchSize[1], fixedDispatchSize[2]);
@@ -457,10 +455,10 @@ struct DoubleBufferedComputePass {
         requires(Domain == ComputeDomain::Fixed)
     {
         static_assert(sizeof(T) <= kScenePassPushPayloadBytes, "Pass push struct exceeds DescriptorHeapPushData::passData.");
-        detail::AssertValidCommandBuffer(cmd);
-        ZHLN::Assert(Valid(), "Attempted to bind an invalid double-buffered compute pipeline.");
-        detail::AssertHeapIndexOffset(heapBindings.indexPushOffset);
-        detail::AssertFixedDispatchDomain(fixedDispatchSize);
+        detail::RequireValidCommandBuffer(cmd);
+        contract_assert(Valid());
+        detail::RequireHeapIndexOffset(heapBindings.indexPushOffset);
+        detail::RequireFixedDispatchDomain(fixedDispatchSize);
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.Get());
         PushData(ctx, cmd, 0, pushData);
         PushHeapIndex(ctx, cmd, heapBindings.indexPushOffset, heapIndex);
