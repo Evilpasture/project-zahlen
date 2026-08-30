@@ -522,10 +522,18 @@ class Runner {
     /// and the group main hands those here to get one aggregated summary.
     ///
     ///   // tests/core/TestContainers.cpp
-    ///   auto ContainersSuite() -> ZHLN::Test::TestStats { return ZHLN::Test::RunSuite<ContainersTestSuite>(); }
+    ///   auto RunContainersSuite() -> ZHLN::Test::TestStats { return ZHLN::Test::RunSuite<ContainersTestSuite>(); }
     ///
     ///   // tests/core/RunCoreTests.cpp
-    ///   int main() { return ZHLN::Test::Runner::RunDeferred(ContainersSuite, FormatSuite, ReflectionSuite); }
+    ///   int main() { return ZHLN::Test::Runner::RunDeferred(RunContainersSuite, RunReflectionSuite, RunErrorSuite); }
+    ///
+    /// The exported name is `Run<Base>Suite`, not `<Base>Suite`. Naming it
+    /// after the suite it runs compiles at the declaration -- the function
+    /// merely hides the class -- and then fails inside its own body with
+    /// "no matching function for call to RunSuite<ContainersTestSuite>()",
+    /// because the suite type is no longer visible. TestGraphicsSettings.cpp
+    /// has a struct literally named GraphicsSettingsSuite, so this is not
+    /// hypothetical.
     template <typename... SuiteRunners>
     static int RunDeferred(SuiteRunners... runners) {
         TestStats totalStats;
