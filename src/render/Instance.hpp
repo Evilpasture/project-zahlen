@@ -11,6 +11,8 @@
 
 #include <atomic>
 #include <cstdint>
+#include <memory>
+#include <new>
 #include <span>
 #include <string_view>
 
@@ -63,7 +65,8 @@ struct DiagnosticsSink {
 // ============================================================================
 class Instance {
   public:
-    Instance() noexcept = default;
+    Instance() noexcept: _debugForwarding(std::unique_ptr<ZHLN_DebugForwarding>(new (std::nothrow) ZHLN_DebugForwarding {})) {
+    }
     ~Instance() noexcept;
 
     Instance(const Instance&)                    = delete;
@@ -120,7 +123,10 @@ class Instance {
 
     VkInstance               _handle    = VK_NULL_HANDLE;
     VkDebugUtilsMessengerEXT _messenger = VK_NULL_HANDLE;
-    ZHLN_DebugForwarding     _debugForwarding {};
+    // Stable heap storage: Vulkan stores this pointer as pUserData in both the
+    // instance-create callback chain and the persistent debug messenger, so it
+    // must remain valid across Instance moves.
+    std::unique_ptr<ZHLN_DebugForwarding> _debugForwarding;
 
     // Counting targets: the registered sink when one was resolved at
     // Create() time, else this instance's own members.

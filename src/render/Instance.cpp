@@ -57,20 +57,20 @@ Instance::~Instance() noexcept {
 }
 
 Instance::Instance(Instance&& other) noexcept
-    : _handle(std::exchange(other._handle, VK_NULL_HANDLE)), _messenger(std::exchange(other._messenger, VK_NULL_HANDLE)), _debugForwarding(other._debugForwarding),
-      _validationErrors(other._validationErrors.load(std::memory_order_relaxed)), _deviceLost(other._deviceLost.load(std::memory_order_relaxed)),
+    : _handle(std::exchange(other._handle, VK_NULL_HANDLE)), _messenger(std::exchange(other._messenger, VK_NULL_HANDLE)),
+      _debugForwarding(std::move(other._debugForwarding)), _validationErrors(other._validationErrors.load(std::memory_order_relaxed)),
+      _deviceLost(other._deviceLost.load(std::memory_order_relaxed)),
       _validationTarget(other._validationTarget == &other._validationErrors ? &_validationErrors : other._validationTarget),
       _deviceLostTarget(other._deviceLostTarget == &other._deviceLost ? &_deviceLost : other._deviceLostTarget) {
-    // The C-side forwarding (and possibly _active) still points at the
-    // moved-from address -- including the stack local in Create() when the
-    // return wasn't elided. Re-point unconditionally: the hook is ours.
-    if (_debugForwarding.hook != nullptr) {
-        _debugForwarding.userdata = this;
+    // Vulkan stores the forwarding object pointer itself as pUserData, so the
+    // pointee must be stable across moves; only the owning Instance* inside it
+    // needs rebinding.
+    if (_debugForwarding && _debugForwarding->hook != nullptr) {
+        _debugForwarding->userdata = this;
     }
     if (_active.load(std::memory_order_acquire) == &other) {
         _active.store(this, std::memory_order_release);
     }
-    other._debugForwarding = {};
     other._validationErrors.store(0, std::memory_order_relaxed);
     other._deviceLost.store(0, std::memory_order_relaxed);
     other._validationTarget = &other._validationErrors;
@@ -89,22 +89,22 @@ auto Instance::operator=(Instance&& other) noexcept -> Instance& {
             _active.compare_exchange_strong(expected, &other, std::memory_order_release, std::memory_order_relaxed);
         }
 
-        _handle             = std::exchange(other._handle, VK_NULL_HANDLE);
-        _messenger          = std::exchange(other._messenger, VK_NULL_HANDLE);
-        _debugForwarding    = other._debugForwarding;
-        _validationErrors   = other._validationErrors.load(std::memory_order_relaxed);
-        _deviceLost         = other._deviceLost.load(std::memory_order_relaxed);
-        _validationTarget   = other._validationTarget == &other._validationErrors ? &_validationErrors : other._validationTarget;
-        _deviceLostTarget   = other._deviceLostTarget == &other._deviceLost ? &_deviceLost : other._deviceLostTarget;
+        _handle           = std::exchange(other._handle, VK_NULL_HANDLE);
+        _messenger        = std::exchange(other._messenger, VK_NULL_HANDLE);
+        _debugForwarding  = std::move(other._debugForwarding);
+        _validationErrors = other._validationErrors.load(std::memory_order_relaxed);
+        _deviceLost       = other._deviceLost.load(std::memory_order_relaxed);
+        _validationTarget = other._validationTarget == &other._validationErrors ? &_validationErrors : other._validationTarget;
+        _deviceLostTarget = other._deviceLostTarget == &other._deviceLost ? &_deviceLost : other._deviceLostTarget;
 
-        // See the move constructor: re-point the C-side forwarding at us.
-        if (_debugForwarding.hook != nullptr) {
-            _debugForwarding.userdata = this;
+        // See the move constructor: the forwarding object's address stays
+        // stable; only its owning Instance* needs rebinding.
+        if (_debugForwarding && _debugForwarding->hook != nullptr) {
+            _debugForwarding->userdata = this;
         }
         if (_active.load(std::memory_order_acquire) == &other) {
             _active.store(this, std::memory_order_release);
         }
-        other._debugForwarding = {};
         other._validationErrors.store(0, std::memory_order_relaxed);
         other._deviceLost.store(0, std::memory_order_relaxed);
         other._validationTarget = &other._validationErrors;
@@ -139,19 +139,22 @@ auto Instance::Create(
         .severity_flags  = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
         .extensions      = cStrings.data(),
         .validation_mode = validation,
-        .debug           = &result._debugForwarding,
+        .debug           = result._debugForwarding.get(),
     };
 
     const size_t copySize = ZHLN::Min(appName.size(), sizeof(desc.app_name) - 1);
     std::memcpy(desc.app_name, appName.data(), copySize);
     desc.app_name[copySize] = '\0';
 
-    result._debugForwarding = {.hook = &Instance::DebugHookTrampoline, .userdata = &result};
+    if (result._debugForwarding == nullptr) {
+        return result;
+    }
+    *result._debugForwarding = {.hook = &Instance::DebugHookTrampoline, .userdata = &result};
     // From here the pNext messenger can fire into result's counters -- including during vkCreateInstance itself.
 
     result._handle = ZHLN_CreateInstance(&desc);
     if (result._handle == VK_NULL_HANDLE) {
-        result._debugForwarding = {};
+        *result._debugForwarding = {};
         return result;
     }
 
@@ -160,7 +163,7 @@ auto Instance::Create(
     // worth fixing at the source, not filtering here.
     if (validation != ZHLN_VALIDATION_OFF) {
         result._messenger = ZHLN_CreateDebugMessenger(
-            result._handle, VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT, &result._debugForwarding
+            result._handle, VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT, result._debugForwarding.get()
         );
     }
 
@@ -178,7 +181,7 @@ auto Instance::Create(
         result._messenger          = VK_NULL_HANDLE;
         result._validationTarget   = &result._validationErrors;
         result._deviceLostTarget   = &result._deviceLost;
-        result._debugForwarding    = {};
+        *result._debugForwarding   = {};
         return result;
     }
     return result;
