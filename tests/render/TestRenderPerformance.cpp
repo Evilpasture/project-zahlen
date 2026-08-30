@@ -304,7 +304,7 @@ auto RunGeometryTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
         "    [Geometry & Culling] 60 frames x 1,600 Meshes in {:.2f} ms ({:.2f} FPS, {:.2f} kTris/frame)", durationMs, (kFrames * 1000.0) / durationMs,
         ZHLN::CullingStats::TotalTriangles / 1000.0
     );
-    ZHLN_PERF_CHECK(mode == ZHLN::ValidationMode::On ? "render.geometry_culling_60f.val_on" : "render.geometry_culling_60f.val_off", durationMs, 25.0);
+    ZHLN::Test::VerifyBaseline(mode == ZHLN::ValidationMode::On ? "render.geometry_culling_60f.val_on" : "render.geometry_culling_60f.val_off", durationMs, 25.0);
 
     return {};
 }
@@ -374,7 +374,7 @@ auto RunLightingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
     double durationMs = timer.ElapsedMilliseconds();
 
     ZHLN::Println("    [Clustered Lighting] 60 frames x 64 Moving Point Lights in {:.2f} ms ({:.2f} FPS)", durationMs, (kFrames * 1000.0) / durationMs);
-    ZHLN_PERF_CHECK(mode == ZHLN::ValidationMode::On ? "render.clustered_lighting_60f.val_on" : "render.clustered_lighting_60f.val_off", durationMs, 25.0);
+    ZHLN::Test::VerifyBaseline(mode == ZHLN::ValidationMode::On ? "render.clustered_lighting_60f.val_on" : "render.clustered_lighting_60f.val_off", durationMs, 25.0);
 
     return {};
 }
@@ -426,7 +426,7 @@ auto RunParticlesTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::e
     double durationMs = timer.ElapsedMilliseconds();
 
     ZHLN::Println("    [GPU Particles] 60 frames x 20,000 Active Particles in {:.2f} ms ({:.2f} FPS)", durationMs, (kFrames * 1000.0) / durationMs);
-    ZHLN_PERF_CHECK(mode == ZHLN::ValidationMode::On ? "render.gpu_particles_60f.val_on" : "render.gpu_particles_60f.val_off", durationMs, 25.0);
+    ZHLN::Test::VerifyBaseline(mode == ZHLN::ValidationMode::On ? "render.gpu_particles_60f.val_on" : "render.gpu_particles_60f.val_off", durationMs, 25.0);
 
     return {};
 }
@@ -475,7 +475,7 @@ auto RunVolumetricsTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
     double durationMs = timer.ElapsedMilliseconds();
 
     ZHLN::Println("    [Volumetric Fog] 60 frames x 3D Noise Froxel Ray-Marching in {:.2f} ms ({:.2f} FPS)", durationMs, (kFrames * 1000.0) / durationMs);
-    ZHLN_PERF_CHECK(mode == ZHLN::ValidationMode::On ? "render.volumetric_fog_60f.val_on" : "render.volumetric_fog_60f.val_off", durationMs, 25.0);
+    ZHLN::Test::VerifyBaseline(mode == ZHLN::ValidationMode::On ? "render.volumetric_fog_60f.val_on" : "render.volumetric_fog_60f.val_off", durationMs, 25.0);
 
     return {};
 }
@@ -523,7 +523,7 @@ auto RunDecalsTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expe
     double durationMs = timer.ElapsedMilliseconds();
 
     ZHLN::Println("    [Screen-Space Decals] 60 frames x 100 Projected Decals in {:.2f} ms ({:.2f} FPS)", durationMs, (kFrames * 1000.0) / durationMs);
-    ZHLN_PERF_CHECK(mode == ZHLN::ValidationMode::On ? "render.screen_decals_60f.val_on" : "render.screen_decals_60f.val_off", durationMs, 25.0);
+    ZHLN::Test::VerifyBaseline(mode == ZHLN::ValidationMode::On ? "render.screen_decals_60f.val_on" : "render.screen_decals_60f.val_off", durationMs, 25.0);
 
     return {};
 }
@@ -553,7 +553,7 @@ auto RunUITest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expected
     double durationMs = timer.ElapsedMilliseconds();
 
     ZHLN::Println("    [UI Compositor] 60 frames x 10 Complex Panels + SDF Text in {:.2f} ms ({:.2f} FPS)", durationMs, (kFrames * 1000.0) / durationMs);
-    ZHLN_PERF_CHECK(mode == ZHLN::ValidationMode::On ? "render.ui_compositor_60f.val_on" : "render.ui_compositor_60f.val_off", durationMs, 25.0);
+    ZHLN::Test::VerifyBaseline(mode == ZHLN::ValidationMode::On ? "render.ui_compositor_60f.val_on" : "render.ui_compositor_60f.val_off", durationMs, 25.0);
 
     return {};
 }
@@ -597,7 +597,7 @@ auto RunPostProcessingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> s
     ZHLN::Println(
         "    [Post-Processing & TAA] 60 frames x (TAA + Tonemap + SSR + Vignette) in {:.2f} ms ({:.2f} FPS)", durationMs, (kFrames * 1000.0) / durationMs
     );
-    ZHLN_PERF_CHECK(mode == ZHLN::ValidationMode::On ? "render.postprocess_taa_60f.val_on" : "render.postprocess_taa_60f.val_off", durationMs, 25.0);
+    ZHLN::Test::VerifyBaseline(mode == ZHLN::ValidationMode::On ? "render.postprocess_taa_60f.val_on" : "render.postprocess_taa_60f.val_off", durationMs, 25.0);
 
     return {};
 }
@@ -707,7 +707,7 @@ auto RunRayTracingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::
         "    [Hardware Ray Tracing] 60 frames x 400 TLAS Instances (RTR + RT Shadows) in {:.2f} ms ({:.2f} FPS, Shaded Px: {})", durationMs,
         (kFrames * 1000.0) / durationMs, litPixels
     );
-    ZHLN_PERF_CHECK(mode == ZHLN::ValidationMode::On ? "render.hw_ray_tracing_60f.val_on" : "render.hw_ray_tracing_60f.val_off", durationMs, 30.0);
+    ZHLN::Test::VerifyBaseline(mode == ZHLN::ValidationMode::On ? "render.hw_ray_tracing_60f.val_on" : "render.hw_ray_tracing_60f.val_off", durationMs, 30.0);
 
     return {};
 }
@@ -945,8 +945,8 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
         "    [Results] Rendered 120 frames in {:.3f} s (Avg: {:.3f} ms, Min: {:.3f} ms, Max: {:.3f} ms, P99: {:.3f} ms)", totalDurationSec, avgFrameMs,
         minFrameMs, maxFrameMs, p99FrameMs
     );
-    ZHLN_PERF_CHECK(mode == ZHLN::ValidationMode::On ? "render.master.avg_frame_ms.val_on" : "render.master.avg_frame_ms.val_off", avgFrameMs, 20.0);
-    ZHLN_PERF_CHECK(mode == ZHLN::ValidationMode::On ? "render.master.p99_frame_ms.val_on" : "render.master.p99_frame_ms.val_off", p99FrameMs, 35.0);
+    ZHLN::Test::VerifyBaseline(mode == ZHLN::ValidationMode::On ? "render.master.avg_frame_ms.val_on" : "render.master.avg_frame_ms.val_off", avgFrameMs, 20.0);
+    ZHLN::Test::VerifyBaseline(mode == ZHLN::ValidationMode::On ? "render.master.p99_frame_ms.val_on" : "render.master.p99_frame_ms.val_off", p99FrameMs, 35.0);
     ZHLN::Println("    [Throughput] Render Rate: {:.2f} FPS", (kTotalFrames * 1.0) / totalDurationSec);
     ZHLN::Println("    [Image Validation] Captured resolution: {}x{}, Shaded Pixels: {}", outputImg.width, outputImg.height, litPixels);
 

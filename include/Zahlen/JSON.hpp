@@ -9,8 +9,10 @@
 #include <Zahlen/Log.hpp>
 #include <expected>
 #include <memory>
+#include <string>
 #include <string_view>
 #include <type_traits>
+#include <vector>
 
 namespace ZHLN {
 
@@ -30,6 +32,10 @@ class ZHLN_API ValueReader {
     [[nodiscard]] auto GetBool() const noexcept -> std::expected<bool, Error>;
     [[nodiscard]] auto GetString() const noexcept -> std::expected<std::string_view, Error>;
     [[nodiscard]] auto GetKey(std::string_view key) const noexcept -> std::expected<ValueReader, Error>;
+
+    /// Object only (JSONError::TypeMismatch otherwise). Member keys in document
+    /// order; the views remain valid for the owning Document's lifetime.
+    [[nodiscard]] auto GetObjectKeys() const -> std::expected<std::vector<std::string_view>, Error>;
 
     [[nodiscard]] auto GetArraySize() const noexcept -> size_t;
     [[nodiscard]] auto GetArrayElement(size_t index) const noexcept -> std::expected<ValueReader, Error>;
@@ -52,6 +58,44 @@ class ZHLN_API Document {
 
     [[nodiscard]] static auto Parse(std::string_view jsonString) noexcept -> std::expected<Document, Error>;
     [[nodiscard]] auto        GetRoot() const noexcept -> ValueReader;
+
+  private:
+    struct Impl;
+    std::unique_ptr<Impl> _impl;
+};
+
+// ============================================================================
+// JSON Writer — the write-side counterpart of Document/ValueReader.
+//
+// Values are built bottom-up from the static factories and assembled with
+// Set() (objects, runtime keys, insertion order preserved) and Push()
+// (arrays). Stringify() emits the whole tree; non-finite numbers are not
+// representable in JSON and serialise as null.
+// ============================================================================
+class ZHLN_API Value {
+  public:
+    Value();
+    ~Value();
+
+    Value(const Value&)                    = delete;
+    auto operator=(const Value&) -> Value& = delete;
+    Value(Value&&) noexcept;
+    auto operator=(Value&&) noexcept -> Value&;
+
+    [[nodiscard]] static auto Object() -> Value;
+    [[nodiscard]] static auto Array() -> Value;
+    [[nodiscard]] static auto String(std::string_view text) -> Value;
+    [[nodiscard]] static auto Number(double value) -> Value;
+    [[nodiscard]] static auto Bool(bool value) -> Value;
+    [[nodiscard]] static auto Null() -> Value;
+
+    /// Object only (JSONError::TypeMismatch otherwise). Overwrites an existing key.
+    auto Set(std::string_view key, Value value) -> std::expected<void, Error>;
+    /// Array only (JSONError::TypeMismatch otherwise).
+    auto Push(Value value) -> std::expected<void, Error>;
+
+    /// Serialises the tree. `indent` spaces per level (0 = compact one-liner).
+    [[nodiscard]] auto Stringify(size_t indent = 2) const -> std::string;
 
   private:
     struct Impl;

@@ -218,6 +218,13 @@ if(ZHLN_DEV_MODE)
     add_compile_definitions(ZHLN_DEV_MODE)
 endif()
 
+# Absolute project root (forward slashes also on Windows) for code that reads
+# or writes repo-root files at runtime, e.g. the performance baseline cache
+# (tests/PerfBaseline.hpp). Defined once here so every target shares it
+# instead of each consumer inventing its own path plumbing.
+string(REPLACE "\\" "/" ZHLN_PROJECT_ROOT_FWD "${PROJECT_SOURCE_DIR}")
+add_compile_definitions(ZHLN_PROJECT_ROOT="${ZHLN_PROJECT_ROOT_FWD}")
+
 option(ZHLN_IN_DOCKER "Build running inside a Docker container" OFF)
 if(ZHLN_IN_DOCKER)
     add_compile_definitions(ZHLN_IN_DOCKER=1)

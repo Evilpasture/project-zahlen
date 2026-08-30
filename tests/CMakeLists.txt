@@ -8,10 +8,6 @@
 # 1. Enable CTest testing framework
 enable_testing()
 
-# Absolute project root with forward slashes (also on Windows), baked into the
-# test binaries for the perf-baseline.json location (see tests/PerfBaseline.hpp).
-string(REPLACE "\\" "/" ZHLN_PROJECT_ROOT_FWD "${PROJECT_SOURCE_DIR}")
-
 # 2. Automatically discover all test source files in this directory
 file(GLOB TEST_SOURCES CONFIGURE_DEPENDS "Test*.cpp")
 
@@ -48,15 +44,6 @@ foreach(TEST_SRC IN LISTS TEST_SOURCES)
         ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_SOURCE_DIR}/tests
         ${PROJECT_SOURCE_DIR}/extern/stb
-    )
-
-    # Performance baselines (TestPerformance & friends, see tests/PerfBaseline.hpp)
-    # are cached in perf-baseline.json at the PROJECT ROOT so they survive build
-    # directory deletion/reconfiguration. The path is baked in absolute, so the
-    # file is found regardless of the test's working directory.
-    target_compile_definitions(${TARGET_NAME} PRIVATE
-        ZHLN_PROJECT_ROOT="${ZHLN_PROJECT_ROOT_FWD}"
-        ZHLN_BUILD_PROFILE="${CMAKE_BUILD_TYPE}"
     )
 
     # include/Zahlen/Meshlet.hpp is a public header, but it includes
