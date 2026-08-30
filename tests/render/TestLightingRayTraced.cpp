@@ -401,10 +401,17 @@ struct LightingRTTestSuite {
             }
 
             uint32_t validationRaised = 0;
+            // Which kind of failure the scene actually saw. A light losing its
+            // contribution is a cluster-culling bug; ordinary frame-to-frame
+            // change is a stability bug. Collapsing both into the single bool
+            // RunStableScene returns is what made this case report every
+            // culling pop as flicker.
+            bool lightCullingPop = false;
 
             const auto stable = RunStableScene(
                 *engine, 8, "point_light_cluster_culling_sweep",
                 [&](ZHLN::Engine& eng) -> bool {
+                    lightCullingPop = false;
                     auto& reg = eng.GetRegistry();
                     ZHLN::Test::ExpectTrue(reg.IsAlive(redLight));
 
@@ -487,13 +494,20 @@ struct LightingRTTestSuite {
                     const bool noIsolatedCull   = ZHLN::Test::ExpectTrue(isolatedDips == 0u);
                     const bool noStaticStep     = ZHLN::Test::ExpectTrue(worstPairFrac < 0.005);
 
+                    // The first three measure the light's own contribution and
+                    // are what a cluster-culling pop breaks; noStaticStep is the
+                    // frame-to-frame stability gate. Recording which group
+                    // failed is what lets the caller name the right error.
+                    lightCullingPop = !neverCulled || !brightEverywhere || !noIsolatedCull;
+
                     return neverCulled && brightEverywhere && noIsolatedCull && noStaticStep;
                 },
                 &validationRaised
             );
 
             if (stable == StableRunResult::AssertionsFailed) {
-                return std::unexpected(LightingRTTestError::TemporalFlickerDetected);
+                return std::unexpected(lightCullingPop ? LightingRTTestError::LightCullingPopDetected
+                                                       : LightingRTTestError::TemporalFlickerDetected);
             }
             if (stable != StableRunResult::Ok) {
                 return std::unexpected(LightingRTTestError::DeviceLostDuringTest);
@@ -859,10 +873,16 @@ struct LightingRTTestSuite {
             }
 
             uint32_t validationRaised = 0;
+            // Which kind of failure the scene actually saw. "No reflection at
+            // all" means RTR/SSR silently fell back to IBL, which is a
+            // different bug from a reflection that is present but blown out or
+            // speckled -- and needs different things looked at.
+            bool reflectionMissing = false;
 
             const auto stable = RunStableScene(
                 *engine, 10, "raytraced_reflection_coverage_and_artifacts",
-                [](ZHLN::Engine& eng) -> bool {
+                [&](ZHLN::Engine& eng) -> bool {
+                    reflectionMissing = false;
                     std::vector<double> reflectionSeries;
                     std::vector<double> saturationSeries;
                     std::vector<double> isolatedSeries;
@@ -893,13 +913,20 @@ struct LightingRTTestSuite {
                     const bool noRayDebris       = ZHLN::Test::ExpectTrue(isolatedRatio < 0.35);
                     const bool saturationStable  = ZHLN::Test::ExpectTrue(saturationCV < 0.25 || meanSaturation < 100.0);
 
+                    // reflectionPresent is the coverage gate: when it fails the
+                    // polished surface shows nothing at all, which is the
+                    // RTR/SSR -> IBL fallback, not an artifact in a reflection
+                    // that does exist.
+                    reflectionMissing = !reflectionPresent;
+
                     return reflectionPresent && reflectionStable && noBlowout && noRayDebris && saturationStable;
                 },
                 &validationRaised
             );
 
             if (stable == StableRunResult::AssertionsFailed) {
-                return std::unexpected(LightingRTTestError::ReflectionArtifacts);
+                return std::unexpected(reflectionMissing ? LightingRTTestError::ReflectionMissing
+                                                         : LightingRTTestError::ReflectionArtifacts);
             }
             if (stable != StableRunResult::Ok) {
                 return std::unexpected(LightingRTTestError::DeviceLostDuringTest);
