@@ -304,6 +304,25 @@ struct SubRegionStats {
     return m;
 }
 
+// ============================================================================
+// Named Expectations
+// ============================================================================
+
+// ExpectTrue files the failure against its file:line, which is all the summary
+// prints -- enough to locate the statement, not enough to tell which operand
+// missed or by how much. This wraps it and echoes the label plus the measured
+// operands, so a red run names the failed check and the frame statistics behind
+// it instead of a bare "Expected condition to be: true".
+template <typename... Args>
+[[nodiscard]] bool CheckCondition(bool condition, std::string_view label, std::string_view fmt, Args&&... args) {
+    if (ZHLN::Test::ExpectTrue(condition)) {
+        return true;
+    }
+    ZHLN::Println("      {}[CHECK FAILED]{} {}", ZHLN::Color::Red, ZHLN::Color::Reset, label);
+    ZHLN::Println("        {}", ZHLN::Format(fmt, std::forward<Args>(args)...).string_view());
+    return false;
+}
+
 struct FrameDiff {
     uint32_t over12  = 0;
     uint32_t over32  = 0;
@@ -1511,42 +1530,82 @@ struct LightingRTTestSuite {
 
                     ZHLN::Println("    [INFO] Multi-light 64-Light Clustered Grid:");
                     ZHLN::Println(
-                        "      Top-Left Quad (Red):    MeanRGB=({:.1f},{:.1f},{:.1f}), DominantRed={}", quadTL.meanR, quadTL.meanG, quadTL.meanB,
-                        quadTL.dominantRed
+                        "      Top-Left Quad (Red):    MeanRGB=({:.1f},{:.1f},{:.1f}), DominantRed={}/{}", quadTL.meanR, quadTL.meanG, quadTL.meanB,
+                        quadTL.dominantRed, quadTL.pixels
                     );
                     ZHLN::Println(
-                        "      Top-Right Quad (Green): MeanRGB=({:.1f},{:.1f},{:.1f}), DominantGreen={}", quadTR.meanG, quadTR.meanG, quadTR.meanB,
-                        quadTR.dominantGrn
+                        "      Top-Right Quad (Green): MeanRGB=({:.1f},{:.1f},{:.1f}), DominantGreen={}/{}", quadTR.meanR, quadTR.meanG, quadTR.meanB,
+                        quadTR.dominantGrn, quadTR.pixels
                     );
                     ZHLN::Println(
-                        "      Bottom-Left Quad (Blue):MeanRGB=({:.1f},{:.1f},{:.1f}), DominantBlue={}", quadBL.meanB, quadBL.meanG, quadBL.meanB,
-                        quadBL.dominantBlu
+                        "      Bottom-Left Quad (Blue):MeanRGB=({:.1f},{:.1f},{:.1f}), DominantBlue={}/{}", quadBL.meanR, quadBL.meanG, quadBL.meanB,
+                        quadBL.dominantBlu, quadBL.pixels
                     );
                     ZHLN::Println(
-                        "      Center Mixing (R+G->Y): MeanRGB=({:.1f},{:.1f},{:.1f}), YellowMixPixels={}", centerMix.meanR, centerMix.meanG, centerMix.meanB,
-                        centerMix.yellowMix
+                        "      Center Mixing (R+G->Y): MeanRGB=({:.1f},{:.1f},{:.1f}), YellowMixPixels={}/{}", centerMix.meanR, centerMix.meanG,
+                        centerMix.meanB, centerMix.yellowMix, centerMix.pixels
                     );
+
+                    // Every gate below is a ratio -- channel against channel, or
+                    // saturated pixels as a share of their region -- so the scene can be
+                    // re-exposed without the assertions moving. Absolute means are
+                    // exposure/tone-map outputs, not lighting behaviour.
 
                     // 1. Quadrant Chromatic Purity
-                    const bool redDominant =
-                        ZHLN::Test::ExpectTrue(quadTL.meanR > 1.3 * quadTL.meanG && quadTL.meanR > 1.3 * quadTL.meanB && quadTL.dominantRed > 100u);
-                    const bool greenDominant =
-                        ZHLN::Test::ExpectTrue(quadTR.meanG > 1.3 * quadTR.meanR && quadTR.meanG > 1.3 * quadTR.meanB && quadTR.dominantGrn > 100u);
-                    const bool blueDominant =
-                        ZHLN::Test::ExpectTrue(quadBL.meanB > 1.3 * quadBL.meanR && quadBL.meanB > 1.3 * quadBL.meanG && quadBL.dominantBlu > 100u);
-
-                    // 2. Additive Color Superposition at boundary (Red + Green -> Yellow)
-                    const bool additiveMixing = ZHLN::Test::ExpectTrue(
-                        centerMix.meanR > 40.0 && centerMix.meanG > 40.0 && centerMix.meanB < 0.6 * std::min(centerMix.meanR, centerMix.meanG) &&
-                        centerMix.yellowMix > 20u
+                    const bool redDominant = CheckCondition(
+                        quadTL.meanR > 1.3 * quadTL.meanG && quadTL.meanR > 1.3 * quadTL.meanB && quadTL.dominantRed * 100 > quadTL.pixels,
+                        "top-left quadrant is red-dominant",
+                        "meanRGB=({:.1f},{:.1f},{:.1f}), dominantRed={}/{} px (need >1% of the quad)", quadTL.meanR, quadTL.meanG, quadTL.meanB,
+                        quadTL.dominantRed, quadTL.pixels
+                    );
+                    const bool greenDominant = CheckCondition(
+                        quadTR.meanG > 1.3 * quadTR.meanR && quadTR.meanG > 1.3 * quadTR.meanB && quadTR.dominantGrn * 100 > quadTR.pixels,
+                        "top-right quadrant is green-dominant",
+                        "meanRGB=({:.1f},{:.1f},{:.1f}), dominantGreen={}/{} px (need >1% of the quad)", quadTR.meanR, quadTR.meanG, quadTR.meanB,
+                        quadTR.dominantGrn, quadTR.pixels
+                    );
+                    const bool blueDominant = CheckCondition(
+                        quadBL.meanB > 1.3 * quadBL.meanR && quadBL.meanB > 1.3 * quadBL.meanG && quadBL.dominantBlu * 100 > quadBL.pixels,
+                        "bottom-left quadrant is blue-dominant",
+                        "meanRGB=({:.1f},{:.1f},{:.1f}), dominantBlue={}/{} px (need >1% of the quad)", quadBL.meanR, quadBL.meanG, quadBL.meanB,
+                        quadBL.dominantBlu, quadBL.pixels
                     );
 
-                    // 3. No massive blackout or overflow
-                    const FrameMetrics fullFrame         = MeasureImage(frame);
-                    const bool         sceneWellLit      = ZHLN::Test::ExpectTrue(fullFrame.lit > (fullFrame.total * 0.30));
-                    const bool         noExtremeOverflow = ZHLN::Test::ExpectTrue(fullFrame.saturated < (fullFrame.total * 0.05));
+                    // 2. Additive Color Superposition at boundary (Red + Green -> Yellow).
+                    // The pedestal sits under all four quadrants, so it must out-shine
+                    // each pure quadrant in its own channel -- lights accumulating rather
+                    // than the nearest one winning.
+                    const bool additiveMixing = CheckCondition(
+                        centerMix.meanR > 1.3 * centerMix.meanB && centerMix.meanG > 1.3 * centerMix.meanB && centerMix.meanR > 0.6 * centerMix.meanG &&
+                            centerMix.meanG > 0.6 * centerMix.meanR && centerMix.meanR > 0.5 * quadTL.meanR && centerMix.meanG > 0.5 * quadTR.meanG &&
+                            centerMix.yellowMix * 100 > centerMix.pixels,
+                        "quadrant boundary mixes red + green into yellow",
+                        "centerMeanRGB=({:.1f},{:.1f},{:.1f}) vs redQuad.meanR={:.1f} greenQuad.meanG={:.1f}, yellowMix={}/{} px (need >1%)", centerMix.meanR,
+                        centerMix.meanG, centerMix.meanB, quadTL.meanR, quadTR.meanG, centerMix.yellowMix, centerMix.pixels
+                    );
 
-                    return redDominant && greenDominant && blueDominant && additiveMixing && sceneWellLit && noExtremeOverflow;
+                    // 3. Coverage & headroom. "lit" counts Luma > 40, which a pure blue
+                    // pixel can never reach (0.0722 * 255 = 18.4), so in a scene that is
+                    // a quarter blue by construction that metric grades the palette
+                    // instead of the lighting. Count saturated chroma instead: it is
+                    // hue-aware and, as a share of the sampled area, exposure-relative.
+                    const uint32_t chromaticPixels = quadTL.dominantRed + quadTR.dominantGrn + quadBL.dominantBlu + centerMix.yellowMix;
+                    const uint32_t sampledPixels   = quadTL.pixels + quadTR.pixels + quadBL.pixels + centerMix.pixels;
+                    const bool     lightCovered    = CheckCondition(
+                        chromaticPixels * 10 > sampledPixels, "clustered lights cover a meaningful share of the frame",
+                        "chromaticPixels={}/{} sampled px (need >10%)", chromaticPixels, sampledPixels
+                    );
+
+                    const FrameMetrics fullFrame         = MeasureImage(frame);
+                    const bool         noBlackout        = CheckCondition(
+                        fullFrame.meanLuma > 1.0, "frame is not blacked out", "meanLuma={:.2f} over {} px", fullFrame.meanLuma, fullFrame.total
+                    );
+                    const bool         noExtremeOverflow = CheckCondition(
+                        fullFrame.saturated * 20 < fullFrame.total, "frame is not blown out", "saturated={}/{} px (need <5%)", fullFrame.saturated,
+                        fullFrame.total
+                    );
+
+                    return redDominant && greenDominant && blueDominant && additiveMixing && lightCovered && noBlackout && noExtremeOverflow;
                 },
                 &validationRaised
             );
@@ -1716,17 +1775,54 @@ struct LightingRTTestSuite {
                         reflStripYel.meanB, reflStripYel.yellowMix
                     );
 
-                    // 1. Validate spatial correspondence of mirrored reflections
-                    const bool reflRedOk = ZHLN::Test::ExpectTrue(reflStripRed.dominantRed > 30u && reflStripRed.meanR > 1.3 * reflStripRed.meanG);
-                    const bool reflGrnOk = ZHLN::Test::ExpectTrue(reflStripGrn.dominantGrn > 30u && reflStripGrn.meanG > 1.3 * reflStripGrn.meanR);
-                    const bool reflBluOk = ZHLN::Test::ExpectTrue(reflStripBlu.dominantBlu > 30u && reflStripBlu.meanB > 1.3 * reflStripBlu.meanR);
-                    const bool reflYelOk = ZHLN::Test::ExpectTrue(reflStripYel.yellowMix > 20u && reflStripYel.meanR > 20.0 && reflStripYel.meanG > 20.0);
+                    // 1. Spatial mirror correspondence. Each gate is a ratio: channel
+                    // against channel inside the strip, or bright pixels as a share of
+                    // the strip. Absolute means are exposure outputs -- the same correct
+                    // reflection measures 5.9 or 59.0 depending on ambientExposure -- and
+                    // the strips are not even the same width, so a shared absolute floor
+                    // grades geometry rather than the reflection.
 
-                    // 2. Validate Upper Direct Emission visibility
-                    const auto upperDirect   = MeasureSubRegion(frame, {.x0 = 0.0, .y0 = 0.05, .x1 = 1.0, .y1 = 0.45});
-                    const bool directVisible = ZHLN::Test::ExpectTrue(
-                        upperDirect.maxLuma > 60.0 &&
-                        (upperDirect.dominantRed + upperDirect.dominantGrn + upperDirect.dominantBlu + upperDirect.yellowMix) > 150u
+                    const bool reflRedOk = CheckCondition(
+                        reflStripRed.dominantRed * 200 > reflStripRed.pixels && reflStripRed.meanR > 1.3 * reflStripRed.meanG &&
+                            reflStripRed.meanR > 1.3 * reflStripRed.meanB,
+                        "strip 1 mirrors the red emitter",
+                        "meanRGB=({:.1f},{:.1f},{:.1f}), dominantRed={}/{} px (need >0.5% of the strip)", reflStripRed.meanR, reflStripRed.meanG,
+                        reflStripRed.meanB, reflStripRed.dominantRed, reflStripRed.pixels
+                    );
+                    const bool reflGrnOk = CheckCondition(
+                        reflStripGrn.dominantGrn * 200 > reflStripGrn.pixels && reflStripGrn.meanG > 1.3 * reflStripGrn.meanR &&
+                            reflStripGrn.meanG > 1.3 * reflStripGrn.meanB,
+                        "strip 2 mirrors the green emitter",
+                        "meanRGB=({:.1f},{:.1f},{:.1f}), dominantGreen={}/{} px (need >0.5% of the strip)", reflStripGrn.meanR, reflStripGrn.meanG,
+                        reflStripGrn.meanB, reflStripGrn.dominantGrn, reflStripGrn.pixels
+                    );
+                    const bool reflBluOk = CheckCondition(
+                        reflStripBlu.dominantBlu * 200 > reflStripBlu.pixels && reflStripBlu.meanB > 1.3 * reflStripBlu.meanR &&
+                            reflStripBlu.meanB > 1.3 * reflStripBlu.meanG,
+                        "strip 3 mirrors the blue emitter",
+                        "meanRGB=({:.1f},{:.1f},{:.1f}), dominantBlue={}/{} px (need >0.5% of the strip)", reflStripBlu.meanR, reflStripBlu.meanG,
+                        reflStripBlu.meanB, reflStripBlu.dominantBlu, reflStripBlu.pixels
+                    );
+                    // Yellow has no single dominant channel to lean on, so its signature is
+                    // the R+G mix count plus R and G clearing B by the same 1.3x the pure
+                    // strips use and staying within 0.6x of each other (yellow, not amber).
+                    const bool reflYelOk = CheckCondition(
+                        reflStripYel.yellowMix * 200 > reflStripYel.pixels && reflStripYel.meanR > 1.3 * reflStripYel.meanB &&
+                            reflStripYel.meanG > 1.3 * reflStripYel.meanB && reflStripYel.meanR > 0.6 * reflStripYel.meanG &&
+                            reflStripYel.meanG > 0.6 * reflStripYel.meanR,
+                        "strip 4 mirrors the yellow emitter",
+                        "meanRGB=({:.1f},{:.1f},{:.1f}), yellowMix={}/{} px (need >0.5% of the strip)", reflStripYel.meanR, reflStripYel.meanG,
+                        reflStripYel.meanB, reflStripYel.yellowMix, reflStripYel.pixels
+                    );
+
+                    // 2. Validate Upper Direct Emission visibility. The peak-luma guard
+                    // stays absolute: it only asserts the emitters are directly visible
+                    // somewhere in the upper frame, not that the scene is bright.
+                    const auto     upperDirect      = MeasureSubRegion(frame, {.x0 = 0.0, .y0 = 0.05, .x1 = 1.0, .y1 = 0.45});
+                    const uint32_t directChroma     = upperDirect.dominantRed + upperDirect.dominantGrn + upperDirect.dominantBlu + upperDirect.yellowMix;
+                    const bool     directVisible    = CheckCondition(
+                        upperDirect.maxLuma > 60.0 && directChroma * 1000 > upperDirect.pixels, "emitters are directly visible in the upper frame",
+                        "maxLuma={:.1f} (need >60), chromaticPixels={}/{} px (need >0.1%)", upperDirect.maxLuma, directChroma, upperDirect.pixels
                     );
 
                     return reflRedOk && reflGrnOk && reflBluOk && reflYelOk && directVisible;
