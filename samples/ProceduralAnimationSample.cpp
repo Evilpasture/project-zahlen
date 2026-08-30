@@ -530,6 +530,7 @@ auto AttachCharacterRig(
         .enableAccelerationTilt  = !EnvironmentFlag("ZHLN_DISABLE_ACCELERATION_TILT"),
         .enableUpperBody         = !EnvironmentFlag("ZHLN_DISABLE_UPPER_BODY"),
         .enableSecondaryMotion   = !EnvironmentFlag("ZHLN_DISABLE_SECONDARY_MOTION"),
+        .enforceFootAttachments  = false,
         .authoredPoseOnly        = EnvironmentFlag("ZHLN_AUTHORED_POSE_ONLY") || EnvironmentFlag("ZHLN_KEYFRAME_ONLY"),
     };
     ZHLN::Log(

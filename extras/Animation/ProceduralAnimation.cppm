@@ -74,7 +74,7 @@ inline constexpr size_t kCoreBoneCount = BoneSlot(CharacterBone::ToeR) + 1;
 // Real production GLBs commonly contain hundreds of mesh/attachment nodes in
 // addition to the 140 deform controls. Keep fixed-capacity evaluation while
 // leaving enough headroom for those imported hierarchies.
-inline constexpr size_t kMaxRigNodes           = 512;
+inline constexpr size_t kMaxRigNodes           = 1024;
 inline constexpr size_t kMaxChildOfConstraints = 64;
 inline constexpr size_t kMaxFingerJoints       = 64;
 
@@ -85,6 +85,7 @@ enum class RigChildOfKind : uint8_t {
     Head,
     FootAttachment,
     Knee,
+    Ankle,
 };
 
 struct RigChildOfConstraint {
