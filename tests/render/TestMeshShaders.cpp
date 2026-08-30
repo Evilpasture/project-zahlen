@@ -631,6 +631,9 @@ struct MeshShaderTestSuite {
     };
 };
 
-int main() {
-    return ZHLN::Test::Runner::Run<MeshShaderTestSuite>();
+// Exported for the GPU_Pipeline group binary, which aggregates every suite in
+// this domain through Runner::RunDeferred.
+auto RunMeshShaderSuite() -> ZHLN::Test::TestStats {
+    return ZHLN::Test::RunSuite<MeshShaderTestSuite>();
 }
+

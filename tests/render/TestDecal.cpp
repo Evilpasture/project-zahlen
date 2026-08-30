@@ -310,6 +310,9 @@ struct DecalTestSuite {
     };
 };
 
-int main() {
-    return ZHLN::Test::Runner::Run<DecalTestSuite>();
+// Exported for the GPU_Lighting group binary, which aggregates every suite in
+// this domain through Runner::RunDeferred.
+auto RunDecalSuite() -> ZHLN::Test::TestStats {
+    return ZHLN::Test::RunSuite<DecalTestSuite>();
 }
+

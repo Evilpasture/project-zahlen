@@ -495,6 +495,9 @@ struct PBRTestSuite {
     };
 };
 
-int main() {
-    return ZHLN::Test::Runner::Run<PBRTestSuite>();
+// Exported for the GPU_Lighting group binary, which aggregates every suite in
+// this domain through Runner::RunDeferred.
+auto RunPBRSuite() -> ZHLN::Test::TestStats {
+    return ZHLN::Test::RunSuite<PBRTestSuite>();
 }
+

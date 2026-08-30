@@ -4,19 +4,30 @@
 # Tests exercise public behaviour only. They must not include engine internals
 # from src/ (systems, render/Vulkan guts, cooker headers, ...). Configure-time
 # enforcement lives in tools/check_tests_public_api.py.
+#
+# Layout: one binary per directory group instead of one per suite. Every
+# Test*.cpp in a group keeps its suite definition private to its own
+# translation unit and exports a stats-returning function; the group's
+# Run*Tests.cpp aggregates them through ZHLN::Test::Runner::RunDeferred.
+# Grouping 24 suites into 8 links is what pays for itself under ASan/UBSan or
+# LTO, where each extra link of zahlen_engine + Jolt + reflection meta-types is
+# the expensive part. The cost is process isolation: a crash or timeout in one
+# suite takes the rest of its group with it.
 
 # 1. Enable CTest testing framework
 enable_testing()
 
-# 2. Automatically discover all test source files in this directory
-file(GLOB TEST_SOURCES CONFIGURE_DEPENDS "Test*.cpp")
+# Shared per-target setup for a CPU test group.
+function(zahlen_add_cpu_test_group TARGET_NAME GROUP_DIR)
+    # Picks up both the Test*.cpp suites and the group's Run*Tests.cpp entry
+    # point. A file that defines main() must not be added to any other group.
+    file(GLOB GROUP_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${GROUP_DIR}/*.cpp")
 
-# 3. Iterate and dynamically register each test executable with original casing preserved
-foreach(TEST_SRC IN LISTS TEST_SOURCES)
-    # Extract file name without path or extension (e.g., "TestTaskSystem", "TestJSON", "TestECS")
-    get_filename_component(TARGET_NAME ${TEST_SRC} NAME_WLE)
+    if(NOT GROUP_SOURCES)
+        message(FATAL_ERROR "CPU test group ${TARGET_NAME}: no sources found in tests/${GROUP_DIR}")
+    endif()
 
-    add_executable(${TARGET_NAME} ${TEST_SRC})
+    add_executable(${TARGET_NAME} ${GROUP_SOURCES})
 
     set_target_properties(${TARGET_NAME} PROPERTIES
         CXX_STANDARD 26
@@ -46,17 +57,19 @@ foreach(TEST_SRC IN LISTS TEST_SOURCES)
         ${PROJECT_SOURCE_DIR}/extern/stb
     )
 
-    # include/Zahlen/Meshlet.hpp is a public header, but it includes
-    # <meshoptimizer.h> and its inline BuildMeshlets() calls into the library.
-    # zahlen_engine links meshoptimizer PRIVATE (root CMakeLists.txt:502), so
-    # neither the include path nor the symbols propagate to test targets through
-    # the engine link. Any test exercising BuildMeshlets must link it directly.
-    if(TARGET_NAME STREQUAL "TestMeshlets")
-        target_link_libraries(${TARGET_NAME} PRIVATE meshoptimizer)
-    endif()
-
     # Applies the required reflection flags (-freflection / custom libc++) configured in the root
     zahlen_enable_reflection(${TARGET_NAME})
+
+    # Extra per-group dependencies.
+    #
+    # assets: include/Zahlen/Meshlet.hpp is a public header, but it includes
+    # <meshoptimizer.h> and its inline BuildMeshlets() calls into the library.
+    # zahlen_engine links meshoptimizer PRIVATE (root CMakeLists.txt:502), so
+    # neither the include path nor the symbols propagate through the engine
+    # link. TestMeshlets exercises BuildMeshlets, so the group links it.
+    if(TARGET_NAME STREQUAL "CPU_Assets")
+        target_link_libraries(${TARGET_NAME} PRIVATE meshoptimizer)
+    endif()
 
     # --- ASAN & UBSAN CONFIGURATION ---
     if(USE_SANITIZERS)
@@ -84,7 +97,8 @@ foreach(TEST_SRC IN LISTS TEST_SOURCES)
         endif()
     endif()
 
-    # 4. Register the executable as a test with CTest (using original casing)
+    # Register the group as a single CTest entry. Per-suite results still print
+    # individually; use `ctest -R CPU_Core` to run one group.
     add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
     set_tests_properties(${TARGET_NAME} PROPERTIES LABELS "CPU;Fast")
 
@@ -94,7 +108,17 @@ foreach(TEST_SRC IN LISTS TEST_SOURCES)
             ENVIRONMENT "${ZHLN_TEST_ENVIRONMENT}"
         )
     endif()
-endforeach()
+endfunction()
+
+# 2. The CPU test groups.
+zahlen_add_cpu_test_group(CPU_Core      core)
+zahlen_add_cpu_test_group(CPU_Threading threading)
+zahlen_add_cpu_test_group(CPU_ECS       ecs)
+zahlen_add_cpu_test_group(CPU_Scripting scripting)
+zahlen_add_cpu_test_group(CPU_Physics   physics)
+zahlen_add_cpu_test_group(CPU_Assets    assets)
+zahlen_add_cpu_test_group(CPU_Audio     audio)
+zahlen_add_cpu_test_group(CPU_Perf      perf)
 
 # Optional CPU tests live with the extras toolkit and disappear completely when
 # ZHLN_BUILD_EXTRAS is disabled.
@@ -102,12 +126,10 @@ if(ZHLN_BUILD_EXTRAS AND TARGET zahlen_extras)
     add_subdirectory(extras)
 endif()
 
-# 5. Local GPU Render Test Suite (Off by default for headless CI/CD)
+# 3. Local GPU Render Test Suite (Off by default for headless CI/CD)
 option(ZHLN_BUILD_GPU_TESTS "Build GPU/Vulkan rendering tests (local hardware required)" OFF)
 
 if(ZHLN_BUILD_GPU_TESTS)
     message(STATUS "Configuring local GPU render tests in tests/render...")
     add_subdirectory(render)
 endif()
-
-

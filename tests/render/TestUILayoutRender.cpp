@@ -280,6 +280,9 @@ struct UILayoutRenderTestSuite {
     };
 };
 
-int main() {
-    return ZHLN::Test::Runner::Run<UILayoutRenderTestSuite>();
+// Exported for the GPU_Interface group binary, which aggregates every suite in
+// this domain through Runner::RunDeferred.
+auto RunUILayoutRenderSuite() -> ZHLN::Test::TestStats {
+    return ZHLN::Test::RunSuite<UILayoutRenderTestSuite>();
 }
+

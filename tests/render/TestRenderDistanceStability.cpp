@@ -77,7 +77,8 @@
 #include <utility>
 #include <vector>
 
-#define STB_IMAGE_WRITE_IMPLEMENTATION
+// Declarations only: the stb_image_write implementation is compiled once per
+// group binary from tests/helpers/ImageWriteImpl.cpp.
 #include <stb_image_write.h>
 
 // ============================================================================
@@ -1111,31 +1112,12 @@ struct DistanceStabilitySuite {
 };
 
 // ============================================================================
-// Main Execution Entry Point
+// Group Binary Entry Point
 // ============================================================================
 
-auto main(int argc, char** argv) -> int {
-    // --convert-ppm FILE... : convert already-captured PPM frames to PNG
-    // without re-running the suite (attach diagnostics from a failing run).
-    if (argc >= 3 && std::string_view(argv[1]) == "--convert-ppm") {
-        bool allOk = true;
-        for (int i = 2; i < argc; ++i) {
-            const RgbImage img = LoadPPM(argv[i]);
-            if (!img.Valid()) {
-                std::fprintf(stderr, "Failed to read: %s\n", argv[i]);
-                allOk = false;
-                continue;
-            }
-            const std::string png = PngPathOf(argv[i]);
-            if (!SavePNG(png, img)) {
-                std::fprintf(stderr, "Failed to write: %s\n", png.c_str());
-                allOk = false;
-                continue;
-            }
-            std::printf("converted %s -> %s\n", argv[i], png.c_str());
-        }
-        return allOk ? 0 : 1;
-    }
-
-    return ZHLN::Test::Runner::Run<DistanceStabilitySuite>();
+// Exported for the GPU_Performance group binary, which aggregates every suite in
+// this domain through Runner::RunDeferred.
+auto RunDistanceStabilitySuite() -> ZHLN::Test::TestStats {
+    return ZHLN::Test::RunSuite<DistanceStabilitySuite>();
 }
+

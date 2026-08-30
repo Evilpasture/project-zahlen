@@ -267,6 +267,46 @@ inline bool ExpectFalse(bool condition, std::source_location loc = std::source_l
     return false;
 }
 
+/// A named expectation.
+///
+/// ExpectTrue files the failure against its file:line, which is all the summary
+/// prints -- enough to locate the statement, not enough to tell which operand
+/// missed or by how much. A check that ANDs five conditions is the worst case:
+/// the summary says the line failed and nothing about which of the five. This
+/// records the same failure and additionally echoes a label plus the measured
+/// operands, so a red run is self-describing.
+///
+/// Reached through the ZHLN_CHECK macro below rather than called directly:
+/// source_location::current() has to be spelled at the call site to capture the
+/// caller's position, and a function parameter pack must be the last parameter,
+/// so no signature can take both a defaulted location and variadic format
+/// arguments.
+namespace Detail {
+
+template <typename... Args>
+[[nodiscard]] inline bool
+CheckConditionImpl(bool condition, std::string_view label, std::string_view fmt, std::source_location loc, Args&&... args) {
+    if (ExpectTrue(condition, loc)) {
+        return true;
+    }
+    ZHLN::Println("      {}[CHECK FAILED]{} {}", ZHLN::Color::Red, ZHLN::Color::Reset, label);
+    ZHLN::Println("        {}", ZHLN::Format(fmt, std::forward<Args>(args)...).string_view());
+    return false;
+}
+
+} // namespace Detail
+
+// Spelled as a macro so that source_location::current() is evaluated at the
+// call site; see Detail::CheckConditionImpl above for why no function signature
+// can do this and also take variadic format arguments.
+//
+//   const bool ok = ZHLN_CHECK(
+//       stats.meanR > 1.3 * stats.meanB, "strip mirrors the red emitter",
+//       "meanRGB=({:.1f},{:.1f},{:.1f}), dominantRed={}/{}", stats.meanR, stats.meanG, stats.meanB, stats.dominantRed, stats.pixels
+//   );
+#define ZHLN_CHECK(condition, label, fmt, ...) \
+    ::ZHLN::Test::Detail::CheckConditionImpl((condition), (label), (fmt), std::source_location::current() __VA_OPT__(, ) __VA_ARGS__)
+
 // Aborting Assertions
 template <typename T1, typename T2>
 [[nodiscard]] std::expected<void, ZHLN::Error> AssertEq(const T1& actual, const T2& expected, std::source_location loc = std::source_location::current()) {
@@ -470,6 +510,46 @@ class Runner {
 
         (run_one.template operator()<Suites>(), ...);
 
+        return Summarize(totalStats);
+    }
+
+    /// Runs suites that live in other translation units of the same binary.
+    ///
+    /// A group binary cannot name its members' suite types: the definitions
+    /// stay inside their own .cpp, which is exactly what keeps each file's
+    /// anonymous-namespace helpers from colliding once several files share a
+    /// link. Each file therefore exports a stats-returning function instead,
+    /// and the group main hands those here to get one aggregated summary.
+    ///
+    ///   // tests/core/TestContainers.cpp
+    ///   auto RunContainersSuite() -> ZHLN::Test::TestStats { return ZHLN::Test::RunSuite<ContainersTestSuite>(); }
+    ///
+    ///   // tests/core/RunCoreTests.cpp
+    ///   int main() { return ZHLN::Test::Runner::RunDeferred(RunContainersSuite, RunReflectionSuite, RunErrorSuite); }
+    ///
+    /// The exported name is `Run<Base>Suite`, not `<Base>Suite`. Naming it
+    /// after the suite it runs compiles at the declaration -- the function
+    /// merely hides the class -- and then fails inside its own body with
+    /// "no matching function for call to RunSuite<ContainersTestSuite>()",
+    /// because the suite type is no longer visible. TestGraphicsSettings.cpp
+    /// has a struct literally named GraphicsSettingsSuite, so this is not
+    /// hypothetical.
+    template <typename... SuiteRunners>
+    static int RunDeferred(SuiteRunners... runners) {
+        TestStats totalStats;
+
+        const auto add = [&totalStats](TestStats s) {
+            totalStats.passed += s.passed;
+            totalStats.failed += s.failed;
+        };
+
+        (add(runners()), ...);
+
+        return Summarize(totalStats);
+    }
+
+  private:
+    static int Summarize(const TestStats& totalStats) {
         ZHLN::Println("==================================================");
         ZHLN::Println("GLOBAL TEST RESULTS");
         ZHLN::Println("Total Passed: {}", totalStats.passed);
