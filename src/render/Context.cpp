@@ -7,30 +7,6 @@
 
 namespace ZHLN::Vk {
 
-VkInstance
-    CreateInstance(std::string_view appName, uint32_t appVersion, std::span<const std::string_view> extensions, ValidationMode enableValidation) noexcept {
-    std::vector<const char*> c_strings;
-    c_strings.reserve(extensions.size());
-    for (const auto& sv: extensions) {
-        c_strings.push_back(sv.data());
-    }
-
-    ZHLN_InstanceDesc inst_desc = {
-        .app_name        = {},
-        .version         = appVersion,
-        .extension_count = static_cast<uint32_t>(c_strings.size()),
-        .severity_flags  = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
-        .extensions      = c_strings.data(),
-        .validation_mode = enableValidation
-    };
-
-    const size_t copy_size = ZHLN::Min(appName.size(), sizeof(inst_desc.app_name) - 1);
-    std::memcpy(inst_desc.app_name, appName.data(), copy_size);
-    inst_desc.app_name[copy_size] = '\0';
-
-    return ZHLN_CreateInstance(&inst_desc);
-}
-
 ZHLN_PhysicalDeviceInfo SelectDevice(VkInstance instance, VkSurfaceKHR surface) noexcept {
     ZHLN_DeviceSelectDesc select_desc = {.instance = instance, .surface = surface, .score_fn = nullptr, .score_userdata = nullptr};
     return ZHLN_SelectPhysicalDevice(&select_desc);
@@ -44,20 +20,14 @@ Context::~Context() noexcept {
     if (_device.handle != VK_NULL_HANDLE) {
         vkDestroyDevice(_device.handle, nullptr);
     }
-    // Must be destroyed before the instance that owns it.
-    if (_debugMessenger != VK_NULL_HANDLE) {
-        ZHLN_DestroyDebugMessenger(_instance, _debugMessenger);
-        _debugMessenger = VK_NULL_HANDLE;
-    }
-    if (_instance != VK_NULL_HANDLE) {
-        vkDestroyInstance(_instance, nullptr);
-    }
+    // _instanceObject's destructor tears down the persistent debug messenger
+    // (if any) and then the instance, in that order, folding its diagnostics
+    // into the process totals.
 }
 
 Context::Context(Context&& other) noexcept:
-    _instance(std::exchange(other._instance, VK_NULL_HANDLE)), _surface(std::exchange(other._surface, VK_NULL_HANDLE)),
-    _physical(std::exchange(other._physical, {})), _device(std::exchange(other._device, {})),
-    _debugMessenger(std::exchange(other._debugMessenger, VK_NULL_HANDLE)) {
+    _instanceObject(std::move(other._instanceObject)), _surface(std::exchange(other._surface, VK_NULL_HANDLE)),
+    _physical(std::exchange(other._physical, {})), _device(std::exchange(other._device, {})) {
 }
 
 auto Context::operator=(Context&& other) noexcept -> Context& {
@@ -65,23 +35,12 @@ auto Context::operator=(Context&& other) noexcept -> Context& {
         if (_device.handle != VK_NULL_HANDLE) {
             vkDestroyDevice(_device.handle, nullptr);
         }
-        // Destroy the messenger before its instance, exactly as the destructor does.
-        if (_debugMessenger != VK_NULL_HANDLE) {
-            ZHLN_DestroyDebugMessenger(_instance, _debugMessenger);
-            _debugMessenger = VK_NULL_HANDLE;
-        }
-        if (_instance != VK_NULL_HANDLE) {
-            vkDestroyInstance(_instance, nullptr);
-        }
-
-        _instance       = std::exchange(other._instance, VK_NULL_HANDLE);
+        // Instance::operator= retires our instance (messenger first) and
+        // re-points the diagnostics forwarding at this object.
+        _instanceObject = std::move(other._instanceObject);
         _surface        = std::exchange(other._surface, VK_NULL_HANDLE);
-        _physical       = other._physical;
-        _device         = other._device;
-        _debugMessenger = std::exchange(other._debugMessenger, VK_NULL_HANDLE);
-
-        other._physical = {};
-        other._device   = {};
+        _physical       = std::exchange(other._physical, {});
+        _device         = std::exchange(other._device, {});
     }
     return *this;
 }
@@ -90,16 +49,22 @@ auto Context::operator=(Context&& other) noexcept -> Context& {
 // Builder Implementation
 // ============================================================================
 
-std::expected<VkInstance, ZHLN::Error> Context::Builder::BuildInstance() const noexcept {
-    VkInstance instance = CreateInstance(_appName, _appVersion, _instanceExtensions, _validationMode);
-    if (instance == VK_NULL_HANDLE) {
+std::expected<Vk::Instance, ZHLN::Error> Context::Builder::BuildInstance() noexcept {
+    // Ownership leaves with the return value: the caller must keep the
+    // Vk::Instance alive and hand it back via Instance(Vk::Instance&&)
+    // before Build(). A builder that still owns an instance when it dies
+    // destroys it (RAII -- failed bring-ups cannot leak).
+    _instanceObject = Instance::Create(_appName, _appVersion, _instanceExtensions, _validationMode);
+    if (!_instanceObject.Valid()) {
         return std::unexpected(ContextError::InstanceCreationFailed);
     }
-    return instance;
+    _instanceView = _instanceObject.Handle();
+    return std::move(_instanceObject);
 }
 
 std::expected<ZHLN_PhysicalDeviceInfo, ZHLN::Error> Context::Builder::SelectPhysicalDevice() const noexcept {
-    ZHLN_DeviceSelectDesc   select_desc = {.instance = _instance, .surface = _surface, .score_fn = _scoreFn, .score_userdata = _scoreUserdata};
+    const VkInstance        view = _instanceView != VK_NULL_HANDLE ? _instanceView : _instanceObject.Handle();
+    ZHLN_DeviceSelectDesc   select_desc = {.instance = view, .surface = _surface, .score_fn = _scoreFn, .score_userdata = _scoreUserdata};
     ZHLN_PhysicalDeviceInfo info        = ZHLN_SelectPhysicalDevice(&select_desc);
     if (info.handle == VK_NULL_HANDLE) {
         return std::unexpected(ContextError::NoSuitableDeviceFound);
@@ -107,7 +72,7 @@ std::expected<ZHLN_PhysicalDeviceInfo, ZHLN::Error> Context::Builder::SelectPhys
     return info;
 }
 
-std::expected<Context, Error> Context::Builder::Build() const noexcept {
+std::expected<Context, Error> Context::Builder::Build() noexcept {
     Context ctx;
     ctx._surface  = _surface;
     ctx._physical = _physical;
@@ -125,17 +90,14 @@ std::expected<Context, Error> Context::Builder::Build() const noexcept {
         return std::unexpected(ContextError::DeviceCreationFailed);
     }
 
-    // Only take ownership of _instance once device creation succeeds
-    ctx._instance = _instance;
-
-    // Hook the persistent messenger so runtime validation messages reach
-    // ZHLN_Internal_DebugCallback (error counter + GPU-AV abort hook).
-    // Errors AND warnings: a warning the engine cannot explain is a warning
-    // worth fixing at the source, not filtering here.
-    if (_validationMode != ZHLN_VALIDATION_OFF) {
-        ctx._debugMessenger =
-            ZHLN_CreateDebugMessenger(ctx._instance, VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT);
+    // Only take ownership of the instance once device creation succeeds.
+    // The persistent debug messenger already exists: Instance::Create set it
+    // up (errors AND warnings -- a warning the engine cannot explain is a
+    // warning worth fixing at the source) and owns its teardown.
+    if (!_instanceObject.Valid()) {
+        return std::unexpected(ContextError::InstanceCreationFailed);
     }
+    ctx._instanceObject = std::move(_instanceObject);
 
     return ctx;
 }

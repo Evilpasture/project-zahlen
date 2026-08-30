@@ -32,6 +32,19 @@ extern "C" {
 
 static constexpr auto maxInstanceExtensions = 128;
 
+typedef void (*ZHLN_DebugHookFn)(void* userdata, VkDebugUtilsMessageSeverityFlagBitsEXT severity);
+
+/*
+ * Diagnostics forwarding. The C layer is stateless by design (see RENDER.md):
+ * it owns no counters. The C++ Vk::Instance owns one of these and points the
+ * instance descriptor at it; the debug-messenger pUserData carries it back to
+ * the C callback, which forwards error severities to the hook.
+ */
+typedef struct ZHLN_DebugForwarding {
+    ZHLN_DebugHookFn hook;      /* NULL: no counting, logging only */
+    void*            userdata;  /* the Vk::Instance that owns the counters */
+} ZHLN_DebugForwarding;
+
 typedef enum ZHLN_ValidationMode : uint8_t { ZHLN_VALIDATION_OFF = 0, ZHLN_VALIDATION_ON = 1, ZHLN_VALIDATION_GPU = 2 } ZHLN_ValidationMode;
 
 /**
@@ -45,6 +58,9 @@ typedef struct ZHLN_InstanceDesc {
     const VkDebugUtilsMessageSeverityFlagsEXT severity_flags;
     const char* const*                        extensions;
     const ZHLN_ValidationMode                 validation_mode;
+    /* Diagnostics owner (C++ side); may be NULL when no counting is wanted.
+       Used as pUserData by both the pNext and the persistent messenger. */
+    ZHLN_DebugForwarding*                     debug;
 } ZHLN_InstanceDesc;
 
 /**
@@ -199,25 +215,19 @@ typedef struct ZHLN_MeshShaderLimits {
  * Always 0 when validation is disabled.
  */
 /**
+/*
  * @brief Creates the persistent debug messenger. REQUIRED for runtime messages:
  * the create-info chained into VkInstanceCreateInfo only covers instance
  * creation/destruction, so without this the engine's debug callback never runs.
+ * The hook/userdata pair receives error-severity notifications (counting is
+ * the C++ owner's business; the C layer stays stateless).
  */
 [[nodiscard]]
-VkDebugUtilsMessengerEXT ZHLN_CreateDebugMessenger(VkInstance instance, VkDebugUtilsMessageSeverityFlagsEXT severity);
+VkDebugUtilsMessengerEXT ZHLN_CreateDebugMessenger(
+    VkInstance instance, VkDebugUtilsMessageSeverityFlagsEXT severity, ZHLN_DebugForwarding* debug
+);
 
 void ZHLN_DestroyDebugMessenger(VkInstance instance, VkDebugUtilsMessengerEXT messenger);
-
-/* --- VALIDATION & DEVICE ERROR DIAGNOSTICS --- */
-
-[[nodiscard]]
-uint32_t ZHLN_GetValidationErrorCount();
-
-void ZHLN_ResetValidationErrorCount();
-
-[[nodiscard]] uint32_t ZHLN_GetDeviceLostCount();
-void                   ZHLN_ResetDeviceLostCount();
-void                   ZHLN_NotifyDeviceLost();
 
 [[nodiscard]]
 ZHLN_MeshShaderLimits ZHLN_QueryMeshShaderLimits(VkPhysicalDevice physical);

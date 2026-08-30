@@ -3,6 +3,7 @@
 
 // File: src/engine/RenderResources.cpp
 #include "RenderInternal.hpp"
+#include "Instance.hpp"
 #include "Resources.hpp"
 #include "Zahlen/Types.hpp"
 #include <Zahlen/Core/ControlFlow.hpp>
@@ -217,11 +218,11 @@ bool RenderContext::RayTracingSupported() const noexcept {
 }
 
 uint32_t RenderContext::ValidationErrorCount() noexcept {
-    return ZHLN_GetValidationErrorCount();
+    return Vk::Instance::ValidationErrorCount();
 }
 
 uint32_t RenderContext::DeviceLostCount() noexcept {
-    return ZHLN_GetDeviceLostCount();
+    return Vk::Instance::DeviceLostCount();
 }
 
 void RenderContext::WriteCheckpoint(std::string_view name) noexcept {

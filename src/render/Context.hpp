@@ -7,6 +7,8 @@
 #include <Zahlen/Error.hpp>
 #include <cstdint>
 
+#include "Instance.hpp"
+
 namespace ZHLN::Vk {
 
 // Vulkan instance/device bring-up failures for the Context subsystem.
@@ -30,7 +32,7 @@ class Context {
     auto operator=(Context&& other) noexcept -> Context&;
 
     [[nodiscard]] auto Instance() const noexcept -> VkInstance {
-        return _instance;
+        return _instanceObject.Handle();
     }
     [[nodiscard]] auto Surface() const noexcept -> VkSurfaceKHR {
         return _surface;
@@ -147,11 +149,13 @@ class Context {
     }
 
   private:
-    VkInstance               _instance       = VK_NULL_HANDLE;
+    // Qualified: the Instance() accessor above shadows the class name in
+    // class scope. Owns the handle, the persistent debug messenger, and the
+    // validation/device-lost diagnostics.
+    Vk::Instance             _instanceObject {};
     VkSurfaceKHR             _surface        = VK_NULL_HANDLE;
     ZHLN_PhysicalDeviceInfo  _physical       = {};
     ZHLN_Device              _device         = {};
-    VkDebugUtilsMessengerEXT _debugMessenger = VK_NULL_HANDLE;
 };
 
 using ValidationMode = ZHLN_ValidationMode;
@@ -176,7 +180,17 @@ class Context::Builder {
     }
 
     constexpr Builder& Instance(VkInstance inst) noexcept {
-        _instance = inst;
+        _instanceView = inst;
+        return *this;
+    }
+
+    // Owning variant: transfers a Vk::Instance (created via BuildInstance())
+    // into this builder so Build() can move it into the Context. Required for
+    // the final Build(); the raw setter above only provides a non-owning view
+    // for query paths (SelectPhysicalDevice and friends).
+    constexpr Builder& Instance(Vk::Instance&& inst) noexcept {
+        _instanceObject = std::move(inst);
+        _instanceView   = _instanceObject.Handle();
         return *this;
     }
 
@@ -219,18 +233,22 @@ class Context::Builder {
     }
 
     // --- Build Steps ---
-    [[nodiscard]] std::expected<VkInstance, ZHLN::Error>              BuildInstance() const noexcept;
+    // Creates the instance and moves OWNERSHIP out: hold the returned Vk::Instance
+    // and feed it back via Instance(Vk::Instance&&) before Build(). (A temporary
+    // Builder that owns the instance destroys it when it goes out of scope.)
+    [[nodiscard]] std::expected<Vk::Instance, ZHLN::Error>            BuildInstance() noexcept;
     [[nodiscard]] std::expected<ZHLN_PhysicalDeviceInfo, ZHLN::Error> SelectPhysicalDevice() const noexcept;
-    [[nodiscard]] std::expected<Context, ZHLN::Error>                 Build() const noexcept;
+    [[nodiscard]] std::expected<Context, ZHLN::Error>                 Build() noexcept;
 
   private:
     std::string_view   _appName        = "ZHLN Engine";
     uint32_t           _appVersion     = VK_MAKE_API_VERSION(0, 1, 0, 0);
     Vk::ValidationMode _validationMode = ZHLN_VALIDATION_ON;
 
-    VkInstance              _instance = VK_NULL_HANDLE;
-    VkSurfaceKHR            _surface  = VK_NULL_HANDLE;
-    ZHLN_PhysicalDeviceInfo _physical = {};
+    Vk::Instance            _instanceObject {};
+    VkInstance              _instanceView  = VK_NULL_HANDLE;
+    VkSurfaceKHR            _surface       = VK_NULL_HANDLE;
+    ZHLN_PhysicalDeviceInfo _physical      = {};
 
     std::vector<std::string_view>    _instanceExtensions;
     std::vector<const char*>         _deviceExtensions;

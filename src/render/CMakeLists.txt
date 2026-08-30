@@ -36,6 +36,7 @@ add_library(zahlen_render STATIC
     ${PROJECT_SOURCE_DIR}/extern/volk/volk.c
     RenderCore.c
     VmaImplementation.cpp
+    Instance.cpp
     RenderCore.cpp
     Commands.cpp
     PipelineBuilder.cpp

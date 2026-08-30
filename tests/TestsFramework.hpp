@@ -16,11 +16,10 @@
 #include <type_traits>
 #include <vector>
 
-// Lightweight C hooks into RenderCore.c
-extern "C" {
-uint32_t ZHLN_GetValidationErrorCount() noexcept;
-uint32_t ZHLN_GetDeviceLostCount() noexcept;
-}
+// Render diagnostics: static accessors on the public RenderContext. They read
+// the process totals owned by Vk::Instance (active instance + retired
+// instances), and report zero for suites that never bring up Vulkan.
+#include <Zahlen/Render.hpp>
 
 #if defined(__unix__) || defined(__APPLE__) || defined(__linux__)
 #define ZHLN_TEST_TIMEOUT_SUPPORTED 1
@@ -266,8 +265,8 @@ TestStats RunSuite() {
             ctx.Reset(name);
 
             // 1. Snapshot telemetry before test begins
-            const uint32_t valErrorsBefore = ZHLN_GetValidationErrorCount();
-            const uint32_t devLostBefore   = ZHLN_GetDeviceLostCount();
+            const uint32_t valErrorsBefore = ZHLN::RenderContext::ValidationErrorCount();
+            const uint32_t devLostBefore   = ZHLN::RenderContext::DeviceLostCount();
 
             ReturnType result = std::unexpected(ZHLN::Error(TestFrameworkError::AssertionFailed));
 
@@ -307,7 +306,7 @@ TestStats RunSuite() {
 #endif
 
             // 2. Fail if new Vulkan Validation Errors occurred
-            const uint32_t valErrorsAfter = ZHLN_GetValidationErrorCount();
+            const uint32_t valErrorsAfter = ZHLN::RenderContext::ValidationErrorCount();
             if (valErrorsAfter > valErrorsBefore && !ctx.allowValidationErrors) {
                 const uint32_t count = valErrorsAfter - valErrorsBefore;
                 ctx.failures.push_back(
@@ -320,7 +319,7 @@ TestStats RunSuite() {
             }
 
             // 3. Fail if GPU Device Lost / Hang occurred
-            const uint32_t devLostAfter = ZHLN_GetDeviceLostCount();
+            const uint32_t devLostAfter = ZHLN::RenderContext::DeviceLostCount();
             if (devLostAfter > devLostBefore && !ctx.allowDeviceLost) {
                 const uint32_t count = devLostAfter - devLostBefore;
                 ctx.failures.push_back(

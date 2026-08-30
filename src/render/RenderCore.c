@@ -82,49 +82,18 @@ static inline uint64_t zhln_max_u64(uint64_t a, uint64_t b) {
 // run before any of them are touched. ZHLN_CreateInstance calls it, and so do
 // the helpers that can legally query Vulkan before an instance exists
 // (ExtensionBuilder::ForInstance, EnumerateInstanceExtensions).
-static atomic_bool g_volk_loaded = false;
+// Validation diagnostics are NOT accumulated here: the C layer is stateless
+// (RENDER.md). The C++ Vk::Instance registers a ZHLN_DebugForwarding in the
+// instance descriptor; the callback below forwards error severities to its
+// hook and keeps only the stateless behaviors (stderr logging and the GPU-AV
+// out-of-bounds abort).
 
+// Stateless: volkInitialize() is idempotent (it only re-acquires the loader
+// handle and re-fetches the global pointers) and safe to race, so there is no
+// once-flag to guard. Call sites are bring-up paths where the dlopen
+// round-trip is noise.
 VkResult ZHLN_EnsureVulkanLoader(void) {
-    if (atomic_load_explicit(&g_volk_loaded, memory_order_acquire)) {
-        return VK_SUCCESS;
-    }
-
-    const VkResult result = volkInitialize();
-    if (result != VK_SUCCESS) {
-        return result;
-    }
-
-    // Benign race: two threads may run volkInitialize() concurrently; it only
-    // (re)acquires the loader handle and re-fetches global pointers, and
-    // never tears anything down, so double initialization is harmless.
-    atomic_store_explicit(&g_volk_loaded, true, memory_order_release);
-    return VK_SUCCESS;
-}
-
-// Validation-error accounting. Tests (and the console) can snapshot this around
-// a workload to assert that a feature does not introduce validation errors --
-// a suite that prints VUID violations and still reports PASS is not a test.
-static atomic_uint g_validation_error_count = 0;
-static atomic_uint g_device_lost_count      = 0;
-
-uint32_t ZHLN_GetValidationErrorCount() {
-    return atomic_load_explicit(&g_validation_error_count, memory_order_relaxed);
-}
-
-void ZHLN_ResetValidationErrorCount() {
-    atomic_store_explicit(&g_validation_error_count, 0, memory_order_relaxed);
-}
-
-uint32_t ZHLN_GetDeviceLostCount() {
-    return atomic_load_explicit(&g_device_lost_count, memory_order_relaxed);
-}
-
-void ZHLN_ResetDeviceLostCount() {
-    atomic_store_explicit(&g_device_lost_count, 0, memory_order_relaxed);
-}
-
-void ZHLN_NotifyDeviceLost() {
-    atomic_fetch_add_explicit(&g_device_lost_count, 1, memory_order_relaxed);
+    return volkInitialize();
 }
 
 static VkBool32 VKAPI_CALL ZHLN_Internal_DebugCallback(
@@ -142,8 +111,11 @@ static VkBool32 VKAPI_CALL ZHLN_Internal_DebugCallback(
         prefix = "VULKAN INFO";
     }
 
-    if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
-        atomic_fetch_add_explicit(&g_validation_error_count, 1, memory_order_relaxed);
+    if ((severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) && userdata != NULL) {
+        const ZHLN_DebugForwarding* const debug = (const ZHLN_DebugForwarding*) userdata;
+        if (debug->hook != NULL) {
+            debug->hook(debug->userdata, severity);
+        }
     }
 
     fprintf(stderr, "[%s] %s\n", prefix, (data && data->pMessage) ? data->pMessage : "");
@@ -161,7 +133,8 @@ static VkBool32 VKAPI_CALL ZHLN_Internal_DebugCallback(
     return VK_FALSE;
 }
 
-VkDebugUtilsMessengerEXT ZHLN_CreateDebugMessenger(const VkInstance instance, const VkDebugUtilsMessageSeverityFlagsEXT severity) {
+VkDebugUtilsMessengerEXT
+    ZHLN_CreateDebugMessenger(const VkInstance instance, const VkDebugUtilsMessageSeverityFlagsEXT severity, ZHLN_DebugForwarding* debug) {
     if (instance == VK_NULL_HANDLE) {
         return VK_NULL_HANDLE;
     }
@@ -182,6 +155,7 @@ VkDebugUtilsMessengerEXT ZHLN_CreateDebugMessenger(const VkInstance instance, co
         .messageType     = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
                            VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
         .pfnUserCallback = ZHLN_Internal_DebugCallback,
+        .pUserData       = debug,
     };
 
     VkDebugUtilsMessengerEXT messenger = VK_NULL_HANDLE;
@@ -414,6 +388,7 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
             .messageType     = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
                                VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
             .pfnUserCallback = ZHLN_Internal_DebugCallback,
+            .pUserData       = desc->debug,
         };
 
         create_info.pNext = &debug_info;

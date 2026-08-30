@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "RenderInternal.hpp"
+#include "Instance.hpp"
 #include "Zahlen/Profiler.hpp"
 #include "backends/imgui_impl_glfw.h"
 #include "imgui.h"
@@ -468,7 +469,7 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
 
         if (!comp_submit_res) [[unlikely]] {
             if (comp_submit_res.error().Is<VkResult>() && comp_submit_res.error().As<VkResult>() == VK_ERROR_DEVICE_LOST) {
-                ZHLN_NotifyDeviceLost();
+                Vk::Instance::NotifyDeviceLost();
                 return std::unexpected(DeviceLost);
             }
             return std::unexpected(comp_submit_res.error());
@@ -556,7 +557,7 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
 
             if (!submit_res) {
                 if (submit_res.error().Is<VkResult>() && submit_res.error().As<VkResult>() == VK_ERROR_DEVICE_LOST) {
-                    ZHLN_NotifyDeviceLost();
+                    Vk::Instance::NotifyDeviceLost();
                     return std::unexpected(DeviceLost);
                 }
                 return std::unexpected(Error);
