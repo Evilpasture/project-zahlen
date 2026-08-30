@@ -21,12 +21,21 @@
 
 #include "TestsFramework.hpp"
 #include "helpers/ImageTesting.hpp"
+#include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
+#include <Zahlen/Entity.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
+#include <Zahlen/Log.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Types.hpp>
+// DisableTAA calls Registry::GetEntitiesWith and Registry::Patch directly.
+// <Zahlen/Engine.hpp> only forward-declares ECS::Registry, so this header must
+// not rely on the including translation unit having pulled the definition in
+// first -- that is what made it compile only when a suite happened to include
+// <Zahlen/ecs/ECS.hpp> ahead of this one.
+#include <Zahlen/ecs/ECS.hpp>
 #include <cstdint>
 #include <memory>
 #include <string>
