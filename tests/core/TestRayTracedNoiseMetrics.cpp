@@ -23,24 +23,24 @@
 
 #include "RayTracedNoiseMetrics.hpp"
 #include "TestsFramework.hpp"
-#include <stb_image.h>
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
 #include <expected>
+#include <stb_image.h>
 #include <vector>
 
 // The same tile the renderer binds, embedded so the discriminator is measured
 // against the real asset rather than an idealised stand-in.
 // NOLINTBEGIN(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
 constexpr uint8_t kBlueNoisePng[] = {
-#embed "../resources/shaders/LDR_RGBA_0.png"
+#embed "../../resources/shaders/LDR_RGBA_0.png"
 };
 // NOLINTEND(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
 
 enum class NoiseMetricError : uint8_t {
-    BlueNoiseDecodeFailed[[= ZHLN::Description<"The embedded LDR_RGBA_0 blue noise tile failed to decode.">{}]] = 1,
+    BlueNoiseDecodeFailed[[= ZHLN::Description<"The embedded LDR_RGBA_0 blue noise tile failed to decode."> {}]] = 1,
 };
 
 namespace {
@@ -61,11 +61,11 @@ constexpr int kSize = 128;
     std::vector<double> field(static_cast<std::size_t>(kSize) * kSize, 0.0);
     for (int y = 0; y < kSize; ++y) {
         for (int x = 0; x < kSize; ++x) {
-            const auto    fx       = static_cast<float>(x);
-            const auto    fy       = static_cast<float>(y);
-            const float   magic    = std::fmod(0.06711056f * fx + 0.00583715f * fy, 1.0f);
-            const float   dither   = std::fmod(52.9829189f * magic, 1.0f);
-            const double  residual = dither > 0.5f ? amplitude : 0.0;
+            const auto   fx                                = static_cast<float>(x);
+            const auto   fy                                = static_cast<float>(y);
+            const float  magic                             = std::fmod(0.06711056f * fx + 0.00583715f * fy, 1.0f);
+            const float  dither                            = std::fmod(52.9829189f * magic, 1.0f);
+            const double residual                          = dither > 0.5f ? amplitude : 0.0;
             field[static_cast<std::size_t>(y) * kSize + x] = residual;
         }
     }
@@ -86,7 +86,7 @@ constexpr int kSize = 128;
     }
     for (int y = 0; y < kSize; ++y) {
         for (int x = 0; x < kSize; ++x) {
-            const auto   v = static_cast<double>(px[(static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + x) * 4u]) / 255.0;
+            const auto v = static_cast<double>(px[(static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + x) * 4u]) / 255.0;
             field[static_cast<std::size_t>(y) * kSize + x] = v > 0.5 ? amplitude : 0.0;
         }
     }
@@ -100,7 +100,7 @@ constexpr int kSize = 128;
     std::vector<double> field(static_cast<std::size_t>(kSize) * kSize, 0.0);
     for (int y = 0; y < kSize; ++y) {
         for (int x = 0; x < kSize; ++x) {
-            const uint32_t r = Hash(static_cast<uint32_t>(x), static_cast<uint32_t>(y), 0x9E37u);
+            const uint32_t r                               = Hash(static_cast<uint32_t>(x), static_cast<uint32_t>(y), 0x9E37u);
             field[static_cast<std::size_t>(y) * kSize + x] = ((r & 0xFFFFu) > 0x8000u) ? amplitude : 0.0;
         }
     }
@@ -112,7 +112,7 @@ constexpr int kSize = 128;
 [[nodiscard]] std::vector<uint8_t> ToRgb(const std::vector<double>& field) {
     std::vector<uint8_t> rgb(field.size() * 3u, 0);
     for (std::size_t i = 0; i < field.size(); ++i) {
-        const auto v = static_cast<uint8_t>(std::clamp(field[i], 0.0, 255.0));
+        const auto v     = static_cast<uint8_t>(std::clamp(field[i], 0.0, 255.0));
         rgb[i * 3u + 0u] = v;
         rgb[i * 3u + 1u] = v;
         rgb[i * 3u + 2u] = v;
@@ -127,18 +127,18 @@ struct NoiseMetricTestSuite {
         /// The discriminator: a lattice must read as anisotropic and periodic,
         /// blue noise as neither.
         std::expected<void, ZHLN::Error> metrics_separate_lattice_from_blue_noise() {
-            bool ok = false;
+            bool                      ok         = false;
             const std::vector<double> lattice    = MakeIgnLattice(96.0);
             const std::vector<double> blueNoise  = MakeBlueNoise(96.0, &ok);
             const std::vector<double> whiteNoise = MakeWhiteNoise(96.0);
-            auto check = ZHLN::Test::AssertTrue(ok);
+            auto                      check      = ZHLN::Test::AssertTrue(ok);
             if (!check) {
                 return std::unexpected(NoiseMetricError::BlueNoiseDecodeFailed);
             }
 
-            const auto latticeDir   = ZHLN::Test::Noise::MeasureDirectionalEnergy(lattice.data(), kSize, kSize);
-            const auto blueDir      = ZHLN::Test::Noise::MeasureDirectionalEnergy(blueNoise.data(), kSize, kSize);
-            const auto whiteDir     = ZHLN::Test::Noise::MeasureDirectionalEnergy(whiteNoise.data(), kSize, kSize);
+            const auto   latticeDir = ZHLN::Test::Noise::MeasureDirectionalEnergy(lattice.data(), kSize, kSize);
+            const auto   blueDir    = ZHLN::Test::Noise::MeasureDirectionalEnergy(blueNoise.data(), kSize, kSize);
+            const auto   whiteDir   = ZHLN::Test::Noise::MeasureDirectionalEnergy(whiteNoise.data(), kSize, kSize);
             const double latticeLob = ZHLN::Test::Noise::AutocorrelationSideLobe(lattice.data(), kSize, kSize, 4);
             const double blueLob    = ZHLN::Test::Noise::AutocorrelationSideLobe(blueNoise.data(), kSize, kSize, 4);
             const double whiteLob   = ZHLN::Test::Noise::AutocorrelationSideLobe(whiteNoise.data(), kSize, kSize, 4);
@@ -188,7 +188,7 @@ struct NoiseMetricTestSuite {
         /// sampling onto a line.
         std::expected<void, ZHLN::Error> blue_noise_channels_are_decorrelated() {
             int            w = 0, h = 0, c = 0;
-            unsigned char* px = stbi_load_from_memory(kBlueNoisePng, static_cast<int>(sizeof(kBlueNoisePng)), &w, &h, &c, 4);
+            unsigned char* px    = stbi_load_from_memory(kBlueNoisePng, static_cast<int>(sizeof(kBlueNoisePng)), &w, &h, &c, 4);
             auto           check = ZHLN::Test::AssertTrue(px != nullptr && w > 0 && h > 0);
             if (!check) {
                 return std::unexpected(NoiseMetricError::BlueNoiseDecodeFailed);
@@ -224,7 +224,7 @@ struct NoiseMetricTestSuite {
         /// regenerated mip), which defeats the purpose of sampling it.
         std::expected<void, ZHLN::Error> blue_noise_is_high_frequency() {
             int            w = 0, h = 0, c = 0;
-            unsigned char* px = stbi_load_from_memory(kBlueNoisePng, static_cast<int>(sizeof(kBlueNoisePng)), &w, &h, &c, 4);
+            unsigned char* px    = stbi_load_from_memory(kBlueNoisePng, static_cast<int>(sizeof(kBlueNoisePng)), &w, &h, &c, 4);
             auto           check = ZHLN::Test::AssertTrue(px != nullptr && w >= 64 && h >= 64);
             if (!check) {
                 return std::unexpected(NoiseMetricError::BlueNoiseDecodeFailed);
@@ -251,7 +251,7 @@ struct NoiseMetricTestSuite {
         /// Identical frames must produce a zero residual, otherwise every
         /// stability threshold in the GPU suite is meaningless.
         std::expected<void, ZHLN::Error> residual_of_identical_frames_is_zero() {
-            const std::vector<double> flat(kSize * kSize, 128.0);
+            const std::vector<double>  flat(kSize * kSize, 128.0);
             const std::vector<uint8_t> rgb = ToRgb(flat);
             const auto                 s   = ZHLN::Test::Noise::MeasureResidual(rgb.data(), rgb.data(), kSize, kSize, 2.0);
             ZHLN::Test::ExpectTrue(s.valid);
@@ -315,4 +315,3 @@ struct NoiseMetricTestSuite {
 auto RunRayTracedNoiseMetricsSuite() -> ZHLN::Test::TestStats {
     return ZHLN::Test::RunSuite<NoiseMetricTestSuite>();
 }
-
