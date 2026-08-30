@@ -1058,6 +1058,20 @@ struct RenderPerformanceThroughputSuite {
 // Main Execution Entry Point
 // ============================================================================
 
-auto main() -> int {
-    return ZHLN::Test::Runner::Run<RenderPerformanceValidationSuite, RenderPerformanceThroughputSuite>();
+// Exported for the GPU_Performance group binary, which aggregates every suite in
+// this domain through Runner::RunDeferred.
+auto RunRenderPerformanceSuites() -> ZHLN::Test::TestStats {
+    ZHLN::Test::TestStats total {};
+        {
+            const auto s = ZHLN::Test::RunSuite<RenderPerformanceValidationSuite>();
+            total.passed += s.passed;
+            total.failed += s.failed;
+        }
+        {
+            const auto s = ZHLN::Test::RunSuite<RenderPerformanceThroughputSuite>();
+            total.passed += s.passed;
+            total.failed += s.failed;
+        }
+        return total;
 }
+

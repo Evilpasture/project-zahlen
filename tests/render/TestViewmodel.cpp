@@ -279,6 +279,9 @@ struct ViewmodelTestSuite {
     };
 };
 
-int main() {
-    return ZHLN::Test::Runner::Run<ViewmodelTestSuite>();
+// Exported for the GPU_Interface group binary, which aggregates every suite in
+// this domain through Runner::RunDeferred.
+auto RunViewmodelSuite() -> ZHLN::Test::TestStats {
+    return ZHLN::Test::RunSuite<ViewmodelTestSuite>();
 }
+

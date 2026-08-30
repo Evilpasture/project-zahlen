@@ -201,6 +201,9 @@ struct RenderAnimatedMeshTestSuite {
     };
 };
 
-int main() {
-    return ZHLN::Test::Runner::Run<RenderAnimatedMeshTestSuite>();
+// Exported for the GPU_Pipeline group binary, which aggregates every suite in
+// this domain through Runner::RunDeferred.
+auto RunRenderAnimatedMeshSuite() -> ZHLN::Test::TestStats {
+    return ZHLN::Test::RunSuite<RenderAnimatedMeshTestSuite>();
 }
+

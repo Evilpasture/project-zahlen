@@ -708,6 +708,9 @@ struct RayTracedNoiseStabilityTestSuite {
     };
 };
 
-int main() {
-    return ZHLN::Test::Runner::Run<RayTracedNoiseStabilityTestSuite>();
+// Exported for the GPU_Lighting group binary, which aggregates every suite in
+// this domain through Runner::RunDeferred.
+auto RunRayTracedNoiseStabilitySuite() -> ZHLN::Test::TestStats {
+    return ZHLN::Test::RunSuite<RayTracedNoiseStabilityTestSuite>();
 }
+

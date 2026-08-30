@@ -88,6 +88,9 @@ struct RenderPipelinesTestSuite {
     };
 };
 
-int main() {
-    return ZHLN::Test::Runner::Run<RenderPipelinesTestSuite>();
+// Exported for the GPU_Pipeline group binary, which aggregates every suite in
+// this domain through Runner::RunDeferred.
+auto RunRenderPipelinesSuite() -> ZHLN::Test::TestStats {
+    return ZHLN::Test::RunSuite<RenderPipelinesTestSuite>();
 }
+

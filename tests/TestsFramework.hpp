@@ -510,6 +510,38 @@ class Runner {
 
         (run_one.template operator()<Suites>(), ...);
 
+        return Summarize(totalStats);
+    }
+
+    /// Runs suites that live in other translation units of the same binary.
+    ///
+    /// A group binary cannot name its members' suite types: the definitions
+    /// stay inside their own .cpp, which is exactly what keeps each file's
+    /// anonymous-namespace helpers from colliding once several files share a
+    /// link. Each file therefore exports a stats-returning function instead,
+    /// and the group main hands those here to get one aggregated summary.
+    ///
+    ///   // tests/core/TestContainers.cpp
+    ///   auto ContainersSuite() -> ZHLN::Test::TestStats { return ZHLN::Test::RunSuite<ContainersTestSuite>(); }
+    ///
+    ///   // tests/core/RunCoreTests.cpp
+    ///   int main() { return ZHLN::Test::Runner::RunDeferred(ContainersSuite, FormatSuite, ReflectionSuite); }
+    template <typename... SuiteRunners>
+    static int RunDeferred(SuiteRunners... runners) {
+        TestStats totalStats;
+
+        const auto add = [&totalStats](TestStats s) {
+            totalStats.passed += s.passed;
+            totalStats.failed += s.failed;
+        };
+
+        (add(runners()), ...);
+
+        return Summarize(totalStats);
+    }
+
+  private:
+    static int Summarize(const TestStats& totalStats) {
         ZHLN::Println("==================================================");
         ZHLN::Println("GLOBAL TEST RESULTS");
         ZHLN::Println("Total Passed: {}", totalStats.passed);

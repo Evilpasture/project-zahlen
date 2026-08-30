@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <fstream>
 #include <string>
 #include <string_view>
@@ -106,6 +107,37 @@ struct RgbImage {
         return false;
     }
     return stbi_write_png(path.c_str(), img.width, img.height, 3, img.rgb.data(), img.width * 3) != 0;
+}
+
+/// `--convert-ppm FILE...`: convert already-captured PPM frames to PNG without
+/// re-running a suite, so the diagnostics from a failing run can be attached to
+/// a report.
+///
+/// Returns false when argv is not that invocation, so a group runner can fall
+/// through to running its suites. Two suites carried this verbatim; it is a
+/// property of the capture format, not of either suite.
+[[nodiscard]] inline bool ConvertPpmToPng(int argc, char** argv) {
+    if (argc < 3 || std::string_view(argv[1]) != "--convert-ppm") {
+        return false;
+    }
+
+    bool allOk = true;
+    for (int i = 2; i < argc; ++i) {
+        const RgbImage img = LoadPPM(argv[i]);
+        if (!img.Valid()) {
+            std::fprintf(stderr, "Failed to read: %s\n", argv[i]);
+            allOk = false;
+            continue;
+        }
+        const std::string png = PngPathOf(argv[i]);
+        if (!SavePNG(png, img)) {
+            std::fprintf(stderr, "Failed to write: %s\n", png.c_str());
+            allOk = false;
+            continue;
+        }
+        std::printf("converted %s -> %s\n", argv[i], png.c_str());
+    }
+    return allOk;
 }
 
 // ============================================================================

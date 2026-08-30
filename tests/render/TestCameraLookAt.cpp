@@ -222,6 +222,9 @@ struct CameraLookAtTestSuite {
     };
 };
 
-int main() {
-    return ZHLN::Test::Runner::Run<CameraLookAtTestSuite>();
+// Exported for the GPU_Pipeline group binary, which aggregates every suite in
+// this domain through Runner::RunDeferred.
+auto RunCameraLookAtSuite() -> ZHLN::Test::TestStats {
+    return ZHLN::Test::RunSuite<CameraLookAtTestSuite>();
 }
+

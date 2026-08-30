@@ -301,15 +301,18 @@ struct DescriptorHeapsParallelSuite {
     };
 };
 
-int main() {
+// Exported for the GPU_Pipeline group binary, which aggregates every suite in
+// this domain through Runner::RunDeferred.
+auto RunDescriptorHeapsParallelSuite() -> ZHLN::Test::TestStats {
     // Force the CPU-culling policy BEFORE the first frame records: MainPass1
     // then draws into parallel secondary command buffers that inherit the
     // primary's descriptor-heap bindings (Diag::DisableGpuCulling caches the
     // environment read on first use).
-#if defined(_WIN32)
+    #if defined(_WIN32)
     _putenv_s("ZHLN_NO_GPU_CULLING", "1");
-#else
+    #else
     setenv("ZHLN_NO_GPU_CULLING", "1", 1);
-#endif
-    return ZHLN::Test::Runner::Run<DescriptorHeapsParallelSuite>();
+    #endif
+    return ZHLN::Test::RunSuite<DescriptorHeapsParallelSuite>();
 }
+

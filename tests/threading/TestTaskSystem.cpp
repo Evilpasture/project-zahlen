@@ -1,0 +1,135 @@
+// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+#include "TestsFramework.hpp"
+#include <Zahlen/Threading/TaskSystem.hpp>
+#include <Zahlen/Threading/Thread.hpp>
+#include <array>
+#include <atomic>
+#include <expected>
+#include <vector>
+
+// ============================================================================
+// Local Test Enums (Self-Contained)
+// ============================================================================
+
+enum class TaskSystemError : uint32_t {
+    DispatchFailed[[= ZHLN::Description<"Dispatched tasks failed to execute or update shared memory.">{}]] = 1,
+    ParallelForFailed[[= ZHLN::Description<"ParallelFor processing failed to reach or verify all iterations.">{}]]
+};
+
+// ============================================================================
+// Test Suite Class
+// ============================================================================
+
+struct TaskSystemTestSuite {
+    TaskSystemTestSuite() {
+        // Setup: Initialize the fiber scheduling environment with the guarded minimum stack.
+        ZHLN::TaskSystem::Init(2, 32, ZHLN::kMinimumFiberStackSize);
+    }
+
+    ~TaskSystemTestSuite() {
+        // Teardown: Reclaim all scheduler resources
+        ZHLN::TaskSystem::Shutdown();
+    }
+
+    struct Tests {
+        std::expected<void, ZHLN::Error> fiber_metadata_alignment() {
+            auto         noop    = [](void*) {};
+            ZHLN::Fiber* fiber   = ZHLN::Fiber::Create(ZHLN::kMinimumFiberStackSize, noop, nullptr);
+            const bool   aligned = fiber != nullptr && reinterpret_cast<uintptr_t>(fiber) % alignof(ZHLN::Fiber) == 0 &&
+                                   fiber->mapSize >= ZHLN::kMinimumFiberStackSize;
+            ZHLN::Fiber::Destroy(fiber);
+            if (!aligned) {
+                return std::unexpected(TaskSystemError::DispatchFailed);
+            }
+            return {};
+        }
+
+        std::expected<void, ZHLN::Error> dispatch_and_wait() {
+            std::atomic<int>          accum {0};
+            ZHLN::TaskSystem::Counter counter;
+
+            auto task_fn = [](void* arg) {
+                auto* a = static_cast<std::atomic<int>*>(arg);
+                a->fetch_add(1, std::memory_order::relaxed);
+            };
+
+            std::array<ZHLN::TaskSystem::Task, 8> tasks = {
+                {{task_fn, &accum},
+                 {task_fn, &accum},
+                 {task_fn, &accum},
+                 {task_fn, &accum},
+                 {task_fn, &accum},
+                 {task_fn, &accum},
+                 {task_fn, &accum},
+                 {task_fn, &accum}}
+            };
+
+            ZHLN::TaskSystem::Dispatch(tasks, &counter);
+            ZHLN::TaskSystem::Wait(&counter);
+
+            if (accum.load(std::memory_order::relaxed) != 8) {
+                return std::unexpected(TaskSystemError::DispatchFailed);
+            }
+            return {};
+        }
+
+        std::expected<void, ZHLN::Error> parallel_for_processing() {
+            constexpr size_t arraySize = 512;
+            std::vector<int> data(arraySize, 0);
+
+            // Execute concurrent chunked loops
+            ZHLN::TaskSystem::ParallelFor(arraySize, 64, [&](uint32_t start, uint32_t end, uint32_t) {
+                for (uint32_t i = start; i < end; ++i) {
+                    data[i] = static_cast<int>(i) * 2;
+                }
+            });
+
+            // Verify integrity
+            for (size_t i = 0; i < arraySize; ++i) {
+                if (data[i] != static_cast<int>(i) * 2) {
+                    return std::unexpected(TaskSystemError::ParallelForFailed);
+                }
+            }
+            return {};
+        }
+
+        std::expected<void, ZHLN::Error> nested_parallel_for_survives_fiber_pool_saturation() {
+            constexpr size_t      outerTaskCount = 24;
+            constexpr size_t      innerTaskCount = 64;
+            std::atomic<uint32_t> completed {0};
+
+            struct Payload {
+                std::atomic<uint32_t>* completed;
+            } payload {&completed};
+
+            auto outerTask = [](void* raw) {
+                auto* value = static_cast<Payload*>(raw);
+                ZHLN::TaskSystem::ParallelFor(innerTaskCount, 1, [&](uint32_t start, uint32_t end, uint32_t) {
+                    value->completed->fetch_add(end - start, std::memory_order::relaxed);
+                });
+            };
+
+            std::array<ZHLN::TaskSystem::Task, outerTaskCount> tasks {};
+            for (auto& task: tasks) {
+                task = {.func = outerTask, .arg = &payload};
+            }
+
+            ZHLN::TaskSystem::Counter counter;
+            ZHLN::TaskSystem::Dispatch(tasks, &counter);
+            ZHLN::TaskSystem::Wait(&counter);
+            if (completed.load(std::memory_order::relaxed) != outerTaskCount * innerTaskCount) {
+                return std::unexpected(TaskSystemError::ParallelForFailed);
+            }
+            return {};
+        }
+    };
+};
+
+// Exported for the threading group binary (RunThreadingTests.cpp), which
+// aggregates every suite in this directory through Runner::RunDeferred.
+auto RunTaskSystemSuite() -> ZHLN::Test::TestStats {
+    return ZHLN::Test::RunSuite<TaskSystemTestSuite>();
+}
+

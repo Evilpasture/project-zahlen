@@ -392,6 +392,9 @@ struct DescriptorHeapsSuite {
     };
 };
 
-int main() {
-    return ZHLN::Test::Runner::Run<DescriptorHeapsSuite>();
+// Exported for the GPU_Pipeline group binary, which aggregates every suite in
+// this domain through Runner::RunDeferred.
+auto RunDescriptorHeapsSuite() -> ZHLN::Test::TestStats {
+    return ZHLN::Test::RunSuite<DescriptorHeapsSuite>();
 }
+

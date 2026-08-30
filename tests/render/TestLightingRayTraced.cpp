@@ -31,10 +31,9 @@
 
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
-// This TU owns the stb_image_write implementation for its binary. Exactly one
-// TU per test binary may define this -- a second is a duplicate-symbol link
-// error. See tests/helpers/ImageTesting.hpp.
-#define ZHLN_TEST_IMAGE_WRITE_IMPL
+// stb_image_write's implementation comes from tests/helpers/ImageWriteImpl.cpp,
+// compiled once into the group binary. Do not define ZHLN_TEST_IMAGE_WRITE_IMPL
+// here -- a second definition in the same link is a duplicate-symbol error.
 #include "helpers/ImageTesting.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
@@ -1496,27 +1495,9 @@ struct LightingRTTestSuite {
         }
     };
 };
-
-int main(int argc, char** argv) {
-    if (argc >= 3 && std::string_view(argv[1]) == "--convert-ppm") {
-        bool allOk = true;
-        for (int i = 2; i < argc; ++i) {
-            const RgbImage img = LoadPPM(argv[i]);
-            if (!img.Valid()) {
-                std::fprintf(stderr, "Failed to read: %s\n", argv[i]);
-                allOk = false;
-                continue;
-            }
-            const std::string png = PngPathOf(argv[i]);
-            if (!SavePNG(png, img)) {
-                std::fprintf(stderr, "Failed to write: %s\n", png.c_str());
-                allOk = false;
-                continue;
-            }
-            std::printf("converted %s -> %s\n", argv[i], png.c_str());
-        }
-        return allOk ? 0 : 1;
-    }
-
-    return ZHLN::Test::Runner::Run<LightingRTTestSuite>();
+// Exported for the GPU_Lighting group binary, which aggregates every suite in
+// this domain through Runner::RunDeferred.
+auto RunLightingRTSuite() -> ZHLN::Test::TestStats {
+    return ZHLN::Test::RunSuite<LightingRTTestSuite>();
 }
+

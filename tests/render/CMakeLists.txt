@@ -1,12 +1,28 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-file(GLOB RENDER_TEST_SOURCES CONFIGURE_DEPENDS "Test*.cpp")
+# GPU test groups: one binary per domain instead of one per suite. Each
+# Test*.cpp keeps its suite definition private to its own translation unit and
+# exports a stats-returning function; the group's Run*Tests.cpp aggregates them
+# through ZHLN::Test::Runner::RunDeferred.
+#
+# What grouping costs here specifically: these suites create and destroy a
+# Vulkan device, and a group now shares one process and one CTest TIMEOUT. A
+# device-lost that the engine cannot recover from, or a hang, takes every
+# remaining suite in the group with it. The grouping below keeps the two
+# long-running suites (render performance, distance stability) in their own
+# group so a timeout there does not also lose the pipeline results.
+#
+# Every group compiles tests/helpers/ImageWriteImpl.cpp exactly once -- it owns
+# the stb_image_write implementation the shared PNG capture path links against.
+# Adding a second TU that defines ZHLN_TEST_IMAGE_WRITE_IMPL breaks the link.
 
-foreach(TEST_SRC IN LISTS RENDER_TEST_SOURCES)
-    get_filename_component(TARGET_NAME ${TEST_SRC} NAME_WLE)
+set(GPU_HELPER_IMPL ${PROJECT_SOURCE_DIR}/tests/helpers/ImageWriteImpl.cpp)
 
-    add_executable(${TARGET_NAME} ${TEST_SRC})
+function(zahlen_add_gpu_test_group TARGET_NAME TIMEOUT_SECONDS)
+    set(GROUP_SOURCES ${ARGN})
+
+    add_executable(${TARGET_NAME} ${GROUP_SOURCES} ${GPU_HELPER_IMPL})
 
     set_target_properties(${TARGET_NAME} PROPERTIES
         CXX_STANDARD 26
@@ -59,18 +75,58 @@ foreach(TEST_SRC IN LISTS RENDER_TEST_SOURCES)
         endif()
     endif()
 
-    add_test(NAME GPU_${TARGET_NAME} COMMAND ${TARGET_NAME})
-    set_tests_properties(GPU_${TARGET_NAME} PROPERTIES
+    add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
+    set_tests_properties(${TARGET_NAME} PROPERTIES
         LABELS "GPU;LocalOnly"
-        TIMEOUT 60
+        TIMEOUT ${TIMEOUT_SECONDS}
     )
 
     if(USE_SANITIZERS)
-        set_tests_properties(GPU_${TARGET_NAME} PROPERTIES
+        set_tests_properties(${TARGET_NAME} PROPERTIES
             ENVIRONMENT "${ZHLN_TEST_ENVIRONMENT}"
         )
     endif()
-endforeach()
+endfunction()
+
+# Lighting, shading and ray-traced image quality.
+zahlen_add_gpu_test_group(GPU_Lighting 300
+    RunLightingTests.cpp
+    TestLightingRayTraced.cpp
+    TestPBR.cpp
+    TestRTRPBRReflection.cpp
+    TestRayTracedNoiseStability.cpp
+    TestRayTracedReflectionNoise.cpp
+    TestDecal.cpp
+)
+
+# Pipeline, resource and culling mechanics.
+zahlen_add_gpu_test_group(GPU_Pipeline 300
+    RunPipelineTests.cpp
+    TestRenderPipelines.cpp
+    TestRenderCompute.cpp
+    TestMeshShaders.cpp
+    TestDescriptorHeaps.cpp
+    TestDescriptorHeapsParallel.cpp
+    TestRenderAnimatedMesh.cpp
+    TestCameraLookAt.cpp
+    TestRenderHIZ.cpp
+)
+
+# ImGui, UI layout and viewmodel presentation.
+zahlen_add_gpu_test_group(GPU_Interface 180
+    RunInterfaceTests.cpp
+    TestImGuiRender.cpp
+    TestUILayoutRender.cpp
+    TestViewmodel.cpp
+)
+
+# Throughput and long-run distance stability. Kept apart from the others: these
+# two are the slowest suites and the most likely to hit the timeout.
+zahlen_add_gpu_test_group(GPU_Performance 900
+    RunPerformanceTests.cpp
+    TestRenderPerformance.cpp
+    TestRenderDistanceStability.cpp
+)
 
 # --- Extras VFX & Render Tests ---
 if(ZHLN_BUILD_EXTRAS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extras")

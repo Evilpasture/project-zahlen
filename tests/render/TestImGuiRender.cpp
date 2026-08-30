@@ -196,6 +196,9 @@ struct ImGuiRenderTestSuite {
     };
 };
 
-int main() {
-    return ZHLN::Test::Runner::Run<ImGuiRenderTestSuite>();
+// Exported for the GPU_Interface group binary, which aggregates every suite in
+// this domain through Runner::RunDeferred.
+auto RunImGuiRenderSuite() -> ZHLN::Test::TestStats {
+    return ZHLN::Test::RunSuite<ImGuiRenderTestSuite>();
 }
+
