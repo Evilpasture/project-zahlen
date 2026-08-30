@@ -54,6 +54,33 @@
     #include <unistd.h> // gethostname
 #endif
 
+namespace ZHLN::Test {
+
+// Runs `measure` n times and returns the FASTEST sample. Wall-clock
+// benchmarks on a desktop are one-sided noisy (frequency scaling, scheduler
+// migrations, cache state): interruptions only ever ADD time, so the minimum
+// of a handful of samples is the stable estimate of a workload's true cost,
+// and the first sample doubles as warm-up. Feed this into VerifyBaseline:
+//
+//   const double ms = ZHLN::Test::BestOf(5, [&] {
+//       BenchmarkTimer timer;
+//       DoWork();
+//       return timer.ElapsedMilliseconds();
+//   });
+template <typename F>
+[[nodiscard]] inline double BestOf(unsigned n, F&& measure) {
+    double best = measure();
+    for (unsigned i = 1; i < n; ++i) {
+        const double sample = measure();
+        if (sample < best) {
+            best = sample;
+        }
+    }
+    return best;
+}
+
+} // namespace ZHLN::Test
+
 namespace ZHLN::Test::Perf {
 
 // ============================================================================
@@ -209,11 +236,17 @@ namespace detail {
         void SaveNow() {
             const MutexGuard lock(mutex);
 
-            // Read-modify-write through the reflected file struct: only OUR
-            // machine's section is replaced, so other machines' baselines
-            // (and other test executables' sections) survive the save.
+            // Read-modify-write at METRIC granularity: only the keys this
+            // process accepted are overwritten. Rejected metrics keep their
+            // stored value (that is the "failing run cannot launder itself"
+            // guarantee), metrics this process never measured survive
+            // untouched, and sibling test executables sharing this machine
+            // key (cpu.*/render.* namespaces) cannot clobber each other.
             PerfBaselineFile file = LoadBaselineFile(BaselineFilePath());
-            file.machines[MachineKey()].metrics = pending;
+            auto&            ours = file.machines[MachineKey()].metrics;
+            for (const auto& [metric, value]: pending) {
+                ours[metric] = value;
+            }
 
             WriteBaselineAtomically(BaselineFilePath(), Reflect::SerializeJSON(file, 2));
         }

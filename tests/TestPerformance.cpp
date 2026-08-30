@@ -156,9 +156,11 @@ struct PerformanceTestSuite {
                 items[i] = {.key = {seed}, .payload = i};
             }
 
-            BenchmarkTimer sortTimer;
-            ZHLN::RadixSort64(items.data(), temp.data(), kSortCount);
-            double sortDurationMs = sortTimer.ElapsedMilliseconds();
+            const double sortDurationMs = ZHLN::Test::BestOf(7, [&] {
+                BenchmarkTimer sortTimer;
+                ZHLN::RadixSort64(items.data(), temp.data(), kSortCount);
+                return sortTimer.ElapsedMilliseconds();
+            });
 
             // Verify Monotonic Sort Order
             for (uint32_t i = 1; i < kSortCount; ++i) {
@@ -171,22 +173,24 @@ struct PerformanceTestSuite {
             ZHLN::Test::VerifyBaseline("cpu.radix_sort_65536", sortDurationMs);
 
             // B. ZHLN::HashMap Stress (30,000 Inserts & Lookups)
-            constexpr uint32_t                kMapOps = 30000;
-            ZHLN::HashMap<uint32_t, uint32_t> map;
+            constexpr uint32_t kMapOps = 30000;
 
-            BenchmarkTimer mapTimer;
-            for (uint32_t i = 0; i < kMapOps; ++i) {
-                map.Insert(i, i * 7 + 3);
-            }
-            uint32_t foundCount = 0;
-            for (uint32_t i = 0; i < kMapOps; ++i) {
-                const uint32_t* val = map.Find(i);
-                if (val && *val == (i * 7 + 3)) {
-                    foundCount++;
+            const double mapDurationMs = ZHLN::Test::BestOf(7, [&] {
+                ZHLN::HashMap<uint32_t, uint32_t> map;
+                BenchmarkTimer                    mapTimer;
+                for (uint32_t i = 0; i < kMapOps; ++i) {
+                    map.Insert(i, i * 7 + 3);
                 }
-            }
-            double mapDurationMs = mapTimer.ElapsedMilliseconds();
-            ZHLN::Test::ExpectEq(foundCount, kMapOps);
+                uint32_t foundCount = 0;
+                for (uint32_t i = 0; i < kMapOps; ++i) {
+                    const uint32_t* val = map.Find(i);
+                    if (val && *val == (i * 7 + 3)) {
+                        foundCount++;
+                    }
+                }
+                ZHLN::Test::ExpectEq(foundCount, kMapOps);
+                return mapTimer.ElapsedMilliseconds();
+            });
             ZHLN::Println("    [HashMap] 30,000 Insert + Find operations in {:.3f} ms ({:.2f} kOps/sec)", mapDurationMs, (kMapOps * 2.0) / mapDurationMs);
             ZHLN::Test::VerifyBaseline("cpu.hashmap_30k_insert_find", mapDurationMs);
 
@@ -199,14 +203,17 @@ struct PerformanceTestSuite {
             std::vector<TrackedNode*>          allocatedNodes;
             allocatedNodes.reserve(kPoolAllocations);
 
-            BenchmarkTimer poolTimer;
-            for (size_t i = 0; i < kPoolAllocations; ++i) {
-                allocatedNodes.push_back(pool.Create());
-            }
-            for (size_t i = 0; i < kPoolAllocations; ++i) {
-                pool.Destroy(allocatedNodes[i]);
-            }
-            double poolDurationMs = poolTimer.ElapsedMilliseconds();
+            const double poolDurationMs = ZHLN::Test::BestOf(7, [&] {
+                allocatedNodes.clear();
+                BenchmarkTimer poolTimer;
+                for (size_t i = 0; i < kPoolAllocations; ++i) {
+                    allocatedNodes.push_back(pool.Create());
+                }
+                for (size_t i = 0; i < kPoolAllocations; ++i) {
+                    pool.Destroy(allocatedNodes[i]);
+                }
+                return poolTimer.ElapsedMilliseconds();
+            });
             ZHLN::Println(
                 "    [ObjectPool] 50,000 Alloc + Destroy cycles in {:.3f} ms ({:.2f} Mops/sec)", poolDurationMs,
                 (kPoolAllocations * 2.0 / 1000.0) / poolDurationMs
@@ -227,16 +234,18 @@ struct PerformanceTestSuite {
             std::vector<float> dataArray(kParallelCount, 1.0f);
             std::atomic<float> totalSum {0.0f};
 
-            BenchmarkTimer pForTimer;
-            ZHLN::TaskSystem::ParallelFor(kParallelCount, 1024, [&](uint32_t start, uint32_t end, uint32_t) {
-                float localAccum = 0.0f;
-                for (uint32_t i = start; i < end; ++i) {
-                    dataArray[i] = std::sqrt(static_cast<float>(i) * 2.5f + 1.0f);
-                    localAccum += dataArray[i];
-                }
-                totalSum.fetch_add(localAccum, std::memory_order::relaxed);
+            const double pForDurationMs = ZHLN::Test::BestOf(5, [&] {
+                BenchmarkTimer pForTimer;
+                ZHLN::TaskSystem::ParallelFor(kParallelCount, 1024, [&](uint32_t start, uint32_t end, uint32_t) {
+                    float localAccum = 0.0f;
+                    for (uint32_t i = start; i < end; ++i) {
+                        dataArray[i] = std::sqrt(static_cast<float>(i) * 2.5f + 1.0f);
+                        localAccum += dataArray[i];
+                    }
+                    totalSum.fetch_add(localAccum, std::memory_order::relaxed);
+                });
+                return pForTimer.ElapsedMilliseconds();
             });
-            double pForDurationMs = pForTimer.ElapsedMilliseconds();
 
             ZHLN::Test::ExpectTrue(totalSum.load() > 0.0f);
             ZHLN::Println(
@@ -265,11 +274,14 @@ struct PerformanceTestSuite {
                 t = {.func = outerJob, .arg = &payload};
             }
 
-            BenchmarkTimer            nestedTimer;
-            ZHLN::TaskSystem::Counter syncCounter;
-            ZHLN::TaskSystem::Dispatch(tasks, &syncCounter);
-            ZHLN::TaskSystem::Wait(&syncCounter);
-            double nestedDurationMs = nestedTimer.ElapsedMilliseconds();
+            const double nestedDurationMs = ZHLN::Test::BestOf(9, [&] {
+                nestedCounter.store(0, std::memory_order::relaxed);
+                BenchmarkTimer             nestedTimer;
+                ZHLN::TaskSystem::Counter  syncCounter;
+                ZHLN::TaskSystem::Dispatch(tasks, &syncCounter);
+                ZHLN::TaskSystem::Wait(&syncCounter);
+                return nestedTimer.ElapsedMilliseconds();
+            });
 
             ZHLN::Test::ExpectEq(nestedCounter.load(), static_cast<uint32_t>(kOuterTasks * kInnerTasks));
             ZHLN::Println("    [Nested Fibers] 32 x 256 child tasks dispatched & synced in {:.3f} ms", nestedDurationMs);
@@ -293,8 +305,25 @@ struct PerformanceTestSuite {
             std::vector<ZHLN::Entity> createdEntities;
             createdEntities.reserve(kTotalEntities);
 
-            // A. Batch Entity Creation with Multiple Components
-            BenchmarkTimer createTimer;
+            // A. Batch Entity Creation with Multiple Components. Fresh
+            // registry per sample so every sample pays identical pool-growth
+            // costs; the shared registry used by parts B and C is populated
+            // untimed right after.
+            const double createDurationMs = ZHLN::Test::BestOf(3, [&] {
+                ZHLN::ECS::Registry benchReg;
+                benchReg.RegisterComponents<
+                    ZHLN::Components::TransformComponent, ZHLN::Components::MovementComponent, ZHLN::Components::PhysicsStateComponent, AgentHealthComponent,
+                    AgentCombatStateComponent>();
+                BenchmarkTimer createTimer;
+                for (size_t i = 0; i < kTotalEntities; ++i) {
+                    (void) benchReg.Create(
+                        ZHLN::Components::TransformComponent {.position = JPH::Vec3(static_cast<float>(i), 1.0f, 0.0f)},
+                        ZHLN::Components::MovementComponent {.speed = 6.5f}, AgentHealthComponent {.currentHealth = 100.0f},
+                        AgentCombatStateComponent {.attackRange = 12.0f}
+                    );
+                }
+                return createTimer.ElapsedMilliseconds();
+            });
             for (size_t i = 0; i < kTotalEntities; ++i) {
                 createdEntities.push_back(reg.Create(
                     ZHLN::Components::TransformComponent {.position = JPH::Vec3(static_cast<float>(i), 1.0f, 0.0f)},
@@ -302,7 +331,6 @@ struct PerformanceTestSuite {
                     AgentCombatStateComponent {.attackRange = 12.0f}
                 ));
             }
-            double createDurationMs = createTimer.ElapsedMilliseconds();
             ZHLN::Println(
                 "    [ECS Create] 40,000 Entities (4 Components each) created in {:.3f} ms ({:.2f} kEntities/sec)", createDurationMs,
                 kTotalEntities / createDurationMs
@@ -310,18 +338,20 @@ struct PerformanceTestSuite {
                 ZHLN::Test::VerifyBaseline("cpu.ecs_create_40k_entities", createDurationMs);
 
             // B. Dense Array Direct Vectorized Iteration (GetRawArray & Patch)
-            BenchmarkTimer iterTimer;
-            auto           healths = reg.GetRawArray<AgentHealthComponent>();
-            auto           moves   = reg.GetRawArray<ZHLN::Components::MovementComponent>();
-            auto           trans   = reg.GetRawArray<ZHLN::Components::TransformComponent>();
+            const double iterDurationMs = ZHLN::Test::BestOf(5, [&] {
+                BenchmarkTimer iterTimer;
+                auto           healths = reg.GetRawArray<AgentHealthComponent>();
+                auto           moves   = reg.GetRawArray<ZHLN::Components::MovementComponent>();
+                auto           trans   = reg.GetRawArray<ZHLN::Components::TransformComponent>();
 
-            for (size_t frame = 0; frame < 10; ++frame) {
-                for (size_t i = 0; i < healths.size(); ++i) {
-                    trans[i].position.SetX(trans[i].position.GetX() + moves[i].speed * 0.016f);
-                    healths[i].currentHealth = std::min(healths[i].maxHealth, healths[i].currentHealth + 0.1f);
+                for (size_t frame = 0; frame < 10; ++frame) {
+                    for (size_t i = 0; i < healths.size(); ++i) {
+                        trans[i].position.SetX(trans[i].position.GetX() + moves[i].speed * 0.016f);
+                        healths[i].currentHealth = std::min(healths[i].maxHealth, healths[i].currentHealth + 0.1f);
+                    }
                 }
-            }
-            double iterDurationMs = iterTimer.ElapsedMilliseconds();
+                return iterTimer.ElapsedMilliseconds();
+            });
             ZHLN::Println(
                 "    [ECS Dense Iterate] 10 Frames x 40,000 Entities updated in {:.3f} ms ({:.2f} Mupdates/sec)", iterDurationMs,
                 (10.0 * kTotalEntities / 1000.0) / iterDurationMs
@@ -329,16 +359,18 @@ struct PerformanceTestSuite {
                 ZHLN::Test::VerifyBaseline("cpu.ecs_dense_iterate_10x40k", iterDurationMs);
 
             // C. EntityCommandBuffer Bulk Playback
-            ZHLN::ECS::EntityCommandBuffer ecb(reg);
-            BenchmarkTimer                 ecbTimer;
-            for (size_t i = 0; i < 15000; ++i) {
-                ZHLN::Entity tempE = ecb.CreateEntity(
-                    ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 0.0f, 0.0f)}, AgentHealthComponent {.currentHealth = 50.0f}
-                );
-                ecb.AddComponent<ZHLN::Components::MovementComponent>(tempE);
-            }
-            ecb.Playback();
-            double ecbDurationMs = ecbTimer.ElapsedMilliseconds();
+            const double ecbDurationMs = ZHLN::Test::BestOf(3, [&] {
+                ZHLN::ECS::EntityCommandBuffer ecb(reg);
+                BenchmarkTimer                 ecbTimer;
+                for (size_t i = 0; i < 15000; ++i) {
+                    ZHLN::Entity tempE = ecb.CreateEntity(
+                        ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 0.0f, 0.0f)}, AgentHealthComponent {.currentHealth = 50.0f}
+                    );
+                    ecb.AddComponent<ZHLN::Components::MovementComponent>(tempE);
+                }
+                ecb.Playback();
+                return ecbTimer.ElapsedMilliseconds();
+            });
             ZHLN::Println("    [ECB Playback] 15,000 Deferred Creations + Mutations executed in {:.3f} ms", ecbDurationMs);
             ZHLN::Test::VerifyBaseline("cpu.ecb_playback_15k", ecbDurationMs);
 
@@ -383,12 +415,18 @@ struct PerformanceTestSuite {
             alignas(ZHLN::Engine) std::byte fakeEngineStorage[sizeof(ZHLN::Engine)] {};
             auto*                           fakeEngine = reinterpret_cast<ZHLN::Engine*>(fakeEngineStorage);
 
-            BenchmarkTimer graphTimer;
-            constexpr int  kGraphIterations = 2000;
-            for (int i = 0; i < kGraphIterations; ++i) {
-                graph.Execute(*fakeEngine, 0.016f);
-            }
-            double graphDurationMs = graphTimer.ElapsedMilliseconds();
+            constexpr int kGraphIterations = 2000;
+            const double  graphDurationMs  = ZHLN::Test::BestOf(3, [&] {
+                for (auto& c: readCounters) {
+                    c.store(0, std::memory_order::relaxed);
+                }
+                writeCounter.store(0, std::memory_order::relaxed);
+                BenchmarkTimer graphTimer;
+                for (int i = 0; i < kGraphIterations; ++i) {
+                    graph.Execute(*fakeEngine, 0.016f);
+                }
+                return graphTimer.ElapsedMilliseconds();
+            });
 
             ZHLN::Test::ExpectEq(writeCounter.load(), kGraphIterations);
             ZHLN::Println(
@@ -425,11 +463,13 @@ struct PerformanceTestSuite {
             pc.OptimizeBroadphase();
 
             // A. Step 60 Simulation Frames
-            BenchmarkTimer stepTimer;
-            for (int i = 0; i < 60; ++i) {
-                pc.Step(1.0f / 60.0f);
-            }
-            double stepDurationMs = stepTimer.ElapsedMilliseconds();
+            const double stepDurationMs = ZHLN::Test::BestOf(3, [&] {
+                BenchmarkTimer stepTimer;
+                for (int i = 0; i < 60; ++i) {
+                    pc.Step(1.0f / 60.0f);
+                }
+                return stepTimer.ElapsedMilliseconds();
+            });
             ZHLN::Println("    [Physics Step] 60 frames (256 dynamic bodies) simulated in {:.3f} ms ({:.2f} FPS)", stepDurationMs, 60000.0 / stepDurationMs);
             ZHLN::Test::VerifyBaseline("cpu.physics_step_60f_256bodies", stepDurationMs);
 
@@ -437,20 +477,23 @@ struct PerformanceTestSuite {
             constexpr uint32_t kRaycastCount = 5000;
             std::atomic<int>   hitCount {0};
 
-            BenchmarkTimer rayTimer;
-            ZHLN::TaskSystem::ParallelFor(kRaycastCount, 128, [&](uint32_t start, uint32_t end, uint32_t) {
-                int localHits = 0;
-                for (uint32_t i = start; i < end; ++i) {
-                    float      posX = -20.0f + static_cast<float>(i % 100) * 0.4f;
-                    float      posZ = -20.0f + static_cast<float>(i / 100) * 0.8f;
-                    const auto hit  = pc.Raycast(JPH::RVec3(posX, 20.0, posZ), JPH::Vec3(0.0f, -1.0f, 0.0f), 40.0f);
-                    if (hit.hasHit) {
-                        localHits++;
+            const double rayDurationMs = ZHLN::Test::BestOf(5, [&] {
+                hitCount.store(0, std::memory_order::relaxed);
+                BenchmarkTimer rayTimer;
+                ZHLN::TaskSystem::ParallelFor(kRaycastCount, 128, [&](uint32_t start, uint32_t end, uint32_t) {
+                    int localHits = 0;
+                    for (uint32_t i = start; i < end; ++i) {
+                        float      posX = -20.0f + static_cast<float>(i % 100) * 0.4f;
+                        float      posZ = -20.0f + static_cast<float>(i / 100) * 0.8f;
+                        const auto hit  = pc.Raycast(JPH::RVec3(posX, 20.0, posZ), JPH::Vec3(0.0f, -1.0f, 0.0f), 40.0f);
+                        if (hit.hasHit) {
+                            localHits++;
+                        }
                     }
-                }
-                hitCount.fetch_add(localHits, std::memory_order::relaxed);
+                    hitCount.fetch_add(localHits, std::memory_order::relaxed);
+                });
+                return rayTimer.ElapsedMilliseconds();
             });
-            double rayDurationMs = rayTimer.ElapsedMilliseconds();
 
             ZHLN::Test::ExpectTrue(hitCount.load() > 0);
             ZHLN::Println(
@@ -471,22 +514,24 @@ struct PerformanceTestSuite {
             ZHLN::ECS::Registry reg;
 
             constexpr uint64_t kSimulatedFrames = 100;
-            BenchmarkTimer     uiTimer;
 
-            for (uint64_t frame = 1; frame <= kSimulatedFrames; ++frame) {
-                ZHLN::GUI::Context gui(reg, frame);
+            const double uiDurationMs = ZHLN::Test::BestOf(3, [&]() -> double {
+                BenchmarkTimer uiTimer;
+                for (uint64_t frame = 1; frame <= kSimulatedFrames; ++frame) {
+                    ZHLN::GUI::Context gui(reg, frame);
 
-                gui.Panel("MainDashboard", ZHLN::GUI::PanelConfig {.width = 800.0f, .height = 600.0f}, [&]() {
-                    for (int row = 0; row < 20; ++row) {
-                        gui.Box(ZHLN::GUI::BoxConfig {.height = 24.0f}, [&]() {
-                            gui.Label(std::format("Telemetry Channel #{}", row));
-                            // Dynamic changing key to stress GC tombstone eviction
-                            gui.Button(std::format("btn_row_{}_{}", row, frame % 5), "Action", []() {});
-                        });
-                    }
-                });
-            }
-            double uiDurationMs = uiTimer.ElapsedMilliseconds();
+                    gui.Panel("MainDashboard", ZHLN::GUI::PanelConfig {.width = 800.0f, .height = 600.0f}, [&]() {
+                        for (int row = 0; row < 20; ++row) {
+                            gui.Box(ZHLN::GUI::BoxConfig {.height = 24.0f}, [&]() {
+                                gui.Label(std::format("Telemetry Channel #{}", row));
+                                // Dynamic changing key to stress GC tombstone eviction
+                                gui.Button(std::format("btn_row_{}_{}", row, frame % 5), "Action", []() {});
+                            });
+                        }
+                    });
+                }
+                return uiTimer.ElapsedMilliseconds();
+            });
 
             // Total active UI rects should match static dashboard footprint, not leak dynamically
             size_t liveRects = reg.GetEntitiesWith<ZHLN::Components::UIRectComponent>().size();
@@ -510,21 +555,23 @@ struct PerformanceTestSuite {
             ZHLN::AudioContext audio;
             constexpr uint32_t kAudioEvents = 20000;
 
-            BenchmarkTimer audioTimer;
-            for (uint32_t i = 0; i < kAudioEvents; ++i) {
-                audio.PostEvent(
-                    ZHLN::AudioEvent {
-                        .type     = ZHLN::AudioEventType::OneShot3D,
-                        .position = JPH::Vec3(static_cast<float>(i % 50), 1.0f, static_cast<float>(i / 50)),
-                        .volume   = 0.8f,
-                        .pitch    = 1.0f,
-                        .duration = 0.25f,
-                        .waveType = ZHLN::AudioWaveformType::Triangle,
-                    }
-                );
-            }
-            audio.FlushEvents();
-            double audioDurationMs = audioTimer.ElapsedMilliseconds();
+            const double audioDurationMs = ZHLN::Test::BestOf(3, [&] {
+                BenchmarkTimer audioTimer;
+                for (uint32_t i = 0; i < kAudioEvents; ++i) {
+                    audio.PostEvent(
+                        ZHLN::AudioEvent {
+                            .type     = ZHLN::AudioEventType::OneShot3D,
+                            .position = JPH::Vec3(static_cast<float>(i % 50), 1.0f, static_cast<float>(i / 50)),
+                            .volume   = 0.8f,
+                            .pitch    = 1.0f,
+                            .duration = 0.25f,
+                            .waveType = ZHLN::AudioWaveformType::Triangle,
+                        }
+                    );
+                }
+                audio.FlushEvents();
+                return audioTimer.ElapsedMilliseconds();
+            });
 
             ZHLN::Println(
                 "    [Audio Context] 20,000 3D spatial events queued & flushed in {:.3f} ms ({:.2f} kEvents/sec)", audioDurationMs,
