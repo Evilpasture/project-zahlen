@@ -62,7 +62,7 @@ endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# --- DETECT C++26 REFLECTION SUPPORT ---
+# --- DETECT C++26 LANGUAGE FEATURE FLAGS ---
 include(CheckCXXCompilerFlag)
 check_cxx_compiler_flag("-freflection" COMPILER_HAS_REFLECTION)
 
@@ -70,6 +70,17 @@ if(COMPILER_HAS_REFLECTION)
     message(STATUS "C++26 Static Reflection supported via -freflection")
 else()
     message(STATUS "C++26 Static Reflection not supported by current compiler. Using generated script for source code flattening.")
+endif()
+
+set(ZHLN_CONTRACT_SEMANTIC "enforce" CACHE STRING "C++26 contract semantic for supported compilers")
+set_property(CACHE ZHLN_CONTRACT_SEMANTIC PROPERTY STRINGS ignore enforce observe quick-enforce)
+set(ZHLN_CONTRACT_FLAG_STRING "-fcontracts -fcontract-semantic=${ZHLN_CONTRACT_SEMANTIC}")
+check_cxx_compiler_flag("${ZHLN_CONTRACT_FLAG_STRING}" COMPILER_HAS_CONTRACTS)
+
+if(COMPILER_HAS_CONTRACTS)
+    message(STATUS "C++26 Contracts supported via ${ZHLN_CONTRACT_FLAG_STRING}")
+else()
+    message(FATAL_ERROR "This branch uses C++26 contracts in public headers, but the compiler rejected: ${ZHLN_CONTRACT_FLAG_STRING}")
 endif()
 
 # --- PYTHON INTERPRETER SELECTION ---
@@ -424,6 +435,9 @@ set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} ${ZHLN_COMPILE_WARNINGS_STR} -fn
 
 if(COMPILER_HAS_REFLECTION)
     set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} -freflection")
+endif()
+if(COMPILER_HAS_CONTRACTS)
+    set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} ${ZHLN_CONTRACT_FLAG_STRING}")
 endif()
 
 string(STRIP "${COMPILER_FLAGS_LIST}" COMPILER_FLAGS_LIST)
@@ -855,6 +869,12 @@ function(zahlen_enable_reflection TARGET_NAME)
             target_compile_options(${TARGET_NAME} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-fannotation-attributes>")
         endif()
         target_compile_definitions(${TARGET_NAME} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:__cpp_impl_reflection=202603L>")
+    endif()
+    if(COMPILER_HAS_CONTRACTS)
+        target_compile_options(${TARGET_NAME} PRIVATE
+            "$<$<COMPILE_LANGUAGE:CXX>:-fcontracts>"
+            "$<$<COMPILE_LANGUAGE:CXX>:-fcontract-semantic=${ZHLN_CONTRACT_SEMANTIC}>"
+        )
     endif()
     zahlen_use_custom_libcxx(${TARGET_NAME})
 endfunction()
