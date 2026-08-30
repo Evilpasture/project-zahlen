@@ -1495,6 +1495,7 @@ struct LightingRTTestSuite {
         }
     };
 };
+
 // Exported for the GPU_Lighting group binary, which aggregates every suite in
 // this domain through Runner::RunDeferred.
 auto RunLightingRTSuite() -> ZHLN::Test::TestStats {

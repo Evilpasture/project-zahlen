@@ -1112,7 +1112,7 @@ struct DistanceStabilitySuite {
 };
 
 // ============================================================================
-// Main Execution Entry Point
+// Group Binary Entry Point
 // ============================================================================
 
 // Exported for the GPU_Performance group binary, which aggregates every suite in
