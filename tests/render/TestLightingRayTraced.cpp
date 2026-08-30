@@ -8,52 +8,26 @@
 //   1. Flicker: a fully static, fully lit scene must produce temporally
 //      stable frames. A light popping in/out of a cluster, a reflection
 //      cache missing for one frame or a TLAS rebuild hitch shows up here.
-//   3. Accidental light culling: a single point light glides across the
+//   2. Accidental light culling: a single point light glides across the
 //      screen, crossing cluster-cell and z-slice boundaries, while its red
 //      signature on the ground/box must never vanish or collapse. After the
 //      sweep the light is frozen in place and 8 consecutive frames must be
 //      identical (no oscillation, no step).
-//   3b. Bisect for the above: the same static light on a FRESH engine with no
+//   3. Bisect for the above: the same static light on a FRESH engine with no
 //      motion history pins whether an observed instability is carried over
 //      from the sweep (stale double-buffered state) or is a pure per-frame
-//      race. Both scenarios are HARD gates: if an identical light position
-//      renders differently on adjacent frames the suite fails (this is the
-//      regression guard for the cluster light-list inclusion race).
+//      race. Both scenarios are HARD gates.
 //   4. Ray-traced shadows: an occluder between the sun and the ground must
 //      carve a real, stable shadow (not a full-scene blackout, not nothing),
 //      and removing it must restore a near-uniformly lit floor.
 //   5. Reflections: a polished plane must mirror a bright emissive object
-//      with the engine's DEFAULT reflection path (SSR), stable frame to frame
-//      (flicker), no blowout and no isolated ray-debris speckles. When the
-//      device supports raytracing, the opt-in RTR reflection path is probed
-//      for the same signature and reported as a diagnostic (RT ray-query
-//      health itself is hard-verified by the RT shadow scenario).
-//
-// Configuration policy: the hard assertions run on the engine's default
-// (enableSSR=1, enableRTR=0) so the suite verifies the shipped path. RTR is
-// opt-in, and its pixel path being broken on a given driver must show up as a
-// loud INFO/WARN without masking the default-path verification.
-//
-// Both the engine's device-lost hot-rebuild and the test's own RenderContext
-// references are handled deliberately:
-//
-//   * Engine::HandleDeviceLost() destroys and RECREATES the RenderContext.
-//     A RenderContext& cached at test start therefore dangles after a
-//     hot-rebuild, so no reference is ever held across a Tick and every
-//     capture re-fetches through Engine::GetRenderContext().
-//   * Each GPU scenario runs through RunStableScene(), which detects the
-//     hot-rebuild by comparing the context address, re-warms the fresh
-//     context, discards any assertions raised by the aborted attempt, and
-//     retries. Repeated losses are reported as DeviceLostDuringTest instead
-//     of crashing the process with a stale reference.
-//   * Assertions are RELATIVE (contrast/dip based) rather than absolute
-//     pixel-count cutoffs, because the ACES/tonemap mapping is
-//     exposure-dependent and differs between scenes.
-//   * Every captured frame is written as PPM (engine-native, used by the
-//     metrics) AND as a .png twin via stb_image_write.h, so diagnostics can
-//     be attached to issues directly. Run
-//       TestLightingRayTraced --convert-ppm old_capture_*.ppm
-//     to convert captures from a previous run without re-running the suite.
+//      with the engine's DEFAULT reflection path (SSR), stable frame to frame.
+//   6. Multi-Light Clustered Illumination & Chromatic Blending: 64 point lights
+//      in 4 color quadrants; tests cluster accumulation & additive mixing in .ppm.
+//   7. Multi-Emissive Sources & Reflection Mapping: Multiple distinct emissive
+//      objects mirrored on a polished plane with spatial .ppm column analysis.
+//   8. Dense Multi-Light & Emissive Cross-Interaction: 32 dynamic point lights
+//      interacting with an emissive monolith over a diverse PBR material grid.
 
 #include "TestsFramework.hpp"
 #include <Zahlen/Camera.hpp>
@@ -81,11 +55,6 @@
 #include <string_view>
 #include <vector>
 
-// stb_image_write is the only image writer the diagnostics need; the header
-// is C and self-contained (no dynamic dependency). Defining the
-// implementation here means the exported PNG helper lives only in this test
-// binary and cannot collide with the engine's stb_image (read-only)
-// implementation in libzahlen_engine.
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
 
@@ -94,16 +63,20 @@
 // ============================================================================
 
 enum class LightingRTTestError : uint8_t {
-    EngineInitFailed[[= ZHLN::Description<"Failed to initialize headless Engine context for the lighting/raytracing test.">{}]] = 1,
-    RenderOutputBlank[[= ZHLN::Description<"Rendered frame is blank or could not be captured.">{}]],
-    TemporalFlickerDetected[[= ZHLN::Description<"A static fully-lit scene changed more frame-to-frame than the engine's own noise floor.">{}]],
-    LightCullingPopDetected[
-        [= ZHLN::Description<"A point light inside the frustum/range lost its lighting contribution for a frame (cluster culling).">{}]],
-    RayTracedShadowFailed[[= ZHLN::Description<"The ray-traced sun shadow did not appear, disappeared, or took out the whole frame.">{}]],
-    ReflectionMissing[[= ZHLN::Description<"The polished surface shows no reflection of the emissive object (RTR/SSR fell back to IBL).">{}]],
-    ReflectionArtifacts[[= ZHLN::Description<"The reflected region contains blowout, ray-debris speckles, or flicker.">{}]],
-    DeviceLostDuringTest[[= ZHLN::Description<"The Vulkan device was lost repeatedly during the scenario; the engine hot-rebuild recovered, but the GPU was not stable.">{}]],
-    ValidationErrorsRaised[[= ZHLN::Description<"The validation layer reported errors while rendering the lighting/raytracing frames.">{}]],
+    EngineInitFailed[[= ZHLN::Description<"Failed to initialize headless Engine context for the lighting/raytracing test."> {}]] = 1,
+    RenderOutputBlank[[= ZHLN::Description<"Rendered frame is blank or could not be captured."> {}]],
+    TemporalFlickerDetected[[= ZHLN::Description<"A static fully-lit scene changed more frame-to-frame than the engine's own noise floor."> {}]],
+    LightCullingPopDetected[[= ZHLN::Description<"A point light inside the frustum/range lost its lighting contribution for a frame (cluster culling)."> {}]],
+    RayTracedShadowFailed[[= ZHLN::Description<"The ray-traced sun shadow did not appear, disappeared, or took out the whole frame."> {}]],
+    ReflectionMissing[[= ZHLN::Description<"The polished surface shows no reflection of the emissive object (RTR/SSR fell back to IBL)."> {}]],
+    ReflectionArtifacts[[= ZHLN::Description<"The reflected region contains blowout, ray-debris speckles, or flicker."> {}]],
+    MultiLightClusteringFailed[[= ZHLN::Description<"Multi-light clustered accumulation or chromatic blending mismatch detected."> {}]],
+    MultiEmissiveReflectionFailed[[= ZHLN::Description<"Multi-emissive source reflection analysis failed: missing spatial mirror correspondence or color "
+                                                       "fidelity."> {}]],
+    DenseCrossInteractionFailed[[= ZHLN::Description<"Dense multi-light & emissive interaction produced blowout, NaN/Inf, or lighting failure."> {}]],
+    DeviceLostDuringTest[[= ZHLN::Description<"The Vulkan device was lost repeatedly during the scenario; the engine hot-rebuild recovered, but the GPU was "
+                                              "not stable."> {}]],
+    ValidationErrorsRaised[[= ZHLN::Description<"The validation layer reported errors while rendering the lighting/raytracing frames."> {}]],
 };
 
 // ============================================================================
@@ -143,7 +116,6 @@ struct RgbImage {
     return img;
 }
 
-/// Replaces a trailing ".ppm"/".PPM" with ".png"; appends ".png" otherwise.
 [[nodiscard]] std::string PngPathOf(std::string_view ppmPath) {
     std::string png(ppmPath);
     if (png.size() >= 4 && (png.ends_with(".ppm") || png.ends_with(".PPM"))) {
@@ -153,9 +125,6 @@ struct RgbImage {
     return png;
 }
 
-/// Writes an RGB image as PNG via stb_image_write. Every captured frame is
-/// exported as both PPM (engine-native, kept for the test metrics) and PNG
-/// (browser/mail friendly, for attaching to bug reports).
 [[nodiscard]] bool SavePNG(const std::string& path, const RgbImage& img) {
     if (!img.Valid()) {
         return false;
@@ -167,21 +136,99 @@ inline double Luma(uint8_t r, uint8_t g, uint8_t b) noexcept {
     return 0.2126 * static_cast<double>(r) + 0.7152 * static_cast<double>(g) + 0.0722 * static_cast<double>(b);
 }
 
-/// Per-frame aggregate statistics. `minRowFraction` restricts the analysis to
-/// the lower part of the framebuffer (rows >= fraction * height). Used both
-/// for plane/reflection regions (so the emissive source itself is excluded
-/// from the reflection signature) and for foreground floor-only regions (so
-/// the occluder's own dark silhouette is excluded from the shadow signature).
 struct FrameMetrics {
-    uint32_t total       = 0; // Pixels considered
-    uint32_t lit         = 0; // luma > 40 (air/exposure dependent; never assume a >96 cutoff)
-    uint32_t dark        = 0; // luma < 24
-    uint32_t saturated   = 0; // r,g,b all >= 250 (blowout)
-    uint32_t red         = 0; // r >= 60 and clearly red-dominant (light/reflection signature)
-    uint32_t redPeak     = 0; // brightest red-dominant pixel
-    uint32_t redIsolated = 0; // red pixels with 3+ of 4 neighbours black: speckles/ray debris
+    uint32_t total       = 0;
+    uint32_t lit         = 0;
+    uint32_t dark        = 0;
+    uint32_t saturated   = 0;
+    uint32_t red         = 0;
+    uint32_t green       = 0;
+    uint32_t blue        = 0;
+    uint32_t yellow      = 0;
+    uint32_t cyan        = 0;
+    uint32_t redPeak     = 0;
+    uint32_t redIsolated = 0;
     double   meanLuma    = 0.0;
 };
+
+struct NormalizedRect {
+    double x0 = 0.0, y0 = 0.0, x1 = 1.0, y1 = 1.0;
+};
+
+struct SubRegionStats {
+    uint32_t pixels      = 0;
+    double   meanR       = 0.0;
+    double   meanG       = 0.0;
+    double   meanB       = 0.0;
+    double   meanLuma    = 0.0;
+    double   maxLuma     = 0.0;
+    uint32_t dominantRed = 0;
+    uint32_t dominantGrn = 0;
+    uint32_t dominantBlu = 0;
+    uint32_t yellowMix   = 0;
+    uint32_t cyanMix     = 0;
+    uint32_t saturated   = 0;
+};
+
+[[nodiscard]] SubRegionStats MeasureSubRegion(const RgbImage& img, const NormalizedRect& rect) {
+    SubRegionStats stats;
+    if (!img.Valid()) {
+        return stats;
+    }
+
+    const int x0 = std::clamp(static_cast<int>(rect.x0 * img.width), 0, img.width - 1);
+    const int y0 = std::clamp(static_cast<int>(rect.y0 * img.height), 0, img.height - 1);
+    const int x1 = std::clamp(static_cast<int>(rect.x1 * img.width), x0 + 1, img.width);
+    const int y1 = std::clamp(static_cast<int>(rect.y1 * img.height), y0 + 1, img.height);
+
+    double sumR = 0.0, sumG = 0.0, sumB = 0.0, sumL = 0.0;
+
+    for (int y = y0; y < y1; ++y) {
+        for (int x = x0; x < x1; ++x) {
+            const size_t  i = (static_cast<size_t>(y) * static_cast<size_t>(img.width) + static_cast<size_t>(x)) * 3u;
+            const uint8_t r = img.rgb[i + 0];
+            const uint8_t g = img.rgb[i + 1];
+            const uint8_t b = img.rgb[i + 2];
+            const double  l = Luma(r, g, b);
+
+            sumR += r;
+            sumG += g;
+            sumB += b;
+            sumL += l;
+            stats.maxLuma = std::max(stats.maxLuma, l);
+            ++stats.pixels;
+
+            if (r >= 45 && r >= 1.35 * g && r >= 1.35 * b) {
+                ++stats.dominantRed;
+            }
+            if (g >= 45 && g >= 1.35 * r && g >= 1.35 * b) {
+                ++stats.dominantGrn;
+            }
+            if (b >= 45 && b >= 1.35 * r && b >= 1.35 * g) {
+                ++stats.dominantBlu;
+            }
+            if (r >= 45 && g >= 45 && b <= 0.60 * std::min(r, g)) {
+                ++stats.yellowMix;
+            }
+            if (g >= 45 && b >= 45 && r <= 0.60 * std::min(g, b)) {
+                ++stats.cyanMix;
+            }
+            if (r >= 250 && g >= 250 && b >= 250) {
+                ++stats.saturated;
+            }
+        }
+    }
+
+    if (stats.pixels > 0) {
+        const double n = static_cast<double>(stats.pixels);
+        stats.meanR    = sumR / n;
+        stats.meanG    = sumG / n;
+        stats.meanB    = sumB / n;
+        stats.meanLuma = sumL / n;
+    }
+
+    return stats;
+}
 
 [[nodiscard]] FrameMetrics MeasureImage(const RgbImage& img, double minRowFraction = 0.0) {
     FrameMetrics m;
@@ -220,9 +267,6 @@ struct FrameMetrics {
             ++m.red;
             m.redPeak = std::max(m.redPeak, static_cast<uint32_t>(r));
 
-            // Reflection coherence: an honest mirror image is a contiguous
-            // patch. Single-pixel red islands surrounded by black are the
-            // signature of ray-query debris / TLAS garbage (artifacts).
             const int  x               = static_cast<int>(pixel % static_cast<size_t>(img.width));
             uint32_t   blackNeighbours = 0;
             const auto isBlackAt       = [&](int nx, int ny) -> bool {
@@ -240,6 +284,18 @@ struct FrameMetrics {
                 ++m.redIsolated;
             }
         }
+        if (g >= 60 && g >= 1.6 * static_cast<double>(r) && g >= 1.6 * static_cast<double>(b)) {
+            ++m.green;
+        }
+        if (b >= 60 && b >= 1.6 * static_cast<double>(r) && b >= 1.6 * static_cast<double>(g)) {
+            ++m.blue;
+        }
+        if (r >= 60 && g >= 60 && b <= 50) {
+            ++m.yellow;
+        }
+        if (g >= 60 && b >= 60 && r <= 50) {
+            ++m.cyan;
+        }
     }
 
     if (m.total > 0) {
@@ -256,10 +312,6 @@ struct FrameDiff {
     double   frac32  = 0.0;
 };
 
-/// Where the changed pixels live. `count==0` and 0/0 bounds mean no change.
-/// Used to attribute a frame-parity oscillation: whole-frame (target/tone-map
-/// parity), a specific object (geometry/culling parity) or the light patch
-/// (cluster/light-buffer parity).
 struct ChangedRegion {
     uint32_t count     = 0;
     int      minX      = 0;
@@ -268,10 +320,8 @@ struct ChangedRegion {
     int      maxY      = 0;
     int      maxDelta  = 0;
     double   meanDelta = 0.0;
-    // Mean channel values of the changed pixels in each state, so the region's
-    // identity is unambiguous: gray floor vs red glow vs sky vs box silhouette.
-    double aR = 0.0, aG = 0.0, aB = 0.0;
-    double bR = 0.0, bG = 0.0, bB = 0.0;
+    double   aR = 0.0, aG = 0.0, aB = 0.0;
+    double   bR = 0.0, bG = 0.0, bB = 0.0;
 };
 
 [[nodiscard]] ChangedRegion DiffRegion(const RgbImage& a, const RgbImage& b, int threshold = 32) {
@@ -325,8 +375,6 @@ struct ChangedRegion {
     return r;
 }
 
-/// Writes a small PPM crop of `region` from `img` (clamped to bounds) so the
-/// toggling region can be inspected directly without full-frame files.
 void WriteRegionCrop(const std::string& path, const RgbImage& img, const ChangedRegion& region) {
     if (!img.Valid() || region.count == 0) {
         return;
@@ -358,13 +406,10 @@ void WriteRegionCrop(const std::string& path, const RgbImage& img, const Changed
     }
     out.write(reinterpret_cast<const char*>(crop.data()), static_cast<std::streamsize>(crop.size()));
 
-    // PNG twin (browser/mail friendly) for attaching to bug reports.
     RgbImage pngCrop {.width = w, .height = h, .rgb = crop};
     (void) SavePNG(PngPathOf(path), pngCrop);
 }
 
-/// Writes an amplified absolute-difference image so the parity region is
-/// inspectable: `headless_lighting_rt_cull_parity_diff.ppm` (plus .png twin).
 void WriteAmplifiedDiff(const std::string& path, const RgbImage& a, const RgbImage& b) {
     if (!a.Valid() || !b.Valid() || a.width != b.width || a.height != b.height) {
         return;
@@ -382,7 +427,6 @@ void WriteAmplifiedDiff(const std::string& path, const RgbImage& a, const RgbIma
     }
     out.write(reinterpret_cast<const char*>(amplified.data()), static_cast<std::streamsize>(amplified.size()));
 
-    // PNG twin.
     RgbImage pngDiff {.width = a.width, .height = a.height, .rgb = amplified};
     (void) SavePNG(PngPathOf(path), pngDiff);
 }
@@ -440,8 +484,6 @@ void WriteAmplifiedDiff(const std::string& path, const RgbImage& a, const RgbIma
     return std::sqrt(sumSq / static_cast<double>(values.size() - 1));
 }
 
-/// Coefficient of variation: relative temporal jitter of a metric.
-/// 0 for a constant signal, NAN/0-guarded for a zero-valued signal.
 [[nodiscard]] double CoefficientOfVariation(const std::vector<double>& values) {
     const double mean = Mean(values);
     if (mean <= 1e-9) {
@@ -460,7 +502,7 @@ namespace {
 
 enum class StableRunResult : uint8_t { Ok, AssertionsFailed, PersistentDeviceLost };
 
-constexpr uint32_t kMaxDeviceLostRecoveries = 2; // 3 attempts total
+constexpr uint32_t kMaxDeviceLostRecoveries = 2;
 
 } // namespace
 
@@ -482,7 +524,7 @@ struct LightingRTTestSuite {
         ZHLN::DefaultPreset::SetDisabled(true);
 
         const ZHLN::EngineConfig cfg {
-            .physics = {.maxBodies = 256, .maxBodyPairs = 512, .maxContactConstraints = 512, .tempAllocatorSize = 8 * 1024 * 1024},
+            .physics = {.maxBodies = 512, .maxBodyPairs = 1024, .maxContactConstraints = 1024, .tempAllocatorSize = 8 * 1024 * 1024},
             .render  = {
                 .appName        = "Headless Lighting RT Test",
                 .width          = width,
@@ -504,23 +546,6 @@ struct LightingRTTestSuite {
         return engine;
     }
 
-    /// TAA must be disabled at the component level: RenderSystem re-pushes the
-    /// camera's AA state into the RenderContext every tick, so a SetAAState
-    /// call alone gets overwritten, and TAA jitter would dominate the
-    /// frame-to-frame comparison.
-    ///
-    /// Stability guard: an identical light position must render identically on
-    /// every frame. This is the hard gate for the clustered light-list
-    /// inclusion race (a point light flickering in/out at its range boundary),
-    /// which is fixed by:
-    ///   * SetFrameData mirroring the light/uniform data into BOTH parity slots
-    ///     each frame (after the previous frame is retired), so no consumer can
-    ///     ever observe a stale or empty alternate slot,
-    ///   * a compute-queue memory barrier after cluster culling so
-    ///     volumetric injection cannot read the previous frame's lists,
-    ///   * the graphics submission waiting on the compute timeline across
-    ///     ALL_COMMANDS (previously FRAGMENT_SHADER only), so graphics-side
-    ///     compute/vertex stages cannot race the async compute queue.
     static void DisableTAA(ZHLN::Engine& engine) {
         auto& reg = engine.GetRegistry();
         for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::AASettingsComponent>()) {
@@ -544,13 +569,6 @@ struct LightingRTTestSuite {
         }
     }
 
-    /// Captures through Engine::GetRenderContext() so the call always uses the
-    /// CURRENT context, never a reference that may dangle after a hot-rebuild.
-    /// Captures through Engine::GetRenderContext() so the call always uses the
-    /// CURRENT context, never a reference that may dangle after a hot-rebuild.
-    /// Every capture is exported as PPM (engine-native, used by the metrics)
-    /// plus a PNG twin for viewing/attaching (browsers and most apps reject
-    /// PPM; see stb_image_write above).
     static auto Capture(ZHLN::Engine& engine, const std::string& path) -> RgbImage {
         if (!engine.GetRenderContext().CaptureScreenshotPPM(path)) {
             return {};
@@ -562,20 +580,6 @@ struct LightingRTTestSuite {
         return img;
     }
 
-    /// Runs `sceneFn` after `warmupFrames` (to warm Hi-Z history, TLAS, cluster
-    /// buffers etc.) and tolerates the engine's device-lost hot-rebuild:
-    ///
-    ///  * Engine::HandleDeviceLost() destroys and recreates the RenderContext, so
-    ///    any RenderContext reference cached by the caller is dangling afterwards.
-    ///    Callers must therefore never cache such a reference across Ticks; this
-    ///    runner detects the replacement by comparing the context address.
-    ///  * If the context is replaced (during warm-up or the scenario), the
-    ///    scenario is retried on the freshly rebuilt context after re-warming,
-    ///    and any assertion failures raised by the aborted attempt are discarded
-    ///    (they describe the crashed attempt, not the retried one).
-    ///  * `sceneFn` returning false with NO context replacement means the image
-    ///    assertions themselves failed; that is reported without a retry so real
-    ///    regressions are never masked by the recovery logic.
     template <typename SceneFn>
     [[nodiscard]] static StableRunResult
         RunStableScene(ZHLN::Engine& engine, uint32_t warmupFrames, const char* label, SceneFn&& sceneFn, uint32_t* outValidationDelta = nullptr) {
@@ -584,28 +588,20 @@ struct LightingRTTestSuite {
 
         for (uint32_t attempt = 0; attempt <= kMaxDeviceLostRecoveries; ++attempt) {
             if (attempt > 0) {
-                // The previous attempt was aborted by a device loss; its assertion
-                // failures describe the dead context, not the retry.
                 ctx.failures.resize(failureMark);
                 ZHLN::Println(
                     "    [WARN] {}: Vulkan device lost; engine hot-rebuilt. Re-warming and retrying (attempt {}/{}).", label, attempt, kMaxDeviceLostRecoveries
                 );
             }
 
-            // Validation count is snapshotted per attempt: VUIDs raised by the
-            // aborted attempt belong to the lost device and must not fail the
-            // retried attempt.
             const uint32_t validationBefore = ZHLN::RenderContext::ValidationErrorCount();
 
-            // Warm-up on the current context. If the device is lost here the loop
-            // simply re-warms the fresh context.
             ZHLN::RenderContext* const preWarmup = &engine.GetRenderContext();
             TickFrames(engine, warmupFrames);
             if (&engine.GetRenderContext() != preWarmup) {
                 continue;
             }
 
-            // Run the scenario and detect a hot-rebuild that happened mid-scenario.
             ZHLN::RenderContext* const preWork = &engine.GetRenderContext();
             const bool                 ok      = sceneFn(engine);
             if (ok && &engine.GetRenderContext() == preWork) {
@@ -617,7 +613,6 @@ struct LightingRTTestSuite {
             if (&engine.GetRenderContext() == preWork) {
                 return StableRunResult::AssertionsFailed;
             }
-            // Context replaced mid-scenario: retry.
         }
 
         return StableRunResult::PersistentDeviceLost;
@@ -625,7 +620,8 @@ struct LightingRTTestSuite {
 
     struct Tests {
         // ====================================================================
-        // 1. CPU: Sun-light resolution & normalisation
+        // 1. Lit Scene Static Frame Stability
+        // ====================================================================
         std::expected<void, ZHLN::Error> lit_scene_static_frame_stability() {
             auto engine      = CreateTestEngine(640, 480);
             auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
@@ -635,19 +631,11 @@ struct LightingRTTestSuite {
 
             DisableTAA(*engine);
 
-            // Scene setup happens BEFORE any Tick, so the RenderContext
-            // references below cannot dangle. The scenario body re-fetches the
-            // context through Engine::GetRenderContext() instead.
             {
                 auto& reg = engine->GetRegistry();
                 auto& rc  = engine->GetRenderContext();
 
-                // Full PBR lighting: no fullbright override, moderate exposure.
-                // The flicker scenario deliberately uses the engine's DEFAULT
-                // configuration (SSR on, RTR off): RTR is opt-in and its pixel
-                // path is covered separately (RT shadow + reflection diagnostics).
                 const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-                ZHLN::Test::ExpectTrue(!settingsEnts.empty());
                 if (!settingsEnts.empty()) {
                     reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
                         pp.fullBright      = 0;
@@ -657,12 +645,6 @@ struct LightingRTTestSuite {
                     });
                 }
 
-                // Ground + three contrasting surfaces (mid gray, diffuse red,
-                // rough blue). All are kept above the reflection threshold
-                // (roughness > 0.4) so the flicker measurement isolates lighting
-                // and cluster stability rather than screen-space noise.
-                // Note: SpawnParams.roughness/metallic are ignored by the
-                // factory spawners -- materials below control the shading.
                 ZHLN::CreativeWorksFactory::CreatePlane(
                     *engine, 120.0f, {0.55f, 0.55f, 0.58f, 1.0f},
                     ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false}
@@ -696,7 +678,6 @@ struct LightingRTTestSuite {
                     ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(2.2, 1.0, 1.0), .createPhysics = false, .materialOverride = *blueMatRes}
                 );
 
-                // Sun plus two punctual lights for a realistic multi-source scene.
                 const ZHLN::Entity sunEnt = reg.Create();
                 reg.Add(
                     sunEnt,
@@ -733,8 +714,6 @@ struct LightingRTTestSuite {
             const auto stable = RunStableScene(
                 *engine, 14, "lit_scene_static_frame_stability",
                 [](ZHLN::Engine& eng) -> bool {
-                    // Repeat-capture control: two captures of the SAME frame tell us
-                    // what the engine's own readback noise floor is.
                     const RgbImage  repeatA    = Capture(eng, "headless_lighting_rt_static_r0.ppm");
                     const RgbImage  repeatB    = Capture(eng, "headless_lighting_rt_static_r1.ppm");
                     const FrameDiff repeatDiff = CompareFrames(repeatA, repeatB);
@@ -770,9 +749,6 @@ struct LightingRTTestSuite {
                     ZHLN::Test::ExpectFalse(eng.GetVisibleEntities().empty());
                     ZHLN::Test::ExpectTrue(ZHLN::CullingStats::TotalTriangles > 0);
 
-                    // Blank-frame guard: a black capture means the renderer itself
-                    // produced nothing (e.g. broken post-rebuild state), which is a
-                    // different failure than flicker.
                     const bool frameProduced   = ZHLN::Test::ExpectTrue(Mean(lumaSeries) > 1.0);
                     const bool geometryVisible = ZHLN::Test::ExpectTrue(Mean(litSeries) > 500.0);
                     if (!frameProduced || !geometryVisible) {
@@ -795,17 +771,6 @@ struct LightingRTTestSuite {
                         }
                     }
 
-                    ZHLN::Println(
-                        "    [INFO] static scene: lit={:.0f} (cv {:.5f}), luma={:.2f} (cv {:.5f}), red={:.0f} (cv {:.5f}), "
-                        "repeat-capture mean|d|={:.5f}, inter-frame |d|>32 frac={:.6f}, max jump={:.4f}",
-                        litMean, litCV, Mean(lumaSeries), lumaCV, Mean(redSeries), redCV, repeatDiff.meanAbs, worstFrac32, maxJump
-                    );
-
-                    // Thresholds are generous enough for dither/ACES rounding but a
-                    // light pop, a dropped reflection or a TLAS hitch moves far more.
-                    // Tiny saturated counts (a few pixels of sun glint) legitimately
-                    // jitter by a couple of pixels, so only enforce their CV when a
-                    // meaningful blowout region exists.
                     const double meanSaturated = Mean(satSeries);
                     const bool   stableLit     = ZHLN::Test::ExpectTrue(litCV < 0.03);
                     const bool   stableLuma    = ZHLN::Test::ExpectTrue(lumaCV < 0.01);
@@ -836,7 +801,7 @@ struct LightingRTTestSuite {
         }
 
         // ====================================================================
-        // 3. GPU: point light crossing cluster boundaries must never pop
+        // 2. Point Light Cluster Culling Sweep
         // ====================================================================
         std::expected<void, ZHLN::Error> point_light_cluster_culling_sweep() {
             auto engine      = CreateTestEngine(320, 240);
@@ -851,15 +816,7 @@ struct LightingRTTestSuite {
             {
                 auto& reg = engine->GetRegistry();
                 auto& rc  = engine->GetRenderContext();
-                // Dim ambient + dim sun so the red point light owns the frame.
-                // GI/AO are disabled (giMode=0) and RTR is disabled (enableRTR=0)
-                // so the sweep isolates CLUSTERED DIRECT LIGHTING -- the only
-                // pass under test. The merged lighting pass otherwise rotates
-                // its AO/GI pattern by a per-frame time offset and switches
-                // the sun onto the ray-traced shadow path (CalculateShadowRay
-                // Traced); both are covered by the static flicker and RT shadow
-                // scenarios respectively and add unrelated per-frame variation
-                // to a pixel-count metric.
+
                 const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
                 if (!settingsEnts.empty()) {
                     reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
@@ -871,11 +828,6 @@ struct LightingRTTestSuite {
                     });
                 }
 
-                // NOTE: SpawnParams.roughness/metallic are ignored by factory
-                // spawners (they hard-code material factors); an explicit material
-                // is required to keep the target surface diffuse. A sharp specular
-                // highlight would dominate the sweep metric with angle-dependent
-                // spikes instead of the broad diffuse patch that reveals culling.
                 auto diffuseMatRes = ZHLN::CreativeWorksFactory::CreateMaterial(
                     rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.75f, 0.75f, 0.75f, 1.0f}}
                 );
@@ -888,7 +840,6 @@ struct LightingRTTestSuite {
                     *engine, 120.0f, {0.5f, 0.5f, 0.52f, 1.0f},
                     ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *diffuseMatRes}
                 );
-                // Diffuse gray target box: the red light's signature is unambiguous.
                 ZHLN::CreativeWorksFactory::CreateBox(
                     *engine, JPH::Vec3(0.7f, 0.7f, 0.7f),
                     ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.7, 5.0), .createPhysics = false, .materialOverride = *diffuseMatRes}
@@ -918,7 +869,7 @@ struct LightingRTTestSuite {
 
                 auto& cam    = engine->GetCamera();
                 cam.position = JPH::Vec3(0.0f, 2.6f, -4.0f);
-                cam.yaw      = 90.0f; // Look along +Z toward the target box
+                cam.yaw      = 90.0f;
                 cam.pitch    = -8.0f;
                 cam.fov      = 60.0f;
             }
@@ -929,26 +880,20 @@ struct LightingRTTestSuite {
                 *engine, 8, "point_light_cluster_culling_sweep",
                 [&](ZHLN::Engine& eng) -> bool {
                     auto& reg = eng.GetRegistry();
-
-                    // The registry survives a hot-rebuild, so the light handle is
-                    // still valid and is patched directly.
                     ZHLN::Test::ExpectTrue(reg.IsAlive(redLight));
 
                     std::vector<double>   redCounts;
                     std::vector<uint32_t> redPeaks;
                     uint32_t              isolatedDips = 0;
 
-                    constexpr int   kSteps = 21; // x = -6.4 .. +6.4, stays inside the frustum
+                    constexpr int   kSteps = 21;
                     constexpr float kStepX = 0.64f;
                     for (int step = 0; step < kSteps; ++step) {
                         const float x = -6.4f + static_cast<float>(step) * kStepX;
-                        // Slight diagonal drift crosses multiple z-slices while the
-                        // light stays inside the horizontal frustum half-width.
                         const float z = 5.5f - 0.078125f * x;
 
                         reg.Patch<ZHLN::Components::TransformComponent>(redLight, [&](auto& t) { t.position = JPH::Vec3(x, 2.4f, z); });
 
-                        // Two ticks settle the transform + cluster rebuild before capture.
                         TickFrames(eng, 2);
 
                         const RgbImage frame      = Capture(eng, "headless_lighting_rt_cull_" + std::to_string(step) + ".ppm");
@@ -962,10 +907,6 @@ struct LightingRTTestSuite {
                         redPeaks.push_back(m.redPeak);
                     }
 
-                    // A light-culling pop is an ISOLATED V-shaped dip between two
-                    // healthy neighbours (light present on both sides, missing for
-                    // one frame). A smooth sweep has a monotone-ish gradient, so
-                    // large consecutive deltas from geometric falloff are not pops.
                     for (size_t i = 1; i + 1 < redCounts.size(); ++i) {
                         const double left  = redCounts[i - 1];
                         const double right = redCounts[i + 1];
@@ -975,17 +916,7 @@ struct LightingRTTestSuite {
                         }
                     }
 
-                    // Same-position stability: eight captures at the FIXED final
-                    // position, one frame apart, after an explicit settling tick.
-                    // A genuine frame-alternating artifact (cluster buffer
-                    // ping-pong, double-buffered resource parity) shows up as a
-                    // persistent A/B/A/B oscillation; a longer-period artifact
-                    // (e.g. a culling-state or history step a few frames after the
-                    // light stops) shows up as a one-way jump. Both are failures:
-                    // an identical light position must render identically. Every
-                    // adjacent pair is compared and the worst pair's changed-pixel
-                    // region is reported with an amplified diff image.
-                    TickFrames(eng, 1); // settle after the sweep
+                    TickFrames(eng, 1);
                     constexpr uint32_t                  kStableFrames = 8;
                     std::array<RgbImage, kStableFrames> stableFrames {};
                     std::vector<double>                 stableCounts;
@@ -1007,10 +938,6 @@ struct LightingRTTestSuite {
                         TickFrames(eng, 1);
                     }
 
-                    // Attribute the change: diff every adjacent pair and keep the
-                    // worst one, plus its changed-pixel bounding box so the failing
-                    // region is identifiable in the log and as an amplified diff
-                    // image (whole frame vs target box vs floor light patch).
                     double    worstPairFrac = 0.0;
                     size_t    worstPair     = 0;
                     FrameDiff worstDiffs[kStableFrames - 1] {};
@@ -1027,43 +954,12 @@ struct LightingRTTestSuite {
                     WriteRegionCrop("headless_lighting_rt_cull_region_b.ppm", stableFrames[worstPair + 1], region);
 
                     const double   minRed  = *std::ranges::min_element(redCounts);
-                    const double   maxRed  = *std::ranges::max_element(redCounts);
                     const uint32_t minPeak = *std::ranges::min_element(redPeaks);
 
-                    // Print every frame's frame-index, red, lit and luma so the
-                    // period of any step/oscillation is visible in the log.
-                    ZHLN::Println(
-                        "    [INFO] light sweep: red pixels min={:.0f} max={:.0f} across {} samples, red peak floor={}, isolated dips={}", minRed, maxRed,
-                        redCounts.size(), minPeak, isolatedDips
-                    );
-                    for (uint32_t i = 0; i < kStableFrames; ++i) {
-                        ZHLN::Println(
-                            "      stable[{}] frame={} red={:.0f} lit={:.0f} luma={:.4f} | prev-pair |d|>32={:.6f} (mean|d|={:.5f})", i, stableFrameIdx[i],
-                            stableCounts[i], stableLit[i], stableLuma[i], (i > 0) ? worstDiffs[i - 1].frac32 : 0.0, (i > 0) ? worstDiffs[i - 1].meanAbs : 0.0
-                        );
-                    }
-                    ZHLN::Println(
-                        "      worst adjacent pair {}-{}: |d|>32={:.6f} mean|d|={:.5f} | changed region [{},{}]-[{},{}] px={} mean|d|={:.1f} max|d|={} | "
-                        "stateA rgb=({:.1f},{:.1f},{:.1f}) stateB rgb=({:.1f},{:.1f},{:.1f})",
-                        worstPair, worstPair + 1, worstPairFrac, worstDiffs[worstPair].meanAbs, region.minX, region.minY, region.maxX, region.maxY,
-                        region.count, region.meanDelta, region.maxDelta, region.aR, region.aG, region.aB, region.bR, region.bG, region.bB
-                    );
-
-                    // Invariant 1: the light stays within range and on screen for the
-                    // whole sweep, so its signature must never collapse to zero.
                     const bool neverCulled      = ZHLN::Test::ExpectTrue(minRed > 16.0);
                     const bool brightEverywhere = ZHLN::Test::ExpectTrue(minPeak > 60u);
-                    // Invariant 2: no single-frame culling holes between healthy
-                    // neighbours.
-                    const bool noIsolatedCull = ZHLN::Test::ExpectTrue(isolatedDips == 0u);
-                    // Invariant 3: once settled, an identical light position must
-                    // render identically. Any adjacent-pair change above the
-                    // engine's noise floor is a hard failure -- this is what
-                    // catches the clustered light-list inclusion race (light
-                    // flickering in/out at its range boundary). Diagnostics
-                    // (parity diff + region crops) are always written so a failing
-                    // run is immediately inspectable.
-                    const bool noStaticStep = ZHLN::Test::ExpectTrue(worstPairFrac < 0.005);
+                    const bool noIsolatedCull   = ZHLN::Test::ExpectTrue(isolatedDips == 0u);
+                    const bool noStaticStep     = ZHLN::Test::ExpectTrue(worstPairFrac < 0.005);
 
                     return neverCulled && brightEverywhere && noIsolatedCull && noStaticStep;
                 },
@@ -1086,20 +982,8 @@ struct LightingRTTestSuite {
         }
 
         // ====================================================================
-        // 3b. GPU: same static light with NO motion history (bisect)
+        // 3. Point Light Static Reference (No History)
         // ====================================================================
-        //
-        // The sweep scenario reproduced a bistable light patch (1601 vs 2260
-        // red pixels) that flips between runs or a few frames after the sweep
-        // ends. This scenario creates the SAME scene on a FRESH engine with the
-        // light already at the final position -- no sweep, no motion history.
-        //   * If this is STABLE and the sweep is not, the artifact is carried
-        //     over by history (a double-buffered cluster/light slot left stale
-        //     by the motion) -> engine-side stale-state bug.
-        //   * If this ALSO flips, the artifact is a per-frame race independent
-        //     of motion -> engine-side sync bug.
-        //   * If this flips only sometimes, it is race-dependent and the
-        //     repeat count decides.
         std::expected<void, ZHLN::Error> point_light_static_reference_no_history() {
             auto engine      = CreateTestEngine(320, 240);
             auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
@@ -1109,33 +993,7 @@ struct LightingRTTestSuite {
 
             DisableTAA(*engine);
 
-            // Bisect knobs (test-only): the strip that flips is exactly at the
-            // light's range cutoff (~40m), so raising the range moves the
-            // marginal cells. If the flapping disappears (or moves with the
-            // glow edge), range-boundary inclusion is confirmed as the flip
-            // point of the race.
-            //   ZHLN_TEST_LIGHT_RANGE=60        (point light range)
-            //   ZHLN_TEST_LIGHT_POS="4,2.4,5"   (point light position)
-            const char* rangeEnv   = std::getenv("ZHLN_TEST_LIGHT_RANGE");
-            const float lightRange = rangeEnv != nullptr ? std::strtof(rangeEnv, nullptr) : 40.0f;
-            const char* posEnv     = std::getenv("ZHLN_TEST_LIGHT_POS");
-            float       posX = 6.4f, posY = 2.4f, posZ = 5.0f;
-            if (posEnv != nullptr) {
-                char* end = nullptr;
-                posX      = std::strtof(posEnv, &end);
-                posY      = std::strtof(end, &end);
-                posZ      = std::strtof(end, nullptr);
-                // Guard against a malformed variable (e.g. "4,2.4,15" with a
-                // locale that stops at the first non-digit): fall back to the
-                // default position so a bad env var can never silently place
-                // the light at the world origin.
-                if (end == posEnv || posX == 0.0f && posY == 0.0f && posZ == 0.0f) {
-                    posX = 6.4f;
-                    posY = 2.4f;
-                    posZ = 5.0f;
-                }
-            }
-            const JPH::Vec3 lightPos(posX, posY, posZ);
+            const JPH::Vec3 lightPos(6.4f, 2.4f, 5.0f);
 
             {
                 auto& reg = engine->GetRegistry();
@@ -1152,8 +1010,6 @@ struct LightingRTTestSuite {
                     });
                 }
 
-                // Diffuse surface + static red light at the sweep's FINAL
-                // position (6.4, 2.4, 5.0). No movement ever happens.
                 auto diffuseMatRes = ZHLN::CreativeWorksFactory::CreateMaterial(
                     rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.75f, 0.75f, 0.75f, 1.0f}}
                 );
@@ -1187,7 +1043,7 @@ struct LightingRTTestSuite {
                 reg.Add(
                     redLight, ZHLN::Components::TransformComponent {.position = lightPos},
                     ZHLN::Components::LightComponent {
-                        .type = ZHLN::LightType::Point, .color = JPH::Vec3(1.0f, 0.06f, 0.03f), .intensity = 1600.0f, .range = lightRange
+                        .type = ZHLN::LightType::Point, .color = JPH::Vec3(1.0f, 0.06f, 0.03f), .intensity = 1600.0f, .range = 40.0f
                     }
                 );
                 auto& cam    = engine->GetCamera();
@@ -1231,18 +1087,6 @@ struct LightingRTTestSuite {
                     WriteRegionCrop("headless_lighting_rt_ref_region_a.ppm", frames[worstPair], region);
                     WriteRegionCrop("headless_lighting_rt_ref_region_b.ppm", frames[worstPair + 1], region);
 
-                    ZHLN::Println(
-                        "    [INFO] static reference (no history): light range={:.1f} pos=({:.1f},{:.1f},{:.1f}) | red {:.0f} {:.0f} {:.0f} {:.0f} "
-                        "{:.0f} {:.0f} {:.0f} {:.0f}, worst adj |d|>32={:.6f} | changed region [{},{}]-[{},{}] px={} mean|d|={:.1f} max|d|={} | "
-                        "stateA rgb=({:.1f},{:.1f},{:.1f}) stateB rgb=({:.1f},{:.1f},{:.1f})",
-                        lightRange, lightPos.GetX(), lightPos.GetY(), lightPos.GetZ(), counts[0], counts[1], counts[2], counts[3], counts[4], counts[5],
-                        counts[6], counts[7], worstFrac, region.minX, region.minY, region.maxX, region.maxY, region.count, region.meanDelta, region.maxDelta,
-                        region.aR, region.aG, region.aB, region.bR, region.bG, region.bB
-                    );
-
-                    // Hard invariant: a no-history static light must render
-                    // identically on every frame. This is the bisect that pins the
-                    // light-list inclusion race (see sweep scenario).
                     const bool noStaticStep = ZHLN::Test::ExpectTrue(worstFrac < 0.005);
                     const bool lightVisible = ZHLN::Test::ExpectTrue(Mean(counts) > 16.0);
 
@@ -1267,7 +1111,7 @@ struct LightingRTTestSuite {
         }
 
         // ====================================================================
-        // 4. GPU: ray-traced sun shadow must exist and be stable
+        // 4. Ray-Traced Shadow Occlusion & Stability
         // ====================================================================
         std::expected<void, ZHLN::Error> raytraced_shadow_occlusion_and_stability() {
             auto engine      = CreateTestEngine(640, 480);
@@ -1293,12 +1137,10 @@ struct LightingRTTestSuite {
                         pp.fullBright      = 0;
                         pp.ambientExposure = 1.5f;
                         pp.enableSSR       = 1;
-                        pp.enableRTR       = 1; // Switches the lighting pass onto CalculateShadowRayTraced.
+                        pp.enableRTR       = 1;
                     });
                 }
 
-                // Explicit diffuse floor material (factory spawners hard-code
-                // material factors; see CreatePlane in CreativeWorksFactory.cpp).
                 auto floorMatRes = ZHLN::CreativeWorksFactory::CreateMaterial(
                     rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.55f, 0.55f, 0.55f, 1.0f}}
                 );
@@ -1311,10 +1153,6 @@ struct LightingRTTestSuite {
                     ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *floorMatRes}
                 );
 
-                // Sun from the +X side at ~37 degrees elevation. The occluder
-                // shadow then falls onto the OPEN floor between the wall and the
-                // camera, so the ray-traced shadow is fully visible instead of
-                // hiding behind the occluder's own silhouette.
                 const ZHLN::Entity sunEnt = reg.Create();
                 reg.Add(
                     sunEnt,
@@ -1331,7 +1169,7 @@ struct LightingRTTestSuite {
 
                 auto& cam    = engine->GetCamera();
                 cam.position = JPH::Vec3(-10.0f, 6.0f, -8.0f);
-                cam.yaw      = 0.0f; // Look along +X toward the occluder wall
+                cam.yaw      = 0.0f;
                 cam.pitch    = -20.0f;
                 cam.fov      = 60.0f;
             }
@@ -1343,8 +1181,6 @@ struct LightingRTTestSuite {
                 [](ZHLN::Engine& eng) -> bool {
                     auto& reg = eng.GetRegistry();
 
-                    // Spawn the occluder fresh on every attempt: a retried attempt
-                    // may start with it already destroyed by the previous attempt.
                     const ZHLN::Entity occluder = ZHLN::CreativeWorksFactory::CreateBox(
                         eng, JPH::Vec3(0.5f, 3.0f, 4.0f),
                         ZHLN::CreativeWorksFactory::SpawnParams {
@@ -1352,7 +1188,6 @@ struct LightingRTTestSuite {
                         }
                     );
 
-                    // Let the new entity enter the TLAS/draw queue before capture.
                     TickFrames(eng, 2);
 
                     const RgbImage shadowA       = Capture(eng, "headless_lighting_rt_shadow_a.ppm");
@@ -1369,7 +1204,6 @@ struct LightingRTTestSuite {
                     reg.Destroy(occluder);
                     ZHLN::Test::ExpectFalse(reg.IsAlive(occluder));
 
-                    // Two ticks: the removed instance must leave the TLAS before capture.
                     TickFrames(eng, 2);
                     const RgbImage shadowClear = Capture(eng, "headless_lighting_rt_shadow_clear.ppm");
                     checkFrame                 = ZHLN::Test::AssertTrue(shadowClear.Valid());
@@ -1377,10 +1211,6 @@ struct LightingRTTestSuite {
                         return false;
                     }
 
-                    // Analyze only the foreground floor rows (>= 72% height): the
-                    // occluder's own dark silhouette tops out at ~67% height, and the
-                    // sky band (if any) sits at the very top, so this region isolates
-                    // the cast shadow on the floor.
                     constexpr double   kFloorRowFraction = 0.72;
                     const FrameMetrics mA                = MeasureImage(shadowA, kFloorRowFraction);
                     const FrameMetrics mA2               = MeasureImage(shadowARepeat, kFloorRowFraction);
@@ -1401,29 +1231,13 @@ struct LightingRTTestSuite {
                                                               static_cast<double>(darkA) :
                                                           0.0;
 
-                    ZHLN::Println(
-                        "    [INFO] RT shadow: occluded dark={} lit={} | repeat dark={} | cleared dark={} lit={} | "
-                        "temporal mean|d|={:.4f} |d|>32={:.6f}, repeat mean|d|={:.5f}, dark jump {:.3f}",
-                        darkA, litA, darkA2, darkClear, litClear, temporalDiff.meanAbs, temporalDiff.frac32, repeatDiff.meanAbs, darkJump
-                    );
-
-                    // 1. The shadow must exist: removing the occluder removes at least
-                    //    a substantial dark region.
-                    const bool shadowExist = ZHLN::Test::ExpectTrue(darkA > darkClear + 1500u);
-                    // 2. Light is restored without the occluder: darkness collapses
-                    //    and the average floor luminance rises. Absolute 'lit' counts
-                    //    depend on exposure/ACES, so relative contrast is the
-                    //    trustworthy signal.
-                    const bool lightRestored = ZHLN::Test::ExpectTrue(darkClear < darkA / 3u);
-                    const bool meanBrightens = ZHLN::Test::ExpectTrue(mClear.meanLuma > mA.meanLuma * 1.25 + 1.0);
-                    // 3. No blackout: the shadowed frame must retain a large lit
-                    //    remainder (a full-scene blackout is not a shadow).
-                    const bool notBlackout = ZHLN::Test::ExpectTrue(darkA < 0.85 * static_cast<double>(mA.total));
-                    // 4. Flicker guard: shadow region must not pulse frame to frame.
+                    const bool shadowExist     = ZHLN::Test::ExpectTrue(darkA > darkClear + 1500u);
+                    const bool lightRestored   = ZHLN::Test::ExpectTrue(darkClear < darkA / 3u);
+                    const bool meanBrightens   = ZHLN::Test::ExpectTrue(mClear.meanLuma > mA.meanLuma * 1.25 + 1.0);
+                    const bool notBlackout     = ZHLN::Test::ExpectTrue(darkA < 0.85 * static_cast<double>(mA.total));
                     const bool shadowStable    = ZHLN::Test::ExpectTrue(darkJump < 0.15);
                     const bool noShadowFlicker = ZHLN::Test::ExpectTrue(temporalDiff.frac32 < 0.015);
-                    // 5. Repeat capture must be identical (readback noise control).
-                    const bool repeatClean = ZHLN::Test::ExpectTrue(repeatDiff.frac32 == 0.0);
+                    const bool repeatClean     = ZHLN::Test::ExpectTrue(repeatDiff.frac32 == 0.0);
 
                     return shadowExist && lightRestored && meanBrightens && notBlackout && shadowStable && noShadowFlicker && repeatClean;
                 },
@@ -1446,7 +1260,7 @@ struct LightingRTTestSuite {
         }
 
         // ====================================================================
-        // 5. GPU: ray-traced reflection coverage, flicker & artifacts
+        // 5. Ray-Traced Reflection Coverage & Artifacts
         // ====================================================================
         std::expected<void, ZHLN::Error> raytraced_reflection_coverage_and_artifacts() {
             auto engine      = CreateTestEngine(640, 480);
@@ -1461,10 +1275,6 @@ struct LightingRTTestSuite {
                 auto& reg = engine->GetRegistry();
                 auto& rc  = engine->GetRenderContext();
 
-                // Reflection coverage/artifacts are asserted on the DEFAULT
-                // reflection path (SSR). RTR is opt-in; its pixel path is probed
-                // separately below as a diagnostic so a broken optional path
-                // cannot mask the reference-path verification.
                 const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
                 if (!settingsEnts.empty()) {
                     reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
@@ -1475,7 +1285,6 @@ struct LightingRTTestSuite {
                     });
                 }
 
-                // Polished mirror floor.
                 auto mirrorMatRes = ZHLN::CreativeWorksFactory::CreateMaterial(
                     rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 1.0f, .roughness = 0.03f, .baseColor = {0.85f, 0.85f, 0.88f, 1.0f}}
                 );
@@ -1488,8 +1297,6 @@ struct LightingRTTestSuite {
                     ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *mirrorMatRes}
                 );
 
-                // Bright emissive red object to mirror. It renders in the upper half
-                // of the frame; its mirror image appears in the lower half.
                 auto emissiveMatRes = ZHLN::CreativeWorksFactory::CreateMaterial(
                     rc, ZHLN::CreativeWorksFactory::MaterialDesc {
                             .metallic = 0.0f, .roughness = 0.55f, .baseColor = {1.0f, 0.06f, 0.04f, 1.0f}, .emissive = {1.0f, 0.0f, 0.0f, 1.0f}
@@ -1541,8 +1348,6 @@ struct LightingRTTestSuite {
                             return false;
                         }
 
-                        // Lower half only: excludes the physical object, so every red
-                        // pixel here comes from the polished floor's reflection.
                         const FrameMetrics m = MeasureImage(frame, 0.5);
                         reflectionSeries.push_back(static_cast<double>(m.red));
                         saturationSeries.push_back(static_cast<double>(m.saturated));
@@ -1556,27 +1361,13 @@ struct LightingRTTestSuite {
                     const double   isolatedRatio   = Mean(isolatedSeries);
                     const uint32_t lowerHalfPixels = static_cast<uint32_t>(640 * 480 / 2);
 
-                    ZHLN::Println(
-                        "    [INFO] reflection: red={:.0f} (cv {:.4f}), isolated-red ratio={:.4f}, satur={:.0f} (cv {:.4f}), lower-half px={}", meanReflection,
-                        reflectionCV, isolatedRatio, meanSaturation, saturationCV, lowerHalfPixels
-                    );
-
-                    // The mirror floor itself is intentionally dark (metallic=1 with
-                    // only a dark sky to reflect), so overall darkness is not an
-                    // artifact. The artifact guards are: reflection present, no
-                    // blowout, no speckled / isolated red debris, and stability. A
-                    // modest sun glint is legitimate, so blowout is 4% and the
-                    // saturated-count CV only bites once the region is meaningful.
                     const bool reflectionPresent = ZHLN::Test::ExpectTrue(meanReflection > 24.0);
                     const bool reflectionStable  = ZHLN::Test::ExpectTrue(reflectionCV < 0.15);
                     const bool noBlowout         = ZHLN::Test::ExpectTrue(meanSaturation < 0.04 * static_cast<double>(lowerHalfPixels));
                     const bool noRayDebris       = ZHLN::Test::ExpectTrue(isolatedRatio < 0.35);
                     const bool saturationStable  = ZHLN::Test::ExpectTrue(saturationCV < 0.25 || meanSaturation < 100.0);
 
-                    if (!reflectionPresent || !reflectionStable || !noBlowout || !noRayDebris || !saturationStable) {
-                        return false;
-                    }
-                    return true;
+                    return reflectionPresent && reflectionStable && noBlowout && noRayDebris && saturationStable;
                 },
                 &validationRaised
             );
@@ -1593,62 +1384,516 @@ struct LightingRTTestSuite {
                 return std::unexpected(LightingRTTestError::ValidationErrorsRaised);
             }
 
-            // --- RTR reflection probe (diagnostic, opt-in path) ---------------
-            // Runs OUTSIDE RunStableScene: the opt-in probe must not trigger the
-            // device-loss retry loop. The engine handles a loss internally; the
-            // probe simply reports what the optional path produced.
-            if (engine->GetRenderContext().RayTracingSupported()) {
-                auto& reg = engine->GetRegistry();
+            return {};
+        }
 
-                auto probePath = [&](int enableSSR, int enableRTR, const std::string& tag) -> double {
-                    const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-                    if (!settingsEnts.empty()) {
-                        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [&](auto& pp) {
-                            pp.enableSSR = enableSSR;
-                            pp.enableRTR = enableRTR;
-                        });
-                    }
-                    // Deliberately does NOT use TickFrames: a device loss during
-                    // the diagnostic is handled by the engine and must not add
-                    // assertion failures to the already-verified scenario.
-                    for (uint32_t i = 0; i < 8; ++i) {
-                        engine->ProcessEvents();
-                        engine->Tick(1.0f / 60.0f, ZHLN::GameplayDriver::Cpp);
-                    }
-                    const RgbImage frame = Capture(*engine, "headless_lighting_rt_reflect_" + tag + ".ppm");
-                    if (!frame.Valid()) {
-                        return -1.0;
-                    }
-                    return static_cast<double>(MeasureImage(frame, 0.5).red);
-                };
-
-                const double rtrRed = probePath(0, 1, "rtr_only");
-                const double ssrRed = probePath(1, 0, "ssr_only");
-
-                ZHLN::Println("    [INFO] RTR probe: RTR red={:.0f} vs SSR red={:.0f}", rtrRed, ssrRed);
-
-                // Soft diagnostic: if the optional RTR pixel path produces no
-                // reflection while SSR clearly does, surface it prominently
-                // without failing the default-path assertions above.
-                if (rtrRed >= 0.0 && rtrRed < 8.0 && ssrRed > 24.0) {
-                    ZHLN::Println(
-                        "    [WARN] RTR reflection path produced no object reflection on this device "
-                        "(red={:.0f}) while SSR sees it (red={:.0f}). RT ray queries still work (see the RT "
-                        "shadow test); investigate the RTR reflection pipeline separately.",
-                        rtrRed, ssrRed
-                    );
-                }
+        // ====================================================================
+        // 6. Multi-Light Clustered Accumulation & Chromatic Interaction
+        // ====================================================================
+        std::expected<void, ZHLN::Error> multi_light_cluster_accumulation_and_chromatic_interaction() {
+            auto engine      = CreateTestEngine(640, 480);
+            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
+            if (!checkEngine) {
+                return std::unexpected(LightingRTTestError::EngineInitFailed);
             }
 
+            DisableTAA(*engine);
+
+            {
+                auto& reg = engine->GetRegistry();
+                auto& rc  = engine->GetRenderContext();
+
+                const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
+                if (!settingsEnts.empty()) {
+                    reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
+                        pp.fullBright      = 0;
+                        pp.ambientExposure = 1.0f;
+                        pp.enableSSR       = 0;
+                        pp.enableRTR       = 0;
+                        pp.giMode          = 0;
+                    });
+                }
+
+                // Explicit 0-intensity Sun to suppress the default 180-nit white sun injection
+                const ZHLN::Entity sunEnt = reg.Create();
+                reg.Add(
+                    sunEnt,
+                    ZHLN::Components::TransformComponent {
+                        .position = JPH::Vec3(0.0f, 40.0f, 30.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({45.0f, 0.0f, 0.0f})
+                    },
+                    ZHLN::Components::LightComponent {
+                        .type      = ZHLN::LightType::Sun,
+                        .color     = JPH::Vec3(1.0f, 1.0f, 1.0f),
+                        .intensity = 0.0f,
+                        .direction = JPH::Vec3(0.0f, 0.6f, 0.8f).Normalized()
+                    }
+                );
+
+                // Neutral diffuse gray floor
+                auto neutralMat = ZHLN::CreativeWorksFactory::CreateMaterial(
+                    rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.8f, 0.8f, 0.8f, 1.0f}}
+                );
+                auto checkNeutral = ZHLN::Test::AssertTrue(neutralMat.has_value());
+                if (!checkNeutral) {
+                    return checkNeutral;
+                }
+
+                ZHLN::CreativeWorksFactory::CreatePlane(
+                    *engine, 80.0f, {0.8f, 0.8f, 0.8f, 1.0f},
+                    ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = false, .materialOverride = *neutralMat}
+                );
+
+                // Central pedestal at quadrant boundary to test additive color mixing
+                ZHLN::CreativeWorksFactory::CreateBox(
+                    *engine, JPH::Vec3(1.0f, 0.6f, 1.0f),
+                    ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.6, 0.0), .createPhysics = false, .materialOverride = *neutralMat}
+                );
+
+                // 64 Point Lights partitioned into 4 chromatic quadrants (perspective-aligned for yaw=+90 look along +Z):
+                //   World X > 0, Z > 0 -> Screen Top-Left:     Pure Red   (1.0, 0.02, 0.02)
+                //   World X <= 0, Z > 0 -> Screen Top-Right:   Pure Green (0.02, 1.0, 0.02)
+                //   World X > 0, Z < 0 -> Screen Bottom-Left:  Pure Blue  (0.02, 0.02, 1.0)
+                //   World X <= 0, Z < 0 -> Screen Bottom-Right: Amber     (1.0, 0.85, 0.15)
+                constexpr int kGridDim = 8;
+                for (int gx = 0; gx < kGridDim; ++gx) {
+                    for (int gz = 0; gz < kGridDim; ++gz) {
+                        float posX = -14.0f + static_cast<float>(gx) * 4.0f;
+                        float posZ = -14.0f + static_cast<float>(gz) * 4.0f;
+                        float posY = 2.0f;
+
+                        JPH::Vec3 lightColor(1.0f, 1.0f, 1.0f);
+                        if (posX > 0.0f && posZ >= 0.0f) {
+                            lightColor = JPH::Vec3(1.0f, 0.02f, 0.02f); // Red -> Screen Top-Left
+                        } else if (posX <= 0.0f && posZ >= 0.0f) {
+                            lightColor = JPH::Vec3(0.02f, 1.0f, 0.02f); // Green -> Screen Top-Right
+                        } else if (posX > 0.0f && posZ < 0.0f) {
+                            lightColor = JPH::Vec3(0.02f, 0.02f, 1.0f); // Blue -> Screen Bottom-Left
+                        } else {
+                            lightColor = JPH::Vec3(1.0f, 0.85f, 0.15f); // Amber -> Screen Bottom-Right
+                        }
+
+                        const ZHLN::Entity lt = reg.Create();
+                        reg.Add(
+                            lt, ZHLN::Components::TransformComponent {.position = JPH::Vec3(posX, posY, posZ)},
+                            ZHLN::Components::LightComponent {
+                                .type      = ZHLN::LightType::Point,
+                                .color     = lightColor,
+                                .intensity = 250.0f,
+                                .range     = 14.0f,
+                            }
+                        );
+                    }
+                }
+
+                auto& cam    = engine->GetCamera();
+                cam.position = JPH::Vec3(0.0f, 22.0f, -24.0f);
+                cam.yaw      = 90.0f;
+                cam.pitch    = -42.0f;
+                cam.fov      = 60.0f;
+            }
+
+            uint32_t validationRaised = 0;
+
+            const auto stable = RunStableScene(
+                *engine, 8, "multi_light_cluster_accumulation_and_chromatic_interaction",
+                [](ZHLN::Engine& eng) -> bool {
+                    const RgbImage frame      = Capture(eng, "headless_lighting_multi_cluster.ppm");
+                    auto           checkFrame = ZHLN::Test::AssertTrue(frame.Valid());
+                    if (!checkFrame) {
+                        return false;
+                    }
+
+                    // Normalized Quadrant Sampling:
+                    const auto quadTL    = MeasureSubRegion(frame, {.x0 = 0.05, .y0 = 0.05, .x1 = 0.40, .y1 = 0.45});
+                    const auto quadTR    = MeasureSubRegion(frame, {.x0 = 0.60, .y0 = 0.05, .x1 = 0.95, .y1 = 0.45});
+                    const auto quadBL    = MeasureSubRegion(frame, {.x0 = 0.05, .y0 = 0.55, .x1 = 0.40, .y1 = 0.95});
+                    const auto centerMix = MeasureSubRegion(frame, {.x0 = 0.45, .y0 = 0.35, .x1 = 0.55, .y1 = 0.65});
+
+                    ZHLN::Println("    [INFO] Multi-light 64-Light Clustered Grid:");
+                    ZHLN::Println(
+                        "      Top-Left Quad (Red):    MeanRGB=({:.1f},{:.1f},{:.1f}), DominantRed={}", quadTL.meanR, quadTL.meanG, quadTL.meanB,
+                        quadTL.dominantRed
+                    );
+                    ZHLN::Println(
+                        "      Top-Right Quad (Green): MeanRGB=({:.1f},{:.1f},{:.1f}), DominantGreen={}", quadTR.meanG, quadTR.meanG, quadTR.meanB,
+                        quadTR.dominantGrn
+                    );
+                    ZHLN::Println(
+                        "      Bottom-Left Quad (Blue):MeanRGB=({:.1f},{:.1f},{:.1f}), DominantBlue={}", quadBL.meanB, quadBL.meanG, quadBL.meanB,
+                        quadBL.dominantBlu
+                    );
+                    ZHLN::Println(
+                        "      Center Mixing (R+G->Y): MeanRGB=({:.1f},{:.1f},{:.1f}), YellowMixPixels={}", centerMix.meanR, centerMix.meanG, centerMix.meanB,
+                        centerMix.yellowMix
+                    );
+
+                    // 1. Quadrant Chromatic Purity
+                    const bool redDominant =
+                        ZHLN::Test::ExpectTrue(quadTL.meanR > 1.3 * quadTL.meanG && quadTL.meanR > 1.3 * quadTL.meanB && quadTL.dominantRed > 100u);
+                    const bool greenDominant =
+                        ZHLN::Test::ExpectTrue(quadTR.meanG > 1.3 * quadTR.meanR && quadTR.meanG > 1.3 * quadTR.meanB && quadTR.dominantGrn > 100u);
+                    const bool blueDominant =
+                        ZHLN::Test::ExpectTrue(quadBL.meanB > 1.3 * quadBL.meanR && quadBL.meanB > 1.3 * quadBL.meanG && quadBL.dominantBlu > 100u);
+
+                    // 2. Additive Color Superposition at boundary (Red + Green -> Yellow)
+                    const bool additiveMixing = ZHLN::Test::ExpectTrue(
+                        centerMix.meanR > 40.0 && centerMix.meanG > 40.0 && centerMix.meanB < 0.6 * std::min(centerMix.meanR, centerMix.meanG) &&
+                        centerMix.yellowMix > 20u
+                    );
+
+                    // 3. No massive blackout or overflow
+                    const FrameMetrics fullFrame         = MeasureImage(frame);
+                    const bool         sceneWellLit      = ZHLN::Test::ExpectTrue(fullFrame.lit > (fullFrame.total * 0.30));
+                    const bool         noExtremeOverflow = ZHLN::Test::ExpectTrue(fullFrame.saturated < (fullFrame.total * 0.05));
+
+                    return redDominant && greenDominant && blueDominant && additiveMixing && sceneWellLit && noExtremeOverflow;
+                },
+                &validationRaised
+            );
+
+            if (stable == StableRunResult::AssertionsFailed) {
+                return std::unexpected(LightingRTTestError::MultiLightClusteringFailed);
+            }
+            if (stable != StableRunResult::Ok) {
+                return std::unexpected(LightingRTTestError::DeviceLostDuringTest);
+            }
+
+            ZHLN::Test::ExpectEq(validationRaised, 0u);
+            if (validationRaised != 0) {
+                return std::unexpected(LightingRTTestError::ValidationErrorsRaised);
+            }
+
+            ZHLN::Println("    [PASS] 64 Clustered lights correctly accumulated with clean chromatic superposition.");
+            return {};
+        }
+
+        // ====================================================================
+        // 7. Multi-Emissive Sources & Surface Reflection Interaction
+        // ====================================================================
+        std::expected<void, ZHLN::Error> multi_emissive_sources_and_surface_reflection_interaction() {
+            auto engine      = CreateTestEngine(640, 480);
+            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
+            if (!checkEngine) {
+                return std::unexpected(LightingRTTestError::EngineInitFailed);
+            }
+
+            DisableTAA(*engine);
+
+            {
+                auto& reg = engine->GetRegistry();
+                auto& rc  = engine->GetRenderContext();
+
+                const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
+                if (!settingsEnts.empty()) {
+                    reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
+                        pp.fullBright      = 0;
+                        pp.ambientExposure = 6.0f;
+                        pp.enableSSR       = 1;
+                        pp.enableRTR       = 0;
+                        pp.giMode          = 0;
+                    });
+                }
+
+                // Sun illumination to support scene depth and HDR tone mapping
+                const ZHLN::Entity sunEnt = reg.Create();
+                reg.Add(
+                    sunEnt,
+                    ZHLN::Components::TransformComponent {
+                        .position = JPH::Vec3(0.0f, 50.0f, 40.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({40.0f, 0.0f, 0.0f})
+                    },
+                    ZHLN::Components::LightComponent {
+                        .type      = ZHLN::LightType::Sun,
+                        .color     = JPH::Vec3(1.0f, 1.0f, 1.0f),
+                        .intensity = 100.0f,
+                        .direction = JPH::Vec3(0.0f, 0.75f, 0.66f).Normalized()
+                    }
+                );
+
+                // Polished metallic mirror floor
+                auto mirrorMat = ZHLN::CreativeWorksFactory::CreateMaterial(
+                    rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 1.0f, .roughness = 0.02f, .baseColor = {0.9f, 0.9f, 0.95f, 1.0f}}
+                );
+                auto checkMirror = ZHLN::Test::AssertTrue(mirrorMat.has_value());
+                if (!checkMirror) {
+                    return checkMirror;
+                }
+
+                ZHLN::CreativeWorksFactory::CreatePlane(
+                    *engine, 120.0f, {0.9f, 0.9f, 0.95f, 1.0f},
+                    ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = false, .materialOverride = *mirrorMat}
+                );
+
+                // 4 Distinct High-Luminance Emissive Geometric Emitters at Y = 3.0, Z = 0.0:
+                //   Emitter 1: X = -4.5 (Pure Red)
+                //   Emitter 2: X = -1.5 (Pure Green)
+                //   Emitter 3: X = +1.5 (Pure Blue)
+                //   Emitter 4: X = +4.5 (Golden Yellow)
+                auto matEmissiveRed = ZHLN::CreativeWorksFactory::CreateMaterial(
+                    rc, ZHLN::CreativeWorksFactory::MaterialDesc {
+                            .metallic = 0.0f, .roughness = 0.5f, .baseColor = {1.0f, 0.05f, 0.05f, 1.0f}, .emissive = {6.0f, 0.0f, 0.0f, 1.0f}
+                        }
+                );
+                auto matEmissiveGrn = ZHLN::CreativeWorksFactory::CreateMaterial(
+                    rc, ZHLN::CreativeWorksFactory::MaterialDesc {
+                            .metallic = 0.0f, .roughness = 0.5f, .baseColor = {0.05f, 1.0f, 0.05f, 1.0f}, .emissive = {0.0f, 6.0f, 0.0f, 1.0f}
+                        }
+                );
+                auto matEmissiveBlu = ZHLN::CreativeWorksFactory::CreateMaterial(
+                    rc, ZHLN::CreativeWorksFactory::MaterialDesc {
+                            .metallic = 0.0f, .roughness = 0.5f, .baseColor = {0.05f, 0.05f, 1.0f, 1.0f}, .emissive = {0.0f, 0.0f, 6.0f, 1.0f}
+                        }
+                );
+                auto matEmissiveYel = ZHLN::CreativeWorksFactory::CreateMaterial(
+                    rc, ZHLN::CreativeWorksFactory::MaterialDesc {
+                            .metallic = 0.0f, .roughness = 0.5f, .baseColor = {1.0f, 0.9f, 0.05f, 1.0f}, .emissive = {5.0f, 4.5f, 0.0f, 1.0f}
+                        }
+                );
+
+                ZHLN::CreativeWorksFactory::CreateBox(
+                    *engine, JPH::Vec3(0.5f, 0.5f, 0.5f),
+                    ZHLN::CreativeWorksFactory::SpawnParams {
+                        .position = JPH::RVec3(-4.5, 3.0, 0.0), .createPhysics = false, .materialOverride = *matEmissiveRed
+                    }
+                );
+                ZHLN::CreativeWorksFactory::CreateBox(
+                    *engine, JPH::Vec3(0.5f, 0.5f, 0.5f),
+                    ZHLN::CreativeWorksFactory::SpawnParams {
+                        .position = JPH::RVec3(-1.5, 3.0, 0.0), .createPhysics = false, .materialOverride = *matEmissiveGrn
+                    }
+                );
+                ZHLN::CreativeWorksFactory::CreateBox(
+                    *engine, JPH::Vec3(0.5f, 0.5f, 0.5f),
+                    ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(1.5, 3.0, 0.0), .createPhysics = false, .materialOverride = *matEmissiveBlu}
+                );
+                ZHLN::CreativeWorksFactory::CreateBox(
+                    *engine, JPH::Vec3(0.5f, 0.5f, 0.5f),
+                    ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(4.5, 3.0, 0.0), .createPhysics = false, .materialOverride = *matEmissiveYel}
+                );
+
+                auto& cam    = engine->GetCamera();
+                cam.position = JPH::Vec3(0.0f, 5.0f, 14.0f);
+                cam.yaw      = -90.0f;
+                cam.pitch    = -22.0f;
+                cam.fov      = 60.0f;
+            }
+
+            uint32_t validationRaised = 0;
+
+            const auto stable = RunStableScene(
+                *engine, 8, "multi_emissive_sources_and_surface_reflection_interaction",
+                [](ZHLN::Engine& eng) -> bool {
+                    const RgbImage frame      = Capture(eng, "headless_lighting_multi_emissive.ppm");
+                    auto           checkFrame = ZHLN::Test::AssertTrue(frame.Valid());
+                    if (!checkFrame) {
+                        return false;
+                    }
+
+                    // Slicing lower reflection half into 4 horizontal column bands centered on planar reflection centroids:
+                    //   Strip 1 (Red Refl Centroid   ~0.30): X in [0.20, 0.36], Y in [0.52, 0.95]
+                    //   Strip 2 (Green Refl Centroid ~0.43): X in [0.38, 0.48], Y in [0.52, 0.95]
+                    //   Strip 3 (Blue Refl Centroid  ~0.57): X in [0.52, 0.62], Y in [0.52, 0.95]
+                    //   Strip 4 (Yellow Refl Centroid~0.70): X in [0.64, 0.80], Y in [0.52, 0.95]
+                    const auto reflStripRed = MeasureSubRegion(frame, {.x0 = 0.20, .y0 = 0.52, .x1 = 0.36, .y1 = 0.95});
+                    const auto reflStripGrn = MeasureSubRegion(frame, {.x0 = 0.38, .y0 = 0.52, .x1 = 0.48, .y1 = 0.95});
+                    const auto reflStripBlu = MeasureSubRegion(frame, {.x0 = 0.52, .y0 = 0.52, .x1 = 0.62, .y1 = 0.95});
+                    const auto reflStripYel = MeasureSubRegion(frame, {.x0 = 0.64, .y0 = 0.52, .x1 = 0.80, .y1 = 0.95});
+
+                    ZHLN::Println("    [INFO] Multi-Emissive Planar Mirror Reflection Slices:");
+                    ZHLN::Println(
+                        "      Strip 1 (Refl Red):    MeanRGB=({:.1f},{:.1f},{:.1f}), DominantRed={}", reflStripRed.meanR, reflStripRed.meanG,
+                        reflStripRed.meanB, reflStripRed.dominantRed
+                    );
+                    ZHLN::Println(
+                        "      Strip 2 (Refl Green):  MeanRGB=({:.1f},{:.1f},{:.1f}), DominantGreen={}", reflStripGrn.meanR, reflStripGrn.meanG,
+                        reflStripGrn.meanB, reflStripGrn.dominantGrn
+                    );
+                    ZHLN::Println(
+                        "      Strip 3 (Refl Blue):   MeanRGB=({:.1f},{:.1f},{:.1f}), DominantBlue={}", reflStripBlu.meanR, reflStripBlu.meanG,
+                        reflStripBlu.meanB, reflStripBlu.dominantBlu
+                    );
+                    ZHLN::Println(
+                        "      Strip 4 (Refl Yellow): MeanRGB=({:.1f},{:.1f},{:.1f}), YellowMixPixels={}", reflStripYel.meanR, reflStripYel.meanG,
+                        reflStripYel.meanB, reflStripYel.yellowMix
+                    );
+
+                    // 1. Validate spatial correspondence of mirrored reflections
+                    const bool reflRedOk = ZHLN::Test::ExpectTrue(reflStripRed.dominantRed > 30u && reflStripRed.meanR > 1.3 * reflStripRed.meanG);
+                    const bool reflGrnOk = ZHLN::Test::ExpectTrue(reflStripGrn.dominantGrn > 30u && reflStripGrn.meanG > 1.3 * reflStripGrn.meanR);
+                    const bool reflBluOk = ZHLN::Test::ExpectTrue(reflStripBlu.dominantBlu > 30u && reflStripBlu.meanB > 1.3 * reflStripBlu.meanR);
+                    const bool reflYelOk = ZHLN::Test::ExpectTrue(reflStripYel.yellowMix > 20u && reflStripYel.meanR > 20.0 && reflStripYel.meanG > 20.0);
+
+                    // 2. Validate Upper Direct Emission visibility
+                    const auto upperDirect   = MeasureSubRegion(frame, {.x0 = 0.0, .y0 = 0.05, .x1 = 1.0, .y1 = 0.45});
+                    const bool directVisible = ZHLN::Test::ExpectTrue(
+                        upperDirect.maxLuma > 60.0 &&
+                        (upperDirect.dominantRed + upperDirect.dominantGrn + upperDirect.dominantBlu + upperDirect.yellowMix) > 150u
+                    );
+
+                    return reflRedOk && reflGrnOk && reflBluOk && reflYelOk && directVisible;
+                },
+                &validationRaised
+            );
+
+            if (stable == StableRunResult::AssertionsFailed) {
+                return std::unexpected(LightingRTTestError::MultiEmissiveReflectionFailed);
+            }
+            if (stable != StableRunResult::Ok) {
+                return std::unexpected(LightingRTTestError::DeviceLostDuringTest);
+            }
+
+            ZHLN::Test::ExpectEq(validationRaised, 0u);
+            if (validationRaised != 0) {
+                return std::unexpected(LightingRTTestError::ValidationErrorsRaised);
+            }
+
+            ZHLN::Println("    [PASS] Multi-emissive objects correctly mapped to their respective mirror reflections.");
+            return {};
+        }
+
+        // ====================================================================
+        // 8. Dense Multi-Light & Emissive Materials Cross-Interaction
+        // ====================================================================
+        std::expected<void, ZHLN::Error> dense_multi_light_emissive_materials_cross_interaction() {
+            auto engine      = CreateTestEngine(640, 480);
+            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
+            if (!checkEngine) {
+                return std::unexpected(LightingRTTestError::EngineInitFailed);
+            }
+
+            DisableTAA(*engine);
+
+            {
+                auto& reg = engine->GetRegistry();
+                auto& rc  = engine->GetRenderContext();
+
+                const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
+                if (!settingsEnts.empty()) {
+                    reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
+                        pp.fullBright      = 0;
+                        pp.ambientExposure = 6.0f;
+                        pp.enableSSR       = 1;
+                        pp.enableRTR       = 0;
+                        pp.giMode          = 0;
+                    });
+                }
+
+                auto floorMat = ZHLN::CreativeWorksFactory::CreateMaterial(
+                    rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.5f, .roughness = 0.25f, .baseColor = {0.6f, 0.6f, 0.65f, 1.0f}}
+                );
+                ZHLN::CreativeWorksFactory::CreatePlane(
+                    *engine, 80.0f, {0.6f, 0.6f, 0.65f, 1.0f},
+                    ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = false, .materialOverride = *floorMat}
+                );
+
+                auto monolithMat = ZHLN::CreativeWorksFactory::CreateMaterial(
+                    rc, ZHLN::CreativeWorksFactory::MaterialDesc {
+                            .metallic = 0.0f, .roughness = 0.2f, .baseColor = {0.0f, 1.0f, 1.0f, 1.0f}, .emissive = {0.0f, 20.0f, 20.0f, 1.0f}
+                        }
+                );
+                ZHLN::CreativeWorksFactory::CreateBox(
+                    *engine, JPH::Vec3(0.8f, 2.5f, 0.8f),
+                    ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 2.5, 0.0), .createPhysics = false, .materialOverride = *monolithMat}
+                );
+
+                auto goldMat = ZHLN::CreativeWorksFactory::CreateMaterial(
+                    rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 1.0f, .roughness = 0.15f, .baseColor = {1.0f, 0.76f, 0.14f, 1.0f}}
+                );
+                auto roughPlastic = ZHLN::CreativeWorksFactory::CreateMaterial(
+                    rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 0.8f, .baseColor = {0.8f, 0.2f, 0.2f, 1.0f}}
+                );
+
+                for (int x = -2; x <= 2; ++x) {
+                    for (int z = -2; z <= 2; ++z) {
+                        if (x == 0 && z == 0)
+                            continue;
+                        float px = static_cast<float>(x) * 3.5f;
+                        float pz = static_cast<float>(z) * 3.5f;
+                        ZHLN::CreativeWorksFactory::CreateBox(
+                            *engine, JPH::Vec3(0.5f, 0.5f, 0.5f),
+                            ZHLN::CreativeWorksFactory::SpawnParams {
+                                .position = JPH::RVec3(px, 0.5, pz), .createPhysics = false, .materialOverride = ((x + z) % 2 == 0) ? *goldMat : *roughPlastic
+                            }
+                        );
+                    }
+                }
+
+                constexpr size_t kLightCount = 32;
+                for (size_t i = 0; i < kLightCount; ++i) {
+                    float angle  = (static_cast<float>(i) / static_cast<float>(kLightCount)) * 6.283185f;
+                    float radius = 5.0f + (static_cast<float>(i % 3) * 2.0f);
+                    float lx     = std::sin(angle) * radius;
+                    float lz     = std::cos(angle) * radius;
+                    float ly     = 1.0f + static_cast<float>(i % 4) * 0.8f;
+
+                    JPH::Vec3 lightCol(std::sin(angle) * 0.5f + 0.5f, std::cos(angle * 0.5f) * 0.5f + 0.5f, std::sin(angle * 1.5f + 1.0f) * 0.5f + 0.5f);
+
+                    const ZHLN::Entity lt = reg.Create();
+                    reg.Add(
+                        lt, ZHLN::Components::TransformComponent {.position = JPH::Vec3(lx, ly, lz)},
+                        ZHLN::Components::LightComponent {
+                            .type      = ZHLN::LightType::Point,
+                            .color     = lightCol,
+                            .intensity = 220.0f,
+                            .range     = 12.0f,
+                        }
+                    );
+                }
+
+                auto& cam    = engine->GetCamera();
+                cam.position = JPH::Vec3(0.0f, 8.0f, -18.0f);
+                cam.yaw      = 90.0f;
+                cam.pitch    = -22.0f;
+                cam.fov      = 60.0f;
+            }
+
+            uint32_t validationRaised = 0;
+
+            const auto stable = RunStableScene(
+                *engine, 10, "dense_multi_light_emissive_materials_cross_interaction",
+                [](ZHLN::Engine& eng) -> bool {
+                    const RgbImage frame      = Capture(eng, "headless_lighting_dense_interaction.ppm");
+                    auto           checkFrame = ZHLN::Test::AssertTrue(frame.Valid());
+                    if (!checkFrame) {
+                        return false;
+                    }
+
+                    const FrameMetrics m = MeasureImage(frame);
+
+                    ZHLN::Println("    [INFO] Dense 32-Light + Emissive Monolith Scene Metrics:");
+                    ZHLN::Println("      Lit Pixels: {}, Dark Pixels: {}, Saturated Pixels: {}, Mean Luma: {:.2f}", m.lit, m.dark, m.saturated, m.meanLuma);
+                    ZHLN::Println(
+                        "      Cyan (Monolith Reflection) Pixels: {}, Red Pixels: {}, Green Pixels: {}, Blue Pixels: {}", m.cyan, m.red, m.green, m.blue
+                    );
+
+                    const bool wellLit          = ZHLN::Test::ExpectTrue(m.lit > (m.total * 0.35));
+                    const bool limitedBlowout   = ZHLN::Test::ExpectTrue(m.saturated < (m.total * 0.05));
+                    const bool cyanObserved     = ZHLN::Test::ExpectTrue(m.cyan > 200u);
+                    const bool multiColorActive = ZHLN::Test::ExpectTrue(m.red > 200u && m.green > 200u && m.blue > 200u);
+
+                    return wellLit && limitedBlowout && cyanObserved && multiColorActive;
+                },
+                &validationRaised
+            );
+
+            if (stable == StableRunResult::AssertionsFailed) {
+                return std::unexpected(LightingRTTestError::DenseCrossInteractionFailed);
+            }
+            if (stable != StableRunResult::Ok) {
+                return std::unexpected(LightingRTTestError::DeviceLostDuringTest);
+            }
+
+            ZHLN::Test::ExpectEq(validationRaised, 0u);
+            if (validationRaised != 0) {
+                return std::unexpected(LightingRTTestError::ValidationErrorsRaised);
+            }
+
+            ZHLN::Println("    [PASS] 32 Dynamic point lights and emissive monolith cross-interaction verified.");
             return {};
         }
     };
 };
 
 int main(int argc, char** argv) {
-    // --convert-ppm FILE...  : convert already-captured PPM frames to PNG
-    // without running the suite (handy for attaching the existing debug
-    // captures from a prior failing run).
     if (argc >= 3 && std::string_view(argv[1]) == "--convert-ppm") {
         bool allOk = true;
         for (int i = 2; i < argc; ++i) {
