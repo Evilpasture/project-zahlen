@@ -39,9 +39,9 @@ class IBLProcessor {
         const JPH::Vec4 sunDir     = JPH::Vec4(JPH::Vec3(0.5f, 1.0f, 0.2f).Normalized(), 0.0f);
 
         struct Pipelines {
-            ComputePass brdf;
-            ComputePass spec;
-            ComputePass sh;
+            DynamicComputePass brdf;
+            DynamicComputePass spec;
+            DynamicComputePass sh;
         };
 
         struct State {
@@ -56,15 +56,15 @@ class IBLProcessor {
             .and_then([&](auto) -> auto {
                 return CreateHeapComputePass(impl.ctx.Device(), brdfShader, impl.bakeHeapBindings.GetInfo(), impl.bakeHeapBindings.indexPushOffset);
             })
-            .and_then([&](ComputePass brdf) -> auto {
+            .and_then([&](DynamicComputePass brdf) -> auto {
                 return CreateHeapComputePass(impl.ctx.Device(), specShader, impl.bakeHeapBindings.GetInfo(), impl.bakeHeapBindings.indexPushOffset)
-                    .transform([brdf = std::move(brdf)](ComputePass spec) mutable {
+                    .transform([brdf = std::move(brdf)](DynamicComputePass spec) mutable {
                         return Pipelines {.brdf = std::move(brdf), .spec = std::move(spec), .sh = {}};
                     });
             })
             .and_then([&](Pipelines pipes) -> auto {
                 return CreateHeapComputePass(impl.ctx.Device(), shShader, impl.bakeHeapBindings.GetInfo(), impl.bakeHeapBindings.indexPushOffset)
-                    .transform([pipes = std::move(pipes)](ComputePass sh) mutable {
+                    .transform([pipes = std::move(pipes)](DynamicComputePass sh) mutable {
                         pipes.sh = std::move(sh);
                         return std::move(pipes);
                     });

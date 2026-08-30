@@ -16,7 +16,7 @@ auto RenderContext::Impl::BuildTAAPipeline() -> std::expected<void, Error> {
     using enum Resource::ShaderID;
 
     return BuildPassHelper(
-        this, taaPass, "TAA", {.path = Resource::Paths::TaaVS, .fallback = Resource::GetShaderProgram(Taa).vertex, .entryPoint = "VSMain"},
+        this, taaPass, {.path = Resource::Paths::TaaVS, .fallback = Resource::GetShaderProgram(Taa).vertex, .entryPoint = "VSMain"},
         {.path = Resource::Paths::TaaPS, .fallback = Resource::GetShaderProgram(Taa).fragment, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT}
     );
 }
@@ -25,7 +25,7 @@ auto RenderContext::Impl::BuildFXAAPipeline() -> std::expected<void, Error> {
     using enum Resource::ShaderID;
 
     return BuildPassHelper(
-        this, fxaaPass, "FXAA", {.path = Resource::Paths::FxaaVS, .fallback = Resource::GetShaderProgram(Fxaa).vertex},
+        this, fxaaPass, {.path = Resource::Paths::FxaaVS, .fallback = Resource::GetShaderProgram(Fxaa).vertex},
         {.path = Resource::Paths::FxaaPS, .fallback = Resource::GetShaderProgram(Fxaa).fragment}, {VK_FORMAT_R16G16B16A16_SFLOAT}
     );
 }
@@ -34,7 +34,7 @@ auto RenderContext::Impl::BuildMLAAPipeline() -> std::expected<void, Error> {
     using enum Resource::ShaderID;
 
     return BuildPassHelper(
-        this, mlaaPass, "MLAA", {.path = Resource::Paths::MlaaVS, .fallback = Resource::GetShaderProgram(Mlaa).vertex},
+        this, mlaaPass, {.path = Resource::Paths::MlaaVS, .fallback = Resource::GetShaderProgram(Mlaa).vertex},
         {.path = Resource::Paths::MlaaPS, .fallback = Resource::GetShaderProgram(Mlaa).fragment}, {VK_FORMAT_R16G16B16A16_SFLOAT}
     );
 }
@@ -43,19 +43,19 @@ auto RenderContext::Impl::BuildSMAAPipeline() -> std::expected<void, Error> {
     using enum Resource::ShaderID;
 
     return BuildPassHelper(
-               this, smaaEdgePass, "SMAA Edge Detection", {.path = Resource::Paths::SmaaEdgeVS, .fallback = Resource::GetShaderProgram(SmaaEdge).vertex},
+               this, smaaEdgePass, {.path = Resource::Paths::SmaaEdgeVS, .fallback = Resource::GetShaderProgram(SmaaEdge).vertex},
                {.path = Resource::Paths::SmaaEdgePS, .fallback = Resource::GetShaderProgram(SmaaEdge).fragment}, {VK_FORMAT_R8G8_UNORM}
     )
         .and_then([&]() -> std::expected<void, Error> {
             return BuildPassHelper(
-                this, smaaWeightPass, "SMAA Blending Weight",
+                this, smaaWeightPass,
                 {.path = Resource::Paths::SmaaWeightVS, .fallback = Resource::GetShaderProgram(SmaaWeight).vertex},
                 {.path = Resource::Paths::SmaaWeightPS, .fallback = Resource::GetShaderProgram(SmaaWeight).fragment}, {VK_FORMAT_R8G8B8A8_UNORM}
             );
         })
         .and_then([&]() -> std::expected<void, Error> {
             return BuildPassHelper(
-                this, smaaBlendPass, "SMAA Neighborhood Blend",
+                this, smaaBlendPass,
                 {.path = Resource::Paths::SmaaBlendVS, .fallback = Resource::GetShaderProgram(SmaaBlend).vertex},
                 {.path = Resource::Paths::SmaaBlendPS, .fallback = Resource::GetShaderProgram(SmaaBlend).fragment}, {VK_FORMAT_R16G16B16A16_SFLOAT}
             );
@@ -84,7 +84,7 @@ auto RenderContext::Impl::BuildLightingPipeline() -> std::expected<void, Error> 
     auto psSpan = hasRt ? Resource::GetShaderProgram(Lighting).fragment : Resource::GetShaderProgram(LightingNort).fragment;
 
     return BuildPassVariants(
-        this, lightingPass, "Lighting", {.path = vsPath, .fallback = vsSpan, .entryPoint = "VSMain"},
+        this, lightingPass, {.path = vsPath, .fallback = vsSpan, .entryPoint = "VSMain"},
         {.path = psPath, .fallback = psSpan, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
     );
 }
@@ -117,7 +117,7 @@ auto RenderContext::Impl::BuildReflectionPipelines() -> std::expected<void, Erro
     auto psSpan = hasRt ? Resource::GetShaderProgram(Reflection).fragment : Resource::GetShaderProgram(Resource::ShaderID::ReflectionNort).fragment;
 
     auto res = BuildPassVariants(
-        this, reflectionPass, "Reflection", {.path = vsPath, .fallback = vsSpan, .entryPoint = "VSMain"},
+        this, reflectionPass, {.path = vsPath, .fallback = vsSpan, .entryPoint = "VSMain"},
         {.path = psPath, .fallback = psSpan, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
     );
     if (!res) {
@@ -125,7 +125,7 @@ auto RenderContext::Impl::BuildReflectionPipelines() -> std::expected<void, Erro
     }
 
     return BuildPassVariants(
-        this, translucentReflectionPass, "Translucent Reflection", {.path = vsPath, .fallback = vsSpan, .entryPoint = "VSMain"},
+        this, translucentReflectionPass, {.path = vsPath, .fallback = vsSpan, .entryPoint = "VSMain"},
         {.path = psPath, .fallback = psSpan, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
     );
 }
@@ -143,7 +143,7 @@ auto RenderContext::Impl::BuildBloomPipelines() -> std::expected<void, Error> {
     // index-addressable slot or the later writes clobber the earlier
     // dispatches' bindings before the GPU ever reads them.
     const auto buildCompute =
-        [&](Vk::ComputePass& pass, Vk::SlangReflectedLayout& layout, Vk::HeapPassBindings& bindings, std::span<const uint8_t> spirv, uint32_t slotSpan)
+        [&](Vk::DynamicComputePass& pass, Vk::SlangReflectedLayout& layout, Vk::HeapPassBindings& bindings, std::span<const uint8_t> spirv, uint32_t slotSpan)
         -> std::expected<void, Error> {
         const auto shader = Vk::CreateShaderDesc(spirv);
         if (!layout.Build(ctx.Device(), shader, VK_SHADER_STAGE_COMPUTE_BIT)) {
@@ -184,7 +184,7 @@ auto RenderContext::Impl::BuildBlitPipeline() -> std::expected<void, Error> {
     using enum Resource::ShaderID;
 
     return BuildPassHelper(
-        this, blitPass, "Blit", {.path = Resource::Paths::BlitVS, .fallback = Resource::GetShaderProgram(Blit).vertex, .entryPoint = "VSMain"},
+        this, blitPass, {.path = Resource::Paths::BlitVS, .fallback = Resource::GetShaderProgram(Blit).vertex, .entryPoint = "VSMain"},
         {.path = Resource::Paths::BlitPS, .fallback = Resource::GetShaderProgram(Blit).fragment, .entryPoint = "PSMain"}, {presentation.GetPresentFormat()}
     );
 }
@@ -235,7 +235,7 @@ auto RenderContext::Impl::BakeSMAALUTs() -> std::expected<void, Error> {
     };
     const ZHLN_ShaderDesc shader = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::SMAALUTComp).vertex, "CSMain");
     return Vk::CreateHeapComputePass(ctx.Device(), shader, bakeHeapBindings.GetInfo(), bakeHeapBindings.indexPushOffset)
-        .and_then([&](Vk::ComputePass pass) -> std::expected<void, Error> {
+        .and_then([&](Vk::DynamicComputePass pass) -> std::expected<void, Error> {
             return BakeComputeTexture2D(pass, 160, 560, VK_FORMAT_R8G8B8A8_UNORM, SMAALUTPush {.width = 160, .height = 560, .mode = 0})
                 .and_then([&](uint32_t areaIdx) -> std::expected<uint32_t, Error> {
                     smaaAreaTexIdx = areaIdx;

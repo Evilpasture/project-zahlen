@@ -15,6 +15,9 @@
 
 namespace ZHLN::Vk {
 
+template <typename T>
+concept PostProcessPushPayload = GpuTriviallyCopyable<T> && (sizeof(T) <= sizeof(::ZHLN::ScenePassPushConstants));
+
 template <typename LayoutT>
 struct PostProcessPass {
     [[no_unique_address]] LayoutT layoutInstance {};
@@ -41,30 +44,25 @@ struct PostProcessPass {
         bool                                  additive = false
     ) noexcept;
 
+    [[nodiscard]] auto Valid() const noexcept -> bool {
+        return pipeline.Valid() || !pipelines.empty();
+    }
+
+    [[nodiscard]] auto HasHeapIndexPushOffset() const noexcept -> bool {
+        return heapBindings.indexPushOffset > 0;
+    }
+
     /// Writes the pass descriptors into the slot span selected by `heapIndex`
     /// (frame parity). Argument order mirrors the shader's set-0 declaration
     /// order; sampler positions are skipped.
     template <typename... Args>
     void WriteHeap(const Context& ctx, HeapManager& heap, uint32_t heapIndex, Args&&... args) const noexcept;
 
-    template <GpuTriviallyCopyable T>
-    void ExecuteHeap(
-        const Context&     ctx,
-        VkCommandBuffer    cmd,
-        const T&           pushData,
-        uint32_t           heapIndex,
-        VkShaderStageFlags stages = VK_SHADER_STAGE_FRAGMENT_BIT
-    ) const noexcept;
+    template <PostProcessPushPayload T>
+    void ExecuteHeap(const Context& ctx, VkCommandBuffer cmd, const T& pushData, uint32_t heapIndex) const noexcept;
 
-    template <GpuTriviallyCopyable T>
-    void ExecuteVariantHeap(
-        const Context&     ctx,
-        VkCommandBuffer    cmd,
-        uint32_t           variantIdx,
-        const T&           pushData,
-        uint32_t           heapIndex,
-        VkShaderStageFlags stages = VK_SHADER_STAGE_FRAGMENT_BIT
-    ) const noexcept;
+    template <PostProcessPushPayload T>
+    void ExecuteVariantHeap(const Context& ctx, VkCommandBuffer cmd, uint32_t variantIdx, const T& pushData, uint32_t heapIndex) const noexcept;
 
     void ExecuteHeap(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex) const noexcept;
 };

@@ -34,9 +34,8 @@ GraphicsPassDesc(PassT&, const char*, VertexStageSource, FragmentStageSource, Vk
 
 template <typename LayoutT>
 [[nodiscard]] inline auto BuildPassHelper(
-    RenderContext::Impl*          self,
-    Vk::PostProcessPass<LayoutT>& pass,
-    const char* /*passName*/,
+    RenderContext::Impl*            self,
+    Vk::PostProcessPass<LayoutT>&   pass,
     VertexStageSource               vs,
     FragmentStageSource             ps,
     std::initializer_list<VkFormat> colorFormats,
@@ -55,9 +54,8 @@ template <typename LayoutT>
 
 template <typename LayoutT>
 [[nodiscard]] inline auto BuildPassVariants(
-    RenderContext::Impl*          self,
-    Vk::PostProcessPass<LayoutT>& pass,
-    const char* /*passName*/,
+    RenderContext::Impl*                  self,
+    Vk::PostProcessPass<LayoutT>&         pass,
     VertexStageSource                     vs,
     FragmentStageSource                   ps,
     std::initializer_list<VkFormat>       colorFormats,
@@ -78,14 +76,14 @@ template <typename LayoutT>
 
 template <typename PassT>
 [[nodiscard]] inline auto BuildDescribedPass(RenderContext::Impl* self, const GraphicsPassDesc<PassT>& desc) noexcept -> std::expected<void, Error> {
-    auto result = BuildPassHelper(self, desc.pass, desc.name, desc.vs, desc.ps, {desc.colorFormat}, desc.additive);
+    auto result = BuildPassHelper(self, desc.pass, desc.vs, desc.ps, {desc.colorFormat}, desc.additive);
     if (!result) {
         return result;
     }
     self->WatchPipeline(
         desc.vs.path, desc.ps.path,
         [self, pass = &desc.pass, name = desc.name, vs = desc.vs, ps = desc.ps, fmt = desc.colorFormat, additive = desc.additive]() -> auto {
-            auto reload = BuildPassHelper(self, *pass, name, vs, ps, {fmt}, additive);
+            auto reload = BuildPassHelper(self, *pass, vs, ps, {fmt}, additive);
             if (!reload) {
                 ZHLN::Log("ERROR: Failed to hot-reload pipeline '{}': {}", name, reload.error().Message());
             } else {
