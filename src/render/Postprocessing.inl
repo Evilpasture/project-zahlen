@@ -96,7 +96,7 @@ void PostProcessPass<LayoutT>::WriteHeap(const Context& ctx, HeapManager& heap, 
 template <typename LayoutT>
 template <PostProcessPushPayload T>
 void PostProcessPass<LayoutT>::ExecuteHeap(const Context& ctx, VkCommandBuffer cmd, const T& pushData, uint32_t heapIndex) const noexcept {
-    static_assert(sizeof(T) <= sizeof(::ZHLN::ScenePassPushConstants), "Pass push struct exceeds DescriptorHeapPushData::passData.");
+    static_assert(sizeof(T) <= kScenePassPushPayloadBytes, "Pass push struct exceeds DescriptorHeapPushData::passData.");
     detail::AssertValidCommandBuffer(cmd, "post-process fullscreen draw");
     ZHLN::Assert(Valid(), "Attempted to bind an invalid post-process pipeline.");
     detail::AssertHeapIndexOffset(heapBindings.indexPushOffset);
@@ -115,7 +115,7 @@ void PostProcessPass<LayoutT>::ExecuteVariantHeap(
     const T&        pushData,
     uint32_t        heapIndex
 ) const noexcept {
-    static_assert(sizeof(T) <= sizeof(::ZHLN::ScenePassPushConstants), "Pass push struct exceeds DescriptorHeapPushData::passData.");
+    static_assert(sizeof(T) <= kScenePassPushPayloadBytes, "Pass push struct exceeds DescriptorHeapPushData::passData.");
     detail::AssertValidCommandBuffer(cmd, "post-process fullscreen draw");
     detail::AssertHeapIndexOffset(heapBindings.indexPushOffset);
     ZHLN::Assert(variantIdx < pipelines.size(), "Post-process pipeline variant index {} is out of bounds ({} variants).", variantIdx, pipelines.size());

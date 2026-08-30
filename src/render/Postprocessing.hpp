@@ -16,7 +16,7 @@
 namespace ZHLN::Vk {
 
 template <typename T>
-concept PostProcessPushPayload = GpuTriviallyCopyable<T> && (sizeof(T) <= sizeof(::ZHLN::ScenePassPushConstants));
+concept PostProcessPushPayload = GpuTriviallyCopyable<T> && (sizeof(T) <= kScenePassPushPayloadBytes);
 
 template <typename LayoutT>
 struct PostProcessPass {

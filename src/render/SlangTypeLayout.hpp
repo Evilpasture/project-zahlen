@@ -32,7 +32,8 @@ enum class SpirvLayoutError : uint8_t {
 /// `DescriptorHeapPushData`. Rename this with the Slang type.
 struct DescriptorHeapPushData {};
 
-inline constexpr uint32_t kHeapFrameAddressCount = 6;
+inline constexpr uint32_t kHeapFrameAddressCount      = 6;
+inline constexpr uint32_t kScenePassPushPayloadBytes = 192;
 
 /// Byte offsets in the vkCmdPushDataEXT blob, reflected from
 /// DescriptorHeapPushData in compiled SPIR-V. Address slots are taken in

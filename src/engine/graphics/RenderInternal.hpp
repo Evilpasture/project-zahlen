@@ -1071,6 +1071,7 @@ struct RenderContext::Impl {
     // (descriptor_heap_layout.slang) and size-validated against the compiled
     // gpu_abi SPIR-V at startup.
     using PPPushConstants = GPUTypes::Heap::ScenePassPushConstants;
+    static_assert(sizeof(PPPushConstants) == Vk::kScenePassPushPayloadBytes);
 
     struct DecalPushConstants {
         JPH::Mat44 world;

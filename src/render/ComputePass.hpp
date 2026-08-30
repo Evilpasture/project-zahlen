@@ -13,14 +13,13 @@
 #endif
 
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Types.hpp>
 
 namespace ZHLN::Vk {
 
 enum class ComputeDomain : uint8_t { Dynamic, Fixed };
 
 template <typename T>
-concept HeapPassPushPayload = GpuTriviallyCopyable<T> && (sizeof(T) <= sizeof(::ZHLN::ScenePassPushConstants));
+concept HeapPassPushPayload = GpuTriviallyCopyable<T> && (sizeof(T) <= kScenePassPushPayloadBytes);
 
 namespace detail {
 
@@ -230,7 +229,7 @@ struct ComputePass {
     ) const noexcept
         requires(Domain == ComputeDomain::Dynamic)
     {
-        static_assert(sizeof(T) <= sizeof(::ZHLN::ScenePassPushConstants), "Pass push struct exceeds DescriptorHeapPushData::passData.");
+        static_assert(sizeof(T) <= kScenePassPushPayloadBytes, "Pass push struct exceeds DescriptorHeapPushData::passData.");
         Bind(cmd);
         PushData(ctx, cmd, 0, pushData);
         DispatchThreads(cmd, threadCountX, threadCountY, threadCountZ);
@@ -264,7 +263,7 @@ struct ComputePass {
     ) const noexcept
         requires(Domain == ComputeDomain::Dynamic)
     {
-        static_assert(sizeof(T) <= sizeof(::ZHLN::ScenePassPushConstants), "Pass push struct exceeds DescriptorHeapPushData::passData.");
+        static_assert(sizeof(T) <= kScenePassPushPayloadBytes, "Pass push struct exceeds DescriptorHeapPushData::passData.");
         detail::AssertHeapIndexOffset(heapIndexPushOffset);
         Bind(cmd);
         PushData(ctx, cmd, 0, pushData);
@@ -316,7 +315,7 @@ struct ComputePass {
     void DispatchHeap(const Context& ctx, VkCommandBuffer cmd, const T& pushData) const noexcept
         requires(Domain == ComputeDomain::Fixed)
     {
-        static_assert(sizeof(T) <= sizeof(::ZHLN::ScenePassPushConstants), "Pass push struct exceeds DescriptorHeapPushData::passData.");
+        static_assert(sizeof(T) <= kScenePassPushPayloadBytes, "Pass push struct exceeds DescriptorHeapPushData::passData.");
         Bind(cmd);
         PushData(ctx, cmd, 0, pushData);
         Dispatch(cmd);
@@ -335,7 +334,7 @@ struct ComputePass {
     void DispatchHeapIndexed(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex, const T& pushData) const noexcept
         requires(Domain == ComputeDomain::Fixed)
     {
-        static_assert(sizeof(T) <= sizeof(::ZHLN::ScenePassPushConstants), "Pass push struct exceeds DescriptorHeapPushData::passData.");
+        static_assert(sizeof(T) <= kScenePassPushPayloadBytes, "Pass push struct exceeds DescriptorHeapPushData::passData.");
         detail::AssertHeapIndexOffset(heapIndexPushOffset);
         Bind(cmd);
         PushData(ctx, cmd, 0, pushData);
@@ -431,7 +430,7 @@ struct DoubleBufferedComputePass {
     ) const noexcept
         requires(Domain == ComputeDomain::Dynamic)
     {
-        static_assert(sizeof(T) <= sizeof(::ZHLN::ScenePassPushConstants), "Pass push struct exceeds DescriptorHeapPushData::passData.");
+        static_assert(sizeof(T) <= kScenePassPushPayloadBytes, "Pass push struct exceeds DescriptorHeapPushData::passData.");
         detail::AssertValidCommandBuffer(cmd);
         ZHLN::Assert(Valid(), "Attempted to bind an invalid double-buffered compute pipeline.");
         detail::AssertHeapIndexOffset(heapBindings.indexPushOffset);
@@ -457,7 +456,7 @@ struct DoubleBufferedComputePass {
     void DispatchHeap(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex, const T& pushData) const noexcept
         requires(Domain == ComputeDomain::Fixed)
     {
-        static_assert(sizeof(T) <= sizeof(::ZHLN::ScenePassPushConstants), "Pass push struct exceeds DescriptorHeapPushData::passData.");
+        static_assert(sizeof(T) <= kScenePassPushPayloadBytes, "Pass push struct exceeds DescriptorHeapPushData::passData.");
         detail::AssertValidCommandBuffer(cmd);
         ZHLN::Assert(Valid(), "Attempted to bind an invalid double-buffered compute pipeline.");
         detail::AssertHeapIndexOffset(heapBindings.indexPushOffset);
