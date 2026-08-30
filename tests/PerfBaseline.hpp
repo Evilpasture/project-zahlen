@@ -4,8 +4,8 @@
 // tests/PerfBaseline.hpp
 //
 // Performance baseline caching for TestPerformance / TestRenderPerformance,
-// built on the engine's own JSON module (ReflectJSON::Document to read,
-// ReflectJSON::Value to write), ZHLN::Mutex and ZHLN::Println.
+// built on the engine's own JSON module (ReflectJSON::TryParse to read,
+// ZHLN::Reflect::SerializeJSON to write), ZHLN::Mutex and ZHLN::Println.
 //
 // Every benchmark metric is recorded to perf-baseline.json at the PROJECT
 // ROOT (ZHLN_PROJECT_ROOT, defined once in the root CMakeLists), so
@@ -13,9 +13,9 @@
 // compares against the LAST recorded value; a regression beyond the limit
 // fails the test via ZHLN::Test::VerifyBaseline (TestsFramework.hpp).
 //
-// Storage layout (one file, many machines):
-//   { "_version": 1,
-//     "<machine key>": { "<metric name>": <number>, ... }, ... }
+// Storage: one reflected struct (PerfBaselineFile below) serialised through
+// ZHLN::Reflect::SerializeJSON and read back with ReflectJSON::TryParse --
+// the file format IS the struct declaration:
 // The machine key is hostname | Config.hpp Compiler | BuildType (+ " ASan"),
 // so different machines/toolchains/profiles keep independent baselines in
 // the shared file; an unknown key simply starts a fresh baseline. The file
@@ -113,85 +113,34 @@ namespace ZHLN::Test::Perf {
 }
 
 // ============================================================================
-// Baseline file I/O (via the engine JSON module)
+// Baseline file schema (reflected: field names are the JSON keys)
 // ============================================================================
 
-using MetricMap = std::map<std::string, double>;
-using MachineMap = std::map<std::string, MetricMap>;
+struct MachineBaselines {
+    std::map<std::string, double> metrics;
+};
 
-// Reads one machine's metrics out of the baseline file. A missing file or
-// missing machine section is not an error (fresh baseline); an unparsable
-// file warns on stderr and also yields a fresh baseline.
-[[nodiscard]] inline auto LoadMachineMetrics(const std::filesystem::path& path, const std::string& machine) -> MetricMap {
+struct PerfBaselineFile {
+    uint32_t                                version = 1;
+    std::map<std::string, MachineBaselines> machines;
+};
+
+// Reads the whole baseline file. A missing or unparsable file is not an
+// error: it warns and yields the default (fresh baseline), because the
+// natural first-run flow is "no file yet".
+[[nodiscard]] inline auto LoadBaselineFile(const std::filesystem::path& path) -> PerfBaselineFile {
     std::ifstream file {path, std::ios::binary};
     if (!file) {
-        return {}; // no baseline yet
+        return {};
     }
     const std::string text {(std::istreambuf_iterator<char> {file}), std::istreambuf_iterator<char> {}};
 
-    auto document = ReflectJSON::Document::Parse(text);
-    if (!document) {
+    auto parsed = ReflectJSON::TryParse<PerfBaselineFile>(text);
+    if (!parsed) {
         ZHLN::Println(stderr, "[perf-baseline] {} is malformed; starting a fresh baseline", path.string());
         return {};
     }
-
-    // Missing machine key (JSONError::MissingField) = fresh baseline.
-    auto section = document->GetRoot().GetKey(machine);
-    if (!section) {
-        return {};
-    }
-
-    auto keys = section->GetObjectKeys();
-    if (!keys) {
-        ZHLN::Println(stderr, "[perf-baseline] machine section is not an object; starting a fresh baseline");
-        return {};
-    }
-
-    MetricMap metrics;
-    for (const std::string_view key: *keys) {
-        auto field = section->GetKey(key);
-        if (!field) {
-            continue;
-        }
-        auto number = field->GetDouble();
-        if (number && *number > 0.0) {
-            metrics.emplace(std::string {key}, *number);
-        }
-    }
-    return metrics;
-}
-
-// Serialises every machine's metrics through ReflectJSON::Value.
-[[nodiscard]] inline auto SerializeMachines(const MachineMap& machines) -> std::string {
-    auto root = ReflectJSON::Value::Object();
-    (void) root.Set("_version", ReflectJSON::Value::Number(1));
-
-    for (const auto& [machine, metrics]: machines) {
-        auto section = ReflectJSON::Value::Object();
-        for (const auto& [metric, value]: metrics) {
-            (void) section.Set(metric, ReflectJSON::Value::Number(value));
-        }
-        (void) root.Set(machine, std::move(section));
-    }
-    return root.Stringify();
-}
-
-// Writes `text` to `path` atomically (tmp file + rename).
-inline void WriteBaselineAtomically(const std::filesystem::path& path, const std::string& text) {
-    try {
-        const std::filesystem::path temporary {path.string() + ".tmp"};
-        {
-            std::ofstream file {temporary, std::ios::binary | std::ios::trunc};
-            if (!file) {
-                ZHLN::Println(stderr, "[perf-baseline] cannot open {} for writing", temporary.string());
-                return;
-            }
-            file.write(text.data(), static_cast<std::streamsize>(text.size()));
-        }
-        std::filesystem::rename(temporary, path); // throws on failure
-    } catch (const std::filesystem::filesystem_error& error) {
-        ZHLN::Println(stderr, "[perf-baseline] writing {} failed: {}", path.string(), error.what());
-    }
+    return std::move(*parsed);
 }
 
 // ============================================================================
@@ -219,10 +168,10 @@ namespace detail {
     // (TestPerformance + TestRenderPerformance under `ctest -j`) cannot
     // clobber each other's metrics.
     struct BaselineStore {
-        ZHLN::Mutex  mutex;
-        MetricMap    baseline; // this machine's last-known values
-        MetricMap    pending;  // this process's accepted updates
-        bool         loaded = false;
+        ZHLN::Mutex                       mutex;
+        std::map<std::string, double>     baseline; // this machine's last-known values
+        std::map<std::string, double>     pending;  // this process's accepted updates
+        bool                              loaded = false;
 
         ~BaselineStore() {
             SaveNow();
@@ -231,44 +180,13 @@ namespace detail {
         void SaveNow() {
             const std::lock_guard<ZHLN::Mutex> lock {mutex};
 
-            // Re-read the whole file and replace only OUR machine's section.
-            MachineMap machines;
-            {
-                std::ifstream file {BaselineFilePath(), std::ios::binary};
-                if (file) {
-                    const std::string text {(std::istreambuf_iterator<char> {file}), std::istreambuf_iterator<char> {}};
-                    if (auto document = ReflectJSON::Document::Parse(text); document) {
-                        if (auto machinesOnDisk = document->GetRoot().GetObjectKeys(); machinesOnDisk) {
-                            for (const std::string_view machine: *machinesOnDisk) {
-                                if (machine == "_version") {
-                                    continue;
-                                }
-                                auto section = document->GetRoot().GetKey(machine);
-                                if (!section) {
-                                    continue;
-                                }
-                                MetricMap metrics;
-                                if (auto metricKeys = section->GetObjectKeys(); metricKeys) {
-                                    for (const std::string_view metric: *metricKeys) {
-                                        auto field = section->GetKey(metric);
-                                        if (!field) {
-                                            continue;
-                                        }
-                                        auto number = field->GetDouble();
-                                        if (number && *number > 0.0) {
-                                            metrics.emplace(std::string {metric}, *number);
-                                        }
-                                    }
-                                }
-                                machines.emplace(std::string {machine}, std::move(metrics));
-                            }
-                        }
-                    }
-                }
-            }
-            machines[MachineKey()] = pending; // our accepted values win
+            // Read-modify-write through the reflected file struct: only OUR
+            // machine's section is replaced, so other machines' baselines
+            // (and other test executables' sections) survive the save.
+            PerfBaselineFile file = LoadBaselineFile(BaselineFilePath());
+            file.machines[MachineKey()].metrics = pending;
 
-            WriteBaselineAtomically(BaselineFilePath(), SerializeMachines(machines));
+            WriteBaselineAtomically(BaselineFilePath(), Reflect::SerializeJSON(file, 2));
         }
     };
 
@@ -292,8 +210,12 @@ namespace detail {
     const std::lock_guard<ZHLN::Mutex> lock {store.mutex};
 
     if (!store.loaded) {
-        store.baseline = LoadMachineMetrics(BaselineFilePath(), MachineKey());
-        store.loaded   = true;
+        const PerfBaselineFile file = LoadBaselineFile(BaselineFilePath());
+        const auto             ours = file.machines.find(MachineKey());
+        if (ours != file.machines.end()) {
+            store.baseline = ours->second.metrics;
+        }
+        store.loaded = true;
     }
 
     const std::string key {metric};
