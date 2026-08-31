@@ -428,8 +428,13 @@ void ApplyIKReachTilt(
         targetRoll                = -direction.GetX() * angle;
     }
 
-    Detail::SpringScalar(gait.ikBodyTiltPitch, gait.ikBodyTiltPitchVelocity, targetPitch, dt, 6.0f, 1.0f);
-    Detail::SpringScalar(gait.ikBodyTiltRoll, gait.ikBodyTiltRollVelocity, targetRoll, dt, 6.0f, 1.0f);
+    // Use a low-frequency, overdamped spring for IK body tilt. The target
+    // changes at stride rate (~1–2 Hz walking); a 6 Hz spring rings at its
+    // natural frequency between each foot switch, producing a visible lateral
+    // waddle. 2.5 Hz with damping 1.8 tracks the target smoothly without
+    // overshoot.
+    Detail::SpringScalar(gait.ikBodyTiltPitch, gait.ikBodyTiltPitchVelocity, targetPitch, dt, 2.5f, 1.8f);
+    Detail::SpringScalar(gait.ikBodyTiltRoll, gait.ikBodyTiltRollVelocity, targetRoll, dt, 2.5f, 1.8f);
     const float tiltMagnitude = std::sqrt(gait.ikBodyTiltPitch * gait.ikBodyTiltPitch + gait.ikBodyTiltRoll * gait.ikBodyTiltRoll);
     if (tiltMagnitude > maxTilt && tiltMagnitude > 1.0e-6f) {
         const float scale = maxTilt / tiltMagnitude;
