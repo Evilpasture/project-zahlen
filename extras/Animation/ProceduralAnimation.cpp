@@ -452,6 +452,41 @@ void ApplyAuthoredPose(const Components::AnimatorComponent* animator, const Proc
             const size_t node = static_cast<size_t>(channel.targetNodeIndex);
             SamplePoseChannel(channel, animator->currentTrackTime, mode, bicubicTension, targetTranslations[node], targetRotations[node], targetScales[node]);
         }
+
+        // Cross-fade between the previous and current tracks when a blend is
+        // active. Without this, locomotion track switches snap instantly even
+        // though SynchronizeLocomotionTrack sets blendFactor/blendDuration.
+        // The core AnimationSystem also cross-fades, but ProceduralAnimation
+        // overwrites its output, so we must blend here too.
+        if (animator->prevTrackIdx >= 0 && animator->blendFactor < 1.0f &&
+            animator->prevTrackIdx < static_cast<int32_t>(animator->prefab->animations.size())) {
+            std::array<JPH::Vec3, kMaxRigNodes> prevTranslations {};
+            std::array<JPH::Quat, kMaxRigNodes> prevRotations {};
+            std::array<JPH::Vec3, kMaxRigNodes> prevScales {};
+            for (size_t node = 0; node < map.nodeCount; ++node) {
+                prevTranslations[node] = map.bindLocalTransforms[node].GetTranslation();
+                prevRotations[node]    = ExtractRotation(map.bindLocalTransforms[node]);
+                prevScales[node]       = ExtractScale(map.bindLocalTransforms[node]);
+            }
+            const AnimationClip& prevClip = animator->prefab->animations[static_cast<size_t>(animator->prevTrackIdx)];
+            for (const AnimationChannel& channel: prevClip.channels) {
+                if (channel.targetNodeIndex < 0 || channel.targetNodeIndex >= static_cast<int32_t>(map.nodeCount) ||
+                    channel.path == AnimationPathType::Weights) {
+                    continue;
+                }
+                const size_t node = static_cast<size_t>(channel.targetNodeIndex);
+                SamplePoseChannel(
+                    channel, animator->prevTrackTime, mode, bicubicTension,
+                    prevTranslations[node], prevRotations[node], prevScales[node]
+                );
+            }
+            const float t = SmootherStep(animator->blendFactor);
+            for (size_t node = 0; node < map.nodeCount; ++node) {
+                targetTranslations[node] = prevTranslations[node] + t * (targetTranslations[node] - prevTranslations[node]);
+                targetRotations[node]    = prevRotations[node].SLERP(targetRotations[node], t).Normalized();
+                targetScales[node]       = prevScales[node] + t * (targetScales[node] - prevScales[node]);
+            }
+        }
     }
 
     // Non-semantic controls (fingers, face, accessories) receive the selected
@@ -543,7 +578,8 @@ void SynchronizeLocomotionTrack(
     ProceduralLocomotionTracksComponent& tracks,
     const Components::MovementComponent* movement,
     ProceduralLocomotionComponent&       gait,
-    float                                speed
+    float                                speed,
+    float                                dt
 ) noexcept {
     const bool moving  = speed > std::max(tracks.movementThreshold, 0.0f);
     const bool running = moving && ((movement != nullptr && movement->isSprinting) || speed >= std::max(tracks.runSpeedThreshold, 0.0f));
@@ -620,8 +656,28 @@ void SynchronizeLocomotionTrack(
         animator.currentTrackIdx   = desiredTrack;
         animator.currentTrackTime  = 0.0f;
         animator.blendFactor       = 0.0f;
-        animator.blendDuration     = 0.25f; // Cross-fade over 0.25 seconds
+        animator.blendDuration     = 0.50f; // Cross-fade over 0.5 seconds to match gait blend duration
         animator.isFinished        = false;
+    }
+
+    // Advance the track cross-fade. ProceduralAnimation owns the final pose
+    // for locomotion entities, so it must drive the blend factor itself rather
+    // than relying on the core AnimationSystem (which may run at a different
+    // point in the frame or not at all for these entities).
+    if (animator.prevTrackIdx >= 0 && animator.blendDuration > 0.0f) {
+        animator.blendFactor = std::min(1.0f, animator.blendFactor + (dt / animator.blendDuration));
+        if (animator.blendFactor >= 1.0f) {
+            animator.prevTrackIdx = -1;
+        }
+    } else {
+        animator.blendFactor = 1.0f;
+    }
+    if (animator.prevTrackIdx >= 0 && animator.blendFactor < 1.0f) {
+        animator.prevTrackTime += dt * animator.prevPlaybackSpeed;
+        const AnimationClip& prevClip = animator.prefab->animations[static_cast<size_t>(animator.prevTrackIdx)];
+        if (prevClip.duration > 0.0f) {
+            animator.prevTrackTime = std::fmod(animator.prevTrackTime, prevClip.duration);
+        }
     }
 
     tracks.passWeight  = 0.5f * (gait.passWeightL + gait.passWeightR);
@@ -1959,7 +2015,7 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
             Animation::EvaluateGait(*gait, velocityLocal, angularVelocity, dt);
         }
         if (animator != nullptr && tracks != nullptr) {
-            SynchronizeLocomotionTrack(*animator, *tracks, movement, *gait, horizontalSpeed);
+            SynchronizeLocomotionTrack(*animator, *tracks, movement, *gait, horizontalSpeed, dt);
         }
 
         ApplyAuthoredPose(animator, config, *boneMap, dt);
