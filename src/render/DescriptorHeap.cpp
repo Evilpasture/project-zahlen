@@ -6,11 +6,38 @@
 #include "DescriptorHeap.hpp"
 #include "Allocator.hpp"
 #include "Rendering.hpp"
+#include <Zahlen/Log.hpp>
 #include <algorithm>
 #include <utility>
 #include <vector>
 
 namespace ZHLN::Vk {
+
+namespace {
+
+/// Refuses a batch that would write outside the heap.
+///
+/// batch.Flush() hands the driver `mappedPtr + slot * stride` for every slot it
+/// carries, so one out-of-range slot writes over the implementation's reserved
+/// range at the tail of the buffer -- and past the mapping entirely if the slot
+/// is far enough out. Nothing upstream bounds it in general: regions addressed
+/// by raw offset rather than through SlotAllocator (the bindless
+/// globalTextures[] array, every HeapPassBindings span) compute their slot
+/// arithmetically, so an unchecked index arrives here as a plausible-looking
+/// number.
+///
+/// Dropping the batch loses a descriptor, which shows up as a wrong or missing
+/// texture. That is strictly better than the alternative, and the log names the
+/// slot that overflowed.
+[[nodiscard]] auto BatchFitsHeap(const uint32_t* slots, uint32_t count, uint32_t maxSlot, uint32_t capacity, const char* heapName) noexcept -> bool {
+    if (count == 0 || slots == nullptr || maxSlot < capacity) {
+        return true;
+    }
+    ZHLN::Log("[DescriptorHeap] {} heap write out of range: slot {} >= capacity {}. Dropping {} descriptor write(s).", heapName, maxSlot, capacity, count);
+    return false;
+}
+
+} // namespace
 
 // ============================================================================
 // DescriptorHeap Implementation
@@ -197,6 +224,9 @@ void DescriptorHeap<Type>::Flush(ResourceWriteBatch& batch) noexcept
         VkDeviceSize flushSize   = 0;
         if (count > 0 && slots != nullptr && _stride > 0) {
             const auto [minIt, maxIt] = std::minmax_element(slots, slots + count);
+            if (!BatchFitsHeap(slots, count, *maxIt, _capacity, "Resource")) {
+                return;
+            }
             flushOffset               = static_cast<VkDeviceSize>(*minIt) * _stride;
             flushSize                 = (static_cast<VkDeviceSize>(*maxIt) + 1U) * _stride - flushOffset;
             // vkFlushMappedMemoryRanges requires offsets/sizes aligned to
@@ -222,6 +252,9 @@ void DescriptorHeap<Type>::Flush(SamplerWriteBatch& batch) noexcept
         VkDeviceSize flushSize   = 0;
         if (count > 0 && slots != nullptr && _stride > 0) {
             const auto [minIt, maxIt] = std::minmax_element(slots, slots + count);
+            if (!BatchFitsHeap(slots, count, *maxIt, _capacity, "Sampler")) {
+                return;
+            }
             flushOffset               = static_cast<VkDeviceSize>(*minIt) * _stride;
             flushSize                 = (static_cast<VkDeviceSize>(*maxIt) + 1U) * _stride - flushOffset;
             flushOffset = AlignDown(flushOffset, _nonCoherentAtomSize);

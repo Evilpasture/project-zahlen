@@ -192,6 +192,12 @@ static constexpr uint32_t kSceneDynamicResourceSlots = 32;
 static constexpr uint32_t kSceneStaticSamplerSlots   = 16;
 static constexpr uint32_t kSceneDynamicSamplerSlots  = 8;
 static constexpr uint32_t kGlobalTextureSlots        = 32768; // bindless globalTextures[] region
+// Uploaded first by InitializeSystemTextures, in this order, and used as the
+// fallback whenever a texture cannot be created or looked up. Index, not
+// handle: this is a position in globalTextures[].
+static constexpr uint32_t kFallbackBlackTextureIndex  = 0;
+static constexpr uint32_t kFallbackWhiteTextureIndex  = 1;
+static constexpr uint32_t kFallbackNormalTextureIndex = 2;
 static constexpr uint32_t kPassStaticResourceSlots   = 1024;  // descriptor-heap passes (mip spans, parity pairs)
 static constexpr uint32_t kPassStaticSamplerSlots    = 64;
 static constexpr uint32_t kPassResourceHeapBase      = kSceneStaticResourceSlots + kGlobalTextureSlots;
@@ -886,7 +892,12 @@ struct RenderContext::Impl {
     void                       WriteTextureSlotToHeap(uint32_t bindlessIndex, VkImage image, VkFormat format, uint32_t mipLevels, bool cube) noexcept;
     void                       InitPassSamplerDescriptors() noexcept;
     [[nodiscard]] std::expected<void, Error> InitBakeHeapBindings() noexcept;
-    [[nodiscard]] auto AdoptBindlessTexture(Vk::Image&& image, Vk::ImageView&& view, VkFormat format, uint32_t mipLevels = 1, bool cube = false) -> uint32_t;
+    /// Takes ownership of an uploaded image and publishes it in globalTextures[].
+    ///
+    /// Fails with DescriptorHeapError::ResourceSlotsExhausted rather than
+    /// writing past the region when the array is full; see the definition.
+    [[nodiscard]] auto AdoptBindlessTexture(Vk::Image&& image, Vk::ImageView&& view, VkFormat format, uint32_t mipLevels = 1, bool cube = false)
+        -> std::expected<uint32_t, Error>;
     template <typename PushT>
     [[nodiscard]] auto BakeComputeTexture2D(const Vk::DynamicComputePass& pass, uint32_t width, uint32_t height, VkFormat format, const PushT& push)
         -> std::expected<uint32_t, Error>;

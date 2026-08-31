@@ -269,6 +269,54 @@ struct DescriptorHeapsSuite {
         }
 
         // ====================================================================
+        // 1b. globalTextures[] slots are never reclaimed -- Unload is a no-op
+        //     and nextTextureIndex only ever counts up -- so recreating the
+        //     same procedural texture has to be answered from the record
+        //     instead of burning another slot and orphaning the old image.
+        //     The font atlas used to do exactly that once per scene reset.
+        // ====================================================================
+        std::expected<void, ZHLN::Error> recreating_a_procedural_texture_reuses_its_bindless_slot() {
+            auto engine      = DescriptorHeapsSuite::CreateTestEngine();
+            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
+            if (!checkEngine) {
+                return checkEngine;
+            }
+
+            auto& rc = engine->GetRenderContext();
+
+            std::array<uint32_t, 16 * 16> texels {};
+            texels.fill(0xFF3366CCu);
+
+            const ZHLN::TextureHandle first = rc.CreateProceduralTexture("dheap_slot_reuse", 16, 16, false, texels.data());
+            if (first == ZHLN::TextureHandle::Invalid) {
+                return std::unexpected(DescriptorHeapsTestError::TextureCreationFailed);
+            }
+            const uint32_t firstIndex = rc.GetBindlessIndex(first);
+
+            // Byte-identical re-creation, ten times over: same handle, same
+            // slot, no new upload. Before the guard each of these consumed a
+            // fresh globalTextures[] index and leaked the previous image.
+            for (uint32_t attempt = 0; attempt < 10; ++attempt) {
+                const ZHLN::TextureHandle again = rc.CreateProceduralTexture("dheap_slot_reuse", 16, 16, false, texels.data());
+                ZHLN::Test::ExpectTrue(again == first);
+                ZHLN::Test::ExpectEq(rc.GetBindlessIndex(again), firstIndex);
+            }
+
+            // A different name is still a different texture in its own slot --
+            // the dedupe is by asset id and content, not a blanket refusal.
+            std::array<uint32_t, 16 * 16> otherTexels {};
+            otherTexels.fill(0xFF22AA55u);
+            const ZHLN::TextureHandle other = rc.CreateProceduralTexture("dheap_slot_reuse_other", 16, 16, false, otherTexels.data());
+            ZHLN::Test::ExpectTrue(other != first);
+            ZHLN::Test::ExpectTrue(rc.GetBindlessIndex(other) != firstIndex);
+
+            // The slot still samples: one frame with the reused texture on a
+            // box has to render rather than trip a validation error.
+            ZHLN::Test::Headless::TickFrames(*engine, 2);
+            return {};
+        }
+
+        // ====================================================================
         // 2. Per-frame PUSH_ADDRESS block: the scene registry's frame/instance
         //    buffers are selected through device addresses pushed once per
         //    segment. Moving the camera must therefore change the image --

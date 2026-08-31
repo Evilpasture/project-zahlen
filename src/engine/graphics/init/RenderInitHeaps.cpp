@@ -498,7 +498,27 @@ auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, Error> {
         });
 }
 
-auto RenderContext::Impl::AdoptBindlessTexture(Vk::Image&& image, Vk::ImageView&& view, VkFormat format, uint32_t mipLevels, bool cube) -> uint32_t {
+auto RenderContext::Impl::AdoptBindlessTexture(Vk::Image&& image, Vk::ImageView&& view, VkFormat format, uint32_t mipLevels, bool cube)
+    -> std::expected<uint32_t, Error> {
+    // globalTextures[] is addressed by raw offset (textureHeapBase + index),
+    // not through SlotAllocator, so nothing else bounds this counter. Slot
+    // kGlobalTextureSlots is the first slot of the *pass* region that follows
+    // it in the same heap, so an overrun would quietly rewrite another pass's
+    // descriptors long before it ran off the end of the buffer.
+    //
+    // Nothing ever gives a slot back -- Unload is deliberately a no-op and the
+    // renderer keeps every texture resident for the life of the device -- so
+    // exhaustion means a caller is recreating textures in a loop rather than
+    // that 32768 distinct textures are genuinely in use. Recoverable, so it is
+    // an error rather than an assertion: every caller already substitutes the
+    // white fallback for a texture it could not create.
+    if (nextTextureIndex >= kGlobalTextureSlots) [[unlikely]] {
+        ZHLN::Log("[Bindless] globalTextures[] exhausted: all {} slots taken. Refusing the upload; a caller is leaking texture slots.", kGlobalTextureSlots);
+        // image and view die with this scope: the refusal costs the GPU
+        // allocation that was already made, but leaks nothing.
+        return std::unexpected(Vk::DescriptorHeapError::ResourceSlotsExhausted);
+    }
+
     const uint32_t index = nextTextureIndex++;
     WriteTextureSlotToHeap(index, image.Handle(), format, mipLevels, cube);
     textureImages.push_back(std::move(image));
@@ -539,7 +559,7 @@ auto RenderContext::Impl::InitializeSystemTextures() noexcept -> std::expected<v
     return CreateTextureInternal(blackPixel.data(), 1, 1, false).and_then([&, whitePixel, normalPixel](uint32_t blackIdx) -> std::expected<void, Error> {
         return CreateTextureInternal(whitePixel.data(), 1, 1, true).and_then([&, blackIdx, normalPixel](uint32_t whiteIdx) -> std::expected<void, Error> {
             return CreateTextureInternal(normalPixel.data(), 1, 1, false).and_then([&, blackIdx, whiteIdx](uint32_t normalIdx) -> std::expected<void, Error> {
-                if (blackIdx != 0 || whiteIdx != 1 || normalIdx != 2) {
+                if (blackIdx != kFallbackBlackTextureIndex || whiteIdx != kFallbackWhiteTextureIndex || normalIdx != kFallbackNormalTextureIndex) {
                     return std::unexpected(BindlessSetupError::DefaultTextureRegistrationFailed);
                 }
                 return {};
