@@ -159,7 +159,7 @@ struct RenderPerfEnvironment {
     }
 };
 
-auto CreateTestEngine(uint32_t width, uint32_t height, ZHLN::ValidationMode mode) -> std::unique_ptr<ZHLN::Engine> {
+auto CreateTestEngine(uint32_t width, uint32_t height, ZHLN::ValidationMode mode) -> ZHLN::ScopedEngine {
     ZHLN::DefaultPreset::SetDisabled(true);
 
     const ZHLN::EngineConfig cfg {
@@ -177,7 +177,7 @@ auto CreateTestEngine(uint32_t width, uint32_t height, ZHLN::ValidationMode mode
 
     auto engineRes = ZHLN::Engine::Create(cfg);
     if (!engineRes) {
-        return nullptr;
+        return {};
     }
 
     auto engine = std::move(engineRes.value());
@@ -969,7 +969,7 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
 // ============================================================================
 
 struct RenderPerformanceValidationSuite {
-    static inline std::unique_ptr<ZHLN::Engine> s_engine;
+    static inline ZHLN::ScopedEngine s_engine;
 
     RenderPerformanceValidationSuite() {
         RenderPerfEnvironment::Init();
@@ -1012,7 +1012,7 @@ struct RenderPerformanceValidationSuite {
 };
 
 struct RenderPerformanceThroughputSuite {
-    static inline std::unique_ptr<ZHLN::Engine> s_engine;
+    static inline ZHLN::ScopedEngine s_engine;
 
     RenderPerformanceThroughputSuite() {
         RenderPerfEnvironment::Init();

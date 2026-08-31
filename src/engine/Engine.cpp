@@ -7,7 +7,6 @@
 #include <atomic>
 #include <iterator>
 #include <mutex>
-#include <optional>
 #include <thread>
 #include <vector>
 // clang-format off
@@ -118,6 +117,37 @@ EngineContextScope::~EngineContextScope() {
     s_GlobalEngine.store(s_GlobalEngineContexts.empty() ? nullptr : s_GlobalEngineContexts.back(), std::memory_order_release);
 }
 
+ScopedEngine::ScopedEngine(std::unique_ptr<Engine> engine): _engine(std::move(engine)) {
+    if (_engine != nullptr) {
+        _scope = std::make_unique<EngineContextScope>(*_engine);
+    }
+}
+
+ScopedEngine::ScopedEngine(ScopedEngine&&) noexcept = default;
+
+auto ScopedEngine::operator=(ScopedEngine&& other) noexcept -> ScopedEngine& {
+    if (this != &other) {
+        // Not the compiler-generated order: member-wise assignment would
+        // withdraw the old registration before destroying the old engine.
+        reset();
+        _scope  = std::move(other._scope);
+        _engine = std::move(other._engine);
+    }
+    return *this;
+}
+
+ScopedEngine::~ScopedEngine() {
+    reset();
+}
+
+void ScopedEngine::reset() {
+    // Engine first: ~Engine clears the registry, and the OnDestroy hooks that
+    // runs expect GetEngineContext() to still answer. The scope then withdraws
+    // a pointer it only ever compares, never dereferences.
+    _engine.reset();
+    _scope.reset();
+}
+
 static void InitRenderDocAPI() {
 #if defined(_WIN32)
     if (HMODULE mod = GetModuleHandleA("renderdoc.dll")) {
@@ -144,11 +174,6 @@ namespace CreativeWorksFactory {
 }
 
 struct EngineImpl {
-    // Declared first, therefore destroyed last: ~Engine clears the registry,
-    // which runs component OnDestroy hooks that reach back through
-    // GetEngineContext().
-    std::optional<EngineContextScope> contextScope;
-
     std::unique_ptr<Window>               window;
     std::unique_ptr<RenderContext>        renderContext;
     std::unique_ptr<PhysicsContext>       physicsContext;
@@ -172,6 +197,7 @@ struct EngineImpl {
 
     void*        gameState    = nullptr;
     uint64_t     frameCounter = 0;
+    bool         joltAcquired = false;
     EngineConfig config;
 };
 
@@ -578,29 +604,73 @@ Engine::Engine(const EngineConfig& cfg, bool& outSuccess): _impl(nullptr) {
     }
 }
 
-auto Engine::Create(const EngineConfig& cfg) -> std::expected<std::unique_ptr<Engine>, Error> {
-    auto engine = std::unique_ptr<Engine>(new (std::nothrow) Engine());
-    if (!engine) {
+auto Engine::Create(const EngineConfig& cfg) -> std::expected<ScopedEngine, Error> {
+    auto instance = std::unique_ptr<Engine>(new (std::nothrow) Engine());
+    if (!instance) {
         return std::unexpected(EngineInitError::EngineAllocationFailed);
     }
 
-    auto res = engine->InitInternal(cfg);
+    // Published from here on, and withdrawn by `scoped` on every exit path --
+    // including the failure below, which is what used to leave the ambient
+    // pointer aimed at an engine this function had already deleted.
+    ScopedEngine scoped(std::move(instance));
+
+    auto res = scoped->InitInternal(cfg);
     if (!res) {
         return std::unexpected(res.error());
     }
 
-    return engine;
+    return scoped;
 }
+
+// --- PROCESS-GLOBAL JOLT REGISTRATION ---
+//
+// JPH::Factory::sInstance and the registered type list are process state, not
+// engine state. Acquisition was already guarded, but release was not: the first
+// engine destroyed called JPH::UnregisterTypes() and deleted the factory out
+// from under every other engine in the process. That is one of the things that
+// made a second engine unusable, and it blocks running more than one physics
+// world. Refcounted: first in registers, last out unregisters.
+namespace {
+
+std::mutex s_JoltRegistrationMutex;
+uint32_t   s_JoltRegistrations = 0;
+
+void AcquireJoltRegistration() {
+    const std::lock_guard lock(s_JoltRegistrationMutex);
+    if (s_JoltRegistrations++ > 0) {
+        return;
+    }
+
+    JPH::RegisterDefaultAllocator();
+    JPH::Trace = JoltTraceBridge;
+#ifdef JPH_ENABLE_ASSERTS
+    JPH::AssertFailed = JoltAssertBridge;
+#endif
+
+    if (JPH::Factory::sInstance == nullptr) {
+        JPH::Factory::sInstance = new JPH::Factory();
+        JPH::RegisterTypes();
+    }
+}
+
+void ReleaseJoltRegistration() {
+    const std::lock_guard lock(s_JoltRegistrationMutex);
+    if (s_JoltRegistrations == 0 || --s_JoltRegistrations > 0) {
+        return;
+    }
+
+    JPH::UnregisterTypes();
+    delete JPH::Factory::sInstance;
+    JPH::Factory::sInstance = nullptr;
+}
+
+} // namespace
 
 auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error> {
     ZHLN::Fiber::InitMainThread();
 
-    _impl = std::make_unique<EngineImpl>();
-    // Publish only once there is something behind the pointer: GetEngineContext()
-    // is worthless before _impl exists, since every accessor reaches through it.
-    // The scope is owned by this engine, so it is released in ~Engine -- including
-    // on the failure paths below, where Create deletes a half-built engine.
-    _impl->contextScope.emplace(*this);
+    _impl               = std::make_unique<EngineImpl>();
     _impl->config       = cfg;
     _impl->scriptRunner = std::make_unique<ScriptRunner>();
 
@@ -703,16 +773,8 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
 
     InitRenderDocAPI();
 
-    JPH::RegisterDefaultAllocator();
-    JPH::Trace = JoltTraceBridge;
-#ifdef JPH_ENABLE_ASSERTS
-    JPH::AssertFailed = JoltAssertBridge;
-#endif
-
-    if (JPH::Factory::sInstance == nullptr) {
-        JPH::Factory::sInstance = new JPH::Factory();
-        JPH::RegisterTypes();
-    }
+    AcquireJoltRegistration();
+    _impl->joltAcquired = true;
 
     auto rc_res = RenderContext::Create(*_impl->window, cfg.render);
     if (!rc_res) {
@@ -759,14 +821,16 @@ Engine::~Engine() {
     _impl->mainECB.reset();
     _impl->cullingSystem.reset();
 
+    // Process-global, and not refcounted the way the Jolt registration below
+    // is: a second windowed engine would lose GLFW when the first one goes.
+    // Headless engines never call glfwInit, so this does not constrain the
+    // tests.
     if (!_impl->config.render.headless) {
         glfwTerminate();
     }
 
-    JPH::UnregisterTypes();
-    if (JPH::Factory::sInstance != nullptr) {
-        delete JPH::Factory::sInstance;
-        JPH::Factory::sInstance = nullptr;
+    if (_impl->joltAcquired) {
+        ReleaseJoltRegistration();
     }
 }
 

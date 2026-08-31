@@ -15,6 +15,7 @@
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Types.hpp>
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <functional>
@@ -54,6 +55,85 @@ class EntityCommandBuffer;
 
 class FrameScheduler;
 
+class Engine;
+
+/// Publishes an engine as the ambient one for GetEngineContext(), for exactly
+/// as long as the scope object lives.
+///
+/// Ambient access exists for the callers that structurally cannot be handed an
+/// engine: component OnDestroy hooks (see include/ARCHITECTURE.md), the
+/// terminal-signal diagnostic dump, and the scripting C ABI. Everything else
+/// should take an `Engine&`.
+///
+/// The registration is owned by whoever opened it, not assigned by the engine
+/// to itself. Engine::Create packages one into the ScopedEngine it returns, so
+/// GetEngineContext() can never name a destroyed engine -- which it used to,
+/// because the old `g_CurrentEngine = this` in initialisation had no
+/// counterpart in teardown and a failed Create left the pointer aimed at freed
+/// memory.
+///
+/// Scopes nest: the ambient engine is the most recently published one that is
+/// still alive, and dropping a scope out of order falls back to the next one
+/// still standing rather than to a stale pointer. A scope should be released on
+/// the thread that created it; the process-wide fallback is corrected either
+/// way, but the per-thread override is not.
+class EngineContextScope {
+  public:
+    explicit EngineContextScope(Engine& engine);
+    ~EngineContextScope();
+
+    EngineContextScope(const EngineContextScope&)                    = delete;
+    auto operator=(const EngineContextScope&) -> EngineContextScope& = delete;
+    EngineContextScope(EngineContextScope&&)                         = delete;
+    auto operator=(EngineContextScope&&) -> EngineContextScope&      = delete;
+
+  private:
+    Engine* _engine;
+};
+
+/// An engine and its ambient registration, owned as one thing.
+///
+/// Engine::Create hands this back instead of a bare unique_ptr so the two
+/// lifetimes cannot drift apart. Nothing publishes itself: the caller holds the
+/// registration, and when the caller drops it both the engine and its entry in
+/// the ambient chain go away together, in that order -- the engine is torn down
+/// while still published, because clearing the registry runs component
+/// OnDestroy hooks that call GetEngineContext().
+///
+/// Shaped like the std::unique_ptr<Engine> it replaces: `*engine`, `engine->`,
+/// `engine.get()`, `engine != nullptr` and `.reset()` all mean what they did.
+class ZHLN_API ScopedEngine {
+  public:
+    ScopedEngine() noexcept = default;
+    /// Publishes `engine` immediately, before it is initialised -- exactly when
+    /// the old globals were assigned, so anything reached during initialisation
+    /// still sees an ambient engine.
+    explicit ScopedEngine(std::unique_ptr<Engine> engine);
+    ~ScopedEngine();
+
+    ScopedEngine(ScopedEngine&&) noexcept;
+    auto operator=(ScopedEngine&&) noexcept -> ScopedEngine&;
+    ScopedEngine(const ScopedEngine&)                    = delete;
+    auto operator=(const ScopedEngine&) -> ScopedEngine& = delete;
+
+    [[nodiscard]] auto get() const noexcept -> Engine* { return _engine.get(); }
+    auto               operator->() const noexcept -> Engine* { return _engine.get(); }
+    auto               operator*() const noexcept -> Engine& { return *_engine; }
+    explicit           operator bool() const noexcept { return _engine != nullptr; }
+
+    /// Destroys the engine and withdraws its registration.
+    void reset();
+
+    friend auto operator==(const ScopedEngine& lhs, std::nullptr_t) noexcept -> bool { return lhs._engine == nullptr; }
+
+  private:
+    // Declaration order is the teardown contract: _engine is destroyed first,
+    // while _scope still publishes it.
+    std::unique_ptr<EngineContextScope> _scope;
+    std::unique_ptr<Engine>             _engine;
+};
+
+
 class CullingSystem;
 
 class ZHLN_API Engine {
@@ -61,13 +141,18 @@ class ZHLN_API Engine {
     using UICallback = std::function<void(Engine&)>;
 
     Engine();
+    /// Legacy direct construction. Unlike Engine::Create these do not publish
+    /// the engine for GetEngineContext(); open an EngineContextScope over the
+    /// instance if the ambient callbacks need to find it.
     Engine(const EngineConfig& cfg);
     Engine(const EngineConfig& cfg, bool& outSuccess);
     ~Engine();
 
     auto HandleDeviceLost() noexcept -> std::expected<void, Error>;
 
-    static auto Create(const EngineConfig& cfg) -> std::expected<std::unique_ptr<Engine>, Error>;
+    /// Builds an engine and publishes it as the ambient context for as long as
+    /// the returned owner lives. See ScopedEngine.
+    static auto Create(const EngineConfig& cfg) -> std::expected<ScopedEngine, Error>;
 
     [[nodiscard]] auto IsRunning() const -> bool;
     void               ProcessEvents();
@@ -127,39 +212,6 @@ class ZHLN_API Engine {
   private:
     auto                        InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>;
     std::unique_ptr<EngineImpl> _impl;
-};
-
-/// Publishes an engine as the ambient one for GetEngineContext(), for exactly
-/// as long as the scope object lives.
-///
-/// Ambient access exists for the callers that structurally cannot be handed an
-/// engine: component OnDestroy hooks (see include/ARCHITECTURE.md), the
-/// terminal-signal diagnostic dump, and the scripting C ABI. Everything else
-/// should take an `Engine&`.
-///
-/// The registration is owned, not assigned. An engine publishes itself through
-/// a scope it holds for its own lifetime, so GetEngineContext() can never
-/// return a destroyed engine -- which it used to, because the old
-/// `g_CurrentEngine = this` in initialisation had no counterpart in teardown
-/// and a failed Engine::Create left the pointer aimed at freed memory.
-///
-/// Scopes nest: the ambient engine is the most recently published one that is
-/// still alive, and dropping a scope out of order falls back to the next one
-/// still standing rather than to a stale pointer. A scope should be released on
-/// the thread that created it; the process-wide fallback is corrected either
-/// way, but the per-thread override is not.
-class EngineContextScope {
-  public:
-    explicit EngineContextScope(Engine& engine);
-    ~EngineContextScope();
-
-    EngineContextScope(const EngineContextScope&)                    = delete;
-    auto operator=(const EngineContextScope&) -> EngineContextScope& = delete;
-    EngineContextScope(EngineContextScope&&)                         = delete;
-    auto operator=(EngineContextScope&&) -> EngineContextScope&      = delete;
-
-  private:
-    Engine* _engine;
 };
 
 /// The innermost live EngineContextScope's engine, or nullptr when none is

@@ -59,15 +59,15 @@ struct EngineOptions {
 /// Creates a headless engine with validation enabled and the default preset
 /// suppressed, then seeds the default scene.
 ///
-/// Prefer AcquireEngine below unless the test genuinely needs a cold device: an
-/// engine owned here must not be alive at the same time as a pooled one, since
-/// engine teardown tears down process-global Jolt state.
+/// Prefer AcquireEngine below unless the test genuinely needs a cold device.
 ///
-/// Returns nullptr on failure; callers assert rather than dereference. The
+/// Returns an empty owner on failure; callers assert rather than dereference.
+/// The engine is published as the ambient context for as long as the returned
+/// ScopedEngine lives. The
 /// default preset is disabled process-wide, which is what keeps the engine
 /// from injecting its own sun, floor and camera into a scene the test is
 /// trying to measure.
-[[nodiscard]] inline auto CreateEngine(const EngineOptions& opts = {}) -> std::unique_ptr<ZHLN::Engine> {
+[[nodiscard]] inline auto CreateEngine(const EngineOptions& opts = {}) -> ZHLN::ScopedEngine {
     ZHLN::DefaultPreset::SetDisabled(true);
 
     const ZHLN::EngineConfig cfg {
@@ -92,7 +92,7 @@ struct EngineOptions {
 
     auto engineRes = ZHLN::Engine::Create(cfg);
     if (!engineRes) {
-        return nullptr;
+        return {};
     }
 
     auto engine = std::move(engineRes.value());
@@ -101,7 +101,7 @@ struct EngineOptions {
 }
 
 /// Convenience overload for the common "just give me a 640x480 engine" case.
-[[nodiscard]] inline auto CreateEngine(std::string_view appName, uint32_t width = 640, uint32_t height = 480) -> std::unique_ptr<ZHLN::Engine> {
+[[nodiscard]] inline auto CreateEngine(std::string_view appName, uint32_t width = 640, uint32_t height = 480) -> ZHLN::ScopedEngine {
     return CreateEngine(EngineOptions {.appName = appName, .width = width, .height = height});
 }
 
@@ -178,21 +178,21 @@ namespace Detail {
 
 /// One slot, not a map.
 ///
-/// Two engines cannot be alive at once. Engine teardown calls
-/// JPH::UnregisterTypes() and deletes JPH::Factory::sInstance, both process
-/// globals, so whichever engine is destroyed first pulls Jolt out from under
-/// the other. (The engine also used to leave `g_CurrentEngine`/`s_GlobalEngine`
-/// aimed at freed memory, which is what turned a keyed pool into a
-/// use-after-free inside CreateFontAtlasTexture; that part is now an owned
-/// EngineContextScope, but the Jolt globals still make one-at-a-time the rule.)
+/// A keyed pool kept two engines alive at once and fell over: the ambient
+/// engine pointers were raw globals with no teardown, and Jolt's factory and
+/// type registration were acquired per engine but released by whichever engine
+/// died first. Both are fixed -- the context is an owned EngineContextScope and
+/// the Jolt registration is refcounted -- but two coexisting engines have never
+/// actually been run on hardware, so this stays conservative: a configuration
+/// change destroys the current engine before building the next, exactly as the
+/// per-test engines did.
 ///
-/// So a configuration change destroys the current engine before building the
-/// next, exactly as the per-test engines used to. That preserves the
-/// one-engine-at-a-time invariant the engine actually has, and still collapses
-/// every run of same-resolution tests into a single initialisation.
+/// That still collapses every run of same-resolution tests into a single
+/// initialisation, which is nearly all of them. Going back to a keyed pool is a
+/// small change to this struct once a green run says coexistence works.
 struct EngineSlot {
-    EngineOptions                 opts {};
-    std::unique_ptr<ZHLN::Engine> engine;
+    EngineOptions      opts {};
+    ZHLN::ScopedEngine engine;
 };
 
 [[nodiscard]] inline auto Slot() -> EngineSlot& {
@@ -224,8 +224,7 @@ struct EngineSlot {
         return EngineHandle {slot.engine.get()};
     }
 
-    // Destroy before create. Both orderings leak the engine globals for an
-    // instant; only this one avoids ever having two engines fighting over them.
+    // Destroy before create: one engine at a time, see EngineSlot.
     slot.engine.reset();
     slot.opts   = opts;
     slot.engine = CreateEngine(opts);

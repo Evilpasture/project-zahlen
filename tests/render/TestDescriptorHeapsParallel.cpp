@@ -48,7 +48,7 @@ struct DescriptorHeapsParallelSuite {
         ZHLN::TaskSystem::Shutdown();
     }
 
-    static auto CreateTestEngine(uint32_t width = 640, uint32_t height = 480) -> std::unique_ptr<ZHLN::Engine> {
+    static auto CreateTestEngine(uint32_t width = 640, uint32_t height = 480) -> ZHLN::ScopedEngine {
         ZHLN::DefaultPreset::SetDisabled(true);
 
         const ZHLN::EngineConfig cfg {
@@ -66,7 +66,7 @@ struct DescriptorHeapsParallelSuite {
 
         auto engineRes = ZHLN::Engine::Create(cfg);
         if (!engineRes) {
-            return nullptr;
+            return {};
         }
 
         auto engine = std::move(engineRes.value());
