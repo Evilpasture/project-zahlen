@@ -188,11 +188,15 @@ float4 ComputeAmbientAndAO(float2 uv, uint2 pixelPos, float3 N, float3 worldPos,
 
                 if (diff > 0.0f) {
                     float finalWeight = smoothstep(0.0f, pc.aoBias * 2.0f, diff - pc.aoBias) * smoothstep(0.0f, 1.0f, pc.aoRadius / max(abs(diff), 0.001f));
-                    if (pc.giMode == 1)
+                    if (pc.giMode == 1) {
                         occlusion += finalWeight;
-                    else if (pc.giMode == 2)
+                    } else if (pc.giMode == 2) {
+                        // Emitters bounce: the gather reads lit scene colour
+                        // plus the emissive channel, which the lighting pass
+                        // adds separately and so is absent from texInput.
                         float3 sampleRadiance = texInput.SampleLevel(smp, uv_sample, 0).rgb + texEmissive.SampleLevel(smp, uv_sample, 0).rgb;
                         indirectLight += sampleRadiance * max(dot(N, dir), 0.0f) * finalWeight;
+                    }
                 }
             }
 
