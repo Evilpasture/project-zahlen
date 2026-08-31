@@ -428,8 +428,16 @@ void ApplyAuthoredPose(const Components::AnimatorComponent* animator, const Proc
     // a second, conflicting pose and visibly separates joints even with IK off.
     // Sample the complete graph coherently instead; procedural passes still
     // layer over this bicubic authored pose in model space.
-    const PoseInterpolationMode mode = map.preserveAuthoredHierarchy && requestedMode == PoseInterpolationMode::SpringDamper ? PoseInterpolationMode::Bicubic :
-                                                                                                                               requestedMode;
+    // 
+    // For walking, force Bicubic mode to disable spring-damper filtering which
+    // might be oscillating and causing waddling at slow speeds.
+    const bool isWalking = animator != nullptr && animator->currentTrackIdx >= 0 && 
+                          animator->currentTrackIdx < static_cast<int32_t>(animator->prefab->animations.size()) &&
+                          animator->prefab->animations[animator->currentTrackIdx].name.find("walk") != std::string::npos;
+    
+    const PoseInterpolationMode mode = isWalking ? PoseInterpolationMode::Bicubic :
+        (map.preserveAuthoredHierarchy && requestedMode == PoseInterpolationMode::SpringDamper ? PoseInterpolationMode::Bicubic : requestedMode);
+    
     const float                 springStiffness     = config != nullptr ? config->springStiffness : map.poseSpringStiffness;
     const float                 springDampingFactor = config != nullptr ? config->springDampingFactor : map.poseSpringDampingFactor;
     const float                 bicubicTension      = config != nullptr ? config->bicubicTension : 0.0f;
