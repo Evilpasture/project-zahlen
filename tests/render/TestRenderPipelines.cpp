@@ -183,9 +183,14 @@ struct RenderPipelinesTestSuite {
             first->InitializeDefaultScene();
 
             auto secondRes = ZHLN::Engine::Create(smallCfg("LocalGPUCoexistB"));
-            if (!ZHLN::Test::ExpectTrue(secondRes.has_value())) {
+            if (!secondRes.has_value()) {
                 // Creating an engine alongside a live one is the whole point of
-                // the test; bail rather than dereference the failure.
+                // the test; name the stage that refused rather than dereference
+                // the failure. Jolt's registration is refcounted now, so an
+                // error here points at whatever else is still process-global.
+                ZHLN::Println("    [INFO] second Engine::Create failed: {}: {}", secondRes.error().Category(), secondRes.error().Message());
+            }
+            if (!ZHLN::Test::ExpectTrue(secondRes.has_value())) {
                 return {};
             }
             auto second = std::move(secondRes.value());
