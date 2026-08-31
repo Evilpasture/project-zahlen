@@ -24,6 +24,7 @@ module;
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdlib>
 #include <functional>
 #include <iterator>
 #include <limits>
@@ -37,6 +38,18 @@ module ZHLN.ProceduralAnimation;
 
 namespace ZHLN {
 namespace {
+
+// Debug environment variables to selectively disable procedural animation systems.
+// Evaluated once at startup. Rebuild the binary to pick up new flags.
+static const bool kDisableGaitBounce  = std::getenv("ZAHLEN_DISABLE_GAIT_BOUNCE") != nullptr;
+static const bool kDisableGaitSway    = std::getenv("ZAHLEN_DISABLE_GAIT_SWAY") != nullptr;
+static const bool kDisableGaitLean    = std::getenv("ZAHLEN_DISABLE_GAIT_LEAN") != nullptr;
+static const bool kDisableGaitBank    = std::getenv("ZAHLEN_DISABLE_GAIT_BANK") != nullptr;
+static const bool kDisableIKTilt      = std::getenv("ZAHLEN_DISABLE_IK_TILT") != nullptr;
+static const bool kDisablePelvisDrop  = std::getenv("ZAHLEN_DISABLE_PELVIS_DROP") != nullptr;
+static const bool kDisableSpringFilter = std::getenv("ZAHLEN_DISABLE_SPRING_FILTER") != nullptr;
+
+static bool kDebugLogged = false;
 
 inline constexpr std::array<std::string_view, kCoreBoneCount> kCoreBoneLabels = {
     "Root",     "Hips",  "Spine",  "SupSpine", "Chest", "Neck", "Head",   "UpperArmL", "ForearmL", "HandL", "UpperArmR",
@@ -428,21 +441,12 @@ void ApplyAuthoredPose(const Components::AnimatorComponent* animator, const Proc
     // a second, conflicting pose and visibly separates joints even with IK off.
     // Sample the complete graph coherently instead; procedural passes still
     // layer over this bicubic authored pose in model space.
-    // 
-    // For walking, force Bicubic mode to disable spring-damper filtering which
-    // might be oscillating and causing waddling at slow speeds.
-    bool isWalking = false;
-    if (animator != nullptr && animator->currentTrackIdx >= 0 && 
-        animator->currentTrackIdx < static_cast<int32_t>(animator->prefab->animations.size())) {
-        std::string_view animName(animator->prefab->animations[animator->currentTrackIdx].name.data(),
-                                  animator->prefab->animations[animator->currentTrackIdx].name.size());
-        isWalking = animName.find("walk") != std::string_view::npos ||
-                    animName.find("Walk") != std::string_view::npos;
+    PoseInterpolationMode mode = map.preserveAuthoredHierarchy && requestedMode == PoseInterpolationMode::SpringDamper ? PoseInterpolationMode::Bicubic :
+                                                                                                                          requestedMode;
+    // Debug override: force Bicubic mode to bypass spring-damper pose filtering.
+    if (kDisableSpringFilter) {
+        mode = PoseInterpolationMode::Bicubic;
     }
-    
-    const PoseInterpolationMode mode = isWalking ? PoseInterpolationMode::Bicubic :
-        (map.preserveAuthoredHierarchy && requestedMode == PoseInterpolationMode::SpringDamper ? PoseInterpolationMode::Bicubic : requestedMode);
-    
     const float                 springStiffness     = config != nullptr ? config->springStiffness : map.poseSpringStiffness;
     const float                 springDampingFactor = config != nullptr ? config->springDampingFactor : map.poseSpringDampingFactor;
     const float                 bicubicTension      = config != nullptr ? config->bicubicTension : 0.0f;
@@ -614,14 +618,14 @@ void SynchronizeLocomotionTrack(
     // one had reached rather than snapping back to walk defaults.
     {
         constexpr GaitPreset kWalkPreset {
-            .strideLength     = 1.60f,
-            .stepHeight       = 0.28f,
-            .maxBounceHeight  = 0.0f,    // No procedural bounce - use authored animation
-            .bounceGravity    = 9.81f,
-            .pelvisSwayScale  = 0.0f,    // No procedural sway - use authored animation
-            .armSwingScale    = 0.0f,    // No procedural arm swing - use authored animation
-            .forwardLeanScale = 0.0f,    // No forward lean - use authored animation
-            .lateralBankScale = 0.0f,    // No lateral lean for walking
+            .strideLength       = 1.60f,
+            .stepHeight         = 0.28f,
+            .maxBounceHeight    = 0.025f,
+            .bounceGravity      = 9.81f,
+            .pelvisSwayScale    = 0.30f,
+            .armSwingScale      = 0.80f,
+            .forwardLeanScale   = 0.50f,
+            .lateralBankScale   = 0.40f,
         };
         constexpr GaitPreset kRunPreset {
             .strideLength     = 2.40f,
@@ -696,11 +700,8 @@ void SynchronizeLocomotionTrack(
     tracks.passWeight  = 0.5f * (gait.passWeightL + gait.passWeightR);
     tracks.reachWeight = 0.5f * (gait.reachWeightL + gait.reachWeightR);
     
-    // Disable stride synchronization for walking to test if it's causing waddling.
-    // At walking speed, the stride-synced animation timing might cause visible
-    // speed variations within each stride cycle. Running is fast enough that
-    // these variations are less noticeable.
-    if (moving && tracks.synchronizeToStrideWheel && running) {
+    // Always sync to stride wheel for accurate foot placement
+    if (moving && tracks.synchronizeToStrideWheel) {
         const float wheelPhase = gait.phase;
         // Two authored keys represent opposing reach poses. Ping-pong across
         // the stride wheel makes pass occur halfway between them and returns to
@@ -1834,6 +1835,19 @@ size_t ProceduralAnimation::SyncNonSkinnedAttachments(ECS::Registry& registry, E
 
 void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
     ZHLN::ScopedTimer timer("ECS System: Procedural Animation");
+    
+    if (!kDebugLogged && (kDisableGaitBounce || kDisableGaitSway || kDisableGaitLean || kDisableGaitBank || 
+                          kDisableIKTilt || kDisablePelvisDrop || kDisableSpringFilter)) {
+        ZHLN::Log("[ProceduralAnimation] Debug overrides active:");
+        if (kDisableGaitBounce) ZHLN::Log("  - Gait bounce disabled");
+        if (kDisableGaitSway) ZHLN::Log("  - Gait sway disabled");
+        if (kDisableGaitLean) ZHLN::Log("  - Gait lean disabled");
+        if (kDisableGaitBank) ZHLN::Log("  - Gait bank disabled");
+        if (kDisableIKTilt) ZHLN::Log("  - IK body tilt disabled");
+        if (kDisablePelvisDrop) ZHLN::Log("  - Pelvis drop disabled");
+        if (kDisableSpringFilter) ZHLN::Log("  - Spring pose filtering disabled (Bicubic mode)");
+        kDebugLogged = true;
+    }
 
     auto& registry = engine.GetRegistry();
     auto& physics  = engine.GetPhysicsContext();
@@ -2026,6 +2040,24 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
         // before evaluation so the stride clock and foot trajectories see the
         // blended values instead of snapping between presets.
         Animation::BlendGaitParameters(*gait, dt);
+        
+        // Apply debug overrides to selectively disable gait systems
+        if (kDisableGaitBounce) {
+            gait->pelvisBob = 0.0f;
+            gait->pelvisBobVelocity = 0.0f;
+        }
+        if (kDisableGaitSway) {
+            gait->pelvisSway = 0.0f;
+            gait->pelvisSwayVelocity = 0.0f;
+        }
+        if (kDisableGaitLean) {
+            gait->forwardLean = 0.0f;
+            gait->forwardLeanVelocity = 0.0f;
+        }
+        if (kDisableGaitBank) {
+            gait->lateralBank = 0.0f;
+            gait->lateralBankVelocity = 0.0f;
+        }
 
         // Advance the stride wheel before sampling locomotion clips so the two
         // authored reach keys and their interpolated pass pose stay phase locked.
@@ -2060,22 +2092,25 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
 
         // Stage 3: terrain contact, pelvis reach correction, and two-bone IK.
         if (ikEnabled) {
-            // Check if walking by speed (more reliable than animation name)
-            const bool isWalking = horizontalSpeed < std::max(tracks != nullptr ? tracks->runSpeedThreshold : 4.0f, 0.1f);
-            
             const Entity ignoredHandle          = physicsComponent != nullptr ? physicsComponent->physicsHandle : Entity {};
             const float  legIKWeight            = config != nullptr ? config->legIKWeight : 1.0f;
-            // Disable pelvis drop for walking to prevent spring oscillation
-            const float  pelvisDropWeight       = isWalking ? 0.0f : (config != nullptr ? config->pelvisDropWeight : 1.0f);
+            float        pelvisDropWeight       = config != nullptr ? config->pelvisDropWeight : 1.0f;
             const float  maxHeightCorrection    = config != nullptr ? config->maxFootHeightCorrection : 0.18f;
             const float  maxLegExtension        = config != nullptr ? config->maxLegExtension : 0.98f;
-            
-            // Disable body tilt from IK reach for walking to prevent spring oscillation waddling
-            const float  maxBodyTilt            = isWalking ? 0.0f : JPH::DegreesToRadians(config != nullptr ? config->maxIKBodyTiltDegrees : 10.0f);
+            float        maxBodyTilt            = JPH::DegreesToRadians(config != nullptr ? config->maxIKBodyTiltDegrees : 10.0f);
             const float  maxAnkleSideways       = JPH::DegreesToRadians(config != nullptr ? config->maxAnkleSidewaysDegrees : 15.0f);
             const float  maxAnkleForward        = JPH::DegreesToRadians(config != nullptr ? config->maxAnkleForwardDegrees : 35.0f);
             const bool   preserveAuthoredFootXZ = config == nullptr || config->preserveAuthoredFootXZ;
             const bool   worldLockFeet          = config != nullptr && config->worldLockFeet;
+            
+            // Apply debug overrides to IK systems
+            if (kDisablePelvisDrop) {
+                pelvisDropWeight = 0.0f;
+            }
+            if (kDisableIKTilt) {
+                maxBodyTilt = 0.0f;
+            }
+            
             Animation::SolveLegGrounding(
                 engine, transform->position, rootRotation, *gait, boneMap->modelTransforms.data(), *boneMap, ignoredHandle, legIKWeight, preserveAuthoredFootXZ,
                 worldLockFeet, maxHeightCorrection, dt, pelvisDropWeight, maxLegExtension, maxBodyTilt, maxAnkleSideways, maxAnkleForward
