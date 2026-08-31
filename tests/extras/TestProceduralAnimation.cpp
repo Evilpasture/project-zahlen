@@ -625,6 +625,7 @@ struct ProceduralAnimationTestSuite {
             const auto                          baseTransforms    = tiltMap.modelTransforms;
             const ZHLN::RigNodeIndex            tiltThigh         = tiltMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ThighL)];
             const ZHLN::RigNodeIndex            tiltHips          = tiltMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Hips)];
+            const ZHLN::RigNodeIndex            tiltHead          = tiltMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Head)];
             const JPH::Vec3                     unreachableTarget = tiltMap.modelTransforms[tiltThigh].GetTranslation() + JPH::Vec3(1.5f, -0.35f, 0.0f);
             constexpr float                     maxBodyTilt       = 0.14f;
             ZHLN::ProceduralLocomotionComponent tiltGait;
@@ -635,7 +636,11 @@ struct ProceduralAnimationTestSuite {
                 );
             }
             const float appliedTilt = std::sqrt(tiltGait.ikBodyTiltPitch * tiltGait.ikBodyTiltPitch + tiltGait.ikBodyTiltRoll * tiltGait.ikBodyTiltRoll);
-            if (appliedTilt < 0.01f || appliedTilt > maxBodyTilt + 0.0001f || tiltMap.modelTransforms[tiltHips].IsClose(baseTransforms[tiltHips], 0.0001f)) {
+            // The reach tilt rotates the spine subtree around the hips pivot: the upper body must
+            // move, while the hips and the thighs stay planted so leg IK reach is unaffected.
+            if (appliedTilt < 0.01f || appliedTilt > maxBodyTilt + 0.0001f || tiltMap.modelTransforms[tiltHead].IsClose(baseTransforms[tiltHead], 0.0001f) ||
+                !tiltMap.modelTransforms[tiltHips].IsClose(baseTransforms[tiltHips], 0.0001f) ||
+                !tiltMap.modelTransforms[tiltThigh].IsClose(baseTransforms[tiltThigh], 0.0001f)) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
             return {};
