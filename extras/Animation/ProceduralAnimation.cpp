@@ -1035,8 +1035,26 @@ void ConfigureHumanoidChildOfConstraints(RigBoneMap& map) noexcept {
     addConstraint(CharacterBone::SupSpine, CharacterBone::Chest, RigChildOfKind::Chest);
     addConstraint(CharacterBone::Chest, CharacterBone::Neck, RigChildOfKind::Neck);
     addConstraint(CharacterBone::Neck, CharacterBone::Head, RigChildOfKind::Head);
-    addConstraint(CharacterBone::ForearmL, CharacterBone::HandL, RigChildOfKind::Hand);
-    addConstraint(CharacterBone::ForearmR, CharacterBone::HandR, RigChildOfKind::Hand);
+    
+    // Hand constraints: log whether they're created and if the hand is already
+    // a hierarchy child of the forearm (in which case the constraint is redundant).
+    auto addHandConstraint = [&](CharacterBone forearmBone, CharacterBone handBone) {
+        const RigNodeIndex forearm = map.nodeIndices[BoneSlot(forearmBone)];
+        const RigNodeIndex hand    = map.nodeIndices[BoneSlot(handBone)];
+        if (!IsValidRigNode(forearm, map.nodeCount) || !IsValidRigNode(hand, map.nodeCount)) {
+            ZHLN::Log("[ProceduralAnimation] WARNING: hand constraint not created — forearm={} hand={}", 
+                      IsValidRigNode(forearm, map.nodeCount) ? "valid" : "missing",
+                      IsValidRigNode(hand, map.nodeCount) ? "valid" : "missing");
+            return;
+        }
+        const bool isHierarchyChild = IsNodeDescendant(map, hand, forearm);
+        addConstraint(forearmBone, handBone, RigChildOfKind::Hand);
+        ZHLN::Log("[ProceduralAnimation] Hand constraint: forearm={} hand={} hierarchyChild={}",
+                  forearm, hand, isHierarchyChild ? "yes" : "no (detached)");
+    };
+    addHandConstraint(CharacterBone::ForearmL, CharacterBone::HandL);
+    addHandConstraint(CharacterBone::ForearmR, CharacterBone::HandR);
+    
     addConstraint(CharacterBone::FootL, CharacterBone::ToeL, RigChildOfKind::FootAttachment);
     addConstraint(CharacterBone::FootR, CharacterBone::ToeR, RigChildOfKind::FootAttachment);
 }
@@ -2456,6 +2474,7 @@ void DrawProceduralDebugRig(
     const JPH::Vec4 armColor(1.00f, 0.60f, 0.12f, 1.0f);
     const JPH::Vec4 legColor(0.20f, 1.00f, 0.35f, 1.0f);
     const JPH::Vec4 hairColor(0.90f, 0.25f, 1.00f, 1.0f);
+    const JPH::Vec4 constraintColor(1.00f, 0.00f, 1.00f, 1.0f); // Magenta for constraints
 
     for (size_t semantic = 0; semantic < kCoreBoneCount; ++semantic) {
         const RigNodeIndex node = boneMap.nodeIndices[semantic];
@@ -2473,6 +2492,17 @@ void DrawProceduralDebugRig(
             renderContext.DrawLine(worldPosition(parent), worldPosition(node), color);
         }
         drawCross(worldPosition(node), semantic == BoneSlot(CharacterBone::Head) ? 0.07f : 0.025f, color);
+    }
+    
+    // Draw child-of constraints as magenta lines
+    for (size_t index = 0; index < boneMap.childOfConstraintCount; ++index) {
+        const RigChildOfConstraint& constraint = boneMap.childOfConstraints[index];
+        if (constraint.kind == RigChildOfKind::Hand && 
+            IsValidRigNode(constraint.parent, boneMap.nodeCount) && 
+            IsValidRigNode(constraint.child, boneMap.nodeCount)) {
+            renderContext.DrawLine(worldPosition(constraint.parent), worldPosition(constraint.child), constraintColor);
+            drawCross(worldPosition(constraint.child), 0.04f, constraintColor);
+        }
     }
 
     for (size_t strand = 0; strand < HairStrandsComponent::kStrandCount; ++strand) {
