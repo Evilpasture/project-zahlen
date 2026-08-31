@@ -605,7 +605,7 @@ void SynchronizeLocomotionTrack(
             .stepHeight       = 0.28f,
             .maxBounceHeight  = 0.045f,
             .bounceGravity    = 9.81f,
-            .pelvisSwayScale  = 1.0f,
+            .pelvisSwayScale  = 0.30f,  // Minimal sway for walking
             .armSwingScale    = 1.0f,
             .forwardLeanScale = 1.0f,
             .lateralBankScale = 1.0f,
@@ -615,7 +615,7 @@ void SynchronizeLocomotionTrack(
             .stepHeight       = 0.45f,
             .maxBounceHeight  = 0.065f,
             .bounceGravity    = 12.50f,
-            .pelvisSwayScale  = 1.35f,
+            .pelvisSwayScale  = 1.50f,  // More pronounced sway for running
             .armSwingScale    = 1.50f,
             .forwardLeanScale = 1.40f,
             .lateralBankScale = 1.20f,
