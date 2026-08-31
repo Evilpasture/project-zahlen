@@ -234,7 +234,7 @@ struct PerformanceTestSuite {
             std::vector<float> dataArray(kParallelCount, 1.0f);
             std::atomic<float> totalSum {0.0f};
 
-            const double pForDurationMs = ZHLN::Test::BestOf(5, [&] {
+            const auto pForSamples = ZHLN::Test::SampleBestOf(5, [&] {
                 BenchmarkTimer pForTimer;
                 ZHLN::TaskSystem::ParallelFor(kParallelCount, 1024, [&](uint32_t start, uint32_t end, uint32_t) {
                     float localAccum = 0.0f;
@@ -246,10 +246,12 @@ struct PerformanceTestSuite {
                 });
                 return pForTimer.ElapsedMilliseconds();
             });
+            const double pForDurationMs = pForSamples.best;
 
             ZHLN::Test::ExpectTrue(totalSum.load() > 0.0f);
             ZHLN::Println(
-                "    [ParallelFor] 1,000,000 sqrt math iterations in {:.3f} ms ({:.2f} Mitems/sec)", pForDurationMs, (kParallelCount / 1000.0) / pForDurationMs
+                "    [ParallelFor] 1,000,000 sqrt math iterations in {:.3f} ms ({:.2f} Mitems/sec) [median {:.3f}, worst {:.3f}, n={}]", pForDurationMs,
+                (kParallelCount / 1000.0) / pForDurationMs, pForSamples.median, pForSamples.worst, pForSamples.samples
             );
                 ZHLN::Test::VerifyBaseline("cpu.parallel_for_1m_items", pForDurationMs);
 
@@ -274,7 +276,12 @@ struct PerformanceTestSuite {
                 t = {.func = outerJob, .arg = &payload};
             }
 
-            const double nestedDurationMs = ZHLN::Test::BestOf(9, [&] {
+            // Reported with its distribution: at ~30 us of wall clock this is
+            // the finest-grained metric in the suite -- almost all of it is
+            // worker wake-up and fiber switching -- so a bare minimum cannot
+            // distinguish "nested dispatch got slower" from "this machine
+            // parked its cores". The median and worst say which.
+            const auto nestedSamples = ZHLN::Test::SampleBestOf(9, [&] {
                 nestedCounter.store(0, std::memory_order::relaxed);
                 BenchmarkTimer             nestedTimer;
                 ZHLN::TaskSystem::Counter  syncCounter;
@@ -282,9 +289,13 @@ struct PerformanceTestSuite {
                 ZHLN::TaskSystem::Wait(&syncCounter);
                 return nestedTimer.ElapsedMilliseconds();
             });
+            const double nestedDurationMs = nestedSamples.best;
 
             ZHLN::Test::ExpectEq(nestedCounter.load(), static_cast<uint32_t>(kOuterTasks * kInnerTasks));
-            ZHLN::Println("    [Nested Fibers] 32 x 256 child tasks dispatched & synced in {:.3f} ms", nestedDurationMs);
+            ZHLN::Println(
+                "    [Nested Fibers] 32 x 256 child tasks dispatched & synced in {:.3f} ms [median {:.3f}, worst {:.3f}, n={}]", nestedDurationMs,
+                nestedSamples.median, nestedSamples.worst, nestedSamples.samples
+            );
             ZHLN::Test::VerifyBaseline("cpu.nested_fibers_32x256", nestedDurationMs);
 
             return {};
@@ -338,7 +349,9 @@ struct PerformanceTestSuite {
                 ZHLN::Test::VerifyBaseline("cpu.ecs_create_40k_entities", createDurationMs);
 
             // B. Dense Array Direct Vectorized Iteration (GetRawArray & Patch)
-            const double iterDurationMs = ZHLN::Test::BestOf(5, [&] {
+            // Single-threaded and memory-bound, so its distribution is
+            // normally tight; a wide one means the machine, not the loop.
+            const auto iterSamples = ZHLN::Test::SampleBestOf(5, [&] {
                 BenchmarkTimer iterTimer;
                 auto           healths = reg.GetRawArray<AgentHealthComponent>();
                 auto           moves   = reg.GetRawArray<ZHLN::Components::MovementComponent>();
@@ -352,9 +365,10 @@ struct PerformanceTestSuite {
                 }
                 return iterTimer.ElapsedMilliseconds();
             });
+            const double iterDurationMs = iterSamples.best;
             ZHLN::Println(
-                "    [ECS Dense Iterate] 10 Frames x 40,000 Entities updated in {:.3f} ms ({:.2f} Mupdates/sec)", iterDurationMs,
-                (10.0 * kTotalEntities / 1000.0) / iterDurationMs
+                "    [ECS Dense Iterate] 10 Frames x 40,000 Entities updated in {:.3f} ms ({:.2f} Mupdates/sec) [median {:.3f}, worst {:.3f}, n={}]",
+                iterDurationMs, (10.0 * kTotalEntities / 1000.0) / iterDurationMs, iterSamples.median, iterSamples.worst, iterSamples.samples
             );
                 ZHLN::Test::VerifyBaseline("cpu.ecs_dense_iterate_10x40k", iterDurationMs);
 

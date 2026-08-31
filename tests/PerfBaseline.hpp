@@ -39,6 +39,7 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdint>
 #include <cstdlib>
@@ -49,6 +50,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #if !defined(_WIN32)
     #include <unistd.h> // gethostname
@@ -77,6 +79,37 @@ template <typename F>
         }
     }
     return best;
+}
+
+/// The same sampling, keeping the shape of the distribution.
+///
+/// `best` is what a baseline check should use -- see BestOf for why -- but the
+/// best alone cannot tell a real regression from a noisy machine. A workload
+/// that genuinely got slower moves its whole distribution; a machine that is
+/// merely busy or thermally throttled grows a tail and leaves the median near
+/// where it was. Print all three next to a disputed metric and the next run
+/// answers the question instead of raising it.
+struct SampleStats {
+    double   best    = 0.0;
+    double   median  = 0.0;
+    double   worst   = 0.0;
+    unsigned samples = 0;
+};
+
+template <typename F>
+[[nodiscard]] inline auto SampleBestOf(unsigned n, F&& measure) -> SampleStats {
+    std::vector<double> samples;
+    samples.reserve(n > 0 ? n : 1);
+    for (unsigned i = 0; i < (n > 0 ? n : 1); ++i) {
+        samples.push_back(measure());
+    }
+    std::sort(samples.begin(), samples.end());
+    return SampleStats {
+        .best    = samples.front(),
+        .median  = samples[samples.size() / 2],
+        .worst   = samples.back(),
+        .samples = static_cast<unsigned>(samples.size())
+    };
 }
 
 } // namespace ZHLN::Test
