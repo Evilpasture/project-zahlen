@@ -563,7 +563,11 @@ void SolveLegGrounding(
     accumulateDrop(thighRNode, targetModelR, gait.plantWeightR);
 
     gait.targetPelvisDrop = -std::clamp(requiredDrop * std::clamp(pelvisDropWeight, 0.0f, 1.0f), 0.0f, 0.38f);
-    Detail::SpringScalar(gait.pelvisDrop, gait.pelvisDropVelocity, gait.targetPelvisDrop, dt, 5.0f, 1.0f);
+    // Overdamped, low-frequency pelvis drop spring. The target alternates at
+    // stride rate (~1–2 Hz walking); a 5 Hz critically-damped spring rings at
+    // its natural frequency between foot switches, producing a visible lateral
+    // waddle. 2 Hz with damping 1.8 tracks terrain changes without oscillation.
+    Detail::SpringScalar(gait.pelvisDrop, gait.pelvisDropVelocity, gait.targetPelvisDrop, dt, 2.0f, 1.8f);
 
     ApplyPelvisGaitOffset(gait, nodeTransforms, map, true);
     ApplyIKReachTilt(
