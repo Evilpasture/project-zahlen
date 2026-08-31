@@ -604,6 +604,12 @@ void SynchronizeLocomotionTrack(
             };
             gait.targetPreset    = desiredPreset;
             gait.gaitBlendWeight = 0.0f;
+            ZHLN::Log(
+                "[ProceduralAnimation] Gait blend started: {} -> {} (stride {:.2f} -> {:.2f}, step {:.2f} -> {:.2f})",
+                running ? "walk" : "run", running ? "run" : "walk",
+                gait.currentPreset.strideLength, gait.targetPreset.strideLength,
+                gait.currentPreset.stepHeight, gait.targetPreset.stepHeight
+            );
         }
     }
 

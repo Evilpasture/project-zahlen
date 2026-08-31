@@ -235,7 +235,7 @@ struct ProceduralLocomotionComponent {
     GaitPreset currentPreset {};
     GaitPreset targetPreset {};
     float      gaitBlendWeight = 0.0f;
-    float      gaitBlendSpeed  = 3.5f;
+    float      gaitBlendSpeed  = 2.0f; // Slower blend for more visible transitions
     float      pelvisSwayScale  = 1.0f;
     float      armSwingScale   = 1.0f;
     float      forwardLeanScale = 1.0f;
