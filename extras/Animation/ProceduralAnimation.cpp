@@ -2065,7 +2065,19 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
             const float  pelvisDropWeight       = config != nullptr ? config->pelvisDropWeight : 1.0f;
             const float  maxHeightCorrection    = config != nullptr ? config->maxFootHeightCorrection : 0.18f;
             const float  maxLegExtension        = config != nullptr ? config->maxLegExtension : 0.98f;
-            const float  maxBodyTilt            = JPH::DegreesToRadians(config != nullptr ? config->maxIKBodyTiltDegrees : 10.0f);
+            
+            // Check if walking to disable IK body tilt (prevents spring oscillation waddling)
+            bool isWalking = false;
+            if (animator != nullptr && animator->currentTrackIdx >= 0 && 
+                animator->currentTrackIdx < static_cast<int32_t>(animator->prefab->animations.size())) {
+                std::string_view animName(animator->prefab->animations[animator->currentTrackIdx].name.data(),
+                                          animator->prefab->animations[animator->currentTrackIdx].name.size());
+                isWalking = animName.find("walk") != std::string_view::npos ||
+                            animName.find("Walk") != std::string_view::npos;
+            }
+            
+            // Disable body tilt from IK reach for walking to prevent spring oscillation waddling
+            const float  maxBodyTilt            = isWalking ? 0.0f : JPH::DegreesToRadians(config != nullptr ? config->maxIKBodyTiltDegrees : 10.0f);
             const float  maxAnkleSideways       = JPH::DegreesToRadians(config != nullptr ? config->maxAnkleSidewaysDegrees : 15.0f);
             const float  maxAnkleForward        = JPH::DegreesToRadians(config != nullptr ? config->maxAnkleForwardDegrees : 35.0f);
             const bool   preserveAuthoredFootXZ = config == nullptr || config->preserveAuthoredFootXZ;
