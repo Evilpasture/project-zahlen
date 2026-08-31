@@ -431,9 +431,14 @@ void ApplyAuthoredPose(const Components::AnimatorComponent* animator, const Proc
     // 
     // For walking, force Bicubic mode to disable spring-damper filtering which
     // might be oscillating and causing waddling at slow speeds.
-    const bool isWalking = animator != nullptr && animator->currentTrackIdx >= 0 && 
-                          animator->currentTrackIdx < static_cast<int32_t>(animator->prefab->animations.size()) &&
-                          animator->prefab->animations[animator->currentTrackIdx].name.find("walk") != std::string::npos;
+    bool isWalking = false;
+    if (animator != nullptr && animator->currentTrackIdx >= 0 && 
+        animator->currentTrackIdx < static_cast<int32_t>(animator->prefab->animations.size())) {
+        std::string_view animName(animator->prefab->animations[animator->currentTrackIdx].name.data(),
+                                  animator->prefab->animations[animator->currentTrackIdx].name.size());
+        isWalking = animName.find("walk") != std::string_view::npos ||
+                    animName.find("Walk") != std::string_view::npos;
+    }
     
     const PoseInterpolationMode mode = isWalking ? PoseInterpolationMode::Bicubic :
         (map.preserveAuthoredHierarchy && requestedMode == PoseInterpolationMode::SpringDamper ? PoseInterpolationMode::Bicubic : requestedMode);
