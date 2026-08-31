@@ -545,7 +545,8 @@ struct GLTFImportTestSuite {
                 bool sourceHasJointWeights = false;
                 for (size_t primitive = 0; primitive < owner.mesh->primitives_count; ++primitive) {
                     for (size_t attribute = 0; attribute < owner.mesh->primitives[primitive].attributes_count; ++attribute) {
-                        sourceHasJointWeights = sourceHasJointWeights || owner.mesh->primitives[primitive].attributes[attribute].type == cgltf_attribute_type_joints;
+                        sourceHasJointWeights =
+                            sourceHasJointWeights || owner.mesh->primitives[primitive].attributes[attribute].type == cgltf_attribute_type_joints;
                     }
                 }
                 if (part.skeletonIndex != expectedSkeleton || part.isSkinned != (owner.skin != nullptr && sourceHasJointWeights)) {
@@ -635,7 +636,8 @@ struct GLTFImportTestSuite {
                     }
 
                     // The inverse bind matrix must undo the bind-pose world transform.
-                    if (skin.inverse_bind_matrices != nullptr && !(SourceWorld(*sourceNode) * joint.inverseBindMatrix).IsClose(JPH::Mat44::sIdentity(), 0.0001f)) {
+                    if (skin.inverse_bind_matrices != nullptr &&
+                        !(SourceWorld(*sourceNode) * joint.inverseBindMatrix).IsClose(JPH::Mat44::sIdentity(), 0.0001f)) {
                         return std::unexpected(GLTFImportError::SkeletonMismatch);
                     }
                 }
@@ -724,7 +726,8 @@ struct GLTFImportTestSuite {
 
             // 1. KHR_materials_emissive_strength scales the authored emissive factor.
             const std::vector<uint8_t> strengthBytes = MakeEmissiveStrengthFixture();
-            const ZHLN::ModelPrefab*   withStrength  = ZHLN::CreativeWorksFactory::LoadModelPrefabFromMemory(*engine, strengthBytes, "ext_emissive_strength.glb");
+            const ZHLN::ModelPrefab*   withStrength =
+                ZHLN::CreativeWorksFactory::LoadModelPrefabFromMemory(*engine, strengthBytes, "ext_emissive_strength.glb");
             if (withStrength == nullptr || withStrength->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
@@ -827,19 +830,21 @@ struct GLTFImportTestSuite {
 
             // 1. The default spawn adds no lights: the glow comes from the
             //    material, exactly as it would in any other glTF viewer.
-            std::array<ZHLN::Entity, 8> defaultEntities {};
-            const ZHLN::SpawnParams     defaultParams {.position = JPH::RVec3(0.0f, 0.0f, 0.0f)};
-            const uint32_t              defaultSpawned =
-                ZHLN::CreativeWorksFactory::InstantiatePrefab(*engine, *prefab, defaultParams, defaultEntities.data(), static_cast<uint32_t>(defaultEntities.size()));
+            std::array<ZHLN::Entity, 8>                  defaultEntities {};
+            const ZHLN::CreativeWorksFactory::SpawnParams defaultParams {.position = JPH::RVec3(0.0f, 0.0f, 0.0f)};
+            const uint32_t                               defaultSpawned = ZHLN::CreativeWorksFactory::InstantiatePrefab(
+                *engine, *prefab, defaultParams, defaultEntities.data(), static_cast<uint32_t>(defaultEntities.size())
+            );
             if (defaultSpawned == 0 || lightCount() != lightsBefore) {
                 return std::unexpected(GLTFImportError::EmissiveLightMismatch);
             }
 
             // 2. Opting in adds exactly one light for the one emissive part.
-            std::array<ZHLN::Entity, 8> entities {};
-            const JPH::Vec3             spawnPosition(4.0f, 1.0f, -2.0f);
-            const ZHLN::SpawnParams     params {.position = JPH::RVec3(spawnPosition), .emissiveVirtualLights = true};
-            const uint32_t              spawned = ZHLN::CreativeWorksFactory::InstantiatePrefab(*engine, *prefab, params, entities.data(), static_cast<uint32_t>(entities.size()));
+            std::array<ZHLN::Entity, 8>                  entities {};
+            const JPH::Vec3                              spawnPosition(4.0f, 1.0f, -2.0f);
+            const ZHLN::CreativeWorksFactory::SpawnParams params {.position = JPH::RVec3(spawnPosition), .emissiveVirtualLights = true};
+            const uint32_t                               spawned =
+                ZHLN::CreativeWorksFactory::InstantiatePrefab(*engine, *prefab, params, entities.data(), static_cast<uint32_t>(entities.size()));
             if (spawned < 3 || lightCount() != lightsBefore + 1) {
                 return std::unexpected(GLTFImportError::EmissiveLightMismatch);
             }
