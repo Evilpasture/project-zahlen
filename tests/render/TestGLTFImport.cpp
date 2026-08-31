@@ -29,6 +29,7 @@
 #include <cgltf.h>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <expected>
 #include <fstream>
 #include <ios>
@@ -49,6 +50,7 @@ enum class GLTFImportError : uint8_t {
     AnimationMismatch[[= ZHLN::Description<"Imported animation channels disagree with the source document.">{}]],
     PartMismatch[[= ZHLN::Description<"Imported mesh parts do not reference the nodes and skins that carry them.">{}]],
     PrefabCacheMismatch[[= ZHLN::Description<"Reloading the same virtual path did not return the cached prefab.">{}]],
+    ExtensionMismatch[[= ZHLN::Description<"A Khronos glTF extension was not applied the way the importer documents it.">{}]],
 };
 
 namespace {
@@ -86,6 +88,87 @@ constexpr std::string_view kVirtualPath = "ProceduralAnimationBaseRig.glb";
     float matrix[16] {};
     cgltf_node_transform_world(&node, matrix);
     return ColumnMajor(matrix);
+}
+
+/// Assembles a GLB container around a JSON chunk and a binary chunk.
+///
+/// Synthesizing the input is not the same as reimplementing the importer: this
+/// only produces bytes a conformant loader must accept, so the extension
+/// behaviour under test stays the importer's own.
+[[nodiscard]] auto MakeGlb(const std::string& json, std::span<const uint8_t> bin) -> std::vector<uint8_t> {
+    std::string paddedJson = json;
+    while (paddedJson.size() % 4 != 0) {
+        paddedJson.push_back(' ');
+    }
+    std::vector<uint8_t> paddedBin(bin.begin(), bin.end());
+    while (paddedBin.size() % 4 != 0) {
+        paddedBin.push_back(0);
+    }
+
+    std::vector<uint8_t> glb;
+    auto                 append32 = [&glb](uint32_t value) {
+        for (uint32_t byte = 0; byte < 4; ++byte) {
+            glb.push_back(static_cast<uint8_t>((value >> (8u * byte)) & 0xFFu));
+        }
+    };
+    auto appendBytes = [&glb](const auto& source) {
+        for (const auto element: source) {
+            glb.push_back(static_cast<uint8_t>(element));
+        }
+    };
+
+    append32(0x46546C67u); // "glTF"
+    append32(2u);
+    append32(static_cast<uint32_t>(12u + 8u + paddedJson.size() + 8u + paddedBin.size()));
+    append32(static_cast<uint32_t>(paddedJson.size()));
+    append32(0x4E4F534Au); // "JSON"
+    appendBytes(paddedJson);
+    append32(static_cast<uint32_t>(paddedBin.size()));
+    append32(0x004E4942u); // "BIN\0"
+    appendBytes(paddedBin);
+    return glb;
+}
+
+/// One triangle plus one emissive material, optionally carrying
+/// KHR_materials_emissive_strength and a KHR_lights_punctual point light.
+[[nodiscard]] auto MakeExtensionFixture(bool withEmissiveStrength, bool withPunctualLight) -> std::vector<uint8_t> {
+    constexpr float    kPositions[9] = {0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f};
+    constexpr uint32_t kIndices[3]   = {0u, 1u, 2u};
+
+    std::vector<uint8_t> bin(sizeof(kPositions) + sizeof(kIndices));
+    std::memcpy(bin.data(), kPositions, sizeof(kPositions));
+    std::memcpy(bin.data() + sizeof(kPositions), kIndices, sizeof(kIndices));
+
+    std::string used = R"("extensionsUsed":[)";
+    used += withEmissiveStrength ? R"("KHR_materials_emissive_strength")" : "";
+    used += (withEmissiveStrength && withPunctualLight) ? "," : "";
+    used += withPunctualLight ? R"("KHR_lights_punctual")" : "";
+    used += "],";
+    if (!withEmissiveStrength && !withPunctualLight) {
+        used.clear();
+    }
+
+    const std::string lightsBlock = withPunctualLight ?
+        R"("extensions":{"KHR_lights_punctual":{"lights":[{"type":"point","name":"TestPoint","color":[1.0,0.5,0.25],"intensity":42.0}]}},)" :
+        "";
+    const std::string lightNode = withPunctualLight ?
+        R"(,{"name":"PunctualLight","translation":[1.0,2.0,3.0],"extensions":{"KHR_lights_punctual":{"light":0}}})" :
+        "";
+    const std::string sceneNodes    = withPunctualLight ? "[0,1]" : "[0]";
+    const std::string strengthBlock = withEmissiveStrength ? R"(,"extensions":{"KHR_materials_emissive_strength":{"emissiveStrength":4.0}})" : "";
+
+    // emissiveFactor is deliberately below 1 in every channel so a 4x strength
+    // stays representable and cannot be confused with a clamp to white.
+    const std::string json = std::string(R"({"asset":{"version":"2.0"},)") + used + lightsBlock + R"("scene":0,"scenes":[{"nodes":)" + sceneNodes +
+                             R"(}],"nodes":[{"name":"EmissiveTriangle","mesh":0})" + lightNode +
+                             R"(],"meshes":[{"name":"Tri","primitives":[{"attributes":{"POSITION":0},"indices":1,"material":0}]}],)" +
+                             R"("materials":[{"name":"Emissive","pbrMetallicRoughness":{"baseColorFactor":[1.0,1.0,1.0,1.0],"metallicFactor":0.0,)" +
+                             R"("roughnessFactor":1.0},"emissiveFactor":[0.25,0.5,0.125])" + strengthBlock +
+                             R"(}],"accessors":[{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0.0,0.0,0.0],"max":[1.0,1.0,0.0]},)" +
+                             R"({"bufferView":1,"componentType":5125,"count":3,"type":"SCALAR"}],)" +
+                             R"("bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":36,"target":34962},)" +
+                             R"({"buffer":0,"byteOffset":36,"byteLength":12,"target":34963}],"buffers":[{"byteLength":48}]})";
+    return MakeGlb(json, bin);
 }
 
 /// Independent cgltf view of the same bytes, used as the reference the
@@ -386,6 +469,82 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::AnimationMismatch);
             }
 
+            return {};
+        }
+
+        /**
+         * Khronos extensions. The importer consumes exactly one today --
+         * KHR_materials_emissive_strength (GLTFImporter.cpp:291) -- so that one
+         * is asserted properly, and the rest are pinned as the behaviour they
+         * actually have rather than the behaviour a reader might assume.
+         *
+         * KHR_lights_punctual in particular is exported by zcook
+         * (src/zcook/GLB.cpp:1077) but never read back: ModelPrefab has no
+         * light representation at all, so a cooked light survives the round
+         * trip only through the cooker's own manifest. What is enforced here is
+         * that such a file still imports cleanly instead of failing or
+         * corrupting the node graph.
+         */
+        std::expected<void, ZHLN::Error> importer_applies_supported_khronos_extensions() {
+            const auto engine = ZHLN::Test::Headless::CreateEngine("Headless glTF Extensions");
+            if (engine == nullptr) {
+                return std::unexpected(GLTFImportError::EngineInitFailed);
+            }
+
+            constexpr float kAuthoredEmissive[3] = {0.25f, 0.5f, 0.125f};
+            constexpr float kEmissiveStrength    = 4.0f;
+
+            // 1. KHR_materials_emissive_strength scales the authored emissive factor.
+            const std::vector<uint8_t> strengthBytes = MakeExtensionFixture(true, false);
+            const ZHLN::ModelPrefab*   withStrength  = ZHLN::CreativeWorksFactory::LoadModelPrefabFromMemory(*engine, strengthBytes, "ext_emissive_strength.glb");
+            if (withStrength == nullptr || withStrength->parts.size() != 1) {
+                return std::unexpected(GLTFImportError::PrefabLoadFailed);
+            }
+            for (size_t channel = 0; channel < 3; ++channel) {
+                const float expected = kAuthoredEmissive[channel] * kEmissiveStrength;
+                if (std::abs(withStrength->parts[0].defaultMaterial.emissiveFactor[channel] - expected) > 0.0001f) {
+                    return std::unexpected(GLTFImportError::ExtensionMismatch);
+                }
+            }
+
+            // 2. The same material without the extension keeps the authored value,
+            //    so the scale above is attributable to the extension and not to a
+            //    constant the importer applies to every emissive material.
+            const std::vector<uint8_t> plainBytes = MakeExtensionFixture(false, false);
+            const ZHLN::ModelPrefab*   plain      = ZHLN::CreativeWorksFactory::LoadModelPrefabFromMemory(*engine, plainBytes, "ext_emissive_plain.glb");
+            if (plain == nullptr || plain->parts.size() != 1) {
+                return std::unexpected(GLTFImportError::PrefabLoadFailed);
+            }
+            for (size_t channel = 0; channel < 3; ++channel) {
+                if (std::abs(plain->parts[0].defaultMaterial.emissiveFactor[channel] - kAuthoredEmissive[channel]) > 0.0001f) {
+                    return std::unexpected(GLTFImportError::ExtensionMismatch);
+                }
+            }
+
+            // 3. KHR_lights_punctual: declared in extensionsUsed, referenced by a
+            //    node, and unread by the importer. The file must still import, the
+            //    light node must survive as an ordinary transform node with its
+            //    translation intact, and the mesh node must be unaffected by it.
+            const std::vector<uint8_t> lightBytes = MakeExtensionFixture(true, true);
+            const ZHLN::ModelPrefab*   withLight  = ZHLN::CreativeWorksFactory::LoadModelPrefabFromMemory(*engine, lightBytes, "ext_punctual_light.glb");
+            if (withLight == nullptr || withLight->nodes.size() != 2 || withLight->parts.size() != 1) {
+                return std::unexpected(GLTFImportError::PrefabLoadFailed);
+            }
+            const ZHLN::ModelNode& lightNode = withLight->nodes[1];
+            if (std::string_view(lightNode.name) != "PunctualLight" || lightNode.hasMesh || lightNode.parentIndex != -1 ||
+                !lightNode.localTransform.GetTranslation().IsClose(JPH::Vec3(1.0f, 2.0f, 3.0f), 0.0001f)) {
+                return std::unexpected(GLTFImportError::ExtensionMismatch);
+            }
+            if (!withLight->nodes[0].hasMesh || withLight->parts[0].nodeIndex != 0) {
+                return std::unexpected(GLTFImportError::ExtensionMismatch);
+            }
+            // The emissive extension still applies when a second extension is present.
+            for (size_t channel = 0; channel < 3; ++channel) {
+                const float expected = kAuthoredEmissive[channel] * kEmissiveStrength;
+                if (std::abs(withLight->parts[0].defaultMaterial.emissiveFactor[channel] - expected) > 0.0001f) {
+                    return std::unexpected(GLTFImportError::ExtensionMismatch);
+                }
+            }
             return {};
         }
     };
