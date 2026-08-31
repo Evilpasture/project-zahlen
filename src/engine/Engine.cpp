@@ -831,6 +831,11 @@ Engine::~Engine() {
         return;
     }
 
+    // The fallback preset parks entity handles in process-global storage. They
+    // name entities in the registry that is about to be cleared, so they must
+    // not survive into the next engine (see DefaultPreset::ReleaseFor).
+    DefaultPreset::ReleaseFor(this);
+
     _impl->registry.Clear();
     _impl->physicsContext.reset();
     _impl->renderContext.reset();

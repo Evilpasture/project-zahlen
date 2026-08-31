@@ -276,27 +276,48 @@ struct PerformanceTestSuite {
                 t = {.func = outerJob, .arg = &payload};
             }
 
-            // Reported with its distribution: at ~30 us of wall clock this is
-            // the finest-grained metric in the suite -- almost all of it is
-            // worker wake-up and fiber switching -- so a bare minimum cannot
-            // distinguish "nested dispatch got slower" from "this machine
-            // parked its cores". The median and worst say which.
+            // One dispatch of this shape is ~30 us of wall clock, and most of
+            // that is the workers coming back from a park -- which is the OS
+            // scheduler's latency, not the task system's throughput. Timing a
+            // single dispatch made this the noisiest number in the suite: the
+            // best of nine samples moved 0.029 -> 0.056 -> 0.098 ms across
+            // three runs of unchanged code, a 3.4x spread that no regression
+            // limit can sit inside.
+            //
+            // So measure the hot path instead. A warm-up dispatch pays the
+            // wake-up cost up front, and each sample then runs the dispatch
+            // kRepeats times back to back and reports the mean, which keeps
+            // the workers spinning and puts real dispatch/fiber-switch work in
+            // the numerator. The metric is renamed rather than re-baselined:
+            // it measures something different from the old one, and quietly
+            // reusing the key would compare the two.
+            constexpr uint32_t kRepeats = 64;
+
+            {
+                ZHLN::TaskSystem::Counter warmCounter;
+                ZHLN::TaskSystem::Dispatch(tasks, &warmCounter);
+                ZHLN::TaskSystem::Wait(&warmCounter);
+            }
+
             const auto nestedSamples = ZHLN::Test::SampleBestOf(9, [&] {
                 nestedCounter.store(0, std::memory_order::relaxed);
-                BenchmarkTimer             nestedTimer;
-                ZHLN::TaskSystem::Counter  syncCounter;
-                ZHLN::TaskSystem::Dispatch(tasks, &syncCounter);
-                ZHLN::TaskSystem::Wait(&syncCounter);
-                return nestedTimer.ElapsedMilliseconds();
+                BenchmarkTimer nestedTimer;
+                for (uint32_t rep = 0; rep < kRepeats; ++rep) {
+                    ZHLN::TaskSystem::Counter syncCounter;
+                    ZHLN::TaskSystem::Dispatch(tasks, &syncCounter);
+                    ZHLN::TaskSystem::Wait(&syncCounter);
+                }
+                return nestedTimer.ElapsedMilliseconds() / kRepeats;
             });
             const double nestedDurationMs = nestedSamples.best;
 
-            ZHLN::Test::ExpectEq(nestedCounter.load(), static_cast<uint32_t>(kOuterTasks * kInnerTasks));
+            ZHLN::Test::ExpectEq(nestedCounter.load(), static_cast<uint32_t>(kOuterTasks * kInnerTasks * kRepeats));
             ZHLN::Println(
-                "    [Nested Fibers] 32 x 256 child tasks dispatched & synced in {:.3f} ms [median {:.3f}, worst {:.3f}, n={}]", nestedDurationMs,
-                nestedSamples.median, nestedSamples.worst, nestedSamples.samples
+                "    [Nested Fibers] 32 x 256 child tasks dispatched & synced in {:.3f} ms/dispatch over {} back-to-back dispatches "
+                "[median {:.3f}, worst {:.3f}, n={}]",
+                nestedDurationMs, kRepeats, nestedSamples.median, nestedSamples.worst, nestedSamples.samples
             );
-            ZHLN::Test::VerifyBaseline("cpu.nested_fibers_32x256", nestedDurationMs);
+            ZHLN::Test::VerifyBaseline("cpu.nested_fibers_32x256_hot", nestedDurationMs);
 
             return {};
         }

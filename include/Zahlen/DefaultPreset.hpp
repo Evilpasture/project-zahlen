@@ -20,6 +20,19 @@ class ZHLN_API DefaultPreset {
     static void               Update(Engine& engine, float dt);
     [[nodiscard]] static bool IsActive() noexcept;
     static void               ClearFallback() noexcept;
+
+    /// Drops the fallback state if @p engine is the engine that built it.
+    ///
+    /// The preset keeps entity handles (the emblem, the orbit light, the UI
+    /// widgets) in process-global storage, and nothing used to clear them when
+    /// an engine died: the next engine in the process inherited s_IsActive
+    /// together with handles naming entities in a registry that no longer
+    /// exists. Entity indices are handed out deterministically, so those
+    /// handles resolve against the new registry and the preset animates
+    /// whatever entity happens to sit at the same slot. Engine's destructor
+    /// calls this; the state is owner-scoped until the preset itself is moved
+    /// into the engine.
+    static void ReleaseFor(const Engine* engine) noexcept;
     static void               SetDisabled(bool disabled) noexcept {
         s_Disabled = disabled;
     }
@@ -29,6 +42,7 @@ class ZHLN_API DefaultPreset {
 
   private:
     static inline bool           s_IsActive       = false;
+    static inline const Engine*  s_Owner          = nullptr;
     static inline bool           s_Disabled       = false;
     static inline FallbackReason s_Reason         = FallbackReason::None;
     static inline char           s_DetailMsg[256] = "";

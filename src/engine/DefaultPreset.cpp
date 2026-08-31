@@ -28,6 +28,7 @@ auto DefaultPreset::IsActive() noexcept -> bool {
 
 void DefaultPreset::ClearFallback() noexcept {
     s_IsActive     = false;
+    s_Owner        = nullptr;
     s_Reason       = FallbackReason::None;
     s_DetailMsg[0] = '\0';
     s_CubeEntity   = Entity::Null();
@@ -46,6 +47,7 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
     }
 
     s_IsActive     = true;
+    s_Owner        = &engine;
     s_Reason       = reason;
     s_PopupVisible = true;
 
@@ -126,8 +128,17 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
     cam.fov      = 52.0f;
 }
 
+void DefaultPreset::ReleaseFor(const Engine* engine) noexcept {
+    if (s_Owner == engine) {
+        ClearFallback();
+    }
+}
+
 void DefaultPreset::Update(Engine& engine, float dt) {
-    if (!s_IsActive) {
+    // Owner check: the handles below belong to the registry of the engine that
+    // built the scene, and resolving them against a different registry patches
+    // unrelated entities that happen to occupy the same slots.
+    if (!s_IsActive || s_Disabled || s_Owner != &engine) {
         return;
     }
 

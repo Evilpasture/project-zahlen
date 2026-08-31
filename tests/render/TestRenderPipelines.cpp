@@ -15,8 +15,11 @@
 // Engine.hpp only forward-declares SystemGraph; the scene-reset test calls
 // GetSystemCount() on the graphs Engine hands out.
 #include <Zahlen/ecs/SystemGraph.hpp>
+#include <Zahlen/physics/Physics.hpp>
 #include <cstddef>
 #include <expected>
+#include <format>
+#include <string>
 
 struct RenderPipelinesTestSuite {
     RenderPipelinesTestSuite() {
@@ -266,6 +269,34 @@ struct RenderPipelinesTestSuite {
                 };
             };
 
+            // A box spawned at Y = 8 with a dynamic body has to fall. When it
+            // does not, the break can be anywhere along
+            //     body created -> world steps it -> PhysicsStateSystem::WriteBack
+            //     copies it into PhysicsStateComponent -> VisualInterpolationSystem
+            //     writes the transform
+            // and a bare position assertion cannot say which link gave way.
+            // This prints the whole chain. The downward raycast locates the
+            // body in the broadphase without needing the world's private
+            // slot->dense mapping, so "no hit" means the body was never added,
+            // "hit near 8" means it is there but not simulating, and a low hit
+            // with a high transform means the write-back never reached the ECS.
+            const auto reportFall = [](ZHLN::Engine& eng, ZHLN::Entity box, const char* which) -> void {
+                auto&       reg   = eng.GetRegistry();
+                const auto* trans = reg.Get<ZHLN::Components::TransformComponent>(box);
+                const auto* phys  = reg.Get<ZHLN::Components::PhysicsComponent>(box);
+                const auto* state = reg.Get<ZHLN::Components::PhysicsStateComponent>(box);
+                const char* body  = (phys == nullptr) ? "no PhysicsComponent" : ((phys->physicsHandle == ZHLN::Entity::Null()) ? "null handle" : "live");
+                const auto  hit   = eng.GetPhysicsContext().Raycast(JPH::RVec3(0.0, 15.0, 0.0), JPH::Vec3(0.0f, -1.0f, 0.0f), 30.0f);
+
+                ZHLN::Println(
+                    "    [INFO] {}: transform Y {:.3f} | state Y {:.3f} (prev {:.3f}, synced on frame {}) | body {} | raycast {} | engine frame {}", which,
+                    trans != nullptr ? trans->position.GetY() : -1.0f, state != nullptr ? state->currPosition.GetY() : -1.0f,
+                    state != nullptr ? state->prevPosition.GetY() : -1.0f, state != nullptr ? state->lastPhysicsSyncFrame : 0ULL,
+                    body,
+                    hit.hasHit ? std::format("hit at Y {:.3f}", static_cast<float>(hit.position.GetY())) : std::string("no hit"), eng.GetCurrentFrame()
+                );
+            };
+
             // Exclusive engine: only one Vulkan instance may be live at a
             // time (see engines_are_serial_and_the_slot_is_released), so the
             // pool must not be holding one when this builds its own.
@@ -307,6 +338,7 @@ struct RenderPipelinesTestSuite {
                 first->ProcessEvents();
                 ZHLN::Test::ExpectEq(first->Tick(dt, ZHLN::GameplayDriver::Cpp), ZHLN::GameplayStatus::OK);
             }
+            reportFall(*first, falling, "engine A box");
             if (const auto* transform = first->GetRegistry().Get<ZHLN::Components::TransformComponent>(falling);
                 ZHLN::Test::ExpectTrue(transform != nullptr)) {
                 ZHLN::Test::ExpectTrue(transform->position.GetY() < 7.5f);
@@ -333,6 +365,7 @@ struct RenderPipelinesTestSuite {
                 second->ProcessEvents();
                 ZHLN::Test::ExpectEq(second->Tick(dt, ZHLN::GameplayDriver::Cpp), ZHLN::GameplayStatus::OK);
             }
+            reportFall(*second, fallingB, "engine B box");
             if (const auto* transform = second->GetRegistry().Get<ZHLN::Components::TransformComponent>(fallingB);
                 ZHLN::Test::ExpectTrue(transform != nullptr)) {
                 ZHLN::Test::ExpectTrue(transform->position.GetY() < 7.5f);
