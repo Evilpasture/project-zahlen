@@ -2060,15 +2060,15 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
 
         // Stage 3: terrain contact, pelvis reach correction, and two-bone IK.
         if (ikEnabled) {
+            // Check if walking by speed (more reliable than animation name)
+            const bool isWalking = horizontalSpeed < std::max(tracks != nullptr ? tracks->runSpeedThreshold : 4.0f, 0.1f);
+            
             const Entity ignoredHandle          = physicsComponent != nullptr ? physicsComponent->physicsHandle : Entity {};
             const float  legIKWeight            = config != nullptr ? config->legIKWeight : 1.0f;
             // Disable pelvis drop for walking to prevent spring oscillation
             const float  pelvisDropWeight       = isWalking ? 0.0f : (config != nullptr ? config->pelvisDropWeight : 1.0f);
             const float  maxHeightCorrection    = config != nullptr ? config->maxFootHeightCorrection : 0.18f;
             const float  maxLegExtension        = config != nullptr ? config->maxLegExtension : 0.98f;
-            
-            // Check if walking by speed (more reliable than animation name)
-            const bool isWalking = horizontalSpeed < std::max(tracks != nullptr ? tracks->runSpeedThreshold : 4.0f, 0.1f);
             
             // Disable body tilt from IK reach for walking to prevent spring oscillation waddling
             const float  maxBodyTilt            = isWalking ? 0.0f : JPH::DegreesToRadians(config != nullptr ? config->maxIKBodyTiltDegrees : 10.0f);
