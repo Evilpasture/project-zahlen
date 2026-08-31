@@ -650,14 +650,26 @@ void SynchronizeLocomotionTrack(
     }
 
     if (animator.currentTrackIdx != desiredTrack) {
-        animator.prevTrackIdx      = animator.currentTrackIdx;
-        animator.prevTrackTime     = animator.currentTrackTime;
-        animator.prevPlaybackSpeed = animator.currentPlaybackSpeed;
-        animator.currentTrackIdx   = desiredTrack;
-        animator.currentTrackTime  = 0.0f;
-        animator.blendFactor       = 0.0f;
-        animator.blendDuration     = 0.50f; // Cross-fade over 0.5 seconds to match gait blend duration
-        animator.isFinished        = false;
+        if (animator.prevTrackIdx == desiredTrack && animator.blendFactor < 1.0f) {
+            // Reversing a blend in progress (e.g. rapid walk→run→walk toggle).
+            // Swap prev/current and invert the blend factor so the cross-fade
+            // smoothly reverses instead of snapping to a fresh blend from a
+            // barely-started track.
+            std::swap(animator.prevTrackIdx, animator.currentTrackIdx);
+            std::swap(animator.prevTrackTime, animator.currentTrackTime);
+            std::swap(animator.prevPlaybackSpeed, animator.currentPlaybackSpeed);
+            animator.blendFactor = 1.0f - animator.blendFactor;
+        } else {
+            animator.prevTrackIdx      = animator.currentTrackIdx;
+            animator.prevTrackTime     = animator.currentTrackTime;
+            animator.prevPlaybackSpeed = animator.currentPlaybackSpeed;
+            animator.currentTrackIdx   = desiredTrack;
+            animator.currentTrackTime  = 0.0f;
+            animator.currentPlaybackSpeed = 1.0f;
+            animator.blendFactor       = 0.0f;
+            animator.blendDuration     = 0.35f;
+            animator.isFinished        = false;
+        }
     }
 
     // Advance the track cross-fade. ProceduralAnimation owns the final pose
@@ -673,10 +685,19 @@ void SynchronizeLocomotionTrack(
         animator.blendFactor = 1.0f;
     }
     if (animator.prevTrackIdx >= 0 && animator.blendFactor < 1.0f) {
-        animator.prevTrackTime += dt * animator.prevPlaybackSpeed;
-        const AnimationClip& prevClip = animator.prefab->animations[static_cast<size_t>(animator.prevTrackIdx)];
-        if (prevClip.duration > 0.0f) {
-            animator.prevTrackTime = std::fmod(animator.prevTrackTime, prevClip.duration);
+        // Keep the previous track stride-synced too, so both tracks show the
+        // same pose phase during the cross-fade. Without this, the prev track
+        // drifts relative to the current track and the blend looks wrong.
+        if (moving && tracks.synchronizeToStrideWheel) {
+            const float          prevPosePhase = Animation::EvaluateTwoKeyPosePhase(gait.phase);
+            const AnimationClip& prevClip      = animator.prefab->animations[static_cast<size_t>(animator.prevTrackIdx)];
+            animator.prevTrackTime             = prevPosePhase * std::max(prevClip.duration, 0.0f);
+        } else {
+            animator.prevTrackTime += dt * animator.prevPlaybackSpeed;
+            const AnimationClip& prevClip = animator.prefab->animations[static_cast<size_t>(animator.prevTrackIdx)];
+            if (prevClip.duration > 0.0f) {
+                animator.prevTrackTime = std::fmod(animator.prevTrackTime, prevClip.duration);
+            }
         }
     }
 
@@ -1977,7 +1998,7 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
         const bool upperBodyEnabled       = !authoredPoseOnly && (config == nullptr || config->enableUpperBody);
         const bool secondaryMotionEnabled = !authoredPoseOnly && (config == nullptr || config->enableSecondaryMotion);
         const bool itemHandlingEnabled    = !authoredPoseOnly && itemHandling != nullptr && itemHandling->enabled && itemHandling->gripCount > 0;
-        const bool handChildOfEnabled     = config == nullptr || config->enforceHandChildOf;
+        const bool handChildOfEnabled     = true; // Hands must always follow forearms
         const bool chestChildOfEnabled    = config == nullptr || config->enforceChestChildOf;
         const bool neckChildOfEnabled     = config == nullptr || config->enforceNeckChildOf;
         const bool headChildOfEnabled     = config == nullptr || config->enforceHeadChildOf;
