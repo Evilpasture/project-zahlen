@@ -371,6 +371,8 @@ set(RAW_ENGINE_SOURCES
     src/engine/graphics/RenderSetup.cpp
     src/engine/ScriptECSBridge.cpp
     src/engine/JSON.cpp
+    src/engine/TOML.cpp
+    src/engine/Scene.cpp
 )
 
 find_library(ZSTD_LIBRARY NAMES zstd zstd_static HINTS "/opt/homebrew/lib" "/usr/local/lib" "/usr/lib")
