@@ -608,7 +608,7 @@ void SynchronizeLocomotionTrack(
             .pelvisSwayScale  = 0.0f,    // No procedural sway - use authored animation
             .armSwingScale    = 1.0f,
             .forwardLeanScale = 1.0f,
-            .lateralBankScale = 1.0f,
+            .lateralBankScale = 0.0f,    // No lateral lean for walking
         };
         constexpr GaitPreset kRunPreset {
             .strideLength     = 2.40f,
