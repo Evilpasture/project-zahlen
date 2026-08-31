@@ -402,8 +402,16 @@ auto InstantiateMeshPart(
 // instead is what used to leave a puddle of lights at the spawn point while
 // the model itself went dark once it moved.
 auto TrySpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, Entity parentEntity, float scaleMult) -> Entity {
-    const float* ef  = part.defaultMaterial.emissiveFactor;
-    float        lum = ef[0] * 0.2126f + ef[1] * 0.7152f + ef[2] * 0.0722f;
+    // The imported factor is in engine HDR units (kGLTFEmissiveDisplayScale
+    // converts glTF's [0,1] on the way in). A light wants the authored colour
+    // and an intensity in light units, so the display conversion is undone
+    // here -- otherwise opting into VPLs would spawn a 100x overbright lamp.
+    static constexpr float kInvDisplayScale = 1.0f / kGLTFEmissiveDisplayScale;
+
+    const float* raw = part.defaultMaterial.emissiveFactor;
+    const float  ef[3] {raw[0] * kInvDisplayScale, raw[1] * kInvDisplayScale, raw[2] * kInvDisplayScale};
+
+    float lum = ef[0] * 0.2126f + ef[1] * 0.7152f + ef[2] * 0.0722f;
     if (lum <= 0.01f) {
         return Entity::Null();
     }

@@ -82,8 +82,12 @@ enum class BodyKind : uint8_t { None, Static, Dynamic };
 
 /// Surface appearance. Emission is a shading term plus a glow contribution --
 /// it is not a light source, which is both the glTF meaning and Babylon's.
-/// Values above 1.0 are the KHR_materials_emissive_strength case and are
-/// allowed here for the same reason.
+///
+/// `emissive` is in engine HDR units, not glTF's [0,1]: blit.slang tonemaps
+/// with `hdrColor *= 0.015`, so 1.0 renders at roughly 10/255 and 100 is about
+/// the tonemapper's white point. A scene that wants neon should say ~80, which
+/// is what the importer produces for a glTF emissiveFactor of 0.8 (see
+/// kGLTFEmissiveDisplayScale in Zahlen/ModelPrefab.hpp).
 struct SceneMaterial {
     JPH::Float4 baseColor = {0.8f, 0.4f, 0.2f, 1.0f};
     float       roughness = 0.5f;

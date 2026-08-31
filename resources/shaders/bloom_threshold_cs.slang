@@ -42,8 +42,16 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
 
     float3 color = texInput.SampleLevel(smp, uv, 0).rgb;
 
+    // The emission the deferred pass wrote for this pixel. lighting.slang adds
+    // it into the scene colour, so it is already part of `color` -- the bright
+    // pass below takes it back out and step 4 adds it in again on its own
+    // terms. Emission therefore reaches the blur exactly once, whether or not
+    // it happens to clear the threshold.
+    float3 emissive = texEmissive.SampleLevel(smp, uv, 0).rgb;
+    float3 surface  = max(color - emissive, 0.0f);
+
     // 1. Relative luminance (ITU-R BT.709)
-    float luma = dot(color, kLumaBT709);
+    float luma = dot(surface, kLumaBT709);
 
     // 2. Soft-Knee Thresholding (Matching original constants)
     static const float threshold = 1.0;
@@ -53,7 +61,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     soft       = (soft * soft) / (4.0 * knee + 1e-5);
 
     float contribution = max(soft, luma - threshold) / max(luma, 1e-5);
-    float3 brightColor = color * contribution;
+    float3 brightColor = surface * contribution;
 
     // 3. Highlight Energy Limiter
     static const float maxLuma = 128.0;
@@ -63,23 +71,21 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
 
     // 4. Glow layer.
     //
-    // The bright pass above only sees what is already over the threshold, and
-    // since emission stopped being multiplied by incident light (it owns a
-    // G-Buffer channel now, see lighting.slang) an emitter tops out at its own
-    // emissive factor. glTF clamps that factor to [0,1] unless the asset ships
-    // KHR_materials_emissive_strength, so a neon material lands at luma ~0.7 --
-    // under the threshold, and the halo that used to come free from emission
-    // being scaled by the sun disappeared with it.
-    //
-    // Babylon.js does not gate its glow on luminance either: GlowLayer renders
-    // the emissive channel by itself, blurs it and adds it back at `intensity`,
+    // Babylon.js does not gate its glow on luminance: GlowLayer renders the
+    // emissive channel by itself, blurs it and adds it back at `intensity`,
     // independent of how bright the rest of the frame is. That is what neon
-    // looks like, and it is what this adds -- the emission is fed into the same
-    // Kawase cascade with no threshold, so the halo scales with the emissive
-    // factor instead of switching on at 1.0.
+    // looks like, so emission enters the same Kawase cascade with no
+    // threshold, and the halo scales continuously with the emissive factor
+    // instead of switching on at 1.0.
+    //
+    // What emission does NOT get is a second helping: the bright pass ran on
+    // `surface`, the frame with emission removed, so a bright emitter is not
+    // counted once by the threshold and again here.
+    //
+    // The unit conversion that makes an imported material bright enough for
+    // any of this to be visible lives at the import boundary, not here --
+    // see kGLTFEmissiveDisplayScale in Zahlen/ModelPrefab.hpp.
     static const float kGlowIntensity = 1.0;
 
-    float3 glow = texEmissive.SampleLevel(smp, uv, 0).rgb * kGlowIntensity;
-
-    outImage[tid.xy] = float4(brightColor + glow, 1.0);
+    outImage[tid.xy] = float4(brightColor + emissive * kGlowIntensity, 1.0);
 }

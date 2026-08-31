@@ -27,6 +27,7 @@
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
@@ -76,12 +77,17 @@ constexpr std::array<float, 4> kEmissiveGreen {0.0f, 3.0f, 0.0f, 1.0f};
 constexpr std::array<float, 4> kNoEmission {0.0f, 0.0f, 0.0f, 1.0f};
 constexpr std::array<float, 4> kBoxBaseColor {0.05f, 0.05f, 0.05f, 1.0f};
 
-// Deliberately under the bloom bright-pass threshold: luma(0, 0.8, 0) = 0.57
-// against a threshold of 1.0. This is the ordinary glTF case -- emissiveFactor
-// is clamped to [0,1] unless the asset ships KHR_materials_emissive_strength --
-// and it is the case that stopped glowing when emission moved out of the albedo
-// attachment and stopped being multiplied by incident light.
-constexpr std::array<float, 4> kDimNeonGreen {0.0f, 0.8f, 0.0f, 1.0f};
+// The ordinary glTF neon case, in the units the importer produces: a
+// spec-clamped emissiveFactor of 0.8 with no KHR_materials_emissive_strength,
+// converted into engine HDR by kGLTFEmissiveDisplayScale.
+//
+// The raw 0.8 is deliberately NOT used here. blit.slang tonemaps with
+// `hdrColor *= 0.015`, so 0.8 renders at about 8/255 -- the emitter itself is
+// nearly black, and no glow constant can produce a halo brighter than the
+// thing casting it. That dimness was the actual regression behind "the neon
+// look is gone"; the fix is the unit conversion at import, and this constant
+// tracks it so the test measures what an imported asset really does.
+constexpr std::array<float, 4> kNeonGreen {0.0f, 0.8f * ZHLN::kGLTFEmissiveDisplayScale, 0.0f, 1.0f};
 
 /// Builds the unlit scene: one box at the origin, no lights of any kind, and
 /// ambient/GI dialled out so nothing but emission can brighten a surface.
@@ -267,30 +273,35 @@ struct EmissiveShadingTestSuite {
         }
 
         /**
-         * A neon material glows past its own edges even when it never crosses
-         * the bloom threshold.
+         * An imported neon material glows past its own edges.
          *
          * Emission owning a G-Buffer channel fixed the shading (see the test
-         * above) and cost the halo: it is no longer multiplied by incident
-         * light, so an emitter tops out at its emissiveFactor, and glTF clamps
-         * that to [0,1] without KHR_materials_emissive_strength. The bright
-         * pass thresholds at luma 1.0, so an ordinary neon material -- 0.57
-         * here -- contributed roughly 3% of itself to the bloom chain and the
-         * glow vanished.
+         * above) and cost the halo, and the reason turned out to be units
+         * rather than the bloom chain. Emission is no longer multiplied by
+         * incident light, so an emitter tops out at its emissiveFactor -- and
+         * glTF clamps that to [0,1] without KHR_materials_emissive_strength.
+         * Against `hdrColor *= 0.015` in blit.slang that is ~8/255 on screen:
+         * the neon surface itself was nearly black, so there was nothing for
+         * any glow to be a halo of.
          *
-         * bloom_threshold_cs now feeds the emissive channel into the same
-         * cascade ungated, the way Babylon.js's GlowLayer does. The band above
-         * the box is outside the geometry, so anything bright in it arrived by
-         * blur; the far corner is the control for "the whole frame lifted".
+         * Two changes make this scene the scene an asset author sees in
+         * Babylon. The importer converts glTF emissive into engine HDR units
+         * (kGLTFEmissiveDisplayScale), and bloom_threshold_cs feeds emission
+         * into the Kawase cascade ungated -- exactly once, since the bright
+         * pass now runs on the frame with emission removed.
+         *
+         * The band above the box is outside the geometry, so anything bright
+         * in it arrived by blur; the far corner is the control for "the whole
+         * frame lifted".
          */
-        std::expected<void, ZHLN::Error> a_dim_emitter_still_glows_past_its_silhouette() {
-            const UnlitMeasurement neon = MeasureUnlitBox(kDimNeonGreen, "emissive_glow_halo.ppm");
+        std::expected<void, ZHLN::Error> an_imported_neon_material_glows_past_its_silhouette() {
+            const UnlitMeasurement neon = MeasureUnlitBox(kNeonGreen, "emissive_glow_halo.ppm");
             if (!neon.valid) {
                 return std::unexpected(EmissiveShadingError::CaptureFailed);
             }
 
             ZHLN::Println(
-                "    [INFO] dim emitter: box meanG={:.1f} | halo meanRGB=({:.1f}, {:.1f}, {:.1f}) meanLuma={:.1f} | corner meanLuma={:.1f}",
+                "    [INFO] neon emitter: box meanG={:.1f} | halo meanRGB=({:.1f}, {:.1f}, {:.1f}) meanLuma={:.1f} | corner meanLuma={:.1f}",
                 neon.box.meanG, neon.halo.meanR, neon.halo.meanG, neon.halo.meanB, neon.halo.meanLuma, neon.corner.meanLuma
             );
 

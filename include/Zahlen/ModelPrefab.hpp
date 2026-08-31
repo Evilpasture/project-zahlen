@@ -15,6 +15,26 @@
 
 namespace ZHLN {
 
+/// Converts a glTF emissiveFactor into the engine's HDR units.
+///
+/// glTF says emissiveFactor is [0,1] and leaves anything brighter to
+/// KHR_materials_emissive_strength, which most exporters never write. This
+/// renderer, though, lives in absolute-ish HDR: the sun is 250 and blit.slang
+/// tonemaps with `hdrColor *= 0.015`, so an emissiveFactor of 1.0 taken at
+/// face value renders at about 10/255 -- a "neon" material comes out nearly
+/// black, and nothing it emits ever reaches the bloom bright pass.
+///
+/// Babylon.js only looks right without this because it composites in LDR,
+/// where 1.0 already means white. The scale is that unit conversion: it puts a
+/// fully saturated emissiveFactor near the tonemapper's white point (ACES of
+/// 100 * 0.015 is ~0.84), which is what the asset author saw in Babylon.
+///
+/// It applies to imported materials only. Material::emissiveFactor stays raw
+/// HDR, so a programmatic CreateMaterial keeps meaning exactly what it says,
+/// and KHR_materials_emissive_strength keeps its spec meaning -- a relative
+/// multiplier on top of this.
+inline constexpr float kGLTFEmissiveDisplayScale = 100.0f;
+
 struct ModelNode {
     String64   name;
     int32_t    parentIndex    = -1;

@@ -288,12 +288,17 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job) {
         job.emissiveFactor[1] = prim.material->emissive_factor[1];
         job.emissiveFactor[2] = prim.material->emissive_factor[2];
 
-        if (prim.material->has_emissive_strength) {
-            const float strength = prim.material->emissive_strength.emissive_strength;
-            job.emissiveFactor[0] *= strength;
-            job.emissiveFactor[1] *= strength;
-            job.emissiveFactor[2] *= strength;
-        }
+        // KHR_materials_emissive_strength is a relative multiplier on the
+        // authored factor; kGLTFEmissiveDisplayScale is the glTF [0,1] ->
+        // engine HDR unit conversion that applies either way. Without the
+        // latter an imported emissive material renders at ~10/255 and never
+        // reaches the bloom bright pass (see Zahlen/ModelPrefab.hpp).
+        const float strength      = prim.material->has_emissive_strength ? prim.material->emissive_strength.emissive_strength : 1.0f;
+        const float emissiveScale = strength * kGLTFEmissiveDisplayScale;
+
+        job.emissiveFactor[0] *= emissiveScale;
+        job.emissiveFactor[1] *= emissiveScale;
+        job.emissiveFactor[2] *= emissiveScale;
 
         if (prim.material->has_pbr_metallic_roughness) {
             const float* c         = prim.material->pbr_metallic_roughness.base_color_factor;

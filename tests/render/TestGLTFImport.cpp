@@ -712,6 +712,11 @@ struct GLTFImportTestSuite {
          * is asserted properly, and the rest are pinned as the behaviour they
          * actually have rather than the behaviour a reader might assume.
          *
+         * Every imported emissive factor also carries kGLTFEmissiveDisplayScale,
+         * the glTF [0,1] -> engine HDR unit conversion. The extension is a
+         * relative multiplier on top of it, exactly as the spec says, so the
+         * two fixtures below differ by precisely kEmissiveStrength.
+         *
          * KHR_lights_punctual in particular is exported by zcook
          * (src/zcook/GLB.cpp:1077) but never read back: ModelPrefab has no
          * light representation at all, so a cooked light survives the round
@@ -725,7 +730,8 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::EngineInitFailed);
             }
 
-            // 1. KHR_materials_emissive_strength scales the authored emissive factor.
+            // 1. KHR_materials_emissive_strength scales the authored emissive
+            //    factor, on top of the import-time unit conversion.
             const std::vector<uint8_t> strengthBytes = MakeEmissiveStrengthFixture();
             const ZHLN::ModelPrefab*   withStrength =
                 ZHLN::CreativeWorksFactory::LoadModelPrefabFromMemory(*engine, strengthBytes, "ext_emissive_strength.glb");
@@ -733,22 +739,30 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
             for (size_t channel = 0; channel < 3; ++channel) {
-                const float expected = kAuthoredEmissive[channel] * kEmissiveStrength;
-                if (std::abs(withStrength->parts[0].defaultMaterial.emissiveFactor[channel] - expected) > 0.0001f) {
+                const float expected = kAuthoredEmissive[channel] * kEmissiveStrength * ZHLN::kGLTFEmissiveDisplayScale;
+                if (std::abs(withStrength->parts[0].defaultMaterial.emissiveFactor[channel] - expected) > 0.01f) {
                     return std::unexpected(GLTFImportError::ExtensionMismatch);
                 }
             }
 
-            // 2. The same material without the extension keeps the authored value,
-            //    so the scale above is attributable to the extension and not to a
-            //    constant the importer applies to every emissive material.
+            // 2. The same material without the extension carries the unit
+            //    conversion alone. Asserting both spellings pins the extension
+            //    as a relative multiplier: an asset that writes
+            //    emissiveStrength = 1 must import identically to one that omits
+            //    the extension, rather than 100x darker.
             const std::vector<uint8_t> plainBytes = MakePlainEmissiveFixture();
             const ZHLN::ModelPrefab*   plain      = ZHLN::CreativeWorksFactory::LoadModelPrefabFromMemory(*engine, plainBytes, "ext_emissive_plain.glb");
             if (plain == nullptr || plain->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
             for (size_t channel = 0; channel < 3; ++channel) {
-                if (std::abs(plain->parts[0].defaultMaterial.emissiveFactor[channel] - kAuthoredEmissive[channel]) > 0.0001f) {
+                const float expected = kAuthoredEmissive[channel] * ZHLN::kGLTFEmissiveDisplayScale;
+                if (std::abs(plain->parts[0].defaultMaterial.emissiveFactor[channel] - expected) > 0.01f) {
+                    return std::unexpected(GLTFImportError::ExtensionMismatch);
+                }
+                // ... and the extension is exactly the ratio between the two.
+                const float ratio = withStrength->parts[0].defaultMaterial.emissiveFactor[channel] / std::max(expected, 1e-6f);
+                if (std::abs(ratio - kEmissiveStrength) > 0.001f) {
                     return std::unexpected(GLTFImportError::ExtensionMismatch);
                 }
             }
@@ -767,8 +781,8 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             for (size_t channel = 0; channel < 3; ++channel) {
-                const float expected = kAuthoredEmissive[channel] * kEmissiveStrength;
-                if (std::abs(litMesh->parts[0].defaultMaterial.emissiveFactor[channel] - expected) > 0.0001f) {
+                const float expected = kAuthoredEmissive[channel] * kEmissiveStrength * ZHLN::kGLTFEmissiveDisplayScale;
+                if (std::abs(litMesh->parts[0].defaultMaterial.emissiveFactor[channel] - expected) > 0.01f) {
                     return std::unexpected(GLTFImportError::ExtensionMismatch);
                 }
             }
