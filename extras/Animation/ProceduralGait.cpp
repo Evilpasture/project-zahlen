@@ -276,13 +276,15 @@ void EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg velocity, fl
     EvaluateGait(gait, velocity, 0.0f, dt);
 }
 
-/** Rotates the complete posed body around an estimated center of mass. */
+/** Rotates the upper body around an estimated center of mass. The legs are
+ *  excluded so planted feet stay world-locked. */
 void ApplyAccelerationTilt(ProceduralLocomotionComponent& gait, JPH::Mat44* nodeTransforms, const RigBoneMap& map) noexcept {
     if (nodeTransforms == nullptr || map.nodeCount == 0) {
         return;
     }
 
     const RigNodeIndex hipsNode  = Detail::Node(map, CharacterBone::Hips);
+    const RigNodeIndex spineNode = Detail::Node(map, CharacterBone::Spine);
     const RigNodeIndex chestNode = Detail::Node(map, CharacterBone::Chest);
     if (!IsValidRigNode(hipsNode, map.nodeCount)) {
         return;
@@ -297,7 +299,9 @@ void ApplyAccelerationTilt(ProceduralLocomotionComponent& gait, JPH::Mat44* node
 
     const JPH::Quat pitch = JPH::Quat::sRotation(JPH::Vec3::sAxisX(), gait.forwardLean);
     const JPH::Quat roll  = JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), gait.lateralBank);
-    Detail::RotateSubtreeAroundPivot(map, nodeTransforms, hipsNode, gait.centerOfMassModel, (pitch * roll).Normalized());
+    // Rotate from spine so legs are not displaced.
+    const RigNodeIndex tiltRoot = IsValidRigNode(spineNode, map.nodeCount) ? spineNode : hipsNode;
+    Detail::RotateSubtreeAroundPivot(map, nodeTransforms, tiltRoot, gait.centerOfMassModel, (pitch * roll).Normalized());
 }
 
 JPH::Mat44 CorrectBoneDirection(
@@ -442,20 +446,28 @@ void ApplyIKReachTilt(
         gait.ikBodyTiltRoll *= scale;
     }
 
-    const JPH::Quat pitch = JPH::Quat::sRotation(JPH::Vec3::sAxisX(), gait.ikBodyTiltPitch);
-    const JPH::Quat roll  = JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), gait.ikBodyTiltRoll);
-    Detail::RotateSubtreeAroundPivot(map, nodeTransforms, hipsNode, supportPivot, (roll * pitch).Normalized());
+    // Rotate the upper body (spine and above) around the hips, not the entire
+    // hips subtree. Rotating from the hips displaces the thighs, which changes
+    // IK reach and causes planted feet to slide — violating the IK contract.
+    const RigNodeIndex spineNode = Detail::Node(map, CharacterBone::Spine);
+    const RigNodeIndex tiltRoot  = IsValidRigNode(spineNode, map.nodeCount) ? spineNode : hipsNode;
+    const JPH::Quat    pitch     = JPH::Quat::sRotation(JPH::Vec3::sAxisX(), gait.ikBodyTiltPitch);
+    const JPH::Quat    roll      = JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), gait.ikBodyTiltRoll);
+    Detail::RotateSubtreeAroundPivot(map, nodeTransforms, tiltRoot, nodeTransforms[hipsNode].GetTranslation(), (roll * pitch).Normalized());
 }
 
-/** Applies gait sway/bounce independently from analytical foot IK. */
+/** Applies gait sway/bounce to the upper body only (spine and above).
+ *  Legs stay planted — translating from the hips would move the thighs
+ *  and break IK reach, causing foot sliding. */
 void ApplyPelvisGaitOffset(const ProceduralLocomotionComponent& gait, JPH::Mat44* nodeTransforms, const RigBoneMap& map, bool includeDrop) noexcept {
     if (nodeTransforms == nullptr) {
         return;
     }
-    const RigNodeIndex hipsNode = Detail::Node(map, CharacterBone::Hips);
-    if (IsValidRigNode(hipsNode, map.nodeCount)) {
+    // Apply to spine so legs are not displaced.
+    const RigNodeIndex spineNode = Detail::Node(map, CharacterBone::Spine);
+    if (IsValidRigNode(spineNode, map.nodeCount)) {
         const float drop = includeDrop ? gait.pelvisDrop : 0.0f;
-        Detail::TranslateSubtree(map, nodeTransforms, hipsNode, JPH::Vec3(gait.pelvisSway, gait.pelvisBob + drop, 0.0f));
+        Detail::TranslateSubtree(map, nodeTransforms, spineNode, JPH::Vec3(gait.pelvisSway, gait.pelvisBob + drop, 0.0f));
     }
 }
 
