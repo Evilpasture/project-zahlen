@@ -511,9 +511,9 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeBloomPass() const noexcept {
         return Vk::MakePass<
-            "BloomKawase", Vk::ComputeReadGeneral<Res_HdrSceneColor>, Vk::ComputeWrite<Res_BloomThresh>, Vk::ComputeWrite<Res_BloomDown1>,
-            Vk::ComputeWrite<Res_BloomDown2>, Vk::ComputeWrite<Res_BloomDown3>, Vk::ComputeWrite<Res_BloomUp2>, Vk::ComputeWrite<Res_BloomUp1>,
-            Vk::ComputeWrite<Res_BloomFinal>>([this](VkCommandBuffer c) noexcept {
+            "BloomKawase", Vk::ComputeReadGeneral<Res_HdrSceneColor>, Vk::ComputeRead<Res_Emissive>, Vk::ComputeWrite<Res_BloomThresh>,
+            Vk::ComputeWrite<Res_BloomDown1>, Vk::ComputeWrite<Res_BloomDown2>, Vk::ComputeWrite<Res_BloomDown3>, Vk::ComputeWrite<Res_BloomUp2>,
+            Vk::ComputeWrite<Res_BloomUp1>, Vk::ComputeWrite<Res_BloomFinal>>([this](VkCommandBuffer c) noexcept {
             self.BindHeapsAndPushFrame(c);
 
             auto& heap = self.heapManager;
@@ -524,6 +524,9 @@ struct PassFactory {
             // separate the dispatches -- no render pass boundaries, no layout
             // ping-pong.
             const auto srcHdr     = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.hdrSceneColor);
+            // Sampled in its post-lighting layout rather than dragged into
+            // GENERAL with the rest of the chain: the bright pass only reads it.
+            const auto emissive   = Vk::Assume<Vk::ComputeRead<Res_Emissive>>(self.graphResources.emissiveBuffer);
             const auto thresh     = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.bloomThresholdTarget);
             const auto down1      = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.bloomDown1);
             const auto down2      = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.bloomDown2);
@@ -548,10 +551,13 @@ struct PassFactory {
                 };
             };
 
-            // 0. Bright pass: HDR scene color -> half-res threshold target.
+            // 0. Bright pass: HDR scene color -> half-res threshold target,
+            //    plus the emission channel ungated (the glow layer -- see
+            //    bloom_threshold_cs.slang). Argument order is the shader's
+            //    reflected binding order: texInput, smp, texEmissive, outImage.
             thresholdChain.Step(
                 self.bloomThresholdCS, self.bloomThresholdHeapBindings, thresh.extent, Kawase(0, self.graphResources.hdrSceneColor), srcHdr,
-                self.defaultSampler, thresh
+                self.defaultSampler, emissive, thresh
             );
 
             // 1-3. Downsample chain: thresh -> down1 -> down2 -> down3.

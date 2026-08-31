@@ -47,6 +47,8 @@ enum class EmissiveShadingError : uint8_t {
     EmissiveHueLost[[= ZHLN::Description<"The unlit emissive surface is bright but not the colour it emits.">{}]],
     ControlNotDark[[= ZHLN::Description<"The non-emissive control box is lit, so the scene is not the unlit scene the test needs.">{}]],
     BackgroundNotDark[[= ZHLN::Description<"Emission leaked into pixels the emitter does not cover.">{}]],
+    GlowHaloMissing
+    [[= ZHLN::Description<"An emitter under the bloom threshold cast no glow past its silhouette -- the glow layer is not feeding the bloom chain.">{}]],
     DeviceLost[[= ZHLN::Description<"The Vulkan device was lost and the engine could not recover.">{}]],
 };
 
@@ -60,18 +62,33 @@ using ZHLN::Test::Image::SubRegionStats;
 constexpr NormalizedRect kBoxWindow {.x0 = 0.40, .y0 = 0.40, .x1 = 0.60, .y1 = 0.60};
 constexpr NormalizedRect kCornerWindow {.x0 = 0.02, .y0 = 0.02, .x1 = 0.18, .y1 = 0.18};
 
+// A band just above the box, outside its silhouette. The box is 2 units tall,
+// 6 away, through a 60-degree vertical FOV, so it covers y 0.36 .. 0.64 -- and
+// unlike the horizontal extent that does not depend on the aspect ratio, so
+// this window stays off the geometry whatever resolution the fixture picks.
+// Anything measured here arrived by blur, not by rasterisation.
+constexpr NormalizedRect kHaloWindow {.x0 = 0.44, .y0 = 0.22, .x1 = 0.56, .y1 = 0.32};
+
 // A strong green emitter: green is the one channel neither the sky gradient
 // (blue-dominant) nor the default clear colour leans on, so a green-dominant
 // pixel in the box window can only be the emissive material.
 constexpr std::array<float, 4> kEmissiveGreen {0.0f, 3.0f, 0.0f, 1.0f};
+constexpr std::array<float, 4> kNoEmission {0.0f, 0.0f, 0.0f, 1.0f};
 constexpr std::array<float, 4> kBoxBaseColor {0.05f, 0.05f, 0.05f, 1.0f};
+
+// Deliberately under the bloom bright-pass threshold: luma(0, 0.8, 0) = 0.57
+// against a threshold of 1.0. This is the ordinary glTF case -- emissiveFactor
+// is clamped to [0,1] unless the asset ships KHR_materials_emissive_strength --
+// and it is the case that stopped glowing when emission moved out of the albedo
+// attachment and stopped being multiplied by incident light.
+constexpr std::array<float, 4> kDimNeonGreen {0.0f, 0.8f, 0.0f, 1.0f};
 
 /// Builds the unlit scene: one box at the origin, no lights of any kind, and
 /// ambient/GI dialled out so nothing but emission can brighten a surface.
 ///
 /// Returns false when material creation fails, which is a setup failure rather
 /// than a rendering result.
-[[nodiscard]] bool BuildUnlitBoxScene(ZHLN::Engine& engine, bool emissive) {
+[[nodiscard]] bool BuildUnlitBoxScene(ZHLN::Engine& engine, const std::array<float, 4>& emissiveFactor) {
     auto& registry = engine.GetRegistry();
     auto& renderCtx = engine.GetRenderContext();
 
@@ -94,7 +111,7 @@ constexpr std::array<float, 4> kBoxBaseColor {0.05f, 0.05f, 0.05f, 1.0f};
                        .metallic  = 0.0f,
                        .roughness = 0.8f,
                        .baseColor = kBoxBaseColor,
-                       .emissive  = emissive ? kEmissiveGreen : std::array<float, 4> {0.0f, 0.0f, 0.0f, 1.0f}
+                       .emissive  = emissiveFactor
                    }
     );
     if (!material.has_value()) {
@@ -119,14 +136,17 @@ constexpr std::array<float, 4> kBoxBaseColor {0.05f, 0.05f, 0.05f, 1.0f};
 /// capture from a legitimately black frame.
 struct UnlitMeasurement {
     SubRegionStats box;
+    SubRegionStats halo;
     SubRegionStats corner;
     double         greenShare = 0.0;
     bool           valid      = false;
 };
 
 /// Renders the unlit scene once and measures it.
-[[nodiscard]] auto MeasureUnlitBox(bool emissive, const std::string& ppmPath) -> UnlitMeasurement {
+[[nodiscard]] auto MeasureUnlitBox(const std::array<float, 4>& emissiveFactor, const std::string& ppmPath) -> UnlitMeasurement {
     UnlitMeasurement out;
+
+    const bool emissive = emissiveFactor[1] > 0.0f;
 
     // Pooled: both halves of the comparison run on the same device with the
     // scene reset in between, so a difference in the frames cannot come from
@@ -137,7 +157,7 @@ struct UnlitMeasurement {
     }
     ZHLN::Test::Headless::DisableTAA(*engine);
 
-    if (!BuildUnlitBoxScene(*engine, emissive)) {
+    if (!BuildUnlitBoxScene(*engine, emissiveFactor)) {
         return out;
     }
 
@@ -148,6 +168,7 @@ struct UnlitMeasurement {
     }
 
     out.box    = ZHLN::Test::Image::MeasureSubRegion(frame, kBoxWindow);
+    out.halo   = ZHLN::Test::Image::MeasureSubRegion(frame, kHaloWindow);
     out.corner = ZHLN::Test::Image::MeasureSubRegion(frame, kCornerWindow);
     // Not MeasureSubRegion::dominantGrn: its 45 floor is absolute, and an
     // emitter this dim never reaches it however green it is.
@@ -185,12 +206,12 @@ struct EmissiveShadingTestSuite {
          *      full-screen brightening.
          */
         std::expected<void, ZHLN::Error> emission_survives_a_scene_with_no_lights() {
-            const UnlitMeasurement emissive = MeasureUnlitBox(true, "emissive_unlit.ppm");
+            const UnlitMeasurement emissive = MeasureUnlitBox(kEmissiveGreen, "emissive_unlit.ppm");
             if (!emissive.valid) {
                 return std::unexpected(EmissiveShadingError::CaptureFailed);
             }
 
-            const UnlitMeasurement control = MeasureUnlitBox(false, "emissive_unlit_control.ppm");
+            const UnlitMeasurement control = MeasureUnlitBox(kNoEmission, "emissive_unlit_control.ppm");
             if (!control.valid) {
                 return std::unexpected(EmissiveShadingError::CaptureFailed);
             }
@@ -240,6 +261,56 @@ struct EmissiveShadingTestSuite {
             if (emissiveCorner.meanLuma > 12.0) {
                 ZHLN::Println("    [INFO] corner meanLuma={:.1f}", emissiveCorner.meanLuma);
                 return std::unexpected(EmissiveShadingError::BackgroundNotDark);
+            }
+
+            return {};
+        }
+
+        /**
+         * A neon material glows past its own edges even when it never crosses
+         * the bloom threshold.
+         *
+         * Emission owning a G-Buffer channel fixed the shading (see the test
+         * above) and cost the halo: it is no longer multiplied by incident
+         * light, so an emitter tops out at its emissiveFactor, and glTF clamps
+         * that to [0,1] without KHR_materials_emissive_strength. The bright
+         * pass thresholds at luma 1.0, so an ordinary neon material -- 0.57
+         * here -- contributed roughly 3% of itself to the bloom chain and the
+         * glow vanished.
+         *
+         * bloom_threshold_cs now feeds the emissive channel into the same
+         * cascade ungated, the way Babylon.js's GlowLayer does. The band above
+         * the box is outside the geometry, so anything bright in it arrived by
+         * blur; the far corner is the control for "the whole frame lifted".
+         */
+        std::expected<void, ZHLN::Error> a_dim_emitter_still_glows_past_its_silhouette() {
+            const UnlitMeasurement neon = MeasureUnlitBox(kDimNeonGreen, "emissive_glow_halo.ppm");
+            if (!neon.valid) {
+                return std::unexpected(EmissiveShadingError::CaptureFailed);
+            }
+
+            ZHLN::Println(
+                "    [INFO] dim emitter: box meanG={:.1f} | halo meanRGB=({:.1f}, {:.1f}, {:.1f}) meanLuma={:.1f} | corner meanLuma={:.1f}",
+                neon.box.meanG, neon.halo.meanR, neon.halo.meanG, neon.halo.meanB, neon.halo.meanLuma, neon.corner.meanLuma
+            );
+
+            // 1. The emitter itself is still visible. If this fails the glow is
+            //    not the problem -- read the test above first.
+            if (neon.box.meanG <= neon.halo.meanG) {
+                return std::unexpected(EmissiveShadingError::EmissiveWentDark);
+            }
+
+            // 2. There is light outside the silhouette, it is the colour the
+            //    box emits, and it is a local halo rather than a lifted frame.
+            //    Margins are loose on purpose: the assertion is "a green glow
+            //    is present and falls off with distance", not a calibration of
+            //    the Kawase cascade.
+            const bool brighterThanBackground = neon.halo.meanG > neon.corner.meanG + 4.0;
+            const bool greenDominant          = neon.halo.meanG > neon.halo.meanR + 3.0 && neon.halo.meanG > neon.halo.meanB + 3.0;
+            const bool fallsOff               = neon.corner.meanLuma < 12.0;
+
+            if (!brighterThanBackground || !greenDominant || !fallsOff) {
+                return std::unexpected(EmissiveShadingError::GlowHaloMissing);
             }
 
             return {};
