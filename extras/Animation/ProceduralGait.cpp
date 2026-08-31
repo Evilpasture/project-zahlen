@@ -161,6 +161,41 @@ float EvaluateTwoKeyPosePhase(float stridePhase) noexcept {
 }
 
 /**
+ * Smoothly interpolates all tunable gait parameters from currentPreset toward
+ * targetPreset. Called once per frame before EvaluateGait so the stride clock,
+ * foot trajectories, bounce, sway, and arm swing all see the blended values.
+ * The blend uses a critically-damped exponential approach so transitions feel
+ * natural at any framerate and never overshoot.
+ */
+void BlendGaitParameters(ProceduralLocomotionComponent& gait, float dt) noexcept {
+    // Advance the blend weight toward 1.0 at the configured speed.
+    const float safeDt      = std::clamp(dt, 0.0f, 0.05f);
+    const float blendSpeed  = std::max(gait.gaitBlendSpeed, 0.01f);
+    const float blendDelta  = safeDt * blendSpeed;
+    gait.gaitBlendWeight    = std::clamp(gait.gaitBlendWeight + blendDelta, 0.0f, 1.0f);
+
+    // Use smoothstep for a more natural ease-in/ease-out curve.
+    const float weight      = Detail::SmoothStep(gait.gaitBlendWeight);
+
+    // Interpolate all gait parameters.
+    gait.strideLength       = gait.currentPreset.strideLength + (gait.targetPreset.strideLength - gait.currentPreset.strideLength) * weight;
+    gait.stepHeight         = gait.currentPreset.stepHeight + (gait.targetPreset.stepHeight - gait.currentPreset.stepHeight) * weight;
+    gait.maxBounceHeight    = gait.currentPreset.maxBounceHeight + (gait.targetPreset.maxBounceHeight - gait.currentPreset.maxBounceHeight) * weight;
+    gait.bounceGravity      = gait.currentPreset.bounceGravity + (gait.targetPreset.bounceGravity - gait.currentPreset.bounceGravity) * weight;
+    gait.pelvisSwayScale    = gait.currentPreset.pelvisSwayScale + (gait.targetPreset.pelvisSwayScale - gait.currentPreset.pelvisSwayScale) * weight;
+    gait.armSwingScale      = gait.currentPreset.armSwingScale + (gait.targetPreset.armSwingScale - gait.currentPreset.armSwingScale) * weight;
+    gait.forwardLeanScale   = gait.currentPreset.forwardLeanScale + (gait.targetPreset.forwardLeanScale - gait.currentPreset.forwardLeanScale) * weight;
+    gait.lateralBankScale   = gait.currentPreset.lateralBankScale + (gait.targetPreset.lateralBankScale - gait.currentPreset.lateralBankScale) * weight;
+
+    // When the blend completes, snap current to target so the next transition
+    // starts from the correct baseline.
+    if (gait.gaitBlendWeight >= 1.0f) {
+        gait.currentPreset = gait.targetPreset;
+        gait.gaitBlendWeight = 0.0f;
+    }
+}
+
+/**
  * Stage 1 + 2: extract directional acceleration, advance the distance-driven
  * stride clock, and evaluate alternating cubic/parabolic foot trajectories.
  * Velocity is expected in character-local space.
@@ -222,12 +257,14 @@ void EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg velocity, fl
     } else {
         gait.gravityBounce = EvaluateGravityBounce(gait, speed);
         gait.pelvisBob     = gait.gravityBounce;
-        gait.pelvisSway    = std::sin(kGaitTwoPi * gait.phase) * 0.035f;
+        gait.pelvisSway    = std::sin(kGaitTwoPi * gait.phase) * 0.035f * gait.pelvisSwayScale;
     }
 
-    const float targetForwardLean = std::clamp(-gait.directionalAcceleration.GetZ() * 0.018f, -0.22f, 0.22f);
+    const float targetForwardLean = std::clamp(-gait.directionalAcceleration.GetZ() * 0.018f * gait.forwardLeanScale, -0.22f, 0.22f);
     const float centripetal       = speed * angularVelocity;
-    const float targetLateralBank = std::clamp(gait.directionalAcceleration.GetX() * 0.008f - centripetal * 0.018f, -0.28f, 0.28f);
+    const float targetLateralBank = std::clamp(
+        (gait.directionalAcceleration.GetX() * 0.008f - centripetal * 0.018f) * gait.lateralBankScale, -0.28f, 0.28f
+    );
     Detail::SpringScalar(gait.forwardLean, gait.tiltPitchVelocity, targetForwardLean, dt, 5.5f, 0.88f);
     Detail::SpringScalar(gait.lateralBank, gait.tiltRollVelocity, targetLateralBank, dt, 5.5f, 0.88f);
 }
@@ -641,7 +678,7 @@ void SolveUpperBody(
         const float horizontalSpeed =
             std::sqrt(gait.previousVelocity.GetX() * gait.previousVelocity.GetX() + gait.previousVelocity.GetZ() * gait.previousVelocity.GetZ());
         const float        swingWeight = std::clamp(horizontalSpeed * 0.35f, 0.0f, 1.0f);
-        const float        armAngle    = std::sin(kGaitTwoPi * gait.phase) * 0.58f * swingWeight;
+        const float        armAngle    = std::sin(kGaitTwoPi * gait.phase) * 0.58f * swingWeight * gait.armSwingScale;
         const RigNodeIndex armL        = Detail::Node(map, CharacterBone::UpperArmL);
         const RigNodeIndex armR        = Detail::Node(map, CharacterBone::UpperArmR);
         if (IsValidRigNode(armL, map.nodeCount)) {

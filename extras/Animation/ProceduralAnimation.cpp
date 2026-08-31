@@ -542,7 +542,7 @@ void SynchronizeLocomotionTrack(
     Components::AnimatorComponent&       animator,
     ProceduralLocomotionTracksComponent& tracks,
     const Components::MovementComponent* movement,
-    const ProceduralLocomotionComponent& gait,
+    ProceduralLocomotionComponent&       gait,
     float                                speed
 ) noexcept {
     const bool moving  = speed > std::max(tracks.movementThreshold, 0.0f);
@@ -557,6 +557,51 @@ void SynchronizeLocomotionTrack(
     }
     if (!IsValidTrack(animator, desiredTrack)) {
         return;
+    }
+
+    // Drive the gait preset blend target from the speed/sprint state. When the
+    // desired locomotion mode changes, snapshot the current blend into
+    // currentPreset so the next transition starts from wherever the previous
+    // one had reached rather than snapping back to walk defaults.
+    {
+        constexpr GaitPreset kWalkPreset {
+            .strideLength     = 1.60f,
+            .stepHeight       = 0.28f,
+            .maxBounceHeight  = 0.045f,
+            .bounceGravity    = 9.81f,
+            .pelvisSwayScale  = 1.0f,
+            .armSwingScale    = 1.0f,
+            .forwardLeanScale = 1.0f,
+            .lateralBankScale = 1.0f,
+        };
+        constexpr GaitPreset kRunPreset {
+            .strideLength     = 2.40f,
+            .stepHeight       = 0.45f,
+            .maxBounceHeight  = 0.065f,
+            .bounceGravity    = 12.50f,
+            .pelvisSwayScale  = 1.35f,
+            .armSwingScale    = 1.50f,
+            .forwardLeanScale = 1.40f,
+            .lateralBankScale = 1.20f,
+        };
+        const GaitPreset& desiredPreset = running ? kRunPreset : kWalkPreset;
+        if (desiredPreset.strideLength != gait.targetPreset.strideLength ||
+            desiredPreset.stepHeight != gait.targetPreset.stepHeight) {
+            // Snapshot the current blended state as the new starting point so
+            // walk -> run -> walk transitions chain without popping.
+            gait.currentPreset   = GaitPreset {
+                .strideLength     = gait.strideLength,
+                .stepHeight       = gait.stepHeight,
+                .maxBounceHeight  = gait.maxBounceHeight,
+                .bounceGravity    = gait.bounceGravity,
+                .pelvisSwayScale  = gait.pelvisSwayScale,
+                .armSwingScale    = gait.armSwingScale,
+                .forwardLeanScale = gait.forwardLeanScale,
+                .lateralBankScale = gait.lateralBankScale,
+            };
+            gait.targetPreset    = desiredPreset;
+            gait.gaitBlendWeight = 0.0f;
+        }
     }
 
     if (animator.currentTrackIdx != desiredTrack) {
@@ -1892,6 +1937,11 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
         }
         gait->previousRootRotation   = rootRotation;
         gait->orientationInitialized = true;
+
+        // Smoothly interpolate gait parameters (stride, bounce, sway, etc.)
+        // before evaluation so the stride clock and foot trajectories see the
+        // blended values instead of snapping between presets.
+        Animation::BlendGaitParameters(*gait, dt);
 
         // Advance the stride wheel before sampling locomotion clips so the two
         // authored reach keys and their interpolated pass pose stay phase locked.

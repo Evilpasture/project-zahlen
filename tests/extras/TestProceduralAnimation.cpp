@@ -1128,6 +1128,65 @@ struct ProceduralAnimationTestSuite {
             }
             return {};
         }
+
+        std::expected<void, ZHLN::Error> gait_blend_interpolates_parameters_smoothly() {
+            ZHLN::ProceduralLocomotionComponent gait;
+            // Walk preset
+            gait.currentPreset.strideLength     = 1.60f;
+            gait.currentPreset.stepHeight       = 0.28f;
+            gait.currentPreset.maxBounceHeight  = 0.045f;
+            gait.currentPreset.pelvisSwayScale  = 1.0f;
+            gait.currentPreset.armSwingScale    = 1.0f;
+            gait.currentPreset.forwardLeanScale = 1.0f;
+            // Initialize live parameters to match current preset
+            gait.strideLength     = gait.currentPreset.strideLength;
+            gait.stepHeight       = gait.currentPreset.stepHeight;
+            gait.maxBounceHeight  = gait.currentPreset.maxBounceHeight;
+            gait.pelvisSwayScale  = gait.currentPreset.pelvisSwayScale;
+            gait.armSwingScale    = gait.currentPreset.armSwingScale;
+            gait.forwardLeanScale = gait.currentPreset.forwardLeanScale;
+
+            // Set run preset as target
+            gait.targetPreset.strideLength     = 2.40f;
+            gait.targetPreset.stepHeight       = 0.45f;
+            gait.targetPreset.maxBounceHeight  = 0.065f;
+            gait.targetPreset.pelvisSwayScale  = 1.35f;
+            gait.targetPreset.armSwingScale    = 1.50f;
+            gait.targetPreset.forwardLeanScale = 1.40f;
+            gait.gaitBlendWeight               = 0.0f;
+            gait.gaitBlendSpeed                = 4.0f;
+
+            // Blend for one frame - parameters should start moving toward target
+            constexpr float dt = 1.0f / 60.0f;
+            ZHLN::Animation::BlendGaitParameters(gait, dt);
+            if (gait.gaitBlendWeight <= 0.0f || gait.gaitBlendWeight >= 1.0f ||
+                gait.strideLength <= gait.currentPreset.strideLength ||
+                gait.strideLength >= gait.targetPreset.strideLength) {
+                return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
+            }
+
+            // Blend until complete
+            for (uint32_t frame = 0; frame < 120; ++frame) {
+                ZHLN::Animation::BlendGaitParameters(gait, dt);
+            }
+            // After enough time, parameters should have reached the target
+            if (std::abs(gait.strideLength - gait.targetPreset.strideLength) > 0.001f ||
+                std::abs(gait.stepHeight - gait.targetPreset.stepHeight) > 0.001f ||
+                std::abs(gait.maxBounceHeight - gait.targetPreset.maxBounceHeight) > 0.001f ||
+                std::abs(gait.pelvisSwayScale - gait.targetPreset.pelvisSwayScale) > 0.001f ||
+                std::abs(gait.armSwingScale - gait.targetPreset.armSwingScale) > 0.001f ||
+                std::abs(gait.forwardLeanScale - gait.targetPreset.forwardLeanScale) > 0.001f) {
+                return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
+            }
+
+            // Verify the blend weight resets after completion and current
+            // preset snaps to target
+            if (gait.currentPreset.strideLength != gait.targetPreset.strideLength ||
+                gait.gaitBlendWeight != 0.0f) {
+                return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
+            }
+            return {};
+        }
     };
 };
 
