@@ -269,8 +269,15 @@ struct RenderPipelinesTestSuite {
                 };
             };
 
-            // A box spawned at Y = 8 with a dynamic body has to fall. When it
-            // does not, the break can be anywhere along
+            // A box spawned at Y = 8 with a dynamic body has to fall -- and
+            // SpawnParams::isStaticPhysics defaults to true, so "dynamic" must
+            // be asked for explicitly. Leaving it out is what this test did
+            // originally: it got a static body, which cannot fall and never
+            // receives a PhysicsStateComponent, so the position assertion
+            // failed for a reason that had nothing to do with the engine.
+            //
+            // That took a round trip on hardware to establish, because the
+            // break could have been anywhere along
             //     body created -> world steps it -> PhysicsStateSystem::WriteBack
             //     copies it into PhysicsStateComponent -> VisualInterpolationSystem
             //     writes the transform
@@ -288,11 +295,15 @@ struct RenderPipelinesTestSuite {
                 const char* body  = (phys == nullptr) ? "no PhysicsComponent" : ((phys->physicsHandle == ZHLN::Entity::Null()) ? "null handle" : "live");
                 const auto  hit   = eng.GetPhysicsContext().Raycast(JPH::RVec3(0.0, 15.0, 0.0), JPH::Vec3(0.0f, -1.0f, 0.0f), 30.0f);
 
+                const std::string stateText = state != nullptr ? std::format(
+                                                                    "Y {:.3f} (prev {:.3f}, synced on frame {})", state->currPosition.GetY(),
+                                                                    state->prevPosition.GetY(), state->lastPhysicsSyncFrame
+                                                                ) :
+                                                                std::string("no PhysicsStateComponent (static body?)");
+
                 ZHLN::Println(
-                    "    [INFO] {}: transform Y {:.3f} | state Y {:.3f} (prev {:.3f}, synced on frame {}) | body {} | raycast {} | engine frame {}", which,
-                    trans != nullptr ? trans->position.GetY() : -1.0f, state != nullptr ? state->currPosition.GetY() : -1.0f,
-                    state != nullptr ? state->prevPosition.GetY() : -1.0f, state != nullptr ? state->lastPhysicsSyncFrame : 0ULL,
-                    body,
+                    "    [INFO] {}: transform Y {:.3f} | physics state {} | body {} | raycast {} | engine frame {}", which,
+                    trans != nullptr ? trans->position.GetY() : -1.0f, stateText, body,
                     hit.hasHit ? std::format("hit at Y {:.3f}", static_cast<float>(hit.position.GetY())) : std::string("no hit"), eng.GetCurrentFrame()
                 );
             };
@@ -329,7 +340,7 @@ struct RenderPipelinesTestSuite {
             ZHLN::Test::ExpectTrue(ZHLN::GetEngineContext() == first.get());
             const ZHLN::Entity falling = ZHLN::CreativeWorksFactory::CreateBox(
                 *first, JPH::Vec3(0.5f, 0.5f, 0.5f),
-                ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 8.0, 0.0), .createPhysics = true}
+                ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 8.0, 0.0), .createPhysics = true, .isStaticPhysics = false}
             );
             ZHLN::Test::ExpectTrue(falling != ZHLN::Entity::Null());
 
@@ -359,7 +370,7 @@ struct RenderPipelinesTestSuite {
 
             const ZHLN::Entity fallingB = ZHLN::CreativeWorksFactory::CreateBox(
                 *second, JPH::Vec3(0.5f, 0.5f, 0.5f),
-                ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 8.0, 0.0), .createPhysics = true}
+                ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 8.0, 0.0), .createPhysics = true, .isStaticPhysics = false}
             );
             for (uint32_t frame = 0; frame < 60; ++frame) {
                 second->ProcessEvents();
