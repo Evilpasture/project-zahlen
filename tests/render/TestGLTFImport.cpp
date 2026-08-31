@@ -19,6 +19,7 @@
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/Engine.hpp>
+#include <Zahlen/JSON.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/ModelPrefab.hpp>
@@ -90,7 +91,168 @@ constexpr std::string_view kVirtualPath = "ProceduralAnimationBaseRig.glb";
     return ColumnMajor(matrix);
 }
 
-/// Assembles a GLB container around a JSON chunk and a binary chunk.
+// ---------------------------------------------------------------------------
+// Typed glTF fixture documents.
+//
+// These are declarations, not text: ZHLN::Reflect::SerializeJSON turns each
+// struct into the JSON chunk, so field names are the glTF keys and the
+// compiler checks every value's type. Nothing here hand-writes a brace, a
+// comma or an escape.
+//
+// glTF is optional-by-omission, and SerializeJSON emits an empty std::optional
+// as null rather than dropping the key -- which cgltf would then read as
+// "mesh": 0 rather than "no mesh". So each shape a fixture needs is its own
+// type (a node with a mesh, a node with only a light) and the document is
+// templated over them. Empty structs are not an option either: the serializer
+// static_asserts on FieldCount<T>() == 0.
+// ---------------------------------------------------------------------------
+
+struct GltfAsset {
+    std::string_view version = "2.0";
+};
+
+struct GltfScene {
+    std::vector<int32_t> nodes;
+};
+
+struct GltfPrimitiveAttributes {
+    int32_t POSITION = 0;
+};
+
+struct GltfPrimitive {
+    GltfPrimitiveAttributes attributes;
+    int32_t                 indices  = 1;
+    int32_t                 material = 0;
+};
+
+struct GltfMesh {
+    std::string_view           name;
+    std::vector<GltfPrimitive> primitives;
+};
+
+struct GltfPbrMetallicRoughness {
+    std::array<float, 4> baseColorFactor {1.0f, 1.0f, 1.0f, 1.0f};
+    float                metallicFactor  = 0.0f;
+    float                roughnessFactor = 1.0f;
+};
+
+struct KhrMaterialsEmissiveStrength {
+    float emissiveStrength = 1.0f;
+};
+
+struct GltfMaterialExtensions {
+    KhrMaterialsEmissiveStrength KHR_materials_emissive_strength;
+};
+
+struct GltfPlainMaterial {
+    std::string_view         name;
+    GltfPbrMetallicRoughness pbrMetallicRoughness;
+    std::array<float, 3>     emissiveFactor;
+};
+
+struct GltfEmissiveStrengthMaterial {
+    std::string_view         name;
+    GltfPbrMetallicRoughness pbrMetallicRoughness;
+    std::array<float, 3>     emissiveFactor;
+    GltfMaterialExtensions   extensions;
+};
+
+// min/max are carried on both accessors so one type covers the position and
+// the index accessor; the spec allows them on either.
+struct GltfAccessor {
+    int32_t            bufferView    = 0;
+    int32_t            componentType = 5126;
+    int32_t            count         = 0;
+    std::string_view   type          = "VEC3";
+    std::vector<float> min;
+    std::vector<float> max;
+};
+
+struct GltfBufferView {
+    int32_t buffer     = 0;
+    int32_t byteOffset = 0;
+    int32_t byteLength = 0;
+    int32_t target     = 34962;
+};
+
+struct GltfBuffer {
+    int32_t byteLength = 0;
+};
+
+struct KhrLightsPunctualRef {
+    int32_t light = 0;
+};
+
+struct GltfNodeExtensions {
+    KhrLightsPunctualRef KHR_lights_punctual;
+};
+
+struct GltfMeshNode {
+    std::string_view     name;
+    int32_t              mesh = 0;
+    std::array<float, 3> translation {0.0f, 0.0f, 0.0f};
+};
+
+struct GltfMeshNodeWithLight {
+    std::string_view     name;
+    int32_t              mesh = 0;
+    std::array<float, 3> translation {0.0f, 0.0f, 0.0f};
+    GltfNodeExtensions   extensions;
+};
+
+struct GltfLightNode {
+    std::string_view     name;
+    std::array<float, 3> translation {0.0f, 0.0f, 0.0f};
+    GltfNodeExtensions   extensions;
+};
+
+struct KhrPunctualLight {
+    std::string_view     type = "point";
+    std::string_view     name;
+    std::array<float, 3> color {1.0f, 1.0f, 1.0f};
+    float                intensity = 1.0f;
+};
+
+struct KhrLightsPunctual {
+    std::vector<KhrPunctualLight> lights;
+};
+
+struct GltfRootExtensions {
+    KhrLightsPunctual KHR_lights_punctual;
+};
+
+template <typename NodeT, typename MaterialT>
+struct GltfDocument {
+    GltfAsset                     asset;
+    std::vector<std::string_view> extensionsUsed;
+    int32_t                       scene = 0;
+    std::vector<GltfScene>        scenes;
+    std::vector<NodeT>            nodes;
+    std::vector<GltfMesh>         meshes;
+    std::vector<MaterialT>        materials;
+    std::vector<GltfAccessor>     accessors;
+    std::vector<GltfBufferView>   bufferViews;
+    std::vector<GltfBuffer>       buffers;
+};
+
+/// Same document with a root `extensions` object. A separate type rather than
+/// an optional member, for the omission reason above.
+template <typename NodeT, typename MaterialT>
+struct GltfLightDocument {
+    GltfAsset                     asset;
+    std::vector<std::string_view> extensionsUsed;
+    GltfRootExtensions            extensions;
+    int32_t                       scene = 0;
+    std::vector<GltfScene>        scenes;
+    std::vector<NodeT>            nodes;
+    std::vector<GltfMesh>         meshes;
+    std::vector<MaterialT>        materials;
+    std::vector<GltfAccessor>     accessors;
+    std::vector<GltfBufferView>   bufferViews;
+    std::vector<GltfBuffer>       buffers;
+};
+
+/// Assembles a GLB container around a serialized JSON chunk and a binary chunk.
 ///
 /// Synthesizing the input is not the same as reimplementing the importer: this
 /// only produces bytes a conformant loader must accept, so the extension
@@ -117,58 +279,125 @@ constexpr std::string_view kVirtualPath = "ProceduralAnimationBaseRig.glb";
         }
     };
 
+    const size_t binChunkSize = paddedBin.empty() ? 0u : 8u + paddedBin.size();
     append32(0x46546C67u); // "glTF"
     append32(2u);
-    append32(static_cast<uint32_t>(12u + 8u + paddedJson.size() + 8u + paddedBin.size()));
+    append32(static_cast<uint32_t>(12u + 8u + paddedJson.size() + binChunkSize));
     append32(static_cast<uint32_t>(paddedJson.size()));
     append32(0x4E4F534Au); // "JSON"
     appendBytes(paddedJson);
-    append32(static_cast<uint32_t>(paddedBin.size()));
-    append32(0x004E4942u); // "BIN\0"
-    appendBytes(paddedBin);
+    if (!paddedBin.empty()) {
+        append32(static_cast<uint32_t>(paddedBin.size()));
+        append32(0x004E4942u); // "BIN\0"
+        appendBytes(paddedBin);
+    }
     return glb;
 }
 
-/// One triangle plus one emissive material, optionally carrying
-/// KHR_materials_emissive_strength and a KHR_lights_punctual point light.
-[[nodiscard]] auto MakeExtensionFixture(bool withEmissiveStrength, bool withPunctualLight) -> std::vector<uint8_t> {
-    constexpr float    kPositions[9] = {0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f};
-    constexpr uint32_t kIndices[3]   = {0u, 1u, 2u};
+// One triangle: 3 VEC3 positions then 3 uint32 indices.
+constexpr float    kTrianglePositions[9] = {0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f};
+constexpr uint32_t kTriangleIndices[3]   = {0u, 1u, 2u};
+constexpr int32_t  kPositionBytes        = static_cast<int32_t>(sizeof(kTrianglePositions));
+constexpr int32_t  kIndexBytes           = static_cast<int32_t>(sizeof(kTriangleIndices));
 
-    std::vector<uint8_t> bin(sizeof(kPositions) + sizeof(kIndices));
-    std::memcpy(bin.data(), kPositions, sizeof(kPositions));
-    std::memcpy(bin.data() + sizeof(kPositions), kIndices, sizeof(kIndices));
+// emissiveFactor is deliberately below 1 in every channel so a 4x strength
+// stays representable and cannot be confused with a clamp to white.
+constexpr std::array<float, 3> kAuthoredEmissive {0.25f, 0.5f, 0.125f};
+constexpr float                kEmissiveStrength = 4.0f;
 
-    std::string used = R"("extensionsUsed":[)";
-    used += withEmissiveStrength ? R"("KHR_materials_emissive_strength")" : "";
-    used += (withEmissiveStrength && withPunctualLight) ? "," : "";
-    used += withPunctualLight ? R"("KHR_lights_punctual")" : "";
-    used += "],";
-    if (!withEmissiveStrength && !withPunctualLight) {
-        used.clear();
-    }
+[[nodiscard]] auto TriangleBin() -> std::vector<uint8_t> {
+    std::vector<uint8_t> bin(static_cast<size_t>(kPositionBytes + kIndexBytes));
+    std::memcpy(bin.data(), kTrianglePositions, sizeof(kTrianglePositions));
+    std::memcpy(bin.data() + sizeof(kTrianglePositions), kTriangleIndices, sizeof(kTriangleIndices));
+    return bin;
+}
 
-    const std::string lightsBlock = withPunctualLight ?
-        R"("extensions":{"KHR_lights_punctual":{"lights":[{"type":"point","name":"TestPoint","color":[1.0,0.5,0.25],"intensity":42.0}]}},)" :
-        "";
-    const std::string lightNode = withPunctualLight ?
-        R"(,{"name":"PunctualLight","translation":[1.0,2.0,3.0],"extensions":{"KHR_lights_punctual":{"light":0}}})" :
-        "";
-    const std::string sceneNodes    = withPunctualLight ? "[0,1]" : "[0]";
-    const std::string strengthBlock = withEmissiveStrength ? R"(,"extensions":{"KHR_materials_emissive_strength":{"emissiveStrength":4.0}})" : "";
+[[nodiscard]] auto TriangleMeshes() -> std::vector<GltfMesh> {
+    return {GltfMesh {.name = "Tri", .primitives = {GltfPrimitive {}}}};
+}
 
-    // emissiveFactor is deliberately below 1 in every channel so a 4x strength
-    // stays representable and cannot be confused with a clamp to white.
-    const std::string json = std::string(R"({"asset":{"version":"2.0"},)") + used + lightsBlock + R"("scene":0,"scenes":[{"nodes":)" + sceneNodes +
-                             R"(}],"nodes":[{"name":"EmissiveTriangle","mesh":0})" + lightNode +
-                             R"(],"meshes":[{"name":"Tri","primitives":[{"attributes":{"POSITION":0},"indices":1,"material":0}]}],)" +
-                             R"("materials":[{"name":"Emissive","pbrMetallicRoughness":{"baseColorFactor":[1.0,1.0,1.0,1.0],"metallicFactor":0.0,)" +
-                             R"("roughnessFactor":1.0},"emissiveFactor":[0.25,0.5,0.125])" + strengthBlock +
-                             R"(}],"accessors":[{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0.0,0.0,0.0],"max":[1.0,1.0,0.0]},)" +
-                             R"({"bufferView":1,"componentType":5125,"count":3,"type":"SCALAR"}],)" +
-                             R"("bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":36,"target":34962},)" +
-                             R"({"buffer":0,"byteOffset":36,"byteLength":12,"target":34963}],"buffers":[{"byteLength":48}]})";
-    return MakeGlb(json, bin);
+[[nodiscard]] auto TriangleAccessors() -> std::vector<GltfAccessor> {
+    return {
+        GltfAccessor {.bufferView = 0, .componentType = 5126, .count = 3, .type = "VEC3", .min = {0.0f, 0.0f, 0.0f}, .max = {1.0f, 1.0f, 0.0f}},
+        GltfAccessor {.bufferView = 1, .componentType = 5125, .count = 3, .type = "SCALAR", .min = {0.0f}, .max = {2.0f}},
+    };
+}
+
+[[nodiscard]] auto TriangleBufferViews() -> std::vector<GltfBufferView> {
+    return {
+        GltfBufferView {.buffer = 0, .byteOffset = 0, .byteLength = kPositionBytes, .target = 34962},
+        GltfBufferView {.buffer = 0, .byteOffset = kPositionBytes, .byteLength = kIndexBytes, .target = 34963},
+    };
+}
+
+[[nodiscard]] auto TriangleBuffers() -> std::vector<GltfBuffer> {
+    return {GltfBuffer {.byteLength = kPositionBytes + kIndexBytes}};
+}
+
+/// Triangle whose material carries KHR_materials_emissive_strength.
+[[nodiscard]] auto MakeEmissiveStrengthFixture() -> std::vector<uint8_t> {
+    const GltfDocument<GltfMeshNode, GltfEmissiveStrengthMaterial> document {
+        .extensionsUsed = {"KHR_materials_emissive_strength"},
+        .scenes         = {GltfScene {.nodes = {0}}},
+        .nodes          = {GltfMeshNode {.name = "EmissiveTriangle"}},
+        .meshes         = TriangleMeshes(),
+        .materials      = {GltfEmissiveStrengthMaterial {
+                 .name              = "Emissive",
+                 .emissiveFactor    = kAuthoredEmissive,
+                 .extensions        = {.KHR_materials_emissive_strength = {.emissiveStrength = kEmissiveStrength}},
+        }},
+        .accessors      = TriangleAccessors(),
+        .bufferViews    = TriangleBufferViews(),
+        .buffers        = TriangleBuffers(),
+    };
+    return MakeGlb(ZHLN::Reflect::SerializeJSON(document), TriangleBin());
+}
+
+/// The same triangle and the same emissiveFactor, extension absent.
+[[nodiscard]] auto MakePlainEmissiveFixture() -> std::vector<uint8_t> {
+    const GltfDocument<GltfMeshNode, GltfPlainMaterial> document {
+        .scenes      = {GltfScene {.nodes = {0}}},
+        .nodes       = {GltfMeshNode {.name = "EmissiveTriangle"}},
+        .meshes      = TriangleMeshes(),
+        .materials   = {GltfPlainMaterial {.name = "Emissive", .emissiveFactor = kAuthoredEmissive}},
+        .accessors   = TriangleAccessors(),
+        .bufferViews = TriangleBufferViews(),
+        .buffers     = TriangleBuffers(),
+    };
+    return MakeGlb(ZHLN::Reflect::SerializeJSON(document), TriangleBin());
+}
+
+/// A mesh node that also carries a punctual light, alongside the emissive
+/// extension: two extensions on one document, one of them unread.
+[[nodiscard]] auto MakeLitMeshFixture() -> std::vector<uint8_t> {
+    const GltfLightDocument<GltfMeshNodeWithLight, GltfEmissiveStrengthMaterial> document {
+        .extensionsUsed = {"KHR_materials_emissive_strength", "KHR_lights_punctual"},
+        .extensions     = {.KHR_lights_punctual = {.lights = {KhrPunctualLight {.name = "TestPoint", .color = {1.0f, 0.5f, 0.25f}, .intensity = 42.0f}}}},
+        .scenes         = {GltfScene {.nodes = {0}}},
+        .nodes          = {GltfMeshNodeWithLight {.name = "LitTriangle", .translation = {1.0f, 2.0f, 3.0f}}},
+        .meshes         = TriangleMeshes(),
+        .materials      = {GltfEmissiveStrengthMaterial {
+                 .name              = "Emissive",
+                 .emissiveFactor    = kAuthoredEmissive,
+                 .extensions        = {.KHR_materials_emissive_strength = {.emissiveStrength = kEmissiveStrength}},
+        }},
+        .accessors      = TriangleAccessors(),
+        .bufferViews    = TriangleBufferViews(),
+        .buffers        = TriangleBuffers(),
+    };
+    return MakeGlb(ZHLN::Reflect::SerializeJSON(document), TriangleBin());
+}
+
+/// Geometry-free document carrying only a punctual light -- the shape zcook
+/// emits for a cooked scene light (src/zcook/GLB.cpp:1077).
+[[nodiscard]] auto MakeLightOnlyFixture() -> std::vector<uint8_t> {
+    const GltfLightDocument<GltfLightNode, GltfPlainMaterial> document {
+        .extensionsUsed = {"KHR_lights_punctual"},
+        .extensions     = {.KHR_lights_punctual = {.lights = {KhrPunctualLight {.name = "TestPoint", .color = {1.0f, 0.5f, 0.25f}, .intensity = 42.0f}}}},
+        .scenes         = {GltfScene {.nodes = {0}}},
+        .nodes          = {GltfLightNode {.name = "PunctualLight", .translation = {1.0f, 2.0f, 3.0f}}},
+    };
+    return MakeGlb(ZHLN::Reflect::SerializeJSON(document), {});
 }
 
 /// Independent cgltf view of the same bytes, used as the reference the
@@ -491,11 +720,8 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::EngineInitFailed);
             }
 
-            constexpr float kAuthoredEmissive[3] = {0.25f, 0.5f, 0.125f};
-            constexpr float kEmissiveStrength    = 4.0f;
-
             // 1. KHR_materials_emissive_strength scales the authored emissive factor.
-            const std::vector<uint8_t> strengthBytes = MakeExtensionFixture(true, false);
+            const std::vector<uint8_t> strengthBytes = MakeEmissiveStrengthFixture();
             const ZHLN::ModelPrefab*   withStrength  = ZHLN::CreativeWorksFactory::LoadModelPrefabFromMemory(*engine, strengthBytes, "ext_emissive_strength.glb");
             if (withStrength == nullptr || withStrength->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
@@ -510,7 +736,7 @@ struct GLTFImportTestSuite {
             // 2. The same material without the extension keeps the authored value,
             //    so the scale above is attributable to the extension and not to a
             //    constant the importer applies to every emissive material.
-            const std::vector<uint8_t> plainBytes = MakeExtensionFixture(false, false);
+            const std::vector<uint8_t> plainBytes = MakePlainEmissiveFixture();
             const ZHLN::ModelPrefab*   plain      = ZHLN::CreativeWorksFactory::LoadModelPrefabFromMemory(*engine, plainBytes, "ext_emissive_plain.glb");
             if (plain == nullptr || plain->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
@@ -521,29 +747,42 @@ struct GLTFImportTestSuite {
                 }
             }
 
-            // 3. KHR_lights_punctual: declared in extensionsUsed, referenced by a
-            //    node, and unread by the importer. The file must still import, the
-            //    light node must survive as an ordinary transform node with its
-            //    translation intact, and the mesh node must be unaffected by it.
-            const std::vector<uint8_t> lightBytes = MakeExtensionFixture(true, true);
-            const ZHLN::ModelPrefab*   withLight  = ZHLN::CreativeWorksFactory::LoadModelPrefabFromMemory(*engine, lightBytes, "ext_punctual_light.glb");
-            if (withLight == nullptr || withLight->nodes.size() != 2 || withLight->parts.size() != 1) {
+            // 3. An unread extension on a mesh-bearing node must not disturb the
+            //    node it sits on, the part it produces, or the extension that is
+            //    read from the same document.
+            const std::vector<uint8_t> litBytes = MakeLitMeshFixture();
+            const ZHLN::ModelPrefab*   litMesh  = ZHLN::CreativeWorksFactory::LoadModelPrefabFromMemory(*engine, litBytes, "ext_lit_mesh.glb");
+            if (litMesh == nullptr || litMesh->nodes.size() != 1 || litMesh->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
-            const ZHLN::ModelNode& lightNode = withLight->nodes[1];
+            const ZHLN::ModelNode& litNode = litMesh->nodes[0];
+            if (std::string_view(litNode.name) != "LitTriangle" || !litNode.hasMesh || litNode.parentIndex != -1 ||
+                !litNode.localTransform.GetTranslation().IsClose(JPH::Vec3(1.0f, 2.0f, 3.0f), 0.0001f) || litMesh->parts[0].nodeIndex != 0) {
+                return std::unexpected(GLTFImportError::ExtensionMismatch);
+            }
+            for (size_t channel = 0; channel < 3; ++channel) {
+                const float expected = kAuthoredEmissive[channel] * kEmissiveStrength;
+                if (std::abs(litMesh->parts[0].defaultMaterial.emissiveFactor[channel] - expected) > 0.0001f) {
+                    return std::unexpected(GLTFImportError::ExtensionMismatch);
+                }
+            }
+
+            // 4. A geometry-free light document -- what zcook emits for a scene
+            //    light -- imports as a bare transform node. The light itself is
+            //    dropped: ModelPrefab has nowhere to put it. Pinning that keeps
+            //    the gap visible instead of implied.
+            const std::vector<uint8_t> lightOnlyBytes = MakeLightOnlyFixture();
+            const ZHLN::ModelPrefab*   lightOnly      = ZHLN::CreativeWorksFactory::LoadModelPrefabFromMemory(*engine, lightOnlyBytes, "ext_light_only.glb");
+            if (lightOnly == nullptr || lightOnly->nodes.size() != 1) {
+                return std::unexpected(GLTFImportError::PrefabLoadFailed);
+            }
+            const ZHLN::ModelNode& lightNode = lightOnly->nodes[0];
             if (std::string_view(lightNode.name) != "PunctualLight" || lightNode.hasMesh || lightNode.parentIndex != -1 ||
                 !lightNode.localTransform.GetTranslation().IsClose(JPH::Vec3(1.0f, 2.0f, 3.0f), 0.0001f)) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
-            if (!withLight->nodes[0].hasMesh || withLight->parts[0].nodeIndex != 0) {
+            if (!lightOnly->parts.empty() || !lightOnly->skeletons.empty() || !lightOnly->animations.empty()) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
-            }
-            // The emissive extension still applies when a second extension is present.
-            for (size_t channel = 0; channel < 3; ++channel) {
-                const float expected = kAuthoredEmissive[channel] * kEmissiveStrength;
-                if (std::abs(withLight->parts[0].defaultMaterial.emissiveFactor[channel] - expected) > 0.0001f) {
-                    return std::unexpected(GLTFImportError::ExtensionMismatch);
-                }
             }
             return {};
         }
