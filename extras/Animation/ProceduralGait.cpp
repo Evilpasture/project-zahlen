@@ -456,18 +456,27 @@ void ApplyIKReachTilt(
     Detail::RotateSubtreeAroundPivot(map, nodeTransforms, tiltRoot, nodeTransforms[hipsNode].GetTranslation(), (roll * pitch).Normalized());
 }
 
-/** Applies gait sway/bounce to the upper body only (spine and above).
- *  Legs stay planted — translating from the hips would move the thighs
- *  and break IK reach, causing foot sliding. */
+/** Applies gait offsets with vertical on hips and lateral on spine.
+ *  Vertical motion (bob + drop) moves the whole body up/down — the legs
+ *  compress/extend via IK, creating the gravity bounce feel. Lateral
+ *  sway stays on the spine to avoid displacing the thighs sideways,
+ *  which would break IK reach and cause foot sliding. */
 void ApplyPelvisGaitOffset(const ProceduralLocomotionComponent& gait, JPH::Mat44* nodeTransforms, const RigBoneMap& map, bool includeDrop) noexcept {
     if (nodeTransforms == nullptr) {
         return;
     }
-    // Apply to spine so legs are not displaced.
-    const RigNodeIndex spineNode = Detail::Node(map, CharacterBone::Spine);
-    if (IsValidRigNode(spineNode, map.nodeCount)) {
+    // Vertical: bob + drop on hips — whole body rises/falls with gravity.
+    const RigNodeIndex hipsNode = Detail::Node(map, CharacterBone::Hips);
+    if (IsValidRigNode(hipsNode, map.nodeCount)) {
         const float drop = includeDrop ? gait.pelvisDrop : 0.0f;
-        Detail::TranslateSubtree(map, nodeTransforms, spineNode, JPH::Vec3(gait.pelvisSway, gait.pelvisBob + drop, 0.0f));
+        Detail::TranslateSubtree(map, nodeTransforms, hipsNode, JPH::Vec3(0.0f, gait.pelvisBob + drop, 0.0f));
+    }
+    // Lateral: sway on spine only — avoids displacing thighs sideways.
+    if (gait.pelvisSway != 0.0f) {
+        const RigNodeIndex spineNode = Detail::Node(map, CharacterBone::Spine);
+        if (IsValidRigNode(spineNode, map.nodeCount)) {
+            Detail::TranslateSubtree(map, nodeTransforms, spineNode, JPH::Vec3(gait.pelvisSway, 0.0f, 0.0f));
+        }
     }
 }
 
