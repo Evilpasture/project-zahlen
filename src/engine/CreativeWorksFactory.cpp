@@ -69,7 +69,7 @@ static auto FindSystemFont(const char* fontName) -> std::string {
     return fontPath;
 }
 
-auto CreateFontAtlasTexture(RenderContext& ctx) -> TextureHandle {
+auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> TextureHandle {
     std::string fontPath = FindSystemFont("sans-serif");
     if (fontPath.empty()) {
         fontPath = "/usr/share/fonts/TTF/DejaVuSans.ttf";
@@ -102,9 +102,7 @@ auto CreateFontAtlasTexture(RenderContext& ctx) -> TextureHandle {
     const uint32_t       atlasSize = 1024;
     std::vector<uint8_t> alphaBitmap(static_cast<size_t>(atlasSize * atlasSize), 0);
 
-    auto* engine     = GetEngineContext();
-    auto& reg        = engine->GetRegistry();
-    auto* uiSettings = reg.GetSingleton<Components::UISettingsComponent>();
+    auto* uiSettings = registry.GetSingleton<Components::UISettingsComponent>();
     if (uiSettings == nullptr) {
         return TextureHandle::Invalid;
     }
@@ -753,11 +751,11 @@ void SetupPlayerRagdoll(Engine& engine, Entity playerEntity, std::span<const Ent
     SetupPlayerRagdoll(engine.GetPhysicsContext(), engine.GetRegistry(), playerEntity, visualParts);
 }
 
-void RebuildVulkanResources(RenderContext& ctx, CreativeWorksManager& cwMgr, ECS::Registry& /*reg*/) {
+void RebuildVulkanResources(RenderContext& ctx, CreativeWorksManager& cwMgr, ECS::Registry& reg) {
     ZHLN::Log("[Engine] Device Lost: Clearing GPU asset cache. Next frame will re-upload assets lazily.");
 
     ctx.ClearGPUCaches();
-    CreateFontAtlasTexture(ctx);
+    CreateFontAtlasTexture(ctx, reg);
 
     uint32_t count = cwMgr.GetCachedPrefabs(nullptr, 0);
     if (count > 0) {

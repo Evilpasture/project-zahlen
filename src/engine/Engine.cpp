@@ -3,7 +3,13 @@
 
 // src/engine/Engine.cpp
 #include <GLFW/glfw3.h>
+#include <algorithm>
+#include <atomic>
+#include <iterator>
+#include <mutex>
+#include <optional>
 #include <thread>
+#include <vector>
 // clang-format off
 #include <Jolt/Jolt.h>
 #include <Jolt/Core/Factory.h>
@@ -63,9 +69,54 @@
 
 namespace ZHLN {
 
-thread_local Engine*        g_CurrentEngine = nullptr;
-static Engine*              s_GlobalEngine  = nullptr;
-static RENDERDOC_API_1_5_0* s_RDocAPI       = nullptr;
+static RENDERDOC_API_1_5_0* s_RDocAPI = nullptr;
+
+// --- AMBIENT ENGINE CONTEXT ---
+//
+// The chain of published engines, innermost last. This used to be two raw
+// pointers assigned in InitInternal and never cleared, so GetEngineContext()
+// outlived the engine it named: destroying an engine left the pointers aimed
+// at freed memory, and a failed Engine::Create left them aimed at an object it
+// had already deleted.
+//
+// GetEngineContext() is read from worker fibers and from the terminal-signal
+// handler, so the read path takes no lock and no allocation: a thread-local
+// override if this thread published one, otherwise an atomic process-wide
+// fallback. The bookkeeping vectors are only touched when a scope opens or
+// closes.
+namespace {
+
+thread_local std::vector<Engine*> t_ThreadEngineContexts;
+std::mutex                        s_GlobalEngineContextMutex;
+std::vector<Engine*>              s_GlobalEngineContexts;
+std::atomic<Engine*>              s_GlobalEngine {nullptr};
+
+/// Removes the innermost registration of `engine`, which is the last one in
+/// normal (stack-ordered) teardown but need not be.
+void EraseInnermost(std::vector<Engine*>& stack, Engine* engine) {
+    const auto it = std::find(stack.rbegin(), stack.rend(), engine);
+    if (it != stack.rend()) {
+        stack.erase(std::next(it).base());
+    }
+}
+
+} // namespace
+
+EngineContextScope::EngineContextScope(Engine& engine) : _engine(&engine) {
+    t_ThreadEngineContexts.push_back(_engine);
+
+    const std::lock_guard lock(s_GlobalEngineContextMutex);
+    s_GlobalEngineContexts.push_back(_engine);
+    s_GlobalEngine.store(_engine, std::memory_order_release);
+}
+
+EngineContextScope::~EngineContextScope() {
+    EraseInnermost(t_ThreadEngineContexts, _engine);
+
+    const std::lock_guard lock(s_GlobalEngineContextMutex);
+    EraseInnermost(s_GlobalEngineContexts, _engine);
+    s_GlobalEngine.store(s_GlobalEngineContexts.empty() ? nullptr : s_GlobalEngineContexts.back(), std::memory_order_release);
+}
 
 static void InitRenderDocAPI() {
 #if defined(_WIN32)
@@ -93,6 +144,11 @@ namespace CreativeWorksFactory {
 }
 
 struct EngineImpl {
+    // Declared first, therefore destroyed last: ~Engine clears the registry,
+    // which runs component OnDestroy hooks that reach back through
+    // GetEngineContext().
+    std::optional<EngineContextScope> contextScope;
+
     std::unique_ptr<Window>               window;
     std::unique_ptr<RenderContext>        renderContext;
     std::unique_ptr<PhysicsContext>       physicsContext;
@@ -537,12 +593,14 @@ auto Engine::Create(const EngineConfig& cfg) -> std::expected<std::unique_ptr<En
 }
 
 auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error> {
-    g_CurrentEngine = this;
-    s_GlobalEngine  = this;
-
     ZHLN::Fiber::InitMainThread();
 
-    _impl               = std::make_unique<EngineImpl>();
+    _impl = std::make_unique<EngineImpl>();
+    // Publish only once there is something behind the pointer: GetEngineContext()
+    // is worthless before _impl exists, since every accessor reaches through it.
+    // The scope is owned by this engine, so it is released in ~Engine -- including
+    // on the failure paths below, where Create deletes a half-built engine.
+    _impl->contextScope.emplace(*this);
     _impl->config       = cfg;
     _impl->scriptRunner = std::make_unique<ScriptRunner>();
 
@@ -683,6 +741,12 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
 }
 
 Engine::~Engine() {
+    // InitInternal can fail before _impl is built, and Engine::Create deletes a
+    // half-built engine.
+    if (_impl == nullptr) {
+        return;
+    }
+
     _impl->registry.Clear();
     _impl->physicsContext.reset();
     _impl->renderContext.reset();
@@ -854,10 +918,10 @@ void Engine::ProvokeDeviceLost() {
 }
 
 auto GetEngineContext() -> Engine* {
-    if (g_CurrentEngine != nullptr) {
-        return g_CurrentEngine;
+    if (!t_ThreadEngineContexts.empty()) {
+        return t_ThreadEngineContexts.back();
     }
-    return s_GlobalEngine;
+    return s_GlobalEngine.load(std::memory_order_acquire);
 }
 
 auto Engine::InitializeDefaultScene() -> bool {
@@ -890,7 +954,7 @@ auto Engine::InitializeDefaultScene() -> bool {
 
     reg.Create(Components::UISettingsComponent {});
 
-    CreativeWorksFactory::CreateFontAtlasTexture(rc);
+    CreativeWorksFactory::CreateFontAtlasTexture(rc, reg);
     BuildSystemGraphs(*this);
     BuildFrameScheduler(*this);
     return true;

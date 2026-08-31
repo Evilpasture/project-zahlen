@@ -129,5 +129,41 @@ class ZHLN_API Engine {
     std::unique_ptr<EngineImpl> _impl;
 };
 
+/// Publishes an engine as the ambient one for GetEngineContext(), for exactly
+/// as long as the scope object lives.
+///
+/// Ambient access exists for the callers that structurally cannot be handed an
+/// engine: component OnDestroy hooks (see include/ARCHITECTURE.md), the
+/// terminal-signal diagnostic dump, and the scripting C ABI. Everything else
+/// should take an `Engine&`.
+///
+/// The registration is owned, not assigned. An engine publishes itself through
+/// a scope it holds for its own lifetime, so GetEngineContext() can never
+/// return a destroyed engine -- which it used to, because the old
+/// `g_CurrentEngine = this` in initialisation had no counterpart in teardown
+/// and a failed Engine::Create left the pointer aimed at freed memory.
+///
+/// Scopes nest: the ambient engine is the most recently published one that is
+/// still alive, and dropping a scope out of order falls back to the next one
+/// still standing rather than to a stale pointer. A scope should be released on
+/// the thread that created it; the process-wide fallback is corrected either
+/// way, but the per-thread override is not.
+class EngineContextScope {
+  public:
+    explicit EngineContextScope(Engine& engine);
+    ~EngineContextScope();
+
+    EngineContextScope(const EngineContextScope&)                    = delete;
+    auto operator=(const EngineContextScope&) -> EngineContextScope& = delete;
+    EngineContextScope(EngineContextScope&&)                         = delete;
+    auto operator=(EngineContextScope&&) -> EngineContextScope&      = delete;
+
+  private:
+    Engine* _engine;
+};
+
+/// The innermost live EngineContextScope's engine, or nullptr when none is
+/// published. Prefer passing an `Engine&`; see EngineContextScope for the cases
+/// that cannot.
 auto GetEngineContext() -> Engine*;
 } // namespace ZHLN

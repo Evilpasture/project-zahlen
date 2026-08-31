@@ -58,7 +58,12 @@ struct MaterialDesc {
 
 [[nodiscard]] auto CreateMaterial(RenderContext& ctx, const MaterialDesc& desc) -> std::expected<Material, Error>;
 
-auto CreateFontAtlasTexture(RenderContext& ctx) -> TextureHandle;
+/// Bakes the SDF font atlas and stores it on the UISettingsComponent singleton.
+///
+/// The registry is a parameter rather than something this reaches for through
+/// GetEngineContext(): the ambient engine is only correct while a scope
+/// publishes one, and every caller here already holds the registry it means.
+auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> TextureHandle;
 auto LoadTexture(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view path, bool isSRGB = true) -> uint32_t;
 
 struct SpawnParams {

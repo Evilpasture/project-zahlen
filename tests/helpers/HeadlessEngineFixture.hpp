@@ -59,9 +59,9 @@ struct EngineOptions {
 /// Creates a headless engine with validation enabled and the default preset
 /// suppressed, then seeds the default scene.
 ///
-/// Prefer AcquireEngine below unless the test genuinely needs a cold device:
-/// the engine records itself in `g_CurrentEngine`/`s_GlobalEngine` on init, so
-/// a directly-owned engine must not be alive at the same time as a pooled one.
+/// Prefer AcquireEngine below unless the test genuinely needs a cold device: an
+/// engine owned here must not be alive at the same time as a pooled one, since
+/// engine teardown tears down process-global Jolt state.
 ///
 /// Returns nullptr on failure; callers assert rather than dereference. The
 /// default preset is disabled process-wide, which is what keeps the engine
@@ -178,13 +178,13 @@ namespace Detail {
 
 /// One slot, not a map.
 ///
-/// Engine::InitInternal assigns `g_CurrentEngine` and `s_GlobalEngine`, and
-/// GetEngineContext() -- which is how CreativeWorksFactory reaches the
-/// registry, among others -- reads them. Two live engines therefore cannot
-/// coexist: the second one to be created owns the globals, and destroying
-/// either leaves them dangling. Keeping two pooled engines around is what made
-/// the 320x240 engine fail to initialise and then took the 640x480 one down
-/// with it, as a use-after-free inside CreateFontAtlasTexture.
+/// Two engines cannot be alive at once. Engine teardown calls
+/// JPH::UnregisterTypes() and deletes JPH::Factory::sInstance, both process
+/// globals, so whichever engine is destroyed first pulls Jolt out from under
+/// the other. (The engine also used to leave `g_CurrentEngine`/`s_GlobalEngine`
+/// aimed at freed memory, which is what turned a keyed pool into a
+/// use-after-free inside CreateFontAtlasTexture; that part is now an owned
+/// EngineContextScope, but the Jolt globals still make one-at-a-time the rule.)
 ///
 /// So a configuration change destroys the current engine before building the
 /// next, exactly as the per-test engines used to. That preserves the

@@ -85,6 +85,62 @@ struct RenderPipelinesTestSuite {
 
             return {};
         }
+
+        // ====================================================================
+        // Ambient Engine Context Lifetime
+        // ====================================================================
+        //
+        // GetEngineContext() used to be a pair of raw globals assigned during
+        // initialisation and never cleared, so it kept naming an engine that
+        // had been destroyed -- and a failed Engine::Create left it naming an
+        // object Create had already deleted. Test suites hit that as a
+        // use-after-free the moment they stopped building one engine per test.
+        std::expected<void, ZHLN::Error> ambient_engine_context_is_scoped_to_the_engine_lifetime() {
+            ZHLN::Test::ExpectTrue(ZHLN::GetEngineContext() == nullptr);
+
+            ZHLN::DefaultPreset::SetDisabled(true);
+
+            const ZHLN::EngineConfig cfg {
+                .physics = {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 4 * 1024 * 1024},
+                .render  = {
+                    .appName        = "LocalGPUEngineContextTest",
+                    .width          = 320,
+                    .height         = 240,
+                    .vsync          = false,
+                    .fullscreen     = false,
+                    .validationMode = ZHLN::ValidationMode::On,
+                    .headless       = true
+                }
+            };
+
+            auto engineRes = ZHLN::Engine::Create(cfg);
+            if (!engineRes) {
+                return std::unexpected(engineRes.error());
+            }
+
+            {
+                const auto engine = std::move(engineRes.value());
+
+                // Published by the engine's own scope, before the caller does
+                // anything with it -- InitializeDefaultScene is entitled to rely
+                // on it.
+                ZHLN::Test::ExpectTrue(ZHLN::GetEngineContext() == engine.get());
+                engine->InitializeDefaultScene();
+                ZHLN::Test::ExpectTrue(ZHLN::GetEngineContext() == engine.get());
+
+                {
+                    // A caller-owned scope over the same engine: publishing it
+                    // again must not corrupt the chain when it unwinds.
+                    const ZHLN::EngineContextScope scope(*engine);
+                    ZHLN::Test::ExpectTrue(ZHLN::GetEngineContext() == engine.get());
+                }
+                ZHLN::Test::ExpectTrue(ZHLN::GetEngineContext() == engine.get());
+            }
+
+            // Gone, rather than stale.
+            ZHLN::Test::ExpectTrue(ZHLN::GetEngineContext() == nullptr);
+            return {};
+        }
     };
 };
 
