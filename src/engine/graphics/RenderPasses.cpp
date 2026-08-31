@@ -338,6 +338,7 @@ struct GpuCullingPolicyPass1 {
         Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         color_att,
         Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         vel_att,
         Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         norm_att,
+        Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         emis_att,
         Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> depth_att
     ) noexcept {
         VkCommandBuffer cmd = recorder.cmd;
@@ -386,6 +387,7 @@ struct GpuCullingPolicyPass1 {
             .AddColor(color_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorScene)
             .AddColor(vel_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorVelocity)
             .AddColor(norm_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorNormalRoughness)
+            .AddColor(emis_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorEmissive)
             .AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearDepthValue)
             .Execute(cmd, [&]() {
                 // The culling dispatch above is a heap pass using push data at
@@ -423,6 +425,7 @@ struct GpuCullingPolicyPass2 {
         Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         color_att,
         Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         vel_att,
         Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         norm_att,
+        Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         emis_att,
         Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> depth_att
     ) noexcept {
         VkCommandBuffer cmd = recorder.cmd;
@@ -463,6 +466,7 @@ struct GpuCullingPolicyPass2 {
             .AddColor(color_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
             .AddColor(vel_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
             .AddColor(norm_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+            .AddColor(emis_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
             .AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
             .Execute(cmd, [&]() {
                 // Re-establish heap + push-data state after the culling dispatch
@@ -500,6 +504,7 @@ struct CpuCullingPolicyPass1 {
         Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         color_att,
         Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         vel_att,
         Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         norm_att,
+        Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         emis_att,
         Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> depth_att
     ) noexcept {
         VkCommandBuffer cmd          = recorder.cmd;
@@ -510,6 +515,7 @@ struct CpuCullingPolicyPass1 {
             .AddColor(color_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorScene)
             .AddColor(vel_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorVelocity)
             .AddColor(norm_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorNormalRoughness)
+            .AddColor(emis_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorEmissive)
             .AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearDepthValue)
             .Flags(VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT)
             .Execute(cmd, [&]() {
@@ -562,6 +568,7 @@ struct CpuCullingPolicyPass2 {
         Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         color_att,
         Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         vel_att,
         Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         norm_att,
+        Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         emis_att,
         Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> depth_att
     ) noexcept {
         // CPU Culling does everything in Pass 1. Pass 2 just draws CSG and Particles on top.
@@ -571,6 +578,7 @@ struct CpuCullingPolicyPass2 {
             .AddColor(color_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
             .AddColor(vel_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
             .AddColor(norm_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+            .AddColor(emis_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
             .AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
             .Execute(cmd, [&]() {
                 ctx.BindHeapsAndPushFrame(cmd);
@@ -826,6 +834,7 @@ void MainPass1::Execute(
             .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorScene)
             .AddColor(in.velocity, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorVelocity)
             .AddColor(in.normRough, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorNormalRoughness)
+            .AddColor(in.emissive, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorEmissive)
             .AddDepth(in.depth, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearDepthValue)
             .Execute(cmd, []() {});
         return;
@@ -862,9 +871,9 @@ void MainPass1::Execute(
     const bool useGpuCulling = ctx.cullingPass.pipeline.Valid() && ctx.frames.indirectCommandsBuffers->Valid() && (drawCount <= kGpuCullingMaxInstances) &&
                                !Diag::DisableGpuCulling() && !ctx.MeshShadingActive();
     if (useGpuCulling) {
-        ExecutePass<GpuCullingPolicyPass1>(recorder, groups, drawCount, in.sceneColor, in.velocity, in.normRough, in.depth);
+        ExecutePass<GpuCullingPolicyPass1>(recorder, groups, drawCount, in.sceneColor, in.velocity, in.normRough, in.emissive, in.depth);
     } else {
-        ExecutePass<CpuCullingPolicyPass1>(recorder, groups, drawCount, in.sceneColor, in.velocity, in.normRough, in.depth);
+        ExecutePass<CpuCullingPolicyPass1>(recorder, groups, drawCount, in.sceneColor, in.velocity, in.normRough, in.emissive, in.depth);
     }
 }
 
@@ -904,9 +913,9 @@ void MainPass2::Execute(
     const bool useGpuCulling = ctx.cullingPass.pipeline.Valid() && ctx.frames.indirectCommandsBuffers->Valid() && (drawCount <= kGpuCullingMaxInstances) &&
                                !Diag::DisableGpuCulling() && !ctx.MeshShadingActive();
     if (useGpuCulling) {
-        ExecutePass<GpuCullingPolicyPass2>(recorder, groups, drawCount, in.sceneColor, in.velocity, in.normRough, in.depth);
+        ExecutePass<GpuCullingPolicyPass2>(recorder, groups, drawCount, in.sceneColor, in.velocity, in.normRough, in.emissive, in.depth);
     } else {
-        ExecutePass<CpuCullingPolicyPass2>(recorder, groups, drawCount, in.sceneColor, in.velocity, in.normRough, in.depth);
+        ExecutePass<CpuCullingPolicyPass2>(recorder, groups, drawCount, in.sceneColor, in.velocity, in.normRough, in.emissive, in.depth);
     }
 }
 
@@ -1110,6 +1119,7 @@ void ViewmodelPass::Execute(
         .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .AddColor(in.velocity, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .AddColor(in.normRough, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+        .AddColor(in.emissive, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .AddDepth(in.depth, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .Execute(cmd, [&]() {
             for (size_t i = 0; i < ctx.queues.drawQueue.size(); ++i) {

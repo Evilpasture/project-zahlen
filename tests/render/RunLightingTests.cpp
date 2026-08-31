@@ -28,6 +28,7 @@ auto RunRTRPBRReflectionSuite() -> ZHLN::Test::TestStats;
 auto RunRayTracedNoiseStabilitySuite() -> ZHLN::Test::TestStats;
 auto RunRayTracedReflectionNoiseSuite() -> ZHLN::Test::TestStats;
 auto RunDecalSuite() -> ZHLN::Test::TestStats;
+auto RunEmissiveShadingSuite() -> ZHLN::Test::TestStats;
 
 
 auto main(int argc, char** argv) -> int {
@@ -44,6 +45,7 @@ auto main(int argc, char** argv) -> int {
         RunRTRPBRReflectionSuite,
         RunRayTracedNoiseStabilitySuite,
         RunRayTracedReflectionNoiseSuite,
-        RunDecalSuite
+        RunDecalSuite,
+        RunEmissiveShadingSuite
     );
 }

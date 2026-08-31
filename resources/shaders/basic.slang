@@ -14,6 +14,10 @@ struct PSOutput {
     float4 color : SV_Target0;
     float2 velocity : SV_Target1;
     float4 normalRoughness : SV_Target2;
+    // Emission is its own attachment. Folding it into SV_Target0 made the
+    // deferred lighting pass treat it as reflectance, so an emissive surface
+    // went black as soon as nothing was shining on it.
+    float4 emissive : SV_Target3;
 };
 
 // NOTE: use the Vulkan-native index semantics here. Slang maps SV_InstanceID
@@ -203,7 +207,8 @@ PSOutput PSMain(GBufferGeometryOutput input) {
         worldNormal      = normalize(normalMap.x * T + normalMap.y * B + normalMap.z * N);
     }
 
-    output.color           = float4(albedo.rgb + emissive, albedo.a);
+    output.color           = float4(albedo.rgb, albedo.a);
+    output.emissive        = float4(emissive, 1.0f);
     float2 packedNormal    = PackNormalOctahedron(worldNormal) * 0.5f + 0.5f;
     output.normalRoughness = float4(packedNormal, roughness, metallic);
 

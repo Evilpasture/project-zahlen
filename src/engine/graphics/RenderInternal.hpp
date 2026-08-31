@@ -199,6 +199,9 @@ static constexpr uint32_t kPassSamplerHeapBase       = kSceneStaticSamplerSlots;
 
 static constexpr Color4 kClearColorScene    = {.r = 0.08f, .g = 0.09f, .b = 0.12f, .a = 1.0f}; // G-Buffer background theme
 static constexpr Color4 kClearColorVelocity = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
+// Emission is additive in the lighting pass, so the cleared value has to be a
+// true zero -- the scene clear colour would add a constant glow to the sky.
+static constexpr Color4 kClearColorEmissive = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
 static constexpr float  kClearDepthValue    = 1.0f;
 
 // --- Layouts and Types ---
@@ -237,7 +240,8 @@ using DecalLayout                 = Vk::SlangReflectedLayout;
 using ActiveGBuffer = Vk::GBufferLayout<
     Vk::RenderTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32>, // Index 0: sceneColor
     Vk::RenderTarget<VK_FORMAT_R16G16_SFLOAT>,           // Index 1: velocityBuffer
-    Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>           // Index 2: normalRoughnessBuffer
+    Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>,          // Index 2: normalRoughnessBuffer
+    Vk::RenderTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32>  // Index 3: emissiveBuffer
     >;
 
 // Keep these enumerator names identical to the compile-time graph pass names.
@@ -409,6 +413,7 @@ struct SceneResources {
     Vk::TypedImage<ColorL> sceneColor;
     Vk::TypedImage<ColorL> velocity;
     Vk::TypedImage<ColorL> normRough;
+    Vk::TypedImage<ColorL> emissive;
     Vk::TypedImage<DepthL> depth;
 };
 
@@ -428,6 +433,10 @@ inline constexpr uint32_t kMaxGeneratedHiZMips = 7;
 using Res_SceneColor    = Vk::GraphImage<"SceneColor", VK_FORMAT_B10G11R11_UFLOAT_PACK32, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_Velocity      = Vk::GraphImage<"Velocity", VK_FORMAT_R16G16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_NormRough     = Vk::GraphImage<"NormRough", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
+// Emission is its own G-Buffer channel rather than a term folded into
+// SceneColor: the lighting pass multiplies SceneColor by incident light, so
+// anything baked in there stops existing the moment a surface is unlit.
+using Res_Emissive      = Vk::GraphImage<"Emissive", VK_FORMAT_B10G11R11_UFLOAT_PACK32, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_Depth         = Vk::GraphImage<"Depth", VK_FORMAT_D32_SFLOAT_S8_UINT, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT>;
 using Res_ShadowMap     = Vk::GraphImage<"ShadowMap", VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT>;
 using Res_ShadowAtlas   = Vk::GraphImage<"ShadowAtlas", VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT>;
@@ -498,6 +507,7 @@ struct RenderContext::Impl {
         Vk::RenderTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32> sceneColor;
         Vk::RenderTarget<VK_FORMAT_R16G16_SFLOAT>           velocityBuffer;
         Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>          normalRoughnessBuffer;
+        Vk::RenderTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32> emissiveBuffer;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     lightingTarget;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     hdrSceneColor;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     denoiseA;
@@ -529,6 +539,7 @@ struct RenderContext::Impl {
             Res_SceneColor    sceneColor;
             Res_Velocity      velocityBuffer;
             Res_NormRough     normalRoughnessBuffer;
+            Res_Emissive      emissiveBuffer;
             Res_Lighting      lightingTarget;
             Res_HdrSceneColor hdrSceneColor;
             Res_DenoiseA      denoiseA;

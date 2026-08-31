@@ -49,13 +49,15 @@ struct PassFactory {
             .sceneColor = Vk::Assume<Vk::ColorWrite<Res_SceneColor>>(self.graphResources.sceneColor),
             .velocity   = Vk::Assume<Vk::ColorWrite<Res_Velocity>>(self.graphResources.velocityBuffer),
             .normRough  = Vk::Assume<Vk::ColorWrite<Res_NormRough>>(self.graphResources.normalRoughnessBuffer),
+            .emissive   = Vk::Assume<Vk::ColorWrite<Res_Emissive>>(self.graphResources.emissiveBuffer),
             .depth      = Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(self.presentation.depthTarget)
         };
     }
 
     [[nodiscard]] auto MakeMainPass1() const noexcept {
         return Vk::Passieren<
-            "MainPass1", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::DepthStencilWrite<Res_Depth>>(
+            "MainPass1", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::ColorWrite<Res_Emissive>,
+            Vk::DepthStencilWrite<Res_Depth>>(
             [this](VkCommandBuffer c) noexcept {
                 FrameRecorder mainRec(c, self);
                 Passes::MainPass1 {}.Execute(mainRec, BuildSceneResources());
@@ -117,8 +119,8 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeMainPass2() const noexcept {
         return Vk::Passieren<
-            "MainPass2", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::DepthStencilWrite<Res_Depth>,
-            Vk::ComputeRead<Res_HiZ>>([this](VkCommandBuffer c) noexcept {
+            "MainPass2", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::ColorWrite<Res_Emissive>,
+            Vk::DepthStencilWrite<Res_Depth>, Vk::ComputeRead<Res_HiZ>>([this](VkCommandBuffer c) noexcept {
             FrameRecorder mainRec(c, self);
             Passes::MainPass2 {}.Execute(mainRec, BuildSceneResources());
         });
@@ -126,8 +128,8 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeShadowPass() const noexcept {
         return Vk::Passieren<
-            "MainShadow", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::DepthStencilWrite<Res_Depth>,
-            Vk::DepthWrite<Res_ShadowMap>, Vk::DepthWrite<Res_ShadowAtlas>>([this](VkCommandBuffer c) noexcept {
+            "MainShadow", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::ColorWrite<Res_Emissive>,
+            Vk::DepthStencilWrite<Res_Depth>, Vk::DepthWrite<Res_ShadowMap>, Vk::DepthWrite<Res_ShadowAtlas>>([this](VkCommandBuffer c) noexcept {
             const auto drawCount      = static_cast<uint32_t>(self.queues.drawQueue.size());
             const bool gpuCullingUsed = self.cullingPass.pipeline.Valid() && self.frames.indirectCommandsBuffers->Valid() &&
                                         (drawCount <= kGpuCullingMaxInstances) && !Diag::DisableGpuCulling() && !self.MeshShadingActive();
@@ -277,8 +279,8 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeLightingPass() const noexcept {
         return Vk::MakePass<
-            "Lighting", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_ShadowMap>,
-            Vk::ShaderRead<Res_ShadowAtlas>, Vk::ColorWrite<Res_Lighting>>([this](auto& ctx) noexcept {
+            "Lighting", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Emissive>, Vk::ShaderRead<Res_Depth>,
+            Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ColorWrite<Res_Lighting>>([this](auto& ctx) noexcept {
             const auto ltcMatHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
                 .handle   = self.ltcMatImage.Handle(),
                 .view     = self.ltcMatView.Get(),
@@ -327,7 +329,7 @@ struct PassFactory {
                 Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer), self.frames.lightStorageBuffers[fIdx],
                 self.frames.frameUniformBuffers[fIdx], Vk::Assume<Vk::ShaderRead<Res_ShadowMap>>(self.graphResources.shadowMap), self.shadowSampler, ltcMatHeap,
                 ltcAmpHeap, self.clampSampler, self.frames.clusterGridBuffers[fIdx], self.frames.lightIndexListBuffers[fIdx], self.pointSampler, atlasCubeHeap,
-                atlas2DHeap, blueNoiseHeap, self.blueNoiseSampler,
+                atlas2DHeap, blueNoiseHeap, self.blueNoiseSampler, Vk::Assume<Vk::ShaderRead<Res_Emissive>>(self.graphResources.emissiveBuffer),
                 Vk::AsAddressWrite {
                     .address = (self.rtCtx.Valid() && self.frames.tlas.Current() != VK_NULL_HANDLE) ?
                                    self.rtCtx.GetAccelerationStructureAddress(self.frames.tlas.Current()) :
@@ -857,7 +859,8 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeViewmodelPass() const noexcept {
         return Vk::Passieren<
-            "Viewmodel", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::DepthStencilWrite<Res_Depth>>(
+            "Viewmodel", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::ColorWrite<Res_Emissive>,
+            Vk::DepthStencilWrite<Res_Depth>>(
             [this](VkCommandBuffer c) noexcept {
                 FrameRecorder vmRec(c, self);
                 Passes::ViewmodelPass {}.Execute(vmRec, BuildSceneResources());

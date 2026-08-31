@@ -99,6 +99,7 @@ zahlen_add_gpu_test_group(GPU_Lighting 300
     TestRayTracedNoiseStability.cpp
     TestRayTracedReflectionNoise.cpp
     TestDecal.cpp
+    TestEmissiveShading.cpp
 )
 
 # Pipeline, resource and culling mechanics.

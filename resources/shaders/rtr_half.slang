@@ -222,9 +222,10 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         float4 hitNormRough = texNormalRoughness.SampleLevel(smp, hitUV, 0);
         if (hitNormRough.z != 0.0f) {
             float3 screenColor = texLighting.SampleLevel(smp, hitUV, 0).rgb;
-            // Screen lighting bakes emissive into albedo then multiplies by
-            // ambient, so a bright emitter can look dimmer than the analytic
-            // fallback. Keep the brighter of the two.
+            // The lighting target now carries emission as its own additive
+            // term (lighting.slang), so screen colour is trustworthy for
+            // emitters. The max() stays for pixels the analytic fallback
+            // resolves better than a low-confidence screen hit.
             reflectionColor = max(fallbackColor, lerp(fallbackColor, screenColor, confidence));
         }
     }

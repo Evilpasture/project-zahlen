@@ -61,6 +61,7 @@ struct PSOutput {
     float4 color : SV_Target0;
     float2 velocity : SV_Target1;
     float4 normalRoughness : SV_Target2;
+    float4 emissive : SV_Target3; // See basic.slang: additive, not reflectance.
 };
 
 public struct Quaternion {
@@ -210,7 +211,8 @@ PSOutput PSMain(VSOutput input) {
         worldNormal      = normalize(normalMap.x * T + normalMap.y * B + normalMap.z * N);
     }
 
-    output.color           = float4(albedo.rgb + emissive, albedo.a);
+    output.color           = float4(albedo.rgb, albedo.a);
+    output.emissive        = float4(emissive, 1.0f);
     float2 packedNormal    = PackNormalOctahedron(worldNormal) * 0.5f + 0.5f;
     output.normalRoughness = float4(packedNormal, roughness, metallic);
 
