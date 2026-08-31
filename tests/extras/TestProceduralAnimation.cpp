@@ -427,19 +427,12 @@ struct ProceduralAnimationTestSuite {
                 (importedMap.modelTransforms[thighL] * kneeLConstraint->bindRelative * kneeLConstraint->localPoseDelta).GetTranslation();
             const JPH::Vec3 expectedKneeR =
                 (importedMap.modelTransforms[thighR] * kneeRConstraint->bindRelative * kneeRConstraint->localPoseDelta).GetTranslation();
-<<<<<<< HEAD
             // Ankle constraints use the shin positions after knee constraints are applied.
             // Knee constraints pin shin translation but preserve rotation.
             const JPH::Mat44 pinnedShinL    = JPH::Mat44::sRotationTranslation(detachedShinL.GetQuaternion(), expectedKneeL);
             const JPH::Mat44 pinnedShinR    = JPH::Mat44::sRotationTranslation(detachedShinR.GetQuaternion(), expectedKneeR);
             const JPH::Vec3  expectedAnkleL = (pinnedShinL * ankleLConstraint->bindRelative * ankleLConstraint->localPoseDelta).GetTranslation();
             const JPH::Vec3  expectedAnkleR = (pinnedShinR * ankleRConstraint->bindRelative * ankleRConstraint->localPoseDelta).GetTranslation();
-=======
-            const JPH::Vec3 expectedAnkleL =
-                (importedMap.modelTransforms[shinL] * ankleLConstraint->bindRelative * ankleLConstraint->localPoseDelta).GetTranslation();
-            const JPH::Vec3 expectedAnkleR =
-                (importedMap.modelTransforms[shinR] * ankleRConstraint->bindRelative * ankleRConstraint->localPoseDelta).GetTranslation();
->>>>>>> 5c40cd95 (fix tests: update standard_rig_maps_every_control for new ankle constraints)
 
             // Knee and ankle joints are structural and remain active even when
             // every optional child-of relationship is disabled. They pin position
@@ -458,11 +451,7 @@ struct ProceduralAnimationTestSuite {
                 return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
 
-<<<<<<< HEAD
             if (ZHLN::ProceduralAnimation::ApplyChildOfConstraints(importedMap) != 15 || handLConstraint == nullptr || handRConstraint == nullptr ||
-=======
-            if (ZHLN::ProceduralAnimation::ApplyChildOfConstraints(importedMap) != 14 || handLConstraint == nullptr || handRConstraint == nullptr ||
->>>>>>> 5c40cd95 (fix tests: update standard_rig_maps_every_control for new ankle constraints)
                 ankleLConstraint == nullptr || ankleRConstraint == nullptr || rigidFootLConstraint == nullptr || rigidFootRConstraint == nullptr ||
                 secondaryFootLConstraint == nullptr || secondaryFootRConstraint == nullptr || toeRConstraint == nullptr ||
                 !importedMap.modelTransforms[handL].IsClose(
