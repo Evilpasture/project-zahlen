@@ -23,6 +23,7 @@ struct ReflectionsTestSuite {
     }
 
     ~ReflectionsTestSuite() {
+        ZHLN::Test::Headless::ShutdownPooledEngines();
         ZHLN::TaskSystem::Shutdown();
     }
 

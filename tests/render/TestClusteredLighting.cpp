@@ -23,6 +23,7 @@ struct ClusteredLightingTestSuite {
     }
 
     ~ClusteredLightingTestSuite() {
+        ZHLN::Test::Headless::ShutdownPooledEngines();
         ZHLN::TaskSystem::Shutdown();
     }
 

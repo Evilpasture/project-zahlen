@@ -21,6 +21,7 @@ struct RayTracedShadowsTestSuite {
     }
 
     ~RayTracedShadowsTestSuite() {
+        ZHLN::Test::Headless::ShutdownPooledEngines();
         ZHLN::TaskSystem::Shutdown();
     }
 

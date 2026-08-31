@@ -21,6 +21,7 @@
 
 #include "TestsFramework.hpp"
 #include "helpers/ImageTesting.hpp"
+#include <Zahlen/Camera.hpp>
 #include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/DefaultPreset.hpp>
@@ -36,11 +37,13 @@
 // first -- that is what made it compile only when a suite happened to include
 // <Zahlen/ecs/ECS.hpp> ahead of this one.
 #include <Zahlen/ecs/ECS.hpp>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace ZHLN::Test::Headless {
 
@@ -97,6 +100,139 @@ struct EngineOptions {
 /// Convenience overload for the common "just give me a 640x480 engine" case.
 [[nodiscard]] inline auto CreateEngine(std::string_view appName, uint32_t width = 640, uint32_t height = 480) -> std::unique_ptr<ZHLN::Engine> {
     return CreateEngine(EngineOptions {.appName = appName, .width = width, .height = height});
+}
+
+// ============================================================================
+// Engine Reuse
+// ============================================================================
+//
+// Creating an engine is by far the most expensive thing a GPU test does: a
+// Vulkan instance and device, an IBL bake, an LTC upload, ~17 MB of line and
+// UI vertex buffers, an SMAA LUT bake and a miniaudio device, all per test.
+//
+// It is also the reason a long test binary dies. Every vkCreateInstance
+// dlopen()s the ICD, which on the NVIDIA driver pulls in libnvidia-tls.so;
+// glibc's static TLS surplus is finite and is not fully reclaimed on dlclose,
+// so after enough instances the loader reports
+//   "cannot allocate memory in static TLS block"
+//   -> loader_icd_scan: Failed loading library associated with ICD JSON
+//   -> vkCreateInstance: Found no drivers!
+// and every remaining test in the process fails for a reason that has nothing
+// to do with what it was measuring. That is what took out the tail of
+// GPU_Lighting.
+//
+// So the engine is pooled and the *scene* is what gets thrown away between
+// tests. A suite that reuses an engine must not assume a virgin process: it
+// gets a cleared registry with a freshly seeded default scene, but the render
+// context still holds the meshes, materials and textures earlier tests
+// uploaded. Tests that measure pixels do not care; a test that needs a
+// genuinely cold device should call CreateEngine and own it.
+
+/// Non-owning handle to a pooled engine.
+///
+/// Deliberately shaped like the std::unique_ptr<Engine> it replaces --
+/// `*engine`, `engine->`, `engine.get()`, `engine != nullptr` and `.reset()`
+/// all mean what they used to -- so migrating a suite is a change to its
+/// CreateTestEngine and nothing else. `.reset()` drops the caller's view of
+/// the engine; the pool keeps owning it.
+class EngineHandle {
+public:
+    EngineHandle() = default;
+    explicit EngineHandle(ZHLN::Engine* engine) noexcept : _engine(engine) {}
+
+    [[nodiscard]] auto get() const noexcept -> ZHLN::Engine* { return _engine; }
+    auto               operator->() const noexcept -> ZHLN::Engine* { return _engine; }
+    auto               operator*() const noexcept -> ZHLN::Engine& { return *_engine; }
+    explicit           operator bool() const noexcept { return _engine != nullptr; }
+    void               reset() noexcept { _engine = nullptr; }
+
+    friend auto operator==(const EngineHandle& handle, std::nullptr_t) noexcept -> bool { return handle._engine == nullptr; }
+
+private:
+    ZHLN::Engine* _engine = nullptr;
+};
+
+/// Returns the engine to the state CreateEngine hands out: no entities, then
+/// the default scene seeded again.
+///
+/// Registry::Clear bumps every generation, so entity handles a previous test
+/// held are dead rather than dangling. InitializeDefaultScene re-registers the
+/// component families (idempotent), recreates the camera and settings
+/// singletons, and rebuilds the system graphs and frame scheduler.
+inline void ResetScene(ZHLN::Engine& engine) {
+    engine.GetRegistry().Clear();
+    engine.InitializeDefaultScene();
+    ZHLN::DefaultPreset::SetDisabled(true);
+
+    // The camera is engine state, not an entity, so Clear does not touch it.
+    // Tests routinely set only the fields they care about (position and yaw but
+    // not fov, say), and inheriting the previous test's framing is exactly the
+    // kind of order-dependent difference a pooled engine must not introduce.
+    engine.GetCamera() = ZHLN::Camera {};
+}
+
+namespace Detail {
+
+struct PooledEngine {
+    EngineOptions                 opts;
+    std::unique_ptr<ZHLN::Engine> engine;
+    bool                          creationFailed = false;
+};
+
+[[nodiscard]] inline auto EnginePool() -> std::vector<PooledEngine>& {
+    static std::vector<PooledEngine> pool;
+    return pool;
+}
+
+/// appName is excluded on purpose: headless it only labels the log banner, and
+/// keying on it would hand two engines to a suite that names its scenes.
+[[nodiscard]] inline auto SameEngine(const EngineOptions& a, const EngineOptions& b) noexcept -> bool {
+    return a.width == b.width && a.height == b.height && a.maxBodies == b.maxBodies && a.maxBodyPairs == b.maxBodyPairs
+        && a.maxContactConstraints == b.maxContactConstraints && a.tempAllocatorSize == b.tempAllocatorSize;
+}
+
+} // namespace Detail
+
+/// Hands out a pooled engine matching `opts`, creating one on first use and
+/// resetting the scene on every use after that.
+///
+/// Returns a null handle if the engine could not be created, matching
+/// CreateEngine; a configuration that failed once is not retried, because the
+/// usual cause (no device, no drivers) will not have fixed itself and the
+/// retry costs the suite its remaining timeout.
+[[nodiscard]] inline auto AcquireEngine(const EngineOptions& opts = {}) -> EngineHandle {
+    auto& pool = Detail::EnginePool();
+    for (auto& slot: pool) {
+        if (!Detail::SameEngine(slot.opts, opts)) {
+            continue;
+        }
+        if (slot.creationFailed) {
+            return EngineHandle {};
+        }
+        ResetScene(*slot.engine);
+        return EngineHandle {slot.engine.get()};
+    }
+
+    auto                engine = CreateEngine(opts);
+    ZHLN::Engine* const raw    = engine.get();
+    pool.push_back(Detail::PooledEngine {.opts = opts, .engine = std::move(engine), .creationFailed = raw == nullptr});
+    return EngineHandle {raw};
+}
+
+/// Convenience overload mirroring the CreateEngine one.
+[[nodiscard]] inline auto AcquireEngine(std::string_view appName, uint32_t width = 640, uint32_t height = 480) -> EngineHandle {
+    return AcquireEngine(EngineOptions {.appName = appName, .width = width, .height = height});
+}
+
+/// Destroys every pooled engine.
+///
+/// Must run before ZHLN::TaskSystem::Shutdown -- engine teardown schedules
+/// work -- which in these suites means the suite destructor, immediately
+/// before the Shutdown call. Leaving it to static destruction would tear a
+/// Vulkan device down after the task system and the fiber main thread are
+/// already gone.
+inline void ShutdownPooledEngines() {
+    Detail::EnginePool().clear();
 }
 
 /// Turns off TAA and zeroes the jitter history.

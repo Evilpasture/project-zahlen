@@ -65,9 +65,24 @@ foreach(TEST_SRC IN LISTS EXTRAS_RENDER_TEST_SOURCES)
         TIMEOUT 60
     )
 
+    # Each vkCreateInstance dlopen()s the Vulkan ICD, which on the NVIDIA driver
+    # pulls in libnvidia-tls.so. glibc's static TLS surplus is finite and is not
+    # fully reclaimed on dlclose, so a binary that builds many engines eventually
+    # fails with "cannot allocate memory in static TLS block" and every remaining
+    # test reports "vkCreateInstance: Found no drivers!". The suites pool their
+    # engines (see tests/helpers/HeadlessEngineFixture.hpp); this raises the
+    # surplus as well, so a suite that still churns engines degrades late instead
+    # of falling over.
+    set(GPU_TEST_ENVIRONMENT "")
+    if(UNIX AND NOT APPLE)
+        list(APPEND GPU_TEST_ENVIRONMENT "GLIBC_TUNABLES=glibc.rtld.optional_static_tls=4096")
+    endif()
     if(USE_SANITIZERS)
+        list(APPEND GPU_TEST_ENVIRONMENT ${ZHLN_TEST_ENVIRONMENT})
+    endif()
+    if(GPU_TEST_ENVIRONMENT)
         set_tests_properties(GPU_EXTRAS_${TARGET_NAME} PROPERTIES
-            ENVIRONMENT "${ZHLN_TEST_ENVIRONMENT}"
+            ENVIRONMENT "${GPU_TEST_ENVIRONMENT}"
         )
     endif()
 endforeach()

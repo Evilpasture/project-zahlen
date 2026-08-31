@@ -44,6 +44,7 @@
 #include "NoiseFrameCapture.hpp"
 #include "RayTracedNoiseMetrics.hpp"
 #include "TestsFramework.hpp"
+#include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
@@ -128,30 +129,18 @@ struct RayTracedReflectionNoiseTestSuite {
     }
 
     ~RayTracedReflectionNoiseTestSuite() {
+        ZHLN::Test::Headless::ShutdownPooledEngines();
         ZHLN::TaskSystem::Shutdown();
     }
 
-    static auto CreateTestEngine() -> std::unique_ptr<ZHLN::Engine> {
-        ZHLN::DefaultPreset::SetDisabled(true);
-        const ZHLN::EngineConfig cfg {
-            .physics = {.maxBodies = 256, .maxBodyPairs = 512, .maxContactConstraints = 512, .tempAllocatorSize = 8 * 1024 * 1024},
-            .render  = {
-                 .appName        = "Headless RTR Noise",
-                 .width          = kWidth,
-                 .height         = kHeight,
-                 .vsync          = false,
-                 .fullscreen     = false,
-                 .validationMode = ZHLN::ValidationMode::On,
-                 .headless       = true
-            }
-        };
-        auto engineRes = ZHLN::Engine::Create(cfg);
-        if (!engineRes) {
-            return nullptr;
-        }
-        auto engine = std::move(engineRes.value());
-        engine->InitializeDefaultScene();
-        return engine;
+    /// Pooled: one engine per resolution for the whole binary, with the
+    /// scene reset between tests. Creating a Vulkan instance per test is
+    /// what eventually exhausts the loader's static TLS and turns the tail
+    /// of the group into "vkCreateInstance: Found no drivers!".
+    static auto CreateTestEngine() -> ZHLN::Test::Headless::EngineHandle {
+        return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
+            .appName = "Headless RTR Noise", .width = kWidth, .height = kHeight
+        });
     }
 
     static void SetAA(ZHLN::Engine& engine, ZHLN::AAMode mode) {
@@ -248,7 +237,21 @@ struct RayTracedReflectionNoiseTestSuite {
                 .metallic  = 0.0f,
                 .roughness = 0.5f,
                 .baseColor = {0.2f, 0.2f, 0.2f, 1.0f},
-                .emissive  = {4.0f, 4.0f, 4.0f, 1.0f}
+                // Emission is radiance now, not a multiplier on incident light.
+                //
+                // This used to read 4.0. Back then basic.slang folded emission
+                // into the albedo target, so the lighting pass multiplied it by
+                // the sun: (0.2 + 4.0) / pi * 120 * NdotL, roughly 105 on the
+                // camera-facing face. With emission carried on its own GBuffer
+                // target and added after shading, the same material renders at
+                // about 9 -- the box is physically correct and twelve times
+                // dimmer, and the reflection of it stopped clearing the
+                // per-pixel change threshold, which is what collapsed the
+                // measured band to a 10x9 speck.
+                //
+                // 100 restores the radiance the scene was calibrated against,
+                // expressed the honest way: a very bright emitter.
+                .emissive  = {100.0f, 100.0f, 100.0f, 1.0f}
             }
         );
         if (!floorMat || !plateMat || !boxMat) {

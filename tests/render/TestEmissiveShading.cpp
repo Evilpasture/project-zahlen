@@ -120,7 +120,10 @@ constexpr std::array<float, 4> kBoxBaseColor {0.05f, 0.05f, 0.05f, 1.0f};
     outValid = false;
     SubRegionStats box;
 
-    const auto engine = ZHLN::Test::Headless::CreateEngine(emissive ? "Headless Emissive Unlit" : "Headless Emissive Control");
+    // Pooled: both halves of the comparison run on the same device with the
+    // scene reset in between, so a difference in the frames cannot come from
+    // a difference in the engine.
+    const auto engine = ZHLN::Test::Headless::AcquireEngine(emissive ? "Headless Emissive Unlit" : "Headless Emissive Control");
     if (engine == nullptr) {
         return box;
     }
@@ -151,6 +154,7 @@ struct EmissiveShadingTestSuite {
     }
 
     ~EmissiveShadingTestSuite() {
+        ZHLN::Test::Headless::ShutdownPooledEngines();
         ZHLN::TaskSystem::Shutdown();
     }
 

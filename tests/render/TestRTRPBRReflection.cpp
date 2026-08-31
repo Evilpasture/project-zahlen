@@ -15,6 +15,7 @@
 // is a failure, not a retry.
 
 #include "TestsFramework.hpp"
+#include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
@@ -181,30 +182,18 @@ struct RTRPBRReflectionTestSuite {
     }
 
     ~RTRPBRReflectionTestSuite() {
+        ZHLN::Test::Headless::ShutdownPooledEngines();
         ZHLN::TaskSystem::Shutdown();
     }
 
-    static auto CreateTestEngine() -> std::unique_ptr<ZHLN::Engine> {
-        ZHLN::DefaultPreset::SetDisabled(true);
-        const ZHLN::EngineConfig cfg {
-            .physics = {.maxBodies = 256, .maxBodyPairs = 512, .maxContactConstraints = 512, .tempAllocatorSize = 8 * 1024 * 1024},
-            .render  = {
-                .appName        = "Headless RTR PBR Colour",
-                .width          = 640,
-                .height         = 480,
-                .vsync          = false,
-                .fullscreen     = false,
-                .validationMode = ZHLN::ValidationMode::On,
-                .headless       = true
-            }
-        };
-        auto engineRes = ZHLN::Engine::Create(cfg);
-        if (!engineRes) {
-            return nullptr;
-        }
-        auto engine = std::move(engineRes.value());
-        engine->InitializeDefaultScene();
-        return engine;
+    /// Pooled: one engine per resolution for the whole binary, with the
+    /// scene reset between tests. Creating a Vulkan instance per test is
+    /// what eventually exhausts the loader's static TLS and turns the tail
+    /// of the group into "vkCreateInstance: Found no drivers!".
+    static auto CreateTestEngine() -> ZHLN::Test::Headless::EngineHandle {
+        return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
+            .appName = "Headless RTR PBR Colour", .width = 640, .height = 480
+        });
     }
 
     static void DisableTAAAndFreeCam(ZHLN::Engine& engine) {
@@ -311,8 +300,10 @@ struct RTRPBRReflectionTestSuite {
     static constexpr NormRect kSource {.x0 = 0.30, .y0 = 0.08, .x1 = 0.70, .y1 = 0.42};
 
     struct Session {
-        std::unique_ptr<ZHLN::Engine> engine;
-        uint32_t                      lostBefore = 0;
+        // Pool-owned, so `engine.reset()` below means "this session is skipping",
+        // not "destroy the device".
+        ZHLN::Test::Headless::EngineHandle engine;
+        uint32_t                           lostBefore = 0;
     };
 
     static auto Boot() -> std::expected<Session, ZHLN::Error> {
