@@ -19,10 +19,28 @@
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <physics/PhysicsDebug.hpp>
 
 namespace ZHLN {
+
+namespace {
+
+/// Nominal frame period packed into `FrameUniforms::camPos.w`, which doubles
+/// as the only frame counter the shaders can see (see
+/// `FrameIndexFromCamPosW` in resources/shaders/blue_noise.slang).
+///
+/// 1/64 s rather than 1/60: a power of two multiplies exactly in float32, so
+/// the shader recovers the integer frame index bit for bit. The old 0.0166f
+/// did not, and past a couple of thousand frames consecutive frames decoded to
+/// the same index -- freezing every blue-noise dither driven from this slot.
+/// The mask keeps the product exact past 2^24 frames (~3 days at 64 Hz) by
+/// wrapping the clock instead of letting it lose its low bits.
+constexpr float    kFrameTimeStep  = 0.015625f;
+constexpr uint64_t kFrameClockMask = 0xFFFFFFull;
+
+} // namespace
 
 std::expected<void, Error> RenderSystem::Update(Engine& engine, float dt) {
     int        physicsDrawMode = 0;
@@ -119,7 +137,7 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
     uniforms.prevUnjitteredViewProj = prevUnjitteredVp;
     uniforms.invViewProj            = unjitteredVp.Inversed();
     std::memcpy(&uniforms.camPos[0], &cam.position, sizeof(float) * 3);
-    uniforms.camPos[3]       = static_cast<float>(engine.GetCurrentFrame()) * 0.0166f;
+    uniforms.camPos[3]       = static_cast<float>(engine.GetCurrentFrame() & kFrameClockMask) * kFrameTimeStep;
     JPH::Vec3 shaderLightDir = sunDirection;
     std::memcpy(&uniforms.lightDir[0], &shaderLightDir, sizeof(float) * 3);
     uniforms.lightDir[3]      = sunIntensity;

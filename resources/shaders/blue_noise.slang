@@ -33,19 +33,39 @@ public static const float2 R2_OFFSET = float2(0.7548776662466927f, 0.56984029099
 /// frame so sample `i` of a pixel does not reuse sample `i-1`'s texel.
 public static const float2 R2_SAMPLE_OFFSET = float2(0.1548776662466927f, 0.3569840290998053f);
 
+/// Nominal frame period written into `camPos.w`, and its exact inverse.
+///
+/// 1/64 s, not 1/60: the encode/decode round trip has to be *exact*, and
+/// 0.015625 is a power of two, so `frame * FRAME_TIME_STEP` is representable
+/// with no rounding for every frame index below 2^24 and multiplying it back
+/// by 64 recovers the integer bit for bit.
+public static const float FRAME_TIME_STEP = 0.015625f;
+public static const float FRAME_RATE_HZ   = 64.0f;
+
+/// Period the recovered index wraps at. Keeping it small bounds the magnitude
+/// of `frameIndex * R2_OFFSET` below, where float32 would otherwise quantise
+/// the fractional scroll away once the counter reaches the millions -- a long
+/// running session, or a pooled engine reused across a whole test binary.
+public static const uint FRAME_INDEX_PERIOD = 4096u;
+
 /// Recover an integer frame counter from the `camPos.w` uniform slot.
 ///
 /// FrameUniforms has no frameIndex field (the counter lives on AAState, which
 /// no render pass currently binds), but RenderSystem writes
-/// `camPos[3] = GetCurrentFrame() * 0.0166f`, so the value is already in every
-/// FrameUniforms block these shaders can see. Inverting the constant avoids
+/// `camPos[3] = GetCurrentFrame() * FRAME_TIME_STEP`, so the value is already
+/// in every FrameUniforms block these shaders can see. Reading it back avoids
 /// widening the GPU ABI -- which would shift every later offset in the struct
-/// and require a matching change in the host mirror. float32 keeps ~7
-/// significant digits: after an hour (~216k frames, camPos.w ~ 3586) the
-/// recovered index is still exact to well under one frame.
+/// and require a matching change in the host mirror.
+///
+/// The previous encoding used 0.0166f and inverted it with 60.2409...f. Both
+/// constants are inexact in float32, so the round trip drifted: by frame ~2000
+/// consecutive frames decoded to the *same* index (and others were skipped),
+/// which froze every dither driven from here and made two successive captures
+/// byte-identical. The rounding term below keeps the decode robust even if a
+/// caller writes a time that is not an exact multiple of the step.
 [ForceInline]
 public uint FrameIndexFromCamPosW(float camPosW) {
-    return uint(max(camPosW, 0.0f) * 60.240963855421686f);
+    return uint(max(camPosW, 0.0f) * FRAME_RATE_HZ + 0.5f) & (FRAME_INDEX_PERIOD - 1u);
 }
 
 /**

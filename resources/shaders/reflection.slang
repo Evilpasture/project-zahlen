@@ -423,9 +423,14 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         float zSlice = log(max(viewDepth, 0.1f) / 0.1f) / log(10000.0f);
         zSlice -= 0.5f / 64.0f;
 
-        float2 noisePos = input.pos.xy;
-        noisePos.x += (frame.camPos.w * 60.0f) * 5.588238f;
-        noisePos.y += (frame.camPos.w * 60.0f) * 5.588238f;
+        // Same frame counter every other stochastic path uses. Deriving it
+        // with a local `* 60.0f` re-introduced the decode drift this helper
+        // exists to avoid, and the wrap keeps noisePos small enough that the
+        // IGN hash below still resolves per-frame steps in float32.
+        float  ignFrame  = float(FrameIndexFromCamPosW(frame.camPos.w));
+        float2 noisePos  = input.pos.xy;
+        noisePos.x += ignFrame * 5.588238f;
+        noisePos.y += ignFrame * 5.588238f;
         float3 magic = float3(0.06711056f, 0.00583715f, 52.9829189f);
         float dither = frac(magic.z * frac(dot(noisePos, magic.xy))) - 0.5f;
 
