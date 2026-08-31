@@ -396,7 +396,14 @@ auto InstantiateMeshPart(
     return e;
 }
 
-auto TrySpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, const JPH::Mat44& baseTransform, float scaleMult) -> Entity {
+// Spawns a cheap point light approximating the bounce from an emissive part.
+//
+// The light is parented to the part entity and positioned in *part-local*
+// space, so it inherits the part's world transform every frame: move or
+// animate the model and the glow goes with it. Baking a world position here
+// instead is what used to leave a puddle of lights at the spawn point while
+// the model itself went dark once it moved.
+auto TrySpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, Entity parentEntity, float scaleMult) -> Entity {
     const float* ef  = part.defaultMaterial.emissiveFactor;
     float        lum = ef[0] * 0.2126f + ef[1] * 0.7152f + ef[2] * 0.0722f;
     if (lum <= 0.01f) {
@@ -409,11 +416,10 @@ auto TrySpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, const JPH::M
     float partExtent = (part.localMax[0] - part.localMin[0]) + (part.localMax[1] - part.localMin[1]) + (part.localMax[2] - part.localMin[2]);
 
     Entity glowEnt = reg.Create();
-    reg.Add(
-        glowEnt,
-        Components::TransformComponent {.position = baseTransform * localCenter, .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)}
-    );
+    reg.Add(glowEnt, Components::TransformComponent {.position = localCenter, .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)});
+    reg.Add(glowEnt, Components::HierarchyComponent {.parent = parentEntity});
     reg.Add(glowEnt, Components::NameComponent {.name = String64("Glow_" + std::string(part.name.c_str()))});
+
     reg.Add(
         glowEnt, Components::LightComponent {
                      .type        = LightType::Point,
@@ -606,7 +612,7 @@ auto InstantiatePrefab(
         }
         spawnedCount++;
 
-        Entity glowEnt = TrySpawnEmissiveVPL(reg, prefab.parts[i], baseTransform * GetNodeLogicalTransform(prefab, prefab.parts[i].nodeIndex), scaleMult);
+        Entity glowEnt = params.emissiveVirtualLights ? TrySpawnEmissiveVPL(reg, prefab.parts[i], meshEnt, scaleMult) : Entity::Null();
         if (glowEnt != Entity::Null()) {
             if (outBuffer != nullptr && spawnedCount < maxCount) {
                 outBuffer[spawnedCount] = glowEnt;

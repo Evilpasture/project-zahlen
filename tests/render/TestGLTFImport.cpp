@@ -27,6 +27,7 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <algorithm>
+#include <array>
 #include <cgltf.h>
 #include <cmath>
 #include <cstdint>
@@ -52,6 +53,7 @@ enum class GLTFImportError : uint8_t {
     PartMismatch[[= ZHLN::Description<"Imported mesh parts do not reference the nodes and skins that carry them.">{}]],
     PrefabCacheMismatch[[= ZHLN::Description<"Reloading the same virtual path did not return the cached prefab.">{}]],
     ExtensionMismatch[[= ZHLN::Description<"A Khronos glTF extension was not applied the way the importer documents it.">{}]],
+    EmissiveLightMismatch[[= ZHLN::Description<"Emissive virtual point lights did not follow the prefab they were spawned for.">{}]],
 };
 
 namespace {
@@ -784,6 +786,109 @@ struct GLTFImportTestSuite {
             if (!lightOnly->parts.empty() || !lightOnly->skeletons.empty() || !lightOnly->animations.empty()) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
+            return {};
+        }
+
+        /**
+         * Emission is a surface term, not a light source.
+         *
+         * glTF (and Babylon.js, which mirrors it) says an emissive material
+         * shades itself; it does not illuminate its neighbours. This engine
+         * shades it that way too -- material_model.slang samples the emissive
+         * map times emissiveFactor and basic.slang adds it to the lit result,
+         * where the bloom threshold pass picks up the overbright. So a spawned
+         * neon model must glow with no LightComponent anywhere in the scene.
+         *
+         * SpawnParams::emissiveVirtualLights opts into an extra approximate
+         * bounce light per emissive part. When it is on, that light is a child
+         * of the part entity holding a *local* offset, so it inherits the
+         * part's world transform. It used to be an unparented entity holding a
+         * world position baked at spawn time, which meant every instance left
+         * its lights pooled at the spawn point and went dark the moment it
+         * moved -- that is what the second half of this test pins down.
+         */
+        std::expected<void, ZHLN::Error> emissive_lights_follow_the_prefab_they_belong_to() {
+            const auto engine = ZHLN::Test::Headless::CreateEngine("Headless Emissive Spawn");
+            if (engine == nullptr) {
+                return std::unexpected(GLTFImportError::EngineInitFailed);
+            }
+
+            const std::vector<uint8_t> bytes  = MakeEmissiveStrengthFixture();
+            const ZHLN::ModelPrefab*   prefab = ZHLN::CreativeWorksFactory::LoadModelPrefabFromMemory(*engine, bytes, "emissive_spawn.glb");
+            if (prefab == nullptr || prefab->parts.size() != 1) {
+                return std::unexpected(GLTFImportError::PrefabLoadFailed);
+            }
+
+            auto& registry = engine->GetRegistry();
+
+            const auto lightCount = [&registry] { return registry.GetEntitiesWith<ZHLN::Components::LightComponent>().size(); };
+
+            const size_t lightsBefore = lightCount();
+
+            // 1. The default spawn adds no lights: the glow comes from the
+            //    material, exactly as it would in any other glTF viewer.
+            std::array<ZHLN::Entity, 8> defaultEntities {};
+            const ZHLN::SpawnParams     defaultParams {.position = JPH::RVec3(0.0f, 0.0f, 0.0f)};
+            const uint32_t              defaultSpawned =
+                ZHLN::CreativeWorksFactory::InstantiatePrefab(*engine, *prefab, defaultParams, defaultEntities.data(), static_cast<uint32_t>(defaultEntities.size()));
+            if (defaultSpawned == 0 || lightCount() != lightsBefore) {
+                return std::unexpected(GLTFImportError::EmissiveLightMismatch);
+            }
+
+            // 2. Opting in adds exactly one light for the one emissive part.
+            std::array<ZHLN::Entity, 8> entities {};
+            const JPH::Vec3             spawnPosition(4.0f, 1.0f, -2.0f);
+            const ZHLN::SpawnParams     params {.position = JPH::RVec3(spawnPosition), .emissiveVirtualLights = true};
+            const uint32_t              spawned = ZHLN::CreativeWorksFactory::InstantiatePrefab(*engine, *prefab, params, entities.data(), static_cast<uint32_t>(entities.size()));
+            if (spawned < 3 || lightCount() != lightsBefore + 1) {
+                return std::unexpected(GLTFImportError::EmissiveLightMismatch);
+            }
+
+            // outBuffer order is root, part, glow.
+            const ZHLN::Entity rootEntity = entities[0];
+            const ZHLN::Entity partEntity = entities[1];
+            const ZHLN::Entity glowEntity = entities[2];
+
+            const auto* hierarchy = registry.Get<ZHLN::Components::HierarchyComponent>(glowEntity);
+            if (hierarchy == nullptr || hierarchy->parent != partEntity) {
+                return std::unexpected(GLTFImportError::EmissiveLightMismatch);
+            }
+            if (registry.Get<ZHLN::Components::LightComponent>(glowEntity) == nullptr) {
+                return std::unexpected(GLTFImportError::EmissiveLightMismatch);
+            }
+
+            // The stored transform is a local offset. The triangle's bounds sit
+            // within a unit box at the origin, so a spawn four metres away must
+            // not show up in the light's own TransformComponent.
+            const auto* glowLocal = registry.Get<ZHLN::Components::TransformComponent>(glowEntity);
+            if (glowLocal == nullptr || glowLocal->position.Length() > 2.0f) {
+                return std::unexpected(GLTFImportError::EmissiveLightMismatch);
+            }
+            const JPH::Vec3 localOffset = glowLocal->position;
+
+            ZHLN::Test::Headless::TickFrames(*engine, 1);
+
+            const auto* glowWorld = registry.Get<ZHLN::Components::WorldTransformComponent>(glowEntity);
+            if (glowWorld == nullptr) {
+                return std::unexpected(GLTFImportError::EmissiveLightMismatch);
+            }
+            const JPH::Vec3 restingPosition = glowWorld->world.GetTranslation();
+            if (!restingPosition.IsClose(spawnPosition + localOffset, 0.001f)) {
+                return std::unexpected(GLTFImportError::EmissiveLightMismatch);
+            }
+
+            // 3. Move the prefab root; the light has to move with it by the same
+            //    delta rather than staying behind at the spawn point.
+            const JPH::Vec3 delta(10.0f, 0.0f, 7.0f);
+            registry.Patch<ZHLN::Components::TransformComponent>(rootEntity, [&delta](auto& transform) { transform.position += delta; });
+
+            ZHLN::Test::Headless::TickFrames(*engine, 1);
+
+            const auto* movedWorld = registry.Get<ZHLN::Components::WorldTransformComponent>(glowEntity);
+            if (movedWorld == nullptr || !movedWorld->world.GetTranslation().IsClose(restingPosition + delta, 0.001f)) {
+                return std::unexpected(GLTFImportError::EmissiveLightMismatch);
+            }
+
             return {};
         }
     };
