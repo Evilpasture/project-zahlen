@@ -427,10 +427,14 @@ struct ProceduralAnimationTestSuite {
                 (importedMap.modelTransforms[thighL] * kneeLConstraint->bindRelative * kneeLConstraint->localPoseDelta).GetTranslation();
             const JPH::Vec3 expectedKneeR =
                 (importedMap.modelTransforms[thighR] * kneeRConstraint->bindRelative * kneeRConstraint->localPoseDelta).GetTranslation();
-            const JPH::Vec3 expectedAnkleL =
-                (importedMap.modelTransforms[shinL] * ankleLConstraint->bindRelative * ankleLConstraint->localPoseDelta).GetTranslation();
+            // Ankle constraints use the shin positions after knee constraints are applied.
+            // Knee constraints pin shin translation but preserve rotation.
+            const JPH::Mat44 pinnedShinL = JPH::Mat44::sRotationTranslation(detachedShinL.GetQuaternion(), expectedKneeL);
+            const JPH::Mat44 pinnedShinR = JPH::Mat44::sRotationTranslation(detachedShinR.GetQuaternion(), expectedKneeR);
+            const JPH::Vec3  expectedAnkleL =
+                (pinnedShinL * ankleLConstraint->bindRelative * ankleLConstraint->localPoseDelta).GetTranslation();
             const JPH::Vec3 expectedAnkleR =
-                (importedMap.modelTransforms[shinR] * ankleRConstraint->bindRelative * ankleRConstraint->localPoseDelta).GetTranslation();
+                (pinnedShinR * ankleRConstraint->bindRelative * ankleRConstraint->localPoseDelta).GetTranslation();
 
             // Knee and ankle joints are structural and remain active even when
             // every optional child-of relationship is disabled. They pin position
