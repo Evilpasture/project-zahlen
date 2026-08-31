@@ -213,9 +213,9 @@ struct alignas(64) RigBoneMap {
 struct GaitPreset {
     float strideLength       = 1.60f;
     float stepHeight         = 0.28f;
-    float maxBounceHeight    = 0.045f;
+    float maxBounceHeight    = 0.025f;
     float bounceGravity      = 9.81f;
-    float pelvisSwayScale    = 1.0f;
+    float pelvisSwayScale    = 0.30f;  // Reduced default - human locomotion has minimal sway
     float armSwingScale      = 1.0f;
     float forwardLeanScale   = 1.0f;
     float lateralBankScale   = 1.0f;
