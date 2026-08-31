@@ -28,9 +28,9 @@ import ZHLN.Locomotion;
 import ZHLN.ProceduralAnimation;
 
 enum class ProceduralAnimationTestError : uint32_t {
-    RigMappingFailed[[= ZHLN::Description<"The generated procedural rig did not map all core and secondary controls.">{}]] = 1,
-    GaitInvariantFailed[[= ZHLN::Description<"The distance-driven gait clock or alternating foot phases violated its invariant.">{}]],
-    HairConstraintFailed[[= ZHLN::Description<"The XPBD hair solver produced a non-finite or excessively stretched segment.">{}]],
+    RigMappingFailed[[= ZHLN::Description<"The generated procedural rig did not map all core and secondary controls."> {}]] = 1,
+    GaitInvariantFailed[[= ZHLN::Description<"The distance-driven gait clock or alternating foot phases violated its invariant."> {}]],
+    HairConstraintFailed[[= ZHLN::Description<"The XPBD hair solver produced a non-finite or excessively stretched segment."> {}]],
 };
 
 struct ProceduralAnimationTestSuite {
@@ -427,14 +427,19 @@ struct ProceduralAnimationTestSuite {
                 (importedMap.modelTransforms[thighL] * kneeLConstraint->bindRelative * kneeLConstraint->localPoseDelta).GetTranslation();
             const JPH::Vec3 expectedKneeR =
                 (importedMap.modelTransforms[thighR] * kneeRConstraint->bindRelative * kneeRConstraint->localPoseDelta).GetTranslation();
+<<<<<<< HEAD
             // Ankle constraints use the shin positions after knee constraints are applied.
             // Knee constraints pin shin translation but preserve rotation.
-            const JPH::Mat44 pinnedShinL = JPH::Mat44::sRotationTranslation(detachedShinL.GetQuaternion(), expectedKneeL);
-            const JPH::Mat44 pinnedShinR = JPH::Mat44::sRotationTranslation(detachedShinR.GetQuaternion(), expectedKneeR);
-            const JPH::Vec3  expectedAnkleL =
-                (pinnedShinL * ankleLConstraint->bindRelative * ankleLConstraint->localPoseDelta).GetTranslation();
+            const JPH::Mat44 pinnedShinL    = JPH::Mat44::sRotationTranslation(detachedShinL.GetQuaternion(), expectedKneeL);
+            const JPH::Mat44 pinnedShinR    = JPH::Mat44::sRotationTranslation(detachedShinR.GetQuaternion(), expectedKneeR);
+            const JPH::Vec3  expectedAnkleL = (pinnedShinL * ankleLConstraint->bindRelative * ankleLConstraint->localPoseDelta).GetTranslation();
+            const JPH::Vec3  expectedAnkleR = (pinnedShinR * ankleRConstraint->bindRelative * ankleRConstraint->localPoseDelta).GetTranslation();
+=======
+            const JPH::Vec3 expectedAnkleL =
+                (importedMap.modelTransforms[shinL] * ankleLConstraint->bindRelative * ankleLConstraint->localPoseDelta).GetTranslation();
             const JPH::Vec3 expectedAnkleR =
-                (pinnedShinR * ankleRConstraint->bindRelative * ankleRConstraint->localPoseDelta).GetTranslation();
+                (importedMap.modelTransforms[shinR] * ankleRConstraint->bindRelative * ankleRConstraint->localPoseDelta).GetTranslation();
+>>>>>>> 5c40cd95 (fix tests: update standard_rig_maps_every_control for new ankle constraints)
 
             // Knee and ankle joints are structural and remain active even when
             // every optional child-of relationship is disabled. They pin position
@@ -453,7 +458,11 @@ struct ProceduralAnimationTestSuite {
                 return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
 
+<<<<<<< HEAD
             if (ZHLN::ProceduralAnimation::ApplyChildOfConstraints(importedMap) != 15 || handLConstraint == nullptr || handRConstraint == nullptr ||
+=======
+            if (ZHLN::ProceduralAnimation::ApplyChildOfConstraints(importedMap) != 14 || handLConstraint == nullptr || handRConstraint == nullptr ||
+>>>>>>> 5c40cd95 (fix tests: update standard_rig_maps_every_control for new ankle constraints)
                 ankleLConstraint == nullptr || ankleRConstraint == nullptr || rigidFootLConstraint == nullptr || rigidFootRConstraint == nullptr ||
                 secondaryFootLConstraint == nullptr || secondaryFootRConstraint == nullptr || toeRConstraint == nullptr ||
                 !importedMap.modelTransforms[handL].IsClose(
@@ -1159,8 +1168,7 @@ struct ProceduralAnimationTestSuite {
             // Blend for one frame - parameters should start moving toward target
             constexpr float dt = 1.0f / 60.0f;
             ZHLN::Animation::BlendGaitParameters(gait, dt);
-            if (gait.gaitBlendWeight <= 0.0f || gait.gaitBlendWeight >= 1.0f ||
-                gait.strideLength <= gait.currentPreset.strideLength ||
+            if (gait.gaitBlendWeight <= 0.0f || gait.gaitBlendWeight >= 1.0f || gait.strideLength <= gait.currentPreset.strideLength ||
                 gait.strideLength >= gait.targetPreset.strideLength) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
@@ -1172,8 +1180,7 @@ struct ProceduralAnimationTestSuite {
             // After enough time, parameters should have reached the target.
             // Don't check gaitBlendWeight exactly - it may have cycled through
             // completion and reset multiple times due to floating point accumulation.
-            if (std::abs(gait.strideLength - gait.targetPreset.strideLength) > 0.01f ||
-                std::abs(gait.stepHeight - gait.targetPreset.stepHeight) > 0.01f ||
+            if (std::abs(gait.strideLength - gait.targetPreset.strideLength) > 0.01f || std::abs(gait.stepHeight - gait.targetPreset.stepHeight) > 0.01f ||
                 std::abs(gait.maxBounceHeight - gait.targetPreset.maxBounceHeight) > 0.001f ||
                 std::abs(gait.pelvisSwayScale - gait.targetPreset.pelvisSwayScale) > 0.01f ||
                 std::abs(gait.armSwingScale - gait.targetPreset.armSwingScale) > 0.01f ||
