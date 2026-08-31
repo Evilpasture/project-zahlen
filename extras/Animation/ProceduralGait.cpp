@@ -257,12 +257,10 @@ void EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg velocity, fl
     } else {
         gait.gravityBounce = EvaluateGravityBounce(gait, speed);
         gait.pelvisBob     = gait.gravityBounce;
-        // Scale lateral sway with speed so slow walking doesn't rock side-to-side
-        // as dramatically as running. Ramp from 0 at movement threshold to full
-        // amplitude at ~4 m/s (typical walk-to-run transition speed).
-        // Base amplitude is 2.0cm - human walking has almost no lateral sway.
-        const float swaySpeedFactor = std::min(speed / 4.0f, 1.0f);
-        gait.pelvisSway    = std::sin(kGaitTwoPi * gait.phase) * 0.020f * gait.pelvisSwayScale * swaySpeedFactor;
+        // Completely disable lateral sway for now to diagnose waddling issue.
+        // Human walking has almost no lateral translation - only vertical bob
+        // and pelvis rotation.
+        gait.pelvisSway    = 0.0f;
     }
 
     const float targetForwardLean = std::clamp(-gait.directionalAcceleration.GetZ() * 0.018f * gait.forwardLeanScale, -0.22f, 0.22f);
