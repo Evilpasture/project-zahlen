@@ -682,7 +682,12 @@ void SynchronizeLocomotionTrack(
 
     tracks.passWeight  = 0.5f * (gait.passWeightL + gait.passWeightR);
     tracks.reachWeight = 0.5f * (gait.reachWeightL + gait.reachWeightR);
-    if (moving && tracks.synchronizeToStrideWheel) {
+    
+    // Disable stride synchronization for walking to test if it's causing waddling.
+    // At walking speed, the stride-synced animation timing might cause visible
+    // speed variations within each stride cycle. Running is fast enough that
+    // these variations are less noticeable.
+    if (moving && tracks.synchronizeToStrideWheel && running) {
         const float wheelPhase = gait.phase;
         // Two authored keys represent opposing reach poses. Ping-pong across
         // the stride wheel makes pass occur halfway between them and returns to
