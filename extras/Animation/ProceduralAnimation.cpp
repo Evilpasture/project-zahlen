@@ -611,6 +611,7 @@ void SynchronizeLocomotionTrack(
         animator.currentTrackIdx   = desiredTrack;
         animator.currentTrackTime  = 0.0f;
         animator.blendFactor       = 0.0f;
+        animator.blendDuration     = 0.25f; // Cross-fade over 0.25 seconds
         animator.isFinished        = false;
     }
 
