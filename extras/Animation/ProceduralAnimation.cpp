@@ -2044,19 +2044,17 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
         // Apply debug overrides to selectively disable gait systems
         if (kDisableGaitBounce) {
             gait->pelvisBob = 0.0f;
-            gait->pelvisBobVelocity = 0.0f;
         }
         if (kDisableGaitSway) {
             gait->pelvisSway = 0.0f;
-            gait->pelvisSwayVelocity = 0.0f;
         }
         if (kDisableGaitLean) {
             gait->forwardLean = 0.0f;
-            gait->forwardLeanVelocity = 0.0f;
+            gait->tiltPitchVelocity = 0.0f;
         }
         if (kDisableGaitBank) {
             gait->lateralBank = 0.0f;
-            gait->lateralBankVelocity = 0.0f;
+            gait->tiltRollVelocity = 0.0f;
         }
 
         // Advance the stride wheel before sampling locomotion clips so the two
