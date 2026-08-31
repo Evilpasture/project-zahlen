@@ -1764,6 +1764,13 @@ size_t ProceduralAnimation::ApplyChildOfConstraints(
                 const JPH::Vec3 jointPosition =
                     (boneMap.modelTransforms[constraint.parent] * constraint.bindRelative * constraint.localPoseDelta).GetTranslation();
                 constrainedChild.SetTranslation(jointPosition);
+            } else if (kind == RigChildOfKind::Hand && !IsNodeDescendant(boneMap, constraint.child, constraint.parent)) {
+                // Detached hand: pin rigidly to forearm at bind-time offset.
+                // The cross-fade blends local transforms in the hand's actual
+                // parent space (not the forearm's), producing wrong model-space
+                // positions. Ignore the authored pose delta and use the bind
+                // offset directly so the hand always follows the forearm.
+                constrainedChild = boneMap.modelTransforms[constraint.parent] * constraint.bindRelative;
             } else {
                 constrainedChild = boneMap.modelTransforms[constraint.parent] * constraint.bindRelative * constraint.localPoseDelta;
             }
