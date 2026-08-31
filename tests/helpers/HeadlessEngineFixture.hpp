@@ -165,6 +165,15 @@ private:
 /// held are dead rather than dangling. InitializeDefaultScene re-registers the
 /// component families (idempotent), recreates the camera and settings
 /// singletons, and rebuilds the system graphs and frame scheduler.
+///
+/// "Rebuilds" is load-bearing, and is what
+/// scene_reset_rebuilds_engine_state_instead_of_accumulating_it pins:
+/// BuildSystemGraphs clears both graphs first, because appending instead left
+/// one duplicate of every system per reset -- and duplicates of a system that
+/// declares no conflicting access (TextureSystem, CullingSystem, DecalSystem)
+/// get scheduled concurrently with each other. Device-level state built by
+/// InitializeDefaultScene, the font atlas so far, is built once by the engine
+/// and copied into the new scene rather than remade here.
 inline void ResetScene(ZHLN::Engine& engine) {
     engine.GetRegistry().Clear();
     engine.InitializeDefaultScene();

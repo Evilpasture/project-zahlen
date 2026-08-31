@@ -7,6 +7,7 @@
 #include <atomic>
 #include <iterator>
 #include <mutex>
+#include <optional>
 #include <thread>
 #include <vector>
 // clang-format off
@@ -194,6 +195,14 @@ struct EngineImpl {
     JPH::Array<Entity>                        visibleEntities;
     JPH::Array<Entity>                        visibleShadowEntities;
     float                                     currentAlpha = 0.0f;
+
+    // Built once per engine, not once per scene: the glyph packing costs a
+    // fontconfig scan plus 96 SDF rasterisations, and the upload burns a
+    // 1024x1024 bindless texture that nothing ever releases. The scene owns a
+    // *copy* in UISettingsComponent, which Registry::Clear() throws away, so
+    // the engine keeps the authoritative one and re-seeds each new scene from
+    // it. See InitializeDefaultScene.
+    std::optional<FontAtlas> fontAtlas;
 
     void*        gameState    = nullptr;
     uint64_t     frameCounter = 0;
@@ -415,6 +424,19 @@ void BuildFrameScheduler(Engine& engine) {
 void BuildSystemGraphs(Engine& engine) {
     auto& updateGraph = engine.GetUpdateGraph();
     auto& renderGraph = engine.GetRenderGraph();
+
+    // Rebuild, never append. InitializeDefaultScene is called again whenever a
+    // scene is reset on a live engine (the GPU test pool does exactly that),
+    // and without this the graphs accumulate a second, third, ... copy of every
+    // system. Duplicates are not merely slow: Compile() only orders nodes that
+    // conflict, so a system with a read-only or empty access pattern --
+    // TextureSystem, CullingSystem, DecalSystem -- has no edge to its own
+    // duplicate and the copies are dispatched to run *concurrently* over the
+    // same engine state. That is a data race on whatever they fill in, and it
+    // shows up much later as a corrupted allocator heap.
+    // BuildFrameScheduler has always cleared for the same reason.
+    updateGraph.Clear();
+    renderGraph.Clear();
 
     using namespace ZHLN::ECS;
 
@@ -1018,7 +1040,22 @@ auto Engine::InitializeDefaultScene() -> bool {
 
     reg.Create(Components::UISettingsComponent {});
 
-    CreativeWorksFactory::CreateFontAtlasTexture(rc, reg);
+    // The atlas is device state, so it survives the scene it was first built
+    // for; only the component-side copy is re-seeded. Rebuilding it per scene
+    // leaked a 1024x1024 texture and a full fontconfig config every time.
+    if (_impl->fontAtlas.has_value()) {
+        if (auto* uiSettings = reg.GetSingleton<Components::UISettingsComponent>(); uiSettings != nullptr) {
+            uiSettings->fontAtlas        = *_impl->fontAtlas;
+            uiSettings->defaultFontAtlas = _impl->fontAtlas->texture;
+        }
+    } else {
+        CreativeWorksFactory::CreateFontAtlasTexture(rc, reg);
+        if (const auto* uiSettings = reg.GetSingleton<Components::UISettingsComponent>();
+            uiSettings != nullptr && uiSettings->fontAtlas.texture != TextureHandle::Invalid) {
+            _impl->fontAtlas = uiSettings->fontAtlas;
+        }
+    }
+
     BuildSystemGraphs(*this);
     BuildFrameScheduler(*this);
     return true;

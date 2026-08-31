@@ -155,6 +155,70 @@ struct RenderPipelinesTestSuite {
         }
 
         // ====================================================================
+        // Scene Reset Is A Rebuild, Not An Append
+        // ====================================================================
+        //
+        // InitializeDefaultScene is called again every time the pool hands a
+        // reused engine to the next test. BuildSystemGraphs used to push its
+        // systems onto whatever was already in the graphs, so a thirty-test
+        // binary ended up with thirty TextureSystems, thirty CullingSystems and
+        // thirty DecalSystems. Compile() only orders nodes whose access
+        // patterns conflict, and those three declare nothing or reads only --
+        // so the duplicates had no edges between them and were dispatched to
+        // run concurrently over the same engine state. It surfaced as a
+        // SIGSEGV deep inside the allocator, in whatever unlucky call site
+        // allocated next.
+        //
+        // The font atlas is the same shape of bug without the race: a fresh
+        // 1024x1024 bindless texture (and a fresh fontconfig config) per reset,
+        // none of them released. It is device state now, built once and copied
+        // into each new scene's UISettingsComponent.
+        std::expected<void, ZHLN::Error> scene_reset_rebuilds_engine_state_instead_of_accumulating_it() {
+            auto engine = ZHLN::Test::Headless::AcquireEngine("LocalGPUSceneResetTest", 320, 240);
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return {};
+            }
+
+            const size_t updateSystems = engine->GetUpdateGraph().GetSystemCount();
+            const size_t renderSystems = engine->GetRenderGraph().GetSystemCount();
+            ZHLN::Test::ExpectTrue(updateSystems > 0);
+            ZHLN::Test::ExpectTrue(renderSystems > 0);
+
+            const auto* firstUI = engine->GetRegistry().GetSingleton<ZHLN::Components::UISettingsComponent>();
+            if (!ZHLN::Test::ExpectTrue(firstUI != nullptr)) {
+                return {};
+            }
+            const ZHLN::TextureHandle atlas = firstUI->defaultFontAtlas;
+            // 'A' is glyph 33 of the 96 printable ASCII codepoints the atlas
+            // packs, and it is never an empty box, so a zero-area entry means
+            // the metrics were not carried over.
+            const ZHLN::GlyphMetric glyphA = firstUI->fontAtlas.glyphs['A' - 32];
+            ZHLN::Test::ExpectTrue(glyphA.x1 > glyphA.x0);
+
+            for (uint32_t pass = 0; pass < 3; ++pass) {
+                ZHLN::Test::Headless::ResetScene(*engine);
+
+                ZHLN::Test::ExpectEq(engine->GetUpdateGraph().GetSystemCount(), updateSystems);
+                ZHLN::Test::ExpectEq(engine->GetRenderGraph().GetSystemCount(), renderSystems);
+
+                const auto* ui = engine->GetRegistry().GetSingleton<ZHLN::Components::UISettingsComponent>();
+                if (ZHLN::Test::ExpectTrue(ui != nullptr)) {
+                    // Same atlas, and the glyph table came with it: the new
+                    // scene is seeded from the engine's copy rather than
+                    // rebuilt or left blank.
+                    ZHLN::Test::ExpectTrue(ui->defaultFontAtlas == atlas);
+                    ZHLN::Test::ExpectTrue(ui->fontAtlas.texture == atlas);
+                    ZHLN::Test::ExpectTrue(ui->fontAtlas.glyphs['A' - 32].x1 == glyphA.x1);
+                }
+
+                // And the rebuilt frame still runs.
+                ZHLN::Test::Headless::TickFrames(*engine, 2);
+            }
+
+            return {};
+        }
+
+        // ====================================================================
         // One Engine At A Time
         // ====================================================================
         //
