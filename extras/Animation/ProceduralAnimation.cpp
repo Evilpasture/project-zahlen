@@ -603,9 +603,9 @@ void SynchronizeLocomotionTrack(
         constexpr GaitPreset kWalkPreset {
             .strideLength     = 1.60f,
             .stepHeight       = 0.28f,
-            .maxBounceHeight  = 0.045f,
+            .maxBounceHeight  = 0.025f,  // Reduced from 0.045f
             .bounceGravity    = 9.81f,
-            .pelvisSwayScale  = 0.30f,  // Minimal sway for walking
+            .pelvisSwayScale  = 0.10f,   // Almost no lateral sway for walking
             .armSwingScale    = 1.0f,
             .forwardLeanScale = 1.0f,
             .lateralBankScale = 1.0f,

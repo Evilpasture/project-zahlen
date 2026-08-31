@@ -260,8 +260,9 @@ void EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg velocity, fl
         // Scale lateral sway with speed so slow walking doesn't rock side-to-side
         // as dramatically as running. Ramp from 0 at movement threshold to full
         // amplitude at ~4 m/s (typical walk-to-run transition speed).
+        // Base amplitude is 2.0cm - human walking has almost no lateral sway.
         const float swaySpeedFactor = std::min(speed / 4.0f, 1.0f);
-        gait.pelvisSway    = std::sin(kGaitTwoPi * gait.phase) * 0.035f * gait.pelvisSwayScale * swaySpeedFactor;
+        gait.pelvisSway    = std::sin(kGaitTwoPi * gait.phase) * 0.020f * gait.pelvisSwayScale * swaySpeedFactor;
     }
 
     const float targetForwardLean = std::clamp(-gait.directionalAcceleration.GetZ() * 0.018f * gait.forwardLeanScale, -0.22f, 0.22f);
