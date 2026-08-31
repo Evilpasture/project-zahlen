@@ -28,10 +28,10 @@ namespace ZHLN::Scene {
 
 namespace {
 
-/// The only conversion the schema needs a helper for. JPH::Vec3 and JPH::Vec4
-/// construct from Float3/Float4 directly, but RVec3 is DVec3 in a
-/// JPH_DOUBLE_PRECISION build and Vec3 in every other one, and only the widen
-/// -through-Vec3 spelling compiles in both.
+/// The only conversion the schema needs a helper for. JPH::Vec3 constructs
+/// from a Float3 and JPH::Vec4 loads a Float4, but RVec3 is DVec3 in a
+/// JPH_DOUBLE_PRECISION build (which this one is) and Vec3 in every other,
+/// and only the widen-through-Vec3 spelling compiles in both.
 [[nodiscard]] auto ToRVec3(const JPH::Float3& v) noexcept -> JPH::RVec3 {
     return JPH::RVec3 {JPH::Vec3 {v}};
 }
@@ -52,7 +52,7 @@ namespace {
 
         .roughness = entity.material.roughness,
         .metallic  = entity.material.metallic,
-        .color     = JPH::Vec4 {entity.material.baseColor}
+        .color     = JPH::Vec4::sLoadFloat4(&entity.material.baseColor)
     };
 }
 
@@ -130,7 +130,7 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
                 break;
             }
             case ShapeKind::Plane: {
-                const Entity created = CreativeWorksFactory::CreatePlane(engine, entity.extent, JPH::Vec4 {entity.material.baseColor}, params);
+                const Entity created = CreativeWorksFactory::CreatePlane(engine, entity.extent, JPH::Vec4::sLoadFloat4(&entity.material.baseColor), params);
                 NameEntity(registry, created, entity.name);
                 instance.entities.push_back(created);
                 break;
