@@ -12,6 +12,10 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+// Engine.hpp only forward-declares SystemGraph; the scene-reset test calls
+// GetSystemCount() on the graphs Engine hands out.
+#include <Zahlen/ecs/SystemGraph.hpp>
+#include <cstddef>
 #include <expected>
 
 struct RenderPipelinesTestSuite {
