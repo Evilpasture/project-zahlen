@@ -585,11 +585,11 @@ void SynchronizeLocomotionTrack(
             .lateralBankScale = 1.20f,
         };
         const GaitPreset& desiredPreset = running ? kRunPreset : kWalkPreset;
-        // Check if the current blended parameters differ from the desired preset.
-        // This triggers a blend even on the first transition or when interrupting
-        // an ongoing blend.
-        if (std::abs(desiredPreset.strideLength - gait.strideLength) > 0.01f ||
-            std::abs(desiredPreset.stepHeight - gait.stepHeight) > 0.01f) {
+        // Only trigger a new blend when the target preset changes (walk <-> run).
+        // Don't check current parameters - during a blend they're intentionally
+        // different from both presets as they interpolate.
+        if (std::abs(desiredPreset.strideLength - gait.targetPreset.strideLength) > 0.01f ||
+            std::abs(desiredPreset.stepHeight - gait.targetPreset.stepHeight) > 0.01f) {
             // Snapshot the current blended state as the new starting point so
             // walk -> run -> walk transitions chain without popping.
             gait.currentPreset   = GaitPreset {
