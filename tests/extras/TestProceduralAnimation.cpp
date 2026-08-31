@@ -315,7 +315,7 @@ struct ProceduralAnimationTestSuite {
 
             ZHLN::RigBoneMap importedMap;
             if (!ZHLN::BuildBoneMap(prefab, skeleton, importedMap) || importedMap.parentIndices[malformedNode] != ZHLN::InvalidRigNode ||
-                importedMap.childOfConstraintCount != 14 || importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Spine)] != 3 ||
+                importedMap.childOfConstraintCount != 15 || importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Spine)] != 3 ||
                 importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::SupSpine)] != 2 ||
                 importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::UpperArmL)] != 8 ||
                 importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ForearmL)] != 7 ||
@@ -453,7 +453,7 @@ struct ProceduralAnimationTestSuite {
                 return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
 
-            if (ZHLN::ProceduralAnimation::ApplyChildOfConstraints(importedMap) != 14 || handLConstraint == nullptr || handRConstraint == nullptr ||
+            if (ZHLN::ProceduralAnimation::ApplyChildOfConstraints(importedMap) != 15 || handLConstraint == nullptr || handRConstraint == nullptr ||
                 ankleLConstraint == nullptr || ankleRConstraint == nullptr || rigidFootLConstraint == nullptr || rigidFootRConstraint == nullptr ||
                 secondaryFootLConstraint == nullptr || secondaryFootRConstraint == nullptr || toeRConstraint == nullptr ||
                 !importedMap.modelTransforms[handL].IsClose(
