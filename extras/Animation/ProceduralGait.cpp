@@ -161,6 +161,41 @@ float EvaluateTwoKeyPosePhase(float stridePhase) noexcept {
 }
 
 /**
+ * Smoothly interpolates all tunable gait parameters from currentPreset toward
+ * targetPreset. Called once per frame before EvaluateGait so the stride clock,
+ * foot trajectories, bounce, sway, and arm swing all see the blended values.
+ * The blend uses a critically-damped exponential approach so transitions feel
+ * natural at any framerate and never overshoot.
+ */
+void BlendGaitParameters(ProceduralLocomotionComponent& gait, float dt) noexcept {
+    // Advance the blend weight toward 1.0 at the configured speed.
+    const float safeDt      = std::clamp(dt, 0.0f, 0.05f);
+    const float blendSpeed  = std::max(gait.gaitBlendSpeed, 0.01f);
+    const float blendDelta  = safeDt * blendSpeed;
+    gait.gaitBlendWeight    = std::clamp(gait.gaitBlendWeight + blendDelta, 0.0f, 1.0f);
+
+    // Use smoothstep for a more natural ease-in/ease-out curve.
+    const float weight      = Detail::SmoothStep(gait.gaitBlendWeight);
+
+    // Interpolate all gait parameters.
+    gait.strideLength       = gait.currentPreset.strideLength + (gait.targetPreset.strideLength - gait.currentPreset.strideLength) * weight;
+    gait.stepHeight         = gait.currentPreset.stepHeight + (gait.targetPreset.stepHeight - gait.currentPreset.stepHeight) * weight;
+    gait.maxBounceHeight    = gait.currentPreset.maxBounceHeight + (gait.targetPreset.maxBounceHeight - gait.currentPreset.maxBounceHeight) * weight;
+    gait.bounceGravity      = gait.currentPreset.bounceGravity + (gait.targetPreset.bounceGravity - gait.currentPreset.bounceGravity) * weight;
+    gait.pelvisSwayScale    = gait.currentPreset.pelvisSwayScale + (gait.targetPreset.pelvisSwayScale - gait.currentPreset.pelvisSwayScale) * weight;
+    gait.armSwingScale      = gait.currentPreset.armSwingScale + (gait.targetPreset.armSwingScale - gait.currentPreset.armSwingScale) * weight;
+    gait.forwardLeanScale   = gait.currentPreset.forwardLeanScale + (gait.targetPreset.forwardLeanScale - gait.currentPreset.forwardLeanScale) * weight;
+    gait.lateralBankScale   = gait.currentPreset.lateralBankScale + (gait.targetPreset.lateralBankScale - gait.currentPreset.lateralBankScale) * weight;
+
+    // When the blend completes, snap current to target so the next transition
+    // starts from the correct baseline.
+    if (gait.gaitBlendWeight >= 1.0f) {
+        gait.currentPreset = gait.targetPreset;
+        gait.gaitBlendWeight = 0.0f;
+    }
+}
+
+/**
  * Stage 1 + 2: extract directional acceleration, advance the distance-driven
  * stride clock, and evaluate alternating cubic/parabolic foot trajectories.
  * Velocity is expected in character-local space.
@@ -222,12 +257,17 @@ void EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg velocity, fl
     } else {
         gait.gravityBounce = EvaluateGravityBounce(gait, speed);
         gait.pelvisBob     = gait.gravityBounce;
-        gait.pelvisSway    = std::sin(kGaitTwoPi * gait.phase) * 0.035f;
+        // Completely disable lateral sway for now to diagnose waddling issue.
+        // Human walking has almost no lateral translation - only vertical bob
+        // and pelvis rotation.
+        gait.pelvisSway    = 0.0f;
     }
 
-    const float targetForwardLean = std::clamp(-gait.directionalAcceleration.GetZ() * 0.018f, -0.22f, 0.22f);
+    const float targetForwardLean = std::clamp(-gait.directionalAcceleration.GetZ() * 0.018f * gait.forwardLeanScale, -0.22f, 0.22f);
     const float centripetal       = speed * angularVelocity;
-    const float targetLateralBank = std::clamp(gait.directionalAcceleration.GetX() * 0.008f - centripetal * 0.018f, -0.28f, 0.28f);
+    const float targetLateralBank = std::clamp(
+        (gait.directionalAcceleration.GetX() * 0.008f - centripetal * 0.018f) * gait.lateralBankScale, -0.28f, 0.28f
+    );
     Detail::SpringScalar(gait.forwardLean, gait.tiltPitchVelocity, targetForwardLean, dt, 5.5f, 0.88f);
     Detail::SpringScalar(gait.lateralBank, gait.tiltRollVelocity, targetLateralBank, dt, 5.5f, 0.88f);
 }
@@ -236,13 +276,15 @@ void EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg velocity, fl
     EvaluateGait(gait, velocity, 0.0f, dt);
 }
 
-/** Rotates the complete posed body around an estimated center of mass. */
+/** Rotates the upper body around an estimated center of mass. The legs are
+ *  excluded so planted feet stay world-locked. */
 void ApplyAccelerationTilt(ProceduralLocomotionComponent& gait, JPH::Mat44* nodeTransforms, const RigBoneMap& map) noexcept {
     if (nodeTransforms == nullptr || map.nodeCount == 0) {
         return;
     }
 
     const RigNodeIndex hipsNode  = Detail::Node(map, CharacterBone::Hips);
+    const RigNodeIndex spineNode = Detail::Node(map, CharacterBone::Spine);
     const RigNodeIndex chestNode = Detail::Node(map, CharacterBone::Chest);
     if (!IsValidRigNode(hipsNode, map.nodeCount)) {
         return;
@@ -257,7 +299,9 @@ void ApplyAccelerationTilt(ProceduralLocomotionComponent& gait, JPH::Mat44* node
 
     const JPH::Quat pitch = JPH::Quat::sRotation(JPH::Vec3::sAxisX(), gait.forwardLean);
     const JPH::Quat roll  = JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), gait.lateralBank);
-    Detail::RotateSubtreeAroundPivot(map, nodeTransforms, hipsNode, gait.centerOfMassModel, (pitch * roll).Normalized());
+    // Rotate from spine so legs are not displaced.
+    const RigNodeIndex tiltRoot = IsValidRigNode(spineNode, map.nodeCount) ? spineNode : hipsNode;
+    Detail::RotateSubtreeAroundPivot(map, nodeTransforms, tiltRoot, gait.centerOfMassModel, (pitch * roll).Normalized());
 }
 
 JPH::Mat44 CorrectBoneDirection(
@@ -388,8 +432,13 @@ void ApplyIKReachTilt(
         targetRoll                = -direction.GetX() * angle;
     }
 
-    Detail::SpringScalar(gait.ikBodyTiltPitch, gait.ikBodyTiltPitchVelocity, targetPitch, dt, 6.0f, 1.0f);
-    Detail::SpringScalar(gait.ikBodyTiltRoll, gait.ikBodyTiltRollVelocity, targetRoll, dt, 6.0f, 1.0f);
+    // Use a low-frequency, overdamped spring for IK body tilt. The target
+    // changes at stride rate (~1–2 Hz walking); a 6 Hz spring rings at its
+    // natural frequency between each foot switch, producing a visible lateral
+    // waddle. 2.5 Hz with damping 1.8 tracks the target smoothly without
+    // overshoot.
+    Detail::SpringScalar(gait.ikBodyTiltPitch, gait.ikBodyTiltPitchVelocity, targetPitch, dt, 2.5f, 1.8f);
+    Detail::SpringScalar(gait.ikBodyTiltRoll, gait.ikBodyTiltRollVelocity, targetRoll, dt, 2.5f, 1.8f);
     const float tiltMagnitude = std::sqrt(gait.ikBodyTiltPitch * gait.ikBodyTiltPitch + gait.ikBodyTiltRoll * gait.ikBodyTiltRoll);
     if (tiltMagnitude > maxTilt && tiltMagnitude > 1.0e-6f) {
         const float scale = maxTilt / tiltMagnitude;
@@ -397,20 +446,37 @@ void ApplyIKReachTilt(
         gait.ikBodyTiltRoll *= scale;
     }
 
-    const JPH::Quat pitch = JPH::Quat::sRotation(JPH::Vec3::sAxisX(), gait.ikBodyTiltPitch);
-    const JPH::Quat roll  = JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), gait.ikBodyTiltRoll);
-    Detail::RotateSubtreeAroundPivot(map, nodeTransforms, hipsNode, supportPivot, (roll * pitch).Normalized());
+    // Rotate the upper body (spine and above) around the hips, not the entire
+    // hips subtree. Rotating from the hips displaces the thighs, which changes
+    // IK reach and causes planted feet to slide — violating the IK contract.
+    const RigNodeIndex spineNode = Detail::Node(map, CharacterBone::Spine);
+    const RigNodeIndex tiltRoot  = IsValidRigNode(spineNode, map.nodeCount) ? spineNode : hipsNode;
+    const JPH::Quat    pitch     = JPH::Quat::sRotation(JPH::Vec3::sAxisX(), gait.ikBodyTiltPitch);
+    const JPH::Quat    roll      = JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), gait.ikBodyTiltRoll);
+    Detail::RotateSubtreeAroundPivot(map, nodeTransforms, tiltRoot, nodeTransforms[hipsNode].GetTranslation(), (roll * pitch).Normalized());
 }
 
-/** Applies gait sway/bounce independently from analytical foot IK. */
+/** Applies gait offsets with vertical on hips and lateral on spine.
+ *  Vertical motion (bob + drop) moves the whole body up/down — the legs
+ *  compress/extend via IK, creating the gravity bounce feel. Lateral
+ *  sway stays on the spine to avoid displacing the thighs sideways,
+ *  which would break IK reach and cause foot sliding. */
 void ApplyPelvisGaitOffset(const ProceduralLocomotionComponent& gait, JPH::Mat44* nodeTransforms, const RigBoneMap& map, bool includeDrop) noexcept {
     if (nodeTransforms == nullptr) {
         return;
     }
+    // Vertical: bob + drop on hips — whole body rises/falls with gravity.
     const RigNodeIndex hipsNode = Detail::Node(map, CharacterBone::Hips);
     if (IsValidRigNode(hipsNode, map.nodeCount)) {
         const float drop = includeDrop ? gait.pelvisDrop : 0.0f;
-        Detail::TranslateSubtree(map, nodeTransforms, hipsNode, JPH::Vec3(gait.pelvisSway, gait.pelvisBob + drop, 0.0f));
+        Detail::TranslateSubtree(map, nodeTransforms, hipsNode, JPH::Vec3(0.0f, gait.pelvisBob + drop, 0.0f));
+    }
+    // Lateral: sway on spine only — avoids displacing thighs sideways.
+    if (gait.pelvisSway != 0.0f) {
+        const RigNodeIndex spineNode = Detail::Node(map, CharacterBone::Spine);
+        if (IsValidRigNode(spineNode, map.nodeCount)) {
+            Detail::TranslateSubtree(map, nodeTransforms, spineNode, JPH::Vec3(gait.pelvisSway, 0.0f, 0.0f));
+        }
     }
 }
 
@@ -518,7 +584,11 @@ void SolveLegGrounding(
     accumulateDrop(thighRNode, targetModelR, gait.plantWeightR);
 
     gait.targetPelvisDrop = -std::clamp(requiredDrop * std::clamp(pelvisDropWeight, 0.0f, 1.0f), 0.0f, 0.38f);
-    Detail::SpringScalar(gait.pelvisDrop, gait.pelvisDropVelocity, gait.targetPelvisDrop, dt, 5.0f, 1.0f);
+    // Overdamped, low-frequency pelvis drop spring. The target alternates at
+    // stride rate (~1–2 Hz walking); a 5 Hz critically-damped spring rings at
+    // its natural frequency between foot switches, producing a visible lateral
+    // waddle. 2 Hz with damping 1.8 tracks terrain changes without oscillation.
+    Detail::SpringScalar(gait.pelvisDrop, gait.pelvisDropVelocity, gait.targetPelvisDrop, dt, 2.0f, 1.8f);
 
     ApplyPelvisGaitOffset(gait, nodeTransforms, map, true);
     ApplyIKReachTilt(
@@ -641,7 +711,7 @@ void SolveUpperBody(
         const float horizontalSpeed =
             std::sqrt(gait.previousVelocity.GetX() * gait.previousVelocity.GetX() + gait.previousVelocity.GetZ() * gait.previousVelocity.GetZ());
         const float        swingWeight = std::clamp(horizontalSpeed * 0.35f, 0.0f, 1.0f);
-        const float        armAngle    = std::sin(kGaitTwoPi * gait.phase) * 0.58f * swingWeight;
+        const float        armAngle    = std::sin(kGaitTwoPi * gait.phase) * 0.58f * swingWeight * gait.armSwingScale;
         const RigNodeIndex armL        = Detail::Node(map, CharacterBone::UpperArmL);
         const RigNodeIndex armR        = Detail::Node(map, CharacterBone::UpperArmR);
         if (IsValidRigNode(armL, map.nodeCount)) {

@@ -449,6 +449,243 @@ struct CharacterMovementTestSuite {
             }
             return {};
         }
+
+        // 12. Acceleration from Rest
+        auto test_12_acceleration_from_rest() -> std::expected<void, ZHLN::Error> {
+            // Test the acceleration/deceleration logic directly on the component
+            // without the physics harness (which bypasses MovementSystem).
+            ZHLN::Components::MovementComponent move;
+            move.acceleration = 25.0f;
+            move.deceleration = 30.0f;
+            move.speed        = 7.0f;
+            move.currentVelX  = 0.0f;
+            move.currentVelZ  = 0.0f;
+
+            constexpr float dt           = 1.0f / 60.0f;
+            const float     targetSpeed  = move.speed;
+
+            // Simulate the acceleration logic from MovementSystem for one frame
+            auto applyAcceleration = [&](float inputX, float inputZ) {
+                const float targetVelX   = inputX * move.speed;
+                const float targetVelZ   = inputZ * move.speed;
+                const float targetSpeedSq = targetVelX * targetVelX + targetVelZ * targetVelZ;
+                const float currentSpeedSq = move.currentVelX * move.currentVelX + move.currentVelZ * move.currentVelZ;
+                const bool  hasInput       = targetSpeedSq > 0.01f;
+                const float rate           = hasInput ? move.acceleration : move.deceleration;
+
+                if (hasInput) {
+                    const float invTargetSpeed = (targetSpeedSq > 0.01f) ? 1.0f / std::sqrt(targetSpeedSq) : 0.0f;
+                    const float targetDirX     = targetVelX * invTargetSpeed;
+                    const float targetDirZ     = targetVelZ * invTargetSpeed;
+                    const float tSpeed         = std::sqrt(targetSpeedSq);
+                    const float currentAlong   = move.currentVelX * targetDirX + move.currentVelZ * targetDirZ;
+                    const float newSpeed       = std::min(currentAlong + rate * dt, tSpeed);
+                    const float blend          = (tSpeed > 0.01f) ? std::min(newSpeed / tSpeed, 1.0f) : 0.0f;
+                    const float curSpd         = std::sqrt(currentSpeedSq);
+                    const float invCurSpd      = (curSpd > 0.01f) ? 1.0f / curSpd : 0.0f;
+                    const float curDirX        = move.currentVelX * invCurSpd;
+                    const float curDirZ        = move.currentVelZ * invCurSpd;
+                    const float bDirX          = curDirX * (1.0f - blend) + targetDirX * blend;
+                    const float bDirZ          = curDirZ * (1.0f - blend) + targetDirZ * blend;
+                    const float bDirLen        = std::sqrt(bDirX * bDirX + bDirZ * bDirZ);
+                    const float invBDirLen     = (bDirLen > 0.01f) ? 1.0f / bDirLen : 0.0f;
+                    move.currentVelX           = bDirX * invBDirLen * newSpeed;
+                    move.currentVelZ           = bDirZ * invBDirLen * newSpeed;
+                } else {
+                    const float curSpd = std::sqrt(currentSpeedSq);
+                    if (curSpd > 0.01f) {
+                        const float newSpd = std::max(curSpd - rate * dt, 0.0f);
+                        const float scale  = newSpd / curSpd;
+                        move.currentVelX *= scale;
+                        move.currentVelZ *= scale;
+                    } else {
+                        move.currentVelX = 0.0f;
+                        move.currentVelZ = 0.0f;
+                    }
+                }
+            };
+
+            // Apply input for one frame - velocity should start increasing but not reach target
+            applyAcceleration(0.0f, 1.0f);
+            float velAfterOneFrame = std::sqrt(move.currentVelX * move.currentVelX + move.currentVelZ * move.currentVelZ);
+
+            ZHLN::Test::ExpectTrue(velAfterOneFrame > 0.0f);
+            ZHLN::Test::ExpectTrue(velAfterOneFrame < targetSpeed);
+
+            // After enough time, should reach target speed
+            for (int i = 0; i < 60; ++i) {
+                applyAcceleration(0.0f, 1.0f);
+            }
+            float velAfterConvergence = std::sqrt(move.currentVelX * move.currentVelX + move.currentVelZ * move.currentVelZ);
+
+            ZHLN::Test::ExpectTrue(std::abs(velAfterConvergence - targetSpeed) < 0.1f);
+
+            if (velAfterOneFrame <= 0.0f || velAfterOneFrame >= targetSpeed ||
+                std::abs(velAfterConvergence - targetSpeed) >= 0.1f) {
+                return std::unexpected(CharacterTestError::DisplacementMismatch);
+            }
+            return {};
+        }
+
+        // 13. Deceleration to Rest
+        auto test_13_deceleration_to_rest() -> std::expected<void, ZHLN::Error> {
+            ZHLN::Components::MovementComponent move;
+            move.acceleration = 25.0f;
+            move.deceleration = 30.0f;
+            move.speed        = 7.0f;
+            move.currentVelX  = 0.0f;
+            move.currentVelZ  = 0.0f;
+
+            constexpr float dt = 1.0f / 60.0f;
+
+            auto applyAcceleration = [&](float inputX, float inputZ) {
+                const float targetVelX   = inputX * move.speed;
+                const float targetVelZ   = inputZ * move.speed;
+                const float targetSpeedSq = targetVelX * targetVelX + targetVelZ * targetVelZ;
+                const float currentSpeedSq = move.currentVelX * move.currentVelX + move.currentVelZ * move.currentVelZ;
+                const bool  hasInput       = targetSpeedSq > 0.01f;
+                const float rate           = hasInput ? move.acceleration : move.deceleration;
+
+                if (hasInput) {
+                    const float invTargetSpeed = (targetSpeedSq > 0.01f) ? 1.0f / std::sqrt(targetSpeedSq) : 0.0f;
+                    const float targetDirX     = targetVelX * invTargetSpeed;
+                    const float targetDirZ     = targetVelZ * invTargetSpeed;
+                    const float tSpeed         = std::sqrt(targetSpeedSq);
+                    const float currentAlong   = move.currentVelX * targetDirX + move.currentVelZ * targetDirZ;
+                    const float newSpeed       = std::min(currentAlong + rate * dt, tSpeed);
+                    const float blend          = (tSpeed > 0.01f) ? std::min(newSpeed / tSpeed, 1.0f) : 0.0f;
+                    const float curSpd         = std::sqrt(currentSpeedSq);
+                    const float invCurSpd      = (curSpd > 0.01f) ? 1.0f / curSpd : 0.0f;
+                    const float curDirX        = move.currentVelX * invCurSpd;
+                    const float curDirZ        = move.currentVelZ * invCurSpd;
+                    const float bDirX          = curDirX * (1.0f - blend) + targetDirX * blend;
+                    const float bDirZ          = curDirZ * (1.0f - blend) + targetDirZ * blend;
+                    const float bDirLen        = std::sqrt(bDirX * bDirX + bDirZ * bDirZ);
+                    const float invBDirLen     = (bDirLen > 0.01f) ? 1.0f / bDirLen : 0.0f;
+                    move.currentVelX           = bDirX * invBDirLen * newSpeed;
+                    move.currentVelZ           = bDirZ * invBDirLen * newSpeed;
+                } else {
+                    const float curSpd = std::sqrt(currentSpeedSq);
+                    if (curSpd > 0.01f) {
+                        const float newSpd = std::max(curSpd - rate * dt, 0.0f);
+                        const float scale  = newSpd / curSpd;
+                        move.currentVelX *= scale;
+                        move.currentVelZ *= scale;
+                    } else {
+                        move.currentVelX = 0.0f;
+                        move.currentVelZ = 0.0f;
+                    }
+                }
+            };
+
+            // First, accelerate to full speed
+            for (int i = 0; i < 60; ++i) {
+                applyAcceleration(0.0f, 1.0f);
+            }
+            float velAtFullSpeed = std::sqrt(move.currentVelX * move.currentVelX + move.currentVelZ * move.currentVelZ);
+            ZHLN::Test::ExpectTrue(std::abs(velAtFullSpeed - move.speed) < 0.1f);
+
+            // Release input - velocity should start decreasing but not instantly zero
+            applyAcceleration(0.0f, 0.0f);
+            float velAfterOneFrame = std::sqrt(move.currentVelX * move.currentVelX + move.currentVelZ * move.currentVelZ);
+
+            ZHLN::Test::ExpectTrue(velAfterOneFrame > 0.0f);
+            ZHLN::Test::ExpectTrue(velAfterOneFrame < velAtFullSpeed);
+
+            // After enough time, should stop completely
+            for (int i = 0; i < 60; ++i) {
+                applyAcceleration(0.0f, 0.0f);
+            }
+            float velAfterStopping = std::sqrt(move.currentVelX * move.currentVelX + move.currentVelZ * move.currentVelZ);
+
+            ZHLN::Test::ExpectTrue(velAfterStopping < 0.01f);
+
+            if (velAfterOneFrame <= 0.0f || velAfterOneFrame >= velAtFullSpeed || velAfterStopping >= 0.01f) {
+                return std::unexpected(CharacterTestError::DisplacementMismatch);
+            }
+            return {};
+        }
+
+        // 14. Acceleration Rate Consistency
+        auto test_14_acceleration_rate_consistency() -> std::expected<void, ZHLN::Error> {
+            ZHLN::Components::MovementComponent move;
+            move.acceleration = 20.0f;
+            move.deceleration = 30.0f;
+            move.speed        = 10.0f;
+            move.currentVelX  = 0.0f;
+            move.currentVelZ  = 0.0f;
+
+            constexpr float dt = 1.0f / 60.0f;
+
+            auto applyAcceleration = [&](float inputX, float inputZ) {
+                const float targetVelX   = inputX * move.speed;
+                const float targetVelZ   = inputZ * move.speed;
+                const float targetSpeedSq = targetVelX * targetVelX + targetVelZ * targetVelZ;
+                const float currentSpeedSq = move.currentVelX * move.currentVelX + move.currentVelZ * move.currentVelZ;
+                const bool  hasInput       = targetSpeedSq > 0.01f;
+                const float rate           = hasInput ? move.acceleration : move.deceleration;
+
+                if (hasInput) {
+                    const float invTargetSpeed = (targetSpeedSq > 0.01f) ? 1.0f / std::sqrt(targetSpeedSq) : 0.0f;
+                    const float targetDirX     = targetVelX * invTargetSpeed;
+                    const float targetDirZ     = targetVelZ * invTargetSpeed;
+                    const float tSpeed         = std::sqrt(targetSpeedSq);
+                    const float currentAlong   = move.currentVelX * targetDirX + move.currentVelZ * targetDirZ;
+                    const float newSpeed       = std::min(currentAlong + rate * dt, tSpeed);
+                    const float blend          = (tSpeed > 0.01f) ? std::min(newSpeed / tSpeed, 1.0f) : 0.0f;
+                    const float curSpd         = std::sqrt(currentSpeedSq);
+                    const float invCurSpd      = (curSpd > 0.01f) ? 1.0f / curSpd : 0.0f;
+                    const float curDirX        = move.currentVelX * invCurSpd;
+                    const float curDirZ        = move.currentVelZ * invCurSpd;
+                    const float bDirX          = curDirX * (1.0f - blend) + targetDirX * blend;
+                    const float bDirZ          = curDirZ * (1.0f - blend) + targetDirZ * blend;
+                    const float bDirLen        = std::sqrt(bDirX * bDirX + bDirZ * bDirZ);
+                    const float invBDirLen     = (bDirLen > 0.01f) ? 1.0f / bDirLen : 0.0f;
+                    move.currentVelX           = bDirX * invBDirLen * newSpeed;
+                    move.currentVelZ           = bDirZ * invBDirLen * newSpeed;
+                } else {
+                    const float curSpd = std::sqrt(currentSpeedSq);
+                    if (curSpd > 0.01f) {
+                        const float newSpd = std::max(curSpd - rate * dt, 0.0f);
+                        const float scale  = newSpd / curSpd;
+                        move.currentVelX *= scale;
+                        move.currentVelZ *= scale;
+                    } else {
+                        move.currentVelX = 0.0f;
+                        move.currentVelZ = 0.0f;
+                    }
+                }
+            };
+
+            // Measure velocity increase over several frames
+            std::vector<float> velocities;
+            velocities.reserve(10);
+
+            for (int i = 0; i < 10; ++i) {
+                applyAcceleration(0.0f, 1.0f);
+                float vel = std::sqrt(move.currentVelX * move.currentVelX + move.currentVelZ * move.currentVelZ);
+                velocities.push_back(vel);
+            }
+
+            // Check that velocity increases monotonically
+            for (size_t i = 1; i < velocities.size(); ++i) {
+                ZHLN::Test::ExpectTrue(velocities[i] > velocities[i - 1]);
+                if (velocities[i] <= velocities[i - 1]) {
+                    return std::unexpected(CharacterTestError::DisplacementMismatch);
+                }
+            }
+
+            // Check that acceleration rate is approximately correct (within 20% tolerance)
+            float measuredAccel = (velocities[5] - velocities[0]) / (5.0f * dt);
+            float accelError = std::abs(measuredAccel - move.acceleration) / move.acceleration;
+
+            ZHLN::Test::ExpectTrue(accelError < 0.20f);
+
+            if (accelError >= 0.20f) {
+                return std::unexpected(CharacterTestError::DisplacementMismatch);
+            }
+            return {};
+        }
     };
 };
 

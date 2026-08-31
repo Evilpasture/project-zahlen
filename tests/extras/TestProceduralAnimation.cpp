@@ -315,7 +315,7 @@ struct ProceduralAnimationTestSuite {
 
             ZHLN::RigBoneMap importedMap;
             if (!ZHLN::BuildBoneMap(prefab, skeleton, importedMap) || importedMap.parentIndices[malformedNode] != ZHLN::InvalidRigNode ||
-                importedMap.childOfConstraintCount != 12 || importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Spine)] != 3 ||
+                importedMap.childOfConstraintCount != 15 || importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Spine)] != 3 ||
                 importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::SupSpine)] != 2 ||
                 importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::UpperArmL)] != 8 ||
                 importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ForearmL)] != 7 ||
@@ -380,6 +380,8 @@ struct ProceduralAnimationTestSuite {
             };
             const ZHLN::RigChildOfConstraint* kneeLConstraint          = findConstraint(ZHLN::RigChildOfKind::Knee, shinL);
             const ZHLN::RigChildOfConstraint* kneeRConstraint          = findConstraint(ZHLN::RigChildOfKind::Knee, shinR);
+            const ZHLN::RigChildOfConstraint* ankleLConstraint         = findConstraint(ZHLN::RigChildOfKind::Ankle, footL);
+            const ZHLN::RigChildOfConstraint* ankleRConstraint         = findConstraint(ZHLN::RigChildOfKind::Ankle, footR);
             const ZHLN::RigChildOfConstraint* handLConstraint          = findConstraint(ZHLN::RigChildOfKind::Hand, handL);
             const ZHLN::RigChildOfConstraint* handRConstraint          = findConstraint(ZHLN::RigChildOfKind::Hand, handR);
             const ZHLN::RigChildOfConstraint* rigidFootLConstraint     = findConstraint(ZHLN::RigChildOfKind::FootAttachment, rigidFootL.root);
@@ -389,7 +391,7 @@ struct ProceduralAnimationTestSuite {
             const ZHLN::RigChildOfConstraint* toeRConstraint           = findConstraint(ZHLN::RigChildOfKind::FootAttachment, toeR);
 
             ZHLN::ProceduralAnimation::ResolveModelTransforms(importedMap);
-            if (kneeLConstraint == nullptr || kneeRConstraint == nullptr) {
+            if (kneeLConstraint == nullptr || kneeRConstraint == nullptr || ankleLConstraint == nullptr || ankleRConstraint == nullptr) {
                 return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
             // Baked control rigs may author a knee anchor that is not the bind
@@ -419,26 +421,41 @@ struct ProceduralAnimationTestSuite {
 
             const JPH::Mat44 detachedShinL = importedMap.modelTransforms[shinL];
             const JPH::Mat44 detachedShinR = importedMap.modelTransforms[shinR];
+            const JPH::Mat44 detachedFootL = importedMap.modelTransforms[footL];
+            const JPH::Mat44 detachedFootR = importedMap.modelTransforms[footR];
             const JPH::Vec3  expectedKneeL =
                 (importedMap.modelTransforms[thighL] * kneeLConstraint->bindRelative * kneeLConstraint->localPoseDelta).GetTranslation();
             const JPH::Vec3 expectedKneeR =
                 (importedMap.modelTransforms[thighR] * kneeRConstraint->bindRelative * kneeRConstraint->localPoseDelta).GetTranslation();
+            // Ankle constraints use the shin positions after knee constraints are applied.
+            // Knee constraints pin shin translation but preserve rotation.
+            const JPH::Mat44 pinnedShinL = JPH::Mat44::sRotationTranslation(detachedShinL.GetQuaternion(), expectedKneeL);
+            const JPH::Mat44 pinnedShinR = JPH::Mat44::sRotationTranslation(detachedShinR.GetQuaternion(), expectedKneeR);
+            const JPH::Vec3  expectedAnkleL =
+                (pinnedShinL * ankleLConstraint->bindRelative * ankleLConstraint->localPoseDelta).GetTranslation();
+            const JPH::Vec3 expectedAnkleR =
+                (pinnedShinR * ankleRConstraint->bindRelative * ankleRConstraint->localPoseDelta).GetTranslation();
 
-            // Knee joints are structural and remain active even when every
-            // optional child-of relationship is disabled. They pin position
-            // without replacing the authored or IK-produced shin basis.
-            if (ZHLN::ProceduralAnimation::ApplyChildOfConstraints(importedMap, false, false, false, false, false) != 2 ||
+            // Knee and ankle joints are structural and remain active even when
+            // every optional child-of relationship is disabled. They pin position
+            // without replacing the authored or IK-produced basis.
+            if (ZHLN::ProceduralAnimation::ApplyChildOfConstraints(importedMap, false, false, false, false, false) != 4 ||
                 !importedMap.modelTransforms[shinL].GetTranslation().IsClose(expectedKneeL, 0.0001f) ||
                 !importedMap.modelTransforms[shinR].GetTranslation().IsClose(expectedKneeR, 0.0001f) ||
+                !importedMap.modelTransforms[footL].GetTranslation().IsClose(expectedAnkleL, 0.0001f) ||
+                !importedMap.modelTransforms[footR].GetTranslation().IsClose(expectedAnkleR, 0.0001f) ||
                 !importedMap.modelTransforms[shinL].Multiply3x3(JPH::Vec3::sAxisZ()).IsClose(detachedShinL.Multiply3x3(JPH::Vec3::sAxisZ()), 0.0001f) ||
                 !importedMap.modelTransforms[shinR].Multiply3x3(JPH::Vec3::sAxisZ()).IsClose(detachedShinR.Multiply3x3(JPH::Vec3::sAxisZ()), 0.0001f) ||
-                detachedShinL.GetTranslation().IsClose(expectedKneeL, 0.0001f) || detachedShinR.GetTranslation().IsClose(expectedKneeR, 0.0001f)) {
+                !importedMap.modelTransforms[footL].Multiply3x3(JPH::Vec3::sAxisZ()).IsClose(detachedFootL.Multiply3x3(JPH::Vec3::sAxisZ()), 0.0001f) ||
+                !importedMap.modelTransforms[footR].Multiply3x3(JPH::Vec3::sAxisZ()).IsClose(detachedFootR.Multiply3x3(JPH::Vec3::sAxisZ()), 0.0001f) ||
+                detachedShinL.GetTranslation().IsClose(expectedKneeL, 0.0001f) || detachedShinR.GetTranslation().IsClose(expectedKneeR, 0.0001f) ||
+                detachedFootL.GetTranslation().IsClose(expectedAnkleL, 0.0001f) || detachedFootR.GetTranslation().IsClose(expectedAnkleR, 0.0001f)) {
                 return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
 
-            if (ZHLN::ProceduralAnimation::ApplyChildOfConstraints(importedMap) != 12 || handLConstraint == nullptr || handRConstraint == nullptr ||
-                rigidFootLConstraint == nullptr || rigidFootRConstraint == nullptr || secondaryFootLConstraint == nullptr ||
-                secondaryFootRConstraint == nullptr || toeRConstraint == nullptr ||
+            if (ZHLN::ProceduralAnimation::ApplyChildOfConstraints(importedMap) != 15 || handLConstraint == nullptr || handRConstraint == nullptr ||
+                ankleLConstraint == nullptr || ankleRConstraint == nullptr || rigidFootLConstraint == nullptr || rigidFootRConstraint == nullptr ||
+                secondaryFootLConstraint == nullptr || secondaryFootRConstraint == nullptr || toeRConstraint == nullptr ||
                 !importedMap.modelTransforms[handL].IsClose(
                     importedMap.modelTransforms[forearmL] * handLConstraint->bindRelative * handLConstraint->localPoseDelta, 0.0001f
                 ) ||
@@ -1108,6 +1125,65 @@ struct ProceduralAnimationTestSuite {
             const JPH::Vec3  authoredTip = headPosition + hair.restLocalPositions[tip];
             if ((hair.positions[tip] - authoredTip).Length() > 0.04f) {
                 return std::unexpected(ProceduralAnimationTestError::HairConstraintFailed);
+            }
+            return {};
+        }
+
+        std::expected<void, ZHLN::Error> gait_blend_interpolates_parameters_smoothly() {
+            ZHLN::ProceduralLocomotionComponent gait;
+            // Walk preset
+            gait.currentPreset.strideLength     = 1.60f;
+            gait.currentPreset.stepHeight       = 0.28f;
+            gait.currentPreset.maxBounceHeight  = 0.045f;
+            gait.currentPreset.pelvisSwayScale  = 1.0f;
+            gait.currentPreset.armSwingScale    = 1.0f;
+            gait.currentPreset.forwardLeanScale = 1.0f;
+            // Initialize live parameters to match current preset
+            gait.strideLength     = gait.currentPreset.strideLength;
+            gait.stepHeight       = gait.currentPreset.stepHeight;
+            gait.maxBounceHeight  = gait.currentPreset.maxBounceHeight;
+            gait.pelvisSwayScale  = gait.currentPreset.pelvisSwayScale;
+            gait.armSwingScale    = gait.currentPreset.armSwingScale;
+            gait.forwardLeanScale = gait.currentPreset.forwardLeanScale;
+
+            // Set run preset as target
+            gait.targetPreset.strideLength     = 2.40f;
+            gait.targetPreset.stepHeight       = 0.45f;
+            gait.targetPreset.maxBounceHeight  = 0.065f;
+            gait.targetPreset.pelvisSwayScale  = 1.35f;
+            gait.targetPreset.armSwingScale    = 1.50f;
+            gait.targetPreset.forwardLeanScale = 1.40f;
+            gait.gaitBlendWeight               = 0.0f;
+            gait.gaitBlendSpeed                = 4.0f;
+
+            // Blend for one frame - parameters should start moving toward target
+            constexpr float dt = 1.0f / 60.0f;
+            ZHLN::Animation::BlendGaitParameters(gait, dt);
+            if (gait.gaitBlendWeight <= 0.0f || gait.gaitBlendWeight >= 1.0f ||
+                gait.strideLength <= gait.currentPreset.strideLength ||
+                gait.strideLength >= gait.targetPreset.strideLength) {
+                return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
+            }
+
+            // Blend until complete (use enough frames to guarantee convergence)
+            for (uint32_t frame = 0; frame < 180; ++frame) {
+                ZHLN::Animation::BlendGaitParameters(gait, dt);
+            }
+            // After enough time, parameters should have reached the target.
+            // Don't check gaitBlendWeight exactly - it may have cycled through
+            // completion and reset multiple times due to floating point accumulation.
+            if (std::abs(gait.strideLength - gait.targetPreset.strideLength) > 0.01f ||
+                std::abs(gait.stepHeight - gait.targetPreset.stepHeight) > 0.01f ||
+                std::abs(gait.maxBounceHeight - gait.targetPreset.maxBounceHeight) > 0.001f ||
+                std::abs(gait.pelvisSwayScale - gait.targetPreset.pelvisSwayScale) > 0.01f ||
+                std::abs(gait.armSwingScale - gait.targetPreset.armSwingScale) > 0.01f ||
+                std::abs(gait.forwardLeanScale - gait.targetPreset.forwardLeanScale) > 0.01f) {
+                return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
+            }
+
+            // Verify that currentPreset eventually snaps to target after completion
+            if (std::abs(gait.currentPreset.strideLength - gait.targetPreset.strideLength) > 0.01f) {
+                return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
             return {};
         }

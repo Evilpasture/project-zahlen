@@ -204,12 +204,42 @@ struct alignas(64) RigBoneMap {
     }
 };
 
+/**
+ * Named parametric snapshot for one locomotion mode. The gait blender
+ * interpolates between two presets so stride length, step height, bounce,
+ * sway, arm swing, and lean all transition continuously instead of snapping
+ * when the character crosses a speed threshold.
+ */
+struct GaitPreset {
+    float strideLength       = 1.60f;
+    float stepHeight         = 0.28f;
+    float maxBounceHeight    = 0.025f;
+    float bounceGravity      = 9.81f;
+    float pelvisSwayScale    = 0.30f;  // Reduced default - human locomotion has minimal sway
+    float armSwingScale      = 1.0f;
+    float forwardLeanScale   = 1.0f;
+    float lateralBankScale   = 1.0f;
+};
+
 /** Parametric gait state, including persistent world-space foot locks. */
 struct ProceduralLocomotionComponent {
     float phase        = 0.0f;
     float strideLength = 1.60f;
     float stepHeight   = 0.28f;
     float legReach     = 0.85f;
+
+    // Gait blend state. The pipeline interpoliates every tunable parameter
+    // from currentPreset toward targetPreset at blendSpeed units per second.
+    // Speed-driven transitions set targetPreset; gameplay code may also
+    // override it directly for crouch, sneak, or wounded gaits.
+    GaitPreset currentPreset {};
+    GaitPreset targetPreset {};
+    float      gaitBlendWeight = 0.0f;
+    float      gaitBlendSpeed  = 2.0f; // Slower blend for more visible transitions
+    float      pelvisSwayScale  = 1.0f;
+    float      armSwingScale   = 1.0f;
+    float      forwardLeanScale = 1.0f;
+    float      lateralBankScale = 1.0f;
 
     JPH::Vec3 localFootTargetL = JPH::Vec3::sZero();
     JPH::Vec3 localFootTargetR = JPH::Vec3::sZero();
@@ -480,6 +510,7 @@ namespace Animation {
 
 float      EvaluateGravityBounce(const ProceduralLocomotionComponent& gait, float speed) noexcept;
 float      EvaluateTwoKeyPosePhase(float stridePhase) noexcept;
+void       BlendGaitParameters(ProceduralLocomotionComponent& gait, float dt) noexcept;
 void       EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg velocity, float angularVelocity, float dt) noexcept;
 void       EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg velocity, float dt) noexcept;
 void       ApplyAccelerationTilt(ProceduralLocomotionComponent& gait, JPH::Mat44* nodeTransforms, const RigBoneMap& map) noexcept;

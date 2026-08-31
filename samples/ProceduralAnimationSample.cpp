@@ -710,8 +710,10 @@ auto main(int argc, char* argv[]) -> int {
     float       sampleTime      = 0.0f;
     bool        handgunEquipped = false;
     bool        equipKeyWasDown = false;
+    bool        slowMotion      = false;
+    bool        tabKeyWasDown   = false;
     ZHLN::Log(
-        "[ProceduralAnimationSample] Ready. WASD move, LSHIFT sprint, SPACE jump, E equip/rest handgun, V first/third person, Right-Click look. "
+        "[ProceduralAnimationSample] Ready. WASD move, LSHIFT sprint, SPACE jump, E equip/rest handgun, V first/third person, TAB slow motion, Right-Click look. "
         "First person keeps the full body and arms but hides head visuals."
     );
 
@@ -724,10 +726,12 @@ auto main(int argc, char* argv[]) -> int {
         // 1. Mouse Look and edge-triggered handgun equip input.
         bool equipKeyDown = false;
         bool viewKeyDown  = false;
+        bool tabKeyDown   = false;
         for (ZHLN::Entity e: registry.GetEntitiesWith<ZHLN::Components::InputStateComponent>()) {
             registry.Patch<ZHLN::Components::InputStateComponent>(e, [&](auto& st) -> auto {
                 equipKeyDown = equipKeyDown || st.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::E));
                 viewKeyDown  = viewKeyDown || st.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::V));
+                tabKeyDown   = tabKeyDown || st.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Tab));
                 if (viewState.enabled) {
                     st.mouseWheel = 0.0f;
                 }
@@ -764,6 +768,11 @@ auto main(int argc, char* argv[]) -> int {
             SetFirstPersonMode(*engine, player, viewState, !viewState.enabled);
         }
         viewState.toggleKeyWasDown = viewKeyDown;
+        if (tabKeyDown && !tabKeyWasDown) {
+            slowMotion = !slowMotion;
+            ZHLN::Log("[Sample] Slow motion: {}.", slowMotion ? "ON (0.25x)" : "OFF (1.0x)");
+        }
+        tabKeyWasDown = tabKeyDown;
         if (viewState.enabled) {
             registry.Patch<ZHLN::FirstPersonVisibilityComponent>(player, [&](auto& visibility) -> auto {
                 visibility.lookYawDegrees   = viewState.lookYawOffset;
@@ -777,8 +786,9 @@ auto main(int argc, char* argv[]) -> int {
             lookAt.targetWorldPos = trans.position + trans.rotation * JPH::Vec3(std::sin(sampleTime * 0.65f) * 2.2f, 1.65f, 4.0f);
         });
 
-        // 3. Synchronized Engine Tick
-        const auto status = engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
+        // 3. Synchronized Engine Tick (apply slow motion time scale)
+        const float scaledDt = slowMotion ? dt * 0.25f : dt;
+        const auto status = engine->Tick(scaledDt, ZHLN::GameplayDriver::Cpp);
         if (status == ZHLN::GameplayStatus::RequestQuit) {
             engine->GetWindow().Close();
             break;

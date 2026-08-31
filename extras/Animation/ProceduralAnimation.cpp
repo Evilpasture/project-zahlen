@@ -452,6 +452,41 @@ void ApplyAuthoredPose(const Components::AnimatorComponent* animator, const Proc
             const size_t node = static_cast<size_t>(channel.targetNodeIndex);
             SamplePoseChannel(channel, animator->currentTrackTime, mode, bicubicTension, targetTranslations[node], targetRotations[node], targetScales[node]);
         }
+
+        // Cross-fade between the previous and current tracks when a blend is
+        // active. Without this, locomotion track switches snap instantly even
+        // though SynchronizeLocomotionTrack sets blendFactor/blendDuration.
+        // The core AnimationSystem also cross-fades, but ProceduralAnimation
+        // overwrites its output, so we must blend here too.
+        if (animator->prevTrackIdx >= 0 && animator->blendFactor < 1.0f &&
+            animator->prevTrackIdx < static_cast<int32_t>(animator->prefab->animations.size())) {
+            std::array<JPH::Vec3, kMaxRigNodes> prevTranslations {};
+            std::array<JPH::Quat, kMaxRigNodes> prevRotations {};
+            std::array<JPH::Vec3, kMaxRigNodes> prevScales {};
+            for (size_t node = 0; node < map.nodeCount; ++node) {
+                prevTranslations[node] = map.bindLocalTransforms[node].GetTranslation();
+                prevRotations[node]    = ExtractRotation(map.bindLocalTransforms[node]);
+                prevScales[node]       = ExtractScale(map.bindLocalTransforms[node]);
+            }
+            const AnimationClip& prevClip = animator->prefab->animations[static_cast<size_t>(animator->prevTrackIdx)];
+            for (const AnimationChannel& channel: prevClip.channels) {
+                if (channel.targetNodeIndex < 0 || channel.targetNodeIndex >= static_cast<int32_t>(map.nodeCount) ||
+                    channel.path == AnimationPathType::Weights) {
+                    continue;
+                }
+                const size_t node = static_cast<size_t>(channel.targetNodeIndex);
+                SamplePoseChannel(
+                    channel, animator->prevTrackTime, mode, bicubicTension,
+                    prevTranslations[node], prevRotations[node], prevScales[node]
+                );
+            }
+            const float t = SmootherStep(animator->blendFactor);
+            for (size_t node = 0; node < map.nodeCount; ++node) {
+                targetTranslations[node] = prevTranslations[node] + t * (targetTranslations[node] - prevTranslations[node]);
+                targetRotations[node]    = prevRotations[node].SLERP(targetRotations[node], t).Normalized();
+                targetScales[node]       = prevScales[node] + t * (targetScales[node] - prevScales[node]);
+            }
+        }
     }
 
     // Non-semantic controls (fingers, face, accessories) receive the selected
@@ -542,8 +577,9 @@ void SynchronizeLocomotionTrack(
     Components::AnimatorComponent&       animator,
     ProceduralLocomotionTracksComponent& tracks,
     const Components::MovementComponent* movement,
-    const ProceduralLocomotionComponent& gait,
-    float                                speed
+    ProceduralLocomotionComponent&       gait,
+    float                                speed,
+    float                                dt
 ) noexcept {
     const bool moving  = speed > std::max(tracks.movementThreshold, 0.0f);
     const bool running = moving && ((movement != nullptr && movement->isSprinting) || speed >= std::max(tracks.runSpeedThreshold, 0.0f));
@@ -559,18 +595,116 @@ void SynchronizeLocomotionTrack(
         return;
     }
 
+    // Drive the gait preset blend target from the speed/sprint state. When the
+    // desired locomotion mode changes, snapshot the current blend into
+    // currentPreset so the next transition starts from wherever the previous
+    // one had reached rather than snapping back to walk defaults.
+    {
+        constexpr GaitPreset kWalkPreset {
+            .strideLength       = 1.60f,
+            .stepHeight         = 0.28f,
+            .maxBounceHeight    = 0.025f,
+            .bounceGravity      = 9.81f,
+            .pelvisSwayScale    = 0.30f,
+            .armSwingScale      = 0.80f,
+            .forwardLeanScale   = 0.50f,
+            .lateralBankScale   = 0.40f,
+        };
+        constexpr GaitPreset kRunPreset {
+            .strideLength     = 2.40f,
+            .stepHeight       = 0.45f,
+            .maxBounceHeight  = 0.065f,
+            .bounceGravity    = 12.50f,
+            .pelvisSwayScale  = 1.50f,  // More pronounced sway for running
+            .armSwingScale    = 1.50f,
+            .forwardLeanScale = 1.40f,
+            .lateralBankScale = 1.20f,
+        };
+        const GaitPreset& desiredPreset = running ? kRunPreset : kWalkPreset;
+        // Only trigger a new blend when the target preset changes (walk <-> run).
+        // Don't check current parameters - during a blend they're intentionally
+        // different from both presets as they interpolate.
+        if (std::abs(desiredPreset.strideLength - gait.targetPreset.strideLength) > 0.01f ||
+            std::abs(desiredPreset.stepHeight - gait.targetPreset.stepHeight) > 0.01f) {
+            // Snapshot the current blended state as the new starting point so
+            // walk -> run -> walk transitions chain without popping.
+            gait.currentPreset   = GaitPreset {
+                .strideLength     = gait.strideLength,
+                .stepHeight       = gait.stepHeight,
+                .maxBounceHeight  = gait.maxBounceHeight,
+                .bounceGravity    = gait.bounceGravity,
+                .pelvisSwayScale  = gait.pelvisSwayScale,
+                .armSwingScale    = gait.armSwingScale,
+                .forwardLeanScale = gait.forwardLeanScale,
+                .lateralBankScale = gait.lateralBankScale,
+            };
+            gait.targetPreset    = desiredPreset;
+            gait.gaitBlendWeight = 0.0f;
+            ZHLN::Log(
+                "[ProceduralAnimation] Gait blend started: {} -> {} (stride {:.2f} -> {:.2f}, step {:.2f} -> {:.2f})",
+                running ? "walk" : "run", running ? "run" : "walk",
+                gait.currentPreset.strideLength, gait.targetPreset.strideLength,
+                gait.currentPreset.stepHeight, gait.targetPreset.stepHeight
+            );
+        }
+    }
+
     if (animator.currentTrackIdx != desiredTrack) {
-        animator.prevTrackIdx      = animator.currentTrackIdx;
-        animator.prevTrackTime     = animator.currentTrackTime;
-        animator.prevPlaybackSpeed = animator.currentPlaybackSpeed;
-        animator.currentTrackIdx   = desiredTrack;
-        animator.currentTrackTime  = 0.0f;
-        animator.blendFactor       = 0.0f;
-        animator.isFinished        = false;
+        if (animator.prevTrackIdx == desiredTrack && animator.blendFactor < 1.0f) {
+            // Reversing a blend in progress (e.g. rapid walk→run→walk toggle).
+            // Swap prev/current and invert the blend factor so the cross-fade
+            // smoothly reverses instead of snapping to a fresh blend from a
+            // barely-started track.
+            std::swap(animator.prevTrackIdx, animator.currentTrackIdx);
+            std::swap(animator.prevTrackTime, animator.currentTrackTime);
+            std::swap(animator.prevPlaybackSpeed, animator.currentPlaybackSpeed);
+            animator.blendFactor = 1.0f - animator.blendFactor;
+        } else {
+            animator.prevTrackIdx      = animator.currentTrackIdx;
+            animator.prevTrackTime     = animator.currentTrackTime;
+            animator.prevPlaybackSpeed = animator.currentPlaybackSpeed;
+            animator.currentTrackIdx   = desiredTrack;
+            animator.currentTrackTime  = 0.0f;
+            animator.currentPlaybackSpeed = 1.0f;
+            animator.blendFactor       = 0.0f;
+            animator.blendDuration     = 0.35f;
+            animator.isFinished        = false;
+        }
+    }
+
+    // Advance the track cross-fade. ProceduralAnimation owns the final pose
+    // for locomotion entities, so it must drive the blend factor itself rather
+    // than relying on the core AnimationSystem (which may run at a different
+    // point in the frame or not at all for these entities).
+    if (animator.prevTrackIdx >= 0 && animator.blendDuration > 0.0f) {
+        animator.blendFactor = std::min(1.0f, animator.blendFactor + (dt / animator.blendDuration));
+        if (animator.blendFactor >= 1.0f) {
+            animator.prevTrackIdx = -1;
+        }
+    } else {
+        animator.blendFactor = 1.0f;
+    }
+    if (animator.prevTrackIdx >= 0 && animator.blendFactor < 1.0f) {
+        // Keep the previous track stride-synced too, so both tracks show the
+        // same pose phase during the cross-fade. Without this, the prev track
+        // drifts relative to the current track and the blend looks wrong.
+        if (moving && tracks.synchronizeToStrideWheel) {
+            const float          prevPosePhase = Animation::EvaluateTwoKeyPosePhase(gait.phase);
+            const AnimationClip& prevClip      = animator.prefab->animations[static_cast<size_t>(animator.prevTrackIdx)];
+            animator.prevTrackTime             = prevPosePhase * std::max(prevClip.duration, 0.0f);
+        } else {
+            animator.prevTrackTime += dt * animator.prevPlaybackSpeed;
+            const AnimationClip& prevClip = animator.prefab->animations[static_cast<size_t>(animator.prevTrackIdx)];
+            if (prevClip.duration > 0.0f) {
+                animator.prevTrackTime = std::fmod(animator.prevTrackTime, prevClip.duration);
+            }
+        }
     }
 
     tracks.passWeight  = 0.5f * (gait.passWeightL + gait.passWeightR);
     tracks.reachWeight = 0.5f * (gait.reachWeightL + gait.reachWeightR);
+    
+    // Always sync to stride wheel for accurate foot placement
     if (moving && tracks.synchronizeToStrideWheel) {
         const float wheelPhase = gait.phase;
         // Two authored keys represent opposing reach poses. Ping-pong across
@@ -901,8 +1035,26 @@ void ConfigureHumanoidChildOfConstraints(RigBoneMap& map) noexcept {
     addConstraint(CharacterBone::SupSpine, CharacterBone::Chest, RigChildOfKind::Chest);
     addConstraint(CharacterBone::Chest, CharacterBone::Neck, RigChildOfKind::Neck);
     addConstraint(CharacterBone::Neck, CharacterBone::Head, RigChildOfKind::Head);
-    addConstraint(CharacterBone::ForearmL, CharacterBone::HandL, RigChildOfKind::Hand);
-    addConstraint(CharacterBone::ForearmR, CharacterBone::HandR, RigChildOfKind::Hand);
+    
+    // Hand constraints: log whether they're created and if the hand is already
+    // a hierarchy child of the forearm (in which case the constraint is redundant).
+    auto addHandConstraint = [&](CharacterBone forearmBone, CharacterBone handBone) {
+        const RigNodeIndex forearm = map.nodeIndices[BoneSlot(forearmBone)];
+        const RigNodeIndex hand    = map.nodeIndices[BoneSlot(handBone)];
+        if (!IsValidRigNode(forearm, map.nodeCount) || !IsValidRigNode(hand, map.nodeCount)) {
+            ZHLN::Log("[ProceduralAnimation] WARNING: hand constraint not created — forearm={} hand={}", 
+                      IsValidRigNode(forearm, map.nodeCount) ? "valid" : "missing",
+                      IsValidRigNode(hand, map.nodeCount) ? "valid" : "missing");
+            return;
+        }
+        const bool isHierarchyChild = IsNodeDescendant(map, hand, forearm);
+        addConstraint(forearmBone, handBone, RigChildOfKind::Hand);
+        ZHLN::Log("[ProceduralAnimation] Hand constraint: forearm={} hand={} hierarchyChild={}",
+                  forearm, hand, isHierarchyChild ? "yes" : "no (detached)");
+    };
+    addHandConstraint(CharacterBone::ForearmL, CharacterBone::HandL);
+    addHandConstraint(CharacterBone::ForearmR, CharacterBone::HandR);
+    
     addConstraint(CharacterBone::FootL, CharacterBone::ToeL, RigChildOfKind::FootAttachment);
     addConstraint(CharacterBone::FootR, CharacterBone::ToeR, RigChildOfKind::FootAttachment);
 }
@@ -1612,6 +1764,13 @@ size_t ProceduralAnimation::ApplyChildOfConstraints(
                 const JPH::Vec3 jointPosition =
                     (boneMap.modelTransforms[constraint.parent] * constraint.bindRelative * constraint.localPoseDelta).GetTranslation();
                 constrainedChild.SetTranslation(jointPosition);
+            } else if (kind == RigChildOfKind::Hand && !IsNodeDescendant(boneMap, constraint.child, constraint.parent)) {
+                // Detached hand: pin rigidly to forearm at bind-time offset.
+                // The cross-fade blends local transforms in the hand's actual
+                // parent space (not the forearm's), producing wrong model-space
+                // positions. Ignore the authored pose delta and use the bind
+                // offset directly so the hand always follows the forearm.
+                constrainedChild = boneMap.modelTransforms[constraint.parent] * constraint.bindRelative;
             } else {
                 constrainedChild = boneMap.modelTransforms[constraint.parent] * constraint.bindRelative * constraint.localPoseDelta;
             }
@@ -1864,7 +2023,7 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
         const bool upperBodyEnabled       = !authoredPoseOnly && (config == nullptr || config->enableUpperBody);
         const bool secondaryMotionEnabled = !authoredPoseOnly && (config == nullptr || config->enableSecondaryMotion);
         const bool itemHandlingEnabled    = !authoredPoseOnly && itemHandling != nullptr && itemHandling->enabled && itemHandling->gripCount > 0;
-        const bool handChildOfEnabled     = config == nullptr || config->enforceHandChildOf;
+        const bool handChildOfEnabled     = true; // Hands must always follow forearms
         const bool chestChildOfEnabled    = config == nullptr || config->enforceChestChildOf;
         const bool neckChildOfEnabled     = config == nullptr || config->enforceNeckChildOf;
         const bool headChildOfEnabled     = config == nullptr || config->enforceHeadChildOf;
@@ -1893,13 +2052,18 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
         gait->previousRootRotation   = rootRotation;
         gait->orientationInitialized = true;
 
+        // Smoothly interpolate gait parameters (stride, bounce, sway, etc.)
+        // before evaluation so the stride clock and foot trajectories see the
+        // blended values instead of snapping between presets.
+        Animation::BlendGaitParameters(*gait, dt);
+
         // Advance the stride wheel before sampling locomotion clips so the two
         // authored reach keys and their interpolated pass pose stay phase locked.
         if (gaitEnabled || locomotionSyncEnabled) {
             Animation::EvaluateGait(*gait, velocityLocal, angularVelocity, dt);
         }
         if (animator != nullptr && tracks != nullptr) {
-            SynchronizeLocomotionTrack(*animator, *tracks, movement, *gait, horizontalSpeed);
+            SynchronizeLocomotionTrack(*animator, *tracks, movement, *gait, horizontalSpeed, dt);
         }
 
         ApplyAuthoredPose(animator, config, *boneMap, dt);
@@ -2317,6 +2481,7 @@ void DrawProceduralDebugRig(
     const JPH::Vec4 armColor(1.00f, 0.60f, 0.12f, 1.0f);
     const JPH::Vec4 legColor(0.20f, 1.00f, 0.35f, 1.0f);
     const JPH::Vec4 hairColor(0.90f, 0.25f, 1.00f, 1.0f);
+    const JPH::Vec4 constraintColor(1.00f, 0.00f, 1.00f, 1.0f); // Magenta for constraints
 
     for (size_t semantic = 0; semantic < kCoreBoneCount; ++semantic) {
         const RigNodeIndex node = boneMap.nodeIndices[semantic];
@@ -2334,6 +2499,17 @@ void DrawProceduralDebugRig(
             renderContext.DrawLine(worldPosition(parent), worldPosition(node), color);
         }
         drawCross(worldPosition(node), semantic == BoneSlot(CharacterBone::Head) ? 0.07f : 0.025f, color);
+    }
+    
+    // Draw child-of constraints as magenta lines
+    for (size_t index = 0; index < boneMap.childOfConstraintCount; ++index) {
+        const RigChildOfConstraint& constraint = boneMap.childOfConstraints[index];
+        if (constraint.kind == RigChildOfKind::Hand && 
+            IsValidRigNode(constraint.parent, boneMap.nodeCount) && 
+            IsValidRigNode(constraint.child, boneMap.nodeCount)) {
+            renderContext.DrawLine(worldPosition(constraint.parent), worldPosition(constraint.child), constraintColor);
+            drawCross(worldPosition(constraint.child), 0.04f, constraintColor);
+        }
     }
 
     for (size_t strand = 0; strand < HairStrandsComponent::kStrandCount; ++strand) {
