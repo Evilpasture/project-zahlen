@@ -315,7 +315,7 @@ struct ProceduralAnimationTestSuite {
 
             ZHLN::RigBoneMap importedMap;
             if (!ZHLN::BuildBoneMap(prefab, skeleton, importedMap) || importedMap.parentIndices[malformedNode] != ZHLN::InvalidRigNode ||
-                importedMap.childOfConstraintCount != 12 || importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Spine)] != 3 ||
+                importedMap.childOfConstraintCount != 14 || importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Spine)] != 3 ||
                 importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::SupSpine)] != 2 ||
                 importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::UpperArmL)] != 8 ||
                 importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ForearmL)] != 7 ||
@@ -380,6 +380,8 @@ struct ProceduralAnimationTestSuite {
             };
             const ZHLN::RigChildOfConstraint* kneeLConstraint          = findConstraint(ZHLN::RigChildOfKind::Knee, shinL);
             const ZHLN::RigChildOfConstraint* kneeRConstraint          = findConstraint(ZHLN::RigChildOfKind::Knee, shinR);
+            const ZHLN::RigChildOfConstraint* ankleLConstraint         = findConstraint(ZHLN::RigChildOfKind::Ankle, footL);
+            const ZHLN::RigChildOfConstraint* ankleRConstraint         = findConstraint(ZHLN::RigChildOfKind::Ankle, footR);
             const ZHLN::RigChildOfConstraint* handLConstraint          = findConstraint(ZHLN::RigChildOfKind::Hand, handL);
             const ZHLN::RigChildOfConstraint* handRConstraint          = findConstraint(ZHLN::RigChildOfKind::Hand, handR);
             const ZHLN::RigChildOfConstraint* rigidFootLConstraint     = findConstraint(ZHLN::RigChildOfKind::FootAttachment, rigidFootL.root);
@@ -389,7 +391,7 @@ struct ProceduralAnimationTestSuite {
             const ZHLN::RigChildOfConstraint* toeRConstraint           = findConstraint(ZHLN::RigChildOfKind::FootAttachment, toeR);
 
             ZHLN::ProceduralAnimation::ResolveModelTransforms(importedMap);
-            if (kneeLConstraint == nullptr || kneeRConstraint == nullptr) {
+            if (kneeLConstraint == nullptr || kneeRConstraint == nullptr || ankleLConstraint == nullptr || ankleRConstraint == nullptr) {
                 return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
             // Baked control rigs may author a knee anchor that is not the bind
@@ -419,26 +421,37 @@ struct ProceduralAnimationTestSuite {
 
             const JPH::Mat44 detachedShinL = importedMap.modelTransforms[shinL];
             const JPH::Mat44 detachedShinR = importedMap.modelTransforms[shinR];
+            const JPH::Mat44 detachedFootL = importedMap.modelTransforms[footL];
+            const JPH::Mat44 detachedFootR = importedMap.modelTransforms[footR];
             const JPH::Vec3  expectedKneeL =
                 (importedMap.modelTransforms[thighL] * kneeLConstraint->bindRelative * kneeLConstraint->localPoseDelta).GetTranslation();
             const JPH::Vec3 expectedKneeR =
                 (importedMap.modelTransforms[thighR] * kneeRConstraint->bindRelative * kneeRConstraint->localPoseDelta).GetTranslation();
+            const JPH::Vec3 expectedAnkleL =
+                (importedMap.modelTransforms[shinL] * ankleLConstraint->bindRelative * ankleLConstraint->localPoseDelta).GetTranslation();
+            const JPH::Vec3 expectedAnkleR =
+                (importedMap.modelTransforms[shinR] * ankleRConstraint->bindRelative * ankleRConstraint->localPoseDelta).GetTranslation();
 
-            // Knee joints are structural and remain active even when every
-            // optional child-of relationship is disabled. They pin position
-            // without replacing the authored or IK-produced shin basis.
-            if (ZHLN::ProceduralAnimation::ApplyChildOfConstraints(importedMap, false, false, false, false, false) != 2 ||
+            // Knee and ankle joints are structural and remain active even when
+            // every optional child-of relationship is disabled. They pin position
+            // without replacing the authored or IK-produced basis.
+            if (ZHLN::ProceduralAnimation::ApplyChildOfConstraints(importedMap, false, false, false, false, false) != 4 ||
                 !importedMap.modelTransforms[shinL].GetTranslation().IsClose(expectedKneeL, 0.0001f) ||
                 !importedMap.modelTransforms[shinR].GetTranslation().IsClose(expectedKneeR, 0.0001f) ||
+                !importedMap.modelTransforms[footL].GetTranslation().IsClose(expectedAnkleL, 0.0001f) ||
+                !importedMap.modelTransforms[footR].GetTranslation().IsClose(expectedAnkleR, 0.0001f) ||
                 !importedMap.modelTransforms[shinL].Multiply3x3(JPH::Vec3::sAxisZ()).IsClose(detachedShinL.Multiply3x3(JPH::Vec3::sAxisZ()), 0.0001f) ||
                 !importedMap.modelTransforms[shinR].Multiply3x3(JPH::Vec3::sAxisZ()).IsClose(detachedShinR.Multiply3x3(JPH::Vec3::sAxisZ()), 0.0001f) ||
-                detachedShinL.GetTranslation().IsClose(expectedKneeL, 0.0001f) || detachedShinR.GetTranslation().IsClose(expectedKneeR, 0.0001f)) {
+                !importedMap.modelTransforms[footL].Multiply3x3(JPH::Vec3::sAxisZ()).IsClose(detachedFootL.Multiply3x3(JPH::Vec3::sAxisZ()), 0.0001f) ||
+                !importedMap.modelTransforms[footR].Multiply3x3(JPH::Vec3::sAxisZ()).IsClose(detachedFootR.Multiply3x3(JPH::Vec3::sAxisZ()), 0.0001f) ||
+                detachedShinL.GetTranslation().IsClose(expectedKneeL, 0.0001f) || detachedShinR.GetTranslation().IsClose(expectedKneeR, 0.0001f) ||
+                detachedFootL.GetTranslation().IsClose(expectedAnkleL, 0.0001f) || detachedFootR.GetTranslation().IsClose(expectedAnkleR, 0.0001f)) {
                 return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
 
-            if (ZHLN::ProceduralAnimation::ApplyChildOfConstraints(importedMap) != 12 || handLConstraint == nullptr || handRConstraint == nullptr ||
-                rigidFootLConstraint == nullptr || rigidFootRConstraint == nullptr || secondaryFootLConstraint == nullptr ||
-                secondaryFootRConstraint == nullptr || toeRConstraint == nullptr ||
+            if (ZHLN::ProceduralAnimation::ApplyChildOfConstraints(importedMap) != 14 || handLConstraint == nullptr || handRConstraint == nullptr ||
+                ankleLConstraint == nullptr || ankleRConstraint == nullptr || rigidFootLConstraint == nullptr || rigidFootRConstraint == nullptr ||
+                secondaryFootLConstraint == nullptr || secondaryFootRConstraint == nullptr || toeRConstraint == nullptr ||
                 !importedMap.modelTransforms[handL].IsClose(
                     importedMap.modelTransforms[forearmL] * handLConstraint->bindRelative * handLConstraint->localPoseDelta, 0.0001f
                 ) ||
