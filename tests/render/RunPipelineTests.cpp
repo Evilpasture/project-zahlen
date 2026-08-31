@@ -28,6 +28,7 @@ auto RunDescriptorHeapsParallelSuite() -> ZHLN::Test::TestStats;
 auto RunRenderAnimatedMeshSuite() -> ZHLN::Test::TestStats;
 auto RunCameraLookAtSuite() -> ZHLN::Test::TestStats;
 auto RunHiZSuite() -> ZHLN::Test::TestStats;
+auto RunGLTFImportSuite() -> ZHLN::Test::TestStats;
 
 
 auto main(int argc, char** argv) -> int {
@@ -44,6 +45,7 @@ auto main(int argc, char** argv) -> int {
         RunDescriptorHeapsParallelSuite,
         RunRenderAnimatedMeshSuite,
         RunCameraLookAtSuite,
-        RunHiZSuite
+        RunHiZSuite,
+        RunGLTFImportSuite
     );
 }

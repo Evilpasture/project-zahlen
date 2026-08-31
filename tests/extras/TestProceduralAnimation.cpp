@@ -19,7 +19,6 @@
 #include <iostream>
 #include <memory>
 #include <numbers>
-#include <ranges>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -32,49 +31,34 @@ enum class ProceduralAnimationTestError : uint32_t {
     RigMappingFailed[[= ZHLN::Description<"The generated procedural rig did not map all core and secondary controls."> {}]] = 1,
     GaitInvariantFailed[[= ZHLN::Description<"The distance-driven gait clock or alternating foot phases violated its invariant."> {}]],
     HairConstraintFailed[[= ZHLN::Description<"The XPBD hair solver produced a non-finite or excessively stretched segment."> {}]],
-    GLTFImportFailed[[= ZHLN::Description<"The imported glTF node graph disagrees with the source document."> {}]],
 };
 
 namespace {
-namespace ImportHelpers {
-
-[[nodiscard]] inline JPH::Mat44 ColumnMajor(const float (&values)[16]) noexcept {
-    return JPH::Mat44(
-        JPH::Vec4(values[0], values[1], values[2], values[3]), JPH::Vec4(values[4], values[5], values[6], values[7]),
-        JPH::Vec4(values[8], values[9], values[10], values[11]), JPH::Vec4(values[12], values[13], values[14], values[15])
-    );
-}
-
-[[nodiscard]] inline JPH::Mat44 SourceLocalTransform(const cgltf_node& node) noexcept {
-    float matrix[16] {};
-    cgltf_node_transform_local(&node, matrix);
-    return ColumnMajor(matrix);
-}
-
-[[nodiscard]] inline JPH::Mat44 SourceWorldTransform(const cgltf_node& node) noexcept {
-    float matrix[16] {};
-    cgltf_node_transform_world(&node, matrix);
-    return ColumnMajor(matrix);
-}
+namespace RigFixture {
 
 /**
- * Reproduces the CPU half of ZHLN::GLTF::BuildModelPrefab (node flattening,
- * skin/joint construction and animation channels).
+ * Builds the ModelPrefab *input* that BuildBoneMap consumes, from a parsed GLB.
  *
- * The shipping importer needs a live RenderContext for its texture and
- * primitive stages, so it cannot run in a headless CPU suite. Mirroring only
- * the graph construction keeps the invariants under test — parent linking,
- * matrix convention, joint indices — verifiable against cgltf as the source
- * of truth, which is exactly what the rig evaluator consumes downstream.
+ * This is a fixture, not an importer test: this suite is CPU-only and cannot
+ * link the real GLTF importer, which uploads through a live RenderContext.
+ * The importer itself is covered by tests/render/TestGLTFImport.cpp, which
+ * loads the same asset through CreativeWorksFactory and checks the prefab it
+ * returns against the source document. Here the asset is only a realistic
+ * source of node names and a bind pose for the rig mapper.
  */
-inline void BuildPrefabGraph(const cgltf_data& data, ZHLN::ModelPrefab& outPrefab) {
+inline void BuildFixture(const cgltf_data& data, ZHLN::ModelPrefab& outPrefab) {
     outPrefab.nodes.resize(data.nodes_count);
     for (size_t node = 0; node < data.nodes_count; ++node) {
-        const cgltf_node& source             = data.nodes[node];
+        const cgltf_node& source = data.nodes[node];
+        float             matrix[16] {};
+        cgltf_node_transform_local(&source, matrix);
         outPrefab.nodes[node].name           = source.name != nullptr ? ZHLN::String64(source.name) : ZHLN::String64("Unnamed");
         outPrefab.nodes[node].parentIndex    = source.parent != nullptr ? static_cast<int32_t>(source.parent - data.nodes) : -1;
-        outPrefab.nodes[node].localTransform = SourceLocalTransform(source);
         outPrefab.nodes[node].hasMesh        = source.mesh != nullptr;
+        outPrefab.nodes[node].localTransform = JPH::Mat44(
+            JPH::Vec4(matrix[0], matrix[1], matrix[2], matrix[3]), JPH::Vec4(matrix[4], matrix[5], matrix[6], matrix[7]),
+            JPH::Vec4(matrix[8], matrix[9], matrix[10], matrix[11]), JPH::Vec4(matrix[12], matrix[13], matrix[14], matrix[15])
+        );
     }
 
     outPrefab.skeletons.reserve(data.skins_count);
@@ -86,12 +70,10 @@ inline void BuildPrefabGraph(const cgltf_data& data, ZHLN::ModelPrefab& outPrefa
         for (size_t jointIndex = 0; jointIndex < skin.joints_count; ++jointIndex) {
             const cgltf_node* jointNode = skin.joints[jointIndex];
             int32_t           parent    = -1;
-            if (jointNode->parent != nullptr) {
-                for (size_t candidate = 0; candidate < skin.joints_count; ++candidate) {
-                    if (skin.joints[candidate] == jointNode->parent) {
-                        parent = static_cast<int32_t>(candidate);
-                        break;
-                    }
+            for (size_t candidate = 0; candidate < skin.joints_count; ++candidate) {
+                if (skin.joints[candidate] == jointNode->parent) {
+                    parent = static_cast<int32_t>(candidate);
+                    break;
                 }
             }
 
@@ -99,7 +81,10 @@ inline void BuildPrefabGraph(const cgltf_data& data, ZHLN::ModelPrefab& outPrefa
             if (skin.inverse_bind_matrices != nullptr) {
                 float raw[16] {};
                 cgltf_accessor_read_float(skin.inverse_bind_matrices, jointIndex, raw, 16);
-                inverseBind = ColumnMajor(raw);
+                inverseBind = JPH::Mat44(
+                    JPH::Vec4(raw[0], raw[1], raw[2], raw[3]), JPH::Vec4(raw[4], raw[5], raw[6], raw[7]), JPH::Vec4(raw[8], raw[9], raw[10], raw[11]),
+                    JPH::Vec4(raw[12], raw[13], raw[14], raw[15])
+                );
             }
 
             skeleton.joints.push_back({
@@ -113,37 +98,22 @@ inline void BuildPrefabGraph(const cgltf_data& data, ZHLN::ModelPrefab& outPrefa
     }
 
     outPrefab.animations.reserve(data.animations_count);
-    for (size_t animationIndex = 0; animationIndex < data.animations_count; ++animationIndex) {
-        const cgltf_animation& source = data.animations[animationIndex];
-        ZHLN::AnimationClip    clip;
-        clip.name = source.name != nullptr ? ZHLN::String64(source.name) : ZHLN::String64("Anim");
-        clip.channels.reserve(source.channels_count);
-        for (size_t channelIndex = 0; channelIndex < source.channels_count; ++channelIndex) {
-            const cgltf_animation_channel& channel = source.channels[channelIndex];
-            if (channel.target_node == nullptr || channel.sampler == nullptr) {
-                continue;
-            }
-            ZHLN::AnimationChannel imported;
-            imported.targetNodeIndex = static_cast<int32_t>(channel.target_node - data.nodes);
-            imported.path            = channel.target_path == cgltf_animation_path_type_rotation  ? ZHLN::AnimationPathType::Rotation :
-                                       channel.target_path == cgltf_animation_path_type_scale     ? ZHLN::AnimationPathType::Scale :
-                                       channel.target_path == cgltf_animation_path_type_weights   ? ZHLN::AnimationPathType::Weights :
-                                                                                                    ZHLN::AnimationPathType::Translation;
-            imported.interpolation   = channel.sampler->interpolation == cgltf_interpolation_type_step         ? ZHLN::InterpolationType::Step :
-                                       channel.sampler->interpolation == cgltf_interpolation_type_cubic_spline ? ZHLN::InterpolationType::CubicSpline :
-                                                                                                                 ZHLN::InterpolationType::Linear;
-            imported.keyTimes.resize(channel.sampler->input->count);
-            for (size_t key = 0; key < imported.keyTimes.size(); ++key) {
-                cgltf_accessor_read_float(channel.sampler->input, key, &imported.keyTimes[key], 1);
-                clip.duration = std::max(clip.duration, imported.keyTimes[key]);
-            }
-            clip.channels.push_back(std::move(imported));
-        }
-        outPrefab.animations.push_back(std::move(clip));
+    for (size_t clipIndex = 0; clipIndex < data.animations_count; ++clipIndex) {
+        const cgltf_animation& source = data.animations[clipIndex];
+        outPrefab.animations.push_back({.name = source.name != nullptr ? ZHLN::String64(source.name) : ZHLN::String64("Anim")});
     }
 }
 
-} // namespace ImportHelpers
+[[nodiscard]] inline JPH::Mat44 SourceWorld(const cgltf_node& node) noexcept {
+    float matrix[16] {};
+    cgltf_node_transform_world(&node, matrix);
+    return JPH::Mat44(
+        JPH::Vec4(matrix[0], matrix[1], matrix[2], matrix[3]), JPH::Vec4(matrix[4], matrix[5], matrix[6], matrix[7]),
+        JPH::Vec4(matrix[8], matrix[9], matrix[10], matrix[11]), JPH::Vec4(matrix[12], matrix[13], matrix[14], matrix[15])
+    );
+}
+
+} // namespace RigFixture
 } // namespace
 
 struct ProceduralAnimationTestSuite {
@@ -977,12 +947,17 @@ struct ProceduralAnimationTestSuite {
         }
 
         /**
-         * Imports the shipped base rig GLB and validates the resulting node graph
-         * against cgltf: node count and naming, parent links, the local/world
-         * matrix convention, skin joint indices and inverse binds, then the
-         * semantic RigBoneMap and its forward kinematics built on top of them.
+         * Maps a real authored rig: the shipped base rig GLB is parsed into a
+         * prefab fixture (see RigFixture) and handed to BuildBoneMap, then the
+         * resulting semantic map, its forward kinematics and its bind-pose
+         * skinning palette are checked.
+         *
+         * The importer that produces this prefab in production is covered
+         * separately by tests/render/TestGLTFImport.cpp; what is under test
+         * here is the rig mapper, on names and a bind pose no synthetic
+         * fixture reproduces faithfully.
          */
-        std::expected<void, ZHLN::Error> imported_gltf_node_graph_matches_source() {
+        std::expected<void, ZHLN::Error> base_rig_glb_maps_every_control_and_hair_strand() {
             const std::string assetPath = std::string(ZHLN_TEST_SOURCE_DIR) + "/resources/assets/ProceduralAnimationBaseRig.glb";
             std::ifstream     stream(assetPath, std::ios::binary);
             char              magic[4] {};
@@ -995,135 +970,32 @@ struct ProceduralAnimationTestSuite {
             cgltf_options options {};
             cgltf_data*   rawData = nullptr;
             if (cgltf_parse_file(&options, assetPath.c_str(), &rawData) != cgltf_result_success || rawData == nullptr) {
-                return std::unexpected(ProceduralAnimationTestError::GLTFImportFailed);
+                return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
             std::unique_ptr<cgltf_data, decltype(&cgltf_free)> data(rawData, &cgltf_free);
-            if (cgltf_load_buffers(&options, data.get(), assetPath.c_str()) != cgltf_result_success ||
-                cgltf_validate(data.get()) != cgltf_result_success || data->nodes_count == 0 || data->skins_count == 0) {
-                return std::unexpected(ProceduralAnimationTestError::GLTFImportFailed);
+            if (cgltf_load_buffers(&options, data.get(), assetPath.c_str()) != cgltf_result_success || data->nodes_count == 0 || data->skins_count == 0) {
+                return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
 
             ZHLN::ModelPrefab prefab;
             prefab.virtualPath = "ProceduralAnimationBaseRig.glb";
-            ImportHelpers::BuildPrefabGraph(*data, prefab);
+            RigFixture::BuildFixture(*data, prefab);
 
-            // --- Node graph: one prefab node per glTF node, parents resolved by index ---
-            if (prefab.nodes.size() != data->nodes_count) {
-                return std::unexpected(ProceduralAnimationTestError::GLTFImportFailed);
-            }
-            size_t rootCount = 0;
-            size_t meshCount = 0;
-            for (size_t node = 0; node < data->nodes_count; ++node) {
-                const cgltf_node&     source   = data->nodes[node];
-                const ZHLN::ModelNode& imported = prefab.nodes[node];
-                const std::string_view name     = std::string_view(imported.name);
-                if (source.name != nullptr && name != std::string_view(source.name)) {
-                    return std::unexpected(ProceduralAnimationTestError::GLTFImportFailed);
-                }
-                if (imported.hasMesh != (source.mesh != nullptr)) {
-                    return std::unexpected(ProceduralAnimationTestError::GLTFImportFailed);
-                }
-                meshCount += imported.hasMesh ? 1u : 0u;
-
-                const int32_t expectedParent = source.parent != nullptr ? static_cast<int32_t>(source.parent - data->nodes) : -1;
-                if (imported.parentIndex != expectedParent || imported.parentIndex == static_cast<int32_t>(node) ||
-                    imported.parentIndex >= static_cast<int32_t>(prefab.nodes.size())) {
-                    return std::unexpected(ProceduralAnimationTestError::GLTFImportFailed);
-                }
-                rootCount += imported.parentIndex < 0 ? 1u : 0u;
-
-                // Children declared by the source must agree with the flattened parents.
-                for (size_t child = 0; child < source.children_count; ++child) {
-                    const size_t childIndex = static_cast<size_t>(source.children[child] - data->nodes);
-                    if (childIndex >= prefab.nodes.size() || prefab.nodes[childIndex].parentIndex != static_cast<int32_t>(node)) {
-                        return std::unexpected(ProceduralAnimationTestError::GLTFImportFailed);
-                    }
-                }
-
-                // Every chain terminates at a root: no cycles, no dangling parents.
-                int32_t cursor = imported.parentIndex;
-                size_t  depth  = 0;
-                while (cursor >= 0 && depth <= prefab.nodes.size()) {
-                    cursor = prefab.nodes[static_cast<size_t>(cursor)].parentIndex;
-                    ++depth;
-                }
-                if (cursor != -1) {
-                    return std::unexpected(ProceduralAnimationTestError::GLTFImportFailed);
-                }
-
-                if (!imported.localTransform.IsClose(ImportHelpers::SourceLocalTransform(source), 0.0001f)) {
-                    return std::unexpected(ProceduralAnimationTestError::GLTFImportFailed);
-                }
-            }
-            if (rootCount == 0 || meshCount == 0) {
-                return std::unexpected(ProceduralAnimationTestError::GLTFImportFailed);
-            }
-
-            // Composing the flattened graph must reproduce the source world transforms.
-            // This is what catches a transposed matrix load or a reversed multiply order.
-            std::vector<JPH::Mat44> composedWorld(prefab.nodes.size(), JPH::Mat44::sIdentity());
-            for (size_t node = 0; node < prefab.nodes.size(); ++node) {
-                JPH::Mat44 world  = prefab.nodes[node].localTransform;
-                int32_t    cursor = prefab.nodes[node].parentIndex;
-                for (size_t depth = 0; cursor >= 0 && depth < prefab.nodes.size(); ++depth) {
-                    world  = prefab.nodes[static_cast<size_t>(cursor)].localTransform * world;
-                    cursor = prefab.nodes[static_cast<size_t>(cursor)].parentIndex;
-                }
-                composedWorld[node] = world;
-                if (!world.IsClose(ImportHelpers::SourceWorldTransform(data->nodes[node]), 0.0001f)) {
-                    return std::unexpected(ProceduralAnimationTestError::GLTFImportFailed);
-                }
-            }
-
-            // --- Skins: joint indices, intra-skin parents and inverse binds ---
-            if (prefab.skeletons.size() != data->skins_count) {
-                return std::unexpected(ProceduralAnimationTestError::GLTFImportFailed);
-            }
-            for (size_t skinIndex = 0; skinIndex < data->skins_count; ++skinIndex) {
-                const cgltf_skin&     skin     = data->skins[skinIndex];
-                const ZHLN::Skeleton& skeleton = prefab.skeletons[skinIndex];
-                if (skeleton.joints.size() != skin.joints_count || skeleton.joints.empty()) {
-                    return std::unexpected(ProceduralAnimationTestError::GLTFImportFailed);
-                }
-                for (size_t jointIndex = 0; jointIndex < skin.joints_count; ++jointIndex) {
-                    const ZHLN::Joint& joint      = skeleton.joints[jointIndex];
-                    const cgltf_node*  sourceNode = skin.joints[jointIndex];
-                    if (joint.nodeIndex < 0 || static_cast<size_t>(joint.nodeIndex) != static_cast<size_t>(sourceNode - data->nodes)) {
-                        return std::unexpected(ProceduralAnimationTestError::GLTFImportFailed);
-                    }
-
-                    int32_t expectedParentJoint = -1;
-                    for (size_t candidate = 0; candidate < skin.joints_count; ++candidate) {
-                        if (skin.joints[candidate] == sourceNode->parent) {
-                            expectedParentJoint = static_cast<int32_t>(candidate);
-                            break;
-                        }
-                    }
-                    if (joint.parentIndex != expectedParentJoint || joint.parentIndex == static_cast<int32_t>(jointIndex)) {
-                        return std::unexpected(ProceduralAnimationTestError::GLTFImportFailed);
-                    }
-
-                    // At bind pose the inverse bind matrix must undo the world transform.
-                    if (skin.inverse_bind_matrices != nullptr &&
-                        !(composedWorld[static_cast<size_t>(joint.nodeIndex)] * joint.inverseBindMatrix).IsClose(JPH::Mat44::sIdentity(), 0.0001f)) {
-                        return std::unexpected(ProceduralAnimationTestError::GLTFImportFailed);
-                    }
-                }
-            }
-
-            // --- Semantic rig built from the imported graph ---
             const ZHLN::Skeleton& skeleton = prefab.skeletons[0];
             ZHLN::RigBoneMap      map;
             if (!ZHLN::BuildBoneMap(prefab, skeleton, map) || map.nodeCount != prefab.nodes.size() || !map.initialized) {
-                return std::unexpected(ProceduralAnimationTestError::GLTFImportFailed);
+                return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
+
+            // The map mirrors the imported hierarchy, and its forward kinematics
+            // reproduce the bind-pose world transforms of the source rig.
             for (ZHLN::RigNodeIndex node = 0; node < map.nodeCount; ++node) {
                 const int32_t importedParent = prefab.nodes[node].parentIndex;
                 const bool    parentMatches  = importedParent < 0 ? map.parentIndices[node] == ZHLN::InvalidRigNode :
                                                                     map.parentIndices[node] == static_cast<ZHLN::RigNodeIndex>(importedParent);
                 if (!parentMatches || !map.bindLocalTransforms[node].IsClose(prefab.nodes[node].localTransform, 0.0001f) ||
-                    !map.modelTransforms[node].IsClose(composedWorld[node], 0.0001f)) {
-                    return std::unexpected(ProceduralAnimationTestError::GLTFImportFailed);
+                    !map.modelTransforms[node].IsClose(RigFixture::SourceWorld(data->nodes[node]), 0.0001f)) {
+                    return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
                 }
             }
 
@@ -1155,7 +1027,7 @@ struct ProceduralAnimationTestSuite {
             for (const auto& [bone, expectedName]: expectedNodes) {
                 const ZHLN::RigNodeIndex node = map.nodeIndices[ZHLN::BoneSlot(bone)];
                 if (!ZHLN::IsValidRigNode(node, map.nodeCount) || std::string_view(prefab.nodes[node].name) != expectedName) {
-                    return std::unexpected(ProceduralAnimationTestError::GLTFImportFailed);
+                    return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
                 }
             }
 
@@ -1168,18 +1040,17 @@ struct ProceduralAnimationTestSuite {
                     continue;
                 }
                 if (claimed[node] != 0) {
-                    return std::unexpected(ProceduralAnimationTestError::GLTFImportFailed);
+                    return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
                 }
                 claimed[node] = 1;
                 mappedHairLinks += semantic >= ZHLN::BoneSlot(ZHLN::CharacterBone::HairStart) ? 1u : 0u;
             }
 
-            // The rig ships 18 six-link strands; every link must land in its own slot,
-            // and the parent of each link must be the previous link of the same strand.
             // The authored asset ships 18 six-link strands (DEF-Hair_S01_01 .. S18_06).
+            // Every link must land in its own slot, in order, parented to the previous.
             constexpr size_t expectedStrands = 18;
             if (map.sourceHairStrandCount != expectedStrands || mappedHairLinks != expectedStrands * ZHLN::HairStrandsComponent::kLinksPerStrand) {
-                return std::unexpected(ProceduralAnimationTestError::GLTFImportFailed);
+                return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
             const size_t hairBase = ZHLN::BoneSlot(ZHLN::CharacterBone::HairStart);
             for (size_t strand = 0; strand < expectedStrands; ++strand) {
@@ -1188,7 +1059,7 @@ struct ProceduralAnimationTestSuite {
                     const ZHLN::RigNodeIndex node     = map.nodeIndices[hairBase + slot];
                     const ZHLN::RigNodeIndex previous = map.nodeIndices[hairBase + slot - 1];
                     if (!ZHLN::IsValidRigNode(node, map.nodeCount) || map.parentIndices[node] != previous) {
-                        return std::unexpected(ProceduralAnimationTestError::GLTFImportFailed);
+                        return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
                     }
                 }
             }
@@ -1197,45 +1068,19 @@ struct ProceduralAnimationTestSuite {
             std::vector<JPH::Mat44> palette(skeleton.joints.size(), JPH::Mat44::sIdentity());
             ZHLN::ProceduralAnimation::ResolveModelTransforms(map);
             if (ZHLN::ProceduralAnimation::BuildSkinningPalette(skeleton, map, palette) != skeleton.joints.size()) {
-                return std::unexpected(ProceduralAnimationTestError::GLTFImportFailed);
+                return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
             for (const JPH::Mat44& jointMatrix: palette) {
                 if (!jointMatrix.IsClose(JPH::Mat44::sIdentity(), 0.0001f)) {
-                    return std::unexpected(ProceduralAnimationTestError::GLTFImportFailed);
+                    return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
                 }
             }
 
-            // --- Animation channels reference the same flattened node indices ---
-            if (prefab.animations.empty()) {
-                return std::unexpected(ProceduralAnimationTestError::GLTFImportFailed);
-            }
-            float longestClip = 0.0f;
-            for (const ZHLN::AnimationClip& clip: prefab.animations) {
-                if (clip.channels.empty()) {
-                    return std::unexpected(ProceduralAnimationTestError::GLTFImportFailed);
-                }
-                // A single-key pose clip legitimately has duration 0, so the invariant
-                // is "duration is the largest key time", not "duration is positive".
-                float latestKey = 0.0f;
-                for (const ZHLN::AnimationChannel& channel: clip.channels) {
-                    if (channel.targetNodeIndex < 0 || static_cast<size_t>(channel.targetNodeIndex) >= prefab.nodes.size() || channel.keyTimes.empty() ||
-                        !std::ranges::is_sorted(channel.keyTimes) || channel.keyTimes.front() < 0.0f) {
-                        return std::unexpected(ProceduralAnimationTestError::GLTFImportFailed);
-                    }
-                    latestKey = std::max(latestKey, channel.keyTimes.back());
-                }
-                if (std::abs(clip.duration - latestKey) > 0.0001f) {
-                    return std::unexpected(ProceduralAnimationTestError::GLTFImportFailed);
-                }
-                longestClip = std::max(longestClip, clip.duration);
-            }
-            if (longestClip <= 0.0f) {
-                return std::unexpected(ProceduralAnimationTestError::GLTFImportFailed);
-            }
+            // Authored track lookup against the real clip names of this rig.
             if (ZHLN::FindAnimationTrack(prefab, "idle") < 0 || ZHLN::FindAnimationTrack(prefab, "walk") < 0 ||
                 ZHLN::FindAnimationTrack(prefab, "run") < 0 ||
                 ZHLN::FindAnimationTrack(prefab, "walk") == ZHLN::FindAnimationTrack(prefab, "run")) {
-                return std::unexpected(ProceduralAnimationTestError::GLTFImportFailed);
+                return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
             return {};
         }

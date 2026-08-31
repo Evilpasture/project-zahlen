@@ -112,7 +112,17 @@ zahlen_add_gpu_test_group(GPU_Pipeline 300
     TestRenderAnimatedMesh.cpp
     TestCameraLookAt.cpp
     TestRenderHIZ.cpp
+    TestGLTFImport.cpp
 )
+
+# TestGLTFImport.cpp checks what the shipping importer produced against the
+# same GLB parsed independently by cgltf. zahlen_engine gets cgltf privately
+# through zahlen_gltf, so the reference parse needs its own copy of the
+# implementation (same arrangement as tests/extras). ZHLN_TEST_SOURCE_DIR
+# locates resources/assets/ at runtime instead of embedding a 100 KB rig.
+target_sources(GPU_Pipeline PRIVATE ${PROJECT_SOURCE_DIR}/extern/cgltf_impl.c)
+target_include_directories(GPU_Pipeline SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/extern/cgltf)
+target_compile_definitions(GPU_Pipeline PRIVATE ZHLN_TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 
 # ImGui, UI layout and viewmodel presentation.
 zahlen_add_gpu_test_group(GPU_Interface 180
