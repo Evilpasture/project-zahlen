@@ -44,6 +44,10 @@
 //     is the worst failure mode a hand-edited format has.
 //   * std::optional is omitted entirely when empty rather than written null,
 //     which is how TOML expresses absence.
+//   * A struct can opt out of table form and serialise as `[x, y, z]` by
+//     specialising ReflectTOML::TOMLVector -- see there. Zahlen/Scene.hpp
+//     uses it so Jolt's Float3/Float4 read as coordinates in a document
+//     while staying Jolt types in the code.
 //
 // The parser accepts the subset the serialiser emits plus what hand-written
 // documents normally use: comments, bare/quoted/dotted keys, table and
@@ -84,6 +88,11 @@ class ZHLN_API Value {
     /// Table only. Keys in document order; the views live as long as the Document.
     [[nodiscard]] auto GetTableKeys() const -> std::expected<std::vector<std::string_view>, Error>;
 
+    /// True only for array nodes. Checked before reading a sequence, because
+    /// GetArraySize() answers 0 for a table and a field would otherwise take a
+    /// wrong-shaped value as an empty one.
+    [[nodiscard]] auto IsArray() const noexcept -> bool;
+
     [[nodiscard]] auto GetArraySize() const noexcept -> size_t;
     [[nodiscard]] auto GetArrayElement(size_t index) const noexcept -> std::expected<Value, Error>;
 
@@ -113,6 +122,26 @@ class ZHLN_API Document {
     std::unique_ptr<Impl> _impl;
 };
 
+/// Opt-in: serialise T as a TOML array of its fields, `[x, y, z]`, instead of
+/// a table of named members.
+///
+/// A small vector type is a struct in C++ and a coordinate in a document, and
+/// nobody wants to read
+///
+///     [entities.transform.position]
+///     x = 0.0
+///     y = 8.0
+///
+/// where `position = [0.0, 8.0, 0.0]` says the same thing on one line and
+/// diffs as one line. Specialise this next to the type that needs it -- see
+/// Zahlen/Scene.hpp, which does it for JPH::Float2/Float3/Float4 -- so this
+/// header keeps depending on nothing but the reflection layer.
+///
+/// Fields are read and written in declaration order through reflection, so a
+/// specialisation is one line and supplies no accessors.
+template <typename T>
+struct TOMLVector : std::false_type {};
+
 namespace detail {
 
     /// std::array and other fixed-size ranges: sized at compile time, so they
@@ -131,6 +160,10 @@ namespace detail {
         typename T::key_type;
         typename T::mapped_type;
     };
+
+    /// A struct that opted in to array form via TOMLVector.
+    template <typename T>
+    concept VectorLike = TOMLVector<T>::value && (ZHLN::Reflect::FieldCount<T>() > 0);
 
     template <typename T>
     concept OptionalLike = requires { typename T::value_type; } && std::is_same_v<T, std::optional<typename T::value_type>>;
@@ -210,6 +243,9 @@ auto GetTOMLValue(Value reader) -> std::expected<FieldType, Error> {
         }
         return container;
     } else if constexpr (detail::FixedArray<Decayed>) {
+        if (!reader.IsArray()) {
+            return std::unexpected(TOMLError::TypeMismatch);
+        }
         constexpr size_t kCapacity = std::tuple_size<Decayed>::value;
         const size_t     size      = reader.GetArraySize();
         if (size > kCapacity) {
@@ -232,6 +268,9 @@ auto GetTOMLValue(Value reader) -> std::expected<FieldType, Error> {
         }
         return container;
     } else if constexpr (std::ranges::range<Decayed>) {
+        if (!reader.IsArray()) {
+            return std::unexpected(TOMLError::TypeMismatch);
+        }
         const size_t size = reader.GetArraySize();
         Decayed      container;
         for (size_t i = 0; i < size; ++i) {
@@ -244,6 +283,42 @@ auto GetTOMLValue(Value reader) -> std::expected<FieldType, Error> {
                 return std::unexpected(parsed.error());
             }
             container.push_back(std::move(*parsed));
+        }
+        return container;
+    } else if constexpr (detail::VectorLike<Decayed>) {
+        // `[x, y, z]` back into the fields, in declaration order.
+        if (!reader.IsArray()) {
+            return std::unexpected(TOMLError::TypeMismatch);
+        }
+        constexpr size_t kCapacity = ZHLN::Reflect::FieldCount<Decayed>();
+        const size_t     size      = reader.GetArraySize();
+        if (size > kCapacity) {
+            ZHLN::Log("[TOML] array of {} values does not fit {}[{}]", size, ZHLN::Reflect::TypeName<Decayed>(), kCapacity);
+            return std::unexpected(TOMLError::TypeMismatch);
+        }
+
+        Decayed              container {};
+        std::optional<Error> err;
+        size_t               index = 0;
+        ZHLN::Reflect::ForEachField(container, [&](auto& component) -> void {
+            const size_t at = index++;
+            if (err || at >= size) {
+                return; // A short array leaves the trailing components alone.
+            }
+            auto element = reader.GetArrayElement(at);
+            if (!element) {
+                err = element.error();
+                return;
+            }
+            auto parsed = GetTOMLValue<std::remove_cvref_t<decltype(component)>>(*element);
+            if (!parsed) {
+                err = parsed.error();
+                return;
+            }
+            component = std::move(*parsed);
+        });
+        if (err) {
+            return std::unexpected(*err);
         }
         return container;
     } else if constexpr (ZHLN::Reflect::FieldCount<Decayed>() > 0) {
@@ -342,6 +417,7 @@ namespace detail {
     using ZHLN::ReflectTOML::detail::FixedArray;
     using ZHLN::ReflectTOML::detail::MapLike;
     using ZHLN::ReflectTOML::detail::StringLike;
+    using ZHLN::ReflectTOML::detail::VectorLike;
 
     /// Serialises as a TOML table: [header] on its own, rather than inline
     /// after an `=`.
@@ -350,6 +426,8 @@ namespace detail {
         using Decayed = std::remove_cvref_t<T>;
         if constexpr (StringLike<Decayed> || std::is_enum_v<Decayed> || std::is_arithmetic_v<Decayed>) {
             return false;
+        } else if constexpr (VectorLike<Decayed>) {
+            return false; // `[x, y, z]` after an `=`, not a table of its own.
         } else if constexpr (MapLike<Decayed>) {
             return true;
         } else if constexpr (FixedArray<Decayed> || std::ranges::range<Decayed>) {
@@ -508,6 +586,17 @@ namespace detail {
                 first = false;
                 AppendTOMLInline(out, element);
             }
+            out += ']';
+        } else if constexpr (VectorLike<Decayed>) {
+            out += '[';
+            bool first = true;
+            ZHLN::Reflect::ForEachField(value, [&](const auto& component) {
+                if (!first) {
+                    out += ", ";
+                }
+                first = false;
+                AppendTOMLInline(out, component);
+            });
             out += ']';
         } else if constexpr (ZHLN::Reflect::FieldCount<Decayed>() > 0) {
             AppendTOMLInlineTable(out, value);

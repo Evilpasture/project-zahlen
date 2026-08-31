@@ -737,6 +737,11 @@ auto Value::GetTableKeys() const -> std::expected<std::vector<std::string_view>,
     return keys;
 }
 
+auto Value::IsArray() const noexcept -> bool {
+    const Node* node = AsNode(_node);
+    return node != nullptr && node->kind == Kind::Array;
+}
+
 auto Value::GetArraySize() const noexcept -> size_t {
     const Node* node = AsNode(_node);
     if (node == nullptr || node->kind != Kind::Array) {

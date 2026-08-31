@@ -263,6 +263,12 @@ label = "two"
             ZHLN::Test::ExpectTrue(!ZHLN::ReflectTOML::TryParse<Config>("revision = \"seven\"").has_value());
             // An enum spelling that does not exist.
             ZHLN::Test::ExpectTrue(!ZHLN::ReflectTOML::TryParse<Config>("difficulty = \"Impossible\"").has_value());
+            // A table (or a scalar) where a sequence is declared. Worth its
+            // own case: an array node answers its length and a table answers
+            // zero, so without a shape check this reads as "empty" rather
+            // than "wrong" and the field silently keeps its default.
+            ZHLN::Test::ExpectTrue(!ZHLN::ReflectTOML::TryParse<Config>("slots = { a = 1 }").has_value());
+            ZHLN::Test::ExpectTrue(!ZHLN::ReflectTOML::TryParse<Config>("slots = 3").has_value());
 
             // An unknown key is survivable -- it is logged and skipped, so one
             // stale field in a scene file does not cost the whole scene.
@@ -329,10 +335,19 @@ intensity = 250.0
             }
 
             ZHLN::Test::ExpectEq(scene->name, "serial engine smoke");
-            ZHLN::Test::ExpectEq(scene->camera.position[2], 12.0f);
+            ZHLN::Test::ExpectEq(scene->camera.position.z, 12.0f);
             // Not mentioned in the document, so it is the declared default.
             ZHLN::Test::ExpectEq(scene->camera.fov, 60.0f);
             ZHLN::Test::ExpectEq(scene->environment.ambientExposure, 0.0f);
+
+            // A Jolt vector is a struct in C++ and `[x, y, z]` in the
+            // document -- the emitted text has to keep saying so.
+            ZHLN::Test::ExpectTrue(ZHLN::Reflect::SerializeTOML(*scene).contains("position = [0.0, 2.0, 12.0]"));
+            // ... and only in that form.
+            ZHLN::Test::ExpectTrue(!ZHLN::ReflectTOML::TryParse<ZHLN::Scene::Scene>("[camera.position]\nx = 1.0\n").has_value());
+            // A Float3 accepts the integers a person types.
+            const auto integral = ZHLN::ReflectTOML::TryParse<ZHLN::Scene::Scene>("[camera]\nposition = [0, 2, 12]\n");
+            ZHLN::Test::ExpectTrue(integral.has_value() && integral->camera.position.z == 12.0f);
 
             ZHLN::Test::ExpectEq(scene->entities.size(), size_t {2});
             ZHLN::Test::ExpectEq(scene->lights.size(), size_t {1});
@@ -348,10 +363,10 @@ intensity = 250.0
                 // relying on a struct default: a dynamic body has to be asked
                 // for. In a document it is a word.
                 ZHLN::Test::ExpectTrue(box.body == ZHLN::Scene::BodyKind::Dynamic);
-                ZHLN::Test::ExpectEq(box.transform.position[1], 8.0f);
-                ZHLN::Test::ExpectEq(box.material.emissive[1], 0.8f);
+                ZHLN::Test::ExpectEq(box.transform.position.y, 8.0f);
+                ZHLN::Test::ExpectEq(box.material.emissive.y, 0.8f);
                 // Untouched: still the declared default scale.
-                ZHLN::Test::ExpectEq(box.transform.scale[0], 1.0f);
+                ZHLN::Test::ExpectEq(box.transform.scale.x, 1.0f);
             }
             if (!scene->lights.empty()) {
                 ZHLN::Test::ExpectEq(scene->lights[0].intensity, 250.0f);

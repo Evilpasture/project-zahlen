@@ -3,14 +3,21 @@
 
 #pragma once
 
+// clang-format off
+#include <Jolt/Jolt.h>
+// clang-format on
+#include <Jolt/Math/Float2.h>
+#include <Jolt/Math/Float3.h>
+#include <Jolt/Math/Float4.h>
 #include <Zahlen/Common.h>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
-#include <array>
+#include <Zahlen/TOML.hpp>
 #include <cstdint>
 #include <expected>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 // ============================================================================
@@ -40,6 +47,14 @@
 //     const auto scene = ZHLN::ReflectTOML::TryParse<ZHLN::Scene::Scene>(text);
 //     const auto built = ZHLN::Scene::Instantiate(engine, *scene);
 //
+// Vectors are Jolt's plain storage types (JPH::Float3, JPH::Float4) rather
+// than std::array, so a field goes straight into the engine --
+// JPH::Vec3(t.position) -- with no unpacking helper in between. They still read as `[x, y, z]` in
+// the document; see the TOMLVector specialisations at the bottom of this file.
+// Positions are Float3 and not Double3 on purpose: RVec3 is only DVec3 in a
+// JPH_DOUBLE_PRECISION build, so a Double3 field would stop converting in the
+// default one, and no hand-authored scene needs 15 significant digits.
+//
 // Colours are linear RGBA in [0,1] unless a field says otherwise; angles are
 // degrees, because that is what the people writing these files think in.
 // ============================================================================
@@ -52,9 +67,9 @@ namespace Scene {
 
 /// Local transform. Euler degrees, in the engine's XYZ order.
 struct Transform {
-    std::array<float, 3> position = {0.0f, 0.0f, 0.0f};
-    std::array<float, 3> rotation = {0.0f, 0.0f, 0.0f};
-    std::array<float, 3> scale    = {1.0f, 1.0f, 1.0f};
+    JPH::Float3 position = {0.0f, 0.0f, 0.0f};
+    JPH::Float3 rotation = {0.0f, 0.0f, 0.0f};
+    JPH::Float3 scale    = {1.0f, 1.0f, 1.0f};
 };
 
 /// What geometry an entity is. `Prefab` reads the `source` glTF/GLB path;
@@ -70,10 +85,10 @@ enum class BodyKind : uint8_t { None, Static, Dynamic };
 /// Values above 1.0 are the KHR_materials_emissive_strength case and are
 /// allowed here for the same reason.
 struct SceneMaterial {
-    std::array<float, 4> baseColor = {0.8f, 0.4f, 0.2f, 1.0f};
-    float                roughness = 0.5f;
-    float                metallic  = 0.0f;
-    std::array<float, 3> emissive  = {0.0f, 0.0f, 0.0f};
+    JPH::Float4 baseColor = {0.8f, 0.4f, 0.2f, 1.0f};
+    float       roughness = 0.5f;
+    float       metallic  = 0.0f;
+    JPH::Float3 emissive  = {0.0f, 0.0f, 0.0f};
 
     /// Spawns a cheap point light per emissive part. Off by default and
     /// approximate -- see SpawnParams::emissiveVirtualLights.
@@ -85,7 +100,7 @@ struct SceneEntity {
     ShapeKind   shape = ShapeKind::Box;
 
     /// Box half extents. Ignored by the other shapes.
-    std::array<float, 3> halfExtents = {0.5f, 0.5f, 0.5f};
+    JPH::Float3 halfExtents = {0.5f, 0.5f, 0.5f};
     /// Plane half size. Ignored by the other shapes.
     float extent = 10.0f;
     /// Asset path for ShapeKind::Prefab.
@@ -99,32 +114,32 @@ struct SceneEntity {
 struct SceneLight {
     std::string name;
     /// One of the LightType enumerators: Directional, Point, Spot, Area, Sun.
-    std::string          type        = "Point";
-    std::array<float, 3> position    = {0.0f, 3.0f, 0.0f};
-    std::array<float, 3> direction   = {0.0f, -1.0f, 0.0f};
-    std::array<float, 3> color       = {1.0f, 1.0f, 1.0f};
-    float                intensity   = 100.0f;
-    float                radius      = 0.5f;
-    float                range       = 20.0f;
-    int32_t              shadowLayer = -1;
+    std::string type        = "Point";
+    JPH::Float3 position    = {0.0f, 3.0f, 0.0f};
+    JPH::Float3 direction   = {0.0f, -1.0f, 0.0f};
+    JPH::Float3 color       = {1.0f, 1.0f, 1.0f};
+    float       intensity   = 100.0f;
+    float       radius      = 0.5f;
+    float       range       = 20.0f;
+    int32_t     shadowLayer = -1;
 };
 
 struct SceneCamera {
-    std::array<float, 3> position = {0.0f, 2.0f, 8.0f};
-    float                yaw      = -90.0f;
-    float                pitch    = 0.0f;
-    float                fov      = 60.0f;
+    JPH::Float3 position = {0.0f, 2.0f, 8.0f};
+    float       yaw      = -90.0f;
+    float       pitch    = 0.0f;
+    float       fov      = 60.0f;
 };
 
 /// The knobs a scene is allowed to set on the global settings entity. Kept
 /// deliberately small: this is the part of the renderer a scene author owns,
 /// not a mirror of PostProcessSettingsComponent.
 struct SceneEnvironment {
-    float                ambientExposure = 1.0f;
-    float                giIntensity     = 1.0f;
-    std::array<float, 3> skyZenith       = {0.05f, 0.10f, 0.20f};
-    std::array<float, 3> skyHorizon      = {0.35f, 0.45f, 0.60f};
-    std::array<float, 3> skyGround       = {0.10f, 0.10f, 0.10f};
+    float       ambientExposure = 1.0f;
+    float       giIntensity     = 1.0f;
+    JPH::Float3 skyZenith       = {0.05f, 0.10f, 0.20f};
+    JPH::Float3 skyHorizon      = {0.35f, 0.45f, 0.60f};
+    JPH::Float3 skyGround       = {0.10f, 0.10f, 0.10f};
 };
 
 /// A whole scene. This is the root table of the document.
@@ -158,4 +173,19 @@ enum class SceneError : uint8_t {
 [[nodiscard]] auto InstantiateFromTOML(Engine& engine, std::string_view tomlText) -> std::expected<Instance, Error>;
 
 } // namespace Scene
+
+namespace ReflectTOML {
+
+// Jolt's storage vectors are structs to C++ and coordinates to a reader, so
+// they are written and parsed as `[x, y, z]` rather than a table of members.
+// Declared here rather than in Zahlen/TOML.hpp to keep that header free of
+// any dependency on Jolt.
+template <>
+struct TOMLVector<JPH::Float2> : std::true_type {};
+template <>
+struct TOMLVector<JPH::Float3> : std::true_type {};
+template <>
+struct TOMLVector<JPH::Float4> : std::true_type {};
+
+} // namespace ReflectTOML
 } // namespace ZHLN

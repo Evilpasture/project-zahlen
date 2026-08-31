@@ -28,16 +28,12 @@ namespace ZHLN::Scene {
 
 namespace {
 
-[[nodiscard]] auto ToVec3(const std::array<float, 3>& v) noexcept -> JPH::Vec3 {
-    return JPH::Vec3 {v[0], v[1], v[2]};
-}
-
-[[nodiscard]] auto ToRVec3(const std::array<float, 3>& v) noexcept -> JPH::RVec3 {
-    return JPH::RVec3 {v[0], v[1], v[2]};
-}
-
-[[nodiscard]] auto ToVec4(const std::array<float, 4>& v) noexcept -> JPH::Vec4 {
-    return JPH::Vec4 {v[0], v[1], v[2], v[3]};
+/// The only conversion the schema needs a helper for. JPH::Vec3 and JPH::Vec4
+/// construct from Float3/Float4 directly, but RVec3 is DVec3 in a
+/// JPH_DOUBLE_PRECISION build and Vec3 in every other one, and only the widen
+/// -through-Vec3 spelling compiles in both.
+[[nodiscard]] auto ToRVec3(const JPH::Float3& v) noexcept -> JPH::RVec3 {
+    return JPH::RVec3 {JPH::Vec3 {v}};
 }
 
 /// Builds the SpawnParams shared by every shape: placement, body kind and the
@@ -45,8 +41,8 @@ namespace {
 [[nodiscard]] auto MakeSpawnParams(const SceneEntity& entity) -> CreativeWorksFactory::SpawnParams {
     return CreativeWorksFactory::SpawnParams {
         .position        = ToRVec3(entity.transform.position),
-        .rotation        = Math::EulerDegreesToQuat(ToVec3(entity.transform.rotation)),
-        .scale           = ToVec3(entity.transform.scale),
+        .rotation        = Math::EulerDegreesToQuat(JPH::Vec3 {entity.transform.rotation}),
+        .scale           = JPH::Vec3 {entity.transform.scale},
         .createPhysics   = entity.body != BodyKind::None,
         // SpawnParams defaults this to true, and a description that asked for
         // BodyKind::Dynamic must not silently get a body that cannot move.
@@ -56,7 +52,7 @@ namespace {
 
         .roughness = entity.material.roughness,
         .metallic  = entity.material.metallic,
-        .color     = ToVec4(entity.material.baseColor)
+        .color     = JPH::Vec4 {entity.material.baseColor}
     };
 }
 
@@ -64,7 +60,7 @@ namespace {
 /// colour/roughness shorthand: the factory's built-in material has no emissive
 /// factor to set.
 [[nodiscard]] auto NeedsMaterial(const SceneMaterial& material) noexcept -> bool {
-    return material.emissive[0] > 0.0f || material.emissive[1] > 0.0f || material.emissive[2] > 0.0f;
+    return material.emissive.x > 0.0f || material.emissive.y > 0.0f || material.emissive.z > 0.0f;
 }
 
 [[nodiscard]] auto BuildMaterial(RenderContext& ctx, const SceneMaterial& material) -> std::expected<ZHLN::Material, Error> {
@@ -72,8 +68,8 @@ namespace {
         ctx, CreativeWorksFactory::MaterialDesc {
                  .metallic  = material.metallic,
                  .roughness = material.roughness,
-                 .baseColor = material.baseColor,
-                 .emissive  = {material.emissive[0], material.emissive[1], material.emissive[2], 1.0f}
+                 .baseColor = {material.baseColor.x, material.baseColor.y, material.baseColor.z, material.baseColor.w},
+                 .emissive  = {material.emissive.x, material.emissive.y, material.emissive.z, 1.0f}
              }
     );
 }
@@ -96,7 +92,7 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
 
     // --- camera -------------------------------------------------------------
     auto& camera    = engine.GetCamera();
-    camera.position = ToVec3(description.camera.position);
+    camera.position = JPH::Vec3 {description.camera.position};
     camera.yaw      = description.camera.yaw;
     camera.pitch    = description.camera.pitch;
     camera.fov      = description.camera.fov;
@@ -107,9 +103,9 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
         registry.Patch<Components::PostProcessSettingsComponent>(settings, [&](auto& pp) {
             pp.ambientExposure = environment.ambientExposure;
             pp.giIntensity     = environment.giIntensity;
-            pp.skyZenith       = JPH::Vec4(environment.skyZenith[0], environment.skyZenith[1], environment.skyZenith[2], 1.0f);
-            pp.skyHorizon      = JPH::Vec4(environment.skyHorizon[0], environment.skyHorizon[1], environment.skyHorizon[2], 1.0f);
-            pp.skyGround       = JPH::Vec4(environment.skyGround[0], environment.skyGround[1], environment.skyGround[2], 1.0f);
+            pp.skyZenith       = JPH::Vec4(JPH::Vec3 {environment.skyZenith}, 1.0f);
+            pp.skyHorizon      = JPH::Vec4(JPH::Vec3 {environment.skyHorizon}, 1.0f);
+            pp.skyGround       = JPH::Vec4(JPH::Vec3 {environment.skyGround}, 1.0f);
         });
     }
 
@@ -128,13 +124,13 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
 
         switch (entity.shape) {
             case ShapeKind::Box: {
-                const Entity created = CreativeWorksFactory::CreateBox(engine, ToVec3(entity.halfExtents), params);
+                const Entity created = CreativeWorksFactory::CreateBox(engine, JPH::Vec3 {entity.halfExtents}, params);
                 NameEntity(registry, created, entity.name);
                 instance.entities.push_back(created);
                 break;
             }
             case ShapeKind::Plane: {
-                const Entity created = CreativeWorksFactory::CreatePlane(engine, entity.extent, ToVec4(entity.material.baseColor), params);
+                const Entity created = CreativeWorksFactory::CreatePlane(engine, entity.extent, JPH::Vec4 {entity.material.baseColor}, params);
                 NameEntity(registry, created, entity.name);
                 instance.entities.push_back(created);
                 break;
@@ -174,7 +170,7 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
             return std::unexpected(SceneError::UnknownLightType);
         }
 
-        const JPH::Vec3  position = ToVec3(light.position);
+        const JPH::Vec3  position = JPH::Vec3 {light.position};
         const JPH::Mat44 world    = Math::CreateTransform(position, JPH::Quat::sIdentity(), JPH::Vec3::sReplicate(1.0f));
 
         const Entity created = registry.Create(
@@ -183,10 +179,10 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
             Components::WorldTransformComponent {.world = world, .previous = world},
             Components::LightComponent {
                 .type        = *type,
-                .color       = ToVec3(light.color),
+                .color       = JPH::Vec3 {light.color},
                 .intensity   = light.intensity,
                 .radius      = light.radius,
-                .direction   = ToVec3(light.direction),
+                .direction   = JPH::Vec3 {light.direction},
                 .range       = light.range,
                 .shadowLayer = light.shadowLayer
             }
