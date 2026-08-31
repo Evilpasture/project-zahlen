@@ -114,48 +114,59 @@ constexpr std::array<float, 4> kBoxBaseColor {0.05f, 0.05f, 0.05f, 1.0f};
     return true;
 }
 
-/// Renders the unlit scene once and reports the box window and a background
-/// corner. `outValid` distinguishes a failed capture from a black frame.
-[[nodiscard]] auto MeasureUnlitBox(bool emissive, const std::string& ppmPath, SubRegionStats& outCorner, bool& outValid) -> SubRegionStats {
-    outValid = false;
+/// One rendered frame reduced to what the assertions need: the box window, a
+/// background corner, and the box's green share. `valid` distinguishes a failed
+/// capture from a legitimately black frame.
+struct UnlitMeasurement {
     SubRegionStats box;
+    SubRegionStats corner;
+    double         greenShare = 0.0;
+    bool           valid      = false;
+};
+
+/// Renders the unlit scene once and measures it.
+[[nodiscard]] auto MeasureUnlitBox(bool emissive, const std::string& ppmPath) -> UnlitMeasurement {
+    UnlitMeasurement out;
 
     // Pooled: both halves of the comparison run on the same device with the
     // scene reset in between, so a difference in the frames cannot come from
     // a difference in the engine.
     const auto engine = ZHLN::Test::Headless::AcquireEngine(emissive ? "Headless Emissive Unlit" : "Headless Emissive Control");
     if (engine == nullptr) {
-        return box;
+        return out;
     }
     ZHLN::Test::Headless::DisableTAA(*engine);
 
     if (!BuildUnlitBoxScene(*engine, emissive)) {
-        return box;
+        return out;
     }
 
     ZHLN::Test::Headless::TickFrames(*engine, 4);
     const auto frame = ZHLN::Test::Headless::Capture(*engine, ppmPath);
     if (!frame.Valid()) {
-        return box;
+        return out;
     }
 
-    box       = ZHLN::Test::Image::MeasureSubRegion(frame, kBoxWindow);
-    outCorner = ZHLN::Test::Image::MeasureSubRegion(frame, kCornerWindow);
-    outValid  = true;
-    return box;
+    out.box    = ZHLN::Test::Image::MeasureSubRegion(frame, kBoxWindow);
+    out.corner = ZHLN::Test::Image::MeasureSubRegion(frame, kCornerWindow);
+    // Not MeasureSubRegion::dominantGrn: its 45 floor is absolute, and an
+    // emitter this dim never reaches it however green it is.
+    out.greenShare = ZHLN::Test::Image::DominantHueShare(frame, kBoxWindow, ZHLN::Test::Image::HueChannel::Green);
+    out.valid      = true;
+    return out;
 }
 
 } // namespace
 
 struct EmissiveShadingTestSuite {
     EmissiveShadingTestSuite() {
-        ZHLN::Fiber::InitMainThread();
-        ZHLN::TaskSystem::Init(2, 32, ZHLN::kMinimumFiberStackSize);
+        // Nested in the group binary's session: the task system and the pooled
+        // engine outlive this suite (see HeadlessEngineFixture.hpp).
+        ZHLN::Test::Headless::BeginSession();
     }
 
     ~EmissiveShadingTestSuite() {
-        ZHLN::Test::Headless::ShutdownPooledEngines();
-        ZHLN::TaskSystem::Shutdown();
+        ZHLN::Test::Headless::EndSession();
     }
 
     struct Tests {
@@ -174,23 +185,25 @@ struct EmissiveShadingTestSuite {
          *      full-screen brightening.
          */
         std::expected<void, ZHLN::Error> emission_survives_a_scene_with_no_lights() {
-            SubRegionStats emissiveCorner;
-            bool           emissiveValid = false;
-            const SubRegionStats emissiveBox = MeasureUnlitBox(true, "emissive_unlit.ppm", emissiveCorner, emissiveValid);
-            if (!emissiveValid) {
+            const UnlitMeasurement emissive = MeasureUnlitBox(true, "emissive_unlit.ppm");
+            if (!emissive.valid) {
                 return std::unexpected(EmissiveShadingError::CaptureFailed);
             }
 
-            SubRegionStats controlCorner;
-            bool           controlValid = false;
-            const SubRegionStats controlBox = MeasureUnlitBox(false, "emissive_unlit_control.ppm", controlCorner, controlValid);
-            if (!controlValid) {
+            const UnlitMeasurement control = MeasureUnlitBox(false, "emissive_unlit_control.ppm");
+            if (!control.valid) {
                 return std::unexpected(EmissiveShadingError::CaptureFailed);
             }
+
+            const SubRegionStats& emissiveBox    = emissive.box;
+            const SubRegionStats& emissiveCorner = emissive.corner;
+            const SubRegionStats& controlBox     = control.box;
 
             ZHLN::Println(
-                "    [INFO] emissive box meanLuma={:.1f} maxLuma={:.1f} | control box meanLuma={:.1f} | corner meanLuma={:.1f}",
-                emissiveBox.meanLuma, emissiveBox.maxLuma, controlBox.meanLuma, emissiveCorner.meanLuma
+                "    [INFO] emissive box meanLuma={:.1f} maxLuma={:.1f} meanRGB=({:.1f}, {:.1f}, {:.1f}) greenShare={:.2f} | control box "
+                "meanLuma={:.1f} | corner meanLuma={:.1f}",
+                emissiveBox.meanLuma, emissiveBox.maxLuma, emissiveBox.meanR, emissiveBox.meanG, emissiveBox.meanB, emissive.greenShare,
+                controlBox.meanLuma, emissiveCorner.meanLuma
             );
 
             // 1. The emitter is visible at all. Before the fix this window was
@@ -209,12 +222,7 @@ struct EmissiveShadingTestSuite {
             }
 
             // 2. It is the colour it emits, not a grey wash.
-            const double greenShare = static_cast<double>(emissiveBox.dominantGrn) / static_cast<double>(std::max(emissiveBox.pixels, 1u));
-            if (greenShare < 0.5 || emissiveBox.meanG <= emissiveBox.meanR || emissiveBox.meanG <= emissiveBox.meanB) {
-                ZHLN::Println(
-                    "    [INFO] emissive box greenShare={:.2f} meanRGB=({:.1f}, {:.1f}, {:.1f})", greenShare, emissiveBox.meanR, emissiveBox.meanG,
-                    emissiveBox.meanB
-                );
+            if (emissive.greenShare < 0.5 || emissiveBox.meanG <= emissiveBox.meanR || emissiveBox.meanG <= emissiveBox.meanB) {
                 return std::unexpected(EmissiveShadingError::EmissiveHueLost);
             }
 

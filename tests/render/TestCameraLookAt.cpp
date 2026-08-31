@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
-#include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render.hpp>
@@ -78,12 +78,13 @@ void DisableJitterAndVignette(ZHLN::ECS::Registry& reg) {
 
 struct CameraLookAtTestSuite {
     CameraLookAtTestSuite() {
-        ZHLN::Fiber::InitMainThread();
-        ZHLN::TaskSystem::Init(2, 32, ZHLN::kMinimumFiberStackSize);
+        // Nested in the group binary's session: the task system and the pooled
+        // engine outlive this suite (see HeadlessEngineFixture.hpp).
+        ZHLN::Test::Headless::BeginSession();
     }
 
     ~CameraLookAtTestSuite() {
-        ZHLN::TaskSystem::Shutdown();
+        ZHLN::Test::Headless::EndSession();
     }
 
     struct Tests {
@@ -91,28 +92,10 @@ struct CameraLookAtTestSuite {
         // TargetCamera must put the red centroid near the image center and keep
         // the decoy off-screen. The default free-cam (origin look-at) does the opposite.
         std::expected<void, ZHLN::Error> target_camera_centers_colored_subject() {
-            ZHLN::DefaultPreset::SetDisabled(true);
-
-            const ZHLN::EngineConfig cfg {
-                .physics = {.maxBodies = 256, .maxBodyPairs = 512, .maxContactConstraints = 512, .tempAllocatorSize = 8 * 1024 * 1024},
-                .render  = {
-                    .appName        = "Headless Camera LookAt",
-                    .width          = 640,
-                    .height         = 480,
-                    .vsync          = false,
-                    .fullscreen     = false,
-                    .validationMode = ZHLN::ValidationMode::On,
-                    .headless       = true
-                }
-            };
-
-            auto engineRes = ZHLN::Engine::Create(cfg);
-            if (!engineRes) {
+            const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless Camera LookAt");
+            if (engine == nullptr) {
                 return std::unexpected(CameraLookAtError::EngineInitFailed);
             }
-
-            auto engine = std::move(engineRes.value());
-            engine->InitializeDefaultScene();
 
             auto& reg = engine->GetRegistry();
             auto& rc  = engine->GetRenderContext();

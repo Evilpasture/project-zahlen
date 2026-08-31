@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -10,35 +11,26 @@
 
 struct RenderComputeTestSuite {
     RenderComputeTestSuite() {
-        ZHLN::Fiber::InitMainThread();
-        ZHLN::TaskSystem::Init(2, 32, ZHLN::kMinimumFiberStackSize);
+        // Nested in the group binary's session: the task system and the pooled
+        // engine outlive this suite (see HeadlessEngineFixture.hpp).
+        ZHLN::Test::Headless::BeginSession();
     }
 
     ~RenderComputeTestSuite() {
-        ZHLN::TaskSystem::Shutdown();
+        ZHLN::Test::Headless::EndSession();
     }
 
     struct Tests {
         std::expected<void, ZHLN::Error> procedural_bake_compute_execution() {
-            const ZHLN::EngineConfig cfg {
-                .render = {
-                    .appName        = "LocalGPUComputeTest",
-                    .width          = 640,
-                    .height         = 480,
-                    .vsync          = false,
-                    .validationMode = ZHLN::ValidationMode::On,
-                    .headless       = true,
-                }
-            };
-
-            auto       engineRes   = ZHLN::Engine::Create(cfg);
-            const auto checkEngine = ZHLN::Test::AssertTrue(engineRes.has_value());
+            // Pooled: the compute bake does not care what earlier tests
+            // uploaded, and a device of its own costs a Vulkan instance.
+            const auto engine      = ZHLN::Test::Headless::AcquireEngine("LocalGPUComputeTest");
+            const auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
             if (!checkEngine) {
                 return checkEngine;
             }
 
-            const auto engine = std::move(engineRes.value());
-            auto&      rc     = engine->GetRenderContext();
+            auto& rc = engine->GetRenderContext();
 
             const auto bakeRes   = rc.BakeProceduralTexture(128, 128, 0, 4.0f, 1.0f);
             const auto checkBake = ZHLN::Test::AssertTrue(bakeRes.has_value());

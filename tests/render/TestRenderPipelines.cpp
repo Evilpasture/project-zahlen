@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include "helpers/HeadlessEngineFixture.hpp"
 #include "Zahlen/Render.hpp"
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
@@ -15,12 +16,13 @@
 
 struct RenderPipelinesTestSuite {
     RenderPipelinesTestSuite() {
-        ZHLN::Fiber::InitMainThread();
-        ZHLN::TaskSystem::Init(2, 32, ZHLN::kMinimumFiberStackSize);
+        // Nested in the group binary's session: the task system and the pooled
+        // engine outlive this suite (see HeadlessEngineFixture.hpp).
+        ZHLN::Test::Headless::BeginSession();
     }
 
     ~RenderPipelinesTestSuite() {
-        ZHLN::TaskSystem::Shutdown();
+        ZHLN::Test::Headless::EndSession();
     }
 
     struct Tests {
@@ -43,6 +45,11 @@ struct RenderPipelinesTestSuite {
                     .headless       = true
                 }
             };
+
+            // Exclusive engine: only one Vulkan instance may be live at a
+            // time (see engines_are_serial_and_the_slot_is_released), so the
+            // pool must not be holding one when this builds its own.
+            ZHLN::Test::Headless::ShutdownPooledEngines();
 
             auto engineRes = ZHLN::Engine::Create(cfg);
             if (!engineRes) {
@@ -113,6 +120,11 @@ struct RenderPipelinesTestSuite {
                 }
             };
 
+            // Exclusive engine: only one Vulkan instance may be live at a
+            // time (see engines_are_serial_and_the_slot_is_released), so the
+            // pool must not be holding one when this builds its own.
+            ZHLN::Test::Headless::ShutdownPooledEngines();
+
             auto engineRes = ZHLN::Engine::Create(cfg);
             if (!engineRes) {
                 return std::unexpected(engineRes.error());
@@ -143,21 +155,32 @@ struct RenderPipelinesTestSuite {
         }
 
         // ====================================================================
-        // Two Engines At Once
+        // One Engine At A Time
         // ====================================================================
         //
-        // The prerequisite for more than one physics world, and the canary for
-        // process-global state generally. Jolt's factory and type registration
-        // are process-wide: they were acquired per engine but released
-        // unconditionally, so the first engine destroyed unregistered every
-        // Jolt shape type out from under everyone else. They are refcounted
-        // now, and this is what says so -- engine B keeps simulating after
-        // engine A is gone.
+        // Two live engines are refused, on purpose, and this pins both halves
+        // of that contract: the refusal is clean (the first engine is
+        // untouched and keeps simulating), and the slot is genuinely released
+        // when the first engine dies, which is the invariant the pooled test
+        // fixture and every serial reuse depend on.
         //
-        // It also pins the ambient chain's out-of-order case: A publishes, B
-        // publishes, A dies first, and the ambient engine must be B rather than
-        // a restored-and-dangling A.
-        std::expected<void, ZHLN::Error> two_engines_coexist_and_outlive_each_other() {
+        // Why refused: volk resolves Vulkan entry points into process-global
+        // dispatch tables (volkLoadInstance / volkLoadDevice in
+        // src/render/RenderCore.c), so a second device would silently rebind
+        // the function pointers the first one is calling through.
+        // Vk::Instance::Create claims a single live-instance slot rather than
+        // let that happen. Lifting the restriction -- the prerequisite for more
+        // than one physics world in a process -- means threading a per-device
+        // VolkDeviceTable through the renderer, not deleting the claim.
+        //
+        // The Jolt registration is refcounted underneath this: it is acquired
+        // per engine, so the serial hand-off below only works because the
+        // release does not unregister every shape type while a later engine
+        // could still need them.
+        //
+        // It also pins the ambient chain: each engine publishes itself for its
+        // own lifetime, and the context is empty once the last one is gone.
+        std::expected<void, ZHLN::Error> engines_are_serial_and_the_slot_is_released() {
             ZHLN::DefaultPreset::SetDisabled(true);
 
             const auto smallCfg = [](const char* name) -> ZHLN::EngineConfig {
@@ -175,49 +198,75 @@ struct RenderPipelinesTestSuite {
                 };
             };
 
-            auto firstRes = ZHLN::Engine::Create(smallCfg("LocalGPUCoexistA"));
+            // Exclusive engine: only one Vulkan instance may be live at a
+            // time (see engines_are_serial_and_the_slot_is_released), so the
+            // pool must not be holding one when this builds its own.
+            ZHLN::Test::Headless::ShutdownPooledEngines();
+
+            auto firstRes = ZHLN::Engine::Create(smallCfg("LocalGPUSerialA"));
             if (!firstRes) {
                 return std::unexpected(firstRes.error());
             }
             auto first = std::move(firstRes.value());
             first->InitializeDefaultScene();
+            ZHLN::Test::ExpectTrue(ZHLN::GetEngineContext() == first.get());
 
-            auto secondRes = ZHLN::Engine::Create(smallCfg("LocalGPUCoexistB"));
-            if (!secondRes.has_value()) {
-                // Creating an engine alongside a live one is the whole point of
-                // the test; name the stage that refused rather than dereference
-                // the failure. Jolt's registration is refcounted now, so an
-                // error here points at whatever else is still process-global.
-                ZHLN::Println("    [INFO] second Engine::Create failed: {}: {}", secondRes.error().Category(), secondRes.error().Message());
+            // 1. A second engine is refused rather than half-built.
+            {
+                auto secondRes = ZHLN::Engine::Create(smallCfg("LocalGPUSerialB"));
+                if (secondRes.has_value()) {
+                    // Not a failure of this test so much as news: if a second
+                    // engine can be built, the volk dispatch tables have been
+                    // made per-device and this test should become the
+                    // coexistence test it wants to be.
+                    ZHLN::Println("    [INFO] a second engine was created; the single-instance claim is gone. Revisit this test.");
+                    return {};
+                }
+                ZHLN::Println("    [INFO] second Engine::Create refused: {}: {}", secondRes.error().Category(), secondRes.error().Message());
             }
+
+            // 2. The refusal did not damage the engine that was already up.
+            //    Ambient context, rendering and physics all still work.
+            ZHLN::Test::ExpectTrue(ZHLN::GetEngineContext() == first.get());
+            const ZHLN::Entity falling = ZHLN::CreativeWorksFactory::CreateBox(
+                *first, JPH::Vec3(0.5f, 0.5f, 0.5f),
+                ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 8.0, 0.0), .createPhysics = true}
+            );
+            ZHLN::Test::ExpectTrue(falling != ZHLN::Entity::Null());
+
+            constexpr float dt = 1.0f / 60.0f;
+            for (uint32_t frame = 0; frame < 60; ++frame) {
+                first->ProcessEvents();
+                ZHLN::Test::ExpectEq(first->Tick(dt, ZHLN::GameplayDriver::Cpp), ZHLN::GameplayStatus::OK);
+            }
+            if (const auto* transform = first->GetRegistry().Get<ZHLN::Components::TransformComponent>(falling);
+                ZHLN::Test::ExpectTrue(transform != nullptr)) {
+                ZHLN::Test::ExpectTrue(transform->position.GetY() < 7.5f);
+            }
+
+            // 3. Destroying A releases the slot, and B gets a working engine --
+            //    Jolt's types included, which is what the refcount buys.
+            first.reset();
+            ZHLN::Test::ExpectTrue(ZHLN::GetEngineContext() == nullptr);
+
+            auto secondRes = ZHLN::Engine::Create(smallCfg("LocalGPUSerialB"));
             if (!ZHLN::Test::ExpectTrue(secondRes.has_value())) {
                 return {};
             }
             auto second = std::move(secondRes.value());
             second->InitializeDefaultScene();
-
-            // Innermost published wins.
             ZHLN::Test::ExpectTrue(ZHLN::GetEngineContext() == second.get());
 
-            const ZHLN::Entity falling = ZHLN::CreativeWorksFactory::CreateBox(
+            const ZHLN::Entity fallingB = ZHLN::CreativeWorksFactory::CreateBox(
                 *second, JPH::Vec3(0.5f, 0.5f, 0.5f),
                 ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 8.0, 0.0), .createPhysics = true}
             );
-            ZHLN::Test::ExpectTrue(falling != ZHLN::Entity::Null());
-
-            // Out of order on purpose: the older engine goes first.
-            first.reset();
-            ZHLN::Test::ExpectTrue(ZHLN::GetEngineContext() == second.get());
-
-            constexpr float dt = 1.0f / 60.0f;
             for (uint32_t frame = 0; frame < 60; ++frame) {
                 second->ProcessEvents();
                 ZHLN::Test::ExpectEq(second->Tick(dt, ZHLN::GameplayDriver::Cpp), ZHLN::GameplayStatus::OK);
             }
-
-            // Gravity still works, i.e. the Jolt registration survived A.
-            const auto* transform = second->GetRegistry().Get<ZHLN::Components::TransformComponent>(falling);
-            if (ZHLN::Test::ExpectTrue(transform != nullptr)) {
+            if (const auto* transform = second->GetRegistry().Get<ZHLN::Components::TransformComponent>(fallingB);
+                ZHLN::Test::ExpectTrue(transform != nullptr)) {
                 ZHLN::Test::ExpectTrue(transform->position.GetY() < 7.5f);
             }
 

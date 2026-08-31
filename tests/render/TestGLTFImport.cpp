@@ -422,12 +422,13 @@ struct SourceDocument {
 
 struct GLTFImportTestSuite {
     GLTFImportTestSuite() {
-        ZHLN::Fiber::InitMainThread();
-        ZHLN::TaskSystem::Init(2, 32, ZHLN::kMinimumFiberStackSize);
+        // Nested in the group binary's session: the task system and the pooled
+        // engine outlive this suite (see HeadlessEngineFixture.hpp).
+        ZHLN::Test::Headless::BeginSession();
     }
 
     ~GLTFImportTestSuite() {
-        ZHLN::TaskSystem::Shutdown();
+        ZHLN::Test::Headless::EndSession();
     }
 
     struct Tests {
@@ -450,7 +451,7 @@ struct GLTFImportTestSuite {
             }
             const cgltf_data& document = *source.data;
 
-            const auto engine = ZHLN::Test::Headless::CreateEngine("Headless glTF Import");
+            const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless glTF Import");
             if (engine == nullptr) {
                 return std::unexpected(GLTFImportError::EngineInitFailed);
             }
@@ -586,13 +587,13 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::AssetUnavailable);
             }
 
-            const auto engine = ZHLN::Test::Headless::CreateEngine("Headless glTF Skin Import");
+            const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless glTF Skin Import");
             if (engine == nullptr) {
                 return std::unexpected(GLTFImportError::EngineInitFailed);
             }
 
-            // Each test builds its own engine, so this loads into a fresh prefab
-            // cache; the distinct path just keeps the two imports easy to tell
+            // The prefab cache lives on the pooled engine and outlives the
+            // test, so the distinct virtual path is what keeps the two imports
             // apart in the engine log.
             const ZHLN::ModelPrefab* prefab = ZHLN::CreativeWorksFactory::LoadModelPrefabFromMemory(*engine, bytes, "ProceduralAnimationBaseRig_Skins.glb");
             if (prefab == nullptr) {
@@ -719,7 +720,7 @@ struct GLTFImportTestSuite {
          * corrupting the node graph.
          */
         std::expected<void, ZHLN::Error> importer_applies_supported_khronos_extensions() {
-            const auto engine = ZHLN::Test::Headless::CreateEngine("Headless glTF Extensions");
+            const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless glTF Extensions");
             if (engine == nullptr) {
                 return std::unexpected(GLTFImportError::EngineInitFailed);
             }
@@ -811,7 +812,7 @@ struct GLTFImportTestSuite {
          * moved -- that is what the second half of this test pins down.
          */
         std::expected<void, ZHLN::Error> emissive_lights_follow_the_prefab_they_belong_to() {
-            const auto engine = ZHLN::Test::Headless::CreateEngine("Headless Emissive Spawn");
+            const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless Emissive Spawn");
             if (engine == nullptr) {
                 return std::unexpected(GLTFImportError::EngineInitFailed);
             }

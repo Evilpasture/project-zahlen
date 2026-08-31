@@ -244,6 +244,71 @@ struct SubRegionStats {
     return stats;
 }
 
+enum class HueChannel : uint8_t { Red, Green, Blue };
+
+/// Share of the window whose hue is dominated by `channel`, with the level
+/// floor expressed relative to the window's own brightest pixel.
+///
+/// MeasureSubRegion's dominant* counters gate on an absolute 8-bit floor of
+/// 45, which is the right call for a lit scene but reports a flat zero for a
+/// subject that is correct and unambiguous but dim: an unlit green emitter
+/// measuring meanRGB (0.1, 32.7, 0.1) -- a green-to-red ratio of nearly 300 --
+/// scores 0.00 green, because no pixel reaches 45. Use this when the question
+/// is "what colour is this subject" rather than "is this subject bright".
+///
+/// `levelFraction` of maxLuma keeps unwritten background out of the count
+/// (their channel ratios are noise), and `ratio` is the same 1.35 separation
+/// MeasureSubRegion uses.
+[[nodiscard]] inline double DominantHueShare(
+    const RgbImage& img, const NormalizedRect& rect, HueChannel channel, double ratio = 1.35, double levelFraction = 0.25
+) {
+    if (!img.Valid()) {
+        return 0.0;
+    }
+
+    const int x0 = std::clamp(static_cast<int>(rect.x0 * img.width), 0, img.width - 1);
+    const int y0 = std::clamp(static_cast<int>(rect.y0 * img.height), 0, img.height - 1);
+    const int x1 = std::clamp(static_cast<int>(rect.x1 * img.width), x0 + 1, img.width);
+    const int y1 = std::clamp(static_cast<int>(rect.y1 * img.height), y0 + 1, img.height);
+
+    double maxLuma = 0.0;
+    for (int y = y0; y < y1; ++y) {
+        for (int x = x0; x < x1; ++x) {
+            const size_t i = (static_cast<size_t>(y) * static_cast<size_t>(img.width) + static_cast<size_t>(x)) * 3u;
+            maxLuma        = std::max(maxLuma, Luma(img.rgb[i + 0], img.rgb[i + 1], img.rgb[i + 2]));
+        }
+    }
+    if (maxLuma <= 0.0) {
+        return 0.0;
+    }
+
+    const double floorLuma = levelFraction * maxLuma;
+    uint32_t     total     = 0;
+    uint32_t     dominant  = 0;
+
+    for (int y = y0; y < y1; ++y) {
+        for (int x = x0; x < x1; ++x) {
+            const size_t i = (static_cast<size_t>(y) * static_cast<size_t>(img.width) + static_cast<size_t>(x)) * 3u;
+            const double r = img.rgb[i + 0];
+            const double g = img.rgb[i + 1];
+            const double b = img.rgb[i + 2];
+            ++total;
+
+            if (Luma(img.rgb[i + 0], img.rgb[i + 1], img.rgb[i + 2]) < floorLuma) {
+                continue;
+            }
+
+            const double self  = channel == HueChannel::Red ? r : (channel == HueChannel::Green ? g : b);
+            const double other = channel == HueChannel::Red ? std::max(g, b) : (channel == HueChannel::Green ? std::max(r, b) : std::max(r, g));
+            if (self >= ratio * other) {
+                ++dominant;
+            }
+        }
+    }
+
+    return total > 0 ? static_cast<double>(dominant) / static_cast<double>(total) : 0.0;
+}
+
 // ============================================================================
 // Whole-Frame Statistics
 // ============================================================================

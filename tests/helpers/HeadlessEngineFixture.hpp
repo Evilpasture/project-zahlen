@@ -30,6 +30,8 @@
 #include <Zahlen/GraphicsSettings.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
+#include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/Types.hpp>
 // DisableTAA calls Registry::GetEntitiesWith and Registry::Patch directly.
 // <Zahlen/Engine.hpp> only forward-declares ECS::Registry, so this header must
@@ -37,6 +39,7 @@
 // first -- that is what made it compile only when a suite happened to include
 // <Zahlen/ecs/ECS.hpp> ahead of this one.
 #include <Zahlen/ecs/ECS.hpp>
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -200,14 +203,36 @@ struct EngineSlot {
     return slot;
 }
 
-/// appName is excluded on purpose: headless it only labels the log banner, and
-/// keying on it would rebuild the engine for a suite that names its scenes.
-[[nodiscard]] inline auto SameEngine(const EngineOptions& a, const EngineOptions& b) noexcept -> bool {
-    return a.width == b.width && a.height == b.height && a.maxBodies == b.maxBodies && a.maxBodyPairs == b.maxBodyPairs
-        && a.maxContactConstraints == b.maxContactConstraints && a.tempAllocatorSize == b.tempAllocatorSize;
+/// Can the engine built for `have` serve a request for `want`?
+///
+/// Not equality. appName is excluded because headless it only labels the log
+/// banner, and keying on it would rebuild for a suite that names its scenes.
+/// Resolution is excluded because a mismatch is handled by resizing rather
+/// than rebuilding. What is left is the physics slab, and there a *bigger*
+/// engine serves a smaller request perfectly well -- the capacities are
+/// ceilings, and no test asserts on them.
+[[nodiscard]] inline auto ServesRequest(const EngineOptions& have, const EngineOptions& want) noexcept -> bool {
+    return have.maxBodies >= want.maxBodies && have.maxBodyPairs >= want.maxBodyPairs && have.maxContactConstraints >= want.maxContactConstraints
+        && have.tempAllocatorSize >= want.tempAllocatorSize;
+}
+
+/// The configuration to rebuild at: the element-wise ceiling of everything
+/// asked for so far, so the pool converges on one engine that serves every
+/// suite instead of ping-ponging between two capacity profiles.
+[[nodiscard]] inline auto Widen(const EngineOptions& have, const EngineOptions& want) noexcept -> EngineOptions {
+    EngineOptions merged         = want;
+    merged.maxBodies             = std::max(have.maxBodies, want.maxBodies);
+    merged.maxBodyPairs          = std::max(have.maxBodyPairs, want.maxBodyPairs);
+    merged.maxContactConstraints = std::max(have.maxContactConstraints, want.maxContactConstraints);
+    merged.tempAllocatorSize     = std::max(have.tempAllocatorSize, want.tempAllocatorSize);
+    return merged;
 }
 
 } // namespace Detail
+
+/// Advances the engine by `frames` fixed steps, asserting each tick succeeded.
+/// (Defined below; AcquireEngine needs it to land a resize.)
+inline void TickFrames(ZHLN::Engine& engine, uint32_t frames, float dt = 1.0f / 60.0f);
 
 /// Hands out the pooled engine, reusing it when the configuration matches and
 /// rebuilding it when it does not.
@@ -219,15 +244,34 @@ struct EngineSlot {
 [[nodiscard]] inline auto AcquireEngine(const EngineOptions& opts = {}) -> EngineHandle {
     auto& slot = Detail::Slot();
 
-    if (slot.engine != nullptr && Detail::SameEngine(slot.opts, opts)) {
+    if (slot.engine != nullptr && Detail::ServesRequest(slot.opts, opts)) {
         ResetScene(*slot.engine);
+
+        // A resolution change is a target recreate, not a new device. The
+        // recreate lands in the next BeginFrame, so spend one tick on it here
+        // rather than leaving the first captured frame at the old extent.
+        //
+        // Measured against the live framebuffer rather than against the
+        // configuration this slot was built with: a test is free to call
+        // SetResolution itself (TestRenderHIZ does), and the pool has to
+        // notice and put the next test back at the size it asked for.
+        const auto live = slot.engine->GetRenderContext().GetFramebufferSize();
+        if (!live.has_value() || live->width != opts.width || live->height != opts.height) {
+            slot.engine->GetRenderContext().SetResolution(ZHLN::Extent2D {.width = opts.width, .height = opts.height});
+            slot.opts.width  = opts.width;
+            slot.opts.height = opts.height;
+            TickFrames(*slot.engine, 1);
+        }
         return EngineHandle {slot.engine.get()};
     }
 
-    // Destroy before create: one engine at a time, see EngineSlot.
+    // Destroy before create: one engine at a time, see EngineSlot. The new one
+    // is built wide enough for every request seen so far, so this runs once
+    // per binary rather than once per capacity profile.
+    const EngineOptions widened = slot.engine != nullptr ? Detail::Widen(slot.opts, opts) : Detail::Widen(opts, opts);
     slot.engine.reset();
-    slot.opts   = opts;
-    slot.engine = CreateEngine(opts);
+    slot.opts   = widened;
+    slot.engine = CreateEngine(widened);
     return EngineHandle {slot.engine.get()};
 }
 
@@ -246,6 +290,59 @@ struct EngineSlot {
 inline void ShutdownPooledEngines() {
     Detail::Slot().engine.reset();
 }
+
+// ============================================================================
+// Binary-Wide Session
+// ============================================================================
+//
+// The pool can only reuse an engine for as long as the task system that engine
+// schedules on is alive. With every suite calling TaskSystem::Init in its
+// constructor and TaskSystem::Shutdown in its destructor, the pooled engine had
+// to be destroyed at every suite boundary -- so a nine-suite binary paid at
+// least nine device bring-ups no matter how well the pool worked inside a
+// suite.
+//
+// BeginSession/EndSession refcount that. The group's main holds the outer
+// reference for the whole run, each suite takes a nested one, and the task
+// system (and with it the pooled engine) is only torn down when the outermost
+// reference goes -- after the last suite has finished, while the fiber main
+// thread is still up.
+//
+// Every suite in a group binary must use these. One suite calling
+// TaskSystem::Shutdown directly takes the task system out from under the
+// suites that run after it.
+
+namespace Detail {
+[[nodiscard]] inline auto SessionDepth() -> int& {
+    static int depth = 0;
+    return depth;
+}
+} // namespace Detail
+
+inline void BeginSession(uint32_t workerThreads = 2, uint32_t maxFibers = 32) {
+    ZHLN::Fiber::InitMainThread();
+    if (Detail::SessionDepth()++ == 0) {
+        ZHLN::TaskSystem::Init(workerThreads, maxFibers, ZHLN::kMinimumFiberStackSize);
+    }
+}
+
+inline void EndSession() {
+    if (--Detail::SessionDepth() == 0) {
+        // Order matters: engine teardown schedules work, so the pooled engine
+        // dies before the task system it schedules on.
+        ShutdownPooledEngines();
+        ZHLN::TaskSystem::Shutdown();
+    }
+}
+
+/// RAII form for a group binary's main.
+struct SessionScope {
+    explicit SessionScope(uint32_t workerThreads = 2, uint32_t maxFibers = 32) { BeginSession(workerThreads, maxFibers); }
+    ~SessionScope() { EndSession(); }
+
+    SessionScope(const SessionScope&)                    = delete;
+    auto operator=(const SessionScope&) -> SessionScope& = delete;
+};
 
 /// Turns off TAA and zeroes the jitter history.
 ///
@@ -268,7 +365,7 @@ inline void DisableTAA(ZHLN::Engine& engine) {
 }
 
 /// Advances the engine by `frames` fixed steps, asserting each tick succeeded.
-inline void TickFrames(ZHLN::Engine& engine, uint32_t frames, float dt = 1.0f / 60.0f) {
+inline void TickFrames(ZHLN::Engine& engine, uint32_t frames, float dt) {
     for (uint32_t i = 0; i < frames; ++i) {
         engine.ProcessEvents();
         const auto status = engine.Tick(dt, ZHLN::GameplayDriver::Cpp);

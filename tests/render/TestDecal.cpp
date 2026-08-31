@@ -34,13 +34,13 @@ enum class DecalTestError : uint8_t {
 
 struct DecalTestSuite {
     DecalTestSuite() {
-        ZHLN::Fiber::InitMainThread();
-        ZHLN::TaskSystem::Init(2, 32, ZHLN::kMinimumFiberStackSize);
+        // Nested in the group binary's session: the task system and the pooled
+        // engine outlive this suite (see HeadlessEngineFixture.hpp).
+        ZHLN::Test::Headless::BeginSession();
     }
 
     ~DecalTestSuite() {
-        ZHLN::Test::Headless::ShutdownPooledEngines();
-        ZHLN::TaskSystem::Shutdown();
+        ZHLN::Test::Headless::EndSession();
     }
 
     /// Pooled: one engine per resolution for the whole binary, with the

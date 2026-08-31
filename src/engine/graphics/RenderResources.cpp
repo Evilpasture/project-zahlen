@@ -261,7 +261,16 @@ void RenderContext::CheckShaderReload() noexcept {
     }
 }
 
-void RenderContext::SetResolution([[maybe_unused]] const Extent2D& res) {
+void RenderContext::SetResolution(const Extent2D& res) {
+    // With a real window the compositor owns the size: the request is advisory
+    // and the recreate re-queries glfwGetFramebufferSize, which is why this
+    // used to ignore its argument entirely. Headless (and TTY) there is nothing
+    // to ask -- Window::GetSize just returns what it was told -- so the extent
+    // has to be written there or the recreate reproduces the old size and the
+    // call is a no-op.
+    if (res.width > 0 && res.height > 0 && _impl->window.IsHeadless()) {
+        _impl->window.SetSize(res.width, res.height);
+    }
     _impl->resized = true;
 }
 

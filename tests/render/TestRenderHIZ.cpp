@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
@@ -31,38 +32,25 @@ enum class HiZTestError : uint32_t {
 
 struct HiZTestSuite {
     HiZTestSuite() {
-        ZHLN::Fiber::InitMainThread();
-        ZHLN::TaskSystem::Init(2, 32, ZHLN::kMinimumFiberStackSize);
+        // Nested in the group binary's session: the task system and the pooled
+        // engine outlive this suite (see HeadlessEngineFixture.hpp).
+        ZHLN::Test::Headless::BeginSession();
     }
 
     ~HiZTestSuite() {
-        ZHLN::TaskSystem::Shutdown();
+        ZHLN::Test::Headless::EndSession();
     }
 
-    static auto CreateTestEngine(uint32_t width = 1280, uint32_t height = 720) -> ZHLN::ScopedEngine {
-        ZHLN::DefaultPreset::SetDisabled(true);
-
-        const ZHLN::EngineConfig cfg {
-            .physics = {.maxBodies = 256, .maxBodyPairs = 512, .maxContactConstraints = 512, .tempAllocatorSize = 8 * 1024 * 1024},
-            .render  = {
-                .appName        = "Headless Hi-Z Test",
-                .width          = width,
-                .height         = height,
-                .vsync          = false,
-                .fullscreen     = false,
-                .validationMode = ZHLN::ValidationMode::On,
-                .headless       = true
-            }
-        };
-
-        auto engineRes = ZHLN::Engine::Create(cfg);
-        if (!engineRes) {
-            return {};
-        }
-
-        auto engine = std::move(engineRes.value());
-        engine->InitializeDefaultScene();
-        return engine;
+    /// Pooled: the binary keeps one engine alive and the scene is what gets
+    /// thrown away between tests. Creating a Vulkan instance per test is what
+    /// eventually exhausts the loader's static TLS and turns the tail of a
+    /// group into "vkCreateInstance: Found no drivers!".
+    static auto CreateTestEngine(uint32_t width = 1280, uint32_t height = 720) -> ZHLN::Test::Headless::EngineHandle {
+        return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
+            .appName               = "Headless Hi-Z Test",
+            .width                 = width,
+            .height                = height,
+        });
     }
 
     struct Tests {
@@ -249,6 +237,17 @@ struct HiZTestSuite {
                 engine->ProcessEvents();
                 const auto status = engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
                 ZHLN::Test::ExpectEq(status, ZHLN::GameplayStatus::OK);
+            }
+
+            // The resize actually took. Headless there is no compositor to ask
+            // for the framebuffer size, so SetResolution writing the extent
+            // through to the window is the only thing that makes this true --
+            // without it the call flagged a recreate at the old size and the
+            // ten frames above proved nothing.
+            const auto resized = engine->GetRenderContext().GetFramebufferSize();
+            if (ZHLN::Test::ExpectTrue(resized.has_value())) {
+                ZHLN::Test::ExpectEq(resized->width, 800u);
+                ZHLN::Test::ExpectEq(resized->height, 600u);
             }
 
             return {};
