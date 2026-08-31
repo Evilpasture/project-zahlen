@@ -606,8 +606,8 @@ void SynchronizeLocomotionTrack(
             .maxBounceHeight  = 0.0f,    // No procedural bounce - use authored animation
             .bounceGravity    = 9.81f,
             .pelvisSwayScale  = 0.0f,    // No procedural sway - use authored animation
-            .armSwingScale    = 1.0f,
-            .forwardLeanScale = 1.0f,
+            .armSwingScale    = 0.0f,    // No procedural arm swing - use authored animation
+            .forwardLeanScale = 0.0f,    // No forward lean - use authored animation
             .lateralBankScale = 0.0f,    // No lateral lean for walking
         };
         constexpr GaitPreset kRunPreset {
