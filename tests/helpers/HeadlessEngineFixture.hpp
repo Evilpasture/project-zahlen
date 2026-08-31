@@ -43,7 +43,6 @@
 #include <string>
 #include <string_view>
 #include <utility>
-#include <vector>
 
 namespace ZHLN::Test::Headless {
 
@@ -59,6 +58,10 @@ struct EngineOptions {
 
 /// Creates a headless engine with validation enabled and the default preset
 /// suppressed, then seeds the default scene.
+///
+/// Prefer AcquireEngine below unless the test genuinely needs a cold device:
+/// the engine records itself in `g_CurrentEngine`/`s_GlobalEngine` on init, so
+/// a directly-owned engine must not be alive at the same time as a pooled one.
 ///
 /// Returns nullptr on failure; callers assert rather than dereference. The
 /// default preset is disabled process-wide, which is what keeps the engine
@@ -121,7 +124,7 @@ struct EngineOptions {
 // to do with what it was measuring. That is what took out the tail of
 // GPU_Lighting.
 //
-// So the engine is pooled and the *scene* is what gets thrown away between
+// So one engine is kept alive and the *scene* is what gets thrown away between
 // tests. A suite that reuses an engine must not assume a virgin process: it
 // gets a cleared registry with a freshly seeded default scene, but the render
 // context still holds the meshes, materials and textures earlier tests
@@ -173,19 +176,32 @@ inline void ResetScene(ZHLN::Engine& engine) {
 
 namespace Detail {
 
-struct PooledEngine {
-    EngineOptions                 opts;
+/// One slot, not a map.
+///
+/// Engine::InitInternal assigns `g_CurrentEngine` and `s_GlobalEngine`, and
+/// GetEngineContext() -- which is how CreativeWorksFactory reaches the
+/// registry, among others -- reads them. Two live engines therefore cannot
+/// coexist: the second one to be created owns the globals, and destroying
+/// either leaves them dangling. Keeping two pooled engines around is what made
+/// the 320x240 engine fail to initialise and then took the 640x480 one down
+/// with it, as a use-after-free inside CreateFontAtlasTexture.
+///
+/// So a configuration change destroys the current engine before building the
+/// next, exactly as the per-test engines used to. That preserves the
+/// one-engine-at-a-time invariant the engine actually has, and still collapses
+/// every run of same-resolution tests into a single initialisation.
+struct EngineSlot {
+    EngineOptions                 opts {};
     std::unique_ptr<ZHLN::Engine> engine;
-    bool                          creationFailed = false;
 };
 
-[[nodiscard]] inline auto EnginePool() -> std::vector<PooledEngine>& {
-    static std::vector<PooledEngine> pool;
-    return pool;
+[[nodiscard]] inline auto Slot() -> EngineSlot& {
+    static EngineSlot slot;
+    return slot;
 }
 
 /// appName is excluded on purpose: headless it only labels the log banner, and
-/// keying on it would hand two engines to a suite that names its scenes.
+/// keying on it would rebuild the engine for a suite that names its scenes.
 [[nodiscard]] inline auto SameEngine(const EngineOptions& a, const EngineOptions& b) noexcept -> bool {
     return a.width == b.width && a.height == b.height && a.maxBodies == b.maxBodies && a.maxBodyPairs == b.maxBodyPairs
         && a.maxContactConstraints == b.maxContactConstraints && a.tempAllocatorSize == b.tempAllocatorSize;
@@ -193,30 +209,27 @@ struct PooledEngine {
 
 } // namespace Detail
 
-/// Hands out a pooled engine matching `opts`, creating one on first use and
-/// resetting the scene on every use after that.
+/// Hands out the pooled engine, reusing it when the configuration matches and
+/// rebuilding it when it does not.
 ///
 /// Returns a null handle if the engine could not be created, matching
-/// CreateEngine; a configuration that failed once is not retried, because the
-/// usual cause (no device, no drivers) will not have fixed itself and the
-/// retry costs the suite its remaining timeout.
+/// CreateEngine. A failed configuration is retried on the next request rather
+/// than remembered: the old per-test code retried too, and with only one engine
+/// alive at a time a failure is a real failure rather than a collision.
 [[nodiscard]] inline auto AcquireEngine(const EngineOptions& opts = {}) -> EngineHandle {
-    auto& pool = Detail::EnginePool();
-    for (auto& slot: pool) {
-        if (!Detail::SameEngine(slot.opts, opts)) {
-            continue;
-        }
-        if (slot.creationFailed) {
-            return EngineHandle {};
-        }
+    auto& slot = Detail::Slot();
+
+    if (slot.engine != nullptr && Detail::SameEngine(slot.opts, opts)) {
         ResetScene(*slot.engine);
         return EngineHandle {slot.engine.get()};
     }
 
-    auto                engine = CreateEngine(opts);
-    ZHLN::Engine* const raw    = engine.get();
-    pool.push_back(Detail::PooledEngine {.opts = opts, .engine = std::move(engine), .creationFailed = raw == nullptr});
-    return EngineHandle {raw};
+    // Destroy before create. Both orderings leak the engine globals for an
+    // instant; only this one avoids ever having two engines fighting over them.
+    slot.engine.reset();
+    slot.opts   = opts;
+    slot.engine = CreateEngine(opts);
+    return EngineHandle {slot.engine.get()};
 }
 
 /// Convenience overload mirroring the CreateEngine one.
@@ -224,7 +237,7 @@ struct PooledEngine {
     return AcquireEngine(EngineOptions {.appName = appName, .width = width, .height = height});
 }
 
-/// Destroys every pooled engine.
+/// Destroys the pooled engine.
 ///
 /// Must run before ZHLN::TaskSystem::Shutdown -- engine teardown schedules
 /// work -- which in these suites means the suite destructor, immediately
@@ -232,7 +245,7 @@ struct PooledEngine {
 /// Vulkan device down after the task system and the fiber main thread are
 /// already gone.
 inline void ShutdownPooledEngines() {
-    Detail::EnginePool().clear();
+    Detail::Slot().engine.reset();
 }
 
 /// Turns off TAA and zeroes the jitter history.
