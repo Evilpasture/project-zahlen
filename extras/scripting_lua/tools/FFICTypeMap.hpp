@@ -142,6 +142,14 @@ consteval auto MapCType() -> CDecl {
     } else if constexpr (detail::FixedStringTraits<U>::available) {
         // char data[N]; size_t len;  -- emitted as a named struct per capacity.
         d.base = "ZHLN_FixedString";
+    } else if constexpr (std::is_array_v<U>) {
+        // A raw C array member, e.g. `char _pad[3]`. remove_cvref_t does not
+        // strip array-ness, so without this branch it falls through to the
+        // opaque case -- correct bytes, but needlessly unnamed.
+        constexpr auto element = MapCType<std::remove_extent_t<U>>();
+        d.base                 = element.base;
+        d.count                = element.count * static_cast<int>(std::extent_v<U>);
+        d.aligned16            = element.aligned16;
     } else if constexpr (detail::ArrayTraits<U>::available) {
         constexpr auto element = MapCType<typename detail::ArrayTraits<U>::element>();
         d.base                 = element.base;

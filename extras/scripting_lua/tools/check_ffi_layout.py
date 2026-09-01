@@ -110,8 +110,10 @@ def parse_structs(cdef_text: str, wanted: set[str]) -> dict[str, list[str]]:
             continue
         fields: list[str] = []
         for line in body.strip().splitlines():
-            line = line.strip().rstrip(";").strip()
-            if not line or line.startswith("//"):
+            # The generator annotates opaque blobs with a trailing comment;
+            # strip it or its words parse as field names.
+            line = line.split("//")[0].strip().rstrip(";").strip()
+            if not line:
                 continue
             parts = line.split()
             if len(parts) < 2:
@@ -193,6 +195,14 @@ def main() -> int:
         help="Extra -I for the C++ probe (needs at least include/ and Jolt).",
     )
     ap.add_argument(
+        "--cxx-flag",
+        action="append",
+        default=[],
+        help="Extra raw flag for the C++ probe. Reflection-dependent members "
+        "(std::bitset<EnumCount<E>()>) change size with -freflection, so the "
+        "probe must be built the way the engine is or it will disagree.",
+    )
+    ap.add_argument(
         "--cxx-define",
         action="append",
         default=["JPH_DOUBLE_PRECISION"],
@@ -232,6 +242,7 @@ def main() -> int:
             cxx_src.write_text(emit_cxx_offsets(probe))
             proc = subprocess.run(
                 [args.cxx_compiler, "-std=c++26", "-w",
+                 *args.cxx_flag,
                  *[f"-I{i}" for i in args.cxx_include],
                  *[f"-D{d}" for d in args.cxx_define],
                  str(cxx_src), "-o", str(tmp_path / "cxx_probe")],

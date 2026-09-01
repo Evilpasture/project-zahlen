@@ -142,6 +142,18 @@ int main() {
     Check<std::array<float, 4>>("std::array<float,4>");
     Check<std::array<Entity, 8>>("std::array<Entity,8>");
 
+    // Raw C array members. These appear as hand-written padding inside
+    // components (UIRectComponent::_free_space, UIStyleComponent::_pad) and
+    // used to fall through to the opaque case.
+    struct RawArrays {
+        char     pad3[3];
+        uint8_t  bytes16[16];
+        float    quads[8];
+    };
+    Check<decltype(RawArrays::pad3)>("char[3]");
+    Check<decltype(RawArrays::bytes16)>("uint8_t[16]");
+    Check<decltype(RawArrays::quads)>("float[8]");
+
     printf("types with no C layout\n");
     Check<Components::UIChildCacheComponent>("UIChildCacheComponent");
 

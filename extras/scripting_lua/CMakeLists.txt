@@ -86,10 +86,24 @@ add_custom_command(
 # Audit the generated layouts against Components.hpp. It compiles both sides and
 # compares sizeof and every offset, so a mapping the generator gets wrong fails
 # here rather than corrupting memory from a script at runtime.
+# The probe has to be built the way the engine is. Some members are sized
+# by reflection -- InputStateComponent::keys is a bitset sized by
+# EnumCount<KeyCode>(), 16 bytes with reflection and 1 without -- so auditing
+# against a differently-configured compile reports drift that is not there.
+if(COMPILER_HAS_REFLECTION)
+    set(FFI_LAYOUT_REFLECTION_FLAGS
+        "--cxx-flag=-freflection"
+        "--cxx-flag=-D__cpp_impl_reflection=202603L"
+    )
+else()
+    set(FFI_LAYOUT_REFLECTION_FLAGS "")
+endif()
+
 add_custom_target(check_ffi_layout
     COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_ffi_layout.py"
-            --generated ${GEN_FFI_CDEF_OUTPUT}
+            --cdef ${GEN_FFI_CDEF_OUTPUT}
+            ${FFI_LAYOUT_REFLECTION_FLAGS}
             --cxx-compiler ${CMAKE_CXX_COMPILER}
             --cxx-include ${PROJECT_SOURCE_DIR}/include
             --cxx-include ${PROJECT_SOURCE_DIR}/extern/JoltPhysics
