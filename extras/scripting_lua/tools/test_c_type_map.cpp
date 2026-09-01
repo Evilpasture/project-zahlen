@@ -184,6 +184,15 @@ int main() {
         static_assert(decl.count == 1);
     }
 
+    // The predicate is owned by ZHLN::Reflect::TypeName itself: MapCType just
+    // forwards its lambda there. A nullptr return keeps the type's own
+    // spelling, so the overloaded form agrees with the no-argument form both
+    // with reflection (identifier/display spelling) and without (empty).
+    constexpr auto keep = [](std::string_view) -> const char* { return nullptr; };
+    static_assert(ZHLN::Reflect::TypeName<std::uint32_t>(keep) == ZHLN::Reflect::TypeName<std::uint32_t>());
+    static_assert(ZHLN::Reflect::TypeName<Components::UIChildCacheComponent>(keep) ==
+                  ZHLN::Reflect::TypeName<Components::UIChildCacheComponent>());
+
     printf("\n%s (%d failure%s)\n", failures == 0 ? "PASS" : "FAIL",
            failures, failures == 1 ? "" : "s");
     return failures == 0 ? 0 : 1;

@@ -14,14 +14,14 @@
 //     with no static-reflection support.
 //
 //  2. Names are obtained through the project's reflection header
-//     (Zahlen/Core/Reflection.hpp, ZHLN::Reflect::TypeName) when the
-//     compiler has static reflection: the type's own spelling is handed to a
-//     caller-supplied compile-time predicate -- a lambda -- which returns the
-//     C name to emit or nullptr to keep the built-in mapping. That is what
-//     lets a previously opaque field (std::bitset, HashMap, an intrusive Ref,
-//     ...) be named by the generator without editing this file, and what lets
-//     any emitted spelling be renamed, e.g. "unsigned int" -> "uint32_t" or
-//     "Entity" -> "ZHLN_Entity".
+//     (Zahlen/Core/Reflection.hpp). ZHLN::Reflect::TypeName already accepts
+//     an optional compile-time rename predicate -- the lambda -- which sees
+//     the type's reflected spelling and returns the C name to emit or nullptr
+//     to keep the built-in mapping. That is what lets a previously opaque
+//     field (std::bitset, HashMap, an intrusive Ref, ...) be named by the
+//     generator without editing this file, and what lets any emitted spelling
+//     be renamed, e.g. "unsigned int" -> "uint32_t" or "Entity" ->
+//     "ZHLN_Entity". The mapper just forwards its predicate to TypeName.
 //
 // The rule this file exists to enforce: never guess a layout. A name never
 // decides size or alignment -- sizeof/alignof always do -- and the caller
@@ -107,6 +107,15 @@ namespace detail {
         return ZHLN::Reflect::TypeName<std::remove_cvref_t<T>>();
     }
 
+    /// The spelling after TypeName's rename predicate was applied. TypeName
+    /// owns the predicate hook, so the mapper forwards its lambda there and
+    /// then compares against the un-renamed spelling to tell a real override
+    /// from "no opinion".
+    template <typename T, typename NameOverride>
+    consteval auto ReflectedName(NameOverride rename) -> std::string_view {
+        return ZHLN::Reflect::TypeName<std::remove_cvref_t<T>>(rename);
+    }
+
     /// The default vocabulary: spellings whose C name is the C++ name itself.
     /// This is what the no-argument MapCType<T>() uses. Return nullptr to
     /// leave the decision to the built-in (type-based) mapping below.
@@ -167,11 +176,12 @@ namespace detail {
 
 /// Map a C++ field type to its C declaration.
 ///
-/// `rename` is a compile-time predicate called with the type's reflected
-/// spelling. Returning a non-null string overrides the C base name; returning
-/// nullptr falls through to the built-in mapping. Layout is always derived
-/// from the C++ type itself (sizeof/alignof, extents, alignment), never from
-/// the name -- the predicate can only change how the type is spelled.
+/// `rename` is a compile-time predicate forwarded to ZHLN::Reflect::TypeName:
+/// it receives the type's reflected spelling and may return a replacement
+/// name; returning nullptr keeps the type's own spelling. Layout is always
+/// derived from the C++ type itself (sizeof/alignof, extents, alignment),
+/// never from the name -- the predicate can only change how the type is
+/// spelled.
 ///
 /// Returns an opaque CDecl (base == nullptr, size/align still populated) for
 /// anything the predicate and the built-in mapping both refuse to name --
@@ -185,8 +195,13 @@ consteval auto MapCType(NameOverride rename) -> CDecl {
     d.size  = sizeof(U);
     d.align = alignof(U);
 
-    const std::string_view spelling = detail::ReflectedName<U>();
-    const char*            name     = rename(spelling);
+    // TypeName applies the rename predicate itself. A predicate that returns
+    // the type's own spelling is indistinguishable from "no opinion" and falls
+    // through to the built-in mapping below -- an identity rename never
+    // changes the emitted C declaration.
+    const std::string_view original  = detail::ReflectedName<U>();
+    const std::string_view effective = detail::ReflectedName<U>(rename);
+    const char*            name      = effective == original ? nullptr : effective.data();
 
     if constexpr (std::is_enum_v<U>) {
         // An enum occupies exactly its underlying type.

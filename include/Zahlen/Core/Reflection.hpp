@@ -487,6 +487,28 @@ consteval auto TypeName() -> std::string_view {
     return detail::TypeReflector<std::remove_cvref_t<T>>::name();
 }
 
+/// TypeName with an optional rename predicate.
+///
+/// `rename` is a compile-time callable invoked with the type's reflected
+/// spelling; a non-null return replaces the name with the returned string,
+/// nullptr keeps the type's own spelling. This is a naming hook only: the
+/// predicate can never change what reflection reports about the type, and the
+/// no-argument form above remains the canonical spelling used everywhere else.
+///
+/// Typical use is project-specific spellings without forking this file, e.g.
+/// `TypeName<uint32_t>([](std::string_view s) -> const char* {
+///     return s == "unsigned int" ? "uint32_t" : nullptr;
+/// })`.
+template <typename T, typename NameOverride>
+consteval auto TypeName(NameOverride rename) -> std::string_view {
+    const std::string_view spelling   = TypeName<T>();
+    const char*            overridden = rename(spelling);
+    if (overridden != nullptr) {
+        return overridden;
+    }
+    return spelling;
+}
+
 template <typename T, typename F>
 constexpr void ForEachBase(F&& f) {
     [:Expand(detail::BasesOf<T>()):] >> [&]<auto base>() -> auto { f.template operator()<typename[:std::meta::type_of(base):]>(); };
@@ -1013,6 +1035,20 @@ constexpr decltype(auto) GetFieldByName(T&& /*unused*/) {
 template <typename T>
 consteval std::string_view TypeName() {
     return "";
+}
+
+/// TypeName with an optional rename predicate (fallback build). The compiler
+/// has no reflection, so the predicate receives an empty spelling and may
+/// still supply a name; returning nullptr yields the same empty spelling as
+/// the no-argument form above.
+template <typename T, typename NameOverride>
+consteval auto TypeName(NameOverride rename) -> std::string_view {
+    const std::string_view spelling   = TypeName<T>();
+    const char*            overridden = rename(spelling);
+    if (overridden != nullptr) {
+        return overridden;
+    }
+    return spelling;
 }
 
 template <typename T, typename F>
