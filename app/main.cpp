@@ -1,7 +1,11 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// File: src/main.cpp
+// File: app/main.cpp
+//
+// The composition root. It lives outside src/ because wiring an engine together
+// means naming the optional layers it runs with, and the core library may not
+// know extras exist. See include/ARCHITECTURE.md 1.2.
 #include "engine/Platform.hpp"
 #if defined(ZHLN_HAS_SCRIPTING)
 // Core has no scripting of its own; the composition root is what names the

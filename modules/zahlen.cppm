@@ -410,7 +410,6 @@ using ZHLN::AudioWaveformType;
 
 // Scripting
 using ZHLN::ScriptRunner;
-using ZHLN::ScriptVal;
 
 // Engine
 using ZHLN::CatalogEntry;
