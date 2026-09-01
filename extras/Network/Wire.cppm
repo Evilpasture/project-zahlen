@@ -777,20 +777,13 @@ struct RangeTrait<Range<MinValue, MaxValue>>: std::true_type {
     static constexpr long double maxValue  = static_cast<long double>(Range<MinValue, MaxValue>::maxValue);
 };
 
-template <auto MemberInfo>
-consteval auto MemberRange() -> RangeSpec {
-    RangeSpec result {};
-    ZHLN::Reflect::ForEachAnnotationType<MemberInfo>([&]<typename Annotation>() {
-        if constexpr (RangeTrait<Annotation>::is_range) {
-            if (!result.active) {
-                result.active   = true;
-                result.minValue = RangeTrait<Annotation>::minValue;
-                result.maxValue = RangeTrait<Annotation>::maxValue;
-            }
-        }
-    });
-    return result;
-}
+// NOTE: no module-private function template here. An instantiation of a
+// non-exported template with a consumer-side reflection argument (e.g.
+// ^^ClientHello::userId) is a module-scoped symbol that only the module's own
+// TU can define, so clang leaves it undefined when the exported DecodeAggregate
+// is instantiated in an importer (mold: undefined MemberRange<...>). The range
+// walk therefore lives inline in DecodeAggregate's body; RangeTrait stays a
+// private class template (no emitted symbol).
 
 template <typename Annotation>
 struct VersionTrait: std::false_type {
@@ -1288,7 +1281,22 @@ auto DecodeAggregate(T& out, Reader& reader) -> Result<void> {
                 Result<void>    res = reader.Get(ZHLN::Reflect::MemberValue<member>(out));
                 if (res) {
                     if constexpr (std::is_arithmetic_v<Field>) {
-                        constexpr auto range = MemberRange<member>();
+                        // Range extraction inlined into the exported template
+                        // body — see the NOTE above RangeTrait for why this must
+                        // not be a module-private function template.
+                        constexpr auto range = [] {
+                            RangeSpec result {};
+                            ZHLN::Reflect::ForEachAnnotationType<member>([&]<typename Annotation>() {
+                                if constexpr (RangeTrait<Annotation>::is_range) {
+                                    if (!result.active) {
+                                        result.active   = true;
+                                        result.minValue = RangeTrait<Annotation>::minValue;
+                                        result.maxValue = RangeTrait<Annotation>::maxValue;
+                                    }
+                                }
+                            });
+                            return result;
+                        }();
                         if constexpr (range.active) {
                             const long double current = static_cast<long double>(ZHLN::Reflect::MemberValue<member>(out));
                             if (current < range.minValue || current > range.maxValue) {
