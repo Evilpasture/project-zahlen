@@ -140,6 +140,18 @@ class ZHLN_API Engine {
   public:
     using UICallback = std::function<void(Engine&)>;
 
+    /// Notified from HandleDeviceLost() once the replacement VkDevice exists and
+    /// core has rebuilt the GPU state it owns.
+    ///
+    /// Anything that uploaded GPU resources from outside the engine -- an
+    /// importer, a host renderer, a plugin -- re-uploads them here. Core cannot
+    /// do it for them: the handles those owners were holding died with the old
+    /// device, and recreating them means re-reading the source file, which only
+    /// the owner knows how to do. Callbacks run in registration order against
+    /// the new context. The list lives on Engine rather than on RenderContext
+    /// because the context is destroyed and rebuilt on the way through.
+    using DeviceLostCallback = std::function<void(Engine&)>;
+
     Engine();
     /// Legacy direct construction. Unlike Engine::Create these do not publish
     /// the engine for GetEngineContext(); open an EngineContextScope over the
@@ -184,6 +196,15 @@ class ZHLN_API Engine {
     [[nodiscard]] auto GetCurrentFrame() const noexcept -> uint64_t;
 
     void SetUICallback(UICallback callback);
+
+    /// Subscribes to the device-lost notification. See DeviceLostCallback.
+    /// Idempotent only in the sense that a null callback is ignored; adding the
+    /// same function twice registers it twice.
+    void AddDeviceLostCallback(DeviceLostCallback callback);
+
+    /// How many device-lost subscribers are registered. Exposed so a host can
+    /// assert that the owners it expects actually installed themselves.
+    [[nodiscard]] auto DeviceLostCallbackCount() const noexcept -> size_t;
     /// The host editor callback, or nullptr when none is installed. Exposed so
     /// the frame scheduler can run it as an ordinary phase step.
     [[nodiscard]] auto GetUICallback() const noexcept -> const UICallback*;

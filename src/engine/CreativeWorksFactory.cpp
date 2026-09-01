@@ -763,16 +763,15 @@ void SetupPlayerRagdoll(Engine& engine, Entity playerEntity, std::span<const Ent
     SetupPlayerRagdoll(engine.GetPhysicsContext(), engine.GetRegistry(), playerEntity, visualParts);
 }
 
-void RebuildVulkanResources(RenderContext& ctx, CreativeWorksManager& /*cwMgr*/, ECS::Registry& reg) {
+void RebuildVulkanResources(RenderContext& ctx, ECS::Registry& reg) {
     ZHLN::Log("[Engine] Device Lost: Clearing GPU asset cache. Next frame will re-upload assets lazily.");
 
     ctx.ClearGPUCaches();
     CreateFontAtlasTexture(ctx, reg);
 
-    // Rebuilding an imported model's meshes and materials means re-parsing its .glb, which only
-    // the importer can do. An application that loaded models through extras/glTF rebuilds them
-    // with ZHLN::GLTF::RebuildCachedPrefabs() after a device loss; Core owns the caches above,
-    // which the next frame re-populates lazily as it touches them.
+    // Everything past this point belongs to an owner outside core. Rebuilding an imported model's
+    // meshes and materials means re-parsing its .glb, which only the importer can do, so those
+    // owners subscribe an Engine::DeviceLostCallback and re-upload once this returns.
 }
 
 auto CreateTerrainFromData(

@@ -1012,4 +1012,12 @@ void RebuildCachedPrefabs(RenderContext& ctx, CreativeWorksManager& cwMgr) {
     }
 }
 
+void InstallDeviceLostHandler(Engine& engine) {
+    engine.AddDeviceLostCallback(
+        [](Engine& e) {
+            RebuildCachedPrefabs(e.GetRenderContext(), e.GetCreativeWorksManager());
+        }
+    );
+}
+
 } // namespace ZHLN::GLTF

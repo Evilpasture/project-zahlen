@@ -47,7 +47,15 @@ auto InstantiatePrefabFromMemory(
 /// under the asset keys the ECS instances were built against. This is the
 /// device-lost half of importing: after a VkDevice is recreated the GPU handles
 /// in a ModelPrefab are dead, and recovering them means reading the .glb again.
-/// Call it once after CreativeWorksFactory::RebuildVulkanResources().
 void RebuildCachedPrefabs(RenderContext& ctx, CreativeWorksManager& cwMgr);
+
+/// Subscribes RebuildCachedPrefabs to the engine's device-lost notification.
+///
+/// Call it once after creating the Engine, next to the first import. This is a
+/// subscription, not a backend: it tells core that imported models hold GPU
+/// resources core cannot recreate, and core calls back once it has rebuilt its
+/// own. An application that never imports a model needs no call at all, and
+/// registering twice would rebuild twice.
+void InstallDeviceLostHandler(Engine& engine);
 } // namespace GLTF
 } // namespace ZHLN

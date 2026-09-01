@@ -165,6 +165,10 @@ auto InstantiatePrefab(Engine& engine, std::string_view path, const SpawnParams&
 
 void SetupPlayerRagdoll(PhysicsContext& pc, ECS::Registry& reg, Entity playerEntity, std::span<const Entity> visualParts);
 void SetupPlayerRagdoll(Engine& engine, Entity playerEntity, std::span<const Entity> visualParts);
-void RebuildVulkanResources(RenderContext& ctx, CreativeWorksManager& cwMgr, ECS::Registry& reg);
+/// Rebuilds the GPU state core owns after a device loss: the GPU caches are
+/// cleared and the font atlas is recreated. Resources that an owner outside the
+/// engine uploaded are not touched here -- subscribe an
+/// Engine::DeviceLostCallback to re-upload those.
+void RebuildVulkanResources(RenderContext& ctx, ECS::Registry& reg);
 
 } // namespace ZHLN::CreativeWorksFactory

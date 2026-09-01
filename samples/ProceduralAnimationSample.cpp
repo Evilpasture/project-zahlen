@@ -676,6 +676,7 @@ auto main(int argc, char* argv[]) -> int {
     // caches the prefab, after which CreativeWorksFactory::LoadModelPrefab(rigPath)
     // -- the path Scene::ShapeKind::Prefab and the scripting bindings use -- finds
     // it without core knowing a parser exists.
+    ZHLN::GLTF::InstallDeviceLostHandler(*engine);
     ZHLN::ModelPrefab* const prefab = ZHLN::GLTF::LoadGLBPrefab(engine->GetRenderContext(), engine->GetCreativeWorksManager(), rigPath);
 
     const ZHLN::Locomotion::CharacterBoundsEstimate bounds          = prefab != nullptr ? ZHLN::Locomotion::EstimateCharacterBounds(*prefab) :

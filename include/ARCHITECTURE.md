@@ -175,20 +175,33 @@ Core has no JSON, TOML or model-file dependency at all, so a core-only build
   cache, Core reads it, and nothing has to be installed first. In a core-only
   build nothing ever fills the cache, so the lookup returns null — a core-only
   build simply has no model files, the same way it has no JSON.
-* **Recovering from device loss re-imports.** The GPU handles inside a
-  `ModelPrefab` die with the `VkDevice`, and getting them back means reading the
-  `.glb` again. `CreativeWorksFactory::RebuildVulkanResources()` therefore only
-  clears and re-creates what Core owns (the GPU caches, the font atlas); an
-  application that imported models calls `ZHLN::GLTF::RebuildCachedPrefabs()`
-  after it, which re-imports every cached prefab and re-registers its meshes and
-  materials under the asset keys the ECS instances were built against.
+* **Device loss is the case where a callback is the right shape.** The GPU
+  handles inside a `ModelPrefab` die with the `VkDevice`, and getting them back
+  means reading the `.glb` again — an action only the importer can perform, and
+  one Core cannot reach by inspecting state it already owns. So `Engine` keeps a
+  list of `DeviceLostCallback`s and runs it, in registration order, once
+  `CreativeWorksFactory::RebuildVulkanResources()` has rebuilt what Core owns:
 
-That last point is the general shape of the rule: **when Core needs something an
-extra provides, the extra produces ordinary Core data and Core reads it back
-through state it already owns** — a prefab cache, a `Scene::Scene`, a
-`ModelPrefab`. No callback table, no registry, and nothing the extra has to
-install at startup. The dependency arrow still points one way, and the build
-still works with the extra absent.
+  ```cpp
+  ZHLN::GLTF::InstallDeviceLostHandler(*engine);   // once, next to the first import
+  ```
+
+  The list lives on `Engine` rather than on `RenderContext` because the context
+  is destroyed and rebuilt inside `HandleDeviceLost()`; anything stored on it
+  would die with the device it is meant to survive. `ZHLN::glTF::Initialize()`
+  installs the handler for the inspector, and an application that imports models
+  directly calls it once itself. `Engine::DeviceLostCallbackCount()` lets a host
+  assert that the owners it expects actually subscribed.
+
+That is the whole distinction, and it is worth stating precisely because the two
+cases look alike. **When Core needs *data* an extra produces, the extra writes
+ordinary Core state and Core reads it back** — a prefab cache, a `Scene::Scene`,
+a `ModelPrefab` — with nothing to register and no way for the seam to be
+forgotten. **When Core needs an extra to *act*, because the work requires
+knowledge Core does not have, the extra subscribes to a notification.** The
+first needs no callback; the second cannot work without one. Neither points the
+dependency arrow the wrong way, and the build still works with the extra absent
+— a callback that was never registered is simply never called.
 
 ---
 

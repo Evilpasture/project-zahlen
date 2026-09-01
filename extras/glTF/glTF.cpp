@@ -805,6 +805,11 @@ void RenderFrame(ZHLN::Engine& engine) {
 namespace ZHLN::glTF {
 
 void Initialize(ZHLN::Engine& engine) {
+    // Dropping a model on the window imports it, and an imported model holds GPU
+    // resources core cannot recreate, so the inspector subscribes the importer to
+    // the device-lost notification before anything can be imported.
+    ZHLN::GLTF::InstallDeviceLostHandler(engine);
+
     engine.InitializeDefaultScene();
     ZHLN::DefaultPreset::SetDisabled(true);
 
