@@ -889,25 +889,39 @@ constexpr decltype(auto) MemberValue(T&& object) {
 /// reflected entity (data member, type, enumerator...). The const qualifier
 /// some implementations add (P3394) is stripped so the callback sees the tag
 /// the source spelled.
+///
+/// The walk uses the same indexed form as GetDescriptionText: a range-for
+/// variable over std::meta::annotations_of is not a constant expression on
+/// some implementations, so the annotation handle must arrive as a non-type
+/// template argument (ExtractDescriptionTextAt) or be spliced out of the
+/// define_static_array (ExtractDescriptionText).
+namespace detail {
+template <auto Annotation, typename F>
+consteval void InvokeAnnotationType(F&& f) {
+    constexpr auto type = std::meta::remove_const(std::meta::dealias(std::meta::type_of(Annotation)));
+    using AnnotationType = typename[:type:];
+    std::forward<F>(f).template operator()<AnnotationType>();
+}
+} // namespace detail
+
 template <auto EntityInfo, typename F>
 consteval void ForEachAnnotationType(F&& f) {
-    for (const auto annotation: std::meta::annotations_of(EntityInfo)) {
-        constexpr auto annotationType = std::meta::remove_const(std::meta::dealias(std::meta::type_of(annotation)));
-        using AnnotationType           = typename[:annotationType:];
-        std::forward<F>(f).template operator()<AnnotationType>();
-    }
+    constexpr auto annotations = detail::AnnotationsOf<EntityInfo>();
+    [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+        (detail::InvokeAnnotationType<annotations[Is]>(f), ...);
+    }(std::make_index_sequence<annotations.size()>());
 }
 
-/// Same, for a type: walks the annotations of T. The handle overload cannot
-/// be reused here -- the computed handle is a local variable and is not a
-/// permissible non-type template argument -- so the loop lives in both.
+/// Same, for a type: walks the annotations of T. The walk is inlined because
+/// the type handle is computed inside this function and cannot be passed as a
+/// template argument to the handle overload.
 template <typename T, typename F>
 consteval void ForEachAnnotationType(F&& f) {
-    for (const auto annotation: std::meta::annotations_of(std::meta::dealias(^^std::remove_cvref_t<T>))) {
-        constexpr auto annotationType = std::meta::remove_const(std::meta::dealias(std::meta::type_of(annotation)));
-        using AnnotationType           = typename[:annotationType:];
-        std::forward<F>(f).template operator()<AnnotationType>();
-    }
+    constexpr auto entity      = std::meta::dealias(^^std::remove_cvref_t<T>);
+    constexpr auto annotations = detail::AnnotationsOf<entity>();
+    [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+        (detail::InvokeAnnotationType<annotations[Is]>(f), ...);
+    }(std::make_index_sequence<annotations.size()>());
 }
 
 template <typename T>
