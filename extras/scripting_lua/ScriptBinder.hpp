@@ -324,6 +324,28 @@ class ScriptBinder {
     }
 
   private:
+    // GCC-only suppression, and a narrow one. GCC's -Wreturn-type does not
+    // count a discarded `if constexpr` branch as covering the end of a
+    // function, so the if/else lambdas below report "no return statement" once
+    // per field of every registered type -- thousands of lines per build for
+    // code whose every path does return. Clang does not warn at all.
+    //
+    // This cannot be fixed by rewriting the branches as early returns. The else
+    // bodies are not merely unreachable for the rejected instantiations, they
+    // are ill-formed, and only compile because they are discarded:
+    // FromScriptVal<T[N]> would be a std::expected of an array type, which
+    // libstdc++ rejects with "function returning an array" (Components.hpp has
+    // two `char _pad[3]` fields, at 419 and 434), and in the method thunk
+    // `decltype(auto) ret = (pmf)(...)` would declare a variable of type void.
+    // Hoisting either out of the else turns a discarded statement into a
+    // compiled one.
+    //
+    // Scoped to this function rather than the file so a genuinely missing
+    // return anywhere else still diagnoses.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wreturn-type"
+#endif
     template <typename ClassT, typename CurrentT>
     static void PopulateClassInfo(ScriptClassInfo& classInfo) {
         ZHLN::Reflect::ForEachBase<CurrentT>([&]<typename Base>() -> auto { PopulateClassInfo<ClassT, Base>(classInfo); });
@@ -335,26 +357,18 @@ class ScriptBinder {
                     const auto* typedInst = static_cast<const CurrentT*>(static_cast<const ClassT*>(inst));
                     return ToScriptVal(const_getter(*typedInst));
                 },
-                // Early return rather than if/else throughout these lambdas.
-                // GCC's -Wreturn-type does not treat a discarded `if constexpr`
-                // branch as covering the end of the function, so the if/else
-                // spelling reports "no return statement" once per field of every
-                // registered type -- thousands of lines for a function whose
-                // every path does return. Clang does not warn, and the generated
-                // code is correct either way; this shape keeps a GCC build quiet
-                // without suppressing the diagnostic outright.
                 .set = [setter](void* inst, const ScriptVal& val) -> std::expected<void, Error> {
+                    auto* typedInst = static_cast<CurrentT*>(static_cast<ClassT*>(inst));
                     if constexpr (std::is_array_v<FieldT> || !std::is_copy_constructible_v<FieldT> || !std::is_copy_assignable_v<FieldT>) {
                         return std::unexpected(ScriptError::UnsupportedConversion);
+                    } else {
+                        auto converted = FromScriptVal<FieldT>(val);
+                        if (!converted) {
+                            return std::unexpected(converted.error());
+                        }
+                        setter(*typedInst, converted.value());
+                        return {};
                     }
-
-                    auto* typedInst = static_cast<CurrentT*>(static_cast<ClassT*>(inst));
-                    auto  converted = FromScriptVal<FieldT>(val);
-                    if (!converted) {
-                        return std::unexpected(converted.error());
-                    }
-                    setter(*typedInst, converted.value());
-                    return {};
                 },
                 .get_element_at = nullptr,
                 .set_element_at = nullptr
@@ -371,13 +385,12 @@ class ScriptBinder {
                         return std::unexpected(ScriptError::IndexOutOfBounds);
                     }
 
-                    // std::vector<bool> hands back a proxy rather than a bool,
-                    // so that case materializes the element before converting.
                     if constexpr (std::is_same_v<ElementType, bool>) {
                         bool boolVal = container[index];
                         return ToScriptVal(boolVal);
+                    } else {
+                        return ToScriptVal(container[index]);
                     }
-                    return ToScriptVal(container[index]);
                 };
 
                 prop.set_element_at = [mut_getter](void* inst, size_t index, const ScriptVal& val) -> std::expected<void, Error> {
@@ -432,23 +445,25 @@ class ScriptBinder {
                         if constexpr (std::is_same_v<RetType, void>) {
                             (typedInst->*pmf)(std::get<Is>(convertedArgs).value()...);
                             return ScriptVal {std::monostate {}};
-                        }
+                        } else {
+                            decltype(auto) ret = (typedInst->*pmf)(std::get<Is>(convertedArgs).value()...);
+                            using RawRet       = decltype(ret);
 
-                        decltype(auto) ret = (typedInst->*pmf)(std::get<Is>(convertedArgs).value()...);
-                        using RawRet       = decltype(ret);
-
-                        // A returned reference borrows from the instance, so it
-                        // is boxed; anything else is owned and outlives the call.
-                        if constexpr (std::is_reference_v<RawRet>) {
-                            return ToScriptVal(ret);
+                            if constexpr (std::is_reference_v<RawRet>) {
+                                return ToScriptVal(ret);
+                            } else {
+                                return ToScriptValOwned(std::move(ret));
+                            }
                         }
-                        return ToScriptValOwned(std::move(ret));
                     }(std::make_index_sequence<Traits::arity> {});
                 }
             };
             classInfo.methods[name].push_back(std::move(method));
         });
     }
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 };
 
 // ----------------------------------------------------------------------------
