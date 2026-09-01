@@ -10,8 +10,11 @@
 //
 //  1. Layout is ordinary template code over the complete type: sizeof/alignof,
 //     array extents and Jolt's 16-byte SIMD alignment. It never needs
-//     reflection, so the mapper compiles and can be tested on a compiler with
-//     no static-reflection support.
+//     reflection -- no <meta>, no Reflection.hpp -- so this header stays a
+//     plain layout engine, and the generated layouts are audited in one place:
+//     tools/check_ffi_layout.py compiles the cdef and Components.hpp and
+//     compares sizeof and every offset.
+
 //
 //  2. Names come from the caller. ZHLN::Reflect::TypeName owns the compile-time
 //     rename predicate (see Zahlen/Core/Reflection.hpp); a caller resolves the

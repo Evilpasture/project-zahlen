@@ -99,6 +99,17 @@ struct ReflectionTestSuite {
             ZHLN::Test::ExpectEq(names[1], "Rifle");
             ZHLN::Test::ExpectEq(names[2], "Shotgun");
 
+            // TypeName rename predicate (the hook FFI code generation uses to
+            // remap C++ spellings to C names). nullptr keeps the reflected
+            // spelling; a non-null return replaces it.
+            constexpr auto keepName = [](std::string_view) -> const char* { return nullptr; };
+            ZHLN::Test::ExpectEq(ZHLN::Reflect::TypeName<WeaponType>(), "WeaponType");
+            ZHLN::Test::ExpectEq(ZHLN::Reflect::TypeName<WeaponType>(keepName), "WeaponType");
+            constexpr auto renameWeapon = [](std::string_view n) -> const char* {
+                return n == "WeaponType" ? "Weapon" : nullptr;
+            };
+            ZHLN::Test::ExpectEq(ZHLN::Reflect::TypeName<WeaponType>(renameWeapon), "Weapon");
+
             // EnumToFlagsString
             std::string      flagStr;
             auto             flags    = static_cast<StatusEffect>(static_cast<uint32_t>(StatusEffect::Burning) | static_cast<uint32_t>(StatusEffect::Frozen));
