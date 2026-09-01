@@ -22,7 +22,6 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
-#include <cgltf.h>
 #include <chrono>
 #include <cstring>
 #include <engine/system/LightingSystem.hpp>
