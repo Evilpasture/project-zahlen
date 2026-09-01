@@ -308,3 +308,47 @@ set_tests_properties(${TARGET_NAME} PROPERTIES
     LABELS "CPU;Fast;Extras"
     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/.."
 )
+
+# --- Scripting Suite (tests/extras/scripting) ---
+# ScriptBinder and ScriptECSBridge moved out of core with the Lua layer, so
+# their suites moved too. This is the only test target that links
+# zahlen_scripting_lua, and it is the reason CPU_ECS no longer covers the
+# bridge: a build without the scripting extra has nothing to bridge.
+set(TARGET_NAME TestScripting)
+file(GLOB SCRIPTING_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/scripting/*.cpp")
+
+add_executable(${TARGET_NAME} ${SCRIPTING_SOURCES})
+
+set_target_properties(${TARGET_NAME} PROPERTIES
+    CXX_STANDARD 26
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+)
+
+target_link_libraries(${TARGET_NAME} PRIVATE
+    zahlen_engine
+    zahlen_scripting_lua
+)
+
+# Public headers only. src/ is banned — see tools/check_tests_public_api.py.
+target_include_directories(${TARGET_NAME} PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/tests
+    ${PROJECT_SOURCE_DIR}/extras
+)
+
+zahlen_enable_reflection(${TARGET_NAME})
+
+if(USE_SANITIZERS)
+    target_compile_options(${TARGET_NAME} PRIVATE
+        -fsanitize=address,undefined
+        -fno-omit-frame-pointer
+    )
+    target_link_options(${TARGET_NAME} PRIVATE
+        -fsanitize=address,undefined
+    )
+    target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
+endif()
+
+add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
+set_tests_properties(${TARGET_NAME} PROPERTIES LABELS "CPU;Fast;Extras")

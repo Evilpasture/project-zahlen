@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "IScriptRuntime.hpp"
+#include <Zahlen/IScriptRuntime.hpp>
 
 struct lua_State;
 

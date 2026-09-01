@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "IScriptRuntime.hpp"
+#include "ScriptingABI.h"
 #include "LuaScriptRuntime.hpp"
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/Components.hpp"
@@ -15,7 +15,7 @@
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render.hpp>
-#include <Zahlen/Scripting.h>
+#include <Zahlen/IScriptRuntime.hpp>
 #include <Zahlen/Scripting.hpp>
 #include <Zahlen/Sync.hpp>
 #include <Zahlen/Window.hpp>
@@ -1265,29 +1265,5 @@ ZHLN_API uint64_t ZHLN_DispatchCommand(ZHLN_Engine* engine_handle, uint32_t cmdI
 } // extern "C"
 
 namespace ZHLN {
-
-ScriptRunner::ScriptRunner(): _runtime(std::make_unique<LuaScriptRuntime>()) {
-}
-
-ScriptRunner::~ScriptRunner() = default;
-
-void ScriptRunner::RunFile(std::string_view path) {
-    _runtime->RunFile(path);
-}
-
-void ScriptRunner::CallUpdate(Engine* engine, float dt) {
-    if (engine != nullptr) {
-        _runtime->Initialize(engine);
-        _runtime->TickUpdate(engine, dt);
-    }
-}
-
-void ScriptRunner::ExecuteString(std::string_view code) {
-    _runtime->ExecuteString(code);
-}
-
-void ScriptRunner::ReloadFile(std::string_view path) {
-    _runtime->ReloadFile(path);
-}
 
 } // namespace ZHLN

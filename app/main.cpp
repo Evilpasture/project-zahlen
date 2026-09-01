@@ -3,6 +3,11 @@
 
 // File: src/main.cpp
 #include "engine/Platform.hpp"
+#if defined(ZHLN_HAS_SCRIPTING)
+// Core has no scripting of its own; the composition root is what names the
+// optional layers the engine runs with.
+#include <scripting_lua/LuaScriptRuntime.hpp>
+#endif
 #include "engine/system/GraphicsSettingsSync.hpp"
 #include <GLFW/glfw3.h>
 // clang-format off
@@ -1121,6 +1126,14 @@ auto main(int argc, char* argv[]) -> int {
                 }
 
                 auto engine = std::move(engine_res.value());
+
+#if defined(ZHLN_HAS_SCRIPTING)
+                // Nothing in core installs a runtime, so a build without the
+                // scripting extra simply has none: ScriptRunner forwards to
+                // nothing and the engine runs C++-only.
+                engine->GetScriptRunner().SetRuntime(std::make_unique<ZHLN::LuaScriptRuntime>());
+#endif
+
                 engine->GetWindow().Focus();
                 engine->InitializeDefaultScene();
 

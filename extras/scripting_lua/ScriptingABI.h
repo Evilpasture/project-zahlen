@@ -3,6 +3,13 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// extras/scripting_lua/ScriptingABI.h
+//
+// The C ABI that LuaJIT's ffi.C calls through. It lives here, not in core: an
+// integer command ID, a void* argument blob and a jump table are how a dynamic
+// language reaches C++, and core has no reason to know any of that exists.
+// The declarations mirror the ffi.cdef block the Lua side loads.
+
 #pragma once
 
 #include <Zahlen/Common.h>

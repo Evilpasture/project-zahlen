@@ -134,9 +134,11 @@ included. The concrete case that motivated the rule:
 | `extras/json/` | `JSON.hpp` (reflection-driven reader + `Reflect::SerializeJSON`), `JSONSchema.hpp` (compile-time schema → C++ type) | simdjson |
 | `extras/toml/` | `TOML.hpp` (reflection-driven documents), `SceneTOML.hpp` (binds a core `Scene::Scene` to the document format) | none |
 | `extras/glTF/` | `GLTFImporter.*` (the glTF/GLB reader), `glTF.*` (the drop-a-file inspector, module `ZHLN.glTF`) | cgltf, stb_image, meshoptimizer, and `extras/json` for the custom node members |
+| `extras/scripting_lua/` | `LuaScriptRuntime.*` (the LuaJIT state), `Scripting.cpp` (the C ABI and command dispatch), `ScriptBinder.hpp` / `ScriptECSBridge.*` (reflection-driven class table), `scripts/` (the Fennel sources) | LuaJIT |
 
-Core has no JSON, TOML or model-file dependency at all, so a core-only build
-(`-DZHLN_BUILD_EXTRAS=OFF`) needs none of those installed and links no parser.
+Core has no JSON, TOML, model-file or scripting dependency at all, so a
+core-only build (`-DZHLN_BUILD_EXTRAS=OFF`) needs none of those installed and
+links no parser and no Lua runtime.
 
 ### Consequences worth knowing
 
@@ -192,6 +194,29 @@ Core has no JSON, TOML or model-file dependency at all, so a core-only build
   installs the handler for the inspector, and an application that imports models
   directly calls it once itself. `Engine::DeviceLostCallbackCount()` lets a host
   assert that the owners it expects actually subscribed.
+
+* **Core has no scripting implementation.** `include/Zahlen/IScriptRuntime.hpp`
+  is seven virtual functions and `ScriptRunner` is a null-safe forwarder — 122
+  lines in total. There is no `lua_State`, no `extern "C"` surface, no integer
+  command table and no marshalling code anywhere in `src/`, `include/` or
+  `modules/`. All of it lives in `extras/scripting_lua/`, which implements the
+  interface, owns the LuaJIT link, and compiles the Fennel sources:
+
+  ```cpp
+  // the composition root, app/main.cpp — not core
+  engine->GetScriptRunner().SetRuntime(std::make_unique<ZHLN::LuaScriptRuntime>());
+  ```
+
+  Every `ScriptRunner` method is a no-op while nothing is installed, so the
+  engine, the fallback preset and the console all ask for script work without a
+  guard and without knowing whether anything is listening. A core-only build
+  simply runs C++.
+* **The composition root lives in `app/`, not `src/`.** Wiring an engine
+  together means naming the optional layers it runs with, which is exactly what
+  `src/` is forbidden from doing. `app/main.cpp` is therefore outside the
+  boundary rule — `tools/check_core_extras_boundary.py` scans `src/`, `include/`
+  and `modules/` only — and it is the one place allowed to link
+  `zahlen_scripting_lua`.
 
 That is the whole distinction, and it is worth stating precisely because the two
 cases look alike. **When Core needs *data* an extra produces, the extra writes

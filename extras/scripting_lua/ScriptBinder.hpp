@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "Zahlen/Entity.hpp"
+#include <Zahlen/Entity.hpp>
 #include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Error.hpp>
 #include <expected>

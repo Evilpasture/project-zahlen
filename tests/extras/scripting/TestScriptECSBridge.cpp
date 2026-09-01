@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
-#include <Zahlen/ScriptBinder.hpp>
-#include <Zahlen/ScriptECSBridge.hpp>
+#include <scripting_lua/ScriptBinder.hpp>
+#include <scripting_lua/ScriptECSBridge.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <expected>
 #include <string>

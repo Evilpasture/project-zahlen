@@ -20,12 +20,10 @@
 
 auto RunECSSuite() -> ZHLN::Test::TestStats;
 auto RunSystemGraphSuite() -> ZHLN::Test::TestStats;
-auto RunScriptECSBridgeSuite() -> ZHLN::Test::TestStats;
 
 auto main() -> int {
     return ZHLN::Test::Runner::RunDeferred(
         RunECSSuite,
-        RunSystemGraphSuite,
-        RunScriptECSBridgeSuite
+        RunSystemGraphSuite
     );
 }

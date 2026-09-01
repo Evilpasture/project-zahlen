@@ -164,9 +164,6 @@ module;
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/Profiler.hpp>
 #include <Zahlen/Render.hpp>
-#include <Zahlen/ScriptBinder.hpp>
-#include <Zahlen/ScriptECSBridge.hpp>
-#include <Zahlen/Scripting.h>
 #include <Zahlen/Scripting.hpp>
 #include <Zahlen/SkeletalAnimation.hpp>
 #include <Zahlen/Sync.hpp>
@@ -412,15 +409,6 @@ using ZHLN::AudioSystem;
 using ZHLN::AudioWaveformType;
 
 // Scripting
-using ZHLN::BoxedObject;
-using ZHLN::OwnedObject;
-using ZHLN::ScriptArray;
-using ZHLN::ScriptBinder;
-using ZHLN::ScriptClassInfo;
-using ZHLN::ScriptECSBridge;
-using ZHLN::ScriptError;
-using ZHLN::ScriptMethod;
-using ZHLN::ScriptProperty;
 using ZHLN::ScriptRunner;
 using ZHLN::ScriptVal;
 

@@ -3,7 +3,7 @@
 
 #include "TestsFramework.hpp"
 #include <Zahlen/Core/Reflection.hpp>
-#include <Zahlen/ScriptBinder.hpp>
+#include <scripting_lua/ScriptBinder.hpp>
 #include <array>
 #include <expected>
 #include <string>

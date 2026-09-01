@@ -1,10 +1,12 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/scripting/RunScriptingTests.cpp
+// tests/extras/scripting/RunScriptingTests.cpp
 //
-// Entry point for the CPU_Scripting group binary: every suite in this directory,
-// one process.
+// Entry point for the scripting extras binary. These suites moved out of
+// tests/scripting and tests/ecs when the Lua layer left core: they exercise
+// ScriptBinder and ScriptECSBridge, which now live in extras/scripting_lua and
+// are unreachable from a build without it.
 //
 // Each Test*.cpp keeps its suite definition and its anonymous-namespace
 // helpers private to its own translation unit and exports a stats-returning
@@ -19,9 +21,11 @@
 #include "TestsFramework.hpp"
 
 auto RunScriptBinderSuite() -> ZHLN::Test::TestStats;
+auto RunScriptECSBridgeSuite() -> ZHLN::Test::TestStats;
 
 auto main() -> int {
     return ZHLN::Test::Runner::RunDeferred(
-        RunScriptBinderSuite
+        RunScriptBinderSuite,
+        RunScriptECSBridgeSuite
     );
 }
