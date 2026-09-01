@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "LuaScriptRuntime.hpp"
+#include "ScriptBinderRegistry.hpp"
 #include <Zahlen/Console.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
@@ -136,6 +137,12 @@ void LuaScriptRuntime::Initialize(Engine* engine) {
         return;
     }
     _initialized = true;
+
+    // Populate the ScriptBinder registry before any script runs. Every lookup
+    // in ScriptECSBridge and every ZHLN_InvokeMethod resolves against it, so
+    // without this the registry is empty and all of them fail with
+    // TypeNotFound. Idempotent, so a runtime re-init does not duplicate work.
+    [[maybe_unused]] const auto registeredTypes = RegisterCoreScriptTypes();
 
 #ifdef ZHLN_COMPILED_SCRIPTS_DIR
     std::string appendPath = std::format("package.path = package.path .. ';{}/?.lua;{}/?/init.lua'", ZHLN_COMPILED_SCRIPTS_DIR, ZHLN_COMPILED_SCRIPTS_DIR);

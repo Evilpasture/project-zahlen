@@ -15,6 +15,7 @@ add_library(${TARGET_NAME} STATIC
     Scripting.cpp
     LuaScriptRuntime.cpp
     ScriptECSBridge.cpp
+    ScriptingABI.cpp
 )
 
 set_target_properties(${TARGET_NAME} PROPERTIES
