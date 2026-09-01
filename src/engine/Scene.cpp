@@ -5,6 +5,11 @@
 //
 // Turns a Scene description into entities in a given engine.
 //
+// This is the whole of the scene layer that core needs: the description comes
+// in as a struct, so nothing here knows or cares whether it arrived from a
+// document, from C++ (as the DefaultPreset fallback does), or from a script.
+// Parsing a scene document is extras/toml/SceneTOML.cpp's job.
+//
 // Everything here takes the engine as an argument. There is no ambient lookup
 // and no static scene state, so instantiating the same description twice --
 // into two engines, or into one engine after a reset -- produces the same
@@ -17,7 +22,6 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Scene.hpp>
-#include <Zahlen/TOML.hpp>
 #include <Zahlen/Types.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
@@ -205,14 +209,6 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
         instance.entities.size(), instance.lights.size()
     );
     return instance;
-}
-
-auto InstantiateFromTOML(Engine& engine, std::string_view tomlText) -> std::expected<Instance, Error> {
-    auto description = ReflectTOML::TryParse<Scene>(tomlText);
-    if (!description) {
-        return std::unexpected(description.error());
-    }
-    return Instantiate(engine, *description);
 }
 
 } // namespace ZHLN::Scene

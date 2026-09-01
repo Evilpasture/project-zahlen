@@ -21,18 +21,15 @@ target_include_directories(zahlen_gltf SYSTEM PUBLIC
     ${PROJECT_SOURCE_DIR}/extern/stb
 )
 
-# Pull in PkgConfig/Homebrew simdjson include paths
-if(SIMDJSON_INCLUDE_DIRS)
-    target_include_directories(zahlen_gltf PRIVATE ${SIMDJSON_INCLUDE_DIRS})
-endif()
-
+# No JSON here: the importer reads the one custom member it cares about
+# (extras.csg_data) with the scanner in CsgExtras.hpp, so neither this library
+# nor the engine that links it needs simdjson or extras/json.
 target_link_libraries(zahlen_gltf PRIVATE
     zahlen_render
     zahlen_physics
     zahlen_threading
     meshoptimizer
     Jolt
-    PkgConfig::SIMDJSON # <-- ADD THIS
 )
 
 if(NOT MSVC)

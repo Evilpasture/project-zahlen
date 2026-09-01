@@ -1,10 +1,15 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+// tests/extras/TestJSON.cpp
+//
+// JSON is an optional layer (extras/json), so its suite lives here rather than
+// in tests/core and is built only when ZHLN_BUILD_EXTRAS is on.
+
 #include "TestsFramework.hpp"
 #include <Zahlen/Core/Reflection.hpp>
-#include <Zahlen/JSON.hpp>
-#include <Zahlen/JSONSchema.hpp>
+#include <json/JSON.hpp>
+#include <json/JSONSchema.hpp>
 #include <expected>
 #include <string>
 #include <string_view>
@@ -187,9 +192,9 @@ struct JSONTestSuite {
     };
 };
 
-// Exported for the core group binary (RunCoreTests.cpp), which
-// aggregates every suite in this directory through Runner::RunDeferred.
-auto RunJSONSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<JSONTestSuite>();
+// The extras test binaries are one suite per process (see
+// tests/extras/CMakeLists.txt), so this owns its own entry point.
+int main() {
+    return ZHLN::Test::Runner::Run<JSONTestSuite>();
 }
 

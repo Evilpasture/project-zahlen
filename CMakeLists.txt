@@ -370,8 +370,6 @@ set(RAW_ENGINE_SOURCES
     src/engine/graphics/RenderPasses.cpp
     src/engine/graphics/RenderSetup.cpp
     src/engine/ScriptECSBridge.cpp
-    src/engine/JSON.cpp
-    src/engine/TOML.cpp
     src/engine/Scene.cpp
 )
 
@@ -395,15 +393,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     pkg_check_modules(LIBSEAT REQUIRED IMPORTED_TARGET libseat)
 endif()
 
-# Dependencies needed on both Linux and macOS
+# Dependencies needed on both Linux and macOS.
+#
+# simdjson is deliberately NOT here: JSON lives in extras/json, so the core
+# engine has no JSON dependency and a core-only build needs no JSON library
+# installed. extras/CMakeLists.txt finds it when the extras layer is built.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR APPLE)
     pkg_check_modules(FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig)
-    pkg_check_modules(SIMDJSON REQUIRED IMPORTED_TARGET simdjson)
-
-    # Ensure alias exists for consistent linking
-    if(TARGET PkgConfig::SIMDJSON AND NOT TARGET simdjson::simdjson)
-        add_library(simdjson::simdjson ALIAS PkgConfig::SIMDJSON)
-    endif()
 endif()
 
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/render)
@@ -536,7 +532,6 @@ target_link_libraries(zahlen_engine PRIVATE
     meshoptimizer
     yogacore
     ${ZSTD_LIBRARY}
-    PkgConfig::SIMDJSON
 )
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

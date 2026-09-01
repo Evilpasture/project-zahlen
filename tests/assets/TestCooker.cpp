@@ -3,7 +3,7 @@
 
 #include "TestsFramework.hpp"
 #include <Zahlen/CreativeWorksManager.hpp>
-#include <Zahlen/JSON.hpp>
+#include <json/JSON.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/Types.hpp>

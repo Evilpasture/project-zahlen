@@ -1,9 +1,9 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/engine/TOML.cpp
+// extras/toml/TOML.cpp
 //
-// The document parser behind Zahlen/TOML.hpp.
+// The document parser behind extras/toml/TOML.hpp.
 //
 // Hand-written rather than vendored: the grammar the engine needs is small
 // (tables, arrays of tables, inline tables, arrays, strings, numbers, bools),
@@ -17,7 +17,7 @@
 // document is still being built (Value holds raw pointers into it).
 
 #include <Zahlen/Log.hpp>
-#include <Zahlen/TOML.hpp>
+#include <toml/TOML.hpp>
 #include <charconv>
 #include <cstdlib>
 #include <deque>

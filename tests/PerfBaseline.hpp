@@ -4,7 +4,7 @@
 // tests/PerfBaseline.hpp
 //
 // Performance baseline caching for TestPerformance / TestRenderPerformance,
-// built on the engine's own JSON module (ReflectJSON::TryParse to read,
+// built on the JSON extra (ReflectJSON::TryParse to read,
 // ZHLN::Reflect::SerializeJSON to write), ZHLN::Mutex and ZHLN::Println.
 //
 // Every benchmark metric is recorded to perf-baseline.json at the PROJECT
@@ -35,7 +35,7 @@
 #pragma once
 
 #include <Zahlen/Config.hpp>
-#include <Zahlen/JSON.hpp>
+#include <json/JSON.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 

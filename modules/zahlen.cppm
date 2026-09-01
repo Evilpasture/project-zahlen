@@ -159,7 +159,6 @@ module;
 #include <Zahlen/GUI.hpp>
 #include <Zahlen/IK.hpp>
 #include <Zahlen/Input.hpp>
-#include <Zahlen/JSON.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/ModelPrefab.hpp>
@@ -414,7 +413,6 @@ using ZHLN::AudioWaveformType;
 
 // Scripting
 using ZHLN::BoxedObject;
-using ZHLN::JSONError;
 using ZHLN::OwnedObject;
 using ZHLN::ScriptArray;
 using ZHLN::ScriptBinder;
@@ -425,15 +423,6 @@ using ZHLN::ScriptMethod;
 using ZHLN::ScriptProperty;
 using ZHLN::ScriptRunner;
 using ZHLN::ScriptVal;
-
-namespace ReflectJSON {
-using ZHLN::ReflectJSON::Document;
-using ZHLN::ReflectJSON::GetJSONValue;
-using ZHLN::ReflectJSON::Parse;
-using ZHLN::ReflectJSON::ParseObject;
-using ZHLN::ReflectJSON::TryParse;
-using ZHLN::ReflectJSON::ValueReader;
-} // namespace ReflectJSON
 
 // Engine
 using ZHLN::CatalogEntry;

@@ -14,6 +14,16 @@
 # the expensive part. The cost is process isolation: a crash or timeout in one
 # suite takes the rest of its group with it.
 
+# The test tree is built on top of the extras layer even though the core engine
+# is not: the perf baselines and the cooker's GLB checks read and write JSON
+# through extras/json, and the JSON and TOML suites live in tests/extras.
+# Turning extras off therefore turns the tests off with them, rather than
+# leaving a test tree that cannot compile.
+if(NOT TARGET zahlen_extras)
+    message(FATAL_ERROR
+        "ZHLN_BUILD_TESTS=ON requires ZHLN_BUILD_EXTRAS=ON: the test suites read JSON through extras/json.")
+endif()
+
 # 1. Enable CTest testing framework
 enable_testing()
 
@@ -69,6 +79,17 @@ function(zahlen_add_cpu_test_group TARGET_NAME GROUP_DIR)
     # link. TestMeshlets exercises BuildMeshlets, so the group links it.
     if(TARGET_NAME STREQUAL "CPU_Assets")
         target_link_libraries(${TARGET_NAME} PRIVATE meshoptimizer)
+    endif()
+
+    # perf/assets: JSON is an extra, so the two groups that read it link the
+    # extras archive -- TestCooker.cpp parses the cooker's GLB JSON chunk and
+    # PerfBaseline.hpp reads and writes the perf baseline files. Only the
+    # parser's symbols are needed (the <json/...> include path arrives with
+    # zahlen_extras' PUBLIC include directories), and the linker drops the
+    # VFX/animation objects nothing here references. The other groups link the
+    # core engine only, which is the whole point of the boundary.
+    if(TARGET_NAME STREQUAL "CPU_Assets" OR TARGET_NAME STREQUAL "CPU_Perf")
+        target_link_libraries(${TARGET_NAME} PRIVATE zahlen_extras)
     endif()
 
     # --- ASAN & UBSAN CONFIGURATION ---

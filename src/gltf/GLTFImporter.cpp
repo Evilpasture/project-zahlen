@@ -3,12 +3,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "GLTFImporter.hpp"
+#include "CsgExtras.hpp"
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Zahlen/Core/Ranges.hpp>
+#include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/CreativeWorksManager.hpp>
-#include <Zahlen/JSON.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Meshlet.hpp>
@@ -32,10 +33,6 @@
 namespace ZHLN::GLTF {
 
 namespace {
-
-struct NodeExtras {
-    std::string csg_data;
-};
 
 struct CPUTextureJob {
     cgltf_image*   image = nullptr;
@@ -832,13 +829,19 @@ auto BuildModelPrefab(RenderContext& ctx, CreativeWorksManager& cwMgr, cgltf_dat
         const int32_t skeletonIdx = (node->skin != nullptr) ? skinMap[node->skin] : -1;
         const bool    isSkinned   = (node->skin != nullptr) && !primJob.skins.empty();
 
+        // Blender writes CSG modifiers as a JSON document inside a JSON string
+        // under extras.csg_data; ScanCsgExtras (CsgExtras.hpp) reads them
+        // without a JSON library, so this importer stays off extras/json.
         std::vector<CSGModifier> csgModifiers;
         if (node->extras.start_offset != node->extras.end_offset) {
             const std::string_view extras_json(data->json + node->extras.start_offset, node->extras.end_offset - node->extras.start_offset);
-            if (const auto extras_res = ZHLN::ReflectJSON::TryParse<NodeExtras>(extras_json)) {
-                if (auto csg_res = ZHLN::ReflectJSON::TryParse<std::vector<CSGModifier>>(extras_res->csg_data)) {
-                    csgModifiers = std::move(*csg_res);
+            for (const CsgExtrasEntry& entry: ScanCsgExtras(extras_json)) {
+                const auto operation = ZHLN::Reflect::StringToEnum<CSGOperation>(entry.operation);
+                if (!operation) {
+                    Log("[GLTF] node '{}': '{}' is not a CSGOperation; modifier dropped", (node->name != nullptr) ? node->name : "Unnamed", entry.operation);
+                    continue;
                 }
+                csgModifiers.push_back(CSGModifier {.operation = *operation, .operand_name = entry.operand_name});
             }
         }
 

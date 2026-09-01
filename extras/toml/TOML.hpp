@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <Zahlen/Common.h>
 #include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
@@ -28,7 +27,7 @@
 //   const std::string text = ZHLN::Reflect::SerializeTOML(scene);
 //   const auto         back = ZHLN::ReflectTOML::TryParse<Scene>(text);
 //
-// Same contract as Zahlen/JSON.hpp -- field names come from the declarations
+// Same contract as extras/json/JSON.hpp -- field names come from the
 // themselves, so the type is the schema and there is no second definition to
 // drift -- with the differences TOML forces:
 //
@@ -45,9 +44,9 @@
 //   * std::optional is omitted entirely when empty rather than written null,
 //     which is how TOML expresses absence.
 //   * A struct can opt out of table form and serialise as `[x, y, z]` by
-//     specialising ReflectTOML::TOMLVector -- see there. Zahlen/Scene.hpp
-//     uses it so Jolt's Float3/Float4 read as coordinates in a document
-//     while staying Jolt types in the code.
+//     specialising ReflectTOML::TOMLVector -- see there. SceneTOML.hpp in
+//     this directory uses it so Jolt's Float3/Float4 read as coordinates in
+//     a scene document while staying Jolt types in the code.
 //
 // The parser accepts the subset the serialiser emits plus what hand-written
 // documents normally use: comments, bare/quoted/dotted keys, table and
@@ -64,7 +63,7 @@ enum class TOMLError : uint8_t { InvalidTOML = 1, TypeMismatch, MissingField, Un
 namespace ReflectTOML {
 
 /// A node in a parsed document. Non-owning: valid while its Document lives.
-class ZHLN_API Value {
+class Value {
   public:
     Value() = default;
     explicit Value(const void* node) noexcept: _node(node) {
@@ -101,7 +100,7 @@ class ZHLN_API Value {
 };
 
 /// Owns the parsed node tree.
-class ZHLN_API Document {
+class Document {
   public:
     Document();
     ~Document();
@@ -601,7 +600,7 @@ namespace detail {
         } else if constexpr (ZHLN::Reflect::FieldCount<Decayed>() > 0) {
             AppendTOMLInlineTable(out, value);
         } else {
-            static_assert(!sizeof(Decayed), "SerializeTOML: unsupported field type (see the supported set in Zahlen/TOML.hpp)");
+            static_assert(!sizeof(Decayed), "SerializeTOML: unsupported field type (see the supported set in toml/TOML.hpp)");
         }
     }
 

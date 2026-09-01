@@ -15,14 +15,16 @@
 // A crash or a timeout here costs the whole group, which is the trade for not
 // paying a link per suite; the per-suite granularity lives in the labels and in
 // the [ PASS ]/[ FAIL ] lines rather than in separate processes.
+//
+// The JSON and TOML suites used to run here. They moved to tests/extras when
+// those layers did: this group links the core engine only, and reading a
+// document is no longer something core does.
 
 #include "TestsFramework.hpp"
 
 auto RunContainersSuite() -> ZHLN::Test::TestStats;
 auto RunReflectionSuite() -> ZHLN::Test::TestStats;
 auto RunErrorSuite() -> ZHLN::Test::TestStats;
-auto RunJSONSuite() -> ZHLN::Test::TestStats;
-auto RunTOMLSuite() -> ZHLN::Test::TestStats;
 auto RunCommandLineSuite() -> ZHLN::Test::TestStats;
 auto RunMathAndIKSuite() -> ZHLN::Test::TestStats;
 auto RunGraphicsSettingsSuite() -> ZHLN::Test::TestStats;
@@ -35,8 +37,6 @@ auto main() -> int {
         RunContainersSuite,
         RunReflectionSuite,
         RunErrorSuite,
-        RunJSONSuite,
-        RunTOMLSuite,
         RunCommandLineSuite,
         RunMathAndIKSuite,
         RunGraphicsSettingsSuite,

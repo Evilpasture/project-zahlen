@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <Zahlen/Common.h>
 #include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
@@ -25,7 +24,7 @@ enum class JSONError : uint8_t { InvalidJSON = 1, TypeMismatch, MissingField, Un
 namespace ReflectJSON {
 
 // Opaque non-template Value Reader
-class ZHLN_API ValueReader {
+class ValueReader {
   public:
     ValueReader() = default;
     explicit ValueReader(const void* internalNode);
@@ -50,7 +49,7 @@ class ZHLN_API ValueReader {
 };
 
 // Opaque non-template Document Parser
-class ZHLN_API Document {
+class Document {
   public:
     Document();
     ~Document();
@@ -378,7 +377,7 @@ namespace detail {
             }
             out += '}';
         } else {
-            static_assert(!sizeof(Decayed), "SerializeJSON: unsupported field type (see the supported set in Zahlen/JSON.hpp)");
+            static_assert(!sizeof(Decayed), "SerializeJSON: unsupported field type (see the supported set in json/JSON.hpp)");
         }
     }
 

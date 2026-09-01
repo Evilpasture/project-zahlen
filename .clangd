@@ -4,6 +4,7 @@ CompileFlags:
     [
       -I../include,
       -I../src,
+      -I../extras,
       -isystem,
       ../extern/JoltPhysics,
       -freflection,
@@ -27,6 +28,7 @@ CompileFlags:
       -std=c++26,
       -I../include,
       -I../src,
+      -I../extras,
       -isystem,
       ../extern/JoltPhysics,
       -freflection,

@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/core/TestTOML.cpp
+// tests/extras/TestTOML.cpp
 //
 // The TOML layer is reflection-driven end to end: the struct declaration is
 // the schema, the serialiser walks it, and the parser fills it back in. So the
@@ -10,13 +10,19 @@
 //
 // The scene types are exercised through the same path, because "scene
 // definition in the type system" only means anything if a scene document is
-// just another reflected struct.
+// just another reflected struct. Note the direction of that dependency: the
+// core scene model (Zahlen/Scene.hpp) knows nothing about TOML, and it is
+// extras/toml/SceneTOML.hpp that makes a ZHLN::Scene::Scene a document.
+//
+// TOML is an optional layer, so this suite lives here rather than in
+// tests/core and is built only when ZHLN_BUILD_EXTRAS is on.
 
 #include "TestsFramework.hpp"
 #include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Scene.hpp>
-#include <Zahlen/TOML.hpp>
+#include <toml/SceneTOML.hpp>
+#include <toml/TOML.hpp>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -386,58 +392,70 @@ intensity = 250.0
         }
 
         /**
-         * The engine's own fallback scene is one of these documents.
+         * The engine's own fallback scene is expressible as a document.
          *
-         * DefaultPreset used to build that scene by hand out of factory calls,
-         * which meant the scene layer was something the engine offered other
-         * people rather than something it used. It is now a baked-in document
-         * -- and a baked-in document is exactly the kind that never gets
-         * parsed until the day it is needed, which is the day the game already
-         * failed to boot. So it is parsed here, on the CPU, with no device.
+         * DefaultPreset no longer parses one at runtime -- it builds a
+         * ZHLN::Scene::Scene in C++ and calls Scene::Instantiate(), so the
+         * fail-safe path has no text parser on it. What is still worth pinning
+         * down is that the two halves have not drifted: the compiled-in
+         * description has to survive text -> struct -> text unchanged, or a
+         * scene saved from a running fallback would not read back as the scene
+         * the engine boots.
          *
          * The indices matter as much as the values: DefaultPreset::Update
          * animates entities[1] and orbits lights[1], reading them back out of
          * the Instance by position.
          */
-        std::expected<void, ZHLN::Error> the_fallback_scene_document_parses() {
-            const auto scene = ZHLN::ReflectTOML::TryParse<ZHLN::Scene::Scene>(ZHLN::DefaultPreset::FallbackSceneTOML());
-            if (!ZHLN::Test::ExpectTrue(scene.has_value())) {
+        std::expected<void, ZHLN::Error> the_fallback_scene_description_round_trips() {
+            const ZHLN::Scene::Scene& scene = ZHLN::DefaultPreset::FallbackScene();
+
+            if (!ZHLN::Test::ExpectEq(scene.entities.size(), size_t {2}) || !ZHLN::Test::ExpectEq(scene.lights.size(), size_t {2})) {
                 return {};
             }
 
-            if (!ZHLN::Test::ExpectEq(scene->entities.size(), size_t {2}) || !ZHLN::Test::ExpectEq(scene->lights.size(), size_t {2})) {
-                return {};
-            }
-
-            ZHLN::Test::ExpectEq(scene->entities[0].name, std::string {"FallbackGround"});
-            ZHLN::Test::ExpectTrue(scene->entities[0].shape == ZHLN::Scene::ShapeKind::Plane);
-            ZHLN::Test::ExpectEq(scene->entities[1].name, std::string {"FallbackEmblem"});
-            ZHLN::Test::ExpectTrue(scene->entities[1].shape == ZHLN::Scene::ShapeKind::Box);
-            ZHLN::Test::ExpectEq(scene->lights[1].name, std::string {"FallbackPointLight"});
+            ZHLN::Test::ExpectEq(scene.name, std::string {"Zahlen Fallback"});
+            ZHLN::Test::ExpectEq(scene.entities[0].name, std::string {"FallbackGround"});
+            ZHLN::Test::ExpectTrue(scene.entities[0].shape == ZHLN::Scene::ShapeKind::Plane);
+            ZHLN::Test::ExpectEq(scene.entities[1].name, std::string {"FallbackEmblem"});
+            ZHLN::Test::ExpectTrue(scene.entities[1].shape == ZHLN::Scene::ShapeKind::Box);
+            ZHLN::Test::ExpectEq(scene.lights[1].name, std::string {"FallbackPointLight"});
 
             // The sun is oriented, which is why SceneLight grew a rotation:
             // LightingSystem packs a Sun's direction from the world matrix.
-            ZHLN::Test::ExpectEq(scene->lights[0].type, std::string {"Sun"});
-            ZHLN::Test::ExpectEq(scene->lights[0].rotation.x, 50.0f);
+            ZHLN::Test::ExpectEq(scene.lights[0].type, std::string {"Sun"});
+            ZHLN::Test::ExpectEq(scene.lights[0].rotation.x, 50.0f);
             // ... and it is not a ranged light, which the punctual defaults
             // would otherwise make it.
-            ZHLN::Test::ExpectEq(scene->lights[0].range, 0.0f);
+            ZHLN::Test::ExpectEq(scene.lights[0].range, 0.0f);
 
-            // The reflection toggles are the only environment keys it sets;
-            // everything else has to come back as the engine default, or the
+            // The reflection toggles are the only environment values it sets;
+            // everything else has to stay at the engine default, or the
             // fallback would restyle the frame on its way past.
-            ZHLN::Test::ExpectTrue(scene->environment.enableRTR);
-            ZHLN::Test::ExpectTrue(!scene->environment.enableSSR);
-            ZHLN::Test::ExpectEq(scene->environment.ambientExposure, ZHLN::Scene::SceneEnvironment {}.ambientExposure);
-            ZHLN::Test::ExpectEq(scene->environment.giIntensity, ZHLN::Scene::SceneEnvironment {}.giIntensity);
+            ZHLN::Test::ExpectTrue(scene.environment.enableRTR);
+            ZHLN::Test::ExpectTrue(!scene.environment.enableSSR);
+            ZHLN::Test::ExpectEq(scene.environment.ambientExposure, ZHLN::Scene::SceneEnvironment {}.ambientExposure);
+            ZHLN::Test::ExpectEq(scene.environment.giIntensity, ZHLN::Scene::SceneEnvironment {}.giIntensity);
+
+            // And the document layer can carry all of it without loss.
+            const std::string emitted  = ZHLN::Reflect::SerializeTOML(scene);
+            const auto        reparsed = ZHLN::ReflectTOML::TryParse<ZHLN::Scene::Scene>(emitted);
+            if (!ZHLN::Test::ExpectTrue(reparsed.has_value())) {
+                ZHLN::Println("    [INFO] re-emitted fallback scene:\n{}", emitted);
+                return {};
+            }
+
+            ZHLN::Test::ExpectEq(reparsed->entities[1].name, std::string {"FallbackEmblem"});
+            ZHLN::Test::ExpectEq(reparsed->entities[1].transform.position.y, 2.0f);
+            ZHLN::Test::ExpectEq(reparsed->lights[0].rotation.x, 50.0f);
+            ZHLN::Test::ExpectEq(ZHLN::Reflect::SerializeTOML(*reparsed), emitted);
 
             return {};
         }
     };
 };
 
-// Exported for the core group binary (RunCoreTests.cpp), which
-// aggregates every suite in this directory through Runner::RunDeferred.
-auto RunTOMLSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<TOMLTestSuite>();
+// The extras test binaries are one suite per process (see
+// tests/extras/CMakeLists.txt), so this owns its own entry point.
+int main() {
+    return ZHLN::Test::Runner::Run<TOMLTestSuite>();
 }

@@ -107,6 +107,57 @@ void   Update(Engine& engine, float dt);
 
 ---
 
+## 1.2 The Core / Extras Dependency Boundary
+
+`src/`, `include/` and `modules/` are the **Core Engine**. `extras/` is the
+optional feature layer built on top of it.
+
+> **Rule: the dependency is one-way.** Core must never include, import or link
+> anything from `extras/`. `extras/` may consume Core freely.
+
+`tools/check_core_extras_boundary.py` runs at CMake configure time and fails the
+build on a violation, so the rule is enforced rather than documented. It catches
+both `import ZHLN.<extras module>;` and any `#include` that resolves to a file
+under `extras/` — including the short forms, because `extras/` is itself an
+include root for consumers of `zahlen_extras`, so `#include <json/JSON.hpp>`
+compiles happily from a core file and has to be rejected by path resolution, not
+by spelling. What the script cannot see is linking: keep `zahlen_extras` out of
+every target defined outside `extras/` and `tests/`.
+
+### What the boundary buys
+
+Anything behind it is genuinely optional — its third-party dependencies
+included. The concrete case that motivated the rule:
+
+| Layer | Contents | Dependency it carries |
+| :--- | :--- | :--- |
+| `extras/json/` | `JSON.hpp` (reflection-driven reader + `Reflect::SerializeJSON`), `JSONSchema.hpp` (compile-time schema → C++ type) | simdjson |
+| `extras/toml/` | `TOML.hpp` (reflection-driven documents), `SceneTOML.hpp` (binds a core `Scene::Scene` to the document format) | none |
+
+Core has no JSON or TOML dependency at all, so a core-only build
+(`-DZHLN_BUILD_EXTRAS=OFF`) needs no simdjson installed and links no parser.
+
+### Two consequences worth knowing
+
+* **`Zahlen/Scene.hpp` is pure data.** The structs, their defaults and
+  `Scene::Instantiate(engine, scene)` are Core. Turning a scene into text and
+  back is `extras/toml/SceneTOML.hpp`, which also holds the
+  `ReflectTOML::TOMLVector<JPH::Float3>` specialisations that make a Jolt vector
+  read as `[x, y, z]`. Include *that* header — not `toml/TOML.hpp` alone — or a
+  scene serialises its vectors as tables of members.
+* **`DefaultPreset` does not parse anything.** The engine's fallback scene is the
+  one scene that has to work when nothing else loaded, so it is a compiled-in
+  `ZHLN::Scene::Scene` handed to `Scene::Instantiate()` rather than a baked-in
+  document parsed at runtime. A mistake in it fails the build instead of
+  surfacing on the day the game already failed to boot.
+
+By the same reasoning, `src/gltf/GLTFImporter.cpp` reads the single custom glTF
+member it cares about (`extras.csg_data`) with the small scanner in
+`src/gltf/CsgExtras.hpp` instead of pulling a JSON parser into the importer and,
+through it, into the engine.
+
+---
+
 ## 2. Mathematical & Geometric Conventions
 
 Zahlen adheres strictly to standard Vulkan and Jolt Physics conventions across both CPU host code and GPU shaders:

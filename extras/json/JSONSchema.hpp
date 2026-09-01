@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "Core/Reflection.hpp"
+#include <Zahlen/Core/Reflection.hpp>
 #include <string_view>
 #include <type_traits>
 

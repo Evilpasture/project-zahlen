@@ -138,7 +138,17 @@ zahlen_add_gpu_test_group(GPU_Pipeline 300
 # locates resources/assets/ at runtime instead of embedding a 100 KB rig.
 target_sources(GPU_Pipeline PRIVATE ${PROJECT_SOURCE_DIR}/extern/cgltf_impl.c)
 target_include_directories(GPU_Pipeline SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/extern/cgltf)
+# TestGLTFImport.cpp writes its reference GLBs with ZHLN::Reflect::SerializeJSON,
+# which is header-only, so this group needs the extras/json include path but not
+# a link against zahlen_extras.
+target_include_directories(GPU_Pipeline PRIVATE ${PROJECT_SOURCE_DIR}/extras)
 target_compile_definitions(GPU_Pipeline PRIVATE ZHLN_TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+
+# TestGLTFImport.cpp assembles its own GLB files and serialises the JSON chunk
+# with ZHLN::Reflect::SerializeJSON, which lives in extras/json. That half is
+# header-only, so the include path is all it needs -- no link against
+# zahlen_extras and no simdjson.
+target_include_directories(GPU_Pipeline SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/extras)
 
 # ImGui, UI layout and viewmodel presentation.
 zahlen_add_gpu_test_group(GPU_Interface 180

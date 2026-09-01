@@ -19,7 +19,7 @@
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/Engine.hpp>
-#include <Zahlen/JSON.hpp>
+#include <json/JSON.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/ModelPrefab.hpp>
