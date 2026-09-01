@@ -41,7 +41,14 @@ struct ActorConfig {
 // Compile-Time JSON Schema & Constants
 // ============================================================================
 
-#ifndef ZHLN_IN_DOCKER
+// Compile-time JSON synthesis runs consteval reflection code that builds
+// std::strings. Under -fsanitize=undefined GCC rejects the pointer null-check
+// inside std::string's constructor during constant evaluation (GCC bugzilla
+// #71962, still open), so this block is compiled out of sanitizer builds.
+// ZHLN_IN_DOCKER previously masked this inside CI (which configures
+// USE_SANITIZERS=ON together with ZHLN_IN_DOCKER); the Docker flag itself is
+// not what breaks it.
+#if !defined(ZHLN_SANITIZER_BUILD)
 constexpr auto kStaticConfigJSON = ZHLN::StringLiteral(R"({
     "engine": "Zahlen",
     "version": 2026,
@@ -73,7 +80,10 @@ struct JSONTestSuite {
     struct Tests {
         // --- 1. Compile-Time JSON Reflection Verification ---
         std::expected<void, ZHLN::Error> compile_time_json_schema_and_values() {
-#ifndef ZHLN_IN_DOCKER
+            // Skipped in sanitizer builds: consteval reflection reaches
+            // std::string in constant evaluation, which GCC's UBSan rejects
+            // (bugzilla #71962). See the kStaticConfigJSON block above.
+#if !defined(ZHLN_SANITIZER_BUILD)
             // Verify synthesized struct fields and reflected values
             ZHLN::Test::ExpectEq(kStaticParsed.engine, "Zahlen");
             ZHLN::Test::ExpectEq(kStaticParsed.version, 2026);

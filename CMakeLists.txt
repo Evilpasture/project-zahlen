@@ -199,8 +199,13 @@ option(USE_SANITIZERS "Enable ASan and UBSan" OFF)
 if(USE_SANITIZERS)
     add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
     add_link_options(-fsanitize=address,undefined)
+    # Marks the whole sanitizer profile. Tests whose consteval code builds
+    # std::strings are broken by GCC bug 71962 (-fsanitize=undefined rejects
+    # pointer null-checks during constant evaluation); see
+    # tests/core/TestReflection.cpp and tests/extras/TestJSON.cpp.
     add_definitions(
         -D__ASAN_ENABLED__
+        -DZHLN_SANITIZER_BUILD=1
         -DZHLN_PROJECT_ROOT="${CMAKE_CURRENT_SOURCE_DIR}"
     )
 
