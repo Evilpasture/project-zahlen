@@ -764,7 +764,11 @@ struct RangeSpec {
 };
 
 template <typename Annotation>
-struct RangeTrait: std::false_type {};
+struct RangeTrait: std::false_type {
+    // Present on the primary so `if constexpr (RangeTrait<Annotation>::is_range)`
+    // is well-formed for every annotation (e.g. Description), not just Range.
+    static constexpr bool is_range = false;
+};
 
 template <auto MinValue, auto MaxValue>
 struct RangeTrait<Range<MinValue, MaxValue>>: std::true_type {
@@ -789,7 +793,10 @@ consteval auto MemberRange() -> RangeSpec {
 }
 
 template <typename Annotation>
-struct VersionTrait: std::false_type {};
+struct VersionTrait: std::false_type {
+    // Present on the primary so the probe is well-formed for any annotation.
+    static constexpr bool is_version = false;
+};
 
 template <uint32_t Value>
 struct VersionTrait<Version<Value>>: std::true_type {
