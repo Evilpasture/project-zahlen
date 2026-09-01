@@ -3,7 +3,13 @@
 
 // src/engine/Engine.cpp
 #include <GLFW/glfw3.h>
+#include <algorithm>
+#include <atomic>
+#include <iterator>
+#include <mutex>
+#include <optional>
 #include <thread>
+#include <vector>
 // clang-format off
 #include <Jolt/Jolt.h>
 #include <Jolt/Core/Factory.h>
@@ -63,9 +69,85 @@
 
 namespace ZHLN {
 
-thread_local Engine*        g_CurrentEngine = nullptr;
-static Engine*              s_GlobalEngine  = nullptr;
-static RENDERDOC_API_1_5_0* s_RDocAPI       = nullptr;
+static RENDERDOC_API_1_5_0* s_RDocAPI = nullptr;
+
+// --- AMBIENT ENGINE CONTEXT ---
+//
+// The chain of published engines, innermost last. This used to be two raw
+// pointers assigned in InitInternal and never cleared, so GetEngineContext()
+// outlived the engine it named: destroying an engine left the pointers aimed
+// at freed memory, and a failed Engine::Create left them aimed at an object it
+// had already deleted.
+//
+// GetEngineContext() is read from worker fibers and from the terminal-signal
+// handler, so the read path takes no lock and no allocation: a thread-local
+// override if this thread published one, otherwise an atomic process-wide
+// fallback. The bookkeeping vectors are only touched when a scope opens or
+// closes.
+namespace {
+
+thread_local std::vector<Engine*> t_ThreadEngineContexts;
+std::mutex                        s_GlobalEngineContextMutex;
+std::vector<Engine*>              s_GlobalEngineContexts;
+std::atomic<Engine*>              s_GlobalEngine {nullptr};
+
+/// Removes the innermost registration of `engine`, which is the last one in
+/// normal (stack-ordered) teardown but need not be.
+void EraseInnermost(std::vector<Engine*>& stack, Engine* engine) {
+    const auto it = std::find(stack.rbegin(), stack.rend(), engine);
+    if (it != stack.rend()) {
+        stack.erase(std::next(it).base());
+    }
+}
+
+} // namespace
+
+EngineContextScope::EngineContextScope(Engine& engine) : _engine(&engine) {
+    t_ThreadEngineContexts.push_back(_engine);
+
+    const std::lock_guard lock(s_GlobalEngineContextMutex);
+    s_GlobalEngineContexts.push_back(_engine);
+    s_GlobalEngine.store(_engine, std::memory_order_release);
+}
+
+EngineContextScope::~EngineContextScope() {
+    EraseInnermost(t_ThreadEngineContexts, _engine);
+
+    const std::lock_guard lock(s_GlobalEngineContextMutex);
+    EraseInnermost(s_GlobalEngineContexts, _engine);
+    s_GlobalEngine.store(s_GlobalEngineContexts.empty() ? nullptr : s_GlobalEngineContexts.back(), std::memory_order_release);
+}
+
+ScopedEngine::ScopedEngine(std::unique_ptr<Engine> engine): _engine(std::move(engine)) {
+    if (_engine != nullptr) {
+        _scope = std::make_unique<EngineContextScope>(*_engine);
+    }
+}
+
+ScopedEngine::ScopedEngine(ScopedEngine&&) noexcept = default;
+
+auto ScopedEngine::operator=(ScopedEngine&& other) noexcept -> ScopedEngine& {
+    if (this != &other) {
+        // Not the compiler-generated order: member-wise assignment would
+        // withdraw the old registration before destroying the old engine.
+        reset();
+        _scope  = std::move(other._scope);
+        _engine = std::move(other._engine);
+    }
+    return *this;
+}
+
+ScopedEngine::~ScopedEngine() {
+    reset();
+}
+
+void ScopedEngine::reset() {
+    // Engine first: ~Engine clears the registry, and the OnDestroy hooks that
+    // runs expect GetEngineContext() to still answer. The scope then withdraws
+    // a pointer it only ever compares, never dereferences.
+    _engine.reset();
+    _scope.reset();
+}
 
 static void InitRenderDocAPI() {
 #if defined(_WIN32)
@@ -114,8 +196,17 @@ struct EngineImpl {
     JPH::Array<Entity>                        visibleShadowEntities;
     float                                     currentAlpha = 0.0f;
 
+    // Built once per engine, not once per scene: the glyph packing costs a
+    // fontconfig scan plus 96 SDF rasterisations, and the upload burns a
+    // 1024x1024 bindless texture that nothing ever releases. The scene owns a
+    // *copy* in UISettingsComponent, which Registry::Clear() throws away, so
+    // the engine keeps the authoritative one and re-seeds each new scene from
+    // it. See InitializeDefaultScene.
+    std::optional<FontAtlas> fontAtlas;
+
     void*        gameState    = nullptr;
     uint64_t     frameCounter = 0;
+    bool         joltAcquired = false;
     EngineConfig config;
 };
 
@@ -334,6 +425,19 @@ void BuildSystemGraphs(Engine& engine) {
     auto& updateGraph = engine.GetUpdateGraph();
     auto& renderGraph = engine.GetRenderGraph();
 
+    // Rebuild, never append. InitializeDefaultScene is called again whenever a
+    // scene is reset on a live engine (the GPU test pool does exactly that),
+    // and without this the graphs accumulate a second, third, ... copy of every
+    // system. Duplicates are not merely slow: Compile() only orders nodes that
+    // conflict, so a system with a read-only or empty access pattern --
+    // TextureSystem, CullingSystem, DecalSystem -- has no edge to its own
+    // duplicate and the copies are dispatched to run *concurrently* over the
+    // same engine state. That is a data race on whatever they fill in, and it
+    // shows up much later as a corrupted allocator heap.
+    // BuildFrameScheduler has always cleared for the same reason.
+    updateGraph.Clear();
+    renderGraph.Clear();
+
     using namespace ZHLN::ECS;
 
     // Components written by imperative frame phases that run before this graph
@@ -522,24 +626,70 @@ Engine::Engine(const EngineConfig& cfg, bool& outSuccess): _impl(nullptr) {
     }
 }
 
-auto Engine::Create(const EngineConfig& cfg) -> std::expected<std::unique_ptr<Engine>, Error> {
-    auto engine = std::unique_ptr<Engine>(new (std::nothrow) Engine());
-    if (!engine) {
+auto Engine::Create(const EngineConfig& cfg) -> std::expected<ScopedEngine, Error> {
+    auto instance = std::unique_ptr<Engine>(new (std::nothrow) Engine());
+    if (!instance) {
         return std::unexpected(EngineInitError::EngineAllocationFailed);
     }
 
-    auto res = engine->InitInternal(cfg);
+    // Published from here on, and withdrawn by `scoped` on every exit path --
+    // including the failure below, which is what used to leave the ambient
+    // pointer aimed at an engine this function had already deleted.
+    ScopedEngine scoped(std::move(instance));
+
+    auto res = scoped->InitInternal(cfg);
     if (!res) {
         return std::unexpected(res.error());
     }
 
-    return engine;
+    return scoped;
 }
 
-auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error> {
-    g_CurrentEngine = this;
-    s_GlobalEngine  = this;
+// --- PROCESS-GLOBAL JOLT REGISTRATION ---
+//
+// JPH::Factory::sInstance and the registered type list are process state, not
+// engine state. Acquisition was already guarded, but release was not: the first
+// engine destroyed called JPH::UnregisterTypes() and deleted the factory out
+// from under every other engine in the process. That is one of the things that
+// made a second engine unusable, and it blocks running more than one physics
+// world. Refcounted: first in registers, last out unregisters.
+namespace {
 
+std::mutex s_JoltRegistrationMutex;
+uint32_t   s_JoltRegistrations = 0;
+
+void AcquireJoltRegistration() {
+    const std::lock_guard lock(s_JoltRegistrationMutex);
+    if (s_JoltRegistrations++ > 0) {
+        return;
+    }
+
+    JPH::RegisterDefaultAllocator();
+    JPH::Trace = JoltTraceBridge;
+#ifdef JPH_ENABLE_ASSERTS
+    JPH::AssertFailed = JoltAssertBridge;
+#endif
+
+    if (JPH::Factory::sInstance == nullptr) {
+        JPH::Factory::sInstance = new JPH::Factory();
+        JPH::RegisterTypes();
+    }
+}
+
+void ReleaseJoltRegistration() {
+    const std::lock_guard lock(s_JoltRegistrationMutex);
+    if (s_JoltRegistrations == 0 || --s_JoltRegistrations > 0) {
+        return;
+    }
+
+    JPH::UnregisterTypes();
+    delete JPH::Factory::sInstance;
+    JPH::Factory::sInstance = nullptr;
+}
+
+} // namespace
+
+auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error> {
     ZHLN::Fiber::InitMainThread();
 
     _impl               = std::make_unique<EngineImpl>();
@@ -645,16 +795,8 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
 
     InitRenderDocAPI();
 
-    JPH::RegisterDefaultAllocator();
-    JPH::Trace = JoltTraceBridge;
-#ifdef JPH_ENABLE_ASSERTS
-    JPH::AssertFailed = JoltAssertBridge;
-#endif
-
-    if (JPH::Factory::sInstance == nullptr) {
-        JPH::Factory::sInstance = new JPH::Factory();
-        JPH::RegisterTypes();
-    }
+    AcquireJoltRegistration();
+    _impl->joltAcquired = true;
 
     auto rc_res = RenderContext::Create(*_impl->window, cfg.render);
     if (!rc_res) {
@@ -683,6 +825,17 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
 }
 
 Engine::~Engine() {
+    // InitInternal can fail before _impl is built, and Engine::Create deletes a
+    // half-built engine.
+    if (_impl == nullptr) {
+        return;
+    }
+
+    // The fallback preset parks entity handles in process-global storage. They
+    // name entities in the registry that is about to be cleared, so they must
+    // not survive into the next engine (see DefaultPreset::ReleaseFor).
+    DefaultPreset::ReleaseFor(this);
+
     _impl->registry.Clear();
     _impl->physicsContext.reset();
     _impl->renderContext.reset();
@@ -695,14 +848,16 @@ Engine::~Engine() {
     _impl->mainECB.reset();
     _impl->cullingSystem.reset();
 
+    // Process-global, and not refcounted the way the Jolt registration below
+    // is: a second windowed engine would lose GLFW when the first one goes.
+    // Headless engines never call glfwInit, so this does not constrain the
+    // tests.
     if (!_impl->config.render.headless) {
         glfwTerminate();
     }
 
-    JPH::UnregisterTypes();
-    if (JPH::Factory::sInstance != nullptr) {
-        delete JPH::Factory::sInstance;
-        JPH::Factory::sInstance = nullptr;
+    if (_impl->joltAcquired) {
+        ReleaseJoltRegistration();
     }
 }
 
@@ -854,10 +1009,10 @@ void Engine::ProvokeDeviceLost() {
 }
 
 auto GetEngineContext() -> Engine* {
-    if (g_CurrentEngine != nullptr) {
-        return g_CurrentEngine;
+    if (!t_ThreadEngineContexts.empty()) {
+        return t_ThreadEngineContexts.back();
     }
-    return s_GlobalEngine;
+    return s_GlobalEngine.load(std::memory_order_acquire);
 }
 
 auto Engine::InitializeDefaultScene() -> bool {
@@ -890,7 +1045,22 @@ auto Engine::InitializeDefaultScene() -> bool {
 
     reg.Create(Components::UISettingsComponent {});
 
-    CreativeWorksFactory::CreateFontAtlasTexture(rc);
+    // The atlas is device state, so it survives the scene it was first built
+    // for; only the component-side copy is re-seeded. Rebuilding it per scene
+    // leaked a 1024x1024 texture and a full fontconfig config every time.
+    if (_impl->fontAtlas.has_value()) {
+        if (auto* uiSettings = reg.GetSingleton<Components::UISettingsComponent>(); uiSettings != nullptr) {
+            uiSettings->fontAtlas        = *_impl->fontAtlas;
+            uiSettings->defaultFontAtlas = _impl->fontAtlas->texture;
+        }
+    } else {
+        CreativeWorksFactory::CreateFontAtlasTexture(rc, reg);
+        if (const auto* uiSettings = reg.GetSingleton<Components::UISettingsComponent>();
+            uiSettings != nullptr && uiSettings->fontAtlas.texture != TextureHandle::Invalid) {
+            _impl->fontAtlas = uiSettings->fontAtlas;
+        }
+    }
+
     BuildSystemGraphs(*this);
     BuildFrameScheduler(*this);
     return true;

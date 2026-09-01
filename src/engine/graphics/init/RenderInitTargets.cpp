@@ -178,6 +178,7 @@ std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) 
         std::array colorTargets = {graphResources.sceneColor.image.Handle(),
                                    graphResources.velocityBuffer.image.Handle(),
                                    graphResources.normalRoughnessBuffer.image.Handle(),
+                                   graphResources.emissiveBuffer.image.Handle(),
                                    graphResources.hdrSceneColor.image.Handle(),
                                    graphResources.lightingTarget.image.Handle(),
                                    graphResources.smaaEdgeTarget.image.Handle(),

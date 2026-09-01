@@ -8,8 +8,16 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render.hpp>
 #include <cstddef>
+#include <cstring>
 
 namespace ZHLN {
+
+namespace {
+/// globalTextures[1], uploaded by InitializeSystemTextures before anything
+/// else can allocate a slot. Every lookup and upload failure resolves here so
+/// a missing texture renders as untinted white rather than as garbage.
+constexpr uint32_t kWhiteFallbackBindlessIndex = 1;
+} // namespace
 
 TextureHandle TextureManager::Load(RenderContext& rc, CreativeWorksManager& cwMgr, std::string_view path, bool isSRGB) {
     uint64_t id     = HashAssetID(path);
@@ -28,14 +36,54 @@ TextureHandle TextureManager::Load(RenderContext& rc, CreativeWorksManager& cwMg
 }
 
 TextureHandle TextureManager::CreateProcedural(RenderContext& rc, std::string_view name, uint32_t width, uint32_t height, bool isSRGB, const uint32_t* pixels) {
-    uint64_t              id          = HashAssetID(name);
-    auto                  handle      = static_cast<TextureHandle>(id);
-    auto                  texRes      = rc.CreateTexture(pixels, width, height, isSRGB);
-    uint32_t              bindlessIdx = texRes ? *texRes : 1;
-    std::vector<uint32_t> pixelCopy;
-    if (pixels != nullptr && width > 0 && height > 0) {
-        pixelCopy.assign(pixels, pixels + (static_cast<size_t>(width * height)));
+    uint64_t     id         = HashAssetID(name);
+    auto         handle     = static_cast<TextureHandle>(id);
+    const size_t pixelCount = static_cast<size_t>(width) * static_cast<size_t>(height);
+
+    // CreateTextureInternal reads width*height*4 bytes out of `pixels` with no
+    // way to signal a short read, so a null source or an empty extent is a
+    // caller bug rather than a runtime condition to recover from.
+    ZHLN::Assert(pixels != nullptr && pixelCount > 0, "TextureManager::CreateProcedural('{}'): no pixel data for a {}x{} texture", name, width, height);
+    if (pixels == nullptr || pixelCount == 0) {
+        ZHLN::Log("[TextureManager] Refusing procedural texture '{}': {}x{} with {} pixel data.", name, width, height, pixels == nullptr ? "no" : "empty");
+        return TextureHandle::Invalid;
     }
+
+    // Re-creating a procedural texture under a name that already exists is a
+    // leak, not an update: the renderer never reclaims a bindless slot (Unload
+    // is a no-op by design and globalTextures[] only ever grows), so the
+    // previous image and its slot stay resident for the life of the device.
+    //
+    // An identical re-creation is therefore answered from the record -- Load()
+    // has always deduplicated by asset id this way -- which makes the call
+    // idempotent for callers that rebuild the same atlas per scene. A genuine
+    // content change still goes through, but says so, because it orphans the
+    // old slot and there is currently no API to release it.
+    const bool duplicate = Lock(_mutex, [&] -> bool {
+        const auto* existing = _textures.Find(id);
+        if (existing == nullptr) {
+            return false;
+        }
+        const bool sameShape = existing->isProcedural && existing->width == width && existing->height == height && existing->isSRGB == isSRGB;
+        if (sameShape && existing->cpuPixels.size() == pixelCount && std::memcmp(existing->cpuPixels.data(), pixels, pixelCount * sizeof(uint32_t)) == 0) {
+            return true;
+        }
+        ZHLN::Log(
+            "[TextureManager] Procedural texture '{}' recreated with different contents ({}x{} -> {}x{}); bindless slot {} is orphaned for the life of the "
+            "device.",
+            name, existing->width, existing->height, width, height, existing->gpuBindlessIndex
+        );
+        return false;
+    });
+
+    if (duplicate) {
+        return handle;
+    }
+
+    auto                  texRes      = rc.CreateTexture(pixels, width, height, isSRGB);
+    uint32_t              bindlessIdx = texRes ? *texRes : kWhiteFallbackBindlessIndex;
+    std::vector<uint32_t> pixelCopy;
+    pixelCopy.assign(pixels, pixels + pixelCount);
     Lock(_mutex, [&] {
         _textures.Insert(
             id, TextureRecord {
@@ -55,7 +103,7 @@ TextureHandle TextureManager::CreateProcedural(RenderContext& rc, std::string_vi
 
 uint32_t TextureManager::GetBindlessIndex(TextureHandle handle) const noexcept {
     if (handle == TextureHandle::Invalid) {
-        return 1; // Default white
+        return kWhiteFallbackBindlessIndex;
     }
 
     auto id = static_cast<uint64_t>(handle);
@@ -76,7 +124,7 @@ uint32_t TextureManager::GetBindlessIndex(TextureHandle handle) const noexcept {
             }
         }
 
-        return 1; // Safe fallback
+        return kWhiteFallbackBindlessIndex; // Safe fallback
     });
 }
 
@@ -109,7 +157,7 @@ void TextureManager::RebuildGPUResources(RenderContext& rc, CreativeWorksManager
             if (record.isProcedural) {
                 if (!record.cpuPixels.empty()) {
                     auto texRes             = rc.CreateTexture(record.cpuPixels.data(), record.width, record.height, record.isSRGB);
-                    record.gpuBindlessIndex = texRes ? *texRes : 1;
+                    record.gpuBindlessIndex = texRes ? *texRes : kWhiteFallbackBindlessIndex;
                 }
             } else {
                 record.gpuBindlessIndex = CreativeWorksFactory::LoadTexture(rc, cwMgr, record.path.c_str(), record.isSRGB);

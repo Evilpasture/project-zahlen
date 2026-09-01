@@ -22,6 +22,7 @@ auto RunContainersSuite() -> ZHLN::Test::TestStats;
 auto RunReflectionSuite() -> ZHLN::Test::TestStats;
 auto RunErrorSuite() -> ZHLN::Test::TestStats;
 auto RunJSONSuite() -> ZHLN::Test::TestStats;
+auto RunTOMLSuite() -> ZHLN::Test::TestStats;
 auto RunCommandLineSuite() -> ZHLN::Test::TestStats;
 auto RunMathAndIKSuite() -> ZHLN::Test::TestStats;
 auto RunGraphicsSettingsSuite() -> ZHLN::Test::TestStats;
@@ -35,6 +36,7 @@ auto main() -> int {
         RunReflectionSuite,
         RunErrorSuite,
         RunJSONSuite,
+        RunTOMLSuite,
         RunCommandLineSuite,
         RunMathAndIKSuite,
         RunGraphicsSettingsSuite,

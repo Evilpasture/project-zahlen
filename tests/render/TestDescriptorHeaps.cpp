@@ -13,6 +13,7 @@
 //      addresses re-pushed via vkCmdPushDataEXT are actually consumed.
 
 #include "TestsFramework.hpp"
+#include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/DefaultPreset.hpp>
@@ -50,38 +51,28 @@ struct DescriptorHeapsSuite {
     static constexpr uint32_t kGridRows     = 8;
 
     DescriptorHeapsSuite() {
-        ZHLN::Fiber::InitMainThread();
-        ZHLN::TaskSystem::Init(2, 32, ZHLN::kMinimumFiberStackSize);
+        // Nested in the group binary's session: the task system and the pooled
+        // engine outlive this suite (see HeadlessEngineFixture.hpp).
+        ZHLN::Test::Headless::BeginSession();
     }
 
     ~DescriptorHeapsSuite() {
-        ZHLN::TaskSystem::Shutdown();
+        ZHLN::Test::Headless::EndSession();
     }
 
-    static auto CreateTestEngine(uint32_t width = 640, uint32_t height = 480) -> std::unique_ptr<ZHLN::Engine> {
-        ZHLN::DefaultPreset::SetDisabled(true);
-
-        const ZHLN::EngineConfig cfg {
-            .physics = {.maxBodies = 512, .maxBodyPairs = 1024, .maxContactConstraints = 1024, .tempAllocatorSize = 8 * 1024 * 1024},
-            .render  = {
-                .appName        = "Headless Descriptor Heap Test",
-                .width          = width,
-                .height         = height,
-                .vsync          = false,
-                .fullscreen     = false,
-                .validationMode = ZHLN::ValidationMode::On,
-                .headless       = true
-            }
-        };
-
-        auto engineRes = ZHLN::Engine::Create(cfg);
-        if (!engineRes) {
-            return nullptr;
-        }
-
-        auto engine = std::move(engineRes.value());
-        engine->InitializeDefaultScene();
-        return engine;
+    /// Pooled: the binary keeps one engine alive and the scene is what gets
+    /// thrown away between tests. Creating a Vulkan instance per test is what
+    /// eventually exhausts the loader's static TLS and turns the tail of a
+    /// group into "vkCreateInstance: Found no drivers!".
+    static auto CreateTestEngine(uint32_t width = 640, uint32_t height = 480) -> ZHLN::Test::Headless::EngineHandle {
+        return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
+            .appName               = "Headless Descriptor Heap Test",
+            .width                 = width,
+            .height                = height,
+            .maxBodies             = 512,
+            .maxBodyPairs          = 1024,
+            .maxContactConstraints = 1024,
+        });
     }
 
     [[nodiscard]] static auto HsvToRgb(float h, float s, float v) -> std::array<uint8_t, 3> {
@@ -274,6 +265,54 @@ struct DescriptorHeapsSuite {
                 return std::unexpected(DescriptorHeapsTestError::HeapTextureArrayWrong);
             }
 
+            return {};
+        }
+
+        // ====================================================================
+        // 1b. globalTextures[] slots are never reclaimed -- Unload is a no-op
+        //     and nextTextureIndex only ever counts up -- so recreating the
+        //     same procedural texture has to be answered from the record
+        //     instead of burning another slot and orphaning the old image.
+        //     The font atlas used to do exactly that once per scene reset.
+        // ====================================================================
+        std::expected<void, ZHLN::Error> recreating_a_procedural_texture_reuses_its_bindless_slot() {
+            auto engine      = DescriptorHeapsSuite::CreateTestEngine();
+            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
+            if (!checkEngine) {
+                return checkEngine;
+            }
+
+            auto& rc = engine->GetRenderContext();
+
+            std::array<uint32_t, 16 * 16> texels {};
+            texels.fill(0xFF3366CCu);
+
+            const ZHLN::TextureHandle first = rc.CreateProceduralTexture("dheap_slot_reuse", 16, 16, false, texels.data());
+            if (first == ZHLN::TextureHandle::Invalid) {
+                return std::unexpected(DescriptorHeapsTestError::TextureCreationFailed);
+            }
+            const uint32_t firstIndex = rc.GetBindlessIndex(first);
+
+            // Byte-identical re-creation, ten times over: same handle, same
+            // slot, no new upload. Before the guard each of these consumed a
+            // fresh globalTextures[] index and leaked the previous image.
+            for (uint32_t attempt = 0; attempt < 10; ++attempt) {
+                const ZHLN::TextureHandle again = rc.CreateProceduralTexture("dheap_slot_reuse", 16, 16, false, texels.data());
+                ZHLN::Test::ExpectTrue(again == first);
+                ZHLN::Test::ExpectEq(rc.GetBindlessIndex(again), firstIndex);
+            }
+
+            // A different name is still a different texture in its own slot --
+            // the dedupe is by asset id and content, not a blanket refusal.
+            std::array<uint32_t, 16 * 16> otherTexels {};
+            otherTexels.fill(0xFF22AA55u);
+            const ZHLN::TextureHandle other = rc.CreateProceduralTexture("dheap_slot_reuse_other", 16, 16, false, otherTexels.data());
+            ZHLN::Test::ExpectTrue(other != first);
+            ZHLN::Test::ExpectTrue(rc.GetBindlessIndex(other) != firstIndex);
+
+            // The slot still samples: one frame with the reused texture on a
+            // box has to render rather than trip a validation error.
+            ZHLN::Test::Headless::TickFrames(*engine, 2);
             return {};
         }
 

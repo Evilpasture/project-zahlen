@@ -15,6 +15,7 @@
 // expose mesh shading, so this binary stays green on lavapipe/older hardware.
 
 #include "TestsFramework.hpp"
+#include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
@@ -217,38 +218,25 @@ struct MeshShaderTestSuite {
         // that have nothing to do with mesh shading.
         setenv("ZHLN_NO_GPU_CULLING", "1", 1);
 
-        ZHLN::Fiber::InitMainThread();
-        ZHLN::TaskSystem::Init(2, 32, ZHLN::kMinimumFiberStackSize);
+        // Nested in the group binary's session: the task system and the pooled
+        // engine outlive this suite (see HeadlessEngineFixture.hpp).
+        ZHLN::Test::Headless::BeginSession();
     }
 
     ~MeshShaderTestSuite() {
-        ZHLN::TaskSystem::Shutdown();
+        ZHLN::Test::Headless::EndSession();
     }
 
-    static auto CreateTestEngine(uint32_t width = 320, uint32_t height = 240) -> std::unique_ptr<ZHLN::Engine> {
-        ZHLN::DefaultPreset::SetDisabled(true);
-
-        const ZHLN::EngineConfig cfg {
-            .physics = {.maxBodies = 256, .maxBodyPairs = 512, .maxContactConstraints = 512, .tempAllocatorSize = 8 * 1024 * 1024},
-            .render  = {
-                .appName        = "Headless Mesh Shader Test",
-                .width          = width,
-                .height         = height,
-                .vsync          = false,
-                .fullscreen     = false,
-                .validationMode = ZHLN::ValidationMode::On,
-                .headless       = true
-            }
-        };
-
-        auto engineRes = ZHLN::Engine::Create(cfg);
-        if (!engineRes) {
-            return nullptr;
-        }
-
-        auto engine = std::move(engineRes.value());
-        engine->InitializeDefaultScene();
-        return engine;
+    /// Pooled: the binary keeps one engine alive and the scene is what gets
+    /// thrown away between tests. Creating a Vulkan instance per test is what
+    /// eventually exhausts the loader's static TLS and turns the tail of a
+    /// group into "vkCreateInstance: Found no drivers!".
+    static auto CreateTestEngine(uint32_t width = 320, uint32_t height = 240) -> ZHLN::Test::Headless::EngineHandle {
+        return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
+            .appName               = "Headless Mesh Shader Test",
+            .width                 = width,
+            .height                = height,
+        });
     }
 
     struct Tests {

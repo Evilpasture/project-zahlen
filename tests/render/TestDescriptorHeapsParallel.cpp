@@ -11,6 +11,7 @@
 // with heap pipelines. 400 cubes in 4 shared materials verify the pipeline.
 
 #include "TestsFramework.hpp"
+#include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/DefaultPreset.hpp>
@@ -40,38 +41,28 @@ enum class DescriptorHeapsParallelTestError : uint8_t {
 
 struct DescriptorHeapsParallelSuite {
     DescriptorHeapsParallelSuite() {
-        ZHLN::Fiber::InitMainThread();
-        ZHLN::TaskSystem::Init(2, 32, ZHLN::kMinimumFiberStackSize);
+        // Nested in the group binary's session: the task system and the pooled
+        // engine outlive this suite (see HeadlessEngineFixture.hpp).
+        ZHLN::Test::Headless::BeginSession();
     }
 
     ~DescriptorHeapsParallelSuite() {
-        ZHLN::TaskSystem::Shutdown();
+        ZHLN::Test::Headless::EndSession();
     }
 
-    static auto CreateTestEngine(uint32_t width = 640, uint32_t height = 480) -> std::unique_ptr<ZHLN::Engine> {
-        ZHLN::DefaultPreset::SetDisabled(true);
-
-        const ZHLN::EngineConfig cfg {
-            .physics = {.maxBodies = 1024, .maxBodyPairs = 2048, .maxContactConstraints = 2048, .tempAllocatorSize = 8 * 1024 * 1024},
-            .render  = {
-                .appName        = "Headless Parallel Descriptor Heap Test",
-                .width          = width,
-                .height         = height,
-                .vsync          = false,
-                .fullscreen     = false,
-                .validationMode = ZHLN::ValidationMode::On,
-                .headless       = true
-            }
-        };
-
-        auto engineRes = ZHLN::Engine::Create(cfg);
-        if (!engineRes) {
-            return nullptr;
-        }
-
-        auto engine = std::move(engineRes.value());
-        engine->InitializeDefaultScene();
-        return engine;
+    /// Pooled: the binary keeps one engine alive and the scene is what gets
+    /// thrown away between tests. Creating a Vulkan instance per test is what
+    /// eventually exhausts the loader's static TLS and turns the tail of a
+    /// group into "vkCreateInstance: Found no drivers!".
+    static auto CreateTestEngine(uint32_t width = 640, uint32_t height = 480) -> ZHLN::Test::Headless::EngineHandle {
+        return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
+            .appName               = "Headless Parallel Descriptor Heap Test",
+            .width                 = width,
+            .height                = height,
+            .maxBodies             = 1024,
+            .maxBodyPairs          = 2048,
+            .maxContactConstraints = 2048,
+        });
     }
 
     struct Tests {

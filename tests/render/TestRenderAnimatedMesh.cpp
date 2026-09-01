@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
-#include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/ModelPrefab.hpp>
@@ -47,40 +47,30 @@ enum class AnimatedMeshTestError : uint8_t {
 
 struct RenderAnimatedMeshTestSuite {
     RenderAnimatedMeshTestSuite() {
-        ZHLN::Fiber::InitMainThread();
-        ZHLN::TaskSystem::Init(2, 32, ZHLN::kMinimumFiberStackSize);
+        // Nested in the group binary's session: the task system and the pooled
+        // engine outlive this suite (see HeadlessEngineFixture.hpp).
+        ZHLN::Test::Headless::BeginSession();
     }
 
     ~RenderAnimatedMeshTestSuite() {
-        ZHLN::TaskSystem::Shutdown();
+        ZHLN::Test::Headless::EndSession();
     }
 
     struct Tests {
         std::expected<void, ZHLN::Error> headless_automated_skinning_and_emission_verification() {
-            ZHLN::DefaultPreset::SetDisabled(true);
-
-            // 1. Headless Configuration (Runs hermetically in CI/CD without window managers)
-            const ZHLN::EngineConfig cfg {
-                .physics = {.maxBodies = 512, .maxBodyPairs = 1024, .maxContactConstraints = 1024, .tempAllocatorSize = 16 * 1024 * 1024},
-                .render  = {
-                    .appName        = "Headless Skinning Sanity Test",
-                    .width          = 640,
-                    .height         = 480,
-                    .vsync          = false,
-                    .fullscreen     = false,
-                    .validationMode = ZHLN::ValidationMode::On,
-                    .headless       = true
-                }
-            };
-
-            auto engineRes   = ZHLN::Engine::Create(cfg);
-            auto checkEngine = ZHLN::Test::AssertTrue(engineRes.has_value());
+            // 1. Headless and pooled (runs hermetically without a window
+            //    manager, and without its own Vulkan instance).
+            const auto engine      = ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
+                     .appName               = "Headless Skinning Sanity Test",
+                     .maxBodies             = 512,
+                     .maxBodyPairs          = 1024,
+                     .maxContactConstraints = 1024,
+                     .tempAllocatorSize     = 16 * 1024 * 1024
+            });
+            const auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
             if (!checkEngine) {
                 return checkEngine;
             }
-
-            const auto engine = std::move(engineRes.value());
-            engine->InitializeDefaultScene();
 
             auto& reg = engine->GetRegistry();
             auto& rc  = engine->GetRenderContext();

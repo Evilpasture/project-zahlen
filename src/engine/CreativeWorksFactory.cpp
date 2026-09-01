@@ -69,7 +69,7 @@ static auto FindSystemFont(const char* fontName) -> std::string {
     return fontPath;
 }
 
-auto CreateFontAtlasTexture(RenderContext& ctx) -> TextureHandle {
+auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> TextureHandle {
     std::string fontPath = FindSystemFont("sans-serif");
     if (fontPath.empty()) {
         fontPath = "/usr/share/fonts/TTF/DejaVuSans.ttf";
@@ -102,9 +102,7 @@ auto CreateFontAtlasTexture(RenderContext& ctx) -> TextureHandle {
     const uint32_t       atlasSize = 1024;
     std::vector<uint8_t> alphaBitmap(static_cast<size_t>(atlasSize * atlasSize), 0);
 
-    auto* engine     = GetEngineContext();
-    auto& reg        = engine->GetRegistry();
-    auto* uiSettings = reg.GetSingleton<Components::UISettingsComponent>();
+    auto* uiSettings = registry.GetSingleton<Components::UISettingsComponent>();
     if (uiSettings == nullptr) {
         return TextureHandle::Invalid;
     }
@@ -396,9 +394,24 @@ auto InstantiateMeshPart(
     return e;
 }
 
-auto TrySpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, const JPH::Mat44& baseTransform, float scaleMult) -> Entity {
-    const float* ef  = part.defaultMaterial.emissiveFactor;
-    float        lum = ef[0] * 0.2126f + ef[1] * 0.7152f + ef[2] * 0.0722f;
+// Spawns a cheap point light approximating the bounce from an emissive part.
+//
+// The light is parented to the part entity and positioned in *part-local*
+// space, so it inherits the part's world transform every frame: move or
+// animate the model and the glow goes with it. Baking a world position here
+// instead is what used to leave a puddle of lights at the spawn point while
+// the model itself went dark once it moved.
+auto TrySpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, Entity parentEntity, float scaleMult) -> Entity {
+    // The imported factor is in engine HDR units (kGLTFEmissiveDisplayScale
+    // converts glTF's [0,1] on the way in). A light wants the authored colour
+    // and an intensity in light units, so the display conversion is undone
+    // here -- otherwise opting into VPLs would spawn a 100x overbright lamp.
+    static constexpr float kInvDisplayScale = 1.0f / kGLTFEmissiveDisplayScale;
+
+    const float* raw = part.defaultMaterial.emissiveFactor;
+    const float  ef[3] {raw[0] * kInvDisplayScale, raw[1] * kInvDisplayScale, raw[2] * kInvDisplayScale};
+
+    float lum = ef[0] * 0.2126f + ef[1] * 0.7152f + ef[2] * 0.0722f;
     if (lum <= 0.01f) {
         return Entity::Null();
     }
@@ -409,11 +422,10 @@ auto TrySpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, const JPH::M
     float partExtent = (part.localMax[0] - part.localMin[0]) + (part.localMax[1] - part.localMin[1]) + (part.localMax[2] - part.localMin[2]);
 
     Entity glowEnt = reg.Create();
-    reg.Add(
-        glowEnt,
-        Components::TransformComponent {.position = baseTransform * localCenter, .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)}
-    );
+    reg.Add(glowEnt, Components::TransformComponent {.position = localCenter, .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)});
+    reg.Add(glowEnt, Components::HierarchyComponent {.parent = parentEntity});
     reg.Add(glowEnt, Components::NameComponent {.name = String64("Glow_" + std::string(part.name.c_str()))});
+
     reg.Add(
         glowEnt, Components::LightComponent {
                      .type        = LightType::Point,
@@ -606,7 +618,7 @@ auto InstantiatePrefab(
         }
         spawnedCount++;
 
-        Entity glowEnt = TrySpawnEmissiveVPL(reg, prefab.parts[i], baseTransform * GetNodeLogicalTransform(prefab, prefab.parts[i].nodeIndex), scaleMult);
+        Entity glowEnt = params.emissiveVirtualLights ? TrySpawnEmissiveVPL(reg, prefab.parts[i], meshEnt, scaleMult) : Entity::Null();
         if (glowEnt != Entity::Null()) {
             if (outBuffer != nullptr && spawnedCount < maxCount) {
                 outBuffer[spawnedCount] = glowEnt;
@@ -747,11 +759,11 @@ void SetupPlayerRagdoll(Engine& engine, Entity playerEntity, std::span<const Ent
     SetupPlayerRagdoll(engine.GetPhysicsContext(), engine.GetRegistry(), playerEntity, visualParts);
 }
 
-void RebuildVulkanResources(RenderContext& ctx, CreativeWorksManager& cwMgr, ECS::Registry& /*reg*/) {
+void RebuildVulkanResources(RenderContext& ctx, CreativeWorksManager& cwMgr, ECS::Registry& reg) {
     ZHLN::Log("[Engine] Device Lost: Clearing GPU asset cache. Next frame will re-upload assets lazily.");
 
     ctx.ClearGPUCaches();
-    CreateFontAtlasTexture(ctx);
+    CreateFontAtlasTexture(ctx, reg);
 
     uint32_t count = cwMgr.GetCachedPrefabs(nullptr, 0);
     if (count > 0) {

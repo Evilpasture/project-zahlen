@@ -33,6 +33,89 @@ enum class ProceduralAnimationTestError : uint32_t {
     HairConstraintFailed[[= ZHLN::Description<"The XPBD hair solver produced a non-finite or excessively stretched segment."> {}]],
 };
 
+namespace {
+namespace RigFixture {
+
+/**
+ * Builds the ModelPrefab *input* that BuildBoneMap consumes, from a parsed GLB.
+ *
+ * This is a fixture, not an importer test: this suite is CPU-only and cannot
+ * link the real GLTF importer, which uploads through a live RenderContext.
+ * The importer itself is covered by tests/render/TestGLTFImport.cpp, which
+ * loads the same asset through CreativeWorksFactory and checks the prefab it
+ * returns against the source document. Here the asset is only a realistic
+ * source of node names and a bind pose for the rig mapper.
+ */
+inline void BuildFixture(const cgltf_data& data, ZHLN::ModelPrefab& outPrefab) {
+    outPrefab.nodes.resize(data.nodes_count);
+    for (size_t node = 0; node < data.nodes_count; ++node) {
+        const cgltf_node& source = data.nodes[node];
+        float             matrix[16] {};
+        cgltf_node_transform_local(&source, matrix);
+        outPrefab.nodes[node].name           = source.name != nullptr ? ZHLN::String64(source.name) : ZHLN::String64("Unnamed");
+        outPrefab.nodes[node].parentIndex    = source.parent != nullptr ? static_cast<int32_t>(source.parent - data.nodes) : -1;
+        outPrefab.nodes[node].hasMesh        = source.mesh != nullptr;
+        outPrefab.nodes[node].localTransform = JPH::Mat44(
+            JPH::Vec4(matrix[0], matrix[1], matrix[2], matrix[3]), JPH::Vec4(matrix[4], matrix[5], matrix[6], matrix[7]),
+            JPH::Vec4(matrix[8], matrix[9], matrix[10], matrix[11]), JPH::Vec4(matrix[12], matrix[13], matrix[14], matrix[15])
+        );
+    }
+
+    outPrefab.skeletons.reserve(data.skins_count);
+    for (size_t skinIndex = 0; skinIndex < data.skins_count; ++skinIndex) {
+        const cgltf_skin& skin = data.skins[skinIndex];
+        ZHLN::Skeleton    skeleton;
+        skeleton.name = skin.name != nullptr ? ZHLN::String64(skin.name) : ZHLN::String64("Skeleton");
+        skeleton.joints.reserve(skin.joints_count);
+        for (size_t jointIndex = 0; jointIndex < skin.joints_count; ++jointIndex) {
+            const cgltf_node* jointNode = skin.joints[jointIndex];
+            int32_t           parent    = -1;
+            for (size_t candidate = 0; candidate < skin.joints_count; ++candidate) {
+                if (skin.joints[candidate] == jointNode->parent) {
+                    parent = static_cast<int32_t>(candidate);
+                    break;
+                }
+            }
+
+            JPH::Mat44 inverseBind = JPH::Mat44::sIdentity();
+            if (skin.inverse_bind_matrices != nullptr) {
+                float raw[16] {};
+                cgltf_accessor_read_float(skin.inverse_bind_matrices, jointIndex, raw, 16);
+                inverseBind = JPH::Mat44(
+                    JPH::Vec4(raw[0], raw[1], raw[2], raw[3]), JPH::Vec4(raw[4], raw[5], raw[6], raw[7]), JPH::Vec4(raw[8], raw[9], raw[10], raw[11]),
+                    JPH::Vec4(raw[12], raw[13], raw[14], raw[15])
+                );
+            }
+
+            skeleton.joints.push_back({
+                .name              = jointNode->name != nullptr ? ZHLN::String64(jointNode->name) : ZHLN::String64("Joint"),
+                .parentIndex       = parent,
+                .nodeIndex         = static_cast<int32_t>(jointNode - data.nodes),
+                .inverseBindMatrix = inverseBind,
+            });
+        }
+        outPrefab.skeletons.push_back(std::move(skeleton));
+    }
+
+    outPrefab.animations.reserve(data.animations_count);
+    for (size_t clipIndex = 0; clipIndex < data.animations_count; ++clipIndex) {
+        const cgltf_animation& source = data.animations[clipIndex];
+        outPrefab.animations.push_back({.name = source.name != nullptr ? ZHLN::String64(source.name) : ZHLN::String64("Anim")});
+    }
+}
+
+[[nodiscard]] inline JPH::Mat44 SourceWorld(const cgltf_node& node) noexcept {
+    float matrix[16] {};
+    cgltf_node_transform_world(&node, matrix);
+    return JPH::Mat44(
+        JPH::Vec4(matrix[0], matrix[1], matrix[2], matrix[3]), JPH::Vec4(matrix[4], matrix[5], matrix[6], matrix[7]),
+        JPH::Vec4(matrix[8], matrix[9], matrix[10], matrix[11]), JPH::Vec4(matrix[12], matrix[13], matrix[14], matrix[15])
+    );
+}
+
+} // namespace RigFixture
+} // namespace
+
 struct ProceduralAnimationTestSuite {
     ProceduralAnimationTestSuite() {
         ZHLN::TaskSystem::Init(2, 32, ZHLN::kMinimumFiberStackSize);
@@ -625,6 +708,7 @@ struct ProceduralAnimationTestSuite {
             const auto                          baseTransforms    = tiltMap.modelTransforms;
             const ZHLN::RigNodeIndex            tiltThigh         = tiltMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ThighL)];
             const ZHLN::RigNodeIndex            tiltHips          = tiltMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Hips)];
+            const ZHLN::RigNodeIndex            tiltHead          = tiltMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Head)];
             const JPH::Vec3                     unreachableTarget = tiltMap.modelTransforms[tiltThigh].GetTranslation() + JPH::Vec3(1.5f, -0.35f, 0.0f);
             constexpr float                     maxBodyTilt       = 0.14f;
             ZHLN::ProceduralLocomotionComponent tiltGait;
@@ -635,7 +719,11 @@ struct ProceduralAnimationTestSuite {
                 );
             }
             const float appliedTilt = std::sqrt(tiltGait.ikBodyTiltPitch * tiltGait.ikBodyTiltPitch + tiltGait.ikBodyTiltRoll * tiltGait.ikBodyTiltRoll);
-            if (appliedTilt < 0.01f || appliedTilt > maxBodyTilt + 0.0001f || tiltMap.modelTransforms[tiltHips].IsClose(baseTransforms[tiltHips], 0.0001f)) {
+            // The reach tilt rotates the spine subtree around the hips pivot: the upper body must
+            // move, while the hips and the thighs stay planted so leg IK reach is unaffected.
+            if (appliedTilt < 0.01f || appliedTilt > maxBodyTilt + 0.0001f || tiltMap.modelTransforms[tiltHead].IsClose(baseTransforms[tiltHead], 0.0001f) ||
+                !tiltMap.modelTransforms[tiltHips].IsClose(baseTransforms[tiltHips], 0.0001f) ||
+                !tiltMap.modelTransforms[tiltThigh].IsClose(baseTransforms[tiltThigh], 0.0001f)) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
             return {};
@@ -853,6 +941,145 @@ struct ProceduralAnimationTestSuite {
                 !attachmentTransform->scale.IsClose(expectedScale, 0.0001f) ||
                 !(attachmentTransform->rotation * JPH::Vec3::sAxisZ()).IsClose(expectedRotation * JPH::Vec3::sAxisZ(), 0.0001f) ||
                 skinnedTransform == nullptr || !skinnedTransform->position.IsClose(JPH::Vec3(9.0f, 9.0f, 9.0f), 0.0001f)) {
+                return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+            }
+            return {};
+        }
+
+        /**
+         * Maps a real authored rig: the shipped base rig GLB is parsed into a
+         * prefab fixture (see RigFixture) and handed to BuildBoneMap, then the
+         * resulting semantic map, its forward kinematics and its bind-pose
+         * skinning palette are checked.
+         *
+         * The importer that produces this prefab in production is covered
+         * separately by tests/render/TestGLTFImport.cpp; what is under test
+         * here is the rig mapper, on names and a bind pose no synthetic
+         * fixture reproduces faithfully.
+         */
+        std::expected<void, ZHLN::Error> base_rig_glb_maps_every_control_and_hair_strand() {
+            const std::string assetPath = std::string(ZHLN_TEST_SOURCE_DIR) + "/resources/assets/ProceduralAnimationBaseRig.glb";
+            std::ifstream     stream(assetPath, std::ios::binary);
+            char              magic[4] {};
+            stream.read(magic, sizeof(magic));
+            if (stream.gcount() != 4 || std::string_view(magic, 4) != "glTF") {
+                std::cout << "[SKIP] ProceduralAnimationBaseRig.glb is an unresolved Git LFS pointer.\n";
+                return {};
+            }
+
+            cgltf_options options {};
+            cgltf_data*   rawData = nullptr;
+            if (cgltf_parse_file(&options, assetPath.c_str(), &rawData) != cgltf_result_success || rawData == nullptr) {
+                return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+            }
+            std::unique_ptr<cgltf_data, decltype(&cgltf_free)> data(rawData, &cgltf_free);
+            if (cgltf_load_buffers(&options, data.get(), assetPath.c_str()) != cgltf_result_success || data->nodes_count == 0 || data->skins_count == 0) {
+                return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+            }
+
+            ZHLN::ModelPrefab prefab;
+            prefab.virtualPath = "ProceduralAnimationBaseRig.glb";
+            RigFixture::BuildFixture(*data, prefab);
+
+            const ZHLN::Skeleton& skeleton = prefab.skeletons[0];
+            ZHLN::RigBoneMap      map;
+            if (!ZHLN::BuildBoneMap(prefab, skeleton, map) || map.nodeCount != prefab.nodes.size() || !map.initialized) {
+                return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+            }
+
+            // The map mirrors the imported hierarchy, and its forward kinematics
+            // reproduce the bind-pose world transforms of the source rig.
+            for (ZHLN::RigNodeIndex node = 0; node < map.nodeCount; ++node) {
+                const int32_t importedParent = prefab.nodes[node].parentIndex;
+                const bool    parentMatches  = importedParent < 0 ? map.parentIndices[node] == ZHLN::InvalidRigNode :
+                                                                    map.parentIndices[node] == static_cast<ZHLN::RigNodeIndex>(importedParent);
+                if (!parentMatches || !map.bindLocalTransforms[node].IsClose(prefab.nodes[node].localTransform, 0.0001f) ||
+                    !map.modelTransforms[node].IsClose(RigFixture::SourceWorld(data->nodes[node]), 0.0001f)) {
+                    return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+                }
+            }
+
+            // Aliasing-prone controls must claim their own node, never a neighbour's
+            // (Forearm swallowed as UpperArm, Sup_Spine as Spine, Toe as Foot, ...).
+            const std::array<std::pair<ZHLN::CharacterBone, std::string_view>, ZHLN::kCoreBoneCount> expectedNodes = {{
+                {ZHLN::CharacterBone::Root, "Root"},
+                {ZHLN::CharacterBone::Hips, "DEF-Hips"},
+                {ZHLN::CharacterBone::Spine, "DEF-Spine"},
+                {ZHLN::CharacterBone::SupSpine, "DEF-Sup_Spine"},
+                {ZHLN::CharacterBone::Chest, "DEF-Chest"},
+                {ZHLN::CharacterBone::Neck, "DEF-Neck"},
+                {ZHLN::CharacterBone::Head, "DEF-Head"},
+                {ZHLN::CharacterBone::UpperArmL, "DEF-Upper_arm.L"},
+                {ZHLN::CharacterBone::ForearmL, "DEF-Forearm.L"},
+                {ZHLN::CharacterBone::HandL, "DEF-Hand.L"},
+                {ZHLN::CharacterBone::UpperArmR, "DEF-Upper_arm.R"},
+                {ZHLN::CharacterBone::ForearmR, "DEF-Forearm.R"},
+                {ZHLN::CharacterBone::HandR, "DEF-Hand.R"},
+                {ZHLN::CharacterBone::ThighL, "DEF-Thigh.L"},
+                {ZHLN::CharacterBone::ShinL, "DEF-Shin.L"},
+                {ZHLN::CharacterBone::FootL, "DEF-Foot.L"},
+                {ZHLN::CharacterBone::ToeL, "DEF-Toe.L"},
+                {ZHLN::CharacterBone::ThighR, "DEF-Thigh.R"},
+                {ZHLN::CharacterBone::ShinR, "DEF-Shin.R"},
+                {ZHLN::CharacterBone::FootR, "DEF-Foot.R"},
+                {ZHLN::CharacterBone::ToeR, "DEF-Toe.R"},
+            }};
+            for (const auto& [bone, expectedName]: expectedNodes) {
+                const ZHLN::RigNodeIndex node = map.nodeIndices[ZHLN::BoneSlot(bone)];
+                if (!ZHLN::IsValidRigNode(node, map.nodeCount) || std::string_view(prefab.nodes[node].name) != expectedName) {
+                    return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+                }
+            }
+
+            // No imported node may be claimed by two semantic slots.
+            std::vector<uint8_t> claimed(map.nodeCount, 0);
+            size_t               mappedHairLinks = 0;
+            for (size_t semantic = 0; semantic < ZHLN::kBoneCount; ++semantic) {
+                const ZHLN::RigNodeIndex node = map.nodeIndices[semantic];
+                if (!ZHLN::IsValidRigNode(node, map.nodeCount)) {
+                    continue;
+                }
+                if (claimed[node] != 0) {
+                    return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+                }
+                claimed[node] = 1;
+                mappedHairLinks += semantic >= ZHLN::BoneSlot(ZHLN::CharacterBone::HairStart) ? 1u : 0u;
+            }
+
+            // The authored asset ships 18 six-link strands (DEF-Hair_S01_01 .. S18_06).
+            // Every link must land in its own slot, in order, parented to the previous.
+            constexpr size_t expectedStrands = 18;
+            if (map.sourceHairStrandCount != expectedStrands || mappedHairLinks != expectedStrands * ZHLN::HairStrandsComponent::kLinksPerStrand) {
+                return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+            }
+            const size_t hairBase = ZHLN::BoneSlot(ZHLN::CharacterBone::HairStart);
+            for (size_t strand = 0; strand < expectedStrands; ++strand) {
+                for (size_t link = 1; link < ZHLN::HairStrandsComponent::kLinksPerStrand; ++link) {
+                    const size_t             slot     = strand * ZHLN::HairStrandsComponent::kLinksPerStrand + link;
+                    const ZHLN::RigNodeIndex node     = map.nodeIndices[hairBase + slot];
+                    const ZHLN::RigNodeIndex previous = map.nodeIndices[hairBase + slot - 1];
+                    if (!ZHLN::IsValidRigNode(node, map.nodeCount) || map.parentIndices[node] != previous) {
+                        return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+                    }
+                }
+            }
+
+            // Bind-pose palette: model transform times inverse bind is identity per joint.
+            std::vector<JPH::Mat44> palette(skeleton.joints.size(), JPH::Mat44::sIdentity());
+            ZHLN::ProceduralAnimation::ResolveModelTransforms(map);
+            if (ZHLN::ProceduralAnimation::BuildSkinningPalette(skeleton, map, palette) != skeleton.joints.size()) {
+                return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+            }
+            for (const JPH::Mat44& jointMatrix: palette) {
+                if (!jointMatrix.IsClose(JPH::Mat44::sIdentity(), 0.0001f)) {
+                    return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+                }
+            }
+
+            // Authored track lookup against the real clip names of this rig.
+            if (ZHLN::FindAnimationTrack(prefab, "idle") < 0 || ZHLN::FindAnimationTrack(prefab, "walk") < 0 ||
+                ZHLN::FindAnimationTrack(prefab, "run") < 0 ||
+                ZHLN::FindAnimationTrack(prefab, "walk") == ZHLN::FindAnimationTrack(prefab, "run")) {
                 return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
             return {};

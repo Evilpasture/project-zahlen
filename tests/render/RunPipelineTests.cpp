@@ -17,6 +17,7 @@
 // their own group.
 
 #include "TestsFramework.hpp"
+#include "helpers/HeadlessEngineFixture.hpp"
 #include "helpers/ImageTesting.hpp"
 #include <string_view>
 
@@ -28,6 +29,7 @@ auto RunDescriptorHeapsParallelSuite() -> ZHLN::Test::TestStats;
 auto RunRenderAnimatedMeshSuite() -> ZHLN::Test::TestStats;
 auto RunCameraLookAtSuite() -> ZHLN::Test::TestStats;
 auto RunHiZSuite() -> ZHLN::Test::TestStats;
+auto RunGLTFImportSuite() -> ZHLN::Test::TestStats;
 
 
 auto main(int argc, char** argv) -> int {
@@ -35,6 +37,13 @@ auto main(int argc, char** argv) -> int {
     if (argc >= 3 && std::string_view(argv[1]) == "--convert-ppm") {
         return ZHLN::Test::Image::ConvertPpmToPng(argc, argv) ? 0 : 1;
     }
+
+    // The outer reference for the whole binary. Suites take nested ones, so the
+    // task system stays up and the pooled engine survives every suite boundary
+    // instead of being rebuilt nine times. Released here, after the last suite
+    // and before main returns, which is where a Vulkan device can still be torn
+    // down safely.
+    const ZHLN::Test::Headless::SessionScope session;
 
     return ZHLN::Test::Runner::RunDeferred(
         RunRenderPipelinesSuite,
@@ -44,6 +53,7 @@ auto main(int argc, char** argv) -> int {
         RunDescriptorHeapsParallelSuite,
         RunRenderAnimatedMeshSuite,
         RunCameraLookAtSuite,
-        RunHiZSuite
+        RunHiZSuite,
+        RunGLTFImportSuite
     );
 }

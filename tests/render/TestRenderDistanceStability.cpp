@@ -551,7 +551,7 @@ struct DistanceStabilitySuite {
         ZHLN::TaskSystem::Shutdown();
     }
 
-    static auto CreateTestEngine() -> std::unique_ptr<ZHLN::Engine> {
+    static auto CreateTestEngine() -> ZHLN::ScopedEngine {
         ZHLN::DefaultPreset::SetDisabled(true);
 
         const ZHLN::EngineConfig cfg {
@@ -569,7 +569,7 @@ struct DistanceStabilitySuite {
 
         auto engineRes = ZHLN::Engine::Create(cfg);
         if (!engineRes) {
-            return nullptr;
+            return {};
         }
 
         auto engine = std::move(engineRes.value());

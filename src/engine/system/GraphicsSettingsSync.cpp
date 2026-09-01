@@ -56,14 +56,15 @@ GraphicsSettings CollectGraphicsSettings(Engine& engine) {
         ppEnt = reg.SingletonEntity<PostProcessSettingsComponent>();
     }
     if (const auto* pp = reg.Get<PostProcessSettingsComponent>(ppEnt); pp != nullptr) {
-        gfx.post.mode        = pp->giMode;
-        gfx.post.aoRadius    = pp->aoRadius;
-        gfx.post.aoBias      = pp->aoBias;
-        gfx.post.aoPower     = pp->aoPower;
-        gfx.post.giIntensity = pp->giIntensity;
-        gfx.post.giSamples   = pp->giSamples;
-        gfx.post.enableSSR   = pp->enableSSR ? 1 : 0;
-        gfx.post.enableRTR   = pp->enableRTR ? 1 : 0;
+        gfx.post.mode          = pp->giMode;
+        gfx.post.aoRadius      = pp->aoRadius;
+        gfx.post.aoBias        = pp->aoBias;
+        gfx.post.aoPower       = pp->aoPower;
+        gfx.post.giIntensity   = pp->giIntensity;
+        gfx.post.giSamples     = pp->giSamples;
+        gfx.post.enableSSR     = pp->enableSSR ? 1 : 0;
+        gfx.post.enableRTR     = pp->enableRTR ? 1 : 0;
+        gfx.post.glowIntensity = pp->glowIntensity;
 
         gfx.environment.ambientExposure = pp->ambientExposure;
         gfx.environment.fullBright      = pp->fullBright;

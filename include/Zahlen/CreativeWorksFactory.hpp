@@ -58,7 +58,12 @@ struct MaterialDesc {
 
 [[nodiscard]] auto CreateMaterial(RenderContext& ctx, const MaterialDesc& desc) -> std::expected<Material, Error>;
 
-auto CreateFontAtlasTexture(RenderContext& ctx) -> TextureHandle;
+/// Bakes the SDF font atlas and stores it on the UISettingsComponent singleton.
+///
+/// The registry is a parameter rather than something this reaches for through
+/// GetEngineContext(): the ambient engine is only correct while a scope
+/// publishes one, and every caller here already holds the registry it means.
+auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> TextureHandle;
 auto LoadTexture(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view path, bool isSRGB = true) -> uint32_t;
 
 struct SpawnParams {
@@ -72,6 +77,16 @@ struct SpawnParams {
     bool     isAnimated      = false;
     uint32_t physicsCategory = 0xFFFFFFFF;
     uint32_t physicsMask     = 0xFFFFFFFF;
+
+    // Emissive materials always shade and bloom on their own (see
+    // material_model.slang / bloom_threshold_cs) -- that is the glTF and
+    // Babylon.js meaning of emission: a surface term, not a light source.
+    //
+    // Set this to spawn an additional cheap point light ("virtual point
+    // light") per emissive part so the glow also bounces onto nearby
+    // geometry. Off by default: it is an approximation, it costs a light
+    // per emissive part, and no other glTF viewer does it.
+    bool emissiveVirtualLights = false;
 
     float     roughness = 0.5f;
     float     metallic  = 0.0f;

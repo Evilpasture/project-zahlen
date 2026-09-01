@@ -48,6 +48,7 @@
 #include "NoiseFrameCapture.hpp"
 #include "RayTracedNoiseMetrics.hpp"
 #include "TestsFramework.hpp"
+#include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
@@ -148,35 +149,23 @@ constexpr float kSunSize = 0.15f;
 
 struct RayTracedNoiseStabilityTestSuite {
     RayTracedNoiseStabilityTestSuite() {
-        ZHLN::Fiber::InitMainThread();
-        ZHLN::TaskSystem::Init(2, 32, ZHLN::kMinimumFiberStackSize);
+        // Nested in the group binary's session: the task system and the pooled
+        // engine outlive this suite (see HeadlessEngineFixture.hpp).
+        ZHLN::Test::Headless::BeginSession();
     }
 
     ~RayTracedNoiseStabilityTestSuite() {
-        ZHLN::TaskSystem::Shutdown();
+        ZHLN::Test::Headless::EndSession();
     }
 
-    static auto CreateTestEngine() -> std::unique_ptr<ZHLN::Engine> {
-        ZHLN::DefaultPreset::SetDisabled(true);
-        const ZHLN::EngineConfig cfg {
-            .physics = {.maxBodies = 256, .maxBodyPairs = 512, .maxContactConstraints = 512, .tempAllocatorSize = 8 * 1024 * 1024},
-            .render  = {
-                 .appName        = "Headless RT Noise Stability",
-                 .width          = kWidth,
-                 .height         = kHeight,
-                 .vsync          = false,
-                 .fullscreen     = false,
-                 .validationMode = ZHLN::ValidationMode::On,
-                 .headless       = true
-            }
-        };
-        auto engineRes = ZHLN::Engine::Create(cfg);
-        if (!engineRes) {
-            return nullptr;
-        }
-        auto engine = std::move(engineRes.value());
-        engine->InitializeDefaultScene();
-        return engine;
+    /// Pooled: one engine per resolution for the whole binary, with the
+    /// scene reset between tests. Creating a Vulkan instance per test is
+    /// what eventually exhausts the loader's static TLS and turns the tail
+    /// of the group into "vkCreateInstance: Found no drivers!".
+    static auto CreateTestEngine() -> ZHLN::Test::Headless::EngineHandle {
+        return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
+            .appName = "Headless RT Noise Stability", .width = kWidth, .height = kHeight
+        });
     }
 
     /// Pins the requested AA mode and zeroes sub-pixel jitter. Jitter must be

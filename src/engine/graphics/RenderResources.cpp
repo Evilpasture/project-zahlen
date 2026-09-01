@@ -261,7 +261,16 @@ void RenderContext::CheckShaderReload() noexcept {
     }
 }
 
-void RenderContext::SetResolution([[maybe_unused]] const Extent2D& res) {
+void RenderContext::SetResolution(const Extent2D& res) {
+    // With a real window the compositor owns the size: the request is advisory
+    // and the recreate re-queries glfwGetFramebufferSize, which is why this
+    // used to ignore its argument entirely. Headless (and TTY) there is nothing
+    // to ask -- Window::GetSize just returns what it was told -- so the extent
+    // has to be written there or the recreate reproduces the old size and the
+    // call is a no-op.
+    if (res.width > 0 && res.height > 0 && _impl->window.IsHeadless()) {
+        _impl->window.SetSize(res.width, res.height);
+    }
     _impl->resized = true;
 }
 
@@ -741,7 +750,12 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
     blueNoiseWidth       = w;
     blueNoiseHeight      = h;
     blueNoiseViewInfo    = Vk::MakeViewCreateInfo2D(image.Handle(), kFormat, 1, VK_IMAGE_ASPECT_COLOR_BIT);
-    blueNoiseTexIdx      = AdoptBindlessTexture(std::move(image), std::move(view), kFormat, 1, false);
+
+    auto blueNoiseIdx = AdoptBindlessTexture(std::move(image), std::move(view), kFormat, 1, false);
+    if (!blueNoiseIdx) {
+        return std::unexpected(blueNoiseIdx.error());
+    }
+    blueNoiseTexIdx = *blueNoiseIdx;
 
     ZHLN::Log("[BlueNoise] LDR_RGBA_0 bound as bindless texture {} ({}x{}, single mip).", blueNoiseTexIdx, w, h);
     return {};
@@ -801,8 +815,10 @@ auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width
             }
             auto gpuView = std::move(*view_res);
 
-            const uint32_t index = AdoptBindlessTexture(std::forward<decltype(gpuImage)>(gpuImage), std::move(gpuView), format, mipLevels, false);
-            Vk::Debug::SetImageName(ctx, textureImages.back().Handle(), std::format("BindlessTexture{:03}", index));
+            const auto index = AdoptBindlessTexture(std::forward<decltype(gpuImage)>(gpuImage), std::move(gpuView), format, mipLevels, false);
+            if (index) {
+                Vk::Debug::SetImageName(ctx, textureImages.back().Handle(), std::format("BindlessTexture{:03}", *index));
+            }
             return index;
         });
 }
@@ -836,9 +852,11 @@ auto RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceData,
             }
             auto gpuView = std::move(*cube_view_res);
 
-            const uint32_t index = AdoptBindlessTexture(std::forward<decltype(gpuImage)>(gpuImage), std::move(gpuView), VK_FORMAT_R8G8B8A8_UNORM, 1, true);
-            std::array<char, 32> buf {};
-            Vk::Debug::SetImageName(ctx, textureImages.back().Handle(), FormatTo(buf, "BindlessCubeTexture{:03}", index));
+            const auto index = AdoptBindlessTexture(std::forward<decltype(gpuImage)>(gpuImage), std::move(gpuView), VK_FORMAT_R8G8B8A8_UNORM, 1, true);
+            if (index) {
+                std::array<char, 32> buf {};
+                Vk::Debug::SetImageName(ctx, textureImages.back().Handle(), FormatTo(buf, "BindlessCubeTexture{:03}", *index));
+            }
             return index;
         });
 }

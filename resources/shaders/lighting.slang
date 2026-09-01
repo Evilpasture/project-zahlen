@@ -33,6 +33,13 @@ Texture2DArray<float> punctualShadow2D;     // Spotlight shadows
 Texture2D<float4> blueNoiseTex;
 SamplerState blueNoiseSampler;
 
+// Emissive G-Buffer channel. It is added to the composed result instead of
+// being multiplied by incident light: emission is what a surface radiates on
+// its own, so it has to survive shadow, night and back-facing geometry.
+// Declared after the blue noise pair and before the TLAS for the same reason
+// they are -- the optional TLAS slot must stay at the tail.
+Texture2D<float4> texEmissive;
+
 // The TLAS binding is declared LAST on purpose: in the NoRT variant this
 // declaration disappears entirely, so the (never present) hole stays at the
 // tail of the binding table and positional descriptor writes stay aligned.
@@ -181,10 +188,15 @@ float4 ComputeAmbientAndAO(float2 uv, uint2 pixelPos, float3 N, float3 worldPos,
 
                 if (diff > 0.0f) {
                     float finalWeight = smoothstep(0.0f, pc.aoBias * 2.0f, diff - pc.aoBias) * smoothstep(0.0f, 1.0f, pc.aoRadius / max(abs(diff), 0.001f));
-                    if (pc.giMode == 1)
+                    if (pc.giMode == 1) {
                         occlusion += finalWeight;
-                    else if (pc.giMode == 2)
-                        indirectLight += texInput.SampleLevel(smp, uv_sample, 0).rgb * max(dot(N, dir), 0.0f) * finalWeight;
+                    } else if (pc.giMode == 2) {
+                        // Emitters bounce: the gather reads lit scene colour
+                        // plus the emissive channel, which the lighting pass
+                        // adds separately and so is absent from texInput.
+                        float3 sampleRadiance = texInput.SampleLevel(smp, uv_sample, 0).rgb + texEmissive.SampleLevel(smp, uv_sample, 0).rgb;
+                        indirectLight += sampleRadiance * max(dot(N, dir), 0.0f) * finalWeight;
+                    }
                 }
             }
 
@@ -211,8 +223,9 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         discard;
 
     float4 albedoRaw = texInput.SampleLevel(smp, input.uv, 0);
+    float3 emissive  = texEmissive.SampleLevel(smp, input.uv, 0).rgb;
     if (frame.fullBright != 0) {
-        return float4(albedoRaw.rgb, 1.0f);
+        return float4(albedoRaw.rgb + emissive, 1.0f);
     }
     float4 normRoughRaw = texNormalRoughness.SampleLevel(smp, input.uv, 0);
     float3 N            = UnpackNormalOctahedron(normRoughRaw.xy * 2.0f - 1.0f);
@@ -412,6 +425,8 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         }
     }
 
-    float3 litColor = ambientDiffuseAndGI * albedoRaw.rgb + directSun + directPunctual;
+    // Emission is additive and unconditional -- the one term that does not
+    // depend on a light reaching this pixel.
+    float3 litColor = ambientDiffuseAndGI * albedoRaw.rgb + directSun + directPunctual + emissive;
     return float4(litColor, ao);
 }

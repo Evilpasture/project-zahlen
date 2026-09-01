@@ -81,9 +81,24 @@ function(zahlen_add_gpu_test_group TARGET_NAME TIMEOUT_SECONDS)
         TIMEOUT ${TIMEOUT_SECONDS}
     )
 
+    # Each vkCreateInstance dlopen()s the Vulkan ICD, which on the NVIDIA driver
+    # pulls in libnvidia-tls.so. glibc's static TLS surplus is finite and is not
+    # fully reclaimed on dlclose, so a binary that builds many engines eventually
+    # fails with "cannot allocate memory in static TLS block" and every remaining
+    # test reports "vkCreateInstance: Found no drivers!". The suites pool their
+    # engines (see tests/helpers/HeadlessEngineFixture.hpp); this raises the
+    # surplus as well, so a suite that still churns engines degrades late instead
+    # of falling over.
+    set(GPU_TEST_ENVIRONMENT "")
+    if(UNIX AND NOT APPLE)
+        list(APPEND GPU_TEST_ENVIRONMENT "GLIBC_TUNABLES=glibc.rtld.optional_static_tls=4096")
+    endif()
     if(USE_SANITIZERS)
+        list(APPEND GPU_TEST_ENVIRONMENT ${ZHLN_TEST_ENVIRONMENT})
+    endif()
+    if(GPU_TEST_ENVIRONMENT)
         set_tests_properties(${TARGET_NAME} PROPERTIES
-            ENVIRONMENT "${ZHLN_TEST_ENVIRONMENT}"
+            ENVIRONMENT "${GPU_TEST_ENVIRONMENT}"
         )
     endif()
 endfunction()
@@ -99,6 +114,7 @@ zahlen_add_gpu_test_group(GPU_Lighting 300
     TestRayTracedNoiseStability.cpp
     TestRayTracedReflectionNoise.cpp
     TestDecal.cpp
+    TestEmissiveShading.cpp
 )
 
 # Pipeline, resource and culling mechanics.
@@ -112,7 +128,17 @@ zahlen_add_gpu_test_group(GPU_Pipeline 300
     TestRenderAnimatedMesh.cpp
     TestCameraLookAt.cpp
     TestRenderHIZ.cpp
+    TestGLTFImport.cpp
 )
+
+# TestGLTFImport.cpp checks what the shipping importer produced against the
+# same GLB parsed independently by cgltf. zahlen_engine gets cgltf privately
+# through zahlen_gltf, so the reference parse needs its own copy of the
+# implementation (same arrangement as tests/extras). ZHLN_TEST_SOURCE_DIR
+# locates resources/assets/ at runtime instead of embedding a 100 KB rig.
+target_sources(GPU_Pipeline PRIVATE ${PROJECT_SOURCE_DIR}/extern/cgltf_impl.c)
+target_include_directories(GPU_Pipeline SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/extern/cgltf)
+target_compile_definitions(GPU_Pipeline PRIVATE ZHLN_TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 
 # ImGui, UI layout and viewmodel presentation.
 zahlen_add_gpu_test_group(GPU_Interface 180

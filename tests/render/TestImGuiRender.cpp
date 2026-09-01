@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include "helpers/HeadlessEngineFixture.hpp"
 #include "imgui.h"
 #include <Zahlen/Components.hpp>
 #include <Zahlen/DefaultPreset.hpp>
@@ -92,12 +93,13 @@ struct PpmImage {
 
 struct ImGuiRenderTestSuite {
     ImGuiRenderTestSuite() {
-        ZHLN::Fiber::InitMainThread();
-        ZHLN::TaskSystem::Init(2, 32, ZHLN::kMinimumFiberStackSize);
+        // Nested in the group binary's session: the task system and the pooled
+        // engine outlive this suite (see HeadlessEngineFixture.hpp).
+        ZHLN::Test::Headless::BeginSession();
     }
 
     ~ImGuiRenderTestSuite() {
-        ZHLN::TaskSystem::Shutdown();
+        ZHLN::Test::Headless::EndSession();
     }
 
     struct Tests {
@@ -116,6 +118,11 @@ struct ImGuiRenderTestSuite {
                     .headless       = true,
                 },
             };
+
+            // Exclusive engine: only one Vulkan instance may be live at a
+            // time (see engines_are_serial_and_the_slot_is_released), so the
+            // pool must not be holding one when this builds its own.
+            ZHLN::Test::Headless::ShutdownPooledEngines();
 
             auto engineRes = ZHLN::Engine::Create(cfg);
             if (!engineRes) {

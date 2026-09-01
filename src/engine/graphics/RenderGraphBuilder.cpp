@@ -6,6 +6,7 @@
 #include "Zahlen/Math3D.hpp"
 #include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <tuple>
@@ -49,13 +50,15 @@ struct PassFactory {
             .sceneColor = Vk::Assume<Vk::ColorWrite<Res_SceneColor>>(self.graphResources.sceneColor),
             .velocity   = Vk::Assume<Vk::ColorWrite<Res_Velocity>>(self.graphResources.velocityBuffer),
             .normRough  = Vk::Assume<Vk::ColorWrite<Res_NormRough>>(self.graphResources.normalRoughnessBuffer),
+            .emissive   = Vk::Assume<Vk::ColorWrite<Res_Emissive>>(self.graphResources.emissiveBuffer),
             .depth      = Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(self.presentation.depthTarget)
         };
     }
 
     [[nodiscard]] auto MakeMainPass1() const noexcept {
         return Vk::Passieren<
-            "MainPass1", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::DepthStencilWrite<Res_Depth>>(
+            "MainPass1", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::ColorWrite<Res_Emissive>,
+            Vk::DepthStencilWrite<Res_Depth>>(
             [this](VkCommandBuffer c) noexcept {
                 FrameRecorder mainRec(c, self);
                 Passes::MainPass1 {}.Execute(mainRec, BuildSceneResources());
@@ -117,8 +120,8 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeMainPass2() const noexcept {
         return Vk::Passieren<
-            "MainPass2", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::DepthStencilWrite<Res_Depth>,
-            Vk::ComputeRead<Res_HiZ>>([this](VkCommandBuffer c) noexcept {
+            "MainPass2", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::ColorWrite<Res_Emissive>,
+            Vk::DepthStencilWrite<Res_Depth>, Vk::ComputeRead<Res_HiZ>>([this](VkCommandBuffer c) noexcept {
             FrameRecorder mainRec(c, self);
             Passes::MainPass2 {}.Execute(mainRec, BuildSceneResources());
         });
@@ -126,8 +129,8 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeShadowPass() const noexcept {
         return Vk::Passieren<
-            "MainShadow", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::DepthStencilWrite<Res_Depth>,
-            Vk::DepthWrite<Res_ShadowMap>, Vk::DepthWrite<Res_ShadowAtlas>>([this](VkCommandBuffer c) noexcept {
+            "MainShadow", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::ColorWrite<Res_Emissive>,
+            Vk::DepthStencilWrite<Res_Depth>, Vk::DepthWrite<Res_ShadowMap>, Vk::DepthWrite<Res_ShadowAtlas>>([this](VkCommandBuffer c) noexcept {
             const auto drawCount      = static_cast<uint32_t>(self.queues.drawQueue.size());
             const bool gpuCullingUsed = self.cullingPass.pipeline.Valid() && self.frames.indirectCommandsBuffers->Valid() &&
                                         (drawCount <= kGpuCullingMaxInstances) && !Diag::DisableGpuCulling() && !self.MeshShadingActive();
@@ -277,8 +280,8 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeLightingPass() const noexcept {
         return Vk::MakePass<
-            "Lighting", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_ShadowMap>,
-            Vk::ShaderRead<Res_ShadowAtlas>, Vk::ColorWrite<Res_Lighting>>([this](auto& ctx) noexcept {
+            "Lighting", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Emissive>, Vk::ShaderRead<Res_Depth>,
+            Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ColorWrite<Res_Lighting>>([this](auto& ctx) noexcept {
             const auto ltcMatHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
                 .handle   = self.ltcMatImage.Handle(),
                 .view     = self.ltcMatView.Get(),
@@ -327,7 +330,7 @@ struct PassFactory {
                 Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer), self.frames.lightStorageBuffers[fIdx],
                 self.frames.frameUniformBuffers[fIdx], Vk::Assume<Vk::ShaderRead<Res_ShadowMap>>(self.graphResources.shadowMap), self.shadowSampler, ltcMatHeap,
                 ltcAmpHeap, self.clampSampler, self.frames.clusterGridBuffers[fIdx], self.frames.lightIndexListBuffers[fIdx], self.pointSampler, atlasCubeHeap,
-                atlas2DHeap, blueNoiseHeap, self.blueNoiseSampler,
+                atlas2DHeap, blueNoiseHeap, self.blueNoiseSampler, Vk::Assume<Vk::ShaderRead<Res_Emissive>>(self.graphResources.emissiveBuffer),
                 Vk::AsAddressWrite {
                     .address = (self.rtCtx.Valid() && self.frames.tlas.Current() != VK_NULL_HANDLE) ?
                                    self.rtCtx.GetAccelerationStructureAddress(self.frames.tlas.Current()) :
@@ -509,9 +512,9 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeBloomPass() const noexcept {
         return Vk::MakePass<
-            "BloomKawase", Vk::ComputeReadGeneral<Res_HdrSceneColor>, Vk::ComputeWrite<Res_BloomThresh>, Vk::ComputeWrite<Res_BloomDown1>,
-            Vk::ComputeWrite<Res_BloomDown2>, Vk::ComputeWrite<Res_BloomDown3>, Vk::ComputeWrite<Res_BloomUp2>, Vk::ComputeWrite<Res_BloomUp1>,
-            Vk::ComputeWrite<Res_BloomFinal>>([this](VkCommandBuffer c) noexcept {
+            "BloomKawase", Vk::ComputeReadGeneral<Res_HdrSceneColor>, Vk::ComputeRead<Res_Emissive>, Vk::ComputeWrite<Res_BloomThresh>,
+            Vk::ComputeWrite<Res_BloomDown1>, Vk::ComputeWrite<Res_BloomDown2>, Vk::ComputeWrite<Res_BloomDown3>, Vk::ComputeWrite<Res_BloomUp2>,
+            Vk::ComputeWrite<Res_BloomUp1>, Vk::ComputeWrite<Res_BloomFinal>>([this](VkCommandBuffer c) noexcept {
             self.BindHeapsAndPushFrame(c);
 
             auto& heap = self.heapManager;
@@ -522,6 +525,9 @@ struct PassFactory {
             // separate the dispatches -- no render pass boundaries, no layout
             // ping-pong.
             const auto srcHdr     = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.hdrSceneColor);
+            // Sampled in its post-lighting layout rather than dragged into
+            // GENERAL with the rest of the chain: the bright pass only reads it.
+            const auto emissive   = Vk::Assume<Vk::ComputeRead<Res_Emissive>>(self.graphResources.emissiveBuffer);
             const auto thresh     = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.bloomThresholdTarget);
             const auto down1      = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.bloomDown1);
             const auto down2      = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.bloomDown2);
@@ -539,17 +545,24 @@ struct PassFactory {
 
             const auto Kawase = [](int mode, const auto& src) noexcept {
                 return RenderContext::Impl::KawasePushConstants {
-                    .mode      = mode,
-                    .rcpWidth  = 1.0f / static_cast<float>(src.extent.width),
-                    .rcpHeight = 1.0f / static_cast<float>(src.extent.height),
-                    .padding   = 0.0f
+                    .mode          = mode,
+                    .rcpWidth      = 1.0f / static_cast<float>(src.extent.width),
+                    .rcpHeight     = 1.0f / static_cast<float>(src.extent.height),
+                    .glowIntensity = 0.0f
                 };
             };
 
-            // 0. Bright pass: HDR scene color -> half-res threshold target.
+            // Only the bright pass reads the glow feed; the rest of the chain
+            // is blurring whatever it produced.
+            auto thresholdPush          = Kawase(0, self.graphResources.hdrSceneColor);
+            thresholdPush.glowIntensity = std::max(self.settings.post.glowIntensity, 0.0f);
+
+            // 0. Bright pass: HDR scene color -> half-res threshold target,
+            //    plus the emission channel ungated (the glow layer -- see
+            //    bloom_threshold_cs.slang). Argument order is the shader's
+            //    reflected binding order: texInput, smp, texEmissive, outImage.
             thresholdChain.Step(
-                self.bloomThresholdCS, self.bloomThresholdHeapBindings, thresh.extent, Kawase(0, self.graphResources.hdrSceneColor), srcHdr,
-                self.defaultSampler, thresh
+                self.bloomThresholdCS, self.bloomThresholdHeapBindings, thresh.extent, thresholdPush, srcHdr, self.defaultSampler, emissive, thresh
             );
 
             // 1-3. Downsample chain: thresh -> down1 -> down2 -> down3.
@@ -857,7 +870,8 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeViewmodelPass() const noexcept {
         return Vk::Passieren<
-            "Viewmodel", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::DepthStencilWrite<Res_Depth>>(
+            "Viewmodel", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::ColorWrite<Res_Emissive>,
+            Vk::DepthStencilWrite<Res_Depth>>(
             [this](VkCommandBuffer c) noexcept {
                 FrameRecorder vmRec(c, self);
                 Passes::ViewmodelPass {}.Execute(vmRec, BuildSceneResources());
