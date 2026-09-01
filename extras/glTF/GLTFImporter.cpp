@@ -8,10 +8,10 @@
 #include <Zahlen/Core/Ranges.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/CreativeWorksManager.hpp>
+#include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Meshlet.hpp>
-#include <Zahlen/PrefabLoader.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/physics/Physics.hpp>
@@ -977,18 +977,39 @@ void RebuildPrefabGPUResources(RenderContext& ctx, ModelPrefab* prefab) {
     cgltf_free(data);
 }
 
-void RegisterAsPrefabLoader() noexcept {
-    // Register copies the table into engine-owned storage, so there is nothing
-    // here whose lifetime has to be managed. Idempotent by construction: the
-    // second call overwrites the first with the same three pointers.
-    PrefabLoader::Register(
-        PrefabLoader::Backend {
-            .Load                = &LoadGLBPrefab,
-            .LoadFromMemory      = &LoadGLBPrefabFromMemory,
-            .RebuildGPUResources = &RebuildPrefabGPUResources
+auto InstantiatePrefabFromMemory(
+    Engine&                                  engine,
+    std::span<const uint8_t>                 bytes,
+    std::string_view                         virtualPath,
+    const CreativeWorksFactory::SpawnParams& params,
+    Entity*                                  outBuffer,
+    uint32_t                                 maxCount
+) -> uint32_t {
+    const auto* prefab = LoadGLBPrefabFromMemory(engine.GetRenderContext(), engine.GetCreativeWorksManager(), bytes, virtualPath);
+    if (prefab == nullptr) {
+        return 0;
+    }
+    return CreativeWorksFactory::InstantiatePrefab(engine, *prefab, params, outBuffer, maxCount);
+}
+
+void RebuildCachedPrefabs(RenderContext& ctx, CreativeWorksManager& cwMgr) {
+    const uint32_t count = cwMgr.GetCachedPrefabs(nullptr, 0);
+    if (count == 0) {
+        return;
+    }
+
+    std::vector<ModelPrefab*> prefabs(count);
+    cwMgr.GetCachedPrefabs(prefabs.data(), count);
+
+    for (auto* prefab: prefabs) {
+        RebuildPrefabGPUResources(ctx, prefab);
+        for (size_t i = 0; i < prefab->parts.size(); ++i) {
+            const std::string assetKey = std::string(prefab->virtualPath.c_str()) + "#" + prefab->parts[i].name.c_str() + "_" +
+                                         std::to_string(prefab->parts[i].nodeIndex);
+            ctx.RegisterGPUMesh(HashAssetID(assetKey), prefab->parts[i].mesh);
+            ctx.RegisterGPUMaterial(HashAssetID(assetKey + "_mat"), prefab->parts[i].defaultMaterial);
         }
-    );
-    Log("[glTF] registered as the engine's prefab loader");
+    }
 }
 
 } // namespace ZHLN::GLTF

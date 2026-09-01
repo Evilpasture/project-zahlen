@@ -220,7 +220,7 @@ endif()
 
 # Absolute project root (forward slashes also on Windows) for code that reads
 # or writes repo-root files at runtime, e.g. the performance baseline cache
-# (tests/PerfBaseline.hpp). Defined once here so every target shares it
+# (tests/extras/profile/PerfBaseline.hpp). Defined once here so every target shares it
 # instead of each consumer inventing its own path plumbing.
 string(REPLACE "\\" "/" ZHLN_PROJECT_ROOT_FWD "${PROJECT_SOURCE_DIR}")
 add_compile_definitions(ZHLN_PROJECT_ROOT="${ZHLN_PROJECT_ROOT_FWD}")
@@ -371,7 +371,6 @@ set(RAW_ENGINE_SOURCES
     src/engine/graphics/RenderSetup.cpp
     src/engine/ScriptECSBridge.cpp
     src/engine/Scene.cpp
-    src/engine/PrefabLoader.cpp
 )
 
 find_library(ZSTD_LIBRARY NAMES zstd zstd_static HINTS "/opt/homebrew/lib" "/usr/local/lib" "/usr/lib")

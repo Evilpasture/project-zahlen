@@ -133,10 +133,9 @@ zahlen_add_gpu_test_group(GPU_Pipeline 300
 
 # TestGLTFImport.cpp checks what the shipping importer produced against the
 # same GLB parsed independently by cgltf, and TestRenderAnimatedMesh.cpp plays
-# one back. Both go through ZHLN::CreativeWorksFactory, which reaches the
-# importer through the ZHLN::PrefabLoader hook now that the importer lives in
-# extras -- so this group links zahlen_extras and registers the loader before
-# loading anything. That one link also supplies:
+# one back. Both call ZHLN::GLTF::* in extras/glTF directly -- core's loader is
+# only a lookup in the prefab cache the importer fills -- so this group links
+# zahlen_extras. That one link also supplies:
 #
 #   * the cgltf symbols for the reference parse, and its header path below
 #     (zahlen_extras compiles the one extern/cgltf_impl.c in the tree)
@@ -165,6 +164,12 @@ zahlen_add_gpu_test_group(GPU_Performance 900
     TestRenderPerformance.cpp
     TestRenderDistanceStability.cpp
 )
+
+# TestRenderPerformance.cpp checks its measurements against the recorded
+# baselines, and those live in extras/profile/PerfBaseline.hpp on top of
+# extras/json -- so this group links the extras archive like GPU_Pipeline does.
+target_link_libraries(GPU_Performance PRIVATE zahlen_extras)
+target_include_directories(GPU_Performance PRIVATE ${PROJECT_SOURCE_DIR}/extras)
 
 # --- Extras VFX & Render Tests ---
 if(ZHLN_BUILD_EXTRAS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extras")

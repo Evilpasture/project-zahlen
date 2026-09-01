@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/PerfBaseline.hpp
+// tests/extras/profile/PerfBaseline.hpp
 //
 // Performance baseline caching for TestPerformance / TestRenderPerformance,
 // built on the JSON extra (ReflectJSON::TryParse to read,
@@ -34,19 +34,21 @@
 
 #pragma once
 
+#include "TestsFramework.hpp"
 #include <Zahlen/Config.hpp>
-#include <json/JSON.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
-
 #include <algorithm>
-#include <cstdio>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <iterator>
+#include <json/JSON.hpp>
 #include <map>
+#include <source_location>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -346,3 +348,51 @@ inline void SaveBaseline() {
 }
 
 } // namespace ZHLN::Test::Perf
+
+namespace ZHLN::Test {
+
+// ============================================================================
+// Performance baseline verification (see tests/extras/profile/PerfBaseline.hpp).
+//
+// Records the metric in perf-baseline.json (project root, per machine) and
+// fails the current test when it regressed beyond the limit versus the LAST
+// recorded run. First run of a metric records the baseline and passes.
+//
+//   VerifyBaseline("cpu.ecs_dense_iterate", iterDurationMs);
+//   VerifyBaseline("render.hw_ray_tracing", durationMs, 30.0); // limit %
+//
+// Limits can be overridden globally with ZHLN_PERF_REGRESSION_LIMIT
+// (percent); a fresh baseline can be forced with ZHLN_PERF_REBASELINE=1.
+// The stored value is only updated by PASSING runs, so a regression stays
+// visible until it is fixed (or explicitly re-baselined).
+// ============================================================================
+inline void VerifyBaseline(
+    std::string_view                    metric,
+    double                              value,
+    double                              limitPercent      = -1.0,
+    Perf::Direction                     direction         = Perf::Direction::LowerIsBetter,
+    std::source_location                location          = std::source_location::current()
+) {
+    const Perf::Result result = Perf::Check(metric, value, limitPercent, direction);
+
+    if (result.known) {
+        ZHLN::Println(
+            "    {}[Baseline]{} {} = {:.3f} (last run: {:.3f}, {:+.1f}% vs limit {:+.1f}%){}", result.regressed ? Color::Red : Color::Green,
+            Color::Reset, metric, value, result.previous, result.changePct, result.limitPct, result.regressed ? "  << REGRESSION" : ""
+        );
+    } else {
+        ZHLN::Println("    {}[Baseline]{} {} = {:.3f} (first run, baseline recorded)", Color::Green, Color::Reset, metric, value);
+    }
+
+    if (result.regressed) {
+        GetThreadLocalContext().failures.push_back(
+            {.file          = location.file_name(),
+             .line          = static_cast<uint32_t>(location.line()),
+             .actualValue   = std::format("{} = {:.3f} ({:+.1f}% vs last run {:.3f})", metric, value, result.changePct, result.previous),
+             .expectedValue = std::format("within {:+.1f}% of last run", result.limitPct),
+             .op            = "PerfRegression"}
+        );
+    }
+}
+
+} // namespace ZHLN::Test

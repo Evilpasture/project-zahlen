@@ -3,9 +3,10 @@
 
 // tests/render/TestGLTFImport.cpp
 //
-// Exercises the real importer -- ZHLN::CreativeWorksFactory::LoadModelPrefab-
-// FromMemory, which reaches extras/glTF through the ZHLN::PrefabLoader hook --
-// and checks the ModelPrefab it produces against the source document.
+// Exercises the real importer -- ZHLN::GLTF::LoadGLBPrefabFromMemory in
+// extras/glTF -- and checks the ModelPrefab it produces against the source
+// document. Core only ever sees the resulting ModelPrefab, which the importer
+// caches under its virtual path; nothing here goes through core's loader.
 //
 // The reference side is cgltf reading the same bytes independently. That is
 // deliberate: the assertions describe what the glTF says, and the importer has
@@ -58,16 +59,6 @@ enum class GLTFImportError : uint8_t {
 };
 
 namespace {
-
-// The glTF importer is an extra, so it reaches the engine through the
-// ZHLN::PrefabLoader hook instead of being linked into it. Registration is
-// process-wide and idempotent, and PrefabLoader's table is constant-initialised,
-// so doing it at TU scope is order-safe and saves every test in this binary from
-// repeating the call.
-const bool kPrefabLoaderRegistered = []() -> bool {
-    ZHLN::GLTF::RegisterAsPrefabLoader();
-    return true;
-}();
 
 constexpr std::string_view kVirtualPath = "ProceduralAnimationBaseRig.glb";
 
@@ -467,7 +458,7 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::EngineInitFailed);
             }
 
-            const ZHLN::ModelPrefab* prefab = ZHLN::CreativeWorksFactory::LoadModelPrefabFromMemory(*engine, bytes, kVirtualPath);
+            const ZHLN::ModelPrefab* prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetCreativeWorksManager(), bytes, kVirtualPath);
             if (prefab == nullptr) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
@@ -571,7 +562,7 @@ struct GLTFImportTestSuite {
             }
 
             // The loader is cache-backed: the same virtual path must not import twice.
-            if (ZHLN::CreativeWorksFactory::LoadModelPrefabFromMemory(*engine, bytes, kVirtualPath) != prefab) {
+            if (ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetCreativeWorksManager(), bytes, kVirtualPath) != prefab) {
                 return std::unexpected(GLTFImportError::PrefabCacheMismatch);
             }
             return {};
@@ -606,7 +597,7 @@ struct GLTFImportTestSuite {
             // The prefab cache lives on the pooled engine and outlives the
             // test, so the distinct virtual path is what keeps the two imports
             // apart in the engine log.
-            const ZHLN::ModelPrefab* prefab = ZHLN::CreativeWorksFactory::LoadModelPrefabFromMemory(*engine, bytes, "ProceduralAnimationBaseRig_Skins.glb");
+            const ZHLN::ModelPrefab* prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetCreativeWorksManager(), bytes, "ProceduralAnimationBaseRig_Skins.glb");
             if (prefab == nullptr) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
@@ -745,7 +736,7 @@ struct GLTFImportTestSuite {
             //    factor, on top of the import-time unit conversion.
             const std::vector<uint8_t> strengthBytes = MakeEmissiveStrengthFixture();
             const ZHLN::ModelPrefab*   withStrength =
-                ZHLN::CreativeWorksFactory::LoadModelPrefabFromMemory(*engine, strengthBytes, "ext_emissive_strength.glb");
+                ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetCreativeWorksManager(), strengthBytes, "ext_emissive_strength.glb");
             if (withStrength == nullptr || withStrength->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
@@ -762,7 +753,7 @@ struct GLTFImportTestSuite {
             //    emissiveStrength = 1 must import identically to one that omits
             //    the extension, rather than 100x darker.
             const std::vector<uint8_t> plainBytes = MakePlainEmissiveFixture();
-            const ZHLN::ModelPrefab*   plain      = ZHLN::CreativeWorksFactory::LoadModelPrefabFromMemory(*engine, plainBytes, "ext_emissive_plain.glb");
+            const ZHLN::ModelPrefab*   plain      = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetCreativeWorksManager(), plainBytes, "ext_emissive_plain.glb");
             if (plain == nullptr || plain->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
@@ -782,7 +773,7 @@ struct GLTFImportTestSuite {
             //    node it sits on, the part it produces, or the extension that is
             //    read from the same document.
             const std::vector<uint8_t> litBytes = MakeLitMeshFixture();
-            const ZHLN::ModelPrefab*   litMesh  = ZHLN::CreativeWorksFactory::LoadModelPrefabFromMemory(*engine, litBytes, "ext_lit_mesh.glb");
+            const ZHLN::ModelPrefab*   litMesh  = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetCreativeWorksManager(), litBytes, "ext_lit_mesh.glb");
             if (litMesh == nullptr || litMesh->nodes.size() != 1 || litMesh->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
@@ -803,7 +794,7 @@ struct GLTFImportTestSuite {
             //    dropped: ModelPrefab has nowhere to put it. Pinning that keeps
             //    the gap visible instead of implied.
             const std::vector<uint8_t> lightOnlyBytes = MakeLightOnlyFixture();
-            const ZHLN::ModelPrefab*   lightOnly      = ZHLN::CreativeWorksFactory::LoadModelPrefabFromMemory(*engine, lightOnlyBytes, "ext_light_only.glb");
+            const ZHLN::ModelPrefab*   lightOnly      = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetCreativeWorksManager(), lightOnlyBytes, "ext_light_only.glb");
             if (lightOnly == nullptr || lightOnly->nodes.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
@@ -843,7 +834,7 @@ struct GLTFImportTestSuite {
             }
 
             const std::vector<uint8_t> bytes  = MakeEmissiveStrengthFixture();
-            const ZHLN::ModelPrefab*   prefab = ZHLN::CreativeWorksFactory::LoadModelPrefabFromMemory(*engine, bytes, "emissive_spawn.glb");
+            const ZHLN::ModelPrefab*   prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetCreativeWorksManager(), bytes, "emissive_spawn.glb");
             if (prefab == nullptr || prefab->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }

@@ -14,15 +14,11 @@
 # the expensive part. The cost is process isolation: a crash or timeout in one
 # suite takes the rest of its group with it.
 
-# The test tree is built on top of the extras layer even though the core engine
-# is not: the perf baselines and the cooker's GLB checks read and write JSON
-# through extras/json, and the JSON and TOML suites live in tests/extras.
-# Turning extras off therefore turns the tests off with them, rather than
-# leaving a test tree that cannot compile.
-if(NOT TARGET zahlen_extras)
-    message(FATAL_ERROR
-        "ZHLN_BUILD_TESTS=ON requires ZHLN_BUILD_EXTRAS=ON: the test suites read JSON through extras/json.")
-endif()
+# Nothing here depends on extras. Every group below links zahlen_engine alone,
+# and the suites that exercise the extras layer -- JSON, TOML, the glTF
+# importer, the perf baselines -- live in tests/extras and are only configured
+# when that layer is built. ZHLN_BUILD_EXTRAS=OFF therefore drops those suites
+# and leaves the rest of the tree building and running.
 
 # 1. Enable CTest testing framework
 enable_testing()
@@ -81,17 +77,6 @@ function(zahlen_add_cpu_test_group TARGET_NAME GROUP_DIR)
         target_link_libraries(${TARGET_NAME} PRIVATE meshoptimizer)
     endif()
 
-    # perf/assets: JSON is an extra, so the two groups that read it link the
-    # extras archive -- TestCooker.cpp parses the cooker's GLB JSON chunk and
-    # PerfBaseline.hpp reads and writes the perf baseline files. Only the
-    # parser's symbols are needed (the <json/...> include path arrives with
-    # zahlen_extras' PUBLIC include directories), and the linker drops the
-    # VFX/animation objects nothing here references. The other groups link the
-    # core engine only, which is the whole point of the boundary.
-    if(TARGET_NAME STREQUAL "CPU_Assets" OR TARGET_NAME STREQUAL "CPU_Perf")
-        target_link_libraries(${TARGET_NAME} PRIVATE zahlen_extras)
-    endif()
-
     # --- ASAN & UBSAN CONFIGURATION ---
     if(USE_SANITIZERS)
         target_compile_options(${TARGET_NAME} PRIVATE
@@ -139,10 +124,11 @@ zahlen_add_cpu_test_group(CPU_Scripting scripting)
 zahlen_add_cpu_test_group(CPU_Physics   physics)
 zahlen_add_cpu_test_group(CPU_Assets    assets)
 zahlen_add_cpu_test_group(CPU_Audio     audio)
-zahlen_add_cpu_test_group(CPU_Perf      perf)
 
-# Optional CPU tests live with the extras toolkit and disappear completely when
-# ZHLN_BUILD_EXTRAS is disabled.
+# The extras suites live with the extras toolkit: JSON, TOML, the procedural
+# animation rig, the network codecs, and the perf baselines under
+# tests/extras/profile. They are the only tests that link zahlen_extras, and
+# they disappear completely when ZHLN_BUILD_EXTRAS is disabled.
 if(ZHLN_BUILD_EXTRAS AND TARGET zahlen_extras)
     add_subdirectory(extras)
 endif()

@@ -28,9 +28,10 @@
 // (zero while no engine exists) and are meant for workload-scoped deltas.
 #include <Zahlen/Render.hpp>
 
-// Performance baseline caching, on the engine JSON module (see
-// PerfBaseline.hpp for the storage format and policy).
-#include "PerfBaseline.hpp"
+// Performance baselines live in extras/profile/PerfBaseline.hpp, because
+// storing them is a JSON document and JSON is an extra. This header stays
+// extras-free on purpose: every test suite includes it, and a suite that only
+// exercises core must build in a build without extras.
 
 #if defined(__unix__) || defined(__APPLE__) || defined(__linux__)
 #define ZHLN_TEST_TIMEOUT_SUPPORTED 1
@@ -138,50 +139,6 @@ struct TestContext {
 inline TestContext& GetThreadLocalContext() noexcept {
     thread_local TestContext ctx;
     return ctx;
-}
-
-// ============================================================================
-// Performance baseline verification (see tests/PerfBaseline.hpp).
-//
-// Records the metric in perf-baseline.json (project root, per machine) and
-// fails the current test when it regressed beyond the limit versus the LAST
-// recorded run. First run of a metric records the baseline and passes.
-//
-//   VerifyBaseline("cpu.ecs_dense_iterate", iterDurationMs);
-//   VerifyBaseline("render.hw_ray_tracing", durationMs, 30.0); // limit %
-//
-// Limits can be overridden globally with ZHLN_PERF_REGRESSION_LIMIT
-// (percent); a fresh baseline can be forced with ZHLN_PERF_REBASELINE=1.
-// The stored value is only updated by PASSING runs, so a regression stays
-// visible until it is fixed (or explicitly re-baselined).
-// ============================================================================
-inline void VerifyBaseline(
-    std::string_view                    metric,
-    double                              value,
-    double                              limitPercent      = -1.0,
-    Perf::Direction                     direction         = Perf::Direction::LowerIsBetter,
-    std::source_location                location          = std::source_location::current()
-) {
-    const Perf::Result result = Perf::Check(metric, value, limitPercent, direction);
-
-    if (result.known) {
-        ZHLN::Println(
-            "    {}[Baseline]{} {} = {:.3f} (last run: {:.3f}, {:+.1f}% vs limit {:+.1f}%){}", result.regressed ? Color::Red : Color::Green,
-            Color::Reset, metric, value, result.previous, result.changePct, result.limitPct, result.regressed ? "  << REGRESSION" : ""
-        );
-    } else {
-        ZHLN::Println("    {}[Baseline]{} {} = {:.3f} (first run, baseline recorded)", Color::Green, Color::Reset, metric, value);
-    }
-
-    if (result.regressed) {
-        GetThreadLocalContext().failures.push_back(
-            {.file          = location.file_name(),
-             .line          = static_cast<uint32_t>(location.line()),
-             .actualValue   = std::format("{} = {:.3f} ({:+.1f}% vs last run {:.3f})", metric, value, result.changePct, result.previous),
-             .expectedValue = std::format("within {:+.1f}% of last run", result.limitPct),
-             .op            = "PerfRegression"}
-        );
-    }
 }
 
 // Escape-hatches for tests deliberately provoking errors/hangs (e.g. testing recovery)

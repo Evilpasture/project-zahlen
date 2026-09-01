@@ -8,14 +8,22 @@
 // The glTF/GLB reader. This is an extra, not core: reading a model file means a
 // container parser (cgltf), an image decoder (stb), a mesh partitioner
 // (meshoptimizer) and a JSON reader for the custom members -- none of which the
-// engine needs in order to run. Core reaches it only through the
-// ZHLN::PrefabLoader hook, so nothing in src/ includes this header.
+// engine needs in order to run.
+//
+// There is no registration step and nothing in src/ includes this header. These
+// functions build the plain ZHLN::ModelPrefab that the ECS already describes and
+// cache it under HashCreativeWorkPath(path); from then on Core's
+// CreativeWorksFactory::LoadModelPrefab(path) -- a lookup in that same cache --
+// returns it. The importer depends on Core, Core depends on the prefab cache,
+// and no function pointer is installed anywhere.
 
+#include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/ModelPrefab.hpp>
 #include <span>
 #include <string_view>
 
 namespace ZHLN {
+class Engine;
 class RenderContext;
 class CreativeWorksManager;
 
@@ -24,10 +32,22 @@ auto LoadGLBPrefab(RenderContext& ctx, CreativeWorksManager& cwMgr, std::string_
 auto LoadGLBPrefabFromMemory(RenderContext& ctx, CreativeWorksManager& cwMgr, std::span<const uint8_t> bytes, std::string_view virtualPath) -> ModelPrefab*;
 void RebuildPrefabGPUResources(RenderContext& ctx, ModelPrefab* prefab);
 
-/// Installs the three functions above as the engine's ZHLN::PrefabLoader
-/// backend. Applications call this through ZHLN::glTF::RegisterPrefabLoader();
-/// it is declared here so the importer can be used without the inspector
-/// module. Idempotent.
-void RegisterAsPrefabLoader() noexcept;
+/// Import straight from a byte buffer and spawn it in one call. Core has no
+/// equivalent because reading bytes is the importer's job.
+auto InstantiatePrefabFromMemory(
+    Engine&                          engine,
+    std::span<const uint8_t>         bytes,
+    std::string_view                 virtualPath,
+    const CreativeWorksFactory::SpawnParams& params,
+    Entity*                          outBuffer = nullptr,
+    uint32_t                         maxCount  = 0
+) -> uint32_t;
+
+/// Re-imports every cached prefab and re-registers its meshes and materials
+/// under the asset keys the ECS instances were built against. This is the
+/// device-lost half of importing: after a VkDevice is recreated the GPU handles
+/// in a ModelPrefab are dead, and recovering them means reading the .glb again.
+/// Call it once after CreativeWorksFactory::RebuildVulkanResources().
+void RebuildCachedPrefabs(RenderContext& ctx, CreativeWorksManager& cwMgr);
 } // namespace GLTF
 } // namespace ZHLN

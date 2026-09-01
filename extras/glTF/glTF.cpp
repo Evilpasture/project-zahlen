@@ -639,8 +639,9 @@ void LoadDroppedModel(InspectorState& state, const ZHLN::FileDrop& drop) {
     auto& engine = *state.engine;
     ClearInstances(state);
 
-    ZHLN::ModelPrefab* prefab =
-        ZHLN::CreativeWorksFactory::LoadModelPrefabFromMemory(engine, std::span<const uint8_t>(drop.data.data(), drop.data.size()), drop.fileName);
+    ZHLN::ModelPrefab* prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(
+        engine.GetRenderContext(), engine.GetCreativeWorksManager(), std::span<const uint8_t>(drop.data.data(), drop.data.size()), drop.fileName
+    );
     if (prefab == nullptr) {
         ZHLN::Log("[glTF Inspector] Failed to parse '{}' as glTF.", drop.fileName);
         return;
@@ -803,16 +804,7 @@ void RenderFrame(ZHLN::Engine& engine) {
 
 namespace ZHLN::glTF {
 
-void RegisterPrefabLoader() noexcept {
-    ZHLN::GLTF::RegisterAsPrefabLoader();
-}
-
 void Initialize(ZHLN::Engine& engine) {
-    // The inspector's whole purpose is opening model files, and dropping one on
-    // the window reaches CreativeWorksFactory, so the importer has to be
-    // installed before the first frame can ask for it.
-    RegisterPrefabLoader();
-
     engine.InitializeDefaultScene();
     ZHLN::DefaultPreset::SetDisabled(true);
 

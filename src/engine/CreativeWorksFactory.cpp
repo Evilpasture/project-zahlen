@@ -15,7 +15,6 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/ModelPrefab.hpp>
-#include <Zahlen/PrefabLoader.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/SkeletalAnimation.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -214,33 +213,13 @@ auto LoadTexture(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string
     return texRes ? *texRes : 1;
 }
 
-namespace {
-
-/// The registered model-file reader, or null. Reading a .glb means a container
-/// parser, an image decoder and a schema, all of which live in extras/glTF; on
-/// a build without them every prefab entry point below reports the miss here
-/// and returns null. Logged once, because a scene full of prefabs would
-/// otherwise print a line per entity per frame.
-[[nodiscard]] auto PrefabBackend() -> const PrefabLoader::Backend* {
-    const auto* backend = PrefabLoader::Get();
-    if (backend == nullptr) {
-        static bool warned = false;
-        if (!warned) {
-            warned = true;
-            ZHLN::Log(
-                "[CreativeWorksFactory] no prefab loader registered: .glb/.gltf import lives in extras/glTF. "
-                "Call ZHLN::glTF::RegisterPrefabLoader() at startup, or build with -DZHLN_BUILD_EXTRAS=ON and link zahlen_extras."
-            );
-        }
-    }
-    return backend;
-}
-
-} // namespace
-
-auto LoadModelPrefab(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view path) -> ModelPrefab* {
-    const auto* backend = PrefabBackend();
-    return (backend != nullptr) ? backend->Load(ctx, assetMgr, path) : nullptr;
+auto LoadModelPrefab(RenderContext& /*ctx*/, CreativeWorksManager& assetMgr, std::string_view path) -> ModelPrefab* {
+    // Core never parses a model file. An importer -- extras/glTF, the asset pipeline, a tool --
+    // builds the ModelPrefab, uploads its meshes and materials, and caches it under
+    // HashCreativeWorkPath(path). This is the lookup that consumes the struct that importer
+    // produced, so the dependency points one way: the importer knows about Core, Core knows about
+    // the prefab cache. A null return means nothing has imported that path yet.
+    return assetMgr.GetCachedPrefab(HashCreativeWorkPath(path));
 }
 
 namespace {
@@ -784,30 +763,16 @@ void SetupPlayerRagdoll(Engine& engine, Entity playerEntity, std::span<const Ent
     SetupPlayerRagdoll(engine.GetPhysicsContext(), engine.GetRegistry(), playerEntity, visualParts);
 }
 
-void RebuildVulkanResources(RenderContext& ctx, CreativeWorksManager& cwMgr, ECS::Registry& reg) {
+void RebuildVulkanResources(RenderContext& ctx, CreativeWorksManager& /*cwMgr*/, ECS::Registry& reg) {
     ZHLN::Log("[Engine] Device Lost: Clearing GPU asset cache. Next frame will re-upload assets lazily.");
 
     ctx.ClearGPUCaches();
     CreateFontAtlasTexture(ctx, reg);
 
-    uint32_t count = cwMgr.GetCachedPrefabs(nullptr, 0);
-    if (count > 0) {
-        std::vector<ModelPrefab*> prefabs(count);
-        cwMgr.GetCachedPrefabs(prefabs.data(), count);
-
-        const auto* backend = PrefabBackend();
-        for (auto* prefab: prefabs) {
-            if (backend != nullptr) {
-                backend->RebuildGPUResources(ctx, prefab);
-            }
-            for (size_t i = 0; i < prefab->parts.size(); ++i) {
-                std::string assetKeyStr = std::string(prefab->virtualPath.c_str()) + "#" + prefab->parts[i].name.c_str() + "_" +
-                                          std::to_string(prefab->parts[i].nodeIndex);
-                ctx.RegisterGPUMesh(HashAssetID(assetKeyStr), prefab->parts[i].mesh);
-                ctx.RegisterGPUMaterial(HashAssetID(assetKeyStr + "_mat"), prefab->parts[i].defaultMaterial);
-            }
-        }
-    }
+    // Rebuilding an imported model's meshes and materials means re-parsing its .glb, which only
+    // the importer can do. An application that loaded models through extras/glTF rebuilds them
+    // with ZHLN::GLTF::RebuildCachedPrefabs() after a device loss; Core owns the caches above,
+    // which the next frame re-populates lazily as it touches them.
 }
 
 auto CreateTerrainFromData(
@@ -969,24 +934,6 @@ auto InstantiatePrefab(Engine& engine, std::string_view path, const SpawnParams&
     return InstantiatePrefab(engine, *prefab, params, outBuffer, maxCount);
 }
 
-auto LoadModelPrefabFromMemory(Engine& engine, std::span<const uint8_t> bytes, std::string_view virtualPath) -> ModelPrefab* {
-    const auto* backend = PrefabBackend();
-    return (backend != nullptr) ? backend->LoadFromMemory(engine.GetRenderContext(), engine.GetCreativeWorksManager(), bytes, virtualPath) : nullptr;
-}
 
-auto InstantiatePrefabFromMemory(
-    Engine&                  engine,
-    std::span<const uint8_t> bytes,
-    std::string_view         virtualPath,
-    const SpawnParams&       params,
-    Entity*                  outBuffer,
-    uint32_t                 maxCount
-) -> uint32_t {
-    const auto* prefab = LoadModelPrefabFromMemory(engine, bytes, virtualPath);
-    if (prefab == nullptr) {
-        return 0;
-    }
-    return InstantiatePrefab(engine, *prefab, params, outBuffer, maxCount);
-}
 
 } // namespace ZHLN::CreativeWorksFactory

@@ -12,16 +12,11 @@ class Engine;
 
 export namespace ZHLN::glTF {
 
-/// Installs the glTF/GLB importer as the engine's ZHLN::PrefabLoader backend.
-///
-/// Reading a model file is an extra, so core cannot call the importer directly:
-/// CreativeWorksFactory goes through ZHLN::PrefabLoader, and until something
-/// registers a backend its prefab entry points return null. Any application
-/// that loads a .glb -- directly, through Scene::ShapeKind::Prefab, or through
-/// CreativeWorksFactory::InstantiatePrefab -- calls this once at startup, next
-/// to Engine creation. Initialize() calls it too, so the inspector needs no
-/// separate step. Idempotent.
-void RegisterPrefabLoader() noexcept;
+// Loading a model needs no registration step. ZHLN::GLTF::LoadGLBPrefab()
+// (declared in <glTF/GLTFImporter.hpp>) builds the ZHLN::ModelPrefab the ECS
+// already describes and caches it; CreativeWorksFactory::LoadModelPrefab(path)
+// then finds it in that cache. Core consumes the struct, the importer produces
+// it, and nothing installs a callback in between.
 
 void Initialize(ZHLN::Engine& engine);
 

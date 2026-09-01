@@ -138,7 +138,7 @@ included. The concrete case that motivated the rule:
 Core has no JSON, TOML or model-file dependency at all, so a core-only build
 (`-DZHLN_BUILD_EXTRAS=OFF`) needs none of those installed and links no parser.
 
-### Three consequences worth knowing
+### Consequences worth knowing
 
 * **`Zahlen/Scene.hpp` is pure data.** The structs, their defaults and
   `Scene::Instantiate(engine, scene)` are Core. Turning a scene into text and
@@ -152,29 +152,43 @@ Core has no JSON, TOML or model-file dependency at all, so a core-only build
   document parsed at runtime. A mistake in it fails the build instead of
   surfacing on the day the game already failed to boot.
 
-* **The glTF importer is an extra, reached through a hook.** Reading a model
+* **The glTF importer is an extra, and Core never calls it.** Reading a model
   file means a container parser, an image decoder, a mesh partitioner and a JSON
   reader for the custom node members — far more machinery than the engine needs
   to run, so `extras/glTF/GLTFImporter.cpp` sits behind the boundary and uses
-  the real `extras/json` parser rather than a bespoke scanner. Core still
-  exposes `CreativeWorksFactory::LoadModelPrefab` and friends; they call through
-  the `ZHLN::PrefabLoader` function table (`include/Zahlen/PrefabLoader.hpp`),
-  which the importer fills in at startup:
+  the real `extras/json` parser rather than a bespoke scanner. What it produces
+  is a plain `ZHLN::ModelPrefab` — the same struct the ECS already describes —
+  which it leaves in `CreativeWorksManager`'s prefab cache under
+  `HashCreativeWorkPath(path)`. `CreativeWorksFactory::LoadModelPrefab(path)`,
+  the entry point `Scene::ShapeKind::Prefab` and the scripting bindings use, is
+  that cache lookup and nothing else:
 
   ```cpp
-  import ZHLN.glTF;
-  ZHLN::glTF::RegisterPrefabLoader();   // before the first prefab is loaded
+  // the extra: parse, upload, cache
+  auto* prefab = ZHLN::GLTF::LoadGLBPrefab(ctx, cwMgr, "Crate.glb");
+
+  // core only: read the struct back out of the cache and spawn it
+  ZHLN::CreativeWorksFactory::InstantiatePrefab(engine, "Crate.glb", params);
   ```
 
-  With nothing registered those entry points log once and return null — a
-  core-only build simply has no model files, the same way it has no JSON. The
-  default `zahlen` executable never loads a `.glb`, so it needs no registration;
-  the samples and GPU tests that do load one are the ones that register.
+  There is no function table and no registration step. The importer writes the
+  cache, Core reads it, and nothing has to be installed first. In a core-only
+  build nothing ever fills the cache, so the lookup returns null — a core-only
+  build simply has no model files, the same way it has no JSON.
+* **Recovering from device loss re-imports.** The GPU handles inside a
+  `ModelPrefab` die with the `VkDevice`, and getting them back means reading the
+  `.glb` again. `CreativeWorksFactory::RebuildVulkanResources()` therefore only
+  clears and re-creates what Core owns (the GPU caches, the font atlas); an
+  application that imported models calls `ZHLN::GLTF::RebuildCachedPrefabs()`
+  after it, which re-imports every cached prefab and re-registers its meshes and
+  materials under the asset keys the ECS instances were built against.
 
 That last point is the general shape of the rule: **when Core needs something an
-extra provides, Core declares the seam and the extra installs itself.** The
-dependency arrow still points one way, and the build still works with the extra
-absent.
+extra provides, the extra produces ordinary Core data and Core reads it back
+through state it already owns** — a prefab cache, a `Scene::Scene`, a
+`ModelPrefab`. No callback table, no registry, and nothing the extra has to
+install at startup. The dependency arrow still points one way, and the build
+still works with the extra absent.
 
 ---
 

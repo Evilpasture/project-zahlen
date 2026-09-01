@@ -18,10 +18,10 @@ endif()
 #                                            binding that reads/writes a core
 #                                            ZHLN::Scene::Scene as a document
 #   extras/glTF/   the glTF/GLB importer (GLTFImporter.*) plus the drop-a-file
-#                  inspector (ZHLN.glTF). The importer is the one extra core
-#                  would otherwise have to call directly, so it publishes itself
-#                  through ZHLN::PrefabLoader instead -- see
-#                  include/Zahlen/PrefabLoader.hpp.
+#                  inspector (ZHLN.glTF). The importer is the one extra that
+#                  produces data core then consumes: it fills the prefab cache,
+#                  and CreativeWorksFactory::LoadModelPrefab reads that cache.
+#                  No registration, and nothing in src/ includes it.
 #
 # All of it is picked up by the source globs below; nothing needs listing by
 # hand.
@@ -88,9 +88,9 @@ if(ZHLN_EXTRAS_SOURCES)
 endif()
 
 # extras/glTF/GLTFImporter.cpp is the glTF/GLB reader, and it is the reason
-# this target carries more than a header path. Core reaches it through the
-# ZHLN::PrefabLoader hook rather than by linking it, so everything it needs
-# stays here:
+# this target carries more than a header path. Core never links or calls it --
+# it only reads the prefabs it leaves in the cache -- so everything the reader
+# needs stays here:
 #
 #   * cgltf      -- the container parser, header plus this one impl TU. It used
 #                   to live in the src/gltf static library; nothing else in the
