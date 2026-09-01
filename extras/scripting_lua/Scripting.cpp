@@ -1,8 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "ScriptingABI.h"
 #include "LuaScriptRuntime.hpp"
+#include "ScriptingABI.h"
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Input.hpp"
@@ -13,9 +13,9 @@
 #include <Zahlen/Console.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/Entity.hpp>
+#include <Zahlen/IScriptRuntime.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render.hpp>
-#include <Zahlen/IScriptRuntime.hpp>
 #include <Zahlen/Scripting.hpp>
 #include <Zahlen/Sync.hpp>
 #include <Zahlen/Window.hpp>

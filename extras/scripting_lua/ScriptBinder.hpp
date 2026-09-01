@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include <Zahlen/Entity.hpp>
 #include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
 #include <expected>
 #include <functional>
@@ -170,21 +170,37 @@ auto FromScriptVal(const ScriptVal& sval) -> std::expected<T, Error> {
         }
         return std::unexpected(ScriptError::TypeMismatch);
     } else if constexpr (std::is_class_v<Decayed>) {
-        if (const auto* obj = std::get_if<BoxedObject>(&sval)) {
-            if (obj->typeName == ZHLN::Reflect::TypeName<Decayed>() && obj->rawPtr != nullptr) {
-                return *static_cast<const Decayed*>(obj->rawPtr);
+        if constexpr (std::is_copy_constructible_v<Decayed>) {
+            if (const auto* obj = std::get_if<BoxedObject>(&sval)) {
+                if (obj->typeName == ZHLN::Reflect::TypeName<Decayed>() && obj->rawPtr != nullptr) {
+                    return *static_cast<const Decayed*>(obj->rawPtr);
+                }
+                return std::unexpected(ScriptError::TypeMismatch);
+            }
+            if (const auto* obj = std::get_if<OwnedObject>(&sval)) {
+                if (obj->typeName == ZHLN::Reflect::TypeName<Decayed>() && obj->ptr != nullptr) {
+                    return *static_cast<const Decayed*>(obj->ptr.get());
+                }
+                return std::unexpected(ScriptError::TypeMismatch);
             }
             return std::unexpected(ScriptError::TypeMismatch);
+        } else {
+            return std::unexpected(ScriptError::UnsupportedConversion);
+        }
+    } else if constexpr (std::is_pointer_v<Decayed>) {
+        if (std::holds_alternative<std::monostate>(sval)) {
+            return static_cast<Decayed>(nullptr);
+        }
+        if (const auto* obj = std::get_if<BoxedObject>(&sval)) {
+            return static_cast<Decayed>(obj->rawPtr);
         }
         if (const auto* obj = std::get_if<OwnedObject>(&sval)) {
-            if (obj->typeName == ZHLN::Reflect::TypeName<Decayed>() && obj->ptr != nullptr) {
-                return *static_cast<const Decayed*>(obj->ptr.get());
-            }
-            return std::unexpected(ScriptError::TypeMismatch);
+            return static_cast<Decayed>(obj->ptr.get());
         }
         return std::unexpected(ScriptError::TypeMismatch);
+    } else {
+        return std::unexpected(ScriptError::UnsupportedConversion);
     }
-    return std::unexpected(ScriptError::UnsupportedConversion);
 }
 
 template <typename T>
@@ -197,6 +213,12 @@ struct function_traits<R (C::*)(Args...)> {
 };
 template <typename R, typename C, typename... Args>
 struct function_traits<R (C::*)(Args...) const>: function_traits<R (C::*)(Args...)> {};
+
+template <typename R, typename C, typename... Args>
+struct function_traits<R (C::*)(Args...) noexcept>: function_traits<R (C::*)(Args...)> {};
+
+template <typename R, typename C, typename... Args>
+struct function_traits<R (C::*)(Args...) const noexcept>: function_traits<R (C::*)(Args...)> {};
 
 // ----------------------------------------------------------------------------
 // Registry Definitions
@@ -278,12 +300,16 @@ class ScriptBinder {
                 },
                 .set = [setter](void* inst, const ScriptVal& val) -> std::expected<void, Error> {
                     auto* typedInst = static_cast<CurrentT*>(static_cast<ClassT*>(inst));
-                    auto  converted = FromScriptVal<FieldT>(val);
-                    if (!converted) {
-                        return std::unexpected(converted.error());
+                    if constexpr (std::is_array_v<FieldT> || !std::is_copy_constructible_v<FieldT> || !std::is_copy_assignable_v<FieldT>) {
+                        return std::unexpected(ScriptError::UnsupportedConversion);
+                    } else {
+                        auto converted = FromScriptVal<FieldT>(val);
+                        if (!converted) {
+                            return std::unexpected(converted.error());
+                        }
+                        setter(*typedInst, converted.value());
+                        return {};
                     }
-                    setter(*typedInst, converted.value());
-                    return {};
                 },
                 .get_element_at = nullptr,
                 .set_element_at = nullptr
