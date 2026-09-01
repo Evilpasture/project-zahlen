@@ -50,7 +50,7 @@ enum class EmissiveShadingError : uint8_t {
     ControlNotDark[[= ZHLN::Description<"The non-emissive control box is lit, so the scene is not the unlit scene the test needs.">{}]],
     BackgroundNotDark[[= ZHLN::Description<"Emission leaked into pixels the emitter does not cover.">{}]],
     GlowHaloMissing[[= ZHLN::Description<
-        "The emissive glow past the silhouette is wrong: either absent (the glow layer is not reaching the bloom chain) or bright enough to read as a slab.">{}]],
+        "The glow past the silhouette is wrong: absent (not reaching the bloom chain) or bright enough to read as a slab.">{}]],
     DeviceLost[[= ZHLN::Description<"The Vulkan device was lost and the engine could not recover.">{}]],
 };
 
@@ -78,7 +78,14 @@ constexpr NormalizedRect kHaloWindow {.x0 = 0.44, .y0 = 0.25, .x1 = 0.56, .y1 = 
 // A strong green emitter: green is the one channel neither the sky gradient
 // (blue-dominant) nor the default clear colour leans on, so a green-dominant
 // pixel in the box window can only be the emissive material.
-constexpr std::array<float, 4> kEmissiveGreen {0.0f, 3.0f, 0.0f, 1.0f};
+//
+// A fully saturated glTF green in engine units. This used to be a bare 3.0,
+// which measured bright only because the bright pass and the glow layer were
+// both counting the same emission -- with that double count gone, 3.0 is what
+// 3.0 has always been at this exposure: 13/255, a dim lamp. Expressing the
+// emitter the way the importer does keeps the test measuring a neon material
+// rather than the accounting error that used to inflate one.
+constexpr std::array<float, 4> kEmissiveGreen {0.0f, 1.0f * ZHLN::kGLTFEmissiveDisplayScale, 0.0f, 1.0f};
 constexpr std::array<float, 4> kNoEmission {0.0f, 0.0f, 0.0f, 1.0f};
 constexpr std::array<float, 4> kBoxBaseColor {0.05f, 0.05f, 0.05f, 1.0f};
 
@@ -254,10 +261,11 @@ struct EmissiveShadingTestSuite {
             //    The floor is deliberately a degenerate-case guard, not a
             //    calibration: what actually proves emission happened is (3),
             //    which compares this window against the identical box with the
-            //    emissive factor removed. Hardware measures ~23 here, and the
-            //    control window is capped at 12 by (3), so 16 separates "lit
-            //    by its own emission" from "as dark as the control" without
-            //    pinning the test to one tonemapper's output.
+            //    emissive factor removed. Hardware measures ~240 for a
+            //    saturated emitter, and the control window is capped at 12 by
+            //    (3), so 16 separates "lit by its own emission" from "as dark
+            //    as the control" without pinning the test to one tonemapper's
+            //    output.
             if (emissiveBox.meanLuma < 16.0) {
                 return std::unexpected(EmissiveShadingError::EmissiveWentDark);
             }
