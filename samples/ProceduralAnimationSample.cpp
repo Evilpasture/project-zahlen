@@ -21,6 +21,7 @@
 // Optional extras/toolkit modules
 import ZHLN.Locomotion;
 import ZHLN.ProceduralAnimation;
+import ZHLN.glTF;
 
 // Jolt Physics
 #include <Jolt/Jolt.h>
@@ -660,6 +661,13 @@ auto main(int argc, char* argv[]) -> int {
 
     auto engine = std::move(engineRes.value());
     engine->GetWindow().Focus();
+
+    // The rig below is a .glb, and reading one is an extra: the importer
+    // publishes itself through ZHLN::PrefabLoader, so CreativeWorksFactory can
+    // reach it without core depending on extras. Must happen before the first
+    // LoadModelPrefab / InstantiatePrefab call.
+    ZHLN::glTF::RegisterPrefabLoader();
+
     engine->InitializeDefaultScene();
     ZHLN::ProceduralAnimation::Register(*engine);
     BuildProceduralArena(*engine);

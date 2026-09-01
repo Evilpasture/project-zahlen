@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <expected>
 #include <fstream>
+#include <glTF/GLTFImporter.hpp>
 #include <span>
 #include <string>
 #include <vector>
@@ -25,6 +26,17 @@
 #pragma clang diagnostic ignored "-Wc23-extensions"
 #endif
 namespace {
+
+// The glTF importer is an extra, so it reaches the engine through the
+// ZHLN::PrefabLoader hook instead of being linked into it. Registration is
+// process-wide and idempotent, and PrefabLoader's table is constant-initialised,
+// so doing it at TU scope is order-safe and saves every test in this binary from
+// repeating the call.
+const bool kPrefabLoaderRegistered = []() -> bool {
+    ZHLN::GLTF::RegisterAsPrefabLoader();
+    return true;
+}();
+
 // Embed the binary GLB directly into the read-only data section of the test binary
 // NOLINTBEGIN(bugprone-string-literal-with-embedded-nul, modernize-avoid-c-arrays, cppcoreguidelines-avoid-c-arrays)
 constexpr uint8_t kUziGlbData[] = {

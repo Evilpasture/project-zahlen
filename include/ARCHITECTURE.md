@@ -129,15 +129,16 @@ every target defined outside `extras/` and `tests/`.
 Anything behind it is genuinely optional — its third-party dependencies
 included. The concrete case that motivated the rule:
 
-| Layer | Contents | Dependency it carries |
+| Layer | Contents | Dependencies it carries |
 | :--- | :--- | :--- |
 | `extras/json/` | `JSON.hpp` (reflection-driven reader + `Reflect::SerializeJSON`), `JSONSchema.hpp` (compile-time schema → C++ type) | simdjson |
 | `extras/toml/` | `TOML.hpp` (reflection-driven documents), `SceneTOML.hpp` (binds a core `Scene::Scene` to the document format) | none |
+| `extras/glTF/` | `GLTFImporter.*` (the glTF/GLB reader), `glTF.*` (the drop-a-file inspector, module `ZHLN.glTF`) | cgltf, stb_image, meshoptimizer, and `extras/json` for the custom node members |
 
-Core has no JSON or TOML dependency at all, so a core-only build
-(`-DZHLN_BUILD_EXTRAS=OFF`) needs no simdjson installed and links no parser.
+Core has no JSON, TOML or model-file dependency at all, so a core-only build
+(`-DZHLN_BUILD_EXTRAS=OFF`) needs none of those installed and links no parser.
 
-### Two consequences worth knowing
+### Three consequences worth knowing
 
 * **`Zahlen/Scene.hpp` is pure data.** The structs, their defaults and
   `Scene::Instantiate(engine, scene)` are Core. Turning a scene into text and
@@ -151,10 +152,29 @@ Core has no JSON or TOML dependency at all, so a core-only build
   document parsed at runtime. A mistake in it fails the build instead of
   surfacing on the day the game already failed to boot.
 
-By the same reasoning, `src/gltf/GLTFImporter.cpp` reads the single custom glTF
-member it cares about (`extras.csg_data`) with the small scanner in
-`src/gltf/CsgExtras.hpp` instead of pulling a JSON parser into the importer and,
-through it, into the engine.
+* **The glTF importer is an extra, reached through a hook.** Reading a model
+  file means a container parser, an image decoder, a mesh partitioner and a JSON
+  reader for the custom node members — far more machinery than the engine needs
+  to run, so `extras/glTF/GLTFImporter.cpp` sits behind the boundary and uses
+  the real `extras/json` parser rather than a bespoke scanner. Core still
+  exposes `CreativeWorksFactory::LoadModelPrefab` and friends; they call through
+  the `ZHLN::PrefabLoader` function table (`include/Zahlen/PrefabLoader.hpp`),
+  which the importer fills in at startup:
+
+  ```cpp
+  import ZHLN.glTF;
+  ZHLN::glTF::RegisterPrefabLoader();   // before the first prefab is loaded
+  ```
+
+  With nothing registered those entry points log once and return null — a
+  core-only build simply has no model files, the same way it has no JSON. The
+  default `zahlen` executable never loads a `.glb`, so it needs no registration;
+  the samples and GPU tests that do load one are the ones that register.
+
+That last point is the general shape of the rule: **when Core needs something an
+extra provides, Core declares the seam and the extra installs itself.** The
+dependency arrow still points one way, and the build still works with the extra
+absent.
 
 ---
 

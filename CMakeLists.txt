@@ -371,6 +371,7 @@ set(RAW_ENGINE_SOURCES
     src/engine/graphics/RenderSetup.cpp
     src/engine/ScriptECSBridge.cpp
     src/engine/Scene.cpp
+    src/engine/PrefabLoader.cpp
 )
 
 find_library(ZSTD_LIBRARY NAMES zstd zstd_static HINTS "/opt/homebrew/lib" "/usr/local/lib" "/usr/lib")
@@ -406,7 +407,6 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/render)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/threading)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/physics)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/ecs)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/gltf)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/audio)
 
 # --- ASSEMBLE COMPILER FLAGS METADATA ---
@@ -522,7 +522,6 @@ target_link_libraries(zahlen_engine PRIVATE
     zahlen_physics
     zahlen_threading
     zahlen_ecs
-    zahlen_gltf
     zahlen_audio
     glfw
     LuaJIT
@@ -858,7 +857,6 @@ endfunction()
 
 zahlen_enable_reflection(zahlen_render)
 zahlen_enable_reflection(zahlen_engine)
-zahlen_enable_reflection(zahlen_gltf)
 zahlen_enable_reflection(zahlen_audio)
 zahlen_enable_reflection(zahlen_physics)
 zahlen_enable_reflection(zahlen_ecs)

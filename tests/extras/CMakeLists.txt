@@ -5,10 +5,13 @@ if(NOT ZHLN_BUILD_EXTRAS OR NOT TARGET zahlen_extras)
     return()
 endif()
 
+# No extern/cgltf_impl.c here: the importer moved into extras, so zahlen_extras
+# compiles the one copy of it and this target gets the cgltf symbols (and the
+# header path) through that link. Compiling it again would be a duplicate
+# definition at link time.
 set(TARGET_NAME TestProceduralAnimation)
 add_executable(${TARGET_NAME}
     TestProceduralAnimation.cpp
-    ${PROJECT_SOURCE_DIR}/extern/cgltf_impl.c
 )
 
 set_target_properties(${TARGET_NAME} PROPERTIES

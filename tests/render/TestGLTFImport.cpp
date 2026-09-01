@@ -4,8 +4,8 @@
 // tests/render/TestGLTFImport.cpp
 //
 // Exercises the real importer -- ZHLN::CreativeWorksFactory::LoadModelPrefab-
-// FromMemory, which reaches ZHLN::GLTF::BuildModelPrefab -- and checks the
-// ModelPrefab it produces against the source document.
+// FromMemory, which reaches extras/glTF through the ZHLN::PrefabLoader hook --
+// and checks the ModelPrefab it produces against the source document.
 //
 // The reference side is cgltf reading the same bytes independently. That is
 // deliberate: the assertions describe what the glTF says, and the importer has
@@ -19,7 +19,6 @@
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/Engine.hpp>
-#include <json/JSON.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/ModelPrefab.hpp>
@@ -34,8 +33,10 @@
 #include <cstring>
 #include <expected>
 #include <fstream>
+#include <glTF/GLTFImporter.hpp>
 #include <ios>
 #include <iterator>
+#include <json/JSON.hpp>
 #include <memory>
 #include <ranges>
 #include <span>
@@ -57,6 +58,16 @@ enum class GLTFImportError : uint8_t {
 };
 
 namespace {
+
+// The glTF importer is an extra, so it reaches the engine through the
+// ZHLN::PrefabLoader hook instead of being linked into it. Registration is
+// process-wide and idempotent, and PrefabLoader's table is constant-initialised,
+// so doing it at TU scope is order-safe and saves every test in this binary from
+// repeating the call.
+const bool kPrefabLoaderRegistered = []() -> bool {
+    ZHLN::GLTF::RegisterAsPrefabLoader();
+    return true;
+}();
 
 constexpr std::string_view kVirtualPath = "ProceduralAnimationBaseRig.glb";
 

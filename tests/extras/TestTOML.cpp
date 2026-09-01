@@ -21,8 +21,6 @@
 #include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Scene.hpp>
-#include <toml/SceneTOML.hpp>
-#include <toml/TOML.hpp>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -30,6 +28,8 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <toml/SceneTOML.hpp>
+#include <toml/TOML.hpp>
 #include <vector>
 
 namespace {

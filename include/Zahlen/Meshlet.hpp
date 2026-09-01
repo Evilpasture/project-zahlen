@@ -8,7 +8,7 @@
 // importer produce byte-identical GPU streams:
 //
 //   * src/zcook/Transform.cpp     (offline .zmesh cooking)
-//   * src/gltf/GLTFImporter.cpp   (runtime glTF/GLB import)
+//   * extras/glTF/GLTFImporter.cpp (runtime glTF/GLB import)
 //
 // The output is the exact memory image the task/mesh shaders read through BDA:
 //

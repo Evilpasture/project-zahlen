@@ -17,8 +17,14 @@ endif()
 #   extras/toml/   TOML.hpp, SceneTOML.hpp   reflection-driven TOML, and the
 #                                            binding that reads/writes a core
 #                                            ZHLN::Scene::Scene as a document
+#   extras/glTF/   the glTF/GLB importer (GLTFImporter.*) plus the drop-a-file
+#                  inspector (ZHLN.glTF). The importer is the one extra core
+#                  would otherwise have to call directly, so it publishes itself
+#                  through ZHLN::PrefabLoader instead -- see
+#                  include/Zahlen/PrefabLoader.hpp.
 #
-# Both are picked up by the source globs below; nothing needs listing by hand.
+# All of it is picked up by the source globs below; nothing needs listing by
+# hand.
 
 find_package(PkgConfig REQUIRED)
 
@@ -57,6 +63,12 @@ set_target_properties(zahlen_extras PROPERTIES
     CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
+    # Every static library in this tree that ends up inside a shared library or
+    # a PIE executable sets this explicitly -- there is no global
+    # CMAKE_POSITION_INDEPENDENT_CODE. It matters here because the glTF
+    # importer arrived with extern/cgltf_impl.c, a C translation unit that
+    # samples and tests link straight into a PIE executable.
+    POSITION_INDEPENDENT_CODE ON
 )
 
 if(ZHLN_EXTRAS_MODULES)
@@ -74,6 +86,28 @@ endif()
 if(ZHLN_EXTRAS_SOURCES)
     target_sources(zahlen_extras PRIVATE ${ZHLN_EXTRAS_SOURCES})
 endif()
+
+# extras/glTF/GLTFImporter.cpp is the glTF/GLB reader, and it is the reason
+# this target carries more than a header path. Core reaches it through the
+# ZHLN::PrefabLoader hook rather than by linking it, so everything it needs
+# stays here:
+#
+#   * cgltf      -- the container parser, header plus this one impl TU. It used
+#                   to live in the src/gltf static library; nothing else in the
+#                   tree defines it, so exactly one copy is compiled.
+#   * stb_image  -- header only. STB_IMAGE_IMPLEMENTATION is extern/stbi_impl.c,
+#                   which is part of zahlen_engine, so the decode symbols arrive
+#                   through the engine link below.
+#   * meshoptimizer -- Zahlen/Meshlet.hpp's inline BuildMeshlets() calls into
+#                   it; zahlen_engine links it PRIVATE, so it does not propagate.
+target_sources(zahlen_extras PRIVATE ${PROJECT_SOURCE_DIR}/extern/cgltf_impl.c)
+
+target_include_directories(zahlen_extras SYSTEM PRIVATE
+    ${PROJECT_SOURCE_DIR}/extern/cgltf
+    ${PROJECT_SOURCE_DIR}/extern/stb
+)
+
+target_link_libraries(zahlen_extras PRIVATE meshoptimizer)
 
 target_include_directories(zahlen_extras PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 

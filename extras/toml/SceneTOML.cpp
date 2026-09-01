@@ -8,11 +8,10 @@
 // in Zahlen/Scene.hpp, and the entity building is Scene::Instantiate() in
 // src/engine/Scene.cpp.
 
-#include <toml/SceneTOML.hpp>
-
 #include <Zahlen/Scene.hpp>
 #include <expected>
 #include <string_view>
+#include <toml/SceneTOML.hpp>
 #include <toml/TOML.hpp>
 
 namespace ZHLN::Scene {

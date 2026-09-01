@@ -1,18 +1,17 @@
-// src/gltf/GLTFImporter.cpp
+// extras/glTF/GLTFImporter.cpp
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "GLTFImporter.hpp"
-#include "CsgExtras.hpp"
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Zahlen/Core/Ranges.hpp>
-#include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/CreativeWorksManager.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Meshlet.hpp>
+#include <Zahlen/PrefabLoader.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/physics/Physics.hpp>
@@ -22,6 +21,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <json/JSON.hpp>
 #include <memory>
 #include <span>
 #include <stb_image.h>
@@ -33,6 +33,16 @@
 namespace ZHLN::GLTF {
 
 namespace {
+
+/// The one custom member this importer reads: Blender writes CSG modifiers as a
+/// JSON document inside a JSON string under a node's `extras.csg_data`, so the
+/// payload survives round-tripping through tools that only understand string
+/// custom properties. Two nested reflected parses -- no bespoke scanner -- and
+/// both are why this file lives in extras: they are the engine's real JSON
+/// layer, which core deliberately does not carry.
+struct NodeExtras {
+    std::string csg_data;
+};
 
 struct CPUTextureJob {
     cgltf_image*   image = nullptr;
@@ -829,19 +839,13 @@ auto BuildModelPrefab(RenderContext& ctx, CreativeWorksManager& cwMgr, cgltf_dat
         const int32_t skeletonIdx = (node->skin != nullptr) ? skinMap[node->skin] : -1;
         const bool    isSkinned   = (node->skin != nullptr) && !primJob.skins.empty();
 
-        // Blender writes CSG modifiers as a JSON document inside a JSON string
-        // under extras.csg_data; ScanCsgExtras (CsgExtras.hpp) reads them
-        // without a JSON library, so this importer stays off extras/json.
         std::vector<CSGModifier> csgModifiers;
         if (node->extras.start_offset != node->extras.end_offset) {
             const std::string_view extras_json(data->json + node->extras.start_offset, node->extras.end_offset - node->extras.start_offset);
-            for (const CsgExtrasEntry& entry: ScanCsgExtras(extras_json)) {
-                const auto operation = ZHLN::Reflect::StringToEnum<CSGOperation>(entry.operation);
-                if (!operation) {
-                    Log("[GLTF] node '{}': '{}' is not a CSGOperation; modifier dropped", (node->name != nullptr) ? node->name : "Unnamed", entry.operation);
-                    continue;
+            if (const auto extras_res = ZHLN::ReflectJSON::TryParse<NodeExtras>(extras_json)) {
+                if (auto csg_res = ZHLN::ReflectJSON::TryParse<std::vector<CSGModifier>>(extras_res->csg_data)) {
+                    csgModifiers = std::move(*csg_res);
                 }
-                csgModifiers.push_back(CSGModifier {.operation = *operation, .operand_name = entry.operand_name});
             }
         }
 
@@ -971,6 +975,20 @@ void RebuildPrefabGPUResources(RenderContext& ctx, ModelPrefab* prefab) {
     }
 
     cgltf_free(data);
+}
+
+void RegisterAsPrefabLoader() noexcept {
+    // Register copies the table into engine-owned storage, so there is nothing
+    // here whose lifetime has to be managed. Idempotent by construction: the
+    // second call overwrites the first with the same three pointers.
+    PrefabLoader::Register(
+        PrefabLoader::Backend {
+            .Load                = &LoadGLBPrefab,
+            .LoadFromMemory      = &LoadGLBPrefabFromMemory,
+            .RebuildGPUResources = &RebuildPrefabGPUResources
+        }
+    );
+    Log("[glTF] registered as the engine's prefab loader");
 }
 
 } // namespace ZHLN::GLTF

@@ -132,23 +132,23 @@ zahlen_add_gpu_test_group(GPU_Pipeline 300
 )
 
 # TestGLTFImport.cpp checks what the shipping importer produced against the
-# same GLB parsed independently by cgltf. zahlen_engine gets cgltf privately
-# through zahlen_gltf, so the reference parse needs its own copy of the
-# implementation (same arrangement as tests/extras). ZHLN_TEST_SOURCE_DIR
-# locates resources/assets/ at runtime instead of embedding a 100 KB rig.
-target_sources(GPU_Pipeline PRIVATE ${PROJECT_SOURCE_DIR}/extern/cgltf_impl.c)
-target_include_directories(GPU_Pipeline SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/extern/cgltf)
-# TestGLTFImport.cpp writes its reference GLBs with ZHLN::Reflect::SerializeJSON,
-# which is header-only, so this group needs the extras/json include path but not
-# a link against zahlen_extras.
+# same GLB parsed independently by cgltf, and TestRenderAnimatedMesh.cpp plays
+# one back. Both go through ZHLN::CreativeWorksFactory, which reaches the
+# importer through the ZHLN::PrefabLoader hook now that the importer lives in
+# extras -- so this group links zahlen_extras and registers the loader before
+# loading anything. That one link also supplies:
+#
+#   * the cgltf symbols for the reference parse, and its header path below
+#     (zahlen_extras compiles the one extern/cgltf_impl.c in the tree)
+#   * extras/json, which TestGLTFImport.cpp uses to serialize the JSON chunk of
+#     the GLBs it assembles
+#
+# ZHLN_TEST_SOURCE_DIR locates resources/assets/ at runtime instead of
+# embedding a 100 KB rig.
+target_link_libraries(GPU_Pipeline PRIVATE zahlen_extras)
 target_include_directories(GPU_Pipeline PRIVATE ${PROJECT_SOURCE_DIR}/extras)
+target_include_directories(GPU_Pipeline SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/extern/cgltf)
 target_compile_definitions(GPU_Pipeline PRIVATE ZHLN_TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
-
-# TestGLTFImport.cpp assembles its own GLB files and serialises the JSON chunk
-# with ZHLN::Reflect::SerializeJSON, which lives in extras/json. That half is
-# header-only, so the include path is all it needs -- no link against
-# zahlen_extras and no simdjson.
-target_include_directories(GPU_Pipeline SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/extras)
 
 # ImGui, UI layout and viewmodel presentation.
 zahlen_add_gpu_test_group(GPU_Interface 180

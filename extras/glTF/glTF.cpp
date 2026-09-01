@@ -29,6 +29,9 @@ module;
 #include <Zahlen/Types.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+// The importer lives beside this file. Note the two spellings: ZHLN::GLTF is
+// the importer's namespace, ZHLN::glTF (below) is this module's.
+#include "GLTFImporter.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -800,7 +803,16 @@ void RenderFrame(ZHLN::Engine& engine) {
 
 namespace ZHLN::glTF {
 
+void RegisterPrefabLoader() noexcept {
+    ZHLN::GLTF::RegisterAsPrefabLoader();
+}
+
 void Initialize(ZHLN::Engine& engine) {
+    // The inspector's whole purpose is opening model files, and dropping one on
+    // the window reaches CreativeWorksFactory, so the importer has to be
+    // installed before the first frame can ask for it.
+    RegisterPrefabLoader();
+
     engine.InitializeDefaultScene();
     ZHLN::DefaultPreset::SetDisabled(true);
 

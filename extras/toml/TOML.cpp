@@ -17,7 +17,6 @@
 // document is still being built (Value holds raw pointers into it).
 
 #include <Zahlen/Log.hpp>
-#include <toml/TOML.hpp>
 #include <charconv>
 #include <cstdlib>
 #include <deque>
@@ -25,6 +24,7 @@
 #include <limits>
 #include <string>
 #include <string_view>
+#include <toml/TOML.hpp>
 #include <utility>
 #include <vector>
 

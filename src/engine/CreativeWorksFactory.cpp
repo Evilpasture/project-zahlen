@@ -15,6 +15,7 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/ModelPrefab.hpp>
+#include <Zahlen/PrefabLoader.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/SkeletalAnimation.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -26,7 +27,6 @@
 #include <engine/system/ArticulationSystem.hpp>
 #include <engine/system/LightingSystem.hpp>
 #include <engine/system/TerrainSystem.hpp>
-#include <gltf/GLTFImporter.hpp>
 #include <stb_image.h>
 #define STB_TRUETYPE_IMPLEMENTATION
 #include <fontconfig/fontconfig.h>
@@ -214,8 +214,33 @@ auto LoadTexture(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string
     return texRes ? *texRes : 1;
 }
 
+namespace {
+
+/// The registered model-file reader, or null. Reading a .glb means a container
+/// parser, an image decoder and a schema, all of which live in extras/glTF; on
+/// a build without them every prefab entry point below reports the miss here
+/// and returns null. Logged once, because a scene full of prefabs would
+/// otherwise print a line per entity per frame.
+[[nodiscard]] auto PrefabBackend() -> const PrefabLoader::Backend* {
+    const auto* backend = PrefabLoader::Get();
+    if (backend == nullptr) {
+        static bool warned = false;
+        if (!warned) {
+            warned = true;
+            ZHLN::Log(
+                "[CreativeWorksFactory] no prefab loader registered: .glb/.gltf import lives in extras/glTF. "
+                "Call ZHLN::glTF::RegisterPrefabLoader() at startup, or build with -DZHLN_BUILD_EXTRAS=ON and link zahlen_extras."
+            );
+        }
+    }
+    return backend;
+}
+
+} // namespace
+
 auto LoadModelPrefab(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view path) -> ModelPrefab* {
-    return GLTF::LoadGLBPrefab(ctx, assetMgr, path);
+    const auto* backend = PrefabBackend();
+    return (backend != nullptr) ? backend->Load(ctx, assetMgr, path) : nullptr;
 }
 
 namespace {
@@ -770,8 +795,11 @@ void RebuildVulkanResources(RenderContext& ctx, CreativeWorksManager& cwMgr, ECS
         std::vector<ModelPrefab*> prefabs(count);
         cwMgr.GetCachedPrefabs(prefabs.data(), count);
 
+        const auto* backend = PrefabBackend();
         for (auto* prefab: prefabs) {
-            GLTF::RebuildPrefabGPUResources(ctx, prefab);
+            if (backend != nullptr) {
+                backend->RebuildGPUResources(ctx, prefab);
+            }
             for (size_t i = 0; i < prefab->parts.size(); ++i) {
                 std::string assetKeyStr = std::string(prefab->virtualPath.c_str()) + "#" + prefab->parts[i].name.c_str() + "_" +
                                           std::to_string(prefab->parts[i].nodeIndex);
@@ -942,7 +970,8 @@ auto InstantiatePrefab(Engine& engine, std::string_view path, const SpawnParams&
 }
 
 auto LoadModelPrefabFromMemory(Engine& engine, std::span<const uint8_t> bytes, std::string_view virtualPath) -> ModelPrefab* {
-    return GLTF::LoadGLBPrefabFromMemory(engine.GetRenderContext(), engine.GetCreativeWorksManager(), bytes, virtualPath);
+    const auto* backend = PrefabBackend();
+    return (backend != nullptr) ? backend->LoadFromMemory(engine.GetRenderContext(), engine.GetCreativeWorksManager(), bytes, virtualPath) : nullptr;
 }
 
 auto InstantiatePrefabFromMemory(
