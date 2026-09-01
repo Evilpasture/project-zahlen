@@ -5,12 +5,13 @@
 
 // Standalone check of the C++ -> C type mapping in FFICTypeMap.hpp.
 //
-// The mapper is ordinary template code, so unlike the reflection driver that
-// uses it, this compiles and runs on a compiler with no static-reflection
-// support. It walks the field types Components.hpp actually uses and asserts
-// that every spelling the mapper produces occupies exactly the bytes and
-// demands exactly the alignment of the C++ type it stands for -- the property
-// the generated layouts depend on.
+// The layout half of the mapper is ordinary template code and the name half
+// degrades to the same type-based vocabulary without reflection, so unlike the
+// reflection driver that uses it this compiles and runs on a compiler with no
+// static-reflection support. It walks the field types Components.hpp actually
+// uses and asserts that every spelling the mapper produces occupies exactly
+// the bytes and demands exactly the alignment of the C++ type it stands for --
+// the property the generated layouts depend on.
 //
 // Not part of the shipped build; run it directly:
 //   clang++ -std=c++26 -Iinclude -Iextras -Iextern/JoltPhysics \
@@ -23,6 +24,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <string_view>
 #include <type_traits>
 
 namespace {
@@ -156,6 +158,16 @@ int main() {
 
     printf("types with no C layout\n");
     Check<Components::UIChildCacheComponent>("UIChildCacheComponent");
+
+    // Predicate plumbing. Without reflection the predicate is invoked with an
+    // empty spelling, and returning nullptr means "no opinion, fall back to
+    // the built-in mapping" -- which is exactly the default vocabulary used by
+    // the no-argument form above. On a reflection build (GenFFICdef) the same
+    // lambda receives the type's real spelling and may return a C name for a
+    // type the built-in mapping would otherwise emit as opaque bytes.
+    constexpr auto noOverride = [](std::string_view) -> const char* { return nullptr; };
+    static_assert(!ZHLN::FFI::MapCType<float>(noOverride).isOpaque());
+    static_assert(ZHLN::FFI::MapCType<Components::UIChildCacheComponent>(noOverride).isOpaque());
 
     printf("\n%s (%d failure%s)\n", failures == 0 ? "PASS" : "FAIL",
            failures, failures == 1 ? "" : "s");
