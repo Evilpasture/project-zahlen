@@ -159,8 +159,21 @@ inline bool ReadValue(std::istream& stream, T& outValue) {
 }
 
 // Locates the compiled zcook executable across build platforms
+// Resolved against the process working directory, which CTest sets to the
+// directory holding the add_test() call. zcook itself is built at the root of
+// the build tree, so the candidate list has to cover one level per nesting
+// step between there and the group: tests/ is one down, tests/extras/ is two.
 fs::path FindZcookExecutable() {
-    std::vector<fs::path> candidates = {"zcook", "./zcook", "../zcook", "bin/zcook", "zcook.exe", "./zcook.exe", "../zcook.exe", "bin/zcook.exe"};
+    std::vector<fs::path> candidates = {"zcook",
+                                        "./zcook",
+                                        "../zcook",
+                                        "../../zcook",
+                                        "bin/zcook",
+                                        "zcook.exe",
+                                        "./zcook.exe",
+                                        "../zcook.exe",
+                                        "../../zcook.exe",
+                                        "bin/zcook.exe"};
 
     for (const auto& candidate: candidates) {
         std::error_code ec;

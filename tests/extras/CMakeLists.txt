@@ -298,7 +298,13 @@ if(USE_SANITIZERS)
     target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
 endif()
 
-# The suite shells out to the zcook binary, so it needs the asset pipeline
-# target to exist before CTest runs it; CPU_Assets asserts the same way.
+# The suite shells out to the zcook binary, which is built at the root of the
+# build tree and found by a working-directory-relative search (see
+# tests/helpers/CookerFixture.hpp). This add_test lives two directories below
+# that root, so the working directory is pinned to the same one CPU_Assets
+# inherits by default; without it the lookup resolves to tests/zcook.
 add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
-set_tests_properties(${TARGET_NAME} PROPERTIES LABELS "CPU;Fast;Extras")
+set_tests_properties(${TARGET_NAME} PROPERTIES
+    LABELS "CPU;Fast;Extras"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/.."
+)
