@@ -22,10 +22,12 @@
 
 auto RunScriptBinderSuite() -> ZHLN::Test::TestStats;
 auto RunScriptECSBridgeSuite() -> ZHLN::Test::TestStats;
+auto RunScriptValueTypesSuite() -> ZHLN::Test::TestStats;
 
 auto main() -> int {
     return ZHLN::Test::Runner::RunDeferred(
         RunScriptBinderSuite,
-        RunScriptECSBridgeSuite
+        RunScriptECSBridgeSuite,
+        RunScriptValueTypesSuite
     );
 }

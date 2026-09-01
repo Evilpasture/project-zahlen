@@ -22,7 +22,14 @@
 
 #pragma once
 
+// ScriptValueTypes.hpp must be included before Register<T>() is instantiated
+// below. ScriptBinder's conversions reach the ScriptValueTrait specializations
+// at instantiation time, so a trait declared after this point would simply never
+// be consulted and the engine's value types would silently fall back to opaque
+// boxing. Including it here rather than in ScriptBinder.hpp keeps Jolt out of
+// the generic binder.
 #include <scripting_lua/ScriptBinder.hpp>
+#include <scripting_lua/ScriptValueTypes.hpp>
 
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Reflection.hpp>

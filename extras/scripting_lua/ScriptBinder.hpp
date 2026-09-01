@@ -61,13 +61,41 @@ template <typename T>
 auto ToScriptValOwned(T&& val) -> ScriptVal;
 
 // ----------------------------------------------------------------------------
+// Value-type customization point
+// ----------------------------------------------------------------------------
+//
+// The generic conversions below know about arithmetic, bool, string, enum and
+// range types, and treat every other class as an opaque boxed object. That is
+// right for components -- a script holds one by reference -- but wrong for the
+// small value types the engine's methods pass by value: Entity, and Jolt's
+// Vec3/RVec3/Quat and their *Arg wrappers.
+//
+// Left generic, a Vec3 crosses as an opaque BoxedObject, so a script can only
+// hand back one it was already given and cannot write `pc:Raycast({0,5,0}, ...)`.
+// And FromScriptVal matches on Reflect::TypeName<T>, so a method taking Vec3Arg
+// would reject a Vec3 even though Vec3Arg exists purely to be built from one.
+//
+// Specializing this trait teaches the binder a type's script representation.
+// It stays a trait rather than overloads because the conversion functions are
+// templates in this namespace and their calls are dependent: an overload added
+// in another header would only be reachable through ADL, which for JPH types
+// would mean declaring into namespace JPH. Specializations are found at
+// instantiation, so a header included before Register<T>() is called is enough.
+template <typename T, typename = void>
+struct ScriptValueTrait {
+    static constexpr bool specialized = false;
+};
+
+// ----------------------------------------------------------------------------
 // Conversion Engine
 // ----------------------------------------------------------------------------
 
 template <typename T>
 auto ToScriptVal(const T& val) -> ScriptVal {
     using Decayed = std::decay_t<T>;
-    if constexpr (std::is_same_v<Decayed, bool>) {
+    if constexpr (ScriptValueTrait<Decayed>::specialized) {
+        return ScriptValueTrait<Decayed>::To(val);
+    } else if constexpr (std::is_same_v<Decayed, bool>) {
         return val;
     } else if constexpr (std::is_arithmetic_v<Decayed>) {
         return static_cast<double>(val);
@@ -98,7 +126,11 @@ auto ToScriptVal(const T& val) -> ScriptVal {
 template <typename T>
 auto ToScriptValOwned(T&& val) -> ScriptVal {
     using Decayed = std::decay_t<T>;
-    if constexpr (std::is_same_v<Decayed, bool>) {
+    if constexpr (ScriptValueTrait<Decayed>::specialized) {
+        // Value types are small and cheap to copy; there is nothing to take
+        // ownership of, so the owned and borrowed paths are the same.
+        return ScriptValueTrait<Decayed>::To(val);
+    } else if constexpr (std::is_same_v<Decayed, bool>) {
         return val;
     } else if constexpr (std::is_arithmetic_v<Decayed>) {
         return static_cast<double>(val);
@@ -123,7 +155,12 @@ auto ToScriptValOwned(T&& val) -> ScriptVal {
 template <typename T>
 auto FromScriptVal(const ScriptVal& sval) -> std::expected<T, Error> {
     using Decayed = std::decay_t<T>;
-    if constexpr (std::is_same_v<Decayed, bool>) {
+    if constexpr (requires(const ScriptVal& s) { ScriptValueTrait<Decayed>::From(s); }) {
+        // Not every specialized type is constructible from a script -- an
+        // output-only type specializes To alone and falls through to the
+        // generic branch below, which reports TypeMismatch as it should.
+        return ScriptValueTrait<Decayed>::From(sval);
+    } else if constexpr (std::is_same_v<Decayed, bool>) {
         if (const auto* b = std::get_if<bool>(&sval)) {
             return *b;
         }
