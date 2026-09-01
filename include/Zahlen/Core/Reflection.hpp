@@ -349,13 +349,25 @@ constexpr auto EnumToString(E value) -> std::string_view {
 template <typename E>
     requires std::is_enum_v<E>
 constexpr auto StringToEnum(std::string_view name) -> std::optional<E> {
-    std::optional<E> result = std::nullopt;
+    // Match into a plain flag plus a value-initialized enum, then build the
+    // optional once on a single non-lambda path. Holding the result in a
+    // std::optional<E> that is only ever assigned from inside the expanded
+    // lambda leaves GCC unable to prove the optional's payload was ever
+    // constructed, and it reports -Wmaybe-uninitialized at every `*parsed` in
+    // a caller. Value-initializing the enum keeps the read well-defined on the
+    // no-match path too, where 0 is always in an enum's value range.
+    bool found = false;
+    E    value {};
     [:Expand(detail::EnumeratorsOf<E>()):] >> [&]<auto enumerator>() -> auto {
         if (name == std::meta::identifier_of(enumerator)) {
-            result = static_cast<E>([:enumerator:]);
+            value = static_cast<E>([:enumerator:]);
+            found = true;
         }
     };
-    return result;
+    if (!found) {
+        return std::nullopt;
+    }
+    return value;
 }
 
 template <typename E>

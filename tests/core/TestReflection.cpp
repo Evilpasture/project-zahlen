@@ -73,6 +73,10 @@ struct ReflectionTestSuite {
                 return checkParsed;
             ZHLN::Test::ExpectEq(*parsed, WeaponType::Shotgun);
 
+            // No-match path: must come back empty, not an engaged optional.
+            auto missing = ZHLN::Reflect::StringToEnum<WeaponType>("NotAnEnumerator");
+            ZHLN::Test::AssertTrue(!missing.has_value());
+
             // EnumToMessage
             std::string_view msg = ZHLN::Reflect::EnumToMessage(WeaponType::Pistol);
             ZHLN::Test::ExpectEq(msg, "Sidearm with high mobility.");
