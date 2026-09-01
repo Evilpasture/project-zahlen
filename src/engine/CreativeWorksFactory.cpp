@@ -26,7 +26,6 @@
 #include <engine/system/ArticulationSystem.hpp>
 #include <engine/system/LightingSystem.hpp>
 #include <engine/system/TerrainSystem.hpp>
-#include <gltf/GLTFImporter.hpp>
 #include <stb_image.h>
 #define STB_TRUETYPE_IMPLEMENTATION
 #include <fontconfig/fontconfig.h>
@@ -214,8 +213,13 @@ auto LoadTexture(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string
     return texRes ? *texRes : 1;
 }
 
-auto LoadModelPrefab(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view path) -> ModelPrefab* {
-    return GLTF::LoadGLBPrefab(ctx, assetMgr, path);
+auto LoadModelPrefab(RenderContext& /*ctx*/, CreativeWorksManager& assetMgr, std::string_view path) -> ModelPrefab* {
+    // Core never parses a model file. An importer -- extras/glTF, the asset pipeline, a tool --
+    // builds the ModelPrefab, uploads its meshes and materials, and caches it under
+    // HashCreativeWorkPath(path). This is the lookup that consumes the struct that importer
+    // produced, so the dependency points one way: the importer knows about Core, Core knows about
+    // the prefab cache. A null return means nothing has imported that path yet.
+    return assetMgr.GetCachedPrefab(HashCreativeWorkPath(path));
 }
 
 namespace {
@@ -759,27 +763,15 @@ void SetupPlayerRagdoll(Engine& engine, Entity playerEntity, std::span<const Ent
     SetupPlayerRagdoll(engine.GetPhysicsContext(), engine.GetRegistry(), playerEntity, visualParts);
 }
 
-void RebuildVulkanResources(RenderContext& ctx, CreativeWorksManager& cwMgr, ECS::Registry& reg) {
+void RebuildVulkanResources(RenderContext& ctx, ECS::Registry& reg) {
     ZHLN::Log("[Engine] Device Lost: Clearing GPU asset cache. Next frame will re-upload assets lazily.");
 
     ctx.ClearGPUCaches();
     CreateFontAtlasTexture(ctx, reg);
 
-    uint32_t count = cwMgr.GetCachedPrefabs(nullptr, 0);
-    if (count > 0) {
-        std::vector<ModelPrefab*> prefabs(count);
-        cwMgr.GetCachedPrefabs(prefabs.data(), count);
-
-        for (auto* prefab: prefabs) {
-            GLTF::RebuildPrefabGPUResources(ctx, prefab);
-            for (size_t i = 0; i < prefab->parts.size(); ++i) {
-                std::string assetKeyStr = std::string(prefab->virtualPath.c_str()) + "#" + prefab->parts[i].name.c_str() + "_" +
-                                          std::to_string(prefab->parts[i].nodeIndex);
-                ctx.RegisterGPUMesh(HashAssetID(assetKeyStr), prefab->parts[i].mesh);
-                ctx.RegisterGPUMaterial(HashAssetID(assetKeyStr + "_mat"), prefab->parts[i].defaultMaterial);
-            }
-        }
-    }
+    // Everything past this point belongs to an owner outside core. Rebuilding an imported model's
+    // meshes and materials means re-parsing its .glb, which only the importer can do, so those
+    // owners subscribe an Engine::DeviceLostCallback and re-upload once this returns.
 }
 
 auto CreateTerrainFromData(
@@ -941,23 +933,6 @@ auto InstantiatePrefab(Engine& engine, std::string_view path, const SpawnParams&
     return InstantiatePrefab(engine, *prefab, params, outBuffer, maxCount);
 }
 
-auto LoadModelPrefabFromMemory(Engine& engine, std::span<const uint8_t> bytes, std::string_view virtualPath) -> ModelPrefab* {
-    return GLTF::LoadGLBPrefabFromMemory(engine.GetRenderContext(), engine.GetCreativeWorksManager(), bytes, virtualPath);
-}
 
-auto InstantiatePrefabFromMemory(
-    Engine&                  engine,
-    std::span<const uint8_t> bytes,
-    std::string_view         virtualPath,
-    const SpawnParams&       params,
-    Entity*                  outBuffer,
-    uint32_t                 maxCount
-) -> uint32_t {
-    const auto* prefab = LoadModelPrefabFromMemory(engine, bytes, virtualPath);
-    if (prefab == nullptr) {
-        return 0;
-    }
-    return InstantiatePrefab(engine, *prefab, params, outBuffer, maxCount);
-}
 
 } // namespace ZHLN::CreativeWorksFactory

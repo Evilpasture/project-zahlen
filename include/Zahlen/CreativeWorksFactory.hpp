@@ -140,11 +140,12 @@ auto CreateTerrainFromData(Engine& engine, int sampleCount, float worldSize, con
     -> Entity;
 
 // --- Model Prefab Loaders ---
+// Core does not parse model files; it consumes prefabs that an importer already built and cached
+// under HashCreativeWorkPath(path). extras/glTF is that importer: ZHLN::GLTF::LoadGLBPrefab()
+// reads and uploads a .glb and caches the result, after which these lookups return it. Returns
+// nullptr when nothing has imported the path yet.
 auto LoadModelPrefab(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view path) -> ModelPrefab*;
 auto LoadModelPrefab(Engine& engine, std::string_view path) -> ModelPrefab*;
-auto LoadModelPrefabFromMemory(RenderContext& ctx, CreativeWorksManager& assetMgr, std::span<const uint8_t> bytes, std::string_view virtualPath)
-    -> ModelPrefab*;
-auto LoadModelPrefabFromMemory(Engine& engine, std::span<const uint8_t> bytes, std::string_view virtualPath) -> ModelPrefab*;
 
 // --- Prefab Spawners ---
 // Low-level context overload (Required by Scripting.cpp)
@@ -161,17 +162,13 @@ auto InstantiatePrefab(
 // Engine-level convenience overloads
 auto InstantiatePrefab(Engine& engine, const ModelPrefab& prefab, const SpawnParams& params, Entity* outBuffer = nullptr, uint32_t maxCount = 0) -> uint32_t;
 auto InstantiatePrefab(Engine& engine, std::string_view path, const SpawnParams& params, Entity* outBuffer = nullptr, uint32_t maxCount = 0) -> uint32_t;
-auto InstantiatePrefabFromMemory(
-    Engine&                  engine,
-    std::span<const uint8_t> bytes,
-    std::string_view         virtualPath,
-    const SpawnParams&       params,
-    Entity*                  outBuffer = nullptr,
-    uint32_t                 maxCount  = 0
-) -> uint32_t;
 
 void SetupPlayerRagdoll(PhysicsContext& pc, ECS::Registry& reg, Entity playerEntity, std::span<const Entity> visualParts);
 void SetupPlayerRagdoll(Engine& engine, Entity playerEntity, std::span<const Entity> visualParts);
-void RebuildVulkanResources(RenderContext& ctx, CreativeWorksManager& cwMgr, ECS::Registry& reg);
+/// Rebuilds the GPU state core owns after a device loss: the GPU caches are
+/// cleared and the font atlas is recreated. Resources that an owner outside the
+/// engine uploaded are not touched here -- subscribe an
+/// Engine::DeviceLostCallback to re-upload those.
+void RebuildVulkanResources(RenderContext& ctx, ECS::Registry& reg);
 
 } // namespace ZHLN::CreativeWorksFactory

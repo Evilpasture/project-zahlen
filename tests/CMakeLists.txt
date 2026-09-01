@@ -14,6 +14,12 @@
 # the expensive part. The cost is process isolation: a crash or timeout in one
 # suite takes the rest of its group with it.
 
+# Nothing here depends on extras. Every group below links zahlen_engine alone,
+# and the suites that exercise the extras layer -- JSON, TOML, the glTF
+# importer, the perf baselines -- live in tests/extras and are only configured
+# when that layer is built. ZHLN_BUILD_EXTRAS=OFF therefore drops those suites
+# and leaves the rest of the tree building and running.
+
 # 1. Enable CTest testing framework
 enable_testing()
 
@@ -114,14 +120,14 @@ endfunction()
 zahlen_add_cpu_test_group(CPU_Core      core)
 zahlen_add_cpu_test_group(CPU_Threading threading)
 zahlen_add_cpu_test_group(CPU_ECS       ecs)
-zahlen_add_cpu_test_group(CPU_Scripting scripting)
 zahlen_add_cpu_test_group(CPU_Physics   physics)
 zahlen_add_cpu_test_group(CPU_Assets    assets)
 zahlen_add_cpu_test_group(CPU_Audio     audio)
-zahlen_add_cpu_test_group(CPU_Perf      perf)
 
-# Optional CPU tests live with the extras toolkit and disappear completely when
-# ZHLN_BUILD_EXTRAS is disabled.
+# The extras suites live with the extras toolkit: JSON, TOML, the procedural
+# animation rig, the network codecs, and the perf baselines under
+# tests/extras/profile. They are the only tests that link zahlen_extras, and
+# they disappear completely when ZHLN_BUILD_EXTRAS is disabled.
 if(ZHLN_BUILD_EXTRAS AND TARGET zahlen_extras)
     add_subdirectory(extras)
 endif()

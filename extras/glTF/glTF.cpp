@@ -29,6 +29,9 @@ module;
 #include <Zahlen/Types.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+// The importer lives beside this file. Note the two spellings: ZHLN::GLTF is
+// the importer's namespace, ZHLN::glTF (below) is this module's.
+#include "GLTFImporter.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -636,8 +639,9 @@ void LoadDroppedModel(InspectorState& state, const ZHLN::FileDrop& drop) {
     auto& engine = *state.engine;
     ClearInstances(state);
 
-    ZHLN::ModelPrefab* prefab =
-        ZHLN::CreativeWorksFactory::LoadModelPrefabFromMemory(engine, std::span<const uint8_t>(drop.data.data(), drop.data.size()), drop.fileName);
+    ZHLN::ModelPrefab* prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(
+        engine.GetRenderContext(), engine.GetCreativeWorksManager(), std::span<const uint8_t>(drop.data.data(), drop.data.size()), drop.fileName
+    );
     if (prefab == nullptr) {
         ZHLN::Log("[glTF Inspector] Failed to parse '{}' as glTF.", drop.fileName);
         return;
@@ -801,6 +805,11 @@ void RenderFrame(ZHLN::Engine& engine) {
 namespace ZHLN::glTF {
 
 void Initialize(ZHLN::Engine& engine) {
+    // Dropping a model on the window imports it, and an imported model holds GPU
+    // resources core cannot recreate, so the inspector subscribes the importer to
+    // the device-lost notification before anything can be imported.
+    ZHLN::GLTF::InstallDeviceLostHandler(engine);
+
     engine.InitializeDefaultScene();
     ZHLN::DefaultPreset::SetDisabled(true);
 

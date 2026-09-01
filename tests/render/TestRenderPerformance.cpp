@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include "extras/profile/PerfBaseline.hpp"
 
 // clang-format off
 #include <Jolt/Jolt.h>

@@ -10,4 +10,3 @@
 
 #include <Zahlen/Buffer.h>
 #include <Zahlen/Common.h>
-#include <Zahlen/Scripting.h>

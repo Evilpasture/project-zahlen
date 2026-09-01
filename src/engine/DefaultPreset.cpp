@@ -20,12 +20,13 @@
 #include <cmath>
 #include <cstring>
 #include <format>
+#include <utility>
 
 namespace ZHLN {
 
 namespace {
 
-// The fallback scene, as a document rather than a sequence of factory calls.
+// The fallback scene, as a description rather than a sequence of factory calls.
 //
 // This is the engine's own scene, so it goes through the same
 // Scene::Instantiate that any other scene does: if the scene layer cannot
@@ -36,76 +37,99 @@ namespace {
 // of worked around here.
 //
 // Nothing is loaded from disk: the fallback runs precisely when the game's
-// assets did not, so the document is baked into the binary.
-constexpr std::string_view kFallbackSceneTOML = R"(name = "Zahlen Fallback"
+// assets did not, so the description is compiled into the binary. It used to be
+// a baked-in TOML document parsed at runtime, which put the reflection-driven
+// document parser on the one code path that exists because everything else
+// failed to load. Same data, no parser: the extras/toml layer can still read
+// and write this exact description (see tests/extras/TestTOML.cpp), it just is
+// not what the engine boots from.
+//
+// Only the fields that differ from the struct defaults in Zahlen/Scene.hpp are
+// set, so the two stay in step by construction -- exactly what a scene document
+// would have said.
+[[nodiscard]] auto MakeFallbackScene() -> Scene::Scene {
+    Scene::Scene scene;
+    scene.name = "Zahlen Fallback";
 
-[camera]
-position = [0.0, 3.8, 7.5]
-yaw      = -90.0
-pitch    = -14.0
-fov      = 52.0
+    scene.camera = Scene::SceneCamera {
+        .position = {0.0f, 3.8f, 7.5f},
+        .yaw      = -90.0f,
+        .pitch    = -14.0f,
+        .fov      = 52.0f
+    };
 
-[environment]
-# Reflections on the emblem are the point of the scene; everything else is the
-# engine default and is therefore left unsaid.
-enableSSR = false
-enableRTR = true
+    // Reflections on the emblem are the point of the scene; everything else is
+    // the engine default and is therefore left unsaid.
+    scene.environment = Scene::SceneEnvironment {
+        .enableSSR = false,
+        .enableRTR = true
+    };
 
-[[entities]]
-name   = "FallbackGround"
-shape  = "Plane"
-extent = 35.0
+    Scene::SceneEntity ground;
+    ground.name     = "FallbackGround";
+    ground.shape    = Scene::ShapeKind::Plane;
+    ground.extent   = 35.0f;
+    ground.material = Scene::SceneMaterial {
+        .baseColor = {0.12f, 0.14f, 0.18f, 1.0f},
+        .roughness = 0.05f,
+        .metallic  = 0.30f
+    };
 
-  [entities.material]
-  baseColor = [0.12, 0.14, 0.18, 1.0]
-  roughness = 0.05
-  metallic  = 0.30
+    Scene::SceneEntity emblem;
+    emblem.name        = "FallbackEmblem";
+    emblem.shape       = Scene::ShapeKind::Box;
+    emblem.halfExtents = {1.2f, 1.2f, 1.2f};
+    emblem.transform   = Scene::Transform {.position = {0.0f, 2.0f, 0.0f}};
+    emblem.material    = Scene::SceneMaterial {
+        .baseColor = {0.1f, 0.6f, 0.95f, 1.0f},
+        .roughness = 0.15f,
+        .metallic  = 0.85f
+    };
 
-[[entities]]
-name        = "FallbackEmblem"
-shape       = "Box"
-halfExtents = [1.2, 1.2, 1.2]
+    scene.entities.push_back(std::move(ground));
+    scene.entities.push_back(std::move(emblem));
 
-  [entities.transform]
-  position = [0.0, 2.0, 0.0]
+    Scene::SceneLight sun;
+    sun.name      = "FallbackSun";
+    sun.type      = "Sun";
+    sun.position  = {12.0f, 25.0f, 12.0f};
+    sun.rotation  = {50.0f, -35.0f, 0.0f};
+    sun.direction = {0.4f, 1.0f, 0.3f};
+    sun.color     = {1.0f, 0.96f, 0.88f};
+    sun.intensity = 180.0f;
+    // A sun is not a ranged light; the punctual defaults would put it in the
+    // cluster grid.
+    sun.radius = 0.0f;
+    sun.range  = 0.0f;
 
-  [entities.material]
-  baseColor = [0.1, 0.6, 0.95, 1.0]
-  roughness = 0.15
-  metallic  = 0.85
+    Scene::SceneLight orbit;
+    orbit.name      = "FallbackPointLight";
+    orbit.type      = "Point";
+    orbit.position  = {0.0f, 2.5f, 0.0f};
+    orbit.color     = {0.2f, 0.85f, 1.0f};
+    orbit.intensity = 220.0f;
+    orbit.radius    = 0.6f;
+    orbit.range     = 18.0f;
 
-[[lights]]
-name      = "FallbackSun"
-type      = "Sun"
-position  = [12.0, 25.0, 12.0]
-rotation  = [50.0, -35.0, 0.0]
-direction = [0.4, 1.0, 0.3]
-color     = [1.0, 0.96, 0.88]
-intensity = 180.0
-# A sun is not a ranged light; the punctual defaults would put it in the
-# cluster grid.
-radius = 0.0
-range  = 0.0
+    scene.lights.push_back(std::move(sun));
+    scene.lights.push_back(std::move(orbit));
 
-[[lights]]
-name      = "FallbackPointLight"
-type      = "Point"
-position  = [0.0, 2.5, 0.0]
-color     = [0.2, 0.85, 1.0]
-intensity = 220.0
-radius    = 0.6
-range     = 18.0
-)";
+    return scene;
+}
 
-// Positions in the document above. Update() animates two of these, and reading
-// them back by index only works while the document says what it says.
+// Positions in the description above. Update() animates two of these, and
+// reading them back by index only works while it says what it says.
 constexpr size_t kEmblemIndex     = 1;
 constexpr size_t kPointLightIndex = 1;
 
 } // namespace
 
-auto DefaultPreset::FallbackSceneTOML() noexcept -> std::string_view {
-    return kFallbackSceneTOML;
+auto DefaultPreset::FallbackScene() noexcept -> const Scene::Scene& {
+    // Built on first use: a description holds strings and vectors, so it cannot
+    // be a constexpr object, and there is no reason to pay for it in a process
+    // that boots a real scene instead.
+    static const Scene::Scene kScene = MakeFallbackScene();
+    return kScene;
 }
 
 auto DefaultPreset::IsActive() noexcept -> bool {
@@ -169,15 +193,16 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
     // ========================================================================
     // 1. 3D SCENE SETUP
     // ========================================================================
-    // Camera, environment, geometry and lights all come out of the document.
-    const auto instance = Scene::InstantiateFromTOML(engine, kFallbackSceneTOML);
+    // Camera, environment, geometry and lights all come out of the description.
+    const auto instance = Scene::Instantiate(engine, FallbackScene());
     if (!instance) {
-        // A baked-in document that does not parse is a programming error, and
-        // tests/core/TestTOML.cpp parses this one. Should it ever happen in
-        // the field, the popup explaining why the game did not boot is the
-        // half of this scene that matters, so it is still built: the handles
-        // below stay null and Update()'s animation patches nothing.
-        Log("[DefaultPreset] fallback scene document rejected: {}", instance.error().Message());
+        // Reaching here means a material could not be created or a prefab did
+        // not resolve -- the description itself is compiled in, so there is
+        // nothing left to reject. Either way the popup explaining why the game
+        // did not boot is the half of this scene that matters, so it is still
+        // built: the handles below stay null and Update()'s animation patches
+        // nothing.
+        Log("[DefaultPreset] fallback scene rejected: {}", instance.error().Message());
     } else {
         if (instance->entities.size() > kEmblemIndex) {
             s_CubeEntity = instance->entities[kEmblemIndex];

@@ -349,13 +349,25 @@ constexpr auto EnumToString(E value) -> std::string_view {
 template <typename E>
     requires std::is_enum_v<E>
 constexpr auto StringToEnum(std::string_view name) -> std::optional<E> {
-    std::optional<E> result = std::nullopt;
+    // Match into a plain flag plus a value-initialized enum, then build the
+    // optional once on a single non-lambda path. Holding the result in a
+    // std::optional<E> that is only ever assigned from inside the expanded
+    // lambda leaves GCC unable to prove the optional's payload was ever
+    // constructed, and it reports -Wmaybe-uninitialized at every `*parsed` in
+    // a caller. Value-initializing the enum keeps the read well-defined on the
+    // no-match path too, where 0 is always in an enum's value range.
+    bool found = false;
+    E    value {};
     [:Expand(detail::EnumeratorsOf<E>()):] >> [&]<auto enumerator>() -> auto {
         if (name == std::meta::identifier_of(enumerator)) {
-            result = static_cast<E>([:enumerator:]);
+            value = static_cast<E>([:enumerator:]);
+            found = true;
         }
     };
-    return result;
+    if (!found) {
+        return std::nullopt;
+    }
+    return value;
 }
 
 template <typename E>
@@ -653,7 +665,17 @@ constexpr void ForEachFieldAccessor(F&& f) {
 
         auto const_getter = [](const U& inst) -> const FieldType& { return inst.[:member:]; };
         auto mut_getter   = [](U& inst) -> FieldType& { return inst.[:member:]; };
-        auto setter       = [](U& inst, const FieldType& val) -> auto { inst.[:member:] = val; };
+        auto setter       = [](U& inst, const FieldType& val) -> void {
+            if constexpr (std::is_array_v<FieldType>) {
+                for (std::size_t i = 0; i < std::extent_v<FieldType>; ++i) {
+                    inst.[:member:][i] = val[i];
+                }
+            } else if constexpr (std::is_copy_assignable_v<FieldType>) {
+                inst.[:member:] = val;
+            } else if constexpr (std::is_move_assignable_v<FieldType>) {
+                inst.[:member:] = std::move(const_cast<FieldType&>(val));
+            }
+        };
 
         f.template operator()<FieldType>(name, const_getter, mut_getter, setter);
     };
@@ -663,9 +685,11 @@ template <typename T, typename F>
 constexpr void ForEachMethodPointer(F&& f) {
     [:Expand(detail::MembersOf<T>()):] >> [&]<auto member>() -> auto {
         if constexpr (std::meta::is_function(member) && std::meta::has_identifier(member)) {
-            constexpr std::string_view name = std::meta::identifier_of(member);
-            constexpr auto             pmf  = &[:member:];
-            f(name, pmf);
+            constexpr auto pmf = &[:member:];
+            if constexpr (std::is_member_function_pointer_v<decltype(pmf)>) {
+                constexpr std::string_view name = std::meta::identifier_of(member);
+                f(name, pmf);
+            }
         }
     };
 }

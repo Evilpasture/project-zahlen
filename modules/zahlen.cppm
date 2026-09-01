@@ -159,15 +159,11 @@ module;
 #include <Zahlen/GUI.hpp>
 #include <Zahlen/IK.hpp>
 #include <Zahlen/Input.hpp>
-#include <Zahlen/JSON.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/Profiler.hpp>
 #include <Zahlen/Render.hpp>
-#include <Zahlen/ScriptBinder.hpp>
-#include <Zahlen/ScriptECSBridge.hpp>
-#include <Zahlen/Scripting.h>
 #include <Zahlen/Scripting.hpp>
 #include <Zahlen/SkeletalAnimation.hpp>
 #include <Zahlen/Sync.hpp>
@@ -413,27 +409,7 @@ using ZHLN::AudioSystem;
 using ZHLN::AudioWaveformType;
 
 // Scripting
-using ZHLN::BoxedObject;
-using ZHLN::JSONError;
-using ZHLN::OwnedObject;
-using ZHLN::ScriptArray;
-using ZHLN::ScriptBinder;
-using ZHLN::ScriptClassInfo;
-using ZHLN::ScriptECSBridge;
-using ZHLN::ScriptError;
-using ZHLN::ScriptMethod;
-using ZHLN::ScriptProperty;
 using ZHLN::ScriptRunner;
-using ZHLN::ScriptVal;
-
-namespace ReflectJSON {
-using ZHLN::ReflectJSON::Document;
-using ZHLN::ReflectJSON::GetJSONValue;
-using ZHLN::ReflectJSON::Parse;
-using ZHLN::ReflectJSON::ParseObject;
-using ZHLN::ReflectJSON::TryParse;
-using ZHLN::ReflectJSON::ValueReader;
-} // namespace ReflectJSON
 
 // Engine
 using ZHLN::CatalogEntry;

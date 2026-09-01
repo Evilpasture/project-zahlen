@@ -17,6 +17,7 @@
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
+#include <glTF/GLTFImporter.hpp>
 
 // Optional extras/toolkit modules
 import ZHLN.Locomotion;
@@ -660,6 +661,7 @@ auto main(int argc, char* argv[]) -> int {
 
     auto engine = std::move(engineRes.value());
     engine->GetWindow().Focus();
+
     engine->InitializeDefaultScene();
     ZHLN::ProceduralAnimation::Register(*engine);
     BuildProceduralArena(*engine);
@@ -670,7 +672,12 @@ auto main(int argc, char* argv[]) -> int {
     const std::string_view rigPath     = rigOverride != nullptr && rigOverride[0] != '\0' ? std::string_view(rigOverride) :
                                                                                             std::string_view("ProceduralAnimationBaseRig.glb");
     ZHLN::Log("[Sample] Using procedural rig '{}'. Set ZHLN_PROCEDURAL_RIG to override.", rigPath);
-    ZHLN::ModelPrefab* const prefab = ZHLN::CreativeWorksFactory::LoadModelPrefab(*engine, rigPath);
+    // Reading a .glb is an extra, so the sample asks the importer directly. It
+    // caches the prefab, after which CreativeWorksFactory::LoadModelPrefab(rigPath)
+    // -- the path Scene::ShapeKind::Prefab and the scripting bindings use -- finds
+    // it without core knowing a parser exists.
+    ZHLN::GLTF::InstallDeviceLostHandler(*engine);
+    ZHLN::ModelPrefab* const prefab = ZHLN::GLTF::LoadGLBPrefab(engine->GetRenderContext(), engine->GetCreativeWorksManager(), rigPath);
 
     const ZHLN::Locomotion::CharacterBoundsEstimate bounds          = prefab != nullptr ? ZHLN::Locomotion::EstimateCharacterBounds(*prefab) :
                                                                                           ZHLN::Locomotion::CharacterBoundsEstimate {};

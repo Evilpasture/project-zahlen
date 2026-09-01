@@ -12,17 +12,27 @@ namespace ZHLN {
 
 class Engine;
 
+namespace Scene {
+struct Scene;
+} // namespace Scene
+
 enum class FallbackReason : uint8_t { None = 0, MissingBootScript, MissingNativeModule, ScriptExecutionError };
 
 class ZHLN_API DefaultPreset {
   public:
     static void               BuildFallbackScene(Engine& engine, FallbackReason reason, std::string_view detailMessage = "");
 
-    /// The fallback scene as a TOML document -- the same text BuildFallbackScene
-    /// instantiates. Exposed so it can be parsed and checked without a device:
-    /// it is baked into the binary, so a typo in it would otherwise only show
-    /// up on the day everything else has already gone wrong.
-    [[nodiscard]] static auto FallbackSceneTOML() noexcept -> std::string_view;
+    /// The fallback scene as a scene description -- the same data
+    /// BuildFallbackScene instantiates. Exposed so it can be inspected and
+    /// checked without a device.
+    ///
+    /// It is a compiled-in ZHLN::Scene::Scene, not a baked-in document: this is
+    /// the engine's fail-safe, it runs precisely when nothing else could be
+    /// loaded, and making it depend on a text parser would mean the one scene
+    /// that has to work is the one with the most machinery between it and the
+    /// screen. Building it in C++ also means a mistake in it fails the build
+    /// rather than surfacing on the day everything else has already gone wrong.
+    [[nodiscard]] static auto FallbackScene() noexcept -> const Scene::Scene&;
     static void               Update(Engine& engine, float dt);
     [[nodiscard]] static bool IsActive() noexcept;
     static void               ClearFallback() noexcept;

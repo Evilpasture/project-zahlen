@@ -81,7 +81,7 @@ blender/
 *.patch
 .Rhistory
 
-# Local performance-test baselines (machine-specific; see tests/PerfBaseline.hpp)
+# Local performance-test baselines (machine-specific; see tests/extras/profile/PerfBaseline.hpp)
 perf-baseline.json
 
 # C++ module BMIs (GCC)

@@ -107,6 +107,129 @@ void   Update(Engine& engine, float dt);
 
 ---
 
+## 1.2 The Core / Extras Dependency Boundary
+
+`src/`, `include/` and `modules/` are the **Core Engine**. `extras/` is the
+optional feature layer built on top of it.
+
+> **Rule: the dependency is one-way.** Core must never include, import or link
+> anything from `extras/`. `extras/` may consume Core freely.
+
+`tools/check_core_extras_boundary.py` runs at CMake configure time and fails the
+build on a violation, so the rule is enforced rather than documented. It catches
+both `import ZHLN.<extras module>;` and any `#include` that resolves to a file
+under `extras/` — including the short forms, because `extras/` is itself an
+include root for consumers of `zahlen_extras`, so `#include <json/JSON.hpp>`
+compiles happily from a core file and has to be rejected by path resolution, not
+by spelling. What the script cannot see is linking: keep `zahlen_extras` out of
+every target defined outside `extras/` and `tests/`.
+
+### What the boundary buys
+
+Anything behind it is genuinely optional — its third-party dependencies
+included. The concrete case that motivated the rule:
+
+| Layer | Contents | Dependencies it carries |
+| :--- | :--- | :--- |
+| `extras/json/` | `JSON.hpp` (reflection-driven reader + `Reflect::SerializeJSON`), `JSONSchema.hpp` (compile-time schema → C++ type) | simdjson |
+| `extras/toml/` | `TOML.hpp` (reflection-driven documents), `SceneTOML.hpp` (binds a core `Scene::Scene` to the document format) | none |
+| `extras/glTF/` | `GLTFImporter.*` (the glTF/GLB reader), `glTF.*` (the drop-a-file inspector, module `ZHLN.glTF`) | cgltf, stb_image, meshoptimizer, and `extras/json` for the custom node members |
+| `extras/scripting_lua/` | `LuaScriptRuntime.*` (the LuaJIT state), `Scripting.cpp` (the C ABI and command dispatch), `ScriptBinder.hpp` / `ScriptECSBridge.*` (reflection-driven class table), `scripts/` (the Fennel sources) | LuaJIT |
+
+Core has no JSON, TOML, model-file or scripting dependency at all, so a
+core-only build (`-DZHLN_BUILD_EXTRAS=OFF`) needs none of those installed and
+links no parser and no Lua runtime.
+
+### Consequences worth knowing
+
+* **`Zahlen/Scene.hpp` is pure data.** The structs, their defaults and
+  `Scene::Instantiate(engine, scene)` are Core. Turning a scene into text and
+  back is `extras/toml/SceneTOML.hpp`, which also holds the
+  `ReflectTOML::TOMLVector<JPH::Float3>` specialisations that make a Jolt vector
+  read as `[x, y, z]`. Include *that* header — not `toml/TOML.hpp` alone — or a
+  scene serialises its vectors as tables of members.
+* **`DefaultPreset` does not parse anything.** The engine's fallback scene is the
+  one scene that has to work when nothing else loaded, so it is a compiled-in
+  `ZHLN::Scene::Scene` handed to `Scene::Instantiate()` rather than a baked-in
+  document parsed at runtime. A mistake in it fails the build instead of
+  surfacing on the day the game already failed to boot.
+
+* **The glTF importer is an extra, and Core never calls it.** Reading a model
+  file means a container parser, an image decoder, a mesh partitioner and a JSON
+  reader for the custom node members — far more machinery than the engine needs
+  to run, so `extras/glTF/GLTFImporter.cpp` sits behind the boundary and uses
+  the real `extras/json` parser rather than a bespoke scanner. What it produces
+  is a plain `ZHLN::ModelPrefab` — the same struct the ECS already describes —
+  which it leaves in `CreativeWorksManager`'s prefab cache under
+  `HashCreativeWorkPath(path)`. `CreativeWorksFactory::LoadModelPrefab(path)`,
+  the entry point `Scene::ShapeKind::Prefab` and the scripting bindings use, is
+  that cache lookup and nothing else:
+
+  ```cpp
+  // the extra: parse, upload, cache
+  auto* prefab = ZHLN::GLTF::LoadGLBPrefab(ctx, cwMgr, "Crate.glb");
+
+  // core only: read the struct back out of the cache and spawn it
+  ZHLN::CreativeWorksFactory::InstantiatePrefab(engine, "Crate.glb", params);
+  ```
+
+  There is no function table and no registration step. The importer writes the
+  cache, Core reads it, and nothing has to be installed first. In a core-only
+  build nothing ever fills the cache, so the lookup returns null — a core-only
+  build simply has no model files, the same way it has no JSON.
+* **Device loss is the case where a callback is the right shape.** The GPU
+  handles inside a `ModelPrefab` die with the `VkDevice`, and getting them back
+  means reading the `.glb` again — an action only the importer can perform, and
+  one Core cannot reach by inspecting state it already owns. So `Engine` keeps a
+  list of `DeviceLostCallback`s and runs it, in registration order, once
+  `CreativeWorksFactory::RebuildVulkanResources()` has rebuilt what Core owns:
+
+  ```cpp
+  ZHLN::GLTF::InstallDeviceLostHandler(*engine);   // once, next to the first import
+  ```
+
+  The list lives on `Engine` rather than on `RenderContext` because the context
+  is destroyed and rebuilt inside `HandleDeviceLost()`; anything stored on it
+  would die with the device it is meant to survive. `ZHLN::glTF::Initialize()`
+  installs the handler for the inspector, and an application that imports models
+  directly calls it once itself. `Engine::DeviceLostCallbackCount()` lets a host
+  assert that the owners it expects actually subscribed.
+
+* **Core has no scripting implementation.** `include/Zahlen/IScriptRuntime.hpp`
+  is seven virtual functions and `ScriptRunner` is a null-safe forwarder — 122
+  lines in total. There is no `lua_State`, no `extern "C"` surface, no integer
+  command table and no marshalling code anywhere in `src/`, `include/` or
+  `modules/`. All of it lives in `extras/scripting_lua/`, which implements the
+  interface, owns the LuaJIT link, and compiles the Fennel sources:
+
+  ```cpp
+  // the composition root, app/main.cpp — not core
+  engine->GetScriptRunner().SetRuntime(std::make_unique<ZHLN::LuaScriptRuntime>());
+  ```
+
+  Every `ScriptRunner` method is a no-op while nothing is installed, so the
+  engine, the fallback preset and the console all ask for script work without a
+  guard and without knowing whether anything is listening. A core-only build
+  simply runs C++.
+* **The composition root lives in `app/`, not `src/`.** Wiring an engine
+  together means naming the optional layers it runs with, which is exactly what
+  `src/` is forbidden from doing. `app/main.cpp` is therefore outside the
+  boundary rule — `tools/check_core_extras_boundary.py` scans `src/`, `include/`
+  and `modules/` only — and it is the one place allowed to link
+  `zahlen_scripting_lua`.
+
+That is the whole distinction, and it is worth stating precisely because the two
+cases look alike. **When Core needs *data* an extra produces, the extra writes
+ordinary Core state and Core reads it back** — a prefab cache, a `Scene::Scene`,
+a `ModelPrefab` — with nothing to register and no way for the seam to be
+forgotten. **When Core needs an extra to *act*, because the work requires
+knowledge Core does not have, the extra subscribes to a notification.** The
+first needs no callback; the second cannot work without one. Neither points the
+dependency arrow the wrong way, and the build still works with the extra absent
+— a callback that was never registered is simply never called.
+
+---
+
 ## 2. Mathematical & Geometric Conventions
 
 Zahlen adheres strictly to standard Vulkan and Jolt Physics conventions across both CPU host code and GPU shaders:

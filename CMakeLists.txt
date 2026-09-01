@@ -220,7 +220,7 @@ endif()
 
 # Absolute project root (forward slashes also on Windows) for code that reads
 # or writes repo-root files at runtime, e.g. the performance baseline cache
-# (tests/PerfBaseline.hpp). Defined once here so every target shares it
+# (tests/extras/profile/PerfBaseline.hpp). Defined once here so every target shares it
 # instead of each consumer inventing its own path plumbing.
 string(REPLACE "\\" "/" ZHLN_PROJECT_ROOT_FWD "${PROJECT_SOURCE_DIR}")
 add_compile_definitions(ZHLN_PROJECT_ROOT="${ZHLN_PROJECT_ROOT_FWD}")
@@ -334,8 +334,6 @@ set(RAW_ENGINE_SOURCES
     src/engine/CreativeWorksManager.cpp
     src/engine/Window.cpp
     src/engine/Platform.cpp
-    src/engine/Scripting.cpp
-    src/engine/LuaScriptRuntime.cpp
     src/engine/Console.cpp
     src/engine/Profiler.cpp
     src/engine/Text.cpp
@@ -369,10 +367,8 @@ set(RAW_ENGINE_SOURCES
     src/engine/graphics/RenderProcedural.cpp
     src/engine/graphics/RenderPasses.cpp
     src/engine/graphics/RenderSetup.cpp
-    src/engine/ScriptECSBridge.cpp
-    src/engine/JSON.cpp
-    src/engine/TOML.cpp
     src/engine/Scene.cpp
+    src/engine/ScriptRunner.cpp
 )
 
 find_library(ZSTD_LIBRARY NAMES zstd zstd_static HINTS "/opt/homebrew/lib" "/usr/local/lib" "/usr/lib")
@@ -395,22 +391,19 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     pkg_check_modules(LIBSEAT REQUIRED IMPORTED_TARGET libseat)
 endif()
 
-# Dependencies needed on both Linux and macOS
+# Dependencies needed on both Linux and macOS.
+#
+# simdjson is deliberately NOT here: JSON lives in extras/json, so the core
+# engine has no JSON dependency and a core-only build needs no JSON library
+# installed. extras/CMakeLists.txt finds it when the extras layer is built.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR APPLE)
     pkg_check_modules(FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig)
-    pkg_check_modules(SIMDJSON REQUIRED IMPORTED_TARGET simdjson)
-
-    # Ensure alias exists for consistent linking
-    if(TARGET PkgConfig::SIMDJSON AND NOT TARGET simdjson::simdjson)
-        add_library(simdjson::simdjson ALIAS PkgConfig::SIMDJSON)
-    endif()
 endif()
 
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/render)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/threading)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/physics)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/ecs)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/gltf)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/audio)
 
 # --- ASSEMBLE COMPILER FLAGS METADATA ---
@@ -526,17 +519,14 @@ target_link_libraries(zahlen_engine PRIVATE
     zahlen_physics
     zahlen_threading
     zahlen_ecs
-    zahlen_gltf
     zahlen_audio
     glfw
-    LuaJIT
     spirv_reflect
     imgui
     mimalloc-static
     meshoptimizer
     yogacore
     ${ZSTD_LIBRARY}
-    PkgConfig::SIMDJSON
 )
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -555,7 +545,6 @@ target_include_directories(zahlen_engine SYSTEM PRIVATE
 )
 target_include_directories(zahlen_engine SYSTEM PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/extern/LuaJIT/src
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/yoga
     ${CMAKE_BINARY_DIR}/generated_shaders
 )
@@ -564,21 +553,6 @@ target_include_directories(zahlen_engine SYSTEM PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/stb
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
-
-# --- AUTOMATIC FENNEL BOOTSTRAP DOWNLOADER ---
-if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/fennel.lua")
-    message(STATUS "fennel.lua not found. Downloading from official fennel-lang.org...")
-    file(DOWNLOAD
-        "https://fennel-lang.org/downloads/fennel-1.6.1.lua"
-        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/fennel.lua"
-        SHOW_PROGRESS
-        STATUS DOWNLOAD_STATUS
-    )
-    list(GET DOWNLOAD_STATUS 0 DOWNLOAD_CODE)
-    if(NOT DOWNLOAD_CODE EQUAL 0)
-        message(FATAL_ERROR "Failed to download fennel.lua: ${DOWNLOAD_STATUS}")
-    endif()
-endif()
 
 # --- SHADER COMPILATION ---
 include(ShaderCompilation)
@@ -615,72 +589,21 @@ function(zahlen_compile_fennel TARGET_NAME OUTPUT_LUA_FILES_VAR)
     set(${OUTPUT_LUA_FILES_VAR} ${LUA_OUTPUTS} PARENT_SCOPE)
 endfunction()
 
-if(IS_SYMLINK "${CMAKE_BINARY_DIR}/scripts")
-    message(STATUS "Removing stale scripts directory symlink: ${CMAKE_BINARY_DIR}/scripts")
-    file(REMOVE "${CMAKE_BINARY_DIR}/scripts")
-endif()
-
-# 1. Compile Engine Core Fennel files
-zahlen_compile_fennel(zahlen_engine COMPILED_CORE_LUA_FILES
-    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/memoryview.fnl"
-    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/zahlen.fnl"
-    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/ecs.fnl"
-    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/dialogue.fnl"
-    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/inventory.fnl"
-    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/ffi_cdef.fnl"
-)
-
-# 2. Selectively copy or link static non-Fennel core script files
-file(GLOB_RECURSE STATIC_CORE_SCRIPT_FILES
-    LIST_DIRECTORIES false
-    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/*.lua"
-    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/*.sh"
-    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/*.txt"
-)
-
-set(STATIC_SCRIPT_SYMLINKS "")
-foreach(STATIC_SRC IN LISTS STATIC_CORE_SCRIPT_FILES)
-    file(RELATIVE_PATH REL_FILE "${CMAKE_CURRENT_SOURCE_DIR}/scripts" "${STATIC_SRC}")
-    get_filename_component(REL_DIR "${REL_FILE}" DIRECTORY)
-
-    set(OUT_FILE "${CMAKE_BINARY_DIR}/scripts/${REL_FILE}")
-    set(OUT_DIR "${CMAKE_BINARY_DIR}/scripts/${REL_DIR}")
-
-    file(MAKE_DIRECTORY "${OUT_DIR}")
-
-    if(WIN32)
-        add_custom_command(
-            OUTPUT "${OUT_FILE}"
-            COMMAND ${CMAKE_COMMAND} -E copy "${STATIC_SRC}" "${OUT_FILE}"
-            DEPENDS "${STATIC_SRC}"
-            COMMENT "Copying static core script: ${REL_FILE}"
-            VERBATIM
-        )
-    else()
-        add_custom_command(
-            OUTPUT "${OUT_FILE}"
-            COMMAND ${CMAKE_COMMAND} -E create_symlink "${STATIC_SRC}" "${OUT_FILE}"
-            DEPENDS "${STATIC_SRC}"
-            COMMENT "Symlinking static core script: ${REL_FILE}"
-            VERBATIM
-        )
-    endif()
-    list(APPEND STATIC_SCRIPT_SYMLINKS "${OUT_FILE}")
-endforeach()
-
-add_custom_target(sync_static_core_scripts DEPENDS ${STATIC_SCRIPT_SYMLINKS})
-
-# 3. Create a target blocking engine compilation until all core scripts are generated
-add_custom_target(zahlen_fennel_compilation ALL DEPENDS ${COMPILED_CORE_LUA_FILES})
-add_dependencies(zahlen_fennel_compilation sync_static_core_scripts)
-add_dependencies(zahlen_engine zahlen_fennel_compilation)
 
 # --- ENGINE LAUNCHER & EDITOR EXECUTABLE ---
+# The composition root. It lives outside src/ on purpose: wiring an engine
+# together means naming the optional layers it runs with, and src/ is the core
+# library, which may not know extras exist. See tools/check_core_extras_boundary.py.
 add_executable(zahlen
-    src/main.cpp
+    app/main.cpp
 )
 target_link_libraries(zahlen PRIVATE zahlen_engine imgui Jolt)
 target_compile_definitions(zahlen PRIVATE JPH_DOUBLE_PRECISION)
+
+# The composition root reaches engine internals (engine/Platform.hpp,
+# physics/PhysicsWorld.hpp). While it lived at src/main.cpp those resolved
+# relative to the file; from app/ the path has to be explicit.
+target_include_directories(zahlen PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 set_target_properties(zahlen PROPERTIES
     CXX_STANDARD 26
@@ -863,7 +786,6 @@ endfunction()
 
 zahlen_enable_reflection(zahlen_render)
 zahlen_enable_reflection(zahlen_engine)
-zahlen_enable_reflection(zahlen_gltf)
 zahlen_enable_reflection(zahlen_audio)
 zahlen_enable_reflection(zahlen_physics)
 zahlen_enable_reflection(zahlen_ecs)
@@ -875,6 +797,14 @@ option(ZHLN_BUILD_EXTRAS "Build first-party engine feature modules and VFX toolk
 
 if(ZHLN_BUILD_EXTRAS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extras")
     add_subdirectory(extras)
+
+    # The engine itself has no scripting; the composition root installs a runtime
+    # if one was built. Without it ScriptRunner forwards to nothing and the
+    # engine runs C++-only.
+    if(TARGET zahlen_scripting_lua)
+        target_link_libraries(zahlen PRIVATE zahlen_scripting_lua)
+        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_SCRIPTING=1)
+    endif()
 endif()
 
 # --- TESTS ---

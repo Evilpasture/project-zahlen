@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <expected>
 #include <fstream>
+#include <glTF/GLTFImporter.hpp>
 #include <span>
 #include <string>
 #include <vector>
@@ -25,6 +26,7 @@
 #pragma clang diagnostic ignored "-Wc23-extensions"
 #endif
 namespace {
+
 // Embed the binary GLB directly into the read-only data section of the test binary
 // NOLINTBEGIN(bugprone-string-literal-with-embedded-nul, modernize-avoid-c-arrays, cppcoreguidelines-avoid-c-arrays)
 constexpr uint8_t kUziGlbData[] = {
@@ -87,7 +89,7 @@ struct RenderAnimatedMeshTestSuite {
 
             // 3. Instantiate Prefab Directly From Embedded In-Memory Byte Stream
             std::vector<ZHLN::Entity> spawnedParts(512);
-            const uint32_t            count = ZHLN::CreativeWorksFactory::InstantiatePrefabFromMemory(
+            const uint32_t            count = ZHLN::GLTF::InstantiatePrefabFromMemory(
                 *engine, kUziGlbData, "Uzi.glb",
                 {
                     .position        = JPH::RVec3(0.0f, 0.0f, 0.0f),

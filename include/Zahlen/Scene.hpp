@@ -6,51 +6,44 @@
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
-#include <Jolt/Math/Float2.h>
 #include <Jolt/Math/Float3.h>
 #include <Jolt/Math/Float4.h>
 #include <Zahlen/Common.h>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/TOML.hpp>
 #include <cstdint>
 #include <expected>
 #include <string>
-#include <string_view>
-#include <type_traits>
 #include <vector>
 
 // ============================================================================
 // Scenes as data.
 //
 // The structs below ARE the scene format. There is no schema file, no parser
-// table and no registry of field names: Zahlen/TOML.hpp walks these
-// declarations with static reflection, so
+// table and no registry of field names: they are plain reflected structs, so
+// any reflection-driven serialiser can walk them, and adding a field to a
+// struct here adds it to the document format in the same edit. A field's
+// default in the declaration is its default in a document, which is what lets
+// a scene file say only what differs from the defaults.
 //
-//     ZHLN::Reflect::SerializeTOML(scene)          // scene -> text
-//     ZHLN::ReflectTOML::TryParse<Scene>(text)     // text  -> scene
-//
-// are both derived from the type, and adding a field to a struct here adds it
-// to the file format in the same edit. A field's default in the declaration is
-// its default in the document, because a missing key leaves the field alone --
-// so a scene file says what differs from the defaults and nothing else.
-//
-// TOML rather than JSON because these are hand-edited and reviewed: comments
-// survive, [[entities]] reads as a list of things rather than a bracket forest,
-// and `position = [0.0, 8.0, 0.0]` diffs one line at a time.
+// This header is deliberately format-free. Reading and writing a scene as TOML
+// lives in extras/toml/SceneTOML.hpp, which binds these structs to the
+// reflection-driven parser in extras/toml/ and provides
+// Scene::InstantiateFromTOML(). Core never reaches for it: the engine's own
+// fallback preset (DefaultPreset) builds one of these structs in C++ and calls
+// Instantiate() directly, so a scene description is usable with no document
+// layer compiled in at all.
 //
 // Instantiating is a pure function of the description plus the engine it is
 // given -- no ambient engine, no process-global scene state. Two engines can
 // hold the same Scene at once, and re-instantiating the same description
 // produces the same scene, which is the property the render tests need.
 //
-//     const auto scene = ZHLN::ReflectTOML::TryParse<ZHLN::Scene::Scene>(text);
-//     const auto built = ZHLN::Scene::Instantiate(engine, *scene);
-//
 // Vectors are Jolt's plain storage types (JPH::Float3, JPH::Float4) rather
 // than std::array, so a field goes straight into the engine --
-// JPH::Vec3(t.position) -- with no unpacking helper in between. They still read as `[x, y, z]` in
-// the document; see the TOMLVector specialisations at the bottom of this file.
+// JPH::Vec3(t.position) -- with no unpacking helper in between. They still read
+// as `[x, y, z]` in a document; see the TOMLVector specialisations in
+// extras/toml/SceneTOML.hpp.
 // Positions are Float3 and not Double3 on purpose: RVec3 is only DVec3 in a
 // JPH_DOUBLE_PRECISION build, so a Double3 field would stop converting in the
 // default one, and no hand-authored scene needs 15 significant digits.
@@ -189,25 +182,10 @@ enum class SceneError : uint8_t {
 /// Builds `description` into `engine`. Additive: it does not clear what is
 /// already there, so a caller that wants a clean slate resets the engine
 /// first.
+///
+/// The textual counterpart, Scene::InstantiateFromTOML(), is declared in
+/// extras/toml/SceneTOML.hpp.
 [[nodiscard]] auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Instance, Error>;
 
-/// Reads a scene document and instantiates it in one step.
-[[nodiscard]] auto InstantiateFromTOML(Engine& engine, std::string_view tomlText) -> std::expected<Instance, Error>;
-
 } // namespace Scene
-
-namespace ReflectTOML {
-
-// Jolt's storage vectors are structs to C++ and coordinates to a reader, so
-// they are written and parsed as `[x, y, z]` rather than a table of members.
-// Declared here rather than in Zahlen/TOML.hpp to keep that header free of
-// any dependency on Jolt.
-template <>
-struct TOMLVector<JPH::Float2> : std::true_type {};
-template <>
-struct TOMLVector<JPH::Float3> : std::true_type {};
-template <>
-struct TOMLVector<JPH::Float4> : std::true_type {};
-
-} // namespace ReflectTOML
 } // namespace ZHLN

@@ -182,7 +182,8 @@ struct EngineImpl {
     std::unique_ptr<CreativeWorksManager> assetManager;
     std::unique_ptr<ScriptRunner>         scriptRunner;
 
-    Engine::UICallback uiCallback = nullptr;
+    Engine::UICallback                    uiCallback = nullptr;
+    std::vector<Engine::DeviceLostCallback> deviceLostCallbacks;
 
     Camera        mainCamera;
     ECS::Registry registry;
@@ -614,7 +615,15 @@ auto Engine::HandleDeviceLost() noexcept -> std::expected<void, Error> {
         return std::unexpected(rc_res.error());
     }
     _impl->renderContext = std::move(rc_res.value());
-    CreativeWorksFactory::RebuildVulkanResources(*_impl->renderContext, *_impl->assetManager, _impl->registry);
+    CreativeWorksFactory::RebuildVulkanResources(*_impl->renderContext, _impl->registry);
+
+    // Core has rebuilt everything it owns. Owners outside the engine now
+    // re-upload against the new context, in the order they registered.
+    for (const auto& callback: _impl->deviceLostCallbacks) {
+        if (callback) {
+            callback(*this);
+        }
+    }
     return {};
 }
 
@@ -998,6 +1007,16 @@ void Engine::SetGameState(void* state) {
 
 void Engine::SetUICallback(UICallback callback) {
     _impl->uiCallback = std::move(callback);
+}
+
+void Engine::AddDeviceLostCallback(DeviceLostCallback callback) {
+    if (callback) {
+        _impl->deviceLostCallbacks.push_back(std::move(callback));
+    }
+}
+
+auto Engine::DeviceLostCallbackCount() const noexcept -> size_t {
+    return _impl->deviceLostCallbacks.size();
 }
 
 auto Engine::GetUICallback() const noexcept -> const UICallback* {
