@@ -14,6 +14,7 @@ SMAA.hlsl
 
 # --- Build Artifacts ---
 build/
+dist/
 target/
 bin/
 obj/
@@ -69,6 +70,9 @@ Thumbs.db
 # Assets
 resources/intermediate/
 *.bin
+*.png
+*.jpg
+*.ppm
 
 # Blender source files and unpacked textures
 blender/
