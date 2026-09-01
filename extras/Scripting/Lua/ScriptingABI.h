@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// extras/scripting_lua/ScriptingABI.h
+// extras/Scripting/Lua/ScriptingABI.h
 //
 // The C ABI that LuaJIT's ffi.C calls through. It lives here, not in core: an
 // integer command ID, a void* argument blob and a jump table are how a dynamic

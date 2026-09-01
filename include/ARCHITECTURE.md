@@ -134,7 +134,8 @@ included. The concrete case that motivated the rule:
 | `extras/json/` | `JSON.hpp` (reflection-driven reader + `Reflect::SerializeJSON`), `JSONSchema.hpp` (compile-time schema → C++ type) | simdjson |
 | `extras/toml/` | `TOML.hpp` (reflection-driven documents), `SceneTOML.hpp` (binds a core `Scene::Scene` to the document format) | none |
 | `extras/glTF/` | `GLTFImporter.*` (the glTF/GLB reader), `glTF.*` (the drop-a-file inspector, module `ZHLN.glTF`) | cgltf, stb_image, meshoptimizer, and `extras/json` for the custom node members |
-| `extras/scripting_lua/` | `LuaScriptRuntime.*` (the LuaJIT state), `Scripting.cpp` (the C ABI and command dispatch), `ScriptBinder.hpp` / `ScriptECSBridge.*` (reflection-driven class table), `scripts/` (the Fennel sources) | LuaJIT |
+| `extras/Scripting/` | `ScriptBinder.hpp` / `ScriptBinderRegistry.hpp` / `ScriptECSBridge.*` / `ScriptValueTypes.hpp` (reflection-driven class table and ECS bridge, Lua-independent) | none |
+| `extras/Scripting/Lua/` | `LuaScriptRuntime.*` (the LuaJIT state), `Scripting.cpp` (the C ABI and command dispatch), `ScriptingABI.*` (the ffi shim), `scripts/` (the Fennel sources) | LuaJIT |
 
 Core has no JSON, TOML, model-file or scripting dependency at all, so a
 core-only build (`-DZHLN_BUILD_EXTRAS=OFF`) needs none of those installed and
@@ -199,8 +200,10 @@ links no parser and no Lua runtime.
   is seven virtual functions and `ScriptRunner` is a null-safe forwarder — 122
   lines in total. There is no `lua_State`, no `extern "C"` surface, no integer
   command table and no marshalling code anywhere in `src/`, `include/` or
-  `modules/`. All of it lives in `extras/scripting_lua/`, which implements the
-  interface, owns the LuaJIT link, and compiles the Fennel sources:
+  `modules/`. The Lua-independent bindings live in `extras/Scripting/`; the
+  LuaJIT runtime, the C ABI and the Fennel sources live in
+  `extras/Scripting/Lua/`, which implements the interface, owns the
+  LuaJIT link, and compiles the Fennel sources:
 
   ```cpp
   // the composition root, app/main.cpp — not core

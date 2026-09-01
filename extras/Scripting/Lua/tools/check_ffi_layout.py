@@ -4,7 +4,7 @@
 """
 check_ffi_layout.py -- prove the Lua-visible struct layouts match C++.
 
-extras/scripting_lua/scripts/core/ffi_cdef.fnl re-states, in C syntax, the
+extras/Scripting/Lua/scripts/core/ffi_cdef.fnl re-states, in C syntax, the
 memory layout of core's ECS components. LuaJIT trusts that text absolutely: it
 computes offsets from it and writes through them into live C++ objects. Nothing
 else in the build compares the two, so a component that gains a field, changes
@@ -20,7 +20,7 @@ and Components.hpp as text, then asks the compilers for the truth. That means
 it can audit the hand-written file, and it can audit generated output with no
 change.
 
-    python3 extras/scripting_lua/tools/check_ffi_layout.py \
+    python3 extras/Scripting/Lua/tools/check_ffi_layout.py \
         --c-compiler gcc --cxx-compiler g++
 
 Exit status is 0 only when every compared layout agrees.
@@ -36,8 +36,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-FNL_CDEF = REPO_ROOT / "extras/scripting_lua/scripts/core/ffi_cdef.fnl"
+REPO_ROOT = Path(__file__).resolve().parents[4]
+FNL_CDEF = REPO_ROOT / "extras/Scripting/Lua/scripts/core/ffi_cdef.fnl"
 COMPONENTS_HPP = REPO_ROOT / "include/Zahlen/Components.hpp"
 
 # Structs the cdef spells by hand rather than mirroring a Components member.

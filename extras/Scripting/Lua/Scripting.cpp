@@ -1,8 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "LuaScriptRuntime.hpp"
-#include "ScriptingABI.h"
+#include <Scripting/Lua/ScriptingABI.h>
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Input.hpp"

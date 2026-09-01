@@ -51,17 +51,19 @@ file(GLOB_RECURSE ZHLN_EXTRAS_MODULES
     "${CMAKE_CURRENT_SOURCE_DIR}/*.cppm"
 )
 
-# extras/scripting_lua is its own target: it is the only extra that needs
-# LuaJIT, and folding it into zahlen_extras would make every consumer of the
-# extras archive link a Lua runtime it may not want.
-list(FILTER ZHLN_EXTRAS_MODULES EXCLUDE REGEX ".*/extras/scripting_lua/.*")
+# extras/Scripting is its own pair of targets: the Lua-independent
+# bindings (zahlen_scripting) and the LuaJIT runtime (zahlen_scripting_lua).
+# Neither may be folded into zahlen_extras -- the runtime is the only extra
+# that needs LuaJIT, and consumers of the extras archive must not be forced
+# to link a Lua runtime they may not want.
+list(FILTER ZHLN_EXTRAS_MODULES EXCLUDE REGEX ".*/extras/Scripting/.*")
 
 # 2. Discover all implementation source files (.cpp)
 file(GLOB_RECURSE ZHLN_EXTRAS_SOURCES
     CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
 )
-list(FILTER ZHLN_EXTRAS_SOURCES EXCLUDE REGEX ".*/extras/scripting_lua/.*")
+list(FILTER ZHLN_EXTRAS_SOURCES EXCLUDE REGEX ".*/extras/Scripting/.*")
 
 add_library(zahlen_extras STATIC)
 
@@ -137,4 +139,4 @@ if(COMMAND zahlen_enable_reflection)
     zahlen_enable_reflection(zahlen_extras)
 endif()
 
-add_subdirectory(scripting_lua)
+add_subdirectory(Scripting)

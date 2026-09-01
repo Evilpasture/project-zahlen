@@ -28,8 +28,8 @@
 #include <Zahlen/Entity.hpp>
 #include <cstdint>
 #include <expected>
-#include <scripting_lua/ScriptBinder.hpp>
-#include <scripting_lua/ScriptValueTypes.hpp>
+#include <Scripting/ScriptBinder.hpp>
+#include <Scripting/ScriptValueTypes.hpp>
 #include <string>
 
 namespace {

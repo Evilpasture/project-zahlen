@@ -10,7 +10,7 @@
 #if defined(ZHLN_HAS_SCRIPTING)
 // Core has no scripting of its own; the composition root is what names the
 // optional layers the engine runs with.
-#include <scripting_lua/LuaScriptRuntime.hpp>
+#include <Scripting/Lua/LuaScriptRuntime.hpp>
 #endif
 #include "engine/system/GraphicsSettingsSync.hpp"
 #include <GLFW/glfw3.h>

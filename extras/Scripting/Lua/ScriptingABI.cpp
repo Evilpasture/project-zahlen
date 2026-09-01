@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// extras/scripting_lua/ScriptingABI.cpp
+// extras/Scripting/Lua/ScriptingABI.cpp
 //
 // The shim between LuaJIT's ffi and ScriptBinder.
 //
@@ -16,9 +16,9 @@
 // wants before making another call, which is the usual contract for a C shim
 // and is why nothing here allocates on the caller's behalf.
 
-#include "ScriptingABI.h"
-#include "ScriptBinder.hpp"
-#include "ScriptBinderRegistry.hpp"
+#include <Scripting/Lua/ScriptingABI.h>
+#include <Scripting/ScriptBinder.hpp>
+#include <Scripting/ScriptBinderRegistry.hpp>
 
 #include <Zahlen/Core/Reflection.hpp>
 

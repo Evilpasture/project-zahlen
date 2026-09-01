@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// extras/scripting_lua/tools/FFICTypeMap.hpp
+// extras/Scripting/Lua/tools/FFICTypeMap.hpp
 //
 // The C++ type -> C declaration mapping used to generate ffi_cdef's struct
 // bodies. Two distinct concerns:

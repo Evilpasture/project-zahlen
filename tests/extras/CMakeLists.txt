@@ -324,10 +324,12 @@ zahlen_register_extras_test(${TARGET_NAME}
 )
 
 # --- Scripting Suite (tests/extras/scripting) ---
-# ScriptBinder and ScriptECSBridge moved out of core with the Lua layer, so
-# their suites moved too. This is the only test target that links
-# zahlen_scripting_lua, and it is the reason CPU_ECS no longer covers the
-# bridge: a build without the scripting extra has nothing to bridge.
+# ScriptBinder, ScriptECSBridge and ScriptValueTypes are the generic,
+# Lua-independent half of the scripting layer (extras/Scripting); the suite
+# links the Lua runtime so both halves are built and exercised together. This
+# is the only test target that links zahlen_scripting_lua, and it is the reason
+# CPU_ECS no longer covers the bridge: a build without the scripting extra has
+# nothing to bridge.
 set(TARGET_NAME TestScripting)
 file(GLOB SCRIPTING_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/scripting/*.cpp")
 

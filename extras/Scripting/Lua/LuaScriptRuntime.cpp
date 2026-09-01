@@ -1,8 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "LuaScriptRuntime.hpp"
-#include "ScriptBinderRegistry.hpp"
+#include <Scripting/Lua/LuaScriptRuntime.hpp>
+#include <Scripting/ScriptBinderRegistry.hpp>
 #include <Zahlen/Console.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>

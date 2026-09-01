@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// extras/scripting_lua/ScriptValueTypes.hpp
+// extras/Scripting/ScriptValueTypes.hpp
 //
 // Teaches ScriptBinder the value types the engine's scripting surface actually
 // passes around: Entity, and Jolt's Vec3/DVec3/Quat/Vec4.
@@ -56,7 +56,7 @@
 #include <cstdint>
 #include <expected>
 #include <initializer_list>
-#include <scripting_lua/ScriptBinder.hpp>
+#include <Scripting/ScriptBinder.hpp>
 #include <string_view>
 
 namespace ZHLN {

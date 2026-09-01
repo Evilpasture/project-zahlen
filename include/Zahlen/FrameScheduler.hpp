@@ -36,7 +36,7 @@ enum class FramePhase : uint8_t {
 
 // Phase names come from ZHLN::Reflect::EnumToString(FramePhase) -- the codebase
 // convention (see src/render/RenderCore.cpp:95, include/Zahlen/Error.hpp:39,
-// extras/scripting_lua/ScriptBinder.hpp). A hand-rolled switch here would be the
+// extras/Scripting/ScriptBinder.hpp). A hand-rolled switch here would be the
 // only one in the tree and would silently drift when a phase is added.
 
 /**
