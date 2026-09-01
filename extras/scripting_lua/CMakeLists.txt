@@ -50,6 +50,54 @@ target_include_directories(${TARGET_NAME} PRIVATE ${PROJECT_SOURCE_DIR}/src)
 
 zahlen_enable_reflection(${TARGET_NAME})
 
+# --- FFI cdef generator ----------------------------------------------------
+# The component layouts the scripts see are read out of ZHLN::Components through
+# reflection at build time rather than maintained by hand in ffi_cdef.fnl. This
+# needs real static reflection: without it ForEachNestedType expands to nothing,
+# and the generator exits non-zero rather than writing a plausible file with no
+# components in it.
+add_executable(zahlen_gen_ffi_cdef
+    tools/GenFFICdef.cpp
+)
+set_target_properties(zahlen_gen_ffi_cdef PROPERTIES
+    CXX_STANDARD 26
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+)
+target_link_libraries(zahlen_gen_ffi_cdef PRIVATE zahlen_engine)
+# <scripting_lua/tools/FFICTypeMap.hpp> resolves from the extras root.
+target_include_directories(zahlen_gen_ffi_cdef SYSTEM PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+zahlen_enable_reflection(zahlen_gen_ffi_cdef)
+
+set(GEN_FFI_CDEF_DIR "${CMAKE_BINARY_DIR}/scripts/core")
+set(GEN_FFI_CDEF_OUTPUT "${GEN_FFI_CDEF_DIR}/ffi_cdef_generated.lua")
+file(MAKE_DIRECTORY "${GEN_FFI_CDEF_DIR}")
+
+add_custom_command(
+    OUTPUT ${GEN_FFI_CDEF_OUTPUT}
+    COMMAND zahlen_gen_ffi_cdef ${GEN_FFI_CDEF_OUTPUT}
+    DEPENDS zahlen_gen_ffi_cdef
+    COMMENT "Generating ffi_cdef_generated.lua from ZHLN::Components"
+    VERBATIM
+)
+
+# Audit the generated layouts against Components.hpp. It compiles both sides and
+# compares sizeof and every offset, so a mapping the generator gets wrong fails
+# here rather than corrupting memory from a script at runtime.
+add_custom_target(check_ffi_layout
+    COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_ffi_layout.py"
+            --generated ${GEN_FFI_CDEF_OUTPUT}
+            --cxx-compiler ${CMAKE_CXX_COMPILER}
+            --cxx-include ${PROJECT_SOURCE_DIR}/include
+            --cxx-include ${PROJECT_SOURCE_DIR}/extern/JoltPhysics
+    DEPENDS ${GEN_FFI_CDEF_OUTPUT}
+    COMMENT "Auditing generated FFI layouts against Components.hpp"
+    VERBATIM
+)
+
 # --- Fennel bootstrap ------------------------------------------------------
 # The Lua-side compiler bootstrap lives with the scripts it compiles.
 if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/fennel.lua")
@@ -123,6 +171,8 @@ foreach(STATIC_SRC IN LISTS STATIC_SCRIPT_FILES)
 endforeach()
 
 add_custom_target(sync_static_scripts DEPENDS ${STATIC_SCRIPT_SYMLINKS})
-add_custom_target(zahlen_fennel_compilation ALL DEPENDS ${COMPILED_SCRIPT_LUA_FILES})
+add_custom_target(zahlen_fennel_compilation ALL
+    DEPENDS ${COMPILED_SCRIPT_LUA_FILES} ${GEN_FFI_CDEF_OUTPUT}
+)
 add_dependencies(zahlen_fennel_compilation sync_static_scripts)
 add_dependencies(${TARGET_NAME} zahlen_fennel_compilation)

@@ -51,13 +51,27 @@ PADDING_RE = re.compile(r"^_?pad\w*$")
 
 
 def extract_cdef_text(fnl_path: Path) -> str:
-    """Return the raw C text passed to ffi.cdef, as LuaJIT would read it."""
-    lines = fnl_path.read_text().splitlines()
+    """Return the raw C text handed to ffi.cdef, as LuaJIT would read it.
+
+    Accepts both shapes this pipeline produces: the hand-written Fennel module,
+    which wraps the text in (ffi.cdef "..."), and the generated Lua module,
+    which returns it as a [[ long string ]].
+    """
+    text = fnl_path.read_text()
+
+    generated = re.search(r"return \[\[\n(.*)\n\]\]", text, re.S)
+    if generated is not None:
+        return generated.group(1)
+
+    lines = text.splitlines()
     try:
         start = next(i for i, l in enumerate(lines) if l.strip().startswith('(ffi.cdef "'))
         end = next(i for i, l in enumerate(lines) if l.strip() == '"))')
     except StopIteration as exc:
-        raise SystemExit(f"error: no ffi.cdef block found in {fnl_path}") from exc
+        raise SystemExit(
+            f"error: {fnl_path} is neither an (ffi.cdef \"...\") module nor a "
+            "generated `return [[...]]` module"
+        ) from exc
     body = "\n".join(lines[start + 1 : end])
     # Keep every typedef; drop the extern function prototypes, which are not
     # layout and would need the engine's own types to compile.
