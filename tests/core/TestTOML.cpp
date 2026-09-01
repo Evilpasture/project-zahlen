@@ -14,6 +14,7 @@
 
 #include "TestsFramework.hpp"
 #include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Scene.hpp>
 #include <Zahlen/TOML.hpp>
 #include <array>
@@ -380,6 +381,55 @@ intensity = 250.0
                 return {};
             }
             ZHLN::Test::ExpectEq(ZHLN::Reflect::SerializeTOML(*reparsed), emitted);
+
+            return {};
+        }
+
+        /**
+         * The engine's own fallback scene is one of these documents.
+         *
+         * DefaultPreset used to build that scene by hand out of factory calls,
+         * which meant the scene layer was something the engine offered other
+         * people rather than something it used. It is now a baked-in document
+         * -- and a baked-in document is exactly the kind that never gets
+         * parsed until the day it is needed, which is the day the game already
+         * failed to boot. So it is parsed here, on the CPU, with no device.
+         *
+         * The indices matter as much as the values: DefaultPreset::Update
+         * animates entities[1] and orbits lights[1], reading them back out of
+         * the Instance by position.
+         */
+        std::expected<void, ZHLN::Error> the_fallback_scene_document_parses() {
+            const auto scene = ZHLN::ReflectTOML::TryParse<ZHLN::Scene::Scene>(ZHLN::DefaultPreset::FallbackSceneTOML());
+            if (!ZHLN::Test::ExpectTrue(scene.has_value())) {
+                return {};
+            }
+
+            if (!ZHLN::Test::ExpectEq(scene->entities.size(), size_t {2}) || !ZHLN::Test::ExpectEq(scene->lights.size(), size_t {2})) {
+                return {};
+            }
+
+            ZHLN::Test::ExpectEq(scene->entities[0].name, std::string {"FallbackGround"});
+            ZHLN::Test::ExpectTrue(scene->entities[0].shape == ZHLN::Scene::ShapeKind::Plane);
+            ZHLN::Test::ExpectEq(scene->entities[1].name, std::string {"FallbackEmblem"});
+            ZHLN::Test::ExpectTrue(scene->entities[1].shape == ZHLN::Scene::ShapeKind::Box);
+            ZHLN::Test::ExpectEq(scene->lights[1].name, std::string {"FallbackPointLight"});
+
+            // The sun is oriented, which is why SceneLight grew a rotation:
+            // LightingSystem packs a Sun's direction from the world matrix.
+            ZHLN::Test::ExpectEq(scene->lights[0].type, std::string {"Sun"});
+            ZHLN::Test::ExpectEq(scene->lights[0].rotation.x, 50.0f);
+            // ... and it is not a ranged light, which the punctual defaults
+            // would otherwise make it.
+            ZHLN::Test::ExpectEq(scene->lights[0].range, 0.0f);
+
+            // The reflection toggles are the only environment keys it sets;
+            // everything else has to come back as the engine default, or the
+            // fallback would restyle the frame on its way past.
+            ZHLN::Test::ExpectTrue(scene->environment.enableRTR);
+            ZHLN::Test::ExpectTrue(!scene->environment.enableSSR);
+            ZHLN::Test::ExpectEq(scene->environment.ambientExposure, ZHLN::Scene::SceneEnvironment {}.ambientExposure);
+            ZHLN::Test::ExpectEq(scene->environment.giIntensity, ZHLN::Scene::SceneEnvironment {}.giIntensity);
 
             return {};
         }

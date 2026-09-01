@@ -103,6 +103,8 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
         registry.Patch<Components::PostProcessSettingsComponent>(settings, [&](auto& pp) {
             pp.ambientExposure = environment.ambientExposure;
             pp.giIntensity     = environment.giIntensity;
+            pp.enableSSR       = environment.enableSSR ? 1 : 0;
+            pp.enableRTR       = environment.enableRTR ? 1 : 0;
             pp.skyZenith       = JPH::Vec4(JPH::Vec3 {environment.skyZenith}, 1.0f);
             pp.skyHorizon      = JPH::Vec4(JPH::Vec3 {environment.skyHorizon}, 1.0f);
             pp.skyGround       = JPH::Vec4(JPH::Vec3 {environment.skyGround}, 1.0f);
@@ -171,18 +173,25 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
         }
 
         const JPH::Vec3  position = JPH::Vec3 {light.position};
-        const JPH::Mat44 world    = Math::CreateTransform(position, JPH::Quat::sIdentity(), JPH::Vec3::sReplicate(1.0f));
+        const JPH::Quat  rotation = Math::EulerDegreesToQuat(JPH::Vec3 {light.rotation});
+        const JPH::Mat44 world    = Math::CreateTransform(position, rotation, JPH::Vec3::sReplicate(1.0f));
+
+        // A direction is a direction: a document writing [0.4, 1.0, 0.3] means
+        // the bearing, and an unnormalized vector reaches the shader as an
+        // intensity multiplier nobody asked for.
+        const JPH::Vec3 rawDirection = JPH::Vec3 {light.direction};
+        const JPH::Vec3 direction    = rawDirection.LengthSq() > 1e-8f ? rawDirection.Normalized() : rawDirection;
 
         const Entity created = registry.Create(
             Components::NameComponent {.name = String64(light.name)},
-            Components::TransformComponent {.position = position, .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)},
+            Components::TransformComponent {.position = position, .rotation = rotation, .scale = JPH::Vec3::sReplicate(1.0f)},
             Components::WorldTransformComponent {.world = world, .previous = world},
             Components::LightComponent {
                 .type        = *type,
                 .color       = JPH::Vec3 {light.color},
                 .intensity   = light.intensity,
                 .radius      = light.radius,
-                .direction   = JPH::Vec3 {light.direction},
+                .direction   = direction,
                 .range       = light.range,
                 .shadowLayer = light.shadowLayer
             }

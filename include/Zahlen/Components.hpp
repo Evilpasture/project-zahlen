@@ -306,8 +306,11 @@ struct Components {
         float     vignettePower     = 1.50f;
         /// How much of the emissive channel is fed into the bloom cascade --
         /// the Babylon.js GlowLayer knob. 0 turns the halo off and leaves
-        /// emissive surfaces shading normally; 1 is as bright as the emitter.
-        float     glowIntensity     = 0.25f;
+        /// emissive surfaces shading normally; 1 feeds the blur as much light
+        /// as the emitter has, which reads as a slab rather than a glow. The
+        /// default is tuned by eye against Babylon: enough halo to see the
+        /// emission spill past the silhouette, not enough to wash it out.
+        float     glowIntensity     = 0.15f;
         int       enableSSR         = 1;
         int       enableRTR         = 0;
         int       fullBright        = 0;

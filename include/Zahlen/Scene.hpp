@@ -118,8 +118,15 @@ struct SceneEntity {
 struct SceneLight {
     std::string name;
     /// One of the LightType enumerators: Directional, Point, Spot, Area, Sun.
-    std::string type        = "Point";
-    JPH::Float3 position    = {0.0f, 3.0f, 0.0f};
+    std::string type     = "Point";
+    JPH::Float3 position = {0.0f, 3.0f, 0.0f};
+    /// Euler degrees, like Transform::rotation. It matters for the oriented
+    /// types: LightingSystem packs a Directional/Spot/Sun direction from the
+    /// world matrix, not from `direction` below, which the sun's cascade path
+    /// reads instead.
+    JPH::Float3 rotation = {0.0f, 0.0f, 0.0f};
+    /// Normalized on instantiation, so a document can write [0.4, 1.0, 0.3]
+    /// and mean the direction rather than the length.
     JPH::Float3 direction   = {0.0f, -1.0f, 0.0f};
     JPH::Float3 color       = {1.0f, 1.0f, 1.0f};
     float       intensity   = 100.0f;
@@ -138,12 +145,23 @@ struct SceneCamera {
 /// The knobs a scene is allowed to set on the global settings entity. Kept
 /// deliberately small: this is the part of the renderer a scene author owns,
 /// not a mirror of PostProcessSettingsComponent.
+///
+/// Every default here is PostProcessSettingsComponent's default. That is a
+/// requirement, not a coincidence: Instantiate writes all of these
+/// unconditionally, so a field whose default disagreed with the engine's would
+/// silently restyle any scene that left the key out -- the opposite of "a
+/// document says what differs".
 struct SceneEnvironment {
-    float       ambientExposure = 1.0f;
-    float       giIntensity     = 1.0f;
-    JPH::Float3 skyZenith       = {0.05f, 0.10f, 0.20f};
-    JPH::Float3 skyHorizon      = {0.35f, 0.45f, 0.60f};
-    JPH::Float3 skyGround       = {0.10f, 0.10f, 0.10f};
+    float       ambientExposure = 25.0f;
+    float       giIntensity     = 1.2f;
+    JPH::Float3 skyZenith       = {0.003f, 0.008f, 0.020f};
+    JPH::Float3 skyHorizon      = {0.015f, 0.035f, 0.080f};
+    JPH::Float3 skyGround       = {0.001f, 0.001f, 0.003f};
+
+    /// Screen-space and ray-traced reflections. Scene-owned because whether a
+    /// scene is worth tracing reflections for is a property of the scene.
+    bool enableSSR = true;
+    bool enableRTR = false;
 };
 
 /// A whole scene. This is the root table of the document.

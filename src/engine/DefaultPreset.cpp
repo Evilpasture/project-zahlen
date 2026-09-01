@@ -12,6 +12,7 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Render.hpp>
+#include <Zahlen/Scene.hpp>
 #include <Zahlen/Scripting.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
@@ -21,6 +22,91 @@
 #include <format>
 
 namespace ZHLN {
+
+namespace {
+
+// The fallback scene, as a document rather than a sequence of factory calls.
+//
+// This is the engine's own scene, so it goes through the same
+// Scene::Instantiate that any other scene does: if the scene layer cannot
+// express what the fallback needs, that is a gap in the schema and not a
+// reason for this file to reach for CreativeWorksFactory directly. Writing it
+// found two -- a light had no orientation, and the environment defaults did
+// not match the component's -- and both are fixed in Zahlen/Scene.hpp instead
+// of worked around here.
+//
+// Nothing is loaded from disk: the fallback runs precisely when the game's
+// assets did not, so the document is baked into the binary.
+constexpr std::string_view kFallbackSceneTOML = R"(name = "Zahlen Fallback"
+
+[camera]
+position = [0.0, 3.8, 7.5]
+yaw      = -90.0
+pitch    = -14.0
+fov      = 52.0
+
+[environment]
+# Reflections on the emblem are the point of the scene; everything else is the
+# engine default and is therefore left unsaid.
+enableSSR = false
+enableRTR = true
+
+[[entities]]
+name   = "FallbackGround"
+shape  = "Plane"
+extent = 35.0
+
+  [entities.material]
+  baseColor = [0.12, 0.14, 0.18, 1.0]
+  roughness = 0.05
+  metallic  = 0.30
+
+[[entities]]
+name        = "FallbackEmblem"
+shape       = "Box"
+halfExtents = [1.2, 1.2, 1.2]
+
+  [entities.transform]
+  position = [0.0, 2.0, 0.0]
+
+  [entities.material]
+  baseColor = [0.1, 0.6, 0.95, 1.0]
+  roughness = 0.15
+  metallic  = 0.85
+
+[[lights]]
+name      = "FallbackSun"
+type      = "Sun"
+position  = [12.0, 25.0, 12.0]
+rotation  = [50.0, -35.0, 0.0]
+direction = [0.4, 1.0, 0.3]
+color     = [1.0, 0.96, 0.88]
+intensity = 180.0
+# A sun is not a ranged light; the punctual defaults would put it in the
+# cluster grid.
+radius = 0.0
+range  = 0.0
+
+[[lights]]
+name      = "FallbackPointLight"
+type      = "Point"
+position  = [0.0, 2.5, 0.0]
+color     = [0.2, 0.85, 1.0]
+intensity = 220.0
+radius    = 0.6
+range     = 18.0
+)";
+
+// Positions in the document above. Update() animates two of these, and reading
+// them back by index only works while the document says what it says.
+constexpr size_t kEmblemIndex     = 1;
+constexpr size_t kPointLightIndex = 1;
+
+} // namespace
+
+auto DefaultPreset::FallbackSceneTOML() noexcept -> std::string_view {
+    return kFallbackSceneTOML;
+}
 
 auto DefaultPreset::IsActive() noexcept -> bool {
     return s_IsActive;
@@ -61,15 +147,14 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
     auto& reg = engine.GetRegistry();
 
     // ========================================================================
-    // 0. POST-PROCESSING CONFIGURATION
+    // 0. THE SETTINGS ENTITY
     // ========================================================================
-    auto   settingsEntities = reg.GetEntitiesWith<Components::GlobalSettingsTagComponent>();
-    Entity settingsEnt      = settingsEntities.empty() ? reg.Create(Components::GlobalSettingsTagComponent {}) : settingsEntities[0];
-
-    reg.Patch<Components::PostProcessSettingsComponent>(settingsEnt, [&](auto& pp) -> auto {
-        pp.enableRTR = 1;
-        pp.enableSSR = 0;
-    });
+    // Scene::Instantiate writes the environment onto whatever carries the
+    // global settings tag, so the entity has to exist before it runs. In the
+    // default scene layout it already does.
+    if (reg.GetEntitiesWith<Components::GlobalSettingsTagComponent>().empty()) {
+        reg.Create(Components::GlobalSettingsTagComponent {});
+    }
 
     TextureHandle fontHandle = TextureHandle::Invalid;
     if (auto* settings = reg.GetSingleton<Components::UISettingsComponent>()) {
@@ -84,48 +169,23 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
     // ========================================================================
     // 1. 3D SCENE SETUP
     // ========================================================================
-    JPH::Vec3  sunPos   = {12.0f, 25.0f, 12.0f};
-    JPH::Quat  sunRot   = Math::EulerDegreesToQuat({50.0f, -35.0f, 0.0f});
-    JPH::Mat44 sunWorld = Math::CreateTransform(sunPos, sunRot);
-
-    reg.Create(
-        Components::NameComponent {.name = String64("FallbackSun")},
-        Components::TransformComponent {.position = sunPos, .rotation = sunRot, .scale = {1.0f, 1.0f, 1.0f}},
-        Components::WorldTransformComponent {.world = sunWorld, .previous = sunWorld},
-        Components::LightComponent {
-            .type = LightType::Sun, .color = JPH::Vec3(1.0f, 0.96f, 0.88f), .intensity = 180.0f, .direction = JPH::Vec3(0.4f, 1.0f, 0.3f).Normalized()
+    // Camera, environment, geometry and lights all come out of the document.
+    const auto instance = Scene::InstantiateFromTOML(engine, kFallbackSceneTOML);
+    if (!instance) {
+        // A baked-in document that does not parse is a programming error, and
+        // tests/core/TestTOML.cpp parses this one. Should it ever happen in
+        // the field, the popup explaining why the game did not boot is the
+        // half of this scene that matters, so it is still built: the handles
+        // below stay null and Update()'s animation patches nothing.
+        Log("[DefaultPreset] fallback scene document rejected: {}", instance.error().Message());
+    } else {
+        if (instance->entities.size() > kEmblemIndex) {
+            s_CubeEntity = instance->entities[kEmblemIndex];
         }
-    );
-
-    JPH::Vec3  lightPos   = {0.0f, 2.5f, 0.0f};
-    JPH::Mat44 lightWorld = Math::CreateTransform(lightPos, JPH::Quat::sIdentity());
-
-    s_PointLight = reg.Create(
-        Components::NameComponent {.name = String64("FallbackPointLight")},
-        Components::TransformComponent {.position = lightPos, .rotation = JPH::Quat::sIdentity(), .scale = {1.0f, 1.0f, 1.0f}},
-        Components::WorldTransformComponent {.world = lightWorld, .previous = lightWorld},
-        Components::LightComponent {
-            .type = LightType::Point, .color = JPH::Vec3(0.2f, 0.85f, 1.0f), .intensity = 220.0f, .radius = 0.6f, .range = 18.0f, .shadowLayer = -1
+        if (instance->lights.size() > kPointLightIndex) {
+            s_PointLight = instance->lights[kPointLightIndex];
         }
-    );
-
-    Entity planeEnt = CreativeWorksFactory::CreatePlane(
-        engine, 35.0f, {0.12f, 0.14f, 0.18f, 1.0f}, CreativeWorksFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .roughness = 0.05f, .metallic = 0.30f}
-    );
-    reg.Assign<Components::NameComponent>(planeEnt, "FallbackGround");
-
-    Entity boxEnt = CreativeWorksFactory::CreateBox(
-        engine, JPH::Vec3(1.2f, 1.2f, 1.2f),
-        CreativeWorksFactory::SpawnParams {.position = {0.0, 2.0, 0.0}, .roughness = 0.15f, .metallic = 0.85f, .color = {0.1f, 0.6f, 0.95f, 1.0f}}
-    );
-    reg.Assign<Components::NameComponent>(boxEnt, "FallbackEmblem");
-    s_CubeEntity = boxEnt;
-
-    auto& cam    = engine.GetCamera();
-    cam.position = {0.0f, 3.8f, 7.5f};
-    cam.yaw      = -90.0f;
-    cam.pitch    = -14.0f;
-    cam.fov      = 52.0f;
+    }
 }
 
 void DefaultPreset::ReleaseFor(const Engine* engine) noexcept {

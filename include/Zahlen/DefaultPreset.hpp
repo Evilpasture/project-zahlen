@@ -17,6 +17,12 @@ enum class FallbackReason : uint8_t { None = 0, MissingBootScript, MissingNative
 class ZHLN_API DefaultPreset {
   public:
     static void               BuildFallbackScene(Engine& engine, FallbackReason reason, std::string_view detailMessage = "");
+
+    /// The fallback scene as a TOML document -- the same text BuildFallbackScene
+    /// instantiates. Exposed so it can be parsed and checked without a device:
+    /// it is baked into the binary, so a typo in it would otherwise only show
+    /// up on the day everything else has already gone wrong.
+    [[nodiscard]] static auto FallbackSceneTOML() noexcept -> std::string_view;
     static void               Update(Engine& engine, float dt);
     [[nodiscard]] static bool IsActive() noexcept;
     static void               ClearFallback() noexcept;

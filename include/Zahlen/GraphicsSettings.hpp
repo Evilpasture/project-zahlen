@@ -86,7 +86,7 @@ struct GISettings {
     float vignettePower     = 1.5f;
     /// Emissive -> bloom feed (see PostProcessSettingsComponent::glowIntensity).
     /// Not a preset signature field: a tier change leaves it alone.
-    float glowIntensity     = 0.25f;
+    float glowIntensity     = 0.15f;
     int   enableSSR         = 1;
     int   enableRTR         = 0;
 
