@@ -61,9 +61,16 @@ inline constexpr bool ReflectionAvailable =
 
 namespace ZHLN::Reflect {
 
+// All reflection handles are NTTPs of type std::meta::info, spelled
+// explicitly rather than `auto`: GCC's module merger compares template
+// declarations streamed out of a module interface against the importer's
+// textually-included copy of this header (Wire.cppm's GMF vs Network.cppm's
+// GMF), and placeholder `auto` parameter types stream inconsistently across
+// module contexts -> "conflicting imported declaration" (cf. GCC PR 118049 /
+// 120644). An explicitly-typed std::meta::info parameter merges cleanly.
 namespace detail {
 
-template <auto... vals>
+template <std::meta::info... vals>
 struct ReplicatorType {
     template <typename F>
     constexpr void operator>>([[maybe_unused]] F body) const {
@@ -71,7 +78,7 @@ struct ReplicatorType {
     }
 };
 
-template <auto... vals>
+template <std::meta::info... vals>
 ReplicatorType<vals...> Replicator {};
 
 template <typename T>
@@ -190,7 +197,7 @@ struct MethodCollector {
     static constexpr auto method_handles = get_methods();
 };
 
-template <auto EntityInfo>
+template <std::meta::info EntityInfo>
 consteval auto AnnotationsOf() {
     return std::define_static_array(std::meta::annotations_of(EntityInfo));
 }
@@ -743,7 +750,7 @@ consteval auto AnnotationHasType(std::meta::info annotation) -> bool {
     return actualType == std::meta::dealias(^^Tag) || actualType == std::meta::dealias(^^std::add_const_t<Tag>);
 }
 
-template <typename Tag, auto EntityInfo>
+template <typename Tag, std::meta::info EntityInfo>
 consteval auto HasAnnotation() -> bool {
     for (auto a: std::meta::annotations_of(EntityInfo)) {
         if (AnnotationHasType<Tag>(a)) {
@@ -753,7 +760,7 @@ consteval auto HasAnnotation() -> bool {
     return false;
 }
 
-template <auto ScopeInfo, typename Tag, typename F>
+template <std::meta::info ScopeInfo, typename Tag, typename F>
 constexpr void ForEachAnnotatedTypeInScope(F&& f) {
     [:Expand(std::define_static_array(std::meta::members_of(ScopeInfo, std::meta::access_context::current()))):] >> [&]<auto m>() -> auto {
         if constexpr (std::meta::is_type(m)) {
@@ -772,7 +779,7 @@ constexpr void ForEachAnnotatedType(F&& f) {
     ForEachAnnotatedTypeInScope<std::meta::parent_of(^^Tag), Tag>(std::forward<F>(f));
 }
 
-template <typename Tag, auto EntityInfo>
+template <typename Tag, std::meta::info EntityInfo>
 consteval auto GetAnnotation() -> std::optional<Tag> {
     for (auto a: std::meta::annotations_of(EntityInfo)) {
         if (AnnotationHasType<Tag>(a)) {
@@ -814,7 +821,7 @@ struct EnumMessageEntry {
     std::string_view          message;
 };
 
-template <auto a>
+template <std::meta::info a>
 consteval auto ExtractDescriptionText() -> std::string_view {
     constexpr auto type = std::meta::remove_const(std::meta::dealias(std::meta::type_of(a)));
     if constexpr (std::meta::has_template_arguments(type)) {
@@ -842,13 +849,13 @@ consteval auto ExtractDescriptionText() -> std::string_view {
 // Indexing sidesteps it: the index is a plain integer NTTP (always a constant
 // expression) and anns[I] is then usable, so the type can be spliced. This
 // form is equally valid on Clang's P2996 branch.
-template <auto EntityInfo, std::size_t Index>
+template <std::meta::info EntityInfo, std::size_t Index>
 consteval auto ExtractDescriptionTextAt() -> std::string_view {
     constexpr auto annotations = detail::AnnotationsOf<EntityInfo>();
     return ExtractDescriptionText<annotations[Index]>();
 }
 
-template <auto EntityInfo>
+template <std::meta::info EntityInfo>
 consteval auto GetDescriptionText() -> std::string_view {
     constexpr std::size_t count = detail::AnnotationsOf<EntityInfo>().size();
     std::string_view      result {};
@@ -866,7 +873,7 @@ consteval auto GetDescriptionText() -> std::string_view {
 
 /// Spelling of a reflected data member (a handle as handed to
 /// ForEachDataMember); empty when the compiler reports no identifier.
-template <auto MemberInfo>
+template <std::meta::info MemberInfo>
 consteval auto MemberName() -> std::string_view {
     if constexpr (std::meta::has_identifier(MemberInfo)) {
         return std::meta::identifier_of(MemberInfo);
@@ -875,12 +882,12 @@ consteval auto MemberName() -> std::string_view {
 }
 
 /// Declared type of a reflected data member.
-template <auto MemberInfo>
+template <std::meta::info MemberInfo>
 using MemberType = typename[:std::meta::type_of(MemberInfo):];
 
 /// Reference to a reflected data member of an object. MemberInfo must be one
 /// of the handles ForEachDataMember passes to its callback.
-template <auto MemberInfo, typename T>
+template <std::meta::info MemberInfo, typename T>
 constexpr decltype(auto) MemberValue(T&& object) {
     return (std::forward<T>(object).[:MemberInfo:]);
 }
@@ -896,7 +903,7 @@ constexpr decltype(auto) MemberValue(T&& object) {
 /// template argument (ExtractDescriptionTextAt) or be spliced out of the
 /// define_static_array (ExtractDescriptionText).
 namespace detail {
-template <auto Annotation, typename F>
+template <std::meta::info Annotation, typename F>
 consteval void InvokeAnnotationType(F&& f) {
     constexpr auto type = std::meta::remove_const(std::meta::dealias(std::meta::type_of(Annotation)));
     using AnnotationType = typename[:type:];
@@ -904,7 +911,7 @@ consteval void InvokeAnnotationType(F&& f) {
 }
 } // namespace detail
 
-template <auto EntityInfo, typename F>
+template <std::meta::info EntityInfo, typename F>
 consteval void ForEachAnnotationType(F&& f) {
     constexpr auto annotations = detail::AnnotationsOf<EntityInfo>();
     [&]<std::size_t... Is>(std::index_sequence<Is...>) {
