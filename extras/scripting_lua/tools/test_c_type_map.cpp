@@ -169,6 +169,21 @@ int main() {
     static_assert(!ZHLN::FFI::MapCType<float>(noOverride).isOpaque());
     static_assert(ZHLN::FFI::MapCType<Components::UIChildCacheComponent>(noOverride).isOpaque());
 
+    // Override contract: a non-null return replaces the emitted C base name
+    // without touching layout (size/align/count stay derived from the type).
+    // This works with or without reflection: the predicate decides, the
+    // built-in mapping only fills in when it declines.
+    constexpr auto overrideEntity = [](std::string_view) -> const char* { return "EntityHandle"; };
+    {
+        constexpr auto decl = ZHLN::FFI::MapCType<Entity>(overrideEntity);
+        static_assert(decl.base != nullptr);
+        constexpr std::string_view base = decl.base;
+        static_assert(base == "EntityHandle");
+        static_assert(decl.size == sizeof(Entity));
+        static_assert(decl.align == alignof(Entity));
+        static_assert(decl.count == 1);
+    }
+
     printf("\n%s (%d failure%s)\n", failures == 0 ? "PASS" : "FAIL",
            failures, failures == 1 ? "" : "s");
     return failures == 0 ? 0 : 1;

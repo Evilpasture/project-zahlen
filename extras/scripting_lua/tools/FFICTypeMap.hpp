@@ -13,14 +13,15 @@
 //     reflection, so the mapper still compiles and can be tested on a compiler
 //     with no static-reflection support.
 //
-//  2. Names are obtained through static reflection when the compiler has it:
-//     the type's own spelling (std::meta::identifier_of / display_string_of)
-//     is handed to a caller-supplied compile-time predicate -- a lambda --
-//     which returns the C name to emit or nullptr to keep the built-in
-//     mapping. That is what lets a previously opaque field (std::bitset,
-//     HashMap, an intrusive Ref, ...) be named by the generator without
-//     editing this file, and what lets any emitted spelling be renamed, e.g.
-//     "unsigned int" -> "uint32_t" or "Entity" -> "ZHLN_Entity".
+//  2. Names are obtained through the project's reflection header
+//     (Zahlen/Core/Reflection.hpp, ZHLN::Reflect::TypeName) when the
+//     compiler has static reflection: the type's own spelling is handed to a
+//     caller-supplied compile-time predicate -- a lambda -- which returns the
+//     C name to emit or nullptr to keep the built-in mapping. That is what
+//     lets a previously opaque field (std::bitset, HashMap, an intrusive Ref,
+//     ...) be named by the generator without editing this file, and what lets
+//     any emitted spelling be renamed, e.g. "unsigned int" -> "uint32_t" or
+//     "Entity" -> "ZHLN_Entity".
 //
 // The rule this file exists to enforce: never guess a layout. A name never
 // decides size or alignment -- sizeof/alignof always do -- and the caller
@@ -30,6 +31,7 @@
 #pragma once
 
 #include <Jolt/Jolt.h>
+#include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Entity.hpp>
 
@@ -39,20 +41,12 @@
 #include <string_view>
 #include <type_traits>
 
-// Reflection is optional. Nested form of the feature check: a compiler that
-// has neither __cpp_impl_reflection nor __has_feature (e.g. plain GCC before
-// the reflection branch) must still preprocess this file.
-#if defined(__cpp_impl_reflection)
-#    define ZHLN_FFI_HAS_REFLECTION 1
-#elif defined(__has_feature)
-#    if __has_feature(reflection)
-#        define ZHLN_FFI_HAS_REFLECTION 1
-#    endif
-#endif
-
-#if defined(ZHLN_FFI_HAS_REFLECTION)
-#include <meta>
-#endif
+// Reflection is optional. All name lookups go through Zahlen/Core/Reflection.hpp:
+// with a reflection-capable compiler ZHLN::Reflect::TypeName returns the type's
+// own spelling (std::meta::identifier_of / display_string_of via TypeReflector),
+// and without one it returns an empty spelling, which makes the predicate's
+// "no opinion" path fall back to the built-in vocabulary below. No <meta> is
+// touched here.
 
 namespace ZHLN::FFI {
 
@@ -98,29 +92,20 @@ namespace detail {
 
     /// The source spelling of T, obtained through static reflection.
     ///
-    /// For an entity with an identifier (a class, enum or typedef) that is its
-    /// bare identifier -- "uint32_t", "Vec3", "Entity". For builtin types and
-    /// template specializations it is the fully rendered display spelling --
-    /// "float", "unsigned int", "ZHLN::FixedString<64>",
-    /// "std::array<float, 4>". Without static reflection the result is empty
-    /// and the mapper falls back to the type-based vocabulary below.
-#if defined(ZHLN_FFI_HAS_REFLECTION)
+    /// Delegates to ZHLN::Reflect::TypeName (Zahlen/Core/Reflection.hpp), which
+    /// dealises typedefs first: a class or enum with an identifier is its bare
+    /// identifier -- "Vec3", "Entity", "TextAlignment" -- a builtin type is its
+    /// canonical spelling -- "float", "unsigned int" -- and a template
+    /// specialization, having no identifier, is reported as
+    /// "TemplateSpecialization" (callers that need the rendered spelling can
+    /// match that and use std::meta::display_string_of themselves). Without
+    /// static reflection the result is empty and the mapper falls back to the
+    /// type-based vocabulary below, so this header still compiles and is
+    /// testable on a compiler with no reflection support.
     template <typename T>
     consteval auto ReflectedName() -> std::string_view {
-        using U             = std::remove_cvref_t<T>;
-        constexpr auto info = ^^U;
-        if constexpr (std::meta::has_identifier(info)) {
-            return std::meta::identifier_of(info);
-        } else {
-            return std::meta::display_string_of(info);
-        }
+        return ZHLN::Reflect::TypeName<std::remove_cvref_t<T>>();
     }
-#else
-    template <typename T>
-    consteval auto ReflectedName() -> std::string_view {
-        return {};
-    }
-#endif
 
     /// The default vocabulary: spellings whose C name is the C++ name itself.
     /// This is what the no-argument MapCType<T>() uses. Return nullptr to
@@ -271,5 +256,3 @@ consteval auto FixedStringStructName() -> const char* {
 }
 
 } // namespace ZHLN::FFI
-
-#undef ZHLN_FFI_HAS_REFLECTION
