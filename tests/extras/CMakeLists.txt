@@ -5,6 +5,28 @@ if(NOT ZHLN_BUILD_EXTRAS OR NOT TARGET zahlen_extras)
     return()
 endif()
 
+# Extras suites are registered ad hoc (one add_test per target), unlike the CPU
+# groups in tests/CMakeLists.txt, which is why they never received
+# ZHLN_TEST_ENVIRONMENT. In sanitizer builds that meant LSAN_OPTIONS (and thus
+# lsan.supp) was never set for them -- the JACK-related leak in TestPerformance
+# is the visible symptom. Route every extras test through this helper so it
+# carries the same ASan/LSan/UBSan options as the CPU groups.
+function(zahlen_register_extras_test TARGET_NAME)
+    add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
+    if(USE_SANITIZERS)
+        set_tests_properties(${TARGET_NAME} PROPERTIES
+            LABELS "CPU;Fast;Extras"
+            ENVIRONMENT "${ZHLN_TEST_ENVIRONMENT}"
+            ${ARGN}
+        )
+    else()
+        set_tests_properties(${TARGET_NAME} PROPERTIES
+            LABELS "CPU;Fast;Extras"
+            ${ARGN}
+        )
+    endif()
+endfunction()
+
 # No extern/cgltf_impl.c here: the importer moved into extras, so zahlen_extras
 # compiles the one copy of it and this target gets the cgltf symbols (and the
 # header path) through that link. Compiling it again would be a duplicate
@@ -49,8 +71,7 @@ if(USE_SANITIZERS)
     target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
 endif()
 
-add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
-set_tests_properties(${TARGET_NAME} PROPERTIES LABELS "CPU;Fast;Extras")
+zahlen_register_extras_test(${TARGET_NAME})
 
 # --- ALife Test Suite ---
 set(TARGET_NAME TestALife)
@@ -87,8 +108,7 @@ if(USE_SANITIZERS)
     target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
 endif()
 
-add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
-set_tests_properties(${TARGET_NAME} PROPERTIES LABELS "CPU;Fast;Extras")
+zahlen_register_extras_test(${TARGET_NAME})
 
 # --- JSON Test Suite ---
 # extras/json: the reflection-driven reader (simdjson behind an opaque handle)
@@ -129,8 +149,7 @@ if(USE_SANITIZERS)
     target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
 endif()
 
-add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
-set_tests_properties(${TARGET_NAME} PROPERTIES LABELS "CPU;Fast;Extras")
+zahlen_register_extras_test(${TARGET_NAME})
 
 # --- TOML Test Suite ---
 # extras/toml: the reflection-driven document layer, plus SceneTOML.hpp, which
@@ -169,8 +188,7 @@ if(USE_SANITIZERS)
     target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
 endif()
 
-add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
-set_tests_properties(${TARGET_NAME} PROPERTIES LABELS "CPU;Fast;Extras")
+zahlen_register_extras_test(${TARGET_NAME})
 
 # --- Network Wire / Serialization Test Suite ---
 # Exercises ZHLN.Wire (dependency-free reflection serialization) and the
@@ -211,8 +229,7 @@ if(USE_SANITIZERS)
     target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
 endif()
 
-add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
-set_tests_properties(${TARGET_NAME} PROPERTIES LABELS "CPU;Fast;Extras")
+zahlen_register_extras_test(${TARGET_NAME})
 
 # --- Performance Baseline Group (tests/extras/profile) ---
 # Moved out of tests/perf when the baseline store was recognized for what it
@@ -256,8 +273,7 @@ if(USE_SANITIZERS)
     target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
 endif()
 
-add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
-set_tests_properties(${TARGET_NAME} PROPERTIES LABELS "CPU;Fast;Extras")
+zahlen_register_extras_test(${TARGET_NAME})
 
 # --- Cooker glTF Container Suite ---
 # The one cooker check that needs a JSON reader: it runs `zcook glb`, then reads
@@ -303,9 +319,7 @@ endif()
 # tests/helpers/CookerFixture.hpp). This add_test lives two directories below
 # that root, so the working directory is pinned to the same one CPU_Assets
 # inherits by default; without it the lookup resolves to tests/zcook.
-add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
-set_tests_properties(${TARGET_NAME} PROPERTIES
-    LABELS "CPU;Fast;Extras"
+zahlen_register_extras_test(${TARGET_NAME}
     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/.."
 )
 
@@ -350,5 +364,4 @@ if(USE_SANITIZERS)
     target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
 endif()
 
-add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
-set_tests_properties(${TARGET_NAME} PROPERTIES LABELS "CPU;Fast;Extras")
+zahlen_register_extras_test(${TARGET_NAME})

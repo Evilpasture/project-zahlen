@@ -5,6 +5,23 @@
 
 #include "Zahlen/ecs/ECS.hpp"
 #include <filesystem>
+
+// miniaudio runtime-links the JACK client library: ma_context_init__jack
+// dlopen()s libjack.so even when it is only probing backends and no JACK
+// server is reachable. Loading the library runs its ELF initializers, which
+// allocate a couple of small objects (2 x 48 bytes per dlopen) that are never
+// freed, and miniaudio keeps the handle around for the rest of the context's
+// lifetime. Any host that merely has libjack installed -- e.g. the CI
+// container, where it arrives as a transitive dependency -- therefore makes
+// LeakSanitizer report "direct leak of 48 bytes" from ma_dlopen inside
+// ma_context_init__jack, while hosts without libjack never load it and see
+// nothing. The backend is unusable in the sanitizer-test environment anyway
+// (no sound hardware, no JACK server), so drop it from sanitizer builds.
+// Non-sanitized builds keep the JACK backend untouched.
+#if defined(ZHLN_SANITIZER_BUILD)
+#define MA_NO_JACK
+#endif
+
 #define MINIAUDIO_IMPLEMENTATION
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Core/ControlFlow.hpp>
