@@ -38,6 +38,7 @@
 #include <cstdint>
 #include <expected>
 #include <memory>
+#include <optional>
 #include <string>
 
 enum class EmissiveShadingError : uint8_t {
@@ -48,8 +49,8 @@ enum class EmissiveShadingError : uint8_t {
     EmissiveHueLost[[= ZHLN::Description<"The unlit emissive surface is bright but not the colour it emits.">{}]],
     ControlNotDark[[= ZHLN::Description<"The non-emissive control box is lit, so the scene is not the unlit scene the test needs.">{}]],
     BackgroundNotDark[[= ZHLN::Description<"Emission leaked into pixels the emitter does not cover.">{}]],
-    GlowHaloMissing
-    [[= ZHLN::Description<"An emitter under the bloom threshold cast no glow past its silhouette -- the glow layer is not feeding the bloom chain.">{}]],
+    GlowHaloMissing[[= ZHLN::Description<
+        "The emissive glow past the silhouette is wrong: either absent (the glow layer is not reaching the bloom chain) or bright enough to read as a slab.">{}]],
     DeviceLost[[= ZHLN::Description<"The Vulkan device was lost and the engine could not recover.">{}]],
 };
 
@@ -68,7 +69,11 @@ constexpr NormalizedRect kCornerWindow {.x0 = 0.02, .y0 = 0.02, .x1 = 0.18, .y1 
 // unlike the horizontal extent that does not depend on the aspect ratio, so
 // this window stays off the geometry whatever resolution the fixture picks.
 // Anything measured here arrived by blur, not by rasterisation.
-constexpr NormalizedRect kHaloWindow {.x0 = 0.44, .y0 = 0.22, .x1 = 0.56, .y1 = 0.32};
+//
+// It sits close to the silhouette on purpose. The glow is meant to be soft, so
+// the far field is a couple of LDR units at most -- measuring there would be
+// measuring quantisation, and would quietly demand a blinding halo to pass.
+constexpr NormalizedRect kHaloWindow {.x0 = 0.44, .y0 = 0.25, .x1 = 0.56, .y1 = 0.33};
 
 // A strong green emitter: green is the one channel neither the sky gradient
 // (blue-dominant) nor the default clear colour leans on, so a green-dominant
@@ -92,14 +97,22 @@ constexpr std::array<float, 4> kNeonGreen {0.0f, 0.8f * ZHLN::kGLTFEmissiveDispl
 /// Builds the unlit scene: one box at the origin, no lights of any kind, and
 /// ambient/GI dialled out so nothing but emission can brighten a surface.
 ///
+/// `glowIntensity` overrides the emissive -> bloom feed. std::nullopt leaves
+/// whatever the engine ships as its default, so the "on" case measures the
+/// halo a scene gets without asking for anything; 0 renders the same scene
+/// with the glow layer switched off.
+///
 /// Returns false when material creation fails, which is a setup failure rather
 /// than a rendering result.
-[[nodiscard]] bool BuildUnlitBoxScene(ZHLN::Engine& engine, const std::array<float, 4>& emissiveFactor) {
+[[nodiscard]] bool BuildUnlitBoxScene(ZHLN::Engine& engine, const std::array<float, 4>& emissiveFactor, std::optional<float> glowIntensity) {
     auto& registry = engine.GetRegistry();
     auto& renderCtx = engine.GetRenderContext();
 
     for (const ZHLN::Entity settings: registry.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
-        registry.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings, [](auto& pp) {
+        registry.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings, [glowIntensity](auto& pp) {
+            if (glowIntensity.has_value()) {
+                pp.glowIntensity = *glowIntensity;
+            }
             pp.fullBright      = 0;
             pp.ambientExposure = 0.0f;
             pp.giMode          = 0;
@@ -149,7 +162,8 @@ struct UnlitMeasurement {
 };
 
 /// Renders the unlit scene once and measures it.
-[[nodiscard]] auto MeasureUnlitBox(const std::array<float, 4>& emissiveFactor, const std::string& ppmPath) -> UnlitMeasurement {
+[[nodiscard]] auto MeasureUnlitBox(const std::array<float, 4>& emissiveFactor, const std::string& ppmPath, std::optional<float> glowIntensity = std::nullopt)
+    -> UnlitMeasurement {
     UnlitMeasurement out;
 
     const bool emissive = emissiveFactor[1] > 0.0f;
@@ -163,7 +177,7 @@ struct UnlitMeasurement {
     }
     ZHLN::Test::Headless::DisableTAA(*engine);
 
-    if (!BuildUnlitBoxScene(*engine, emissiveFactor)) {
+    if (!BuildUnlitBoxScene(*engine, emissiveFactor, glowIntensity)) {
         return out;
     }
 
@@ -293,34 +307,53 @@ struct EmissiveShadingTestSuite {
          * The band above the box is outside the geometry, so anything bright
          * in it arrived by blur; the far corner is the control for "the whole
          * frame lifted".
+         *
+         * The glow feed is a fraction of the emitter, not all of it
+         * (PostProcessSettingsComponent::glowIntensity), so the assertions
+         * bound the halo from both sides: it has to appear when the feed is on
+         * and stay well below the surface that casts it. A halo as bright as
+         * its emitter is not glow, it is a slab.
          */
         std::expected<void, ZHLN::Error> an_imported_neon_material_glows_past_its_silhouette() {
-            const UnlitMeasurement neon = MeasureUnlitBox(kNeonGreen, "emissive_glow_halo.ppm");
-            if (!neon.valid) {
+            // The same scene twice, differing only in the glow feed. Comparing
+            // the two is what makes this a test of the glow layer rather than
+            // of one hand-picked brightness: whatever the tonemapper and the
+            // Kawase cascade do, they do it identically to both frames.
+            const UnlitMeasurement lit  = MeasureUnlitBox(kNeonGreen, "emissive_glow_halo.ppm");
+            const UnlitMeasurement dark = MeasureUnlitBox(kNeonGreen, "emissive_glow_halo_off.ppm", 0.0f);
+            if (!lit.valid || !dark.valid) {
                 return std::unexpected(EmissiveShadingError::CaptureFailed);
             }
 
             ZHLN::Println(
-                "    [INFO] neon emitter: box meanG={:.1f} | halo meanRGB=({:.1f}, {:.1f}, {:.1f}) meanLuma={:.1f} | corner meanLuma={:.1f}",
-                neon.box.meanG, neon.halo.meanR, neon.halo.meanG, neon.halo.meanB, neon.halo.meanLuma, neon.corner.meanLuma
+                "    [INFO] glow on : box meanG={:.1f} | halo meanRGB=({:.1f}, {:.1f}, {:.1f}) meanLuma={:.1f} | corner meanLuma={:.1f}", lit.box.meanG,
+                lit.halo.meanR, lit.halo.meanG, lit.halo.meanB, lit.halo.meanLuma, lit.corner.meanLuma
+            );
+            ZHLN::Println(
+                "    [INFO] glow off: box meanG={:.1f} | halo meanRGB=({:.1f}, {:.1f}, {:.1f}) meanLuma={:.1f} | corner meanLuma={:.1f}", dark.box.meanG,
+                dark.halo.meanR, dark.halo.meanG, dark.halo.meanB, dark.halo.meanLuma, dark.corner.meanLuma
             );
 
-            // 1. The emitter itself is still visible. If this fails the glow is
-            //    not the problem -- read the test above first.
-            if (neon.box.meanG <= neon.halo.meanG) {
+            // 1. The emitter itself is still visible, and brighter than its own
+            //    halo. If this fails the glow is not the problem -- read the
+            //    test above first.
+            if (lit.box.meanG <= lit.halo.meanG) {
                 return std::unexpected(EmissiveShadingError::EmissiveWentDark);
             }
 
-            // 2. There is light outside the silhouette, it is the colour the
-            //    box emits, and it is a local halo rather than a lifted frame.
-            //    Margins are loose on purpose: the assertion is "a green glow
-            //    is present and falls off with distance", not a calibration of
-            //    the Kawase cascade.
-            const bool brighterThanBackground = neon.halo.meanG > neon.corner.meanG + 4.0;
-            const bool greenDominant          = neon.halo.meanG > neon.halo.meanR + 3.0 && neon.halo.meanG > neon.halo.meanB + 3.0;
-            const bool fallsOff               = neon.corner.meanLuma < 12.0;
+            // 2. The halo is the glow layer's doing: it is there with the feed
+            //    on and gone with it off, in the same scene.
+            const bool haloIsFromGlow = lit.halo.meanG > dark.halo.meanG + 4.0;
+            const bool greenDominant  = lit.halo.meanG > lit.halo.meanR + 3.0 && lit.halo.meanG > lit.halo.meanB + 3.0;
 
-            if (!brighterThanBackground || !greenDominant || !fallsOff) {
+            // 3. Soft, not blinding. The halo has to stay well under the
+            //    surface that casts it -- a glow that reads as a blown-out
+            //    slab is the failure this bound exists to catch -- and it must
+            //    not lift the far corner of the frame.
+            const bool softerThanEmitter = lit.halo.meanG * 2.0 < lit.box.meanG;
+            const bool fallsOff          = lit.corner.meanLuma < 12.0;
+
+            if (!haloIsFromGlow || !greenDominant || !softerThanEmitter || !fallsOff) {
                 return std::unexpected(EmissiveShadingError::GlowHaloMissing);
             }
 

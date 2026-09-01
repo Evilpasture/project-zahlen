@@ -8,13 +8,14 @@
 
 // The push block must stay word-for-word identical to RenderContext::Impl::
 // KawasePushConstants {int mode; float rcpWidth; float rcpHeight; float
-// padding}, which every dispatch of the chain pushes at offset 0. The
-// threshold stage ignores `mode` (it is always the first link).
+// glowIntensity}, which every dispatch of the chain pushes at offset 0. The
+// threshold stage ignores `mode` (it is always the first link) and is the only
+// stage that reads glowIntensity.
 struct ThresholdPush {
     int mode;
     float rcpWidth;
     float rcpHeight;
-    float padding;
+    float glowIntensity;
 };
 
 [vk::push_constant]
@@ -84,8 +85,10 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     //
     // The unit conversion that makes an imported material bright enough for
     // any of this to be visible lives at the import boundary, not here --
-    // see kGLTFEmissiveDisplayScale in Zahlen/ModelPrefab.hpp.
-    static const float kGlowIntensity = 1.0;
-
-    outImage[tid.xy] = float4(brightColor + emissive * kGlowIntensity, 1.0);
+    // see kGLTFEmissiveDisplayScale in Zahlen/ModelPrefab.hpp. Feeding the
+    // emitter into the blur at full strength on top of that is what makes a
+    // halo read as blown out rather than as glow, so the feed is a fraction
+    // (PostProcessSettingsComponent::glowIntensity, 0.25 by default) and the
+    // emitter itself keeps its own brightness either way.
+    outImage[tid.xy] = float4(brightColor + emissive * max(pc.glowIntensity, 0.0f), 1.0);
 }

@@ -6,6 +6,7 @@
 #include "Zahlen/Math3D.hpp"
 #include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <tuple>
@@ -544,20 +545,24 @@ struct PassFactory {
 
             const auto Kawase = [](int mode, const auto& src) noexcept {
                 return RenderContext::Impl::KawasePushConstants {
-                    .mode      = mode,
-                    .rcpWidth  = 1.0f / static_cast<float>(src.extent.width),
-                    .rcpHeight = 1.0f / static_cast<float>(src.extent.height),
-                    .padding   = 0.0f
+                    .mode          = mode,
+                    .rcpWidth      = 1.0f / static_cast<float>(src.extent.width),
+                    .rcpHeight     = 1.0f / static_cast<float>(src.extent.height),
+                    .glowIntensity = 0.0f
                 };
             };
+
+            // Only the bright pass reads the glow feed; the rest of the chain
+            // is blurring whatever it produced.
+            auto thresholdPush          = Kawase(0, self.graphResources.hdrSceneColor);
+            thresholdPush.glowIntensity = std::max(self.settings.post.glowIntensity, 0.0f);
 
             // 0. Bright pass: HDR scene color -> half-res threshold target,
             //    plus the emission channel ungated (the glow layer -- see
             //    bloom_threshold_cs.slang). Argument order is the shader's
             //    reflected binding order: texInput, smp, texEmissive, outImage.
             thresholdChain.Step(
-                self.bloomThresholdCS, self.bloomThresholdHeapBindings, thresh.extent, Kawase(0, self.graphResources.hdrSceneColor), srcHdr,
-                self.defaultSampler, emissive, thresh
+                self.bloomThresholdCS, self.bloomThresholdHeapBindings, thresh.extent, thresholdPush, srcHdr, self.defaultSampler, emissive, thresh
             );
 
             // 1-3. Downsample chain: thresh -> down1 -> down2 -> down3.

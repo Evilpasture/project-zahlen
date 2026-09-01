@@ -1132,7 +1132,9 @@ struct RenderContext::Impl {
         int   mode;
         float rcpWidth;
         float rcpHeight;
-        float padding;
+        // Bright pass only: how much of the emissive channel joins the blur.
+        // The down/up dispatches ignore it (it was the padding word).
+        float glowIntensity;
     };
 
     struct RtrHalfPushConstants {

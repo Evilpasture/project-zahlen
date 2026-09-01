@@ -304,6 +304,10 @@ struct Components {
         int       useLocalProbe     = 0;
         float     vignetteIntensity = 1.10f;
         float     vignettePower     = 1.50f;
+        /// How much of the emissive channel is fed into the bloom cascade --
+        /// the Babylon.js GlowLayer knob. 0 turns the halo off and leaves
+        /// emissive surfaces shading normally; 1 is as bright as the emitter.
+        float     glowIntensity     = 0.25f;
         int       enableSSR         = 1;
         int       enableRTR         = 0;
         int       fullBright        = 0;
