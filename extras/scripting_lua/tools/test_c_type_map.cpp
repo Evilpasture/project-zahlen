@@ -5,13 +5,13 @@
 
 // Standalone check of the C++ -> C type mapping in FFICTypeMap.hpp.
 //
-// The layout half of the mapper is ordinary template code and the name half
-// degrades to the same type-based vocabulary without reflection, so unlike the
-// reflection driver that uses it this compiles and runs on a compiler with no
-// static-reflection support. It walks the field types Components.hpp actually
-// uses and asserts that every spelling the mapper produces occupies exactly
-// the bytes and demands exactly the alignment of the C++ type it stands for --
-// the property the generated layouts depend on.
+// The layout half of the mapper is ordinary template code and the naming
+// policy lives in ZHLN::Reflect::TypeName, so unlike the reflection driver
+// that uses it this compiles and runs on a compiler with no static-reflection
+// support. It walks the field types Components.hpp actually uses and asserts
+// that every spelling the mapper produces occupies exactly the bytes and
+// demands exactly the alignment of the C++ type it stands for -- the property
+// the generated layouts depend on.
 //
 // Not part of the shipped build; run it directly:
 //   clang++ -std=c++26 -Iinclude -Iextras -Iextern/JoltPhysics \
@@ -19,6 +19,7 @@
 
 #include <scripting_lua/tools/FFICTypeMap.hpp>
 
+#include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Types.hpp>
 
@@ -159,23 +160,20 @@ int main() {
     printf("types with no C layout\n");
     Check<Components::UIChildCacheComponent>("UIChildCacheComponent");
 
-    // Predicate plumbing. Without reflection the predicate is invoked with an
-    // empty spelling, and returning nullptr means "no opinion, fall back to
-    // the built-in mapping" -- which is exactly the default vocabulary used by
-    // the no-argument form above. On a reflection build (GenFFICdef) the same
-    // lambda receives the type's real spelling and may return a C name for a
-    // type the built-in mapping would otherwise emit as opaque bytes.
-    constexpr auto noOverride = [](std::string_view) -> const char* { return nullptr; };
-    static_assert(!ZHLN::FFI::MapCType<float>(noOverride).isOpaque());
-    static_assert(ZHLN::FFI::MapCType<Components::UIChildCacheComponent>(noOverride).isOpaque());
+    // The rename predicate is owned by ZHLN::Reflect::TypeName, not by the
+    // mapper: nullptr keeps the type's own spelling, a non-null return
+    // replaces it. Same contract with and without reflection (the fallback
+    // spelling there is empty).
+    constexpr auto keep = [](std::string_view) -> const char* { return nullptr; };
+    static_assert(ZHLN::Reflect::TypeName<std::uint32_t>(keep) == ZHLN::Reflect::TypeName<std::uint32_t>());
+    static_assert(ZHLN::Reflect::TypeName<Components::UIChildCacheComponent>(keep) ==
+                  ZHLN::Reflect::TypeName<Components::UIChildCacheComponent>());
 
-    // Override contract: a non-null return replaces the emitted C base name
-    // without touching layout (size/align/count stay derived from the type).
-    // This works with or without reflection: the predicate decides, the
-    // built-in mapping only fills in when it declines.
-    constexpr auto overrideEntity = [](std::string_view) -> const char* { return "EntityHandle"; };
+    // MapCType consumes the resolved C name: empty means "no reflective
+    // spelling -- use the built-in vocabulary", a non-empty name is emitted.
+    // Layout (size/align/count) still comes from the type, never the name.
     {
-        constexpr auto decl = ZHLN::FFI::MapCType<Entity>(overrideEntity);
+        constexpr auto decl = ZHLN::FFI::MapCType<Entity>("EntityHandle");
         static_assert(decl.base != nullptr);
         constexpr std::string_view base = decl.base;
         static_assert(base == "EntityHandle");
@@ -183,15 +181,9 @@ int main() {
         static_assert(decl.align == alignof(Entity));
         static_assert(decl.count == 1);
     }
-
-    // The predicate is owned by ZHLN::Reflect::TypeName itself: MapCType just
-    // forwards its lambda there. A nullptr return keeps the type's own
-    // spelling, so the overloaded form agrees with the no-argument form both
-    // with reflection (identifier/display spelling) and without (empty).
-    constexpr auto keep = [](std::string_view) -> const char* { return nullptr; };
-    static_assert(ZHLN::Reflect::TypeName<std::uint32_t>(keep) == ZHLN::Reflect::TypeName<std::uint32_t>());
-    static_assert(ZHLN::Reflect::TypeName<Components::UIChildCacheComponent>(keep) ==
-                  ZHLN::Reflect::TypeName<Components::UIChildCacheComponent>());
+    static_assert(!ZHLN::FFI::MapCType<float>(std::string_view {}).isOpaque());
+    static_assert(ZHLN::FFI::MapCType<Components::UIChildCacheComponent>(std::string_view {}).isOpaque());
+    static_assert(!ZHLN::FFI::MapCType<Components::UIChildCacheComponent>("UIChildCache").isOpaque());
 
     printf("\n%s (%d failure%s)\n", failures == 0 ? "PASS" : "FAIL",
            failures, failures == 1 ? "" : "s");

@@ -10,18 +10,18 @@
 //
 //  1. Layout is ordinary template code over the complete type: sizeof/alignof,
 //     array extents and Jolt's 16-byte SIMD alignment. It never needs
-//     reflection, so the mapper still compiles and can be tested on a compiler
-//     with no static-reflection support.
+//     reflection, so the mapper compiles and can be tested on a compiler with
+//     no static-reflection support.
 //
-//  2. Names are obtained through the project's reflection header
-//     (Zahlen/Core/Reflection.hpp). ZHLN::Reflect::TypeName already accepts
-//     an optional compile-time rename predicate -- the lambda -- which sees
-//     the type's reflected spelling and returns the C name to emit or nullptr
-//     to keep the built-in mapping. That is what lets a previously opaque
-//     field (std::bitset, HashMap, an intrusive Ref, ...) be named by the
-//     generator without editing this file, and what lets any emitted spelling
-//     be renamed, e.g. "unsigned int" -> "uint32_t" or "Entity" ->
-//     "ZHLN_Entity". The mapper just forwards its predicate to TypeName.
+//  2. Names come from the caller. ZHLN::Reflect::TypeName owns the compile-time
+//     rename predicate (see Zahlen/Core/Reflection.hpp); a caller resolves the
+//     C spelling it wants -- TypeName<T>(rename) -- and hands the result to
+//     MapCType<T>(cName). An empty name defers to the built-in type-based
+//     vocabulary below, so an otherwise unmapped type stays opaque bytes
+//     rather than being guessed at.
+//
+//     The mapper itself contains no reflection or predicate plumbing: it is a
+//     layout engine, and the reflection API owns the naming policy.
 //
 // The rule this file exists to enforce: never guess a layout. A name never
 // decides size or alignment -- sizeof/alignof always do -- and the caller
@@ -31,7 +31,6 @@
 #pragma once
 
 #include <Jolt/Jolt.h>
-#include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Entity.hpp>
 
@@ -40,13 +39,6 @@
 #include <cstdint>
 #include <string_view>
 #include <type_traits>
-
-// Reflection is optional. All name lookups go through Zahlen/Core/Reflection.hpp:
-// with a reflection-capable compiler ZHLN::Reflect::TypeName returns the type's
-// own spelling (std::meta::identifier_of / display_string_of via TypeReflector),
-// and without one it returns an empty spelling, which makes the predicate's
-// "no opinion" path fall back to the built-in vocabulary below. No <meta> is
-// touched here.
 
 namespace ZHLN::FFI {
 
@@ -90,57 +82,10 @@ namespace detail {
         static constexpr std::size_t capacity  = N;
     };
 
-    /// The source spelling of T, obtained through static reflection.
-    ///
-    /// Delegates to ZHLN::Reflect::TypeName (Zahlen/Core/Reflection.hpp), which
-    /// dealises typedefs first: a class or enum with an identifier is its bare
-    /// identifier -- "Vec3", "Entity", "TextAlignment" -- a builtin type is its
-    /// canonical spelling -- "float", "unsigned int" -- and a template
-    /// specialization, having no identifier, is reported as
-    /// "TemplateSpecialization" (callers that need the rendered spelling can
-    /// match that and use std::meta::display_string_of themselves). Without
-    /// static reflection the result is empty and the mapper falls back to the
-    /// type-based vocabulary below, so this header still compiles and is
-    /// testable on a compiler with no reflection support.
-    template <typename T>
-    consteval auto ReflectedName() -> std::string_view {
-        return ZHLN::Reflect::TypeName<std::remove_cvref_t<T>>();
-    }
-
-    /// The spelling after TypeName's rename predicate was applied. TypeName
-    /// owns the predicate hook, so the mapper forwards its lambda there and
-    /// then compares against the un-renamed spelling to tell a real override
-    /// from "no opinion".
-    template <typename T, typename NameOverride>
-    consteval auto ReflectedName(NameOverride rename) -> std::string_view {
-        return ZHLN::Reflect::TypeName<std::remove_cvref_t<T>>(rename);
-    }
-
-    /// The default vocabulary: spellings whose C name is the C++ name itself.
-    /// This is what the no-argument MapCType<T>() uses. Return nullptr to
-    /// leave the decision to the built-in (type-based) mapping below.
-    struct DefaultNameOverride {
-        consteval auto operator()(std::string_view name) const -> const char* {
-            if (name == "bool") return "bool";
-            if (name == "float") return "float";
-            if (name == "double") return "double";
-            if (name == "char") return "char";
-            if (name == "int8_t") return "int8_t";
-            if (name == "uint8_t") return "uint8_t";
-            if (name == "int16_t") return "int16_t";
-            if (name == "uint16_t") return "uint16_t";
-            if (name == "int32_t") return "int32_t";
-            if (name == "uint32_t") return "uint32_t";
-            if (name == "int64_t") return "int64_t";
-            if (name == "uint64_t") return "uint64_t";
-            return nullptr;
-        }
-    };
-
     /// The C spelling of a scalar by type, or nullptr if it is not one this
-    /// file knows. This is the fallback used when the compiler has no static
-    /// reflection (or the reflected spelling matched no vocabulary entry), and
-    /// the guaranteed mapping for enum underlying types in either build.
+    /// file knows. This is the fallback vocabulary used when the caller
+    /// supplied no name, and the guaranteed mapping for enum underlying types
+    /// in either case.
     template <typename T>
     consteval auto ScalarName() -> const char* {
         using U = std::remove_cvref_t<T>;
@@ -174,34 +119,39 @@ namespace detail {
     }
 } // namespace detail
 
+/// Map a C++ field type to its C declaration using the built-in vocabulary.
+template <typename T>
+consteval auto MapCType() -> CDecl;
+
 /// Map a C++ field type to its C declaration.
 ///
-/// `rename` is a compile-time predicate forwarded to ZHLN::Reflect::TypeName:
-/// it receives the type's reflected spelling and may return a replacement
-/// name; returning nullptr keeps the type's own spelling. Layout is always
-/// derived from the C++ type itself (sizeof/alignof, extents, alignment),
-/// never from the name -- the predicate can only change how the type is
-/// spelled.
+/// `cName` is the C name the caller wants emitted for this type -- normally
+/// the result of ZHLN::Reflect::TypeName<T>(rename). A non-empty name is used
+/// as the C base name; an empty name defers to the built-in type-based
+/// vocabulary below, so a type with no built-in spelling stays opaque. Only
+/// pass a name you actually intend to emit; an empty view keeps the built-in
+/// mapping.
+///
+/// Layout is always derived from the C++ type itself (sizeof/alignof,
+/// extents, alignment), never from the name -- the caller can only change how
+/// the type is spelled.
 ///
 /// Returns an opaque CDecl (base == nullptr, size/align still populated) for
-/// anything the predicate and the built-in mapping both refuse to name --
+/// anything with neither a built-in spelling nor a caller-supplied name --
 /// std::bitset, HashMap, intrusive Refs. Callers must render that as a
 /// correctly sized and aligned byte blob rather than inventing a layout.
-template <typename T, typename NameOverride>
-consteval auto MapCType(NameOverride rename) -> CDecl {
+template <typename T>
+consteval auto MapCType(std::string_view cName) -> CDecl {
     using U = std::remove_cvref_t<T>;
 
     CDecl d;
     d.size  = sizeof(U);
     d.align = alignof(U);
 
-    // TypeName applies the rename predicate itself. A predicate that returns
-    // the type's own spelling is indistinguishable from "no opinion" and falls
-    // through to the built-in mapping below -- an identity rename never
-    // changes the emitted C declaration.
-    const std::string_view original  = detail::ReflectedName<U>();
-    const std::string_view effective = detail::ReflectedName<U>(rename);
-    const char*            name      = effective == original ? nullptr : effective.data();
+    // The returned CDecl keeps a pointer into `cName`, so it must refer to
+    // static storage (a string literal or a reflected identifier), never to a
+    // stack buffer.
+    const char* name = cName.empty() ? nullptr : cName.data();
 
     if constexpr (std::is_enum_v<U>) {
         // An enum occupies exactly its underlying type.
@@ -231,28 +181,29 @@ consteval auto MapCType(NameOverride rename) -> CDecl {
         // A raw C array member, e.g. `char _pad[3]`. remove_cvref_t does not
         // strip array-ness, so without this branch it falls through to the
         // opaque case -- correct bytes, but needlessly unnamed. The element's
-        // mapping (with the same predicate) supplies extent and alignment.
-        const auto element = MapCType<std::remove_extent_t<U>>(rename);
+        // mapping supplies extent and alignment; the caller-supplied name, if
+        // any, names the array itself.
+        const auto element = MapCType<std::remove_extent_t<U>>();
         d.base             = name != nullptr ? name : element.base;
         d.count            = element.count * static_cast<int>(std::extent_v<U>);
         d.aligned16        = element.aligned16;
     } else if constexpr (detail::ArrayTraits<U>::available) {
-        const auto element = MapCType<typename detail::ArrayTraits<U>::element>(rename);
+        const auto element = MapCType<typename detail::ArrayTraits<U>::element>();
         d.base             = name != nullptr ? name : element.base;
         d.count            = element.count * static_cast<int>(detail::ArrayTraits<U>::extent);
         d.aligned16        = element.aligned16;
     } else {
-        // No built-in layout rule and no name from the predicate: opaque.
+        // No built-in layout rule and no caller-supplied name: opaque.
         d.base = name;
     }
 
     return d;
 }
 
-/// Map a C++ field type to its C declaration using the default vocabulary.
+/// Map a C++ field type to its C declaration using the built-in vocabulary.
 template <typename T>
 consteval auto MapCType() -> CDecl {
-    return MapCType<T>(detail::DefaultNameOverride {});
+    return MapCType<T>(std::string_view {});
 }
 
 /// C spelling of the struct a FixedString<N> becomes.

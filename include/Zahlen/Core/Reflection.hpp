@@ -98,7 +98,11 @@ struct TypeReflector {
         if constexpr (std::meta::has_identifier(info)) {
             return std::meta::identifier_of(info);
         } else {
-            return "TemplateSpecialization";
+            // Builtin types (`unsigned int`) and template specializations
+            // (`ZHLN::FixedString<64>`) have no identifier; render their full
+            // display spelling so TypeName's rename predicate sees something
+            // it can actually match instead of a placeholder.
+            return std::meta::display_string_of(info);
         }
     }
 };
