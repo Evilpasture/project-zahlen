@@ -505,9 +505,9 @@ struct TestNetworkWireSuite {
         }
 
         std::expected<void, ZHLN::Error> schema_version_annotation() {
-            ZHLN::Test::ExpectEq(ZHLN::Wire::detail::SchemaVersionOf<ZHLN::Net::InitialSnapshotMessage>(), uint32_t {2});
-            ZHLN::Test::ExpectEq(ZHLN::Wire::detail::SchemaVersionOf<ZHLN::Net::PhysicsBatchMessage>(), uint32_t {2});
-            ZHLN::Test::ExpectEq(ZHLN::Wire::detail::SchemaVersionOf<TestWorld>(), uint32_t {1});
+            ZHLN::Test::ExpectEq(ZHLN::Wire::SchemaVersionOf<ZHLN::Net::InitialSnapshotMessage>(), uint32_t {2});
+            ZHLN::Test::ExpectEq(ZHLN::Wire::SchemaVersionOf<ZHLN::Net::PhysicsBatchMessage>(), uint32_t {2});
+            ZHLN::Test::ExpectEq(ZHLN::Wire::SchemaVersionOf<TestWorld>(), uint32_t {1});
             return {};
         }
 

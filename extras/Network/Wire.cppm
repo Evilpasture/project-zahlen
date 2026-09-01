@@ -601,11 +601,16 @@ concept CustomCodable = requires(const T& value, T& out, Writer& writer, Reader&
 } // namespace ZHLN::Wire
 
 // ============================================================================
-// Type traits and encoding details (exported: reachable wherever the
-// templates below are instantiated)
+// Implementation details -- module-private, never exported.
+//
+// ZHLN::Wire::detail must stay unreachable-by-name from every importer:
+// exported templates below may name these helpers freely (their
+// instantiations see them through the module interface), but importers may
+// never spell them. tools/check_reflection_boundary.py fails the configure
+// step if any detail namespace is ever exported again.
 // ============================================================================
 
-export namespace ZHLN::Wire::detail {
+namespace ZHLN::Wire::detail {
 
 template <typename T>
 struct AlwaysFalse: std::false_type {};
@@ -746,12 +751,60 @@ inline auto GetLE32(Reader& reader, uint32_t& out) -> Result<void> {
     return {};
 }
 
-inline constexpr bool ReflectionAvailable =
-#if defined(__cpp_impl_reflection) || (defined(__has_feature) && __has_feature(reflection))
-    true;
-#else
-    false;
-#endif
+// --- Schema annotation machinery -------------------------------------------
+// ZHLN::Reflect::ForEachAnnotationType yields annotation types; these traits
+// match the Wire-specific Range / Version specializations so the module never
+// needs no reflection tokens of its own.
+
+struct RangeSpec {
+    bool        active {};
+    long double minValue {};
+    long double maxValue {};
+};
+
+template <typename Annotation>
+struct RangeTrait: std::false_type {};
+
+template <auto MinValue, auto MaxValue>
+struct RangeTrait<Range<MinValue, MaxValue>>: std::true_type {
+    static constexpr bool        is_range  = true;
+    static constexpr long double minValue  = static_cast<long double>(Range<MinValue, MaxValue>::minValue);
+    static constexpr long double maxValue  = static_cast<long double>(Range<MinValue, MaxValue>::maxValue);
+};
+
+template <auto MemberInfo>
+consteval auto MemberRange() -> RangeSpec {
+    RangeSpec result {};
+    ZHLN::Reflect::ForEachAnnotationType<MemberInfo>([&]<typename Annotation>() {
+        if constexpr (RangeTrait<Annotation>::is_range) {
+            if (!result.active) {
+                result.active   = true;
+                result.minValue = RangeTrait<Annotation>::minValue;
+                result.maxValue = RangeTrait<Annotation>::maxValue;
+            }
+        }
+    });
+    return result;
+}
+
+template <typename Annotation>
+struct VersionTrait: std::false_type {};
+
+template <uint32_t Value>
+struct VersionTrait<Version<Value>>: std::true_type {
+    static constexpr bool        is_version = true;
+    static constexpr uint32_t    value      = Value;
+};
+
+inline void AttachFieldNote(Failure& failure, std::string_view typeName, std::string_view fieldName, std::string_view description) {
+    if (!failure.note.empty()) {
+        return; // innermost annotation wins
+    }
+    failure.note = std::format("{}.{}", typeName, fieldName);
+    if (!description.empty()) {
+        failure.note += std::string(": ") + std::string(description);
+    }
+}
 
 } // namespace ZHLN::Wire::detail
 
@@ -867,7 +920,7 @@ auto EncodeValue(const T& value, Writer& writer) -> Result<void> {
             return EncodeValue(*value, writer);
         }
         return writer.PutByte(0);
-    } else if constexpr (std::is_aggregate_v<Type> && detail::ReflectionAvailable) {
+    } else if constexpr (std::is_aggregate_v<Type> && ZHLN::Reflect::ReflectionAvailable) {
         return EncodeAggregate(value, writer);
     } else {
         static_assert(
@@ -949,7 +1002,7 @@ auto DecodeValue(T& out, Reader& reader) -> Result<void> {
         if (!res) {
             return res;
         }
-        if constexpr (detail::ReflectionAvailable) {
+        if constexpr (ZHLN::Reflect::ReflectionAvailable) {
             if (!ZHLN::Reflect::EnumHasValue<Type>(static_cast<std::underlying_type_t<Type>>(raw))) {
                 return std::unexpected(reader.Fail(WireError::InvalidEnumValue, static_cast<unsigned long long>(raw), ZHLN::Reflect::TypeName<Type>()));
             }
@@ -1120,7 +1173,7 @@ auto DecodeValue(T& out, Reader& reader) -> Result<void> {
             }
             return {};
         }
-    } else if constexpr (std::is_aggregate_v<Type> && detail::ReflectionAvailable) {
+    } else if constexpr (std::is_aggregate_v<Type> && ZHLN::Reflect::ReflectionAvailable) {
         return DecodeAggregate(out, reader);
     } else {
         static_assert(
@@ -1134,141 +1187,62 @@ auto DecodeValue(T& out, Reader& reader) -> Result<void> {
 } // namespace ZHLN::Wire
 
 // ============================================================================
-// Reflection-driven aggregate encoding (C++26 static reflection)
+// Schema version and reflection-driven aggregate encoding
+//
+// The field walk, the member queries and the annotation iteration all come
+// from Zahlen/Core/Reflection.hpp; this module contains no reflection
+// tokens of its own. Without reflection those queries degrade to the
+// fallbacks in Reflection.hpp: the aggregate functions below compile, but
+// EncodeValue/DecodeValue only route here when ZHLN::Reflect::ReflectionAvailable
+// is true, so aggregates still require a hand-written Codec<T> specialization.
 // ============================================================================
 
-#if defined(__cpp_impl_reflection) || (defined(__has_feature) && __has_feature(reflection))
-
-export namespace ZHLN::Wire::detail {
-
-template <auto MemberInfo>
-consteval auto MemberSkipped() -> bool {
-    return ZHLN::Reflect::HasAnnotation<Skip, MemberInfo>();
-}
-
-template <auto MemberInfo>
-consteval auto MemberDescription() -> std::string_view {
-    return ZHLN::Reflect::GetDescriptionText<MemberInfo>();
-}
-
-struct RangeSpec {
-    bool        active {};
-    long double minValue {};
-    long double maxValue {};
-};
-
-template <auto MemberInfo, std::size_t Index>
-consteval auto ExtractRangeAt() -> RangeSpec {
-    constexpr auto annotations = ZHLN::Reflect::detail::AnnotationsOf<MemberInfo>();
-    constexpr auto type        = std::meta::dealias(std::meta::type_of(annotations[Index]));
-    if constexpr (std::meta::has_template_arguments(type)) {
-        if constexpr (std::meta::template_of(type) == ^^Range) {
-            using RangeType = typename[:type:];
-            return RangeSpec {
-                .active = true, .minValue = static_cast<long double>(RangeType::minValue), .maxValue = static_cast<long double>(RangeType::maxValue)
-            };
-        }
-    }
-    return RangeSpec {};
-}
-
-template <auto MemberInfo>
-consteval auto MemberRange() -> RangeSpec {
-    constexpr std::size_t count = ZHLN::Reflect::detail::AnnotationsOf<MemberInfo>().size();
-    RangeSpec             result {};
-    [&]<std::size_t... Is>(std::index_sequence<Is...>) -> auto {
-        (
-            [&] -> auto {
-                if (!result.active) {
-                    result = ExtractRangeAt<MemberInfo, Is>();
-                }
-            }(),
-            ...);
-    }(std::make_index_sequence<count>());
-    return result;
-}
-
-template <typename T, std::size_t Index>
-consteval auto ExtractVersionAt() -> std::optional<uint32_t> {
-    constexpr auto entity      = std::meta::dealias(^^std::remove_cvref_t<T>);
-    constexpr auto annotations = ZHLN::Reflect::detail::AnnotationsOf<entity>();
-    constexpr auto type        = std::meta::dealias(std::meta::type_of(annotations[Index]));
-    if constexpr (std::meta::has_template_arguments(type)) {
-        if constexpr (std::meta::template_of(type) == ^^Version) {
-            using VersionType = typename[:type:];
-            return VersionType::value;
-        }
-    }
-    return std::nullopt;
-}
+export namespace ZHLN::Wire {
 
 /// Wire schema version declared via [[= ZHLN::Wire::Version<N> {}]]; default 1.
 template <typename T>
 consteval auto SchemaVersionOf() -> uint32_t {
-    constexpr auto        entity = std::meta::dealias(^^std::remove_cvref_t<T>);
-    constexpr std::size_t count  = ZHLN::Reflect::detail::AnnotationsOf<entity>().size();
-    uint32_t              result = 1;
-    [&]<std::size_t... Is>(std::index_sequence<Is...>) -> auto {
-        (
-            [&] -> auto {
-                if (result == 1) {
-                    if (auto version = ExtractVersionAt<T, Is>()) {
-                        result = *version;
-                    }
-                }
-            }(),
-            ...);
-    }(std::make_index_sequence<count>());
+    uint32_t result = 1;
+    bool     found  = false;
+    ZHLN::Reflect::ForEachAnnotationType<T>([&]<typename Annotation>() {
+        if constexpr (detail::VersionTrait<Annotation>::is_version) {
+            if (!found) {
+                result = detail::VersionTrait<Annotation>::value;
+                found  = true;
+            }
+        }
+    });
     return result;
 }
-
-template <typename T>
-consteval auto HasBaseClasses() -> bool {
-    return !ZHLN::Reflect::BaseClasses<T>().empty();
-}
-
-inline void AttachFieldNote(Failure& failure, std::string_view typeName, std::string_view fieldName, std::string_view description) {
-    if (!failure.note.empty()) {
-        return; // innermost annotation wins
-    }
-    failure.note = std::format("{}.{}", typeName, fieldName);
-    if (!description.empty()) {
-        failure.note += std::string(": ") + std::string(description);
-    }
-}
-
-} // namespace ZHLN::Wire::detail
-
-export namespace ZHLN::Wire {
 
 template <typename T>
     requires std::is_aggregate_v<std::remove_cvref_t<T>>
 auto EncodeAggregate(const T& value, Writer& writer) -> Result<void> {
     using Type = std::remove_cvref_t<T>;
     static_assert(
-        !detail::HasBaseClasses<Type>(),
+        !ZHLN::Reflect::HasBases<Type>(),
         "ZHLN.Wire: aggregates with base classes are not wire-serializable; flatten the fields or add a Codec<T> specialization"
     );
 
     std::optional<Failure> failure;
-    [:ZHLN::Reflect::Expand(ZHLN::Reflect::detail::NonStaticDataMembers<Type>()):] >> [&]<auto member>() -> auto {
+    ZHLN::Reflect::ForEachDataMember<Type>([&]<auto member>() {
         if (failure.has_value()) {
             return;
         }
-        constexpr bool skipped = detail::MemberSkipped<member>();
-        if constexpr (skipped) {
+        if constexpr (ZHLN::Reflect::HasAnnotation<Skip, member>()) {
             return;
         } else {
-            constexpr std::string_view name = std::meta::has_identifier(member) ? std::meta::identifier_of(member) : "<anonymous>";
-            const PathScope            scope(writer.Path(), name);
-            const Result<void>         res = writer.Put(value.[:member:]);
+            constexpr std::string_view name        = ZHLN::Reflect::MemberName<member>();
+            constexpr std::string_view displayName = name.empty() ? "<anonymous>" : name;
+            const PathScope            scope(writer.Path(), displayName);
+            const Result<void>         res = writer.Put(ZHLN::Reflect::MemberValue<member>(value));
             if (!res) {
                 Failure failing = std::move(res).error();
-                detail::AttachFieldNote(failing, ZHLN::Reflect::TypeName<Type>(), name, detail::MemberDescription<member>());
+                detail::AttachFieldNote(failing, ZHLN::Reflect::TypeName<Type>(), displayName, ZHLN::Reflect::GetDescriptionText<member>());
                 failure = std::move(failing);
             }
         }
-    };
+    });
     if (failure.has_value()) {
         return std::unexpected(std::move(*failure));
     }
@@ -1280,21 +1254,21 @@ template <typename T>
 auto DecodeAggregate(T& out, Reader& reader) -> Result<void> {
     using Type = std::remove_cvref_t<T>;
     static_assert(
-        !detail::HasBaseClasses<Type>(),
+        !ZHLN::Reflect::HasBases<Type>(),
         "ZHLN.Wire: aggregates with base classes are not wire-serializable; flatten the fields or add a Codec<T> specialization"
     );
 
     std::optional<Failure> failure;
-    [:ZHLN::Reflect::Expand(ZHLN::Reflect::detail::NonStaticDataMembers<Type>()):] >> [&]<auto member>() -> auto {
+    ZHLN::Reflect::ForEachDataMember<Type>([&]<auto member>() {
         if (failure.has_value()) {
             return;
         }
-        constexpr bool skipped = detail::MemberSkipped<member>();
-        if constexpr (skipped) {
+        if constexpr (ZHLN::Reflect::HasAnnotation<Skip, member>()) {
             return;
         } else {
-            using Field                     = typename[:std::meta::type_of(member):];
-            constexpr std::string_view name = std::meta::has_identifier(member) ? std::meta::identifier_of(member) : "<anonymous>";
+            using Field                     = ZHLN::Reflect::MemberType<member>;
+            constexpr std::string_view name        = ZHLN::Reflect::MemberName<member>();
+            constexpr std::string_view displayName = name.empty() ? "<anonymous>" : name;
 
             if constexpr (std::same_as<Field, std::string_view> || detail::SpanLike<Field>) {
                 static_assert(
@@ -1302,13 +1276,13 @@ auto DecodeAggregate(T& out, Reader& reader) -> Result<void> {
                                                        "resizable container in decodable messages"
                 );
             } else {
-                const PathScope scope(reader.Path(), name);
-                Result<void>    res = reader.Get(out.[:member:]);
+                const PathScope scope(reader.Path(), displayName);
+                Result<void>    res = reader.Get(ZHLN::Reflect::MemberValue<member>(out));
                 if (res) {
                     if constexpr (std::is_arithmetic_v<Field>) {
                         constexpr auto range = detail::MemberRange<member>();
                         if constexpr (range.active) {
-                            const long double current = static_cast<long double>(out.[:member:]);
+                            const long double current = static_cast<long double>(ZHLN::Reflect::MemberValue<member>(out));
                             if (current < range.minValue || current > range.maxValue) {
                                 res = std::unexpected(reader.Fail(WireError::ValueOutOfRange, current, range.minValue, range.maxValue));
                             }
@@ -1317,12 +1291,12 @@ auto DecodeAggregate(T& out, Reader& reader) -> Result<void> {
                 }
                 if (!res) {
                     Failure failing = std::move(res).error();
-                    detail::AttachFieldNote(failing, ZHLN::Reflect::TypeName<Type>(), name, detail::MemberDescription<member>());
+                    detail::AttachFieldNote(failing, ZHLN::Reflect::TypeName<Type>(), displayName, ZHLN::Reflect::GetDescriptionText<member>());
                     failure = std::move(failing);
                 }
             }
         }
-    };
+    });
     if (failure.has_value()) {
         return std::unexpected(std::move(*failure));
     }
@@ -1330,33 +1304,6 @@ auto DecodeAggregate(T& out, Reader& reader) -> Result<void> {
 }
 
 } // namespace ZHLN::Wire
-
-#else
-
-export namespace ZHLN::Wire {
-
-// Reflection-free fallback: aggregates require hand-written Codec<T> specializations.
-template <typename T>
-auto EncodeAggregate(const T& /*value*/, Writer& writer) -> Result<void> {
-    static_assert(
-        detail::AlwaysFalse<T>::value, "ZHLN.Wire: reflected aggregate serialization requires a compiler with C++26 static reflection "
-                                       "(__cpp_impl_reflection); provide a Codec<T> specialization instead"
-    );
-    return std::unexpected(writer.Fail(WireError::UnsupportedType, ZHLN::Reflect::TypeName<T>()));
-}
-
-template <typename T>
-auto DecodeAggregate(T& /*out*/, Reader& reader) -> Result<void> {
-    static_assert(
-        detail::AlwaysFalse<T>::value, "ZHLN.Wire: reflected aggregate serialization requires a compiler with C++26 static reflection "
-                                       "(__cpp_impl_reflection); provide a Codec<T> specialization instead"
-    );
-    return std::unexpected(reader.Fail(WireError::UnsupportedType, ZHLN::Reflect::TypeName<T>()));
-}
-
-} // namespace ZHLN::Wire
-
-#endif
 
 // ============================================================================
 // Convenience API + out-of-line typed entry points
@@ -1405,9 +1352,7 @@ template <typename T>
 // CRC32 (IEEE 802.3, reflected) — used by the network frame codec
 // ============================================================================
 
-export namespace ZHLN::Wire::Checksum {
-
-namespace detail {
+namespace ZHLN::Wire::Checksum::detail {
 consteval auto MakeCrcTable() {
     std::array<uint32_t, 256> table {};
     for (uint32_t index = 0; index < 256; ++index) {
@@ -1419,7 +1364,9 @@ consteval auto MakeCrcTable() {
     }
     return table;
 }
-} // namespace detail
+} // namespace ZHLN::Wire::Checksum::detail
+
+export namespace ZHLN::Wire::Checksum {
 
 inline constexpr auto kCrcTable = detail::MakeCrcTable();
 
@@ -1445,6 +1392,16 @@ inline constexpr auto kCrcTable = detail::MakeCrcTable();
 //   the byte equals 255.
 // ============================================================================
 
+namespace ZHLN::Wire::Compression::detail {
+
+inline auto Hash4(std::span<const uint8_t> data, size_t index) noexcept -> uint32_t {
+    const uint32_t value = static_cast<uint32_t>(data[index]) | (static_cast<uint32_t>(data[index + 1]) << 8) | (static_cast<uint32_t>(data[index + 2]) << 16) |
+                           (static_cast<uint32_t>(data[index + 3]) << 24);
+    return (value * 2654435761u) >> (32 - HASH_LOG);
+}
+
+} // namespace ZHLN::Wire::Compression::detail
+
 export namespace ZHLN::Wire::Compression {
 
 inline constexpr size_t WINDOW_SIZE = 64 * 1024;
@@ -1457,16 +1414,6 @@ inline constexpr size_t HASH_SIZE   = 1u << HASH_LOG;
 [[nodiscard]] inline auto CompressBound(size_t rawSize) noexcept -> size_t {
     return rawSize + (rawSize / 255) + 16;
 }
-
-namespace detail {
-
-inline auto Hash4(std::span<const uint8_t> data, size_t index) noexcept -> uint32_t {
-    const uint32_t value = static_cast<uint32_t>(data[index]) | (static_cast<uint32_t>(data[index + 1]) << 8) | (static_cast<uint32_t>(data[index + 2]) << 16) |
-                           (static_cast<uint32_t>(data[index + 3]) << 24);
-    return (value * 2654435761u) >> (32 - HASH_LOG);
-}
-
-} // namespace detail
 
 [[nodiscard]] auto Compress(std::span<const uint8_t> raw, size_t maxOutput = DEFAULT_MAX_MESSAGE_BYTES) -> Result<std::vector<uint8_t>> {
     if (raw.empty()) {

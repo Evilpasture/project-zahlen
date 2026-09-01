@@ -112,6 +112,24 @@ if(NOT ZHLN_TESTS_PUBLIC_API_RESULT EQUAL 0)
 endif()
 message(STATUS "${ZHLN_TESTS_PUBLIC_API_OUTPUT}")
 
+# Reflection internals live in include/Zahlen/Core/Reflection.hpp and nowhere
+# else; module interface units must never export a detail namespace. Both are
+# configured-invariants -- an exported detail namespace or a stray
+# std::meta/^^/[:...:] would otherwise survive as a permanent public surface.
+execute_process(
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_reflection_boundary.py"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    RESULT_VARIABLE ZHLN_REFLECTION_BOUNDARY_RESULT
+    OUTPUT_VARIABLE ZHLN_REFLECTION_BOUNDARY_OUTPUT
+    ERROR_VARIABLE ZHLN_REFLECTION_BOUNDARY_ERROR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_STRIP_TRAILING_WHITESPACE
+)
+if(NOT ZHLN_REFLECTION_BOUNDARY_RESULT EQUAL 0)
+    message(FATAL_ERROR "${ZHLN_REFLECTION_BOUNDARY_ERROR}")
+endif()
+message(STATUS "${ZHLN_REFLECTION_BOUNDARY_OUTPUT}")
+
 set(ZHLN_TRANSPILER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/tools/transpile_reflection.py")
 
 function(zahlen_transpile_sources OUT_SOURCES_VAR)

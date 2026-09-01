@@ -37,6 +37,19 @@ constexpr auto IsBracesConstructible() -> bool {
     return std::is_aggregate_v<std::remove_cvref_t<T>>;
 }
 
+/// True when the compiler provides C++26 static reflection (P2996).
+///
+/// This is the single source of truth for the capability: nothing outside
+/// this header tests __cpp_impl_reflection / __has_feature(reflection) in
+/// library code. Code that needs to know asks ZHLN::Reflect::ReflectionAvailable,
+/// so the macro idiom cannot drift into a second copy.
+inline constexpr bool ReflectionAvailable =
+#if defined(__cpp_impl_reflection) || (defined(__has_feature) && __has_feature(reflection))
+    true;
+#else
+    false;
+#endif
+
 } // namespace ZHLN::Reflect
 
 // ============================================================================
@@ -845,6 +858,58 @@ consteval auto GetDescriptionText() -> std::string_view {
     return result;
 }
 
+// ----------------------------------------------------------------------------
+// Member queries -- the only reflection handles that leave this header.
+// Callers (e.g. extras/Network/Wire.cppm) never spell ^^, [:...:] or
+// std::meta themselves; everything raw lives in this file.
+// ----------------------------------------------------------------------------
+
+/// Spelling of a reflected data member (a handle as handed to
+/// ForEachDataMember); empty when the compiler reports no identifier.
+template <auto MemberInfo>
+consteval auto MemberName() -> std::string_view {
+    if constexpr (std::meta::has_identifier(MemberInfo)) {
+        return std::meta::identifier_of(MemberInfo);
+    }
+    return {};
+}
+
+/// Declared type of a reflected data member.
+template <auto MemberInfo>
+using MemberType = typename[:std::meta::type_of(MemberInfo):];
+
+/// Reference to a reflected data member of an object. MemberInfo must be one
+/// of the handles ForEachDataMember passes to its callback.
+template <auto MemberInfo, typename T>
+constexpr decltype(auto) MemberValue(T&& object) {
+    return (std::forward<T>(object).[:MemberInfo:]);
+}
+
+/// Invokes f.template operator()<AnnotationType>() for every annotation on a
+/// reflected entity (data member, type, enumerator...). The const qualifier
+/// some implementations add (P3394) is stripped so the callback sees the tag
+/// the source spelled.
+template <auto EntityInfo, typename F>
+consteval void ForEachAnnotationType(F&& f) {
+    for (const auto annotation: std::meta::annotations_of(EntityInfo)) {
+        constexpr auto annotationType = std::meta::remove_const(std::meta::dealias(std::meta::type_of(annotation)));
+        using AnnotationType           = typename[:annotationType:];
+        std::forward<F>(f).template operator()<AnnotationType>();
+    }
+}
+
+/// Same, for a type: walks the annotations of T. The handle overload cannot
+/// be reused here -- the computed handle is a local variable and is not a
+/// permissible non-type template argument -- so the loop lives in both.
+template <typename T, typename F>
+consteval void ForEachAnnotationType(F&& f) {
+    for (const auto annotation: std::meta::annotations_of(std::meta::dealias(^^std::remove_cvref_t<T>))) {
+        constexpr auto annotationType = std::meta::remove_const(std::meta::dealias(std::meta::type_of(annotation)));
+        using AnnotationType           = typename[:annotationType:];
+        std::forward<F>(f).template operator()<AnnotationType>();
+    }
+}
+
 template <typename T>
 consteval auto AnnotatedName() -> std::string_view {
     constexpr auto info = ^^std::remove_cvref_t<T>;
@@ -1018,6 +1083,39 @@ consteval bool HasTag(std::string_view /*unused*/) {
 
 template <std::size_t N, typename T>
 using FieldType = void;
+
+template <typename Tag, auto EntityInfo>
+consteval bool HasAnnotation() {
+    return false;
+}
+
+template <auto EntityInfo>
+consteval std::string_view GetDescriptionText() {
+    return {};
+}
+
+template <auto MemberInfo>
+consteval std::string_view MemberName() {
+    return {};
+}
+
+template <auto MemberInfo>
+using MemberType = void;
+
+template <auto MemberInfo, typename T>
+constexpr decltype(auto) MemberValue(T&& /*object*/) {
+    struct Dummy {};
+    static Dummy d;
+    return d;
+}
+
+template <auto EntityInfo, typename F>
+consteval void ForEachAnnotationType(F&& /*f*/) {
+}
+
+template <typename T, typename F>
+consteval void ForEachAnnotationType(F&& /*f*/) {
+}
 
 template <typename T>
 consteval auto BaseClasses() {
