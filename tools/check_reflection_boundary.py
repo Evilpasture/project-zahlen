@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-"""Keep reflection internals inside Reflection.hpp and modules' details unexported.
+"""Keep reflection internals inside Reflection.hpp and module internals unmarked.
 
 Three invariants, enforced at CMake configure time:
 
-1. No module interface unit exports a namespace named ``detail`` -- neither
-   ``export namespace ZHLN::Wire::detail`` nor a ``namespace detail`` declared
-   inside an ``export namespace ...`` / ``export { ... }`` block. A namespace
-   nested inside an exported namespace is exported too, so both forms leak the
-   implementation namespace to importers; an exported detail namespace must
-   never exist again.
+1. No module interface unit declares a namespace named ``detail``, exported or
+   not. Module-internal implementation needs no marker namespace: a
+   declaration that is not in an export block is internal by definition, so a
+   detail namespace in a module unit only exists to be (or become) exported by
+   accident. Private helpers live in the module's own namespace instead.
 
 2. No C++ source outside ``include/Zahlen/Core/Reflection.hpp`` spells
    ``std::meta::``, ``^^`` or ``[:`` (the splice opener) -- i.e. no raw
@@ -34,14 +33,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 REFLECTION_HEADER = ROOT / "include" / "Zahlen" / "Core" / "Reflection.hpp"
 
-# Module interface units that may declare detail namespaces.
+# Module interface units (checked for detail namespace declarations).
 MODULE_ROOTS = (ROOT / "modules", ROOT / "extras")
 # C++ source trees that must contain no raw reflection tokens.
 SOURCE_ROOTS = (ROOT / "modules", ROOT / "extras", ROOT / "src", ROOT / "include", ROOT / "app", ROOT / "tests")
 CXX_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".cppm", ".ixx", ".inl", ".ipp"}
 MODULE_SUFFIXES = {".cppm", ".ixx"}
 
-export_block = re.compile(r"\bexport\s+(?:(?:namespace\s+[A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\s*)?\{")
 namespace_decl = re.compile(r"\bnamespace\s+([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\b")
 raw_token = re.compile(r"std::meta::|\^\^|\[:")
 reflect_detail = re.compile(r"\b(?:ZHLN::)?Reflect::detail\b")
@@ -51,7 +49,7 @@ def strip_comments_and_strings(text: str) -> str:
     """Replace comments and string/char literals with spaces (newlines kept).
 
     Braces inside string literals ('{}' is all over the Wire format strings)
-    must not confuse the namespace-block walker.
+    must not confuse the namespace scan.
     """
     out = list(text)
     i, n = 0, len(text)
@@ -97,37 +95,29 @@ def strip_comments_and_strings(text: str) -> str:
     return "".join(out)
 
 
-def matching_brace(text: str, open_index: int) -> int:
-    depth = 0
-    for i in range(open_index, len(text)):
-        if text[i] == "{":
-            depth += 1
-        elif text[i] == "}":
-            depth -= 1
-            if depth == 0:
-                return i
-    return len(text)
-
-
 def line_of(text: str, index: int) -> int:
     return text.count("\n", 0, index) + 1
 
 
 def check_module_details(path: Path, violations: list[str]) -> int:
-    """Rule 1: no detail namespace may be exported by a module interface unit."""
+    """Rule 1: no detail namespace may be declared by a module interface unit.
+
+    Non-exported members are already invisible to importers, so a detail
+    namespace in a module unit has no legitimate purpose -- it only exists to
+    be exported by accident. Module-private helpers belong in the module's own
+    namespace.
+    """
     text = path.read_text(encoding="utf-8", errors="ignore")
     clean = strip_comments_and_strings(text)
     count = 0
-    for block in export_block.finditer(clean):
-        close = matching_brace(clean, block.end() - 1)
-        for ns in namespace_decl.finditer(clean, block.start(), close + 1):
-            name = ns.group(1)
-            if name.split("::")[-1] == "detail":
-                violations.append(
-                    f"{path.relative_to(ROOT)}:{line_of(clean, ns.start())} exports detail namespace '{name}' "
-                    f"(detail namespaces must stay module-private)"
-                )
-                count += 1
+    for ns in namespace_decl.finditer(clean):
+        name = ns.group(1)
+        if name.split("::")[-1] == "detail":
+            violations.append(
+                f"{path.relative_to(ROOT)}:{line_of(clean, ns.start())} declares detail namespace '{name}' "
+                f"(module internals need no detail namespace; use a non-exported declaration in the module's own namespace)"
+            )
+            count += 1
     return count
 
 
@@ -181,7 +171,7 @@ def main() -> int:
             print(f"  - {violation}", file=sys.stderr)
         print(
             "Keep std::meta and reflection tokens in include/Zahlen/Core/Reflection.hpp, "
-            "use its public API elsewhere, and never export a detail namespace.",
+            "use its public API elsewhere, and declare no detail namespace in module units.",
             file=sys.stderr,
         )
         return 1

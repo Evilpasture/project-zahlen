@@ -113,9 +113,11 @@ endif()
 message(STATUS "${ZHLN_TESTS_PUBLIC_API_OUTPUT}")
 
 # Reflection internals live in include/Zahlen/Core/Reflection.hpp and nowhere
-# else; module interface units must never export a detail namespace. Both are
-# configured-invariants -- an exported detail namespace or a stray
-# std::meta/^^/[:...:] would otherwise survive as a permanent public surface.
+# else; module interface units must never declare a detail namespace -- module
+# internals are internal by not being exported, and a detail namespace only
+# exists to be exported by accident. Both are configured-invariants: a stray
+# std::meta/^^/[:...:] or a detail namespace would otherwise survive as a
+# permanent public surface.
 execute_process(
     COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_reflection_boundary.py"
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
