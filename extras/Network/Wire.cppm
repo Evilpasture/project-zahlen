@@ -17,7 +17,7 @@
 //     diagnostics.
 //
 //   * Annotated, formatted failures: WireError enumerators carry
-//     [[= ZHLN::Description<"..."> {}]] messages that double as
+//     ZHLN_ANNOTATION(ZHLN::Description<"..."> {}) messages that double as
 //     std::format strings. A Failure records the category, the byte offset,
 //     the wire path ("snapshot.objects[3].position") and the formatted
 //     details — plus the schema annotation of the offending field.
@@ -68,28 +68,28 @@ export namespace ZHLN::Wire {
 // ============================================================================
 
 enum class WireError : uint8_t {
-    Truncated[[= ZHLN::Description<"wire stream truncated: needed {} byte(s) at offset {} but only {} remain(s)"> {}]] = 1,
-    NonCanonicalVarint[[= ZHLN::Description<"non-canonical varint at offset {}: trailing zero group (use the shortest encoding)"> {}]],
-    VarintOverflow[[= ZHLN::Description<"varint at offset {} exceeds the 64-bit range"> {}]],
-    InvalidBoolean[[= ZHLN::Description<"boolean byte {} at offset {} is neither 0 nor 1"> {}]],
-    InvalidEnumValue[[= ZHLN::Description<"value {} is not a valid enumerator of '{}'"> {}]],
-    ValueOutOfRange[[= ZHLN::Description<"value {} is outside the permitted range [{}, {}]"> {}]],
-    StringTooLong[[= ZHLN::Description<"string of {} byte(s) exceeds the {} byte limit"> {}]],
-    FixedStringOverflow[[= ZHLN::Description<"string of {} byte(s) does not fit FixedString<{}> ({} usable characters)"> {}]],
-    CollectionTooLarge[[= ZHLN::Description<"collection of {} element(s) exceeds the {} element limit"> {}]],
-    ElementCountExceedsInput[[= ZHLN::Description<"collection claims {} element(s) but only {} byte(s) of wire data remain"> {}]],
-    BufferOverflow[[= ZHLN::Description<"byte limit of {} exceeded while writing {} additional byte(s)"> {}]],
-    AllocationFailed[[= ZHLN::Description<"allocation of {} byte(s) failed"> {}]],
-    UnsupportedType[[= ZHLN::Description<"type '{}' has no wire representation"> {}]],
-    TrailingBytes[[= ZHLN::Description<"{} trailing byte(s) remain after the value ({} byte(s) total)"> {}]],
-    ChecksumMismatch[[= ZHLN::Description<"CRC32 mismatch: computed 0x{:08x}, expected 0x{:08x}"> {}]],
-    DecompressionFailed[[= ZHLN::Description<"decompression failed: {}"> {}]],
-    CompressionFailed[[= ZHLN::Description<"compression failed: {}"> {}]],
-    InvalidFrame[[= ZHLN::Description<"malformed frame: {}"> {}]],
-    FrameTooLarge[[= ZHLN::Description<"frame length {} exceeds the {} byte stream limit"> {}]],
-    FrameLengthMismatch[[= ZHLN::Description<"frame header declares {} byte(s) but {} byte(s) were provided"> {}]],
-    UnknownMessageType[[= ZHLN::Description<"message type {} is not part of protocol version {}"> {}]],
-    ProtocolVersionMismatch[[= ZHLN::Description<"protocol version mismatch: message carries {}, client speaks {}"> {}]]
+    Truncated ZHLN_ANNOTATION(ZHLN::Description<"wire stream truncated: needed {} byte(s) at offset {} but only {} remain(s)"> {}) = 1,
+    NonCanonicalVarint ZHLN_ANNOTATION(ZHLN::Description<"non-canonical varint at offset {}: trailing zero group (use the shortest encoding)"> {}),
+    VarintOverflow ZHLN_ANNOTATION(ZHLN::Description<"varint at offset {} exceeds the 64-bit range"> {}),
+    InvalidBoolean ZHLN_ANNOTATION(ZHLN::Description<"boolean byte {} at offset {} is neither 0 nor 1"> {}),
+    InvalidEnumValue ZHLN_ANNOTATION(ZHLN::Description<"value {} is not a valid enumerator of '{}'"> {}),
+    ValueOutOfRange ZHLN_ANNOTATION(ZHLN::Description<"value {} is outside the permitted range [{}, {}]"> {}),
+    StringTooLong ZHLN_ANNOTATION(ZHLN::Description<"string of {} byte(s) exceeds the {} byte limit"> {}),
+    FixedStringOverflow ZHLN_ANNOTATION(ZHLN::Description<"string of {} byte(s) does not fit FixedString<{}> ({} usable characters)"> {}),
+    CollectionTooLarge ZHLN_ANNOTATION(ZHLN::Description<"collection of {} element(s) exceeds the {} element limit"> {}),
+    ElementCountExceedsInput ZHLN_ANNOTATION(ZHLN::Description<"collection claims {} element(s) but only {} byte(s) of wire data remain"> {}),
+    BufferOverflow ZHLN_ANNOTATION(ZHLN::Description<"byte limit of {} exceeded while writing {} additional byte(s)"> {}),
+    AllocationFailed ZHLN_ANNOTATION(ZHLN::Description<"allocation of {} byte(s) failed"> {}),
+    UnsupportedType ZHLN_ANNOTATION(ZHLN::Description<"type '{}' has no wire representation"> {}),
+    TrailingBytes ZHLN_ANNOTATION(ZHLN::Description<"{} trailing byte(s) remain after the value ({} byte(s) total)"> {}),
+    ChecksumMismatch ZHLN_ANNOTATION(ZHLN::Description<"CRC32 mismatch: computed 0x{:08x}, expected 0x{:08x}"> {}),
+    DecompressionFailed ZHLN_ANNOTATION(ZHLN::Description<"decompression failed: {}"> {}),
+    CompressionFailed ZHLN_ANNOTATION(ZHLN::Description<"compression failed: {}"> {}),
+    InvalidFrame ZHLN_ANNOTATION(ZHLN::Description<"malformed frame: {}"> {}),
+    FrameTooLarge ZHLN_ANNOTATION(ZHLN::Description<"frame length {} exceeds the {} byte stream limit"> {}),
+    FrameLengthMismatch ZHLN_ANNOTATION(ZHLN::Description<"frame header declares {} byte(s) but {} byte(s) were provided"> {}),
+    UnknownMessageType ZHLN_ANNOTATION(ZHLN::Description<"message type {} is not part of protocol version {}"> {}),
+    ProtocolVersionMismatch ZHLN_ANNOTATION(ZHLN::Description<"protocol version mismatch: message carries {}, client speaks {}"> {})
 };
 
 // ============================================================================
@@ -144,10 +144,10 @@ using Result = std::expected<T, Failure>;
 // Schema annotations
 // ============================================================================
 
-/// [[= ZHLN::Wire::Skip {}]] — the field is not part of the wire format.
+/// ZHLN_ANNOTATION(ZHLN::Wire::Skip {}) — the field is not part of the wire format.
 struct Skip {};
 
-/// [[= ZHLN::Wire::Range<Min, Max> {}]] — numeric bounds enforced on decode.
+/// ZHLN_ANNOTATION(ZHLN::Wire::Range<Min, Max> {}) — numeric bounds enforced on decode.
 template <auto MinValue, auto MaxValue>
 struct Range {
     static_assert(MinValue <= MaxValue, "ZHLN::Wire::Range: minValue must be <= maxValue");
@@ -155,7 +155,7 @@ struct Range {
     static constexpr auto maxValue = MaxValue;
 };
 
-/// [[= ZHLN::Wire::Version<N> {}]] — wire schema version of an annotated type.
+/// ZHLN_ANNOTATION(ZHLN::Wire::Version<N> {}) — wire schema version of an annotated type.
 template <uint32_t Value>
 struct Version {
     static constexpr uint32_t value = Value;
@@ -1200,7 +1200,7 @@ auto DecodeValue(T& out, Reader& reader) -> Result<void> {
 
 export namespace ZHLN::Wire {
 
-/// Wire schema version declared via [[= ZHLN::Wire::Version<N> {}]]; default 1.
+/// Wire schema version declared via ZHLN_ANNOTATION(ZHLN::Wire::Version<N> {}); default 1.
 template <typename T>
 consteval auto SchemaVersionOf() -> uint32_t {
     uint32_t result = 1;

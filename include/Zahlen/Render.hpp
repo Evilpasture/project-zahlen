@@ -27,7 +27,7 @@ namespace ZHLN {
 // on "this GPU lacks the optional feature" without knowing about Vulkan.
 // ============================================================================
 enum class RenderFeatureError : uint8_t {
-    FeatureNotSupported[[= ZHLN::Description<"The requested render feature is not supported on this device">{}]] = 1,
+    FeatureNotSupported ZHLN_ANNOTATION(ZHLN::Description<"The requested render feature is not supported on this device">{}) = 1,
 };
 
 namespace Shadows {

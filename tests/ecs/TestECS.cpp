@@ -27,9 +27,9 @@ struct FlagComponent {
 };
 
 enum class ECSTestError : uint8_t {
-    EntityGenerationMismatch[[= ZHLN::Description<"Recycled entity handle failed generation check.">{}]] = 1,
-    ComponentAccessFailed[[= ZHLN::Description<"Component addition, retrieval, or removal failed.">{}]],
-    CommandBufferFailed[[= ZHLN::Description<"Deferred EntityCommandBuffer operations failed.">{}]],
+    EntityGenerationMismatch ZHLN_ANNOTATION(ZHLN::Description<"Recycled entity handle failed generation check.">{}) = 1,
+    ComponentAccessFailed ZHLN_ANNOTATION(ZHLN::Description<"Component addition, retrieval, or removal failed.">{}),
+    CommandBufferFailed ZHLN_ANNOTATION(ZHLN::Description<"Deferred EntityCommandBuffer operations failed.">{}),
 };
 
 struct ECSTestSuite {

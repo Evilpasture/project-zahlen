@@ -35,10 +35,10 @@
 namespace {
 
 enum class ScriptValueTypeTestError : uint32_t {
-    ValueConversionFailed[[= ZHLN::Description<"A value type did not round-trip through ToScriptVal/FromScriptVal."> {}]] = 1,
-    WrongRepresentation[[= ZHLN::Description<"A value type did not cross as the script representation it documents."> {}]],
-    BadInputAccepted[[= ZHLN::Description<"A malformed script value was accepted instead of rejected."> {}]],
-    WrongErrorReported[[= ZHLN::Description<"A rejected value reported a different ScriptError than expected."> {}]]
+    ValueConversionFailed ZHLN_ANNOTATION(ZHLN::Description<"A value type did not round-trip through ToScriptVal/FromScriptVal."> {}) = 1,
+    WrongRepresentation ZHLN_ANNOTATION(ZHLN::Description<"A value type did not cross as the script representation it documents."> {}),
+    BadInputAccepted ZHLN_ANNOTATION(ZHLN::Description<"A malformed script value was accepted instead of rejected."> {}),
+    WrongErrorReported ZHLN_ANNOTATION(ZHLN::Description<"A rejected value reported a different ScriptError than expected."> {})
 };
 
 /// A ScriptVal holding a fixed-length array of numbers, spelled the way Lua would.

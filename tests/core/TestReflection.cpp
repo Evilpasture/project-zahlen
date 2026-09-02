@@ -15,9 +15,9 @@
 // ============================================================================
 
 enum class WeaponType : uint32_t {
-    Pistol[[= ZHLN::Description<"Sidearm with high mobility.">{}]],
-    Rifle[[= ZHLN::Description<"Standard automatic assault rifle.">{}]],
-    Shotgun[[= ZHLN::Description<"Close-range high damage scattergun.">{}]]
+    Pistol ZHLN_ANNOTATION(ZHLN::Description<"Sidearm with high mobility.">{}),
+    Rifle ZHLN_ANNOTATION(ZHLN::Description<"Standard automatic assault rifle.">{}),
+    Shotgun ZHLN_ANNOTATION(ZHLN::Description<"Close-range high damage scattergun.">{})
 };
 
 enum class StatusEffect : uint32_t { None = 0, Burning = 1 << 0, Frozen = 1 << 1, Poisoned = 1 << 2 };

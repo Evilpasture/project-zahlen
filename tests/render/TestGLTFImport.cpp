@@ -46,16 +46,16 @@
 #include <vector>
 
 enum class GLTFImportError : uint8_t {
-    AssetUnavailable[[= ZHLN::Description<"The base rig GLB could not be read from the source tree.">{}]] = 1,
-    EngineInitFailed[[= ZHLN::Description<"Failed to initialize the headless Engine the importer uploads through.">{}]],
-    PrefabLoadFailed[[= ZHLN::Description<"CreativeWorksFactory returned no prefab for a valid in-memory GLB.">{}]],
-    NodeGraphMismatch[[= ZHLN::Description<"Imported node names, parents or transforms disagree with the source document.">{}]],
-    SkeletonMismatch[[= ZHLN::Description<"Imported skin joints, parents or inverse bind matrices disagree with the source document.">{}]],
-    AnimationMismatch[[= ZHLN::Description<"Imported animation channels disagree with the source document.">{}]],
-    PartMismatch[[= ZHLN::Description<"Imported mesh parts do not reference the nodes and skins that carry them.">{}]],
-    PrefabCacheMismatch[[= ZHLN::Description<"Reloading the same virtual path did not return the cached prefab.">{}]],
-    ExtensionMismatch[[= ZHLN::Description<"A Khronos glTF extension was not applied the way the importer documents it.">{}]],
-    EmissiveLightMismatch[[= ZHLN::Description<"Emissive virtual point lights did not follow the prefab they were spawned for.">{}]],
+    AssetUnavailable ZHLN_ANNOTATION(ZHLN::Description<"The base rig GLB could not be read from the source tree.">{}) = 1,
+    EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize the headless Engine the importer uploads through.">{}),
+    PrefabLoadFailed ZHLN_ANNOTATION(ZHLN::Description<"CreativeWorksFactory returned no prefab for a valid in-memory GLB.">{}),
+    NodeGraphMismatch ZHLN_ANNOTATION(ZHLN::Description<"Imported node names, parents or transforms disagree with the source document.">{}),
+    SkeletonMismatch ZHLN_ANNOTATION(ZHLN::Description<"Imported skin joints, parents or inverse bind matrices disagree with the source document.">{}),
+    AnimationMismatch ZHLN_ANNOTATION(ZHLN::Description<"Imported animation channels disagree with the source document.">{}),
+    PartMismatch ZHLN_ANNOTATION(ZHLN::Description<"Imported mesh parts do not reference the nodes and skins that carry them.">{}),
+    PrefabCacheMismatch ZHLN_ANNOTATION(ZHLN::Description<"Reloading the same virtual path did not return the cached prefab.">{}),
+    ExtensionMismatch ZHLN_ANNOTATION(ZHLN::Description<"A Khronos glTF extension was not applied the way the importer documents it.">{}),
+    EmissiveLightMismatch ZHLN_ANNOTATION(ZHLN::Description<"Emissive virtual point lights did not follow the prefab they were spawned for.">{}),
 };
 
 namespace {

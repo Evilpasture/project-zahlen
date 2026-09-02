@@ -94,7 +94,7 @@ inline std::atomic<uint32_t> g_validationErrors {0};
 inline std::atomic<uint32_t> g_deviceLost {0};
 
 enum class TestFrameworkError : uint8_t {
-    AssertionFailed[[= ZHLN::Description<"One or more assertions failed in this test. ">{}]] = 1,
+    AssertionFailed ZHLN_ANNOTATION(ZHLN::Description<"One or more assertions failed in this test. ">{}) = 1,
 };
 
 struct AssertionFailure {

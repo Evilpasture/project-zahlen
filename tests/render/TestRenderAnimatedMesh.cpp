@@ -38,13 +38,13 @@ constexpr uint8_t kUziGlbData[] = {
 #pragma clang diagnostic pop
 #endif
 enum class AnimatedMeshTestError : uint8_t {
-    PrefabLoadFailed[[= ZHLN::Description<"CreativeWorksFactory failed to load or parse the in-memory GLB prefab.">{}]] = 1,
-    NoSkeletalMeshSpawned[[= ZHLN::Description<"No entities with SkeletalMeshComponent were spawned.">{}]],
-    NoAnimatorFound[[= ZHLN::Description<"Root entity does not contain an AnimatorComponent.">{}]],
-    SimulationTickFailed[[= ZHLN::Description<"Engine::Tick failed during animated mesh playback.">{}]],
-    MeshDeformationExplosion[[= ZHLN::Description<"Skinned mesh bounding radius exploded or contains NaN/Inf positions.">{}]],
-    RenderOutputBlank[[= ZHLN::Description<"Rendered frame is completely black or failed to capture.">{}]],
-    MissingEmissiveGlow[[= ZHLN::Description<"Automated pixel analysis detected zero emissive purple pixels.">{}]],
+    PrefabLoadFailed ZHLN_ANNOTATION(ZHLN::Description<"CreativeWorksFactory failed to load or parse the in-memory GLB prefab.">{}) = 1,
+    NoSkeletalMeshSpawned ZHLN_ANNOTATION(ZHLN::Description<"No entities with SkeletalMeshComponent were spawned.">{}),
+    NoAnimatorFound ZHLN_ANNOTATION(ZHLN::Description<"Root entity does not contain an AnimatorComponent.">{}),
+    SimulationTickFailed ZHLN_ANNOTATION(ZHLN::Description<"Engine::Tick failed during animated mesh playback.">{}),
+    MeshDeformationExplosion ZHLN_ANNOTATION(ZHLN::Description<"Skinned mesh bounding radius exploded or contains NaN/Inf positions.">{}),
+    RenderOutputBlank ZHLN_ANNOTATION(ZHLN::Description<"Rendered frame is completely black or failed to capture.">{}),
+    MissingEmissiveGlow ZHLN_ANNOTATION(ZHLN::Description<"Automated pixel analysis detected zero emissive purple pixels.">{}),
 };
 
 struct RenderAnimatedMeshTestSuite {

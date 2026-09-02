@@ -13,7 +13,7 @@ namespace ZHLN {
 
 // Private UI subsystem setup failure (Tier 1): file-local to this TU.
 enum class UISetupError : uint8_t {
-    SetupFailed[[= ZHLN::Description<"UI subsystem setup failed">{}]] = 1,
+    SetupFailed ZHLN_ANNOTATION(ZHLN::Description<"UI subsystem setup failed">{}) = 1,
 };
 
 auto RenderContext::Impl::SetupUI(GLFWwindow* glfwWindow) -> std::expected<void, Error> {

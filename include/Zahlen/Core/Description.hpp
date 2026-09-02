@@ -3,7 +3,7 @@
 
 // include/Zahlen/Core/Description.hpp
 //
-// The annotation vocabulary behind [[= ZHLN::Description<"..."> {}]].
+// The annotation vocabulary behind ZHLN_ANNOTATION(ZHLN::Description<"..."> {}).
 //
 // Split out of Reflection.hpp on purpose: an annotation site only needs
 // StringLiteral and Description, so it no longer has to pay for <meta>,
@@ -48,3 +48,9 @@ struct Description {
 };
 
 } // namespace ZHLN
+
+#if defined(__cpp_impl_reflection) || (defined(__has_feature) && __has_feature(reflection))
+#define ZHLN_ANNOTATION(...) [[= __VA_ARGS__]]
+#else
+#define ZHLN_ANNOTATION(...)
+#endif

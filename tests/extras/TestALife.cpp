@@ -12,9 +12,9 @@
 #include <memory_resource>
 
 enum class ALifeTestError : uint8_t {
-    GOAPPlanFailed[[= ZHLN::Description<"GOAP solver failed to compute valid action sequence.">{}]] = 1,
-    PathfindingFailed[[= ZHLN::Description<"LevelGraph A* failed to find shortest path.">{}]],
-    SpatialGridQueryFailed[[= ZHLN::Description<"SpatialGrid spatial query missed expected entity.">{}]]
+    GOAPPlanFailed ZHLN_ANNOTATION(ZHLN::Description<"GOAP solver failed to compute valid action sequence.">{}) = 1,
+    PathfindingFailed ZHLN_ANNOTATION(ZHLN::Description<"LevelGraph A* failed to find shortest path.">{}),
+    SpatialGridQueryFailed ZHLN_ANNOTATION(ZHLN::Description<"SpatialGrid spatial query missed expected entity.">{})
 };
 
 struct ALifeTestSuite {

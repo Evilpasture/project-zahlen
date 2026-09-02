@@ -43,17 +43,17 @@
 // ============================================================================
 
 enum class RenderPerfTestError : uint8_t {
-    EngineInitFailed[[= ZHLN::Description<"Failed to initialize headless Engine context for render performance test.">{}]] = 1,
-    GeometryThroughputFailed[[= ZHLN::Description<"Mass geometry and instance submission failed throughput gate.">{}]],
-    LightingThroughputFailed[[= ZHLN::Description<"Clustered lighting with multi-light stress failed throughput gate.">{}]],
-    ParticleThroughputFailed[[= ZHLN::Description<"GPU particle simulation & rendering failed throughput gate.">{}]],
-    VolumetricsThroughputFailed[[= ZHLN::Description<"Volumetric fog and lighting injection failed throughput gate.">{}]],
-    DecalsThroughputFailed[[= ZHLN::Description<"Mass screen-space decal projection failed throughput gate.">{}]],
-    UICompositeThroughputFailed[[= ZHLN::Description<"Immediate-mode UI rendering and batch composition failed throughput gate.">{}]],
-    PostProcessingThroughputFailed[[= ZHLN::Description<"Post-processing, TAA jitter, and tonemapping failed throughput gate.">{}]],
-    RayTracingThroughputFailed[[= ZHLN::Description<"Hardware Ray Tracing (RTR / RT Shadows) failed throughput gate.">{}]],
-    UnifiedMasterBenchmarkFailed[[= ZHLN::Description<"Unified master graphics benchmark failed performance or image verification criteria.">{}]],
-    ValidationErrorsRaised[[= ZHLN::Description<"Vulkan validation layer reported errors during benchmark execution.">{}]],
+    EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine context for render performance test.">{}) = 1,
+    GeometryThroughputFailed ZHLN_ANNOTATION(ZHLN::Description<"Mass geometry and instance submission failed throughput gate.">{}),
+    LightingThroughputFailed ZHLN_ANNOTATION(ZHLN::Description<"Clustered lighting with multi-light stress failed throughput gate.">{}),
+    ParticleThroughputFailed ZHLN_ANNOTATION(ZHLN::Description<"GPU particle simulation & rendering failed throughput gate.">{}),
+    VolumetricsThroughputFailed ZHLN_ANNOTATION(ZHLN::Description<"Volumetric fog and lighting injection failed throughput gate.">{}),
+    DecalsThroughputFailed ZHLN_ANNOTATION(ZHLN::Description<"Mass screen-space decal projection failed throughput gate.">{}),
+    UICompositeThroughputFailed ZHLN_ANNOTATION(ZHLN::Description<"Immediate-mode UI rendering and batch composition failed throughput gate.">{}),
+    PostProcessingThroughputFailed ZHLN_ANNOTATION(ZHLN::Description<"Post-processing, TAA jitter, and tonemapping failed throughput gate.">{}),
+    RayTracingThroughputFailed ZHLN_ANNOTATION(ZHLN::Description<"Hardware Ray Tracing (RTR / RT Shadows) failed throughput gate.">{}),
+    UnifiedMasterBenchmarkFailed ZHLN_ANNOTATION(ZHLN::Description<"Unified master graphics benchmark failed performance or image verification criteria.">{}),
+    ValidationErrorsRaised ZHLN_ANNOTATION(ZHLN::Description<"Vulkan validation layer reported errors during benchmark execution.">{}),
 };
 
 // ============================================================================

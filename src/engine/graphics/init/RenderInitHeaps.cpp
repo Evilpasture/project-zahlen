@@ -16,7 +16,7 @@ namespace ZHLN {
 // Private bindless/heap setup failure (Tier 1): declared at file scope in this
 // translation unit so no header exposes it.
 enum class BindlessSetupError : uint8_t {
-    DefaultTextureRegistrationFailed[[= ZHLN::Description<"Default bindless texture registration returned unexpected indices">{}]] = 1,
+    DefaultTextureRegistrationFailed ZHLN_ANNOTATION(ZHLN::Description<"Default bindless texture registration returned unexpected indices">{}) = 1,
 };
 
 auto RenderContext::Impl::InitBindless() -> std::expected<void, Error> {

@@ -905,7 +905,7 @@ constexpr decltype(auto) MemberValue(T&& object) {
 namespace detail {
 template <std::meta::info Annotation, typename F>
 consteval void InvokeAnnotationType(F&& f) {
-    constexpr auto type = std::meta::remove_const(std::meta::dealias(std::meta::type_of(Annotation)));
+    constexpr auto type  = std::meta::remove_const(std::meta::dealias(std::meta::type_of(Annotation)));
     using AnnotationType = typename[:type:];
     std::forward<F>(f).template operator()<AnnotationType>();
 }
@@ -1155,9 +1155,72 @@ constexpr decltype(auto) GetFieldByName(T&& /*unused*/) {
     return d;
 }
 
+namespace detail {
+
+template <typename T>
+consteval auto ExtractTypeName() noexcept -> std::string_view {
+#if defined(__clang__)
+    std::string_view p     = __PRETTY_FUNCTION__;
+    auto             start = p.find("[T = ");
+    if (start != std::string_view::npos) {
+        start += 5;
+        auto end = p.find(']', start);
+        if (end != std::string_view::npos) {
+            std::string_view raw = p.substr(start, end - start);
+            for (std::string_view prefix: {"enum class ", "enum ", "struct ", "class "}) {
+                if (raw.starts_with(prefix)) {
+                    raw.remove_prefix(prefix.size());
+                    break;
+                }
+            }
+            return raw;
+        }
+    }
+#elif defined(__GNUC__)
+    std::string_view p     = __PRETTY_FUNCTION__;
+    auto             start = p.find("[with T = ");
+    if (start != std::string_view::npos) {
+        start += 10;
+        auto end = p.find(';', start);
+        if (end == std::string_view::npos)
+            end = p.find(']', start);
+        if (end != std::string_view::npos) {
+            std::string_view raw = p.substr(start, end - start);
+            for (std::string_view prefix: {"enum class ", "enum ", "struct ", "class "}) {
+                if (raw.starts_with(prefix)) {
+                    raw.remove_prefix(prefix.size());
+                    break;
+                }
+            }
+            return raw;
+        }
+    }
+#elif defined(_MSC_VER)
+    std::string_view p     = __FUNCSIG__;
+    auto             start = p.find("ExtractTypeName<");
+    if (start != std::string_view::npos) {
+        start += 16;
+        auto end = p.rfind(">(void)");
+        if (end != std::string_view::npos && end > start) {
+            std::string_view raw = p.substr(start, end - start);
+            for (std::string_view prefix: {"enum class ", "enum ", "struct ", "class "}) {
+                if (raw.starts_with(prefix)) {
+                    raw.remove_prefix(prefix.size());
+                    break;
+                }
+            }
+            return raw;
+        }
+    }
+#endif
+    return "";
+}
+
+} // namespace detail
+
 template <typename T>
 consteval std::string_view TypeName() {
-    return "";
+    return detail::ExtractTypeName<std::remove_cvref_t<T>>();
 }
 
 /// TypeName with an optional rename predicate (fallback build). The compiler

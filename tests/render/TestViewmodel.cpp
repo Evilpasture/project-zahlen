@@ -24,11 +24,11 @@
 #include <vector>
 
 enum class ViewmodelTestError : uint8_t {
-    EngineInitFailed[[= ZHLN::Description<"Failed to initialize headless Engine context for Viewmodel test.">{}]] = 1,
-    FOVDecouplingFailed[[= ZHLN::Description<"Camera FOV modifications altered the viewmodel projection matrix.">{}]],
-    RenderOutputBlank[[= ZHLN::Description<"Rendered frame is blank or failed to capture.">{}]],
-    ViewmodelNotRendered[[= ZHLN::Description<"Automated pixel analysis detected zero viewmodel pixels on screen.">{}]],
-    ViewmodelOccludedByWorld[[= ZHLN::Description<"Viewmodel was erroneously occluded by world geometry in front of it.">{}]],
+    EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine context for Viewmodel test.">{}) = 1,
+    FOVDecouplingFailed ZHLN_ANNOTATION(ZHLN::Description<"Camera FOV modifications altered the viewmodel projection matrix.">{}),
+    RenderOutputBlank ZHLN_ANNOTATION(ZHLN::Description<"Rendered frame is blank or failed to capture.">{}),
+    ViewmodelNotRendered ZHLN_ANNOTATION(ZHLN::Description<"Automated pixel analysis detected zero viewmodel pixels on screen.">{}),
+    ViewmodelOccludedByWorld ZHLN_ANNOTATION(ZHLN::Description<"Viewmodel was erroneously occluded by world geometry in front of it.">{}),
 };
 
 struct ViewmodelTestSuite {
