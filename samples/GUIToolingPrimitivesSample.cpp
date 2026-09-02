@@ -62,13 +62,14 @@ void DrawRenderSettingsWindow(ZHLN::GUI::Context& ui, RenderSettings& s) {
         .padding  = 14.0f,
     }, [&]() -> void {
         ui.Label("Render Settings", ZHLN::GUI::LabelConfig {
-            .scale  = 1.05f,
-            .color  = {0.40f, 0.72f, 1.00f, 1.0f},
-            .height = 28.0f,
-            .align  = ZHLN::TextAlignment::Center,
+            .scale         = 1.05f,
+            .color         = {0.40f, 0.72f, 1.00f, 1.0f},
+            .align         = ZHLN::TextAlignment::Center,
+            .verticalAlign = ZHLN::TextVerticalAlignment::Center,
+            .height        = 28.0f,
         });
 
-        ui.CollapsingHeader("Display", true, [&]() -> void {
+        auto scopeDisplay = ui.CollapsingHeader("Display", true, [&]() -> void {
             ui.Checkbox("VSync",    "Enable VSync",    s.enableVsync);
             ui.Checkbox("Wireframe","Wireframe Overlay",s.showWireframe);
             ui.Checkbox("Grid",     "Show Grid",       s.showGrid);
@@ -77,20 +78,20 @@ void DrawRenderSettingsWindow(ZHLN::GUI::Context& ui, RenderSettings& s) {
             ui.Slider("Bloom",       s.bloomIntensity,  0.0f,   1.0f, 0.01f);
         });
 
-        ui.CollapsingHeader("Quality", false, [&]() -> void {
+        auto scopeQuality = ui.CollapsingHeader("Quality", false, [&]() -> void {
             int idx = s.qualityPreset;
             ui.Dropdown("Preset", "Quality Preset", idx,
                         std::span<const std::string_view>(kQualityPresets));
             s.qualityPreset = idx;
         });
 
-        ui.CollapsingHeader("Profile", true, [&]() -> void {
+        auto scopeProfile = ui.CollapsingHeader("Profile", true, [&]() -> void {
             ui.TextInput("ProfileName", "Profile Name", s.profileName);
         });
 
         // Splitter/Columns demo: left half "Preview" placeholder, right half "Stats".
         float split = 0.55f;
-        ui.Columns("PreviewSplit", ZHLN::GUI::SplitDirection::Horizontal, split,
+        auto scopeSplit = ui.Columns("PreviewSplit", ZHLN::GUI::SplitDirection::Horizontal, split,
             [&]() -> void {
                 ui.Box(ZHLN::GUI::BoxConfig {
                     .height    = 100.0f,
@@ -101,17 +102,25 @@ void DrawRenderSettingsWindow(ZHLN::GUI::Context& ui, RenderSettings& s) {
                     .padding   = 8.0f,
                 }, [&]() -> void {
                     ui.Label("Preview", ZHLN::GUI::LabelConfig {
-                        .color = {0.55f, 0.70f, 0.90f, 0.60f}
+                        .scale         = 0.90f,
+                        .color         = {0.55f, 0.70f, 0.90f, 0.60f},
+                        .align         = ZHLN::TextAlignment::Center,
+                        .verticalAlign = ZHLN::TextVerticalAlignment::Center,
                     });
                 });
             },
             [&]() -> void {
-                ui.Label("Stats", ZHLN::GUI::LabelConfig {.height = 20.0f});
+                ui.Label("Stats", ZHLN::GUI::LabelConfig {
+                    .scale         = 0.80f,
+                    .color         = {0.70f, 0.80f, 0.95f, 1.0f},
+                    .height        = 20.0f,
+                });
                 ui.Label("FPS: 142",  ZHLN::GUI::LabelConfig {.scale = 0.75f, .height = 18.0f});
                 ui.Label("Draws: 312",ZHLN::GUI::LabelConfig {.scale = 0.75f, .height = 18.0f});
                 ui.Label("VSync: on", ZHLN::GUI::LabelConfig {.scale = 0.75f, .height = 18.0f});
             }
         );
+        (void)scopeDisplay; (void)scopeQuality; (void)scopeProfile; (void)scopeSplit;
     });
 }
 

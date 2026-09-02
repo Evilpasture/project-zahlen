@@ -993,7 +993,9 @@ class Context {
                 Components::UIDropdownComponent {
                     .selectedIdx = selectedIdx,
                     .previousIdx = selectedIdx,
-                    .expanded    = false
+                    .expanded    = false,
+                    .hovered     = false,
+                    .options     = {},
                 }
             );
             return ent;
