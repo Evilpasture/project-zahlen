@@ -364,7 +364,7 @@ struct UILayoutRenderTestSuite {
                     ui.Dropdown("qual", "Quality", q, opts);
                     s.quality = q;
                     ui.TextInput("prof", "Profile", s.profile);
-                    auto cols = ui.Columns("split", ZHLN::GUI::SplitDirection::Horizontal, s.splitRatio,
+                    ui.Columns("split", ZHLN::GUI::SplitDirection::Horizontal, s.splitRatio,
                         [&]() -> void {
                             ui.Box(ZHLN::GUI::BoxConfig {
                                 .height = 80.0f,
@@ -375,7 +375,6 @@ struct UILayoutRenderTestSuite {
                             ui.Label("Stats");
                             ui.Label("FPS: 142");
                         });
-                    (void)cols;
                 });
             });
 

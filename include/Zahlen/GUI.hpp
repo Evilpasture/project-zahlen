@@ -1246,7 +1246,7 @@ class Context {
 
     template <typename LeftFn, typename RightFn>
         requires std::invocable<LeftFn> && std::invocable<RightFn>
-    [[nodiscard]] auto Columns(std::string_view id, SplitDirection direction, float& ratio, LeftFn&& leftFn, RightFn&& rightFn, const SplitterConfig& cfg = {}) -> UIScope {
+    auto Columns(std::string_view id, SplitDirection direction, float& ratio, LeftFn&& leftFn, RightFn&& rightFn, const SplitterConfig& cfg = {}) -> Entity {
         Entity   parent = GetCurrentParent();
         uint32_t depth  = GetCurrentDepth();
         uint64_t key    = HashCombine(parent.Pack(), HashStringView(id));
@@ -1390,22 +1390,35 @@ class Context {
             std::forward<RightFn>(rightFn)();
         }
 
-        return scope;
+        // Closure-overload contract: like Panel/Box(name, cfg, fn), the
+        // scope is held locally so its destructor runs the pop+sweep on
+        // return, and we give the caller back the entity (which is the
+        // only thing a closure-based caller cares about — the scope was
+        // already opened AND closed for them while `fn` executed, unlike
+        // the guard-returning RAII form).
+        Entity ent = scope.GetEntity();
+        return ent;
     }
 
     // ui.Splitter is the same primitive with a name that evokes the drag handle
     template <typename LeftFn, typename RightFn>
         requires std::invocable<LeftFn> && std::invocable<RightFn>
-    [[nodiscard]] auto Splitter(std::string_view id, SplitDirection direction, float& ratio, LeftFn&& leftFn, RightFn&& rightFn, const SplitterConfig& cfg = {}) -> UIScope {
+    auto Splitter(std::string_view id, SplitDirection direction, float& ratio, LeftFn&& leftFn, RightFn&& rightFn, const SplitterConfig& cfg = {}) -> Entity {
         return Columns(id, direction, ratio, std::forward<LeftFn>(leftFn), std::forward<RightFn>(rightFn), cfg);
     }
 
     template <typename LeftFn, typename RightFn>
         requires std::invocable<LeftFn> && std::invocable<RightFn>
-    [[nodiscard]] auto Columns(SplitDirection direction, float& ratio, LeftFn&& leftFn, RightFn&& rightFn, const SplitterConfig& cfg = {}) -> UIScope {
+    auto Columns(SplitDirection direction, float& ratio, LeftFn&& leftFn, RightFn&& rightFn, const SplitterConfig& cfg = {}) -> Entity {
         std::array<char, 64> nameBuf {};
         std::string_view     autoName = FormatTo(nameBuf, "Split_D{}_{}", GetCurrentDepth(), m_autoIdCounter++);
         return Columns(autoName, direction, ratio, std::forward<LeftFn>(leftFn), std::forward<RightFn>(rightFn), cfg);
+    }
+
+    template <typename LeftFn, typename RightFn>
+        requires std::invocable<LeftFn> && std::invocable<RightFn>
+    auto Splitter(SplitDirection direction, float& ratio, LeftFn&& leftFn, RightFn&& rightFn, const SplitterConfig& cfg = {}) -> Entity {
+        return Columns(direction, ratio, std::forward<LeftFn>(leftFn), std::forward<RightFn>(rightFn), cfg);
     }
 
   private:

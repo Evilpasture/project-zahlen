@@ -91,7 +91,7 @@ void DrawRenderSettingsWindow(ZHLN::GUI::Context& ui, RenderSettings& s) {
 
         // Splitter/Columns demo: left half "Preview" placeholder, right half "Stats".
         float split = 0.55f;
-        auto scopeSplit = ui.Columns("PreviewSplit", ZHLN::GUI::SplitDirection::Horizontal, split,
+        ui.Columns("PreviewSplit", ZHLN::GUI::SplitDirection::Horizontal, split,
             [&]() -> void {
                 ui.Box(ZHLN::GUI::BoxConfig {
                     .height    = 100.0f,
@@ -120,7 +120,7 @@ void DrawRenderSettingsWindow(ZHLN::GUI::Context& ui, RenderSettings& s) {
                 ui.Label("VSync: on", ZHLN::GUI::LabelConfig {.scale = 0.75f, .height = 18.0f});
             }
         );
-        (void)scopeDisplay; (void)scopeQuality; (void)scopeProfile; (void)scopeSplit;
+        (void)scopeDisplay; (void)scopeQuality; (void)scopeProfile;
     });
 }
 

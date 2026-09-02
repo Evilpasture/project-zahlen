@@ -678,11 +678,9 @@ struct GUIContextTestSuite {
             Entity rLbl  = Entity::Null();
             {
                 GUI::Context gui(reg, 1);
-                auto scope = gui.Columns("split", GUI::SplitDirection::Horizontal, ratio,
+                sp1 = gui.Columns("split", GUI::SplitDirection::Horizontal, ratio,
                     [&]() -> void { lLbl = gui.Label("L"); },
                     [&]() -> void { rLbl = gui.Label("R"); });
-                sp1 = scope.GetEntity();
-                (void)scope;
             }
             ZHLN::Test::ExpectTrue(sp1 != Entity::Null());
             ZHLN::Test::ExpectTrue(reg.IsAlive(lLbl));
@@ -703,11 +701,9 @@ struct GUIContextTestSuite {
             ratio = 0.6f;
             {
                 GUI::Context gui(reg, 2);
-                auto scope = gui.Columns("split", GUI::SplitDirection::Horizontal, ratio,
+                sp2 = gui.Columns("split", GUI::SplitDirection::Horizontal, ratio,
                     [&]() -> void { lLbl2 = gui.Label("L"); },
                     [&]() -> void { rLbl2 = gui.Label("R"); });
-                sp2 = scope.GetEntity();
-                (void)scope;
             }
             ZHLN::Test::ExpectEq(sp1.Pack(), sp2.Pack());
             ZHLN::Test::ExpectEq(lLbl.Pack(), lLbl2.Pack());
@@ -722,9 +718,8 @@ struct GUIContextTestSuite {
             ratio = -0.5f;
             {
                 GUI::Context gui(reg, 3);
-                auto scope = gui.Columns("split", GUI::SplitDirection::Horizontal, ratio,
+                (void)gui.Columns("split", GUI::SplitDirection::Horizontal, ratio,
                     [&]() -> void {}, [&]() -> void {});
-                (void)scope;
             }
             ZHLN::Test::ExpectTrue(ratio >= 0.05f - 1e-5f);
 
@@ -760,10 +755,9 @@ struct GUIContextTestSuite {
                         gui.Label("inside-ch");
                     });
                     chEnt = ch.GetEntity();
-                    auto col = gui.Columns("sp", GUI::SplitDirection::Horizontal, splitterRatio,
+                    spEnt = gui.Columns("sp", GUI::SplitDirection::Horizontal, splitterRatio,
                         [&]() -> void { gui.Label("L"); },
                         [&]() -> void { gui.Label("R"); });
-                    spEnt = col.GetEntity();
                 });
             }
 
