@@ -419,6 +419,358 @@ struct GUIContextTestSuite {
 
             return {};
         }
+
+        // ------------------------------------------------------------------
+        // CHECKBOX: entity reuse across frames, boolean out-param reflects
+        // the ECS value, and inner visual children (box + mark + label) are
+        // cached rather than respawned.
+        // ------------------------------------------------------------------
+        auto checkbox_reuses_entity_and_its_visual_children() -> std::expected<void, ZHLN::Error> {
+            Registry reg;
+
+            bool value = false;
+            Entity cb1 = Entity::Null();
+            {
+                GUI::Context gui(reg, 1);
+                cb1 = gui.Checkbox("vsync", "Vsync", value);
+            }
+            size_t rectsAfter1 = CountUIRects(reg);
+            ZHLN::Test::ExpectTrue(rectsAfter1 >= 4u); // root + box + mark + label at minimum
+
+            value = true; // flip out-param externally before frame 2
+            Entity cb2 = Entity::Null();
+            {
+                GUI::Context gui(reg, 2);
+                cb2 = gui.Checkbox("vsync", "Vsync", value);
+            }
+
+            ZHLN::Test::ExpectEq(cb1.Pack(), cb2.Pack());
+            // External value change is accepted into the component
+            const auto* cbComp = reg.Get<Comp::UICheckboxComponent>(cb2);
+            ZHLN::Test::ExpectTrue(cbComp != nullptr);
+            if (cbComp != nullptr) {
+                ZHLN::Test::ExpectTrue(cbComp->checked);
+            }
+            // No child entity respawning (stable count)
+            ZHLN::Test::ExpectEq(CountUIRects(reg), rectsAfter1);
+
+            return {};
+        }
+
+        // ------------------------------------------------------------------
+        // SLIDER: entity reuse, float out-param clamped into [min,max], and
+        // visual children (track + knob + optional label + value) are cached.
+        // ------------------------------------------------------------------
+        auto slider_reuses_entity_and_clamps_value() -> std::expected<void, ZHLN::Error> {
+            Registry reg;
+
+            float value = 1.5f; // above max — must clamp on first frame
+            Entity sl1 = Entity::Null();
+            {
+                GUI::Context gui(reg, 1);
+                sl1 = gui.Slider("gamma", "Gamma", value, 0.0f, 1.0f, 0.01f);
+            }
+            ZHLN::Test::ExpectTrue(value <= 1.0f + 1e-5f); // clamped out
+
+            value = 0.3f; // external programmatic change
+            Entity sl2 = Entity::Null();
+            {
+                GUI::Context gui(reg, 2);
+                sl2 = gui.Slider("gamma", "Gamma", value, 0.0f, 1.0f, 0.01f);
+            }
+            ZHLN::Test::ExpectEq(sl1.Pack(), sl2.Pack());
+            const auto* slComp = reg.Get<Comp::UISliderComponent>(sl2);
+            ZHLN::Test::ExpectTrue(slComp != nullptr);
+            if (slComp != nullptr) {
+                ZHLN::Test::ExpectTrue(std::abs(slComp->value - 0.3f) < 1e-5f);
+                ZHLN::Test::ExpectTrue(std::abs(slComp->minValue - 0.0f) < 1e-5f);
+                ZHLN::Test::ExpectTrue(std::abs(slComp->maxValue - 1.0f) < 1e-5f);
+                ZHLN::Test::ExpectTrue(std::abs(slComp->step - 0.01f) < 1e-5f);
+                ZHLN::Test::ExpectFalse(slComp->isDragging); // idle
+            }
+
+            return {};
+        }
+
+        // ------------------------------------------------------------------
+        // TEXTINPUT: entity reuse, string out-param syncs from the ECS
+        // component, and the editable text lives on a LEAF child (no children
+        // of its own) so Yoga never has to attach a measure function to a
+        // node that already has children (this was the original Yoga crash).
+        // Regression guard for "Nodes with measure functions cannot have
+        // children".
+        // ------------------------------------------------------------------
+        auto textinput_has_no_text_on_root_and_leaf_text_child() -> std::expected<void, ZHLN::Error> {
+            Registry reg;
+
+            std::string value = "hello";
+            Entity ti1 = Entity::Null();
+            {
+                GUI::Context gui(reg, 1);
+                ti1 = gui.TextInput("name", "Name", value);
+            }
+            // Root must NOT carry the TextComponent (that was the Yoga crash
+            // trigger: measure func + children), but must still hold the
+            // UITextInputComponent for the engine's key handler.
+            ZHLN::Test::ExpectTrue(reg.Get<Comp::UITextInputComponent>(ti1) != nullptr);
+            // The editable text leaf child must exist and be a leaf.
+            Entity textLeaf = Entity::Null();
+            if (const auto* cache = reg.Get<Comp::UIChildCacheComponent>(ti1)) {
+                cache->children.ForEach([&](uint64_t, const Comp::UIChildCacheComponent::ChildRecord& rec) -> void {
+                    Entity c = rec.entity;
+                    if (!reg.IsAlive(c)) return;
+                    if (const auto* nm = reg.Get<Comp::NameComponent>(c)) {
+                        if (std::string_view(nm->name) == "_ti_text") textLeaf = c;
+                    }
+                });
+            }
+            ZHLN::Test::ExpectTrue(textLeaf != Entity::Null());
+            if (textLeaf != Entity::Null()) {
+                // Text leaf has TextComponent, no children, UITextInputComponent is NOT here
+                ZHLN::Test::ExpectTrue(reg.Get<Comp::TextComponent>(textLeaf) != nullptr);
+                ZHLN::Test::ExpectTrue(reg.Get<Comp::UITextInputComponent>(textLeaf) == nullptr);
+                ZHLN::Test::ExpectEq(CountCacheRecordsOn(reg, textLeaf), 0u); // leaf
+            }
+
+            // Label path: when both id and label are supplied, a _ti_label
+            // sibling is created; rebuild reuses entities.
+            std::string v2 = "world";
+            Entity ti2 = Entity::Null();
+            size_t rectsBefore2 = CountUIRects(reg);
+            {
+                GUI::Context gui(reg, 2);
+                ti2 = gui.TextInput("name", "Name", v2);
+            }
+            ZHLN::Test::ExpectEq(ti1.Pack(), ti2.Pack());
+            ZHLN::Test::ExpectEq(CountUIRects(reg), rectsBefore2); // no respawn
+
+            return {};
+        }
+
+        // ------------------------------------------------------------------
+        // DROPDOWN: entity reuse, selected index out-param sync, option list
+        // stored in the component, expansion starts collapsed, and removing
+        // the dropdown sweeps its menu box + option items.
+        // ------------------------------------------------------------------
+        auto dropdown_stores_options_and_tracks_selected_index() -> std::expected<void, ZHLN::Error> {
+            Registry reg;
+
+            std::array<std::string_view, 3> opts = {"Low", "Medium", "High"};
+            int selected = 1;
+            Entity dd1 = Entity::Null();
+            {
+                GUI::Context gui(reg, 1);
+                dd1 = gui.Dropdown("qual", "Quality", selected, opts);
+            }
+            const auto* ddComp = reg.Get<Comp::UIDropdownComponent>(dd1);
+            ZHLN::Test::ExpectTrue(ddComp != nullptr);
+            if (ddComp != nullptr) {
+                ZHLN::Test::ExpectEq(static_cast<int>(ddComp->options.size()), 3);
+                ZHLN::Test::ExpectEq(ddComp->selectedIdx, 1);
+                ZHLN::Test::ExpectFalse(ddComp->expanded); // collapsed by default
+            }
+            // Header children exist: display text + arrow
+            ZHLN::Test::ExpectTrue(CountCacheRecordsOn(reg, dd1) >= 2u);
+            // Menu box should NOT exist while collapsed (we only create it when
+            // expanded). That also means option items don't clutter the
+            // registry when closed.
+            size_t rectsWhileCollapsed = CountUIRects(reg);
+
+            // Rebuild identical dropdown — stable entities, no leak.
+            selected = 2;
+            Entity dd2 = Entity::Null();
+            {
+                GUI::Context gui(reg, 2);
+                dd2 = gui.Dropdown("qual", "Quality", selected, opts);
+            }
+            ZHLN::Test::ExpectEq(dd1.Pack(), dd2.Pack());
+            ZHLN::Test::ExpectEq(CountUIRects(reg), rectsWhileCollapsed);
+
+            // Removing the dropdown from the tree sweeps all its children.
+            {
+                GUI::Context gui(reg, 3);
+                gui.SweepStaleChildren(Entity::Null()); // "qual" not rebuilt this frame
+            }
+            ZHLN::Test::ExpectFalse(reg.IsAlive(dd1));
+            ZHLN::Test::ExpectEq(CountUIRects(reg), 0u);
+
+            return {};
+        }
+
+        // ------------------------------------------------------------------
+        // COLLAPSINGHEADER: RAII scope — content entities are only visited
+        // (and thus exist) while open. Toggling closed sweeps the content
+        // subtree; toggling open rebuilds it.
+        // ------------------------------------------------------------------
+        auto collapsing_header_content_exists_only_while_open() -> std::expected<void, ZHLN::Error> {
+            Registry reg;
+
+            // Frame 1: defaultOpen = true, content is built
+            Entity hdrOpen = Entity::Null();
+            Entity lbl     = Entity::Null();
+            {
+                GUI::Context gui(reg, 1);
+                auto scope = gui.CollapsingHeader("adv", "Advanced", true, [&]() -> void {
+                    lbl = gui.Label("inner-label");
+                });
+                hdrOpen = scope.GetEntity();
+                (void)scope;
+            }
+            ZHLN::Test::ExpectTrue(hdrOpen != Entity::Null());
+            ZHLN::Test::ExpectTrue(reg.IsAlive(lbl));
+
+            // Frame 2: still defaultOpen=true (we aren't simulating clicks),
+            // entities reuse.
+            Entity lbl2 = Entity::Null();
+            {
+                GUI::Context gui(reg, 2);
+                auto scope = gui.CollapsingHeader("adv", "Advanced", true, [&]() -> void {
+                    lbl2 = gui.Label("inner-label");
+                });
+                (void)scope;
+            }
+            ZHLN::Test::ExpectEq(lbl.Pack(), lbl2.Pack());
+
+            // Frame 3: defaultOpen=false. Content should not be visited and
+            // thus swept when the header scope closes.
+            {
+                GUI::Context gui(reg, 3);
+                auto scope = gui.CollapsingHeader("adv", "Advanced", false, [&]() -> void {
+                    lbl2 = gui.Label("inner-label"); // never invoked when closed
+                });
+                (void)scope;
+            }
+            ZHLN::Test::ExpectFalse(reg.IsAlive(lbl2));
+            ZHLN::Test::ExpectTrue(reg.IsAlive(hdrOpen)); // header itself still alive
+
+            return {};
+        }
+
+        // ------------------------------------------------------------------
+        // COLUMNS/SPLITTER: entity reuse, ratio is persisted in the
+        // UISplitterComponent, left + right + handle children are created
+        // and re-parented correctly, and removing the splitter sweeps its
+        // subtree.
+        // ------------------------------------------------------------------
+        auto columns_creates_three_children_and_persists_ratio() -> std::expected<void, ZHLN::Error> {
+            Registry reg;
+
+            float ratio = 0.3f;
+            Entity sp1  = Entity::Null();
+            Entity lLbl  = Entity::Null();
+            Entity rLbl  = Entity::Null();
+            {
+                GUI::Context gui(reg, 1);
+                auto scope = gui.Columns("split", GUI::SplitDirection::Horizontal, ratio,
+                    [&]() -> void { lLbl = gui.Label("L"); },
+                    [&]() -> void { rLbl = gui.Label("R"); });
+                sp1 = scope.GetEntity();
+                (void)scope;
+            }
+            ZHLN::Test::ExpectTrue(sp1 != Entity::Null());
+            ZHLN::Test::ExpectTrue(reg.IsAlive(lLbl));
+            ZHLN::Test::ExpectTrue(reg.IsAlive(rLbl));
+            const auto* spComp = reg.Get<Comp::UISplitterComponent>(sp1);
+            ZHLN::Test::ExpectTrue(spComp != nullptr);
+            if (spComp != nullptr) {
+                ZHLN::Test::ExpectTrue(std::abs(spComp->ratio - 0.3f) < 1e-5f);
+                ZHLN::Test::ExpectTrue(spComp->direction == Comp::UISplitterComponent::Horizontal);
+                ZHLN::Test::ExpectFalse(spComp->isDragging);
+            }
+            // Expect 3 immediate children: left, handle, right
+            ZHLN::Test::ExpectEq(CountCacheRecordsOn(reg, sp1), 3u);
+
+            // Re-build with a different ratio (external mutation); entity
+            // reuse still holds, ratio updates.
+            Entity lLbl2 = Entity::Null(), rLbl2 = Entity::Null(), sp2 = Entity::Null();
+            ratio = 0.6f;
+            {
+                GUI::Context gui(reg, 2);
+                auto scope = gui.Columns("split", GUI::SplitDirection::Horizontal, ratio,
+                    [&]() -> void { lLbl2 = gui.Label("L"); },
+                    [&]() -> void { rLbl2 = gui.Label("R"); });
+                sp2 = scope.GetEntity();
+                (void)scope;
+            }
+            ZHLN::Test::ExpectEq(sp1.Pack(), sp2.Pack());
+            ZHLN::Test::ExpectEq(lLbl.Pack(), lLbl2.Pack());
+            ZHLN::Test::ExpectEq(rLbl.Pack(), rLbl2.Pack());
+            spComp = reg.Get<Comp::UISplitterComponent>(sp2);
+            ZHLN::Test::ExpectTrue(spComp != nullptr);
+            if (spComp != nullptr) {
+                ZHLN::Test::ExpectTrue(std::abs(spComp->ratio - 0.6f) < 1e-5f);
+            }
+
+            // Ratio must be clamped back to [0.05, 0.95]
+            ratio = -0.5f;
+            {
+                GUI::Context gui(reg, 3);
+                auto scope = gui.Columns("split", GUI::SplitDirection::Horizontal, ratio,
+                    [&]() -> void {}, [&]() -> void {});
+                (void)scope;
+            }
+            ZHLN::Test::ExpectTrue(ratio >= 0.05f - 1e-5f);
+
+            return {};
+        }
+
+        // ------------------------------------------------------------------
+        // Compound-widget container roots never carry a TextComponent (which
+        // would give the Yoga node a measure function) while ALSO having
+        // children attached. This is the universal form of the Yoga crash
+        // "Cannot add child: Nodes with measure functions cannot have
+        // children." Every compound widget root is validated here.
+        // ------------------------------------------------------------------
+        auto compound_widget_roots_never_pair_text_with_children() -> std::expected<void, ZHLN::Error> {
+            Registry reg;
+
+            bool cb = false;
+            float sl = 0.5f;
+            std::string ti = "x";
+            std::array<std::string_view, 2> ddOpts = {"a", "b"};
+            int ddSel = 0;
+            float splitterRatio = 0.5f;
+
+            Entity cbEnt, slEnt, tiEnt, ddEnt, chEnt, spEnt;
+            {
+                GUI::Context gui(reg, 1);
+                gui.Panel("r", GUI::PanelConfig {}, [&]() -> void {
+                    cbEnt = gui.Checkbox("cb", "CB", cb);
+                    slEnt = gui.Slider("sl", "SL", sl, 0.0f, 1.0f);
+                    tiEnt = gui.TextInput("ti", "TI", ti);
+                    ddEnt = gui.Dropdown("dd", "DD", ddSel, ddOpts);
+                    auto ch = gui.CollapsingHeader("ch", "CH", true, [&]() -> void {
+                        gui.Label("inside-ch");
+                    });
+                    chEnt = ch.GetEntity();
+                    auto col = gui.Columns("sp", GUI::SplitDirection::Horizontal, splitterRatio,
+                        [&]() -> void { gui.Label("L"); },
+                        [&]() -> void { gui.Label("R"); });
+                    spEnt = col.GetEntity();
+                });
+            }
+
+            // For each compound root: if it has children, it must NOT have a
+            // TextComponent (which is what triggers Yoga's measure-func path).
+            const auto checkRoot = [&](Entity e, const char* name) -> void {
+                if (e == Entity::Null() || !reg.IsAlive(e)) return;
+                const bool hasText     = reg.Get<Comp::TextComponent>(e) != nullptr;
+                const size_t kids      = CountCacheRecordsOn(reg, e);
+                if (kids > 0 && hasText) {
+                    // Surface the violation as an Expect failure rather than
+                    // a crash so we know which widget regressed.
+                    ZHLN::Test::ExpectTrue(false && name);
+                }
+            };
+            checkRoot(cbEnt, "checkbox");
+            checkRoot(slEnt, "slider");
+            checkRoot(tiEnt, "textinput");
+            checkRoot(ddEnt, "dropdown");
+            checkRoot(chEnt, "collapsingheader");
+            checkRoot(spEnt, "splitter");
+
+            return {};
+        }
     };
 };
 

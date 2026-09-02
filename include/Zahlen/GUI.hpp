@@ -848,6 +848,10 @@ class Context {
         return DragFloat(label, label, value, minVal, maxVal, step, cfg);
     }
 
+    auto Slider(std::string_view id, std::string_view label, float& value, float minVal, float maxVal, float step = 0.0f, const SliderConfig& cfg = {}) -> Entity {
+        return DragFloat(id, label, value, minVal, maxVal, step, cfg);
+    }
+
     template <typename OnChangeFn>
         requires std::invocable<OnChangeFn, float>
     auto DragFloat(std::string_view id, std::string_view label, float& value, float minVal, float maxVal, OnChangeFn&& onChange) -> Entity {
@@ -893,7 +897,13 @@ class Context {
 
         const TextureHandle fontHandle = ResolveFontTexture();
 
-        // First, initialise the component text from the caller on create
+        // First, initialise the component text from the caller on create.
+        // The root is a plain flex container WITHOUT a TextComponent (so Yoga
+        // does not attach a measure function — nodes with measure funcs cannot
+        // have children). The editable text lives on a dedicated inner child
+        // `_ti_text` that is a leaf (no children of its own), and an optional
+        // `_ti_label` child sits alongside it. The UITextInputComponent stays
+        // on the root so the engine's key handler finds it by entity type.
         Entity e = GetOrCreateEntity(key, [&]() -> Entity {
             String256 initialText;
             initialText.assign(std::string_view(value));
@@ -909,15 +919,7 @@ class Context {
                     .gapX          = 6.0f
                 },
                 Components::UIButtonComponent {},
-                Components::UITextInputComponent {.text = initialText, .cursorIndex = 0, .isFocused = false, .edited = false},
-                Components::TextComponent {
-                    .text          = initialText,
-                    .scale         = cfg.scale,
-                    .color         = cfg.textColor,
-                    .align         = TextAlignment::Left,
-                    .verticalAlign = TextVerticalAlignment::Center,
-                    .fontIndex     = fontHandle
-                }
+                Components::UITextInputComponent {.text = initialText, .cursorIndex = 0, .isFocused = false, .edited = false}
             );
         });
 
@@ -1045,6 +1047,7 @@ class Context {
                         Components::UIFlexComponent {
                             .direction     = FlexDirection::Row,
                             .alignItems    = FlexAlign::Center,
+                            .flexGrow      = 1.0f,
                             .paddingLeft   = cfg.padding,
                             .paddingRight  = cfg.padding
                         },
@@ -1060,12 +1063,15 @@ class Context {
                     );
                 });
 
-                // Ensure parent/depth stays correct if the menu box moved
+                // Ensure parent/depth/sizing stays correct if the menu box moved
                 m_reg->Patch<Components::UIRectComponent>(itemEnt, [&](auto& r) -> auto {
                     r.parentEntity   = menuParent;
                     r.hierarchyDepth = menuDepth;
                     r.height         = cfg.itemHeight;
                 });
+                if (auto* iflex = m_reg->Get<Components::UIFlexComponent>(itemEnt)) {
+                    iflex->flexGrow = 1.0f;
+                }
 
                 // Update text/color
                 m_reg->Patch<Components::TextComponent>(itemEnt, [&](auto& tc) -> auto {
@@ -1701,14 +1707,45 @@ class Context {
             pc.edgeWidth    = 1.0f;
             pc.borderRadius = cfg.borderRadius;
         });
-        // Sync text component from input component text
+
+        // Ensure the leaf text child exists (leaf — no children, so Yoga may
+        // safely attach a measure function to it). Sync it from the
+        // UITextInputComponent which is the authoritative text store.
         if (auto* input = m_reg->Get<Components::UITextInputComponent>(e)) {
-            // Ensure we have a TextComponent showing the current text
-            if (auto* tc = m_reg->Get<Components::TextComponent>(e)) {
-                tc->text      = input->text;
-                tc->color     = cfg.textColor;
-                tc->scale     = cfg.scale;
-                tc->fontIndex = font;
+            uint32_t parentDepth = 0;
+            if (const auto* r = m_reg->Get<Components::UIRectComponent>(e)) {
+                parentDepth = r->hierarchyDepth;
+            }
+            Entity textEnt = GetOrCreateChild(e, HashStringView("_ti_text"), [&]() -> Entity {
+                return m_reg->Create(
+                    Components::NameComponent {.name = String64("_ti_text")},
+                    Components::UIRectComponent {.parentEntity = e, .height = cfg.height, .hierarchyDepth = parentDepth + 1},
+                    Components::UIFlexComponent {.flexGrow = 1.0f},
+                    Components::TextComponent {
+                        .text          = input->text,
+                        .scale         = cfg.scale,
+                        .color         = cfg.textColor,
+                        .align         = TextAlignment::Left,
+                        .verticalAlign = TextVerticalAlignment::Center,
+                        .fontIndex     = font
+                    }
+                );
+            });
+            // Keep parent/depth/sizing correct each frame
+            m_reg->Patch<Components::UIRectComponent>(textEnt, [&](auto& tr) -> auto {
+                tr.parentEntity   = e;
+                tr.hierarchyDepth = parentDepth + 1;
+                tr.height         = cfg.height;
+            });
+            // Sync displayed text
+            m_reg->Patch<Components::TextComponent>(textEnt, [&](auto& tc) -> auto {
+                tc.text      = input->text;
+                tc.color     = focused ? JPH::Vec4 {1.0f, 1.0f, 1.0f, 1.0f} : cfg.textColor;
+                tc.scale     = cfg.scale;
+                tc.fontIndex = font;
+            });
+            if (auto* tflex = m_reg->Get<Components::UIFlexComponent>(textEnt)) {
+                tflex->flexGrow = 1.0f;
             }
         }
     }

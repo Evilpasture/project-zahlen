@@ -298,7 +298,19 @@ void UIRenderSystem::Update(Engine& engine) {
             float drawY = text->offsetY;
 
             std::string displayStr = text->text.c_str();
-            if (auto* input = reg.Get<Components::UITextInputComponent>(e)) {
+            // A TextInput's editable text lives on a child `_ti_text` entity;
+            // walk up to find the UITextInputComponent that owns the cursor.
+            const Components::UITextInputComponent* input = reg.Get<Components::UITextInputComponent>(e);
+            if (input == nullptr && rect != nullptr) {
+                Entity cur = rect->parentEntity;
+                for (int hops = 0; hops < 4 && cur != Entity::Null() && reg.IsAlive(cur); ++hops) {
+                    input = reg.Get<Components::UITextInputComponent>(cur);
+                    if (input != nullptr) break;
+                    if (const auto* pr = reg.Get<Components::UIRectComponent>(cur)) cur = pr->parentEntity;
+                    else break;
+                }
+            }
+            if (input != nullptr) {
                 std::string_view raw = input->text;
                 if (input->isFocused) {
                     displayStr = std::string(raw.substr(0, input->cursorIndex)) + "|" + std::string(raw.substr(input->cursorIndex));
