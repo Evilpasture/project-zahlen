@@ -36,7 +36,7 @@ REFLECTION_HEADER = ROOT / "include" / "Zahlen" / "Core" / "Reflection.hpp"
 # Module interface units (checked for detail namespace declarations).
 MODULE_ROOTS = (ROOT / "modules", ROOT / "extras")
 # C++ source trees that must contain no raw reflection tokens.
-SOURCE_ROOTS = (ROOT / "modules", ROOT / "extras", ROOT / "src", ROOT / "include", ROOT / "app", ROOT / "tests")
+SOURCE_ROOTS = (ROOT / "modules", ROOT / "extras", ROOT / "src", ROOT / "include", ROOT / "app", ROOT / "tools", ROOT / "tests")
 CXX_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".cppm", ".ixx", ".inl", ".ipp"}
 MODULE_SUFFIXES = {".cppm", ".ixx"}
 

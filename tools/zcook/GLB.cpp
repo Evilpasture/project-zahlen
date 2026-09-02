@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// File: src/zcook/GLB.cpp
+// File: tools/zcook/GLB.cpp
 #include "GLB.hpp"
 #include "Transform.hpp"
 #include <algorithm>

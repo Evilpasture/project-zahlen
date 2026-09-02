@@ -636,16 +636,21 @@ set_target_properties(zahlen PROPERTIES
 )
 
 # --- ASSET COMPILER (ZCOOK) ---
+# zcook lives in tools/, not src/: it is the offline asset pipeline, and the
+# off-line GLB emitter consumes extras/json's reflection serializer. Core
+# (src/, include/, modules/) must never depend on extras -- see
+# tools/check_core_extras_boundary.py -- so the cooker is outside core roots.
 add_executable(zcook
-    src/zcook/main.cpp
-    src/zcook/Transform.cpp
-    src/zcook/GLB.cpp
-    src/zcook/Cook.cpp
+    tools/zcook/main.cpp
+    tools/zcook/Transform.cpp
+    tools/zcook/GLB.cpp
+    tools/zcook/Cook.cpp
 )
 target_link_libraries(zcook PRIVATE zahlen_engine meshoptimizer)
 target_include_directories(zcook SYSTEM PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/cgltf
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/zcook
+    ${CMAKE_CURRENT_SOURCE_DIR}/extern/stb
+    ${CMAKE_CURRENT_SOURCE_DIR}/tools/zcook
 )
 
 

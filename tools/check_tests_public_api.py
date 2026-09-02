@@ -49,7 +49,7 @@ INTERNAL_PREFIXES = (
     "ecs/",
     "gltf/",
     "audio/",
-    "zcook/",
+    "tools/zcook/",
     "threading/",
 )
 
