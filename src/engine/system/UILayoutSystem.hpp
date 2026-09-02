@@ -27,6 +27,11 @@ class UILayoutSystem {
         const FontAtlas* font = nullptr;
         std::string      text;
         float            scale = 1.0f;
+        // Automatic word wrapping: when enabled the text is re-flowed to the
+        // width Yoga offers (or to wrapWidth, when the widget pins one) and the
+        // measured height grows by whole lines.
+        bool             wrap      = false;
+        float            wrapWidth = 0.0f;
     };
 
     static YGSize MeasureTextNode(YGNodeConstRef node, float width, YGMeasureMode widthMode, float height, YGMeasureMode heightMode) {
@@ -35,9 +40,18 @@ class UILayoutSystem {
             return YGSize {.width = 0.0f, .height = 0.0f};
         }
 
-        GUI::TextBounds bounds         = GUI::MeasureTextBounds(*ctx->font, ctx->text, ctx->scale);
-        float           measuredWidth  = bounds.width();
-        float           measuredHeight = bounds.height();
+        // An explicit wrap width wins; otherwise the constraint Yoga passes in
+        // is the container's content width, which is exactly what a designer
+        // means by "wrap to the panel".
+        float wrapAt = 0.0f;
+        if (ctx->wrap) {
+            wrapAt = (ctx->wrapWidth > 0.0f) ? ctx->wrapWidth : ((widthMode != YGMeasureModeUndefined) ? width : 0.0f);
+        }
+
+        GUI::TextBounds bounds = (wrapAt > 0.0f) ? GUI::MeasureWrappedTextBounds(*ctx->font, ctx->text, ctx->scale, wrapAt) :
+                                                   GUI::MeasureTextBounds(*ctx->font, ctx->text, ctx->scale);
+        float measuredWidth  = bounds.width();
+        float measuredHeight = bounds.height();
 
         if (widthMode == YGMeasureModeExactly) {
             measuredWidth = width;
@@ -52,6 +66,28 @@ class UILayoutSystem {
         }
 
         return YGSize {.width = measuredWidth, .height = measuredHeight};
+    }
+
+    /// Horizontal space a parent leaves for its children. Used to wrap text
+    /// during the intrinsic-height walk, where Yoga has not been asked for a
+    /// width yet. Returns 0 when nothing is known, which means "do not wrap".
+    static auto AvailableContentWidth(ECS::Registry& reg, Entity parent) -> float {
+        if (parent == Entity::Null() || !reg.IsAlive(parent)) {
+            return 0.0f;
+        }
+        const auto* parentRect = reg.Get<Components::UIRectComponent>(parent);
+        if (parentRect == nullptr) {
+            return 0.0f;
+        }
+
+        float width = parentRect->width;
+        if (width <= 0.0f) {
+            width = parentRect->computedAbsMaxX - parentRect->computedAbsMinX;
+        }
+        if (const auto* parentFlex = reg.Get<Components::UIFlexComponent>(parent)) {
+            width -= parentFlex->paddingLeft + parentFlex->paddingRight;
+        }
+        return std::max(0.0f, width);
     }
 
     void ResolveLayouts(ECS::Registry& reg, const UIViewport& viewport) {
@@ -277,13 +313,42 @@ class UILayoutSystem {
                 YGNodeStyleSetGap(node, YGGutterRow, flex->gapY);
             }
 
+            // Children of a scroll viewport never shrink. Yoga's default
+            // flex-shrink of 1 squeezes a 3x40px list into a 100px viewport,
+            // which silently removes the very overflow the ScrollBox exists to
+            // scroll — the content fits, maxScrollY stays 0, and the wheel does
+            // nothing. The scroll axis is exempt from shrink-to-fit by design.
+            if (rect.parentEntity != Entity::Null() && reg.IsAlive(rect.parentEntity) && reg.Get<Components::UIScrollComponent>(rect.parentEntity) != nullptr) {
+                YGNodeStyleSetFlexShrink(node, 0.0f);
+            }
+
             // Intrinsic Content Measuring for Text Components
             if (rect.width <= 0.0f || rect.height <= 0.0f) {
                 if (auto* textComp = reg.Get<Components::TextComponent>(e)) {
-                    auto* textCtx = new TextMeasureContext {.font = activeFont, .text = textComp->text.c_str(), .scale = textComp->scale};
+                    auto* textCtx = new TextMeasureContext {
+                        .font      = activeFont,
+                        .text      = textComp->text.c_str(),
+                        .scale     = textComp->scale,
+                        .wrap      = textComp->wrapText,
+                        .wrapWidth = textComp->wrapWidth
+                    };
                     measureContexts.push_back(textCtx);
                     YGNodeSetContext(node, textCtx);
                     YGNodeSetMeasureFunc(node, &UILayoutSystem::MeasureTextNode);
+                }
+            }
+
+            // Intrinsic Content Sizing for Images. A sprite knows its own
+            // native size, so `ui.Image(id, tex, {.mode = FitAspect,
+            // .sourceWidth = 64, .sourceHeight = 64})` sizes itself instead of
+            // collapsing to zero. An explicit width/height always wins, and a
+            // stretched flex child keeps overriding this through align/flex.
+            if (auto* image = reg.Get<Components::UIImageComponent>(e)) {
+                if (rect.width <= 0.0f && image->sourceWidth > 0.0f) {
+                    YGNodeStyleSetWidth(node, image->sourceWidth);
+                }
+                if (rect.height <= 0.0f && image->sourceHeight > 0.0f) {
+                    YGNodeStyleSetHeight(node, image->sourceHeight);
                 }
             }
         }
@@ -310,6 +375,17 @@ class UILayoutSystem {
             const auto* rect = reg.Get<Components::UIRectComponent>(e);
             if (rect == nullptr) {
                 return 0.0f;
+            }
+
+            // A scroll viewport contributes its OWN height to its ancestors,
+            // never its content height. Content that overflows the viewport is
+            // the whole point of the widget; letting it leak upward would make
+            // every auto-height ancestor grow to fit the scrolled-away rows
+            // and leave the scroller with nothing to scroll.
+            if (reg.Get<Components::UIScrollComponent>(e) != nullptr) {
+                const float own = std::max(0.0f, rect->height);
+                intrinsicHeights.emplace(e.Pack(), own);
+                return own;
             }
 
             float intrinsicHeight = std::max(0.0f, rect->height);
@@ -355,10 +431,19 @@ class UILayoutSystem {
 
             // A text-only auto-height node can be encountered by the
             // bottom-up walk even when it does not have an explicit widget
-            // height.  Match the measure function's unconstrained result.
+            // height.  Match the measure function's result, wrapping included,
+            // so a wrapped paragraph contributes every one of its lines here.
             if (intrinsicHeight <= 0.0f && activeFont != nullptr) {
                 if (const auto* textComp = reg.Get<Components::TextComponent>(e)) {
-                    intrinsicHeight = GUI::MeasureTextBounds(*activeFont, textComp->text, textComp->scale).height();
+                    float wrapAt = 0.0f;
+                    if (textComp->wrapText) {
+                        wrapAt = textComp->wrapWidth;
+                        if (wrapAt <= 0.0f) {
+                            wrapAt = AvailableContentWidth(reg, rect->parentEntity);
+                        }
+                    }
+                    intrinsicHeight = (wrapAt > 0.0f) ? GUI::MeasureWrappedTextBounds(*activeFont, textComp->text, textComp->scale, wrapAt).height() :
+                                                        GUI::MeasureTextBounds(*activeFont, textComp->text, textComp->scale).height();
                 }
             }
 
@@ -369,6 +454,14 @@ class UILayoutSystem {
         for (Entity e: entities) {
             const auto* rect = reg.Get<Components::UIRectComponent>(e);
             if (rect == nullptr || rect->height > 0.0f || reg.Get<Components::UIFlexComponent>(e) == nullptr) {
+                continue;
+            }
+
+            // A scroll viewport must never acquire a content-sized min-height:
+            // that is precisely the height it is supposed to clip away, and
+            // granting it would make the container grow to fit everything and
+            // leave nothing to scroll.
+            if (reg.Get<Components::UIScrollComponent>(e) != nullptr) {
                 continue;
             }
 
@@ -424,10 +517,21 @@ class UILayoutSystem {
             rect->computedAbsMaxX = rect->computedAbsMinX + width;
             rect->computedAbsMaxY = rect->computedAbsMinY + height;
 
+            // A scroll viewport shifts its whole subtree by the scroll offset.
+            // Only the CONTENT moves: the viewport's own rect (and therefore
+            // the scissor rect the renderer derives from it) stays put, which
+            // is what turns the shift into clipping.
+            float childOriginX = rect->computedAbsMinX;
+            float childOriginY = rect->computedAbsMinY;
+            if (const auto* scroll = reg.Get<Components::UIScrollComponent>(e)) {
+                childOriginX -= scroll->scrollX;
+                childOriginY -= scroll->scrollY;
+            }
+
             // Recurse children
             for (size_t i = 0; i < entities.size(); ++i) {
                 if (rects[i].parentEntity == e) {
-                    self(self, entities[i], rect->computedAbsMinX, rect->computedAbsMinY);
+                    self(self, entities[i], childOriginX, childOriginY);
                 }
             }
         };
@@ -437,6 +541,11 @@ class UILayoutSystem {
                 ReadBackLayout(ReadBackLayout, entities[i], 0.0f, 0.0f);
             }
         }
+
+        // 5a. Measure scroll content extents now that every rect is final, and
+        // clamp the live offsets into range (content that shrank below the
+        // viewport must pull the offset back with it).
+        GUI::UpdateScrollExtents(reg);
 
         // 5b. Post-layout re-centering pass. For anchor-positioned widgets
         // (absolute, not flex children) that sit on a centered pivot with an

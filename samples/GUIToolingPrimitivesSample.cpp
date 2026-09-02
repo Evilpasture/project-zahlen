@@ -106,6 +106,143 @@ void DrawRenderSettingsWindow(ZHLN::GUI::Context& ui, RenderSettings& s) {
     );
 }
 
+// ============================================================================
+// CONTENT BROWSER — the primitives a tool window actually needs
+// ============================================================================
+// This second window exists to be dogfooded: a long list that does not fit the
+// screen (ScrollBox), rows you can select and double-click (Selectable), a
+// hierarchy that expands (TreeNode), an icon and a sprite slice (Image), a
+// paragraph that has to reflow to the panel width (wrapped Label), and hover
+// hints (Tooltip).
+
+struct BrowserState {
+    int  selectedIndex     = 3;
+    bool materialsOpen     = true;
+    bool meshesOpen        = false;
+    bool matRockSelected   = false;
+    bool matWoodSelected   = false;
+    bool meshRockSelected  = false;
+};
+
+constexpr std::array<std::string_view, 24> kAssets = {
+    "SM_Rock_Large",  "SM_Rock_Small",   "SM_Boulder_01",  "T_Rock_Albedo",  "T_Rock_Normal",  "T_Rock_Roughness",
+    "M_Rock_Base",    "M_Rock_Wet",      "SM_Tree_Pine",   "SM_Tree_Oak",    "T_Bark_Albedo",  "M_Bark_Base",
+    "SM_Grass_Tuft",  "T_Grass_Albedo",  "M_Grass_Base",   "SM_Fence_Post",  "SM_Fence_Rail",  "T_Wood_Albedo",
+    "M_Wood_Base",    "SFX_Footstep",    "SFX_Impact",     "AUD_Music_Loop", "VFX_Dust_Puff",  "VFX_Splash"
+};
+
+void DrawContentBrowser(ZHLN::GUI::Context& ui, BrowserState& state) {
+    ui.Panel(
+        "ContentBrowser",
+        ZHLN::GUI::PanelConfig {
+            .width      = 360.0f,
+            .height     = 520.0f,
+            .x          = 24.0f,
+            .y          = 24.0f,
+            .anchorMinX = 1.0f,
+            .anchorMinY = 0.0f,
+            .anchorMaxX = 1.0f,
+            .anchorMaxY = 0.0f,
+            .gap        = 8.0f,
+            .padding    = 14.0f,
+        },
+        [&]() -> void {
+            ui.Label(
+                "Content Browser", ZHLN::GUI::LabelConfig {
+                                       .scale         = 1.00f,
+                                       .color         = {0.40f, 0.72f, 1.00f, 1.0f},
+                                       .verticalAlign = ZHLN::TextVerticalAlignment::Center,
+                                       .height        = 26.0f,
+                                   }
+            );
+
+            // A paragraph that reflows to the panel width instead of running
+            // off the right edge. height = 0 lets the label grow by lines.
+            ui.Label(
+                "Scroll the list with the mouse wheel. Click a row to select it, "
+                "double-click to open the asset, and hover anything for a hint.",
+                ZHLN::GUI::LabelConfig {.scale = 0.78f, .color = {0.62f, 0.72f, 0.88f, 0.85f}, .height = 0.0f, .wrap = true}
+            );
+
+            // Icon + sprite-sheet slice side by side.
+            ui.Box(
+                "IconRow", ZHLN::GUI::BoxConfig {
+                               .height    = 40.0f,
+                               .direction = ZHLN::FlexDirection::Row,
+                               .gap       = 10.0f,
+                               .padding   = 4.0f,
+                           },
+                [&]() -> void {
+                    ui.Icon("IconThumb", ZHLN::SystemTextures::White, 28.0f);
+                    ui.Tooltip("Thumbnail placeholder (built-in white texture)");
+
+                    ui.Image(
+                        "AtlasSlice", ZHLN::SystemTextures::White,
+                        ZHLN::GUI::ImageConfig {
+                            .width  = 28.0f,
+                            .height = 28.0f,
+                            .mode   = ZHLN::ImageScaleMode::Tile,
+                            .uv0x   = 0.0f,
+                            .uv0y   = 0.0f,
+                            .uv1x   = 0.25f,
+                            .uv1y   = 0.25f,
+                            .sourceWidth  = 8.0f,
+                            .sourceHeight = 8.0f,
+                        }
+                    );
+                    ui.Tooltip("A tiled quarter of the atlas");
+                }
+            );
+
+            // The asset list: taller than the panel, so it scrolls.
+            ui.ScrollBox(
+                "AssetList", ZHLN::GUI::ScrollBoxConfig {.height = 300.0f, .gap = 1.0f, .padding = 2.0f, .scrollbarWidth = 8.0f},
+                [&]() -> void {
+                    for (int i = 0; i < static_cast<int>(kAssets.size()); ++i) {
+                        // One bool per row, kept in the state struct so the
+                        // selection survives between frames without the sample
+                        // having to own an ECS view of it.
+                        const int  index = i;
+                        const bool wasSelected = (index == state.selectedIndex);
+                        bool       rowSelected = wasSelected;
+
+                        std::array<char, 32> idBuf {};
+                        const std::string_view id = ZHLN::FormatTo(idBuf, "Asset_{:02}", index);
+
+                        bool opened = false;
+                        ui.Selectable(
+                            id, kAssets[static_cast<size_t>(index)], rowSelected, ZHLN::GUI::SelectableConfig {},
+                            [&](bool nowSelected) -> void {
+                                // Single click: this row becomes the selection.
+                                state.selectedIndex = nowSelected ? index : -1;
+                            },
+                            [&]() -> void { opened = true; }
+                        );
+                        if (opened) {
+                            ZHLN::Log("[ContentBrowser] Open asset: {}", kAssets[static_cast<size_t>(index)]);
+                        }
+                    }
+                }
+            );
+
+            // A hierarchy: selection and expansion are independent.
+            ui.CollapsingHeader("Hierarchy", true, [&]() -> void {
+                ui.TreeNode(
+                    "Materials", "Materials", state.materialsOpen,
+                    [&]() -> void {
+                        ui.Selectable("Mat_Rock", "M_Rock_Base", state.matRockSelected);
+                        ui.Selectable("Mat_Wood", "M_Wood_Base", state.matWoodSelected);
+                    }
+                );
+                ui.TreeNode(
+                    "Meshes", "Meshes", state.meshesOpen,
+                    [&]() -> void { ui.Selectable("Mesh_Rock", "SM_Rock_Large", state.meshRockSelected); }
+                );
+            });
+        }
+    );
+}
+
 } // namespace
 
 auto main(int argc, char* argv[]) -> int {
@@ -119,12 +256,14 @@ auto main(int argc, char* argv[]) -> int {
             ZHLN::DefaultPreset::SetDisabled(true); // Suppress missing libgameplay.so fallback
 
             RenderSettings settings;
+            BrowserState   browser;
 
             // ZHLN::Engine::Run handles Platform::Init, resize events, frame pacing,
             // and executes your UI callback in Phase::UI before rendering.
-            return ZHLN::Engine::Run(options, [&settings](ZHLN::Engine& engine) {
+            return ZHLN::Engine::Run(options, [&settings, &browser](ZHLN::Engine& engine) {
                 ZHLN::GUI::Context ui(engine.GetRegistry(), engine.GetCurrentFrame());
                 DrawRenderSettingsWindow(ui, settings);
+                DrawContentBrowser(ui, browser);
             });
         })
         .transform([]() -> int { return EXIT_SUCCESS; })
