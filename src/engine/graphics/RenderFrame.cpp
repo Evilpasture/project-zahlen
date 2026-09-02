@@ -192,7 +192,8 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
             mesh = meshPool.Resolve(drawCmd.skinnedVertexBuffer).value_or(nullptr);
         }
 
-        if (mesh == nullptr || mesh->blasAddress == 0 || ((drawCmd.flags & ExcludeFromTLAS) != None)) {
+        if (mesh == nullptr || mesh->blasAddress == 0 || !Vk::IsAccelerationStructureAddressAligned(mesh->blasAddress) ||
+            ((drawCmd.flags & ExcludeFromTLAS) != None)) {
             continue;
         }
 

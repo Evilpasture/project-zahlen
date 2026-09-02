@@ -330,9 +330,31 @@ void ResourceWriteBatch::AddBuffer(UniformBufferHandle handle, VkDeviceAddress a
     _impl->types.push_back(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
 }
 
-void ResourceWriteBatch::AddAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address) noexcept {
+void ResourceWriteBatch::AddAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address, bool nullDescriptorEnabled) noexcept {
+    if (!handle.Valid()) {
+        return;
+    }
+
+    if (address == 0) {
+        if (!nullDescriptorEnabled) {
+            // A zero range is not a substitute for a missing acceleration
+            // structure: VUID-VkResourceDescriptorInfoEXT-type-11483 requires
+            // a non-null range to contain an address returned for an AS object.
+            // Without robustness2::nullDescriptor there is no valid descriptor
+            // payload to write, so leave the slot untouched.
+            return;
+        }
+    } else if (!IsAccelerationStructureAddressAligned(address)) {
+        // Do not round this address down. An unaligned value may be an interior
+        // address from a wrongly allocated buffer, and masking it would make a
+        // different (also invalid) AS descriptor.
+        return;
+    }
+
     // Acceleration structure descriptors ignore the range size (only the
-    // 256-byte address alignment is validated), so a zero size is safe.
+    // 256-byte address alignment is validated), so a zero size is safe. A zero
+    // address is converted to a NULL pAddressRange in Flush() when the device
+    // supports null descriptors.
     _impl->addressRanges.push_back({.address = address, .size = 0});
     _impl->slots.push_back(handle.index);
     _impl->types.push_back(VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR);
@@ -362,7 +384,16 @@ void ResourceWriteBatch::Flush(VkDevice device, PFN_vkWriteResourceDescriptorsEX
             _impl->imageInfos[img_idx].pView = &_impl->viewInfos[img_idx];
             resource_infos[i].data.pImage    = &_impl->imageInfos[img_idx++];
         } else {
-            resource_infos[i].data.pAddressRange = &_impl->addressRanges[buf_idx++];
+            const auto* address_range = &_impl->addressRanges[buf_idx++];
+            if (_impl->types[i] == VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR && address_range->address == 0) {
+                // With nullDescriptor enabled the union itself, rather than a
+                // fabricated zero range, represents a missing AS. This avoids
+                // both the alignment and "must be retrieved from an AS"
+                // requirements for a payload that does not exist.
+                resource_infos[i].data.pAddressRange = nullptr;
+            } else {
+                resource_infos[i].data.pAddressRange = address_range;
+            }
         }
 
         ranges[i] = {.address = static_cast<uint8_t*>(mappedPtr) + (_impl->slots[i] * stride), .size = stride};
@@ -503,6 +534,9 @@ auto HeapManager::Init(
     _dynamicSamplerCount  = dynamicSamplerCount;
     _doubleBufferCount    = doubleBufferCount;
     _currentFrameIndex    = 0;
+    _nullDescriptorEnabled = ctx.NullDescriptorSupported();
+    _nullDescriptorWarningIssued = false;
+    _asAddressWarningIssued = false;
 
     _staticResourceAlloc.Init(staticResourceCount, DescriptorHeapError::ResourceSlotsExhausted);
     _staticSamplerAlloc.Init(staticSamplerCount, DescriptorHeapError::SamplerSlotsExhausted);
@@ -641,8 +675,33 @@ void HeapManager::WriteAccelerationStructure(AccelerationStructureHandle handle,
     if (!handle.Valid()) {
         return;
     }
+
+    if (address == 0 && !_nullDescriptorEnabled) {
+        if (!_nullDescriptorWarningIssued) {
+            ZHLN::Log(
+                "[DescriptorHeap] no acceleration-structure address is available, and the device does not support nullDescriptor; "
+                "leaving AS slot {} untouched.",
+                handle.index
+            );
+            _nullDescriptorWarningIssued = true;
+        }
+        return;
+    }
+
+    if (address != 0 && !IsAccelerationStructureAddressAligned(address)) {
+        if (!_asAddressWarningIssued) {
+            ZHLN::Log(
+                "[DescriptorHeap] refusing unaligned acceleration-structure address 0x{:x} for slot {}; "
+                "AS addresses must be returned by an AS object and aligned to {} bytes.",
+                static_cast<uint64_t>(address), handle.index, kAccelerationStructureAddressAlignment
+            );
+            _asAddressWarningIssued = true;
+        }
+        return;
+    }
+
     ResourceWriteBatch batch;
-    batch.AddAccelerationStructure(handle, address);
+    batch.AddAccelerationStructure(handle, address, _nullDescriptorEnabled);
     FlushResourceBatch(batch);
 }
 

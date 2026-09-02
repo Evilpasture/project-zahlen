@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "Raytracing.hpp"
+#include <Zahlen/Log.hpp>
 
 namespace ZHLN::Vk {
 
@@ -30,7 +31,24 @@ void RayTracingContext::DestroyAccelerationStructure(VkAccelerationStructureKHR 
 }
 
 VkDeviceAddress RayTracingContext::GetAccelerationStructureAddress(VkAccelerationStructureKHR as) const noexcept {
-    return ZHLN_GetASAddress(&_raw, as);
+    // Never ask the driver for an address of a missing AS. A zero address is
+    // the null-descriptor sentinel used by the heap writer when the optional
+    // nullDescriptor feature is enabled.
+    if (!Valid() || as == VK_NULL_HANDLE || _raw.get_address == nullptr) {
+        return 0;
+    }
+
+    const VkDeviceAddress address = ZHLN_GetASAddress(&_raw, as);
+    if (address != 0 && !IsAccelerationStructureAddressAligned(address)) {
+        // This is a producer/allocation bug, not a reason to round the address:
+        // masking it could turn a valid AS address into the middle of another
+        // allocation. The descriptor writer rejects the raw value as well.
+        ZHLN::Log(
+            "[RayTracing] acceleration-structure address 0x{:x} is not aligned to {} bytes; refusing to repair it.",
+            static_cast<uint64_t>(address), kAccelerationStructureAddressAlignment
+        );
+    }
+    return address;
 }
 
 void RayTracingContext::BuildBLAS(

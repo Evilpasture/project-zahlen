@@ -83,6 +83,22 @@ sampler heap buffer: same partitioning for samplers
 * `HeapManager::Init` refuses to run if `maxPushDataSize` is too small for the
   push-data layout (below).
 
+### Acceleration-structure descriptor invariant
+
+`VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR` resource writes use the
+address returned by `vkGetAccelerationStructureDeviceAddressKHR` directly.
+The descriptor-heap specification requires that address to be a multiple of
+256 bytes, so every AS storage allocation (TLAS and BLAS) requests a 256-byte
+minimum VMA allocation alignment. The descriptor writer validates the returned
+address and rejects an unaligned value; it never masks or rounds it, because a
+rounded value could identify the middle of a different allocation.
+
+When an optional TLAS/BLAS is unavailable, a device with
+`robustness2::nullDescriptor` writes a null resource payload (`pAddressRange =
+NULL`). On devices without that feature the write is skipped rather than
+submitting an invalid zero address. Buffer and image descriptor paths retain
+their existing ranges and slot mappings.
+
 ---
 
 ## 3. Scene Registry Bindings (GlobalSceneRegistry, common.slang)

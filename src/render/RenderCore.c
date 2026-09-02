@@ -559,6 +559,18 @@ ZHLN_PhysicalDeviceInfo ZHLN_SelectPhysicalDevice(const ZHLN_DeviceSelectDesc* c
 }
 
 [[nodiscard]]
+static bool ZHLN_FeatureChainEnablesNullDescriptor(const VkPhysicalDeviceFeatures2* const features) {
+    const VkBaseInStructure* node = (const VkBaseInStructure*) features;
+    while (node != NULL) {
+        if (node->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT) {
+            const VkPhysicalDeviceRobustness2FeaturesEXT* robustness = (const VkPhysicalDeviceRobustness2FeaturesEXT*) node;
+            return robustness->nullDescriptor == VK_TRUE;
+        }
+        node = (const VkBaseInStructure*) node->pNext;
+    }
+    return false;
+}
+
 ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
     ZHLN_Device null_result = {};
 
@@ -639,6 +651,7 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
     };
     const VkPhysicalDeviceFeatures2* features = desc->features ? desc->features : &default_features;
+    const bool                       null_descriptor_enabled = ZHLN_FeatureChainEnablesNullDescriptor(features);
 
     const VkDeviceCreateInfo create_info = {
         .sType            = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
@@ -759,6 +772,7 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
         .pfn_write_resource_descriptors = pfn_write_resource_descs,
         .pfn_write_sampler_descriptors  = pfn_write_sampler_descs,
         .descriptor_heap_enabled        = heap_available,
+        .null_descriptor_enabled        = null_descriptor_enabled,
 
         .pfn_cmd_draw_mesh_tasks                = pfn_draw_mesh_tasks,
         .pfn_cmd_draw_mesh_tasks_indirect       = pfn_draw_mesh_tasks_indirect,
@@ -2321,6 +2335,10 @@ void ZHLN_DestroyAS(const ZHLN_RayTracingContext* ctx, VkAccelerationStructureKH
 }
 
 VkDeviceAddress ZHLN_GetASAddress(const ZHLN_RayTracingContext* ctx, VkAccelerationStructureKHR as) {
+    if (ctx == NULL || ctx->device == VK_NULL_HANDLE || ctx->get_address == NULL || as == VK_NULL_HANDLE) {
+        return 0;
+    }
+
     VkAccelerationStructureDeviceAddressInfoKHR info = {.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR, .accelerationStructure = as};
     return ctx->get_address(ctx->device, &info);
 }

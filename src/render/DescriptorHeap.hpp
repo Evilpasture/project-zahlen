@@ -232,7 +232,12 @@ class ResourceWriteBatch {
     void AddStorageImage(StorageImageHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept;
     void AddBuffer(StorageBufferHandle handle, VkDeviceAddress address, VkDeviceSize size) noexcept;
     void AddBuffer(UniformBufferHandle handle, VkDeviceAddress address, VkDeviceSize size) noexcept;
-    void AddAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address) noexcept;
+    /// Queues a KHR acceleration-structure descriptor. A zero address is
+    /// encoded as a NULL resource payload only when nullDescriptorEnabled is
+    /// true; non-zero addresses are never rounded or otherwise modified.
+    void AddAccelerationStructure(
+        AccelerationStructureHandle handle, VkDeviceAddress address, bool nullDescriptorEnabled = false
+    ) noexcept;
 
     void Flush(VkDevice device, PFN_vkWriteResourceDescriptorsEXT writeFn, void* mappedPtr, VkDeviceSize stride) noexcept;
 
@@ -447,6 +452,14 @@ class HeapManager {
 
     uint32_t _dynamicResourceAllocated = 0;
     uint32_t _dynamicSamplerAllocated  = 0;
+
+    // Optional AS descriptors use a NULL payload when the device enabled
+    // robustness2::nullDescriptor. Without it there is no spec-valid payload
+    // for a missing AS, so WriteAccelerationStructure deliberately does not
+    // issue a Vulkan write.
+    bool _nullDescriptorEnabled = false;
+    bool _nullDescriptorWarningIssued = false;
+    bool _asAddressWarningIssued = false;
 };
 
 } // namespace ZHLN::Vk
