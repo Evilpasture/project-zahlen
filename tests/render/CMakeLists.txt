@@ -93,8 +93,13 @@ function(zahlen_add_gpu_test_group TARGET_NAME TIMEOUT_SECONDS)
     if(UNIX AND NOT APPLE)
         list(APPEND GPU_TEST_ENVIRONMENT "GLIBC_TUNABLES=glibc.rtld.optional_static_tls=4096")
     endif()
-    # Include the shared sanitizer and Vulkan sandbox settings regardless of
-    # whether sanitizers are enabled.
+    # Shared sanitizer settings only. The opt-in Vulkan sandbox pin
+    # (ZHLN_VULKAN_SANDBOX_ENVIRONMENT) is deliberately NOT inherited: these
+    # groups are "local hardware required", and VK_DRIVER_FILES replaces the
+    # loader's ICD search path, which would hide the very GPU they exist to
+    # exercise and quietly run them on lavapipe instead. To force a render
+    # suite onto the sandbox ICD, export VK_DRIVER_FILES yourself when invoking
+    # the test binary directly.
     list(APPEND GPU_TEST_ENVIRONMENT ${ZHLN_TEST_ENVIRONMENT})
     if(GPU_TEST_ENVIRONMENT)
         set_tests_properties(${TARGET_NAME} PROPERTIES

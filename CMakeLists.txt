@@ -264,16 +264,34 @@ if(ZHLN_IN_DOCKER)
     message(STATUS "Docker container build mode enabled.")
 endif()
 
-# --- HERMETIC HEADLESS VULKAN TEST ENVIRONMENT ---
-# The checked-in sandbox keeps local Linux GPU tests independent of whatever
-# ICDs and validation layers happen to be installed on the host. Docker uses
-# the distro's Lavapipe instead (see Dockerfile), because these binaries are
-# built for the Arch-based CI image and are not portable to arbitrary hosts.
+# --- OPT-IN HERMETIC VULKAN TEST ENVIRONMENT ---
+# The checked-in lavapipe ICD makes a test run independent of whatever ICDs and
+# validation layers happen to be installed on the host. It is OPT-IN, because
+# VK_DRIVER_FILES *replaces* the loader's ICD search path instead of extending
+# it: pinning it hides real hardware completely, so an ordinary bare-metal dev
+# machine (Arch + Hyprland + a discrete GPU, no container anywhere) would
+# silently run every render suite on the CPU rasteriser and print
+# "[VULKAN] Selected physical device: llvmpipe" while a perfectly good GPU sat
+# in the same box. Device scoring was never the problem — the GPU simply was
+# never enumerated (see ZHLN_Internal_DefaultScoreFn in src/render/RenderCore.c,
+# which ranks a discrete GPU at 1'000'000 and a CPU device at 0).
+#
+# Default OFF: tests use the host Vulkan installation. Turn it ON for a hermetic
+# CPU-only run. Docker never needs it — the Dockerfile points the distro's
+# Lavapipe at the whole image — and ZHLN_IN_DOCKER keeps this block off so the
+# two mechanisms never stack.
+#
+# The pin applies to the CPU test groups only. tests/render declares itself
+# "local hardware required", so the GPU groups always see the host drivers.
+option(ZHLN_TEST_VULKAN_SANDBOX
+    "Pin the CPU test groups to the vendored lavapipe ICD instead of the host Vulkan drivers (hides real GPUs)"
+    OFF)
+
 set(ZHLN_VULKAN_SANDBOX_ROOT
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/vulkan_sandbox/linux-x86_64")
 set(ZHLN_VULKAN_SANDBOX_ENVIRONMENT "")
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ZHLN_IN_DOCKER)
+if(ZHLN_TEST_VULKAN_SANDBOX AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ZHLN_IN_DOCKER)
     find_file(ZHLN_VULKAN_SANDBOX_ICD
         NAMES lvp_icd.json
         PATHS "${ZHLN_VULKAN_SANDBOX_ROOT}/icd.d"
@@ -287,14 +305,19 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ZHLN_IN_DOCKER)
             "VK_LAYER_PATH=${ZHLN_VULKAN_SANDBOX_ROOT}/explicit_layer.d"
             "LD_LIBRARY_PATH=${ZHLN_VULKAN_SANDBOX_ROOT}/lib"
         )
-        list(APPEND ZHLN_TEST_ENVIRONMENT ${ZHLN_VULKAN_SANDBOX_ENVIRONMENT})
-        message(STATUS "Using vendored Vulkan sandbox: ${ZHLN_VULKAN_SANDBOX_ROOT}")
-    else()
         message(STATUS
-            "Vendored Vulkan sandbox ICD not found at "
+            "Using vendored Vulkan sandbox for the CPU test groups: "
+            "${ZHLN_VULKAN_SANDBOX_ROOT} (GPU test groups still use the host drivers)")
+    else()
+        message(WARNING
+            "ZHLN_TEST_VULKAN_SANDBOX=ON but no ICD was found at "
             "${ZHLN_VULKAN_SANDBOX_ROOT}/icd.d/lvp_icd.json; "
-            "local tests will use the host Vulkan installation.")
+            "tests will use the host Vulkan installation.")
     endif()
+else()
+    message(STATUS
+        "Tests will use the host Vulkan installation and its real GPUs "
+        "(-DZHLN_TEST_VULKAN_SANDBOX=ON pins the CPU test groups to the vendored lavapipe ICD).")
 endif()
 
 # Workaround for Clang P2996 revisions where copying a reflected
