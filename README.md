@@ -332,3 +332,9 @@ These are located in the `extern/` and `third_party/` directories:
 ## LICENSE
 
 This project is licensed under the GNU General Public License version 3.0 or later versions. See the [LICENSE](LICENSE.md) file for more details.
+
+# Third-Party Software Notices
+
+Project Zahlen includes or links to third-party software components subject to their respective licenses:
+
+For complete license texts, see the respective subdirectories or `third_party/vulkan_sandbox/LICENSE`.
