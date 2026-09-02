@@ -54,12 +54,12 @@ constexpr std::array<std::string_view, 4> kQualityPresets = {"Low", "Medium", "H
 // Draws the "Render Settings" inspector — this is the ~30-line tool window.
 void DrawRenderSettingsWindow(ZHLN::GUI::Context& ui, RenderSettings& s) {
     ui.Panel("RenderSettings", ZHLN::GUI::PanelConfig {
-        .width    = 400.0f,
-        .height   = 0.0f,
-        .x        = -200.0f,   // anchored center, offset left half-width
-        .y        = -240.0f,
-        .gap      = 6.0f,
-        .padding  = 14.0f,
+        .width      = 400.0f,
+        .height     = 0.0f,    // auto-size to content
+        .x          = 0.0f,    // centered on anchor 0.5
+        .y          = 0.0f,
+        .gap        = 6.0f,
+        .padding    = 14.0f,
     }, [&]() -> void {
         ui.Label("Render Settings", ZHLN::GUI::LabelConfig {
             .scale         = 1.05f,

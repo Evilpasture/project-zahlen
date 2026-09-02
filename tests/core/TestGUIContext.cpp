@@ -599,18 +599,32 @@ struct GUIContextTestSuite {
 
         // ------------------------------------------------------------------
         // COLLAPSINGHEADER: RAII scope — content entities are only visited
-        // (and thus exist) while open. Toggling closed sweeps the content
-        // subtree; toggling open rebuilds it.
+        // (and thus exist) while the header is open. defaultOpen is a
+        // create-time default, not a per-frame force. Toggle is driven by
+        // the isOpen field on the component (which UIInteractionSystem sets
+        // on click); flipping it closed causes the content subtree to be
+        // swept on the next frame.
         // ------------------------------------------------------------------
         auto collapsing_header_content_exists_only_while_open() -> std::expected<void, ZHLN::Error> {
             Registry reg;
 
-            // Frame 1: defaultOpen = true, content is built
+            // Frame 1: defaultOpen = false, content closure is NOT invoked
+            {
+                GUI::Context gui(reg, 1);
+                bool invoked = false;
+                auto scope = gui.CollapsingHeader("adv", "Advanced", false, [&]() -> void {
+                    invoked = true;
+                });
+                (void)scope;
+                ZHLN::Test::ExpectFalse(invoked);
+            }
+
+            // Frame 2: create a header defaulted open. Content is built.
             Entity hdrOpen = Entity::Null();
             Entity lbl     = Entity::Null();
             {
-                GUI::Context gui(reg, 1);
-                auto scope = gui.CollapsingHeader("adv", "Advanced", true, [&]() -> void {
+                GUI::Context gui(reg, 2);
+                auto scope = gui.CollapsingHeader("adv_open", "Advanced", true, [&]() -> void {
                     lbl = gui.Label("inner-label");
                 });
                 hdrOpen = scope.GetEntity();
@@ -618,30 +632,33 @@ struct GUIContextTestSuite {
             }
             ZHLN::Test::ExpectTrue(hdrOpen != Entity::Null());
             ZHLN::Test::ExpectTrue(reg.IsAlive(lbl));
+            const auto* hdrComp = reg.Get<Comp::UICollapsingHeaderComponent>(hdrOpen);
+            ZHLN::Test::ExpectTrue(hdrComp != nullptr);
+            if (hdrComp == nullptr) return {};
+            ZHLN::Test::ExpectTrue(hdrComp->isOpen);
 
-            // Frame 2: still defaultOpen=true (we aren't simulating clicks),
-            // entities reuse.
-            Entity lbl2 = Entity::Null();
-            {
-                GUI::Context gui(reg, 2);
-                auto scope = gui.CollapsingHeader("adv", "Advanced", true, [&]() -> void {
-                    lbl2 = gui.Label("inner-label");
-                });
-                (void)scope;
-            }
-            ZHLN::Test::ExpectEq(lbl.Pack(), lbl2.Pack());
-
-            // Frame 3: defaultOpen=false. Content should not be visited and
-            // thus swept when the header scope closes.
+            // Frame 3: programmatically close the header (simulates click
+            // handling, which flips isOpen). Next rebuild must NOT invoke
+            // the content closure and the previous label must be swept.
             {
                 GUI::Context gui(reg, 3);
-                auto scope = gui.CollapsingHeader("adv", "Advanced", false, [&]() -> void {
-                    lbl2 = gui.Label("inner-label"); // never invoked when closed
+                // Mutate the ECS directly, as ConsumeClick would on a title click.
+                if (auto* mutHdr = reg.Get<Comp::UICollapsingHeaderComponent>(hdrOpen)) {
+                    mutHdr->isOpen = false;
+                }
+                bool invoked = false;
+                auto scope = gui.CollapsingHeader("adv_open", "Advanced", true, [&]() -> void {
+                    invoked = true;
+                    lbl = gui.Label("inner-label");
                 });
                 (void)scope;
+                ZHLN::Test::ExpectFalse(invoked);
             }
-            ZHLN::Test::ExpectFalse(reg.IsAlive(lbl2));
-            ZHLN::Test::ExpectTrue(reg.IsAlive(hdrOpen)); // header itself still alive
+            // The label created in frame 2 must be gone; header remains.
+            ZHLN::Test::ExpectFalse(reg.IsAlive(lbl));
+            ZHLN::Test::ExpectTrue(reg.IsAlive(hdrOpen));
+            hdrComp = reg.Get<Comp::UICollapsingHeaderComponent>(hdrOpen);
+            ZHLN::Test::ExpectTrue(hdrComp != nullptr && !hdrComp->isOpen);
 
             return {};
         }

@@ -1273,6 +1273,17 @@ class Context {
         });
 
         auto* split = m_reg->Get<Components::UISplitterComponent>(e);
+
+        // Sync external ratio change: if the caller mutated `ratio` since
+        // last frame and the user isn't actively dragging, reflect it into
+        // the ECS. Otherwise the ECS value is authoritative (user dragged
+        // the handle). Clamp defensively either way.
+        ratio = std::clamp(ratio, 0.05f, 0.95f);
+        if (!split->isDragging && std::abs(ratio - split->previousRatio) > 1e-5f) {
+            split->ratio = ratio;
+        } else {
+            ratio = split->ratio;
+        }
         split->previousRatio = split->ratio;
         ratio = split->ratio;
 

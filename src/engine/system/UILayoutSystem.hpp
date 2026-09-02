@@ -108,14 +108,50 @@ class UILayoutSystem {
                 (rect.parentEntity != Entity::Null() && reg.IsAlive(rect.parentEntity) && reg.Get<Components::UIFlexComponent>(rect.parentEntity) != nullptr);
 
             if (!isFlexChild) {
-                // Anchor-based Canvas Positioning (e.g. Center popups, anchored HUDs)
+                // Anchor-based Canvas Positioning (HUD popups, tool windows,
+                // docked panels). anchorMin/Max form a fractional rect in the
+                // parent; x/y/width/height are offsets/insets.
+                //
+                //   anchorMinX == anchorMaxX  ->  horizontal pivot (no stretch),
+                //       position Left from pivot + x; width honours rect.width.
+                //       When the pivot is ~0.5 (centered), x is interpreted as
+                //       a center offset and the widget is shifted left by half
+                //       its width so its CENTER lands on the pivot point.
+                //
+                //   anchorMinX != anchorMaxX  ->  stretch horizontally between
+                //       the two anchors; x is the left inset, rect.width the
+                //       right inset (set as Right=... inset in Yoga).
+                //
+                // Same semantics for Y.
                 YGNodeStyleSetPositionType(node, YGPositionTypeAbsolute);
 
-                float anchorLeft = (pWidth * rect.anchorMinX) + rect.x;
-                float anchorTop  = (pHeight * rect.anchorMinY) + rect.y;
+                const float aMinX = std::clamp(rect.anchorMinX, 0.0f, 1.0f);
+                const float aMaxX = std::clamp(rect.anchorMaxX, 0.0f, 1.0f);
+                const float aMinY = std::clamp(rect.anchorMinY, 0.0f, 1.0f);
+                const float aMaxY = std::clamp(rect.anchorMaxY, 0.0f, 1.0f);
 
-                YGNodeStyleSetPosition(node, YGEdgeLeft, anchorLeft);
-                YGNodeStyleSetPosition(node, YGEdgeTop, anchorTop);
+                const bool hStretch = (aMaxX - aMinX) > 0.001f;
+                const bool vStretch = (aMaxY - aMinY) > 0.001f;
+                const bool hCenter  = (!hStretch) && std::abs(aMinX - 0.5f) < 0.001f && (rect.width > 0.0f);
+                const bool vCenter  = (!vStretch) && std::abs(aMinY - 0.5f) < 0.001f && (rect.height > 0.0f);
+
+                if (hStretch) {
+                    YGNodeStyleSetPosition(node, YGEdgeLeft,  aMinX * pWidth  + rect.x);
+                    YGNodeStyleSetPosition(node, YGEdgeRight, (1.0f - aMaxX) * pWidth - (rect.width > 0.0f ? rect.width : 0.0f));
+                } else {
+                    float left = aMinX * pWidth + rect.x - (hCenter ? rect.width * 0.5f : 0.0f);
+                    YGNodeStyleSetPosition(node, YGEdgeLeft, left);
+                    if (rect.width > 0.0f) YGNodeStyleSetWidth(node, rect.width);
+                }
+
+                if (vStretch) {
+                    YGNodeStyleSetPosition(node, YGEdgeTop,    aMinY * pHeight + rect.y);
+                    YGNodeStyleSetPosition(node, YGEdgeBottom,(1.0f - aMaxY) * pHeight - (rect.height > 0.0f ? rect.height : 0.0f));
+                } else {
+                    float top = aMinY * pHeight + rect.y - (vCenter ? rect.height * 0.5f : 0.0f);
+                    YGNodeStyleSetPosition(node, YGEdgeTop, top);
+                    if (rect.height > 0.0f) YGNodeStyleSetHeight(node, rect.height);
+                }
             }
 
             if (flex != nullptr) {
