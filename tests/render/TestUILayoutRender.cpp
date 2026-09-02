@@ -284,6 +284,157 @@ struct UILayoutRenderTestSuite {
             ZHLN::Println("    [PASS] UI flex column computedAbs matches top-left padded bands.");
             return {};
         }
+
+        // ------------------------------------------------------------------
+        // Centered anchored panel with all six tooling primitives:
+        // at every viewport size the 400px-wide panel must stay centered and
+        // preserve its explicit width (the "stretches on resize" regression).
+        // A Vulkan-rendered PPM is captured at each size for visual review.
+        // ------------------------------------------------------------------
+        std::expected<void, ZHLN::Error> centered_tooling_panel_stays_centered_on_resize() {
+            ZHLN::DefaultPreset::SetDisabled(true);
+
+            const ZHLN::EngineConfig cfg {
+                .physics = {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 4 * 1024 * 1024},
+                .render  = {
+                    .appName        = "Headless UI Centered Panel",
+                    .width          = 1280,
+                    .height         = 720,
+                    .vsync          = false,
+                    .fullscreen     = false,
+                    .validationMode = ZHLN::ValidationMode::On,
+                    .headless       = true
+                }
+            };
+
+            ZHLN::Test::Headless::ShutdownPooledEngines();
+
+            auto engineRes = ZHLN::Engine::Create(cfg);
+            if (!engineRes) {
+                return std::unexpected(UILayoutRenderError::EngineInitFailed);
+            }
+            auto engine = std::move(engineRes.value());
+            engine->InitializeDefaultScene();
+
+            auto& reg = engine->GetRegistry();
+            for (ZHLN::Entity camEnt: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
+                reg.Patch<ZHLN::Components::AASettingsComponent>(camEnt, [](auto& aa) { aa.state.mode = ZHLN::AAMode::None; });
+            }
+            auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
+            if (!settings.empty()) {
+                reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [](auto& pp) {
+                    pp.fullBright        = 1;
+                    pp.vignetteIntensity = 0.0f;
+                    pp.enableSSR         = 0;
+                    pp.enableRTR         = 0;
+                });
+            }
+
+            // Mutable widget state held across frames (public API: out-params).
+            // The UICallback is a std::function set below; it captures this
+            // state by reference so widget out-params persist across ticks.
+            struct S {
+                bool              vsync       = true;
+                bool              grid        = true;
+                float             exposure    = 1.0f;
+                float             bloom       = 0.15f;
+                ZHLN::String256   profile     = ZHLN::String256("Default");
+                int               quality     = 1;
+                float             splitRatio  = 0.55f;
+            } s;
+            static constexpr std::array<std::string_view, 4> kPresets = {"Low", "Medium", "High", "Ultra"};
+
+            engine->SetUICallback([&](ZHLN::Engine& e) {
+                ZHLN::GUI::Context ui(e.GetRegistry(), e.GetCurrentFrame());
+                ui.Panel("ToolWin", ZHLN::GUI::PanelConfig {
+                    .width      = 400.0f,
+                    .height     = 0.0f,
+                    .x          = 0.0f,
+                    .y          = 0.0f,
+                    .gap        = 6.0f,
+                    .padding    = 14.0f,
+                }, [&]() -> void {
+                    ui.Label("Render Settings");
+                    ui.Checkbox("vsync",  "Enable VSync", s.vsync);
+                    ui.Checkbox("grid",   "Show Grid",   s.grid);
+                    ui.DragFloat("expo", "Exposure", s.exposure, 0.1f, 5.0f, 0.01f);
+                    ui.Slider("bloom", "Bloom", s.bloom, 0.0f, 1.0f, 0.01f);
+                    std::span<const std::string_view> opts(kPresets);
+                    int q = s.quality;
+                    ui.Dropdown("qual", "Quality", q, opts);
+                    s.quality = q;
+                    ui.TextInput("prof", "Profile", s.profile);
+                    auto cols = ui.Columns("split", ZHLN::GUI::SplitDirection::Horizontal, s.splitRatio,
+                        [&]() -> void {
+                            ui.Box(ZHLN::GUI::BoxConfig {
+                                .height = 80.0f,
+                                .color  = {0.06f, 0.09f, 0.14f, 0.85f},
+                            }, [&]() -> void { ui.Label("Preview"); });
+                        },
+                        [&]() -> void {
+                            ui.Label("Stats");
+                            ui.Label("FPS: 142");
+                        });
+                    (void)cols;
+                });
+            });
+
+            auto tickN = [&](uint32_t n) {
+                constexpr float dt = 1.0f / 60.0f;
+                for (uint32_t i = 0; i < n; ++i) {
+                    engine->ProcessEvents();
+                    auto st = engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
+                    ZHLN::Test::ExpectEq(st, ZHLN::GameplayStatus::OK);
+                }
+            };
+
+            auto findNamed = [&](std::string_view want) -> ZHLN::Entity {
+                for (ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::NameComponent>()) {
+                    const auto* nm = reg.Get<ZHLN::Components::NameComponent>(e);
+                    if (nm != nullptr && std::string_view(nm->name) == want) return e;
+                }
+                return ZHLN::Entity::Null();
+            };
+
+            struct Viewport { uint32_t w, h; const char* ppm; };
+            for (const Viewport& vp : {Viewport{1280, 720, "gui_tooling_1280x720.ppm"},
+                                      Viewport{1920, 1080, "gui_tooling_1920x1080.ppm"},
+                                      Viewport{640, 480, "gui_tooling_640x480.ppm"}}) {
+                engine->GetWindow().SetSize(vp.w, vp.h);
+                tickN(10); // let a few frames of layout + render settle
+
+                auto cap = engine->GetRenderContext().CaptureScreenshotPPM(vp.ppm);
+                ZHLN::Test::ExpectTrue(cap.has_value());
+
+                ZHLN::Entity panel = findNamed("ToolWin");
+                const auto* rr = reg.Get<ZHLN::Components::UIRectComponent>(panel);
+                ZHLN::Test::ExpectTrue(rr != nullptr);
+                if (rr == nullptr) return std::unexpected(UILayoutRenderError::LayoutMismatch);
+
+                const float pw = rr->computedAbsMaxX - rr->computedAbsMinX;
+                const float ph = rr->computedAbsMaxY - rr->computedAbsMinY;
+                const float cx = rr->computedAbsMinX + pw * 0.5f;
+                const float cy = rr->computedAbsMinY + ph * 0.5f;
+                const float vcx = static_cast<float>(vp.w) * 0.5f;
+                const float vcy = static_cast<float>(vp.h) * 0.5f;
+
+                ZHLN::Println(
+                    "    [INFO] vp={}x{} panel=({:.1f},{:.1f})-({:.1f},{:.1f}) size={:.1f}x{:.1f} center=({:.1f},{:.1f}) viewportCenter=({:.1f},{:.1f})",
+                    vp.w, vp.h, rr->computedAbsMinX, rr->computedAbsMinY, rr->computedAbsMaxX, rr->computedAbsMaxY,
+                    pw, ph, cx, cy, vcx, vcy);
+
+                const bool widthOK  = std::abs(pw - 400.0f) < 2.5f;
+                const bool xCenterOK = std::abs(cx - vcx) < 2.5f;
+                const bool yCenterOK = std::abs(cy - vcy) < 2.5f;
+                if (!widthOK || !xCenterOK || !yCenterOK) {
+                    ZHLN::Println("    [FAIL] Panel not properly centered/sized at {}x{}.", vp.w, vp.h);
+                    return std::unexpected(UILayoutRenderError::LayoutMismatch);
+                }
+            }
+
+            ZHLN::Println("    [PASS] Centered tooling panel stays centered and fixed-width across resize.");
+            return {};
+        }
     };
 };
 
