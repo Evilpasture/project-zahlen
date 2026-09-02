@@ -773,6 +773,9 @@ class Context {
 
         // 2. Not found -> Spawn new entity
         Entity newEntity = createFn();
+        if (auto* freshRect = m_reg->Get<Components::UIRectComponent>(newEntity)) {
+            freshRect->layoutOrder = m_layoutOrder++;
+        }
         cache->children.Insert(widgetKey, Components::UIChildCacheComponent::ChildRecord {.entity = newEntity, .lastVisitedFrame = m_currentFrame});
 
         m_lastItem = newEntity;
@@ -1301,11 +1304,10 @@ class Context {
                 Components::UIRectComponent {.parentEntity = parent, .width = cfg.width, .height = cfg.height, .hierarchyDepth = depth},
                 Components::UIPanelComponent {.color = cfg.bgColor, .borderRadius = cfg.borderRadius},
                 Components::UIFlexComponent {
-                    .direction     = FlexDirection::Column,
+                    .direction     = FlexDirection::Row,
+                    .alignItems    = FlexAlign::Center,
                     .paddingLeft   = cfg.padding,
-                    .paddingTop    = 4.0f,
-                    .paddingRight  = cfg.padding,
-                    .paddingBottom = 4.0f
+                    .paddingRight  = cfg.padding
                 },
                 Components::UIButtonComponent {},
                 Components::UIDropdownComponent {
@@ -1319,6 +1321,14 @@ class Context {
         });
 
         auto* dd = m_reg->Get<Components::UIDropdownComponent>(e);
+
+        // The header (selected text + arrow) is a single row. An older build
+        // created it as a column, stacking the arrow under the text where it
+        // hung out of the 32px header and into the widget below.
+        m_reg->Patch<Components::UIFlexComponent>(e, [&](auto& f) -> auto {
+            f.direction  = FlexDirection::Row;
+            f.alignItems = FlexAlign::Center;
+        });
 
         // Store options into the component so they survive between calls
         dd->options.clear();
@@ -2304,6 +2314,9 @@ class Context {
             }
         }
         Entity newEnt = createFn();
+        if (auto* freshRect = m_reg->Get<Components::UIRectComponent>(newEnt)) {
+            freshRect->layoutOrder = m_layoutOrder++;
+        }
         cache->children.Insert(childKey, Components::UIChildCacheComponent::ChildRecord {.entity = newEnt, .lastVisitedFrame = m_currentFrame});
         return newEnt;
     }
@@ -3520,6 +3533,7 @@ class Context {
 
     ECS::Registry*                              m_reg          = nullptr;
     uint64_t                                    m_currentFrame = 0;
+    uint32_t                                    m_layoutOrder  = 1;
     std::array<UIScopeNode, MAX_UI_STACK_DEPTH> m_stack {};
     uint32_t                                    m_stackTop        = 0;
     uint32_t                                    m_autoIdCounter   = 0;

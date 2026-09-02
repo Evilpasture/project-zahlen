@@ -118,7 +118,13 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                 // Slider drag: adjust slider value
                 if (auto* slider = reg.Get<Components::UISliderComponent>(sliderEnt)) {
                     if (!leftMouseDown) {
+                        // Release BOTH latches. Forgetting the drag-component
+                        // latch here made the handle stay "armed" after the
+                        // first drag: the next left press anywhere on the
+                        // screen re-activated the slider and the knob jumped
+                        // to follow an unrelated click -- the "sticky slider".
                         slider->isDragging = false;
+                        drag->isDragging   = false;
                     } else if (drag->isDragging || slider->isDragging) {
                         if (!slider->isDragging) {
                             slider->isDragging = true;
@@ -169,6 +175,7 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                 if (auto* split = reg.Get<Components::UISplitterComponent>(splitterEnt)) {
                     if (!leftMouseDown) {
                         split->isDragging = false;
+                        drag->isDragging  = false; // same latch leak as the slider
                     } else if (drag->isDragging || split->isDragging) {
                         if (!split->isDragging) {
                             split->isDragging = true;
@@ -210,13 +217,19 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
     struct SortEntry {
         size_t   rawIndex;
         uint32_t depth;
+        uint32_t order;
     };
     JPH::Array<SortEntry> sortedEntries;
     sortedEntries.reserve(entities.size());
     for (size_t i = 0; i < entities.size(); ++i) {
-        sortedEntries.push_back({.rawIndex = i, .depth = rects[i].hierarchyDepth});
+        sortedEntries.push_back({.rawIndex = i, .depth = rects[i].hierarchyDepth, .order = rects[i].layoutOrder});
     }
-    std::ranges::sort(sortedEntries, [](const auto& a, const auto& b) { return a.depth > b.depth; });
+    // Deepest first; at equal depth the widget drawn LAST (highest layoutOrder)
+    // is on top and must win the hit test -- the same order the render pass
+    // draws in, so what you see on top is what you click.
+    std::ranges::sort(sortedEntries, [](const auto& a, const auto& b) {
+        return (a.depth != b.depth) ? (a.depth > b.depth) : (a.order > b.order);
+    });
 
     bool   clickConsumed   = false;
     bool   focusCaptured   = false;

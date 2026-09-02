@@ -31,8 +31,15 @@ void DrawRenderSettingsWindow(ZHLN::GUI::Context& ui, RenderSettings& s) {
         ZHLN::GUI::PanelConfig {
             .width   = 400.0f,
             .height  = 0.0f,
-            .x       = 0.0f,
+            // Docked 24px in from the LEFT edge. The browser docks 24px in
+            // from the right one, so the two windows can never overlap no
+            // matter how narrow the user's window is -- a centered window
+            // collided with the browser the moment the viewport went below
+            // ~1200px wide, and the two panels' contents interleaved.
+            .x       = 24.0f,
             .y       = 0.0f,
+            .anchorMinX = 0.0f,
+            .anchorMaxX = 0.0f,
             .gap     = 6.0f,
             .padding = 14.0f,
         },

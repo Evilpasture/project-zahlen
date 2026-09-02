@@ -98,6 +98,19 @@ class UILayoutSystem {
             return;
         }
 
+        // Processing order is CREATION order (layoutOrder), not ECS dense
+        // order. The dense array reshuffles on every swap-remove destroy --
+        // collapsing a section destroys its subtree and the last entity in
+        // the array swaps into the hole -- which visibly reshuffled sibling
+        // order (a Hierarchy block jumping above its panel's title) and made
+        // window layering nondeterministic. Yoga child order follows this
+        // sequence, so siblings keep their declared order forever.
+        std::vector<size_t> seq(entities.size());
+        for (size_t i = 0; i < seq.size(); ++i) {
+            seq[i] = i;
+        }
+        std::stable_sort(seq.begin(), seq.end(), [&](size_t a, size_t b) -> bool { return rects[a].layoutOrder < rects[b].layoutOrder; });
+
         // 1. Fetch active Font Atlas for text measurement
         const FontAtlas* activeFont     = nullptr;
         auto             uiSettingsEnts = reg.GetEntitiesWith<Components::UISettingsComponent>();
@@ -474,7 +487,8 @@ class UILayoutSystem {
         // 3. Assemble Yoga Hierarchy Tree
         std::vector<YGNodeRef> rootNodes;
 
-        for (size_t i = 0; i < entities.size(); ++i) {
+        for (size_t k = 0; k < seq.size(); ++k) {
+            const size_t i = seq[k];
             Entity    e         = entities[i];
             YGNodeRef childNode = nodeMap[e.Pack()];
             Entity    parent    = rects[i].parentEntity;

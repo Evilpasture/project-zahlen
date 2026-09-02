@@ -88,6 +88,7 @@ void UIRenderSystem::Update(Engine& engine) {
     struct SortEntry {
         Entity   entity;
         uint32_t depth;
+        uint32_t order;
     };
     std::vector<SortEntry> sortedEntries;
     sortedEntries.reserve(uniqueEntities.size());
@@ -99,15 +100,23 @@ void UIRenderSystem::Update(Engine& engine) {
         }
 
         uint32_t depth = 0;
+        uint32_t order = 0;
         if (auto* rect = reg.Get<Components::UIRectComponent>(e)) {
             depth = rect->hierarchyDepth;
+            order = rect->layoutOrder;
         }
 
-        sortedEntries.push_back({.entity = e, .depth = depth});
+        sortedEntries.push_back({.entity = e, .depth = depth, .order = order});
     }
 
-    // Sort ALL UI Entities by Hierarchy Depth (Ascending: Parents & lower layers first)
-    std::ranges::sort(sortedEntries, [](const auto& a, const auto& b) -> auto { return a.depth < b.depth; });
+    // Sort ALL UI Entities by Hierarchy Depth (Ascending: parents and lower
+    // layers first). Entries come out of an unordered_set, so same-depth ties
+    // MUST break on layoutOrder or the draw order of overlapping windows is
+    // nondeterministic from frame to frame -- panels and text of two windows
+    // interleaving differently every run.
+    std::ranges::sort(sortedEntries, [](const auto& a, const auto& b) -> auto {
+        return (a.depth != b.depth) ? (a.depth < b.depth) : (a.order < b.order);
+    });
 
     // ========================================================================
     // 3. PRE-PASS: TOP-DOWN MULTI-ANCESTOR SCISSOR PROPAGATION & INTERSECTION

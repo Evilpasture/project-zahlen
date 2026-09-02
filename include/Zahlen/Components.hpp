@@ -404,6 +404,12 @@ struct Components {
         float computedAbsMaxY = 0.0f;
 
         uint32_t hierarchyDepth = 0;
+        // Monotonic creation stamp assigned by GUI::Context. The ECS dense-array
+        // order reshuffles on every swap-remove destroy (collapsing a section
+        // destroys a dozen entities), so it must never decide sibling order or
+        // draw/hit-test layering: layout, render and interaction all sort by
+        // (hierarchyDepth, layoutOrder) instead. 0 = not stamped (pre-GUI rect).
+        uint32_t layoutOrder    = 0;
         bool     clipChildren   = false;
         char     _free_space[3] {};
     };
