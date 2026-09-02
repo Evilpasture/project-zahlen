@@ -37,11 +37,25 @@
 namespace ZHLN {
 namespace ReflectJSON {
 
+// Shared option block for the reflection-driven read and write halves.
+//
+// omitEmpty models glTF's "optional by omission" convention on both sides:
+//   * SerializeJSON skips a disengaged std::optional (or an empty map/range)
+//     member entirely instead of writing null / [].
+//   * TryParse/ParseObject treat a missing member key as "leave the default"
+//     (a disengaged optional, an empty container) instead of MissingField.
+//
+// The default (false) keeps the historical behaviour in both directions:
+// empty optional writes null and a missing key is an error.
+struct Options {
+    bool omitEmpty = false;
+};
+
 template <typename T>
-auto ParseObject(ValueReader reader) -> std::expected<T, Error>;
+auto ParseObject(ValueReader reader, Options options = {}) -> std::expected<T, Error>;
 
 template <typename FieldType>
-auto GetJSONValue(ValueReader reader) -> std::expected<FieldType, Error> {
+auto GetJSONValue(ValueReader reader, Options options = {}) -> std::expected<FieldType, Error> {
     using Decayed = std::decay_t<FieldType>;
 
     if constexpr (std::is_same_v<Decayed, int> || std::is_same_v<Decayed, int32_t>) {
@@ -98,7 +112,7 @@ auto GetJSONValue(ValueReader reader) -> std::expected<FieldType, Error> {
             if (!field) {
                 return std::unexpected(field.error());
             }
-            auto parsed = GetJSONValue<MappedType>(*field);
+            auto parsed = GetJSONValue<MappedType>(*field, options);
             if (!parsed) {
                 return std::unexpected(parsed.error());
             }
@@ -114,7 +128,7 @@ auto GetJSONValue(ValueReader reader) -> std::expected<FieldType, Error> {
             if (!elemReader) {
                 return std::unexpected(elemReader.error());
             }
-            auto parsed_item = GetJSONValue<ElementType>(*elemReader);
+            auto parsed_item = GetJSONValue<ElementType>(*elemReader, options);
             if (!parsed_item) {
                 return std::unexpected(parsed_item.error());
             }
@@ -122,14 +136,14 @@ auto GetJSONValue(ValueReader reader) -> std::expected<FieldType, Error> {
         }
         return container;
     } else if constexpr (ZHLN::Reflect::FieldCount<Decayed>() > 0) {
-        return ParseObject<Decayed>(reader);
+        return ParseObject<Decayed>(reader, options);
     } else {
         return std::unexpected(JSONError::UnsupportedType);
     }
 }
 
 template <typename T>
-auto ParseObject(ValueReader reader) -> std::expected<T, Error> {
+auto ParseObject(ValueReader reader, Options options) -> std::expected<T, Error> {
     T                    obj {};
     std::optional<Error> err;
 
@@ -142,11 +156,14 @@ auto ParseObject(ValueReader reader) -> std::expected<T, Error> {
 
         auto keyReader = reader.GetKey(fieldName);
         if (!keyReader) {
-            err = JSONError::MissingField;
+            if (options.omitEmpty && keyReader.error().Is(JSONError::MissingField)) {
+                return; // Optional-by-omission: absent key keeps the default.
+            }
+            err = keyReader.error();
             return;
         }
 
-        auto value_res = GetJSONValue<FieldType>(*keyReader);
+        auto value_res = GetJSONValue<FieldType>(*keyReader, options);
         if (!value_res) {
             err = value_res.error();
             return;
@@ -165,17 +182,17 @@ auto ParseObject(ValueReader reader) -> std::expected<T, Error> {
 }
 
 template <typename T>
-auto TryParse(std::string_view jsonString) -> std::expected<T, Error> {
+auto TryParse(std::string_view jsonString, Options options = {}) -> std::expected<T, Error> {
     auto doc = Document::Parse(jsonString);
     if (!doc) {
         return std::unexpected(doc.error());
     }
-    return ParseObject<T>(doc->GetRoot());
+    return ParseObject<T>(doc->GetRoot(), options);
 }
 
 template <typename T>
-auto Parse(std::string_view jsonString) -> T {
-    auto res = TryParse<T>(jsonString);
+auto Parse(std::string_view jsonString, Options options = {}) -> T {
+    auto res = TryParse<T>(jsonString, options);
     if (!res) [[unlikely]] {
         ZHLN::Panic("Failed to parse JSON for type '{}': {}", ZHLN::Reflect::TypeName<T>(), res.error().Message());
     }
@@ -205,10 +222,38 @@ auto Parse(std::string_view jsonString) -> T {
 // static_assert at the offending field.
 //
 // `indent` spaces per nesting level; 0 (default) emits one compact line.
+//
+// Options{.omitEmpty = true} switches the document to glTF-style optional-by-
+// omission: a disengaged optional member, or an empty map/range member, is
+// not written at all. This is the write-side half of the option block above;
+// the matching read half treats an absent key as the default value. String
+// types are never treated as containers, so an empty name still serialises
+// as "".
 // ============================================================================
 namespace ReflectJSON {
 
 namespace detail {
+
+    /// True when a member value should be omitted entirely under
+    /// Options{.omitEmpty = true}: a disengaged optional, or an empty
+    /// map/range. Strings are values, never collections.
+    template <typename T>
+    constexpr auto IsEmptyOmittableMember(const T& value) noexcept -> bool {
+        using Decayed = std::remove_cvref_t<T>;
+
+        if constexpr (requires { value.has_value(); }) {
+            return !value.has_value();
+        } else if constexpr (std::is_same_v<Decayed, std::string> || std::is_same_v<Decayed, std::string_view> ||
+                             std::is_same_v<Decayed, const char*> || std::is_same_v<Decayed, char*> ||
+                             (std::is_array_v<Decayed> && std::is_same_v<std::remove_extent_t<Decayed>, char>)) {
+            return false;
+        } else if constexpr (requires { value.empty(); }) {
+            return value.empty();
+        } else {
+            return false;
+        }
+    }
+
 
     inline void AppendJSONString(std::string& out, std::string_view text) {
         static constexpr std::string_view kHexDigits {"0123456789abcdef"};
@@ -248,7 +293,7 @@ namespace detail {
     }
 
     template <typename T>
-    void AppendJSONValue(std::string& out, const T& value, size_t indent, size_t depth) {
+    void AppendJSONValue(std::string& out, const T& value, size_t indent, size_t depth, bool omitEmpty) {
         using Decayed = std::remove_cvref_t<T>;
 
         if constexpr (std::is_same_v<Decayed, bool>) {
@@ -273,9 +318,10 @@ namespace detail {
         } else if constexpr (std::is_enum_v<Decayed>) {
             AppendJSONString(out, ZHLN::Reflect::EnumToString(value));
         } else if constexpr (requires { value.has_value(); }) {
-            // std::optional (and optional-likes): empty emits null.
+            // std::optional (and optional-likes): empty emits null (or is
+            // skipped by the enclosing reflected struct under omitEmpty).
             if (value.has_value()) {
-                AppendJSONValue(out, *value, indent, depth);
+                AppendJSONValue(out, *value, indent, depth, omitEmpty);
             } else {
                 out += "null";
             }
@@ -296,7 +342,7 @@ namespace detail {
                 first = false;
                 AppendJSONString(out, key);
                 out += pretty ? ": " : ":";
-                AppendJSONValue(out, mapped, indent, depth + 1);
+                AppendJSONValue(out, mapped, indent, depth + 1, omitEmpty);
             }
             if (pretty) {
                 out += '\n';
@@ -316,7 +362,7 @@ namespace detail {
                     AppendJSONSeparator(out, pretty, indent, depth);
                 }
                 first = false;
-                AppendJSONValue(out, element, indent, depth + 1);
+                AppendJSONValue(out, element, indent, depth + 1, omitEmpty);
             }
             if (pretty) {
                 out += '\n';
@@ -333,13 +379,16 @@ namespace detail {
             }
             bool first = true;
             ZHLN::Reflect::ForEachFieldWithName(value, [&](std::string_view fieldName, const auto& fieldVal) {
+                if (omitEmpty && IsEmptyOmittableMember(fieldVal)) {
+                    return; // Optional-by-omission: the key is not written.
+                }
                 if (!first) {
                     AppendJSONSeparator(out, pretty, indent, depth);
                 }
                 first = false;
                 AppendJSONString(out, fieldName);
                 out += pretty ? ": " : ":";
-                AppendJSONValue(out, fieldVal, indent, depth + 1);
+                AppendJSONValue(out, fieldVal, indent, depth + 1, omitEmpty);
             });
             if (pretty) {
                 out += '\n';
@@ -354,10 +403,10 @@ namespace detail {
 } // namespace detail
 
 template <typename T>
-[[nodiscard]] auto SerializeJSON(const T& value, size_t indent = 0) -> std::string {
+[[nodiscard]] auto SerializeJSON(const T& value, size_t indent = 0, Options options = {}) -> std::string {
     std::string out;
     out.reserve(256);
-    detail::AppendJSONValue(out, value, indent, 0);
+    detail::AppendJSONValue(out, value, indent, 0, options.omitEmpty);
     return out;
 }
 
