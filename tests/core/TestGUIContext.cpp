@@ -22,6 +22,12 @@
 //     overloads are sugar on top. Push/pop are private, the root-cache
 //     accessor is private (tests derive it from UISettingsComponent), and
 //     ~Context() itself sweeps the root cache at frame end.
+//   - CLOSURE CONTRACT: the closure overloads MUST return Entity (never a live
+//     UIScope). Returning a UIScope from a closure would force callers to
+//     capture it (to silence [[nodiscard]]) and extend its lifetime, nesting
+//     every following sibling inside it. Enforced at compile time here (see the
+//     static_asserts) and at run time (the sibling-nesting regression test).
+//     Only BeginCollapsingHeader legitimately returns a UIScope (RAII form).
 
 #include "TestsFramework.hpp"
 #include <Zahlen/Components.hpp>
@@ -32,6 +38,8 @@
 #include <expected>
 #include <functional>
 #include <string>
+#include <type_traits>
+#include <utility>
 
 namespace {
 
@@ -69,6 +77,21 @@ using Comp    = ZHLN::Components; // NB: nested types of a struct, not a namespa
     const auto settings = reg.GetEntitiesWith<Comp::UISettingsComponent>();
     return settings.empty() ? Entity::Null() : settings[0];
 }
+
+// ---------------------------------------------------------------------
+// COMPILE-TIME CONTRACT ENFORCEMENT (the "never again" guard)
+// ---------------------------------------------------------------------
+// The closure forms of every container MUST return Entity and MUST NOT return
+// UIScope. Returning a live UIScope from a closure forces callers to capture it
+// to satisfy [[nodiscard]], which extends the guard's lifetime and silently
+// nests every subsequent sibling inside it. If any of these asserts fail, the
+// closure overload was regressed back to returning a UIScope — stop and fix the
+// return type, do not silence the assert. The RAII form is the ONLY container
+// overload that legitimately returns a UIScope.
+static_assert(std::is_same_v<decltype(std::declval<GUI::Context&>().CollapsingHeader("a", "a", true, []() {})), ZHLN::Entity>);
+static_assert(std::is_same_v<decltype(std::declval<GUI::Context&>().CollapsingHeader("a", true, []() {})), ZHLN::Entity>);
+static_assert(std::is_same_v<decltype(std::declval<GUI::Context&>().BeginCollapsingHeader("a", "a", true)), GUI::UIScope>);
+static_assert(std::is_same_v<decltype(std::declval<GUI::Context&>().BeginCollapsingHeader("a", true)), GUI::UIScope>);
 
 } // namespace
 
@@ -608,15 +631,17 @@ struct GUIContextTestSuite {
         auto collapsing_header_content_exists_only_while_open() -> std::expected<void, ZHLN::Error> {
             Registry reg;
 
-            // Frame 1: defaultOpen = false, content closure is NOT invoked
+            // Frame 1: defaultOpen = false, content closure is NOT invoked.
+            // The closure form returns the header Entity (never a live UIScope),
+            // so the value can be ignored without any [[nodiscard]] gymnastics.
             {
                 GUI::Context gui(reg, 1);
                 bool invoked = false;
-                auto scope = gui.CollapsingHeader("adv", "Advanced", false, [&]() -> void {
+                const Entity hdr = gui.CollapsingHeader("adv", "Advanced", false, [&]() -> void {
                     invoked = true;
                 });
-                (void)scope;
                 ZHLN::Test::ExpectFalse(invoked);
+                ZHLN::Test::ExpectTrue(hdr != Entity::Null());
             }
 
             // Frame 2: create a header defaulted open. Content is built.
@@ -624,11 +649,9 @@ struct GUIContextTestSuite {
             Entity lbl     = Entity::Null();
             {
                 GUI::Context gui(reg, 2);
-                auto scope = gui.CollapsingHeader("adv_open", "Advanced", true, [&]() -> void {
+                hdrOpen = gui.CollapsingHeader("adv_open", "Advanced", true, [&]() -> void {
                     lbl = gui.Label("inner-label");
                 });
-                hdrOpen = scope.GetEntity();
-                (void)scope;
             }
             ZHLN::Test::ExpectTrue(hdrOpen != Entity::Null());
             ZHLN::Test::ExpectTrue(reg.IsAlive(lbl));
@@ -647,11 +670,10 @@ struct GUIContextTestSuite {
                     mutHdr->isOpen = false;
                 }
                 bool invoked = false;
-                auto scope = gui.CollapsingHeader("adv_open", "Advanced", true, [&]() -> void {
+                gui.CollapsingHeader("adv_open", "Advanced", true, [&]() -> void {
                     invoked = true;
                     lbl = gui.Label("inner-label");
                 });
-                (void)scope;
                 ZHLN::Test::ExpectFalse(invoked);
             }
             // The label created in frame 2 must be gone; header remains.
@@ -659,6 +681,111 @@ struct GUIContextTestSuite {
             ZHLN::Test::ExpectTrue(reg.IsAlive(hdrOpen));
             hdrComp = reg.Get<Comp::UICollapsingHeaderComponent>(hdrOpen);
             ZHLN::Test::ExpectTrue(hdrComp != nullptr && !hdrComp->isOpen);
+
+            return {};
+        }
+
+        // ------------------------------------------------------------------
+        // THE closure-form regression: two CollapsingHeader calls in a row must
+        // produce SIBLING headers, never a nested one. The old design returned a
+        // live UIScope, so callers captured it (to satisfy [[nodiscard]]) and its
+        // destructor was deferred to the end of the enclosing function — which
+        // kept the first header pushed and silently re-parented the second header
+        // inside it. The closure form must pop its own scope before returning.
+        // ------------------------------------------------------------------
+        auto collapsing_header_closure_form_nests_nothing() -> std::expected<void, ZHLN::Error> {
+            Registry reg;
+
+            Entity rootB = Entity::Null();
+            Entity hdr1  = Entity::Null();
+            Entity hdr2  = Entity::Null();
+            {
+                GUI::Context gui(reg, 1);
+                rootB = gui.Panel("root", GUI::PanelConfig {}, [&]() -> void {
+                    hdr1 = gui.CollapsingHeader("h1", "H1", true, [&]() -> void { gui.Label("one"); });
+                    hdr2 = gui.CollapsingHeader("h2", "H2", true, [&]() -> void { gui.Label("two"); });
+                });
+            }
+
+            ZHLN::Test::ExpectTrue(rootB != Entity::Null());
+            ZHLN::Test::ExpectTrue(hdr1 != Entity::Null());
+            ZHLN::Test::ExpectTrue(hdr2 != Entity::Null());
+            ZHLN::Test::ExpectNe(hdr1.Pack(), hdr2.Pack());
+
+            const auto* r1 = reg.Get<Comp::UIRectComponent>(hdr1);
+            const auto* r2 = reg.Get<Comp::UIRectComponent>(hdr2);
+            ZHLN::Test::ExpectTrue(r1 != nullptr && r2 != nullptr);
+            if (r1 == nullptr || r2 == nullptr) return {};
+
+            // Both headers are SIBLINGS under the panel. A regressed closure form
+            // that returns a live UIScope would make hdr2 a child of hdr1.
+            ZHLN::Test::ExpectEq(r1->parentEntity.Pack(), rootB.Pack());
+            ZHLN::Test::ExpectEq(r2->parentEntity.Pack(), rootB.Pack());
+            ZHLN::Test::ExpectNe(r2->parentEntity.Pack(), hdr1.Pack());
+
+            return {};
+        }
+
+        // ------------------------------------------------------------------
+        // BeginCollapsingHeader (RAII form) hands back a live UIScope whose
+        // GetEntity() is the INDENTED CONTENT BOX — so widgets added while the
+        // guard is held are parented under the content box, which is parented
+        // under the header, which is parented under the caller's parent. The
+        // pop + sweep runs exactly when the guard is destroyed. A closed header
+        // yields a DISENGAGED guard (IsPushed() == false).
+        // ------------------------------------------------------------------
+        auto begin_collapsing_header_raii_guard_parents_under_content_box() -> std::expected<void, ZHLN::Error> {
+            Registry reg;
+
+            Entity rootB      = Entity::Null();
+            Entity label      = Entity::Null();
+            Entity contentBox = Entity::Null();
+            Entity header     = Entity::Null();
+            {
+                GUI::Context gui(reg, 1);
+                rootB = gui.Panel("root", GUI::PanelConfig {}, [&]() -> void {
+                    // Manual scope block: the guard owns the push/pop pair.
+                    auto hd = gui.BeginCollapsingHeader("adv", "Advanced", true);
+                    ZHLN::Test::ExpectTrue(hd.IsPushed());
+                    if (!hd.IsPushed()) return;
+                    contentBox = hd.GetEntity();
+                    label      = gui.Label("inside");
+                });
+            }
+
+            ZHLN::Test::ExpectTrue(rootB != Entity::Null());
+            ZHLN::Test::ExpectTrue(contentBox != Entity::Null());
+            ZHLN::Test::ExpectTrue(reg.IsAlive(contentBox));
+            ZHLN::Test::ExpectTrue(label != Entity::Null());
+            ZHLN::Test::ExpectTrue(reg.IsAlive(label));
+
+            // label -> contentBox -> header -> rootB.
+            const auto* labelRect = reg.Get<Comp::UIRectComponent>(label);
+            ZHLN::Test::ExpectTrue(labelRect != nullptr);
+            if (labelRect != nullptr) {
+                ZHLN::Test::ExpectEq(labelRect->parentEntity.Pack(), contentBox.Pack());
+            }
+            const auto* boxRect = reg.Get<Comp::UIRectComponent>(contentBox);
+            ZHLN::Test::ExpectTrue(boxRect != nullptr);
+            if (boxRect != nullptr) {
+                header = boxRect->parentEntity;
+                ZHLN::Test::ExpectTrue(header != Entity::Null());
+                const auto* hdrRect = reg.Get<Comp::UIRectComponent>(header);
+                ZHLN::Test::ExpectTrue(hdrRect != nullptr);
+                if (hdrRect != nullptr) {
+                    ZHLN::Test::ExpectEq(hdrRect->parentEntity.Pack(), rootB.Pack());
+                }
+            }
+
+            // Closed header => disengaged guard; nothing is pushed, so callers
+            // MUST check IsPushed() before injecting content.
+            {
+                GUI::Context gui(reg, 2);
+                gui.Panel("root", GUI::PanelConfig {}, [&]() -> void {
+                    auto hd = gui.BeginCollapsingHeader("adv2", "Advanced", false);
+                    ZHLN::Test::ExpectFalse(hd.IsPushed());
+                });
+            }
 
             return {};
         }
@@ -751,10 +878,9 @@ struct GUIContextTestSuite {
                     slEnt = gui.Slider("sl", "SL", sl, 0.0f, 1.0f);
                     tiEnt = gui.TextInput("ti", "TI", ti);
                     ddEnt = gui.Dropdown("dd", "DD", ddSel, ddOpts);
-                    auto ch = gui.CollapsingHeader("ch", "CH", true, [&]() -> void {
+                    chEnt = gui.CollapsingHeader("ch", "CH", true, [&]() -> void {
                         gui.Label("inside-ch");
                     });
-                    chEnt = ch.GetEntity();
                     spEnt = gui.Columns("sp", GUI::SplitDirection::Horizontal, splitterRatio,
                         [&]() -> void { gui.Label("L"); },
                         [&]() -> void { gui.Label("R"); });

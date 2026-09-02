@@ -10,8 +10,14 @@
 //     ui.DragFloat / Slider(label, float& value, min, max, step)
 //     ui.TextInput(label, FixedString/string& value)
 //     ui.Dropdown(label, int& selectedIdx, span<string_view> options)
-//     ui.CollapsingHeader(label, defaultOpen, fn)
+//     ui.CollapsingHeader(label, defaultOpen, fn)   // closure form → Entity
+//     ui.BeginCollapsingHeader(id, label, defaultOpen) // RAII form → UIScope
 //     ui.Columns / Splitter(direction, ratio, leftFn, rightFn)
+//
+// CollapsingHeader ships in two forms. The closure form (used below) owns the
+// scope push/pop internally and returns the header Entity, so its content
+// blocks stay siblings. The RAII form hands you a UIScope to hold in a manual
+// scope block; see <Zahlen/GUI.hpp> for the full contract.
 //
 // With these primitives any tool/inspector window can be expressed in
 // 20-30 lines of C++: this sample is the living proof.
@@ -69,7 +75,12 @@ void DrawRenderSettingsWindow(ZHLN::GUI::Context& ui, RenderSettings& s) {
             .height        = 28.0f,
         });
 
-        auto scopeDisplay = ui.CollapsingHeader("Display", true, [&]() -> void {
+        // Closure form: the scope is opened and popped *inside* CollapsingHeader
+        // around the lambda, so these three headers stay siblings (never nested).
+        // The return value is the header Entity and may be ignored — no UIScope
+        // leaks into the enclosing frame, which is the contract this header
+        // enforces (see the CONTRACT RULE in <Zahlen/GUI.hpp>).
+        ui.CollapsingHeader("Display", true, [&]() -> void {
             ui.Checkbox("VSync",    "Enable VSync",    s.enableVsync);
             ui.Checkbox("Wireframe","Wireframe Overlay",s.showWireframe);
             ui.Checkbox("Grid",     "Show Grid",       s.showGrid);
@@ -78,14 +89,14 @@ void DrawRenderSettingsWindow(ZHLN::GUI::Context& ui, RenderSettings& s) {
             ui.Slider("Bloom",       s.bloomIntensity,  0.0f,   1.0f, 0.01f);
         });
 
-        auto scopeQuality = ui.CollapsingHeader("Quality", false, [&]() -> void {
+        ui.CollapsingHeader("Quality", false, [&]() -> void {
             int idx = s.qualityPreset;
             ui.Dropdown("Preset", "Quality Preset", idx,
                         std::span<const std::string_view>(kQualityPresets));
             s.qualityPreset = idx;
         });
 
-        auto scopeProfile = ui.CollapsingHeader("Profile", true, [&]() -> void {
+        ui.CollapsingHeader("Profile", true, [&]() -> void {
             ui.TextInput("ProfileName", "Profile Name", s.profileName);
         });
 
@@ -120,7 +131,6 @@ void DrawRenderSettingsWindow(ZHLN::GUI::Context& ui, RenderSettings& s) {
                 ui.Label("VSync: on", ZHLN::GUI::LabelConfig {.scale = 0.75f, .height = 18.0f});
             }
         );
-        (void)scopeDisplay; (void)scopeQuality; (void)scopeProfile;
     });
 }
 

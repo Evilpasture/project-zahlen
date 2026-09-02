@@ -14,6 +14,7 @@
 #include <expected>
 #include <span>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 
 namespace ZHLN::GUI {
@@ -73,6 +74,28 @@ auto AppendPanelVertices(VertexPosition* outPos, VertexAttributes* outAttr, cons
 // container's stale children). The three-argument closure overloads are thin
 // sugar over that guard. Context itself auto-sweeps the root cache from its
 // destructor, so per-frame "end of frame" sweeps at call sites are gone.
+//
+// TWO MUTUALLY EXCLUSIVE PARADIGMS — NEVER MIX THEM PER WIDGET
+// ------------------------------------------------------------
+// Every container widget offers exactly two forms, and a single widget must
+// be used in exactly ONE of them per call site:
+//
+//   * RAII-guard form:  `auto scope = ui.Panel("p");` ... `; } // ~UIScope pops`
+//     The guard owns the push/pop pair. Capture it; its lifetime IS the scope.
+//     Used in a manual C++ scope block.
+//
+//   * Closure form:     `ui.Panel("p", cfg, [&]{ ... });`
+//     The function creates AND destroys the scope internally around the lambda
+//     and returns the created Entity. The caller NEVER sees the guard — it has
+//     already been popped by the time the call returns.
+//
+// CONTRACT RULE (enforced by the type system, keep it that way): the closure
+// form MUST return `Entity` and MUST NOT return `UIScope`. Returning a live
+// UIScope from a closure forces the caller to hold it open (to silence
+// [[nodiscard]]), which extends the guard's lifetime and locks the parenting
+// stack inside that container for the rest of the calling function — silently
+// nesting every subsequent sibling into it. That is exactly the CollapsingHeader
+// defect this contract exists to prevent.
 //
 // GUIError deliberately has NO 'Success' enumerator: success is not an error.
 // Codes start at 1 because Error::operator bool treats only non-zero values
@@ -230,6 +253,13 @@ class Context;
 // stale-child sweep). [[nodiscard]] by class so a discarded temporary guard —
 // which would pop the scope at the end of the full expression — is a compile
 // error. Move-only; moving transfers the pop duty exactly once.
+//
+// A UIScope is a LIVE guard: while it is alive it owns an active push on the
+// context stack. That means it may ONLY be returned by the RAII-form builder
+// (e.g. Panel(name), Box(name), BeginCollapsingHeader(...)) — never by a
+// closure form. A closure form that returns a UIScope hands ownership of a
+// still-open scope to the caller, which is the exact lifetime-extension bug
+// this header was written to prevent (see the top-of-file CONTRACT RULE).
 
 class [[nodiscard]] UIScope {
   public:
@@ -1144,68 +1174,32 @@ class Context {
     }
 
     // -----------------------------------------------------------------
-    // COLLAPSINGHEADER  —  ui.CollapsingHeader(label, defaultOpen, fn, [cfg])
+    // COLLAPSINGHEADER  —  ui.CollapsingHeader(id, label, defaultOpen, fn, [cfg])
     // -----------------------------------------------------------------
-    // Returns a UIScope that holds the content section open. When the
-    // header is collapsed, the inner scope is NOT pushed and `fn` is not
-    // invoked, which means child widgets will NOT be visited and will be
-    // swept automatically when the header scope closes.
+    // Closure form: the header scope and the indented content box are created
+    // AND destroyed entirely inside this function around `fn`. It returns the
+    // created header Entity — never a UIScope. Holding a live UIScope here
+    // would force callers to capture it (to satisfy [[nodiscard]]) and extend
+    // its lifetime to the end of the caller's function, which locks the
+    // parenting stack inside this header for the rest of the frame and silently
+    // nests every following sibling into it. Return types are the enforcement:
+    // closure → Entity, RAII → BeginCollapsingHeader() → UIScope.
+    //
+    // When the header is collapsed, `fn` is NOT invoked; the previous frame's
+    // content box (and its descendants) are swept at the end of the call.
     template <typename Fn>
         requires std::invocable<Fn>
-    [[nodiscard]] auto CollapsingHeader(std::string_view id, std::string_view label, bool defaultOpen, Fn&& content, const CollapsingHeaderConfig& cfg = {}) -> UIScope {
-        Entity   parent = GetCurrentParent();
-        uint32_t depth  = GetCurrentDepth();
-        uint64_t key    = HashCombine(parent.Pack(), HashStringView(id));
-
-        const TextureHandle fontHandle = ResolveFontTexture();
-
-        Entity e = GetOrCreateEntity(key, [&]() -> Entity {
-            return m_reg->Create(
-                Components::NameComponent {.name = String64(id)},
-                Components::UIRectComponent {.parentEntity = parent, .height = 0.0f, .hierarchyDepth = depth},
-                Components::UIPanelComponent {.color = defaultOpen ? cfg.openColor : cfg.bgColor},
-                Components::UIFlexComponent {
-                    .direction     = FlexDirection::Column,
-                    .paddingLeft   = 0.0f,
-                    .paddingTop    = 0.0f,
-                    .paddingRight  = 0.0f,
-                    .paddingBottom = 0.0f,
-                    .gapX          = 0.0f,
-                    .gapY          = 0.0f
-                },
-                Components::UICollapsingHeaderComponent {.isOpen = defaultOpen, .defaultOpen = defaultOpen}
-            );
-        });
+    auto CollapsingHeader(std::string_view id, std::string_view label, bool defaultOpen, Fn&& content, const CollapsingHeaderConfig& cfg = {}) -> Entity {
+        uint32_t depth = 0;
+        Entity   e     = PrepareCollapsingHeader(id, label, defaultOpen, cfg, depth);
 
         auto* hdr = m_reg->Get<Components::UICollapsingHeaderComponent>(e);
-
-        // Ensure the clickable header button child exists. The title child
-        // carries the UIButtonComponent so its hover flag is the source of
-        // truth for hover visuals.
-        EnsureCollapsingHeaderTitle(e, label, cfg, fontHandle, hdr->isOpen);
-
-        // The clickable _title child carries the UIButtonComponent; consume
-        // a click there to toggle open/closed.
-        bool   titleClicked = false;
-        Entity titleEnt     = FindChildByKey(e, HashStringView("_title"));
-        if (titleEnt != Entity::Null()) {
-            titleClicked = ConsumeClick(titleEnt);
-        }
-        if (titleClicked) {
-            hdr->isOpen = !hdr->isOpen;
-        }
-
-        // Update panel color to reflect open/hover state. Hover is read from
-        // the title child's UIButtonComponent (single source of truth).
-        bool titleHover = (titleEnt != Entity::Null()) && IsHovered(titleEnt);
-        m_reg->Patch<Components::UIPanelComponent>(e, [&](auto& pc) -> auto {
-            pc.color = titleHover ? cfg.hoverColor : (hdr->isOpen ? cfg.openColor : cfg.bgColor);
-        });
-
-        // If open, push a content child box (indented) and invoke content in its scope
         if (hdr->isOpen) {
+            // Both guards are strictly local. They are destroyed, in reverse
+            // declaration order (boxScope then scope), when this function
+            // returns — content box popped and swept, then the header popped
+            // and swept. The caller never sees either one.
             UIScope scope = PushScope(e, depth);
-            // Content box with indent
             std::array<char, 64> boxNameBuf {};
             std::string_view     contentBoxName = FormatTo(boxNameBuf, "{}_content", id);
 
@@ -1218,22 +1212,96 @@ class Context {
                 .padding   = cfg.indent
             });
             std::forward<Fn>(content)();
-            // boxScope dismissed here, then outer scope
-            return scope;
+            return e;
         }
 
-        // Collapsed: the content subtree wasn't visited this frame. We still
-        // have to sweep e's children so last frame's _content box (and its
-        // descendants) are reclaimed. Return a disengaged scope so the
-        // caller's UIScope destructor is a no-op.
+        // Collapsed: the content subtree wasn't visited this frame. Sweep e's
+        // children so last frame's _content box (and its descendants) are
+        // reclaimed; the header entity itself stays alive for its cached state.
+        SweepStaleChildren(e);
+        return e;
+    }
+
+    // Shorthand: id == label (matches the sample and most tool-inspector uses).
+    template <typename Fn>
+        requires std::invocable<Fn>
+    auto CollapsingHeader(std::string_view label, bool defaultOpen, Fn&& content, const CollapsingHeaderConfig& cfg = {}) -> Entity {
+        return CollapsingHeader(label, label, defaultOpen, std::forward<Fn>(content), cfg);
+    }
+
+    // -----------------------------------------------------------------
+    // BEGINCOLLAPSINGHEADER  —  pure RAII form, no lambda
+    // -----------------------------------------------------------------
+    // The manual/RAII counterpart to the closure form above. Hand the guard to
+    // the caller so a C++ scope block can inject content between the begin and
+    // the guard's destruction:
+    //
+    //     {
+    //         auto hdr = ui.BeginCollapsingHeader("Display", "Display", true);
+    //         if (hdr.IsPushed()) {
+    //             ui.Label("Inside the open header");
+    //         }
+    //     } // ~UIScope pops the content box (and sweeps it)
+    //
+    // The returned guard is the INDENTED CONTENT BOX — a direct child of the
+    // header (same cache key and components as the closure form's content box),
+    // so the caller's widgets land inside it and the pop + sweep runs exactly
+    // when the guard is destroyed. Only the content box is pushed; the header
+    // is never on the stack, which keeps pops strictly LIFO (a UIScope pops the
+    // stack top, so you must never pop an outer scope while an inner one is
+    // still open — that is why this form does not stack the header at all).
+    // A closed header yields a DISENGAGED guard (IsPushed() == false) — listen
+    // to it and skip content, exactly as the closure form skips `fn`.
+    [[nodiscard]] auto BeginCollapsingHeader(std::string_view id, std::string_view label, bool defaultOpen, const CollapsingHeaderConfig& cfg = {}) -> UIScope {
+        uint32_t depth = 0;
+        Entity   e     = PrepareCollapsingHeader(id, label, defaultOpen, cfg, depth);
+
+        auto* hdr = m_reg->Get<Components::UICollapsingHeaderComponent>(e);
+        if (hdr->isOpen) {
+            // Build the content box directly under the header (same key as the
+            // closure form's Box, so switching forms never dupes the subtree),
+            // then push ONLY that box. Widgets the caller adds after this call
+            // therefore parent inside the box, matching the closure form.
+            std::array<char, 64> boxNameBuf {};
+            std::string_view     contentBoxName = FormatTo(boxNameBuf, "{}_content", id);
+            const uint64_t       boxKey         = HashCombine(e.Pack(), HashStringView(contentBoxName));
+
+            Entity contentBox = GetOrCreateChild(e, boxKey, [&]() -> Entity {
+                return m_reg->Create(
+                    Components::NameComponent {.name = String64(contentBoxName)},
+                    Components::UIRectComponent {.parentEntity = e, .width = 0.0f, .height = 0.0f, .hierarchyDepth = depth + 1},
+                    Components::UIPanelComponent {.color = {0.0f, 0.0f, 0.0f, 0.0f}},
+                    Components::UIFlexComponent {
+                        .direction     = FlexDirection::Column,
+                        .paddingLeft   = cfg.indent,
+                        .paddingTop    = cfg.indent,
+                        .paddingRight  = cfg.indent,
+                        .paddingBottom = cfg.indent,
+                        .gapX          = 2.0f,
+                        .gapY          = 2.0f
+                    }
+                );
+            });
+            // Keep parent/depth correct for the persistent entity each frame.
+            m_reg->Patch<Components::UIRectComponent>(contentBox, [&](auto& r) -> auto {
+                r.parentEntity   = e;
+                r.hierarchyDepth = depth + 1;
+            });
+
+            // If the push overflowed the cap, the guard disengages and the
+            // caller sees IsPushed() == false; either way the guard owns the pop.
+            return PushScope(contentBox, depth + 1);
+        }
+
+        // Collapsed: nothing was pushed; the caller's content would leak into
+        // the current parent, so return a disengaged guard (check IsPushed()).
         SweepStaleChildren(e);
         return {};
     }
 
-    template <typename Fn>
-        requires std::invocable<Fn>
-    [[nodiscard]] auto CollapsingHeader(std::string_view label, bool defaultOpen, Fn&& content, const CollapsingHeaderConfig& cfg = {}) -> UIScope {
-        return CollapsingHeader(label, label, defaultOpen, std::forward<Fn>(content), cfg);
+    // Shorthand: id == label.
+    [[nodiscard]] auto BeginCollapsingHeader(std::string_view label, bool defaultOpen, const CollapsingHeaderConfig& cfg = {}) -> UIScope {
+        return BeginCollapsingHeader(label, label, defaultOpen, cfg);
     }
 
     // -----------------------------------------------------------------
@@ -1856,6 +1924,67 @@ class Context {
         return PushScope(menuBox, depth + 1);
     }
 
+    // Shared preamble for the collapsing-header family. Both the closure form
+    // (CollapsingHeader -> Entity) and the RAII form (BeginCollapsingHeader ->
+    // UIScope) delegate here so the two paradigms can never drift in behaviour.
+    // It creates/reuses the header entity, ensures the clickable title child,
+    // applies the open/close toggle for the frame, and patches the panel colour.
+    // Returns the header entity and writes the header's live depth into
+    // `outDepth` so the caller can push the content scope at the right depth.
+    auto PrepareCollapsingHeader(std::string_view id, std::string_view label, bool defaultOpen, const CollapsingHeaderConfig& cfg, uint32_t& outDepth) -> Entity {
+        Entity   parent = GetCurrentParent();
+        uint32_t depth  = GetCurrentDepth();
+        uint64_t key    = HashCombine(parent.Pack(), HashStringView(id));
+
+        const TextureHandle fontHandle = ResolveFontTexture();
+
+        Entity e = GetOrCreateEntity(key, [&]() -> Entity {
+            return m_reg->Create(
+                Components::NameComponent {.name = String64(id)},
+                Components::UIRectComponent {.parentEntity = parent, .height = 0.0f, .hierarchyDepth = depth},
+                Components::UIPanelComponent {.color = defaultOpen ? cfg.openColor : cfg.bgColor},
+                Components::UIFlexComponent {
+                    .direction     = FlexDirection::Column,
+                    .paddingLeft   = 0.0f,
+                    .paddingTop    = 0.0f,
+                    .paddingRight  = 0.0f,
+                    .paddingBottom = 0.0f,
+                    .gapX          = 0.0f,
+                    .gapY          = 0.0f
+                },
+                Components::UICollapsingHeaderComponent {.isOpen = defaultOpen, .defaultOpen = defaultOpen}
+            );
+        });
+
+        auto* hdr = m_reg->Get<Components::UICollapsingHeaderComponent>(e);
+
+        // Ensure the clickable header button child exists. The title child
+        // carries the UIButtonComponent so its hover flag is the source of
+        // truth for hover visuals.
+        EnsureCollapsingHeaderTitle(e, label, cfg, fontHandle, hdr->isOpen);
+
+        // The clickable _title child carries the UIButtonComponent; consume
+        // a click there to toggle open/closed.
+        bool   titleClicked = false;
+        Entity titleEnt     = FindChildByKey(e, HashStringView("_title"));
+        if (titleEnt != Entity::Null()) {
+            titleClicked = ConsumeClick(titleEnt);
+        }
+        if (titleClicked) {
+            hdr->isOpen = !hdr->isOpen;
+        }
+
+        // Update panel colour to reflect open/hover state. Hover is read from
+        // the title child's UIButtonComponent (single source of truth).
+        bool titleHover = (titleEnt != Entity::Null()) && IsHovered(titleEnt);
+        m_reg->Patch<Components::UIPanelComponent>(e, [&](auto& pc) -> auto {
+            pc.color = titleHover ? cfg.hoverColor : (hdr->isOpen ? cfg.openColor : cfg.bgColor);
+        });
+
+        outDepth = depth;
+        return e;
+    }
+
     void EnsureCollapsingHeaderTitle(Entity hdrEntity, std::string_view label, const CollapsingHeaderConfig& cfg, TextureHandle font, bool isOpen) {
         Entity   parent = hdrEntity;
         uint32_t parentDepth = 0;
@@ -1966,5 +2095,22 @@ inline void UIScope::Dismiss() noexcept {
         m_pushed = false;
     }
 }
+
+// ============================================================================
+// COMPILE-TIME CONTRACT ENFORCEMENT (the "never again" guard)
+// ============================================================================
+// The closure forms of every container MUST return Entity and MUST NOT return a
+// live UIScope. Returning a UIScope from a closure forces callers to capture it
+// to satisfy [[nodiscard]], which extends the guard's lifetime to the end of the
+// caller's function, locks the parenting stack inside that container, and
+// silently nests every subsequent sibling inside it — the exact CollapsingHeader
+// defect this header was fixed to prevent. If any assert below fails, a closure
+// overload was regressed back to returning UIScope: stop and fix the return
+// type, do not silence the assert. The RAII forms (Panel/Box/BeginCollapsingHeader)
+// are the ONLY overloads that legitimately return a UIScope.
+static_assert(std::is_same_v<decltype(std::declval<Context&>().CollapsingHeader("a", "a", true, []() {})), Entity>);
+static_assert(std::is_same_v<decltype(std::declval<Context&>().CollapsingHeader("a", true, []() {})), Entity>);
+static_assert(std::is_same_v<decltype(std::declval<Context&>().BeginCollapsingHeader("a", "a", true)), UIScope>);
+static_assert(std::is_same_v<decltype(std::declval<Context&>().BeginCollapsingHeader("a", true)), UIScope>);
 
 } // namespace ZHLN::GUI
