@@ -84,7 +84,7 @@ struct TOMLTestSuite {
                 .route = {{.label = "start", .at = {0.0f, 1.0f, 0.0f}}, {.label = "end", .at = {4.0f, 1.0f, -2.0f}}}
             };
 
-            const std::string text = ZHLN::Reflect::SerializeTOML(config);
+            const std::string text = ZHLN::ReflectTOML::SerializeTOML(config);
             ZHLN::Println("    [INFO] serialised document:\n{}", text);
 
             const size_t firstTable  = text.find("[window]");
@@ -133,7 +133,7 @@ struct TOMLTestSuite {
                 .route      = {{.label = "a", .at = {1.0f, 2.0f, 3.0f}}}
             };
 
-            const std::string  text   = ZHLN::Reflect::SerializeTOML(original);
+            const std::string  text   = ZHLN::ReflectTOML::SerializeTOML(original);
             const auto         parsed = ZHLN::ReflectTOML::TryParse<Config>(text);
             if (!ZHLN::Test::ExpectTrue(parsed.has_value())) {
                 return {};
@@ -156,7 +156,7 @@ struct TOMLTestSuite {
 
             // Text -> struct -> text is stable, which is the property that
             // makes a serialised scene reviewable in a diff.
-            ZHLN::Test::ExpectEq(ZHLN::Reflect::SerializeTOML(*parsed), text);
+            ZHLN::Test::ExpectEq(ZHLN::ReflectTOML::SerializeTOML(*parsed), text);
             return {};
         }
 
@@ -350,7 +350,7 @@ intensity = 250.0
 
             // A Jolt vector is a struct in C++ and `[x, y, z]` in the
             // document -- the emitted text has to keep saying so.
-            ZHLN::Test::ExpectTrue(ZHLN::Reflect::SerializeTOML(*scene).contains("position = [0.0, 2.0, 12.0]"));
+            ZHLN::Test::ExpectTrue(ZHLN::ReflectTOML::SerializeTOML(*scene).contains("position = [0.0, 2.0, 12.0]"));
             // ... and only in that form.
             ZHLN::Test::ExpectTrue(!ZHLN::ReflectTOML::TryParse<ZHLN::Scene::Scene>("[camera.position]\nx = 1.0\n").has_value());
             // A Float3 accepts the integers a person types.
@@ -381,13 +381,13 @@ intensity = 250.0
                 ZHLN::Test::ExpectEq(scene->lights[0].type, "Point");
             }
 
-            const std::string emitted   = ZHLN::Reflect::SerializeTOML(*scene);
+            const std::string emitted   = ZHLN::ReflectTOML::SerializeTOML(*scene);
             const auto        reparsed  = ZHLN::ReflectTOML::TryParse<ZHLN::Scene::Scene>(emitted);
             if (!ZHLN::Test::ExpectTrue(reparsed.has_value())) {
                 ZHLN::Println("    [INFO] re-emitted scene:\n{}", emitted);
                 return {};
             }
-            ZHLN::Test::ExpectEq(ZHLN::Reflect::SerializeTOML(*reparsed), emitted);
+            ZHLN::Test::ExpectEq(ZHLN::ReflectTOML::SerializeTOML(*reparsed), emitted);
 
             return {};
         }
@@ -438,7 +438,7 @@ intensity = 250.0
             ZHLN::Test::ExpectEq(scene.environment.giIntensity, ZHLN::Scene::SceneEnvironment {}.giIntensity);
 
             // And the document layer can carry all of it without loss.
-            const std::string emitted  = ZHLN::Reflect::SerializeTOML(scene);
+            const std::string emitted  = ZHLN::ReflectTOML::SerializeTOML(scene);
             const auto        reparsed = ZHLN::ReflectTOML::TryParse<ZHLN::Scene::Scene>(emitted);
             if (!ZHLN::Test::ExpectTrue(reparsed.has_value())) {
                 ZHLN::Println("    [INFO] re-emitted fallback scene:\n{}", emitted);
@@ -448,7 +448,7 @@ intensity = 250.0
             ZHLN::Test::ExpectEq(reparsed->entities[1].name, std::string {"FallbackEmblem"});
             ZHLN::Test::ExpectEq(reparsed->entities[1].transform.position.y, 2.0f);
             ZHLN::Test::ExpectEq(reparsed->lights[0].rotation.x, 50.0f);
-            ZHLN::Test::ExpectEq(ZHLN::Reflect::SerializeTOML(*reparsed), emitted);
+            ZHLN::Test::ExpectEq(ZHLN::ReflectTOML::SerializeTOML(*reparsed), emitted);
 
             return {};
         }
