@@ -22,19 +22,9 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 project(zahlen LANGUAGES C CXX ASM)
 
-# Vulkan is loaded at runtime by Volk. Keep the API headers self-contained and
-# independent of an installed SDK or loader library.
-set(ZHLN_VULKAN_HEADERS_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/extern/Vulkan-Headers/include")
-if(NOT IS_DIRECTORY "${ZHLN_VULKAN_HEADERS_INCLUDE_DIR}/vulkan")
-    message(FATAL_ERROR
-        "Vendored Vulkan headers were not found at ${ZHLN_VULKAN_HEADERS_INCLUDE_DIR}. "
-        "Initialize the extern/Vulkan-Headers submodule before configuring.")
-endif()
-
-add_library(zahlen_vulkan_headers INTERFACE)
-target_include_directories(zahlen_vulkan_headers SYSTEM INTERFACE
-    "${ZHLN_VULKAN_HEADERS_INCLUDE_DIR}"
-)
+# Vulkan-Headers is a vendored submodule. Its CMake project provides the
+# Vulkan-Headers interface target; no installed SDK or loader is required.
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/Vulkan-Headers EXCLUDE_FROM_ALL SYSTEM)
 
 include(CompilerWarnings)
 

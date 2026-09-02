@@ -11,8 +11,8 @@
 # vulkan-1/libvulkan anymore, the loader is acquired at runtime through
 # volkInitialize() (see ZHLN_EnsureVulkanLoader in RenderCore.c), and device
 # commands dispatch through the driver's own entry points. The API headers are
-# supplied by the project-local zahlen_vulkan_headers target; no Vulkan SDK
-# discovery or loader library is needed at link time.
+# supplied by the vendored Vulkan-Headers submodule; no Vulkan SDK discovery or
+# loader library is needed at link time.
 #
 # Why a pinned submodule instead of the Vulkan SDK's optionally-bundled Volk:
 #   * Repo convention: every third-party dependency is a pinned submodule,
@@ -114,8 +114,8 @@ endif()
 
 target_link_libraries(zahlen_render PUBLIC
     # The Vulkan loader is deliberately NOT linked: Volk acquires it at
-    # runtime instead. zahlen_vulkan_headers is headers-only.
-    zahlen_vulkan_headers
+    # runtime instead. Vulkan-Headers is headers-only.
+    Vulkan-Headers
     GPUOpen::VulkanMemoryAllocator
     spirv_reflect
 )
