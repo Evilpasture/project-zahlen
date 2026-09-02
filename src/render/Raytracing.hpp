@@ -5,15 +5,6 @@
 
 namespace ZHLN::Vk {
 
-// VK_EXT_descriptor_heap requires an acceleration-structure device address to
-// be 256-byte aligned. Keep this requirement next to the AS address API so
-// allocation sites and descriptor writers use the same source-of-truth value.
-inline constexpr VkDeviceSize kAccelerationStructureAddressAlignment = 256;
-
-[[nodiscard]] constexpr auto IsAccelerationStructureAddressAligned(VkDeviceAddress address) noexcept -> bool {
-    return (address % kAccelerationStructureAddressAlignment) == 0;
-}
-
 class RayTracingContext {
   public:
     RayTracingContext() = default;

@@ -764,14 +764,13 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, Error> {
 
             return CreateDoubleBuffered(
                        allocator, tlasSizes.acceleration_structure_size,
-                       VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY,
-                       Vk::kAccelerationStructureAddressAlignment
+                       VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY
             )
                 .and_then([&](auto&& tb) {
                     frames.tlasBuffer = std::forward<decltype(tb)>(tb);
                     return CreateDoubleBuffered(
                         allocator, tlasSizes.build_scratch_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                        VMA_MEMORY_USAGE_GPU_ONLY, Vk::kAccelerationStructureAddressAlignment
+                        VMA_MEMORY_USAGE_GPU_ONLY
                     );
                 })
                 .and_then([&](auto&& tsb) {
@@ -788,23 +787,12 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, Error> {
                         VMA_MEMORY_USAGE_CPU_TO_GPU
                     );
                 })
-                .and_then([&](auto&& tib) -> std::expected<void, Error> {
+                .transform([&](auto&& tib) {
                     frames.tlasInstanceBuffers = std::forward<decltype(tib)>(tib);
                     for (uint32_t i = 0; i < 2; ++i) {
                         frames.tlas[i] =
                             rtCtx.CreateAccelerationStructure(frames.tlasBuffer[i].Handle(), tlasSizes.acceleration_structure_size, ZHLN_AS_TYPE_TOP_LEVEL);
-                        if (frames.tlas[i] == VK_NULL_HANDLE) {
-                            return std::unexpected(Vk::VulkanCallError::VulkanCallFailed);
-                        }
-
-                        const VkDeviceAddress address = rtCtx.GetAccelerationStructureAddress(frames.tlas[i]);
-                        if (address == 0 || !Vk::IsAccelerationStructureAddressAligned(address)) {
-                            rtCtx.DestroyAccelerationStructure(frames.tlas[i]);
-                            frames.tlas[i] = VK_NULL_HANDLE;
-                            return std::unexpected(Vk::VulkanCallError::VulkanCallFailed);
-                        }
                     }
-                    return {};
                 });
         })
         .and_then([&]() -> std::expected<void, Error> { return BuildSkinningPipeline(); })

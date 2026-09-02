@@ -71,12 +71,6 @@ class Context {
         return _device.descriptor_heap_enabled;
     }
 
-    /// True when a resource descriptor may use a NULL payload. The renderer
-    /// uses this for passes whose optional TLAS/BLAS is not available.
-    [[nodiscard]] auto NullDescriptorSupported() const noexcept -> bool {
-        return _device.null_descriptor_enabled;
-    }
-
     void CmdBindResourceHeap(VkCommandBuffer cmd, const VkBindHeapInfoEXT* info) const noexcept {
         if (_device.pfn_cmd_bind_resource_heap != nullptr) {
             _device.pfn_cmd_bind_resource_heap(cmd, info);

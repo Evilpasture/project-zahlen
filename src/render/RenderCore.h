@@ -181,7 +181,6 @@ typedef struct ZHLN_Device {
     PFN_vkWriteResourceDescriptorsEXT pfn_write_resource_descriptors;
     PFN_vkWriteSamplerDescriptorsEXT  pfn_write_sampler_descriptors;
     bool                              descriptor_heap_enabled;
-    bool                              null_descriptor_enabled; /**< VK_EXT_robustness2 nullDescriptor was enabled */
 
     // --- VK_EXT_mesh_shader entry points (NULL when the extension is absent) ---
     PFN_vkCmdDrawMeshTasksEXT              pfn_cmd_draw_mesh_tasks;

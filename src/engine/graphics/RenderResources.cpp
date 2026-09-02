@@ -954,56 +954,27 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
     ZHLN_AccelerationStructureSizes sizes {};
     rtCtx.GetBLASSizes(geom, primitiveCount, sizes);
 
-    if (scratchMesh->blas == VK_NULL_HANDLE || scratchMesh->blasAddress == 0 ||
-        !Vk::IsAccelerationStructureAddressAligned(scratchMesh->blasAddress)) {
-        if (scratchMesh->blas != VK_NULL_HANDLE) {
-            rtCtx.DestroyAccelerationStructure(scratchMesh->blas);
-            scratchMesh->blas = VK_NULL_HANDLE;
-        }
-        scratchMesh->blasAddress = 0;
-        scratchMesh->blasBuffer   = {};
-
+    if (scratchMesh->blas == VK_NULL_HANDLE) {
         auto blasBufOpt = Vk::Buffer::Create(
             allocator.Get(), sizes.acceleration_structure_size,
-            VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY,
-            Vk::kAccelerationStructureAddressAlignment
+            VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY
         );
         if (!blasBufOpt) {
             return;
         }
         scratchMesh->blasBuffer = std::move(*blasBufOpt);
         scratchMesh->blas = rtCtx.CreateAccelerationStructure(scratchMesh->blasBuffer.Handle(), sizes.acceleration_structure_size, ZHLN_AS_TYPE_BOTTOM_LEVEL);
-        if (scratchMesh->blas == VK_NULL_HANDLE) {
-            scratchMesh->blasBuffer = {};
-            return;
-        }
-
         scratchMesh->blasAddress = rtCtx.GetAccelerationStructureAddress(scratchMesh->blas);
-        if (scratchMesh->blasAddress == 0 || !Vk::IsAccelerationStructureAddressAligned(scratchMesh->blasAddress)) {
-            // The raw driver result is not repaired here. The AS is unusable,
-            // so discard it and let the caller omit this optional BLAS.
-            rtCtx.DestroyAccelerationStructure(scratchMesh->blas);
-            scratchMesh->blas        = VK_NULL_HANDLE;
-            scratchMesh->blasAddress = 0;
-            scratchMesh->blasBuffer  = {};
-            return;
-        }
     }
 
     auto scratchBufOpt = Vk::Buffer::Create(
-        allocator.Get(), sizes.build_scratch_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY,
-        Vk::kAccelerationStructureAddressAlignment
+        allocator.Get(), sizes.build_scratch_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY
     );
     if (!scratchBufOpt) {
         return;
     }
     Vk::Buffer      scratchBuf     = std::move(*scratchBufOpt);
     VkDeviceAddress scratchAddress = ctx.BufferAddress(scratchBuf.Handle());
-    if (scratchAddress == 0 || !Vk::IsAccelerationStructureAddressAligned(scratchAddress)) {
-        // Scratch addresses have the same conservative alignment here. Do not
-        // submit a build with an address that the allocator failed to honor.
-        return;
-    }
 
     // Record the build command directly onto the active graphics queue command buffer
     rtCtx.BuildBLAS(cmd, geom, scratchMesh->blas, scratchAddress, primitiveCount);
@@ -1220,7 +1191,6 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
         ZHLN_AccelerationStructureSizes sizes;
         Vk::Buffer                      blasBuffer;
         VkAccelerationStructureKHR      blas;
-        VkDeviceAddress                 blasAddress = 0;
         Vk::Buffer                      scratch;
     };
 
@@ -1253,8 +1223,7 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
 
             return Vk::Buffer::Create(
                        impl->allocator.Get(), b.sizes.acceleration_structure_size,
-                       VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY,
-                       Vk::kAccelerationStructureAddressAlignment
+                       VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY
             )
                 .transform([b = std::move(b)](auto&& buffer) mutable -> auto {
                     b.blasBuffer = std::forward<decltype(buffer)>(buffer);
@@ -1267,19 +1236,9 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
                 return std::unexpected(Vk::VulkanCallError::VulkanCallFailed);
             }
 
-            b.blasAddress = impl->rtCtx.GetAccelerationStructureAddress(b.blas);
-            if (b.blasAddress == 0 || !Vk::IsAccelerationStructureAddressAligned(b.blasAddress)) {
-                // The address came from the AS object, so an alignment failure
-                // identifies an invalid allocation/driver result. Never mask it
-                // into a different address.
-                impl->rtCtx.DestroyAccelerationStructure(b.blas);
-                b.blas = VK_NULL_HANDLE;
-                return std::unexpected(Vk::VulkanCallError::VulkanCallFailed);
-            }
-
             return Vk::Buffer::Create(
                        impl->allocator.Get(), b.sizes.build_scratch_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                       VMA_MEMORY_USAGE_GPU_ONLY, Vk::kAccelerationStructureAddressAlignment
+                       VMA_MEMORY_USAGE_GPU_ONLY
             )
                 .transform([b = std::move(b)](auto&& buffer) mutable -> auto {
                     b.scratch = std::forward<decltype(buffer)>(buffer);
@@ -1302,12 +1261,7 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
                     tempCmd, Vk::BarrierStage::Copy, Vk::BarrierAccess::TransferWrite,
                     Vk::BarrierStage::AccelerationStructureBuild, Vk::BarrierAccess::AccelerationStructureRead
                 );
-                const VkDeviceAddress scratchAddress = Vk::GetBufferAddress(impl->ctx.Device(), b.scratch.Handle());
-                if (scratchAddress == 0 || !Vk::IsAccelerationStructureAddressAligned(scratchAddress)) {
-                    impl->rtCtx.DestroyAccelerationStructure(b.blas);
-                    return std::unexpected(Vk::VulkanCallError::VulkanCallFailed);
-                }
-                impl->rtCtx.BuildBLAS(tempCmd, b.geom, b.blas, scratchAddress, b.primitiveCount);
+                impl->rtCtx.BuildBLAS(tempCmd, b.geom, b.blas, Vk::GetBufferAddress(impl->ctx.Device(), b.scratch.Handle()), b.primitiveCount);
             }
 
             return Vk::SubmitAndWait(
@@ -1318,7 +1272,7 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
                 .transform([&]() -> void {
                     b.posMesh->blasBuffer  = std::move(b.blasBuffer);
                     b.posMesh->blas        = b.blas;
-                    b.posMesh->blasAddress = b.blasAddress;
+                    b.posMesh->blasAddress = impl->rtCtx.GetAccelerationStructureAddress(b.blas);
                     b.posMesh->device      = impl->ctx.Device();
                     b.posMesh->rtCtx       = &impl->rtCtx;
                 });

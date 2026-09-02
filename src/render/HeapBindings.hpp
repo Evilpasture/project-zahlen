@@ -199,9 +199,7 @@ inline void PushHeapIndex(const Context& ctx, VkCommandBuffer cmd, uint32_t offs
 }
 
 /// Acceleration-structure heap write payload (decouples the write helper from
-/// the ray-tracing context; the engine resolves the address). Zero means that
-/// the optional AS is unavailable and is encoded as a null descriptor when the
-/// device advertises robustness2::nullDescriptor.
+/// the ray-tracing context; the engine resolves the address).
 struct AsAddressWrite {
     VkDeviceAddress address = 0;
 };
