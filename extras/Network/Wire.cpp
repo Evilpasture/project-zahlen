@@ -20,9 +20,11 @@
 module;
 
 #include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Error.hpp>
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <expected>
 #include <format>
 #include <span>
 #include <vector>
@@ -86,14 +88,9 @@ inline auto Hash4(std::span<const uint8_t> data, size_t index) noexcept -> uint3
 
 namespace ZHLN::Wire::Compression {
 
-inline constexpr size_t WINDOW_SIZE = 64 * 1024;
-inline constexpr size_t MIN_MATCH   = 4;
-inline constexpr size_t MAX_MATCH   = 65535;
-
-/// Worst-case encoded size (everything literal, every length extended).
-[[nodiscard]] inline auto CompressBound(size_t rawSize) noexcept -> size_t {
-    return rawSize + (rawSize / 255) + 16;
-}
+// WINDOW_SIZE / MIN_MATCH / MAX_MATCH and CompressBound are defined in the
+// interface (exported constants — importers use them); this unit only defines
+// the runtime functions.
 
 [[nodiscard]] auto Compress(std::span<const uint8_t> raw, size_t maxOutput) -> Result<std::vector<uint8_t>> {
     if (raw.empty()) {
