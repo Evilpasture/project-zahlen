@@ -111,8 +111,9 @@ endif()
 zahlen_register_extras_test(${TARGET_NAME})
 
 # --- JSON Test Suite ---
-# extras/json: the reflection-driven reader (simdjson behind an opaque handle)
-# and the compile-time schema parser. Moved out of tests/core when JSON became
+# extras/json: JSON.hpp is the opaque simdjson document reader; JSONSchema.hpp
+# is the reflection-driven serialisation layer (typed read and write) plus the
+# compile-time schema parser. Moved out of tests/core when JSON became
 # an extra; it is the reason the CPU test groups cannot all link the core engine
 # alone (see tests/CMakeLists.txt).
 set(TARGET_NAME TestJSON)
@@ -153,7 +154,7 @@ zahlen_register_extras_test(${TARGET_NAME})
 
 # --- TOML Test Suite ---
 # extras/toml: the reflection-driven document layer, plus SceneTOML.hpp, which
-# is what makes a core ZHLN::Scene::Scene readable and writable as a document.
+# binds Jolt vectors so a core ZHLN::Scene::Scene reads/writes as a document.
 set(TARGET_NAME TestTOML)
 add_executable(${TARGET_NAME} TestTOML.cpp)
 

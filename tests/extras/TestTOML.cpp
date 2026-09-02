@@ -12,7 +12,8 @@
 // definition in the type system" only means anything if a scene document is
 // just another reflected struct. Note the direction of that dependency: the
 // core scene model (Zahlen/Scene.hpp) knows nothing about TOML, and it is
-// extras/toml/SceneTOML.hpp that makes a ZHLN::Scene::Scene a document.
+// extras/toml/SceneTOML.hpp's Jolt vector bindings that make a
+// ZHLN::Scene::Scene a document.
 //
 // TOML is an optional layer, so this suite lives here rather than in
 // tests/core and is built only when ZHLN_BUILD_EXTRAS is on.

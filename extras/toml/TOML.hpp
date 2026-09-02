@@ -27,7 +27,7 @@
 //   const std::string text = ZHLN::Reflect::SerializeTOML(scene);
 //   const auto         back = ZHLN::ReflectTOML::TryParse<Scene>(text);
 //
-// Same contract as extras/json/JSON.hpp -- field names come from the
+// Same contract as extras/json/JSONSchema.hpp -- field names come from the
 // themselves, so the type is the schema and there is no second definition to
 // drift -- with the differences TOML forces:
 //

@@ -21,7 +21,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
-#include <json/JSON.hpp>
+#include <json/JSONSchema.hpp>
 #include <memory>
 #include <span>
 #include <stb_image.h>

@@ -37,7 +37,7 @@
 #include <glTF/GLTFImporter.hpp>
 #include <ios>
 #include <iterator>
-#include <json/JSON.hpp>
+#include <json/JSONSchema.hpp>
 #include <memory>
 #include <ranges>
 #include <span>

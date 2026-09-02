@@ -46,7 +46,7 @@
 #include <format>
 #include <fstream>
 #include <iterator>
-#include <json/JSON.hpp>
+#include <json/JSONSchema.hpp>
 #include <map>
 #include <source_location>
 #include <string>
