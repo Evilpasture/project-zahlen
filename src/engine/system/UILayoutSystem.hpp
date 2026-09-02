@@ -124,6 +124,13 @@ class UILayoutSystem {
                 //
                 // Same semantics for Y.
                 YGNodeStyleSetPositionType(node, YGPositionTypeAbsolute);
+                // Absolute children must opt out of the parent's alignItems
+                // (which defaults to Stretch in our flex containers and in
+                // Yoga). Without this, Yoga stretches the cross-axis size of
+                // absolute children to the parent's size on layout, ignoring
+                // the widget's explicit width/height whenever the parent
+                // resizes (the "window resize stretches panels" bug).
+                YGNodeStyleSetAlignSelf(node, YGAlignFlexStart);
 
                 const float aMinX = std::clamp(rect.anchorMinX, 0.0f, 1.0f);
                 const float aMaxX = std::clamp(rect.anchorMaxX, 0.0f, 1.0f);

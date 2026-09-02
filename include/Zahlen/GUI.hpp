@@ -1222,9 +1222,11 @@ class Context {
             return scope;
         }
 
-        // Collapsed: return a disengaged scope (IsPushed() == false) so the
-        // caller's UIScope destructor is a no-op. We still need to mark the
-        // header entity visited for this frame, which GetOrCreateEntity did.
+        // Collapsed: the content subtree wasn't visited this frame. We still
+        // have to sweep e's children so last frame's _content box (and its
+        // descendants) are reclaimed. Return a disengaged scope so the
+        // caller's UIScope destructor is a no-op.
+        SweepStaleChildren(e);
         return {};
     }
 
