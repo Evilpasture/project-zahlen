@@ -382,10 +382,16 @@ struct Components {
     struct UIRectComponent {
         ZHLN::Entity parentEntity {};
 
-        float x      = 0.0f;
-        float y      = 0.0f;
-        float width  = 100.0f;
-        float height = 100.0f;
+        float x = 0.0f;
+        float y = 0.0f;
+        // 0 = auto: the size is derived by the flex/anchor layout instead of
+        // being pinned. These used to default to 100, which silently froze
+        // every widget built without an explicit `.width` (compound-widget
+        // labels, collapsing headers, checkbox rows, ...) at exactly 100px, so
+        // a 400px panel showed a 100px column of controls hugging its left
+        // edge. UILayoutSystem only applies a size when it is > 0.
+        float width  = 0.0f;
+        float height = 0.0f;
 
         float anchorMinX = 0.0f;
         float anchorMinY = 0.0f;

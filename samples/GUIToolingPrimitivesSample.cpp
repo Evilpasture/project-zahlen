@@ -137,7 +137,10 @@ void DrawContentBrowser(ZHLN::GUI::Context& ui, BrowserState& state) {
         ZHLN::GUI::PanelConfig {
             .width      = 360.0f,
             .height     = 520.0f,
-            .x          = 24.0f,
+            // Anchor 1.0 is the RIGHT edge and `x` is measured from it, so a
+            // 24px inset from the right is -(width + 24), not +24 (which parks
+            // the whole panel off-screen).
+            .x          = -384.0f,
             .y          = 24.0f,
             .anchorMinX = 1.0f,
             .anchorMinY = 0.0f,
@@ -173,11 +176,16 @@ void DrawContentBrowser(ZHLN::GUI::Context& ui, BrowserState& state) {
                                .padding   = 4.0f,
                            },
                 [&]() -> void {
-                    ui.Icon("IconThumb", ZHLN::SystemTextures::White, 28.0f);
+                    // TextureHandle::Invalid is the engine's white fallback
+                    // slot (TextureManager::GetBindlessIndex). Do NOT pass
+                    // ZHLN::SystemTextures::White: TextureHandle values are
+                    // hashed asset ids, so that constant is not registered and
+                    // only logs "TextureHandle 0x2 was not found in registry".
+                    ui.Icon("IconThumb", ZHLN::TextureHandle::Invalid, 28.0f);
                     ui.Tooltip("Thumbnail placeholder (built-in white texture)");
 
                     ui.Image(
-                        "AtlasSlice", ZHLN::SystemTextures::White,
+                        "AtlasSlice", ZHLN::TextureHandle::Invalid,
                         ZHLN::GUI::ImageConfig {
                             .width  = 28.0f,
                             .height = 28.0f,

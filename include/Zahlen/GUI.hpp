@@ -1858,7 +1858,14 @@ class Context {
                     .direction  = FlexDirection::Row,
                     .alignItems = FlexAlign::Stretch,
                     .flexGrow   = cfg.flexGrow,
-                    .flexShrink = 1.0f,
+                    // Never shrink: the root is an item in the parent's column,
+                    // so Yoga's default shrink-to-fit would squeeze the
+                    // viewport (and everything in it) the moment the panel's
+                    // content overflowed -- a 300px viewport collapsing to 37px
+                    // and scrolling nothing. A scroll viewport's height is the
+                    // whole point of the widget; overflow belongs to the
+                    // content, not to the box.
+                    .flexShrink = 0.0f,
                     .flexBasis  = -1.0f
                 }
             );
@@ -1878,7 +1885,7 @@ class Context {
             f.direction  = FlexDirection::Row;
             f.alignItems = FlexAlign::Stretch;
             f.flexGrow   = cfg.flexGrow;
-            f.flexShrink = 1.0f;
+            f.flexShrink = 0.0f; // see the create path: the viewport height is authoritative
             f.flexBasis  = -1.0f;
         });
 
