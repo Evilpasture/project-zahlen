@@ -8,6 +8,7 @@
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
+#include <functional>
 #include <unordered_map>
 #include <vector>
 #include <yoga/Yoga.h>
@@ -344,6 +345,58 @@ class UILayoutSystem {
             if (rects[i].parentEntity == Entity::Null() || !reg.IsAlive(rects[i].parentEntity)) {
                 ReadBackLayout(ReadBackLayout, entities[i], 0.0f, 0.0f);
             }
+        }
+
+        // 5b. Post-layout re-centering pass. For anchor-positioned widgets
+        // (absolute, not flex children) that sit on a centered pivot with an
+        // auto-measured axis (width or height <= 0, meaning Yoga sized the
+        // axis from content), the first-pass top/left was placed at the
+        // pivot fraction because Yoga cannot know the final content size
+        // before layout. Shift them so their CENTER lands on the pivot
+        // point after we know the measured size. This is what makes a
+        // `PanelConfig{.width=400,.height=0}` centered tool window actually
+        // sit in the middle of the viewport rather than dropping off the
+        // bottom edge (the "centered auto-height panel" case).
+        for (size_t i = 0; i < entities.size(); ++i) {
+            Entity e = entities[i];
+            const auto& r = rects[i];
+            const bool isFlexChild =
+                (r.parentEntity != Entity::Null() && reg.IsAlive(r.parentEntity) &&
+                 reg.Get<Components::UIFlexComponent>(r.parentEntity) != nullptr);
+            if (isFlexChild) continue;
+
+            float pWidth = viewport.width, pHeight = viewport.height;
+            if (r.parentEntity != Entity::Null() && reg.IsAlive(r.parentEntity)) {
+                if (const auto* pr = reg.Get<Components::UIRectComponent>(r.parentEntity)) {
+                    pWidth  = pr->computedAbsMaxX - pr->computedAbsMinX;
+                    pHeight = pr->computedAbsMaxY - pr->computedAbsMinY;
+                }
+            }
+
+            const bool centeredH = std::abs(r.anchorMinX - 0.5f) < 0.001f && std::abs(r.anchorMaxX - 0.5f) < 0.001f && (r.width <= 0.0f);
+            const bool centeredV = std::abs(r.anchorMinY - 0.5f) < 0.001f && std::abs(r.anchorMaxY - 0.5f) < 0.001f && (r.height <= 0.0f);
+            if (!centeredH && !centeredV) continue;
+
+            const float w = r.computedAbsMaxX - r.computedAbsMinX;
+            const float h = r.computedAbsMaxY - r.computedAbsMinY;
+            float shiftX = 0.0f, shiftY = 0.0f;
+            if (centeredH) shiftX = (pWidth  * 0.5f) - (r.computedAbsMinX + w * 0.5f);
+            if (centeredV) shiftY = (pHeight * 0.5f) - (r.computedAbsMinY + h * 0.5f);
+            if (std::abs(shiftX) < 0.5f && std::abs(shiftY) < 0.5f) continue;
+
+            // Shift this entity AND all its descendants by the delta.
+            std::function<void(Entity, float, float)> shift = [&](Entity ent, float dx, float dy) {
+                if (auto* rr = reg.Get<Components::UIRectComponent>(ent)) {
+                    rr->computedAbsMinX += dx;
+                    rr->computedAbsMaxX += dx;
+                    rr->computedAbsMinY += dy;
+                    rr->computedAbsMaxY += dy;
+                }
+                for (size_t j = 0; j < entities.size(); ++j) {
+                    if (rects[j].parentEntity == ent) shift(entities[j], dx, dy);
+                }
+            };
+            shift(e, shiftX, shiftY);
         }
 
         // 6. Memory Reclamation
