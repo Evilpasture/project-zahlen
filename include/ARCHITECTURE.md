@@ -124,6 +124,14 @@ compiles happily from a core file and has to be rejected by path resolution, not
 by spelling. What the script cannot see is linking: keep `zahlen_extras` out of
 every target defined outside `extras/` and `tests/`.
 
+One deliberate exception to the *location* of the rule, not to its direction:
+the offline cooker `tools/zcook/` is not core and may consume `extras/`. It
+lives under `tools/` precisely because its GLB emitter serialises the glTF
+document with `extras/json`'s reflection serializer, which a core source tree
+may not touch. It still links no `zahlen_extras` and pulls no simdjson —
+`ReflectJSON::SerializeJSON` is a header template — so an extras-free build
+keeps producing assets.
+
 ### What the boundary buys
 
 Anything behind it is genuinely optional — its third-party dependencies
