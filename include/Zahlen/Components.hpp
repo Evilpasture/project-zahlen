@@ -416,7 +416,53 @@ struct Components {
         String256 text;
         uint32_t  cursorIndex = 0;
         bool      isFocused   = false;
-        char      _pad[3]     = {};
+        bool      edited      = false; // Set true by engine on text mutation; builder clears after reading
+        char      _pad[2]     = {};
+    };
+
+    struct UICheckboxComponent {
+        bool checked       = false;
+        bool previousValue = false; // For external-mutation detection
+        bool hovered       = false;
+        char _pad[1]       = {};
+    };
+
+    struct UISliderComponent {
+        float value         = 0.0f;
+        float minValue      = 0.0f;
+        float maxValue      = 1.0f;
+        float step          = 0.0f; // 0 = continuous
+        float previousValue = 0.0f;
+        bool  isDragging    = false;
+        bool  hovered       = false;
+        char  _pad[2]       = {};
+    };
+
+    struct UIDropdownComponent {
+        int32_t  selectedIdx    = 0;
+        int32_t  previousIdx    = 0;
+        bool     expanded       = false;
+        bool     hovered        = false;
+        char     _pad[2]        = {};
+        // Stored option strings (copied at build time so options are retained)
+        ZHLN::Array<String128> options;
+    };
+
+    struct UICollapsingHeaderComponent {
+        bool isOpen       = true;
+        bool defaultOpen  = true;
+        bool hovered      = false;
+        char _pad[1]      = {};
+    };
+
+    struct UISplitterComponent {
+        enum Direction : uint8_t { Horizontal = 0, Vertical = 1 };
+        float ratio         = 0.5f; // Size of the first panel (0..1)
+        float previousRatio = 0.5f;
+        bool  isDragging    = false;
+        bool  hovered       = false;
+        Direction direction = Horizontal;
+        char _pad[2]        = {};
     };
 
     struct UIStyleComponent {

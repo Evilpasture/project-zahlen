@@ -744,10 +744,18 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
                         std::string next = std::string(curr.substr(0, inputComp->cursorIndex - 1)) + std::string(curr.substr(inputComp->cursorIndex));
                         inputComp->text.assign(next);
                         inputComp->cursorIndex--;
+                        inputComp->edited = true;
+                    } else if (key == KeyCode::Delete && inputComp->cursorIndex < curr.size()) {
+                        std::string next = std::string(curr.substr(0, inputComp->cursorIndex)) + std::string(curr.substr(inputComp->cursorIndex + 1));
+                        inputComp->text.assign(next);
+                        inputComp->edited = true;
                     } else if (key == KeyCode::Left && inputComp->cursorIndex > 0) {
                         inputComp->cursorIndex--;
                     } else if (key == KeyCode::Right && inputComp->cursorIndex < curr.size()) {
                         inputComp->cursorIndex++;
+                    } else if (key == KeyCode::Enter || key == KeyCode::Escape) {
+                        // Commit/defocus: leave focus but don't clear text
+                        inputComp->isFocused = false;
                     }
                 }
             }
@@ -783,6 +791,7 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
                                             std::string(curr.substr(inputComp->cursorIndex));
                     inputComp->text.assign(next);
                     inputComp->cursorIndex++;
+                    inputComp->edited = true;
                 }
             }
         }
