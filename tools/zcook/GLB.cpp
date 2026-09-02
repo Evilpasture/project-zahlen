@@ -2,17 +2,32 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // File: tools/zcook/GLB.cpp
+//
+// Emits a cookable scene from Compiler::IRManifest as a self-contained glTF
+// 2.0 binary container. The document model (GLBModel.hpp) is the schema and
+// ZHLN::ReflectJSON::SerializeJSON writes it -- no JSON is built by hand.
+// The PNG half of the BIN chunk is stb_image_write; the container framing
+// (magic, chunk headers, padding) is the one binary shape the layer above
+// must stay hand-assembled.
 #include "GLB.hpp"
+#include "GLBModel.hpp"
 #include "Transform.hpp"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
-#include <format>
+#include <map>
+#include <optional>
 #include <unordered_map>
 #include <vector>
+
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include <stb_image_write.h>
+
+#include <json/JSONSchema.hpp>
 
 namespace ZHLN::GLB {
 
@@ -92,146 +107,40 @@ inline std::array<float, 4> UnpackNormal(uint32_t packed) noexcept {
     return {x, y, z, w};
 }
 
-inline uint32_t crc32(const uint8_t* data, size_t len) {
-    uint32_t crc = 0xFFFFFFFF;
-    for (size_t i = 0; i < len; ++i) {
-        crc ^= data[i];
-        for (int j = 0; j < 8; ++j) {
-            if (crc & 1)
-                crc = (crc >> 1) ^ 0xEDB88320;
-            else
-                crc >>= 1;
-        }
-    }
-    return ~crc;
-}
-
+/// stb_image_write appends through a context pointer; this is the only
+/// result sink the emitter needs (BIN chunk bytes, and the baked .ztex copy).
 std::vector<uint8_t> CreatePNGBytes(const std::vector<uint32_t>& rgbaPixels, uint32_t width, uint32_t height) {
-    std::vector<uint8_t> rawData;
-    rawData.reserve(static_cast<size_t>(height) * (1 + width * 4));
-    for (uint32_t y = 0; y < height; ++y) {
-        rawData.push_back(0);
-        for (uint32_t x = 0; x < width; ++x) {
-            uint32_t pixel = rgbaPixels[y * width + x];
-            rawData.push_back(pixel & 0xFF);
-            rawData.push_back((pixel >> 8) & 0xFF);
-            rawData.push_back((pixel >> 16) & 0xFF);
-            rawData.push_back((pixel >> 24) & 0xFF);
-        }
-    }
-
-    std::vector<uint8_t> zlibData;
-    zlibData.push_back(0x78);
-    zlibData.push_back(0x01);
-
-    size_t offset = 0;
-    while (offset < rawData.size()) {
-        size_t chunk  = std::min(rawData.size() - offset, size_t(65535));
-        bool   isLast = (offset + chunk == rawData.size());
-
-        zlibData.push_back(isLast ? 0x01 : 0x00);
-        zlibData.push_back(chunk & 0xFF);
-        zlibData.push_back((chunk >> 8) & 0xFF);
-        zlibData.push_back((~chunk) & 0xFF);
-        zlibData.push_back(((~chunk) >> 8) & 0xFF);
-
-        zlibData.insert(zlibData.end(), rawData.begin() + offset, rawData.begin() + offset + chunk);
-        offset += chunk;
-    }
-
-    uint32_t s1 = 1, s2 = 0;
-    for (uint8_t b: rawData) {
-        s1 = (s1 + b) % 65521;
-        s2 = (s2 + s1) % 65521;
-    }
-    uint32_t adler = (s2 << 16) | s1;
-    zlibData.push_back((adler >> 24) & 0xFF);
-    zlibData.push_back((adler >> 16) & 0xFF);
-    zlibData.push_back((adler >> 8) & 0xFF);
-    zlibData.push_back(adler & 0xFF);
-
-    std::vector<uint8_t> png = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
-
-    std::vector<uint8_t> ihdrData = {
-        'I',
-        'H',
-        'D',
-        'R',
-        static_cast<uint8_t>((width >> 24) & 0xFF),
-        static_cast<uint8_t>((width >> 16) & 0xFF),
-        static_cast<uint8_t>((width >> 8) & 0xFF),
-        static_cast<uint8_t>(width & 0xFF),
-        static_cast<uint8_t>((height >> 24) & 0xFF),
-        static_cast<uint8_t>((height >> 16) & 0xFF),
-        static_cast<uint8_t>((height >> 8) & 0xFF),
-        static_cast<uint8_t>(height & 0xFF),
-        8,
-        6,
-        0,
-        0,
-        0
+    std::vector<uint8_t> pngBytes;
+    auto                 append = [](void* ctx, void* data, int size) {
+        auto*       out       = static_cast<std::vector<uint8_t>*>(ctx);
+        const auto* bytes     = static_cast<const uint8_t*>(data);
+        out->insert(out->end(), bytes, bytes + size);
     };
-
-    uint32_t ihdrCrc = crc32(ihdrData.data(), ihdrData.size());
-    png.push_back(0);
-    png.push_back(0);
-    png.push_back(0);
-    png.push_back(13);
-    png.insert(png.end(), ihdrData.begin(), ihdrData.end());
-    png.push_back((ihdrCrc >> 24) & 0xFF);
-    png.push_back((ihdrCrc >> 16) & 0xFF);
-    png.push_back((ihdrCrc >> 8) & 0xFF);
-    png.push_back(ihdrCrc & 0xFF);
-
-    std::vector<uint8_t> idatHeader = {'I', 'D', 'A', 'T'};
-    idatHeader.insert(idatHeader.end(), zlibData.begin(), zlibData.end());
-    uint32_t idatCrc = crc32(idatHeader.data(), idatHeader.size());
-    uint32_t zlibLen = static_cast<uint32_t>(zlibData.size());
-
-    png.push_back((zlibLen >> 24) & 0xFF);
-    png.push_back((zlibLen >> 16) & 0xFF);
-    png.push_back((zlibLen >> 8) & 0xFF);
-    png.push_back(zlibLen & 0xFF);
-    png.insert(png.end(), idatHeader.begin(), idatHeader.end());
-    png.push_back((idatCrc >> 24) & 0xFF);
-    png.push_back((idatCrc >> 16) & 0xFF);
-    png.push_back((idatCrc >> 8) & 0xFF);
-    png.push_back(idatCrc & 0xFF);
-
-    const uint8_t iend[] = {0x00, 0x00, 0x00, 0x00, 'I', 'E', 'N', 'D', 0xAE, 0x42, 0x60, 0x82};
-    png.insert(png.end(), iend, iend + 12);
-    return png;
+    if (stbi_write_png_to_func(append, &pngBytes, static_cast<int>(width), static_cast<int>(height), 4, rgbaPixels.data(), static_cast<int>(width * 4)) == 0) {
+        return {};
+    }
+    return pngBytes;
 }
-
-} // namespace
 
 bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolder, const std::string& outputPath) {
     std::vector<uint8_t> binBuffer;
     binBuffer.reserve(static_cast<size_t>(16 * 1024 * 1024));
 
-    std::vector<std::string> bufferViews;
-    std::vector<std::string> accessors;
-    std::vector<std::string> meshesJson;
-    std::vector<std::string> nodesJson;
-    std::vector<std::string> skinsJson;
-    std::vector<std::string> glbAnimsJson;
+    GlbDocument doc;
 
     std::unordered_map<std::string, int> meshIdToGlbIndex;
     std::unordered_map<std::string, int> lightIdToGlbIndex;
     std::unordered_map<std::string, int> nodeIdToGlbIndex;
     std::unordered_map<std::string, int> skinIdToGlbIndex;
+    std::unordered_map<std::string, int> matIdToGlbIndex;
 
     uint32_t accIndex   = 0;
     uint32_t bViewIndex = 0;
 
-    std::vector<std::string>             images;
-    std::vector<std::string>             textures;
-    std::vector<std::string>             materialsJson;
-    std::unordered_map<std::string, int> matIdToGlbIndex;
-
+    // Packed images are the parallel source of the textures[] and images[]
+    // arrays: texture.source is the index into both.
     struct PackedImage {
         std::string relativeUri;
-        uint32_t    bufferViewIndex;
     };
     std::vector<PackedImage> packedImages;
 
@@ -263,17 +172,17 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
         while (binBuffer.size() % 4 != 0)
             binBuffer.push_back(0);
 
-        std::string mimeType = "image/png";
+        std::string_view mimeType = "image/png";
         if (relativeUri.ends_with(".jpg") || relativeUri.ends_with(".jpeg"))
             mimeType = "image/jpeg";
 
-        bufferViews.push_back(std::format(R"(    {{ "buffer": 0, "byteOffset": {}, "byteLength": {} }})", imgOffset, size));
+        doc.bufferViews.push_back(GlbBufferView {.byteOffset = imgOffset, .byteLength = static_cast<uint32_t>(size)});
         uint32_t imgBViewIdx = bViewIndex++;
 
         int idx = static_cast<int>(packedImages.size());
-        packedImages.push_back({.relativeUri = relativeUri, .bufferViewIndex = imgBViewIdx});
-        textures.push_back(std::format(R"(    {{"sampler": 0, "source": {}}})", idx));
-        images.push_back(std::format(R"(    {{"bufferView": {}, "mimeType": "{}"}})", imgBViewIdx, mimeType));
+        packedImages.push_back({.relativeUri = relativeUri});
+        doc.textures.push_back(GlbTexture {.sampler = 0, .source = static_cast<uint32_t>(idx)});
+        doc.images.push_back(GlbImage {.bufferView = imgBViewIdx, .mimeType = mimeType});
 
         return idx;
     };
@@ -433,13 +342,13 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
         while (binBuffer.size() % 4 != 0)
             binBuffer.push_back(0);
 
-        bufferViews.push_back(std::format(R"(    {{ "buffer": 0, "byteOffset": {}, "byteLength": {} }})", imgOffset, pngBytes.size()));
+        doc.bufferViews.push_back(GlbBufferView {.byteOffset = imgOffset, .byteLength = static_cast<uint32_t>(pngBytes.size())});
         uint32_t imgBViewIdx = bViewIndex++;
 
         int idx = static_cast<int>(packedImages.size());
-        packedImages.push_back({.relativeUri = id, .bufferViewIndex = imgBViewIdx});
-        textures.push_back(std::format(R"(    {{"sampler": 0, "source": {}}})", idx));
-        images.push_back(std::format(R"(    {{"bufferView": {}, "mimeType": "image/png"}})", imgBViewIdx));
+        packedImages.push_back({.relativeUri = id});
+        doc.textures.push_back(GlbTexture {.sampler = 0, .source = static_cast<uint32_t>(idx)});
+        doc.images.push_back(GlbImage {.bufferView = imgBViewIdx, .mimeType = "image/png"});
 
         return idx;
     };
@@ -455,83 +364,35 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
         int mrTex       = getTextureIndex(mat.metallicRoughnessMap);
         int emissiveTex = getTextureIndex(mat.emissiveMap);
 
-        std::string pbrStr = std::format(
-            R"(      "baseColorFactor": [{}, {}, {}, {}],
-      "metallicFactor": {},
-      "roughnessFactor": {})",
-            mat.baseColor[0], mat.baseColor[1], mat.baseColor[2], mat.baseColor[3], mat.metallic, mat.roughness
-        );
-
+        GlbMaterial material;
+        material.name = mat.id;
+        material.pbrMetallicRoughness.baseColorFactor = {mat.baseColor[0], mat.baseColor[1], mat.baseColor[2], mat.baseColor[3]};
+        material.pbrMetallicRoughness.metallicFactor  = mat.metallic;
+        material.pbrMetallicRoughness.roughnessFactor = mat.roughness;
         if (albedoTex != -1) {
-            pbrStr += std::format(
-                R"(,
-      "baseColorTexture": {{"index": {}}})",
-                albedoTex
-            );
+            material.pbrMetallicRoughness.baseColorTexture = GlbTextureRef {.index = static_cast<uint32_t>(albedoTex)};
         }
 
-        std::string matStr = std::format(
-            R"(    {{
-      "name": "{}",
-      "pbrMetallicRoughness": {{
-  {}
-      }})",
-            mat.id, pbrStr
-        );
-
         if (mat.procedural.active && mat.procedural.type != "NODE_GRAPH") {
-            std::string paramsJson = "{\n";
-            for (size_t p = 0; p < mat.procedural.parameters.size(); ++p) {
-                const auto& param = mat.procedural.parameters[p];
-                paramsJson += std::format(R"(          "{}": )", param.name);
-                if (param.values.size() == 1) {
-                    paramsJson += std::to_string(param.values[0]);
-                } else {
-                    paramsJson += "[";
-                    for (size_t v = 0; v < param.values.size(); ++v) {
-                        paramsJson += std::to_string(param.values[v]) + (v < param.values.size() - 1 ? ", " : "");
-                    }
-                    paramsJson += "]";
-                }
-                paramsJson += (p < mat.procedural.parameters.size() - 1 ? ",\n" : "\n");
+            GlbProceduralShader shader;
+            shader.type = mat.procedural.type;
+            for (const auto& param: mat.procedural.parameters) {
+                shader.parameters.emplace(param.name, param.values);
             }
-            paramsJson += "        }";
-
-            matStr += std::format(
-                R"(,
-      "extensions": {{
-        "ZHLN_procedural_shader": {{
-          "type": "{}",
-          "parameters": {}
-        }}
-      }})",
-                mat.procedural.type, paramsJson
-            );
+            material.extensions = GlbMaterialExtensions {.ZHLN_procedural_shader = shader};
         }
 
         if (mat.baseColor[3] < 0.999f) {
-            matStr += R"(,
-      "alphaMode": "BLEND")";
+            material.alphaMode = "BLEND";
         }
-
         if (mat.doubleSided) {
-            matStr += R"(,
-      "doubleSided": true)";
+            material.doubleSided = true;
         }
-
         if (normalTex != -1) {
-            matStr += std::format(
-                R"(,
-      "normalTexture": {{"index": {}}})",
-                normalTex
-            );
+            material.normalTexture = GlbTextureRef {.index = static_cast<uint32_t>(normalTex)};
         }
         if (mrTex != -1) {
-            matStr += std::format(
-                R"(,
-      "metallicRoughnessTexture": {{"index": {}}})",
-                mrTex
-            );
+            material.metallicRoughnessTexture = GlbTextureRef {.index = static_cast<uint32_t>(mrTex)};
         }
 
         bool hasEmissive = (mat.emissiveStrength > 0.f) &&
@@ -551,34 +412,24 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
                 strength = 1.f;
             }
 
-            matStr += std::format(
-                R"(,
-      "emissiveFactor": [{}, {}, {}])",
-                ef[0], ef[1], ef[2]
-            );
+            material.emissiveFactor = std::array<float, 3> {ef[0], ef[1], ef[2]};
             if (emissiveTex != -1) {
-                matStr += std::format(
-                    R"(,
-      "emissiveTexture": {{"index": {}}})",
-                    emissiveTex
-                );
+                material.emissiveTexture = GlbTextureRef {.index = static_cast<uint32_t>(emissiveTex)};
             }
             if (strength > 1.f) {
-                matStr += std::format(
-                    R"(,
-      "extensions": {{
-        "KHR_materials_emissive_strength": {{
-          "emissiveStrength": {}
-        }}
-      }})",
-                    strength
-                );
+                if (!material.extensions) {
+                    material.extensions = GlbMaterialExtensions {};
+                }
+                material.extensions->KHR_materials_emissive_strength = GlbEmissiveStrength {.emissiveStrength = strength};
             }
         }
 
-        matStr += "\n    }";
-        matIdToGlbIndex[mat.id] = static_cast<int>(materialsJson.size());
-        materialsJson.push_back(matStr);
+        matIdToGlbIndex[mat.id] = static_cast<int>(doc.materials.size());
+        doc.materials.push_back(material);
+    }
+
+    if (!doc.textures.empty()) {
+        doc.samplers.push_back(GlbSampler {});
     }
 
     for (const auto& mesh: manifest.meshes) {
@@ -588,7 +439,7 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
             continue;
         }
 
-        meshIdToGlbIndex[mesh.id] = static_cast<int>(meshesJson.size());
+        meshIdToGlbIndex[mesh.id] = static_cast<int>(doc.meshes.size());
 
         auto vertexCount = static_cast<uint32_t>(compiled.positions.size());
 
@@ -601,17 +452,7 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
         while (binBuffer.size() % 4 != 0)
             binBuffer.push_back(0);
 
-        bufferViews.push_back(
-            std::format(
-                R"(    {{
-      "buffer": 0,
-      "byteOffset": {},
-      "byteLength": {},
-      "target": 34962
-    }})",
-                posOffset, posBytes
-            )
-        );
+        doc.bufferViews.push_back(GlbBufferView {.byteOffset = posOffset, .byteLength = static_cast<uint32_t>(posBytes), .target = 34962});
         uint32_t posBViewIdx = bViewIndex++;
 
         // 2. Unpack and Pack Normals (FLOAT3)
@@ -624,17 +465,7 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
         while (binBuffer.size() % 4 != 0)
             binBuffer.push_back(0);
 
-        bufferViews.push_back(
-            std::format(
-                R"(    {{
-      "buffer": 0,
-      "byteOffset": {},
-      "byteLength": {},
-      "target": 34962
-    }})",
-                normOffset, vertexCount * 12
-            )
-        );
+        doc.bufferViews.push_back(GlbBufferView {.byteOffset = normOffset, .byteLength = vertexCount * 12, .target = 34962});
         uint32_t normBViewIdx = bViewIndex++;
 
         // 3. Unpack and Pack Tangents (FLOAT4)
@@ -647,17 +478,7 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
         while (binBuffer.size() % 4 != 0)
             binBuffer.push_back(0);
 
-        bufferViews.push_back(
-            std::format(
-                R"(    {{
-      "buffer": 0,
-      "byteOffset": {},
-      "byteLength": {},
-      "target": 34962
-    }})",
-                tangOffset, vertexCount * 16
-            )
-        );
+        doc.bufferViews.push_back(GlbBufferView {.byteOffset = tangOffset, .byteLength = vertexCount * 16, .target = 34962});
         uint32_t tangBViewIdx = bViewIndex++;
 
         // 4. Unpack and Pack UVs (FLOAT2)
@@ -671,17 +492,7 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
         while (binBuffer.size() % 4 != 0)
             binBuffer.push_back(0);
 
-        bufferViews.push_back(
-            std::format(
-                R"(    {{
-      "buffer": 0,
-      "byteOffset": {},
-      "byteLength": {},
-      "target": 34962
-    }})",
-                uvOffset, vertexCount * 8
-            )
-        );
+        doc.bufferViews.push_back(GlbBufferView {.byteOffset = uvOffset, .byteLength = vertexCount * 8, .target = 34962});
         uint32_t uvBViewIdx = bViewIndex++;
 
         // 5. Pack Colors (directly as UNORM8)
@@ -693,17 +504,7 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
         while (binBuffer.size() % 4 != 0)
             binBuffer.push_back(0);
 
-        bufferViews.push_back(
-            std::format(
-                R"(    {{
-      "buffer": 0,
-      "byteOffset": {},
-      "byteLength": {},
-      "target": 34962
-    }})",
-                colorOffset, vertexCount * 4
-            )
-        );
+        doc.bufferViews.push_back(GlbBufferView {.byteOffset = colorOffset, .byteLength = vertexCount * 4, .target = 34962});
         uint32_t colorBViewIdx = bViewIndex++;
 
         // 6. Indices (IBO)
@@ -718,17 +519,7 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
             binBuffer.push_back(0);
         }
 
-        bufferViews.push_back(
-            std::format(
-                R"(    {{
-      "buffer": 0,
-      "byteOffset": {},
-      "byteLength": {},
-      "target": 34963
-    }})",
-                iboOffset, iboBytes
-            )
-        );
+        doc.bufferViews.push_back(GlbBufferView {.byteOffset = iboOffset, .byteLength = static_cast<uint32_t>(iboBytes), .target = 34963});
         uint32_t iboBViewIdx = bViewIndex++;
 
         uint32_t posAcc   = accIndex++;
@@ -737,20 +528,20 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
         uint32_t uvAcc    = accIndex++;
         uint32_t colorAcc = accIndex++;
 
-        accessors.push_back(
-            std::format(
-                R"(    {{"bufferView": {}, "componentType": 5126, "count": {}, "type": "VEC3", "min": [{}, {}, {}], "max": [{}, {}, {}]}})", posBViewIdx,
-                vertexCount, compiled.minB[0], compiled.minB[1], compiled.minB[2], compiled.maxB[0], compiled.maxB[1], compiled.maxB[2]
-            )
-        );
-        accessors.push_back(std::format(R"(    {{"bufferView": {}, "componentType": 5126, "count": {}, "type": "VEC3"}})", normBViewIdx, vertexCount));
-        accessors.push_back(std::format(R"(    {{"bufferView": {}, "componentType": 5126, "count": {}, "type": "VEC4"}})", tangBViewIdx, vertexCount));
-        accessors.push_back(std::format(R"(    {{"bufferView": {}, "componentType": 5126, "count": {}, "type": "VEC2"}})", uvBViewIdx, vertexCount));
+        doc.accessors.push_back(GlbAccessor {
+            .bufferView    = posBViewIdx,
+            .componentType = 5126,
+            .count         = vertexCount,
+            .type          = "VEC3",
+            .min           = {compiled.minB[0], compiled.minB[1], compiled.minB[2]},
+            .max           = {compiled.maxB[0], compiled.maxB[1], compiled.maxB[2]},
+        });
+        doc.accessors.push_back(GlbAccessor {.bufferView = normBViewIdx, .componentType = 5126, .count = vertexCount, .type = "VEC3"});
+        doc.accessors.push_back(GlbAccessor {.bufferView = tangBViewIdx, .componentType = 5126, .count = vertexCount, .type = "VEC4"});
+        doc.accessors.push_back(GlbAccessor {.bufferView = uvBViewIdx, .componentType = 5126, .count = vertexCount, .type = "VEC2"});
 
         // Use 5121 (UNSIGNED_BYTE) normalized=true for vertex colors
-        accessors.push_back(
-            std::format(R"(    {{"bufferView": {}, "componentType": 5121, "count": {}, "type": "VEC4", "normalized": true}})", colorBViewIdx, vertexCount)
-        );
+        doc.accessors.push_back(GlbAccessor {.bufferView = colorBViewIdx, .componentType = 5121, .count = vertexCount, .type = "VEC4", .normalized = true});
 
         uint32_t jointsAcc  = 0;
         uint32_t weightsAcc = 0;
@@ -769,11 +560,11 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
                 binBuffer.push_back(0);
             }
 
-            bufferViews.push_back(std::format(R"(    {{ "buffer": 0, "byteOffset": {}, "byteLength": {}, "target": 34962 }})", jboOffset, jboBytes));
+            doc.bufferViews.push_back(GlbBufferView {.byteOffset = jboOffset, .byteLength = static_cast<uint32_t>(jboBytes), .target = 34962});
             uint32_t jboBViewIdx = bViewIndex++;
 
             jointsAcc = accIndex++;
-            accessors.push_back(std::format(R"(    {{"bufferView": {}, "componentType": 5123, "count": {}, "type": "VEC4"}})", jboBViewIdx, vertexCount));
+            doc.accessors.push_back(GlbAccessor {.bufferView = jboBViewIdx, .componentType = 5123, .count = vertexCount, .type = "VEC4"});
 
             // weights: PackedRGBA8 -> 5121 (UNSIGNED_BYTE) normalized=true
             while (binBuffer.size() % 4 != 0) {
@@ -788,17 +579,17 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
                 binBuffer.push_back(0);
             }
 
-            bufferViews.push_back(std::format(R"(    {{ "buffer": 0, "byteOffset": {}, "byteLength": {}, "target": 34962 }})", wboOffset, vertexCount * 4));
+            doc.bufferViews.push_back(GlbBufferView {.byteOffset = wboOffset, .byteLength = vertexCount * 4, .target = 34962});
             uint32_t wboBViewIdx = bViewIndex++;
 
             weightsAcc = accIndex++;
-            accessors.push_back(
-                std::format(R"(    {{"bufferView": {}, "componentType": 5121, "count": {}, "type": "VEC4", "normalized": true}})", wboBViewIdx, vertexCount)
+            doc.accessors.push_back(
+                GlbAccessor {.bufferView = wboBViewIdx, .componentType = 5121, .count = vertexCount, .type = "VEC4", .normalized = true}
             );
         }
 
         // Compile morph targets (shape keys)
-        std::vector<std::string> targetsJson;
+        std::vector<GlbMorphTarget> targets;
         for (const auto& target: mesh.morphTargets) {
             std::string targetBinPath = levelFolder + "/" + target.binFile;
             FILE*       tbf           = std::fopen(targetBinPath.c_str(), "rb");
@@ -835,7 +626,7 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
                 binBuffer.end(), reinterpret_cast<uint8_t*>(compiledOffsets.data()), reinterpret_cast<uint8_t*>(compiledOffsets.data()) + targetBytes
             );
 
-            bufferViews.push_back(std::format(R"(    {{ "buffer": 0, "byteOffset": {}, "byteLength": {} }})", targetOffset, targetBytes));
+            doc.bufferViews.push_back(GlbBufferView {.byteOffset = targetOffset, .byteLength = static_cast<uint32_t>(targetBytes)});
             uint32_t targetBViewIdx = bViewIndex++;
 
             uint32_t targetAccIdx = accIndex++;
@@ -851,66 +642,53 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
                 maxO[2] = std::max(maxO[2], compiledOffsets[i * 3 + 2]);
             }
 
-            accessors.push_back(
-                std::format(
-                    R"(    {{"bufferView": {}, "componentType": 5126, "count": {}, "type": "VEC3", "min": [{}, {}, {}], "max": [{}, {}, {}]}})", targetBViewIdx,
-                    vertexCount, minO[0], minO[1], minO[2], maxO[0], maxO[1], maxO[2]
-                )
-            );
+            doc.accessors.push_back(GlbAccessor {
+                .bufferView    = targetBViewIdx,
+                .componentType = 5126,
+                .count         = vertexCount,
+                .type          = "VEC3",
+                .min           = {minO[0], minO[1], minO[2]},
+                .max           = {maxO[0], maxO[1], maxO[2]},
+            });
 
-            targetsJson.push_back(std::format(R"(        {{ "POSITION": {} }})", targetAccIdx));
+            targets.push_back(GlbMorphTarget {.POSITION = targetAccIdx});
         }
 
-        std::string targetsArrayStr;
-        if (!targetsJson.empty()) {
-            targetsArrayStr = R"(, "targets": [ )";
-            for (size_t t = 0; t < targetsJson.size(); ++t) {
-                targetsArrayStr += targetsJson[t] + (t < targetsJson.size() - 1 ? ", " : "");
-            }
-            targetsArrayStr += " ]";
-        }
-
-        std::string primsStr;
+        GlbMesh glbMesh;
+        glbMesh.name = mesh.id;
         for (size_t p = 0; p < compiled.primitives.size(); ++p) {
             const auto& prim     = compiled.primitives[p];
             uint32_t    indexAcc = accIndex++;
 
-            accessors.push_back(
-                std::format(
-                    R"(    {{ "bufferView": {}, "byteOffset": {}, "componentType": 5125, "count": {}, "type": "SCALAR" }})", iboBViewIdx, prim.vertexOffset,
-                    prim.vertexCount
-                )
-            );
+            doc.accessors.push_back(GlbAccessor {
+                .bufferView    = iboBViewIdx,
+                .byteOffset    = prim.vertexOffset,
+                .componentType = 5125,
+                .count         = prim.vertexCount,
+                .type          = "SCALAR",
+            });
 
-            int  matGlbIdx = -1;
-            auto it        = matIdToGlbIndex.find(prim.materialId);
-            if (it != matIdToGlbIndex.end()) {
-                matGlbIdx = it->second;
-            }
-
-            std::string matStr;
-            if (matGlbIdx != -1) {
-                matStr = std::format(R"(, "material": {})", matGlbIdx);
-            }
-
-            std::string skinAttribs;
+            GlbPrimitive glbPrim;
+            glbPrim.attributes.POSITION   = posAcc;
+            glbPrim.attributes.NORMAL     = normAcc;
+            glbPrim.attributes.TANGENT    = tangAcc;
+            glbPrim.attributes.TEXCOORD_0 = uvAcc;
+            glbPrim.attributes.COLOR_0    = colorAcc;
             if (compiled.isSkinned) {
-                skinAttribs = std::format(R"(, "JOINTS_0": {}, "WEIGHTS_0": {})", jointsAcc, weightsAcc);
+                glbPrim.attributes.JOINTS_0  = jointsAcc;
+                glbPrim.attributes.WEIGHTS_0 = weightsAcc;
+            }
+            glbPrim.indices  = indexAcc;
+            glbPrim.targets  = targets;
+
+            auto it = matIdToGlbIndex.find(prim.materialId);
+            if (it != matIdToGlbIndex.end()) {
+                glbPrim.material = static_cast<uint32_t>(it->second);
             }
 
-            primsStr += std::format(
-                R"(        {{
-          "attributes": {{ "POSITION": {}, "NORMAL": {}, "TANGENT": {}, "TEXCOORD_0": {}, "COLOR_0": {} {} }},
-          "indices": {} {}{}
-        }})",
-                posAcc, normAcc, tangAcc, uvAcc, colorAcc, skinAttribs, indexAcc, matStr, targetsArrayStr
-            );
-            if (p < compiled.primitives.size() - 1) {
-                primsStr += ",\n";
-            }
+            glbMesh.primitives.push_back(glbPrim);
         }
-
-        meshesJson.push_back(std::format(R"(    {{ "name": "{}", "primitives": [ {} ] }})", mesh.id, primsStr));
+        doc.meshes.push_back(glbMesh);
     }
 
     for (size_t i = 0; i < manifest.lights.size(); ++i) {
@@ -953,7 +731,7 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
         nodesToEmit.push_back(&node);
     }
 
-    std::vector<std::pair<std::string, std::string>> jointsToEmit;
+    std::vector<std::pair<std::string, std::array<float, 16>>> jointsToEmit;
     for (const auto& skin: manifest.skins) {
         for (size_t i = 0; i < skin.joints.size(); ++i) {
             const auto& jointId = skin.joints[i];
@@ -961,21 +739,16 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
                 continue;
             }
 
-            std::string matrixStr = "[";
+            std::array<float, 16> matrix {};
             for (int m = 0; m < 16; ++m) {
-                float val = (i * 16 + m < skin.restPose.size()) ? skin.restPose[i * 16 + m] : (m == 0 || m == 5 || m == 10 || m == 15 ? 1.0f : 0.0f);
-                matrixStr += std::to_string(val);
-                if (m < 15) {
-                    matrixStr += ", ";
-                }
+                matrix[static_cast<size_t>(m)] = (i * 16 + m < skin.restPose.size()) ? skin.restPose[i * 16 + m] : (m == 0 || m == 5 || m == 10 || m == 15 ? 1.0f : 0.0f);
             }
-            matrixStr += "]";
             nodeIdToGlbIndex[jointId] = glbNodeIdx++;
-            jointsToEmit.emplace_back(jointId, matrixStr);
+            jointsToEmit.emplace_back(jointId, matrix);
         }
     }
 
-    nodesJson.resize(glbNodeIdx);
+    doc.nodes.resize(static_cast<size_t>(glbNodeIdx));
 
     for (const auto& skin: manifest.skins) {
         while (binBuffer.size() % 4 != 0) {
@@ -990,45 +763,49 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
             );
         }
 
-        bufferViews.push_back(std::format(R"(    {{ "buffer": 0, "byteOffset": {}, "byteLength": {} }})", ibmOffset, ibmBytes));
+        doc.bufferViews.push_back(GlbBufferView {.byteOffset = ibmOffset, .byteLength = static_cast<uint32_t>(ibmBytes)});
         uint32_t ibmBViewIdx = bViewIndex++;
 
         uint32_t ibmAccIdx = accIndex++;
-        accessors.push_back(std::format(R"(    {{"bufferView": {}, "componentType": 5126, "count": {}, "type": "MAT4"}})", ibmBViewIdx, skin.joints.size()));
+        doc.accessors.push_back(GlbAccessor {
+            .bufferView    = ibmBViewIdx,
+            .componentType = 5126,
+            .count         = static_cast<uint32_t>(skin.joints.size()),
+            .type          = "MAT4",
+        });
 
-        std::string jointsStr;
-        for (size_t j = 0; j < skin.joints.size(); ++j) {
-            jointsStr += std::to_string(nodeIdToGlbIndex[skin.joints[j]]);
-            if (j < skin.joints.size() - 1)
-                jointsStr += ", ";
+        GlbSkin glbSkin;
+        glbSkin.name = skin.name;
+        glbSkin.inverseBindMatrices = ibmAccIdx;
+        for (const auto& jointId: skin.joints) {
+            glbSkin.joints.push_back(static_cast<uint32_t>(nodeIdToGlbIndex[jointId]));
         }
 
-        skinIdToGlbIndex[skin.id] = static_cast<int>(skinsJson.size());
-        skinsJson.push_back(std::format(R"(    {{ "name": "{}", "inverseBindMatrices": {}, "joints": [{}] }})", skin.name, ibmAccIdx, jointsStr));
+        skinIdToGlbIndex[skin.id] = static_cast<int>(doc.skins.size());
+        doc.skins.push_back(glbSkin);
     }
 
-    for (const auto& [jointId, matrixStr]: jointsToEmit) {
-        int         nIdx = nodeIdToGlbIndex[jointId];
-        std::string childrenStr;
-        auto        cIt = nodeChildren.find(jointId);
-        if (cIt != nodeChildren.end() && !cIt->second.empty()) {
-            std::vector<int> activeChildren;
-            for (const auto& childId: cIt->second) {
-                auto childIt = nodeIdToGlbIndex.find(childId);
-                if (childIt != nodeIdToGlbIndex.end())
-                    activeChildren.push_back(childIt->second);
-            }
-            if (!activeChildren.empty()) {
-                childrenStr = ",\n      \"children\": [";
-                for (size_t c = 0; c < activeChildren.size(); ++c) {
-                    childrenStr += std::to_string(activeChildren[c]);
-                    if (c < activeChildren.size() - 1)
-                        childrenStr += ", ";
-                }
-                childrenStr += "]";
-            }
+    auto childrenOf = [&](const std::string& nodeId) -> std::vector<uint32_t> {
+        std::vector<uint32_t> activeChildren;
+        auto                  cIt = nodeChildren.find(nodeId);
+        if (cIt == nodeChildren.end() || cIt->second.empty()) {
+            return activeChildren;
         }
-        nodesJson[nIdx] = std::format(R"(    {{ "name": "{}", "matrix": {}{} }})", jointId, matrixStr, childrenStr);
+        for (const auto& childId: cIt->second) {
+            auto childIt = nodeIdToGlbIndex.find(childId);
+            if (childIt != nodeIdToGlbIndex.end())
+                activeChildren.push_back(static_cast<uint32_t>(childIt->second));
+        }
+        return activeChildren;
+    };
+
+    for (const auto& [jointId, matrix]: jointsToEmit) {
+        int nIdx = nodeIdToGlbIndex[jointId];
+        doc.nodes[static_cast<size_t>(nIdx)] = GlbNode {
+            .name     = jointId,
+            .matrix   = matrix,
+            .children = childrenOf(jointId),
+        };
     }
 
     for (const auto* nodePtr: nodesToEmit) {
@@ -1042,67 +819,38 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
                 matrixData = node.localMatrix;
         }
 
-        std::string matrixStr = "[";
-        for (int i = 0; i < 16; ++i) {
-            matrixStr += std::to_string(matrixData[i]);
-            if (i < 15)
-                matrixStr += ", ";
-        }
-        matrixStr += "]";
+        GlbNode glbNode;
+        glbNode.name = node.id;
+        std::copy_n(matrixData, 16, glbNode.matrix.begin());
 
-        std::string meshStr, skinStr, extStr, weightsStr;
         if (!node.meshId.empty() && node.visible) {
             auto it = meshIdToGlbIndex.find(node.meshId);
             if (it != meshIdToGlbIndex.end()) {
-                meshStr = std::format(",\n      \"mesh\": {}", it->second);
-
+                glbNode.mesh = static_cast<uint32_t>(it->second);
                 auto mIt = std::ranges::find_if(manifest.meshes, [&](const auto& m) { return m.id == node.meshId; });
                 if (mIt != manifest.meshes.end() && !mIt->morphTargets.empty()) {
-                    weightsStr = ",\n      \"weights\": [";
-                    for (size_t w = 0; w < mIt->morphTargets.size(); ++w) {
-                        weightsStr += "0.0" + std::string(w < mIt->morphTargets.size() - 1 ? ", " : "");
-                    }
-                    weightsStr += "]";
+                    glbNode.weights.assign(mIt->morphTargets.size(), 0.0f);
                 }
             }
         }
         if (!node.skinId.empty()) {
             auto sit = skinIdToGlbIndex.find(node.skinId);
             if (sit != skinIdToGlbIndex.end())
-                skinStr = std::format(",\n      \"skin\": {}", sit->second);
+                glbNode.skin = static_cast<uint32_t>(sit->second);
         }
         if (!node.lightId.empty()) {
             auto lit = lightIdToGlbIndex.find(node.lightId);
             if (lit != lightIdToGlbIndex.end())
-                extStr = std::format(R"(, "extensions": {{ "KHR_lights_punctual": {{ "light": {} }} }})", lit->second);
+                glbNode.extensions = GlbNodeExtensions {.KHR_lights_punctual = {.light = static_cast<uint32_t>(lit->second)}};
         }
+        glbNode.children = childrenOf(node.id);
 
-        std::string childrenStr;
-        auto        cIt = nodeChildren.find(node.id);
-        if (cIt != nodeChildren.end() && !cIt->second.empty()) {
-            std::vector<int> activeChildren;
-            for (const auto& childId: cIt->second) {
-                auto childIt = nodeIdToGlbIndex.find(childId);
-                if (childIt != nodeIdToGlbIndex.end())
-                    activeChildren.push_back(childIt->second);
-            }
-            if (!activeChildren.empty()) {
-                childrenStr = ",\n      \"children\": [";
-                for (size_t c = 0; c < activeChildren.size(); ++c) {
-                    childrenStr += std::to_string(activeChildren[c]);
-                    if (c < activeChildren.size() - 1)
-                        childrenStr += ", ";
-                }
-                childrenStr += "]";
-            }
-        }
-        nodesJson[nIdx] =
-            std::format(R"(    {{ "name": "{}", "matrix": {}{}{}{}{}{} }})", node.id, matrixStr, meshStr, skinStr, extStr, childrenStr, weightsStr);
+        doc.nodes[static_cast<size_t>(nIdx)] = glbNode;
     }
 
     for (const auto& anim: manifest.animations) {
-        std::vector<std::string> channelsJson;
-        std::vector<std::string> samplersJson;
+        GlbAnimation glbAnim;
+        glbAnim.name = anim.name;
 
         for (size_t sIdx = 0; sIdx < anim.samplers.size(); ++sIdx) {
             const auto& s           = anim.samplers[sIdx];
@@ -1131,14 +879,14 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
             uint32_t glbOutOffset = static_cast<uint32_t>(binBuffer.size());
             binBuffer.insert(binBuffer.end(), outputBytes.begin(), outputBytes.end());
 
-            bufferViews.push_back(std::format(R"(    {{ "buffer": 0, "byteOffset": {}, "byteLength": {} }})", glbInOffset, s.inputLength));
+            doc.bufferViews.push_back(GlbBufferView {.byteOffset = glbInOffset, .byteLength = s.inputLength});
             uint32_t inBViewIdx = bViewIndex++;
 
-            bufferViews.push_back(std::format(R"(    {{ "buffer": 0, "byteOffset": {}, "byteLength": {} }})", glbOutOffset, s.outputLength));
+            doc.bufferViews.push_back(GlbBufferView {.byteOffset = glbOutOffset, .byteLength = s.outputLength});
             uint32_t outBViewIdx = bViewIndex++;
 
-            uint32_t    keyCount   = s.inputLength / sizeof(float);
-            std::string outputType = "VEC3";
+            uint32_t        keyCount   = s.inputLength / sizeof(float);
+            std::string_view outputType = "VEC3"; // string literal storage: outlives the accessors
             for (const auto& chan: anim.channels) {
                 if (chan.samplerId == sIdx) {
                     if (chan.targetPath == "rotation")
@@ -1159,44 +907,37 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
             }
 
             uint32_t inAccIdx = accIndex++;
-            accessors.push_back(
-                std::format(
-                    R"(    {{"bufferView": {}, "componentType": 5126, "count": {}, "type": "SCALAR", "min": [{}], "max": [{}]}})", inBViewIdx, keyCount,
-                    minTime, maxTime
-                )
-            );
+            doc.accessors.push_back(GlbAccessor {
+                .bufferView    = inBViewIdx,
+                .componentType = 5126,
+                .count         = keyCount,
+                .type          = "SCALAR",
+                .min           = {minTime},
+                .max           = {maxTime},
+            });
 
             uint32_t outAccIdx = accIndex++;
-            accessors.push_back(
-                std::format(R"(    {{"bufferView": {}, "componentType": 5126, "count": {}, "type": "{}"}})", outBViewIdx, keyCount, outputType)
-            );
+            doc.accessors.push_back(GlbAccessor {.bufferView = outBViewIdx, .componentType = 5126, .count = keyCount, .type = outputType});
 
-            samplersJson.push_back(
-                std::format(
-                    R"(        {{ "input": {}, "interpolation": "{}", "output": {} }})", inAccIdx, s.interpolation.empty() ? "LINEAR" : s.interpolation,
-                    outAccIdx
-                )
-            );
+            glbAnim.samplers.push_back(GlbAnimSampler {
+                .input         = inAccIdx,
+                .interpolation = s.interpolation.empty() ? std::string_view {"LINEAR"} : std::string_view {s.interpolation},
+                .output        = outAccIdx,
+            });
         }
 
         for (const auto& chan: anim.channels) {
             auto nIt = nodeIdToGlbIndex.find(chan.targetNodeId);
             if (nIt == nodeIdToGlbIndex.end())
                 continue;
-            channelsJson.push_back(
-                std::format(R"(        {{ "sampler": {}, "target": {{ "node": {}, "path": "{}" }} }})", chan.samplerId, nIt->second, chan.targetPath)
-            );
+            glbAnim.channels.push_back(GlbAnimChannel {
+                .sampler = chan.samplerId,
+                .target  = {.node = static_cast<uint32_t>(nIt->second), .path = chan.targetPath},
+            });
         }
 
-        if (!channelsJson.empty() && !samplersJson.empty()) {
-            std::string chansArr;
-            for (size_t i = 0; i < channelsJson.size(); ++i)
-                chansArr += channelsJson[i] + (i < channelsJson.size() - 1 ? ",\n" : "");
-            std::string sampsArr;
-            for (size_t i = 0; i < samplersJson.size(); ++i)
-                sampsArr += samplersJson[i] + (i < samplersJson.size() - 1 ? ",\n" : "");
-
-            glbAnimsJson.push_back(std::format(R"(    {{ "name": "{}", "channels": [ {} ], "samplers": [ {} ] }})", anim.name, chansArr, sampsArr));
+        if (!glbAnim.channels.empty() && !glbAnim.samplers.empty()) {
+            doc.animations.push_back(glbAnim);
         }
     }
 
@@ -1235,9 +976,9 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
         }
     }
 
-    std::vector<std::string> usedExts;
+    std::vector<std::string_view> usedExts;
     if (!manifest.lights.empty())
-        usedExts.emplace_back("\"KHR_lights_punctual\"");
+        usedExts.emplace_back("KHR_lights_punctual");
     bool usesEmissiveStrength = false;
     for (const auto& mat: manifest.materials) {
         bool hasEmissive = (mat.emissiveStrength > 0.f) &&
@@ -1248,171 +989,28 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
         }
     }
     if (usesEmissiveStrength)
-        usedExts.emplace_back("\"KHR_materials_emissive_strength\"");
+        usedExts.emplace_back("KHR_materials_emissive_strength");
 
-    usedExts.emplace_back("\"ZHLN_procedural_shader\"");
+    usedExts.emplace_back("ZHLN_procedural_shader");
 
-    std::string extensionsUsed;
-    for (size_t i = 0; i < usedExts.size(); ++i)
-        extensionsUsed += usedExts[i] + (i < usedExts.size() - 1 ? ", " : "");
-    std::string rootExtensions;
+    doc.extensionsUsed = usedExts;
     if (!manifest.lights.empty()) {
-        std::string lightsArr;
-        for (size_t i = 0; i < manifest.lights.size(); ++i) {
-            const auto& l = manifest.lights[i];
-            lightsArr += std::format(
-                R"(        {{ "name": "{}", "type": "{}", "color": [{}, {}, {}], "intensity": {} }})", l.id, l.type, l.color[0], l.color[1], l.color[2],
-                l.intensity
-            );
-            if (i < manifest.lights.size() - 1)
-                lightsArr += ",\n";
+        GlbRootExtensions rootExtensions;
+        for (const auto& l: manifest.lights) {
+            rootExtensions.KHR_lights_punctual.lights.push_back(GlbKhrLight {
+                .name      = l.id,
+                .type      = l.type,
+                .color     = {l.color[0], l.color[1], l.color[2]},
+                .intensity = l.intensity,
+            });
         }
-        rootExtensions += std::format(
-            R"(  "extensions": {{ "KHR_lights_punctual": {{ "lights": [
-{}
-      ] }} }},
-)",
-            lightsArr
-        );
+        doc.extensions = rootExtensions;
     }
 
-    std::string json;
-    json.reserve(static_cast<size_t>(128 * 1024));
-    json.append(R"({
-  "asset": {"version": "2.0", "generator": "Zahlen GLB Emitter"},
-)");
+    doc.scenes.push_back(GlbScene {.nodes = {rootNodeIndices.begin(), rootNodeIndices.end()}});
+    doc.buffers.push_back(GlbBuffer {.byteLength = static_cast<uint32_t>(binBuffer.size())});
 
-    if (!extensionsUsed.empty()) {
-        json.append(
-            std::format(
-                R"(  "extensionsUsed": [{}],
-)",
-                extensionsUsed
-            )
-        );
-    }
-    if (!rootExtensions.empty()) {
-        json.append(rootExtensions);
-    }
-
-    json.append(R"(  "bufferViews": [
-)");
-    for (size_t i = 0; i < bufferViews.size(); ++i) {
-        json.append(bufferViews[i]);
-        json.append(i < bufferViews.size() - 1 ? ",\n" : "\n");
-    }
-    json.append(R"(  ],
-  "accessors": [
-)");
-    for (size_t i = 0; i < accessors.size(); ++i) {
-        json.append(accessors[i]);
-        json.append(i < accessors.size() - 1 ? ",\n" : "\n");
-    }
-    json.append(R"(  ],
-)");
-
-    if (!materialsJson.empty()) {
-        json.append(R"(  "materials": [
-)");
-        for (size_t i = 0; i < materialsJson.size(); ++i) {
-            json.append(materialsJson[i]);
-            json.append(i < materialsJson.size() - 1 ? ",\n" : "\n");
-        }
-        json.append(R"(  ],
-)");
-    }
-
-    if (!textures.empty()) {
-        json.append(R"(  "textures": [
-)");
-        for (size_t i = 0; i < textures.size(); ++i) {
-            json.append(textures[i]);
-            json.append(i < textures.size() - 1 ? ",\n" : "\n");
-        }
-        json.append(R"(  ],
-)");
-    }
-
-    if (!images.empty()) {
-        json.append(R"(  "images": [
-)");
-        for (size_t i = 0; i < images.size(); ++i) {
-            json.append(images[i]);
-            json.append(i < images.size() - 1 ? ",\n" : "\n");
-        }
-        json.append(R"(  ],
-  "samplers": [
-    {"magFilter": 9729, "minFilter": 9729, "wrapS": 10497, "wrapT": 10497}
-  ],
-)");
-    }
-
-    if (!meshesJson.empty()) {
-        json.append(R"(  "meshes": [
-)");
-        for (size_t i = 0; i < meshesJson.size(); ++i) {
-            json.append(meshesJson[i]);
-            json.append(i < meshesJson.size() - 1 ? ",\n" : "\n");
-        }
-        json.append(R"(  ],
-)");
-    }
-
-    if (!skinsJson.empty()) {
-        json.append(R"(  "skins": [
-)");
-        for (size_t i = 0; i < skinsJson.size(); ++i) {
-            json.append(skinsJson[i]);
-            json.append(i < skinsJson.size() - 1 ? ",\n" : "\n");
-        }
-        json.append(R"(  ],
-)");
-    }
-
-    if (!glbAnimsJson.empty()) {
-        json.append(R"(  "animations": [
-)");
-        for (size_t i = 0; i < glbAnimsJson.size(); ++i) {
-            json.append(glbAnimsJson[i]);
-            json.append(i < glbAnimsJson.size() - 1 ? ",\n" : "\n");
-        }
-        json.append(R"(  ],
-)");
-    }
-
-    json.append(R"(  "nodes": [
-)");
-    for (size_t i = 0; i < nodesJson.size(); ++i) {
-        json.append(nodesJson[i]);
-        json.append(i < nodesJson.size() - 1 ? ",\n" : "\n");
-    }
-    json.append(R"(  ],
-  "scenes": [
-    {
-      "nodes": [)");
-    for (size_t i = 0; i < rootNodeIndices.size(); ++i) {
-        json.append(std::to_string(rootNodeIndices[i]));
-        if (i < rootNodeIndices.size() - 1) {
-            json.append(",");
-        }
-    }
-    json.append(R"(]
-    }
-  ],
-  "scene": 0,
-)");
-
-    json.append(
-        std::format(
-            R"(  "buffers": [
-    {{
-      "byteLength": {}
-    }}
-  ]
-}})",
-            binBuffer.size()
-        )
-    );
+    std::string json = ZHLN::ReflectJSON::SerializeJSON(doc, 2, {.omitEmpty = true});
 
     while (json.length() % 4 != 0)
         json += ' ';

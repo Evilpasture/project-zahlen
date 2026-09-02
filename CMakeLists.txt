@@ -650,6 +650,7 @@ target_link_libraries(zcook PRIVATE zahlen_engine meshoptimizer)
 target_include_directories(zcook SYSTEM PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/cgltf
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/stb
+    ${CMAKE_CURRENT_SOURCE_DIR}/extras
     ${CMAKE_CURRENT_SOURCE_DIR}/tools/zcook
 )
 
