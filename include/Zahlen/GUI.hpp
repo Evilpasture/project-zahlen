@@ -297,6 +297,14 @@ struct BoxConfig {
     float width  = 0.0f;
     float height = 0.0f;
 
+    // Yoga's default flex-shrink is 1, so a box that declares a height is
+    // silently squeezed the moment its parent's content overflows -- a 40px
+    // thumbnail strip collapsing to 22px with its thumbnails hanging out of
+    // it. Set 0 to keep `height` authoritative and let a flexible sibling
+    // absorb the overflow instead. Applied when the box is first built, like
+    // the rest of BoxConfig, so it does not track a later config change.
+    float flexShrink = 1.0f;
+
     JPH::Vec4 color     = {0.05f, 0.07f, 0.11f, 0.85f};
     float     edgeWidth = 1.0f;
 
@@ -854,6 +862,7 @@ class Context {
                     .direction     = cfg.direction,
                     .justify       = cfg.justify,
                     .alignItems    = cfg.alignItems,
+                    .flexShrink    = cfg.flexShrink,
                     .paddingLeft   = cfg.padding,
                     .paddingTop    = cfg.padding,
                     .paddingRight  = cfg.padding,
@@ -1858,14 +1867,17 @@ class Context {
                     .direction  = FlexDirection::Row,
                     .alignItems = FlexAlign::Stretch,
                     .flexGrow   = cfg.flexGrow,
-                    // Never shrink: the root is an item in the parent's column,
-                    // so Yoga's default shrink-to-fit would squeeze the
-                    // viewport (and everything in it) the moment the panel's
-                    // content overflowed -- a 300px viewport collapsing to 37px
-                    // and scrolling nothing. A scroll viewport's height is the
-                    // whole point of the widget; overflow belongs to the
-                    // content, not to the box.
-                    .flexShrink = 0.0f,
+                    // A scroll box has exactly one honest way to give space
+                    // back: a shorter viewport, and it is the only widget in a
+                    // panel that can take one, because its content scrolls.
+                    // Yoga's default shrink-to-fit, however, also applied when
+                    // the caller asked for a FIXED height -- squeezing a 300px
+                    // viewport to 37px and scrolling nothing. So shrink only
+                    // while the box is joining in the parent's free-space
+                    // distribution (flexGrow > 0); a fixed height stays
+                    // authoritative and lets the panel's overflow be the
+                    // caller's problem, where it is visible.
+                    .flexShrink = (cfg.flexGrow > 0.0f) ? 1.0f : 0.0f,
                     .flexBasis  = -1.0f
                 }
             );
@@ -1885,7 +1897,7 @@ class Context {
             f.direction  = FlexDirection::Row;
             f.alignItems = FlexAlign::Stretch;
             f.flexGrow   = cfg.flexGrow;
-            f.flexShrink = 0.0f; // see the create path: the viewport height is authoritative
+            f.flexShrink = (cfg.flexGrow > 0.0f) ? 1.0f : 0.0f; // see the create path
             f.flexBasis  = -1.0f;
         });
 
@@ -2450,14 +2462,13 @@ class Context {
 
         // Value text
         if (cfg.showValue) {
-            std::array<char, 32> valBuf {};
-            std::string_view     valStr = FormatTo(valBuf, "{:.3g}", value);
+            const FixedString<32> valStr = FormatSliderValue(value);
             Entity valEnt = GetOrCreateChild(parent, HashStringView("_sl_value"), [&]() -> Entity {
                 return m_reg->Create(
                     Components::NameComponent {.name = String64("_sl_value")},
                     Components::UIRectComponent {.parentEntity = parent, .height = cfg.height, .hierarchyDepth = parentDepth + 1},
                     Components::TextComponent {
-                        .text          = String256(valStr),
+                        .text          = String256(std::string_view(valStr)),
                         .scale         = cfg.scale,
                         .color         = cfg.textColor,
                         .align         = TextAlignment::Right,
@@ -2467,7 +2478,7 @@ class Context {
                 );
             });
             m_reg->Patch<Components::TextComponent>(valEnt, [&](auto& tc) -> auto {
-                tc.text.assign(valStr);
+                tc.text.assign(std::string_view(valStr));
             });
         }
 
@@ -2863,7 +2874,8 @@ class Context {
     // --- SELECTABLE / TREENODE PLUMBING ---
 
     struct SelectableClickInfo {
-        Entity entity        = Entity::Null();
+        Entity entity        = Entity::Null(); // what the builder returns, and the scope entity
+        Entity rowEntity     = Entity::Null(); // carries UIButtonComponent and the highlight
         bool   clicked       = false;
         bool   doubleClicked = false;
         bool   selected      = false;
@@ -2873,6 +2885,18 @@ class Context {
     // it this frame. Shared by Selectable (no arrow) and TreeNode (arrow), so
     // the two can never drift in how they read click state. `arrowGlyph` is
     // ignored unless `hasArrow`.
+    //
+    // The two kinds have different shapes, because only a tree row has to host
+    // content:
+    //
+    //   Selectable  id             Row: [label]              <- button + highlight
+    //   TreeNode    id             Column                    <- the returned entity
+    //                 +- _sel_row  Row: [arrow][label]       <- button + highlight
+    //                 +- <content> built by TreeNode, indented
+    //
+    // Giving a TreeNode the flat Row shape put its content box in the row's
+    // main axis: the branch's children were laid out to the RIGHT of the label
+    // and vertically centred on the row, overlapping their own parent.
     auto PrepareSelectable(
         std::string_view       id,
         std::string_view       label,
@@ -2890,6 +2914,20 @@ class Context {
         const float         padLeft    = 8.0f + std::max(0.0f, cfg.indent);
 
         Entity e = GetOrCreateEntity(key, [&]() -> Entity {
+            if (hasArrow) {
+                return m_reg->Create(
+                    Components::NameComponent {.name = String64(id)},
+                    Components::UIRectComponent {.parentEntity = parent, .width = cfg.width, .hierarchyDepth = depth},
+                    Components::UIFlexComponent {
+                        .direction  = FlexDirection::Column,
+                        .alignItems = FlexAlign::Stretch,
+                        .flexGrow   = 1.0f,
+                        .flexShrink = 1.0f,
+                        .flexBasis  = -1.0f
+                    },
+                    Components::UISelectableComponent {.selected = selectedIn, .doubleClickSpan = cfg.doubleClickSpan}
+                );
+            }
             return m_reg->Create(
                 Components::NameComponent {.name = String64(id)},
                 Components::UIRectComponent {.parentEntity = parent, .width = cfg.width, .height = cfg.height, .hierarchyDepth = depth},
@@ -2912,25 +2950,60 @@ class Context {
         m_reg->Patch<Components::UIRectComponent>(e, [&](auto& r) -> auto {
             r.parentEntity   = parent;
             r.width          = cfg.width;
-            r.height         = cfg.height;
+            r.height         = hasArrow ? 0.0f : cfg.height;
             r.hierarchyDepth = depth;
         });
         m_reg->Patch<Components::UIFlexComponent>(e, [&](auto& f) -> auto {
-            f.direction    = FlexDirection::Row;
-            f.alignItems   = FlexAlign::Center;
+            f.direction    = hasArrow ? FlexDirection::Column : FlexDirection::Row;
+            f.alignItems   = hasArrow ? FlexAlign::Stretch : FlexAlign::Center;
             f.flexGrow     = 1.0f;
             f.flexShrink   = 1.0f;
             f.flexBasis    = -1.0f;
-            f.paddingLeft  = padLeft;
-            f.paddingRight = 8.0f;
-            f.gapX         = 6.0f;
+            f.paddingLeft  = hasArrow ? 0.0f : padLeft;
+            f.paddingRight = hasArrow ? 0.0f : 8.0f;
+            f.gapX         = hasArrow ? 0.0f : 6.0f;
         });
+
+        // The entity that owns the button and the selection highlight: the row
+        // itself for a Selectable, the inner `_sel_row` for a TreeNode. Keeping
+        // the button off the branch's column is what stops hovering a branch's
+        // CHILDREN from lighting up the branch's own row.
+        Entity rowEnt = e;
+        if (hasArrow) {
+            rowEnt = GetOrCreateChild(e, HashStringView("_sel_row"), [&]() -> Entity {
+                return m_reg->Create(
+                    Components::NameComponent {.name = String64("_sel_row")},
+                    Components::UIRectComponent {.parentEntity = e, .height = cfg.height, .hierarchyDepth = depth + 1},
+                    Components::UIPanelComponent {.color = cfg.normalColor, .borderRadius = cfg.borderRadius},
+                    Components::UIFlexComponent {
+                        .direction    = FlexDirection::Row,
+                        .alignItems   = FlexAlign::Center,
+                        .paddingLeft  = padLeft,
+                        .paddingRight = 8.0f,
+                        .gapX         = 6.0f
+                    },
+                    Components::UIButtonComponent {}
+                );
+            });
+            m_reg->Patch<Components::UIRectComponent>(rowEnt, [&](auto& r) -> auto {
+                r.parentEntity   = e;
+                r.height         = cfg.height;
+                r.hierarchyDepth = depth + 1;
+            });
+            m_reg->Patch<Components::UIFlexComponent>(rowEnt, [&](auto& f) -> auto {
+                f.direction    = FlexDirection::Row;
+                f.alignItems   = FlexAlign::Center;
+                f.paddingLeft  = padLeft;
+                f.paddingRight = 8.0f;
+                f.gapX         = 6.0f;
+            });
+        }
 
         auto* sel = m_reg->Get<Components::UISelectableComponent>(e);
 
-        SelectableClickInfo info {.entity = e, .selected = sel->selected};
+        SelectableClickInfo info {.entity = e, .rowEntity = rowEnt, .selected = sel->selected};
 
-        if (ConsumeClick(e)) {
+        if (ConsumeClick(rowEnt)) {
             // Double-click is a pair of clicks inside a frame window. The
             // window is counted in frames because the context is fed a frame
             // counter, which keeps the gesture reproducible in tests.
@@ -2951,13 +3024,16 @@ class Context {
         sel->doubleClicked = info.doubleClicked;
         info.selected      = sel->selected;
 
-        // Row children. The arrow is created BEFORE the label so it precedes
-        // it in the Yoga child order (which follows registry creation order).
+        // Row children, parented to the interactive row. The arrow is created
+        // BEFORE the label so it precedes it in the Yoga child order (which
+        // follows registry creation order).
+        const uint32_t childDepth = depth + (hasArrow ? 2 : 1);
+
         if (hasArrow) {
-            Entity arrowEnt = GetOrCreateChild(e, HashStringView("_sel_arrow"), [&]() -> Entity {
+            Entity arrowEnt = GetOrCreateChild(rowEnt, HashStringView("_sel_arrow"), [&]() -> Entity {
                 return m_reg->Create(
                     Components::NameComponent {.name = String64("_sel_arrow")},
-                    Components::UIRectComponent {.parentEntity = e, .width = 14.0f, .height = cfg.height, .hierarchyDepth = depth + 1},
+                    Components::UIRectComponent {.parentEntity = rowEnt, .width = 14.0f, .height = cfg.height, .hierarchyDepth = childDepth},
                     Components::TextComponent {
                         .text          = String256(arrowGlyph),
                         .scale         = cfg.scale,
@@ -2969,18 +3045,18 @@ class Context {
                 );
             });
             m_reg->Patch<Components::UIRectComponent>(arrowEnt, [&](auto& r) -> auto {
-                r.parentEntity   = e;
+                r.parentEntity   = rowEnt;
                 r.width          = 14.0f;
                 r.height         = cfg.height;
-                r.hierarchyDepth = depth + 1;
+                r.hierarchyDepth = childDepth;
             });
-            PatchSelectableArrow(e, arrowGlyph, cfg.selectedTextColor);
+            PatchSelectableArrow(rowEnt, arrowGlyph, cfg.selectedTextColor);
         }
 
-        Entity lblEnt = GetOrCreateChild(e, HashStringView("_sel_label"), [&]() -> Entity {
+        Entity lblEnt = GetOrCreateChild(rowEnt, HashStringView("_sel_label"), [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64("_sel_label")},
-                Components::UIRectComponent {.parentEntity = e, .height = cfg.height, .hierarchyDepth = depth + 1},
+                Components::UIRectComponent {.parentEntity = rowEnt, .height = cfg.height, .hierarchyDepth = childDepth},
                 Components::TextComponent {
                     .text          = String256(label),
                     .scale         = cfg.scale,
@@ -2993,9 +3069,9 @@ class Context {
             );
         });
         m_reg->Patch<Components::UIRectComponent>(lblEnt, [&](auto& r) -> auto {
-            r.parentEntity   = e;
+            r.parentEntity   = rowEnt;
             r.height         = cfg.height;
-            r.hierarchyDepth = depth + 1;
+            r.hierarchyDepth = childDepth;
         });
 
         m_reg->Patch<Components::TextComponent>(lblEnt, [&](auto& tc) -> auto {
@@ -3003,7 +3079,7 @@ class Context {
             tc.scale = cfg.scale;
             tc.align = cfg.align;
         });
-        ApplySelectableVisual(e, cfg, sel->selected);
+        ApplySelectableVisual(rowEnt, cfg, sel->selected);
 
         outDepth = depth;
         return info;
@@ -3023,11 +3099,13 @@ class Context {
         }
     }
 
-    // Forces a row's bound selection state AND repaints it. TreeNode needs
-    // this: its double click skips the toggle, and leaving the row's own flag
-    // flipped would desaturate the very branch it just activated.
-    void ApplySelectableSelection(Entity row, const SelectableConfig& cfg, bool selected) {
-        if (auto* sel = m_reg->Get<Components::UISelectableComponent>(row)) {
+    // Forces a branch's bound selection state AND repaints its row. TreeNode
+    // needs this: its double click skips the toggle, and leaving the flag
+    // flipped would desaturate the very branch it just activated. `row` carries
+    // the highlight, `stateEnt` the UISelectableComponent -- for a TreeNode
+    // those are two different entities (the inner row and the branch column).
+    void ApplySelectableSelection(Entity row, Entity stateEnt, const SelectableConfig& cfg, bool selected) {
+        if (auto* sel = m_reg->Get<Components::UISelectableComponent>(stateEnt)) {
             sel->selected = selected;
         }
         ApplySelectableVisual(row, cfg, selected);
@@ -3063,10 +3141,10 @@ class Context {
             open = !open;
         }
         // Keep the arrow in sync with the (possibly just toggled) state.
-        PatchSelectableArrow(info.entity, open ? "v" : ">", cfg.arrowColor);
+        PatchSelectableArrow(info.rowEntity, open ? "v" : ">", cfg.arrowColor);
         // The row's highlight tracks `open`; on a double click the toggle was
         // deliberately skipped, so re-sync the flag PrepareSelectable flipped.
-        ApplySelectableSelection(info.entity, cfg.row, open);
+        ApplySelectableSelection(info.rowEntity, info.entity, cfg.row, open);
 
         if (open) {
             std::array<char, 64> boxNameBuf {};
@@ -3400,6 +3478,28 @@ class Context {
 
     static constexpr auto HashCombine(uint64_t seed, uint64_t v) noexcept -> uint64_t {
         return seed ^ (v + 0x9e3779b97f4a7c15ull + (seed << 6) + (seed >> 2));
+    }
+
+    // Slider value text. FormatTo's spec parser understands hex and a numeric
+    // width only, so "{:.3g}" silently fell through to the 6-decimal default
+    // and the slot rendered "75.000000" — nine characters of value crowding
+    // the track it sits next to. Three decimals with the trailing zeros
+    // stripped: 75 -> "75", 0.15 -> "0.15", 0.5 -> "0.5".
+    static auto FormatSliderValue(float value) noexcept -> FixedString<32> {
+        std::array<char, 32> buf {};
+        const size_t         len = Detail::FormatDouble(buf.data(), buf.size(), static_cast<double>(value), 3);
+        size_t               end = std::min(len, buf.size());
+        if (std::string_view(buf.data(), end).find('.') != std::string_view::npos) {
+            while (end > 0 && buf[end - 1] == '0') {
+                --end;
+            }
+            if (end > 0 && buf[end - 1] == '.') {
+                --end;
+            }
+        }
+        FixedString<32> out;
+        out.assign(std::string_view(buf.data(), end));
+        return out;
     }
 
     static constexpr auto HashStringView(std::string_view str) noexcept -> uint64_t {

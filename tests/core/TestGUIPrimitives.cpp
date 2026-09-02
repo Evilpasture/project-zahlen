@@ -695,9 +695,21 @@ struct GUIPrimitivesTestSuite {
             ZHLN::Test::ExpectTrue(node != Entity::Null() && content != Entity::Null());
             ZHLN::Test::ExpectTrue(reg.IsAlive(content));
 
+            // Shape: the branch root is a column holding the interactive row
+            // and the content box as SIBLINGS. Parenting the content to the row
+            // laid the branch's children out to the right of its own label.
+            const Entity row      = FindChildNamed(reg, node, "_sel_row");
+            const Entity contentBox = FindChildNamed(reg, node, "Branch_children");
+            ZHLN::Test::ExpectTrue(row != Entity::Null() && contentBox != Entity::Null());
+            if (auto* leafRect = reg.Get<Comp::UIRectComponent>(content)) {
+                ZHLN::Test::ExpectTrue(leafRect->parentEntity == contentBox);
+            }
+
             // Close the branch: the click toggles `open`, and the next frame's
-            // build must not recreate the content box.
-            if (auto* btn = reg.Get<Comp::UIButtonComponent>(node)) {
+            // build must not recreate the content box. The button lives on the
+            // row, not on the branch column, so hovering a branch's children
+            // cannot light up the branch's own row.
+            if (auto* btn = reg.Get<Comp::UIButtonComponent>(row)) {
                 btn->Set(ZHLN::UIButton::Clicked, true);
             }
             {
@@ -727,7 +739,7 @@ struct GUIPrimitivesTestSuite {
             };
 
             auto Click = [&]() -> void {
-                if (auto* btn = reg.Get<Comp::UIButtonComponent>(node)) {
+                if (auto* btn = reg.Get<Comp::UIButtonComponent>(FindChildNamed(reg, node, "_sel_row"))) {
                     btn->Set(ZHLN::UIButton::Clicked, true);
                 }
             };
@@ -751,8 +763,11 @@ struct GUIPrimitivesTestSuite {
 
             // The row still reports itself as open — the skipped toggle must
             // not leave the row's own selected flag flipped behind it.
-            const auto* sel = reg.Get<Comp::UISelectableComponent>(node);
-            const auto* panel = reg.Get<Comp::UIPanelComponent>(node);
+            // The highlight is on the interactive row; the bound state is on
+            // the branch column.
+            const Entity row    = FindChildNamed(reg, node, "_sel_row");
+            const auto*  sel    = reg.Get<Comp::UISelectableComponent>(node);
+            const auto*  panel  = reg.Get<Comp::UIPanelComponent>(row);
             ZHLN::Test::ExpectTrue(sel != nullptr && panel != nullptr);
             if (sel != nullptr) {
                 ZHLN::Test::ExpectTrue(sel->selected);

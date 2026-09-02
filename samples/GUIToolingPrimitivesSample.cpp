@@ -170,8 +170,12 @@ void DrawContentBrowser(ZHLN::GUI::Context& ui, BrowserState& state) {
             // Icon + sprite-sheet slice side by side.
             ui.Box(
                 "IconRow", ZHLN::GUI::BoxConfig {
-                               .height    = 40.0f,
-                               .direction = ZHLN::FlexDirection::Row,
+                               .height     = 40.0f,
+                               // The strip must keep its height: the thumbnails
+                               // inside are 28px and would hang out of a squeezed
+                               // row. AssetList below absorbs the overflow.
+                               .flexShrink = 0.0f,
+                               .direction  = ZHLN::FlexDirection::Row,
                                .gap       = 10.0f,
                                .padding   = 4.0f,
                            },
@@ -202,9 +206,11 @@ void DrawContentBrowser(ZHLN::GUI::Context& ui, BrowserState& state) {
                 }
             );
 
-            // The asset list: taller than the panel, so it scrolls.
+            // The asset list: `.flexGrow = 1` lets it take the panel's leftover
+            // space and shrink back when the hierarchy below it opens, instead
+            // of pushing the rows under it out of the panel.
             ui.ScrollBox(
-                "AssetList", ZHLN::GUI::ScrollBoxConfig {.height = 300.0f, .gap = 1.0f, .padding = 2.0f, .scrollbarWidth = 8.0f},
+                "AssetList", ZHLN::GUI::ScrollBoxConfig {.height = 300.0f, .gap = 1.0f, .padding = 2.0f, .flexGrow = 1.0f, .scrollbarWidth = 8.0f},
                 [&]() -> void {
                     for (int i = 0; i < static_cast<int>(kAssets.size()); ++i) {
                         // One bool per row, kept in the state struct so the
