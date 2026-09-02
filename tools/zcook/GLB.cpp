@@ -122,6 +122,8 @@ std::vector<uint8_t> CreatePNGBytes(const std::vector<uint32_t>& rgbaPixels, uin
     return pngBytes;
 }
 
+} // namespace
+
 bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolder, const std::string& outputPath) {
     std::vector<uint8_t> binBuffer;
     binBuffer.reserve(static_cast<size_t>(16 * 1024 * 1024));
