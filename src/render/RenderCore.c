@@ -408,6 +408,21 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
     return instance;
 }
 
+static const char* ZHLN_Internal_DeviceTypeName(const VkPhysicalDeviceType type) {
+    switch (type) {
+        case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
+            return "discrete GPU";
+        case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
+            return "integrated GPU";
+        case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:
+            return "virtual GPU";
+        case VK_PHYSICAL_DEVICE_TYPE_CPU:
+            return "CPU Vulkan device";
+        default:
+            return "other Vulkan device";
+    }
+}
+
 [[nodiscard]]
 static int32_t ZHLN_Internal_DefaultScoreFn(const ZHLN_PhysicalDeviceInfo* const restrict info, [[maybe_unused]] const void* const restrict userdata) {
     // Reject anything missing required queues
@@ -418,21 +433,46 @@ static int32_t ZHLN_Internal_DefaultScoreFn(const ZHLN_PhysicalDeviceInfo* const
         return -1;
     }
 
-    int32_t                           score = 0;
-    const VkPhysicalDeviceProperties* p     = &info->properties.properties;
+    const VkPhysicalDeviceProperties* p = &info->properties.properties;
 
-    if (p->deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
-        score += 1000;
-    }
-    if (p->deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) {
-        score += 100;
+    // Device class must dominate the memory bonus. Lavapipe/llvmpipe reports
+    // host RAM as device-local memory; adding that unweighted used to let a
+    // CPU Vulkan device with 32 GiB of RAM outscore a discrete GPU with 4 GiB
+    // of VRAM. Keep CPU devices as a fallback when they are the only option,
+    // but never prefer one over an actual GPU merely because the host has more
+    // memory.
+    int32_t score = 0;
+    switch (p->deviceType) {
+        case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
+            score = 1'000'000;
+            break;
+        case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
+            score = 500'000;
+            break;
+        case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:
+            score = 250'000;
+            break;
+        case VK_PHYSICAL_DEVICE_TYPE_CPU:
+            score = 0;
+            break;
+        default:
+            score = 0;
+            break;
     }
 
-    // Reward VRAM (in MB, capped to avoid overflow)
-    for (uint32_t i = 0; i < info->memory.memoryProperties.memoryHeapCount; ++i) {
-        const VkMemoryHeap heap = info->memory.memoryProperties.memoryHeaps[i];
-        if (heap.flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
-            score += (int32_t) (heap.size / ((VkDeviceSize) 1024U * 1024U));
+    // Reward device-local memory for hardware devices, but cap the contribution
+    // so it cannot overturn the device-class preference above. CPU Vulkan
+    // devices deliberately receive no host-memory bonus.
+    if (p->deviceType != VK_PHYSICAL_DEVICE_TYPE_CPU) {
+        for (uint32_t i = 0; i < info->memory.memoryProperties.memoryHeapCount; ++i) {
+            const VkMemoryHeap heap = info->memory.memoryProperties.memoryHeaps[i];
+            if (heap.flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
+                VkDeviceSize memory_mb = heap.size / ((VkDeviceSize) 1024U * 1024U);
+                if (memory_mb > 16'384U) {
+                    memory_mb = 16'384U;
+                }
+                score += (int32_t) memory_mb;
+            }
         }
     }
 
@@ -553,6 +593,15 @@ ZHLN_PhysicalDeviceInfo ZHLN_SelectPhysicalDevice(const ZHLN_DeviceSelectDesc* c
             best_score = score;
             best       = info;
         }
+    }
+
+    if (best_score >= 0) {
+        fprintf(
+            stderr,
+            "[VULKAN] Selected physical device: %s (%s)\n",
+            best.properties.properties.deviceName,
+            ZHLN_Internal_DeviceTypeName(best.properties.properties.deviceType)
+        );
     }
 
     return best_score >= 0 ? best : null_result;
