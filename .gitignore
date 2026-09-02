@@ -90,3 +90,6 @@ gcm.cache/
 
 # Proprietary third parties that I obviously cannot distribute
 NSightAftermath/
+
+# --- Whitelist Vendored Third-Party Binaries & Manifests ---
+!third_party/vulkan_sandbox/**

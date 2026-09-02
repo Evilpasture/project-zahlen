@@ -143,6 +143,15 @@ auto Buffer::Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usag
     VmaAllocation     alloc  = nullptr;
     VmaAllocationInfo info   = {};
 
+    // Acceleration-structure addresses must be aligned to 256 bytes. Promote
+    // the caller's optional alignment here so every AS buffer gets the same
+    // guarantee, even when a call site uses the four-argument overload.
+    VkDeviceSize effectiveAlignment = minAlignment;
+    if (usage & (VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+                 VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR)) {
+        effectiveAlignment = std::max(effectiveAlignment, static_cast<VkDeviceSize>(256));
+    }
+
     const VkBufferCreateInfo buffer_info = {
         .sType                 = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
         .pNext                 = nullptr,
@@ -163,7 +172,7 @@ auto Buffer::Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usag
         .pool           = nullptr,
         .pUserData      = nullptr,
         .priority       = 0.0F,
-        .minAlignment   = 0
+        .minAlignment   = effectiveAlignment
     };
 
     // Automatically request persistent mapping for host-visible memory types
@@ -174,7 +183,7 @@ auto Buffer::Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usag
     // VMA 3.1+: honor additional alignment requirements of the allocation
     // (VmaAllocationCreateInfo::minAlignment only exists from VMA 3.1.0).
 #if defined(VMA_VERSION_MAJOR) && defined(VMA_VERSION_MINOR) && (VMA_VERSION_MAJOR > 3 || (VMA_VERSION_MAJOR == 3 && VMA_VERSION_MINOR >= 1))
-    alloc_info.minAlignment = minAlignment;
+    alloc_info.minAlignment = effectiveAlignment;
 #endif
 
     VkResult res = vmaCreateBuffer(allocator, &buffer_info, &alloc_info, &buffer, &alloc, &info);

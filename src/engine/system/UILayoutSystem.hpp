@@ -8,6 +8,7 @@
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <unordered_map>
 #include <vector>
@@ -284,6 +285,96 @@ class UILayoutSystem {
                     YGNodeSetContext(node, textCtx);
                     YGNodeSetMeasureFunc(node, &UILayoutSystem::MeasureTextNode);
                 }
+            }
+        }
+
+        // 2b. Supply an intrinsic cross-axis size for auto-height flex
+        // containers.  Yoga's flex-basis is a main-axis value: a horizontal
+        // splitter whose panes intentionally use flexBasis=0 therefore has no
+        // height to contribute while its parent is also auto-height.  That
+        // leaves the splitter at zero height even when a descendant (such as
+        // the Preview box) has a real height, and the descendant then appears
+        // to fall out of the parent panel.
+        //
+        // Compute the content height bottom-up and expose it as a min-height
+        // only for auto-height flex nodes.  Explicit heights retain their
+        // normal fixed-size semantics.  This is deliberately done before the
+        // Yoga calculation so both the splitter and its auto-height ancestor
+        // participate in the same layout pass.
+        std::unordered_map<uint64_t, float> intrinsicHeights;
+        auto ComputeIntrinsicHeight = [&](auto& self, Entity e) -> float {
+            if (const auto found = intrinsicHeights.find(e.Pack()); found != intrinsicHeights.end()) {
+                return found->second;
+            }
+
+            const auto* rect = reg.Get<Components::UIRectComponent>(e);
+            if (rect == nullptr) {
+                return 0.0f;
+            }
+
+            float intrinsicHeight = std::max(0.0f, rect->height);
+            const auto* flex      = reg.Get<Components::UIFlexComponent>(e);
+
+            // Fixed-size nodes do not need (and must not acquire) a larger
+            // min-height merely because one of their children overflows.
+            if (rect->height <= 0.0f && flex != nullptr) {
+                const bool column = flex->direction == FlexDirection::Column || flex->direction == FlexDirection::ColumnReverse;
+                float      contentHeight = 0.0f;
+                float      maxChildHeight = 0.0f;
+                size_t     childCount = 0;
+
+                for (size_t i = 0; i < entities.size(); ++i) {
+                    if (rects[i].parentEntity != e) {
+                        continue;
+                    }
+
+                    float childHeight = self(self, entities[i]);
+                    if (const auto* childFlex = reg.Get<Components::UIFlexComponent>(entities[i])) {
+                        childHeight += childFlex->marginTop + childFlex->marginBottom;
+                    }
+
+                    ++childCount;
+                    if (column) {
+                        contentHeight += childHeight;
+                    } else {
+                        maxChildHeight = std::max(maxChildHeight, childHeight);
+                    }
+                }
+
+                if (column) {
+                    if (childCount > 1) {
+                        contentHeight += static_cast<float>(childCount - 1) * flex->gapY;
+                    }
+                    contentHeight += flex->paddingTop + flex->paddingBottom;
+                } else if (childCount > 0) {
+                    contentHeight = maxChildHeight + flex->paddingTop + flex->paddingBottom;
+                }
+
+                intrinsicHeight = std::max(intrinsicHeight, contentHeight);
+            }
+
+            // A text-only auto-height node can be encountered by the
+            // bottom-up walk even when it does not have an explicit widget
+            // height.  Match the measure function's unconstrained result.
+            if (intrinsicHeight <= 0.0f && activeFont != nullptr) {
+                if (const auto* textComp = reg.Get<Components::TextComponent>(e)) {
+                    intrinsicHeight = GUI::MeasureTextBounds(*activeFont, textComp->text, textComp->scale).height();
+                }
+            }
+
+            intrinsicHeights.emplace(e.Pack(), intrinsicHeight);
+            return intrinsicHeight;
+        };
+
+        for (Entity e: entities) {
+            const auto* rect = reg.Get<Components::UIRectComponent>(e);
+            if (rect == nullptr || rect->height > 0.0f || reg.Get<Components::UIFlexComponent>(e) == nullptr) {
+                continue;
+            }
+
+            const float intrinsicHeight = ComputeIntrinsicHeight(ComputeIntrinsicHeight, e);
+            if (intrinsicHeight > 0.0f) {
+                YGNodeStyleSetMinHeight(nodeMap[e.Pack()], intrinsicHeight);
             }
         }
 

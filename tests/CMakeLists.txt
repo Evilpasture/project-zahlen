@@ -108,8 +108,9 @@ function(zahlen_add_cpu_test_group TARGET_NAME GROUP_DIR)
     add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
     set_tests_properties(${TARGET_NAME} PROPERTIES LABELS "CPU;Fast")
 
-    # Pass Sanitizer options to CTest runner so reports halt and print stack traces
-    if(USE_SANITIZERS)
+    # Pass shared test options (sanitizers and, on Linux, the Vulkan sandbox)
+    # to CTest even when sanitizers are disabled.
+    if(ZHLN_TEST_ENVIRONMENT)
         set_tests_properties(${TARGET_NAME} PROPERTIES
             ENVIRONMENT "${ZHLN_TEST_ENVIRONMENT}"
         )

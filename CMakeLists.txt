@@ -22,6 +22,10 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 project(zahlen LANGUAGES C CXX ASM)
 
+# Vulkan-Headers is a vendored submodule. Its CMake project provides the
+# Vulkan-Headers interface target; no installed SDK or loader is required.
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/Vulkan-Headers EXCLUDE_FROM_ALL SYSTEM)
+
 include(CompilerWarnings)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
@@ -216,6 +220,11 @@ else()
 endif()
 
 option(USE_SANITIZERS "Enable ASan and UBSan" OFF)
+
+# Shared CTest environment. Keep this list independent of the sanitizer option:
+# the Vulkan sandbox must reach every test in a normal build as well.
+set(ZHLN_TEST_ENVIRONMENT "")
+
 if(USE_SANITIZERS)
     add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
     add_link_options(-fsanitize=address,undefined)
@@ -229,8 +238,7 @@ if(USE_SANITIZERS)
         -DZHLN_PROJECT_ROOT="${CMAKE_CURRENT_SOURCE_DIR}"
     )
 
-    # Centralized test environment string for CTest
-    set(ZHLN_TEST_ENVIRONMENT
+    list(APPEND ZHLN_TEST_ENVIRONMENT
         "ASAN_OPTIONS=protect_shadow_gap=0:detect_leaks=1:symbolize=1:halt_on_error=1"
         "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp:print_suppressions=0"
         "UBSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/ubsan.supp:print_stacktrace=1:halt_on_error=1"
@@ -254,6 +262,39 @@ option(ZHLN_IN_DOCKER "Build running inside a Docker container" OFF)
 if(ZHLN_IN_DOCKER)
     add_compile_definitions(ZHLN_IN_DOCKER=1)
     message(STATUS "Docker container build mode enabled.")
+endif()
+
+# --- HERMETIC HEADLESS VULKAN TEST ENVIRONMENT ---
+# The checked-in sandbox keeps local Linux GPU tests independent of whatever
+# ICDs and validation layers happen to be installed on the host. Docker uses
+# the distro's Lavapipe instead (see Dockerfile), because these binaries are
+# built for the Arch-based CI image and are not portable to arbitrary hosts.
+set(ZHLN_VULKAN_SANDBOX_ROOT
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/vulkan_sandbox/linux-x86_64")
+set(ZHLN_VULKAN_SANDBOX_ENVIRONMENT "")
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ZHLN_IN_DOCKER)
+    find_file(ZHLN_VULKAN_SANDBOX_ICD
+        NAMES lvp_icd.json
+        PATHS "${ZHLN_VULKAN_SANDBOX_ROOT}/icd.d"
+        NO_DEFAULT_PATH
+    )
+
+    if(ZHLN_VULKAN_SANDBOX_ICD)
+        list(APPEND ZHLN_VULKAN_SANDBOX_ENVIRONMENT
+            "VK_DRIVER_FILES=${ZHLN_VULKAN_SANDBOX_ICD}"
+            "VK_ICD_FILENAMES=${ZHLN_VULKAN_SANDBOX_ICD}"
+            "VK_LAYER_PATH=${ZHLN_VULKAN_SANDBOX_ROOT}/explicit_layer.d"
+            "LD_LIBRARY_PATH=${ZHLN_VULKAN_SANDBOX_ROOT}/lib"
+        )
+        list(APPEND ZHLN_TEST_ENVIRONMENT ${ZHLN_VULKAN_SANDBOX_ENVIRONMENT})
+        message(STATUS "Using vendored Vulkan sandbox: ${ZHLN_VULKAN_SANDBOX_ROOT}")
+    else()
+        message(STATUS
+            "Vendored Vulkan sandbox ICD not found at "
+            "${ZHLN_VULKAN_SANDBOX_ROOT}/icd.d/lvp_icd.json; "
+            "local tests will use the host Vulkan installation.")
+    endif()
 endif()
 
 # Workaround for Clang P2996 revisions where copying a reflected
