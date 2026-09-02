@@ -1324,13 +1324,13 @@ class Context {
         Entity e = GetOrCreateEntity(key, [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64(id)},
-                Components::UIRectComponent {.parentEntity = parent, .height = 0.0f, .hierarchyDepth = depth},
+                Components::UIRectComponent {.parentEntity = parent, .width = 0.0f, .height = 0.0f, .hierarchyDepth = depth},
                 Components::UIPanelComponent {.color = {0.0f, 0.0f, 0.0f, 0.0f}},
                 Components::UIFlexComponent {
                     .direction  = (direction == SplitDirection::Horizontal) ? FlexDirection::Row : FlexDirection::Column,
                     .alignItems = FlexAlign::Stretch,
-                    .gapX       = 0.0f,
-                    .gapY       = 0.0f
+                    .gapX        = 0.0f,
+                    .gapY        = 0.0f
                 },
                 Components::UISplitterComponent {
                     .ratio         = ratio,
@@ -1340,6 +1340,25 @@ class Context {
                                         : Components::UISplitterComponent::Vertical
                 }
             );
+        });
+
+        // Cached splitter entities may survive for many frames (and the same
+        // id can be used with either orientation), so refresh their layout
+        // configuration before building the two child panes.
+        m_reg->Patch<Components::UIRectComponent>(e, [&](auto& r) -> auto {
+            r.parentEntity   = parent;
+            r.width          = 0.0f;
+            r.height         = 0.0f;
+            r.hierarchyDepth = depth;
+        });
+        m_reg->Patch<Components::UIFlexComponent>(e, [&](auto& f) -> auto {
+            f.direction  = (direction == SplitDirection::Horizontal) ? FlexDirection::Row : FlexDirection::Column;
+            f.alignItems = FlexAlign::Stretch;
+            f.flexGrow   = 0.0f;
+            f.flexShrink = 1.0f;
+            f.flexBasis  = -1.0f;
+            f.gapX       = 0.0f;
+            f.gapY       = 0.0f;
         });
 
         auto* split = m_reg->Get<Components::UISplitterComponent>(e);
@@ -1379,8 +1398,11 @@ class Context {
             m_reg->Patch<Components::UIRectComponent>(leftEnt, [&](auto& lr) -> auto {
                 lr.parentEntity   = e;
                 lr.hierarchyDepth = depth + 1;
-                lr.width          = horizontal ? 0.0f : 0.0f;
-                lr.height         = horizontal ? 0.0f : 0.0f;
+                // The pane's size is supplied by flex-grow on the main axis;
+                // leave the cross-axis height auto so Yoga can derive it from
+                // the pane's content.
+                lr.width  = 0.0f;
+                lr.height = 0.0f;
             });
             if (auto* lflex = m_reg->Get<Components::UIFlexComponent>(leftEnt)) {
                 lflex->flexGrow   = ratio * 1000.0f;
@@ -1449,6 +1471,8 @@ class Context {
             m_reg->Patch<Components::UIRectComponent>(rightEnt, [&](auto& rr) -> auto {
                 rr.parentEntity   = e;
                 rr.hierarchyDepth = depth + 1;
+                rr.width          = 0.0f;
+                rr.height         = 0.0f;
             });
             if (auto* rflex = m_reg->Get<Components::UIFlexComponent>(rightEnt)) {
                 rflex->flexGrow   = (1.0f - ratio) * 1000.0f;
@@ -1709,21 +1733,47 @@ class Context {
         Entity trackEnt = GetOrCreateChild(parent, HashStringView("_sl_track"), [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64("_sl_track")},
-                Components::UIRectComponent {.parentEntity = parent, .height = cfg.height, .hierarchyDepth = parentDepth + 1},
-                Components::UIPanelComponent {.color = cfg.trackColor},
+                Components::UIRectComponent {.parentEntity = parent, .width = 0.0f, .height = cfg.trackHeight, .hierarchyDepth = parentDepth + 1},
+                Components::UIPanelComponent {
+                    .color        = cfg.trackColor,
+                    .borderRadius = {cfg.trackHeight * 0.5f, cfg.trackHeight * 0.5f, cfg.trackHeight * 0.5f, cfg.trackHeight * 0.5f}
+                },
                 Components::UIFlexComponent {
-                    .direction     = FlexDirection::Row,
-                    .alignItems    = FlexAlign::Center,
-                    .flexGrow      = 1.0f,
-                    .flexShrink    = 1.0f,
-                    .flexBasis     = -1.0f,
-                    .paddingLeft   = 4.0f,
-                    .paddingTop    = 0.0f,
-                    .paddingRight  = 4.0f,
-                    .paddingBottom = 0.0f
+                    .direction  = FlexDirection::Row,
+                    .alignItems = FlexAlign::Center,
+                    .flexGrow   = 1.0f,
+                    .flexShrink = 1.0f,
+                    .flexBasis  = -1.0f
                 },
                 Components::UIButtonComponent {}
             );
+        });
+
+        // The track is a thin visual bar, not another full-height row.  Keep
+        // its layout properties in sync for cached widgets as well as newly
+        // created ones.
+        m_reg->Patch<Components::UIRectComponent>(trackEnt, [&](auto& tr) -> auto {
+            tr.parentEntity   = parent;
+            tr.width          = 0.0f;
+            tr.height         = std::max(0.0f, cfg.trackHeight);
+            tr.hierarchyDepth = parentDepth + 1;
+        });
+        m_reg->Patch<Components::UIFlexComponent>(trackEnt, [&](auto& tf) -> auto {
+            tf.direction  = FlexDirection::Row;
+            tf.alignItems = FlexAlign::Center;
+            tf.flexGrow   = 1.0f;
+            tf.flexShrink = 1.0f;
+            tf.flexBasis  = -1.0f;
+            // The knob's travel is measured across the complete track.  It
+            // should not be inset by padding, otherwise the endpoint values
+            // never quite reach the ends of the bar.
+            tf.paddingLeft = tf.paddingRight = 0.0f;
+            tf.paddingTop = tf.paddingBottom = 0.0f;
+        });
+        m_reg->Patch<Components::UIPanelComponent>(trackEnt, [&](auto& tp) -> auto {
+            tp.color        = cfg.trackColor;
+            const float r   = std::max(0.0f, cfg.trackHeight) * 0.5f;
+            tp.borderRadius = {r, r, r, r};
         });
 
         // Value text
@@ -1749,27 +1799,76 @@ class Context {
             });
         }
 
-        // Knob visual child on track
+        // Knob visual child on the track.  The margin is part of the Yoga
+        // layout, so changing the value moves the knob instead of leaving a
+        // marker permanently at the track's flex-start edge.
         float range = maxVal - minVal;
         float t     = (range > 0.0f) ? ((value - minVal) / range) : 0.0f;
-        t = std::clamp(t, 0.0f, 1.0f);
-        (void)t; // actual sizing done at render time; knob exists as a marker
+        t           = std::clamp(t, 0.0f, 1.0f);
+
         Entity knobEnt = GetOrCreateChild(trackEnt, HashStringView("_sl_knob"), [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64("_sl_knob")},
-                Components::UIRectComponent {.parentEntity = trackEnt, .width = cfg.knobSize, .height = cfg.knobSize, .hierarchyDepth = parentDepth + 2},
-                Components::UIPanelComponent {.color = cfg.knobColor, .borderRadius = {cfg.knobSize/2, cfg.knobSize/2, cfg.knobSize/2, cfg.knobSize/2}},
+                Components::UIRectComponent {
+                    .parentEntity   = trackEnt,
+                    .width          = std::max(0.0f, cfg.knobSize),
+                    .height         = std::max(0.0f, cfg.knobSize),
+                    .hierarchyDepth = parentDepth + 2
+                },
+                Components::UIPanelComponent {
+                    .color        = cfg.knobColor,
+                    .borderRadius = {cfg.knobSize * 0.5f, cfg.knobSize * 0.5f, cfg.knobSize * 0.5f, cfg.knobSize * 0.5f}
+                },
+                Components::UIFlexComponent {},
                 Components::UIButtonComponent {},
                 Components::UIDragComponent {.targetEntity = sliderEntity, .isDragging = false}
             );
         });
+
+        // `cfg.width` is the best estimate available before Yoga has laid out
+        // a fill-width slider.  Once a cached track has a computed width, use
+        // that width so the first frame after a resize also converges to the
+        // true travel distance.  The fallback keeps the value-dependent
+        // position useful on the very first frame of a fill-width widget.
+        float trackWidth = 0.0f;
+        if (const auto* tr = m_reg->Get<Components::UIRectComponent>(trackEnt)) {
+            trackWidth = tr->computedAbsMaxX - tr->computedAbsMinX;
+        }
+        if (trackWidth <= 0.0f) {
+            trackWidth = cfg.width;
+        }
+        if (trackWidth <= 0.0f) {
+            trackWidth = 100.0f;
+        }
+        const float knobSize   = std::max(0.0f, cfg.knobSize);
+        const float knobTravel = std::max(0.0f, trackWidth - knobSize);
+
+        m_reg->Patch<Components::UIRectComponent>(knobEnt, [&](auto& kr) -> auto {
+            kr.parentEntity   = trackEnt;
+            kr.width          = knobSize;
+            kr.height         = knobSize;
+            kr.hierarchyDepth = parentDepth + 2;
+        });
+        // GetOrCreateChild also supports widgets created by an older build;
+        // make sure those cached knobs acquire the flex component needed for
+        // marginLeft before patching it.
+        if (m_reg->Get<Components::UIFlexComponent>(knobEnt) == nullptr) {
+            m_reg->Add<Components::UIFlexComponent>(knobEnt);
+        }
+        m_reg->Patch<Components::UIFlexComponent>(knobEnt, [&](auto& kf) -> auto {
+            kf.flexGrow   = 0.0f;
+            kf.flexShrink = 0.0f;
+            kf.flexBasis  = -1.0f;
+            kf.marginLeft = t * knobTravel;
+            kf.marginTop = kf.marginRight = kf.marginBottom = 0.0f;
+        });
         m_reg->Patch<Components::UIPanelComponent>(knobEnt, [&](auto& pc) -> auto {
             // Hover on either the root slider entity, the track, or the knob itself
-            bool hover = IsHovered(sliderEntity) || IsHovered(trackEnt) || IsHovered(knobEnt);
-            auto* s    = m_reg->Get<Components::UISliderComponent>(sliderEntity);
+            bool hover  = IsHovered(sliderEntity) || IsHovered(trackEnt) || IsHovered(knobEnt);
+            auto* s     = m_reg->Get<Components::UISliderComponent>(sliderEntity);
             bool active = (s != nullptr && s->isDragging) || hover;
             pc.color = active ? cfg.hoverColor : cfg.knobColor;
-            pc.borderRadius = {cfg.knobSize / 2.0f, cfg.knobSize / 2.0f, cfg.knobSize / 2.0f, cfg.knobSize / 2.0f};
+            pc.borderRadius = {knobSize * 0.5f, knobSize * 0.5f, knobSize * 0.5f, knobSize * 0.5f};
         });
     }
 

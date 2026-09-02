@@ -13,6 +13,7 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
 #include <cstring>
+#include <string>
 #include <string_view>
 #include <unordered_set>
 #include <vector>
@@ -298,22 +299,44 @@ void UIRenderSystem::Update(Engine& engine) {
             float drawY = text->offsetY;
 
             std::string displayStr = text->text.c_str();
-            // A TextInput's editable text lives on a child `_ti_text` entity;
-            // walk up to find the UITextInputComponent that owns the cursor.
-            const Components::UITextInputComponent* input = reg.Get<Components::UITextInputComponent>(e);
-            if (input == nullptr && rect != nullptr) {
-                Entity cur = rect->parentEntity;
-                for (int hops = 0; hops < 4 && cur != Entity::Null() && reg.IsAlive(cur); ++hops) {
-                    input = reg.Get<Components::UITextInputComponent>(cur);
-                    if (input != nullptr) break;
-                    if (const auto* pr = reg.Get<Components::UIRectComponent>(cur)) cur = pr->parentEntity;
-                    else break;
+
+            // A TextInput's editable text lives on the dedicated `_ti_text`
+            // leaf.  The label is a sibling of that leaf and must keep the
+            // text stored in its own TextComponent (for example, "Profile")
+            // instead of being replaced with the input value (for example,
+            // "Default").
+            bool isTextInputLeaf = false;
+            if (const auto* name = reg.Get<Components::NameComponent>(e)) {
+                isTextInputLeaf = std::string_view(name->name) == "_ti_text";
+            }
+
+            const Components::UITextInputComponent* input = nullptr;
+            if (isTextInputLeaf) {
+                // The component is owned by the TextInput root.  Walk up the
+                // small UI hierarchy to find it without affecting unrelated
+                // text children that happen to be below the same root.
+                input = reg.Get<Components::UITextInputComponent>(e);
+                if (input == nullptr && rect != nullptr) {
+                    Entity cur = rect->parentEntity;
+                    for (int hops = 0; hops < 4 && cur != Entity::Null() && reg.IsAlive(cur); ++hops) {
+                        input = reg.Get<Components::UITextInputComponent>(cur);
+                        if (input != nullptr) {
+                            break;
+                        }
+                        if (const auto* pr = reg.Get<Components::UIRectComponent>(cur)) {
+                            cur = pr->parentEntity;
+                        } else {
+                            break;
+                        }
+                    }
                 }
             }
-            if (input != nullptr) {
-                std::string_view raw = input->text;
+
+            if (isTextInputLeaf && input != nullptr) {
+                std::string_view raw    = input->text;
+                size_t           cursor = std::min<size_t>(input->cursorIndex, raw.size());
                 if (input->isFocused) {
-                    displayStr = std::string(raw.substr(0, input->cursorIndex)) + "|" + std::string(raw.substr(input->cursorIndex));
+                    displayStr = std::string(raw.substr(0, cursor)) + "|" + std::string(raw.substr(cursor));
                 } else {
                     displayStr = std::string(raw);
                 }

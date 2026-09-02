@@ -8,6 +8,9 @@
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Types.hpp>
+#include <algorithm>
+#include <array>
+#include <cmath>
 #include <string>
 
 namespace ZHLN::GUI {
@@ -134,20 +137,120 @@ uint32_t
         return 0;
     }
 
-    float x0 = rect.computedAbsMinX;
-    float y0 = rect.computedAbsMinY;
-    float x1 = rect.computedAbsMaxX;
-    float y1 = rect.computedAbsMaxY;
+    const float x0 = rect.computedAbsMinX;
+    const float y0 = rect.computedAbsMinY;
+    const float x1 = rect.computedAbsMaxX;
+    const float y1 = rect.computedAbsMaxY;
 
     PackedRGBA8   c = Math::PackColor(panel.color.GetX(), panel.color.GetY(), panel.color.GetZ(), panel.color.GetW());
     Packed1010102 n = Math::PackNormal(0, 0, 1);
     Packed1010102 t = Math::PackNormal(1, 0, 0, 1);
 
-    float    width        = x1 - x0;
-    float    height       = y1 - y0;
-    uint32_t writtenCount = 0;
+    const float width  = x1 - x0;
+    const float height = y1 - y0;
+    uint32_t    writtenCount = 0;
 
-    if (panel.edgeWidth > 0.0f && width > 0.0f && height > 0.0f) {
+    // Radius order is top-left, top-right, bottom-right, bottom-left.  Clamp
+    // and normalize the values just as a 2D rounded-rectangle primitive
+    // would, so malformed configuration cannot make neighboring corners cross
+    // one another.
+    float radiusTL = std::max(0.0f, panel.borderRadius.GetX());
+    float radiusTR = std::max(0.0f, panel.borderRadius.GetY());
+    float radiusBR = std::max(0.0f, panel.borderRadius.GetZ());
+    float radiusBL = std::max(0.0f, panel.borderRadius.GetW());
+
+    if (width > 0.0f && height > 0.0f) {
+        const float maxRadius = std::min(width, height) * 0.5f;
+        radiusTL             = std::min(radiusTL, maxRadius);
+        radiusTR             = std::min(radiusTR, maxRadius);
+        radiusBR             = std::min(radiusBR, maxRadius);
+        radiusBL             = std::min(radiusBL, maxRadius);
+
+        float radiusScale = 1.0f;
+        auto  constrainPair = [&](float a, float b, float limit) -> void {
+            if (a + b > limit && a + b > 0.0f) {
+                radiusScale = std::min(radiusScale, limit / (a + b));
+            }
+        };
+        constrainPair(radiusTL, radiusTR, width);
+        constrainPair(radiusBL, radiusBR, width);
+        constrainPair(radiusTL, radiusBL, height);
+        constrainPair(radiusTR, radiusBR, height);
+
+        radiusTL *= radiusScale;
+        radiusTR *= radiusScale;
+        radiusBR *= radiusScale;
+        radiusBL *= radiusScale;
+    }
+
+    const bool hasRoundedCorners = width > 0.0f && height > 0.0f &&
+                                   (radiusTL > 0.0f || radiusTR > 0.0f || radiusBR > 0.0f || radiusBL > 0.0f);
+
+    auto emitVertex = [&](float x, float y, float u, float v) -> void {
+        outPos[writtenCount]    = {{x, y, 0.0f}};
+        outAttr[writtenCount++] = {.normal = n, .tangent = t, .uv = Math::PackUV(u, v), .color = c};
+    };
+
+    if (hasRoundedCorners) {
+        // A 16-sided perimeter (three segments per corner plus the four
+        // straight edges) is enough for the small UI controls this function
+        // serves.  A triangle fan uses 48 vertices, fitting the existing
+        // renderer scratch allocation of 54 vertices per panel while giving
+        // circles such as slider knobs a genuinely rounded silhouette.
+        struct Point {
+            float x;
+            float y;
+        };
+        constexpr int   kCornerSegments = 3;
+        constexpr float kPi             = 3.14159265358979323846f;
+        constexpr float kQuarterStep    = (kPi * 0.5f) / static_cast<float>(kCornerSegments);
+
+        std::array<Point, 16> perimeter {};
+        uint32_t              perimeterCount = 0;
+        auto appendPoint = [&](float x, float y) -> void {
+            if (perimeterCount < perimeter.size()) {
+                perimeter[perimeterCount++] = {.x = x, .y = y};
+            }
+        };
+        auto appendArc = [&](float cx, float cy, float radius, float startAngle, int first, int last) -> void {
+            for (int segment = first; segment <= last; ++segment) {
+                const float angle = startAngle + kQuarterStep * static_cast<float>(segment);
+                appendPoint(cx + std::cos(angle) * radius, cy + std::sin(angle) * radius);
+            }
+        };
+
+        // Walk clockwise in screen coordinates: top-left, top-right,
+        // bottom-right, bottom-left.  Straight-edge endpoints are explicit so
+        // each rounded corner is joined by a real edge rather than a diagonal.
+        appendPoint(x0 + radiusTL, y0);
+        appendPoint(x1 - radiusTR, y0);
+        appendArc(x1 - radiusTR, y0 + radiusTR, radiusTR, -kPi * 0.5f, 1, kCornerSegments);
+        appendPoint(x1, y1 - radiusBR);
+        appendArc(x1 - radiusBR, y1 - radiusBR, radiusBR, 0.0f, 1, kCornerSegments);
+        appendPoint(x0 + radiusBL, y1);
+        appendArc(x0 + radiusBL, y1 - radiusBL, radiusBL, kPi * 0.5f, 1, kCornerSegments);
+        appendPoint(x0, y0 + radiusTL);
+        // The final point of this arc is the first point of the perimeter;
+        // omit it and let the fan close across the top edge.
+        appendArc(x0 + radiusTL, y0 + radiusTL, radiusTL, kPi, 1, kCornerSegments - 1);
+
+        const float centerX = (x0 + x1) * 0.5f;
+        const float centerY = (y0 + y1) * 0.5f;
+        const float invWidth  = 1.0f / width;
+        const float invHeight = 1.0f / height;
+        for (uint32_t i = 0; i < perimeterCount; ++i) {
+            const Point& a = perimeter[i];
+            const Point& b = perimeter[(i + 1) % perimeterCount];
+
+            // Match the winding of the original UI quads.  UI coordinates use
+            // a top-left origin, so the visually clockwise perimeter is the
+            // renderer's front-facing order when emitted as (center, next,
+            // current).
+            emitVertex(centerX, centerY, (centerX - x0) * invWidth, (centerY - y0) * invHeight);
+            emitVertex(b.x, b.y, (b.x - x0) * invWidth, (b.y - y0) * invHeight);
+            emitVertex(a.x, a.y, (a.x - x0) * invWidth, (a.y - y0) * invHeight);
+        }
+    } else if (panel.edgeWidth > 0.0f && width > 0.0f && height > 0.0f) {
         float borderX = std::min(panel.edgeWidth, width * 0.5f);
         float borderY = std::min(panel.edgeWidth, height * 0.5f);
 
@@ -167,35 +270,21 @@ uint32_t
                 float qv0 = vs[r];
                 float qv1 = vs[r + 1];
 
-                outPos[writtenCount]    = {{qx0, qy0, 0.0f}};
-                outAttr[writtenCount++] = {.normal = n, .tangent = t, .uv = Math::PackUV(qu0, qv0), .color = c};
-                outPos[writtenCount]    = {{qx0, qy1, 0.0f}};
-                outAttr[writtenCount++] = {.normal = n, .tangent = t, .uv = Math::PackUV(qu0, qv1), .color = c};
-                outPos[writtenCount]    = {{qx1, qy0, 0.0f}};
-                outAttr[writtenCount++] = {.normal = n, .tangent = t, .uv = Math::PackUV(qu1, qv0), .color = c};
-
-                outPos[writtenCount]    = {{qx1, qy0, 0.0f}};
-                outAttr[writtenCount++] = {.normal = n, .tangent = t, .uv = Math::PackUV(qu1, qv0), .color = c};
-                outPos[writtenCount]    = {{qx0, qy1, 0.0f}};
-                outAttr[writtenCount++] = {.normal = n, .tangent = t, .uv = Math::PackUV(qu0, qv1), .color = c};
-                outPos[writtenCount]    = {{qx1, qy1, 0.0f}};
-                outAttr[writtenCount++] = {.normal = n, .tangent = t, .uv = Math::PackUV(qu1, qv1), .color = c};
+                emitVertex(qx0, qy0, qu0, qv0);
+                emitVertex(qx0, qy1, qu0, qv1);
+                emitVertex(qx1, qy0, qu1, qv0);
+                emitVertex(qx1, qy0, qu1, qv0);
+                emitVertex(qx0, qy1, qu0, qv1);
+                emitVertex(qx1, qy1, qu1, qv1);
             }
         }
     } else {
-        outPos[0]    = {{x0, y0, 0.0f}};
-        outAttr[0]   = {.normal = n, .tangent = t, .uv = Math::PackUV(0.0f, 0.0f), .color = c};
-        outPos[1]    = {{x0, y1, 0.0f}};
-        outAttr[1]   = {.normal = n, .tangent = t, .uv = Math::PackUV(0.0f, 1.0f), .color = c};
-        outPos[2]    = {{x1, y0, 0.0f}};
-        outAttr[2]   = {.normal = n, .tangent = t, .uv = Math::PackUV(1.0f, 0.0f), .color = c};
-        outPos[3]    = {{x1, y0, 0.0f}};
-        outAttr[3]   = {.normal = n, .tangent = t, .uv = Math::PackUV(1.0f, 0.0f), .color = c};
-        outPos[4]    = {{x0, y1, 0.0f}};
-        outAttr[4]   = {.normal = n, .tangent = t, .uv = Math::PackUV(0.0f, 1.0f), .color = c};
-        outPos[5]    = {{x1, y1, 0.0f}};
-        outAttr[5]   = {.normal = n, .tangent = t, .uv = Math::PackUV(1.0f, 1.0f), .color = c};
-        writtenCount = 6;
+        emitVertex(x0, y0, 0.0f, 0.0f);
+        emitVertex(x0, y1, 0.0f, 1.0f);
+        emitVertex(x1, y0, 1.0f, 0.0f);
+        emitVertex(x1, y0, 1.0f, 0.0f);
+        emitVertex(x0, y1, 0.0f, 1.0f);
+        emitVertex(x1, y1, 1.0f, 1.0f);
     }
     return writtenCount;
 }
