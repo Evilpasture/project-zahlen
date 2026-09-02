@@ -31,7 +31,9 @@ auto FindAncestorWith(ECS::Registry& reg, Entity start) -> Entity {
 }
 
 // Compute on-screen bounds for a rect (absolute min/max).
-struct Bounds { float x0, y0, x1, y1; };
+struct Bounds {
+    float x0, y0, x1, y1;
+};
 
 auto GetBounds(const Components::UIRectComponent& r) -> Bounds {
     return {r.computedAbsMinX, r.computedAbsMinY, r.computedAbsMaxX, r.computedAbsMaxY};
@@ -73,20 +75,51 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
     }
 
     // Native ECS UI uses raw button state so ImGui capture does not block in-world panels.
-    bool leftMouseDown = state->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
-    float mouseX       = state->mouseX;
-    float mouseY       = state->mouseY;
-    float deltaX       = state->mouseDeltaX;
-    float deltaY       = state->mouseDeltaY;
-    float wheel        = state->mouseWheel;
-    (void)wheel;
+    bool  leftMouseDown = state->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
+    float mouseX        = state->mouseX;
+    float mouseY        = state->mouseY;
+    float deltaX        = state->mouseDeltaX;
+    float deltaY        = state->mouseDeltaY;
+    float wheel         = state->mouseWheel;
+
+    // TODO(Evilpasture): [UI-SCROLLING] Implement container & widget scrolling using the mouse wheel:
+    //
+    // 1. COMPONENT (include/Zahlen/Components.hpp):
+    //    - Define `Components::UIScrollComponent`:
+    //      * `float scrollX = 0.0f, scrollY = 0.0f;`
+    //      * `float targetScrollY = 0.0f;` (for smooth lerping via dt)
+    //      * `float maxScrollX = 0.0f, maxScrollY = 0.0f;` (calculated during layout)
+    //      * `float scrollSpeed = 35.0f;`
+    //      * `bool smoothScroll = true;`
+    //
+    // 2. LAYOUT PROPAGATION (src/engine/system/UILayoutSystem.hpp):
+    //    - In `ReadBackLayout`, check if the parent entity has a `UIScrollComponent`:
+    //      Subtract parent `scrollX` and `scrollY` from the origin passed to child nodes:
+    //      `self(self, childEnt, rect->computedAbsMinX - scrollX, rect->computedAbsMinY - scrollY);`
+    //    - Post-layout pass: Measure total child bounding extent vs container height to
+    //      compute `maxScrollY = std::max(0.0f, contentHeight - containerHeight)`.
+    //
+    // 3. INTERACTION & WHEEL DISPATCH (here in UIInteractionSystem.cpp):
+    //    - If `std::abs(wheel) > 0.001f`:
+    //      a) Find the innermost (deepest `hierarchyDepth`) hovered container with `UIScrollComponent`.
+    //      b) Adjust `targetScrollY = std::clamp(targetScrollY - wheel * scrollSpeed, 0.0f, maxScrollY)`.
+    //      c) (Optional) If hovering an active `UISliderComponent`, adjust `slider->value` by `wheel * step`.
+    //    - Per-frame smooth scroll integration:
+    //      `scroll->scrollY += (scroll->targetScrollY - scroll->scrollY) * std::clamp(15.0f * dt, 0.0f, 1.0f);`
+    //
+    // 4. CLIPPING & SCISSORING (src/engine/system/UIRenderSystem.cpp):
+    //    - Scrollable containers must have `UIRectComponent.clipChildren = true`.
+    //    - As child vertices shift past bounds, `IntersectScissor` automatically handles GPU clipping.
+    //
+    // 5. FLUENT BUILDER API (include/Zahlen/GUI.hpp):
+    //    - Add `ui.ScrollBox("Name", ScrollBoxConfig { ... }, [&]() { ... })` helper in `GUI::Context`.
+    (void) wheel;
 
     // Reset per-frame hover on every UIButtonComponent in one pass. The
     // UIButtonComponent::Hovered flag is the single source of truth for hover
     // across all widgets; compound widgets never cache their own hovered flag.
     for (auto& btn: reg.GetRawArray<Components::UIButtonComponent>()) {
         btn.Set(UIButton::Hovered, false);
-        btn.Set(UIButton::Pressed, false);
         btn.Set(UIButton::Clicked, false);
     }
 
@@ -113,9 +146,11 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                         bool   hasBounds = false;
                         if (auto* cache = reg.Get<Components::UIChildCacheComponent>(sliderEnt)) {
                             cache->children.ForEach([&](uint64_t, const Components::UIChildCacheComponent::ChildRecord& rec) -> void {
-                                if (hasBounds) return;
+                                if (hasBounds)
+                                    return;
                                 Entity child = rec.entity;
-                                if (!reg.IsAlive(child)) return;
+                                if (!reg.IsAlive(child))
+                                    return;
                                 if (auto* cname = reg.Get<Components::NameComponent>(child)) {
                                     if (std::string_view(cname->name) == "_sl_track") {
                                         if (auto* tr = reg.Get<Components::UIRectComponent>(child)) {
@@ -140,7 +175,7 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                                 if (slider->step > 0.0f) {
                                     v = std::round(v / slider->step) * slider->step;
                                 }
-                                v = std::clamp(v, slider->minValue, slider->maxValue);
+                                v             = std::clamp(v, slider->minValue, slider->maxValue);
                                 slider->value = v;
                             }
                         }
@@ -157,17 +192,17 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                             split->isDragging = true;
                         }
                         if (auto* srect = reg.Get<Components::UIRectComponent>(splitterEnt)) {
-                            Bounds tb  = GetBounds(*srect);
-                            bool horizontal = (split->direction == Components::UISplitterComponent::Horizontal);
-                            float total = horizontal ? (tb.x1 - tb.x0) : (tb.y1 - tb.y0);
-                            float pos   = horizontal ? (mouseX - tb.x0) : (mouseY - tb.y0);
+                            Bounds tb         = GetBounds(*srect);
+                            bool   horizontal = (split->direction == Components::UISplitterComponent::Horizontal);
+                            float  total      = horizontal ? (tb.x1 - tb.x0) : (tb.y1 - tb.y0);
+                            float  pos        = horizontal ? (mouseX - tb.x0) : (mouseY - tb.y0);
                             if (total > 1.0f) {
                                 float r = pos / total;
                                 // Respect minSize — clamp so each side is >= minSize / total
                                 float minRatio = 0.05f;
                                 float maxRatio = 0.95f;
-                                r = std::clamp(r, minRatio, maxRatio);
-                                split->ratio = r;
+                                r              = std::clamp(r, minRatio, maxRatio);
+                                split->ratio   = r;
                             }
                         }
                         continue;
@@ -201,8 +236,8 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
     }
     std::ranges::sort(sortedEntries, [](const auto& a, const auto& b) { return a.depth > b.depth; });
 
-    bool clickConsumed = false;
-    bool focusCaptured = false;
+    bool   clickConsumed   = false;
+    bool   focusCaptured   = false;
     Entity clickedDropdown = Entity::Null();
 
     for (const auto& entry: sortedEntries) {
@@ -251,9 +286,11 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                         bool   hasBounds = false;
                         if (auto* cache = reg.Get<Components::UIChildCacheComponent>(slEnt)) {
                             cache->children.ForEach([&](uint64_t, const Components::UIChildCacheComponent::ChildRecord& rec) -> void {
-                                if (hasBounds) return;
+                                if (hasBounds)
+                                    return;
                                 Entity child = rec.entity;
-                                if (!reg.IsAlive(child)) return;
+                                if (!reg.IsAlive(child))
+                                    return;
                                 if (auto* cname = reg.Get<Components::NameComponent>(child)) {
                                     if (std::string_view(cname->name) == "_sl_track") {
                                         if (auto* tr = reg.Get<Components::UIRectComponent>(child)) {
@@ -278,7 +315,7 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                                 if (slider->step > 0.0f) {
                                     v = std::round(v / slider->step) * slider->step;
                                 }
-                                v = std::clamp(v, slider->minValue, slider->maxValue);
+                                v             = std::clamp(v, slider->minValue, slider->maxValue);
                                 slider->value = v;
                             }
                         }
