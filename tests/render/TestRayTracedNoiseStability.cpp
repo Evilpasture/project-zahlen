@@ -72,17 +72,17 @@
 #include <vector>
 
 enum class NoiseStabilityError : uint8_t {
-    EngineInitFailed[[= ZHLN::Description<"Failed to initialize the headless Engine for the RT noise stability test.">{}]] = 1,
-    CaptureFailed[[= ZHLN::Description<"A frame could not be captured or the PPM could not be read back.">{}]],
-    RayTracedShadowPathInactive[[= ZHLN::Description<"Enabling enableRTR did not change a single pixel against a fully static scene, so the ray-traced shadow path is not executing: either pc.enableRTR reaches the shader as 0, the TLAS is null, or the DISABLE_RTR lighting variant was selected.">{}]],
-    DitherTemporallyFrozen[[= ZHLN::Description<"The ray-traced shadow path executes but renders the identical image at two different frame indices, so the blue noise temporal scroll is not advancing: check FrameIndexFromCamPosW(pc.camPos.w) and the R2 UV offset in blue_noise.slang.">{}]],
-    PenumbraTooSmallToMeasure[[= ZHLN::Description<"The per-frame variation covers too small a region for the structural metrics to be trustworthy; widen the penumbra (frame.sunSize, or raise the occluder) rather than gating on a measurement over a handful of pixels.">{}]],
-    ShadowTooWeakToTest[[= ZHLN::Description<"The shadow never develops from lit to shadowed: the fitted coverage does not span the 0..1 range. Usually the sun disk subtends a larger angle than the occluder, so no umbra forms and the penumbra degenerates into sparse speckle; reduce frame.sunSize or enlarge the occluder.">{}]],
-    NoiseMagnitudeMismatch[[= ZHLN::Description<"The per-pixel temporal variance does not match what a one-sample-per-pixel stochastic shadow must produce: near zero means the dither is not modulating visibility, above 1 means extra variance beyond Bernoulli (instability or fireflies), near 1/N means the shader is averaging N samples.">{}]],
-    DitherIsPeriodic[[= ZHLN::Description<"The ray-traced dither repeats at a short spatial lag; the residual carries a lattice a spatial filter cannot integrate away.">{}]],
-    DitherIsAnisotropic[[= ZHLN::Description<"The ray-traced dither residual has a preferred direction (structured lattice, not blue noise).">{}]],
-    ResidualDidNotConverge[[= ZHLN::Description<"Under temporal accumulation the penumbra residual oscillated instead of falling.">{}]],
-    RayDebrisDetected[[= ZHLN::Description<"The residual is dominated by isolated single-pixel outliers (ray debris / fireflies).">{}]],
+    EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize the headless Engine for the RT noise stability test.">{}) = 1,
+    CaptureFailed ZHLN_ANNOTATION(ZHLN::Description<"A frame could not be captured or the PPM could not be read back.">{}),
+    RayTracedShadowPathInactive ZHLN_ANNOTATION(ZHLN::Description<"Enabling enableRTR did not change a single pixel against a fully static scene, so the ray-traced shadow path is not executing: either pc.enableRTR reaches the shader as 0, the TLAS is null, or the DISABLE_RTR lighting variant was selected.">{}),
+    DitherTemporallyFrozen ZHLN_ANNOTATION(ZHLN::Description<"The ray-traced shadow path executes but renders the identical image at two different frame indices, so the blue noise temporal scroll is not advancing: check FrameIndexFromCamPosW(pc.camPos.w) and the R2 UV offset in blue_noise.slang.">{}),
+    PenumbraTooSmallToMeasure ZHLN_ANNOTATION(ZHLN::Description<"The per-frame variation covers too small a region for the structural metrics to be trustworthy; widen the penumbra (frame.sunSize, or raise the occluder) rather than gating on a measurement over a handful of pixels.">{}),
+    ShadowTooWeakToTest ZHLN_ANNOTATION(ZHLN::Description<"The shadow never develops from lit to shadowed: the fitted coverage does not span the 0..1 range. Usually the sun disk subtends a larger angle than the occluder, so no umbra forms and the penumbra degenerates into sparse speckle; reduce frame.sunSize or enlarge the occluder.">{}),
+    NoiseMagnitudeMismatch ZHLN_ANNOTATION(ZHLN::Description<"The per-pixel temporal variance does not match what a one-sample-per-pixel stochastic shadow must produce: near zero means the dither is not modulating visibility, above 1 means extra variance beyond Bernoulli (instability or fireflies), near 1/N means the shader is averaging N samples.">{}),
+    DitherIsPeriodic ZHLN_ANNOTATION(ZHLN::Description<"The ray-traced dither repeats at a short spatial lag; the residual carries a lattice a spatial filter cannot integrate away.">{}),
+    DitherIsAnisotropic ZHLN_ANNOTATION(ZHLN::Description<"The ray-traced dither residual has a preferred direction (structured lattice, not blue noise).">{}),
+    ResidualDidNotConverge ZHLN_ANNOTATION(ZHLN::Description<"Under temporal accumulation the penumbra residual oscillated instead of falling.">{}),
+    RayDebrisDetected ZHLN_ANNOTATION(ZHLN::Description<"The residual is dominated by isolated single-pixel outliers (ray debris / fireflies).">{}),
 };
 
 namespace {

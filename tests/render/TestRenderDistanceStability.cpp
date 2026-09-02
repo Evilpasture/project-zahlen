@@ -86,14 +86,14 @@
 // ============================================================================
 
 enum class DistanceStabilityTestError : uint8_t {
-    EngineInitFailed[[= ZHLN::Description<"Failed to initialize headless Engine context for the distance-stability test.">{}]] = 1,
-    RenderOutputBlank[[= ZHLN::Description<"Rendered frame is blank or could not be captured.">{}]],
-    DistanceSurfaceMissing[[= ZHLN::Description<"A PBR surface at some distance never produced a visible signature (culled, unshaded or shadowed out).">{}]],
-    TemporalFlickerDetected[[= ZHLN::Description<"A static scene with PBR surfaces at varying distances changed more frame-to-frame than the noise floor allows.">{}]],
-    SweepPopDetected[[= ZHLN::Description<"During the camera sweep an in-frustum PBR surface vanished for a frame (cascade/cluster/culling pop).">{}]],
-    PostSweepParityDetected[[= ZHLN::Description<"After motion stopped the frames kept changing (stale history / double-buffer state).">{}]],
-    DeviceLostDuringTest[[= ZHLN::Description<"The Vulkan device was lost repeatedly during the scenario; the engine hot-rebuild recovered, but the GPU was not stable.">{}]],
-    ValidationErrorsRaised[[= ZHLN::Description<"The validation layer reported errors while rendering the distance-stability frames.">{}]],
+    EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine context for the distance-stability test.">{}) = 1,
+    RenderOutputBlank ZHLN_ANNOTATION(ZHLN::Description<"Rendered frame is blank or could not be captured.">{}),
+    DistanceSurfaceMissing ZHLN_ANNOTATION(ZHLN::Description<"A PBR surface at some distance never produced a visible signature (culled, unshaded or shadowed out).">{}),
+    TemporalFlickerDetected ZHLN_ANNOTATION(ZHLN::Description<"A static scene with PBR surfaces at varying distances changed more frame-to-frame than the noise floor allows.">{}),
+    SweepPopDetected ZHLN_ANNOTATION(ZHLN::Description<"During the camera sweep an in-frustum PBR surface vanished for a frame (cascade/cluster/culling pop).">{}),
+    PostSweepParityDetected ZHLN_ANNOTATION(ZHLN::Description<"After motion stopped the frames kept changing (stale history / double-buffer state).">{}),
+    DeviceLostDuringTest ZHLN_ANNOTATION(ZHLN::Description<"The Vulkan device was lost repeatedly during the scenario; the engine hot-rebuild recovered, but the GPU was not stable.">{}),
+    ValidationErrorsRaised ZHLN_ANNOTATION(ZHLN::Description<"The validation layer reported errors while rendering the distance-stability frames.">{}),
 };
 
 // ============================================================================

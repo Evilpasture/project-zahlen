@@ -15,9 +15,9 @@
 // ============================================================================
 
 enum class WeaponType : uint32_t {
-    Pistol[[= ZHLN::Description<"Sidearm with high mobility.">{}]],
-    Rifle[[= ZHLN::Description<"Standard automatic assault rifle.">{}]],
-    Shotgun[[= ZHLN::Description<"Close-range high damage scattergun.">{}]]
+    Pistol ZHLN_ANNOTATION(ZHLN::Description<"Sidearm with high mobility.">{}),
+    Rifle ZHLN_ANNOTATION(ZHLN::Description<"Standard automatic assault rifle.">{}),
+    Shotgun ZHLN_ANNOTATION(ZHLN::Description<"Close-range high damage scattergun.">{})
 };
 
 enum class StatusEffect : uint32_t { None = 0, Burning = 1 << 0, Frozen = 1 << 1, Poisoned = 1 << 2 };
@@ -49,7 +49,14 @@ struct Character: BaseStats {
     }
 };
 
-#ifndef ZHLN_IN_DOCKER
+// Schema synthesis runs a consteval block that hands field names to
+// std::meta::define_aggregate through std::string. Under -fsanitize=undefined
+// GCC rejects the pointer null-check inside std::string's constructor during
+// constant evaluation (GCC bugzilla #71962, still open), so the aggregate can
+// never be completed in a sanitizer build. Compile this test out of sanitizer
+// builds: it is not a Docker-only issue, ZHLN_IN_DOCKER was only masking it
+// inside CI (which configures USE_SANITIZERS=ON together with ZHLN_IN_DOCKER).
+#if !defined(ZHLN_SANITIZER_BUILD)
 struct SchemaContainer {
     using ItemSchema = ZHLN::Reflect::Define<"ItemSchema", ZHLN::Reflect::Field<uint32_t, "id">, ZHLN::Reflect::Field<float, "weight">>::type;
 };
@@ -91,6 +98,17 @@ struct ReflectionTestSuite {
             ZHLN::Test::ExpectEq(names[0], "Pistol");
             ZHLN::Test::ExpectEq(names[1], "Rifle");
             ZHLN::Test::ExpectEq(names[2], "Shotgun");
+
+            // TypeName rename predicate (the hook FFI code generation uses to
+            // remap C++ spellings to C names). nullptr keeps the reflected
+            // spelling; a non-null return replaces it.
+            constexpr auto keepName = [](std::string_view) -> const char* { return nullptr; };
+            ZHLN::Test::ExpectEq(ZHLN::Reflect::TypeName<WeaponType>(), "WeaponType");
+            ZHLN::Test::ExpectEq(ZHLN::Reflect::TypeName<WeaponType>(keepName), "WeaponType");
+            constexpr auto renameWeapon = [](std::string_view n) -> const char* {
+                return n == "WeaponType" ? "Weapon" : nullptr;
+            };
+            ZHLN::Test::ExpectEq(ZHLN::Reflect::TypeName<WeaponType>(renameWeapon), "Weapon");
 
             // EnumToFlagsString
             std::string      flagStr;
@@ -336,7 +354,10 @@ struct ReflectionTestSuite {
 
         // --- 7. Declarative Schema Types & Nested Types ---
         std::expected<void, ZHLN::Error> declarative_schema_and_nested_types() {
-#ifndef ZHLN_IN_DOCKER
+            // Skipped in sanitizer builds: Define's consteval block reaches
+            // std::string in constant evaluation, which GCC's UBSan rejects
+            // (bugzilla #71962). See the SchemaContainer definition above.
+#if !defined(ZHLN_SANITIZER_BUILD)
             using Schema = SchemaContainer::ItemSchema;
 
             // Schema name resolution

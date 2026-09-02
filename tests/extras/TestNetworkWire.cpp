@@ -43,21 +43,21 @@ using ZHLN::Wire::WireError;
 enum class TestGear : uint8_t {
     Reverse = 1,
     Neutral,
-    First[[= ZHLN::Description<"lowest forward gear"> {}]],
+    First ZHLN_ANNOTATION(ZHLN::Description<"lowest forward gear"> {}),
     Second,
     Third
 };
 
 struct TestPlayer {
-    uint64_t                uid [[= ZHLN::Description<"account identity"> {}]];
+    uint64_t                uid ZHLN_ANNOTATION(ZHLN::Description<"account identity"> {});
     std::string             name;
-    int32_t                 hp [[= ZHLN::Wire::Range<0, 100> {}, = ZHLN::Description<"hitpoints remaining"> {}]];
-    float                   heading [[= ZHLN::Wire::Range<-180.0f, 180.0f> {}]];
+    int32_t                 hp ZHLN_ANNOTATION(ZHLN::Wire::Range<0, 100> {}, = ZHLN::Description<"hitpoints remaining"> {});
+    float                   heading ZHLN_ANNOTATION(ZHLN::Wire::Range<-180.0f, 180.0f> {});
     std::optional<uint16_t> teamId;
     std::vector<uint8_t>    inventory;
     bool                    active;
     TestGear                gear;
-    int                     localCache [[= ZHLN::Wire::Skip {}]]; // never serialized
+    int                     localCache ZHLN_ANNOTATION(ZHLN::Wire::Skip {}); // never serialized
 };
 
 struct TestWorld {
@@ -505,9 +505,9 @@ struct TestNetworkWireSuite {
         }
 
         std::expected<void, ZHLN::Error> schema_version_annotation() {
-            ZHLN::Test::ExpectEq(ZHLN::Wire::detail::SchemaVersionOf<ZHLN::Net::InitialSnapshotMessage>(), uint32_t {2});
-            ZHLN::Test::ExpectEq(ZHLN::Wire::detail::SchemaVersionOf<ZHLN::Net::PhysicsBatchMessage>(), uint32_t {2});
-            ZHLN::Test::ExpectEq(ZHLN::Wire::detail::SchemaVersionOf<TestWorld>(), uint32_t {1});
+            ZHLN::Test::ExpectEq(ZHLN::Wire::SchemaVersionOf<ZHLN::Net::InitialSnapshotMessage>(), uint32_t {2});
+            ZHLN::Test::ExpectEq(ZHLN::Wire::SchemaVersionOf<ZHLN::Net::PhysicsBatchMessage>(), uint32_t {2});
+            ZHLN::Test::ExpectEq(ZHLN::Wire::SchemaVersionOf<TestWorld>(), uint32_t {1});
             return {};
         }
 

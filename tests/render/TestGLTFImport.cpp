@@ -37,7 +37,7 @@
 #include <glTF/GLTFImporter.hpp>
 #include <ios>
 #include <iterator>
-#include <json/JSON.hpp>
+#include <json/JSONSchema.hpp>
 #include <memory>
 #include <ranges>
 #include <span>
@@ -46,16 +46,16 @@
 #include <vector>
 
 enum class GLTFImportError : uint8_t {
-    AssetUnavailable[[= ZHLN::Description<"The base rig GLB could not be read from the source tree.">{}]] = 1,
-    EngineInitFailed[[= ZHLN::Description<"Failed to initialize the headless Engine the importer uploads through.">{}]],
-    PrefabLoadFailed[[= ZHLN::Description<"CreativeWorksFactory returned no prefab for a valid in-memory GLB.">{}]],
-    NodeGraphMismatch[[= ZHLN::Description<"Imported node names, parents or transforms disagree with the source document.">{}]],
-    SkeletonMismatch[[= ZHLN::Description<"Imported skin joints, parents or inverse bind matrices disagree with the source document.">{}]],
-    AnimationMismatch[[= ZHLN::Description<"Imported animation channels disagree with the source document.">{}]],
-    PartMismatch[[= ZHLN::Description<"Imported mesh parts do not reference the nodes and skins that carry them.">{}]],
-    PrefabCacheMismatch[[= ZHLN::Description<"Reloading the same virtual path did not return the cached prefab.">{}]],
-    ExtensionMismatch[[= ZHLN::Description<"A Khronos glTF extension was not applied the way the importer documents it.">{}]],
-    EmissiveLightMismatch[[= ZHLN::Description<"Emissive virtual point lights did not follow the prefab they were spawned for.">{}]],
+    AssetUnavailable ZHLN_ANNOTATION(ZHLN::Description<"The base rig GLB could not be read from the source tree.">{}) = 1,
+    EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize the headless Engine the importer uploads through.">{}),
+    PrefabLoadFailed ZHLN_ANNOTATION(ZHLN::Description<"CreativeWorksFactory returned no prefab for a valid in-memory GLB.">{}),
+    NodeGraphMismatch ZHLN_ANNOTATION(ZHLN::Description<"Imported node names, parents or transforms disagree with the source document.">{}),
+    SkeletonMismatch ZHLN_ANNOTATION(ZHLN::Description<"Imported skin joints, parents or inverse bind matrices disagree with the source document.">{}),
+    AnimationMismatch ZHLN_ANNOTATION(ZHLN::Description<"Imported animation channels disagree with the source document.">{}),
+    PartMismatch ZHLN_ANNOTATION(ZHLN::Description<"Imported mesh parts do not reference the nodes and skins that carry them.">{}),
+    PrefabCacheMismatch ZHLN_ANNOTATION(ZHLN::Description<"Reloading the same virtual path did not return the cached prefab.">{}),
+    ExtensionMismatch ZHLN_ANNOTATION(ZHLN::Description<"A Khronos glTF extension was not applied the way the importer documents it.">{}),
+    EmissiveLightMismatch ZHLN_ANNOTATION(ZHLN::Description<"Emissive virtual point lights did not follow the prefab they were spawned for.">{}),
 };
 
 namespace {
@@ -98,7 +98,7 @@ constexpr std::string_view kVirtualPath = "ProceduralAnimationBaseRig.glb";
 // ---------------------------------------------------------------------------
 // Typed glTF fixture documents.
 //
-// These are declarations, not text: ZHLN::Reflect::SerializeJSON turns each
+// These are declarations, not text: ZHLN::ReflectJSON::SerializeJSON turns each
 // struct into the JSON chunk, so field names are the glTF keys and the
 // compiler checks every value's type. Nothing here hand-writes a brace, a
 // comma or an escape.
@@ -354,7 +354,7 @@ constexpr float                kEmissiveStrength = 4.0f;
         .bufferViews    = TriangleBufferViews(),
         .buffers        = TriangleBuffers(),
     };
-    return MakeGlb(ZHLN::Reflect::SerializeJSON(document), TriangleBin());
+    return MakeGlb(ZHLN::ReflectJSON::SerializeJSON(document), TriangleBin());
 }
 
 /// The same triangle and the same emissiveFactor, extension absent.
@@ -368,7 +368,7 @@ constexpr float                kEmissiveStrength = 4.0f;
         .bufferViews = TriangleBufferViews(),
         .buffers     = TriangleBuffers(),
     };
-    return MakeGlb(ZHLN::Reflect::SerializeJSON(document), TriangleBin());
+    return MakeGlb(ZHLN::ReflectJSON::SerializeJSON(document), TriangleBin());
 }
 
 /// A mesh node that also carries a punctual light, alongside the emissive
@@ -389,11 +389,11 @@ constexpr float                kEmissiveStrength = 4.0f;
         .bufferViews    = TriangleBufferViews(),
         .buffers        = TriangleBuffers(),
     };
-    return MakeGlb(ZHLN::Reflect::SerializeJSON(document), TriangleBin());
+    return MakeGlb(ZHLN::ReflectJSON::SerializeJSON(document), TriangleBin());
 }
 
 /// Geometry-free document carrying only a punctual light -- the shape zcook
-/// emits for a cooked scene light (src/zcook/GLB.cpp:1077).
+/// emits for a cooked scene light (tools/zcook/GLB.cpp).
 [[nodiscard]] auto MakeLightOnlyFixture() -> std::vector<uint8_t> {
     const GltfLightDocument<GltfLightNode, GltfPlainMaterial> document {
         .extensionsUsed = {"KHR_lights_punctual"},
@@ -401,7 +401,7 @@ constexpr float                kEmissiveStrength = 4.0f;
         .scenes         = {GltfScene {.nodes = {0}}},
         .nodes          = {GltfLightNode {.name = "PunctualLight", .translation = {1.0f, 2.0f, 3.0f}}},
     };
-    return MakeGlb(ZHLN::Reflect::SerializeJSON(document), {});
+    return MakeGlb(ZHLN::ReflectJSON::SerializeJSON(document), {});
 }
 
 /// Independent cgltf view of the same bytes, used as the reference the
@@ -720,7 +720,7 @@ struct GLTFImportTestSuite {
          * two fixtures below differ by precisely kEmissiveStrength.
          *
          * KHR_lights_punctual in particular is exported by zcook
-         * (src/zcook/GLB.cpp:1077) but never read back: ModelPrefab has no
+         * (tools/zcook/GLB.cpp) but never read back: ModelPrefab has no
          * light representation at all, so a cooked light survives the round
          * trip only through the cooker's own manifest. What is enforced here is
          * that such a file still imports cleanly instead of failing or

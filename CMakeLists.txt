@@ -112,6 +112,26 @@ if(NOT ZHLN_TESTS_PUBLIC_API_RESULT EQUAL 0)
 endif()
 message(STATUS "${ZHLN_TESTS_PUBLIC_API_OUTPUT}")
 
+# Reflection internals live in include/Zahlen/Core/Reflection.hpp and nowhere
+# else; module interface units must never declare a detail namespace -- module
+# internals are internal by not being exported, and a detail namespace only
+# exists to be exported by accident. Both are configured-invariants: a stray
+# std::meta/^^/[:...:] or a detail namespace would otherwise survive as a
+# permanent public surface.
+execute_process(
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_reflection_boundary.py"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    RESULT_VARIABLE ZHLN_REFLECTION_BOUNDARY_RESULT
+    OUTPUT_VARIABLE ZHLN_REFLECTION_BOUNDARY_OUTPUT
+    ERROR_VARIABLE ZHLN_REFLECTION_BOUNDARY_ERROR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_STRIP_TRAILING_WHITESPACE
+)
+if(NOT ZHLN_REFLECTION_BOUNDARY_RESULT EQUAL 0)
+    message(FATAL_ERROR "${ZHLN_REFLECTION_BOUNDARY_ERROR}")
+endif()
+message(STATUS "${ZHLN_REFLECTION_BOUNDARY_OUTPUT}")
+
 set(ZHLN_TRANSPILER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/tools/transpile_reflection.py")
 
 function(zahlen_transpile_sources OUT_SOURCES_VAR)
@@ -199,8 +219,13 @@ option(USE_SANITIZERS "Enable ASan and UBSan" OFF)
 if(USE_SANITIZERS)
     add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
     add_link_options(-fsanitize=address,undefined)
+    # Marks the whole sanitizer profile. Tests whose consteval code builds
+    # std::strings are broken by GCC bug 71962 (-fsanitize=undefined rejects
+    # pointer null-checks during constant evaluation); see
+    # tests/core/TestReflection.cpp and tests/extras/TestJSON.cpp.
     add_definitions(
         -D__ASAN_ENABLED__
+        -DZHLN_SANITIZER_BUILD=1
         -DZHLN_PROJECT_ROOT="${CMAKE_CURRENT_SOURCE_DIR}"
     )
 
@@ -611,16 +636,22 @@ set_target_properties(zahlen PROPERTIES
 )
 
 # --- ASSET COMPILER (ZCOOK) ---
+# zcook lives in tools/, not src/: it is the offline asset pipeline, and the
+# off-line GLB emitter consumes extras/json's reflection serializer. Core
+# (src/, include/, modules/) must never depend on extras -- see
+# tools/check_core_extras_boundary.py -- so the cooker is outside core roots.
 add_executable(zcook
-    src/zcook/main.cpp
-    src/zcook/Transform.cpp
-    src/zcook/GLB.cpp
-    src/zcook/Cook.cpp
+    tools/zcook/main.cpp
+    tools/zcook/Transform.cpp
+    tools/zcook/GLB.cpp
+    tools/zcook/Cook.cpp
 )
 target_link_libraries(zcook PRIVATE zahlen_engine meshoptimizer)
 target_include_directories(zcook SYSTEM PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/cgltf
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/zcook
+    ${CMAKE_CURRENT_SOURCE_DIR}/extern/stb
+    ${CMAKE_CURRENT_SOURCE_DIR}/extras
+    ${CMAKE_CURRENT_SOURCE_DIR}/tools/zcook
 )
 
 

@@ -80,10 +80,9 @@ auto AppendPanelVertices(VertexPosition* outPos, VertexAttributes* outAttr, cons
 constexpr size_t MAX_UI_STACK_DEPTH = 32;
 
 enum class GUIError : uint8_t {
-    HierarchyTooDeep[
-        [= ZHLN::Description<"UI hierarchy exceeded MAX_UI_STACK_DEPTH; overflowing widgets attached to the deepest live parent instead.">{}]] = 1,
-    EntityNotAlive[[= ZHLN::Description<"Target UI entity is not alive (already destroyed or never existed).">{}]],
-    ParentNotAlive[[= ZHLN::Description<"Parent entity for the GUI operation is not alive.">{}]],
+    HierarchyTooDeep ZHLN_ANNOTATION(ZHLN::Description<"UI hierarchy exceeded MAX_UI_STACK_DEPTH; overflowing widgets attached to the deepest live parent instead.">{}) = 1,
+    EntityNotAlive ZHLN_ANNOTATION(ZHLN::Description<"Target UI entity is not alive (already destroyed or never existed).">{}),
+    ParentNotAlive ZHLN_ANNOTATION(ZHLN::Description<"Parent entity for the GUI operation is not alive.">{}),
 };
 
 // --- CONFIGURATION STRUCTS ---

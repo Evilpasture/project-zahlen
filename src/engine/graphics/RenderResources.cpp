@@ -30,18 +30,18 @@
 namespace ZHLN {
 
 enum class MaterialCreationError : uint8_t {
-    ShaderCompilationFailed[[= ZHLN::Description<"Material shader compilation failed">{}]] = 1,
-    PipelineLayoutCreationFailed[[= ZHLN::Description<"Material pipeline layout creation failed">{}]],
-    PipelineCreationFailed[[= ZHLN::Description<"Material pipeline creation failed">{}]],
+    ShaderCompilationFailed ZHLN_ANNOTATION(ZHLN::Description<"Material shader compilation failed">{}) = 1,
+    PipelineLayoutCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Material pipeline layout creation failed">{}),
+    PipelineCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Material pipeline creation failed">{}),
 };
 
 enum class BlueNoiseError : uint8_t {
-    DecodeFailed[[= ZHLN::Description<"Blue noise PNG decode failed">{}]] = 1,
+    DecodeFailed ZHLN_ANNOTATION(ZHLN::Description<"Blue noise PNG decode failed">{}) = 1,
 };
 
 enum class ShadowResolutionError : uint8_t {
-    DeviceLost[[= ZHLN::Description<"Device lost while resizing shadow map">{}]] = 1,
-    RecreationFailed[[= ZHLN::Description<"Shadow map recreation failed">{}]],
+    DeviceLost ZHLN_ANNOTATION(ZHLN::Description<"Device lost while resizing shadow map">{}) = 1,
+    RecreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Shadow map recreation failed">{}),
 };
 
 } // namespace ZHLN
@@ -1295,8 +1295,8 @@ auto RenderContext::CreateProceduralTexture(std::string_view name, uint32_t widt
 }
 
 enum class ScreenshotError : uint8_t {
-    FileOpenFailed[[= ZHLN::Description<"Failed to open screenshot output file for writing">{}]] = 1,
-    ReadbackFailed[[= ZHLN::Description<"GPU readback buffer mapping failed">{}]],
+    FileOpenFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to open screenshot output file for writing">{}) = 1,
+    ReadbackFailed ZHLN_ANNOTATION(ZHLN::Description<"GPU readback buffer mapping failed">{}),
 };
 
 auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -> std::expected<void, Error> {

@@ -24,12 +24,12 @@
 #include <vector>
 
 enum class DecalTestError : uint8_t {
-    EngineInitFailed[[= ZHLN::Description<"Failed to initialize headless Engine context for Decal test.">{}]] = 1,
-    ProceduralTextureFailed[[= ZHLN::Description<"Failed to allocate procedural decal texture.">{}]],
-    DecalEntitySpawnFailed[[= ZHLN::Description<"Failed to create entity with DecalComponent.">{}]],
-    RenderOutputBlank[[= ZHLN::Description<"Rendered frame is blank or failed to capture.">{}]],
-    DecalPixelsNotProjected[[= ZHLN::Description<"Projected decal pixels were not detected on target geometry surface.">{}]],
-    DecalBoundingClippingFailed[[= ZHLN::Description<"Decal bled onto geometry outside its projection bounding volume.">{}]],
+    EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine context for Decal test.">{}) = 1,
+    ProceduralTextureFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to allocate procedural decal texture.">{}),
+    DecalEntitySpawnFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to create entity with DecalComponent.">{}),
+    RenderOutputBlank ZHLN_ANNOTATION(ZHLN::Description<"Rendered frame is blank or failed to capture.">{}),
+    DecalPixelsNotProjected ZHLN_ANNOTATION(ZHLN::Description<"Projected decal pixels were not detected on target geometry surface.">{}),
+    DecalBoundingClippingFailed ZHLN_ANNOTATION(ZHLN::Description<"Decal bled onto geometry outside its projection bounding volume.">{}),
 };
 
 struct DecalTestSuite {

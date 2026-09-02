@@ -3,19 +3,33 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// extras/scripting_lua/tools/FFICTypeMap.hpp
+// extras/Scripting/Lua/tools/FFICTypeMap.hpp
 //
 // The C++ type -> C declaration mapping used to generate ffi_cdef's struct
-// bodies. Deliberately free of any reflection: it is ordinary template code
-// over a complete type, so it compiles and can be tested on a compiler with no
-// static-reflection support. The reflection layer's only job is to hand this
-// each field's type, name and offset.
+// bodies. Two distinct concerns:
 //
-// The rule this file exists to enforce: never guess a layout. Every spelling
-// below is either a scalar whose C counterpart has the same size and alignment
-// by definition, or it carries the C++ type's measured sizeof/alignof so the
-// caller can check the result and fall back to an opaque blob. A mapping that
-// cannot be justified is not emitted as a guess -- it is emitted as bytes.
+//  1. Layout is ordinary template code over the complete type: sizeof/alignof,
+//     array extents and Jolt's 16-byte SIMD alignment. It never needs
+//     reflection -- no <meta>, no Reflection.hpp -- so this header stays a
+//     plain layout engine, and the generated layouts are audited in one place:
+//     tools/check_ffi_layout.py compiles the cdef and Components.hpp and
+//     compares sizeof and every offset.
+
+//
+//  2. Names come from the caller. ZHLN::Reflect::TypeName owns the compile-time
+//     rename predicate (see Zahlen/Core/Reflection.hpp); a caller resolves the
+//     C spelling it wants -- TypeName<T>(rename) -- and hands the result to
+//     MapCType<T>(cName). An empty name defers to the built-in type-based
+//     vocabulary below, so an otherwise unmapped type stays opaque bytes
+//     rather than being guessed at.
+//
+//     The mapper itself contains no reflection or predicate plumbing: it is a
+//     layout engine, and the reflection API owns the naming policy.
+//
+// The rule this file exists to enforce: never guess a layout. A name never
+// decides size or alignment -- sizeof/alignof always do -- and the caller
+// verifies each produced declaration against the measured values. A mapping
+// that cannot be justified is not emitted as a guess; it is emitted as bytes.
 
 #pragma once
 
@@ -26,6 +40,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 #include <type_traits>
 
 namespace ZHLN::FFI {
@@ -57,20 +72,23 @@ namespace detail {
         static constexpr bool available = false;
     };
     template <typename E, std::size_t N> struct ArrayTraits<std::array<E, N>> {
-        static constexpr bool      available = true;
-        static constexpr std::size_t extent  = N;
-        using element                        = E;
+        static constexpr bool        available = true;
+        static constexpr std::size_t extent    = N;
+        using element                          = E;
     };
 
     template <typename T> struct FixedStringTraits {
         static constexpr bool available = false;
     };
     template <std::size_t N> struct FixedStringTraits<ZHLN::FixedString<N>> {
-        static constexpr bool      available = true;
-        static constexpr std::size_t capacity = N;
+        static constexpr bool        available = true;
+        static constexpr std::size_t capacity  = N;
     };
 
-    /// The C spelling of a scalar, or nullptr if it is not one this file knows.
+    /// The C spelling of a scalar by type, or nullptr if it is not one this
+    /// file knows. This is the fallback vocabulary used when the caller
+    /// supplied no name, and the guaranteed mapping for enum underlying types
+    /// in either case.
     template <typename T>
     consteval auto ScalarName() -> const char* {
         using U = std::remove_cvref_t<T>;
@@ -104,62 +122,91 @@ namespace detail {
     }
 } // namespace detail
 
+/// Map a C++ field type to its C declaration using the built-in vocabulary.
+template <typename T>
+consteval auto MapCType() -> CDecl;
+
 /// Map a C++ field type to its C declaration.
 ///
+/// `cName` is the C name the caller wants emitted for this type -- normally
+/// the result of ZHLN::Reflect::TypeName<T>(rename). A non-empty name is used
+/// as the C base name; an empty name defers to the built-in type-based
+/// vocabulary below, so a type with no built-in spelling stays opaque. Only
+/// pass a name you actually intend to emit; an empty view keeps the built-in
+/// mapping.
+///
+/// Layout is always derived from the C++ type itself (sizeof/alignof,
+/// extents, alignment), never from the name -- the caller can only change how
+/// the type is spelled.
+///
 /// Returns an opaque CDecl (base == nullptr, size/align still populated) for
-/// anything without a C counterpart -- std::bitset, HashMap, intrusive Refs.
-/// Callers must render that as a correctly sized and aligned byte blob rather
-/// than inventing a layout.
+/// anything with neither a built-in spelling nor a caller-supplied name --
+/// std::bitset, HashMap, intrusive Refs. Callers must render that as a
+/// correctly sized and aligned byte blob rather than inventing a layout.
 template <typename T>
-consteval auto MapCType() -> CDecl {
+consteval auto MapCType(std::string_view cName) -> CDecl {
     using U = std::remove_cvref_t<T>;
 
     CDecl d;
     d.size  = sizeof(U);
     d.align = alignof(U);
 
+    // The returned CDecl keeps a pointer into `cName`, so it must refer to
+    // static storage (a string literal or a reflected identifier), never to a
+    // stack buffer.
+    const char* name = cName.empty() ? nullptr : cName.data();
+
     if constexpr (std::is_enum_v<U>) {
         // An enum occupies exactly its underlying type.
-        d.base = detail::ScalarName<std::underlying_type_t<U>>();
+        d.base = name != nullptr ? name : detail::ScalarName<std::underlying_type_t<U>>();
     } else if constexpr (detail::ScalarName<U>() != nullptr) {
-        d.base = detail::ScalarName<U>();
+        d.base = name != nullptr ? name : detail::ScalarName<U>();
     } else if constexpr (std::is_same_v<U, ZHLN::Entity>) {
         // { uint32_t index; uint32_t generation; } -- emitted as a named struct
         // so scripts can write .index and .generation. Size 8, align 4, which
         // no scalar spelling reproduces.
-        d.base = "ZHLN_Entity";
+        d.base = name != nullptr ? name : "ZHLN_Entity";
     } else if constexpr (std::is_same_v<U, JPH::Vec3> || std::is_same_v<U, JPH::Vec4> ||
                          std::is_same_v<U, JPH::Quat>) {
         // Measured 16 bytes at 16-byte alignment. Vec3 stores three floats in a
         // 16-byte SIMD slot, so float[3] would be wrong on both counts.
-        d.base      = "float";
+        d.base      = name != nullptr ? name : "float";
         d.count     = 4;
         d.aligned16 = true;
     } else if constexpr (std::is_same_v<U, JPH::Mat44>) {
-        d.base      = "float";
+        d.base      = name != nullptr ? name : "float";
         d.count     = 16;
         d.aligned16 = true;
     } else if constexpr (detail::FixedStringTraits<U>::available) {
         // char data[N]; size_t len;  -- emitted as a named struct per capacity.
-        d.base = "ZHLN_FixedString";
+        d.base = name != nullptr ? name : "ZHLN_FixedString";
     } else if constexpr (std::is_array_v<U>) {
         // A raw C array member, e.g. `char _pad[3]`. remove_cvref_t does not
         // strip array-ness, so without this branch it falls through to the
-        // opaque case -- correct bytes, but needlessly unnamed.
-        constexpr auto element = MapCType<std::remove_extent_t<U>>();
-        d.base                 = element.base;
-        d.count                = element.count * static_cast<int>(std::extent_v<U>);
-        d.aligned16            = element.aligned16;
+        // opaque case -- correct bytes, but needlessly unnamed. The element's
+        // mapping supplies extent and alignment; the caller-supplied name, if
+        // any, names the array itself.
+        const auto element = MapCType<std::remove_extent_t<U>>();
+        d.base             = name != nullptr ? name : element.base;
+        d.count            = element.count * static_cast<int>(std::extent_v<U>);
+        d.aligned16        = element.aligned16;
     } else if constexpr (detail::ArrayTraits<U>::available) {
-        constexpr auto element = MapCType<typename detail::ArrayTraits<U>::element>();
-        d.base                 = element.base;
-        d.count                = element.count * static_cast<int>(detail::ArrayTraits<U>::extent);
-        d.aligned16            = element.aligned16;
+        const auto element = MapCType<typename detail::ArrayTraits<U>::element>();
+        d.base             = name != nullptr ? name : element.base;
+        d.count            = element.count * static_cast<int>(detail::ArrayTraits<U>::extent);
+        d.aligned16        = element.aligned16;
     } else {
-        d.base = nullptr;
+        // No built-in layout rule and no caller-supplied name: opaque.
+        d.base = name;
     }
 
     return d;
+}
+
+/// Map a C++ field type to its C declaration using the built-in vocabulary.
+template <typename T>
+consteval auto MapCType() -> CDecl {
+    return MapCType<T>(std::string_view {});
 }
 
 /// C spelling of the struct a FixedString<N> becomes.

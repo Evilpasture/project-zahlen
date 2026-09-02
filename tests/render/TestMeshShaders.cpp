@@ -44,13 +44,13 @@
 // ============================================================================
 
 enum class MeshShaderTestError : uint8_t {
-    EngineInitFailed[[= ZHLN::Description<"Failed to initialize headless Engine context for the mesh shader test.">{}]] = 1,
-    MeshletPartitioningFailed[[= ZHLN::Description<"meshoptimizer partitioning violated a GPU stream invariant.">{}]],
-    MeshletStreamsMissing[[= ZHLN::Description<"A mesh that must be meshletized carries no meshlet streams.">{}]],
-    RenderOutputBlank[[= ZHLN::Description<"Rendered frame is blank or could not be captured.">{}]],
-    PathDivergence[[= ZHLN::Description<"The mesh-shader path and the vertex path produced different images.">{}]],
-    ValidationErrorsRaised[[= ZHLN::Description<"The validation layer reported errors while rendering the comparison frames.">{}]],
-    ToggleIneffective[[= ZHLN::Description<"SetMeshShadingEnabled() did not change the active geometry path.">{}]],
+    EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine context for the mesh shader test.">{}) = 1,
+    MeshletPartitioningFailed ZHLN_ANNOTATION(ZHLN::Description<"meshoptimizer partitioning violated a GPU stream invariant.">{}),
+    MeshletStreamsMissing ZHLN_ANNOTATION(ZHLN::Description<"A mesh that must be meshletized carries no meshlet streams.">{}),
+    RenderOutputBlank ZHLN_ANNOTATION(ZHLN::Description<"Rendered frame is blank or could not be captured.">{}),
+    PathDivergence ZHLN_ANNOTATION(ZHLN::Description<"The mesh-shader path and the vertex path produced different images.">{}),
+    ValidationErrorsRaised ZHLN_ANNOTATION(ZHLN::Description<"The validation layer reported errors while rendering the comparison frames.">{}),
+    ToggleIneffective ZHLN_ANNOTATION(ZHLN::Description<"SetMeshShadingEnabled() did not change the active geometry path.">{}),
 };
 
 namespace {

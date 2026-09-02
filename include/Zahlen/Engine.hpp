@@ -29,13 +29,13 @@ namespace ZHLN {
 // ============================================================================
 
 enum class EngineInitError : uint8_t {
-    WindowCreationFailed[[= ZHLN::Description<"Window creation failed"> {}]] = 1,
-    TTYInitializationFailed[[= ZHLN::Description<"TTY initialization failed"> {}]],
-    RenderInitializationFailed[[= ZHLN::Description<"Render initialization failed"> {}]],
-    PhysicsInitializationFailed[[= ZHLN::Description<"Physics initialization failed"> {}]],
-    AudioInitializationFailed[[= ZHLN::Description<"Audio initialization failed"> {}]],
-    AssetInitializationFailed[[= ZHLN::Description<"Asset initialization failed"> {}]],
-    EngineAllocationFailed[[= ZHLN::Description<"Engine instance allocation failed"> {}]],
+    WindowCreationFailed        ZHLN_ANNOTATION(ZHLN::Description<"Window creation failed"> {}) = 1,
+    TTYInitializationFailed     ZHLN_ANNOTATION(ZHLN::Description<"TTY initialization failed"> {}),
+    RenderInitializationFailed  ZHLN_ANNOTATION(ZHLN::Description<"Render initialization failed"> {}),
+    PhysicsInitializationFailed ZHLN_ANNOTATION(ZHLN::Description<"Physics initialization failed"> {}),
+    AudioInitializationFailed   ZHLN_ANNOTATION(ZHLN::Description<"Audio initialization failed"> {}),
+    AssetInitializationFailed   ZHLN_ANNOTATION(ZHLN::Description<"Asset initialization failed"> {}),
+    EngineAllocationFailed      ZHLN_ANNOTATION(ZHLN::Description<"Engine instance allocation failed"> {}),
 };
 
 class Window;
@@ -116,15 +116,25 @@ class ZHLN_API ScopedEngine {
     ScopedEngine(const ScopedEngine&)                    = delete;
     auto operator=(const ScopedEngine&) -> ScopedEngine& = delete;
 
-    [[nodiscard]] auto get() const noexcept -> Engine* { return _engine.get(); }
-    auto               operator->() const noexcept -> Engine* { return _engine.get(); }
-    auto               operator*() const noexcept -> Engine& { return *_engine; }
-    explicit           operator bool() const noexcept { return _engine != nullptr; }
+    [[nodiscard]] auto get() const noexcept -> Engine* {
+        return _engine.get();
+    }
+    auto operator->() const noexcept -> Engine* {
+        return _engine.get();
+    }
+    auto operator*() const noexcept -> Engine& {
+        return *_engine;
+    }
+    explicit operator bool() const noexcept {
+        return _engine != nullptr;
+    }
 
     /// Destroys the engine and withdraws its registration.
     void reset();
 
-    friend auto operator==(const ScopedEngine& lhs, std::nullptr_t) noexcept -> bool { return lhs._engine == nullptr; }
+    friend auto operator==(const ScopedEngine& lhs, std::nullptr_t) noexcept -> bool {
+        return lhs._engine == nullptr;
+    }
 
   private:
     // Declaration order is the teardown contract: _engine is destroyed first,
@@ -132,7 +142,6 @@ class ZHLN_API ScopedEngine {
     std::unique_ptr<EngineContextScope> _scope;
     std::unique_ptr<Engine>             _engine;
 };
-
 
 class CullingSystem;
 

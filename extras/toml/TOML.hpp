@@ -24,10 +24,10 @@
 // ============================================================================
 // Reflection-driven TOML
 //
-//   const std::string text = ZHLN::Reflect::SerializeTOML(scene);
+//   const std::string text = ZHLN::ReflectTOML::SerializeTOML(scene);
 //   const auto         back = ZHLN::ReflectTOML::TryParse<Scene>(text);
 //
-// Same contract as extras/json/JSON.hpp -- field names come from the
+// Same contract as extras/json/JSONSchema.hpp -- field names come from the
 // themselves, so the type is the schema and there is no second definition to
 // drift -- with the differences TOML forces:
 //
@@ -409,14 +409,9 @@ auto Parse(std::string_view tomlText) -> T {
 
 } // namespace ReflectTOML
 
-namespace Reflect {
+namespace ReflectTOML {
 
 namespace detail {
-
-    using ZHLN::ReflectTOML::detail::FixedArray;
-    using ZHLN::ReflectTOML::detail::MapLike;
-    using ZHLN::ReflectTOML::detail::StringLike;
-    using ZHLN::ReflectTOML::detail::VectorLike;
 
     /// Serialises as a TOML table: [header] on its own, rather than inline
     /// after an `=`.
@@ -693,5 +688,5 @@ template <typename T>
     return out;
 }
 
-} // namespace Reflect
+} // namespace ReflectTOML
 } // namespace ZHLN

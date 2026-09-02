@@ -53,20 +53,20 @@
 // ============================================================================
 
 enum class LightingRTTestError : uint8_t {
-    EngineInitFailed[[= ZHLN::Description<"Failed to initialize headless Engine context for the lighting/raytracing test."> {}]] = 1,
-    RenderOutputBlank[[= ZHLN::Description<"Rendered frame is blank or could not be captured."> {}]],
-    TemporalFlickerDetected[[= ZHLN::Description<"A static fully-lit scene changed more frame-to-frame than the engine's own noise floor."> {}]],
-    LightCullingPopDetected[[= ZHLN::Description<"A point light inside the frustum/range lost its lighting contribution for a frame (cluster culling)."> {}]],
-    RayTracedShadowFailed[[= ZHLN::Description<"The ray-traced sun shadow did not appear, disappeared, or took out the whole frame."> {}]],
-    ReflectionMissing[[= ZHLN::Description<"The polished surface shows no reflection of the emissive object (RTR/SSR fell back to IBL)."> {}]],
-    ReflectionArtifacts[[= ZHLN::Description<"The reflected region contains blowout, ray-debris speckles, or flicker."> {}]],
-    MultiLightClusteringFailed[[= ZHLN::Description<"Multi-light clustered accumulation or chromatic blending mismatch detected."> {}]],
-    MultiEmissiveReflectionFailed[[= ZHLN::Description<"Multi-emissive source reflection analysis failed: missing spatial mirror correspondence or color "
-                                                       "fidelity."> {}]],
-    DenseCrossInteractionFailed[[= ZHLN::Description<"Dense multi-light & emissive interaction produced blowout, NaN/Inf, or lighting failure."> {}]],
-    DeviceLostDuringTest[[= ZHLN::Description<"The Vulkan device was lost repeatedly during the scenario; the engine hot-rebuild recovered, but the GPU was "
-                                              "not stable."> {}]],
-    ValidationErrorsRaised[[= ZHLN::Description<"The validation layer reported errors while rendering the lighting/raytracing frames."> {}]],
+    EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine context for the lighting/raytracing test."> {}) = 1,
+    RenderOutputBlank ZHLN_ANNOTATION(ZHLN::Description<"Rendered frame is blank or could not be captured."> {}),
+    TemporalFlickerDetected ZHLN_ANNOTATION(ZHLN::Description<"A static fully-lit scene changed more frame-to-frame than the engine's own noise floor."> {}),
+    LightCullingPopDetected ZHLN_ANNOTATION(ZHLN::Description<"A point light inside the frustum/range lost its lighting contribution for a frame (cluster culling)."> {}),
+    RayTracedShadowFailed ZHLN_ANNOTATION(ZHLN::Description<"The ray-traced sun shadow did not appear, disappeared, or took out the whole frame."> {}),
+    ReflectionMissing ZHLN_ANNOTATION(ZHLN::Description<"The polished surface shows no reflection of the emissive object (RTR/SSR fell back to IBL)."> {}),
+    ReflectionArtifacts ZHLN_ANNOTATION(ZHLN::Description<"The reflected region contains blowout, ray-debris speckles, or flicker."> {}),
+    MultiLightClusteringFailed ZHLN_ANNOTATION(ZHLN::Description<"Multi-light clustered accumulation or chromatic blending mismatch detected."> {}),
+    MultiEmissiveReflectionFailed ZHLN_ANNOTATION(ZHLN::Description<"Multi-emissive source reflection analysis failed: missing spatial mirror correspondence or color "
+                                                       "fidelity."> {}),
+    DenseCrossInteractionFailed ZHLN_ANNOTATION(ZHLN::Description<"Dense multi-light & emissive interaction produced blowout, NaN/Inf, or lighting failure."> {}),
+    DeviceLostDuringTest ZHLN_ANNOTATION(ZHLN::Description<"The Vulkan device was lost repeatedly during the scenario; the engine hot-rebuild recovered, but the GPU was "
+                                              "not stable."> {}),
+    ValidationErrorsRaised ZHLN_ANNOTATION(ZHLN::Description<"The validation layer reported errors while rendering the lighting/raytracing frames."> {}),
 };
 
 // ============================================================================

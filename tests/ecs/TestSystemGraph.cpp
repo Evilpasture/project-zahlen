@@ -13,9 +13,9 @@
 #include <thread>
 
 enum class SystemGraphTestError : uint8_t {
-    HazardMismatch[[= ZHLN::Description<"SystemGraph failed to detect a Read/Write or Write/Write component conflict."> {}]] = 1,
-    ExecutionOrderFailed[[= ZHLN::Description<"Systems were executed out of dependency order."> {}]],
-    ExternalWriteAnchorFailed[[= ZHLN::Description<"The external-write anchor did not register, or broke dispatch to its dependents."> {}]],
+    HazardMismatch ZHLN_ANNOTATION(ZHLN::Description<"SystemGraph failed to detect a Read/Write or Write/Write component conflict."> {}) = 1,
+    ExecutionOrderFailed ZHLN_ANNOTATION(ZHLN::Description<"Systems were executed out of dependency order."> {}),
+    ExternalWriteAnchorFailed ZHLN_ANNOTATION(ZHLN::Description<"The external-write anchor did not register, or broke dispatch to its dependents."> {}),
 };
 
 // Mock components for access hazard tracking

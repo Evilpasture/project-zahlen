@@ -17,7 +17,7 @@
 //     diagnostics.
 //
 //   * Annotated, formatted failures: WireError enumerators carry
-//     [[= ZHLN::Description<"..."> {}]] messages that double as
+//     ZHLN_ANNOTATION(ZHLN::Description<"..."> {}) messages that double as
 //     std::format strings. A Failure records the category, the byte offset,
 //     the wire path ("snapshot.objects[3].position") and the formatted
 //     details — plus the schema annotation of the offending field.
@@ -68,28 +68,28 @@ export namespace ZHLN::Wire {
 // ============================================================================
 
 enum class WireError : uint8_t {
-    Truncated[[= ZHLN::Description<"wire stream truncated: needed {} byte(s) at offset {} but only {} remain(s)"> {}]] = 1,
-    NonCanonicalVarint[[= ZHLN::Description<"non-canonical varint at offset {}: trailing zero group (use the shortest encoding)"> {}]],
-    VarintOverflow[[= ZHLN::Description<"varint at offset {} exceeds the 64-bit range"> {}]],
-    InvalidBoolean[[= ZHLN::Description<"boolean byte {} at offset {} is neither 0 nor 1"> {}]],
-    InvalidEnumValue[[= ZHLN::Description<"value {} is not a valid enumerator of '{}'"> {}]],
-    ValueOutOfRange[[= ZHLN::Description<"value {} is outside the permitted range [{}, {}]"> {}]],
-    StringTooLong[[= ZHLN::Description<"string of {} byte(s) exceeds the {} byte limit"> {}]],
-    FixedStringOverflow[[= ZHLN::Description<"string of {} byte(s) does not fit FixedString<{}> ({} usable characters)"> {}]],
-    CollectionTooLarge[[= ZHLN::Description<"collection of {} element(s) exceeds the {} element limit"> {}]],
-    ElementCountExceedsInput[[= ZHLN::Description<"collection claims {} element(s) but only {} byte(s) of wire data remain"> {}]],
-    BufferOverflow[[= ZHLN::Description<"byte limit of {} exceeded while writing {} additional byte(s)"> {}]],
-    AllocationFailed[[= ZHLN::Description<"allocation of {} byte(s) failed"> {}]],
-    UnsupportedType[[= ZHLN::Description<"type '{}' has no wire representation"> {}]],
-    TrailingBytes[[= ZHLN::Description<"{} trailing byte(s) remain after the value ({} byte(s) total)"> {}]],
-    ChecksumMismatch[[= ZHLN::Description<"CRC32 mismatch: computed 0x{:08x}, expected 0x{:08x}"> {}]],
-    DecompressionFailed[[= ZHLN::Description<"decompression failed: {}"> {}]],
-    CompressionFailed[[= ZHLN::Description<"compression failed: {}"> {}]],
-    InvalidFrame[[= ZHLN::Description<"malformed frame: {}"> {}]],
-    FrameTooLarge[[= ZHLN::Description<"frame length {} exceeds the {} byte stream limit"> {}]],
-    FrameLengthMismatch[[= ZHLN::Description<"frame header declares {} byte(s) but {} byte(s) were provided"> {}]],
-    UnknownMessageType[[= ZHLN::Description<"message type {} is not part of protocol version {}"> {}]],
-    ProtocolVersionMismatch[[= ZHLN::Description<"protocol version mismatch: message carries {}, client speaks {}"> {}]]
+    Truncated ZHLN_ANNOTATION(ZHLN::Description<"wire stream truncated: needed {} byte(s) at offset {} but only {} remain(s)"> {}) = 1,
+    NonCanonicalVarint ZHLN_ANNOTATION(ZHLN::Description<"non-canonical varint at offset {}: trailing zero group (use the shortest encoding)"> {}),
+    VarintOverflow ZHLN_ANNOTATION(ZHLN::Description<"varint at offset {} exceeds the 64-bit range"> {}),
+    InvalidBoolean ZHLN_ANNOTATION(ZHLN::Description<"boolean byte {} at offset {} is neither 0 nor 1"> {}),
+    InvalidEnumValue ZHLN_ANNOTATION(ZHLN::Description<"value {} is not a valid enumerator of '{}'"> {}),
+    ValueOutOfRange ZHLN_ANNOTATION(ZHLN::Description<"value {} is outside the permitted range [{}, {}]"> {}),
+    StringTooLong ZHLN_ANNOTATION(ZHLN::Description<"string of {} byte(s) exceeds the {} byte limit"> {}),
+    FixedStringOverflow ZHLN_ANNOTATION(ZHLN::Description<"string of {} byte(s) does not fit FixedString<{}> ({} usable characters)"> {}),
+    CollectionTooLarge ZHLN_ANNOTATION(ZHLN::Description<"collection of {} element(s) exceeds the {} element limit"> {}),
+    ElementCountExceedsInput ZHLN_ANNOTATION(ZHLN::Description<"collection claims {} element(s) but only {} byte(s) of wire data remain"> {}),
+    BufferOverflow ZHLN_ANNOTATION(ZHLN::Description<"byte limit of {} exceeded while writing {} additional byte(s)"> {}),
+    AllocationFailed ZHLN_ANNOTATION(ZHLN::Description<"allocation of {} byte(s) failed"> {}),
+    UnsupportedType ZHLN_ANNOTATION(ZHLN::Description<"type '{}' has no wire representation"> {}),
+    TrailingBytes ZHLN_ANNOTATION(ZHLN::Description<"{} trailing byte(s) remain after the value ({} byte(s) total)"> {}),
+    ChecksumMismatch ZHLN_ANNOTATION(ZHLN::Description<"CRC32 mismatch: computed 0x{:08x}, expected 0x{:08x}"> {}),
+    DecompressionFailed ZHLN_ANNOTATION(ZHLN::Description<"decompression failed: {}"> {}),
+    CompressionFailed ZHLN_ANNOTATION(ZHLN::Description<"compression failed: {}"> {}),
+    InvalidFrame ZHLN_ANNOTATION(ZHLN::Description<"malformed frame: {}"> {}),
+    FrameTooLarge ZHLN_ANNOTATION(ZHLN::Description<"frame length {} exceeds the {} byte stream limit"> {}),
+    FrameLengthMismatch ZHLN_ANNOTATION(ZHLN::Description<"frame header declares {} byte(s) but {} byte(s) were provided"> {}),
+    UnknownMessageType ZHLN_ANNOTATION(ZHLN::Description<"message type {} is not part of protocol version {}"> {}),
+    ProtocolVersionMismatch ZHLN_ANNOTATION(ZHLN::Description<"protocol version mismatch: message carries {}, client speaks {}"> {})
 };
 
 // ============================================================================
@@ -144,10 +144,10 @@ using Result = std::expected<T, Failure>;
 // Schema annotations
 // ============================================================================
 
-/// [[= ZHLN::Wire::Skip {}]] — the field is not part of the wire format.
+/// ZHLN_ANNOTATION(ZHLN::Wire::Skip {}) — the field is not part of the wire format.
 struct Skip {};
 
-/// [[= ZHLN::Wire::Range<Min, Max> {}]] — numeric bounds enforced on decode.
+/// ZHLN_ANNOTATION(ZHLN::Wire::Range<Min, Max> {}) — numeric bounds enforced on decode.
 template <auto MinValue, auto MaxValue>
 struct Range {
     static_assert(MinValue <= MaxValue, "ZHLN::Wire::Range: minValue must be <= maxValue");
@@ -155,7 +155,7 @@ struct Range {
     static constexpr auto maxValue = MaxValue;
 };
 
-/// [[= ZHLN::Wire::Version<N> {}]] — wire schema version of an annotated type.
+/// ZHLN_ANNOTATION(ZHLN::Wire::Version<N> {}) — wire schema version of an annotated type.
 template <uint32_t Value>
 struct Version {
     static constexpr uint32_t value = Value;
@@ -601,11 +601,17 @@ concept CustomCodable = requires(const T& value, T& out, Writer& writer, Reader&
 } // namespace ZHLN::Wire
 
 // ============================================================================
-// Type traits and encoding details (exported: reachable wherever the
-// templates below are instantiated)
+// Module-private helpers.
+//
+// These are declared in ZHLN::Wire *before* the exported namespace blocks,
+// so they are ordinary non-exported members of the module: importers can use
+// the exported templates below, but can never name these helpers. No detail
+// namespace is needed -- a declaration that is not in an export block is
+// internal by definition. tools/check_reflection_boundary.py fails the
+// configure step if a detail namespace is ever declared in a module unit.
 // ============================================================================
 
-export namespace ZHLN::Wire::detail {
+namespace ZHLN::Wire {
 
 template <typename T>
 struct AlwaysFalse: std::false_type {};
@@ -746,14 +752,29 @@ inline auto GetLE32(Reader& reader, uint32_t& out) -> Result<void> {
     return {};
 }
 
-inline constexpr bool ReflectionAvailable =
-#if defined(__cpp_impl_reflection) || (defined(__has_feature) && __has_feature(reflection))
-    true;
-#else
-    false;
-#endif
+// --- Schema annotation machinery -------------------------------------------
+// Range / Version are read through ZHLN::Reflect::AnnotationCountOf /
+// AnnotationTemplateArgument, which return plain values. A lambda-driven walk
+// (ForEachAnnotationType) cannot be instantiated across the module boundary:
+// its specialization is keyed on the caller's lambda type, and neither the
+// module's own TU nor the importer can define it (mold: undefined
+// ForEachAnnotationType<^^ClientHello::userId, ...> once Network.cppm
+// instantiates DecodeAggregate). The value queries fold just like
+// HasAnnotation / GetDescriptionText and emit no symbols.
+//
+// The first matching annotation wins, as before.
 
-} // namespace ZHLN::Wire::detail
+inline void AttachFieldNote(Failure& failure, std::string_view typeName, std::string_view fieldName, std::string_view description) {
+    if (!failure.note.empty()) {
+        return; // innermost annotation wins
+    }
+    failure.note = std::format("{}.{}", typeName, fieldName);
+    if (!description.empty()) {
+        failure.note += std::string(": ") + std::string(description);
+    }
+}
+
+} // namespace ZHLN::Wire (module-private helpers)
 
 // ============================================================================
 // Value dispatch (encode)
@@ -770,24 +791,24 @@ auto EncodeValue(const T& value, Writer& writer) -> Result<void> {
     } else if constexpr (std::same_as<Type, bool>) {
         return writer.PutByte(value ? 1 : 0);
     } else if constexpr (std::integral<Type>) {
-        if constexpr (std::signed_integral<Type> && !detail::ByteLike<Type>) {
-            return writer.PutUVar(detail::ZigzagEncode(static_cast<int64_t>(value)));
+        if constexpr (std::signed_integral<Type> && !ByteLike<Type>) {
+            return writer.PutUVar(ZigzagEncode(static_cast<int64_t>(value)));
         } else {
             using Unsigned = std::make_unsigned_t<Type>;
             return writer.PutUVar(static_cast<uint64_t>(static_cast<Unsigned>(value)));
         }
     } else if constexpr (std::floating_point<Type>) {
         if constexpr (sizeof(Type) == 4) {
-            return detail::PutLE32(writer, std::bit_cast<uint32_t>(value));
+            return PutLE32(writer, std::bit_cast<uint32_t>(value));
         } else if constexpr (sizeof(Type) == 8) {
-            return detail::PutLE64(writer, std::bit_cast<uint64_t>(value));
+            return PutLE64(writer, std::bit_cast<uint64_t>(value));
         } else {
-            static_assert(detail::AlwaysFalse<Type>::value, "ZHLN.Wire: only 32-bit and 64-bit floats are supported");
+            static_assert(AlwaysFalse<Type>::value, "ZHLN.Wire: only 32-bit and 64-bit floats are supported");
         }
     } else if constexpr (std::is_enum_v<Type>) {
         using Underlying = std::underlying_type_t<Type>;
         return EncodeValue(static_cast<Underlying>(value), writer);
-    } else if constexpr (detail::FixedStringLike<Type>) {
+    } else if constexpr (FixedStringLike<Type>) {
         return EncodeValue(static_cast<std::string_view>(value), writer);
     } else if constexpr (std::same_as<Type, std::string> || std::same_as<Type, std::string_view>) {
         const Result<void> length = writer.PutUVar(value.size());
@@ -796,14 +817,14 @@ auto EncodeValue(const T& value, Writer& writer) -> Result<void> {
         }
         const auto* raw = reinterpret_cast<const uint8_t*>(value.data());
         return writer.PutBytes({raw, value.size()});
-    } else if constexpr (detail::ByteBlob<Type>) {
+    } else if constexpr (ByteBlob<Type>) {
         const Result<void> length = writer.PutUVar(value.size());
         if (!length) {
             return length;
         }
         return writer.PutBytes({value.data(), value.size()});
-    } else if constexpr (detail::VectorLike<Type> || detail::SpanLike<Type>) {
-        using Element             = typename detail::SequenceTrait<Type>::element;
+    } else if constexpr (VectorLike<Type> || SpanLike<Type>) {
+        using Element             = typename SequenceTrait<Type>::element;
         const Result<void> length = writer.PutUVar(value.size());
         if (!length) {
             return length;
@@ -817,8 +838,8 @@ auto EncodeValue(const T& value, Writer& writer) -> Result<void> {
             }
         }
         return {};
-    } else if constexpr (detail::ArrayLike<Type>) {
-        if constexpr (detail::ByteLike<typename detail::ArrayTrait<Type>::element>) {
+    } else if constexpr (ArrayLike<Type>) {
+        if constexpr (ByteLike<typename ArrayTrait<Type>::element>) {
             const auto* raw = reinterpret_cast<const uint8_t*>(value.data());
             return writer.PutBytes({raw, value.size()});
         } else {
@@ -831,13 +852,13 @@ auto EncodeValue(const T& value, Writer& writer) -> Result<void> {
             }
             return {};
         }
-    } else if constexpr (detail::PairLike<Type>) {
+    } else if constexpr (PairLike<Type>) {
         const Result<void> first = EncodeValue(value.first, writer);
         if (!first) {
             return first;
         }
         return EncodeValue(value.second, writer);
-    } else if constexpr (detail::TupleLike<Type>) {
+    } else if constexpr (TupleLike<Type>) {
         Result<void> result {};
         [&]<size_t... Is>(std::index_sequence<Is...>) {
             ((result ? (result = EncodeValue(std::get<Is>(value), writer)) : result), ...);
@@ -845,7 +866,7 @@ auto EncodeValue(const T& value, Writer& writer) -> Result<void> {
         return result;
     } else if constexpr (std::is_array_v<Type>) {
         using Element = std::remove_extent_t<Type>;
-        if constexpr (detail::ByteLike<Element>) {
+        if constexpr (ByteLike<Element>) {
             const auto* raw = reinterpret_cast<const uint8_t*>(value);
             return writer.PutBytes({raw, std::extent_v<Type>});
         } else {
@@ -858,7 +879,7 @@ auto EncodeValue(const T& value, Writer& writer) -> Result<void> {
             }
             return {};
         }
-    } else if constexpr (detail::OptionalLike<Type>) {
+    } else if constexpr (OptionalLike<Type>) {
         if (value.has_value()) {
             const Result<void> presence = writer.PutByte(1);
             if (!presence) {
@@ -867,11 +888,11 @@ auto EncodeValue(const T& value, Writer& writer) -> Result<void> {
             return EncodeValue(*value, writer);
         }
         return writer.PutByte(0);
-    } else if constexpr (std::is_aggregate_v<Type> && detail::ReflectionAvailable) {
+    } else if constexpr (std::is_aggregate_v<Type> && ZHLN::Reflect::ReflectionAvailable) {
         return EncodeAggregate(value, writer);
     } else {
         static_assert(
-            detail::AlwaysFalse<Type>::value, "ZHLN.Wire: type has no wire representation. Add a ZHLN::Wire::Codec<T> specialization, "
+            AlwaysFalse<Type>::value, "ZHLN.Wire: type has no wire representation. Add a ZHLN::Wire::Codec<T> specialization, "
                                               "convert it to a wire-supported type, or build with a reflection-capable compiler."
         );
         return std::unexpected(writer.Fail(WireError::UnsupportedType, ZHLN::Reflect::TypeName<Type>()));
@@ -905,8 +926,8 @@ auto DecodeValue(T& out, Reader& reader) -> Result<void> {
         if (!res) {
             return res;
         }
-        if constexpr (std::signed_integral<Type> && !detail::ByteLike<Type>) {
-            const int64_t decoded = detail::ZigzagDecode(raw);
+        if constexpr (std::signed_integral<Type> && !ByteLike<Type>) {
+            const int64_t decoded = ZigzagDecode(raw);
             if (decoded < static_cast<int64_t>(std::numeric_limits<Type>::min()) || decoded > static_cast<int64_t>(std::numeric_limits<Type>::max())) {
                 return std::unexpected(reader.Fail(
                     WireError::ValueOutOfRange, decoded, static_cast<long long>(std::numeric_limits<Type>::min()),
@@ -925,7 +946,7 @@ auto DecodeValue(T& out, Reader& reader) -> Result<void> {
     } else if constexpr (std::floating_point<Type>) {
         if constexpr (sizeof(Type) == 4) {
             uint32_t           raw = 0;
-            const Result<void> res = detail::GetLE32(reader, raw);
+            const Result<void> res = GetLE32(reader, raw);
             if (!res) {
                 return res;
             }
@@ -933,14 +954,14 @@ auto DecodeValue(T& out, Reader& reader) -> Result<void> {
             return {};
         } else if constexpr (sizeof(Type) == 8) {
             uint64_t           raw = 0;
-            const Result<void> res = detail::GetLE64(reader, raw);
+            const Result<void> res = GetLE64(reader, raw);
             if (!res) {
                 return res;
             }
             out = std::bit_cast<Type>(raw);
             return {};
         } else {
-            static_assert(detail::AlwaysFalse<Type>::value, "ZHLN.Wire: only 32-bit and 64-bit floats are supported");
+            static_assert(AlwaysFalse<Type>::value, "ZHLN.Wire: only 32-bit and 64-bit floats are supported");
         }
     } else if constexpr (std::is_enum_v<Type>) {
         using Underlying = std::underlying_type_t<Type>;
@@ -949,14 +970,14 @@ auto DecodeValue(T& out, Reader& reader) -> Result<void> {
         if (!res) {
             return res;
         }
-        if constexpr (detail::ReflectionAvailable) {
+        if constexpr (ZHLN::Reflect::ReflectionAvailable) {
             if (!ZHLN::Reflect::EnumHasValue<Type>(static_cast<std::underlying_type_t<Type>>(raw))) {
                 return std::unexpected(reader.Fail(WireError::InvalidEnumValue, static_cast<unsigned long long>(raw), ZHLN::Reflect::TypeName<Type>()));
             }
         }
         out = static_cast<Type>(raw);
         return {};
-    } else if constexpr (detail::OptionalLike<Type>) {
+    } else if constexpr (OptionalLike<Type>) {
         uint8_t            presence = 0;
         const Result<void> res      = reader.GetByte(presence);
         if (!res) {
@@ -986,8 +1007,8 @@ auto DecodeValue(T& out, Reader& reader) -> Result<void> {
         }
         out.assign(reinterpret_cast<const char*>(bytes->data()), bytes->size());
         return {};
-    } else if constexpr (detail::FixedStringLike<Type>) {
-        constexpr size_t   kCapacity = detail::FixedStringTrait<Type>::capacity;
+    } else if constexpr (FixedStringLike<Type>) {
+        constexpr size_t   kCapacity = FixedStringTrait<Type>::capacity;
         uint64_t           length    = 0;
         const Result<void> lenRes    = reader.GetUVar(length);
         if (!lenRes) {
@@ -1042,8 +1063,8 @@ auto DecodeValue(T& out, Reader& reader) -> Result<void> {
             out.push_back(element);
         }
         return {};
-    } else if constexpr (detail::VectorLike<Type>) {
-        using Element             = typename detail::VectorTrait<Type>::element;
+    } else if constexpr (VectorLike<Type>) {
+        using Element             = typename VectorTrait<Type>::element;
         uint64_t           count  = 0;
         const Result<void> lenRes = reader.GetUVar(count);
         if (!lenRes) {
@@ -1069,8 +1090,8 @@ auto DecodeValue(T& out, Reader& reader) -> Result<void> {
             }
         }
         return {};
-    } else if constexpr (detail::ArrayLike<Type>) {
-        if constexpr (detail::ByteLike<typename detail::ArrayTrait<Type>::element>) {
+    } else if constexpr (ArrayLike<Type>) {
+        if constexpr (ByteLike<typename ArrayTrait<Type>::element>) {
             const auto bytes = reader.Take(out.size());
             if (!bytes) {
                 return std::unexpected(bytes.error());
@@ -1087,13 +1108,13 @@ auto DecodeValue(T& out, Reader& reader) -> Result<void> {
             }
             return {};
         }
-    } else if constexpr (detail::PairLike<Type>) {
+    } else if constexpr (PairLike<Type>) {
         const Result<void> first = DecodeValue(out.first, reader);
         if (!first) {
             return first;
         }
         return DecodeValue(out.second, reader);
-    } else if constexpr (detail::TupleLike<Type>) {
+    } else if constexpr (TupleLike<Type>) {
         Result<void> result {};
         [&]<size_t... Is>(std::index_sequence<Is...>) {
             ((result ? (result = DecodeValue(std::get<Is>(out), reader)) : result), ...);
@@ -1101,7 +1122,7 @@ auto DecodeValue(T& out, Reader& reader) -> Result<void> {
         return result;
     } else if constexpr (std::is_array_v<Type>) {
         using Element = std::remove_extent_t<Type>;
-        if constexpr (detail::ByteLike<Element>) {
+        if constexpr (ByteLike<Element>) {
             constexpr size_t kExtent = std::extent_v<Type>;
             const auto       bytes   = reader.Take(kExtent);
             if (!bytes) {
@@ -1120,11 +1141,11 @@ auto DecodeValue(T& out, Reader& reader) -> Result<void> {
             }
             return {};
         }
-    } else if constexpr (std::is_aggregate_v<Type> && detail::ReflectionAvailable) {
+    } else if constexpr (std::is_aggregate_v<Type> && ZHLN::Reflect::ReflectionAvailable) {
         return DecodeAggregate(out, reader);
     } else {
         static_assert(
-            detail::AlwaysFalse<Type>::value, "ZHLN.Wire: type has no wire representation. Add a ZHLN::Wire::Codec<T> specialization, "
+            AlwaysFalse<Type>::value, "ZHLN.Wire: type has no wire representation. Add a ZHLN::Wire::Codec<T> specialization, "
                                               "convert it to a wire-supported type, or build with a reflection-capable compiler."
         );
         return std::unexpected(reader.Fail(WireError::UnsupportedType, ZHLN::Reflect::TypeName<Type>()));
@@ -1134,141 +1155,55 @@ auto DecodeValue(T& out, Reader& reader) -> Result<void> {
 } // namespace ZHLN::Wire
 
 // ============================================================================
-// Reflection-driven aggregate encoding (C++26 static reflection)
+// Schema version and reflection-driven aggregate encoding
+//
+// The field walk, the member queries and the annotation iteration all come
+// from Zahlen/Core/Reflection.hpp; this module contains no reflection
+// tokens of its own. Without reflection those queries degrade to the
+// fallbacks in Reflection.hpp: the aggregate functions below compile, but
+// EncodeValue/DecodeValue only route here when ZHLN::Reflect::ReflectionAvailable
+// is true, so aggregates still require a hand-written Codec<T> specialization.
 // ============================================================================
 
-#if defined(__cpp_impl_reflection) || (defined(__has_feature) && __has_feature(reflection))
+export namespace ZHLN::Wire {
 
-export namespace ZHLN::Wire::detail {
-
-template <auto MemberInfo>
-consteval auto MemberSkipped() -> bool {
-    return ZHLN::Reflect::HasAnnotation<Skip, MemberInfo>();
-}
-
-template <auto MemberInfo>
-consteval auto MemberDescription() -> std::string_view {
-    return ZHLN::Reflect::GetDescriptionText<MemberInfo>();
-}
-
-struct RangeSpec {
-    bool        active {};
-    long double minValue {};
-    long double maxValue {};
-};
-
-template <auto MemberInfo, std::size_t Index>
-consteval auto ExtractRangeAt() -> RangeSpec {
-    constexpr auto annotations = ZHLN::Reflect::detail::AnnotationsOf<MemberInfo>();
-    constexpr auto type        = std::meta::dealias(std::meta::type_of(annotations[Index]));
-    if constexpr (std::meta::has_template_arguments(type)) {
-        if constexpr (std::meta::template_of(type) == ^^Range) {
-            using RangeType = typename[:type:];
-            return RangeSpec {
-                .active = true, .minValue = static_cast<long double>(RangeType::minValue), .maxValue = static_cast<long double>(RangeType::maxValue)
-            };
-        }
-    }
-    return RangeSpec {};
-}
-
-template <auto MemberInfo>
-consteval auto MemberRange() -> RangeSpec {
-    constexpr std::size_t count = ZHLN::Reflect::detail::AnnotationsOf<MemberInfo>().size();
-    RangeSpec             result {};
-    [&]<std::size_t... Is>(std::index_sequence<Is...>) -> auto {
-        (
-            [&] -> auto {
-                if (!result.active) {
-                    result = ExtractRangeAt<MemberInfo, Is>();
-                }
-            }(),
-            ...);
-    }(std::make_index_sequence<count>());
-    return result;
-}
-
-template <typename T, std::size_t Index>
-consteval auto ExtractVersionAt() -> std::optional<uint32_t> {
-    constexpr auto entity      = std::meta::dealias(^^std::remove_cvref_t<T>);
-    constexpr auto annotations = ZHLN::Reflect::detail::AnnotationsOf<entity>();
-    constexpr auto type        = std::meta::dealias(std::meta::type_of(annotations[Index]));
-    if constexpr (std::meta::has_template_arguments(type)) {
-        if constexpr (std::meta::template_of(type) == ^^Version) {
-            using VersionType = typename[:type:];
-            return VersionType::value;
-        }
-    }
-    return std::nullopt;
-}
-
-/// Wire schema version declared via [[= ZHLN::Wire::Version<N> {}]]; default 1.
+/// Wire schema version declared via ZHLN_ANNOTATION(ZHLN::Wire::Version<N> {}); default 1.
 template <typename T>
 consteval auto SchemaVersionOf() -> uint32_t {
-    constexpr auto        entity = std::meta::dealias(^^std::remove_cvref_t<T>);
-    constexpr std::size_t count  = ZHLN::Reflect::detail::AnnotationsOf<entity>().size();
-    uint32_t              result = 1;
-    [&]<std::size_t... Is>(std::index_sequence<Is...>) -> auto {
-        (
-            [&] -> auto {
-                if (result == 1) {
-                    if (auto version = ExtractVersionAt<T, Is>()) {
-                        result = *version;
-                    }
-                }
-            }(),
-            ...);
-    }(std::make_index_sequence<count>());
-    return result;
-}
-
-template <typename T>
-consteval auto HasBaseClasses() -> bool {
-    return !ZHLN::Reflect::BaseClasses<T>().empty();
-}
-
-inline void AttachFieldNote(Failure& failure, std::string_view typeName, std::string_view fieldName, std::string_view description) {
-    if (!failure.note.empty()) {
-        return; // innermost annotation wins
+    if constexpr (ZHLN::Reflect::AnnotationCountOf<Version, T>() > 0) {
+        return ZHLN::Reflect::AnnotationTemplateArgument<Version, T, 0, uint32_t>();
     }
-    failure.note = std::format("{}.{}", typeName, fieldName);
-    if (!description.empty()) {
-        failure.note += std::string(": ") + std::string(description);
-    }
+    return 1;
 }
-
-} // namespace ZHLN::Wire::detail
-
-export namespace ZHLN::Wire {
 
 template <typename T>
     requires std::is_aggregate_v<std::remove_cvref_t<T>>
 auto EncodeAggregate(const T& value, Writer& writer) -> Result<void> {
     using Type = std::remove_cvref_t<T>;
     static_assert(
-        !detail::HasBaseClasses<Type>(),
+        !ZHLN::Reflect::HasBases<Type>(),
         "ZHLN.Wire: aggregates with base classes are not wire-serializable; flatten the fields or add a Codec<T> specialization"
     );
 
     std::optional<Failure> failure;
-    [:ZHLN::Reflect::Expand(ZHLN::Reflect::detail::NonStaticDataMembers<Type>()):] >> [&]<auto member>() -> auto {
+    ZHLN::Reflect::ForEachDataMember<Type>([&]<auto member>() {
         if (failure.has_value()) {
             return;
         }
-        constexpr bool skipped = detail::MemberSkipped<member>();
-        if constexpr (skipped) {
+        if constexpr (ZHLN::Reflect::HasAnnotation<Skip, member>()) {
             return;
         } else {
-            constexpr std::string_view name = std::meta::has_identifier(member) ? std::meta::identifier_of(member) : "<anonymous>";
-            const PathScope            scope(writer.Path(), name);
-            const Result<void>         res = writer.Put(value.[:member:]);
+            constexpr std::string_view name        = ZHLN::Reflect::MemberName<member>();
+            constexpr std::string_view displayName = name.empty() ? "<anonymous>" : name;
+            const PathScope            scope(writer.Path(), displayName);
+            const Result<void>         res = writer.Put(ZHLN::Reflect::MemberValue<member>(value));
             if (!res) {
                 Failure failing = std::move(res).error();
-                detail::AttachFieldNote(failing, ZHLN::Reflect::TypeName<Type>(), name, detail::MemberDescription<member>());
+                AttachFieldNote(failing, ZHLN::Reflect::TypeName<Type>(), displayName, ZHLN::Reflect::GetDescriptionText<member>());
                 failure = std::move(failing);
             }
         }
-    };
+    });
     if (failure.has_value()) {
         return std::unexpected(std::move(*failure));
     }
@@ -1280,49 +1215,55 @@ template <typename T>
 auto DecodeAggregate(T& out, Reader& reader) -> Result<void> {
     using Type = std::remove_cvref_t<T>;
     static_assert(
-        !detail::HasBaseClasses<Type>(),
+        !ZHLN::Reflect::HasBases<Type>(),
         "ZHLN.Wire: aggregates with base classes are not wire-serializable; flatten the fields or add a Codec<T> specialization"
     );
 
     std::optional<Failure> failure;
-    [:ZHLN::Reflect::Expand(ZHLN::Reflect::detail::NonStaticDataMembers<Type>()):] >> [&]<auto member>() -> auto {
+    ZHLN::Reflect::ForEachDataMember<Type>([&]<auto member>() {
         if (failure.has_value()) {
             return;
         }
-        constexpr bool skipped = detail::MemberSkipped<member>();
-        if constexpr (skipped) {
+        if constexpr (ZHLN::Reflect::HasAnnotation<Skip, member>()) {
             return;
         } else {
-            using Field                     = typename[:std::meta::type_of(member):];
-            constexpr std::string_view name = std::meta::has_identifier(member) ? std::meta::identifier_of(member) : "<anonymous>";
+            // Member type via MemberValue (not ZHLN::Reflect::MemberType):
+            // the alias's declaration contains a spliced type and GCC's module
+            // merger cannot merge such a declaration across the Wire/Network
+            // boundary ("conflicting imported declaration"), even when the two
+            // copies are textually identical.
+            using Field                     = std::remove_cvref_t<decltype(ZHLN::Reflect::MemberValue<member>(std::declval<Type&>()))>;
+            constexpr std::string_view name        = ZHLN::Reflect::MemberName<member>();
+            constexpr std::string_view displayName = name.empty() ? "<anonymous>" : name;
 
-            if constexpr (std::same_as<Field, std::string_view> || detail::SpanLike<Field>) {
+            if constexpr (std::same_as<Field, std::string_view> || SpanLike<Field>) {
                 static_assert(
-                    detail::AlwaysFalse<Field>::value, "ZHLN.Wire: string_view/span members are write-only; use std::string, FixedString or a "
+                    AlwaysFalse<Field>::value, "ZHLN.Wire: string_view/span members are write-only; use std::string, FixedString or a "
                                                        "resizable container in decodable messages"
                 );
             } else {
-                const PathScope scope(reader.Path(), name);
-                Result<void>    res = reader.Get(out.[:member:]);
+                const PathScope scope(reader.Path(), displayName);
+                Result<void>    res = reader.Get(ZHLN::Reflect::MemberValue<member>(out));
                 if (res) {
                     if constexpr (std::is_arithmetic_v<Field>) {
-                        constexpr auto range = detail::MemberRange<member>();
-                        if constexpr (range.active) {
-                            const long double current = static_cast<long double>(out.[:member:]);
-                            if (current < range.minValue || current > range.maxValue) {
-                                res = std::unexpected(reader.Fail(WireError::ValueOutOfRange, current, range.minValue, range.maxValue));
+                        if constexpr (ZHLN::Reflect::AnnotationCountOf<Range, member>() > 0) {
+                            constexpr long double minValue = ZHLN::Reflect::AnnotationTemplateArgument<Range, member, 0, long double>();
+                            constexpr long double maxValue = ZHLN::Reflect::AnnotationTemplateArgument<Range, member, 1, long double>();
+                            const long double current = static_cast<long double>(ZHLN::Reflect::MemberValue<member>(out));
+                            if (current < minValue || current > maxValue) {
+                                res = std::unexpected(reader.Fail(WireError::ValueOutOfRange, current, minValue, maxValue));
                             }
                         }
                     }
                 }
                 if (!res) {
                     Failure failing = std::move(res).error();
-                    detail::AttachFieldNote(failing, ZHLN::Reflect::TypeName<Type>(), name, detail::MemberDescription<member>());
+                    AttachFieldNote(failing, ZHLN::Reflect::TypeName<Type>(), displayName, ZHLN::Reflect::GetDescriptionText<member>());
                     failure = std::move(failing);
                 }
             }
         }
-    };
+    });
     if (failure.has_value()) {
         return std::unexpected(std::move(*failure));
     }
@@ -1330,33 +1271,6 @@ auto DecodeAggregate(T& out, Reader& reader) -> Result<void> {
 }
 
 } // namespace ZHLN::Wire
-
-#else
-
-export namespace ZHLN::Wire {
-
-// Reflection-free fallback: aggregates require hand-written Codec<T> specializations.
-template <typename T>
-auto EncodeAggregate(const T& /*value*/, Writer& writer) -> Result<void> {
-    static_assert(
-        detail::AlwaysFalse<T>::value, "ZHLN.Wire: reflected aggregate serialization requires a compiler with C++26 static reflection "
-                                       "(__cpp_impl_reflection); provide a Codec<T> specialization instead"
-    );
-    return std::unexpected(writer.Fail(WireError::UnsupportedType, ZHLN::Reflect::TypeName<T>()));
-}
-
-template <typename T>
-auto DecodeAggregate(T& /*out*/, Reader& reader) -> Result<void> {
-    static_assert(
-        detail::AlwaysFalse<T>::value, "ZHLN.Wire: reflected aggregate serialization requires a compiler with C++26 static reflection "
-                                       "(__cpp_impl_reflection); provide a Codec<T> specialization instead"
-    );
-    return std::unexpected(reader.Fail(WireError::UnsupportedType, ZHLN::Reflect::TypeName<T>()));
-}
-
-} // namespace ZHLN::Wire
-
-#endif
 
 // ============================================================================
 // Convenience API + out-of-line typed entry points
@@ -1402,289 +1316,33 @@ template <typename T>
 } // namespace ZHLN::Wire
 
 // ============================================================================
-// CRC32 (IEEE 802.3, reflected) — used by the network frame codec
+// CRC32 (IEEE 802.3, reflected) + block compression (mini-LZ4)
+//
+// Implementations live in the module implementation unit
+// extras/Network/Wire.cpp (this unit is the interface: exported declarations
+// and templates only). Exporting a definition in this unit would keep the
+// bodies in the interface; the .cpp keeps the non-template runtime code out
+// of the BMI and away from both compilers' module merging.
 // ============================================================================
 
 export namespace ZHLN::Wire::Checksum {
 
-namespace detail {
-consteval auto MakeCrcTable() {
-    std::array<uint32_t, 256> table {};
-    for (uint32_t index = 0; index < 256; ++index) {
-        uint32_t value = index;
-        for (int bit = 0; bit < 8; ++bit) {
-            value = (value & 1u) != 0 ? (0xEDB88320u ^ (value >> 1)) : (value >> 1);
-        }
-        table[index] = value;
-    }
-    return table;
-}
-} // namespace detail
-
-inline constexpr auto kCrcTable = detail::MakeCrcTable();
-
-[[nodiscard]] inline auto Crc32(std::span<const uint8_t> data) noexcept -> uint32_t {
-    uint32_t crc = 0xFFFFFFFFu;
-    for (const uint8_t byte: data) {
-        crc = kCrcTable[(crc ^ byte) & 0xFFu] ^ (crc >> 8);
-    }
-    return crc ^ 0xFFFFFFFFu;
-}
+[[nodiscard]] auto Crc32(std::span<const uint8_t> data) noexcept -> uint32_t;
 
 } // namespace ZHLN::Wire::Checksum
-
-// ============================================================================
-// Block compression — compact LZ77 ("mini-LZ4"), dependency-free
-//
-// Token stream (mirrors the LZ4 block layout):
-//   token byte: high nibble = literal length (15 = extended), low nibble =
-//   match length - 4 (15 = extended). Then the literal bytes, then — unless
-//   this is the final sequence — a 2-byte little-endian back-reference offset
-//   in [1, 65535] and the extended match length bytes. The last sequence of
-//   a block contains literals only. Length extensions add 255 per byte while
-//   the byte equals 255.
-// ============================================================================
 
 export namespace ZHLN::Wire::Compression {
 
 inline constexpr size_t WINDOW_SIZE = 64 * 1024;
 inline constexpr size_t MIN_MATCH   = 4;
 inline constexpr size_t MAX_MATCH   = 65535;
-inline constexpr size_t HASH_LOG    = 12;
-inline constexpr size_t HASH_SIZE   = 1u << HASH_LOG;
 
 /// Worst-case encoded size (everything literal, every length extended).
-[[nodiscard]] inline auto CompressBound(size_t rawSize) noexcept -> size_t {
+[[nodiscard]] inline constexpr auto CompressBound(size_t rawSize) noexcept -> size_t {
     return rawSize + (rawSize / 255) + 16;
 }
 
-namespace detail {
-
-inline auto Hash4(std::span<const uint8_t> data, size_t index) noexcept -> uint32_t {
-    const uint32_t value = static_cast<uint32_t>(data[index]) | (static_cast<uint32_t>(data[index + 1]) << 8) | (static_cast<uint32_t>(data[index + 2]) << 16) |
-                           (static_cast<uint32_t>(data[index + 3]) << 24);
-    return (value * 2654435761u) >> (32 - HASH_LOG);
-}
-
-} // namespace detail
-
-[[nodiscard]] auto Compress(std::span<const uint8_t> raw, size_t maxOutput = DEFAULT_MAX_MESSAGE_BYTES) -> Result<std::vector<uint8_t>> {
-    if (raw.empty()) {
-        return std::vector<uint8_t> {0x00};
-    }
-    if (CompressBound(raw.size()) > maxOutput) {
-        return std::unexpected(
-            Failure {
-                .code    = ZHLN::Error(WireError::CompressionFailed),
-                .details = ZHLN::Reflect::FormatEnumMessage(
-                    WireError::CompressionFailed, std::format("input of {} byte(s) exceeds the {} byte output limit", raw.size(), maxOutput)
-                )
-            }
-        );
-    }
-
-    Buffer output(CompressBound(raw.size()));
-    // 0xFFFFFFFF marks an empty slot; position 0 is a legitimate candidate.
-    std::vector<uint32_t> table(HASH_SIZE, 0xFFFFFFFFu);
-
-    const auto emitLength = [&output](size_t length) -> Result<void> {
-        while (length >= 255) {
-            const Result<void> res = output.AppendByte(255);
-            if (!res) {
-                return res;
-            }
-            length -= 255;
-        }
-        return output.AppendByte(static_cast<uint8_t>(length));
-    };
-
-    const auto emitLiterals = [&output, &raw](size_t begin, size_t end) -> Result<void> { return output.Append(raw.subspan(begin, end - begin)); };
-
-    size_t anchor   = 0; // start of the pending literal run
-    size_t position = 0;
-
-    while (position + MIN_MATCH <= raw.size()) {
-        const uint32_t hash      = detail::Hash4(raw, position);
-        const uint32_t candidate = table[hash];
-        table[hash]              = static_cast<uint32_t>(position);
-
-        // Offsets are stored as 16-bit values in [1, 65535]; WINDOW_SIZE itself is not representable.
-        const bool usable = candidate != 0xFFFFFFFFu && candidate < position && (position - candidate) < WINDOW_SIZE &&
-                            std::memcmp(raw.data() + candidate, raw.data() + position, MIN_MATCH) == 0;
-        if (!usable) {
-            ++position;
-            continue;
-        }
-
-        // Extend the match as far as it actually goes.
-        size_t matchLength = MIN_MATCH;
-        while (matchLength < MAX_MATCH && position + matchLength < raw.size() && raw[candidate + matchLength] == raw[position + matchLength]) {
-            ++matchLength;
-        }
-
-        const size_t  literalLength = position - anchor;
-        const size_t  matchToken    = matchLength - MIN_MATCH;
-        const uint8_t token         = static_cast<uint8_t>(((literalLength < 15 ? literalLength : 15) << 4) | (matchToken < 15 ? matchToken : 15));
-
-        Result<void> res = output.AppendByte(token);
-        if (res && literalLength >= 15) {
-            res = emitLength(literalLength - 15);
-        }
-        if (res) {
-            res = emitLiterals(anchor, position);
-        }
-        if (res) {
-            const size_t offset = position - candidate;
-            res                 = output.AppendByte(static_cast<uint8_t>(offset & 0xFFu));
-            if (res) {
-                res = output.AppendByte(static_cast<uint8_t>((offset >> 8) & 0xFFu));
-            }
-        }
-        if (res && matchToken >= 15) {
-            res = emitLength(matchToken - 15);
-        }
-        if (!res) {
-            return std::unexpected(res.error());
-        }
-
-        anchor   = position + matchLength;
-        position = anchor;
-    }
-
-    // Final literal-only sequence.
-    const size_t literalLength = raw.size() - anchor;
-    Result<void> res           = output.AppendByte(static_cast<uint8_t>((literalLength < 15 ? literalLength : 15) << 4));
-    if (res && literalLength >= 15) {
-        res = emitLength(literalLength - 15);
-    }
-    if (res) {
-        res = emitLiterals(anchor, raw.size());
-    }
-    if (!res) {
-        return std::unexpected(res.error());
-    }
-
-    const auto bytes = output.Data();
-    return std::vector<uint8_t>(bytes.begin(), bytes.end());
-}
-
-[[nodiscard]] auto Decompress(std::span<const uint8_t> compressed, size_t maxDecompressed) -> Result<std::vector<uint8_t>> {
-    // maxDecompressed == 0 means "no explicit cap".
-    std::vector<uint8_t> out;
-    if (maxDecompressed != 0) {
-        out.reserve(maxDecompressed < (1u << 20) ? maxDecompressed : (1u << 20));
-    }
-
-    const auto fits = [&](size_t additional) -> bool { return maxDecompressed == 0 || out.size() + additional <= maxDecompressed; };
-
-    const auto readLength = [&](size_t& position, size_t base) -> Result<size_t> {
-        size_t length = base;
-        while (true) {
-            if (position >= compressed.size()) {
-                return std::unexpected(
-                    Failure {
-                        .code    = ZHLN::Error(WireError::DecompressionFailed),
-                        .details = ZHLN::Reflect::FormatEnumMessage(WireError::DecompressionFailed, "truncated length extension")
-                    }
-                );
-            }
-            const uint8_t byte = compressed[position];
-            ++position;
-            length += byte;
-            if (byte != 255) {
-                return length;
-            }
-        }
-    };
-
-    size_t position = 0;
-    while (position < compressed.size()) {
-        const uint8_t token = compressed[position];
-        ++position;
-
-        size_t literalLength = token >> 4;
-        if (literalLength == 15) {
-            const auto extended = readLength(position, 15);
-            if (!extended) {
-                return std::unexpected(extended.error());
-            }
-            literalLength = *extended;
-        }
-        if (literalLength > compressed.size() - position) {
-            return std::unexpected(
-                Failure {
-                    .code    = ZHLN::Error(WireError::DecompressionFailed),
-                    .details = ZHLN::Reflect::FormatEnumMessage(
-                        WireError::DecompressionFailed, std::format("literal run of {} byte(s) at input offset {} overruns the block", literalLength, position)
-                    )
-                }
-            );
-        }
-        if (!fits(literalLength)) {
-            return std::unexpected(
-                Failure {
-                    .code    = ZHLN::Error(WireError::DecompressionFailed),
-                    .details = ZHLN::Reflect::FormatEnumMessage(
-                        WireError::DecompressionFailed, std::format("decompressed size would exceed the {} byte limit", maxDecompressed)
-                    )
-                }
-            );
-        }
-        out.insert(
-            out.end(), compressed.begin() + static_cast<std::ptrdiff_t>(position), compressed.begin() + static_cast<std::ptrdiff_t>(position + literalLength)
-        );
-        position += literalLength;
-
-        if (position == compressed.size()) {
-            break; // final sequence: literals only
-        }
-        if (compressed.size() - position < 2) {
-            return std::unexpected(
-                Failure {
-                    .code    = ZHLN::Error(WireError::DecompressionFailed),
-                    .details = ZHLN::Reflect::FormatEnumMessage(WireError::DecompressionFailed, "truncated match offset")
-                }
-            );
-        }
-        const size_t offset = static_cast<size_t>(compressed[position]) | (static_cast<size_t>(compressed[position + 1]) << 8);
-        position += 2;
-        if (offset == 0 || offset > out.size()) {
-            return std::unexpected(
-                Failure {
-                    .code    = ZHLN::Error(WireError::DecompressionFailed),
-                    .details = ZHLN::Reflect::FormatEnumMessage(
-                        WireError::DecompressionFailed, std::format("back-reference offset {} is out of range ({} byte(s) produced so far)", offset, out.size())
-                    )
-                }
-            );
-        }
-
-        size_t matchLength = static_cast<size_t>(token & 0x0Fu) + MIN_MATCH;
-        if ((token & 0x0Fu) == 15) {
-            const auto extended = readLength(position, 15);
-            if (!extended) {
-                return std::unexpected(extended.error());
-            }
-            matchLength = *extended + MIN_MATCH;
-        }
-        if (!fits(matchLength)) {
-            return std::unexpected(
-                Failure {
-                    .code    = ZHLN::Error(WireError::DecompressionFailed),
-                    .details = ZHLN::Reflect::FormatEnumMessage(
-                        WireError::DecompressionFailed, std::format("decompressed size would exceed the {} byte limit", maxDecompressed)
-                    )
-                }
-            );
-        }
-
-        size_t source = out.size() - offset;
-        for (size_t index = 0; index < matchLength; ++index) {
-            out.push_back(out[source]); // overlapping copies replicate runs, exactly like LZ4
-            ++source;
-        }
-    }
-    return out;
-}
+[[nodiscard]] auto Compress(std::span<const uint8_t> raw, size_t maxOutput = DEFAULT_MAX_MESSAGE_BYTES) -> Result<std::vector<uint8_t>>;
+[[nodiscard]] auto Decompress(std::span<const uint8_t> compressed, size_t maxDecompressed) -> Result<std::vector<uint8_t>>;
 
 } // namespace ZHLN::Wire::Compression

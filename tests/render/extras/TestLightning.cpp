@@ -17,10 +17,10 @@
 import ZHLN.Lightning;
 
 enum class LightningTestError : uint32_t {
-    StrikeSpawnFailed[[= ZHLN::Description<"Lightning::Spawn failed to instantiate ECS entity and flash lights.">{}]] = 1,
-    StrikeLifecycleDesync[[= ZHLN::Description<"Lightning strike phase progression (Leader -> Stroke -> Dissipate) failed to complete.">{}]],
-    AmbienceFlashNotRestored[[= ZHLN::Description<"Global ambient exposure was not cleanly restored to baseline after bolt expiration.">{}]],
-    SubEntityMemoryLeak[[= ZHLN::Description<"Point-light flash entities were leaked after strike expiration.">{}]],
+    StrikeSpawnFailed ZHLN_ANNOTATION(ZHLN::Description<"Lightning::Spawn failed to instantiate ECS entity and flash lights.">{}) = 1,
+    StrikeLifecycleDesync ZHLN_ANNOTATION(ZHLN::Description<"Lightning strike phase progression (Leader -> Stroke -> Dissipate) failed to complete.">{}),
+    AmbienceFlashNotRestored ZHLN_ANNOTATION(ZHLN::Description<"Global ambient exposure was not cleanly restored to baseline after bolt expiration.">{}),
+    SubEntityMemoryLeak ZHLN_ANNOTATION(ZHLN::Description<"Point-light flash entities were leaked after strike expiration.">{}),
 };
 
 struct LightningTestSuite {

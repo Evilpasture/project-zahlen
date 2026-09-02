@@ -35,8 +35,7 @@ def get_called_function_name(call_node):
 
 def unwrap_type(type_obj):
     """
-    Recursively strips pointer (*), lvalue-ref (&), and rvalue-ref (&&) layers
-    to obtain the underlying canonical class/struct/enum type.
+    Recursively strips pointer (*), lvalue-ref (&), and rvalue-ref (&&) layers.
     Returns: (unwrapped_canonical_type, is_pointer_type)
     """
     t = type_obj.get_canonical()
@@ -56,27 +55,53 @@ def unwrap_type(type_obj):
 
 def clean_type_spelling(spelling):
     """Strips C++ type keywords to yield clean fully-qualified C++ type names."""
-    for prefix in ["enum class ", "enum ", "struct ", "class "]:
+    if not spelling:
+        return ""
+    for prefix in ["enum class ", "enum ", "struct ", "class ", "const ", "volatile "]:
         if spelling.startswith(prefix):
             spelling = spelling[len(prefix) :]
     return spelling.strip()
 
 
-def is_target_type(clean_name):
-    """Filters for engine types to avoid generating invalid specializations for std/internal types."""
-    if not clean_name:
-        return False
-    # Exclude VkResult to prevent precompiled header template instantiation conflicts
-    if clean_name.startswith("ZHLN::") or clean_name.startswith("ZHLN_"):
-        return True
-    return False
+def get_template_argument_type(node):
+    """Finds the first explicit template argument type for a template function call."""
+    for child in node.get_children():
+        if child.kind == CursorKind.TYPE_REF:
+            return child.type
+        for sub in child.get_children():
+            if sub.kind == CursorKind.TYPE_REF:
+                return sub.type
+            for sub2 in sub.get_children():
+                if sub2.kind == CursorKind.TYPE_REF:
+                    return sub2.type
+    return None
+
+
+def get_nested_types(type_obj):
+    """Extracts all nested struct/class type names within a container struct."""
+    unwrapped_type, _ = unwrap_type(type_obj)
+    decl_cursor = unwrapped_type.get_declaration()
+    nested = []
+
+    for child in decl_cursor.get_children():
+        if (
+            child.kind
+            in (
+                CursorKind.STRUCT_DECL,
+                CursorKind.CLASS_DECL,
+            )
+            and child.is_definition()
+        ):
+            raw_type = child.type.get_canonical().spelling
+            clean_name = clean_type_spelling(raw_type)
+            if clean_name and "<" not in clean_name:
+                nested.append(clean_name)
+
+    return nested
 
 
 def get_struct_fields(type_obj):
-    """
-    Recursively extracts all PUBLIC field names from a type declaration and its
-    base classes using Clang's Type and Cursor hierarchy.
-    """
+    """Recursively extracts all PUBLIC field names from a type declaration and base classes."""
     unwrapped_type, _ = unwrap_type(type_obj)
     decl_cursor = unwrapped_type.get_declaration()
     fields = []
@@ -116,175 +141,7 @@ def get_enum_constants(type_obj):
 
 
 # ==============================================================================
-# 2. GLOBAL AST REFLECTION COLLECTOR (HANDLES TEMPLATES & HEADERS)
-# ==============================================================================
-
-
-def collect_enums(cursor, enums_dict, visited=None):
-    """Scans the Translation Unit for all target enum definitions to generate specializations."""
-    if visited is None:
-        visited = set()
-    if cursor.hash in visited:
-        return
-    visited.add(cursor.hash)
-
-    try:
-        kind = cursor.kind
-    except ValueError:
-        return
-
-    if kind == CursorKind.ENUM_DECL and cursor.is_definition():
-        raw_type = cursor.type.get_canonical().spelling
-        clean_name = clean_type_spelling(raw_type)
-        if is_target_type(clean_name):
-            constants = []
-            seen_values = set()
-            for child in cursor.get_children():
-                if child.kind == CursorKind.ENUM_CONSTANT_DECL:
-                    val = child.enum_value
-                    if val not in seen_values:
-                        seen_values.add(val)
-                        constants.append(child.spelling)
-            if constants and clean_name not in enums_dict:
-                enums_dict[clean_name] = (cursor.spelling, constants)
-
-    for child in cursor.get_children():
-        collect_enums(child, enums_dict, visited)
-
-
-def collect_structs(cursor, structs_dict, visited=None):
-    """Scans the Translation Unit for target struct/class definitions for TypeName<T>."""
-    if visited is None:
-        visited = set()
-    if cursor.hash in visited:
-        return
-    visited.add(cursor.hash)
-
-    try:
-        kind = cursor.kind
-    except ValueError:
-        return
-
-    if (
-        kind in (CursorKind.STRUCT_DECL, CursorKind.CLASS_DECL)
-        and cursor.is_definition()
-    ):
-        raw_type = cursor.type.get_canonical().spelling
-        clean_name = clean_type_spelling(raw_type)
-        if is_target_type(clean_name):
-            if clean_name not in structs_dict:
-                structs_dict[clean_name] = cursor.spelling
-
-    for child in cursor.get_children():
-        collect_structs(child, structs_dict, visited)
-
-
-def generate_reflection_specializations(enums_dict, structs_dict):
-    """
-    Generates explicit C++ template specializations.
-    Splits them into:
-      - external_specs: Prepended at offset 0 (with required headers)
-      - internal_specs: Inserted at insert_pos (after main includes)
-    """
-    external_lines = []
-    internal_lines = []
-
-    # Inject VkResult at the very beginning of the file to prevent PCH pre-instantiation conflicts
-    if "VkResult" in enums_dict:
-        external_lines.append("#include <vulkan/vulkan.h>")
-        external_lines.append("namespace ZHLN::Reflect {")
-
-        _, constants = enums_dict["VkResult"]
-        external_lines.append("template <>")
-        external_lines.append(
-            "constexpr std::string_view EnumToString<VkResult>(VkResult __val) {"
-        )
-        external_lines.append("    switch(__val) {")
-        for const_name in constants:
-            external_lines.append(
-                f'        case VkResult::{const_name}: return "{const_name}";'
-            )
-        external_lines.append('        default: return "Unknown";')
-        external_lines.append("    }")
-        external_lines.append("}")
-
-        external_lines.append("template <>")
-        external_lines.append("consteval std::string_view TypeName<VkResult>() {")
-        external_lines.append('    return "VkResult";')
-        external_lines.append("}")
-        external_lines.append("} // namespace ZHLN::Reflect\n")
-
-    # Process internal engine types (must reside after main includes)
-    internal_lines.append(
-        "\n\n// --- AUTOMATICALLY GENERATED ZHLN REFLECTION SPECIALIZATIONS ---"
-    )
-    internal_lines.append("namespace ZHLN::Reflect {")
-
-    has_internal = False
-    for enum_full_name, (short_name, constants) in enums_dict.items():
-        if enum_full_name == "VkResult":
-            continue
-        has_internal = True
-        internal_lines.append("template <>")
-        internal_lines.append(
-            f"constexpr std::string_view EnumToString<{enum_full_name}>({enum_full_name} __val) {{"
-        )
-        internal_lines.append("    switch(__val) {")
-        for const_name in constants:
-            internal_lines.append(
-                f'        case {enum_full_name}::{const_name}: return "{const_name}";'
-            )
-        internal_lines.append('        default: return "Unknown";')
-        internal_lines.append("    }")
-        internal_lines.append("}")
-
-        internal_lines.append("template <>")
-        internal_lines.append(
-            f"consteval std::string_view TypeName<{enum_full_name}>() {{"
-        )
-        internal_lines.append(f'    return "{short_name}";')
-        internal_lines.append("}")
-
-    for struct_full_name, short_name in structs_dict.items():
-        has_internal = True
-        internal_lines.append("template <>")
-        internal_lines.append(
-            f"consteval std::string_view TypeName<{struct_full_name}>() {{"
-        )
-        internal_lines.append(f'    return "{short_name}";')
-        internal_lines.append("}")
-
-    internal_lines.append("} // namespace ZHLN::Reflect\n")
-
-    external_specs = "\n".join(external_lines) if external_lines else ""
-    internal_specs = "\n".join(internal_lines) if has_internal else ""
-
-    return external_specs, internal_specs
-
-
-def find_first_declaration_offset(tu, input_abspath, file_size) -> int:
-    """Finds the character offset of the first actual C++ declaration in the main file using pure AST."""
-    first_offset = [file_size]
-
-    def traverse(node):
-        if (
-            node.location.file
-            and os.path.abspath(node.location.file.name) == input_abspath
-        ):
-            offset = node.extent.start.offset
-            if offset < first_offset[0]:
-                first_offset[0] = offset
-            return  # Found root of this branch, do not recurse deeper
-
-        for child in node.get_children():
-            traverse(child)
-
-    traverse(tu.cursor)
-    return first_offset[0] if first_offset[0] < file_size else 0
-
-
-# ==============================================================================
-# 3. AST TRANSFORMERS (INLINE CALL EXPR REWRITING)
+# 2. AST TRANSFORMERS (INLINE CALL EXPR REWRITING)
 # ==============================================================================
 
 
@@ -357,6 +214,54 @@ def transform_ForEachFieldWithName(node, source_code):
     return "\n".join(code)
 
 
+def transform_ForEachFieldInfo(node, source_code):
+    """Transforms ForEachFieldInfo<T>(fn) into unrolled calls with field names and offsetof."""
+    args = list(node.get_arguments())
+    if len(args) < 1:
+        return None
+
+    func_text = get_node_text(args[0], source_code)
+    target_type = get_template_argument_type(node)
+    if target_type is None:
+        return None
+
+    unwrapped_type, _ = unwrap_type(target_type)
+    type_name = clean_type_spelling(unwrapped_type.get_canonical().spelling)
+    fields = get_struct_fields(target_type)
+
+    code = ["[&]() {", f"    auto&& __fn = {func_text};"]
+    for field in fields:
+        code.append(
+            f'    __fn.template operator()<decltype({type_name}::{field})>(std::string_view("{field}"), offsetof({type_name}, {field}));'
+        )
+    code.append("}()")
+
+    return "\n".join(code)
+
+
+def transform_ForEachNestedType(node, source_code):
+    """Transforms ForEachNestedType<Container>(fn) into unrolled calls for each nested struct."""
+    args = list(node.get_arguments())
+    if len(args) < 1:
+        return None
+
+    func_text = get_node_text(args[0], source_code)
+    target_type = get_template_argument_type(node)
+    if target_type is None:
+        return None
+
+    nested_types = get_nested_types(target_type)
+    if not nested_types:
+        return None
+
+    code = ["[&]() {", f"    auto&& __fn = {func_text};"]
+    for t in nested_types:
+        code.append(f"    __fn.template operator()<{t}>();")
+    code.append("}()")
+
+    return "\n".join(code)
+
+
 def transform_TieFields(node, source_code):
     """Transforms TieFields(t) into std::tie(t.f1, t.f2, ...)."""
     args = list(node.get_arguments())
@@ -385,7 +290,7 @@ def transform_EnumToString(node, source_code):
     constants = get_enum_constants(args[0].type)
 
     if not constants:
-        return None  # Let the generated template overload handle it
+        return None
 
     code = ["[&](auto __val) -> std::string_view {", "    switch(__val) {"]
     for const_name, enum_type_name in constants:
@@ -438,12 +343,14 @@ def transform_VisitFieldByName(node, source_code):
 
 
 # ==============================================================================
-# 4. AST TRAVERSAL AND REWRITING ENGINE
+# 3. AST TRAVERSAL ENGINE
 # ==============================================================================
 
 DISPATCH_TABLE = {
     "ForEachField": transform_ForEachField,
     "ForEachFieldWithName": transform_ForEachFieldWithName,
+    "ForEachFieldInfo": transform_ForEachFieldInfo,
+    "ForEachNestedType": transform_ForEachNestedType,
     "TieFields": transform_TieFields,
     "EnumToString": transform_EnumToString,
     "VisitFieldByName": transform_VisitFieldByName,
@@ -556,7 +463,7 @@ def sanitize_flags(raw_args, cmd_dir, input_abspath):
 
 
 def parse_translation_unit(index, input_abspath, flags, cmd_dir):
-    """Tries parsing TU with fallback handling, preserving C++23 minimum for std::expected."""
+    """Parses TU with fallback handling, preserving C++23 minimum for std::expected."""
     orig_cwd = os.getcwd()
     if cmd_dir and os.path.exists(cmd_dir):
         os.chdir(cmd_dir)
@@ -612,7 +519,7 @@ def parse_translation_unit(index, input_abspath, flags, cmd_dir):
 
 
 # ==============================================================================
-# 5. ENTRY POINT
+# 4. ENTRY POINT
 # ==============================================================================
 
 
@@ -654,7 +561,7 @@ def main():
     with open(args.input, "r", encoding="utf-8") as f:
         source_code = f.read()
 
-    # 1. Collect and perform inline AST call replacements
+    # 1. Collect and perform inline AST call replacements (end-to-start)
     edits = []
     walk_ast_and_collect_edits(tu.cursor, source_code, edits)
     edits.sort(key=lambda x: x["start"], reverse=True)
@@ -666,32 +573,6 @@ def main():
             + edit["replacement"]
             + modified_code[edit["end"] :]
         )
-
-    # 2. Collect all target ZHLN enums and structs in the translation unit
-    enums_dict = {}
-    structs_dict = {}
-    collect_enums(tu.cursor, enums_dict)
-    collect_structs(tu.cursor, structs_dict)
-
-    external_specs, internal_specs = generate_reflection_specializations(
-        enums_dict, structs_dict
-    )
-
-    # 3. Locate the first C++ declaration in the main file using pure AST.
-    insert_pos = find_first_declaration_offset(tu, input_abspath, len(modified_code))
-
-    # Insert internal engine types after the includes
-    if internal_specs:
-        modified_code = (
-            modified_code[:insert_pos]
-            + "\n"
-            + internal_specs
-            + modified_code[insert_pos:]
-        )
-
-    # Prepend external types (like VkResult) at the very top of the file (offset 0)
-    if external_specs:
-        modified_code = external_specs + "\n" + modified_code
 
     os_dir = os.path.dirname(args.output)
     if os_dir:

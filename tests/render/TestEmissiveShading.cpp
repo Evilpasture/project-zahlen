@@ -42,16 +42,16 @@
 #include <string>
 
 enum class EmissiveShadingError : uint8_t {
-    EngineInitFailed[[= ZHLN::Description<"Failed to initialize the headless Engine for the emissive scene.">{}]] = 1,
-    MaterialCreationFailed[[= ZHLN::Description<"CreateMaterial rejected the emissive or the control material.">{}]],
-    CaptureFailed[[= ZHLN::Description<"The rendered frame could not be read back.">{}]],
-    EmissiveWentDark[[= ZHLN::Description<"An emissive surface rendered black with no light shining on it -- emission is being treated as reflectance.">{}]],
-    EmissiveHueLost[[= ZHLN::Description<"The unlit emissive surface is bright but not the colour it emits.">{}]],
-    ControlNotDark[[= ZHLN::Description<"The non-emissive control box is lit, so the scene is not the unlit scene the test needs.">{}]],
-    BackgroundNotDark[[= ZHLN::Description<"Emission leaked into pixels the emitter does not cover.">{}]],
-    GlowHaloMissing[[= ZHLN::Description<
-        "The glow past the silhouette is wrong: absent (not reaching the bloom chain) or bright enough to read as a slab.">{}]],
-    DeviceLost[[= ZHLN::Description<"The Vulkan device was lost and the engine could not recover.">{}]],
+    EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize the headless Engine for the emissive scene.">{}) = 1,
+    MaterialCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"CreateMaterial rejected the emissive or the control material.">{}),
+    CaptureFailed ZHLN_ANNOTATION(ZHLN::Description<"The rendered frame could not be read back.">{}),
+    EmissiveWentDark ZHLN_ANNOTATION(ZHLN::Description<"An emissive surface rendered black with no light shining on it -- emission is being treated as reflectance.">{}),
+    EmissiveHueLost ZHLN_ANNOTATION(ZHLN::Description<"The unlit emissive surface is bright but not the colour it emits.">{}),
+    ControlNotDark ZHLN_ANNOTATION(ZHLN::Description<"The non-emissive control box is lit, so the scene is not the unlit scene the test needs.">{}),
+    BackgroundNotDark ZHLN_ANNOTATION(ZHLN::Description<"Emission leaked into pixels the emitter does not cover.">{}),
+    GlowHaloMissing ZHLN_ANNOTATION(ZHLN::Description<
+        "The glow past the silhouette is wrong: absent (not reaching the bloom chain) or bright enough to read as a slab.">{}),
+    DeviceLost ZHLN_ANNOTATION(ZHLN::Description<"The Vulkan device was lost and the engine could not recover.">{}),
 };
 
 namespace {

@@ -19,9 +19,9 @@ namespace ZHLN::Vk {
 // builders below both produce it. Backend-agnostic on purpose: the renderer
 // does not model windowing-implementation details such as GLFW here.
 enum class SurfaceCreationError : uint8_t {
-    WindowSurfaceUnsupported[[= ZHLN::Description<"Window surface unsupported">{}]] = 1,
-    WindowSurfaceCreationFailed[[= ZHLN::Description<"Windowed surface creation failed">{}]],
-    TTYSurfaceCreationFailed[[= ZHLN::Description<"TTY surface creation failed">{}]],
+    WindowSurfaceUnsupported ZHLN_ANNOTATION(ZHLN::Description<"Window surface unsupported">{}) = 1,
+    WindowSurfaceCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Windowed surface creation failed">{}),
+    TTYSurfaceCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"TTY surface creation failed">{}),
 };
 
 // --- Monadic Configuration Typestates ---

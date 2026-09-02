@@ -13,7 +13,7 @@ namespace ZHLN::Vk {
 // Private extension-builder error (Tier 1): declared at file scope in this
 // translation unit so no header exposes it.
 enum class ExtensionBuilderError : uint8_t {
-    MissingRequiredExtension[[= ZHLN::Description<"A required Vulkan extension is missing">{}]] = 1,
+    MissingRequiredExtension ZHLN_ANNOTATION(ZHLN::Description<"A required Vulkan extension is missing">{}) = 1,
 };
 
 // ============================================================================

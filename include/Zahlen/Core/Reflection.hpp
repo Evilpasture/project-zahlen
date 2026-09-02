@@ -37,6 +37,19 @@ constexpr auto IsBracesConstructible() -> bool {
     return std::is_aggregate_v<std::remove_cvref_t<T>>;
 }
 
+/// True when the compiler provides C++26 static reflection (P2996).
+///
+/// This is the single source of truth for the capability: nothing outside
+/// this header tests __cpp_impl_reflection / __has_feature(reflection) in
+/// library code. Code that needs to know asks ZHLN::Reflect::ReflectionAvailable,
+/// so the macro idiom cannot drift into a second copy.
+inline constexpr bool ReflectionAvailable =
+#if defined(__cpp_impl_reflection) || (defined(__has_feature) && __has_feature(reflection))
+    true;
+#else
+    false;
+#endif
+
 } // namespace ZHLN::Reflect
 
 // ============================================================================
@@ -48,9 +61,16 @@ constexpr auto IsBracesConstructible() -> bool {
 
 namespace ZHLN::Reflect {
 
+// All reflection handles are NTTPs of type std::meta::info, spelled
+// explicitly rather than `auto`: GCC's module merger compares template
+// declarations streamed out of a module interface against the importer's
+// textually-included copy of this header (Wire.cppm's GMF vs Network.cppm's
+// GMF), and placeholder `auto` parameter types stream inconsistently across
+// module contexts -> "conflicting imported declaration" (cf. GCC PR 118049 /
+// 120644). An explicitly-typed std::meta::info parameter merges cleanly.
 namespace detail {
 
-template <auto... vals>
+template <std::meta::info... vals>
 struct ReplicatorType {
     template <typename F>
     constexpr void operator>>([[maybe_unused]] F body) const {
@@ -58,7 +78,7 @@ struct ReplicatorType {
     }
 };
 
-template <auto... vals>
+template <std::meta::info... vals>
 ReplicatorType<vals...> Replicator {};
 
 template <typename T>
@@ -98,7 +118,11 @@ struct TypeReflector {
         if constexpr (std::meta::has_identifier(info)) {
             return std::meta::identifier_of(info);
         } else {
-            return "TemplateSpecialization";
+            // Builtin types (`unsigned int`) and template specializations
+            // (`ZHLN::FixedString<64>`) have no identifier; render their full
+            // display spelling so TypeName's rename predicate sees something
+            // it can actually match instead of a placeholder.
+            return std::meta::display_string_of(info);
         }
     }
 };
@@ -173,7 +197,7 @@ struct MethodCollector {
     static constexpr auto method_handles = get_methods();
 };
 
-template <auto EntityInfo>
+template <std::meta::info EntityInfo>
 consteval auto AnnotationsOf() {
     return std::define_static_array(std::meta::annotations_of(EntityInfo));
 }
@@ -487,6 +511,28 @@ consteval auto TypeName() -> std::string_view {
     return detail::TypeReflector<std::remove_cvref_t<T>>::name();
 }
 
+/// TypeName with an optional rename predicate.
+///
+/// `rename` is a compile-time callable invoked with the type's reflected
+/// spelling; a non-null return replaces the name with the returned string,
+/// nullptr keeps the type's own spelling. This is a naming hook only: the
+/// predicate can never change what reflection reports about the type, and the
+/// no-argument form above remains the canonical spelling used everywhere else.
+///
+/// Typical use is project-specific spellings without forking this file, e.g.
+/// `TypeName<uint32_t>([](std::string_view s) -> const char* {
+///     return s == "unsigned int" ? "uint32_t" : nullptr;
+/// })`.
+template <typename T, typename NameOverride>
+consteval auto TypeName(NameOverride rename) -> std::string_view {
+    const std::string_view spelling   = TypeName<T>();
+    const char*            overridden = rename(spelling);
+    if (overridden != nullptr) {
+        return overridden;
+    }
+    return spelling;
+}
+
 template <typename T, typename F>
 constexpr void ForEachBase(F&& f) {
     [:Expand(detail::BasesOf<T>()):] >> [&]<auto base>() -> auto { f.template operator()<typename[:std::meta::type_of(base):]>(); };
@@ -704,7 +750,7 @@ consteval auto AnnotationHasType(std::meta::info annotation) -> bool {
     return actualType == std::meta::dealias(^^Tag) || actualType == std::meta::dealias(^^std::add_const_t<Tag>);
 }
 
-template <typename Tag, auto EntityInfo>
+template <typename Tag, std::meta::info EntityInfo>
 consteval auto HasAnnotation() -> bool {
     for (auto a: std::meta::annotations_of(EntityInfo)) {
         if (AnnotationHasType<Tag>(a)) {
@@ -714,7 +760,7 @@ consteval auto HasAnnotation() -> bool {
     return false;
 }
 
-template <auto ScopeInfo, typename Tag, typename F>
+template <std::meta::info ScopeInfo, typename Tag, typename F>
 constexpr void ForEachAnnotatedTypeInScope(F&& f) {
     [:Expand(std::define_static_array(std::meta::members_of(ScopeInfo, std::meta::access_context::current()))):] >> [&]<auto m>() -> auto {
         if constexpr (std::meta::is_type(m)) {
@@ -733,7 +779,7 @@ constexpr void ForEachAnnotatedType(F&& f) {
     ForEachAnnotatedTypeInScope<std::meta::parent_of(^^Tag), Tag>(std::forward<F>(f));
 }
 
-template <typename Tag, auto EntityInfo>
+template <typename Tag, std::meta::info EntityInfo>
 consteval auto GetAnnotation() -> std::optional<Tag> {
     for (auto a: std::meta::annotations_of(EntityInfo)) {
         if (AnnotationHasType<Tag>(a)) {
@@ -775,7 +821,7 @@ struct EnumMessageEntry {
     std::string_view          message;
 };
 
-template <auto a>
+template <std::meta::info a>
 consteval auto ExtractDescriptionText() -> std::string_view {
     constexpr auto type = std::meta::remove_const(std::meta::dealias(std::meta::type_of(a)));
     if constexpr (std::meta::has_template_arguments(type)) {
@@ -803,13 +849,13 @@ consteval auto ExtractDescriptionText() -> std::string_view {
 // Indexing sidesteps it: the index is a plain integer NTTP (always a constant
 // expression) and anns[I] is then usable, so the type can be spliced. This
 // form is equally valid on Clang's P2996 branch.
-template <auto EntityInfo, std::size_t Index>
+template <std::meta::info EntityInfo, std::size_t Index>
 consteval auto ExtractDescriptionTextAt() -> std::string_view {
     constexpr auto annotations = detail::AnnotationsOf<EntityInfo>();
     return ExtractDescriptionText<annotations[Index]>();
 }
 
-template <auto EntityInfo>
+template <std::meta::info EntityInfo>
 consteval auto GetDescriptionText() -> std::string_view {
     constexpr std::size_t count = detail::AnnotationsOf<EntityInfo>().size();
     std::string_view      result {};
@@ -817,6 +863,154 @@ consteval auto GetDescriptionText() -> std::string_view {
         ((result.empty() ? (result = ExtractDescriptionTextAt<EntityInfo, Is>(), 0) : 0), ...);
     }(std::make_index_sequence<count> {});
     return result;
+}
+
+// ----------------------------------------------------------------------------
+// Member queries -- the only reflection handles that leave this header.
+// Callers (e.g. extras/Network/Wire.cppm) never spell ^^, [:...:] or
+// std::meta themselves; everything raw lives in this file.
+// ----------------------------------------------------------------------------
+
+/// Spelling of a reflected data member (a handle as handed to
+/// ForEachDataMember); empty when the compiler reports no identifier.
+template <std::meta::info MemberInfo>
+consteval auto MemberName() -> std::string_view {
+    if constexpr (std::meta::has_identifier(MemberInfo)) {
+        return std::meta::identifier_of(MemberInfo);
+    }
+    return {};
+}
+
+/// Declared type of a reflected data member.
+template <std::meta::info MemberInfo>
+using MemberType = typename[:std::meta::type_of(MemberInfo):];
+
+/// Reference to a reflected data member of an object. MemberInfo must be one
+/// of the handles ForEachDataMember passes to its callback.
+template <std::meta::info MemberInfo, typename T>
+constexpr decltype(auto) MemberValue(T&& object) {
+    return (std::forward<T>(object).[:MemberInfo:]);
+}
+
+/// Invokes f.template operator()<AnnotationType>() for every annotation on a
+/// reflected entity (data member, type, enumerator...). The const qualifier
+/// some implementations add (P3394) is stripped so the callback sees the tag
+/// the source spelled.
+///
+/// The walk uses the same indexed form as GetDescriptionText: a range-for
+/// variable over std::meta::annotations_of is not a constant expression on
+/// some implementations, so the annotation handle must arrive as a non-type
+/// template argument (ExtractDescriptionTextAt) or be spliced out of the
+/// define_static_array (ExtractDescriptionText).
+namespace detail {
+template <std::meta::info Annotation, typename F>
+consteval void InvokeAnnotationType(F&& f) {
+    constexpr auto type  = std::meta::remove_const(std::meta::dealias(std::meta::type_of(Annotation)));
+    using AnnotationType = typename[:type:];
+    std::forward<F>(f).template operator()<AnnotationType>();
+}
+} // namespace detail
+
+template <std::meta::info EntityInfo, typename F>
+consteval void ForEachAnnotationType(F&& f) {
+    constexpr auto annotations = detail::AnnotationsOf<EntityInfo>();
+    [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+        (detail::InvokeAnnotationType<annotations[Is]>(f), ...);
+    }(std::make_index_sequence<annotations.size()>());
+}
+
+/// Same, for a type: walks the annotations of T. The walk is inlined because
+/// the type handle is computed inside this function and cannot be passed as a
+/// template argument to the handle overload.
+template <typename T, typename F>
+consteval void ForEachAnnotationType(F&& f) {
+    constexpr auto entity      = std::meta::dealias(^^std::remove_cvref_t<T>);
+    constexpr auto annotations = detail::AnnotationsOf<entity>();
+    [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+        (detail::InvokeAnnotationType<annotations[Is]>(f), ...);
+    }(std::make_index_sequence<annotations.size()>());
+}
+
+// ----------------------------------------------------------------------------
+// Value-returning annotation queries.
+//
+// ForEachAnnotationType / GetDescriptionText-style walks pass the CALLER'S
+// lambda as a template argument. A module interface template instantiated in
+// an importer (Wire::DecodeAggregate<ClientHello> in Network.cppm) then needs
+// ForEachAnnotationType<^^ClientHello::userId, Lambda> — and a specialization
+// keyed on a local lambda type cannot be defined by the module's own TU nor
+// emitted by the importer, so clang leaves an undefined reference (mold:
+// undefined ForEachAnnotationType<...>). Value-returning queries have no
+// function-type template argument, so they fold exactly like HasAnnotation /
+// GetDescriptionText / SchemaVersionOf, which never produce a symbol.
+//
+// Template template parameters handle both Range<Min, Max> (two `auto` NTTPs)
+// and Version<N> (one uint32_t NTTP); the first matching annotation wins,
+// matching the previous trait-walk semantics.
+// ----------------------------------------------------------------------------
+
+namespace detail {
+template <template <auto...> class Template>
+consteval bool IsAnnotationOfTemplate(std::meta::info annotation) {
+    const std::meta::info type = std::meta::remove_const(std::meta::dealias(std::meta::type_of(annotation)));
+    if (std::meta::has_template_arguments(type)) {
+        return std::meta::template_of(type) == ^^Template;
+    }
+    return false;
+}
+
+template <template <auto...> class Template, std::meta::info EntityInfo>
+consteval std::size_t FirstAnnotationIndex() {
+    constexpr auto annotations = AnnotationsOf<EntityInfo>();
+    for (std::size_t index = 0; index < annotations.size(); ++index) {
+        if (IsAnnotationOfTemplate<Template>(annotations[index])) {
+            return index;
+        }
+    }
+    return annotations.size();
+}
+} // namespace detail
+
+/// Number of annotations on a reflected entity whose class template is
+/// Template (e.g. Wire::Range<Min, Max> counts for Wire::Range).
+template <template <auto...> class Template, std::meta::info EntityInfo>
+consteval std::size_t AnnotationCountOf() {
+    std::size_t count = 0;
+    for (auto annotation: std::meta::annotations_of(EntityInfo)) {
+        if (detail::IsAnnotationOfTemplate<Template>(annotation)) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+/// Same, for a type.
+template <template <auto...> class Template, typename T>
+consteval std::size_t AnnotationCountOf() {
+    constexpr auto entity = std::meta::dealias(^^std::remove_cvref_t<T>);
+    return AnnotationCountOf<Template, entity>();
+}
+
+/// ArgumentIndex-th non-type template argument of the first annotation whose
+/// class template is Template, converted to Value. Returns Value {} when no
+/// such annotation exists.
+template <template <auto...> class Template, std::meta::info EntityInfo, std::size_t ArgumentIndex, typename Value = long double>
+consteval Value AnnotationTemplateArgument() {
+    constexpr auto annotations = detail::AnnotationsOf<EntityInfo>();
+    constexpr auto match       = detail::FirstAnnotationIndex<Template, EntityInfo>();
+    if constexpr (match < annotations.size()) {
+        constexpr auto type = std::meta::remove_const(std::meta::dealias(std::meta::type_of(annotations[match])));
+        constexpr auto args = std::define_static_array(std::meta::template_arguments_of(type));
+        return static_cast<Value>([:args[ArgumentIndex]:]);
+    }
+    return Value {};
+}
+
+/// Same, for a type.
+template <template <auto...> class Template, typename T, std::size_t ArgumentIndex, typename Value = long double>
+consteval Value AnnotationTemplateArgument() {
+    constexpr auto entity = std::meta::dealias(^^std::remove_cvref_t<T>);
+    return AnnotationTemplateArgument<Template, entity, ArgumentIndex, Value>();
 }
 
 template <typename T>
@@ -993,6 +1187,59 @@ consteval bool HasTag(std::string_view /*unused*/) {
 template <std::size_t N, typename T>
 using FieldType = void;
 
+template <typename Tag, auto EntityInfo>
+consteval bool HasAnnotation() {
+    return false;
+}
+
+template <auto EntityInfo>
+consteval std::string_view GetDescriptionText() {
+    return {};
+}
+
+template <auto MemberInfo>
+consteval std::string_view MemberName() {
+    return {};
+}
+
+template <auto MemberInfo>
+using MemberType = void;
+
+template <auto MemberInfo, typename T>
+constexpr decltype(auto) MemberValue(T&& /*object*/) {
+    struct Dummy {};
+    static Dummy d;
+    return d;
+}
+
+template <auto EntityInfo, typename F>
+consteval void ForEachAnnotationType(F&& /*f*/) {
+}
+
+template <typename T, typename F>
+consteval void ForEachAnnotationType(F&& /*f*/) {
+}
+
+template <template <auto...> class Template, auto EntityInfo>
+consteval std::size_t AnnotationCountOf() {
+    return 0;
+}
+
+template <template <auto...> class Template, typename T>
+consteval std::size_t AnnotationCountOf() {
+    return 0;
+}
+
+template <template <auto...> class Template, auto EntityInfo, std::size_t ArgumentIndex, typename Value = long double>
+consteval Value AnnotationTemplateArgument() {
+    return Value {};
+}
+
+template <template <auto...> class Template, typename T, std::size_t ArgumentIndex, typename Value = long double>
+consteval Value AnnotationTemplateArgument() {
+    return Value {};
+}
+
 template <typename T>
 consteval auto BaseClasses() {
     return std::array<int, 0> {};
@@ -1010,9 +1257,86 @@ constexpr decltype(auto) GetFieldByName(T&& /*unused*/) {
     return d;
 }
 
+namespace detail {
+
+template <typename T>
+consteval auto ExtractTypeName() noexcept -> std::string_view {
+#if defined(__clang__)
+    std::string_view p     = __PRETTY_FUNCTION__;
+    auto             start = p.find("[T = ");
+    if (start != std::string_view::npos) {
+        start += 5;
+        auto end = p.find(']', start);
+        if (end != std::string_view::npos) {
+            std::string_view raw = p.substr(start, end - start);
+            for (std::string_view prefix: {"enum class ", "enum ", "struct ", "class "}) {
+                if (raw.starts_with(prefix)) {
+                    raw.remove_prefix(prefix.size());
+                    break;
+                }
+            }
+            return raw;
+        }
+    }
+#elif defined(__GNUC__)
+    std::string_view p     = __PRETTY_FUNCTION__;
+    auto             start = p.find("[with T = ");
+    if (start != std::string_view::npos) {
+        start += 10;
+        auto end = p.find(';', start);
+        if (end == std::string_view::npos)
+            end = p.find(']', start);
+        if (end != std::string_view::npos) {
+            std::string_view raw = p.substr(start, end - start);
+            for (std::string_view prefix: {"enum class ", "enum ", "struct ", "class "}) {
+                if (raw.starts_with(prefix)) {
+                    raw.remove_prefix(prefix.size());
+                    break;
+                }
+            }
+            return raw;
+        }
+    }
+#elif defined(_MSC_VER)
+    std::string_view p     = __FUNCSIG__;
+    auto             start = p.find("ExtractTypeName<");
+    if (start != std::string_view::npos) {
+        start += 16;
+        auto end = p.rfind(">(void)");
+        if (end != std::string_view::npos && end > start) {
+            std::string_view raw = p.substr(start, end - start);
+            for (std::string_view prefix: {"enum class ", "enum ", "struct ", "class "}) {
+                if (raw.starts_with(prefix)) {
+                    raw.remove_prefix(prefix.size());
+                    break;
+                }
+            }
+            return raw;
+        }
+    }
+#endif
+    return "";
+}
+
+} // namespace detail
+
 template <typename T>
 consteval std::string_view TypeName() {
-    return "";
+    return detail::ExtractTypeName<std::remove_cvref_t<T>>();
+}
+
+/// TypeName with an optional rename predicate (fallback build). The compiler
+/// has no reflection, so the predicate receives an empty spelling and may
+/// still supply a name; returning nullptr yields the same empty spelling as
+/// the no-argument form above.
+template <typename T, typename NameOverride>
+consteval auto TypeName(NameOverride rename) -> std::string_view {
+    const std::string_view spelling   = TypeName<T>();
+    const char*            overridden = rename(spelling);
+    if (overridden != nullptr) {
+        return overridden;
+    }
+    return spelling;
 }
 
 template <typename T, typename F>

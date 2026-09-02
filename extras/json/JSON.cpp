@@ -130,6 +130,14 @@ auto ValueReader::GetString() const noexcept -> std::expected<std::string_view, 
     return std::unexpected(JSONError::TypeMismatch);
 }
 
+auto ValueReader::IsNull() const noexcept -> bool {
+    if (!_valid) {
+        return false;
+    }
+    const auto& elem = *reinterpret_cast<const simdjson::dom::element*>(_opaque);
+    return elem.is_null();
+}
+
 auto ValueReader::GetKey(std::string_view key) const noexcept -> std::expected<ValueReader, Error> {
     if (!_valid) {
         return std::unexpected(JSONError::TypeMismatch);

@@ -17,10 +17,10 @@ namespace ZHLN::Vk {
 
 // Staging buffer / host-mapped upload failures for the staging subsystem.
 enum class StagingError : uint8_t {
-    OutOfHostMemory[[= ZHLN::Description<"Host memory allocation failed for staging buffer">{}]] = 1,
-    OutOfDeviceMemory[[= ZHLN::Description<"Device/Host-visible VRAM allocation failed for staging buffer">{}]],
-    MemoryMappingFailed[[= ZHLN::Description<"Failed to map staging buffer CPU pointer">{}]],
-    InvalidBufferDimensions[[= ZHLN::Description<"Image upload byte size or dimensions exceed limit">{}]],
+    OutOfHostMemory ZHLN_ANNOTATION(ZHLN::Description<"Host memory allocation failed for staging buffer">{}) = 1,
+    OutOfDeviceMemory ZHLN_ANNOTATION(ZHLN::Description<"Device/Host-visible VRAM allocation failed for staging buffer">{}),
+    MemoryMappingFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to map staging buffer CPU pointer">{}),
+    InvalidBufferDimensions ZHLN_ANNOTATION(ZHLN::Description<"Image upload byte size or dimensions exceed limit">{}),
 };
 
 class Allocator;

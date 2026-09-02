@@ -5,6 +5,28 @@ if(NOT ZHLN_BUILD_EXTRAS OR NOT TARGET zahlen_extras)
     return()
 endif()
 
+# Extras suites are registered ad hoc (one add_test per target), unlike the CPU
+# groups in tests/CMakeLists.txt, which is why they never received
+# ZHLN_TEST_ENVIRONMENT. In sanitizer builds that meant LSAN_OPTIONS (and thus
+# lsan.supp) was never set for them -- the JACK-related leak in TestPerformance
+# is the visible symptom. Route every extras test through this helper so it
+# carries the same ASan/LSan/UBSan options as the CPU groups.
+function(zahlen_register_extras_test TARGET_NAME)
+    add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
+    if(USE_SANITIZERS)
+        set_tests_properties(${TARGET_NAME} PROPERTIES
+            LABELS "CPU;Fast;Extras"
+            ENVIRONMENT "${ZHLN_TEST_ENVIRONMENT}"
+            ${ARGN}
+        )
+    else()
+        set_tests_properties(${TARGET_NAME} PROPERTIES
+            LABELS "CPU;Fast;Extras"
+            ${ARGN}
+        )
+    endif()
+endfunction()
+
 # No extern/cgltf_impl.c here: the importer moved into extras, so zahlen_extras
 # compiles the one copy of it and this target gets the cgltf symbols (and the
 # header path) through that link. Compiling it again would be a duplicate
@@ -49,8 +71,7 @@ if(USE_SANITIZERS)
     target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
 endif()
 
-add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
-set_tests_properties(${TARGET_NAME} PROPERTIES LABELS "CPU;Fast;Extras")
+zahlen_register_extras_test(${TARGET_NAME})
 
 # --- ALife Test Suite ---
 set(TARGET_NAME TestALife)
@@ -87,12 +108,12 @@ if(USE_SANITIZERS)
     target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
 endif()
 
-add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
-set_tests_properties(${TARGET_NAME} PROPERTIES LABELS "CPU;Fast;Extras")
+zahlen_register_extras_test(${TARGET_NAME})
 
 # --- JSON Test Suite ---
-# extras/json: the reflection-driven reader (simdjson behind an opaque handle)
-# and the compile-time schema parser. Moved out of tests/core when JSON became
+# extras/json: JSON.hpp is the opaque simdjson document reader; JSONSchema.hpp
+# is the reflection-driven serialisation layer (typed read and write) plus the
+# compile-time schema parser. Moved out of tests/core when JSON became
 # an extra; it is the reason the CPU test groups cannot all link the core engine
 # alone (see tests/CMakeLists.txt).
 set(TARGET_NAME TestJSON)
@@ -129,12 +150,11 @@ if(USE_SANITIZERS)
     target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
 endif()
 
-add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
-set_tests_properties(${TARGET_NAME} PROPERTIES LABELS "CPU;Fast;Extras")
+zahlen_register_extras_test(${TARGET_NAME})
 
 # --- TOML Test Suite ---
 # extras/toml: the reflection-driven document layer, plus SceneTOML.hpp, which
-# is what makes a core ZHLN::Scene::Scene readable and writable as a document.
+# binds Jolt vectors so a core ZHLN::Scene::Scene reads/writes as a document.
 set(TARGET_NAME TestTOML)
 add_executable(${TARGET_NAME} TestTOML.cpp)
 
@@ -169,8 +189,7 @@ if(USE_SANITIZERS)
     target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
 endif()
 
-add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
-set_tests_properties(${TARGET_NAME} PROPERTIES LABELS "CPU;Fast;Extras")
+zahlen_register_extras_test(${TARGET_NAME})
 
 # --- Network Wire / Serialization Test Suite ---
 # Exercises ZHLN.Wire (dependency-free reflection serialization) and the
@@ -211,8 +230,7 @@ if(USE_SANITIZERS)
     target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
 endif()
 
-add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
-set_tests_properties(${TARGET_NAME} PROPERTIES LABELS "CPU;Fast;Extras")
+zahlen_register_extras_test(${TARGET_NAME})
 
 # --- Performance Baseline Group (tests/extras/profile) ---
 # Moved out of tests/perf when the baseline store was recognized for what it
@@ -256,8 +274,7 @@ if(USE_SANITIZERS)
     target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
 endif()
 
-add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
-set_tests_properties(${TARGET_NAME} PROPERTIES LABELS "CPU;Fast;Extras")
+zahlen_register_extras_test(${TARGET_NAME})
 
 # --- Cooker glTF Container Suite ---
 # The one cooker check that needs a JSON reader: it runs `zcook glb`, then reads
@@ -303,17 +320,17 @@ endif()
 # tests/helpers/CookerFixture.hpp). This add_test lives two directories below
 # that root, so the working directory is pinned to the same one CPU_Assets
 # inherits by default; without it the lookup resolves to tests/zcook.
-add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
-set_tests_properties(${TARGET_NAME} PROPERTIES
-    LABELS "CPU;Fast;Extras"
+zahlen_register_extras_test(${TARGET_NAME}
     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/.."
 )
 
 # --- Scripting Suite (tests/extras/scripting) ---
-# ScriptBinder and ScriptECSBridge moved out of core with the Lua layer, so
-# their suites moved too. This is the only test target that links
-# zahlen_scripting_lua, and it is the reason CPU_ECS no longer covers the
-# bridge: a build without the scripting extra has nothing to bridge.
+# ScriptBinder, ScriptECSBridge and ScriptValueTypes are the generic,
+# Lua-independent half of the scripting layer (extras/Scripting); the suite
+# links the Lua runtime so both halves are built and exercised together. This
+# is the only test target that links zahlen_scripting_lua, and it is the reason
+# CPU_ECS no longer covers the bridge: a build without the scripting extra has
+# nothing to bridge.
 set(TARGET_NAME TestScripting)
 file(GLOB SCRIPTING_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/scripting/*.cpp")
 
@@ -350,5 +367,4 @@ if(USE_SANITIZERS)
     target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
 endif()
 
-add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
-set_tests_properties(${TARGET_NAME} PROPERTIES LABELS "CPU;Fast;Extras")
+zahlen_register_extras_test(${TARGET_NAME})

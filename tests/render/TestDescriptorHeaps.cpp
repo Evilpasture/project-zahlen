@@ -35,14 +35,13 @@
 #include <vector>
 
 enum class DescriptorHeapsTestError : uint8_t {
-    EngineInitFailed[[= ZHLN::Description<"Failed to initialize headless Engine context for descriptor-heap test.">{}]] = 1,
-    MaterialCreationFailed[[= ZHLN::Description<"CreativeWorksFactory::CreateMaterial failed during heap stress test.">{}]],
-    TextureCreationFailed[[= ZHLN::Description<"CreateProceduralTexture failed during heap stress test.">{}]],
-    RenderOutputBlank[[= ZHLN::Description<"Rendered frame is blank or failed to capture.">{}]],
-    HeapTextureArrayWrong[[= ZHLN::Description<"Not enough distinct texture colors resolved through the heap texture array.">{}]],
-    BoundaryTextureIndexMissing[[= ZHLN::Description<"A texture beyond the static heap-slot boundary did not resolve.">{}]],
-    PushAddressFrameBlockStale[
-        [= ZHLN::Description<"Camera movement did not change the frame, implying the per-frame push-address block was stale.">{}]],
+    EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine context for descriptor-heap test.">{}) = 1,
+    MaterialCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"CreativeWorksFactory::CreateMaterial failed during heap stress test.">{}),
+    TextureCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"CreateProceduralTexture failed during heap stress test.">{}),
+    RenderOutputBlank ZHLN_ANNOTATION(ZHLN::Description<"Rendered frame is blank or failed to capture.">{}),
+    HeapTextureArrayWrong ZHLN_ANNOTATION(ZHLN::Description<"Not enough distinct texture colors resolved through the heap texture array.">{}),
+    BoundaryTextureIndexMissing ZHLN_ANNOTATION(ZHLN::Description<"A texture beyond the static heap-slot boundary did not resolve.">{}),
+    PushAddressFrameBlockStale ZHLN_ANNOTATION(ZHLN::Description<"Camera movement did not change the frame, implying the per-frame push-address block was stale.">{}),
 };
 
 struct DescriptorHeapsSuite {

@@ -10,10 +10,10 @@
 #include <vector>
 
 enum class MeshletTestError : uint8_t {
-    LayoutDrift[[= ZHLN::Description<"A GPU vertex/meshlet struct changed size, so cooked and JIT streams no longer match the shaders.">{}]] = 1,
-    NotDeterministic[[= ZHLN::Description<"BuildMeshlets produced different output for identical input.">{}]],
-    StreamInvariantBroken[[= ZHLN::Description<"A meshlet stream invariant the mesh shader relies on was violated.">{}]],
-    StrideForwardingBroken[[= ZHLN::Description<"The VertexPosition overload disagreed with the explicit-stride form.">{}]],
+    LayoutDrift ZHLN_ANNOTATION(ZHLN::Description<"A GPU vertex/meshlet struct changed size, so cooked and JIT streams no longer match the shaders.">{}) = 1,
+    NotDeterministic ZHLN_ANNOTATION(ZHLN::Description<"BuildMeshlets produced different output for identical input.">{}),
+    StreamInvariantBroken ZHLN_ANNOTATION(ZHLN::Description<"A meshlet stream invariant the mesh shader relies on was violated.">{}),
+    StrideForwardingBroken ZHLN_ANNOTATION(ZHLN::Description<"The VertexPosition overload disagreed with the explicit-stride form.">{}),
 };
 
 namespace {

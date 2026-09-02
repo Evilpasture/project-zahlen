@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include <Scripting/ScriptBinder.hpp>
 #include <Zahlen/Core/Reflection.hpp>
-#include <scripting_lua/ScriptBinder.hpp>
 #include <array>
 #include <expected>
 #include <string>
@@ -14,10 +14,10 @@
 // ============================================================================
 
 enum class ScriptBinderTestError : uint32_t {
-    ClassNotRegistered[[= ZHLN::Description<"The class was not found in the ScriptBinder registry.">{}]] = 1,
-    PropertyAccessFailed[[= ZHLN::Description<"Reading or writing a property via ScriptProperty failed.">{}]],
-    MethodInvocationFailed[[= ZHLN::Description<"Invoking a registered method via ScriptMethod failed.">{}]],
-    ValueConversionFailed[[= ZHLN::Description<"ToScriptVal or FromScriptVal conversion produced unexpected results.">{}]]
+    ClassNotRegistered     ZHLN_ANNOTATION(ZHLN::Description<"The class was not found in the ScriptBinder registry."> {}) = 1,
+    PropertyAccessFailed   ZHLN_ANNOTATION(ZHLN::Description<"Reading or writing a property via ScriptProperty failed."> {}),
+    MethodInvocationFailed ZHLN_ANNOTATION(ZHLN::Description<"Invoking a registered method via ScriptMethod failed."> {}),
+    ValueConversionFailed  ZHLN_ANNOTATION(ZHLN::Description<"ToScriptVal or FromScriptVal conversion produced unexpected results."> {})
 };
 
 enum class MockStatus : uint32_t { Idle = 0, Running, Attacking };
@@ -249,4 +249,3 @@ struct ScriptBinderTestSuite {
 auto RunScriptBinderSuite() -> ZHLN::Test::TestStats {
     return ZHLN::Test::RunSuite<ScriptBinderTestSuite>();
 }
-

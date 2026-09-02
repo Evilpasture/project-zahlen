@@ -26,13 +26,14 @@
 // default in the declaration is its default in a document, which is what lets
 // a scene file say only what differs from the defaults.
 //
-// This header is deliberately format-free. Reading and writing a scene as TOML
-// lives in extras/toml/SceneTOML.hpp, which binds these structs to the
-// reflection-driven parser in extras/toml/ and provides
-// Scene::InstantiateFromTOML(). Core never reaches for it: the engine's own
-// fallback preset (DefaultPreset) builds one of these structs in C++ and calls
-// Instantiate() directly, so a scene description is usable with no document
-// layer compiled in at all.
+// This header is deliberately format-free. Reading and writing a scene as a
+// document is the reflection-driven layer in extras/toml/TOML.hpp plus the
+// Jolt vector bindings in extras/toml/SceneTOML.hpp (which is what makes
+// `position = [x, y, z]` work); the two halves meet at Scene::Instantiate().
+// Core never reaches for them: the engine's own fallback preset
+// (DefaultPreset) builds one of these structs in C++ and calls Instantiate()
+// directly, so a scene description is usable with no document layer compiled
+// in at all.
 //
 // Instantiating is a pure function of the description plus the engine it is
 // given -- no ambient engine, no process-global scene state. Two engines can
@@ -183,8 +184,10 @@ enum class SceneError : uint8_t {
 /// already there, so a caller that wants a clean slate resets the engine
 /// first.
 ///
-/// The textual counterpart, Scene::InstantiateFromTOML(), is declared in
-/// extras/toml/SceneTOML.hpp.
+/// The textual half -- reading a scene document -- is ReflectTOML::TryParse
+/// in extras/toml/TOML.hpp, with the Jolt vector bindings from
+/// extras/toml/SceneTOML.hpp; this function turns the parsed description
+/// into world state.
 [[nodiscard]] auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Instance, Error>;
 
 } // namespace Scene

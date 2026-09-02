@@ -23,28 +23,28 @@ namespace ZHLN::Vk {
 // translation unit so no header exposes them; callers only log the
 // type-erased ZHLN::Error message.
 enum class BufferCreationError : uint8_t {
-    OutOfHostMemory[[= ZHLN::Description<"Out of host memory">{}]] = 1,
-    OutOfDeviceMemory[[= ZHLN::Description<"Out of device memory">{}]],
-    InvalidCaptureAddress[[= ZHLN::Description<"Invalid capture address">{}]],
-    VulkanSubsystemFailure[[= ZHLN::Description<"Vulkan subsystem failure">{}]],
+    OutOfHostMemory ZHLN_ANNOTATION(ZHLN::Description<"Out of host memory">{}) = 1,
+    OutOfDeviceMemory ZHLN_ANNOTATION(ZHLN::Description<"Out of device memory">{}),
+    InvalidCaptureAddress ZHLN_ANNOTATION(ZHLN::Description<"Invalid capture address">{}),
+    VulkanSubsystemFailure ZHLN_ANNOTATION(ZHLN::Description<"Vulkan subsystem failure">{}),
 };
 
 enum class ImageCreationError : uint8_t {
-    OutOfHostMemory[[= ZHLN::Description<"Out of host memory">{}]] = 1,
-    OutOfDeviceMemory[[= ZHLN::Description<"Out of device memory">{}]],
-    InvalidCaptureAddress[[= ZHLN::Description<"Invalid capture address">{}]],
-    VulkanSubsystemFailure[[= ZHLN::Description<"Vulkan subsystem failure">{}]],
+    OutOfHostMemory ZHLN_ANNOTATION(ZHLN::Description<"Out of host memory">{}) = 1,
+    OutOfDeviceMemory ZHLN_ANNOTATION(ZHLN::Description<"Out of device memory">{}),
+    InvalidCaptureAddress ZHLN_ANNOTATION(ZHLN::Description<"Invalid capture address">{}),
+    VulkanSubsystemFailure ZHLN_ANNOTATION(ZHLN::Description<"Vulkan subsystem failure">{}),
 };
 
 // VMA allocator instance bring-up failure.
 enum class AllocatorError : uint8_t {
-    InitializationFailed[[= ZHLN::Description<"Vulkan memory allocator initialization failed">{}]] = 1,
+    InitializationFailed ZHLN_ANNOTATION(ZHLN::Description<"Vulkan memory allocator initialization failed">{}) = 1,
 };
 
 // Staging ring buffer / persistent transfer buffer bring-up failures.
 enum class StagingRingBufferError : uint8_t {
-    OutOfHostMemory[[= ZHLN::Description<"Out of host memory">{}]] = 1,
-    StagingBufferCreationFailed[[= ZHLN::Description<"Staging ring buffer allocation failed">{}]],
+    OutOfHostMemory ZHLN_ANNOTATION(ZHLN::Description<"Out of host memory">{}) = 1,
+    StagingBufferCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Staging ring buffer allocation failed">{}),
 };
 
 

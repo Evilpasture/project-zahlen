@@ -16,8 +16,8 @@ class Engine;
 ///
 /// Core owns no scripting implementation. It does not know what a lua_State, a
 /// C ABI, a marshalling table or a managed delegate is -- those all live in
-/// extras/scripting_lua, which implements IScriptRuntime and installs itself
-/// here. ScriptRunner forwards to whatever is installed and every method is a
+/// extras/Scripting/ (generic bindings) and extras/Scripting/Lua/ (the LuaJIT
+/// runtime), which implement IScriptRuntime and install themselves here. ScriptRunner forwards to whatever is installed and every method is a
 /// no-op while nothing is, so a build without a scripting extra still runs and
 /// core call sites need no guards of their own.
 class ScriptRunner {

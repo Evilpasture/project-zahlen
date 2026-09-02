@@ -53,14 +53,14 @@
 // ============================================================================
 
 enum class PerfTestError : uint8_t {
-    CoreContainersThroughputFailed[[= ZHLN::Description<"Core container or algorithm benchmark failed throughput invariants.">{}]] = 1,
-    TaskSystemThroughputFailed[[= ZHLN::Description<"TaskSystem parallel dispatch or fiber scheduling failed under heavy load.">{}]],
-    ECSIterationThroughputFailed[[= ZHLN::Description<"ECS bulk lifecycle, ECB playback, or dense iteration failed performance criteria.">{}]],
-    SystemGraphContentionFailed[[= ZHLN::Description<"SystemGraph parallel execution encountered dependency or contention failure.">{}]],
-    PhysicsSimulationThroughputFailed[[= ZHLN::Description<"Physics engine body simulation or mass raycasting failed performance gate.">{}]],
-    GUIRebuildThroughputFailed[[= ZHLN::Description<"Immediate-mode GUI tree rebuild or mark-and-sweep GC failed throughput criteria.">{}]],
-    AudioQueueThroughputFailed[[= ZHLN::Description<"Audio event queue failed to process high-throughput batch stream.">{}]],
-    UnifiedMasterSceneFailed[[= ZHLN::Description<"Unified multi-subsystem master benchmark failed stability, performance, or state integrity.">{}]],
+    CoreContainersThroughputFailed ZHLN_ANNOTATION(ZHLN::Description<"Core container or algorithm benchmark failed throughput invariants.">{}) = 1,
+    TaskSystemThroughputFailed ZHLN_ANNOTATION(ZHLN::Description<"TaskSystem parallel dispatch or fiber scheduling failed under heavy load.">{}),
+    ECSIterationThroughputFailed ZHLN_ANNOTATION(ZHLN::Description<"ECS bulk lifecycle, ECB playback, or dense iteration failed performance criteria.">{}),
+    SystemGraphContentionFailed ZHLN_ANNOTATION(ZHLN::Description<"SystemGraph parallel execution encountered dependency or contention failure.">{}),
+    PhysicsSimulationThroughputFailed ZHLN_ANNOTATION(ZHLN::Description<"Physics engine body simulation or mass raycasting failed performance gate.">{}),
+    GUIRebuildThroughputFailed ZHLN_ANNOTATION(ZHLN::Description<"Immediate-mode GUI tree rebuild or mark-and-sweep GC failed throughput criteria.">{}),
+    AudioQueueThroughputFailed ZHLN_ANNOTATION(ZHLN::Description<"Audio event queue failed to process high-throughput batch stream.">{}),
+    UnifiedMasterSceneFailed ZHLN_ANNOTATION(ZHLN::Description<"Unified multi-subsystem master benchmark failed stability, performance, or state integrity.">{}),
 };
 
 // ============================================================================

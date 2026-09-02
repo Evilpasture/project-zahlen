@@ -15,8 +15,8 @@
 #include <expected>
 
 enum class PhysicsTestError : uint32_t {
-    RaycastMissedExpectedBody[[= ZHLN::Description<"Raycast did not hit expected collider.">{}]] = 1,
-    OverlapQueryFailed[[= ZHLN::Description<"Broadphase overlap failed to detect sphere/AABB collision.">{}]],
+    RaycastMissedExpectedBody ZHLN_ANNOTATION(ZHLN::Description<"Raycast did not hit expected collider.">{}) = 1,
+    OverlapQueryFailed ZHLN_ANNOTATION(ZHLN::Description<"Broadphase overlap failed to detect sphere/AABB collision.">{}),
 };
 
 struct PhysicsTestSuite {

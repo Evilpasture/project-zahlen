@@ -23,11 +23,11 @@
 #include <vector>
 
 enum class HiZTestError : uint32_t {
-    EngineInitFailed[[= ZHLN::Description<"Failed to initialize headless Engine context for Hi-Z test.">{}]] = 1,
-    PyramidDimensionMismatch[[= ZHLN::Description<"Hi-Z mip-chain level count or resolution hierarchy violated bit_width invariants.">{}]],
-    ComputePassDispatchFailed[[= ZHLN::Description<"Hi-Z compute generation or occlusion culling pass failed during frame tick.">{}]],
-    OcclusionCullingInvariantFailed[[= ZHLN::Description<"Hi-Z occlusion culling failed to classify occluded versus visible geometry.">{}]],
-    DynamicResizeFailed[[= ZHLN::Description<"Rebuilding the Hi-Z pyramid upon viewport resize resulted in invalid targets or views.">{}]],
+    EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine context for Hi-Z test.">{}) = 1,
+    PyramidDimensionMismatch ZHLN_ANNOTATION(ZHLN::Description<"Hi-Z mip-chain level count or resolution hierarchy violated bit_width invariants.">{}),
+    ComputePassDispatchFailed ZHLN_ANNOTATION(ZHLN::Description<"Hi-Z compute generation or occlusion culling pass failed during frame tick.">{}),
+    OcclusionCullingInvariantFailed ZHLN_ANNOTATION(ZHLN::Description<"Hi-Z occlusion culling failed to classify occluded versus visible geometry.">{}),
+    DynamicResizeFailed ZHLN_ANNOTATION(ZHLN::Description<"Rebuilding the Hi-Z pyramid upon viewport resize resulted in invalid targets or views.">{}),
 };
 
 struct HiZTestSuite {

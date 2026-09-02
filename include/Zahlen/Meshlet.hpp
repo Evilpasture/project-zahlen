@@ -7,7 +7,7 @@
 // offline by `zcook` and the same mesh imported JIT by the runtime glTF
 // importer produce byte-identical GPU streams:
 //
-//   * src/zcook/Transform.cpp     (offline .zmesh cooking)
+//   * tools/zcook/Transform.cpp   (offline .zmesh cooking)
 //   * extras/glTF/GLTFImporter.cpp (runtime glTF/GLB import)
 //
 // The output is the exact memory image the task/mesh shaders read through BDA:

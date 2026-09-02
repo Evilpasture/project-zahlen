@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// extras/scripting_lua/ScriptBinderRegistry.hpp
+// extras/Scripting/ScriptBinderRegistry.hpp
 //
 // Populates the ScriptBinder registry from core's Components.
 //
@@ -28,8 +28,8 @@
 // be consulted and the engine's value types would silently fall back to opaque
 // boxing. Including it here rather than in ScriptBinder.hpp keeps Jolt out of
 // the generic binder.
-#include <scripting_lua/ScriptBinder.hpp>
-#include <scripting_lua/ScriptValueTypes.hpp>
+#include <Scripting/ScriptBinder.hpp>
+#include <Scripting/ScriptValueTypes.hpp>
 
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Reflection.hpp>

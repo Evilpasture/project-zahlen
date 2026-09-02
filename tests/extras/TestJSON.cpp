@@ -11,6 +11,7 @@
 #include <expected>
 #include <json/JSON.hpp>
 #include <json/JSONSchema.hpp>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -37,11 +38,28 @@ struct ActorConfig {
     std::vector<int32_t> itemSlots;
 };
 
+// glTF-style optional-by-omission shape: absent keys mean "no value", so
+// Options{.omitEmpty = true} must drop disengaged optionals and empty
+// containers on write and treat a missing key as the default on read.
+struct OmittedDocument {
+    std::string_view              assetVersion = "2.0";
+    std::optional<int32_t>        mesh;
+    std::vector<float>            min;
+    std::vector<std::string_view> extensionsUsed;
+};
+
 // ============================================================================
 // Compile-Time JSON Schema & Constants
 // ============================================================================
 
-#ifndef ZHLN_IN_DOCKER
+// Compile-time JSON synthesis runs consteval reflection code that builds
+// std::strings. Under -fsanitize=undefined GCC rejects the pointer null-check
+// inside std::string's constructor during constant evaluation (GCC bugzilla
+// #71962, still open), so this block is compiled out of sanitizer builds.
+// ZHLN_IN_DOCKER previously masked this inside CI (which configures
+// USE_SANITIZERS=ON together with ZHLN_IN_DOCKER); the Docker flag itself is
+// not what breaks it.
+#if !defined(ZHLN_SANITIZER_BUILD)
 constexpr auto kStaticConfigJSON = ZHLN::StringLiteral(R"({
     "engine": "Zahlen",
     "version": 2026,
@@ -73,7 +91,10 @@ struct JSONTestSuite {
     struct Tests {
         // --- 1. Compile-Time JSON Reflection Verification ---
         std::expected<void, ZHLN::Error> compile_time_json_schema_and_values() {
-#ifndef ZHLN_IN_DOCKER
+            // Skipped in sanitizer builds: consteval reflection reaches
+            // std::string in constant evaluation, which GCC's UBSan rejects
+            // (bugzilla #71962). See the kStaticConfigJSON block above.
+#if !defined(ZHLN_SANITIZER_BUILD)
             // Verify synthesized struct fields and reflected values
             ZHLN::Test::ExpectEq(kStaticParsed.engine, "Zahlen");
             ZHLN::Test::ExpectEq(kStaticParsed.version, 2026);
@@ -185,6 +206,84 @@ struct JSONTestSuite {
             if (!parseResult) {
                 ZHLN::Test::ExpectTrue(parseResult.error().Is(ZHLN::JSONError::TypeMismatch));
                 ZHLN::Println("    [Runtime Error Check] Caught TypeMismatch: {}", parseResult.error().Message());
+            }
+
+            return {};
+        }
+
+        // --- 6. Optional-by-Omission Serialisation (write side) ---
+        std::expected<void, ZHLN::Error> serialize_json_omits_empty_members() {
+            const OmittedDocument emptyDoc {};
+            const OmittedDocument fullDoc {
+                .assetVersion    = "2.0",
+                .mesh            = 3,
+                .min             = {1.0f, 2.0f, 3.0f},
+                .extensionsUsed  = {"KHR_lights_punctual"},
+            };
+
+            // Default: every member is present; disengaged optional is null.
+            const std::string defaultJson = ZHLN::ReflectJSON::SerializeJSON(emptyDoc);
+            ZHLN::Test::ExpectTrue(defaultJson.find("\"mesh\":null") != std::string::npos);
+            ZHLN::Test::ExpectTrue(defaultJson.find("\"min\":[]") != std::string::npos);
+
+            // omitEmpty: absent keys are not written at all.
+            const std::string omittedJson = ZHLN::ReflectJSON::SerializeJSON(emptyDoc, 0, {.omitEmpty = true});
+            ZHLN::Test::ExpectTrue(omittedJson.find("\"mesh\"") == std::string::npos);
+            ZHLN::Test::ExpectTrue(omittedJson.find("\"min\"") == std::string::npos);
+            ZHLN::Test::ExpectTrue(omittedJson.find("\"extensionsUsed\"") == std::string::npos);
+            ZHLN::Test::ExpectTrue(omittedJson.find("\"assetVersion\":\"2.0\"") != std::string::npos);
+
+            // Engaged values are neither omitted nor corrupted.
+            const std::string fullJson = ZHLN::ReflectJSON::SerializeJSON(fullDoc, 0, {.omitEmpty = true});
+            ZHLN::Test::ExpectTrue(fullJson.find("\"mesh\":3") != std::string::npos);
+            ZHLN::Test::ExpectTrue(fullJson.find("\"min\":[1,2,3]") != std::string::npos);
+            ZHLN::Test::ExpectTrue(fullJson.find("\"extensionsUsed\":[\"KHR_lights_punctual\"]") != std::string::npos);
+
+            ZHLN::Println("    [Optional-by-Omission Write] {}", omittedJson);
+            return {};
+        }
+
+        // --- 7. Optional-by-Omission Deserialisation (read side) ---
+        std::expected<void, ZHLN::Error> parse_json_missing_keys_keep_defaults() {
+            // A document with every optional key omitted is valid under the
+            // convention; without the option it remains a MissingField error.
+            auto strict = ZHLN::ReflectJSON::TryParse<OmittedDocument>(R"({})");
+            ZHLN::Test::ExpectFalse(strict.has_value());
+
+            auto relaxed = ZHLN::ReflectJSON::TryParse<OmittedDocument>(R"({})", {.omitEmpty = true});
+            ZHLN::Test::ExpectTrue(relaxed.has_value());
+            if (relaxed) {
+                ZHLN::Test::ExpectTrue(!relaxed->mesh.has_value());
+                ZHLN::Test::ExpectTrue(relaxed->min.empty());
+                ZHLN::Test::ExpectTrue(relaxed->extensionsUsed.empty());
+                ZHLN::Test::ExpectEq(relaxed->assetVersion, "2.0");
+            }
+
+            // Present keys still parse normally under the option.
+            auto present = ZHLN::ReflectJSON::TryParse<OmittedDocument>(
+                R"({ "assetVersion": "2.0", "mesh": 5, "min": [0.5, 1.5], "extensionsUsed": ["ZHLN_procedural_shader"] })",
+                {.omitEmpty = true}
+            );
+            ZHLN::Test::ExpectTrue(present.has_value());
+            if (present) {
+                ZHLN::Test::ExpectTrue(present->mesh.has_value());
+                ZHLN::Test::ExpectEq(*present->mesh, 5);
+                ZHLN::Test::ExpectEq(present->min.size(), static_cast<size_t>(2));
+            }
+
+            // JSON null is what the default mode writes for a disengaged
+            // optional; reading it back yields a disengaged optional.
+            auto nullable = ZHLN::ReflectJSON::TryParse<OmittedDocument>(R"({
+                "assetVersion": "2.0",
+                "mesh": null,
+                "min": [],
+                "extensionsUsed": []
+            })");
+            ZHLN::Test::ExpectTrue(nullable.has_value());
+            if (nullable) {
+                ZHLN::Test::ExpectTrue(!nullable->mesh.has_value());
+                ZHLN::Test::ExpectTrue(nullable->min.empty());
+                ZHLN::Test::ExpectTrue(nullable->extensionsUsed.empty());
             }
 
             return {};

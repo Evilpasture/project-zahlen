@@ -1,20 +1,21 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# extras/scripting_lua -- the Lua scripting layer.
+# extras/Scripting/Lua -- the LuaJIT-backed scripting runtime.
 #
-# This is the whole of the engine's scripting support, and none of it is core.
-# Core exposes IScriptRuntime and a ScriptRunner that forwards to it; this
-# target supplies the implementation: the LuaJIT state, the reflection-driven
-# FFI definitions, the ScriptBinder class table, and the Fennel sources under
-# scripts/. Core links no Lua, includes no lua headers, and has no C ABI.
+# This is the whole of the engine's Lua support: the LuaJIT state
+# (LuaScriptRuntime), the C ABI and command dispatch scripts call
+# (Scripting.cpp, ScriptingABI.* -- the shim over the generic binder in
+# ../), and the Fennel sources under scripts/. Core links no Lua, includes no
+# lua headers, and has no C ABI. The generic, Lua-independent half of the
+# scripting layer lives in extras/Scripting/ (zahlen_scripting), which this
+# target links.
 
 set(TARGET_NAME zahlen_scripting_lua)
 
 add_library(${TARGET_NAME} STATIC
-    Scripting.cpp
     LuaScriptRuntime.cpp
-    ScriptECSBridge.cpp
+    Scripting.cpp
     ScriptingABI.cpp
 )
 
@@ -26,19 +27,18 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 )
 
 target_link_libraries(${TARGET_NAME} PUBLIC
-    zahlen_engine
+    zahlen_scripting
 )
 target_link_libraries(${TARGET_NAME} PRIVATE
     LuaJIT
 )
 
-# Its own headers are included as <scripting_lua/...> by consumers and as
-# "..." internally, so both the extras root and this directory are on the path.
+# Public headers are included as <Scripting/Lua/...> by consumers and as
+# <Scripting/...> internally, so just the extras root is published.
 target_include_directories(${TARGET_NAME} PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/..
+    ${PROJECT_SOURCE_DIR}/extras
 )
 target_include_directories(${TARGET_NAME} SYSTEM PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
     ${PROJECT_SOURCE_DIR}/extern/LuaJIT/src
 )
 
@@ -66,9 +66,9 @@ set_target_properties(zahlen_gen_ffi_cdef PROPERTIES
     CXX_EXTENSIONS OFF
 )
 target_link_libraries(zahlen_gen_ffi_cdef PRIVATE zahlen_engine)
-# <scripting_lua/tools/FFICTypeMap.hpp> resolves from the extras root.
+# <Scripting/Lua/tools/FFICTypeMap.hpp> resolves from the extras root.
 target_include_directories(zahlen_gen_ffi_cdef SYSTEM PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/..
+    ${PROJECT_SOURCE_DIR}/extras
 )
 zahlen_enable_reflection(zahlen_gen_ffi_cdef)
 

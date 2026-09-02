@@ -28,10 +28,10 @@
 // ============================================================================
 
 enum class PBRTestError : uint8_t {
-    EngineInitFailed[[= ZHLN::Description<"Failed to initialize headless Engine context for PBR test.">{}]] = 1,
-    RenderOutputBlank[[= ZHLN::Description<"Rendered frame is blank or failed to capture.">{}]],
-    SpecularHighlightNotDetected[[= ZHLN::Description<"PBR specular reflection highlight was not observed on target surface.">{}]],
-    MaterialCreationFailed[[= ZHLN::Description<"CreativeWorksFactory::CreateMaterial failed to construct GPU pipeline.">{}]],
+    EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine context for PBR test.">{}) = 1,
+    RenderOutputBlank ZHLN_ANNOTATION(ZHLN::Description<"Rendered frame is blank or failed to capture.">{}),
+    SpecularHighlightNotDetected ZHLN_ANNOTATION(ZHLN::Description<"PBR specular reflection highlight was not observed on target surface.">{}),
+    MaterialCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"CreativeWorksFactory::CreateMaterial failed to construct GPU pipeline.">{}),
 };
 
 // ============================================================================
