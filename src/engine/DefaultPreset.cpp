@@ -51,40 +51,24 @@ namespace {
     Scene::Scene scene;
     scene.name = "Zahlen Fallback";
 
-    scene.camera = Scene::SceneCamera {
-        .position = {0.0f, 3.8f, 7.5f},
-        .yaw      = -90.0f,
-        .pitch    = -14.0f,
-        .fov      = 52.0f
-    };
+    scene.camera = Scene::SceneCamera {.position = {0.0f, 3.8f, 7.5f}, .yaw = -90.0f, .pitch = -14.0f, .fov = 52.0f};
 
     // Reflections on the emblem are the point of the scene; everything else is
     // the engine default and is therefore left unsaid.
-    scene.environment = Scene::SceneEnvironment {
-        .enableSSR = false,
-        .enableRTR = true
-    };
+    scene.environment = Scene::SceneEnvironment {.enableSSR = false, .enableRTR = true};
 
     Scene::SceneEntity ground;
     ground.name     = "FallbackGround";
     ground.shape    = Scene::ShapeKind::Plane;
     ground.extent   = 35.0f;
-    ground.material = Scene::SceneMaterial {
-        .baseColor = {0.12f, 0.14f, 0.18f, 1.0f},
-        .roughness = 0.05f,
-        .metallic  = 0.30f
-    };
+    ground.material = Scene::SceneMaterial {.baseColor = {0.12f, 0.14f, 0.18f, 1.0f}, .roughness = 0.05f, .metallic = 0.30f};
 
     Scene::SceneEntity emblem;
     emblem.name        = "FallbackEmblem";
     emblem.shape       = Scene::ShapeKind::Box;
     emblem.halfExtents = {1.2f, 1.2f, 1.2f};
     emblem.transform   = Scene::Transform {.position = {0.0f, 2.0f, 0.0f}};
-    emblem.material    = Scene::SceneMaterial {
-        .baseColor = {0.1f, 0.6f, 0.95f, 1.0f},
-        .roughness = 0.15f,
-        .metallic  = 0.85f
-    };
+    emblem.material    = Scene::SceneMaterial {.baseColor = {0.1f, 0.6f, 0.95f, 1.0f}, .roughness = 0.15f, .metallic = 0.85f};
 
     scene.entities.push_back(std::move(ground));
     scene.entities.push_back(std::move(emblem));
@@ -262,8 +246,7 @@ void DefaultPreset::Update(Engine& engine, float dt) {
         GUI::Context ui(reg, engine.GetCurrentFrame());
 
         s_UIPopupBox = ui.Panel(
-            "FallbackUIPopupBox", GUI::PanelConfig {.width = 700.0f, .height = 440.0f, .x = -350.0f, .y = -220.0f, .gap = 14.0f, .padding = 20.0f},
-            [&]() -> void {
+            "FallbackUIPopupBox", GUI::PanelConfig {.width = 700.0f, .height = 440.0f, .x = 0.0f, .y = 0.0f, .gap = 14.0f, .padding = 20.0f}, [&]() -> void {
                 // Header Title (Fits perfectly at 0.70f scale)
                 ui.Label(
                     "ZAHLEN ENGINE :: STANDALONE FALLBACK MODE",
