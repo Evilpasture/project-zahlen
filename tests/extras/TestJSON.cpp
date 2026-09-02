@@ -271,6 +271,21 @@ struct JSONTestSuite {
                 ZHLN::Test::ExpectEq(present->min.size(), static_cast<size_t>(2));
             }
 
+            // JSON null is what the default mode writes for a disengaged
+            // optional; reading it back yields a disengaged optional.
+            auto nullable = ZHLN::ReflectJSON::TryParse<OmittedDocument>(R"({
+                "assetVersion": "2.0",
+                "mesh": null,
+                "min": [],
+                "extensionsUsed": []
+            })");
+            ZHLN::Test::ExpectTrue(nullable.has_value());
+            if (nullable) {
+                ZHLN::Test::ExpectTrue(!nullable->mesh.has_value());
+                ZHLN::Test::ExpectTrue(nullable->min.empty());
+                ZHLN::Test::ExpectTrue(nullable->extensionsUsed.empty());
+            }
+
             return {};
         }
     };

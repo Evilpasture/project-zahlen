@@ -46,7 +46,9 @@ namespace ReflectJSON {
 //     (a disengaged optional, an empty container) instead of MissingField.
 //
 // The default (false) keeps the historical behaviour in both directions:
-// empty optional writes null and a missing key is an error.
+// empty optional writes null and a missing key is an error. Either way a
+// present optional member parses engaged and an explicit JSON null parses
+// disengaged (the written form of a disengaged optional in default mode).
 struct Options {
     bool omitEmpty = false;
 };
@@ -88,6 +90,20 @@ auto GetJSONValue(ValueReader reader, Options options = {}) -> std::expected<Fie
             return std::unexpected(res.error());
         }
         return std::string(*res);
+    } else if constexpr (requires { typename Decayed::value_type; } && requires(const Decayed& v) { v.has_value(); }) {
+        // std::optional (and optional-likes): a present value parses
+        // engaged; explicit JSON null -- the writer's default-mode rendering
+        // of a disengaged optional -- parses disengaged.
+        if (reader.IsNull()) {
+            return Decayed {};
+        }
+        auto parsed = GetJSONValue<typename Decayed::value_type>(reader, options);
+        if (!parsed) {
+            return std::unexpected(parsed.error());
+        }
+        Decayed value;
+        value.emplace(std::move(*parsed));
+        return value;
     } else if constexpr (std::is_enum_v<Decayed>) {
         auto res = reader.GetString();
         if (!res) {
