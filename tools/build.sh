@@ -2,8 +2,9 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# Exit immediately if any command fails
+# Exit immediately on command or pipeline failures
 set -e
+set -o pipefail
 
 BASE_BUILD_DIR="build"
 
@@ -27,11 +28,9 @@ while [[ "$#" -gt 0 ]]; do
         --sanitize|--sanitizer|--asan)
             ENABLE_SANITIZER=true
             ;;
-        # Only flags explicitly passed by the user go here
         -D*)
             USER_CMAKE_ARGS+=("$1")
             ;;
-        # Anything else is passed to cmake --build (e.g., target name, --clean-first)
         *) 
             BUILD_FLAGS+=("$1") 
             ;;
@@ -39,7 +38,7 @@ while [[ "$#" -gt 0 ]]; do
     shift
 done
 
-# 2. Determine base compiler flavor (explicit argument or last active build)
+# 2. Determine base compiler flavor
 mkdir -p "$BASE_BUILD_DIR"
 
 if [[ -n "$SPECIFIED_COMPILER" ]]; then
@@ -69,7 +68,7 @@ fi
 BUILD_DIR="$BASE_BUILD_DIR/$COMPILER_TAG"
 LOG_FILE="$BUILD_DIR/build.log"
 
-# 4. Resolve compiler binaries and specific flags for the chosen base compiler
+# 4. Resolve compiler binaries
 COMPILER_CC=""
 COMPILER_CXX=""
 
@@ -149,7 +148,7 @@ case "$BASE_COMPILER" in
         ;;
 esac
 
-# 5. Directory setup & auto-migration of legacy flat build
+# 5. Directory setup & auto-migration
 if [[ -f "$BASE_BUILD_DIR/CMakeCache.txt" ]]; then
     echo "--- Detected legacy flat build layout: Migrating assets to build/shared_assets/ ---"
     mkdir -p "$BASE_BUILD_DIR/shared_assets"
@@ -167,12 +166,16 @@ fi
 mkdir -p "$BASE_BUILD_DIR/shared_assets"
 mkdir -p "$BUILD_DIR"
 
-# Update 'build/current' symlink
+# Update 'build/current' symlink and create a top-level 'build/build.log' pointer
 (cd "$BASE_BUILD_DIR" && ln -sfn "$COMPILER_TAG" current)
+ln -sf "$COMPILER_TAG/build.log" "$BASE_BUILD_DIR/build.log"
 
-# 6. Configuration (ONLY runs if unconfigured or new -D flags were explicitly passed)
+# Truncate/initialize log file for this run
+: > "$LOG_FILE"
+
+# 6. Configuration (Pipes output to log file)
 if [ ! -f "$BUILD_DIR/CMakeCache.txt" ] || [ ${#USER_CMAKE_ARGS[@]} -gt 0 ]; then
-    echo "--- Configuring [$COMPILER_TAG] in '$BUILD_DIR' ---"
+    echo "--- Configuring [$COMPILER_TAG] in '$BUILD_DIR' ---" | tee -a "$LOG_FILE"
     
     if [[ -n "$COMPILER_CC" ]]; then
         export CC="$COMPILER_CC"
@@ -183,10 +186,10 @@ if [ ! -f "$BUILD_DIR/CMakeCache.txt" ] || [ ${#USER_CMAKE_ARGS[@]} -gt 0 ]; the
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
         "${INTERNAL_CMAKE_ARGS[@]}" \
-        "${USER_CMAKE_ARGS[@]}"
+        "${USER_CMAKE_ARGS[@]}" 2>&1 | tee -a "$LOG_FILE"
 fi
 
-# Always link compile_commands.json to repository root for editor/LSP
+# Link compile_commands.json to repository root
 if [[ -f "$BUILD_DIR/compile_commands.json" ]]; then
     ln -sf "$BUILD_DIR/compile_commands.json" ./compile_commands.json
 fi
@@ -200,17 +203,8 @@ else
     NPROCS=2
 fi
 
-# 8. Build and log
-echo "--- Starting build [$COMPILER_TAG] (Active: $BUILD_DIR)... ---"
-cmake --build "$BUILD_DIR" --parallel "$NPROCS" "${BUILD_FLAGS[@]}" 2>&1 | tee "$LOG_FILE"
+# 8. Build and append to log
+echo "--- Starting build [$COMPILER_TAG] (Active: $BUILD_DIR)... ---" | tee -a "$LOG_FILE"
+cmake --build "$BUILD_DIR" --parallel "$NPROCS" "${BUILD_FLAGS[@]}" 2>&1 | tee -a "$LOG_FILE"
 
-# 9. Handle Result
-BUILD_STATUS=${PIPESTATUS[0]}
-
-if [ $BUILD_STATUS -eq 0 ]; then
-    echo "--- Build [$COMPILER_TAG] successful! ---"
-else
-    echo "--- Build [$COMPILER_TAG] FAILED. ---"
-    tail -n 10 "$LOG_FILE"
-    exit $BUILD_STATUS
-fi
+echo "--- Build [$COMPILER_TAG] successful! ---" | tee -a "$LOG_FILE"
