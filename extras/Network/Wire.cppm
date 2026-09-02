@@ -753,49 +753,16 @@ inline auto GetLE32(Reader& reader, uint32_t& out) -> Result<void> {
 }
 
 // --- Schema annotation machinery -------------------------------------------
-// ZHLN::Reflect::ForEachAnnotationType yields annotation types; these traits
-// match the Wire-specific Range / Version specializations so the module never
-// needs no reflection tokens of its own.
-
-struct RangeSpec {
-    bool        active {};
-    long double minValue {};
-    long double maxValue {};
-};
-
-template <typename Annotation>
-struct RangeTrait: std::false_type {
-    // Present on the primary so `if constexpr (RangeTrait<Annotation>::is_range)`
-    // is well-formed for every annotation (e.g. Description), not just Range.
-    static constexpr bool is_range = false;
-};
-
-template <auto MinValue, auto MaxValue>
-struct RangeTrait<Range<MinValue, MaxValue>>: std::true_type {
-    static constexpr bool        is_range  = true;
-    static constexpr long double minValue  = static_cast<long double>(Range<MinValue, MaxValue>::minValue);
-    static constexpr long double maxValue  = static_cast<long double>(Range<MinValue, MaxValue>::maxValue);
-};
-
-// NOTE: no module-private function template here. An instantiation of a
-// non-exported template with a consumer-side reflection argument (e.g.
-// ^^ClientHello::userId) is a module-scoped symbol that only the module's own
-// TU can define, so clang leaves it undefined when the exported DecodeAggregate
-// is instantiated in an importer (mold: undefined MemberRange<...>). The range
-// walk therefore lives inline in DecodeAggregate's body; RangeTrait stays a
-// private class template (no emitted symbol).
-
-template <typename Annotation>
-struct VersionTrait: std::false_type {
-    // Present on the primary so the probe is well-formed for any annotation.
-    static constexpr bool is_version = false;
-};
-
-template <uint32_t Value>
-struct VersionTrait<Version<Value>>: std::true_type {
-    static constexpr bool        is_version = true;
-    static constexpr uint32_t    value      = Value;
-};
+// Range / Version are read through ZHLN::Reflect::AnnotationCountOf /
+// AnnotationTemplateArgument, which return plain values. A lambda-driven walk
+// (ForEachAnnotationType) cannot be instantiated across the module boundary:
+// its specialization is keyed on the caller's lambda type, and neither the
+// module's own TU nor the importer can define it (mold: undefined
+// ForEachAnnotationType<^^ClientHello::userId, ...> once Network.cppm
+// instantiates DecodeAggregate). The value queries fold just like
+// HasAnnotation / GetDescriptionText and emit no symbols.
+//
+// The first matching annotation wins, as before.
 
 inline void AttachFieldNote(Failure& failure, std::string_view typeName, std::string_view fieldName, std::string_view description) {
     if (!failure.note.empty()) {
@@ -1203,17 +1170,10 @@ export namespace ZHLN::Wire {
 /// Wire schema version declared via ZHLN_ANNOTATION(ZHLN::Wire::Version<N> {}); default 1.
 template <typename T>
 consteval auto SchemaVersionOf() -> uint32_t {
-    uint32_t result = 1;
-    bool     found  = false;
-    ZHLN::Reflect::ForEachAnnotationType<T>([&]<typename Annotation>() {
-        if constexpr (VersionTrait<Annotation>::is_version) {
-            if (!found) {
-                result = VersionTrait<Annotation>::value;
-                found  = true;
-            }
-        }
-    });
-    return result;
+    if constexpr (ZHLN::Reflect::AnnotationCountOf<Version, T>() > 0) {
+        return ZHLN::Reflect::AnnotationTemplateArgument<Version, T, 0, uint32_t>();
+    }
+    return 1;
 }
 
 template <typename T>
@@ -1286,26 +1246,12 @@ auto DecodeAggregate(T& out, Reader& reader) -> Result<void> {
                 Result<void>    res = reader.Get(ZHLN::Reflect::MemberValue<member>(out));
                 if (res) {
                     if constexpr (std::is_arithmetic_v<Field>) {
-                        // Range extraction inlined into the exported template
-                        // body — see the NOTE above RangeTrait for why this must
-                        // not be a module-private function template.
-                        constexpr auto range = [] {
-                            RangeSpec result {};
-                            ZHLN::Reflect::ForEachAnnotationType<member>([&]<typename Annotation>() {
-                                if constexpr (RangeTrait<Annotation>::is_range) {
-                                    if (!result.active) {
-                                        result.active   = true;
-                                        result.minValue = RangeTrait<Annotation>::minValue;
-                                        result.maxValue = RangeTrait<Annotation>::maxValue;
-                                    }
-                                }
-                            });
-                            return result;
-                        }();
-                        if constexpr (range.active) {
+                        if constexpr (ZHLN::Reflect::AnnotationCountOf<Range, member>() > 0) {
+                            constexpr long double minValue = ZHLN::Reflect::AnnotationTemplateArgument<Range, member, 0, long double>();
+                            constexpr long double maxValue = ZHLN::Reflect::AnnotationTemplateArgument<Range, member, 1, long double>();
                             const long double current = static_cast<long double>(ZHLN::Reflect::MemberValue<member>(out));
-                            if (current < range.minValue || current > range.maxValue) {
-                                res = std::unexpected(reader.Fail(WireError::ValueOutOfRange, current, range.minValue, range.maxValue));
+                            if (current < minValue || current > maxValue) {
+                                res = std::unexpected(reader.Fail(WireError::ValueOutOfRange, current, minValue, maxValue));
                             }
                         }
                     }

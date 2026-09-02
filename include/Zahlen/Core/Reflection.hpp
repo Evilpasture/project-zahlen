@@ -931,6 +931,88 @@ consteval void ForEachAnnotationType(F&& f) {
     }(std::make_index_sequence<annotations.size()>());
 }
 
+// ----------------------------------------------------------------------------
+// Value-returning annotation queries.
+//
+// ForEachAnnotationType / GetDescriptionText-style walks pass the CALLER'S
+// lambda as a template argument. A module interface template instantiated in
+// an importer (Wire::DecodeAggregate<ClientHello> in Network.cppm) then needs
+// ForEachAnnotationType<^^ClientHello::userId, Lambda> — and a specialization
+// keyed on a local lambda type cannot be defined by the module's own TU nor
+// emitted by the importer, so clang leaves an undefined reference (mold:
+// undefined ForEachAnnotationType<...>). Value-returning queries have no
+// function-type template argument, so they fold exactly like HasAnnotation /
+// GetDescriptionText / SchemaVersionOf, which never produce a symbol.
+//
+// Template template parameters handle both Range<Min, Max> (two `auto` NTTPs)
+// and Version<N> (one uint32_t NTTP); the first matching annotation wins,
+// matching the previous trait-walk semantics.
+// ----------------------------------------------------------------------------
+
+namespace detail {
+template <template <auto...> class Template>
+consteval bool IsAnnotationOfTemplate(std::meta::info annotation) {
+    const std::meta::info type = std::meta::remove_const(std::meta::dealias(std::meta::type_of(annotation)));
+    if (std::meta::has_template_arguments(type)) {
+        return std::meta::template_of(type) == ^^Template;
+    }
+    return false;
+}
+
+template <template <auto...> class Template, std::meta::info EntityInfo>
+consteval std::size_t FirstAnnotationIndex() {
+    constexpr auto annotations = AnnotationsOf<EntityInfo>();
+    for (std::size_t index = 0; index < annotations.size(); ++index) {
+        if (IsAnnotationOfTemplate<Template>(annotations[index])) {
+            return index;
+        }
+    }
+    return annotations.size();
+}
+} // namespace detail
+
+/// Number of annotations on a reflected entity whose class template is
+/// Template (e.g. Wire::Range<Min, Max> counts for Wire::Range).
+template <template <auto...> class Template, std::meta::info EntityInfo>
+consteval std::size_t AnnotationCountOf() {
+    std::size_t count = 0;
+    for (auto annotation: std::meta::annotations_of(EntityInfo)) {
+        if (detail::IsAnnotationOfTemplate<Template>(annotation)) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+/// Same, for a type.
+template <template <auto...> class Template, typename T>
+consteval std::size_t AnnotationCountOf() {
+    constexpr auto entity = std::meta::dealias(^^std::remove_cvref_t<T>);
+    return AnnotationCountOf<Template, entity>();
+}
+
+/// ArgumentIndex-th non-type template argument of the first annotation whose
+/// class template is Template, converted to Value. Returns Value {} when no
+/// such annotation exists.
+template <template <auto...> class Template, std::meta::info EntityInfo, std::size_t ArgumentIndex, typename Value = long double>
+consteval Value AnnotationTemplateArgument() {
+    constexpr auto annotations = detail::AnnotationsOf<EntityInfo>();
+    constexpr auto match       = detail::FirstAnnotationIndex<Template, EntityInfo>();
+    if constexpr (match < annotations.size()) {
+        constexpr auto type = std::meta::remove_const(std::meta::dealias(std::meta::type_of(annotations[match])));
+        constexpr auto args = std::define_static_array(std::meta::template_arguments_of(type));
+        return static_cast<Value>([:args[ArgumentIndex]:]);
+    }
+    return Value {};
+}
+
+/// Same, for a type.
+template <template <auto...> class Template, typename T, std::size_t ArgumentIndex, typename Value = long double>
+consteval Value AnnotationTemplateArgument() {
+    constexpr auto entity = std::meta::dealias(^^std::remove_cvref_t<T>);
+    return AnnotationTemplateArgument<Template, entity, ArgumentIndex, Value>();
+}
+
 template <typename T>
 consteval auto AnnotatedName() -> std::string_view {
     constexpr auto info = ^^std::remove_cvref_t<T>;
@@ -1136,6 +1218,26 @@ consteval void ForEachAnnotationType(F&& /*f*/) {
 
 template <typename T, typename F>
 consteval void ForEachAnnotationType(F&& /*f*/) {
+}
+
+template <template <auto...> class Template, auto EntityInfo>
+consteval std::size_t AnnotationCountOf() {
+    return 0;
+}
+
+template <template <auto...> class Template, typename T>
+consteval std::size_t AnnotationCountOf() {
+    return 0;
+}
+
+template <template <auto...> class Template, auto EntityInfo, std::size_t ArgumentIndex, typename Value = long double>
+consteval Value AnnotationTemplateArgument() {
+    return Value {};
+}
+
+template <template <auto...> class Template, typename T, std::size_t ArgumentIndex, typename Value = long double>
+consteval Value AnnotationTemplateArgument() {
+    return Value {};
 }
 
 template <typename T>
