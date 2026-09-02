@@ -20,6 +20,7 @@ RUN pacman -S --needed --noconfirm \
     directx-shader-compiler \
     vulkan-icd-loader \
     vulkan-swrast \
+    vulkan-validation-layers \
     libevdev \
     seatd \
     fontconfig \
@@ -43,6 +44,13 @@ ENV VULKAN_SDK=/opt/vulkansdk/x86_64
 ENV PATH=$VULKAN_SDK/bin:$PATH
 ENV LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+${LD_LIBRARY_PATH}:}/opt/vulkansdk/x86_64/lib"
 ENV CMAKE_PREFIX_PATH="${CMAKE_PREFIX_PATH:+${CMAKE_PREFIX_PATH}:}/opt/vulkansdk/x86_64"
+
+# CI deliberately uses the system Lavapipe and validation layer packages.
+# CMake disables the checked-in Arch-built sandbox in ZHLN_IN_DOCKER mode,
+# leaving these environment variables as the source of truth for CTest.
+ENV VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+ENV VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+ENV VK_LAYER_PATH=/usr/share/vulkan/explicit_layer.d
 
 WORKDIR /workspace
 

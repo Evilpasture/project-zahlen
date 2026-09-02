@@ -93,9 +93,9 @@ function(zahlen_add_gpu_test_group TARGET_NAME TIMEOUT_SECONDS)
     if(UNIX AND NOT APPLE)
         list(APPEND GPU_TEST_ENVIRONMENT "GLIBC_TUNABLES=glibc.rtld.optional_static_tls=4096")
     endif()
-    if(USE_SANITIZERS)
-        list(APPEND GPU_TEST_ENVIRONMENT ${ZHLN_TEST_ENVIRONMENT})
-    endif()
+    # Include the shared sanitizer and Vulkan sandbox settings regardless of
+    # whether sanitizers are enabled.
+    list(APPEND GPU_TEST_ENVIRONMENT ${ZHLN_TEST_ENVIRONMENT})
     if(GPU_TEST_ENVIRONMENT)
         set_tests_properties(${TARGET_NAME} PROPERTIES
             ENVIRONMENT "${GPU_TEST_ENVIRONMENT}"

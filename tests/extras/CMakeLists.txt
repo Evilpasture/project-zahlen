@@ -6,23 +6,17 @@ if(NOT ZHLN_BUILD_EXTRAS OR NOT TARGET zahlen_extras)
 endif()
 
 # Extras suites are registered ad hoc (one add_test per target), unlike the CPU
-# groups in tests/CMakeLists.txt, which is why they never received
-# ZHLN_TEST_ENVIRONMENT. In sanitizer builds that meant LSAN_OPTIONS (and thus
-# lsan.supp) was never set for them -- the JACK-related leak in TestPerformance
-# is the visible symptom. Route every extras test through this helper so it
-# carries the same ASan/LSan/UBSan options as the CPU groups.
+# groups in tests/CMakeLists.txt. Route every extras test through this helper so
+# it receives the shared sanitizer and Vulkan sandbox environment.
 function(zahlen_register_extras_test TARGET_NAME)
     add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
-    if(USE_SANITIZERS)
+    set_tests_properties(${TARGET_NAME} PROPERTIES
+        LABELS "CPU;Fast;Extras"
+        ${ARGN}
+    )
+    if(ZHLN_TEST_ENVIRONMENT)
         set_tests_properties(${TARGET_NAME} PROPERTIES
-            LABELS "CPU;Fast;Extras"
             ENVIRONMENT "${ZHLN_TEST_ENVIRONMENT}"
-            ${ARGN}
-        )
-    else()
-        set_tests_properties(${TARGET_NAME} PROPERTIES
-            LABELS "CPU;Fast;Extras"
-            ${ARGN}
         )
     endif()
 endfunction()
