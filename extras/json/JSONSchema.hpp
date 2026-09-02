@@ -9,7 +9,7 @@
 //
 //   * Runtime, reflection-driven: GetJSONValue, ParseObject, TryParse and
 //     Parse read a document (extras/json/JSON.hpp -- simdjson behind an
-//     opaque handle) into any reflected type, and Reflect::SerializeJSON
+//     opaque handle) into any reflected type, and ReflectJSON::SerializeJSON
 //     writes one back out. Field names come from the declarations themselves,
 //     so the type is the schema: same contract as extras/toml/TOML.hpp.
 //
@@ -188,7 +188,7 @@ auto Parse(std::string_view jsonString) -> T {
 // Reflection-Driven JSON Serialisation
 //
 //   Player p {"Hero", 9999, true};
-//   std::string json = ZHLN::Reflect::SerializeJSON(p);
+//   std::string json = ZHLN::ReflectJSON::SerializeJSON(p);
 //   // {"name":"Hero","score":9999,"isAlive":true}
 //
 // Field names come from the declarations themselves (the same
@@ -206,7 +206,7 @@ auto Parse(std::string_view jsonString) -> T {
 //
 // `indent` spaces per nesting level; 0 (default) emits one compact line.
 // ============================================================================
-namespace Reflect {
+namespace ReflectJSON {
 
 namespace detail {
 
@@ -271,7 +271,7 @@ namespace detail {
             // string literals never embed their terminator).
             AppendJSONString(out, std::string_view {value});
         } else if constexpr (std::is_enum_v<Decayed>) {
-            AppendJSONString(out, EnumToString(value));
+            AppendJSONString(out, ZHLN::Reflect::EnumToString(value));
         } else if constexpr (requires { value.has_value(); }) {
             // std::optional (and optional-likes): empty emits null.
             if (value.has_value()) {
@@ -332,7 +332,7 @@ namespace detail {
                 out.append((depth + 1) * indent, ' ');
             }
             bool first = true;
-            ForEachFieldWithName(value, [&](std::string_view fieldName, const auto& fieldVal) {
+            ZHLN::Reflect::ForEachFieldWithName(value, [&](std::string_view fieldName, const auto& fieldVal) {
                 if (!first) {
                     AppendJSONSeparator(out, pretty, indent, depth);
                 }
@@ -361,7 +361,7 @@ template <typename T>
     return out;
 }
 
-} // namespace Reflect
+} // namespace ReflectJSON
 } // namespace ZHLN
 
 namespace ZHLN::Reflect {

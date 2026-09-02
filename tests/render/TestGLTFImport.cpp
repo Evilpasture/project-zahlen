@@ -98,7 +98,7 @@ constexpr std::string_view kVirtualPath = "ProceduralAnimationBaseRig.glb";
 // ---------------------------------------------------------------------------
 // Typed glTF fixture documents.
 //
-// These are declarations, not text: ZHLN::Reflect::SerializeJSON turns each
+// These are declarations, not text: ZHLN::ReflectJSON::SerializeJSON turns each
 // struct into the JSON chunk, so field names are the glTF keys and the
 // compiler checks every value's type. Nothing here hand-writes a brace, a
 // comma or an escape.
@@ -354,7 +354,7 @@ constexpr float                kEmissiveStrength = 4.0f;
         .bufferViews    = TriangleBufferViews(),
         .buffers        = TriangleBuffers(),
     };
-    return MakeGlb(ZHLN::Reflect::SerializeJSON(document), TriangleBin());
+    return MakeGlb(ZHLN::ReflectJSON::SerializeJSON(document), TriangleBin());
 }
 
 /// The same triangle and the same emissiveFactor, extension absent.
@@ -368,7 +368,7 @@ constexpr float                kEmissiveStrength = 4.0f;
         .bufferViews = TriangleBufferViews(),
         .buffers     = TriangleBuffers(),
     };
-    return MakeGlb(ZHLN::Reflect::SerializeJSON(document), TriangleBin());
+    return MakeGlb(ZHLN::ReflectJSON::SerializeJSON(document), TriangleBin());
 }
 
 /// A mesh node that also carries a punctual light, alongside the emissive
@@ -389,7 +389,7 @@ constexpr float                kEmissiveStrength = 4.0f;
         .bufferViews    = TriangleBufferViews(),
         .buffers        = TriangleBuffers(),
     };
-    return MakeGlb(ZHLN::Reflect::SerializeJSON(document), TriangleBin());
+    return MakeGlb(ZHLN::ReflectJSON::SerializeJSON(document), TriangleBin());
 }
 
 /// Geometry-free document carrying only a punctual light -- the shape zcook
@@ -401,7 +401,7 @@ constexpr float                kEmissiveStrength = 4.0f;
         .scenes         = {GltfScene {.nodes = {0}}},
         .nodes          = {GltfLightNode {.name = "PunctualLight", .translation = {1.0f, 2.0f, 3.0f}}},
     };
-    return MakeGlb(ZHLN::Reflect::SerializeJSON(document), {});
+    return MakeGlb(ZHLN::ReflectJSON::SerializeJSON(document), {});
 }
 
 /// Independent cgltf view of the same bytes, used as the reference the

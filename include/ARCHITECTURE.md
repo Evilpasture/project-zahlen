@@ -131,7 +131,7 @@ included. The concrete case that motivated the rule:
 
 | Layer | Contents | Dependencies it carries |
 | :--- | :--- | :--- |
-| `extras/json/` | `JSON.hpp` (reflection-driven reader + `Reflect::SerializeJSON`), `JSONSchema.hpp` (compile-time schema → C++ type) | simdjson |
+| `extras/json/` | `JSON.hpp` (opaque document) + `JSONSchema.hpp` (reflection-driven reader/writer + compile-time schema), `JSONSchema.hpp` (compile-time schema → C++ type) | simdjson |
 | `extras/toml/` | `TOML.hpp` (reflection-driven documents), `SceneTOML.hpp` (binds a core `Scene::Scene` to the document format) | none |
 | `extras/glTF/` | `GLTFImporter.*` (the glTF/GLB reader), `glTF.*` (the drop-a-file inspector, module `ZHLN.glTF`) | cgltf, stb_image, meshoptimizer, and `extras/json` for the custom node members |
 | `extras/Scripting/` | `ScriptBinder.hpp` / `ScriptBinderRegistry.hpp` / `ScriptECSBridge.*` / `ScriptValueTypes.hpp` (reflection-driven class table and ECS bridge, Lua-independent) | none |
