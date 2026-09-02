@@ -81,31 +81,13 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
     float wheel        = state->mouseWheel;
     (void)wheel;
 
-    // Reset per-frame hover flags on compound widgets before we recompute them.
-    for (Entity e: reg.GetEntitiesWith<Components::UICheckboxComponent>()) {
-        if (auto* cb = reg.Get<Components::UICheckboxComponent>(e)) {
-            cb->hovered = false;
-        }
-    }
-    for (Entity e: reg.GetEntitiesWith<Components::UISliderComponent>()) {
-        if (auto* sl = reg.Get<Components::UISliderComponent>(e)) {
-            sl->hovered = false;
-        }
-    }
-    for (Entity e: reg.GetEntitiesWith<Components::UIDropdownComponent>()) {
-        if (auto* dd = reg.Get<Components::UIDropdownComponent>(e)) {
-            dd->hovered = false;
-        }
-    }
-    for (Entity e: reg.GetEntitiesWith<Components::UICollapsingHeaderComponent>()) {
-        if (auto* ch = reg.Get<Components::UICollapsingHeaderComponent>(e)) {
-            ch->hovered = false;
-        }
-    }
-    for (Entity e: reg.GetEntitiesWith<Components::UISplitterComponent>()) {
-        if (auto* sp = reg.Get<Components::UISplitterComponent>(e)) {
-            sp->hovered = false;
-        }
+    // Reset per-frame hover on every UIButtonComponent in one pass. The
+    // UIButtonComponent::Hovered flag is the single source of truth for hover
+    // across all widgets; compound widgets never cache their own hovered flag.
+    for (auto& btn: reg.GetRawArray<Components::UIButtonComponent>()) {
+        btn.Set(UIButton::Hovered, false);
+        btn.Set(UIButton::Pressed, false);
+        btn.Set(UIButton::Clicked, false);
     }
 
     // 1. Process active drag operations (window dragging + slider + splitter)
@@ -246,27 +228,8 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
             continue;
         }
 
-        Bounds b = GetBounds(rect);
-        bool inside = Inside(b, mouseX, mouseY);
-
-        // Propagate hover state up to compound widget parents
-        if (inside) {
-            if (Entity cbEnt = FindAncestorWith<Components::UICheckboxComponent>(reg, e); cbEnt != Entity::Null()) {
-                if (auto* cb = reg.Get<Components::UICheckboxComponent>(cbEnt)) cb->hovered = true;
-            }
-            if (Entity slEnt = FindAncestorWith<Components::UISliderComponent>(reg, e); slEnt != Entity::Null()) {
-                if (auto* sl = reg.Get<Components::UISliderComponent>(slEnt)) sl->hovered = true;
-            }
-            if (Entity ddEnt = FindAncestorWith<Components::UIDropdownComponent>(reg, e); ddEnt != Entity::Null()) {
-                if (auto* dd = reg.Get<Components::UIDropdownComponent>(ddEnt)) dd->hovered = true;
-            }
-            if (Entity chEnt = FindAncestorWith<Components::UICollapsingHeaderComponent>(reg, e); chEnt != Entity::Null()) {
-                if (auto* ch = reg.Get<Components::UICollapsingHeaderComponent>(chEnt)) ch->hovered = true;
-            }
-            if (Entity spEnt = FindAncestorWith<Components::UISplitterComponent>(reg, e); spEnt != Entity::Null()) {
-                if (auto* sp = reg.Get<Components::UISplitterComponent>(spEnt)) sp->hovered = true;
-            }
-        }
+        Bounds b      = GetBounds(rect);
+        bool   inside = Inside(b, mouseX, mouseY);
 
         if (clickConsumed) {
             button->Set(UIButton::Hovered, false);

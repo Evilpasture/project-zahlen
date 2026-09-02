@@ -423,8 +423,6 @@ struct Components {
     struct UICheckboxComponent {
         bool checked       = false;
         bool previousValue = false; // For external-mutation detection
-        bool hovered       = false;
-        char _pad[1]       = {};
     };
 
     struct UISliderComponent {
@@ -434,16 +432,14 @@ struct Components {
         float step          = 0.0f; // 0 = continuous
         float previousValue = 0.0f;
         bool  isDragging    = false;
-        bool  hovered       = false;
-        char  _pad[2]       = {};
+        char  _pad[3]       = {};
     };
 
     struct UIDropdownComponent {
         int32_t  selectedIdx    = 0;
         int32_t  previousIdx    = 0;
         bool     expanded       = false;
-        bool     hovered        = false;
-        char     _pad[2]        = {};
+        char     _pad[3]        = {};
         // Stored option strings (copied at build time so options are retained)
         ZHLN::Array<String128> options;
     };
@@ -451,8 +447,7 @@ struct Components {
     struct UICollapsingHeaderComponent {
         bool isOpen       = true;
         bool defaultOpen  = true;
-        bool hovered      = false;
-        char _pad[1]      = {};
+        char _pad[2]      = {};
     };
 
     struct UISplitterComponent {
@@ -460,9 +455,7 @@ struct Components {
         float ratio         = 0.5f; // Size of the first panel (0..1)
         float previousRatio = 0.5f;
         bool  isDragging    = false;
-        bool  hovered       = false;
         Direction direction = Horizontal;
-        char _pad[2]        = {};
     };
 
     struct UIStyleComponent {

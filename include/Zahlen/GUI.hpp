@@ -719,25 +719,22 @@ class Context {
         // matches the component.
         auto* cb = m_reg->Get<Components::UICheckboxComponent>(e);
 
+        // Toggle on click (ConsumeClick both tests and clears the flag).
+        if (ConsumeClick(e)) {
+            cb->checked = !cb->checked;
+        }
         // Accept external programmatic change when the caller flipped the
-        // value without a click (unless a click is pending this frame).
-        bool clickPending = false;
-        m_reg->Patch<Components::UIButtonComponent>(e, [&](auto& btn) -> auto {
-            if (btn.Has(UIButton::Clicked)) {
-                cb->checked  = !cb->checked;
-                clickPending = true;
-                btn.Set(UIButton::Clicked, false);
-            }
-        });
-        if (!clickPending && value != cb->checked) {
+        // value without a click.
+        else if (value != cb->checked) {
             cb->checked = value;
         }
 
         // Create / patch inner children (box + check mark + label)
         EnsureCheckboxChildren(e, label, cfg, fontHandle, cb->checked);
 
-        // Apply hover visual to the checkbox box via UIPanel on inner box child
-        PatchCheckboxVisuals(e, cfg, cb->checked, cb->hovered);
+        // Apply hover visual directly from the UIButtonComponent (single
+        // source of truth — no duplicated cb->hovered flag).
+        PatchCheckboxVisuals(e, cfg, cb->checked);
 
         // Push the (possibly new) ECS value back to the caller's reference
         value = cb->checked;
@@ -994,7 +991,6 @@ class Context {
                     .selectedIdx = selectedIdx,
                     .previousIdx = selectedIdx,
                     .expanded    = false,
-                    .hovered     = false,
                     .options     = {},
                 }
             );
@@ -1009,12 +1005,15 @@ class Context {
             dd->options.push_back(String128(opt));
         }
 
-        // Click on header toggles expansion; click on an item selects
-        m_reg->Patch<Components::UIButtonComponent>(e, [&](auto& btn) -> auto {
-            if (btn.Has(UIButton::Clicked)) {
-                dd->expanded = !dd->expanded;
-                btn.Set(UIButton::Clicked, false); // consume
-            }
+        // Click on header toggles expansion (ConsumeClick reads + clears the flag).
+        if (ConsumeClick(e)) {
+            dd->expanded = !dd->expanded;
+        }
+
+        // Update header panel color to reflect hover
+        m_reg->Patch<Components::UIPanelComponent>(e, [&](auto& pc) -> auto {
+            pc.color = IsHovered(e) ? cfg.hoverColor : cfg.bgColor;
+            pc.borderRadius = cfg.borderRadius;
         });
 
         // Header shows the currently selected option (or placeholder label)
@@ -1072,18 +1071,17 @@ class Context {
                 m_reg->Patch<Components::TextComponent>(itemEnt, [&](auto& tc) -> auto {
                     tc.text.assign(std::string_view(dd->options[i]));
                 });
+                bool isSelected = (i == dd->selectedIdx);
+                bool isItemHover = IsHovered(itemEnt);
                 m_reg->Patch<Components::UIPanelComponent>(itemEnt, [&](auto& pc) -> auto {
-                    pc.color = (i == dd->selectedIdx) ? cfg.selectedColor : cfg.bgColor;
+                    pc.color = isSelected ? cfg.selectedColor : (isItemHover ? cfg.hoverColor : cfg.bgColor);
                 });
 
-                // Handle item click
-                m_reg->Patch<Components::UIButtonComponent>(itemEnt, [&, i](auto& btn) -> auto {
-                    if (btn.Has(UIButton::Clicked)) {
-                        dd->selectedIdx = i;
-                        dd->expanded    = false;
-                        btn.Set(UIButton::Clicked, false);
-                    }
-                });
+                // Handle item click (consumes the click flag)
+                if (ConsumeClick(itemEnt)) {
+                    dd->selectedIdx = i;
+                    dd->expanded    = false;
+                }
             }
         }
 
@@ -1175,25 +1173,27 @@ class Context {
 
         auto* hdr = m_reg->Get<Components::UICollapsingHeaderComponent>(e);
 
-        // Ensure the clickable header button child exists
+        // Ensure the clickable header button child exists. The title child
+        // carries the UIButtonComponent so its hover flag is the source of
+        // truth for hover visuals.
         EnsureCollapsingHeaderTitle(e, label, cfg, fontHandle, hdr->isOpen);
 
-        // Make the title area clickable (we added UIButtonComponent on the _title child)
-        Entity titleEnt = FindChildByKey(e, HashStringView("_title"));
-        if (auto* titleBtn = (titleEnt != Entity::Null()) ? m_reg->Get<Components::UIButtonComponent>(titleEnt) : nullptr) {
-            if (titleBtn->Has(UIButton::Clicked)) {
-                hdr->isOpen = !hdr->isOpen;
-                titleBtn->Set(UIButton::Clicked, false);
-            }
+        // The clickable _title child carries the UIButtonComponent; consume
+        // a click there to toggle open/closed.
+        bool   titleClicked = false;
+        Entity titleEnt     = FindChildByKey(e, HashStringView("_title"));
+        if (titleEnt != Entity::Null()) {
+            titleClicked = ConsumeClick(titleEnt);
+        }
+        if (titleClicked) {
+            hdr->isOpen = !hdr->isOpen;
         }
 
-        // Update panel color to reflect state
+        // Update panel color to reflect open/hover state. Hover is read from
+        // the title child's UIButtonComponent (single source of truth).
+        bool titleHover = (titleEnt != Entity::Null()) && IsHovered(titleEnt);
         m_reg->Patch<Components::UIPanelComponent>(e, [&](auto& pc) -> auto {
-            if (hdr->hovered) {
-                pc.color = cfg.hoverColor;
-            } else {
-                pc.color = hdr->isOpen ? cfg.openColor : cfg.bgColor;
-            }
+            pc.color = titleHover ? cfg.hoverColor : (hdr->isOpen ? cfg.openColor : cfg.bgColor);
         });
 
         // If open, push a content child box (indented) and invoke content in its scope
@@ -1339,8 +1339,11 @@ class Context {
                 hf.flexShrink = 0.0f;
                 hf.flexBasis  = static_cast<float>(cfg.handleSize);
             });
+            // Handle hover color — read directly from the handle's own
+            // UIButtonComponent (single source of truth; no duplicated flag).
+            bool handleHover = IsHovered(handleEnt) || (split != nullptr && split->isDragging);
             m_reg->Patch<Components::UIPanelComponent>(handleEnt, [&](auto& hp) -> auto {
-                hp.color = split->hovered ? cfg.hoverColor : cfg.handleColor;
+                hp.color = handleHover ? cfg.hoverColor : cfg.handleColor;
             });
         }
 
@@ -1438,6 +1441,30 @@ class Context {
         return {this, e, InternalPush(e, depth)};
     }
 
+    // Consume a pending click on an entity's UIButtonComponent and return
+    // whether it fired this frame. Centralised so every compound widget
+    // handles click state in exactly one way.
+    [[nodiscard]] auto ConsumeClick(Entity e) noexcept -> bool {
+        bool clicked = false;
+        if (auto* btn = m_reg->Get<Components::UIButtonComponent>(e)) {
+            if (btn->Has(UIButton::Clicked)) {
+                clicked = true;
+                btn->Set(UIButton::Clicked, false);
+            }
+        }
+        return clicked;
+    }
+
+    // Read hover state directly from the entity's UIButtonComponent. This is
+    // the single source of truth for whether a widget is hovered — compound
+    // widgets never cache their own hover flag.
+    [[nodiscard]] auto IsHovered(Entity e) const noexcept -> bool {
+        if (const auto* btn = m_reg->Get<Components::UIButtonComponent>(e)) {
+            return btn->Has(UIButton::Hovered);
+        }
+        return false;
+    }
+
     // --- PRIVATE HELPERS FOR COMPOUND WIDGETS ---
 
     // Look up a child entity in the parent's child cache by its hash key.
@@ -1531,14 +1558,23 @@ class Context {
         });
     }
 
-    void PatchCheckboxVisuals(Entity e, const CheckboxConfig& cfg, bool checked, bool hovered) {
-        (void)checked;
-        Entity boxEnt = FindChildByKey(e, HashStringView("_cb_box"));
+    void PatchCheckboxVisuals(Entity e, const CheckboxConfig& cfg, bool checked) {
+        bool isHovered = IsHovered(e);
+        Entity boxEnt  = FindChildByKey(e, HashStringView("_cb_box"));
         if (boxEnt != Entity::Null()) {
-            if (auto* panel = m_reg->Get<Components::UIPanelComponent>(boxEnt)) {
-                panel->color        = hovered ? cfg.hoverColor : cfg.boxColor;
-                panel->edgeWidth    = 1.0f;
-                panel->borderRadius = cfg.borderRadius;
+            m_reg->Patch<Components::UIPanelComponent>(boxEnt, [&](auto& panel) -> auto {
+                panel.color        = isHovered ? cfg.hoverColor : cfg.boxColor;
+                panel.edgeWidth    = 1.0f;
+                panel.borderRadius = cfg.borderRadius;
+            });
+        }
+        // Update check-mark visibility (mark is a child of boxEnt)
+        if (boxEnt != Entity::Null()) {
+            Entity markEnt = FindChildByKey(boxEnt, HashStringView("_cb_mark"));
+            if (markEnt != Entity::Null()) {
+                m_reg->Patch<Components::UIPanelComponent>(markEnt, [&](auto& mc) -> auto {
+                    mc.color = checked ? cfg.checkColor : JPH::Vec4 {0, 0, 0, 0};
+                });
             }
         }
     }
@@ -1628,8 +1664,12 @@ class Context {
             );
         });
         m_reg->Patch<Components::UIPanelComponent>(knobEnt, [&](auto& pc) -> auto {
-            auto* s = m_reg->Get<Components::UISliderComponent>(sliderEntity);
-            pc.color = (s != nullptr && s->hovered) ? cfg.hoverColor : cfg.knobColor;
+            // Hover on either the root slider entity, the track, or the knob itself
+            bool hover = IsHovered(sliderEntity) || IsHovered(trackEnt) || IsHovered(knobEnt);
+            auto* s    = m_reg->Get<Components::UISliderComponent>(sliderEntity);
+            bool active = (s != nullptr && s->isDragging) || hover;
+            pc.color = active ? cfg.hoverColor : cfg.knobColor;
+            pc.borderRadius = {cfg.knobSize / 2.0f, cfg.knobSize / 2.0f, cfg.knobSize / 2.0f, cfg.knobSize / 2.0f};
         });
     }
 
@@ -1723,9 +1763,15 @@ class Context {
     // under the dropdown while we iterate options. The push is balanced by
     // InternalPop via a local UIScope we return.
     [[nodiscard]] auto PushScopeForDropdownMenu(Entity ddEnt, uint32_t depth, const DropdownConfig& cfg) -> UIScope {
-        // Push dropdown entity
-        UIScope outer = PushScope(ddEnt, depth);
-        // Create a container box for the menu items (appears below the header)
+        // Create the menu container box directly under the dropdown entity.
+        //
+        // IMPORTANT: do NOT call PushScope(ddEnt) and then Dismiss() it here
+        // — Dismiss() runs SweepStaleChildren(ddEnt), which at this point has
+        // NOT yet seen the menu items we're about to create and would sweep
+        // them (and any previously-visited children) as stale. Just create
+        // the menuBox via GetOrCreateChild (which marks ddEnt's cache
+        // visited on create/lookup) and push only the menuBox onto the stack
+        // so option items are parented under it.
         std::array<char, 64> menuNameBuf {};
         std::string_view     menuName = FormatTo(menuNameBuf, "_dd_menu_{}", ddEnt.index);
         Entity menuBox = GetOrCreateChild(ddEnt, HashStringView(menuName), [&]() -> Entity {
@@ -1744,9 +1790,6 @@ class Context {
                 }
             );
         });
-        // Dismiss the outer scope (pushed ddEnt), then push menuBox so child
-        // items are parented to the menu container rather than the header.
-        outer.Dismiss();
         return PushScope(menuBox, depth + 1);
     }
 
