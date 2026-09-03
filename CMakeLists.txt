@@ -37,6 +37,21 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
 endif()
 
+# --- DWARF IN RELEASE, ALWAYS ---
+# An optimized build without debug info produces stacks that cannot be
+# symbolized, which makes release-mode crashes and profiler output worthless.
+# Plain Release therefore carries the same -g that RelWithDebInfo already has.
+# Must be set before any add_subdirectory: directory scope snapshots the flags
+# variables when the subdirectory is processed. Plain (non-cache) set, so a
+# user who deliberately passes -DCMAKE_CXX_FLAGS_RELEASE keeps their value and
+# merely gains -g on top of it.
+if(NOT CMAKE_CXX_FLAGS_RELEASE MATCHES "(^| )-g")
+    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -g")
+endif()
+if(NOT CMAKE_C_FLAGS_RELEASE MATCHES "(^| )-g")
+    set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -g")
+endif()
+
 # --- RETRIEVE GIT COMMIT HASH ---
 find_package(Git QUIET)
 if(GIT_FOUND)
