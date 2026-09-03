@@ -124,14 +124,32 @@ static void FiberMain(void* arg) {
             data->counter->value.fetch_sub(1, std::memory_order::release);
         }
 
-        // 3. Put this fiber back in the single-element local free pool
-        Fiber* self = Fiber::GetCurrent();
-        if (!PushLocalFiber(self)) {
-            s_freeQueue.Push(self);
-        }
+        // 3. Mark the task complete. The RESUMER recycles this fiber into
+        //    the free pool after Resume() returns -- never publish yourself
+        //    here: between the push and the Yield the fiber is still running,
+        //    and another thread that pops and resumes it becomes a second
+        //    owner (both threads end up inside the same fiber; one of them
+        //    returns from a Resume it never owned, and the fiber is dropped
+        //    from every queue -- the pool silently drains until the root
+        //    Dispatch starves).
+        Fiber::GetCurrent()->taskDone.store(true, std::memory_order::release);
 
         // 4. Yield back to the OS worker thread so it can grab the next Ready Fiber
         Fiber::Yield();
+    }
+}
+
+// Hand a fiber that just finished its task back to the pool. Called by the
+// resumer immediately after Resume() returns: at that instant the fiber is
+// provably suspended and this thread is its only owner. Blocked yields
+// (mutex/condvar/counter waits) leave taskDone clear and are skipped --
+// those fibers re-enter the ready queue through WakeUp instead.
+static inline void RecycleFiber(Fiber* f) noexcept {
+    if (f == nullptr || !f->taskDone.exchange(false, std::memory_order::acquire)) {
+        return;
+    }
+    if (!PushLocalFiber(f)) {
+        s_freeQueue.Push(f);
     }
 }
 
@@ -142,11 +160,21 @@ static void WorkerMain(uint32_t index) {
     t_workerIndex = index;
 
     while (true) {
+        // A fiber recycled into this thread's local cache is invisible to
+        // every other thread. Hand it back to the global free pool BEFORE
+        // sleeping: otherwise a root Dispatch can starve forever in
+        // s_freeQueue.PopOrWait() while every free fiber sits parked in a
+        // sleeping worker's cache (observed: whole pool idle at the post-task
+        // Yield, both global queues empty, main hung dispatching entry nodes).
+        if (Fiber* cached = PopLocalFiber()) {
+            s_freeQueue.Push(cached);
+        }
         Fiber* f = s_readyQueue.PopOrWait();
         if (f == nullptr) {
             break;
         }
         Fiber::Resume(f);
+        RecycleFiber(f);
     }
 }
 
@@ -269,6 +297,7 @@ void Wait(Counter* counter) {
             Fiber* f = s_readyQueue.TryPop();
             if (f != nullptr) {
                 Fiber::Resume(f);
+                RecycleFiber(f);
                 spinCount = 0;
             } else {
                 if (spinCount < 100) {

@@ -169,14 +169,16 @@ Fiber* Fiber::Create(size_t stackSize, FiberFunc func, void* arg) noexcept {
 }
 
 void Fiber::Resume(Fiber* target) noexcept {
-    //  Ensure the target OS thread has fully vacated this stack before we jump into it!
-    while (target->isRunning.load(std::memory_order::acquire)) {
+    // Claim the target atomically: a load-then-store pair lets two resumers
+    // both pass the guard and jump onto the same stack. The spin still
+    // ensures the previous resumer has fully vacated the stack before we
+    // jump into it.
+    while (target->isRunning.exchange(true, std::memory_order::acq_rel)) {
         CPURelax();
     }
 
     Fiber* self    = t_currentFiber;
     target->caller = self;
-    target->isRunning.store(true, std::memory_order::release);
 
     SwapTEB(target);
     t_currentFiber = target;
