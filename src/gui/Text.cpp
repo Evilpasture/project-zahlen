@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// File: src/engine/Text.cpp
+// File: src/gui/Text.cpp
 #include "Zahlen/Components.hpp"
 #include <Zahlen/GUI.hpp>
 #include <Zahlen/Log.hpp>

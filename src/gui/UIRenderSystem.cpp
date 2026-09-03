@@ -23,7 +23,7 @@ namespace ZHLN {
 namespace {
 
 // Text measurement is deliberately NOT re-implemented here: GUI::TextBounds /
-// GUI::MeasureTextBounds (src/engine/Text.cpp) are the single source of truth
+// GUI::MeasureTextBounds (src/gui/Text.cpp) are the single source of truth
 // shared with the Yoga measure callback and the word wrapper. A local copy is
 // how a label ends up measured as one line and drawn as a paragraph.
 using TextBounds = GUI::TextBounds;

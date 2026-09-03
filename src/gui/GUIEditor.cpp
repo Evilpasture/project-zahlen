@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// src/engine/GUIEditor.cpp
+// src/gui/GUIEditor.cpp
 //
 // Native editor panels (Hierarchy + Inspector). See include/Zahlen/GUIEditor.hpp
 // for the design notes; this file is where the reflection iteration lives, so

@@ -57,8 +57,8 @@
 #include <engine/system/TerrainSystem.hpp>
 #include <engine/system/TextureSystem.hpp>
 #include <engine/system/TransformSystem.hpp>
-#include <engine/system/UIInteractionSystem.hpp>
-#include <engine/system/UIRenderSystem.hpp>
+#include <gui/UIInteractionSystem.hpp>
+#include <gui/UIRenderSystem.hpp>
 #include <filesystem>
 #include <renderdoc_app.h>
 #ifdef __linux__

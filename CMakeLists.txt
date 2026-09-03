@@ -418,7 +418,7 @@ endif()
 set(RAW_ENGINE_SOURCES
     src/engine/AssertHandler.cpp
     src/engine/DefaultPreset.cpp
-    src/engine/GUIEditor.cpp
+    src/gui/GUIEditor.cpp
     src/engine/graphics/RenderFrame.cpp
     src/engine/graphics/RenderGraphBuilder.cpp
     src/engine/graphics/RenderDrawCommands.cpp
@@ -441,7 +441,7 @@ set(RAW_ENGINE_SOURCES
     src/engine/Platform.cpp
     src/engine/Console.cpp
     src/engine/Profiler.cpp
-    src/engine/Text.cpp
+    src/gui/Text.cpp
     src/engine/graphics/Resources.cpp
     src/engine/system/RenderSystem.cpp
     src/engine/system/GraphicsSettingsSync.cpp
@@ -466,8 +466,8 @@ set(RAW_ENGINE_SOURCES
     src/engine/system/CameraSystem.cpp
     src/engine/graphics/RenderDocInit.cpp
     src/engine/system/InteractionSystem.cpp
-    src/engine/system/UIRenderSystem.cpp
-    src/engine/system/UIInteractionSystem.cpp
+    src/gui/UIRenderSystem.cpp
+    src/gui/UIInteractionSystem.cpp
     src/engine/WindowSurface.cpp
     src/engine/graphics/RenderProcedural.cpp
     src/engine/graphics/RenderPasses.cpp

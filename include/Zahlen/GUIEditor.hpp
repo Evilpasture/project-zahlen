@@ -23,7 +23,7 @@
 //     String256 -> TextInput, JPH::Vec4 -> four sliders. Handles, textures
 //     and padding fields (leading '_') get no row in this version.
 //
-//   * The reflection iteration lives in src/engine/GUIEditor.cpp, not here.
+//   * The reflection iteration lives in src/gui/GUIEditor.cpp, not here.
 //     Compilers without P2996 build the engine through
 //     tools/transpile_reflection.py, which rewrites reflection calls by
 //     source offset within a translation unit; calls inside headers would be
