@@ -1,10 +1,11 @@
-// src/engine/system/UIInteractionSystem.cpp
+// src/gui/UIInteractionSystem.cpp
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "UIInteractionSystem.hpp"
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
+#include <Zahlen/GUI.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
@@ -39,9 +40,9 @@ auto GetBounds(const Components::UIRectComponent& r) -> Bounds {
     return {r.computedAbsMinX, r.computedAbsMinY, r.computedAbsMaxX, r.computedAbsMaxY};
 }
 
-auto Inside(Bounds b, float x, float y) -> bool {
-    return x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1;
-}
+// Point-in-rect hit testing lives in GUI::IsPointVisible, which also walks the
+// ancestor clip chain — a widget clipped away by a panel or scrolled out of a
+// viewport must not swallow hover or clicks.
 
 } // namespace
 
@@ -82,38 +83,19 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
     float deltaY        = state->mouseDeltaY;
     float wheel         = state->mouseWheel;
 
-    // TODO(Evilpasture): [UI-SCROLLING] Implement container & widget scrolling using the mouse wheel:
+    // [UI-SCROLLING] Mouse wheel dispatch + smooth scroll integration.
     //
-    // 1. COMPONENT (include/Zahlen/Components.hpp):
-    //    - Define `Components::UIScrollComponent`:
-    //      * `float scrollX = 0.0f, scrollY = 0.0f;`
-    //      * `float targetScrollY = 0.0f;` (for smooth lerping via dt)
-    //      * `float maxScrollX = 0.0f, maxScrollY = 0.0f;` (calculated during layout)
-    //      * `float scrollSpeed = 35.0f;`
-    //      * `bool smoothScroll = true;`
+    // The wheel goes to the innermost scrollable under the pointer (deepest
+    // hierarchyDepth wins, so a scroller nested in a scroller scrolls itself),
+    // and every viewport eases towards its target — including the ones that
+    // are not hovered, so a fling that started last frame still settles.
     //
-    // 2. LAYOUT PROPAGATION (src/engine/system/UILayoutSystem.hpp):
-    //    - In `ReadBackLayout`, check if the parent entity has a `UIScrollComponent`:
-    //      Subtract parent `scrollX` and `scrollY` from the origin passed to child nodes:
-    //      `self(self, childEnt, rect->computedAbsMinX - scrollX, rect->computedAbsMinY - scrollY);`
-    //    - Post-layout pass: Measure total child bounding extent vs container height to
-    //      compute `maxScrollY = std::max(0.0f, contentHeight - containerHeight)`.
-    //
-    // 3. INTERACTION & WHEEL DISPATCH (here in UIInteractionSystem.cpp):
-    //    - If `std::abs(wheel) > 0.001f`:
-    //      a) Find the innermost (deepest `hierarchyDepth`) hovered container with `UIScrollComponent`.
-    //      b) Adjust `targetScrollY = std::clamp(targetScrollY - wheel * scrollSpeed, 0.0f, maxScrollY)`.
-    //      c) (Optional) If hovering an active `UISliderComponent`, adjust `slider->value` by `wheel * step`.
-    //    - Per-frame smooth scroll integration:
-    //      `scroll->scrollY += (scroll->targetScrollY - scroll->scrollY) * std::clamp(15.0f * dt, 0.0f, 1.0f);`
-    //
-    // 4. CLIPPING & SCISSORING (src/engine/system/UIRenderSystem.cpp):
-    //    - Scrollable containers must have `UIRectComponent.clipChildren = true`.
-    //    - As child vertices shift past bounds, `IntersectScissor` automatically handles GPU clipping.
-    //
-    // 5. FLUENT BUILDER API (include/Zahlen/GUI.hpp):
-    //    - Add `ui.ScrollBox("Name", ScrollBoxConfig { ... }, [&]() { ... })` helper in `GUI::Context`.
-    (void) wheel;
+    // Content extents (maxScrollX/Y) are measured in the layout pass, which
+    // runs after this one, so the clamp here uses last frame's extent. That is
+    // the same one-frame lag the scroll offset itself has, and it is why
+    // ApplyScrollInput clamps against the component's stored range instead of
+    // recomputing it from geometry.
+    GUI::ApplyScrollInput(reg, GUI::ScrollInput {.mouseX = mouseX, .mouseY = mouseY, .wheelDelta = wheel, .deltaTime = dt});
 
     // Reset per-frame hover on every UIButtonComponent in one pass. The
     // UIButtonComponent::Hovered flag is the single source of truth for hover
@@ -136,7 +118,13 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                 // Slider drag: adjust slider value
                 if (auto* slider = reg.Get<Components::UISliderComponent>(sliderEnt)) {
                     if (!leftMouseDown) {
+                        // Release BOTH latches. Forgetting the drag-component
+                        // latch here made the handle stay "armed" after the
+                        // first drag: the next left press anywhere on the
+                        // screen re-activated the slider and the knob jumped
+                        // to follow an unrelated click -- the "sticky slider".
                         slider->isDragging = false;
+                        drag->isDragging   = false;
                     } else if (drag->isDragging || slider->isDragging) {
                         if (!slider->isDragging) {
                             slider->isDragging = true;
@@ -187,6 +175,7 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                 if (auto* split = reg.Get<Components::UISplitterComponent>(splitterEnt)) {
                     if (!leftMouseDown) {
                         split->isDragging = false;
+                        drag->isDragging  = false; // same latch leak as the slider
                     } else if (drag->isDragging || split->isDragging) {
                         if (!split->isDragging) {
                             split->isDragging = true;
@@ -228,22 +217,27 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
     struct SortEntry {
         size_t   rawIndex;
         uint32_t depth;
+        uint32_t order;
     };
     JPH::Array<SortEntry> sortedEntries;
     sortedEntries.reserve(entities.size());
     for (size_t i = 0; i < entities.size(); ++i) {
-        sortedEntries.push_back({.rawIndex = i, .depth = rects[i].hierarchyDepth});
+        sortedEntries.push_back({.rawIndex = i, .depth = rects[i].hierarchyDepth, .order = rects[i].layoutOrder});
     }
-    std::ranges::sort(sortedEntries, [](const auto& a, const auto& b) { return a.depth > b.depth; });
+    // Deepest first; at equal depth the widget drawn LAST (highest layoutOrder)
+    // is on top and must win the hit test -- the same order the render pass
+    // draws in, so what you see on top is what you click.
+    std::ranges::sort(sortedEntries, [](const auto& a, const auto& b) {
+        return (a.depth != b.depth) ? (a.depth > b.depth) : (a.order > b.order);
+    });
 
     bool   clickConsumed   = false;
     bool   focusCaptured   = false;
     Entity clickedDropdown = Entity::Null();
 
     for (const auto& entry: sortedEntries) {
-        Entity      e      = entities[entry.rawIndex];
-        const auto& rect   = rects[entry.rawIndex];
-        auto*       button = reg.Get<Components::UIButtonComponent>(e);
+        Entity e      = entities[entry.rawIndex];
+        auto*  button = reg.Get<Components::UIButtonComponent>(e);
 
         bool hidden = IsEntityOrAncestorHidden(e);
 
@@ -263,8 +257,11 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
             continue;
         }
 
-        Bounds b      = GetBounds(rect);
-        bool   inside = Inside(b, mouseX, mouseY);
+        // Hit-test through the clip chain, not just the widget's own rect: a
+        // row scrolled out of a ScrollBox viewport (or clipped by a panel with
+        // clipChildren) is invisible, and an invisible widget must not swallow
+        // hover or clicks. IsPointVisible walks the ancestors that clip.
+        const bool inside = GUI::IsPointVisible(reg, e, mouseX, mouseY);
 
         if (clickConsumed) {
             button->Set(UIButton::Hovered, false);
@@ -335,6 +332,19 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                     clickedDropdown = ddEnt;
                 }
 
+                // The menu itself lives on the overlay root, so the dropdown is
+                // NOT an ancestor of its own option rows. Resolve the owner
+                // through UIPopupComponent; without this, clicking an option
+                // reads as a click "outside every dropdown" and the menu closes
+                // in the same frame the selection would have been applied.
+                if (Entity popEnt = FindAncestorWith<Components::UIPopupComponent>(reg, e); popEnt != Entity::Null()) {
+                    if (const auto* pop = reg.Get<Components::UIPopupComponent>(popEnt)) {
+                        if (reg.Get<Components::UIDropdownComponent>(pop->owner) != nullptr) {
+                            clickedDropdown = pop->owner;
+                        }
+                    }
+                }
+
                 if (auto* drag = reg.Get<Components::UIDragComponent>(e)) {
                     drag->isDragging = true;
                 }
@@ -343,7 +353,14 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                     focusCaptured = true;
                     for (Entity other: reg.GetEntitiesWith<Components::UITextInputComponent>()) {
                         if (auto* inputComp = reg.Get<Components::UITextInputComponent>(other)) {
-                            inputComp->isFocused = (other == e);
+                            const bool nowFocused = (other == e);
+                            if (nowFocused && !inputComp->isFocused) {
+                                // Focus gain selects the pre-focus content so
+                                // typing replaces it instead of appending to it.
+                                inputComp->selectAll   = true;
+                                inputComp->cursorIndex = 0;
+                            }
+                            inputComp->isFocused = nowFocused;
                         }
                     }
                 }

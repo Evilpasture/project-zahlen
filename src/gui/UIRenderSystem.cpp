@@ -22,65 +22,11 @@ namespace ZHLN {
 
 namespace {
 
-struct TextBounds {
-    float              minX = 0.0f;
-    float              maxX = 0.0f;
-    float              minY = 0.0f;
-    float              maxY = 0.0f;
-    [[nodiscard]] auto width() const noexcept -> float {
-        return maxX - minX;
-    }
-    [[nodiscard]] auto height() const noexcept -> float {
-        return maxY - minY;
-    }
-};
-
-// Measures the exact visual ink bounding box of the rendered glyphs
-auto MeasureTextBounds(const FontAtlas& font, std::string_view text, float scale) noexcept -> TextBounds {
-    if (text.empty()) {
-        return {};
-    }
-
-    TextBounds bounds;
-    bounds.minX = 1e9f;
-    bounds.maxX = -1e9f;
-    bounds.minY = 1e9f;
-    bounds.maxY = -1e9f;
-
-    float currentX  = 0.0f;
-    bool  hasGlyphs = false;
-
-    for (char c: text) {
-        if (c == '\n' || c == '\r') {
-            continue;
-        }
-        uint32_t glyphCode = static_cast<uint8_t>(c);
-        if (glyphCode < 32 || glyphCode > 127) {
-            glyphCode = '?';
-        }
-
-        const auto& g = font.glyphs[glyphCode - 32];
-
-        float x0 = currentX + g.xoff * scale;
-        float x1 = x0 + (g.x1 - g.x0) * scale;
-        float y0 = (g.yoff + 28.0f) * scale;
-        float y1 = y0 + (g.y1 - g.y0) * scale;
-
-        bounds.minX = std::min(bounds.minX, x0);
-        bounds.maxX = std::max(bounds.maxX, x1);
-        bounds.minY = std::min(bounds.minY, y0);
-        bounds.maxY = std::max(bounds.maxY, y1);
-
-        currentX += g.xadvance * scale;
-        hasGlyphs = true;
-    }
-
-    if (!hasGlyphs) {
-        return {};
-    }
-
-    return bounds;
-}
+// Text measurement is deliberately NOT re-implemented here: GUI::TextBounds /
+// GUI::MeasureTextBounds (src/gui/Text.cpp) are the single source of truth
+// shared with the Yoga measure callback and the word wrapper. A local copy is
+// how a label ends up measured as one line and drawn as a paragraph.
+using TextBounds = GUI::TextBounds;
 
 // Computes the intersection [x0, y0, x1, y1] between two scissor rectangles
 auto IntersectScissor(const ScissorRect& a, const ScissorRect& b) noexcept -> ScissorRect {
@@ -142,6 +88,7 @@ void UIRenderSystem::Update(Engine& engine) {
     struct SortEntry {
         Entity   entity;
         uint32_t depth;
+        uint32_t order;
     };
     std::vector<SortEntry> sortedEntries;
     sortedEntries.reserve(uniqueEntities.size());
@@ -153,15 +100,23 @@ void UIRenderSystem::Update(Engine& engine) {
         }
 
         uint32_t depth = 0;
+        uint32_t order = 0;
         if (auto* rect = reg.Get<Components::UIRectComponent>(e)) {
             depth = rect->hierarchyDepth;
+            order = rect->layoutOrder;
         }
 
-        sortedEntries.push_back({.entity = e, .depth = depth});
+        sortedEntries.push_back({.entity = e, .depth = depth, .order = order});
     }
 
-    // Sort ALL UI Entities by Hierarchy Depth (Ascending: Parents & lower layers first)
-    std::ranges::sort(sortedEntries, [](const auto& a, const auto& b) -> auto { return a.depth < b.depth; });
+    // Sort ALL UI Entities by Hierarchy Depth (Ascending: parents and lower
+    // layers first). Entries come out of an unordered_set, so same-depth ties
+    // MUST break on layoutOrder or the draw order of overlapping windows is
+    // nondeterministic from frame to frame -- panels and text of two windows
+    // interleaving differently every run.
+    std::ranges::sort(sortedEntries, [](const auto& a, const auto& b) -> auto {
+        return (a.depth != b.depth) ? (a.depth < b.depth) : (a.order < b.order);
+    });
 
     // ========================================================================
     // 3. PRE-PASS: TOP-DOWN MULTI-ANCESTOR SCISSOR PROPAGATION & INTERSECTION
@@ -293,6 +248,29 @@ void UIRenderSystem::Update(Engine& engine) {
             }
         }
 
+        // A2. Process Image (if entity has UIImageComponent)
+        // A dedicated primitive rather than a panel background: the scale mode
+        // and the sub-UV region decide the quad's shape, and Tile needs one
+        // quad per repeat, which the 54-vertex panel budget cannot express.
+        if (auto* image = reg.Get<Components::UIImageComponent>(e)) {
+            if (rect != nullptr) {
+                const uint32_t needed = GUI::CountImageVertices(*rect, *image);
+                if (needed > 0) {
+                    size_t startIdx = localPositions.size();
+                    localPositions.resize(startIdx + needed);
+                    localAttributes.resize(startIdx + needed);
+
+                    uint32_t written = GUI::AppendImageVertices(&localPositions[startIdx], &localAttributes[startIdx], *rect, *image);
+
+                    localPositions.resize(startIdx + written);
+                    localAttributes.resize(startIdx + written);
+
+                    currentVertexOffset += written;
+                    QueueBatch(image->texture, written, useScissor, currentScissor, false);
+                }
+            }
+        }
+
         // B. Process Text (if entity has TextComponent)
         if (auto* text = reg.Get<Components::TextComponent>(e)) {
             float drawX = text->offsetX;
@@ -342,11 +320,31 @@ void UIRenderSystem::Update(Engine& engine) {
                 }
             }
 
+            float containerWidth  = 0.0f;
+            float containerHeight = 0.0f;
             if (rect != nullptr) {
-                float containerWidth  = rect->computedAbsMaxX - rect->computedAbsMinX;
-                float containerHeight = rect->computedAbsMaxY - rect->computedAbsMinY;
+                containerWidth  = rect->computedAbsMaxX - rect->computedAbsMinX;
+                containerHeight = rect->computedAbsMaxY - rect->computedAbsMinY;
+            }
 
-                TextBounds bounds = (activeFont != nullptr) ? MeasureTextBounds(*activeFont, displayStr, text->scale) : TextBounds {};
+            // Wrap when the widget asks for it. The breaks come from the same
+            // shaper the Yoga measure callback uses (GUI::WrapTextInto), so a
+            // label is drawn exactly as tall and as wide as it was laid out.
+            ZHLN::FixedString<GUI::kWrapBufferCapacity> wrappedText;
+            std::string_view                            drawStr = displayStr;
+            if (text->wrapText && activeFont != nullptr) {
+                float wrapAt = text->wrapWidth;
+                if (wrapAt <= 0.0f) {
+                    wrapAt = containerWidth;
+                }
+                if (wrapAt > 0.0f) {
+                    GUI::WrapTextInto(*activeFont, displayStr, text->scale, wrapAt, wrappedText);
+                    drawStr = std::string_view(wrappedText);
+                }
+            }
+
+            if (rect != nullptr) {
+                TextBounds bounds = (activeFont != nullptr) ? GUI::MeasureTextBounds(*activeFont, drawStr, text->scale) : TextBounds {};
 
                 // 1. Horizontal Alignment (Clamped to prevent left overflow)
                 if (text->align == TextAlignment::Center) {
@@ -371,16 +369,57 @@ void UIRenderSystem::Update(Engine& engine) {
                 }
             }
 
-            if (activeFont != nullptr && !displayStr.empty()) {
-                auto   maxVertsNeeded = static_cast<uint32_t>(displayStr.length() * 6);
-                size_t startIdx       = localPositions.size();
+            if (activeFont != nullptr && !drawStr.empty()) {
+                const auto   maxVertsNeeded = static_cast<uint32_t>(drawStr.size() * 6);
+                const size_t startIdx       = localPositions.size();
 
                 localPositions.resize(startIdx + maxVertsNeeded);
                 localAttributes.resize(startIdx + maxVertsNeeded);
 
-                uint32_t written = GUI::AppendTextVertices(
-                    &localPositions[startIdx], &localAttributes[startIdx], *activeFont, displayStr, drawX, drawY, text->scale, text->color
-                );
+                // AppendTextVertices resets its pen to the block's left edge on
+                // every '\n', which left-aligns each line inside the block. A
+                // centred or right-aligned paragraph therefore has to be
+                // emitted one line at a time, each with its own x.
+                const bool multiLine   = drawStr.find('\n') != std::string_view::npos;
+                const bool perLineDraw = multiLine && (text->align != TextAlignment::Left);
+
+                uint32_t written = 0;
+                if (!perLineDraw) {
+                    written = GUI::AppendTextVertices(
+                        &localPositions[startIdx], &localAttributes[startIdx], *activeFont, std::string(drawStr), drawX, drawY, text->scale, text->color
+                    );
+                } else {
+                    const float lineHeight = GUI::TextLineHeight(text->scale);
+                    float       lineY      = drawY;
+                    size_t      pos        = 0;
+
+                    while (pos <= drawStr.size()) {
+                        const size_t     newline = drawStr.find('\n', pos);
+                        const size_t     lineEnd = (newline == std::string_view::npos) ? drawStr.size() : newline;
+                        std::string_view line    = drawStr.substr(pos, lineEnd - pos);
+
+                        const TextBounds lineBounds = GUI::MeasureTextBounds(*activeFont, line, text->scale);
+                        float            lineX      = drawX;
+                        if (rect != nullptr) {
+                            if (text->align == TextAlignment::Center) {
+                                lineX = rect->computedAbsMinX + std::max(0.0f, (containerWidth - lineBounds.width()) * 0.5f) - lineBounds.minX + text->offsetX;
+                            } else {
+                                lineX = rect->computedAbsMinX + std::max(0.0f, containerWidth - lineBounds.width()) - lineBounds.minX + text->offsetX;
+                            }
+                        }
+
+                        written += GUI::AppendTextVertices(
+                            &localPositions[startIdx + written], &localAttributes[startIdx + written], *activeFont, std::string(line), lineX, lineY,
+                            text->scale, text->color
+                        );
+
+                        if (newline == std::string_view::npos) {
+                            break;
+                        }
+                        lineY += lineHeight;
+                        pos = newline + 1;
+                    }
+                }
 
                 localPositions.resize(startIdx + written);
                 localAttributes.resize(startIdx + written);

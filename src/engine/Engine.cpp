@@ -57,8 +57,8 @@
 #include <engine/system/TerrainSystem.hpp>
 #include <engine/system/TextureSystem.hpp>
 #include <engine/system/TransformSystem.hpp>
-#include <engine/system/UIInteractionSystem.hpp>
-#include <engine/system/UIRenderSystem.hpp>
+#include <gui/UIInteractionSystem.hpp>
+#include <gui/UIRenderSystem.hpp>
 #include <filesystem>
 #include <renderdoc_app.h>
 #ifdef __linux__
@@ -740,22 +740,43 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
                 auto* inputComp = reg->Get<Components::UITextInputComponent>(e);
                 if (inputComp && inputComp->isFocused) {
                     std::string_view curr = inputComp->text;
-                    if (key == KeyCode::Backspace && inputComp->cursorIndex > 0) {
-                        std::string next = std::string(curr.substr(0, inputComp->cursorIndex - 1)) + std::string(curr.substr(inputComp->cursorIndex));
-                        inputComp->text.assign(next);
-                        inputComp->cursorIndex--;
-                        inputComp->edited = true;
-                    } else if (key == KeyCode::Delete && inputComp->cursorIndex < curr.size()) {
-                        std::string next = std::string(curr.substr(0, inputComp->cursorIndex)) + std::string(curr.substr(inputComp->cursorIndex + 1));
-                        inputComp->text.assign(next);
-                        inputComp->edited = true;
-                    } else if (key == KeyCode::Left && inputComp->cursorIndex > 0) {
-                        inputComp->cursorIndex--;
-                    } else if (key == KeyCode::Right && inputComp->cursorIndex < curr.size()) {
-                        inputComp->cursorIndex++;
+                    if (key == KeyCode::Backspace) {
+                        if (inputComp->selectAll) {
+                            inputComp->text.assign("");
+                            inputComp->cursorIndex = 0;
+                            inputComp->selectAll   = false;
+                            inputComp->edited      = true;
+                        } else if (inputComp->cursorIndex > 0) {
+                            std::string next = std::string(curr.substr(0, inputComp->cursorIndex - 1)) + std::string(curr.substr(inputComp->cursorIndex));
+                            inputComp->text.assign(next);
+                            inputComp->cursorIndex--;
+                            inputComp->edited = true;
+                        }
+                    } else if (key == KeyCode::Delete) {
+                        if (inputComp->selectAll) {
+                            inputComp->text.assign("");
+                            inputComp->cursorIndex = 0;
+                            inputComp->selectAll   = false;
+                            inputComp->edited      = true;
+                        } else if (inputComp->cursorIndex < curr.size()) {
+                            std::string next = std::string(curr.substr(0, inputComp->cursorIndex)) + std::string(curr.substr(inputComp->cursorIndex + 1));
+                            inputComp->text.assign(next);
+                            inputComp->edited = true;
+                        }
+                    } else if (key == KeyCode::Left) {
+                        inputComp->selectAll = false; // caret movement drops the selection
+                        if (inputComp->cursorIndex > 0) {
+                            inputComp->cursorIndex--;
+                        }
+                    } else if (key == KeyCode::Right) {
+                        inputComp->selectAll = false;
+                        if (inputComp->cursorIndex < curr.size()) {
+                            inputComp->cursorIndex++;
+                        }
                     } else if (key == KeyCode::Enter || key == KeyCode::Escape) {
                         // Commit/defocus: leave focus but don't clear text
                         inputComp->isFocused = false;
+                        inputComp->selectAll = false;
                     }
                 }
             }
@@ -785,12 +806,22 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
         for (Entity e: reg->GetEntitiesWith<Components::UITextInputComponent>()) {
             auto* inputComp = reg->Get<Components::UITextInputComponent>(e);
             if (inputComp && inputComp->isFocused) {
-                if (codepoint >= 32 && codepoint <= 126 && inputComp->text.size() < 255) {
-                    std::string_view curr = inputComp->text;
-                    std::string      next = std::string(curr.substr(0, inputComp->cursorIndex)) + static_cast<char>(codepoint) +
-                                            std::string(curr.substr(inputComp->cursorIndex));
-                    inputComp->text.assign(next);
-                    inputComp->cursorIndex++;
+                if (codepoint >= 32 && codepoint <= 126) {
+                    if (inputComp->selectAll) {
+                        // First key after focus gain replaces the selection:
+                        // "Default" goes away when the user types.
+                        inputComp->text.assign(std::string(1, static_cast<char>(codepoint)));
+                        inputComp->cursorIndex = 1;
+                        inputComp->selectAll   = false;
+                    } else if (inputComp->text.size() < 255) {
+                        std::string_view curr = inputComp->text;
+                        std::string      next = std::string(curr.substr(0, inputComp->cursorIndex)) + static_cast<char>(codepoint) +
+                                                std::string(curr.substr(inputComp->cursorIndex));
+                        inputComp->text.assign(next);
+                        inputComp->cursorIndex++;
+                    } else {
+                        return;
+                    }
                     inputComp->edited = true;
                 }
             }

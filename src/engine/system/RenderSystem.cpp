@@ -6,7 +6,7 @@
 #include "CullingSystem.hpp"
 #include "GraphicsSettingsSync.hpp"
 #include "LightingSystem.hpp"
-#include "UIRenderSystem.hpp"
+#include <gui/UIRenderSystem.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>

@@ -30,6 +30,8 @@ auto RunMathAndIKSuite() -> ZHLN::Test::TestStats;
 auto RunGraphicsSettingsSuite() -> ZHLN::Test::TestStats;
 auto RunGUIContextSuite() -> ZHLN::Test::TestStats;
 auto RunUILayoutSuite() -> ZHLN::Test::TestStats;
+auto RunGUIPrimitivesSuite() -> ZHLN::Test::TestStats;
+auto RunGUIEditorSuite() -> ZHLN::Test::TestStats;
 auto RunRayTracedNoiseMetricsSuite() -> ZHLN::Test::TestStats;
 
 auto main() -> int {
@@ -42,6 +44,8 @@ auto main() -> int {
         RunGraphicsSettingsSuite,
         RunGUIContextSuite,
         RunUILayoutSuite,
+        RunGUIPrimitivesSuite,
+        RunGUIEditorSuite,
         RunRayTracedNoiseMetricsSuite
     );
 }

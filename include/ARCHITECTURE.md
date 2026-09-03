@@ -402,3 +402,74 @@ When porting prototype gameplay or math logic from a **TypeScript + Three.js + R
 | **Box Geometry Sizes** | Full-Extents $(W, H, D)$ | **Half-Extents** $(X, Y, Z)$ | ⚠️ **Divide dimensions by 2** |
 | **Clip Depth Range** | $[-1, 1]$ (WebGL) | $[0, 1]$ (Vulkan) | ⚠️ **Use `Math::CreatePerspective`** |
 | **Euler Rotation Order** | Default: 'XYZ' | Default: 'YXZ' (Yaw, Pitch, Roll) | Use `MathUtils::EulerYXZ` or `EulerXYZ` |
+
+## 8. Native ECS UI (`Zahlen/GUI.hpp`)
+
+ImGui stays for debug overlays; in-engine tooling is built with the engine's own
+UI toolkit. It obeys the Core Law: there is no widget object. A `GUI::Context`
+is constructed per frame and *builds entities* — every widget is a set of
+components (`UIRectComponent` + `UIPanelComponent` / `UIFlexComponent` /
+`TextComponent` / `UIButtonComponent` / …) laid out by Yoga and batched by
+`UIRenderSystem`.
+
+```cpp
+// Phase::UI
+GUI::Context ui(engine.GetRegistry(), engine.GetCurrentFrame());
+ui.Panel("Browser", cfg, [&]() { ... });   // ~Context sweeps the root cache
+```
+
+**Two paradigms, never mixed per widget.** A container either returns a
+`[[nodiscard]] UIScope` (`Panel`, `Box`, `BeginScrollBox`, `BeginPopup`,
+`BeginCollapsingHeader`) whose lifetime *is* the push/pop pair, or it takes a
+closure and returns `Entity`, opening and closing the scope around the
+callback. `static_assert`s at the bottom of `GUI.hpp` fail the build if a
+closure form is ever regressed into returning a live scope — that is the
+CollapsingHeader lifetime bug they exist to prevent.
+
+**Fault tolerance.** Builders never return errors: the first structural problem
+latches into `Context::Status()` (`std::expected<void, Error>`). Only
+`DestroyUIEntity` is monadic. `UIButtonComponent`'s `Hovered`/`Pressed`/
+`Clicked` flags are the single source of truth for pointer state; compound
+widgets must not cache their own hover flag.
+
+### Designer-facing primitives
+
+| Builder | Purpose | Notes |
+| :--- | :--- | :--- |
+| `ui.ScrollBox(id, cfg, fn)` / `ui.BeginScrollBox` | Mouse-wheel container | `cfg.height` is the **viewport** height; `flexGrow = 1` lets the box absorb the parent's free space instead. Structure: root row → `_sb_viewport` (column, `clipChildren`, `UIScrollComponent`) + `_sb_track` → `_sb_thumb`. Children of a scroll viewport never flex-shrink, so overflow survives to be scrolled. The box itself shrinks only when `flexGrow > 0`: a declared viewport height stays authoritative, a flexible box yields to its parent instead of pushing the rows under it out of the panel. |
+| `ui.Image(id, tex, cfg)` / `ui.Icon(id, tex, size)` | First-class sprite | `Stretch` / `FitAspect` / `CropAspect` / `Tile`, plus a sub-UV region (`uv0`/`uv1`) for atlas slices. `sourceWidth`/`sourceHeight` give the sprite its intrinsic size. Carries no `UIPanelComponent`, so it emits exactly one primitive. |
+| `ui.Selectable(id, label, selected, …)` | List / tree row | `normal` → `hover` → `selected` → `active` (selected **and** hovered) styling, `onDoubleClick` counted in frames (`doubleClickSpan`). Structure: the row itself is the flex row that carries the `UIButtonComponent` and the highlight, with `_sel_label` inside it. |
+| `ui.TreeNode(id, label, open, fn, cfg, [onDoubleClick])` | Branch row | One `bool` drives arrow, row highlight and the `_children` content box. A single click toggles the branch; the second click of a double click fires `onDoubleClick` instead of toggling, so activating a node never closes it. Structure: the returned entity is a **column** holding `_sel_row` (`_sel_arrow` + `_sel_label`; carries the button, the highlight and the bound state's paint) and `<id>_children` as *siblings*. The content box must never be a child of the row — a row is a main-axis container, so the branch's children would be laid out to the right of its own label instead of below it. The bound `UISelectableComponent` lives on the column, so hovering a branch's children cannot light up the branch's row. |
+| `ui.Tooltip(text)` / `ui.TooltipFor(owner, text)` | Hover hint | Attaches to the last built item (or an explicit owner); appears after `delayFrames` of continuous hover. |
+| `ui.Popup(owner, cfg, fn)` / `ui.BeginPopup` | Context menus, dropdowns | Anchored at the owner's last laid-out rect, so it follows with a one-frame delay. `openUpward` flips it using the previous frame's height. |
+| `ui.Label(text, {.wrap = true})` | Wrapped text | `maxWidth = 0` wraps at the width the container offers. Pair it with `height = 0`, or a fixed height clips the extra lines. |
+
+### Overlay layer
+
+Popups, dropdown menus and tooltips are parented to a single
+`__ui_overlay_root__` entity that has **no parent**, `clipChildren = false` and
+`hierarchyDepth = UI_OVERLAY_DEPTH` (4096). That is what lets them escape every
+ancestor scissor the renderer propagates: the renderer draws in ascending depth
+order and the interaction pass hit-tests in descending order, so overlay
+geometry is both on top of every widget and first in line for the pointer. A
+popup's owner is recorded in `UIPopupComponent::owner`, which is how the
+interaction pass tells "clicked inside the menu" from "clicked outside".
+
+### Scrolling pipeline
+
+1. `UILayoutSystem` lays out the tree, then calls `GUI::UpdateScrollExtents`,
+   which measures each viewport's content extent from its laid-out children
+   (padding included) and derives `maxScrollX/Y`. A viewport contributes its
+   *own* height to auto-height ancestors, never its content height.
+2. `UIInteractionSystem` calls `GUI::ApplyScrollInput`, which gives the wheel to
+   the innermost scrollable under the pointer (deepest `hierarchyDepth` wins)
+   and eases every viewport towards its target — hovered or not, so a fling
+   still settles.
+3. The next layout pass subtracts the offset from the viewport's child origin.
+   The viewport's own rect does not move, which is what turns the shift into
+   clipping.
+4. Hit-testing goes through `GUI::IsPointVisible`, which walks the ancestor
+   clip chain: a row scrolled out of its viewport is inert, not just invisible.
+
+Worked example: [`samples/GUIToolingPrimitivesSample.cpp`](../samples/GUIToolingPrimitivesSample.cpp).
+Behaviour is pinned by [`tests/core/TestGUIPrimitives.cpp`](../tests/core/TestGUIPrimitives.cpp).

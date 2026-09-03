@@ -7,16 +7,20 @@ endif()
 
 # Extras suites are registered ad hoc (one add_test per target), unlike the CPU
 # groups in tests/CMakeLists.txt. Route every extras test through this helper so
-# it receives the shared sanitizer and Vulkan sandbox environment.
+# it receives the shared sanitizer environment, plus the opt-in Vulkan sandbox
+# pin — these suites are CPU-labelled, so they follow the same rule as the CPU
+# groups: pinned only when ZHLN_TEST_VULKAN_SANDBOX is ON.
 function(zahlen_register_extras_test TARGET_NAME)
     add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
     set_tests_properties(${TARGET_NAME} PROPERTIES
         LABELS "CPU;Fast;Extras"
         ${ARGN}
     )
-    if(ZHLN_TEST_ENVIRONMENT)
+    set(EXTRAS_TEST_ENVIRONMENT ${ZHLN_TEST_ENVIRONMENT})
+    list(APPEND EXTRAS_TEST_ENVIRONMENT ${ZHLN_VULKAN_SANDBOX_ENVIRONMENT})
+    if(EXTRAS_TEST_ENVIRONMENT)
         set_tests_properties(${TARGET_NAME} PROPERTIES
-            ENVIRONMENT "${ZHLN_TEST_ENVIRONMENT}"
+            ENVIRONMENT "${EXTRAS_TEST_ENVIRONMENT}"
         )
     endif()
 endfunction()

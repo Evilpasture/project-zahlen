@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// File: src/engine/Text.cpp
+// File: src/gui/Text.cpp
 #include "Zahlen/Components.hpp"
 #include <Zahlen/GUI.hpp>
 #include <Zahlen/Log.hpp>
@@ -26,11 +26,23 @@ TextBounds MeasureTextBounds(const FontAtlas& font, std::string_view text, float
     bounds.minY = 1e9f;
     bounds.maxY = -1e9f;
 
+    // Line breaks are part of the measurement, not something the renderer gets
+    // to discover on its own: AppendTextVertices advances by TextLineHeight on
+    // '\n' and resets the pen to the line's left edge, so the bounds of a
+    // multi-line string are the union of its lines rather than the width of
+    // every glyph run together. Without this, a wrapped label measures as one
+    // line wide and one line tall while drawing as a paragraph.
     float currentX  = 0.0f;
+    float lineTop   = 0.0f;
     bool  hasGlyphs = false;
 
     for (char c: text) {
-        if (c == '\n' || c == '\r') {
+        if (c == '\n') {
+            currentX = 0.0f;
+            lineTop += TextLineHeight(scale);
+            continue;
+        }
+        if (c == '\r') {
             continue;
         }
         uint32_t glyphCode = static_cast<uint8_t>(c);
@@ -42,7 +54,7 @@ TextBounds MeasureTextBounds(const FontAtlas& font, std::string_view text, float
 
         float x0 = currentX + g.xoff * scale;
         float x1 = x0 + (g.x1 - g.x0) * scale;
-        float y0 = (g.yoff + 28.0f) * scale;
+        float y0 = lineTop + (g.yoff + 28.0f) * scale;
         float y1 = y0 + (g.y1 - g.y0) * scale;
 
         bounds.minX = std::min(bounds.minX, x0);
@@ -61,6 +73,14 @@ TextBounds MeasureTextBounds(const FontAtlas& font, std::string_view text, float
     return bounds;
 }
 
+TextBounds MeasureWrappedTextBounds(const FontAtlas& font, std::string_view text, float scale, float maxWidth) noexcept {
+    // The wrap and the measure share one buffer size so the layout pass and
+    // the renderer can never disagree about which characters survived.
+    ZHLN::FixedString<kWrapBufferCapacity> wrapped;
+    WrapTextInto(font, text, scale, maxWidth, wrapped);
+    return MeasureTextBounds(font, std::string_view(wrapped), scale);
+}
+
 uint32_t AppendTextVertices(
     VertexPosition*    outPos,
     VertexAttributes*  outAttr,
@@ -77,7 +97,7 @@ uint32_t AppendTextVertices(
 
     float         currentX     = x;
     float         currentY     = y;
-    float         lineHeight   = 36.0f * scale; // Line height step for newlines
+    float         lineHeight   = TextLineHeight(scale); // Line height step for newlines
     PackedRGBA8   packedColor  = Math::PackColor(color.GetX(), color.GetY(), color.GetZ(), color.GetW());
     Packed1010102 dummyNormal  = Math::PackNormal(0, 1, 0);
     Packed1010102 dummyTangent = Math::PackNormal(1, 0, 0, 1);
@@ -286,6 +306,171 @@ uint32_t
         emitVertex(x0, y1, 0.0f, 1.0f);
         emitVertex(x1, y1, 1.0f, 1.0f);
     }
+    return writtenCount;
+}
+
+namespace {
+
+// Tile emits one quad per repeat, so its vertex count depends on the rect.
+// The repeat count is capped: a 1-pixel sprite tiled across a full-screen quad
+// would otherwise ask for a million quads from a typo'd sourceWidth.
+constexpr int32_t kMaxTileRepeats = 64;
+
+struct ImageQuad {
+    float dx0;
+    float dy0;
+    float dx1;
+    float dy1;
+    float du0;
+    float dv0;
+    float du1;
+    float dv1;
+};
+
+} // namespace
+
+uint32_t CountImageVertices(const Components::UIRectComponent& rect, const Components::UIImageComponent& image) noexcept {
+    const float width  = rect.computedAbsMaxX - rect.computedAbsMinX;
+    const float height = rect.computedAbsMaxY - rect.computedAbsMinY;
+    if (width <= 0.0f || height <= 0.0f || image.tint.GetW() <= 0.0f) {
+        return 0;
+    }
+
+    if (image.mode == ImageScaleMode::Tile) {
+        const float tileWidth  = (image.sourceWidth > 0.0f) ? image.sourceWidth : width;
+        const float tileHeight = (image.sourceHeight > 0.0f) ? image.sourceHeight : height;
+        const int32_t columns  = std::clamp(static_cast<int32_t>(std::ceil(width / tileWidth)), 1, kMaxTileRepeats);
+        const int32_t rows     = std::clamp(static_cast<int32_t>(std::ceil(height / tileHeight)), 1, kMaxTileRepeats);
+        return static_cast<uint32_t>(columns) * static_cast<uint32_t>(rows) * 6u;
+    }
+
+    return 6;
+}
+
+uint32_t AppendImageVertices(
+    VertexPosition*                     outPos,
+    VertexAttributes*                   outAttr,
+    const Components::UIRectComponent&  rect,
+    const Components::UIImageComponent& image
+) {
+    const float x0 = rect.computedAbsMinX;
+    const float y0 = rect.computedAbsMinY;
+    const float x1 = rect.computedAbsMaxX;
+    const float y1 = rect.computedAbsMaxY;
+
+    const float width  = x1 - x0;
+    const float height = y1 - y0;
+    if (width <= 0.0f || height <= 0.0f || image.tint.GetW() <= 0.0f) {
+        return 0;
+    }
+
+    PackedRGBA8   c = Math::PackColor(image.tint.GetX(), image.tint.GetY(), image.tint.GetZ(), image.tint.GetW());
+    Packed1010102 n = Math::PackNormal(0, 0, 1);
+    Packed1010102 t = Math::PackNormal(1, 0, 0, 1);
+
+    uint32_t writtenCount = 0;
+    auto     emitVertex   = [&](float px, float py, float u, float v) -> void {
+        outPos[writtenCount]    = {{px, py, 0.0f}};
+        outAttr[writtenCount++] = {.normal = n, .tangent = t, .uv = Math::PackUV(u, v), .color = c};
+    };
+    auto emitQuad = [&](const ImageQuad& q) -> void {
+        emitVertex(q.dx0, q.dy0, q.du0, q.dv0);
+        emitVertex(q.dx0, q.dy1, q.du0, q.dv1);
+        emitVertex(q.dx1, q.dy0, q.du1, q.dv0);
+        emitVertex(q.dx1, q.dy0, q.du1, q.dv0);
+        emitVertex(q.dx0, q.dy1, q.du0, q.dv1);
+        emitVertex(q.dx1, q.dy1, q.du1, q.dv1);
+    };
+
+    const float su0 = image.uv0x;
+    const float sv0 = image.uv0y;
+    const float su1 = image.uv1x;
+    const float sv1 = image.uv1y;
+
+    const bool  hasSourceSize = (image.sourceWidth > 0.0f) && (image.sourceHeight > 0.0f);
+    ImageQuad   quad {.dx0 = x0, .dy0 = y0, .dx1 = x1, .dy1 = y1, .du0 = su0, .dv0 = sv0, .du1 = su1, .dv1 = sv1};
+
+    switch (image.mode) {
+        case ImageScaleMode::FitAspect: {
+            // Scale to fit INSIDE the rect: the quad shrinks and centres, the
+            // UV region stays whole. This is the "icon" behaviour.
+            if (hasSourceSize) {
+                const float s  = std::min(width / image.sourceWidth, height / image.sourceHeight);
+                const float nw = image.sourceWidth * s;
+                const float nh = image.sourceHeight * s;
+                const float cx = (x0 + x1) * 0.5f;
+                const float cy = (y0 + y1) * 0.5f;
+                quad.dx0       = cx - nw * 0.5f;
+                quad.dx1       = cx + nw * 0.5f;
+                quad.dy0       = cy - nh * 0.5f;
+                quad.dy1       = cy + nh * 0.5f;
+            }
+            emitQuad(quad);
+            break;
+        }
+
+        case ImageScaleMode::CropAspect: {
+            // Scale to COVER the rect and crop: the quad keeps the full rect,
+            // the UV window is inset so the aspect ratio survives.
+            if (hasSourceSize) {
+                const float s      = std::max(width / image.sourceWidth, height / image.sourceHeight);
+                const float visW   = (s > 0.0f) ? (width / s) : image.sourceWidth;
+                const float visH   = (s > 0.0f) ? (height / s) : image.sourceHeight;
+                const float uSpan  = (su1 - su0) * std::clamp(visW / image.sourceWidth, 0.0f, 1.0f);
+                const float vSpan  = (sv1 - sv0) * std::clamp(visH / image.sourceHeight, 0.0f, 1.0f);
+                const float cu     = (su0 + su1) * 0.5f;
+                const float cv     = (sv0 + sv1) * 0.5f;
+                quad.du0           = cu - uSpan * 0.5f;
+                quad.du1           = cu + uSpan * 0.5f;
+                quad.dv0           = cv - vSpan * 0.5f;
+                quad.dv1           = cv + vSpan * 0.5f;
+            }
+            emitQuad(quad);
+            break;
+        }
+
+        case ImageScaleMode::Tile: {
+            // Repeat the region at its native pixel size. Emitting one quad
+            // per repeat keeps this correct with the renderer's clamped UI
+            // sampler — no reliance on hardware UV wrap.
+            const float tileWidth  = (image.sourceWidth > 0.0f) ? image.sourceWidth : width;
+            const float tileHeight = (image.sourceHeight > 0.0f) ? image.sourceHeight : height;
+            const int32_t columns  = std::clamp(static_cast<int32_t>(std::ceil(width / tileWidth)), 1, kMaxTileRepeats);
+            const int32_t rows     = std::clamp(static_cast<int32_t>(std::ceil(height / tileHeight)), 1, kMaxTileRepeats);
+
+            for (int32_t row = 0; row < rows; ++row) {
+                for (int32_t col = 0; col < columns; ++col) {
+                    const float tileX = x0 + static_cast<float>(col) * tileWidth;
+                    const float tileY = y0 + static_cast<float>(row) * tileHeight;
+                    // Edge tiles are cropped by the rect, and their UV window
+                    // is inset by the same fraction so the sprite is not
+                    // stretched into the leftover sliver.
+                    const float cellW = std::min(tileWidth, x1 - tileX);
+                    const float cellH = std::min(tileHeight, y1 - tileY);
+                    if (cellW <= 0.0f || cellH <= 0.0f) {
+                        continue;
+                    }
+
+                    ImageQuad tile {.dx0 = tileX,
+                                    .dy0 = tileY,
+                                    .dx1 = tileX + cellW,
+                                    .dy1 = tileY + cellH,
+                                    .du0 = su0,
+                                    .dv0 = sv0,
+                                    .du1 = su0 + (su1 - su0) * (cellW / tileWidth),
+                                    .dv1 = sv0 + (sv1 - sv0) * (cellH / tileHeight)};
+                    emitQuad(tile);
+                }
+            }
+            break;
+        }
+
+        case ImageScaleMode::Stretch:
+        default:
+            emitQuad(quad);
+            break;
+    }
+
     return writtenCount;
 }
 

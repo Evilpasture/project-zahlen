@@ -108,11 +108,15 @@ function(zahlen_add_cpu_test_group TARGET_NAME GROUP_DIR)
     add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
     set_tests_properties(${TARGET_NAME} PROPERTIES LABELS "CPU;Fast")
 
-    # Pass shared test options (sanitizers and, on Linux, the Vulkan sandbox)
-    # to CTest even when sanitizers are disabled.
-    if(ZHLN_TEST_ENVIRONMENT)
+    # Shared test options (sanitizers, plus the opt-in Vulkan sandbox pin)
+    # reach CTest even when sanitizers are disabled. The sandbox pin lives in
+    # its own list so the GPU groups can opt out of it: VK_DRIVER_FILES would
+    # otherwise hide the hardware those suites are named after.
+    set(CPU_TEST_ENVIRONMENT ${ZHLN_TEST_ENVIRONMENT})
+    list(APPEND CPU_TEST_ENVIRONMENT ${ZHLN_VULKAN_SANDBOX_ENVIRONMENT})
+    if(CPU_TEST_ENVIRONMENT)
         set_tests_properties(${TARGET_NAME} PROPERTIES
-            ENVIRONMENT "${ZHLN_TEST_ENVIRONMENT}"
+            ENVIRONMENT "${CPU_TEST_ENVIRONMENT}"
         )
     endif()
 endfunction()

@@ -94,6 +94,13 @@ enum class TerrainHandle : uint64_t { Invalid = 0 };
 enum class AudioHandle : uint64_t { Invalid = 0 };
 enum class SynthHandle : uint64_t { Invalid = 0 };
 // NOLINTEND(performance-enum-size)
+// NOTE: these are BINDLESS SLOT indices conceptually, but they are NOT valid
+// TextureHandles. TextureHandle keys are hashed asset ids
+// (TextureManager::RegisterUploaded -> HashAssetID), and the fallback slots are
+// registered separately (RenderInternal.hpp: black 0, white 1, flat normal 2).
+// Passing SystemTextures::White therefore logs "[Warning] TextureHandle 0x2 was
+// not found in registry" and falls back to white anyway. Use
+// TextureHandle::Invalid when you want the white fallback texture.
 namespace SystemTextures {
 inline constexpr TextureHandle Invalid    = TextureHandle(0);
 inline constexpr TextureHandle Black      = TextureHandle(1);

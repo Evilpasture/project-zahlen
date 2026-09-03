@@ -33,6 +33,14 @@ struct alignas(128) Fiber {
     bool              isFinished;
     bool              isMain;
     std::atomic<bool> isRunning;
+    // Set by the fiber right before its final Yield of a task, read by the
+    // resumer after Resume() returns: "this fiber finished its task, recycle
+    // it". Fibers that yield while blocked (mutex/condvar/counter waits)
+    // leave it clear, so resumers never recycle a fiber that is still owed a
+    // wakeup. Only the resumer may recycle -- a fiber that publishes itself
+    // as free BEFORE suspending can be claimed by a second thread while it
+    // is still running, which double-owns the fiber and corrupts the pool.
+    std::atomic<bool> taskDone {false};
 
     // Static API for Mutex/Scheduler access
     static Fiber* GetCurrent() noexcept;

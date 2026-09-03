@@ -40,6 +40,16 @@ enum class FlexWrap : uint8_t { NoWrap = 0, Wrap, WrapReverse };
 enum class FlexJustify : uint8_t { FlexStart = 0, Center, FlexEnd, SpaceBetween, SpaceAround, SpaceEvenly };
 enum class FlexAlign : uint8_t { Auto = 0, FlexStart, Center, FlexEnd, Stretch, Baseline };
 
+// How a UI image maps its source region onto the widget's laid-out rect.
+//  * Stretch    — ignore the source aspect ratio, fill the rect exactly.
+//  * FitAspect  — keep the aspect ratio, scale to fit INSIDE the rect
+//                 (letterboxed; the quad is centred and smaller than the rect).
+//  * CropAspect — keep the aspect ratio, scale to COVER the rect and crop the
+//                 overflow by insetting the UV region.
+//  * Tile       — repeat the source region at its native pixel size until the
+//                 rect is filled (edge tiles are cropped).
+enum class ImageScaleMode : uint8_t { Stretch = 0, FitAspect = 1, CropAspect = 2, Tile = 3 };
+
 enum class AudioWaveformType : uint8_t { Sine = 0, Square = 1, Triangle = 2, Sawtooth = 3 };
 enum class AudioFilterType : uint8_t { LowPass = 0, HighPass = 1, BandPass = 2, Notch = 3 };
 enum class AudioNoiseType : uint8_t { White = 0, Pink = 1, Brownian = 2 };
@@ -56,6 +66,15 @@ struct Components {
         TextureHandle fontIndex = TextureHandle::Invalid;
         float         offsetX   = 0.0f;
         float         offsetY   = 0.0f;
+
+        // Automatic word wrapping. When set, the layout measure function wraps
+        // the text at the width Yoga offers (or `wrapWidth` when non-zero) and
+        // the renderer breaks the same lines, so measurement and drawing can
+        // never disagree. Off by default: single-line labels keep their old
+        // "one line, no reflow" behaviour.
+        bool wrapText   = false;
+        float wrapWidth = 0.0f; // 0 = wrap at the laid-out container width
+        char _pad[2]    = {};
     };
 
     struct UIChildCacheComponent {
@@ -329,6 +348,12 @@ struct Components {
     struct UISettingsComponent {
         TextureHandle defaultFontAtlas = TextureHandle::Invalid;
         FontAtlas     fontAtlas;
+        // Monotonic creation-stamp source for UIRectComponent::layoutOrder.
+        // Lives in the REGISTRY (not in GUI::Context, which is rebuilt every
+        // frame): a per-context counter restarted at 1 each frame, so a widget
+        // recreated after a collapse got a SMALLER order than its surviving
+        // siblings and jumped above them -- sections "dropping up" on reopen.
+        uint32_t      nextLayoutOrder = 1;
     };
     struct ItemBaseComponent {
         String64 name;
@@ -363,10 +388,16 @@ struct Components {
     struct UIRectComponent {
         ZHLN::Entity parentEntity {};
 
-        float x      = 0.0f;
-        float y      = 0.0f;
-        float width  = 100.0f;
-        float height = 100.0f;
+        float x = 0.0f;
+        float y = 0.0f;
+        // 0 = auto: the size is derived by the flex/anchor layout instead of
+        // being pinned. These used to default to 100, which silently froze
+        // every widget built without an explicit `.width` (compound-widget
+        // labels, collapsing headers, checkbox rows, ...) at exactly 100px, so
+        // a 400px panel showed a 100px column of controls hugging its left
+        // edge. UILayoutSystem only applies a size when it is > 0.
+        float width  = 0.0f;
+        float height = 0.0f;
 
         float anchorMinX = 0.0f;
         float anchorMinY = 0.0f;
@@ -379,6 +410,12 @@ struct Components {
         float computedAbsMaxY = 0.0f;
 
         uint32_t hierarchyDepth = 0;
+        // Monotonic creation stamp assigned by GUI::Context. The ECS dense-array
+        // order reshuffles on every swap-remove destroy (collapsing a section
+        // destroys a dozen entities), so it must never decide sibling order or
+        // draw/hit-test layering: layout, render and interaction all sort by
+        // (hierarchyDepth, layoutOrder) instead. 0 = not stamped (pre-GUI rect).
+        uint32_t layoutOrder    = 0;
         bool     clipChildren   = false;
         char     _free_space[3] {};
     };
@@ -417,7 +454,13 @@ struct Components {
         uint32_t  cursorIndex = 0;
         bool      isFocused   = false;
         bool      edited      = false; // Set true by engine on text mutation; builder clears after reading
-        char      _pad[2]     = {};
+        // Set on the unfocused->focused transition: the pre-focus content is
+        // "selected", so the first printable key REPLACES it ("Default" goes
+        // away when you type) and Backspace deletes it wholesale. Any caret
+        // movement (Left/Right) or commit clears it, matching how name fields
+        // behave in tool UIs.
+        bool      selectAll   = false;
+        char      _pad[1]     = {};
     };
 
     struct UICheckboxComponent {
@@ -456,6 +499,92 @@ struct Components {
         float previousRatio = 0.5f;
         bool  isDragging    = false;
         Direction direction = Horizontal;
+    };
+
+    // Scrollable viewport state. Lives on the ScrollBox's clipping viewport
+    // entity; the layout pass measures the content extent and clamps the
+    // offsets, the interaction pass integrates the wheel into `targetScroll*`
+    // and eases `scroll*` towards it.
+    struct UIScrollComponent {
+        float scrollX       = 0.0f;
+        float scrollY       = 0.0f;
+        float targetScrollX = 0.0f;
+        float targetScrollY = 0.0f;
+
+        // Content extent in pixels, measured by the layout pass from the
+        // viewport's laid-out children (padding and gaps included).
+        float contentWidth  = 0.0f;
+        float contentHeight = 0.0f;
+
+        // Scrollable range: max(0, contentExtent - viewportExtent). Written by
+        // the layout pass; the interaction pass clamps against it.
+        float maxScrollX = 0.0f;
+        float maxScrollY = 0.0f;
+
+        float scrollSpeed = 35.0f;  // Pixels per wheel notch
+        float smoothSpeed = 15.0f;  // Exponential easing rate (1/seconds)
+        bool  smoothScroll = true;
+        bool  allowHorizontal = false;
+        char  _pad[2]         = {};
+    };
+
+    // A textured quad: an icon, a sprite, or a slice of a sprite atlas. The
+    // renderer emits this instead of the plain panel quad whenever the entity
+    // carries one, and the UV rectangle below selects the source region.
+    struct UIImageComponent {
+        TextureHandle  texture  = TextureHandle::Invalid;
+        ImageScaleMode mode     = ImageScaleMode::Stretch;
+        JPH::Vec4      tint     = {1.0f, 1.0f, 1.0f, 1.0f};
+
+        // Sub-UV region inside the texture (sprite-sheet slice). (0,0)-(1,1)
+        // is the whole texture.
+        float uv0x = 0.0f;
+        float uv0y = 0.0f;
+        float uv1x = 1.0f;
+        float uv1y = 1.0f;
+
+        // Native size of the selected region in pixels. Required by
+        // FitAspect/CropAspect (aspect source) and by Tile (repeat pitch).
+        float sourceWidth  = 0.0f;
+        float sourceHeight = 0.0f;
+    };
+
+    // List/tree row state: selection plus the double-click bookkeeping. The
+    // double-click window is counted in FRAMES (not seconds) because GUI::Context
+    // is fed a frame counter, which keeps the gesture deterministic in tests.
+    struct UISelectableComponent {
+        bool     selected        = false;
+        bool     doubleClicked   = false; // Consumed by the builder, cleared each frame
+        uint64_t lastClickFrame  = 0;
+        uint32_t doubleClickSpan = 18; // Frames allowed between the two clicks
+        bool     _pad0           = false;
+        char     _pad[2]         = {};
+    };
+
+    // Marks a subtree that is parented under the top-level overlay root instead
+    // of under the widget that logically owns it, so popups escape every
+    // ancestor scissor (a clipped panel, a scrolled viewport). `owner` is the
+    // widget the popup belongs to; the interaction pass uses it to decide
+    // whether a click landed "inside the dropdown" or outside it.
+    struct UIPopupComponent {
+        ZHLN::Entity owner = ZHLN::Entity::Null();
+        bool         open  = true;
+        char         _pad[3] = {};
+    };
+
+    // Hover-introspection state parked on the widget a tooltip describes. The
+    // tooltip itself is transient overlay geometry; this component only
+    // remembers how long the owner has been hovered so a delay can be applied.
+    struct UITooltipComponent {
+        String256  text;
+        uint64_t   hoverStartFrame = 0; // 0 = not hovered last frame
+        uint32_t   delayFrames     = 20;
+        float      scale           = 0.80f;
+        JPH::Vec4  bgColor         = {0.05f, 0.07f, 0.11f, 0.98f};
+        JPH::Vec4  textColor       = {0.90f, 0.95f, 1.00f, 1.00f};
+        JPH::Vec4  borderColor     = {0.26f, 0.38f, 0.58f, 1.00f};
+        float      offsetX         = 14.0f;
+        float      offsetY         = 18.0f;
     };
 
     struct UIStyleComponent {
