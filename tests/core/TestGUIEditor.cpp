@@ -24,6 +24,7 @@
 #include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/GUI.hpp>
 #include <Zahlen/GUIEditor.hpp>
+#include <Zahlen/Math3D.hpp>
 #include <Zahlen/Types.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <cstdint>
@@ -268,6 +269,91 @@ struct GUIEditorTestSuite {
                 ZHLN::Test::ExpectTrue(FindEntityNamed(reg, "rect") != Entity::Null());
             }
             return {};
+        }
+
+        auto hierarchy_lists_pure_3d_entities() -> std::expected<void, ZHLN::Error> {
+            Registry reg;
+            // A 3D scene entity: named + transform, but no UIRectComponent.
+            Entity   prop = reg.Create(
+                Comp::NameComponent {.name = ZHLN::String64("Barrel")},
+                Comp::TransformComponent {}
+            );
+            Entity   ui = MakeSceneEntity(reg, "Panel", 0, 3);
+
+            Editor::EditorState st;
+            {
+                GUI::Context gui(reg, 1);
+                const Entity panel = Editor::DrawHierarchyPanel(gui, st, "H");
+                ZHLN::Test::ExpectTrue(reg.IsAlive(panel));
+            }
+            ZHLN::Test::ExpectTrue(FindEntityNamed(reg, "H_row" + std::to_string(prop.index)) != Entity::Null());
+            ZHLN::Test::ExpectTrue(FindEntityNamed(reg, "H_row" + std::to_string(ui.index)) != Entity::Null());
+            ZHLN::Test::ExpectTrue(HasText(reg, "Barrel"));
+            return {};
+        }
+
+        auto inspector_covers_3d_components() -> std::expected<void, ZHLN::Error> {
+            Registry reg;
+            reg.Create(Comp::UISettingsComponent {.fontAtlas = MakeTestFont()});
+            Entity   e = reg.Create(
+                Comp::NameComponent {.name = ZHLN::String64("Lamp")},
+                Comp::TransformComponent {},
+                Comp::PBRComponent {},
+                Comp::LightComponent {}
+            );
+
+            Editor::EditorState st;
+            st.selectedEntity = e;
+            {
+                GUI::Context gui(reg, 1);
+                const Entity panel = Editor::DrawInspectorPanel(gui, st, "I");
+                ZHLN::Test::ExpectTrue(reg.IsAlive(panel));
+                ZHLN::Test::ExpectTrue(gui.Status().has_value());
+            }
+
+            ZHLN::Test::ExpectTrue(FindEntityNamed(reg, "transform") != Entity::Null());
+            ZHLN::Test::ExpectTrue(FindEntityNamed(reg, "pbr") != Entity::Null());
+            ZHLN::Test::ExpectTrue(FindEntityNamed(reg, "light") != Entity::Null());
+
+            if constexpr (ZHLN::Reflect::ReflectionAvailable) {
+                // Vec3 -> three axis rows, Quat -> three Euler-degree rows.
+                ZHLN::Test::ExpectTrue(FindEntityNamed(reg, "transform_position_x") != Entity::Null());
+                ZHLN::Test::ExpectTrue(FindEntityNamed(reg, "transform_position_z") != Entity::Null());
+                ZHLN::Test::ExpectTrue(FindEntityNamed(reg, "transform_rotation_rot_y") != Entity::Null());
+                ZHLN::Test::ExpectTrue(FindEntityNamed(reg, "transform_scale_x") != Entity::Null());
+                ZHLN::Test::ExpectTrue(FindEntityNamed(reg, "light_intensity") != Entity::Null());
+                // Mat44 (LightComponent::points) has no row type yet.
+                ZHLN::Test::ExpectTrue(FindEntityNamed(reg, "light_points") == Entity::Null());
+            }
+            return {};
+        }
+
+        auto inspector_rotation_roundtrip_is_stable_when_unedited() -> std::expected<void, ZHLN::Error> {
+            if constexpr (!ZHLN::Reflect::ReflectionAvailable) {
+                return {}; // no rows, no write-back path to exercise
+            } else {
+                Registry reg;
+                reg.Create(Comp::UISettingsComponent {.fontAtlas = MakeTestFont()});
+                const JPH::Quat original = ZHLN::Math::EulerDegreesToQuat(JPH::Vec3(10.0f, -45.0f, 170.0f));
+                Entity          e        = reg.Create(Comp::TransformComponent {.rotation = original});
+
+                Editor::EditorState st;
+                st.selectedEntity = e;
+                // Draw twice; nothing edits the rows, so the stored quaternion
+                // must survive both frames bit-identical (no Euler round-trip
+                // drift on untouched rotations).
+                for (int frame = 0; frame < 2; ++frame) {
+                    GUI::Context gui(reg, frame + 1);
+                    const Entity panel = Editor::DrawInspectorPanel(gui, st, "I");
+                    ZHLN::Test::ExpectTrue(reg.IsAlive(panel));
+                }
+                const auto* tf = reg.Get<Comp::TransformComponent>(e);
+                ZHLN::Test::ExpectTrue(tf != nullptr);
+                if (tf != nullptr) {
+                    ZHLN::Test::ExpectTrue(tf->rotation == original);
+                }
+                return {};
+            }
         }
 
         // Regression: rows used to be drawn through a live reference into the

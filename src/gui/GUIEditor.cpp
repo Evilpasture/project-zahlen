@@ -11,6 +11,7 @@
 #include <Zahlen/GUIEditor.hpp>
 
 #include <Zahlen/Components.hpp>
+#include <Zahlen/Math3D.hpp>
 #include <Zahlen/Core/Format.hpp>
 #include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/GUI.hpp>
@@ -114,6 +115,38 @@ namespace {
                 field.SetY(v[1]);
                 field.SetZ(v[2]);
                 field.SetW(v[3]);
+            } else if constexpr (std::is_same_v<FT, JPH::Vec3>) {
+                float v[3] = {field.GetX(), field.GetY(), field.GetZ()};
+                for (int axis = 0; axis < 3; ++axis) {
+                    std::array<char, 136> axisIdBuf {};
+                    const std::string_view axisId = ZHLN::FormatTo(axisIdBuf, "{}_{}", rowId, "xyz"[axis]);
+                    std::array<char, 96>  axisLabelBuf {};
+                    const std::string_view axisLabel = ZHLN::FormatTo(axisLabelBuf, "{} {}", name, "XYZ"[axis]);
+                    gui.Slider(axisId, axisLabel, v[axis], -10000.0f, 10000.0f);
+                }
+                field = JPH::Vec3(v[0], v[1], v[2]);
+            } else if constexpr (std::is_same_v<FT, JPH::Quat>) {
+                // Designers edit Euler degrees; the component stores a
+                // quaternion. Only write back when a row actually changed —
+                // an unconditional Euler->Quat->Euler round trip every frame
+                // would slowly drift (and sign-flip) untouched rotations.
+                const JPH::Vec3 euler = ZHLN::Math::QuatToEulerDegrees(field);
+                float           deg[3] = {euler.GetX(), euler.GetY(), euler.GetZ()};
+                bool            changed = false;
+                for (int axis = 0; axis < 3; ++axis) {
+                    std::array<char, 136> axisIdBuf {};
+                    const std::string_view axisId = ZHLN::FormatTo(axisIdBuf, "{}_rot_{}", rowId, "xyz"[axis]);
+                    std::array<char, 96>  axisLabelBuf {};
+                    const std::string_view axisLabel = ZHLN::FormatTo(axisLabelBuf, "{} Rot {}", name, "XYZ"[axis]);
+                    const float          prev = deg[axis];
+                    gui.Slider(axisId, axisLabel, deg[axis], -360.0f, 360.0f, 1.0f);
+                    if (deg[axis] != prev) {
+                        changed = true;
+                    }
+                }
+                if (changed) {
+                    field = ZHLN::Math::EulerDegreesToQuat(JPH::Vec3(deg[0], deg[1], deg[2]));
+                }
             } else if constexpr (std::is_same_v<FT, ZHLN::String256> || std::is_same_v<FT, ZHLN::String64>) {
                 gui.TextInput(rowId, name, field);
             }
@@ -137,15 +170,20 @@ auto DrawHierarchyPanel(
     };
 
     // Snapshot + sort: GetEntitiesWith returns dense-array order, which
-    // reshuffles on every swap-remove destroy. (hierarchyDepth, layoutOrder)
-    // is the stable key layout/render/hit-testing already sort by.
+    // reshuffles on every swap-remove destroy. UI entities sort by
+    // (hierarchyDepth, layoutOrder) — the stable key layout/render/
+    // hit-testing already use. Pure 3D entities (no UIRectComponent) have
+    // no layout stamps; they fall back to (0, entity index) so the list is
+    // still deterministic and they group ahead of deep UI nesting.
     std::vector<Row> rows;
-    for (const ZHLN::Entity e: reg.GetEntitiesWith<Comp::UIRectComponent>()) {
+    for (const ZHLN::Entity e: reg.GetEntitiesWith<Comp::NameComponent>()) {
         if (IsEditorEntity(e, reg, state.editorRoot)) {
             continue;
         }
         const auto* rect = reg.Get<Comp::UIRectComponent>(e);
-        rows.push_back(Row {e, rect->hierarchyDepth, rect->layoutOrder});
+        rows.push_back(Row {e,
+                            rect != nullptr ? rect->hierarchyDepth : 0u,
+                            rect != nullptr ? rect->layoutOrder : e.index});
     }
     std::stable_sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) -> bool {
         if (a.depth != b.depth) {
@@ -241,6 +279,12 @@ auto DrawInspectorPanel(
 
             section("name", "Name", reg.Get<Comp::NameComponent>(sel),
                     [](Comp::NameComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
+            section("transform", "Transform", reg.Get<Comp::TransformComponent>(sel),
+                    [](Comp::TransformComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
+            section("pbr", "PBR Material", reg.Get<Comp::PBRComponent>(sel),
+                    [](Comp::PBRComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
+            section("light", "Light", reg.Get<Comp::LightComponent>(sel),
+                    [](Comp::LightComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
             section("rect", "Rect", reg.Get<Comp::UIRectComponent>(sel),
                     [](Comp::UIRectComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
             section("flex", "Flex", reg.Get<Comp::UIFlexComponent>(sel),

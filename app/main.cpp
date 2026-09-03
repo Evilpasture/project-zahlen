@@ -28,6 +28,8 @@
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
+#include <Zahlen/GUI.hpp>
+#include <Zahlen/GUIEditor.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -761,6 +763,19 @@ struct EditorState {
 
 EditorState s_EditorState;
 
+// --- Native (self-hosted) editor state --------------------------------------
+// The ImGui EditorState above keeps the simulation toggle and fly-cam knobs;
+// selection now lives in the native EditorState, which the Hierarchy and
+// Inspector panels read and write directly.
+ZHLN::Editor::EditorState s_NativeEditorState;
+float    s_HierarchySplit = 0.22f;
+float    s_InspectorSplit = 0.72f;
+// Screen rect of the center viewport pane, refreshed by RunNativeEditorFrame.
+// Picking rays are gated to it so clicks on the native panels do not also
+// deselect/raycast into the world (the wantCaptureMouse trap: the native UI
+// does not siphon GLFW input).
+JPH::Vec4 s_ViewportScreenRect {0.0f, 0.0f, 0.0f, 0.0f};
+
 void UpdateEditorCamera(ZHLN::Camera& cam, const ZHLN::Components::InputStateComponent& state, float dt) {
     const float sensitivity = 0.15f;
 
@@ -1004,6 +1019,58 @@ void DrawEditorPanels(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& opti
     ImGui::End();
 }
 
+// Draws one frame of the self-hosted editor: [Hierarchy | Viewport | Inspector]
+// built entirely from native GUI widgets, replacing the ImGui DrawEditorPanels.
+// The whole workspace is parented under one panel whose entity is captured as
+// EditorState::editorRoot, so the hierarchy never lists the editor's own chrome.
+void RunNativeEditorFrame(ZHLN::Engine& engine) {
+    auto&              reg = engine.GetRegistry();
+    ZHLN::GUI::Context gui(reg, engine.GetCurrentFrame());
+
+    auto rootScope = gui.Panel("EditorWorkspace", ZHLN::GUI::PanelConfig {
+        .width      = 0.0f,
+        .height     = 0.0f,
+        .anchorMinX = 0.0f,
+        .anchorMinY = 0.0f,
+        .anchorMaxX = 1.0f,
+        .anchorMaxY = 1.0f,
+        .direction  = ZHLN::FlexDirection::Row
+    });
+    s_NativeEditorState.editorRoot = rootScope.GetEntity();
+
+    gui.Columns(
+        "EditorSplit_Left",
+        ZHLN::GUI::SplitDirection::Horizontal,
+        s_HierarchySplit,
+        [&]() -> void { ZHLN::Editor::DrawHierarchyPanel(gui, s_NativeEditorState, "Hierarchy"); },
+        [&]() -> void {
+            gui.Columns(
+                "EditorSplit_Right",
+                ZHLN::GUI::SplitDirection::Horizontal,
+                s_InspectorSplit,
+                [&]() -> void {
+                    // Center pane: the 3D scene renders behind the UI; cache
+                    // the pane's screen rect so world picking can be gated to
+                    // it. The Simulate toggle replaces the ImGui PLAY button.
+                    const ZHLN::Entity pane = gui.GetCurrentParent();
+                    if (const auto* r = reg.Get<ZHLN::Components::UIRectComponent>(pane)) {
+                        s_ViewportScreenRect = JPH::Vec4 {
+                            r->computedAbsMinX, r->computedAbsMinY,
+                            r->computedAbsMaxX, r->computedAbsMaxY
+                        };
+                    }
+                    gui.Box(
+                        "ViewportOverlay",
+                        ZHLN::GUI::BoxConfig {.flexShrink = 0.0f, .color = {0.0f, 0.0f, 0.0f, 0.0f}, .edgeWidth = 0.0f},
+                        [&]() -> void { gui.Checkbox("Simulate", s_EditorState.simulationRunning); }
+                    );
+                },
+                [&]() -> void { ZHLN::Editor::DrawInspectorPanel(gui, s_NativeEditorState, "Inspector"); }
+            );
+        }
+    );
+}
+
 int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options) {
     ZHLN::Clock clock;
     auto&       cam = engine.GetCamera();
@@ -1032,18 +1099,30 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
             break;
         }
 
-        if (state != nullptr && !state->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton)) && !imguiCapturesMouse) {
+        // World picking fires only from inside the center viewport pane: the
+        // native editor panels overlay the window but do not siphon GLFW
+        // input, so without this gate a click on the hierarchy would also
+        // cast a ray and clear the selection.
+        const bool pointerInViewport =
+            state != nullptr &&
+            state->mouseX >= s_ViewportScreenRect.GetX() && state->mouseX <= s_ViewportScreenRect.GetZ() &&
+            state->mouseY >= s_ViewportScreenRect.GetY() && state->mouseY <= s_ViewportScreenRect.GetW();
+
+        if (state != nullptr && pointerInViewport && !state->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton)) && !imguiCapturesMouse) {
             static bool wasMouseDown = false;
             bool        isMouseDown  = glfwGetMouseButton(static_cast<GLFWwindow*>(engine.GetWindow().GetNativeHandle()), GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
 
             if (isMouseDown && !wasMouseDown) {
-                auto hit                     = CastPickingRay(engine, cam);
-                s_EditorState.selectedEntity = hit.hasHit ? hit.handle : ZHLN::Entity::Null();
+                auto hit = CastPickingRay(engine, cam);
+                s_NativeEditorState.selectedEntity = hit.hasHit ? hit.handle : ZHLN::Entity::Null();
             }
             wasMouseDown = isMouseDown;
         }
 
-        DrawEditorPanels(engine, options);
+        // Native self-hosted editor frame (replaced the ImGui DrawEditorPanels;
+        // that function is kept below for reference until the ImGui editor
+        // scaffolding is retired for good).
+        RunNativeEditorFrame(engine);
 
         if (state != nullptr && state->needsResize) {
             engine.GetRenderContext().SetResolution(state->newSize);
