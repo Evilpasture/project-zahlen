@@ -58,9 +58,13 @@ void DrawRenderSettingsWindow(ZHLN::GUI::Context& ui, RenderSettings& s) {
                 ui.Checkbox("VSync", "Enable VSync", s.enableVsync);
                 ui.Checkbox("Wireframe", "Wireframe Overlay", s.showWireframe);
                 ui.Checkbox("Grid", "Show Grid", s.showGrid);
-                ui.DragFloat("FOV", s.fov, 30.0f, 120.0f, 0.5f);
-                ui.Slider("Exposure", s.exposure, 0.1f, 5.0f, 0.01f);
-                ui.Slider("Bloom", s.bloomIntensity, 0.0f, 1.0f, 0.01f);
+                // Same fixed label/value slots on every row: the tracks all
+                // start and end on the same x instead of flexing with the
+                // label ("FOV" vs "Exposure") and the value text mid-drag.
+                ZHLN::GUI::SliderConfig sliderCfg = {.labelWidth = 72.0f, .valueWidth = 40.0f};
+                ui.DragFloat("FOV", s.fov, 30.0f, 120.0f, 0.5f, sliderCfg);
+                ui.Slider("Exposure", s.exposure, 0.1f, 5.0f, 0.01f, sliderCfg);
+                ui.Slider("Bloom", s.bloomIntensity, 0.0f, 1.0f, 0.01f, sliderCfg);
             });
 
             ui.CollapsingHeader("Quality", false, [&]() -> void {

@@ -366,6 +366,13 @@ struct SliderConfig {
     JPH::Vec4 hoverColor   = {0.60f, 0.82f, 1.00f, 1.0f};
     JPH::Vec4 textColor    = {0.90f, 0.95f, 1.0f, 1.0f};
     bool      showValue    = true;
+    // Fixed-width label / value slots. 0 keeps the per-text auto width, which
+    // makes every row's track length depend on its words ("FOV" vs "Exposure")
+    // and re-resizes the track as the value text changes mid-drag. Give all
+    // sliders in a panel the same two numbers and every track starts and ends
+    // on the same x.
+    float     labelWidth   = 0.0f;
+    float     valueWidth   = 0.0f;
 };
 
 struct TextInputConfig {
@@ -1261,6 +1268,7 @@ class Context {
         if (!input->isFocused && externalText != currentText) {
             input->text.assign(externalText);
             input->cursorIndex = static_cast<uint32_t>(externalText.size());
+            input->selectAll   = false;
             currentText = std::string_view(input->text);
         }
 
@@ -2423,7 +2431,7 @@ class Context {
             Entity lblEnt = GetOrCreateChild(parent, HashStringView("_sl_label"), [&]() -> Entity {
                 return m_reg->Create(
                     Components::NameComponent {.name = String64("_sl_label")},
-                    Components::UIRectComponent {.parentEntity = parent, .height = cfg.height, .hierarchyDepth = parentDepth + 1},
+                    Components::UIRectComponent {.parentEntity = parent, .width = cfg.labelWidth, .height = cfg.height, .hierarchyDepth = parentDepth + 1},
                     Components::TextComponent {
                         .text          = String256(label),
                         .scale         = cfg.scale,
@@ -2434,6 +2442,7 @@ class Context {
                     }
                 );
             });
+            m_reg->Patch<Components::UIRectComponent>(lblEnt, [&](auto& r) -> auto { r.width = cfg.labelWidth; });
             m_reg->Patch<Components::TextComponent>(lblEnt, [&](auto& tc) -> auto { tc.text.assign(label); });
         }
 
@@ -2490,7 +2499,7 @@ class Context {
             Entity valEnt = GetOrCreateChild(parent, HashStringView("_sl_value"), [&]() -> Entity {
                 return m_reg->Create(
                     Components::NameComponent {.name = String64("_sl_value")},
-                    Components::UIRectComponent {.parentEntity = parent, .height = cfg.height, .hierarchyDepth = parentDepth + 1},
+                    Components::UIRectComponent {.parentEntity = parent, .width = cfg.valueWidth, .height = cfg.height, .hierarchyDepth = parentDepth + 1},
                     Components::TextComponent {
                         .text          = String256(std::string_view(valStr)),
                         .scale         = cfg.scale,
@@ -2501,6 +2510,7 @@ class Context {
                     }
                 );
             });
+            m_reg->Patch<Components::UIRectComponent>(valEnt, [&](auto& r) -> auto { r.width = cfg.valueWidth; });
             m_reg->Patch<Components::TextComponent>(valEnt, [&](auto& tc) -> auto {
                 tc.text.assign(std::string_view(valStr));
             });

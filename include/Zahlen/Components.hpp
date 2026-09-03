@@ -454,7 +454,13 @@ struct Components {
         uint32_t  cursorIndex = 0;
         bool      isFocused   = false;
         bool      edited      = false; // Set true by engine on text mutation; builder clears after reading
-        char      _pad[2]     = {};
+        // Set on the unfocused->focused transition: the pre-focus content is
+        // "selected", so the first printable key REPLACES it ("Default" goes
+        // away when you type) and Backspace deletes it wholesale. Any caret
+        // movement (Left/Right) or commit clears it, matching how name fields
+        // behave in tool UIs.
+        bool      selectAll   = false;
+        char      _pad[1]     = {};
     };
 
     struct UICheckboxComponent {

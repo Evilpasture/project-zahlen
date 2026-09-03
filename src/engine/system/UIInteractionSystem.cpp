@@ -353,7 +353,14 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                     focusCaptured = true;
                     for (Entity other: reg.GetEntitiesWith<Components::UITextInputComponent>()) {
                         if (auto* inputComp = reg.Get<Components::UITextInputComponent>(other)) {
-                            inputComp->isFocused = (other == e);
+                            const bool nowFocused = (other == e);
+                            if (nowFocused && !inputComp->isFocused) {
+                                // Focus gain selects the pre-focus content so
+                                // typing replaces it instead of appending to it.
+                                inputComp->selectAll   = true;
+                                inputComp->cursorIndex = 0;
+                            }
+                            inputComp->isFocused = nowFocused;
                         }
                     }
                 }
