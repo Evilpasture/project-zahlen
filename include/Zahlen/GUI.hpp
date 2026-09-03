@@ -774,7 +774,7 @@ class Context {
         // 2. Not found -> Spawn new entity
         Entity newEntity = createFn();
         if (auto* freshRect = m_reg->Get<Components::UIRectComponent>(newEntity)) {
-            freshRect->layoutOrder = m_layoutOrder++;
+            freshRect->layoutOrder = NextLayoutOrder();
         }
         cache->children.Insert(widgetKey, Components::UIChildCacheComponent::ChildRecord {.entity = newEntity, .lastVisitedFrame = m_currentFrame});
 
@@ -2012,6 +2012,11 @@ class Context {
             return m_reg->Create(
                 Components::NameComponent {.name = String64(id)},
                 Components::UIRectComponent {.parentEntity = parent, .width = cfg.width, .height = cfg.height, .hierarchyDepth = depth},
+                // A button makes the sprite a hover target: UIButtonComponent
+                // is the single source of truth for hover, and TooltipFor reads
+                // IsHovered(owner) -- without a button an icon could never fire
+                // its tooltip. It carries no visual of its own.
+                Components::UIButtonComponent {},
                 Components::UIImageComponent {
                     .texture      = texture,
                     .mode         = cfg.mode,
@@ -2220,6 +2225,12 @@ class Context {
         uint32_t depth  = 1;
     };
 
+    // Creation stamp that survives between frames: GUI::Context is rebuilt
+    // every frame, so the counter lives on the registry's settings component.
+    auto NextLayoutOrder() -> uint32_t {
+        return m_reg->Get<Components::UISettingsComponent>(GetRootCacheEntity())->nextLayoutOrder++;
+    }
+
     // Resolves or creates the root cache entity (UISettingsComponent).
     // Private by design: the cache root is an implementation detail of the GC;
     // tests can derive it via GetEntitiesWith<UISettingsComponent>().
@@ -2315,7 +2326,7 @@ class Context {
         }
         Entity newEnt = createFn();
         if (auto* freshRect = m_reg->Get<Components::UIRectComponent>(newEnt)) {
-            freshRect->layoutOrder = m_layoutOrder++;
+            freshRect->layoutOrder = NextLayoutOrder();
         }
         cache->children.Insert(childKey, Components::UIChildCacheComponent::ChildRecord {.entity = newEnt, .lastVisitedFrame = m_currentFrame});
         return newEnt;
@@ -3533,7 +3544,6 @@ class Context {
 
     ECS::Registry*                              m_reg          = nullptr;
     uint64_t                                    m_currentFrame = 0;
-    uint32_t                                    m_layoutOrder  = 1;
     std::array<UIScopeNode, MAX_UI_STACK_DEPTH> m_stack {};
     uint32_t                                    m_stackTop        = 0;
     uint32_t                                    m_autoIdCounter   = 0;

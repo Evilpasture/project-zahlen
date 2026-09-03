@@ -786,6 +786,52 @@ struct GUIPrimitivesTestSuite {
             return {};
         }
 
+        auto collapsing_header_recreated_content_keeps_its_slot_below_the_title() -> std::expected<void, ZHLN::Error> {
+            // Regression: the layout-order counter used to live in GUI::Context,
+            // which is rebuilt every frame. A content box recreated on reopen
+            // then received a SMALLER order than its surviving _title sibling
+            // and was laid out ABOVE the header -- sections "dropping up" after
+            // the second toggle. The counter lives in the registry now, so a
+            // recreated child must always sort after surviving siblings.
+            Registry reg;
+            reg.Create(Comp::UISettingsComponent {.fontAtlas = MakeTestFont()});
+            Entity header = Entity::Null();
+
+            auto BuildAt = [&](uint64_t frame, bool clickTitle) -> void {
+                GUI::Context gui(reg, frame);
+                gui.Panel(
+                    "P", GUI::PanelConfig {.width = 300.0f, .height = 400.0f},
+                    [&]() -> void {
+                        header = gui.CollapsingHeader(
+                            "Sec", true, [&]() -> void { gui.Label("Inside", GUI::LabelConfig {.height = 20.0f}); }
+                        );
+                    }
+                );
+                if (clickTitle) {
+                    if (auto* btn = reg.Get<Comp::UIButtonComponent>(FindChildNamed(reg, header, "_title"))) {
+                        btn->Set(ZHLN::UIButton::Clicked, true);
+                    }
+                }
+            };
+
+            BuildAt(1, false); // open
+            BuildAt(2, true);  // close
+            BuildAt(3, false);
+            BuildAt(4, true);  // reopen: content box is recreated here
+            BuildAt(5, false);
+
+            const Entity title = FindChildNamed(reg, header, "_title");
+            const Entity cont  = FindChildNamed(reg, header, "Sec_content");
+            ZHLN::Test::ExpectTrue(title != Entity::Null() && cont != Entity::Null());
+            const auto* titleRect = reg.Get<Comp::UIRectComponent>(title);
+            const auto* contRect  = reg.Get<Comp::UIRectComponent>(cont);
+            ZHLN::Test::ExpectTrue(titleRect != nullptr && contRect != nullptr);
+            if (titleRect != nullptr && contRect != nullptr) {
+                ZHLN::Test::ExpectTrue(contRect->layoutOrder > titleRect->layoutOrder);
+            }
+            return {};
+        }
+
         // --------------------------------------------------------------
         // TOOLTIPS
         // --------------------------------------------------------------

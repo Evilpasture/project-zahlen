@@ -348,6 +348,12 @@ struct Components {
     struct UISettingsComponent {
         TextureHandle defaultFontAtlas = TextureHandle::Invalid;
         FontAtlas     fontAtlas;
+        // Monotonic creation-stamp source for UIRectComponent::layoutOrder.
+        // Lives in the REGISTRY (not in GUI::Context, which is rebuilt every
+        // frame): a per-context counter restarted at 1 each frame, so a widget
+        // recreated after a collapse got a SMALLER order than its surviving
+        // siblings and jumped above them -- sections "dropping up" on reopen.
+        uint32_t      nextLayoutOrder = 1;
     };
     struct ItemBaseComponent {
         String64 name;
