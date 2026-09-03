@@ -418,6 +418,7 @@ endif()
 set(RAW_ENGINE_SOURCES
     src/engine/AssertHandler.cpp
     src/engine/DefaultPreset.cpp
+    src/gui/GUIContext.cpp
     src/gui/GUIEditor.cpp
     src/engine/graphics/RenderFrame.cpp
     src/engine/graphics/RenderGraphBuilder.cpp
