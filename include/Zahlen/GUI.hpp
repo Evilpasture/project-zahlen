@@ -1129,9 +1129,14 @@ class Context {
         m_reg->Patch<Components::UIFlexComponent>(e, [&](auto& f) -> auto {
             f.direction  = (direction == SplitDirection::Horizontal) ? FlexDirection::Row : FlexDirection::Column;
             f.alignItems = FlexAlign::Stretch;
-            f.flexGrow   = 0.0f;
+            // The splitter container absorbs its parent's free space on the
+            // main axis. With grow 0 a Columns nested in a flex parent (the
+            // editor workspace, a dock pane, ...) collapsed to content width
+            // and its proportional panes had no free space left to divide --
+            // the whole split rendered as a 6px sliver.
+            f.flexGrow   = 1.0f;
             f.flexShrink = 1.0f;
-            f.flexBasis  = -1.0f;
+            f.flexBasis  = 0.0f;
             f.gapX       = 0.0f;
             f.gapY       = 0.0f;
         });
