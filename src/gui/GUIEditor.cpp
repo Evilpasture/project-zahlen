@@ -125,11 +125,11 @@ namespace {
 } // namespace
 
 auto DrawHierarchyPanel(
-    GUI::Context&        gui,
-    ZHLN::ECS::Registry& reg,
-    EditorState&         state,
-    std::string_view     id
+    GUI::Context&     gui,
+    EditorState&      state,
+    std::string_view  id
 ) -> ZHLN::Entity {
+    ZHLN::ECS::Registry& reg = gui.GetRegistry();
     struct Row {
         ZHLN::Entity entity;
         uint32_t     depth;
@@ -190,11 +190,11 @@ auto DrawHierarchyPanel(
 }
 
 auto DrawInspectorPanel(
-    GUI::Context&        gui,
-    ZHLN::ECS::Registry& reg,
-    EditorState&         state,
-    std::string_view     id
+    GUI::Context&     gui,
+    EditorState&      state,
+    std::string_view  id
 ) -> ZHLN::Entity {
+    ZHLN::ECS::Registry& reg = gui.GetRegistry();
     return gui.ScrollBox(
         id,
         GUI::ScrollBoxConfig {

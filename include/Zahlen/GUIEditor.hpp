@@ -41,10 +41,6 @@
 #include <Zahlen/Entity.hpp>
 #include <string_view>
 
-namespace ZHLN::ECS {
-class Registry;
-}
-
 namespace ZHLN::GUI {
 class Context;
 }
@@ -64,8 +60,9 @@ struct EditorState {
     ZHLN::Entity editorRoot = ZHLN::Entity::Null();
 };
 
-/// Draws the scene hierarchy: one selectable row per UI entity (anything with
-/// a UIRectComponent that is not part of the editor's own subtree), ordered by
+/// Draws the scene hierarchy (against the registry the context already owns):
+/// one selectable row per UI entity (anything with a UIRectComponent that is
+/// not part of the editor's own subtree), ordered by
 /// (hierarchyDepth, layoutOrder) — the same key layout, render and hit-testing
 /// sort by, so the list matches what is on screen. Clicking a row writes
 /// `state.selectedEntity`.
@@ -73,9 +70,8 @@ struct EditorState {
 /// Returns the panel root entity (a scroll box).
 [[nodiscard]] auto DrawHierarchyPanel(
     ZHLN::GUI::Context& gui,
-    ZHLN::ECS::Registry& reg,
-    EditorState&         state,
-    std::string_view     id = "Hierarchy"
+    EditorState&        state,
+    std::string_view    id = "Hierarchy"
 ) -> ZHLN::Entity;
 
 /// Draws the inspector for `state.selectedEntity`: a labelled header plus one
@@ -87,9 +83,8 @@ struct EditorState {
 /// Returns the panel root entity (a scroll box).
 [[nodiscard]] auto DrawInspectorPanel(
     ZHLN::GUI::Context& gui,
-    ZHLN::ECS::Registry& reg,
-    EditorState&         state,
-    std::string_view     id = "Inspector"
+    EditorState&        state,
+    std::string_view    id = "Inspector"
 ) -> ZHLN::Entity;
 
 } // namespace ZHLN::Editor

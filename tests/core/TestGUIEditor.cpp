@@ -129,7 +129,7 @@ struct GUIEditorTestSuite {
             Entity              panel = Entity::Null();
             {
                 GUI::Context gui(reg, 1);
-                panel = Editor::DrawHierarchyPanel(gui, reg, st, "H");
+                panel = Editor::DrawHierarchyPanel(gui, st, "H");
                 ZHLN::Test::ExpectTrue(gui.Status().has_value());
             }
 
@@ -154,7 +154,7 @@ struct GUIEditorTestSuite {
             st.editorRoot = root;
             {
                 GUI::Context gui(reg, 1);
-                const Entity panel = Editor::DrawHierarchyPanel(gui, reg, st, "H");
+                const Entity panel = Editor::DrawHierarchyPanel(gui, st, "H");
                 ZHLN::Test::ExpectTrue(gui.Status().has_value());
             }
 
@@ -173,7 +173,7 @@ struct GUIEditorTestSuite {
             st.selectedEntity = b;
             {
                 GUI::Context gui(reg, 1);
-                Editor::DrawHierarchyPanel(gui, reg, st, "H");
+                [[maybe_unused]] const Entity panel = Editor::DrawHierarchyPanel(gui, st, "H");
             }
 
             const Entity rowA = FindEntityNamed(reg, "H_row" + std::to_string(a.index));
@@ -200,7 +200,7 @@ struct GUIEditorTestSuite {
             Editor::EditorState st;
             {
                 GUI::Context gui(reg, 1);
-                const Entity panel = Editor::DrawInspectorPanel(gui, reg, st, "I");
+                const Entity panel = Editor::DrawInspectorPanel(gui, st, "I");
                 ZHLN::Test::ExpectTrue(reg.IsAlive(panel));
                 ZHLN::Test::ExpectTrue(gui.Status().has_value());
             }
@@ -221,7 +221,7 @@ struct GUIEditorTestSuite {
             st.selectedEntity = e;
             {
                 GUI::Context gui(reg, 1);
-                const Entity panel = Editor::DrawInspectorPanel(gui, reg, st, "I");
+                const Entity panel = Editor::DrawInspectorPanel(gui, st, "I");
                 ZHLN::Test::ExpectTrue(reg.IsAlive(panel));
                 ZHLN::Test::ExpectTrue(gui.Status().has_value());
             }
@@ -249,7 +249,7 @@ struct GUIEditorTestSuite {
             st.selectedEntity = e;
             {
                 GUI::Context gui(reg, 1);
-                const Entity panel = Editor::DrawInspectorPanel(gui, reg, st, "I");
+                const Entity panel = Editor::DrawInspectorPanel(gui, st, "I");
                 ZHLN::Test::ExpectTrue(gui.Status().has_value());
             }
 
@@ -295,7 +295,7 @@ struct GUIEditorTestSuite {
                 st.selectedEntity = e;
                 {
                     GUI::Context gui(reg, 1);
-                    const Entity panel = Editor::DrawInspectorPanel(gui, reg, st, "I");
+                    const Entity panel = Editor::DrawInspectorPanel(gui, st, "I");
                     ZHLN::Test::ExpectTrue(gui.Status().has_value());
                     ZHLN::Test::ExpectTrue(reg.IsAlive(panel));
                 }
