@@ -67,8 +67,10 @@ struct EditorState {
 /// sort by, so the list matches what is on screen. Clicking a row writes
 /// `state.selectedEntity`.
 ///
-/// Returns the panel root entity (a scroll box).
-[[nodiscard]] auto DrawHierarchyPanel(
+/// Returns the panel root entity (a scroll box), for callers that want to
+/// measure or hide the panel; like every closure-form widget in GUI.hpp,
+/// discarding it is normal.
+auto DrawHierarchyPanel(
     ZHLN::GUI::Context& gui,
     EditorState&        state,
     std::string_view    id = "Hierarchy"
@@ -80,8 +82,9 @@ struct EditorState {
 /// "No selection" placeholder. Field rows are generated from reflection; see
 /// the dispatch table in the file comment above.
 ///
-/// Returns the panel root entity (a scroll box).
-[[nodiscard]] auto DrawInspectorPanel(
+/// Returns the panel root entity (a scroll box); discarding it is normal,
+/// matching the closure-form widget convention.
+auto DrawInspectorPanel(
     ZHLN::GUI::Context& gui,
     EditorState&        state,
     std::string_view    id = "Inspector"
