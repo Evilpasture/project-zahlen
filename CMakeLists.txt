@@ -422,6 +422,7 @@ set(RAW_ENGINE_SOURCES
     src/gui/GUIEditor.cpp
     src/engine/graphics/RenderFrame.cpp
     src/engine/graphics/RenderGraphBuilder.cpp
+    src/engine/graphics/HostBlitSwapchain.cpp
     src/engine/graphics/RenderDrawCommands.cpp
     src/engine/graphics/RenderInit.cpp
     src/engine/graphics/init/RenderInitDevice.cpp
