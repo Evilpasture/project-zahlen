@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Config.hpp>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Threading/Thread.hpp>
@@ -19,6 +20,36 @@ extern "C" void ZHLN_TrampolineAsm(void);
 namespace ZHLN {
 
 namespace {
+
+/**
+ * @brief The stack frame a brand new fiber starts executing on.
+ *
+ * ZHLN_Switch (Thread.S) restores the callee-saved registers off the frame it
+ * is handed and then returns into that frame's return-address slot, which is
+ * how a freshly created fiber reaches ZHLN_Trampoline. Both numbers are
+ * dictated by the assembly: `size` is the total number of bytes the switch
+ * pops before returning, and `returnAddressOffset` is where the return address
+ * sits, relative to the stack pointer handed to it.
+ */
+struct InitialStackFrame {
+    size_t size;                // Total bytes ZHLN_Switch pops.
+    size_t returnAddressOffset; // Offset of the return-address slot.
+};
+
+[[nodiscard]] constexpr auto GetInitialStackFrame() noexcept -> InitialStackFrame {
+    static_assert(isX64 || isARM64, "Thread.S implements ZHLN_Switch for x86_64 and AArch64 only.");
+
+    if constexpr (isWindows && isX64) {
+        // Win64: 10 XMMs (160) + 9 GPRs (72) + the return address (8).
+        return {.size = 240, .returnAddressOffset = 232};
+    } else if constexpr (isX64) {
+        // System V: the return address sits above the 6 callee-saved GPRs (48).
+        return {.size = 48 + 8, .returnAddressOffset = 48};
+    } else {
+        // AArch64: x19-x30 + d8-d15 (160); X30 is the link register.
+        return {.size = 160, .returnAddressOffset = 88};
+    }
+}
 
 // Thread-local tracking of the active fiber
 thread_local Fiber  t_mainFiber;
@@ -116,20 +147,12 @@ auto Fiber::Create(size_t stackSize, FiberFunc func, void* arg) noexcept -> Fibe
     fiber->isMain     = false;
     fiber->isRunning.store(false, std::memory_order::relaxed);
 
-    // 3. Initialize Stack Frame for ZHLN_Switch
-    uintptr_t sp = structAddr;
+    // 3. Seed the stack frame ZHLN_Switch expects: it pops the saved registers
+    //    and returns into the trampoline, which is how a new fiber starts.
+    constexpr InitialStackFrame frame = GetInitialStackFrame();
+    const uintptr_t             sp    = structAddr - frame.size;
 
-#if defined(_WIN32) && (defined(__x86_64__) || defined(_M_X64))
-    sp -= 240; // Windows x64 context size (GPRs + XMMs)
-    *std::bit_cast<uintptr_t*>(sp + 232) = reinterpret_cast<uintptr_t>(ZHLN_TrampolineAsm);
-#elif defined(__x86_64__) || defined(_M_X64)
-    sp -= 8; // Space for Return Address
-    *std::bit_cast<uintptr_t*>(sp) = reinterpret_cast<uintptr_t>(ZHLN_TrampolineAsm);
-    sp -= 48; // Space for 6 Callee-saved GPRs
-#elif defined(__aarch64__) || defined(_M_ARM64)
-    sp -= 160;                                                                             // ARM64 Context size
-    *std::bit_cast<uintptr_t*>(sp + 88) = reinterpret_cast<uintptr_t>(ZHLN_TrampolineAsm); // X30 (LR)
-#endif
+    *std::bit_cast<uintptr_t*>(sp + frame.returnAddressOffset) = reinterpret_cast<uintptr_t>(ZHLN_TrampolineAsm);
 
     fiber->stackPointer = std::bit_cast<void*>(sp);
     return fiber;

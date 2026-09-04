@@ -7,6 +7,7 @@
 #include <Zahlen/Core/Print.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/Threading/Thread.hpp> // For GetCurrentFiberID()
 #include <Zahlen/physics/Physics.hpp>
 #include <atomic>
 #include <cctype> // For std::isprint

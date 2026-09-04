@@ -6,6 +6,7 @@
 #include <Zahlen/Core/Platform.hpp>
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 namespace ZHLN {
 
 // Jolt collision jobs and modern libc++ frames can exceed 128 KiB on ARM64.
@@ -62,5 +63,14 @@ struct alignas(128) Fiber {
 // Global Linker Satellites for Mutex.cpp
 auto GetCurrentFiber() noexcept -> Fiber*;
 void YieldFiber() noexcept;
+
+/**
+ * @brief Identifies the fiber (or OS thread) the caller is running on.
+ *
+ * 0 means the thread was never converted with Fiber::InitMainThread(), 1 is
+ * the main thread, and every other fiber reports its own address. Logging and
+ * assertion reporting use it to attribute output to a context.
+ */
+auto GetCurrentFiberID() -> uint64_t;
 
 } // namespace ZHLN
