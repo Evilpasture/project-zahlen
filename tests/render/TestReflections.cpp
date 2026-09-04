@@ -33,8 +33,7 @@ struct ReflectionsTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::Error> raytraced_reflection_coverage_and_artifacts() {
             auto engine      = CreateTestEngine(640, 480);
-            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine) {
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
             }
 
@@ -57,9 +56,8 @@ struct ReflectionsTestSuite {
                 auto mirrorMatRes = ZHLN::CreativeWorksFactory::CreateMaterial(
                     rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 1.0f, .roughness = 0.03f, .baseColor = {0.85f, 0.85f, 0.88f, 1.0f}}
                 );
-                auto checkMirror = ZHLN::Test::AssertTrue(mirrorMatRes.has_value());
-                if (!checkMirror) {
-                    return checkMirror;
+                if (!ZHLN::Test::ExpectTrue(mirrorMatRes.has_value())) {
+                    return std::unexpected(LightingRTTestError::MaterialCreationFailed);
                 }
                 ZHLN::CreativeWorksFactory::CreatePlane(
                     *engine, 120.0f, {0.85f, 0.85f, 0.88f, 1.0f},
@@ -71,9 +69,8 @@ struct ReflectionsTestSuite {
                             .metallic = 0.0f, .roughness = 0.55f, .baseColor = {1.0f, 0.06f, 0.04f, 1.0f}, .emissive = {1.0f, 0.0f, 0.0f, 1.0f}
                         }
                 );
-                auto checkEmissive = ZHLN::Test::AssertTrue(emissiveMatRes.has_value());
-                if (!checkEmissive) {
-                    return checkEmissive;
+                if (!ZHLN::Test::ExpectTrue(emissiveMatRes.has_value())) {
+                    return std::unexpected(LightingRTTestError::MaterialCreationFailed);
                 }
                 ZHLN::CreativeWorksFactory::CreateBox(
                     *engine, JPH::Vec3(0.5f, 0.5f, 0.5f),
@@ -122,8 +119,7 @@ struct ReflectionsTestSuite {
                     for (uint32_t f = 0; f < 4; ++f) {
                         TickFrames(eng, 1);
                         const RgbImage frame      = Capture(eng, "headless_lighting_rt_reflect_f" + std::to_string(f) + ".ppm");
-                        auto           checkFrame = ZHLN::Test::AssertTrue(frame.Valid());
-                        if (!checkFrame) {
+                        if (!ZHLN::Test::ExpectTrue(frame.Valid())) {
                             captureFailed = true;
                             return false;
                         }
@@ -182,8 +178,7 @@ struct ReflectionsTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::Error> multi_emissive_sources_and_surface_reflection_interaction() {
             auto engine      = CreateTestEngine(640, 480);
-            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine) {
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
             }
 
@@ -223,9 +218,8 @@ struct ReflectionsTestSuite {
                 auto mirrorMat = ZHLN::CreativeWorksFactory::CreateMaterial(
                     rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 1.0f, .roughness = 0.02f, .baseColor = {0.9f, 0.9f, 0.95f, 1.0f}}
                 );
-                auto checkMirror = ZHLN::Test::AssertTrue(mirrorMat.has_value());
-                if (!checkMirror) {
-                    return checkMirror;
+                if (!ZHLN::Test::ExpectTrue(mirrorMat.has_value())) {
+                    return std::unexpected(LightingRTTestError::MaterialCreationFailed);
                 }
 
                 ZHLN::CreativeWorksFactory::CreatePlane(
@@ -297,8 +291,7 @@ struct ReflectionsTestSuite {
                 [&](ZHLN::Engine& eng) -> bool {
                     captureFailed = false;
                     const RgbImage frame      = Capture(eng, "headless_lighting_multi_emissive.ppm");
-                    auto           checkFrame = ZHLN::Test::AssertTrue(frame.Valid());
-                    if (!checkFrame) {
+                    if (!ZHLN::Test::ExpectTrue(frame.Valid())) {
                         captureFailed = true;
                         return false;
                     }
@@ -338,37 +331,57 @@ struct ReflectionsTestSuite {
                     // the strips are not even the same width, so a shared absolute floor
                     // grades geometry rather than the reflection.
 
-                    const bool reflRedOk = ZHLN_CHECK(
+                    const bool reflRedOk = ZHLN::Test::ExpectThat(
                         reflStripRed.dominantRed * 200 > reflStripRed.pixels && reflStripRed.meanR > 1.3 * reflStripRed.meanG &&
                             reflStripRed.meanR > 1.3 * reflStripRed.meanB,
-                        "strip 1 mirrors the red emitter",
-                        "meanRGB=({:.1f},{:.1f},{:.1f}), dominantRed={}/{} px (need >0.5% of the strip)", reflStripRed.meanR, reflStripRed.meanG,
-                        reflStripRed.meanB, reflStripRed.dominantRed, reflStripRed.pixels
+                        "strip 1 mirrors the red emitter", [&] {
+                            ZHLN::Println("        meanRGB=({:.1f},{:.1f},{:.1f}), dominantRed={}/{} px (need >0.5% of the strip)",
+                                reflStripRed.meanR,
+                                reflStripRed.meanG,
+                                reflStripRed.meanB,
+                                reflStripRed.dominantRed,
+                                reflStripRed.pixels);
+                        }
                     );
-                    const bool reflGrnOk = ZHLN_CHECK(
+                    const bool reflGrnOk = ZHLN::Test::ExpectThat(
                         reflStripGrn.dominantGrn * 200 > reflStripGrn.pixels && reflStripGrn.meanG > 1.3 * reflStripGrn.meanR &&
                             reflStripGrn.meanG > 1.3 * reflStripGrn.meanB,
-                        "strip 2 mirrors the green emitter",
-                        "meanRGB=({:.1f},{:.1f},{:.1f}), dominantGreen={}/{} px (need >0.5% of the strip)", reflStripGrn.meanR, reflStripGrn.meanG,
-                        reflStripGrn.meanB, reflStripGrn.dominantGrn, reflStripGrn.pixels
+                        "strip 2 mirrors the green emitter", [&] {
+                            ZHLN::Println("        meanRGB=({:.1f},{:.1f},{:.1f}), dominantGreen={}/{} px (need >0.5% of the strip)",
+                                reflStripGrn.meanR,
+                                reflStripGrn.meanG,
+                                reflStripGrn.meanB,
+                                reflStripGrn.dominantGrn,
+                                reflStripGrn.pixels);
+                        }
                     );
-                    const bool reflBluOk = ZHLN_CHECK(
+                    const bool reflBluOk = ZHLN::Test::ExpectThat(
                         reflStripBlu.dominantBlu * 200 > reflStripBlu.pixels && reflStripBlu.meanB > 1.3 * reflStripBlu.meanR &&
                             reflStripBlu.meanB > 1.3 * reflStripBlu.meanG,
-                        "strip 3 mirrors the blue emitter",
-                        "meanRGB=({:.1f},{:.1f},{:.1f}), dominantBlue={}/{} px (need >0.5% of the strip)", reflStripBlu.meanR, reflStripBlu.meanG,
-                        reflStripBlu.meanB, reflStripBlu.dominantBlu, reflStripBlu.pixels
+                        "strip 3 mirrors the blue emitter", [&] {
+                            ZHLN::Println("        meanRGB=({:.1f},{:.1f},{:.1f}), dominantBlue={}/{} px (need >0.5% of the strip)",
+                                reflStripBlu.meanR,
+                                reflStripBlu.meanG,
+                                reflStripBlu.meanB,
+                                reflStripBlu.dominantBlu,
+                                reflStripBlu.pixels);
+                        }
                     );
                     // Yellow has no single dominant channel to lean on, so its signature is
                     // the R+G mix count plus R and G clearing B by the same 1.3x the pure
                     // strips use and staying within 0.6x of each other (yellow, not amber).
-                    const bool reflYelOk = ZHLN_CHECK(
+                    const bool reflYelOk = ZHLN::Test::ExpectThat(
                         reflStripYel.yellowMix * 200 > reflStripYel.pixels && reflStripYel.meanR > 1.3 * reflStripYel.meanB &&
                             reflStripYel.meanG > 1.3 * reflStripYel.meanB && reflStripYel.meanR > 0.6 * reflStripYel.meanG &&
                             reflStripYel.meanG > 0.6 * reflStripYel.meanR,
-                        "strip 4 mirrors the yellow emitter",
-                        "meanRGB=({:.1f},{:.1f},{:.1f}), yellowMix={}/{} px (need >0.5% of the strip)", reflStripYel.meanR, reflStripYel.meanG,
-                        reflStripYel.meanB, reflStripYel.yellowMix, reflStripYel.pixels
+                        "strip 4 mirrors the yellow emitter", [&] {
+                            ZHLN::Println("        meanRGB=({:.1f},{:.1f},{:.1f}), yellowMix={}/{} px (need >0.5% of the strip)",
+                                reflStripYel.meanR,
+                                reflStripYel.meanG,
+                                reflStripYel.meanB,
+                                reflStripYel.yellowMix,
+                                reflStripYel.pixels);
+                        }
                     );
 
                     // 2. Validate Upper Direct Emission visibility. The peak-luma guard
@@ -376,9 +389,14 @@ struct ReflectionsTestSuite {
                     // somewhere in the upper frame, not that the scene is bright.
                     const auto     upperDirect      = MeasureSubRegion(frame, {.x0 = 0.0, .y0 = 0.05, .x1 = 1.0, .y1 = 0.45});
                     const uint32_t directChroma     = upperDirect.dominantRed + upperDirect.dominantGrn + upperDirect.dominantBlu + upperDirect.yellowMix;
-                    const bool     directVisible    = ZHLN_CHECK(
-                        upperDirect.maxLuma > 60.0 && directChroma * 1000 > upperDirect.pixels, "emitters are directly visible in the upper frame",
-                        "maxLuma={:.1f} (need >60), chromaticPixels={}/{} px (need >0.1%)", upperDirect.maxLuma, directChroma, upperDirect.pixels
+                    const bool     directVisible    = ZHLN::Test::ExpectThat(
+                        upperDirect.maxLuma > 60.0 && directChroma * 1000 > upperDirect.pixels,
+                        "emitters are directly visible in the upper frame", [&] {
+                            ZHLN::Println("        maxLuma={:.1f} (need >60), chromaticPixels={}/{} px (need >0.1%)",
+                                upperDirect.maxLuma,
+                                directChroma,
+                                upperDirect.pixels);
+                        }
                     );
 
                     return reflRedOk && reflGrnOk && reflBluOk && reflYelOk && directVisible;
@@ -410,8 +428,7 @@ struct ReflectionsTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::Error> dense_multi_light_emissive_materials_cross_interaction() {
             auto engine      = CreateTestEngine(640, 480);
-            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine) {
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
             }
 
@@ -511,8 +528,7 @@ struct ReflectionsTestSuite {
                 [&](ZHLN::Engine& eng) -> bool {
                     captureFailed = false;
                     const RgbImage frame      = Capture(eng, "headless_lighting_dense_interaction.ppm");
-                    auto           checkFrame = ZHLN::Test::AssertTrue(frame.Valid());
-                    if (!checkFrame) {
+                    if (!ZHLN::Test::ExpectTrue(frame.Valid())) {
                         captureFailed = true;
                         return false;
                     }

@@ -75,16 +75,14 @@ struct ScriptValueTypesTestSuite {
 
         ZHLN::ScriptVal val = ZHLN::ToScriptVal(entity);
 
-        auto isNumber = ZHLN::Test::AssertTrue(std::get_if<double>(&val) != nullptr);
-        if (!isNumber) {
-            return isNumber;
+        if (!ZHLN::Test::ExpectTrue(std::get_if<double>(&val) != nullptr)) {
+            return std::unexpected(ScriptValueTypeTestError::WrongRepresentation);
         }
         ZHLN::Test::ExpectEq(*std::get_if<double>(&val), static_cast<double>(entity.Pack()));
 
         auto back = ZHLN::FromScriptVal<ZHLN::Entity>(val);
-        auto ok   = ZHLN::Test::AssertTrue(back.has_value());
-        if (!ok) {
-            return ok;
+        if (!ZHLN::Test::ExpectTrue(back.has_value())) {
+            return std::unexpected(ScriptValueTypeTestError::ValueConversionFailed);
         }
         ZHLN::Test::ExpectEq(back->Pack(), entity.Pack());
 
@@ -94,9 +92,8 @@ struct ScriptValueTypesTestSuite {
     std::expected<void, ZHLN::Error> entity_rejects_non_number() {
         auto res = ZHLN::FromScriptVal<ZHLN::Entity>(ZHLN::ScriptVal {std::string {"not an entity"}});
 
-        auto rejected = ZHLN::Test::AssertTrue(!res.has_value());
-        if (!rejected) {
-            return rejected;
+        if (!ZHLN::Test::ExpectTrue(!res.has_value())) {
+            return std::unexpected(ScriptValueTypeTestError::BadInputAccepted);
         }
         ZHLN::Test::ExpectTrue(res.error().Is(ZHLN::ScriptError::TypeMismatch));
         return {};
@@ -108,16 +105,14 @@ struct ScriptValueTypesTestSuite {
         ZHLN::ScriptVal val = ZHLN::ToScriptVal(v);
 
         const auto* arr = std::get_if<ZHLN::ScriptArray>(&val);
-        auto        ok  = ZHLN::Test::AssertTrue(arr != nullptr);
-        if (!ok) {
-            return ok;
+        if (!ZHLN::Test::ExpectTrue(arr != nullptr)) {
+            return std::unexpected(ScriptValueTypeTestError::WrongRepresentation);
         }
         ZHLN::Test::ExpectEq(arr->elements.size(), static_cast<size_t>(3));
 
         auto back = ZHLN::FromScriptVal<JPH::Vec3>(val);
-        auto conv = ZHLN::Test::AssertTrue(back.has_value());
-        if (!conv) {
-            return conv;
+        if (!ZHLN::Test::ExpectTrue(back.has_value())) {
+            return std::unexpected(ScriptValueTypeTestError::ValueConversionFailed);
         }
         ZHLN::Test::ExpectEq(back->GetX(), 1.5f);
         ZHLN::Test::ExpectEq(back->GetY(), -2.25f);
@@ -125,9 +120,8 @@ struct ScriptValueTypesTestSuite {
 
         // And the literal form a script would actually write.
         auto fromLiteral = ZHLN::FromScriptVal<JPH::Vec3>(Numbers({7.0, 8.0, 9.0}));
-        auto literalOk   = ZHLN::Test::AssertTrue(fromLiteral.has_value());
-        if (!literalOk) {
-            return literalOk;
+        if (!ZHLN::Test::ExpectTrue(fromLiteral.has_value())) {
+            return std::unexpected(ScriptValueTypeTestError::ValueConversionFailed);
         }
         ZHLN::Test::ExpectEq(fromLiteral->GetX(), 7.0f);
         ZHLN::Test::ExpectEq(fromLiteral->GetZ(), 9.0f);
@@ -144,9 +138,8 @@ struct ScriptValueTypesTestSuite {
         ZHLN::ScriptVal val  = ZHLN::ToScriptVal(v);
         auto            back = ZHLN::FromScriptVal<JPH::DVec3>(val);
 
-        auto conv = ZHLN::Test::AssertTrue(back.has_value());
-        if (!conv) {
-            return conv;
+        if (!ZHLN::Test::ExpectTrue(back.has_value())) {
+            return std::unexpected(ScriptValueTypeTestError::ValueConversionFailed);
         }
         ZHLN::Test::ExpectEq(back->GetX(), 123456.789012);
         ZHLN::Test::ExpectEq(back->GetY(), -987654.321098);
@@ -161,16 +154,14 @@ struct ScriptValueTypesTestSuite {
         ZHLN::ScriptVal val = ZHLN::ToScriptVal(q);
 
         const auto* arr = std::get_if<ZHLN::ScriptArray>(&val);
-        auto        ok  = ZHLN::Test::AssertTrue(arr != nullptr);
-        if (!ok) {
-            return ok;
+        if (!ZHLN::Test::ExpectTrue(arr != nullptr)) {
+            return std::unexpected(ScriptValueTypeTestError::WrongRepresentation);
         }
         ZHLN::Test::ExpectEq(arr->elements.size(), static_cast<size_t>(4));
 
         auto back = ZHLN::FromScriptVal<JPH::Quat>(val);
-        auto conv = ZHLN::Test::AssertTrue(back.has_value());
-        if (!conv) {
-            return conv;
+        if (!ZHLN::Test::ExpectTrue(back.has_value())) {
+            return std::unexpected(ScriptValueTypeTestError::ValueConversionFailed);
         }
         ZHLN::Test::ExpectEq(back->GetX(), 0.1f);
         ZHLN::Test::ExpectEq(back->GetY(), 0.2f);
@@ -187,9 +178,8 @@ struct ScriptValueTypesTestSuite {
         ZHLN::ScriptVal val  = ZHLN::ToScriptVal(c);
         auto            back = ZHLN::FromScriptVal<JPH::Vec4>(val);
 
-        auto conv = ZHLN::Test::AssertTrue(back.has_value());
-        if (!conv) {
-            return conv;
+        if (!ZHLN::Test::ExpectTrue(back.has_value())) {
+            return std::unexpected(ScriptValueTypeTestError::ValueConversionFailed);
         }
         ZHLN::Test::ExpectEq(back->GetX(), 0.25f);
         ZHLN::Test::ExpectEq(back->GetW(), 1.0f);
@@ -204,9 +194,8 @@ struct ScriptValueTypesTestSuite {
         ZHLN::ScriptVal boxed = BoxOf(&source);
 
         auto back = ZHLN::FromScriptVal<JPH::Vec3>(boxed);
-        auto conv = ZHLN::Test::AssertTrue(back.has_value());
-        if (!conv) {
-            return conv;
+        if (!ZHLN::Test::ExpectTrue(back.has_value())) {
+            return std::unexpected(ScriptValueTypeTestError::ValueConversionFailed);
         }
         ZHLN::Test::ExpectEq(back->GetX(), 4.0f);
         ZHLN::Test::ExpectEq(back->GetY(), 5.0f);
@@ -224,9 +213,8 @@ struct ScriptValueTypesTestSuite {
 
         auto res = ZHLN::FromScriptVal<JPH::Vec3>(boxedQuat);
 
-        auto rejected = ZHLN::Test::AssertTrue(!res.has_value());
-        if (!rejected) {
-            return rejected;
+        if (!ZHLN::Test::ExpectTrue(!res.has_value())) {
+            return std::unexpected(ScriptValueTypeTestError::BadInputAccepted);
         }
         ZHLN::Test::ExpectTrue(res.error().Is(ZHLN::ScriptError::TypeMismatch));
         return {};
@@ -235,9 +223,8 @@ struct ScriptValueTypesTestSuite {
     std::expected<void, ZHLN::Error> wrong_length_array_is_rejected() {
         auto res = ZHLN::FromScriptVal<JPH::Vec3>(Numbers({1.0, 2.0}));
 
-        auto rejected = ZHLN::Test::AssertTrue(!res.has_value());
-        if (!rejected) {
-            return rejected;
+        if (!ZHLN::Test::ExpectTrue(!res.has_value())) {
+            return std::unexpected(ScriptValueTypeTestError::BadInputAccepted);
         }
         // Two numbers for a three-component vector is a shape problem, not a
         // type problem; scripts get told which.
@@ -253,9 +240,8 @@ struct ScriptValueTypesTestSuite {
 
         auto res = ZHLN::FromScriptVal<JPH::Vec3>(ZHLN::ScriptVal {std::move(mixed)});
 
-        auto rejected = ZHLN::Test::AssertTrue(!res.has_value());
-        if (!rejected) {
-            return rejected;
+        if (!ZHLN::Test::ExpectTrue(!res.has_value())) {
+            return std::unexpected(ScriptValueTypeTestError::BadInputAccepted);
         }
         ZHLN::Test::ExpectTrue(res.error().Is(ZHLN::ScriptError::TypeMismatch));
         return {};
@@ -270,9 +256,8 @@ struct ScriptValueTypesTestSuite {
 
         auto res = ZHLN::FromScriptVal<JPH::Vec3Arg>(Numbers({1.0, 2.0, 3.0}));
 
-        auto conv = ZHLN::Test::AssertTrue(res.has_value());
-        if (!conv) {
-            return conv;
+        if (!ZHLN::Test::ExpectTrue(res.has_value())) {
+            return std::unexpected(ScriptValueTypeTestError::ValueConversionFailed);
         }
         ZHLN::Test::ExpectEq(res->GetX(), 1.0f);
         return {};

@@ -136,9 +136,9 @@ struct DescriptorHeapsSuite {
         // ====================================================================
         std::expected<void, ZHLN::Error> bindless_texture_array_resolves_across_heap_region() {
             auto engine      = DescriptorHeapsSuite::CreateTestEngine();
-            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine)
-                return checkEngine;
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return std::unexpected(DescriptorHeapsTestError::EngineInitFailed);
+            }
 
             auto& reg = engine->GetRegistry();
             auto& rc  = engine->GetRenderContext();
@@ -276,9 +276,8 @@ struct DescriptorHeapsSuite {
         // ====================================================================
         std::expected<void, ZHLN::Error> recreating_a_procedural_texture_reuses_its_bindless_slot() {
             auto engine      = DescriptorHeapsSuite::CreateTestEngine();
-            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine) {
-                return checkEngine;
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return std::unexpected(DescriptorHeapsTestError::EngineInitFailed);
             }
 
             auto& rc = engine->GetRenderContext();
@@ -323,9 +322,9 @@ struct DescriptorHeapsSuite {
         // ====================================================================
         std::expected<void, ZHLN::Error> per_frame_push_address_block_updates() {
             auto engine      = DescriptorHeapsSuite::CreateTestEngine();
-            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine)
-                return checkEngine;
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return std::unexpected(DescriptorHeapsTestError::EngineInitFailed);
+            }
 
             auto& reg = engine->GetRegistry();
             auto& rc  = engine->GetRenderContext();

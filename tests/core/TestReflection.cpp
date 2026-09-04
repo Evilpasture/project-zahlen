@@ -67,7 +67,11 @@ struct SchemaContainer {
 // ============================================================================
 
 struct ReflectionTestSuite {
-    struct Tests {
+    enum class ReflectionTestError : uint8_t {
+        EnumParseFailed ZHLN_ANNOTATION(ZHLN::Description<"StringToEnum did not produce a value for a name that is a member of the enum.">{}),
+    };
+
+struct Tests {
         // --- 1. Enum Reflection & Introspection ---
         std::expected<void, ZHLN::Error> enum_reflection() {
             // ToString & StringToEnum
@@ -75,9 +79,9 @@ struct ReflectionTestSuite {
             ZHLN::Test::ExpectEq(name, "Rifle");
 
             auto parsed      = ZHLN::Reflect::StringToEnum<WeaponType>("Shotgun");
-            auto checkParsed = ZHLN::Test::AssertTrue(parsed.has_value());
-            if (!checkParsed)
-                return checkParsed;
+            if (!ZHLN::Test::ExpectTrue(parsed.has_value())) {
+                return std::unexpected(ReflectionTestError::EnumParseFailed);
+            }
             ZHLN::Test::ExpectEq(*parsed, WeaponType::Shotgun);
 
             // No-match path: must come back empty, not an engaged optional.

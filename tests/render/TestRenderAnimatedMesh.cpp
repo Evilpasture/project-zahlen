@@ -39,6 +39,7 @@ constexpr uint8_t kUziGlbData[] = {
 #endif
 enum class AnimatedMeshTestError : uint8_t {
     PrefabLoadFailed ZHLN_ANNOTATION(ZHLN::Description<"CreativeWorksFactory failed to load or parse the in-memory GLB prefab.">{}) = 1,
+    EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine context for the animated mesh test.">{}),
     NoSkeletalMeshSpawned ZHLN_ANNOTATION(ZHLN::Description<"No entities with SkeletalMeshComponent were spawned.">{}),
     NoAnimatorFound ZHLN_ANNOTATION(ZHLN::Description<"Root entity does not contain an AnimatorComponent.">{}),
     SimulationTickFailed ZHLN_ANNOTATION(ZHLN::Description<"Engine::Tick failed during animated mesh playback.">{}),
@@ -69,9 +70,8 @@ struct RenderAnimatedMeshTestSuite {
                      .maxContactConstraints = 1024,
                      .tempAllocatorSize     = 16 * 1024 * 1024
             });
-            const auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine) {
-                return checkEngine;
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return std::unexpected(AnimatedMeshTestError::EngineInitFailed);
             }
 
             auto& reg = engine->GetRegistry();

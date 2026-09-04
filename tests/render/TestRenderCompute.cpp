@@ -19,23 +19,25 @@ struct RenderComputeTestSuite {
     ~RenderComputeTestSuite() {
         ZHLN::Test::Headless::EndSession();
     }
+    enum class RenderComputeTestError : uint8_t {
+        EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine context for the compute bake test.">{}),
+        ProceduralBakeFailed ZHLN_ANNOTATION(ZHLN::Description<"BakeProceduralTexture did not return a bindless index.">{}),
+    };
 
-    struct Tests {
+struct Tests {
         std::expected<void, ZHLN::Error> procedural_bake_compute_execution() {
             // Pooled: the compute bake does not care what earlier tests
             // uploaded, and a device of its own costs a Vulkan instance.
             const auto engine      = ZHLN::Test::Headless::AcquireEngine("LocalGPUComputeTest");
-            const auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine) {
-                return checkEngine;
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return std::unexpected(RenderComputeTestError::EngineInitFailed);
             }
 
             auto& rc = engine->GetRenderContext();
 
             const auto bakeRes   = rc.BakeProceduralTexture(128, 128, 0, 4.0f, 1.0f);
-            const auto checkBake = ZHLN::Test::AssertTrue(bakeRes.has_value());
-            if (!checkBake) {
-                return checkBake;
+            if (!ZHLN::Test::ExpectTrue(bakeRes.has_value())) {
+                return std::unexpected(RenderComputeTestError::ProceduralBakeFailed);
             }
 
             const uint32_t bindlessIndex = *bakeRes;

@@ -88,7 +88,11 @@ static_assert(kStaticParsed.window.height == 1080);
 // ============================================================================
 
 struct JSONTestSuite {
-    struct Tests {
+    enum class JSONTestError : uint8_t {
+        ParseFailed ZHLN_ANNOTATION(ZHLN::Description<"ReflectJSON::TryParse rejected a document that should have deserialized.">{}),
+    };
+
+struct Tests {
         // --- 1. Compile-Time JSON Reflection Verification ---
         std::expected<void, ZHLN::Error> compile_time_json_schema_and_values() {
             // Skipped in sanitizer builds: consteval reflection reaches
@@ -128,9 +132,9 @@ struct JSONTestSuite {
             })";
 
             auto parseResult = ZHLN::ReflectJSON::TryParse<ActorConfig>(json);
-            auto checkResult = ZHLN::Test::AssertTrue(parseResult.has_value());
-            if (!checkResult)
-                return checkResult;
+            if (!ZHLN::Test::ExpectTrue(parseResult.has_value())) {
+                return std::unexpected(JSONTestError::ParseFailed);
+            }
 
             const ActorConfig& cfg = *parseResult;
 

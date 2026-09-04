@@ -54,6 +54,8 @@
 
 enum class LightingRTTestError : uint8_t {
     EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine context for the lighting/raytracing test."> {}) = 1,
+    MaterialCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"CreativeWorksFactory::CreateMaterial failed while building the lighting scenario."> {}),
+    FrameCaptureFailed ZHLN_ANNOTATION(ZHLN::Description<"A rendered frame was not captured or came back invalid."> {}),
     RenderOutputBlank ZHLN_ANNOTATION(ZHLN::Description<"Rendered frame is blank or could not be captured."> {}),
     TemporalFlickerDetected ZHLN_ANNOTATION(ZHLN::Description<"A static fully-lit scene changed more frame-to-frame than the engine's own noise floor."> {}),
     LightCullingPopDetected ZHLN_ANNOTATION(ZHLN::Description<"A point light inside the frustum/range lost its lighting contribution for a frame (cluster culling)."> {}),

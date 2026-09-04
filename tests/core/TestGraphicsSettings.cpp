@@ -9,54 +9,56 @@
 #include <Zahlen/GraphicsSettings.hpp>
 
 using namespace ZHLN;
-// Framework assert helpers live in a nested namespace; a using-directive for
-// ZHLN does not surface them. These name namespace members, which is legal
-// at file scope (unlike using-declarations for class members).
-using ZHLN::Test::AssertEq;
-using ZHLN::Test::AssertFalse;
-using ZHLN::Test::AssertTrue;
 
 struct GraphicsSettingsSuite {
     GraphicsSettingsSuite() {
         // Suites mirror the framework layout used by TestECS: stateless setup,
         // nested Tests struct, expected<void, Error> test methods.
     }
+    enum class GraphicsSettingsTestError : uint8_t {
+        PresetDetectionFailed ZHLN_ANNOTATION(ZHLN::Description<"QualityLevel::DetectPreset() did not report the tier the settings were configured for.">{}),
+    PresetSignatureMismatch ZHLN_ANNOTATION(ZHLN::Description<"ApplyPreset() left a tier's signature field at the wrong value.">{}),
+        ConfigEqualityFailed ZHLN_ANNOTATION(ZHLN::Description<"Two GraphicsSettings values that should be identical compared unequal.">{}),
+        EnumToStringFailed ZHLN_ANNOTATION(ZHLN::Description<"GraphicsSettings enum <-> string conversion did not round-trip.">{}),
+    };
 
-    struct Tests {
+struct Tests {
         // --- 1. Defaults form exactly the Medium tier ------------------------
         std::expected<void, ZHLN::Error> defaults_are_medium_tier() {
             GraphicsSettings gfx {};
-            auto             check = AssertEq(gfx.DetectPreset(), QualityLevel::Medium);
-            if (!check) {
-                return check;
+            if (!ZHLN::Test::ExpectEq(gfx.DetectPreset(), QualityLevel::Medium)) {
+                return std::unexpected(GraphicsSettingsTestError::PresetDetectionFailed);
             }
-            return AssertEq(gfx.qualityPreset, QualityLevel::Medium);
+            if (!ZHLN::Test::ExpectEq(gfx.qualityPreset, QualityLevel::Medium)) {
+                return std::unexpected(GraphicsSettingsTestError::PresetDetectionFailed);
+            }
+            return {};
         }
 
         // --- 2. Presets pin their signature fields ---------------------------
         std::expected<void, ZHLN::Error> presets_pin_signature_fields() {
             GraphicsSettings low {};
             low.ApplyPreset(QualityLevel::Low);
-            auto check = AssertTrue(low.antiAliasing.mode == AAMode::FXAA && low.shadows.resolution == 1024 && low.post.giSamples == 4);
-            if (!check) {
-                return check;
+            if (!ZHLN::Test::ExpectTrue(low.antiAliasing.mode == AAMode::FXAA && low.shadows.resolution == 1024 && low.post.giSamples == 4)) {
+                return std::unexpected(GraphicsSettingsTestError::PresetSignatureMismatch);
             }
-            check = AssertTrue(low.post.enableSSR == 0 && low.post.enableRTR == 0 && low.rayTracing.denoiserPasses == 0);
-            if (!check) {
-                return check;
+            if (!ZHLN::Test::ExpectTrue(low.post.enableSSR == 0 && low.post.enableRTR == 0 && low.rayTracing.denoiserPasses == 0)) {
+                return std::unexpected(GraphicsSettingsTestError::PresetSignatureMismatch);
             }
 
             GraphicsSettings ultra {};
             ultra.ApplyPreset(QualityLevel::Ultra);
-            check = AssertTrue(
+            if (!ZHLN::Test::ExpectTrue(
                 ultra.shadows.resolution == 4096 && ultra.post.giSamples == 16 && ultra.post.enableRTR == 1 && ultra.post.enableSSR == 1
-            );
-            if (!check) {
-                return check;
+            )) {
+                return std::unexpected(GraphicsSettingsTestError::PresetSignatureMismatch);
             }
             // RT sample budget: the extension point for the upcoming RT shadow
             // mask / A-Trous denoiser / VNDF reflection passes.
-            return AssertTrue(ultra.rayTracing.shadowSamples == 2 && ultra.rayTracing.reflectionSamples == 2 && ultra.rayTracing.maxBounces == 2);
+            if (!ZHLN::Test::ExpectTrue(ultra.rayTracing.shadowSamples == 2 && ultra.rayTracing.reflectionSamples == 2 && ultra.rayTracing.maxBounces == 2)) {
+                return std::unexpected(GraphicsSettingsTestError::PresetSignatureMismatch);
+            }
+            return {};
         }
 
         // --- 3. Round-trip: ApplyPreset -> DetectPreset ------------------------
@@ -64,13 +66,11 @@ struct GraphicsSettingsSuite {
             for (const QualityLevel tier : {QualityLevel::Low, QualityLevel::Medium, QualityLevel::High, QualityLevel::Ultra}) {
                 GraphicsSettings gfx {};
                 gfx.ApplyPreset(tier);
-                auto check = AssertEq(gfx.DetectPreset(), tier);
-                if (!check) {
-                    return check;
+                if (!ZHLN::Test::ExpectEq(gfx.DetectPreset(), tier)) {
+                    return std::unexpected(GraphicsSettingsTestError::PresetDetectionFailed);
                 }
-                check = AssertEq(gfx.qualityPreset, tier);
-                if (!check) {
-                    return check;
+                if (!ZHLN::Test::ExpectEq(gfx.qualityPreset, tier)) {
+                    return std::unexpected(GraphicsSettingsTestError::PresetDetectionFailed);
                 }
             }
             return {};
@@ -86,14 +86,16 @@ struct GraphicsSettingsSuite {
             gfx.post.vignetteIntensity     = 1.4f;
             gfx.environment.ambientExposure = 12.0f;
             gfx.antiAliasing.fxaaSubpix    = 0.5f;
-            auto check                     = AssertEq(gfx.DetectPreset(), QualityLevel::High);
-            if (!check) {
-                return check;
+            if (!ZHLN::Test::ExpectEq(gfx.DetectPreset(), QualityLevel::High)) {
+                return std::unexpected(GraphicsSettingsTestError::PresetDetectionFailed);
             }
 
             // Signature knob: Custom.
             gfx.post.giSamples = 12;
-            return AssertEq(gfx.DetectPreset(), QualityLevel::Custom);
+            if (!ZHLN::Test::ExpectEq(gfx.DetectPreset(), QualityLevel::Custom)) {
+                return std::unexpected(GraphicsSettingsTestError::PresetDetectionFailed);
+            }
+            return {};
         }
 
         // --- 5. Custom preset is a no-op ---------------------------------------
@@ -101,7 +103,10 @@ struct GraphicsSettingsSuite {
             GraphicsSettings gfx {};
             gfx.ApplyPreset(QualityLevel::Ultra);
             gfx.ApplyPreset(QualityLevel::Custom);
-            return AssertEq(gfx.DetectPreset(), QualityLevel::Ultra);
+            if (!ZHLN::Test::ExpectEq(gfx.DetectPreset(), QualityLevel::Ultra)) {
+                return std::unexpected(GraphicsSettingsTestError::PresetDetectionFailed);
+            }
+            return {};
         }
 
         // --- 6. ConfigEquals ignores jitter, catches configuration ------------
@@ -114,22 +119,23 @@ struct GraphicsSettingsSuite {
             b.antiAliasing.jitterY     = -0.5f;
             b.antiAliasing.prevJitterX = 0.125f;
             b.antiAliasing.frameIndex  = 128;
-            auto check                 = AssertTrue(a.ConfigEquals(b));
-            if (!check) {
-                return check;
+            if (!ZHLN::Test::ExpectTrue(a.ConfigEquals(b))) {
+                return std::unexpected(GraphicsSettingsTestError::ConfigEqualityFailed);
             }
 
             // A real knob change must be detected.
             b.shadows.resolution = 4096;
-            check                = AssertFalse(a.ConfigEquals(b));
-            if (!check) {
-                return check;
+            if (!ZHLN::Test::ExpectFalse(a.ConfigEquals(b))) {
+                return std::unexpected(GraphicsSettingsTestError::ConfigEqualityFailed);
             }
 
             // AA mode is configuration; AA jitter is not.
             b                   = a;
             b.antiAliasing.mode = AAMode::SMAA;
-            return AssertFalse(a.ConfigEquals(b));
+            if (!ZHLN::Test::ExpectFalse(a.ConfigEquals(b))) {
+                return std::unexpected(GraphicsSettingsTestError::ConfigEqualityFailed);
+            }
+            return {};
         }
 
         // --- 7. Tier labels come from the reflection machinery -----------------
@@ -137,11 +143,14 @@ struct GraphicsSettingsSuite {
         // ZHLN::ToString (Reflect::EnumToMessage -> identifier fallback) names
         // the tiers.
         std::expected<void, ZHLN::Error> quality_level_labels() {
-            auto check = AssertTrue(ToString(QualityLevel::Low) == "Low" && ToString(QualityLevel::Medium) == "Medium");
-            if (!check) {
-                return check;
+            if (!ZHLN::Test::ExpectTrue(ToString(QualityLevel::Low) == "Low" && ToString(QualityLevel::Medium) == "Medium")) {
+                return std::unexpected(GraphicsSettingsTestError::EnumToStringFailed);
             }
-            return AssertTrue(ToString(QualityLevel::High) == "High" && ToString(QualityLevel::Ultra) == "Ultra" && ToString(QualityLevel::Custom) == "Custom");
+            if (!ZHLN::Test::ExpectTrue(ToString(QualityLevel::High) == "High" && ToString(QualityLevel::Ultra) == "Ultra" &&
+                                        ToString(QualityLevel::Custom) == "Custom")) {
+                return std::unexpected(GraphicsSettingsTestError::EnumToStringFailed);
+            }
+            return {};
         }
     };
 };

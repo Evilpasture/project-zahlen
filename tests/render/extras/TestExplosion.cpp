@@ -19,6 +19,7 @@ import ZHLN.Explosions;
 
 enum class ExplosionTestError : uint32_t {
     ExplosionSpawnFailed ZHLN_ANNOTATION(ZHLN::Description<"ExplosionSystem::Spawn failed to instantiate entity hierarchy.">{}) = 1,
+    EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine context for the explosion test.">{}),
     CraterDecalSpawnFailed ZHLN_ANNOTATION(ZHLN::Description<"Autonomous crater decal was not spawned after ground impact delay.">{}),
     CraterFadeFailed ZHLN_ANNOTATION(ZHLN::Description<"Crater decal did not dissolve/scale down during the fade window.">{}),
     EntityLeakDetected ZHLN_ANNOTATION(ZHLN::Description<"Explosion root or debris entities remained alive after duration expired.">{}),
@@ -66,9 +67,8 @@ struct ExplosionTestSuite {
         // ====================================================================
         auto standard_fireball_lifecycle() -> std::expected<void, ZHLN::Error> {
             auto engine      = CreateTestEngine();
-            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine) {
-                return checkEngine;
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return std::unexpected(ExplosionTestError::EngineInitFailed);
             }
 
             auto& reg = engine->GetRegistry();
@@ -80,9 +80,8 @@ struct ExplosionTestSuite {
             ZHLN::Test::ExpectTrue(reg.IsAlive(expRoot));
 
             const auto* comp      = reg.Get<ZHLN::ExplosionComponent>(expRoot);
-            auto        checkComp = ZHLN::Test::AssertTrue(comp != nullptr);
-            if (!checkComp) {
-                return checkComp;
+            if (!ZHLN::Test::ExpectTrue(comp != nullptr)) {
+                return std::unexpected(ExplosionTestError::ExplosionSpawnFailed);
             }
 
             ZHLN::Test::ExpectEq(comp->type, ZHLN::OrdnanceType::StandardFireball);
@@ -111,9 +110,8 @@ struct ExplosionTestSuite {
         // ====================================================================
         auto artillery_mortar_and_crater() -> std::expected<void, ZHLN::Error> {
             auto engine      = CreateTestEngine();
-            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine) {
-                return checkEngine;
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return std::unexpected(ExplosionTestError::EngineInitFailed);
             }
 
             auto& reg = engine->GetRegistry();
@@ -123,9 +121,8 @@ struct ExplosionTestSuite {
             ZHLN::Test::ExpectTrue(reg.IsAlive(expRoot));
 
             const auto* comp      = reg.Get<ZHLN::ExplosionComponent>(expRoot);
-            auto        checkComp = ZHLN::Test::AssertTrue(comp != nullptr);
-            if (!checkComp) {
-                return checkComp;
+            if (!ZHLN::Test::ExpectTrue(comp != nullptr)) {
+                return std::unexpected(ExplosionTestError::ExplosionSpawnFailed);
             }
 
             const ZHLN::Entity debrisEnt = comp->debrisEntity;
@@ -176,9 +173,8 @@ struct ExplosionTestSuite {
         // ====================================================================
         auto crater_decal_fade_and_cleanup() -> std::expected<void, ZHLN::Error> {
             auto engine      = CreateTestEngine();
-            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine) {
-                return checkEngine;
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return std::unexpected(ExplosionTestError::EngineInitFailed);
             }
 
             auto& reg = engine->GetRegistry();
@@ -210,9 +206,8 @@ struct ExplosionTestSuite {
 
             // Invariant 1: Scale shrunk dynamically during fade
             const auto* trans      = reg.Get<ZHLN::Components::TransformComponent>(craterEnt);
-            auto        checkTrans = ZHLN::Test::AssertTrue(trans != nullptr);
-            if (!checkTrans) {
-                return checkTrans;
+            if (!ZHLN::Test::ExpectTrue(trans != nullptr)) {
+                return std::unexpected(ExplosionTestError::CraterDecalSpawnFailed);
             }
             ZHLN::Test::ExpectTrue(trans->scale.GetX() < 6.8f);
 

@@ -31,8 +31,7 @@ struct RayTracedShadowsTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::Error> raytraced_shadow_occlusion_and_stability() {
             auto engine      = CreateTestEngine(640, 480);
-            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine) {
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
             }
 
@@ -60,9 +59,8 @@ struct RayTracedShadowsTestSuite {
                 auto floorMatRes = ZHLN::CreativeWorksFactory::CreateMaterial(
                     rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.55f, 0.55f, 0.55f, 1.0f}}
                 );
-                auto checkFloorMat = ZHLN::Test::AssertTrue(floorMatRes.has_value());
-                if (!checkFloorMat) {
-                    return checkFloorMat;
+                if (!ZHLN::Test::ExpectTrue(floorMatRes.has_value())) {
+                    return std::unexpected(LightingRTTestError::MaterialCreationFailed);
                 }
                 ZHLN::CreativeWorksFactory::CreatePlane(
                     *engine, 400.0f, {0.55f, 0.55f, 0.55f, 1.0f},
@@ -115,10 +113,7 @@ struct RayTracedShadowsTestSuite {
                     TickFrames(eng, 1);
                     const RgbImage shadowB = Capture(eng, "headless_lighting_rt_shadow_b.ppm");
 
-                    auto checkFrame = ZHLN::Test::AssertTrue(shadowA.Valid() && shadowARepeat.Valid() && shadowB.Valid());
-                    if (!checkFrame) {
-                        captureFailed = true;
-                        reg.Destroy(occluder);
+                    if (!ZHLN::Test::ExpectTrue(shadowA.Valid() && shadowARepeat.Valid() && shadowB.Valid())) {
                         return false;
                     }
 
@@ -127,8 +122,7 @@ struct RayTracedShadowsTestSuite {
 
                     TickFrames(eng, 2);
                     const RgbImage shadowClear = Capture(eng, "headless_lighting_rt_shadow_clear.ppm");
-                    checkFrame                 = ZHLN::Test::AssertTrue(shadowClear.Valid());
-                    if (!checkFrame) {
+                    if (!ZHLN::Test::ExpectTrue(shadowClear.Valid())) {
                         captureFailed = true;
                         return false;
                     }

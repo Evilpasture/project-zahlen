@@ -62,9 +62,9 @@ struct HiZTestSuite {
             constexpr uint32_t kHeight = 720;
 
             auto engine      = CreateTestEngine(kWidth, kHeight);
-            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine)
-                return checkEngine;
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return std::unexpected(HiZTestError::EngineInitFailed);
+            }
 
             // Invariant: Mip count must equal std::bit_width(max(width, height))
             const uint32_t expectedMips = std::bit_width(std::max(kWidth, kHeight));
@@ -96,9 +96,9 @@ struct HiZTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::Error> hiz_two_pass_culling_pipeline_execution() {
             auto engine      = CreateTestEngine(1280, 720);
-            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine)
-                return checkEngine;
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return std::unexpected(HiZTestError::EngineInitFailed);
+            }
 
             auto& reg = engine->GetRegistry();
 
@@ -150,9 +150,9 @@ struct HiZTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::Error> hiz_occlusion_culling_invariants() {
             auto engine      = CreateTestEngine(1280, 720);
-            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine)
-                return checkEngine;
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return std::unexpected(HiZTestError::EngineInitFailed);
+            }
 
             auto& reg = engine->GetRegistry();
 
@@ -213,9 +213,9 @@ struct HiZTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::Error> hiz_dynamic_viewport_resizing() {
             auto engine      = CreateTestEngine(1280, 720);
-            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine)
-                return checkEngine;
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return std::unexpected(HiZTestError::EngineInitFailed);
+            }
 
             constexpr float dt = 1.0f / 60.0f;
 

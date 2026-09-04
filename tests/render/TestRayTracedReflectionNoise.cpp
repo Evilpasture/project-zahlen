@@ -339,7 +339,7 @@ struct RayTracedReflectionNoiseTestSuite {
         /// frame must stay still.
         std::expected<void, ZHLN::Error> rtr_is_live_and_rough_surfaces_stay_still() {
             auto engine = RayTracedReflectionNoiseTestSuite::CreateTestEngine();
-            if (!ZHLN::Test::AssertTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(ReflectionNoiseError::EngineInitFailed);
             }
             if (!engine->GetRenderContext().RayTracingSupported()) {
@@ -438,7 +438,7 @@ struct RayTracedReflectionNoiseTestSuite {
         /// box of the pixels that actually vary between two on-frames.
         std::expected<void, ZHLN::Error> rtr_residual_is_aperiodic_and_isotropic() {
             auto engine = RayTracedReflectionNoiseTestSuite::CreateTestEngine();
-            if (!ZHLN::Test::AssertTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(ReflectionNoiseError::EngineInitFailed);
             }
             if (!engine->GetRenderContext().RayTracingSupported()) {
@@ -560,7 +560,7 @@ struct RayTracedReflectionNoiseTestSuite {
         /// real hardware (transient 2.03 -> 1.06, then a ~1.7 plateau).
         std::expected<void, ZHLN::Error> rtr_residual_converges_with_temporal_accumulation() {
             auto engine = RayTracedReflectionNoiseTestSuite::CreateTestEngine();
-            if (!ZHLN::Test::AssertTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(ReflectionNoiseError::EngineInitFailed);
             }
             if (!engine->GetRenderContext().RayTracingSupported()) {
@@ -651,7 +651,7 @@ struct RayTracedReflectionNoiseTestSuite {
         /// debris, not VNDF jitter.
         std::expected<void, ZHLN::Error> rtr_residual_has_no_isolated_ray_debris() {
             auto engine = RayTracedReflectionNoiseTestSuite::CreateTestEngine();
-            if (!ZHLN::Test::AssertTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(ReflectionNoiseError::EngineInitFailed);
             }
             if (!engine->GetRenderContext().RayTracingSupported()) {
@@ -696,7 +696,7 @@ struct RayTracedReflectionNoiseTestSuite {
         /// a frozen or bypassed denoiser leaves it untouched.
         std::expected<void, ZHLN::Error> hdr_denoiser_reduces_reflection_noise() {
             auto engine = RayTracedReflectionNoiseTestSuite::CreateTestEngine();
-            if (!ZHLN::Test::AssertTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(ReflectionNoiseError::EngineInitFailed);
             }
             if (!engine->GetRenderContext().RayTracingSupported()) {

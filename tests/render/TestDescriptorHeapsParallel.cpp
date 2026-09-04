@@ -73,9 +73,9 @@ struct DescriptorHeapsParallelSuite {
         // ====================================================================
         std::expected<void, ZHLN::Error> secondary_command_buffers_inherit_and_draw_from_heaps() {
             auto engine      = DescriptorHeapsParallelSuite::CreateTestEngine();
-            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine)
-                return checkEngine;
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return std::unexpected(DescriptorHeapsParallelTestError::EngineInitFailed);
+            }
 
             auto& reg = engine->GetRegistry();
             auto& rc  = engine->GetRenderContext();
