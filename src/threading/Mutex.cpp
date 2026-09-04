@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Threading/ConditionalVariable.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -12,9 +13,9 @@
 #include <mutex>
 #ifdef ZHLN_DEBUG
 #include <print>
+#include <thread>
 #endif
 #include <new>
-#include <thread>
 
 namespace ZHLN {
 
@@ -197,7 +198,7 @@ void Mutex::LockSlow() noexcept {
 
         if (!(val & LOCKED)) {
             if (_bits.compare_exchange_weak(val, val | LOCKED, std::memory_order::acquire, std::memory_order::relaxed)) {
-                if constexpr (kIsDebugMutex) {
+                if constexpr (isDebug) {
                     PostLock();
                 }
                 return;
@@ -222,7 +223,7 @@ void Mutex::LockSlow() noexcept {
 
         if (!(val & LOCKED)) {
             if (_bits.compare_exchange_weak(val, val | LOCKED, std::memory_order::acquire, std::memory_order::relaxed)) {
-                if constexpr (kIsDebugMutex) {
+                if constexpr (isDebug) {
                     PostLock();
                 }
                 return;

@@ -282,7 +282,9 @@ constexpr std::array Handlers = {
         .placeholder = "",
         .description = "Halt startup and wait for an external debugger attachment",
         .action      = [](ZHLN::CommandLineOptions& opt, std::string_view) -> std::expected<void, ZHLN::Error> {
-            std::println("\n{}Waiting for debugger attachment. PID: {}{}{}\nPress ENTER to continue...", Ansi::BYellow, Ansi::BCyan, GetPID(), Ansi::Reset);
+            std::println(
+                "\n{}Waiting for debugger attachment. PID: {}{}{}\nPress ENTER to continue...", Ansi::BYellow, Ansi::BCyan, ZHLN::GetPID(), Ansi::Reset
+            );
             std::cin.get();
             return {};
         }
