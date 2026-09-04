@@ -202,7 +202,7 @@ case "$BASE_COMPILER" in
             exit 1
         fi
 
-        if [[ -d "$P2996_ROOT/install" ]]; then
+        if [[ -d "$P2996_INSTALL" ]]; then
             P2996_INSTALL="$P2996_ROOT/install"
             P2996_BUILD="$P2996_ROOT/build"
         elif [[ -x "$P2996_ROOT/build/bin/clang" ]]; then
