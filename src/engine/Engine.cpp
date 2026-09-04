@@ -17,7 +17,6 @@
 // clang-format on
 #include "TTYBackend.hpp"
 #include "engine/system/LODSystem.hpp"
-#include "imgui.h"
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/CommandLine.hpp>
@@ -209,6 +208,11 @@ struct EngineImpl {
     void*        gameState    = nullptr;
     uint64_t     frameCounter = 0;
     bool         joltAcquired = false;
+    // ImGui is kept as a reference/debug overlay, not as the UI. Off by
+    // default: Engine::ProcessEvents does not open an ImGui frame at all when
+    // this is false, so no NewFrame, no ImGui vertex upload and no ImGui
+    // render pass happen. See Engine::SetImGuiEnabled.
+    bool         imguiEnabled = false;
     EngineConfig config;
 };
 
@@ -940,14 +944,14 @@ void Engine::ProcessEvents() {
     }
 
     glfwPollEvents();
-    _impl->renderContext->BeginImGuiFrame();
 
-    // Mirror ImGui capture into ECS so gameplay systems stay ImGui-free.
-    // High-level ImGui UI remains in main.cpp; only the capture flags cross here.
-    if (inputState != nullptr) {
-        const ImGuiIO& io               = ImGui::GetIO();
-        inputState->wantCaptureKeyboard = io.WantCaptureKeyboard;
-        inputState->wantCaptureMouse    = io.WantCaptureMouse;
+    // ImGui is a debug overlay now, not the UI. When it is toggled off it does
+    // not get a frame at all: no NewFrame, no vertex buffers, no render pass
+    // (RenderContext tracks whether a frame was ever opened). Input capture is
+    // no longer read back from ImGui either -- UIInteractionSystem derives
+    // wantCaptureMouse / wantCaptureKeyboard from the native ECS widgets.
+    if (_impl->imguiEnabled) {
+        _impl->renderContext->BeginImGuiFrame();
     }
 }
 
@@ -1048,6 +1052,14 @@ void Engine::SetGameState(void* state) {
 
 void Engine::SetUICallback(UICallback callback) {
     _impl->uiCallback = std::move(callback);
+}
+
+void Engine::SetImGuiEnabled(bool enabled) noexcept {
+    _impl->imguiEnabled = enabled;
+}
+
+auto Engine::IsImGuiEnabled() const noexcept -> bool {
+    return _impl->imguiEnabled;
 }
 
 void Engine::AddDeviceLostCallback(DeviceLostCallback callback) {

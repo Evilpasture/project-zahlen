@@ -493,12 +493,26 @@ void DrawOrientationGizmo(const ZHLN::Camera& cam) {
     ImGui::End();
 }
 
+// The ImGui diagnostic panels (console, profilers, compass, lighting
+// workspace) are kept behind F8 as a reference while the native GUI catches
+// up. Off by default so the editor dogfoods the native stack; while it is off
+// the engine does not open an ImGui frame at all.
+bool s_ShowImGuiDebug = false;
+bool s_WasF8Down      = false;
+
 // ============================================================================
 // MAIN DIAGNOSTIC UI SYSTEM
 // ============================================================================
 
 void UISystem(ZHLN::Engine& engine) {
     if (engine.GetWindow().IsTTY() || engine.GetWindow().IsHeadless()) {
+        return;
+    }
+
+    // ImGui is a reference overlay behind F8. Without the guard these panels
+    // would issue ImGui calls for a frame the engine never opened, which draws
+    // into the previous frame's draw list.
+    if (!s_ShowImGuiDebug) {
         return;
     }
 
@@ -772,6 +786,7 @@ EditorState s_EditorState;
 ZHLN::Editor::EditorState s_NativeEditorState;
 float    s_HierarchySplit = 0.22f;
 float    s_InspectorSplit = 0.72f;
+
 // Screen rect of the center viewport pane, refreshed by RunNativeEditorFrame.
 // Picking rays are gated to it so clicks on the native panels do not also
 // deselect/raycast into the world (the wantCaptureMouse trap: the native UI
@@ -781,15 +796,18 @@ JPH::Vec4 s_ViewportScreenRect {0.0f, 0.0f, 0.0f, 0.0f};
 void UpdateEditorCamera(ZHLN::Camera& cam, const ZHLN::Components::InputStateComponent& state, float dt) {
     const float sensitivity = 0.15f;
 
-    const bool imguiCapturesMouse    = ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureMouse;
-    const bool imguiCapturesKeyboard = ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureKeyboard;
+    // wantCaptureMouse / wantCaptureKeyboard are computed by
+    // UIInteractionSystem from the native ECS widgets, so the camera is gated
+    // by the UI actually on screen -- ImGui's or the engine's own.
+    const bool uiCapturesMouse    = state.wantCaptureMouse;
+    const bool uiCapturesKeyboard = state.wantCaptureKeyboard;
 
-    if (state.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton)) && !imguiCapturesMouse) {
+    if (state.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton)) && !uiCapturesMouse) {
         cam.yaw += state.mouseDeltaX * sensitivity;
         cam.pitch = std::clamp(cam.pitch - (state.mouseDeltaY * sensitivity), -89.0f, 89.0f);
     }
 
-    if (imguiCapturesKeyboard) {
+    if (uiCapturesKeyboard) {
         return;
     }
 
@@ -1061,6 +1079,12 @@ void RunNativeEditorFrame(ZHLN::Engine& engine) {
                             r->computedAbsMaxX, r->computedAbsMaxY
                         };
                     }
+                    // This pane is the 3D view, not chrome: tag it so
+                    // UIInteractionSystem leaves wantCaptureMouse clear while
+                    // the pointer is over it and the camera keeps orbiting.
+                    if (reg.Get<ZHLN::GUI::UIComponents::UIViewportComponent>(pane) == nullptr) {
+                        reg.Add<ZHLN::GUI::UIComponents::UIViewportComponent>(pane);
+                    }
                     gui.Box(
                         "ViewportOverlay",
                         ZHLN::GUI::BoxConfig {.flexShrink = 0.0f, .color = {0.0f, 0.0f, 0.0f, 0.0f}, .edgeWidth = 0.0f},
@@ -1093,24 +1117,40 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
         auto& reg   = engine.GetRegistry();
         auto* state = reg.GetSingleton<ZHLN::Components::InputStateComponent>();
 
-        const bool imguiCapturesMouse    = ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureMouse;
-        const bool imguiCapturesKeyboard = ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureKeyboard;
+        // F8 toggles the ImGui diagnostic overlay. Edge-detected against last
+        // frame because InputStateComponent only reports held keys.
+        if (state != nullptr) {
+            const bool f8Down = state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::F8));
+            if (f8Down && !s_WasF8Down) {
+                s_ShowImGuiDebug = !s_ShowImGuiDebug;
+                engine.SetImGuiEnabled(s_ShowImGuiDebug);
+                ZHLN::Log("[WorldEditor] ImGui debug overlay {}.", s_ShowImGuiDebug ? "enabled" : "disabled");
+            }
+            s_WasF8Down = f8Down;
+        }
 
-        if (state != nullptr && state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Escape)) && !imguiCapturesKeyboard) {
+        // Both flags come from UIInteractionSystem, which walks this frame's
+        // native widgets. The center viewport pane carries UIViewportComponent,
+        // so hovering it leaves wantCaptureMouse clear and picking still
+        // works; hovering the hierarchy or inspector sets it, so a click there
+        // cannot also cast a ray and clear the selection.
+        const bool uiCapturesMouse    = state != nullptr && state->wantCaptureMouse;
+        const bool uiCapturesKeyboard = state != nullptr && state->wantCaptureKeyboard;
+
+        if (state != nullptr && state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Escape)) && !uiCapturesKeyboard) {
             engine.GetWindow().Close();
             break;
         }
 
-        // World picking fires only from inside the center viewport pane: the
-        // native editor panels overlay the window but do not siphon GLFW
-        // input, so without this gate a click on the hierarchy would also
-        // cast a ray and clear the selection.
+        // World picking is additionally confined to the viewport's screen rect:
+        // the native panels overlay the same window, and a pointer over the
+        // hierarchy sits outside the viewport even before capture is consulted.
         const bool pointerInViewport =
             state != nullptr &&
             state->mouseX >= s_ViewportScreenRect.GetX() && state->mouseX <= s_ViewportScreenRect.GetZ() &&
             state->mouseY >= s_ViewportScreenRect.GetY() && state->mouseY <= s_ViewportScreenRect.GetW();
 
-        if (state != nullptr && pointerInViewport && !state->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton)) && !imguiCapturesMouse) {
+        if (state != nullptr && pointerInViewport && !state->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton)) && !uiCapturesMouse) {
             static bool wasMouseDown = false;
             bool        isMouseDown  = glfwGetMouseButton(static_cast<GLFWwindow*>(engine.GetWindow().GetNativeHandle()), GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
 
@@ -1129,7 +1169,9 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
         if (state != nullptr && state->needsResize) {
             engine.GetRenderContext().SetResolution(state->newSize);
             state->needsResize = false;
-            ImGui::EndFrame();
+            if (s_ShowImGuiDebug) {
+                ImGui::EndFrame();
+            }
             continue;
         }
 

@@ -173,6 +173,22 @@ struct UIComponents {
         char     _free_space[3] {};
     };
 
+    // Marks the pane that shows the 3D world instead of chrome.
+    //
+    // UIInteractionSystem sets InputStateComponent::wantCaptureMouse when the
+    // pointer is over a widget, which is what stops a click on a panel from
+    // also orbiting the camera or picking into the scene. A viewport is the
+    // exception: the world is supposed to receive the pointer there, so
+    // hovering anywhere inside a tagged subtree leaves wantCaptureMouse clear
+    // and the camera keeps working as if the pointer were over bare screen.
+    //
+    // This only suppresses *capture*. Widgets inside a viewport are still
+    // hit-tested and still receive their own hover and clicks, so the overlays
+    // drawn over the 3D view (gizmos, the Simulate toggle) remain usable. It
+    // is an empty tag: the interaction pass looks for it by walking the parent
+    // chain, so tagging the pane covers everything nested under it.
+    struct UIViewportComponent {};
+
     struct UIPanelComponent {
         JPH::Vec4     color        = {1.0f, 1.0f, 1.0f, 1.0f};
         JPH::Vec4     borderRadius = {0.0f, 0.0f, 0.0f, 0.0f};

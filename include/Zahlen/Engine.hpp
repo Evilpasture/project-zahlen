@@ -206,6 +206,21 @@ class ZHLN_API Engine {
 
     void SetUICallback(UICallback callback);
 
+    /// ImGui is a debug overlay kept around as a reference while the native GUI
+    /// reaches feature parity; it is not the engine's UI and nothing in the
+    /// engine reads its state.
+    ///
+    /// Off by default, and when it is off ProcessEvents never opens an ImGui
+    /// frame: no NewFrame, no draw-data upload, no ImGui render pass. Toggling
+    /// mid-run is fine -- the host simply stops issuing ImGui calls and the
+    /// next frame draws without the overlay.
+    ///
+    /// Input capture is *not* affected by this flag: wantCaptureMouse and
+    /// wantCaptureKeyboard are computed by UIInteractionSystem from the native
+    /// ECS widgets, so gameplay is gated identically either way.
+    void               SetImGuiEnabled(bool enabled) noexcept;
+    [[nodiscard]] auto IsImGuiEnabled() const noexcept -> bool;
+
     /// Subscribes to the device-lost notification. See DeviceLostCallback.
     /// Idempotent only in the sense that a null callback is ignored; adding the
     /// same function twice registers it twice.

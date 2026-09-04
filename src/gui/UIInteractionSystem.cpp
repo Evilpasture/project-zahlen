@@ -73,6 +73,13 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
     auto rects    = reg.GetRawArray<GUI::UIComponents::UIRectComponent>();
 
     if (entities.empty()) {
+        // Nothing on screen can capture, but the flags are not reset anywhere
+        // else: ProcessEvents only clears the per-frame deltas, and the TTY
+        // path returns before it gets here. Without this a stale `true` from a
+        // scene that had widgets would freeze the camera for the rest of the
+        // session after the UI was torn down.
+        state->wantCaptureMouse    = false;
+        state->wantCaptureKeyboard = false;
         return;
     }
 
@@ -447,6 +454,74 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
             }
         }
     }
+
+    // 4. Pointer and keyboard capture, for everything that is not UI.
+    //
+    // InputStateComponent::wantCaptureMouse / wantCaptureKeyboard are the
+    // contract that keeps a click on a panel from also orbiting the camera,
+    // picking into the scene or walking the player. They used to be copied
+    // straight out of ImGui::GetIO(); the native UI now derives them from the
+    // widgets it actually owns, so the editor behaves the same whether or not
+    // the ImGui debug overlay happens to be running.
+    //
+    // This runs in Phase::UI, ahead of PlayerIntent, Gameplay, Simulation and
+    // Camera, so the flags a gameplay system reads this frame were decided
+    // against this frame's widget layout -- the same ordering the ImGui
+    // readback had, which was filled in during ProcessEvents.
+
+    // Topmost visible widget under the pointer. The entries are still sorted
+    // deepest-first with the highest layoutOrder winning at equal depth, so
+    // the first hit is what the render pass drew on top -- what you see is
+    // what captures. IsPointVisible walks the clip chain, so a row scrolled
+    // out of a ScrollBox or clipped by an ancestor cannot capture.
+    bool pointerOverCapturingWidget = false;
+    for (const auto& entry: sortedEntries) {
+        const Entity e = entities[entry.rawIndex];
+        if (IsEntityOrAncestorHidden(e) || !GUI::IsPointVisible(reg, e, mouseX, mouseY)) {
+            continue;
+        }
+        pointerOverCapturingWidget = FindAncestorWith<GUI::UIComponents::UIViewportComponent>(reg, e) == Entity::Null();
+        break;
+    }
+
+    // An in-flight drag captures even when the pointer has left the widget, so
+    // dragging a slider or splitter handle cannot slip through to the world
+    // halfway through. Panel drags are UIDragComponent, sliders and splitters
+    // latch their own isDragging as well.
+    bool dragActive = false;
+    for (const auto& drag: reg.GetRawArray<GUI::UIComponents::UIDragComponent>()) {
+        if (drag.isDragging) {
+            dragActive = true;
+            break;
+        }
+    }
+    if (!dragActive) {
+        for (const auto& slider: reg.GetRawArray<GUI::UIComponents::UISliderComponent>()) {
+            if (slider.isDragging) {
+                dragActive = true;
+                break;
+            }
+        }
+    }
+    if (!dragActive) {
+        for (const auto& split: reg.GetRawArray<GUI::UIComponents::UISplitterComponent>()) {
+            if (split.isDragging) {
+                dragActive = true;
+                break;
+            }
+        }
+    }
+
+    bool textFocused = false;
+    for (const auto& input: reg.GetRawArray<GUI::UIComponents::UITextInputComponent>()) {
+        if (input.isFocused) {
+            textFocused = true;
+            break;
+        }
+    }
+
+    state->wantCaptureMouse    = pointerOverCapturingWidget || dragActive;
+    state->wantCaptureKeyboard = textFocused;
 }
 
 } // namespace ZHLN
