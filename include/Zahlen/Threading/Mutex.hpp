@@ -6,6 +6,7 @@
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/Atomic.hpp>
 #include <cstdint>
+#include <type_traits>
 
 namespace ZHLN {
 
@@ -13,6 +14,59 @@ namespace ZHLN {
 struct Fiber;
 extern auto GetCurrentFiber() noexcept -> Fiber*;
 extern void YieldFiber() noexcept;
+
+namespace detail {
+
+/**
+ * @brief Remembers which context owns a mutex, so that Mutex.cpp can catch
+ * recursive locking and unlocking a mutex someone else holds.
+ *
+ * Both variants answer the same questions. `NoMutexOwner` is the release variant and
+ * carries no state at all, which is what keeps Mutex a single C-compatible byte
+ * -- see the static_asserts below. The shared shape is also what lets the
+ * checks in Mutex.cpp be written once and guarded by `if constexpr (isDebug)`
+ * instead of being preprocessed away: the discarded branch still has to
+ * type-check, so the calls it makes have to exist in both configurations.
+ */
+struct MutexOwner {
+    alignas(16) ZHLN::Atomic<bool>      hasOwner {false};
+    alignas(16) ZHLN::Atomic<uintptr_t> owner {0};
+
+    [[nodiscard]] auto IsOwned() const noexcept -> bool {
+        return hasOwner.load(std::memory_order::acquire);
+    }
+
+    [[nodiscard]] auto OwnedBy(uintptr_t context) const noexcept -> bool {
+        return hasOwner.load(std::memory_order::acquire) && owner.load(std::memory_order::relaxed) == context;
+    }
+
+    void SetOwner(uintptr_t context) noexcept {
+        owner.store(context, std::memory_order::relaxed);
+        hasOwner.store(true, std::memory_order::release);
+    }
+
+    void Reset() noexcept {
+        hasOwner.store(false, std::memory_order::release);
+    }
+};
+
+struct NoMutexOwner {
+    [[nodiscard]] constexpr auto IsOwned() const noexcept -> bool {
+        return false;
+    }
+
+    [[nodiscard]] constexpr auto OwnedBy(uintptr_t) const noexcept -> bool {
+        return false;
+    }
+
+    constexpr void SetOwner(uintptr_t) noexcept {
+    }
+
+    constexpr void Reset() noexcept {
+    }
+};
+
+} // namespace detail
 
 /**
  * @brief High-Performance, 1-Byte Mutex.
@@ -75,33 +129,30 @@ class Mutex {
     static constexpr uint8_t HAS_WAITERS = 0x02;
     static constexpr uint8_t POISONED    = 0x04;
 
+    using Owner = std::conditional_t<isDebug, detail::MutexOwner, detail::NoMutexOwner>;
+
     // Raw zero is the unlocked C/FFI representation. Keep this member free of
     // NSDMI so Mutex remains trivially default constructible; C++ owners must
     // value-initialize (`Mutex mutex {}`), and FFI storage must be zeroed.
     ZHLN::Atomic<uint8_t> _bits;
 
+    // Ownership bookkeeping for the deadlock detector: two atomics in a debug
+    // build, an empty type in a release one, where [[no_unique_address]] lets it
+    // take up no space at all. Deliberately no NSDMI, for the same reason as
+    // _bits -- MutexOwner initializes its own members.
+    [[no_unique_address]] Owner _owner;
+
     [[gnu::cold, gnu::noinline]] void LockSlow() noexcept;
     [[gnu::cold, gnu::noinline]] void UnlockSlow() noexcept;
 
-    // --- Debug Variables & Helpers ---
-#ifdef ZHLN_DEBUG
-    alignas(16) ZHLN::Atomic<bool> _hasOwner {};
-    alignas(16) ZHLN::Atomic<uintptr_t> _owner {};
-
+    // --- Debug Hooks ---
+    // Mutex.cpp defines these for both configurations and guards the bodies
+    // with `if constexpr (isDebug)`, so a release build keeps the detector out
+    // of the binary without a second, empty copy of every check living here.
     void CheckPreLock() noexcept;
     void PostLock() noexcept;
     void PreUnlock() noexcept;
     void ClearOwner() noexcept;
-#else
-    constexpr void CheckPreLock() noexcept {
-    }
-    constexpr void PostLock() noexcept {
-    }
-    constexpr void PreUnlock() noexcept {
-    }
-    constexpr void ClearOwner() noexcept {
-    }
-#endif
 };
 
 // Guarantee 1-byte footprint in Release builds
