@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <Zahlen/Core/Platform.hpp>
 #include <atomic>
 #include <cstddef>
 namespace ZHLN {
@@ -19,16 +20,16 @@ using FiberFunc = void (*)(void*);
  */
 struct alignas(128) Fiber {
     void*     stackPointer; // Offset 0: Used by ZHLN_Switch
-    void*     mapAddr;      // Base of mmap/VirtualAlloc
+    void*     mapAddr;      // Base of the stack mapping (AllocateGuardedRegion)
     size_t    mapSize;      // Total size including guard pages
     FiberFunc func;         // Entry point
     void*     arg;          // User data
     Fiber*    caller;       // Parent fiber to return to on Yield
 
-#if defined(_WIN32)
-    void* stackBase; // Windows TEB tracking
-    void* stackLimit;
-#endif
+    // The stack bounds the OS has recorded for this fiber. Swapped in and out
+    // of the platform's per-thread state on every switch; stays zeroed and
+    // unused where the OS tracks nothing (see GetCurrentStackBounds()).
+    StackBounds bounds {};
 
     bool              isFinished;
     bool              isMain;

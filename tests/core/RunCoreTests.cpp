@@ -22,6 +22,7 @@
 
 #include "TestsFramework.hpp"
 
+auto RunPlatformSuite() -> ZHLN::Test::TestStats;
 auto RunContainersSuite() -> ZHLN::Test::TestStats;
 auto RunReflectionSuite() -> ZHLN::Test::TestStats;
 auto RunErrorSuite() -> ZHLN::Test::TestStats;
@@ -36,6 +37,7 @@ auto RunRayTracedNoiseMetricsSuite() -> ZHLN::Test::TestStats;
 
 auto main() -> int {
     return ZHLN::Test::Runner::RunDeferred(
+        RunPlatformSuite,
         RunContainersSuite,
         RunReflectionSuite,
         RunErrorSuite,
