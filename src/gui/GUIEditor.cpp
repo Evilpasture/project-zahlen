@@ -69,7 +69,13 @@ namespace {
     // scrollbar. `Entity::Null()` is not offered — a field that means "no
     // target" is expressed by the picker's None entry, not by a second empty
     // row nobody can tell apart from the first.
-    [[nodiscard]] auto BuildEntityOptions(ZHLN::ECS::Registry& reg, ZHLN::Entity editorRoot) -> std::vector<GUI::ReferenceOption> {
+    // Reachable only through an `if constexpr` branch of MakeRowSink's generic
+    // lambda, which is instantiated per reflected field type. Builds without
+    // P2996 reflection compile ForEachFieldWithName down to a no-op, so the
+    // lambda is never instantiated and nothing references this — hence the
+    // attribute. It is live in any build where reflection actually runs.
+    [[maybe_unused]] [[nodiscard]] auto BuildEntityOptions(ZHLN::ECS::Registry& reg, ZHLN::Entity editorRoot)
+        -> std::vector<GUI::ReferenceOption> {
         std::vector<GUI::ReferenceOption> out;
         out.reserve(64);
         for (const ZHLN::Entity e: reg.GetEntitiesWith<Comp::NameComponent>()) {

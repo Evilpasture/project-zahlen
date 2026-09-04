@@ -30,6 +30,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <source_location>
 #include <expected>
 #include <string_view>
 #include <vector>
@@ -44,8 +45,42 @@ using UIComp     = ZHLN::GUI::UIComponents;
 
 constexpr float kEps = 0.01f;
 
-[[nodiscard]] auto Near(float actual, float expected) -> bool {
-    return std::fabs(actual - expected) < kEps;
+[[nodiscard]] auto Near(float actual, float expected, float tolerance = kEps) -> bool {
+    return std::fabs(actual - expected) <= tolerance;
+}
+
+// A near-equality assertion that reports WHERE it failed and by HOW MUCH.
+//
+// ExpectTrue alone records only "true"/"false", which says a coordinate was
+// wrong but not by how far -- the one thing you need when a geometry assertion
+// goes red. The defaulted std::source_location is what lets a plain FUNCTION
+// file the failure against its call site: default arguments are evaluated at
+// the call, so `loc` is the assertion, not this helper. No macro required.
+auto ExpectNear(
+    float actual, float expected, float tolerance = kEps, std::source_location loc = std::source_location::current()
+) -> void {
+    if (Near(actual, expected, tolerance)) {
+        return;
+    }
+    ZHLN::Test::ExpectTrue(false, loc);
+    ZHLN::Println(
+        "      {}near:{} actual={:.4f}, expected={:.4f}, tol={:.4f}", ZHLN::Color::Red, ZHLN::Color::Reset, actual,
+        expected, tolerance
+    );
+}
+
+// The colour assertions, which always read three channels at once.
+auto ExpectColor(
+    const JPH::Vec4& actual, float r, float g, float b, std::source_location loc = std::source_location::current()
+) -> void {
+    if (Near(actual.GetX(), r) && Near(actual.GetY(), g) && Near(actual.GetZ(), b)) {
+        return;
+    }
+    ZHLN::Test::ExpectTrue(false, loc);
+    ZHLN::Println(
+        "      {}colour:{} actual=({:.3f},{:.3f},{:.3f}), expected=({:.3f},{:.3f},{:.3f})", ZHLN::Color::Red,
+        ZHLN::Color::Reset, actual.GetX(), actual.GetY(), actual.GetZ(), r, g, b
+    );
 }
 
 // Finds a cached child of `parent` by widget name, the way the engine's own
@@ -77,16 +112,6 @@ template <typename C>
         return e;
     }
     return Entity::Null();
-}
-
-// Gives a rect an explicit on-screen box, standing in for a layout pass.
-void SetComputedRect(Registry& reg, Entity e, float x0, float y0, float x1, float y1) {
-    reg.Patch<UIComp::UIRectComponent>(e, [&](auto& r) -> auto {
-        r.computedAbsMinX = x0;
-        r.computedAbsMinY = y0;
-        r.computedAbsMaxX = x1;
-        r.computedAbsMaxY = y1;
-    });
 }
 
 // An empty rect with an explicit box, for the emitters (which take the rect by
@@ -259,14 +284,18 @@ struct GUIWidgetsTestSuite {
             // Horizontal: fills the width, every quad is the full height.
             g.axis = GUI::UIGradientAxis::Horizontal;
             const Extent h = BoundsOf(EmitGradient(rect, g));
-            ZHLN_CHECK(Near(h.minX, 20.0f) && Near(h.maxX, 120.0f), "horizontal gradient spans the width", "x=[{:.1f},{:.1f}]", h.minX, h.maxX);
-            ZHLN_CHECK(Near(h.minY, 40.0f) && Near(h.maxY, 70.0f), "horizontal gradient fills the height", "y=[{:.1f},{:.1f}]", h.minY, h.maxY);
+            ExpectNear(h.minX, 20.0f);
+            ExpectNear(h.maxX, 120.0f);
+            ExpectNear(h.minY, 40.0f);
+            ExpectNear(h.maxY, 70.0f);
 
             // Vertical: the same rect, transposed.
             g.axis = GUI::UIGradientAxis::Vertical;
             const Extent v = BoundsOf(EmitGradient(rect, g));
-            ZHLN_CHECK(Near(v.minX, 20.0f) && Near(v.maxX, 120.0f), "vertical gradient fills the width", "x=[{:.1f},{:.1f}]", v.minX, v.maxX);
-            ZHLN_CHECK(Near(v.minY, 40.0f) && Near(v.maxY, 70.0f), "vertical gradient spans the height", "y=[{:.1f},{:.1f}]", v.minY, v.maxY);
+            ExpectNear(v.minX, 20.0f);
+            ExpectNear(v.maxX, 120.0f);
+            ExpectNear(v.minY, 40.0f);
+            ExpectNear(v.maxY, 70.0f);
             return {};
         }
 
@@ -365,8 +394,8 @@ struct GUIWidgetsTestSuite {
             // its own thickness — that is the stroke, not a mis-mapped value.
             const float half = std::max(0.5f, p.lineWidth * 0.5f) + kEps;
             const Extent b   = BoundsOf(geo);
-            ZHLN_CHECK(Near(b.minY, 200.0f) || (b.minY > 200.0f - half && b.minY < 200.0f + half), "the series maximum reaches the top edge", "minY={:.2f} (tolerance {:.2f})", b.minY, half);
-            ZHLN_CHECK(Near(b.maxY, 300.0f) || (b.maxY > 300.0f - half && b.maxY < 300.0f + half), "the series minimum reaches the bottom edge", "maxY={:.2f} (tolerance {:.2f})", b.maxY, half);
+            ExpectNear(b.minY, 200.0f, half);
+            ExpectNear(b.maxY, 300.0f, half);
             return {};
         }
 
@@ -387,8 +416,8 @@ struct GUIWidgetsTestSuite {
             // look like it had gaps in its data. Tolerance is the stroke
             // thickness, for the same reason as the mapping test above.
             const float half = std::max(0.5f, p.lineWidth * 0.5f) + kEps;
-            ZHLN_CHECK(b.minY < half, "an overshooting sample pins to the top", "minY={:.2f}", b.minY);
-            ZHLN_CHECK(b.maxY > 100.0f - half, "an undershooting sample pins to the bottom", "maxY={:.2f}", b.maxY);
+            ExpectNear(b.minY, 0.0f, half);
+            ExpectNear(b.maxY, 100.0f, half);
             return {};
         }
 
@@ -405,11 +434,11 @@ struct GUIWidgetsTestSuite {
             // CountPlotVertices is an upper bound on a well-formed plot; the
             // emitter is what has to bail out on the degenerate range.
             ZHLN::Test::ExpectEq(GUI::CountPlotVertices(p), 12u);
-            ZHLN_CHECK(EmitPlot(rect, p).positions.empty(), "a zero-width range emits nothing rather than NaN geometry", "", "");
+            ZHLN::Test::ExpectTrue(EmitPlot(rect, p).positions.empty());
 
             // Every kind has to bail out the same way, not just the default.
             p.kind = GUI::UIPlotKind::Histogram;
-            ZHLN_CHECK(EmitPlot(rect, p).positions.empty(), "histograms ignore a zero-width range too", "", "");
+            ZHLN::Test::ExpectTrue(EmitPlot(rect, p).positions.empty());
             return {};
         }
 
@@ -438,7 +467,8 @@ struct GUIWidgetsTestSuite {
                 bar0MinY = std::min(bar0MinY, geo.positions[static_cast<std::size_t>(i)].position[1]);
                 bar0MaxY = std::max(bar0MaxY, geo.positions[static_cast<std::size_t>(i)].position[1]);
             }
-            ZHLN_CHECK(Near(bar0MinY, 50.0f) && Near(bar0MaxY, 75.0f), "a negative bar hangs below the zero line", "y=[{:.1f},{:.1f}]", bar0MinY, bar0MaxY);
+            ExpectNear(bar0MinY, 50.0f);
+            ExpectNear(bar0MaxY, 75.0f);
 
             float bar1MinY = geo.positions[6].position[1];
             float bar1MaxY = geo.positions[6].position[1];
@@ -446,7 +476,8 @@ struct GUIWidgetsTestSuite {
                 bar1MinY = std::min(bar1MinY, geo.positions[static_cast<std::size_t>(i)].position[1]);
                 bar1MaxY = std::max(bar1MaxY, geo.positions[static_cast<std::size_t>(i)].position[1]);
             }
-            ZHLN_CHECK(Near(bar1MinY, 25.0f) && Near(bar1MaxY, 50.0f), "a positive bar rises above the zero line", "y=[{:.1f},{:.1f}]", bar1MinY, bar1MaxY);
+            ExpectNear(bar1MinY, 25.0f);
+            ExpectNear(bar1MaxY, 50.0f);
             return {};
         }
 
@@ -467,8 +498,10 @@ struct GUIWidgetsTestSuite {
             // last bars by half a gap, and a zero-valued sample (the first bar
             // here) is drawn as a 1px sliver — which is the case that used to
             // poke a fringe out past the bottom edge.
-            ZHLN_CHECK(b.minX >= 10.0f - kEps && b.maxX <= 210.0f + kEps, "bars stay within the widget width", "x=[{:.1f},{:.1f}]", b.minX, b.maxX);
-            ZHLN_CHECK(b.minY >= 10.0f - kEps && b.maxY <= 60.0f + kEps, "bars stay within the widget height", "y=[{:.1f},{:.1f}]", b.minY, b.maxY);
+            ZHLN::Test::ExpectTrue(b.minX >= 10.0f - kEps);
+            ZHLN::Test::ExpectTrue(b.maxX <= 210.0f + kEps);
+            ZHLN::Test::ExpectTrue(b.minY >= 10.0f - kEps);
+            ZHLN::Test::ExpectTrue(b.maxY <= 60.0f + kEps);
             return {};
         }
 
@@ -481,13 +514,13 @@ struct GUIWidgetsTestSuite {
             const JPH::Vec4 green = GUI::HsvToRgb(120.0f, 1.0f, 1.0f);
             const JPH::Vec4 blue  = GUI::HsvToRgb(240.0f, 1.0f, 1.0f);
 
-            ZHLN_CHECK(Near(red.GetX(), 1.0f) && Near(red.GetY(), 0.0f) && Near(red.GetZ(), 0.0f), "hue 0 is red", "rgb=({:.2f},{:.2f},{:.2f})", red.GetX(), red.GetY(), red.GetZ());
-            ZHLN_CHECK(Near(green.GetX(), 0.0f) && Near(green.GetY(), 1.0f) && Near(green.GetZ(), 0.0f), "hue 120 is green", "rgb=({:.2f},{:.2f},{:.2f})", green.GetX(), green.GetY(), green.GetZ());
-            ZHLN_CHECK(Near(blue.GetX(), 0.0f) && Near(blue.GetY(), 0.0f) && Near(blue.GetZ(), 1.0f), "hue 240 is blue", "rgb=({:.2f},{:.2f},{:.2f})", blue.GetX(), blue.GetY(), blue.GetZ());
+            ExpectColor(red, 1.0f, 0.0f, 0.0f);
+            ExpectColor(green, 0.0f, 1.0f, 0.0f);
+            ExpectColor(blue, 0.0f, 0.0f, 1.0f);
 
             // 360 is the same colour as 0: the hue strip's last stop wraps.
             const JPH::Vec4 wrapped = GUI::HsvToRgb(360.0f, 1.0f, 1.0f);
-            ZHLN_CHECK(Near(wrapped.GetX(), 1.0f) && Near(wrapped.GetZ(), 0.0f), "hue 360 wraps to red", "rgb=({:.2f},{:.2f},{:.2f})", wrapped.GetX(), wrapped.GetY(), wrapped.GetZ());
+            ExpectColor(wrapped, 1.0f, 0.0f, 0.0f);
             return {};
         }
 
@@ -499,9 +532,9 @@ struct GUIWidgetsTestSuite {
             float val = 0.0f;
             GUI::RgbToHsv(original, hue, sat, val);
 
-            ZHLN_CHECK(Near(hue, 210.0f), "hue survives the round trip", "hue={:.1f}", hue);
-            ZHLN_CHECK(Near(sat, 0.6f), "saturation survives the round trip", "sat={:.3f}", sat);
-            ZHLN_CHECK(Near(val, 0.8f), "value survives the round trip", "val={:.3f}", val);
+            ExpectNear(hue, 210.0f);
+            ExpectNear(sat, 0.6f);
+            ExpectNear(val, 0.8f);
             return {};
         }
 
@@ -514,9 +547,9 @@ struct GUIWidgetsTestSuite {
             float val = 0.0f;
             GUI::RgbToHsv(JPH::Vec4(0.5f, 0.5f, 0.5f, 1.0f), hue, sat, val);
 
-            ZHLN_CHECK(Near(hue, 200.0f), "an achromatic colour keeps the previous hue", "hue={:.1f}", hue);
-            ZHLN_CHECK(Near(sat, 0.0f), "a grey has no saturation", "sat={:.3f}", sat);
-            ZHLN_CHECK(Near(val, 0.5f), "a grey's value is its luminance", "val={:.3f}", val);
+            ExpectNear(hue, 200.0f);
+            ExpectNear(sat, 0.0f);
+            ExpectNear(val, 0.5f);
             return {};
         }
 
@@ -592,7 +625,7 @@ struct GUIWidgetsTestSuite {
             if (panel == nullptr) {
                 return {};
             }
-            ZHLN_CHECK(Near(panel->color.GetX(), 0.0f) && Near(panel->color.GetY(), 1.0f), "the swatch tracks an external edit", "rgb=({:.2f},{:.2f},{:.2f})", panel->color.GetX(), panel->color.GetY(), panel->color.GetZ());
+            ExpectColor(panel->color, 0.0f, 1.0f, 0.0f);
             return {};
         }
 
@@ -670,9 +703,9 @@ struct GUIWidgetsTestSuite {
             if (ce == nullptr) {
                 return {};
             }
-            ZHLN_CHECK(Near(ce->hue, 240.0f), "the picker's hue is derived from the colour", "hue={:.1f}", ce->hue);
-            ZHLN_CHECK(Near(ce->sat, 1.0f), "the picker's saturation is derived from the colour", "sat={:.3f}", ce->sat);
-            ZHLN_CHECK(Near(ce->val, 1.0f), "the picker's value is derived from the colour", "val={:.3f}", ce->val);
+            ExpectNear(ce->hue, 240.0f);
+            ExpectNear(ce->sat, 1.0f);
+            ExpectNear(ce->val, 1.0f);
 
             // The plane is tinted from that hue, so a second picker on a
             // different colour cannot inherit the first one's.
@@ -681,7 +714,8 @@ struct GUIWidgetsTestSuite {
 
             // And the colour survives the open/close cycle untouched: opening
             // a picker must not nudge the value it is showing.
-            ZHLN_CHECK(Near(col[0], 0.0f) && Near(col[2], 1.0f), "opening the picker does not alter the colour", "rgb=({:.3f},{:.3f},{:.3f})", col[0], col[1], col[2]);
+            ExpectNear(col[0], 0.0f);
+            ExpectNear(col[2], 1.0f);
             return {};
         }
 
@@ -827,7 +861,7 @@ struct GUIWidgetsTestSuite {
                     gui.Reference("ref", "Ref", value, std::span<const GUI::ReferenceOption>(after, 2), GUI::ReferenceConfig {});
                 });
             }
-            ZHLN_CHECK(value == 20u, "the field still points at Beta after the list shifts", "value={}", value);
+            ZHLN::Test::ExpectEq(value, std::uint64_t {20});
             ZHLN::Test::ExpectEq(reg.Get<UIComp::UIDropdownComponent>(e)->selectedIdx, 1);
             return {};
         }
@@ -855,7 +889,7 @@ struct GUIWidgetsTestSuite {
                     gui.Reference("ref", "Ref", value, std::span<const GUI::ReferenceOption>(options, 2), GUI::ReferenceConfig {});
                 });
             }
-            ZHLN_CHECK(value == 999u, "a dangling handle survives being displayed", "value={}", value);
+            ZHLN::Test::ExpectEq(value, std::uint64_t {999});
             return {};
         }
 
@@ -895,7 +929,7 @@ struct GUIWidgetsTestSuite {
                     gui.Reference("tex", "Texture", value, std::span<const GUI::ReferenceOption> {}, GUI::ReferenceConfig {});
                 });
             }
-            ZHLN_CHECK(value == 0u, "an unbacked reference can still be cleared", "value={}", value);
+            ZHLN::Test::ExpectEq(value, std::uint64_t {0});
             return {};
         }
 
@@ -912,7 +946,9 @@ struct GUIWidgetsTestSuite {
                 });
             }
 
-            ZHLN_CHECK(Near(col[0], 1.0f) && Near(col[1], 0.0f) && Near(col[2], 0.5f), "out-of-range channels are clamped", "rgb=({:.2f},{:.2f},{:.2f})", col[0], col[1], col[2]);
+            ExpectNear(col[0], 1.0f);
+            ExpectNear(col[1], 0.0f);
+            ExpectNear(col[2], 0.5f);
             return {};
         }
     };
