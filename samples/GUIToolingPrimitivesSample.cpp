@@ -7,8 +7,11 @@
 #include <Zahlen/GUI.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/gui/UIComponents.hpp>
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdlib>
+#include <span>
 #include <string_view>
 
 namespace {
@@ -22,11 +25,56 @@ struct RenderSettings {
     float           bloomIntensity = 0.15f;
     ZHLN::String256 profileName    = ZHLN::String256("Default");
     int             qualityPreset  = 1;
+
+    float   clearColor[3] = {0.05f, 0.07f, 0.11f};
+    uint64_t targetEntity = 0;
 };
 
 constexpr std::array<std::string_view, 4> kQualityPresets = {"Low", "Medium", "High", "Ultra"};
 
-void DrawRenderSettingsWindow(ZHLN::GUI::Context& ui, RenderSettings& s) {
+// The candidate list for the reference field below. A real editor builds this
+// from the registry (see DrawInspectorPanel in src/gui/GUIEditor.cpp); a sample
+// with no scene hands over a fixed list instead, which is what the widget is
+// for — it owns the mapping, not the discovery.
+constexpr std::array<ZHLN::GUI::ReferenceOption, 4> kTargets = {{
+    {.id = 0x1A01, .label = "Player"},
+    {.id = 0x1A02, .label = "Main Camera"},
+    {.id = 0x1A03, .label = "Directional Light"},
+    {.id = 0x2B10, .label = "SM_Rock_Large"},
+}};
+
+// A rolling frame-time window, oldest sample first.
+//
+// The ring is unwound into chronological order before being handed to the plot:
+// a plot reads left to right, so a buffer handed over in ring order would show
+// the seam jumping across the strip once per wrap. The widget maps sample
+// INDEX to x, not sample time, so it cannot straighten that out on its own.
+class FrameHistory {
+  public:
+    static constexpr uint32_t kCapacity = 64;
+
+    void Push(float ms) noexcept {
+        m_samples[m_head] = ms;
+        m_head            = (m_head + 1) % kCapacity;
+        m_count           = std::min(m_count + 1u, kCapacity);
+    }
+
+    [[nodiscard]] auto Chronological() noexcept -> std::span<const float> {
+        const uint32_t start = (m_head + kCapacity - m_count) % kCapacity;
+        for (uint32_t i = 0; i < m_count; ++i) {
+            m_ordered[i] = m_samples[(start + i) % kCapacity];
+        }
+        return std::span<const float>(m_ordered.data(), m_count);
+    }
+
+  private:
+    std::array<float, kCapacity> m_samples {};
+    std::array<float, kCapacity> m_ordered {};
+    uint32_t                     m_head  = 0;
+    uint32_t                     m_count = 0;
+};
+
+void DrawRenderSettingsWindow(ZHLN::GUI::Context& ui, RenderSettings& s, FrameHistory& history, uint64_t frame) {
     ui.Panel(
         "RenderSettings",
         ZHLN::GUI::PanelConfig {
@@ -75,6 +123,43 @@ void DrawRenderSettingsWindow(ZHLN::GUI::Context& ui, RenderSettings& s) {
             });
 
             ui.CollapsingHeader("Profile", true, [&]() -> void { ui.TextInput("ProfileName", "Profile Name", s.profileName); });
+
+            // The charting and colour primitives. The series is synthetic —
+            // a sample has no renderer stats to read — but the widgets do not
+            // care where the numbers come from, and driving them from a live
+            // ring buffer is the case a profiler actually needs.
+            ui.CollapsingHeader("Diagnostics", false, [&]() -> void {
+                const float t = static_cast<float>(frame) * 0.05f;
+                history.Push(16.7f + 4.0f * std::sin(t) + 2.0f * std::sin(t * 3.7f));
+
+                ZHLN::GUI::PlotConfig barCfg;
+                barCfg.height    = 48.0f;
+                barCfg.minValue  = 0.0f;
+                barCfg.maxValue  = 30.0f;
+                barCfg.kind      = ZHLN::GUI::UIPlotKind::Histogram;
+                barCfg.fillColor = {0.30f, 0.78f, 1.00f, 0.80f};
+                ui.Plot("FrameHistory", history.Chronological(), barCfg);
+
+                // A fixed 0..30ms range rather than an autoscale: a frame-time
+                // graph is read against a budget, and bounds that move with
+                // the data make every spike look the same size.
+                ZHLN::GUI::PlotConfig trendCfg;
+                trendCfg.height    = 40.0f;
+                trendCfg.minValue  = 0.0f;
+                trendCfg.maxValue  = 30.0f;
+                trendCfg.kind      = ZHLN::GUI::UIPlotKind::ShadedLines;
+                trendCfg.lineColor = {0.95f, 0.72f, 0.25f, 1.00f};
+                trendCfg.fillColor = {0.95f, 0.72f, 0.25f, 0.30f};
+                ui.Plot("FrameTrend", history.Chronological(), trendCfg);
+            });
+
+            ui.CollapsingHeader("Appearance", false, [&]() -> void {
+                ui.ColorEdit3("ClearColor", "Clear Color", s.clearColor);
+
+                uint64_t target = s.targetEntity;
+                ui.Reference("TargetEntity", "Target Entity", target, std::span<const ZHLN::GUI::ReferenceOption>(kTargets));
+                s.targetEntity = target;
+            });
 
             float split = 0.55f;
             ui.Columns(
@@ -283,12 +368,13 @@ auto main(int argc, char* argv[]) -> int {
 
             RenderSettings settings;
             BrowserState   browser;
+            FrameHistory   history;
 
             // ZHLN::Engine::Run handles Platform::Init, resize events, frame pacing,
             // and executes your UI callback in Phase::UI before rendering.
-            return ZHLN::Engine::Run(options, [&settings, &browser](ZHLN::Engine& engine) {
+            return ZHLN::Engine::Run(options, [&settings, &browser, &history](ZHLN::Engine& engine) {
                 ZHLN::GUI::Context ui(engine.GetRegistry(), engine.GetCurrentFrame());
-                DrawRenderSettingsWindow(ui, settings);
+                DrawRenderSettingsWindow(ui, settings, history, engine.GetCurrentFrame());
                 DrawContentBrowser(ui, browser);
             });
         })

@@ -601,6 +601,52 @@ struct PlotConfig {
     float     barGap      = 1.0f; // Histogram, pixels between bars
 };
 
+// One entry of a ui.Reference picker's option list. `id` is what gets stored
+// and `label` is what the user reads; keeping them separate is the whole point,
+// because every interesting handle in an engine is a number that means nothing
+// on its own (an entity's packed index+generation, an asset hash).
+struct ReferenceOption {
+    uint64_t         id    = 0;
+    std::string_view label = {};
+};
+
+// A field that points at something else: an entity, an asset, a material.
+//
+// The picker needs an OPTION LIST — it has no way to enumerate one on its own.
+// A GUI::Context can see the registry, but it cannot know which entities are
+// scene content and which are the editor's own chrome, and there is no
+// enumerable asset catalogue to ask. So the caller supplies the candidates and
+// the widget owns the mapping, the dangling case and the "none" case.
+struct ReferenceConfig {
+    float     height        = 28.0f;
+    float     scale         = 0.85f;
+    float     itemHeight    = 28.0f;
+    float     maxMenuHeight = 200.0f;
+    float     padding       = 8.0f;
+
+    JPH::Vec4 bgColor       = {0.10f, 0.14f, 0.22f, 0.95f};
+    JPH::Vec4 hoverColor    = {0.20f, 0.30f, 0.48f, 1.00f};
+    JPH::Vec4 selectedColor = {0.26f, 0.46f, 0.78f, 1.00f};
+    JPH::Vec4 textColor     = {0.90f, 0.95f, 1.00f, 1.00f};
+    JPH::Vec4 arrowColor    = {0.70f, 0.82f, 1.00f, 1.00f};
+    JPH::Vec4 borderRadius  = {3.0f, 3.0f, 3.0f, 3.0f};
+
+    // Prepends an entry that stores 0. Turn it off for a field where "nothing"
+    // is not a legal value.
+    bool            allowNone = true;
+    std::string_view noneLabel = "None";
+
+    // Prefix for a value that matches no option: a handle whose target was
+    // destroyed, or an asset that is not mounted. The raw id is rendered after
+    // it, because a dangling handle is a real state and a slot silently showing
+    // "None" would read as a field somebody cleared.
+    std::string_view danglingPrefix = "<dangling ";
+
+    // A very long option list would make the menu useless long before it made
+    // the widget slow; the excess is dropped rather than rendered.
+    uint32_t maxOptions = 256;
+};
+
 // A colour field: a swatch that opens a picker popup.
 //
 // The popup holds a saturation/value plane, a hue strip, an alpha strip when
@@ -1473,6 +1519,24 @@ class Context {
     auto Plot(std::string_view id, std::span<const float> values, const PlotConfig& cfg) -> Entity;
     auto PlotLines(std::string_view id, std::span<const float> values, const PlotConfig& cfg = {}) -> Entity;
     auto Histogram(std::string_view id, std::span<const float> values, const PlotConfig& cfg = {}) -> Entity;
+
+    // -----------------------------------------------------------------
+    // REFERENCE  —  ui.Reference(id, label, value, options, [cfg])
+    // -----------------------------------------------------------------
+    // A dropdown over a caller-supplied list of (id, label) pairs. `value` is
+    // the stored id, not an index, so a list whose order changes between
+    // frames (entities created and destroyed) cannot silently re-point the
+    // field: the selection is re-derived from the id every frame.
+    //
+    // Three cases the plain Dropdown has no concept of:
+    //
+    //   * value 0                 -> the "none" entry, when allowNone is set.
+    //   * value matching an option -> that option's label.
+    //   * value matching nothing   -> "<dangling 0x…>", which stays selectable
+    //     so a stale handle is visible and can be cleared on purpose rather
+    //     than being quietly rewritten to something plausible.
+    auto Reference(std::string_view id, std::string_view label, uint64_t& value, std::span<const ReferenceOption> options,
+                   const ReferenceConfig& cfg = {}) -> Entity;
 
     // -----------------------------------------------------------------
     // COLOREDIT  —  ui.ColorEdit3/4(id, label, col, [cfg], [onChange])

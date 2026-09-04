@@ -729,6 +729,176 @@ struct GUIWidgetsTestSuite {
             return {};
         }
 
+        // ==================================================================
+        // REFERENCE
+        // ==================================================================
+
+        // Builds a Reference and returns the widget's own option list, which
+        // is what the user actually reads.
+        [[nodiscard]] static auto BuildReference(
+            Registry& reg, Entity& outEntity, std::string_view id, uint64_t& value,
+            std::span<const GUI::ReferenceOption> options, const GUI::ReferenceConfig& cfg
+        ) -> std::vector<std::string> {
+            InstallFont(reg);
+            {
+                GUI::Context gui(reg, 1);
+                gui.Panel("root", GUI::PanelConfig {.width = 300.0f, .height = 300.0f}, [&]() -> void {
+                    outEntity = gui.Reference(id, "Ref", value, options, cfg);
+                });
+            }
+            std::vector<std::string> labels;
+            const auto* dd = reg.Get<UIComp::UIDropdownComponent>(outEntity);
+            if (dd != nullptr) {
+                for (const auto& o: dd->options) {
+                    labels.emplace_back(std::string_view(o));
+                }
+            }
+            return labels;
+        }
+
+        auto reference_lists_the_options_and_selects_by_id() -> std::expected<void, ZHLN::Error> {
+            Registry reg;
+            const GUI::ReferenceOption options[3] = {
+                {.id = 10, .label = "Alpha"}, {.id = 20, .label = "Beta"}, {.id = 30, .label = "Gamma"}};
+
+            uint64_t value = 20;
+            Entity   e     = Entity::Null();
+            auto     labels = BuildReference(reg, e, "ref", value, std::span<const GUI::ReferenceOption>(options, 3), GUI::ReferenceConfig {});
+
+            ZHLN::Test::ExpectEq(labels.size(), std::size_t {4}); // "None" plus three
+            ZHLN::Test::ExpectTrue(labels[0] == "None");
+            ZHLN::Test::ExpectTrue(labels[2] == "Beta");
+            // The selection is an INDEX derived from the id, not the id itself.
+            ZHLN::Test::ExpectEq(reg.Get<UIComp::UIDropdownComponent>(e)->selectedIdx, 2);
+            // Building the row must not change the value.
+            ZHLN::Test::ExpectTrue(value == 20u);
+            return {};
+        }
+
+        auto reference_writes_back_the_id_of_the_picked_option() -> std::expected<void, ZHLN::Error> {
+            Registry reg;
+            const GUI::ReferenceOption options[3] = {
+                {.id = 10, .label = "Alpha"}, {.id = 20, .label = "Beta"}, {.id = 30, .label = "Gamma"}};
+
+            uint64_t value = 10;
+            Entity   e     = Entity::Null();
+            (void) BuildReference(reg, e, "ref", value, std::span<const GUI::ReferenceOption>(options, 3), GUI::ReferenceConfig {});
+
+            // Pick "Gamma" the way the interaction pass does: the menu row
+            // sets selectedIdx, and the widget maps it back to an id.
+            reg.Get<UIComp::UIDropdownComponent>(e)->selectedIdx = 3;
+            {
+                GUI::Context gui(reg, 2);
+                gui.Panel("root", GUI::PanelConfig {.width = 300.0f, .height = 300.0f}, [&]() -> void {
+                    gui.Reference("ref", "Ref", value, std::span<const GUI::ReferenceOption>(options, 3), GUI::ReferenceConfig {});
+                });
+            }
+            ZHLN::Test::ExpectTrue(value == 30u);
+
+            // "None" is index 0 and clears the field.
+            reg.Get<UIComp::UIDropdownComponent>(e)->selectedIdx = 0;
+            {
+                GUI::Context gui(reg, 3);
+                gui.Panel("root", GUI::PanelConfig {.width = 300.0f, .height = 300.0f}, [&]() -> void {
+                    gui.Reference("ref", "Ref", value, std::span<const GUI::ReferenceOption>(options, 3), GUI::ReferenceConfig {});
+                });
+            }
+            ZHLN::Test::ExpectTrue(value == 0u);
+            return {};
+        }
+
+        auto reference_rederives_the_selection_when_the_option_list_shifts() -> std::expected<void, ZHLN::Error> {
+            Registry reg;
+            // "Alpha" disappears between frames, so every index moves down by
+            // one. A widget that carried the index across would silently
+            // re-point the field from Beta to Gamma.
+            const GUI::ReferenceOption before[3] = {
+                {.id = 10, .label = "Alpha"}, {.id = 20, .label = "Beta"}, {.id = 30, .label = "Gamma"}};
+            const GUI::ReferenceOption after[2] = {{.id = 20, .label = "Beta"}, {.id = 30, .label = "Gamma"}};
+
+            uint64_t value = 20;
+            Entity   e     = Entity::Null();
+            (void) BuildReference(reg, e, "ref", value, std::span<const GUI::ReferenceOption>(before, 3), GUI::ReferenceConfig {});
+            ZHLN::Test::ExpectEq(reg.Get<UIComp::UIDropdownComponent>(e)->selectedIdx, 2);
+
+            {
+                GUI::Context gui(reg, 2);
+                gui.Panel("root", GUI::PanelConfig {.width = 300.0f, .height = 300.0f}, [&]() -> void {
+                    gui.Reference("ref", "Ref", value, std::span<const GUI::ReferenceOption>(after, 2), GUI::ReferenceConfig {});
+                });
+            }
+            ZHLN_CHECK(value == 20u, "the field still points at Beta after the list shifts", "value={}", value);
+            ZHLN::Test::ExpectEq(reg.Get<UIComp::UIDropdownComponent>(e)->selectedIdx, 1);
+            return {};
+        }
+
+        auto reference_shows_a_dangling_handle_instead_of_rewriting_it() -> std::expected<void, ZHLN::Error> {
+            Registry reg;
+            const GUI::ReferenceOption options[2] = {{.id = 10, .label = "Alpha"}, {.id = 20, .label = "Beta"}};
+
+            // 999 names nothing: a handle whose target was destroyed.
+            uint64_t value  = 999;
+            Entity   e      = Entity::Null();
+            auto     labels = BuildReference(reg, e, "ref", value, std::span<const GUI::ReferenceOption>(options, 2), GUI::ReferenceConfig {});
+
+            ZHLN::Test::ExpectEq(labels.size(), std::size_t {4}); // None + two + the dangling entry
+            ZHLN::Test::ExpectTrue(labels[3].starts_with("<dangling"));
+            ZHLN::Test::ExpectTrue(labels[3].find("999") != std::string::npos || labels[3].find("3E7") != std::string::npos);
+            ZHLN::Test::ExpectEq(reg.Get<UIComp::UIDropdownComponent>(e)->selectedIdx, 3);
+
+            // Selecting the dangling entry is a no-op, NOT a rewrite. Writing
+            // options[0] instead would launder a broken handle into a
+            // plausible-looking one, which is far worse than leaving it be.
+            {
+                GUI::Context gui(reg, 2);
+                gui.Panel("root", GUI::PanelConfig {.width = 300.0f, .height = 300.0f}, [&]() -> void {
+                    gui.Reference("ref", "Ref", value, std::span<const GUI::ReferenceOption>(options, 2), GUI::ReferenceConfig {});
+                });
+            }
+            ZHLN_CHECK(value == 999u, "a dangling handle survives being displayed", "value={}", value);
+            return {};
+        }
+
+        auto reference_hides_the_none_entry_when_it_is_not_allowed() -> std::expected<void, ZHLN::Error> {
+            Registry reg;
+            const GUI::ReferenceOption options[2] = {{.id = 10, .label = "Alpha"}, {.id = 20, .label = "Beta"}};
+
+            uint64_t value = 0; // matches nothing, and there is no None entry
+            Entity   e     = Entity::Null();
+            GUI::ReferenceConfig cfg;
+            cfg.allowNone = false;
+
+            auto labels = BuildReference(reg, e, "ref", value, std::span<const GUI::ReferenceOption>(options, 2), cfg);
+
+            ZHLN::Test::ExpectEq(labels.size(), std::size_t {2});
+            ZHLN::Test::ExpectTrue(labels[0] == "Alpha");
+            return {};
+        }
+
+        auto reference_with_no_options_still_shows_and_clears_the_handle() -> std::expected<void, ZHLN::Error> {
+            // The state of an asset reference today: nothing can enumerate
+            // mounted assets yet, so the row is a readout plus a way to clear
+            // the field, rather than a menu pretending to have entries.
+            Registry reg;
+
+            uint64_t value  = 0xABCD;
+            Entity   e      = Entity::Null();
+            auto     labels = BuildReference(reg, e, "tex", value, std::span<const GUI::ReferenceOption> {}, GUI::ReferenceConfig {});
+
+            ZHLN::Test::ExpectEq(labels.size(), std::size_t {2}); // None + dangling
+            ZHLN::Test::ExpectTrue(labels[1].starts_with("<dangling"));
+
+            reg.Get<UIComp::UIDropdownComponent>(e)->selectedIdx = 0;
+            {
+                GUI::Context gui(reg, 2);
+                gui.Panel("root", GUI::PanelConfig {.width = 300.0f, .height = 300.0f}, [&]() -> void {
+                    gui.Reference("tex", "Texture", value, std::span<const GUI::ReferenceOption> {}, GUI::ReferenceConfig {});
+                });
+            }
+            ZHLN_CHECK(value == 0u, "an unbacked reference can still be cleared", "value={}", value);
+            return {};
+        }
+
         auto color_edit_clamps_channels_into_zero_to_one() -> std::expected<void, ZHLN::Error> {
             Registry reg;
             InstallFont(reg);

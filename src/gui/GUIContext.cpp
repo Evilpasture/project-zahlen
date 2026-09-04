@@ -895,6 +895,95 @@ auto Context::Histogram(std::string_view id, std::span<const float> values, cons
         return Plot(id, values, c);
     }
 
+auto Context::Reference(
+    std::string_view id, std::string_view label, uint64_t& value, std::span<const ReferenceOption> options, const ReferenceConfig& cfg
+) -> Entity {
+        // Cap the label array below, which lives on the stack. The cap is a UI
+        // decision, not a memory one — a four-thousand-entry menu is unusable
+        // long before it is expensive — but it is also what keeps one call to
+        // ~16KB of stack, which matters on a fiber even at the 512KB minimum.
+        constexpr uint32_t kHardMaxOptions = 1024;
+
+        const uint32_t cap       = std::min(cfg.maxOptions, kHardMaxOptions);
+        const uint32_t optCount  = std::min(static_cast<uint32_t>(options.size()), cap);
+        const uint32_t noneSlots = cfg.allowNone ? 1u : 0u;
+
+        std::array<std::string_view, kHardMaxOptions + 2> labels {};
+        uint32_t                                          labelCount = 0;
+
+        if (cfg.allowNone) {
+            labels[labelCount++] = cfg.noneLabel;
+        }
+
+        // Re-derived from the id every frame, never carried across as an index:
+        // the caller's list is rebuilt each frame too (entities come and go),
+        // so a remembered index would re-point the field at whatever happened
+        // to land in that slot.
+        int32_t selectedIdx = cfg.allowNone ? 0 : -1;
+        for (uint32_t i = 0; i < optCount; ++i) {
+            const uint32_t slot = labelCount;
+            labels[labelCount++] = options[i].label;
+            if (options[i].id == value) {
+                selectedIdx = static_cast<int32_t>(slot);
+            }
+        }
+
+        // A value that matches nothing is shown rather than hidden, with the
+        // raw id so the reader can tell a dangling handle from a cleared field.
+        std::array<char, 48> danglingBuf {};
+        uint32_t             danglingSlot = 0xFFFFFFFFu;
+        bool                 hasDangling  = false;
+        if (value != 0 && selectedIdx == (cfg.allowNone ? 0 : -1)) {
+            danglingSlot    = labelCount;
+            hasDangling     = true;
+            // Select it, or the row would read "None" for a handle that is
+            // very much set — and the write-back below would then clear the
+            // field, laundering a dangling handle into an empty one.
+            selectedIdx     = static_cast<int32_t>(danglingSlot);
+            labels[labelCount++] = FormatTo(danglingBuf, "{}{:#X}>", cfg.danglingPrefix, value);
+        }
+
+        if (selectedIdx < 0) {
+            selectedIdx = 0;
+        }
+
+        DropdownConfig ddCfg;
+        ddCfg.height        = cfg.height;
+        ddCfg.scale         = cfg.scale;
+        ddCfg.itemHeight    = cfg.itemHeight;
+        ddCfg.bgColor       = cfg.bgColor;
+        ddCfg.hoverColor    = cfg.hoverColor;
+        ddCfg.selectedColor = cfg.selectedColor;
+        ddCfg.textColor     = cfg.textColor;
+        ddCfg.arrowColor    = cfg.arrowColor;
+        ddCfg.borderRadius  = cfg.borderRadius;
+        ddCfg.maxMenuHeight = cfg.maxMenuHeight;
+        ddCfg.padding       = cfg.padding;
+
+        int    idx = selectedIdx;
+        Entity e   = Dropdown(id, label, idx, std::span<const std::string_view>(labels.data(), labelCount), ddCfg);
+
+        // Selecting the dangling entry is deliberately a no-op: the value is
+        // not in the option list, so there is nothing to map it to, and
+        // writing options[0] would launder a broken handle into a plausible
+        // one. The entry exists so the state is visible and can be cleared
+        // through "None" — on purpose, not by accident.
+        if (hasDangling && idx == static_cast<int32_t>(danglingSlot)) {
+            return e;
+        }
+
+        if (cfg.allowNone && idx == 0) {
+            value = 0;
+            return e;
+        }
+
+        const int32_t optIdx = idx - static_cast<int32_t>(noneSlots);
+        if (optIdx >= 0 && static_cast<uint32_t>(optIdx) < optCount) {
+            value = options[static_cast<uint32_t>(optIdx)].id;
+        }
+        return e;
+    }
+
 // JPH::Vec4's operator== is component-wise and returns a mask, not a bool, so
 // "did this colour change" has to be asked one channel at a time.
 namespace {
