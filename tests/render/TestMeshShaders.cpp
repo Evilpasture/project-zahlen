@@ -303,9 +303,8 @@ struct MeshShaderTestSuite {
             }
 
             const auto built = ZHLN::BuildMeshlets(indices, positions);
-            auto       check = ZHLN::Test::AssertFalse(built.Empty());
-            if (!check) {
-                return check;
+            if (!ZHLN::Test::ExpectFalse(built.Empty())) {
+                return std::unexpected(MeshShaderTestError::MeshletPartitioningFailed);
             }
 
             size_t totalTriangles = 0;
@@ -367,8 +366,7 @@ struct MeshShaderTestSuite {
         // stayed on the vertex pipeline and the mesh path was never exercised.
         std::expected<void, ZHLN::Error> procedural_meshes_carry_meshlet_streams() {
             auto engine      = CreateTestEngine();
-            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine) {
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(MeshShaderTestError::EngineInitFailed);
             }
 
@@ -411,8 +409,7 @@ struct MeshShaderTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::Error> mesh_shading_runtime_toggle() {
             auto engine      = CreateTestEngine();
-            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine) {
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(MeshShaderTestError::EngineInitFailed);
             }
 
@@ -445,8 +442,7 @@ struct MeshShaderTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::Error> mesh_and_vertex_paths_render_identically() {
             auto engine      = CreateTestEngine(320, 240);
-            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine) {
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(MeshShaderTestError::EngineInitFailed);
             }
 
@@ -537,8 +533,7 @@ struct MeshShaderTestSuite {
 
             const uint32_t validationRaised = ZHLN::RenderContext::ValidationErrorCount() - validationBefore;
 
-            auto checkImages = ZHLN::Test::AssertTrue(meshImage.Valid() && vertexA.Valid() && vertexB.Valid());
-            if (!checkImages) {
+            if (!ZHLN::Test::ExpectTrue(meshImage.Valid() && vertexA.Valid() && vertexB.Valid())) {
                 return std::unexpected(MeshShaderTestError::RenderOutputBlank);
             }
             ZHLN::Test::ExpectEq(meshImage.width, vertexB.width);

@@ -17,7 +17,6 @@
 // clang-format on
 #include "TTYBackend.hpp"
 #include "engine/system/LODSystem.hpp"
-#include "imgui.h"
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/CommandLine.hpp>
@@ -37,6 +36,7 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
+#include <Zahlen/gui/UIComponents.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <engine/FileWatcher.hpp>
 #include <engine/NativeScriptModule.hpp>
@@ -208,6 +208,11 @@ struct EngineImpl {
     void*        gameState    = nullptr;
     uint64_t     frameCounter = 0;
     bool         joltAcquired = false;
+    // ImGui is kept as a reference/debug overlay, not as the UI. Off by
+    // default: Engine::ProcessEvents does not open an ImGui frame at all when
+    // this is false, so no NewFrame, no ImGui vertex upload and no ImGui
+    // render pass happen. See Engine::SetImGuiEnabled.
+    bool         imguiEnabled = false;
     EngineConfig config;
 };
 
@@ -736,8 +741,8 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
 
         if (pressed) {
             // Handle text navigation directly on focused text input components
-            for (Entity e: reg->GetEntitiesWith<Components::UITextInputComponent>()) {
-                auto* inputComp = reg->Get<Components::UITextInputComponent>(e);
+            for (Entity e: reg->GetEntitiesWith<GUI::UIComponents::UITextInputComponent>()) {
+                auto* inputComp = reg->Get<GUI::UIComponents::UITextInputComponent>(e);
                 if (inputComp && inputComp->isFocused) {
                     std::string_view curr = inputComp->text;
                     if (key == KeyCode::Backspace) {
@@ -803,8 +808,8 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
 
     auto onChar = [](void* userdata, unsigned int codepoint) -> void {
         auto* reg = static_cast<ECS::Registry*>(userdata);
-        for (Entity e: reg->GetEntitiesWith<Components::UITextInputComponent>()) {
-            auto* inputComp = reg->Get<Components::UITextInputComponent>(e);
+        for (Entity e: reg->GetEntitiesWith<GUI::UIComponents::UITextInputComponent>()) {
+            auto* inputComp = reg->Get<GUI::UIComponents::UITextInputComponent>(e);
             if (inputComp && inputComp->isFocused) {
                 if (codepoint >= 32 && codepoint <= 126) {
                     if (inputComp->selectAll) {
@@ -939,14 +944,14 @@ void Engine::ProcessEvents() {
     }
 
     glfwPollEvents();
-    _impl->renderContext->BeginImGuiFrame();
 
-    // Mirror ImGui capture into ECS so gameplay systems stay ImGui-free.
-    // High-level ImGui UI remains in main.cpp; only the capture flags cross here.
-    if (inputState != nullptr) {
-        const ImGuiIO& io               = ImGui::GetIO();
-        inputState->wantCaptureKeyboard = io.WantCaptureKeyboard;
-        inputState->wantCaptureMouse    = io.WantCaptureMouse;
+    // ImGui is a debug overlay now, not the UI. When it is toggled off it does
+    // not get a frame at all: no NewFrame, no vertex buffers, no render pass
+    // (RenderContext tracks whether a frame was ever opened). Input capture is
+    // no longer read back from ImGui either -- UIInteractionSystem derives
+    // wantCaptureMouse / wantCaptureKeyboard from the native ECS widgets.
+    if (_impl->imguiEnabled) {
+        _impl->renderContext->BeginImGuiFrame();
     }
 }
 
@@ -1049,6 +1054,14 @@ void Engine::SetUICallback(UICallback callback) {
     _impl->uiCallback = std::move(callback);
 }
 
+void Engine::SetImGuiEnabled(bool enabled) noexcept {
+    _impl->imguiEnabled = enabled;
+}
+
+auto Engine::IsImGuiEnabled() const noexcept -> bool {
+    return _impl->imguiEnabled;
+}
+
 void Engine::AddDeviceLostCallback(DeviceLostCallback callback) {
     if (callback) {
         _impl->deviceLostCallbacks.push_back(std::move(callback));
@@ -1079,6 +1092,8 @@ auto Engine::InitializeDefaultScene() -> bool {
     auto& reg = GetRegistry();
 
     reg.RegisterAllComponentsIn<ZHLN::Components>();
+    // The widget types live with the GUI subsystem, so it registers them.
+    GUI::RegisterUIComponents(reg);
 
     reg.Create(
         Components::MainCameraTagComponent {}, Components::CameraComponent {},
@@ -1102,19 +1117,19 @@ auto Engine::InitializeDefaultScene() -> bool {
         Components::DebugSettingsComponent {.physicsDrawMode = 0}
     );
 
-    reg.Create(Components::UISettingsComponent {});
+    reg.Create(GUI::UIComponents::UISettingsComponent {});
 
     // The atlas is device state, so it survives the scene it was first built
     // for; only the component-side copy is re-seeded. Rebuilding it per scene
     // leaked a 1024x1024 texture and a full fontconfig config every time.
     if (_impl->fontAtlas.has_value()) {
-        if (auto* uiSettings = reg.GetSingleton<Components::UISettingsComponent>(); uiSettings != nullptr) {
+        if (auto* uiSettings = reg.GetSingleton<GUI::UIComponents::UISettingsComponent>(); uiSettings != nullptr) {
             uiSettings->fontAtlas        = *_impl->fontAtlas;
             uiSettings->defaultFontAtlas = _impl->fontAtlas->texture;
         }
     } else {
         CreativeWorksFactory::CreateFontAtlasTexture(rc, reg);
-        if (const auto* uiSettings = reg.GetSingleton<Components::UISettingsComponent>();
+        if (const auto* uiSettings = reg.GetSingleton<GUI::UIComponents::UISettingsComponent>();
             uiSettings != nullptr && uiSettings->fontAtlas.texture != TextureHandle::Invalid) {
             _impl->fontAtlas = uiSettings->fontAtlas;
         }

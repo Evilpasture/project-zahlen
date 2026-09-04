@@ -11,6 +11,7 @@
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/gui/UIComponents.hpp>
 #include <algorithm>
 #include <cstring>
 #include <string>
@@ -59,7 +60,7 @@ void UIRenderSystem::Update(Engine& engine) {
                     return true;
                 }
             }
-            auto* rect = reg.Get<Components::UIRectComponent>(curr);
+            auto* rect = reg.Get<GUI::UIComponents::UIRectComponent>(curr);
             curr       = (rect != nullptr) ? rect->parentEntity : Entity::Null();
         }
         return false;
@@ -71,13 +72,13 @@ void UIRenderSystem::Update(Engine& engine) {
 
     // 2. Collect ALL Unique UI Entities (Panels, Text, Rects)
     std::unordered_set<uint64_t> uniqueEntities;
-    for (Entity e: reg.GetEntitiesWith<Components::UIRectComponent>()) {
+    for (Entity e: reg.GetEntitiesWith<GUI::UIComponents::UIRectComponent>()) {
         uniqueEntities.insert(e.Pack());
     }
-    for (Entity e: reg.GetEntitiesWith<Components::UIPanelComponent>()) {
+    for (Entity e: reg.GetEntitiesWith<GUI::UIComponents::UIPanelComponent>()) {
         uniqueEntities.insert(e.Pack());
     }
-    for (Entity e: reg.GetEntitiesWith<Components::TextComponent>()) {
+    for (Entity e: reg.GetEntitiesWith<GUI::UIComponents::TextComponent>()) {
         uniqueEntities.insert(e.Pack());
     }
 
@@ -101,7 +102,7 @@ void UIRenderSystem::Update(Engine& engine) {
 
         uint32_t depth = 0;
         uint32_t order = 0;
-        if (auto* rect = reg.Get<Components::UIRectComponent>(e)) {
+        if (auto* rect = reg.Get<GUI::UIComponents::UIRectComponent>(e)) {
             depth = rect->hierarchyDepth;
             order = rect->layoutOrder;
         }
@@ -128,7 +129,7 @@ void UIRenderSystem::Update(Engine& engine) {
         if (IsEntityOrAncestorHidden(e)) {
             continue;
         }
-        auto* rect = reg.Get<Components::UIRectComponent>(e);
+        auto* rect = reg.Get<GUI::UIComponents::UIRectComponent>(e);
         if (rect == nullptr) {
             continue;
         }
@@ -138,7 +139,7 @@ void UIRenderSystem::Update(Engine& engine) {
         }
 
         Entity      parent     = rect->parentEntity;
-        const auto* parentRect = reg.Get<Components::UIRectComponent>(parent);
+        const auto* parentRect = reg.Get<GUI::UIComponents::UIRectComponent>(parent);
         if (parentRect == nullptr) {
             continue;
         }
@@ -201,10 +202,10 @@ void UIRenderSystem::Update(Engine& engine) {
         );
     };
 
-    auto             uiSettingsEntities = reg.GetEntitiesWith<Components::UISettingsComponent>();
+    auto             uiSettingsEntities = reg.GetEntitiesWith<GUI::UIComponents::UISettingsComponent>();
     const FontAtlas* activeFont         = nullptr;
     if (!uiSettingsEntities.empty()) {
-        activeFont = &reg.Get<Components::UISettingsComponent>(uiSettingsEntities[0])->fontAtlas;
+        activeFont = &reg.Get<GUI::UIComponents::UISettingsComponent>(uiSettingsEntities[0])->fontAtlas;
     }
 
     // ========================================================================
@@ -229,10 +230,10 @@ void UIRenderSystem::Update(Engine& engine) {
             currentScissor = *sc;
         }
 
-        auto* rect = reg.Get<Components::UIRectComponent>(e);
+        auto* rect = reg.Get<GUI::UIComponents::UIRectComponent>(e);
 
         // A. Process Panel (if entity has UIPanelComponent)
-        if (auto* panel = reg.Get<Components::UIPanelComponent>(e)) {
+        if (auto* panel = reg.Get<GUI::UIComponents::UIPanelComponent>(e)) {
             if (rect != nullptr) {
                 size_t startIdx = localPositions.size();
                 localPositions.resize(startIdx + 54);
@@ -252,7 +253,7 @@ void UIRenderSystem::Update(Engine& engine) {
         // A dedicated primitive rather than a panel background: the scale mode
         // and the sub-UV region decide the quad's shape, and Tile needs one
         // quad per repeat, which the 54-vertex panel budget cannot express.
-        if (auto* image = reg.Get<Components::UIImageComponent>(e)) {
+        if (auto* image = reg.Get<GUI::UIComponents::UIImageComponent>(e)) {
             if (rect != nullptr) {
                 const uint32_t needed = GUI::CountImageVertices(*rect, *image);
                 if (needed > 0) {
@@ -271,8 +272,54 @@ void UIRenderSystem::Update(Engine& engine) {
             }
         }
 
+        // A3. Process Gradient (if entity has UIGradientComponent)
+        // Drawn before the panel would hide it, and after it so a gradient
+        // child sits on top of its parent's background: the colour picker's
+        // saturation/value plane is a gradient child of a plain Box.
+        if (auto* gradient = reg.Get<GUI::UIComponents::UIGradientComponent>(e)) {
+            if (rect != nullptr) {
+                const uint32_t needed = GUI::CountGradientVertices(*rect, *gradient);
+                if (needed > 0) {
+                    size_t startIdx = localPositions.size();
+                    localPositions.resize(startIdx + needed);
+                    localAttributes.resize(startIdx + needed);
+
+                    uint32_t written = GUI::AppendGradientVertices(&localPositions[startIdx], &localAttributes[startIdx], *rect, *gradient);
+
+                    localPositions.resize(startIdx + written);
+                    localAttributes.resize(startIdx + written);
+
+                    currentVertexOffset += written;
+                    QueueBatch(TextureHandle::Invalid, written, useScissor, currentScissor, false);
+                }
+            }
+        }
+
+        // A4. Process Plot (if entity has UIPlotComponent)
+        // A plot is pure geometry with no textured background, so it batches
+        // with the other untextured UI (panels, gradients) rather than forcing
+        // a texture bind.
+        if (auto* plot = reg.Get<GUI::UIComponents::UIPlotComponent>(e)) {
+            if (rect != nullptr) {
+                const uint32_t needed = GUI::CountPlotVertices(*plot);
+                if (needed > 0) {
+                    size_t startIdx = localPositions.size();
+                    localPositions.resize(startIdx + needed);
+                    localAttributes.resize(startIdx + needed);
+
+                    uint32_t written = GUI::AppendPlotVertices(&localPositions[startIdx], &localAttributes[startIdx], *rect, *plot);
+
+                    localPositions.resize(startIdx + written);
+                    localAttributes.resize(startIdx + written);
+
+                    currentVertexOffset += written;
+                    QueueBatch(TextureHandle::Invalid, written, useScissor, currentScissor, false);
+                }
+            }
+        }
+
         // B. Process Text (if entity has TextComponent)
-        if (auto* text = reg.Get<Components::TextComponent>(e)) {
+        if (auto* text = reg.Get<GUI::UIComponents::TextComponent>(e)) {
             float drawX = text->offsetX;
             float drawY = text->offsetY;
 
@@ -288,20 +335,20 @@ void UIRenderSystem::Update(Engine& engine) {
                 isTextInputLeaf = std::string_view(name->name) == "_ti_text";
             }
 
-            const Components::UITextInputComponent* input = nullptr;
+            const GUI::UIComponents::UITextInputComponent* input = nullptr;
             if (isTextInputLeaf) {
                 // The component is owned by the TextInput root.  Walk up the
                 // small UI hierarchy to find it without affecting unrelated
                 // text children that happen to be below the same root.
-                input = reg.Get<Components::UITextInputComponent>(e);
+                input = reg.Get<GUI::UIComponents::UITextInputComponent>(e);
                 if (input == nullptr && rect != nullptr) {
                     Entity cur = rect->parentEntity;
                     for (int hops = 0; hops < 4 && cur != Entity::Null() && reg.IsAlive(cur); ++hops) {
-                        input = reg.Get<Components::UITextInputComponent>(cur);
+                        input = reg.Get<GUI::UIComponents::UITextInputComponent>(cur);
                         if (input != nullptr) {
                             break;
                         }
-                        if (const auto* pr = reg.Get<Components::UIRectComponent>(cur)) {
+                        if (const auto* pr = reg.Get<GUI::UIComponents::UIRectComponent>(cur)) {
                             cur = pr->parentEntity;
                         } else {
                             break;
@@ -347,10 +394,10 @@ void UIRenderSystem::Update(Engine& engine) {
                 TextBounds bounds = (activeFont != nullptr) ? GUI::MeasureTextBounds(*activeFont, drawStr, text->scale) : TextBounds {};
 
                 // 1. Horizontal Alignment (Clamped to prevent left overflow)
-                if (text->align == TextAlignment::Center) {
+                if (text->align == GUI::TextAlignment::Center) {
                     float centerOffset = std::max(0.0f, (containerWidth - bounds.width()) * 0.5f);
                     drawX              = rect->computedAbsMinX + centerOffset - bounds.minX + text->offsetX;
-                } else if (text->align == TextAlignment::Right) {
+                } else if (text->align == GUI::TextAlignment::Right) {
                     float rightOffset = std::max(0.0f, containerWidth - bounds.width());
                     drawX             = rect->computedAbsMinX + rightOffset - bounds.minX + text->offsetX;
                 } else {
@@ -358,10 +405,10 @@ void UIRenderSystem::Update(Engine& engine) {
                 }
 
                 // 2. Vertical Alignment (Clamped to prevent top overflow)
-                if (text->verticalAlign == TextVerticalAlignment::Center) {
+                if (text->verticalAlign == GUI::TextVerticalAlignment::Center) {
                     float centerOffset = std::max(0.0f, (containerHeight - bounds.height()) * 0.5f);
                     drawY              = rect->computedAbsMinY + centerOffset - bounds.minY + text->offsetY;
-                } else if (text->verticalAlign == TextVerticalAlignment::Bottom) {
+                } else if (text->verticalAlign == GUI::TextVerticalAlignment::Bottom) {
                     float bottomOffset = std::max(0.0f, containerHeight - bounds.height());
                     drawY              = rect->computedAbsMinY + bottomOffset - bounds.minY + text->offsetY;
                 } else {
@@ -381,7 +428,7 @@ void UIRenderSystem::Update(Engine& engine) {
                 // centred or right-aligned paragraph therefore has to be
                 // emitted one line at a time, each with its own x.
                 const bool multiLine   = drawStr.find('\n') != std::string_view::npos;
-                const bool perLineDraw = multiLine && (text->align != TextAlignment::Left);
+                const bool perLineDraw = multiLine && (text->align != GUI::TextAlignment::Left);
 
                 uint32_t written = 0;
                 if (!perLineDraw) {
@@ -401,7 +448,7 @@ void UIRenderSystem::Update(Engine& engine) {
                         const TextBounds lineBounds = GUI::MeasureTextBounds(*activeFont, line, text->scale);
                         float            lineX      = drawX;
                         if (rect != nullptr) {
-                            if (text->align == TextAlignment::Center) {
+                            if (text->align == GUI::TextAlignment::Center) {
                                 lineX = rect->computedAbsMinX + std::max(0.0f, (containerWidth - lineBounds.width()) * 0.5f) - lineBounds.minX + text->offsetX;
                             } else {
                                 lineX = rect->computedAbsMinX + std::max(0.0f, containerWidth - lineBounds.width()) - lineBounds.minX + text->offsetX;

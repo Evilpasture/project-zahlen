@@ -77,9 +77,9 @@ struct DecalTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::Error> decal_component_registration_and_setup() {
             auto engine      = CreateTestEngine(640, 480);
-            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine)
-                return checkEngine;
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return std::unexpected(DecalTestError::EngineInitFailed);
+            }
 
             auto& reg = engine->GetRegistry();
             auto& rc  = engine->GetRenderContext();
@@ -110,9 +110,9 @@ struct DecalTestSuite {
             ZHLN::Test::ExpectTrue(reg.IsAlive(decalEnt));
 
             const auto* decalComp = reg.Get<ZHLN::Components::DecalComponent>(decalEnt);
-            auto        checkComp = ZHLN::Test::AssertTrue(decalComp != nullptr);
-            if (!checkComp)
-                return checkComp;
+            if (!ZHLN::Test::ExpectTrue(decalComp != nullptr)) {
+                return std::unexpected(DecalTestError::DecalEntitySpawnFailed);
+            }
 
             ZHLN::Test::ExpectEq(decalComp->roughness, 0.85f);
             ZHLN::Test::ExpectEq(decalComp->metallic, 0.05f);
@@ -126,9 +126,9 @@ struct DecalTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::Error> decal_surface_projection_and_pixel_verification() {
             auto engine      = CreateTestEngine(640, 480);
-            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine)
-                return checkEngine;
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return std::unexpected(DecalTestError::EngineInitFailed);
+            }
 
             auto& reg = engine->GetRegistry();
             auto& rc  = engine->GetRenderContext();
@@ -245,9 +245,9 @@ struct DecalTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::Error> decal_bounding_box_volume_clipping() {
             auto engine      = CreateTestEngine(640, 480);
-            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine)
-                return checkEngine;
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return std::unexpected(DecalTestError::EngineInitFailed);
+            }
 
             auto& reg = engine->GetRegistry();
             auto& rc  = engine->GetRenderContext();

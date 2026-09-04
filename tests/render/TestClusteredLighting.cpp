@@ -33,8 +33,7 @@ struct ClusteredLightingTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::Error> lit_scene_static_frame_stability() {
             auto engine      = CreateTestEngine(640, 480);
-            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine) {
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
             }
 
@@ -69,9 +68,8 @@ struct ClusteredLightingTestSuite {
                     rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.1f, 0.2f, 0.9f, 1.0f}}
                 );
 
-                auto checkMaterials = ZHLN::Test::AssertTrue(grayMatRes && redMatRes && blueMatRes);
-                if (!checkMaterials) {
-                    return checkMaterials;
+                if (!ZHLN::Test::ExpectTrue(grayMatRes && redMatRes && blueMatRes)) {
+                    return std::unexpected(LightingRTTestError::MaterialCreationFailed);
                 }
 
                 ZHLN::CreativeWorksFactory::CreateBox(
@@ -142,8 +140,7 @@ struct ClusteredLightingTestSuite {
                         TickFrames(eng, 1);
                         const RgbImage frame = Capture(eng, "headless_lighting_rt_static_f" + std::to_string(f) + ".ppm");
 
-                        auto checkFrame = ZHLN::Test::AssertTrue(frame.Valid());
-                        if (!checkFrame) {
+                        if (!ZHLN::Test::ExpectTrue(frame.Valid())) {
                             captureFailed = true;
                             return false;
                         }
@@ -223,8 +220,7 @@ struct ClusteredLightingTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::Error> point_light_cluster_culling_sweep() {
             auto engine      = CreateTestEngine(320, 240);
-            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine) {
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
             }
 
@@ -249,9 +245,8 @@ struct ClusteredLightingTestSuite {
                 auto diffuseMatRes = ZHLN::CreativeWorksFactory::CreateMaterial(
                     rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.75f, 0.75f, 0.75f, 1.0f}}
                 );
-                auto checkDiffuse = ZHLN::Test::AssertTrue(diffuseMatRes.has_value());
-                if (!checkDiffuse) {
-                    return checkDiffuse;
+                if (!ZHLN::Test::ExpectTrue(diffuseMatRes.has_value())) {
+                    return std::unexpected(LightingRTTestError::MaterialCreationFailed);
                 }
 
                 ZHLN::CreativeWorksFactory::CreatePlane(
@@ -326,8 +321,7 @@ struct ClusteredLightingTestSuite {
                         TickFrames(eng, 2);
 
                         const RgbImage frame      = Capture(eng, "headless_lighting_rt_cull_" + std::to_string(step) + ".ppm");
-                        auto           checkFrame = ZHLN::Test::AssertTrue(frame.Valid());
-                        if (!checkFrame) {
+                        if (!ZHLN::Test::ExpectTrue(frame.Valid())) {
                             captureFailed = true;
                             return false;
                         }
@@ -356,8 +350,7 @@ struct ClusteredLightingTestSuite {
                     for (uint32_t r = 0; r < kStableFrames; ++r) {
                         stableFrameIdx.push_back(eng.GetCurrentFrame());
                         stableFrames[r]  = Capture(eng, "headless_lighting_rt_cull_stable_" + std::to_string(r) + ".ppm");
-                        auto checkStable = ZHLN::Test::AssertTrue(stableFrames[r].Valid());
-                        if (!checkStable) {
+                        if (!ZHLN::Test::ExpectTrue(stableFrames[r].Valid())) {
                             captureFailed = true;
                             return false;
                         }
@@ -427,8 +420,7 @@ struct ClusteredLightingTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::Error> point_light_static_reference_no_history() {
             auto engine      = CreateTestEngine(320, 240);
-            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine) {
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
             }
 
@@ -454,9 +446,8 @@ struct ClusteredLightingTestSuite {
                 auto diffuseMatRes = ZHLN::CreativeWorksFactory::CreateMaterial(
                     rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.75f, 0.75f, 0.75f, 1.0f}}
                 );
-                auto checkDiffuse = ZHLN::Test::AssertTrue(diffuseMatRes.has_value());
-                if (!checkDiffuse) {
-                    return checkDiffuse;
+                if (!ZHLN::Test::ExpectTrue(diffuseMatRes.has_value())) {
+                    return std::unexpected(LightingRTTestError::MaterialCreationFailed);
                 }
                 ZHLN::CreativeWorksFactory::CreatePlane(
                     *engine, 120.0f, {0.5f, 0.5f, 0.52f, 1.0f},
@@ -508,8 +499,7 @@ struct ClusteredLightingTestSuite {
                     std::vector<double>                 counts;
                     for (uint32_t r = 0; r < kStableFrames; ++r) {
                         frames[r]       = Capture(eng, "headless_lighting_rt_ref_stable_" + std::to_string(r) + ".ppm");
-                        auto checkFrame = ZHLN::Test::AssertTrue(frames[r].Valid());
-                        if (!checkFrame) {
+                        if (!ZHLN::Test::ExpectTrue(frames[r].Valid())) {
                             captureFailed = true;
                             return false;
                         }
@@ -564,8 +554,7 @@ struct ClusteredLightingTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::Error> multi_light_cluster_accumulation_and_chromatic_interaction() {
             auto engine      = CreateTestEngine(640, 480);
-            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine) {
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
             }
 
@@ -605,9 +594,8 @@ struct ClusteredLightingTestSuite {
                 auto neutralMat = ZHLN::CreativeWorksFactory::CreateMaterial(
                     rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.8f, 0.8f, 0.8f, 1.0f}}
                 );
-                auto checkNeutral = ZHLN::Test::AssertTrue(neutralMat.has_value());
-                if (!checkNeutral) {
-                    return checkNeutral;
+                if (!ZHLN::Test::ExpectTrue(neutralMat.has_value())) {
+                    return std::unexpected(LightingRTTestError::MaterialCreationFailed);
                 }
 
                 ZHLN::CreativeWorksFactory::CreatePlane(
@@ -674,8 +662,7 @@ struct ClusteredLightingTestSuite {
                 [&](ZHLN::Engine& eng) -> bool {
                     captureFailed = false;
                     const RgbImage frame      = Capture(eng, "headless_lighting_multi_cluster.ppm");
-                    auto           checkFrame = ZHLN::Test::AssertTrue(frame.Valid());
-                    if (!checkFrame) {
+                    if (!ZHLN::Test::ExpectTrue(frame.Valid())) {
                         captureFailed = true;
                         return false;
                     }
@@ -710,36 +697,28 @@ struct ClusteredLightingTestSuite {
                     // exposure/tone-map outputs, not lighting behaviour.
 
                     // 1. Quadrant Chromatic Purity
-                    const bool redDominant = ZHLN_CHECK(
-                        quadTL.meanR > 1.3 * quadTL.meanG && quadTL.meanR > 1.3 * quadTL.meanB && quadTL.dominantRed * 100 > quadTL.pixels,
-                        "top-left quadrant is red-dominant",
-                        "meanRGB=({:.1f},{:.1f},{:.1f}), dominantRed={}/{} px (need >1% of the quad)", quadTL.meanR, quadTL.meanG, quadTL.meanB,
-                        quadTL.dominantRed, quadTL.pixels
+                    // top-left quadrant is red-dominant
+                    const bool redDominant = ZHLN::Test::ExpectTrue(
+                            quadTL.meanR > 1.3 * quadTL.meanG && quadTL.meanR > 1.3 * quadTL.meanB && quadTL.dominantRed * 100 > quadTL.pixels
                     );
-                    const bool greenDominant = ZHLN_CHECK(
-                        quadTR.meanG > 1.3 * quadTR.meanR && quadTR.meanG > 1.3 * quadTR.meanB && quadTR.dominantGrn * 100 > quadTR.pixels,
-                        "top-right quadrant is green-dominant",
-                        "meanRGB=({:.1f},{:.1f},{:.1f}), dominantGreen={}/{} px (need >1% of the quad)", quadTR.meanR, quadTR.meanG, quadTR.meanB,
-                        quadTR.dominantGrn, quadTR.pixels
+                    // top-right quadrant is green-dominant
+                    const bool greenDominant = ZHLN::Test::ExpectTrue(
+                            quadTR.meanG > 1.3 * quadTR.meanR && quadTR.meanG > 1.3 * quadTR.meanB && quadTR.dominantGrn * 100 > quadTR.pixels
                     );
-                    const bool blueDominant = ZHLN_CHECK(
-                        quadBL.meanB > 1.3 * quadBL.meanR && quadBL.meanB > 1.3 * quadBL.meanG && quadBL.dominantBlu * 100 > quadBL.pixels,
-                        "bottom-left quadrant is blue-dominant",
-                        "meanRGB=({:.1f},{:.1f},{:.1f}), dominantBlue={}/{} px (need >1% of the quad)", quadBL.meanR, quadBL.meanG, quadBL.meanB,
-                        quadBL.dominantBlu, quadBL.pixels
+                    // bottom-left quadrant is blue-dominant
+                    const bool blueDominant = ZHLN::Test::ExpectTrue(
+                            quadBL.meanB > 1.3 * quadBL.meanR && quadBL.meanB > 1.3 * quadBL.meanG && quadBL.dominantBlu * 100 > quadBL.pixels
                     );
 
                     // 2. Additive Color Superposition at boundary (Red + Green -> Yellow).
                     // The pedestal sits under all four quadrants, so it must out-shine
                     // each pure quadrant in its own channel -- lights accumulating rather
                     // than the nearest one winning.
-                    const bool additiveMixing = ZHLN_CHECK(
-                        centerMix.meanR > 1.3 * centerMix.meanB && centerMix.meanG > 1.3 * centerMix.meanB && centerMix.meanR > 0.6 * centerMix.meanG &&
+                    // quadrant boundary mixes red + green into yellow
+                    const bool additiveMixing = ZHLN::Test::ExpectTrue(
+                            centerMix.meanR > 1.3 * centerMix.meanB && centerMix.meanG > 1.3 * centerMix.meanB && centerMix.meanR > 0.6 * centerMix.meanG &&
                             centerMix.meanG > 0.6 * centerMix.meanR && centerMix.meanR > 0.5 * quadTL.meanR && centerMix.meanG > 0.5 * quadTR.meanG &&
-                            centerMix.yellowMix * 100 > centerMix.pixels,
-                        "quadrant boundary mixes red + green into yellow",
-                        "centerMeanRGB=({:.1f},{:.1f},{:.1f}) vs redQuad.meanR={:.1f} greenQuad.meanG={:.1f}, yellowMix={}/{} px (need >1%)", centerMix.meanR,
-                        centerMix.meanG, centerMix.meanB, quadTL.meanR, quadTR.meanG, centerMix.yellowMix, centerMix.pixels
+                            centerMix.yellowMix * 100 > centerMix.pixels
                     );
 
                     // 3. Coverage & headroom. "lit" counts Luma > 40, which a pure blue
@@ -749,18 +728,19 @@ struct ClusteredLightingTestSuite {
                     // hue-aware and, as a share of the sampled area, exposure-relative.
                     const uint32_t chromaticPixels = quadTL.dominantRed + quadTR.dominantGrn + quadBL.dominantBlu + centerMix.yellowMix;
                     const uint32_t sampledPixels   = quadTL.pixels + quadTR.pixels + quadBL.pixels + centerMix.pixels;
-                    const bool     lightCovered    = ZHLN_CHECK(
-                        chromaticPixels * 10 > sampledPixels, "clustered lights cover a meaningful share of the frame",
-                        "chromaticPixels={}/{} sampled px (need >10%)", chromaticPixels, sampledPixels
+                    // clustered lights cover a meaningful share of the frame
+                    const bool     lightCovered    = ZHLN::Test::ExpectTrue(
+                            chromaticPixels * 10 > sampledPixels
                     );
 
                     const FrameMetrics fullFrame         = MeasureImage(frame);
-                    const bool         noBlackout        = ZHLN_CHECK(
-                        fullFrame.meanLuma > 1.0, "frame is not blacked out", "meanLuma={:.2f} over {} px", fullFrame.meanLuma, fullFrame.total
+                    // frame is not blacked out
+                    const bool         noBlackout        = ZHLN::Test::ExpectTrue(
+                            fullFrame.meanLuma > 1.0
                     );
-                    const bool         noExtremeOverflow = ZHLN_CHECK(
-                        fullFrame.saturated * 20 < fullFrame.total, "frame is not blown out", "saturated={}/{} px (need <5%)", fullFrame.saturated,
-                        fullFrame.total
+                    // frame is not blown out
+                    const bool         noExtremeOverflow = ZHLN::Test::ExpectTrue(
+                            fullFrame.saturated * 20 < fullFrame.total
                     );
 
                     return redDominant && greenDominant && blueDominant && additiveMixing && lightCovered && noBlackout && noExtremeOverflow;

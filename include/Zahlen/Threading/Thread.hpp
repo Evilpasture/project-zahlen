@@ -3,8 +3,10 @@
 
 #pragma once
 
+#include <Zahlen/Core/Platform.hpp>
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 namespace ZHLN {
 
 // Jolt collision jobs and modern libc++ frames can exceed 128 KiB on ARM64.
@@ -19,16 +21,16 @@ using FiberFunc = void (*)(void*);
  */
 struct alignas(128) Fiber {
     void*     stackPointer; // Offset 0: Used by ZHLN_Switch
-    void*     mapAddr;      // Base of mmap/VirtualAlloc
+    void*     mapAddr;      // Base of the stack mapping (AllocateGuardedRegion)
     size_t    mapSize;      // Total size including guard pages
     FiberFunc func;         // Entry point
     void*     arg;          // User data
     Fiber*    caller;       // Parent fiber to return to on Yield
 
-#if defined(_WIN32)
-    void* stackBase; // Windows TEB tracking
-    void* stackLimit;
-#endif
+    // The stack bounds the OS has recorded for this fiber. Swapped in and out
+    // of the platform's per-thread state on every switch; stays zeroed and
+    // unused where the OS tracks nothing (see GetCurrentStackBounds()).
+    StackBounds bounds {};
 
     bool              isFinished;
     bool              isMain;
@@ -61,5 +63,14 @@ struct alignas(128) Fiber {
 // Global Linker Satellites for Mutex.cpp
 auto GetCurrentFiber() noexcept -> Fiber*;
 void YieldFiber() noexcept;
+
+/**
+ * @brief Identifies the fiber (or OS thread) the caller is running on.
+ *
+ * 0 means the thread was never converted with Fiber::InitMainThread(), 1 is
+ * the main thread, and every other fiber reports its own address. Logging and
+ * assertion reporting use it to attribute output to a context.
+ */
+auto GetCurrentFiberID() -> uint64_t;
 
 } // namespace ZHLN

@@ -15,6 +15,7 @@
 #include <Zahlen/Core/Format.hpp>
 #include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/GUI.hpp>
+#include <Zahlen/gui/UIComponents.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 
 #include <algorithm>
@@ -31,6 +32,7 @@ namespace {
 
     namespace GUI = ZHLN::GUI;
     using Comp    = ZHLN::Components;
+    using UIComp  = ZHLN::GUI::UIComponents;
 
     // The editor and the edited scene share one registry, so the hierarchy
     // has to know which subtree is chrome. Walk the UI parent chain upward
@@ -49,13 +51,47 @@ namespace {
             if (cur == editorRoot) {
                 return true;
             }
-            const auto* rect = reg.Get<Comp::UIRectComponent>(cur);
+            const auto* rect = reg.Get<UIComp::UIRectComponent>(cur);
             if (rect == nullptr || rect->parentEntity == ZHLN::Entity::Null()) {
                 return false;
             }
             cur = rect->parentEntity;
         }
         return false;
+    }
+
+    // The candidate list for a reference field that points at an ENTITY.
+    //
+    // Only the registry knows what exists, but only the editor knows which of
+    // those are scene content: everything under editorRoot is the editor's own
+    // chrome, and offering the inspector's own rows as the target of a scene
+    // component's `parent` handle is how a scene ends up parented to a
+    // scrollbar. `Entity::Null()` is not offered — a field that means "no
+    // target" is expressed by the picker's None entry, not by a second empty
+    // row nobody can tell apart from the first.
+    // Reachable only through an `if constexpr` branch of MakeRowSink's generic
+    // lambda, which is instantiated per reflected field type. Builds without
+    // P2996 reflection compile ForEachFieldWithName down to a no-op, so the
+    // lambda is never instantiated and nothing references this — hence the
+    // attribute. It is live in any build where reflection actually runs.
+    [[maybe_unused]] [[nodiscard]] auto BuildEntityOptions(ZHLN::ECS::Registry& reg, ZHLN::Entity editorRoot)
+        -> std::vector<GUI::ReferenceOption> {
+        std::vector<GUI::ReferenceOption> out;
+        out.reserve(64);
+        for (const ZHLN::Entity e: reg.GetEntitiesWith<Comp::NameComponent>()) {
+            if (e == ZHLN::Entity::Null() || IsEditorEntity(e, reg, editorRoot)) {
+                continue;
+            }
+            const auto* name = reg.Get<Comp::NameComponent>(e);
+            if (name == nullptr) {
+                continue;
+            }
+            // The label borrows the component's own storage. It only has to
+            // outlive this frame's Reference() call, which copies the strings
+            // it keeps into the widget's own option array.
+            out.push_back(GUI::ReferenceOption {.id = e.Pack(), .label = std::string_view(name->name)});
+        }
+        return out;
     }
 
     // The generic row sink: one row per reflected (name, field) pair. The
@@ -65,8 +101,8 @@ namespace {
     // The ForEachFieldWithName call sites live in DrawInspectorPanel, one per
     // concrete component type — see the comment there for why the iteration
     // is not driven from this generic lambda.
-    [[nodiscard]] auto MakeRowSink(GUI::Context& gui, std::string_view sectionId) {
-        return [&gui, sectionId](std::string_view name, auto& field) -> void {
+    [[nodiscard]] auto MakeRowSink(GUI::Context& gui, ZHLN::Entity editorRoot, std::string_view sectionId) {
+        return [&gui, editorRoot, sectionId](std::string_view name, auto& field) -> void {
             using FT = std::remove_cvref_t<decltype(field)>;
 
             // Padding/reserved members never get a row.
@@ -102,6 +138,31 @@ namespace {
                     gui.Dropdown(rowId, name, idx, std::span<const std::string_view> {names});
                     field = static_cast<FT>(idx);
                 }
+            } else if constexpr (std::is_same_v<FT, ZHLN::Entity>) {
+                // Entity handles: a picker over the scene's named entities.
+                // Entity::Null() packs to all-ones, which is not a useful
+                // dropdown value, so it is mapped onto the picker's None entry
+                // (0) in both directions.
+                const ZHLN::Entity current = field;
+                uint64_t           packed  = (current == ZHLN::Entity::Null()) ? 0 : current.Pack();
+                gui.Reference(rowId, name, packed, BuildEntityOptions(gui.GetRegistry(), editorRoot));
+                field = (packed == 0) ? ZHLN::Entity::Null() : ZHLN::Entity::Unpack(packed);
+            } else if constexpr (std::is_same_v<FT, TextureHandle>) {
+                // Deliberately ahead of the generic enum branch below.
+                // TextureHandle IS an enum, so it used to fall through to
+                // "render a dropdown of Reflect::EnumNames" — whose only
+                // enumerator is Invalid. Under real reflection that produced a
+                // one-option menu and rewrote every texture on the entity to
+                // Invalid the moment the inspector touched it.
+                //
+                // There is no enumerable asset catalogue to list yet, so this
+                // passes an empty option list: the row shows the handle (or
+                // "None"), flags it as dangling when it names nothing known,
+                // and lets it be cleared. It becomes a real asset browser the
+                // moment something can enumerate mounted assets.
+                uint64_t raw = static_cast<uint64_t>(field);
+                gui.Reference(rowId, name, raw, std::span<const GUI::ReferenceOption> {});
+                field = static_cast<TextureHandle>(raw);
             } else if constexpr (std::is_same_v<FT, JPH::Vec4>) {
                 float v[4] = {field.GetX(), field.GetY(), field.GetZ(), field.GetW()};
                 for (int axis = 0; axis < 4; ++axis) {
@@ -180,7 +241,7 @@ auto DrawHierarchyPanel(
         if (IsEditorEntity(e, reg, state.editorRoot)) {
             continue;
         }
-        const auto* rect = reg.Get<Comp::UIRectComponent>(e);
+        const auto* rect = reg.Get<UIComp::UIRectComponent>(e);
         rows.push_back(Row {e,
                             rect != nullptr ? rect->hierarchyDepth : 0u,
                             rect != nullptr ? rect->layoutOrder : e.index});
@@ -272,7 +333,7 @@ auto DrawInspectorPanel(
                 using CompT = std::remove_pointer_t<decltype(comp)>;
                 gui.CollapsingHeader(sectionId, title, true, [&]() -> void {
                     CompT local = *comp;
-                    reflect(local, MakeRowSink(gui, sectionId));
+                    reflect(local, MakeRowSink(gui, state.editorRoot, sectionId));
                     reg.Patch<CompT>(sel, [&local](CompT& dst) -> void { dst = local; });
                 });
             };
@@ -285,14 +346,14 @@ auto DrawInspectorPanel(
                     [](Comp::PBRComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
             section("light", "Light", reg.Get<Comp::LightComponent>(sel),
                     [](Comp::LightComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
-            section("rect", "Rect", reg.Get<Comp::UIRectComponent>(sel),
-                    [](Comp::UIRectComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
-            section("flex", "Flex", reg.Get<Comp::UIFlexComponent>(sel),
-                    [](Comp::UIFlexComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
-            section("panel", "Panel", reg.Get<Comp::UIPanelComponent>(sel),
-                    [](Comp::UIPanelComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
-            section("text", "Text", reg.Get<Comp::TextComponent>(sel),
-                    [](Comp::TextComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
+            section("rect", "Rect", reg.Get<UIComp::UIRectComponent>(sel),
+                    [](UIComp::UIRectComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
+            section("flex", "Flex", reg.Get<UIComp::UIFlexComponent>(sel),
+                    [](UIComp::UIFlexComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
+            section("panel", "Panel", reg.Get<UIComp::UIPanelComponent>(sel),
+                    [](UIComp::UIPanelComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
+            section("text", "Text", reg.Get<UIComp::TextComponent>(sel),
+                    [](UIComp::TextComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
         }
     );
 }

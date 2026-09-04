@@ -77,14 +77,12 @@ struct SystemGraphTestSuite {
             graph.Execute(*fakeEngine, TestDeltaTime);
 
             // Verification: WriterA must precede ReaderA
-            auto chkA = ZHLN::Test::AssertTrue(orderA.load() > 0);
-            if (!chkA) {
-                return chkA;
+            if (!ZHLN::Test::ExpectTrue(orderA.load() > 0)) {
+                return std::unexpected(SystemGraphTestError::ExecutionOrderFailed);
             }
 
-            auto chkB = ZHLN::Test::AssertTrue(orderB.load() > orderA.load());
-            if (!chkB) {
-                return chkB;
+            if (!ZHLN::Test::ExpectTrue(orderB.load() > orderA.load())) {
+                return std::unexpected(SystemGraphTestError::ExecutionOrderFailed);
             }
 
             return {};
@@ -180,9 +178,8 @@ struct SystemGraphTestSuite {
             graph.Execute(*fakeEngine, TestDeltaTime);
 
             // SysC MUST execute after both SysA and SysB complete
-            auto chkC = ZHLN::Test::AssertTrue(orderC.load() > orderA.load() && orderC.load() > orderB.load());
-            if (!chkC) {
-                return chkC;
+            if (!ZHLN::Test::ExpectTrue(orderC.load() > orderA.load() && orderC.load() > orderB.load())) {
+                return std::unexpected(SystemGraphTestError::ExecutionOrderFailed);
             }
 
             return {};
@@ -233,14 +230,12 @@ struct SystemGraphTestSuite {
 
             // Both systems ran exactly once: the null-function anchor neither
             // crashed dispatch nor stranded its dependents.
-            auto ranBoth = ZHLN::Test::AssertTrue(orderReader.load() > 0 && orderWriter.load() > 0);
-            if (!ranBoth) {
-                return ranBoth;
+            if (!ZHLN::Test::ExpectTrue(orderReader.load() > 0 && orderWriter.load() > 0)) {
+                return std::unexpected(SystemGraphTestError::ExecutionOrderFailed);
             }
             // Registration order still decides the reader/writer tie-break.
-            auto ordered = ZHLN::Test::AssertTrue(orderWriter.load() > orderReader.load());
-            if (!ordered) {
-                return ordered;
+            if (!ZHLN::Test::ExpectTrue(orderWriter.load() > orderReader.load())) {
+                return std::unexpected(SystemGraphTestError::ExecutionOrderFailed);
             }
 
             // Guards: an empty access set or a null label must add no node, so a

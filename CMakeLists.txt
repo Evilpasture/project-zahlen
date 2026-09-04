@@ -151,6 +151,36 @@ if(NOT ZHLN_REFLECTION_BOUNDARY_RESULT EQUAL 0)
 endif()
 message(STATUS "${ZHLN_REFLECTION_BOUNDARY_OUTPUT}")
 
+# Macro governance: every #define in the repository must be named in
+# tools/macro_allowlist.json. A macro escapes namespaces, types, overloads and
+# scope, so it is invisible to every other check here -- which makes an
+# allowlist the only place a decision to add one can be recorded.
+#
+# The deep expansion pass needs the libclang Python bindings and is opt-in: it
+# runs as its own target so a machine without them still configures. It is the
+# only pass that can tell a macro apart from an enum constant (VK_SUCCESS vs
+# VK_FORMAT_R8G8B8A8_UNORM), which a regex cannot do.
+execute_process(
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_macro_governance.py"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    RESULT_VARIABLE ZHLN_MACRO_GOVERNANCE_RESULT
+    OUTPUT_VARIABLE ZHLN_MACRO_GOVERNANCE_OUTPUT
+    ERROR_VARIABLE ZHLN_MACRO_GOVERNANCE_ERROR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_STRIP_TRAILING_WHITESPACE
+)
+if(NOT ZHLN_MACRO_GOVERNANCE_RESULT EQUAL 0)
+    message(FATAL_ERROR "${ZHLN_MACRO_GOVERNANCE_ERROR}")
+endif()
+message(STATUS "${ZHLN_MACRO_GOVERNANCE_OUTPUT}")
+
+add_custom_target(check_macro_expansions
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_macro_governance.py" --full
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    COMMENT "Checking macro expansions with libclang (requires: pip install clang)"
+    VERBATIM
+)
+
 set(ZHLN_TRANSPILER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/tools/transpile_reflection.py")
 
 function(zahlen_transpile_sources OUT_SOURCES_VAR)
@@ -470,6 +500,7 @@ set(RAW_ENGINE_SOURCES
     src/engine/system/InteractionSystem.cpp
     src/gui/UIRenderSystem.cpp
     src/gui/UIInteractionSystem.cpp
+    src/gui/UIRegistration.cpp
     src/engine/WindowSurface.cpp
     src/engine/graphics/RenderProcedural.cpp
     src/engine/graphics/RenderPasses.cpp

@@ -585,8 +585,7 @@ struct DistanceStabilitySuite {
         ZHLN::Test::SetTimeout(55);
 
         auto engine      = CreateTestEngine();
-        auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-        if (!checkEngine) {
+        if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
             return std::unexpected(DistanceStabilityTestError::EngineInitFailed);
         }
 
@@ -668,8 +667,7 @@ struct DistanceStabilitySuite {
                         .baseColor = {kMaterials[i].baseColor[0], kMaterials[i].baseColor[1], kMaterials[i].baseColor[2], 1.0f}
                     }
                 );
-                auto checkMat = ZHLN::Test::AssertTrue(mat.has_value());
-                if (!checkMat) {
+                if (!ZHLN::Test::ExpectTrue(mat.has_value())) {
                     return std::unexpected(DistanceStabilityTestError::EngineInitFailed);
                 }
 
@@ -890,7 +888,7 @@ struct DistanceStabilitySuite {
                 for (uint32_t f = 0; f < kStaticFrames; ++f) {
                     TickFrames(eng, 1);
                     const RgbImage frame = Capture(eng, "headless_distance_static_f" + std::to_string(f) + ".ppm");
-                    if (!ZHLN::Test::AssertTrue(frame.Valid())) {
+                    if (!ZHLN::Test::ExpectTrue(frame.Valid())) {
                         return false;
                     }
 
@@ -976,7 +974,7 @@ struct DistanceStabilitySuite {
                         continue;
                     }
                     const RgbImage frame = Capture(eng, "headless_distance_sweep_s" + std::to_string(f) + ".ppm");
-                    if (!ZHLN::Test::AssertTrue(frame.Valid())) {
+                    if (!ZHLN::Test::ExpectTrue(frame.Valid())) {
                         return false;
                     }
 
@@ -1044,7 +1042,7 @@ struct DistanceStabilitySuite {
                 for (uint32_t f = 0; f < kParityFrames; ++f) {
                     TickFrames(eng, 1);
                     const RgbImage frame = Capture(eng, "headless_distance_parity_f" + std::to_string(f) + ".ppm");
-                    if (!ZHLN::Test::AssertTrue(frame.Valid())) {
+                    if (!ZHLN::Test::ExpectTrue(frame.Valid())) {
                         return false;
                     }
                     for (uint32_t i = 0; i < kRingCount; ++i) {

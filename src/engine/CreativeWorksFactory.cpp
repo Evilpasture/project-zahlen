@@ -19,6 +19,7 @@
 #include <Zahlen/SkeletalAnimation.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/gui/UIComponents.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <cstddef>
@@ -101,7 +102,7 @@ auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> Text
     const uint32_t       atlasSize = 1024;
     std::vector<uint8_t> alphaBitmap(static_cast<size_t>(atlasSize * atlasSize), 0);
 
-    auto* uiSettings = registry.GetSingleton<Components::UISettingsComponent>();
+    auto* uiSettings = registry.GetSingleton<GUI::UIComponents::UISettingsComponent>();
     if (uiSettings == nullptr) {
         return TextureHandle::Invalid;
     }

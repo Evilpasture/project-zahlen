@@ -18,6 +18,7 @@ import ZHLN.Lightning;
 
 enum class LightningTestError : uint32_t {
     StrikeSpawnFailed ZHLN_ANNOTATION(ZHLN::Description<"Lightning::Spawn failed to instantiate ECS entity and flash lights.">{}) = 1,
+    EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine context for the lightning test.">{}),
     StrikeLifecycleDesync ZHLN_ANNOTATION(ZHLN::Description<"Lightning strike phase progression (Leader -> Stroke -> Dissipate) failed to complete.">{}),
     AmbienceFlashNotRestored ZHLN_ANNOTATION(ZHLN::Description<"Global ambient exposure was not cleanly restored to baseline after bolt expiration.">{}),
     SubEntityMemoryLeak ZHLN_ANNOTATION(ZHLN::Description<"Point-light flash entities were leaked after strike expiration.">{}),
@@ -54,9 +55,9 @@ struct LightningTestSuite {
             };
 
             auto engineRes   = ZHLN::Engine::Create(engineCfg);
-            auto checkEngine = ZHLN::Test::AssertTrue(engineRes.has_value());
-            if (!checkEngine)
-                return checkEngine;
+            if (!ZHLN::Test::ExpectTrue(engineRes.has_value())) {
+                return std::unexpected(LightningTestError::EngineInitFailed);
+            }
 
             const auto engine = std::move(engineRes.value());
             engine->InitializeDefaultScene();
@@ -79,9 +80,9 @@ struct LightningTestSuite {
             ZHLN::Test::ExpectTrue(reg.IsAlive(boltEntity));
 
             const auto* boltComp  = reg.Get<ZHLN::LightningComponent>(boltEntity);
-            auto        checkComp = ZHLN::Test::AssertTrue(boltComp != nullptr);
-            if (!checkComp)
-                return checkComp;
+            if (!ZHLN::Test::ExpectTrue(boltComp != nullptr)) {
+                return std::unexpected(LightningTestError::StrikeSpawnFailed);
+            }
 
             ZHLN::Test::ExpectEq(boltComp->phase, ZHLN::LightningPhase::SteppedLeader);
             ZHLN::Test::ExpectEq(boltComp->baseAmbientExposure, kInitialBaselineExposure);
@@ -166,9 +167,9 @@ struct LightningTestSuite {
             };
 
             auto engineRes   = ZHLN::Engine::Create(engineCfg);
-            auto checkEngine = ZHLN::Test::AssertTrue(engineRes.has_value());
-            if (!checkEngine)
-                return checkEngine;
+            if (!ZHLN::Test::ExpectTrue(engineRes.has_value())) {
+                return std::unexpected(LightningTestError::EngineInitFailed);
+            }
 
             const auto engine = std::move(engineRes.value());
             engine->InitializeDefaultScene();
@@ -192,9 +193,9 @@ struct LightningTestSuite {
 
             const auto* c1         = reg.Get<ZHLN::LightningComponent>(bolt1);
             const auto* c2         = reg.Get<ZHLN::LightningComponent>(bolt2);
-            auto        checkBolts = ZHLN::Test::AssertTrue(c1 != nullptr && c2 != nullptr);
-            if (!checkBolts)
-                return checkBolts;
+            if (!ZHLN::Test::ExpectTrue(c1 != nullptr && c2 != nullptr)) {
+                return std::unexpected(LightningTestError::StrikeSpawnFailed);
+            }
 
             // Both strikes must reference the true un-flashed baseline
             ZHLN::Test::ExpectEq(c1->baseAmbientExposure, kBaselineExposure);

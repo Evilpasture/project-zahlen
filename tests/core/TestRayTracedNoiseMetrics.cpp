@@ -131,8 +131,7 @@ struct NoiseMetricTestSuite {
             const std::vector<double> lattice    = MakeIgnLattice(96.0);
             const std::vector<double> blueNoise  = MakeBlueNoise(96.0, &ok);
             const std::vector<double> whiteNoise = MakeWhiteNoise(96.0);
-            auto                      check      = ZHLN::Test::AssertTrue(ok);
-            if (!check) {
+            if (!ZHLN::Test::ExpectTrue(ok)) {
                 return std::unexpected(NoiseMetricError::BlueNoiseDecodeFailed);
             }
 
@@ -189,8 +188,7 @@ struct NoiseMetricTestSuite {
         std::expected<void, ZHLN::Error> blue_noise_channels_are_decorrelated() {
             int            w = 0, h = 0, c = 0;
             unsigned char* px    = stbi_load_from_memory(kBlueNoisePng, static_cast<int>(sizeof(kBlueNoisePng)), &w, &h, &c, 4);
-            auto           check = ZHLN::Test::AssertTrue(px != nullptr && w > 0 && h > 0);
-            if (!check) {
+            if (!ZHLN::Test::ExpectTrue(px != nullptr && w > 0 && h > 0)) {
                 return std::unexpected(NoiseMetricError::BlueNoiseDecodeFailed);
             }
 
@@ -225,8 +223,7 @@ struct NoiseMetricTestSuite {
         std::expected<void, ZHLN::Error> blue_noise_is_high_frequency() {
             int            w = 0, h = 0, c = 0;
             unsigned char* px    = stbi_load_from_memory(kBlueNoisePng, static_cast<int>(sizeof(kBlueNoisePng)), &w, &h, &c, 4);
-            auto           check = ZHLN::Test::AssertTrue(px != nullptr && w >= 64 && h >= 64);
-            if (!check) {
+            if (!ZHLN::Test::ExpectTrue(px != nullptr && w >= 64 && h >= 64)) {
                 return std::unexpected(NoiseMetricError::BlueNoiseDecodeFailed);
             }
 

@@ -68,9 +68,9 @@ struct CombatFXTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::Error> surface_presets_and_decal_instantiation() {
             auto engine      = CreateTestEngine();
-            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine)
-                return checkEngine;
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return std::unexpected(CombatFXTestError::SystemInitFailed);
+            }
 
             auto& reg = engine->GetRegistry();
 
@@ -117,9 +117,9 @@ struct CombatFXTestSuite {
                 const auto* decalComp = reg.Get<ZHLN::Components::DecalComponent>(decalEntities[0]);
                 const auto* transComp = reg.Get<ZHLN::Components::TransformComponent>(decalEntities[0]);
 
-                auto checkDecal = ZHLN::Test::AssertTrue(decalComp != nullptr && transComp != nullptr);
-                if (!checkDecal)
-                    return checkDecal;
+                if (!ZHLN::Test::ExpectTrue(decalComp != nullptr && transComp != nullptr)) {
+                    return std::unexpected(CombatFXTestError::DecalSpawnMismatch);
+                }
 
                 // Verify decal was placed at hit position
                 ZHLN::Test::ExpectEq(transComp->position.GetX(), hitPos1.GetX());
@@ -136,9 +136,9 @@ struct CombatFXTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::Error> ballistic_tracer_progression_and_termination() {
             auto engine      = CreateTestEngine();
-            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine)
-                return checkEngine;
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return std::unexpected(CombatFXTestError::SystemInitFailed);
+            }
 
             ZHLN::CombatFX::System combatFX;
             combatFX.Init(*engine);
@@ -176,9 +176,9 @@ struct CombatFXTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::Error> shockwave_rings_and_particle_physics() {
             auto engine      = CreateTestEngine();
-            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine)
-                return checkEngine;
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return std::unexpected(CombatFXTestError::SystemInitFailed);
+            }
 
             ZHLN::CombatFX::System combatFX;
             combatFX.Init(*engine);

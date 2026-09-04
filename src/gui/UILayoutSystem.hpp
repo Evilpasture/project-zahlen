@@ -7,6 +7,7 @@
 #include "Zahlen/GUI.hpp"
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/gui/UIComponents.hpp>
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -75,7 +76,7 @@ class UILayoutSystem {
         if (parent == Entity::Null() || !reg.IsAlive(parent)) {
             return 0.0f;
         }
-        const auto* parentRect = reg.Get<Components::UIRectComponent>(parent);
+        const auto* parentRect = reg.Get<GUI::UIComponents::UIRectComponent>(parent);
         if (parentRect == nullptr) {
             return 0.0f;
         }
@@ -84,15 +85,15 @@ class UILayoutSystem {
         if (width <= 0.0f) {
             width = parentRect->computedAbsMaxX - parentRect->computedAbsMinX;
         }
-        if (const auto* parentFlex = reg.Get<Components::UIFlexComponent>(parent)) {
+        if (const auto* parentFlex = reg.Get<GUI::UIComponents::UIFlexComponent>(parent)) {
             width -= parentFlex->paddingLeft + parentFlex->paddingRight;
         }
         return std::max(0.0f, width);
     }
 
     void ResolveLayouts(ECS::Registry& reg, const UIViewport& viewport) {
-        auto entities = reg.GetEntitiesWith<Components::UIRectComponent>();
-        auto rects    = reg.GetRawArray<Components::UIRectComponent>();
+        auto entities = reg.GetEntitiesWith<GUI::UIComponents::UIRectComponent>();
+        auto rects    = reg.GetRawArray<GUI::UIComponents::UIRectComponent>();
 
         if (entities.empty()) {
             return;
@@ -113,9 +114,9 @@ class UILayoutSystem {
 
         // 1. Fetch active Font Atlas for text measurement
         const FontAtlas* activeFont     = nullptr;
-        auto             uiSettingsEnts = reg.GetEntitiesWith<Components::UISettingsComponent>();
+        auto             uiSettingsEnts = reg.GetEntitiesWith<GUI::UIComponents::UISettingsComponent>();
         if (!uiSettingsEnts.empty()) {
-            activeFont = &reg.Get<Components::UISettingsComponent>(uiSettingsEnts[0])->fontAtlas;
+            activeFont = &reg.Get<GUI::UIComponents::UISettingsComponent>(uiSettingsEnts[0])->fontAtlas;
         }
 
         // 2. Instantiate Yoga Nodes for every active UI Entity
@@ -128,9 +129,10 @@ class UILayoutSystem {
             nodeMap[e.Pack()] = node;
 
             const auto& rect = rects[i];
-            auto*       flex = reg.Get<Components::UIFlexComponent>(e);
-            auto* parentRect = (rect.parentEntity != Entity::Null() && reg.IsAlive(rect.parentEntity)) ? reg.Get<Components::UIRectComponent>(rect.parentEntity) :
-                                                                                                     nullptr;
+            auto*       flex = reg.Get<GUI::UIComponents::UIFlexComponent>(e);
+            auto* parentRect = (rect.parentEntity != Entity::Null() && reg.IsAlive(rect.parentEntity)) ?
+                                   reg.Get<GUI::UIComponents::UIRectComponent>(rect.parentEntity) :
+                                   nullptr;
 
             float pWidth  = (parentRect != nullptr) ?
                                 (parentRect->width > 0.0f ? parentRect->width : (parentRect->computedAbsMaxX - parentRect->computedAbsMinX)) :
@@ -155,8 +157,8 @@ class UILayoutSystem {
             }
 
             // --- ANCHOR vs FLEX POSITIONING ---
-            bool isFlexChild =
-                (rect.parentEntity != Entity::Null() && reg.IsAlive(rect.parentEntity) && reg.Get<Components::UIFlexComponent>(rect.parentEntity) != nullptr);
+            bool isFlexChild = (rect.parentEntity != Entity::Null() && reg.IsAlive(rect.parentEntity) &&
+                                reg.Get<GUI::UIComponents::UIFlexComponent>(rect.parentEntity) != nullptr);
 
             if (!isFlexChild) {
                 // Anchor-based Canvas Positioning (HUD popups, tool windows,
@@ -215,55 +217,55 @@ class UILayoutSystem {
             if (flex != nullptr) {
                 // Flexbox Style Configuration for laying out children
                 switch (flex->direction) {
-                    case FlexDirection::Column:
+                    case GUI::FlexDirection::Column:
                         YGNodeStyleSetFlexDirection(node, YGFlexDirectionColumn);
                         break;
-                    case FlexDirection::ColumnReverse:
+                    case GUI::FlexDirection::ColumnReverse:
                         YGNodeStyleSetFlexDirection(node, YGFlexDirectionColumnReverse);
                         break;
-                    case FlexDirection::Row:
+                    case GUI::FlexDirection::Row:
                         YGNodeStyleSetFlexDirection(node, YGFlexDirectionRow);
                         break;
-                    case FlexDirection::RowReverse:
+                    case GUI::FlexDirection::RowReverse:
                         YGNodeStyleSetFlexDirection(node, YGFlexDirectionRowReverse);
                         break;
                 }
 
                 switch (flex->justify) {
-                    case FlexJustify::FlexStart:
+                    case GUI::FlexJustify::FlexStart:
                         YGNodeStyleSetJustifyContent(node, YGJustifyFlexStart);
                         break;
-                    case FlexJustify::Center:
+                    case GUI::FlexJustify::Center:
                         YGNodeStyleSetJustifyContent(node, YGJustifyCenter);
                         break;
-                    case FlexJustify::FlexEnd:
+                    case GUI::FlexJustify::FlexEnd:
                         YGNodeStyleSetJustifyContent(node, YGJustifyFlexEnd);
                         break;
-                    case FlexJustify::SpaceBetween:
+                    case GUI::FlexJustify::SpaceBetween:
                         YGNodeStyleSetJustifyContent(node, YGJustifySpaceBetween);
                         break;
-                    case FlexJustify::SpaceAround:
+                    case GUI::FlexJustify::SpaceAround:
                         YGNodeStyleSetJustifyContent(node, YGJustifySpaceAround);
                         break;
-                    case FlexJustify::SpaceEvenly:
+                    case GUI::FlexJustify::SpaceEvenly:
                         YGNodeStyleSetJustifyContent(node, YGJustifySpaceEvenly);
                         break;
                 }
 
                 switch (flex->alignItems) {
-                    case FlexAlign::FlexStart:
+                    case GUI::FlexAlign::FlexStart:
                         YGNodeStyleSetAlignItems(node, YGAlignFlexStart);
                         break;
-                    case FlexAlign::Center:
+                    case GUI::FlexAlign::Center:
                         YGNodeStyleSetAlignItems(node, YGAlignCenter);
                         break;
-                    case FlexAlign::FlexEnd:
+                    case GUI::FlexAlign::FlexEnd:
                         YGNodeStyleSetAlignItems(node, YGAlignFlexEnd);
                         break;
-                    case FlexAlign::Stretch:
+                    case GUI::FlexAlign::Stretch:
                         YGNodeStyleSetAlignItems(node, YGAlignStretch);
                         break;
-                    case FlexAlign::Baseline:
+                    case GUI::FlexAlign::Baseline:
                         YGNodeStyleSetAlignItems(node, YGAlignBaseline);
                         break;
                     default:
@@ -272,19 +274,19 @@ class UILayoutSystem {
                 }
 
                 switch (flex->alignSelf) {
-                    case FlexAlign::FlexStart:
+                    case GUI::FlexAlign::FlexStart:
                         YGNodeStyleSetAlignSelf(node, YGAlignFlexStart);
                         break;
-                    case FlexAlign::Center:
+                    case GUI::FlexAlign::Center:
                         YGNodeStyleSetAlignSelf(node, YGAlignCenter);
                         break;
-                    case FlexAlign::FlexEnd:
+                    case GUI::FlexAlign::FlexEnd:
                         YGNodeStyleSetAlignSelf(node, YGAlignFlexEnd);
                         break;
-                    case FlexAlign::Stretch:
+                    case GUI::FlexAlign::Stretch:
                         YGNodeStyleSetAlignSelf(node, YGAlignStretch);
                         break;
-                    case FlexAlign::Baseline:
+                    case GUI::FlexAlign::Baseline:
                         YGNodeStyleSetAlignSelf(node, YGAlignBaseline);
                         break;
                     default:
@@ -293,13 +295,13 @@ class UILayoutSystem {
                 }
 
                 switch (flex->wrap) {
-                    case FlexWrap::NoWrap:
+                    case GUI::FlexWrap::NoWrap:
                         YGNodeStyleSetFlexWrap(node, YGWrapNoWrap);
                         break;
-                    case FlexWrap::Wrap:
+                    case GUI::FlexWrap::Wrap:
                         YGNodeStyleSetFlexWrap(node, YGWrapWrap);
                         break;
-                    case FlexWrap::WrapReverse:
+                    case GUI::FlexWrap::WrapReverse:
                         YGNodeStyleSetFlexWrap(node, YGWrapWrapReverse);
                         break;
                 }
@@ -331,13 +333,14 @@ class UILayoutSystem {
             // which silently removes the very overflow the ScrollBox exists to
             // scroll — the content fits, maxScrollY stays 0, and the wheel does
             // nothing. The scroll axis is exempt from shrink-to-fit by design.
-            if (rect.parentEntity != Entity::Null() && reg.IsAlive(rect.parentEntity) && reg.Get<Components::UIScrollComponent>(rect.parentEntity) != nullptr) {
+            if (rect.parentEntity != Entity::Null() && reg.IsAlive(rect.parentEntity) &&
+                reg.Get<GUI::UIComponents::UIScrollComponent>(rect.parentEntity) != nullptr) {
                 YGNodeStyleSetFlexShrink(node, 0.0f);
             }
 
             // Intrinsic Content Measuring for Text Components
             if (rect.width <= 0.0f || rect.height <= 0.0f) {
-                if (auto* textComp = reg.Get<Components::TextComponent>(e)) {
+                if (auto* textComp = reg.Get<GUI::UIComponents::TextComponent>(e)) {
                     auto* textCtx = new TextMeasureContext {
                         .font      = activeFont,
                         .text      = textComp->text.c_str(),
@@ -356,7 +359,7 @@ class UILayoutSystem {
             // .sourceWidth = 64, .sourceHeight = 64})` sizes itself instead of
             // collapsing to zero. An explicit width/height always wins, and a
             // stretched flex child keeps overriding this through align/flex.
-            if (auto* image = reg.Get<Components::UIImageComponent>(e)) {
+            if (auto* image = reg.Get<GUI::UIComponents::UIImageComponent>(e)) {
                 if (rect.width <= 0.0f && image->sourceWidth > 0.0f) {
                     YGNodeStyleSetWidth(node, image->sourceWidth);
                 }
@@ -385,7 +388,7 @@ class UILayoutSystem {
                 return found->second;
             }
 
-            const auto* rect = reg.Get<Components::UIRectComponent>(e);
+            const auto* rect = reg.Get<GUI::UIComponents::UIRectComponent>(e);
             if (rect == nullptr) {
                 return 0.0f;
             }
@@ -395,19 +398,19 @@ class UILayoutSystem {
             // the whole point of the widget; letting it leak upward would make
             // every auto-height ancestor grow to fit the scrolled-away rows
             // and leave the scroller with nothing to scroll.
-            if (reg.Get<Components::UIScrollComponent>(e) != nullptr) {
+            if (reg.Get<GUI::UIComponents::UIScrollComponent>(e) != nullptr) {
                 const float own = std::max(0.0f, rect->height);
                 intrinsicHeights.emplace(e.Pack(), own);
                 return own;
             }
 
             float intrinsicHeight = std::max(0.0f, rect->height);
-            const auto* flex      = reg.Get<Components::UIFlexComponent>(e);
+            const auto* flex      = reg.Get<GUI::UIComponents::UIFlexComponent>(e);
 
             // Fixed-size nodes do not need (and must not acquire) a larger
             // min-height merely because one of their children overflows.
             if (rect->height <= 0.0f && flex != nullptr) {
-                const bool column = flex->direction == FlexDirection::Column || flex->direction == FlexDirection::ColumnReverse;
+                const bool column = flex->direction == GUI::FlexDirection::Column || flex->direction == GUI::FlexDirection::ColumnReverse;
                 float      contentHeight = 0.0f;
                 float      maxChildHeight = 0.0f;
                 size_t     childCount = 0;
@@ -418,7 +421,7 @@ class UILayoutSystem {
                     }
 
                     float childHeight = self(self, entities[i]);
-                    if (const auto* childFlex = reg.Get<Components::UIFlexComponent>(entities[i])) {
+                    if (const auto* childFlex = reg.Get<GUI::UIComponents::UIFlexComponent>(entities[i])) {
                         childHeight += childFlex->marginTop + childFlex->marginBottom;
                     }
 
@@ -447,7 +450,7 @@ class UILayoutSystem {
             // height.  Match the measure function's result, wrapping included,
             // so a wrapped paragraph contributes every one of its lines here.
             if (intrinsicHeight <= 0.0f && activeFont != nullptr) {
-                if (const auto* textComp = reg.Get<Components::TextComponent>(e)) {
+                if (const auto* textComp = reg.Get<GUI::UIComponents::TextComponent>(e)) {
                     float wrapAt = 0.0f;
                     if (textComp->wrapText) {
                         wrapAt = textComp->wrapWidth;
@@ -465,8 +468,8 @@ class UILayoutSystem {
         };
 
         for (Entity e: entities) {
-            const auto* rect = reg.Get<Components::UIRectComponent>(e);
-            if (rect == nullptr || rect->height > 0.0f || reg.Get<Components::UIFlexComponent>(e) == nullptr) {
+            const auto* rect = reg.Get<GUI::UIComponents::UIRectComponent>(e);
+            if (rect == nullptr || rect->height > 0.0f || reg.Get<GUI::UIComponents::UIFlexComponent>(e) == nullptr) {
                 continue;
             }
 
@@ -474,7 +477,7 @@ class UILayoutSystem {
             // that is precisely the height it is supposed to clip away, and
             // granting it would make the container grow to fit everything and
             // leave nothing to scroll.
-            if (reg.Get<Components::UIScrollComponent>(e) != nullptr) {
+            if (reg.Get<GUI::UIComponents::UIScrollComponent>(e) != nullptr) {
                 continue;
             }
 
@@ -516,7 +519,7 @@ class UILayoutSystem {
         // 5. Read Back Computed Coordinates into UIRectComponent
         auto ReadBackLayout = [&](auto& self, Entity e, float parentAbsMinX, float parentAbsMinY) -> void {
             YGNodeRef node = nodeMap[e.Pack()];
-            auto*     rect = reg.Get<Components::UIRectComponent>(e);
+            auto*     rect = reg.Get<GUI::UIComponents::UIRectComponent>(e);
             if (rect == nullptr) {
                 return;
             }
@@ -537,7 +540,7 @@ class UILayoutSystem {
             // is what turns the shift into clipping.
             float childOriginX = rect->computedAbsMinX;
             float childOriginY = rect->computedAbsMinY;
-            if (const auto* scroll = reg.Get<Components::UIScrollComponent>(e)) {
+            if (const auto* scroll = reg.Get<GUI::UIComponents::UIScrollComponent>(e)) {
                 childOriginX -= scroll->scrollX;
                 childOriginY -= scroll->scrollY;
             }
@@ -576,12 +579,12 @@ class UILayoutSystem {
             const auto& r = rects[i];
             const bool isFlexChild =
                 (r.parentEntity != Entity::Null() && reg.IsAlive(r.parentEntity) &&
-                 reg.Get<Components::UIFlexComponent>(r.parentEntity) != nullptr);
+                 reg.Get<GUI::UIComponents::UIFlexComponent>(r.parentEntity) != nullptr);
             if (isFlexChild) continue;
 
             float pWidth = viewport.width, pHeight = viewport.height;
             if (r.parentEntity != Entity::Null() && reg.IsAlive(r.parentEntity)) {
-                if (const auto* pr = reg.Get<Components::UIRectComponent>(r.parentEntity)) {
+                if (const auto* pr = reg.Get<GUI::UIComponents::UIRectComponent>(r.parentEntity)) {
                     pWidth  = pr->computedAbsMaxX - pr->computedAbsMinX;
                     pHeight = pr->computedAbsMaxY - pr->computedAbsMinY;
                 }
@@ -600,7 +603,7 @@ class UILayoutSystem {
 
             // Shift this entity AND all its descendants by the delta.
             std::function<void(Entity, float, float)> shift = [&](Entity ent, float dx, float dy) {
-                if (auto* rr = reg.Get<Components::UIRectComponent>(ent)) {
+                if (auto* rr = reg.Get<GUI::UIComponents::UIRectComponent>(ent)) {
                     rr->computedAbsMinX += dx;
                     rr->computedAbsMaxX += dx;
                     rr->computedAbsMinY += dy;

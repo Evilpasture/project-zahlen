@@ -25,6 +25,7 @@
 
 enum class ViewmodelTestError : uint8_t {
     EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine context for Viewmodel test.">{}) = 1,
+    ViewmodelComponentMissing ZHLN_ANNOTATION(ZHLN::Description<"The viewmodel entity carries no ViewmodelComponent to configure.">{}),
     FOVDecouplingFailed ZHLN_ANNOTATION(ZHLN::Description<"Camera FOV modifications altered the viewmodel projection matrix.">{}),
     RenderOutputBlank ZHLN_ANNOTATION(ZHLN::Description<"Rendered frame is blank or failed to capture.">{}),
     ViewmodelNotRendered ZHLN_ANNOTATION(ZHLN::Description<"Automated pixel analysis detected zero viewmodel pixels on screen.">{}),
@@ -60,9 +61,9 @@ struct ViewmodelTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::Error> viewmodel_fov_decoupling_invariants() {
             auto engine      = CreateTestEngine(1280, 720);
-            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine)
-                return checkEngine;
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return std::unexpected(ViewmodelTestError::EngineInitFailed);
+            }
 
             auto&       cam    = engine->GetCamera();
             const float aspect = 1280.0f / 720.0f;
@@ -98,9 +99,9 @@ struct ViewmodelTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::Error> viewmodel_draw_flag_pipeline_routing() {
             auto engine      = CreateTestEngine(640, 480);
-            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine)
-                return checkEngine;
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return std::unexpected(ViewmodelTestError::EngineInitFailed);
+            }
 
             auto& reg = engine->GetRegistry();
 
@@ -127,9 +128,9 @@ struct ViewmodelTestSuite {
             reg.Patch<ZHLN::Components::MeshComponent>(vmGun, [](auto& mc) { mc.flags |= ZHLN::DrawFlags::Viewmodel; });
 
             const auto* mc      = reg.Get<ZHLN::Components::MeshComponent>(vmGun);
-            auto        checkMC = ZHLN::Test::AssertTrue(mc != nullptr);
-            if (!checkMC)
-                return checkMC;
+            if (!ZHLN::Test::ExpectTrue(mc != nullptr)) {
+                return std::unexpected(ViewmodelTestError::ViewmodelComponentMissing);
+            }
 
             ZHLN::Test::ExpectTrue((mc->flags & ZHLN::DrawFlags::Viewmodel) != ZHLN::DrawFlags::None);
 
@@ -149,9 +150,9 @@ struct ViewmodelTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::Error> viewmodel_depth_priority_and_pixel_verification() {
             auto engine      = CreateTestEngine(640, 480);
-            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine)
-                return checkEngine;
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return std::unexpected(ViewmodelTestError::EngineInitFailed);
+            }
 
             auto& reg = engine->GetRegistry();
             auto& rc  = engine->GetRenderContext();

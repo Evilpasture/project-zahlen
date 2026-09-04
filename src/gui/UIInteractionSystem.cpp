@@ -8,6 +8,7 @@
 #include <Zahlen/GUI.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/gui/UIComponents.hpp>
 #include <algorithm>
 
 namespace ZHLN {
@@ -22,7 +23,7 @@ auto FindAncestorWith(ECS::Registry& reg, Entity start) -> Entity {
         if (reg.Get<Comp>(curr) != nullptr) {
             return curr;
         }
-        if (auto* rect = reg.Get<Components::UIRectComponent>(curr)) {
+        if (auto* rect = reg.Get<GUI::UIComponents::UIRectComponent>(curr)) {
             curr = rect->parentEntity;
         } else {
             break;
@@ -36,7 +37,7 @@ struct Bounds {
     float x0, y0, x1, y1;
 };
 
-auto GetBounds(const Components::UIRectComponent& r) -> Bounds {
+auto GetBounds(const GUI::UIComponents::UIRectComponent& r) -> Bounds {
     return {r.computedAbsMinX, r.computedAbsMinY, r.computedAbsMaxX, r.computedAbsMaxY};
 }
 
@@ -62,16 +63,23 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                     return true;
                 }
             }
-            auto* rect = reg.Get<Components::UIRectComponent>(curr);
+            auto* rect = reg.Get<GUI::UIComponents::UIRectComponent>(curr);
             curr       = (rect != nullptr) ? rect->parentEntity : Entity::Null();
         }
         return false;
     };
 
-    auto entities = reg.GetEntitiesWith<Components::UIRectComponent>();
-    auto rects    = reg.GetRawArray<Components::UIRectComponent>();
+    auto entities = reg.GetEntitiesWith<GUI::UIComponents::UIRectComponent>();
+    auto rects    = reg.GetRawArray<GUI::UIComponents::UIRectComponent>();
 
     if (entities.empty()) {
+        // Nothing on screen can capture, but the flags are not reset anywhere
+        // else: ProcessEvents only clears the per-frame deltas, and the TTY
+        // path returns before it gets here. Without this a stale `true` from a
+        // scene that had widgets would freeze the camera for the rest of the
+        // session after the UI was torn down.
+        state->wantCaptureMouse    = false;
+        state->wantCaptureKeyboard = false;
         return;
     }
 
@@ -100,23 +108,26 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
     // Reset per-frame hover on every UIButtonComponent in one pass. The
     // UIButtonComponent::Hovered flag is the single source of truth for hover
     // across all widgets; compound widgets never cache their own hovered flag.
-    for (auto& btn: reg.GetRawArray<Components::UIButtonComponent>()) {
-        btn.Set(UIButton::Hovered, false);
-        btn.Set(UIButton::Clicked, false);
+    for (auto& btn: reg.GetRawArray<GUI::UIComponents::UIButtonComponent>()) {
+        btn.Set(GUI::UIButton::Hovered, false);
+        btn.Set(GUI::UIButton::Clicked, false);
     }
 
     // 1. Process active drag operations (window dragging + slider + splitter)
     // Window/Panel drags
-    for (Entity e: reg.GetEntitiesWith<Components::UIDragComponent>()) {
-        if (auto* drag = reg.Get<Components::UIDragComponent>(e)) {
+    for (Entity e: reg.GetEntitiesWith<GUI::UIComponents::UIDragComponent>()) {
+        if (auto* drag = reg.Get<GUI::UIComponents::UIDragComponent>(e)) {
             // Determine whether this drag handle belongs to a slider or splitter
             // by walking up parents.
-            Entity sliderEnt   = FindAncestorWith<Components::UISliderComponent>(reg, e);
-            Entity splitterEnt = FindAncestorWith<Components::UISplitterComponent>(reg, e);
+            Entity sliderEnt   = FindAncestorWith<GUI::UIComponents::UISliderComponent>(reg, e);
+            Entity splitterEnt = FindAncestorWith<GUI::UIComponents::UISplitterComponent>(reg, e);
+            // Checked after the slider: a 1D control is the more specific
+            // match, and nothing nests an SV pad inside one.
+            Entity svEnt       = FindAncestorWith<GUI::UIComponents::UIColorSVComponent>(reg, e);
 
             if (sliderEnt != Entity::Null()) {
                 // Slider drag: adjust slider value
-                if (auto* slider = reg.Get<Components::UISliderComponent>(sliderEnt)) {
+                if (auto* slider = reg.Get<GUI::UIComponents::UISliderComponent>(sliderEnt)) {
                     if (!leftMouseDown) {
                         // Release BOTH latches. Forgetting the drag-component
                         // latch here made the handle stay "armed" after the
@@ -132,8 +143,8 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                         // Find the _sl_track child to get the track's on-screen bounds
                         Bounds trackB {};
                         bool   hasBounds = false;
-                        if (auto* cache = reg.Get<Components::UIChildCacheComponent>(sliderEnt)) {
-                            cache->children.ForEach([&](uint64_t, const Components::UIChildCacheComponent::ChildRecord& rec) -> void {
+                        if (auto* cache = reg.Get<GUI::UIComponents::UIChildCacheComponent>(sliderEnt)) {
+                            cache->children.ForEach([&](uint64_t, const GUI::UIComponents::UIChildCacheComponent::ChildRecord& rec) -> void {
                                 if (hasBounds)
                                     return;
                                 Entity child = rec.entity;
@@ -141,7 +152,7 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                                     return;
                                 if (auto* cname = reg.Get<Components::NameComponent>(child)) {
                                     if (std::string_view(cname->name) == "_sl_track") {
-                                        if (auto* tr = reg.Get<Components::UIRectComponent>(child)) {
+                                        if (auto* tr = reg.Get<GUI::UIComponents::UIRectComponent>(child)) {
                                             trackB    = GetBounds(*tr);
                                             hasBounds = true;
                                         }
@@ -150,7 +161,7 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                             });
                         }
                         if (!hasBounds) {
-                            if (auto* srect = reg.Get<Components::UIRectComponent>(sliderEnt)) {
+                            if (auto* srect = reg.Get<GUI::UIComponents::UIRectComponent>(sliderEnt)) {
                                 trackB    = GetBounds(*srect);
                                 hasBounds = true;
                             }
@@ -172,7 +183,7 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                 }
             } else if (splitterEnt != Entity::Null()) {
                 // Splitter drag: adjust ratio
-                if (auto* split = reg.Get<Components::UISplitterComponent>(splitterEnt)) {
+                if (auto* split = reg.Get<GUI::UIComponents::UISplitterComponent>(splitterEnt)) {
                     if (!leftMouseDown) {
                         split->isDragging = false;
                         drag->isDragging  = false; // same latch leak as the slider
@@ -180,9 +191,9 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                         if (!split->isDragging) {
                             split->isDragging = true;
                         }
-                        if (auto* srect = reg.Get<Components::UIRectComponent>(splitterEnt)) {
+                        if (auto* srect = reg.Get<GUI::UIComponents::UIRectComponent>(splitterEnt)) {
                             Bounds tb         = GetBounds(*srect);
-                            bool   horizontal = (split->direction == Components::UISplitterComponent::Horizontal);
+                            bool   horizontal = (split->direction == GUI::UIComponents::UISplitterComponent::Horizontal);
                             float  total      = horizontal ? (tb.x1 - tb.x0) : (tb.y1 - tb.y0);
                             float  pos        = horizontal ? (mouseX - tb.x0) : (mouseY - tb.y0);
                             if (total > 1.0f) {
@@ -197,13 +208,49 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                         continue;
                     }
                 }
+            } else if (svEnt != Entity::Null()) {
+                // Colour picker: the saturation/value plane.
+                //
+                // The one control in the GUI that is genuinely 2D, so there is
+                // no 1D slider to reuse — the pointer's position inside the
+                // pad IS the value. Y is inverted because the plane's origin
+                // is its top-left corner while value 1 (brightest) is at the
+                // top, which is the opposite sense from screen Y.
+                if (auto* sv = reg.Get<GUI::UIComponents::UIColorSVComponent>(svEnt)) {
+                    if (!leftMouseDown) {
+                        // Both latches, same as the slider: leaving the
+                        // drag-component latch armed makes the next click
+                        // anywhere on screen move the pad.
+                        sv->isDragging   = false;
+                        drag->isDragging = false;
+                    } else if (drag->isDragging || sv->isDragging) {
+                        sv->isDragging = true;
+                        if (const auto* srect = reg.Get<GUI::UIComponents::UIRectComponent>(svEnt)) {
+                            const Bounds b = GetBounds(*srect);
+                            const float  w = b.x1 - b.x0;
+                            const float  h = b.y1 - b.y0;
+                            // Unlike a slider, the pad keeps the drag alive
+                            // outside its own rect (clamped): losing the
+                            // pointer mid-gesture would strand the colour
+                            // halfway, and the clamp means "off the pad"
+                            // still resolves to a legal corner value.
+                            if (w > 1.0f) {
+                                sv->sat = std::clamp((mouseX - b.x0) / w, 0.0f, 1.0f);
+                            }
+                            if (h > 1.0f) {
+                                sv->val = std::clamp(1.0f - (mouseY - b.y0) / h, 0.0f, 1.0f);
+                            }
+                        }
+                        continue;
+                    }
+                }
             } else {
                 // Regular panel drag
                 if (drag->isDragging) {
                     if (!leftMouseDown) {
                         drag->isDragging = false;
                     } else {
-                        if (auto* targetRect = reg.Get<Components::UIRectComponent>(drag->targetEntity)) {
+                        if (auto* targetRect = reg.Get<GUI::UIComponents::UIRectComponent>(drag->targetEntity)) {
                             targetRect->x += deltaX;
                             targetRect->y += deltaY;
                         }
@@ -234,26 +281,27 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
     bool   clickConsumed   = false;
     bool   focusCaptured   = false;
     Entity clickedDropdown = Entity::Null();
+    Entity clickedColorEdit = Entity::Null();
 
     for (const auto& entry: sortedEntries) {
         Entity e      = entities[entry.rawIndex];
-        auto*  button = reg.Get<Components::UIButtonComponent>(e);
+        auto*  button = reg.Get<GUI::UIComponents::UIButtonComponent>(e);
 
         bool hidden = IsEntityOrAncestorHidden(e);
 
         if (button == nullptr || hidden) {
             if (button != nullptr) {
-                button->Set(UIButton::Hovered, false);
-                button->Set(UIButton::Pressed, false);
+                button->Set(GUI::UIButton::Hovered, false);
+                button->Set(GUI::UIButton::Pressed, false);
             }
             continue;
         }
 
-        button->Set(UIButton::Clicked, false);
+        button->Set(GUI::UIButton::Clicked, false);
 
-        if (button->Has(UIButton::Disabled)) {
-            button->Set(UIButton::Hovered, false);
-            button->Set(UIButton::Pressed, false);
+        if (button->Has(GUI::UIButton::Disabled)) {
+            button->Set(GUI::UIButton::Hovered, false);
+            button->Set(GUI::UIButton::Pressed, false);
             continue;
         }
 
@@ -264,25 +312,25 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
         const bool inside = GUI::IsPointVisible(reg, e, mouseX, mouseY);
 
         if (clickConsumed) {
-            button->Set(UIButton::Hovered, false);
-            button->Set(UIButton::Pressed, false);
+            button->Set(GUI::UIButton::Hovered, false);
+            button->Set(GUI::UIButton::Pressed, false);
             continue;
         }
 
         if (inside) {
-            button->Set(UIButton::Hovered, true);
+            button->Set(GUI::UIButton::Hovered, true);
             if (leftMouseDown) {
-                button->Set(UIButton::Pressed, true);
+                button->Set(GUI::UIButton::Pressed, true);
 
                 // Click-to-set on sliders: start drag and jump value to click position
-                if (Entity slEnt = FindAncestorWith<Components::UISliderComponent>(reg, e); slEnt != Entity::Null()) {
-                    if (auto* slider = reg.Get<Components::UISliderComponent>(slEnt)) {
+                if (Entity slEnt = FindAncestorWith<GUI::UIComponents::UISliderComponent>(reg, e); slEnt != Entity::Null()) {
+                    if (auto* slider = reg.Get<GUI::UIComponents::UISliderComponent>(slEnt)) {
                         slider->isDragging = true;
                         // Find track bounds
                         Bounds trackB {};
                         bool   hasBounds = false;
-                        if (auto* cache = reg.Get<Components::UIChildCacheComponent>(slEnt)) {
-                            cache->children.ForEach([&](uint64_t, const Components::UIChildCacheComponent::ChildRecord& rec) -> void {
+                        if (auto* cache = reg.Get<GUI::UIComponents::UIChildCacheComponent>(slEnt)) {
+                            cache->children.ForEach([&](uint64_t, const GUI::UIComponents::UIChildCacheComponent::ChildRecord& rec) -> void {
                                 if (hasBounds)
                                     return;
                                 Entity child = rec.entity;
@@ -290,7 +338,7 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                                     return;
                                 if (auto* cname = reg.Get<Components::NameComponent>(child)) {
                                     if (std::string_view(cname->name) == "_sl_track") {
-                                        if (auto* tr = reg.Get<Components::UIRectComponent>(child)) {
+                                        if (auto* tr = reg.Get<GUI::UIComponents::UIRectComponent>(child)) {
                                             trackB    = GetBounds(*tr);
                                             hasBounds = true;
                                         }
@@ -299,7 +347,7 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                             });
                         }
                         if (!hasBounds) {
-                            if (auto* srect = reg.Get<Components::UIRectComponent>(slEnt)) {
+                            if (auto* srect = reg.Get<GUI::UIComponents::UIRectComponent>(slEnt)) {
                                 trackB    = GetBounds(*srect);
                                 hasBounds = true;
                             }
@@ -320,18 +368,38 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                 }
 
                 // Splitter handle: begin drag
-                if (Entity spEnt = FindAncestorWith<Components::UISplitterComponent>(reg, e); spEnt != Entity::Null()) {
-                    const auto* handleDrag = reg.Get<Components::UIDragComponent>(e);
+                if (Entity spEnt = FindAncestorWith<GUI::UIComponents::UISplitterComponent>(reg, e); spEnt != Entity::Null()) {
+                    const auto* handleDrag = reg.Get<GUI::UIComponents::UIDragComponent>(e);
                     if (handleDrag != nullptr && handleDrag->targetEntity == spEnt) {
-                        if (auto* sp = reg.Get<Components::UISplitterComponent>(spEnt)) {
+                        if (auto* sp = reg.Get<GUI::UIComponents::UISplitterComponent>(spEnt)) {
                             sp->isDragging = true;
+                        }
+                    }
+                }
+
+                // Click-to-set on the saturation/value plane: a click lands
+                // the colour exactly where it was aimed, and the press also
+                // arms the drag so the same gesture can continue into one.
+                if (Entity svEnt = FindAncestorWith<GUI::UIComponents::UIColorSVComponent>(reg, e); svEnt != Entity::Null()) {
+                    if (auto* sv = reg.Get<GUI::UIComponents::UIColorSVComponent>(svEnt)) {
+                        sv->isDragging = true;
+                        if (const auto* srect = reg.Get<GUI::UIComponents::UIRectComponent>(svEnt)) {
+                            const Bounds b = GetBounds(*srect);
+                            const float  w = b.x1 - b.x0;
+                            const float  h = b.y1 - b.y0;
+                            if (w > 1.0f) {
+                                sv->sat = std::clamp((mouseX - b.x0) / w, 0.0f, 1.0f);
+                            }
+                            if (h > 1.0f) {
+                                sv->val = std::clamp(1.0f - (mouseY - b.y0) / h, 0.0f, 1.0f);
+                            }
                         }
                     }
                 }
 
                 // Dropdown: clicking anywhere inside an open dropdown (but not an
                 // item) shouldn't auto-close; clicking the header toggles.
-                if (Entity ddEnt = FindAncestorWith<Components::UIDropdownComponent>(reg, e); ddEnt != Entity::Null()) {
+                if (Entity ddEnt = FindAncestorWith<GUI::UIComponents::UIDropdownComponent>(reg, e); ddEnt != Entity::Null()) {
                     clickedDropdown = ddEnt;
                 }
 
@@ -340,22 +408,36 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                 // through UIPopupComponent; without this, clicking an option
                 // reads as a click "outside every dropdown" and the menu closes
                 // in the same frame the selection would have been applied.
-                if (Entity popEnt = FindAncestorWith<Components::UIPopupComponent>(reg, e); popEnt != Entity::Null()) {
-                    if (const auto* pop = reg.Get<Components::UIPopupComponent>(popEnt)) {
-                        if (reg.Get<Components::UIDropdownComponent>(pop->owner) != nullptr) {
+                if (Entity popEnt = FindAncestorWith<GUI::UIComponents::UIPopupComponent>(reg, e); popEnt != Entity::Null()) {
+                    if (const auto* pop = reg.Get<GUI::UIComponents::UIPopupComponent>(popEnt)) {
+                        if (reg.Get<GUI::UIComponents::UIDropdownComponent>(pop->owner) != nullptr) {
                             clickedDropdown = pop->owner;
+                        }
+                        // Same escape the dropdown needs: the colour picker is
+                        // a popup, so a click on the saturation plane or a
+                        // channel slider is not an ancestor of the field that
+                        // owns it. Without this the picker would close on the
+                        // very click that was trying to pick a colour.
+                        if (reg.Get<GUI::UIComponents::UIColorEditComponent>(pop->owner) != nullptr) {
+                            clickedColorEdit = pop->owner;
                         }
                     }
                 }
 
-                if (auto* drag = reg.Get<Components::UIDragComponent>(e)) {
+                // Colour picker: same contract as the dropdown — clicking the
+                // field toggles, clicking inside the open picker keeps it open.
+                if (Entity ceEnt = FindAncestorWith<GUI::UIComponents::UIColorEditComponent>(reg, e); ceEnt != Entity::Null()) {
+                    clickedColorEdit = ceEnt;
+                }
+
+                if (auto* drag = reg.Get<GUI::UIComponents::UIDragComponent>(e)) {
                     drag->isDragging = true;
                 }
 
-                if (reg.Get<Components::UITextInputComponent>(e) != nullptr) {
+                if (reg.Get<GUI::UIComponents::UITextInputComponent>(e) != nullptr) {
                     focusCaptured = true;
-                    for (Entity other: reg.GetEntitiesWith<Components::UITextInputComponent>()) {
-                        if (auto* inputComp = reg.Get<Components::UITextInputComponent>(other)) {
+                    for (Entity other: reg.GetEntitiesWith<GUI::UIComponents::UITextInputComponent>()) {
+                        if (auto* inputComp = reg.Get<GUI::UIComponents::UITextInputComponent>(other)) {
                             const bool nowFocused = (other == e);
                             if (nowFocused && !inputComp->isFocused) {
                                 // Focus gain selects the pre-focus content so
@@ -368,42 +450,55 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                     }
                 }
             } else {
-                if (button->Has(UIButton::Pressed)) {
-                    button->Set(UIButton::Clicked, true);
+                if (button->Has(GUI::UIButton::Pressed)) {
+                    button->Set(GUI::UIButton::Clicked, true);
                     clickConsumed = true;
                 }
-                button->Set(UIButton::Pressed, false);
+                button->Set(GUI::UIButton::Pressed, false);
             }
         } else {
-            button->Set(UIButton::Hovered, false);
+            button->Set(GUI::UIButton::Hovered, false);
             if (!leftMouseDown) {
-                button->Set(UIButton::Pressed, false);
+                button->Set(GUI::UIButton::Pressed, false);
             }
         }
     }
 
     // Close expanded dropdowns when clicking outside any dropdown.
     if (leftMouseDown && clickedDropdown == Entity::Null()) {
-        for (Entity e: reg.GetEntitiesWith<Components::UIDropdownComponent>()) {
-            if (auto* dd = reg.Get<Components::UIDropdownComponent>(e)) {
+        for (Entity e: reg.GetEntitiesWith<GUI::UIComponents::UIDropdownComponent>()) {
+            if (auto* dd = reg.Get<GUI::UIComponents::UIDropdownComponent>(e)) {
                 dd->expanded = false;
+            }
+        }
+    }
+
+    // Close an open colour picker when clicking outside it. Deliberately not
+    // folded into the dropdown loop above: a picker and a dropdown are
+    // different widgets with different state, and one shared "clicked
+    // somewhere else" flag would mean clicking a dropdown closed any open
+    // picker and vice versa.
+    if (leftMouseDown && clickedColorEdit == Entity::Null()) {
+        for (Entity e: reg.GetEntitiesWith<GUI::UIComponents::UIColorEditComponent>()) {
+            if (auto* ce = reg.Get<GUI::UIComponents::UIColorEditComponent>(e)) {
+                ce->expanded = false;
             }
         }
     }
 
     // Focus handling for text inputs (defocus when clicking away)
     if (leftMouseDown && !focusCaptured) {
-        for (Entity e: reg.GetEntitiesWith<Components::UITextInputComponent>()) {
-            if (auto* inputComp = reg.Get<Components::UITextInputComponent>(e)) {
+        for (Entity e: reg.GetEntitiesWith<GUI::UIComponents::UITextInputComponent>()) {
+            if (auto* inputComp = reg.Get<GUI::UIComponents::UITextInputComponent>(e)) {
                 inputComp->isFocused = false;
             }
         }
     }
 
     // 3. Process State-Driven Style Transitions
-    for (Entity e: reg.GetEntitiesWith<Components::UIStyleComponent>()) {
-        auto* style = reg.Get<Components::UIStyleComponent>(e);
-        auto* btn   = reg.Get<Components::UIButtonComponent>(e);
+    for (Entity e: reg.GetEntitiesWith<GUI::UIComponents::UIStyleComponent>()) {
+        auto* style = reg.Get<GUI::UIComponents::UIStyleComponent>(e);
+        auto* btn   = reg.Get<GUI::UIComponents::UIButtonComponent>(e);
         if (style == nullptr) {
             continue;
         }
@@ -412,19 +507,19 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
         JPH::Vec4 targetTextColor  = style->textColorNormal;
 
         if (btn != nullptr) {
-            if (btn->Has(UIButton::Disabled)) {
+            if (btn->Has(GUI::UIButton::Disabled)) {
                 targetPanelColor = style->disabledColor;
-            } else if (btn->Has(UIButton::Pressed)) {
+            } else if (btn->Has(GUI::UIButton::Pressed)) {
                 targetPanelColor = style->pressedColor;
                 targetTextColor  = style->textColorPressed;
-            } else if (btn->Has(UIButton::Hovered)) {
+            } else if (btn->Has(GUI::UIButton::Hovered)) {
                 targetPanelColor = style->hoverColor;
                 targetTextColor  = style->textColorHover;
             }
         }
 
         // Animate Panel Color
-        if (auto* panel = reg.Get<Components::UIPanelComponent>(e)) {
+        if (auto* panel = reg.Get<GUI::UIComponents::UIPanelComponent>(e)) {
             if (style->transitionSpeed > 0.0f) {
                 float factor = std::clamp(style->transitionSpeed * dt, 0.0f, 1.0f);
                 panel->color = panel->color + factor * (targetPanelColor - panel->color);
@@ -435,7 +530,7 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
 
         // Animate Text Color (on self)
         if (style->hasTextColor) {
-            auto* text = reg.Get<Components::TextComponent>(e);
+            auto* text = reg.Get<GUI::UIComponents::TextComponent>(e);
             if (text != nullptr) {
                 if (style->transitionSpeed > 0.0f) {
                     float factor = std::clamp(style->transitionSpeed * dt, 0.0f, 1.0f);
@@ -446,6 +541,86 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
             }
         }
     }
+
+    // 4. Pointer and keyboard capture, for everything that is not UI.
+    //
+    // InputStateComponent::wantCaptureMouse / wantCaptureKeyboard are the
+    // contract that keeps a click on a panel from also orbiting the camera,
+    // picking into the scene or walking the player. They used to be copied
+    // straight out of ImGui::GetIO(); the native UI now derives them from the
+    // widgets it actually owns, so the editor behaves the same whether or not
+    // the ImGui debug overlay happens to be running.
+    //
+    // This runs in Phase::UI, ahead of PlayerIntent, Gameplay, Simulation and
+    // Camera, so the flags a gameplay system reads this frame were decided
+    // against this frame's widget layout -- the same ordering the ImGui
+    // readback had, which was filled in during ProcessEvents.
+
+    // Topmost visible widget under the pointer. The entries are still sorted
+    // deepest-first with the highest layoutOrder winning at equal depth, so
+    // the first hit is what the render pass drew on top -- what you see is
+    // what captures. IsPointVisible walks the clip chain, so a row scrolled
+    // out of a ScrollBox or clipped by an ancestor cannot capture.
+    bool pointerOverCapturingWidget = false;
+    for (const auto& entry: sortedEntries) {
+        const Entity e = entities[entry.rawIndex];
+        if (IsEntityOrAncestorHidden(e) || !GUI::IsPointVisible(reg, e, mouseX, mouseY)) {
+            continue;
+        }
+        pointerOverCapturingWidget = FindAncestorWith<GUI::UIComponents::UIViewportComponent>(reg, e) == Entity::Null();
+        break;
+    }
+
+    // An in-flight drag captures even when the pointer has left the widget, so
+    // dragging a slider or splitter handle cannot slip through to the world
+    // halfway through. Panel drags are UIDragComponent, sliders and splitters
+    // latch their own isDragging as well.
+    bool dragActive = false;
+    for (const auto& drag: reg.GetRawArray<GUI::UIComponents::UIDragComponent>()) {
+        if (drag.isDragging) {
+            dragActive = true;
+            break;
+        }
+    }
+    if (!dragActive) {
+        for (const auto& slider: reg.GetRawArray<GUI::UIComponents::UISliderComponent>()) {
+            if (slider.isDragging) {
+                dragActive = true;
+                break;
+            }
+        }
+    }
+    if (!dragActive) {
+        for (const auto& split: reg.GetRawArray<GUI::UIComponents::UISplitterComponent>()) {
+            if (split.isDragging) {
+                dragActive = true;
+                break;
+            }
+        }
+    }
+    // The colour picker's saturation/value plane. It is the one control whose
+    // drag has no 1D equivalent, so it needs its own latch here — and it needs
+    // it more than a slider does, because the gesture routinely leaves the
+    // pad while staying perfectly valid.
+    if (!dragActive) {
+        for (const auto& sv: reg.GetRawArray<GUI::UIComponents::UIColorSVComponent>()) {
+            if (sv.isDragging) {
+                dragActive = true;
+                break;
+            }
+        }
+    }
+
+    bool textFocused = false;
+    for (const auto& input: reg.GetRawArray<GUI::UIComponents::UITextInputComponent>()) {
+        if (input.isFocused) {
+            textFocused = true;
+            break;
+        }
+    }
+
+    state->wantCaptureMouse    = pointerOverCapturingWidget || dragActive;
+    state->wantCaptureKeyboard = textFocused;
 }
 
 } // namespace ZHLN

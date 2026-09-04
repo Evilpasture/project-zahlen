@@ -9,6 +9,7 @@
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/gui/UIComponents.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -48,8 +49,8 @@ auto AppendTextVertices(
     const JPH::Vec4&   color
 ) -> uint32_t;
 
-auto AppendPanelVertices(VertexPosition* outPos, VertexAttributes* outAttr, const Components::UIRectComponent& rect, const Components::UIPanelComponent& panel)
-    -> uint32_t;
+auto AppendPanelVertices(VertexPosition* outPos, VertexAttributes* outAttr, const UIComponents::UIRectComponent& rect,
+                         const UIComponents::UIPanelComponent& panel) -> uint32_t;
 
 // ============================================================================
 // TEXT SHAPING — SHARED BY THE LAYOUT MEASURE FUNCTION AND THE RENDERER
@@ -187,7 +188,7 @@ auto WrapTextInto(const FontAtlas& font, std::string_view text, float scale, flo
 
 /// Number of vertices AppendImageVertices needs for this rect/scale-mode pair.
 /// Tile emits one quad per repeat, so the count depends on the rect size.
-[[nodiscard]] auto CountImageVertices(const Components::UIRectComponent& rect, const Components::UIImageComponent& image) noexcept -> uint32_t;
+[[nodiscard]] auto CountImageVertices(const UIComponents::UIRectComponent& rect, const UIComponents::UIImageComponent& image) noexcept -> uint32_t;
 
 /// Emits the textured quad(s) for a UIImageComponent, honouring its scale mode
 /// and sub-UV region. Returns the number of vertices written (never more than
@@ -195,9 +196,54 @@ auto WrapTextInto(const FontAtlas& font, std::string_view text, float scale, flo
 auto AppendImageVertices(
     VertexPosition*                     outPos,
     VertexAttributes*                   outAttr,
-    const Components::UIRectComponent&  rect,
-    const Components::UIImageComponent& image
+    const UIComponents::UIRectComponent&  rect,
+    const UIComponents::UIImageComponent& image
 ) -> uint32_t;
+
+// --- GRADIENT --------------------------------------------------------------
+// One quad per pair of adjacent stops, with the stop colours on the corners, so
+// the GPU interpolates between them. That is exact AT the stops and linear
+// between them, which is why a hue strip supplies all seven stops of the wheel
+// instead of only its two ends.
+
+/// Tile-style count for a gradient: `(stopCount - 1) * 6`, or 0 when there are
+/// fewer than two stops or the rect has collapsed.
+[[nodiscard]] auto CountGradientVertices(const UIComponents::UIRectComponent& rect, const UIComponents::UIGradientComponent& gradient) noexcept -> uint32_t;
+
+auto AppendGradientVertices(
+    VertexPosition*                        outPos,
+    VertexAttributes*                      outAttr,
+    const UIComponents::UIRectComponent&   rect,
+    const UIComponents::UIGradientComponent& gradient
+) -> uint32_t;
+
+// --- PLOT ------------------------------------------------------------------
+// Lines, bars and shaded strips. Every kind stays inside a fixed per-sample
+// vertex budget (see UIPlotComponent::kMaxPoints) so a long history cannot
+// inflate the UI batch without bound.
+
+/// Upper bound on the vertices a plot needs: bars and line segments are six
+/// vertices each, and ShadedLines emits both a fill quad and a line quad per
+/// segment.
+[[nodiscard]] auto CountPlotVertices(const UIComponents::UIPlotComponent& plot) noexcept -> uint32_t;
+
+auto AppendPlotVertices(
+    VertexPosition*                     outPos,
+    VertexAttributes*                   outAttr,
+    const UIComponents::UIRectComponent& rect,
+    const UIComponents::UIPlotComponent& plot
+) -> uint32_t;
+
+// --- COLOUR CONVERSION -----------------------------------------------------
+// HSV <-> RGB, shared by the picker's widgets and by anything that wants to
+// reason about a colour the way a colour wheel does. All components are 0..1
+// except hue, which is degrees.
+//
+// Achromatic colours have no hue, so RgbToHsv keeps `hueOut` unchanged when the
+// input is a grey. Callers pass the previous hue: without it, dragging
+// saturation to zero and back would recolour a grey to red.
+auto HsvToRgb(float hue, float sat, float val) noexcept -> JPH::Vec4;
+auto RgbToHsv(const JPH::Vec4& rgb, float& hueInOut, float& satOut, float& valOut) noexcept -> void;
 
 // ============================================================================
 // FIBER-SAFE & ZERO-ALLOCATION GUI CONTEXT — HYBRID RAII + CLOSURE
@@ -523,6 +569,111 @@ struct TreeNodeConfig {
     JPH::Vec4        arrowColor = {0.70f, 0.82f, 1.00f, 1.00f};
 };
 
+// A band of colour stops. `stops` is copied into the widget's
+// UIGradientComponent, so it may be a temporary (a brace-enclosed list, a
+// stack array rebuilt every frame). Fewer than two stops paints nothing.
+struct GradientConfig {
+    float                        width  = 0.0f; // 0 = fill the parent's cross axis
+    float                        height = 24.0f;
+    UIGradientAxis               axis   = UIGradientAxis::Horizontal;
+    std::span<const JPH::Vec4>   stops  = {};
+};
+
+// A rolling series, drawn as lines, bars, or a shaded line strip.
+//
+// `minValue`/`maxValue` are the value range mapped to the bottom and top of
+// the widget — NOT an auto-fit. A profiler that wants a stable baseline (frame
+// times against a 16.7ms target) should pass fixed bounds; autoscaling bounds
+// make the strip jump around so much it stops being readable. Values outside
+// the range are clamped to the edges rather than dropped.
+struct PlotConfig {
+    float     width       = 0.0f; // 0 = fill
+    float     height      = 60.0f;
+    UIPlotKind kind       = UIPlotKind::Lines;
+
+    float     minValue    = 0.0f;
+    float     maxValue    = 1.0f;
+
+    JPH::Vec4 lineColor   = {0.30f, 0.78f, 1.00f, 1.00f};
+    JPH::Vec4 fillColor   = {0.30f, 0.78f, 1.00f, 0.35f};
+
+    float     lineWidth   = 1.5f; // Lines / ShadedLines, pixels
+    float     barGap      = 1.0f; // Histogram, pixels between bars
+};
+
+// One entry of a ui.Reference picker's option list. `id` is what gets stored
+// and `label` is what the user reads; keeping them separate is the whole point,
+// because every interesting handle in an engine is a number that means nothing
+// on its own (an entity's packed index+generation, an asset hash).
+struct ReferenceOption {
+    uint64_t         id    = 0;
+    std::string_view label = {};
+};
+
+// A field that points at something else: an entity, an asset, a material.
+//
+// The picker needs an OPTION LIST — it has no way to enumerate one on its own.
+// A GUI::Context can see the registry, but it cannot know which entities are
+// scene content and which are the editor's own chrome, and there is no
+// enumerable asset catalogue to ask. So the caller supplies the candidates and
+// the widget owns the mapping, the dangling case and the "none" case.
+struct ReferenceConfig {
+    float     height        = 28.0f;
+    float     scale         = 0.85f;
+    float     itemHeight    = 28.0f;
+    float     maxMenuHeight = 200.0f;
+    float     padding       = 8.0f;
+
+    JPH::Vec4 bgColor       = {0.10f, 0.14f, 0.22f, 0.95f};
+    JPH::Vec4 hoverColor    = {0.20f, 0.30f, 0.48f, 1.00f};
+    JPH::Vec4 selectedColor = {0.26f, 0.46f, 0.78f, 1.00f};
+    JPH::Vec4 textColor     = {0.90f, 0.95f, 1.00f, 1.00f};
+    JPH::Vec4 arrowColor    = {0.70f, 0.82f, 1.00f, 1.00f};
+    JPH::Vec4 borderRadius  = {3.0f, 3.0f, 3.0f, 3.0f};
+
+    // Prepends an entry that stores 0. Turn it off for a field where "nothing"
+    // is not a legal value.
+    bool            allowNone = true;
+    std::string_view noneLabel = "None";
+
+    // Prefix for a value that matches no option: a handle whose target was
+    // destroyed, or an asset that is not mounted. The raw id is rendered after
+    // it, because a dangling handle is a real state and a slot silently showing
+    // "None" would read as a field somebody cleared.
+    std::string_view danglingPrefix = "<dangling ";
+
+    // A very long option list would make the menu useless long before it made
+    // the widget slow; the excess is dropped rather than rendered.
+    uint32_t maxOptions = 256;
+};
+
+// A colour field: a swatch that opens a picker popup.
+//
+// The popup holds a saturation/value plane, a hue strip, an alpha strip when
+// `componentCount` is 4, per-channel sliders and a hex readout. Set
+// `showRgbSliders` to false for a compact picker that is just the pad and the
+// strips — which is what most palette rows want.
+struct ColorEditConfig {
+    float     height        = 24.0f;
+    float     scale         = 0.85f;
+    float     swatchWidth   = 48.0f; // 0 = fill the row's remaining space
+    float     gap           = 8.0f;
+    float     borderRadius  = 3.0f;
+
+    JPH::Vec4 textColor     = {0.90f, 0.95f, 1.00f, 1.00f};
+    JPH::Vec4 borderColor   = {0.26f, 0.38f, 0.58f, 1.00f};
+    JPH::Vec4 hoverColor    = {0.20f, 0.28f, 0.42f, 1.00f};
+
+    // --- picker popup ---
+    float pickerWidth    = 0.0f;  // 0 = size to the row that opened it
+    float svSize         = 140.0f; // Saturation/value plane, square
+    float stripHeight    = 18.0f;  // Hue and alpha strips
+    float knobSize       = 10.0f;
+    float padding        = 8.0f;
+    bool  showRgbSliders = true;
+    bool  showHex        = true;
+};
+
 class Context;
 
 // --- RAII SCOPE GUARD ---
@@ -660,9 +811,9 @@ class Context {
         Entity parent      = GetCurrentParent();
         Entity cacheEntity = (parent != Entity::Null()) ? parent : GetRootCacheEntity();
 
-        auto* cache = m_reg->Get<Components::UIChildCacheComponent>(cacheEntity);
+        auto* cache = m_reg->Get<UIComponents::UIChildCacheComponent>(cacheEntity);
         if (cache == nullptr) {
-            cache = &m_reg->Add<Components::UIChildCacheComponent>(cacheEntity);
+            cache = &m_reg->Add<UIComponents::UIChildCacheComponent>(cacheEntity);
         }
 
         // 1. O(1) Lookup in cache. A record whose entity was destroyed outside
@@ -678,10 +829,10 @@ class Context {
 
         // 2. Not found -> Spawn new entity
         Entity newEntity = createFn();
-        if (auto* freshRect = m_reg->Get<Components::UIRectComponent>(newEntity)) {
+        if (auto* freshRect = m_reg->Get<UIComponents::UIRectComponent>(newEntity)) {
             freshRect->layoutOrder = NextLayoutOrder();
         }
-        cache->children.Insert(widgetKey, Components::UIChildCacheComponent::ChildRecord {.entity = newEntity, .lastVisitedFrame = m_currentFrame});
+        cache->children.Insert(widgetKey, UIComponents::UIChildCacheComponent::ChildRecord {.entity = newEntity, .lastVisitedFrame = m_currentFrame});
 
         m_lastItem = newEntity;
         return newEntity;
@@ -738,9 +889,9 @@ class Context {
         Entity e = GetOrCreateEntity(key, [&]() -> auto {
             return m_reg->Create(
                 Components::NameComponent {.name = String64(id)},
-                Components::UIRectComponent {.parentEntity = parent, .width = cfg.width, .height = cfg.height, .hierarchyDepth = depth},
-                Components::UIPanelComponent {.color = cfg.normalColor, .borderRadius = cfg.borderRadius}, Components::UIButtonComponent {},
-                Components::UIStyleComponent {
+                UIComponents::UIRectComponent {.parentEntity = parent, .width = cfg.width, .height = cfg.height, .hierarchyDepth = depth},
+                UIComponents::UIPanelComponent {.color = cfg.normalColor, .borderRadius = cfg.borderRadius}, UIComponents::UIButtonComponent {},
+                UIComponents::UIStyleComponent {
                     .normalColor     = cfg.normalColor,
                     .hoverColor      = cfg.hoverColor,
                     .pressedColor    = cfg.pressedColor,
@@ -749,7 +900,7 @@ class Context {
                     .transitionSpeed = 16.0f,
                     .hasTextColor    = true
                 },
-                Components::TextComponent {
+                UIComponents::TextComponent {
                     .text          = String256(text),
                     .scale         = cfg.scale,
                     .color         = cfg.textColor,
@@ -761,9 +912,9 @@ class Context {
         });
 
         // Update the text in the TextComponent of the existing entity dynamically
-        m_reg->Patch<Components::TextComponent>(e, [&](auto& textComp) -> auto { textComp.text.assign(text); });
+        m_reg->Patch<UIComponents::TextComponent>(e, [&](auto& textComp) -> auto { textComp.text.assign(text); });
 
-        m_reg->Patch<Components::UIButtonComponent>(e, [&](const auto& btn) -> auto {
+        m_reg->Patch<UIComponents::UIButtonComponent>(e, [&](const auto& btn) -> auto {
             if (btn.Has(UIButton::Clicked)) {
                 std::forward<OnClickFn>(onClick)();
             }
@@ -900,21 +1051,21 @@ class Context {
             initialText.assign(std::string_view(value));
             return m_reg->Create(
                 Components::NameComponent {.name = String64(id)},
-                Components::UIRectComponent {.parentEntity = parent, .width = cfg.width, .height = cfg.height, .hierarchyDepth = depth},
-                Components::UIPanelComponent {.color = cfg.bgColor, .borderRadius = cfg.borderRadius, .edgeWidth = 1.0f},
-                Components::UIFlexComponent {
+                UIComponents::UIRectComponent {.parentEntity = parent, .width = cfg.width, .height = cfg.height, .hierarchyDepth = depth},
+                UIComponents::UIPanelComponent {.color = cfg.bgColor, .borderRadius = cfg.borderRadius, .edgeWidth = 1.0f},
+                UIComponents::UIFlexComponent {
                     .direction     = FlexDirection::Row,
                     .alignItems    = FlexAlign::Center,
                     .paddingLeft   = cfg.padding,
                     .paddingRight  = cfg.padding,
                     .gapX          = 6.0f
                 },
-                Components::UIButtonComponent {},
-                Components::UITextInputComponent {.text = initialText, .cursorIndex = 0, .isFocused = false, .edited = false}
+                UIComponents::UIButtonComponent {},
+                UIComponents::UITextInputComponent {.text = initialText, .cursorIndex = 0, .isFocused = false, .edited = false}
             );
         });
 
-        auto* input = m_reg->Get<Components::UITextInputComponent>(e);
+        auto* input = m_reg->Get<UIComponents::UITextInputComponent>(e);
 
         // Sync label if a non-empty label is passed (we render it as a
         // separate text entity inside a horizontal box — or omit for bare inputs)
@@ -1015,7 +1166,7 @@ class Context {
         uint32_t depth = 0;
         Entity   e     = PrepareCollapsingHeader(id, label, defaultOpen, cfg, depth);
 
-        auto* hdr = m_reg->Get<Components::UICollapsingHeaderComponent>(e);
+        auto* hdr = m_reg->Get<UIComponents::UICollapsingHeaderComponent>(e);
         if (hdr->isOpen) {
             // Both guards are strictly local. They are destroyed, in reverse
             // declaration order (boxScope then scope), when this function
@@ -1099,20 +1250,20 @@ class Context {
         Entity e = GetOrCreateEntity(key, [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64(id)},
-                Components::UIRectComponent {.parentEntity = parent, .width = 0.0f, .height = 0.0f, .hierarchyDepth = depth},
-                Components::UIPanelComponent {.color = {0.0f, 0.0f, 0.0f, 0.0f}},
-                Components::UIFlexComponent {
+                UIComponents::UIRectComponent {.parentEntity = parent, .width = 0.0f, .height = 0.0f, .hierarchyDepth = depth},
+                UIComponents::UIPanelComponent {.color = {0.0f, 0.0f, 0.0f, 0.0f}},
+                UIComponents::UIFlexComponent {
                     .direction  = (direction == SplitDirection::Horizontal) ? FlexDirection::Row : FlexDirection::Column,
                     .alignItems = FlexAlign::Stretch,
                     .gapX        = 0.0f,
                     .gapY        = 0.0f
                 },
-                Components::UISplitterComponent {
+                UIComponents::UISplitterComponent {
                     .ratio         = ratio,
                     .previousRatio = ratio,
                     .direction     = (direction == SplitDirection::Horizontal)
-                                        ? Components::UISplitterComponent::Horizontal
-                                        : Components::UISplitterComponent::Vertical
+                                        ? UIComponents::UISplitterComponent::Horizontal
+                                        : UIComponents::UISplitterComponent::Vertical
                 }
             );
         });
@@ -1120,13 +1271,13 @@ class Context {
         // Cached splitter entities may survive for many frames (and the same
         // id can be used with either orientation), so refresh their layout
         // configuration before building the two child panes.
-        m_reg->Patch<Components::UIRectComponent>(e, [&](auto& r) -> auto {
+        m_reg->Patch<UIComponents::UIRectComponent>(e, [&](auto& r) -> auto {
             r.parentEntity   = parent;
             r.width          = 0.0f;
             r.height         = 0.0f;
             r.hierarchyDepth = depth;
         });
-        m_reg->Patch<Components::UIFlexComponent>(e, [&](auto& f) -> auto {
+        m_reg->Patch<UIComponents::UIFlexComponent>(e, [&](auto& f) -> auto {
             f.direction  = (direction == SplitDirection::Horizontal) ? FlexDirection::Row : FlexDirection::Column;
             f.alignItems = FlexAlign::Stretch;
             // The splitter container absorbs its parent's free space on the
@@ -1141,7 +1292,7 @@ class Context {
             f.gapY       = 0.0f;
         });
 
-        auto* split = m_reg->Get<Components::UISplitterComponent>(e);
+        auto* split = m_reg->Get<UIComponents::UISplitterComponent>(e);
 
         // Sync external ratio change: if the caller mutated `ratio` since
         // last frame and the user isn't actively dragging, reflect it into
@@ -1175,7 +1326,7 @@ class Context {
             auto leftScope = Box(leftName, leftCfg);
             Entity leftEnt = leftScope.GetEntity();
             // Patch parent/depth/sizing each frame (needed for persistent entities)
-            m_reg->Patch<Components::UIRectComponent>(leftEnt, [&](auto& lr) -> auto {
+            m_reg->Patch<UIComponents::UIRectComponent>(leftEnt, [&](auto& lr) -> auto {
                 lr.parentEntity   = e;
                 lr.hierarchyDepth = depth + 1;
                 // The pane's size is supplied by flex-grow on the main axis;
@@ -1184,7 +1335,7 @@ class Context {
                 lr.width  = 0.0f;
                 lr.height = 0.0f;
             });
-            if (auto* lflex = m_reg->Get<Components::UIFlexComponent>(leftEnt)) {
+            if (auto* lflex = m_reg->Get<UIComponents::UIFlexComponent>(leftEnt)) {
                 lflex->flexGrow   = ratio * 1000.0f;
                 lflex->flexShrink = 1.0f;
                 lflex->flexBasis  = 0.0f;
@@ -1200,30 +1351,30 @@ class Context {
             Entity handleEnt = GetOrCreateChild(e, HashStringView(handleName), [&]() -> Entity {
                 return m_reg->Create(
                     Components::NameComponent {.name = String64(handleName)},
-                    Components::UIRectComponent {
+                    UIComponents::UIRectComponent {
                         .parentEntity   = e,
                         .width          = horizontal ? cfg.handleSize : 0.0f,
                         .height         = horizontal ? 0.0f : cfg.handleSize,
                         .hierarchyDepth = depth + 1
                     },
-                    Components::UIPanelComponent {.color = cfg.handleColor},
-                    Components::UIFlexComponent {
+                    UIComponents::UIPanelComponent {.color = cfg.handleColor},
+                    UIComponents::UIFlexComponent {
                         .flexGrow   = 0.0f,
                         .flexShrink = 0.0f,
                         .flexBasis  = static_cast<float>(cfg.handleSize)
                     },
-                    Components::UIButtonComponent {},
-                    Components::UIDragComponent {.targetEntity = e, .isDragging = false}
+                    UIComponents::UIButtonComponent {},
+                    UIComponents::UIDragComponent {.targetEntity = e, .isDragging = false}
                 );
             });
             // Patch the handle sizing each frame for current direction
-            m_reg->Patch<Components::UIRectComponent>(handleEnt, [&](auto& hr) -> auto {
+            m_reg->Patch<UIComponents::UIRectComponent>(handleEnt, [&](auto& hr) -> auto {
                 hr.parentEntity   = e;
                 hr.hierarchyDepth = depth + 1;
                 if (horizontal) { hr.width = cfg.handleSize; hr.height = 0.0f; }
                 else             { hr.width = 0.0f; hr.height = cfg.handleSize; }
             });
-            m_reg->Patch<Components::UIFlexComponent>(handleEnt, [&](auto& hf) -> auto {
+            m_reg->Patch<UIComponents::UIFlexComponent>(handleEnt, [&](auto& hf) -> auto {
                 hf.flexGrow   = 0.0f;
                 hf.flexShrink = 0.0f;
                 hf.flexBasis  = static_cast<float>(cfg.handleSize);
@@ -1231,7 +1382,7 @@ class Context {
             // Handle hover color — read directly from the handle's own
             // UIButtonComponent (single source of truth; no duplicated flag).
             bool handleHover = IsHovered(handleEnt) || (split != nullptr && split->isDragging);
-            m_reg->Patch<Components::UIPanelComponent>(handleEnt, [&](auto& hp) -> auto {
+            m_reg->Patch<UIComponents::UIPanelComponent>(handleEnt, [&](auto& hp) -> auto {
                 hp.color = handleHover ? cfg.hoverColor : cfg.handleColor;
             });
         }
@@ -1248,13 +1399,13 @@ class Context {
             rightCfg.gap       = 0.0f;
             auto rightScope = Box(rightName, rightCfg);
             Entity rightEnt = rightScope.GetEntity();
-            m_reg->Patch<Components::UIRectComponent>(rightEnt, [&](auto& rr) -> auto {
+            m_reg->Patch<UIComponents::UIRectComponent>(rightEnt, [&](auto& rr) -> auto {
                 rr.parentEntity   = e;
                 rr.hierarchyDepth = depth + 1;
                 rr.width          = 0.0f;
                 rr.height         = 0.0f;
             });
-            if (auto* rflex = m_reg->Get<Components::UIFlexComponent>(rightEnt)) {
+            if (auto* rflex = m_reg->Get<UIComponents::UIFlexComponent>(rightEnt)) {
                 rflex->flexGrow   = (1.0f - ratio) * 1000.0f;
                 rflex->flexShrink = 1.0f;
                 rflex->flexBasis  = 0.0f;
@@ -1320,7 +1471,7 @@ class Context {
         Entity  root  = Entity::Null();
         if (scope.IsPushed()) {
             // The pushed scope is the viewport; its parent is the ScrollBox root.
-            if (const auto* vr = m_reg->Get<Components::UIRectComponent>(scope.GetEntity())) {
+            if (const auto* vr = m_reg->Get<UIComponents::UIRectComponent>(scope.GetEntity())) {
                 root = vr->parentEntity;
             }
         }
@@ -1344,6 +1495,71 @@ class Context {
 
     // Square, aspect-preserving icon — the 90% case for toolbars and buttons.
     auto Icon(std::string_view id, TextureHandle texture, float size = 24.0f, ImageScaleMode mode = ImageScaleMode::FitAspect) -> Entity;
+
+    // -----------------------------------------------------------------
+    // GRADIENT  —  ui.Gradient(id, cfg)
+    // -----------------------------------------------------------------
+    // A band of colour stops. Mostly a building block for other widgets (the
+    // colour picker's hue strip and saturation/value plane are gradient
+    // children), but usable on its own for a legend, a heat scale or a
+    // progress bar that runs through several colours.
+    auto Gradient(std::string_view id, const GradientConfig& cfg) -> Entity;
+
+    // -----------------------------------------------------------------
+    // PLOT  —  ui.PlotLines(...) / ui.Histogram(...) / ui.Plot(...)
+    // -----------------------------------------------------------------
+    // A rolling series. `values` is copied into the widget each call, so the
+    // caller keeps ownership of its ring buffer; a span over a std::array, a
+    // std::vector, or a plain C array all work.
+    //
+    // ImGui users: these are the replacements for ImGui::PlotLines and
+    // ImGui::PlotHistogram. Note the range is explicit (PlotConfig::minValue /
+    // maxValue) rather than derived from the data — see the note on PlotConfig
+    // for why an autoscale is usually the wrong choice for a profiler.
+    auto Plot(std::string_view id, std::span<const float> values, const PlotConfig& cfg) -> Entity;
+    auto PlotLines(std::string_view id, std::span<const float> values, const PlotConfig& cfg = {}) -> Entity;
+    auto Histogram(std::string_view id, std::span<const float> values, const PlotConfig& cfg = {}) -> Entity;
+
+    // -----------------------------------------------------------------
+    // REFERENCE  —  ui.Reference(id, label, value, options, [cfg])
+    // -----------------------------------------------------------------
+    // A dropdown over a caller-supplied list of (id, label) pairs. `value` is
+    // the stored id, not an index, so a list whose order changes between
+    // frames (entities created and destroyed) cannot silently re-point the
+    // field: the selection is re-derived from the id every frame.
+    //
+    // Three cases the plain Dropdown has no concept of:
+    //
+    //   * value 0                 -> the "none" entry, when allowNone is set.
+    //   * value matching an option -> that option's label.
+    //   * value matching nothing   -> "<dangling 0x…>", which stays selectable
+    //     so a stale handle is visible and can be cleared on purpose rather
+    //     than being quietly rewritten to something plausible.
+    auto Reference(std::string_view id, std::string_view label, uint64_t& value, std::span<const ReferenceOption> options,
+                   const ReferenceConfig& cfg = {}) -> Entity;
+
+    // -----------------------------------------------------------------
+    // COLOREDIT  —  ui.ColorEdit3/4(id, label, col, [cfg], [onChange])
+    // -----------------------------------------------------------------
+    // A colour field: a label and a swatch that opens a picker popup holding a
+    // saturation/value plane, a hue strip, an alpha strip (ColorEdit4 only),
+    // per-channel sliders and a hex readout.
+    //
+    // `col` is 3 or 4 contiguous floats in 0..1 and is authoritative on the
+    // way in: an externally changed colour (a preset, an undo, another panel
+    // editing the same field) re-derives the picker's HSV and the swatch
+    // follows. Values are clamped to 0..1 on write-back.
+    //
+    // The Vec4 overload edits all four channels including alpha, regardless of
+    // cfg — colour fields on materials and lights want the alpha row even when
+    // the shader ignores it.
+    auto ColorEdit(std::string_view id, std::string_view label, float* col, int componentCount, const ColorEditConfig& cfg) -> Entity;
+    auto ColorEdit3(std::string_view id, std::string_view label, float col[3], const ColorEditConfig& cfg = {}) -> Entity;
+    auto ColorEdit3(std::string_view label, float col[3], const ColorEditConfig& cfg = {}) -> Entity;
+    auto ColorEdit4(std::string_view id, std::string_view label, float col[4], const ColorEditConfig& cfg = {}) -> Entity;
+    auto ColorEdit4(std::string_view label, float col[4], const ColorEditConfig& cfg = {}) -> Entity;
+    auto ColorEdit4(std::string_view id, std::string_view label, JPH::Vec4& col, const ColorEditConfig& cfg = {}) -> Entity;
+    auto ColorEdit4(std::string_view label, JPH::Vec4& col, const ColorEditConfig& cfg = {}) -> Entity;
 
     // -----------------------------------------------------------------
     // SELECTABLE  —  ui.Selectable(id, label, selected, [cfg], [onClick], [onDoubleClick])
@@ -1520,9 +1736,9 @@ class Context {
     // building inner structure of compound widgets (checkbox box, slider track).
     template <typename CreateFn>
     auto GetOrCreateChild(Entity parent, uint64_t childKey, CreateFn&& createFn) -> Entity {
-        auto* cache = m_reg->Get<Components::UIChildCacheComponent>(parent);
+        auto* cache = m_reg->Get<UIComponents::UIChildCacheComponent>(parent);
         if (cache == nullptr) {
-            cache = &m_reg->Add<Components::UIChildCacheComponent>(parent);
+            cache = &m_reg->Add<UIComponents::UIChildCacheComponent>(parent);
         }
 
         if (const auto* rec = cache->children.Find(childKey)) {
@@ -1532,10 +1748,10 @@ class Context {
             }
         }
         Entity newEnt = createFn();
-        if (auto* freshRect = m_reg->Get<Components::UIRectComponent>(newEnt)) {
+        if (auto* freshRect = m_reg->Get<UIComponents::UIRectComponent>(newEnt)) {
             freshRect->layoutOrder = NextLayoutOrder();
         }
-        cache->children.Insert(childKey, Components::UIChildCacheComponent::ChildRecord {.entity = newEnt, .lastVisitedFrame = m_currentFrame});
+        cache->children.Insert(childKey, UIComponents::UIChildCacheComponent::ChildRecord {.entity = newEnt, .lastVisitedFrame = m_currentFrame});
         return newEnt;
     }
 
@@ -1552,6 +1768,11 @@ class Context {
     void PatchTextInputVisuals(Entity e, const TextInputConfig& cfg, bool focused, TextureHandle font);
 
     void EnsureDropdownHeader(Entity ddEnt, std::string_view displayText, const DropdownConfig& cfg, TextureHandle font);
+
+    // Builds the ColorEdit row's own children (label + swatch). The picker
+    // popup is built inline in ColorEdit() rather than here: it is a tree of
+    // nested Scopes, and a Scope cannot outlive the function that opened it.
+    void EnsureColorEditChildren(Entity ceEntity, std::string_view label, const ColorEditConfig& cfg, TextureHandle font, const JPH::Vec4& color);
 
     // --- OVERLAY / POPUP PLUMBING ---
 
@@ -1646,22 +1867,22 @@ class Context {
             if (hasArrow) {
                 return m_reg->Create(
                     Components::NameComponent {.name = String64(id)},
-                    Components::UIRectComponent {.parentEntity = parent, .width = cfg.width, .hierarchyDepth = depth},
-                    Components::UIFlexComponent {
+                    UIComponents::UIRectComponent {.parentEntity = parent, .width = cfg.width, .hierarchyDepth = depth},
+                    UIComponents::UIFlexComponent {
                         .direction  = FlexDirection::Column,
                         .alignItems = FlexAlign::Stretch,
                         .flexGrow   = 1.0f,
                         .flexShrink = 1.0f,
                         .flexBasis  = -1.0f
                     },
-                    Components::UISelectableComponent {.selected = selectedIn, .doubleClickSpan = cfg.doubleClickSpan}
+                    UIComponents::UISelectableComponent {.selected = selectedIn, .doubleClickSpan = cfg.doubleClickSpan}
                 );
             }
             return m_reg->Create(
                 Components::NameComponent {.name = String64(id)},
-                Components::UIRectComponent {.parentEntity = parent, .width = cfg.width, .height = cfg.height, .hierarchyDepth = depth},
-                Components::UIPanelComponent {.color = cfg.normalColor, .borderRadius = cfg.borderRadius},
-                Components::UIFlexComponent {
+                UIComponents::UIRectComponent {.parentEntity = parent, .width = cfg.width, .height = cfg.height, .hierarchyDepth = depth},
+                UIComponents::UIPanelComponent {.color = cfg.normalColor, .borderRadius = cfg.borderRadius},
+                UIComponents::UIFlexComponent {
                     .direction     = FlexDirection::Row,
                     .alignItems    = FlexAlign::Center,
                     .flexGrow      = 1.0f,
@@ -1671,18 +1892,18 @@ class Context {
                     .paddingRight  = 8.0f,
                     .gapX          = 6.0f
                 },
-                Components::UIButtonComponent {},
-                Components::UISelectableComponent {.selected = selectedIn, .doubleClickSpan = cfg.doubleClickSpan}
+                UIComponents::UIButtonComponent {},
+                UIComponents::UISelectableComponent {.selected = selectedIn, .doubleClickSpan = cfg.doubleClickSpan}
             );
         });
 
-        m_reg->Patch<Components::UIRectComponent>(e, [&](auto& r) -> auto {
+        m_reg->Patch<UIComponents::UIRectComponent>(e, [&](auto& r) -> auto {
             r.parentEntity   = parent;
             r.width          = cfg.width;
             r.height         = hasArrow ? 0.0f : cfg.height;
             r.hierarchyDepth = depth;
         });
-        m_reg->Patch<Components::UIFlexComponent>(e, [&](auto& f) -> auto {
+        m_reg->Patch<UIComponents::UIFlexComponent>(e, [&](auto& f) -> auto {
             f.direction    = hasArrow ? FlexDirection::Column : FlexDirection::Row;
             f.alignItems   = hasArrow ? FlexAlign::Stretch : FlexAlign::Center;
             f.flexGrow     = 1.0f;
@@ -1702,24 +1923,24 @@ class Context {
             rowEnt = GetOrCreateChild(e, HashStringView("_sel_row"), [&]() -> Entity {
                 return m_reg->Create(
                     Components::NameComponent {.name = String64("_sel_row")},
-                    Components::UIRectComponent {.parentEntity = e, .height = cfg.height, .hierarchyDepth = depth + 1},
-                    Components::UIPanelComponent {.color = cfg.normalColor, .borderRadius = cfg.borderRadius},
-                    Components::UIFlexComponent {
+                    UIComponents::UIRectComponent {.parentEntity = e, .height = cfg.height, .hierarchyDepth = depth + 1},
+                    UIComponents::UIPanelComponent {.color = cfg.normalColor, .borderRadius = cfg.borderRadius},
+                    UIComponents::UIFlexComponent {
                         .direction    = FlexDirection::Row,
                         .alignItems   = FlexAlign::Center,
                         .paddingLeft  = padLeft,
                         .paddingRight = 8.0f,
                         .gapX         = 6.0f
                     },
-                    Components::UIButtonComponent {}
+                    UIComponents::UIButtonComponent {}
                 );
             });
-            m_reg->Patch<Components::UIRectComponent>(rowEnt, [&](auto& r) -> auto {
+            m_reg->Patch<UIComponents::UIRectComponent>(rowEnt, [&](auto& r) -> auto {
                 r.parentEntity   = e;
                 r.height         = cfg.height;
                 r.hierarchyDepth = depth + 1;
             });
-            m_reg->Patch<Components::UIFlexComponent>(rowEnt, [&](auto& f) -> auto {
+            m_reg->Patch<UIComponents::UIFlexComponent>(rowEnt, [&](auto& f) -> auto {
                 f.direction    = FlexDirection::Row;
                 f.alignItems   = FlexAlign::Center;
                 f.paddingLeft  = padLeft;
@@ -1728,7 +1949,7 @@ class Context {
             });
         }
 
-        auto* sel = m_reg->Get<Components::UISelectableComponent>(e);
+        auto* sel = m_reg->Get<UIComponents::UISelectableComponent>(e);
 
         SelectableClickInfo info {.entity = e, .rowEntity = rowEnt, .selected = sel->selected};
 
@@ -1762,8 +1983,8 @@ class Context {
             Entity arrowEnt = GetOrCreateChild(rowEnt, HashStringView("_sel_arrow"), [&]() -> Entity {
                 return m_reg->Create(
                     Components::NameComponent {.name = String64("_sel_arrow")},
-                    Components::UIRectComponent {.parentEntity = rowEnt, .width = 14.0f, .height = cfg.height, .hierarchyDepth = childDepth},
-                    Components::TextComponent {
+                    UIComponents::UIRectComponent {.parentEntity = rowEnt, .width = 14.0f, .height = cfg.height, .hierarchyDepth = childDepth},
+                    UIComponents::TextComponent {
                         .text          = String256(arrowGlyph),
                         .scale         = cfg.scale,
                         .color         = cfg.textColor,
@@ -1773,7 +1994,7 @@ class Context {
                     }
                 );
             });
-            m_reg->Patch<Components::UIRectComponent>(arrowEnt, [&](auto& r) -> auto {
+            m_reg->Patch<UIComponents::UIRectComponent>(arrowEnt, [&](auto& r) -> auto {
                 r.parentEntity   = rowEnt;
                 r.width          = 14.0f;
                 r.height         = cfg.height;
@@ -1785,8 +2006,8 @@ class Context {
         Entity lblEnt = GetOrCreateChild(rowEnt, HashStringView("_sel_label"), [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64("_sel_label")},
-                Components::UIRectComponent {.parentEntity = rowEnt, .height = cfg.height, .hierarchyDepth = childDepth},
-                Components::TextComponent {
+                UIComponents::UIRectComponent {.parentEntity = rowEnt, .height = cfg.height, .hierarchyDepth = childDepth},
+                UIComponents::TextComponent {
                     .text          = String256(label),
                     .scale         = cfg.scale,
                     .color         = cfg.textColor,
@@ -1794,16 +2015,16 @@ class Context {
                     .verticalAlign = TextVerticalAlignment::Center,
                     .fontIndex     = fontHandle
                 },
-                Components::UIFlexComponent {.flexGrow = 1.0f}
+                UIComponents::UIFlexComponent {.flexGrow = 1.0f}
             );
         });
-        m_reg->Patch<Components::UIRectComponent>(lblEnt, [&](auto& r) -> auto {
+        m_reg->Patch<UIComponents::UIRectComponent>(lblEnt, [&](auto& r) -> auto {
             r.parentEntity   = rowEnt;
             r.height         = cfg.height;
             r.hierarchyDepth = childDepth;
         });
 
-        m_reg->Patch<Components::TextComponent>(lblEnt, [&](auto& tc) -> auto {
+        m_reg->Patch<UIComponents::TextComponent>(lblEnt, [&](auto& tc) -> auto {
             tc.text.assign(label);
             tc.scale = cfg.scale;
             tc.align = cfg.align;
@@ -1866,11 +2087,11 @@ class Context {
             UIScope scope = PushScope(info.entity, depth);
             auto    boxScope = Box(contentBoxName, boxCfg);
             Entity  boxEnt   = boxScope.GetEntity();
-            m_reg->Patch<Components::UIRectComponent>(boxEnt, [&](auto& r) -> auto {
+            m_reg->Patch<UIComponents::UIRectComponent>(boxEnt, [&](auto& r) -> auto {
                 r.parentEntity   = info.entity;
                 r.hierarchyDepth = depth + 1;
             });
-            m_reg->Patch<Components::UIFlexComponent>(boxEnt, [&](auto& f) -> auto {
+            m_reg->Patch<UIComponents::UIFlexComponent>(boxEnt, [&](auto& f) -> auto {
                 f.direction   = FlexDirection::Column;
                 f.marginLeft  = cfg.indent;
                 f.marginTop   = 0.0f;
@@ -1967,18 +2188,18 @@ struct ScrollInput {
 /// ScrollBox viewport would still swallow hover and clicks — the clipped part
 /// of a scroller must be inert, not just invisible.
 [[nodiscard]] inline auto IsPointVisible(ECS::Registry& reg, Entity ent, float x, float y) noexcept -> bool {
-    auto Inside = [](const Components::UIRectComponent& r, float px, float py) -> bool {
+    auto Inside = [](const UIComponents::UIRectComponent& r, float px, float py) -> bool {
         return px >= r.computedAbsMinX && px <= r.computedAbsMaxX && py >= r.computedAbsMinY && py <= r.computedAbsMaxY;
     };
 
-    const auto* rect = reg.Get<Components::UIRectComponent>(ent);
+    const auto* rect = reg.Get<UIComponents::UIRectComponent>(ent);
     if (rect == nullptr || !Inside(*rect, x, y)) {
         return false;
     }
 
     Entity curr = rect->parentEntity;
     while (curr != Entity::Null() && reg.IsAlive(curr)) {
-        const auto* parent = reg.Get<Components::UIRectComponent>(curr);
+        const auto* parent = reg.Get<UIComponents::UIRectComponent>(curr);
         if (parent == nullptr) {
             break;
         }
@@ -2007,15 +2228,15 @@ inline void UpdateScrollExtents(ECS::Registry& reg) noexcept {
 
     HashMap<uint64_t, Extent> extents;
 
-    const auto entities = reg.GetEntitiesWith<Components::UIRectComponent>();
-    const auto rects    = reg.GetRawArray<Components::UIRectComponent>();
+    const auto entities = reg.GetEntitiesWith<UIComponents::UIRectComponent>();
+    const auto rects    = reg.GetRawArray<UIComponents::UIRectComponent>();
 
     for (size_t i = 0; i < entities.size(); ++i) {
         const auto& r = rects[i];
         if (r.parentEntity == Entity::Null() || !reg.IsAlive(r.parentEntity)) {
             continue;
         }
-        if (reg.Get<Components::UIScrollComponent>(r.parentEntity) == nullptr) {
+        if (reg.Get<UIComponents::UIScrollComponent>(r.parentEntity) == nullptr) {
             continue;
         }
 
@@ -2043,14 +2264,14 @@ inline void UpdateScrollExtents(ECS::Registry& reg) noexcept {
         ++ex->count;
     }
 
-    for (Entity sc: reg.GetEntitiesWith<Components::UIScrollComponent>()) {
-        auto* scroll = reg.Get<Components::UIScrollComponent>(sc);
-        const auto* rect = reg.Get<Components::UIRectComponent>(sc);
+    for (Entity sc: reg.GetEntitiesWith<UIComponents::UIScrollComponent>()) {
+        auto* scroll = reg.Get<UIComponents::UIScrollComponent>(sc);
+        const auto* rect = reg.Get<UIComponents::UIRectComponent>(sc);
         if (scroll == nullptr || rect == nullptr) {
             continue;
         }
 
-        const auto* flex = reg.Get<Components::UIFlexComponent>(sc);
+        const auto* flex = reg.Get<UIComponents::UIFlexComponent>(sc);
         const float padL = (flex != nullptr) ? flex->paddingLeft : 0.0f;
         const float padT = (flex != nullptr) ? flex->paddingTop : 0.0f;
         const float padR = (flex != nullptr) ? flex->paddingRight : 0.0f;
@@ -2092,8 +2313,8 @@ inline auto ApplyScrollInput(ECS::Registry& reg, const ScrollInput& input) noexc
         Entity   best       = Entity::Null();
         uint32_t bestDepth  = 0;
 
-        for (Entity sc: reg.GetEntitiesWith<Components::UIScrollComponent>()) {
-            const auto* scroll = reg.Get<Components::UIScrollComponent>(sc);
+        for (Entity sc: reg.GetEntitiesWith<UIComponents::UIScrollComponent>()) {
+            const auto* scroll = reg.Get<UIComponents::UIScrollComponent>(sc);
             if (scroll == nullptr) {
                 continue;
             }
@@ -2101,7 +2322,7 @@ inline auto ApplyScrollInput(ECS::Registry& reg, const ScrollInput& input) noexc
             if (!canScroll || !IsPointVisible(reg, sc, input.mouseX, input.mouseY)) {
                 continue;
             }
-            const auto*    rect  = reg.Get<Components::UIRectComponent>(sc);
+            const auto*    rect  = reg.Get<UIComponents::UIRectComponent>(sc);
             const uint32_t depth = (rect != nullptr) ? rect->hierarchyDepth : 0;
             if (best == Entity::Null() || depth > bestDepth) {
                 best      = sc;
@@ -2110,7 +2331,7 @@ inline auto ApplyScrollInput(ECS::Registry& reg, const ScrollInput& input) noexc
         }
 
         if (best != Entity::Null()) {
-            auto* scroll = reg.Get<Components::UIScrollComponent>(best);
+            auto* scroll = reg.Get<UIComponents::UIScrollComponent>(best);
             // Wheel up (positive) scrolls the content down, i.e. the offset
             // shrinks — the same sign convention as a browser viewport.
             const float delta = input.wheelDelta * scroll->scrollSpeed;
@@ -2123,8 +2344,8 @@ inline auto ApplyScrollInput(ECS::Registry& reg, const ScrollInput& input) noexc
         }
     }
 
-    for (Entity sc: reg.GetEntitiesWith<Components::UIScrollComponent>()) {
-        auto* scroll = reg.Get<Components::UIScrollComponent>(sc);
+    for (Entity sc: reg.GetEntitiesWith<UIComponents::UIScrollComponent>()) {
+        auto* scroll = reg.Get<UIComponents::UIScrollComponent>(sc);
         if (scroll == nullptr) {
             continue;
         }

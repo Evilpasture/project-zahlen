@@ -16,6 +16,7 @@
 #include <Zahlen/Scripting.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/gui/UIComponents.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -165,7 +166,7 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
     }
 
     TextureHandle fontHandle = TextureHandle::Invalid;
-    if (auto* settings = reg.GetSingleton<Components::UISettingsComponent>()) {
+    if (auto* settings = reg.GetSingleton<GUI::UIComponents::UISettingsComponent>()) {
         fontHandle = settings->fontAtlas.texture;
         if (fontHandle == TextureHandle::Invalid) {
             fontHandle                  = CreativeWorksFactory::CreateFontAtlasTexture(rc, reg);
@@ -250,7 +251,7 @@ void DefaultPreset::Update(Engine& engine, float dt) {
                 // Header Title (Fits perfectly at 0.70f scale)
                 ui.Label(
                     "ZAHLEN ENGINE :: STANDALONE FALLBACK MODE",
-                    GUI::LabelConfig {.scale = 0.70f, .color = {0.3f, 0.85f, 1.0f, 1.0f}, .align = TextAlignment::Center, .height = 28.0f}
+                    GUI::LabelConfig {.scale = 0.70f, .color = {0.3f, 0.85f, 1.0f, 1.0f}, .align = GUI::TextAlignment::Center, .height = 28.0f}
                 );
 
                 // Alert Toast Box
@@ -270,7 +271,8 @@ void DefaultPreset::Update(Engine& engine, float dt) {
                 );
 
                 ui.Box(GUI::BoxConfig {.height = 170.0f, .color = {0.05f, 0.07f, 0.11f, 0.85f}, .padding = 12.0f}, [&]() -> void {
-                    ui.Label(envSummary, GUI::LabelConfig {.scale = 0.80f, .color = {0.65f, 0.75f, 0.85f, 1.0f}, .verticalAlign = TextVerticalAlignment::Top});
+                    ui.Label(envSummary,
+                             GUI::LabelConfig {.scale = 0.80f, .color = {0.65f, 0.75f, 0.85f, 1.0f}, .verticalAlign = GUI::TextVerticalAlignment::Top});
                 });
 
                 // Transparent Horizontal Button Bar
@@ -279,8 +281,8 @@ void DefaultPreset::Update(Engine& engine, float dt) {
                         .height    = 48.0f,
                         .color     = {0.0f, 0.0f, 0.0f, 0.0f},
                         .edgeWidth = 0.0f,
-                        .direction = FlexDirection::Row,
-                        .justify   = FlexJustify::SpaceBetween,
+                        .direction = GUI::FlexDirection::Row,
+                        .justify   = GUI::FlexJustify::SpaceBetween,
                         .padding   = 0.0f
                     },
                     [&]() -> void {

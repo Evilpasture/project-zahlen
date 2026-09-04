@@ -77,22 +77,18 @@ struct MeshletTestSuite {
         // documented in comments, so those three are the real gap covered here.
         // GPUMeshlet is re-checked as a guard against the assert being removed.
         std::expected<void, ZHLN::Error> gpu_stream_layout_is_pinned() {
-            auto chkPos = ZHLN::Test::AssertEq(sizeof(ZHLN::VertexPosition), size_t {12});
-            if (!chkPos) {
-                return chkPos;
+            if (!ZHLN::Test::ExpectEq(sizeof(ZHLN::VertexPosition), size_t {12})) {
+                return std::unexpected(MeshletTestError::LayoutDrift);
             }
-            auto chkAttr = ZHLN::Test::AssertEq(sizeof(ZHLN::VertexAttributes), size_t {16});
-            if (!chkAttr) {
-                return chkAttr;
+            if (!ZHLN::Test::ExpectEq(sizeof(ZHLN::VertexAttributes), size_t {16})) {
+                return std::unexpected(MeshletTestError::LayoutDrift);
             }
-            auto chkSkin = ZHLN::Test::AssertEq(sizeof(ZHLN::VertexSkin), size_t {12});
-            if (!chkSkin) {
-                return chkSkin;
+            if (!ZHLN::Test::ExpectEq(sizeof(ZHLN::VertexSkin), size_t {12})) {
+                return std::unexpected(MeshletTestError::LayoutDrift);
             }
             // Meshlet.hpp documents a 64-byte stride for GPUMeshlet.
-            auto chkMeshlet = ZHLN::Test::AssertEq(sizeof(ZHLN::GPUMeshlet), size_t {64});
-            if (!chkMeshlet) {
-                return chkMeshlet;
+            if (!ZHLN::Test::ExpectEq(sizeof(ZHLN::GPUMeshlet), size_t {64})) {
+                return std::unexpected(MeshletTestError::LayoutDrift);
             }
             return {};
         }
@@ -112,9 +108,8 @@ struct MeshletTestSuite {
             }
             // If this ever drops to 1 the alignment and padding assertions below
             // become vacuous, so fail loudly instead of passing on a technicality.
-            auto multi = ZHLN::Test::AssertTrue(a.meshlets.size() > 1);
-            if (!multi) {
-                return multi;
+            if (!ZHLN::Test::ExpectTrue(a.meshlets.size() > 1)) {
+                return std::unexpected(MeshletTestError::StreamInvariantBroken);
             }
             if (!StreamsEqual(a, b)) {
                 return std::unexpected(MeshletTestError::NotDeterministic);
@@ -135,9 +130,8 @@ struct MeshletTestSuite {
 
             // Micro-indices are read as uint*, so every offset and the total
             // length must be 4-byte aligned.
-            auto chkTail = ZHLN::Test::AssertTrue(built.triangles.size() % 4 == 0);
-            if (!chkTail) {
-                return chkTail;
+            if (!ZHLN::Test::ExpectTrue(built.triangles.size() % 4 == 0)) {
+                return std::unexpected(MeshletTestError::StreamInvariantBroken);
             }
 
             // The stream must actually have been padded somewhere, otherwise the
@@ -146,9 +140,8 @@ struct MeshletTestSuite {
             for (const auto& m: built.meshlets) {
                 rawTriangleBytes += static_cast<size_t>(m.triangleCount) * 3;
             }
-            auto chkPadded = ZHLN::Test::AssertTrue(built.triangles.size() > rawTriangleBytes);
-            if (!chkPadded) {
-                return chkPadded;
+            if (!ZHLN::Test::ExpectTrue(built.triangles.size() > rawTriangleBytes)) {
+                return std::unexpected(MeshletTestError::StreamInvariantBroken);
             }
 
             for (const auto& m: built.meshlets) {
@@ -199,24 +192,21 @@ struct MeshletTestSuite {
         std::expected<void, ZHLN::Error> degenerate_input_yields_empty_result() {
             const auto positions = MakeGridPositions();
 
-            auto tooFewIndices = ZHLN::Test::AssertTrue(ZHLN::BuildMeshlets(std::vector<uint32_t> {0, 1}, positions).Empty());
-            if (!tooFewIndices) {
-                return tooFewIndices;
+            if (!ZHLN::Test::ExpectTrue(ZHLN::BuildMeshlets(std::vector<uint32_t> {0, 1}, positions).Empty())) {
+                return std::unexpected(MeshletTestError::StreamInvariantBroken);
             }
 
             const std::vector<uint32_t> indices = MakeGridIndices();
-            auto nullPositions                  = ZHLN::Test::AssertTrue(ZHLN::BuildMeshlets(indices, nullptr, 0, 0).Empty());
-            if (!nullPositions) {
-                return nullPositions;
+            if (!ZHLN::Test::ExpectTrue(ZHLN::BuildMeshlets(indices, nullptr, 0, 0).Empty())) {
+                return std::unexpected(MeshletTestError::StreamInvariantBroken);
             }
 
             // A stride too narrow to hold a float3 must be rejected rather than
             // reading out of bounds.
-            auto narrowStride = ZHLN::Test::AssertTrue(
+            if (!ZHLN::Test::ExpectTrue(
                 ZHLN::BuildMeshlets(indices, &positions[0].position[0], positions.size(), sizeof(float) * 2).Empty()
-            );
-            if (!narrowStride) {
-                return narrowStride;
+            )) {
+                return std::unexpected(MeshletTestError::StrideForwardingBroken);
             }
             return {};
         }

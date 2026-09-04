@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #ifdef _WIN32
 #undef WINVER
@@ -273,6 +274,114 @@ inline void FreePages(void* address, [[maybe_unused]] size_t bytes) noexcept {
 #else
     munmap(address, AlignUpToPage(bytes));
 #endif
+}
+
+// ============================================================================
+// Cached Stack Bounds
+// ============================================================================
+
+/**
+ * @brief The bounds of the stack that is currently running.
+ *
+ * `base` is the highest address (where a downwards-growing stack starts),
+ * `limit` the lowest one it may grow to.
+ */
+struct StackBounds {
+    void* base  = nullptr;
+    void* limit = nullptr;
+};
+
+/**
+ * @brief Reads the stack bounds the OS recorded for the calling thread.
+ *
+ * Some platforms keep a copy of the active stack bounds in per-thread OS state:
+ * Windows stores them in the TEB, where the kernel, stack probes, SEH and
+ * GetCurrentThreadStackLimits() all read them. Anything that swaps stacks by
+ * hand (fibers, coroutines, user-space schedulers) has to keep that copy in
+ * sync with the stack it switches to.
+ *
+ * Platforms with no such bookkeeping return a zeroed struct.
+ */
+[[nodiscard]] inline auto GetCurrentStackBounds() noexcept -> StackBounds {
+#if defined(_WIN32)
+    auto* const tib = reinterpret_cast<NT_TIB*>(NtCurrentTeb());
+    return {.base = tib->StackBase, .limit = tib->StackLimit};
+#else
+    return {};
+#endif
+}
+
+/**
+ * @brief Overwrites the OS's copy of the calling thread's stack bounds.
+ * No-op on platforms that don't keep one.
+ */
+inline void SetCurrentStackBounds([[maybe_unused]] StackBounds bounds) noexcept {
+#if defined(_WIN32)
+    auto* const tib = reinterpret_cast<NT_TIB*>(NtCurrentTeb());
+    tib->StackBase  = bounds.base;
+    tib->StackLimit = bounds.limit;
+#else
+    // Nothing to keep in sync.
+#endif
+}
+
+// ============================================================================
+// Guarded Regions
+// ============================================================================
+
+/**
+ * @brief A page-aligned allocation walled in by one inaccessible page on each
+ * side, so that stepping off either end faults instead of silently corrupting
+ * whatever is mapped next to it.
+ */
+struct GuardedRegion {
+    void*  base  = nullptr; // Base of the whole mapping; hand this to FreeGuardedRegion().
+    size_t size  = 0;       // Size of the whole mapping, guard pages included.
+    void*  begin = nullptr; // First usable byte, just above the low guard page.
+    void*  end   = nullptr; // One past the last usable byte; stacks grow down from here.
+
+    [[nodiscard]] constexpr auto valid() const noexcept -> bool {
+        return base != nullptr;
+    }
+};
+
+/**
+ * @brief Reserves `bytes` of read/write memory with a guard page on both ends.
+ *
+ * The usable payload is rounded up to a whole page, so `end - begin` may be
+ * larger than requested. Returns an invalid region (`valid() == false`) if the
+ * mapping or either guard page could not be set up.
+ */
+[[nodiscard]] inline auto AllocateGuardedRegion(size_t bytes) noexcept -> GuardedRegion {
+    if (bytes == 0) {
+        return {};
+    }
+
+    const size_t page   = GetPageSize();
+    const size_t usable = AlignUpToPage(bytes);
+    const size_t total  = usable + (page * 2); // Payload + 2 guard pages
+
+    void* const base = AllocatePages(total, PageProtection::ReadWrite);
+    if (base == nullptr) {
+        return {};
+    }
+
+    auto* const low  = static_cast<std::byte*>(base);
+    auto* const high = low + page + usable;
+
+    if (!ProtectPages(low, page, PageProtection::Guard) || !ProtectPages(high, page, PageProtection::Guard)) {
+        FreePages(base, total);
+        return {};
+    }
+
+    return {.base = base, .size = total, .begin = low + page, .end = high};
+}
+
+/**
+ * @brief Releases a region previously handed out by AllocateGuardedRegion().
+ */
+inline void FreeGuardedRegion(GuardedRegion region) noexcept {
+    FreePages(region.base, region.size);
 }
 
 } // namespace ZHLN

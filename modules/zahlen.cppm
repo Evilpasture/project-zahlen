@@ -177,6 +177,7 @@ module;
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
+#include <Zahlen/gui/UIComponents.hpp>
 #include <Zahlen/physics/Physics.hpp>
 
 export module zahlen;
@@ -343,16 +344,7 @@ using ZHLN::BufferSync;
 using ZHLN::BufferView;
 using ZHLN::Components;
 using ZHLN::Entity;
-using ZHLN::FlexAlign;
-using ZHLN::FlexDirection;
-using ZHLN::FlexJustify;
-using ZHLN::FlexWrap;
 using ZHLN::RagdollState;
-using ZHLN::StackDirection;
-using ZHLN::TextAlignment;
-using ZHLN::TextVerticalAlignment;
-using ZHLN::UIButton;
-using ZHLN::UIJustify;
 
 namespace ECS {
 using ZHLN::ECS::Access;
@@ -396,8 +388,19 @@ using ZHLN::RenderContext;
 
 namespace GUI {
 using ZHLN::GUI::AppendTextVertices;
+using ZHLN::GUI::FlexAlign;
+using ZHLN::GUI::FlexDirection;
+using ZHLN::GUI::FlexJustify;
+using ZHLN::GUI::FlexWrap;
 using ZHLN::GUI::MeasureTextBounds;
+using ZHLN::GUI::StackDirection;
+using ZHLN::GUI::TextAlignment;
 using ZHLN::GUI::TextBounds;
+using ZHLN::GUI::TextVerticalAlignment;
+using ZHLN::GUI::UIGradientAxis;
+using ZHLN::GUI::UIButton;
+using ZHLN::GUI::UIJustify;
+using ZHLN::GUI::UIPlotKind;
 } // namespace GUI
 
 // Audio

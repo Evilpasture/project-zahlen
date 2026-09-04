@@ -8,6 +8,7 @@
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Types.hpp>
+#include <Zahlen/gui/UIComponents.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -151,7 +152,8 @@ uint32_t AppendTextVertices(
 }
 
 uint32_t
-    AppendPanelVertices(VertexPosition* outPos, VertexAttributes* outAttr, const Components::UIRectComponent& rect, const Components::UIPanelComponent& panel) {
+    AppendPanelVertices(VertexPosition* outPos, VertexAttributes* outAttr, const UIComponents::UIRectComponent& rect,
+                        const UIComponents::UIPanelComponent& panel) {
     // Skip generating quad geometry for completely transparent/invisible layout boxes
     if (panel.color.GetW() <= 0.0f && panel.edgeWidth <= 0.0f) {
         return 0;
@@ -329,7 +331,7 @@ struct ImageQuad {
 
 } // namespace
 
-uint32_t CountImageVertices(const Components::UIRectComponent& rect, const Components::UIImageComponent& image) noexcept {
+uint32_t CountImageVertices(const UIComponents::UIRectComponent& rect, const UIComponents::UIImageComponent& image) noexcept {
     const float width  = rect.computedAbsMaxX - rect.computedAbsMinX;
     const float height = rect.computedAbsMaxY - rect.computedAbsMinY;
     if (width <= 0.0f || height <= 0.0f || image.tint.GetW() <= 0.0f) {
@@ -350,8 +352,8 @@ uint32_t CountImageVertices(const Components::UIRectComponent& rect, const Compo
 uint32_t AppendImageVertices(
     VertexPosition*                     outPos,
     VertexAttributes*                   outAttr,
-    const Components::UIRectComponent&  rect,
-    const Components::UIImageComponent& image
+    const UIComponents::UIRectComponent&  rect,
+    const UIComponents::UIImageComponent& image
 ) {
     const float x0 = rect.computedAbsMinX;
     const float y0 = rect.computedAbsMinY;
@@ -472,6 +474,306 @@ uint32_t AppendImageVertices(
     }
 
     return writtenCount;
+}
+
+// --- GRADIENT --------------------------------------------------------------
+
+uint32_t CountGradientVertices(const UIComponents::UIRectComponent& rect, const UIComponents::UIGradientComponent& gradient) noexcept {
+    if (gradient.stopCount < 2) {
+        return 0;
+    }
+    const float width  = rect.computedAbsMaxX - rect.computedAbsMinX;
+    const float height = rect.computedAbsMaxY - rect.computedAbsMinY;
+    if (width <= 0.0f || height <= 0.0f) {
+        return 0;
+    }
+    return (gradient.stopCount - 1) * 6;
+}
+
+uint32_t AppendGradientVertices(
+    VertexPosition*                          outPos,
+    VertexAttributes*                        outAttr,
+    const UIComponents::UIRectComponent&     rect,
+    const UIComponents::UIGradientComponent& gradient
+) {
+    if (gradient.stopCount < 2) {
+        return 0;
+    }
+
+    const float x0 = rect.computedAbsMinX;
+    const float y0 = rect.computedAbsMinY;
+    const float x1 = rect.computedAbsMaxX;
+    const float y1 = rect.computedAbsMaxY;
+    if ((x1 - x0) <= 0.0f || (y1 - y0) <= 0.0f) {
+        return 0;
+    }
+
+    // An out-of-range stopCount would read past the inline array, and a
+    // component can arrive from a script or a deserialized scene with one.
+    const uint32_t stops = std::min(gradient.stopCount, UIComponents::UIGradientComponent::kMaxStops);
+    if (stops < 2) {
+        return 0;
+    }
+
+    const Packed1010102 n = Math::PackNormal(0, 0, 1);
+    const Packed1010102 t = Math::PackNormal(1, 0, 0, 1);
+
+    uint32_t writtenCount = 0;
+    auto     emitVertex   = [&](float px, float py, const JPH::Vec4& c) -> void {
+        outPos[writtenCount]    = {{px, py, 0.0f}};
+        outAttr[writtenCount++] = {
+            .normal = n, .tangent = t, .uv = Math::PackUV(0.0f, 0.0f), .color = Math::PackColor(c.GetX(), c.GetY(), c.GetZ(), c.GetW())};
+    };
+
+    const bool horizontal  = (gradient.axis == UIGradientAxis::Horizontal);
+    const float spanStart  = horizontal ? x0 : y0;
+    const float spanLength = horizontal ? (x1 - x0) : (y1 - y0);
+    const float denom      = static_cast<float>(stops - 1);
+
+    for (uint32_t i = 0; i + 1 < stops; ++i) {
+        const float t0 = static_cast<float>(i) / denom;
+        const float t1 = static_cast<float>(i + 1) / denom;
+        const float a0 = spanStart + t0 * spanLength;
+        const float a1 = spanStart + t1 * spanLength;
+
+        const JPH::Vec4& c0 = gradient.stops[i];
+        const JPH::Vec4& c1 = gradient.stops[i + 1];
+
+        if (horizontal) {
+            emitVertex(a0, y0, c0);
+            emitVertex(a0, y1, c0);
+            emitVertex(a1, y0, c1);
+            emitVertex(a1, y0, c1);
+            emitVertex(a0, y1, c0);
+            emitVertex(a1, y1, c1);
+        } else {
+            emitVertex(x0, a0, c0);
+            emitVertex(x0, a1, c1);
+            emitVertex(x1, a0, c0);
+            emitVertex(x1, a0, c0);
+            emitVertex(x0, a1, c1);
+            emitVertex(x1, a1, c1);
+        }
+    }
+
+    return writtenCount;
+}
+
+// --- PLOT ------------------------------------------------------------------
+
+uint32_t CountPlotVertices(const UIComponents::UIPlotComponent& plot) noexcept {
+    const uint32_t n = std::min(static_cast<uint32_t>(plot.values.size()), UIComponents::UIPlotComponent::kMaxPoints);
+    if (n == 0) {
+        return 0;
+    }
+
+    switch (plot.kind) {
+        case UIPlotKind::Histogram:
+            return n * 6;
+        case UIPlotKind::ShadedLines:
+            // A fill quad and a line quad per segment.
+            return (n > 1) ? ((n - 1) * 12) : 0;
+        case UIPlotKind::Lines:
+        default:
+            return (n > 1) ? ((n - 1) * 6) : 0;
+    }
+}
+
+uint32_t AppendPlotVertices(
+    VertexPosition*                     outPos,
+    VertexAttributes*                   outAttr,
+    const UIComponents::UIRectComponent& rect,
+    const UIComponents::UIPlotComponent& plot
+) {
+    const uint32_t n = std::min(static_cast<uint32_t>(plot.values.size()), UIComponents::UIPlotComponent::kMaxPoints);
+
+    const float x0 = rect.computedAbsMinX;
+    const float y0 = rect.computedAbsMinY;
+    const float x1 = rect.computedAbsMaxX;
+    const float y1 = rect.computedAbsMaxY;
+    const float width  = x1 - x0;
+    const float height = y1 - y0;
+    if (width <= 0.0f || height <= 0.0f || n == 0) {
+        return 0;
+    }
+
+    const float range = plot.maxValue - plot.minValue;
+    // A degenerate range (or a NaN one) would divide by zero and put every
+    // sample at -inf. Flat-line the series at the bottom edge instead: a
+    // misconfigured plot should read as empty, not as garbage.
+    if (!(range > 0.0f)) {
+        return 0;
+    }
+
+    auto ValueToY = [&](float v) -> float {
+        const float t = std::clamp((v - plot.minValue) / range, 0.0f, 1.0f);
+        return y1 - t * height;
+    };
+
+    // Bars and shaded fills grow from the zero line when the range contains
+    // it, so a signed series (an audio meter, a delta-from-target) reads
+    // correctly instead of every bar hanging off the bottom edge.
+    const bool  hasZero = (plot.minValue < 0.0f) && (plot.maxValue > 0.0f);
+    const float baseline = hasZero ? ValueToY(0.0f) : y1;
+
+    const Packed1010102 nrm = Math::PackNormal(0, 0, 1);
+    const Packed1010102 tan = Math::PackNormal(1, 0, 0, 1);
+
+    uint32_t writtenCount = 0;
+    auto     emitVertex   = [&](float px, float py, const JPH::Vec4& c) -> void {
+        outPos[writtenCount]    = {{px, py, 0.0f}};
+        outAttr[writtenCount++] = {
+            .normal = nrm, .tangent = tan, .uv = Math::PackUV(0.0f, 0.0f), .color = Math::PackColor(c.GetX(), c.GetY(), c.GetZ(), c.GetW())};
+    };
+    auto emitQuad = [&](float ax, float ay, float bx, float by, float cx, float cy, float dx, float dy, const JPH::Vec4& c) -> void {
+        emitVertex(ax, ay, c);
+        emitVertex(bx, by, c);
+        emitVertex(cx, cy, c);
+        emitVertex(cx, cy, c);
+        emitVertex(bx, by, c);
+        emitVertex(dx, dy, c);
+    };
+
+    if (plot.kind == UIPlotKind::Histogram) {
+        const float band  = width / static_cast<float>(n);
+        const float gap   = std::clamp(plot.barGap, 0.0f, std::max(0.0f, band - 1.0f));
+        const float barW  = std::max(1.0f, band - gap);
+        for (uint32_t i = 0; i < n; ++i) {
+            const float bandX = x0 + static_cast<float>(i) * band;
+            const float left  = bandX + gap * 0.5f;
+            const float right = left + barW;
+            const float top   = ValueToY(plot.values[i]);
+            float       lo    = std::min(baseline, top);
+            float       hi    = std::max(baseline, top);
+
+            // A zero-height bar (a sample equal to the baseline) still gets a
+            // 1px sliver, otherwise a flat series looks like an empty plot
+            // instead of a flat one. The sliver has to grow towards the side
+            // the bar would have grown towards: growing it downwards every
+            // time pushes a bar sitting on the bottom edge one pixel outside
+            // the widget, which is visible as a fringe below the plot.
+            if ((hi - lo) < 1.0f) {
+                if (plot.values[i] < 0.0f && hasZero) {
+                    hi = lo + 1.0f;
+                } else {
+                    lo = hi - 1.0f;
+                }
+            }
+            emitQuad(left, lo, left, hi, right, lo, right, hi, plot.fillColor);
+        }
+        return writtenCount;
+    }
+
+    // Lines and ShadedLines.
+    if (n < 2) {
+        return 0;
+    }
+
+    auto SampleX = [&](uint32_t i) -> float {
+        return x0 + (static_cast<float>(i) / static_cast<float>(n - 1)) * width;
+    };
+
+    const float halfWidth = std::max(0.5f, plot.lineWidth * 0.5f);
+
+    for (uint32_t i = 0; i + 1 < n; ++i) {
+        const float px = SampleX(i);
+        const float py = ValueToY(plot.values[i]);
+        const float qx = SampleX(i + 1);
+        const float qy = ValueToY(plot.values[i + 1]);
+
+        if (plot.kind == UIPlotKind::ShadedLines) {
+            emitQuad(px, baseline, px, py, qx, baseline, qx, qy, plot.fillColor);
+        }
+
+        // Perpendicular offset rather than a vertical one: a vertical offset
+        // makes a steep segment look thinner than a flat one, so a spike in a
+        // frame-time graph loses weight exactly where it matters most.
+        float dx = qx - px;
+        float dy = qy - py;
+        const float len = std::sqrt(dx * dx + dy * dy);
+        if (len > 1e-4f) {
+            dx /= len;
+            dy /= len;
+        } else {
+            dx = 1.0f;
+            dy = 0.0f;
+        }
+        const float nx = -dy * halfWidth;
+        const float ny = dx * halfWidth;
+
+        emitQuad(px + nx, py + ny, px - nx, py - ny, qx + nx, qy + ny, qx - nx, qy - ny, plot.lineColor);
+    }
+
+    return writtenCount;
+}
+
+// --- COLOUR CONVERSION -----------------------------------------------------
+
+JPH::Vec4 HsvToRgb(float hue, float sat, float val) noexcept {
+    // Wrap into [0,360) first: the hue strip can hand over exactly 360 and a
+    // caller that integrates a hue slider by hand can push it negative.
+    hue = std::fmod(hue, 360.0f);
+    if (hue < 0.0f) {
+        hue += 360.0f;
+    }
+
+    const float s = std::clamp(sat, 0.0f, 1.0f);
+    const float v = std::clamp(val, 0.0f, 1.0f);
+
+    const float c = v * s;
+    const float h = hue / 60.0f;
+    const float x = c * (1.0f - std::abs(std::fmod(h, 2.0f) - 1.0f));
+    const float m = v - c;
+
+    float r = 0.0f;
+    float g = 0.0f;
+    float b = 0.0f;
+    if (h < 1.0f) {
+        r = c; g = x;
+    } else if (h < 2.0f) {
+        r = x; g = c;
+    } else if (h < 3.0f) {
+        g = c; b = x;
+    } else if (h < 4.0f) {
+        g = x; b = c;
+    } else if (h < 5.0f) {
+        r = x; b = c;
+    } else {
+        r = c; b = x;
+    }
+
+    return JPH::Vec4(r + m, g + m, b + m, 1.0f);
+}
+
+void RgbToHsv(const JPH::Vec4& rgb, float& hueInOut, float& satOut, float& valOut) noexcept {
+    const float r = std::clamp(rgb.GetX(), 0.0f, 1.0f);
+    const float g = std::clamp(rgb.GetY(), 0.0f, 1.0f);
+    const float b = std::clamp(rgb.GetZ(), 0.0f, 1.0f);
+
+    const float max = std::max(r, std::max(g, b));
+    const float min = std::min(r, std::min(g, b));
+    const float delta = max - min;
+
+    valOut = max;
+    satOut = (max > 0.0f) ? (delta / max) : 0.0f;
+
+    // Hue is undefined at the grey axis. Leaving hueInOut alone keeps the last
+    // chromatic hue, so dragging saturation to zero and back does not turn a
+    // grey red.
+    if (delta > 1e-6f) {
+        float h = 0.0f;
+        if (max == r) {
+            h = 60.0f * std::fmod((g - b) / delta, 6.0f);
+        } else if (max == g) {
+            h = 60.0f * (((b - r) / delta) + 2.0f);
+        } else {
+            h = 60.0f * (((r - g) / delta) + 4.0f);
+        }
+        if (h < 0.0f) {
+            h += 360.0f;
+        }
+        hueInOut = h;
+    }
 }
 
 } // namespace ZHLN::GUI

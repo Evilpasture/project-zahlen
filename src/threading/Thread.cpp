@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Config.hpp>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Threading/Thread.hpp>
@@ -12,9 +13,6 @@
 #include <cstring>
 #include <memory>
 
-#if defined(__x86_64__) || defined(_M_X64)
-#include <emmintrin.h>
-#endif
 // Defined in Thread.S
 extern "C" void ZHLN_Switch(void** old_sp, void* new_sp);
 extern "C" void ZHLN_TrampolineAsm(void);
@@ -22,6 +20,36 @@ extern "C" void ZHLN_TrampolineAsm(void);
 namespace ZHLN {
 
 namespace {
+
+/**
+ * @brief The stack frame a brand new fiber starts executing on.
+ *
+ * ZHLN_Switch (Thread.S) restores the callee-saved registers off the frame it
+ * is handed and then returns into that frame's return-address slot, which is
+ * how a freshly created fiber reaches ZHLN_Trampoline. Both numbers are
+ * dictated by the assembly: `size` is the total number of bytes the switch
+ * pops before returning, and `returnAddressOffset` is where the return address
+ * sits, relative to the stack pointer handed to it.
+ */
+struct InitialStackFrame {
+    size_t size;                // Total bytes ZHLN_Switch pops.
+    size_t returnAddressOffset; // Offset of the return-address slot.
+};
+
+[[nodiscard]] constexpr auto GetInitialStackFrame() noexcept -> InitialStackFrame {
+    static_assert(isX64 || isARM64, "Thread.S implements ZHLN_Switch for x86_64 and AArch64 only.");
+
+    if constexpr (isWindows && isX64) {
+        // Win64: 10 XMMs (160) + 9 GPRs (72) + the return address (8).
+        return {.size = 240, .returnAddressOffset = 232};
+    } else if constexpr (isX64) {
+        // System V: the return address sits above the 6 callee-saved GPRs (48).
+        return {.size = 48 + 8, .returnAddressOffset = 48};
+    } else {
+        // AArch64: x19-x30 + d8-d15 (160); X30 is the link register.
+        return {.size = 160, .returnAddressOffset = 88};
+    }
+}
 
 // Thread-local tracking of the active fiber
 thread_local Fiber  t_mainFiber;
@@ -44,17 +72,18 @@ extern "C" void ZHLN_Trampoline() {
     }
 }
 
-// Windows requires swapping StackBase/StackLimit in the TEB (Thread Environment Block)
-void SwapTEB([[maybe_unused]] Fiber* target) {
-#if defined(_WIN32)
-    NT_TIB* tib                = (NT_TIB*) NtCurrentTeb();
-    t_currentFiber->stackBase  = tib->StackBase;
-    t_currentFiber->stackLimit = tib->StackLimit;
-    tib->StackBase             = target->stackBase;
-    tib->StackLimit            = target->stackLimit;
-#else
-    // No need.
-#endif
+// Windows caches the active stack bounds in the TEB (Thread Environment Block);
+// the kernel, stack probes and SEH all read them from there, so they have to
+// follow the stack we switch to. On platforms that keep no such state
+// GetCurrentStackBounds() reports an empty range and this is a no-op.
+void SwapStackBounds(Fiber* target) noexcept {
+    const StackBounds outgoing = GetCurrentStackBounds();
+    if (outgoing.base == nullptr) {
+        return; // Platform tracks nothing, nothing to swap.
+    }
+
+    t_currentFiber->bounds = outgoing;
+    SetCurrentStackBounds(target->bounds);
 }
 
 } // namespace
@@ -84,63 +113,33 @@ void Fiber::InitMainThread() noexcept {
     t_mainFiber.isMain     = true;
     t_mainFiber.caller     = nullptr;
 
-#if defined(_WIN32)
-    NT_TIB* tib            = (NT_TIB*) NtCurrentTeb();
-    t_mainFiber.stackBase  = tib->StackBase;
-    t_mainFiber.stackLimit = tib->StackLimit;
-#endif
+    // Adopt the bounds the OS already picked for this thread's real stack.
+    t_mainFiber.bounds = GetCurrentStackBounds();
 
     t_currentFiber = &t_mainFiber;
 }
 
 auto Fiber::Create(size_t stackSize, FiberFunc func, void* arg) noexcept -> Fiber* {
-    // 1. Calculate Sizes (Page Aligned)
-#if defined(_WIN32)
-    SYSTEM_INFO si;
-    GetSystemInfo(&si);
-    size_t pageSize = si.dwPageSize;
-#else
-    size_t pageSize = sysconf(_SC_PAGESIZE);
-#endif
-
-    if (stackSize == 0) {
-        stackSize = kMinimumFiberStackSize;
-    }
-    stackSize        = std::max(stackSize, kMinimumFiberStackSize);
-    stackSize        = (stackSize + pageSize - 1) & ~(pageSize - 1);
-    size_t totalSize = stackSize + (pageSize * 2); // Stack + 2 Guard Pages
-
-    // 2. Allocate Stack
-    void*     map      = nullptr;
-    uintptr_t stackTop = 0;
-#if defined(_WIN32)
-    map = VirtualAlloc(nullptr, totalSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-    if (map == nullptr) {
+    // 1. Allocate the stack: page aligned, with a guard page on both ends so
+    //    that overflowing or underflowing faults instead of corrupting its
+    //    neighbours. Allocation/protection is a platform concern.
+    const size_t        requested = std::max(stackSize, kMinimumFiberStackSize);
+    const GuardedRegion stack     = AllocateGuardedRegion(requested);
+    if (!stack.valid()) {
         return nullptr;
     }
-    DWORD old;
-    VirtualProtect(map, pageSize, PAGE_READWRITE | PAGE_GUARD, &old);
-    stackTop = std::bit_cast<uintptr_t>(map) + totalSize;
-#else
-    map = mmap(nullptr, totalSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (map == MAP_FAILED) {
-        return nullptr;
-    }
-    const auto mapBase = std::bit_cast<uintptr_t>(map);
-    mprotect(map, pageSize, PROT_NONE);
-    mprotect(std::bit_cast<void*>(mapBase + pageSize + stackSize), pageSize, PROT_NONE);
-    stackTop = mapBase + pageSize + stackSize;
-#endif
+    const uintptr_t stackTop = std::bit_cast<uintptr_t>(stack.end);
 
-    // 3. Construct aligned metadata immediately below the usable stack top.
+    // 2. Construct aligned metadata immediately below the usable stack top.
     // Fiber is alignas(128); the previous 16-byte placement was undefined on
     // ARM64 and could fault when its atomic running flag was accessed.
     static_assert(std::has_single_bit(alignof(Fiber)));
     const uintptr_t structAddr = (stackTop - sizeof(Fiber)) & ~(static_cast<uintptr_t>(alignof(Fiber)) - 1u);
     auto* const     fiber      = std::construct_at(std::bit_cast<Fiber*>(structAddr));
 
-    fiber->mapAddr    = map;
-    fiber->mapSize    = totalSize;
+    fiber->mapAddr    = stack.base;
+    fiber->mapSize    = stack.size;
+    fiber->bounds     = {.base = stack.end, .limit = stack.begin};
     fiber->func       = func;
     fiber->arg        = arg;
     fiber->caller     = nullptr;
@@ -148,25 +147,12 @@ auto Fiber::Create(size_t stackSize, FiberFunc func, void* arg) noexcept -> Fibe
     fiber->isMain     = false;
     fiber->isRunning.store(false, std::memory_order::relaxed);
 
-#if defined(_WIN32)
-    fiber->stackBase  = std::bit_cast<void*>(stackTop);
-    fiber->stackLimit = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(map) + pageSize);
-#endif
+    // 3. Seed the stack frame ZHLN_Switch expects: it pops the saved registers
+    //    and returns into the trampoline, which is how a new fiber starts.
+    constexpr InitialStackFrame frame = GetInitialStackFrame();
+    const uintptr_t             sp    = structAddr - frame.size;
 
-    // 4. Initialize Stack Frame for ZHLN_Switch
-    uintptr_t sp = structAddr;
-
-#if defined(_WIN32) && (defined(__x86_64__) || defined(_M_X64))
-    sp -= 240; // Windows x64 context size (GPRs + XMMs)
-    *std::bit_cast<uintptr_t*>(sp + 232) = reinterpret_cast<uintptr_t>(ZHLN_TrampolineAsm);
-#elif defined(__x86_64__) || defined(_M_X64)
-    sp -= 8; // Space for Return Address
-    *std::bit_cast<uintptr_t*>(sp) = reinterpret_cast<uintptr_t>(ZHLN_TrampolineAsm);
-    sp -= 48; // Space for 6 Callee-saved GPRs
-#elif defined(__aarch64__) || defined(_M_ARM64)
-    sp -= 160;                                                                             // ARM64 Context size
-    *std::bit_cast<uintptr_t*>(sp + 88) = reinterpret_cast<uintptr_t>(ZHLN_TrampolineAsm); // X30 (LR)
-#endif
+    *std::bit_cast<uintptr_t*>(sp + frame.returnAddressOffset) = reinterpret_cast<uintptr_t>(ZHLN_TrampolineAsm);
 
     fiber->stackPointer = std::bit_cast<void*>(sp);
     return fiber;
@@ -184,7 +170,7 @@ void Fiber::Resume(Fiber* target) noexcept {
     Fiber* self    = t_currentFiber;
     target->caller = self;
 
-    SwapTEB(target);
+    SwapStackBounds(target);
     t_currentFiber = target;
 
     // Execute Assembly Context Switch
@@ -201,7 +187,7 @@ void Fiber::Yield() noexcept {
         return;
     }
 
-    SwapTEB(target);
+    SwapStackBounds(target);
     t_currentFiber = target;
     ZHLN_Switch(&self->stackPointer, target->stackPointer);
 }
@@ -210,14 +196,9 @@ void Fiber::Destroy(Fiber* fiber) noexcept {
     if ((fiber == nullptr) || fiber->isMain) {
         return;
     }
-    void* const  mapAddr = fiber->mapAddr;
-    const size_t mapSize = fiber->mapSize;
+    const GuardedRegion stack = {.base = fiber->mapAddr, .size = fiber->mapSize};
     std::destroy_at(fiber);
-#if defined(_WIN32)
-    VirtualFree(mapAddr, 0, MEM_RELEASE);
-#else
-    munmap(mapAddr, mapSize);
-#endif
+    FreeGuardedRegion(stack);
 }
 
 auto GetCurrentFiber() noexcept -> Fiber* {

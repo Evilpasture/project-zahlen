@@ -27,6 +27,7 @@
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Types.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/gui/UIComponents.hpp>
 #include <cstdint>
 #include <expected>
 #include <string>
@@ -40,6 +41,7 @@ using ZHLN::ECS::Registry;
 namespace GUI    = ZHLN::GUI;
 namespace Editor = ZHLN::Editor;
 using Comp       = ZHLN::Components;
+using UIComp     = ZHLN::GUI::UIComponents;
 
 // Finds the (first) entity whose NameComponent matches `name`, anywhere in the
 // registry. Editor widgets are named by their id, exactly like the compound
@@ -56,8 +58,8 @@ using Comp       = ZHLN::Components;
 }
 
 [[nodiscard]] auto HasText(Registry& reg, std::string_view text) -> bool {
-    for (const Entity e: reg.GetEntitiesWith<Comp::TextComponent>()) {
-        if (const auto* t = reg.Get<Comp::TextComponent>(e)) {
+    for (const Entity e: reg.GetEntitiesWith<UIComp::TextComponent>()) {
+        if (const auto* t = reg.Get<UIComp::TextComponent>(e)) {
             if (std::string_view(t->text) == text) {
                 return true;
             }
@@ -76,7 +78,7 @@ using Comp       = ZHLN::Components;
     Entity             parent = Entity::Null()
 ) -> Entity {
     return reg.Create(
-        Comp::UIRectComponent {.parentEntity = parent, .hierarchyDepth = depth, .layoutOrder = order},
+        UIComp::UIRectComponent {.parentEntity = parent, .hierarchyDepth = depth, .layoutOrder = order},
         Comp::NameComponent {.name = ZHLN::String64(name)}
     );
 }
@@ -84,7 +86,7 @@ using Comp       = ZHLN::Components;
 // Collects the row entities of a hierarchy panel in child-cache order.
 [[nodiscard]] auto CollectRows(Registry& reg, Entity panel, std::string_view idPrefix) -> std::vector<Entity> {
     std::vector<Entity> rows;
-    for (const Entity e: reg.GetEntitiesWith<Comp::UISelectableComponent>()) {
+    for (const Entity e: reg.GetEntitiesWith<UIComp::UISelectableComponent>()) {
         const auto* n = reg.Get<Comp::NameComponent>(e);
         if (n == nullptr) {
             continue;
@@ -180,12 +182,12 @@ struct GUIEditorTestSuite {
             const Entity rowA = FindEntityNamed(reg, "H_row" + std::to_string(a.index));
             const Entity rowB = FindEntityNamed(reg, "H_row" + std::to_string(b.index));
             ZHLN::Test::ExpectTrue(rowA != Entity::Null() && rowB != Entity::Null());
-            if (const auto* sa = reg.Get<Comp::UISelectableComponent>(rowA)) {
+            if (const auto* sa = reg.Get<UIComp::UISelectableComponent>(rowA)) {
                 ZHLN::Test::ExpectTrue(!sa->selected);
             } else {
                 ZHLN::Test::ExpectTrue(false);
             }
-            if (const auto* sb = reg.Get<Comp::UISelectableComponent>(rowB)) {
+            if (const auto* sb = reg.Get<UIComp::UISelectableComponent>(rowB)) {
                 ZHLN::Test::ExpectTrue(sb->selected);
             } else {
                 ZHLN::Test::ExpectTrue(false);
@@ -211,10 +213,10 @@ struct GUIEditorTestSuite {
 
         auto inspector_builds_a_section_per_component() -> std::expected<void, ZHLN::Error> {
             Registry reg;
-            reg.Create(Comp::UISettingsComponent {.fontAtlas = MakeTestFont()});
+            reg.Create(UIComp::UISettingsComponent {.fontAtlas = MakeTestFont()});
             Entity   e = reg.Create(
-                Comp::UIRectComponent {.hierarchyDepth = 0, .layoutOrder = 1},
-                Comp::UIFlexComponent {},
+                UIComp::UIRectComponent {.hierarchyDepth = 0, .layoutOrder = 1},
+                UIComp::UIFlexComponent {},
                 Comp::NameComponent {.name = ZHLN::String64("Foo")}
             );
 
@@ -240,10 +242,10 @@ struct GUIEditorTestSuite {
 
         auto inspector_rows_follow_reflection() -> std::expected<void, ZHLN::Error> {
             Registry reg;
-            reg.Create(Comp::UISettingsComponent {.fontAtlas = MakeTestFont()});
+            reg.Create(UIComp::UISettingsComponent {.fontAtlas = MakeTestFont()});
             Entity   e = reg.Create(
-                Comp::UIRectComponent {.hierarchyDepth = 0, .layoutOrder = 1},
-                Comp::UIFlexComponent {}
+                UIComp::UIRectComponent {.hierarchyDepth = 0, .layoutOrder = 1},
+                UIComp::UIFlexComponent {}
             );
 
             Editor::EditorState st;
@@ -294,7 +296,7 @@ struct GUIEditorTestSuite {
 
         auto inspector_covers_3d_components() -> std::expected<void, ZHLN::Error> {
             Registry reg;
-            reg.Create(Comp::UISettingsComponent {.fontAtlas = MakeTestFont()});
+            reg.Create(UIComp::UISettingsComponent {.fontAtlas = MakeTestFont()});
             Entity   e = reg.Create(
                 Comp::NameComponent {.name = ZHLN::String64("Lamp")},
                 Comp::TransformComponent {},
@@ -333,7 +335,7 @@ struct GUIEditorTestSuite {
                 return {}; // no rows, no write-back path to exercise
             } else {
                 Registry reg;
-                reg.Create(Comp::UISettingsComponent {.fontAtlas = MakeTestFont()});
+                reg.Create(UIComp::UISettingsComponent {.fontAtlas = MakeTestFont()});
                 const JPH::Quat original = ZHLN::Math::EulerDegreesToQuat(JPH::Vec3(10.0f, -45.0f, 170.0f));
                 Entity          e        = reg.Create(Comp::TransformComponent {.rotation = original});
 
@@ -370,10 +372,10 @@ struct GUIEditorTestSuite {
                 return {};
             } else {
                 Registry reg;
-                reg.Create(Comp::UISettingsComponent {.fontAtlas = MakeTestFont()});
+                reg.Create(UIComp::UISettingsComponent {.fontAtlas = MakeTestFont()});
                 Entity   e = reg.Create(
-                    Comp::UIRectComponent {.x = 3.0f, .y = 4.0f, .hierarchyDepth = 0, .layoutOrder = 1},
-                    Comp::UIFlexComponent {.flexGrow = 0.75f},
+                    UIComp::UIRectComponent {.x = 3.0f, .y = 4.0f, .hierarchyDepth = 0, .layoutOrder = 1},
+                    UIComp::UIFlexComponent {.flexGrow = 0.75f},
                     Comp::NameComponent {.name = ZHLN::String64("Foo")}
                 );
 
@@ -389,8 +391,8 @@ struct GUIEditorTestSuite {
                 // Rows built (so the write-back path actually ran)...
                 ZHLN::Test::ExpectTrue(FindEntityNamed(reg, "flex_flexGrow") != Entity::Null());
                 // ...and every value round-tripped through the local copy.
-                const auto* rect = reg.Get<Comp::UIRectComponent>(e);
-                const auto* flex = reg.Get<Comp::UIFlexComponent>(e);
+                const auto* rect = reg.Get<UIComp::UIRectComponent>(e);
+                const auto* flex = reg.Get<UIComp::UIFlexComponent>(e);
                 const auto* name = reg.Get<Comp::NameComponent>(e);
                 ZHLN::Test::ExpectTrue(rect != nullptr && flex != nullptr && name != nullptr);
                 if (rect != nullptr) {

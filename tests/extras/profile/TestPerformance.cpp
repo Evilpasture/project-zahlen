@@ -34,6 +34,7 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
+#include <Zahlen/gui/UIComponents.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <array>
@@ -570,7 +571,7 @@ struct PerformanceTestSuite {
             });
 
             // Total active UI rects should match static dashboard footprint, not leak dynamically
-            size_t liveRects = reg.GetEntitiesWith<ZHLN::Components::UIRectComponent>().size();
+            size_t liveRects = reg.GetEntitiesWith<ZHLN::GUI::UIComponents::UIRectComponent>().size();
             ZHLN::Test::ExpectTrue(liveRects > 0 && liveRects < 100);
 
             ZHLN::Println(
@@ -642,7 +643,7 @@ struct PerformanceTestSuite {
             registry.RegisterComponents<
                 ZHLN::Components::TransformComponent, ZHLN::Components::MovementComponent, ZHLN::Components::PhysicsComponent,
                 ZHLN::Components::PhysicsStateComponent, AgentHealthComponent, AgentCombatStateComponent, SpatialPerceptionComponent,
-                ZHLN::Components::UIRectComponent>();
+                ZHLN::GUI::UIComponents::UIRectComponent>();
 
             // 2. Setup Static Physics World Boundary
             auto groundShape = physicsContext.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 150.0f, 1.0f, 150.0f);

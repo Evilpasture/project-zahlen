@@ -23,6 +23,7 @@
 
 enum class CameraLookAtError : uint8_t {
     EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine context for camera look-at test.">{}) = 1,
+    NoCameraFound ZHLN_ANNOTATION(ZHLN::Description<"No camera entity was created for the look-at scenario.">{}),
     RenderOutputBlank ZHLN_ANNOTATION(ZHLN::Description<"Rendered frame is blank or failed to capture.">{}),
     TargetNotCentered ZHLN_ANNOTATION(ZHLN::Description<"Target-colored pixels are not centered; camera is not looking at the target.">{}),
 };
@@ -124,9 +125,8 @@ struct CameraLookAtTestSuite {
             ZHLN::Test::ExpectTrue(reg.IsAlive(decoy));
 
             auto cameras  = reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>();
-            auto checkCam = ZHLN::Test::AssertTrue(!cameras.empty());
-            if (!checkCam) {
-                return checkCam;
+            if (!ZHLN::Test::ExpectTrue(!cameras.empty())) {
+                return std::unexpected(CameraLookAtError::NoCameraFound);
             }
 
             reg.Patch<ZHLN::Components::TargetCameraComponent>(cameras[0], [&](auto& tc) {
