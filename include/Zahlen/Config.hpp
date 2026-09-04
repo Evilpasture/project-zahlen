@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <bit>
 #include <cstdint>
@@ -19,6 +18,30 @@
 
 // 2. Combine them using string literal concatenation
 #define ZHLN_VERSION_STR ZHLN_STR(ZHLN_VERSION_MAJOR) "." ZHLN_STR(ZHLN_VERSION_MINOR) "." ZHLN_STR(ZHLN_VERSION_PATCH)
+
+#ifndef ZHLN_GIT_COMMIT_HASH
+#define ZHLN_GIT_COMMIT_HASH "unknown"
+#endif
+
+#ifndef ZHLN_COMPILER_FLAGS
+#define ZHLN_COMPILER_FLAGS "unknown"
+#endif
+
+#ifndef ZHLN_META_BUILDER
+#define ZHLN_META_BUILDER "unknown"
+#endif
+
+#ifndef ZHLN_BUILD_TOOL
+#define ZHLN_BUILD_TOOL "unknown"
+#endif
+
+#ifndef ZHLN_TARGET_TRIPLE
+#define ZHLN_TARGET_TRIPLE "unknown"
+#endif
+
+#ifndef ZHLN_LINKER_NAME
+#define ZHLN_LINKER_NAME "unknown"
+#endif
 
 namespace ZHLN {
 
@@ -70,6 +93,12 @@ inline constexpr std::string_view BuildType = "Debug";
 inline constexpr bool isDev = true;
 #else
 inline constexpr bool isDev = false;
+#endif
+
+#if defined(ZHLN_DEBUG)
+inline constexpr bool isDebug = true;
+#else
+inline constexpr bool isDebug = false;
 #endif
 
 #if defined(__ASAN_ENABLED__)
@@ -147,32 +176,14 @@ inline constexpr bool isDocker = true;
 inline constexpr bool isDocker = false;
 #endif
 
-// Check if the compiler supports a standardized debug break hook
-inline void DebugBreak() noexcept {
-#if defined(_WIN32) || defined(_WIN64)
-// We are strictly on Windows
-#if defined(_MSC_VER) || defined(__clang__)
-    __debugbreak();
-#endif
-#elif defined(__linux__)
-// We are strictly on Linux
-#if defined(__GNUC__) || defined(__clang__)
-    __builtin_trap();
-#endif
-#elif defined(__APPLE__)
-// We are strictly on macOS
-#if defined(__GNUC__) || defined(__clang__)
-    __builtin_trap();
-#endif
-#endif
-}
-
 struct PhysicsConfig {
     uint32_t maxBodies             = 1024;
     uint32_t maxBodyPairs          = 1024;
     uint32_t maxContactConstraints = 1024;
     uint32_t tempAllocatorSize     = 32 * 1024 * 1024; // 32MB
 };
+
+enum class ValidationMode : uint8_t { Off = 0, On = 1, GPU = 2 };
 
 struct RenderConfig {
     String64       appName;

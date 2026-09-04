@@ -10,8 +10,8 @@
 #include <span>
 
 namespace ZHLN::TaskSystem {
-uint32_t GetWorkerIndex();
-uint32_t GetWorkerCount();
+auto GetWorkerIndex() -> uint32_t;
+auto GetWorkerCount() -> uint32_t;
 // The function signature for a Job
 using TaskFn = void (*)(void*);
 
@@ -95,11 +95,10 @@ void ParallelFor(uint32_t count, uint32_t chunkSize, Func&& func) {
         jobs[i] = {.func = funcPtr, .start = start, .end = end, .chunkIdx = i};
 
         tasks[i] = {
-            .func =
-                [](void* arg) {
-                    auto* job = static_cast<ChunkJob*>(arg);
-                    (*job->func)(job->start, job->end, job->chunkIdx);
-                },
+            .func = [](void* arg) -> auto {
+                auto* job = static_cast<ChunkJob*>(arg);
+                (*job->func)(job->start, job->end, job->chunkIdx);
+            },
             .arg = &jobs[i]
         };
     }

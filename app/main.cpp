@@ -26,6 +26,7 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Console.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/GUI.hpp>
@@ -47,7 +48,7 @@
 #include <format>
 #include <imgui.h>
 #include <print>
-#include <thread> // FIXED: Added to fix 'std::this_thread'
+#include <thread>
 
 extern std::vector<std::string> s_InvShellLog;
 extern bool                     s_InvScrollToBottom;
@@ -1185,6 +1186,7 @@ auto main(int argc, char* argv[]) -> int {
                 ZHLN::Platform::Init();
                 ZHLN::SetupSignalHandler();
                 ZHLN::TaskSystem::Init();
+                ZHLN::DefaultPreset::SetDisabled(true);
 
                 uint32_t w = options.fullscreen ? 0 : 1280;
                 uint32_t h = options.fullscreen ? 0 : 720;

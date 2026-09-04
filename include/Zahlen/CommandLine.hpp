@@ -3,6 +3,7 @@
 
 #pragma once
 #include <Zahlen/Common.h>
+#include <Zahlen/Config.hpp>
 #include <Zahlen/Error.hpp>
 #include <cstdint>
 #include <cstdlib>
@@ -13,8 +14,6 @@
 namespace ZHLN {
 
 enum class LogLevel : uint8_t { Quiet, Moderate, Verbose };
-
-enum class ValidationMode : uint8_t { Off = 0, On = 1, GPU = 2 };
 
 enum class CommandLineError : uint8_t { InvalidValue = 1, MissingValue, UnknownArgument };
 

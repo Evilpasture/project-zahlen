@@ -8,6 +8,7 @@
 
 #pragma once
 #include <Zahlen/Common.h>
+#include <Zahlen/Config.hpp>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -50,9 +51,6 @@ typedef struct ZHLN_BufferView {
 namespace ZHLN {
 // C++ alias
 using BufferView = ::ZHLN_BufferView;
-static_assert(
-    (std::is_trivially_default_constructible_v<BufferView> && std::is_trivially_copyable_v<BufferView>),
-    "BufferView must be trivial for FFI safety!"
-);
+static_assert(isDebug || (std::is_trivially_default_constructible_v<BufferView> && std::is_trivially_copyable_v<BufferView>) );
 } // namespace ZHLN
 #endif

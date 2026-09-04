@@ -3,25 +3,16 @@
 
 #pragma once
 
+#include <Zahlen/Config.hpp>
 #include <Zahlen/Core/Atomic.hpp>
 #include <cstdint>
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
-#include <immintrin.h>
-#endif
 
 namespace ZHLN {
 
 // Forward declare the Fiber system
 struct Fiber;
-extern Fiber* GetCurrentFiber() noexcept;
-extern void   YieldFiber() noexcept;
-
-inline constexpr bool kIsDebugMutex =
-#ifdef ZHLN_DEBUG
-    true;
-#else
-    false;
-#endif
+extern auto GetCurrentFiber() noexcept -> Fiber*;
+extern void YieldFiber() noexcept;
 
 /**
  * @brief High-Performance, 1-Byte Mutex.
@@ -33,14 +24,14 @@ class Mutex {
     ~Mutex()                   = default;
 
     [[gnu::flatten, gnu::hot, gnu::always_inline]]
-    inline void lock() noexcept {
-        if constexpr (kIsDebugMutex) {
+    void lock() noexcept {
+        if constexpr (isDebug) {
             CheckPreLock();
         }
 
         uint8_t expected = UNLOCKED;
         if (_bits.compare_exchange_strong(expected, LOCKED, std::memory_order::acquire, std::memory_order::relaxed)) [[likely]] {
-            if constexpr (kIsDebugMutex) {
+            if constexpr (isDebug) {
                 PostLock();
             }
             return;
@@ -49,8 +40,8 @@ class Mutex {
     }
 
     [[gnu::flatten, gnu::hot, gnu::always_inline]]
-    inline void unlock() noexcept {
-        if constexpr (kIsDebugMutex) {
+    void unlock() noexcept {
+        if constexpr (isDebug) {
             PreUnlock();
             ClearOwner();
         }
@@ -63,14 +54,14 @@ class Mutex {
     }
 
     [[gnu::flatten, gnu::hot, gnu::always_inline]]
-    inline bool try_lock() noexcept {
-        if constexpr (kIsDebugMutex) {
+    auto try_lock() noexcept -> bool {
+        if constexpr (isDebug) {
             CheckPreLock();
         }
 
         uint8_t expected = UNLOCKED;
         bool    success  = _bits.compare_exchange_strong(expected, LOCKED, std::memory_order::acquire, std::memory_order::relaxed);
-        if constexpr (kIsDebugMutex) {
+        if constexpr (isDebug) {
             if (success) {
                 PostLock();
             }
@@ -114,10 +105,10 @@ class Mutex {
 };
 
 // Guarantee 1-byte footprint in Release builds
-static_assert(kIsDebugMutex || sizeof(Mutex) == 1, "ZHLN::Mutex must be exactly 1 byte in Release mode!");
+static_assert(isDebug || sizeof(Mutex) == 1, "ZHLN::Mutex must be exactly 1 byte in Release mode!");
 
 static_assert(
-    kIsDebugMutex || (std::is_trivially_default_constructible_v<Mutex> && std::is_standard_layout_v<Mutex> && std::is_trivially_copyable_v<Mutex>),
+    isDebug || (std::is_trivially_default_constructible_v<Mutex> && std::is_standard_layout_v<Mutex> && std::is_trivially_copyable_v<Mutex>),
     "Mutex must remain a trivial C-compatible byte in Release mode!"
 );
 
@@ -133,18 +124,8 @@ struct MutexGuard {
         _m.unlock();
     }
 
-    MutexGuard(const MutexGuard&)            = delete;
-    MutexGuard& operator=(const MutexGuard&) = delete;
+    MutexGuard(const MutexGuard&)                    = delete;
+    auto operator=(const MutexGuard&) -> MutexGuard& = delete;
 };
-
-inline void CPURelax() noexcept {
-#if defined(__x86_64__) || defined(_M_X64)
-    _mm_pause();
-#elif defined(__aarch64__)
-    __asm__ __volatile__("yield" ::: "memory");
-#else
-    std::this_thread::yield();
-#endif
-}
 
 } // namespace ZHLN

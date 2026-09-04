@@ -30,9 +30,9 @@ struct WorkQueue {
         fibers.push(f);
     }
 
-    Fiber* PopOrWait() {
+    auto PopOrWait() -> Fiber* {
         std::unique_lock lock(mtx);
-        cv.wait(lock, [this] { return !fibers.empty() || quit; });
+        cv.wait(lock, [this] -> bool { return !fibers.empty() || quit; });
         if (quit && fibers.empty()) {
             return nullptr;
         }
@@ -41,7 +41,7 @@ struct WorkQueue {
         return f;
     }
 
-    Fiber* TryPop() {
+    auto TryPop() -> Fiber* {
         std::lock_guard lock(mtx);
         if (fibers.empty()) {
             return nullptr;
@@ -69,9 +69,9 @@ struct WorkQueue {
 namespace {
 
 // Compiler-safe single-element thread-local cache (maximum 1 fiber per thread)
-static thread_local Fiber* t_localFiber = nullptr;
+thread_local Fiber* t_localFiber = nullptr;
 
-inline bool PushLocalFiber(Fiber* f) noexcept {
+inline auto PushLocalFiber(Fiber* f) noexcept -> bool {
     if (t_localFiber == nullptr) {
         t_localFiber = f;
         return true;
@@ -79,7 +79,7 @@ inline bool PushLocalFiber(Fiber* f) noexcept {
     return false; // Cache full, fallback to global s_freeQueue
 }
 
-inline Fiber* PopLocalFiber() noexcept {
+inline auto PopLocalFiber() noexcept -> Fiber* {
     if (t_localFiber != nullptr) {
         Fiber* f     = t_localFiber;
         t_localFiber = nullptr;
@@ -88,30 +88,28 @@ inline Fiber* PopLocalFiber() noexcept {
     return nullptr; // Cache empty, fallback to global s_freeQueue
 }
 
-} // namespace
-
 // --- Internal State ---
 struct FiberData {
     Task     task;
     Counter* counter;
 };
 
-static WorkQueue                s_readyQueue;
-static WorkQueue                s_freeQueue;
-static std::vector<Fiber*>      s_fiberPool;
-static std::vector<FiberData>   s_fiberData;
-static std::vector<std::thread> s_threads;
-static thread_local uint32_t    t_workerIndex = 0;
-static uint32_t                 s_workerCount = 0;
+WorkQueue                s_readyQueue;
+WorkQueue                s_freeQueue;
+std::vector<Fiber*>      s_fiberPool;
+std::vector<FiberData>   s_fiberData;
+std::vector<std::thread> s_threads;
+thread_local uint32_t    t_workerIndex = 0;
+uint32_t                 s_workerCount = 0;
 struct TaskSystemDeinitGuard {
     ~TaskSystemDeinitGuard() {
         Shutdown();
     }
 };
-static TaskSystemDeinitGuard s_deinitGuard;
+TaskSystemDeinitGuard s_deinitGuard;
 
 // --- The Infinite Loop every Fiber runs ---
-static void FiberMain(void* arg) {
+void FiberMain(void* arg) {
     auto* data = static_cast<FiberData*>(arg);
     while (true) {
         // 1. Run the assigned task
@@ -144,7 +142,7 @@ static void FiberMain(void* arg) {
 // provably suspended and this thread is its only owner. Blocked yields
 // (mutex/condvar/counter waits) leave taskDone clear and are skipped --
 // those fibers re-enter the ready queue through WakeUp instead.
-static inline void RecycleFiber(Fiber* f) noexcept {
+inline void RecycleFiber(Fiber* f) noexcept {
     if (f == nullptr || !f->taskDone.exchange(false, std::memory_order::acquire)) {
         return;
     }
@@ -154,7 +152,7 @@ static inline void RecycleFiber(Fiber* f) noexcept {
 }
 
 // --- The Infinite Loop every OS Thread runs ---
-static void WorkerMain(uint32_t index) {
+void WorkerMain(uint32_t index) {
     Platform::SetHighPriority();
     Fiber::InitMainThread();
     t_workerIndex = index;
@@ -177,6 +175,8 @@ static void WorkerMain(uint32_t index) {
         RecycleFiber(f);
     }
 }
+
+} // namespace
 
 void Init(uint32_t numThreads, uint32_t numFibers, size_t stackSize) {
     if (!s_threads.empty() || !s_fiberPool.empty()) {
@@ -214,10 +214,10 @@ void Init(uint32_t numThreads, uint32_t numFibers, size_t stackSize) {
     }
 }
 
-uint32_t GetWorkerIndex() {
+auto GetWorkerIndex() -> uint32_t {
     return t_workerIndex;
 }
-uint32_t GetWorkerCount() {
+auto GetWorkerCount() -> uint32_t {
     return s_workerCount;
 }
 

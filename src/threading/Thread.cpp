@@ -21,21 +21,11 @@ extern "C" void ZHLN_TrampolineAsm(void);
 
 namespace ZHLN {
 
+namespace {
+
 // Thread-local tracking of the active fiber
-static thread_local Fiber  t_mainFiber;
-static thread_local Fiber* t_currentFiber = nullptr;
-
-auto GetCurrentFiberID() -> uint64_t {
-    if (t_currentFiber == nullptr) {
-        return 0; // Not a fiber-managed thread
-    }
-    if (t_currentFiber->isMain) {
-        return 1; // Friendly ID for main thread
-    }
-
-    // For worker fibers, return the memory address as a unique ID
-    return std::bit_cast<uint64_t>(t_currentFiber);
-}
+thread_local Fiber  t_mainFiber;
+thread_local Fiber* t_currentFiber = nullptr;
 
 /**
  * @brief The bridge between Assembly and C++.
@@ -55,7 +45,7 @@ extern "C" void ZHLN_Trampoline() {
 }
 
 // Windows requires swapping StackBase/StackLimit in the TEB (Thread Environment Block)
-static inline void SwapTEB(Fiber* target) {
+void SwapTEB([[maybe_unused]] Fiber* target) {
 #if defined(_WIN32)
     NT_TIB* tib                = (NT_TIB*) NtCurrentTeb();
     t_currentFiber->stackBase  = tib->StackBase;
@@ -63,11 +53,25 @@ static inline void SwapTEB(Fiber* target) {
     tib->StackBase             = target->stackBase;
     tib->StackLimit            = target->stackLimit;
 #else
-    (void) target;
+    // No need.
 #endif
 }
 
-Fiber* Fiber::GetCurrent() noexcept {
+} // namespace
+
+auto GetCurrentFiberID() -> uint64_t {
+    if (t_currentFiber == nullptr) {
+        return 0; // Not a fiber-managed thread
+    }
+    if (t_currentFiber->isMain) {
+        return 1; // Friendly ID for main thread
+    }
+
+    // For worker fibers, return the memory address as a unique ID
+    return std::bit_cast<uint64_t>(t_currentFiber);
+}
+
+auto Fiber::GetCurrent() noexcept -> Fiber* {
     return t_currentFiber;
 }
 
@@ -89,7 +93,7 @@ void Fiber::InitMainThread() noexcept {
     t_currentFiber = &t_mainFiber;
 }
 
-Fiber* Fiber::Create(size_t stackSize, FiberFunc func, void* arg) noexcept {
+auto Fiber::Create(size_t stackSize, FiberFunc func, void* arg) noexcept -> Fiber* {
     // 1. Calculate Sizes (Page Aligned)
 #if defined(_WIN32)
     SYSTEM_INFO si;
@@ -122,7 +126,7 @@ Fiber* Fiber::Create(size_t stackSize, FiberFunc func, void* arg) noexcept {
     if (map == MAP_FAILED) {
         return nullptr;
     }
-    const uintptr_t mapBase = std::bit_cast<uintptr_t>(map);
+    const auto mapBase = std::bit_cast<uintptr_t>(map);
     mprotect(map, pageSize, PROT_NONE);
     mprotect(std::bit_cast<void*>(mapBase + pageSize + stackSize), pageSize, PROT_NONE);
     stackTop = mapBase + pageSize + stackSize;
@@ -216,7 +220,7 @@ void Fiber::Destroy(Fiber* fiber) noexcept {
 #endif
 }
 
-Fiber* GetCurrentFiber() noexcept {
+auto GetCurrentFiber() noexcept -> Fiber* {
     return Fiber::GetCurrent();
 }
 

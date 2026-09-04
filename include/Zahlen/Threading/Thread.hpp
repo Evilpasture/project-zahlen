@@ -43,13 +43,13 @@ struct alignas(128) Fiber {
     std::atomic<bool> taskDone {false};
 
     // Static API for Mutex/Scheduler access
-    static Fiber* GetCurrent() noexcept;
-    static void   Yield() noexcept;
-    static void   Resume(Fiber* target) noexcept;
+    static auto GetCurrent() noexcept -> Fiber*;
+    static void Yield() noexcept;
+    static void Resume(Fiber* target) noexcept;
 
     // Allocation
-    static Fiber* Create(size_t stackSize, FiberFunc func, void* arg) noexcept;
-    static void   Destroy(Fiber* fiber) noexcept;
+    static auto Create(size_t stackSize, FiberFunc func, void* arg) noexcept -> Fiber*;
+    static void Destroy(Fiber* fiber) noexcept;
 
     /**
      * @brief Converts the current OS thread into the "Main" Fiber.
@@ -59,7 +59,7 @@ struct alignas(128) Fiber {
 };
 
 // Global Linker Satellites for Mutex.cpp
-Fiber* GetCurrentFiber() noexcept;
-void   YieldFiber() noexcept;
+auto GetCurrentFiber() noexcept -> Fiber*;
+void YieldFiber() noexcept;
 
 } // namespace ZHLN

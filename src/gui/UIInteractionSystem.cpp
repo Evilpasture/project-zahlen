@@ -321,8 +321,11 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
 
                 // Splitter handle: begin drag
                 if (Entity spEnt = FindAncestorWith<Components::UISplitterComponent>(reg, e); spEnt != Entity::Null()) {
-                    if (auto* sp = reg.Get<Components::UISplitterComponent>(spEnt)) {
-                        sp->isDragging = true;
+                    const auto* handleDrag = reg.Get<Components::UIDragComponent>(e);
+                    if (handleDrag != nullptr && handleDrag->targetEntity == spEnt) {
+                        if (auto* sp = reg.Get<Components::UISplitterComponent>(spEnt)) {
+                            sp->isDragging = true;
+                        }
                     }
                 }
 
