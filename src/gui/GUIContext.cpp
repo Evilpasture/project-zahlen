@@ -11,6 +11,7 @@
 // necessity.
 
 #include <Zahlen/GUI.hpp>
+#include <Zahlen/gui/UIComponents.hpp>
 
 namespace ZHLN::GUI {
 
@@ -49,8 +50,8 @@ void Context::ClearStatus() noexcept {
         // First failure wins and propagates; a liveness-verified child that
         // fails to die is a real failure, not a discarded temporary.
         std::expected<void, Error> firstFailure {};
-        if (const auto* cache = m_reg->Get<Components::UIChildCacheComponent>(ent)) {
-            cache->children.ForEach([&](uint64_t, const Components::UIChildCacheComponent::ChildRecord& rec) -> void {
+        if (const auto* cache = m_reg->Get<UIComponents::UIChildCacheComponent>(ent)) {
+            cache->children.ForEach([&](uint64_t, const UIComponents::UIChildCacheComponent::ChildRecord& rec) -> void {
                 if (firstFailure.has_value() && m_reg->IsAlive(rec.entity)) {
                     firstFailure = DestroyUIEntity(rec.entity);
                 }
@@ -71,7 +72,7 @@ void Context::SweepStaleChildren(Entity parentEntity) {
             return;
         }
 
-        auto* cache = m_reg->Get<Components::UIChildCacheComponent>(cacheEntity);
+        auto* cache = m_reg->Get<UIComponents::UIChildCacheComponent>(cacheEntity);
         if (cache == nullptr) {
             return;
         }
@@ -80,7 +81,7 @@ void Context::SweepStaleChildren(Entity parentEntity) {
         // the entity died outside the GUI (orphaned record pointing at a dead
         // entity, e.g. after a direct Registry::Destroy).
         ZHLN::Array<uint64_t> staleKeys;
-        cache->children.ForEach([&](uint64_t key, const Components::UIChildCacheComponent::ChildRecord& rec) -> void {
+        cache->children.ForEach([&](uint64_t key, const UIComponents::UIChildCacheComponent::ChildRecord& rec) -> void {
             if (!m_reg->IsAlive(rec.entity) || rec.lastVisitedFrame < m_currentFrame) {
                 staleKeys.push_back(key);
             }
@@ -139,7 +140,7 @@ void Context::SweepStaleChildren(Entity parentEntity) {
         Entity e = GetOrCreateEntity(key, [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64(name)},
-                Components::UIRectComponent {
+                UIComponents::UIRectComponent {
                     .parentEntity   = parent,
                     .x              = cfg.x,
                     .y              = cfg.y,
@@ -152,8 +153,8 @@ void Context::SweepStaleChildren(Entity parentEntity) {
                     .hierarchyDepth = depth,
                     .clipChildren   = cfg.clipChildren
                 },
-                Components::UIPanelComponent {.color = cfg.color, .borderRadius = cfg.borderRadius, .edgeWidth = cfg.edgeWidth},
-                Components::UIFlexComponent {
+                UIComponents::UIPanelComponent {.color = cfg.color, .borderRadius = cfg.borderRadius, .edgeWidth = cfg.edgeWidth},
+                UIComponents::UIFlexComponent {
                     .direction     = cfg.direction,
                     .justify       = cfg.justify,
                     .alignItems    = cfg.alignItems,
@@ -168,7 +169,7 @@ void Context::SweepStaleChildren(Entity parentEntity) {
             );
         });
 
-        m_reg->Patch<Components::UIRectComponent>(e, [&](auto& rect) -> auto {
+        m_reg->Patch<UIComponents::UIRectComponent>(e, [&](auto& rect) -> auto {
             rect.x              = cfg.x;
             rect.y              = cfg.y;
             rect.width          = cfg.width;
@@ -193,9 +194,9 @@ void Context::SweepStaleChildren(Entity parentEntity) {
         Entity e = GetOrCreateEntity(key, [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64(name)},
-                Components::UIRectComponent {.parentEntity = parent, .width = cfg.width, .height = cfg.height, .hierarchyDepth = depth},
-                Components::UIPanelComponent {.color = cfg.color, .edgeWidth = cfg.edgeWidth},
-                Components::UIFlexComponent {
+                UIComponents::UIRectComponent {.parentEntity = parent, .width = cfg.width, .height = cfg.height, .hierarchyDepth = depth},
+                UIComponents::UIPanelComponent {.color = cfg.color, .edgeWidth = cfg.edgeWidth},
+                UIComponents::UIFlexComponent {
                     .direction     = cfg.direction,
                     .justify       = cfg.justify,
                     .alignItems    = cfg.alignItems,
@@ -230,8 +231,8 @@ auto Context::Label(std::string_view text, const LabelConfig& cfg ) -> Entity {
         Entity e = GetOrCreateEntity(key, [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64(labelName)},
-                Components::UIRectComponent {.parentEntity = parent, .height = cfg.height, .hierarchyDepth = depth},
-                Components::TextComponent {
+                UIComponents::UIRectComponent {.parentEntity = parent, .height = cfg.height, .hierarchyDepth = depth},
+                UIComponents::TextComponent {
                     .text          = String256(text),
                     .scale         = cfg.scale,
                     .color         = cfg.color,
@@ -244,7 +245,7 @@ auto Context::Label(std::string_view text, const LabelConfig& cfg ) -> Entity {
             );
         });
 
-        m_reg->Patch<Components::TextComponent>(e, [&](auto& textComp) -> auto {
+        m_reg->Patch<UIComponents::TextComponent>(e, [&](auto& textComp) -> auto {
             textComp.text.assign(text);
             textComp.color     = cfg.color;
             textComp.scale     = cfg.scale;
@@ -266,9 +267,9 @@ auto Context::Checkbox(std::string_view id, std::string_view label, bool& value,
         Entity e = GetOrCreateEntity(key, [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64(id)},
-                Components::UIRectComponent {.parentEntity = parent, .height = cfg.height, .hierarchyDepth = depth},
-                Components::UIPanelComponent {.color = {0.0f, 0.0f, 0.0f, 0.0f}},
-                Components::UIFlexComponent {
+                UIComponents::UIRectComponent {.parentEntity = parent, .height = cfg.height, .hierarchyDepth = depth},
+                UIComponents::UIPanelComponent {.color = {0.0f, 0.0f, 0.0f, 0.0f}},
+                UIComponents::UIFlexComponent {
                     .direction     = FlexDirection::Row,
                     .alignItems    = FlexAlign::Center,
                     .paddingLeft   = 4.0f,
@@ -276,8 +277,8 @@ auto Context::Checkbox(std::string_view id, std::string_view label, bool& value,
                     .gapX          = cfg.gap,
                     .gapY          = cfg.gap
                 },
-                Components::UIButtonComponent {},
-                Components::UICheckboxComponent {.checked = value, .previousValue = value},
+                UIComponents::UIButtonComponent {},
+                UIComponents::UICheckboxComponent {.checked = value, .previousValue = value},
                 // Inner checkbox box
                 // Will be child-created below as a sibling to a label
                 Components::MeshComponent {}
@@ -287,7 +288,7 @@ auto Context::Checkbox(std::string_view id, std::string_view label, bool& value,
         // Sync: on first/respawn the entity has no children yet — create the
         // box+check+label inside. On subsequent frames ensure visual state
         // matches the component.
-        auto* cb = m_reg->Get<Components::UICheckboxComponent>(e);
+        auto* cb = m_reg->Get<UIComponents::UICheckboxComponent>(e);
 
         // Toggle on click (ConsumeClick both tests and clears the flag).
         if (ConsumeClick(e)) {
@@ -331,16 +332,16 @@ auto Context::DragFloat(std::string_view id, std::string_view label, float& valu
         Entity e = GetOrCreateEntity(key, [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64(id)},
-                Components::UIRectComponent {.parentEntity = parent, .width = cfg.width, .height = cfg.height, .hierarchyDepth = depth},
-                Components::UIPanelComponent {.color = {0.0f, 0.0f, 0.0f, 0.0f}},
-                Components::UIFlexComponent {
+                UIComponents::UIRectComponent {.parentEntity = parent, .width = cfg.width, .height = cfg.height, .hierarchyDepth = depth},
+                UIComponents::UIPanelComponent {.color = {0.0f, 0.0f, 0.0f, 0.0f}},
+                UIComponents::UIFlexComponent {
                     .direction  = FlexDirection::Row,
                     .alignItems = FlexAlign::Center,
                     .gapX       = 8.0f,
                     .gapY       = 8.0f
                 },
-                Components::UIButtonComponent {},
-                Components::UISliderComponent {
+                UIComponents::UIButtonComponent {},
+                UIComponents::UISliderComponent {
                     .value         = std::clamp(value, minVal, maxVal),
                     .minValue      = minVal,
                     .maxValue      = maxVal,
@@ -350,7 +351,7 @@ auto Context::DragFloat(std::string_view id, std::string_view label, float& valu
             );
         });
 
-        auto* slider = m_reg->Get<Components::UISliderComponent>(e);
+        auto* slider = m_reg->Get<UIComponents::UISliderComponent>(e);
 
         // Write back to caller reference (ECS is authoritative)
         value = std::clamp(value, slider->minValue, slider->maxValue);
@@ -400,16 +401,16 @@ auto Context::Dropdown(std::string_view id, std::string_view label, int& selecte
         Entity e = GetOrCreateEntity(key, [&]() -> Entity {
             auto ent = m_reg->Create(
                 Components::NameComponent {.name = String64(id)},
-                Components::UIRectComponent {.parentEntity = parent, .width = cfg.width, .height = cfg.height, .hierarchyDepth = depth},
-                Components::UIPanelComponent {.color = cfg.bgColor, .borderRadius = cfg.borderRadius},
-                Components::UIFlexComponent {
+                UIComponents::UIRectComponent {.parentEntity = parent, .width = cfg.width, .height = cfg.height, .hierarchyDepth = depth},
+                UIComponents::UIPanelComponent {.color = cfg.bgColor, .borderRadius = cfg.borderRadius},
+                UIComponents::UIFlexComponent {
                     .direction     = FlexDirection::Row,
                     .alignItems    = FlexAlign::Center,
                     .paddingLeft   = cfg.padding,
                     .paddingRight  = cfg.padding
                 },
-                Components::UIButtonComponent {},
-                Components::UIDropdownComponent {
+                UIComponents::UIButtonComponent {},
+                UIComponents::UIDropdownComponent {
                     .selectedIdx = selectedIdx,
                     .previousIdx = selectedIdx,
                     .expanded    = false,
@@ -419,12 +420,12 @@ auto Context::Dropdown(std::string_view id, std::string_view label, int& selecte
             return ent;
         });
 
-        auto* dd = m_reg->Get<Components::UIDropdownComponent>(e);
+        auto* dd = m_reg->Get<UIComponents::UIDropdownComponent>(e);
 
         // The header (selected text + arrow) is a single row. An older build
         // created it as a column, stacking the arrow under the text where it
         // hung out of the 32px header and into the widget below.
-        m_reg->Patch<Components::UIFlexComponent>(e, [&](auto& f) -> auto {
+        m_reg->Patch<UIComponents::UIFlexComponent>(e, [&](auto& f) -> auto {
             f.direction  = FlexDirection::Row;
             f.alignItems = FlexAlign::Center;
         });
@@ -441,7 +442,7 @@ auto Context::Dropdown(std::string_view id, std::string_view label, int& selecte
         }
 
         // Update header panel color to reflect hover
-        m_reg->Patch<Components::UIPanelComponent>(e, [&](auto& pc) -> auto {
+        m_reg->Patch<UIComponents::UIPanelComponent>(e, [&](auto& pc) -> auto {
             pc.color = IsHovered(e) ? cfg.hoverColor : cfg.bgColor;
             pc.borderRadius = cfg.borderRadius;
         });
@@ -503,17 +504,17 @@ auto Context::Dropdown(std::string_view id, std::string_view label, int& selecte
                 Entity itemEnt = GetOrCreateEntity(itemKey, [&]() -> Entity {
                     return m_reg->Create(
                         Components::NameComponent {.name = String64(itemName)},
-                        Components::UIRectComponent {.parentEntity = menuParent, .height = cfg.itemHeight, .hierarchyDepth = menuDepth},
-                        Components::UIPanelComponent {.color = (i == dd->selectedIdx) ? cfg.selectedColor : cfg.bgColor},
-                        Components::UIFlexComponent {
+                        UIComponents::UIRectComponent {.parentEntity = menuParent, .height = cfg.itemHeight, .hierarchyDepth = menuDepth},
+                        UIComponents::UIPanelComponent {.color = (i == dd->selectedIdx) ? cfg.selectedColor : cfg.bgColor},
+                        UIComponents::UIFlexComponent {
                             .direction     = FlexDirection::Row,
                             .alignItems    = FlexAlign::Center,
                             .flexGrow      = 1.0f,
                             .paddingLeft   = cfg.padding,
                             .paddingRight  = cfg.padding
                         },
-                        Components::UIButtonComponent {},
-                        Components::TextComponent {
+                        UIComponents::UIButtonComponent {},
+                        UIComponents::TextComponent {
                             .text          = String256(std::string_view(dd->options[i])),
                             .scale         = cfg.scale,
                             .color         = cfg.textColor,
@@ -525,22 +526,22 @@ auto Context::Dropdown(std::string_view id, std::string_view label, int& selecte
                 });
 
                 // Ensure parent/depth/sizing stays correct if the menu box moved
-                m_reg->Patch<Components::UIRectComponent>(itemEnt, [&](auto& r) -> auto {
+                m_reg->Patch<UIComponents::UIRectComponent>(itemEnt, [&](auto& r) -> auto {
                     r.parentEntity   = menuParent;
                     r.hierarchyDepth = menuDepth;
                     r.height         = cfg.itemHeight;
                 });
-                if (auto* iflex = m_reg->Get<Components::UIFlexComponent>(itemEnt)) {
+                if (auto* iflex = m_reg->Get<UIComponents::UIFlexComponent>(itemEnt)) {
                     iflex->flexGrow = 1.0f;
                 }
 
                 // Update text/color
-                m_reg->Patch<Components::TextComponent>(itemEnt, [&](auto& tc) -> auto {
+                m_reg->Patch<UIComponents::TextComponent>(itemEnt, [&](auto& tc) -> auto {
                     tc.text.assign(std::string_view(dd->options[i]));
                 });
                 bool isSelected = (i == dd->selectedIdx);
                 bool isItemHover = IsHovered(itemEnt);
-                m_reg->Patch<Components::UIPanelComponent>(itemEnt, [&](auto& pc) -> auto {
+                m_reg->Patch<UIComponents::UIPanelComponent>(itemEnt, [&](auto& pc) -> auto {
                     pc.color = isSelected ? cfg.selectedColor : (isItemHover ? cfg.hoverColor : cfg.bgColor);
                 });
 
@@ -580,7 +581,7 @@ auto Context::Dropdown(std::string_view id, std::string_view label, int& selecte
         uint32_t depth = 0;
         Entity   e     = PrepareCollapsingHeader(id, label, defaultOpen, cfg, depth);
 
-        auto* hdr = m_reg->Get<Components::UICollapsingHeaderComponent>(e);
+        auto* hdr = m_reg->Get<UIComponents::UICollapsingHeaderComponent>(e);
         if (hdr->isOpen) {
             // Build the content box directly under the header (same key as the
             // closure form's Box, so switching forms never dupes the subtree),
@@ -593,9 +594,9 @@ auto Context::Dropdown(std::string_view id, std::string_view label, int& selecte
             Entity contentBox = GetOrCreateChild(e, boxKey, [&]() -> Entity {
                 return m_reg->Create(
                     Components::NameComponent {.name = String64(contentBoxName)},
-                    Components::UIRectComponent {.parentEntity = e, .width = 0.0f, .height = 0.0f, .hierarchyDepth = depth + 1},
-                    Components::UIPanelComponent {.color = {0.0f, 0.0f, 0.0f, 0.0f}},
-                    Components::UIFlexComponent {
+                    UIComponents::UIRectComponent {.parentEntity = e, .width = 0.0f, .height = 0.0f, .hierarchyDepth = depth + 1},
+                    UIComponents::UIPanelComponent {.color = {0.0f, 0.0f, 0.0f, 0.0f}},
+                    UIComponents::UIFlexComponent {
                         .direction     = FlexDirection::Column,
                         .paddingLeft   = cfg.indent,
                         .paddingTop    = cfg.indent,
@@ -607,7 +608,7 @@ auto Context::Dropdown(std::string_view id, std::string_view label, int& selecte
                 );
             });
             // Keep parent/depth correct for the persistent entity each frame.
-            m_reg->Patch<Components::UIRectComponent>(contentBox, [&](auto& r) -> auto {
+            m_reg->Patch<UIComponents::UIRectComponent>(contentBox, [&](auto& r) -> auto {
                 r.parentEntity   = e;
                 r.hierarchyDepth = depth + 1;
             });
@@ -637,9 +638,9 @@ auto Context::Dropdown(std::string_view id, std::string_view label, int& selecte
         Entity e = GetOrCreateEntity(key, [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64(id)},
-                Components::UIRectComponent {.parentEntity = parent, .width = cfg.width, .height = viewportHeight, .hierarchyDepth = depth},
-                Components::UIPanelComponent {.color = cfg.bgColor},
-                Components::UIFlexComponent {
+                UIComponents::UIRectComponent {.parentEntity = parent, .width = cfg.width, .height = viewportHeight, .hierarchyDepth = depth},
+                UIComponents::UIPanelComponent {.color = cfg.bgColor},
+                UIComponents::UIFlexComponent {
                     .direction  = FlexDirection::Row,
                     .alignItems = FlexAlign::Stretch,
                     .flexGrow   = cfg.flexGrow,
@@ -659,7 +660,7 @@ auto Context::Dropdown(std::string_view id, std::string_view label, int& selecte
             );
         });
 
-        m_reg->Patch<Components::UIRectComponent>(e, [&](auto& r) -> auto {
+        m_reg->Patch<UIComponents::UIRectComponent>(e, [&](auto& r) -> auto {
             r.parentEntity   = parent;
             r.width          = cfg.width;
             r.height         = viewportHeight;
@@ -669,7 +670,7 @@ auto Context::Dropdown(std::string_view id, std::string_view label, int& selecte
         // flexGrow decides whether `height` is authoritative (0) or a base the
         // parent's free space is added to (1). It is patched every frame so a
         // cached box follows a config change instead of keeping last frame's.
-        m_reg->Patch<Components::UIFlexComponent>(e, [&](auto& f) -> auto {
+        m_reg->Patch<UIComponents::UIFlexComponent>(e, [&](auto& f) -> auto {
             f.direction  = FlexDirection::Row;
             f.alignItems = FlexAlign::Stretch;
             f.flexGrow   = cfg.flexGrow;
@@ -681,9 +682,9 @@ auto Context::Dropdown(std::string_view id, std::string_view label, int& selecte
         Entity viewport = GetOrCreateChild(e, HashStringView("_sb_viewport"), [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64("_sb_viewport")},
-                Components::UIRectComponent {.parentEntity = e, .width = 0.0f, .height = 0.0f, .hierarchyDepth = depth + 1, .clipChildren = true},
-                Components::UIPanelComponent {.color = {0.0f, 0.0f, 0.0f, 0.0f}},
-                Components::UIFlexComponent {
+                UIComponents::UIRectComponent {.parentEntity = e, .width = 0.0f, .height = 0.0f, .hierarchyDepth = depth + 1, .clipChildren = true},
+                UIComponents::UIPanelComponent {.color = {0.0f, 0.0f, 0.0f, 0.0f}},
+                UIComponents::UIFlexComponent {
                     .direction     = FlexDirection::Column,
                     .alignItems    = FlexAlign::Stretch,
                     .flexGrow      = 1.0f,
@@ -696,7 +697,7 @@ auto Context::Dropdown(std::string_view id, std::string_view label, int& selecte
                     .gapX          = cfg.gap,
                     .gapY          = cfg.gap
                 },
-                Components::UIScrollComponent {
+                UIComponents::UIScrollComponent {
                     .scrollSpeed     = cfg.scrollSpeed,
                     .smoothSpeed     = cfg.smoothSpeed,
                     .smoothScroll    = cfg.smoothScroll,
@@ -704,12 +705,12 @@ auto Context::Dropdown(std::string_view id, std::string_view label, int& selecte
                 }
             );
         });
-        m_reg->Patch<Components::UIRectComponent>(viewport, [&](auto& r) -> auto {
+        m_reg->Patch<UIComponents::UIRectComponent>(viewport, [&](auto& r) -> auto {
             r.parentEntity   = e;
             r.hierarchyDepth = depth + 1;
             r.clipChildren   = true;
         });
-        m_reg->Patch<Components::UIFlexComponent>(viewport, [&](auto& f) -> auto {
+        m_reg->Patch<UIComponents::UIFlexComponent>(viewport, [&](auto& f) -> auto {
             f.direction     = FlexDirection::Column;
             f.alignItems    = FlexAlign::Stretch;
             f.flexGrow      = 1.0f;
@@ -722,7 +723,7 @@ auto Context::Dropdown(std::string_view id, std::string_view label, int& selecte
             f.gapX          = cfg.gap;
             f.gapY          = cfg.gap;
         });
-        m_reg->Patch<Components::UIScrollComponent>(viewport, [&](auto& s) -> auto {
+        m_reg->Patch<UIComponents::UIScrollComponent>(viewport, [&](auto& s) -> auto {
             s.scrollSpeed     = cfg.scrollSpeed;
             s.smoothSpeed     = cfg.smoothSpeed;
             s.smoothScroll    = cfg.smoothScroll;
@@ -748,13 +749,13 @@ auto Context::Image(std::string_view id, TextureHandle texture, const ImageConfi
         Entity e = GetOrCreateEntity(key, [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64(id)},
-                Components::UIRectComponent {.parentEntity = parent, .width = cfg.width, .height = cfg.height, .hierarchyDepth = depth},
+                UIComponents::UIRectComponent {.parentEntity = parent, .width = cfg.width, .height = cfg.height, .hierarchyDepth = depth},
                 // A button makes the sprite a hover target: UIButtonComponent
                 // is the single source of truth for hover, and TooltipFor reads
                 // IsHovered(owner) -- without a button an icon could never fire
                 // its tooltip. It carries no visual of its own.
-                Components::UIButtonComponent {},
-                Components::UIImageComponent {
+                UIComponents::UIButtonComponent {},
+                UIComponents::UIImageComponent {
                     .texture      = texture,
                     .mode         = cfg.mode,
                     .tint         = cfg.tint,
@@ -771,13 +772,13 @@ auto Context::Image(std::string_view id, TextureHandle texture, const ImageConfi
         // Cached entities outlive the config that created them, so every field
         // is re-applied each frame (an icon swapped to another atlas slice must
         // not keep last frame's UVs).
-        m_reg->Patch<Components::UIRectComponent>(e, [&](auto& r) -> auto {
+        m_reg->Patch<UIComponents::UIRectComponent>(e, [&](auto& r) -> auto {
             r.parentEntity   = parent;
             r.width          = cfg.width;
             r.height         = cfg.height;
             r.hierarchyDepth = depth;
         });
-        m_reg->Patch<Components::UIImageComponent>(e, [&](auto& img) -> auto {
+        m_reg->Patch<UIComponents::UIImageComponent>(e, [&](auto& img) -> auto {
             img.texture      = texture;
             img.mode         = cfg.mode;
             img.tint         = cfg.tint;
@@ -826,7 +827,7 @@ auto Context::TooltipFor(Entity owner, std::string_view text) -> Entity {
     }
 
 [[nodiscard]] auto Context::IsHovered(Entity e) const noexcept -> bool {
-        if (const auto* btn = m_reg->Get<Components::UIButtonComponent>(e)) {
+        if (const auto* btn = m_reg->Get<UIComponents::UIButtonComponent>(e)) {
             return btn->Has(UIButton::Hovered);
         }
         return false;
@@ -845,7 +846,7 @@ auto Context::TooltipFor(Entity owner, std::string_view text) -> Entity {
     }
 
 auto Context::NextLayoutOrder() -> uint32_t {
-        return m_reg->Get<Components::UISettingsComponent>(GetRootCacheEntity())->nextLayoutOrder++;
+        return m_reg->Get<UIComponents::UISettingsComponent>(GetRootCacheEntity())->nextLayoutOrder++;
     }
 
 auto Context::GetRootCacheEntity() -> Entity {
@@ -853,14 +854,14 @@ auto Context::GetRootCacheEntity() -> Entity {
             return m_rootCacheEntity;
         }
 
-        auto uiSettings = m_reg->GetEntitiesWith<Components::UISettingsComponent>();
+        auto uiSettings = m_reg->GetEntitiesWith<UIComponents::UISettingsComponent>();
         if (!uiSettings.empty()) {
             m_rootCacheEntity = uiSettings[0];
             return m_rootCacheEntity;
         }
 
         // Fallback: create UISettingsComponent entity if missing
-        m_rootCacheEntity = m_reg->Create(Components::UISettingsComponent {});
+        m_rootCacheEntity = m_reg->Create(UIComponents::UISettingsComponent {});
         return m_rootCacheEntity;
     }
 
@@ -886,7 +887,7 @@ auto Context::PushScope(Entity e, uint32_t depth) noexcept -> UIScope {
 
 [[nodiscard]] auto Context::ConsumeClick(Entity e) noexcept -> bool {
         bool clicked = false;
-        if (auto* btn = m_reg->Get<Components::UIButtonComponent>(e)) {
+        if (auto* btn = m_reg->Get<UIComponents::UIButtonComponent>(e)) {
             if (btn->Has(UIButton::Clicked)) {
                 clicked = true;
                 btn->Set(UIButton::Clicked, false);
@@ -896,7 +897,7 @@ auto Context::PushScope(Entity e, uint32_t depth) noexcept -> UIScope {
     }
 
 [[nodiscard]] auto Context::FindChildByKey(Entity parent, uint64_t childKey) const -> Entity {
-        if (const auto* cache = m_reg->Get<Components::UIChildCacheComponent>(parent)) {
+        if (const auto* cache = m_reg->Get<UIComponents::UIChildCacheComponent>(parent)) {
             if (const auto* rec = cache->children.Find(childKey)) {
                 if (m_reg->IsAlive(rec->entity)) {
                     return rec->entity;
@@ -909,7 +910,7 @@ auto Context::PushScope(Entity e, uint32_t depth) noexcept -> UIScope {
 void Context::EnsureCheckboxChildren(Entity cbEntity, std::string_view label, const CheckboxConfig& cfg, TextureHandle font, bool checked) {
         Entity   parent = cbEntity;
         uint32_t parentDepth = 0;
-        if (const auto* r = m_reg->Get<Components::UIRectComponent>(cbEntity)) {
+        if (const auto* r = m_reg->Get<UIComponents::UIRectComponent>(cbEntity)) {
             parentDepth = r->hierarchyDepth;
         }
 
@@ -917,9 +918,9 @@ void Context::EnsureCheckboxChildren(Entity cbEntity, std::string_view label, co
         Entity boxEnt = GetOrCreateChild(parent, HashStringView("_cb_box"), [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64("_cb_box")},
-                Components::UIRectComponent {.parentEntity = parent, .width = cfg.boxSize, .height = cfg.boxSize, .hierarchyDepth = parentDepth + 1},
-                Components::UIPanelComponent {.color = cfg.boxColor, .borderRadius = cfg.borderRadius, .edgeWidth = 1.0f},
-                Components::UIFlexComponent {
+                UIComponents::UIRectComponent {.parentEntity = parent, .width = cfg.boxSize, .height = cfg.boxSize, .hierarchyDepth = parentDepth + 1},
+                UIComponents::UIPanelComponent {.color = cfg.boxColor, .borderRadius = cfg.borderRadius, .edgeWidth = 1.0f},
+                UIComponents::UIFlexComponent {
                     .direction  = FlexDirection::Column,
                     .justify    = FlexJustify::Center,
                     .alignItems = FlexAlign::Center
@@ -932,11 +933,11 @@ void Context::EnsureCheckboxChildren(Entity cbEntity, std::string_view label, co
         Entity markEnt = GetOrCreateChild(boxEnt, HashStringView("_cb_mark"), [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64("_cb_mark")},
-                Components::UIRectComponent {.parentEntity = boxEnt, .width = cfg.boxSize - inset, .height = cfg.boxSize - inset, .hierarchyDepth = parentDepth + 2},
-                Components::UIPanelComponent {.color = checked ? cfg.checkColor : JPH::Vec4 {0, 0, 0, 0}, .borderRadius = {2.0f, 2.0f, 2.0f, 2.0f}}
+                UIComponents::UIRectComponent {.parentEntity = boxEnt, .width = cfg.boxSize - inset, .height = cfg.boxSize - inset, .hierarchyDepth = parentDepth + 2},
+                UIComponents::UIPanelComponent {.color = checked ? cfg.checkColor : JPH::Vec4 {0, 0, 0, 0}, .borderRadius = {2.0f, 2.0f, 2.0f, 2.0f}}
             );
         });
-        m_reg->Patch<Components::UIPanelComponent>(markEnt, [&](auto& pc) -> auto {
+        m_reg->Patch<UIComponents::UIPanelComponent>(markEnt, [&](auto& pc) -> auto {
             pc.color = checked ? cfg.checkColor : JPH::Vec4 {0, 0, 0, 0};
         });
 
@@ -944,8 +945,8 @@ void Context::EnsureCheckboxChildren(Entity cbEntity, std::string_view label, co
         Entity lblEnt = GetOrCreateChild(parent, HashStringView("_cb_label"), [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64("_cb_label")},
-                Components::UIRectComponent {.parentEntity = parent, .height = cfg.height, .hierarchyDepth = parentDepth + 1},
-                Components::TextComponent {
+                UIComponents::UIRectComponent {.parentEntity = parent, .height = cfg.height, .hierarchyDepth = parentDepth + 1},
+                UIComponents::TextComponent {
                     .text          = String256(label),
                     .scale         = cfg.scale,
                     .color         = cfg.textColor,
@@ -953,10 +954,10 @@ void Context::EnsureCheckboxChildren(Entity cbEntity, std::string_view label, co
                     .verticalAlign = TextVerticalAlignment::Center,
                     .fontIndex     = font
                 },
-                Components::UIFlexComponent {.flexGrow = 1.0f}
+                UIComponents::UIFlexComponent {.flexGrow = 1.0f}
             );
         });
-        m_reg->Patch<Components::TextComponent>(lblEnt, [&](auto& tc) -> auto {
+        m_reg->Patch<UIComponents::TextComponent>(lblEnt, [&](auto& tc) -> auto {
             tc.text.assign(label);
             tc.color = cfg.textColor;
         });
@@ -966,7 +967,7 @@ void Context::PatchCheckboxVisuals(Entity e, const CheckboxConfig& cfg, bool che
         bool isHovered = IsHovered(e);
         Entity boxEnt  = FindChildByKey(e, HashStringView("_cb_box"));
         if (boxEnt != Entity::Null()) {
-            m_reg->Patch<Components::UIPanelComponent>(boxEnt, [&](auto& panel) -> auto {
+            m_reg->Patch<UIComponents::UIPanelComponent>(boxEnt, [&](auto& panel) -> auto {
                 panel.color        = isHovered ? cfg.hoverColor : cfg.boxColor;
                 panel.edgeWidth    = 1.0f;
                 panel.borderRadius = cfg.borderRadius;
@@ -976,7 +977,7 @@ void Context::PatchCheckboxVisuals(Entity e, const CheckboxConfig& cfg, bool che
         if (boxEnt != Entity::Null()) {
             Entity markEnt = FindChildByKey(boxEnt, HashStringView("_cb_mark"));
             if (markEnt != Entity::Null()) {
-                m_reg->Patch<Components::UIPanelComponent>(markEnt, [&](auto& mc) -> auto {
+                m_reg->Patch<UIComponents::UIPanelComponent>(markEnt, [&](auto& mc) -> auto {
                     mc.color = checked ? cfg.checkColor : JPH::Vec4 {0, 0, 0, 0};
                 });
             }
@@ -986,7 +987,7 @@ void Context::PatchCheckboxVisuals(Entity e, const CheckboxConfig& cfg, bool che
 void Context::EnsureSliderChildren(Entity sliderEntity, std::string_view label, const SliderConfig& cfg, TextureHandle font, float value, float minVal, float maxVal) {
         Entity   parent = sliderEntity;
         uint32_t parentDepth = 0;
-        if (const auto* r = m_reg->Get<Components::UIRectComponent>(sliderEntity)) {
+        if (const auto* r = m_reg->Get<UIComponents::UIRectComponent>(sliderEntity)) {
             parentDepth = r->hierarchyDepth;
         }
 
@@ -995,8 +996,8 @@ void Context::EnsureSliderChildren(Entity sliderEntity, std::string_view label, 
             Entity lblEnt = GetOrCreateChild(parent, HashStringView("_sl_label"), [&]() -> Entity {
                 return m_reg->Create(
                     Components::NameComponent {.name = String64("_sl_label")},
-                    Components::UIRectComponent {.parentEntity = parent, .width = cfg.labelWidth, .height = cfg.height, .hierarchyDepth = parentDepth + 1},
-                    Components::TextComponent {
+                    UIComponents::UIRectComponent {.parentEntity = parent, .width = cfg.labelWidth, .height = cfg.height, .hierarchyDepth = parentDepth + 1},
+                    UIComponents::TextComponent {
                         .text          = String256(label),
                         .scale         = cfg.scale,
                         .color         = cfg.textColor,
@@ -1006,40 +1007,40 @@ void Context::EnsureSliderChildren(Entity sliderEntity, std::string_view label, 
                     }
                 );
             });
-            m_reg->Patch<Components::UIRectComponent>(lblEnt, [&](auto& r) -> auto { r.width = cfg.labelWidth; });
-            m_reg->Patch<Components::TextComponent>(lblEnt, [&](auto& tc) -> auto { tc.text.assign(label); });
+            m_reg->Patch<UIComponents::UIRectComponent>(lblEnt, [&](auto& r) -> auto { r.width = cfg.labelWidth; });
+            m_reg->Patch<UIComponents::TextComponent>(lblEnt, [&](auto& tc) -> auto { tc.text.assign(label); });
         }
 
         // Track (container for filled region and knob)
         Entity trackEnt = GetOrCreateChild(parent, HashStringView("_sl_track"), [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64("_sl_track")},
-                Components::UIRectComponent {.parentEntity = parent, .width = 0.0f, .height = cfg.trackHeight, .hierarchyDepth = parentDepth + 1},
-                Components::UIPanelComponent {
+                UIComponents::UIRectComponent {.parentEntity = parent, .width = 0.0f, .height = cfg.trackHeight, .hierarchyDepth = parentDepth + 1},
+                UIComponents::UIPanelComponent {
                     .color        = cfg.trackColor,
                     .borderRadius = {cfg.trackHeight * 0.5f, cfg.trackHeight * 0.5f, cfg.trackHeight * 0.5f, cfg.trackHeight * 0.5f}
                 },
-                Components::UIFlexComponent {
+                UIComponents::UIFlexComponent {
                     .direction  = FlexDirection::Row,
                     .alignItems = FlexAlign::Center,
                     .flexGrow   = 1.0f,
                     .flexShrink = 1.0f,
                     .flexBasis  = -1.0f
                 },
-                Components::UIButtonComponent {}
+                UIComponents::UIButtonComponent {}
             );
         });
 
         // The track is a thin visual bar, not another full-height row.  Keep
         // its layout properties in sync for cached widgets as well as newly
         // created ones.
-        m_reg->Patch<Components::UIRectComponent>(trackEnt, [&](auto& tr) -> auto {
+        m_reg->Patch<UIComponents::UIRectComponent>(trackEnt, [&](auto& tr) -> auto {
             tr.parentEntity   = parent;
             tr.width          = 0.0f;
             tr.height         = std::max(0.0f, cfg.trackHeight);
             tr.hierarchyDepth = parentDepth + 1;
         });
-        m_reg->Patch<Components::UIFlexComponent>(trackEnt, [&](auto& tf) -> auto {
+        m_reg->Patch<UIComponents::UIFlexComponent>(trackEnt, [&](auto& tf) -> auto {
             tf.direction  = FlexDirection::Row;
             tf.alignItems = FlexAlign::Center;
             tf.flexGrow   = 1.0f;
@@ -1051,7 +1052,7 @@ void Context::EnsureSliderChildren(Entity sliderEntity, std::string_view label, 
             tf.paddingLeft = tf.paddingRight = 0.0f;
             tf.paddingTop = tf.paddingBottom = 0.0f;
         });
-        m_reg->Patch<Components::UIPanelComponent>(trackEnt, [&](auto& tp) -> auto {
+        m_reg->Patch<UIComponents::UIPanelComponent>(trackEnt, [&](auto& tp) -> auto {
             tp.color        = cfg.trackColor;
             const float r   = std::max(0.0f, cfg.trackHeight) * 0.5f;
             tp.borderRadius = {r, r, r, r};
@@ -1063,8 +1064,8 @@ void Context::EnsureSliderChildren(Entity sliderEntity, std::string_view label, 
             Entity valEnt = GetOrCreateChild(parent, HashStringView("_sl_value"), [&]() -> Entity {
                 return m_reg->Create(
                     Components::NameComponent {.name = String64("_sl_value")},
-                    Components::UIRectComponent {.parentEntity = parent, .width = cfg.valueWidth, .height = cfg.height, .hierarchyDepth = parentDepth + 1},
-                    Components::TextComponent {
+                    UIComponents::UIRectComponent {.parentEntity = parent, .width = cfg.valueWidth, .height = cfg.height, .hierarchyDepth = parentDepth + 1},
+                    UIComponents::TextComponent {
                         .text          = String256(std::string_view(valStr)),
                         .scale         = cfg.scale,
                         .color         = cfg.textColor,
@@ -1074,8 +1075,8 @@ void Context::EnsureSliderChildren(Entity sliderEntity, std::string_view label, 
                     }
                 );
             });
-            m_reg->Patch<Components::UIRectComponent>(valEnt, [&](auto& r) -> auto { r.width = cfg.valueWidth; });
-            m_reg->Patch<Components::TextComponent>(valEnt, [&](auto& tc) -> auto {
+            m_reg->Patch<UIComponents::UIRectComponent>(valEnt, [&](auto& r) -> auto { r.width = cfg.valueWidth; });
+            m_reg->Patch<UIComponents::TextComponent>(valEnt, [&](auto& tc) -> auto {
                 tc.text.assign(std::string_view(valStr));
             });
         }
@@ -1090,19 +1091,19 @@ void Context::EnsureSliderChildren(Entity sliderEntity, std::string_view label, 
         Entity knobEnt = GetOrCreateChild(trackEnt, HashStringView("_sl_knob"), [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64("_sl_knob")},
-                Components::UIRectComponent {
+                UIComponents::UIRectComponent {
                     .parentEntity   = trackEnt,
                     .width          = std::max(0.0f, cfg.knobSize),
                     .height         = std::max(0.0f, cfg.knobSize),
                     .hierarchyDepth = parentDepth + 2
                 },
-                Components::UIPanelComponent {
+                UIComponents::UIPanelComponent {
                     .color        = cfg.knobColor,
                     .borderRadius = {cfg.knobSize * 0.5f, cfg.knobSize * 0.5f, cfg.knobSize * 0.5f, cfg.knobSize * 0.5f}
                 },
-                Components::UIFlexComponent {},
-                Components::UIButtonComponent {},
-                Components::UIDragComponent {.targetEntity = sliderEntity, .isDragging = false}
+                UIComponents::UIFlexComponent {},
+                UIComponents::UIButtonComponent {},
+                UIComponents::UIDragComponent {.targetEntity = sliderEntity, .isDragging = false}
             );
         });
 
@@ -1112,7 +1113,7 @@ void Context::EnsureSliderChildren(Entity sliderEntity, std::string_view label, 
         // true travel distance.  The fallback keeps the value-dependent
         // position useful on the very first frame of a fill-width widget.
         float trackWidth = 0.0f;
-        if (const auto* tr = m_reg->Get<Components::UIRectComponent>(trackEnt)) {
+        if (const auto* tr = m_reg->Get<UIComponents::UIRectComponent>(trackEnt)) {
             trackWidth = tr->computedAbsMaxX - tr->computedAbsMinX;
         }
         if (trackWidth <= 0.0f) {
@@ -1124,7 +1125,7 @@ void Context::EnsureSliderChildren(Entity sliderEntity, std::string_view label, 
         const float knobSize   = std::max(0.0f, cfg.knobSize);
         const float knobTravel = std::max(0.0f, trackWidth - knobSize);
 
-        m_reg->Patch<Components::UIRectComponent>(knobEnt, [&](auto& kr) -> auto {
+        m_reg->Patch<UIComponents::UIRectComponent>(knobEnt, [&](auto& kr) -> auto {
             kr.parentEntity   = trackEnt;
             kr.width          = knobSize;
             kr.height         = knobSize;
@@ -1133,20 +1134,20 @@ void Context::EnsureSliderChildren(Entity sliderEntity, std::string_view label, 
         // GetOrCreateChild also supports widgets created by an older build;
         // make sure those cached knobs acquire the flex component needed for
         // marginLeft before patching it.
-        if (m_reg->Get<Components::UIFlexComponent>(knobEnt) == nullptr) {
-            m_reg->Add<Components::UIFlexComponent>(knobEnt);
+        if (m_reg->Get<UIComponents::UIFlexComponent>(knobEnt) == nullptr) {
+            m_reg->Add<UIComponents::UIFlexComponent>(knobEnt);
         }
-        m_reg->Patch<Components::UIFlexComponent>(knobEnt, [&](auto& kf) -> auto {
+        m_reg->Patch<UIComponents::UIFlexComponent>(knobEnt, [&](auto& kf) -> auto {
             kf.flexGrow   = 0.0f;
             kf.flexShrink = 0.0f;
             kf.flexBasis  = -1.0f;
             kf.marginLeft = t * knobTravel;
             kf.marginTop = kf.marginRight = kf.marginBottom = 0.0f;
         });
-        m_reg->Patch<Components::UIPanelComponent>(knobEnt, [&](auto& pc) -> auto {
+        m_reg->Patch<UIComponents::UIPanelComponent>(knobEnt, [&](auto& pc) -> auto {
             // Hover on either the root slider entity, the track, or the knob itself
             bool hover  = IsHovered(sliderEntity) || IsHovered(trackEnt) || IsHovered(knobEnt);
-            auto* s     = m_reg->Get<Components::UISliderComponent>(sliderEntity);
+            auto* s     = m_reg->Get<UIComponents::UISliderComponent>(sliderEntity);
             bool active = (s != nullptr && s->isDragging) || hover;
             pc.color = active ? cfg.hoverColor : cfg.knobColor;
             pc.borderRadius = {knobSize * 0.5f, knobSize * 0.5f, knobSize * 0.5f, knobSize * 0.5f};
@@ -1155,14 +1156,14 @@ void Context::EnsureSliderChildren(Entity sliderEntity, std::string_view label, 
 
 void Context::EnsureTextInputLabel(Entity inputEnt, std::string_view label, const TextInputConfig& cfg, TextureHandle font) {
         uint32_t parentDepth = 0;
-        if (const auto* r = m_reg->Get<Components::UIRectComponent>(inputEnt)) {
+        if (const auto* r = m_reg->Get<UIComponents::UIRectComponent>(inputEnt)) {
             parentDepth = r->hierarchyDepth;
         }
         Entity lblEnt = GetOrCreateChild(inputEnt, HashStringView("_ti_label"), [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64("_ti_label")},
-                Components::UIRectComponent {.parentEntity = inputEnt, .height = cfg.height, .hierarchyDepth = parentDepth + 1},
-                Components::TextComponent {
+                UIComponents::UIRectComponent {.parentEntity = inputEnt, .height = cfg.height, .hierarchyDepth = parentDepth + 1},
+                UIComponents::TextComponent {
                     .text          = String256(label),
                     .scale         = cfg.scale,
                     .color         = cfg.textColor,
@@ -1172,11 +1173,11 @@ void Context::EnsureTextInputLabel(Entity inputEnt, std::string_view label, cons
                 }
             );
         });
-        m_reg->Patch<Components::TextComponent>(lblEnt, [&](auto& tc) -> auto { tc.text.assign(label); });
+        m_reg->Patch<UIComponents::TextComponent>(lblEnt, [&](auto& tc) -> auto { tc.text.assign(label); });
     }
 
 void Context::PatchTextInputVisuals(Entity e, const TextInputConfig& cfg, bool focused, TextureHandle font) {
-        m_reg->Patch<Components::UIPanelComponent>(e, [&](auto& pc) -> auto {
+        m_reg->Patch<UIComponents::UIPanelComponent>(e, [&](auto& pc) -> auto {
             pc.color        = focused ? cfg.focusedColor : cfg.bgColor;
             pc.edgeWidth    = 1.0f;
             pc.borderRadius = cfg.borderRadius;
@@ -1185,17 +1186,17 @@ void Context::PatchTextInputVisuals(Entity e, const TextInputConfig& cfg, bool f
         // Ensure the leaf text child exists (leaf — no children, so Yoga may
         // safely attach a measure function to it). Sync it from the
         // UITextInputComponent which is the authoritative text store.
-        if (auto* input = m_reg->Get<Components::UITextInputComponent>(e)) {
+        if (auto* input = m_reg->Get<UIComponents::UITextInputComponent>(e)) {
             uint32_t parentDepth = 0;
-            if (const auto* r = m_reg->Get<Components::UIRectComponent>(e)) {
+            if (const auto* r = m_reg->Get<UIComponents::UIRectComponent>(e)) {
                 parentDepth = r->hierarchyDepth;
             }
             Entity textEnt = GetOrCreateChild(e, HashStringView("_ti_text"), [&]() -> Entity {
                 return m_reg->Create(
                     Components::NameComponent {.name = String64("_ti_text")},
-                    Components::UIRectComponent {.parentEntity = e, .height = cfg.height, .hierarchyDepth = parentDepth + 1},
-                    Components::UIFlexComponent {.flexGrow = 1.0f},
-                    Components::TextComponent {
+                    UIComponents::UIRectComponent {.parentEntity = e, .height = cfg.height, .hierarchyDepth = parentDepth + 1},
+                    UIComponents::UIFlexComponent {.flexGrow = 1.0f},
+                    UIComponents::TextComponent {
                         .text          = input->text,
                         .scale         = cfg.scale,
                         .color         = cfg.textColor,
@@ -1206,19 +1207,19 @@ void Context::PatchTextInputVisuals(Entity e, const TextInputConfig& cfg, bool f
                 );
             });
             // Keep parent/depth/sizing correct each frame
-            m_reg->Patch<Components::UIRectComponent>(textEnt, [&](auto& tr) -> auto {
+            m_reg->Patch<UIComponents::UIRectComponent>(textEnt, [&](auto& tr) -> auto {
                 tr.parentEntity   = e;
                 tr.hierarchyDepth = parentDepth + 1;
                 tr.height         = cfg.height;
             });
             // Sync displayed text
-            m_reg->Patch<Components::TextComponent>(textEnt, [&](auto& tc) -> auto {
+            m_reg->Patch<UIComponents::TextComponent>(textEnt, [&](auto& tc) -> auto {
                 tc.text      = input->text;
                 tc.color     = focused ? JPH::Vec4 {1.0f, 1.0f, 1.0f, 1.0f} : cfg.textColor;
                 tc.scale     = cfg.scale;
                 tc.fontIndex = font;
             });
-            if (auto* tflex = m_reg->Get<Components::UIFlexComponent>(textEnt)) {
+            if (auto* tflex = m_reg->Get<UIComponents::UIFlexComponent>(textEnt)) {
                 tflex->flexGrow = 1.0f;
             }
         }
@@ -1227,15 +1228,15 @@ void Context::PatchTextInputVisuals(Entity e, const TextInputConfig& cfg, bool f
 void Context::EnsureDropdownHeader(Entity ddEnt, std::string_view displayText, const DropdownConfig& cfg, TextureHandle font) {
         Entity   parent = ddEnt;
         uint32_t parentDepth = 0;
-        if (const auto* r = m_reg->Get<Components::UIRectComponent>(ddEnt)) {
+        if (const auto* r = m_reg->Get<UIComponents::UIRectComponent>(ddEnt)) {
             parentDepth = r->hierarchyDepth;
         }
 
         Entity txtEnt = GetOrCreateChild(parent, HashStringView("_dd_text"), [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64("_dd_text")},
-                Components::UIRectComponent {.parentEntity = parent, .height = cfg.height, .hierarchyDepth = parentDepth + 1},
-                Components::TextComponent {
+                UIComponents::UIRectComponent {.parentEntity = parent, .height = cfg.height, .hierarchyDepth = parentDepth + 1},
+                UIComponents::TextComponent {
                     .text          = String256(displayText),
                     .scale         = cfg.scale,
                     .color         = cfg.textColor,
@@ -1243,17 +1244,17 @@ void Context::EnsureDropdownHeader(Entity ddEnt, std::string_view displayText, c
                     .verticalAlign = TextVerticalAlignment::Center,
                     .fontIndex     = font
                 },
-                Components::UIFlexComponent {.flexGrow = 1.0f}
+                UIComponents::UIFlexComponent {.flexGrow = 1.0f}
             );
         });
-        m_reg->Patch<Components::TextComponent>(txtEnt, [&](auto& tc) -> auto { tc.text.assign(displayText); });
+        m_reg->Patch<UIComponents::TextComponent>(txtEnt, [&](auto& tc) -> auto { tc.text.assign(displayText); });
 
         // Arrow
         Entity arrowEnt = GetOrCreateChild(parent, HashStringView("_dd_arrow"), [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64("_dd_arrow")},
-                Components::UIRectComponent {.parentEntity = parent, .width = 16.0f, .height = cfg.height, .hierarchyDepth = parentDepth + 1},
-                Components::TextComponent {
+                UIComponents::UIRectComponent {.parentEntity = parent, .width = 16.0f, .height = cfg.height, .hierarchyDepth = parentDepth + 1},
+                UIComponents::TextComponent {
                     .text          = String256("v"),
                     .scale         = cfg.scale,
                     .color         = cfg.arrowColor,
@@ -1263,8 +1264,8 @@ void Context::EnsureDropdownHeader(Entity ddEnt, std::string_view displayText, c
                 }
             );
         });
-        m_reg->Patch<Components::TextComponent>(arrowEnt, [&](auto& tc) -> auto {
-            auto* dd = m_reg->Get<Components::UIDropdownComponent>(ddEnt);
+        m_reg->Patch<UIComponents::TextComponent>(arrowEnt, [&](auto& tc) -> auto {
+            auto* dd = m_reg->Get<UIComponents::UIDropdownComponent>(ddEnt);
             tc.text.assign((dd != nullptr && dd->expanded) ? "^" : "v");
         });
     }
@@ -1279,7 +1280,7 @@ auto Context::GetOrCreateOverlayRoot() -> Entity {
         m_overlayRoot = GetOrCreateChild(cache, HashStringView(kOverlayName), [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64(kOverlayName)},
-                Components::UIRectComponent {
+                UIComponents::UIRectComponent {
                     .parentEntity   = Entity::Null(),
                     .width          = 0.0f,
                     .height         = 0.0f,
@@ -1288,7 +1289,7 @@ auto Context::GetOrCreateOverlayRoot() -> Entity {
                 }
             );
         });
-        m_reg->Patch<Components::UIRectComponent>(m_overlayRoot, [&](auto& r) -> auto {
+        m_reg->Patch<UIComponents::UIRectComponent>(m_overlayRoot, [&](auto& r) -> auto {
             r.parentEntity   = Entity::Null();
             r.hierarchyDepth = UI_OVERLAY_DEPTH;
             r.clipChildren   = false;
@@ -1298,7 +1299,7 @@ auto Context::GetOrCreateOverlayRoot() -> Entity {
 
 [[nodiscard]] auto Context::GetOwnerAnchor(Entity owner) const noexcept -> OwnerAnchor {
         OwnerAnchor a {};
-        if (const auto* r = m_reg->Get<Components::UIRectComponent>(owner)) {
+        if (const auto* r = m_reg->Get<UIComponents::UIRectComponent>(owner)) {
             a.x      = r->computedAbsMinX;
             a.y      = r->computedAbsMinY;
             a.width  = r->computedAbsMaxX - r->computedAbsMinX;
@@ -1325,9 +1326,9 @@ auto Context::PrepareCollapsingHeader(std::string_view id, std::string_view labe
         Entity e = GetOrCreateEntity(key, [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64(id)},
-                Components::UIRectComponent {.parentEntity = parent, .height = 0.0f, .hierarchyDepth = depth},
-                Components::UIPanelComponent {.color = defaultOpen ? cfg.openColor : cfg.bgColor},
-                Components::UIFlexComponent {
+                UIComponents::UIRectComponent {.parentEntity = parent, .height = 0.0f, .hierarchyDepth = depth},
+                UIComponents::UIPanelComponent {.color = defaultOpen ? cfg.openColor : cfg.bgColor},
+                UIComponents::UIFlexComponent {
                     .direction     = FlexDirection::Column,
                     .paddingLeft   = 0.0f,
                     .paddingTop    = 0.0f,
@@ -1336,11 +1337,11 @@ auto Context::PrepareCollapsingHeader(std::string_view id, std::string_view labe
                     .gapX          = 0.0f,
                     .gapY          = 0.0f
                 },
-                Components::UICollapsingHeaderComponent {.isOpen = defaultOpen, .defaultOpen = defaultOpen}
+                UIComponents::UICollapsingHeaderComponent {.isOpen = defaultOpen, .defaultOpen = defaultOpen}
             );
         });
 
-        auto* hdr = m_reg->Get<Components::UICollapsingHeaderComponent>(e);
+        auto* hdr = m_reg->Get<UIComponents::UICollapsingHeaderComponent>(e);
 
         // Ensure the clickable header button child exists. The title child
         // carries the UIButtonComponent so its hover flag is the source of
@@ -1361,7 +1362,7 @@ auto Context::PrepareCollapsingHeader(std::string_view id, std::string_view labe
         // Update panel colour to reflect open/hover state. Hover is read from
         // the title child's UIButtonComponent (single source of truth).
         bool titleHover = (titleEnt != Entity::Null()) && IsHovered(titleEnt);
-        m_reg->Patch<Components::UIPanelComponent>(e, [&](auto& pc) -> auto {
+        m_reg->Patch<UIComponents::UIPanelComponent>(e, [&](auto& pc) -> auto {
             pc.color = titleHover ? cfg.hoverColor : (hdr->isOpen ? cfg.openColor : cfg.bgColor);
         });
 
@@ -1372,22 +1373,22 @@ auto Context::PrepareCollapsingHeader(std::string_view id, std::string_view labe
 void Context::EnsureCollapsingHeaderTitle(Entity hdrEntity, std::string_view label, const CollapsingHeaderConfig& cfg, TextureHandle font, bool isOpen) {
         Entity   parent = hdrEntity;
         uint32_t parentDepth = 0;
-        if (const auto* r = m_reg->Get<Components::UIRectComponent>(hdrEntity)) {
+        if (const auto* r = m_reg->Get<UIComponents::UIRectComponent>(hdrEntity)) {
             parentDepth = r->hierarchyDepth;
         }
 
         Entity titleEnt = GetOrCreateChild(parent, HashStringView("_title"), [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64("_title")},
-                Components::UIRectComponent {.parentEntity = parent, .height = cfg.height, .hierarchyDepth = parentDepth + 1},
-                Components::UIPanelComponent {.color = {0, 0, 0, 0}},
-                Components::UIFlexComponent {
+                UIComponents::UIRectComponent {.parentEntity = parent, .height = cfg.height, .hierarchyDepth = parentDepth + 1},
+                UIComponents::UIPanelComponent {.color = {0, 0, 0, 0}},
+                UIComponents::UIFlexComponent {
                     .direction     = FlexDirection::Row,
                     .alignItems    = FlexAlign::Center,
                     .paddingLeft   = cfg.padding,
                     .paddingRight  = cfg.padding
                 },
-                Components::UIButtonComponent {}
+                UIComponents::UIButtonComponent {}
             );
         });
 
@@ -1395,8 +1396,8 @@ void Context::EnsureCollapsingHeaderTitle(Entity hdrEntity, std::string_view lab
         Entity arrowEnt = GetOrCreateChild(titleEnt, HashStringView("_ch_arrow"), [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64("_ch_arrow")},
-                Components::UIRectComponent {.parentEntity = titleEnt, .width = 16.0f, .height = cfg.height, .hierarchyDepth = parentDepth + 2},
-                Components::TextComponent {
+                UIComponents::UIRectComponent {.parentEntity = titleEnt, .width = 16.0f, .height = cfg.height, .hierarchyDepth = parentDepth + 2},
+                UIComponents::TextComponent {
                     .text          = String256(isOpen ? "v" : ">"),
                     .scale         = cfg.scale,
                     .color         = cfg.arrowColor,
@@ -1406,7 +1407,7 @@ void Context::EnsureCollapsingHeaderTitle(Entity hdrEntity, std::string_view lab
                 }
             );
         });
-        m_reg->Patch<Components::TextComponent>(arrowEnt, [&](auto& tc) -> auto {
+        m_reg->Patch<UIComponents::TextComponent>(arrowEnt, [&](auto& tc) -> auto {
             tc.text.assign(isOpen ? "v" : ">");
             tc.color = cfg.arrowColor;
         });
@@ -1414,8 +1415,8 @@ void Context::EnsureCollapsingHeaderTitle(Entity hdrEntity, std::string_view lab
         Entity lblEnt = GetOrCreateChild(titleEnt, HashStringView("_ch_label"), [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64("_ch_label")},
-                Components::UIRectComponent {.parentEntity = titleEnt, .height = cfg.height, .hierarchyDepth = parentDepth + 2},
-                Components::TextComponent {
+                UIComponents::UIRectComponent {.parentEntity = titleEnt, .height = cfg.height, .hierarchyDepth = parentDepth + 2},
+                UIComponents::TextComponent {
                     .text          = String256(label),
                     .scale         = cfg.scale,
                     .color         = cfg.textColor,
@@ -1423,10 +1424,10 @@ void Context::EnsureCollapsingHeaderTitle(Entity hdrEntity, std::string_view lab
                     .verticalAlign = TextVerticalAlignment::Center,
                     .fontIndex     = font
                 },
-                Components::UIFlexComponent {.flexGrow = 1.0f}
+                UIComponents::UIFlexComponent {.flexGrow = 1.0f}
             );
         });
-        m_reg->Patch<Components::TextComponent>(lblEnt, [&](auto& tc) -> auto {
+        m_reg->Patch<UIComponents::TextComponent>(lblEnt, [&](auto& tc) -> auto {
             tc.text.assign(label);
             tc.color = cfg.textColor;
         });
@@ -1435,17 +1436,17 @@ void Context::EnsureCollapsingHeaderTitle(Entity hdrEntity, std::string_view lab
 void Context::ApplySelectableVisual(Entity row, const SelectableConfig& cfg, bool selected) {
         const bool hovered = IsHovered(row);
         const bool active  = selected && hovered;
-        m_reg->Patch<Components::UIPanelComponent>(row, [&](auto& pc) -> auto {
+        m_reg->Patch<UIComponents::UIPanelComponent>(row, [&](auto& pc) -> auto {
             pc.color        = active ? cfg.activeColor : (selected ? cfg.selectedColor : (hovered ? cfg.hoverColor : cfg.normalColor));
             pc.borderRadius = cfg.borderRadius;
         });
         if (Entity lbl = FindChildByKey(row, HashStringView("_sel_label")); lbl != Entity::Null()) {
-            m_reg->Patch<Components::TextComponent>(lbl, [&](auto& tc) -> auto { tc.color = selected ? cfg.selectedTextColor : cfg.textColor; });
+            m_reg->Patch<UIComponents::TextComponent>(lbl, [&](auto& tc) -> auto { tc.color = selected ? cfg.selectedTextColor : cfg.textColor; });
         }
     }
 
 void Context::ApplySelectableSelection(Entity row, Entity stateEnt, const SelectableConfig& cfg, bool selected) {
-        if (auto* sel = m_reg->Get<Components::UISelectableComponent>(stateEnt)) {
+        if (auto* sel = m_reg->Get<UIComponents::UISelectableComponent>(stateEnt)) {
             sel->selected = selected;
         }
         ApplySelectableVisual(row, cfg, selected);
@@ -1456,7 +1457,7 @@ void Context::PatchSelectableArrow(Entity rowEntity, std::string_view glyph, JPH
         if (arrowEnt == Entity::Null()) {
             return;
         }
-        m_reg->Patch<Components::TextComponent>(arrowEnt, [&](auto& tc) -> auto {
+        m_reg->Patch<UIComponents::TextComponent>(arrowEnt, [&](auto& tc) -> auto {
             tc.text.assign(glyph);
             tc.color = color;
         });
@@ -1470,28 +1471,28 @@ void Context::UpdateScrollbar(Entity root, Entity viewport, const ScrollBoxConfi
         Entity track = GetOrCreateChild(root, HashStringView("_sb_track"), [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64("_sb_track")},
-                Components::UIRectComponent {.parentEntity = root, .width = cfg.scrollbarWidth, .height = 0.0f, .hierarchyDepth = depth + 1},
-                Components::UIPanelComponent {.color = cfg.trackColor},
-                Components::UIFlexComponent {.direction = FlexDirection::Column, .flexGrow = 0.0f, .flexShrink = 0.0f, .flexBasis = cfg.scrollbarWidth}
+                UIComponents::UIRectComponent {.parentEntity = root, .width = cfg.scrollbarWidth, .height = 0.0f, .hierarchyDepth = depth + 1},
+                UIComponents::UIPanelComponent {.color = cfg.trackColor},
+                UIComponents::UIFlexComponent {.direction = FlexDirection::Column, .flexGrow = 0.0f, .flexShrink = 0.0f, .flexBasis = cfg.scrollbarWidth}
             );
         });
-        m_reg->Patch<Components::UIRectComponent>(track, [&](auto& r) -> auto {
+        m_reg->Patch<UIComponents::UIRectComponent>(track, [&](auto& r) -> auto {
             r.parentEntity   = root;
             r.width          = cfg.scrollbarWidth;
             r.height         = 0.0f;
             r.hierarchyDepth = depth + 1;
         });
-        m_reg->Patch<Components::UIFlexComponent>(track, [&](auto& f) -> auto {
+        m_reg->Patch<UIComponents::UIFlexComponent>(track, [&](auto& f) -> auto {
             f.direction  = FlexDirection::Column;
             f.flexGrow   = 0.0f;
             f.flexShrink = 0.0f;
             f.flexBasis  = cfg.scrollbarWidth;
         });
-        m_reg->Patch<Components::UIPanelComponent>(track, [&](auto& pc) -> auto { pc.color = cfg.trackColor; });
+        m_reg->Patch<UIComponents::UIPanelComponent>(track, [&](auto& pc) -> auto { pc.color = cfg.trackColor; });
 
-        const auto* scroll = m_reg->Get<Components::UIScrollComponent>(viewport);
-        const auto* vrect  = m_reg->Get<Components::UIRectComponent>(viewport);
-        const auto* trect  = m_reg->Get<Components::UIRectComponent>(track);
+        const auto* scroll = m_reg->Get<UIComponents::UIScrollComponent>(viewport);
+        const auto* vrect  = m_reg->Get<UIComponents::UIRectComponent>(viewport);
+        const auto* trect  = m_reg->Get<UIComponents::UIRectComponent>(track);
 
         float trackHeight = (trect != nullptr) ? (trect->computedAbsMaxY - trect->computedAbsMinY) : 0.0f;
         if (trackHeight <= 0.0f && vrect != nullptr) {
@@ -1519,25 +1520,25 @@ void Context::UpdateScrollbar(Entity root, Entity viewport, const ScrollBoxConfi
         Entity thumb = GetOrCreateChild(track, HashStringView("_sb_thumb"), [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64("_sb_thumb")},
-                Components::UIRectComponent {.parentEntity = track, .width = cfg.scrollbarWidth, .height = thumbHeight, .hierarchyDepth = depth + 2},
-                Components::UIPanelComponent {.color = cfg.thumbColor, .borderRadius = {cfg.scrollbarWidth * 0.5f, cfg.scrollbarWidth * 0.5f, cfg.scrollbarWidth * 0.5f, cfg.scrollbarWidth * 0.5f}},
-                Components::UIFlexComponent {.flexGrow = 0.0f, .flexShrink = 0.0f, .flexBasis = -1.0f},
-                Components::UIButtonComponent {}
+                UIComponents::UIRectComponent {.parentEntity = track, .width = cfg.scrollbarWidth, .height = thumbHeight, .hierarchyDepth = depth + 2},
+                UIComponents::UIPanelComponent {.color = cfg.thumbColor, .borderRadius = {cfg.scrollbarWidth * 0.5f, cfg.scrollbarWidth * 0.5f, cfg.scrollbarWidth * 0.5f, cfg.scrollbarWidth * 0.5f}},
+                UIComponents::UIFlexComponent {.flexGrow = 0.0f, .flexShrink = 0.0f, .flexBasis = -1.0f},
+                UIComponents::UIButtonComponent {}
             );
         });
-        m_reg->Patch<Components::UIRectComponent>(thumb, [&](auto& r) -> auto {
+        m_reg->Patch<UIComponents::UIRectComponent>(thumb, [&](auto& r) -> auto {
             r.parentEntity   = track;
             r.width          = cfg.scrollbarWidth;
             r.height         = thumbHeight;
             r.hierarchyDepth = depth + 2;
         });
-        m_reg->Patch<Components::UIFlexComponent>(thumb, [&](auto& f) -> auto {
+        m_reg->Patch<UIComponents::UIFlexComponent>(thumb, [&](auto& f) -> auto {
             f.flexGrow   = 0.0f;
             f.flexShrink = 0.0f;
             f.flexBasis  = -1.0f;
             f.marginTop  = fraction * travel;
         });
-        m_reg->Patch<Components::UIPanelComponent>(thumb, [&](auto& pc) -> auto {
+        m_reg->Patch<UIComponents::UIPanelComponent>(thumb, [&](auto& pc) -> auto {
             pc.color = hovered ? cfg.thumbHoverColor : cfg.thumbColor;
         });
     }
@@ -1552,7 +1553,7 @@ void Context::UpdateScrollbar(Entity root, Entity viewport, const ScrollBoxConfi
         // popup has been laid out at least once; until then it opens downward.
         float lastHeight = 0.0f;
         if (Entity prev = FindChildByKey(overlay, key); prev != Entity::Null()) {
-            if (const auto* pr = m_reg->Get<Components::UIRectComponent>(prev)) {
+            if (const auto* pr = m_reg->Get<UIComponents::UIRectComponent>(prev)) {
                 lastHeight = pr->computedAbsMaxY - pr->computedAbsMinY;
             }
         }
@@ -1564,7 +1565,7 @@ void Context::UpdateScrollbar(Entity root, Entity viewport, const ScrollBoxConfi
         Entity popup = GetOrCreateChild(overlay, key, [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64("_ui_popup")},
-                Components::UIRectComponent {
+                UIComponents::UIRectComponent {
                     .parentEntity   = overlay,
                     .x              = popupX,
                     .y              = popupY,
@@ -1573,8 +1574,8 @@ void Context::UpdateScrollbar(Entity root, Entity viewport, const ScrollBoxConfi
                     .hierarchyDepth = UI_OVERLAY_DEPTH + 1,
                     .clipChildren   = false
                 },
-                Components::UIPanelComponent {.color = cfg.bgColor, .borderRadius = cfg.borderRadius, .edgeWidth = 1.0f},
-                Components::UIFlexComponent {
+                UIComponents::UIPanelComponent {.color = cfg.bgColor, .borderRadius = cfg.borderRadius, .edgeWidth = 1.0f},
+                UIComponents::UIFlexComponent {
                     .direction     = FlexDirection::Column,
                     .alignItems    = FlexAlign::Stretch,
                     .paddingLeft   = cfg.padding,
@@ -1584,11 +1585,11 @@ void Context::UpdateScrollbar(Entity root, Entity viewport, const ScrollBoxConfi
                     .gapX          = cfg.gap,
                     .gapY          = cfg.gap
                 },
-                Components::UIPopupComponent {.owner = owner, .open = true}
+                UIComponents::UIPopupComponent {.owner = owner, .open = true}
             );
         });
 
-        m_reg->Patch<Components::UIRectComponent>(popup, [&](auto& r) -> auto {
+        m_reg->Patch<UIComponents::UIRectComponent>(popup, [&](auto& r) -> auto {
             r.parentEntity   = overlay;
             r.x              = popupX;
             r.y              = popupY;
@@ -1597,12 +1598,12 @@ void Context::UpdateScrollbar(Entity root, Entity viewport, const ScrollBoxConfi
             r.hierarchyDepth = UI_OVERLAY_DEPTH + 1;
             r.clipChildren   = false;
         });
-        m_reg->Patch<Components::UIPanelComponent>(popup, [&](auto& pc) -> auto {
+        m_reg->Patch<UIComponents::UIPanelComponent>(popup, [&](auto& pc) -> auto {
             pc.color        = cfg.bgColor;
             pc.borderRadius = cfg.borderRadius;
             pc.edgeWidth    = 1.0f;
         });
-        m_reg->Patch<Components::UIPopupComponent>(popup, [&](auto& p) -> auto { p.owner = owner; });
+        m_reg->Patch<UIComponents::UIPopupComponent>(popup, [&](auto& p) -> auto { p.owner = owner; });
 
         return PushScope(popup, UI_OVERLAY_DEPTH + 1);
     }
@@ -1618,10 +1619,10 @@ auto Context::TooltipForImpl(Entity owner, std::string_view text, const TooltipC
         Entity stateEnt = GetOrCreateChild(owner, HashStringView("_ui_tooltip"), [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64("_ui_tooltip")},
-                Components::UITooltipComponent {.text = String256(text), .delayFrames = cfg.delayFrames}
+                UIComponents::UITooltipComponent {.text = String256(text), .delayFrames = cfg.delayFrames}
             );
         });
-        auto* tip = m_reg->Get<Components::UITooltipComponent>(stateEnt);
+        auto* tip = m_reg->Get<UIComponents::UITooltipComponent>(stateEnt);
         tip->text.assign(text);
         tip->delayFrames     = cfg.delayFrames;
         tip->scale           = cfg.scale;
@@ -1673,7 +1674,7 @@ auto Context::TooltipForImpl(Entity owner, std::string_view text, const TooltipC
         Entity box = GetOrCreateChild(overlay, key, [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64("_ui_tooltip_box")},
-                Components::UIRectComponent {
+                UIComponents::UIRectComponent {
                     .parentEntity   = overlay,
                     .x              = baseX + cfg.offsetX,
                     .y              = baseY + cfg.offsetY,
@@ -1682,19 +1683,19 @@ auto Context::TooltipForImpl(Entity owner, std::string_view text, const TooltipC
                     .hierarchyDepth = UI_OVERLAY_DEPTH + 1,
                     .clipChildren   = false
                 },
-                Components::UIPanelComponent {.color = cfg.bgColor, .borderRadius = {3.0f, 3.0f, 3.0f, 3.0f}, .edgeWidth = 1.0f},
-                Components::UIFlexComponent {
+                UIComponents::UIPanelComponent {.color = cfg.bgColor, .borderRadius = {3.0f, 3.0f, 3.0f, 3.0f}, .edgeWidth = 1.0f},
+                UIComponents::UIFlexComponent {
                     .direction     = FlexDirection::Column,
                     .paddingLeft   = cfg.padding,
                     .paddingTop    = cfg.padding,
                     .paddingRight  = cfg.padding,
                     .paddingBottom = cfg.padding
                 },
-                Components::UIPopupComponent {.owner = owner, .open = true}
+                UIComponents::UIPopupComponent {.owner = owner, .open = true}
             );
         });
 
-        m_reg->Patch<Components::UIRectComponent>(box, [&](auto& r) -> auto {
+        m_reg->Patch<UIComponents::UIRectComponent>(box, [&](auto& r) -> auto {
             r.parentEntity   = overlay;
             r.x              = baseX + cfg.offsetX;
             r.y              = baseY + cfg.offsetY;
@@ -1702,13 +1703,13 @@ auto Context::TooltipForImpl(Entity owner, std::string_view text, const TooltipC
             r.height         = boxHeight;
             r.hierarchyDepth = UI_OVERLAY_DEPTH + 1;
         });
-        m_reg->Patch<Components::UIPanelComponent>(box, [&](auto& pc) -> auto { pc.color = cfg.bgColor; });
+        m_reg->Patch<UIComponents::UIPanelComponent>(box, [&](auto& pc) -> auto { pc.color = cfg.bgColor; });
 
         Entity textEnt = GetOrCreateChild(box, HashStringView("_ui_tooltip_text"), [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64("_ui_tooltip_text")},
-                Components::UIRectComponent {.parentEntity = box, .width = 0.0f, .height = 0.0f, .hierarchyDepth = UI_OVERLAY_DEPTH + 2},
-                Components::TextComponent {
+                UIComponents::UIRectComponent {.parentEntity = box, .width = 0.0f, .height = 0.0f, .hierarchyDepth = UI_OVERLAY_DEPTH + 2},
+                UIComponents::TextComponent {
                     .text          = String256(text),
                     .scale         = cfg.scale,
                     .color         = cfg.textColor,
@@ -1718,10 +1719,10 @@ auto Context::TooltipForImpl(Entity owner, std::string_view text, const TooltipC
                     .wrapText      = (innerMax > 0.0f),
                     .wrapWidth     = innerMax
                 },
-                Components::UIFlexComponent {.flexGrow = 1.0f}
+                UIComponents::UIFlexComponent {.flexGrow = 1.0f}
             );
         });
-        m_reg->Patch<Components::TextComponent>(textEnt, [&](auto& tc) -> auto {
+        m_reg->Patch<UIComponents::TextComponent>(textEnt, [&](auto& tc) -> auto {
             tc.text.assign(text);
             tc.color    = cfg.textColor;
             tc.scale    = cfg.scale;
@@ -1733,17 +1734,17 @@ auto Context::TooltipForImpl(Entity owner, std::string_view text, const TooltipC
     }
 
 [[nodiscard]] auto Context::ResolveFontAtlas() const noexcept -> const FontAtlas* {
-        const auto uiSettings = m_reg->GetEntitiesWith<Components::UISettingsComponent>();
+        const auto uiSettings = m_reg->GetEntitiesWith<UIComponents::UISettingsComponent>();
         if (!uiSettings.empty()) {
-            return &m_reg->Get<Components::UISettingsComponent>(uiSettings[0])->fontAtlas;
+            return &m_reg->Get<UIComponents::UISettingsComponent>(uiSettings[0])->fontAtlas;
         }
         return nullptr;
     }
 
 [[nodiscard]] auto Context::ResolveFontTexture() const noexcept -> TextureHandle {
-        const auto uiSettings = m_reg->GetEntitiesWith<Components::UISettingsComponent>();
+        const auto uiSettings = m_reg->GetEntitiesWith<UIComponents::UISettingsComponent>();
         if (!uiSettings.empty()) {
-            if (const auto* s = m_reg->Get<Components::UISettingsComponent>(uiSettings[0])) {
+            if (const auto* s = m_reg->Get<UIComponents::UISettingsComponent>(uiSettings[0])) {
                 return s->fontAtlas.texture;
             }
         }

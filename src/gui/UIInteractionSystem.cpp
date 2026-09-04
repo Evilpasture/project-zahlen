@@ -8,6 +8,7 @@
 #include <Zahlen/GUI.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/gui/UIComponents.hpp>
 #include <algorithm>
 
 namespace ZHLN {
@@ -22,7 +23,7 @@ auto FindAncestorWith(ECS::Registry& reg, Entity start) -> Entity {
         if (reg.Get<Comp>(curr) != nullptr) {
             return curr;
         }
-        if (auto* rect = reg.Get<Components::UIRectComponent>(curr)) {
+        if (auto* rect = reg.Get<GUI::UIComponents::UIRectComponent>(curr)) {
             curr = rect->parentEntity;
         } else {
             break;
@@ -36,7 +37,7 @@ struct Bounds {
     float x0, y0, x1, y1;
 };
 
-auto GetBounds(const Components::UIRectComponent& r) -> Bounds {
+auto GetBounds(const GUI::UIComponents::UIRectComponent& r) -> Bounds {
     return {r.computedAbsMinX, r.computedAbsMinY, r.computedAbsMaxX, r.computedAbsMaxY};
 }
 
@@ -62,14 +63,14 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                     return true;
                 }
             }
-            auto* rect = reg.Get<Components::UIRectComponent>(curr);
+            auto* rect = reg.Get<GUI::UIComponents::UIRectComponent>(curr);
             curr       = (rect != nullptr) ? rect->parentEntity : Entity::Null();
         }
         return false;
     };
 
-    auto entities = reg.GetEntitiesWith<Components::UIRectComponent>();
-    auto rects    = reg.GetRawArray<Components::UIRectComponent>();
+    auto entities = reg.GetEntitiesWith<GUI::UIComponents::UIRectComponent>();
+    auto rects    = reg.GetRawArray<GUI::UIComponents::UIRectComponent>();
 
     if (entities.empty()) {
         return;
@@ -100,23 +101,23 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
     // Reset per-frame hover on every UIButtonComponent in one pass. The
     // UIButtonComponent::Hovered flag is the single source of truth for hover
     // across all widgets; compound widgets never cache their own hovered flag.
-    for (auto& btn: reg.GetRawArray<Components::UIButtonComponent>()) {
-        btn.Set(UIButton::Hovered, false);
-        btn.Set(UIButton::Clicked, false);
+    for (auto& btn: reg.GetRawArray<GUI::UIComponents::UIButtonComponent>()) {
+        btn.Set(GUI::UIButton::Hovered, false);
+        btn.Set(GUI::UIButton::Clicked, false);
     }
 
     // 1. Process active drag operations (window dragging + slider + splitter)
     // Window/Panel drags
-    for (Entity e: reg.GetEntitiesWith<Components::UIDragComponent>()) {
-        if (auto* drag = reg.Get<Components::UIDragComponent>(e)) {
+    for (Entity e: reg.GetEntitiesWith<GUI::UIComponents::UIDragComponent>()) {
+        if (auto* drag = reg.Get<GUI::UIComponents::UIDragComponent>(e)) {
             // Determine whether this drag handle belongs to a slider or splitter
             // by walking up parents.
-            Entity sliderEnt   = FindAncestorWith<Components::UISliderComponent>(reg, e);
-            Entity splitterEnt = FindAncestorWith<Components::UISplitterComponent>(reg, e);
+            Entity sliderEnt   = FindAncestorWith<GUI::UIComponents::UISliderComponent>(reg, e);
+            Entity splitterEnt = FindAncestorWith<GUI::UIComponents::UISplitterComponent>(reg, e);
 
             if (sliderEnt != Entity::Null()) {
                 // Slider drag: adjust slider value
-                if (auto* slider = reg.Get<Components::UISliderComponent>(sliderEnt)) {
+                if (auto* slider = reg.Get<GUI::UIComponents::UISliderComponent>(sliderEnt)) {
                     if (!leftMouseDown) {
                         // Release BOTH latches. Forgetting the drag-component
                         // latch here made the handle stay "armed" after the
@@ -132,8 +133,8 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                         // Find the _sl_track child to get the track's on-screen bounds
                         Bounds trackB {};
                         bool   hasBounds = false;
-                        if (auto* cache = reg.Get<Components::UIChildCacheComponent>(sliderEnt)) {
-                            cache->children.ForEach([&](uint64_t, const Components::UIChildCacheComponent::ChildRecord& rec) -> void {
+                        if (auto* cache = reg.Get<GUI::UIComponents::UIChildCacheComponent>(sliderEnt)) {
+                            cache->children.ForEach([&](uint64_t, const GUI::UIComponents::UIChildCacheComponent::ChildRecord& rec) -> void {
                                 if (hasBounds)
                                     return;
                                 Entity child = rec.entity;
@@ -141,7 +142,7 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                                     return;
                                 if (auto* cname = reg.Get<Components::NameComponent>(child)) {
                                     if (std::string_view(cname->name) == "_sl_track") {
-                                        if (auto* tr = reg.Get<Components::UIRectComponent>(child)) {
+                                        if (auto* tr = reg.Get<GUI::UIComponents::UIRectComponent>(child)) {
                                             trackB    = GetBounds(*tr);
                                             hasBounds = true;
                                         }
@@ -150,7 +151,7 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                             });
                         }
                         if (!hasBounds) {
-                            if (auto* srect = reg.Get<Components::UIRectComponent>(sliderEnt)) {
+                            if (auto* srect = reg.Get<GUI::UIComponents::UIRectComponent>(sliderEnt)) {
                                 trackB    = GetBounds(*srect);
                                 hasBounds = true;
                             }
@@ -172,7 +173,7 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                 }
             } else if (splitterEnt != Entity::Null()) {
                 // Splitter drag: adjust ratio
-                if (auto* split = reg.Get<Components::UISplitterComponent>(splitterEnt)) {
+                if (auto* split = reg.Get<GUI::UIComponents::UISplitterComponent>(splitterEnt)) {
                     if (!leftMouseDown) {
                         split->isDragging = false;
                         drag->isDragging  = false; // same latch leak as the slider
@@ -180,9 +181,9 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                         if (!split->isDragging) {
                             split->isDragging = true;
                         }
-                        if (auto* srect = reg.Get<Components::UIRectComponent>(splitterEnt)) {
+                        if (auto* srect = reg.Get<GUI::UIComponents::UIRectComponent>(splitterEnt)) {
                             Bounds tb         = GetBounds(*srect);
-                            bool   horizontal = (split->direction == Components::UISplitterComponent::Horizontal);
+                            bool   horizontal = (split->direction == GUI::UIComponents::UISplitterComponent::Horizontal);
                             float  total      = horizontal ? (tb.x1 - tb.x0) : (tb.y1 - tb.y0);
                             float  pos        = horizontal ? (mouseX - tb.x0) : (mouseY - tb.y0);
                             if (total > 1.0f) {
@@ -203,7 +204,7 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                     if (!leftMouseDown) {
                         drag->isDragging = false;
                     } else {
-                        if (auto* targetRect = reg.Get<Components::UIRectComponent>(drag->targetEntity)) {
+                        if (auto* targetRect = reg.Get<GUI::UIComponents::UIRectComponent>(drag->targetEntity)) {
                             targetRect->x += deltaX;
                             targetRect->y += deltaY;
                         }
@@ -237,23 +238,23 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
 
     for (const auto& entry: sortedEntries) {
         Entity e      = entities[entry.rawIndex];
-        auto*  button = reg.Get<Components::UIButtonComponent>(e);
+        auto*  button = reg.Get<GUI::UIComponents::UIButtonComponent>(e);
 
         bool hidden = IsEntityOrAncestorHidden(e);
 
         if (button == nullptr || hidden) {
             if (button != nullptr) {
-                button->Set(UIButton::Hovered, false);
-                button->Set(UIButton::Pressed, false);
+                button->Set(GUI::UIButton::Hovered, false);
+                button->Set(GUI::UIButton::Pressed, false);
             }
             continue;
         }
 
-        button->Set(UIButton::Clicked, false);
+        button->Set(GUI::UIButton::Clicked, false);
 
-        if (button->Has(UIButton::Disabled)) {
-            button->Set(UIButton::Hovered, false);
-            button->Set(UIButton::Pressed, false);
+        if (button->Has(GUI::UIButton::Disabled)) {
+            button->Set(GUI::UIButton::Hovered, false);
+            button->Set(GUI::UIButton::Pressed, false);
             continue;
         }
 
@@ -264,25 +265,25 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
         const bool inside = GUI::IsPointVisible(reg, e, mouseX, mouseY);
 
         if (clickConsumed) {
-            button->Set(UIButton::Hovered, false);
-            button->Set(UIButton::Pressed, false);
+            button->Set(GUI::UIButton::Hovered, false);
+            button->Set(GUI::UIButton::Pressed, false);
             continue;
         }
 
         if (inside) {
-            button->Set(UIButton::Hovered, true);
+            button->Set(GUI::UIButton::Hovered, true);
             if (leftMouseDown) {
-                button->Set(UIButton::Pressed, true);
+                button->Set(GUI::UIButton::Pressed, true);
 
                 // Click-to-set on sliders: start drag and jump value to click position
-                if (Entity slEnt = FindAncestorWith<Components::UISliderComponent>(reg, e); slEnt != Entity::Null()) {
-                    if (auto* slider = reg.Get<Components::UISliderComponent>(slEnt)) {
+                if (Entity slEnt = FindAncestorWith<GUI::UIComponents::UISliderComponent>(reg, e); slEnt != Entity::Null()) {
+                    if (auto* slider = reg.Get<GUI::UIComponents::UISliderComponent>(slEnt)) {
                         slider->isDragging = true;
                         // Find track bounds
                         Bounds trackB {};
                         bool   hasBounds = false;
-                        if (auto* cache = reg.Get<Components::UIChildCacheComponent>(slEnt)) {
-                            cache->children.ForEach([&](uint64_t, const Components::UIChildCacheComponent::ChildRecord& rec) -> void {
+                        if (auto* cache = reg.Get<GUI::UIComponents::UIChildCacheComponent>(slEnt)) {
+                            cache->children.ForEach([&](uint64_t, const GUI::UIComponents::UIChildCacheComponent::ChildRecord& rec) -> void {
                                 if (hasBounds)
                                     return;
                                 Entity child = rec.entity;
@@ -290,7 +291,7 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                                     return;
                                 if (auto* cname = reg.Get<Components::NameComponent>(child)) {
                                     if (std::string_view(cname->name) == "_sl_track") {
-                                        if (auto* tr = reg.Get<Components::UIRectComponent>(child)) {
+                                        if (auto* tr = reg.Get<GUI::UIComponents::UIRectComponent>(child)) {
                                             trackB    = GetBounds(*tr);
                                             hasBounds = true;
                                         }
@@ -299,7 +300,7 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                             });
                         }
                         if (!hasBounds) {
-                            if (auto* srect = reg.Get<Components::UIRectComponent>(slEnt)) {
+                            if (auto* srect = reg.Get<GUI::UIComponents::UIRectComponent>(slEnt)) {
                                 trackB    = GetBounds(*srect);
                                 hasBounds = true;
                             }
@@ -320,10 +321,10 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                 }
 
                 // Splitter handle: begin drag
-                if (Entity spEnt = FindAncestorWith<Components::UISplitterComponent>(reg, e); spEnt != Entity::Null()) {
-                    const auto* handleDrag = reg.Get<Components::UIDragComponent>(e);
+                if (Entity spEnt = FindAncestorWith<GUI::UIComponents::UISplitterComponent>(reg, e); spEnt != Entity::Null()) {
+                    const auto* handleDrag = reg.Get<GUI::UIComponents::UIDragComponent>(e);
                     if (handleDrag != nullptr && handleDrag->targetEntity == spEnt) {
-                        if (auto* sp = reg.Get<Components::UISplitterComponent>(spEnt)) {
+                        if (auto* sp = reg.Get<GUI::UIComponents::UISplitterComponent>(spEnt)) {
                             sp->isDragging = true;
                         }
                     }
@@ -331,7 +332,7 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
 
                 // Dropdown: clicking anywhere inside an open dropdown (but not an
                 // item) shouldn't auto-close; clicking the header toggles.
-                if (Entity ddEnt = FindAncestorWith<Components::UIDropdownComponent>(reg, e); ddEnt != Entity::Null()) {
+                if (Entity ddEnt = FindAncestorWith<GUI::UIComponents::UIDropdownComponent>(reg, e); ddEnt != Entity::Null()) {
                     clickedDropdown = ddEnt;
                 }
 
@@ -340,22 +341,22 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                 // through UIPopupComponent; without this, clicking an option
                 // reads as a click "outside every dropdown" and the menu closes
                 // in the same frame the selection would have been applied.
-                if (Entity popEnt = FindAncestorWith<Components::UIPopupComponent>(reg, e); popEnt != Entity::Null()) {
-                    if (const auto* pop = reg.Get<Components::UIPopupComponent>(popEnt)) {
-                        if (reg.Get<Components::UIDropdownComponent>(pop->owner) != nullptr) {
+                if (Entity popEnt = FindAncestorWith<GUI::UIComponents::UIPopupComponent>(reg, e); popEnt != Entity::Null()) {
+                    if (const auto* pop = reg.Get<GUI::UIComponents::UIPopupComponent>(popEnt)) {
+                        if (reg.Get<GUI::UIComponents::UIDropdownComponent>(pop->owner) != nullptr) {
                             clickedDropdown = pop->owner;
                         }
                     }
                 }
 
-                if (auto* drag = reg.Get<Components::UIDragComponent>(e)) {
+                if (auto* drag = reg.Get<GUI::UIComponents::UIDragComponent>(e)) {
                     drag->isDragging = true;
                 }
 
-                if (reg.Get<Components::UITextInputComponent>(e) != nullptr) {
+                if (reg.Get<GUI::UIComponents::UITextInputComponent>(e) != nullptr) {
                     focusCaptured = true;
-                    for (Entity other: reg.GetEntitiesWith<Components::UITextInputComponent>()) {
-                        if (auto* inputComp = reg.Get<Components::UITextInputComponent>(other)) {
+                    for (Entity other: reg.GetEntitiesWith<GUI::UIComponents::UITextInputComponent>()) {
+                        if (auto* inputComp = reg.Get<GUI::UIComponents::UITextInputComponent>(other)) {
                             const bool nowFocused = (other == e);
                             if (nowFocused && !inputComp->isFocused) {
                                 // Focus gain selects the pre-focus content so
@@ -368,24 +369,24 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                     }
                 }
             } else {
-                if (button->Has(UIButton::Pressed)) {
-                    button->Set(UIButton::Clicked, true);
+                if (button->Has(GUI::UIButton::Pressed)) {
+                    button->Set(GUI::UIButton::Clicked, true);
                     clickConsumed = true;
                 }
-                button->Set(UIButton::Pressed, false);
+                button->Set(GUI::UIButton::Pressed, false);
             }
         } else {
-            button->Set(UIButton::Hovered, false);
+            button->Set(GUI::UIButton::Hovered, false);
             if (!leftMouseDown) {
-                button->Set(UIButton::Pressed, false);
+                button->Set(GUI::UIButton::Pressed, false);
             }
         }
     }
 
     // Close expanded dropdowns when clicking outside any dropdown.
     if (leftMouseDown && clickedDropdown == Entity::Null()) {
-        for (Entity e: reg.GetEntitiesWith<Components::UIDropdownComponent>()) {
-            if (auto* dd = reg.Get<Components::UIDropdownComponent>(e)) {
+        for (Entity e: reg.GetEntitiesWith<GUI::UIComponents::UIDropdownComponent>()) {
+            if (auto* dd = reg.Get<GUI::UIComponents::UIDropdownComponent>(e)) {
                 dd->expanded = false;
             }
         }
@@ -393,17 +394,17 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
 
     // Focus handling for text inputs (defocus when clicking away)
     if (leftMouseDown && !focusCaptured) {
-        for (Entity e: reg.GetEntitiesWith<Components::UITextInputComponent>()) {
-            if (auto* inputComp = reg.Get<Components::UITextInputComponent>(e)) {
+        for (Entity e: reg.GetEntitiesWith<GUI::UIComponents::UITextInputComponent>()) {
+            if (auto* inputComp = reg.Get<GUI::UIComponents::UITextInputComponent>(e)) {
                 inputComp->isFocused = false;
             }
         }
     }
 
     // 3. Process State-Driven Style Transitions
-    for (Entity e: reg.GetEntitiesWith<Components::UIStyleComponent>()) {
-        auto* style = reg.Get<Components::UIStyleComponent>(e);
-        auto* btn   = reg.Get<Components::UIButtonComponent>(e);
+    for (Entity e: reg.GetEntitiesWith<GUI::UIComponents::UIStyleComponent>()) {
+        auto* style = reg.Get<GUI::UIComponents::UIStyleComponent>(e);
+        auto* btn   = reg.Get<GUI::UIComponents::UIButtonComponent>(e);
         if (style == nullptr) {
             continue;
         }
@@ -412,19 +413,19 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
         JPH::Vec4 targetTextColor  = style->textColorNormal;
 
         if (btn != nullptr) {
-            if (btn->Has(UIButton::Disabled)) {
+            if (btn->Has(GUI::UIButton::Disabled)) {
                 targetPanelColor = style->disabledColor;
-            } else if (btn->Has(UIButton::Pressed)) {
+            } else if (btn->Has(GUI::UIButton::Pressed)) {
                 targetPanelColor = style->pressedColor;
                 targetTextColor  = style->textColorPressed;
-            } else if (btn->Has(UIButton::Hovered)) {
+            } else if (btn->Has(GUI::UIButton::Hovered)) {
                 targetPanelColor = style->hoverColor;
                 targetTextColor  = style->textColorHover;
             }
         }
 
         // Animate Panel Color
-        if (auto* panel = reg.Get<Components::UIPanelComponent>(e)) {
+        if (auto* panel = reg.Get<GUI::UIComponents::UIPanelComponent>(e)) {
             if (style->transitionSpeed > 0.0f) {
                 float factor = std::clamp(style->transitionSpeed * dt, 0.0f, 1.0f);
                 panel->color = panel->color + factor * (targetPanelColor - panel->color);
@@ -435,7 +436,7 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
 
         // Animate Text Color (on self)
         if (style->hasTextColor) {
-            auto* text = reg.Get<Components::TextComponent>(e);
+            auto* text = reg.Get<GUI::UIComponents::TextComponent>(e);
             if (text != nullptr) {
                 if (style->transitionSpeed > 0.0f) {
                     float factor = std::clamp(style->transitionSpeed * dt, 0.0f, 1.0f);

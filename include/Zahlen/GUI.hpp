@@ -9,6 +9,7 @@
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/gui/UIComponents.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -48,8 +49,8 @@ auto AppendTextVertices(
     const JPH::Vec4&   color
 ) -> uint32_t;
 
-auto AppendPanelVertices(VertexPosition* outPos, VertexAttributes* outAttr, const Components::UIRectComponent& rect, const Components::UIPanelComponent& panel)
-    -> uint32_t;
+auto AppendPanelVertices(VertexPosition* outPos, VertexAttributes* outAttr, const UIComponents::UIRectComponent& rect,
+                         const UIComponents::UIPanelComponent& panel) -> uint32_t;
 
 // ============================================================================
 // TEXT SHAPING — SHARED BY THE LAYOUT MEASURE FUNCTION AND THE RENDERER
@@ -187,7 +188,7 @@ auto WrapTextInto(const FontAtlas& font, std::string_view text, float scale, flo
 
 /// Number of vertices AppendImageVertices needs for this rect/scale-mode pair.
 /// Tile emits one quad per repeat, so the count depends on the rect size.
-[[nodiscard]] auto CountImageVertices(const Components::UIRectComponent& rect, const Components::UIImageComponent& image) noexcept -> uint32_t;
+[[nodiscard]] auto CountImageVertices(const UIComponents::UIRectComponent& rect, const UIComponents::UIImageComponent& image) noexcept -> uint32_t;
 
 /// Emits the textured quad(s) for a UIImageComponent, honouring its scale mode
 /// and sub-UV region. Returns the number of vertices written (never more than
@@ -195,8 +196,8 @@ auto WrapTextInto(const FontAtlas& font, std::string_view text, float scale, flo
 auto AppendImageVertices(
     VertexPosition*                     outPos,
     VertexAttributes*                   outAttr,
-    const Components::UIRectComponent&  rect,
-    const Components::UIImageComponent& image
+    const UIComponents::UIRectComponent&  rect,
+    const UIComponents::UIImageComponent& image
 ) -> uint32_t;
 
 // ============================================================================
@@ -660,9 +661,9 @@ class Context {
         Entity parent      = GetCurrentParent();
         Entity cacheEntity = (parent != Entity::Null()) ? parent : GetRootCacheEntity();
 
-        auto* cache = m_reg->Get<Components::UIChildCacheComponent>(cacheEntity);
+        auto* cache = m_reg->Get<UIComponents::UIChildCacheComponent>(cacheEntity);
         if (cache == nullptr) {
-            cache = &m_reg->Add<Components::UIChildCacheComponent>(cacheEntity);
+            cache = &m_reg->Add<UIComponents::UIChildCacheComponent>(cacheEntity);
         }
 
         // 1. O(1) Lookup in cache. A record whose entity was destroyed outside
@@ -678,10 +679,10 @@ class Context {
 
         // 2. Not found -> Spawn new entity
         Entity newEntity = createFn();
-        if (auto* freshRect = m_reg->Get<Components::UIRectComponent>(newEntity)) {
+        if (auto* freshRect = m_reg->Get<UIComponents::UIRectComponent>(newEntity)) {
             freshRect->layoutOrder = NextLayoutOrder();
         }
-        cache->children.Insert(widgetKey, Components::UIChildCacheComponent::ChildRecord {.entity = newEntity, .lastVisitedFrame = m_currentFrame});
+        cache->children.Insert(widgetKey, UIComponents::UIChildCacheComponent::ChildRecord {.entity = newEntity, .lastVisitedFrame = m_currentFrame});
 
         m_lastItem = newEntity;
         return newEntity;
@@ -738,9 +739,9 @@ class Context {
         Entity e = GetOrCreateEntity(key, [&]() -> auto {
             return m_reg->Create(
                 Components::NameComponent {.name = String64(id)},
-                Components::UIRectComponent {.parentEntity = parent, .width = cfg.width, .height = cfg.height, .hierarchyDepth = depth},
-                Components::UIPanelComponent {.color = cfg.normalColor, .borderRadius = cfg.borderRadius}, Components::UIButtonComponent {},
-                Components::UIStyleComponent {
+                UIComponents::UIRectComponent {.parentEntity = parent, .width = cfg.width, .height = cfg.height, .hierarchyDepth = depth},
+                UIComponents::UIPanelComponent {.color = cfg.normalColor, .borderRadius = cfg.borderRadius}, UIComponents::UIButtonComponent {},
+                UIComponents::UIStyleComponent {
                     .normalColor     = cfg.normalColor,
                     .hoverColor      = cfg.hoverColor,
                     .pressedColor    = cfg.pressedColor,
@@ -749,7 +750,7 @@ class Context {
                     .transitionSpeed = 16.0f,
                     .hasTextColor    = true
                 },
-                Components::TextComponent {
+                UIComponents::TextComponent {
                     .text          = String256(text),
                     .scale         = cfg.scale,
                     .color         = cfg.textColor,
@@ -761,9 +762,9 @@ class Context {
         });
 
         // Update the text in the TextComponent of the existing entity dynamically
-        m_reg->Patch<Components::TextComponent>(e, [&](auto& textComp) -> auto { textComp.text.assign(text); });
+        m_reg->Patch<UIComponents::TextComponent>(e, [&](auto& textComp) -> auto { textComp.text.assign(text); });
 
-        m_reg->Patch<Components::UIButtonComponent>(e, [&](const auto& btn) -> auto {
+        m_reg->Patch<UIComponents::UIButtonComponent>(e, [&](const auto& btn) -> auto {
             if (btn.Has(UIButton::Clicked)) {
                 std::forward<OnClickFn>(onClick)();
             }
@@ -900,21 +901,21 @@ class Context {
             initialText.assign(std::string_view(value));
             return m_reg->Create(
                 Components::NameComponent {.name = String64(id)},
-                Components::UIRectComponent {.parentEntity = parent, .width = cfg.width, .height = cfg.height, .hierarchyDepth = depth},
-                Components::UIPanelComponent {.color = cfg.bgColor, .borderRadius = cfg.borderRadius, .edgeWidth = 1.0f},
-                Components::UIFlexComponent {
+                UIComponents::UIRectComponent {.parentEntity = parent, .width = cfg.width, .height = cfg.height, .hierarchyDepth = depth},
+                UIComponents::UIPanelComponent {.color = cfg.bgColor, .borderRadius = cfg.borderRadius, .edgeWidth = 1.0f},
+                UIComponents::UIFlexComponent {
                     .direction     = FlexDirection::Row,
                     .alignItems    = FlexAlign::Center,
                     .paddingLeft   = cfg.padding,
                     .paddingRight  = cfg.padding,
                     .gapX          = 6.0f
                 },
-                Components::UIButtonComponent {},
-                Components::UITextInputComponent {.text = initialText, .cursorIndex = 0, .isFocused = false, .edited = false}
+                UIComponents::UIButtonComponent {},
+                UIComponents::UITextInputComponent {.text = initialText, .cursorIndex = 0, .isFocused = false, .edited = false}
             );
         });
 
-        auto* input = m_reg->Get<Components::UITextInputComponent>(e);
+        auto* input = m_reg->Get<UIComponents::UITextInputComponent>(e);
 
         // Sync label if a non-empty label is passed (we render it as a
         // separate text entity inside a horizontal box — or omit for bare inputs)
@@ -1015,7 +1016,7 @@ class Context {
         uint32_t depth = 0;
         Entity   e     = PrepareCollapsingHeader(id, label, defaultOpen, cfg, depth);
 
-        auto* hdr = m_reg->Get<Components::UICollapsingHeaderComponent>(e);
+        auto* hdr = m_reg->Get<UIComponents::UICollapsingHeaderComponent>(e);
         if (hdr->isOpen) {
             // Both guards are strictly local. They are destroyed, in reverse
             // declaration order (boxScope then scope), when this function
@@ -1099,20 +1100,20 @@ class Context {
         Entity e = GetOrCreateEntity(key, [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64(id)},
-                Components::UIRectComponent {.parentEntity = parent, .width = 0.0f, .height = 0.0f, .hierarchyDepth = depth},
-                Components::UIPanelComponent {.color = {0.0f, 0.0f, 0.0f, 0.0f}},
-                Components::UIFlexComponent {
+                UIComponents::UIRectComponent {.parentEntity = parent, .width = 0.0f, .height = 0.0f, .hierarchyDepth = depth},
+                UIComponents::UIPanelComponent {.color = {0.0f, 0.0f, 0.0f, 0.0f}},
+                UIComponents::UIFlexComponent {
                     .direction  = (direction == SplitDirection::Horizontal) ? FlexDirection::Row : FlexDirection::Column,
                     .alignItems = FlexAlign::Stretch,
                     .gapX        = 0.0f,
                     .gapY        = 0.0f
                 },
-                Components::UISplitterComponent {
+                UIComponents::UISplitterComponent {
                     .ratio         = ratio,
                     .previousRatio = ratio,
                     .direction     = (direction == SplitDirection::Horizontal)
-                                        ? Components::UISplitterComponent::Horizontal
-                                        : Components::UISplitterComponent::Vertical
+                                        ? UIComponents::UISplitterComponent::Horizontal
+                                        : UIComponents::UISplitterComponent::Vertical
                 }
             );
         });
@@ -1120,13 +1121,13 @@ class Context {
         // Cached splitter entities may survive for many frames (and the same
         // id can be used with either orientation), so refresh their layout
         // configuration before building the two child panes.
-        m_reg->Patch<Components::UIRectComponent>(e, [&](auto& r) -> auto {
+        m_reg->Patch<UIComponents::UIRectComponent>(e, [&](auto& r) -> auto {
             r.parentEntity   = parent;
             r.width          = 0.0f;
             r.height         = 0.0f;
             r.hierarchyDepth = depth;
         });
-        m_reg->Patch<Components::UIFlexComponent>(e, [&](auto& f) -> auto {
+        m_reg->Patch<UIComponents::UIFlexComponent>(e, [&](auto& f) -> auto {
             f.direction  = (direction == SplitDirection::Horizontal) ? FlexDirection::Row : FlexDirection::Column;
             f.alignItems = FlexAlign::Stretch;
             // The splitter container absorbs its parent's free space on the
@@ -1141,7 +1142,7 @@ class Context {
             f.gapY       = 0.0f;
         });
 
-        auto* split = m_reg->Get<Components::UISplitterComponent>(e);
+        auto* split = m_reg->Get<UIComponents::UISplitterComponent>(e);
 
         // Sync external ratio change: if the caller mutated `ratio` since
         // last frame and the user isn't actively dragging, reflect it into
@@ -1175,7 +1176,7 @@ class Context {
             auto leftScope = Box(leftName, leftCfg);
             Entity leftEnt = leftScope.GetEntity();
             // Patch parent/depth/sizing each frame (needed for persistent entities)
-            m_reg->Patch<Components::UIRectComponent>(leftEnt, [&](auto& lr) -> auto {
+            m_reg->Patch<UIComponents::UIRectComponent>(leftEnt, [&](auto& lr) -> auto {
                 lr.parentEntity   = e;
                 lr.hierarchyDepth = depth + 1;
                 // The pane's size is supplied by flex-grow on the main axis;
@@ -1184,7 +1185,7 @@ class Context {
                 lr.width  = 0.0f;
                 lr.height = 0.0f;
             });
-            if (auto* lflex = m_reg->Get<Components::UIFlexComponent>(leftEnt)) {
+            if (auto* lflex = m_reg->Get<UIComponents::UIFlexComponent>(leftEnt)) {
                 lflex->flexGrow   = ratio * 1000.0f;
                 lflex->flexShrink = 1.0f;
                 lflex->flexBasis  = 0.0f;
@@ -1200,30 +1201,30 @@ class Context {
             Entity handleEnt = GetOrCreateChild(e, HashStringView(handleName), [&]() -> Entity {
                 return m_reg->Create(
                     Components::NameComponent {.name = String64(handleName)},
-                    Components::UIRectComponent {
+                    UIComponents::UIRectComponent {
                         .parentEntity   = e,
                         .width          = horizontal ? cfg.handleSize : 0.0f,
                         .height         = horizontal ? 0.0f : cfg.handleSize,
                         .hierarchyDepth = depth + 1
                     },
-                    Components::UIPanelComponent {.color = cfg.handleColor},
-                    Components::UIFlexComponent {
+                    UIComponents::UIPanelComponent {.color = cfg.handleColor},
+                    UIComponents::UIFlexComponent {
                         .flexGrow   = 0.0f,
                         .flexShrink = 0.0f,
                         .flexBasis  = static_cast<float>(cfg.handleSize)
                     },
-                    Components::UIButtonComponent {},
-                    Components::UIDragComponent {.targetEntity = e, .isDragging = false}
+                    UIComponents::UIButtonComponent {},
+                    UIComponents::UIDragComponent {.targetEntity = e, .isDragging = false}
                 );
             });
             // Patch the handle sizing each frame for current direction
-            m_reg->Patch<Components::UIRectComponent>(handleEnt, [&](auto& hr) -> auto {
+            m_reg->Patch<UIComponents::UIRectComponent>(handleEnt, [&](auto& hr) -> auto {
                 hr.parentEntity   = e;
                 hr.hierarchyDepth = depth + 1;
                 if (horizontal) { hr.width = cfg.handleSize; hr.height = 0.0f; }
                 else             { hr.width = 0.0f; hr.height = cfg.handleSize; }
             });
-            m_reg->Patch<Components::UIFlexComponent>(handleEnt, [&](auto& hf) -> auto {
+            m_reg->Patch<UIComponents::UIFlexComponent>(handleEnt, [&](auto& hf) -> auto {
                 hf.flexGrow   = 0.0f;
                 hf.flexShrink = 0.0f;
                 hf.flexBasis  = static_cast<float>(cfg.handleSize);
@@ -1231,7 +1232,7 @@ class Context {
             // Handle hover color — read directly from the handle's own
             // UIButtonComponent (single source of truth; no duplicated flag).
             bool handleHover = IsHovered(handleEnt) || (split != nullptr && split->isDragging);
-            m_reg->Patch<Components::UIPanelComponent>(handleEnt, [&](auto& hp) -> auto {
+            m_reg->Patch<UIComponents::UIPanelComponent>(handleEnt, [&](auto& hp) -> auto {
                 hp.color = handleHover ? cfg.hoverColor : cfg.handleColor;
             });
         }
@@ -1248,13 +1249,13 @@ class Context {
             rightCfg.gap       = 0.0f;
             auto rightScope = Box(rightName, rightCfg);
             Entity rightEnt = rightScope.GetEntity();
-            m_reg->Patch<Components::UIRectComponent>(rightEnt, [&](auto& rr) -> auto {
+            m_reg->Patch<UIComponents::UIRectComponent>(rightEnt, [&](auto& rr) -> auto {
                 rr.parentEntity   = e;
                 rr.hierarchyDepth = depth + 1;
                 rr.width          = 0.0f;
                 rr.height         = 0.0f;
             });
-            if (auto* rflex = m_reg->Get<Components::UIFlexComponent>(rightEnt)) {
+            if (auto* rflex = m_reg->Get<UIComponents::UIFlexComponent>(rightEnt)) {
                 rflex->flexGrow   = (1.0f - ratio) * 1000.0f;
                 rflex->flexShrink = 1.0f;
                 rflex->flexBasis  = 0.0f;
@@ -1320,7 +1321,7 @@ class Context {
         Entity  root  = Entity::Null();
         if (scope.IsPushed()) {
             // The pushed scope is the viewport; its parent is the ScrollBox root.
-            if (const auto* vr = m_reg->Get<Components::UIRectComponent>(scope.GetEntity())) {
+            if (const auto* vr = m_reg->Get<UIComponents::UIRectComponent>(scope.GetEntity())) {
                 root = vr->parentEntity;
             }
         }
@@ -1520,9 +1521,9 @@ class Context {
     // building inner structure of compound widgets (checkbox box, slider track).
     template <typename CreateFn>
     auto GetOrCreateChild(Entity parent, uint64_t childKey, CreateFn&& createFn) -> Entity {
-        auto* cache = m_reg->Get<Components::UIChildCacheComponent>(parent);
+        auto* cache = m_reg->Get<UIComponents::UIChildCacheComponent>(parent);
         if (cache == nullptr) {
-            cache = &m_reg->Add<Components::UIChildCacheComponent>(parent);
+            cache = &m_reg->Add<UIComponents::UIChildCacheComponent>(parent);
         }
 
         if (const auto* rec = cache->children.Find(childKey)) {
@@ -1532,10 +1533,10 @@ class Context {
             }
         }
         Entity newEnt = createFn();
-        if (auto* freshRect = m_reg->Get<Components::UIRectComponent>(newEnt)) {
+        if (auto* freshRect = m_reg->Get<UIComponents::UIRectComponent>(newEnt)) {
             freshRect->layoutOrder = NextLayoutOrder();
         }
-        cache->children.Insert(childKey, Components::UIChildCacheComponent::ChildRecord {.entity = newEnt, .lastVisitedFrame = m_currentFrame});
+        cache->children.Insert(childKey, UIComponents::UIChildCacheComponent::ChildRecord {.entity = newEnt, .lastVisitedFrame = m_currentFrame});
         return newEnt;
     }
 
@@ -1646,22 +1647,22 @@ class Context {
             if (hasArrow) {
                 return m_reg->Create(
                     Components::NameComponent {.name = String64(id)},
-                    Components::UIRectComponent {.parentEntity = parent, .width = cfg.width, .hierarchyDepth = depth},
-                    Components::UIFlexComponent {
+                    UIComponents::UIRectComponent {.parentEntity = parent, .width = cfg.width, .hierarchyDepth = depth},
+                    UIComponents::UIFlexComponent {
                         .direction  = FlexDirection::Column,
                         .alignItems = FlexAlign::Stretch,
                         .flexGrow   = 1.0f,
                         .flexShrink = 1.0f,
                         .flexBasis  = -1.0f
                     },
-                    Components::UISelectableComponent {.selected = selectedIn, .doubleClickSpan = cfg.doubleClickSpan}
+                    UIComponents::UISelectableComponent {.selected = selectedIn, .doubleClickSpan = cfg.doubleClickSpan}
                 );
             }
             return m_reg->Create(
                 Components::NameComponent {.name = String64(id)},
-                Components::UIRectComponent {.parentEntity = parent, .width = cfg.width, .height = cfg.height, .hierarchyDepth = depth},
-                Components::UIPanelComponent {.color = cfg.normalColor, .borderRadius = cfg.borderRadius},
-                Components::UIFlexComponent {
+                UIComponents::UIRectComponent {.parentEntity = parent, .width = cfg.width, .height = cfg.height, .hierarchyDepth = depth},
+                UIComponents::UIPanelComponent {.color = cfg.normalColor, .borderRadius = cfg.borderRadius},
+                UIComponents::UIFlexComponent {
                     .direction     = FlexDirection::Row,
                     .alignItems    = FlexAlign::Center,
                     .flexGrow      = 1.0f,
@@ -1671,18 +1672,18 @@ class Context {
                     .paddingRight  = 8.0f,
                     .gapX          = 6.0f
                 },
-                Components::UIButtonComponent {},
-                Components::UISelectableComponent {.selected = selectedIn, .doubleClickSpan = cfg.doubleClickSpan}
+                UIComponents::UIButtonComponent {},
+                UIComponents::UISelectableComponent {.selected = selectedIn, .doubleClickSpan = cfg.doubleClickSpan}
             );
         });
 
-        m_reg->Patch<Components::UIRectComponent>(e, [&](auto& r) -> auto {
+        m_reg->Patch<UIComponents::UIRectComponent>(e, [&](auto& r) -> auto {
             r.parentEntity   = parent;
             r.width          = cfg.width;
             r.height         = hasArrow ? 0.0f : cfg.height;
             r.hierarchyDepth = depth;
         });
-        m_reg->Patch<Components::UIFlexComponent>(e, [&](auto& f) -> auto {
+        m_reg->Patch<UIComponents::UIFlexComponent>(e, [&](auto& f) -> auto {
             f.direction    = hasArrow ? FlexDirection::Column : FlexDirection::Row;
             f.alignItems   = hasArrow ? FlexAlign::Stretch : FlexAlign::Center;
             f.flexGrow     = 1.0f;
@@ -1702,24 +1703,24 @@ class Context {
             rowEnt = GetOrCreateChild(e, HashStringView("_sel_row"), [&]() -> Entity {
                 return m_reg->Create(
                     Components::NameComponent {.name = String64("_sel_row")},
-                    Components::UIRectComponent {.parentEntity = e, .height = cfg.height, .hierarchyDepth = depth + 1},
-                    Components::UIPanelComponent {.color = cfg.normalColor, .borderRadius = cfg.borderRadius},
-                    Components::UIFlexComponent {
+                    UIComponents::UIRectComponent {.parentEntity = e, .height = cfg.height, .hierarchyDepth = depth + 1},
+                    UIComponents::UIPanelComponent {.color = cfg.normalColor, .borderRadius = cfg.borderRadius},
+                    UIComponents::UIFlexComponent {
                         .direction    = FlexDirection::Row,
                         .alignItems   = FlexAlign::Center,
                         .paddingLeft  = padLeft,
                         .paddingRight = 8.0f,
                         .gapX         = 6.0f
                     },
-                    Components::UIButtonComponent {}
+                    UIComponents::UIButtonComponent {}
                 );
             });
-            m_reg->Patch<Components::UIRectComponent>(rowEnt, [&](auto& r) -> auto {
+            m_reg->Patch<UIComponents::UIRectComponent>(rowEnt, [&](auto& r) -> auto {
                 r.parentEntity   = e;
                 r.height         = cfg.height;
                 r.hierarchyDepth = depth + 1;
             });
-            m_reg->Patch<Components::UIFlexComponent>(rowEnt, [&](auto& f) -> auto {
+            m_reg->Patch<UIComponents::UIFlexComponent>(rowEnt, [&](auto& f) -> auto {
                 f.direction    = FlexDirection::Row;
                 f.alignItems   = FlexAlign::Center;
                 f.paddingLeft  = padLeft;
@@ -1728,7 +1729,7 @@ class Context {
             });
         }
 
-        auto* sel = m_reg->Get<Components::UISelectableComponent>(e);
+        auto* sel = m_reg->Get<UIComponents::UISelectableComponent>(e);
 
         SelectableClickInfo info {.entity = e, .rowEntity = rowEnt, .selected = sel->selected};
 
@@ -1762,8 +1763,8 @@ class Context {
             Entity arrowEnt = GetOrCreateChild(rowEnt, HashStringView("_sel_arrow"), [&]() -> Entity {
                 return m_reg->Create(
                     Components::NameComponent {.name = String64("_sel_arrow")},
-                    Components::UIRectComponent {.parentEntity = rowEnt, .width = 14.0f, .height = cfg.height, .hierarchyDepth = childDepth},
-                    Components::TextComponent {
+                    UIComponents::UIRectComponent {.parentEntity = rowEnt, .width = 14.0f, .height = cfg.height, .hierarchyDepth = childDepth},
+                    UIComponents::TextComponent {
                         .text          = String256(arrowGlyph),
                         .scale         = cfg.scale,
                         .color         = cfg.textColor,
@@ -1773,7 +1774,7 @@ class Context {
                     }
                 );
             });
-            m_reg->Patch<Components::UIRectComponent>(arrowEnt, [&](auto& r) -> auto {
+            m_reg->Patch<UIComponents::UIRectComponent>(arrowEnt, [&](auto& r) -> auto {
                 r.parentEntity   = rowEnt;
                 r.width          = 14.0f;
                 r.height         = cfg.height;
@@ -1785,8 +1786,8 @@ class Context {
         Entity lblEnt = GetOrCreateChild(rowEnt, HashStringView("_sel_label"), [&]() -> Entity {
             return m_reg->Create(
                 Components::NameComponent {.name = String64("_sel_label")},
-                Components::UIRectComponent {.parentEntity = rowEnt, .height = cfg.height, .hierarchyDepth = childDepth},
-                Components::TextComponent {
+                UIComponents::UIRectComponent {.parentEntity = rowEnt, .height = cfg.height, .hierarchyDepth = childDepth},
+                UIComponents::TextComponent {
                     .text          = String256(label),
                     .scale         = cfg.scale,
                     .color         = cfg.textColor,
@@ -1794,16 +1795,16 @@ class Context {
                     .verticalAlign = TextVerticalAlignment::Center,
                     .fontIndex     = fontHandle
                 },
-                Components::UIFlexComponent {.flexGrow = 1.0f}
+                UIComponents::UIFlexComponent {.flexGrow = 1.0f}
             );
         });
-        m_reg->Patch<Components::UIRectComponent>(lblEnt, [&](auto& r) -> auto {
+        m_reg->Patch<UIComponents::UIRectComponent>(lblEnt, [&](auto& r) -> auto {
             r.parentEntity   = rowEnt;
             r.height         = cfg.height;
             r.hierarchyDepth = childDepth;
         });
 
-        m_reg->Patch<Components::TextComponent>(lblEnt, [&](auto& tc) -> auto {
+        m_reg->Patch<UIComponents::TextComponent>(lblEnt, [&](auto& tc) -> auto {
             tc.text.assign(label);
             tc.scale = cfg.scale;
             tc.align = cfg.align;
@@ -1866,11 +1867,11 @@ class Context {
             UIScope scope = PushScope(info.entity, depth);
             auto    boxScope = Box(contentBoxName, boxCfg);
             Entity  boxEnt   = boxScope.GetEntity();
-            m_reg->Patch<Components::UIRectComponent>(boxEnt, [&](auto& r) -> auto {
+            m_reg->Patch<UIComponents::UIRectComponent>(boxEnt, [&](auto& r) -> auto {
                 r.parentEntity   = info.entity;
                 r.hierarchyDepth = depth + 1;
             });
-            m_reg->Patch<Components::UIFlexComponent>(boxEnt, [&](auto& f) -> auto {
+            m_reg->Patch<UIComponents::UIFlexComponent>(boxEnt, [&](auto& f) -> auto {
                 f.direction   = FlexDirection::Column;
                 f.marginLeft  = cfg.indent;
                 f.marginTop   = 0.0f;
@@ -1967,18 +1968,18 @@ struct ScrollInput {
 /// ScrollBox viewport would still swallow hover and clicks — the clipped part
 /// of a scroller must be inert, not just invisible.
 [[nodiscard]] inline auto IsPointVisible(ECS::Registry& reg, Entity ent, float x, float y) noexcept -> bool {
-    auto Inside = [](const Components::UIRectComponent& r, float px, float py) -> bool {
+    auto Inside = [](const UIComponents::UIRectComponent& r, float px, float py) -> bool {
         return px >= r.computedAbsMinX && px <= r.computedAbsMaxX && py >= r.computedAbsMinY && py <= r.computedAbsMaxY;
     };
 
-    const auto* rect = reg.Get<Components::UIRectComponent>(ent);
+    const auto* rect = reg.Get<UIComponents::UIRectComponent>(ent);
     if (rect == nullptr || !Inside(*rect, x, y)) {
         return false;
     }
 
     Entity curr = rect->parentEntity;
     while (curr != Entity::Null() && reg.IsAlive(curr)) {
-        const auto* parent = reg.Get<Components::UIRectComponent>(curr);
+        const auto* parent = reg.Get<UIComponents::UIRectComponent>(curr);
         if (parent == nullptr) {
             break;
         }
@@ -2007,15 +2008,15 @@ inline void UpdateScrollExtents(ECS::Registry& reg) noexcept {
 
     HashMap<uint64_t, Extent> extents;
 
-    const auto entities = reg.GetEntitiesWith<Components::UIRectComponent>();
-    const auto rects    = reg.GetRawArray<Components::UIRectComponent>();
+    const auto entities = reg.GetEntitiesWith<UIComponents::UIRectComponent>();
+    const auto rects    = reg.GetRawArray<UIComponents::UIRectComponent>();
 
     for (size_t i = 0; i < entities.size(); ++i) {
         const auto& r = rects[i];
         if (r.parentEntity == Entity::Null() || !reg.IsAlive(r.parentEntity)) {
             continue;
         }
-        if (reg.Get<Components::UIScrollComponent>(r.parentEntity) == nullptr) {
+        if (reg.Get<UIComponents::UIScrollComponent>(r.parentEntity) == nullptr) {
             continue;
         }
 
@@ -2043,14 +2044,14 @@ inline void UpdateScrollExtents(ECS::Registry& reg) noexcept {
         ++ex->count;
     }
 
-    for (Entity sc: reg.GetEntitiesWith<Components::UIScrollComponent>()) {
-        auto* scroll = reg.Get<Components::UIScrollComponent>(sc);
-        const auto* rect = reg.Get<Components::UIRectComponent>(sc);
+    for (Entity sc: reg.GetEntitiesWith<UIComponents::UIScrollComponent>()) {
+        auto* scroll = reg.Get<UIComponents::UIScrollComponent>(sc);
+        const auto* rect = reg.Get<UIComponents::UIRectComponent>(sc);
         if (scroll == nullptr || rect == nullptr) {
             continue;
         }
 
-        const auto* flex = reg.Get<Components::UIFlexComponent>(sc);
+        const auto* flex = reg.Get<UIComponents::UIFlexComponent>(sc);
         const float padL = (flex != nullptr) ? flex->paddingLeft : 0.0f;
         const float padT = (flex != nullptr) ? flex->paddingTop : 0.0f;
         const float padR = (flex != nullptr) ? flex->paddingRight : 0.0f;
@@ -2092,8 +2093,8 @@ inline auto ApplyScrollInput(ECS::Registry& reg, const ScrollInput& input) noexc
         Entity   best       = Entity::Null();
         uint32_t bestDepth  = 0;
 
-        for (Entity sc: reg.GetEntitiesWith<Components::UIScrollComponent>()) {
-            const auto* scroll = reg.Get<Components::UIScrollComponent>(sc);
+        for (Entity sc: reg.GetEntitiesWith<UIComponents::UIScrollComponent>()) {
+            const auto* scroll = reg.Get<UIComponents::UIScrollComponent>(sc);
             if (scroll == nullptr) {
                 continue;
             }
@@ -2101,7 +2102,7 @@ inline auto ApplyScrollInput(ECS::Registry& reg, const ScrollInput& input) noexc
             if (!canScroll || !IsPointVisible(reg, sc, input.mouseX, input.mouseY)) {
                 continue;
             }
-            const auto*    rect  = reg.Get<Components::UIRectComponent>(sc);
+            const auto*    rect  = reg.Get<UIComponents::UIRectComponent>(sc);
             const uint32_t depth = (rect != nullptr) ? rect->hierarchyDepth : 0;
             if (best == Entity::Null() || depth > bestDepth) {
                 best      = sc;
@@ -2110,7 +2111,7 @@ inline auto ApplyScrollInput(ECS::Registry& reg, const ScrollInput& input) noexc
         }
 
         if (best != Entity::Null()) {
-            auto* scroll = reg.Get<Components::UIScrollComponent>(best);
+            auto* scroll = reg.Get<UIComponents::UIScrollComponent>(best);
             // Wheel up (positive) scrolls the content down, i.e. the offset
             // shrinks — the same sign convention as a browser viewport.
             const float delta = input.wheelDelta * scroll->scrollSpeed;
@@ -2123,8 +2124,8 @@ inline auto ApplyScrollInput(ECS::Registry& reg, const ScrollInput& input) noexc
         }
     }
 
-    for (Entity sc: reg.GetEntitiesWith<Components::UIScrollComponent>()) {
-        auto* scroll = reg.Get<Components::UIScrollComponent>(sc);
+    for (Entity sc: reg.GetEntitiesWith<UIComponents::UIScrollComponent>()) {
+        auto* scroll = reg.Get<UIComponents::UIScrollComponent>(sc);
         if (scroll == nullptr) {
             continue;
         }

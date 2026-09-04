@@ -13,6 +13,7 @@
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/Types.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/gui/UIComponents.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -169,8 +170,8 @@ struct UILayoutRenderTestSuite {
                     .anchorMaxY = 0.0f,
                     .color      = {0.04f, 0.04f, 0.08f, 1.0f},
                     .edgeWidth  = 0.0f,
-                    .direction  = ZHLN::FlexDirection::Column,
-                    .justify    = ZHLN::FlexJustify::FlexStart,
+                    .direction  = ZHLN::GUI::FlexDirection::Column,
+                    .justify    = ZHLN::GUI::FlexJustify::FlexStart,
                     .gap        = 10.0f,
                     .padding    = 10.0f,
                 };
@@ -220,9 +221,9 @@ struct UILayoutRenderTestSuite {
             const ZHLN::Entity rootEnt   = findNamed("layout_root");
             const ZHLN::Entity redEnt    = findNamed("band_red");
             const ZHLN::Entity greenEnt  = findNamed("band_green");
-            const auto*        rootRect  = reg.Get<ZHLN::Components::UIRectComponent>(rootEnt);
-            const auto*        redRect   = reg.Get<ZHLN::Components::UIRectComponent>(redEnt);
-            const auto*        greenRect = reg.Get<ZHLN::Components::UIRectComponent>(greenEnt);
+            const auto*        rootRect  = reg.Get<ZHLN::GUI::UIComponents::UIRectComponent>(rootEnt);
+            const auto*        redRect   = reg.Get<ZHLN::GUI::UIComponents::UIRectComponent>(redEnt);
+            const auto*        greenRect = reg.Get<ZHLN::GUI::UIComponents::UIRectComponent>(greenEnt);
             if (rootRect == nullptr || redRect == nullptr || greenRect == nullptr) {
                 ZHLN::Println("    [FAIL] Named UI widgets missing after Tick.");
                 return std::unexpected(UILayoutRenderError::LayoutMismatch);
@@ -406,7 +407,7 @@ struct UILayoutRenderTestSuite {
                 ZHLN::Test::ExpectTrue(cap.has_value());
 
                 ZHLN::Entity panel = findNamed("ToolWin");
-                const auto* rr = reg.Get<ZHLN::Components::UIRectComponent>(panel);
+                const auto* rr = reg.Get<ZHLN::GUI::UIComponents::UIRectComponent>(panel);
                 ZHLN::Test::ExpectTrue(rr != nullptr);
                 if (rr == nullptr) return std::unexpected(UILayoutRenderError::LayoutMismatch);
 

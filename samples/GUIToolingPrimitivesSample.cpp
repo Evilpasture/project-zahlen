@@ -6,6 +6,7 @@
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/GUI.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/gui/UIComponents.hpp>
 #include <array>
 #include <cstdlib>
 #include <string_view>
@@ -48,8 +49,8 @@ void DrawRenderSettingsWindow(ZHLN::GUI::Context& ui, RenderSettings& s) {
                 "Render Settings", ZHLN::GUI::LabelConfig {
                                        .scale         = 1.05f,
                                        .color         = {0.40f, 0.72f, 1.00f, 1.0f},
-                                       .align         = ZHLN::TextAlignment::Center,
-                                       .verticalAlign = ZHLN::TextVerticalAlignment::Center,
+                                       .align         = ZHLN::GUI::TextAlignment::Center,
+                                       .verticalAlign = ZHLN::GUI::TextVerticalAlignment::Center,
                                        .height        = 28.0f,
                                    }
             );
@@ -83,9 +84,9 @@ void DrawRenderSettingsWindow(ZHLN::GUI::Context& ui, RenderSettings& s) {
                         ZHLN::GUI::BoxConfig {
                             .height     = 100.0f,
                             .color      = {0.06f, 0.09f, 0.14f, 0.85f},
-                            .direction  = ZHLN::FlexDirection::Column,
-                            .justify    = ZHLN::FlexJustify::Center,
-                            .alignItems = ZHLN::FlexAlign::Center,
+                            .direction  = ZHLN::GUI::FlexDirection::Column,
+                            .justify    = ZHLN::GUI::FlexJustify::Center,
+                            .alignItems = ZHLN::GUI::FlexAlign::Center,
                             .padding    = 8.0f,
                         },
                         [&]() -> void {
@@ -93,8 +94,8 @@ void DrawRenderSettingsWindow(ZHLN::GUI::Context& ui, RenderSettings& s) {
                                 "Preview", ZHLN::GUI::LabelConfig {
                                                .scale         = 0.90f,
                                                .color         = {0.55f, 0.70f, 0.90f, 0.60f},
-                                               .align         = ZHLN::TextAlignment::Center,
-                                               .verticalAlign = ZHLN::TextVerticalAlignment::Center,
+                                               .align         = ZHLN::GUI::TextAlignment::Center,
+                                               .verticalAlign = ZHLN::GUI::TextVerticalAlignment::Center,
                                            }
                             );
                         }
@@ -165,7 +166,7 @@ void DrawContentBrowser(ZHLN::GUI::Context& ui, BrowserState& state) {
                 "Content Browser", ZHLN::GUI::LabelConfig {
                                        .scale         = 1.00f,
                                        .color         = {0.40f, 0.72f, 1.00f, 1.0f},
-                                       .verticalAlign = ZHLN::TextVerticalAlignment::Center,
+                                       .verticalAlign = ZHLN::GUI::TextVerticalAlignment::Center,
                                        .height        = 26.0f,
                                    }
             );
@@ -186,7 +187,7 @@ void DrawContentBrowser(ZHLN::GUI::Context& ui, BrowserState& state) {
                                // inside are 28px and would hang out of a squeezed
                                // row. AssetList below absorbs the overflow.
                                .flexShrink = 0.0f,
-                               .direction  = ZHLN::FlexDirection::Row,
+                               .direction  = ZHLN::GUI::FlexDirection::Row,
                                .gap       = 10.0f,
                                .padding   = 4.0f,
                            },
@@ -204,7 +205,7 @@ void DrawContentBrowser(ZHLN::GUI::Context& ui, BrowserState& state) {
                         ZHLN::GUI::ImageConfig {
                             .width  = 28.0f,
                             .height = 28.0f,
-                            .mode   = ZHLN::ImageScaleMode::Tile,
+                            .mode   = ZHLN::GUI::ImageScaleMode::Tile,
                             .uv0x   = 0.0f,
                             .uv0y   = 0.0f,
                             .uv1x   = 0.25f,

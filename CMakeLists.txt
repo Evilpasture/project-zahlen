@@ -470,6 +470,7 @@ set(RAW_ENGINE_SOURCES
     src/engine/system/InteractionSystem.cpp
     src/gui/UIRenderSystem.cpp
     src/gui/UIInteractionSystem.cpp
+    src/gui/UIRegistration.cpp
     src/engine/WindowSurface.cpp
     src/engine/graphics/RenderProcedural.cpp
     src/engine/graphics/RenderPasses.cpp

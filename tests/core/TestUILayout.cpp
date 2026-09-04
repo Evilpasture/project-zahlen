@@ -5,6 +5,7 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/GUI.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/gui/UIComponents.hpp>
 #include <expected>
 
 struct UILayoutTestSuite {
@@ -16,8 +17,8 @@ struct UILayoutTestSuite {
             const ZHLN::GUI::PanelConfig rootCfg {
                 .width     = 400.0f,
                 .height    = 300.0f,
-                .direction = ZHLN::FlexDirection::Column,
-                .justify   = ZHLN::FlexJustify::FlexStart,
+                .direction = ZHLN::GUI::FlexDirection::Column,
+                .justify   = ZHLN::GUI::FlexJustify::FlexStart,
                 .gap       = 10.0f,
                 .padding   = 10.0f,
             };
@@ -30,10 +31,10 @@ struct UILayoutTestSuite {
                 child2 = gui.Box("c2", childCfg, [] {});
             });
 
-            const auto* rootRect = reg.Get<ZHLN::Components::UIRectComponent>(root);
-            const auto* rootFlex = reg.Get<ZHLN::Components::UIFlexComponent>(root);
-            const auto* r1       = reg.Get<ZHLN::Components::UIRectComponent>(child1);
-            const auto* r2       = reg.Get<ZHLN::Components::UIRectComponent>(child2);
+            const auto* rootRect = reg.Get<ZHLN::GUI::UIComponents::UIRectComponent>(root);
+            const auto* rootFlex = reg.Get<ZHLN::GUI::UIComponents::UIFlexComponent>(root);
+            const auto* r1       = reg.Get<ZHLN::GUI::UIComponents::UIRectComponent>(child1);
+            const auto* r2       = reg.Get<ZHLN::GUI::UIComponents::UIRectComponent>(child2);
 
             ZHLN::Test::ExpectTrue(rootRect != nullptr && rootFlex != nullptr && r1 != nullptr && r2 != nullptr);
             if (rootRect == nullptr || rootFlex == nullptr || r1 == nullptr || r2 == nullptr) {
@@ -42,8 +43,8 @@ struct UILayoutTestSuite {
 
             ZHLN::Test::ExpectEq(rootRect->width, 400.0f);
             ZHLN::Test::ExpectEq(rootRect->height, 300.0f);
-            ZHLN::Test::ExpectEq(rootFlex->direction, ZHLN::FlexDirection::Column);
-            ZHLN::Test::ExpectEq(rootFlex->justify, ZHLN::FlexJustify::FlexStart);
+            ZHLN::Test::ExpectEq(rootFlex->direction, ZHLN::GUI::FlexDirection::Column);
+            ZHLN::Test::ExpectEq(rootFlex->justify, ZHLN::GUI::FlexJustify::FlexStart);
             ZHLN::Test::ExpectEq(rootFlex->paddingTop, 10.0f);
             ZHLN::Test::ExpectEq(rootFlex->gapY, 10.0f);
 

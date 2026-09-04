@@ -19,6 +19,7 @@
 #include <Zahlen/Sync.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/gui/UIComponents.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <chrono>
@@ -362,10 +363,10 @@ void SafeDestroyEntity(ZHLN::Engine* engine, ZHLN::Entity entity) {
         }
     }
 
-    uint32_t uiRectID  = ComponentFamily::GetTypeID<Components::UIRectComponent>();
+    uint32_t uiRectID  = ComponentFamily::GetTypeID<GUI::UIComponents::UIRectComponent>();
     auto     uEntities = reg.GetEntitiesByFamilyID(uiRectID);
     for (Entity e: uEntities) {
-        if (auto* rect = reg.Get<Components::UIRectComponent>(e)) {
+        if (auto* rect = reg.Get<GUI::UIComponents::UIRectComponent>(e)) {
             if (rect->parentEntity == entity) {
                 childrenToDestroy.push_back(e);
             }
@@ -500,33 +501,41 @@ void InitComponentRegistry() {
         return;
     }
 
-    ZHLN::Reflect::ForEachNestedType<Components>([]<typename Comp>() {
-        std::string_view name = ZHLN::Reflect::TypeName<Comp>();
+    // One entry per component type, whatever container declares it: core owns
+    // ZHLN::Components, the GUI subsystem owns ZHLN::GUI::UIComponents, and a
+    // script must not be able to tell which is which.
+    const auto registerContainer = []<typename Container>() {
+        ZHLN::Reflect::ForEachNestedType<Container>([]<typename Comp>() {
+            std::string_view name = ZHLN::Reflect::TypeName<Comp>();
 
-        s_ComponentRegistry[name] = ComponentRegistryEntry {
-            .add = [](ZHLN::ECS::Registry& reg, ZHLN::Entity entity) -> void* {
-                if constexpr (std::is_same_v<Comp, Components::PhysicsComponent>) {
-                    return nullptr; // Read-only physics handle
-                } else if constexpr (std::is_default_constructible_v<Comp>) {
-                    return &reg.template Add<Comp>(entity, Comp {});
-                } else {
-                    return nullptr;
-                }
-            },
-            .getBuffer = [](ZHLN::ECS::Registry& reg) -> ZHLN_BufferView {
-                auto             raw        = reg.GetRawArray<Comp>();
-                constexpr size_t floatCount = ZHLN::Reflect::GetFloatFieldsCount<Comp>();
+            s_ComponentRegistry[name] = ComponentRegistryEntry {
+                .add = [](ZHLN::ECS::Registry& reg, ZHLN::Entity entity) -> void* {
+                    if constexpr (std::is_same_v<Comp, Components::PhysicsComponent>) {
+                        return nullptr; // Read-only physics handle
+                    } else if constexpr (std::is_default_constructible_v<Comp>) {
+                        return &reg.template Add<Comp>(entity, Comp {});
+                    } else {
+                        return nullptr;
+                    }
+                },
+                .getBuffer = [](ZHLN::ECS::Registry& reg) -> ZHLN_BufferView {
+                    auto             raw        = reg.GetRawArray<Comp>();
+                    constexpr size_t floatCount = ZHLN::Reflect::GetFloatFieldsCount<Comp>();
 
-                if constexpr (std::is_same_v<Comp, Components::PhysicsComponent>) {
-                    return ZHLN::ViewComposer::Build(&reg, raw.data(), "Q", raw.size());
-                } else if constexpr (floatCount > 0) {
-                    return ZHLN::ViewComposer::Build(&reg, raw.data(), "f", raw.size(), floatCount);
-                } else {
-                    return ZHLN::ViewComposer::Build(&reg, raw.data(), "B", raw.size());
+                    if constexpr (std::is_same_v<Comp, Components::PhysicsComponent>) {
+                        return ZHLN::ViewComposer::Build(&reg, raw.data(), "Q", raw.size());
+                    } else if constexpr (floatCount > 0) {
+                        return ZHLN::ViewComposer::Build(&reg, raw.data(), "f", raw.size(), floatCount);
+                    } else {
+                        return ZHLN::ViewComposer::Build(&reg, raw.data(), "B", raw.size());
+                    }
                 }
-            }
-        };
-    });
+            };
+        });
+    };
+
+    registerContainer.operator()<Components>();
+    registerContainer.operator()<GUI::UIComponents>();
 }
 
 void RegisterCreativeWorkCommands() {

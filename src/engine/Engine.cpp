@@ -37,6 +37,7 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
+#include <Zahlen/gui/UIComponents.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <engine/FileWatcher.hpp>
 #include <engine/NativeScriptModule.hpp>
@@ -736,8 +737,8 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
 
         if (pressed) {
             // Handle text navigation directly on focused text input components
-            for (Entity e: reg->GetEntitiesWith<Components::UITextInputComponent>()) {
-                auto* inputComp = reg->Get<Components::UITextInputComponent>(e);
+            for (Entity e: reg->GetEntitiesWith<GUI::UIComponents::UITextInputComponent>()) {
+                auto* inputComp = reg->Get<GUI::UIComponents::UITextInputComponent>(e);
                 if (inputComp && inputComp->isFocused) {
                     std::string_view curr = inputComp->text;
                     if (key == KeyCode::Backspace) {
@@ -803,8 +804,8 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
 
     auto onChar = [](void* userdata, unsigned int codepoint) -> void {
         auto* reg = static_cast<ECS::Registry*>(userdata);
-        for (Entity e: reg->GetEntitiesWith<Components::UITextInputComponent>()) {
-            auto* inputComp = reg->Get<Components::UITextInputComponent>(e);
+        for (Entity e: reg->GetEntitiesWith<GUI::UIComponents::UITextInputComponent>()) {
+            auto* inputComp = reg->Get<GUI::UIComponents::UITextInputComponent>(e);
             if (inputComp && inputComp->isFocused) {
                 if (codepoint >= 32 && codepoint <= 126) {
                     if (inputComp->selectAll) {
@@ -1079,6 +1080,8 @@ auto Engine::InitializeDefaultScene() -> bool {
     auto& reg = GetRegistry();
 
     reg.RegisterAllComponentsIn<ZHLN::Components>();
+    // The widget types live with the GUI subsystem, so it registers them.
+    GUI::RegisterUIComponents(reg);
 
     reg.Create(
         Components::MainCameraTagComponent {}, Components::CameraComponent {},
@@ -1102,19 +1105,19 @@ auto Engine::InitializeDefaultScene() -> bool {
         Components::DebugSettingsComponent {.physicsDrawMode = 0}
     );
 
-    reg.Create(Components::UISettingsComponent {});
+    reg.Create(GUI::UIComponents::UISettingsComponent {});
 
     // The atlas is device state, so it survives the scene it was first built
     // for; only the component-side copy is re-seeded. Rebuilding it per scene
     // leaked a 1024x1024 texture and a full fontconfig config every time.
     if (_impl->fontAtlas.has_value()) {
-        if (auto* uiSettings = reg.GetSingleton<Components::UISettingsComponent>(); uiSettings != nullptr) {
+        if (auto* uiSettings = reg.GetSingleton<GUI::UIComponents::UISettingsComponent>(); uiSettings != nullptr) {
             uiSettings->fontAtlas        = *_impl->fontAtlas;
             uiSettings->defaultFontAtlas = _impl->fontAtlas->texture;
         }
     } else {
         CreativeWorksFactory::CreateFontAtlasTexture(rc, reg);
-        if (const auto* uiSettings = reg.GetSingleton<Components::UISettingsComponent>();
+        if (const auto* uiSettings = reg.GetSingleton<GUI::UIComponents::UISettingsComponent>();
             uiSettings != nullptr && uiSettings->fontAtlas.texture != TextureHandle::Invalid) {
             _impl->fontAtlas = uiSettings->fontAtlas;
         }

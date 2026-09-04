@@ -15,6 +15,7 @@
 #include <Zahlen/Core/Format.hpp>
 #include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/GUI.hpp>
+#include <Zahlen/gui/UIComponents.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 
 #include <algorithm>
@@ -31,6 +32,7 @@ namespace {
 
     namespace GUI = ZHLN::GUI;
     using Comp    = ZHLN::Components;
+    using UIComp  = ZHLN::GUI::UIComponents;
 
     // The editor and the edited scene share one registry, so the hierarchy
     // has to know which subtree is chrome. Walk the UI parent chain upward
@@ -49,7 +51,7 @@ namespace {
             if (cur == editorRoot) {
                 return true;
             }
-            const auto* rect = reg.Get<Comp::UIRectComponent>(cur);
+            const auto* rect = reg.Get<UIComp::UIRectComponent>(cur);
             if (rect == nullptr || rect->parentEntity == ZHLN::Entity::Null()) {
                 return false;
             }
@@ -180,7 +182,7 @@ auto DrawHierarchyPanel(
         if (IsEditorEntity(e, reg, state.editorRoot)) {
             continue;
         }
-        const auto* rect = reg.Get<Comp::UIRectComponent>(e);
+        const auto* rect = reg.Get<UIComp::UIRectComponent>(e);
         rows.push_back(Row {e,
                             rect != nullptr ? rect->hierarchyDepth : 0u,
                             rect != nullptr ? rect->layoutOrder : e.index});
@@ -285,14 +287,14 @@ auto DrawInspectorPanel(
                     [](Comp::PBRComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
             section("light", "Light", reg.Get<Comp::LightComponent>(sel),
                     [](Comp::LightComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
-            section("rect", "Rect", reg.Get<Comp::UIRectComponent>(sel),
-                    [](Comp::UIRectComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
-            section("flex", "Flex", reg.Get<Comp::UIFlexComponent>(sel),
-                    [](Comp::UIFlexComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
-            section("panel", "Panel", reg.Get<Comp::UIPanelComponent>(sel),
-                    [](Comp::UIPanelComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
-            section("text", "Text", reg.Get<Comp::TextComponent>(sel),
-                    [](Comp::TextComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
+            section("rect", "Rect", reg.Get<UIComp::UIRectComponent>(sel),
+                    [](UIComp::UIRectComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
+            section("flex", "Flex", reg.Get<UIComp::UIFlexComponent>(sel),
+                    [](UIComp::UIFlexComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
+            section("panel", "Panel", reg.Get<UIComp::UIPanelComponent>(sel),
+                    [](UIComp::UIPanelComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
+            section("text", "Text", reg.Get<UIComp::TextComponent>(sel),
+                    [](UIComp::TextComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
         }
     );
 }

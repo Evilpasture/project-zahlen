@@ -33,6 +33,7 @@
 
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/gui/UIComponents.hpp>
 
 #include <cstddef>
 
@@ -41,15 +42,22 @@ namespace ZHLN {
 /// Register every component type core declares. Returns how many were added.
 ///
 /// Safe to call more than once; Register overwrites the entry for a type rather
-/// than duplicating it.
+/// than duplicating it. Both container structs are walked: core's ZHLN::Components
+/// and the GUI subsystem's ZHLN::GUI::UIComponents, so a script reaches a widget
+/// component by the same name whether or not it lives in the core header.
 inline auto RegisterCoreScriptTypes() -> std::size_t {
-    auto&      binder = ScriptBinder::Get();
-    std::size_t count = 0;
+    auto&       binder = ScriptBinder::Get();
+    std::size_t count  = 0;
 
-    Reflect::ForEachNestedType<Components>([&]<typename Component>() {
-        binder.Register<Component>();
-        ++count;
-    });
+    const auto registerContainer = [&]<typename Container>() {
+        Reflect::ForEachNestedType<Container>([&]<typename Component>() {
+            binder.Register<Component>();
+            ++count;
+        });
+    };
+
+    registerContainer.operator()<Components>();
+    registerContainer.operator()<GUI::UIComponents>();
 
     return count;
 }

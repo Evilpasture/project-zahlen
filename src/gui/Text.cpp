@@ -8,6 +8,7 @@
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Types.hpp>
+#include <Zahlen/gui/UIComponents.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -151,7 +152,8 @@ uint32_t AppendTextVertices(
 }
 
 uint32_t
-    AppendPanelVertices(VertexPosition* outPos, VertexAttributes* outAttr, const Components::UIRectComponent& rect, const Components::UIPanelComponent& panel) {
+    AppendPanelVertices(VertexPosition* outPos, VertexAttributes* outAttr, const UIComponents::UIRectComponent& rect,
+                        const UIComponents::UIPanelComponent& panel) {
     // Skip generating quad geometry for completely transparent/invisible layout boxes
     if (panel.color.GetW() <= 0.0f && panel.edgeWidth <= 0.0f) {
         return 0;
@@ -329,7 +331,7 @@ struct ImageQuad {
 
 } // namespace
 
-uint32_t CountImageVertices(const Components::UIRectComponent& rect, const Components::UIImageComponent& image) noexcept {
+uint32_t CountImageVertices(const UIComponents::UIRectComponent& rect, const UIComponents::UIImageComponent& image) noexcept {
     const float width  = rect.computedAbsMaxX - rect.computedAbsMinX;
     const float height = rect.computedAbsMaxY - rect.computedAbsMinY;
     if (width <= 0.0f || height <= 0.0f || image.tint.GetW() <= 0.0f) {
@@ -350,8 +352,8 @@ uint32_t CountImageVertices(const Components::UIRectComponent& rect, const Compo
 uint32_t AppendImageVertices(
     VertexPosition*                     outPos,
     VertexAttributes*                   outAttr,
-    const Components::UIRectComponent&  rect,
-    const Components::UIImageComponent& image
+    const UIComponents::UIRectComponent&  rect,
+    const UIComponents::UIImageComponent& image
 ) {
     const float x0 = rect.computedAbsMinX;
     const float y0 = rect.computedAbsMinY;

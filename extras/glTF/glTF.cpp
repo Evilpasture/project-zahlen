@@ -29,6 +29,7 @@ module;
 #include <Zahlen/Types.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/gui/UIComponents.hpp>
 // The importer lives beside this file. Note the two spellings: ZHLN::GLTF is
 // the importer's namespace, ZHLN::glTF (below) is this module's.
 #include "GLTFImporter.hpp"
@@ -127,9 +128,9 @@ void AddInspectorLighting(ZHLN::Engine& engine) {
     );
     reg.Assign<ZHLN::Components::NameComponent>(ground, "glTFInspectorGround");
 
-    auto uiSettingsEnts = reg.GetEntitiesWith<ZHLN::Components::UISettingsComponent>();
+    auto uiSettingsEnts = reg.GetEntitiesWith<ZHLN::GUI::UIComponents::UISettingsComponent>();
     if (!uiSettingsEnts.empty()) {
-        if (auto* settings = reg.Get<ZHLN::Components::UISettingsComponent>(uiSettingsEnts[0])) {
+        if (auto* settings = reg.Get<ZHLN::GUI::UIComponents::UISettingsComponent>(uiSettingsEnts[0])) {
             if (settings->fontAtlas.texture == ZHLN::TextureHandle::Invalid) {
                 settings->fontAtlas.texture = ZHLN::CreativeWorksFactory::CreateFontAtlasTexture(engine.GetRenderContext(), engine.GetRegistry());
                 settings->defaultFontAtlas  = settings->fontAtlas.texture;
@@ -259,8 +260,8 @@ void TreeRow(
             .pressedColor  = pressedColor,
             .textColor     = textColor,
             .borderRadius  = {3.0f, 3.0f, 3.0f, 3.0f},
-            .align         = ZHLN::TextAlignment::Left,
-            .verticalAlign = ZHLN::TextVerticalAlignment::Center,
+            .align         = ZHLN::GUI::TextAlignment::Left,
+            .verticalAlign = ZHLN::GUI::TextVerticalAlignment::Center,
         },
         [&]() -> void {
             if (expandable) {
@@ -282,7 +283,7 @@ void TreeRow(
     // UIInteractionSystem lerps panel/text colors from UIStyleComponent every
     // frame; refresh it so selection & playback tints apply immediately.
     auto& reg = ui.GetRegistry();
-    reg.Patch<ZHLN::Components::UIStyleComponent>(row, [&](auto& style) -> auto {
+    reg.Patch<ZHLN::GUI::UIComponents::UIStyleComponent>(row, [&](auto& style) -> auto {
         style.normalColor     = normalColor;
         style.hoverColor      = hoverColor;
         style.pressedColor    = pressedColor;
@@ -557,7 +558,7 @@ void DrawSceneExplorer(ZHLN::GUI::Context& ui, InspectorState& state, ZHLN::Engi
         [&]() -> void {
             ui.Label(
                 "SCENE EXPLORER",
-                ZHLN::GUI::LabelConfig {.scale = 1.0f, .color = {0.30f, 0.85f, 1.0f, 1.0f}, .align = ZHLN::TextAlignment::Center, .height = 30.0f}
+                ZHLN::GUI::LabelConfig {.scale = 1.0f, .color = {0.30f, 0.85f, 1.0f, 1.0f}, .align = ZHLN::GUI::TextAlignment::Center, .height = 30.0f}
             );
 
             const ZHLN::ModelPrefab* prefab     = (state.loaded && state.prefab != nullptr) ? state.prefab : nullptr;
@@ -565,7 +566,7 @@ void DrawSceneExplorer(ZHLN::GUI::Context& ui, InspectorState& state, ZHLN::Engi
 
             ui.Label(
                 (prefab != nullptr) ? state.modelName : "no model loaded",
-                ZHLN::GUI::LabelConfig {.scale = 0.70f, .color = {0.55f, 0.62f, 0.72f, 1.0f}, .align = ZHLN::TextAlignment::Center, .height = 18.0f}
+                ZHLN::GUI::LabelConfig {.scale = 0.70f, .color = {0.55f, 0.62f, 0.72f, 1.0f}, .align = ZHLN::GUI::TextAlignment::Center, .height = 18.0f}
             );
 
             // ---- SCENE ROOT ----
@@ -617,7 +618,7 @@ void DrawSceneExplorer(ZHLN::GUI::Context& ui, InspectorState& state, ZHLN::Engi
                     ui.Label(
                         state.selectedDetails.empty() ? "Click an item in the tree to inspect it." : state.selectedDetails,
                         ZHLN::GUI::LabelConfig {
-                            .scale = 0.68f, .color = {0.72f, 0.78f, 0.86f, 1.0f}, .verticalAlign = ZHLN::TextVerticalAlignment::Top, .height = 128.0f
+                            .scale = 0.68f, .color = {0.72f, 0.78f, 0.86f, 1.0f}, .verticalAlign = ZHLN::GUI::TextVerticalAlignment::Top, .height = 128.0f
                         }
                     );
                 }
@@ -625,7 +626,7 @@ void DrawSceneExplorer(ZHLN::GUI::Context& ui, InspectorState& state, ZHLN::Engi
 
             ui.Label(
                 "LMB drag: orbit | RMB drag: pan | Wheel: zoom",
-                ZHLN::GUI::LabelConfig {.scale = 0.60f, .color = {0.45f, 0.50f, 0.58f, 1.0f}, .align = ZHLN::TextAlignment::Center, .height = 16.0f}
+                ZHLN::GUI::LabelConfig {.scale = 0.60f, .color = {0.45f, 0.50f, 0.58f, 1.0f}, .align = ZHLN::GUI::TextAlignment::Center, .height = 16.0f}
             );
         }
     );
@@ -765,11 +766,11 @@ void DrawDropPrompt(ZHLN::GUI::Context& ui) {
         [&]() -> void {
             ui.Label(
                 "glTF Inspector",
-                ZHLN::GUI::LabelConfig {.scale = 1.0f, .color = {0.3f, 0.85f, 1.0f, 1.0f}, .align = ZHLN::TextAlignment::Center, .height = 40.0f}
+                ZHLN::GUI::LabelConfig {.scale = 1.0f, .color = {0.3f, 0.85f, 1.0f, 1.0f}, .align = ZHLN::GUI::TextAlignment::Center, .height = 40.0f}
             );
             ui.Label(
                 "Drop a glTF (.glb / .gltf) file onto this window to inspect it.",
-                ZHLN::GUI::LabelConfig {.scale = 0.80f, .color = {0.85f, 0.90f, 0.95f, 1.0f}, .align = ZHLN::TextAlignment::Center, .height = 28.0f}
+                ZHLN::GUI::LabelConfig {.scale = 0.80f, .color = {0.85f, 0.90f, 0.95f, 1.0f}, .align = ZHLN::GUI::TextAlignment::Center, .height = 28.0f}
             );
         }
     );

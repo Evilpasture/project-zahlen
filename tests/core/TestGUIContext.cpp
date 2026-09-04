@@ -33,6 +33,7 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/GUI.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/gui/UIComponents.hpp>
 #include <array>
 #include <cstdint>
 #include <expected>
@@ -48,15 +49,16 @@ using ZHLN::ECS::Registry;
 using ZHLN::GUI::GUIError;
 namespace GUI = ZHLN::GUI;
 using Comp    = ZHLN::Components; // NB: nested types of a struct, not a namespace
+using UIComp  = ZHLN::GUI::UIComponents;
 
 [[nodiscard]] auto CountUIRects(Registry& reg) -> size_t {
-    return reg.GetEntitiesWith<Comp::UIRectComponent>().size();
+    return reg.GetEntitiesWith<UIComp::UIRectComponent>().size();
 }
 
 [[nodiscard]] auto CountTotalCacheRecords(Registry& reg) -> size_t {
     size_t total = 0;
-    for (Entity e: reg.GetEntitiesWith<Comp::UIChildCacheComponent>()) {
-        if (const auto* cache = reg.Get<Comp::UIChildCacheComponent>(e)) {
+    for (Entity e: reg.GetEntitiesWith<UIComp::UIChildCacheComponent>()) {
+        if (const auto* cache = reg.Get<UIComp::UIChildCacheComponent>(e)) {
             total += cache->children.Size();
         }
     }
@@ -64,7 +66,7 @@ using Comp    = ZHLN::Components; // NB: nested types of a struct, not a namespa
 }
 
 [[nodiscard]] auto CountCacheRecordsOn(Registry& reg, Entity e) -> size_t {
-    if (const auto* cache = reg.Get<Comp::UIChildCacheComponent>(e)) {
+    if (const auto* cache = reg.Get<UIComp::UIChildCacheComponent>(e)) {
         return cache->children.Size();
     }
     return 0;
@@ -74,7 +76,7 @@ using Comp    = ZHLN::Components; // NB: nested types of a struct, not a namespa
 // "the UISettings entity", which the builder's fallback creates on first use.
 // NOTE: on a pristine registry this only resolves AFTER the first build.
 [[nodiscard]] auto RootCacheEntity(Registry& reg) -> Entity {
-    const auto settings = reg.GetEntitiesWith<Comp::UISettingsComponent>();
+    const auto settings = reg.GetEntitiesWith<UIComp::UISettingsComponent>();
     return settings.empty() ? Entity::Null() : settings[0];
 }
 
@@ -384,10 +386,10 @@ struct GUIContextTestSuite {
             // Everything was actually created: no loss, no infinite loop.
             ZHLN::Test::ExpectEq(CountUIRects(reg), kDepth);
 
-            const auto* rectAtCap    = reg.Get<Comp::UIRectComponent>(boxes[GUI::MAX_UI_STACK_DEPTH]);
-            const auto* rectPastCap1 = reg.Get<Comp::UIRectComponent>(boxes[GUI::MAX_UI_STACK_DEPTH + 1]);
-            const auto* rectPastCap2 = reg.Get<Comp::UIRectComponent>(boxes[GUI::MAX_UI_STACK_DEPTH + 2]);
-            const auto* rectDeepest  = reg.Get<Comp::UIRectComponent>(boxes[kDepth]);
+            const auto* rectAtCap    = reg.Get<UIComp::UIRectComponent>(boxes[GUI::MAX_UI_STACK_DEPTH]);
+            const auto* rectPastCap1 = reg.Get<UIComp::UIRectComponent>(boxes[GUI::MAX_UI_STACK_DEPTH + 1]);
+            const auto* rectPastCap2 = reg.Get<UIComp::UIRectComponent>(boxes[GUI::MAX_UI_STACK_DEPTH + 2]);
+            const auto* rectDeepest  = reg.Get<UIComp::UIRectComponent>(boxes[kDepth]);
 
             ZHLN::Test::ExpectTrue(rectAtCap != nullptr && rectPastCap1 != nullptr && rectPastCap2 != nullptr && rectDeepest != nullptr);
             if (rectAtCap == nullptr || rectPastCap1 == nullptr || rectPastCap2 == nullptr || rectDeepest == nullptr) {
@@ -469,7 +471,7 @@ struct GUIContextTestSuite {
 
             ZHLN::Test::ExpectEq(cb1.Pack(), cb2.Pack());
             // External value change is accepted into the component
-            const auto* cbComp = reg.Get<Comp::UICheckboxComponent>(cb2);
+            const auto* cbComp = reg.Get<UIComp::UICheckboxComponent>(cb2);
             ZHLN::Test::ExpectTrue(cbComp != nullptr);
             if (cbComp != nullptr) {
                 ZHLN::Test::ExpectTrue(cbComp->checked);
@@ -502,7 +504,7 @@ struct GUIContextTestSuite {
                 sl2 = gui.Slider("gamma", "Gamma", value, 0.0f, 1.0f, 0.01f);
             }
             ZHLN::Test::ExpectEq(sl1.Pack(), sl2.Pack());
-            const auto* slComp = reg.Get<Comp::UISliderComponent>(sl2);
+            const auto* slComp = reg.Get<UIComp::UISliderComponent>(sl2);
             ZHLN::Test::ExpectTrue(slComp != nullptr);
             if (slComp != nullptr) {
                 ZHLN::Test::ExpectTrue(std::abs(slComp->value - 0.3f) < 1e-5f);
@@ -535,11 +537,11 @@ struct GUIContextTestSuite {
             // Root must NOT carry the TextComponent (that was the Yoga crash
             // trigger: measure func + children), but must still hold the
             // UITextInputComponent for the engine's key handler.
-            ZHLN::Test::ExpectTrue(reg.Get<Comp::UITextInputComponent>(ti1) != nullptr);
+            ZHLN::Test::ExpectTrue(reg.Get<UIComp::UITextInputComponent>(ti1) != nullptr);
             // The editable text leaf child must exist and be a leaf.
             Entity textLeaf = Entity::Null();
-            if (const auto* cache = reg.Get<Comp::UIChildCacheComponent>(ti1)) {
-                cache->children.ForEach([&](uint64_t, const Comp::UIChildCacheComponent::ChildRecord& rec) -> void {
+            if (const auto* cache = reg.Get<UIComp::UIChildCacheComponent>(ti1)) {
+                cache->children.ForEach([&](uint64_t, const UIComp::UIChildCacheComponent::ChildRecord& rec) -> void {
                     Entity c = rec.entity;
                     if (!reg.IsAlive(c)) return;
                     if (const auto* nm = reg.Get<Comp::NameComponent>(c)) {
@@ -550,8 +552,8 @@ struct GUIContextTestSuite {
             ZHLN::Test::ExpectTrue(textLeaf != Entity::Null());
             if (textLeaf != Entity::Null()) {
                 // Text leaf has TextComponent, no children, UITextInputComponent is NOT here
-                ZHLN::Test::ExpectTrue(reg.Get<Comp::TextComponent>(textLeaf) != nullptr);
-                ZHLN::Test::ExpectTrue(reg.Get<Comp::UITextInputComponent>(textLeaf) == nullptr);
+                ZHLN::Test::ExpectTrue(reg.Get<UIComp::TextComponent>(textLeaf) != nullptr);
+                ZHLN::Test::ExpectTrue(reg.Get<UIComp::UITextInputComponent>(textLeaf) == nullptr);
                 ZHLN::Test::ExpectEq(CountCacheRecordsOn(reg, textLeaf), 0u); // leaf
             }
 
@@ -585,7 +587,7 @@ struct GUIContextTestSuite {
                 GUI::Context gui(reg, 1);
                 dd1 = gui.Dropdown("qual", "Quality", selected, opts);
             }
-            const auto* ddComp = reg.Get<Comp::UIDropdownComponent>(dd1);
+            const auto* ddComp = reg.Get<UIComp::UIDropdownComponent>(dd1);
             ZHLN::Test::ExpectTrue(ddComp != nullptr);
             if (ddComp != nullptr) {
                 ZHLN::Test::ExpectEq(static_cast<int>(ddComp->options.size()), 3);
@@ -655,7 +657,7 @@ struct GUIContextTestSuite {
             }
             ZHLN::Test::ExpectTrue(hdrOpen != Entity::Null());
             ZHLN::Test::ExpectTrue(reg.IsAlive(lbl));
-            const auto* hdrComp = reg.Get<Comp::UICollapsingHeaderComponent>(hdrOpen);
+            const auto* hdrComp = reg.Get<UIComp::UICollapsingHeaderComponent>(hdrOpen);
             ZHLN::Test::ExpectTrue(hdrComp != nullptr);
             if (hdrComp == nullptr) return {};
             ZHLN::Test::ExpectTrue(hdrComp->isOpen);
@@ -666,7 +668,7 @@ struct GUIContextTestSuite {
             {
                 GUI::Context gui(reg, 3);
                 // Mutate the ECS directly, as ConsumeClick would on a title click.
-                if (auto* mutHdr = reg.Get<Comp::UICollapsingHeaderComponent>(hdrOpen)) {
+                if (auto* mutHdr = reg.Get<UIComp::UICollapsingHeaderComponent>(hdrOpen)) {
                     mutHdr->isOpen = false;
                 }
                 bool invoked = false;
@@ -679,7 +681,7 @@ struct GUIContextTestSuite {
             // The label created in frame 2 must be gone; header remains.
             ZHLN::Test::ExpectFalse(reg.IsAlive(lbl));
             ZHLN::Test::ExpectTrue(reg.IsAlive(hdrOpen));
-            hdrComp = reg.Get<Comp::UICollapsingHeaderComponent>(hdrOpen);
+            hdrComp = reg.Get<UIComp::UICollapsingHeaderComponent>(hdrOpen);
             ZHLN::Test::ExpectTrue(hdrComp != nullptr && !hdrComp->isOpen);
 
             return {};
@@ -712,8 +714,8 @@ struct GUIContextTestSuite {
             ZHLN::Test::ExpectTrue(hdr2 != Entity::Null());
             ZHLN::Test::ExpectNe(hdr1.Pack(), hdr2.Pack());
 
-            const auto* r1 = reg.Get<Comp::UIRectComponent>(hdr1);
-            const auto* r2 = reg.Get<Comp::UIRectComponent>(hdr2);
+            const auto* r1 = reg.Get<UIComp::UIRectComponent>(hdr1);
+            const auto* r2 = reg.Get<UIComp::UIRectComponent>(hdr2);
             ZHLN::Test::ExpectTrue(r1 != nullptr && r2 != nullptr);
             if (r1 == nullptr || r2 == nullptr) return {};
 
@@ -760,17 +762,17 @@ struct GUIContextTestSuite {
             ZHLN::Test::ExpectTrue(reg.IsAlive(label));
 
             // label -> contentBox -> header -> rootB.
-            const auto* labelRect = reg.Get<Comp::UIRectComponent>(label);
+            const auto* labelRect = reg.Get<UIComp::UIRectComponent>(label);
             ZHLN::Test::ExpectTrue(labelRect != nullptr);
             if (labelRect != nullptr) {
                 ZHLN::Test::ExpectEq(labelRect->parentEntity.Pack(), contentBox.Pack());
             }
-            const auto* boxRect = reg.Get<Comp::UIRectComponent>(contentBox);
+            const auto* boxRect = reg.Get<UIComp::UIRectComponent>(contentBox);
             ZHLN::Test::ExpectTrue(boxRect != nullptr);
             if (boxRect != nullptr) {
                 header = boxRect->parentEntity;
                 ZHLN::Test::ExpectTrue(header != Entity::Null());
-                const auto* hdrRect = reg.Get<Comp::UIRectComponent>(header);
+                const auto* hdrRect = reg.Get<UIComp::UIRectComponent>(header);
                 ZHLN::Test::ExpectTrue(hdrRect != nullptr);
                 if (hdrRect != nullptr) {
                     ZHLN::Test::ExpectEq(hdrRect->parentEntity.Pack(), rootB.Pack());
@@ -812,11 +814,11 @@ struct GUIContextTestSuite {
             ZHLN::Test::ExpectTrue(sp1 != Entity::Null());
             ZHLN::Test::ExpectTrue(reg.IsAlive(lLbl));
             ZHLN::Test::ExpectTrue(reg.IsAlive(rLbl));
-            const auto* spComp = reg.Get<Comp::UISplitterComponent>(sp1);
+            const auto* spComp = reg.Get<UIComp::UISplitterComponent>(sp1);
             ZHLN::Test::ExpectTrue(spComp != nullptr);
             if (spComp != nullptr) {
                 ZHLN::Test::ExpectTrue(std::abs(spComp->ratio - 0.3f) < 1e-5f);
-                ZHLN::Test::ExpectTrue(spComp->direction == Comp::UISplitterComponent::Horizontal);
+                ZHLN::Test::ExpectTrue(spComp->direction == UIComp::UISplitterComponent::Horizontal);
                 ZHLN::Test::ExpectFalse(spComp->isDragging);
             }
             // Expect 3 immediate children: left, handle, right
@@ -835,7 +837,7 @@ struct GUIContextTestSuite {
             ZHLN::Test::ExpectEq(sp1.Pack(), sp2.Pack());
             ZHLN::Test::ExpectEq(lLbl.Pack(), lLbl2.Pack());
             ZHLN::Test::ExpectEq(rLbl.Pack(), rLbl2.Pack());
-            spComp = reg.Get<Comp::UISplitterComponent>(sp2);
+            spComp = reg.Get<UIComp::UISplitterComponent>(sp2);
             ZHLN::Test::ExpectTrue(spComp != nullptr);
             if (spComp != nullptr) {
                 ZHLN::Test::ExpectTrue(std::abs(spComp->ratio - 0.6f) < 1e-5f);
@@ -891,7 +893,7 @@ struct GUIContextTestSuite {
             // TextComponent (which is what triggers Yoga's measure-func path).
             const auto checkRoot = [&](Entity e, const char* name) -> void {
                 if (e == Entity::Null() || !reg.IsAlive(e)) return;
-                const bool hasText     = reg.Get<Comp::TextComponent>(e) != nullptr;
+                const bool hasText     = reg.Get<UIComp::TextComponent>(e) != nullptr;
                 const size_t kids      = CountCacheRecordsOn(reg, e);
                 if (kids > 0 && hasText) {
                     // Surface the violation as an Expect failure rather than

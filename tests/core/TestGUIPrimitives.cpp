@@ -27,6 +27,7 @@
 #include <Zahlen/GUI.hpp>
 #include <Zahlen/Types.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/gui/UIComponents.hpp>
 #include <array>
 #include <cstdint>
 #include <expected>
@@ -38,6 +39,7 @@ using ZHLN::Entity;
 using ZHLN::ECS::Registry;
 namespace GUI = ZHLN::GUI;
 using Comp    = ZHLN::Components;
+using UIComp  = ZHLN::GUI::UIComponents;
 
 // A synthetic font metric table with fully predictable numbers, so a test can
 // state an expected break position instead of guessing at glyph shapes.
@@ -61,12 +63,12 @@ using Comp    = ZHLN::Components;
 // Finds a cached child of `parent` by widget name, the way the engine's own
 // compound widgets are keyed ("_sb_viewport", "_sel_label", ...).
 [[nodiscard]] auto FindChildNamed(Registry& reg, Entity parent, std::string_view name) -> Entity {
-    const auto* cache = reg.Get<Comp::UIChildCacheComponent>(parent);
+    const auto* cache = reg.Get<UIComp::UIChildCacheComponent>(parent);
     if (cache == nullptr) {
         return Entity::Null();
     }
     Entity found = Entity::Null();
-    cache->children.ForEach([&](uint64_t, const Comp::UIChildCacheComponent::ChildRecord& rec) -> void {
+    cache->children.ForEach([&](uint64_t, const UIComp::UIChildCacheComponent::ChildRecord& rec) -> void {
         if (found != Entity::Null() || !reg.IsAlive(rec.entity)) {
             return;
         }
@@ -81,7 +83,7 @@ using Comp    = ZHLN::Components;
 
 // Gives a rect an explicit on-screen box, standing in for a layout pass.
 void SetComputedRect(Registry& reg, Entity e, float x0, float y0, float x1, float y1) {
-    reg.Patch<Comp::UIRectComponent>(e, [&](auto& r) -> auto {
+    reg.Patch<UIComp::UIRectComponent>(e, [&](auto& r) -> auto {
         r.computedAbsMinX = x0;
         r.computedAbsMinY = y0;
         r.computedAbsMaxX = x1;
@@ -91,8 +93,8 @@ void SetComputedRect(Registry& reg, Entity e, float x0, float y0, float x1, floa
 
 // The single overlay root every popup/tooltip is parented to.
 [[nodiscard]] auto FindOverlayRoot(Registry& reg) -> Entity {
-    for (Entity e: reg.GetEntitiesWith<Comp::UIRectComponent>()) {
-        const auto* rect = reg.Get<Comp::UIRectComponent>(e);
+    for (Entity e: reg.GetEntitiesWith<UIComp::UIRectComponent>()) {
+        const auto* rect = reg.Get<UIComp::UIRectComponent>(e);
         if (rect != nullptr && rect->hierarchyDepth == GUI::UI_OVERLAY_DEPTH) {
             return e;
         }
@@ -142,8 +144,8 @@ struct GUIPrimitivesTestSuite {
             // The scope handed to the closure is the viewport, not the root.
             ZHLN::Test::ExpectTrue(viewport != root);
 
-            const auto* scroll = reg.Get<Comp::UIScrollComponent>(viewport);
-            const auto* vrect  = reg.Get<Comp::UIRectComponent>(viewport);
+            const auto* scroll = reg.Get<UIComp::UIScrollComponent>(viewport);
+            const auto* vrect  = reg.Get<UIComp::UIRectComponent>(viewport);
             ZHLN::Test::ExpectTrue(scroll != nullptr);
             ZHLN::Test::ExpectTrue(vrect != nullptr);
             if (scroll == nullptr || vrect == nullptr) {
@@ -179,7 +181,7 @@ struct GUIPrimitivesTestSuite {
             if (viewport == Entity::Null() || row == Entity::Null()) {
                 return {};
             }
-            const auto* rowRect = reg.Get<Comp::UIRectComponent>(row);
+            const auto* rowRect = reg.Get<UIComp::UIRectComponent>(row);
             ZHLN::Test::ExpectTrue(rowRect != nullptr);
             if (rowRect == nullptr) {
                 return {};
@@ -242,10 +244,10 @@ struct GUIPrimitivesTestSuite {
             SetComputedRect(reg, viewport, 0.0f, 0.0f, 200.0f, 100.0f);
             SetComputedRect(reg, rowA, 0.0f, 0.0f, 200.0f, 40.0f);
             SetComputedRect(reg, rowB, 0.0f, 44.0f, 200.0f, 84.0f);
-            reg.Patch<Comp::UIFlexComponent>(viewport, [&](auto& f) -> auto { f.SetPadding(0.0f); });
+            reg.Patch<UIComp::UIFlexComponent>(viewport, [&](auto& f) -> auto { f.SetPadding(0.0f); });
 
             GUI::UpdateScrollExtents(reg);
-            auto* scroll = reg.Get<Comp::UIScrollComponent>(viewport);
+            auto* scroll = reg.Get<UIComp::UIScrollComponent>(viewport);
             ZHLN::Test::ExpectTrue(scroll != nullptr);
             if (scroll == nullptr) {
                 return {};
@@ -268,34 +270,34 @@ struct GUIPrimitivesTestSuite {
             // "innermost wins" is observable rather than assumed.
             Entity outer = reg.Create(
                 Comp::NameComponent {.name = ZHLN::String64("outer")},
-                Comp::UIRectComponent {.width = 200.0f, .height = 200.0f, .hierarchyDepth = 1, .clipChildren = true},
-                Comp::UIFlexComponent {}, Comp::UIScrollComponent {.scrollSpeed = 10.0f, .smoothScroll = false}
+                UIComp::UIRectComponent {.width = 200.0f, .height = 200.0f, .hierarchyDepth = 1, .clipChildren = true},
+                UIComp::UIFlexComponent {}, UIComp::UIScrollComponent {.scrollSpeed = 10.0f, .smoothScroll = false}
             );
             Entity inner = reg.Create(
                 Comp::NameComponent {.name = ZHLN::String64("inner")},
-                Comp::UIRectComponent {.parentEntity = outer, .width = 100.0f, .height = 100.0f, .hierarchyDepth = 2, .clipChildren = true},
-                Comp::UIScrollComponent {.scrollSpeed = 10.0f, .smoothScroll = false}
+                UIComp::UIRectComponent {.parentEntity = outer, .width = 100.0f, .height = 100.0f, .hierarchyDepth = 2, .clipChildren = true},
+                UIComp::UIScrollComponent {.scrollSpeed = 10.0f, .smoothScroll = false}
             );
 
             SetComputedRect(reg, outer, 0.0f, 0.0f, 200.0f, 200.0f);
             SetComputedRect(reg, inner, 50.0f, 50.0f, 150.0f, 150.0f);
-            reg.Get<Comp::UIScrollComponent>(outer)->maxScrollY = 500.0f;
-            reg.Get<Comp::UIScrollComponent>(inner)->maxScrollY = 500.0f;
+            reg.Get<UIComp::UIScrollComponent>(outer)->maxScrollY = 500.0f;
+            reg.Get<UIComp::UIScrollComponent>(inner)->maxScrollY = 500.0f;
 
             // Pointer over BOTH: the deeper one must take the wheel.
             bool consumed = GUI::ApplyScrollInput(reg, GUI::ScrollInput {.mouseX = 100.0f, .mouseY = 100.0f, .wheelDelta = -1.0f, .deltaTime = 0.016f});
             ZHLN::Test::ExpectTrue(consumed);
-            ZHLN::Test::ExpectEq(reg.Get<Comp::UIScrollComponent>(inner)->scrollY, 10.0f);
-            ZHLN::Test::ExpectEq(reg.Get<Comp::UIScrollComponent>(outer)->scrollY, 0.0f);
+            ZHLN::Test::ExpectEq(reg.Get<UIComp::UIScrollComponent>(inner)->scrollY, 10.0f);
+            ZHLN::Test::ExpectEq(reg.Get<UIComp::UIScrollComponent>(outer)->scrollY, 0.0f);
 
             // Pointer over the outer only: now the outer scrolls.
             GUI::ApplyScrollInput(reg, GUI::ScrollInput {.mouseX = 10.0f, .mouseY = 10.0f, .wheelDelta = -1.0f, .deltaTime = 0.016f});
-            ZHLN::Test::ExpectEq(reg.Get<Comp::UIScrollComponent>(outer)->scrollY, 10.0f);
-            ZHLN::Test::ExpectEq(reg.Get<Comp::UIScrollComponent>(inner)->scrollY, 10.0f);
+            ZHLN::Test::ExpectEq(reg.Get<UIComp::UIScrollComponent>(outer)->scrollY, 10.0f);
+            ZHLN::Test::ExpectEq(reg.Get<UIComp::UIScrollComponent>(inner)->scrollY, 10.0f);
 
             // Wheel up scrolls back down, and never past the top.
             GUI::ApplyScrollInput(reg, GUI::ScrollInput {.mouseX = 10.0f, .mouseY = 10.0f, .wheelDelta = 5.0f, .deltaTime = 0.016f});
-            ZHLN::Test::ExpectEq(reg.Get<Comp::UIScrollComponent>(outer)->scrollY, 0.0f);
+            ZHLN::Test::ExpectEq(reg.Get<UIComp::UIScrollComponent>(outer)->scrollY, 0.0f);
             return {};
         }
 
@@ -303,12 +305,12 @@ struct GUIPrimitivesTestSuite {
             Registry reg;
             Entity   sc = reg.Create(
                 Comp::NameComponent {.name = ZHLN::String64("sc")},
-                Comp::UIRectComponent {.width = 100.0f, .height = 100.0f, .clipChildren = true},
-                Comp::UIScrollComponent {.scrollSpeed = 100.0f, .smoothSpeed = 10.0f, .smoothScroll = true}
+                UIComp::UIRectComponent {.width = 100.0f, .height = 100.0f, .clipChildren = true},
+                UIComp::UIScrollComponent {.scrollSpeed = 100.0f, .smoothSpeed = 10.0f, .smoothScroll = true}
             );
             SetComputedRect(reg, sc, 0.0f, 0.0f, 100.0f, 100.0f);
 
-            auto* scroll  = reg.Get<Comp::UIScrollComponent>(sc);
+            auto* scroll  = reg.Get<UIComp::UIScrollComponent>(sc);
             scroll->maxScrollY = 50.0f;
 
             GUI::ApplyScrollInput(reg, GUI::ScrollInput {.mouseX = 10.0f, .mouseY = 10.0f, .wheelDelta = -1.0f, .deltaTime = 0.1f});
@@ -328,11 +330,11 @@ struct GUIPrimitivesTestSuite {
             Registry reg;
             Entity   viewport = reg.Create(
                 Comp::NameComponent {.name = ZHLN::String64("vp")},
-                Comp::UIRectComponent {.width = 100.0f, .height = 100.0f, .clipChildren = true}, Comp::UIScrollComponent {}
+                UIComp::UIRectComponent {.width = 100.0f, .height = 100.0f, .clipChildren = true}, UIComp::UIScrollComponent {}
             );
             Entity row = reg.Create(
                 Comp::NameComponent {.name = ZHLN::String64("row")},
-                Comp::UIRectComponent {.parentEntity = viewport, .width = 100.0f, .height = 40.0f}, Comp::UIButtonComponent {}
+                UIComp::UIRectComponent {.parentEntity = viewport, .width = 100.0f, .height = 40.0f}, UIComp::UIButtonComponent {}
             );
             SetComputedRect(reg, viewport, 0.0f, 0.0f, 100.0f, 100.0f);
 
@@ -361,7 +363,7 @@ struct GUIPrimitivesTestSuite {
                     GUI::ImageConfig {
                         .width  = 64.0f,
                         .height = 32.0f,
-                        .mode   = ZHLN::ImageScaleMode::CropAspect,
+                        .mode   = ZHLN::GUI::ImageScaleMode::CropAspect,
                         .uv0x   = 0.25f,
                         .uv0y   = 0.5f,
                         .uv1x   = 0.75f,
@@ -372,44 +374,44 @@ struct GUIPrimitivesTestSuite {
                 );
             }
 
-            const auto* image = reg.Get<Comp::UIImageComponent>(img);
+            const auto* image = reg.Get<UIComp::UIImageComponent>(img);
             ZHLN::Test::ExpectTrue(image != nullptr);
             if (image == nullptr) {
                 return {};
             }
             ZHLN::Test::ExpectEq(image->texture, ZHLN::TextureHandle {7});
-            ZHLN::Test::ExpectEq(image->mode, ZHLN::ImageScaleMode::CropAspect);
+            ZHLN::Test::ExpectEq(image->mode, ZHLN::GUI::ImageScaleMode::CropAspect);
             ZHLN::Test::ExpectEq(image->uv0x, 0.25f);
             ZHLN::Test::ExpectEq(image->uv1y, 1.0f);
             ZHLN::Test::ExpectEq(image->sourceWidth, 128.0f);
 
             // An image is its own primitive: no panel quad behind it.
-            ZHLN::Test::ExpectTrue(reg.Get<Comp::UIPanelComponent>(img) == nullptr);
+            ZHLN::Test::ExpectTrue(reg.Get<UIComp::UIPanelComponent>(img) == nullptr);
             return {};
         }
 
         auto image_geometry_follows_the_scale_mode() -> std::expected<void, ZHLN::Error> {
-            Comp::UIRectComponent rect {};
+            UIComp::UIRectComponent rect {};
             rect.computedAbsMinX = 0.0f;
             rect.computedAbsMinY = 0.0f;
             rect.computedAbsMaxX = 100.0f;
             rect.computedAbsMaxY = 50.0f;
 
-            Comp::UIImageComponent img {};
-            img.mode         = ZHLN::ImageScaleMode::Stretch;
+            UIComp::UIImageComponent img {};
+            img.mode         = ZHLN::GUI::ImageScaleMode::Stretch;
             img.sourceWidth  = 200.0f;
             img.sourceHeight = 100.0f;
 
             // Stretch and the aspect modes all emit one quad.
             ZHLN::Test::ExpectEq(GUI::CountImageVertices(rect, img), 6u);
-            img.mode = ZHLN::ImageScaleMode::FitAspect;
+            img.mode = ZHLN::GUI::ImageScaleMode::FitAspect;
             ZHLN::Test::ExpectEq(GUI::CountImageVertices(rect, img), 6u);
-            img.mode = ZHLN::ImageScaleMode::CropAspect;
+            img.mode = ZHLN::GUI::ImageScaleMode::CropAspect;
             ZHLN::Test::ExpectEq(GUI::CountImageVertices(rect, img), 6u);
 
             // Tile repeats at the source size: a 200x100 sprite over a
             // 100x50 rect is cropped to a single tile.
-            img.mode = ZHLN::ImageScaleMode::Tile;
+            img.mode = ZHLN::GUI::ImageScaleMode::Tile;
             ZHLN::Test::ExpectEq(GUI::CountImageVertices(rect, img), 6u);
 
             // A 25x25 sprite tiles 4x2 over the same rect.
@@ -424,12 +426,12 @@ struct GUIPrimitivesTestSuite {
         }
 
         auto fit_aspect_shrinks_the_quad_inside_its_rect() -> std::expected<void, ZHLN::Error> {
-            Comp::UIRectComponent rect {};
+            UIComp::UIRectComponent rect {};
             rect.computedAbsMaxX = 100.0f;
             rect.computedAbsMaxY = 50.0f;
 
-            Comp::UIImageComponent img {};
-            img.mode         = ZHLN::ImageScaleMode::FitAspect;
+            UIComp::UIImageComponent img {};
+            img.mode         = ZHLN::GUI::ImageScaleMode::FitAspect;
             img.sourceWidth  = 200.0f; // 2:1 into a 2:1 rect -> exact fit
             img.sourceHeight = 100.0f;
 
@@ -498,8 +500,8 @@ struct GUIPrimitivesTestSuite {
             // The popup is NOT a descendant of its owner: that is the whole
             // point, since the owner's panel clips its children.
             ZHLN::Test::ExpectTrue(popup != owner);
-            const auto* popupRect = reg.Get<Comp::UIRectComponent>(popup);
-            const auto* ownerRect = reg.Get<Comp::UIRectComponent>(owner);
+            const auto* popupRect = reg.Get<UIComp::UIRectComponent>(popup);
+            const auto* ownerRect = reg.Get<UIComp::UIRectComponent>(owner);
             ZHLN::Test::ExpectTrue(popupRect != nullptr && ownerRect != nullptr);
             if (popupRect == nullptr || ownerRect == nullptr) {
                 return {};
@@ -513,7 +515,7 @@ struct GUIPrimitivesTestSuite {
             ZHLN::Test::ExpectTrue(overlay != Entity::Null());
             if (overlay != Entity::Null()) {
                 ZHLN::Test::ExpectEq(popupRect->parentEntity, overlay);
-                const auto* overlayRect = reg.Get<Comp::UIRectComponent>(overlay);
+                const auto* overlayRect = reg.Get<UIComp::UIRectComponent>(overlay);
                 ZHLN::Test::ExpectTrue(overlayRect != nullptr);
                 if (overlayRect != nullptr) {
                     ZHLN::Test::ExpectTrue(overlayRect->parentEntity == Entity::Null());
@@ -527,13 +529,13 @@ struct GUIPrimitivesTestSuite {
 
             // And it remembers who owns it, which is how the interaction pass
             // tells "clicked inside the menu" from "clicked outside".
-            const auto* pop = reg.Get<Comp::UIPopupComponent>(popup);
+            const auto* pop = reg.Get<UIComp::UIPopupComponent>(popup);
             ZHLN::Test::ExpectTrue(pop != nullptr);
             if (pop != nullptr) {
                 ZHLN::Test::ExpectEq(pop->owner, owner);
             }
 
-            const auto* childRect = reg.Get<Comp::UIRectComponent>(child);
+            const auto* childRect = reg.Get<UIComp::UIRectComponent>(child);
             ZHLN::Test::ExpectTrue(childRect != nullptr);
             if (childRect != nullptr) {
                 ZHLN::Test::ExpectEq(childRect->parentEntity, popup);
@@ -555,8 +557,8 @@ struct GUIPrimitivesTestSuite {
                     [&]() -> void { dropdown = gui.Dropdown("Quality", "Quality", selected, std::span<const std::string_view>(kOptions)); }
                 );
                 // Simulate the interaction pass: a click landed on the header.
-                if (auto* btn = reg.Get<Comp::UIButtonComponent>(dropdown)) {
-                    btn->Set(ZHLN::UIButton::Clicked, true);
+                if (auto* btn = reg.Get<UIComp::UIButtonComponent>(dropdown)) {
+                    btn->Set(ZHLN::GUI::UIButton::Clicked, true);
                 }
             }
             // Frame 2: the click from frame 1 is consumed here, so the menu is
@@ -579,7 +581,7 @@ struct GUIPrimitivesTestSuite {
             }
 
             ZHLN::Test::ExpectTrue(dropdown != Entity::Null());
-            const auto* dd = reg.Get<Comp::UIDropdownComponent>(dropdown);
+            const auto* dd = reg.Get<UIComp::UIDropdownComponent>(dropdown);
             ZHLN::Test::ExpectTrue(dd != nullptr);
             if (dd == nullptr) {
                 return {};
@@ -591,7 +593,7 @@ struct GUIPrimitivesTestSuite {
             }
 
             // The option row is on the overlay, not under the clipped panel.
-            const auto* optRect = reg.Get<Comp::UIRectComponent>(optionEntity);
+            const auto* optRect = reg.Get<UIComp::UIRectComponent>(optionEntity);
             ZHLN::Test::ExpectTrue(optRect != nullptr);
             if (optRect == nullptr) {
                 return {};
@@ -625,8 +627,8 @@ struct GUIPrimitivesTestSuite {
             ZHLN::Test::ExpectEq(clicks, 0);
 
             // Simulate the interaction pass reporting a click, then rebuild.
-            if (auto* btn = reg.Get<Comp::UIButtonComponent>(row)) {
-                btn->Set(ZHLN::UIButton::Clicked, true);
+            if (auto* btn = reg.Get<UIComp::UIButtonComponent>(row)) {
+                btn->Set(ZHLN::GUI::UIButton::Clicked, true);
             }
             {
                 GUI::Context gui(reg, 2);
@@ -636,7 +638,7 @@ struct GUIPrimitivesTestSuite {
             ZHLN::Test::ExpectEq(clicks, 1);
 
             // The row shows its selected state through the panel colour.
-            const auto* panel = reg.Get<Comp::UIPanelComponent>(row);
+            const auto* panel = reg.Get<UIComp::UIPanelComponent>(row);
             const auto  cfg   = GUI::SelectableConfig {};
             ZHLN::Test::ExpectTrue(panel != nullptr);
             if (panel != nullptr) {
@@ -654,8 +656,8 @@ struct GUIPrimitivesTestSuite {
             const auto cfg        = GUI::SelectableConfig {.doubleClickSpan = 18};
 
             auto ClickAt = [&](uint64_t frame) -> void {
-                if (auto* btn = reg.Get<Comp::UIButtonComponent>(row)) {
-                    btn->Set(ZHLN::UIButton::Clicked, true);
+                if (auto* btn = reg.Get<UIComp::UIButtonComponent>(row)) {
+                    btn->Set(ZHLN::GUI::UIButton::Clicked, true);
                 }
                 GUI::Context gui(reg, frame);
                 gui.Selectable(
@@ -701,7 +703,7 @@ struct GUIPrimitivesTestSuite {
             const Entity row      = FindChildNamed(reg, node, "_sel_row");
             const Entity contentBox = FindChildNamed(reg, node, "Branch_children");
             ZHLN::Test::ExpectTrue(row != Entity::Null() && contentBox != Entity::Null());
-            if (auto* leafRect = reg.Get<Comp::UIRectComponent>(content)) {
+            if (auto* leafRect = reg.Get<UIComp::UIRectComponent>(content)) {
                 ZHLN::Test::ExpectTrue(leafRect->parentEntity == contentBox);
             }
 
@@ -709,8 +711,8 @@ struct GUIPrimitivesTestSuite {
             // build must not recreate the content box. The button lives on the
             // row, not on the branch column, so hovering a branch's children
             // cannot light up the branch's own row.
-            if (auto* btn = reg.Get<Comp::UIButtonComponent>(row)) {
-                btn->Set(ZHLN::UIButton::Clicked, true);
+            if (auto* btn = reg.Get<UIComp::UIButtonComponent>(row)) {
+                btn->Set(ZHLN::GUI::UIButton::Clicked, true);
             }
             {
                 GUI::Context gui(reg, 2);
@@ -739,8 +741,8 @@ struct GUIPrimitivesTestSuite {
             };
 
             auto Click = [&]() -> void {
-                if (auto* btn = reg.Get<Comp::UIButtonComponent>(FindChildNamed(reg, node, "_sel_row"))) {
-                    btn->Set(ZHLN::UIButton::Clicked, true);
+                if (auto* btn = reg.Get<UIComp::UIButtonComponent>(FindChildNamed(reg, node, "_sel_row"))) {
+                    btn->Set(ZHLN::GUI::UIButton::Clicked, true);
                 }
             };
 
@@ -766,8 +768,8 @@ struct GUIPrimitivesTestSuite {
             // The highlight is on the interactive row; the bound state is on
             // the branch column.
             const Entity row    = FindChildNamed(reg, node, "_sel_row");
-            const auto*  sel    = reg.Get<Comp::UISelectableComponent>(node);
-            const auto*  panel  = reg.Get<Comp::UIPanelComponent>(row);
+            const auto*  sel    = reg.Get<UIComp::UISelectableComponent>(node);
+            const auto*  panel  = reg.Get<UIComp::UIPanelComponent>(row);
             ZHLN::Test::ExpectTrue(sel != nullptr && panel != nullptr);
             if (sel != nullptr) {
                 ZHLN::Test::ExpectTrue(sel->selected);
@@ -794,7 +796,7 @@ struct GUIPrimitivesTestSuite {
             // the second toggle. The counter lives in the registry now, so a
             // recreated child must always sort after surviving siblings.
             Registry reg;
-            reg.Create(Comp::UISettingsComponent {.fontAtlas = MakeTestFont()});
+            reg.Create(UIComp::UISettingsComponent {.fontAtlas = MakeTestFont()});
             Entity header = Entity::Null();
 
             auto BuildAt = [&](uint64_t frame, bool clickTitle) -> void {
@@ -808,8 +810,8 @@ struct GUIPrimitivesTestSuite {
                     }
                 );
                 if (clickTitle) {
-                    if (auto* btn = reg.Get<Comp::UIButtonComponent>(FindChildNamed(reg, header, "_title"))) {
-                        btn->Set(ZHLN::UIButton::Clicked, true);
+                    if (auto* btn = reg.Get<UIComp::UIButtonComponent>(FindChildNamed(reg, header, "_title"))) {
+                        btn->Set(ZHLN::GUI::UIButton::Clicked, true);
                     }
                 }
             };
@@ -823,8 +825,8 @@ struct GUIPrimitivesTestSuite {
             const Entity title = FindChildNamed(reg, header, "_title");
             const Entity cont  = FindChildNamed(reg, header, "Sec_content");
             ZHLN::Test::ExpectTrue(title != Entity::Null() && cont != Entity::Null());
-            const auto* titleRect = reg.Get<Comp::UIRectComponent>(title);
-            const auto* contRect  = reg.Get<Comp::UIRectComponent>(cont);
+            const auto* titleRect = reg.Get<UIComp::UIRectComponent>(title);
+            const auto* contRect  = reg.Get<UIComp::UIRectComponent>(cont);
             ZHLN::Test::ExpectTrue(titleRect != nullptr && contRect != nullptr);
             if (titleRect != nullptr && contRect != nullptr) {
                 ZHLN::Test::ExpectTrue(contRect->layoutOrder > titleRect->layoutOrder);
@@ -851,8 +853,8 @@ struct GUIPrimitivesTestSuite {
                         // Hovered flag on every button each frame: a widget
                         // that is no longer under the pointer must not keep
                         // last frame's flag.
-                        if (auto* btn = reg.Get<Comp::UIButtonComponent>(button)) {
-                            btn->Set(ZHLN::UIButton::Hovered, hovered);
+                        if (auto* btn = reg.Get<UIComp::UIButtonComponent>(button)) {
+                            btn->Set(ZHLN::GUI::UIButton::Hovered, hovered);
                         }
                         tooltip = gui.Tooltip("Writes the scene to disk", cfg);
                     }
@@ -872,7 +874,7 @@ struct GUIPrimitivesTestSuite {
             ZHLN::Test::ExpectTrue(shown != Entity::Null());
 
             if (shown != Entity::Null()) {
-                const auto* rect = reg.Get<Comp::UIRectComponent>(shown);
+                const auto* rect = reg.Get<UIComp::UIRectComponent>(shown);
                 ZHLN::Test::ExpectTrue(rect != nullptr);
                 if (rect != nullptr) {
                     ZHLN::Test::ExpectEq(rect->hierarchyDepth, GUI::UI_OVERLAY_DEPTH + 1);
@@ -886,7 +888,7 @@ struct GUIPrimitivesTestSuite {
             // Moving off the widget drops it again (nothing rebuilds it, so
             // the overlay sweep reclaims it at frame end).
             ZHLN::Test::ExpectTrue(BuildAt(9, false) == Entity::Null());
-            ZHLN::Test::ExpectTrue(reg.GetEntitiesWith<Comp::UITooltipComponent>().size() >= 1);
+            ZHLN::Test::ExpectTrue(reg.GetEntitiesWith<UIComp::UITooltipComponent>().size() >= 1);
             return {};
         }
 

@@ -17,6 +17,7 @@
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
+#include <Zahlen/gui/UIComponents.hpp>
 #include "physics/PhysicsWorld.hpp"
 #include <Jolt/Physics/Collision/CastResult.h>
 #include <Zahlen/Audio.hpp>
@@ -1035,7 +1036,7 @@ void RunNativeEditorFrame(ZHLN::Engine& engine) {
         .anchorMinY = 0.0f,
         .anchorMaxX = 1.0f,
         .anchorMaxY = 1.0f,
-        .direction  = ZHLN::FlexDirection::Row
+        .direction  = ZHLN::GUI::FlexDirection::Row
     });
     s_NativeEditorState.editorRoot = rootScope.GetEntity();
 
@@ -1054,7 +1055,7 @@ void RunNativeEditorFrame(ZHLN::Engine& engine) {
                     // the pane's screen rect so world picking can be gated to
                     // it. The Simulate toggle replaces the ImGui PLAY button.
                     const ZHLN::Entity pane = gui.GetCurrentParent();
-                    if (const auto* r = reg.Get<ZHLN::Components::UIRectComponent>(pane)) {
+                    if (const auto* r = reg.Get<ZHLN::GUI::UIComponents::UIRectComponent>(pane)) {
                         s_ViewportScreenRect = JPH::Vec4 {
                             r->computedAbsMinX, r->computedAbsMinY,
                             r->computedAbsMaxX, r->computedAbsMaxY
