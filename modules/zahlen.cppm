@@ -397,8 +397,10 @@ using ZHLN::GUI::StackDirection;
 using ZHLN::GUI::TextAlignment;
 using ZHLN::GUI::TextBounds;
 using ZHLN::GUI::TextVerticalAlignment;
+using ZHLN::GUI::UIGradientAxis;
 using ZHLN::GUI::UIButton;
 using ZHLN::GUI::UIJustify;
+using ZHLN::GUI::UIPlotKind;
 } // namespace GUI
 
 // Audio

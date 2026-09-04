@@ -200,6 +200,51 @@ auto AppendImageVertices(
     const UIComponents::UIImageComponent& image
 ) -> uint32_t;
 
+// --- GRADIENT --------------------------------------------------------------
+// One quad per pair of adjacent stops, with the stop colours on the corners, so
+// the GPU interpolates between them. That is exact AT the stops and linear
+// between them, which is why a hue strip supplies all seven stops of the wheel
+// instead of only its two ends.
+
+/// Tile-style count for a gradient: `(stopCount - 1) * 6`, or 0 when there are
+/// fewer than two stops or the rect has collapsed.
+[[nodiscard]] auto CountGradientVertices(const UIComponents::UIRectComponent& rect, const UIComponents::UIGradientComponent& gradient) noexcept -> uint32_t;
+
+auto AppendGradientVertices(
+    VertexPosition*                        outPos,
+    VertexAttributes*                      outAttr,
+    const UIComponents::UIRectComponent&   rect,
+    const UIComponents::UIGradientComponent& gradient
+) -> uint32_t;
+
+// --- PLOT ------------------------------------------------------------------
+// Lines, bars and shaded strips. Every kind stays inside a fixed per-sample
+// vertex budget (see UIPlotComponent::kMaxPoints) so a long history cannot
+// inflate the UI batch without bound.
+
+/// Upper bound on the vertices a plot needs: bars and line segments are six
+/// vertices each, and ShadedLines emits both a fill quad and a line quad per
+/// segment.
+[[nodiscard]] auto CountPlotVertices(const UIComponents::UIPlotComponent& plot) noexcept -> uint32_t;
+
+auto AppendPlotVertices(
+    VertexPosition*                     outPos,
+    VertexAttributes*                   outAttr,
+    const UIComponents::UIRectComponent& rect,
+    const UIComponents::UIPlotComponent& plot
+) -> uint32_t;
+
+// --- COLOUR CONVERSION -----------------------------------------------------
+// HSV <-> RGB, shared by the picker's widgets and by anything that wants to
+// reason about a colour the way a colour wheel does. All components are 0..1
+// except hue, which is degrees.
+//
+// Achromatic colours have no hue, so RgbToHsv keeps `hueOut` unchanged when the
+// input is a grey. Callers pass the previous hue: without it, dragging
+// saturation to zero and back would recolour a grey to red.
+auto HsvToRgb(float hue, float sat, float val) noexcept -> JPH::Vec4;
+auto RgbToHsv(const JPH::Vec4& rgb, float& hueInOut, float& satOut, float& valOut) noexcept -> void;
+
 // ============================================================================
 // FIBER-SAFE & ZERO-ALLOCATION GUI CONTEXT — HYBRID RAII + CLOSURE
 // ============================================================================
@@ -522,6 +567,65 @@ struct TreeNodeConfig {
     float            indent     = 14.0f;
     float            gap        = 2.0f;
     JPH::Vec4        arrowColor = {0.70f, 0.82f, 1.00f, 1.00f};
+};
+
+// A band of colour stops. `stops` is copied into the widget's
+// UIGradientComponent, so it may be a temporary (a brace-enclosed list, a
+// stack array rebuilt every frame). Fewer than two stops paints nothing.
+struct GradientConfig {
+    float                        width  = 0.0f; // 0 = fill the parent's cross axis
+    float                        height = 24.0f;
+    UIGradientAxis               axis   = UIGradientAxis::Horizontal;
+    std::span<const JPH::Vec4>   stops  = {};
+};
+
+// A rolling series, drawn as lines, bars, or a shaded line strip.
+//
+// `minValue`/`maxValue` are the value range mapped to the bottom and top of
+// the widget — NOT an auto-fit. A profiler that wants a stable baseline (frame
+// times against a 16.7ms target) should pass fixed bounds; autoscaling bounds
+// make the strip jump around so much it stops being readable. Values outside
+// the range are clamped to the edges rather than dropped.
+struct PlotConfig {
+    float     width       = 0.0f; // 0 = fill
+    float     height      = 60.0f;
+    UIPlotKind kind       = UIPlotKind::Lines;
+
+    float     minValue    = 0.0f;
+    float     maxValue    = 1.0f;
+
+    JPH::Vec4 lineColor   = {0.30f, 0.78f, 1.00f, 1.00f};
+    JPH::Vec4 fillColor   = {0.30f, 0.78f, 1.00f, 0.35f};
+
+    float     lineWidth   = 1.5f; // Lines / ShadedLines, pixels
+    float     barGap      = 1.0f; // Histogram, pixels between bars
+};
+
+// A colour field: a swatch that opens a picker popup.
+//
+// The popup holds a saturation/value plane, a hue strip, an alpha strip when
+// `componentCount` is 4, per-channel sliders and a hex readout. Set
+// `showRgbSliders` to false for a compact picker that is just the pad and the
+// strips — which is what most palette rows want.
+struct ColorEditConfig {
+    float     height        = 24.0f;
+    float     scale         = 0.85f;
+    float     swatchWidth   = 48.0f; // 0 = fill the row's remaining space
+    float     gap           = 8.0f;
+    float     borderRadius  = 3.0f;
+
+    JPH::Vec4 textColor     = {0.90f, 0.95f, 1.00f, 1.00f};
+    JPH::Vec4 borderColor   = {0.26f, 0.38f, 0.58f, 1.00f};
+    JPH::Vec4 hoverColor    = {0.20f, 0.28f, 0.42f, 1.00f};
+
+    // --- picker popup ---
+    float pickerWidth    = 0.0f;  // 0 = size to the row that opened it
+    float svSize         = 140.0f; // Saturation/value plane, square
+    float stripHeight    = 18.0f;  // Hue and alpha strips
+    float knobSize       = 10.0f;
+    float padding        = 8.0f;
+    bool  showRgbSliders = true;
+    bool  showHex        = true;
 };
 
 class Context;
@@ -1347,6 +1451,53 @@ class Context {
     auto Icon(std::string_view id, TextureHandle texture, float size = 24.0f, ImageScaleMode mode = ImageScaleMode::FitAspect) -> Entity;
 
     // -----------------------------------------------------------------
+    // GRADIENT  —  ui.Gradient(id, cfg)
+    // -----------------------------------------------------------------
+    // A band of colour stops. Mostly a building block for other widgets (the
+    // colour picker's hue strip and saturation/value plane are gradient
+    // children), but usable on its own for a legend, a heat scale or a
+    // progress bar that runs through several colours.
+    auto Gradient(std::string_view id, const GradientConfig& cfg) -> Entity;
+
+    // -----------------------------------------------------------------
+    // PLOT  —  ui.PlotLines(...) / ui.Histogram(...) / ui.Plot(...)
+    // -----------------------------------------------------------------
+    // A rolling series. `values` is copied into the widget each call, so the
+    // caller keeps ownership of its ring buffer; a span over a std::array, a
+    // std::vector, or a plain C array all work.
+    //
+    // ImGui users: these are the replacements for ImGui::PlotLines and
+    // ImGui::PlotHistogram. Note the range is explicit (PlotConfig::minValue /
+    // maxValue) rather than derived from the data — see the note on PlotConfig
+    // for why an autoscale is usually the wrong choice for a profiler.
+    auto Plot(std::string_view id, std::span<const float> values, const PlotConfig& cfg) -> Entity;
+    auto PlotLines(std::string_view id, std::span<const float> values, const PlotConfig& cfg = {}) -> Entity;
+    auto Histogram(std::string_view id, std::span<const float> values, const PlotConfig& cfg = {}) -> Entity;
+
+    // -----------------------------------------------------------------
+    // COLOREDIT  —  ui.ColorEdit3/4(id, label, col, [cfg], [onChange])
+    // -----------------------------------------------------------------
+    // A colour field: a label and a swatch that opens a picker popup holding a
+    // saturation/value plane, a hue strip, an alpha strip (ColorEdit4 only),
+    // per-channel sliders and a hex readout.
+    //
+    // `col` is 3 or 4 contiguous floats in 0..1 and is authoritative on the
+    // way in: an externally changed colour (a preset, an undo, another panel
+    // editing the same field) re-derives the picker's HSV and the swatch
+    // follows. Values are clamped to 0..1 on write-back.
+    //
+    // The Vec4 overload edits all four channels including alpha, regardless of
+    // cfg — colour fields on materials and lights want the alpha row even when
+    // the shader ignores it.
+    auto ColorEdit(std::string_view id, std::string_view label, float* col, int componentCount, const ColorEditConfig& cfg) -> Entity;
+    auto ColorEdit3(std::string_view id, std::string_view label, float col[3], const ColorEditConfig& cfg = {}) -> Entity;
+    auto ColorEdit3(std::string_view label, float col[3], const ColorEditConfig& cfg = {}) -> Entity;
+    auto ColorEdit4(std::string_view id, std::string_view label, float col[4], const ColorEditConfig& cfg = {}) -> Entity;
+    auto ColorEdit4(std::string_view label, float col[4], const ColorEditConfig& cfg = {}) -> Entity;
+    auto ColorEdit4(std::string_view id, std::string_view label, JPH::Vec4& col, const ColorEditConfig& cfg = {}) -> Entity;
+    auto ColorEdit4(std::string_view label, JPH::Vec4& col, const ColorEditConfig& cfg = {}) -> Entity;
+
+    // -----------------------------------------------------------------
     // SELECTABLE  —  ui.Selectable(id, label, selected, [cfg], [onClick], [onDoubleClick])
     // -----------------------------------------------------------------
     // A full-width list row with distinct normal / hover / selected / active
@@ -1553,6 +1704,11 @@ class Context {
     void PatchTextInputVisuals(Entity e, const TextInputConfig& cfg, bool focused, TextureHandle font);
 
     void EnsureDropdownHeader(Entity ddEnt, std::string_view displayText, const DropdownConfig& cfg, TextureHandle font);
+
+    // Builds the ColorEdit row's own children (label + swatch). The picker
+    // popup is built inline in ColorEdit() rather than here: it is a tree of
+    // nested Scopes, and a Scope cannot outlive the function that opened it.
+    void EnsureColorEditChildren(Entity ceEntity, std::string_view label, const ColorEditConfig& cfg, TextureHandle font, const JPH::Vec4& color);
 
     // --- OVERLAY / POPUP PLUMBING ---
 

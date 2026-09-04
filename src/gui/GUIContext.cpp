@@ -803,6 +803,512 @@ auto Context::Icon(std::string_view id, TextureHandle texture, float size , Imag
         return Image(id, texture, cfg);
     }
 
+auto Context::Gradient(std::string_view id, const GradientConfig& cfg ) -> Entity {
+        Entity   parent = GetCurrentParent();
+        uint32_t depth  = GetCurrentDepth();
+        uint64_t key    = HashCombine(parent.Pack(), HashStringView(id));
+
+        Entity e = GetOrCreateEntity(key, [&]() -> Entity {
+            return m_reg->Create(
+                Components::NameComponent {.name = String64(id)},
+                UIComponents::UIRectComponent {.parentEntity = parent, .width = cfg.width, .height = cfg.height, .hierarchyDepth = depth},
+                UIComponents::UIGradientComponent {}
+            );
+        });
+
+        m_reg->Patch<UIComponents::UIRectComponent>(e, [&](auto& r) -> auto {
+            r.parentEntity   = parent;
+            r.width          = cfg.width;
+            r.height         = cfg.height;
+            r.hierarchyDepth = depth;
+        });
+
+        // The stops are rewritten every frame: a gradient is a live visual
+        // (the hue strip of a picker tracks the selected colour), and the
+        // inline array is cheaper to overwrite than to diff.
+        m_reg->Patch<UIComponents::UIGradientComponent>(e, [&](auto& g) -> auto {
+            g.axis      = cfg.axis;
+            g.stopCount = std::min(static_cast<uint32_t>(cfg.stops.size()), UIComponents::UIGradientComponent::kMaxStops);
+            for (uint32_t i = 0; i < g.stopCount; ++i) {
+                g.stops[i] = cfg.stops[i];
+            }
+        });
+
+        return e;
+    }
+
+auto Context::Plot(std::string_view id, std::span<const float> values, const PlotConfig& cfg ) -> Entity {
+        Entity   parent = GetCurrentParent();
+        uint32_t depth  = GetCurrentDepth();
+        uint64_t key    = HashCombine(parent.Pack(), HashStringView(id));
+
+        Entity e = GetOrCreateEntity(key, [&]() -> Entity {
+            return m_reg->Create(
+                Components::NameComponent {.name = String64(id)},
+                UIComponents::UIRectComponent {.parentEntity = parent, .width = cfg.width, .height = cfg.height, .hierarchyDepth = depth},
+                UIComponents::UIPlotComponent {}
+            );
+        });
+
+        m_reg->Patch<UIComponents::UIRectComponent>(e, [&](auto& r) -> auto {
+            r.parentEntity   = parent;
+            r.width          = cfg.width;
+            r.height         = cfg.height;
+            r.hierarchyDepth = depth;
+        });
+
+        m_reg->Patch<UIComponents::UIPlotComponent>(e, [&](auto& p) -> auto {
+            // Resize only when the sample count changes. resize() preserves
+            // the elements it keeps, so this is about avoiding a reallocation
+            // on the hot path: the common case is a ring buffer handed over at
+            // a fixed size every frame, and the widget's copy already
+            // overwrites every sample.
+            const uint32_t n = std::min(static_cast<uint32_t>(values.size()), UIComponents::UIPlotComponent::kMaxPoints);
+            if (p.values.size() != n) {
+                p.values.resize(n);
+            }
+            for (uint32_t i = 0; i < n; ++i) {
+                p.values[i] = values[i];
+            }
+
+            p.kind      = cfg.kind;
+            p.minValue  = cfg.minValue;
+            p.maxValue  = cfg.maxValue;
+            p.lineColor = cfg.lineColor;
+            p.fillColor = cfg.fillColor;
+            p.lineWidth = cfg.lineWidth;
+            p.barGap    = cfg.barGap;
+        });
+
+        return e;
+    }
+
+auto Context::PlotLines(std::string_view id, std::span<const float> values, const PlotConfig& cfg ) -> Entity {
+        PlotConfig c = cfg;
+        c.kind       = UIPlotKind::Lines;
+        return Plot(id, values, c);
+    }
+
+auto Context::Histogram(std::string_view id, std::span<const float> values, const PlotConfig& cfg ) -> Entity {
+        PlotConfig c = cfg;
+        c.kind       = UIPlotKind::Histogram;
+        return Plot(id, values, c);
+    }
+
+// JPH::Vec4's operator== is component-wise and returns a mask, not a bool, so
+// "did this colour change" has to be asked one channel at a time.
+namespace {
+[[nodiscard]] auto SameColor(const JPH::Vec4& a, const JPH::Vec4& b) noexcept -> bool {
+    return a.GetX() == b.GetX() && a.GetY() == b.GetY() && a.GetZ() == b.GetZ() && a.GetW() == b.GetW();
+}
+
+[[nodiscard]] auto Clamp01(float v) noexcept -> float {
+    if (!(v > 0.0f)) { // also catches NaN
+        return 0.0f;
+    }
+    return (v > 1.0f) ? 1.0f : v;
+}
+
+// The seven stops of a full hue loop, used by both the hue strip and the
+// saturation/value plane (which needs only the colour at the current hue, but
+// builds it from the same table so the two can never disagree).
+[[nodiscard]] auto HueStop(float hueDegrees) noexcept -> JPH::Vec4 {
+    return HsvToRgb(hueDegrees, 1.0f, 1.0f);
+}
+} // namespace
+
+void Context::EnsureColorEditChildren(Entity ceEntity, std::string_view label, const ColorEditConfig& cfg, TextureHandle font, const JPH::Vec4& color) {
+    uint32_t parentDepth = 0;
+    if (const auto* r = m_reg->Get<UIComponents::UIRectComponent>(ceEntity)) {
+        parentDepth = r->hierarchyDepth;
+    }
+
+    if (!label.empty()) {
+        Entity lblEnt = GetOrCreateChild(ceEntity, HashStringView("_ce_label"), [&]() -> Entity {
+            return m_reg->Create(
+                Components::NameComponent {.name = String64("_ce_label")},
+                UIComponents::UIRectComponent {.parentEntity = ceEntity, .height = cfg.height, .hierarchyDepth = parentDepth + 1},
+                UIComponents::TextComponent {
+                    .text          = String256(label),
+                    .scale         = cfg.scale,
+                    .color         = cfg.textColor,
+                    .align         = TextAlignment::Left,
+                    .verticalAlign = TextVerticalAlignment::Center,
+                    .fontIndex     = font
+                },
+                UIComponents::UIFlexComponent {.flexGrow = 1.0f}
+            );
+        });
+        m_reg->Patch<UIComponents::TextComponent>(lblEnt, [&](auto& tc) -> auto {
+            tc.text.assign(label);
+            tc.color = cfg.textColor;
+        });
+    }
+
+    Entity swatchEnt = GetOrCreateChild(ceEntity, HashStringView("_ce_swatch"), [&]() -> Entity {
+        return m_reg->Create(
+            Components::NameComponent {.name = String64("_ce_swatch")},
+            UIComponents::UIRectComponent {
+                .parentEntity = ceEntity, .width = cfg.swatchWidth, .height = cfg.height - 4.0f, .hierarchyDepth = parentDepth + 1},
+            UIComponents::UIPanelComponent {
+                .color = color, .borderRadius = {cfg.borderRadius, cfg.borderRadius, cfg.borderRadius, cfg.borderRadius}, .edgeWidth = 1.0f},
+            UIComponents::UIButtonComponent {}
+        );
+    });
+
+    const bool hovered = IsHovered(ceEntity) || IsHovered(swatchEnt);
+    m_reg->Patch<UIComponents::UIRectComponent>(swatchEnt, [&](auto& r) -> auto {
+        r.parentEntity   = ceEntity;
+        r.width          = cfg.swatchWidth;
+        r.height         = cfg.height - 4.0f;
+        r.hierarchyDepth = parentDepth + 1;
+    });
+    m_reg->Patch<UIComponents::UIPanelComponent>(swatchEnt, [&](auto& pc) -> auto {
+        pc.color          = color;
+        pc.borderRadius   = {cfg.borderRadius, cfg.borderRadius, cfg.borderRadius, cfg.borderRadius};
+        // A dark colour on a dark panel has no visible edge of its own; the
+        // border is what keeps a near-black swatch from disappearing.
+        pc.edgeWidth      = 1.0f;
+        pc.uvLeft = pc.uvRight = pc.uvTop = pc.uvBottom = hovered ? 0.0f : 0.0f;
+    });
+    // Hover feedback lives on the row, not the swatch: the swatch is the
+    // colour, and tinting it would lie about the value being edited.
+    m_reg->Patch<UIComponents::UIPanelComponent>(ceEntity, [&](auto& pc) -> auto {
+        pc.color = hovered ? cfg.hoverColor : JPH::Vec4 {0.0f, 0.0f, 0.0f, 0.0f};
+    });
+}
+
+auto Context::ColorEdit(std::string_view id, std::string_view label, float* col, int componentCount, const ColorEditConfig& cfg ) -> Entity {
+        Entity   parent = GetCurrentParent();
+        uint32_t depth  = GetCurrentDepth();
+        uint64_t key    = HashCombine(parent.Pack(), HashStringView(id));
+
+        const TextureHandle fontHandle = ResolveFontTexture();
+        const bool          hasAlpha   = (componentCount >= 4);
+
+        Entity e = GetOrCreateEntity(key, [&]() -> Entity {
+            return m_reg->Create(
+                Components::NameComponent {.name = String64(id)},
+                UIComponents::UIRectComponent {.parentEntity = parent, .height = cfg.height, .hierarchyDepth = depth},
+                UIComponents::UIPanelComponent {.color = {0.0f, 0.0f, 0.0f, 0.0f}},
+                UIComponents::UIFlexComponent {
+                    .direction  = FlexDirection::Row,
+                    .alignItems = FlexAlign::Center,
+                    .gapX       = cfg.gap,
+                    .gapY       = cfg.gap
+                },
+                UIComponents::UIButtonComponent {},
+                UIComponents::UIColorEditComponent {}
+            );
+        });
+
+        m_reg->Patch<UIComponents::UIRectComponent>(e, [&](auto& r) -> auto {
+            r.parentEntity   = parent;
+            r.height         = cfg.height;
+            r.hierarchyDepth = depth;
+        });
+        m_reg->Patch<UIComponents::UIFlexComponent>(e, [&](auto& f) -> auto {
+            f.direction  = FlexDirection::Row;
+            f.alignItems = FlexAlign::Center;
+            f.gapX = f.gapY = cfg.gap;
+        });
+
+        auto* ce = m_reg->Get<UIComponents::UIColorEditComponent>(e);
+        if (ce == nullptr) {
+            return e;
+        }
+        ce->componentCount = hasAlpha ? 4 : 3;
+
+        // --- 1. Sync in ---
+        //
+        // The caller's array is authoritative only when it CHANGED: the picker
+        // writes to it at the end of every frame, so treating it as
+        // authoritative unconditionally would fight the user's own edits (drag
+        // the hue strip, get last frame's value back). previousValue is what
+        // tells an outside edit (a preset, an undo, another panel on the same
+        // material) apart from that echo.
+        const JPH::Vec4 incoming {
+            Clamp01(col[0]), Clamp01(col[1]), Clamp01(col[2]), hasAlpha ? Clamp01(col[3]) : ce->value.GetW()};
+        if (!SameColor(incoming, ce->previousValue)) {
+            ce->value         = incoming;
+            ce->previousValue = incoming;
+            ce->hsvStale      = true;
+        }
+        if (ce->hsvStale) {
+            RgbToHsv(ce->value, ce->hue, ce->sat, ce->val);
+            ce->hsvStale = false;
+        }
+
+        // --- 2. The row: label + swatch ---
+        EnsureColorEditChildren(e, label, cfg, fontHandle, ce->value);
+
+        // --- 3. Open / close the picker ---
+        const Entity swatchEnt = FindChildByKey(e, HashStringView("_ce_swatch"));
+        if (ConsumeClick(e) || ((swatchEnt != Entity::Null()) && ConsumeClick(swatchEnt))) {
+            ce->expanded = !ce->expanded;
+        }
+
+        // --- 4. The picker popup ---
+        if (ce->expanded) {
+            const OwnerAnchor anchor = GetOwnerAnchor(e);
+
+            PopupConfig popCfg;
+            popCfg.width   = (cfg.pickerWidth > 0.0f) ? cfg.pickerWidth : std::max(160.0f, anchor.width);
+            popCfg.padding = cfg.padding;
+            popCfg.gap     = 6.0f;
+            // PopupConfig keeps one radius per corner; the colour field's
+            // config carries a single number, which is the common case.
+            popCfg.borderRadius = {cfg.borderRadius, cfg.borderRadius, cfg.borderRadius, cfg.borderRadius};
+
+            Popup(e, popCfg, [&]() -> void {
+                // --- 4a. Saturation / value plane ---
+                //
+                // The pad is a plain box (no UIFlexComponent) so its children
+                // are positioned by ANCHORS and can overlap: the two gradient
+                // layers and the knob all cover the same rect. Under flex they
+                // would stack, which is not a colour picker.
+                const uint32_t padDepth = GetCurrentDepth();
+                Entity svEnt = GetOrCreateEntity(HashCombine(GetCurrentParent().Pack(), HashStringView("_ce_sv")), [&]() -> Entity {
+                    return m_reg->Create(
+                        Components::NameComponent {.name = String64("_ce_sv")},
+                        UIComponents::UIRectComponent {
+                            .parentEntity = GetCurrentParent(), .width = cfg.svSize, .height = cfg.svSize, .hierarchyDepth = padDepth},
+                        UIComponents::UIButtonComponent {},
+                        UIComponents::UIDragComponent {.targetEntity = Entity::Null(), .isDragging = false},
+                        UIComponents::UIColorSVComponent {}
+                    );
+                });
+
+                m_reg->Patch<UIComponents::UIRectComponent>(svEnt, [&](auto& r) -> auto {
+                    r.parentEntity   = GetCurrentParent();
+                    r.width          = cfg.svSize;
+                    r.height         = cfg.svSize;
+                    r.hierarchyDepth = padDepth;
+                });
+
+                auto* sv = m_reg->Get<UIComponents::UIColorSVComponent>(svEnt);
+                if (sv != nullptr) {
+                    sv->hue = ce->hue;
+
+                    // The pad is the one widget here the interaction pass does
+                    // not own a 1D control for, so its drag state is read back
+                    // into the editor every frame. Only while dragging: the
+                    // authoritative store is the ColorEdit component, and a
+                    // stale pad (one whose entity outlived a collapse) must not
+                    // overwrite a hue the user just picked from the strip.
+                    if (sv->isDragging) {
+                        ce->sat = std::clamp(sv->sat, 0.0f, 1.0f);
+                        ce->val = std::clamp(sv->val, 0.0f, 1.0f);
+                    } else {
+                        sv->sat = ce->sat;
+                        sv->val = ce->val;
+                    }
+
+                    const JPH::Vec4 hueColor = HueStop(ce->hue);
+
+                    // Layer 1: white -> pure hue, left to right (saturation).
+                    const JPH::Vec4 svStops[2] = {JPH::Vec4(1.0f, 1.0f, 1.0f, 1.0f), hueColor};
+                    Gradient("_ce_sv_sat", GradientConfig {
+                        .width = 0.0f, .height = 0.0f, .axis = UIGradientAxis::Horizontal,
+                        .stops = std::span<const JPH::Vec4>(svStops, 2)});
+
+                    // Layer 2: transparent -> black, top to bottom (value).
+                    // Compositing black over the hue ramp is the whole SV
+                    // plane in two quads: it is exactly the sRGB-space
+                    // definition, and cheap enough to rebuild every frame.
+                    const JPH::Vec4 valStops[2] = {JPH::Vec4(0.0f, 0.0f, 0.0f, 0.0f), JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f)};
+                    Gradient("_ce_sv_val", GradientConfig {
+                        .width = 0.0f, .height = 0.0f, .axis = UIGradientAxis::Vertical,
+                        .stops = std::span<const JPH::Vec4>(valStops, 2)});
+
+                    // Knob: anchored at (sat, 1-val) and pulled back by half
+                    // its size so its CENTRE sits on the picked point.
+                    const uint32_t knobDepth = padDepth + 1;
+                    const float    knobHalf  = cfg.knobSize * 0.5f;
+                    Entity knobEnt = GetOrCreateEntity(HashCombine(svEnt.Pack(), HashStringView("_ce_sv_knob")), [&]() -> Entity {
+                        return m_reg->Create(
+                            Components::NameComponent {.name = String64("_ce_sv_knob")},
+                            UIComponents::UIRectComponent {
+                                .parentEntity = svEnt, .width = cfg.knobSize, .height = cfg.knobSize, .hierarchyDepth = knobDepth},
+                            UIComponents::UIPanelComponent {
+                                .color = {1.0f, 1.0f, 1.0f, 1.0f},
+                                .borderRadius = {knobHalf, knobHalf, knobHalf, knobHalf},
+                                .edgeWidth = 1.0f
+                            }
+                        );
+                    });
+                    m_reg->Patch<UIComponents::UIRectComponent>(knobEnt, [&](auto& r) -> auto {
+                        r.parentEntity   = svEnt;
+                        r.width          = cfg.knobSize;
+                        r.height         = cfg.knobSize;
+                        r.hierarchyDepth = knobDepth;
+                        r.anchorMinX = r.anchorMaxX = std::clamp(sv->sat, 0.0f, 1.0f);
+                        r.anchorMinY = r.anchorMaxY = std::clamp(1.0f - sv->val, 0.0f, 1.0f);
+                        // Anchor positioning puts the widget's top-left on the
+                        // pivot; the negative offset re-centres it.
+                        r.x            = -knobHalf;
+                        r.y            = -knobHalf;
+                    });
+                    m_reg->Patch<UIComponents::UIPanelComponent>(knobEnt, [&](auto& pc) -> auto {
+                        pc.color        = {1.0f, 1.0f, 1.0f, 1.0f};
+                        pc.borderRadius = {knobHalf, knobHalf, knobHalf, knobHalf};
+                        pc.edgeWidth    = 1.0f;
+                    });
+                }
+
+                // --- 4b. Hue strip ---
+                //
+                // A stock Slider 0..360 with a hue ramp painted over its
+                // track: the drag, the click-to-jump and the knob all come
+                // from the existing slider, and only the fill is new.
+                SliderConfig hueCfg;
+                hueCfg.height      = cfg.stripHeight;
+                hueCfg.trackHeight = cfg.stripHeight;
+                hueCfg.knobSize    = cfg.knobSize;
+                hueCfg.showValue   = false;
+                hueCfg.trackColor  = {0.0f, 0.0f, 0.0f, 0.0f};
+                Entity hueEnt = Slider("_ce_hue", "H", ce->hue, 0.0f, 360.0f, 1.0f, hueCfg);
+                if (Entity track = FindChildByKey(hueEnt, HashStringView("_sl_track")); track != Entity::Null()) {
+                    const JPH::Vec4 hueStops[7] = {
+                        HueStop(0.0f), HueStop(60.0f), HueStop(120.0f), HueStop(180.0f), HueStop(240.0f), HueStop(300.0f), HueStop(360.0f)};
+                    if (m_reg->Get<UIComponents::UIGradientComponent>(track) == nullptr) {
+                        m_reg->Add<UIComponents::UIGradientComponent>(track);
+                    }
+                    m_reg->Patch<UIComponents::UIGradientComponent>(track, [&](auto& g) -> auto {
+                        g.axis      = UIGradientAxis::Horizontal;
+                        g.stopCount = 7;
+                        for (uint32_t i = 0; i < 7; ++i) {
+                            g.stops[i] = hueStops[i];
+                        }
+                    });
+                }
+
+                // --- 4c. Alpha strip ---
+                if (hasAlpha) {
+                    SliderConfig alphaCfg;
+                    alphaCfg.height      = cfg.stripHeight;
+                    alphaCfg.trackHeight = cfg.stripHeight;
+                    alphaCfg.knobSize    = cfg.knobSize;
+                    alphaCfg.showValue   = false;
+                    alphaCfg.trackColor  = {0.0f, 0.0f, 0.0f, 0.0f};
+                    float alpha = ce->value.GetW();
+                    Entity alphaEnt = Slider("_ce_alpha", "A", alpha, 0.0f, 1.0f, 0.0f, alphaCfg);
+                    ce->value.SetW(std::clamp(alpha, 0.0f, 1.0f));
+                    if (Entity track = FindChildByKey(alphaEnt, HashStringView("_sl_track")); track != Entity::Null()) {
+                        // Transparent -> opaque, over a checkerboard the
+                        // track's own panel cannot draw. Two stops on the
+                        // colour is enough: alpha is the gradient, the RGB is
+                        // constant along the strip.
+                        const JPH::Vec4 a0 = JPH::Vec4(ce->value.GetX(), ce->value.GetY(), ce->value.GetZ(), 0.0f);
+                        const JPH::Vec4 a1 = JPH::Vec4(ce->value.GetX(), ce->value.GetY(), ce->value.GetZ(), 1.0f);
+                        const JPH::Vec4 alphaStops[2] = {a0, a1};
+                        if (m_reg->Get<UIComponents::UIGradientComponent>(track) == nullptr) {
+                            m_reg->Add<UIComponents::UIGradientComponent>(track);
+                        }
+                        m_reg->Patch<UIComponents::UIGradientComponent>(track, [&](auto& g) -> auto {
+                            g.axis      = UIGradientAxis::Horizontal;
+                            g.stopCount = 2;
+                            g.stops[0]  = alphaStops[0];
+                            g.stops[1]  = alphaStops[1];
+                        });
+                    }
+                }
+
+                // --- 4d. Per-channel sliders ---
+                if (cfg.showRgbSliders) {
+                    SliderConfig chanCfg;
+                    chanCfg.height    = 22.0f;
+                    chanCfg.showValue = true;
+                    float rgba[4] = {ce->value.GetX(), ce->value.GetY(), ce->value.GetZ(), ce->value.GetW()};
+                    static constexpr std::string_view kChannelNames[4] = {"R", "G", "B", "A"};
+                    const int channelCount = hasAlpha ? 4 : 3;
+                    for (int c = 0; c < channelCount; ++c) {
+                        std::array<char, 32> chanIdBuf {};
+                        const std::string_view chanId = FormatTo(chanIdBuf, "_ce_chan{}", c);
+                        Slider(chanId, kChannelNames[c], rgba[c], 0.0f, 1.0f, 0.0f, chanCfg);
+                    }
+                    // A channel edit moves the colour without going through
+                    // HSV, so the pad's position has to be re-derived —
+                    // otherwise dragging R to 1 leaves the knob sitting where
+                    // it was.
+                    ce->value = JPH::Vec4(Clamp01(rgba[0]), Clamp01(rgba[1]), Clamp01(rgba[2]), Clamp01(rgba[3]));
+                    ce->hsvStale = true;
+                }
+
+                // --- 4e. Hex readout ---
+                if (cfg.showHex) {
+                    std::array<char, 16> hexBuf {};
+                    const std::string_view hexText = FormatTo(
+                        hexBuf, "#{:02X}{:02X}{:02X}{:02X}",
+                        static_cast<int>(std::lround(ce->value.GetX() * 255.0f)),
+                        static_cast<int>(std::lround(ce->value.GetY() * 255.0f)),
+                        static_cast<int>(std::lround(ce->value.GetZ() * 255.0f)),
+                        static_cast<int>(std::lround(ce->value.GetW() * 255.0f))
+                    );
+                    LabelConfig lblCfg;
+                    lblCfg.height = 20.0f;
+                    lblCfg.scale  = 0.75f;
+                    lblCfg.align  = TextAlignment::Center;
+                    Label(hexText, lblCfg);
+                }
+            });
+
+            // The channel sliders can set hsvStale; re-derive here so the pad
+            // and the swatch agree with the sliders in the SAME frame rather
+            // than lagging one behind.
+            if (ce->hsvStale) {
+                RgbToHsv(ce->value, ce->hue, ce->sat, ce->val);
+                ce->hsvStale = false;
+            }
+        }
+
+        // --- 5. Apply HSV -> RGB and sync out ---
+        //
+        // Runs whenever the plane was touched this frame, which is exactly
+        // when the RGB has not already been written by a channel slider.
+        if (!ce->hsvStale) {
+            const JPH::Vec4 rgb = HsvToRgb(ce->hue, ce->sat, ce->val);
+            ce->value           = JPH::Vec4(rgb.GetX(), rgb.GetY(), rgb.GetZ(), ce->value.GetW());
+        }
+
+        ce->previousValue = ce->value;
+        col[0]            = ce->value.GetX();
+        col[1]            = ce->value.GetY();
+        col[2]            = ce->value.GetZ();
+        if (hasAlpha) {
+            col[3] = ce->value.GetW();
+        }
+
+        return e;
+    }
+
+auto Context::ColorEdit3(std::string_view id, std::string_view label, float col[3], const ColorEditConfig& cfg ) -> Entity {
+        return ColorEdit(id, label, col, 3, cfg);
+    }
+
+auto Context::ColorEdit3(std::string_view label, float col[3], const ColorEditConfig& cfg ) -> Entity {
+        return ColorEdit(label, label, col, 3, cfg);
+    }
+
+auto Context::ColorEdit4(std::string_view id, std::string_view label, float col[4], const ColorEditConfig& cfg ) -> Entity {
+        return ColorEdit(id, label, col, 4, cfg);
+    }
+
+auto Context::ColorEdit4(std::string_view label, float col[4], const ColorEditConfig& cfg ) -> Entity {
+        return ColorEdit(label, label, col, 4, cfg);
+    }
+
+auto Context::ColorEdit4(std::string_view id, std::string_view label, JPH::Vec4& col, const ColorEditConfig& cfg ) -> Entity {
+        float v[4] = {col.GetX(), col.GetY(), col.GetZ(), col.GetW()};
+        Entity e   = ColorEdit(id, label, v, 4, cfg);
+        col        = JPH::Vec4(v[0], v[1], v[2], v[3]);
+        return e;
+    }
+
+auto Context::ColorEdit4(std::string_view label, JPH::Vec4& col, const ColorEditConfig& cfg ) -> Entity {
+        return ColorEdit4(label, label, col, cfg);
+    }
+
 auto Context::Selectable(std::string_view id, std::string_view label, bool& selected, const SelectableConfig& cfg) -> Entity {
         uint32_t depth = 0;
         SelectableClickInfo info = PrepareSelectable(id, label, selected, cfg, std::string_view {}, false, depth);

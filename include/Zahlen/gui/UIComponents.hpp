@@ -56,6 +56,18 @@ enum class FlexAlign : uint8_t { Auto = 0, FlexStart, Center, FlexEnd, Stretch, 
 //                 rect is filled (edge tiles are cropped).
 enum class ImageScaleMode : uint8_t { Stretch = 0, FitAspect = 1, CropAspect = 2, Tile = 3 };
 
+// Which way a UIGradientComponent runs its colour stops across the widget.
+// Horizontal runs left (first stop) to right (last); Vertical runs top to
+// bottom.
+enum class UIGradientAxis : uint8_t { Horizontal = 0, Vertical = 1 };
+
+// What a UIPlotComponent draws from its series.
+//  * Lines       — a polyline through the samples, each segment a thin quad.
+//  * Histogram   — one bar per sample, rising from the zero line (or from the
+//                  bottom of the range when the range never crosses zero).
+//  * ShadedLines — the polyline plus a translucent area down to the baseline.
+enum class UIPlotKind : uint8_t { Lines = 0, Histogram = 1, ShadedLines = 2 };
+
 /// The GUI subsystem's component set.
 ///
 /// Deliberately shaped like ZHLN::Components: a flat namespace of nested
@@ -259,6 +271,52 @@ struct UIComponents {
         ZHLN::Array<String128> options;
     };
 
+    // The saturation/value plane of a colour picker: a 2D drag pad whose x is
+    // saturation and whose y is value, tinted by `hue`.
+    //
+    // Lives on the pad itself, not on the ColorEdit root, because the
+    // interaction pass needs a widget to hit-test and drag, and because the
+    // pad is the one part of the picker that cannot be expressed as a 1D
+    // slider. `hue` is stored here too: the pad is *painted* from it, and the
+    // renderer only ever sees components, so the pad's own gradient stops have
+    // to be derivable from the component alone.
+    struct UIColorSVComponent {
+        float hue        = 0.0f; // 0..360
+        float sat        = 0.0f; // 0..1
+        float val        = 1.0f; // 0..1
+        bool  isDragging = false;
+        char  _pad[3]    = {};
+    };
+
+    // A colour field: a swatch that opens a picker popup.
+    //
+    // `value` is the authoritative RGBA, in 0..1. `hue`/`sat`/`val` are the
+    // HSV working copy the picker edits; they are re-derived from `value`
+    // whenever `value` changes from the outside (an edited material, a preset,
+    // an undo), and `value` is re-derived from them whenever the user drags.
+    // The two-way sync is what keeps a colour that was set programmatically
+    // from showing a stale picker position.
+    //
+    // HSV is lossy at the grey axis (hue is undefined when saturation is 0),
+    // so the derivation keeps the previous hue for achromatic colours rather
+    // than snapping it to 0. Without that, dragging saturation to zero and
+    // back would silently recolour a grey to red.
+    struct UIColorEditComponent {
+        JPH::Vec4 value         = {1.0f, 1.0f, 1.0f, 1.0f};
+        JPH::Vec4 previousValue = {1.0f, 1.0f, 1.0f, 1.0f};
+
+        float hue = 0.0f;
+        float sat = 0.0f;
+        float val = 1.0f;
+
+        // 3 = RGB (alpha hidden and forced to 1), 4 = RGBA.
+        int32_t componentCount = 3;
+
+        bool expanded  = false; // Picker popup open
+        bool hsvStale  = true;  // Recompute HSV from `value` on the next build
+        char _pad[2]   = {};
+    };
+
     struct UICollapsingHeaderComponent {
         bool isOpen       = true;
         bool defaultOpen  = true;
@@ -319,6 +377,64 @@ struct UIComponents {
         // FitAspect/CropAspect (aspect source) and by Tile (repeat pitch).
         float sourceWidth  = 0.0f;
         float sourceHeight = 0.0f;
+    };
+
+    // A band of evenly spaced colour stops painted across the widget rect.
+    //
+    // This is the primitive behind a colour picker's hue strip and its
+    // saturation/value plane, and behind any bar that needs a gradient fill.
+    // The stops are inline and there are at most kMaxStops of them: a gradient
+    // is a per-frame visual that a widget rewrites every time it is built, so
+    // an allocating member here would churn the heap on every frame. Eight is
+    // enough for a full hue loop (seven stops return to red) and for the
+    // two-stop ramps everything else needs.
+    //
+    // Interpolation is per-vertex, so a gradient is only exact at its stops —
+    // which is why the hue strip uses seven of them rather than two. Fewer
+    // than two stops paints nothing.
+    struct UIGradientComponent {
+        static constexpr uint32_t kMaxStops = 8;
+
+        UIGradientAxis axis      = UIGradientAxis::Horizontal;
+        uint32_t       stopCount = 0; // < 2 paints nothing
+        JPH::Vec4      stops[kMaxStops] = {
+            JPH::Vec4(1.0f, 1.0f, 1.0f, 1.0f),
+            JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f),
+            JPH::Vec4(0.0f, 0.0f, 0.0f, 0.0f),
+            JPH::Vec4(0.0f, 0.0f, 0.0f, 0.0f),
+            JPH::Vec4(0.0f, 0.0f, 0.0f, 0.0f),
+            JPH::Vec4(0.0f, 0.0f, 0.0f, 0.0f),
+            JPH::Vec4(0.0f, 0.0f, 0.0f, 0.0f),
+            JPH::Vec4(0.0f, 0.0f, 0.0f, 0.0f),
+        };
+    };
+
+    // A rolling series drawn as lines, bars, or both: frame times, profiler
+    // averages, memory history, audio meters.
+    //
+    // The samples live in `values` and are mapped across the widget's laid-out
+    // width, with `minValue`/`maxValue` mapped to the bottom and top edges, so
+    // a caller that owns a ring buffer can hand over a span each frame without
+    // rescaling anything. Values outside the range are clamped, not dropped: a
+    // spike that overshoots maxValue still draws, pinned to the top edge,
+    // rather than punching a hole in the strip.
+    struct UIPlotComponent {
+        // Guard against an unbounded series: 512 samples is 3k vertices worst
+        // case (ShadedLines), which one UI batch absorbs. Callers with longer
+        // histories should downsample before handing them over.
+        static constexpr uint32_t kMaxPoints = 512;
+
+        ZHLN::Array<float> values;
+
+        UIPlotKind kind     = UIPlotKind::Lines;
+        float      minValue = 0.0f;
+        float      maxValue = 1.0f;
+
+        JPH::Vec4 lineColor = {0.30f, 0.78f, 1.00f, 1.00f};
+        JPH::Vec4 fillColor = {0.30f, 0.78f, 1.00f, 0.35f};
+
+        float lineWidth = 1.5f; // Lines / ShadedLines, in pixels
+        float barGap    = 1.0f; // Histogram, in pixels between adjacent bars
     };
 
     // List/tree row state: selection plus the double-click bookkeeping. The

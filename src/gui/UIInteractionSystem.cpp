@@ -121,6 +121,9 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
             // by walking up parents.
             Entity sliderEnt   = FindAncestorWith<GUI::UIComponents::UISliderComponent>(reg, e);
             Entity splitterEnt = FindAncestorWith<GUI::UIComponents::UISplitterComponent>(reg, e);
+            // Checked after the slider: a 1D control is the more specific
+            // match, and nothing nests an SV pad inside one.
+            Entity svEnt       = FindAncestorWith<GUI::UIComponents::UIColorSVComponent>(reg, e);
 
             if (sliderEnt != Entity::Null()) {
                 // Slider drag: adjust slider value
@@ -205,6 +208,42 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                         continue;
                     }
                 }
+            } else if (svEnt != Entity::Null()) {
+                // Colour picker: the saturation/value plane.
+                //
+                // The one control in the GUI that is genuinely 2D, so there is
+                // no 1D slider to reuse — the pointer's position inside the
+                // pad IS the value. Y is inverted because the plane's origin
+                // is its top-left corner while value 1 (brightest) is at the
+                // top, which is the opposite sense from screen Y.
+                if (auto* sv = reg.Get<GUI::UIComponents::UIColorSVComponent>(svEnt)) {
+                    if (!leftMouseDown) {
+                        // Both latches, same as the slider: leaving the
+                        // drag-component latch armed makes the next click
+                        // anywhere on screen move the pad.
+                        sv->isDragging   = false;
+                        drag->isDragging = false;
+                    } else if (drag->isDragging || sv->isDragging) {
+                        sv->isDragging = true;
+                        if (const auto* srect = reg.Get<GUI::UIComponents::UIRectComponent>(svEnt)) {
+                            const Bounds b = GetBounds(*srect);
+                            const float  w = b.x1 - b.x0;
+                            const float  h = b.y1 - b.y0;
+                            // Unlike a slider, the pad keeps the drag alive
+                            // outside its own rect (clamped): losing the
+                            // pointer mid-gesture would strand the colour
+                            // halfway, and the clamp means "off the pad"
+                            // still resolves to a legal corner value.
+                            if (w > 1.0f) {
+                                sv->sat = std::clamp((mouseX - b.x0) / w, 0.0f, 1.0f);
+                            }
+                            if (h > 1.0f) {
+                                sv->val = std::clamp(1.0f - (mouseY - b.y0) / h, 0.0f, 1.0f);
+                            }
+                        }
+                        continue;
+                    }
+                }
             } else {
                 // Regular panel drag
                 if (drag->isDragging) {
@@ -242,6 +281,7 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
     bool   clickConsumed   = false;
     bool   focusCaptured   = false;
     Entity clickedDropdown = Entity::Null();
+    Entity clickedColorEdit = Entity::Null();
 
     for (const auto& entry: sortedEntries) {
         Entity e      = entities[entry.rawIndex];
@@ -337,6 +377,26 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                     }
                 }
 
+                // Click-to-set on the saturation/value plane: a click lands
+                // the colour exactly where it was aimed, and the press also
+                // arms the drag so the same gesture can continue into one.
+                if (Entity svEnt = FindAncestorWith<GUI::UIComponents::UIColorSVComponent>(reg, e); svEnt != Entity::Null()) {
+                    if (auto* sv = reg.Get<GUI::UIComponents::UIColorSVComponent>(svEnt)) {
+                        sv->isDragging = true;
+                        if (const auto* srect = reg.Get<GUI::UIComponents::UIRectComponent>(svEnt)) {
+                            const Bounds b = GetBounds(*srect);
+                            const float  w = b.x1 - b.x0;
+                            const float  h = b.y1 - b.y0;
+                            if (w > 1.0f) {
+                                sv->sat = std::clamp((mouseX - b.x0) / w, 0.0f, 1.0f);
+                            }
+                            if (h > 1.0f) {
+                                sv->val = std::clamp(1.0f - (mouseY - b.y0) / h, 0.0f, 1.0f);
+                            }
+                        }
+                    }
+                }
+
                 // Dropdown: clicking anywhere inside an open dropdown (but not an
                 // item) shouldn't auto-close; clicking the header toggles.
                 if (Entity ddEnt = FindAncestorWith<GUI::UIComponents::UIDropdownComponent>(reg, e); ddEnt != Entity::Null()) {
@@ -353,7 +413,21 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                         if (reg.Get<GUI::UIComponents::UIDropdownComponent>(pop->owner) != nullptr) {
                             clickedDropdown = pop->owner;
                         }
+                        // Same escape the dropdown needs: the colour picker is
+                        // a popup, so a click on the saturation plane or a
+                        // channel slider is not an ancestor of the field that
+                        // owns it. Without this the picker would close on the
+                        // very click that was trying to pick a colour.
+                        if (reg.Get<GUI::UIComponents::UIColorEditComponent>(pop->owner) != nullptr) {
+                            clickedColorEdit = pop->owner;
+                        }
                     }
+                }
+
+                // Colour picker: same contract as the dropdown — clicking the
+                // field toggles, clicking inside the open picker keeps it open.
+                if (Entity ceEnt = FindAncestorWith<GUI::UIComponents::UIColorEditComponent>(reg, e); ceEnt != Entity::Null()) {
+                    clickedColorEdit = ceEnt;
                 }
 
                 if (auto* drag = reg.Get<GUI::UIComponents::UIDragComponent>(e)) {
@@ -395,6 +469,19 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
         for (Entity e: reg.GetEntitiesWith<GUI::UIComponents::UIDropdownComponent>()) {
             if (auto* dd = reg.Get<GUI::UIComponents::UIDropdownComponent>(e)) {
                 dd->expanded = false;
+            }
+        }
+    }
+
+    // Close an open colour picker when clicking outside it. Deliberately not
+    // folded into the dropdown loop above: a picker and a dropdown are
+    // different widgets with different state, and one shared "clicked
+    // somewhere else" flag would mean clicking a dropdown closed any open
+    // picker and vice versa.
+    if (leftMouseDown && clickedColorEdit == Entity::Null()) {
+        for (Entity e: reg.GetEntitiesWith<GUI::UIComponents::UIColorEditComponent>()) {
+            if (auto* ce = reg.Get<GUI::UIComponents::UIColorEditComponent>(e)) {
+                ce->expanded = false;
             }
         }
     }
@@ -506,6 +593,18 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
     if (!dragActive) {
         for (const auto& split: reg.GetRawArray<GUI::UIComponents::UISplitterComponent>()) {
             if (split.isDragging) {
+                dragActive = true;
+                break;
+            }
+        }
+    }
+    // The colour picker's saturation/value plane. It is the one control whose
+    // drag has no 1D equivalent, so it needs its own latch here — and it needs
+    // it more than a slider does, because the gesture routinely leaves the
+    // pad while staying perfectly valid.
+    if (!dragActive) {
+        for (const auto& sv: reg.GetRawArray<GUI::UIComponents::UIColorSVComponent>()) {
+            if (sv.isDragging) {
                 dragActive = true;
                 break;
             }

@@ -272,6 +272,52 @@ void UIRenderSystem::Update(Engine& engine) {
             }
         }
 
+        // A3. Process Gradient (if entity has UIGradientComponent)
+        // Drawn before the panel would hide it, and after it so a gradient
+        // child sits on top of its parent's background: the colour picker's
+        // saturation/value plane is a gradient child of a plain Box.
+        if (auto* gradient = reg.Get<GUI::UIComponents::UIGradientComponent>(e)) {
+            if (rect != nullptr) {
+                const uint32_t needed = GUI::CountGradientVertices(*rect, *gradient);
+                if (needed > 0) {
+                    size_t startIdx = localPositions.size();
+                    localPositions.resize(startIdx + needed);
+                    localAttributes.resize(startIdx + needed);
+
+                    uint32_t written = GUI::AppendGradientVertices(&localPositions[startIdx], &localAttributes[startIdx], *rect, *gradient);
+
+                    localPositions.resize(startIdx + written);
+                    localAttributes.resize(startIdx + written);
+
+                    currentVertexOffset += written;
+                    QueueBatch(TextureHandle::Invalid, written, useScissor, currentScissor, false);
+                }
+            }
+        }
+
+        // A4. Process Plot (if entity has UIPlotComponent)
+        // A plot is pure geometry with no textured background, so it batches
+        // with the other untextured UI (panels, gradients) rather than forcing
+        // a texture bind.
+        if (auto* plot = reg.Get<GUI::UIComponents::UIPlotComponent>(e)) {
+            if (rect != nullptr) {
+                const uint32_t needed = GUI::CountPlotVertices(*plot);
+                if (needed > 0) {
+                    size_t startIdx = localPositions.size();
+                    localPositions.resize(startIdx + needed);
+                    localAttributes.resize(startIdx + needed);
+
+                    uint32_t written = GUI::AppendPlotVertices(&localPositions[startIdx], &localAttributes[startIdx], *rect, *plot);
+
+                    localPositions.resize(startIdx + written);
+                    localAttributes.resize(startIdx + written);
+
+                    currentVertexOffset += written;
+                    QueueBatch(TextureHandle::Invalid, written, useScissor, currentScissor, false);
+                }
+            }
+        }
+
         // B. Process Text (if entity has TextComponent)
         if (auto* text = reg.Get<GUI::UIComponents::TextComponent>(e)) {
             float drawX = text->offsetX;
