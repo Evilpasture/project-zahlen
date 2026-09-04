@@ -89,10 +89,10 @@ static_assert(kStaticParsed.window.height == 1080);
 
 struct JSONTestSuite {
     enum class JSONTestError : uint8_t {
-        ParseFailed ZHLN_ANNOTATION(ZHLN::Description<"ReflectJSON::TryParse rejected a document that should have deserialized.">{}),
+        ParseFailed ZHLN_ANNOTATION(ZHLN::Description<"ReflectJSON::TryParse rejected a document that should have deserialized."> {}) = 1,
     };
 
-struct Tests {
+    struct Tests {
         // --- 1. Compile-Time JSON Reflection Verification ---
         std::expected<void, ZHLN::Error> compile_time_json_schema_and_values() {
             // Skipped in sanitizer builds: consteval reflection reaches
@@ -219,10 +219,10 @@ struct Tests {
         std::expected<void, ZHLN::Error> serialize_json_omits_empty_members() {
             const OmittedDocument emptyDoc {};
             const OmittedDocument fullDoc {
-                .assetVersion    = "2.0",
-                .mesh            = 3,
-                .min             = {1.0f, 2.0f, 3.0f},
-                .extensionsUsed  = {"KHR_lights_punctual"},
+                .assetVersion   = "2.0",
+                .mesh           = 3,
+                .min            = {1.0f, 2.0f, 3.0f},
+                .extensionsUsed = {"KHR_lights_punctual"},
             };
 
             // Default: every member is present; disengaged optional is null.
@@ -265,8 +265,7 @@ struct Tests {
 
             // Present keys still parse normally under the option.
             auto present = ZHLN::ReflectJSON::TryParse<OmittedDocument>(
-                R"({ "assetVersion": "2.0", "mesh": 5, "min": [0.5, 1.5], "extensionsUsed": ["ZHLN_procedural_shader"] })",
-                {.omitEmpty = true}
+                R"({ "assetVersion": "2.0", "mesh": 5, "min": [0.5, 1.5], "extensionsUsed": ["ZHLN_procedural_shader"] })", {.omitEmpty = true}
             );
             ZHLN::Test::ExpectTrue(present.has_value());
             if (present) {
@@ -300,4 +299,3 @@ struct Tests {
 int main() {
     return ZHLN::Test::Runner::Run<JSONTestSuite>();
 }
-

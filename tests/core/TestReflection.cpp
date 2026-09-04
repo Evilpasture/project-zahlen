@@ -15,9 +15,9 @@
 // ============================================================================
 
 enum class WeaponType : uint32_t {
-    Pistol ZHLN_ANNOTATION(ZHLN::Description<"Sidearm with high mobility.">{}),
-    Rifle ZHLN_ANNOTATION(ZHLN::Description<"Standard automatic assault rifle.">{}),
-    Shotgun ZHLN_ANNOTATION(ZHLN::Description<"Close-range high damage scattergun.">{})
+    Pistol  ZHLN_ANNOTATION(ZHLN::Description<"Sidearm with high mobility."> {}),
+    Rifle   ZHLN_ANNOTATION(ZHLN::Description<"Standard automatic assault rifle."> {}),
+    Shotgun ZHLN_ANNOTATION(ZHLN::Description<"Close-range high damage scattergun."> {})
 };
 
 enum class StatusEffect : uint32_t { None = 0, Burning = 1 << 0, Frozen = 1 << 1, Poisoned = 1 << 2 };
@@ -68,17 +68,17 @@ struct SchemaContainer {
 
 struct ReflectionTestSuite {
     enum class ReflectionTestError : uint8_t {
-        EnumParseFailed ZHLN_ANNOTATION(ZHLN::Description<"StringToEnum did not produce a value for a name that is a member of the enum.">{}),
+        EnumParseFailed ZHLN_ANNOTATION(ZHLN::Description<"StringToEnum did not produce a value for a name that is a member of the enum."> {}) = 1,
     };
 
-struct Tests {
+    struct Tests {
         // --- 1. Enum Reflection & Introspection ---
         std::expected<void, ZHLN::Error> enum_reflection() {
             // ToString & StringToEnum
             std::string_view name = ZHLN::Reflect::EnumToString(WeaponType::Rifle);
             ZHLN::Test::ExpectEq(name, "Rifle");
 
-            auto parsed      = ZHLN::Reflect::StringToEnum<WeaponType>("Shotgun");
+            auto parsed = ZHLN::Reflect::StringToEnum<WeaponType>("Shotgun");
             if (!ZHLN::Test::ExpectTrue(parsed.has_value())) {
                 return std::unexpected(ReflectionTestError::EnumParseFailed);
             }
@@ -109,9 +109,7 @@ struct Tests {
             constexpr auto keepName = [](std::string_view) -> const char* { return nullptr; };
             ZHLN::Test::ExpectEq(ZHLN::Reflect::TypeName<WeaponType>(), "WeaponType");
             ZHLN::Test::ExpectEq(ZHLN::Reflect::TypeName<WeaponType>(keepName), "WeaponType");
-            constexpr auto renameWeapon = [](std::string_view n) -> const char* {
-                return n == "WeaponType" ? "Weapon" : nullptr;
-            };
+            constexpr auto renameWeapon = [](std::string_view n) -> const char* { return n == "WeaponType" ? "Weapon" : nullptr; };
             ZHLN::Test::ExpectEq(ZHLN::Reflect::TypeName<WeaponType>(renameWeapon), "Weapon");
 
             // EnumToFlagsString
@@ -395,4 +393,3 @@ struct Tests {
 auto RunReflectionSuite() -> ZHLN::Test::TestStats {
     return ZHLN::Test::RunSuite<ReflectionTestSuite>();
 }
-

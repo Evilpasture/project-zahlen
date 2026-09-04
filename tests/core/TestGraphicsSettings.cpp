@@ -16,13 +16,14 @@ struct GraphicsSettingsSuite {
         // nested Tests struct, expected<void, Error> test methods.
     }
     enum class GraphicsSettingsTestError : uint8_t {
-        PresetDetectionFailed ZHLN_ANNOTATION(ZHLN::Description<"QualityLevel::DetectPreset() did not report the tier the settings were configured for.">{}),
-    PresetSignatureMismatch ZHLN_ANNOTATION(ZHLN::Description<"ApplyPreset() left a tier's signature field at the wrong value.">{}),
-        ConfigEqualityFailed ZHLN_ANNOTATION(ZHLN::Description<"Two GraphicsSettings values that should be identical compared unequal.">{}),
-        EnumToStringFailed ZHLN_ANNOTATION(ZHLN::Description<"GraphicsSettings enum <-> string conversion did not round-trip.">{}),
+        PresetDetectionFailed ZHLN_ANNOTATION(ZHLN::Description<"QualityLevel::DetectPreset() did not report the tier the settings were configured for."> {}) =
+            1,
+        PresetSignatureMismatch ZHLN_ANNOTATION(ZHLN::Description<"ApplyPreset() left a tier's signature field at the wrong value."> {}),
+        ConfigEqualityFailed    ZHLN_ANNOTATION(ZHLN::Description<"Two GraphicsSettings values that should be identical compared unequal."> {}),
+        EnumToStringFailed      ZHLN_ANNOTATION(ZHLN::Description<"GraphicsSettings enum <-> string conversion did not round-trip."> {}),
     };
 
-struct Tests {
+    struct Tests {
         // --- 1. Defaults form exactly the Medium tier ------------------------
         std::expected<void, ZHLN::Error> defaults_are_medium_tier() {
             GraphicsSettings gfx {};
@@ -49,8 +50,8 @@ struct Tests {
             GraphicsSettings ultra {};
             ultra.ApplyPreset(QualityLevel::Ultra);
             if (!ZHLN::Test::ExpectTrue(
-                ultra.shadows.resolution == 4096 && ultra.post.giSamples == 16 && ultra.post.enableRTR == 1 && ultra.post.enableSSR == 1
-            )) {
+                    ultra.shadows.resolution == 4096 && ultra.post.giSamples == 16 && ultra.post.enableRTR == 1 && ultra.post.enableSSR == 1
+                )) {
                 return std::unexpected(GraphicsSettingsTestError::PresetSignatureMismatch);
             }
             // RT sample budget: the extension point for the upcoming RT shadow
@@ -63,7 +64,7 @@ struct Tests {
 
         // --- 3. Round-trip: ApplyPreset -> DetectPreset ------------------------
         std::expected<void, ZHLN::Error> preset_round_trip_detection() {
-            for (const QualityLevel tier : {QualityLevel::Low, QualityLevel::Medium, QualityLevel::High, QualityLevel::Ultra}) {
+            for (const QualityLevel tier: {QualityLevel::Low, QualityLevel::Medium, QualityLevel::High, QualityLevel::Ultra}) {
                 GraphicsSettings gfx {};
                 gfx.ApplyPreset(tier);
                 if (!ZHLN::Test::ExpectEq(gfx.DetectPreset(), tier)) {
@@ -82,10 +83,10 @@ struct Tests {
             gfx.ApplyPreset(QualityLevel::High);
 
             // Non-signature knob: still High.
-            gfx.shadows.sunSize            = 0.02f;
-            gfx.post.vignetteIntensity     = 1.4f;
+            gfx.shadows.sunSize             = 0.02f;
+            gfx.post.vignetteIntensity      = 1.4f;
             gfx.environment.ambientExposure = 12.0f;
-            gfx.antiAliasing.fxaaSubpix    = 0.5f;
+            gfx.antiAliasing.fxaaSubpix     = 0.5f;
             if (!ZHLN::Test::ExpectEq(gfx.DetectPreset(), QualityLevel::High)) {
                 return std::unexpected(GraphicsSettingsTestError::PresetDetectionFailed);
             }
@@ -146,8 +147,9 @@ struct Tests {
             if (!ZHLN::Test::ExpectTrue(ToString(QualityLevel::Low) == "Low" && ToString(QualityLevel::Medium) == "Medium")) {
                 return std::unexpected(GraphicsSettingsTestError::EnumToStringFailed);
             }
-            if (!ZHLN::Test::ExpectTrue(ToString(QualityLevel::High) == "High" && ToString(QualityLevel::Ultra) == "Ultra" &&
-                                        ToString(QualityLevel::Custom) == "Custom")) {
+            if (!ZHLN::Test::ExpectTrue(
+                    ToString(QualityLevel::High) == "High" && ToString(QualityLevel::Ultra) == "Ultra" && ToString(QualityLevel::Custom) == "Custom"
+                )) {
                 return std::unexpected(GraphicsSettingsTestError::EnumToStringFailed);
             }
             return {};
@@ -160,4 +162,3 @@ struct Tests {
 auto RunGraphicsSettingsSuite() -> ZHLN::Test::TestStats {
     return ZHLN::Test::RunSuite<GraphicsSettingsSuite>();
 }
-
