@@ -6,10 +6,12 @@ A **simple** project that integrates Vulkan, Jolt Physics and ImGUI for hardware
 * **CMake (>= 3.25)**: Build automation tool.
 * **Ninja**: The only supported generator.
 * **C++26 Compiler with -freflection**: Supporting C++26 standard features (GCC 16.1.1 or later).
-* **Zig's clang (optional, no `-freflection`)**: `pip install ziglang cmake ninja` and build with
+* **Zig's clang (optional, no `-freflection`)**: `pip install ziglang cmake ninja slangpy` and build with
   `./tools/build.sh --zig`. Zig ships clang plus its own libc++, so it is a complete C++26 toolchain in one
   package. It has no P2996 reflection, so the build takes the documented non-reflection fallback
   ("Using generated script for source code flattening"); everything else builds as usual.
+  Slang normally comes as a GitHub release binary; when no `slangc` is installed, the build falls back to the
+  compiler inside the `slangpy` wheel via [tools/slangc_slangpy.py](tools/slangc_slangpy.py).
 * **C23 Compiler**: Supporting C23 standard features (such as `#embed` support, but a C++26 compiler can also do `#embed`).
 * **Python**: Used during the asset building phase to scan level assets and configure the parallel build rules.
 
