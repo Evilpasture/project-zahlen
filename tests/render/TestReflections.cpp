@@ -331,57 +331,29 @@ struct ReflectionsTestSuite {
                     // the strips are not even the same width, so a shared absolute floor
                     // grades geometry rather than the reflection.
 
-                    const bool reflRedOk = ZHLN::Test::ExpectThat(
-                        reflStripRed.dominantRed * 200 > reflStripRed.pixels && reflStripRed.meanR > 1.3 * reflStripRed.meanG &&
-                            reflStripRed.meanR > 1.3 * reflStripRed.meanB,
-                        "strip 1 mirrors the red emitter", [&] {
-                            ZHLN::Println("        meanRGB=({:.1f},{:.1f},{:.1f}), dominantRed={}/{} px (need >0.5% of the strip)",
-                                reflStripRed.meanR,
-                                reflStripRed.meanG,
-                                reflStripRed.meanB,
-                                reflStripRed.dominantRed,
-                                reflStripRed.pixels);
-                        }
+                    // strip 1 mirrors the red emitter
+                    const bool reflRedOk = ZHLN::Test::ExpectTrue(
+                            reflStripRed.dominantRed * 200 > reflStripRed.pixels && reflStripRed.meanR > 1.3 * reflStripRed.meanG &&
+                            reflStripRed.meanR > 1.3 * reflStripRed.meanB
                     );
-                    const bool reflGrnOk = ZHLN::Test::ExpectThat(
-                        reflStripGrn.dominantGrn * 200 > reflStripGrn.pixels && reflStripGrn.meanG > 1.3 * reflStripGrn.meanR &&
-                            reflStripGrn.meanG > 1.3 * reflStripGrn.meanB,
-                        "strip 2 mirrors the green emitter", [&] {
-                            ZHLN::Println("        meanRGB=({:.1f},{:.1f},{:.1f}), dominantGreen={}/{} px (need >0.5% of the strip)",
-                                reflStripGrn.meanR,
-                                reflStripGrn.meanG,
-                                reflStripGrn.meanB,
-                                reflStripGrn.dominantGrn,
-                                reflStripGrn.pixels);
-                        }
+                    // strip 2 mirrors the green emitter
+                    const bool reflGrnOk = ZHLN::Test::ExpectTrue(
+                            reflStripGrn.dominantGrn * 200 > reflStripGrn.pixels && reflStripGrn.meanG > 1.3 * reflStripGrn.meanR &&
+                            reflStripGrn.meanG > 1.3 * reflStripGrn.meanB
                     );
-                    const bool reflBluOk = ZHLN::Test::ExpectThat(
-                        reflStripBlu.dominantBlu * 200 > reflStripBlu.pixels && reflStripBlu.meanB > 1.3 * reflStripBlu.meanR &&
-                            reflStripBlu.meanB > 1.3 * reflStripBlu.meanG,
-                        "strip 3 mirrors the blue emitter", [&] {
-                            ZHLN::Println("        meanRGB=({:.1f},{:.1f},{:.1f}), dominantBlue={}/{} px (need >0.5% of the strip)",
-                                reflStripBlu.meanR,
-                                reflStripBlu.meanG,
-                                reflStripBlu.meanB,
-                                reflStripBlu.dominantBlu,
-                                reflStripBlu.pixels);
-                        }
+                    // strip 3 mirrors the blue emitter
+                    const bool reflBluOk = ZHLN::Test::ExpectTrue(
+                            reflStripBlu.dominantBlu * 200 > reflStripBlu.pixels && reflStripBlu.meanB > 1.3 * reflStripBlu.meanR &&
+                            reflStripBlu.meanB > 1.3 * reflStripBlu.meanG
                     );
                     // Yellow has no single dominant channel to lean on, so its signature is
                     // the R+G mix count plus R and G clearing B by the same 1.3x the pure
                     // strips use and staying within 0.6x of each other (yellow, not amber).
-                    const bool reflYelOk = ZHLN::Test::ExpectThat(
-                        reflStripYel.yellowMix * 200 > reflStripYel.pixels && reflStripYel.meanR > 1.3 * reflStripYel.meanB &&
+                    // strip 4 mirrors the yellow emitter
+                    const bool reflYelOk = ZHLN::Test::ExpectTrue(
+                            reflStripYel.yellowMix * 200 > reflStripYel.pixels && reflStripYel.meanR > 1.3 * reflStripYel.meanB &&
                             reflStripYel.meanG > 1.3 * reflStripYel.meanB && reflStripYel.meanR > 0.6 * reflStripYel.meanG &&
-                            reflStripYel.meanG > 0.6 * reflStripYel.meanR,
-                        "strip 4 mirrors the yellow emitter", [&] {
-                            ZHLN::Println("        meanRGB=({:.1f},{:.1f},{:.1f}), yellowMix={}/{} px (need >0.5% of the strip)",
-                                reflStripYel.meanR,
-                                reflStripYel.meanG,
-                                reflStripYel.meanB,
-                                reflStripYel.yellowMix,
-                                reflStripYel.pixels);
-                        }
+                            reflStripYel.meanG > 0.6 * reflStripYel.meanR
                     );
 
                     // 2. Validate Upper Direct Emission visibility. The peak-luma guard
@@ -389,14 +361,9 @@ struct ReflectionsTestSuite {
                     // somewhere in the upper frame, not that the scene is bright.
                     const auto     upperDirect      = MeasureSubRegion(frame, {.x0 = 0.0, .y0 = 0.05, .x1 = 1.0, .y1 = 0.45});
                     const uint32_t directChroma     = upperDirect.dominantRed + upperDirect.dominantGrn + upperDirect.dominantBlu + upperDirect.yellowMix;
-                    const bool     directVisible    = ZHLN::Test::ExpectThat(
-                        upperDirect.maxLuma > 60.0 && directChroma * 1000 > upperDirect.pixels,
-                        "emitters are directly visible in the upper frame", [&] {
-                            ZHLN::Println("        maxLuma={:.1f} (need >60), chromaticPixels={}/{} px (need >0.1%)",
-                                upperDirect.maxLuma,
-                                directChroma,
-                                upperDirect.pixels);
-                        }
+                    // emitters are directly visible in the upper frame
+                    const bool     directVisible    = ZHLN::Test::ExpectTrue(
+                            upperDirect.maxLuma > 60.0 && directChroma * 1000 > upperDirect.pixels
                     );
 
                     return reflRedOk && reflGrnOk && reflBluOk && reflYelOk && directVisible;

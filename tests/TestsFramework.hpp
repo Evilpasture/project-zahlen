@@ -250,39 +250,6 @@ inline bool ExpectFalse(bool condition, std::source_location loc = std::source_l
     return false;
 }
 
-/// A named expectation with a caller-supplied description of the operands.
-///
-/// ExpectTrue files the failure against its file:line, which locates the
-/// statement but says nothing about which operand missed or by how much --
-/// fatal in a render test, where the condition is a conjunction of six
-/// statistical thresholds and "line 695 failed" does not say which one.
-///
-/// `describe` PRINTS the operands rather than returning them. ZHLN::Format
-/// hands back a FormatResult that borrows from a signal-safe pool and
-/// releases on destruction, so a string_view returned out of the lambda
-/// would dangle before anyone printed it. Printing inside keeps the result
-/// alive for exactly as long as it is needed.
-///
-///   const bool noBlackout = ZHLN::Test::ExpectThat(
-///       fullFrame.meanLuma > 1.0, "frame is not blacked out",
-///       [&] { ZHLN::Println("        meanLuma={:.2f} over {} px", fullFrame.meanLuma, fullFrame.total); }
-///   );
-///
-/// This is what the deleted ZHLN_CHECK macro did, without the macro: the
-/// defaulted source_location is evaluated at the call site, so the failure
-/// still points at the caller, and a callback sidesteps the one thing the
-/// macro was actually needed for -- a variadic pack cannot follow a
-/// defaulted parameter.
-template <typename Describe>
-[[nodiscard]] bool
-ExpectThat(bool condition, std::string_view label, Describe&& describe, std::source_location loc = std::source_location::current()) {
-    if (ExpectTrue(condition, loc)) {
-        return true;
-    }
-    ZHLN::Println("      {}[CHECK FAILED]{} {}", ZHLN::Color::Red, ZHLN::Color::Reset, label);
-    describe();
-    return false;
-}
 
 struct TestStats {
     uint32_t passed = 0;

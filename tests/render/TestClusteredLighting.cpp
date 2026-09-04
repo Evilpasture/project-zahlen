@@ -697,59 +697,28 @@ struct ClusteredLightingTestSuite {
                     // exposure/tone-map outputs, not lighting behaviour.
 
                     // 1. Quadrant Chromatic Purity
-                    const bool redDominant = ZHLN::Test::ExpectThat(
-                        quadTL.meanR > 1.3 * quadTL.meanG && quadTL.meanR > 1.3 * quadTL.meanB && quadTL.dominantRed * 100 > quadTL.pixels,
-                        "top-left quadrant is red-dominant", [&] {
-                            ZHLN::Println("        meanRGB=({:.1f},{:.1f},{:.1f}), dominantRed={}/{} px (need >1% of the quad)",
-                                quadTL.meanR,
-                                quadTL.meanG,
-                                quadTL.meanB,
-                                quadTL.dominantRed,
-                                quadTL.pixels);
-                        }
+                    // top-left quadrant is red-dominant
+                    const bool redDominant = ZHLN::Test::ExpectTrue(
+                            quadTL.meanR > 1.3 * quadTL.meanG && quadTL.meanR > 1.3 * quadTL.meanB && quadTL.dominantRed * 100 > quadTL.pixels
                     );
-                    const bool greenDominant = ZHLN::Test::ExpectThat(
-                        quadTR.meanG > 1.3 * quadTR.meanR && quadTR.meanG > 1.3 * quadTR.meanB && quadTR.dominantGrn * 100 > quadTR.pixels,
-                        "top-right quadrant is green-dominant", [&] {
-                            ZHLN::Println("        meanRGB=({:.1f},{:.1f},{:.1f}), dominantGreen={}/{} px (need >1% of the quad)",
-                                quadTR.meanR,
-                                quadTR.meanG,
-                                quadTR.meanB,
-                                quadTR.dominantGrn,
-                                quadTR.pixels);
-                        }
+                    // top-right quadrant is green-dominant
+                    const bool greenDominant = ZHLN::Test::ExpectTrue(
+                            quadTR.meanG > 1.3 * quadTR.meanR && quadTR.meanG > 1.3 * quadTR.meanB && quadTR.dominantGrn * 100 > quadTR.pixels
                     );
-                    const bool blueDominant = ZHLN::Test::ExpectThat(
-                        quadBL.meanB > 1.3 * quadBL.meanR && quadBL.meanB > 1.3 * quadBL.meanG && quadBL.dominantBlu * 100 > quadBL.pixels,
-                        "bottom-left quadrant is blue-dominant", [&] {
-                            ZHLN::Println("        meanRGB=({:.1f},{:.1f},{:.1f}), dominantBlue={}/{} px (need >1% of the quad)",
-                                quadBL.meanR,
-                                quadBL.meanG,
-                                quadBL.meanB,
-                                quadBL.dominantBlu,
-                                quadBL.pixels);
-                        }
+                    // bottom-left quadrant is blue-dominant
+                    const bool blueDominant = ZHLN::Test::ExpectTrue(
+                            quadBL.meanB > 1.3 * quadBL.meanR && quadBL.meanB > 1.3 * quadBL.meanG && quadBL.dominantBlu * 100 > quadBL.pixels
                     );
 
                     // 2. Additive Color Superposition at boundary (Red + Green -> Yellow).
                     // The pedestal sits under all four quadrants, so it must out-shine
                     // each pure quadrant in its own channel -- lights accumulating rather
                     // than the nearest one winning.
-                    const bool additiveMixing = ZHLN::Test::ExpectThat(
-                        centerMix.meanR > 1.3 * centerMix.meanB && centerMix.meanG > 1.3 * centerMix.meanB && centerMix.meanR > 0.6 * centerMix.meanG &&
+                    // quadrant boundary mixes red + green into yellow
+                    const bool additiveMixing = ZHLN::Test::ExpectTrue(
+                            centerMix.meanR > 1.3 * centerMix.meanB && centerMix.meanG > 1.3 * centerMix.meanB && centerMix.meanR > 0.6 * centerMix.meanG &&
                             centerMix.meanG > 0.6 * centerMix.meanR && centerMix.meanR > 0.5 * quadTL.meanR && centerMix.meanG > 0.5 * quadTR.meanG &&
-                            centerMix.yellowMix * 100 > centerMix.pixels,
-                        "quadrant boundary mixes red + green into yellow", [&] {
-                            ZHLN::Println(
-                                "        centerMeanRGB=({:.1f},{:.1f},{:.1f}) vs redQuad.meanR={:.1f} greenQuad.meanG={:.1f}, yellowMix={}/{} px (need >1%)",
-                                centerMix.meanR,
-                                centerMix.meanG,
-                                centerMix.meanB,
-                                quadTL.meanR,
-                                quadTR.meanG,
-                                centerMix.yellowMix,
-                                centerMix.pixels);
-                        }
+                            centerMix.yellowMix * 100 > centerMix.pixels
                     );
 
                     // 3. Coverage & headroom. "lit" counts Luma > 40, which a pure blue
@@ -759,25 +728,19 @@ struct ClusteredLightingTestSuite {
                     // hue-aware and, as a share of the sampled area, exposure-relative.
                     const uint32_t chromaticPixels = quadTL.dominantRed + quadTR.dominantGrn + quadBL.dominantBlu + centerMix.yellowMix;
                     const uint32_t sampledPixels   = quadTL.pixels + quadTR.pixels + quadBL.pixels + centerMix.pixels;
-                    const bool     lightCovered    = ZHLN::Test::ExpectThat(
-                        chromaticPixels * 10 > sampledPixels,
-                        "clustered lights cover a meaningful share of the frame", [&] {
-                            ZHLN::Println("        chromaticPixels={}/{} sampled px (need >10%)", chromaticPixels, sampledPixels);
-                        }
+                    // clustered lights cover a meaningful share of the frame
+                    const bool     lightCovered    = ZHLN::Test::ExpectTrue(
+                            chromaticPixels * 10 > sampledPixels
                     );
 
                     const FrameMetrics fullFrame         = MeasureImage(frame);
-                    const bool         noBlackout        = ZHLN::Test::ExpectThat(
-                        fullFrame.meanLuma > 1.0,
-                        "frame is not blacked out", [&] {
-                            ZHLN::Println("        meanLuma={:.2f} over {} px", fullFrame.meanLuma, fullFrame.total);
-                        }
+                    // frame is not blacked out
+                    const bool         noBlackout        = ZHLN::Test::ExpectTrue(
+                            fullFrame.meanLuma > 1.0
                     );
-                    const bool         noExtremeOverflow = ZHLN::Test::ExpectThat(
-                        fullFrame.saturated * 20 < fullFrame.total,
-                        "frame is not blown out", [&] {
-                            ZHLN::Println("        saturated={}/{} px (need <5%)", fullFrame.saturated, fullFrame.total);
-                        }
+                    // frame is not blown out
+                    const bool         noExtremeOverflow = ZHLN::Test::ExpectTrue(
+                            fullFrame.saturated * 20 < fullFrame.total
                     );
 
                     return redDominant && greenDominant && blueDominant && additiveMixing && lightCovered && noBlackout && noExtremeOverflow;
