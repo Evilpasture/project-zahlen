@@ -21,10 +21,7 @@
 #include "helpers/ImageTesting.hpp"
 #include <string_view>
 
-auto RunImGuiRenderSuite() -> ZHLN::Test::TestStats;
-auto RunUILayoutRenderSuite() -> ZHLN::Test::TestStats;
 auto RunViewmodelSuite() -> ZHLN::Test::TestStats;
-
 
 auto main(int argc, char** argv) -> int {
     // Convert frames captured by an earlier failing run instead of re-rendering.
@@ -39,9 +36,5 @@ auto main(int argc, char** argv) -> int {
     // down safely.
     const ZHLN::Test::Headless::SessionScope session;
 
-    return ZHLN::Test::Runner::RunDeferred(
-        RunImGuiRenderSuite,
-        RunUILayoutRenderSuite,
-        RunViewmodelSuite
-    );
+    return ZHLN::Test::Runner::RunDeferred(RunViewmodelSuite);
 }

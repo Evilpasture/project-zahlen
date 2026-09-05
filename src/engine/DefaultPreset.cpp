@@ -242,74 +242,88 @@ void DefaultPreset::Update(Engine& engine, float dt) {
         });
     }
 
-    // 2. IMMEDIATE-MODE NATIVE ECS 2D UI EVALUATION
+    // 2. IMMEDIATE-MODE CLAY 2D UI EVALUATION
     if (s_PopupVisible) {
-        GUI::Context ui(reg, engine.GetCurrentFrame());
+        GUI::Context ui(engine);
+        ui.BeginFrame(dt);
 
-        s_UIPopupBox = ui.Panel(
-            "FallbackUIPopupBox", GUI::PanelConfig {.width = 700.0f, .height = 440.0f, .x = 0.0f, .y = 0.0f, .gap = 14.0f, .padding = 20.0f}, [&]() -> void {
-                // Header Title (Fits perfectly at 0.70f scale)
-                ui.Label(
-                    "ZAHLEN ENGINE :: STANDALONE FALLBACK MODE",
-                    GUI::LabelConfig {.scale = 0.70f, .color = {0.3f, 0.85f, 1.0f, 1.0f}, .align = GUI::TextAlignment::Center, .height = 28.0f}
-                );
+        // Root popup box (centered 700x440 panel)
+        ui.BeginBox("FallbackUIPopupBox", GUI::BoxConfig {
+            .width     = { .fixed = 700.0f },
+            .height    = { .fixed = 440.0f },
+            .color     = { 0.08f, 0.10f, 0.14f, 0.95f },
+            .cornerRadius = { 10.0f, 10.0f, 10.0f, 10.0f },
+            .padding   = 20.0f,
+            .gap       = 14.0f,
+            .direction = GUI::Direction::Column
+        });
 
-                // Alert Toast Box
-                std::string reasonTitle = (s_Reason == FallbackReason::MissingBootScript)   ? "[WARNING] MISSING BOOT SCRIPT ('scripts/boot.lua')" :
-                                          (s_Reason == FallbackReason::MissingNativeModule) ? "[WARNING] MISSING NATIVE MODULE ('libgameplay.so')" :
-                                                                                              "[WARNING] NO GAMEPLAY MODULE DETECTED";
+        // Header title
+        ui.Text("ZAHLEN ENGINE :: STANDALONE FALLBACK MODE", 14.0f,
+                { 0.3f, 0.85f, 1.0f, 1.0f });
 
-                ui.Box(GUI::BoxConfig {.height = 72.0f, .color = {0.22f, 0.16f, 0.08f, 0.85f}, .gap = 4.0f, .padding = 10.0f}, [&]() -> void {
-                    ui.Label(reasonTitle, GUI::LabelConfig {.color = {1.0f, 0.85f, 0.3f, 1.0f}});
-                    ui.Label(s_DetailMsg, GUI::LabelConfig {.scale = 0.75f, .color = {0.9f, 0.85f, 0.7f, 1.0f}});
-                });
+        // Alert toast box
+        std::string reasonTitle =
+            (s_Reason == FallbackReason::MissingBootScript)   ? "[WARNING] MISSING BOOT SCRIPT ('scripts/boot.lua')" :
+            (s_Reason == FallbackReason::MissingNativeModule) ? "[WARNING] MISSING NATIVE MODULE ('libgameplay.so')" :
+                                                                "[WARNING] NO GAMEPLAY MODULE DETECTED";
 
-                // System Environment Inset Box
-                std::string envSummary = std::format(
-                    "Engine Version:   {}\nCompiler:         {}\nTarget Triple:    {}\nGPU Hardware:     {}", ZHLN::Version::String, Compiler,
-                    ZHLN_TARGET_TRIPLE, rc.GetGPUName()
-                );
+        ui.BeginBox("FallbackAlertBox", GUI::BoxConfig {
+            .width     = { .grow = 1.0f },
+            .height    = { .fixed = 72.0f },
+            .color     = { 0.22f, 0.16f, 0.08f, 0.85f },
+            .padding   = 10.0f,
+            .gap       = 4.0f,
+            .direction = GUI::Direction::Column
+        });
+        ui.Text(reasonTitle, 14.0f, { 1.0f, 0.85f, 0.3f, 1.0f });
+        ui.Text(s_DetailMsg, 12.0f, { 0.9f, 0.85f, 0.7f, 1.0f });
+        ui.EndBox();
 
-                ui.Box(GUI::BoxConfig {.height = 170.0f, .color = {0.05f, 0.07f, 0.11f, 0.85f}, .padding = 12.0f}, [&]() -> void {
-                    ui.Label(envSummary,
-                             GUI::LabelConfig {.scale = 0.80f, .color = {0.65f, 0.75f, 0.85f, 1.0f}, .verticalAlign = GUI::TextVerticalAlignment::Top});
-                });
-
-                // Transparent Horizontal Button Bar
-                ui.Box(
-                    GUI::BoxConfig {
-                        .height    = 48.0f,
-                        .color     = {0.0f, 0.0f, 0.0f, 0.0f},
-                        .edgeWidth = 0.0f,
-                        .direction = GUI::FlexDirection::Row,
-                        .justify   = GUI::FlexJustify::SpaceBetween,
-                        .padding   = 0.0f
-                    },
-                    [&]() -> void {
-                        s_BtnReload = ui.Button("Reload Boot", GUI::ButtonConfig {.width = 210.0f}, [&]() -> void {
-                            Log("[DefaultPreset] Reloading 'scripts/boot.lua' via Native UI...");
-                            engine.GetScriptRunner().ReloadFile("scripts/boot.lua");
-                        });
-
-                        s_BtnAnimate =
-                            ui.Button("BtnAnimate", s_AnimateScene ? "Pause Motion" : "Resume Motion", GUI::ButtonConfig {.width = 210.0f}, [&]() -> void {
-                                s_AnimateScene = !s_AnimateScene;
-                            });
-
-                        s_BtnQuit = ui.Button(
-                            "Quit Engine",
-                            GUI::ButtonConfig {.width = 210.0f, .normalColor = {0.45f, 0.16f, 0.18f, 0.95f}, .hoverColor = {0.65f, 0.22f, 0.25f, 1.0f}},
-                            [&]() -> void { engine.GetWindow().Close(); }
-                        );
-                    }
-                );
-            }
+        // System environment info box
+        std::string envSummary = std::format(
+            "Engine Version:   {}\nCompiler:         {}\nTarget Triple:    {}\nGPU Hardware:     {}",
+            ZHLN::Version::String, Compiler, ZHLN_TARGET_TRIPLE, rc.GetGPUName()
         );
-    } else {
-        // Popup hidden this frame: a teardown-only context whose destructor
-        // sweeps the root cache (collects the stale popup widgets; a failure
-        // would latch into the context status instead of aborting the frame).
-        GUI::Context(reg, engine.GetCurrentFrame());
+        ui.BeginBox("FallbackEnvBox", GUI::BoxConfig {
+            .width   = { .grow = 1.0f },
+            .height  = { .fixed = 170.0f },
+            .color   = { 0.05f, 0.07f, 0.11f, 0.85f },
+            .padding = 12.0f,
+            .direction = GUI::Direction::Column
+        });
+        ui.Text(envSummary, 12.0f, { 0.65f, 0.75f, 0.85f, 1.0f });
+        ui.EndBox();
+
+        // Button row
+        ui.BeginRow(8.0f);
+
+        if (ui.Button("Reload Boot")) {
+            Log("[DefaultPreset] Reloading 'scripts/boot.lua' via Native UI...");
+            engine.GetScriptRunner().ReloadFile("scripts/boot.lua");
+        }
+
+        if (ui.Button(s_AnimateScene ? "Pause Motion" : "Resume Motion")) {
+            s_AnimateScene = !s_AnimateScene;
+        }
+
+        if (ui.Button("Quit Engine", { 0.45f, 0.16f, 0.18f, 0.95f })) {
+            engine.GetWindow().Close();
+        }
+
+        ui.EndRow();
+
+        ui.EndBox(); // Root popup
+
+        // Render to GPU
+        ui.EndFrameAndRender(rc);
+
+        // The s_UIPopupBox / s_BtnXxx fields are kept for API compatibility
+        // but Clay has no UI entities; leave them as null.
+        s_UIPopupBox = Entity::Null();
+        s_BtnReload  = Entity::Null();
+        s_BtnAnimate = Entity::Null();
+        s_BtnQuit    = Entity::Null();
     }
 }
 

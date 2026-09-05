@@ -58,9 +58,9 @@
 #include <engine/system/TerrainSystem.hpp>
 #include <engine/system/TextureSystem.hpp>
 #include <engine/system/TransformSystem.hpp>
+#include <filesystem>
 #include <gui/UIInteractionSystem.hpp>
 #include <gui/UIRenderSystem.hpp>
-#include <filesystem>
 #include <renderdoc_app.h>
 #ifdef __linux__
 #include <dlfcn.h>
@@ -103,7 +103,7 @@ void EraseInnermost(std::vector<Engine*>& stack, Engine* engine) {
 
 } // namespace
 
-EngineContextScope::EngineContextScope(Engine& engine) : _engine(&engine) {
+EngineContextScope::EngineContextScope(Engine& engine): _engine(&engine) {
     t_ThreadEngineContexts.push_back(_engine);
 
     const std::lock_guard lock(s_GlobalEngineContextMutex);
@@ -183,7 +183,7 @@ struct EngineImpl {
     std::unique_ptr<CreativeWorksManager> assetManager;
     std::unique_ptr<ScriptRunner>         scriptRunner;
 
-    Engine::UICallback                    uiCallback = nullptr;
+    Engine::UICallback                      uiCallback = nullptr;
     std::vector<Engine::DeviceLostCallback> deviceLostCallbacks;
 
     Camera        mainCamera;
@@ -206,9 +206,9 @@ struct EngineImpl {
     // it. See InitializeDefaultScene.
     std::optional<FontAtlas> fontAtlas;
 
-    void*        gameState    = nullptr;
-    uint64_t     frameCounter = 0;
-    bool         joltAcquired = false;
+    void*    gameState    = nullptr;
+    uint64_t frameCounter = 0;
+    bool     joltAcquired = false;
     // ImGui is kept as a reference/debug overlay, not as the UI. Off by
     // default: Engine::ProcessEvents does not open an ImGui frame at all when
     // this is false, so no NewFrame, no ImGui vertex upload and no ImGui
@@ -283,10 +283,6 @@ namespace Steps {
 void Input(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
     static InputSystem inputSystem;
     inputSystem.Update(engine);
-}
-
-void UIInteraction(Engine& engine, float dt, FrameContext& /*ctx*/) {
-    UIInteractionSystem::Update(engine, dt);
 }
 
 void HostUICallback(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
@@ -420,7 +416,6 @@ void BuildFrameScheduler(Engine& engine) {
 
     scheduler.Clear();
     scheduler.Add(Phase::Input, "InputSystem", Steps::Input);
-    scheduler.Add(Phase::UI, "UIInteractionSystem", Steps::UIInteraction);
     scheduler.Add(Phase::UI, "HostUICallback", Steps::HostUICallback);
     scheduler.Add(Phase::HotReload, "ScriptAndShaderReload", Steps::HotReload);
     scheduler.Add(Phase::PlayerIntent, "PlayerInputTranslate", Steps::PlayerIntent);
@@ -1083,8 +1078,6 @@ auto Engine::InitializeDefaultScene() -> bool {
     auto& reg = GetRegistry();
 
     reg.RegisterAllComponentsIn<ZHLN::Components>();
-    // The widget types live with the GUI subsystem, so it registers them.
-    GUI::RegisterUIComponents(reg);
 
     reg.Create(
         Components::MainCameraTagComponent {}, Components::CameraComponent {},

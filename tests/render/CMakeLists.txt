@@ -33,7 +33,6 @@ function(zahlen_add_gpu_test_group TARGET_NAME TIMEOUT_SECONDS)
     target_link_libraries(${TARGET_NAME} PRIVATE
         zahlen_engine
         zahlen_render
-        imgui
         # TestMeshShaders.cpp exercises Zahlen/Meshlet.hpp (the shared cooker
         # partitioning) directly; zahlen_engine links meshoptimizer privately,
         # so the tests need their own INTERFACE include/link.
@@ -154,11 +153,8 @@ target_include_directories(GPU_Pipeline PRIVATE ${PROJECT_SOURCE_DIR}/extras)
 target_include_directories(GPU_Pipeline SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/extern/cgltf)
 target_compile_definitions(GPU_Pipeline PRIVATE ZHLN_TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 
-# ImGui, UI layout and viewmodel presentation.
 zahlen_add_gpu_test_group(GPU_Interface 180
     RunInterfaceTests.cpp
-    TestImGuiRender.cpp
-    TestUILayoutRender.cpp
     TestViewmodel.cpp
 )
 

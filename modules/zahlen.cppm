@@ -387,20 +387,11 @@ using ZHLN::PipelineHandle;
 using ZHLN::RenderContext;
 
 namespace GUI {
-using ZHLN::GUI::AppendTextVertices;
-using ZHLN::GUI::FlexAlign;
-using ZHLN::GUI::FlexDirection;
-using ZHLN::GUI::FlexJustify;
-using ZHLN::GUI::FlexWrap;
-using ZHLN::GUI::MeasureTextBounds;
-using ZHLN::GUI::StackDirection;
-using ZHLN::GUI::TextAlignment;
-using ZHLN::GUI::TextBounds;
-using ZHLN::GUI::TextVerticalAlignment;
-using ZHLN::GUI::UIGradientAxis;
-using ZHLN::GUI::UIButton;
-using ZHLN::GUI::UIJustify;
-using ZHLN::GUI::UIPlotKind;
+using ZHLN::GUI::Direction;
+using ZHLN::GUI::Alignment;
+using ZHLN::GUI::Sizing;
+using ZHLN::GUI::BoxConfig;
+using ZHLN::GUI::Context;
 } // namespace GUI
 
 // Audio

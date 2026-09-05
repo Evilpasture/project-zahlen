@@ -430,14 +430,14 @@ set(MESHOPT_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/meshoptimizer EXCLUDE_FROM_ALL SYSTEM)
 set_target_properties(meshoptimizer PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/SPIRV-Reflect)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui SYSTEM)
-set_target_properties(imgui PROPERTIES POSITION_INDEPENDENT_CODE ON)
+# add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui SYSTEM)
+# set_target_properties(imgui PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
-set(YOGA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(YOGA_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
+# set(YOGA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+# set(YOGA_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
 
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/yoga EXCLUDE_FROM_ALL SYSTEM)
+# add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/yoga EXCLUDE_FROM_ALL SYSTEM)
 
 if(APPLE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-enum-enum-conversion -Wno-deprecated-anon-enum-enum-conversion")
@@ -450,6 +450,7 @@ set(RAW_ENGINE_SOURCES
     src/engine/DefaultPreset.cpp
     src/gui/GUIContext.cpp
     src/gui/GUIEditor.cpp
+    src/gui/Text.cpp
     src/engine/graphics/RenderFrame.cpp
     src/engine/graphics/RenderGraphBuilder.cpp
     src/engine/graphics/HostBlitSwapchain.cpp
@@ -473,7 +474,6 @@ set(RAW_ENGINE_SOURCES
     src/engine/Platform.cpp
     src/engine/Console.cpp
     src/engine/Profiler.cpp
-    src/gui/Text.cpp
     src/engine/graphics/Resources.cpp
     src/engine/system/RenderSystem.cpp
     src/engine/system/GraphicsSettingsSync.cpp
@@ -498,9 +498,6 @@ set(RAW_ENGINE_SOURCES
     src/engine/system/CameraSystem.cpp
     src/engine/graphics/RenderDocInit.cpp
     src/engine/system/InteractionSystem.cpp
-    src/gui/UIRenderSystem.cpp
-    src/gui/UIInteractionSystem.cpp
-    src/gui/UIRegistration.cpp
     src/engine/WindowSurface.cpp
     src/engine/graphics/RenderProcedural.cpp
     src/engine/graphics/RenderPasses.cpp
@@ -660,10 +657,8 @@ target_link_libraries(zahlen_engine PRIVATE
     zahlen_audio
     glfw
     spirv_reflect
-    imgui
     mimalloc-static
     meshoptimizer
-    yogacore
     ${ZSTD_LIBRARY}
 )
 
@@ -683,10 +678,10 @@ target_include_directories(zahlen_engine SYSTEM PRIVATE
 )
 target_include_directories(zahlen_engine SYSTEM PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/extern/yoga
     ${CMAKE_BINARY_DIR}/generated_shaders
 )
 target_include_directories(zahlen_engine SYSTEM PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/extern/clay
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/cgltf
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/stb
     ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -735,7 +730,7 @@ endfunction()
 add_executable(zahlen
     app/main.cpp
 )
-target_link_libraries(zahlen PRIVATE zahlen_engine imgui Jolt)
+target_link_libraries(zahlen PRIVATE zahlen_engine Jolt)
 target_compile_definitions(zahlen PRIVATE JPH_DOUBLE_PRECISION)
 
 # The composition root reaches engine internals (engine/Platform.hpp,

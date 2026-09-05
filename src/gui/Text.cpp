@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // File: src/gui/Text.cpp
+#include "Text.hpp"
 #include "Zahlen/Components.hpp"
 #include <Zahlen/GUI.hpp>
 #include <Zahlen/Log.hpp>
