@@ -12,6 +12,7 @@
 #include <expected>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace ZHLN {
@@ -84,6 +85,14 @@ class ZHLN_API Window {
     bool                ReinitTTY();
 
     [[nodiscard]] const WindowInputReceiver& GetInputReceiver() const noexcept;
+
+    /// OS clipboard, UTF-8. Backed by GLFW on desktop; the TTY and headless
+    /// paths have no system clipboard, so they fall back to a per-window
+    /// buffer -- copy/paste still round-trips inside the application, it just
+    /// does not reach other programs. GetClipboardText() returns an empty
+    /// string when the clipboard is empty or holds something that is not text.
+    [[nodiscard]] std::string GetClipboardText() const;
+    void                      SetClipboardText(std::string_view text);
 
     /// @brief Registers the abstract file-drop handler.
     ///

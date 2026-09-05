@@ -161,6 +161,16 @@ namespace {
         case Right:
             return GLFW_KEY_RIGHT;
 
+        // Line / page navigation
+        case Home:
+            return GLFW_KEY_HOME;
+        case End:
+            return GLFW_KEY_END;
+        case PageUp:
+            return GLFW_KEY_PAGE_UP;
+        case PageDown:
+            return GLFW_KEY_PAGE_DOWN;
+
         default:
             return GLFW_KEY_UNKNOWN;
     }
@@ -446,6 +456,26 @@ auto Window::GetInputReceiver() const noexcept -> const WindowInputReceiver& {
 void Window::SetFileDropHandler(void (*handler)(void* userdata, const FileDrop* files, uint32_t count), void* userdata) noexcept {
     _impl->receiver.onFileDrop        = handler;
     _impl->receiver.fileDropUserdata  = userdata;
+}
+
+auto Window::GetClipboardText() const -> std::string {
+    if (_impl->handle != nullptr) {
+        // GLFW returns nullptr (and reports GLFW_FORMAT_UNAVAILABLE) when the
+        // clipboard is empty or non-text; that is an empty paste, not an error.
+        const char* text = glfwGetClipboardString(_impl->handle);
+        return (text != nullptr) ? std::string(text) : std::string();
+    }
+    return _impl->localClipboard;
+}
+
+void Window::SetClipboardText(std::string_view text) {
+    // Always keep the local copy: it is the fallback when GLFW's clipboard is
+    // unavailable (a Wayland compositor with no focus, an X server without
+    // a selection owner), and the only store on TTY / headless windows.
+    _impl->localClipboard.assign(text);
+    if (_impl->handle != nullptr) {
+        glfwSetClipboardString(_impl->handle, _impl->localClipboard.c_str());
+    }
 }
 
 auto Window::ReinitTTY() -> bool {

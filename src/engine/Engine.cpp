@@ -36,6 +36,7 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
+#include <Zahlen/gui/TextEdit.hpp>
 #include <Zahlen/gui/UIComponents.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <engine/FileWatcher.hpp>
@@ -734,107 +735,85 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
         }
     }
 
+    // Text editing for the focused UITextInputComponent lives in
+    // GUI::TextEdit (a pure function over the component) so the TTY front end
+    // and the unit tests exercise exactly what the GLFW path does. Modifier
+    // state comes from the InputStateComponent, which SetKey has already
+    // updated for this event, so Shift/Ctrl held together with the key are
+    // visible here without a separate mods parameter.
     auto onKey = [](void* userdata, KeyCode key, bool pressed) -> void {
-        auto* reg   = static_cast<ECS::Registry*>(userdata);
+        auto* impl  = static_cast<EngineImpl*>(userdata);
+        auto* reg   = &impl->registry;
         auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
         state->SetKey(static_cast<uint8_t>(key), pressed);
 
-        if (pressed) {
-            // Handle text navigation directly on focused text input components
-            for (Entity e: reg->GetEntitiesWith<GUI::UIComponents::UITextInputComponent>()) {
-                auto* inputComp = reg->Get<GUI::UIComponents::UITextInputComponent>(e);
-                if (inputComp && inputComp->isFocused) {
-                    std::string_view curr = inputComp->text;
-                    if (key == KeyCode::Backspace) {
-                        if (inputComp->selectAll) {
-                            inputComp->text.assign("");
-                            inputComp->cursorIndex = 0;
-                            inputComp->selectAll   = false;
-                            inputComp->edited      = true;
-                        } else if (inputComp->cursorIndex > 0) {
-                            std::string next = std::string(curr.substr(0, inputComp->cursorIndex - 1)) + std::string(curr.substr(inputComp->cursorIndex));
-                            inputComp->text.assign(next);
-                            inputComp->cursorIndex--;
-                            inputComp->edited = true;
-                        }
-                    } else if (key == KeyCode::Delete) {
-                        if (inputComp->selectAll) {
-                            inputComp->text.assign("");
-                            inputComp->cursorIndex = 0;
-                            inputComp->selectAll   = false;
-                            inputComp->edited      = true;
-                        } else if (inputComp->cursorIndex < curr.size()) {
-                            std::string next = std::string(curr.substr(0, inputComp->cursorIndex)) + std::string(curr.substr(inputComp->cursorIndex + 1));
-                            inputComp->text.assign(next);
-                            inputComp->edited = true;
-                        }
-                    } else if (key == KeyCode::Left) {
-                        inputComp->selectAll = false; // caret movement drops the selection
-                        if (inputComp->cursorIndex > 0) {
-                            inputComp->cursorIndex--;
-                        }
-                    } else if (key == KeyCode::Right) {
-                        inputComp->selectAll = false;
-                        if (inputComp->cursorIndex < curr.size()) {
-                            inputComp->cursorIndex++;
-                        }
-                    } else if (key == KeyCode::Enter || key == KeyCode::Escape) {
-                        // Commit/defocus: leave focus but don't clear text
-                        inputComp->isFocused = false;
-                        inputComp->selectAll = false;
-                    }
+        if (!pressed) {
+            return;
+        }
+
+        const GUI::TextEdit::Modifiers mods {
+            .shift = state->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::LShift)) || state->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::RShift)),
+            .ctrl  = state->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::LControl)) || state->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::RControl)),
+        };
+
+        // Ctrl+C/X/V go to the OS clipboard through the window. The window is
+        // created right after these callbacks are installed, so it is null
+        // only for events that cannot happen yet.
+        const GUI::TextEdit::ClipboardSink clipboard {
+            .userdata = impl,
+            .set      = [](void* ud, std::string_view text) -> void {
+                auto* ei = static_cast<EngineImpl*>(ud);
+                if (ei->window) {
+                    ei->window->SetClipboardText(text);
                 }
+            },
+            .get = [](void* ud) -> std::string {
+                auto* ei = static_cast<EngineImpl*>(ud);
+                return ei->window ? ei->window->GetClipboardText() : std::string();
+            },
+        };
+
+        for (Entity e: reg->GetEntitiesWith<GUI::UIComponents::UITextInputComponent>()) {
+            auto* inputComp = reg->Get<GUI::UIComponents::UITextInputComponent>(e);
+            if (inputComp != nullptr && inputComp->isFocused) {
+                GUI::TextEdit::HandleKey(*inputComp, key, mods, clipboard);
             }
         }
     };
 
     auto onMouseMove = [](void* userdata, float x, float y) -> void {
-        auto* reg   = static_cast<ECS::Registry*>(userdata);
+        auto* reg   = &static_cast<EngineImpl*>(userdata)->registry;
         auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
         state->ApplyLocalMotion(x, y);
     };
 
     auto onMouseScroll = [](void* userdata, float delta) -> void {
-        auto* reg   = static_cast<ECS::Registry*>(userdata);
+        auto* reg   = &static_cast<EngineImpl*>(userdata)->registry;
         auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
         state->ApplyWheel(delta);
     };
 
     auto onResize = [](void* userdata, Extent2D extent) -> void {
-        auto* reg   = static_cast<ECS::Registry*>(userdata);
+        auto* reg   = &static_cast<EngineImpl*>(userdata)->registry;
         auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
         state->ApplyResize(extent);
     };
 
     auto onChar = [](void* userdata, unsigned int codepoint) -> void {
-        auto* reg = static_cast<ECS::Registry*>(userdata);
+        auto* reg = &static_cast<EngineImpl*>(userdata)->registry;
         for (Entity e: reg->GetEntitiesWith<GUI::UIComponents::UITextInputComponent>()) {
             auto* inputComp = reg->Get<GUI::UIComponents::UITextInputComponent>(e);
-            if (inputComp && inputComp->isFocused) {
-                if (codepoint >= 32 && codepoint <= 126) {
-                    if (inputComp->selectAll) {
-                        // First key after focus gain replaces the selection:
-                        // "Default" goes away when the user types.
-                        inputComp->text.assign(std::string(1, static_cast<char>(codepoint)));
-                        inputComp->cursorIndex = 1;
-                        inputComp->selectAll   = false;
-                    } else if (inputComp->text.size() < 255) {
-                        std::string_view curr = inputComp->text;
-                        std::string      next = std::string(curr.substr(0, inputComp->cursorIndex)) + static_cast<char>(codepoint) +
-                                                std::string(curr.substr(inputComp->cursorIndex));
-                        inputComp->text.assign(next);
-                        inputComp->cursorIndex++;
-                    } else {
-                        return;
-                    }
-                    inputComp->edited = true;
-                }
+            if (inputComp != nullptr && inputComp->isFocused) {
+                GUI::TextEdit::HandleChar(*inputComp, codepoint);
             }
         }
     };
 
+    // userdata is the heap-allocated EngineImpl (stable for the engine's whole
+    // life, unlike `this`), which owns both the registry the callbacks write
+    // to and the window whose clipboard the text fields use.
     WindowInputReceiver receiver = {
-        .userdata = &_impl->registry, .onKey = onKey, .onMouseMove = onMouseMove, .onMouseScroll = onMouseScroll, .onResize = onResize, .onChar = onChar
+        .userdata = _impl.get(), .onKey = onKey, .onMouseMove = onMouseMove, .onMouseScroll = onMouseScroll, .onResize = onResize, .onChar = onChar
     };
 
     _impl->window =

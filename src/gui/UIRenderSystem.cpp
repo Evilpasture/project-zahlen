@@ -365,6 +365,57 @@ void UIRenderSystem::Update(Engine& engine) {
                 } else {
                     displayStr = std::string(raw);
                 }
+
+                // Selection highlight: one untextured quad behind the selected
+                // run, measured with the same shaper the text is drawn with so
+                // the band starts and ends exactly under the glyphs. The caret
+                // glyph is inserted at `cursor`, so the run to the right of it
+                // is measured on the display string (with the bar) to stay
+                // aligned with what is actually drawn.
+                if (input->isFocused && input->HasSelection() && activeFont != nullptr && rect != nullptr) {
+                    const size_t selStart = std::min<size_t>(input->SelectionStart(), raw.size());
+                    const size_t selEnd   = std::min<size_t>(input->SelectionEnd(), raw.size());
+                    if (selEnd > selStart) {
+                        // Display-string offsets: the caret bar shifts everything after it by one.
+                        const size_t dispStart = selStart + (cursor <= selStart ? 1 : 0);
+                        const size_t dispEnd   = selEnd + (cursor < selEnd ? 1 : 0);
+                        auto AdvanceOf = [&](std::string_view run) -> float {
+                            float w = 0.0f;
+                            for (char c: run) {
+                                uint32_t code = static_cast<uint8_t>(c);
+                                if (code < 32 || code > 127) {
+                                    code = '?';
+                                }
+                                w += activeFont->glyphs[code - 32].xadvance * text->scale;
+                            }
+                            return w;
+                        };
+                        const std::string_view disp(displayStr);
+                        const float            x0 = rect->computedAbsMinX + text->offsetX + AdvanceOf(disp.substr(0, dispStart));
+                        const float            x1 = rect->computedAbsMinX + text->offsetX + AdvanceOf(disp.substr(0, dispEnd));
+                        const float            lineH = GUI::TextLineHeight(text->scale);
+                        const float            boxH  = rect->computedAbsMaxY - rect->computedAbsMinY;
+                        const float            y0    = rect->computedAbsMinY + std::max(0.0f, (boxH - lineH) * 0.5f);
+                        const float            y1    = std::min(rect->computedAbsMaxY, y0 + lineH);
+
+                        GUI::UIComponents::UIRectComponent  selRect = *rect;
+                        selRect.computedAbsMinX                     = std::clamp(x0, rect->computedAbsMinX, rect->computedAbsMaxX);
+                        selRect.computedAbsMaxX                     = std::clamp(x1, rect->computedAbsMinX, rect->computedAbsMaxX);
+                        selRect.computedAbsMinY                     = y0;
+                        selRect.computedAbsMaxY                     = y1;
+                        GUI::UIComponents::UIPanelComponent selPanel {};
+                        selPanel.color = {0.26f, 0.46f, 0.78f, 0.55f};
+
+                        size_t startIdx = localPositions.size();
+                        localPositions.resize(startIdx + 54);
+                        localAttributes.resize(startIdx + 54);
+                        uint32_t written = GUI::AppendPanelVertices(&localPositions[startIdx], &localAttributes[startIdx], selRect, selPanel);
+                        localPositions.resize(startIdx + written);
+                        localAttributes.resize(startIdx + written);
+                        currentVertexOffset += written;
+                        QueueBatch(TextureHandle::Invalid, written, useScissor, currentScissor, false);
+                    }
+                }
             }
 
             float containerWidth  = 0.0f;

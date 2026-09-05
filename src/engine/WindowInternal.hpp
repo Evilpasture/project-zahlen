@@ -10,6 +10,7 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 #include <Zahlen/Window.hpp>
+#include <string>
 
 namespace ZHLN {
 struct Window::Impl {
@@ -21,5 +22,6 @@ struct Window::Impl {
     void*               tty_context = nullptr;
     uint32_t            width       = 0;
     uint32_t            height      = 0;
+    std::string         localClipboard; // TTY / headless stand-in for the OS clipboard
 };
 } // namespace ZHLN

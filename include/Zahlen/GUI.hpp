@@ -1031,6 +1031,13 @@ class Context {
     // synced every frame from the component (which the engine mutates
     // directly via char/key callbacks), and the component's `edited` flag
     // is consumed+cleared here.
+    //
+    // Keyboard model (GUI::TextEdit, Zahlen/gui/TextEdit.hpp): Left/Right,
+    // Home/End, Ctrl+Left/Right word jumps, Shift+any of those to select,
+    // Ctrl+A select all, Ctrl+C/X/V through the OS clipboard, Backspace/
+    // Delete (Ctrl+ for whole words), Enter/Escape to commit. Focus gain
+    // selects the whole text so typing replaces it. The renderer draws the
+    // selection as a translucent band behind the glyphs.
     template <typename StringT>
     auto TextInput(std::string_view id, std::string_view label, StringT& value, const TextInputConfig& cfg) -> Entity {
         Entity   parent = GetCurrentParent();
@@ -1081,7 +1088,7 @@ class Context {
         if (!input->isFocused && externalText != currentText) {
             input->text.assign(externalText);
             input->cursorIndex = static_cast<uint32_t>(externalText.size());
-            input->selectAll   = false;
+            input->ClearSelection();
             currentText = std::string_view(input->text);
         }
 
@@ -1094,6 +1101,9 @@ class Context {
         // Keep cursor state sensible
         if (input->cursorIndex > currentText.size()) {
             input->cursorIndex = static_cast<uint32_t>(currentText.size());
+        }
+        if (input->selectionAnchor > currentText.size()) {
+            input->selectionAnchor = static_cast<uint32_t>(currentText.size());
         }
 
         return e;
