@@ -41,6 +41,8 @@ struct BoxConfig {
 
 class ZHLN_API Context {
   public:
+    struct Impl;
+
     explicit Context(Engine& engine) noexcept;
     ~Context() noexcept;
 
@@ -138,8 +140,7 @@ class ZHLN_API Context {
     }
 
   private:
-    struct Impl;
-    std::shared_ptr<Impl> _impl;
+    Impl* _impl = nullptr;
 };
 
 } // namespace ZHLN::GUI
