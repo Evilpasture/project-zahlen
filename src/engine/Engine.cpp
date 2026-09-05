@@ -419,13 +419,13 @@ void BuildFrameScheduler(Engine& engine) {
     scheduler.Add(Phase::PlayerIntent, "PlayerInputTranslate", Steps::PlayerIntent);
     scheduler.Add(Phase::Physics, "PhysicsSystem", Steps::Physics);
     scheduler.Add(Phase::Gameplay, "GameplayModule", Steps::Gameplay);
+    scheduler.Add(Phase::Fallback, "DefaultPreset", Steps::Fallback);
     scheduler.Add(Phase::Simulation, "UpdateGraph", Steps::UpdateGraph);
     scheduler.Add(Phase::Simulation, "MainECBPlayback", Steps::CommandPlayback);
     scheduler.Add(Phase::Camera, "CameraSystems", Steps::Camera);
     scheduler.Add(Phase::Camera, "LODSystem", Steps::LOD);
     scheduler.Add(Phase::Visibility, "RenderGraph", Steps::RenderGraph);
     scheduler.Add(Phase::Present, "RenderSystem", Steps::Present);
-    scheduler.Add(Phase::Fallback, "DefaultPreset", Steps::Fallback);
     scheduler.Add(Phase::History, "TransformHistory", Steps::TransformHistory);
 }
 

@@ -1009,7 +1009,7 @@ void RenderContext::SubmitUI(
     const VertexAttributes* attributes,
     uint32_t                vertexCount
 ) noexcept {
-    if (batchCount == 0 || vertexCount == 0 || _impl->current_cmd == VK_NULL_HANDLE) {
+    if (batchCount == 0 || vertexCount == 0) {
         return;
     }
 
