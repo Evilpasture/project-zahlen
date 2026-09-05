@@ -3,7 +3,7 @@
 
 # src/gui/CMakeLists.txt
 
-add_library(zahlen_gui STATIC
+add_library(zahlen_gui OBJECT
     GUIContext.cpp
     GUIEditor.cpp
     Text.cpp

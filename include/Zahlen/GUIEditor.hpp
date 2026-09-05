@@ -29,6 +29,7 @@
 
 #pragma once
 
+#include <Zahlen/Common.h>
 #include <Zahlen/Entity.hpp>
 #include <string_view>
 
@@ -61,7 +62,7 @@ struct EditorState {
 ///
 /// NOTE: `reg` is separate from `gui` because the new Clay-based GUI::Context
 /// is stateless w.r.t. the ECS — the editor reads the registry directly.
-void DrawHierarchyPanel(
+ZHLN_API void DrawHierarchyPanel(
     ZHLN::GUI::Context&    gui,
     ZHLN::ECS::Registry&   reg,
     EditorState&           state,
@@ -73,7 +74,7 @@ void DrawHierarchyPanel(
 /// With no live selection the panel shows a "No selection" placeholder.
 ///
 /// NOTE: `reg` is separate from `gui` for the same reason as above.
-void DrawInspectorPanel(
+ZHLN_API void DrawInspectorPanel(
     ZHLN::GUI::Context&    gui,
     ZHLN::ECS::Registry&   reg,
     EditorState&           state,
