@@ -158,13 +158,22 @@ Clay_ChildAlignment ToClayChildAlignment(const BoxConfig& cfg) noexcept {
     }
 }
 
+struct GUIContextSingleton {
+    std::shared_ptr<Context::Impl> impl;
+};
+
 } // namespace
 
 // ============================================================================
 // Lifecycle Methods
 // ============================================================================
 
-Context::Context(Engine& engine) noexcept: _impl(std::make_unique<Impl>(engine)) {
+Context::Context(Engine& engine) noexcept {
+    auto& singleton = engine.GetRegistry().GetOrEmplaceSingleton<GUIContextSingleton>();
+    if (!singleton.impl) {
+        singleton.impl = std::make_shared<Impl>(engine);
+    }
+    _impl = singleton.impl;
 }
 
 Context::~Context() noexcept                    = default;

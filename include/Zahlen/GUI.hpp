@@ -44,10 +44,10 @@ class ZHLN_API Context {
     explicit Context(Engine& engine) noexcept;
     ~Context() noexcept;
 
-    Context(const Context&)            = delete;
-    Context& operator=(const Context&) = delete;
-    Context(Context&&) noexcept;
-    Context& operator=(Context&&) noexcept;
+    Context(const Context&)            = default;
+    Context& operator=(const Context&) = default;
+    Context(Context&&) noexcept        = default;
+    Context& operator=(Context&&) noexcept = default;
 
     // --- Frame Lifecycle ---
     void BeginFrame(float dt) noexcept;
@@ -139,7 +139,7 @@ class ZHLN_API Context {
 
   private:
     struct Impl;
-    std::unique_ptr<Impl> _impl;
+    std::shared_ptr<Impl> _impl;
 };
 
 } // namespace ZHLN::GUI
