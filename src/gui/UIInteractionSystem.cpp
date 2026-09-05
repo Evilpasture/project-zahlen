@@ -442,8 +442,15 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
                             if (nowFocused && !inputComp->isFocused) {
                                 // Focus gain selects the pre-focus content so
                                 // typing replaces it instead of appending to it.
-                                inputComp->selectAll   = true;
-                                inputComp->cursorIndex = 0;
+                                // Caret parks at the end (anchor at 0) so a
+                                // Shift+Left after focusing shrinks the
+                                // selection from the right, as editors do.
+                                inputComp->selectAll       = true;
+                                inputComp->selectionAnchor = 0;
+                                inputComp->cursorIndex     = static_cast<uint32_t>(inputComp->text.size());
+                            }
+                            if (!nowFocused && inputComp->isFocused) {
+                                inputComp->ClearSelection();
                             }
                             inputComp->isFocused = nowFocused;
                         }
@@ -490,6 +497,9 @@ void UIInteractionSystem::Update(Engine& engine, float dt) {
     if (leftMouseDown && !focusCaptured) {
         for (Entity e: reg.GetEntitiesWith<GUI::UIComponents::UITextInputComponent>()) {
             if (auto* inputComp = reg.Get<GUI::UIComponents::UITextInputComponent>(e)) {
+                if (inputComp->isFocused) {
+                    inputComp->ClearSelection();
+                }
                 inputComp->isFocused = false;
             }
         }

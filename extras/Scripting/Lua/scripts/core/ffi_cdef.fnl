@@ -381,8 +381,11 @@
       typedef struct UITextInputComponent {
           String256 text;
           uint32_t cursorIndex;
+          uint32_t selectionAnchor;
           bool isFocused;
-          char _pad[3];
+          bool edited;
+          bool selectAll;
+          char _pad[1];
       } UITextInputComponent;
 
       typedef struct UIStyleComponent {

@@ -197,6 +197,16 @@ TTYState* g_CrashState = nullptr;
         case Right:
             return KEY_RIGHT;
 
+        // Line / page navigation
+        case Home:
+            return KEY_HOME;
+        case End:
+            return KEY_END;
+        case PageUp:
+            return KEY_PAGEUP;
+        case PageDown:
+            return KEY_PAGEDOWN;
+
         // Mouse Buttons
         case LButton:
             return BTN_LEFT;
