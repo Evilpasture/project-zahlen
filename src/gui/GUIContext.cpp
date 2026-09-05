@@ -46,6 +46,9 @@ struct Context::Impl {
     }
 
     ~Impl() noexcept {
+        if (Clay_GetCurrentContext() == clayContext) {
+            Clay_SetCurrentContext(nullptr);
+        }
         clayContext = nullptr;
     }
 
@@ -126,6 +129,7 @@ void Context::BeginFrame(float dt) noexcept {
 
     // Lazily allocate Clay memory arena on this instance once
     if (!_impl->clayContext) {
+        Clay_SetCurrentContext(nullptr);
         Clay_SetMaxElementCount(8192);
         Clay_SetMaxMeasureTextCacheWordCount(8192);
         uint64_t memSize = Clay_MinMemorySize();

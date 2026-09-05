@@ -20,7 +20,6 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
-#include <gui/UIRenderSystem.hpp>
 #include <physics/PhysicsDebug.hpp>
 
 namespace ZHLN {

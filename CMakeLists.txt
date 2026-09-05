@@ -448,9 +448,6 @@ endif()
 set(RAW_ENGINE_SOURCES
     src/engine/AssertHandler.cpp
     src/engine/DefaultPreset.cpp
-    src/gui/GUIContext.cpp
-    src/gui/GUIEditor.cpp
-    src/gui/Text.cpp
     src/engine/graphics/RenderFrame.cpp
     src/engine/graphics/RenderGraphBuilder.cpp
     src/engine/graphics/HostBlitSwapchain.cpp
@@ -540,6 +537,7 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/threading)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/physics)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/ecs)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/audio)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/gui)
 
 # --- ASSEMBLE COMPILER FLAGS METADATA ---
 set(COMPILER_FLAGS_LIST "${CMAKE_CXX_FLAGS}")
@@ -655,6 +653,7 @@ target_link_libraries(zahlen_engine PRIVATE
     zahlen_threading
     zahlen_ecs
     zahlen_audio
+    zahlen_gui
     glfw
     spirv_reflect
     mimalloc-static

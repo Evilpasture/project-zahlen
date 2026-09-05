@@ -59,8 +59,6 @@
 #include <engine/system/TextureSystem.hpp>
 #include <engine/system/TransformSystem.hpp>
 #include <filesystem>
-#include <gui/UIInteractionSystem.hpp>
-#include <gui/UIRenderSystem.hpp>
 #include <renderdoc_app.h>
 #ifdef __linux__
 #include <dlfcn.h>
