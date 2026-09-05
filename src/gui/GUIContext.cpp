@@ -197,7 +197,7 @@ void Context::BeginFrame(float dt) noexcept {
         _impl->arenaMemory.resize(memSize);
         _impl->clayArena   = Clay_CreateArenaWithCapacityAndMemory(memSize, _impl->arenaMemory.data());
         _impl->clayContext = Clay_Initialize(_impl->clayArena, {static_cast<float>(winSize.width), static_cast<float>(winSize.height)}, {});
-        Clay_SetMeasureTextFunction(Impl::MeasureText, _impl.get());
+        Clay_SetMeasureTextFunction(Impl::MeasureText, _impl);
     }
 
     Clay_SetCurrentContext(_impl->clayContext);
