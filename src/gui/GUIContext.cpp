@@ -76,10 +76,32 @@ struct Context::Impl {
         if (!impl || !impl->activeFont || text.length == 0)
             return {0.0f, 0.0f};
 
-        std::string_view sv(text.chars, static_cast<size_t>(text.length));
-        float            scale  = static_cast<float>(config->fontSize) / 32.0f;
-        auto             bounds = MeasureTextBounds(*impl->activeFont, sv, scale);
-        return {bounds.width(), bounds.height()};
+        float scale      = static_cast<float>(config->fontSize) / 32.0f;
+        float currentX   = 0.0f;
+        float maxX       = 0.0f;
+        float lineHeight = TextLineHeight(scale);
+        float totalH     = lineHeight;
+
+        for (int32_t i = 0; i < text.length; ++i) {
+            char c = text.chars[i];
+            if (c == '\n') {
+                maxX     = std::max(maxX, currentX);
+                currentX = 0.0f;
+                totalH  += lineHeight;
+                continue;
+            }
+            if (c == '\r') {
+                continue;
+            }
+            uint32_t glyphCode = static_cast<uint8_t>(c);
+            if (glyphCode < 32 || glyphCode > 127) {
+                glyphCode = '?';
+            }
+            const auto& g = impl->activeFont->glyphs[glyphCode - 32];
+            currentX += g.xadvance * scale;
+        }
+        maxX = std::max(maxX, currentX);
+        return {maxX, totalH};
     }
 };
 
@@ -322,7 +344,7 @@ void Context::EndBox() noexcept {
 }
 
 void Context::BeginRow(float gap, float padding) noexcept {
-    BeginBox("", {.width = {.grow = 1.0f}, .padding = padding, .gap = gap, .direction = Direction::Row});
+    BeginBox("", {.width = {.grow = 1.0f}, .padding = padding, .gap = gap, .direction = Direction::Row, .alignCross = Alignment::Center});
 }
 
 void Context::EndRow() noexcept {
@@ -355,7 +377,11 @@ bool Context::Button(std::string_view label, const JPH::Vec4& color) noexcept {
 
     Clay__OpenElementWithId(elemId);
     Clay_ElementDeclaration decl = {
-        .layout          = {.padding = {16, 16, 8, 8}},
+        .layout = {
+            .padding         = {16, 16, 8, 8},
+            .childAlignment  = {.x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER},
+            .layoutDirection = CLAY_LEFT_TO_RIGHT
+        },
         .backgroundColor = Clay_Hovered() ? ToClayColor(color + JPH::Vec4(0.1f, 0.1f, 0.1f, 0.0f)) : ToClayColor(color),
         .cornerRadius    = {4, 4, 4, 4}
     };
@@ -382,7 +408,10 @@ bool Context::Checkbox(std::string_view label, bool& checked) noexcept {
 
     Clay__OpenElementWithId(elemId);
     Clay_ElementDeclaration decl = {
-        .layout          = {.sizing = {.width = CLAY_SIZING_FIXED(20), .height = CLAY_SIZING_FIXED(20)}},
+        .layout = {
+            .sizing         = {.width = CLAY_SIZING_FIXED(20), .height = CLAY_SIZING_FIXED(20)},
+            .childAlignment = {.x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER}
+        },
         .backgroundColor = Clay_Hovered() ? Clay_Color {45, 60, 85, 255} : Clay_Color {25, 35, 50, 255},
         .cornerRadius    = {3, 3, 3, 3}
     };
@@ -397,7 +426,7 @@ bool Context::Checkbox(std::string_view label, bool& checked) noexcept {
     if (checked) {
         Clay__OpenElement();
         Clay_ElementDeclaration mark = {
-            .layout          = {.sizing = {.width = CLAY_SIZING_FIXED(12), .height = CLAY_SIZING_FIXED(12)}, .padding = {4, 0, 4, 0}},
+            .layout          = {.sizing = {.width = CLAY_SIZING_FIXED(12), .height = CLAY_SIZING_FIXED(12)}},
             .backgroundColor = {80, 160, 255, 255},
             .cornerRadius    = {2, 2, 2, 2}
         };
@@ -427,7 +456,11 @@ bool Context::Slider(std::string_view label, float& value, float minVal, float m
 
     Clay__OpenElementWithId(elemId);
     Clay_ElementDeclaration trackDecl = {
-        .layout          = {.sizing = {.width = CLAY_SIZING_FIXED(150), .height = CLAY_SIZING_FIXED(20)}, .padding = {2, 2, 2, 2}},
+        .layout = {
+            .sizing         = {.width = CLAY_SIZING_FIXED(150), .height = CLAY_SIZING_FIXED(20)},
+            .padding        = {2, 2, 2, 2},
+            .childAlignment = {.x = CLAY_ALIGN_X_LEFT, .y = CLAY_ALIGN_Y_CENTER}
+        },
         .backgroundColor = Clay_Hovered() ? Clay_Color {45, 60, 85, 255} : Clay_Color {25, 35, 50, 255},
         .cornerRadius    = {4, 4, 4, 4}
     };
@@ -496,6 +529,7 @@ bool Context::BeginCollapsingHeader(std::string_view label, bool defaultOpen) no
             {.sizing          = {.width = CLAY_SIZING_GROW(), .height = CLAY_SIZING_FIXED(28)},
              .padding         = {8, 8, 4, 4},
              .childGap        = 8,
+             .childAlignment  = {.x = CLAY_ALIGN_X_LEFT, .y = CLAY_ALIGN_Y_CENTER},
              .layoutDirection = CLAY_LEFT_TO_RIGHT},
         .backgroundColor = Clay_Hovered() ? Clay_Color {45, 60, 85, 255} : Clay_Color {30, 40, 58, 255},
         .cornerRadius    = {4, 4, 4, 4}
