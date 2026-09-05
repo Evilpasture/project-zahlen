@@ -372,8 +372,16 @@ void Present(Engine& engine, float dt, FrameContext& ctx) {
     auto render_res = RenderSystem::Update(engine, dt);
     if (!render_res) {
         if (render_res.error().Is<RenderFrameResult>() && render_res.error().As<RenderFrameResult>() == RenderFrameResult::DeviceLost) {
-            [[maybe_unused]] auto _ = engine.HandleDeviceLost();
-            ctx.deviceLost          = true;
+            // HandleDeviceLost tears the RenderContext down before rebuilding
+            // it. If the rebuild fails the engine has no context at all, and
+            // the next Present would dereference null; report it as a fatal
+            // frame status and close the window so the host loop exits.
+            if (auto lost_res = engine.HandleDeviceLost(); !lost_res) {
+                ZHLN::Log("[Engine] Fatal: GPU device recovery failed: {}", lost_res.error().Message());
+                ctx.status = GameplayStatus::Error;
+                engine.GetWindow().Close();
+            }
+            ctx.deviceLost = true;
         }
     }
 }
@@ -940,8 +948,11 @@ auto Engine::BeginFrame(bool& outDeviceLost) noexcept -> bool {
     if (!res) {
         if (res.error() == RenderFrameResult::DeviceLost) {
             outDeviceLost = true;
-            {
-                [[maybe_unused]] auto _ = HandleDeviceLost();
+            // Same contract as Steps::Present: a failed rebuild leaves no
+            // RenderContext, so the window is closed to stop the host loop.
+            if (auto lost_res = HandleDeviceLost(); !lost_res) {
+                ZHLN::Log("[Engine] Fatal: GPU device recovery failed: {}", lost_res.error().Message());
+                _impl->window->Close();
             }
         }
         return false;
@@ -955,8 +966,9 @@ auto Engine::EndFrame(bool& outDeviceLost) noexcept -> bool {
     if (!res) {
         if (res.error() == RenderFrameResult::DeviceLost) {
             outDeviceLost = true;
-            {
-                [[maybe_unused]] auto _ = HandleDeviceLost();
+            if (auto lost_res = HandleDeviceLost(); !lost_res) {
+                ZHLN::Log("[Engine] Fatal: GPU device recovery failed: {}", lost_res.error().Message());
+                _impl->window->Close();
             }
         }
         return false;
