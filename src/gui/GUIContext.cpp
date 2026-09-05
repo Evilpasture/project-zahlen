@@ -39,8 +39,10 @@ struct Context::Impl {
     Clay_Arena                           clayArena   = {};
     std::vector<std::byte>               arenaMemory;
     ZHLN::HashMap<uint64_t, WidgetState> widgetStates;
-    const FontAtlas*                     activeFont = nullptr;
-    float                                lastDt     = 0.016667f;
+    const FontAtlas*                     activeFont      = nullptr;
+    float                                lastDt          = 0.016667f;
+    bool                                 lastItemHovered = false;
+    bool                                 lastItemActive  = false;
 
     explicit Impl(Engine& eng) noexcept: engine(eng) {
     }
@@ -390,13 +392,26 @@ bool Context::Button(std::string_view label, const JPH::Vec4& color, const Sizin
 
     Text(label, 16.0f, {0.95f, 0.95f, 1.0f, 1.0f});
 
-    auto pointer = Clay_GetPointerState();
-    if (Clay_Hovered() && (pointer.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME || pointer.state == CLAY_POINTER_DATA_PRESSED)) {
+    bool isHovered = Clay_Hovered();
+    auto pointer   = Clay_GetPointerState();
+    bool isDown    = (pointer.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME || pointer.state == CLAY_POINTER_DATA_PRESSED);
+    if (isHovered && isDown) {
         clicked = true;
     }
 
+    _impl->lastItemHovered = isHovered;
+    _impl->lastItemActive  = isHovered && isDown;
+
     Clay__CloseElement();
     return clicked;
+}
+
+bool Context::IsItemHovered() const noexcept {
+    return _impl ? _impl->lastItemHovered : false;
+}
+
+bool Context::IsItemActive() const noexcept {
+    return _impl ? _impl->lastItemActive : false;
 }
 
 bool Context::Checkbox(std::string_view label, bool& checked) noexcept {
@@ -418,11 +433,15 @@ bool Context::Checkbox(std::string_view label, bool& checked) noexcept {
     };
     Clay__ConfigureOpenElement(decl);
 
-    auto pointer = Clay_GetPointerState();
-    if (Clay_Hovered() && pointer.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME) {
+    bool isHovered = Clay_Hovered();
+    auto pointer   = Clay_GetPointerState();
+    if (isHovered && pointer.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME) {
         checked = !checked;
         changed = true;
     }
+
+    _impl->lastItemHovered = isHovered;
+    _impl->lastItemActive  = isHovered && (pointer.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME || pointer.state == CLAY_POINTER_DATA_PRESSED);
 
     if (checked) {
         Clay__OpenElement();

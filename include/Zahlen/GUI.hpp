@@ -94,6 +94,34 @@ class ZHLN_API Context {
     bool Button(std::string_view label, const Sizing& width) noexcept {
         return Button(label, {0.16f, 0.24f, 0.36f, 0.95f}, width);
     }
+
+    template <typename OnClickFn>
+        requires std::invocable<OnClickFn>
+    bool Button(std::string_view label, OnClickFn&& onClick) {
+        if (Button(label)) {
+            onClick();
+            return true;
+        }
+        return false;
+    }
+
+    template <typename OnClickFn, typename OnHoverFn>
+        requires std::invocable<OnClickFn> && std::invocable<OnHoverFn>
+    bool Button(std::string_view label, OnClickFn&& onClick, OnHoverFn&& onHover) {
+        bool clicked = Button(label);
+        if (IsItemHovered()) {
+            onHover();
+        }
+        if (clicked) {
+            onClick();
+        }
+        return clicked;
+    }
+
+    // --- State Inspection ---
+    [[nodiscard]] bool IsItemHovered() const noexcept;
+    [[nodiscard]] bool IsItemActive() const noexcept;
+
     bool Checkbox(std::string_view label, bool& checked) noexcept;
     bool Slider(std::string_view label, float& value, float minVal, float maxVal) noexcept;
 
