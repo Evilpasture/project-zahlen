@@ -378,8 +378,8 @@ bool Context::Button(std::string_view label, const JPH::Vec4& color, const Sizin
     Clay__OpenElementWithId(elemId);
     Clay_ElementDeclaration decl = {
         .layout = {
-            .sizing          = {.width = ToClaySizing(width), .height = CLAY_SIZING_FIXED(38)},
-            .padding         = {20, 20, 8, 8},
+            .sizing          = {.width = ToClaySizing(width), .height = CLAY_SIZING_FIXED(44)},
+            .padding         = {24, 24, 10, 10},
             .childAlignment  = {.x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER},
             .layoutDirection = CLAY_LEFT_TO_RIGHT
         },
@@ -388,7 +388,7 @@ bool Context::Button(std::string_view label, const JPH::Vec4& color, const Sizin
     };
     Clay__ConfigureOpenElement(decl);
 
-    Text(label, 14.0f, {0.95f, 0.95f, 1.0f, 1.0f});
+    Text(label, 16.0f, {0.95f, 0.95f, 1.0f, 1.0f});
 
     auto pointer = Clay_GetPointerState();
     if (Clay_Hovered() && (pointer.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME || pointer.state == CLAY_POINTER_DATA_PRESSED)) {
@@ -410,11 +410,11 @@ bool Context::Checkbox(std::string_view label, bool& checked) noexcept {
     Clay__OpenElementWithId(elemId);
     Clay_ElementDeclaration decl = {
         .layout = {
-            .sizing         = {.width = CLAY_SIZING_FIXED(20), .height = CLAY_SIZING_FIXED(20)},
+            .sizing         = {.width = CLAY_SIZING_FIXED(22), .height = CLAY_SIZING_FIXED(22)},
             .childAlignment = {.x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER}
         },
         .backgroundColor = Clay_Hovered() ? Clay_Color {45, 60, 85, 255} : Clay_Color {25, 35, 50, 255},
-        .cornerRadius    = {3, 3, 3, 3}
+        .cornerRadius    = {4, 4, 4, 4}
     };
     Clay__ConfigureOpenElement(decl);
 
@@ -427,7 +427,7 @@ bool Context::Checkbox(std::string_view label, bool& checked) noexcept {
     if (checked) {
         Clay__OpenElement();
         Clay_ElementDeclaration mark = {
-            .layout          = {.sizing = {.width = CLAY_SIZING_FIXED(12), .height = CLAY_SIZING_FIXED(12)}},
+            .layout          = {.sizing = {.width = CLAY_SIZING_FIXED(14), .height = CLAY_SIZING_FIXED(14)}},
             .backgroundColor = {80, 160, 255, 255},
             .cornerRadius    = {2, 2, 2, 2}
         };
@@ -437,7 +437,7 @@ bool Context::Checkbox(std::string_view label, bool& checked) noexcept {
 
     Clay__CloseElement();
 
-    Text(label, 14.0f, {0.9f, 0.9f, 0.9f, 1.0f});
+    Text(label, 16.0f, {0.9f, 0.9f, 0.9f, 1.0f});
 
     EndRow();
     return changed;
@@ -453,12 +453,12 @@ bool Context::Slider(std::string_view label, float& value, float minVal, float m
     auto&    state    = _impl->GetState(stateKey, _impl->engine.GetCurrentFrame());
 
     BeginRow(8.0f);
-    Text(label, 14.0f, {0.9f, 0.9f, 0.9f, 1.0f});
+    Text(label, 15.0f, {0.9f, 0.9f, 0.9f, 1.0f});
 
     Clay__OpenElementWithId(elemId);
     Clay_ElementDeclaration trackDecl = {
         .layout = {
-            .sizing         = {.width = CLAY_SIZING_FIXED(150), .height = CLAY_SIZING_FIXED(20)},
+            .sizing         = {.width = CLAY_SIZING_FIXED(160), .height = CLAY_SIZING_FIXED(22)},
             .padding        = {2, 2, 2, 2},
             .childAlignment = {.x = CLAY_ALIGN_X_LEFT, .y = CLAY_ALIGN_Y_CENTER}
         },
@@ -490,7 +490,7 @@ bool Context::Slider(std::string_view label, float& value, float minVal, float m
     }
 
     float frac      = (maxVal > minVal) ? std::clamp((value - minVal) / (maxVal - minVal), 0.0f, 1.0f) : 0.0f;
-    float fillWidth = std::max(4.0f, frac * 146.0f);
+    float fillWidth = std::max(4.0f, frac * 156.0f);
     Clay__OpenElement();
     Clay_ElementDeclaration fillDecl = {
         .layout          = {.sizing = {.width = CLAY_SIZING_FIXED(fillWidth), .height = CLAY_SIZING_GROW()}},
@@ -504,7 +504,7 @@ bool Context::Slider(std::string_view label, float& value, float minVal, float m
 
     char valBuf[32];
     std::snprintf(valBuf, sizeof(valBuf), "%.2f", static_cast<double>(value));
-    Text(valBuf, 12.0f, {0.7f, 0.7f, 0.7f, 1.0f});
+    Text(valBuf, 14.0f, {0.7f, 0.7f, 0.7f, 1.0f});
 
     EndRow();
     return changed;
@@ -527,8 +527,8 @@ bool Context::BeginCollapsingHeader(std::string_view label, bool defaultOpen) no
     Clay__OpenElementWithId(elemId);
     Clay_ElementDeclaration headerDecl = {
         .layout =
-            {.sizing          = {.width = CLAY_SIZING_GROW(), .height = CLAY_SIZING_FIXED(28)},
-             .padding         = {8, 8, 4, 4},
+            {.sizing          = {.width = CLAY_SIZING_GROW(), .height = CLAY_SIZING_FIXED(32)},
+             .padding         = {10, 10, 6, 6},
              .childGap        = 8,
              .childAlignment  = {.x = CLAY_ALIGN_X_LEFT, .y = CLAY_ALIGN_Y_CENTER},
              .layoutDirection = CLAY_LEFT_TO_RIGHT},
@@ -541,8 +541,8 @@ bool Context::BeginCollapsingHeader(std::string_view label, bool defaultOpen) no
         state.isOpen = !state.isOpen;
     }
 
-    Text(state.isOpen ? "v" : ">", 14.0f, {0.8f, 0.8f, 0.8f, 1.0f});
-    Text(label, 14.0f, {1.0f, 1.0f, 1.0f, 1.0f});
+    Text(state.isOpen ? "v" : ">", 15.0f, {0.8f, 0.8f, 0.8f, 1.0f});
+    Text(label, 15.0f, {1.0f, 1.0f, 1.0f, 1.0f});
 
     Clay__CloseElement(); // Header bar
 

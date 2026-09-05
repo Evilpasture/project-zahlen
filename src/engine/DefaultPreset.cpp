@@ -257,20 +257,20 @@ void DefaultPreset::Update(Engine& engine, float dt) {
             .alignCross = GUI::Alignment::Center
         });
 
-        // Root popup box (centered 660px panel, auto-fit height)
+        // Root popup box (centered 720px panel, auto-fit height)
         ui.BeginBox("FallbackUIPopupBox", GUI::BoxConfig {
-            .width        = { .fixed = 660.0f },
+            .width        = { .fixed = 720.0f },
             .height       = {},
             .color        = { 0.08f, 0.10f, 0.14f, 0.96f },
             .cornerRadius = { 10.0f, 10.0f, 10.0f, 10.0f },
-            .padding      = 22.0f,
-            .gap          = 14.0f,
+            .padding      = 24.0f,
+            .gap          = 16.0f,
             .direction    = GUI::Direction::Column
         });
 
         // Header title
-        ui.Text("ZAHLEN ENGINE :: STANDALONE FALLBACK MODE", 14.0f,
-                { 0.3f, 0.85f, 1.0f, 1.0f });
+        ui.Text("ZAHLEN ENGINE :: STANDALONE FALLBACK MODE", 18.0f,
+                { 0.35f, 0.88f, 1.0f, 1.0f });
 
         // Alert toast box
         std::string reasonTitle =
@@ -283,12 +283,12 @@ void DefaultPreset::Update(Engine& engine, float dt) {
             .height       = {},
             .color        = { 0.22f, 0.16f, 0.08f, 0.85f },
             .cornerRadius = { 6.0f, 6.0f, 6.0f, 6.0f },
-            .padding      = 12.0f,
-            .gap          = 4.0f,
+            .padding      = 14.0f,
+            .gap          = 6.0f,
             .direction    = GUI::Direction::Column
         });
-        ui.Text(reasonTitle, 14.0f, { 1.0f, 0.85f, 0.3f, 1.0f });
-        ui.Text(s_DetailMsg, 12.0f, { 0.9f, 0.85f, 0.7f, 1.0f });
+        ui.Text(reasonTitle, 16.0f, { 1.0f, 0.85f, 0.3f, 1.0f });
+        ui.Text(s_DetailMsg, 14.0f, { 0.92f, 0.88f, 0.78f, 1.0f });
         ui.EndBox();
 
         // System environment info box
@@ -301,14 +301,14 @@ void DefaultPreset::Update(Engine& engine, float dt) {
             .height       = {},
             .color        = { 0.05f, 0.07f, 0.11f, 0.85f },
             .cornerRadius = { 6.0f, 6.0f, 6.0f, 6.0f },
-            .padding      = 12.0f,
+            .padding      = 14.0f,
             .direction    = GUI::Direction::Column
         });
-        ui.Text(envSummary, 12.0f, { 0.65f, 0.75f, 0.85f, 1.0f });
+        ui.Text(envSummary, 14.0f, { 0.78f, 0.85f, 0.92f, 1.0f });
         ui.EndBox();
 
         // Button row
-        ui.BeginRow(10.0f);
+        ui.BeginRow(12.0f);
 
         if (ui.Button("Reload Boot", GUI::Sizing { .grow = 1.0f })) {
             Log("[DefaultPreset] Reloading 'scripts/boot.lua' via Native UI...");
