@@ -257,15 +257,15 @@ void DefaultPreset::Update(Engine& engine, float dt) {
             .alignCross = GUI::Alignment::Center
         });
 
-        // Root popup box (centered 700x440 panel)
+        // Root popup box (centered 660px panel, auto-fit height)
         ui.BeginBox("FallbackUIPopupBox", GUI::BoxConfig {
-            .width     = { .fixed = 700.0f },
-            .height    = { .fixed = 440.0f },
-            .color     = { 0.08f, 0.10f, 0.14f, 0.95f },
+            .width        = { .fixed = 660.0f },
+            .height       = {},
+            .color        = { 0.08f, 0.10f, 0.14f, 0.96f },
             .cornerRadius = { 10.0f, 10.0f, 10.0f, 10.0f },
-            .padding   = 20.0f,
-            .gap       = 14.0f,
-            .direction = GUI::Direction::Column
+            .padding      = 22.0f,
+            .gap          = 14.0f,
+            .direction    = GUI::Direction::Column
         });
 
         // Header title
@@ -279,12 +279,13 @@ void DefaultPreset::Update(Engine& engine, float dt) {
                                                                 "[WARNING] NO GAMEPLAY MODULE DETECTED";
 
         ui.BeginBox("FallbackAlertBox", GUI::BoxConfig {
-            .width     = { .grow = 1.0f },
-            .height    = { .fixed = 72.0f },
-            .color     = { 0.22f, 0.16f, 0.08f, 0.85f },
-            .padding   = 10.0f,
-            .gap       = 4.0f,
-            .direction = GUI::Direction::Column
+            .width        = { .grow = 1.0f },
+            .height       = {},
+            .color        = { 0.22f, 0.16f, 0.08f, 0.85f },
+            .cornerRadius = { 6.0f, 6.0f, 6.0f, 6.0f },
+            .padding      = 12.0f,
+            .gap          = 4.0f,
+            .direction    = GUI::Direction::Column
         });
         ui.Text(reasonTitle, 14.0f, { 1.0f, 0.85f, 0.3f, 1.0f });
         ui.Text(s_DetailMsg, 12.0f, { 0.9f, 0.85f, 0.7f, 1.0f });
@@ -296,28 +297,29 @@ void DefaultPreset::Update(Engine& engine, float dt) {
             ZHLN::Version::String, Compiler, ZHLN_TARGET_TRIPLE, rc.GetGPUName()
         );
         ui.BeginBox("FallbackEnvBox", GUI::BoxConfig {
-            .width   = { .grow = 1.0f },
-            .height  = { .fixed = 170.0f },
-            .color   = { 0.05f, 0.07f, 0.11f, 0.85f },
-            .padding = 12.0f,
-            .direction = GUI::Direction::Column
+            .width        = { .grow = 1.0f },
+            .height       = {},
+            .color        = { 0.05f, 0.07f, 0.11f, 0.85f },
+            .cornerRadius = { 6.0f, 6.0f, 6.0f, 6.0f },
+            .padding      = 12.0f,
+            .direction    = GUI::Direction::Column
         });
         ui.Text(envSummary, 12.0f, { 0.65f, 0.75f, 0.85f, 1.0f });
         ui.EndBox();
 
         // Button row
-        ui.BeginRow(8.0f);
+        ui.BeginRow(10.0f);
 
-        if (ui.Button("Reload Boot")) {
+        if (ui.Button("Reload Boot", GUI::Sizing { .grow = 1.0f })) {
             Log("[DefaultPreset] Reloading 'scripts/boot.lua' via Native UI...");
             engine.GetScriptRunner().ReloadFile("scripts/boot.lua");
         }
 
-        if (ui.Button(s_AnimateScene ? "Pause Motion" : "Resume Motion")) {
+        if (ui.Button(s_AnimateScene ? "Pause Motion" : "Resume Motion", GUI::Sizing { .grow = 1.0f })) {
             s_AnimateScene = !s_AnimateScene;
         }
 
-        if (ui.Button("Quit Engine", { 0.45f, 0.16f, 0.18f, 0.95f })) {
+        if (ui.Button("Quit Engine", { 0.45f, 0.16f, 0.18f, 0.95f }, GUI::Sizing { .grow = 1.0f })) {
             engine.GetWindow().Close();
         }
 

@@ -46,7 +46,7 @@ float4 PSMain(UIVSOutput input) : SV_Target0 {
     if (uiObj.isSDF != 0) {
         float distance = texSample.a;
         // Screen-space derivative calculates edge sharpness dynamically at any scale
-        float smoothing = max(fwidth(distance), 0.0001f);
+        float smoothing = clamp(fwidth(distance) * 0.5f, 0.0001f, 0.5f);
         alpha           = smoothstep(0.5f - smoothing, 0.5f + smoothing, distance);
     }
 

@@ -90,7 +90,10 @@ class ZHLN_API Context {
 
     // --- Interactive Widgets ---
     void Text(std::string_view text, float fontSize = 14.0f, const JPH::Vec4& color = {1, 1, 1, 1}) noexcept;
-    bool Button(std::string_view label, const JPH::Vec4& color = {0.16f, 0.24f, 0.36f, 0.95f}) noexcept;
+    bool Button(std::string_view label, const JPH::Vec4& color = {0.16f, 0.24f, 0.36f, 0.95f}, const Sizing& width = {}) noexcept;
+    bool Button(std::string_view label, const Sizing& width) noexcept {
+        return Button(label, {0.16f, 0.24f, 0.36f, 0.95f}, width);
+    }
     bool Checkbox(std::string_view label, bool& checked) noexcept;
     bool Slider(std::string_view label, float& value, float minVal, float maxVal) noexcept;
 

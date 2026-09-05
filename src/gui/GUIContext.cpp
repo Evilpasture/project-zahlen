@@ -369,7 +369,7 @@ void Context::Text(std::string_view text, float fontSize, const JPH::Vec4& color
     Clay__OpenTextElement(ToClayString(text), config);
 }
 
-bool Context::Button(std::string_view label, const JPH::Vec4& color) noexcept {
+bool Context::Button(std::string_view label, const JPH::Vec4& color, const Sizing& width) noexcept {
     Clay_SetCurrentContext(_impl->clayContext);
     bool           clicked = false;
     uint32_t       id      = static_cast<uint32_t>(HashCreativeWorkPath(label));
@@ -378,12 +378,13 @@ bool Context::Button(std::string_view label, const JPH::Vec4& color) noexcept {
     Clay__OpenElementWithId(elemId);
     Clay_ElementDeclaration decl = {
         .layout = {
-            .padding         = {16, 16, 8, 8},
+            .sizing          = {.width = ToClaySizing(width), .height = CLAY_SIZING_FIXED(38)},
+            .padding         = {20, 20, 8, 8},
             .childAlignment  = {.x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER},
             .layoutDirection = CLAY_LEFT_TO_RIGHT
         },
-        .backgroundColor = Clay_Hovered() ? ToClayColor(color + JPH::Vec4(0.1f, 0.1f, 0.1f, 0.0f)) : ToClayColor(color),
-        .cornerRadius    = {4, 4, 4, 4}
+        .backgroundColor = Clay_Hovered() ? ToClayColor(color + JPH::Vec4(0.12f, 0.12f, 0.12f, 0.0f)) : ToClayColor(color),
+        .cornerRadius    = {6, 6, 6, 6}
     };
     Clay__ConfigureOpenElement(decl);
 
