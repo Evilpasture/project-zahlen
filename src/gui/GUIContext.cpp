@@ -104,6 +104,36 @@ Clay_Color ToClayColor(const JPH::Vec4& c) noexcept {
     };
 }
 
+Clay_LayoutAlignmentX ToClayAlignX(Alignment align) noexcept {
+    switch (align) {
+        case Alignment::Center: return CLAY_ALIGN_X_CENTER;
+        case Alignment::End:    return CLAY_ALIGN_X_RIGHT;
+        default:                return CLAY_ALIGN_X_LEFT;
+    }
+}
+
+Clay_LayoutAlignmentY ToClayAlignY(Alignment align) noexcept {
+    switch (align) {
+        case Alignment::Center: return CLAY_ALIGN_Y_CENTER;
+        case Alignment::End:    return CLAY_ALIGN_Y_BOTTOM;
+        default:                return CLAY_ALIGN_Y_TOP;
+    }
+}
+
+Clay_ChildAlignment ToClayChildAlignment(const BoxConfig& cfg) noexcept {
+    if (cfg.direction == Direction::Row) {
+        return {
+            .x = ToClayAlignX(cfg.alignMain),
+            .y = ToClayAlignY(cfg.alignCross)
+        };
+    } else {
+        return {
+            .x = ToClayAlignX(cfg.alignCross),
+            .y = ToClayAlignY(cfg.alignMain)
+        };
+    }
+}
+
 } // namespace
 
 // ============================================================================
@@ -269,6 +299,7 @@ void Context::BeginBox(std::string_view id, const BoxConfig& cfg) noexcept {
                  {static_cast<uint16_t>(cfg.padding), static_cast<uint16_t>(cfg.padding), static_cast<uint16_t>(cfg.padding),
                   static_cast<uint16_t>(cfg.padding)},
              .childGap        = static_cast<uint16_t>(cfg.gap),
+             .childAlignment  = ToClayChildAlignment(cfg),
              .layoutDirection = (cfg.direction == Direction::Row) ? CLAY_LEFT_TO_RIGHT : CLAY_TOP_TO_BOTTOM},
         .backgroundColor = ToClayColor(cfg.color),
         .cornerRadius    = {cfg.cornerRadius.GetX(), cfg.cornerRadius.GetY(), cfg.cornerRadius.GetZ(), cfg.cornerRadius.GetW()}

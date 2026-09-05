@@ -247,6 +247,16 @@ void DefaultPreset::Update(Engine& engine, float dt) {
         GUI::Context ui(engine);
         ui.BeginFrame(dt);
 
+        // Full-screen centering container
+        ui.BeginBox("FallbackCenterScreen", GUI::BoxConfig {
+            .width      = { .grow = 1.0f },
+            .height     = { .grow = 1.0f },
+            .color      = { 0.0f, 0.0f, 0.0f, 0.0f },
+            .direction  = GUI::Direction::Column,
+            .alignMain  = GUI::Alignment::Center,
+            .alignCross = GUI::Alignment::Center
+        });
+
         // Root popup box (centered 700x440 panel)
         ui.BeginBox("FallbackUIPopupBox", GUI::BoxConfig {
             .width     = { .fixed = 700.0f },
@@ -314,6 +324,7 @@ void DefaultPreset::Update(Engine& engine, float dt) {
         ui.EndRow();
 
         ui.EndBox(); // Root popup
+        ui.EndBox(); // Full-screen centering container
 
         // Render to GPU
         ui.EndFrameAndRender(rc);
