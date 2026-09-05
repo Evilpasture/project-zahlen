@@ -54,14 +54,16 @@
 // ============================================================================
 
 enum class PerfTestError : uint8_t {
-    CoreContainersThroughputFailed ZHLN_ANNOTATION(ZHLN::Description<"Core container or algorithm benchmark failed throughput invariants.">{}) = 1,
-    TaskSystemThroughputFailed ZHLN_ANNOTATION(ZHLN::Description<"TaskSystem parallel dispatch or fiber scheduling failed under heavy load.">{}),
-    ECSIterationThroughputFailed ZHLN_ANNOTATION(ZHLN::Description<"ECS bulk lifecycle, ECB playback, or dense iteration failed performance criteria.">{}),
-    SystemGraphContentionFailed ZHLN_ANNOTATION(ZHLN::Description<"SystemGraph parallel execution encountered dependency or contention failure.">{}),
-    PhysicsSimulationThroughputFailed ZHLN_ANNOTATION(ZHLN::Description<"Physics engine body simulation or mass raycasting failed performance gate.">{}),
-    GUIRebuildThroughputFailed ZHLN_ANNOTATION(ZHLN::Description<"Immediate-mode GUI tree rebuild or mark-and-sweep GC failed throughput criteria.">{}),
-    AudioQueueThroughputFailed ZHLN_ANNOTATION(ZHLN::Description<"Audio event queue failed to process high-throughput batch stream.">{}),
-    UnifiedMasterSceneFailed ZHLN_ANNOTATION(ZHLN::Description<"Unified multi-subsystem master benchmark failed stability, performance, or state integrity.">{}),
+    CoreContainersThroughputFailed ZHLN_ANNOTATION(ZHLN::Description<"Core container or algorithm benchmark failed throughput invariants."> {}) = 1,
+    TaskSystemThroughputFailed     ZHLN_ANNOTATION(ZHLN::Description<"TaskSystem parallel dispatch or fiber scheduling failed under heavy load."> {}),
+    ECSIterationThroughputFailed   ZHLN_ANNOTATION(ZHLN::Description<"ECS bulk lifecycle, ECB playback, or dense iteration failed performance criteria."> {}),
+    SystemGraphContentionFailed    ZHLN_ANNOTATION(ZHLN::Description<"SystemGraph parallel execution encountered dependency or contention failure."> {}),
+    PhysicsSimulationThroughputFailed ZHLN_ANNOTATION(ZHLN::Description<"Physics engine body simulation or mass raycasting failed performance gate."> {}),
+    GUIRebuildThroughputFailed        ZHLN_ANNOTATION(ZHLN::Description<"Immediate-mode GUI tree rebuild or mark-and-sweep GC failed throughput criteria."> {}),
+    AudioQueueThroughputFailed        ZHLN_ANNOTATION(ZHLN::Description<"Audio event queue failed to process high-throughput batch stream."> {}),
+    UnifiedMasterSceneFailed          ZHLN_ANNOTATION(
+        ZHLN::Description<"Unified multi-subsystem master benchmark failed stability, performance, or state integrity."> {}
+    ),
 };
 
 // ============================================================================
@@ -220,7 +222,7 @@ struct PerformanceTestSuite {
                 "    [ObjectPool] 50,000 Alloc + Destroy cycles in {:.3f} ms ({:.2f} Mops/sec)", poolDurationMs,
                 (kPoolAllocations * 2.0 / 1000.0) / poolDurationMs
             );
-                ZHLN::Test::VerifyBaseline("cpu.object_pool_50k_cycles", poolDurationMs);
+            ZHLN::Test::VerifyBaseline("cpu.object_pool_50k_cycles", poolDurationMs);
 
             return {};
         }
@@ -236,7 +238,7 @@ struct PerformanceTestSuite {
             std::vector<float> dataArray(kParallelCount, 1.0f);
             std::atomic<float> totalSum {0.0f};
 
-            const auto pForSamples = ZHLN::Test::SampleBestOf(5, [&] {
+            const auto   pForSamples    = ZHLN::Test::SampleBestOf(5, [&] {
                 BenchmarkTimer pForTimer;
                 ZHLN::TaskSystem::ParallelFor(kParallelCount, 1024, [&](uint32_t start, uint32_t end, uint32_t) {
                     float localAccum = 0.0f;
@@ -255,7 +257,7 @@ struct PerformanceTestSuite {
                 "    [ParallelFor] 1,000,000 sqrt math iterations in {:.3f} ms ({:.2f} Mitems/sec) [median {:.3f}, worst {:.3f}, n={}]", pForDurationMs,
                 (kParallelCount / 1000.0) / pForDurationMs, pForSamples.median, pForSamples.worst, pForSamples.samples
             );
-                ZHLN::Test::VerifyBaseline("cpu.parallel_for_1m_items", pForDurationMs);
+            ZHLN::Test::VerifyBaseline("cpu.parallel_for_1m_items", pForDurationMs);
 
             // B. Nested Parallel Dispatch (Fibers executing child tasks)
             constexpr size_t      kOuterTasks = 32;
@@ -278,21 +280,6 @@ struct PerformanceTestSuite {
                 t = {.func = outerJob, .arg = &payload};
             }
 
-            // One dispatch of this shape is ~30 us of wall clock, and most of
-            // that is the workers coming back from a park -- which is the OS
-            // scheduler's latency, not the task system's throughput. Timing a
-            // single dispatch made this the noisiest number in the suite: the
-            // best of nine samples moved 0.029 -> 0.056 -> 0.098 ms across
-            // three runs of unchanged code, a 3.4x spread that no regression
-            // limit can sit inside.
-            //
-            // So measure the hot path instead. A warm-up dispatch pays the
-            // wake-up cost up front, and each sample then runs the dispatch
-            // kRepeats times back to back and reports the mean, which keeps
-            // the workers spinning and puts real dispatch/fiber-switch work in
-            // the numerator. The metric is renamed rather than re-baselined:
-            // it measures something different from the old one, and quietly
-            // reusing the key would compare the two.
             constexpr uint32_t kRepeats = 64;
 
             {
@@ -301,7 +288,7 @@ struct PerformanceTestSuite {
                 ZHLN::TaskSystem::Wait(&warmCounter);
             }
 
-            const auto nestedSamples = ZHLN::Test::SampleBestOf(9, [&] {
+            const auto   nestedSamples    = ZHLN::Test::SampleBestOf(9, [&] {
                 nestedCounter.store(0, std::memory_order::relaxed);
                 BenchmarkTimer nestedTimer;
                 for (uint32_t rep = 0; rep < kRepeats; ++rep) {
@@ -339,10 +326,7 @@ struct PerformanceTestSuite {
             std::vector<ZHLN::Entity> createdEntities;
             createdEntities.reserve(kTotalEntities);
 
-            // A. Batch Entity Creation with Multiple Components. Fresh
-            // registry per sample so every sample pays identical pool-growth
-            // costs; the shared registry used by parts B and C is populated
-            // untimed right after.
+            // A. Batch Entity Creation with Multiple Components
             const double createDurationMs = ZHLN::Test::BestOf(3, [&] {
                 ZHLN::ECS::Registry benchReg;
                 benchReg.RegisterComponents<
@@ -369,12 +353,10 @@ struct PerformanceTestSuite {
                 "    [ECS Create] 40,000 Entities (4 Components each) created in {:.3f} ms ({:.2f} kEntities/sec)", createDurationMs,
                 kTotalEntities / createDurationMs
             );
-                ZHLN::Test::VerifyBaseline("cpu.ecs_create_40k_entities", createDurationMs);
+            ZHLN::Test::VerifyBaseline("cpu.ecs_create_40k_entities", createDurationMs);
 
             // B. Dense Array Direct Vectorized Iteration (GetRawArray & Patch)
-            // Single-threaded and memory-bound, so its distribution is
-            // normally tight; a wide one means the machine, not the loop.
-            const auto iterSamples = ZHLN::Test::SampleBestOf(5, [&] {
+            const auto   iterSamples    = ZHLN::Test::SampleBestOf(5, [&] {
                 BenchmarkTimer iterTimer;
                 auto           healths = reg.GetRawArray<AgentHealthComponent>();
                 auto           moves   = reg.GetRawArray<ZHLN::Components::MovementComponent>();
@@ -393,7 +375,7 @@ struct PerformanceTestSuite {
                 "    [ECS Dense Iterate] 10 Frames x 40,000 Entities updated in {:.3f} ms ({:.2f} Mupdates/sec) [median {:.3f}, worst {:.3f}, n={}]",
                 iterDurationMs, (10.0 * kTotalEntities / 1000.0) / iterDurationMs, iterSamples.median, iterSamples.worst, iterSamples.samples
             );
-                ZHLN::Test::VerifyBaseline("cpu.ecs_dense_iterate_10x40k", iterDurationMs);
+            ZHLN::Test::VerifyBaseline("cpu.ecs_dense_iterate_10x40k", iterDurationMs);
 
             // C. EntityCommandBuffer Bulk Playback
             const double ecbDurationMs = ZHLN::Test::BestOf(3, [&] {
@@ -470,7 +452,7 @@ struct PerformanceTestSuite {
                 "    [SystemGraph] 2,000 graph evaluations (5 systems each) in {:.3f} ms ({:.2f} cycles/sec)", graphDurationMs,
                 (kGraphIterations * 1000.0) / graphDurationMs
             );
-                ZHLN::Test::VerifyBaseline("cpu.systemgraph_2000_evals", graphDurationMs);
+            ZHLN::Test::VerifyBaseline("cpu.systemgraph_2000_evals", graphDurationMs);
 
             return {};
         }
@@ -537,48 +519,54 @@ struct PerformanceTestSuite {
                 "    [Raycast Fan-out] 5,000 Broadphase raycasts executed in {:.3f} ms ({:.2f} kRays/sec, Hits: {})", rayDurationMs,
                 kRaycastCount / rayDurationMs, hitCount.load()
             );
-                ZHLN::Test::VerifyBaseline("cpu.raycast_5000", rayDurationMs);
+            ZHLN::Test::VerifyBaseline("cpu.raycast_5000", rayDurationMs);
 
             return {};
         }
 
         // ====================================================================
-        // 6. ISOLATED: Immediate-Mode UI & Mark-and-Sweep GC
+        // 6. ISOLATED: Immediate-Mode UI CPU Layout (Clay)
         // ====================================================================
         auto isolated_06_gui_hierarchy_and_gc_churn() -> std::expected<void, ZHLN::Error> {
-            ZHLN::Println("\n  {}--- Subsystem 6: Immediate-Mode GUI & GC ---{}", ZHLN::Color::Cyan, ZHLN::Color::Reset);
+            ZHLN::Println("\n  {}--- Subsystem 6: Immediate-Mode GUI & Layout ---{}", ZHLN::Color::Cyan, ZHLN::Color::Reset);
 
-            ZHLN::ECS::Registry reg;
+            // Setup headless engine for GUI
+            ZHLN::EngineConfig config {.render = {.headless = true}};
+            auto               engine_res = ZHLN::Engine::Create(config);
+            auto               engine     = std::move(engine_res.value());
+            engine->InitializeDefaultScene();
 
             constexpr uint64_t kSimulatedFrames = 100;
 
             const double uiDurationMs = ZHLN::Test::BestOf(3, [&]() -> double {
                 BenchmarkTimer uiTimer;
                 for (uint64_t frame = 1; frame <= kSimulatedFrames; ++frame) {
-                    ZHLN::GUI::Context gui(reg, frame);
+                    ZHLN::GUI::Context gui(*engine);
+                    gui.BeginFrame(0.0166f);
 
-                    gui.Panel("MainDashboard", ZHLN::GUI::PanelConfig {.width = 800.0f, .height = 600.0f}, [&]() {
-                        for (int row = 0; row < 20; ++row) {
-                            gui.Box(ZHLN::GUI::BoxConfig {.height = 24.0f}, [&]() {
-                                gui.Label(std::format("Telemetry Channel #{}", row));
-                                // Dynamic changing key to stress GC tombstone eviction
-                                gui.Button(std::format("btn_row_{}_{}", row, frame % 5), "Action", []() {});
-                            });
+                    gui.Box(
+                        "MainDashboard",
+                        ZHLN::GUI::BoxConfig {.width = {.fixed = 800.0f}, .height = {.fixed = 600.0f}, .direction = ZHLN::GUI::Direction::Column}, [&]() {
+                            for (int row = 0; row < 20; ++row) {
+                                gui.Box("", ZHLN::GUI::BoxConfig {.height = {.fixed = 24.0f}, .direction = ZHLN::GUI::Direction::Row}, [&]() {
+                                    gui.Text(std::format("Telemetry Channel #{}", row), 14.0f);
+                                    gui.Button(std::format("Action {}", row));
+                                });
+                            }
                         }
-                    });
+                    );
+
+                    // Intentionally omitting EndFrameAndRender to purely benchmark
+                    // the CPU component of generating the layout tree
                 }
                 return uiTimer.ElapsedMilliseconds();
             });
-
-            // Total active UI rects should match static dashboard footprint, not leak dynamically
-            size_t liveRects = reg.GetEntitiesWith<ZHLN::GUI::UIComponents::UIRectComponent>().size();
-            ZHLN::Test::ExpectTrue(liveRects > 0 && liveRects < 100);
 
             ZHLN::Println(
                 "    [GUI Context] 100 frames of complex UI (20 rows x 2 widgets) built in {:.3f} ms ({:.2f} frames/sec)", uiDurationMs,
                 (kSimulatedFrames * 1000.0) / uiDurationMs
             );
-                ZHLN::Test::VerifyBaseline("cpu.gui_100f_complex", uiDurationMs);
+            ZHLN::Test::VerifyBaseline("cpu.gui_100f_complex", uiDurationMs);
 
             return {};
         }
@@ -614,7 +602,7 @@ struct PerformanceTestSuite {
                 "    [Audio Context] 20,000 3D spatial events queued & flushed in {:.3f} ms ({:.2f} kEvents/sec)", audioDurationMs,
                 kAudioEvents / audioDurationMs
             );
-                ZHLN::Test::VerifyBaseline("cpu.audio_20k_spatial", audioDurationMs);
+            ZHLN::Test::VerifyBaseline("cpu.audio_20k_spatial", audioDurationMs);
 
             return {};
         }
@@ -628,22 +616,26 @@ struct PerformanceTestSuite {
             ZHLN::Println("  {}--- UNIFIED MASTER BENCHMARK: All Subsystems Concurrently ---{}", ZHLN::Color::Yellow, ZHLN::Color::Reset);
             ZHLN::Println("  {}================================================================{}", ZHLN::Color::Yellow, ZHLN::Color::Reset);
 
-            // 1. Initialize Subsystem Environments
-            ZHLN::ECS::Registry  registry;
-            ZHLN::AudioContext   audio;
-            ZHLN::PhysicsConfig  physicsConfig {.maxBodies = 2048, .maxBodyPairs = 4096, .maxContactConstraints = 4096, .tempAllocatorSize = 32 * 1024 * 1024};
-            ZHLN::PhysicsContext physicsContext(physicsConfig);
-            ZHLN::Camera         mainCamera;
+            // 1. Initialize Subsystem Environments (Headless Engine)
+            ZHLN::EngineConfig config {
+                .physics = {.maxBodies = 2048, .maxBodyPairs = 4096, .maxContactConstraints = 4096, .tempAllocatorSize = 32 * 1024 * 1024},
+                .render  = {.headless = true}
+            };
+            auto engine_res = ZHLN::Engine::Create(config);
+            auto engine     = std::move(engine_res.value());
+            engine->InitializeDefaultScene();
+
+            auto& registry       = engine->GetRegistry();
+            auto& audio          = engine->GetAudioContext();
+            auto& physicsContext = engine->GetPhysicsContext();
+            auto& mainCamera     = engine->GetCamera();
 
             mainCamera.position = JPH::Vec3(0.0f, 25.0f, -50.0f);
             mainCamera.yaw      = 90.0f;
             mainCamera.pitch    = -20.0f;
 
-            // Register Components
-            registry.RegisterComponents<
-                ZHLN::Components::TransformComponent, ZHLN::Components::MovementComponent, ZHLN::Components::PhysicsComponent,
-                ZHLN::Components::PhysicsStateComponent, AgentHealthComponent, AgentCombatStateComponent, SpatialPerceptionComponent,
-                ZHLN::GUI::UIComponents::UIRectComponent>();
+            // Register Custom Test Components
+            registry.RegisterComponents<AgentHealthComponent, AgentCombatStateComponent, SpatialPerceptionComponent>();
 
             // 2. Setup Static Physics World Boundary
             auto groundShape = physicsContext.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 150.0f, 1.0f, 150.0f);
@@ -787,18 +779,25 @@ struct PerformanceTestSuite {
 
                 // --- PHASE 5: Immediate-Mode HUD / GUI Rebuild ---
                 {
-                    ZHLN::GUI::Context gui(registry, static_cast<uint64_t>(frame));
+                    ZHLN::GUI::Context gui(*engine);
+                    gui.BeginFrame(kFixedDt);
 
-                    gui.Panel("UnifiedBenchmarkHUD", ZHLN::GUI::PanelConfig {.width = 300.0f, .height = 200.0f}, [&]() {
-                        gui.Label(std::format("Simulation Frame: {}", frame));
-                        gui.Label(std::format("Active Agents: {}", kAgentCount));
-                        gui.Label(std::format("Rays Processed: {}", totalRaysCast.load()));
+                    gui.Box(
+                        "UnifiedBenchmarkHUD",
+                        ZHLN::GUI::BoxConfig {.width = {.fixed = 300.0f}, .height = {.fixed = 200.0f}, .direction = ZHLN::GUI::Direction::Column}, [&]() {
+                            gui.Text(std::format("Simulation Frame: {}", frame), 14.0f);
+                            gui.Text(std::format("Active Agents: {}", kAgentCount), 14.0f);
+                            gui.Text(std::format("Rays Processed: {}", totalRaysCast.load()), 14.0f);
 
-                        gui.Box(ZHLN::GUI::BoxConfig {.height = 30.0f}, [&]() {
-                            gui.Button("btn_pause", "Pause Sim", []() {});
-                            gui.Button("btn_stats", "Dump Stats", []() {});
-                        });
-                    });
+                            gui.Box("", ZHLN::GUI::BoxConfig {.height = {.fixed = 30.0f}, .direction = ZHLN::GUI::Direction::Row}, [&]() {
+                                gui.Button("Pause Sim");
+                                gui.Button("Dump Stats");
+                            });
+                        }
+                    );
+
+                    // We intentionally skip EndFrameAndRender/BeginFrame to strictly
+                    // isolate the CPU cost of the layout generation
                 }
 
                 frameTimesMs.push_back(frameTimer.ElapsedMilliseconds());
@@ -813,7 +812,7 @@ struct PerformanceTestSuite {
                 "    [Results] Processed 120 frames in {:.3f} s (Average: {:.3f} ms/frame, Range: [{:.3f} - {:.3f}] ms)", totalBenchmarkDurationSec,
                 avgFrameTimeMs, minFrameTimeMs, maxFrameTimeMs
             );
-                ZHLN::Test::VerifyBaseline("cpu.master_integrated.avg_frame_ms", avgFrameTimeMs);
+            ZHLN::Test::VerifyBaseline("cpu.master_integrated.avg_frame_ms", avgFrameTimeMs);
             ZHLN::Println("    [Throughput] Simulation Speed: {:.2f} FPS (Target: >= 60.0 FPS)", kTotalFrames / totalBenchmarkDurationSec);
             ZHLN::Println("    [Telemetry] Total Raycasts: {}, Total Audio Events: {}", totalRaysCast.load(), totalAudioEvents.load());
 
@@ -836,4 +835,3 @@ struct PerformanceTestSuite {
 auto RunPerformanceSuite() -> ZHLN::Test::TestStats {
     return ZHLN::Test::RunSuite<PerformanceTestSuite>();
 }
-

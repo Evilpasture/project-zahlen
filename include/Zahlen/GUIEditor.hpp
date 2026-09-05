@@ -10,36 +10,31 @@
 //
 // Design notes:
 //
-//   * The editor draws into the SAME GUI::Context and Registry as the content
-//     it edits. To keep the editor out of its own hierarchy, EditorState
-//     carries `editorRoot`: every entity at or below that node is filtered
-//     out of the hierarchy and never inspectable through it.
+//   * The editor draws into the same GUI::Context as the scene it edits.
+//     The registry is passed separately: the new Clay-based GUI::Context is
+//     pure layout and does not own or expose ECS state.
 //
 //   * The inspector is generic. Component fields are enumerated through
 //     ZHLN::Reflect::ForEachFieldWithName, so a new component (or a new field
 //     on an existing one) shows up in the inspector without touching this
 //     file. Field dispatch: float -> Slider, bool -> Checkbox, int -> Slider
 //     with step 1, enum -> Dropdown (via ZHLN::Reflect::EnumNames), String64/
-//     String256 -> TextInput, JPH::Vec4 -> four sliders. Handles, textures
-//     and padding fields (leading '_') get no row in this version.
+//     String256 -> TextInput stub, JPH::Vec4 -> four sliders. Handles,
+//     textures and padding fields (leading '_') get no row in this version.
 //
 //   * The reflection iteration lives in src/gui/GUIEditor.cpp, not here.
-//     Compilers without P2996 build the engine through
-//     tools/transpile_reflection.py, which rewrites reflection calls by
-//     source offset within a translation unit; calls inside headers would be
-//     rewritten against the wrong buffer. Keeping the call in the .cpp makes
-//     the native-reflection and transpiled toolchain paths behave identically.
 //
 //   * Both panels are plain frame functions: call them once per frame inside
-//     your editor layout (a Columns split, a dock, ...) and they rebuild or
-//     reclaim their widget subtree through the Context's child cache, exactly
-//     like every compound widget in GUI.hpp. They return the panel root
-//     entity, so the caller can measure or hide it like any other widget.
+//     your editor layout (a Columns split, a dock, ...).
 
 #pragma once
 
 #include <Zahlen/Entity.hpp>
 #include <string_view>
+
+namespace ZHLN::ECS {
+class Registry;
+}
 
 namespace ZHLN::GUI {
 class Context;
@@ -60,34 +55,29 @@ struct EditorState {
     ZHLN::Entity editorRoot = ZHLN::Entity::Null();
 };
 
-/// Draws the scene hierarchy (against the registry the context already owns):
-/// one selectable row per UI entity (anything with a UIRectComponent that is
-/// not part of the editor's own subtree), ordered by
-/// (hierarchyDepth, layoutOrder) — the same key layout, render and hit-testing
-/// sort by, so the list matches what is on screen. Clicking a row writes
+/// Draws the scene hierarchy: one selectable row per named entity that is not
+/// part of the editor's own subtree. Clicking a row writes
 /// `state.selectedEntity`.
 ///
-/// Returns the panel root entity (a scroll box), for callers that want to
-/// measure or hide the panel; like every closure-form widget in GUI.hpp,
-/// discarding it is normal.
-auto DrawHierarchyPanel(
-    ZHLN::GUI::Context& gui,
-    EditorState&        state,
-    std::string_view    id = "Hierarchy"
-) -> ZHLN::Entity;
+/// NOTE: `reg` is separate from `gui` because the new Clay-based GUI::Context
+/// is stateless w.r.t. the ECS — the editor reads the registry directly.
+void DrawHierarchyPanel(
+    ZHLN::GUI::Context&    gui,
+    ZHLN::ECS::Registry&   reg,
+    EditorState&           state,
+    std::string_view       id = "Hierarchy"
+);
 
 /// Draws the inspector for `state.selectedEntity`: a labelled header plus one
-/// collapsing section per editable component present on the entity
-/// (Name, Rect, Flex, Panel, Text). With no live selection the panel shows a
-/// "No selection" placeholder. Field rows are generated from reflection; see
-/// the dispatch table in the file comment above.
+/// collapsing section per editable component present on the entity.
+/// With no live selection the panel shows a "No selection" placeholder.
 ///
-/// Returns the panel root entity (a scroll box); discarding it is normal,
-/// matching the closure-form widget convention.
-auto DrawInspectorPanel(
-    ZHLN::GUI::Context& gui,
-    EditorState&        state,
-    std::string_view    id = "Inspector"
-) -> ZHLN::Entity;
+/// NOTE: `reg` is separate from `gui` for the same reason as above.
+void DrawInspectorPanel(
+    ZHLN::GUI::Context&    gui,
+    ZHLN::ECS::Registry&   reg,
+    EditorState&           state,
+    std::string_view       id = "Inspector"
+);
 
 } // namespace ZHLN::Editor

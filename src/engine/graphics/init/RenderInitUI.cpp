@@ -4,8 +4,6 @@
 // File: src/engine/graphics/init/RenderInitUI.cpp
 #include "../RenderInternal.hpp"
 #include "../Resources.hpp"
-#include "backends/imgui_impl_glfw.h"
-#include "imgui.h"
 #include <Zahlen/Error.hpp>
 #include <cstdint>
 
@@ -16,7 +14,7 @@ enum class UISetupError : uint8_t {
     SetupFailed ZHLN_ANNOTATION(ZHLN::Description<"UI subsystem setup failed">{}) = 1,
 };
 
-auto RenderContext::Impl::SetupUI(GLFWwindow* glfwWindow) -> std::expected<void, Error> {
+auto RenderContext::Impl::SetupUI([[maybe_unused]] GLFWwindow* glfwWindow) -> std::expected<void, Error> {
     using enum Resource::ShaderID;
     Vk::ShaderStages uiShaders;
 
@@ -27,9 +25,6 @@ auto RenderContext::Impl::SetupUI(GLFWwindow* glfwWindow) -> std::expected<void,
             return {};
         })
         .and_then([&]() -> std::expected<void, Error> {
-            // The UI batch pipeline is a descriptor-heap pipeline (scene
-            // registry + push data). ImGui is consumed as another producer of
-            // UI batches and therefore uses this same pipeline.
             uiPipelineLayout = emptyPipelineLayout;
 
             VkFormat swapchainFormat = presentation.GetPresentFormat();
@@ -45,29 +40,6 @@ auto RenderContext::Impl::SetupUI(GLFWwindow* glfwWindow) -> std::expected<void,
                 .Build(ctx.Device())
                 .transform_error([](auto err) -> Error { return err; })
                 .transform([&](auto&& pipeline) -> auto { uiPipeline = std::forward<decltype(pipeline)>(pipeline); });
-        })
-        .and_then([&]() -> std::expected<void, Error> {
-            IMGUI_CHECKVERSION();
-            ImGui::CreateContext();
-            if (glfwWindow != nullptr) {
-                ImGui_ImplGlfw_InitForVulkan(glfwWindow, true);
-            }
-
-            unsigned char* pixels        = nullptr;
-            int            width         = 0;
-            int            height        = 0;
-            int            bytesPerPixel = 0;
-            ImGui::GetIO().Fonts->GetTexDataAsRGBA32(&pixels, &width, &height, &bytesPerPixel);
-            if (pixels == nullptr || width <= 0 || height <= 0 || bytesPerPixel != 4) {
-                return std::unexpected(UISetupError::SetupFailed);
-            }
-
-            return CreateTextureInternal(pixels, static_cast<uint32_t>(width), static_cast<uint32_t>(height), false)
-                .transform_error([](auto err) -> Error { return err; })
-                .transform([&](uint32_t bindlessIndex) {
-                    textureManager.RegisterUploaded("ImGui_FontAtlas", bindlessIndex, false);
-                    ImGui::GetIO().Fonts->SetTexID(static_cast<ImTextureID>(static_cast<uintptr_t>(bindlessIndex)));
-                });
         });
 }
 

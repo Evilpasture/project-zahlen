@@ -38,3 +38,6 @@
 [submodule "extern/Vulkan-Headers"]
 	path = extern/Vulkan-Headers
 	url = https://github.com/KhronosGroup/Vulkan-Headers.git
+[submodule "extern/clay"]
+	path = extern/clay
+	url = https://github.com/nicbarker/clay

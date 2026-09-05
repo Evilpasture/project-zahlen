@@ -39,9 +39,9 @@ namespace {
     // from `e`; anything that reaches `editorRoot` is the editor's own.
     // Bounded so a corrupted parent cycle cannot hang the frame.
     [[nodiscard]] auto IsEditorEntity(
-        ZHLN::Entity             e,
+        ZHLN::Entity               e,
         const ZHLN::ECS::Registry& reg,
-        ZHLN::Entity             editorRoot
+        ZHLN::Entity               editorRoot
     ) -> bool {
         if (editorRoot == ZHLN::Entity::Null()) {
             return false;
@@ -60,49 +60,14 @@ namespace {
         return false;
     }
 
-    // The candidate list for a reference field that points at an ENTITY.
-    //
-    // Only the registry knows what exists, but only the editor knows which of
-    // those are scene content: everything under editorRoot is the editor's own
-    // chrome, and offering the inspector's own rows as the target of a scene
-    // component's `parent` handle is how a scene ends up parented to a
-    // scrollbar. `Entity::Null()` is not offered — a field that means "no
-    // target" is expressed by the picker's None entry, not by a second empty
-    // row nobody can tell apart from the first.
-    // Reachable only through an `if constexpr` branch of MakeRowSink's generic
-    // lambda, which is instantiated per reflected field type. Builds without
-    // P2996 reflection compile ForEachFieldWithName down to a no-op, so the
-    // lambda is never instantiated and nothing references this — hence the
-    // attribute. It is live in any build where reflection actually runs.
-    [[maybe_unused]] [[nodiscard]] auto BuildEntityOptions(ZHLN::ECS::Registry& reg, ZHLN::Entity editorRoot)
-        -> std::vector<GUI::ReferenceOption> {
-        std::vector<GUI::ReferenceOption> out;
-        out.reserve(64);
-        for (const ZHLN::Entity e: reg.GetEntitiesWith<Comp::NameComponent>()) {
-            if (e == ZHLN::Entity::Null() || IsEditorEntity(e, reg, editorRoot)) {
-                continue;
-            }
-            const auto* name = reg.Get<Comp::NameComponent>(e);
-            if (name == nullptr) {
-                continue;
-            }
-            // The label borrows the component's own storage. It only has to
-            // outlive this frame's Reference() call, which copies the strings
-            // it keeps into the widget's own option array.
-            out.push_back(GUI::ReferenceOption {.id = e.Pack(), .label = std::string_view(name->name)});
-        }
-        return out;
-    }
-
     // The generic row sink: one row per reflected (name, field) pair. The
     // field name is the label; the row id is section-scoped so two components
     // with a `width` field cannot collide in the child cache.
     //
-    // The ForEachFieldWithName call sites live in DrawInspectorPanel, one per
-    // concrete component type — see the comment there for why the iteration
-    // is not driven from this generic lambda.
-    [[nodiscard]] auto MakeRowSink(GUI::Context& gui, ZHLN::Entity editorRoot, std::string_view sectionId) {
-        return [&gui, editorRoot, sectionId](std::string_view name, auto& field) -> void {
+    // Missing widget types (Dropdown, TextInput, Reference) are rendered as
+    // read-only text until those widgets are implemented in the Clay API.
+    [[nodiscard]] auto MakeRowSink(GUI::Context& gui, std::string_view sectionId) {
+        return [&gui, sectionId](std::string_view name, auto& field) -> void {
             using FT = std::remove_cvref_t<decltype(field)>;
 
             // Padding/reserved members never get a row.
@@ -114,63 +79,46 @@ namespace {
             const std::string_view rowId = ZHLN::FormatTo(rowIdBuf, "{}_{}", sectionId, name);
 
             if constexpr (std::is_same_v<FT, float>) {
-                gui.Slider(rowId, name, field, -10000.0f, 10000.0f);
+                gui.Slider(std::string_view(rowIdBuf.data()), field, -10000.0f, 10000.0f);
             } else if constexpr (std::is_same_v<FT, bool>) {
-                gui.Checkbox(rowId, name, field);
+                bool copy = field;
+                if (gui.Checkbox(name, copy)) {
+                    field = copy;
+                }
             } else if constexpr (std::is_same_v<FT, int32_t>) {
                 float v = static_cast<float>(field);
-                gui.Slider(rowId, name, v, -100000.0f, 100000.0f, 1.0f);
+                gui.Slider(std::string_view(rowIdBuf.data()), v, -100000.0f, 100000.0f);
                 field = static_cast<int32_t>(v);
             } else if constexpr (std::is_same_v<FT, uint32_t>) {
                 float v = static_cast<float>(field);
-                gui.Slider(rowId, name, v, 0.0f, 1000000.0f, 1.0f);
+                gui.Slider(std::string_view(rowIdBuf.data()), v, 0.0f, 1000000.0f);
                 field = static_cast<uint32_t>(v);
             } else if constexpr (std::is_enum_v<FT>) {
-                // Assumes contiguous enumerators starting at 0, which every UI
-                // enum in Components.hpp satisfies. Flag-style enums degrade
-                // to "pick one bit", which is still better than no row.
+                // Render enum index as a float slider (dropdown stub)
                 constexpr auto names = ZHLN::Reflect::EnumNames<FT>();
                 if constexpr (names.size() > 0) {
                     int idx = static_cast<int>(field);
-                    if (idx < 0 || static_cast<size_t>(idx) >= names.size()) {
-                        idx = 0;
-                    }
-                    gui.Dropdown(rowId, name, idx, std::span<const std::string_view> {names});
-                    field = static_cast<FT>(idx);
+                    if (idx < 0 || static_cast<size_t>(idx) >= names.size()) idx = 0;
+                    // Stub: show current enum name as text
+                    std::array<char, 128> buf {};
+                    auto sv = ZHLN::FormatTo(buf, "{}: {}", name, names[static_cast<size_t>(idx)]);
+                    gui.Text(sv, 12.0f, { 0.8f, 0.8f, 0.8f, 1.0f });
                 }
             } else if constexpr (std::is_same_v<FT, ZHLN::Entity>) {
-                // Entity handles: a picker over the scene's named entities.
-                // Entity::Null() packs to all-ones, which is not a useful
-                // dropdown value, so it is mapped onto the picker's None entry
-                // (0) in both directions.
-                const ZHLN::Entity current = field;
-                uint64_t           packed  = (current == ZHLN::Entity::Null()) ? 0 : current.Pack();
-                gui.Reference(rowId, name, packed, BuildEntityOptions(gui.GetRegistry(), editorRoot));
-                field = (packed == 0) ? ZHLN::Entity::Null() : ZHLN::Entity::Unpack(packed);
+                // Stub: show packed handle as text
+                std::array<char, 64> buf {};
+                auto sv = ZHLN::FormatTo(buf, "{}: Entity({})", name, field.Pack());
+                gui.Text(sv, 12.0f, { 0.7f, 0.7f, 0.7f, 1.0f });
             } else if constexpr (std::is_same_v<FT, TextureHandle>) {
-                // Deliberately ahead of the generic enum branch below.
-                // TextureHandle IS an enum, so it used to fall through to
-                // "render a dropdown of Reflect::EnumNames" — whose only
-                // enumerator is Invalid. Under real reflection that produced a
-                // one-option menu and rewrote every texture on the entity to
-                // Invalid the moment the inspector touched it.
-                //
-                // There is no enumerable asset catalogue to list yet, so this
-                // passes an empty option list: the row shows the handle (or
-                // "None"), flags it as dangling when it names nothing known,
-                // and lets it be cleared. It becomes a real asset browser the
-                // moment something can enumerate mounted assets.
-                uint64_t raw = static_cast<uint64_t>(field);
-                gui.Reference(rowId, name, raw, std::span<const GUI::ReferenceOption> {});
-                field = static_cast<TextureHandle>(raw);
+                std::array<char, 64> buf {};
+                auto sv = ZHLN::FormatTo(buf, "{}: Texture({})", name, static_cast<uint64_t>(field));
+                gui.Text(sv, 12.0f, { 0.7f, 0.7f, 0.7f, 1.0f });
             } else if constexpr (std::is_same_v<FT, JPH::Vec4>) {
                 float v[4] = {field.GetX(), field.GetY(), field.GetZ(), field.GetW()};
                 for (int axis = 0; axis < 4; ++axis) {
                     std::array<char, 136> axisIdBuf {};
-                    const std::string_view axisId = ZHLN::FormatTo(axisIdBuf, "{}_{}", rowId, "xyzw"[axis]);
-                    std::array<char, 96>  axisLabelBuf {};
-                    const std::string_view axisLabel = ZHLN::FormatTo(axisLabelBuf, "{} {}", name, "XYZW"[axis]);
-                    gui.Slider(axisId, axisLabel, v[axis], -10000.0f, 10000.0f);
+                    auto axisLabel = ZHLN::FormatTo(axisIdBuf, "{} {}", name, "XYZW"[axis]);
+                    gui.Slider(axisLabel, v[axis], -10000.0f, 10000.0f);
                 }
                 field.SetX(v[0]);
                 field.SetY(v[1]);
@@ -180,50 +128,44 @@ namespace {
                 float v[3] = {field.GetX(), field.GetY(), field.GetZ()};
                 for (int axis = 0; axis < 3; ++axis) {
                     std::array<char, 136> axisIdBuf {};
-                    const std::string_view axisId = ZHLN::FormatTo(axisIdBuf, "{}_{}", rowId, "xyz"[axis]);
-                    std::array<char, 96>  axisLabelBuf {};
-                    const std::string_view axisLabel = ZHLN::FormatTo(axisLabelBuf, "{} {}", name, "XYZ"[axis]);
-                    gui.Slider(axisId, axisLabel, v[axis], -10000.0f, 10000.0f);
+                    auto axisLabel = ZHLN::FormatTo(axisIdBuf, "{} {}", name, "XYZ"[axis]);
+                    gui.Slider(axisLabel, v[axis], -10000.0f, 10000.0f);
                 }
                 field = JPH::Vec3(v[0], v[1], v[2]);
             } else if constexpr (std::is_same_v<FT, JPH::Quat>) {
-                // Designers edit Euler degrees; the component stores a
-                // quaternion. Only write back when a row actually changed —
-                // an unconditional Euler->Quat->Euler round trip every frame
-                // would slowly drift (and sign-flip) untouched rotations.
                 const JPH::Vec3 euler = ZHLN::Math::QuatToEulerDegrees(field);
                 float           deg[3] = {euler.GetX(), euler.GetY(), euler.GetZ()};
                 bool            changed = false;
                 for (int axis = 0; axis < 3; ++axis) {
-                    std::array<char, 136> axisIdBuf {};
-                    const std::string_view axisId = ZHLN::FormatTo(axisIdBuf, "{}_rot_{}", rowId, "xyz"[axis]);
-                    std::array<char, 96>  axisLabelBuf {};
-                    const std::string_view axisLabel = ZHLN::FormatTo(axisLabelBuf, "{} Rot {}", name, "XYZ"[axis]);
-                    const float          prev = deg[axis];
-                    gui.Slider(axisId, axisLabel, deg[axis], -360.0f, 360.0f, 1.0f);
-                    if (deg[axis] != prev) {
-                        changed = true;
-                    }
+                    std::array<char, 96> axisLabelBuf {};
+                    auto axisLabel = ZHLN::FormatTo(axisLabelBuf, "{} Rot {}", name, "XYZ"[axis]);
+                    const float prev = deg[axis];
+                    gui.Slider(axisLabel, deg[axis], -360.0f, 360.0f);
+                    if (deg[axis] != prev) changed = true;
                 }
                 if (changed) {
                     field = ZHLN::Math::EulerDegreesToQuat(JPH::Vec3(deg[0], deg[1], deg[2]));
                 }
             } else if constexpr (std::is_same_v<FT, ZHLN::String256> || std::is_same_v<FT, ZHLN::String64>) {
-                gui.TextInput(rowId, name, field);
+                // Stub: show as read-only text until TextInput is implemented
+                std::array<char, 32> buf {};
+                auto label = ZHLN::FormatTo(buf, "{}: ", name);
+                gui.Text(label, 12.0f, { 0.7f, 0.7f, 0.7f, 1.0f });
+                gui.Text(std::string_view(field), 12.0f, { 0.9f, 0.9f, 0.9f, 1.0f });
             }
-            // Everything else (Entity handles, TextureHandle, char padding,
-            // nested structs) intentionally gets no row in this version.
+            // Everything else (char padding, nested structs) intentionally
+            // gets no row in this version.
         };
     }
 
 } // namespace
 
-auto DrawHierarchyPanel(
-    GUI::Context&     gui,
-    EditorState&      state,
-    std::string_view  id
-) -> ZHLN::Entity {
-    ZHLN::ECS::Registry& reg = gui.GetRegistry();
+void DrawHierarchyPanel(
+    GUI::Context&         gui,
+    ZHLN::ECS::Registry&  reg,
+    EditorState&          state,
+    std::string_view      id
+) {
     struct Row {
         ZHLN::Entity entity;
         uint32_t     depth;
@@ -247,115 +189,99 @@ auto DrawHierarchyPanel(
                             rect != nullptr ? rect->layoutOrder : e.index});
     }
     std::stable_sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) -> bool {
-        if (a.depth != b.depth) {
-            return a.depth < b.depth;
-        }
+        if (a.depth != b.depth) return a.depth < b.depth;
         return a.order < b.order;
     });
 
-    return gui.ScrollBox(
-        id,
-        GUI::ScrollBoxConfig {
-            .flexGrow = 1.0f // The panel fills whatever the host layout gives it.
-        },
-        [&]() -> void {
-            for (const Row& row: rows) {
-                std::array<char, 96> rowIdBuf {};
-                const std::string_view rowId = ZHLN::FormatTo(rowIdBuf, "{}_row{}", id, row.entity.index);
+    // Render the hierarchy as a scrollable column
+    gui.BeginColumn(4.0f);
+    gui.Text(id, 14.0f, { 0.6f, 0.7f, 0.8f, 1.0f });
 
-                std::array<char, 96> fallbackBuf {};
-                std::string_view     label;
-                if (const auto* name = reg.Get<Comp::NameComponent>(row.entity)) {
-                    label = std::string_view(name->name);
-                } else {
-                    label = ZHLN::FormatTo(fallbackBuf, "Entity {}", row.entity.index);
-                }
-
-                bool selected = (state.selectedEntity == row.entity);
-                gui.Selectable(
-                    rowId,
-                    label,
-                    selected,
-                    GUI::SelectableConfig {},
-                    [&state, e = row.entity](bool nowSelected) -> void {
-                        if (nowSelected) {
-                            state.selectedEntity = e;
-                        }
-                    }
-                );
-            }
+    for (const Row& row: rows) {
+        std::array<char, 96> fallbackBuf {};
+        std::string_view     label;
+        if (const auto* name = reg.Get<Comp::NameComponent>(row.entity)) {
+            label = std::string_view(name->name);
+        } else {
+            label = ZHLN::FormatTo(fallbackBuf, "Entity {}", row.entity.index);
         }
-    );
+
+        bool isSelected = (state.selectedEntity == row.entity);
+        JPH::Vec4 color = isSelected
+            ? JPH::Vec4(0.20f, 0.35f, 0.55f, 0.9f)
+            : JPH::Vec4(0.10f, 0.12f, 0.16f, 0.7f);
+
+        // Indent by depth
+        if (row.depth > 0) {
+            gui.BeginRow(0.0f, static_cast<float>(row.depth) * 8.0f);
+        }
+
+        if (gui.Button(label, color)) {
+            state.selectedEntity = row.entity;
+        }
+
+        if (row.depth > 0) {
+            gui.EndRow();
+        }
+    }
+
+    gui.EndColumn();
 }
 
-auto DrawInspectorPanel(
-    GUI::Context&     gui,
-    EditorState&      state,
-    std::string_view  id
-) -> ZHLN::Entity {
-    ZHLN::ECS::Registry& reg = gui.GetRegistry();
-    return gui.ScrollBox(
-        id,
-        GUI::ScrollBoxConfig {
-            .flexGrow = 1.0f
-        },
-        [&]() -> void {
-            const ZHLN::Entity sel = state.selectedEntity;
-            if (sel == ZHLN::Entity::Null() || !reg.IsAlive(sel)) {
-                gui.Label("No selection");
-                return;
-            }
+void DrawInspectorPanel(
+    GUI::Context&         gui,
+    ZHLN::ECS::Registry&  reg,
+    EditorState&          state,
+    std::string_view      id
+) {
+    gui.BeginColumn(4.0f);
+    gui.Text(id, 14.0f, { 0.6f, 0.7f, 0.8f, 1.0f });
 
-            std::array<char, 64> headerBuf {};
-            gui.Label(std::string_view(ZHLN::FormatTo(headerBuf, "Entity {}", sel.index)));
+    const ZHLN::Entity sel = state.selectedEntity;
+    if (sel == ZHLN::Entity::Null() || !reg.IsAlive(sel)) {
+        gui.Text("No selection", 12.0f, { 0.5f, 0.5f, 0.5f, 1.0f });
+        gui.EndColumn();
+        return;
+    }
 
-            // One collapsing section per editable component, each with its
-            // OWN ForEachFieldWithName call site. Two invariants make these
-            // blocks load-bearing:
-            //
-            //   1. The call's object expression must have a CONCRETE static
-            //      type. The transpiler fallback extracts the field list from
-            //      the object's type, so a call inside a template with a
-            //      dependent T would flatten to zero rows.
-            //
-            //   2. The rows are drawn against a LOCAL COPY of the component,
-            //      which is patched back afterwards. Every widget built for a
-            //      row can create entities (labels, inner text children, ...),
-            //      and entity creation can reallocate the component pool —
-            //      which would leave a reference bound to the pool dangling
-            //      mid-iteration, with every later row writing through freed
-            //      memory. (Found by the flattened-path verifier: flaky
-            //      SIGSEGV inside glibc's malloc bin traversal.)
-            const auto section = [&](std::string_view sectionId, std::string_view title, auto* comp, auto&& reflect) -> void {
-                if (comp == nullptr) {
-                    return;
-                }
-                using CompT = std::remove_pointer_t<decltype(comp)>;
-                gui.CollapsingHeader(sectionId, title, true, [&]() -> void {
-                    CompT local = *comp;
-                    reflect(local, MakeRowSink(gui, state.editorRoot, sectionId));
-                    reg.Patch<CompT>(sel, [&local](CompT& dst) -> void { dst = local; });
-                });
-            };
+    std::array<char, 64> headerBuf {};
+    gui.Text(std::string_view(ZHLN::FormatTo(headerBuf, "Entity {}", sel.index)), 13.0f);
 
-            section("name", "Name", reg.Get<Comp::NameComponent>(sel),
-                    [](Comp::NameComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
-            section("transform", "Transform", reg.Get<Comp::TransformComponent>(sel),
-                    [](Comp::TransformComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
-            section("pbr", "PBR Material", reg.Get<Comp::PBRComponent>(sel),
-                    [](Comp::PBRComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
-            section("light", "Light", reg.Get<Comp::LightComponent>(sel),
-                    [](Comp::LightComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
-            section("rect", "Rect", reg.Get<UIComp::UIRectComponent>(sel),
-                    [](UIComp::UIRectComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
-            section("flex", "Flex", reg.Get<UIComp::UIFlexComponent>(sel),
-                    [](UIComp::UIFlexComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
-            section("panel", "Panel", reg.Get<UIComp::UIPanelComponent>(sel),
-                    [](UIComp::UIPanelComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
-            section("text", "Text", reg.Get<UIComp::TextComponent>(sel),
-                    [](UIComp::TextComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
+    // One collapsing section per editable component.
+    //
+    // Invariant: The call's object expression must have a CONCRETE static
+    // type. The transpiler fallback extracts the field list from the object's
+    // type, so a call inside a template with a dependent T would flatten to
+    // zero rows.
+    const auto section = [&](std::string_view sectionId, std::string_view title, auto* comp, auto&& reflect) -> void {
+        if (comp == nullptr) return;
+        using CompT = std::remove_pointer_t<decltype(comp)>;
+        if (gui.BeginCollapsingHeader(title, true)) {
+            CompT local = *comp;
+            reflect(local, MakeRowSink(gui, sectionId));
+            reg.Patch<CompT>(sel, [&local](CompT& dst) -> void { dst = local; });
+            gui.EndCollapsingHeader();
         }
-    );
+    };
+
+    section("name",      "Name",         reg.Get<Comp::NameComponent>(sel),
+            [](Comp::NameComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
+    section("transform", "Transform",    reg.Get<Comp::TransformComponent>(sel),
+            [](Comp::TransformComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
+    section("pbr",       "PBR Material", reg.Get<Comp::PBRComponent>(sel),
+            [](Comp::PBRComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
+    section("light",     "Light",        reg.Get<Comp::LightComponent>(sel),
+            [](Comp::LightComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
+    section("rect",      "Rect",         reg.Get<UIComp::UIRectComponent>(sel),
+            [](UIComp::UIRectComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
+    section("flex",      "Flex",         reg.Get<UIComp::UIFlexComponent>(sel),
+            [](UIComp::UIFlexComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
+    section("panel",     "Panel",        reg.Get<UIComp::UIPanelComponent>(sel),
+            [](UIComp::UIPanelComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
+    section("text",      "Text",         reg.Get<UIComp::TextComponent>(sel),
+            [](UIComp::TextComponent& c, auto&& sink) -> void { ZHLN::Reflect::ForEachFieldWithName(c, sink); });
+
+    gui.EndColumn();
 }
 
 } // namespace ZHLN::Editor

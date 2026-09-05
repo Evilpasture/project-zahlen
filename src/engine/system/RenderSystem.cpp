@@ -6,7 +6,6 @@
 #include "CullingSystem.hpp"
 #include "GraphicsSettingsSync.hpp"
 #include "LightingSystem.hpp"
-#include <gui/UIRenderSystem.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
@@ -21,6 +20,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <gui/UIRenderSystem.hpp>
 #include <physics/PhysicsDebug.hpp>
 
 namespace ZHLN {
@@ -90,7 +90,6 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
     if (!begin_res) {
         return std::unexpected(begin_res.error());
     }
-    UIRenderSystem::Update(engine);
     Entity cameraEntity = cameraEntities[0];
 
     if (auto* cComp = reg.Get<Components::CameraComponent>(cameraEntity)) {
@@ -140,11 +139,10 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
     uniforms.camPos[3]       = static_cast<float>(engine.GetCurrentFrame() & kFrameClockMask) * kFrameTimeStep;
     JPH::Vec3 shaderLightDir = sunDirection;
     std::memcpy(&uniforms.lightDir[0], &shaderLightDir, sizeof(float) * 3);
-    uniforms.lightDir[3]      = sunIntensity;
-    uniforms.lightCount       = static_cast<uint32_t>(reg.GetEntitiesWith<Components::LightComponent>().size());
-    uniforms.probeMin         = JPH::Vec4(
-        gfx.environment.probeMin[0], gfx.environment.probeMin[1], gfx.environment.probeMin[2], gfx.environment.useLocalProbe ? 1.0f : 0.0f
-    );
+    uniforms.lightDir[3] = sunIntensity;
+    uniforms.lightCount  = static_cast<uint32_t>(reg.GetEntitiesWith<Components::LightComponent>().size());
+    uniforms.probeMin =
+        JPH::Vec4(gfx.environment.probeMin[0], gfx.environment.probeMin[1], gfx.environment.probeMin[2], gfx.environment.useLocalProbe ? 1.0f : 0.0f);
     uniforms.probeMax         = JPH::Vec4(gfx.environment.probeMax[0], gfx.environment.probeMax[1], gfx.environment.probeMax[2], 0.0f);
     uniforms.probePos         = JPH::Vec4(gfx.environment.probePos[0], gfx.environment.probePos[1], gfx.environment.probePos[2], 0.0f);
     uniforms.jitterParams     = JPH::Vec4(aaState.jitterX, aaState.jitterY, aaState.prevJitterX, aaState.prevJitterY);
@@ -154,13 +152,9 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
     uniforms.shadowResolution = gfx.shadows.resolution;
     uniforms.sunSize          = gfx.shadows.sunSize;
     uniforms.ambientExposure  = gfx.environment.ambientExposure;
-    uniforms.skyZenith        = JPH::Vec4(
-        gfx.environment.skyZenith[0], gfx.environment.skyZenith[1], gfx.environment.skyZenith[2], gfx.environment.skyZenith[3]
-    );
-    uniforms.skyHorizon = JPH::Vec4(
-        gfx.environment.skyHorizon[0], gfx.environment.skyHorizon[1], gfx.environment.skyHorizon[2], gfx.environment.skyHorizon[3]
-    );
-    uniforms.skyGround = JPH::Vec4(gfx.environment.skyGround[0], gfx.environment.skyGround[1], gfx.environment.skyGround[2], gfx.environment.skyGround[3]);
+    uniforms.skyZenith  = JPH::Vec4(gfx.environment.skyZenith[0], gfx.environment.skyZenith[1], gfx.environment.skyZenith[2], gfx.environment.skyZenith[3]);
+    uniforms.skyHorizon = JPH::Vec4(gfx.environment.skyHorizon[0], gfx.environment.skyHorizon[1], gfx.environment.skyHorizon[2], gfx.environment.skyHorizon[3]);
+    uniforms.skyGround  = JPH::Vec4(gfx.environment.skyGround[0], gfx.environment.skyGround[1], gfx.environment.skyGround[2], gfx.environment.skyGround[3]);
 
     rc.SetFrameData(cam, uniforms, outShadowProjView, dt);
     rc.SetMatrices(vp, unjitteredVp);

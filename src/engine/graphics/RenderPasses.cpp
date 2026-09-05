@@ -5,7 +5,6 @@
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/Math3D.hpp"
 #include "Zahlen/Profiler.hpp"
-#include "imgui.h"
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <algorithm>
 #include <array>
@@ -19,106 +18,6 @@ struct TaskSystemSchedulerAdapter {
     }
 };
 enum class RenderPassType : uint8_t { Main, Shadow };
-
-[[nodiscard]] PackedRGBA8 ImGuiColor(ImU32 color) noexcept {
-    return PackedRGBA8 {color};
-}
-
-[[nodiscard]] VertexPosition ImGuiPosition(const ImDrawVert& v) noexcept {
-    return VertexPosition {.position = {v.pos.x, v.pos.y, 0.0f}};
-}
-
-[[nodiscard]] VertexAttributes ImGuiAttributes(const ImDrawVert& v) noexcept {
-    return VertexAttributes {.normal = {}, .tangent = {}, .uv = Math::PackUV(v.uv.x, v.uv.y), .color = ImGuiColor(v.col)};
-}
-
-void AppendImGuiBatches(RenderContext::Impl& ctx, uint32_t frameIndex, VkExtent2D extent) noexcept {
-    if (ctx.window.IsTTY() || ImGui::GetCurrentContext() == nullptr || !ctx.imguiFrameOpen) {
-        return;
-    }
-
-    ImGui::Render();
-    ctx.imguiFrameOpen = false;
-    ImDrawData* drawData = ImGui::GetDrawData();
-    if (drawData == nullptr || drawData->TotalIdxCount <= 0 || drawData->DisplaySize.x <= 0.0f || drawData->DisplaySize.y <= 0.0f) {
-        return;
-    }
-
-    auto&  vbo         = ctx.frames.uiVbos[frameIndex];
-    size_t maxVertices = vbo.Size() / (sizeof(VertexPosition) + sizeof(VertexAttributes));
-    if (maxVertices == 0) {
-        return;
-    }
-
-    uint32_t vertexCursor = 0;
-    for (const auto& batch: ctx.queues.uiBatches) {
-        vertexCursor = std::max(vertexCursor, batch.vertexStart + batch.vertexCount);
-    }
-    if (vertexCursor >= maxVertices) {
-        return;
-    }
-
-    auto  mappedRegion = vbo.Map();
-    auto* basePosPtr   = static_cast<VertexPosition*>(mappedRegion.data);
-    auto* baseAttrPtr  = reinterpret_cast<VertexAttributes*>(basePosPtr + maxVertices);
-
-    const ImVec2 clipOff   = drawData->DisplayPos;
-    const ImVec2 clipScale = drawData->FramebufferScale;
-
-    for (const ImDrawList* list: drawData->CmdLists) {
-        for (const ImDrawCmd& drawCmd: list->CmdBuffer) {
-            if (drawCmd.UserCallback != nullptr || drawCmd.ElemCount == 0) {
-                continue;
-            }
-
-            if (drawCmd.ElemCount > maxVertices - vertexCursor) {
-                return;
-            }
-
-            const uint32_t firstVertex = vertexCursor;
-            for (uint32_t i = 0; i < drawCmd.ElemCount; ++i) {
-                const ImDrawIdx idx       = list->IdxBuffer[drawCmd.IdxOffset + i];
-                const ImDrawVert& v       = list->VtxBuffer[drawCmd.VtxOffset + idx];
-                basePosPtr[vertexCursor]  = ImGuiPosition(v);
-                baseAttrPtr[vertexCursor] = ImGuiAttributes(v);
-                ++vertexCursor;
-            }
-
-            const uint32_t emitted = vertexCursor - firstVertex;
-            if (emitted == 0) {
-                return;
-            }
-
-            ImVec2 clipMin {(drawCmd.ClipRect.x - clipOff.x) * clipScale.x, (drawCmd.ClipRect.y - clipOff.y) * clipScale.y};
-            ImVec2 clipMax {(drawCmd.ClipRect.z - clipOff.x) * clipScale.x, (drawCmd.ClipRect.w - clipOff.y) * clipScale.y};
-            clipMin.x = std::clamp(clipMin.x, 0.0f, static_cast<float>(extent.width));
-            clipMin.y = std::clamp(clipMin.y, 0.0f, static_cast<float>(extent.height));
-            clipMax.x = std::clamp(clipMax.x, 0.0f, static_cast<float>(extent.width));
-            clipMax.y = std::clamp(clipMax.y, 0.0f, static_cast<float>(extent.height));
-            if (clipMax.x <= clipMin.x || clipMax.y <= clipMin.y) {
-                continue;
-            }
-
-            ctx.queues.uiBatches.push_back(
-                UIBatch {.texture              = TextureHandle::Invalid,
-                         .bindlessTextureIndex = static_cast<uint32_t>(static_cast<uintptr_t>(drawCmd.GetTexID())),
-                         .vertexStart          = firstVertex,
-                         .vertexCount          = emitted,
-                         .useScissor           = true,
-                         .isSDF                = false,
-                         .useTextureColor      = true,
-                         .scissorRect          = {.x      = static_cast<int32_t>(clipMin.x),
-                                                  .y      = static_cast<int32_t>(clipMin.y),
-                                                  .width  = static_cast<uint32_t>(clipMax.x - clipMin.x),
-                                                  .height = static_cast<uint32_t>(clipMax.y - clipMin.y)}}
-            );
-
-            if (vertexCursor >= maxVertices) {
-                return;
-            }
-        }
-    }
-}
 
 [[nodiscard]] constexpr bool IsForwardOnly(uint32_t instanceFlags) noexcept {
     return (instanceFlags & 0xFF) == 2;
@@ -1044,7 +943,6 @@ void BlitPass::Execute(
     if (ctx.blitPass.pipeline.Valid()) {
         Vk::DynamicPass(inColor.extent).AddColor(swapchainTarget, VK_ATTACHMENT_LOAD_OP_DONT_CARE).Execute(cmd, [&]() {
             ctx.blitPass.ExecuteHeap(ctx.ctx, cmd, pc, recorder.frameIndex);
-            AppendImGuiBatches(ctx, recorder.frameIndex, {.width = inColor.extent.width, .height = inColor.extent.height});
 
             if (!ctx.queues.uiBatches.empty()) {
                 // blitPass is a legacy descriptor-set + push-constant pass; the

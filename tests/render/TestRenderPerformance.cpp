@@ -43,17 +43,17 @@
 // ============================================================================
 
 enum class RenderPerfTestError : uint8_t {
-    EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine context for render performance test.">{}) = 1,
-    GeometryThroughputFailed ZHLN_ANNOTATION(ZHLN::Description<"Mass geometry and instance submission failed throughput gate.">{}),
-    LightingThroughputFailed ZHLN_ANNOTATION(ZHLN::Description<"Clustered lighting with multi-light stress failed throughput gate.">{}),
-    ParticleThroughputFailed ZHLN_ANNOTATION(ZHLN::Description<"GPU particle simulation & rendering failed throughput gate.">{}),
-    VolumetricsThroughputFailed ZHLN_ANNOTATION(ZHLN::Description<"Volumetric fog and lighting injection failed throughput gate.">{}),
-    DecalsThroughputFailed ZHLN_ANNOTATION(ZHLN::Description<"Mass screen-space decal projection failed throughput gate.">{}),
-    UICompositeThroughputFailed ZHLN_ANNOTATION(ZHLN::Description<"Immediate-mode UI rendering and batch composition failed throughput gate.">{}),
-    PostProcessingThroughputFailed ZHLN_ANNOTATION(ZHLN::Description<"Post-processing, TAA jitter, and tonemapping failed throughput gate.">{}),
-    RayTracingThroughputFailed ZHLN_ANNOTATION(ZHLN::Description<"Hardware Ray Tracing (RTR / RT Shadows) failed throughput gate.">{}),
-    UnifiedMasterBenchmarkFailed ZHLN_ANNOTATION(ZHLN::Description<"Unified master graphics benchmark failed performance or image verification criteria.">{}),
-    ValidationErrorsRaised ZHLN_ANNOTATION(ZHLN::Description<"Vulkan validation layer reported errors during benchmark execution.">{}),
+    EngineInitFailed               ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine context for render performance test."> {}) = 1,
+    GeometryThroughputFailed       ZHLN_ANNOTATION(ZHLN::Description<"Mass geometry and instance submission failed throughput gate."> {}),
+    LightingThroughputFailed       ZHLN_ANNOTATION(ZHLN::Description<"Clustered lighting with multi-light stress failed throughput gate."> {}),
+    ParticleThroughputFailed       ZHLN_ANNOTATION(ZHLN::Description<"GPU particle simulation & rendering failed throughput gate."> {}),
+    VolumetricsThroughputFailed    ZHLN_ANNOTATION(ZHLN::Description<"Volumetric fog and lighting injection failed throughput gate."> {}),
+    DecalsThroughputFailed         ZHLN_ANNOTATION(ZHLN::Description<"Mass screen-space decal projection failed throughput gate."> {}),
+    UICompositeThroughputFailed    ZHLN_ANNOTATION(ZHLN::Description<"Immediate-mode UI rendering and batch composition failed throughput gate."> {}),
+    PostProcessingThroughputFailed ZHLN_ANNOTATION(ZHLN::Description<"Post-processing, TAA jitter, and tonemapping failed throughput gate."> {}),
+    RayTracingThroughputFailed     ZHLN_ANNOTATION(ZHLN::Description<"Hardware Ray Tracing (RTR / RT Shadows) failed throughput gate."> {}),
+    UnifiedMasterBenchmarkFailed ZHLN_ANNOTATION(ZHLN::Description<"Unified master graphics benchmark failed performance or image verification criteria."> {}),
+    ValidationErrorsRaised       ZHLN_ANNOTATION(ZHLN::Description<"Vulkan validation layer reported errors during benchmark execution."> {}),
 };
 
 // ============================================================================
@@ -305,7 +305,9 @@ auto RunGeometryTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
         "    [Geometry & Culling] 60 frames x 1,600 Meshes in {:.2f} ms ({:.2f} FPS, {:.2f} kTris/frame)", durationMs, (kFrames * 1000.0) / durationMs,
         ZHLN::CullingStats::TotalTriangles / 1000.0
     );
-    ZHLN::Test::VerifyBaseline(mode == ZHLN::ValidationMode::On ? "render.geometry_culling_60f.val_on" : "render.geometry_culling_60f.val_off", durationMs, 25.0);
+    ZHLN::Test::VerifyBaseline(
+        mode == ZHLN::ValidationMode::On ? "render.geometry_culling_60f.val_on" : "render.geometry_culling_60f.val_off", durationMs, 25.0
+    );
 
     return {};
 }
@@ -375,7 +377,9 @@ auto RunLightingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
     double durationMs = timer.ElapsedMilliseconds();
 
     ZHLN::Println("    [Clustered Lighting] 60 frames x 64 Moving Point Lights in {:.2f} ms ({:.2f} FPS)", durationMs, (kFrames * 1000.0) / durationMs);
-    ZHLN::Test::VerifyBaseline(mode == ZHLN::ValidationMode::On ? "render.clustered_lighting_60f.val_on" : "render.clustered_lighting_60f.val_off", durationMs, 25.0);
+    ZHLN::Test::VerifyBaseline(
+        mode == ZHLN::ValidationMode::On ? "render.clustered_lighting_60f.val_on" : "render.clustered_lighting_60f.val_off", durationMs, 25.0
+    );
 
     return {};
 }
@@ -535,17 +539,41 @@ auto RunUITest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expected
 
     PrepareEngineForTest(engine);
 
-    engine.SetUICallback([](ZHLN::Engine& eng) {
-        ZHLN::GUI::Context ui(eng.GetRegistry(), eng.GetCurrentFrame());
+    engine.SetUICallback([&](ZHLN::Engine& eng) {
+        ZHLN::GUI::Context ui(eng);
+        ui.BeginFrame(0.016f);
 
-        ui.Panel("PerfDashboard", ZHLN::GUI::PanelConfig {.width = 1200.0f, .height = 680.0f, .gap = 6.0f, .padding = 10.0f}, [&]() {
-            for (int row = 0; row < 10; ++row) {
-                ui.Box(ZHLN::GUI::BoxConfig {.height = 40.0f, .color = {0.08f, 0.12f, 0.18f, 0.9f}}, [&]() {
-                    ui.Label(std::format("Telemetry Stream #{} [Bandwidth: 14.8 MB/s | Status: OK]", row));
-                    ui.Button(std::format("btn_action_{}", row), "Execute Command", []() {});
-                });
+        ui.Box(
+            "PerfDashboard",
+            ZHLN::GUI::BoxConfig {
+                .width     = {.fixed = 1200.0f, .fit = false},
+                .height    = {.fixed = 680.0f, .fit = false},
+                .padding   = 10.0f,
+                .gap       = 6.0f,
+                .direction = ZHLN::GUI::Direction::Column
+            },
+            [&]() {
+                for (int row = 0; row < 100; ++row) {
+                    std::string rowId = std::format("row_{}", row);
+                    ui.Box(
+                        rowId,
+                        ZHLN::GUI::BoxConfig {
+                            .height     = {.fixed = 40.0f, .fit = false},
+                            .color      = {0.08f, 0.12f, 0.18f, 0.9f},
+                            .gap        = 10.0f,
+                            .direction  = ZHLN::GUI::Direction::Row,
+                            .alignCross = ZHLN::GUI::Alignment::Center
+                        },
+                        [&]() {
+                            ui.Text(std::format("Telemetry Stream #{} [Bandwidth: 14.8 MB/s | Status: OK]", row));
+                            ui.Button("Execute Command");
+                        }
+                    );
+                }
             }
-        });
+        );
+
+        ui.EndFrameAndRender(eng.GetRenderContext());
     });
 
     constexpr uint32_t   kFrames = 60;
@@ -846,19 +874,34 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
     }
 
     // 7. Immediate-Mode UI HUD Callback
-    engine.SetUICallback([useHardwareRT, mode](ZHLN::Engine& eng) {
-        ZHLN::GUI::Context ui(eng.GetRegistry(), eng.GetCurrentFrame());
-        ui.Panel("GrandBenchmarkHUD", ZHLN::GUI::PanelConfig {.width = 380.0f, .height = 240.0f, .gap = 4.0f, .padding = 12.0f}, [&]() {
-            ui.Label("GRAND MASTER RENDER BENCHMARK", ZHLN::GUI::LabelConfig {.scale = 0.85f, .color = {0.3f, 0.85f, 1.0f, 1.0f}});
-            ui.Label(std::format("Frame: {} | Mode: {}", eng.GetCurrentFrame(), useHardwareRT ? "Hardware RTR + Shadows" : "Forward+ SSR"));
-            ui.Label(std::format("Validation: {}", GetModeLabel(mode)));
-            ui.Label("PBR Meshes: 600 | Clustered Lights: 49");
-            ui.Label("GPU Particles: 10,000 | Volumetric Froxels: Active");
-            ui.Box(ZHLN::GUI::BoxConfig {.height = 28.0f}, [&]() {
-                ui.Button("btn_stream_0", "Capture Frame", []() {});
-                ui.Button("btn_stream_1", "Toggle Stats", []() {});
-            });
-        });
+    engine.SetUICallback([&](ZHLN::Engine& eng) {
+        ZHLN::GUI::Context ui(eng);
+        ui.BeginFrame(0.016f);
+
+        ui.Box(
+            "GrandBenchmarkHUD",
+            ZHLN::GUI::BoxConfig {
+                .width     = {.fixed = 380.0f, .fit = false},
+                .height    = {.fixed = 240.0f, .fit = false},
+                .padding   = 12.0f,
+                .gap       = 4.0f,
+                .direction = ZHLN::GUI::Direction::Column
+            },
+            [&]() {
+                ui.Text("GRAND MASTER RENDER BENCHMARK", 12.0f, {0.3f, 0.85f, 1.0f, 1.0f});
+                ui.Text(std::format("Frame: {} | Mode: {}", eng.GetCurrentFrame(), useHardwareRT ? "Hardware RTR + Shadows" : "Forward+ SSR"));
+                ui.Text(std::format("Validation: {}", GetModeLabel(mode)));
+                ui.Text("PBR Meshes: 600 | Clustered Lights: 49");
+                ui.Text("GPU Particles: 10,000 | Volumetric Froxels: Active");
+
+                ui.Row(8.0f, [&]() {
+                    ui.Button("Capture Frame");
+                    ui.Button("Toggle Stats");
+                });
+            }
+        );
+
+        ui.EndFrameAndRender(eng.GetRenderContext());
     });
 
     // 8. Configure Post-Processing
@@ -1076,16 +1119,15 @@ struct RenderPerformanceThroughputSuite {
 // this domain through Runner::RunDeferred.
 auto RunRenderPerformanceSuites() -> ZHLN::Test::TestStats {
     ZHLN::Test::TestStats total {};
-        {
-            const auto s = ZHLN::Test::RunSuite<RenderPerformanceValidationSuite>();
-            total.passed += s.passed;
-            total.failed += s.failed;
-        }
-        {
-            const auto s = ZHLN::Test::RunSuite<RenderPerformanceThroughputSuite>();
-            total.passed += s.passed;
-            total.failed += s.failed;
-        }
-        return total;
+    {
+        const auto s = ZHLN::Test::RunSuite<RenderPerformanceValidationSuite>();
+        total.passed += s.passed;
+        total.failed += s.failed;
+    }
+    {
+        const auto s = ZHLN::Test::RunSuite<RenderPerformanceThroughputSuite>();
+        total.passed += s.passed;
+        total.failed += s.failed;
+    }
+    return total;
 }
-

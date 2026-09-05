@@ -4,8 +4,6 @@
 // File: src/engine/graphics/init/RenderInitDevice.cpp
 #include "../../TTYBackend.hpp"
 #include "../RenderInternal.hpp"
-#include "backends/imgui_impl_glfw.h"
-#include "imgui.h"
 #include <Features.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
@@ -398,13 +396,7 @@ RenderContext::~RenderContext() {
         }
         _impl->stagingContext.reset();
 
-        // --- SAFETY: Only shut down ImGui if it was actually initialized ---
-        if (ImGui::GetCurrentContext() != nullptr) {
-            if (!_impl->window.IsHeadless() && !_impl->window.IsTTY()) {
-                ImGui_ImplGlfw_Shutdown();
-            }
-            ImGui::DestroyContext();
-        }
+
     }
 }
 

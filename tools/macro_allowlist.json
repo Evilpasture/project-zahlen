@@ -3,6 +3,7 @@
     "_WIN32_WINNT",
     "ARCH_ARM64",
     "ARCH_X64",
+    "CLAY_IMPLEMENTATION",
     "CSYM",
     "GL_BGRA",
     "GL_UNSIGNED_INT_8_8_8_8_REV",
@@ -51,6 +52,7 @@
   ],
   "banned_macros": {},
   "third_party_families": [
+    "CLAY_",
     "GLFW_",
     "IMGUI_",
     "IM_",

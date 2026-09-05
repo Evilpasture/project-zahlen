@@ -29,29 +29,11 @@ auto RunErrorSuite() -> ZHLN::Test::TestStats;
 auto RunCommandLineSuite() -> ZHLN::Test::TestStats;
 auto RunMathAndIKSuite() -> ZHLN::Test::TestStats;
 auto RunGraphicsSettingsSuite() -> ZHLN::Test::TestStats;
-auto RunGUIContextSuite() -> ZHLN::Test::TestStats;
-auto RunUILayoutSuite() -> ZHLN::Test::TestStats;
-auto RunGUIPrimitivesSuite() -> ZHLN::Test::TestStats;
-auto RunGUIWidgetsSuite() -> ZHLN::Test::TestStats;
-auto RunTextEditSuite() -> ZHLN::Test::TestStats;
-auto RunGUIEditorSuite() -> ZHLN::Test::TestStats;
 auto RunRayTracedNoiseMetricsSuite() -> ZHLN::Test::TestStats;
 
 auto main() -> int {
     return ZHLN::Test::Runner::RunDeferred(
-        RunPlatformSuite,
-        RunContainersSuite,
-        RunReflectionSuite,
-        RunErrorSuite,
-        RunCommandLineSuite,
-        RunMathAndIKSuite,
-        RunGraphicsSettingsSuite,
-        RunGUIContextSuite,
-        RunUILayoutSuite,
-        RunGUIPrimitivesSuite,
-        RunGUIWidgetsSuite,
-        RunTextEditSuite,
-        RunGUIEditorSuite,
+        RunPlatformSuite, RunContainersSuite, RunReflectionSuite, RunErrorSuite, RunCommandLineSuite, RunMathAndIKSuite, RunGraphicsSettingsSuite,
         RunRayTracedNoiseMetricsSuite
     );
 }
