@@ -25,6 +25,7 @@ namespace ZHLN::GUI {
 // Internal persistent state for widgets (drag state, foldout status)
 struct WidgetState {
     bool     isDragging      = false;
+    bool     isPressed       = false;
     bool     isOpen          = false;
     bool     isInitialized   = false;
     uint64_t lastActiveFrame = 0;
@@ -381,8 +382,34 @@ void Context::Text(std::string_view text, float fontSize, const JPH::Vec4& color
 bool Context::Button(std::string_view label, const JPH::Vec4& color, const Sizing& width) noexcept {
     Clay_SetCurrentContext(_impl->clayContext);
     bool           clicked = false;
-    uint32_t       id      = static_cast<uint32_t>(HashCreativeWorkPath(label));
-    Clay_ElementId elemId  = Clay_GetElementIdWithIndex(ToClayString(label), id);
+    uint32_t       idNum   = static_cast<uint32_t>(HashCreativeWorkPath(label));
+    Clay_ElementId elemId  = Clay_GetElementIdWithIndex(ToClayString(label), idNum);
+    auto&          state   = _impl->GetState((static_cast<uint64_t>(idNum) << 32) | 0xB007, _impl->engine.GetCurrentFrame());
+
+    auto* input = _impl->engine.GetRegistry().GetSingleton<Components::InputStateComponent>();
+    float mx = input ? input->mouseX : -1.0f;
+    float my = input ? input->mouseY : -1.0f;
+    bool isMouseDown = input && input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
+
+    Clay_ElementData elemData = Clay_GetElementData(elemId);
+    bool isHovered = Clay_Hovered() || Clay_PointerOver(elemId) ||
+                     (elemData.found && elemData.boundingBox.width > 0.0f &&
+                      mx >= elemData.boundingBox.x && mx <= (elemData.boundingBox.x + elemData.boundingBox.width) &&
+                      my >= elemData.boundingBox.y && my <= (elemData.boundingBox.y + elemData.boundingBox.height));
+
+    auto pointer = Clay_GetPointerState();
+    bool isPressedNow = (pointer.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME) || (isMouseDown && !state.isPressed);
+
+    if (isHovered && isPressedNow) {
+        clicked = true;
+        state.isPressed = true;
+    }
+    if (!isMouseDown) {
+        state.isPressed = false;
+    }
+
+    _impl->lastItemHovered = isHovered;
+    _impl->lastItemActive  = isHovered && isMouseDown;
 
     Clay__OpenElementWithId(elemId);
     Clay_ElementDeclaration decl = {
@@ -392,22 +419,12 @@ bool Context::Button(std::string_view label, const JPH::Vec4& color, const Sizin
             .childAlignment  = {.x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER},
             .layoutDirection = CLAY_LEFT_TO_RIGHT
         },
-        .backgroundColor = Clay_Hovered() ? ToClayColor(color + JPH::Vec4(0.12f, 0.12f, 0.12f, 0.0f)) : ToClayColor(color),
+        .backgroundColor = isHovered ? (state.isPressed ? ToClayColor(color + JPH::Vec4(0.22f, 0.22f, 0.22f, 0.0f)) : ToClayColor(color + JPH::Vec4(0.12f, 0.12f, 0.12f, 0.0f))) : ToClayColor(color),
         .cornerRadius    = {6, 6, 6, 6}
     };
     Clay__ConfigureOpenElement(decl);
 
     Text(label, 16.0f, {0.95f, 0.95f, 1.0f, 1.0f});
-
-    bool isHovered = Clay_Hovered();
-    auto pointer   = Clay_GetPointerState();
-    bool isDown    = (pointer.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME || pointer.state == CLAY_POINTER_DATA_PRESSED);
-    if (isHovered && isDown) {
-        clicked = true;
-    }
-
-    _impl->lastItemHovered = isHovered;
-    _impl->lastItemActive  = isHovered && isDown;
 
     Clay__CloseElement();
     return clicked;
@@ -424,8 +441,35 @@ bool Context::IsItemActive() const noexcept {
 bool Context::Checkbox(std::string_view label, bool& checked) noexcept {
     Clay_SetCurrentContext(_impl->clayContext);
     bool           changed = false;
-    uint32_t       id      = static_cast<uint32_t>(HashCreativeWorkPath(label));
-    Clay_ElementId elemId  = Clay_GetElementIdWithIndex(ToClayString("cb"), id);
+    uint32_t       idNum   = static_cast<uint32_t>(HashCreativeWorkPath(label));
+    Clay_ElementId elemId  = Clay_GetElementIdWithIndex(ToClayString("cb"), idNum);
+    auto&          state   = _impl->GetState((static_cast<uint64_t>(idNum) << 32) | 0x00CB, _impl->engine.GetCurrentFrame());
+
+    auto* input = _impl->engine.GetRegistry().GetSingleton<Components::InputStateComponent>();
+    float mx = input ? input->mouseX : -1.0f;
+    float my = input ? input->mouseY : -1.0f;
+    bool isMouseDown = input && input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
+
+    Clay_ElementData elemData = Clay_GetElementData(elemId);
+    bool isHovered = Clay_Hovered() || Clay_PointerOver(elemId) ||
+                     (elemData.found && elemData.boundingBox.width > 0.0f &&
+                      mx >= elemData.boundingBox.x && mx <= (elemData.boundingBox.x + elemData.boundingBox.width) &&
+                      my >= elemData.boundingBox.y && my <= (elemData.boundingBox.y + elemData.boundingBox.height));
+
+    auto pointer = Clay_GetPointerState();
+    bool isPressedNow = (pointer.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME) || (isMouseDown && !state.isPressed);
+
+    if (isHovered && isPressedNow) {
+        checked = !checked;
+        changed = true;
+        state.isPressed = true;
+    }
+    if (!isMouseDown) {
+        state.isPressed = false;
+    }
+
+    _impl->lastItemHovered = isHovered;
+    _impl->lastItemActive  = isHovered && isMouseDown;
 
     BeginRow(8.0f);
 
@@ -435,20 +479,10 @@ bool Context::Checkbox(std::string_view label, bool& checked) noexcept {
             .sizing         = {.width = CLAY_SIZING_FIXED(22), .height = CLAY_SIZING_FIXED(22)},
             .childAlignment = {.x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER}
         },
-        .backgroundColor = Clay_Hovered() ? Clay_Color {45, 60, 85, 255} : Clay_Color {25, 35, 50, 255},
+        .backgroundColor = isHovered ? Clay_Color {55, 75, 105, 255} : Clay_Color {25, 35, 50, 255},
         .cornerRadius    = {4, 4, 4, 4}
     };
     Clay__ConfigureOpenElement(decl);
-
-    bool isHovered = Clay_Hovered();
-    auto pointer   = Clay_GetPointerState();
-    if (isHovered && pointer.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME) {
-        checked = !checked;
-        changed = true;
-    }
-
-    _impl->lastItemHovered = isHovered;
-    _impl->lastItemActive  = isHovered && (pointer.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME || pointer.state == CLAY_POINTER_DATA_PRESSED);
 
     if (checked) {
         Clay__OpenElement();
@@ -478,6 +512,37 @@ bool Context::Slider(std::string_view label, float& value, float minVal, float m
     uint64_t stateKey = (static_cast<uint64_t>(idNum) << 32) | 0x511D;
     auto&    state    = _impl->GetState(stateKey, _impl->engine.GetCurrentFrame());
 
+    auto* input = _impl->engine.GetRegistry().GetSingleton<Components::InputStateComponent>();
+    float mx = input ? input->mouseX : -1.0f;
+    float my = input ? input->mouseY : -1.0f;
+    bool isMouseDown = input && input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
+
+    Clay_ElementData elemData = Clay_GetElementData(elemId);
+    bool isHovered = Clay_Hovered() || Clay_PointerOver(elemId) ||
+                     (elemData.found && elemData.boundingBox.width > 0.0f &&
+                      mx >= elemData.boundingBox.x && mx <= (elemData.boundingBox.x + elemData.boundingBox.width) &&
+                      my >= elemData.boundingBox.y && my <= (elemData.boundingBox.y + elemData.boundingBox.height));
+
+    auto pointer = Clay_GetPointerState();
+    bool isDown  = isMouseDown || (pointer.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME || pointer.state == CLAY_POINTER_DATA_PRESSED);
+
+    if (isHovered && isDown) {
+        state.isDragging = true;
+    }
+    if (!isDown) {
+        state.isDragging = false;
+    }
+
+    if (state.isDragging && elemData.found && elemData.boundingBox.width > 0.0f) {
+        float relX   = mx - elemData.boundingBox.x;
+        float frac   = std::clamp(relX / elemData.boundingBox.width, 0.0f, 1.0f);
+        float newVal = minVal + frac * (maxVal - minVal);
+        if (std::abs(newVal - value) > 1e-5f) {
+            value   = newVal;
+            changed = true;
+        }
+    }
+
     BeginRow(8.0f);
     Text(label, 15.0f, {0.9f, 0.9f, 0.9f, 1.0f});
 
@@ -488,32 +553,10 @@ bool Context::Slider(std::string_view label, float& value, float minVal, float m
             .padding        = {2, 2, 2, 2},
             .childAlignment = {.x = CLAY_ALIGN_X_LEFT, .y = CLAY_ALIGN_Y_CENTER}
         },
-        .backgroundColor = Clay_Hovered() ? Clay_Color {45, 60, 85, 255} : Clay_Color {25, 35, 50, 255},
+        .backgroundColor = isHovered ? Clay_Color {55, 75, 105, 255} : Clay_Color {25, 35, 50, 255},
         .cornerRadius    = {4, 4, 4, 4}
     };
     Clay__ConfigureOpenElement(trackDecl);
-
-    bool isHovered = Clay_Hovered();
-    auto pointer   = Clay_GetPointerState();
-    bool isDown    = (pointer.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME || pointer.state == CLAY_POINTER_DATA_PRESSED);
-
-    if (isHovered && pointer.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME) {
-        state.isDragging = true;
-    }
-    if (!isDown) {
-        state.isDragging = false;
-    }
-
-    Clay_ElementData elemData = Clay_GetElementData(elemId);
-    if (state.isDragging && elemData.found && elemData.boundingBox.width > 0.0f) {
-        float relX   = pointer.position.x - elemData.boundingBox.x;
-        float frac   = std::clamp(relX / elemData.boundingBox.width, 0.0f, 1.0f);
-        float newVal = minVal + frac * (maxVal - minVal);
-        if (std::abs(newVal - value) > 1e-5f) {
-            value   = newVal;
-            changed = true;
-        }
-    }
 
     float frac      = (maxVal > minVal) ? std::clamp((value - minVal) / (maxVal - minVal), 0.0f, 1.0f) : 0.0f;
     float fillWidth = std::max(4.0f, frac * 156.0f);
@@ -548,6 +591,28 @@ bool Context::BeginCollapsingHeader(std::string_view label, bool defaultOpen) no
         state.isInitialized = true;
     }
 
+    auto* input = _impl->engine.GetRegistry().GetSingleton<Components::InputStateComponent>();
+    float mx = input ? input->mouseX : -1.0f;
+    float my = input ? input->mouseY : -1.0f;
+    bool isMouseDown = input && input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
+
+    Clay_ElementData elemData = Clay_GetElementData(elemId);
+    bool isHovered = Clay_Hovered() || Clay_PointerOver(elemId) ||
+                     (elemData.found && elemData.boundingBox.width > 0.0f &&
+                      mx >= elemData.boundingBox.x && mx <= (elemData.boundingBox.x + elemData.boundingBox.width) &&
+                      my >= elemData.boundingBox.y && my <= (elemData.boundingBox.y + elemData.boundingBox.height));
+
+    auto pointer = Clay_GetPointerState();
+    bool isPressedNow = (pointer.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME) || (isMouseDown && !state.isPressed);
+
+    if (isHovered && isPressedNow) {
+        state.isOpen    = !state.isOpen;
+        state.isPressed = true;
+    }
+    if (!isMouseDown) {
+        state.isPressed = false;
+    }
+
     BeginColumn(4.0f);
 
     Clay__OpenElementWithId(elemId);
@@ -558,14 +623,10 @@ bool Context::BeginCollapsingHeader(std::string_view label, bool defaultOpen) no
              .childGap        = 8,
              .childAlignment  = {.x = CLAY_ALIGN_X_LEFT, .y = CLAY_ALIGN_Y_CENTER},
              .layoutDirection = CLAY_LEFT_TO_RIGHT},
-        .backgroundColor = Clay_Hovered() ? Clay_Color {45, 60, 85, 255} : Clay_Color {30, 40, 58, 255},
+        .backgroundColor = isHovered ? Clay_Color {55, 75, 105, 255} : Clay_Color {30, 40, 58, 255},
         .cornerRadius    = {4, 4, 4, 4}
     };
     Clay__ConfigureOpenElement(headerDecl);
-
-    if (Clay_Hovered() && Clay_GetPointerState().state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME) {
-        state.isOpen = !state.isOpen;
-    }
 
     Text(state.isOpen ? "v" : ">", 15.0f, {0.8f, 0.8f, 0.8f, 1.0f});
     Text(label, 15.0f, {1.0f, 1.0f, 1.0f, 1.0f});
