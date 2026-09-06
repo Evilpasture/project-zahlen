@@ -124,7 +124,12 @@ struct UITestSuite {
                 return std::unexpected(UITestError::EngineInitFailed);
             }
 
-            auto& input = engine->GetRegistry().GetOrEmplaceSingleton<ZHLN::Components::InputStateComponent>();
+            auto setInput = [&](float mx, float my, bool lbutton) {
+                auto& in = engine->GetRegistry().GetOrEmplaceSingleton<ZHLN::Components::InputStateComponent>();
+                in.mouseX = mx;
+                in.mouseY = my;
+                in.SetKey(static_cast<uint8_t>(ZHLN::KeyCode::LButton), lbutton);
+            };
 
             uint32_t clickCountA = 0;
             uint32_t clickCountB = 0;
@@ -166,9 +171,7 @@ struct UITestSuite {
             constexpr float dt = 1.0f / 60.0f;
 
             // Frame 1: Initial layout establishment (mouse at 0, 0, unpressed)
-            input.mouseX = 0.0f;
-            input.mouseY = 0.0f;
-            input.SetKey(static_cast<uint8_t>(ZHLN::KeyCode::LButton), false);
+            setInput(0.0f, 0.0f, false);
             engine->ProcessEvents();
             engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
 
@@ -178,9 +181,7 @@ struct UITestSuite {
             ZHLN::Test::ExpectEq(clickCountB, 0u);
 
             // Frame 2: Mouse hovers over ButtonA (approx x: 50, y: 35), unpressed
-            input.mouseX = 50.0f;
-            input.mouseY = 35.0f;
-            input.SetKey(static_cast<uint8_t>(ZHLN::KeyCode::LButton), false);
+            setInput(50.0f, 35.0f, false);
             engine->ProcessEvents();
             engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
 
@@ -194,7 +195,7 @@ struct UITestSuite {
             ZHLN::Test::ExpectTrue(hoverCountA > 0u);
 
             // Frame 3: Mouse pressed down this frame over ButtonA
-            input.SetKey(static_cast<uint8_t>(ZHLN::KeyCode::LButton), true);
+            setInput(50.0f, 35.0f, true);
             engine->ProcessEvents();
             engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
 
@@ -206,6 +207,7 @@ struct UITestSuite {
             ZHLN::Test::ExpectEq(clickCountB, 0u);
 
             // Frame 4: Button is held down across next frame (single-fire guarantee: should NOT click again)
+            setInput(50.0f, 35.0f, true);
             engine->ProcessEvents();
             engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
 
@@ -216,7 +218,7 @@ struct UITestSuite {
             ZHLN::Test::ExpectEq(clickCountA, 1u);
 
             // Frame 5: Mouse released over ButtonA
-            input.SetKey(static_cast<uint8_t>(ZHLN::KeyCode::LButton), false);
+            setInput(50.0f, 35.0f, false);
             engine->ProcessEvents();
             engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
 
@@ -227,15 +229,12 @@ struct UITestSuite {
 
             // Frame 6: Mouse pressed outside (at 500, 400) and dragged onto ButtonB (at 50, 85)
             // Drag-into-click prevention test
-            input.mouseX = 500.0f;
-            input.mouseY = 400.0f;
-            input.SetKey(static_cast<uint8_t>(ZHLN::KeyCode::LButton), true);
+            setInput(500.0f, 400.0f, true);
             engine->ProcessEvents();
             engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
 
             // Move mouse over ButtonB while still held down from previous frame
-            input.mouseX = 50.0f;
-            input.mouseY = 85.0f;
+            setInput(50.0f, 85.0f, true);
             engine->ProcessEvents();
             engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
 
@@ -243,11 +242,11 @@ struct UITestSuite {
             ZHLN::Test::ExpectEq(clickCountB, 0u);
 
             // Frame 7: Release mouse over ButtonB, then press again to verify ButtonB clicks cleanly
-            input.SetKey(static_cast<uint8_t>(ZHLN::KeyCode::LButton), false);
+            setInput(50.0f, 85.0f, false);
             engine->ProcessEvents();
             engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
 
-            input.SetKey(static_cast<uint8_t>(ZHLN::KeyCode::LButton), true);
+            setInput(50.0f, 85.0f, true);
             engine->ProcessEvents();
             engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
 
