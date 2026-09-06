@@ -10,6 +10,7 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <cstdlib>
 #include <expected>
 #include <fstream>
 #include <string>
@@ -141,7 +142,23 @@ struct UITestSuite {
             bool     wasClickedA = false;
             bool     wasClickedB = false;
 
+            // ZHLN_UI_DEBUG=1 dumps, per frame, whether this callback ran at all
+            // and what input the GUI side can actually see. tests/gui_harness
+            // verifies the Button widget itself against the real Clay, so when
+            // this test fails the open question is always "did the frame run, and
+            // did the mouse arrive" -- which is exactly what this prints.
+            const bool uiDebug  = std::getenv("ZHLN_UI_DEBUG") != nullptr;
+            uint32_t   cbFrames = 0;
+
             engine->SetUICallback([&](ZHLN::Engine& eng) {
+                ++cbFrames;
+                if (uiDebug) {
+                    const auto* guiInput = eng.GetRegistry().GetSingleton<ZHLN::Components::InputStateComponent>();
+                    ZHLN::Println("    [ui-debug] callback frame {} : InputStateComponent={} mouse=({},{}) LButton={}", cbFrames,
+                                  reinterpret_cast<uintptr_t>(guiInput), guiInput ? guiInput->mouseX : -1.0f,
+                                  guiInput ? guiInput->mouseY : -1.0f,
+                                  guiInput ? (guiInput->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LButton)) ? 1 : 0) : -1);
+                }
                 ZHLN::GUI::Context ui(eng);
                 ui.BeginFrame(0.016f);
 
@@ -165,6 +182,11 @@ struct UITestSuite {
                     }
                 );
 
+                if (uiDebug) {
+                    ZHLN::Println("    [ui-debug]   -> A hover={} active={} clicked={} | B hover={} active={} clicked={}",
+                                  isHoveredA ? 1 : 0, isActiveA ? 1 : 0, wasClickedA ? 1 : 0, isHoveredB ? 1 : 0,
+                                  isActiveB ? 1 : 0, wasClickedB ? 1 : 0);
+                }
                 ui.EndFrameAndRender(eng.GetRenderContext());
             });
 
@@ -253,6 +275,13 @@ struct UITestSuite {
             ZHLN::Test::ExpectTrue(wasClickedB);
             ZHLN::Test::ExpectEq(clickCountA, 1u);
             ZHLN::Test::ExpectEq(clickCountB, 1u);
+
+            if (clickCountA == 0u && clickCountB == 0u) {
+                ZHLN::Println("    [diag] UI callback ran {} time(s) over 8 ticks; ButtonA hover callback fired {} time(s).", cbFrames,
+                              hoverCountA);
+                ZHLN::Println("    [diag] cbFrames==0 -> the host UI callback never ran. cbFrames>0 with hoverCountA==0 -> the "
+                              "GUI never saw the pointer at (50,35). Set ZHLN_UI_DEBUG=1 for the per-frame dump.");
+            }
 
             return {};
         }
