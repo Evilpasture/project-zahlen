@@ -119,274 +119,139 @@ struct UITestSuite {
         }
 
         std::expected<void, ZHLN::Error> button_click_interaction_and_states() {
-            ZHLN::ECS::Registry registry;
-            auto& input = registry.GetOrEmplaceSingleton<ZHLN::Components::InputStateComponent>();
+            auto engine = CreateTestEngine(640, 480);
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return std::unexpected(UITestError::EngineInitFailed);
+            }
+
+            auto& input = engine->GetRegistry().GetOrEmplaceSingleton<ZHLN::Components::InputStateComponent>();
 
             uint32_t clickCountA = 0;
             uint32_t clickCountB = 0;
             uint32_t hoverCountA = 0;
+            bool     isHoveredA  = false;
+            bool     isHoveredB  = false;
+            bool     isActiveA   = false;
+            bool     isActiveB   = false;
+            bool     wasClickedA = false;
+            bool     wasClickedB = false;
 
-            // Frame 1: Initial layout establishment (mouse far away at 0, 0, unpressed)
+            engine->SetUICallback([&](ZHLN::Engine& eng) {
+                ZHLN::GUI::Context ui(eng);
+                ui.BeginFrame(0.016f);
+
+                ui.Box(
+                    "Container",
+                    ZHLN::GUI::BoxConfig {
+                        .width     = {.fixed = 300.0f},
+                        .height    = {.fixed = 200.0f},
+                        .padding   = 20.0f,
+                        .gap       = 10.0f,
+                        .direction = ZHLN::GUI::Direction::Column
+                    },
+                    [&]() {
+                        wasClickedA = ui.Button("ButtonA", [&]() { clickCountA++; }, [&]() { hoverCountA++; });
+                        isHoveredA  = ui.IsItemHovered();
+                        isActiveA   = ui.IsItemActive();
+
+                        wasClickedB = ui.Button("ButtonB", [&]() { clickCountB++; });
+                        isHoveredB  = ui.IsItemHovered();
+                        isActiveB   = ui.IsItemActive();
+                    }
+                );
+
+                ui.EndFrameAndRender(eng.GetRenderContext());
+            });
+
+            constexpr float dt = 1.0f / 60.0f;
+
+            // Frame 1: Initial layout establishment (mouse at 0, 0, unpressed)
             input.mouseX = 0.0f;
             input.mouseY = 0.0f;
             input.SetKey(static_cast<uint8_t>(ZHLN::KeyCode::LButton), false);
-            {
-                ZHLN::GUI::Context gui(registry, {800, 600});
-                gui.BeginFrame(0.016f);
+            engine->ProcessEvents();
+            engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
 
-                gui.Box(
-                    "Container",
-                    ZHLN::GUI::BoxConfig {
-                        .width     = {.fixed = 400.0f},
-                        .height    = {.fixed = 300.0f},
-                        .padding   = 20.0f,
-                        .gap       = 10.0f,
-                        .direction = ZHLN::GUI::Direction::Column
-                    },
-                    [&]() {
-                        bool clickedA = gui.Button("ButtonA", [&]() { clickCountA++; }, [&]() { hoverCountA++; });
-                        bool clickedB = gui.Button("ButtonB", [&]() { clickCountB++; });
-
-                        ZHLN::Test::ExpectFalse(clickedA);
-                        ZHLN::Test::ExpectFalse(clickedB);
-                        ZHLN::Test::ExpectFalse(gui.IsItemHovered());
-                        ZHLN::Test::ExpectFalse(gui.IsItemActive());
-                    }
-                );
-
-                gui.EndFrame();
-            }
-
+            ZHLN::Test::ExpectFalse(wasClickedA);
+            ZHLN::Test::ExpectFalse(wasClickedB);
             ZHLN::Test::ExpectEq(clickCountA, 0u);
             ZHLN::Test::ExpectEq(clickCountB, 0u);
 
-            // Frame 2: Mouse hovers over ButtonA (approx x: 50, y: 40), still unpressed
+            // Frame 2: Mouse hovers over ButtonA (approx x: 50, y: 35), unpressed
             input.mouseX = 50.0f;
-            input.mouseY = 40.0f;
+            input.mouseY = 35.0f;
             input.SetKey(static_cast<uint8_t>(ZHLN::KeyCode::LButton), false);
-            {
-                ZHLN::GUI::Context gui(registry, {800, 600});
-                gui.BeginFrame(0.016f);
+            engine->ProcessEvents();
+            engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
 
-                gui.Box(
-                    "Container",
-                    ZHLN::GUI::BoxConfig {
-                        .width     = {.fixed = 400.0f},
-                        .height    = {.fixed = 300.0f},
-                        .padding   = 20.0f,
-                        .gap       = 10.0f,
-                        .direction = ZHLN::GUI::Direction::Column
-                    },
-                    [&]() {
-                        bool clickedA = gui.Button("ButtonA", [&]() { clickCountA++; }, [&]() { hoverCountA++; });
-                        ZHLN::Test::ExpectFalse(clickedA);
-                        ZHLN::Test::ExpectTrue(gui.IsItemHovered());
-                        ZHLN::Test::ExpectFalse(gui.IsItemActive());
-
-                        bool clickedB = gui.Button("ButtonB", [&]() { clickCountB++; });
-                        ZHLN::Test::ExpectFalse(clickedB);
-                        ZHLN::Test::ExpectFalse(gui.IsItemHovered());
-                        ZHLN::Test::ExpectFalse(gui.IsItemActive());
-                    }
-                );
-
-                gui.EndFrame();
-            }
-
+            ZHLN::Test::ExpectFalse(wasClickedA);
+            ZHLN::Test::ExpectTrue(isHoveredA);
+            ZHLN::Test::ExpectFalse(isActiveA);
+            ZHLN::Test::ExpectFalse(wasClickedB);
+            ZHLN::Test::ExpectFalse(isHoveredB);
+            ZHLN::Test::ExpectFalse(isActiveB);
             ZHLN::Test::ExpectEq(clickCountA, 0u);
             ZHLN::Test::ExpectTrue(hoverCountA > 0u);
 
             // Frame 3: Mouse pressed down this frame over ButtonA
             input.SetKey(static_cast<uint8_t>(ZHLN::KeyCode::LButton), true);
-            {
-                ZHLN::GUI::Context gui(registry, {800, 600});
-                gui.BeginFrame(0.016f);
+            engine->ProcessEvents();
+            engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
 
-                gui.Box(
-                    "Container",
-                    ZHLN::GUI::BoxConfig {
-                        .width     = {.fixed = 400.0f},
-                        .height    = {.fixed = 300.0f},
-                        .padding   = 20.0f,
-                        .gap       = 10.0f,
-                        .direction = ZHLN::GUI::Direction::Column
-                    },
-                    [&]() {
-                        bool clickedA = gui.Button("ButtonA", [&]() { clickCountA++; });
-                        ZHLN::Test::ExpectTrue(clickedA);
-                        ZHLN::Test::ExpectTrue(gui.IsItemHovered());
-                        ZHLN::Test::ExpectTrue(gui.IsItemActive());
-
-                        bool clickedB = gui.Button("ButtonB", [&]() { clickCountB++; });
-                        ZHLN::Test::ExpectFalse(clickedB);
-                        ZHLN::Test::ExpectFalse(gui.IsItemHovered());
-                        ZHLN::Test::ExpectFalse(gui.IsItemActive());
-                    }
-                );
-
-                gui.EndFrame();
-            }
-
+            ZHLN::Test::ExpectTrue(wasClickedA);
+            ZHLN::Test::ExpectTrue(isHoveredA);
+            ZHLN::Test::ExpectTrue(isActiveA);
+            ZHLN::Test::ExpectFalse(wasClickedB);
             ZHLN::Test::ExpectEq(clickCountA, 1u);
             ZHLN::Test::ExpectEq(clickCountB, 0u);
 
             // Frame 4: Button is held down across next frame (single-fire guarantee: should NOT click again)
-            {
-                ZHLN::GUI::Context gui(registry, {800, 600});
-                gui.BeginFrame(0.016f);
+            engine->ProcessEvents();
+            engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
 
-                gui.Box(
-                    "Container",
-                    ZHLN::GUI::BoxConfig {
-                        .width     = {.fixed = 400.0f},
-                        .height    = {.fixed = 300.0f},
-                        .padding   = 20.0f,
-                        .gap       = 10.0f,
-                        .direction = ZHLN::GUI::Direction::Column
-                    },
-                    [&]() {
-                        bool clickedA = gui.Button("ButtonA", [&]() { clickCountA++; });
-                        ZHLN::Test::ExpectFalse(clickedA); // Hold should NOT re-trigger click
-                        ZHLN::Test::ExpectTrue(gui.IsItemHovered());
-                        ZHLN::Test::ExpectTrue(gui.IsItemActive());
-
-                        bool clickedB = gui.Button("ButtonB", [&]() { clickCountB++; });
-                        ZHLN::Test::ExpectFalse(clickedB);
-                    }
-                );
-
-                gui.EndFrame();
-            }
-
+            ZHLN::Test::ExpectFalse(wasClickedA);
+            ZHLN::Test::ExpectTrue(isHoveredA);
+            ZHLN::Test::ExpectTrue(isActiveA);
+            ZHLN::Test::ExpectFalse(wasClickedB);
             ZHLN::Test::ExpectEq(clickCountA, 1u);
 
             // Frame 5: Mouse released over ButtonA
             input.SetKey(static_cast<uint8_t>(ZHLN::KeyCode::LButton), false);
-            {
-                ZHLN::GUI::Context gui(registry, {800, 600});
-                gui.BeginFrame(0.016f);
+            engine->ProcessEvents();
+            engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
 
-                gui.Box(
-                    "Container",
-                    ZHLN::GUI::BoxConfig {
-                        .width     = {.fixed = 400.0f},
-                        .height    = {.fixed = 300.0f},
-                        .padding   = 20.0f,
-                        .gap       = 10.0f,
-                        .direction = ZHLN::GUI::Direction::Column
-                    },
-                    [&]() {
-                        bool clickedA = gui.Button("ButtonA", [&]() { clickCountA++; });
-                        ZHLN::Test::ExpectFalse(clickedA);
-                        ZHLN::Test::ExpectTrue(gui.IsItemHovered());
-                        ZHLN::Test::ExpectFalse(gui.IsItemActive());
-                    }
-                );
-
-                gui.EndFrame();
-            }
-
+            ZHLN::Test::ExpectFalse(wasClickedA);
+            ZHLN::Test::ExpectTrue(isHoveredA);
+            ZHLN::Test::ExpectFalse(isActiveA);
             ZHLN::Test::ExpectEq(clickCountA, 1u);
 
-            // Frame 6: Mouse pressed outside (at 700, 500) and dragged onto ButtonB (at 50, 100)
+            // Frame 6: Mouse pressed outside (at 500, 400) and dragged onto ButtonB (at 50, 85)
             // Drag-into-click prevention test
-            input.mouseX = 700.0f;
-            input.mouseY = 500.0f;
+            input.mouseX = 500.0f;
+            input.mouseY = 400.0f;
             input.SetKey(static_cast<uint8_t>(ZHLN::KeyCode::LButton), true);
-            {
-                ZHLN::GUI::Context gui(registry, {800, 600});
-                gui.BeginFrame(0.016f);
+            engine->ProcessEvents();
+            engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
 
-                gui.Box(
-                    "Container",
-                    ZHLN::GUI::BoxConfig {
-                        .width     = {.fixed = 400.0f},
-                        .height    = {.fixed = 300.0f},
-                        .padding   = 20.0f,
-                        .gap       = 10.0f,
-                        .direction = ZHLN::GUI::Direction::Column
-                    },
-                    [&]() {
-                        gui.Button("ButtonA");
-                        gui.Button("ButtonB", [&]() { clickCountB++; });
-                    }
-                );
-
-                gui.EndFrame();
-            }
-
-            // Now move mouse over ButtonB while still held down from previous frame
+            // Move mouse over ButtonB while still held down from previous frame
             input.mouseX = 50.0f;
-            input.mouseY = 100.0f;
-            {
-                ZHLN::GUI::Context gui(registry, {800, 600});
-                gui.BeginFrame(0.016f);
+            input.mouseY = 85.0f;
+            engine->ProcessEvents();
+            engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
 
-                gui.Box(
-                    "Container",
-                    ZHLN::GUI::BoxConfig {
-                        .width     = {.fixed = 400.0f},
-                        .height    = {.fixed = 300.0f},
-                        .padding   = 20.0f,
-                        .gap       = 10.0f,
-                        .direction = ZHLN::GUI::Direction::Column
-                    },
-                    [&]() {
-                        gui.Button("ButtonA");
-                        bool clickedB = gui.Button("ButtonB", [&]() { clickCountB++; });
-                        ZHLN::Test::ExpectFalse(clickedB); // Drag-into-hover must NOT trigger click
-                    }
-                );
-
-                gui.EndFrame();
-            }
-
+            ZHLN::Test::ExpectFalse(wasClickedB); // Drag-into-hover must NOT trigger click
             ZHLN::Test::ExpectEq(clickCountB, 0u);
 
             // Frame 7: Release mouse over ButtonB, then press again to verify ButtonB clicks cleanly
             input.SetKey(static_cast<uint8_t>(ZHLN::KeyCode::LButton), false);
-            {
-                ZHLN::GUI::Context gui(registry, {800, 600});
-                gui.BeginFrame(0.016f);
-                gui.Box(
-                    "Container",
-                    ZHLN::GUI::BoxConfig {
-                        .width     = {.fixed = 400.0f},
-                        .height    = {.fixed = 300.0f},
-                        .padding   = 20.0f,
-                        .gap       = 10.0f,
-                        .direction = ZHLN::GUI::Direction::Column
-                    },
-                    [&]() {
-                        gui.Button("ButtonA");
-                        gui.Button("ButtonB");
-                    }
-                );
-                gui.EndFrame();
-            }
+            engine->ProcessEvents();
+            engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
 
             input.SetKey(static_cast<uint8_t>(ZHLN::KeyCode::LButton), true);
-            {
-                ZHLN::GUI::Context gui(registry, {800, 600});
-                gui.BeginFrame(0.016f);
-                gui.Box(
-                    "Container",
-                    ZHLN::GUI::BoxConfig {
-                        .width     = {.fixed = 400.0f},
-                        .height    = {.fixed = 300.0f},
-                        .padding   = 20.0f,
-                        .gap       = 10.0f,
-                        .direction = ZHLN::GUI::Direction::Column
-                    },
-                    [&]() {
-                        gui.Button("ButtonA");
-                        bool clickedB = gui.Button("ButtonB", [&]() { clickCountB++; });
-                        ZHLN::Test::ExpectTrue(clickedB);
-                    }
-                );
-                gui.EndFrame();
-            }
+            engine->ProcessEvents();
+            engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
 
+            ZHLN::Test::ExpectTrue(wasClickedB);
             ZHLN::Test::ExpectEq(clickCountA, 1u);
             ZHLN::Test::ExpectEq(clickCountB, 1u);
 
