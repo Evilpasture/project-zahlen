@@ -1002,7 +1002,10 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
     const std::string suffix      = (mode == ZHLN::ValidationMode::On) ? ".val_on" : ".val_off";
 
     ZHLN::Test::VerifyBaseline("render.master.avg_frame_ms" + suffix, stats.avgFrameMs, avgLimitPct);
+    ZHLN::Test::VerifyBaseline("render.master.p50_frame_ms" + suffix, stats.p50FrameMs, avgLimitPct);
+    ZHLN::Test::VerifyBaseline("render.master.p95_frame_ms" + suffix, stats.p95FrameMs, 35.0);
     ZHLN::Test::VerifyBaseline("render.master.p99_frame_ms" + suffix, stats.p99FrameMs, 35.0);
+    ZHLN::Test::VerifyBaseline("render.master.p99_9_frame_ms" + suffix, stats.p99_9FrameMs, 35.0);
     ZHLN::Test::VerifyBaseline("render.master.max_fps" + suffix, stats.maxFps, 35.0, ZHLN::Test::Perf::Direction::HigherIsBetter);
     ZHLN::Test::VerifyBaseline("render.master.min_fps" + suffix, stats.minFps, 35.0, ZHLN::Test::Perf::Direction::HigherIsBetter);
     ZHLN::Test::VerifyBaseline("render.master.low_1pct_fps" + suffix, stats.low1PctFps, 35.0, ZHLN::Test::Perf::Direction::HigherIsBetter);

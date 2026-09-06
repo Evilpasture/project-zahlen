@@ -804,6 +804,10 @@ struct PerformanceTestSuite {
             );
 
             ZHLN::Test::VerifyBaseline("cpu.master_integrated.avg_frame_ms", stats.avgFrameMs);
+            ZHLN::Test::VerifyBaseline("cpu.master_integrated.p50_frame_ms", stats.p50FrameMs);
+            ZHLN::Test::VerifyBaseline("cpu.master_integrated.p95_frame_ms", stats.p95FrameMs);
+            ZHLN::Test::VerifyBaseline("cpu.master_integrated.p99_frame_ms", stats.p99FrameMs);
+            ZHLN::Test::VerifyBaseline("cpu.master_integrated.p99_9_frame_ms", stats.p99_9FrameMs);
             ZHLN::Test::VerifyBaseline("cpu.master_integrated.max_fps", stats.maxFps, 30.0, ZHLN::Test::Perf::Direction::HigherIsBetter);
             ZHLN::Test::VerifyBaseline("cpu.master_integrated.min_fps", stats.minFps, 30.0, ZHLN::Test::Perf::Direction::HigherIsBetter);
             ZHLN::Test::VerifyBaseline("cpu.master_integrated.low_1pct_fps", stats.low1PctFps, 30.0, ZHLN::Test::Perf::Direction::HigherIsBetter);

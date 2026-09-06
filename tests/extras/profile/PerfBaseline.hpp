@@ -124,10 +124,14 @@ template <typename F>
 ///   * minFps: slowest single frame (1000.0 / maxFrameMs)
 ///   * low1PctFps: average of the worst 1% slowest frames (1000.0 / avg_slowest_1pct_ms)
 ///   * low01PctFps: average of the worst 0.1% slowest frames (1000.0 / avg_slowest_01pct_ms)
+///   * p50 / p90 / p95 / p99 / p99.9: frame time percentiles in milliseconds
 struct FrameStats {
     double avgFrameMs   = 0.0;
     double minFrameMs   = 0.0;
     double maxFrameMs   = 0.0;
+    double p50FrameMs   = 0.0;
+    double p90FrameMs   = 0.0;
+    double p95FrameMs   = 0.0;
     double p99FrameMs   = 0.0;
     double p99_9FrameMs = 0.0;
     double avgFps       = 0.0;
@@ -145,15 +149,21 @@ struct FrameStats {
     std::vector<double> sorted(frameTimesMs.begin(), frameTimesMs.end());
     std::ranges::sort(sorted);
 
-    const size_t n = sorted.size();
-    const double sum = std::accumulate(sorted.begin(), sorted.end(), 0.0);
+    const size_t n     = sorted.size();
+    const double sum   = std::accumulate(sorted.begin(), sorted.end(), 0.0);
     const double avgMs = sum / static_cast<double>(n);
     const double minMs = sorted.front();
     const double maxMs = sorted.back();
 
+    const size_t p50Idx   = std::min(static_cast<size_t>(std::ceil(static_cast<double>(n) * 0.50)) - 1, n - 1);
+    const size_t p90Idx   = std::min(static_cast<size_t>(std::ceil(static_cast<double>(n) * 0.90)) - 1, n - 1);
+    const size_t p95Idx   = std::min(static_cast<size_t>(std::ceil(static_cast<double>(n) * 0.95)) - 1, n - 1);
     const size_t p99Idx   = std::min(static_cast<size_t>(std::ceil(static_cast<double>(n) * 0.99)) - 1, n - 1);
     const size_t p99_9Idx = std::min(static_cast<size_t>(std::ceil(static_cast<double>(n) * 0.999)) - 1, n - 1);
 
+    const double p50Ms   = sorted[p50Idx];
+    const double p90Ms   = sorted[p90Idx];
+    const double p95Ms   = sorted[p95Idx];
     const double p99Ms   = sorted[p99Idx];
     const double p99_9Ms = sorted[p99_9Idx];
 
@@ -167,6 +177,9 @@ struct FrameStats {
         .avgFrameMs   = avgMs,
         .minFrameMs   = minMs,
         .maxFrameMs   = maxMs,
+        .p50FrameMs   = p50Ms,
+        .p90FrameMs   = p90Ms,
+        .p95FrameMs   = p95Ms,
         .p99FrameMs   = p99Ms,
         .p99_9FrameMs = p99_9Ms,
         .avgFps       = (avgMs > 0.0) ? (1000.0 / avgMs) : 0.0,
