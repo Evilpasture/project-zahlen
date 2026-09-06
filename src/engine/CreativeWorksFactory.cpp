@@ -23,151 +23,226 @@
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <cstddef>
+#include <cstdlib>
+#include <filesystem>
 #include <engine/system/AnimationSystem.hpp>
 #include <engine/system/ArticulationSystem.hpp>
 #include <engine/system/LightingSystem.hpp>
 #include <engine/system/TerrainSystem.hpp>
 #include <stb_image.h>
 #define STB_TRUETYPE_IMPLEMENTATION
-#include <fontconfig/fontconfig.h>
 #include <stb_truetype.h>
 
 namespace ZHLN::CreativeWorksFactory {
 
-static auto FindSystemFont(const char* fontName) -> std::string {
-#ifdef __APPLE__
-    const char* macFallbacks[] = {
-        "/System/Library/Fonts/Supplemental/Arial.ttf", "/System/Library/Fonts/Supplemental/Helvetica.ttf", "/System/Library/Fonts/Supplemental/Verdana.ttf",
-        "/System/Library/Fonts/Supplemental/Courier New.ttf"
+static auto FindFontFile() -> std::string {
+    // 1. Environment variable override
+    if (const char* envPath = std::getenv("ZHLN_FONT_PATH"); envPath != nullptr && *envPath != '\0') {
+        std::error_code ec;
+        if (std::filesystem::exists(envPath, ec)) {
+            return envPath;
+        }
+    }
+
+    // 2. Vendored font candidate relative paths
+    static constexpr std::string_view kCandidatePaths[] = {
+        "resources/fonts/font.ttf",
+        "resources/fonts/default.ttf",
+        "resources/fonts/DejaVuSans.ttf",
+        "resources/assets/font.ttf",
+        "resources/assets/default.ttf",
+        "resources/font.ttf",
+        "assets/font.ttf",
+        "assets/fonts/font.ttf",
+        "font.ttf",
     };
-    for (const auto* path: macFallbacks) {
-        FILE* f = std::fopen(path, "rb");
-        if (f != nullptr) {
-            std::fclose(f);
+
+    std::error_code ec;
+    for (const auto& relPath: kCandidatePaths) {
+#if defined(ZHLN_PROJECT_ROOT)
+        auto rootPath = std::filesystem::path(ZHLN_PROJECT_ROOT) / relPath;
+        if (std::filesystem::exists(rootPath, ec)) {
+            return rootPath.string();
+        }
+#endif
+        if (std::filesystem::exists(relPath, ec)) {
+            return std::string(relPath);
+        }
+    }
+
+    // 3. System font fallbacks (no fontconfig dependency)
+#if defined(__APPLE__)
+    static constexpr const char* kSystemFallbacks[] = {
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/System/Library/Fonts/Supplemental/Helvetica.ttf",
+        "/System/Library/Fonts/Supplemental/Verdana.ttf",
+        "/System/Library/Fonts/Supplemental/Courier New.ttf",
+        "/Library/Fonts/Arial.ttf",
+    };
+#elif defined(_WIN32)
+    static constexpr const char* kSystemFallbacks[] = {
+        "C:/Windows/Fonts/arial.ttf",
+        "C:/Windows/Fonts/segoeui.ttf",
+        "C:/Windows/Fonts/calibri.ttf",
+    };
+#else
+    static constexpr const char* kSystemFallbacks[] = {
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/liberation-sans/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/TTF/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+    };
+#endif
+
+    for (const auto* path: kSystemFallbacks) {
+        if (std::filesystem::exists(path, ec)) {
             return path;
         }
     }
-#endif
 
-    FcConfig*  config = FcInitLoadConfigAndFonts();
-    FcPattern* pat    = FcNameParse(reinterpret_cast<const FcChar8*>(fontName));
-    FcConfigSubstitute(config, pat, FcMatchPattern);
-    FcDefaultSubstitute(pat);
-
-    FcResult    result;
-    FcPattern*  match = FcFontMatch(config, pat, &result);
-    std::string fontPath;
-    if (match != nullptr) {
-        FcChar8* file = nullptr;
-        if (FcPatternGetString(match, FC_FILE, 0, &file) == FcResultMatch) {
-            fontPath = reinterpret_cast<const char*>(file);
-        }
-        FcPatternDestroy(match);
-    }
-    FcPatternDestroy(pat);
-    FcConfigDestroy(config);
-    return fontPath;
+    return {};
 }
 
 auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> TextureHandle {
-    std::string fontPath = FindSystemFont("sans-serif");
-    if (fontPath.empty()) {
-        fontPath = "/usr/share/fonts/TTF/DejaVuSans.ttf";
-    }
-
-    Log("Loading TrueType system font: {}", fontPath);
-
-    FILE* f = std::fopen(fontPath.c_str(), "rb");
-    if (f == nullptr) {
-        Log("ERROR: Failed to open system font file: {}", fontPath);
-        return TextureHandle::Invalid;
-    }
-
-    std::fseek(f, 0, SEEK_END);
-    long size = std::ftell(f);
-    std::fseek(f, 0, SEEK_SET);
-    std::vector<uint8_t> fontBuffer(size);
-    std::fread(fontBuffer.data(), 1, size, f);
-    std::fclose(f);
-
-    int fontOffset = stbtt_GetFontOffsetForIndex(fontBuffer.data(), 0);
-    fontOffset     = std::max(fontOffset, 0);
-
-    stbtt_fontinfo fontInfo {};
-    if (!stbtt_InitFont(&fontInfo, fontBuffer.data(), fontOffset)) {
-        Log("ERROR: stbtt_InitFont failed for {}", fontPath);
+    auto* uiSettings = registry.GetSingleton<GUI::UIComponents::UISettingsComponent>();
+    if (uiSettings == nullptr) {
         return TextureHandle::Invalid;
     }
 
     const uint32_t       atlasSize = 1024;
     std::vector<uint8_t> alphaBitmap(static_cast<size_t>(atlasSize * atlasSize), 0);
 
-    auto* uiSettings = registry.GetSingleton<GUI::UIComponents::UISettingsComponent>();
-    if (uiSettings == nullptr) {
-        return TextureHandle::Invalid;
+    std::string          fontPath = FindFontFile();
+    std::vector<uint8_t> fontBuffer;
+
+    if (!fontPath.empty()) {
+        if (FILE* f = std::fopen(fontPath.c_str(), "rb")) {
+            std::fseek(f, 0, SEEK_END);
+            long size = std::ftell(f);
+            std::fseek(f, 0, SEEK_SET);
+            if (size > 0) {
+                fontBuffer.resize(static_cast<size_t>(size));
+                std::fread(fontBuffer.data(), 1, static_cast<size_t>(size), f);
+            }
+            std::fclose(f);
+            Log("Loading TrueType font: {}", fontPath);
+        }
     }
 
-    const float   fontSize         = 32.0f;
-    const float   scale            = stbtt_ScaleForPixelHeight(&fontInfo, fontSize);
-    const int     padding          = 6;
-    const uint8_t onedge_value     = 128;
-    const float   pixel_dist_scale = 128.0f / static_cast<float>(padding);
+    bool           initializedTTF = false;
+    stbtt_fontinfo fontInfo {};
 
-    uint32_t curX      = 2;
-    uint32_t curY      = 2;
-    uint32_t rowHeight = 0;
+    if (!fontBuffer.empty()) {
+        int fontOffset = stbtt_GetFontOffsetForIndex(fontBuffer.data(), 0);
+        fontOffset     = std::max(fontOffset, 0);
+        if (stbtt_InitFont(&fontInfo, fontBuffer.data(), fontOffset)) {
+            initializedTTF = true;
+        } else {
+            Log("WARNING: stbtt_InitFont failed for {}", fontPath);
+        }
+    }
 
-    for (int i = 0; i < 96; ++i) {
-        int codepoint = 32 + i;
-        int w         = 0;
-        int h         = 0;
-        int xoff      = 0;
-        int yoff      = 0;
-        int advance   = 0;
-        int lsb       = 0;
+    if (initializedTTF) {
+        const float   fontSize         = 32.0f;
+        const float   scale            = stbtt_ScaleForPixelHeight(&fontInfo, fontSize);
+        const int     padding          = 6;
+        const uint8_t onedge_value     = 128;
+        const float   pixel_dist_scale = 128.0f / static_cast<float>(padding);
 
-        stbtt_GetCodepointHMetrics(&fontInfo, codepoint, &advance, &lsb);
-        float xadvance = static_cast<float>(advance) * scale;
+        uint32_t curX      = 2;
+        uint32_t curY      = 2;
+        uint32_t rowHeight = 0;
 
-        unsigned char* sdf = stbtt_GetCodepointSDF(&fontInfo, scale, codepoint, padding, onedge_value, pixel_dist_scale, &w, &h, &xoff, &yoff);
+        for (int i = 0; i < 96; ++i) {
+            int codepoint = 32 + i;
+            int w         = 0;
+            int h         = 0;
+            int xoff      = 0;
+            int yoff      = 0;
+            int advance   = 0;
+            int lsb       = 0;
 
-        if (sdf != nullptr && w > 0 && h > 0) {
-            if (curX + w + 2 > atlasSize) {
-                curX = 2;
-                curY += rowHeight + 2;
-                rowHeight = 0;
-            }
+            stbtt_GetCodepointHMetrics(&fontInfo, codepoint, &advance, &lsb);
+            float xadvance = static_cast<float>(advance) * scale;
 
-            if (curY + h + 2 > atlasSize) {
-                Log("WARNING: Font atlas size exceeded! Glyphs truncated.");
+            unsigned char* sdf = stbtt_GetCodepointSDF(&fontInfo, scale, codepoint, padding, onedge_value, pixel_dist_scale, &w, &h, &xoff, &yoff);
+
+            if (sdf != nullptr && w > 0 && h > 0) {
+                if (curX + w + 2 > atlasSize) {
+                    curX = 2;
+                    curY += rowHeight + 2;
+                    rowHeight = 0;
+                }
+
+                if (curY + h + 2 > atlasSize) {
+                    Log("WARNING: Font atlas size exceeded! Glyphs truncated.");
+                    stbtt_FreeSDF(sdf, nullptr);
+                    break;
+                }
+
+                for (int row = 0; row < h; ++row) {
+                    for (int col = 0; col < w; ++col) {
+                        alphaBitmap[(curY + row) * atlasSize + (curX + col)] = sdf[row * w + col];
+                    }
+                }
+
+                uiSettings->fontAtlas.glyphs[i] = GlyphMetric {
+                    .x0       = static_cast<float>(curX),
+                    .y0       = static_cast<float>(curY),
+                    .x1       = static_cast<float>(curX + w),
+                    .y1       = static_cast<float>(curY + h),
+                    .xoff     = static_cast<float>(xoff),
+                    .yoff     = static_cast<float>(yoff),
+                    .xadvance = xadvance
+                };
+
+                curX += w + 2;
+                rowHeight = std::max(rowHeight, static_cast<uint32_t>(h));
                 stbtt_FreeSDF(sdf, nullptr);
-                break;
+            } else {
+                if (sdf != nullptr) {
+                    stbtt_FreeSDF(sdf, nullptr);
+                }
+                uiSettings->fontAtlas.glyphs[i] = GlyphMetric {.x0 = 0.0f, .y0 = 0.0f, .x1 = 0.0f, .y1 = 0.0f, .xoff = 0.0f, .yoff = 0.0f, .xadvance = xadvance};
+            }
+        }
+    } else {
+        Log("WARNING: No TrueType font available; synthesizing fallback 8x8 font atlas.");
+        uint32_t curX     = 2;
+        uint32_t curY     = 2;
+        uint32_t glyphDim = 16;
+
+        for (int i = 0; i < 96; ++i) {
+            if (curX + glyphDim + 2 > atlasSize) {
+                curX = 2;
+                curY += glyphDim + 2;
             }
 
-            for (int row = 0; row < h; ++row) {
-                for (int col = 0; col < w; ++col) {
-                    alphaBitmap[(curY + row) * atlasSize + (curX + col)] = sdf[row * w + col];
+            for (int r = 0; r < 8; ++r) {
+                uint8_t rowBits = Font8x8_Basic[32 + i][r];
+                for (int c = 0; c < 8; ++c) {
+                    uint8_t val = (rowBits & (1 << c)) ? 255 : 0;
+                    alphaBitmap[(curY + r * 2) * atlasSize + (curX + c * 2)]         = val;
+                    alphaBitmap[(curY + r * 2) * atlasSize + (curX + c * 2 + 1)]     = val;
+                    alphaBitmap[(curY + r * 2 + 1) * atlasSize + (curX + c * 2)]     = val;
+                    alphaBitmap[(curY + r * 2 + 1) * atlasSize + (curX + c * 2 + 1)] = val;
                 }
             }
 
             uiSettings->fontAtlas.glyphs[i] = GlyphMetric {
                 .x0       = static_cast<float>(curX),
                 .y0       = static_cast<float>(curY),
-                .x1       = static_cast<float>(curX + w),
-                .y1       = static_cast<float>(curY + h),
-                .xoff     = static_cast<float>(xoff),
-                .yoff     = static_cast<float>(yoff),
-                .xadvance = xadvance
+                .x1       = static_cast<float>(curX + glyphDim),
+                .y1       = static_cast<float>(curY + glyphDim),
+                .xoff     = 0.0f,
+                .yoff     = 0.0f,
+                .xadvance = 18.0f
             };
 
-            curX += w + 2;
-            rowHeight = std::max(rowHeight, static_cast<uint32_t>(h));
-            stbtt_FreeSDF(sdf, nullptr);
-        } else {
-            if (sdf != nullptr) {
-                stbtt_FreeSDF(sdf, nullptr);
-            }
-            uiSettings->fontAtlas.glyphs[i] = GlyphMetric {.x0 = 0.0f, .y0 = 0.0f, .x1 = 0.0f, .y1 = 0.0f, .xoff = 0.0f, .yoff = 0.0f, .xadvance = xadvance};
+            curX += glyphDim + 2;
         }
     }
 

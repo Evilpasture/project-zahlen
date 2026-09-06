@@ -178,9 +178,9 @@ struct RenderPipelinesTestSuite {
         // allocated next.
         //
         // The font atlas is the same shape of bug without the race: a fresh
-        // 1024x1024 bindless texture (and a fresh fontconfig config) per reset,
-        // none of them released. It is device state now, built once and copied
-        // into each new scene's UISettingsComponent.
+        // 1024x1024 bindless texture per reset, none of them released. It is
+        // device state now, built once and copied into each new scene's
+        // UISettingsComponent.
         std::expected<void, ZHLN::Error> scene_reset_rebuilds_engine_state_instead_of_accumulating_it() {
             auto engine = ZHLN::Test::Headless::AcquireEngine("LocalGPUSceneResetTest", 320, 240);
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {

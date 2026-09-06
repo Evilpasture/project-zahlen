@@ -196,12 +196,11 @@ struct EngineImpl {
     JPH::Array<Entity>                        visibleShadowEntities;
     float                                     currentAlpha = 0.0f;
 
-    // Built once per engine, not once per scene: the glyph packing costs a
-    // fontconfig scan plus 96 SDF rasterisations, and the upload burns a
-    // 1024x1024 bindless texture that nothing ever releases. The scene owns a
-    // *copy* in UISettingsComponent, which Registry::Clear() throws away, so
-    // the engine keeps the authoritative one and re-seeds each new scene from
-    // it. See InitializeDefaultScene.
+    // Built once per engine, not once per scene: the glyph packing costs
+    // 96 SDF rasterisations, and the upload burns a 1024x1024 bindless texture
+    // that nothing ever releases. The scene owns a *copy* in UISettingsComponent,
+    // which Registry::Clear() throws away, so the engine keeps the authoritative
+    // one and re-seeds each new scene from it. See InitializeDefaultScene.
     std::optional<FontAtlas> fontAtlas;
 
     void*    gameState    = nullptr;
@@ -1112,7 +1111,7 @@ auto Engine::InitializeDefaultScene() -> bool {
 
     // The atlas is device state, so it survives the scene it was first built
     // for; only the component-side copy is re-seeded. Rebuilding it per scene
-    // leaked a 1024x1024 texture and a full fontconfig config every time.
+    // leaked a 1024x1024 texture every time.
     if (_impl->fontAtlas.has_value()) {
         if (auto* uiSettings = reg.GetSingleton<GUI::UIComponents::UISettingsComponent>(); uiSettings != nullptr) {
             uiSettings->fontAtlas        = *_impl->fontAtlas;

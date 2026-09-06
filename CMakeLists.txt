@@ -536,15 +536,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     pkg_check_modules(LIBSEAT REQUIRED IMPORTED_TARGET libseat)
 endif()
 
-# Dependencies needed on both Linux and macOS.
-#
-# simdjson is deliberately NOT here: JSON lives in extras/json, so the core
-# engine has no JSON dependency and a core-only build needs no JSON library
-# installed. extras/CMakeLists.txt finds it when the extras layer is built.
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR APPLE)
-    pkg_check_modules(FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig)
-endif()
-
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/render)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/threading)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/physics)
@@ -676,10 +667,6 @@ target_link_libraries(zahlen_engine PRIVATE
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(zahlen_engine PRIVATE PkgConfig::LIBEVDEV PkgConfig::LIBSEAT)
-endif()
-
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR APPLE)
-    target_link_libraries(zahlen_engine PRIVATE PkgConfig::FONTCONFIG)
 endif()
 
 target_link_libraries(zahlen_engine PUBLIC Jolt)

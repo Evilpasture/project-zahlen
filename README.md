@@ -308,7 +308,6 @@ These packages are expected to be installed on the host operating system:
 * **zstd (Zstandard)**: Compression algorithm used to build and decompress custom `.pak` assets.
 * **Windows SDK** *(Windows only)*: Windows API headers and libraries. It's expected that you should have the SDK installed on your system.
 * **Visual Studio Build Tools** *(Windows only)*: Required to build the project with Clang/LLVM when targeting Windows.
-* **Fontconfig** *(Linux & macOS)*: System font customization and configuration library (used to locate standard system fonts for font atlas generation).
 * **libevdev** *(Linux only)*: Kernel-level input device wrapper used by the native TTY/KMS fallback backend.
 * **libseat** *(Linux only)*: Shared session management library used to acquire input and graphics permissions in TTY mode without root access.
 * **X11 / Xlib** *(Linux only)*: Legacy windowing library.
