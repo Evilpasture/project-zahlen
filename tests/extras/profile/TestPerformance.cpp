@@ -792,15 +792,23 @@ struct PerformanceTestSuite {
             }
 
             double totalBenchmarkDurationSec = masterBenchmarkTimer.ElapsedSeconds();
-            double avgFrameTimeMs            = std::accumulate(frameTimesMs.begin(), frameTimesMs.end(), 0.0) / frameTimesMs.size();
-            double maxFrameTimeMs            = *std::ranges::max_element(frameTimesMs);
-            double minFrameTimeMs            = *std::ranges::min_element(frameTimesMs);
+            auto   stats                     = ZHLN::Test::CalculateFrameStats(frameTimesMs);
 
             ZHLN::Println(
                 "    [Results] Processed 120 frames in {:.3f} s (Average: {:.3f} ms/frame, Range: [{:.3f} - {:.3f}] ms)", totalBenchmarkDurationSec,
-                avgFrameTimeMs, minFrameTimeMs, maxFrameTimeMs
+                stats.avgFrameMs, stats.minFrameMs, stats.maxFrameMs
             );
-            ZHLN::Test::VerifyBaseline("cpu.master_integrated.avg_frame_ms", avgFrameTimeMs);
+            ZHLN::Println(
+                "    [FPS Metrics] Avg: {:.2f} FPS, Max: {:.2f} FPS, Min: {:.2f} FPS, 1% Low: {:.2f} FPS, 0.1% Low: {:.2f} FPS",
+                stats.avgFps, stats.maxFps, stats.minFps, stats.low1PctFps, stats.low01PctFps
+            );
+
+            ZHLN::Test::VerifyBaseline("cpu.master_integrated.avg_frame_ms", stats.avgFrameMs);
+            ZHLN::Test::VerifyBaseline("cpu.master_integrated.max_fps", stats.maxFps, 30.0, ZHLN::Test::Perf::Direction::HigherIsBetter);
+            ZHLN::Test::VerifyBaseline("cpu.master_integrated.min_fps", stats.minFps, 30.0, ZHLN::Test::Perf::Direction::HigherIsBetter);
+            ZHLN::Test::VerifyBaseline("cpu.master_integrated.low_1pct_fps", stats.low1PctFps, 30.0, ZHLN::Test::Perf::Direction::HigherIsBetter);
+            ZHLN::Test::VerifyBaseline("cpu.master_integrated.low_0_1pct_fps", stats.low01PctFps, 30.0, ZHLN::Test::Perf::Direction::HigherIsBetter);
+
             ZHLN::Println("    [Throughput] Simulation Speed: {:.2f} FPS (Target: >= 60.0 FPS)", kTotalFrames / totalBenchmarkDurationSec);
             ZHLN::Println("    [Telemetry] Total Raycasts: {}, Total Audio Events: {}", totalRaysCast.load(), totalAudioEvents.load());
 

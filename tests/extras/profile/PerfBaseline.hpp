@@ -39,6 +39,7 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -48,6 +49,8 @@
 #include <iterator>
 #include <json/JSONSchema.hpp>
 #include <map>
+#include <numeric>
+#include <span>
 #include <source_location>
 #include <string>
 #include <string_view>
@@ -111,6 +114,66 @@ template <typename F>
         .median  = samples[samples.size() / 2],
         .worst   = samples.back(),
         .samples = static_cast<unsigned>(samples.size())
+    };
+}
+
+/// Frame time distribution and derived FPS percentiles.
+///
+/// Standard gaming benchmark metrics:
+///   * maxFps: fastest single frame (1000.0 / minFrameMs)
+///   * minFps: slowest single frame (1000.0 / maxFrameMs)
+///   * low1PctFps: average of the worst 1% slowest frames (1000.0 / avg_slowest_1pct_ms)
+///   * low01PctFps: average of the worst 0.1% slowest frames (1000.0 / avg_slowest_01pct_ms)
+struct FrameStats {
+    double avgFrameMs   = 0.0;
+    double minFrameMs   = 0.0;
+    double maxFrameMs   = 0.0;
+    double p99FrameMs   = 0.0;
+    double p99_9FrameMs = 0.0;
+    double avgFps       = 0.0;
+    double maxFps       = 0.0;
+    double minFps       = 0.0;
+    double low1PctFps   = 0.0;
+    double low01PctFps  = 0.0;
+};
+
+[[nodiscard]] inline auto CalculateFrameStats(std::span<const double> frameTimesMs) -> FrameStats {
+    if (frameTimesMs.empty()) {
+        return {};
+    }
+
+    std::vector<double> sorted(frameTimesMs.begin(), frameTimesMs.end());
+    std::ranges::sort(sorted);
+
+    const size_t n = sorted.size();
+    const double sum = std::accumulate(sorted.begin(), sorted.end(), 0.0);
+    const double avgMs = sum / static_cast<double>(n);
+    const double minMs = sorted.front();
+    const double maxMs = sorted.back();
+
+    const size_t p99Idx   = std::min(static_cast<size_t>(std::ceil(static_cast<double>(n) * 0.99)) - 1, n - 1);
+    const size_t p99_9Idx = std::min(static_cast<size_t>(std::ceil(static_cast<double>(n) * 0.999)) - 1, n - 1);
+
+    const double p99Ms   = sorted[p99Idx];
+    const double p99_9Ms = sorted[p99_9Idx];
+
+    const size_t count1Pct  = std::max(1UL, static_cast<size_t>(std::ceil(static_cast<double>(n) * 0.01)));
+    const size_t count01Pct = std::max(1UL, static_cast<size_t>(std::ceil(static_cast<double>(n) * 0.001)));
+
+    const double avgSlowest1PctMs  = std::accumulate(sorted.end() - count1Pct, sorted.end(), 0.0) / static_cast<double>(count1Pct);
+    const double avgSlowest01PctMs = std::accumulate(sorted.end() - count01Pct, sorted.end(), 0.0) / static_cast<double>(count01Pct);
+
+    return FrameStats {
+        .avgFrameMs   = avgMs,
+        .minFrameMs   = minMs,
+        .maxFrameMs   = maxMs,
+        .p99FrameMs   = p99Ms,
+        .p99_9FrameMs = p99_9Ms,
+        .avgFps       = (avgMs > 0.0) ? (1000.0 / avgMs) : 0.0,
+        .maxFps       = (minMs > 0.0) ? (1000.0 / minMs) : 0.0,
+        .minFps       = (maxMs > 0.0) ? (1000.0 / maxMs) : 0.0,
+        .low1PctFps   = (avgSlowest1PctMs > 0.0) ? (1000.0 / avgSlowest1PctMs) : 0.0,
+        .low01PctFps  = (avgSlowest01PctMs > 0.0) ? (1000.0 / avgSlowest01PctMs) : 0.0,
     };
 }
 
