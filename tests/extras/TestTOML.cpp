@@ -19,9 +19,18 @@
 // tests/core and is built only when ZHLN_BUILD_EXTRAS is on.
 
 #include "TestsFramework.hpp"
+// clang-format off
+#include <Jolt/Jolt.h>
+// clang-format on
+#include <Jolt/Math/Vec3.h>
+#include <Jolt/Math/Vec4.h>
+#include <Zahlen/Camera.hpp>
+#include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/DefaultPreset.hpp>
+#include <Zahlen/Math3D.hpp>
 #include <Zahlen/Scene.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -449,6 +458,169 @@ intensity = 250.0
             ZHLN::Test::ExpectEq(reparsed->entities[1].transform.position.y, 2.0f);
             ZHLN::Test::ExpectEq(reparsed->lights[0].rotation.x, 50.0f);
             ZHLN::Test::ExpectEq(ZHLN::ReflectTOML::SerializeTOML(*reparsed), emitted);
+
+            return {};
+        }
+
+        // ====================================================================
+        // Extraction
+        // ====================================================================
+
+        /**
+         * Extract() is Instantiate() read backwards, and the description it
+         * produces has to survive the document on the way through: a
+         * world -> description -> text -> description trip that dropped a field
+         * would make the editor's Ctrl+S a way to quietly corrupt a scene.
+         *
+         * The registry is built by hand instead of by instantiating a scene,
+         * because that is what makes this runnable with no device: Extract()
+         * takes a camera and a registry (and, optionally, a material table), so
+         * those are the whole of its input. Passing a null material table is
+         * also the assertion -- base colour and emissive keep their defaults
+         * rather than crashing or being invented.
+         */
+        std::expected<void, ZHLN::Error> extract_reads_a_world_back_into_a_description() {
+            ZHLN::ECS::Registry registry;
+
+            // The settings entity is how a scene owns the environment.
+            registry.Create(
+                ZHLN::Components::GlobalSettingsTagComponent {}, ZHLN::Components::PostProcessSettingsComponent {
+                                                                     .giIntensity     = 2.5f,
+                                                                     .enableSSR       = 0,
+                                                                     .enableRTR       = 1,
+                                                                     .ambientExposure = 40.0f,
+                                                                     .skyZenith       = JPH::Vec4(0.5f, 0.25f, 0.125f, 1.0f)
+                                                                 }
+            );
+
+            // A dynamic box: everything the live components can answer for
+            // itself, plus the provenance record for what they cannot.
+            registry.Create(
+                ZHLN::Components::NameComponent {.name = ZHLN::String64 {"SavedBox"}},
+                ZHLN::Components::TransformComponent {
+                    .position = JPH::Vec3(1.0f, 2.0f, 3.0f),
+                    .rotation = ZHLN::Math::EulerDegreesToQuat(JPH::Vec3(0.0f, 45.0f, 0.0f)),
+                    .scale    = JPH::Vec3(2.0f, 2.0f, 2.0f)
+                },
+                ZHLN::Components::MeshComponent {.meshAsset = 1, .materialAsset = 2, .cullRadius = 2.0f},
+                ZHLN::Components::PBRComponent {.roughness = 0.25f, .metallic = 0.75f},
+                ZHLN::Components::PhysicsComponent {},
+                ZHLN::Components::PhysicsStateComponent {},
+                ZHLN::Components::SceneSourceComponent {
+                    .shape                 = ZHLN::Scene::ShapeKind::Box,
+                    .halfExtents           = {1.5f, 0.5f, 2.5f},
+                    .extent                = 10.0f,
+                    .emissiveVirtualLights = true
+                }
+            );
+
+            // A static plane: PhysicsComponent without PhysicsStateComponent is
+            // what the spawners leave behind for a body that cannot move.
+            registry.Create(
+                ZHLN::Components::NameComponent {.name = ZHLN::String64 {"SavedGround"}}, ZHLN::Components::MeshComponent {},
+                ZHLN::Components::PhysicsComponent {},
+                ZHLN::Components::SceneSourceComponent {.shape = ZHLN::Scene::ShapeKind::Plane, .extent = 35.0f}
+            );
+
+            registry.Create(
+                ZHLN::Components::NameComponent {.name = ZHLN::String64 {"SavedCrate"}}, ZHLN::Components::MeshComponent {},
+                ZHLN::Components::SceneSourceComponent {.shape = ZHLN::Scene::ShapeKind::Prefab, .source = ZHLN::String256 {"models/crate.glb"}}
+            );
+
+            // Not scene content: no provenance, so Extract leaves it out rather
+            // than guessing that it is a box.
+            registry.Create(
+                ZHLN::Components::NameComponent {.name = ZHLN::String64 {"RuntimeProp"}}, ZHLN::Components::MeshComponent {}
+            );
+
+            registry.Create(
+                ZHLN::Components::NameComponent {.name = ZHLN::String64 {"SavedSun"}},
+                ZHLN::Components::TransformComponent {
+                    .position = JPH::Vec3(4.0f, 5.0f, 6.0f),
+                    .rotation = ZHLN::Math::EulerDegreesToQuat(JPH::Vec3(50.0f, -35.0f, 0.0f))
+                },
+                ZHLN::Components::LightComponent {
+                    .type        = ZHLN::LightType::Sun,
+                    .color       = JPH::Vec3(1.0f, 0.5f, 0.25f),
+                    .intensity   = 180.0f,
+                    .radius      = 0.0f,
+                    .direction   = JPH::Vec3(0.4f, 1.0f, 0.3f),
+                    .range       = 0.0f,
+                    .shadowLayer = 3
+                },
+                ZHLN::Components::SceneLightTagComponent {}
+            );
+
+            // The "Glow_*" light an emissive prefab brings with it: untagged, so
+            // it is not written. Re-instantiating the prefab spawns it again.
+            registry.Create(ZHLN::Components::LightComponent {.type = ZHLN::LightType::Point});
+
+            ZHLN::Camera camera;
+            camera.position = JPH::Vec3(0.0f, 3.8f, 7.5f);
+            camera.yaw      = -90.0f;
+            camera.pitch    = -14.0f;
+            camera.fov      = 52.0f;
+
+            const auto scene = ZHLN::Scene::Extract(camera, registry, nullptr);
+
+            // Three of the four mesh entities and one of the two lights carry
+            // provenance; the counts are the membership rule under test.
+            if (!ZHLN::Test::ExpectEq(scene.entities.size(), size_t {3}) || !ZHLN::Test::ExpectEq(scene.lights.size(), size_t {1})) {
+                return {};
+            }
+
+            ZHLN::Test::ExpectEq(scene.camera.position.y, 3.8f);
+            ZHLN::Test::ExpectEq(scene.camera.fov, 52.0f);
+
+            // The environment comes out of the settings component by field name,
+            // int -> bool and Vec4 -> Float3 included.
+            ZHLN::Test::ExpectEq(scene.environment.giIntensity, 2.5f);
+            ZHLN::Test::ExpectEq(scene.environment.ambientExposure, 40.0f);
+            ZHLN::Test::ExpectTrue(scene.environment.enableRTR);
+            ZHLN::Test::ExpectFalse(scene.environment.enableSSR);
+            ZHLN::Test::ExpectEq(scene.environment.skyZenith.x, 0.5f);
+
+            const auto& box = scene.entities[0];
+            ZHLN::Test::ExpectEq(box.name, std::string {"SavedBox"});
+            ZHLN::Test::ExpectTrue(box.shape == ZHLN::Scene::ShapeKind::Box);
+            ZHLN::Test::ExpectEq(box.halfExtents.z, 2.5f); // from the record, not from cullRadius
+            ZHLN::Test::ExpectEq(box.transform.position.y, 2.0f);
+            ZHLN::Test::ExpectEq(box.transform.scale.x, 2.0f);
+            ZHLN::Test::ExpectTrue(std::abs(box.transform.rotation.y - 45.0f) < 1e-3f); // quat -> euler degrees
+            ZHLN::Test::ExpectTrue(box.body == ZHLN::Scene::BodyKind::Dynamic);
+            ZHLN::Test::ExpectEq(box.material.roughness, 0.25f);
+            ZHLN::Test::ExpectEq(box.material.metallic, 0.75f);
+            ZHLN::Test::ExpectTrue(box.material.emissiveVirtualLights);
+
+            ZHLN::Test::ExpectTrue(scene.entities[1].body == ZHLN::Scene::BodyKind::Static);
+            ZHLN::Test::ExpectEq(scene.entities[1].extent, 35.0f);
+            ZHLN::Test::ExpectTrue(scene.entities[2].body == ZHLN::Scene::BodyKind::None);
+            ZHLN::Test::ExpectEq(scene.entities[2].source, std::string {"models/crate.glb"});
+
+            const auto& sun = scene.lights[0];
+            ZHLN::Test::ExpectEq(sun.name, std::string {"SavedSun"});
+            ZHLN::Test::ExpectEq(sun.type, std::string {"Sun"});
+            ZHLN::Test::ExpectEq(sun.intensity, 180.0f);
+            ZHLN::Test::ExpectEq(sun.shadowLayer, 3);
+            ZHLN::Test::ExpectEq(sun.color.y, 0.5f);
+            ZHLN::Test::ExpectEq(sun.direction.z, 0.3f);
+            ZHLN::Test::ExpectEq(sun.position.z, 6.0f);
+            ZHLN::Test::ExpectTrue(std::abs(sun.rotation.x - 50.0f) < 1e-3f);
+
+            // And the document carries all of it without loss.
+            const std::string emitted  = ZHLN::ReflectTOML::SerializeTOML(scene);
+            const auto        reparsed = ZHLN::ReflectTOML::TryParse<ZHLN::Scene::Scene>(emitted);
+            if (!ZHLN::Test::ExpectTrue(reparsed.has_value())) {
+                ZHLN::Println("    [INFO] extracted scene:\n{}", emitted);
+                return {};
+            }
+
+            ZHLN::Test::ExpectEq(ZHLN::ReflectTOML::SerializeTOML(*reparsed), emitted);
+            ZHLN::Test::ExpectEq(reparsed->entities[0].halfExtents.z, 2.5f);
+            ZHLN::Test::ExpectEq(reparsed->entities[2].source, std::string {"models/crate.glb"});
+            ZHLN::Test::ExpectTrue(reparsed->entities[0].body == ZHLN::Scene::BodyKind::Dynamic);
+            ZHLN::Test::ExpectEq(reparsed->lights[0].type, std::string {"Sun"});
+            ZHLN::Test::ExpectTrue(reparsed->environment.enableRTR);
 
             return {};
         }

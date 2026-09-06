@@ -29,11 +29,11 @@
 // This header is deliberately format-free. Reading and writing a scene as a
 // document is the reflection-driven layer in extras/toml/TOML.hpp plus the
 // Jolt vector bindings in extras/toml/SceneTOML.hpp (which is what makes
-// `position = [x, y, z]` work); the two halves meet at Scene::Instantiate().
-// Core never reaches for them: the engine's own fallback preset
-// (DefaultPreset) builds one of these structs in C++ and calls Instantiate()
-// directly, so a scene description is usable with no document layer compiled
-// in at all.
+// `position = [x, y, z]` work); the two halves meet at Scene::Instantiate() on
+// the way in and Scene::Extract() on the way out. Core never reaches for them:
+// the engine's own fallback preset (DefaultPreset) builds one of these structs
+// in C++ and calls Instantiate() directly, so a scene description is usable
+// with no document layer compiled in at all.
 //
 // Instantiating is a pure function of the description plus the engine it is
 // given -- no ambient engine, no process-global scene state. Two engines can
@@ -56,6 +56,12 @@
 namespace ZHLN {
 
 class Engine;
+struct Camera;
+class RenderContext;
+
+namespace ECS {
+class Registry;
+}
 
 namespace Scene {
 
@@ -189,6 +195,39 @@ enum class SceneError : uint8_t {
 /// extras/toml/SceneTOML.hpp; this function turns the parsed description
 /// into world state.
 [[nodiscard]] auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Instance, Error>;
+
+/// Rebuilds the description that would reproduce the world @p engine holds.
+///
+/// The mirror image of Instantiate(): the same structs, read out of live
+/// components instead of written into them, so a scene that has been edited in
+/// a running engine can be written back to a document and re-instantiated to
+/// the same thing. Field-by-field it is the inverse -- Instantiate's Euler
+/// degrees go through QuatToEulerDegrees on the way back out, its material
+/// factors come back from the material table -- and the two are kept in step by
+/// the reflective copy in Scene.cpp rather than by two hand-written field lists.
+///
+/// What Extract considers the scene is what Instantiate put there: an entity is
+/// scene content when it carries Components::SceneSourceComponent (geometry) or
+/// Components::SceneLightTagComponent (lights). Geometry that gameplay spawns
+/// at runtime, terrain, and the virtual lights an emissive prefab brings with
+/// it are therefore not extracted -- the first two are not expressible in the
+/// schema, and the third would be duplicated on reload, because re-instantiating
+/// the prefab spawns them again. Entities skipped for that reason are counted
+/// and logged once, never dropped silently.
+///
+/// `Scene::name` is left at its default: a running world does not carry a scene
+/// name. A caller saving to a file sets it from the path it is writing to.
+[[nodiscard]] auto Extract(Engine& engine) -> Scene;
+
+/// Extract() without the engine: the same walk over a camera and a registry.
+///
+/// @p materials resolves a MaterialID to its CPU-side factors, which is where
+/// base colour and emissive live; it may be null, in which case those two keep
+/// their struct defaults. Every other field comes out of the registry, so a
+/// scene can be extracted -- and round-tripped through a document -- with no
+/// device, no window and no engine. That is what makes it testable on a machine
+/// with no GPU.
+[[nodiscard]] auto Extract(const Camera& camera, const ECS::Registry& registry, const RenderContext* materials) -> Scene;
 
 } // namespace Scene
 } // namespace ZHLN

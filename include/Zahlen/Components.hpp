@@ -13,6 +13,7 @@
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Input.hpp>
+#include <Zahlen/Scene.hpp>
 #include <Zahlen/Types.hpp>
 #include <algorithm>
 #include <array>
@@ -213,6 +214,44 @@ struct Components {
     struct HierarchyComponent {
         Entity parent = Entity::Null();
     };
+
+    /// Where a mesh entity's geometry came from, in scene-description terms.
+    ///
+    /// Scene::Instantiate attaches this; Scene::Extract reads it back. It exists
+    /// because the live components cannot answer the question. A box's half
+    /// extents are baked into a GPU vertex buffer (MeshComponent keeps only
+    /// cullRadius, the largest of the three), a plane keeps no extent at all,
+    /// and a prefab part carries no memory of the file it was read from. Without
+    /// this record a scene saved from a running engine would come back as a unit
+    /// cube with no asset behind it.
+    ///
+    /// It is also what marks an entity as *scene content*: Extract walks this
+    /// component, not MeshComponent, so geometry that gameplay spawns at runtime
+    /// -- and the "Glow_*" virtual lights an emissive prefab brings with it --
+    /// stays out of the saved scene instead of being duplicated on reload.
+    struct SceneSourceComponent {
+        Scene::ShapeKind shape       = Scene::ShapeKind::Box;
+        /// glTF/GLB path for ShapeKind::Prefab. Empty for generated shapes.
+        ZHLN::String256  source;
+        /// Box half extents. Ignored by the other shapes.
+        JPH::Float3      halfExtents = {0.5f, 0.5f, 0.5f};
+        /// Plane half size. Ignored by the other shapes.
+        float            extent = 10.0f;
+        /// SpawnParams::emissiveVirtualLights, which nothing in the spawned
+        /// world records: opting in just adds child light entities, and those
+        /// look exactly like authored ones.
+        bool             emissiveVirtualLights = false;
+    };
+
+    /// Marks a light entity as scene content.
+    ///
+    /// Unlike geometry a light carries no unrecoverable data -- LightComponent
+    /// and TransformComponent answer every question SceneLight asks -- so this
+    /// is a pure membership tag in the existing *TagComponent style. What it
+    /// separates is a scene's lights from the ones gameplay spawns at runtime,
+    /// which Scene::Extract must not write into a save.
+    struct SceneLightTagComponent {};
+
     struct PlayerTagComponent {};
     struct MainCameraTagComponent {};
     struct SunTagComponent {};

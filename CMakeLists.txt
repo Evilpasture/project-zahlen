@@ -951,6 +951,16 @@ if(ZHLN_BUILD_EXTRAS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extras")
         target_link_libraries(zahlen PRIVATE zahlen_scripting_lua)
         target_compile_definitions(zahlen PRIVATE ZHLN_HAS_SCRIPTING=1)
     endif()
+
+    # Ctrl+S in the editor writes the world back out as a scene document
+    # (Scene::Extract + extras/toml). Core may not reach for extras, so the
+    # composition root is what links the document layer, and app/main.cpp guards
+    # its include on the definition below: with ZHLN_BUILD_EXTRAS=OFF the editor
+    # still extracts a scene, it just has nothing to serialise it through.
+    if(TARGET zahlen_extras)
+        target_link_libraries(zahlen PRIVATE zahlen_extras)
+        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_SCENE_TOML=1)
+    endif()
 endif()
 
 # --- TESTS ---

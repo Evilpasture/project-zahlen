@@ -36,18 +36,31 @@
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Profiler.hpp>
 #include <Zahlen/Render.hpp>
+#include <Zahlen/Scene.hpp>
 #include <Zahlen/Scripting.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/gui/UIComponents.hpp>
 #include <Zahlen/physics/Physics.hpp>
+#if defined(ZHLN_HAS_SCENE_TOML)
+// The document layer is an optional extra, and the composition root is the one
+// place allowed to name it: core may not reach into extras
+// (tools/check_core_extras_boundary.py). SceneTOML.hpp is what turns a core
+// ZHLN::Scene::Scene into a document, via its Jolt vector bindings.
+#include <toml/SceneTOML.hpp>
+#include <toml/TOML.hpp>
+#endif
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <filesystem>
 #include <format>
+#include <fstream>
 #include <print>
+#include <string>
+#include <string_view>
 #include <thread>
 
 namespace {
@@ -67,6 +80,51 @@ EditorState s_EditorState;
 
 // --- Native (self-hosted) editor state --------------------------------------
 ZHLN::Editor::EditorState s_NativeEditorState;
+
+/// Where Ctrl+S writes. The editor has no notion of "the current scene" yet --
+/// nothing opens a file, so nothing knows its name -- and one predictable path
+/// next to the working directory beats inventing a session concept here.
+constexpr std::string_view kSceneSavePath = "scene.toml";
+
+/// Extracts the world and writes it back out as a scene document.
+///
+/// This is the round trip closing: Scene::Instantiate built the world from a
+/// description, Scene::Extract reads a description back out of the world, and
+/// the reflection-driven TOML layer turns that into text. Nothing here lists
+/// fields -- the description struct is the schema in both directions.
+void SaveScene(ZHLN::Engine& engine) {
+    auto scene = ZHLN::Scene::Extract(engine);
+
+    // A running world carries no scene name; the file it is being written to is
+    // the only name on offer.
+    scene.name = std::filesystem::path(kSceneSavePath).stem().string();
+
+#if defined(ZHLN_HAS_SCENE_TOML)
+    const std::string text = ZHLN::ReflectTOML::SerializeTOML(scene);
+
+    std::ofstream out {std::string {kSceneSavePath}, std::ios::binary | std::ios::trunc};
+    if (!out) {
+        ZHLN::Log("[WorldEditor] Ctrl+S: could not open '{}' for writing", kSceneSavePath);
+        return;
+    }
+    out.write(text.data(), static_cast<std::streamsize>(text.size()));
+    out.close();
+    if (out.fail()) {
+        ZHLN::Log("[WorldEditor] Ctrl+S: writing '{}' failed", kSceneSavePath);
+        return;
+    }
+
+    ZHLN::Log(
+        "[WorldEditor] Ctrl+S: '{}' written ({} entities, {} lights)", kSceneSavePath, scene.entities.size(), scene.lights.size()
+    );
+#else
+    ZHLN::Log(
+        "[WorldEditor] Ctrl+S: built without the TOML layer, so there is nothing to write the description through "
+        "({} entities, {} lights extracted)",
+        scene.entities.size(), scene.lights.size()
+    );
+#endif
+}
 
 constexpr float kLeftPanelWidth  = 260.0f;
 constexpr float kRightPanelWidth = 320.0f;
@@ -238,6 +296,8 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
 
     ZHLN::Log("[WorldEditor] Editor session launched.");
 
+    bool saveChordWasDown = false;
+
     while (engine.IsRunning()) {
         float frameTime = clock.GetDeltaTime();
         engine.ProcessEvents();
@@ -276,6 +336,19 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
             engine.GetWindow().Close();
             break;
         }
+
+        // Ctrl+S saves the world as a scene document. Edge-detected by hand:
+        // InputStateComponent carries key *levels*, not presses, so a held
+        // chord would write the file once per frame. Gated on the same keyboard
+        // capture as Escape and the camera, or Ctrl+S typed into a text field
+        // would save too.
+        const bool controlDown   = state != nullptr && (state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LControl)) ||
+                                                      state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RControl)));
+        const bool saveChordDown = controlDown && state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::S));
+        if (saveChordDown && !saveChordWasDown && !uiCapturesKeyboard) {
+            SaveScene(engine);
+        }
+        saveChordWasDown = saveChordDown;
 
         if (state != nullptr && pointerInViewport && !state->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton)) && !uiCapturesMouse) {
             static bool wasMouseDown = false;
