@@ -82,6 +82,45 @@ struct Camera {
     float nearZ = 0.1f;
     float farZ  = 1000.0f;
 
+    // --- Dynamic viewport bounds -------------------------------------------
+    // An editor's 3D view is a sub-rectangle of the framebuffer (the centre
+    // column between its panels). Rather than scissoring the render pipeline,
+    // the projection is remapped: the base frustum uses the RECT's aspect, and
+    // its x is then affinely mapped so the rectangle's left/right edges land on
+    // the framebuffer edges' NDC range. The rectangle therefore shows exactly
+    // what a native viewport of its own would show; pixels outside it extend
+    // the frustum and hide under the (opaque) panels. Every consumer --
+    // renderer, culling, picking, the editor's transform modes -- goes through
+    // GetProjectionMatrix, so all of them stay consistent for free.
+    float viewportMinX    = 0.0f;
+    float viewportMaxX    = 0.0f;
+    float viewportFrameW  = 1.0f;
+    float viewportFrameH  = 1.0f;
+    bool  viewportRemapOn = false;
+
+    /// @p minX/@p maxX in framebuffer pixels; the rectangle spans the full
+    /// height. A degenerate rectangle disables the remap.
+    void SetViewportBounds(float minX, float maxX, float frameWidth, float frameHeight) noexcept {
+        viewportFrameW  = frameWidth;
+        viewportFrameH  = frameHeight;
+        viewportMinX    = minX;
+        viewportMaxX    = maxX;
+        viewportRemapOn = (maxX - minX) > 1.0f && frameWidth > 1.0f && frameHeight > 1.0f;
+    }
+
+    void ClearViewportBounds() noexcept {
+        viewportRemapOn = false;
+    }
+
+    /// The aspect the composition actually uses: the viewport rectangle's when
+    /// the remap is on, so callers cannot disagree with it by accident.
+    [[nodiscard]] auto GetViewportAspect(float fallbackAspect) const noexcept -> float {
+        if (viewportRemapOn) {
+            return (viewportMaxX - viewportMinX) / viewportFrameH;
+        }
+        return fallbackAspect;
+    }
+
     Frustum frustum {};
     Frustum shadowFrustum {};
 
@@ -95,7 +134,27 @@ struct Camera {
     }
 
     [[nodiscard]] auto GetProjectionMatrix(float aspectRatio) const -> JPH::Mat44 {
-        return Math::CreatePerspective(JPH::DegreesToRadians(fov), aspectRatio, nearZ, farZ);
+        if (!viewportRemapOn) {
+            return Math::CreatePerspective(JPH::DegreesToRadians(fov), aspectRatio, nearZ, farZ);
+        }
+        // Base frustum at the rectangle's own aspect...
+        const float    regionAspect = (viewportMaxX - viewportMinX) / viewportFrameH;
+        JPH::Mat44     proj         = Math::CreatePerspective(JPH::DegreesToRadians(fov), regionAspect, nearZ, farZ);
+        // ...then map its NDC x=-1..+1 onto the rectangle's span of the full
+        // framebuffer: ndcFull = scale * ndcRegion + offset, applied as a column
+        // rewrite so clip = P' * v directly.
+        const float a     = 2.0f * viewportMinX / viewportFrameW - 1.0f;
+        const float b     = 2.0f * viewportMaxX / viewportFrameW - 1.0f;
+        const float scale = (b - a) * 0.5f;
+        const float off   = (a + b) * 0.5f;
+        // Row rewrite row0' = scale*row0 + off*row3 (the w row), expressed on
+        // columns: each column's x becomes scale*x + off*w. Only column 0
+        // carries x and only column 2 carries a non-zero w (-1), so the offset
+        // lands there -- NOT on the translation column, which would shift in
+        // view space instead of NDC.
+        return JPH::Mat44(
+            proj.GetColumn4(0) * scale, proj.GetColumn4(1), proj.GetColumn4(2) + JPH::Vec4(-off, 0.0f, 0.0f, 0.0f), proj.GetColumn4(3)
+        );
     }
 
     static constexpr float Halton_2[16] = {0.5f,    0.25f,   0.75f,   0.125f,  0.625f,  0.375f,  0.875f,  0.0625f,

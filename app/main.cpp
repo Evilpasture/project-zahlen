@@ -21,11 +21,13 @@
 #include <Jolt/Physics/Collision/CastResult.h>
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Camera.hpp>
+#include <clay.h>
 #include <Zahlen/Clock.hpp>
 #include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Console.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/CreativeWorksManager.hpp>
 #include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
@@ -319,6 +321,29 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
 
         auto winSize = engine.GetWindow().GetSize();
 
+        // Dynamic viewport bounds: the 3D composition targets the centre
+        // column between the two panels. Read the panels' REAL boxes from last
+        // frame's Clay layout (they are opaque, so what the frustum paints
+        // beyond them is never seen); the constants are only the first-frame
+        // fallback before any layout exists. The camera remaps its projection
+        // to the rectangle, and picking / transforms / culling all follow
+        // because they go through the same GetProjectionMatrix.
+        float vpX0 = kLeftPanelWidth;
+        float vpX1 = static_cast<float>(winSize.width) - kRightPanelWidth;
+        auto panelBox = [](std::string_view label) -> Clay_ElementData {
+            Clay_String cs {};
+            cs.length = static_cast<int32_t>(label.size());
+            cs.chars  = label.data();
+            return Clay_GetElementData(Clay_GetElementIdWithIndex(cs, static_cast<uint32_t>(ZHLN::HashCreativeWorkPath(label))));
+        };
+        if (const Clay_ElementData left = panelBox("HierarchyPanel"); left.found) {
+            vpX0 = left.boundingBox.x + left.boundingBox.width;
+        }
+        if (const Clay_ElementData right = panelBox("InspectorPanel"); right.found) {
+            vpX1 = right.boundingBox.x;
+        }
+        cam.SetViewportBounds(vpX0, vpX1, static_cast<float>(winSize.width), static_cast<float>(winSize.height));
+
         // A cheap handle over the Impl the registry owns (GUIStateComponent), so
         // building it here costs a pointer and lets the gating below ask about
         // text focus. The same handle is handed to the frame builder.
@@ -334,8 +359,7 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
         });
 
         // Viewport bounds: center area between the left hierarchy and right inspector
-        const bool pointerInViewport = state != nullptr && state->mouseX >= kLeftPanelWidth &&
-                                       state->mouseX <= (static_cast<float>(winSize.width) - kRightPanelWidth);
+        const bool pointerInViewport = state != nullptr && state->mouseX >= vpX0 && state->mouseX <= vpX1;
 
         const bool uiCapturesMouse = state != nullptr && (!pointerInViewport || state->wantCaptureMouse);
         // A focused text field owns the keyboard without setting a capture flag
