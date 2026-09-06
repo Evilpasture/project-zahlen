@@ -651,6 +651,128 @@ auto CreateBox(Engine& engine, JPH::Vec3Arg halfExtents, const SpawnParams& para
     return CreateBox(engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), halfExtents, params);
 }
 
+namespace {
+
+// The three curved primitives share one entity-assembly path: build the mesh,
+// wrap a basic material, register both under per-entity asset ids, and hang the
+// standard component set off the new entity. `cullRadius` is the shape's world
+// extent times the same *2 safety factor CreateBox uses.
+auto SpawnPrimitive(
+    RenderContext&  ctx,
+    ECS::Registry&  reg,
+    PhysicsContext* pc,
+    std::string_view shapeName,
+    Mesh             mesh,
+    float            cullRadius,
+    Physics::ShapeType physicsShape,
+    float            physP1,
+    float            physP2,
+    const SpawnParams& params
+) -> Entity {
+    const JPH::Vec4 shapeColor = (params.color.GetW() >= 0.0f) ? params.color : JPH::Vec4(0.8f, 0.4f, 0.2f, 1.0f);
+
+    Material mat;
+    if (params.materialOverride.pipeline != PipelineHandle::Invalid) {
+        mat = params.materialOverride;
+    } else {
+        auto mat_res           = CreateBasicMaterial(ctx, false, false, false);
+        mat                    = mat_res.value_or(Material {});
+        mat.baseColorFactor[0] = shapeColor.GetX();
+        mat.baseColorFactor[1] = shapeColor.GetY();
+        mat.baseColorFactor[2] = shapeColor.GetZ();
+        mat.baseColorFactor[3] = shapeColor.GetW();
+        mat.roughnessFactor    = params.roughness;
+        mat.metallicFactor     = params.metallic;
+    }
+
+    Entity     e         = reg.Create();
+    AssetID    meshAsset = HashAssetID("prefab_" + std::string(shapeName) + "_mesh_" + std::to_string(e.index));
+    MaterialID matAsset  = HashAssetID("prefab_" + std::string(shapeName) + "_mat_" + std::to_string(e.index));
+
+    ctx.RegisterGPUMesh(meshAsset, mesh);
+    ctx.RegisterGPUMaterial(matAsset, mat);
+
+    JPH::Mat44 worldMat = Math::CreateTransform(JPH::Vec3(params.position), params.rotation, params.scale);
+
+    reg.Add(e, Components::NameComponent {.name = String64(std::string(shapeName) + "_" + std::to_string(e.index))});
+    reg.Add(e, Components::TransformComponent {.position = JPH::Vec3(params.position), .rotation = params.rotation, .scale = params.scale});
+    reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
+    reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = cullRadius});
+    reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
+
+    if (params.createPhysics && pc != nullptr) {
+        auto shape = pc->GetOrCreateShape(physicsShape, physP1, physP2);
+        auto body  = pc->CreateRigidBody(
+            shape, params.position, params.rotation, params.isStaticPhysics ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
+            params.isStaticPhysics ? static_cast<JPH::ObjectLayer>(0) : static_cast<JPH::ObjectLayer>(1), 0, params.physicsCategory, params.physicsMask
+        );
+        reg.Add(e, Components::PhysicsComponent {body});
+        if (!params.isStaticPhysics) {
+            reg.Add(
+                e, Components::PhysicsStateComponent {
+                       .currPosition = JPH::Vec3(params.position),
+                       .prevPosition = JPH::Vec3(params.position),
+                       .currRotation = params.rotation,
+                       .prevRotation = params.rotation
+                   }
+            );
+        }
+    }
+    return e;
+}
+
+} // namespace
+
+auto CreateSphere(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, float radius, const SpawnParams& params) -> Entity {
+    SpawnParams resolved = params;
+    if (resolved.color.GetW() < 0.0f) {
+        resolved.color = JPH::Vec4(0.8f, 0.4f, 0.2f, 1.0f);
+    }
+    const float maxScale = std::max({params.scale.GetX(), params.scale.GetY(), params.scale.GetZ()});
+    return SpawnPrimitive(
+        ctx, reg, pc, "Sphere", CreateSphereMesh(ctx, radius, resolved.color), radius * maxScale * 2.0f, Physics::ShapeType::Sphere,
+        radius * maxScale, 0.0f, resolved
+    );
+}
+
+auto CreateSphere(Engine& engine, float radius, const SpawnParams& params) -> Entity {
+    return CreateSphere(engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), radius, params);
+}
+
+auto CreateCylinder(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, float radius, float height, const SpawnParams& params) -> Entity {
+    SpawnParams resolved = params;
+    if (resolved.color.GetW() < 0.0f) {
+        resolved.color = JPH::Vec4(0.8f, 0.4f, 0.2f, 1.0f);
+    }
+    const float maxScale = std::max({params.scale.GetX(), params.scale.GetY(), params.scale.GetZ()});
+    return SpawnPrimitive(
+        ctx, reg, pc, "Cylinder", CreateCylinderMesh(ctx, radius, height, resolved.color), std::max(radius, height * 0.5f) * maxScale * 2.0f,
+        Physics::ShapeType::Cylinder, radius * maxScale, height * 0.5f * maxScale, resolved
+    );
+}
+
+auto CreateCylinder(Engine& engine, float radius, float height, const SpawnParams& params) -> Entity {
+    return CreateCylinder(engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), radius, height, params);
+}
+
+auto CreateCone(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, float radius, float height, const SpawnParams& params) -> Entity {
+    SpawnParams resolved = params;
+    if (resolved.color.GetW() < 0.0f) {
+        resolved.color = JPH::Vec4(0.8f, 0.4f, 0.2f, 1.0f);
+    }
+    const float maxScale = std::max({params.scale.GetX(), params.scale.GetY(), params.scale.GetZ()});
+    // Jolt has no cone shape; the collider approximates it with a cylinder of
+    // the same height and half the radius. The visual mesh is still a cone.
+    return SpawnPrimitive(
+        ctx, reg, pc, "Cone", CreateConeMesh(ctx, radius, height, resolved.color), std::max(radius, height * 0.5f) * maxScale * 2.0f,
+        Physics::ShapeType::Cylinder, radius * 0.5f * maxScale, height * 0.5f * maxScale, resolved
+    );
+}
+
+auto CreateCone(Engine& engine, float radius, float height, const SpawnParams& params) -> Entity {
+    return CreateCone(engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), radius, height, params);
+}
+
 auto CreatePlane(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, float extent, const JPH::Vec4& color, const SpawnParams& params) -> Entity {
     Mesh mesh = CreatePlaneMesh(ctx, extent, color);
 

@@ -31,11 +31,15 @@
 
 #include <Zahlen/Common.h>
 #include <Zahlen/Entity.hpp>
+#include <Zahlen/Math3D.hpp>
 #include <span>
 #include <string_view>
 
 namespace ZHLN::ECS {
 class Registry;
+}
+namespace ZHLN {
+struct Camera;
 }
 
 namespace ZHLN::GUI {
@@ -55,6 +59,45 @@ struct EditorState {
     /// node are hidden from the hierarchy so the editor never lists (or
     /// lets you select) its own chrome. Null = no filtering.
     ZHLN::Entity editorRoot = ZHLN::Entity::Null();
+
+    // --- Blender-style modal transform (UpdateTransformMode) -----------------
+    // G/R/S enter Move/Rotate/Scale on the selection; X/Y/Z constrain the axis;
+    // LMB or Enter confirms; Esc or RMB cancels and restores the start transform.
+
+    /// Which modal transform, if any, is running.
+    enum class TransformMode : uint8_t { None = 0, Move, Rotate, Scale };
+    TransformMode transformMode = TransformMode::None;
+
+    /// Axis constraint for the running mode. None = free (view plane / uniform).
+    enum class TransformAxis : uint8_t { None = 0, X, Y, Z };
+    TransformAxis transformAxis = TransformAxis::None;
+
+    /// Entity the running mode acts on. Captured at mode entry, so a selection
+    /// change mid-mode does not redirect the manipulation.
+    ZHLN::Entity transformEntity = ZHLN::Entity::Null();
+
+    // Captures taken at mode entry; cancel writes them back.
+    JPH::Vec3 transformStartPosition = JPH::Vec3::sZero();
+    JPH::Quat transformStartRotation = JPH::Quat::sIdentity();
+    JPH::Vec3 transformStartScale    = JPH::Vec3::sReplicate(1.0f);
+
+    // Anchors for the running mode: Move intersects the mouse ray with a plane
+    // through the start position (normal = camera forward at entry); Rotate and
+    // Scale measure screen-space angle / distance around the projected object.
+    JPH::Vec3 transformPlaneNormal = JPH::Vec3::sAxisY();
+    JPH::Vec3 transformAnchor      = JPH::Vec3::sZero();
+    float     transformStartAngle  = 0.0f;
+    float     transformStartDist   = 1.0f;
+
+    /// Previous-frame raw input levels, for press-edge detection. Owned by
+    /// UpdateTransformMode; hosts must not read or write it.
+    uint16_t transformPrevInput = 0;
+
+    /// Spawn requested from the hierarchy's Add Shape dropdown, as an index
+    /// into SpawnShapeNames(); -1 means nothing requested. The host owns the
+    /// Engine a spawn needs, so it consumes this after drawing the panels and
+    /// resets it to -1.
+    int requestedSpawn = -1;
 };
 
 // ============================================================================
@@ -112,6 +155,33 @@ struct ComponentKind {
 /// the two lists are the same set, and a component added to one belongs in the
 /// other.
 [[nodiscard]] ZHLN_API auto ComponentKinds() noexcept -> std::span<const ComponentKind>;
+
+/// The basic shapes the hierarchy's Add Shape dropdown offers, in the order
+/// the dropdown lists them. The host maps a `requestedSpawn` index to the
+/// matching CreativeWorksFactory spawner.
+[[nodiscard]] ZHLN_API auto SpawnShapeNames() noexcept -> std::span<const std::string_view>;
+
+/// Runs the Blender-style modal transform for this frame: enters a mode on
+/// G/R/S press edges (plain S only -- a Ctrl+S save chord never starts Scale),
+/// manipulates the captured entity from the mouse ray, and confirms or cancels
+/// it. Reads raw input levels from the registry's InputStateComponent
+/// singleton and writes the entity's TransformComponent live, so the world
+/// preview follows the pointer before confirmation.
+///
+/// Call once per frame BEFORE camera control and viewport picking: cancel and
+/// confirm then win over the global Escape / click-to-select bindings on the
+/// same frame, and a mode never leaks keys into the fly camera.
+/// @p uiOwnsInput is true while a text field or dropdown owns the keyboard
+/// (the host's `uiCapturesKeyboard`); the mode then neither starts nor acts,
+/// so typing "g" into a name box never grabs the object.
+ZHLN_API void UpdateTransformMode(
+    ZHLN::ECS::Registry& reg,
+    EditorState&         state,
+    const Camera&        camera,
+    uint32_t             viewportWidth,
+    uint32_t             viewportHeight,
+    bool                 uiOwnsInput
+) noexcept;
 
 /// Draws the scene hierarchy: one selectable row per named entity that is not
 /// part of the editor's own subtree. Clicking a row writes

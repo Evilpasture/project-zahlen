@@ -130,6 +130,11 @@ constexpr float kLeftPanelWidth  = 260.0f;
 constexpr float kRightPanelWidth = 320.0f;
 
 void UpdateEditorCamera(ZHLN::Camera& cam, const ZHLN::Components::InputStateComponent& state, float dt) {
+    // A modal transform owns the pointer and the axis keys; the fly camera
+    // would otherwise fight the manipulation for the same input.
+    if (s_NativeEditorState.transformMode != ZHLN::Editor::EditorState::TransformMode::None) {
+        return;
+    }
     const float sensitivity = 0.15f;
 
     const bool uiCapturesMouse    = state.wantCaptureMouse;
@@ -332,7 +337,17 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
         // focus, which is the right question to ask before BeginFrame has run.
         const bool uiCapturesKeyboard = (state != nullptr && state->wantCaptureKeyboard) || gui.IsTextInputFocused();
 
-        if (state != nullptr && state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Escape)) && !uiCapturesKeyboard) {
+        // Blender-style modal transform runs before Escape, picking and the
+        // fly camera: an Esc that cancels a mode must not also close the
+        // editor on the same frame, and mode keys never leak into the camera.
+        const auto transformSize = engine.GetWindow().GetSize();
+        ZHLN::Editor::UpdateTransformMode(
+            reg, s_NativeEditorState, cam, transformSize.width, transformSize.height, uiCapturesKeyboard
+        );
+        const bool transformActive = s_NativeEditorState.transformMode != ZHLN::Editor::EditorState::TransformMode::None;
+
+        if (state != nullptr && state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Escape)) && !uiCapturesKeyboard &&
+            !transformActive) {
             engine.GetWindow().Close();
             break;
         }
@@ -350,7 +365,8 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
         }
         saveChordWasDown = saveChordDown;
 
-        if (state != nullptr && pointerInViewport && !state->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton)) && !uiCapturesMouse) {
+        if (state != nullptr && pointerInViewport && !transformActive &&
+            !state->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton)) && !uiCapturesMouse) {
             static bool wasMouseDown = false;
             bool        isMouseDown  = glfwGetMouseButton(static_cast<GLFWwindow*>(engine.GetWindow().GetNativeHandle()), GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
 
@@ -363,6 +379,34 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
 
         // Native self-hosted editor frame using Clay
         RunNativeEditorFrame(gui, engine, frameTime);
+
+        // The hierarchy's Add Shape dropdown only records a request; spawning
+        // needs the Engine (GPU mesh + material), which lives here.
+        if (s_NativeEditorState.requestedSpawn >= 0) {
+            const int kind                     = s_NativeEditorState.requestedSpawn;
+            s_NativeEditorState.requestedSpawn = -1;
+
+            const float   yawRad   = JPH::DegreesToRadians(cam.yaw);
+            const float   pitchRad = JPH::DegreesToRadians(cam.pitch);
+            const JPH::Vec3 forward =
+                JPH::Vec3(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad)).Normalized();
+
+            ZHLN::CreativeWorksFactory::SpawnParams sp;
+            sp.position = JPH::RVec3(cam.position + forward * 8.0f);
+
+            ZHLN::Entity spawned = ZHLN::Entity::Null();
+            switch (kind) {
+                case 0: spawned = ZHLN::CreativeWorksFactory::CreateBox(engine, JPH::Vec3::sReplicate(0.5f), sp); break;
+                case 1: spawned = ZHLN::CreativeWorksFactory::CreatePlane(engine, 2.0f, JPH::Vec4(0.6f, 0.6f, 0.6f, 1.0f), sp); break;
+                case 2: spawned = ZHLN::CreativeWorksFactory::CreateSphere(engine, 0.5f, sp); break;
+                case 3: spawned = ZHLN::CreativeWorksFactory::CreateCylinder(engine, 0.5f, 1.0f, sp); break;
+                case 4: spawned = ZHLN::CreativeWorksFactory::CreateCone(engine, 0.5f, 1.0f, sp); break;
+                default: break;
+            }
+            if (spawned != ZHLN::Entity::Null()) {
+                s_NativeEditorState.selectedEntity = spawned;
+            }
+        }
 
         if (state != nullptr && state->needsResize) {
             engine.GetRenderContext().SetResolution(state->newSize);

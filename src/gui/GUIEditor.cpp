@@ -8,8 +8,10 @@
 // that the transpiler fallback (tools/transpile_reflection.py, which rewrites
 // reflection calls by translation-unit source offset) sees and flattens it.
 
+#include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Format.hpp>
+#include <Zahlen/Input.hpp>
 #include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/GUI.hpp>
 #include <Zahlen/GUIEditor.hpp>
@@ -18,6 +20,7 @@
 #include <Zahlen/gui/UIComponents.hpp>
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <span>
 #include <string_view>
@@ -245,6 +248,270 @@ void DestroySelected(ZHLN::ECS::Registry& reg, EditorState& state) noexcept {
     reg.Destroy(victim);
 }
 
+// ============================================================================
+// Modal transform (Blender-style G/R/S)
+// ============================================================================
+//
+// The mode is a small state machine over raw input LEVELS, edge-detected
+// against EditorState::transformPrevInput: InputStateComponent carries key
+// levels, not presses, exactly like the host's Ctrl+S handling.
+//
+// All manipulation math is camera-ray based (the same unproject
+// CastPickingRay uses), so the whole mode is testable headless: a registry,
+// a Camera and a mouse position are all it reads.
+
+namespace {
+
+enum TransformInputBit : uint16_t {
+    kInG     = 1u << 0,
+    kInR     = 1u << 1,
+    kInS     = 1u << 2,
+    kInX     = 1u << 3,
+    kInY     = 1u << 4,
+    kInZ     = 1u << 5,
+    kInEnter = 1u << 6,
+    kInEsc   = 1u << 7,
+    kInLMB   = 1u << 8,
+    kInRMB   = 1u << 9,
+    kInCtrl  = 1u << 10,
+};
+
+auto ReadTransformInput(const Comp::InputStateComponent* input) noexcept -> uint16_t {
+    if (input == nullptr) {
+        return 0;
+    }
+    uint16_t bits = 0;
+    auto     key  = [&](ZHLN::KeyCode k) -> bool { return input->IsKeyDownRaw(static_cast<uint8_t>(k)); };
+    if (key(ZHLN::KeyCode::G)) bits |= kInG;
+    if (key(ZHLN::KeyCode::R)) bits |= kInR;
+    if (key(ZHLN::KeyCode::S)) bits |= kInS;
+    if (key(ZHLN::KeyCode::X)) bits |= kInX;
+    if (key(ZHLN::KeyCode::Y)) bits |= kInY;
+    if (key(ZHLN::KeyCode::Z)) bits |= kInZ;
+    if (key(ZHLN::KeyCode::Enter)) bits |= kInEnter;
+    if (key(ZHLN::KeyCode::Escape)) bits |= kInEsc;
+    if (key(ZHLN::KeyCode::LControl) || key(ZHLN::KeyCode::RControl)) bits |= kInCtrl;
+    if (input->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LButton))) bits |= kInLMB;
+    if (input->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton))) bits |= kInRMB;
+    return bits;
+}
+
+auto CameraForward(const Camera& camera) noexcept -> JPH::Vec3 {
+    const float yaw   = JPH::DegreesToRadians(camera.yaw);
+    const float pitch = JPH::DegreesToRadians(camera.pitch);
+    return JPH::Vec3(JPH::Cos(yaw) * JPH::Cos(pitch), JPH::Sin(pitch), JPH::Sin(yaw) * JPH::Cos(pitch)).Normalized();
+}
+
+/// Unprojects the mouse exactly like the host's picking ray: same NDC
+/// convention, same inverse view-projection.
+auto MouseRay(const Camera& camera, float mx, float my, uint32_t w, uint32_t h, JPH::Vec3& origin, JPH::Vec3& dir) noexcept -> bool {
+    if (w == 0 || h == 0) {
+        return false;
+    }
+    const float ndcX   = (2.0f * mx) / static_cast<float>(w) - 1.0f;
+    const float ndcY   = 1.0f - (2.0f * my) / static_cast<float>(h);
+    const float aspect = static_cast<float>(w) / static_cast<float>(h);
+
+    const JPH::Mat44 invVP = (camera.GetProjectionMatrix(aspect) * camera.GetViewMatrix()).Inversed();
+    const JPH::Vec4  nearW = invVP * JPH::Vec4(ndcX, ndcY, 0.0f, 1.0f);
+    const JPH::Vec4  farW  = invVP * JPH::Vec4(ndcX, ndcY, 1.0f, 1.0f);
+    if (nearW.GetW() <= 0.0f || farW.GetW() <= 0.0f) {
+        return false;
+    }
+    origin = JPH::Vec3(nearW.GetX() / nearW.GetW(), nearW.GetY() / nearW.GetW(), nearW.GetZ() / nearW.GetW());
+    const JPH::Vec3 farP = JPH::Vec3(farW.GetX() / farW.GetW(), farW.GetY() / farW.GetW(), farW.GetZ() / farW.GetW());
+    dir    = (farP - origin).Normalized();
+    return true;
+}
+
+auto RayPlane(const JPH::Vec3& origin, const JPH::Vec3& dir, const JPH::Vec3& normal, const JPH::Vec3& planePoint, JPH::Vec3& hit) noexcept -> bool {
+    const float d = dir.Dot(normal);
+    if (std::fabs(d) < 1e-6f) {
+        return false;
+    }
+    const float t = (planePoint - origin).Dot(normal) / d;
+    hit           = origin + dir * t;
+    return true;
+}
+
+auto WorldToScreen(const Camera& camera, uint32_t w, uint32_t h, const JPH::Vec3& world, float& sx, float& sy) noexcept -> bool {
+    if (w == 0 || h == 0) {
+        return false;
+    }
+    const float      aspect = static_cast<float>(w) / static_cast<float>(h);
+    const JPH::Mat44 vp     = camera.GetProjectionMatrix(aspect) * camera.GetViewMatrix();
+    const JPH::Vec4  clip   = vp * JPH::Vec4(world.GetX(), world.GetY(), world.GetZ(), 1.0f);
+    if (clip.GetW() <= 0.0f) {
+        return false;
+    }
+    sx = (clip.GetX() / clip.GetW() + 1.0f) * 0.5f * static_cast<float>(w);
+    sy = (1.0f - clip.GetY() / clip.GetW()) * 0.5f * static_cast<float>(h);
+    return true;
+}
+
+auto AxisVector(EditorState::TransformAxis axis) noexcept -> JPH::Vec3 {
+    switch (axis) {
+        case EditorState::TransformAxis::X: return JPH::Vec3::sAxisX();
+        case EditorState::TransformAxis::Y: return JPH::Vec3::sAxisY();
+        case EditorState::TransformAxis::Z: return JPH::Vec3::sAxisZ();
+        case EditorState::TransformAxis::None: break;
+    }
+    return JPH::Vec3::sZero();
+}
+
+} // namespace
+
+constexpr std::string_view kSpawnShapeNames[] = {"Cube", "Plane", "Sphere", "Cylinder", "Cone"};
+
+auto SpawnShapeNames() noexcept -> std::span<const std::string_view> {
+    return kSpawnShapeNames;
+}
+
+void UpdateTransformMode(
+    ZHLN::ECS::Registry& reg, EditorState& state, const Camera& camera, uint32_t viewportWidth, uint32_t viewportHeight,
+    bool uiOwnsInput
+) noexcept {
+    const auto*    input   = reg.GetSingleton<Comp::InputStateComponent>();
+    if (uiOwnsInput) {
+        // Keep the edge detector honest across the capture window, so a key
+        // held when the field lost focus is not seen as a fresh press.
+        state.transformPrevInput = ReadTransformInput(input);
+        return;
+    }
+    const uint16_t level   = ReadTransformInput(input);
+    const uint16_t pressed = level & ~state.transformPrevInput;
+    const float    mx      = input != nullptr ? input->mouseX : -1.0f;
+    const float    my      = input != nullptr ? input->mouseY : -1.0f;
+
+    if (state.transformMode == EditorState::TransformMode::None) {
+        // Enter a mode only on a live selection. Plain S starts Scale, but a
+        // Ctrl+S is the save chord and must never grab the object.
+        EditorState::TransformMode mode = EditorState::TransformMode::None;
+        if (input != nullptr && state.selectedEntity != ZHLN::Entity::Null() && reg.IsAlive(state.selectedEntity)) {
+            if ((pressed & kInG) != 0) {
+                mode = EditorState::TransformMode::Move;
+            } else if ((pressed & kInR) != 0) {
+                mode = EditorState::TransformMode::Rotate;
+            } else if ((pressed & kInS) != 0 && (level & kInCtrl) == 0) {
+                mode = EditorState::TransformMode::Scale;
+            }
+        }
+        if (mode != EditorState::TransformMode::None) {
+            const auto* t = reg.Get<Comp::TransformComponent>(state.selectedEntity);
+            if (t != nullptr) {
+                state.transformMode        = mode;
+                state.transformAxis        = EditorState::TransformAxis::None;
+                state.transformEntity      = state.selectedEntity;
+                state.transformStartPosition = t->position;
+                state.transformStartRotation = t->rotation;
+                state.transformStartScale    = t->scale;
+
+                state.transformPlaneNormal = CameraForward(camera);
+                JPH::Vec3 origin {}, dir {};
+                if (!MouseRay(camera, mx, my, viewportWidth, viewportHeight, origin, dir) ||
+                    !RayPlane(origin, dir, state.transformPlaneNormal, t->position, state.transformAnchor)) {
+                    state.transformAnchor = t->position;
+                }
+
+                float ox = 0.0f, oy = 0.0f;
+                if (!WorldToScreen(camera, viewportWidth, viewportHeight, t->position, ox, oy)) {
+                    ox = mx;
+                    oy = my;
+                }
+                state.transformStartAngle = std::atan2(my - oy, mx - ox);
+                state.transformStartDist  = std::max(std::hypot(mx - ox, my - oy), 1e-3f);
+            }
+        }
+    } else {
+        const ZHLN::Entity e = state.transformEntity;
+        if (!reg.IsAlive(e)) {
+            state.transformMode = EditorState::TransformMode::None;
+        } else if ((pressed & (kInEsc | kInRMB)) != 0) {
+            // Cancel: write the captures back, drop the mode.
+            reg.Patch<Comp::TransformComponent>(e, [&](Comp::TransformComponent& t) -> void {
+                t.position = state.transformStartPosition;
+                t.rotation = state.transformStartRotation;
+                t.scale    = state.transformStartScale;
+            });
+            state.transformMode = EditorState::TransformMode::None;
+        } else if ((pressed & (kInEnter | kInLMB)) != 0) {
+            // Confirm: the live transform stands.
+            state.transformMode = EditorState::TransformMode::None;
+        } else {
+            if ((pressed & kInX) != 0) {
+                state.transformAxis = (state.transformAxis == EditorState::TransformAxis::X) ? EditorState::TransformAxis::None : EditorState::TransformAxis::X;
+            } else if ((pressed & kInY) != 0) {
+                state.transformAxis = (state.transformAxis == EditorState::TransformAxis::Y) ? EditorState::TransformAxis::None : EditorState::TransformAxis::Y;
+            } else if ((pressed & kInZ) != 0) {
+                state.transformAxis = (state.transformAxis == EditorState::TransformAxis::Z) ? EditorState::TransformAxis::None : EditorState::TransformAxis::Z;
+            }
+
+            switch (state.transformMode) {
+                case EditorState::TransformMode::Move: {
+                    JPH::Vec3 origin {}, dir {}, hit {};
+                    if (MouseRay(camera, mx, my, viewportWidth, viewportHeight, origin, dir) &&
+                        RayPlane(origin, dir, state.transformPlaneNormal, state.transformStartPosition, hit)) {
+                        JPH::Vec3 delta = hit - state.transformAnchor;
+                        if (state.transformAxis != EditorState::TransformAxis::None) {
+                            const JPH::Vec3 axis = AxisVector(state.transformAxis);
+                            delta                = axis * delta.Dot(axis);
+                        }
+                        const JPH::Vec3 newPos = state.transformStartPosition + delta;
+                        reg.Patch<Comp::TransformComponent>(e, [&newPos](Comp::TransformComponent& t) -> void { t.position = newPos; });
+                    }
+                    break;
+                }
+                case EditorState::TransformMode::Rotate: {
+                    float ox = 0.0f, oy = 0.0f;
+                    if (WorldToScreen(camera, viewportWidth, viewportHeight, state.transformStartPosition, ox, oy)) {
+                        const float angle = std::atan2(my - oy, mx - ox);
+                        const JPH::Vec3 axis =
+                            (state.transformAxis != EditorState::TransformAxis::None) ? AxisVector(state.transformAxis) : state.transformPlaneNormal;
+                        const JPH::Quat turn = JPH::Quat::sRotation(axis, angle - state.transformStartAngle);
+                        const JPH::Quat newRot = turn * state.transformStartRotation;
+                        reg.Patch<Comp::TransformComponent>(e, [&newRot](Comp::TransformComponent& t) -> void { t.rotation = newRot; });
+                    }
+                    break;
+                }
+                case EditorState::TransformMode::Scale: {
+                    float ox = 0.0f, oy = 0.0f;
+                    if (WorldToScreen(camera, viewportWidth, viewportHeight, state.transformStartPosition, ox, oy)) {
+                        // Screen-space distance ratio, like Blender's uniform
+                        // scale: pull away from the object and it grows.
+                        const float   dist   = std::max(std::hypot(mx - ox, my - oy), 1e-3f);
+                        const float   factor = std::max(dist / state.transformStartDist, 1e-3f);
+                        const JPH::Vec3 start = state.transformStartScale;
+                        JPH::Vec3       next  = start * factor;
+                        if (state.transformAxis != EditorState::TransformAxis::None) {
+                            next = start;
+                            const float scaled = (state.transformAxis == EditorState::TransformAxis::X) ? start.GetX() * factor :
+                                                 (state.transformAxis == EditorState::TransformAxis::Y) ? start.GetY() * factor :
+                                                                                                          start.GetZ() * factor;
+                            if (state.transformAxis == EditorState::TransformAxis::X) {
+                                next = JPH::Vec3(scaled, start.GetY(), start.GetZ());
+                            } else if (state.transformAxis == EditorState::TransformAxis::Y) {
+                                next = JPH::Vec3(start.GetX(), scaled, start.GetZ());
+                            } else {
+                                next = JPH::Vec3(start.GetX(), start.GetY(), scaled);
+                            }
+                        }
+                        // A flipped or zero scale would turn the mesh inside
+                        // out or collapse it; the mouse can get arbitrarily
+                        // close to the projected center.
+                        next = JPH::Vec3(std::max(next.GetX(), 1e-4f), std::max(next.GetY(), 1e-4f), std::max(next.GetZ(), 1e-4f));
+                        reg.Patch<Comp::TransformComponent>(e, [&next](Comp::TransformComponent& t) -> void { t.scale = next; });
+                    }
+                    break;
+                }
+                case EditorState::TransformMode::None:
+                    break;
+            }
+        }
+    }
+
+    state.transformPrevInput = level;
+}
+
 void DrawHierarchyPanel(GUI::Context& gui, ZHLN::ECS::Registry& reg, EditorState& state, std::string_view id) {
     struct Row {
         ZHLN::Entity entity;
@@ -287,6 +554,36 @@ void DrawHierarchyPanel(GUI::Context& gui, ZHLN::ECS::Registry& reg, EditorState
         DestroySelected(reg, state);
     }
     gui.EndRow();
+
+    // Add Shape requests a spawn rather than spawning here: the factory needs
+    // an Engine (GPU mesh, material), which the panel deliberately does not
+    // see. The host consumes requestedSpawn after drawing and resets it.
+    std::array<std::string_view, 8> spawnOptions {};
+    spawnOptions[0] = "Add Shape...";
+    size_t          spawnCount = 1;
+    for (const std::string_view name: kSpawnShapeNames) {
+        spawnOptions[spawnCount++] = name;
+    }
+    int spawnPick = 0;
+    if (gui.Dropdown("Add Shape", std::span<const std::string_view>(spawnOptions.data(), spawnCount), spawnPick) && spawnPick > 0) {
+        state.requestedSpawn = spawnPick - 1;
+    }
+
+    // The running modal transform gets a visible affordance, so the keybinds
+    // are not invisible state.
+    if (state.transformMode != EditorState::TransformMode::None) {
+        std::array<char, 96>   modeBuf {};
+        const std::string_view modeName = state.transformMode == EditorState::TransformMode::Move   ? "Move" :
+                                          state.transformMode == EditorState::TransformMode::Rotate ? "Rotate" :
+                                                                                                      "Scale";
+        const std::string_view axisName = state.transformAxis == EditorState::TransformAxis::X ? "X" :
+                                          state.transformAxis == EditorState::TransformAxis::Y ? "Y" :
+                                          state.transformAxis == EditorState::TransformAxis::Z ? "Z" :
+                                                                                                 "free";
+        gui.Text(
+            ZHLN::FormatTo(modeBuf, "{} [{}] - LMB/Enter confirm, Esc/RMB cancel", modeName, axisName), 12.0f, {0.9f, 0.8f, 0.4f, 1.0f}
+        );
+    }
 
     for (const Row& row: rows) {
         std::array<char, 96> fallbackBuf {};
