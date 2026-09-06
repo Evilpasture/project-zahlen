@@ -18,6 +18,7 @@
 #include <clay.h>
 #include <cmath>
 #include <cstdio>
+#include <deque>
 #include <limits>
 #include <string>
 #include <vector>
@@ -68,6 +69,26 @@ struct Context::Impl {
     // Ctrl+C/X/V plumbing, installed by the front end (the engine wires it to
     // Window's clipboard). Empty means those three keys do nothing.
     TextEdit::ClipboardSink clipboard = {};
+
+    // --- String interning ---------------------------------------------------
+    // Widget labels routinely arrive as temporaries: a FormatTo into a stack
+    // array, a view into a stack copy of a component. Clay stores only the
+    // pointer and dereferences it in EndFrameAndRender, after the caller that
+    // owned the bytes has returned -- the dangling read showed up on screen as
+    // runs of '?' because MeasureText maps bytes outside 32..127 to '?'.
+    // Every string handed to Clay is therefore copied in on the way through,
+    // and the arena is dropped at the top of the next BeginFrame, by which time
+    // the previous frame's render commands have all been consumed. std::deque
+    // never invalidates pointers to existing elements on push_back, which a
+    // growing std::vector would.
+    std::deque<char> stringArena;
+
+    auto Intern(std::string_view sv) -> Clay_String {
+        const size_t offset = stringArena.size();
+        stringArena.insert(stringArena.end(), sv.begin(), sv.end());
+        stringArena.push_back('\0');
+        return Clay_String {.isStaticallyAllocated = false, .length = static_cast<int32_t>(sv.size()), .chars = &stringArena[offset]};
+    }
 
     // Characters and editing keys arrive from the window between frames, not
     // through InputStateComponent, which only tracks held-down state. They
@@ -168,10 +189,6 @@ struct Context::Impl {
 
 namespace {
 
-constexpr Clay_String ToClayString(std::string_view sv) noexcept {
-    return Clay_String {.isStaticallyAllocated = false, .length = static_cast<int32_t>(sv.size()), .chars = sv.data()};
-}
-
 Clay_SizingAxis ToClaySizing(const Sizing& s) noexcept {
     if (s.fixed > 0.0f)
         return CLAY_SIZING_FIXED(s.fixed);
@@ -253,6 +270,7 @@ Context::~Context() noexcept = default;
 
 void Context::BeginFrame(float dt) noexcept {
     _impl->currentFrame++;
+    _impl->stringArena.clear();
     _impl->lastDt    = dt;
     Extent2D winSize = _impl->viewport;
     if (_impl->engine) {
@@ -457,7 +475,7 @@ void Context::BeginBox(std::string_view id, const BoxConfig& cfg) noexcept {
 
     if (!id.empty()) {
         uint32_t       numId  = static_cast<uint32_t>(HashCreativeWorkPath(id));
-        Clay_ElementId elemId = Clay_GetElementIdWithIndex(ToClayString(id), numId);
+        Clay_ElementId elemId = Clay_GetElementIdWithIndex(_impl->Intern(id), numId);
         Clay__OpenElementWithId(elemId);
     } else {
         Clay__OpenElement();
@@ -494,14 +512,14 @@ void Context::EndColumn() noexcept {
 void Context::Text(std::string_view text, float fontSize, const JPH::Vec4& color) noexcept {
     Clay_SetCurrentContext(_impl->clayContext);
     Clay_TextElementConfig config = {.textColor = ToClayColor(color), .fontSize = static_cast<uint16_t>(fontSize)};
-    Clay__OpenTextElement(ToClayString(text), config);
+    Clay__OpenTextElement(_impl->Intern(text), config);
 }
 
 bool Context::Button(std::string_view label, const JPH::Vec4& color, const Sizing& width) noexcept {
     Clay_SetCurrentContext(_impl->clayContext);
     bool           clicked = false;
     uint32_t       idNum   = static_cast<uint32_t>(HashCreativeWorkPath(label));
-    Clay_ElementId elemId  = Clay_GetElementIdWithIndex(ToClayString(label), idNum);
+    Clay_ElementId elemId  = Clay_GetElementIdWithIndex(_impl->Intern(label), idNum);
     auto&          state   = _impl->GetState((static_cast<uint64_t>(idNum) << 32) | 0xB007, _impl->currentFrame);
 
     auto* input = _impl->registry.GetSingleton<Components::InputStateComponent>();
@@ -558,7 +576,7 @@ bool Context::Checkbox(std::string_view label, bool& checked) noexcept {
     Clay_SetCurrentContext(_impl->clayContext);
     bool           changed = false;
     uint32_t       idNum   = static_cast<uint32_t>(HashCreativeWorkPath(label));
-    Clay_ElementId elemId  = Clay_GetElementIdWithIndex(ToClayString("cb"), idNum);
+    Clay_ElementId elemId  = Clay_GetElementIdWithIndex(_impl->Intern("cb"), idNum);
     auto&          state   = _impl->GetState((static_cast<uint64_t>(idNum) << 32) | 0x00CB, _impl->currentFrame);
 
     auto* input = _impl->registry.GetSingleton<Components::InputStateComponent>();
@@ -621,7 +639,7 @@ bool Context::Slider(std::string_view label, float& value, float minVal, float m
     Clay_SetCurrentContext(_impl->clayContext);
     bool           changed = false;
     uint32_t       idNum   = static_cast<uint32_t>(HashCreativeWorkPath(label));
-    Clay_ElementId elemId  = Clay_GetElementIdWithIndex(ToClayString(label), idNum);
+    Clay_ElementId elemId  = Clay_GetElementIdWithIndex(_impl->Intern(label), idNum);
 
     uint64_t stateKey = (static_cast<uint64_t>(idNum) << 32) | 0x511D;
     auto&    state    = _impl->GetState(stateKey, _impl->currentFrame);
@@ -753,7 +771,7 @@ bool Context::TextInputImpl(std::string_view label, std::string& value, size_t m
     Clay_SetCurrentContext(_impl->clayContext);
 
     uint32_t       idNum   = static_cast<uint32_t>(HashCreativeWorkPath(label));
-    Clay_ElementId elemId  = Clay_GetElementIdWithIndex(ToClayString(label), idNum);
+    Clay_ElementId elemId  = Clay_GetElementIdWithIndex(_impl->Intern(label), idNum);
     const uint64_t stateKey = (static_cast<uint64_t>(idNum) << 32) | 0x7E17;
     auto&          state   = _impl->GetState(stateKey, _impl->currentFrame);
 
@@ -978,7 +996,7 @@ bool Context::Dropdown(
     }
 
     uint32_t       idNum    = static_cast<uint32_t>(HashCreativeWorkPath(label));
-    Clay_ElementId elemId   = Clay_GetElementIdWithIndex(ToClayString(label), idNum);
+    Clay_ElementId elemId   = Clay_GetElementIdWithIndex(_impl->Intern(label), idNum);
     const uint64_t stateKey = (static_cast<uint64_t>(idNum) << 32) | 0xD209;
     auto&          state    = _impl->GetState(stateKey, _impl->currentFrame);
 
@@ -1163,7 +1181,7 @@ bool Context::Dropdown(
 bool Context::BeginCollapsingHeader(std::string_view label, bool defaultOpen) noexcept {
     Clay_SetCurrentContext(_impl->clayContext);
     uint32_t       idNum  = static_cast<uint32_t>(HashCreativeWorkPath(label));
-    Clay_ElementId elemId = Clay_GetElementIdWithIndex(ToClayString(label), idNum);
+    Clay_ElementId elemId = Clay_GetElementIdWithIndex(_impl->Intern(label), idNum);
 
     uint64_t stateKey = (static_cast<uint64_t>(idNum) << 32) | 0xC011;
     auto&    state    = _impl->GetState(stateKey, _impl->currentFrame);
