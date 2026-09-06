@@ -7,6 +7,9 @@ import os
 import sys
 import subprocess
 import clang.cindex
+if os.path.exists('/usr/local/lib/libclang.so'):
+    clang.cindex.Config.set_library_file('/usr/local/lib/libclang.so')
+clang.cindex.Config.set_compatibility_check(False)
 from clang.cindex import CursorKind, TypeKind, AccessSpecifier
 
 # ==============================================================================
@@ -573,6 +576,18 @@ def main():
             + edit["replacement"]
             + modified_code[edit["end"] :]
         )
+
+    def fix_embed(m):
+        rel_path = m.group(1)
+        if not os.path.isabs(rel_path):
+            abs_target = os.path.normpath(os.path.join(os.path.dirname(input_abspath), rel_path))
+            if os.path.exists(abs_target):
+                new_rel = os.path.relpath(abs_target, os.path.dirname(os.path.abspath(args.output))).replace('\\', '/')
+                return f'#embed "{new_rel}"'
+        return m.group(0)
+
+    import re
+    modified_code = re.sub(r'#embed\s+"([^"]+)"', fix_embed, modified_code)
 
     os_dir = os.path.dirname(args.output)
     if os_dir:

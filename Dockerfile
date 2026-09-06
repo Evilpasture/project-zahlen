@@ -23,7 +23,6 @@ RUN pacman -S --needed --noconfirm \
     vulkan-validation-layers \
     libevdev \
     seatd \
-    fontconfig \
     zstd \
     gtest \
     fennel \
@@ -92,7 +91,6 @@ RUN pacman -S --needed --noconfirm \
     vulkan-swrast \
     libevdev \
     seatd \
-    fontconfig \
     ttf-dejavu \
     wayland \
     libxkbcommon \

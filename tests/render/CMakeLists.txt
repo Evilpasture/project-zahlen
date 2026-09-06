@@ -156,6 +156,7 @@ target_compile_definitions(GPU_Pipeline PRIVATE ZHLN_TEST_SOURCE_DIR="${PROJECT_
 zahlen_add_gpu_test_group(GPU_Interface 180
     RunInterfaceTests.cpp
     TestViewmodel.cpp
+    TestUI.cpp
 )
 
 # Throughput and long-run distance stability. Kept apart from the others: these

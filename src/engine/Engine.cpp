@@ -59,8 +59,6 @@
 #include <engine/system/TextureSystem.hpp>
 #include <engine/system/TransformSystem.hpp>
 #include <filesystem>
-#include <gui/UIInteractionSystem.hpp>
-#include <gui/UIRenderSystem.hpp>
 #include <renderdoc_app.h>
 #ifdef __linux__
 #include <dlfcn.h>
@@ -198,12 +196,11 @@ struct EngineImpl {
     JPH::Array<Entity>                        visibleShadowEntities;
     float                                     currentAlpha = 0.0f;
 
-    // Built once per engine, not once per scene: the glyph packing costs a
-    // fontconfig scan plus 96 SDF rasterisations, and the upload burns a
-    // 1024x1024 bindless texture that nothing ever releases. The scene owns a
-    // *copy* in UISettingsComponent, which Registry::Clear() throws away, so
-    // the engine keeps the authoritative one and re-seeds each new scene from
-    // it. See InitializeDefaultScene.
+    // Built once per engine, not once per scene: the glyph packing costs
+    // 96 SDF rasterisations, and the upload burns a 1024x1024 bindless texture
+    // that nothing ever releases. The scene owns a *copy* in UISettingsComponent,
+    // which Registry::Clear() throws away, so the engine keeps the authoritative
+    // one and re-seeds each new scene from it. See InitializeDefaultScene.
     std::optional<FontAtlas> fontAtlas;
 
     void*    gameState    = nullptr;
@@ -421,13 +418,13 @@ void BuildFrameScheduler(Engine& engine) {
     scheduler.Add(Phase::PlayerIntent, "PlayerInputTranslate", Steps::PlayerIntent);
     scheduler.Add(Phase::Physics, "PhysicsSystem", Steps::Physics);
     scheduler.Add(Phase::Gameplay, "GameplayModule", Steps::Gameplay);
+    scheduler.Add(Phase::Fallback, "DefaultPreset", Steps::Fallback);
     scheduler.Add(Phase::Simulation, "UpdateGraph", Steps::UpdateGraph);
     scheduler.Add(Phase::Simulation, "MainECBPlayback", Steps::CommandPlayback);
     scheduler.Add(Phase::Camera, "CameraSystems", Steps::Camera);
     scheduler.Add(Phase::Camera, "LODSystem", Steps::LOD);
     scheduler.Add(Phase::Visibility, "RenderGraph", Steps::RenderGraph);
     scheduler.Add(Phase::Present, "RenderSystem", Steps::Present);
-    scheduler.Add(Phase::Fallback, "DefaultPreset", Steps::Fallback);
     scheduler.Add(Phase::History, "TransformHistory", Steps::TransformHistory);
 }
 
@@ -720,6 +717,10 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
         // True headless mode: skip GLFW entirely. No display server is required.
         ZHLN::Log("[Engine] Headless mode enabled. Skipping GLFW initialization.");
     } else {
+        glfwSetErrorCallback([](int error, const char* description) -> void {
+            ZHLN::Log("[GLFW Error] Code {}: {}", error, description ? description : "(null)");
+        });
+
         if constexpr (isLinux) {
             // Detects both RenderDoc and NVIDIA Nsight Graphics (Nomad) launch environments
             if (std::getenv("ENABLE_VULKAN_RENDERDOC_CAPTURE") != nullptr || std::getenv("NOMAD_VULKAN_LAYER") != nullptr ||
@@ -729,6 +730,11 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
         }
 
         if (!glfwInit()) {
+            const char* desc = nullptr;
+            int err = glfwGetError(&desc);
+            if (desc != nullptr) {
+                ZHLN::Log("[Engine] glfwInit failed: ({}) {}", err, desc);
+            }
             if (TTYBackend::IsSupported()) {
                 ZHLN::Log("GLFW failed to initialize. Falling back to native TTY Display Mode.");
                 use_tty = true;
@@ -1105,7 +1111,7 @@ auto Engine::InitializeDefaultScene() -> bool {
 
     // The atlas is device state, so it survives the scene it was first built
     // for; only the component-side copy is re-seeded. Rebuilding it per scene
-    // leaked a 1024x1024 texture and a full fontconfig config every time.
+    // leaked a 1024x1024 texture every time.
     if (_impl->fontAtlas.has_value()) {
         if (auto* uiSettings = reg.GetSingleton<GUI::UIComponents::UISettingsComponent>(); uiSettings != nullptr) {
             uiSettings->fontAtlas        = *_impl->fontAtlas;

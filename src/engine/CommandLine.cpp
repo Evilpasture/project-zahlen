@@ -19,7 +19,11 @@
 
 namespace ZHLN {
 extern std::string_view GetRenderGraphDump(AAMode currentMode) noexcept;
+
+auto GetGitCommitHash() noexcept -> std::string_view {
+    return ZHLN_GIT_COMMIT_HASH;
 }
+} // namespace ZHLN
 
 namespace {
 

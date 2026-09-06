@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
+#include <Zahlen/Common.h>
 #include <Zahlen/Core/String.hpp>
 #include <bit>
 #include <cstdint>
@@ -72,6 +73,8 @@ struct Version {
 };
 
 inline constexpr Version EngineVersion {.major = ZHLN_VERSION_MAJOR, .minor = ZHLN_VERSION_MINOR, .patch = ZHLN_VERSION_PATCH};
+
+ZHLN_API auto GetGitCommitHash() noexcept -> std::string_view;
 
 #if defined(__clang__)
 inline constexpr std::string_view Compiler = "Clang (" __VERSION__ ")";

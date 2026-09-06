@@ -14,6 +14,9 @@
 namespace ZHLN {
 class Engine;
 class RenderContext;
+namespace ECS {
+class Registry;
+}
 } // namespace ZHLN
 
 namespace ZHLN::GUI {
@@ -41,16 +44,20 @@ struct BoxConfig {
 
 class ZHLN_API Context {
   public:
+    struct Impl;
+
     explicit Context(Engine& engine) noexcept;
+    explicit Context(ECS::Registry& registry, Extent2D viewport = {1920, 1080}) noexcept;
     ~Context() noexcept;
 
-    Context(const Context&)            = delete;
-    Context& operator=(const Context&) = delete;
-    Context(Context&&) noexcept;
-    Context& operator=(Context&&) noexcept;
+    Context(const Context&)            = default;
+    Context& operator=(const Context&) = default;
+    Context(Context&&) noexcept        = default;
+    Context& operator=(Context&&) noexcept = default;
 
     // --- Frame Lifecycle ---
     void BeginFrame(float dt) noexcept;
+    void EndFrame() noexcept;
     void EndFrameAndRender(RenderContext& rc) noexcept;
 
     // --- Layout Containers (Macro-free C++ API) ---
@@ -89,8 +96,85 @@ class ZHLN_API Context {
     }
 
     // --- Interactive Widgets ---
-    void Text(std::string_view text, float fontSize = 14.0f, const JPH::Vec4& color = {1, 1, 1, 1}) noexcept;
-    bool Button(std::string_view label, const JPH::Vec4& color = {0.16f, 0.24f, 0.36f, 0.95f}) noexcept;
+    void Text(std::string_view text, float fontSize = 16.0f, const JPH::Vec4& color = {1, 1, 1, 1}) noexcept;
+    bool Button(std::string_view label, const JPH::Vec4& color = {0.16f, 0.24f, 0.36f, 0.95f}, const Sizing& width = {}) noexcept;
+    bool Button(std::string_view label, const Sizing& width) noexcept {
+        return Button(label, {0.16f, 0.24f, 0.36f, 0.95f}, width);
+    }
+
+    template <typename OnClickFn>
+        requires std::invocable<OnClickFn>
+    bool Button(std::string_view label, OnClickFn&& onClick) {
+        if (Button(label)) {
+            onClick();
+            return true;
+        }
+        return false;
+    }
+
+    template <typename OnClickFn, typename OnHoverFn>
+        requires std::invocable<OnClickFn> && std::invocable<OnHoverFn>
+    bool Button(std::string_view label, OnClickFn&& onClick, OnHoverFn&& onHover) {
+        bool clicked = Button(label);
+        if (IsItemHovered()) {
+            onHover();
+        }
+        if (clicked) {
+            onClick();
+        }
+        return clicked;
+    }
+
+    template <typename OnClickFn>
+        requires std::invocable<OnClickFn>
+    bool Button(std::string_view label, const Sizing& width, OnClickFn&& onClick) {
+        if (Button(label, width)) {
+            onClick();
+            return true;
+        }
+        return false;
+    }
+
+    template <typename OnClickFn, typename OnHoverFn>
+        requires std::invocable<OnClickFn> && std::invocable<OnHoverFn>
+    bool Button(std::string_view label, const Sizing& width, OnClickFn&& onClick, OnHoverFn&& onHover) {
+        bool clicked = Button(label, width);
+        if (IsItemHovered()) {
+            onHover();
+        }
+        if (clicked) {
+            onClick();
+        }
+        return clicked;
+    }
+
+    template <typename OnClickFn>
+        requires std::invocable<OnClickFn>
+    bool Button(std::string_view label, const JPH::Vec4& color, const Sizing& width, OnClickFn&& onClick) {
+        if (Button(label, color, width)) {
+            onClick();
+            return true;
+        }
+        return false;
+    }
+
+    template <typename OnClickFn, typename OnHoverFn>
+        requires std::invocable<OnClickFn> && std::invocable<OnHoverFn>
+    bool Button(std::string_view label, const JPH::Vec4& color, const Sizing& width, OnClickFn&& onClick, OnHoverFn&& onHover) {
+        bool clicked = Button(label, color, width);
+        if (IsItemHovered()) {
+            onHover();
+        }
+        if (clicked) {
+            onClick();
+        }
+        return clicked;
+    }
+
+    // --- State Inspection ---
+    [[nodiscard]] bool IsItemHovered() const noexcept;
+    [[nodiscard]] bool IsItemActive() const noexcept;
+
     bool Checkbox(std::string_view label, bool& checked) noexcept;
     bool Slider(std::string_view label, float& value, float minVal, float maxVal) noexcept;
 
@@ -107,8 +191,7 @@ class ZHLN_API Context {
     }
 
   private:
-    struct Impl;
-    std::unique_ptr<Impl> _impl;
+    Impl* _impl = nullptr;
 };
 
 } // namespace ZHLN::GUI

@@ -154,7 +154,6 @@ module;
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/Font8x8.hpp>
 #include <Zahlen/Format.hpp>
 #include <Zahlen/GUI.hpp>
 #include <Zahlen/IK.hpp>

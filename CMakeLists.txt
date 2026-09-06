@@ -56,12 +56,21 @@ endif()
 find_package(Git QUIET)
 if(GIT_FOUND)
     execute_process(
-        COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
+        COMMAND ${GIT_EXECUTABLE} describe --tags --always
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
         OUTPUT_VARIABLE ZHLN_GIT_HASH
         OUTPUT_STRIP_TRAILING_WHITESPACE
         ERROR_QUIET
     )
+    if(NOT ZHLN_GIT_HASH)
+        execute_process(
+            COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            OUTPUT_VARIABLE ZHLN_GIT_HASH
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+        )
+    endif()
 endif()
 
 if(NOT ZHLN_GIT_HASH)
@@ -394,6 +403,10 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/mimalloc EXCLUDE_FROM_ALL)
 set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+if(UNIX AND NOT APPLE)
+    set(GLFW_BUILD_X11 ON CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_WAYLAND ON CACHE BOOL "" FORCE)
+endif()
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/glfw SYSTEM)
 
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/LuaJIT SYSTEM)
@@ -448,9 +461,6 @@ endif()
 set(RAW_ENGINE_SOURCES
     src/engine/AssertHandler.cpp
     src/engine/DefaultPreset.cpp
-    src/gui/GUIContext.cpp
-    src/gui/GUIEditor.cpp
-    src/gui/Text.cpp
     src/engine/graphics/RenderFrame.cpp
     src/engine/graphics/RenderGraphBuilder.cpp
     src/engine/graphics/HostBlitSwapchain.cpp
@@ -526,20 +536,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     pkg_check_modules(LIBSEAT REQUIRED IMPORTED_TARGET libseat)
 endif()
 
-# Dependencies needed on both Linux and macOS.
-#
-# simdjson is deliberately NOT here: JSON lives in extras/json, so the core
-# engine has no JSON dependency and a core-only build needs no JSON library
-# installed. extras/CMakeLists.txt finds it when the extras layer is built.
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR APPLE)
-    pkg_check_modules(FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig)
-endif()
-
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/render)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/threading)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/physics)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/ecs)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/audio)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/gui)
 
 # --- ASSEMBLE COMPILER FLAGS METADATA ---
 set(COMPILER_FLAGS_LIST "${CMAKE_CXX_FLAGS}")
@@ -655,6 +657,7 @@ target_link_libraries(zahlen_engine PRIVATE
     zahlen_threading
     zahlen_ecs
     zahlen_audio
+    zahlen_gui
     glfw
     spirv_reflect
     mimalloc-static
@@ -664,10 +667,6 @@ target_link_libraries(zahlen_engine PRIVATE
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(zahlen_engine PRIVATE PkgConfig::LIBEVDEV PkgConfig::LIBSEAT)
-endif()
-
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR APPLE)
-    target_link_libraries(zahlen_engine PRIVATE PkgConfig::FONTCONFIG)
 endif()
 
 target_link_libraries(zahlen_engine PUBLIC Jolt)
