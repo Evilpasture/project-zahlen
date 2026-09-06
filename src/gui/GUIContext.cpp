@@ -32,21 +32,29 @@ struct WidgetState {
 };
 
 // ============================================================================
-// Context::Impl Definition (Owned per-engine instance)
+// Context::Impl Definition (Owned per-engine or per-registry instance)
 // ============================================================================
 struct Context::Impl {
-    Engine&                              engine;
-    Clay_Context*                        clayContext = nullptr;
-    Clay_Arena                           clayArena   = {};
+    ECS::Registry&                       registry;
+    Extent2D                             viewport        = {1920, 1080};
+    Engine*                              engine          = nullptr;
+    Clay_Context*                        clayContext     = nullptr;
+    Clay_Arena                           clayArena       = {};
     std::vector<std::byte>               arenaMemory;
     ZHLN::HashMap<uint64_t, WidgetState> widgetStates;
     const FontAtlas*                     activeFont      = nullptr;
+    FontAtlas                            fallbackFont    = {};
     float                                lastDt          = 0.016667f;
+    uint64_t                             currentFrame    = 0;
     bool                                 lastItemHovered = false;
     bool                                 lastItemActive  = false;
     bool                                 inLayout        = false;
 
-    explicit Impl(Engine& eng) noexcept: engine(eng) {
+    explicit Impl(ECS::Registry& reg, Extent2D vp = {1920, 1080}, Engine* eng = nullptr) noexcept
+        : registry(reg), viewport(vp), engine(eng) {
+        for (int i = 0; i < 96; ++i) {
+            fallbackFont.glyphs[i].xadvance = 18.0f;
+        }
     }
 
     ~Impl() noexcept {
@@ -56,20 +64,20 @@ struct Context::Impl {
         clayContext = nullptr;
     }
 
-    WidgetState& GetState(uint64_t id, uint64_t currentFrame) noexcept {
+    WidgetState& GetState(uint64_t id, uint64_t frame) noexcept {
         auto* state = widgetStates.Find(id);
         if (!state) {
             widgetStates.Insert(id, WidgetState {});
             state = widgetStates.Find(id);
         }
         ZHLN::Assert(state);
-        state->lastActiveFrame = currentFrame;
+        state->lastActiveFrame = frame;
         return *state;
     }
 
-    void PruneStaleStates(uint64_t currentFrame) noexcept {
+    void PruneStaleStates(uint64_t frame) noexcept {
         widgetStates.ForEach([&](uint64_t id, const WidgetState& s) {
-            if (currentFrame > s.lastActiveFrame + 60) {
+            if (frame > s.lastActiveFrame + 60) {
                 widgetStates.Erase(id);
             }
         });
@@ -171,9 +179,23 @@ struct GUIStateComponent {
 // ============================================================================
 
 Context::Context(Engine& engine) noexcept {
-    auto& state = engine.GetRegistry().GetOrEmplaceSingleton<GUIStateComponent>();
+    auto& reg   = engine.GetRegistry();
+    auto& state = reg.GetOrEmplaceSingleton<GUIStateComponent>();
     if (!state.impl) {
-        state.impl = std::make_unique<Impl>(engine);
+        state.impl = std::make_unique<Impl>(reg, engine.GetWindow().GetSize(), &engine);
+    } else {
+        state.impl->viewport = engine.GetWindow().GetSize();
+        state.impl->engine   = &engine;
+    }
+    _impl = state.impl.get();
+}
+
+Context::Context(ECS::Registry& registry, Extent2D viewport) noexcept {
+    auto& state = registry.GetOrEmplaceSingleton<GUIStateComponent>();
+    if (!state.impl) {
+        state.impl = std::make_unique<Impl>(registry, viewport, nullptr);
+    } else {
+        state.impl->viewport = viewport;
     }
     _impl = state.impl.get();
 }
@@ -181,14 +203,20 @@ Context::Context(Engine& engine) noexcept {
 Context::~Context() noexcept = default;
 
 void Context::BeginFrame(float dt) noexcept {
-    _impl->lastDt  = dt;
-    auto  winSize  = _impl->engine.GetWindow().GetSize();
-    auto* input    = _impl->engine.GetRegistry().GetSingleton<Components::InputStateComponent>();
-    auto* settings = _impl->engine.GetRegistry().GetSingleton<UIComponents::UISettingsComponent>();
-    if (!input || !settings)
-        return;
+    _impl->currentFrame++;
+    _impl->lastDt    = dt;
+    Extent2D winSize = _impl->viewport;
+    if (_impl->engine) {
+        winSize = _impl->engine->GetWindow().GetSize();
+    }
+    auto* input    = _impl->registry.GetSingleton<Components::InputStateComponent>();
+    auto* settings = _impl->registry.GetSingleton<UIComponents::UISettingsComponent>();
 
-    _impl->activeFont = &settings->fontAtlas;
+    if (settings && settings->fontAtlas.glyphs[0].xadvance > 0.0f) {
+        _impl->activeFont = &settings->fontAtlas;
+    } else {
+        _impl->activeFont = &_impl->fallbackFont;
+    }
 
     // Lazily allocate Clay memory arena on this instance once
     if (!_impl->clayContext) {
@@ -210,10 +238,16 @@ void Context::BeginFrame(float dt) noexcept {
     }
 
     Clay_SetLayoutDimensions({static_cast<float>(winSize.width), static_cast<float>(winSize.height)});
-    Clay_SetPointerState(Clay_Vector2 {input->mouseX, input->mouseY}, input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton)));
-    Clay_UpdateScrollContainers(false, Clay_Vector2 {0.0f, input->GetMouseWheel() * 30.0f}, dt);
 
-    _impl->PruneStaleStates(_impl->engine.GetCurrentFrame());
+    float mx          = input ? input->mouseX : -1.0f;
+    float my          = input ? input->mouseY : -1.0f;
+    bool  isMouseDown = input && input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
+    float wheel       = input ? input->GetMouseWheel() : 0.0f;
+
+    Clay_SetPointerState(Clay_Vector2 {mx, my}, isMouseDown);
+    Clay_UpdateScrollContainers(false, Clay_Vector2 {0.0f, wheel * 30.0f}, dt);
+
+    _impl->PruneStaleStates(_impl->currentFrame);
     Clay_BeginLayout();
     _impl->inLayout = true;
 }
@@ -402,9 +436,9 @@ bool Context::Button(std::string_view label, const JPH::Vec4& color, const Sizin
     bool           clicked = false;
     uint32_t       idNum   = static_cast<uint32_t>(HashCreativeWorkPath(label));
     Clay_ElementId elemId  = Clay_GetElementIdWithIndex(ToClayString(label), idNum);
-    auto&          state   = _impl->GetState((static_cast<uint64_t>(idNum) << 32) | 0xB007, _impl->engine.GetCurrentFrame());
+    auto&          state   = _impl->GetState((static_cast<uint64_t>(idNum) << 32) | 0xB007, _impl->currentFrame);
 
-    auto* input = _impl->engine.GetRegistry().GetSingleton<Components::InputStateComponent>();
+    auto* input = _impl->registry.GetSingleton<Components::InputStateComponent>();
     float mx = input ? input->mouseX : -1.0f;
     float my = input ? input->mouseY : -1.0f;
     bool isMouseDown = input && input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
@@ -462,9 +496,9 @@ bool Context::Checkbox(std::string_view label, bool& checked) noexcept {
     bool           changed = false;
     uint32_t       idNum   = static_cast<uint32_t>(HashCreativeWorkPath(label));
     Clay_ElementId elemId  = Clay_GetElementIdWithIndex(ToClayString("cb"), idNum);
-    auto&          state   = _impl->GetState((static_cast<uint64_t>(idNum) << 32) | 0x00CB, _impl->engine.GetCurrentFrame());
+    auto&          state   = _impl->GetState((static_cast<uint64_t>(idNum) << 32) | 0x00CB, _impl->currentFrame);
 
-    auto* input = _impl->engine.GetRegistry().GetSingleton<Components::InputStateComponent>();
+    auto* input = _impl->registry.GetSingleton<Components::InputStateComponent>();
     float mx = input ? input->mouseX : -1.0f;
     float my = input ? input->mouseY : -1.0f;
     bool isMouseDown = input && input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
@@ -530,9 +564,9 @@ bool Context::Slider(std::string_view label, float& value, float minVal, float m
     Clay_ElementId elemId  = Clay_GetElementIdWithIndex(ToClayString(label), idNum);
 
     uint64_t stateKey = (static_cast<uint64_t>(idNum) << 32) | 0x511D;
-    auto&    state    = _impl->GetState(stateKey, _impl->engine.GetCurrentFrame());
+    auto&    state    = _impl->GetState(stateKey, _impl->currentFrame);
 
-    auto* input = _impl->engine.GetRegistry().GetSingleton<Components::InputStateComponent>();
+    auto* input = _impl->registry.GetSingleton<Components::InputStateComponent>();
     float mx = input ? input->mouseX : -1.0f;
     float my = input ? input->mouseY : -1.0f;
     bool isMouseDown = input && input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
@@ -608,13 +642,13 @@ bool Context::BeginCollapsingHeader(std::string_view label, bool defaultOpen) no
     Clay_ElementId elemId = Clay_GetElementIdWithIndex(ToClayString(label), idNum);
 
     uint64_t stateKey = (static_cast<uint64_t>(idNum) << 32) | 0xC011;
-    auto&    state    = _impl->GetState(stateKey, _impl->engine.GetCurrentFrame());
+    auto&    state    = _impl->GetState(stateKey, _impl->currentFrame);
     if (!state.isInitialized) {
         state.isOpen        = defaultOpen;
         state.isInitialized = true;
     }
 
-    auto* input = _impl->engine.GetRegistry().GetSingleton<Components::InputStateComponent>();
+    auto* input = _impl->registry.GetSingleton<Components::InputStateComponent>();
     float mx = input ? input->mouseX : -1.0f;
     float my = input ? input->mouseY : -1.0f;
     bool isMouseDown = input && input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));

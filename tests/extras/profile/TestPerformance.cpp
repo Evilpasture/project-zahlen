@@ -530,18 +530,13 @@ struct PerformanceTestSuite {
         auto isolated_06_gui_hierarchy_and_gc_churn() -> std::expected<void, ZHLN::Error> {
             ZHLN::Println("\n  {}--- Subsystem 6: Immediate-Mode GUI & Layout ---{}", ZHLN::Color::Cyan, ZHLN::Color::Reset);
 
-            // Setup headless engine for GUI
-            ZHLN::EngineConfig config {.render = {.headless = true}};
-            auto               engine_res = ZHLN::Engine::Create(config);
-            auto               engine     = std::move(engine_res.value());
-            engine->InitializeDefaultScene();
-
-            constexpr uint64_t kSimulatedFrames = 100;
+            ZHLN::ECS::Registry registry;
+            constexpr uint64_t  kSimulatedFrames = 100;
 
             const double uiDurationMs = ZHLN::Test::BestOf(3, [&]() -> double {
                 BenchmarkTimer uiTimer;
                 for (uint64_t frame = 1; frame <= kSimulatedFrames; ++frame) {
-                    ZHLN::GUI::Context gui(*engine);
+                    ZHLN::GUI::Context gui(registry);
                     gui.BeginFrame(0.0166f);
 
                     gui.Box(
@@ -615,19 +610,14 @@ struct PerformanceTestSuite {
             ZHLN::Println("  {}--- UNIFIED MASTER BENCHMARK: All Subsystems Concurrently ---{}", ZHLN::Color::Yellow, ZHLN::Color::Reset);
             ZHLN::Println("  {}================================================================{}", ZHLN::Color::Yellow, ZHLN::Color::Reset);
 
-            // 1. Initialize Subsystem Environments (Headless Engine)
-            ZHLN::EngineConfig config {
-                .physics = {.maxBodies = 2048, .maxBodyPairs = 4096, .maxContactConstraints = 4096, .tempAllocatorSize = 32 * 1024 * 1024},
-                .render  = {.headless = true}
+            // 1. Initialize Subsystem Environments (CPU Only)
+            ZHLN::PhysicsConfig physCfg {
+                .maxBodies = 2048, .maxBodyPairs = 4096, .maxContactConstraints = 4096, .tempAllocatorSize = 32 * 1024 * 1024
             };
-            auto engine_res = ZHLN::Engine::Create(config);
-            auto engine     = std::move(engine_res.value());
-            engine->InitializeDefaultScene();
-
-            auto& registry       = engine->GetRegistry();
-            auto& audio          = engine->GetAudioContext();
-            auto& physicsContext = engine->GetPhysicsContext();
-            auto& mainCamera     = engine->GetCamera();
+            ZHLN::ECS::Registry  registry;
+            ZHLN::AudioContext   audio;
+            ZHLN::PhysicsContext physicsContext(physCfg);
+            ZHLN::Camera         mainCamera;
 
             mainCamera.position = JPH::Vec3(0.0f, 25.0f, -50.0f);
             mainCamera.yaw      = 90.0f;
@@ -778,7 +768,7 @@ struct PerformanceTestSuite {
 
                 // --- PHASE 5: Immediate-Mode HUD / GUI Rebuild ---
                 {
-                    ZHLN::GUI::Context gui(*engine);
+                    ZHLN::GUI::Context gui(registry);
                     gui.BeginFrame(kFixedDt);
 
                     gui.Box(

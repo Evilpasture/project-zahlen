@@ -14,6 +14,9 @@
 namespace ZHLN {
 class Engine;
 class RenderContext;
+namespace ECS {
+class Registry;
+}
 } // namespace ZHLN
 
 namespace ZHLN::GUI {
@@ -44,6 +47,7 @@ class ZHLN_API Context {
     struct Impl;
 
     explicit Context(Engine& engine) noexcept;
+    explicit Context(ECS::Registry& registry, Extent2D viewport = {1920, 1080}) noexcept;
     ~Context() noexcept;
 
     Context(const Context&)            = default;
