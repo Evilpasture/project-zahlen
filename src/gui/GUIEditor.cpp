@@ -32,6 +32,60 @@ namespace GUI = ZHLN::GUI;
 using Comp    = ZHLN::Components;
 using UIComp  = ZHLN::GUI::UIComponents;
 
+// ============================================================================
+// The component table
+// ============================================================================
+//
+// One entry per component the editor can add, and the entry is built from the
+// type rather than written out: the name comes from reflection, and the three
+// operations are the registry calls instantiated for that type. So the table
+// cannot name a component wrong, and it cannot offer one the registry could not
+// store.
+//
+// What it deliberately is NOT is an enumeration of ZHLN::Components. See
+// ComponentKinds() in the header for why: a default-constructed component that
+// owns a GPU mesh, a physics body or a raw prefab pointer is a dangling handle
+// the moment it exists. The set here is the set DrawInspectorPanel draws a
+// section for, so adding one always produces something the editor can show.
+
+template <typename C>
+consteval auto MakeComponentKind() -> ComponentKind {
+    // The two properties the registry relies on: Add() default-constructs, and
+    // a trivially-copyable component takes the memcpy fast path in SparseSet.
+    static_assert(std::is_default_constructible_v<C>, "an addable component must be default-constructible");
+    static_assert(std::is_trivially_copyable_v<C>, "an addable component must be trivially copyable");
+
+    return ComponentKind {
+        // The same spelling the registry registers the component under, so the
+        // dropdown and Registry::DebugDumpEntity cannot disagree about a name.
+        .name   = ZHLN::ECS::BoxedName<C>(),
+        .has    = [](const ZHLN::ECS::Registry& reg, ZHLN::Entity entity) -> bool { return reg.Get<C>(entity) != nullptr; },
+        .add    = [](ZHLN::ECS::Registry& reg, ZHLN::Entity entity) -> void { reg.Add<C>(entity, C {}); },
+        .remove = [](ZHLN::ECS::Registry& reg, ZHLN::Entity entity) -> void { reg.Remove<C>(entity); }
+    };
+}
+
+template <typename... Cs>
+consteval auto MakeComponentKinds() -> std::array<ComponentKind, sizeof...(Cs)> {
+    return {MakeComponentKind<Cs>()...};
+}
+
+/// The components the editor can add -- the same set, in the same order, as the
+/// sections DrawInspectorPanel draws below. The two lists cannot be collapsed
+/// into one: a section body calls Reflect::ForEachFieldWithName on a concrete
+/// static type, which the transpiler fallback requires (see the invariant note
+/// in DrawInspectorPanel), and a table-driven version would make that type
+/// dependent and flatten to zero rows.
+constexpr auto kComponentKinds = MakeComponentKinds<
+    Comp::NameComponent,
+    Comp::TransformComponent,
+    Comp::PBRComponent,
+    Comp::LightComponent,
+    UIComp::UIRectComponent,
+    UIComp::UIFlexComponent,
+    UIComp::UIPanelComponent,
+    UIComp::TextComponent>();
+
 // The editor and the edited scene share one registry, so the hierarchy
 // has to know which subtree is chrome. Walk the UI parent chain upward
 // from `e`; anything that reaches `editorRoot` is the editor's own.
@@ -155,6 +209,42 @@ using UIComp  = ZHLN::GUI::UIComponents;
 
 } // namespace
 
+auto ComponentKinds() noexcept -> std::span<const ComponentKind> {
+    return kComponentKinds;
+}
+
+auto CreateEntity(ZHLN::ECS::Registry& reg, std::string_view name) -> ZHLN::Entity {
+    const ZHLN::Entity entity = reg.Create();
+
+    std::array<char, 64> nameBuf {};
+    const std::string_view label = name.empty() ? ZHLN::FormatTo(nameBuf, "Entity {}", entity.index) : name;
+
+    // The world transform is written here rather than left for
+    // TransformSystem::ResolveTransforms to add on first tick: an entity the
+    // editor just made should be whole immediately, so inspecting or serialising
+    // it on the same frame does not depend on a system having run.
+    const JPH::Mat44 local = JPH::Mat44::sIdentity();
+
+    reg.Add(entity, Comp::NameComponent {.name = ZHLN::String64 {label}});
+    reg.Add(entity, Comp::TransformComponent {});
+    reg.Add(entity, Comp::WorldTransformComponent {.world = local, .previous = local});
+
+    return entity;
+}
+
+void DestroySelected(ZHLN::ECS::Registry& reg, EditorState& state) noexcept {
+    const ZHLN::Entity victim = state.selectedEntity;
+
+    // Cleared first: if the handle turns out to be stale the editor must not be
+    // left holding it, and the inspector's own IsAlive check reads this.
+    state.selectedEntity = ZHLN::Entity::Null();
+
+    if (victim == ZHLN::Entity::Null() || !reg.IsAlive(victim)) {
+        return;
+    }
+    reg.Destroy(victim);
+}
+
 void DrawHierarchyPanel(GUI::Context& gui, ZHLN::ECS::Registry& reg, EditorState& state, std::string_view id) {
     struct Row {
         ZHLN::Entity entity;
@@ -185,6 +275,18 @@ void DrawHierarchyPanel(GUI::Context& gui, ZHLN::ECS::Registry& reg, EditorState
     // Render the hierarchy as a scrollable column
     gui.BeginColumn(4.0f);
     gui.Text(id, 14.0f, {0.6f, 0.7f, 0.8f, 1.0f});
+
+    // Entity-level operations. New Entity also selects its result, so the
+    // inspector opens on it immediately instead of on whatever was picked last.
+    gui.BeginRow(4.0f, 0.0f);
+    if (gui.Button("New Entity", JPH::Vec4(0.16f, 0.30f, 0.20f, 0.95f))) {
+        state.selectedEntity = CreateEntity(reg);
+    }
+    if (state.selectedEntity != ZHLN::Entity::Null() && reg.IsAlive(state.selectedEntity) &&
+        gui.Button("Delete", JPH::Vec4(0.42f, 0.16f, 0.16f, 0.95f))) {
+        DestroySelected(reg, state);
+    }
+    gui.EndRow();
 
     for (const Row& row: rows) {
         std::array<char, 96> fallbackBuf {};
@@ -242,6 +344,19 @@ void DrawInspectorPanel(GUI::Context& gui, ZHLN::ECS::Registry& reg, EditorState
         if (gui.BeginCollapsingHeader(title, true)) {
             CompT local = *comp;
             reflect(local, MakeRowSink(gui, sectionId));
+
+            // Deleting the component from the section that is showing it, so the
+            // thing you remove is the thing you can see. `comp` points into the
+            // sparse set's dense array and Remove is a swap-remove, which leaves
+            // it holding some other entity's data -- hence the return before the
+            // patch below, which would otherwise write the stale copy back.
+            std::array<char, 64> removeBuf {};
+            if (gui.Button(ZHLN::FormatTo(removeBuf, "Remove {}", title), JPH::Vec4(0.40f, 0.16f, 0.16f, 0.90f))) {
+                reg.Remove<CompT>(sel);
+                gui.EndCollapsingHeader();
+                return;
+            }
+
             reg.Patch<CompT>(sel, [&local](CompT& dst) -> void { dst = local; });
             gui.EndCollapsingHeader();
         }
@@ -271,6 +386,38 @@ void DrawInspectorPanel(GUI::Context& gui, ZHLN::ECS::Registry& reg, EditorState
     section("text", "Text", reg.Get<UIComp::TextComponent>(sel), [](UIComp::TextComponent& c, auto&& sink) -> void {
         ZHLN::Reflect::ForEachFieldWithName(c, sink);
     });
+
+    // --- Add Component ------------------------------------------------------
+    //
+    // Offered after the sections, so the dropdown's option list is built once
+    // every Remove above has already run and cannot be contradicted by it.
+    std::array<std::string_view, 32>      options {};
+    std::array<const ComponentKind*, 32>  kinds {};
+    size_t                                count = 0;
+
+    // Index 0 is a prompt rather than a choice. Dropdown reports a change only
+    // when `selected` moves, and this panel rebuilds `picked` at 0 every frame,
+    // so a real component sitting at index 0 would swallow its own click.
+    options[0] = "Add Component...";
+    count      = 1;
+
+    for (const ComponentKind& kind: kComponentKinds) {
+        if (count >= options.size() || kind.has(reg, sel)) {
+            continue;
+        }
+        options[count]       = kind.name;
+        kinds[count - 1]     = &kind;
+        ++count;
+    }
+
+    if (count > 1) {
+        int picked = 0;
+        if (gui.Dropdown("Add Component", std::span<const std::string_view>(options.data(), count), picked) && picked > 0) {
+            kinds[static_cast<size_t>(picked) - 1]->add(reg, sel);
+        }
+    } else {
+        gui.Text("No components to add", 12.0f, {0.5f, 0.5f, 0.5f, 1.0f});
+    }
 
     gui.EndColumn();
 }
