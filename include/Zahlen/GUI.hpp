@@ -120,6 +120,52 @@ class ZHLN_API Context {
         return clicked;
     }
 
+    template <typename OnClickFn>
+        requires std::invocable<OnClickFn>
+    bool Button(std::string_view label, const Sizing& width, OnClickFn&& onClick) {
+        if (Button(label, width)) {
+            onClick();
+            return true;
+        }
+        return false;
+    }
+
+    template <typename OnClickFn, typename OnHoverFn>
+        requires std::invocable<OnClickFn> && std::invocable<OnHoverFn>
+    bool Button(std::string_view label, const Sizing& width, OnClickFn&& onClick, OnHoverFn&& onHover) {
+        bool clicked = Button(label, width);
+        if (IsItemHovered()) {
+            onHover();
+        }
+        if (clicked) {
+            onClick();
+        }
+        return clicked;
+    }
+
+    template <typename OnClickFn>
+        requires std::invocable<OnClickFn>
+    bool Button(std::string_view label, const JPH::Vec4& color, const Sizing& width, OnClickFn&& onClick) {
+        if (Button(label, color, width)) {
+            onClick();
+            return true;
+        }
+        return false;
+    }
+
+    template <typename OnClickFn, typename OnHoverFn>
+        requires std::invocable<OnClickFn> && std::invocable<OnHoverFn>
+    bool Button(std::string_view label, const JPH::Vec4& color, const Sizing& width, OnClickFn&& onClick, OnHoverFn&& onHover) {
+        bool clicked = Button(label, color, width);
+        if (IsItemHovered()) {
+            onHover();
+        }
+        if (clicked) {
+            onClick();
+        }
+        return clicked;
+    }
+
     // --- State Inspection ---
     [[nodiscard]] bool IsItemHovered() const noexcept;
     [[nodiscard]] bool IsItemActive() const noexcept;

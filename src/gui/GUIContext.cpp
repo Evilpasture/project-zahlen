@@ -391,6 +391,8 @@ bool Context::Button(std::string_view label, const JPH::Vec4& color, const Sizin
     float my = input ? input->mouseY : -1.0f;
     bool isMouseDown = input && input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
 
+    Clay__OpenElementWithId(elemId);
+
     Clay_ElementData elemData = Clay_GetElementData(elemId);
     bool isHovered = Clay_Hovered() || Clay_PointerOver(elemId) ||
                      (elemData.found && elemData.boundingBox.width > 0.0f &&
@@ -411,7 +413,6 @@ bool Context::Button(std::string_view label, const JPH::Vec4& color, const Sizin
     _impl->lastItemHovered = isHovered;
     _impl->lastItemActive  = isHovered && isMouseDown;
 
-    Clay__OpenElementWithId(elemId);
     Clay_ElementDeclaration decl = {
         .layout = {
             .sizing          = {.width = ToClaySizing(width), .height = CLAY_SIZING_FIXED(44)},
@@ -419,7 +420,7 @@ bool Context::Button(std::string_view label, const JPH::Vec4& color, const Sizin
             .childAlignment  = {.x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER},
             .layoutDirection = CLAY_LEFT_TO_RIGHT
         },
-        .backgroundColor = isHovered ? (state.isPressed ? ToClayColor(color + JPH::Vec4(0.22f, 0.22f, 0.22f, 0.0f)) : ToClayColor(color + JPH::Vec4(0.12f, 0.12f, 0.12f, 0.0f))) : ToClayColor(color),
+        .backgroundColor = isHovered ? (isMouseDown ? ToClayColor(color + JPH::Vec4(0.22f, 0.22f, 0.22f, 0.0f)) : ToClayColor(color + JPH::Vec4(0.12f, 0.12f, 0.12f, 0.0f))) : ToClayColor(color),
         .cornerRadius    = {6, 6, 6, 6}
     };
     Clay__ConfigureOpenElement(decl);
@@ -450,6 +451,10 @@ bool Context::Checkbox(std::string_view label, bool& checked) noexcept {
     float my = input ? input->mouseY : -1.0f;
     bool isMouseDown = input && input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
 
+    BeginRow(8.0f);
+
+    Clay__OpenElementWithId(elemId);
+
     Clay_ElementData elemData = Clay_GetElementData(elemId);
     bool isHovered = Clay_Hovered() || Clay_PointerOver(elemId) ||
                      (elemData.found && elemData.boundingBox.width > 0.0f &&
@@ -471,9 +476,6 @@ bool Context::Checkbox(std::string_view label, bool& checked) noexcept {
     _impl->lastItemHovered = isHovered;
     _impl->lastItemActive  = isHovered && isMouseDown;
 
-    BeginRow(8.0f);
-
-    Clay__OpenElementWithId(elemId);
     Clay_ElementDeclaration decl = {
         .layout = {
             .sizing         = {.width = CLAY_SIZING_FIXED(22), .height = CLAY_SIZING_FIXED(22)},
@@ -517,6 +519,11 @@ bool Context::Slider(std::string_view label, float& value, float minVal, float m
     float my = input ? input->mouseY : -1.0f;
     bool isMouseDown = input && input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
 
+    BeginRow(8.0f);
+    Text(label, 15.0f, {0.9f, 0.9f, 0.9f, 1.0f});
+
+    Clay__OpenElementWithId(elemId);
+
     Clay_ElementData elemData = Clay_GetElementData(elemId);
     bool isHovered = Clay_Hovered() || Clay_PointerOver(elemId) ||
                      (elemData.found && elemData.boundingBox.width > 0.0f &&
@@ -543,17 +550,16 @@ bool Context::Slider(std::string_view label, float& value, float minVal, float m
         }
     }
 
-    BeginRow(8.0f);
-    Text(label, 15.0f, {0.9f, 0.9f, 0.9f, 1.0f});
+    _impl->lastItemHovered = isHovered;
+    _impl->lastItemActive  = state.isDragging;
 
-    Clay__OpenElementWithId(elemId);
     Clay_ElementDeclaration trackDecl = {
         .layout = {
             .sizing         = {.width = CLAY_SIZING_FIXED(160), .height = CLAY_SIZING_FIXED(22)},
             .padding        = {2, 2, 2, 2},
             .childAlignment = {.x = CLAY_ALIGN_X_LEFT, .y = CLAY_ALIGN_Y_CENTER}
         },
-        .backgroundColor = isHovered ? Clay_Color {55, 75, 105, 255} : Clay_Color {25, 35, 50, 255},
+        .backgroundColor = (isHovered || state.isDragging) ? Clay_Color {55, 75, 105, 255} : Clay_Color {25, 35, 50, 255},
         .cornerRadius    = {4, 4, 4, 4}
     };
     Clay__ConfigureOpenElement(trackDecl);
@@ -596,6 +602,10 @@ bool Context::BeginCollapsingHeader(std::string_view label, bool defaultOpen) no
     float my = input ? input->mouseY : -1.0f;
     bool isMouseDown = input && input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
 
+    BeginColumn(4.0f);
+
+    Clay__OpenElementWithId(elemId);
+
     Clay_ElementData elemData = Clay_GetElementData(elemId);
     bool isHovered = Clay_Hovered() || Clay_PointerOver(elemId) ||
                      (elemData.found && elemData.boundingBox.width > 0.0f &&
@@ -613,9 +623,9 @@ bool Context::BeginCollapsingHeader(std::string_view label, bool defaultOpen) no
         state.isPressed = false;
     }
 
-    BeginColumn(4.0f);
+    _impl->lastItemHovered = isHovered;
+    _impl->lastItemActive  = isHovered && isMouseDown;
 
-    Clay__OpenElementWithId(elemId);
     Clay_ElementDeclaration headerDecl = {
         .layout =
             {.sizing          = {.width = CLAY_SIZING_GROW(), .height = CLAY_SIZING_FIXED(32)},
