@@ -15,7 +15,7 @@ set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-set(CMAKE_CXX_SCAN_FOR_MODULES ON)
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 set(CMAKE_C_STANDARD 23)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -394,7 +394,10 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/mimalloc EXCLUDE_FROM_ALL)
 set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_WAYLAND OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_X11 OFF CACHE BOOL "" FORCE)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/glfw SYSTEM)
+add_compile_definitions(GLFW_INCLUDE_NONE)
 
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/LuaJIT SYSTEM)
 
@@ -638,6 +641,7 @@ set(ZHLN_MODULE_FILES
 # Prevent CMake from injecting PCH before 'module;' on .cppm files
 set_source_files_properties(${ZHLN_MODULE_FILES} PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
 
+if(CMAKE_CXX_SCAN_FOR_MODULES)
 # Register C++20/26 module file set
 target_sources(zahlen_engine
     PUBLIC
@@ -646,6 +650,7 @@ target_sources(zahlen_engine
         BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/modules
         FILES ${ZHLN_MODULE_FILES}
 )
+endif()
 
 target_link_libraries(zahlen_engine PRIVATE
     zahlen_render

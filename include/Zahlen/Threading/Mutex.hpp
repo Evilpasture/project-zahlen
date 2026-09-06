@@ -29,8 +29,8 @@ namespace detail {
  * type-check, so the calls it makes have to exist in both configurations.
  */
 struct MutexOwner {
-    alignas(16) ZHLN::Atomic<bool>      hasOwner {false};
-    alignas(16) ZHLN::Atomic<uintptr_t> owner {0};
+    alignas(16) ZHLN::Atomic<bool>      hasOwner;
+    alignas(16) ZHLN::Atomic<uintptr_t> owner;
 
     [[nodiscard]] auto IsOwned() const noexcept -> bool {
         return hasOwner.load(std::memory_order::acquire);
