@@ -283,7 +283,7 @@ namespace detail {
             PerfBaselineFile file = LoadBaselineFile(BaselineFilePath());
             auto&            ours = file.machines[MachineKey()];
             if (!pending.empty() || ours.commit.empty()) {
-                ours.commit = std::string {GitCommitHash};
+                ours.commit = std::string {GetGitCommitHash()};
             }
             for (const auto& [metric, value]: pending) {
                 ours.metrics[metric] = value;
@@ -329,7 +329,7 @@ namespace detail {
         store.baseline[key] = value;
         store.pending[key]  = value;
         result.recorded     = true;
-        result.commit       = std::string {GitCommitHash};
+        result.commit       = std::string {GetGitCommitHash()};
         return result;
     }
 
@@ -391,7 +391,8 @@ inline void VerifyBaseline(
             Color::Reset, metric, value, commitInfo, result.previous, result.changePct, result.limitPct, result.regressed ? "  << REGRESSION" : ""
         );
     } else {
-        const std::string commitInfo = GitCommitHash.empty() ? "" : std::format(" [{}]", GitCommitHash);
+        const auto        gitHash    = GetGitCommitHash();
+        const std::string commitInfo = gitHash.empty() ? "" : std::format(" [{}]", gitHash);
         ZHLN::Println("    {}[Baseline]{} {} = {:.3f} (first run{}, baseline recorded)", Color::Green, Color::Reset, metric, value, commitInfo);
     }
 

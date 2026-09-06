@@ -311,7 +311,6 @@ endif()
 # instead of each consumer inventing its own path plumbing.
 string(REPLACE "\\" "/" ZHLN_PROJECT_ROOT_FWD "${PROJECT_SOURCE_DIR}")
 add_compile_definitions(ZHLN_PROJECT_ROOT="${ZHLN_PROJECT_ROOT_FWD}")
-add_compile_definitions(ZHLN_GIT_COMMIT_HASH="${ZHLN_GIT_HASH}")
 
 option(ZHLN_IN_DOCKER "Build running inside a Docker container" OFF)
 if(ZHLN_IN_DOCKER)
