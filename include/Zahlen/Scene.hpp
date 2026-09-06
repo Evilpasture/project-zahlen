@@ -11,8 +11,10 @@
 #include <Zahlen/Common.h>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
+#include <Zahlen/Types.hpp>
 #include <cstdint>
 #include <expected>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -57,7 +59,6 @@ namespace ZHLN {
 
 class Engine;
 struct Camera;
-class RenderContext;
 
 namespace ECS {
 class Registry;
@@ -219,21 +220,33 @@ enum class SceneError : uint8_t {
 /// name. A caller saving to a file sets it from the path it is writing to.
 [[nodiscard]] auto Extract(Engine& engine) -> Scene;
 
+/// How Extract() reads a material's CPU-side factors.
+///
+/// Base colour and emissive are the two fields of a scene material that are not
+/// on the entity: they live in the material table the render context owns.
+/// Extract needs exactly one operation on that table -- "resolve this
+/// MaterialID" -- so that is what it asks for. Taking the whole RenderContext
+/// instead would widen the parameter to a Vulkan-owning object to reach one
+/// const lookup on it, and would make this overload uncallable without a device:
+/// RenderContext's only constructors are `Create(Window&, ...)` and a
+/// private-token one.
+///
+/// Same shape as GUI::TextEdit::ClipboardSink -- a function pointer plus the
+/// userdata it closes over -- so a caller supplies one without an allocation or
+/// a std::function. A default-constructed lookup (`find == nullptr`) is the
+/// device-free case: base colour and emissive keep their struct defaults, which
+/// is what lets a scene be extracted, and round-tripped through a document, on a
+/// machine with no GPU.
+struct MaterialLookup {
+    const void*             userdata = nullptr;
+    std::optional<Material> (*find)(const void* userdata, MaterialID id) = nullptr;
+};
+
 /// Extract() without the engine: the same walk over a camera and a registry.
 ///
-/// @p renderContext is consulted for one thing -- `GetGPUMaterial()`, because
-/// base colour and emissive live in the material table rather than on the
-/// entity. Every other field comes out of the registry.
-///
-/// It is a pointer, not a reference, because a RenderContext cannot be had
-/// without a device: its only constructors are `Create(Window&, ...)` and a
-/// private-token one, so a reference here would make this overload callable
-/// only from code that already owns an engine -- which is the overload above.
-/// Null leaves base colour and emissive at their struct defaults, and that is
-/// what lets a scene be extracted, and round-tripped through a document, on a
-/// machine with no GPU. The nullable-context pointer is the house spelling:
-/// see `PhysicsContext* pc` in CreativeWorksFactory.hpp.
-[[nodiscard]] auto Extract(const Camera& camera, const ECS::Registry& registry, const RenderContext* renderContext) -> Scene;
+/// Every field comes out of the registry except base colour and emissive, which
+/// @p materials resolves. Omit it and those two stay at their defaults.
+[[nodiscard]] auto Extract(const Camera& camera, const ECS::Registry& registry, MaterialLookup materials = {}) -> Scene;
 
 } // namespace Scene
 } // namespace ZHLN

@@ -31,9 +31,11 @@
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Scene.hpp>
 #include <Zahlen/Types.hpp>
+
 #include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
 #include <array>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -365,7 +367,7 @@ namespace {
     return registry.Get<Components::PhysicsStateComponent>(entity) != nullptr ? BodyKind::Dynamic : BodyKind::Static;
 }
 
-[[nodiscard]] auto ExtractEntities(const ECS::Registry& registry, const RenderContext* renderContext) -> std::vector<SceneEntity> {
+[[nodiscard]] auto ExtractEntities(const ECS::Registry& registry, MaterialLookup materials) -> std::vector<SceneEntity> {
     std::vector<SceneEntity> entities;
     size_t                   unattributed = 0;
 
@@ -398,14 +400,14 @@ namespace {
         description.body = ExtractBodyKind(registry, entity);
 
         // Roughness and metallic live on the entity; colour and emission live
-        // only in the render context's material table. With no context -- the
-        // device-free extraction -- those two keep their struct defaults.
+        // only in the material table, which is what `materials` reaches. With no
+        // lookup -- the device-free extraction -- those two keep their defaults.
         if (const auto* pbr = registry.Get<Components::PBRComponent>(entity); pbr != nullptr) {
             description.material.roughness = pbr->roughness;
             description.material.metallic  = pbr->metallic;
         }
-        if (renderContext != nullptr) {
-            if (const auto gpuMaterial = renderContext->GetGPUMaterial(mesh.materialAsset); gpuMaterial.has_value()) {
+        if (materials.find != nullptr) {
+            if (const auto gpuMaterial = materials.find(materials.userdata, mesh.materialAsset); gpuMaterial.has_value()) {
                 const float* base = gpuMaterial->baseColorFactor;
                 const float* glow = gpuMaterial->emissiveFactor;
                 description.material.baseColor = JPH::Float4 {base[0], base[1], base[2], base[3]};
@@ -470,17 +472,26 @@ namespace {
 
 } // namespace
 
-auto Extract(const Camera& camera, const ECS::Registry& registry, const RenderContext* renderContext) -> Scene {
+auto Extract(const Camera& camera, const ECS::Registry& registry, MaterialLookup materials) -> Scene {
     Scene scene;
     scene.camera      = ToDescriptionCamera(camera);
     scene.environment = ExtractEnvironment(registry);
-    scene.entities    = ExtractEntities(registry, renderContext);
+    scene.entities    = ExtractEntities(registry, materials);
     scene.lights      = ExtractLights(registry);
     return scene;
 }
 
 auto Extract(Engine& engine) -> Scene {
-    return Extract(engine.GetCamera(), engine.GetRegistry(), &engine.GetRenderContext());
+    // The render context owns the material table; all Extract wants from it is
+    // the one const lookup, so that is all it is given.
+    return Extract(
+        engine.GetCamera(), engine.GetRegistry(), MaterialLookup {
+                                                      .userdata = &engine.GetRenderContext(),
+                                                      .find     = [](const void* userdata, MaterialID id) -> std::optional<Material> {
+                                                          return static_cast<const RenderContext*>(userdata)->GetGPUMaterial(id);
+                                                      }
+                                                  }
+    );
 }
 
 } // namespace ZHLN::Scene

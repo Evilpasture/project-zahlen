@@ -39,6 +39,7 @@
 #include <string>
 #include <string_view>
 #include <toml/SceneTOML.hpp>
+#include <unordered_map>
 #include <toml/TOML.hpp>
 #include <vector>
 
@@ -561,7 +562,28 @@ intensity = 250.0
             camera.pitch    = -14.0f;
             camera.fov      = 52.0f;
 
-            const auto scene = ZHLN::Scene::Extract(camera, registry, nullptr);
+            // The one thing a registry cannot answer is a material's colour:
+            // that lives in the material table. Extract asks for a lookup rather
+            // than a RenderContext, so this supplies one directly -- no device.
+            std::unordered_map<ZHLN::MaterialID, ZHLN::Material> materials;
+            ZHLN::Material boxMaterial {};
+            boxMaterial.baseColorFactor[0] = 0.1f;
+            boxMaterial.baseColorFactor[1] = 0.6f;
+            boxMaterial.baseColorFactor[2] = 0.95f;
+            boxMaterial.baseColorFactor[3] = 1.0f;
+            boxMaterial.emissiveFactor[0]  = 80.0f;
+            materials[2]                   = boxMaterial;
+
+            const auto scene = ZHLN::Scene::Extract(
+                camera, registry, ZHLN::Scene::MaterialLookup {
+                                      .userdata = &materials,
+                                      .find     = [](const void* userdata, ZHLN::MaterialID id) -> std::optional<ZHLN::Material> {
+                                          const auto& table = *static_cast<const std::unordered_map<ZHLN::MaterialID, ZHLN::Material>*>(userdata);
+                                          const auto  hit   = table.find(id);
+                                          return hit == table.end() ? std::nullopt : std::optional<ZHLN::Material> {hit->second};
+                                      }
+                                  }
+            );
 
             // Three of the four mesh entities and one of the two lights carry
             // provenance; the counts are the membership rule under test.
@@ -591,6 +613,8 @@ intensity = 250.0
             ZHLN::Test::ExpectEq(box.material.roughness, 0.25f);
             ZHLN::Test::ExpectEq(box.material.metallic, 0.75f);
             ZHLN::Test::ExpectTrue(box.material.emissiveVirtualLights);
+            ZHLN::Test::ExpectEq(box.material.baseColor.x, 0.1f);
+            ZHLN::Test::ExpectEq(box.material.emissive.x, 80.0f);
 
             ZHLN::Test::ExpectTrue(scene.entities[1].body == ZHLN::Scene::BodyKind::Static);
             ZHLN::Test::ExpectEq(scene.entities[1].extent, 35.0f);
@@ -617,6 +641,8 @@ intensity = 250.0
 
             ZHLN::Test::ExpectEq(ZHLN::ReflectTOML::SerializeTOML(*reparsed), emitted);
             ZHLN::Test::ExpectEq(reparsed->entities[0].halfExtents.z, 2.5f);
+            ZHLN::Test::ExpectEq(reparsed->entities[0].material.baseColor.x, 0.1f);
+            ZHLN::Test::ExpectEq(reparsed->entities[0].material.emissive.x, 80.0f);
             ZHLN::Test::ExpectEq(reparsed->entities[2].source, std::string {"models/crate.glb"});
             ZHLN::Test::ExpectTrue(reparsed->entities[0].body == ZHLN::Scene::BodyKind::Dynamic);
             ZHLN::Test::ExpectEq(reparsed->lights[0].type, std::string {"Sun"});
