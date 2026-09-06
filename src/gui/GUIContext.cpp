@@ -13,10 +13,12 @@
 #include <Zahlen/Render.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/gui/UIComponents.hpp>
+#include <Zahlen/Log.hpp>
 #include <algorithm>
 #include <clay.h>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -171,6 +173,14 @@ Clay_ChildAlignment ToClayChildAlignment(const BoxConfig& cfg) noexcept {
 struct GUIStateComponent {
     std::unique_ptr<Context::Impl> impl;
 };
+
+/// Temporary diagnostic gate: ZHLN_GUI_DEBUG=1 makes Context::Button report the
+/// full hit-test decision for every widget, once per frame. Removed once the
+/// button interaction failure is closed out -- see tests/render/TestUI.cpp.
+[[nodiscard]] bool WidgetDebug() noexcept {
+    static const bool enabled = std::getenv("ZHLN_GUI_DEBUG") != nullptr;
+    return enabled;
+}
 
 } // namespace
 
@@ -453,6 +463,16 @@ bool Context::Button(std::string_view label, const JPH::Vec4& color, const Sizin
 
     auto pointer = Clay_GetPointerState();
     bool isPressedNow = (pointer.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME) || (isHovered && isMouseDown && !state.isPressed);
+
+    if (WidgetDebug()) {
+        ZHLN::Log("[gui-debug] '{}' frame={} registry={} input={} mouse=({},{}) down={} | id={} found={} bb=[{},{} {}x{}] | "
+                  "clayHovered={} pointerOver={} ptr=({},{}) ptrState={} ctxOK={} => hovered={} pressed={}",
+                  label, _impl->currentFrame, reinterpret_cast<uintptr_t>(&_impl->registry), reinterpret_cast<uintptr_t>(input), mx, my,
+                  isMouseDown ? 1 : 0, elemId.id, elemData.found ? 1 : 0, elemData.boundingBox.x, elemData.boundingBox.y,
+                  elemData.boundingBox.width, elemData.boundingBox.height, Clay_Hovered() ? 1 : 0, Clay_PointerOver(elemId) ? 1 : 0,
+                  pointer.position.x, pointer.position.y, static_cast<int>(pointer.state),
+                  (Clay_GetCurrentContext() == _impl->clayContext) ? 1 : 0, isHovered ? 1 : 0, isPressedNow ? 1 : 0);
+    }
 
     if (isHovered && isPressedNow) {
         clicked = true;

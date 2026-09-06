@@ -154,9 +154,9 @@ struct UITestSuite {
                 ++cbFrames;
                 if (uiDebug) {
                     const auto* guiInput = eng.GetRegistry().GetSingleton<ZHLN::Components::InputStateComponent>();
-                    ZHLN::Println("    [ui-debug] callback frame {} : InputStateComponent={} mouse=({},{}) LButton={}", cbFrames,
-                                  reinterpret_cast<uintptr_t>(guiInput), guiInput ? guiInput->mouseX : -1.0f,
-                                  guiInput ? guiInput->mouseY : -1.0f,
+                    ZHLN::Println("    [ui-debug] callback frame {} : registry={} InputStateComponent={} mouse=({},{}) LButton={}", cbFrames,
+                                  reinterpret_cast<uintptr_t>(&eng.GetRegistry()), reinterpret_cast<uintptr_t>(guiInput),
+                                  guiInput ? guiInput->mouseX : -1.0f, guiInput ? guiInput->mouseY : -1.0f,
                                   guiInput ? (guiInput->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LButton)) ? 1 : 0) : -1);
                 }
                 ZHLN::GUI::Context ui(eng);
@@ -277,10 +277,10 @@ struct UITestSuite {
             ZHLN::Test::ExpectEq(clickCountB, 1u);
 
             if (clickCountA == 0u && clickCountB == 0u) {
-                ZHLN::Println("    [diag] UI callback ran {} time(s) over 8 ticks; ButtonA hover callback fired {} time(s).", cbFrames,
-                              hoverCountA);
-                ZHLN::Println("    [diag] cbFrames==0 -> the host UI callback never ran. cbFrames>0 with hoverCountA==0 -> the "
-                              "GUI never saw the pointer at (50,35). Set ZHLN_UI_DEBUG=1 for the per-frame dump.");
+                ZHLN::Println("    [diag] UI callback ran {} time(s); ButtonA hover callback fired {} time(s).", cbFrames, hoverCountA);
+                ZHLN::Println("    [diag] Set ZHLN_GUI_DEBUG=1 as well: Context::Button then prints its whole hit-test "
+                              "decision (its own registry pointer, the mouse it read, the widget bounding box, Clay's "
+                              "hover/pointer state) so the mismatch is visible directly.");
             }
 
             return {};
