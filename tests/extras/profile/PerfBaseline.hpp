@@ -254,9 +254,23 @@ namespace ZHLN::Test::Perf {
 // Baseline file schema (reflected: field names are the JSON keys)
 // ============================================================================
 
+struct FrameMetrics {
+    double avg_frame_ms   = 0.0;
+    double p50_frame_ms   = 0.0;
+    double p95_frame_ms   = 0.0;
+    double p99_frame_ms   = 0.0;
+    double p99_9_frame_ms = 0.0;
+    double avg_fps        = 0.0;
+    double max_fps        = 0.0;
+    double min_fps        = 0.0;
+    double low_1pct_fps   = 0.0;
+    double low_0_1pct_fps = 0.0;
+};
+
 struct MachineBaselines {
-    std::string                   commit;
-    std::map<std::string, double> metrics;
+    std::string                         commit;
+    std::map<std::string, double>       metrics;
+    std::map<std::string, FrameMetrics> frame_benchmarks;
 };
 
 struct PerfBaselineFile {
@@ -337,11 +351,13 @@ namespace detail {
     // (TestPerformance + TestRenderPerformance under `ctest -j`) cannot
     // clobber each other's metrics.
     struct BaselineStore {
-        ZHLN::Mutex                   mutex;
-        std::map<std::string, double> baseline; // this machine's last-known values
-        std::string                   baselineCommit;
-        std::map<std::string, double> pending;  // this process's accepted updates
-        bool                          loaded = false;
+        ZHLN::Mutex                         mutex;
+        std::map<std::string, double>       baseline;
+        std::map<std::string, FrameMetrics> baselineFrames;
+        std::string                         baselineCommit;
+        std::map<std::string, double>       pending;
+        std::map<std::string, FrameMetrics> pendingFrames;
+        bool                                loaded = false;
 
         ~BaselineStore() {
             SaveNow();
@@ -358,11 +374,14 @@ namespace detail {
             // key (cpu.*/render.* namespaces) cannot clobber each other.
             PerfBaselineFile file = LoadBaselineFile(BaselineFilePath());
             auto&            ours = file.machines[MachineKey()];
-            if (!pending.empty() || ours.commit.empty()) {
+            if (!pending.empty() || !pendingFrames.empty() || ours.commit.empty()) {
                 ours.commit = std::string {GetGitCommitHash()};
             }
             for (const auto& [metric, value]: pending) {
                 ours.metrics[metric] = value;
+            }
+            for (const auto& [name, frameMetrics]: pendingFrames) {
+                ours.frame_benchmarks[name] = frameMetrics;
             }
 
             WriteBaselineAtomically(BaselineFilePath(), ReflectJSON::SerializeJSON(file, 2));
@@ -393,6 +412,7 @@ namespace detail {
         const auto             ours = file.machines.find(MachineKey());
         if (ours != file.machines.end()) {
             store.baseline       = ours->second.metrics;
+            store.baselineFrames = ours->second.frame_benchmarks;
             store.baselineCommit = ours->second.commit;
         }
         store.loaded = true;
@@ -423,6 +443,85 @@ namespace detail {
     }
     // Regressed: keep the previous value as the baseline so a failing run
     // cannot launder itself into the next comparison.
+    return result;
+}
+
+struct FrameCheckResult {
+    bool         known        = false;
+    FrameMetrics previous     = {};
+    std::string  commit;
+    double       avgChangePct = 0.0;
+    double       p99ChangePct = 0.0;
+    double       avgLimitPct  = 0.0;
+    double       p99LimitPct  = 0.0;
+    bool         regressed    = false;
+    bool         recorded     = false;
+};
+
+[[nodiscard]] inline auto CheckFrame(
+    std::string_view  benchmarkName,
+    const FrameStats& stats,
+    double            avgLimitPct = -1.0,
+    double            p99LimitPct = 35.0
+) -> FrameCheckResult {
+    FrameCheckResult result;
+    result.avgLimitPct = avgLimitPct > 0.0 ? avgLimitPct : DefaultLimitPercent();
+    result.p99LimitPct = p99LimitPct > 0.0 ? p99LimitPct : 35.0;
+
+    auto&            store = detail::Store();
+    const MutexGuard lock(store.mutex);
+
+    if (!store.loaded) {
+        const PerfBaselineFile file = LoadBaselineFile(BaselineFilePath());
+        const auto             ours = file.machines.find(MachineKey());
+        if (ours != file.machines.end()) {
+            store.baseline       = ours->second.metrics;
+            store.baselineFrames = ours->second.frame_benchmarks;
+            store.baselineCommit = ours->second.commit;
+        }
+        store.loaded = true;
+    }
+
+    FrameMetrics current {
+        .avg_frame_ms   = stats.avgFrameMs,
+        .p50_frame_ms   = stats.p50FrameMs,
+        .p95_frame_ms   = stats.p95FrameMs,
+        .p99_frame_ms   = stats.p99FrameMs,
+        .p99_9_frame_ms = stats.p99_9FrameMs,
+        .avg_fps        = stats.avgFps,
+        .max_fps        = stats.maxFps,
+        .min_fps        = stats.minFps,
+        .low_1pct_fps   = stats.low1PctFps,
+        .low_0_1pct_fps = stats.low01PctFps,
+    };
+
+    const std::string key {benchmarkName};
+    const auto        prev = store.baselineFrames.find(key);
+    if (prev == store.baselineFrames.end() || !(prev->second.avg_frame_ms > 0.0)) {
+        store.baselineFrames[key] = current;
+        store.pendingFrames[key]  = current;
+        result.recorded           = true;
+        result.commit             = std::string {GetGitCommitHash()};
+        return result;
+    }
+
+    result.known        = true;
+    result.previous     = prev->second;
+    result.commit       = store.baselineCommit;
+    result.avgChangePct = 100.0 * (current.avg_frame_ms - result.previous.avg_frame_ms) / result.previous.avg_frame_ms;
+    result.p99ChangePct = (result.previous.p99_frame_ms > 0.0)
+                              ? 100.0 * (current.p99_frame_ms - result.previous.p99_frame_ms) / result.previous.p99_frame_ms
+                              : 0.0;
+
+    const bool avgRegressed = !RebaselineRequested() && result.avgChangePct > result.avgLimitPct;
+    const bool p99Regressed = !RebaselineRequested() && result.p99ChangePct > result.p99LimitPct;
+    result.regressed        = avgRegressed || p99Regressed;
+
+    if (!result.regressed) {
+        store.baselineFrames[key] = current;
+        store.pendingFrames[key]  = current;
+        result.recorded           = true;
+    }
     return result;
 }
 
@@ -478,6 +577,63 @@ inline void VerifyBaseline(
              .line          = static_cast<uint32_t>(location.line()),
              .actualValue   = std::format("{} = {:.3f} ({:+.1f}% vs last run {:.3f})", metric, value, result.changePct, result.previous),
              .expectedValue = std::format("within {:+.1f}% of last run", result.limitPct),
+             .op            = "PerfRegression"}
+        );
+    }
+}
+
+// ============================================================================
+// Multi-frame benchmark verification (nested percentiles & framerates).
+//
+// Records the complete FrameMetrics structure under frame_benchmarks[name] in
+// perf-baseline.json, providing clean grouping for multi-frame benchmarks.
+// ============================================================================
+inline void VerifyFrameBaseline(
+    std::string_view     benchmarkName,
+    const FrameStats&    stats,
+    double               avgLimitPercent   = -1.0,
+    double               p99LimitPercent   = 35.0,
+    std::source_location location          = std::source_location::current()
+) {
+    const Perf::FrameCheckResult result = Perf::CheckFrame(benchmarkName, stats, avgLimitPercent, p99LimitPercent);
+
+    const std::string commitInfo = result.commit.empty() ? "" : std::format(" [{}]", result.commit);
+    if (result.known) {
+        ZHLN::Println(
+            "    {}[Baseline]{} {} = {:.3f} ms (last run{}: {:.3f} ms, {:+.1f}% vs limit {:+.1f}%){}",
+            result.regressed ? Color::Red : Color::Green, Color::Reset, benchmarkName, stats.avgFrameMs, commitInfo,
+            result.previous.avg_frame_ms, result.avgChangePct, result.avgLimitPct, result.regressed ? "  << REGRESSION" : ""
+        );
+        ZHLN::Println(
+            "      {}- Frame Times{} : Avg {:.3f} ms, P50 {:.3f} ms, P95 {:.3f} ms, P99 {:.3f} ms (last: {:.3f} ms), P99.9 {:.3f} ms",
+            Color::Cyan, Color::Reset, stats.avgFrameMs, stats.p50FrameMs, stats.p95FrameMs, stats.p99FrameMs,
+            result.previous.p99_frame_ms, stats.p99_9FrameMs
+        );
+        ZHLN::Println(
+            "      {}- Framerates {} : Avg {:.1f} FPS, Max {:.1f} FPS, Min {:.1f} FPS, 1% Low {:.1f} FPS, 0.1% Low {:.1f} FPS",
+            Color::Cyan, Color::Reset, stats.avgFps, stats.maxFps, stats.minFps, stats.low1PctFps, stats.low01PctFps
+        );
+    } else {
+        ZHLN::Println(
+            "    {}[Baseline]{} {} = {:.3f} ms (first run{}, baseline recorded)",
+            Color::Green, Color::Reset, benchmarkName, stats.avgFrameMs, commitInfo
+        );
+        ZHLN::Println(
+            "      {}- Frame Times{} : Avg {:.3f} ms, P50 {:.3f} ms, P95 {:.3f} ms, P99 {:.3f} ms, P99.9 {:.3f} ms",
+            Color::Cyan, Color::Reset, stats.avgFrameMs, stats.p50FrameMs, stats.p95FrameMs, stats.p99FrameMs, stats.p99_9FrameMs
+        );
+        ZHLN::Println(
+            "      {}- Framerates {} : Avg {:.1f} FPS, Max {:.1f} FPS, Min {:.1f} FPS, 1% Low {:.1f} FPS, 0.1% Low {:.1f} FPS",
+            Color::Cyan, Color::Reset, stats.avgFps, stats.maxFps, stats.minFps, stats.low1PctFps, stats.low01PctFps
+        );
+    }
+
+    if (result.regressed) {
+        GetThreadLocalContext().failures.push_back(
+            {.file          = location.file_name(),
+             .line          = static_cast<uint32_t>(location.line()),
+             .actualValue   = std::format("{} = {:.3f} ms ({:+.1f}% vs last run {:.3f} ms)", benchmarkName, stats.avgFrameMs, result.avgChangePct, result.previous.avg_frame_ms),
+             .expectedValue = std::format("within {:+.1f}% of last run", result.avgLimitPct),
              .op            = "PerfRegression"}
         );
     }

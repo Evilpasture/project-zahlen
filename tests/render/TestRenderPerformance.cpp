@@ -979,37 +979,10 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
         }
     }
 
-    ZHLN::Println(
-        "    [Results] Rendered 120 frames in {:.3f} s (Avg: {:.3f} ms, Min: {:.3f} ms, Max: {:.3f} ms, P99: {:.3f} ms)", totalDurationSec, stats.avgFrameMs,
-        stats.minFrameMs, stats.maxFrameMs, stats.p99FrameMs
-    );
-    ZHLN::Println(
-        "    [FPS Metrics] Avg: {:.2f} FPS, Max: {:.2f} FPS, Min: {:.2f} FPS, 1% Low: {:.2f} FPS, 0.1% Low: {:.2f} FPS",
-        stats.avgFps, stats.maxFps, stats.minFps, stats.low1PctFps, stats.low01PctFps
-    );
-
-    // The val_off pass is the GPU-bound one -- validation off, ~4 ms frames --
-    // so it tracks the device's clock state, and it runs second in this binary
-    // on a card that has already been loaded for ~10 s. Last run showed exactly
-    // that: every val_off metric moved together (geometry +11.8%, fog +13.4%,
-    // decals +21.8%, UI +16.8%, post +14.3%, ray tracing +25.3%) while the
-    // val_on pass, which is CPU-bound on validation overhead, stayed flat or
-    // improved. A 20% gate sits inside that band and reports the room
-    // temperature as a regression; the p99 metric for the same frames already
-    // allows 35%. val_on keeps the tighter limit -- it is the one that can hold
-    // it.
     const double      avgLimitPct = (mode == ZHLN::ValidationMode::On) ? 20.0 : 35.0;
-    const std::string suffix      = (mode == ZHLN::ValidationMode::On) ? ".val_on" : ".val_off";
+    const std::string testName    = (mode == ZHLN::ValidationMode::On) ? "render.master.val_on" : "render.master.val_off";
 
-    ZHLN::Test::VerifyBaseline("render.master.avg_frame_ms" + suffix, stats.avgFrameMs, avgLimitPct);
-    ZHLN::Test::VerifyBaseline("render.master.p50_frame_ms" + suffix, stats.p50FrameMs, avgLimitPct);
-    ZHLN::Test::VerifyBaseline("render.master.p95_frame_ms" + suffix, stats.p95FrameMs, 35.0);
-    ZHLN::Test::VerifyBaseline("render.master.p99_frame_ms" + suffix, stats.p99FrameMs, 35.0);
-    ZHLN::Test::VerifyBaseline("render.master.p99_9_frame_ms" + suffix, stats.p99_9FrameMs, 35.0);
-    ZHLN::Test::VerifyBaseline("render.master.max_fps" + suffix, stats.maxFps, 35.0, ZHLN::Test::Perf::Direction::HigherIsBetter);
-    ZHLN::Test::VerifyBaseline("render.master.min_fps" + suffix, stats.minFps, 35.0, ZHLN::Test::Perf::Direction::HigherIsBetter);
-    ZHLN::Test::VerifyBaseline("render.master.low_1pct_fps" + suffix, stats.low1PctFps, 35.0, ZHLN::Test::Perf::Direction::HigherIsBetter);
-    ZHLN::Test::VerifyBaseline("render.master.low_0_1pct_fps" + suffix, stats.low01PctFps, 35.0, ZHLN::Test::Perf::Direction::HigherIsBetter);
+    ZHLN::Test::VerifyFrameBaseline(testName, stats, avgLimitPct, 35.0);
 
     ZHLN::Println("    [Throughput] Render Rate: {:.2f} FPS", (kTotalFrames * 1.0) / totalDurationSec);
     ZHLN::Println("    [Image Validation] Captured resolution: {}x{}, Shaded Pixels: {}", outputImg.width, outputImg.height, litPixels);
