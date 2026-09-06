@@ -221,13 +221,19 @@ enum class SceneError : uint8_t {
 
 /// Extract() without the engine: the same walk over a camera and a registry.
 ///
-/// @p materials resolves a MaterialID to its CPU-side factors, which is where
-/// base colour and emissive live; it may be null, in which case those two keep
-/// their struct defaults. Every other field comes out of the registry, so a
-/// scene can be extracted -- and round-tripped through a document -- with no
-/// device, no window and no engine. That is what makes it testable on a machine
-/// with no GPU.
-[[nodiscard]] auto Extract(const Camera& camera, const ECS::Registry& registry, const RenderContext* materials) -> Scene;
+/// @p renderContext is consulted for one thing -- `GetGPUMaterial()`, because
+/// base colour and emissive live in the material table rather than on the
+/// entity. Every other field comes out of the registry.
+///
+/// It is a pointer, not a reference, because a RenderContext cannot be had
+/// without a device: its only constructors are `Create(Window&, ...)` and a
+/// private-token one, so a reference here would make this overload callable
+/// only from code that already owns an engine -- which is the overload above.
+/// Null leaves base colour and emissive at their struct defaults, and that is
+/// what lets a scene be extracted, and round-tripped through a document, on a
+/// machine with no GPU. The nullable-context pointer is the house spelling:
+/// see `PhysicsContext* pc` in CreativeWorksFactory.hpp.
+[[nodiscard]] auto Extract(const Camera& camera, const ECS::Registry& registry, const RenderContext* renderContext) -> Scene;
 
 } // namespace Scene
 } // namespace ZHLN

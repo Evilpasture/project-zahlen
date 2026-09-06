@@ -365,7 +365,7 @@ namespace {
     return registry.Get<Components::PhysicsStateComponent>(entity) != nullptr ? BodyKind::Dynamic : BodyKind::Static;
 }
 
-[[nodiscard]] auto ExtractEntities(const ECS::Registry& registry, const RenderContext* materials) -> std::vector<SceneEntity> {
+[[nodiscard]] auto ExtractEntities(const ECS::Registry& registry, const RenderContext* renderContext) -> std::vector<SceneEntity> {
     std::vector<SceneEntity> entities;
     size_t                   unattributed = 0;
 
@@ -398,14 +398,14 @@ namespace {
         description.body = ExtractBodyKind(registry, entity);
 
         // Roughness and metallic live on the entity; colour and emission live
-        // only in the material table, which is what the `materials` parameter
-        // is for. A null table leaves those two at their struct defaults.
+        // only in the render context's material table. With no context -- the
+        // device-free extraction -- those two keep their struct defaults.
         if (const auto* pbr = registry.Get<Components::PBRComponent>(entity); pbr != nullptr) {
             description.material.roughness = pbr->roughness;
             description.material.metallic  = pbr->metallic;
         }
-        if (materials != nullptr) {
-            if (const auto gpuMaterial = materials->GetGPUMaterial(mesh.materialAsset); gpuMaterial.has_value()) {
+        if (renderContext != nullptr) {
+            if (const auto gpuMaterial = renderContext->GetGPUMaterial(mesh.materialAsset); gpuMaterial.has_value()) {
                 const float* base = gpuMaterial->baseColorFactor;
                 const float* glow = gpuMaterial->emissiveFactor;
                 description.material.baseColor = JPH::Float4 {base[0], base[1], base[2], base[3]};
@@ -470,11 +470,11 @@ namespace {
 
 } // namespace
 
-auto Extract(const Camera& camera, const ECS::Registry& registry, const RenderContext* materials) -> Scene {
+auto Extract(const Camera& camera, const ECS::Registry& registry, const RenderContext* renderContext) -> Scene {
     Scene scene;
     scene.camera      = ToDescriptionCamera(camera);
     scene.environment = ExtractEnvironment(registry);
-    scene.entities    = ExtractEntities(registry, materials);
+    scene.entities    = ExtractEntities(registry, renderContext);
     scene.lights      = ExtractLights(registry);
     return scene;
 }
