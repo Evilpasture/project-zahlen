@@ -19,8 +19,8 @@ struct TextEditTestSuite {
             ZHLN::GUI::UIComponents::UITextInputComponent in;
 
             // Typing characters
-            ZHLN::Test::ExpectEq(ZHLN::GUI::TextEdit::HandleChar(in, 'H'), ZHLN::GUI::TextEdit::KeyResult::Edited);
-            ZHLN::Test::ExpectEq(ZHLN::GUI::TextEdit::HandleChar(in, 'i'), ZHLN::GUI::TextEdit::KeyResult::Edited);
+            ZHLN::Test::ExpectTrue(ZHLN::GUI::TextEdit::HandleChar(in, 'H'));
+            ZHLN::Test::ExpectTrue(ZHLN::GUI::TextEdit::HandleChar(in, 'i'));
 
             ZHLN::Test::ExpectEq(std::string_view(in.text), std::string_view("Hi"));
             ZHLN::Test::ExpectEq(in.cursorIndex, 2u);
@@ -56,9 +56,9 @@ struct TextEditTestSuite {
             ZHLN::Test::ExpectEq(ZHLN::GUI::TextEdit::SelectedText(in), std::string_view("Hello"));
 
             // Replace Selection
-            ZHLN::GUI::TextEdit::HandleChar(in, 'B');
-            ZHLN::GUI::TextEdit::HandleChar(in, 'y');
-            ZHLN::GUI::TextEdit::HandleChar(in, 'e');
+            ZHLN::Test::ExpectTrue(ZHLN::GUI::TextEdit::HandleChar(in, 'B'));
+            ZHLN::Test::ExpectTrue(ZHLN::GUI::TextEdit::HandleChar(in, 'y'));
+            ZHLN::Test::ExpectTrue(ZHLN::GUI::TextEdit::HandleChar(in, 'e'));
 
             ZHLN::Test::ExpectEq(std::string_view(in.text), std::string_view("Bye World"));
             ZHLN::Test::ExpectFalse(in.HasSelection());
