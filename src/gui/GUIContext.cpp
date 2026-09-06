@@ -725,7 +725,7 @@ constexpr float kTextInputPadding  = 4.0f;
 constexpr float kTextInputHeight   = 24.0f;
 constexpr float kTextInputWidth    = 180.0f;
 
-// Dropdown geometry. The list floats under the field at kDropdownListOffset, and
+// Dropdown geometry. The list floats at kDropdownListOffset from the field, and
 // both the drawing and the hit-testing below derive row rectangles from that
 // same arithmetic -- no per-row Clay elements, so no per-row ids whose
 // Clay_String would have to outlive the layout pass.
@@ -1036,8 +1036,16 @@ bool Context::Dropdown(
     // Row rectangles come from the field's box plus the same offsets the
     // floating list is drawn with. Clay reports last frame's layout, which is
     // exactly what hit-testing needs.
-    const float listX = elemData.boundingBox.x;
-    const float listY = elemData.boundingBox.y + elemData.boundingBox.height + kDropdownListOffset;
+    // The list opens downward unless it does not fit: a dropdown near the
+    // bottom of the viewport (the inspector's Add Component) would otherwise
+    // put every row off-screen. In that case it flips upward when the room
+    // above is at least the room below.
+    const float listX      = elemData.boundingBox.x;
+    const float listHeight = static_cast<float>(visibleCount) * kDropdownRowHeight;
+    const float spaceBelow = Clay_GetLayoutDimensions().height - (elemData.boundingBox.y + elemData.boundingBox.height);
+    const bool  openUpward = spaceBelow < listHeight + kDropdownListOffset && elemData.boundingBox.y >= spaceBelow;
+    const float listY      = openUpward ? elemData.boundingBox.y - kDropdownListOffset - listHeight
+                                        : elemData.boundingBox.y + elemData.boundingBox.height + kDropdownListOffset;
     auto rowUnderPointer = [&](int optionIndex) -> bool {
         if (!elemData.found) {
             return false;
@@ -1148,9 +1156,11 @@ bool Context::Dropdown(
             .backgroundColor = Clay_Color {20, 28, 40, 250},
             .cornerRadius    = {4, 4, 4, 4},
             .floating        =
-                {.offset       = {0.0f, kDropdownListOffset},
+                {.offset       = {0.0f, openUpward ? -kDropdownListOffset : kDropdownListOffset},
                  .zIndex       = 100,
-                 .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_BOTTOM},
+                 .attachPoints = openUpward
+                                     ? Clay_FloatingAttachPoints {.element = CLAY_ATTACH_POINT_LEFT_BOTTOM, .parent = CLAY_ATTACH_POINT_LEFT_TOP}
+                                     : Clay_FloatingAttachPoints {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_BOTTOM},
                  .attachTo     = CLAY_ATTACH_TO_PARENT}
         };
         Clay__ConfigureOpenElement(listDecl);
