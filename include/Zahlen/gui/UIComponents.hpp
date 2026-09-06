@@ -11,7 +11,6 @@
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Types.hpp>
-#include <Zahlen/gui/TextBuffer.hpp>
 #include <algorithm>
 
 namespace ZHLN::ECS {
@@ -233,37 +232,6 @@ struct UIComponents {
     struct UIDragComponent {
         ZHLN::Entity targetEntity {};
         bool         isDragging = false;
-    };
-
-    struct UITextInputComponent {
-        String256 text;
-        // Caret, selection anchor and the whole-text-selection flag. The
-        // selected range is [min(anchor, cursor), max(anchor, cursor));
-        // anchor == cursor means no selection. Shift + navigation keeps the
-        // anchor and moves the caret, plain navigation collapses the selection,
-        // and editing replaces it.
-        //
-        // This used to be three loose fields with the same three predicates
-        // duplicated here and in the editor; it is now GUI::TextEdit::Caret,
-        // the type the immediate-mode Context::TextInput keeps its state in too,
-        // so both front ends mean the same thing by a selection. The editing
-        // rules live in GUI::TextEdit (Zahlen/gui/TextEdit.hpp).
-        TextEdit::Caret caret;
-        bool            isFocused = false;
-        bool            edited    = false; // Set true by engine on text mutation; builder clears after reading
-
-        [[nodiscard]] auto HasSelection() const noexcept -> bool {
-            return caret.HasSelection();
-        }
-        [[nodiscard]] auto SelectionStart() const noexcept -> uint32_t {
-            return caret.SelectionStart();
-        }
-        [[nodiscard]] auto SelectionEnd() const noexcept -> uint32_t {
-            return caret.SelectionEnd(text.size());
-        }
-        void ClearSelection() noexcept {
-            caret.ClearSelection();
-        }
     };
 
     struct UICheckboxComponent {

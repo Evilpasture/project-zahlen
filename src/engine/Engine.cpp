@@ -36,7 +36,6 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
-#include <Zahlen/gui/TextEdit.hpp>
 #include <Zahlen/gui/UIComponents.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <engine/FileWatcher.hpp>
@@ -744,50 +743,16 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
         }
     }
 
-    // Text editing for the focused UITextInputComponent lives in
-    // GUI::TextEdit (a pure function over the component) so the TTY front end
-    // and the unit tests exercise exactly what the GLFW path does. Modifier
-    // state comes from the InputStateComponent, which SetKey has already
-    // updated for this event, so Shift/Ctrl held together with the key are
-    // visible here without a separate mods parameter.
+    // Keys land in InputStateComponent and nowhere else. The engine deliberately
+    // does not interpret them as text: it does not own a GUI::Context (the caller
+    // does -- see app/main.cpp:151), so it cannot know which field, if any, is
+    // focused. Whoever owns the Context forwards keys and characters to
+    // Context::PushKey/PushChar; that is the only text-input path.
     auto onKey = [](void* userdata, KeyCode key, bool pressed) -> void {
         auto* impl  = static_cast<EngineImpl*>(userdata);
         auto* reg   = &impl->registry;
         auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
         state->SetKey(static_cast<uint8_t>(key), pressed);
-
-        if (!pressed) {
-            return;
-        }
-
-        const GUI::TextEdit::Modifiers mods {
-            .shift = state->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::LShift)) || state->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::RShift)),
-            .ctrl  = state->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::LControl)) || state->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::RControl)),
-        };
-
-        // Ctrl+C/X/V go to the OS clipboard through the window. The window is
-        // created right after these callbacks are installed, so it is null
-        // only for events that cannot happen yet.
-        const GUI::TextEdit::ClipboardSink clipboard {
-            .userdata = impl,
-            .set      = [](void* ud, std::string_view text) -> void {
-                auto* ei = static_cast<EngineImpl*>(ud);
-                if (ei->window) {
-                    ei->window->SetClipboardText(text);
-                }
-            },
-            .get = [](void* ud) -> std::string {
-                auto* ei = static_cast<EngineImpl*>(ud);
-                return ei->window ? ei->window->GetClipboardText() : std::string();
-            },
-        };
-
-        for (Entity e: reg->GetEntitiesWith<GUI::UIComponents::UITextInputComponent>()) {
-            auto* inputComp = reg->Get<GUI::UIComponents::UITextInputComponent>(e);
-            if (inputComp != nullptr && inputComp->isFocused) {
-                GUI::TextEdit::HandleKey(*inputComp, key, mods, clipboard);
-            }
-        }
     };
 
     auto onMouseMove = [](void* userdata, float x, float y) -> void {
@@ -808,21 +773,10 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
         state->ApplyResize(extent);
     };
 
-    auto onChar = [](void* userdata, unsigned int codepoint) -> void {
-        auto* reg = &static_cast<EngineImpl*>(userdata)->registry;
-        for (Entity e: reg->GetEntitiesWith<GUI::UIComponents::UITextInputComponent>()) {
-            auto* inputComp = reg->Get<GUI::UIComponents::UITextInputComponent>(e);
-            if (inputComp != nullptr && inputComp->isFocused) {
-                GUI::TextEdit::HandleChar(*inputComp, codepoint);
-            }
-        }
-    };
-
     // userdata is the heap-allocated EngineImpl (stable for the engine's whole
-    // life, unlike `this`), which owns both the registry the callbacks write
-    // to and the window whose clipboard the text fields use.
+    // life, unlike `this`), which owns the registry the callbacks write to.
     WindowInputReceiver receiver = {
-        .userdata = _impl.get(), .onKey = onKey, .onMouseMove = onMouseMove, .onMouseScroll = onMouseScroll, .onResize = onResize, .onChar = onChar
+        .userdata = _impl.get(), .onKey = onKey, .onMouseMove = onMouseMove, .onMouseScroll = onMouseScroll, .onResize = onResize
     };
 
     _impl->window =

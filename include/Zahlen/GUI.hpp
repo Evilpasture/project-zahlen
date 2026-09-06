@@ -184,9 +184,8 @@ class ZHLN_API Context {
     // --- Text Input ---
     //
     // Single-line editable field. Returns true on any frame the text changed.
-    // Editing is done by the same rules as the ECS UITextInputComponent
-    // (Zahlen/gui/TextBuffer.hpp), so caret movement, selection, word deletion
-    // and Ctrl+C/X/V behave identically in both front ends.
+    // Caret movement, selection, word deletion and Ctrl+C/X/V come from
+    // Zahlen/gui/TextBuffer.hpp, so they are unit-testable without a display.
     //
     // Characters and editing keys do not arrive through InputStateComponent --
     // it holds held-down key state only, with no typed-character stream and no

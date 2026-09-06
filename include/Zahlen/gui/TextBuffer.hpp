@@ -7,18 +7,17 @@
 // insertion, deletion and clipboard exchange, expressed over any store that
 // can be read as a std::string_view and reassigned from one.
 //
-// Nothing here knows about UITextInputComponent, the registry, the window or
-// the renderer, so every front end drives exactly this code:
+// Nothing here knows about the registry, the window or the renderer, so any
+// front end can drive it. Today that is ZHLN::GUI::Context::TextInput, which
+// keeps a Caret per widget in its own state table, and tests/core/TestTextEdit.cpp
+// over a plain std::string.
 //
-//   * ZHLN::GUI::TextEdit (Zahlen/gui/TextEdit.hpp) binds it to the ECS
-//     UITextInputComponent that Engine::InitInternal's onKey/onChar forward to.
-//   * ZHLN::GUI::Context::TextInput binds it to the Clay immediate-mode widget.
-//   * tests/core/TestTextEdit.cpp binds it to a plain std::string.
-//
-// Before this header existed the logic took a UITextInputComponent&, which
-// welded the editing rules to the one storage the legacy ECS UI happened to
-// use. Keeping one implementation behind a concept is what stops the immediate
-// mode widget and the component from drifting apart.
+// The rules used to be free functions taking a UITextInputComponent&, the ECS
+// text field. That component is gone: nothing set its isFocused, so the engine's
+// forwarding loops could never fire, and nothing read its `edited` flag or drew
+// it. Immediate mode keeps per-field state beside the widget, which is where a
+// Caret belongs -- so the component had no reason to exist once the rules moved
+// behind this concept.
 //
 // The single-line model:
 //   * The caret is Caret::cursorIndex, a byte offset into the buffer (ASCII

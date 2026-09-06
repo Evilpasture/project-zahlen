@@ -33,7 +33,6 @@ struct WidgetState {
     uint64_t lastActiveFrame = 0;
     // Text fields keep their caret here rather than in the caller's string, so
     // a TextInput stays a plain `gui.TextInput("Name", str)` at the call site.
-    // Same Caret type the ECS UITextInputComponent embeds.
     TextEdit::Caret caret    = {};
 };
 
