@@ -394,13 +394,13 @@ bool Context::Button(std::string_view label, const JPH::Vec4& color, const Sizin
     Clay__OpenElementWithId(elemId);
 
     Clay_ElementData elemData = Clay_GetElementData(elemId);
-    bool isHovered = Clay_Hovered() || Clay_PointerOver(elemId) ||
+    bool isHovered = Clay_PointerOver(elemId) ||
                      (elemData.found && elemData.boundingBox.width > 0.0f &&
                       mx >= elemData.boundingBox.x && mx <= (elemData.boundingBox.x + elemData.boundingBox.width) &&
                       my >= elemData.boundingBox.y && my <= (elemData.boundingBox.y + elemData.boundingBox.height));
 
     auto pointer = Clay_GetPointerState();
-    bool isPressedNow = (pointer.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME) || (isMouseDown && !state.isPressed);
+    bool isPressedNow = (pointer.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME);
 
     if (isHovered && isPressedNow) {
         clicked = true;
@@ -456,13 +456,13 @@ bool Context::Checkbox(std::string_view label, bool& checked) noexcept {
     Clay__OpenElementWithId(elemId);
 
     Clay_ElementData elemData = Clay_GetElementData(elemId);
-    bool isHovered = Clay_Hovered() || Clay_PointerOver(elemId) ||
+    bool isHovered = Clay_PointerOver(elemId) ||
                      (elemData.found && elemData.boundingBox.width > 0.0f &&
                       mx >= elemData.boundingBox.x && mx <= (elemData.boundingBox.x + elemData.boundingBox.width) &&
                       my >= elemData.boundingBox.y && my <= (elemData.boundingBox.y + elemData.boundingBox.height));
 
     auto pointer = Clay_GetPointerState();
-    bool isPressedNow = (pointer.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME) || (isMouseDown && !state.isPressed);
+    bool isPressedNow = (pointer.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME);
 
     if (isHovered && isPressedNow) {
         checked = !checked;
@@ -525,18 +525,17 @@ bool Context::Slider(std::string_view label, float& value, float minVal, float m
     Clay__OpenElementWithId(elemId);
 
     Clay_ElementData elemData = Clay_GetElementData(elemId);
-    bool isHovered = Clay_Hovered() || Clay_PointerOver(elemId) ||
+    bool isHovered = Clay_PointerOver(elemId) ||
                      (elemData.found && elemData.boundingBox.width > 0.0f &&
                       mx >= elemData.boundingBox.x && mx <= (elemData.boundingBox.x + elemData.boundingBox.width) &&
                       my >= elemData.boundingBox.y && my <= (elemData.boundingBox.y + elemData.boundingBox.height));
 
     auto pointer = Clay_GetPointerState();
-    bool isDown  = isMouseDown || (pointer.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME || pointer.state == CLAY_POINTER_DATA_PRESSED);
 
-    if (isHovered && isDown) {
+    if (isHovered && pointer.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME) {
         state.isDragging = true;
     }
-    if (!isDown) {
+    if (!isMouseDown) {
         state.isDragging = false;
     }
 
@@ -607,13 +606,13 @@ bool Context::BeginCollapsingHeader(std::string_view label, bool defaultOpen) no
     Clay__OpenElementWithId(elemId);
 
     Clay_ElementData elemData = Clay_GetElementData(elemId);
-    bool isHovered = Clay_Hovered() || Clay_PointerOver(elemId) ||
+    bool isHovered = Clay_PointerOver(elemId) ||
                      (elemData.found && elemData.boundingBox.width > 0.0f &&
                       mx >= elemData.boundingBox.x && mx <= (elemData.boundingBox.x + elemData.boundingBox.width) &&
                       my >= elemData.boundingBox.y && my <= (elemData.boundingBox.y + elemData.boundingBox.height));
 
     auto pointer = Clay_GetPointerState();
-    bool isPressedNow = (pointer.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME) || (isMouseDown && !state.isPressed);
+    bool isPressedNow = (pointer.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME);
 
     if (isHovered && isPressedNow) {
         state.isOpen    = !state.isOpen;
