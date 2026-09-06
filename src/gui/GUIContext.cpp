@@ -14,9 +14,11 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/gui/UIComponents.hpp>
 #include <algorithm>
+#include <array>
 #include <clay.h>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -29,6 +31,10 @@ struct WidgetState {
     bool     isOpen          = false;
     bool     isInitialized   = false;
     uint64_t lastActiveFrame = 0;
+    // Text fields keep their caret here rather than in the caller's string, so
+    // a TextInput stays a plain `gui.TextInput("Name", str)` at the call site.
+    // Same Caret type the ECS UITextInputComponent embeds.
+    TextEdit::Caret caret    = {};
 };
 
 // ============================================================================
@@ -49,6 +55,41 @@ struct Context::Impl {
     bool                                 lastItemHovered = false;
     bool                                 lastItemActive  = false;
     bool                                 inLayout        = false;
+
+    // --- Text input ---
+    // State key of the field that currently holds focus; 0 means none. Only one
+    // field is focused at a time, which is what lets a click on any field
+    // defocus the previous one without a focus manager.
+    uint64_t focusedTextInput = 0;
+    // Ctrl+C/X/V plumbing, installed by the front end (the engine wires it to
+    // Window's clipboard). Empty means those three keys do nothing.
+    TextEdit::ClipboardSink clipboard = {};
+
+    // Characters and editing keys arrive from the window between frames, not
+    // through InputStateComponent, which only tracks held-down state. They
+    // queue here, are drained by whichever field is focused during the next
+    // frame, and whatever is left is dropped at the end of it so a keypress can
+    // never leak into a field focused later. Fixed size: a key repeat cannot
+    // outrun a frame by more than a handful of events, and growing here would
+    // put an allocation in the input path.
+    struct PendingEvent {
+        bool     isChar    = false;
+        uint32_t key       = 0;
+        uint32_t codepoint = 0;
+    };
+    static constexpr size_t                             kMaxPendingEvents = 64;
+    std::array<PendingEvent, kMaxPendingEvents>          pendingEvents     = {};
+    size_t                                               pendingEventCount = 0;
+
+    void QueueEvent(const PendingEvent& ev) noexcept {
+        if (pendingEventCount < kMaxPendingEvents) {
+            pendingEvents[pendingEventCount++] = ev;
+        }
+    }
+
+    void ClearPendingEvents() noexcept {
+        pendingEventCount = 0;
+    }
 
     explicit Impl(ECS::Registry& reg, Extent2D vp = {1920, 1080}, Engine* eng = nullptr) noexcept
         : registry(reg), viewport(vp), engine(eng) {
@@ -258,6 +299,7 @@ void Context::EndFrame() noexcept {
     Clay_SetCurrentContext(_impl->clayContext);
     Clay_EndLayout(_impl->lastDt);
     _impl->inLayout = false;
+    _impl->ClearPendingEvents();
 }
 
 void Context::EndFrameAndRender(RenderContext& rc) noexcept {
@@ -266,6 +308,7 @@ void Context::EndFrameAndRender(RenderContext& rc) noexcept {
     Clay_SetCurrentContext(_impl->clayContext);
     Clay_RenderCommandArray commands = Clay_EndLayout(_impl->lastDt);
     _impl->inLayout = false;
+    _impl->ClearPendingEvents();
     if (commands.length == 0 || !_impl->activeFont)
         return;
 
@@ -628,6 +671,251 @@ bool Context::Slider(std::string_view label, float& value, float minVal, float m
 
     EndRow();
     return changed;
+}
+
+// --- Text Input ---
+
+namespace {
+
+// Field geometry, in pixels. The caret is placed by measuring prefixes at this
+// size, so it has to stay in step with the size Text() is called with below.
+constexpr float kTextInputFontSize = 15.0f;
+constexpr float kTextInputPadding  = 4.0f;
+constexpr float kTextInputHeight   = 24.0f;
+constexpr float kTextInputWidth    = 180.0f;
+
+/// How far the pen moves for one glyph, matching Impl::MeasureText so the caret
+/// lands where the text is actually drawn.
+///
+/// MeasureTextBounds is the wrong tool for this: it returns the ink bounding box
+/// (maxX - minX), not the pen advance, so it under-measures proportional fonts
+/// and measures zero for any atlas whose glyph rects are unset even though the
+/// advances are fine -- which is exactly the fallback atlas.
+[[nodiscard]] inline float GlyphAdvance(const FontAtlas& font, char c, float scale) noexcept {
+    uint32_t glyphCode = static_cast<uint8_t>(c);
+    if (glyphCode < 32 || glyphCode > 127) {
+        glyphCode = '?';
+    }
+    return font.glyphs[glyphCode - 32].xadvance * scale;
+}
+
+/// Byte offset whose glyph boundary is nearest to `localX` pixels into `text`.
+[[nodiscard]] inline size_t CaretIndexAtX(const FontAtlas& font, std::string_view text, float localX, float scale) noexcept {
+    float  pen = 0.0f;
+    size_t idx = 0;
+    while (idx < text.size()) {
+        const float advance = GlyphAdvance(font, text[idx], scale);
+        if (pen + advance * 0.5f > localX) {
+            break;
+        }
+        pen += advance;
+        ++idx;
+    }
+    return idx;
+}
+
+} // namespace
+
+bool Context::TextInputImpl(std::string_view label, std::string& value, size_t maxTextLength, const Sizing& width) noexcept {
+    Clay_SetCurrentContext(_impl->clayContext);
+
+    uint32_t       idNum   = static_cast<uint32_t>(HashCreativeWorkPath(label));
+    Clay_ElementId elemId  = Clay_GetElementIdWithIndex(ToClayString(label), idNum);
+    const uint64_t stateKey = (static_cast<uint64_t>(idNum) << 32) | 0x7E17;
+    auto&          state   = _impl->GetState(stateKey, _impl->currentFrame);
+
+    auto* input = _impl->registry.GetSingleton<Components::InputStateComponent>();
+    float mx    = input ? input->mouseX : -1.0f;
+    float my    = input ? input->mouseY : -1.0f;
+
+    // The caller owns the string and may have reassigned it since the last
+    // frame; a caret left outside the text would make every offset below wrong.
+    state.caret.cursorIndex     = static_cast<uint32_t>(std::min<size_t>(state.caret.cursorIndex, value.size()));
+    state.caret.selectionAnchor = static_cast<uint32_t>(std::min<size_t>(state.caret.selectionAnchor, value.size()));
+
+    bool changed = false;
+
+    BeginRow(8.0f);
+    Text(label, 15.0f, {0.9f, 0.9f, 0.9f, 1.0f});
+
+    Clay__OpenElementWithId(elemId);
+
+    Clay_ElementData elemData = Clay_GetElementData(elemId);
+    bool isHovered = Clay_Hovered() || Clay_PointerOver(elemId) ||
+                     (elemData.found && elemData.boundingBox.width > 0.0f &&
+                      mx >= elemData.boundingBox.x && mx <= (elemData.boundingBox.x + elemData.boundingBox.width) &&
+                      my >= elemData.boundingBox.y && my <= (elemData.boundingBox.y + elemData.boundingBox.height));
+
+    auto       pointer          = Clay_GetPointerState();
+    const bool pressedThisFrame = (pointer.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME);
+    const bool wasFocused       = (_impl->focusedTextInput == stateKey);
+    bool       isFocused        = wasFocused;
+
+    if (pressedThisFrame) {
+        // Whichever field the click lands on takes focus. A field that was
+        // focused and was not clicked gives it up, and does so without
+        // clobbering a focus another field has already claimed this frame --
+        // draw order is not knowable here, so the claim is only ever written by
+        // the field that was actually hit.
+        if (isHovered) {
+            isFocused                 = true;
+            _impl->focusedTextInput   = stateKey;
+            state.caret.selectAll     = false;
+            // Place the caret where the click landed: walk prefixes until the
+            // measured width passes the click, which is the same measurement
+            // the layout used, so the bar sits where the glyphs are.
+            if (elemData.found && _impl->activeFont != nullptr) {
+                const float scale  = kTextInputFontSize / 32.0f;
+                const float localX = std::max(0.0f, mx - (elemData.boundingBox.x + kTextInputPadding));
+                state.caret.cursorIndex =
+                    static_cast<uint32_t>(CaretIndexAtX(*_impl->activeFont, std::string_view(value), localX, scale));
+            }
+            state.caret.ClearSelection();
+        } else {
+            isFocused = false;
+            if (_impl->focusedTextInput == stateKey) {
+                _impl->focusedTextInput = 0;
+            }
+        }
+    }
+
+    // Drain the events the window delivered since the last frame. Only the
+    // focused field consumes them; EndFrame drops whatever nobody took.
+    if (isFocused && _impl->pendingEventCount > 0) {
+        TextEdit::Modifiers mods {};
+        if (input != nullptr) {
+            mods.shift = input->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::LShift)) ||
+                         input->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::RShift));
+            mods.ctrl  = input->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::LControl)) ||
+                         input->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::RControl));
+        }
+        // Edited through a bounded view so a fixed-capacity caller's limit
+        // shortens the paste instead of the assign eating the buffer's tail.
+        TextEdit::BoundedString buf {&value, maxTextLength};
+        for (size_t i = 0; i < _impl->pendingEventCount; ++i) {
+            const auto& ev = _impl->pendingEvents[i];
+            if (ev.isChar) {
+                if (TextEdit::HandleChar(buf, state.caret, ev.codepoint)) {
+                    changed = true;
+                }
+                continue;
+            }
+            const auto result = TextEdit::HandleKey(buf, state.caret, static_cast<KeyCode>(ev.key), mods, _impl->clipboard);
+            if (result == TextEdit::KeyResult::Edited) {
+                changed = true;
+            }
+            if (result == TextEdit::KeyResult::Committed) {
+                isFocused               = false;
+                _impl->focusedTextInput = 0;
+            }
+        }
+    }
+
+    _impl->lastItemHovered = isHovered;
+    _impl->lastItemActive  = isFocused;
+
+    const float fieldWidth = (width.fixed > 0.0f) ? width.fixed : kTextInputWidth;
+    Clay_ElementDeclaration fieldDecl = {
+        .layout =
+            {.sizing =
+                 {.width  = (width.grow > 0.0f) ? CLAY_SIZING_GROW(width.grow) : CLAY_SIZING_FIXED(fieldWidth),
+                  .height = CLAY_SIZING_FIXED(kTextInputHeight)},
+             .padding        = {static_cast<uint16_t>(kTextInputPadding), static_cast<uint16_t>(kTextInputPadding),
+                                static_cast<uint16_t>(kTextInputPadding), static_cast<uint16_t>(kTextInputPadding)},
+             .childAlignment = {.x = CLAY_ALIGN_X_LEFT, .y = CLAY_ALIGN_Y_CENTER}},
+        .backgroundColor = isFocused ? Clay_Color {40, 56, 80, 255} : Clay_Color {25, 35, 50, 255},
+        .cornerRadius    = {4, 4, 4, 4}
+    };
+    Clay__ConfigureOpenElement(fieldDecl);
+
+    // Draw the text in up to three runs (before / selected / after) with the
+    // caret bar spliced in at the caret, so selection and caret are visible
+    // without a floating overlay layer.
+    const auto   all       = std::string_view(value);
+    const bool   hasSel    = state.caret.HasSelection();
+    const size_t selStart  = hasSel ? state.caret.SelectionStart() : all.size();
+    const size_t selEnd    = hasSel ? state.caret.SelectionEnd(all.size()) : all.size();
+    const size_t caretIdx  = std::min<size_t>(state.caret.cursorIndex, all.size());
+
+    const JPH::Vec4 plainColor    {0.9f, 0.9f, 0.9f, 1.0f};
+    const JPH::Vec4 selectedColor {1.0f, 1.0f, 1.0f, 1.0f};
+
+    size_t emitted    = 0;
+    bool   caretDrawn = false;
+
+    auto drawCaret = [&]() -> void {
+        if (!isFocused || caretDrawn) {
+            return;
+        }
+        caretDrawn = true;
+        Clay__OpenElement();
+        Clay_ElementDeclaration caretDecl = {
+            .layout          = {.sizing = {.width = CLAY_SIZING_FIXED(1), .height = CLAY_SIZING_FIXED(kTextInputFontSize + 2.0f)}},
+            .backgroundColor = {230, 230, 230, 255}
+        };
+        Clay__ConfigureOpenElement(caretDecl);
+        Clay__CloseElement();
+    };
+
+    auto emitRun = [&](size_t from, size_t to, const JPH::Vec4& color) -> void {
+        if (from >= to) {
+            return;
+        }
+        // Split this run at the caret when the caret falls strictly inside it.
+        const size_t split = (caretIdx > emitted && caretIdx <= to) ? caretIdx : to;
+        Text(all.substr(from, split - from), kTextInputFontSize, color);
+        if (split < to) {
+            drawCaret();
+            Text(all.substr(split, to - split), kTextInputFontSize, color);
+        } else if (caretIdx == to) {
+            drawCaret();
+        }
+        emitted = to;
+    };
+
+    if (caretIdx == 0) {
+        drawCaret();
+    }
+    if (hasSel) {
+        emitRun(0, selStart, plainColor);
+        emitRun(selStart, selEnd, selectedColor);
+        emitRun(selEnd, all.size(), plainColor);
+    } else {
+        emitRun(0, all.size(), plainColor);
+    }
+    drawCaret(); // Caret at the end, or an empty field. No-op once drawn.
+
+    Clay__CloseElement(); // field
+    EndRow();
+    return changed;
+}
+
+bool Context::TextInput(std::string_view label, std::string& value, const Sizing& width) noexcept {
+    return TextInputImpl(label, value, std::numeric_limits<size_t>::max(), width);
+}
+
+void Context::PushKey(KeyCode key, bool pressed) noexcept {
+    if (!_impl || !pressed) {
+        return; // The editing rules act on presses and repeats, not releases.
+    }
+    _impl->QueueEvent({.isChar = false, .key = static_cast<uint32_t>(key), .codepoint = 0});
+}
+
+void Context::PushChar(unsigned int codepoint) noexcept {
+    if (!_impl) {
+        return;
+    }
+    _impl->QueueEvent({.isChar = true, .key = 0, .codepoint = codepoint});
+}
+
+void Context::SetClipboard(TextEdit::ClipboardSink sink) noexcept {
+    if (_impl) {
+        _impl->clipboard = sink;
+    }
+}
+
+bool Context::IsTextInputFocused() const noexcept {
+    return _impl && _impl->focusedTextInput != 0;
 }
 
 bool Context::BeginCollapsingHeader(std::string_view label, bool defaultOpen) noexcept {

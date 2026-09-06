@@ -6,9 +6,12 @@
 #include <Jolt/Jolt.h>
 #include <Jolt/Math/Vec4.h>
 #include <Zahlen/Common.h>
+#include <Zahlen/Core/String.hpp>
 #include <Zahlen/Types.hpp>
+#include <Zahlen/gui/TextBuffer.hpp>
 #include <concepts>
 #include <memory>
+#include <string>
 #include <string_view>
 
 namespace ZHLN {
@@ -178,6 +181,49 @@ class ZHLN_API Context {
     bool Checkbox(std::string_view label, bool& checked) noexcept;
     bool Slider(std::string_view label, float& value, float minVal, float maxVal) noexcept;
 
+    // --- Text Input ---
+    //
+    // Single-line editable field. Returns true on any frame the text changed.
+    // Editing is done by the same rules as the ECS UITextInputComponent
+    // (Zahlen/gui/TextBuffer.hpp), so caret movement, selection, word deletion
+    // and Ctrl+C/X/V behave identically in both front ends.
+    //
+    // Characters and editing keys do not arrive through InputStateComponent --
+    // it holds held-down key state only, with no typed-character stream and no
+    // key edges. The front end therefore forwards what the window gives it via
+    // PushKey/PushChar, which is the same pair of events Engine::InitInternal
+    // already receives from GLFW. Events are consumed by the focused field on
+    // the next frame and anything left over is dropped in EndFrame.
+    bool TextInput(std::string_view label, std::string& value, const Sizing& width = {}) noexcept;
+
+    /// Fixed-capacity overload. The field is edited through a scratch string
+    /// bounded to the store's own limit, so a paste that will not fit is
+    /// shortened rather than truncating the tail of the buffer.
+    template <size_t N>
+    bool TextInput(std::string_view label, ZHLN::FixedString<N>& value, const Sizing& width = {}) noexcept {
+        std::string scratch {std::string_view(value)};
+        const bool  changed = TextInputImpl(label, scratch, ZHLN::FixedString<N>::kMaxTextLength, width);
+        if (changed) {
+            value.assign(scratch);
+        }
+        return changed;
+    }
+
+    /// Forwards a key press to the focused text field. Releases are ignored:
+    /// the editing rules act on presses and repeats.
+    void PushKey(KeyCode key, bool pressed) noexcept;
+
+    /// Forwards a typed character to the focused text field.
+    void PushChar(unsigned int codepoint) noexcept;
+
+    /// Where the focused field's Ctrl+C/X/V read and write. Leave unset and
+    /// those three do nothing; the engine wires this to Window's clipboard.
+    void SetClipboard(TextEdit::ClipboardSink sink) noexcept;
+
+    /// True while any text field holds focus, so the caller can keep key
+    /// events away from gameplay hotkeys.
+    [[nodiscard]] bool IsTextInputFocused() const noexcept;
+
     bool BeginCollapsingHeader(std::string_view label, bool defaultOpen = false) noexcept;
     void EndCollapsingHeader() noexcept;
 
@@ -191,6 +237,12 @@ class ZHLN_API Context {
     }
 
   private:
+    /// The one implementation both TextInput overloads funnel into: owns focus,
+    /// drains the pending key/character queue, edits `value` in place through
+    /// the shared rules and draws the field. `maxTextLength` bounds what a
+    /// paste may insert; std::string callers pass no limit.
+    bool TextInputImpl(std::string_view label, std::string& value, size_t maxTextLength, const Sizing& width) noexcept;
+
     Impl* _impl = nullptr;
 };
 

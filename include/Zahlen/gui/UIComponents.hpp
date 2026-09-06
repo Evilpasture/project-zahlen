@@ -11,6 +11,7 @@
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Types.hpp>
+#include <Zahlen/gui/TextBuffer.hpp>
 #include <algorithm>
 
 namespace ZHLN::ECS {
@@ -236,38 +237,32 @@ struct UIComponents {
 
     struct UITextInputComponent {
         String256 text;
-        uint32_t  cursorIndex = 0;
-        // Selection anchor. The selected range is [min(anchor, cursor),
-        // max(anchor, cursor)); anchor == cursor means no selection. Shift +
-        // navigation keeps the anchor and moves the caret, plain navigation
-        // collapses the selection, and editing replaces it. Editing helpers
-        // live in GUI::TextEdit (Zahlen/gui/TextEdit.hpp).
-        uint32_t  selectionAnchor = 0;
-        bool      isFocused   = false;
-        bool      edited      = false; // Set true by engine on text mutation; builder clears after reading
-        // Set on the unfocused->focused transition: the pre-focus content is
-        // "selected", so the first printable key REPLACES it ("Default" goes
-        // away when you type) and Backspace deletes it wholesale. Any caret
-        // movement (Left/Right) or commit clears it, matching how name fields
-        // behave in tool UIs. Equivalent to a selection spanning the whole
-        // text; kept as a flag so the focus-gain path does not need the
-        // text length and so the renderer can highlight without measuring.
-        bool      selectAll   = false;
-        char      _pad[1]     = {};
+        // Caret, selection anchor and the whole-text-selection flag. The
+        // selected range is [min(anchor, cursor), max(anchor, cursor));
+        // anchor == cursor means no selection. Shift + navigation keeps the
+        // anchor and moves the caret, plain navigation collapses the selection,
+        // and editing replaces it.
+        //
+        // This used to be three loose fields with the same three predicates
+        // duplicated here and in the editor; it is now GUI::TextEdit::Caret,
+        // the type the immediate-mode Context::TextInput keeps its state in too,
+        // so both front ends mean the same thing by a selection. The editing
+        // rules live in GUI::TextEdit (Zahlen/gui/TextEdit.hpp).
+        TextEdit::Caret caret;
+        bool            isFocused = false;
+        bool            edited    = false; // Set true by engine on text mutation; builder clears after reading
 
         [[nodiscard]] auto HasSelection() const noexcept -> bool {
-            return selectAll || selectionAnchor != cursorIndex;
+            return caret.HasSelection();
         }
         [[nodiscard]] auto SelectionStart() const noexcept -> uint32_t {
-            return selectAll ? 0u : std::min(selectionAnchor, cursorIndex);
+            return caret.SelectionStart();
         }
         [[nodiscard]] auto SelectionEnd() const noexcept -> uint32_t {
-            const auto len = static_cast<uint32_t>(text.size());
-            return selectAll ? len : std::min(std::max(selectionAnchor, cursorIndex), len);
+            return caret.SelectionEnd(text.size());
         }
         void ClearSelection() noexcept {
-            selectAll       = false;
-            selectionAnchor = cursorIndex;
+            caret.ClearSelection();
         }
     };
 
