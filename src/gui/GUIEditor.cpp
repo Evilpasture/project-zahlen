@@ -308,8 +308,12 @@ auto MouseRay(const Camera& camera, float mx, float my, uint32_t w, uint32_t h, 
     if (w == 0 || h == 0) {
         return false;
     }
+    // Vulkan Y-down clip space with the framebuffer's row 0 at the top: the
+    // top pixel is NDC y == -1. (The first version used 1 - 2y/h, which aimed
+    // the ray at the point mirrored across the centre line -- the object ran
+    // away from the mouse vertically.)
     const float ndcX   = (2.0f * mx) / static_cast<float>(w) - 1.0f;
-    const float ndcY   = 1.0f - (2.0f * my) / static_cast<float>(h);
+    const float ndcY   = (2.0f * my) / static_cast<float>(h) - 1.0f;
     const float aspect = static_cast<float>(w) / static_cast<float>(h);
 
     const JPH::Mat44 invVP = (camera.GetProjectionMatrix(aspect) * camera.GetViewMatrix()).Inversed();
@@ -345,7 +349,7 @@ auto WorldToScreen(const Camera& camera, uint32_t w, uint32_t h, const JPH::Vec3
         return false;
     }
     sx = (clip.GetX() / clip.GetW() + 1.0f) * 0.5f * static_cast<float>(w);
-    sy = (1.0f - clip.GetY() / clip.GetW()) * 0.5f * static_cast<float>(h);
+    sy = (clip.GetY() / clip.GetW() + 1.0f) * 0.5f * static_cast<float>(h);
     return true;
 }
 
@@ -464,9 +468,16 @@ void UpdateTransformMode(
                 case EditorState::TransformMode::Rotate: {
                     float ox = 0.0f, oy = 0.0f;
                     if (WorldToScreen(camera, viewportWidth, viewportHeight, state.transformStartPosition, ox, oy)) {
-                        const float angle = std::atan2(my - oy, mx - ox);
-                        const JPH::Vec3 axis =
-                            (state.transformAxis != EditorState::TransformAxis::None) ? AxisVector(state.transformAxis) : state.transformPlaneNormal;
+                        // Screen pixels are y-down; the viewer thinks y-up, so
+                        // the seen angle negates the pixel dy. Dragging counter-
+                        // clockwise as seen must turn counter-clockwise: the
+                        // free axis therefore points AT the viewer (the negated
+                        // camera forward), making a positive seen delta a
+                        // positive right-handed turn about it.
+                        const float angle = std::atan2(oy - my, mx - ox);
+                        const JPH::Vec3 axis = (state.transformAxis != EditorState::TransformAxis::None) ?
+                                                   AxisVector(state.transformAxis) :
+                                                   state.transformPlaneNormal * -1.0f;
                         const JPH::Quat turn = JPH::Quat::sRotation(axis, angle - state.transformStartAngle);
                         const JPH::Quat newRot = turn * state.transformStartRotation;
                         reg.Patch<Comp::TransformComponent>(e, [&newRot](Comp::TransformComponent& t) -> void { t.rotation = newRot; });

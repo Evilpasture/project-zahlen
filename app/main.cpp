@@ -129,10 +129,12 @@ void SaveScene(ZHLN::Engine& engine) {
 constexpr float kLeftPanelWidth  = 260.0f;
 constexpr float kRightPanelWidth = 320.0f;
 
-void UpdateEditorCamera(ZHLN::Camera& cam, const ZHLN::Components::InputStateComponent& state, float dt) {
+void UpdateEditorCamera(ZHLN::Camera& cam, const ZHLN::Components::InputStateComponent& state, float dt, bool transformActive) {
     // A modal transform owns the pointer and the axis keys; the fly camera
-    // would otherwise fight the manipulation for the same input.
-    if (s_NativeEditorState.transformMode != ZHLN::Editor::EditorState::TransformMode::None) {
+    // would otherwise fight the manipulation for the same input. The flag is
+    // the pre-update sample: on the frame an LMB/Esc ends the mode the camera
+    // must not also act on whatever movement keys happen to be down.
+    if (transformActive) {
         return;
     }
     const float sensitivity = 0.15f;
@@ -191,8 +193,13 @@ ZHLN::Physics::RaycastResult CastPickingRay(ZHLN::Engine& engine, const ZHLN::Ca
         return {};
     }
 
+    // The projection maps to Vulkan Y-down clip space (see CreatePerspective),
+    // and the framebuffer's row 0 is the top: a pixel at the top (mouseY == 0)
+    // is NDC y == -1. The old 1 - 2y/h mirrored the ray vertically, so picking
+    // -- and the transform modes that copied this math -- aimed at the point
+    // mirrored across the horizontal centre line.
     float ndcX   = (2.0f * mouseX) / static_cast<float>(winSize.width) - 1.0f;
-    float ndcY   = 1.0f - (2.0f * mouseY) / static_cast<float>(winSize.height);
+    float ndcY   = (2.0f * mouseY) / static_cast<float>(winSize.height) - 1.0f;
     float aspect = static_cast<float>(winSize.width) / static_cast<float>(winSize.height);
 
     JPH::Mat44 invVP = (cam.GetProjectionMatrix(aspect) * cam.GetViewMatrix()).Inversed();
@@ -338,13 +345,15 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
         const bool uiCapturesKeyboard = (state != nullptr && state->wantCaptureKeyboard) || gui.IsTextInputFocused();
 
         // Blender-style modal transform runs before Escape, picking and the
-        // fly camera: an Esc that cancels a mode must not also close the
-        // editor on the same frame, and mode keys never leak into the camera.
-        const auto transformSize = engine.GetWindow().GetSize();
+        // fly camera. Sample the mode BEFORE the update: UpdateTransformMode
+        // consumes the Esc press edge to cancel, so afterwards the mode reads
+        // as None and the close check below would quit on the very keypress
+        // the user meant as "abort the manipulation".
+        const bool transformActive = s_NativeEditorState.transformMode != ZHLN::Editor::EditorState::TransformMode::None;
+        const auto transformSize   = engine.GetWindow().GetSize();
         ZHLN::Editor::UpdateTransformMode(
             reg, s_NativeEditorState, cam, transformSize.width, transformSize.height, uiCapturesKeyboard
         );
-        const bool transformActive = s_NativeEditorState.transformMode != ZHLN::Editor::EditorState::TransformMode::None;
 
         if (state != nullptr && state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Escape)) && !uiCapturesKeyboard &&
             !transformActive) {
@@ -422,7 +431,7 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
             }
         } else {
             if (state != nullptr) {
-                UpdateEditorCamera(cam, *state, frameTime);
+                UpdateEditorCamera(cam, *state, frameTime, transformActive);
             }
 
             ZHLN::GameplayStatus status = engine.Tick(0.0f, options.driver);
