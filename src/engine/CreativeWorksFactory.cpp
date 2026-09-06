@@ -11,7 +11,6 @@
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/CreativeWorksManager.hpp>
 #include <Zahlen/Engine.hpp>
-#include <Zahlen/Font8x8.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/ModelPrefab.hpp>
@@ -21,6 +20,7 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/gui/UIComponents.hpp>
 #include <Zahlen/physics/Physics.hpp>
+#include "Font8x8.hpp"
 #include <algorithm>
 #include <cstddef>
 #include <cstdlib>
