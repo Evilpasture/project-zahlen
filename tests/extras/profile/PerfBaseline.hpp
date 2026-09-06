@@ -39,6 +39,7 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -54,6 +55,7 @@
 #include <source_location>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -62,6 +64,72 @@
 #endif
 
 namespace ZHLN::Test {
+
+// ============================================================================
+// Optimization Barriers
+// ============================================================================
+
+template <typename T>
+inline void DoNotOptimize(const T& value) {
+#if defined(__GNUC__) || defined(__clang__)
+    asm volatile("" : : "r,m"(value) : "memory");
+#else
+    std::atomic_signal_fence(std::memory_order_seq_cst);
+#endif
+}
+
+template <typename T>
+inline void DoNotOptimize(T& value) {
+#if defined(__GNUC__) || defined(__clang__)
+    asm volatile("" : "+r,m"(value) : : "memory");
+#else
+    std::atomic_signal_fence(std::memory_order_seq_cst);
+#endif
+}
+
+inline void ClobberMemory() {
+#if defined(__GNUC__) || defined(__clang__)
+    asm volatile("" : : : "memory");
+#else
+    std::atomic_signal_fence(std::memory_order_seq_cst);
+#endif
+}
+
+// ============================================================================
+// High-Resolution Benchmark Timer
+// ============================================================================
+
+struct BenchmarkTimer {
+    using Clock = std::chrono::high_resolution_clock;
+    Clock::time_point startTime;
+
+    BenchmarkTimer() noexcept: startTime(Clock::now()) {
+    }
+
+    void Reset() noexcept {
+        startTime = Clock::now();
+    }
+
+    [[nodiscard]] double ElapsedNanoseconds() const noexcept {
+        const auto now = Clock::now();
+        return std::chrono::duration<double, std::nano>(now - startTime).count();
+    }
+
+    [[nodiscard]] double ElapsedMicroseconds() const noexcept {
+        const auto now = Clock::now();
+        return std::chrono::duration<double, std::micro>(now - startTime).count();
+    }
+
+    [[nodiscard]] double ElapsedMilliseconds() const noexcept {
+        const auto now = Clock::now();
+        return std::chrono::duration<double, std::milli>(now - startTime).count();
+    }
+
+    [[nodiscard]] double ElapsedSeconds() const noexcept {
+        const auto now = Clock::now();
+        return std::chrono::duration<double>(now - startTime).count();
+    }
+};
 
 // Runs `measure` n times and returns the FASTEST sample. Wall-clock
 // benchmarks on a desktop are one-sided noisy (frequency scaling, scheduler
@@ -638,5 +706,332 @@ inline void VerifyFrameBaseline(
         );
     }
 }
+
+// ============================================================================
+// Modern Benchmarking Framework Execution Harness
+// ============================================================================
+
+/// Execution context provided to stateful benchmark bodies.
+class BenchmarkState {
+public:
+    explicit BenchmarkState(size_t maxIterations = 1) noexcept: m_maxIterations(maxIterations) {
+    }
+
+    [[nodiscard]] bool KeepRunning() noexcept {
+        if (m_currentIteration == 0) {
+            m_timer.Reset();
+        }
+        if (m_currentIteration < m_maxIterations) {
+            ++m_currentIteration;
+            return true;
+        }
+        return false;
+    }
+
+    void PauseTiming() noexcept {
+        m_pauseStart = std::chrono::high_resolution_clock::now();
+        m_isPaused   = true;
+    }
+
+    void ResumeTiming() noexcept {
+        if (m_isPaused) {
+            const auto now = std::chrono::high_resolution_clock::now();
+            m_pausedOffsetNs += std::chrono::duration<double, std::nano>(now - m_pauseStart).count();
+            m_isPaused = false;
+        }
+    }
+
+    void SetItemsProcessed(uint64_t items) noexcept {
+        m_itemsProcessed = items;
+    }
+
+    void SetBytesProcessed(uint64_t bytes) noexcept {
+        m_bytesProcessed = bytes;
+    }
+
+    [[nodiscard]] uint64_t ItemsProcessed() const noexcept {
+        return m_itemsProcessed;
+    }
+
+    [[nodiscard]] uint64_t BytesProcessed() const noexcept {
+        return m_bytesProcessed;
+    }
+
+    [[nodiscard]] size_t Iterations() const noexcept {
+        return m_maxIterations;
+    }
+
+    [[nodiscard]] double ActiveMilliseconds() const noexcept {
+        const double elapsedNs = m_timer.ElapsedNanoseconds() - m_pausedOffsetNs;
+        return (elapsedNs > 0.0 ? elapsedNs : 0.0) / 1'000'000.0;
+    }
+
+private:
+    size_t                                         m_maxIterations = 1;
+    size_t                                         m_currentIteration = 0;
+    BenchmarkTimer                                 m_timer;
+    std::chrono::high_resolution_clock::time_point m_pauseStart;
+    double                                         m_pausedOffsetNs = 0.0;
+    bool                                           m_isPaused       = false;
+    uint64_t                                       m_itemsProcessed = 0;
+    uint64_t                                       m_bytesProcessed = 0;
+};
+
+/// Aggregated statistical outcomes of a benchmark run.
+struct BenchmarkStats {
+    double   minMs          = 0.0;
+    double   medianMs       = 0.0;
+    double   avgMs          = 0.0;
+    double   maxMs          = 0.0;
+    double   stddevMs       = 0.0;
+    size_t   samples        = 0;
+    size_t   iterations     = 0;
+    uint64_t itemsProcessed = 0;
+    uint64_t bytesProcessed = 0;
+
+    [[nodiscard]] double ItemsPerSecond() const noexcept {
+        if (minMs > 0.0 && itemsProcessed > 0) {
+            return (static_cast<double>(itemsProcessed) * 1000.0) / minMs;
+        }
+        return 0.0;
+    }
+
+    [[nodiscard]] double MegaBytesPerSecond() const noexcept {
+        if (minMs > 0.0 && bytesProcessed > 0) {
+            return (static_cast<double>(bytesProcessed) / (1024.0 * 1024.0)) / (minMs / 1000.0);
+        }
+        return 0.0;
+    }
+
+    [[nodiscard]] double OperationsPerSecond() const noexcept {
+        if (minMs > 0.0 && iterations > 0) {
+            return (static_cast<double>(iterations) * 1000.0) / minMs;
+        }
+        return 0.0;
+    }
+};
+
+/// Fluent benchmark harness for microbenchmarks and subsystem throughput measurements.
+class Benchmark {
+public:
+    explicit Benchmark(std::string_view name) noexcept: m_name(name) {
+    }
+
+    Benchmark& Warmup(size_t count) noexcept {
+        m_warmupCount = count;
+        return *this;
+    }
+
+    Benchmark& Samples(size_t count) noexcept {
+        m_sampleCount = count > 0 ? count : 1;
+        return *this;
+    }
+
+    Benchmark& Iterations(size_t count) noexcept {
+        m_iterations = count > 0 ? count : 1;
+        return *this;
+    }
+
+    Benchmark& Limit(double limitPct) noexcept {
+        m_limitPercent = limitPct;
+        return *this;
+    }
+
+    Benchmark& Direction(Perf::Direction dir) noexcept {
+        m_direction = dir;
+        return *this;
+    }
+
+    Benchmark& Items(uint64_t items) noexcept {
+        m_itemsProcessed = items;
+        return *this;
+    }
+
+    Benchmark& Bytes(uint64_t bytes) noexcept {
+        m_bytesProcessed = bytes;
+        return *this;
+    }
+
+    Benchmark& Metric(std::string_view metricKey) noexcept {
+        m_metricKey = metricKey;
+        return *this;
+    }
+
+    // Run with parameterless or non-stateful callable () -> void or () -> T
+    template <typename F>
+        requires(!std::is_invocable_v<F, BenchmarkState&>)
+    auto Run(F&& func, std::source_location location = std::source_location::current()) -> BenchmarkStats {
+        // Warmup runs
+        for (size_t i = 0; i < m_warmupCount; ++i) {
+            for (size_t j = 0; j < m_iterations; ++j) {
+                if constexpr (std::is_void_v<std::invoke_result_t<F>>) {
+                    func();
+                } else {
+                    auto res = func();
+                    DoNotOptimize(res);
+                }
+            }
+        }
+
+        // Timed sample runs
+        std::vector<double> sampleTimesMs;
+        sampleTimesMs.reserve(m_sampleCount);
+
+        for (size_t s = 0; s < m_sampleCount; ++s) {
+            BenchmarkTimer timer;
+            for (size_t j = 0; j < m_iterations; ++j) {
+                if constexpr (std::is_void_v<std::invoke_result_t<F>>) {
+                    func();
+                } else {
+                    auto res = func();
+                    DoNotOptimize(res);
+                }
+            }
+            sampleTimesMs.push_back(timer.ElapsedMilliseconds() / static_cast<double>(m_iterations));
+        }
+
+        return FinalizeAndVerify(sampleTimesMs, location);
+    }
+
+    // Run with stateful callable (BenchmarkState&) -> void
+    template <typename F>
+        requires std::is_invocable_v<F, BenchmarkState&>
+    auto Run(F&& func, std::source_location location = std::source_location::current()) -> BenchmarkStats {
+        // Warmup runs
+        for (size_t i = 0; i < m_warmupCount; ++i) {
+            BenchmarkState state(m_iterations);
+            func(state);
+        }
+
+        // Timed sample runs
+        std::vector<double> sampleTimesMs;
+        sampleTimesMs.reserve(m_sampleCount);
+
+        for (size_t s = 0; s < m_sampleCount; ++s) {
+            BenchmarkState state(m_iterations);
+            func(state);
+            const double activeMs = state.ActiveMilliseconds();
+            sampleTimesMs.push_back(activeMs / static_cast<double>(m_iterations));
+            if (state.ItemsProcessed() > 0) {
+                m_itemsProcessed = state.ItemsProcessed();
+            }
+            if (state.BytesProcessed() > 0) {
+                m_bytesProcessed = state.BytesProcessed();
+            }
+        }
+
+        return FinalizeAndVerify(sampleTimesMs, location);
+    }
+
+private:
+    auto FinalizeAndVerify(std::span<const double> sampleTimesMs, std::source_location location) -> BenchmarkStats {
+        std::vector<double> sorted(sampleTimesMs.begin(), sampleTimesMs.end());
+        std::ranges::sort(sorted);
+
+        const size_t n        = sorted.size();
+        const double minMs    = sorted.front();
+        const double medianMs = sorted[n / 2];
+        const double maxMs    = sorted.back();
+        const double sum      = std::accumulate(sorted.begin(), sorted.end(), 0.0);
+        const double avgMs    = sum / static_cast<double>(n);
+
+        double varSum = 0.0;
+        for (double val: sorted) {
+            varSum += (val - avgMs) * (val - avgMs);
+        }
+        const double stddevMs = (n > 1) ? std::sqrt(varSum / static_cast<double>(n - 1)) : 0.0;
+
+        BenchmarkStats stats {
+            .minMs          = minMs,
+            .medianMs       = medianMs,
+            .avgMs          = avgMs,
+            .maxMs          = maxMs,
+            .stddevMs       = stddevMs,
+            .samples        = n,
+            .iterations     = m_iterations,
+            .itemsProcessed = m_itemsProcessed,
+            .bytesProcessed = m_bytesProcessed,
+        };
+
+        const std::string metricKey = m_metricKey.empty() ? m_name : m_metricKey;
+        VerifyBaseline(metricKey, stats.minMs, m_limitPercent, m_direction, location);
+
+        return stats;
+    }
+
+    std::string     m_name;
+    std::string     m_metricKey;
+    size_t          m_warmupCount    = 2;
+    size_t          m_sampleCount    = 5;
+    size_t          m_iterations     = 1;
+    double          m_limitPercent   = -1.0;
+    Perf::Direction m_direction      = Perf::Direction::LowerIsBetter;
+    uint64_t        m_itemsProcessed = 0;
+    uint64_t        m_bytesProcessed = 0;
+};
+
+/// Fluent benchmark harness for multi-frame real-time loops (CPU integration & GPU rendering).
+class BenchmarkFrames {
+public:
+    explicit BenchmarkFrames(std::string_view name) noexcept: m_name(name) {
+    }
+
+    BenchmarkFrames& Warmup(size_t frameCount) noexcept {
+        m_warmupFrames = frameCount;
+        return *this;
+    }
+
+    BenchmarkFrames& Frames(size_t frameCount) noexcept {
+        m_frameCount = frameCount > 0 ? frameCount : 1;
+        return *this;
+    }
+
+    BenchmarkFrames& AvgLimit(double limitPct) noexcept {
+        m_avgLimitPercent = limitPct;
+        return *this;
+    }
+
+    BenchmarkFrames& P99Limit(double limitPct) noexcept {
+        m_p99LimitPercent = limitPct;
+        return *this;
+    }
+
+    template <typename F>
+    auto Run(F&& renderFrameFunc, std::source_location location = std::source_location::current()) -> FrameStats {
+        // Warmup frames (untimed)
+        for (size_t f = 0; f < m_warmupFrames; ++f) {
+            if constexpr (std::is_invocable_v<F, uint32_t>) {
+                renderFrameFunc(static_cast<uint32_t>(f));
+            } else {
+                renderFrameFunc();
+            }
+        }
+
+        // Measured frames
+        std::vector<double> frameTimesMs;
+        frameTimesMs.reserve(m_frameCount);
+
+        for (size_t f = 0; f < m_frameCount; ++f) {
+            BenchmarkTimer frameTimer;
+            if constexpr (std::is_invocable_v<F, uint32_t>) {
+                renderFrameFunc(static_cast<uint32_t>(f));
+            } else {
+                renderFrameFunc();
+            }
+            frameTimesMs.push_back(frameTimer.ElapsedMilliseconds());
+        }
+
+        FrameStats stats = CalculateFrameStats(frameTimesMs);
+        VerifyFrameBaseline(m_name, stats, m_avgLimitPercent, m_p99LimitPercent, location);
+        return stats;
+    }
+
+private:
+    std::string m_name;
+    size_t      m_warmupFrames    = 0;
+    size_t      m_frameCount      = 120;
+    double      m_avgLimitPercent = -1.0;
+    double      m_p99LimitPercent = 35.0;
+};
 
 } // namespace ZHLN::Test

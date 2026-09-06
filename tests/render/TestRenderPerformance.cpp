@@ -57,28 +57,6 @@ enum class RenderPerfTestError : uint8_t {
 };
 
 // ============================================================================
-// High-Resolution Benchmark Timer
-// ============================================================================
-
-struct RenderBenchmarkTimer {
-    using Clock = std::chrono::high_resolution_clock;
-    Clock::time_point startTime;
-
-    RenderBenchmarkTimer() noexcept: startTime(Clock::now()) {
-    }
-
-    [[nodiscard]] double ElapsedMilliseconds() const noexcept {
-        auto now = Clock::now();
-        return std::chrono::duration<double, std::milli>(now - startTime).count();
-    }
-
-    [[nodiscard]] double ElapsedSeconds() const noexcept {
-        auto now = Clock::now();
-        return std::chrono::duration<double>(now - startTime).count();
-    }
-};
-
-// ============================================================================
 // Image Verification & Environment Helpers
 // ============================================================================
 
@@ -281,8 +259,8 @@ auto RunGeometryTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
 
     uint32_t valBefore = ZHLN::RenderContext::ValidationErrorCount();
 
-    constexpr uint32_t   kFrames = 60;
-    RenderBenchmarkTimer timer;
+    constexpr uint32_t         kFrames = 60;
+    ZHLN::Test::BenchmarkTimer timer;
     for (uint32_t f = 0; f < kFrames; ++f) {
         float angle  = static_cast<float>(f) * 0.05f;
         cam.position = JPH::Vec3(std::sin(angle) * 50.0f, 25.0f, std::cos(angle) * 50.0f);
@@ -357,8 +335,8 @@ auto RunLightingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
     cam.yaw      = 90.0f;
     cam.pitch    = -20.0f;
 
-    constexpr uint32_t   kFrames = 60;
-    RenderBenchmarkTimer timer;
+    constexpr uint32_t         kFrames = 60;
+    ZHLN::Test::BenchmarkTimer timer;
     for (uint32_t f = 0; f < kFrames; ++f) {
         float time = static_cast<float>(f) * 0.05f;
 
@@ -425,8 +403,8 @@ auto RunParticlesTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::e
     cam.yaw      = 90.0f;
     cam.pitch    = -15.0f;
 
-    constexpr uint32_t   kFrames = 60;
-    RenderBenchmarkTimer timer;
+    constexpr uint32_t         kFrames = 60;
+    ZHLN::Test::BenchmarkTimer timer;
     TickEngine(engine, kFrames);
     double durationMs = timer.ElapsedMilliseconds();
 
@@ -474,8 +452,8 @@ auto RunVolumetricsTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
     cam.yaw      = 90.0f;
     cam.pitch    = 0.0f;
 
-    constexpr uint32_t   kFrames = 60;
-    RenderBenchmarkTimer timer;
+    constexpr uint32_t         kFrames = 60;
+    ZHLN::Test::BenchmarkTimer timer;
     TickEngine(engine, kFrames);
     double durationMs = timer.ElapsedMilliseconds();
 
@@ -522,8 +500,8 @@ auto RunDecalsTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expe
     cam.yaw      = 90.0f;
     cam.pitch    = 0.0f;
 
-    constexpr uint32_t   kFrames = 60;
-    RenderBenchmarkTimer timer;
+    constexpr uint32_t         kFrames = 60;
+    ZHLN::Test::BenchmarkTimer timer;
     TickEngine(engine, kFrames);
     double durationMs = timer.ElapsedMilliseconds();
 
@@ -576,8 +554,8 @@ auto RunUITest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expected
         ui.EndFrameAndRender(eng.GetRenderContext());
     });
 
-    constexpr uint32_t   kFrames = 60;
-    RenderBenchmarkTimer timer;
+    constexpr uint32_t         kFrames = 60;
+    ZHLN::Test::BenchmarkTimer timer;
     TickEngine(engine, kFrames);
     double durationMs = timer.ElapsedMilliseconds();
 
@@ -618,8 +596,8 @@ auto RunPostProcessingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> s
         ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0, 2, 0), .createPhysics = false, .roughness = 0.3f, .metallic = 0.8f}
     );
 
-    constexpr uint32_t   kFrames = 60;
-    RenderBenchmarkTimer timer;
+    constexpr uint32_t         kFrames = 60;
+    ZHLN::Test::BenchmarkTimer timer;
     TickEngine(engine, kFrames);
     double durationMs = timer.ElapsedMilliseconds();
 
@@ -709,8 +687,8 @@ auto RunRayTracingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::
     cam.pitch    = -22.0f;
     cam.fov      = 60.0f;
 
-    constexpr uint32_t   kFrames = 60;
-    RenderBenchmarkTimer timer;
+    constexpr uint32_t         kFrames = 60;
+    ZHLN::Test::BenchmarkTimer timer;
     for (uint32_t f = 0; f < kFrames; ++f) {
         float t = static_cast<float>(f) * 0.05f;
         (void) reg.Patch<ZHLN::Components::TransformComponent>(emissiveCube, [&](auto& trans) {
@@ -928,38 +906,37 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
 
     uint32_t valBefore = ZHLN::RenderContext::ValidationErrorCount();
 
-    // 9. Execute 120 Frame Heavy Benchmark Simulation
-    constexpr uint32_t  kTotalFrames = 120;
-    std::vector<double> frameTimesMs;
-    frameTimesMs.reserve(kTotalFrames);
+    // 9. Execute 120 Frame Heavy Benchmark Simulation (Framework Managed)
+    constexpr uint32_t         kTotalFrames = 120;
+    const double               avgLimitPct  = (mode == ZHLN::ValidationMode::On) ? 20.0 : 35.0;
+    const std::string          testName     = (mode == ZHLN::ValidationMode::On) ? "render.master.val_on" : "render.master.val_off";
+    ZHLN::Test::BenchmarkTimer masterTimer;
 
-    RenderBenchmarkTimer masterTimer;
+    auto stats = ZHLN::Test::BenchmarkFrames(testName)
+                     .Warmup(0)
+                     .Frames(kTotalFrames)
+                     .AvgLimit(avgLimitPct)
+                     .P99Limit(35.0)
+                     .Run([&](uint32_t f) {
+                         float t      = static_cast<float>(f) * 0.035f;
+                         cam.position = JPH::Vec3(std::sin(t) * 45.0f, 18.0f + std::sin(t * 1.5f) * 6.0f, std::cos(t) * 45.0f);
+                         cam.yaw      = JPH::RadiansToDegrees(std::atan2(-cam.position.GetZ(), -cam.position.GetX()));
+                         cam.pitch    = -18.0f + std::sin(t * 2.0f) * 4.0f;
 
-    for (uint32_t f = 0; f < kTotalFrames; ++f) {
-        RenderBenchmarkTimer frameTimer;
+                         for (size_t i = 0; i < kLightCount; ++i) {
+                             float phase = t * 1.5f + static_cast<float>(i) * 0.3f;
+                             float lx    = std::sin(phase * 0.8f) * (20.0f + static_cast<float>(i % 4) * 4.0f);
+                             float lz    = std::cos(phase * 1.1f) * (20.0f + static_cast<float>(i % 3) * 4.0f);
+                             float ly    = 1.2f + std::sin(phase * 2.5f) * 0.8f;
 
-        float t      = static_cast<float>(f) * 0.035f;
-        cam.position = JPH::Vec3(std::sin(t) * 45.0f, 18.0f + std::sin(t * 1.5f) * 6.0f, std::cos(t) * 45.0f);
-        cam.yaw      = JPH::RadiansToDegrees(std::atan2(-cam.position.GetZ(), -cam.position.GetX()));
-        cam.pitch    = -18.0f + std::sin(t * 2.0f) * 4.0f;
+                             (void) reg.Patch<ZHLN::Components::TransformComponent>(dynamicLights[i], [&](auto& trans) { trans.position = JPH::Vec3(lx, ly, lz); });
+                         }
 
-        for (size_t i = 0; i < kLightCount; ++i) {
-            float phase = t * 1.5f + static_cast<float>(i) * 0.3f;
-            float lx    = std::sin(phase * 0.8f) * (20.0f + static_cast<float>(i % 4) * 4.0f);
-            float lz    = std::cos(phase * 1.1f) * (20.0f + static_cast<float>(i % 3) * 4.0f);
-            float ly    = 1.2f + std::sin(phase * 2.5f) * 0.8f;
-
-            (void) reg.Patch<ZHLN::Components::TransformComponent>(dynamicLights[i], [&](auto& trans) { trans.position = JPH::Vec3(lx, ly, lz); });
-        }
-
-        engine.ProcessEvents();
-        engine.Tick(1.0f / 60.0f, ZHLN::GameplayDriver::Cpp);
-
-        frameTimesMs.push_back(frameTimer.ElapsedMilliseconds());
-    }
+                         engine.ProcessEvents();
+                         engine.Tick(1.0f / 60.0f, ZHLN::GameplayDriver::Cpp);
+                     });
 
     double totalDurationSec = masterTimer.ElapsedSeconds();
-    auto   stats            = ZHLN::Test::CalculateFrameStats(frameTimesMs);
 
     // 10. Frame Screenshot Verification
     const std::string ppmPath    = (mode == ZHLN::ValidationMode::On) ? "headless_master_rt_val_on.ppm" : "headless_master_rt_val_off.ppm";
@@ -978,11 +955,6 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
             return std::unexpected(RenderPerfTestError::ValidationErrorsRaised);
         }
     }
-
-    const double      avgLimitPct = (mode == ZHLN::ValidationMode::On) ? 20.0 : 35.0;
-    const std::string testName    = (mode == ZHLN::ValidationMode::On) ? "render.master.val_on" : "render.master.val_off";
-
-    ZHLN::Test::VerifyFrameBaseline(testName, stats, avgLimitPct, 35.0);
 
     ZHLN::Println("    [Throughput] Render Rate: {:.2f} FPS", (kTotalFrames * 1.0) / totalDurationSec);
     ZHLN::Println("    [Image Validation] Captured resolution: {}x{}, Shaded Pixels: {}", outputImg.width, outputImg.height, litPixels);
