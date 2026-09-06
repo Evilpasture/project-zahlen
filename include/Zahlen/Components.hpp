@@ -401,6 +401,43 @@ struct Components {
             needsResize = true;
         }
 
+        // Typed characters and key presses, queued by the window's event pump
+        // between frames and drained by GUI::Context::BeginFrame.
+        //
+        // The `keys` bitset above cannot carry either. Text editing needs the
+        // edge, not the level: holding Backspace is one continuous
+        // keys[Backspace] but many deletions. Characters have no key at all --
+        // the window reports them separately, already shifted and
+        // layout-resolved, so 'A' and 'a' arrive as different codepoints and the
+        // bitset never sees the difference.
+        //
+        // Fixed size, silently dropping on overflow: a key repeat cannot outrun
+        // a frame by more than a handful of events, and growing here would put
+        // an allocation in the event pump.
+        struct QueuedInput {
+            uint32_t value  = 0; // codepoint when isChar, KeyCode otherwise
+            bool     isChar = false;
+        };
+        static constexpr size_t kMaxQueuedInput = 64;
+        std::array<QueuedInput, kMaxQueuedInput> queuedInput {};
+        uint8_t                                  queuedInputCount = 0;
+
+        void QueueChar(uint32_t codepoint) noexcept {
+            if (queuedInputCount < kMaxQueuedInput) {
+                queuedInput[queuedInputCount++] = QueuedInput {.value = codepoint, .isChar = true};
+            }
+        }
+
+        void QueueKeyPress(KeyCode key) noexcept {
+            if (queuedInputCount < kMaxQueuedInput) {
+                queuedInput[queuedInputCount++] = QueuedInput {.value = static_cast<uint32_t>(key), .isChar = false};
+            }
+        }
+
+        void ClearQueuedInput() noexcept {
+            queuedInputCount = 0;
+        }
+
         void ResetDeltas() noexcept {
             mouseDeltaX = 0.0f;
             mouseDeltaY = 0.0f;

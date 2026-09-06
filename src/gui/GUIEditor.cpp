@@ -58,8 +58,8 @@ using UIComp  = ZHLN::GUI::UIComponents;
 // field name is the label; the row id is section-scoped so two components
 // with a `width` field cannot collide in the child cache.
 //
-// Missing widget types (Dropdown, TextInput, Reference) are rendered as
-// read-only text until those widgets are implemented in the Clay API.
+// Missing widget types (Dropdown, Reference) are rendered as read-only text
+// until those widgets are implemented in the Clay API.
 [[nodiscard]] auto MakeRowSink(GUI::Context& gui, std::string_view sectionId) {
     return [&gui, sectionId](std::string_view name, auto& field) -> void {
         using FT = std::remove_cvref_t<decltype(field)>;
@@ -143,11 +143,11 @@ using UIComp  = ZHLN::GUI::UIComponents;
                 field = ZHLN::Math::EulerDegreesToQuat(JPH::Vec3(deg[0], deg[1], deg[2]));
             }
         } else if constexpr (std::is_same_v<FT, ZHLN::String256> || std::is_same_v<FT, ZHLN::String64>) {
-            // Stub: show as read-only text until TextInput is implemented
-            std::array<char, 32> buf {};
-            auto                 label = ZHLN::FormatTo(buf, "{}: ", name);
-            gui.Text(label, 12.0f, {0.7f, 0.7f, 0.7f, 1.0f});
-            gui.Text(std::string_view(field), 12.0f, {0.9f, 0.9f, 0.9f, 1.0f});
+            // rowId rather than name: two components in the same section can
+            // have a field of the same name, and the widget table is keyed by
+            // the label's hash, so a collision would share one caret between
+            // them. Same convention as Slider above.
+            gui.TextInput(rowId, field);
         }
         // Everything else (char padding, nested structs) intentionally
         // gets no row in this version.

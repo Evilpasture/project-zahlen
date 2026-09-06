@@ -743,16 +743,23 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
         }
     }
 
-    // Keys land in InputStateComponent and nowhere else. The engine deliberately
-    // does not interpret them as text: it does not own a GUI::Context (the caller
-    // does -- see app/main.cpp:151), so it cannot know which field, if any, is
-    // focused. Whoever owns the Context forwards keys and characters to
-    // Context::PushKey/PushChar; that is the only text-input path.
+    // Keys land in InputStateComponent twice over: held state in the bitset for
+    // gameplay, and a queue of presses plus typed characters for text fields.
+    // The engine still does not interpret any of it as text -- it does not own a
+    // GUI::Context (the caller does, see app/main.cpp:151), so it has no way to
+    // know which field is focused. GUI::Context::BeginFrame drains the queue;
+    // Context::PushKey/PushChar feed the same queue for hosts with no window.
+    //
+    // Every press is queued, not just the editing keys. Deciding which keys a
+    // text field acts on is TextBuffer.hpp's business; this is only the pump.
     auto onKey = [](void* userdata, KeyCode key, bool pressed) -> void {
         auto* impl  = static_cast<EngineImpl*>(userdata);
         auto* reg   = &impl->registry;
         auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
         state->SetKey(static_cast<uint8_t>(key), pressed);
+        if (pressed) {
+            state->QueueKeyPress(key);
+        }
     };
 
     auto onMouseMove = [](void* userdata, float x, float y) -> void {
@@ -773,10 +780,17 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
         state->ApplyResize(extent);
     };
 
+    auto onChar = [](void* userdata, unsigned int codepoint) -> void {
+        auto* reg   = &static_cast<EngineImpl*>(userdata)->registry;
+        auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
+        state->QueueChar(codepoint);
+    };
+
     // userdata is the heap-allocated EngineImpl (stable for the engine's whole
     // life, unlike `this`), which owns the registry the callbacks write to.
     WindowInputReceiver receiver = {
-        .userdata = _impl.get(), .onKey = onKey, .onMouseMove = onMouseMove, .onMouseScroll = onMouseScroll, .onResize = onResize
+        .userdata = _impl.get(), .onKey = onKey, .onMouseMove = onMouseMove, .onMouseScroll = onMouseScroll, .onResize = onResize,
+        .onChar   = onChar
     };
 
     _impl->window =

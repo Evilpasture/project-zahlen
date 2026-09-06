@@ -146,9 +146,8 @@ ZHLN::Physics::RaycastResult CastPickingRay(ZHLN::Engine& engine, const ZHLN::Ca
 
 // Draws one frame of the self-hosted editor using the Clay layout engine:
 // [Hierarchy | Viewport Toolbar | Inspector]
-void RunNativeEditorFrame(ZHLN::Engine& engine, float dt) {
-    auto&              reg = engine.GetRegistry();
-    ZHLN::GUI::Context gui(engine);
+void RunNativeEditorFrame(ZHLN::GUI::Context& gui, ZHLN::Engine& engine, float dt) {
+    auto& reg = engine.GetRegistry();
     gui.BeginFrame(dt);
 
     gui.Box(
@@ -248,12 +247,30 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
 
         auto winSize = engine.GetWindow().GetSize();
 
+        // A cheap handle over the Impl the registry owns (GUIStateComponent), so
+        // building it here costs a pointer and lets the gating below ask about
+        // text focus. The same handle is handed to the frame builder.
+        ZHLN::GUI::Context gui(engine);
+
+        // Ctrl+C/X/V in a focused field go to the OS clipboard through the
+        // window. Re-set every frame because the handle is rebuilt; the sink is
+        // stateless, so this is two stores.
+        gui.SetClipboard(ZHLN::GUI::TextEdit::ClipboardSink {
+            .userdata = &engine,
+            .set      = [](void* ud, std::string_view text) -> void { static_cast<ZHLN::Engine*>(ud)->GetWindow().SetClipboardText(text); },
+            .get      = [](void* ud) -> std::string { return static_cast<ZHLN::Engine*>(ud)->GetWindow().GetClipboardText(); },
+        });
+
         // Viewport bounds: center area between the left hierarchy and right inspector
         const bool pointerInViewport = state != nullptr && state->mouseX >= kLeftPanelWidth &&
                                        state->mouseX <= (static_cast<float>(winSize.width) - kRightPanelWidth);
 
-        const bool uiCapturesMouse    = state != nullptr && (!pointerInViewport || state->wantCaptureMouse);
-        const bool uiCapturesKeyboard = state != nullptr && state->wantCaptureKeyboard;
+        const bool uiCapturesMouse = state != nullptr && (!pointerInViewport || state->wantCaptureMouse);
+        // A focused text field owns the keyboard without setting a capture flag
+        // of its own, so it has to be asked directly -- otherwise typing "wasd"
+        // into a name box flies the editor camera. This reads last frame's
+        // focus, which is the right question to ask before BeginFrame has run.
+        const bool uiCapturesKeyboard = (state != nullptr && state->wantCaptureKeyboard) || gui.IsTextInputFocused();
 
         if (state != nullptr && state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Escape)) && !uiCapturesKeyboard) {
             engine.GetWindow().Close();
@@ -272,7 +289,7 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
         }
 
         // Native self-hosted editor frame using Clay
-        RunNativeEditorFrame(engine, frameTime);
+        RunNativeEditorFrame(gui, engine, frameTime);
 
         if (state != nullptr && state->needsResize) {
             engine.GetRenderContext().SetResolution(state->newSize);

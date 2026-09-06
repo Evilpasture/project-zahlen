@@ -252,6 +252,21 @@ void Context::BeginFrame(float dt) noexcept {
     auto* input    = _impl->registry.GetSingleton<Components::InputStateComponent>();
     auto* settings = _impl->registry.GetSingleton<UIComponents::UISettingsComponent>();
 
+    // Fold whatever the window's event pump queued since the last frame into
+    // this Context's own queue, so hardware input and PushKey/PushChar (tests,
+    // headless hosts) converge on the one mechanism TextInput consumes.
+    if (input != nullptr && input->queuedInputCount > 0) {
+        for (size_t i = 0; i < input->queuedInputCount; ++i) {
+            const auto& queued = input->queuedInput[i];
+            if (queued.isChar) {
+                _impl->QueueEvent(Impl::PendingEvent {.isChar = true, .key = 0, .codepoint = queued.value});
+            } else {
+                _impl->QueueEvent(Impl::PendingEvent {.isChar = false, .key = queued.value, .codepoint = 0});
+            }
+        }
+        input->ClearQueuedInput();
+    }
+
     if (settings && settings->fontAtlas.glyphs[0].xadvance > 0.0f) {
         _impl->activeFont = &settings->fontAtlas;
     } else {
