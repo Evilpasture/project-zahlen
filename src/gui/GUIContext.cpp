@@ -34,6 +34,8 @@ struct WidgetState {
     // Text fields keep their caret here rather than in the caller's string, so
     // a TextInput stays a plain `gui.TextInput("Name", str)` at the call site.
     TextEdit::Caret caret    = {};
+    // Keyboard highlight for an open Dropdown, in option indices.
+    int32_t         highlightIndex = 0;
 };
 
 // ============================================================================
@@ -60,6 +62,9 @@ struct Context::Impl {
     // field is focused at a time, which is what lets a click on any field
     // defocus the previous one without a focus manager.
     uint64_t focusedTextInput = 0;
+    // State key of the open Dropdown, or 0. One at a time, which is what lets a
+    // click anywhere close it without a separate dismiss layer.
+    uint64_t openDropdown     = 0;
     // Ctrl+C/X/V plumbing, installed by the front end (the engine wires it to
     // Window's clipboard). Empty means those three keys do nothing.
     TextEdit::ClipboardSink clipboard = {};
@@ -75,6 +80,10 @@ struct Context::Impl {
         bool     isChar    = false;
         uint32_t key       = 0;
         uint32_t codepoint = 0;
+        // Set by the widget that acted on it. Without this a frame that draws
+        // both a focused text field and an open dropdown would apply the same
+        // Enter to both -- committing the field and closing the list.
+        bool     consumed  = false;
     };
     static constexpr size_t                             kMaxPendingEvents = 64;
     std::array<PendingEvent, kMaxPendingEvents>          pendingEvents     = {};
@@ -698,6 +707,16 @@ constexpr float kTextInputPadding  = 4.0f;
 constexpr float kTextInputHeight   = 24.0f;
 constexpr float kTextInputWidth    = 180.0f;
 
+// Dropdown geometry. The list floats under the field at kDropdownListOffset, and
+// both the drawing and the hit-testing below derive row rectangles from that
+// same arithmetic -- no per-row Clay elements, so no per-row ids whose
+// Clay_String would have to outlive the layout pass.
+constexpr float kDropdownHeight      = 24.0f;
+constexpr float kDropdownWidth       = 160.0f;
+constexpr float kDropdownRowHeight   = 20.0f;
+constexpr float kDropdownListOffset  = 2.0f;
+constexpr int   kDropdownMaxVisible  = 8;
+
 /// How far the pen moves for one glyph, matching Impl::MeasureText so the caret
 /// lands where the text is actually drawn.
 ///
@@ -807,7 +826,11 @@ bool Context::TextInputImpl(std::string_view label, std::string& value, size_t m
         // shortens the paste instead of the assign eating the buffer's tail.
         TextEdit::BoundedString buf {&value, maxTextLength};
         for (size_t i = 0; i < _impl->pendingEventCount; ++i) {
-            const auto& ev = _impl->pendingEvents[i];
+            auto& ev = _impl->pendingEvents[i];
+            if (ev.consumed) {
+                continue;
+            }
+            ev.consumed = true;
             if (ev.isChar) {
                 if (TextEdit::HandleChar(buf, state.caret, ev.codepoint)) {
                     changed = true;
@@ -930,6 +953,211 @@ void Context::SetClipboard(TextEdit::ClipboardSink sink) noexcept {
 
 bool Context::IsTextInputFocused() const noexcept {
     return _impl && _impl->focusedTextInput != 0;
+}
+
+// --- Dropdown ---
+
+bool Context::Dropdown(
+    std::string_view label, std::span<const std::string_view> options, int& selected, const Sizing& width
+) noexcept {
+    Clay_SetCurrentContext(_impl->clayContext);
+
+    const int optionCount = static_cast<int>(options.size());
+
+    BeginRow(8.0f);
+    Text(label, 15.0f, {0.9f, 0.9f, 0.9f, 1.0f});
+
+    if (optionCount == 0) {
+        // Nothing to choose from. Still draw something so the row does not
+        // silently vanish from the panel when an enum has no enumerators.
+        Text("(no options)", 14.0f, {0.5f, 0.5f, 0.5f, 1.0f});
+        EndRow();
+        _impl->lastItemHovered = false;
+        _impl->lastItemActive  = false;
+        return false;
+    }
+
+    uint32_t       idNum    = static_cast<uint32_t>(HashCreativeWorkPath(label));
+    Clay_ElementId elemId   = Clay_GetElementIdWithIndex(ToClayString(label), idNum);
+    const uint64_t stateKey = (static_cast<uint64_t>(idNum) << 32) | 0xD209;
+    auto&          state    = _impl->GetState(stateKey, _impl->currentFrame);
+
+    auto* input = _impl->registry.GetSingleton<Components::InputStateComponent>();
+    float mx    = input ? input->mouseX : -1.0f;
+    float my    = input ? input->mouseY : -1.0f;
+
+    // The caller owns the index, so it can arrive out of range -- a shrunk enum
+    // or an uninitialised field. Clamp before anything indexes with it.
+    selected               = std::clamp(selected, 0, optionCount - 1);
+    state.highlightIndex   = std::clamp(state.highlightIndex, 0, optionCount - 1);
+
+    const float fieldWidth = (width.fixed > 0.0f) ? width.fixed : kDropdownWidth;
+    bool        changed    = false;
+
+    const bool wasOpen = (_impl->openDropdown == stateKey);
+    bool       isOpen  = wasOpen;
+
+    Clay__OpenElementWithId(elemId);
+
+    Clay_ElementData elemData = Clay_GetElementData(elemId);
+    bool isHovered = Clay_Hovered() || Clay_PointerOver(elemId) ||
+                     (elemData.found && elemData.boundingBox.width > 0.0f &&
+                      mx >= elemData.boundingBox.x && mx <= (elemData.boundingBox.x + elemData.boundingBox.width) &&
+                      my >= elemData.boundingBox.y && my <= (elemData.boundingBox.y + elemData.boundingBox.height));
+
+    auto       pointer          = Clay_GetPointerState();
+    const bool pressedThisFrame = (pointer.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME);
+
+    // Rows are windowed so a long enum (KeyCode has 72) does not produce a list
+    // taller than the window, with the highlight kept in view.
+    const int visibleCount = std::min(optionCount, kDropdownMaxVisible);
+    const int windowStart  = (optionCount <= kDropdownMaxVisible)
+                                 ? 0
+                                 : std::clamp(state.highlightIndex - kDropdownMaxVisible / 2, 0, optionCount - visibleCount);
+
+    // Row rectangles come from the field's box plus the same offsets the
+    // floating list is drawn with. Clay reports last frame's layout, which is
+    // exactly what hit-testing needs.
+    const float listX = elemData.boundingBox.x;
+    const float listY = elemData.boundingBox.y + elemData.boundingBox.height + kDropdownListOffset;
+    auto rowUnderPointer = [&](int optionIndex) -> bool {
+        if (!elemData.found) {
+            return false;
+        }
+        const float top = listY + static_cast<float>(optionIndex - windowStart) * kDropdownRowHeight;
+        return mx >= listX && mx <= listX + fieldWidth && my >= top && my <= top + kDropdownRowHeight;
+    };
+
+    // Option hit-testing must run before the field decides what the click meant:
+    // the list floats outside the field's box, so a click on a row is a click
+    // outside the field, and the field would otherwise close the list on the
+    // same frame the row was chosen.
+    int hitOption = -1;
+    if (wasOpen && pressedThisFrame) {
+        for (int i = windowStart; i < windowStart + visibleCount; ++i) {
+            if (rowUnderPointer(i)) {
+                hitOption = i;
+                break;
+            }
+        }
+    }
+
+    if (hitOption >= 0) {
+        if (selected != hitOption) {
+            selected = hitOption;
+            changed  = true;
+        }
+        state.highlightIndex = hitOption;
+        isOpen               = false;
+        _impl->openDropdown  = 0;
+    } else if (pressedThisFrame) {
+        if (isHovered) {
+            isOpen              = !wasOpen;
+            _impl->openDropdown = isOpen ? stateKey : 0;
+            if (isOpen) {
+                state.highlightIndex = selected;
+            }
+        } else if (wasOpen) {
+            isOpen              = false;
+            _impl->openDropdown = 0;
+        }
+    }
+
+    // Keyboard, for the open list only. Events another widget already claimed
+    // are skipped, so a focused text field and an open dropdown cannot both act
+    // on one Enter.
+    if (isOpen) {
+        for (size_t i = 0; i < _impl->pendingEventCount; ++i) {
+            auto& ev = _impl->pendingEvents[i];
+            if (ev.isChar || ev.consumed) {
+                continue;
+            }
+            switch (static_cast<KeyCode>(ev.key)) {
+                case KeyCode::Up:
+                    state.highlightIndex = (state.highlightIndex + optionCount - 1) % optionCount;
+                    ev.consumed          = true;
+                    break;
+                case KeyCode::Down:
+                    state.highlightIndex = (state.highlightIndex + 1) % optionCount;
+                    ev.consumed          = true;
+                    break;
+                case KeyCode::Enter:
+                    if (selected != state.highlightIndex) {
+                        selected = state.highlightIndex;
+                        changed  = true;
+                    }
+                    isOpen              = false;
+                    _impl->openDropdown = 0;
+                    ev.consumed         = true;
+                    break;
+                case KeyCode::Escape:
+                    isOpen              = false;
+                    _impl->openDropdown = 0;
+                    ev.consumed         = true;
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+
+    _impl->lastItemHovered = isHovered;
+    _impl->lastItemActive  = isOpen;
+
+    Clay_ElementDeclaration fieldDecl = {
+        .layout =
+            {.sizing =
+                 {.width  = (width.grow > 0.0f) ? CLAY_SIZING_GROW(width.grow) : CLAY_SIZING_FIXED(fieldWidth),
+                  .height = CLAY_SIZING_FIXED(kDropdownHeight)},
+             .padding        = {4, 4, 4, 4},
+             .childAlignment = {.x = CLAY_ALIGN_X_LEFT, .y = CLAY_ALIGN_Y_CENTER}},
+        .backgroundColor = (isHovered || isOpen) ? Clay_Color {55, 75, 105, 255} : Clay_Color {25, 35, 50, 255},
+        .cornerRadius    = {4, 4, 4, 4}
+    };
+    Clay__ConfigureOpenElement(fieldDecl);
+
+    Text(options[static_cast<size_t>(selected)], 14.0f, {0.9f, 0.9f, 0.9f, 1.0f});
+
+    if (isOpen) {
+        // A child of the field, but floating: it layers over what is below
+        // without changing the field's own size or the panel's layout.
+        Clay__OpenElement();
+        Clay_ElementDeclaration listDecl = {
+            .layout =
+                {.sizing = {.width = CLAY_SIZING_FIXED(fieldWidth), .height = CLAY_SIZING_FIXED(static_cast<float>(visibleCount) * kDropdownRowHeight)},
+                 .childGap        = 0,
+                 .layoutDirection = CLAY_TOP_TO_BOTTOM},
+            .backgroundColor = Clay_Color {20, 28, 40, 250},
+            .cornerRadius    = {4, 4, 4, 4},
+            .floating        =
+                {.offset       = {0.0f, kDropdownListOffset},
+                 .zIndex       = 100,
+                 .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_BOTTOM},
+                 .attachTo     = CLAY_ATTACH_TO_PARENT}
+        };
+        Clay__ConfigureOpenElement(listDecl);
+
+        for (int i = windowStart; i < windowStart + visibleCount; ++i) {
+            const bool hot = (i == hitOption) || rowUnderPointer(i) || (i == state.highlightIndex);
+            Clay__OpenElement();
+            Clay_ElementDeclaration rowDecl = {
+                .layout =
+                    {.sizing = {.width = CLAY_SIZING_GROW(), .height = CLAY_SIZING_FIXED(kDropdownRowHeight)},
+                     .padding        = {4, 2, 4, 2},
+                     .childAlignment = {.x = CLAY_ALIGN_X_LEFT, .y = CLAY_ALIGN_Y_CENTER}},
+                .backgroundColor = hot ? Clay_Color {70, 100, 140, 255} : Clay_Color {0, 0, 0, 0}
+            };
+            Clay__ConfigureOpenElement(rowDecl);
+            Text(options[static_cast<size_t>(i)], 14.0f, (i == selected) ? JPH::Vec4 {1.0f, 1.0f, 1.0f, 1.0f} : JPH::Vec4 {0.8f, 0.8f, 0.8f, 1.0f});
+            Clay__CloseElement();
+        }
+
+        Clay__CloseElement(); // list
+    }
+
+    Clay__CloseElement(); // field
+    EndRow();
+    return changed;
 }
 
 bool Context::BeginCollapsingHeader(std::string_view label, bool defaultOpen) noexcept {

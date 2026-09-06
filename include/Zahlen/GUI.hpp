@@ -11,6 +11,7 @@
 #include <Zahlen/gui/TextBuffer.hpp>
 #include <concepts>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -222,6 +223,21 @@ class ZHLN_API Context {
     /// True while any text field holds focus, so the caller can keep key
     /// events away from gameplay hotkeys.
     [[nodiscard]] bool IsTextInputFocused() const noexcept;
+
+    // --- Dropdown ---
+    //
+    // Single-selection list. `options` are the labels, `selected` is an index
+    // into them (clamped, never written out of range), and the return is true on
+    // the frame the selection changed.
+    //
+    // The list is a Clay floating element anchored under the field, so opening
+    // it does not push the rest of the panel down. Clicking the field toggles
+    // it; clicking an option selects and closes; clicking anywhere else closes.
+    // While open, Up/Down move the highlight and Enter or Escape close, using
+    // the same key path TextInput uses.
+    bool Dropdown(
+        std::string_view label, std::span<const std::string_view> options, int& selected, const Sizing& width = {}
+    ) noexcept;
 
     bool BeginCollapsingHeader(std::string_view label, bool defaultOpen = false) noexcept;
     void EndCollapsingHeader() noexcept;

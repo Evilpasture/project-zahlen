@@ -58,8 +58,8 @@ using UIComp  = ZHLN::GUI::UIComponents;
 // field name is the label; the row id is section-scoped so two components
 // with a `width` field cannot collide in the child cache.
 //
-// Missing widget types (Dropdown, Reference) are rendered as read-only text
-// until those widgets are implemented in the Clay API.
+// Missing widget types (Reference) are rendered as read-only text until those
+// widgets are implemented in the Clay API.
 [[nodiscard]] auto MakeRowSink(GUI::Context& gui, std::string_view sectionId) {
     return [&gui, sectionId](std::string_view name, auto& field) -> void {
         using FT = std::remove_cvref_t<decltype(field)>;
@@ -88,16 +88,15 @@ using UIComp  = ZHLN::GUI::UIComponents;
             gui.Slider(rowId, v, 0.0f, 1000000.0f);
             field = static_cast<uint32_t>(v);
         } else if constexpr (std::is_enum_v<FT>) {
-            // Render enum index as a float slider (dropdown stub)
             constexpr auto names = ZHLN::Reflect::EnumNames<FT>();
             if constexpr (names.size() > 0) {
+                // Dropdown clamps the index itself, so a value the enum no
+                // longer has (a scene authored against an older revision) lands
+                // on a real enumerator instead of indexing past the names.
                 int idx = static_cast<int>(field);
-                if (idx < 0 || static_cast<size_t>(idx) >= names.size())
-                    idx = 0;
-                // Stub: show current enum name as text
-                std::array<char, 128> buf {};
-                auto                  sv = ZHLN::FormatTo(buf, "{}: {}", name, names[static_cast<size_t>(idx)]);
-                gui.Text(sv, 12.0f, {0.8f, 0.8f, 0.8f, 1.0f});
+                if (gui.Dropdown(rowId, std::span<const std::string_view>(names), idx)) {
+                    field = static_cast<FT>(idx);
+                }
             }
         } else if constexpr (std::is_same_v<FT, ZHLN::Entity>) {
             // Stub: show packed handle as text
