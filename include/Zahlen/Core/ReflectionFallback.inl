@@ -24,17 +24,14 @@
 // for host-only tooling that is deliberately built on a compiler without
 // reflection and pins the values it needs (see tests/gui_harness).
 
+namespace ZHLN::Reflect {
+
 #if !defined(__CLANGD__) && !defined(ZHLN_ALLOW_REFLECTION_STUBS)
-#error "ZHLN requires C++26 static reflection (P2996). This translation unit was compiled \
-without it, so ZHLN::Reflect falls back to stubs whose values feed struct layout -- \
-InputStateComponent would silently get a different size here than in a reflection-enabled \
-target, which is an ODR violation with no diagnostic. Build with -freflection, and make sure \
-the CMake target owns zahlen_enable_reflection(<target>). Define ZHLN_ALLOW_REFLECTION_STUBS \
-only for host tooling that pins the values it needs."
+static_assert(ReflectionAvailable,
+              "ZHLN requires C++26 static reflection (-freflection); "
+              "give the CMake target zahlen_enable_reflection(<target>)");
 #endif
 
-
-namespace ZHLN::Reflect {
 
 template <std::ranges::range R>
 consteval int Expand(R&& /*unused*/) {
