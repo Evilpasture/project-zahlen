@@ -7,7 +7,6 @@
 #include <Jolt/Jolt.h>
 // clang-format on
 #include <Zahlen/Core/Array.hpp>
-#include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Types.hpp>
@@ -19,28 +18,8 @@ class Registry;
 
 namespace ZHLN::GUI {
 
-// Bit flags for UIButtonComponent::flags, so a button can be hovered and
-// clicked in the same frame. UIButton has to opt in to the operators, and that
-// specialization cannot sit inside ZHLN::GUI -- see the ZHLN block below.
-enum class UIButton : uint8_t { None = 0, Hovered = 1 << 0, Pressed = 1 << 1, Clicked = 1 << 2, Disabled = 1 << 3 };
-
-} // namespace ZHLN::GUI
-
-namespace ZHLN {
-// EnableEnumFlags is declared in Zahlen/Types.hpp at ZHLN scope, and an
-// explicit specialization may only be declared in a namespace enclosing the
-// primary template -- which ZHLN::GUI, being nested, is not. Hence the close
-// and reopen: the opt-in has to be at ZHLN scope even though the enum is not.
-template <>
-inline constexpr bool EnableEnumFlags<GUI::UIButton> = true;
-} // namespace ZHLN
-
-namespace ZHLN::GUI {
-
-enum class StackDirection : uint8_t { Horizontal = 0, Vertical = 1 };
 enum class TextAlignment : uint8_t { Left = 0, Center = 1, Right = 2 };
 enum class TextVerticalAlignment : uint8_t { Top = 0, Center = 1, Bottom = 2 };
-enum class UIJustify : uint8_t { Start = 0, Center = 1, End = 2, SpaceBetween = 3, SpaceAround = 4 };
 
 enum class FlexDirection : uint8_t { Column = 0, ColumnReverse, Row, RowReverse };
 enum class FlexWrap : uint8_t { NoWrap = 0, Wrap, WrapReverse };
@@ -72,10 +51,17 @@ enum class UIPlotKind : uint8_t { Lines = 0, Histogram = 1, ShadedLines = 2 };
 /// The GUI subsystem's component set.
 ///
 /// Deliberately shaped like ZHLN::Components: a flat namespace of nested
-/// POD structs, no inheritance and no virtuals. That is what lets
-/// Reflect::ForEachNestedType walk it, so GUI::RegisterUIComponents can
-/// register the whole set with one call and a new widget component needs
-/// no edit outside this header.
+/// POD structs, no inheritance and no virtuals, so Reflect::ForEachNestedType
+/// can walk the whole set with one call -- which is how the Lua bindings
+/// (extras/Scripting/Lua/Scripting.cpp:538) and the FFI cdef generator
+/// (extras/Scripting/Lua/tools/GenFFICdef.cpp:181) pick up every component
+/// without a per-type edit.
+///
+/// Only components something still reads live here. The widget state that moved
+/// to the Clay immediate-mode Context -- buttons, checkboxes, sliders,
+/// dropdowns, colour pickers, splitters, scrollers, popups, tooltips, styles --
+/// was deleted rather than left beside its replacement: nothing constructed or
+/// drew those, and in immediate mode per-field state belongs next to the widget.
 struct UIComponents {
     struct TextComponent {
         ZHLN::String256 text;
@@ -97,21 +83,6 @@ struct UIComponents {
         bool wrapText   = false;
         float wrapWidth = 0.0f; // 0 = wrap at the laid-out container width
         char _pad[2]    = {};
-    };
-
-    struct UIChildCacheComponent {
-        struct ChildRecord {
-            Entity           entity           = Entity::Null();
-            mutable uint64_t lastVisitedFrame = 0;
-        };
-        HashMap<uint64_t, ChildRecord> children;
-    };
-
-    struct UIStackComponent {
-        float          spacing   = 8.0f;
-        float          padding   = 8.0f;
-        StackDirection direction = StackDirection::Vertical;
-        UIJustify      justify   = UIJustify::Start;
     };
 
     struct UIFlexComponent {
@@ -186,22 +157,9 @@ struct UIComponents {
         char     _free_space[3] {};
     };
 
-    // Marks the pane that shows the 3D world instead of chrome.
-    //
-    // UIInteractionSystem sets InputStateComponent::wantCaptureMouse when the
-    // pointer is over a widget, which is what stops a click on a panel from
-    // also orbiting the camera or picking into the scene. A viewport is the
-    // exception: the world is supposed to receive the pointer there, so
-    // hovering anywhere inside a tagged subtree leaves wantCaptureMouse clear
-    // and the camera keeps working as if the pointer were over bare screen.
-    //
-    // This only suppresses *capture*. Widgets inside a viewport are still
-    // hit-tested and still receive their own hover and clicks, so the overlays
-    // drawn over the 3D view (gizmos, the Simulate toggle) remain usable. It
-    // is an empty tag: the interaction pass looks for it by walking the parent
-    // chain, so tagging the pane covers everything nested under it.
-    struct UIViewportComponent {};
-
+    // A textured quad: an icon, a sprite, or a slice of a sprite atlas. The
+    // renderer emits this instead of the plain panel quad whenever the entity
+    // carries one, and the UV rectangle below selects the source region.
     struct UIPanelComponent {
         JPH::Vec4     color        = {1.0f, 1.0f, 1.0f, 1.0f};
         JPH::Vec4     borderRadius = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -213,141 +171,6 @@ struct UIComponents {
         float         uvBottom     = 0.1f;
     };
 
-    struct UIButtonComponent {
-        UIButton flags = UIButton::None;
-
-        void Set(UIButton flag, bool value) noexcept {
-            if (value) {
-                flags |= flag;
-            } else {
-                flags &= ~flag;
-            }
-        }
-
-        [[nodiscard]] bool Has(UIButton flag) const noexcept {
-            return (flags & flag) != UIButton::None;
-        }
-    };
-
-    struct UIDragComponent {
-        ZHLN::Entity targetEntity {};
-        bool         isDragging = false;
-    };
-
-    struct UICheckboxComponent {
-        bool checked       = false;
-        bool previousValue = false; // For external-mutation detection
-    };
-
-    struct UISliderComponent {
-        float value         = 0.0f;
-        float minValue      = 0.0f;
-        float maxValue      = 1.0f;
-        float step          = 0.0f; // 0 = continuous
-        float previousValue = 0.0f;
-        bool  isDragging    = false;
-        char  _pad[3]       = {};
-    };
-
-    struct UIDropdownComponent {
-        int32_t  selectedIdx    = 0;
-        int32_t  previousIdx    = 0;
-        bool     expanded       = false;
-        char     _pad[3]        = {};
-        // Stored option strings (copied at build time so options are retained)
-        ZHLN::Array<String128> options;
-    };
-
-    // The saturation/value plane of a colour picker: a 2D drag pad whose x is
-    // saturation and whose y is value, tinted by `hue`.
-    //
-    // Lives on the pad itself, not on the ColorEdit root, because the
-    // interaction pass needs a widget to hit-test and drag, and because the
-    // pad is the one part of the picker that cannot be expressed as a 1D
-    // slider. `hue` is stored here too: the pad is *painted* from it, and the
-    // renderer only ever sees components, so the pad's own gradient stops have
-    // to be derivable from the component alone.
-    struct UIColorSVComponent {
-        float hue        = 0.0f; // 0..360
-        float sat        = 0.0f; // 0..1
-        float val        = 1.0f; // 0..1
-        bool  isDragging = false;
-        char  _pad[3]    = {};
-    };
-
-    // A colour field: a swatch that opens a picker popup.
-    //
-    // `value` is the authoritative RGBA, in 0..1. `hue`/`sat`/`val` are the
-    // HSV working copy the picker edits; they are re-derived from `value`
-    // whenever `value` changes from the outside (an edited material, a preset,
-    // an undo), and `value` is re-derived from them whenever the user drags.
-    // The two-way sync is what keeps a colour that was set programmatically
-    // from showing a stale picker position.
-    //
-    // HSV is lossy at the grey axis (hue is undefined when saturation is 0),
-    // so the derivation keeps the previous hue for achromatic colours rather
-    // than snapping it to 0. Without that, dragging saturation to zero and
-    // back would silently recolour a grey to red.
-    struct UIColorEditComponent {
-        JPH::Vec4 value         = {1.0f, 1.0f, 1.0f, 1.0f};
-        JPH::Vec4 previousValue = {1.0f, 1.0f, 1.0f, 1.0f};
-
-        float hue = 0.0f;
-        float sat = 0.0f;
-        float val = 1.0f;
-
-        // 3 = RGB (alpha hidden and forced to 1), 4 = RGBA.
-        int32_t componentCount = 3;
-
-        bool expanded  = false; // Picker popup open
-        bool hsvStale  = true;  // Recompute HSV from `value` on the next build
-        char _pad[2]   = {};
-    };
-
-    struct UICollapsingHeaderComponent {
-        bool isOpen       = true;
-        bool defaultOpen  = true;
-        char _pad[2]      = {};
-    };
-
-    struct UISplitterComponent {
-        enum Direction : uint8_t { Horizontal = 0, Vertical = 1 };
-        float ratio         = 0.5f; // Size of the first panel (0..1)
-        float previousRatio = 0.5f;
-        bool  isDragging    = false;
-        Direction direction = Horizontal;
-    };
-
-    // Scrollable viewport state. Lives on the ScrollBox's clipping viewport
-    // entity; the layout pass measures the content extent and clamps the
-    // offsets, the interaction pass integrates the wheel into `targetScroll*`
-    // and eases `scroll*` towards it.
-    struct UIScrollComponent {
-        float scrollX       = 0.0f;
-        float scrollY       = 0.0f;
-        float targetScrollX = 0.0f;
-        float targetScrollY = 0.0f;
-
-        // Content extent in pixels, measured by the layout pass from the
-        // viewport's laid-out children (padding and gaps included).
-        float contentWidth  = 0.0f;
-        float contentHeight = 0.0f;
-
-        // Scrollable range: max(0, contentExtent - viewportExtent). Written by
-        // the layout pass; the interaction pass clamps against it.
-        float maxScrollX = 0.0f;
-        float maxScrollY = 0.0f;
-
-        float scrollSpeed = 35.0f;  // Pixels per wheel notch
-        float smoothSpeed = 15.0f;  // Exponential easing rate (1/seconds)
-        bool  smoothScroll = true;
-        bool  allowHorizontal = false;
-        char  _pad[2]         = {};
-    };
-
-    // A textured quad: an icon, a sprite, or a slice of a sprite atlas. The
-    // renderer emits this instead of the plain panel quad whenever the entity
-    // carries one, and the UV rectangle below selects the source region.
     struct UIImageComponent {
         TextureHandle  texture  = TextureHandle::Invalid;
         ImageScaleMode mode     = ImageScaleMode::Stretch;
@@ -424,67 +247,6 @@ struct UIComponents {
         float barGap    = 1.0f; // Histogram, in pixels between adjacent bars
     };
 
-    // List/tree row state: selection plus the double-click bookkeeping. The
-    // double-click window is counted in FRAMES (not seconds) because GUI::Context
-    // is fed a frame counter, which keeps the gesture deterministic in tests.
-    struct UISelectableComponent {
-        bool     selected        = false;
-        bool     doubleClicked   = false; // Consumed by the builder, cleared each frame
-        uint64_t lastClickFrame  = 0;
-        uint32_t doubleClickSpan = 18; // Frames allowed between the two clicks
-        bool     _pad0           = false;
-        char     _pad[2]         = {};
-    };
-
-    // Marks a subtree that is parented under the top-level overlay root instead
-    // of under the widget that logically owns it, so popups escape every
-    // ancestor scissor (a clipped panel, a scrolled viewport). `owner` is the
-    // widget the popup belongs to; the interaction pass uses it to decide
-    // whether a click landed "inside the dropdown" or outside it.
-    struct UIPopupComponent {
-        ZHLN::Entity owner = ZHLN::Entity::Null();
-        bool         open  = true;
-        char         _pad[3] = {};
-    };
-
-    // Hover-introspection state parked on the widget a tooltip describes. The
-    // tooltip itself is transient overlay geometry; this component only
-    // remembers how long the owner has been hovered so a delay can be applied.
-    struct UITooltipComponent {
-        String256  text;
-        uint64_t   hoverStartFrame = 0; // 0 = not hovered last frame
-        uint32_t   delayFrames     = 20;
-        float      scale           = 0.80f;
-        JPH::Vec4  bgColor         = {0.05f, 0.07f, 0.11f, 0.98f};
-        JPH::Vec4  textColor       = {0.90f, 0.95f, 1.00f, 1.00f};
-        JPH::Vec4  borderColor     = {0.26f, 0.38f, 0.58f, 1.00f};
-        float      offsetX         = 14.0f;
-        float      offsetY         = 18.0f;
-    };
-
-    struct UIStyleComponent {
-        JPH::Vec4 normalColor   = {0.15f, 0.15f, 0.22f, 0.95f};
-        JPH::Vec4 hoverColor    = {0.22f, 0.22f, 0.32f, 0.95f};
-        JPH::Vec4 pressedColor  = {0.10f, 0.10f, 0.15f, 0.95f};
-        JPH::Vec4 disabledColor = {0.08f, 0.08f, 0.10f, 0.50f};
-
-        JPH::Vec4 textColorNormal  = {0.90f, 0.90f, 0.90f, 1.0f};
-        JPH::Vec4 textColorHover   = {1.00f, 1.00f, 1.00f, 1.0f};
-        JPH::Vec4 textColorPressed = {0.70f, 0.70f, 0.70f, 1.0f};
-
-        float transitionSpeed = 18.0f;
-        bool  hasTextColor    = false;
-        char  _pad[3]         = {};
-    };
 };
-
-/// Registers every component nested in UIComponents with `reg`.
-///
-/// The GUI subsystem owns these types, so it owns their registration: the
-/// reflection walk lives in src/gui/UIRegistration.cpp rather than in the
-/// engine's blanket ZHLN::Components sweep, and a new widget component needs
-/// no edit outside this header. Registration is idempotent (re-registering a
-/// type is a no-op), so a per-scene call is safe.
-void RegisterUIComponents(ECS::Registry& reg);
 
 } // namespace ZHLN::GUI
