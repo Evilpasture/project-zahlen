@@ -44,6 +44,7 @@ struct Context::Impl {
     float                                lastDt          = 0.016667f;
     bool                                 lastItemHovered = false;
     bool                                 lastItemActive  = false;
+    bool                                 inLayout        = false;
 
     explicit Impl(Engine& eng) noexcept: engine(eng) {
     }
@@ -203,17 +204,34 @@ void Context::BeginFrame(float dt) noexcept {
 
     Clay_SetCurrentContext(_impl->clayContext);
 
+    if (_impl->inLayout) {
+        Clay_EndLayout(_impl->lastDt);
+        _impl->inLayout = false;
+    }
+
     Clay_SetLayoutDimensions({static_cast<float>(winSize.width), static_cast<float>(winSize.height)});
     Clay_SetPointerState(Clay_Vector2 {input->mouseX, input->mouseY}, input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton)));
     Clay_UpdateScrollContainers(false, Clay_Vector2 {0.0f, input->GetMouseWheel() * 30.0f}, dt);
 
     _impl->PruneStaleStates(_impl->engine.GetCurrentFrame());
     Clay_BeginLayout();
+    _impl->inLayout = true;
+}
+
+void Context::EndFrame() noexcept {
+    if (!_impl || !_impl->clayContext || !_impl->inLayout)
+        return;
+    Clay_SetCurrentContext(_impl->clayContext);
+    Clay_EndLayout(_impl->lastDt);
+    _impl->inLayout = false;
 }
 
 void Context::EndFrameAndRender(RenderContext& rc) noexcept {
+    if (!_impl || !_impl->clayContext || !_impl->inLayout)
+        return;
     Clay_SetCurrentContext(_impl->clayContext);
     Clay_RenderCommandArray commands = Clay_EndLayout(_impl->lastDt);
+    _impl->inLayout = false;
     if (commands.length == 0 || !_impl->activeFont)
         return;
 

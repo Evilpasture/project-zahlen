@@ -53,6 +53,7 @@ class ZHLN_API Context {
 
     // --- Frame Lifecycle ---
     void BeginFrame(float dt) noexcept;
+    void EndFrame() noexcept;
     void EndFrameAndRender(RenderContext& rc) noexcept;
 
     // --- Layout Containers (Macro-free C++ API) ---

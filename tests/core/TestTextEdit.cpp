@@ -42,6 +42,7 @@ struct TextEditTestSuite {
             ZHLN::GUI::UIComponents::UITextInputComponent in;
             in.text        = "Hello World";
             in.cursorIndex = 5; // Set cursor after "Hello"
+            in.ClearSelection();
 
             ZHLN::GUI::TextEdit::Modifiers mods {.shift = true};
 

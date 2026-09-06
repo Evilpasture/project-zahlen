@@ -556,8 +556,7 @@ struct PerformanceTestSuite {
                         }
                     );
 
-                    // Intentionally omitting EndFrameAndRender to purely benchmark
-                    // the CPU component of generating the layout tree
+                    gui.EndFrame();
                 }
                 return uiTimer.ElapsedMilliseconds();
             });
@@ -796,8 +795,7 @@ struct PerformanceTestSuite {
                         }
                     );
 
-                    // We intentionally skip EndFrameAndRender/BeginFrame to strictly
-                    // isolate the CPU cost of the layout generation
+                    gui.EndFrame();
                 }
 
                 frameTimesMs.push_back(frameTimer.ElapsedMilliseconds());
