@@ -680,7 +680,7 @@ struct PerformanceTestSuite {
             std::atomic<uint64_t> totalRaysCast {0};
             std::atomic<uint64_t> totalAudioEvents {0};
 
-            BenchmarkTimer masterBenchmarkTimer;
+            ZHLN::Test::BenchmarkTimer masterBenchmarkTimer;
 
             auto stats = ZHLN::Test::BenchmarkFrames("cpu.master_integrated")
                              .Warmup(0)
