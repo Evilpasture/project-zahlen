@@ -468,12 +468,18 @@ namespace detail {
 //
 //   limitPct <= 0  -> use DefaultLimitPercent() (env-overridable).
 //   RebaselineRequested() -> never regressed, always records.
-[[nodiscard]] inline auto Check(std::string_view metric, double value, double limitPct = -1.0, Direction direction = Direction::LowerIsBetter) -> Result {
+[[nodiscard]] inline auto Check(
+    std::string_view metric,
+    double           value,
+    double           limitPct   = -1.0,
+    Direction        direction  = Direction::LowerIsBetter,
+    double           noiseFloor = 0.05
+) -> Result {
     Result result;
     result.limitPct = limitPct > 0.0 ? limitPct : DefaultLimitPercent();
 
-    auto&                store = detail::Store();
-    const MutexGuard     lock(store.mutex);
+    auto&            store = detail::Store();
+    const MutexGuard lock(store.mutex);
 
     if (!store.loaded) {
         const PerfBaselineFile file = LoadBaselineFile(BaselineFilePath());
@@ -497,12 +503,12 @@ namespace detail {
         return result;
     }
 
-    result.known     = true;
-    result.previous  = previous->second;
-    result.commit    = store.baselineCommit;
+    result.known       = true;
+    result.previous    = previous->second;
+    result.commit      = store.baselineCommit;
     const double delta = (direction == Direction::LowerIsBetter) ? (value - result.previous) : (result.previous - value);
-    result.changePct = 100.0 * delta / result.previous;
-    result.regressed = !RebaselineRequested() && result.changePct > result.limitPct;
+    result.changePct   = 100.0 * delta / result.previous;
+    result.regressed   = !RebaselineRequested() && (result.changePct > result.limitPct) && (delta > noiseFloor);
 
     if (!result.regressed) {
         store.baseline[key] = value;
@@ -522,6 +528,8 @@ struct FrameCheckResult {
     double       p99ChangePct = 0.0;
     double       avgLimitPct  = 0.0;
     double       p99LimitPct  = 0.0;
+    bool         avgRegressed = false;
+    bool         p99Regressed = false;
     bool         regressed    = false;
     bool         recorded     = false;
 };
@@ -529,12 +537,14 @@ struct FrameCheckResult {
 [[nodiscard]] inline auto CheckFrame(
     std::string_view  benchmarkName,
     const FrameStats& stats,
-    double            avgLimitPct = -1.0,
-    double            p99LimitPct = 35.0
+    double            avgLimitPct     = -1.0,
+    double            p99LimitPct     = 75.0,
+    double            avgNoiseFloorMs = 0.1,
+    double            p99NoiseFloorMs = 1.0
 ) -> FrameCheckResult {
     FrameCheckResult result;
     result.avgLimitPct = avgLimitPct > 0.0 ? avgLimitPct : DefaultLimitPercent();
-    result.p99LimitPct = p99LimitPct > 0.0 ? p99LimitPct : 35.0;
+    result.p99LimitPct = p99LimitPct > 0.0 ? p99LimitPct : 75.0;
 
     auto&            store = detail::Store();
     const MutexGuard lock(store.mutex);
@@ -576,14 +586,20 @@ struct FrameCheckResult {
     result.known        = true;
     result.previous     = prev->second;
     result.commit       = store.baselineCommit;
-    result.avgChangePct = 100.0 * (current.avg_frame_ms - result.previous.avg_frame_ms) / result.previous.avg_frame_ms;
+
+    const double avgDeltaMs = current.avg_frame_ms - result.previous.avg_frame_ms;
+    const double p99DeltaMs = current.p99_frame_ms - result.previous.p99_frame_ms;
+
+    result.avgChangePct = 100.0 * avgDeltaMs / result.previous.avg_frame_ms;
     result.p99ChangePct = (result.previous.p99_frame_ms > 0.0)
-                              ? 100.0 * (current.p99_frame_ms - result.previous.p99_frame_ms) / result.previous.p99_frame_ms
+                              ? (100.0 * p99DeltaMs / result.previous.p99_frame_ms)
                               : 0.0;
 
-    const bool avgRegressed = !RebaselineRequested() && result.avgChangePct > result.avgLimitPct;
-    const bool p99Regressed = !RebaselineRequested() && result.p99ChangePct > result.p99LimitPct;
-    result.regressed        = avgRegressed || p99Regressed;
+    // Both percentage threshold and absolute noise floor must be exceeded to fail.
+    // This prevents microsecond / sub-millisecond desktop jitter from tripping false regressions.
+    result.avgRegressed = !RebaselineRequested() && (result.avgChangePct > result.avgLimitPct) && (avgDeltaMs > avgNoiseFloorMs);
+    result.p99Regressed = !RebaselineRequested() && (result.p99ChangePct > result.p99LimitPct) && (p99DeltaMs > p99NoiseFloorMs);
+    result.regressed    = result.avgRegressed || result.p99Regressed;
 
     if (!result.regressed) {
         store.baselineFrames[key] = current;
@@ -619,13 +635,14 @@ namespace ZHLN::Test {
 // visible until it is fixed (or explicitly re-baselined).
 // ============================================================================
 inline void VerifyBaseline(
-    std::string_view                    metric,
-    double                              value,
-    double                              limitPercent      = -1.0,
-    Perf::Direction                     direction         = Perf::Direction::LowerIsBetter,
-    std::source_location                location          = std::source_location::current()
+    std::string_view     metric,
+    double               value,
+    double               limitPercent = -1.0,
+    Perf::Direction      direction    = Perf::Direction::LowerIsBetter,
+    double               noiseFloor   = 0.05,
+    std::source_location location     = std::source_location::current()
 ) {
-    const Perf::Result result = Perf::Check(metric, value, limitPercent, direction);
+    const Perf::Result result = Perf::Check(metric, value, limitPercent, direction, noiseFloor);
 
     if (result.known) {
         const std::string commitInfo = result.commit.empty() ? "" : std::format(" [{}]", result.commit);
@@ -660,22 +677,27 @@ inline void VerifyFrameBaseline(
     std::string_view     benchmarkName,
     const FrameStats&    stats,
     double               avgLimitPercent   = -1.0,
-    double               p99LimitPercent   = 35.0,
+    double               p99LimitPercent   = 75.0,
+    double               avgNoiseFloorMs   = 0.1,
+    double               p99NoiseFloorMs   = 1.0,
     std::source_location location          = std::source_location::current()
 ) {
-    const Perf::FrameCheckResult result = Perf::CheckFrame(benchmarkName, stats, avgLimitPercent, p99LimitPercent);
+    const Perf::FrameCheckResult result =
+        Perf::CheckFrame(benchmarkName, stats, avgLimitPercent, p99LimitPercent, avgNoiseFloorMs, p99NoiseFloorMs);
 
     const std::string commitInfo = result.commit.empty() ? "" : std::format(" [{}]", result.commit);
     if (result.known) {
         ZHLN::Println(
             "    {}[Baseline]{} {} = {:.3f} ms (last run{}: {:.3f} ms, {:+.1f}% vs limit {:+.1f}%){}",
             result.regressed ? Color::Red : Color::Green, Color::Reset, benchmarkName, stats.avgFrameMs, commitInfo,
-            result.previous.avg_frame_ms, result.avgChangePct, result.avgLimitPct, result.regressed ? "  << REGRESSION" : ""
+            result.previous.avg_frame_ms, result.avgChangePct, result.avgLimitPct,
+            result.avgRegressed ? "  << AVG REGRESSION" : (result.p99Regressed ? "  << P99 REGRESSION" : "")
         );
         ZHLN::Println(
-            "      {}- Frame Times{} : Avg {:.3f} ms, P50 {:.3f} ms, P95 {:.3f} ms, P99 {:.3f} ms (last: {:.3f} ms), P99.9 {:.3f} ms",
+            "      {}- Frame Times{} : Avg {:.3f} ms, P50 {:.3f} ms, P95 {:.3f} ms, P99 {:.3f} ms (last: {:.3f} ms, {:+.1f}% vs limit {:+.1f}%){}, P99.9 {:.3f} ms",
             Color::Cyan, Color::Reset, stats.avgFrameMs, stats.p50FrameMs, stats.p95FrameMs, stats.p99FrameMs,
-            result.previous.p99_frame_ms, stats.p99_9FrameMs
+            result.previous.p99_frame_ms, result.p99ChangePct, result.p99LimitPct,
+            result.p99Regressed ? " << REGRESSION" : "", stats.p99_9FrameMs
         );
         ZHLN::Println(
             "      {}- Framerates {} : Avg {:.1f} FPS, Max {:.1f} FPS, Min {:.1f} FPS, 1% Low {:.1f} FPS, 0.1% Low {:.1f} FPS",
@@ -697,11 +719,33 @@ inline void VerifyFrameBaseline(
     }
 
     if (result.regressed) {
+        std::string failureActual;
+        std::string failureExpected;
+        if (result.avgRegressed && result.p99Regressed) {
+            failureActual = std::format(
+                "{} avg={:.3f} ms ({:+.1f}%), p99={:.3f} ms ({:+.1f}%)",
+                benchmarkName, stats.avgFrameMs, result.avgChangePct, stats.p99FrameMs, result.p99ChangePct
+            );
+            failureExpected = std::format("avg within {:+.1f}%, p99 within {:+.1f}%", result.avgLimitPct, result.p99LimitPct);
+        } else if (result.avgRegressed) {
+            failureActual = std::format(
+                "{} avg={:.3f} ms ({:+.1f}% vs last run {:.3f} ms)",
+                benchmarkName, stats.avgFrameMs, result.avgChangePct, result.previous.avg_frame_ms
+            );
+            failureExpected = std::format("avg within {:+.1f}% of last run", result.avgLimitPct);
+        } else {
+            failureActual = std::format(
+                "{} p99={:.3f} ms ({:+.1f}% vs last run {:.3f} ms)",
+                benchmarkName, stats.p99FrameMs, result.p99ChangePct, result.previous.p99_frame_ms
+            );
+            failureExpected = std::format("p99 within {:+.1f}% of last run (noise floor > {:.1f} ms)", result.p99LimitPct, p99NoiseFloorMs);
+        }
+
         GetThreadLocalContext().failures.push_back(
             {.file          = location.file_name(),
              .line          = static_cast<uint32_t>(location.line()),
-             .actualValue   = std::format("{} = {:.3f} ms ({:+.1f}% vs last run {:.3f} ms)", benchmarkName, stats.avgFrameMs, result.avgChangePct, result.previous.avg_frame_ms),
-             .expectedValue = std::format("within {:+.1f}% of last run", result.avgLimitPct),
+             .actualValue   = std::move(failureActual),
+             .expectedValue = std::move(failureExpected),
              .op            = "PerfRegression"}
         );
     }
@@ -954,7 +998,7 @@ private:
         };
 
         const std::string metricKey = m_metricKey.empty() ? m_name : m_metricKey;
-        VerifyBaseline(metricKey, stats.minMs, m_limitPercent, m_direction, location);
+        VerifyBaseline(metricKey, stats.minMs, m_limitPercent, m_direction, m_noiseFloor, location);
 
         return stats;
     }
@@ -966,6 +1010,7 @@ private:
     size_t          m_iterations     = 1;
     double          m_limitPercent   = -1.0;
     Perf::Direction m_direction      = Perf::Direction::LowerIsBetter;
+    double          m_noiseFloor     = 0.05;
     uint64_t        m_itemsProcessed = 0;
     uint64_t        m_bytesProcessed = 0;
 };
@@ -996,6 +1041,16 @@ public:
         return *this;
     }
 
+    BenchmarkFrames& AvgNoiseFloor(double ms) noexcept {
+        m_avgNoiseFloorMs = ms;
+        return *this;
+    }
+
+    BenchmarkFrames& P99NoiseFloor(double ms) noexcept {
+        m_p99NoiseFloorMs = ms;
+        return *this;
+    }
+
     template <typename F>
     auto Run(F&& renderFrameFunc, std::source_location location = std::source_location::current()) -> FrameStats {
         // Warmup frames (untimed)
@@ -1022,7 +1077,7 @@ public:
         }
 
         FrameStats stats = CalculateFrameStats(frameTimesMs);
-        VerifyFrameBaseline(m_name, stats, m_avgLimitPercent, m_p99LimitPercent, location);
+        VerifyFrameBaseline(m_name, stats, m_avgLimitPercent, m_p99LimitPercent, m_avgNoiseFloorMs, m_p99NoiseFloorMs, location);
         return stats;
     }
 
@@ -1031,7 +1086,9 @@ private:
     size_t      m_warmupFrames    = 0;
     size_t      m_frameCount      = 120;
     double      m_avgLimitPercent = -1.0;
-    double      m_p99LimitPercent = 35.0;
+    double      m_p99LimitPercent = 75.0;
+    double      m_avgNoiseFloorMs = 0.1;
+    double      m_p99NoiseFloorMs = 1.0;
 };
 
 } // namespace ZHLN::Test

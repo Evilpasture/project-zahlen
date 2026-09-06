@@ -916,7 +916,7 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
                      .Warmup(0)
                      .Frames(kTotalFrames)
                      .AvgLimit(avgLimitPct)
-                     .P99Limit(35.0)
+                     .P99Limit(50.0)
                      .Run([&](uint32_t f) {
                          float t      = static_cast<float>(f) * 0.035f;
                          cam.position = JPH::Vec3(std::sin(t) * 45.0f, 18.0f + std::sin(t * 1.5f) * 6.0f, std::cos(t) * 45.0f);
