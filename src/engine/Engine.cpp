@@ -718,6 +718,10 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
         // True headless mode: skip GLFW entirely. No display server is required.
         ZHLN::Log("[Engine] Headless mode enabled. Skipping GLFW initialization.");
     } else {
+        glfwSetErrorCallback([](int error, const char* description) -> void {
+            ZHLN::Log("[GLFW Error] Code {}: {}", error, description ? description : "(null)");
+        });
+
         if constexpr (isLinux) {
             // Detects both RenderDoc and NVIDIA Nsight Graphics (Nomad) launch environments
             if (std::getenv("ENABLE_VULKAN_RENDERDOC_CAPTURE") != nullptr || std::getenv("NOMAD_VULKAN_LAYER") != nullptr ||
@@ -727,6 +731,11 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
         }
 
         if (!glfwInit()) {
+            const char* desc = nullptr;
+            int err = glfwGetError(&desc);
+            if (desc != nullptr) {
+                ZHLN::Log("[Engine] glfwInit failed: ({}) {}", err, desc);
+            }
             if (TTYBackend::IsSupported()) {
                 ZHLN::Log("GLFW failed to initialize. Falling back to native TTY Display Mode.");
                 use_tty = true;
