@@ -922,11 +922,19 @@ function(zahlen_enable_reflection TARGET_NAME)
     zahlen_use_custom_libcxx(${TARGET_NAME})
 endfunction()
 
+# Reflection is not a per-target feature: it changes struct layout.
+# InputStateComponent's first member is std::bitset<Reflect::EnumCount<KeyCode>()>,
+# and EnumCount is 72 with P2996 and 0 in the fallback spelling -- so a target
+# compiled without these flags lays mouseX out at offset 4 instead of 16 and
+# silently reads another field. Every target that includes a header whose layout
+# depends on Reflect has to be in this list. zahlen_gui was missing, which is
+# what made Context::Button read the key bitset as the mouse position.
 zahlen_enable_reflection(zahlen_render)
 zahlen_enable_reflection(zahlen_engine)
 zahlen_enable_reflection(zahlen_audio)
 zahlen_enable_reflection(zahlen_physics)
 zahlen_enable_reflection(zahlen_ecs)
+zahlen_enable_reflection(zahlen_gui)
 zahlen_enable_reflection(zahlen_threading)
 zahlen_enable_reflection(zahlen)
 zahlen_enable_reflection(zcook)
