@@ -179,6 +179,7 @@ namespace ZHLN::Test::Perf {
 // ============================================================================
 
 struct MachineBaselines {
+    std::string                   commit;
     std::map<std::string, double> metrics;
 };
 
@@ -197,7 +198,7 @@ struct PerfBaselineFile {
     }
     const std::string text {(std::istreambuf_iterator<char> {file}), std::istreambuf_iterator<char> {}};
 
-    auto parsed = ReflectJSON::TryParse<PerfBaselineFile>(text);
+    auto parsed = ReflectJSON::TryParse<PerfBaselineFile>(text, ReflectJSON::Options {.omitEmpty = true});
     if (!parsed) {
         ZHLN::Println(stderr, "[perf-baseline] {} is malformed; starting a fresh baseline", path.string());
         return {};
@@ -244,12 +245,13 @@ enum class Direction : uint8_t {
 };
 
 struct Result {
-    bool   known     = false; // a previous value existed for this metric
-    double previous  = 0.0;   // that previous value (0.0 when !known)
-    double changePct = 0.0;   // signed change in the WORSE direction (+ = worse)
-    double limitPct  = 0.0;   // limit that was applied
-    bool   regressed = false; // exceeded the limit; the test must fail
-    bool   recorded  = false; // this run's value became the new baseline
+    bool        known        = false; // a previous value existed for this metric
+    double      previous     = 0.0;   // that previous value (0.0 when !known)
+    std::string commit;               // commit/tag of the previous baseline run
+    double      changePct    = 0.0;   // signed change in the WORSE direction (+ = worse)
+    double      limitPct     = 0.0;   // limit that was applied
+    bool        regressed    = false; // exceeded the limit; the test must fail
+    bool        recorded     = false; // this run's value became the new baseline
 };
 
 namespace detail {
@@ -259,10 +261,11 @@ namespace detail {
     // (TestPerformance + TestRenderPerformance under `ctest -j`) cannot
     // clobber each other's metrics.
     struct BaselineStore {
-        ZHLN::Mutex                       mutex;
-        std::map<std::string, double>     baseline; // this machine's last-known values
-        std::map<std::string, double>     pending;  // this process's accepted updates
-        bool                              loaded = false;
+        ZHLN::Mutex                   mutex;
+        std::map<std::string, double> baseline; // this machine's last-known values
+        std::string                   baselineCommit;
+        std::map<std::string, double> pending;  // this process's accepted updates
+        bool                          loaded = false;
 
         ~BaselineStore() {
             SaveNow();
@@ -278,9 +281,12 @@ namespace detail {
             // untouched, and sibling test executables sharing this machine
             // key (cpu.*/render.* namespaces) cannot clobber each other.
             PerfBaselineFile file = LoadBaselineFile(BaselineFilePath());
-            auto&            ours = file.machines[MachineKey()].metrics;
+            auto&            ours = file.machines[MachineKey()];
+            if (!pending.empty() || ours.commit.empty()) {
+                ours.commit = std::string {GitCommitHash};
+            }
             for (const auto& [metric, value]: pending) {
-                ours[metric] = value;
+                ours.metrics[metric] = value;
             }
 
             WriteBaselineAtomically(BaselineFilePath(), ReflectJSON::SerializeJSON(file, 2));
@@ -310,7 +316,8 @@ namespace detail {
         const PerfBaselineFile file = LoadBaselineFile(BaselineFilePath());
         const auto             ours = file.machines.find(MachineKey());
         if (ours != file.machines.end()) {
-            store.baseline = ours->second.metrics;
+            store.baseline       = ours->second.metrics;
+            store.baselineCommit = ours->second.commit;
         }
         store.loaded = true;
     }
@@ -322,11 +329,13 @@ namespace detail {
         store.baseline[key] = value;
         store.pending[key]  = value;
         result.recorded     = true;
+        result.commit       = std::string {GitCommitHash};
         return result;
     }
 
     result.known     = true;
     result.previous  = previous->second;
+    result.commit    = store.baselineCommit;
     const double delta = (direction == Direction::LowerIsBetter) ? (value - result.previous) : (result.previous - value);
     result.changePct = 100.0 * delta / result.previous;
     result.regressed = !RebaselineRequested() && result.changePct > result.limitPct;
@@ -376,12 +385,14 @@ inline void VerifyBaseline(
     const Perf::Result result = Perf::Check(metric, value, limitPercent, direction);
 
     if (result.known) {
+        const std::string commitInfo = result.commit.empty() ? "" : std::format(" [{}]", result.commit);
         ZHLN::Println(
-            "    {}[Baseline]{} {} = {:.3f} (last run: {:.3f}, {:+.1f}% vs limit {:+.1f}%){}", result.regressed ? Color::Red : Color::Green,
-            Color::Reset, metric, value, result.previous, result.changePct, result.limitPct, result.regressed ? "  << REGRESSION" : ""
+            "    {}[Baseline]{} {} = {:.3f} (last run{}: {:.3f}, {:+.1f}% vs limit {:+.1f}%){}", result.regressed ? Color::Red : Color::Green,
+            Color::Reset, metric, value, commitInfo, result.previous, result.changePct, result.limitPct, result.regressed ? "  << REGRESSION" : ""
         );
     } else {
-        ZHLN::Println("    {}[Baseline]{} {} = {:.3f} (first run, baseline recorded)", Color::Green, Color::Reset, metric, value);
+        const std::string commitInfo = GitCommitHash.empty() ? "" : std::format(" [{}]", GitCommitHash);
+        ZHLN::Println("    {}[Baseline]{} {} = {:.3f} (first run{}, baseline recorded)", Color::Green, Color::Reset, metric, value, commitInfo);
     }
 
     if (result.regressed) {

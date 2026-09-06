@@ -71,7 +71,8 @@ struct Version {
     static constexpr std::string_view String = ZHLN_VERSION_STR;
 };
 
-inline constexpr Version EngineVersion {.major = ZHLN_VERSION_MAJOR, .minor = ZHLN_VERSION_MINOR, .patch = ZHLN_VERSION_PATCH};
+inline constexpr Version          EngineVersion {.major = ZHLN_VERSION_MAJOR, .minor = ZHLN_VERSION_MINOR, .patch = ZHLN_VERSION_PATCH};
+inline constexpr std::string_view GitCommitHash = ZHLN_GIT_COMMIT_HASH;
 
 #if defined(__clang__)
 inline constexpr std::string_view Compiler = "Clang (" __VERSION__ ")";

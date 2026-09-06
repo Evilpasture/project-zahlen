@@ -56,12 +56,21 @@ endif()
 find_package(Git QUIET)
 if(GIT_FOUND)
     execute_process(
-        COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
+        COMMAND ${GIT_EXECUTABLE} describe --tags --always
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
         OUTPUT_VARIABLE ZHLN_GIT_HASH
         OUTPUT_STRIP_TRAILING_WHITESPACE
         ERROR_QUIET
     )
+    if(NOT ZHLN_GIT_HASH)
+        execute_process(
+            COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            OUTPUT_VARIABLE ZHLN_GIT_HASH
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+        )
+    endif()
 endif()
 
 if(NOT ZHLN_GIT_HASH)
@@ -302,6 +311,7 @@ endif()
 # instead of each consumer inventing its own path plumbing.
 string(REPLACE "\\" "/" ZHLN_PROJECT_ROOT_FWD "${PROJECT_SOURCE_DIR}")
 add_compile_definitions(ZHLN_PROJECT_ROOT="${ZHLN_PROJECT_ROOT_FWD}")
+add_compile_definitions(ZHLN_GIT_COMMIT_HASH="${ZHLN_GIT_HASH}")
 
 option(ZHLN_IN_DOCKER "Build running inside a Docker container" OFF)
 if(ZHLN_IN_DOCKER)
