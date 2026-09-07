@@ -13,7 +13,6 @@
 #include <Scripting/Lua/LuaScriptRuntime.hpp>
 #endif
 #include "engine/system/GraphicsSettingsSync.hpp"
-#include <GLFW/glfw3.h>
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
@@ -409,8 +408,11 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
 
         if (state != nullptr && pointerInViewport && !transformActive &&
             !state->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton)) && !uiCapturesMouse) {
+            // Window maps GLFW mouse buttons onto the same key stream (see
+            // Window.cpp's mouse-button callback), so the raw level needs no
+            // platform polling here -- the composition root stays GLFW-free.
             static bool wasMouseDown = false;
-            bool        isMouseDown  = glfwGetMouseButton(static_cast<GLFWwindow*>(engine.GetWindow().GetNativeHandle()), GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+            const bool  isMouseDown  = state->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LButton));
 
             if (isMouseDown && !wasMouseDown) {
                 auto hit                           = CastPickingRay(engine, cam, sceneViewport);
