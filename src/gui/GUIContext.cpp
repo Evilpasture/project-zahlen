@@ -78,16 +78,19 @@ struct Context::Impl {
     // runs of '?' because MeasureText maps bytes outside 32..127 to '?'.
     // Every string handed to Clay is therefore copied in on the way through,
     // and the arena is dropped at the top of the next BeginFrame, by which time
-    // the previous frame's render commands have all been consumed. std::deque
-    // never invalidates pointers to existing elements on push_back, which a
-    // growing std::vector would.
-    std::deque<char> stringArena;
+    // the previous frame's render commands have all been consumed. Each interned
+    // string needs its OWN contiguous buffer: a flat std::deque<char> keeps
+    // element pointers stable but stores bytes in 4096-byte chunks, so a label
+    // straddling a chunk boundary handed Clay a chars pointer whose read runs
+    // off the end of the block (ASan heap-buffer-overflow in Clay's hasher).
+    // std::deque<std::string> gives both properties: emplace_back never moves
+    // an already-constructed element, and each std::string owns contiguous bytes.
+    std::deque<std::string> stringArena;
 
     auto Intern(std::string_view sv) -> Clay_String {
-        const size_t offset = stringArena.size();
-        stringArena.insert(stringArena.end(), sv.begin(), sv.end());
-        stringArena.push_back('\0');
-        return Clay_String {.isStaticallyAllocated = false, .length = static_cast<int32_t>(sv.size()), .chars = &stringArena[offset]};
+        auto& stored = stringArena.emplace_back(sv);
+        stored.push_back('\0');
+        return Clay_String {.isStaticallyAllocated = false, .length = static_cast<int32_t>(sv.size()), .chars = stored.data()};
     }
 
     // Characters and editing keys arrive from the window between frames, not

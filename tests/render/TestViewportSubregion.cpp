@@ -212,6 +212,12 @@ struct ViewportSubregionTestSuite {
             );
             ZHLN::Test::ExpectTrue(reg.IsAlive(box));
 
+            // The engine is pooled across suites; force one target recreate so
+            // the measurement starts from cleared targets instead of whatever
+            // the previous suite left in colour/history buffers.
+            rc.SetResolution(ZHLN::Extent2D {.width = 960, .height = 540});
+            ZHLN::Test::Headless::TickFrames(*engine, 2);
+
             // Two bands, same height, different widths: with a correct aspect
             // chain the subject's pixel bbox is identical in both.
             const uint32_t H     = 540;
