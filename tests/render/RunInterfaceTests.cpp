@@ -3,7 +3,7 @@
 
 // tests/render/RunInterfaceTests.cpp
 //
-// Entry point for the GPU_Interface group binary: ImGui, UI layout and viewmodel presentation.
+// Entry point for the GPU_Interface group binary: UI layout and viewmodel presentation.
 //
 // Each Test*.cpp keeps its suite definition and its anonymous-namespace
 // helpers private to its own translation unit and exports a stats-returning

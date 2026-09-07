@@ -386,8 +386,8 @@ struct Components {
         bool  wantsToSprint  = false;
     };
     // Singleton-style raw device state. Written by window/TTY event pumps;
-    // read by systems via registry. UI capture flags are filled by Engine after
-    // ImGui::NewFrame so systems never touch ImGui headers.
+    // read by systems via registry. The UI capture flags are filled each frame
+    // from the native GUI, so systems never touch GUI internals.
     //
     // Member functions keep injection / query logic on the component itself —
     // there is no InputManager and no parallel helper translation unit.
@@ -483,7 +483,7 @@ struct Components {
             mouseWheel  = 0.0f;
         }
 
-        // Gameplay: gated by ImGui / UI capture flags.
+        // Gameplay: gated by the UI capture flags.
         [[nodiscard]] bool IsKeyDown(uint8_t key) const noexcept {
             if (key == 0 || key >= keys.size() || wantCaptureKeyboard) {
                 return false;

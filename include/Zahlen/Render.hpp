@@ -133,7 +133,6 @@ class ZHLN_API RenderContext {
 
     [[nodiscard]] RenderResult BeginFrame() noexcept;
     [[nodiscard]] RenderResult EndFrame() noexcept;
-    void                       BeginImGuiFrame() noexcept;
     void                       SetResolution(const Extent2D& resolution);
 
     /// Sub-rectangle of the framebuffer the 3D scene renders into, in pixels

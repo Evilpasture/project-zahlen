@@ -219,7 +219,7 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
         })
         // VK_EXT_descriptor_heap: the whole scene binding model now lives in
         // descriptor heaps; the legacy set path remains only for passes that
-        // have not been ported yet (post-processing, volumetric, ImGui, ...).
+        // have not been ported yet (post-processing, volumetric, ...).
         .Require<VkPhysicalDeviceDescriptorHeapFeaturesEXT>([](auto& f) -> auto { f.descriptorHeap = VK_TRUE; })
         // Pipelines declare a stencil attachment format derived from the depth
         // format, but only some passes actually bind stencil; this feature lets

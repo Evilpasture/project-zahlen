@@ -238,9 +238,6 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
     );
 }
 
-void RenderContext::BeginImGuiFrame() noexcept {
-}
-
 auto RenderContext::BeginFrame() noexcept -> RenderResult {
     using enum RenderFrameResult;
 

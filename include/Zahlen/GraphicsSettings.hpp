@@ -7,7 +7,7 @@
 //
 // Data flow (one direction, one writer per hop):
 //
-//   UI (ImGui) / Lua scripts / quality presets
+//   UI / Lua scripts / quality presets
 //        │ write
 //        ▼
 //   ECS components (editing surface: PostProcessSettingsComponent,

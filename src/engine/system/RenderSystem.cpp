@@ -77,7 +77,7 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
     }
 
     // --- Single graphics-settings sync point --------------------------------
-    // ECS components are the editing surface (ImGui / scripts / presets);
+    // ECS components are the editing surface (GUI / scripts / presets);
     // GraphicsSettings is the canonical model. One collect + delta-detected
     // apply per frame replaces the former scattered SetGISettings /
     // SetAAState / SetShadowResolution calls: anything that mutates the

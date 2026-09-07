@@ -110,7 +110,7 @@ inline constexpr TextureHandle FlatNormal = TextureHandle(3);
 
 struct UIBatch {
     TextureHandle texture              = TextureHandle::Invalid;
-    uint32_t      bindlessTextureIndex = 0; // Non-zero bypasses TextureManager lookup (ImGui/user bindless IDs)
+    uint32_t      bindlessTextureIndex = 0; // Non-zero bypasses TextureManager lookup (user bindless IDs)
     uint32_t      vertexStart          = 0;
     uint32_t      vertexCount          = 0;
     bool          useScissor           = false;

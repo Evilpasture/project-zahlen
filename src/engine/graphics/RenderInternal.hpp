@@ -603,7 +603,6 @@ struct RenderContext::Impl {
 
     VkCommandBuffer                           current_cmd = VK_NULL_HANDLE;
     Vk::CommandBuffer<Vk::QueueType::Compute> current_compute_cmd;
-    bool                                      imguiFrameOpen = false;
 
     std::unique_ptr<Vk::StagingContext>    stagingContext;
     Vk::DeletionQueue                      deletionQueue;
