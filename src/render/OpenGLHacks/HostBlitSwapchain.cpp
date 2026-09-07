@@ -62,26 +62,14 @@
 //
 // ============================================================================
 
-// GL_GLEXT_PROTOTYPES must be defined BEFORE the first GL header inclusion:
-// on Linux, <GLFW/glfw3.h> below pulls in <GL/gl.h>, and libglvnd's gl.h
-// includes <GL/glext.h> itself -- glext.h's include guard then makes any
-// later definition moot. glWindowPos2i (GL 1.4, ARB_window_pos) only gets a
-// prototype when the macro is already set at that first inclusion. (Mesa's
-// gl.h does NOT self-include glext.h; libglvnd's -- what Arch and friends
-// ship -- does, so the define cannot live after the GLFW include.)
-#if !defined(__APPLE__) && !defined(GL_GLEXT_PROTOTYPES)
-#define GL_GLEXT_PROTOTYPES 1
-#endif
+// The host presenter is a macOS-only escape hatch. Keep the real implementation
+// entirely behind this branch: non-Apple builds compile only this file's inert
+// definitions below and never include an OpenGL or GLFW header.
+#if defined(__APPLE__)
 
 #include <GLFW/glfw3.h>
-#include <Rendering.hpp> // Vulkan core (PCH of the render module)
-
-#if defined(__APPLE__)
 #include <OpenGL/gl.h> // legacy 2.1 API: glDrawPixels & friends
-#else
-#include <GL/gl.h>
-#include <GL/glext.h> // glWindowPos2i prototype when nothing pulled GL in yet
-#endif
+#include <Rendering.hpp> // Vulkan core (PCH of the render module)
 
 #include <cstdint>
 #include <cstdio>
@@ -504,3 +492,27 @@ void Shutdown() noexcept {
 }
 
 } // namespace ZHLN::HostBlit
+
+#else
+
+#include "HostBlit.hpp"
+
+namespace ZHLN::HostBlit {
+
+// The target remains available on every platform so build graphs and callers do
+// not need platform-specific target checks. Native swapchain presentation is
+// used everywhere except macOS, therefore these functions must be inert.
+[[nodiscard]] bool Init(VkPhysicalDevice, VkDevice, VkQueue, uint32_t) noexcept {
+    return false;
+}
+
+[[nodiscard]] bool Present(const ZHLN::Vk::Image&, GLFWwindow*, uint32_t, uint32_t, VkFormat, VkImageLayout) noexcept {
+    return false;
+}
+
+void Shutdown() noexcept {
+}
+
+} // namespace ZHLN::HostBlit
+
+#endif // defined(__APPLE__)
