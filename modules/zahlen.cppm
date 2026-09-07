@@ -155,7 +155,7 @@ module;
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Format.hpp>
-#include <Zahlen/GUI.hpp>
+#include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/IK.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>

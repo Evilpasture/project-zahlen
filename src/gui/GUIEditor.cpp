@@ -3,7 +3,7 @@
 //
 // src/gui/GUIEditor.cpp
 //
-// Native editor panels (Hierarchy + Inspector). See include/Zahlen/GUIEditor.hpp
+// Native editor panels (Hierarchy + Inspector). See include/Zahlen/gui/GUIEditor.hpp
 // for the design notes; this file is where the reflection iteration lives, so
 // that the transpiler fallback (tools/transpile_reflection.py, which rewrites
 // reflection calls by translation-unit source offset) sees and flattens it.
@@ -13,8 +13,8 @@
 #include <Zahlen/Core/Format.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Core/Reflection.hpp>
-#include <Zahlen/GUI.hpp>
-#include <Zahlen/GUIEditor.hpp>
+#include <Zahlen/gui/GUI.hpp>
+#include <Zahlen/gui/GUIEditor.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/gui/UIComponents.hpp>

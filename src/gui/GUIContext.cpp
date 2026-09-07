@@ -7,7 +7,7 @@
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/CreativeWorksManager.hpp>
 #include <Zahlen/Engine.hpp>
-#include <Zahlen/GUI.hpp>
+#include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Render.hpp>

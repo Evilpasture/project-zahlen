@@ -403,7 +403,7 @@ When porting prototype gameplay or math logic from a **TypeScript + Three.js + R
 | **Clip Depth Range** | $[-1, 1]$ (WebGL) | $[0, 1]$ (Vulkan) | ⚠️ **Use `Math::CreatePerspective`** |
 | **Euler Rotation Order** | Default: 'XYZ' | Default: 'YXZ' (Yaw, Pitch, Roll) | Use `MathUtils::EulerYXZ` or `EulerXYZ` |
 
-## 8. Native ECS UI (`Zahlen/GUI.hpp`)
+## 8. Native ECS UI (`Zahlen/gui/GUI.hpp`)
 
 ImGui stays for debug overlays; in-engine tooling is built with the engine's own
 UI toolkit. It obeys the Core Law: there is no widget object. A `GUI::Context`
