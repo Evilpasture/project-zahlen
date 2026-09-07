@@ -325,6 +325,10 @@ auto PhysicsContext::GetMemoryUsage() const -> size_t {
     return _impl->tempAllocator->GetSize();
 }
 
+void PhysicsContext::TraceDiagnostics() const {
+    ZHLN::Trace(_impl->world);
+}
+
 void PhysicsContext::OptimizeBroadphase() {
     _impl->physicsSystem.OptimizeBroadPhase();
 }
@@ -794,6 +798,39 @@ auto PhysicsContext::TryGetBodyPosition(Entity handle, JPH::RVec3& outPosition) 
         }
         const size_t base = static_cast<size_t>(dense) * 4;
         outPosition = JPH::RVec3(world.positions[base], world.positions[base + 1], world.positions[base + 2]);
+        return true;
+    });
+}
+
+auto PhysicsContext::TryGetBodyState(Entity handle, Physics::BodyStateSnapshot& outState) const noexcept -> bool {
+    const auto& world = _impl->world;
+    return ZHLN::Lock(world.sync.shadowLock, [&] -> bool {
+        if (handle.index >= world.slotCapacity || world.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
+            return false;
+        }
+
+        const uint8_t slotState = world.slotStates[handle.index].load(std::memory_order::acquire);
+        if (!Physics::GetSlotPredicate(slotState).isActive) {
+            return false;
+        }
+
+        const uint32_t dense = world.slotToDense[handle.index];
+        if (dense >= world.count.load(std::memory_order::acquire)) {
+            return false;
+        }
+
+        const size_t base = static_cast<size_t>(dense) * 4;
+        outState.previousPosition = JPH::Vec3(
+            static_cast<float>(world.prevPositions[base]), static_cast<float>(world.prevPositions[base + 1]),
+            static_cast<float>(world.prevPositions[base + 2])
+        );
+        outState.currentPosition = JPH::Vec3(
+            static_cast<float>(world.positions[base]), static_cast<float>(world.positions[base + 1]), static_cast<float>(world.positions[base + 2])
+        );
+        outState.previousRotation =
+            JPH::Quat(world.prevRotations[base], world.prevRotations[base + 1], world.prevRotations[base + 2], world.prevRotations[base + 3]);
+        outState.currentRotation = JPH::Quat(world.rotations[base], world.rotations[base + 1], world.rotations[base + 2], world.rotations[base + 3]);
+        outState.isCharacter = slotState == Physics::SLOT_CHARACTER;
         return true;
     });
 }

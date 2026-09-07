@@ -120,9 +120,13 @@ target_link_libraries(zahlen_render PUBLIC
     spirv_reflect
 )
 
-target_include_directories(zahlen_render PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${PROJECT_SOURCE_DIR}/include
+# The backend's Vulkan implementation headers are intentionally private.
+# Consumers use <Zahlen/Render.hpp>, never files from src/vulkan/.
+target_include_directories(zahlen_render
+    PUBLIC
+        ${PROJECT_SOURCE_DIR}/include
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 # Volk's headers are part of the public surface (RenderCore.h includes

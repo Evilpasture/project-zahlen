@@ -7,8 +7,8 @@
 #include "Zahlen/Engine.hpp"
 #include "Zahlen/Log.hpp"
 #include "Zahlen/Types.hpp"
-#include "engine/FileWatcher.hpp"
-#include "engine/Platform.hpp"
+#include <Zahlen/FileWatcher.hpp>
+#include "Platform.hpp"
 #include <filesystem>
 #include <string>
 #include <string_view>

@@ -3,7 +3,7 @@
 
 // File: src/render/RenderInternal.hpp
 #pragma once
-#include <engine/FileWatcher.hpp>
+#include <Zahlen/FileWatcher.hpp>
 #include "Rendering.hpp"
 #include "TextureManager.hpp" // Private header
 #include <GLFW/glfw3.h>

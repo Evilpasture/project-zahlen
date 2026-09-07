@@ -82,7 +82,11 @@ class ZHLN_API Window {
     [[nodiscard]] bool  IsTTY() const;
     [[nodiscard]] bool  IsHeadless() const;
     [[nodiscard]] void* GetTTYContext() const;
-    bool                ReinitTTY();
+    /// Graphics-backend-neutral instance extensions required by this window.
+    /// Non-TTY windows return an empty list because their presenter owns its
+    /// platform extension selection.
+    [[nodiscard]] std::vector<std::string_view> GetRequiredGraphicsInstanceExtensions() const;
+    bool                                        ReinitTTY();
 
     [[nodiscard]] const WindowInputReceiver& GetInputReceiver() const noexcept;
 

@@ -100,11 +100,17 @@ struct PhysicsTestSuite {
             ZHLN::Test::ExpectTrue(pc.TryGetBodyPosition(sphere, synchronizedPosition));
             ZHLN::Test::ExpectTrue(synchronizedPosition.GetY() < 9.0);
 
+            ZHLN::Physics::BodyStateSnapshot bodyState {};
+            ZHLN::Test::ExpectTrue(pc.TryGetBodyState(sphere, bodyState));
+            ZHLN::Test::ExpectTrue(bodyState.currentPosition.GetY() < 9.0f);
+            ZHLN::Test::ExpectTrue(bodyState.previousPosition.GetY() > bodyState.currentPosition.GetY());
+
             // A queued body destruction invalidates the generation-safe lookup
             // once the following physics step has drained its command queue.
             pc.DestroyBody(sphere);
             pc.Step(1.0f / 60.0f);
             ZHLN::Test::ExpectTrue(!pc.TryGetBodyPosition(sphere, synchronizedPosition));
+            ZHLN::Test::ExpectTrue(!pc.TryGetBodyState(sphere, bodyState));
 
             return {};
         }

@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "PhysicsSystem.hpp"
-#include "engine/system/PhysicsStateSystem.hpp"
+#include "PhysicsStateSystem.hpp"
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Profiler.hpp>
 #include <algorithm>

@@ -140,6 +140,24 @@ if(NOT ZHLN_TESTS_PUBLIC_API_RESULT EQUAL 0)
 endif()
 message(STATUS "${ZHLN_TESTS_PUBLIC_API_OUTPUT}")
 
+# Core implementation directories are hermetic: a subsystem may consume the
+# public include/ surface and its own src/<subsystem>/ headers, never a
+# sibling's private implementation. Keep this configure-time check in lockstep
+# with the target include visibility below.
+execute_process(
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_subsystem_boundaries.py"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    RESULT_VARIABLE ZHLN_SUBSYSTEM_BOUNDARIES_RESULT
+    OUTPUT_VARIABLE ZHLN_SUBSYSTEM_BOUNDARIES_OUTPUT
+    ERROR_VARIABLE ZHLN_SUBSYSTEM_BOUNDARIES_ERROR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_STRIP_TRAILING_WHITESPACE
+)
+if(NOT ZHLN_SUBSYSTEM_BOUNDARIES_RESULT EQUAL 0)
+    message(FATAL_ERROR "${ZHLN_SUBSYSTEM_BOUNDARIES_ERROR}")
+endif()
+message(STATUS "${ZHLN_SUBSYSTEM_BOUNDARIES_OUTPUT}")
+
 # Reflection internals live in include/Zahlen/Core/Reflection.hpp and nowhere
 # else; module interface units must never declare a detail namespace -- module
 # internals are internal by not being exported, and a detail namespace only
@@ -622,7 +640,14 @@ target_include_directories(zahlen_engine SYSTEM PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/clay
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/cgltf
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/stb
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+# The engine target composes src/engine with the high-level src/render layer.
+# That layer consumes renderer-backend implementation types, so expose only
+# src/vulkan privately to this composed target rather than the entire src/
+# tree. No other subsystem implementation directory is searchable here.
+target_include_directories(zahlen_engine PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/vulkan
 )
 
 # --- SHADER COMPILATION ---
@@ -671,9 +696,9 @@ add_executable(zahlen
 target_link_libraries(zahlen PRIVATE zahlen_engine Jolt)
 target_compile_definitions(zahlen PRIVATE JPH_DOUBLE_PRECISION)
 
-# The composition root reaches engine internals (engine/Platform.hpp,
-# physics/PhysicsWorld.hpp). While it lived at src/main.cpp those resolved
-# relative to the file; from app/ the path has to be explicit.
+# The composition root wires engine-private platform and editor services. It is
+# intentionally the only non-subsystem target that can see src/; core targets
+# themselves are restricted to their local implementation directories.
 target_include_directories(zahlen PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 set_target_properties(zahlen PROPERTIES

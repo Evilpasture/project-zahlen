@@ -41,8 +41,34 @@ enum ID : uint8_t { NON_MOVING = 0, MOVING = 1, NUM_LAYERS = 2 };
 
 namespace Physics {
 struct PhysicsWorld;
-struct DebugDrawData;
 struct ContactEvent;
+
+/// GPU-ready vertex emitted by the physics debug renderer. The renderer may
+/// consume this data, but it must not include physics implementation headers.
+struct DebugVertex {
+    float    x, y, z;
+    uint32_t color;
+};
+
+/// Read-only debug geometry owned by PhysicsContext until its next extraction.
+struct DebugDrawData {
+    const DebugVertex* lines     = nullptr;
+    size_t             lineCount = 0;
+    const DebugVertex* triangles = nullptr;
+    size_t             triangleCount = 0;
+};
+
+/// A coherent, generation-safe snapshot of a synchronized physics body.
+/// Positions and rotations are sampled together while the physics-world lock
+/// is held, so callers never need the private dense-slot or SoA layout.
+struct BodyStateSnapshot {
+    JPH::Vec3 previousPosition = JPH::Vec3::sZero();
+    JPH::Vec3 currentPosition  = JPH::Vec3::sZero();
+    JPH::Quat previousRotation = JPH::Quat::sIdentity();
+    JPH::Quat currentRotation  = JPH::Quat::sIdentity();
+    bool      isCharacter      = false;
+};
+
 enum class ShapeType : uint8_t { Box = 0, Sphere = 1, Capsule = 2, Cylinder = 3, Plane = 4 };
 
 enum class ConstraintType : uint8_t { Fixed, Point, Hinge, Slider, Cone, Distance };
@@ -181,6 +207,8 @@ class ZHLN_API PhysicsContext {
     void               Step(float deltaTime);
     [[nodiscard]] auto GetActiveBodyCount() const -> uint32_t;
     [[nodiscard]] auto GetMemoryUsage() const -> size_t;
+    /// Emits a structured diagnostic trace without exposing PhysicsWorld.
+    void TraceDiagnostics() const;
 
     struct Impl;
     [[nodiscard]] auto GetImpl() const -> Impl* {
@@ -242,6 +270,9 @@ class ZHLN_API PhysicsContext {
     void AddRagdollImpulse(JPH::Ragdoll& ragdoll, uint32_t jointIndex, JPH::Vec3Arg impulse) noexcept;
     /// Reads a live physics slot's synchronized center-of-mass position.
     [[nodiscard]] bool TryGetBodyPosition(Entity handle, JPH::RVec3& outPosition) const noexcept;
+    /// Reads the synchronized interpolation history without exposing private
+    /// physics storage or slot bookkeeping.
+    [[nodiscard]] bool TryGetBodyState(Entity handle, Physics::BodyStateSnapshot& outState) const noexcept;
     /// Extracts the physical ragdoll pose under the physics-world lock.
     [[nodiscard]] bool GetRagdollPose(JPH::Ragdoll& ragdoll, JPH::RVec3& outRootOffset, JPH::Mat44* outWorldJoints) const noexcept;
 

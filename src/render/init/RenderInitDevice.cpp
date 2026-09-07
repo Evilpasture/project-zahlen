@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // File: src/render/init/RenderInitDevice.cpp
-#include <engine/TTYBackend.hpp>
 #include "../OpenGLHacks/HostBlit.hpp"
 #include "../RenderInternal.hpp"
 #include <Features.hpp>
@@ -150,7 +149,7 @@ auto GetPlatformInstanceExtensions(Window& window) noexcept -> std::expected<Vk:
         // True headless mode: no surface extensions required. GLFW is not
         // initialised, so we must not call any GLFW functions here.
     } else if (window.IsTTY()) {
-        for (const auto ext: TTYBackend::GetRequiredInstanceExtensions()) {
+        for (const auto ext: window.GetRequiredGraphicsInstanceExtensions()) {
             builder.Require(ext);
         }
     } else {

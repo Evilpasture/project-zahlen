@@ -16,7 +16,6 @@
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
-#include "physics/PhysicsWorld.hpp"
 #include <Jolt/Physics/Collision/CastResult.h>
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Camera.hpp>

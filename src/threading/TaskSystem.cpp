@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "engine/Platform.hpp"
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
@@ -9,6 +8,11 @@
 #include <mutex>
 #include <queue> // Replaced vector with queue
 #include <thread>
+
+#if defined(__APPLE__)
+#include <pthread.h>
+#include <pthread/qos.h>
+#endif
 
 namespace ZHLN::TaskSystem {
 
@@ -108,6 +112,12 @@ struct TaskSystemDeinitGuard {
 };
 TaskSystemDeinitGuard s_deinitGuard;
 
+void SetCurrentThreadHighPriority() noexcept {
+#if defined(__APPLE__)
+    pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+#endif
+}
+
 // --- The Infinite Loop every Fiber runs ---
 void FiberMain(void* arg) {
     auto* data = static_cast<FiberData*>(arg);
@@ -153,7 +163,7 @@ inline void RecycleFiber(Fiber* f) noexcept {
 
 // --- The Infinite Loop every OS Thread runs ---
 void WorkerMain(uint32_t index) {
-    Platform::SetHighPriority();
+    SetCurrentThreadHighPriority();
     Fiber::InitMainThread();
     t_workerIndex = index;
 
@@ -182,7 +192,7 @@ void Init(uint32_t numThreads, uint32_t numFibers, size_t stackSize) {
     if (!s_threads.empty() || !s_fiberPool.empty()) {
         return;
     }
-    Platform::SetHighPriority();
+    SetCurrentThreadHighPriority();
     Fiber::InitMainThread();
     s_readyQueue.Reset();
     s_freeQueue.Reset();

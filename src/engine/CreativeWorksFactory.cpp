@@ -24,10 +24,10 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdlib>
-#include <engine/system/AnimationSystem.hpp>
-#include <engine/system/ArticulationSystem.hpp>
-#include <engine/system/LightingSystem.hpp>
-#include <engine/system/TerrainSystem.hpp>
+#include "AnimationSystem.hpp"
+#include "ArticulationSystem.hpp"
+#include "LightingSystem.hpp"
+#include "TerrainSystem.hpp"
 #include <filesystem>
 #include <stb_image.h>
 #define STB_TRUETYPE_IMPLEMENTATION
