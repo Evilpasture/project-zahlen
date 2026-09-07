@@ -460,45 +460,6 @@ if(APPLE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-enum-enum-conversion -Wno-deprecated-anon-enum-enum-conversion")
 endif()
 
-
-
-set(RAW_ENGINE_SOURCES
-    src/engine/AssertHandler.cpp
-    src/engine/DefaultPreset.cpp
-    src/engine/Engine.cpp
-    src/engine/CreativeWorksFactory.cpp
-    src/engine/system/TextureSystem.cpp
-    src/engine/system/AnimationSystem.cpp
-    src/engine/CreativeWorksManager.cpp
-    src/engine/Window.cpp
-    src/engine/Platform.cpp
-    src/engine/Console.cpp
-    src/engine/Profiler.cpp
-    src/engine/system/RenderSystem.cpp
-    src/engine/system/GraphicsSettingsSync.cpp
-    src/engine/system/DecalSystem.cpp
-    src/engine/system/MovementSystem.cpp
-    src/engine/system/AudioSystem.cpp
-    src/engine/system/ArticulationSystem.cpp
-    src/engine/system/CullingSystem.cpp
-    src/engine/system/PhysicsSystem.cpp
-    src/engine/system/TerrainSystem.cpp
-    src/engine/system/LODSystem.cpp
-    src/engine/system/ParticleSystem.cpp
-    src/engine/CommandLine.cpp
-    src/engine/system/TargetCameraSystem.cpp
-    src/engine/TTYBackend.cpp
-    src/engine/system/TransformSystem.cpp
-    src/engine/system/PhysicsStateSystem.cpp
-    src/engine/system/LightingSystem.cpp
-    src/engine/system/InputSystem.cpp
-    src/engine/system/CameraSystem.cpp
-    src/engine/system/InteractionSystem.cpp
-    src/engine/WindowSurface.cpp
-    src/engine/Scene.cpp
-    src/engine/ScriptRunner.cpp
-)
-
 find_library(ZSTD_LIBRARY NAMES zstd zstd_static HINTS "/opt/homebrew/lib" "/usr/local/lib" "/usr/lib")
 if(NOT ZSTD_LIBRARY)
     message(FATAL_ERROR "Could not find zstd library. Please install it (e.g., 'brew install zstd').")
@@ -544,12 +505,12 @@ endif()
 string(STRIP "${COMPILER_FLAGS_LIST}" COMPILER_FLAGS_LIST)
 string(REGEX REPLACE " +" " " COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST}")
 
-zahlen_transpile_sources(ENGINE_SOURCES ${RAW_ENGINE_SOURCES})
+add_library(zahlen_engine SHARED)
 
-add_library(zahlen_engine SHARED ${ENGINE_SOURCES})
-
-# The engine renderer owns its source list and attaches it to zahlen_engine.
-# Keep the Vulkan backend above so this layer can consume its public headers.
+# Engine implementation and renderer each own their source lists and attach to
+# zahlen_engine. Keep the Vulkan backend above so these layers can consume its
+# public headers.
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/engine)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/render)
 
 # The renderer (and Volk inside it) must bind to THIS image's symbols:
