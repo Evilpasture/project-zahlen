@@ -39,8 +39,8 @@
 #include <string>
 #include <string_view>
 #include <toml/SceneTOML.hpp>
-#include <unordered_map>
 #include <toml/TOML.hpp>
+#include <unordered_map>
 #include <vector>
 
 namespace {
@@ -90,8 +90,11 @@ struct TOMLTestSuite {
          */
         std::expected<void, ZHLN::Error> tables_are_emitted_after_the_scalars_that_belong_to_them() {
             const Config config {
-                .name = "arena", .revision = 7, .slots = {1, 2, 3}, .window = {.width = 1920, .height = 1080, .fullscreen = true},
-                .route = {{.label = "start", .at = {0.0f, 1.0f, 0.0f}}, {.label = "end", .at = {4.0f, 1.0f, -2.0f}}}
+                .name     = "arena",
+                .revision = 7,
+                .slots    = {1, 2, 3},
+                .window   = {.width = 1920, .height = 1080, .fullscreen = true},
+                .route    = {{.label = "start", .at = {0.0f, 1.0f, 0.0f}}, {.label = "end", .at = {4.0f, 1.0f, -2.0f}}}
             };
 
             const std::string text = ZHLN::ReflectTOML::SerializeTOML(config);
@@ -143,8 +146,8 @@ struct TOMLTestSuite {
                 .route      = {{.label = "a", .at = {1.0f, 2.0f, 3.0f}}}
             };
 
-            const std::string  text   = ZHLN::ReflectTOML::SerializeTOML(original);
-            const auto         parsed = ZHLN::ReflectTOML::TryParse<Config>(text);
+            const std::string text   = ZHLN::ReflectTOML::SerializeTOML(original);
+            const auto        parsed = ZHLN::ReflectTOML::TryParse<Config>(text);
             if (!ZHLN::Test::ExpectTrue(parsed.has_value())) {
                 return {};
             }
@@ -391,8 +394,8 @@ intensity = 250.0
                 ZHLN::Test::ExpectEq(scene->lights[0].type, "Point");
             }
 
-            const std::string emitted   = ZHLN::ReflectTOML::SerializeTOML(*scene);
-            const auto        reparsed  = ZHLN::ReflectTOML::TryParse<ZHLN::Scene::Scene>(emitted);
+            const std::string emitted  = ZHLN::ReflectTOML::SerializeTOML(*scene);
+            const auto        reparsed = ZHLN::ReflectTOML::TryParse<ZHLN::Scene::Scene>(emitted);
             if (!ZHLN::Test::ExpectTrue(reparsed.has_value())) {
                 ZHLN::Println("    [INFO] re-emitted scene:\n{}", emitted);
                 return {};
@@ -489,14 +492,14 @@ intensity = 250.0
                                                                      .giIntensity     = 2.5f,
                                                                      .enableSSR       = 0,
                                                                      .enableRTR       = 1,
-                                                                     .ambientExposure = 40.0f,
                                                                      .exposure        = 0.02f,
                                                                      .bloomStrength   = 0.75f,
                                                                      .contrast        = 1.15f,
                                                                      .saturation      = 0.8f,
                                                                      .tonemapper      = 3,
                                                                      .colorFilter     = JPH::Vec3(1.0f, 0.9f, 0.8f),
-                                                                     .skyZenith       = JPH::Vec4(0.5f, 0.25f, 0.125f, 1.0f)
+                                                                     .ambientExposure = 40.0f,
+                                                                     .skyZenith       = JPH::Vec4(0.5f, 0.25f, 0.125f, 1.0f),
                                                                  }
             );
 
@@ -510,14 +513,10 @@ intensity = 250.0
                     .scale    = JPH::Vec3(2.0f, 2.0f, 2.0f)
                 },
                 ZHLN::Components::MeshComponent {.meshAsset = 1, .materialAsset = 2, .cullRadius = 2.0f},
-                ZHLN::Components::PBRComponent {.roughness = 0.25f, .metallic = 0.75f},
-                ZHLN::Components::PhysicsComponent {},
+                ZHLN::Components::PBRComponent {.roughness = 0.25f, .metallic = 0.75f}, ZHLN::Components::PhysicsComponent {},
                 ZHLN::Components::PhysicsStateComponent {},
                 ZHLN::Components::SceneSourceComponent {
-                    .shape                 = ZHLN::Scene::ShapeKind::Box,
-                    .halfExtents           = {1.5f, 0.5f, 2.5f},
-                    .extent                = 10.0f,
-                    .emissiveVirtualLights = true
+                    .shape = ZHLN::Scene::ShapeKind::Box, .halfExtents = {1.5f, 0.5f, 2.5f}, .extent = 10.0f, .emissiveVirtualLights = true
                 }
             );
 
@@ -525,8 +524,7 @@ intensity = 250.0
             // what the spawners leave behind for a body that cannot move.
             registry.Create(
                 ZHLN::Components::NameComponent {.name = ZHLN::String64 {"SavedGround"}}, ZHLN::Components::MeshComponent {},
-                ZHLN::Components::PhysicsComponent {},
-                ZHLN::Components::SceneSourceComponent {.shape = ZHLN::Scene::ShapeKind::Plane, .extent = 35.0f}
+                ZHLN::Components::PhysicsComponent {}, ZHLN::Components::SceneSourceComponent {.shape = ZHLN::Scene::ShapeKind::Plane, .extent = 35.0f}
             );
 
             registry.Create(
@@ -536,15 +534,12 @@ intensity = 250.0
 
             // Not scene content: no provenance, so Extract leaves it out rather
             // than guessing that it is a box.
-            registry.Create(
-                ZHLN::Components::NameComponent {.name = ZHLN::String64 {"RuntimeProp"}}, ZHLN::Components::MeshComponent {}
-            );
+            registry.Create(ZHLN::Components::NameComponent {.name = ZHLN::String64 {"RuntimeProp"}}, ZHLN::Components::MeshComponent {});
 
             registry.Create(
                 ZHLN::Components::NameComponent {.name = ZHLN::String64 {"SavedSun"}},
                 ZHLN::Components::TransformComponent {
-                    .position = JPH::Vec3(4.0f, 5.0f, 6.0f),
-                    .rotation = ZHLN::Math::EulerDegreesToQuat(JPH::Vec3(50.0f, -35.0f, 0.0f))
+                    .position = JPH::Vec3(4.0f, 5.0f, 6.0f), .rotation = ZHLN::Math::EulerDegreesToQuat(JPH::Vec3(50.0f, -35.0f, 0.0f))
                 },
                 ZHLN::Components::LightComponent {
                     .type        = ZHLN::LightType::Sun,
@@ -572,7 +567,7 @@ intensity = 250.0
             // that lives in the material table. Extract asks for a lookup rather
             // than a RenderContext, so this supplies one directly -- no device.
             std::unordered_map<ZHLN::MaterialID, ZHLN::Material> materials;
-            ZHLN::Material boxMaterial {};
+            ZHLN::Material                                       boxMaterial {};
             boxMaterial.baseColorFactor[0] = 0.1f;
             boxMaterial.baseColorFactor[1] = 0.6f;
             boxMaterial.baseColorFactor[2] = 0.95f;
@@ -581,14 +576,12 @@ intensity = 250.0
             materials[2]                   = boxMaterial;
 
             const auto scene = ZHLN::Scene::Extract(
-                camera, registry, ZHLN::Scene::MaterialLookup {
-                                      .userdata = &materials,
-                                      .find     = [](const void* userdata, ZHLN::MaterialID id) -> std::optional<ZHLN::Material> {
-                                          const auto& table = *static_cast<const std::unordered_map<ZHLN::MaterialID, ZHLN::Material>*>(userdata);
-                                          const auto  hit   = table.find(id);
-                                          return hit == table.end() ? std::nullopt : std::optional<ZHLN::Material> {hit->second};
-                                      }
-                                  }
+                camera, registry,
+                ZHLN::Scene::MaterialLookup {.userdata = &materials, .find = [](const void* userdata, ZHLN::MaterialID id) -> std::optional<ZHLN::Material> {
+                                                 const auto& table = *static_cast<const std::unordered_map<ZHLN::MaterialID, ZHLN::Material>*>(userdata);
+                                                 const auto  hit   = table.find(id);
+                                                 return hit == table.end() ? std::nullopt : std::optional<ZHLN::Material> {hit->second};
+                                             }}
             );
 
             // Three of the four mesh entities and one of the two lights carry
