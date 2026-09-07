@@ -11,6 +11,7 @@
 #include <Zahlen/gui/TextBuffer.hpp>
 #include <concepts>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -177,6 +178,18 @@ class ZHLN_API Context {
 
     // --- State Inspection ---
     [[nodiscard]] bool IsItemHovered() const noexcept;
+
+    /// Rectangle, in window pixels with a top-left origin, that the element
+    /// registered under @p id (the same string handed to Box/Button) occupied
+    /// in LAST frame's layout. Returns nothing until the element has been laid
+    /// out at least once -- callers keep their fallback for the first frame.
+    struct ElementRect {
+        float x      = 0.0f;
+        float y      = 0.0f;
+        float width  = 0.0f;
+        float height = 0.0f;
+    };
+    [[nodiscard]] std::optional<ElementRect> GetLastFrameRect(std::string_view id) const noexcept;
     [[nodiscard]] bool IsItemActive() const noexcept;
 
     bool Checkbox(std::string_view label, bool& checked) noexcept;

@@ -20,7 +20,6 @@
 #include <Jolt/Physics/Collision/CastResult.h>
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Camera.hpp>
-#include <clay.h>
 #include <Zahlen/Clock.hpp>
 #include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
@@ -321,9 +320,15 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
 
         auto winSize = engine.GetWindow().GetSize();
 
+        // A cheap handle over the Impl the registry owns (GUIStateComponent),
+        // so building it here costs a pointer and lets the viewport bounds and
+        // the gating below ask about last frame's layout and text focus. The
+        // same handle is handed to the frame builder.
+        ZHLN::GUI::Context gui(engine);
+
         // Dynamic scene viewport: the 3D composition targets the centre
         // column between the two panels. Read the panels' REAL boxes from last
-        // frame's Clay layout; the constants are only the first-frame fallback
+        // frame's GUI layout; the constants are only the first-frame fallback
         // before any layout exists. The rectangle goes to the RenderContext as
         // a fixed-function viewport + scissor on the scene passes, so nothing
         // is rasterized outside it; the camera aspect, GPU culling screen
@@ -331,17 +336,11 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
         // rectangle back through GetViewport.
         float vpX0 = kLeftPanelWidth;
         float vpX1 = static_cast<float>(winSize.width) - kRightPanelWidth;
-        auto panelBox = [](std::string_view label) -> Clay_ElementData {
-            Clay_String cs {};
-            cs.length = static_cast<int32_t>(label.size());
-            cs.chars  = label.data();
-            return Clay_GetElementData(Clay_GetElementIdWithIndex(cs, static_cast<uint32_t>(ZHLN::HashCreativeWorkPath(label))));
-        };
-        if (const Clay_ElementData left = panelBox("HierarchyPanel"); left.found) {
-            vpX0 = left.boundingBox.x + left.boundingBox.width;
+        if (const auto left = gui.GetLastFrameRect("HierarchyPanel")) {
+            vpX0 = left->x + left->width;
         }
-        if (const Clay_ElementData right = panelBox("InspectorPanel"); right.found) {
-            vpX1 = right.boundingBox.x;
+        if (const auto right = gui.GetLastFrameRect("InspectorPanel")) {
+            vpX1 = right->x;
         }
         auto& rc = engine.GetRenderContext();
         rc.SetViewport(ZHLN::RenderContext::ViewportRect {
@@ -351,11 +350,6 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
             .height = winSize.height,
         });
         const auto sceneViewport = rc.GetViewport();
-
-        // A cheap handle over the Impl the registry owns (GUIStateComponent), so
-        // building it here costs a pointer and lets the gating below ask about
-        // text focus. The same handle is handed to the frame builder.
-        ZHLN::GUI::Context gui(engine);
 
         // Ctrl+C/X/V in a focused field go to the OS clipboard through the
         // window. Re-set every frame because the handle is rebuilt; the sink is

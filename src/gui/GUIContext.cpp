@@ -568,6 +568,20 @@ bool Context::IsItemHovered() const noexcept {
     return _impl ? _impl->lastItemHovered : false;
 }
 
+auto Context::GetLastFrameRect(std::string_view id) const noexcept -> std::optional<ElementRect> {
+    // Same element-id recipe as every widget above (hash the path, index the
+    // string), so the id a Box was opened with resolves here. The string only
+    // feeds the hash -- no interning needed for a read.
+    Clay_String cs {};
+    cs.length = static_cast<int32_t>(id.size());
+    cs.chars  = id.data();
+    const Clay_ElementData data = Clay_GetElementData(Clay_GetElementIdWithIndex(cs, static_cast<uint32_t>(HashCreativeWorkPath(id))));
+    if (!data.found) {
+        return std::nullopt;
+    }
+    return ElementRect {data.boundingBox.x, data.boundingBox.y, data.boundingBox.width, data.boundingBox.height};
+}
+
 bool Context::IsItemActive() const noexcept {
     return _impl ? _impl->lastItemActive : false;
 }
