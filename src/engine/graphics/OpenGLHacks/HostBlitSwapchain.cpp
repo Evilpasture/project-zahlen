@@ -453,6 +453,22 @@ void Shutdown() noexcept;
     if (glfwWindowShouldClose(target))
         return false;
 
+    // The plugin window was opened at the caller's framebuffer size and must
+    // follow its resizes: GlBlit scales the source to whatever the window's
+    // current framebuffer is, so a stale size squashes the frame into the
+    // old aspect (the "stretched UI" symptom). Same points==pixels convention
+    // as at creation. Skip the blit on the catch-up frame.
+    bool catchUp = false;
+    if (target == g.glWindow) {
+        int curW = 0;
+        int curH = 0;
+        glfwGetWindowSize(target, &curW, &curH);
+        if (curW != static_cast<int>(width) || curH != static_cast<int>(height)) {
+            glfwSetWindowSize(target, static_cast<int>(width), static_cast<int>(height));
+            catchUp = true;
+        }
+    }
+
     // 4 bytes/px covers every supported format (RGB8 rows are ≤ RGBA8 size).
     if (!EnsureStaging(static_cast<VkDeviceSize>(width) * height * 4))
         return false;
@@ -462,7 +478,9 @@ void Shutdown() noexcept;
     }
 
     glfwMakeContextCurrent(target);
-    GlBlit(width, height, format);
+    if (!catchUp) {
+        GlBlit(width, height, format);
+    }
     glfwSwapBuffers(target);
     return !glfwWindowShouldClose(target);
 }
