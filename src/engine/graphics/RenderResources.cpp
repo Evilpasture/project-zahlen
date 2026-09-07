@@ -259,6 +259,20 @@ auto RenderContext::GetPresentationMode() const noexcept -> PresentationMode {
     return _impl->presentationMode;
 }
 
+// ViewportRect -> VkViewport bridge. Declared in Zahlen/Render.hpp against a
+// forward declaration so the public header stays Vulkan-free; defined here
+// where the full type is available.
+RenderContext::ViewportRect::operator VkViewport() const noexcept {
+    return VkViewport {
+        .x        = static_cast<float>(x),
+        .y        = static_cast<float>(y),
+        .width    = static_cast<float>(width),
+        .height   = static_cast<float>(height),
+        .minDepth = 0.0F,
+        .maxDepth = 1.0F,
+    };
+}
+
 void RenderContext::CheckShaderReload() noexcept {
     if constexpr (isDev) {
         _impl->CheckShaderWatchers();

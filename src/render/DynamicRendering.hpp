@@ -205,6 +205,14 @@ class DynamicPass {
         return std::move(*this);
     }
 
+    // Overload for a ready-made VkViewport (e.g. RenderContext::ViewportRect
+    // converts implicitly). The rectangle is what carries: this pass records
+    // its own 0..1 depth range, so minDepth/maxDepth of the argument are
+    // ignored.
+    constexpr auto Viewport(const VkViewport& viewport) && -> DynamicPass<ColorCount, HasDepth>&& {
+        return std::move(*this).Viewport(viewport.x, viewport.y, viewport.width, viewport.height);
+    }
+
     template <size_t InsideCount, bool InsideDepth>
     constexpr explicit DynamicPass(DynamicPass<InsideCount, InsideDepth>&& other) noexcept:
         _extent(other._extent), _flags(other._flags), _colors(std::move(other)._colors), _depth(other._depth), _viewMask(other._viewMask),

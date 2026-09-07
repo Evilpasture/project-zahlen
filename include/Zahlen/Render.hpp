@@ -17,6 +17,11 @@
 #include <memory>
 #include <optional>
 
+// Forward declaration of Vulkan's viewport struct, for ViewportRect's
+// conversion operator below; the conversion is defined engine-side, so this
+// API-neutral header never needs to include <vulkan/*>.
+struct VkViewport;
+
 namespace ZHLN {
 
 // ============================================================================
@@ -163,6 +168,15 @@ class ZHLN_API RenderContext {
         uint32_t y      = 0;
         uint32_t width  = 0;
         uint32_t height = 0;
+
+        /// Implicit bridge to the renderer's viewport struct, so a rect
+        /// flows straight into VkViewport-taking APIs (e.g.
+        /// Vk::DynamicPass::Viewport); minDepth/maxDepth come out as the
+        /// renderer's usual 0..1. Deliberately a conversion operator, not
+        /// constructors: any constructor would strip ViewportRect's
+        /// aggregate-ness and break the {.x = ...} initialization its call
+        /// sites use. Defined in RenderResources.cpp.
+        operator VkViewport() const noexcept;
     };
 
     void                       SetViewport(const ViewportRect& rect) noexcept;

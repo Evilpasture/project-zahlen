@@ -284,7 +284,7 @@ struct GpuCullingPolicyPass1 {
 
         // 3. Render Pass 1 Geometry
         Vk::DynamicPass(color_att.extent)
-            .Viewport(static_cast<float>(sceneVp.x), static_cast<float>(sceneVp.y), static_cast<float>(sceneVp.width), static_cast<float>(sceneVp.height))
+            .Viewport(sceneVp)
             .AddColor(color_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorScene)
             .AddColor(vel_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorVelocity)
             .AddColor(norm_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorNormalRoughness)
@@ -365,7 +365,7 @@ struct GpuCullingPolicyPass2 {
 
         // 3. Render Pass 2 Geometry (Newly Unoccluded) with LOAD_OP_LOAD!
         Vk::DynamicPass(color_att.extent)
-            .Viewport(static_cast<float>(sceneVp2.x), static_cast<float>(sceneVp2.y), static_cast<float>(sceneVp2.width), static_cast<float>(sceneVp2.height))
+            .Viewport(sceneVp2)
             .AddColor(color_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
             .AddColor(vel_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
             .AddColor(norm_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
@@ -834,7 +834,7 @@ void TranslucentPrePass::Execute(
 
     const auto sceneVp = ctx.EffectiveViewport();
     Vk::DynamicPass(norm_att.extent)
-        .Viewport(static_cast<float>(sceneVp.x), static_cast<float>(sceneVp.y), static_cast<float>(sceneVp.width), static_cast<float>(sceneVp.height))
+        .Viewport(sceneVp)
         .AddColor(norm_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorNormalRoughness)
         .AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearDepthValue)
         .Execute(cmd, [&]() {
@@ -870,7 +870,7 @@ void ForwardPass::Execute(
 
     const auto sceneVp = ctx.EffectiveViewport();
     Vk::DynamicPass(litColor.extent)
-        .Viewport(static_cast<float>(sceneVp.x), static_cast<float>(sceneVp.y), static_cast<float>(sceneVp.width), static_cast<float>(sceneVp.height))
+        .Viewport(sceneVp)
         .AddColor(litColor, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .AddDepth(depth, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .Execute(cmd, [&]() {
