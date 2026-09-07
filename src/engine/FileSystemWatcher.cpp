@@ -17,7 +17,7 @@
 namespace ZHLN {
 namespace {
 
-namespace fs = std::filesystem;
+namespace fs      = std::filesystem;
 using SteadyClock = std::chrono::steady_clock;
 using FileTime    = fs::file_time_type;
 
@@ -36,17 +36,17 @@ struct ObservedEntry {
 struct ScanResult {
     /// False means some paths could not be inspected. Existing entries absent
     /// from this partial snapshot must not be mistaken for deletions.
-    bool                                  complete = true;
+    bool                                 complete = true;
     std::map<std::string, ObservedEntry> entries;
 };
 
 struct TrackedEntry {
     fs::path                path;
-    FileTime                lastMtime {};
-    SteadyClock::time_point lastChange {};
-    SettleState             settleState = SettleState::Idle;
-    FileWatchAction         pendingAction = FileWatchAction::Modified;
-    bool                    exists         = false;
+    FileTime                lastMtime;
+    SteadyClock::time_point lastChange;
+    SettleState             settleState     = SettleState::Idle;
+    FileWatchAction         pendingAction   = FileWatchAction::Modified;
+    bool                    exists          = false;
     bool                    deliveredExists = false;
 };
 
@@ -54,7 +54,7 @@ struct TrackedEntry {
     return path.lexically_normal().generic_string();
 }
 
-[[nodiscard]] bool MatchesFilter(const fs::path& path, const WatchDescriptor& descriptor) {
+[[nodiscard]] auto MatchesFilter(const fs::path& path, const WatchDescriptor& descriptor) -> bool {
     return descriptor.extensionFilter.empty() || path.extension() == descriptor.extensionFilter;
 }
 
@@ -82,9 +82,9 @@ void AddObservedFile(ScanResult& result, const fs::path& path, const WatchDescri
 }
 
 [[nodiscard]] auto Scan(const WatchDescriptor& descriptor) -> ScanResult {
-    ScanResult result;
+    ScanResult      result;
     std::error_code ec;
-    const bool       exists = fs::exists(descriptor.path, ec);
+    const bool      exists = fs::exists(descriptor.path, ec);
     if (ec) {
         result.complete = false;
         return result;
@@ -105,14 +105,14 @@ void AddObservedFile(ScanResult& result, const fs::path& path, const WatchDescri
 
     constexpr auto options = fs::directory_options::skip_permission_denied;
     if (descriptor.recursive) {
-        fs::recursive_directory_iterator it {descriptor.path, options, ec};
+        fs::recursive_directory_iterator       it {descriptor.path, options, ec};
         const fs::recursive_directory_iterator end;
         while (!ec && it != end) {
             AddObservedFile(result, it->path(), descriptor);
             it.increment(ec);
         }
     } else {
-        fs::directory_iterator it {descriptor.path, options, ec};
+        fs::directory_iterator       it {descriptor.path, options, ec};
         const fs::directory_iterator end;
         while (!ec && it != end) {
             AddObservedFile(result, it->path(), descriptor);
@@ -146,9 +146,9 @@ struct FileSystemWatcher::Impl {
     };
 
     struct WorkerWatch {
-        WatchDescriptor                         descriptor;
-        bool                                    initialized = false;
-        std::map<std::string, TrackedEntry>    entries;
+        WatchDescriptor                     descriptor;
+        bool                                initialized = false;
+        std::map<std::string, TrackedEntry> entries;
     };
 
     struct StagedEvent {
@@ -160,7 +160,7 @@ struct FileSystemWatcher::Impl {
     std::thread       worker;
     std::thread::id   dispatchThread = std::this_thread::get_id();
 
-    Mutex                                  subscriptionMutex {};
+    Mutex                                   subscriptionMutex {};
     std::map<FileWatchHandle, Subscription> subscriptions;
     FileWatchHandle                         nextHandle = 1;
 
@@ -168,7 +168,7 @@ struct FileSystemWatcher::Impl {
     std::vector<StagedEvent> readyEvents;
 
     [[nodiscard]] auto SnapshotSubscriptions() -> std::vector<SubscriptionSnapshot> {
-        const std::lock_guard<Mutex> lock(subscriptionMutex);
+        const std::lock_guard<Mutex>      lock(subscriptionMutex);
         std::vector<SubscriptionSnapshot> snapshots;
         snapshots.reserve(subscriptions.size());
         for (const auto& [handle, subscription]: subscriptions) {
@@ -189,9 +189,7 @@ struct FileSystemWatcher::Impl {
         }
     }
 
-    static void PromoteSettled(
-        FileWatchHandle handle, WorkerWatch& watch, SteadyClock::time_point now, std::vector<StagedEvent>& ready
-    ) {
+    static void PromoteSettled(FileWatchHandle handle, WorkerWatch& watch, SteadyClock::time_point now, std::vector<StagedEvent>& ready) {
         const auto settleWindow = std::chrono::milliseconds {watch.descriptor.debounceMs};
         for (auto& [key, entry]: watch.entries) {
             static_cast<void>(key);
@@ -200,18 +198,12 @@ struct FileSystemWatcher::Impl {
             }
 
             ready.push_back({.handle = handle, .event = {.path = entry.path, .action = entry.pendingAction}});
-            entry.settleState = SettleState::Idle;
-            if (entry.pendingAction == FileWatchAction::Deleted) {
-                entry.deliveredExists = false;
-            } else {
-                entry.deliveredExists = true;
-            }
+            entry.settleState     = SettleState::Idle;
+            entry.deliveredExists = entry.pendingAction != FileWatchAction::Deleted;
         }
     }
 
-    static void Observe(
-        FileWatchHandle handle, WorkerWatch& watch, const ScanResult& scan, SteadyClock::time_point now, std::vector<StagedEvent>& ready
-    ) {
+    static void Observe(FileWatchHandle handle, WorkerWatch& watch, const ScanResult& scan, SteadyClock::time_point now, std::vector<StagedEvent>& ready) {
         if (!watch.initialized) {
             // Do not establish a baseline from an incomplete scan: a locked or
             // inaccessible directory must not turn its pre-existing content
@@ -225,14 +217,13 @@ struct FileSystemWatcher::Impl {
             // empty baseline on this first scan.
             for (const auto& [key, observed]: scan.entries) {
                 watch.entries.emplace(
-                    key,
-                    TrackedEntry {
-                        .path = observed.path,
-                        .lastMtime = observed.mtime,
-                        .settleState = SettleState::Idle,
-                        .exists = true,
-                        .deliveredExists = true,
-                    }
+                    key, TrackedEntry {
+                             .path            = observed.path,
+                             .lastMtime       = observed.mtime,
+                             .settleState     = SettleState::Idle,
+                             .exists          = true,
+                             .deliveredExists = true,
+                         }
                 );
             }
             watch.initialized = true;
@@ -291,14 +282,14 @@ struct FileSystemWatcher::Impl {
         std::map<FileWatchHandle, WorkerWatch> watches;
         while (!stop.load(std::memory_order_acquire)) {
             const std::vector<SubscriptionSnapshot> snapshots = SnapshotSubscriptions();
-            std::set<FileWatchHandle>                activeHandles;
-            std::vector<StagedEvent>                 ready;
-            const auto                                now = SteadyClock::now();
+            std::set<FileWatchHandle>               activeHandles;
+            std::vector<StagedEvent>                ready;
+            const auto                              now = SteadyClock::now();
 
             for (const SubscriptionSnapshot& snapshot: snapshots) {
                 activeHandles.insert(snapshot.handle);
                 auto [it, inserted] = watches.try_emplace(snapshot.handle);
-                WorkerWatch& watch = it->second;
+                WorkerWatch& watch  = it->second;
                 if (inserted) {
                     watch.descriptor = snapshot.descriptor;
                 }
@@ -351,7 +342,11 @@ auto FileSystemWatcher::WatchFile(std::filesystem::path path, FileWatchCallback 
 }
 
 auto FileSystemWatcher::WatchDirectory(
-    std::filesystem::path directory, FileWatchCallback callback, bool recursive, std::string extensionFilter, uint32_t debounceMs
+    std::filesystem::path directory,
+    FileWatchCallback     callback,
+    bool                  recursive,
+    std::string           extensionFilter,
+    uint32_t              debounceMs
 ) -> FileWatchHandle {
     return Watch(
         {.path = std::move(directory), .isDirectory = true, .recursive = recursive, .extensionFilter = std::move(extensionFilter), .debounceMs = debounceMs},
