@@ -463,7 +463,6 @@ set(RAW_ENGINE_SOURCES
     src/engine/DefaultPreset.cpp
     src/engine/graphics/RenderFrame.cpp
     src/engine/graphics/RenderGraphBuilder.cpp
-    src/engine/graphics/HostBlitSwapchain.cpp
     src/engine/graphics/RenderDrawCommands.cpp
     src/engine/graphics/RenderInit.cpp
     src/engine/graphics/init/RenderInitDevice.cpp
@@ -542,6 +541,8 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/physics)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/ecs)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/audio)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/gui)
+
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/engine/graphics/OpenGLHacks)
 
 # --- ASSEMBLE COMPILER FLAGS METADATA ---
 set(COMPILER_FLAGS_LIST "${CMAKE_CXX_FLAGS}")
