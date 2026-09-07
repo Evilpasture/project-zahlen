@@ -409,6 +409,12 @@ if(UNIX AND NOT APPLE)
 endif()
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/glfw SYSTEM)
 
+# The macOS SDK marks sprintf deprecated and the vendored cocoa joystick
+# still uses it; silence the deprecation noise on the vendored target only.
+if(APPLE)
+    target_compile_options(glfw PRIVATE -Wno-deprecated-declarations)
+endif()
+
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/LuaJIT SYSTEM)
 
 set(DOUBLE_PRECISION ON CACHE BOOL "" FORCE)

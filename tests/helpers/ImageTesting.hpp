@@ -36,7 +36,21 @@
 #if defined(ZHLN_TEST_IMAGE_WRITE_IMPL)
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #endif
+// Vendored stb uses sprintf in its HDR writer; the macOS SDK marks it
+// deprecated. Scope the deprecation noise to the vendored header.
+#if defined(_MSC_VER)
+    #pragma warning(push)
+    #pragma warning(disable : 4996)
+#else
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
 #include <stb_image_write.h>
+#if defined(_MSC_VER)
+    #pragma warning(pop)
+#else
+    #pragma GCC diagnostic pop
+#endif
 
 namespace ZHLN::Test::Image {
 
