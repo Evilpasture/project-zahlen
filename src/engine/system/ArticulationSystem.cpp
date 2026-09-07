@@ -59,7 +59,7 @@ void ArticulationSystem::ReleaseTracked(Engine& engine, size_t index) noexcept {
     }
 
     if (auto* component = engine.GetRegistry().Get<Components::RagdollComponent>(tracked.owner);
-        component != nullptr && component->ragdollInstance == tracked.instance.GetPtr()) {
+        component != nullptr && component->ragdollInstance.GetPtr() == tracked.instance.GetPtr()) {
         component->isAddedToPhysics = false;
     }
     _tracked.erase(_tracked.begin() + static_cast<std::ptrdiff_t>(index));
@@ -93,7 +93,7 @@ void ArticulationSystem::Reconcile(Engine& engine) noexcept {
     for (size_t index = 0; index < _tracked.size();) {
         const TrackedRagdoll& tracked   = _tracked[index];
         const auto* current = registry.Get<Components::RagdollComponent>(tracked.owner);
-        if (!registry.IsAlive(tracked.owner) || current == nullptr || current->ragdollInstance != tracked.instance.GetPtr()) {
+        if (!registry.IsAlive(tracked.owner) || current == nullptr || current->ragdollInstance.GetPtr() != tracked.instance.GetPtr()) {
             ReleaseTracked(engine, index);
         } else {
             _tracked[index].isAddedToPhysics = current->isAddedToPhysics;
