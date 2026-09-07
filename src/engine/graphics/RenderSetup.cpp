@@ -113,7 +113,7 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniform
     // rectangle, so its projection aspect -- and anything unprojecting from
     // scene NDC -- has to be the viewport's, not the framebuffer's.
     const auto sceneVp = _impl->EffectiveViewport();
-    const float vpAspect = (sceneVp.height > 0) ? static_cast<float>(sceneVp.width) / sceneVp.height : aspect;
+    const float vpAspect = (sceneVp.height > 0.0F) ? sceneVp.width / sceneVp.height : aspect;
 
     std::array<float, 4> cascadeSplits {};
     cascadeSplits[0] = cam.nearZ + (cam.farZ - cam.nearZ) * 0.08f;

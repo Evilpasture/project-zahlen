@@ -269,8 +269,8 @@ struct GpuCullingPolicyPass1 {
 
         const auto sceneVp = ctx.EffectiveViewport();
         pc.viewProj         = ctx.unjittered_view_proj;
-        pc.hizScreenSize[0] = static_cast<float>(sceneVp.width);
-        pc.hizScreenSize[1] = static_cast<float>(sceneVp.height);
+        pc.hizScreenSize[0] = sceneVp.width;
+        pc.hizScreenSize[1] = sceneVp.height;
         const uint32_t hizMips = std::min(ctx.graphResources.hizMap.mipLevels, kMaxGeneratedHiZMips);
         pc.maxHiZMipLevel   = hizMips > 0 ? hizMips - 1 : 0;
         pc.drawCount        = drawCount;
@@ -352,7 +352,7 @@ struct GpuCullingPolicyPass2 {
         const auto sceneVp2 = ctx.EffectiveViewport();
         RenderContext::Impl::CullingConstants pc {
             .viewProj       = ctx.unjittered_view_proj,
-            .hizScreenSize  = {static_cast<float>(sceneVp2.width), static_cast<float>(sceneVp2.height)},
+            .hizScreenSize  = {sceneVp2.width, sceneVp2.height},
             .maxHiZMipLevel = hizMips2 > 0 ? hizMips2 - 1 : 0,
             .drawCount      = drawCount,
             .passIndex      = 1,

@@ -259,20 +259,6 @@ auto RenderContext::GetPresentationMode() const noexcept -> PresentationMode {
     return _impl->presentationMode;
 }
 
-// ViewportRect -> VkViewport bridge. Declared in Zahlen/Render.hpp against a
-// forward declaration so the public header stays Vulkan-free; defined here
-// where the full type is available.
-RenderContext::ViewportRect::operator VkViewport() const noexcept {
-    return VkViewport {
-        .x        = static_cast<float>(x),
-        .y        = static_cast<float>(y),
-        .width    = static_cast<float>(width),
-        .height   = static_cast<float>(height),
-        .minDepth = 0.0F,
-        .maxDepth = 1.0F,
-    };
-}
-
 void RenderContext::CheckShaderReload() noexcept {
     if constexpr (isDev) {
         _impl->CheckShaderWatchers();
@@ -300,7 +286,15 @@ void RenderContext::SetViewport(const ViewportRect& rect) noexcept {
 }
 
 auto RenderContext::GetViewport() const noexcept -> ViewportRect {
-    return _impl->EffectiveViewport();
+    // The impl works in VkViewport (see EffectiveViewport); its values are
+    // whole pixels, so narrowing back into the API-neutral rect is exact.
+    const VkViewport vp = _impl->EffectiveViewport();
+    return ViewportRect {
+        .x      = static_cast<uint32_t>(vp.x),
+        .y      = static_cast<uint32_t>(vp.y),
+        .width  = static_cast<uint32_t>(vp.width),
+        .height = static_cast<uint32_t>(vp.height),
+    };
 }
 
 auto RenderContext::CreateStorageBuffer(const void* data, size_t size, uint32_t stride) -> BufferHandle {

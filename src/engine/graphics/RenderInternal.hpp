@@ -639,18 +639,34 @@ struct RenderContext::Impl {
     uint32_t viewportH = 0;
 
     /// The scene viewport actually in effect: the stored rectangle clamped to
-    /// the framebuffer, or the full framebuffer when none is active.
-    [[nodiscard]] constexpr auto EffectiveViewport() const noexcept -> RenderContext::ViewportRect {
-        const auto& fb   = graphResources.sceneColor.extent;
-        const auto full = RenderContext::ViewportRect {.x = 0, .y = 0, .width = fb.width, .height = fb.height};
+    /// the framebuffer, or the full framebuffer when none is active. This is
+    /// the renderer's actual working form (VkViewport, 0..1 depth range --
+    /// the convention the pass recording uses); the public GetViewport maps
+    /// it back onto the API-neutral ViewportRect.
+    [[nodiscard]] constexpr auto EffectiveViewport() const noexcept -> VkViewport {
+        const auto& fb = graphResources.sceneColor.extent;
         if (viewportW <= 1 || viewportH <= 1) {
-            return full;
+            return VkViewport {
+                .x        = 0.0F,
+                .y        = 0.0F,
+                .width    = static_cast<float>(fb.width),
+                .height   = static_cast<float>(fb.height),
+                .minDepth = 0.0F,
+                .maxDepth = 1.0F,
+            };
         }
         const uint32_t x = std::min<uint32_t>(viewportX, fb.width);
         const uint32_t y = std::min<uint32_t>(viewportY, fb.height);
         const uint32_t w = std::min<uint32_t>(viewportW, fb.width - x);
         const uint32_t h = std::min<uint32_t>(viewportH, fb.height - y);
-        return RenderContext::ViewportRect {.x = x, .y = y, .width = w, .height = h};
+        return VkViewport {
+            .x        = static_cast<float>(x),
+            .y        = static_cast<float>(y),
+            .width    = static_cast<float>(w),
+            .height   = static_cast<float>(h),
+            .minDepth = 0.0F,
+            .maxDepth = 1.0F,
+        };
     }
 
     // ============================================================================
