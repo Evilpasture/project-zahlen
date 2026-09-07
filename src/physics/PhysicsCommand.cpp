@@ -1,8 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "PhysicsWorld.hpp"
 #include "Zahlen/Log.hpp"
-#include "physics/PhysicsWorld.hpp"
 #include <Jolt/Physics/Constraints/HingeConstraint.h>
 #include <Jolt/Physics/Constraints/SliderConstraint.h>
 #include <Zahlen/physics/Physics.hpp> // For GetBodyID
@@ -11,8 +11,10 @@
 namespace ZHLN::Physics {
 
 void PhysicsWorld::FlushCommands(
-    Command* capturedQueue, size_t capturedCount, JPH::Array<JPH::Ref<JPH::CharacterVirtual>>& characterMap,
-    JPH::Array<JPH::CharacterVirtual*>& activeCharacters
+    Command*                                     capturedQueue,
+    size_t                                       capturedCount,
+    JPH::Array<JPH::Ref<JPH::CharacterVirtual>>& characterMap,
+    JPH::Array<JPH::CharacterVirtual*>&          activeCharacters
 ) {
     if (capturedCount == 0) {
         return;
@@ -28,7 +30,7 @@ void PhysicsWorld::FlushCommands(
                     continue;
                 }
 
-                const uint32_t dense  = slotToDense[slot];
+                const uint32_t    dense  = slotToDense[slot];
                 const JPH::BodyID bodyID = bodyIDs[dense];
 
                 if (bodyID.IsInvalid()) {
@@ -50,8 +52,7 @@ void PhysicsWorld::FlushCommands(
                 // Verify indices against array boundaries before writing
                 ZHLN::Assert(
                     joltIdx < idToHandleMap.size() && joltIdx < joltBodyPtrs.size(),
-                    "PhysicsCommand: joltIdx ({}) exceeds active map sizes ({}, {}) during DestroyBody!", joltIdx, idToHandleMap.size(),
-                    joltBodyPtrs.size()
+                    "PhysicsCommand: joltIdx ({}) exceeds active map sizes ({}, {}) during DestroyBody!", joltIdx, idToHandleMap.size(), joltBodyPtrs.size()
                 );
 
                 idToHandleMap[joltIdx].store(0, std::memory_order::release);
