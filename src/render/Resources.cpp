@@ -323,18 +323,18 @@ constexpr uint8_t gpu_abi_comp_raw[] = {
 };
 
 constexpr uint8_t ltc_mat_raw[] = {
-#embed "../../../resources/shaders/ltc_mat.dds"
+#embed "ltc_mat.dds"
 };
 
 constexpr uint8_t ltc_amp_raw[] = {
-#embed "../../../resources/shaders/ltc_amp.dds"
+#embed "ltc_amp.dds"
 };
 
 // Blue noise tile for the ray-traced dither. Embedded rather than read from
 // disk so the packaged binary carries it and no working-directory assumption
 // is baked into the renderer (same treatment as the LTC tables above).
 constexpr uint8_t blue_noise_png_raw[] = {
-#embed "../../../resources/shaders/LDR_RGBA_0.png"
+#embed "LDR_RGBA_0.png"
 };
 
 // NOLINTEND(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
@@ -400,8 +400,8 @@ const char* const PunctualShadowsPS       = SHADER_PUNCTUAL_SHADOWS_SLANG_PS_PAT
 const char* const LightingNortVS          = SHADER_LIGHTING_NORT_SLANG_VS_PATH;
 const char* const LightingNortPS          = SHADER_LIGHTING_NORT_SLANG_PS_PATH;
 const char* const VolumetricClearCS       = SHADER_VOLUMETRIC_CLEAR_SLANG_CS_PATH;
-const char* const HdrDenoiseAtrousCS        = SHADER_HDR_DENOISE_ATROUS_SLANG_CS_PATH;
-const char* const RtrHalfCS                 = SHADER_RTR_HALF_SLANG_CS_PATH;
+const char* const HdrDenoiseAtrousCS      = SHADER_HDR_DENOISE_ATROUS_SLANG_CS_PATH;
+const char* const RtrHalfCS               = SHADER_RTR_HALF_SLANG_CS_PATH;
 const char* const VolumetricFogInjectCS   = SHADER_VOLUMETRIC_FOG_INJECT_CS_PATH;
 const char* const VolumetricLightInjectCS = SHADER_VOLUMETRIC_LIGHT_INJECT_CS_PATH;
 const char* const VolumetricIntegrationCS = SHADER_VOLUMETRIC_INTEGRATION_SLANG_CS_PATH;
