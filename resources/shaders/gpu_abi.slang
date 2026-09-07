@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // Compiled to SPIR-V so the host can reflect every GPU ABI struct with
-// SPIRV-Reflect. src/render never sees Slang source — only this bytecode.
+// SPIRV-Reflect. src/vulkan never sees Slang source — only this bytecode.
 //
 // One ConstantBuffer of nested structs: a UBO cannot drop unused members, so
 // every field keeps its Offset decoration and the element type names survive.

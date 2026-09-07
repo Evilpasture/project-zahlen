@@ -327,7 +327,7 @@ endif()
 # silently run every render suite on the CPU rasteriser and print
 # "[VULKAN] Selected physical device: llvmpipe" while a perfectly good GPU sat
 # in the same box. Device scoring was never the problem — the GPU simply was
-# never enumerated (see ZHLN_Internal_DefaultScoreFn in src/render/RenderCore.c,
+# never enumerated (see ZHLN_Internal_DefaultScoreFn in src/vulkan/RenderCore.c,
 # which ranks a discrete GPU at 1'000'000 and a CPU device at 0).
 #
 # Default OFF: tests use the host Vulkan installation. Turn it ON for a hermetic
@@ -465,21 +465,8 @@ endif()
 set(RAW_ENGINE_SOURCES
     src/engine/AssertHandler.cpp
     src/engine/DefaultPreset.cpp
-    src/engine/graphics/RenderFrame.cpp
-    src/engine/graphics/RenderGraphBuilder.cpp
-    src/engine/graphics/RenderDrawCommands.cpp
-    src/engine/graphics/RenderInit.cpp
-    src/engine/graphics/init/RenderInitDevice.cpp
-    src/engine/graphics/init/RenderInitHeaps.cpp
-    src/engine/graphics/init/RenderInitTargets.cpp
-    src/engine/graphics/init/RenderInitScenePipelines.cpp
-    src/engine/graphics/init/RenderInitPostProcess.cpp
-    src/engine/graphics/init/RenderInitUI.cpp
-    src/engine/graphics/RenderResources.cpp
     src/engine/Engine.cpp
     src/engine/CreativeWorksFactory.cpp
-    src/engine/graphics/MeshBuilder.cpp
-    src/engine/graphics/TextureManager.cpp
     src/engine/system/TextureSystem.cpp
     src/engine/system/AnimationSystem.cpp
     src/engine/CreativeWorksManager.cpp
@@ -487,7 +474,6 @@ set(RAW_ENGINE_SOURCES
     src/engine/Platform.cpp
     src/engine/Console.cpp
     src/engine/Profiler.cpp
-    src/engine/graphics/Resources.cpp
     src/engine/system/RenderSystem.cpp
     src/engine/system/GraphicsSettingsSync.cpp
     src/engine/system/DecalSystem.cpp
@@ -495,8 +481,6 @@ set(RAW_ENGINE_SOURCES
     src/engine/system/AudioSystem.cpp
     src/engine/system/ArticulationSystem.cpp
     src/engine/system/CullingSystem.cpp
-    src/engine/graphics/Sky.cpp
-    src/engine/graphics/BRDFLUT.cpp
     src/engine/system/PhysicsSystem.cpp
     src/engine/system/TerrainSystem.cpp
     src/engine/system/LODSystem.cpp
@@ -509,12 +493,8 @@ set(RAW_ENGINE_SOURCES
     src/engine/system/LightingSystem.cpp
     src/engine/system/InputSystem.cpp
     src/engine/system/CameraSystem.cpp
-    src/engine/graphics/RenderDocInit.cpp
     src/engine/system/InteractionSystem.cpp
     src/engine/WindowSurface.cpp
-    src/engine/graphics/RenderProcedural.cpp
-    src/engine/graphics/RenderPasses.cpp
-    src/engine/graphics/RenderSetup.cpp
     src/engine/Scene.cpp
     src/engine/ScriptRunner.cpp
 )
@@ -539,14 +519,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     pkg_check_modules(LIBSEAT REQUIRED IMPORTED_TARGET libseat)
 endif()
 
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/render)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/vulkan)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/threading)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/physics)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/ecs)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/audio)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/gui)
-
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/engine/graphics/OpenGLHacks)
 
 # --- ASSEMBLE COMPILER FLAGS METADATA ---
 set(COMPILER_FLAGS_LIST "${CMAKE_CXX_FLAGS}")
@@ -570,6 +548,10 @@ zahlen_transpile_sources(ENGINE_SOURCES ${RAW_ENGINE_SOURCES})
 
 add_library(zahlen_engine SHARED ${ENGINE_SOURCES})
 
+# The engine renderer owns its source list and attaches it to zahlen_engine.
+# Keep the Vulkan backend above so this layer can consume its public headers.
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/render)
+
 # The renderer (and Volk inside it) must bind to THIS image's symbols:
 # executables linking zahlen_render's static archive alongside the engine
 # (e.g. the extras GPU tests via zahlen_extras) embed their own copies of
@@ -584,7 +566,7 @@ if(UNIX AND NOT APPLE)
 endif()
 
 target_precompile_headers(zahlen_engine PRIVATE
-    "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/src/render/Rendering.hpp>"
+    "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/src/vulkan/Rendering.hpp>"
 )
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
@@ -595,23 +577,6 @@ set_target_properties(zahlen_engine PROPERTIES
     CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON
 )
-
-# --- COMPILE-TIME PROFILING ---
-option(ZHLN_PROFILE_RENDER_FRAME_COMPILE "Enable GCC compile-time profiling for RenderFrame.cpp" OFF)
-
-if(ZHLN_PROFILE_RENDER_FRAME_COMPILE)
-    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-        set_source_files_properties(src/engine/graphics/RenderFrame.cpp PROPERTIES
-            COMPILE_OPTIONS "-ftime-report"
-        )
-        message(STATUS "GCC compile-time profiling enabled for RenderFrame.cpp")
-    elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-        set_source_files_properties(src/engine/graphics/RenderFrame.cpp PROPERTIES
-            COMPILE_OPTIONS "-ftime-trace"
-        )
-        message(STATUS "Clang time-trace profiling enabled for RenderFrame.cpp")
-    endif()
-endif()
 
 target_compile_definitions(zahlen_engine PRIVATE
     ZHLN_ENGINE_BUILD
