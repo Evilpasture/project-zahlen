@@ -202,13 +202,14 @@ ZHLN_API void UpdateTransformMode(
 /// The header row carries the two entity-level operations: New Entity
 /// (CreateEntity, which also selects the result) and Delete (DestroySelected).
 ///
-/// NOTE: `reg` is separate from `gui` because the new Clay-based GUI::Context
-/// is stateless w.r.t. the ECS — the editor reads the registry directly.
+/// `engine` is explicit because Delete must use its ordered resource-lifecycle
+/// pipeline; the panel edits that engine's registry. GUI::Context itself remains
+/// stateless with respect to the ECS.
 ZHLN_API void DrawHierarchyPanel(
-    ZHLN::GUI::Context&    gui,
-    ZHLN::ECS::Registry&   reg,
-    EditorState&           state,
-    std::string_view       id = "Hierarchy"
+    ZHLN::GUI::Context& gui,
+    ZHLN::Engine&       engine,
+    EditorState&        state,
+    std::string_view    id = "Hierarchy"
 );
 
 /// Draws the inspector for `state.selectedEntity`: a labelled header plus one

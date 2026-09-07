@@ -531,7 +531,8 @@ void UpdateTransformMode(
     state.transformPrevInput = level;
 }
 
-void DrawHierarchyPanel(GUI::Context& gui, ZHLN::ECS::Registry& reg, EditorState& state, std::string_view id) {
+void DrawHierarchyPanel(GUI::Context& gui, ZHLN::Engine& engine, EditorState& state, std::string_view id) {
+    auto& reg = engine.GetRegistry();
     struct Row {
         ZHLN::Entity entity;
         uint32_t     depth;

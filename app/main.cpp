@@ -260,7 +260,7 @@ void RunNativeEditorFrame(ZHLN::GUI::Context& gui, ZHLN::Engine& engine, float d
                     .gap          = 6.0f,
                     .direction    = ZHLN::GUI::Direction::Column
                 },
-                [&]() -> void { ZHLN::Editor::DrawHierarchyPanel(gui, reg, s_NativeEditorState, "Hierarchy"); }
+                [&]() -> void { ZHLN::Editor::DrawHierarchyPanel(gui, engine, s_NativeEditorState, "Hierarchy"); }
             );
 
             // Center: Viewport overlay toolbar
