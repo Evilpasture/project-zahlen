@@ -976,10 +976,13 @@ struct RenderContext::Impl {
     ZHLN::HashMap<AssetID, Mesh>          assetMeshMap;
     ZHLN::HashMap<MaterialID, Material>   assetMaterialMap;
     ZHLN::HashMap<uint64_t, BufferHandle> skinnedScratchMap;
-    ZHLN::HashMap<uint64_t, BufferHandle> particleBufferMap;
+    // Cache-key -> {packed ECS owner, buffer}; owner survives component erasure
+    // so RenderContext can reconcile the allocation without callbacks.
+    ZHLN::HashMap<uint64_t, ZHLN::Pair<uint64_t, BufferHandle>> particleBufferMap;
 
     ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>> tracked2DEmitters;
     ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>> tracked3DEmitters;
+    ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>> trackedEntityBuffers;
 
     RenderQueues       queues;
     ZHLN::Array<Light> mappedLights;

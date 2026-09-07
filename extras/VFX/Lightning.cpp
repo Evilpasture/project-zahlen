@@ -39,18 +39,6 @@ module ZHLN.Lightning;
 
 namespace ZHLN {
 
-void LightningComponent::OnDestroy(LightningComponent* c) noexcept {
-    if (auto* engine = GetEngineContext()) {
-        auto& rc = engine->GetRenderContext();
-        if (c->vboPos != BufferHandle::Invalid) {
-            rc.DestroyBuffer(c->vboPos);
-            rc.DestroyBuffer(c->vboAttr);
-            c->vboPos  = BufferHandle::Invalid;
-            c->vboAttr = BufferHandle::Invalid;
-        }
-    }
-}
-
 namespace {
 
 struct LightningSegment {
@@ -212,6 +200,11 @@ auto Spawn(Engine& engine, JPH::RVec3Arg cloudPos, JPH::RVec3Arg groundPos, cons
     const BufferHandle vboAttr = rc.CreateVertexBuffer(ribbon.attributes.data(), ribbon.attributes.size() * sizeof(VertexAttributes));
 
     const Entity boltEntity = reg.Create();
+    // The renderer, not the component destructor, owns this association. It
+    // remains visible after ordinary Registry::Destroy and is reconciled on
+    // the next lightning update.
+    rc.TrackEntityBuffer(boltEntity, vboPos);
+    rc.TrackEntityBuffer(boltEntity, vboAttr);
 
     std::array<char, 64> strBuf {};
     const AssetID        meshAssetId = HashAssetID(FormatTo(strBuf, "lightning_mesh_{}", boltEntity.index));
@@ -280,6 +273,7 @@ auto Spawn(Engine& engine, JPH::RVec3Arg cloudPos, JPH::RVec3Arg groundPos, cons
 auto Update(Engine& engine, float dt) -> void {
     auto&      rc   = engine.GetRenderContext();
     auto&      reg  = engine.GetRegistry();
+    rc.ReconcileEntityBuffers(reg);
     const auto ents = reg.GetEntitiesWith<LightningComponent>();
 
     if (ents.empty()) {
@@ -392,15 +386,10 @@ auto Update(Engine& engine, float dt) -> void {
     }
 
     for (const Entity deadEnt: deadEntities) {
-        if (const auto* bolt = reg.Get<LightningComponent>(deadEnt)) {
-            if (bolt->flashLightEntity != Entity::Null() && reg.IsAlive(bolt->flashLightEntity)) {
-                reg.Destroy(bolt->flashLightEntity);
-            }
-            if (bolt->impactLightEntity != Entity::Null() && reg.IsAlive(bolt->impactLightEntity)) {
-                reg.Destroy(bolt->impactLightEntity);
-            }
-        }
-        reg.Destroy(deadEnt);
+        // Light entities are HierarchyComponent children of the bolt. The
+        // explicit pipeline tears them down first and releases the tracked VBOs
+        // while the LightningComponent is still inspectable.
+        DespawnEntity(engine, deadEnt);
     }
 
     if (reg.GetEntitiesWith<LightningComponent>().empty() && !settingsEnts.empty()) {

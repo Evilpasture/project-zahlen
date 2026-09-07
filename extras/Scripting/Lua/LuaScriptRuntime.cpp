@@ -136,6 +136,12 @@ void LuaScriptRuntime::Initialize(Engine* engine) {
     }
     _initialized = true;
 
+    // The runtime, not a process-global C ABI, supplies the engine to the
+    // bootstrap module. Lua keeps this lightuserdata only for the lifetime of
+    // this runtime, which is owned by the Engine's ScriptRunner.
+    lua_pushlightuserdata(L, engine);
+    lua_setglobal(L, "ZHLN_EngineContext");
+
     // Populate the ScriptBinder registry before any script runs. Every lookup
     // in ScriptECSBridge and every ZHLN_InvokeMethod resolves against it, so
     // without this the registry is empty and all of them fail with

@@ -11,6 +11,7 @@
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Format.hpp>
+#include <Zahlen/Engine.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/gui/GUI.hpp>
@@ -236,7 +237,8 @@ auto CreateEntity(ZHLN::ECS::Registry& reg, std::string_view name) -> ZHLN::Enti
     return entity;
 }
 
-void DestroySelected(ZHLN::ECS::Registry& reg, EditorState& state) noexcept {
+void DestroySelected(ZHLN::Engine& engine, EditorState& state) noexcept {
+    auto&               reg    = engine.GetRegistry();
     const ZHLN::Entity victim = state.selectedEntity;
 
     // Cleared first: if the handle turns out to be stale the editor must not be
@@ -246,7 +248,7 @@ void DestroySelected(ZHLN::ECS::Registry& reg, EditorState& state) noexcept {
     if (victim == ZHLN::Entity::Null() || !reg.IsAlive(victim)) {
         return;
     }
-    reg.Destroy(victim);
+    ZHLN::DespawnEntity(engine, victim);
 }
 
 // ============================================================================
@@ -568,7 +570,7 @@ void DrawHierarchyPanel(GUI::Context& gui, ZHLN::ECS::Registry& reg, EditorState
     }
     if (state.selectedEntity != ZHLN::Entity::Null() && reg.IsAlive(state.selectedEntity) &&
         gui.Button("Delete", JPH::Vec4(0.42f, 0.16f, 0.16f, 0.95f))) {
-        DestroySelected(reg, state);
+        DestroySelected(engine, state);
     }
     gui.EndRow();
 

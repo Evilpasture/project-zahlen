@@ -15,6 +15,10 @@ namespace ZHLN {
 void MovementSystem(Engine& engine, float dt);
 
 void PhysicsSystem::Update(Engine& engine, float dt) noexcept {
+    // Registry destruction has already erased the PhysicsComponent, so the
+    // world-owned owner ledger is the only durable teardown signal here.
+    PhysicsStateSystem::Reconcile(engine);
+
     float cappedDt = std::min(dt, 0.1f);
     _accumulator += cappedDt;
 

@@ -31,6 +31,7 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/physics/Physics.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 #include <alloca.h>
 #include <cstdlib>
 #include <cstring>
@@ -282,7 +283,7 @@ void PhysicsContext::Step(float deltaTime) {
     });
 
     if (capturedCount > 0) {
-        world.FlushCommands(world.commandQueueSpare.data(), capturedCount);
+        world.FlushCommands(world.commandQueueSpare.data(), capturedCount, _impl->characterMap, _impl->activeCharacters);
     }
 
     world.contactCount.store(0, std::memory_order::relaxed);
@@ -407,7 +408,8 @@ auto PhysicsContext::CreateRigidBody(
     JPH::ObjectLayer      layer,
     uint32_t              materialID,
     uint32_t              category,
-    uint32_t              mask
+    uint32_t              mask,
+    Entity                owner
 ) -> ZHLN::Entity {
     auto&                 world = _impl->world;
     Physics::MaterialData mat {};
@@ -432,6 +434,7 @@ auto PhysicsContext::CreateRigidBody(
         world.slotToDense[handle.index] = dense;
         world.denseToSlot[dense]        = handle.index;
         world.slotStates[handle.index].store(SLOT_ALIVE, std::memory_order::release);
+        world.bodyOwners[handle.index] = owner;
 
         const uint32_t j_idx = id.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
         world.idToHandleMap[j_idx].store(handle.Pack(), std::memory_order::release);
@@ -558,16 +561,19 @@ auto PhysicsContext::CreateMeshBody(
     JPH::RVec3Arg         pos,
     JPH::QuatArg          rot,
     uint32_t              category,
-    uint32_t              mask
+    uint32_t              mask,
+    Entity                owner
 ) -> ZHLN::Entity {
     JPH::ShapeRefC shape = Physics::CreateMeshShape(vertices, vertexCount, indices, indexCount);
     if (shape == nullptr) {
         return ZHLN::Entity::Null();
     }
-    return CreateRigidBody(shape, pos, rot, JPH::EMotionType::Static, Layers::NON_MOVING, 0, category, mask);
+    return CreateRigidBody(shape, pos, rot, JPH::EMotionType::Static, Layers::NON_MOVING, 0, category, mask, owner);
 }
 
-auto PhysicsContext::CreateCharacter(JPH::RVec3Arg position, const Physics::DualShapeConfig& config, uint32_t category, uint32_t mask) -> ZHLN::Entity {
+auto PhysicsContext::CreateCharacter(
+    JPH::RVec3Arg position, const Physics::DualShapeConfig& config, uint32_t category, uint32_t mask, Entity owner
+) -> ZHLN::Entity {
     auto* impl  = _impl.get();
     auto& world = impl->world;
 
@@ -604,6 +610,7 @@ auto PhysicsContext::CreateCharacter(JPH::RVec3Arg position, const Physics::Dual
         world.slotToDense[handle.index] = dense;
         world.denseToSlot[dense]        = handle.index;
         world.slotStates[handle.index].store(SLOT_CHARACTER, std::memory_order::release);
+        world.bodyOwners[handle.index] = owner;
         world.categories[dense] = category;
         world.masks[dense]      = mask;
 
@@ -735,33 +742,60 @@ auto PhysicsContext::GetEntityHandle(JPH::BodyID bodyID) const -> ZHLN::Entity {
     return ZHLN::Entity::Unpack(rawData);
 }
 
-void PhysicsContext::DestroyBody(ZHLN::Entity handle) {
-    auto&          world = _impl->world;
-    const uint32_t slot  = handle.index;
+namespace {
 
-    if (slot >= world.slotCapacity) {
-        return;
-    }
-    if (world.generations[slot].load(std::memory_order::acquire) != handle.generation) {
+void QueueDestroyBodyLocked(Physics::PhysicsWorld& world, Entity handle) {
+    const uint32_t slot = handle.index;
+    if (slot >= world.slotCapacity || world.generations[slot].load(std::memory_order::acquire) != handle.generation) {
         return;
     }
 
-    const uint8_t                state = world.slotStates[slot].load(std::memory_order::acquire);
-    const Physics::SlotPredicate pred  = Physics::GetSlotPredicate(state);
-
-    if (!pred.isDestructible) {
+    const auto predicate = Physics::GetSlotPredicate(world.slotStates[slot].load(std::memory_order::acquire));
+    if (!predicate.isDestructible) {
         return;
     }
 
     world.slotStates[slot].store(Physics::SLOT_PENDING_DESTROY, std::memory_order::release);
+    if (world.commandCount >= world.commandQueue.size()) {
+        const size_t newCapacity = world.commandQueue.empty() ? 64 : world.commandQueue.size() * 2;
+        world.commandQueue.resize(newCapacity);
+        world.commandQueueSpare.resize(newCapacity);
+    }
+    world.commandQueue[world.commandCount++] = {.type = Physics::CommandType::DestroyBody, .handle = handle};
+}
 
-    ZHLN::Lock(world.sync.shadowLock, [&] -> void {
-        if (world.commandCount >= world.commandQueue.size()) {
-            size_t newCap = world.commandQueue.size() == 0 ? 64 : world.commandQueue.size() * 2;
-            world.commandQueue.resize(newCap);
-            world.commandQueueSpare.resize(newCap);
+} // namespace
+
+void PhysicsContext::SetBodyOwner(Entity handle, Entity owner) {
+    auto& world = _impl->world;
+    ZHLN::Lock(world.sync.shadowLock, [&] {
+        if (handle.index >= world.slotCapacity || world.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
+            return;
         }
-        world.commandQueue[world.commandCount++] = {.type = Physics::CommandType::DestroyBody, .handle = handle};
+        if (Physics::GetSlotPredicate(world.slotStates[handle.index].load(std::memory_order::acquire)).isActive) {
+            world.bodyOwners[handle.index] = owner;
+        }
+    });
+}
+
+void PhysicsContext::DestroyBody(Entity handle) {
+    auto& world = _impl->world;
+    ZHLN::Lock(world.sync.shadowLock, [&] { QueueDestroyBodyLocked(world, handle); });
+}
+
+void PhysicsContext::ReconcileOrphanedBodies(const ECS::Registry& registry) {
+    auto& world = _impl->world;
+    ZHLN::Lock(world.sync.shadowLock, [&] {
+        for (uint32_t slot = 0; slot < world.slotCapacity; ++slot) {
+            if (!Physics::GetSlotPredicate(world.slotStates[slot].load(std::memory_order::acquire)).isActive) {
+                continue;
+            }
+
+            const Entity owner = world.bodyOwners[slot];
+            if (owner != Entity::Null() && !registry.IsAlive(owner)) {
+                QueueDestroyBodyLocked(world, Entity {.index = slot, .generation = world.generations[slot].load(std::memory_order::acquire)});
+            }
+        }
     });
 }
 

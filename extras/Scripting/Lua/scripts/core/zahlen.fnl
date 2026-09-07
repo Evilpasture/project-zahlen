@@ -674,7 +674,7 @@
 ;; ============================================================================
 ;; Global Host Hooks & Initialization (LSP Static Declaration)
 ;; ============================================================================
-(local engine_ptr (ffi.C.ZHLN_GetEngineContext))
+(local engine_ptr _G.ZHLN_EngineContext)
 
 ;; Define 'zh' as a static table literal so the LSP can read its fields
 (local zh {:physics (PhysicsWorld.new engine_ptr)

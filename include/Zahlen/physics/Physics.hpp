@@ -20,8 +20,13 @@
 
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 namespace ZHLN {
+
+namespace ECS {
+class Registry;
+}
 
 namespace Layers {
 enum ID : JPH::ObjectLayer { NON_MOVING = 0, MOVING = 1, NUM_LAYERS = 2 };
@@ -193,7 +198,8 @@ class ZHLN_API PhysicsContext {
         JPH::ObjectLayer      layer,
         uint32_t              materialID = 0,
         uint32_t              category   = 0xFFFFFFFF,
-        uint32_t              mask       = 0xFFFFFFFF
+        uint32_t              mask       = 0xFFFFFFFF,
+        Entity                owner      = Entity::Null()
     ) -> ZHLN::Entity;
 
     auto CreateMeshBody(
@@ -204,15 +210,18 @@ class ZHLN_API PhysicsContext {
         JPH::RVec3Arg         pos,
         JPH::QuatArg          rot,
         uint32_t              category = 0xFFFFFFFF,
-        uint32_t              mask     = 0xFFFFFFFF
+        uint32_t              mask     = 0xFFFFFFFF,
+        Entity                owner    = Entity::Null()
     ) -> ZHLN::Entity;
 
     // Overloaded CreateCharacter supporting native Dual-Shape compound hulls
-    auto CreateCharacter(JPH::RVec3Arg position, const Physics::DualShapeConfig& config = {}, uint32_t category = 0xFFFFFFFF, uint32_t mask = 0xFFFFFFFF)
-        -> ZHLN::Entity;
+    auto CreateCharacter(
+        JPH::RVec3Arg position, const Physics::DualShapeConfig& config = {}, uint32_t category = 0xFFFFFFFF, uint32_t mask = 0xFFFFFFFF,
+        Entity owner = Entity::Null()
+    ) -> ZHLN::Entity;
 
-    auto CreateCharacter(JPH::RVec3Arg position, uint32_t category, uint32_t mask = 0xFFFFFFFF) -> ZHLN::Entity {
-        return CreateCharacter(position, Physics::DualShapeConfig {}, category, mask);
+    auto CreateCharacter(JPH::RVec3Arg position, uint32_t category, uint32_t mask = 0xFFFFFFFF, Entity owner = Entity::Null()) -> ZHLN::Entity {
+        return CreateCharacter(position, Physics::DualShapeConfig {}, category, mask, owner);
     }
 
     auto CreateSkeletalRagdoll(JPH::Ref<JPH::Skeleton> skeleton, const std::vector<Physics::RagdollPartParams>& parts) -> JPH::Ref<JPH::Ragdoll>;
@@ -222,7 +231,18 @@ class ZHLN_API PhysicsContext {
     [[nodiscard]] auto GetDebugDrawData(bool drawShapes = true, bool drawConstraints = true, bool wireframe = true) const -> Physics::DebugDrawData;
     void               RegisterMaterial(uint32_t id, float friction, float restitution);
 
+    /// Associate an independently-created physics handle with its ECS owner.
+    /// Bodies created with the owner argument are already bound; this exists for
+    /// construction flows that must allocate the body before the ECS entity.
+    void SetBodyOwner(Entity handle, Entity owner);
+
+    /// Queues a body or virtual character for destruction at the next physics step.
     void DestroyBody(ZHLN::Entity handle);
+
+    /// Queues every live body whose recorded ECS owner has died. Called by the
+    /// physics phase before stepping, so registry destruction cannot strand Jolt
+    /// objects after the component record has disappeared.
+    void ReconcileOrphanedBodies(const ECS::Registry& registry);
     void SetLinearVelocity(ZHLN::Entity handle, JPH::Vec3Arg velocity);
     void SetCharacterVelocity(ZHLN::Entity handle, JPH::Vec3Arg velocity);
     void SetCharacterPosition(ZHLN::Entity handle, JPH::RVec3Arg position);

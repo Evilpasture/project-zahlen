@@ -6,10 +6,14 @@
 #include <Jolt/Physics/Constraints/HingeConstraint.h>
 #include <Jolt/Physics/Constraints/SliderConstraint.h>
 #include <Zahlen/physics/Physics.hpp> // For GetBodyID
+#include <algorithm>
 
 namespace ZHLN::Physics {
 
-void PhysicsWorld::FlushCommands(Command* capturedQueue, size_t capturedCount) {
+void PhysicsWorld::FlushCommands(
+    Command* capturedQueue, size_t capturedCount, JPH::Array<JPH::Ref<JPH::CharacterVirtual>>& characterMap,
+    JPH::Array<JPH::CharacterVirtual*>& activeCharacters
+) {
     if (capturedCount == 0) {
         return;
     }
@@ -24,22 +28,30 @@ void PhysicsWorld::FlushCommands(Command* capturedQueue, size_t capturedCount) {
                     continue;
                 }
 
-                uint32_t    dense  = slotToDense[slot];
-                JPH::BodyID bodyID = bodyIDs[dense];
+                const uint32_t dense  = slotToDense[slot];
+                const JPH::BodyID bodyID = bodyIDs[dense];
 
-                // If we get here, the slot state was validated as SLOT_ALIVE (destructible rigid
-                // body). Having an invalid BodyID here means our internal state is completely
-                // broken.
-                ZHLN::Assert(!bodyID.IsInvalid(), "PhysicsCommand: Attempted to destroy an invalid Jolt BodyID on slot {}!", slot);
+                if (bodyID.IsInvalid()) {
+                    // Virtual characters are physics slots too, but have no
+                    // JPH::BodyID. Release their strong reference and remove
+                    // the raw update-list entry before recycling the slot.
+                    if (slot < characterMap.size() && characterMap[slot] != nullptr) {
+                        auto* character = characterMap[slot].GetPtr();
+                        character->SetListener(nullptr);
+                        activeCharacters.erase(std::remove(activeCharacters.begin(), activeCharacters.end(), character), activeCharacters.end());
+                        characterMap[slot] = nullptr;
+                    }
+                    RemoveBodySlot(slot);
+                    break;
+                }
 
                 const uint32_t joltIdx = bodyID.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
 
                 // Verify indices against array boundaries before writing
                 ZHLN::Assert(
                     joltIdx < idToHandleMap.size() && joltIdx < joltBodyPtrs.size(),
-                    "PhysicsCommand: joltIdx ({}) exceeds active map sizes ({}, {}) "
-                    "during DestroyBody!",
-                    joltIdx, idToHandleMap.size(), joltBodyPtrs.size()
+                    "PhysicsCommand: joltIdx ({}) exceeds active map sizes ({}, {}) during DestroyBody!", joltIdx, idToHandleMap.size(),
+                    joltBodyPtrs.size()
                 );
 
                 idToHandleMap[joltIdx].store(0, std::memory_order::release);

@@ -38,7 +38,7 @@
 // with no document layer compiled in at all.
 //
 // Instantiating is a pure function of the description plus the engine it is
-// given -- no ambient engine, no process-global scene state. Two engines can
+// given -- no hidden engine, no process-global scene state. Two engines can
 // hold the same Scene at once, and re-instantiating the same description
 // produces the same scene, which is the property the render tests need.
 //

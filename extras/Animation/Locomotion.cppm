@@ -251,6 +251,9 @@ inline auto SpawnCharacter(
             .currPosition = spawnPosition, .prevPosition = spawnPosition, .currRotation = JPH::Quat::sIdentity(), .prevRotation = JPH::Quat::sIdentity()
         }
     );
+    // This construction flow must allocate the virtual character before the
+    // entity exists, so bind its durable ECS owner immediately afterwards.
+    pc.SetBodyOwner(charPhys, player);
 
     // Configure third-person follow camera and strip FreeCam
     for (Entity camEnt: reg.GetEntitiesWith<Components::MainCameraTagComponent>()) {

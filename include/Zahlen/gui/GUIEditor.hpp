@@ -39,6 +39,7 @@ namespace ZHLN::ECS {
 class Registry;
 }
 namespace ZHLN {
+class Engine;
 struct Camera;
 }
 
@@ -125,10 +126,10 @@ ZHLN_API auto CreateEntity(ZHLN::ECS::Registry& reg, std::string_view name = {})
 /// Destroys `state.selectedEntity` and clears the selection.
 ///
 /// The selection is cleared before the destroy, so a stale handle is never left
-/// in the editor state even if the entity turns out to be gone already. Does
-/// not cascade: children pointing at the destroyed entity through
-/// HierarchyComponent keep their handle and simply resolve as dead.
-ZHLN_API void DestroySelected(ZHLN::ECS::Registry& reg, EditorState& state) noexcept;
+/// in the editor state even if the entity turns out to be gone already. The
+/// explicit Engine lifecycle pipeline cascades children before their parent and
+/// notifies external resource systems before each registry destroy.
+ZHLN_API void DestroySelected(ZHLN::Engine& engine, EditorState& state) noexcept;
 
 /// One component the editor knows how to add to an entity, remove from it, and
 /// display. Function pointers rather than a std::function, so the table is a

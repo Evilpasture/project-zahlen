@@ -35,7 +35,7 @@ struct ExplosionTestSuite {
         ZHLN::TaskSystem::Shutdown();
     }
 
-    static auto CreateTestEngine() -> ZHLN::ScopedEngine {
+    static auto CreateTestEngine() -> std::unique_ptr<ZHLN::Engine> {
         ZHLN::DefaultPreset::SetDisabled(true);
 
         const ZHLN::EngineConfig cfg {

@@ -11,6 +11,7 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <expected>
 #include <random>
 
@@ -216,6 +217,49 @@ struct LightningTestSuite {
                 ZHLN::Test::ExpectEq(pp.ambientExposure, kBaselineExposure);
             });
 
+            return {};
+        }
+
+        // ====================================================================
+        // 3. Raw registry destroy and explicit despawn use distinct safe paths
+        // ====================================================================
+        std::expected<void, ZHLN::Error> lightning_resources_survive_component_erasure_until_reconciled() {
+            ZHLN::DefaultPreset::SetDisabled(true);
+            const ZHLN::EngineConfig engineCfg {
+                .physics = {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 4 * 1024 * 1024},
+                .render  = {.appName = "Lightning Resource Reconciliation Test", .width = 320, .height = 240, .vsync = false,
+                            .fullscreen = false, .validationMode = ZHLN::ValidationMode::On, .headless = true}
+            };
+
+            auto engineRes = ZHLN::Engine::Create(engineCfg);
+            if (!ZHLN::Test::ExpectTrue(engineRes.has_value())) {
+                return std::unexpected(LightningTestError::EngineInitFailed);
+            }
+            auto engine = std::move(engineRes.value());
+            engine->InitializeDefaultScene();
+            auto& reg = engine->GetRegistry();
+            auto& rc  = engine->GetRenderContext();
+
+            const ZHLN::Entity rawBolt = ZHLN::Lightning::Spawn(*engine, JPH::RVec3(0, 80, 0), JPH::RVec3(0, 0, 0));
+            ZHLN::Test::ExpectEq(rc.GetTrackedEntityBufferCount(), std::size_t {2});
+            reg.Destroy(rawBolt);
+            // The component is gone, but RenderContext retained the owner/VBO
+            // ledger and its system reconciliation reclaims both buffers.
+            ZHLN::Lightning::Update(*engine, 0.0f);
+            ZHLN::Test::ExpectEq(rc.GetTrackedEntityBufferCount(), std::size_t {0});
+
+            const ZHLN::Entity despawnBolt = ZHLN::Lightning::Spawn(*engine, JPH::RVec3(10, 80, 0), JPH::RVec3(10, 0, 0));
+            const auto* bolt = reg.Get<ZHLN::LightningComponent>(despawnBolt);
+            if (!ZHLN::Test::ExpectTrue(bolt != nullptr)) {
+                return std::unexpected(LightningTestError::StrikeSpawnFailed);
+            }
+            const ZHLN::Entity flash  = bolt->flashLightEntity;
+            const ZHLN::Entity impact = bolt->impactLightEntity;
+            ZHLN::DespawnEntity(*engine, despawnBolt);
+            ZHLN::Test::ExpectFalse(reg.IsAlive(despawnBolt));
+            ZHLN::Test::ExpectFalse(reg.IsAlive(flash));
+            ZHLN::Test::ExpectFalse(reg.IsAlive(impact));
+            ZHLN::Test::ExpectEq(rc.GetTrackedEntityBufferCount(), std::size_t {0});
             return {};
         }
     };

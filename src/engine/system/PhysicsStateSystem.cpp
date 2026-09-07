@@ -50,6 +50,10 @@ static void VerifyRealVisualInterpolation(Engine& engine, float alpha) noexcept 
 
 namespace ZHLN {
 
+void PhysicsStateSystem::Reconcile(Engine& engine) noexcept {
+    engine.GetPhysicsContext().ReconcileOrphanedBodies(engine.GetRegistry());
+}
+
 void PhysicsStateSystem::WriteBack(Engine& engine) noexcept {
     auto&       reg   = engine.GetRegistry();
     const auto& world = engine.GetPhysicsContext().GetWorld();
@@ -63,10 +67,26 @@ void PhysicsStateSystem::WriteBack(Engine& engine) noexcept {
         auto*  state = reg.Get<Components::PhysicsStateComponent>(e);
 
         if (state != nullptr) {
-            uint32_t dense = world.slotToDense[phys.physicsHandle.index];
-            size_t   base  = static_cast<size_t>(dense) * 4;
+            // DespawnEntity marks a slot pending immediately, while plain
+            // Registry::Destroy is reconciled at the next physics phase. Never
+            // index the dense SoA using a stale or pending component handle.
+            if (phys.physicsHandle.index >= world.slotCapacity ||
+                world.generations[phys.physicsHandle.index].load(std::memory_order::acquire) != phys.physicsHandle.generation) {
+                continue;
+            }
 
-            bool isCharacter = (world.slotStates[phys.physicsHandle.index].load(std::memory_order::relaxed) == Physics::SLOT_CHARACTER);
+            const uint8_t slotState = world.slotStates[phys.physicsHandle.index].load(std::memory_order::acquire);
+            if (!Physics::GetSlotPredicate(slotState).isActive) {
+                continue;
+            }
+
+            const uint32_t dense = world.slotToDense[phys.physicsHandle.index];
+            if (dense >= world.count.load(std::memory_order::acquire)) {
+                continue;
+            }
+            const size_t base = static_cast<size_t>(dense) * 4;
+
+            const bool isCharacter = slotState == Physics::SLOT_CHARACTER;
 
             // Read directly from Jolt's robust double-buffered history
             state->lastPhysicsSyncFrame = engine.GetCurrentFrame();

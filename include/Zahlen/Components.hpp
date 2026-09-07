@@ -173,15 +173,6 @@ struct Components {
 
         bool isAddedToPhysics = false;
 
-        static void OnDestroy(RagdollComponent* r) noexcept {
-            if (r->ragdollInstance != nullptr) {
-                if (r->isAddedToPhysics) {
-                    r->ragdollInstance->RemoveFromPhysicsSystem();
-                    r->isAddedToPhysics = false;
-                }
-                r->ragdollInstance = nullptr;
-            }
-        }
     };
 
     struct CameraComponent {
@@ -596,10 +587,6 @@ struct Components {
 
     struct TwoBoneIKComponent {
         ZHLN::Array<TwoBoneIKChain> chains;
-
-        static void OnDestroy(TwoBoneIKComponent* c) noexcept {
-            c->chains.clear();
-        }
     };
 
     enum class VolumetricVolumeType : uint32_t { Box = 0, Sphere = 1 };

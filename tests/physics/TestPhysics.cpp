@@ -11,6 +11,7 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/physics/Physics.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 #include <cmath>
 #include <expected>
 
@@ -99,6 +100,30 @@ struct PhysicsTestSuite {
             auto* posData = static_cast<const JPH::Real*>(posView.buf);
             ZHLN::Test::ExpectTrue(posData[1] < 9.0);
 
+            return {};
+        }
+
+        std::expected<void, ZHLN::Error> orphaned_ecs_owner_is_released_by_physics_reconciliation() {
+            ZHLN::PhysicsConfig  cfg {.maxBodies = 16, .maxBodyPairs = 32, .maxContactConstraints = 32, .tempAllocatorSize = 2 * 1024 * 1024};
+            ZHLN::PhysicsContext pc(cfg);
+            ZHLN::ECS::Registry  registry;
+
+            const ZHLN::Entity owner = registry.Create();
+            const auto shape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 0.5f, 0.5f, 0.5f);
+            const ZHLN::Entity body = pc.CreateRigidBody(
+                shape, JPH::RVec3(0, 1, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::MOVING, 0, 0xFFFFFFFF,
+                0xFFFFFFFF, owner
+            );
+            ZHLN::Test::ExpectTrue(body != ZHLN::Entity::Null());
+            ZHLN::Test::ExpectEq(pc.GetActiveBodyCount(), 1u);
+
+            registry.Destroy(owner);
+            pc.ReconcileOrphanedBodies(registry);
+            // Reconciliation uses the normal command queue: the slot remains
+            // present until the next physics step drains that command.
+            ZHLN::Test::ExpectEq(pc.GetActiveBodyCount(), 1u);
+            pc.Step(1.0f / 60.0f);
+            ZHLN::Test::ExpectEq(pc.GetActiveBodyCount(), 0u);
             return {};
         }
     };

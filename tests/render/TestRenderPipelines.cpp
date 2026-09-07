@@ -102,23 +102,19 @@ struct RenderPipelinesTestSuite {
         }
 
         // ====================================================================
-        // Ambient Engine Context Lifetime
+        // Explicit Engine Ownership
         // ====================================================================
         //
-        // GetEngineContext() used to be a pair of raw globals assigned during
-        // initialisation and never cleared, so it kept naming an engine that
-        // had been destroyed -- and a failed Engine::Create left it naming an
-        // object Create had already deleted. Test suites hit that as a
-        // use-after-free the moment they stopped building one engine per test.
-        std::expected<void, ZHLN::Error> ambient_engine_context_is_scoped_to_the_engine_lifetime() {
-            ZHLN::Test::ExpectTrue(ZHLN::GetEngineContext() == nullptr);
-
+        // Component teardown must not discover an engine through ambient global
+        // state. Engine::Create therefore returns the plain unique owner that
+        // callers already pass to every system and factory.
+        std::expected<void, ZHLN::Error> engine_creation_keeps_context_explicit() {
             ZHLN::DefaultPreset::SetDisabled(true);
 
             const ZHLN::EngineConfig cfg {
                 .physics = {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 4 * 1024 * 1024},
                 .render  = {
-                    .appName        = "LocalGPUEngineContextTest",
+                    .appName        = "LocalGPUExplicitEngineTest",
                     .width          = 320,
                     .height         = 240,
                     .vsync          = false,
@@ -128,37 +124,16 @@ struct RenderPipelinesTestSuite {
                 }
             };
 
-            // Exclusive engine: only one Vulkan instance may be live at a
-            // time (see engines_are_serial_and_the_slot_is_released), so the
-            // pool must not be holding one when this builds its own.
             ZHLN::Test::Headless::ShutdownPooledEngines();
-
             auto engineRes = ZHLN::Engine::Create(cfg);
             if (!engineRes) {
                 return std::unexpected(engineRes.error());
             }
 
-            {
-                const auto engine = std::move(engineRes.value());
-
-                // Published by the ScopedEngine the caller now holds, before it
-                // does anything else with it -- InitializeDefaultScene is
-                // entitled to rely on it.
-                ZHLN::Test::ExpectTrue(ZHLN::GetEngineContext() == engine.get());
-                engine->InitializeDefaultScene();
-                ZHLN::Test::ExpectTrue(ZHLN::GetEngineContext() == engine.get());
-
-                {
-                    // A caller-owned scope over the same engine: publishing it
-                    // again must not corrupt the chain when it unwinds.
-                    const ZHLN::EngineContextScope scope(*engine);
-                    ZHLN::Test::ExpectTrue(ZHLN::GetEngineContext() == engine.get());
-                }
-                ZHLN::Test::ExpectTrue(ZHLN::GetEngineContext() == engine.get());
-            }
-
-            // Gone, rather than stale.
-            ZHLN::Test::ExpectTrue(ZHLN::GetEngineContext() == nullptr);
+            auto engine = std::move(engineRes.value());
+            ZHLN::Test::ExpectTrue(engine != nullptr);
+            engine->InitializeDefaultScene();
+            ZHLN::Test::ExpectTrue(!engine->GetRegistry().GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>().empty());
             return {};
         }
 
@@ -320,7 +295,6 @@ struct RenderPipelinesTestSuite {
             }
             auto first = std::move(firstRes.value());
             first->InitializeDefaultScene();
-            ZHLN::Test::ExpectTrue(ZHLN::GetEngineContext() == first.get());
 
             // 1. A second engine is refused rather than half-built.
             {
@@ -336,9 +310,8 @@ struct RenderPipelinesTestSuite {
                 ZHLN::Println("    [INFO] second Engine::Create refused: {}: {}", secondRes.error().Category(), secondRes.error().Message());
             }
 
-            // 2. The refusal did not damage the engine that was already up.
-            //    Ambient context, rendering and physics all still work.
-            ZHLN::Test::ExpectTrue(ZHLN::GetEngineContext() == first.get());
+            // 2. The refusal did not damage the engine that was already up:
+            // rendering and physics still work through its explicit owner.
             const ZHLN::Entity falling = ZHLN::CreativeWorksFactory::CreateBox(
                 *first, JPH::Vec3(0.5f, 0.5f, 0.5f),
                 ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 8.0, 0.0), .createPhysics = true, .isStaticPhysics = false}
@@ -359,7 +332,6 @@ struct RenderPipelinesTestSuite {
             // 3. Destroying A releases the slot, and B gets a working engine --
             //    Jolt's types included, which is what the refcount buys.
             first.reset();
-            ZHLN::Test::ExpectTrue(ZHLN::GetEngineContext() == nullptr);
 
             auto secondRes = ZHLN::Engine::Create(smallCfg("LocalGPUSerialB"));
             if (!ZHLN::Test::ExpectTrue(secondRes.has_value())) {
@@ -367,7 +339,6 @@ struct RenderPipelinesTestSuite {
             }
             auto second = std::move(secondRes.value());
             second->InitializeDefaultScene();
-            ZHLN::Test::ExpectTrue(ZHLN::GetEngineContext() == second.get());
 
             const ZHLN::Entity fallingB = ZHLN::CreativeWorksFactory::CreateBox(
                 *second, JPH::Vec3(0.5f, 0.5f, 0.5f),
@@ -384,7 +355,6 @@ struct RenderPipelinesTestSuite {
             }
 
             second.reset();
-            ZHLN::Test::ExpectTrue(ZHLN::GetEngineContext() == nullptr);
             return {};
         }
     };

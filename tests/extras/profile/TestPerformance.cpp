@@ -638,6 +638,7 @@ struct PerformanceTestSuite {
                     AgentCombatStateComponent {.attackRange = 8.0f + static_cast<float>(i % 6)}, SpatialPerceptionComponent {}
                 );
 
+                physicsContext.SetBodyOwner(bodyHandle, agent);
                 agentEntities.push_back(agent);
             }
             physicsContext.OptimizeBroadphase();

@@ -591,7 +591,7 @@ static void ProcessCrash(int sig, void* addr) {
         // If TTY was active, it recovers. If GLFW was active, this is a silent no-op.
         TTYBackend::EmergencyRestore();
 
-        PerformDiagnosticDump(sig, addr, ZHLN::GetEngineContext());
+        PerformDiagnosticDump(sig, addr, nullptr);
 
         _exit(sig);
     } else {

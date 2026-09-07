@@ -4,11 +4,11 @@
 // src/engine/Engine.cpp
 #include <GLFW/glfw3.h>
 #include <algorithm>
-#include <atomic>
 #include <iterator>
 #include <mutex>
 #include <optional>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 // clang-format off
 #include <Jolt/Jolt.h>
@@ -69,84 +69,6 @@ namespace ZHLN {
 
 static RENDERDOC_API_1_5_0* s_RDocAPI = nullptr;
 
-// --- AMBIENT ENGINE CONTEXT ---
-//
-// The chain of published engines, innermost last. This used to be two raw
-// pointers assigned in InitInternal and never cleared, so GetEngineContext()
-// outlived the engine it named: destroying an engine left the pointers aimed
-// at freed memory, and a failed Engine::Create left them aimed at an object it
-// had already deleted.
-//
-// GetEngineContext() is read from worker fibers and from the terminal-signal
-// handler, so the read path takes no lock and no allocation: a thread-local
-// override if this thread published one, otherwise an atomic process-wide
-// fallback. The bookkeeping vectors are only touched when a scope opens or
-// closes.
-namespace {
-
-thread_local std::vector<Engine*> t_ThreadEngineContexts;
-std::mutex                        s_GlobalEngineContextMutex;
-std::vector<Engine*>              s_GlobalEngineContexts;
-std::atomic<Engine*>              s_GlobalEngine {nullptr};
-
-/// Removes the innermost registration of `engine`, which is the last one in
-/// normal (stack-ordered) teardown but need not be.
-void EraseInnermost(std::vector<Engine*>& stack, Engine* engine) {
-    const auto it = std::find(stack.rbegin(), stack.rend(), engine);
-    if (it != stack.rend()) {
-        stack.erase(std::next(it).base());
-    }
-}
-
-} // namespace
-
-EngineContextScope::EngineContextScope(Engine& engine): _engine(&engine) {
-    t_ThreadEngineContexts.push_back(_engine);
-
-    const std::lock_guard lock(s_GlobalEngineContextMutex);
-    s_GlobalEngineContexts.push_back(_engine);
-    s_GlobalEngine.store(_engine, std::memory_order_release);
-}
-
-EngineContextScope::~EngineContextScope() {
-    EraseInnermost(t_ThreadEngineContexts, _engine);
-
-    const std::lock_guard lock(s_GlobalEngineContextMutex);
-    EraseInnermost(s_GlobalEngineContexts, _engine);
-    s_GlobalEngine.store(s_GlobalEngineContexts.empty() ? nullptr : s_GlobalEngineContexts.back(), std::memory_order_release);
-}
-
-ScopedEngine::ScopedEngine(std::unique_ptr<Engine> engine): _engine(std::move(engine)) {
-    if (_engine != nullptr) {
-        _scope = std::make_unique<EngineContextScope>(*_engine);
-    }
-}
-
-ScopedEngine::ScopedEngine(ScopedEngine&&) noexcept = default;
-
-auto ScopedEngine::operator=(ScopedEngine&& other) noexcept -> ScopedEngine& {
-    if (this != &other) {
-        // Not the compiler-generated order: member-wise assignment would
-        // withdraw the old registration before destroying the old engine.
-        reset();
-        _scope  = std::move(other._scope);
-        _engine = std::move(other._engine);
-    }
-    return *this;
-}
-
-ScopedEngine::~ScopedEngine() {
-    reset();
-}
-
-void ScopedEngine::reset() {
-    // Engine first: ~Engine clears the registry, and the OnDestroy hooks that
-    // runs expect GetEngineContext() to still answer. The scope then withdraws
-    // a pointer it only ever compares, never dereferences.
-    _engine.reset();
-    _scope.reset();
-}
-
 static void InitRenderDocAPI() {
 #if defined(_WIN32)
     if (HMODULE mod = GetModuleHandleA("renderdoc.dll")) {
@@ -191,6 +113,7 @@ struct EngineImpl {
     std::unique_ptr<ECS::SystemGraph>         renderGraph;
     std::unique_ptr<ECS::EntityCommandBuffer> mainECB;
     std::unique_ptr<CullingSystem>            cullingSystem;
+    std::unique_ptr<ArticulationSystem>        articulationSystem;
     JPH::Array<Entity>                        visibleEntities;
     JPH::Array<Entity>                        visibleShadowEntities;
     float                                     currentAlpha = 0.0f;
@@ -221,8 +144,7 @@ void Sys_Animation(Engine& engine, float dt) {
 }
 
 void Sys_Articulation(Engine& engine, float dt) {
-    static ArticulationSystem sys;
-    sys.Update(engine, dt);
+    engine.GetArticulationSystem().Update(engine, dt);
 }
 
 void Sys_Transform(Engine& engine, float /*dt*/) {
@@ -635,23 +557,16 @@ Engine::Engine(const EngineConfig& cfg, bool& outSuccess): _impl(nullptr) {
     }
 }
 
-auto Engine::Create(const EngineConfig& cfg) -> std::expected<ScopedEngine, Error> {
+auto Engine::Create(const EngineConfig& cfg) -> std::expected<std::unique_ptr<Engine>, Error> {
     auto instance = std::unique_ptr<Engine>(new (std::nothrow) Engine());
     if (!instance) {
         return std::unexpected(EngineInitError::EngineAllocationFailed);
     }
 
-    // Published from here on, and withdrawn by `scoped` on every exit path --
-    // including the failure below, which is what used to leave the ambient
-    // pointer aimed at an engine this function had already deleted.
-    ScopedEngine scoped(std::move(instance));
-
-    auto res = scoped->InitInternal(cfg);
-    if (!res) {
-        return std::unexpected(res.error());
+    if (auto result = instance->InitInternal(cfg); !result) {
+        return std::unexpected(result.error());
     }
-
-    return scoped;
+    return std::move(instance);
 }
 
 // --- PROCESS-GLOBAL JOLT REGISTRATION ---
@@ -816,7 +731,8 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
     _impl->updateGraph   = std::make_unique<ECS::SystemGraph>();
     _impl->renderGraph   = std::make_unique<ECS::SystemGraph>();
     _impl->mainECB       = std::make_unique<ECS::EntityCommandBuffer>(_impl->registry);
-    _impl->cullingSystem = std::make_unique<CullingSystem>();
+    _impl->cullingSystem        = std::make_unique<CullingSystem>();
+    _impl->articulationSystem   = std::make_unique<ArticulationSystem>();
 
     if (std::filesystem::exists("data/base.pak")) {
         _impl->assetManager->MountPak("data/base.pak");
@@ -841,7 +757,17 @@ Engine::~Engine() {
     // not survive into the next engine (see DefaultPreset::ReleaseFor).
     DefaultPreset::ReleaseFor(this);
 
+    // Ragdolls retain Jolt resources outside the registry. Drain them while
+    // both the components and PhysicsContext still exist. InitInternal may
+    // fail before this system is created, so teardown must tolerate that path.
+    if (_impl->articulationSystem != nullptr) {
+        _impl->articulationSystem->Shutdown(*this);
+    }
     _impl->registry.Clear();
+    if (_impl->renderContext != nullptr) {
+        _impl->renderContext->ReconcileEntityBuffers(_impl->registry);
+    }
+    _impl->articulationSystem.reset();
     _impl->physicsContext.reset();
     _impl->renderContext.reset();
     _impl->window.reset();
@@ -980,6 +906,9 @@ auto Engine::GetFrameScheduler() -> FrameScheduler& {
 auto Engine::GetCullingSystem() -> CullingSystem& {
     return *_impl->cullingSystem;
 }
+auto Engine::GetArticulationSystem() -> ArticulationSystem& {
+    return *_impl->articulationSystem;
+}
 auto Engine::GetVisibleEntities() -> JPH::Array<Entity>& {
     return _impl->visibleEntities;
 }
@@ -1019,11 +948,56 @@ void Engine::ProvokeDeviceLost() {
     _impl->renderContext->ProvokeDeviceLost();
 }
 
-auto GetEngineContext() -> Engine* {
-    if (!t_ThreadEngineContexts.empty()) {
-        return t_ThreadEngineContexts.back();
+namespace {
+
+void CollectDespawnPostorder(ECS::Registry& registry, Entity entity, std::vector<Entity>& postorder, std::unordered_set<uint64_t>& seen) {
+    if (!registry.IsAlive(entity) || !seen.insert(entity.Pack()).second) {
+        return;
     }
-    return s_GlobalEngine.load(std::memory_order_acquire);
+
+    std::vector<Entity> children;
+    for (const Entity candidate: registry.GetEntitiesWith<Components::HierarchyComponent>()) {
+        if (const auto* hierarchy = registry.Get<Components::HierarchyComponent>(candidate); hierarchy != nullptr && hierarchy->parent == entity) {
+            children.push_back(candidate);
+        }
+    }
+    // UI owns a second entity hierarchy. Treat its parent link identically so
+    // scripting and editor teardown cannot strand visual descendants.
+    for (const Entity candidate: registry.GetEntitiesWith<GUI::UIComponents::UIRectComponent>()) {
+        if (const auto* rect = registry.Get<GUI::UIComponents::UIRectComponent>(candidate); rect != nullptr && rect->parentEntity == entity) {
+            children.push_back(candidate);
+        }
+    }
+
+    for (const Entity child: children) {
+        CollectDespawnPostorder(registry, child, postorder, seen);
+    }
+    postorder.push_back(entity);
+}
+
+} // namespace
+
+void DespawnEntity(Engine& engine, Entity entity) {
+    auto& registry = engine.GetRegistry();
+    std::vector<Entity> postorder;
+    std::unordered_set<uint64_t> seen;
+    CollectDespawnPostorder(registry, entity, postorder, seen);
+
+    for (const Entity current: postorder) {
+        if (!registry.IsAlive(current)) {
+            continue;
+        }
+
+        // These systems keep external handles outside component storage, and
+        // therefore receive the entity while its component data is still valid.
+        engine.GetArticulationSystem().Release(engine, current);
+        engine.GetAudioContext().ReleaseOwner(current);
+        if (const auto* physics = registry.Get<Components::PhysicsComponent>(current); physics != nullptr) {
+            engine.GetPhysicsContext().DestroyBody(physics->physicsHandle);
+        }
+        engine.GetRenderContext().ReleaseEntityBuffers(current);
+        registry.Destroy(current);
+    }
 }
 
 auto Engine::InitializeDefaultScene() -> bool {
@@ -1078,6 +1052,10 @@ auto Engine::InitializeDefaultScene() -> bool {
 }
 
 auto Engine::Tick(float dt, GameplayDriver driver) -> GameplayStatus {
+    // Resource contexts retain owner/handle pairs outside ECS component
+    // storage. Reconcile before any phase can observe this frame's world.
+    _impl->renderContext->ReconcileEntityBuffers(_impl->registry);
+
     FrameContext ctx {.driver = driver, .status = GameplayStatus::OK, .deviceLost = false};
 
     // The whole frame is the scheduler's ordered step list; the two SystemGraphs

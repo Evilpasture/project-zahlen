@@ -28,7 +28,6 @@
       // The singular Dispatch mechanism handling ALL C/Lua interactions.
       uint32_t ZHLN_GetCommandID(const char* cmdName);
       uint64_t ZHLN_DispatchCommand(ZHLN_Engine* engine, uint32_t cmdID, const void* args);
-      ZHLN_Engine* ZHLN_GetEngineContext(void);
 
       typedef struct ZHLN_RaycastResult {
           uint64_t entity;

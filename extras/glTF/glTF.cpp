@@ -171,7 +171,7 @@ void ClearInstances(InspectorState& state) {
     auto& reg = state.engine->GetRegistry();
     for (ZHLN::Entity e: state.instances) {
         if (e != ZHLN::Entity::Null() && reg.IsAlive(e)) {
-            reg.Destroy(e);
+            DespawnEntity(*state.engine, e);
         }
     }
     state.instances.clear();
