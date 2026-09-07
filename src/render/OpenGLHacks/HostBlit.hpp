@@ -17,7 +17,10 @@
 // plugin documents its own threading and lifetime contract in
 // HostBlitSwapchain.cpp's header comment.
 
-#include <vulkan/vulkan_core.h>
+// Volk must own the Vulkan declarations. Including Vulkan-Headers directly
+// before Rendering.hpp would publish loader prototypes, which conflict with
+// Volk's dispatch-pointer variables in the same translation unit.
+#include <volk.h>
 #include <cstdint>
 
 struct GLFWwindow;

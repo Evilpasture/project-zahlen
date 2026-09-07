@@ -17,6 +17,9 @@ target_link_libraries(HostBlitSwapchain PRIVATE
     Vulkan-Headers
     zahlen_warnings
 )
+target_include_directories(HostBlitSwapchain SYSTEM PRIVATE
+    ${PROJECT_SOURCE_DIR}/extern/volk
+)
 
 if(NOT MSVC)
     target_compile_options(HostBlitSwapchain PRIVATE -fno-exceptions -fno-rtti)

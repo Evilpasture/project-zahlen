@@ -213,8 +213,10 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
         const JPH::Skeleton* skel    = ragdoll->GetRagdollSettings()->GetSkeleton();
 
         JPH::RVec3 capsuleWorldPos = JPH::RVec3::sZero();
-        if (phys != nullptr) {
-            pc.TryGetBodyPosition(phys->physicsHandle, capsuleWorldPos);
+        if (phys != nullptr && !pc.TryGetBodyPosition(phys->physicsHandle, capsuleWorldPos)) {
+            // The physics owner may have been queued for destruction. Its
+            // identity root is the safe pose until synchronization catches up.
+            capsuleWorldPos = JPH::RVec3::sZero();
         }
 
         JPH::SkeletonPose animPose;
