@@ -3,12 +3,11 @@
 
 // File: src/render/RenderResources.cpp
 #include "RenderInternal.hpp"
-#include "Instance.hpp"
 #include "Resources.hpp"
 #include "Zahlen/Types.hpp"
 #include <Zahlen/Core/ControlFlow.hpp>
+#include <Zahlen/Core/Ranges.hpp>
 #include <Zahlen/ecs/ECS.hpp>
-#include <stb_image.h>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -16,6 +15,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <stb_image.h>
 #include <utility>
 #include <vector>
 
@@ -31,18 +31,18 @@
 namespace ZHLN {
 
 enum class MaterialCreationError : uint8_t {
-    ShaderCompilationFailed ZHLN_ANNOTATION(ZHLN::Description<"Material shader compilation failed">{}) = 1,
-    PipelineLayoutCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Material pipeline layout creation failed">{}),
-    PipelineCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Material pipeline creation failed">{}),
+    ShaderCompilationFailed      ZHLN_ANNOTATION(ZHLN::Description<"Material shader compilation failed"> {}) = 1,
+    PipelineLayoutCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Material pipeline layout creation failed"> {}),
+    PipelineCreationFailed       ZHLN_ANNOTATION(ZHLN::Description<"Material pipeline creation failed"> {}),
 };
 
 enum class BlueNoiseError : uint8_t {
-    DecodeFailed ZHLN_ANNOTATION(ZHLN::Description<"Blue noise PNG decode failed">{}) = 1,
+    DecodeFailed ZHLN_ANNOTATION(ZHLN::Description<"Blue noise PNG decode failed"> {}) = 1,
 };
 
 enum class ShadowResolutionError : uint8_t {
-    DeviceLost ZHLN_ANNOTATION(ZHLN::Description<"Device lost while resizing shadow map">{}) = 1,
-    RecreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Shadow map recreation failed">{}),
+    DeviceLost       ZHLN_ANNOTATION(ZHLN::Description<"Device lost while resizing shadow map"> {}) = 1,
+    RecreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Shadow map recreation failed"> {}),
 };
 
 } // namespace ZHLN
@@ -104,7 +104,7 @@ auto RenderContext::GetOrCreateParticleBuffer(Entity owner, uint32_t subresource
     }
 
     const uint64_t cacheKey = owner.Pack() ^ static_cast<uint64_t>(subresourceKey);
-    const auto* existing = _impl->particleBufferMap.Find(cacheKey);
+    const auto*    existing = _impl->particleBufferMap.Find(cacheKey);
     if (existing != nullptr && existing->second != BufferHandle::Invalid) {
         return existing->second;
     }
@@ -220,8 +220,8 @@ void RenderContext::TrackEntityBuffer(Entity owner, BufferHandle buffer) {
 
 void RenderContext::ReleaseEntityBuffers(Entity owner) {
     using namespace ZHLN::Ranges;
-    const uint64_t packedOwner = owner.Pack();
-    auto releaseOwned = [this, packedOwner](auto& trackedBuffers) {
+    const uint64_t packedOwner  = owner.Pack();
+    auto           releaseOwned = [this, packedOwner](auto& trackedBuffers) {
         trackedBuffers | EraseIf([this, packedOwner](const auto& tracked) {
             if (tracked.first == packedOwner) {
                 DestroyBuffer(tracked.second);
@@ -780,10 +780,9 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
     // reach for it. The shader always samples LOD 0.
     constexpr VkFormat kFormat = VK_FORMAT_R8G8B8A8_UNORM;
 
-    int width = 0, height = 0, channels = 0;
-    unsigned char* pixels = stbi_load_from_memory(
-        Resource::blue_noise_png.data(), static_cast<int>(Resource::blue_noise_png.size()), &width, &height, &channels, 4
-    );
+    int            width = 0, height = 0, channels = 0;
+    unsigned char* pixels =
+        stbi_load_from_memory(Resource::blue_noise_png.data(), static_cast<int>(Resource::blue_noise_png.size()), &width, &height, &channels, 4);
     if (pixels == nullptr || width <= 0 || height <= 0) {
         if (pixels != nullptr) {
             stbi_image_free(pixels);
@@ -795,9 +794,7 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
     const uint32_t h     = static_cast<uint32_t>(height);
     const size_t   bytes = static_cast<size_t>(w) * static_cast<size_t>(h) * 4;
 
-    auto imageRes = Vk::ImageBuilder {}
-                        .Texture2D(w, h, kFormat, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 1)
-                        .Build(allocator.Get());
+    auto imageRes = Vk::ImageBuilder {}.Texture2D(w, h, kFormat, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 1).Build(allocator.Get());
     if (!imageRes) {
         stbi_image_free(pixels);
         return std::unexpected(imageRes.error());
@@ -1360,8 +1357,8 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
                 impl->pendingAcquires.Drain(tempCmd);
 
                 Vk::MemoryBarrier(
-                    tempCmd, Vk::BarrierStage::Copy, Vk::BarrierAccess::TransferWrite,
-                    Vk::BarrierStage::AccelerationStructureBuild, Vk::BarrierAccess::AccelerationStructureRead
+                    tempCmd, Vk::BarrierStage::Copy, Vk::BarrierAccess::TransferWrite, Vk::BarrierStage::AccelerationStructureBuild,
+                    Vk::BarrierAccess::AccelerationStructureRead
                 );
                 impl->rtCtx.BuildBLAS(tempCmd, b.geom, b.blas, Vk::GetBufferAddress(impl->ctx.Device(), b.scratch.Handle()), b.primitiveCount);
             }
@@ -1397,8 +1394,8 @@ auto RenderContext::CreateProceduralTexture(std::string_view name, uint32_t widt
 }
 
 enum class ScreenshotError : uint8_t {
-    FileOpenFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to open screenshot output file for writing">{}) = 1,
-    ReadbackFailed ZHLN_ANNOTATION(ZHLN::Description<"GPU readback buffer mapping failed">{}),
+    FileOpenFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to open screenshot output file for writing"> {}) = 1,
+    ReadbackFailed ZHLN_ANNOTATION(ZHLN::Description<"GPU readback buffer mapping failed"> {}),
 };
 
 auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -> std::expected<void, Error> {
