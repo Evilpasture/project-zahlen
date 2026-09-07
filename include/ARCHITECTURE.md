@@ -219,7 +219,7 @@ links no parser and no Lua runtime.
   ```
 
   Every `ScriptRunner` method is a no-op while nothing is installed, so the
-  engine, the fallback preset and the console all ask for script work without a
+  engine and the fallback preset ask for script work without a
   guard and without knowing whether anything is listening. A core-only build
   simply runs C++.
 * **The composition root lives in `app/`, not `src/`.** Wiring an engine

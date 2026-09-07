@@ -5,8 +5,8 @@
 //
 // The forwarding half of ScriptRunner. Deliberately the whole of core's
 // scripting support: it holds an IScriptRuntime and calls through it, so the
-// engine, the fallback preset and the console can ask for script work without
-// knowing whether anything is listening.
+// engine and the fallback preset can ask for script work without knowing
+// whether anything is listening.
 
 #include <Zahlen/Scripting.hpp>
 #include <utility>

@@ -9,7 +9,6 @@
 #include "engine/system/InputSystem.hpp"
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Buffer.h>
-#include <Zahlen/Console.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/IScriptRuntime.hpp>
@@ -27,7 +26,6 @@
 #include <engine/system/LightingSystem.hpp>
 #include <functional>
 #include <physics/PhysicsWorld.hpp>
-#include <print>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -152,10 +150,6 @@ struct UnprojectArgs {
     float*  dy;
     float*  dz;
 };
-struct LogInventoryArgs {
-    const char* msg;
-};
-
 struct SpawnPrefabArgs {
     char      path[256];
     float     px, py, pz;
@@ -380,9 +374,6 @@ void SafeDestroyEntity(ZHLN::Engine* engine, ZHLN::Entity entity) {
     reg.Destroy(entity);
 }
 } // namespace
-
-extern std::vector<std::string> s_InvShellLog;
-extern bool                     s_InvScrollToBottom;
 
 namespace ZHLN { namespace {
 
@@ -1041,25 +1032,6 @@ void RegisterECSCommands() {
                     return 0;
                 }));
 
-    RegisterCmd("LogInventoryShell", MakeCmd<LogInventoryArgs>([](ZHLN::Engine*, const LogInventoryArgs& a) -> uint64_t {
-                    if (!a.msg)
-                        return 0;
-                    std::string str(a.msg);
-                    size_t      pos = 0;
-                    while (pos < str.size()) {
-                        size_t next_nl = str.find('\n', pos);
-                        if (next_nl == std::string::npos) {
-                            s_InvShellLog.push_back(str.substr(pos));
-                            break;
-                        }
-                        s_InvShellLog.push_back(str.substr(pos, next_nl - pos));
-                        pos = next_nl + 1;
-                    }
-                    s_InvScrollToBottom = true;
-                    std::println(stdout, "[InvShell Output]\n{}", a.msg);
-                    std::fflush(stdout);
-                    return 0;
-                }));
 }
 
 void RegisterSystemCommands() {

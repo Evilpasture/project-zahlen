@@ -128,7 +128,6 @@ module;
 #include <Zahlen/Common.h>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Config.hpp>
-#include <Zahlen/Console.hpp>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Core/ControlFlow.hpp>
@@ -407,7 +406,6 @@ using ZHLN::ScriptRunner;
 // Engine
 using ZHLN::CatalogEntry;
 using ZHLN::Clock;
-using ZHLN::ColorRGBA;
 using ZHLN::CommandLineError;
 using ZHLN::CommandLineOptions;
 using ZHLN::CPUProfiler;
@@ -417,7 +415,6 @@ using ZHLN::DefaultPreset;
 using ZHLN::Engine;
 using ZHLN::EngineConfig;
 using ZHLN::FallbackReason;
-using ZHLN::GameConsole;
 using ZHLN::GameplayDriver;
 using ZHLN::HandleCommandLine;
 using ZHLN::KeyCode;

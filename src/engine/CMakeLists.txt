@@ -14,7 +14,6 @@ set(RAW_ENGINE_SOURCES
     CreativeWorksManager.cpp
     Window.cpp
     Platform.cpp
-    Console.cpp
     Profiler.cpp
     system/RenderSystem.cpp
     system/GraphicsSettingsSync.cpp

@@ -505,7 +505,6 @@
                         :AddImpulse :SetCharVelArgs
                         :AddImpulseAt :AddImpulseAtArgs
                         :SetMovementInput :SetMoveInputArgs
-                        :LogInventoryShell :LogInventoryArgs
                         :SetJumpIntent :EntityOnlyArgs
                         :DestroyEntity :EntityOnlyArgs
                         :IsCharacterOnGround :EntityOnlyArgs
@@ -714,8 +713,6 @@
   (let [db (require :scripts.dialogue_db)]
     (each [id tree (pairs db)]
       ((. (. zh :dialogue) :register) (. zh :dialogue) id tree)))
-  (let [InventoryShell (require :scripts.core.inventory)]
-    (set _G.inventory_shell (InventoryShell.new)))
   ;; Pull PostProcessSettings Component from ECS
   (let [pp_view (ffi.new "ZHLN_BufferView[1]")]
     (ffi.C.ZHLN_DispatchCommand engine_ptr (get-cmd-id :GetECSBuffer)
@@ -755,15 +752,6 @@
                  (each [_ sys (ipairs (. scheduler :systems))]
                    (when (. sys :enabled)
                      ((. sys :fn) dt)))))
-
-(set _G.run_inventory_command
-     (fn [cmd]
-       (when _G.inventory_shell
-         (let [out (_G.inventory_shell:execute_command cmd)]
-           (when (not= out "")
-             (let [args (ffi.new :LogInventoryArgs {:msg out})]
-               (ffi.C.ZHLN_DispatchCommand engine_ptr
-                                           (get-cmd-id :LogInventoryShell) args)))))))
 
 zh
 

@@ -473,7 +473,6 @@
       typedef struct RaycastPenetrationArgs { double ox, oy, oz; float dx, dy, dz; float maxDist; uint64_t ignoreEntity; ZHLN_RaycastPenetrationResult* outResult; } RaycastPenetrationArgs;
       typedef struct SetMoveInputArgs { uint64_t entityRaw; float x; float z; } SetMoveInputArgs;
       typedef struct UnprojectArgs { float ndcX; float ndcY; double* ox; double* oy; double* oz; float* dx; float* dy; float* dz; } UnprojectArgs;
-      typedef struct LogInventoryArgs { const char* msg; } LogInventoryArgs;
       typedef struct RegisterDynamicComponentArgs {
           const char* name;
           uint64_t size;
