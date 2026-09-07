@@ -26,6 +26,7 @@
 #include <Jolt/Physics/Constraints/MotorSettings.h>
 #include <Jolt/Physics/Constraints/SliderConstraint.h>
 #include <Jolt/Physics/PhysicsSystem.h>
+#include <Jolt/Skeleton/SkeletonPose.h>
 #include <Zahlen/Buffer.h>
 #include <Zahlen/Core/ControlFlow.hpp>
 #include <Zahlen/Log.hpp>
@@ -740,6 +741,70 @@ auto PhysicsContext::GetRotation(JPH::BodyID bodyID) const -> JPH::Quat {
 auto PhysicsContext::GetEntityHandle(JPH::BodyID bodyID) const -> ZHLN::Entity {
     uint64_t rawData = _impl->world.bodyInterface->GetUserData(bodyID);
     return ZHLN::Entity::Unpack(rawData);
+}
+
+void PhysicsContext::ActivateRagdoll(JPH::Ragdoll& ragdoll, const JPH::SkeletonPose& pose, JPH::Vec3Arg initialVelocity) noexcept {
+    auto& world = _impl->world;
+    ZHLN::Lock(world.sync.shadowLock, [&] {
+        ragdoll.AddToPhysicsSystem(JPH::EActivation::Activate);
+        ragdoll.SetPose(pose);
+        ragdoll.SetLinearAndAngularVelocity(initialVelocity, JPH::Vec3::sZero());
+    });
+}
+
+void PhysicsContext::RemoveRagdoll(JPH::Ragdoll& ragdoll) noexcept {
+    auto& world = _impl->world;
+    ZHLN::Lock(world.sync.shadowLock, [&] { ragdoll.RemoveFromPhysicsSystem(); });
+}
+
+void PhysicsContext::DriveRagdollPose(JPH::Ragdoll& ragdoll, const JPH::SkeletonPose& pose) noexcept {
+    auto& world = _impl->world;
+    ZHLN::Lock(world.sync.shadowLock, [&] {
+        ragdoll.Activate();
+        ragdoll.DriveToPoseUsingMotors(pose);
+    });
+}
+
+void PhysicsContext::AddRagdollImpulse(JPH::Ragdoll& ragdoll, uint32_t jointIndex, JPH::Vec3Arg impulse) noexcept {
+    auto& world = _impl->world;
+    ZHLN::Lock(world.sync.shadowLock, [&] {
+        if (jointIndex >= ragdoll.GetBodyCount()) {
+            return;
+        }
+        const JPH::BodyID bodyID = ragdoll.GetBodyID(jointIndex);
+        if (!bodyID.IsInvalid()) {
+            world.bodyInterface->AddImpulse(bodyID, impulse);
+            world.bodyInterface->ActivateBody(bodyID);
+        }
+    });
+}
+
+auto PhysicsContext::TryGetBodyPosition(Entity handle, JPH::RVec3& outPosition) const noexcept -> bool {
+    const auto& world = _impl->world;
+    return ZHLN::Lock(world.sync.shadowLock, [&] -> bool {
+        if (handle.index >= world.slotCapacity || world.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
+            return false;
+        }
+        if (!Physics::GetSlotPredicate(world.slotStates[handle.index].load(std::memory_order::acquire)).isActive) {
+            return false;
+        }
+        const uint32_t dense = world.slotToDense[handle.index];
+        if (dense >= world.count.load(std::memory_order::acquire)) {
+            return false;
+        }
+        const size_t base = static_cast<size_t>(dense) * 4;
+        outPosition = JPH::RVec3(world.positions[base], world.positions[base + 1], world.positions[base + 2]);
+        return true;
+    });
+}
+
+auto PhysicsContext::GetRagdollPose(JPH::Ragdoll& ragdoll, JPH::RVec3& outRootOffset, JPH::Mat44* outWorldJoints) const noexcept -> bool {
+    if (outWorldJoints == nullptr) {
+        return false;
+    }
+    const auto& world = _impl->world;
+    ZHLN::Lock(world.sync.shadowLock, [&] { ragdoll.GetPose(outRootOffset, outWorldJoints); });
+    return true;
 }
 
 namespace {

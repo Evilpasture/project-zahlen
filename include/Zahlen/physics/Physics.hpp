@@ -22,6 +22,10 @@
 #include <memory>
 #include <vector>
 
+namespace JPH {
+class SkeletonPose;
+}
+
 namespace ZHLN {
 
 namespace ECS {
@@ -225,6 +229,21 @@ class ZHLN_API PhysicsContext {
     }
 
     auto CreateSkeletalRagdoll(JPH::Ref<JPH::Skeleton> skeleton, const std::vector<Physics::RagdollPartParams>& parts) -> JPH::Ref<JPH::Ragdoll>;
+
+    // --- Ragdoll Physics Boundary ---
+    /// Adds the ragdoll and applies its initial animation pose/velocity under
+    /// the physics-world synchronization lock.
+    void ActivateRagdoll(JPH::Ragdoll& ragdoll, const JPH::SkeletonPose& pose, JPH::Vec3Arg initialVelocity) noexcept;
+    /// Removes an active ragdoll from Jolt while preserving its ECS-owned ref.
+    void RemoveRagdoll(JPH::Ragdoll& ragdoll) noexcept;
+    /// Activates and drives a ragdoll's motors from an animation pose.
+    void DriveRagdollPose(JPH::Ragdoll& ragdoll, const JPH::SkeletonPose& pose) noexcept;
+    /// Applies an impulse to one valid ragdoll body and wakes it.
+    void AddRagdollImpulse(JPH::Ragdoll& ragdoll, uint32_t jointIndex, JPH::Vec3Arg impulse) noexcept;
+    /// Reads a live physics slot's synchronized center-of-mass position.
+    [[nodiscard]] bool TryGetBodyPosition(Entity handle, JPH::RVec3& outPosition) const noexcept;
+    /// Extracts the physical ragdoll pose under the physics-world lock.
+    [[nodiscard]] bool GetRagdollPose(JPH::Ragdoll& ragdoll, JPH::RVec3& outRootOffset, JPH::Mat44* outWorldJoints) const noexcept;
 
     // --- Actions & Settings ---
     void               SetCollisionFilter(ZHLN::Entity handle, uint32_t category, uint32_t mask);

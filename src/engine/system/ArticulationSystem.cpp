@@ -8,7 +8,6 @@
 #include <Jolt/Skeleton/Skeleton.h>
 #include <Jolt/Skeleton/SkeletonPose.h>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/Core/ControlFlow.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -19,7 +18,6 @@
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <cstring>
-#include <physics/PhysicsWorld.hpp>
 
 namespace ZHLN {
 
@@ -54,8 +52,7 @@ static void VerifyArticulationStateConsistency(const ECS::Registry& reg) noexcep
 void ArticulationSystem::ReleaseTracked(Engine& engine, size_t index) noexcept {
     TrackedRagdoll& tracked = _tracked[index];
     if (tracked.instance != nullptr && tracked.isAddedToPhysics) {
-        const auto& world = engine.GetPhysicsContext().GetWorld();
-        ZHLN::Lock(world.sync.shadowLock, [&] { tracked.instance->RemoveFromPhysicsSystem(); });
+        engine.GetPhysicsContext().RemoveRagdoll(*tracked.instance.GetPtr());
     }
 
     if (auto* component = engine.GetRegistry().Get<Components::RagdollComponent>(tracked.owner);
@@ -116,8 +113,7 @@ void ArticulationSystem::Release(Engine& engine, Entity owner) noexcept {
     // manually activated component defensively without relying on component lifecycle callbacks.
     if (auto* component = engine.GetRegistry().Get<Components::RagdollComponent>(owner);
         component != nullptr && component->ragdollInstance != nullptr && component->isAddedToPhysics) {
-        const auto& world = engine.GetPhysicsContext().GetWorld();
-        ZHLN::Lock(world.sync.shadowLock, [&] { component->ragdollInstance->RemoveFromPhysicsSystem(); });
+        engine.GetPhysicsContext().RemoveRagdoll(*component->ragdollInstance.GetPtr());
         component->isAddedToPhysics = false;
     }
 }
@@ -147,9 +143,9 @@ void ArticulationSystem::BindSkeleton(uint32_t jointOffset, const Skeleton& skel
 void ArticulationSystem::Update(Engine& engine, float dt) {
     Reconcile(engine);
 
-    auto&       reg   = engine.GetRegistry();
-    const auto& world = engine.GetPhysicsContext().GetWorld();
-    auto&       rc    = engine.GetRenderContext();
+    auto& reg = engine.GetRegistry();
+    auto& pc  = engine.GetPhysicsContext();
+    auto& rc  = engine.GetRenderContext();
 
     auto entities = reg.GetEntitiesWith<Components::RagdollComponent>();
     auto ragdolls = reg.GetRawArray<Components::RagdollComponent>();
@@ -180,15 +176,7 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
         }
 
         if (auto* impulseCmd = reg.Get<Components::RagdollImpulseCommand>(e)) {
-            if (impulseCmd->jointIndex < ragComp.ragdollInstance->GetBodyCount()) {
-                JPH::BodyID bodyID = ragComp.ragdollInstance->GetBodyID(impulseCmd->jointIndex);
-                if (!bodyID.IsInvalid()) {
-                    ZHLN::Lock(world.sync.shadowLock, [&] {
-                        world.bodyInterface->AddImpulse(bodyID, impulseCmd->impulse);
-                        world.bodyInterface->ActivateBody(bodyID);
-                    });
-                }
-            }
+            pc.AddRagdollImpulse(*ragComp.ragdollInstance.GetPtr(), impulseCmd->jointIndex, impulseCmd->impulse);
             reg.Remove<Components::RagdollImpulseCommand>(e);
         }
 
@@ -226,9 +214,7 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
 
         JPH::RVec3 capsuleWorldPos = JPH::RVec3::sZero();
         if (phys != nullptr) {
-            uint32_t     dense = world.slotToDense[phys->physicsHandle.index];
-            const size_t base  = static_cast<size_t>(dense) * 4;
-            capsuleWorldPos    = JPH::RVec3(world.positions[base], world.positions[base + 1], world.positions[base + 2]);
+            pc.TryGetBodyPosition(phys->physicsHandle, capsuleWorldPos);
         }
 
         JPH::SkeletonPose animPose;
@@ -263,39 +249,29 @@ void ArticulationSystem::Update(Engine& engine, float dt) {
         if (ragComp.state != ragComp.prevState) {
             if (ragComp.state == RagdollState::Dynamic || ragComp.state == RagdollState::Kinematic || ragComp.state == RagdollState::PartialBlend) {
                 if (!ragComp.isAddedToPhysics) {
-                    ZHLN::Lock(world.sync.shadowLock, [&] {
-                        ragdoll->AddToPhysicsSystem(JPH::EActivation::Activate);
-                        if (phys != nullptr) {
-                            // FIXED: Use context instance method call correctly
-                            JPH::Vec3 charVel = engine.GetPhysicsContext().GetCharacterVelocity(phys->physicsHandle);
-                            ragdoll->SetPose(animPose);
-                            ragdoll->SetLinearAndAngularVelocity(charVel, JPH::Vec3::sZero());
-                        }
-                        ragComp.isAddedToPhysics = true;
-                    });
+                    const JPH::Vec3 initialVelocity = phys != nullptr ? pc.GetCharacterVelocity(phys->physicsHandle) : JPH::Vec3::sZero();
+                    pc.ActivateRagdoll(*ragdoll, animPose, initialVelocity);
+                    ragComp.isAddedToPhysics = true;
                 }
             } else if (ragComp.state == RagdollState::Inactive && ragComp.isAddedToPhysics) {
-                ZHLN::Lock(world.sync.shadowLock, [&] {
-                    ragdoll->RemoveFromPhysicsSystem();
-                    ragComp.isAddedToPhysics = false;
-                });
+                pc.RemoveRagdoll(*ragdoll);
+                ragComp.isAddedToPhysics = false;
             }
             ragComp.prevState = ragComp.state;
         }
         Track(e, ragComp);
 
         if (ragComp.state == RagdollState::Kinematic || ragComp.state == RagdollState::PartialBlend) {
-            ZHLN::Lock(world.sync.shadowLock, [&] {
-                ragdoll->Activate();
-                ragdoll->DriveToPoseUsingMotors(animPose);
-            });
+            pc.DriveRagdollPose(*ragdoll, animPose);
         }
 
         if (ragComp.state != RagdollState::Inactive) {
             JPH::Array<JPH::Mat44> physicalWorldJoints(count, JPH::Mat44::sIdentity());
             JPH::RVec3             actualRootOffset = JPH::RVec3::sZero();
 
-            ZHLN::Lock(world.sync.shadowLock, [&] { ragdoll->GetPose(actualRootOffset, physicalWorldJoints.data()); });
+            if (!pc.GetRagdollPose(*ragdoll, actualRootOffset, physicalWorldJoints.data())) {
+                continue;
+            }
 
             auto allSkinnedEntities = reg.GetEntitiesWith<Components::SkeletalMeshComponent>();
             for (Entity childEnt: allSkinnedEntities) {
