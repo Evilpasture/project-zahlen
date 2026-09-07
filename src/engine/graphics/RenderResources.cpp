@@ -255,6 +255,10 @@ auto RenderContext::GetFrameIndex() const noexcept -> uint32_t {
     return _impl->frame_index;
 }
 
+auto RenderContext::GetPresentationMode() const noexcept -> PresentationMode {
+    return _impl->presentationMode;
+}
+
 void RenderContext::CheckShaderReload() noexcept {
     if constexpr (isDev) {
         _impl->CheckShaderWatchers();
@@ -272,6 +276,25 @@ void RenderContext::SetResolution(const Extent2D& res) {
         _impl->window.SetSize(res.width, res.height);
     }
     _impl->resized = true;
+}
+
+void RenderContext::SetViewport(const ViewportRect& rect) noexcept {
+    _impl->viewportX = rect.x;
+    _impl->viewportY = rect.y;
+    _impl->viewportW = rect.width;
+    _impl->viewportH = rect.height;
+}
+
+auto RenderContext::GetViewport() const noexcept -> ViewportRect {
+    // The impl works in VkViewport (see EffectiveViewport); its values are
+    // whole pixels, so narrowing back into the API-neutral rect is exact.
+    const VkViewport vp = _impl->EffectiveViewport();
+    return ViewportRect {
+        .x      = static_cast<uint32_t>(vp.x),
+        .y      = static_cast<uint32_t>(vp.y),
+        .width  = static_cast<uint32_t>(vp.width),
+        .height = static_cast<uint32_t>(vp.height),
+    };
 }
 
 auto RenderContext::CreateStorageBuffer(const void* data, size_t size, uint32_t stride) -> BufferHandle {

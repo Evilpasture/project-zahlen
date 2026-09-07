@@ -4,6 +4,7 @@
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
+#include "Font8x8.hpp"
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Jolt/Physics/Collision/Shape/ScaledShape.h>
@@ -20,91 +21,144 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/gui/UIComponents.hpp>
 #include <Zahlen/physics/Physics.hpp>
-#include "Font8x8.hpp"
 #include <algorithm>
 #include <cstddef>
 #include <cstdlib>
-#include <filesystem>
 #include <engine/system/AnimationSystem.hpp>
 #include <engine/system/ArticulationSystem.hpp>
 #include <engine/system/LightingSystem.hpp>
 #include <engine/system/TerrainSystem.hpp>
+#include <filesystem>
 #include <stb_image.h>
 #define STB_TRUETYPE_IMPLEMENTATION
 #include <stb_truetype.h>
 
 namespace ZHLN::CreativeWorksFactory {
-
-static auto FindFontFile() -> std::string {
-    // 1. Environment variable override
-    if (const char* envPath = std::getenv("ZHLN_FONT_PATH"); envPath != nullptr && *envPath != '\0') {
+namespace {
+auto FindFontFile() -> std::string {
+    auto check_exists = [](const std::filesystem::path& path) -> std::optional<std::string> {
         std::error_code ec;
-        if (std::filesystem::exists(envPath, ec)) {
-            return envPath;
-        }
-    }
-
-    // 2. Vendored font candidate relative paths
-    static constexpr std::string_view kCandidatePaths[] = {
-        "resources/fonts/font.ttf",
-        "resources/fonts/default.ttf",
-        "resources/fonts/DejaVuSans.ttf",
-        "resources/assets/font.ttf",
-        "resources/assets/default.ttf",
-        "resources/font.ttf",
-        "assets/font.ttf",
-        "assets/fonts/font.ttf",
-        "font.ttf",
-    };
-
-    std::error_code ec;
-    for (const auto& relPath: kCandidatePaths) {
-#if defined(ZHLN_PROJECT_ROOT)
-        auto rootPath = std::filesystem::path(ZHLN_PROJECT_ROOT) / relPath;
-        if (std::filesystem::exists(rootPath, ec)) {
-            return rootPath.string();
-        }
-#endif
-        if (std::filesystem::exists(relPath, ec)) {
-            return std::string(relPath);
-        }
-    }
-
-    // 3. System font fallbacks (no fontconfig dependency)
-#if defined(__APPLE__)
-    static constexpr const char* kSystemFallbacks[] = {
-        "/System/Library/Fonts/Supplemental/Arial.ttf",
-        "/System/Library/Fonts/Supplemental/Helvetica.ttf",
-        "/System/Library/Fonts/Supplemental/Verdana.ttf",
-        "/System/Library/Fonts/Supplemental/Courier New.ttf",
-        "/Library/Fonts/Arial.ttf",
-    };
-#elif defined(_WIN32)
-    static constexpr const char* kSystemFallbacks[] = {
-        "C:/Windows/Fonts/arial.ttf",
-        "C:/Windows/Fonts/segoeui.ttf",
-        "C:/Windows/Fonts/calibri.ttf",
-    };
-#else
-    static constexpr const char* kSystemFallbacks[] = {
-        "/usr/share/fonts/TTF/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-        "/usr/share/fonts/liberation-sans/LiberationSans-Regular.ttf",
-        "/usr/share/fonts/TTF/LiberationSans-Regular.ttf",
-        "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
-    };
-#endif
-
-    for (const auto* path: kSystemFallbacks) {
         if (std::filesystem::exists(path, ec)) {
-            return path;
+            return path.string();
+        }
+        return std::nullopt;
+    };
+
+    auto glob_first = [&check_exists](const std::filesystem::path& root, std::string_view pattern) -> std::optional<std::string> {
+        std::error_code ec;
+        if (!std::filesystem::exists(root, ec)) {
+            return std::nullopt;
+        }
+
+        auto match_pattern = [](std::string_view str, std::string_view pat) -> bool {
+            size_t s     = 0;
+            size_t p     = 0;
+            size_t star  = std::string_view::npos;
+            size_t match = 0;
+            while (s < str.size()) {
+                if (p < pat.size() && (pat[p] == '?' || pat[p] == str[s])) {
+                    s++;
+                    p++;
+                } else if (p < pat.size() && pat[p] == '*') {
+                    star  = p;
+                    match = s;
+                    p++;
+                } else if (star != std::string_view::npos) {
+                    p = star + 1;
+                    match++;
+                    s = match;
+                } else {
+                    return false;
+                }
+            }
+            while (p < pat.size() && pat[p] == '*') {
+                p++;
+            }
+            return p == pat.size();
+        };
+
+        auto opts = std::filesystem::directory_options::skip_permission_denied;
+        for (const auto& entry: std::filesystem::recursive_directory_iterator(root, opts, ec)) {
+            if (ec) {
+                continue;
+            }
+            if (match_pattern(entry.path().filename().string(), pattern)) {
+                if (auto found = check_exists(entry.path())) {
+                    return found;
+                }
+            }
+        }
+        return std::nullopt;
+    };
+
+    // 1. Env Var
+    if (const char* envPath = std::getenv("ZHLN_FONT_PATH"); (envPath != nullptr) && *envPath) {
+        if (auto p = check_exists(envPath)) {
+            return *p;
+        }
+    }
+
+    // 2. Dynamic directory scanning
+
+    if constexpr (!ProjectRoot.empty()) {
+        if (auto p = glob_first(std::filesystem::path(ZHLN::ProjectRoot) / "resources", "*.ttf")) {
+            return *p;
+        }
+        if (auto p = glob_first(std::filesystem::path(ZHLN::ProjectRoot) / "assets", "*.ttf")) {
+            return *p;
+        }
+    }
+
+    if (auto p = glob_first("resources", "*.ttf")) {
+        return *p;
+    }
+    if (auto p = glob_first("assets", "*.ttf")) {
+        return *p;
+    }
+
+    // Direct CWD fallback for bare "font.ttf"
+    if (auto p = check_exists("font.ttf")) {
+        return *p;
+    }
+
+    // 3. Platform OS Fallbacks
+    static constexpr auto kSystemFallbacks = [] -> auto {
+        if constexpr (isMac) {
+            return std::array {
+                "/System/Library/Fonts/Supplemental/Arial.ttf",
+                "/System/Library/Fonts/Supplemental/Helvetica.ttf",
+                "/System/Library/Fonts/Supplemental/Verdana.ttf",
+                "/System/Library/Fonts/Supplemental/Courier New.ttf",
+                "/Library/Fonts/Arial.ttf",
+            };
+        } else if constexpr (isWindows) {
+            return std::array {
+                "C:/Windows/Fonts/arial.ttf",
+                "C:/Windows/Fonts/segoeui.ttf",
+                "C:/Windows/Fonts/calibri.ttf",
+            };
+        } else {
+            return std::array {
+                "/usr/share/fonts/TTF/DejaVuSans.ttf",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
+                "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+                "/usr/share/fonts/liberation-sans/LiberationSans-Regular.ttf",
+                "/usr/share/fonts/TTF/LiberationSans-Regular.ttf",
+                "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+            };
+        }
+    }();
+
+    for (const char* sysPath: kSystemFallbacks) {
+        if (auto p = check_exists(sysPath)) {
+            return *p;
         }
     }
 
     return {};
 }
+} // namespace
 
 auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> TextureHandle {
     auto* uiSettings = registry.GetSingleton<GUI::UIComponents::UISettingsComponent>();
@@ -206,7 +260,8 @@ auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> Text
                 if (sdf != nullptr) {
                     stbtt_FreeSDF(sdf, nullptr);
                 }
-                uiSettings->fontAtlas.glyphs[i] = GlyphMetric {.x0 = 0.0f, .y0 = 0.0f, .x1 = 0.0f, .y1 = 0.0f, .xoff = 0.0f, .yoff = 0.0f, .xadvance = xadvance};
+                uiSettings->fontAtlas.glyphs[i] =
+                    GlyphMetric {.x0 = 0.0f, .y0 = 0.0f, .x1 = 0.0f, .y1 = 0.0f, .xoff = 0.0f, .yoff = 0.0f, .xadvance = xadvance};
             }
         }
     } else {
@@ -224,7 +279,7 @@ auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> Text
             for (int r = 0; r < 8; ++r) {
                 uint8_t rowBits = Font8x8_Basic[32 + i][r];
                 for (int c = 0; c < 8; ++c) {
-                    uint8_t val = (rowBits & (1 << c)) ? 255 : 0;
+                    uint8_t val                                                      = (rowBits & (1 << c)) ? 255 : 0;
                     alphaBitmap[(curY + r * 2) * atlasSize + (curX + c * 2)]         = val;
                     alphaBitmap[(curY + r * 2) * atlasSize + (curX + c * 2 + 1)]     = val;
                     alphaBitmap[(curY + r * 2 + 1) * atlasSize + (curX + c * 2)]     = val;
@@ -594,6 +649,128 @@ auto CreateBox(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, JPH::
 
 auto CreateBox(Engine& engine, JPH::Vec3Arg halfExtents, const SpawnParams& params) -> Entity {
     return CreateBox(engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), halfExtents, params);
+}
+
+namespace {
+
+// The three curved primitives share one entity-assembly path: build the mesh,
+// wrap a basic material, register both under per-entity asset ids, and hang the
+// standard component set off the new entity. `cullRadius` is the shape's world
+// extent times the same *2 safety factor CreateBox uses.
+auto SpawnPrimitive(
+    RenderContext&  ctx,
+    ECS::Registry&  reg,
+    PhysicsContext* pc,
+    std::string_view shapeName,
+    Mesh             mesh,
+    float            cullRadius,
+    Physics::ShapeType physicsShape,
+    float            physP1,
+    float            physP2,
+    const SpawnParams& params
+) -> Entity {
+    const JPH::Vec4 shapeColor = (params.color.GetW() >= 0.0f) ? params.color : JPH::Vec4(0.8f, 0.4f, 0.2f, 1.0f);
+
+    Material mat;
+    if (params.materialOverride.pipeline != PipelineHandle::Invalid) {
+        mat = params.materialOverride;
+    } else {
+        auto mat_res           = CreateBasicMaterial(ctx, false, false, false);
+        mat                    = mat_res.value_or(Material {});
+        mat.baseColorFactor[0] = shapeColor.GetX();
+        mat.baseColorFactor[1] = shapeColor.GetY();
+        mat.baseColorFactor[2] = shapeColor.GetZ();
+        mat.baseColorFactor[3] = shapeColor.GetW();
+        mat.roughnessFactor    = params.roughness;
+        mat.metallicFactor     = params.metallic;
+    }
+
+    Entity     e         = reg.Create();
+    AssetID    meshAsset = HashAssetID("prefab_" + std::string(shapeName) + "_mesh_" + std::to_string(e.index));
+    MaterialID matAsset  = HashAssetID("prefab_" + std::string(shapeName) + "_mat_" + std::to_string(e.index));
+
+    ctx.RegisterGPUMesh(meshAsset, mesh);
+    ctx.RegisterGPUMaterial(matAsset, mat);
+
+    JPH::Mat44 worldMat = Math::CreateTransform(JPH::Vec3(params.position), params.rotation, params.scale);
+
+    reg.Add(e, Components::NameComponent {.name = String64(std::string(shapeName) + "_" + std::to_string(e.index))});
+    reg.Add(e, Components::TransformComponent {.position = JPH::Vec3(params.position), .rotation = params.rotation, .scale = params.scale});
+    reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
+    reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = cullRadius});
+    reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
+
+    if (params.createPhysics && pc != nullptr) {
+        auto shape = pc->GetOrCreateShape(physicsShape, physP1, physP2);
+        auto body  = pc->CreateRigidBody(
+            shape, params.position, params.rotation, params.isStaticPhysics ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
+            params.isStaticPhysics ? static_cast<JPH::ObjectLayer>(0) : static_cast<JPH::ObjectLayer>(1), 0, params.physicsCategory, params.physicsMask
+        );
+        reg.Add(e, Components::PhysicsComponent {body});
+        if (!params.isStaticPhysics) {
+            reg.Add(
+                e, Components::PhysicsStateComponent {
+                       .currPosition = JPH::Vec3(params.position),
+                       .prevPosition = JPH::Vec3(params.position),
+                       .currRotation = params.rotation,
+                       .prevRotation = params.rotation
+                   }
+            );
+        }
+    }
+    return e;
+}
+
+} // namespace
+
+auto CreateSphere(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, float radius, const SpawnParams& params) -> Entity {
+    SpawnParams resolved = params;
+    if (resolved.color.GetW() < 0.0f) {
+        resolved.color = JPH::Vec4(0.8f, 0.4f, 0.2f, 1.0f);
+    }
+    const float maxScale = std::max({params.scale.GetX(), params.scale.GetY(), params.scale.GetZ()});
+    return SpawnPrimitive(
+        ctx, reg, pc, "Sphere", CreateSphereMesh(ctx, radius, resolved.color), radius * maxScale * 2.0f, Physics::ShapeType::Sphere,
+        radius * maxScale, 0.0f, resolved
+    );
+}
+
+auto CreateSphere(Engine& engine, float radius, const SpawnParams& params) -> Entity {
+    return CreateSphere(engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), radius, params);
+}
+
+auto CreateCylinder(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, float radius, float height, const SpawnParams& params) -> Entity {
+    SpawnParams resolved = params;
+    if (resolved.color.GetW() < 0.0f) {
+        resolved.color = JPH::Vec4(0.8f, 0.4f, 0.2f, 1.0f);
+    }
+    const float maxScale = std::max({params.scale.GetX(), params.scale.GetY(), params.scale.GetZ()});
+    return SpawnPrimitive(
+        ctx, reg, pc, "Cylinder", CreateCylinderMesh(ctx, radius, height, resolved.color), std::max(radius, height * 0.5f) * maxScale * 2.0f,
+        Physics::ShapeType::Cylinder, radius * maxScale, height * 0.5f * maxScale, resolved
+    );
+}
+
+auto CreateCylinder(Engine& engine, float radius, float height, const SpawnParams& params) -> Entity {
+    return CreateCylinder(engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), radius, height, params);
+}
+
+auto CreateCone(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, float radius, float height, const SpawnParams& params) -> Entity {
+    SpawnParams resolved = params;
+    if (resolved.color.GetW() < 0.0f) {
+        resolved.color = JPH::Vec4(0.8f, 0.4f, 0.2f, 1.0f);
+    }
+    const float maxScale = std::max({params.scale.GetX(), params.scale.GetY(), params.scale.GetZ()});
+    // Jolt has no cone shape; the collider approximates it with a cylinder of
+    // the same height and half the radius. The visual mesh is still a cone.
+    return SpawnPrimitive(
+        ctx, reg, pc, "Cone", CreateConeMesh(ctx, radius, height, resolved.color), std::max(radius, height * 0.5f) * maxScale * 2.0f,
+        Physics::ShapeType::Cylinder, radius * 0.5f * maxScale, height * 0.5f * maxScale, resolved
+    );
+}
+
+auto CreateCone(Engine& engine, float radius, float height, const SpawnParams& params) -> Entity {
+    return CreateCone(engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), radius, height, params);
 }
 
 auto CreatePlane(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, float extent, const JPH::Vec4& color, const SpawnParams& params) -> Entity {
@@ -1008,7 +1185,5 @@ auto InstantiatePrefab(Engine& engine, std::string_view path, const SpawnParams&
     }
     return InstantiatePrefab(engine, *prefab, params, outBuffer, maxCount);
 }
-
-
 
 } // namespace ZHLN::CreativeWorksFactory

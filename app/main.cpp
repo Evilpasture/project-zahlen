@@ -13,7 +13,6 @@
 #include <Scripting/Lua/LuaScriptRuntime.hpp>
 #endif
 #include "engine/system/GraphicsSettingsSync.hpp"
-#include <GLFW/glfw3.h>
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
@@ -26,6 +25,7 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Console.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/CreativeWorksManager.hpp>
 #include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
@@ -36,18 +36,31 @@
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Profiler.hpp>
 #include <Zahlen/Render.hpp>
+#include <Zahlen/Scene.hpp>
 #include <Zahlen/Scripting.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/gui/UIComponents.hpp>
 #include <Zahlen/physics/Physics.hpp>
+#if defined(ZHLN_HAS_SCENE_TOML)
+// The document layer is an optional extra, and the composition root is the one
+// place allowed to name it: core may not reach into extras
+// (tools/check_core_extras_boundary.py). SceneTOML.hpp is what turns a core
+// ZHLN::Scene::Scene into a document, via its Jolt vector bindings.
+#include <toml/SceneTOML.hpp>
+#include <toml/TOML.hpp>
+#endif
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <filesystem>
 #include <format>
+#include <fstream>
 #include <print>
+#include <string>
+#include <string_view>
 #include <thread>
 
 namespace {
@@ -68,11 +81,69 @@ EditorState s_EditorState;
 // --- Native (self-hosted) editor state --------------------------------------
 ZHLN::Editor::EditorState s_NativeEditorState;
 
+/// Where Ctrl+S writes. The editor has no notion of "the current scene" yet --
+/// nothing opens a file, so nothing knows its name -- and one predictable path
+/// next to the working directory beats inventing a session concept here.
+constexpr std::string_view kSceneSavePath = "scene.toml";
+
+/// Extracts the world and writes it back out as a scene document.
+///
+/// This is the round trip closing: Scene::Instantiate built the world from a
+/// description, Scene::Extract reads a description back out of the world, and
+/// the reflection-driven TOML layer turns that into text. Nothing here lists
+/// fields -- the description struct is the schema in both directions.
+void SaveScene(ZHLN::Engine& engine) {
+    auto scene = ZHLN::Scene::Extract(engine);
+
+    // A running world carries no scene name; the file it is being written to is
+    // the only name on offer.
+    scene.name = std::filesystem::path(kSceneSavePath).stem().string();
+
+#if defined(ZHLN_HAS_SCENE_TOML)
+    const std::string text = ZHLN::ReflectTOML::SerializeTOML(scene);
+
+    std::ofstream out {std::string {kSceneSavePath}, std::ios::binary | std::ios::trunc};
+    if (!out) {
+        ZHLN::Log("[WorldEditor] Ctrl+S: could not open '{}' for writing", kSceneSavePath);
+        return;
+    }
+    out.write(text.data(), static_cast<std::streamsize>(text.size()));
+    out.close();
+    if (out.fail()) {
+        ZHLN::Log("[WorldEditor] Ctrl+S: writing '{}' failed", kSceneSavePath);
+        return;
+    }
+
+    ZHLN::Log(
+        "[WorldEditor] Ctrl+S: '{}' written ({} entities, {} lights)", kSceneSavePath, scene.entities.size(), scene.lights.size()
+    );
+#else
+    ZHLN::Log(
+        "[WorldEditor] Ctrl+S: built without the TOML layer, so there is nothing to write the description through "
+        "({} entities, {} lights extracted)",
+        scene.entities.size(), scene.lights.size()
+    );
+#endif
+}
+
 constexpr float kLeftPanelWidth  = 260.0f;
 constexpr float kRightPanelWidth = 320.0f;
 
-void UpdateEditorCamera(ZHLN::Camera& cam, const ZHLN::Components::InputStateComponent& state, float dt) {
+void UpdateEditorCamera(ZHLN::Camera& cam, const ZHLN::Components::InputStateComponent& state, float dt, bool transformActive) {
+    // A modal transform owns the pointer and the axis keys; the fly camera
+    // would otherwise fight the manipulation for the same input. The flag is
+    // the pre-update sample: on the frame an LMB/Esc ends the mode the camera
+    // must not also act on whatever movement keys happen to be down.
+    if (transformActive) {
+        return;
+    }
     const float sensitivity = 0.15f;
+
+    // TEMP-DIAG (camera jump investigation): record the pre-state so an
+    // uncaused move can be logged below.
+    const JPH::Vec3 camPos0 = cam.position;
+    const float     camYaw0 = cam.yaw;
+    const float     camPit0 = cam.pitch;
 
     const bool uiCapturesMouse    = state.wantCaptureMouse;
     const bool uiCapturesKeyboard = state.wantCaptureKeyboard;
@@ -112,9 +183,22 @@ void UpdateEditorCamera(ZHLN::Camera& cam, const ZHLN::Components::InputStateCom
     if (moveDirection.LengthSq() > 0.0f) {
         cam.position += moveDirection.Normalized() * moveSpeed * dt;
     }
+
+    // TEMP-DIAG (camera jump investigation): the reported jump is a camera
+    // move with no RMB orbit and no WASD; dump the full input state then.
+    const bool camMoved = (cam.position - camPos0).LengthSq() > 0.0f || cam.yaw != camYaw0 || cam.pitch != camPit0;
+    const bool rmbHeld  = state.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton));
+    if (camMoved && !rmbHeld && moveDirection.LengthSq() == 0.0f) {
+        ZHLN::Log(
+            "[DIAG-cam] uncaused move: pos ({},{},{}) -> ({},{},{})  yaw {} -> {}  pitch {} -> {}  delta=({},{}) lmb={} capM={} capK={}",
+            camPos0.GetX(), camPos0.GetY(), camPos0.GetZ(), cam.position.GetX(), cam.position.GetY(), cam.position.GetZ(),
+            camYaw0, cam.yaw, camPit0, cam.pitch, state.mouseDeltaX, state.mouseDeltaY,
+            state.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LButton)), uiCapturesMouse, uiCapturesKeyboard
+        );
+    }
 }
 
-ZHLN::Physics::RaycastResult CastPickingRay(ZHLN::Engine& engine, const ZHLN::Camera& cam) {
+ZHLN::Physics::RaycastResult CastPickingRay(ZHLN::Engine& engine, const ZHLN::Camera& cam, const ZHLN::RenderContext::ViewportRect& vp) {
     auto& reg    = engine.GetRegistry();
     float mouseX = 0.0f;
     float mouseY = 0.0f;
@@ -122,15 +206,21 @@ ZHLN::Physics::RaycastResult CastPickingRay(ZHLN::Engine& engine, const ZHLN::Ca
         mouseX = st->mouseX;
         mouseY = st->mouseY;
     }
-    auto winSize = engine.GetWindow().GetSize();
 
-    if (winSize.width == 0 || winSize.height == 0) {
+    if (vp.width == 0 || vp.height == 0) {
         return {};
     }
 
-    float ndcX   = (2.0f * mouseX) / static_cast<float>(winSize.width) - 1.0f;
-    float ndcY   = 1.0f - (2.0f * mouseY) / static_cast<float>(winSize.height);
-    float aspect = static_cast<float>(winSize.width) / static_cast<float>(winSize.height);
+    // The projection maps to Vulkan Y-down clip space (see CreatePerspective),
+    // and the scene rectangle's row 0 is the top: the pointer is made
+    // rectangle-relative before the NDC map, because the scene is rasterized
+    // by a fixed-function viewport into exactly this rectangle. (The old
+    // 1 - 2y/h mirrored the ray vertically, so picking -- and the transform
+    // modes that copied this math -- aimed at the point mirrored across the
+    // horizontal centre line.)
+    float ndcX   = (2.0f * (mouseX - static_cast<float>(vp.x))) / static_cast<float>(vp.width) - 1.0f;
+    float ndcY   = (2.0f * (mouseY - static_cast<float>(vp.y))) / static_cast<float>(vp.height) - 1.0f;
+    float aspect = static_cast<float>(vp.width) / static_cast<float>(vp.height);
 
     JPH::Mat44 invVP = (cam.GetProjectionMatrix(aspect) * cam.GetViewMatrix()).Inversed();
 
@@ -146,9 +236,8 @@ ZHLN::Physics::RaycastResult CastPickingRay(ZHLN::Engine& engine, const ZHLN::Ca
 
 // Draws one frame of the self-hosted editor using the Clay layout engine:
 // [Hierarchy | Viewport Toolbar | Inspector]
-void RunNativeEditorFrame(ZHLN::Engine& engine, float dt) {
-    auto&              reg = engine.GetRegistry();
-    ZHLN::GUI::Context gui(engine);
+void RunNativeEditorFrame(ZHLN::GUI::Context& gui, ZHLN::Engine& engine, float dt) {
+    auto& reg = engine.GetRegistry();
     gui.BeginFrame(dt);
 
     gui.Box(
@@ -239,6 +328,9 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
 
     ZHLN::Log("[WorldEditor] Editor session launched.");
 
+    bool saveChordWasDown = false;
+    bool escWasDown       = false;
+
     while (engine.IsRunning()) {
         float frameTime = clock.GetDeltaTime();
         engine.ProcessEvents();
@@ -248,31 +340,158 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
 
         auto winSize = engine.GetWindow().GetSize();
 
-        // Viewport bounds: center area between the left hierarchy and right inspector
-        const bool pointerInViewport = state != nullptr && state->mouseX >= kLeftPanelWidth &&
-                                       state->mouseX <= (static_cast<float>(winSize.width) - kRightPanelWidth);
+        // A cheap handle over the Impl the registry owns (GUIStateComponent),
+        // so building it here costs a pointer and lets the viewport bounds and
+        // the gating below ask about last frame's layout and text focus. The
+        // same handle is handed to the frame builder.
+        ZHLN::GUI::Context gui(engine);
 
-        const bool uiCapturesMouse    = state != nullptr && (!pointerInViewport || state->wantCaptureMouse);
-        const bool uiCapturesKeyboard = state != nullptr && state->wantCaptureKeyboard;
+        // Dynamic scene viewport: the 3D composition targets the centre
+        // column between the two panels. Read the panels' REAL boxes from last
+        // frame's GUI layout; the constants are only the first-frame fallback
+        // before any layout exists. The rectangle goes to the RenderContext as
+        // a fixed-function viewport + scissor on the scene passes, so nothing
+        // is rasterized outside it; the camera aspect, GPU culling screen
+        // space, picking and transform unprojection all read the same
+        // rectangle back through GetViewport.
+        float vpX0 = kLeftPanelWidth;
+        float vpX1 = static_cast<float>(winSize.width) - kRightPanelWidth;
+        if (const auto left = gui.GetLastFrameRect("HierarchyPanel")) {
+            vpX0 = left->x + left->width;
+        }
+        if (const auto right = gui.GetLastFrameRect("InspectorPanel")) {
+            vpX1 = right->x;
+        }
+        auto& rc = engine.GetRenderContext();
+        rc.SetViewport(ZHLN::RenderContext::ViewportRect {
+            .x      = static_cast<uint32_t>(std::clamp(vpX0, 0.0f, static_cast<float>(winSize.width))),
+            .y      = 0,
+            .width  = static_cast<uint32_t>(std::max(0.0f, vpX1 - vpX0)),
+            .height = winSize.height,
+        });
+        const auto sceneViewport = rc.GetViewport();
 
-        if (state != nullptr && state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Escape)) && !uiCapturesKeyboard) {
-            engine.GetWindow().Close();
-            break;
+        // TEMP-DIAG (camera jump investigation): log every viewport change so
+        // a rectangle jump can be correlated with the camera log.
+        {
+            static ZHLN::RenderContext::ViewportRect lastVp {};
+            static bool                              hadVp = false;
+            if (!hadVp || lastVp.x != sceneViewport.x || lastVp.y != sceneViewport.y || lastVp.width != sceneViewport.width ||
+                lastVp.height != sceneViewport.height) {
+                ZHLN::Log(
+                    "[DIAG-vp] win={}x{} panelEdges l={} r={} -> vp=({},{},{}x{})",
+                    winSize.width, winSize.height, vpX0, vpX1, sceneViewport.x, sceneViewport.y, sceneViewport.width, sceneViewport.height
+                );
+                lastVp = sceneViewport;
+                hadVp  = true;
+            }
         }
 
-        if (state != nullptr && pointerInViewport && !state->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton)) && !uiCapturesMouse) {
+        // Ctrl+C/X/V in a focused field go to the OS clipboard through the
+        // window. Re-set every frame because the handle is rebuilt; the sink is
+        // stateless, so this is two stores.
+        gui.SetClipboard(ZHLN::GUI::TextEdit::ClipboardSink {
+            .userdata = &engine,
+            .set      = [](void* ud, std::string_view text) -> void { static_cast<ZHLN::Engine*>(ud)->GetWindow().SetClipboardText(text); },
+            .get      = [](void* ud) -> std::string { return static_cast<ZHLN::Engine*>(ud)->GetWindow().GetClipboardText(); },
+        });
+
+        // Viewport bounds: center area between the left hierarchy and right inspector
+        const bool pointerInViewport = state != nullptr && state->mouseX >= vpX0 && state->mouseX <= vpX1;
+
+        const bool uiCapturesMouse = state != nullptr && (!pointerInViewport || state->wantCaptureMouse);
+        // A focused text field owns the keyboard without setting a capture flag
+        // of its own, so it has to be asked directly -- otherwise typing "wasd"
+        // into a name box flies the editor camera. This reads last frame's
+        // focus, which is the right question to ask before BeginFrame has run.
+        const bool uiCapturesKeyboard = (state != nullptr && state->wantCaptureKeyboard) || gui.IsTextInputFocused();
+
+        // Blender-style modal transform runs before Escape, picking and the
+        // fly camera. Sample the mode BEFORE the update: UpdateTransformMode
+        // consumes the Esc press edge to cancel, so afterwards the mode reads
+        // as None and the close check below would quit on the very keypress
+        // the user meant as "abort the manipulation".
+        const bool transformActive = s_NativeEditorState.transformMode != ZHLN::Editor::EditorState::TransformMode::None;
+        ZHLN::Editor::UpdateTransformMode(
+            reg, s_NativeEditorState, cam,
+            ZHLN::Editor::SceneViewport {sceneViewport.x, sceneViewport.y, sceneViewport.width, sceneViewport.height}, uiCapturesKeyboard
+        );
+
+        // Escape never quits the session -- quitting belongs to the window's
+        // close button / the OS quit path. Blender-style, the press walks a
+        // ladder instead: a live transform modal consumes it above to cancel;
+        // a focused text field owns it (GUI unfocus); otherwise it clears the
+        // current selection. Edge-detected so a held key clears once.
+        const bool escDown = state != nullptr && state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Escape));
+        if (escDown && !escWasDown && !uiCapturesKeyboard && !transformActive) {
+            s_NativeEditorState.selectedEntity = ZHLN::Entity::Null();
+        }
+        escWasDown = escDown;
+
+        // Ctrl+S saves the world as a scene document. Edge-detected by hand:
+        // InputStateComponent carries key *levels*, not presses, so a held
+        // chord would write the file once per frame. Gated on the same keyboard
+        // capture as Escape and the camera, or Ctrl+S typed into a text field
+        // would save too.
+        const bool controlDown   = state != nullptr && (state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LControl)) ||
+                                                      state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RControl)));
+        const bool saveChordDown = controlDown && state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::S));
+        if (saveChordDown && !saveChordWasDown && !uiCapturesKeyboard) {
+            SaveScene(engine);
+        }
+        saveChordWasDown = saveChordDown;
+
+        if (state != nullptr && pointerInViewport && !transformActive &&
+            !state->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton)) && !uiCapturesMouse) {
+            // Window maps GLFW mouse buttons onto the same key stream (see
+            // Window.cpp's mouse-button callback), so the raw level needs no
+            // platform polling here -- the composition root stays GLFW-free.
             static bool wasMouseDown = false;
-            bool        isMouseDown  = glfwGetMouseButton(static_cast<GLFWwindow*>(engine.GetWindow().GetNativeHandle()), GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+            const bool  isMouseDown  = state->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LButton));
 
             if (isMouseDown && !wasMouseDown) {
-                auto hit                           = CastPickingRay(engine, cam);
+                auto hit                           = CastPickingRay(engine, cam, sceneViewport);
                 s_NativeEditorState.selectedEntity = hit.hasHit ? hit.handle : ZHLN::Entity::Null();
+                // TEMP-DIAG (camera jump investigation): what the click saw.
+                ZHLN::Log(
+                    "[DIAG-pick] mouse=({},{}) vp=({},{},{}x{}) hit={} selNull={}",
+                    state->mouseX, state->mouseY, sceneViewport.x, sceneViewport.y, sceneViewport.width, sceneViewport.height,
+                    hit.hasHit, s_NativeEditorState.selectedEntity == ZHLN::Entity::Null()
+                );
             }
             wasMouseDown = isMouseDown;
         }
 
         // Native self-hosted editor frame using Clay
-        RunNativeEditorFrame(engine, frameTime);
+        RunNativeEditorFrame(gui, engine, frameTime);
+
+        // The hierarchy's Add Shape dropdown only records a request; spawning
+        // needs the Engine (GPU mesh + material), which lives here.
+        if (s_NativeEditorState.requestedSpawn >= 0) {
+            const int kind                     = s_NativeEditorState.requestedSpawn;
+            s_NativeEditorState.requestedSpawn = -1;
+
+            const float   yawRad   = JPH::DegreesToRadians(cam.yaw);
+            const float   pitchRad = JPH::DegreesToRadians(cam.pitch);
+            const JPH::Vec3 forward =
+                JPH::Vec3(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad)).Normalized();
+
+            ZHLN::CreativeWorksFactory::SpawnParams sp;
+            sp.position = JPH::RVec3(cam.position + forward * 8.0f);
+
+            ZHLN::Entity spawned = ZHLN::Entity::Null();
+            switch (kind) {
+                case 0: spawned = ZHLN::CreativeWorksFactory::CreateBox(engine, JPH::Vec3::sReplicate(0.5f), sp); break;
+                case 1: spawned = ZHLN::CreativeWorksFactory::CreatePlane(engine, 2.0f, JPH::Vec4(0.6f, 0.6f, 0.6f, 1.0f), sp); break;
+                case 2: spawned = ZHLN::CreativeWorksFactory::CreateSphere(engine, 0.5f, sp); break;
+                case 3: spawned = ZHLN::CreativeWorksFactory::CreateCylinder(engine, 0.5f, 1.0f, sp); break;
+                case 4: spawned = ZHLN::CreativeWorksFactory::CreateCone(engine, 0.5f, 1.0f, sp); break;
+                default: break;
+            }
+            if (spawned != ZHLN::Entity::Null()) {
+                s_NativeEditorState.selectedEntity = spawned;
+            }
+        }
 
         if (state != nullptr && state->needsResize) {
             engine.GetRenderContext().SetResolution(state->newSize);
@@ -288,7 +507,7 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
             }
         } else {
             if (state != nullptr) {
-                UpdateEditorCamera(cam, *state, frameTime);
+                UpdateEditorCamera(cam, *state, frameTime, transformActive);
             }
 
             ZHLN::GameplayStatus status = engine.Tick(0.0f, options.driver);

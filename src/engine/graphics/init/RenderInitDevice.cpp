@@ -3,6 +3,7 @@
 
 // File: src/engine/graphics/init/RenderInitDevice.cpp
 #include "../../TTYBackend.hpp"
+#include "../OpenGLHacks/HostBlit.hpp"
 #include "../RenderInternal.hpp"
 #include <Features.hpp>
 #include <Zahlen/Error.hpp>
@@ -140,7 +141,12 @@ namespace {
 auto GetPlatformInstanceExtensions(Window& window) noexcept -> std::expected<Vk::ExtensionResult, Error> {
     auto builder = Vk::ExtensionBuilder::ForInstance();
 
-    if (window.IsHeadless()) {
+    if constexpr (isMac) {
+        // macOS has no native Vulkan WSI: requiring surface extensions here
+        // would fail instance creation outright. Windowed sessions present
+        // through the HostBlit plugin's own OpenGL window instead, so no
+        // WSI extensions are requested at all.
+    } else if (window.IsHeadless()) {
         // True headless mode: no surface extensions required. GLFW is not
         // initialised, so we must not call any GLFW functions here.
     } else if (window.IsTTY()) {
@@ -219,7 +225,7 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
         })
         // VK_EXT_descriptor_heap: the whole scene binding model now lives in
         // descriptor heaps; the legacy set path remains only for passes that
-        // have not been ported yet (post-processing, volumetric, ImGui, ...).
+        // have not been ported yet (post-processing, volumetric, ...).
         .Require<VkPhysicalDeviceDescriptorHeapFeaturesEXT>([](auto& f) -> auto { f.descriptorHeap = VK_TRUE; })
         // Pipelines declare a stencil attachment format derived from the depth
         // format, but only some passes actually bind stencil; this feature lets
@@ -256,10 +262,10 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
         .Build();
 }
 
-auto GetDeviceExtensions(VkPhysicalDevice physicalDevice, bool isHeadless, bool meshShaderSupported) noexcept -> std::expected<Vk::ExtensionResult, Error> {
+auto GetDeviceExtensions(VkPhysicalDevice physicalDevice, bool noSwapchain, bool meshShaderSupported) noexcept -> std::expected<Vk::ExtensionResult, Error> {
     auto builder = Vk::ExtensionBuilder::ForDevice(physicalDevice);
 
-    if (!isHeadless) {
+    if (!noSwapchain) {
         builder.Require(VK_KHR_SWAPCHAIN_EXTENSION_NAME)
             .Optional(VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME)
             .Optional(VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME);
@@ -293,6 +299,22 @@ auto GetDeviceExtensions(VkPhysicalDevice physicalDevice, bool isHeadless, bool 
         .transform_error([](auto err) -> Error { return err; });
 }
 
+/// Chooses how frames reach the display (see PresentationMode). Fixed for
+/// the lifetime of the context; `headless` keeps its strict meaning —
+/// OffscreenOnly is only for sessions that genuinely have no window.
+auto SelectPresentationMode(const Window& window) noexcept -> PresentationMode {
+    if (window.IsHeadless()) {
+        return PresentationMode::OffscreenOnly;
+    }
+    if constexpr (isMac) {
+        // No native Vulkan WSI on macOS: render to the offscreen target and
+        // let the HostBlit plugin blit it through its own OpenGL window.
+        return PresentationMode::HostBlit;
+    } else {
+        return PresentationMode::NativeSwapchain;
+    }
+}
+
 } // namespace
 
 RenderContext::RenderContext(PrivateToken /*unused*/, std::unique_ptr<Impl> impl) noexcept: _impl(std::move(impl)) {
@@ -306,6 +328,9 @@ RenderContext::RenderContext(PrivateToken /*unused*/, std::unique_ptr<Impl> impl
 auto RenderContext::Create(Window& window, const RenderConfig& cfg) noexcept -> std::expected<std::unique_ptr<RenderContext>, Error> {
     auto impl     = std::make_unique<Impl>(window);
     impl->appName = cfg.appName;
+
+    const PresentationMode mode = SelectPresentationMode(window);
+    impl->presentationMode      = mode;
 
     Vk::Instance            instanceObject;
     VkInstance              instance    = VK_NULL_HANDLE;
@@ -327,16 +352,34 @@ auto RenderContext::Create(Window& window, const RenderConfig& cfg) noexcept -> 
                 });
         })
         .and_then([&]() -> std::expected<void, Error> {
-            if (!window.IsTTY() && !window.IsHeadless()) {
-                return window.CreateVulkanSurface(instance, nullptr, width, height)
-                    .transform_error([](auto err) -> Error { return err; })
-                    .transform([&](void* surface) -> void { raw_surface = static_cast<VkSurfaceKHR>(surface); });
-            }
-            if (window.IsHeadless()) {
+            if (mode == PresentationMode::OffscreenOnly) {
                 // Headless: obtain offscreen dimensions without creating a VkSurfaceKHR
                 return window.CreateVulkanSurface(instance, nullptr, width, height)
                     .transform_error([](auto err) -> Error { return err; })
                     .transform([&](void* /*surface*/) -> void { raw_surface = VK_NULL_HANDLE; });
+            }
+            if (mode == PresentationMode::HostBlit) {
+                // No WSI surface to create. Size the offscreen target from the
+                // window's FRAMEBUFFER (points != pixels on Retina displays);
+                // HostBlit presents the finished image after each submit.
+                // TTY sessions have no native window, so keep a sane default.
+                width  = 1280;
+                height = 720;
+                if (auto* win = static_cast<GLFWwindow*>(window.GetNativeHandle()); win != nullptr) {
+                    int fbWidth  = 0;
+                    int fbHeight = 0;
+                    glfwGetFramebufferSize(win, &fbWidth, &fbHeight);
+                    if (fbWidth > 0 && fbHeight > 0) {
+                        width  = fbWidth;
+                        height = fbHeight;
+                    }
+                }
+                return {};
+            }
+            if (!window.IsTTY()) {
+                return window.CreateVulkanSurface(instance, nullptr, width, height)
+                    .transform_error([](auto err) -> Error { return err; })
+                    .transform([&](void* surface) -> void { raw_surface = static_cast<VkSurfaceKHR>(surface); });
             }
             return {};
         })
@@ -348,7 +391,7 @@ auto RenderContext::Create(Window& window, const RenderConfig& cfg) noexcept -> 
                 .transform([&](const ZHLN_PhysicalDeviceInfo& info) -> void { physicalInfo = info; });
         })
         .and_then([&]() -> std::expected<void, Error> {
-            if (window.IsTTY()) {
+            if (window.IsTTY() && mode == PresentationMode::NativeSwapchain) {
                 return window.CreateVulkanSurface(instance, physicalInfo.handle, width, height)
                     .transform_error([](auto err) -> Error { return err; })
                     .transform([&](void* surface) -> void { raw_surface = static_cast<VkSurfaceKHR>(surface); });
@@ -364,7 +407,7 @@ auto RenderContext::Create(Window& window, const RenderConfig& cfg) noexcept -> 
             impl->multiviewMeshShaderEnabled = caps.supportsMultiviewMeshShader;
             auto         features            = BuildFeatureChain(physicalInfo.handle, caps, cfg.validationMode);
 
-            return GetDeviceExtensions(physicalInfo.handle, window.IsHeadless(), caps.supportsMeshShader)
+            return GetDeviceExtensions(physicalInfo.handle, mode != PresentationMode::NativeSwapchain, caps.supportsMeshShader)
                 .and_then([&](auto&& dev_exts) -> std::expected<void, Error> {
                     const std::vector<const char*>& devExtList = dev_exts;
 
@@ -383,12 +426,37 @@ auto RenderContext::Create(Window& window, const RenderConfig& cfg) noexcept -> 
                         });
                 });
         })
+        .and_then([&]() -> std::expected<void, Error> {
+            if constexpr (isMac) {
+                if (mode == PresentationMode::HostBlit) {
+                    // Hand the plugin device access so it can allocate its
+                    // own command pool + fence (it touches no engine state).
+                    // On failure the session continues rendering offscreen
+                    // instead of dying — screenshots and tests still work.
+                    const bool ok = HostBlit::Init(
+                        impl->ctx.Physical(), impl->ctx.Device(), impl->ctx.GraphicsQueue(), physicalInfo.graphics_family
+                    );
+                    if (!ok) {
+                        ZHLN::Log("WARNING: HostBlit presenter failed to initialize; continuing offscreen-only.");
+                        impl->presentationMode = PresentationMode::OffscreenOnly;
+                    }
+                }
+            }
+            return {};
+        })
         .and_then([&]() -> std::expected<void, Error> { return impl->InitSubsystems(cfg, width, height); })
         .transform([&]() -> std::unique_ptr<ZHLN::RenderContext> { return std::make_unique<RenderContext>(PrivateToken {}, std::move(impl)); });
 }
 
 RenderContext::~RenderContext() {
     if (_impl && (_impl->ctx.Device() != nullptr)) {
+        if constexpr (isMac) {
+            if (_impl->presentationMode == PresentationMode::HostBlit) {
+                // Releases the plugin's GL window and its Vulkan staging
+                // resources; safe to call before the device is destroyed.
+                HostBlit::Shutdown();
+            }
+        }
         _impl->gpuDiagnostics.Shutdown();
         auto res = Vk::WaitIdle(_impl->ctx.Device());
         if (!res) {

@@ -193,9 +193,29 @@ class DynamicPass {
     constexpr explicit DynamicPass(VkExtent3D extent) noexcept: _extent({.width = extent.width, .height = extent.height}) {
     }
 
+    // Fixed-function viewport/scissor sub-rectangle in framebuffer pixels. Unset
+    // (width or height <= 1) means the full extent: rasterization is confined
+    // to the rectangle while the render area -- and thus attachment clears --
+    // still covers the whole target.
+    constexpr auto Viewport(float x, float y, float width, float height) && -> DynamicPass<ColorCount, HasDepth>&& {
+        _vpX = x;
+        _vpY = y;
+        _vpW = width;
+        _vpH = height;
+        return std::move(*this);
+    }
+
+    // Overload for a ready-made VkViewport (the engine's EffectiveViewport
+    // returns one). The rectangle is what carries: this pass records its own
+    // 0..1 depth range, so minDepth/maxDepth of the argument are ignored.
+    constexpr auto Viewport(const VkViewport& viewport) && -> DynamicPass<ColorCount, HasDepth>&& {
+        return std::move(*this).Viewport(viewport.x, viewport.y, viewport.width, viewport.height);
+    }
+
     template <size_t InsideCount, bool InsideDepth>
     constexpr explicit DynamicPass(DynamicPass<InsideCount, InsideDepth>&& other) noexcept:
-        _extent(other._extent), _flags(other._flags), _colors(std::move(other)._colors), _depth(other._depth), _viewMask(other._viewMask) {
+        _extent(other._extent), _flags(other._flags), _colors(std::move(other)._colors), _depth(other._depth), _viewMask(other._viewMask),
+        _vpX(other._vpX), _vpY(other._vpY), _vpW(other._vpW), _vpH(other._vpH) {
     }
 
     template <VkImageLayout Layout>
@@ -245,6 +265,10 @@ class DynamicPass {
     VkRenderingAttachmentInfo                                   _depth {};
     uint32_t                                                    _viewMask   = 0;
     bool                                                        _hasStencil = false;
+    float                                                       _vpX        = 0.0f;
+    float                                                       _vpY        = 0.0f;
+    float                                                       _vpW        = 0.0f;
+    float                                                       _vpH        = 0.0f;
 };
 
 DynamicPass(VkExtent2D) -> DynamicPass<0, false>;

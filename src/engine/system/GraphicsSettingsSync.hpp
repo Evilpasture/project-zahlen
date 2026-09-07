@@ -7,7 +7,7 @@
 //
 // The ECS settings components (PostProcessSettingsComponent,
 // ShadowSettingsComponent, AASettingsComponent) are the *editing surface* —
-// what ImGui sliders, Lua scripts and quality presets write to. This helper
+// what GUI sliders, Lua scripts and quality presets write to. This helper
 // is the single collector that folds them into the canonical GraphicsSettings
 // model and pushes it into the RenderContext once per frame
 // (RenderSystem::RenderMain). The renderer never queries the components

@@ -53,6 +53,7 @@
   "banned_macros": {},
   "third_party_families": [
     "CLAY_",
+    "GL_",
     "GLFW_",
     "IMGUI_",
     "IM_",

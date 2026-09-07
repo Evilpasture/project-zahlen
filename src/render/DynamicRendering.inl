@@ -334,15 +334,19 @@ void DynamicPass<ColorCount, HasDepth>::Execute(VkCommandBuffer cmd, Func&& func
 
     vkCmdBeginRendering(cmd, &rendering_info);
 
+    const bool     useVp = _vpW > 1.0F && _vpH > 1.0F;
     const VkViewport viewport = {
-        .x        = 0.0F,
-        .y        = 0.0F,
-        .width    = static_cast<float>(_extent.width),
-        .height   = static_cast<float>(_extent.height),
+        .x        = useVp ? _vpX : 0.0F,
+        .y        = useVp ? _vpY : 0.0F,
+        .width    = useVp ? _vpW : static_cast<float>(_extent.width),
+        .height   = useVp ? _vpH : static_cast<float>(_extent.height),
         .minDepth = 0.0F,
         .maxDepth = 1.0F,
     };
-    const VkRect2D scissor = {.offset = {.x = 0, .y = 0}, .extent = {.width = _extent.width, .height = _extent.height}};
+    const VkRect2D scissor = {
+        .offset = {.x = useVp ? static_cast<int32_t>(_vpX) : 0, .y = useVp ? static_cast<int32_t>(_vpY) : 0},
+        .extent = {.width = useVp ? static_cast<uint32_t>(_vpW) : _extent.width, .height = useVp ? static_cast<uint32_t>(_vpH) : _extent.height}
+    };
 
     vkCmdSetViewport(cmd, 0, 1, &viewport);
     vkCmdSetScissor(cmd, 0, 1, &scissor);

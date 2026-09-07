@@ -1,8 +1,7 @@
+
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/engine/graphics/HostBlitSwapchain.cpp
-//
 // ============================================================================
 // HostBlit — offscreen host presenter (black-box plugin)
 // ============================================================================
@@ -63,19 +62,29 @@
 //
 // ============================================================================
 
-#include "Rendering.hpp" // Vulkan core (PCH of the render module)
-#include "Allocator.hpp" // ZHLN::Vk::Image (handle-only RAII wrapper)
+// GL_GLEXT_PROTOTYPES must be defined BEFORE the first GL header inclusion:
+// on Linux, <GLFW/glfw3.h> below pulls in <GL/gl.h>, and libglvnd's gl.h
+// includes <GL/glext.h> itself -- glext.h's include guard then makes any
+// later definition moot. glWindowPos2i (GL 1.4, ARB_window_pos) only gets a
+// prototype when the macro is already set at that first inclusion. (Mesa's
+// gl.h does NOT self-include glext.h; libglvnd's -- what Arch and friends
+// ship -- does, so the define cannot live after the GLFW include.)
+#if !defined(__APPLE__) && !defined(GL_GLEXT_PROTOTYPES)
+#define GL_GLEXT_PROTOTYPES 1
+#endif
 
 #include <GLFW/glfw3.h>
+#include <Rendering.hpp> // Vulkan core (PCH of the render module)
 
 #if defined(__APPLE__)
 #include <OpenGL/gl.h> // legacy 2.1 API: glDrawPixels & friends
 #else
 #include <GL/gl.h>
+#include <GL/glext.h> // glWindowPos2i prototype when nothing pulled GL in yet
 #endif
 
-#include <cstdio>
 #include <cstdint>
+#include <cstdio>
 
 // GL 1.2 imaging constants — present in every GL 2.1 header we target, but
 // pinned here so the file compiles even against a minimal GL 1.1 gl.h.
@@ -100,18 +109,18 @@ struct State {
     uint32_t         queueFamily = 0;
 
     // Private Vulkan objects.
-    VkCommandPool   cmdPool   = VK_NULL_HANDLE;
-    VkCommandBuffer cmd       = VK_NULL_HANDLE;
-    VkFence         fence     = VK_NULL_HANDLE;
-    VkBuffer        staging   = VK_NULL_HANDLE;
-    VkDeviceMemory  memory    = VK_NULL_HANDLE;
-    void*           mapped    = nullptr;
-    VkDeviceSize    capacity  = 0;
+    VkCommandPool   cmdPool  = VK_NULL_HANDLE;
+    VkCommandBuffer cmd      = VK_NULL_HANDLE;
+    VkFence         fence    = VK_NULL_HANDLE;
+    VkBuffer        staging  = VK_NULL_HANDLE;
+    VkDeviceMemory  memory   = VK_NULL_HANDLE;
+    void*           mapped   = nullptr;
+    VkDeviceSize    capacity = 0;
 
     // GL presentation window (owned only when the caller's window has no
     // GL context, which is the case for every engine window: GLFW_NO_API).
-    GLFWwindow* glWindow  = nullptr;
-    bool        ownsGlfw  = false; // did this file call glfwInit()?
+    // The window is plugin-owned; GLFW itself never is (see ResolveWindow).
+    GLFWwindow* glWindow = nullptr;
 
     bool ready = false;
 } g;
@@ -128,47 +137,49 @@ bool FindHostMemoryType(uint32_t typeBits, bool preferCached, uint32_t& out) noe
     uint32_t fallback = UINT32_MAX;
     for (uint32_t i = 0; i < props.memoryTypeCount; ++i) {
         const VkMemoryPropertyFlags f = props.memoryTypes[i].propertyFlags;
-        const bool usable = (typeBits & (1u << i)) != 0 &&
-                            (f & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0 &&
-                            (f & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0;
-        if (!usable) continue;
+        const bool usable = (typeBits & (1u << i)) != 0 && (f & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0 && (f & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0;
+        if (!usable)
+            continue;
         if ((f & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) != 0) {
             out = i;
             return true;
         }
-        if (fallback == UINT32_MAX) fallback = i;
+        if (fallback == UINT32_MAX)
+            fallback = i;
     }
     if (fallback != UINT32_MAX) {
         out = fallback;
         return true;
     }
-    (void)preferCached;
+    (void) preferCached;
     return false;
 }
 
 void DestroyStaging() noexcept {
     if (g.staging != VK_NULL_HANDLE) {
-        if (g.mapped != nullptr) vkUnmapMemory(g.device, g.memory);
+        if (g.mapped != nullptr)
+            vkUnmapMemory(g.device, g.memory);
         vkDestroyBuffer(g.device, g.staging, nullptr);
         vkFreeMemory(g.device, g.memory, nullptr);
-        g.staging = VK_NULL_HANDLE;
-        g.memory  = VK_NULL_HANDLE;
-        g.mapped  = nullptr;
+        g.staging  = VK_NULL_HANDLE;
+        g.memory   = VK_NULL_HANDLE;
+        g.mapped   = nullptr;
         g.capacity = 0;
     }
 }
 
 bool EnsureStaging(VkDeviceSize bytes) noexcept {
-    if (bytes <= g.capacity) return true;
+    if (bytes <= g.capacity)
+        return true;
     DestroyStaging();
 
     const VkBufferCreateInfo bi {
-        .sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .pNext       = nullptr,
-        .flags       = 0,
-        .size        = bytes,
-        .usage       = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .sType                 = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .pNext                 = nullptr,
+        .flags                 = 0,
+        .size                  = bytes,
+        .usage                 = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
         .queueFamilyIndexCount = 0,
         .pQueueFamilyIndices   = nullptr,
     };
@@ -199,8 +210,7 @@ bool EnsureStaging(VkDeviceSize bytes) noexcept {
         g.staging = VK_NULL_HANDLE;
         return false;
     }
-    if (vkBindBufferMemory(g.device, g.staging, g.memory, 0) != VK_SUCCESS ||
-        vkMapMemory(g.device, g.memory, 0, req.size, 0, &g.mapped) != VK_SUCCESS) {
+    if (vkBindBufferMemory(g.device, g.staging, g.memory, 0) != VK_SUCCESS || vkMapMemory(g.device, g.memory, 0, req.size, 0, &g.mapped) != VK_SUCCESS) {
         Log("Could not bind/map the host staging buffer.");
         DestroyStaging();
         return false;
@@ -212,24 +222,23 @@ bool EnsureStaging(VkDeviceSize bytes) noexcept {
 // Copy mip 0 / layer 0 of `image` into the mapped staging buffer and block
 // until the pixels are CPU-visible. The image is transitioned back to the
 // layout the caller declared, so the engine never observes a stray layout.
-bool ReadBackPixels(VkImage image, uint32_t width, uint32_t height,
-                    VkImageLayout srcLayout) noexcept {
-    if (vkResetFences(g.device, 1, &g.fence) != VK_SUCCESS) return false;
+bool ReadBackPixels(VkImage image, uint32_t width, uint32_t height, VkImageLayout srcLayout) noexcept {
+    if (vkResetFences(g.device, 1, &g.fence) != VK_SUCCESS)
+        return false;
 
     const VkCommandBufferBeginInfo begin {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .pNext = nullptr,
+        .sType            = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .pNext            = nullptr,
         .flags            = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
         .pInheritanceInfo = nullptr,
     };
-    if (vkBeginCommandBuffer(g.cmd, &begin) != VK_SUCCESS) return false;
+    if (vkBeginCommandBuffer(g.cmd, &begin) != VK_SUCCESS)
+        return false;
 
-    const VkImageSubresourceRange range {
-        VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    const VkImageSubresourceRange range {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-    auto barrier = [&](VkImageLayout from, VkImageLayout to,
-                       VkPipelineStageFlags srcStage, VkAccessFlags srcAccess,
-                       VkPipelineStageFlags dstStage, VkAccessFlags dstAccess) {
+    auto barrier = [&](VkImageLayout from, VkImageLayout to, VkPipelineStageFlags srcStage, VkAccessFlags srcAccess, VkPipelineStageFlags dstStage,
+                       VkAccessFlags dstAccess) {
         const VkImageMemoryBarrier b {
             .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
             .pNext               = nullptr,
@@ -242,27 +251,26 @@ bool ReadBackPixels(VkImage image, uint32_t width, uint32_t height,
             .image               = image,
             .subresourceRange    = range,
         };
-        vkCmdPipelineBarrier(g.cmd, srcStage, dstStage, 0,
-                             0, nullptr, 0, nullptr, 1, &b);
+        vkCmdPipelineBarrier(g.cmd, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1, &b);
     };
 
-    barrier(srcLayout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-            VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_MEMORY_WRITE_BIT,
-            VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+    barrier(
+        srcLayout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_MEMORY_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_ACCESS_TRANSFER_READ_BIT
+    );
 
     VkBufferImageCopy region {};
     region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
     region.imageExtent      = {width, height, 1};
-    vkCmdCopyImageToBuffer(g.cmd, image,
-                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                           g.staging, 1, &region);
+    vkCmdCopyImageToBuffer(g.cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, g.staging, 1, &region);
 
-    barrier(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, srcLayout,
-            VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
-            VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-            VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT);
+    barrier(
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, srcLayout, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+        VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT
+    );
 
-    if (vkEndCommandBuffer(g.cmd) != VK_SUCCESS) return false;
+    if (vkEndCommandBuffer(g.cmd) != VK_SUCCESS)
+        return false;
 
     const VkSubmitInfo si {
         .sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO,
@@ -275,15 +283,15 @@ bool ReadBackPixels(VkImage image, uint32_t width, uint32_t height,
         .signalSemaphoreCount = 0,
         .pSignalSemaphores    = nullptr,
     };
-    if (vkQueueSubmit(g.queue, 1, &si, g.fence) != VK_SUCCESS) return false;
+    if (vkQueueSubmit(g.queue, 1, &si, g.fence) != VK_SUCCESS)
+        return false;
     return vkWaitForFences(g.device, 1, &g.fence, VK_TRUE, UINT64_MAX) == VK_SUCCESS;
 }
 
 // Pick a GL window with a usable context: the caller's window when it has
 // one, otherwise a plugin-owned 2.1 window sized to the caller's window.
 GLFWwindow* ResolveWindow(GLFWwindow* requested, uint32_t width, uint32_t height) noexcept {
-    if (requested != nullptr &&
-        glfwGetWindowAttrib(requested, GLFW_CLIENT_API) != GLFW_NO_API) {
+    if (requested != nullptr && glfwGetWindowAttrib(requested, GLFW_CLIENT_API) != GLFW_NO_API) {
         return requested;
     }
     if (g.glWindow != nullptr && !glfwWindowShouldClose(g.glWindow)) {
@@ -297,7 +305,10 @@ GLFWwindow* ResolveWindow(GLFWwindow* requested, uint32_t width, uint32_t height
         Log("glfwInit failed; cannot open a host presentation window.");
         return nullptr;
     }
-    g.ownsGlfw = true;
+    // NOTE: glfwInit() also returns true when the ENGINE already initialized
+    // GLFW, so this file must never assume ownership: glfwTerminate() would
+    // destroy the engine's windows out from under it (the engine tears the
+    // RenderContext — and with it this plugin — down BEFORE its Window).
 
     int fbW = static_cast<int>(width), fbH = static_cast<int>(height);
     if (requested != nullptr) {
@@ -310,8 +321,7 @@ GLFWwindow* ResolveWindow(GLFWwindow* requested, uint32_t width, uint32_t height
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_ANY_PROFILE);
-    g.glWindow = glfwCreateWindow(fbW > 0 ? fbW : 1280, fbH > 0 ? fbH : 720,
-                                  "Zahlen — Host Blit", nullptr, nullptr);
+    g.glWindow = glfwCreateWindow(fbW > 0 ? fbW : 1280, fbH > 0 ? fbH : 720, "Zahlen — Host Blit", nullptr, nullptr);
     if (g.glWindow == nullptr) {
         Log("glfwCreateWindow (OpenGL 2.1) failed.");
         return nullptr;
@@ -324,39 +334,53 @@ GLFWwindow* ResolveWindow(GLFWwindow* requested, uint32_t width, uint32_t height
 // to the window in the same step. Nearest filtering — this is a debug
 // presenter, not a scaler.
 void GlBlit(uint32_t width, uint32_t height, VkFormat format) noexcept {
-    int fbW = 0, fbH = 0;
+    int fbW = 0;
+    int fbH = 0;
     glfwGetFramebufferSize(glfwGetCurrentContext(), &fbW, &fbH);
-    if (fbW <= 0 || fbH <= 0) return;
+    if (fbW <= 0 || fbH <= 0 || !g.mapped) {
+        return;
+    }
 
     GLenum glFormat = GL_BGRA;
     GLenum glType   = GL_UNSIGNED_INT_8_8_8_8_REV;
+
     switch (format) {
-    case VK_FORMAT_R8G8B8A8_UNORM:
-    case VK_FORMAT_R8G8B8A8_SRGB:
-        glFormat = GL_RGBA;
-        glType   = GL_UNSIGNED_BYTE;
-        break;
-    case VK_FORMAT_R8G8B8_UNORM:
-    case VK_FORMAT_R8G8B8_SRGB:
-        glFormat = GL_RGB;
-        glType   = GL_UNSIGNED_BYTE;
-        break;
-    default: // B8G8R8A8_UNORM / _SRGB and anything else 4x8 little-endian
-        break;
+        case VK_FORMAT_R8G8B8A8_UNORM:
+        case VK_FORMAT_R8G8B8A8_SRGB:
+            glFormat = GL_RGBA;
+            glType   = GL_UNSIGNED_BYTE;
+            break;
+        case VK_FORMAT_R8G8B8_UNORM:
+        case VK_FORMAT_R8G8B8_SRGB:
+            glFormat = GL_RGB;
+            glType   = GL_UNSIGNED_BYTE;
+            break;
+        default:
+            break;
     }
 
     glViewport(0, 0, fbW, fbH);
     glDisable(GL_DEPTH_TEST);
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+
+    // Set byte alignment dynamically
+    glPixelStorei(GL_UNPACK_ALIGNMENT, (glFormat == GL_RGB) ? 1 : 4);
+
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
-    glRasterPos2i(0, fbH);
-    glPixelZoom(static_cast<float>(fbW) / static_cast<float>(width),
-                -static_cast<float>(fbH) / static_cast<float>(height));
-    glDrawPixels(static_cast<int>(width), static_cast<int>(height),
-                 glFormat, glType, g.mapped);
+
+    // Direct window-space origin (Top-Left start position for inverted zoom)
+    glWindowPos2i(0, fbH);
+
+    // Scale to framebuffer + flip Y axis
+    glPixelZoom(static_cast<float>(fbW) / static_cast<float>(width), -static_cast<float>(fbH) / static_cast<float>(height));
+
+    // Pump host Vulkan memory straight to screen
+    glDrawPixels(static_cast<int>(width), static_cast<int>(height), glFormat, glType, g.mapped);
+
     glPixelZoom(1.0f, 1.0f);
-    glFlush();
+    // NOTE: no swap here — Present() owns the single per-frame swap. A second
+    // glfwSwapBuffers would flip the never-drawn back buffer onto the screen,
+    // which on macOS shows as an alternating black frame.
 }
 
 } // namespace
@@ -366,9 +390,9 @@ void GlBlit(uint32_t width, uint32_t height, VkFormat format) noexcept {
 // ---------------------------------------------------------------------------
 void Shutdown() noexcept;
 
-[[nodiscard]] bool Init(VkPhysicalDevice gpu, VkDevice device,
-                        VkQueue queue, uint32_t queueFamily) noexcept {
-    if (g.ready) return true;
+[[nodiscard]] bool Init(VkPhysicalDevice gpu, VkDevice device, VkQueue queue, uint32_t queueFamily) noexcept {
+    if (g.ready)
+        return true;
     if (gpu == VK_NULL_HANDLE || device == VK_NULL_HANDLE || queue == VK_NULL_HANDLE) {
         Log("Init needs a valid physical device, device and queue.");
         return false;
@@ -415,25 +439,48 @@ void Shutdown() noexcept;
     return true;
 }
 
-[[nodiscard]] bool Present(const ZHLN::Vk::Image& src, GLFWwindow* window,
-                           uint32_t width, uint32_t height,
-                           VkFormat format, VkImageLayout srcLayout) noexcept {
-    if (!g.ready || !src.Valid() || width == 0 || height == 0) return false;
+[[nodiscard]] bool Present(const ZHLN::Vk::Image& src, GLFWwindow* window, uint32_t width, uint32_t height, VkFormat format, VkImageLayout srcLayout) noexcept {
+    if (!g.ready || !src.Valid() || width == 0 || height == 0)
+        return false;
 
     GLFWwindow* target = ResolveWindow(window, width, height);
-    if (target == nullptr) return false;
-    if (g.ownsGlfw) glfwPollEvents(); // keep the plugin window responsive
-    if (glfwWindowShouldClose(target)) return false;
+    if (target == nullptr)
+        return false;
+    // Keep the plugin window responsive. Harmless when the engine polls too
+    // (events are delivered once); required when the plugin is the only
+    // GLFW consumer (e.g. a TTY-mode engine session).
+    glfwPollEvents();
+    if (glfwWindowShouldClose(target))
+        return false;
+
+    // The plugin window was opened at the caller's framebuffer size and must
+    // follow its resizes: GlBlit scales the source to whatever the window's
+    // current framebuffer is, so a stale size squashes the frame into the
+    // old aspect (the "stretched UI" symptom). Same points==pixels convention
+    // as at creation. Skip the blit on the catch-up frame.
+    bool catchUp = false;
+    if (target == g.glWindow) {
+        int curW = 0;
+        int curH = 0;
+        glfwGetWindowSize(target, &curW, &curH);
+        if (curW != static_cast<int>(width) || curH != static_cast<int>(height)) {
+            glfwSetWindowSize(target, static_cast<int>(width), static_cast<int>(height));
+            catchUp = true;
+        }
+    }
 
     // 4 bytes/px covers every supported format (RGB8 rows are ≤ RGBA8 size).
-    if (!EnsureStaging(static_cast<VkDeviceSize>(width) * height * 4)) return false;
+    if (!EnsureStaging(static_cast<VkDeviceSize>(width) * height * 4))
+        return false;
     if (!ReadBackPixels(src.Handle(), width, height, srcLayout)) {
         Log("Readback copy failed; frame skipped.");
         return !glfwWindowShouldClose(target);
     }
 
     glfwMakeContextCurrent(target);
-    GlBlit(width, height, format);
+    if (!catchUp) {
+        GlBlit(width, height, format);
+    }
     glfwSwapBuffers(target);
     return !glfwWindowShouldClose(target);
 }
@@ -442,11 +489,17 @@ void Shutdown() noexcept {
     if (g.device != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(g.device);
         DestroyStaging();
-        if (g.fence != VK_NULL_HANDLE) vkDestroyFence(g.device, g.fence, nullptr);
-        if (g.cmdPool != VK_NULL_HANDLE) vkDestroyCommandPool(g.device, g.cmdPool, nullptr);
+        if (g.fence != VK_NULL_HANDLE)
+            vkDestroyFence(g.device, g.fence, nullptr);
+        if (g.cmdPool != VK_NULL_HANDLE)
+            vkDestroyCommandPool(g.device, g.cmdPool, nullptr);
     }
-    if (g.glWindow != nullptr) glfwDestroyWindow(g.glWindow);
-    if (g.ownsGlfw) glfwTerminate();
+    if (g.glWindow != nullptr)
+        glfwDestroyWindow(g.glWindow);
+    // Deliberately NO glfwTerminate(): GLFW may be (and in every engine
+    // session IS) owned by the engine, which destroys its Window AFTER this
+    // plugin. Terminating here would free the engine's window handles and
+    // crash its teardown; at process exit the OS reclaims GLFW anyway.
     g = State {};
 }
 

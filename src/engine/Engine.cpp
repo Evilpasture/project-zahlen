@@ -36,7 +36,6 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
-#include <Zahlen/gui/TextEdit.hpp>
 #include <Zahlen/gui/UIComponents.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <engine/FileWatcher.hpp>
@@ -206,11 +205,6 @@ struct EngineImpl {
     void*    gameState    = nullptr;
     uint64_t frameCounter = 0;
     bool     joltAcquired = false;
-    // ImGui is kept as a reference/debug overlay, not as the UI. Off by
-    // default: Engine::ProcessEvents does not open an ImGui frame at all when
-    // this is false, so no NewFrame, no ImGui vertex upload and no ImGui
-    // render pass happen. See Engine::SetImGuiEnabled.
-    bool         imguiEnabled = false;
     EngineConfig config;
 };
 
@@ -744,49 +738,22 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
         }
     }
 
-    // Text editing for the focused UITextInputComponent lives in
-    // GUI::TextEdit (a pure function over the component) so the TTY front end
-    // and the unit tests exercise exactly what the GLFW path does. Modifier
-    // state comes from the InputStateComponent, which SetKey has already
-    // updated for this event, so Shift/Ctrl held together with the key are
-    // visible here without a separate mods parameter.
+    // Keys land in InputStateComponent twice over: held state in the bitset for
+    // gameplay, and a queue of presses plus typed characters for text fields.
+    // The engine still does not interpret any of it as text -- it does not own a
+    // GUI::Context (the caller does, see app/main.cpp:151), so it has no way to
+    // know which field is focused. GUI::Context::BeginFrame drains the queue;
+    // Context::PushKey/PushChar feed the same queue for hosts with no window.
+    //
+    // Every press is queued, not just the editing keys. Deciding which keys a
+    // text field acts on is TextBuffer.hpp's business; this is only the pump.
     auto onKey = [](void* userdata, KeyCode key, bool pressed) -> void {
         auto* impl  = static_cast<EngineImpl*>(userdata);
         auto* reg   = &impl->registry;
         auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
         state->SetKey(static_cast<uint8_t>(key), pressed);
-
-        if (!pressed) {
-            return;
-        }
-
-        const GUI::TextEdit::Modifiers mods {
-            .shift = state->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::LShift)) || state->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::RShift)),
-            .ctrl  = state->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::LControl)) || state->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::RControl)),
-        };
-
-        // Ctrl+C/X/V go to the OS clipboard through the window. The window is
-        // created right after these callbacks are installed, so it is null
-        // only for events that cannot happen yet.
-        const GUI::TextEdit::ClipboardSink clipboard {
-            .userdata = impl,
-            .set      = [](void* ud, std::string_view text) -> void {
-                auto* ei = static_cast<EngineImpl*>(ud);
-                if (ei->window) {
-                    ei->window->SetClipboardText(text);
-                }
-            },
-            .get = [](void* ud) -> std::string {
-                auto* ei = static_cast<EngineImpl*>(ud);
-                return ei->window ? ei->window->GetClipboardText() : std::string();
-            },
-        };
-
-        for (Entity e: reg->GetEntitiesWith<GUI::UIComponents::UITextInputComponent>()) {
-            auto* inputComp = reg->Get<GUI::UIComponents::UITextInputComponent>(e);
-            if (inputComp != nullptr && inputComp->isFocused) {
-                GUI::TextEdit::HandleKey(*inputComp, key, mods, clipboard);
-            }
+        if (pressed) {
+            state->QueueKeyPress(key);
         }
     };
 
@@ -809,20 +776,16 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
     };
 
     auto onChar = [](void* userdata, unsigned int codepoint) -> void {
-        auto* reg = &static_cast<EngineImpl*>(userdata)->registry;
-        for (Entity e: reg->GetEntitiesWith<GUI::UIComponents::UITextInputComponent>()) {
-            auto* inputComp = reg->Get<GUI::UIComponents::UITextInputComponent>(e);
-            if (inputComp != nullptr && inputComp->isFocused) {
-                GUI::TextEdit::HandleChar(*inputComp, codepoint);
-            }
-        }
+        auto* reg   = &static_cast<EngineImpl*>(userdata)->registry;
+        auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
+        state->QueueChar(codepoint);
     };
 
     // userdata is the heap-allocated EngineImpl (stable for the engine's whole
-    // life, unlike `this`), which owns both the registry the callbacks write
-    // to and the window whose clipboard the text fields use.
+    // life, unlike `this`), which owns the registry the callbacks write to.
     WindowInputReceiver receiver = {
-        .userdata = _impl.get(), .onKey = onKey, .onMouseMove = onMouseMove, .onMouseScroll = onMouseScroll, .onResize = onResize, .onChar = onChar
+        .userdata = _impl.get(), .onKey = onKey, .onMouseMove = onMouseMove, .onMouseScroll = onMouseScroll, .onResize = onResize,
+        .onChar   = onChar
     };
 
     _impl->window =
@@ -917,7 +880,7 @@ void Engine::ProcessEvents() {
     }
 
     if (_impl->window->IsHeadless()) {
-        // True headless mode: no windowing event queue to poll, no ImGui frames.
+        // True headless mode: no windowing event queue to poll.
         return;
     }
 
@@ -933,14 +896,6 @@ void Engine::ProcessEvents() {
 
     glfwPollEvents();
 
-    // ImGui is a debug overlay now, not the UI. When it is toggled off it does
-    // not get a frame at all: no NewFrame, no vertex buffers, no render pass
-    // (RenderContext tracks whether a frame was ever opened). Input capture is
-    // no longer read back from ImGui either -- UIInteractionSystem derives
-    // wantCaptureMouse / wantCaptureKeyboard from the native ECS widgets.
-    if (_impl->imguiEnabled) {
-        _impl->renderContext->BeginImGuiFrame();
-    }
 }
 
 auto Engine::BeginFrame(bool& outDeviceLost) noexcept -> bool {
@@ -1044,14 +999,6 @@ void Engine::SetGameState(void* state) {
 
 void Engine::SetUICallback(UICallback callback) {
     _impl->uiCallback = std::move(callback);
-}
-
-void Engine::SetImGuiEnabled(bool enabled) noexcept {
-    _impl->imguiEnabled = enabled;
-}
-
-auto Engine::IsImGuiEnabled() const noexcept -> bool {
-    return _impl->imguiEnabled;
 }
 
 void Engine::AddDeviceLostCallback(DeviceLostCallback callback) {

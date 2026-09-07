@@ -409,6 +409,12 @@ if(UNIX AND NOT APPLE)
 endif()
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/glfw SYSTEM)
 
+# The macOS SDK marks sprintf deprecated and the vendored cocoa joystick
+# still uses it; silence the deprecation noise on the vendored target only.
+if(APPLE)
+    target_compile_options(glfw PRIVATE -Wno-deprecated-declarations)
+endif()
+
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/LuaJIT SYSTEM)
 
 set(DOUBLE_PRECISION ON CACHE BOOL "" FORCE)
@@ -443,8 +449,6 @@ set(MESHOPT_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/meshoptimizer EXCLUDE_FROM_ALL SYSTEM)
 set_target_properties(meshoptimizer PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/SPIRV-Reflect)
-# add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui SYSTEM)
-# set_target_properties(imgui PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 # set(YOGA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
@@ -463,7 +467,6 @@ set(RAW_ENGINE_SOURCES
     src/engine/DefaultPreset.cpp
     src/engine/graphics/RenderFrame.cpp
     src/engine/graphics/RenderGraphBuilder.cpp
-    src/engine/graphics/HostBlitSwapchain.cpp
     src/engine/graphics/RenderDrawCommands.cpp
     src/engine/graphics/RenderInit.cpp
     src/engine/graphics/init/RenderInitDevice.cpp
@@ -542,6 +545,8 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/physics)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/ecs)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/audio)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/gui)
+
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/engine/graphics/OpenGLHacks)
 
 # --- ASSEMBLE COMPILER FLAGS METADATA ---
 set(COMPILER_FLAGS_LIST "${CMAKE_CXX_FLAGS}")
@@ -667,6 +672,14 @@ target_link_libraries(zahlen_engine PRIVATE
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(zahlen_engine PRIVATE PkgConfig::LIBEVDEV PkgConfig::LIBSEAT)
+endif()
+
+if(APPLE)
+    # macOS has no native Vulkan WSI: windowed sessions render offscreen and
+    # the HostBlit plugin blits the finished image through its own OpenGL
+    # window (PresentationMode::HostBlit). All engine call sites are gated
+    # with `if constexpr (isMac)`, so only Apple builds reference the plugin.
+    target_link_libraries(zahlen_engine PRIVATE HostBlitSwapchain)
 endif()
 
 target_link_libraries(zahlen_engine PUBLIC Jolt)
@@ -922,14 +935,24 @@ function(zahlen_enable_reflection TARGET_NAME)
     zahlen_use_custom_libcxx(${TARGET_NAME})
 endfunction()
 
+# Reflection is not a per-target feature: it changes struct layout.
+# InputStateComponent's first member is std::bitset<Reflect::EnumCount<KeyCode>()>,
+# and EnumCount is 72 with P2996 and 0 in the fallback spelling -- so a target
+# compiled without these flags lays mouseX out at offset 4 instead of 16 and
+# silently reads another field. Every target that includes a header whose layout
+# depends on Reflect has to be in this list. zahlen_gui was missing, which is
+# what made Context::Button read the key bitset as the mouse position.
 zahlen_enable_reflection(zahlen_render)
 zahlen_enable_reflection(zahlen_engine)
 zahlen_enable_reflection(zahlen_audio)
 zahlen_enable_reflection(zahlen_physics)
 zahlen_enable_reflection(zahlen_ecs)
+zahlen_enable_reflection(zahlen_gui)
 zahlen_enable_reflection(zahlen_threading)
 zahlen_enable_reflection(zahlen)
 zahlen_enable_reflection(zcook)
+
+zahlen_enable_reflection(HostBlitSwapchain)
 
 option(ZHLN_BUILD_EXTRAS "Build first-party engine feature modules and VFX toolkits" ON)
 
@@ -942,6 +965,16 @@ if(ZHLN_BUILD_EXTRAS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extras")
     if(TARGET zahlen_scripting_lua)
         target_link_libraries(zahlen PRIVATE zahlen_scripting_lua)
         target_compile_definitions(zahlen PRIVATE ZHLN_HAS_SCRIPTING=1)
+    endif()
+
+    # Ctrl+S in the editor writes the world back out as a scene document
+    # (Scene::Extract + extras/toml). Core may not reach for extras, so the
+    # composition root is what links the document layer, and app/main.cpp guards
+    # its include on the definition below: with ZHLN_BUILD_EXTRAS=OFF the editor
+    # still extracts a scene, it just has nothing to serialise it through.
+    if(TARGET zahlen_extras)
+        target_link_libraries(zahlen PRIVATE zahlen_extras)
+        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_SCENE_TOML=1)
     endif()
 endif()
 

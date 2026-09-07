@@ -267,9 +267,10 @@ struct GpuCullingPolicyPass1 {
             uint32_t             passIndex;
         } pc {};
 
+        const auto sceneVp = ctx.EffectiveViewport();
         pc.viewProj         = ctx.unjittered_view_proj;
-        pc.hizScreenSize[0] = static_cast<float>(color_att.extent.width);
-        pc.hizScreenSize[1] = static_cast<float>(color_att.extent.height);
+        pc.hizScreenSize[0] = sceneVp.width;
+        pc.hizScreenSize[1] = sceneVp.height;
         const uint32_t hizMips = std::min(ctx.graphResources.hizMap.mipLevels, kMaxGeneratedHiZMips);
         pc.maxHiZMipLevel   = hizMips > 0 ? hizMips - 1 : 0;
         pc.drawCount        = drawCount;
@@ -283,6 +284,7 @@ struct GpuCullingPolicyPass1 {
 
         // 3. Render Pass 1 Geometry
         Vk::DynamicPass(color_att.extent)
+            .Viewport(sceneVp)
             .AddColor(color_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorScene)
             .AddColor(vel_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorVelocity)
             .AddColor(norm_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorNormalRoughness)
@@ -347,9 +349,10 @@ struct GpuCullingPolicyPass2 {
         // 2. Dispatch Culling Pass 2 (Current Frame Hi-Z Re-test)
 
         const uint32_t hizMips2 = std::min(ctx.graphResources.hizMap.mipLevels, kMaxGeneratedHiZMips);
+        const auto sceneVp2 = ctx.EffectiveViewport();
         RenderContext::Impl::CullingConstants pc {
             .viewProj       = ctx.unjittered_view_proj,
-            .hizScreenSize  = {static_cast<float>(color_att.extent.width), static_cast<float>(color_att.extent.height)},
+            .hizScreenSize  = {sceneVp2.width, sceneVp2.height},
             .maxHiZMipLevel = hizMips2 > 0 ? hizMips2 - 1 : 0,
             .drawCount      = drawCount,
             .passIndex      = 1,
@@ -362,6 +365,7 @@ struct GpuCullingPolicyPass2 {
 
         // 3. Render Pass 2 Geometry (Newly Unoccluded) with LOAD_OP_LOAD!
         Vk::DynamicPass(color_att.extent)
+            .Viewport(sceneVp2)
             .AddColor(color_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
             .AddColor(vel_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
             .AddColor(norm_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
@@ -828,7 +832,9 @@ void TranslucentPrePass::Execute(
 
     ctx.BindHeapsAndPushFrame(cmd);
 
+    const auto sceneVp = ctx.EffectiveViewport();
     Vk::DynamicPass(norm_att.extent)
+        .Viewport(sceneVp)
         .AddColor(norm_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorNormalRoughness)
         .AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearDepthValue)
         .Execute(cmd, [&]() {
@@ -862,7 +868,9 @@ void ForwardPass::Execute(
 
     ctx.BindHeapsAndPushFrame(cmd);
 
+    const auto sceneVp = ctx.EffectiveViewport();
     Vk::DynamicPass(litColor.extent)
+        .Viewport(sceneVp)
         .AddColor(litColor, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .AddDepth(depth, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .Execute(cmd, [&]() {

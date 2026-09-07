@@ -591,6 +591,9 @@ struct RenderContext::Impl {
     Vk::Allocator                                allocator;
     Vk::Surface                                  surface;
     Vk::PresentationContext                      presentation;
+    /// Fixed at RenderContext::Create time (see PresentationMode); read by
+    /// EndFrame to decide whether to hand the finished frame to HostBlit.
+    PresentationMode                             presentationMode = PresentationMode::NativeSwapchain;
     Vk::FrameSync<2>                             sync;
     Vk::CommandPools<2, Vk::QueueType::Graphics> pools;
     Vk::CommandPools<2, Vk::QueueType::Compute>  computePools;
@@ -603,7 +606,6 @@ struct RenderContext::Impl {
 
     VkCommandBuffer                           current_cmd = VK_NULL_HANDLE;
     Vk::CommandBuffer<Vk::QueueType::Compute> current_compute_cmd;
-    bool                                      imguiFrameOpen = false;
 
     std::unique_ptr<Vk::StagingContext>    stagingContext;
     Vk::DeletionQueue                      deletionQueue;
@@ -628,6 +630,44 @@ struct RenderContext::Impl {
     mutable PendingAcquires pendingAcquires;
 
     GraphResources graphResources;
+
+    // Fixed-function scene viewport rectangle (framebuffer pixels, top-left
+    // origin). Width or height <= 1 means full frame. See RenderContext::SetViewport.
+    uint32_t viewportX = 0;
+    uint32_t viewportY = 0;
+    uint32_t viewportW = 0;
+    uint32_t viewportH = 0;
+
+    /// The scene viewport actually in effect: the stored rectangle clamped to
+    /// the framebuffer, or the full framebuffer when none is active. This is
+    /// the renderer's actual working form (VkViewport, 0..1 depth range --
+    /// the convention the pass recording uses); the public GetViewport maps
+    /// it back onto the API-neutral ViewportRect.
+    [[nodiscard]] constexpr auto EffectiveViewport() const noexcept -> VkViewport {
+        const auto& fb = graphResources.sceneColor.extent;
+        if (viewportW <= 1 || viewportH <= 1) {
+            return VkViewport {
+                .x        = 0.0F,
+                .y        = 0.0F,
+                .width    = static_cast<float>(fb.width),
+                .height   = static_cast<float>(fb.height),
+                .minDepth = 0.0F,
+                .maxDepth = 1.0F,
+            };
+        }
+        const uint32_t x = std::min<uint32_t>(viewportX, fb.width);
+        const uint32_t y = std::min<uint32_t>(viewportY, fb.height);
+        const uint32_t w = std::min<uint32_t>(viewportW, fb.width - x);
+        const uint32_t h = std::min<uint32_t>(viewportH, fb.height - y);
+        return VkViewport {
+            .x        = static_cast<float>(x),
+            .y        = static_cast<float>(y),
+            .width    = static_cast<float>(w),
+            .height   = static_cast<float>(h),
+            .minDepth = 0.0F,
+            .maxDepth = 1.0F,
+        };
+    }
 
     // ============================================================================
     // Bounded Substruct for Double-Buffered Resources (Reflection-Safe for Clangd)

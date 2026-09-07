@@ -40,6 +40,21 @@ inline constexpr float FarDepth   = 1000.0f;
 
 enum class RenderFrameResult : uint8_t { Success = 1, Suboptimal, OutOfDate, DeviceLost, Error };
 
+/// How finished frames reach a display, chosen once at device creation.
+/// Kept distinct from "headless" so a windowed session with no window-system
+/// integration (macOS has no native Vulkan WSI) does not masquerade as a
+/// CI run: headless stays true "no window, no presenter", and macOS
+/// windowed sessions present through the host-GL blit instead.
+enum class PresentationMode : uint8_t {
+    /// Standard Vulkan WSI: VkSurfaceKHR + VkSwapchainKHR.
+    NativeSwapchain,
+    /// Offscreen Vulkan render target copied out and blitted through the
+    /// HostBlit plugin's own OpenGL window (macOS).
+    HostBlit,
+    /// No window and no presenter at all: CI / servers / --headless.
+    OffscreenOnly,
+};
+
 using RenderResult = std::expected<void, Error>;
 
 struct PipelineDesc {
@@ -133,11 +148,32 @@ class ZHLN_API RenderContext {
 
     [[nodiscard]] RenderResult BeginFrame() noexcept;
     [[nodiscard]] RenderResult EndFrame() noexcept;
-    void                       BeginImGuiFrame() noexcept;
     void                       SetResolution(const Extent2D& resolution);
+
+    /// Sub-rectangle of the framebuffer the 3D scene renders into, in pixels
+    /// (top-left origin, like window coordinates). Applied as a fixed-function
+    /// viewport and scissor on the screen-space scene passes: nothing outside
+    /// the rectangle is rasterized. Attachment clears still cover the whole
+    /// target, so excluded regions stay clean. Width or height <= 1 restores
+    /// full-frame rendering; rectangles are clamped to the framebuffer.
+    /// The camera aspect, GPU culling screen space, and picking should all use
+    /// this rectangle -- see GetViewport.
+    struct ViewportRect {
+        uint32_t x      = 0;
+        uint32_t y      = 0;
+        uint32_t width  = 0;
+        uint32_t height = 0;
+    };
+
+    void                       SetViewport(const ViewportRect& rect) noexcept;
+    /// Effective scene viewport: the stored rectangle clamped to the
+    /// framebuffer, or {0, 0, framebuffer} when none is active.
+    [[nodiscard]] ViewportRect GetViewport() const noexcept;
     [[nodiscard]] const char*  GetRendererName() const;
     [[nodiscard]] const char*  GetGPUName() const;
     [[nodiscard]] uint32_t     GetFrameIndex() const noexcept;
+    /// How this context presents frames (see PresentationMode).
+    [[nodiscard]] PresentationMode GetPresentationMode() const noexcept;
 
     // --- High-Level Asset Resolution & GPU Cache API ---
     [[nodiscard]] std::optional<Mesh>     GetGPUMesh(AssetID id) const noexcept;

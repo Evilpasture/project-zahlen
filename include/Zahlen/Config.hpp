@@ -141,6 +141,12 @@ inline constexpr bool             isLinux      = false;
 inline constexpr bool             isMac        = false;
 #endif
 
+#if defined(ZHLN_PROJECT_ROOT)
+static constexpr std::string_view ProjectRoot = ZHLN_PROJECT_ROOT;
+#else
+static constexpr std::string_view ProjectRoot = "";
+#endif
+
 // --- ARCHITECTURE DETECTION ---
 #if defined(__x86_64__) || defined(_M_X64)
 inline constexpr std::string_view Architecture = "x86_64";

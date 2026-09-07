@@ -96,42 +96,42 @@ struct ClientHello {
 };
 
 struct ServerWelcome {
-    uint32_t serverTick ZHLN_ANNOTATION(ZHLN::Description<"Server simulation tick at handshake time"> {});
-    uint16_t realtimePort ZHLN_ANNOTATION(ZHLN::Description<"UDP port serving realtime physics and input traffic"> {});
+    uint32_t serverTick ZHLN_ANNOTATION(ZHLN::Description<"Server simulation tick at handshake time"> {}) = 0;
+    uint16_t realtimePort ZHLN_ANNOTATION(ZHLN::Description<"UDP port serving realtime physics and input traffic"> {}) = 0;
     uint8_t  tickRateHz ZHLN_ANNOTATION(ZHLN::Description<"Authoritative server tick rate in hertz"> {},
-                         = ZHLN::Wire::Range<1, 240> {});
+                         = ZHLN::Wire::Range<1, 240> {}) = 0;
 };
 
 struct ObjectSnapshot {
-    uint64_t  uid ZHLN_ANNOTATION(ZHLN::Description<"Server-assigned stable object identity"> {});
+    uint64_t  uid ZHLN_ANNOTATION(ZHLN::Description<"Server-assigned stable object identity"> {}) = 0;
     JPH::Vec3 position ZHLN_ANNOTATION(ZHLN::Description<"World-space position, quantized to 1/256 m"> {});
     JPH::Vec3 size ZHLN_ANNOTATION(ZHLN::Description<"Axis-aligned object extents, quantized to 1/256 m"> {});
 };
 
 struct ZHLN_ANNOTATION(ZHLN::Wire::Version<2> {}) InitialSnapshotMessage {
-    uint32_t                    serverTick ZHLN_ANNOTATION(ZHLN::Description<"Server simulation tick of this snapshot"> {});
+    uint32_t                    serverTick ZHLN_ANNOTATION(ZHLN::Description<"Server simulation tick of this snapshot"> {}) = 0;
     std::vector<ObjectSnapshot> objects ZHLN_ANNOTATION(ZHLN::Description<"Every replicated object in the world"> {});
 };
 
 struct PhysicsBodyState {
-    uint64_t  uid ZHLN_ANNOTATION(ZHLN::Description<"Server-assigned stable object identity"> {});
+    uint64_t  uid ZHLN_ANNOTATION(ZHLN::Description<"Server-assigned stable object identity"> {}) = 0;
     JPH::Vec3 position ZHLN_ANNOTATION(ZHLN::Description<"World-space position, quantized to 1/256 m"> {});
     JPH::Quat rotation ZHLN_ANNOTATION(ZHLN::Description<"Sign-canonical orientation, quantized to 1/32767 per component"> {});
     JPH::Vec3 velocity ZHLN_ANNOTATION(ZHLN::Description<"Linear velocity in metres per second"> {});
 };
 
 struct ZHLN_ANNOTATION(ZHLN::Wire::Version<2> {}) PhysicsBatchMessage {
-    uint32_t                      serverTick ZHLN_ANNOTATION(ZHLN::Description<"Server simulation tick of this batch"> {});
+    uint32_t                      serverTick ZHLN_ANNOTATION(ZHLN::Description<"Server simulation tick of this batch"> {}) = 0;
     std::vector<PhysicsBodyState> bodies ZHLN_ANNOTATION(ZHLN::Description<"One entry per moving replicated body"> {});
 };
 
 struct ClientInputMessage {
-    uint64_t userId ZHLN_ANNOTATION(ZHLN::Description<"Player identity issued by the server operator"> {});
-    uint32_t sequence ZHLN_ANNOTATION(ZHLN::Description<"Monotonically increasing input counter"> {});
+    uint64_t userId ZHLN_ANNOTATION(ZHLN::Description<"Player identity issued by the server operator"> {}) = 0;
+    uint32_t sequence ZHLN_ANNOTATION(ZHLN::Description<"Monotonically increasing input counter"> {}) = 0;
     uint8_t  moveFlags ZHLN_ANNOTATION(ZHLN::Description<"Movement bitfield: 1=forward 2=backward 4=left 8=right 16=jump"> {},
-                        = ZHLN::Wire::Range<0, 31> {});
+                        = ZHLN::Wire::Range<0, 31> {}) = 0;
     float    yaw ZHLN_ANNOTATION(ZHLN::Description<"Camera yaw in degrees, clockwise positive"> {},
-               = ZHLN::Wire::Range<-1000.0f, 1000.0f> {});
+               = ZHLN::Wire::Range<-1000.0f, 1000.0f> {}) = 0.0f;
 };
 
 // ============================================================================

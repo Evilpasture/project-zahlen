@@ -108,6 +108,12 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniform
 
     VkExtent2D res    = _impl->graphResources.sceneColor.extent;
     float      aspect = (res.height > 0) ? static_cast<float>(res.width) / res.height : 1.777f;
+    // invProj must match how the scene geometry was rasterized: when a
+    // sub-region viewport is active the scene camera renders into that
+    // rectangle, so its projection aspect -- and anything unprojecting from
+    // scene NDC -- has to be the viewport's, not the framebuffer's.
+    const auto sceneVp = _impl->EffectiveViewport();
+    const float vpAspect = (sceneVp.height > 0.0F) ? sceneVp.width / sceneVp.height : aspect;
 
     std::array<float, 4> cascadeSplits {};
     cascadeSplits[0] = cam.nearZ + (cam.farZ - cam.nearZ) * 0.08f;
@@ -121,7 +127,7 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniform
 
     JPH::Mat44 viewmodelProj      = Math::CreatePerspective(JPH::DegreesToRadians(58.0f), aspect, cam.nearZ, cam.farZ);
     gpuUniforms.viewmodelViewProj = viewmodelProj * cam.GetViewMatrix();
-    gpuUniforms.invProj           = cam.GetProjectionMatrix(aspect).Inversed();
+    gpuUniforms.invProj           = cam.GetProjectionMatrix(vpAspect).Inversed();
 
     std::memcpy(gpuUniforms.cascadeSplits, cascadeSplits.data(), sizeof(float) * 4);
     std::memcpy(gpuUniforms.sh, _impl->iblPayload.shCoeffs.data(), sizeof(JPH::Vec4) * 9);

@@ -14,9 +14,12 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/gui/UIComponents.hpp>
 #include <algorithm>
+#include <array>
 #include <clay.h>
 #include <cmath>
 #include <cstdio>
+#include <deque>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -29,6 +32,11 @@ struct WidgetState {
     bool     isOpen          = false;
     bool     isInitialized   = false;
     uint64_t lastActiveFrame = 0;
+    // Text fields keep their caret here rather than in the caller's string, so
+    // a TextInput stays a plain `gui.TextInput("Name", str)` at the call site.
+    TextEdit::Caret caret    = {};
+    // Keyboard highlight for an open Dropdown, in option indices.
+    int32_t         highlightIndex = 0;
 };
 
 // ============================================================================
@@ -49,6 +57,71 @@ struct Context::Impl {
     bool                                 lastItemHovered = false;
     bool                                 lastItemActive  = false;
     bool                                 inLayout        = false;
+
+    // --- Text input ---
+    // State key of the field that currently holds focus; 0 means none. Only one
+    // field is focused at a time, which is what lets a click on any field
+    // defocus the previous one without a focus manager.
+    uint64_t focusedTextInput = 0;
+    // State key of the open Dropdown, or 0. One at a time, which is what lets a
+    // click anywhere close it without a separate dismiss layer.
+    uint64_t openDropdown     = 0;
+    // Ctrl+C/X/V plumbing, installed by the front end (the engine wires it to
+    // Window's clipboard). Empty means those three keys do nothing.
+    TextEdit::ClipboardSink clipboard = {};
+
+    // --- String interning ---------------------------------------------------
+    // Widget labels routinely arrive as temporaries: a FormatTo into a stack
+    // array, a view into a stack copy of a component. Clay stores only the
+    // pointer and dereferences it in EndFrameAndRender, after the caller that
+    // owned the bytes has returned -- the dangling read showed up on screen as
+    // runs of '?' because MeasureText maps bytes outside 32..127 to '?'.
+    // Every string handed to Clay is therefore copied in on the way through,
+    // and the arena is dropped at the top of the next BeginFrame, by which time
+    // the previous frame's render commands have all been consumed. Each interned
+    // string needs its OWN contiguous buffer: a flat std::deque<char> keeps
+    // element pointers stable but stores bytes in 4096-byte chunks, so a label
+    // straddling a chunk boundary handed Clay a chars pointer whose read runs
+    // off the end of the block (ASan heap-buffer-overflow in Clay's hasher).
+    // std::deque<std::string> gives both properties: emplace_back never moves
+    // an already-constructed element, and each std::string owns contiguous bytes.
+    std::deque<std::string> stringArena;
+
+    auto Intern(std::string_view sv) -> Clay_String {
+        auto& stored = stringArena.emplace_back(sv);
+        stored.push_back('\0');
+        return Clay_String {.isStaticallyAllocated = false, .length = static_cast<int32_t>(sv.size()), .chars = stored.data()};
+    }
+
+    // Characters and editing keys arrive from the window between frames, not
+    // through InputStateComponent, which only tracks held-down state. They
+    // queue here, are drained by whichever field is focused during the next
+    // frame, and whatever is left is dropped at the end of it so a keypress can
+    // never leak into a field focused later. Fixed size: a key repeat cannot
+    // outrun a frame by more than a handful of events, and growing here would
+    // put an allocation in the input path.
+    struct PendingEvent {
+        bool     isChar    = false;
+        uint32_t key       = 0;
+        uint32_t codepoint = 0;
+        // Set by the widget that acted on it. Without this a frame that draws
+        // both a focused text field and an open dropdown would apply the same
+        // Enter to both -- committing the field and closing the list.
+        bool     consumed  = false;
+    };
+    static constexpr size_t                             kMaxPendingEvents = 64;
+    std::array<PendingEvent, kMaxPendingEvents>          pendingEvents     = {};
+    size_t                                               pendingEventCount = 0;
+
+    void QueueEvent(const PendingEvent& ev) noexcept {
+        if (pendingEventCount < kMaxPendingEvents) {
+            pendingEvents[pendingEventCount++] = ev;
+        }
+    }
+
+    void ClearPendingEvents() noexcept {
+        pendingEventCount = 0;
+    }
 
     explicit Impl(ECS::Registry& reg, Extent2D vp = {1920, 1080}, Engine* eng = nullptr) noexcept
         : registry(reg), viewport(vp), engine(eng) {
@@ -118,10 +191,6 @@ struct Context::Impl {
 };
 
 namespace {
-
-constexpr Clay_String ToClayString(std::string_view sv) noexcept {
-    return Clay_String {.isStaticallyAllocated = false, .length = static_cast<int32_t>(sv.size()), .chars = sv.data()};
-}
 
 Clay_SizingAxis ToClaySizing(const Sizing& s) noexcept {
     if (s.fixed > 0.0f)
@@ -204,6 +273,7 @@ Context::~Context() noexcept = default;
 
 void Context::BeginFrame(float dt) noexcept {
     _impl->currentFrame++;
+    _impl->stringArena.clear();
     _impl->lastDt    = dt;
     Extent2D winSize = _impl->viewport;
     if (_impl->engine) {
@@ -211,6 +281,21 @@ void Context::BeginFrame(float dt) noexcept {
     }
     auto* input    = _impl->registry.GetSingleton<Components::InputStateComponent>();
     auto* settings = _impl->registry.GetSingleton<UIComponents::UISettingsComponent>();
+
+    // Fold whatever the window's event pump queued since the last frame into
+    // this Context's own queue, so hardware input and PushKey/PushChar (tests,
+    // headless hosts) converge on the one mechanism TextInput consumes.
+    if (input != nullptr && input->queuedInputCount > 0) {
+        for (size_t i = 0; i < input->queuedInputCount; ++i) {
+            const auto& queued = input->queuedInput[i];
+            if (queued.isChar) {
+                _impl->QueueEvent(Impl::PendingEvent {.isChar = true, .key = 0, .codepoint = queued.value});
+            } else {
+                _impl->QueueEvent(Impl::PendingEvent {.isChar = false, .key = queued.value, .codepoint = 0});
+            }
+        }
+        input->ClearQueuedInput();
+    }
 
     if (settings && settings->fontAtlas.glyphs[0].xadvance > 0.0f) {
         _impl->activeFont = &settings->fontAtlas;
@@ -258,6 +343,7 @@ void Context::EndFrame() noexcept {
     Clay_SetCurrentContext(_impl->clayContext);
     Clay_EndLayout(_impl->lastDt);
     _impl->inLayout = false;
+    _impl->ClearPendingEvents();
 }
 
 void Context::EndFrameAndRender(RenderContext& rc) noexcept {
@@ -266,6 +352,7 @@ void Context::EndFrameAndRender(RenderContext& rc) noexcept {
     Clay_SetCurrentContext(_impl->clayContext);
     Clay_RenderCommandArray commands = Clay_EndLayout(_impl->lastDt);
     _impl->inLayout = false;
+    _impl->ClearPendingEvents();
     if (commands.length == 0 || !_impl->activeFont)
         return;
 
@@ -391,7 +478,7 @@ void Context::BeginBox(std::string_view id, const BoxConfig& cfg) noexcept {
 
     if (!id.empty()) {
         uint32_t       numId  = static_cast<uint32_t>(HashCreativeWorkPath(id));
-        Clay_ElementId elemId = Clay_GetElementIdWithIndex(ToClayString(id), numId);
+        Clay_ElementId elemId = Clay_GetElementIdWithIndex(_impl->Intern(id), numId);
         Clay__OpenElementWithId(elemId);
     } else {
         Clay__OpenElement();
@@ -428,14 +515,14 @@ void Context::EndColumn() noexcept {
 void Context::Text(std::string_view text, float fontSize, const JPH::Vec4& color) noexcept {
     Clay_SetCurrentContext(_impl->clayContext);
     Clay_TextElementConfig config = {.textColor = ToClayColor(color), .fontSize = static_cast<uint16_t>(fontSize)};
-    Clay__OpenTextElement(ToClayString(text), config);
+    Clay__OpenTextElement(_impl->Intern(text), config);
 }
 
 bool Context::Button(std::string_view label, const JPH::Vec4& color, const Sizing& width) noexcept {
     Clay_SetCurrentContext(_impl->clayContext);
     bool           clicked = false;
     uint32_t       idNum   = static_cast<uint32_t>(HashCreativeWorkPath(label));
-    Clay_ElementId elemId  = Clay_GetElementIdWithIndex(ToClayString(label), idNum);
+    Clay_ElementId elemId  = Clay_GetElementIdWithIndex(_impl->Intern(label), idNum);
     auto&          state   = _impl->GetState((static_cast<uint64_t>(idNum) << 32) | 0xB007, _impl->currentFrame);
 
     auto* input = _impl->registry.GetSingleton<Components::InputStateComponent>();
@@ -484,6 +571,30 @@ bool Context::IsItemHovered() const noexcept {
     return _impl ? _impl->lastItemHovered : false;
 }
 
+auto Context::GetLastFrameRect(std::string_view id) const noexcept -> std::optional<ElementRect> {
+    // Unlike the widget methods, this getter is designed to be called OUTSIDE
+    // a layout pass -- the editor reads panel rects before its first
+    // BeginFrame, when the (lazily created) Clay context does not exist yet
+    // and Clay's current-context pointer is null. No context means there is
+    // no last-frame data to read; anything else must not touch Clay.
+    if (!_impl || !_impl->clayContext) {
+        return std::nullopt;
+    }
+    Clay_SetCurrentContext(_impl->clayContext);
+
+    // Same element-id recipe as every widget above (hash the path, index the
+    // string), so the id a Box was opened with resolves here. The string only
+    // feeds the hash -- no interning needed for a read.
+    Clay_String cs {};
+    cs.length = static_cast<int32_t>(id.size());
+    cs.chars  = id.data();
+    const Clay_ElementData data = Clay_GetElementData(Clay_GetElementIdWithIndex(cs, static_cast<uint32_t>(HashCreativeWorkPath(id))));
+    if (!data.found) {
+        return std::nullopt;
+    }
+    return ElementRect {data.boundingBox.x, data.boundingBox.y, data.boundingBox.width, data.boundingBox.height};
+}
+
 bool Context::IsItemActive() const noexcept {
     return _impl ? _impl->lastItemActive : false;
 }
@@ -492,7 +603,7 @@ bool Context::Checkbox(std::string_view label, bool& checked) noexcept {
     Clay_SetCurrentContext(_impl->clayContext);
     bool           changed = false;
     uint32_t       idNum   = static_cast<uint32_t>(HashCreativeWorkPath(label));
-    Clay_ElementId elemId  = Clay_GetElementIdWithIndex(ToClayString("cb"), idNum);
+    Clay_ElementId elemId  = Clay_GetElementIdWithIndex(_impl->Intern("cb"), idNum);
     auto&          state   = _impl->GetState((static_cast<uint64_t>(idNum) << 32) | 0x00CB, _impl->currentFrame);
 
     auto* input = _impl->registry.GetSingleton<Components::InputStateComponent>();
@@ -555,7 +666,7 @@ bool Context::Slider(std::string_view label, float& value, float minVal, float m
     Clay_SetCurrentContext(_impl->clayContext);
     bool           changed = false;
     uint32_t       idNum   = static_cast<uint32_t>(HashCreativeWorkPath(label));
-    Clay_ElementId elemId  = Clay_GetElementIdWithIndex(ToClayString(label), idNum);
+    Clay_ElementId elemId  = Clay_GetElementIdWithIndex(_impl->Intern(label), idNum);
 
     uint64_t stateKey = (static_cast<uint64_t>(idNum) << 32) | 0x511D;
     auto&    state    = _impl->GetState(stateKey, _impl->currentFrame);
@@ -630,10 +741,484 @@ bool Context::Slider(std::string_view label, float& value, float minVal, float m
     return changed;
 }
 
+// --- Text Input ---
+
+namespace {
+
+// Field geometry, in pixels. The caret is placed by measuring prefixes at this
+// size, so it has to stay in step with the size Text() is called with below.
+constexpr float kTextInputFontSize = 15.0f;
+constexpr float kTextInputPadding  = 4.0f;
+constexpr float kTextInputHeight   = 24.0f;
+constexpr float kTextInputWidth    = 180.0f;
+
+// Dropdown geometry. The list floats at kDropdownListOffset from the field, and
+// both the drawing and the hit-testing below derive row rectangles from that
+// same arithmetic -- no per-row Clay elements, so no per-row ids whose
+// Clay_String would have to outlive the layout pass.
+constexpr float kDropdownHeight      = 24.0f;
+constexpr float kDropdownWidth       = 160.0f;
+constexpr float kDropdownRowHeight   = 20.0f;
+constexpr float kDropdownListOffset  = 2.0f;
+constexpr int   kDropdownMaxVisible  = 8;
+
+/// How far the pen moves for one glyph, matching Impl::MeasureText so the caret
+/// lands where the text is actually drawn.
+///
+/// MeasureTextBounds is the wrong tool for this: it returns the ink bounding box
+/// (maxX - minX), not the pen advance, so it under-measures proportional fonts
+/// and measures zero for any atlas whose glyph rects are unset even though the
+/// advances are fine -- which is exactly the fallback atlas.
+[[nodiscard]] inline float GlyphAdvance(const FontAtlas& font, char c, float scale) noexcept {
+    uint32_t glyphCode = static_cast<uint8_t>(c);
+    if (glyphCode < 32 || glyphCode > 127) {
+        glyphCode = '?';
+    }
+    return font.glyphs[glyphCode - 32].xadvance * scale;
+}
+
+/// Byte offset whose glyph boundary is nearest to `localX` pixels into `text`.
+[[nodiscard]] inline size_t CaretIndexAtX(const FontAtlas& font, std::string_view text, float localX, float scale) noexcept {
+    float  pen = 0.0f;
+    size_t idx = 0;
+    while (idx < text.size()) {
+        const float advance = GlyphAdvance(font, text[idx], scale);
+        if (pen + advance * 0.5f > localX) {
+            break;
+        }
+        pen += advance;
+        ++idx;
+    }
+    return idx;
+}
+
+} // namespace
+
+bool Context::TextInputImpl(std::string_view label, std::string& value, size_t maxTextLength, const Sizing& width) noexcept {
+    Clay_SetCurrentContext(_impl->clayContext);
+
+    uint32_t       idNum   = static_cast<uint32_t>(HashCreativeWorkPath(label));
+    Clay_ElementId elemId  = Clay_GetElementIdWithIndex(_impl->Intern(label), idNum);
+    const uint64_t stateKey = (static_cast<uint64_t>(idNum) << 32) | 0x7E17;
+    auto&          state   = _impl->GetState(stateKey, _impl->currentFrame);
+
+    auto* input = _impl->registry.GetSingleton<Components::InputStateComponent>();
+    float mx    = input ? input->mouseX : -1.0f;
+    float my    = input ? input->mouseY : -1.0f;
+
+    // The caller owns the string and may have reassigned it since the last
+    // frame; a caret left outside the text would make every offset below wrong.
+    state.caret.cursorIndex     = static_cast<uint32_t>(std::min<size_t>(state.caret.cursorIndex, value.size()));
+    state.caret.selectionAnchor = static_cast<uint32_t>(std::min<size_t>(state.caret.selectionAnchor, value.size()));
+
+    bool changed = false;
+
+    BeginRow(8.0f);
+    Text(label, 15.0f, {0.9f, 0.9f, 0.9f, 1.0f});
+
+    Clay__OpenElementWithId(elemId);
+
+    Clay_ElementData elemData = Clay_GetElementData(elemId);
+    bool isHovered = Clay_Hovered() || Clay_PointerOver(elemId) ||
+                     (elemData.found && elemData.boundingBox.width > 0.0f &&
+                      mx >= elemData.boundingBox.x && mx <= (elemData.boundingBox.x + elemData.boundingBox.width) &&
+                      my >= elemData.boundingBox.y && my <= (elemData.boundingBox.y + elemData.boundingBox.height));
+
+    auto       pointer          = Clay_GetPointerState();
+    const bool pressedThisFrame = (pointer.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME);
+    const bool wasFocused       = (_impl->focusedTextInput == stateKey);
+    bool       isFocused        = wasFocused;
+
+    if (pressedThisFrame) {
+        // Whichever field the click lands on takes focus. A field that was
+        // focused and was not clicked gives it up, and does so without
+        // clobbering a focus another field has already claimed this frame --
+        // draw order is not knowable here, so the claim is only ever written by
+        // the field that was actually hit.
+        if (isHovered) {
+            isFocused                 = true;
+            _impl->focusedTextInput   = stateKey;
+            state.caret.selectAll     = false;
+            // Place the caret where the click landed: walk prefixes until the
+            // measured width passes the click, which is the same measurement
+            // the layout used, so the bar sits where the glyphs are.
+            if (elemData.found && _impl->activeFont != nullptr) {
+                const float scale  = kTextInputFontSize / 32.0f;
+                const float localX = std::max(0.0f, mx - (elemData.boundingBox.x + kTextInputPadding));
+                state.caret.cursorIndex =
+                    static_cast<uint32_t>(CaretIndexAtX(*_impl->activeFont, std::string_view(value), localX, scale));
+            }
+            state.caret.ClearSelection();
+        } else {
+            isFocused = false;
+            if (_impl->focusedTextInput == stateKey) {
+                _impl->focusedTextInput = 0;
+            }
+        }
+    }
+
+    // Drain the events the window delivered since the last frame. Only the
+    // focused field consumes them; EndFrame drops whatever nobody took.
+    if (isFocused && _impl->pendingEventCount > 0) {
+        TextEdit::Modifiers mods {};
+        if (input != nullptr) {
+            mods.shift = input->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::LShift)) ||
+                         input->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::RShift));
+            mods.ctrl  = input->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::LControl)) ||
+                         input->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::RControl));
+        }
+        // Edited through a bounded view so a fixed-capacity caller's limit
+        // shortens the paste instead of the assign eating the buffer's tail.
+        TextEdit::BoundedString buf {&value, maxTextLength};
+        for (size_t i = 0; i < _impl->pendingEventCount; ++i) {
+            auto& ev = _impl->pendingEvents[i];
+            if (ev.consumed) {
+                continue;
+            }
+            ev.consumed = true;
+            if (ev.isChar) {
+                if (TextEdit::HandleChar(buf, state.caret, ev.codepoint)) {
+                    changed = true;
+                }
+                continue;
+            }
+            const auto result = TextEdit::HandleKey(buf, state.caret, static_cast<KeyCode>(ev.key), mods, _impl->clipboard);
+            if (result == TextEdit::KeyResult::Edited) {
+                changed = true;
+            }
+            if (result == TextEdit::KeyResult::Committed) {
+                isFocused               = false;
+                _impl->focusedTextInput = 0;
+            }
+        }
+    }
+
+    _impl->lastItemHovered = isHovered;
+    _impl->lastItemActive  = isFocused;
+
+    const float fieldWidth = (width.fixed > 0.0f) ? width.fixed : kTextInputWidth;
+    Clay_ElementDeclaration fieldDecl = {
+        .layout =
+            {.sizing =
+                 {.width  = (width.grow > 0.0f) ? CLAY_SIZING_GROW(width.grow) : CLAY_SIZING_FIXED(fieldWidth),
+                  .height = CLAY_SIZING_FIXED(kTextInputHeight)},
+             .padding        = {static_cast<uint16_t>(kTextInputPadding), static_cast<uint16_t>(kTextInputPadding),
+                                static_cast<uint16_t>(kTextInputPadding), static_cast<uint16_t>(kTextInputPadding)},
+             .childAlignment = {.x = CLAY_ALIGN_X_LEFT, .y = CLAY_ALIGN_Y_CENTER}},
+        .backgroundColor = isFocused ? Clay_Color {40, 56, 80, 255} : Clay_Color {25, 35, 50, 255},
+        .cornerRadius    = {4, 4, 4, 4}
+    };
+    Clay__ConfigureOpenElement(fieldDecl);
+
+    // Draw the text in up to three runs (before / selected / after) with the
+    // caret bar spliced in at the caret, so selection and caret are visible
+    // without a floating overlay layer.
+    const auto   all       = std::string_view(value);
+    const bool   hasSel    = state.caret.HasSelection();
+    const size_t selStart  = hasSel ? state.caret.SelectionStart() : all.size();
+    const size_t selEnd    = hasSel ? state.caret.SelectionEnd(all.size()) : all.size();
+    const size_t caretIdx  = std::min<size_t>(state.caret.cursorIndex, all.size());
+
+    const JPH::Vec4 plainColor    {0.9f, 0.9f, 0.9f, 1.0f};
+    const JPH::Vec4 selectedColor {1.0f, 1.0f, 1.0f, 1.0f};
+
+    size_t emitted    = 0;
+    bool   caretDrawn = false;
+
+    auto drawCaret = [&]() -> void {
+        if (!isFocused || caretDrawn) {
+            return;
+        }
+        caretDrawn = true;
+        Clay__OpenElement();
+        Clay_ElementDeclaration caretDecl = {
+            .layout          = {.sizing = {.width = CLAY_SIZING_FIXED(1), .height = CLAY_SIZING_FIXED(kTextInputFontSize + 2.0f)}},
+            .backgroundColor = {230, 230, 230, 255}
+        };
+        Clay__ConfigureOpenElement(caretDecl);
+        Clay__CloseElement();
+    };
+
+    auto emitRun = [&](size_t from, size_t to, const JPH::Vec4& color) -> void {
+        if (from >= to) {
+            return;
+        }
+        // Split this run at the caret when the caret falls strictly inside it.
+        const size_t split = (caretIdx > emitted && caretIdx <= to) ? caretIdx : to;
+        Text(all.substr(from, split - from), kTextInputFontSize, color);
+        if (split < to) {
+            drawCaret();
+            Text(all.substr(split, to - split), kTextInputFontSize, color);
+        } else if (caretIdx == to) {
+            drawCaret();
+        }
+        emitted = to;
+    };
+
+    if (caretIdx == 0) {
+        drawCaret();
+    }
+    if (hasSel) {
+        emitRun(0, selStart, plainColor);
+        emitRun(selStart, selEnd, selectedColor);
+        emitRun(selEnd, all.size(), plainColor);
+    } else {
+        emitRun(0, all.size(), plainColor);
+    }
+    drawCaret(); // Caret at the end, or an empty field. No-op once drawn.
+
+    Clay__CloseElement(); // field
+    EndRow();
+    return changed;
+}
+
+bool Context::TextInput(std::string_view label, std::string& value, const Sizing& width) noexcept {
+    return TextInputImpl(label, value, std::numeric_limits<size_t>::max(), width);
+}
+
+void Context::PushKey(KeyCode key, bool pressed) noexcept {
+    if (!_impl || !pressed) {
+        return; // The editing rules act on presses and repeats, not releases.
+    }
+    _impl->QueueEvent({.isChar = false, .key = static_cast<uint32_t>(key), .codepoint = 0});
+}
+
+void Context::PushChar(unsigned int codepoint) noexcept {
+    if (!_impl) {
+        return;
+    }
+    _impl->QueueEvent({.isChar = true, .key = 0, .codepoint = codepoint});
+}
+
+void Context::SetClipboard(TextEdit::ClipboardSink sink) noexcept {
+    if (_impl) {
+        _impl->clipboard = sink;
+    }
+}
+
+bool Context::IsTextInputFocused() const noexcept {
+    return _impl && _impl->focusedTextInput != 0;
+}
+
+// --- Dropdown ---
+
+bool Context::Dropdown(
+    std::string_view label, std::span<const std::string_view> options, int& selected, const Sizing& width
+) noexcept {
+    Clay_SetCurrentContext(_impl->clayContext);
+
+    const int optionCount = static_cast<int>(options.size());
+
+    BeginRow(8.0f);
+    Text(label, 15.0f, {0.9f, 0.9f, 0.9f, 1.0f});
+
+    if (optionCount == 0) {
+        // Nothing to choose from. Still draw something so the row does not
+        // silently vanish from the panel when an enum has no enumerators.
+        Text("(no options)", 14.0f, {0.5f, 0.5f, 0.5f, 1.0f});
+        EndRow();
+        _impl->lastItemHovered = false;
+        _impl->lastItemActive  = false;
+        return false;
+    }
+
+    uint32_t       idNum    = static_cast<uint32_t>(HashCreativeWorkPath(label));
+    Clay_ElementId elemId   = Clay_GetElementIdWithIndex(_impl->Intern(label), idNum);
+    const uint64_t stateKey = (static_cast<uint64_t>(idNum) << 32) | 0xD209;
+    auto&          state    = _impl->GetState(stateKey, _impl->currentFrame);
+
+    auto* input = _impl->registry.GetSingleton<Components::InputStateComponent>();
+    float mx    = input ? input->mouseX : -1.0f;
+    float my    = input ? input->mouseY : -1.0f;
+
+    // The caller owns the index, so it can arrive out of range -- a shrunk enum
+    // or an uninitialised field. Clamp before anything indexes with it.
+    selected               = std::clamp(selected, 0, optionCount - 1);
+    state.highlightIndex   = std::clamp(state.highlightIndex, 0, optionCount - 1);
+
+    const float fieldWidth = (width.fixed > 0.0f) ? width.fixed : kDropdownWidth;
+    bool        changed    = false;
+
+    const bool wasOpen = (_impl->openDropdown == stateKey);
+    bool       isOpen  = wasOpen;
+
+    Clay__OpenElementWithId(elemId);
+
+    Clay_ElementData elemData = Clay_GetElementData(elemId);
+    bool isHovered = Clay_Hovered() || Clay_PointerOver(elemId) ||
+                     (elemData.found && elemData.boundingBox.width > 0.0f &&
+                      mx >= elemData.boundingBox.x && mx <= (elemData.boundingBox.x + elemData.boundingBox.width) &&
+                      my >= elemData.boundingBox.y && my <= (elemData.boundingBox.y + elemData.boundingBox.height));
+
+    auto       pointer          = Clay_GetPointerState();
+    const bool pressedThisFrame = (pointer.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME);
+
+    // Rows are windowed so a long enum (KeyCode has 72) does not produce a list
+    // taller than the window, with the highlight kept in view.
+    const int visibleCount = std::min(optionCount, kDropdownMaxVisible);
+    const int windowStart  = (optionCount <= kDropdownMaxVisible)
+                                 ? 0
+                                 : std::clamp(state.highlightIndex - kDropdownMaxVisible / 2, 0, optionCount - visibleCount);
+
+    // Row rectangles come from the field's box plus the same offsets the
+    // floating list is drawn with. Clay reports last frame's layout, which is
+    // exactly what hit-testing needs.
+    // The list opens downward unless it does not fit: a dropdown near the
+    // bottom of the viewport (the inspector's Add Component) would otherwise
+    // put every row off-screen. In that case it flips upward when the room
+    // above is at least the room below.
+    const float listX      = elemData.boundingBox.x;
+    const float listHeight = static_cast<float>(visibleCount) * kDropdownRowHeight;
+    const float spaceBelow = Clay_GetLayoutDimensions().height - (elemData.boundingBox.y + elemData.boundingBox.height);
+    const bool  openUpward = spaceBelow < listHeight + kDropdownListOffset && elemData.boundingBox.y >= spaceBelow;
+    const float listY      = openUpward ? elemData.boundingBox.y - kDropdownListOffset - listHeight
+                                        : elemData.boundingBox.y + elemData.boundingBox.height + kDropdownListOffset;
+    auto rowUnderPointer = [&](int optionIndex) -> bool {
+        if (!elemData.found) {
+            return false;
+        }
+        const float top = listY + static_cast<float>(optionIndex - windowStart) * kDropdownRowHeight;
+        return mx >= listX && mx <= listX + fieldWidth && my >= top && my <= top + kDropdownRowHeight;
+    };
+
+    // Option hit-testing must run before the field decides what the click meant:
+    // the list floats outside the field's box, so a click on a row is a click
+    // outside the field, and the field would otherwise close the list on the
+    // same frame the row was chosen.
+    int hitOption = -1;
+    if (wasOpen && pressedThisFrame) {
+        for (int i = windowStart; i < windowStart + visibleCount; ++i) {
+            if (rowUnderPointer(i)) {
+                hitOption = i;
+                break;
+            }
+        }
+    }
+
+    if (hitOption >= 0) {
+        if (selected != hitOption) {
+            selected = hitOption;
+            changed  = true;
+        }
+        state.highlightIndex = hitOption;
+        isOpen               = false;
+        _impl->openDropdown  = 0;
+    } else if (pressedThisFrame) {
+        if (isHovered) {
+            isOpen              = !wasOpen;
+            _impl->openDropdown = isOpen ? stateKey : 0;
+            if (isOpen) {
+                state.highlightIndex = selected;
+            }
+        } else if (wasOpen) {
+            isOpen              = false;
+            _impl->openDropdown = 0;
+        }
+    }
+
+    // Keyboard, for the open list only. Events another widget already claimed
+    // are skipped, so a focused text field and an open dropdown cannot both act
+    // on one Enter.
+    if (isOpen) {
+        for (size_t i = 0; i < _impl->pendingEventCount; ++i) {
+            auto& ev = _impl->pendingEvents[i];
+            if (ev.isChar || ev.consumed) {
+                continue;
+            }
+            switch (static_cast<KeyCode>(ev.key)) {
+                case KeyCode::Up:
+                    state.highlightIndex = (state.highlightIndex + optionCount - 1) % optionCount;
+                    ev.consumed          = true;
+                    break;
+                case KeyCode::Down:
+                    state.highlightIndex = (state.highlightIndex + 1) % optionCount;
+                    ev.consumed          = true;
+                    break;
+                case KeyCode::Enter:
+                    if (selected != state.highlightIndex) {
+                        selected = state.highlightIndex;
+                        changed  = true;
+                    }
+                    isOpen              = false;
+                    _impl->openDropdown = 0;
+                    ev.consumed         = true;
+                    break;
+                case KeyCode::Escape:
+                    isOpen              = false;
+                    _impl->openDropdown = 0;
+                    ev.consumed         = true;
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+
+    _impl->lastItemHovered = isHovered;
+    _impl->lastItemActive  = isOpen;
+
+    Clay_ElementDeclaration fieldDecl = {
+        .layout =
+            {.sizing =
+                 {.width  = (width.grow > 0.0f) ? CLAY_SIZING_GROW(width.grow) : CLAY_SIZING_FIXED(fieldWidth),
+                  .height = CLAY_SIZING_FIXED(kDropdownHeight)},
+             .padding        = {4, 4, 4, 4},
+             .childAlignment = {.x = CLAY_ALIGN_X_LEFT, .y = CLAY_ALIGN_Y_CENTER}},
+        .backgroundColor = (isHovered || isOpen) ? Clay_Color {55, 75, 105, 255} : Clay_Color {25, 35, 50, 255},
+        .cornerRadius    = {4, 4, 4, 4}
+    };
+    Clay__ConfigureOpenElement(fieldDecl);
+
+    Text(options[static_cast<size_t>(selected)], 14.0f, {0.9f, 0.9f, 0.9f, 1.0f});
+
+    if (isOpen) {
+        // A child of the field, but floating: it layers over what is below
+        // without changing the field's own size or the panel's layout.
+        Clay__OpenElement();
+        Clay_ElementDeclaration listDecl = {
+            .layout =
+                {.sizing = {.width = CLAY_SIZING_FIXED(fieldWidth), .height = CLAY_SIZING_FIXED(static_cast<float>(visibleCount) * kDropdownRowHeight)},
+                 .childGap        = 0,
+                 .layoutDirection = CLAY_TOP_TO_BOTTOM},
+            .backgroundColor = Clay_Color {20, 28, 40, 250},
+            .cornerRadius    = {4, 4, 4, 4},
+            .floating        =
+                {.offset       = {0.0f, openUpward ? -kDropdownListOffset : kDropdownListOffset},
+                 .zIndex       = 100,
+                 .attachPoints = openUpward
+                                     ? Clay_FloatingAttachPoints {.element = CLAY_ATTACH_POINT_LEFT_BOTTOM, .parent = CLAY_ATTACH_POINT_LEFT_TOP}
+                                     : Clay_FloatingAttachPoints {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_BOTTOM},
+                 .attachTo     = CLAY_ATTACH_TO_PARENT}
+        };
+        Clay__ConfigureOpenElement(listDecl);
+
+        for (int i = windowStart; i < windowStart + visibleCount; ++i) {
+            const bool hot = (i == hitOption) || rowUnderPointer(i) || (i == state.highlightIndex);
+            Clay__OpenElement();
+            Clay_ElementDeclaration rowDecl = {
+                .layout =
+                    {.sizing = {.width = CLAY_SIZING_GROW(), .height = CLAY_SIZING_FIXED(kDropdownRowHeight)},
+                     .padding        = {4, 2, 4, 2},
+                     .childAlignment = {.x = CLAY_ALIGN_X_LEFT, .y = CLAY_ALIGN_Y_CENTER}},
+                .backgroundColor = hot ? Clay_Color {70, 100, 140, 255} : Clay_Color {0, 0, 0, 0}
+            };
+            Clay__ConfigureOpenElement(rowDecl);
+            Text(options[static_cast<size_t>(i)], 14.0f, (i == selected) ? JPH::Vec4 {1.0f, 1.0f, 1.0f, 1.0f} : JPH::Vec4 {0.8f, 0.8f, 0.8f, 1.0f});
+            Clay__CloseElement();
+        }
+
+        Clay__CloseElement(); // list
+    }
+
+    Clay__CloseElement(); // field
+    EndRow();
+    return changed;
+}
+
 bool Context::BeginCollapsingHeader(std::string_view label, bool defaultOpen) noexcept {
     Clay_SetCurrentContext(_impl->clayContext);
     uint32_t       idNum  = static_cast<uint32_t>(HashCreativeWorkPath(label));
-    Clay_ElementId elemId = Clay_GetElementIdWithIndex(ToClayString(label), idNum);
+    Clay_ElementId elemId = Clay_GetElementIdWithIndex(_impl->Intern(label), idNum);
 
     uint64_t stateKey = (static_cast<uint64_t>(idNum) << 32) | 0xC011;
     auto&    state    = _impl->GetState(stateKey, _impl->currentFrame);
