@@ -94,11 +94,17 @@ struct PhysicsTestSuite {
             ZHLN::Test::ExpectTrue(hit.hasHit);
             ZHLN::Test::ExpectTrue(hit.position.GetY() < 10.0f); // Top surface fell below 10.0m
 
-            // Verify position buffer holds fallen center of mass (< 9.0m)
-            auto posView = pc.GetPositionBuffer();
-            ZHLN::Test::ExpectTrue(posView.buf != nullptr);
-            auto* posData = static_cast<const JPH::Real*>(posView.buf);
-            ZHLN::Test::ExpectTrue(posData[1] < 9.0);
+            // The public physics façade exposes the synchronized position without
+            // leaking PhysicsWorld's slot-to-dense mapping or SoA storage.
+            JPH::RVec3 synchronizedPosition = JPH::RVec3::sZero();
+            ZHLN::Test::ExpectTrue(pc.TryGetBodyPosition(sphere, synchronizedPosition));
+            ZHLN::Test::ExpectTrue(synchronizedPosition.GetY() < 9.0);
+
+            // A queued body destruction invalidates the generation-safe lookup
+            // once the following physics step has drained its command queue.
+            pc.DestroyBody(sphere);
+            pc.Step(1.0f / 60.0f);
+            ZHLN::Test::ExpectTrue(!pc.TryGetBodyPosition(sphere, synchronizedPosition));
 
             return {};
         }
