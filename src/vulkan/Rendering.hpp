@@ -5,22 +5,6 @@
 
 #pragma once
 
-#if defined(ZHLN_LEGACY_VULKAN_1_1)
-// (legacy dynamic-pass/framebuffer cache removed with the descriptor-set model)
-// Alias modern namespace target to the legacy Vulkan 1.1 implementation
-namespace ZHLN::Vk {
-static constexpr auto isLegacy = true;
-
-using namespace Vk11;
-} // namespace ZHLN::Vk
-#else
-// Default: Alias modern namespace target directly to standard Vulkan 1.3
-namespace ZHLN::Vk {
-static constexpr auto isLegacy = false;
-}
-
-#endif
-
 #define ZHLN_RENDERING_HPP_INCLUDED
 
 #include "RenderingPCH.h" // IWYU pragma: keep
@@ -52,9 +36,7 @@ static constexpr auto isLegacy = false;
 #include <variant>
 #include <vector>
 #include <atomic>
-#if defined(__cpp_impl_reflection) && !defined(__clang__)
-#include <meta>
-#endif
+
 
 // ============================================================================
 // Core C Implementation Declarations
@@ -97,7 +79,6 @@ static constexpr auto isLegacy = false;
 #include "Commands.hpp"
 #include "ComputePass.hpp"
 #include "Postprocessing.hpp"
-#include "GPUDiagnostics.hpp"
 #include "GpuProfiler.hpp"
 #include "PresentationContext.hpp"
 #include "ParallelRecorder.hpp"
