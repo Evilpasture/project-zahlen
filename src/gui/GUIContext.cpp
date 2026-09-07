@@ -569,6 +569,16 @@ bool Context::IsItemHovered() const noexcept {
 }
 
 auto Context::GetLastFrameRect(std::string_view id) const noexcept -> std::optional<ElementRect> {
+    // Unlike the widget methods, this getter is designed to be called OUTSIDE
+    // a layout pass -- the editor reads panel rects before its first
+    // BeginFrame, when the (lazily created) Clay context does not exist yet
+    // and Clay's current-context pointer is null. No context means there is
+    // no last-frame data to read; anything else must not touch Clay.
+    if (!_impl || !_impl->clayContext) {
+        return std::nullopt;
+    }
+    Clay_SetCurrentContext(_impl->clayContext);
+
     // Same element-id recipe as every widget above (hash the path, index the
     // string), so the id a Box was opened with resolves here. The string only
     // feeds the hash -- no interning needed for a read.
