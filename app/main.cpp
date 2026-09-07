@@ -139,6 +139,12 @@ void UpdateEditorCamera(ZHLN::Camera& cam, const ZHLN::Components::InputStateCom
     }
     const float sensitivity = 0.15f;
 
+    // TEMP-DIAG (camera jump investigation): record the pre-state so an
+    // uncaused move can be logged below.
+    const JPH::Vec3 camPos0 = cam.position;
+    const float     camYaw0 = cam.yaw;
+    const float     camPit0 = cam.pitch;
+
     const bool uiCapturesMouse    = state.wantCaptureMouse;
     const bool uiCapturesKeyboard = state.wantCaptureKeyboard;
 
@@ -176,6 +182,19 @@ void UpdateEditorCamera(ZHLN::Camera& cam, const ZHLN::Components::InputStateCom
 
     if (moveDirection.LengthSq() > 0.0f) {
         cam.position += moveDirection.Normalized() * moveSpeed * dt;
+    }
+
+    // TEMP-DIAG (camera jump investigation): the reported jump is a camera
+    // move with no RMB orbit and no WASD; dump the full input state then.
+    const bool camMoved = (cam.position - camPos0).LengthSq() > 0.0f || cam.yaw != camYaw0 || cam.pitch != camPit0;
+    const bool rmbHeld  = state.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton));
+    if (camMoved && !rmbHeld && moveDirection.LengthSq() == 0.0f) {
+        ZHLN::Log(
+            "[DIAG-cam] uncaused move: pos ({},{},{}) -> ({},{},{})  yaw {} -> {}  pitch {} -> {}  delta=({},{}) lmb={} capM={} capK={}",
+            camPos0.GetX(), camPos0.GetY(), camPos0.GetZ(), cam.position.GetX(), cam.position.GetY(), cam.position.GetZ(),
+            camYaw0, cam.yaw, camPit0, cam.pitch, state.mouseDeltaX, state.mouseDeltaY,
+            state.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LButton)), uiCapturesMouse, uiCapturesKeyboard
+        );
     }
 }
 
@@ -352,6 +371,22 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
         });
         const auto sceneViewport = rc.GetViewport();
 
+        // TEMP-DIAG (camera jump investigation): log every viewport change so
+        // a rectangle jump can be correlated with the camera log.
+        {
+            static ZHLN::RenderContext::ViewportRect lastVp {};
+            static bool                              hadVp = false;
+            if (!hadVp || lastVp.x != sceneViewport.x || lastVp.y != sceneViewport.y || lastVp.width != sceneViewport.width ||
+                lastVp.height != sceneViewport.height) {
+                ZHLN::Log(
+                    "[DIAG-vp] win={}x{} panelEdges l={} r={} -> vp=({},{},{}x{})",
+                    winSize.width, winSize.height, vpX0, vpX1, sceneViewport.x, sceneViewport.y, sceneViewport.width, sceneViewport.height
+                );
+                lastVp = sceneViewport;
+                hadVp  = true;
+            }
+        }
+
         // Ctrl+C/X/V in a focused field go to the OS clipboard through the
         // window. Re-set every frame because the handle is rebuilt; the sink is
         // stateless, so this is two stores.
@@ -417,6 +452,12 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
             if (isMouseDown && !wasMouseDown) {
                 auto hit                           = CastPickingRay(engine, cam, sceneViewport);
                 s_NativeEditorState.selectedEntity = hit.hasHit ? hit.handle : ZHLN::Entity::Null();
+                // TEMP-DIAG (camera jump investigation): what the click saw.
+                ZHLN::Log(
+                    "[DIAG-pick] mouse=({},{}) vp=({},{},{}x{}) hit={} selNull={}",
+                    state->mouseX, state->mouseY, sceneViewport.x, sceneViewport.y, sceneViewport.width, sceneViewport.height,
+                    hit.hasHit, s_NativeEditorState.selectedEntity == ZHLN::Entity::Null()
+                );
             }
             wasMouseDown = isMouseDown;
         }
