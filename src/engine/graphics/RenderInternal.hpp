@@ -629,6 +629,28 @@ struct RenderContext::Impl {
 
     GraphResources graphResources;
 
+    // Fixed-function scene viewport rectangle (framebuffer pixels, top-left
+    // origin). Width or height <= 1 means full frame. See RenderContext::SetViewport.
+    uint32_t viewportX = 0;
+    uint32_t viewportY = 0;
+    uint32_t viewportW = 0;
+    uint32_t viewportH = 0;
+
+    /// The scene viewport actually in effect: the stored rectangle clamped to
+    /// the framebuffer, or the full framebuffer when none is active.
+    [[nodiscard]] constexpr auto EffectiveViewport() const noexcept -> RenderContext::ViewportRect {
+        const auto& fb   = graphResources.sceneColor.extent;
+        const auto full = RenderContext::ViewportRect {.x = 0, .y = 0, .width = fb.width, .height = fb.height};
+        if (viewportW <= 1 || viewportH <= 1) {
+            return full;
+        }
+        const uint32_t x = std::min<uint32_t>(viewportX, fb.width);
+        const uint32_t y = std::min<uint32_t>(viewportY, fb.height);
+        const uint32_t w = std::min<uint32_t>(viewportW, fb.width - x);
+        const uint32_t h = std::min<uint32_t>(viewportH, fb.height - y);
+        return RenderContext::ViewportRect {.x = x, .y = y, .width = w, .height = h};
+    }
+
     // ============================================================================
     // Bounded Substruct for Double-Buffered Resources (Reflection-Safe for Clangd)
     // ============================================================================

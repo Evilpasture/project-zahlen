@@ -135,6 +135,26 @@ class ZHLN_API RenderContext {
     [[nodiscard]] RenderResult EndFrame() noexcept;
     void                       BeginImGuiFrame() noexcept;
     void                       SetResolution(const Extent2D& resolution);
+
+    /// Sub-rectangle of the framebuffer the 3D scene renders into, in pixels
+    /// (top-left origin, like window coordinates). Applied as a fixed-function
+    /// viewport and scissor on the screen-space scene passes: nothing outside
+    /// the rectangle is rasterized. Attachment clears still cover the whole
+    /// target, so excluded regions stay clean. Width or height <= 1 restores
+    /// full-frame rendering; rectangles are clamped to the framebuffer.
+    /// The camera aspect, GPU culling screen space, and picking should all use
+    /// this rectangle -- see GetViewport.
+    struct ViewportRect {
+        uint32_t x      = 0;
+        uint32_t y      = 0;
+        uint32_t width  = 0;
+        uint32_t height = 0;
+    };
+
+    void                       SetViewport(const ViewportRect& rect) noexcept;
+    /// Effective scene viewport: the stored rectangle clamped to the
+    /// framebuffer, or {0, 0, framebuffer} when none is active.
+    [[nodiscard]] ViewportRect GetViewport() const noexcept;
     [[nodiscard]] const char*  GetRendererName() const;
     [[nodiscard]] const char*  GetGPUName() const;
     [[nodiscard]] uint32_t     GetFrameIndex() const noexcept;

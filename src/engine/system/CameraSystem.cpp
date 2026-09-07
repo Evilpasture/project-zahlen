@@ -6,13 +6,17 @@
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Engine.hpp"
 #include "Zahlen/Entity.hpp"
+#include "Zahlen/Render.hpp"
 #include "Zahlen/Window.hpp"
 #include <Zahlen/ecs/ECS.hpp>
 
 namespace ZHLN {
 
 void CameraSystem::Update(Engine& engine, float dt, float alpha) {
-    Update(engine.GetRegistry(), engine.GetCamera(), engine.GetWindow().GetSize(), dt, alpha);
+    // The scene renders into the RenderContext viewport, not necessarily the
+    // whole window: aspect and TAA jitter texels must follow that rectangle.
+    const auto vp = engine.GetRenderContext().GetViewport();
+    Update(engine.GetRegistry(), engine.GetCamera(), Extent2D {vp.width, vp.height}, dt, alpha);
 }
 
 void CameraSystem::Update(ECS::Registry& reg, Camera& cam, Extent2D res, float /*dt*/, float /*alpha*/) {

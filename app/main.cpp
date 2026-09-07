@@ -181,7 +181,7 @@ void UpdateEditorCamera(ZHLN::Camera& cam, const ZHLN::Components::InputStateCom
     }
 }
 
-ZHLN::Physics::RaycastResult CastPickingRay(ZHLN::Engine& engine, const ZHLN::Camera& cam) {
+ZHLN::Physics::RaycastResult CastPickingRay(ZHLN::Engine& engine, const ZHLN::Camera& cam, const ZHLN::RenderContext::ViewportRect& vp) {
     auto& reg    = engine.GetRegistry();
     float mouseX = 0.0f;
     float mouseY = 0.0f;
@@ -189,20 +189,21 @@ ZHLN::Physics::RaycastResult CastPickingRay(ZHLN::Engine& engine, const ZHLN::Ca
         mouseX = st->mouseX;
         mouseY = st->mouseY;
     }
-    auto winSize = engine.GetWindow().GetSize();
 
-    if (winSize.width == 0 || winSize.height == 0) {
+    if (vp.width == 0 || vp.height == 0) {
         return {};
     }
 
     // The projection maps to Vulkan Y-down clip space (see CreatePerspective),
-    // and the framebuffer's row 0 is the top: a pixel at the top (mouseY == 0)
-    // is NDC y == -1. The old 1 - 2y/h mirrored the ray vertically, so picking
-    // -- and the transform modes that copied this math -- aimed at the point
-    // mirrored across the horizontal centre line.
-    float ndcX   = (2.0f * mouseX) / static_cast<float>(winSize.width) - 1.0f;
-    float ndcY   = (2.0f * mouseY) / static_cast<float>(winSize.height) - 1.0f;
-    float aspect = static_cast<float>(winSize.width) / static_cast<float>(winSize.height);
+    // and the scene rectangle's row 0 is the top: the pointer is made
+    // rectangle-relative before the NDC map, because the scene is rasterized
+    // by a fixed-function viewport into exactly this rectangle. (The old
+    // 1 - 2y/h mirrored the ray vertically, so picking -- and the transform
+    // modes that copied this math -- aimed at the point mirrored across the
+    // horizontal centre line.)
+    float ndcX   = (2.0f * (mouseX - static_cast<float>(vp.x))) / static_cast<float>(vp.width) - 1.0f;
+    float ndcY   = (2.0f * (mouseY - static_cast<float>(vp.y))) / static_cast<float>(vp.height) - 1.0f;
+    float aspect = static_cast<float>(vp.width) / static_cast<float>(vp.height);
 
     JPH::Mat44 invVP = (cam.GetProjectionMatrix(aspect) * cam.GetViewMatrix()).Inversed();
 
@@ -321,13 +322,14 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
 
         auto winSize = engine.GetWindow().GetSize();
 
-        // Dynamic viewport bounds: the 3D composition targets the centre
+        // Dynamic scene viewport: the 3D composition targets the centre
         // column between the two panels. Read the panels' REAL boxes from last
-        // frame's Clay layout (they are opaque, so what the frustum paints
-        // beyond them is never seen); the constants are only the first-frame
-        // fallback before any layout exists. The camera remaps its projection
-        // to the rectangle, and picking / transforms / culling all follow
-        // because they go through the same GetProjectionMatrix.
+        // frame's Clay layout; the constants are only the first-frame fallback
+        // before any layout exists. The rectangle goes to the RenderContext as
+        // a fixed-function viewport + scissor on the scene passes, so nothing
+        // is rasterized outside it; the camera aspect, GPU culling screen
+        // space, picking and transform unprojection all read the same
+        // rectangle back through GetViewport.
         float vpX0 = kLeftPanelWidth;
         float vpX1 = static_cast<float>(winSize.width) - kRightPanelWidth;
         auto panelBox = [](std::string_view label) -> Clay_ElementData {
@@ -342,7 +344,14 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
         if (const Clay_ElementData right = panelBox("InspectorPanel"); right.found) {
             vpX1 = right.boundingBox.x;
         }
-        cam.SetViewportBounds(vpX0, vpX1, static_cast<float>(winSize.width), static_cast<float>(winSize.height));
+        auto& rc = engine.GetRenderContext();
+        rc.SetViewport(ZHLN::RenderContext::ViewportRect {
+            .x      = static_cast<uint32_t>(std::clamp(vpX0, 0.0f, static_cast<float>(winSize.width))),
+            .y      = 0,
+            .width  = static_cast<uint32_t>(std::max(0.0f, vpX1 - vpX0)),
+            .height = winSize.height,
+        });
+        const auto sceneViewport = rc.GetViewport();
 
         // A cheap handle over the Impl the registry owns (GUIStateComponent), so
         // building it here costs a pointer and lets the gating below ask about
@@ -374,9 +383,9 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
         // as None and the close check below would quit on the very keypress
         // the user meant as "abort the manipulation".
         const bool transformActive = s_NativeEditorState.transformMode != ZHLN::Editor::EditorState::TransformMode::None;
-        const auto transformSize   = engine.GetWindow().GetSize();
         ZHLN::Editor::UpdateTransformMode(
-            reg, s_NativeEditorState, cam, transformSize.width, transformSize.height, uiCapturesKeyboard
+            reg, s_NativeEditorState, cam,
+            ZHLN::Editor::SceneViewport {sceneViewport.x, sceneViewport.y, sceneViewport.width, sceneViewport.height}, uiCapturesKeyboard
         );
 
         if (state != nullptr && state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Escape)) && !uiCapturesKeyboard &&
@@ -404,7 +413,7 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
             bool        isMouseDown  = glfwGetMouseButton(static_cast<GLFWwindow*>(engine.GetWindow().GetNativeHandle()), GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
 
             if (isMouseDown && !wasMouseDown) {
-                auto hit                           = CastPickingRay(engine, cam);
+                auto hit                           = CastPickingRay(engine, cam, sceneViewport);
                 s_NativeEditorState.selectedEntity = hit.hasHit ? hit.handle : ZHLN::Entity::Null();
             }
             wasMouseDown = isMouseDown;

@@ -274,6 +274,17 @@ void RenderContext::SetResolution(const Extent2D& res) {
     _impl->resized = true;
 }
 
+void RenderContext::SetViewport(const ViewportRect& rect) noexcept {
+    _impl->viewportX = rect.x;
+    _impl->viewportY = rect.y;
+    _impl->viewportW = rect.width;
+    _impl->viewportH = rect.height;
+}
+
+auto RenderContext::GetViewport() const noexcept -> ViewportRect {
+    return _impl->EffectiveViewport();
+}
+
 auto RenderContext::CreateStorageBuffer(const void* data, size_t size, uint32_t stride) -> BufferHandle {
     const uint32_t safeStride = (stride > 0) ? stride : 1u;
     return _impl->CreateGPUBuffer(size, data, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)

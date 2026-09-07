@@ -174,12 +174,23 @@ struct ComponentKind {
 /// @p uiOwnsInput is true while a text field or dropdown owns the keyboard
 /// (the host's `uiCapturesKeyboard`); the mode then neither starts nor acts,
 /// so typing "g" into a name box never grabs the object.
+/// Sub-rectangle of the window/framebuffer the 3D scene occupies, in pixels
+/// with a top-left origin -- the same rectangle RenderContext::SetViewport is
+/// given. Mouse unprojection and world-to-screen here are rectangle-relative:
+/// pass {0, 0, w, h} for a full-frame viewport and the behaviour is identical
+/// to a plain window-sized viewport.
+struct SceneViewport {
+    uint32_t x      = 0;
+    uint32_t y      = 0;
+    uint32_t width  = 0;
+    uint32_t height = 0;
+};
+
 ZHLN_API void UpdateTransformMode(
     ZHLN::ECS::Registry& reg,
     EditorState&         state,
     const Camera&        camera,
-    uint32_t             viewportWidth,
-    uint32_t             viewportHeight,
+    const SceneViewport& viewport,
     bool                 uiOwnsInput
 ) noexcept;
 
