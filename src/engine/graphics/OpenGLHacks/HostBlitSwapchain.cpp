@@ -68,7 +68,15 @@
 #if defined(__APPLE__)
 #include <OpenGL/gl.h> // legacy 2.1 API: glDrawPixels & friends
 #else
+// Mesa's <GL/gl.h> stops at GL 1.1, but glWindowPos2i is GL 1.4
+// (ARB_window_pos): on Linux the prototype lives in <GL/glext.h> and only
+// with GL_GLEXT_PROTOTYPES defined. libGL exports the symbol, so the
+// prototype is all that is needed to compile and link.
+#ifndef GL_GLEXT_PROTOTYPES
+#define GL_GLEXT_PROTOTYPES 1
+#endif
 #include <GL/gl.h>
+#include <GL/glext.h>
 #endif
 
 #include <cstdint>
