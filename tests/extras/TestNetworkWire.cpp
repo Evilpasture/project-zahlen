@@ -924,7 +924,8 @@ struct TestNetworkWireSuite {
 
         std::expected<void, ZHLN::Error> quaternion_sign_canonicalization() {
             ZHLN::Net::PhysicsBatchMessage positive;
-            positive.bodies = {{1, JPH::Vec3(0, 0, 0), JPH::Quat(0.1f, 0.2f, 0.3f, 0.9f), JPH::Vec3(0, 0, 0)}};
+            positive.serverTick = 4321;
+            positive.bodies     = {{1, JPH::Vec3(0, 0, 0), JPH::Quat(0.1f, 0.2f, 0.3f, 0.9f), JPH::Vec3(0, 0, 0)}};
 
             ZHLN::Net::PhysicsBatchMessage negative = positive;
             negative.bodies[0].rotation            = JPH::Quat(-0.1f, -0.2f, -0.3f, -0.9f);
