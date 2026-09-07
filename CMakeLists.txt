@@ -668,6 +668,14 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(zahlen_engine PRIVATE PkgConfig::LIBEVDEV PkgConfig::LIBSEAT)
 endif()
 
+if(APPLE)
+    # macOS has no native Vulkan WSI: windowed sessions render offscreen and
+    # the HostBlit plugin blits the finished image through its own OpenGL
+    # window (PresentationMode::HostBlit). All engine call sites are gated
+    # with `if constexpr (isMac)`, so only Apple builds reference the plugin.
+    target_link_libraries(zahlen_engine PRIVATE HostBlitSwapchain)
+endif()
+
 target_link_libraries(zahlen_engine PUBLIC Jolt)
 
 target_include_directories(zahlen_engine SYSTEM PRIVATE

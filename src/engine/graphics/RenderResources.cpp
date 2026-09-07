@@ -255,6 +255,10 @@ auto RenderContext::GetFrameIndex() const noexcept -> uint32_t {
     return _impl->frame_index;
 }
 
+auto RenderContext::GetPresentationMode() const noexcept -> PresentationMode {
+    return _impl->presentationMode;
+}
+
 void RenderContext::CheckShaderReload() noexcept {
     if constexpr (isDev) {
         _impl->CheckShaderWatchers();

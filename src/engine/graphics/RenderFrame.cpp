@@ -3,6 +3,7 @@
 
 #include "RenderInternal.hpp"
 #include "Instance.hpp"
+#include "OpenGLHacks/HostBlit.hpp"
 #include "Zahlen/Profiler.hpp"
 #include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -542,6 +543,26 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
                     return std::unexpected(DeviceLost);
                 }
                 return std::unexpected(Error);
+            }
+
+            // HostBlit (macOS): the finished frame now lives in the offscreen
+            // headlessColorTarget. The plugin copies it out on its own fence
+            // (which also waits on the submit above) and blits it through its
+            // own OpenGL window. Closing that window ends the session, just
+            // like closing any other engine window.
+            if constexpr (isMac) {
+                if (_impl->presentationMode == PresentationMode::HostBlit) {
+                    const auto& target = _impl->presentation.headlessColorTarget;
+                    if (target.Valid()) {
+                        auto* win = static_cast<GLFWwindow*>(_impl->window.GetNativeHandle());
+                        if (!HostBlit::Present(
+                                target.image, win, target.extent.width, target.extent.height,
+                                VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+                            )) {
+                            _impl->window.Close();
+                        }
+                    }
+                }
             }
 
             // Advance the frame index

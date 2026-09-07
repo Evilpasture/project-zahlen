@@ -591,6 +591,9 @@ struct RenderContext::Impl {
     Vk::Allocator                                allocator;
     Vk::Surface                                  surface;
     Vk::PresentationContext                      presentation;
+    /// Fixed at RenderContext::Create time (see PresentationMode); read by
+    /// EndFrame to decide whether to hand the finished frame to HostBlit.
+    PresentationMode                             presentationMode = PresentationMode::NativeSwapchain;
     Vk::FrameSync<2>                             sync;
     Vk::CommandPools<2, Vk::QueueType::Graphics> pools;
     Vk::CommandPools<2, Vk::QueueType::Compute>  computePools;
