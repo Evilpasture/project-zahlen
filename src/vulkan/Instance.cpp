@@ -5,7 +5,8 @@
 
 #include "Instance.hpp"
 #include "RenderCore.h"
-#include "RenderCore.hpp" // ZHLN::Min (via RenderCore.inl -> Utils.hpp)
+#include "RenderCore.hpp"
+#include <Zahlen/Core/Math.hpp>
 
 #include <cstring>
 #include <utility>
@@ -142,7 +143,7 @@ auto Instance::Create(
         .debug           = result._debugForwarding.get(),
     };
 
-    const size_t copySize = ZHLN::Min(appName.size(), sizeof(desc.app_name) - 1);
+    const size_t copySize = ZHLN::Math::Min(appName.size(), sizeof(desc.app_name) - 1);
     std::memcpy(desc.app_name, appName.data(), copySize);
     desc.app_name[copySize] = '\0';
 

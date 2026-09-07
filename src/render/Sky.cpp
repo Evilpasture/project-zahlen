@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Utils.hpp>
+#include <Zahlen/Core/Math.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <cmath>
 #include <cstddef>
@@ -63,10 +63,10 @@ auto GetCubeDirection(int face, float u, float v) -> JPH::Vec3 {
 }
 
 auto PackColor(const JPH::Vec3& color) -> uint32_t {
-    auto r = static_cast<uint8_t>(ZHLN::Clamp(color.GetX(), 0.0f, 1.0f) * 255.0f);
-    auto g = static_cast<uint8_t>(ZHLN::Clamp(color.GetY(), 0.0f, 1.0f) * 255.0f);
-    auto b = static_cast<uint8_t>(ZHLN::Clamp(color.GetZ(), 0.0f, 1.0f) * 255.0f);
-    return 0xFF000000u | (static_cast<uint32_t>(b) << 16) | (static_cast<uint32_t>(g) << 8) | static_cast<uint32_t>(r);
+    auto r = static_cast<uint8_t>(ZHLN::Math::Clamp(color.GetX(), 0.0f, 1.0f) * 255.0f);
+    auto g = static_cast<uint8_t>(ZHLN::Math::Clamp(color.GetY(), 0.0f, 1.0f) * 255.0f);
+    auto b = static_cast<uint8_t>(ZHLN::Math::Clamp(color.GetZ(), 0.0f, 1.0f) * 255.0f);
+    return ZHLN::Math::PackColor(r, g, b);
 }
 
 auto GenerateCosHemisphere(float u1, float u2) -> JPH::Vec3 {

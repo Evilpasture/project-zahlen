@@ -4,7 +4,7 @@
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
-#include <Utils.hpp>
+#include <Zahlen/Core/Math.hpp>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -103,9 +103,9 @@ auto GenerateBRDFLUT(uint32_t width, uint32_t height) -> std::vector<uint32_t> {
             A /= static_cast<float>(SAMPLE_COUNT);
             B /= static_cast<float>(SAMPLE_COUNT);
 
-            auto r                = static_cast<uint8_t>(ZHLN::Clamp(A, 0.0f, 1.0f) * 255.0f);
-            auto g                = static_cast<uint8_t>(ZHLN::Clamp(B, 0.0f, 1.0f) * 255.0f);
-            pixels[y * width + x] = 0xFF000000u | (static_cast<uint32_t>(g) << 8) | r;
+            auto r                = static_cast<uint8_t>(ZHLN::Math::Clamp(A, 0.0f, 1.0f) * 255.0f);
+            auto g                = static_cast<uint8_t>(ZHLN::Math::Clamp(B, 0.0f, 1.0f) * 255.0f);
+            pixels[y * width + x] = ZHLN::Math::PackColor(r, g, 0);
         }
     }
     return pixels;

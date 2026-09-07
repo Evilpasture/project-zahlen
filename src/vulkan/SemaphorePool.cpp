@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "SemaphorePool.hpp"
+#include <Zahlen/Core/Math.hpp>
 
 namespace ZHLN::Vk {
 
@@ -42,7 +43,7 @@ auto SemaphorePool::operator=(SemaphorePool&& other) noexcept -> SemaphorePool& 
 void SemaphorePool::Rebuild(const VkDevice device, const uint32_t count) noexcept {
     Cleanup();
     _device = device;
-    _count  = ZHLN::Min(count, 6U);
+    _count  = ZHLN::Math::Min(count, 6U);
 
     for (uint32_t i = 0; i < _count; ++i) {
         _semaphores[i] = ZHLN_CreateSemaphore(_device);

@@ -135,6 +135,7 @@ module;
 #include <Zahlen/Core/Format.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/Loop.hpp>
+#include <Zahlen/Core/Math.hpp>
 #include <Zahlen/Core/MemoryPool.hpp>
 #include <Zahlen/Core/Pair.hpp>
 #include <Zahlen/Core/Platform.hpp>
@@ -316,6 +317,26 @@ using ZHLN::VertexPosition;
 using ZHLN::VertexSkin;
 
 namespace Math {
+using ZHLN::Math::Abs;
+using ZHLN::Math::Clamp;
+using ZHLN::Math::constexpr_exp;
+using ZHLN::Math::constexpr_ln;
+using ZHLN::Math::FastIntPower;
+using ZHLN::Math::FBM;
+using ZHLN::Math::Floor;
+using ZHLN::Math::Fract;
+using ZHLN::Math::Hash;
+using ZHLN::Math::Lerp;
+using ZHLN::Math::Max;
+using ZHLN::Math::Min;
+using ZHLN::Math::Mix;
+using ZHLN::Math::Noise;
+using ZHLN::Math::Power;
+using ZHLN::Math::Saturate;
+using ZHLN::Math::Sin;
+using ZHLN::Math::Smoothstep;
+using ZHLN::Math::Sqrt;
+using ZHLN::Math::Worley;
 using ZHLN::Math::CalculateFrustumAABB;
 using ZHLN::Math::CreateLookAt;
 using ZHLN::Math::CreateOrtho;

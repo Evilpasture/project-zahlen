@@ -2,19 +2,24 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
+
+// Scalar, constexpr, hashing, and procedural-noise helpers. This header is
+// deliberately freestanding: it depends only on the C++ standard library.
 #include <cmath>
 #include <cstdint>
 #include <initializer_list>
 #include <numbers>
 #include <type_traits>
-namespace ZHLN {
+namespace ZHLN::Math {
 
-constexpr float Floor(float x) {
-    auto i = static_cast<long long>(x);
-    if (x < 0 && x != static_cast<float>(i)) {
-        return static_cast<float>(i - 1);
+template <typename T>
+    requires std::is_floating_point_v<T>
+[[nodiscard]] constexpr T Floor(T x) noexcept {
+    const auto integral = static_cast<long long>(x);
+    if (x < 0 && x != static_cast<T>(integral)) {
+        return static_cast<T>(integral - 1);
     }
-    return static_cast<float>(i);
+    return static_cast<T>(integral);
 }
 
 template <typename T>
@@ -47,7 +52,8 @@ template <typename T>
 
 // GLSL-style fract: works for float, double, etc.
 template <typename T>
-constexpr T Fract(T x) {
+    requires std::is_floating_point_v<T>
+[[nodiscard]] constexpr T Fract(T x) {
     return x - Floor(x);
 }
 
@@ -63,8 +69,16 @@ constexpr T Saturate(T x) {
     return Max(static_cast<T>(0), Min(static_cast<T>(1), x));
 }
 
-// 0x9E3779B9 is the 32-bit fractional part of the Golden Ratio (2^32 / phi)
-static constexpr uint32_t PHI = 0x9E3779B9U;
+namespace Detail {
+
+// 0x9E3779B9 is the 32-bit fractional part of the Golden Ratio (2^32 / phi).
+inline constexpr uint32_t kPhi = 0x9E3779B9U;
+
+// Constants used by the constexpr trigonometric fallback.
+inline constexpr float kPi    = std::numbers::pi_v<float>;
+inline constexpr float kTwoPi = 6.28318530717958647692F;
+
+} // namespace Detail
 
 constexpr float Hash(float x, float y) {
     // 1. Cast to bit-representation or coordinate-seed
@@ -73,7 +87,7 @@ constexpr float Hash(float x, float y) {
     uint32_t iy = static_cast<uint32_t>(y) * 5147U;
 
     // 2. The Fibonacci Hash (Multiplicative hashing)
-    uint32_t hash = (ix ^ iy) * PHI;
+    uint32_t hash = (ix ^ iy) * Detail::kPhi;
 
     // 3. Map to [0.0, 1.0]
     // We use 0xFFFFFFu to mask for 24 bits of precision (mantissa of a float)
@@ -179,8 +193,11 @@ constexpr auto Power(BaseT base, ExpT exp) noexcept {
     }
 }
 
-[[nodiscard]] constexpr uint32_t PackColor(uint8_t r, uint8_t g, uint8_t b) noexcept {
-    return 0xFF000000U | (static_cast<uint32_t>(b) << 16) | (static_cast<uint32_t>(g) << 8) | static_cast<uint32_t>(r);
+// Packs 8-bit color channels into the engine's ABGR byte layout. The opaque
+// default preserves the original three-channel helper; Math3D's normalized
+// float overload delegates to this one source of truth.
+[[nodiscard]] constexpr uint32_t PackColor(uint8_t r, uint8_t g, uint8_t b, uint8_t a = 0xFFU) noexcept {
+    return (static_cast<uint32_t>(a) << 24) | (static_cast<uint32_t>(b) << 16) | (static_cast<uint32_t>(g) << 8) | static_cast<uint32_t>(r);
 }
 
 [[nodiscard]] constexpr float Smoothstep(float edge0, float edge1, float x) noexcept {
@@ -198,21 +215,17 @@ template <typename T>
     return (x < 0) ? -x : x;
 }
 
-// We need a constexpr PI for range reduction
-static constexpr float ZHLN_TWO_PI = std::numbers::pi_v<float>;
-static constexpr float TWO_PI      = 6.28318530717958647692F;
-
 [[nodiscard]] constexpr float Sin(float x) noexcept {
     if consteval {
         // 1. Range Reduction: Bring x into [-PI, PI]
         // We can't use std::fmod in constexpr, so we do it manually
-        auto quotient = static_cast<float>(static_cast<int>(x / TWO_PI));
-        x             = x - (quotient * TWO_PI);
-        if (x > ZHLN_TWO_PI) {
-            x -= TWO_PI;
+        auto quotient = static_cast<float>(static_cast<int>(x / Detail::kTwoPi));
+        x             = x - (quotient * Detail::kTwoPi);
+        if (x > Detail::kPi) {
+            x -= Detail::kTwoPi;
         }
-        if (x < -ZHLN_TWO_PI) {
-            x += TWO_PI;
+        if (x < -Detail::kPi) {
+            x += Detail::kTwoPi;
         }
 
         // 2. Taylor Series (centered at 0):
@@ -298,4 +311,4 @@ template <typename T>
     }
 }
 
-} // namespace ZHLN
+} // namespace ZHLN::Math

@@ -4,7 +4,7 @@
 #pragma once
 
 #include "RenderCore.hpp"
-#include "Utils.hpp"
+#include <Zahlen/Core/Math.hpp>
 
 namespace ZHLN::Vk {
 
@@ -306,11 +306,11 @@ inline void DispatchGroups(VkCommandBuffer cmd, uint32_t gX, uint32_t gY, uint32
 
 template <uint32_t Width, uint32_t Height>
 consteval auto GetMipLevels() noexcept -> uint32_t {
-    return std::bit_width(ZHLN::Max(Width, Height));
+    return std::bit_width(ZHLN::Math::Max(Width, Height));
 }
 
 inline void GenerateMipmaps(const VkCommandBuffer cmd, const VkImage image, const uint32_t width, const uint32_t height) {
-    uint32_t levels = std::bit_width(ZHLN::Max(width, height));
+    uint32_t levels = std::bit_width(ZHLN::Math::Max(width, height));
     ZHLN_GenerateMipmaps(cmd, image, static_cast<int32_t>(width), static_cast<int32_t>(height), levels);
 }
 
