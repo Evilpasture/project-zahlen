@@ -8,6 +8,7 @@ set(RAW_ENGINE_SOURCES
     AssertHandler.cpp
     DefaultPreset.cpp
     Engine.cpp
+    FileSystemWatcher.cpp
     CreativeWorksFactory.cpp
     system/TextureSystem.cpp
     system/AnimationSystem.cpp

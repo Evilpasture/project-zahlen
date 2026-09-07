@@ -44,6 +44,8 @@ class PhysicsContext;
 class AudioContext;
 class CreativeWorksManager;
 class ScriptRunner;
+class FileSystemWatcher;
+class EngineFrameStepAccess;
 struct Camera;
 struct EngineImpl;
 
@@ -101,6 +103,7 @@ class ZHLN_API Engine {
     auto               GetCreativeWorksManager() -> CreativeWorksManager&;
     auto               GetAudioContext() -> AudioContext&;
     auto               GetScriptRunner() -> ScriptRunner&;
+    auto               GetFileSystemWatcher() -> FileSystemWatcher&;
     [[nodiscard]] auto GetRegistry() -> ECS::Registry&;
     [[nodiscard]] auto GetRegistry() const -> const ECS::Registry&;
 
@@ -155,6 +158,8 @@ class ZHLN_API Engine {
     static auto Run(const CommandLineOptions& options, UICallback uiCallback = nullptr) -> std::expected<void, Error>;
 
   private:
+    friend class EngineFrameStepAccess;
+
     auto                        InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>;
     std::unique_ptr<EngineImpl> _impl;
 };

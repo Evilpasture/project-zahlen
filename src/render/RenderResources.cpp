@@ -338,12 +338,6 @@ auto RenderContext::GetPresentationMode() const noexcept -> PresentationMode {
     return _impl->presentationMode;
 }
 
-void RenderContext::CheckShaderReload() noexcept {
-    if constexpr (isDev) {
-        _impl->CheckShaderWatchers();
-    }
-}
-
 void RenderContext::SetResolution(const Extent2D& res) {
     // With a real window the compositor owns the size: the request is advisory
     // and the recreate re-queries glfwGetFramebufferSize, which is why this
@@ -579,17 +573,37 @@ void RenderContext::DrawLine(JPH::Vec3Arg start, JPH::Vec3Arg end, JPH::Vec4Arg 
     _impl->queues.lineQueue.push_back({.start = start, .end = end, .colorStart = colorStart, .colorEnd = colorEnd});
 }
 
-void RenderContext::Impl::CheckShaderWatchers() noexcept {
+void RenderContext::Impl::BeginShaderObservation() {
     if constexpr (isDev) {
-        bool anyReloaded = false;
-        for (auto& watcher: shaderWatchers) {
-            if (watcher.watcher.CheckModified()) {
-                if (!anyReloaded) {
-                    vkDeviceWaitIdle(ctx.Device());
-                    anyReloaded = true;
-                }
-                watcher.reloadCallback();
+        if (fileSystemWatcher != nullptr && shaderDirectoryWatch == 0) {
+            shaderDirectoryWatch = fileSystemWatcher->WatchDirectory(
+                "resources/shaders", [this](const FileWatchEvent& event) { HandleShaderFileEvent(event); }, true, ".slang",
+                FileSystemWatcher::kDefaultDebounceMs
+            );
+        }
+    }
+}
+
+void RenderContext::Impl::HandleShaderFileEvent(const FileWatchEvent& event) {
+    if constexpr (isDev) {
+        const std::string changedPath = event.path.lexically_normal().generic_string();
+        bool              deviceIdle  = false;
+        const size_t      reloadCount = shaderReloads.size();
+        for (size_t index = 0; index < reloadCount; ++index) {
+            const ShaderReloadRegistration& reload = shaderReloads[index];
+            if (std::find(reload.paths.begin(), reload.paths.end(), changedPath) == reload.paths.end()) {
+                continue;
             }
+            if (!deviceIdle) {
+                vkDeviceWaitIdle(ctx.Device());
+                deviceIdle = true;
+            }
+
+            // A rebuild may refresh its own registration (notably the CSG
+            // group), so invoke a local copy rather than a function object
+            // that can be replaced while it is executing.
+            const std::function<void()> callback = reload.reloadCallback;
+            callback();
         }
     }
 }
@@ -1378,10 +1392,37 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
         });
 }
 
-void RenderContext::Impl::RegisterShaderWatcher(const char* path, std::function<void()> callback) {
+void RenderContext::Impl::RegisterShaderReload(std::string_view name, const std::vector<const char*>& paths, std::function<void()> callback) {
     if constexpr (isDev) {
-        shaderWatchers.push_back({.path = path, .watcher = FileWatcher(path), .reloadCallback = std::move(callback)});
+        if (name.empty() || !callback || paths.empty()) {
+            return;
+        }
+
+        ShaderReloadRegistration registration {.name = std::string {name}};
+        registration.paths.reserve(paths.size());
+        for (const char* path: paths) {
+            if (path != nullptr) {
+                registration.paths.push_back(std::filesystem::path {path}.lexically_normal().generic_string());
+            }
+        }
+        if (registration.paths.empty()) {
+            return;
+        }
+        registration.reloadCallback = std::move(callback);
+
+        const auto existing = std::find_if(shaderReloads.begin(), shaderReloads.end(), [&name](const ShaderReloadRegistration& reload) {
+            return reload.name == name;
+        });
+        if (existing != shaderReloads.end()) {
+            *existing = std::move(registration);
+        } else {
+            shaderReloads.push_back(std::move(registration));
+        }
     }
+}
+
+void RenderContext::Impl::RegisterShaderReload(std::string_view name, std::initializer_list<const char*> paths, std::function<void()> callback) {
+    RegisterShaderReload(name, std::vector<const char*> {paths}, std::move(callback));
 }
 
 auto RenderContext::BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness)
@@ -1537,9 +1578,7 @@ void RenderContext::ProvokeDeviceLost() {
 void RenderContext::Impl::RegisterPipeline(const PipelineRegistration& reg) noexcept {
     reg.build();
     if constexpr (isDev) {
-        for (const auto* path: reg.watchPaths) {
-            RegisterShaderWatcher(path, reg.build);
-        }
+        RegisterShaderReload(reg.name, reg.watchPaths, reg.build);
     }
 }
 

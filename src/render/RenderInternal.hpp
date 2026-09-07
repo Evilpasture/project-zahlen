@@ -3,7 +3,7 @@
 
 // File: src/render/RenderInternal.hpp
 #pragma once
-#include <Zahlen/FileWatcher.hpp>
+#include <Zahlen/FileSystemWatcher.hpp>
 #include "Rendering.hpp"
 #include "TextureManager.hpp" // Private header
 #include <GLFW/glfw3.h>
@@ -20,9 +20,15 @@
 #include <Zahlen/Types.hpp>
 #include <array>
 #include <cstddef>
+#include <filesystem>
 #include <fstream>
+#include <functional>
+#include <initializer_list>
 #include <memory>
+#include <string>
+#include <string_view>
 #include <type_traits>
+#include <vector>
 #include <utility>
 
 namespace ZHLN::Vk {
@@ -1014,13 +1020,17 @@ struct RenderContext::Impl {
     FrameProfiler      gpuProfiler;
     Vk::GPUDiagnostics gpuDiagnostics;
 
-    struct WatchableShader {
-        std::string           path;
-        FileWatcher           watcher;
-        std::function<void()> reloadCallback;
+    struct ShaderReloadRegistration {
+        std::string              name;
+        std::vector<std::string> paths;
+        std::function<void()>    reloadCallback;
     };
 
-    ZHLN::Array<WatchableShader> shaderWatchers;
+    // The watcher belongs to Engine. Renderer ownership is limited to its one
+    // directory subscription and the path-to-pipeline callback registry.
+    FileSystemWatcher*                     fileSystemWatcher = nullptr;
+    FileWatchHandle                        shaderDirectoryWatch = 0;
+    std::vector<ShaderReloadRegistration> shaderReloads;
 
     uint32_t frame_index         = 0;
     uint32_t current_image_index = 0;
@@ -1058,10 +1068,13 @@ struct RenderContext::Impl {
         gpuDiagnostics.RegisterShader(desc, fallbackEntry);
     }
 
-    Impl(Window& win): window(win) {
+    Impl(Window& win, FileSystemWatcher* watcher): window(win), fileSystemWatcher(watcher) {
     }
 
     ~Impl() {
+        if (fileSystemWatcher != nullptr && shaderDirectoryWatch != 0) {
+            static_cast<void>(fileSystemWatcher->Unwatch(shaderDirectoryWatch));
+        }
         graphicsCmdRing.Cleanup();
         transferCmdRing.Cleanup();
         if (ctx.Device() != VK_NULL_HANDLE) {
@@ -1267,8 +1280,10 @@ struct RenderContext::Impl {
     void RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Compute> compCmd);
     void RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd);
 
-    void RegisterShaderWatcher(const char* path, std::function<void()> callback);
-    void CheckShaderWatchers() noexcept;
+    void BeginShaderObservation();
+    void HandleShaderFileEvent(const FileWatchEvent& event);
+    void RegisterShaderReload(std::string_view name, const std::vector<const char*>& paths, std::function<void()> callback);
+    void RegisterShaderReload(std::string_view name, std::initializer_list<const char*> paths, std::function<void()> callback);
 
     template <VkFormat F>
     [[nodiscard]] auto CreateDefaultTarget(VkExtent2D ext, VkImageUsageFlags extraFlags = 0) -> std::expected<Vk::RenderTarget<F>, Error> {
@@ -1297,7 +1312,6 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<Vk::Pipeline, Error>
         LoadAndCreateComputeShader(ComputeStageSource cs, VkPipelineLayout layout, Vk::DynamicComputePass& pass) const noexcept;
 
-    void                                     WatchPipeline(const char* vsPath, const char* psPath, std::function<void()> rebuild_fn) noexcept;
     [[nodiscard]] std::expected<void, Error> ValidateSlangTypeLayouts() noexcept;
     static constexpr uint32_t                kBakeHeapSlotSpan   = 7; // slot 0 = 2D bake; slots 1..6 = IBL specular mips
     static constexpr uint32_t                kBake2DHeapIndex    = 0;

@@ -519,7 +519,7 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, Error> {
         .transform([&](auto&& intersectPipeline) -> auto {
             csgIntersectionPipeline = std::forward<decltype(intersectPipeline)>(intersectPipeline);
 
-            WatchPipeline(Resource::Paths::BasicVS, Resource::Paths::BasicPS, [this]() -> void {
+            RegisterShaderReload("CSGStencil", {Resource::Paths::BasicVS, Resource::Paths::BasicPS}, [this]() -> void {
                 auto res = InitCSGPipelines();
                 if (!res) {
                     ZHLN::Log("ERROR: Failed to hot-reload CSG stencil pipelines: {}", res.error().Message());
@@ -798,7 +798,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, Error> {
         .and_then([&]() -> std::expected<void, Error> { return BuildSkinningPipeline(); })
         .transform([&]() -> void {
             if constexpr (isDev) {
-                RegisterShaderWatcher(Resource::Paths::SkinningCS, [this]() -> void {
+                RegisterShaderReload("Skinning", {Resource::Paths::SkinningCS}, [this]() -> void {
                     auto res = BuildSkinningPipeline();
                     if (!res) {
                         ZHLN::Log("ERROR: Failed to hot-reload Skinning pipeline: {}", res.error().Message());

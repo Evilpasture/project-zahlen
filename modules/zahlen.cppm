@@ -154,6 +154,7 @@ module;
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
+#include <Zahlen/FileSystemWatcher.hpp>
 #include <Zahlen/Format.hpp>
 #include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/IK.hpp>
@@ -222,6 +223,11 @@ using ZHLN::Description;
 using ZHLN::Dump;
 using ZHLN::Error;
 using ZHLN::ErrorCategory;
+using ZHLN::FileSystemWatcher;
+using ZHLN::FileWatchAction;
+using ZHLN::FileWatchCallback;
+using ZHLN::FileWatchEvent;
+using ZHLN::FileWatchHandle;
 using ZHLN::FixedString;
 using ZHLN::Format;
 using ZHLN::GetLogLevel;
@@ -241,6 +247,7 @@ using ZHLN::String256;
 using ZHLN::String32;
 using ZHLN::String64;
 using ZHLN::Trace;
+using ZHLN::WatchDescriptor;
 
 namespace Reflect {
 using ZHLN::Reflect::AnnotatedName;

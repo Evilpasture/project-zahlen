@@ -324,8 +324,10 @@ RenderContext::RenderContext(PrivateToken /*unused*/, std::unique_ptr<Impl> impl
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #endif
 
-auto RenderContext::Create(Window& window, const RenderConfig& cfg) noexcept -> std::expected<std::unique_ptr<RenderContext>, Error> {
-    auto impl     = std::make_unique<Impl>(window);
+auto RenderContext::Create(
+    Window& window, const RenderConfig& cfg, FileSystemWatcher* fileSystemWatcher
+) noexcept -> std::expected<std::unique_ptr<RenderContext>, Error> {
+    auto impl     = std::make_unique<Impl>(window, fileSystemWatcher);
     impl->appName = cfg.appName;
 
     const PresentationMode mode = SelectPresentationMode(window);
@@ -444,7 +446,10 @@ auto RenderContext::Create(Window& window, const RenderConfig& cfg) noexcept -> 
             return {};
         })
         .and_then([&]() -> std::expected<void, Error> { return impl->InitSubsystems(cfg, width, height); })
-        .transform([&]() -> std::unique_ptr<ZHLN::RenderContext> { return std::make_unique<RenderContext>(PrivateToken {}, std::move(impl)); });
+        .transform([&]() -> std::unique_ptr<ZHLN::RenderContext> {
+            impl->BeginShaderObservation();
+            return std::make_unique<RenderContext>(PrivateToken {}, std::move(impl));
+        });
 }
 
 RenderContext::~RenderContext() {

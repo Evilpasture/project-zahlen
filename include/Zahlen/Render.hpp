@@ -130,6 +130,7 @@ struct DecalParams {
 };
 
 struct Camera;
+class FileSystemWatcher;
 
 class ZHLN_API RenderContext {
   private:
@@ -145,9 +146,11 @@ class ZHLN_API RenderContext {
     RenderContext(const RenderContext&)                    = delete;
     auto operator=(const RenderContext&) -> RenderContext& = delete;
 
-    [[nodiscard]] static std::expected<std::unique_ptr<RenderContext>, Error> Create(Window& window, const RenderConfig& cfg) noexcept;
-
-    void CheckShaderReload() noexcept;
+    /// Pass the engine-owned watcher to enable development shader reloads. The
+    /// optional pointer keeps direct RenderContext users source-compatible and,
+    /// when non-null, must outlive the RenderContext.
+    [[nodiscard]] static std::expected<std::unique_ptr<RenderContext>, Error>
+        Create(Window& window, const RenderConfig& cfg, FileSystemWatcher* fileSystemWatcher = nullptr) noexcept;
 
     [[nodiscard]] std::optional<Extent2D> GetFramebufferSize() const;
 

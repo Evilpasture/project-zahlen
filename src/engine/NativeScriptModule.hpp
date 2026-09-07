@@ -3,12 +3,12 @@
 
 #pragma once
 
-#include "Zahlen/Config.hpp"
-#include "Zahlen/Engine.hpp"
-#include "Zahlen/Log.hpp"
-#include "Zahlen/Types.hpp"
-#include <Zahlen/FileWatcher.hpp>
 #include "Platform.hpp"
+#include <Zahlen/Config.hpp>
+#include <Zahlen/Engine.hpp>
+#include <Zahlen/FileSystemWatcher.hpp>
+#include <Zahlen/Log.hpp>
+#include <Zahlen/Types.hpp>
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -19,25 +19,29 @@ class NativeScriptModule {
   public:
     using UpdateFn = GameplayStatus (*)(Engine*, float);
 
-    // Automatically resolves platform prefix/extension if omitted (e.g. "scripts/gameplay")
-    explicit NativeScriptModule(std::string_view libPath): m_libPath(ResolveModulePath(libPath)), m_watcher(m_libPath) {
+    // Automatically resolves platform prefix/extension if omitted (e.g. "scripts/gameplay").
+    // The engine service dispatches ReloadFromFileEvent on FramePhase::HotReload,
+    // before this module's Update can execute gameplay code for that frame.
+    NativeScriptModule(Engine& engine, std::string_view libPath): m_libPath(ResolveModulePath(libPath)), m_fileSystemWatcher(&engine.GetFileSystemWatcher()) {
+        m_watchHandle = m_fileSystemWatcher->WatchFile(m_libPath, [this](const FileWatchEvent& event) { ReloadFromFileEvent(event); });
         LoadModule();
     }
 
     ~NativeScriptModule() {
+        if (m_fileSystemWatcher != nullptr && m_watchHandle != 0) {
+            static_cast<void>(m_fileSystemWatcher->Unwatch(m_watchHandle));
+        }
         UnloadModule();
     }
+
+    NativeScriptModule(const NativeScriptModule&)                    = delete;
+    auto operator=(const NativeScriptModule&) -> NativeScriptModule& = delete;
 
     [[nodiscard]] bool IsLoaded() const noexcept {
         return m_handle != nullptr && m_updateFn != nullptr;
     }
 
     GameplayStatus Update(Engine* engine, float dt) {
-        if (m_watcher.CheckModified()) {
-            ZHLN::Log("[Hot-Reload] New C++ gameplay binary detected! Swapping module...");
-            LoadModule();
-        }
-
         if (m_updateFn != nullptr) {
             return m_updateFn(engine, dt);
         }
@@ -50,7 +54,7 @@ class NativeScriptModule {
         namespace fs = std::filesystem;
         fs::path p(basePath);
 
-        // If no file extension is present, format based on active platform
+        // If no file extension is present, format based on active platform.
         if (!p.has_extension()) {
             std::string filename = p.filename().string();
             if constexpr (isWindows) {
@@ -71,6 +75,15 @@ class NativeScriptModule {
         return p.string();
     }
 
+    void ReloadFromFileEvent(const FileWatchEvent& event) {
+        if (event.action == FileWatchAction::Deleted) {
+            ZHLN::Log("[Hot-Reload] C++ gameplay binary was removed. Unloading module.");
+        } else {
+            ZHLN::Log("[Hot-Reload] Settled C++ gameplay binary change detected. Swapping module...");
+        }
+        LoadModule();
+    }
+
     void LoadModule() {
         UnloadModule();
 
@@ -78,7 +91,7 @@ class NativeScriptModule {
             return;
         }
 
-        // Shadow copy binary to avoid OS file-locking during background compilation
+        // Shadow copy binary to avoid OS file-locking during background compilation.
         std::string     shadowPath = m_libPath + ".shadow";
         std::error_code ec;
         std::filesystem::copy_file(m_libPath, shadowPath, std::filesystem::copy_options::overwrite_existing, ec);
@@ -103,10 +116,11 @@ class NativeScriptModule {
         }
     }
 
-    std::string m_libPath;
-    FileWatcher m_watcher;
-    void*       m_handle   = nullptr;
-    UpdateFn    m_updateFn = nullptr;
+    std::string          m_libPath;
+    FileSystemWatcher*   m_fileSystemWatcher = nullptr;
+    FileWatchHandle      m_watchHandle       = 0;
+    void*                m_handle            = nullptr;
+    UpdateFn             m_updateFn          = nullptr;
 };
 
 } // namespace ZHLN

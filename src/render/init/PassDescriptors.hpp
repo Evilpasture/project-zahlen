@@ -80,8 +80,8 @@ template <typename PassT>
     if (!result) {
         return result;
     }
-    self->WatchPipeline(
-        desc.vs.path, desc.ps.path,
+    self->RegisterShaderReload(
+        desc.name, {desc.vs.path, desc.ps.path},
         [self, pass = &desc.pass, name = desc.name, vs = desc.vs, ps = desc.ps, fmt = desc.colorFormat, additive = desc.additive]() -> auto {
             auto reload = BuildPassHelper(self, *pass, vs, ps, {fmt}, additive);
             if (!reload) {
@@ -103,16 +103,14 @@ template <typename BuildFn>
         return std::unexpected(res.error());
     }
     if constexpr (isDev) {
-        for (const auto* path: watchPaths) {
-            self->RegisterShaderWatcher(path, [name, build_fn]() -> auto {
-                auto reload_res = build_fn();
-                if (!reload_res) {
-                    ZHLN::Log("ERROR: Failed to hot-reload pipeline '{}': {}", name, reload_res.error().Message());
-                } else {
-                    ZHLN::Log("[Shader Reload] Pipeline '{}' hot-reloaded successfully.", name);
-                }
-            });
-        }
+        self->RegisterShaderReload(name, watchPaths, [name, build_fn]() -> auto {
+            auto reload_res = build_fn();
+            if (!reload_res) {
+                ZHLN::Log("ERROR: Failed to hot-reload pipeline '{}': {}", name, reload_res.error().Message());
+            } else {
+                ZHLN::Log("[Shader Reload] Pipeline '{}' hot-reloaded successfully.", name);
+            }
+        });
     }
     return {};
 }

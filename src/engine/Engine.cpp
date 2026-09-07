@@ -38,7 +38,7 @@
 #include <Zahlen/ecs/SystemGraph.hpp>
 #include <Zahlen/gui/UIComponents.hpp>
 #include <Zahlen/physics/Physics.hpp>
-#include <Zahlen/FileWatcher.hpp>
+#include <Zahlen/FileSystemWatcher.hpp>
 #include "NativeScriptModule.hpp"
 #include "Platform.hpp"
 #include "AnimationSystem.hpp"
@@ -95,12 +95,19 @@ namespace CreativeWorksFactory {
 }
 
 struct EngineImpl {
+    // Declared first so it outlives every callback-owning client during normal
+    // and partial-initialization teardown.
+    std::unique_ptr<FileSystemWatcher>    fileSystemWatcher;
     std::unique_ptr<Window>               window;
     std::unique_ptr<RenderContext>        renderContext;
     std::unique_ptr<PhysicsContext>       physicsContext;
     std::unique_ptr<AudioContext>         audioContext;
     std::unique_ptr<CreativeWorksManager> assetManager;
     std::unique_ptr<ScriptRunner>         scriptRunner;
+    std::unique_ptr<NativeScriptModule>   nativeScriptModule;
+    FileWatchHandle                        bootLuaWatch = 0;
+    FileWatchHandle                        bootFennelWatch = 0;
+    GameplayDriver                         activeGameplayDriver = GameplayDriver::Cpp;
 
     Engine::UICallback                      uiCallback = nullptr;
     std::vector<Engine::DeviceLostCallback> deviceLostCallbacks;
@@ -129,6 +136,16 @@ struct EngineImpl {
     uint64_t frameCounter = 0;
     bool     joltAcquired = false;
     EngineConfig config;
+};
+
+// Frame steps are free functions to keep FrameScheduler's ABI simple. This
+// narrow friend keeps the engine-owned NativeScriptModule private while letting
+// only those steps access its lifecycle-owned instance.
+class EngineFrameStepAccess {
+  public:
+    [[nodiscard]] static auto NativeGameplayModule(Engine& engine) -> NativeScriptModule& {
+        return *engine._impl->nativeScriptModule;
+    }
 };
 
 // --- SYSTEM GRAPH HELPERS ---
@@ -184,13 +201,6 @@ void Sys_Terrain(Engine& engine, float dt) {
 // order. Adding a system means adding a step here, not editing Engine::Tick.
 // ============================================================================
 
-/// The native gameplay module is shared by the Gameplay and Fallback steps
-/// (the latter checks IsLoaded()), so both must see the same instance.
-[[nodiscard]] NativeScriptModule& GameplayModule() {
-    static NativeScriptModule module("scripts/gameplay");
-    return module;
-}
-
 namespace Steps {
 
 void Input(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
@@ -204,12 +214,10 @@ void HostUICallback(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
     }
 }
 
-void HotReload(Engine& engine, float /*dt*/, FrameContext& ctx) {
-    static FileWatcher gameplayWatcher("scripts/boot.lua");
-    if (ctx.driver != GameplayDriver::Cpp && gameplayWatcher.CheckModified()) {
-        engine.GetScriptRunner().ReloadFile("scripts/boot.lua");
-    }
-    engine.GetRenderContext().CheckShaderReload();
+void HotReload(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
+    // All background discovery has already settled into the service queue.
+    // This is the sole callback dispatch point, before gameplay and rendering.
+    engine.GetFileSystemWatcher().DispatchEvents();
 }
 
 /// Translate gameplay input using the previous resolved camera. Camera
@@ -230,7 +238,7 @@ void Gameplay(Engine& engine, float dt, FrameContext& ctx) {
         using enum GameplayDriver;
         case Cpp: {
             ZHLN::ScopedTimer profTimer("ECS System: Native C++ Gameplay Update");
-            ctx.status = GameplayModule().Update(&engine, dt);
+            ctx.status = EngineFrameStepAccess::NativeGameplayModule(engine).Update(&engine, dt);
             break;
         }
         case Fennel: {
@@ -241,7 +249,7 @@ void Gameplay(Engine& engine, float dt, FrameContext& ctx) {
         case Hybrid: {
             {
                 ZHLN::ScopedTimer profTimer("ECS System: Native C++ Gameplay Update");
-                ctx.status = GameplayModule().Update(&engine, dt);
+                ctx.status = EngineFrameStepAccess::NativeGameplayModule(engine).Update(&engine, dt);
             }
             {
                 ZHLN::ScopedTimer profTimer("ECS System: Script/Lua Update");
@@ -301,7 +309,7 @@ void Fallback(Engine& engine, float dt, FrameContext& ctx) {
         if ((ctx.driver == GameplayDriver::Fennel || ctx.driver == GameplayDriver::Hybrid) && !std::filesystem::exists("scripts/boot.lua") &&
             !std::filesystem::exists("scripts/boot.fnl")) {
             DefaultPreset::BuildFallbackScene(engine, FallbackReason::MissingBootScript, "Script 'scripts/boot.lua' was not found in working directory.");
-        } else if (ctx.driver == GameplayDriver::Cpp && !GameplayModule().IsLoaded()) {
+        } else if (ctx.driver == GameplayDriver::Cpp && !EngineFrameStepAccess::NativeGameplayModule(engine).IsLoaded()) {
             DefaultPreset::BuildFallbackScene(
                 engine, FallbackReason::MissingNativeModule, "Native gameplay module (libgameplay.so / gameplay.dll) was not found."
             );
@@ -532,7 +540,7 @@ auto Engine::HandleDeviceLost() noexcept -> std::expected<void, Error> {
     _impl->renderContext->OnDeviceLost();
     _impl->renderContext.reset();
 
-    auto rc_res = RenderContext::Create(*_impl->window, _impl->config.render);
+    auto rc_res = RenderContext::Create(*_impl->window, _impl->config.render, _impl->fileSystemWatcher.get());
     if (!rc_res) {
         return std::unexpected(rc_res.error());
     }
@@ -616,9 +624,10 @@ void ReleaseJoltRegistration() {
 auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error> {
     ZHLN::Fiber::InitMainThread();
 
-    _impl               = std::make_unique<EngineImpl>();
-    _impl->config       = cfg;
-    _impl->scriptRunner = std::make_unique<ScriptRunner>();
+    _impl                       = std::make_unique<EngineImpl>();
+    _impl->config               = cfg;
+    _impl->fileSystemWatcher    = std::make_unique<FileSystemWatcher>();
+    _impl->scriptRunner         = std::make_unique<ScriptRunner>();
 
     bool use_tty = false;
 
@@ -718,7 +727,7 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
     AcquireJoltRegistration();
     _impl->joltAcquired = true;
 
-    auto rc_res = RenderContext::Create(*_impl->window, cfg.render);
+    auto rc_res = RenderContext::Create(*_impl->window, cfg.render, _impl->fileSystemWatcher.get());
     if (!rc_res) {
         return std::unexpected(rc_res.error());
     }
@@ -727,6 +736,16 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
     _impl->physicsContext = std::make_unique<PhysicsContext>(cfg.physics);
     _impl->audioContext   = std::make_unique<AudioContext>();
     _impl->assetManager   = std::make_unique<CreativeWorksManager>();
+    _impl->nativeScriptModule = std::make_unique<NativeScriptModule>(*this, "scripts/gameplay");
+
+    const auto reloadBootScript = [this](const FileWatchEvent& event) {
+        if (_impl->activeGameplayDriver == GameplayDriver::Cpp || event.action == FileWatchAction::Deleted) {
+            return;
+        }
+        _impl->scriptRunner->ReloadFile(event.path.string());
+    };
+    _impl->bootLuaWatch    = _impl->fileSystemWatcher->WatchFile("scripts/boot.lua", reloadBootScript);
+    _impl->bootFennelWatch = _impl->fileSystemWatcher->WatchFile("scripts/boot.fnl", reloadBootScript);
 
     _impl->updateGraph   = std::make_unique<ECS::SystemGraph>();
     _impl->renderGraph   = std::make_unique<ECS::SystemGraph>();
@@ -770,6 +789,8 @@ Engine::~Engine() {
     _impl->articulationSystem.reset();
     _impl->physicsContext.reset();
     _impl->renderContext.reset();
+    _impl->nativeScriptModule.reset();
+    _impl->fileSystemWatcher.reset();
     _impl->window.reset();
     _impl->assetManager.reset();
     _impl->audioContext.reset();
@@ -882,6 +903,9 @@ auto Engine::GetAudioContext() -> AudioContext& {
 }
 auto Engine::GetScriptRunner() -> ScriptRunner& {
     return *_impl->scriptRunner;
+}
+auto Engine::GetFileSystemWatcher() -> FileSystemWatcher& {
+    return *_impl->fileSystemWatcher;
 }
 auto Engine::GetRegistry() -> ECS::Registry& {
     return _impl->registry;
@@ -1052,6 +1076,8 @@ auto Engine::InitializeDefaultScene() -> bool {
 }
 
 auto Engine::Tick(float dt, GameplayDriver driver) -> GameplayStatus {
+    _impl->activeGameplayDriver = driver;
+
     // Resource contexts retain owner/handle pairs outside ECS component
     // storage. Reconcile before any phase can observe this frame's world.
     _impl->renderContext->ReconcileEntityBuffers(_impl->registry);

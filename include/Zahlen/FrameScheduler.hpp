@@ -22,7 +22,7 @@ class Engine;
 enum class FramePhase : uint8_t {
     Input,        ///< Raw device state -> InputStateComponent.
     UI,           ///< UI interaction plus the host editor callback.
-    HotReload,    ///< Gameplay script and shader reload checks.
+    HotReload,    ///< Main-thread dispatch of settled filesystem reload events.
     PlayerIntent, ///< Input -> movement, using last frame's resolved camera.
     Physics,      ///< Fixed-step simulation and transform write-back.
     Gameplay,     ///< Native and/or scripted gameplay modules.

@@ -52,13 +52,6 @@ std::expected<Vk::Pipeline, Error>
     return Vk::ComputePipelineBuilder().Shader(shader).Layout(layout).Build(ctx.Device());
 }
 
-void RenderContext::Impl::WatchPipeline(const char* vsPath, const char* psPath, std::function<void()> rebuild_fn) noexcept {
-    if constexpr (isDev) {
-        RegisterShaderWatcher(vsPath, rebuild_fn);
-        RegisterShaderWatcher(psPath, std::move(rebuild_fn));
-    }
-}
-
 std::expected<void, Error> RenderContext::Impl::InitDiagnosticsAndProfiling() {
     if (!CheckRayTracingSupport(ctx.Physical()) || !rtCtx.Init(ctx.Device())) {
         ZHLN::Log("WARNING: Raytracing context failed to initialize. RTR will be disabled.");
