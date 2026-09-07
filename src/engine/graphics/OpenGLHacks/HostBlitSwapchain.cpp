@@ -107,8 +107,8 @@ struct State {
 
     // GL presentation window (owned only when the caller's window has no
     // GL context, which is the case for every engine window: GLFW_NO_API).
+    // The window is plugin-owned; GLFW itself never is (see ResolveWindow).
     GLFWwindow* glWindow = nullptr;
-    bool        ownsGlfw = false; // did this file call glfwInit()?
 
     bool ready = false;
 } g;
@@ -293,7 +293,10 @@ GLFWwindow* ResolveWindow(GLFWwindow* requested, uint32_t width, uint32_t height
         Log("glfwInit failed; cannot open a host presentation window.");
         return nullptr;
     }
-    g.ownsGlfw = true;
+    // NOTE: glfwInit() also returns true when the ENGINE already initialized
+    // GLFW, so this file must never assume ownership: glfwTerminate() would
+    // destroy the engine's windows out from under it (the engine tears the
+    // RenderContext — and with it this plugin — down BEFORE its Window).
 
     int fbW = static_cast<int>(width), fbH = static_cast<int>(height);
     if (requested != nullptr) {
@@ -363,7 +366,9 @@ void GlBlit(uint32_t width, uint32_t height, VkFormat format) noexcept {
     glDrawPixels(static_cast<int>(width), static_cast<int>(height), glFormat, glType, g.mapped);
 
     glPixelZoom(1.0f, 1.0f);
-    glfwSwapBuffers(glfwGetCurrentContext());
+    // NOTE: no swap here — Present() owns the single per-frame swap. A second
+    // glfwSwapBuffers would flip the never-drawn back buffer onto the screen,
+    // which on macOS shows as an alternating black frame.
 }
 
 } // namespace
@@ -429,8 +434,10 @@ void Shutdown() noexcept;
     GLFWwindow* target = ResolveWindow(window, width, height);
     if (target == nullptr)
         return false;
-    if (g.ownsGlfw)
-        glfwPollEvents(); // keep the plugin window responsive
+    // Keep the plugin window responsive. Harmless when the engine polls too
+    // (events are delivered once); required when the plugin is the only
+    // GLFW consumer (e.g. a TTY-mode engine session).
+    glfwPollEvents();
     if (glfwWindowShouldClose(target))
         return false;
 
@@ -459,8 +466,10 @@ void Shutdown() noexcept {
     }
     if (g.glWindow != nullptr)
         glfwDestroyWindow(g.glWindow);
-    if (g.ownsGlfw)
-        glfwTerminate();
+    // Deliberately NO glfwTerminate(): GLFW may be (and in every engine
+    // session IS) owned by the engine, which destroys its Window AFTER this
+    // plugin. Terminating here would free the engine's window handles and
+    // crash its teardown; at process exit the OS reclaims GLFW anyway.
     g = State {};
 }
 
