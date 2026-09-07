@@ -62,21 +62,25 @@
 //
 // ============================================================================
 
+// GL_GLEXT_PROTOTYPES must be defined BEFORE the first GL header inclusion:
+// on Linux, <GLFW/glfw3.h> below pulls in <GL/gl.h>, and libglvnd's gl.h
+// includes <GL/glext.h> itself -- glext.h's include guard then makes any
+// later definition moot. glWindowPos2i (GL 1.4, ARB_window_pos) only gets a
+// prototype when the macro is already set at that first inclusion. (Mesa's
+// gl.h does NOT self-include glext.h; libglvnd's -- what Arch and friends
+// ship -- does, so the define cannot live after the GLFW include.)
+#if !defined(__APPLE__) && !defined(GL_GLEXT_PROTOTYPES)
+#define GL_GLEXT_PROTOTYPES 1
+#endif
+
 #include <GLFW/glfw3.h>
 #include <Rendering.hpp> // Vulkan core (PCH of the render module)
 
 #if defined(__APPLE__)
 #include <OpenGL/gl.h> // legacy 2.1 API: glDrawPixels & friends
 #else
-// Mesa's <GL/gl.h> stops at GL 1.1, but glWindowPos2i is GL 1.4
-// (ARB_window_pos): on Linux the prototype lives in <GL/glext.h> and only
-// with GL_GLEXT_PROTOTYPES defined. libGL exports the symbol, so the
-// prototype is all that is needed to compile and link.
-#ifndef GL_GLEXT_PROTOTYPES
-#define GL_GLEXT_PROTOTYPES 1
-#endif
 #include <GL/gl.h>
-#include <GL/glext.h>
+#include <GL/glext.h> // glWindowPos2i prototype when nothing pulled GL in yet
 #endif
 
 #include <cstdint>
