@@ -17,7 +17,8 @@ target_include_directories(HostBlitSwapchain PUBLIC
 if(NOT MSVC)
     target_compile_options(HostBlitSwapchain PRIVATE -fno-exceptions -fno-rtti)
 endif()
-
+target_link_libraries(HostBlitSwapchain PRIVATE zahlen_render)
 target_link_libraries(HostBlitSwapchain PRIVATE zahlen_warnings)
 target_link_libraries(HostBlitSwapchain PRIVATE OpenGL::GL)
 target_link_libraries(HostBlitSwapchain PRIVATE glfw)
+

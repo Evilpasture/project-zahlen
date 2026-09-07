@@ -940,6 +940,8 @@ zahlen_enable_reflection(zahlen_threading)
 zahlen_enable_reflection(zahlen)
 zahlen_enable_reflection(zcook)
 
+zahlen_enable_reflection(HostBlitSwapchain)
+
 option(ZHLN_BUILD_EXTRAS "Build first-party engine feature modules and VFX toolkits" ON)
 
 if(ZHLN_BUILD_EXTRAS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extras")
