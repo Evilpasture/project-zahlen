@@ -942,11 +942,18 @@ void BlitPass::Execute(
     VkCommandBuffer cmd = recorder.cmd;
     auto&           ctx = recorder.ctx;
 
-    struct BlitPushConstants {
-        float vignetteIntensity;
-        float vignettePower;
-        int   fullBright;
-    } pc = {.vignetteIntensity = ctx.settings.post.vignetteIntensity, .vignettePower = ctx.settings.post.vignettePower, .fullBright = fullBright};
+    const RenderContext::Impl::BlitPushConstants pc {
+        .vignetteIntensity = ctx.settings.post.vignetteIntensity,
+        .vignettePower     = ctx.settings.post.vignettePower,
+        .fullBright        = fullBright,
+        .exposure          = ctx.settings.post.exposure,
+        .bloomStrength     = ctx.settings.post.bloomStrength,
+        .contrast          = ctx.settings.post.contrast,
+        .saturation        = ctx.settings.post.saturation,
+        .tonemapper        = ctx.settings.post.tonemapper,
+        .colorFilter       = {ctx.settings.post.colorFilter[0], ctx.settings.post.colorFilter[1], ctx.settings.post.colorFilter[2]},
+        ._padding          = 0.0f
+    };
 
     if (ctx.blitPass.pipeline.Valid()) {
         Vk::DynamicPass(inColor.extent).AddColor(swapchainTarget, VK_ATTACHMENT_LOAD_OP_DONT_CARE).Execute(cmd, [&]() {

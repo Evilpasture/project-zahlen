@@ -90,6 +90,15 @@ struct GISettings {
     int   enableSSR         = 1;
     int   enableRTR         = 0;
 
+    // Final Blit colour style. These deliberately are not QualitySignature
+    // fields: quality tiers choose rendering cost, not a scene's look.
+    float                exposure      = 0.015f;
+    float                bloomStrength = 0.5f;
+    float                contrast      = 1.0f;
+    float                saturation    = 1.0f;
+    int                  tonemapper    = 1; // 0 = Linear, 1 = ACES, 2 = Reinhard, 3 = Neutral
+    std::array<float, 3> colorFilter   = {1.0f, 1.0f, 1.0f};
+
     auto operator==(const GISettings&) const noexcept -> bool = default;
 };
 
@@ -301,6 +310,7 @@ static_assert([] -> bool {
     s.ApplyPreset(QualityLevel::High);
     s.shadows.sunSize        = 0.02f; // non-signature tweaks keep the tier
     s.post.vignetteIntensity = 1.4f;
+    s.post.tonemapper        = 3;
     return s.DetectPreset() == QualityLevel::High;
 }());
 

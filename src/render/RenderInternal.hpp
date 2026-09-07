@@ -1193,7 +1193,19 @@ struct RenderContext::Impl {
         float vignetteIntensity;
         float vignettePower;
         int   fullBright;
+        float exposure;
+        float bloomStrength;
+        float contrast;
+        float saturation;
+        int   tonemapper;
+        float colorFilter[3];
+        float _padding;
     };
+    static_assert(sizeof(BlitPushConstants) == 48, "BlitPushConstants must exactly mirror blit.slang");
+    static_assert(
+        offsetof(BlitPushConstants, colorFilter) == 32 && offsetof(BlitPushConstants, _padding) == 44,
+        "BlitPushConstants field offsets must exactly mirror blit.slang"
+    );
 
     struct PipelineRegistration {
         const char*              name;

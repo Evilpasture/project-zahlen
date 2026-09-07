@@ -286,6 +286,16 @@ struct Components {
         int       enableSSR         = 1;
         int       enableRTR         = 0;
         int       fullBright        = 0;
+
+        // Final Blit colour style. Tonemapper values mirror blit.slang:
+        // 0 = Linear, 1 = ACES, 2 = Reinhard, 3 = Neutral.
+        float     exposure          = 0.015f;
+        float     bloomStrength     = 0.5f;
+        float     contrast          = 1.0f;
+        float     saturation        = 1.0f;
+        int       tonemapper        = 1;
+        JPH::Vec3 colorFilter       = JPH::Vec3::sReplicate(1.0f);
+
         float     ambientExposure   = 25.0f;
         JPH::Vec3 probeMin          = JPH::Vec3(-22.0f, 0.0f, -22.0f);
         JPH::Vec3 probeMax          = JPH::Vec3(22.0f, 12.0f, 22.0f);

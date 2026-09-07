@@ -65,6 +65,12 @@ GraphicsSettings CollectGraphicsSettings(Engine& engine) {
         gfx.post.enableSSR     = pp->enableSSR ? 1 : 0;
         gfx.post.enableRTR     = pp->enableRTR ? 1 : 0;
         gfx.post.glowIntensity = pp->glowIntensity;
+        gfx.post.exposure      = pp->exposure;
+        gfx.post.bloomStrength = pp->bloomStrength;
+        gfx.post.contrast      = pp->contrast;
+        gfx.post.saturation    = pp->saturation;
+        gfx.post.tonemapper    = pp->tonemapper;
+        gfx.post.colorFilter   = ToArray3(pp->colorFilter);
 
         gfx.environment.ambientExposure = pp->ambientExposure;
         gfx.environment.fullBright      = pp->fullBright;

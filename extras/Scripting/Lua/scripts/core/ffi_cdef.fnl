@@ -165,17 +165,24 @@
           int useLocalProbe;
           float vignetteIntensity;
           float vignettePower;
+          float glowIntensity;
           int enableSSR;
           int enableRTR;
           int fullBright;
+          float exposure;
+          float bloomStrength;
+          float contrast;
+          float saturation;
+          int tonemapper;
+          float colorFilter[4] __attribute__((aligned(16)));
           float ambientExposure;
-          float probeMin[4];
-          float probeMax[4];
-          float probePos[4];
-          float skyZenith[4];
-          float skyHorizon[4];
-          float skyGround[4];
-      } PostProcessSettingsComponent;
+          float probeMin[4] __attribute__((aligned(16)));
+          float probeMax[4] __attribute__((aligned(16)));
+          float probePos[4] __attribute__((aligned(16)));
+          float skyZenith[4] __attribute__((aligned(16)));
+          float skyHorizon[4] __attribute__((aligned(16)));
+          float skyGround[4] __attribute__((aligned(16)));
+      } __attribute__((aligned(16))) PostProcessSettingsComponent;
 
       typedef struct DebugSettingsComponent {
           int physicsDrawMode;

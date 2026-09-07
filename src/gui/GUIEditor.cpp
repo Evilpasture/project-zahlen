@@ -84,6 +84,7 @@ constexpr auto kComponentKinds = MakeComponentKinds<
     Comp::TransformComponent,
     Comp::PBRComponent,
     Comp::LightComponent,
+    Comp::PostProcessSettingsComponent,
     UIComp::UIRectComponent,
     UIComp::UIFlexComponent,
     UIComp::UIPanelComponent,
@@ -685,6 +686,9 @@ void DrawInspectorPanel(GUI::Context& gui, ZHLN::ECS::Registry& reg, EditorState
         ZHLN::Reflect::ForEachFieldWithName(c, sink);
     });
     section("light", "Light", reg.Get<Comp::LightComponent>(sel), [](Comp::LightComponent& c, auto&& sink) -> void {
+        ZHLN::Reflect::ForEachFieldWithName(c, sink);
+    });
+    section("postprocess", "Post Process", reg.Get<Comp::PostProcessSettingsComponent>(sel), [](Comp::PostProcessSettingsComponent& c, auto&& sink) -> void {
         ZHLN::Reflect::ForEachFieldWithName(c, sink);
     });
     section("rect", "Rect", reg.Get<UIComp::UIRectComponent>(sel), [](UIComp::UIRectComponent& c, auto&& sink) -> void {

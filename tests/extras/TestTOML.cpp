@@ -490,6 +490,12 @@ intensity = 250.0
                                                                      .enableSSR       = 0,
                                                                      .enableRTR       = 1,
                                                                      .ambientExposure = 40.0f,
+                                                                     .exposure        = 0.02f,
+                                                                     .bloomStrength   = 0.75f,
+                                                                     .contrast        = 1.15f,
+                                                                     .saturation      = 0.8f,
+                                                                     .tonemapper      = 3,
+                                                                     .colorFilter     = JPH::Vec3(1.0f, 0.9f, 0.8f),
                                                                      .skyZenith       = JPH::Vec4(0.5f, 0.25f, 0.125f, 1.0f)
                                                                  }
             );
@@ -600,6 +606,12 @@ intensity = 250.0
             ZHLN::Test::ExpectEq(scene.environment.ambientExposure, 40.0f);
             ZHLN::Test::ExpectTrue(scene.environment.enableRTR);
             ZHLN::Test::ExpectFalse(scene.environment.enableSSR);
+            ZHLN::Test::ExpectEq(scene.environment.exposure, 0.02f);
+            ZHLN::Test::ExpectEq(scene.environment.bloomStrength, 0.75f);
+            ZHLN::Test::ExpectEq(scene.environment.contrast, 1.15f);
+            ZHLN::Test::ExpectEq(scene.environment.saturation, 0.8f);
+            ZHLN::Test::ExpectEq(scene.environment.tonemapper, 3);
+            ZHLN::Test::ExpectEq(scene.environment.colorFilter.y, 0.9f);
             ZHLN::Test::ExpectEq(scene.environment.skyZenith.x, 0.5f);
 
             const auto& box = scene.entities[0];
@@ -647,6 +659,8 @@ intensity = 250.0
             ZHLN::Test::ExpectTrue(reparsed->entities[0].body == ZHLN::Scene::BodyKind::Dynamic);
             ZHLN::Test::ExpectEq(reparsed->lights[0].type, std::string {"Sun"});
             ZHLN::Test::ExpectTrue(reparsed->environment.enableRTR);
+            ZHLN::Test::ExpectEq(reparsed->environment.tonemapper, 3);
+            ZHLN::Test::ExpectEq(reparsed->environment.colorFilter.z, 0.8f);
 
             return {};
         }

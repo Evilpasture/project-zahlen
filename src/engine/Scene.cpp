@@ -60,9 +60,9 @@ namespace {
 
 /// Assigns across the type pairs the two spellings disagree about.
 ///
-/// The settings component stores a colour as JPH::Vec4 and a toggle as int; the
-/// description says JPH::Float3 and bool. Same type on both sides is a plain
-/// assignment. Everything else falls through and leaves the destination alone:
+/// The settings component stores colours as JPH::Vec3/Vec4 and toggles as int;
+/// the description says JPH::Float3 and bool. Same type on both sides is a
+/// plain assignment. Everything else falls through and leaves the destination alone:
 /// failing the build on an unrelated field that happens to share a name would
 /// make every rename in PostProcessSettingsComponent a compile error in the
 /// scene layer, which is not a trade worth making.
@@ -81,6 +81,10 @@ void AssignConverted(Dst& dst, const Src& src) {
         dst = JPH::Float3 {src.GetX(), src.GetY(), src.GetZ()};
     } else if constexpr (std::is_same_v<D, JPH::Vec4> && std::is_same_v<S, JPH::Float3>) {
         dst = JPH::Vec4 {src.x, src.y, src.z, 1.0f};
+    } else if constexpr (std::is_same_v<D, JPH::Float3> && std::is_same_v<S, JPH::Vec3>) {
+        dst = JPH::Float3 {src.GetX(), src.GetY(), src.GetZ()};
+    } else if constexpr (std::is_same_v<D, JPH::Vec3> && std::is_same_v<S, JPH::Float3>) {
+        dst = JPH::Vec3 {src};
     } else if constexpr (std::is_arithmetic_v<D> && std::is_arithmetic_v<S>) {
         dst = static_cast<D>(src);
     }
@@ -207,7 +211,7 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
     // --- environment --------------------------------------------------------
     const SceneEnvironment& environment = description.environment;
     for (const Entity settings: registry.GetEntitiesWith<Components::GlobalSettingsTagComponent>()) {
-        // By field name, so the seven assignments that used to be written out
+        // By field name, so the hand-written assignments that used to live
         // here cannot fall out of step with the struct. Extract() runs the same
         // copy in the other direction.
         registry.Patch<Components::PostProcessSettingsComponent>(settings, [&](auto& pp) { CopySharedFields(pp, environment); });
