@@ -310,6 +310,7 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
     ZHLN::Log("[WorldEditor] Editor session launched.");
 
     bool saveChordWasDown = false;
+    bool escWasDown       = false;
 
     while (engine.IsRunning()) {
         float frameTime = clock.GetDeltaTime();
@@ -381,11 +382,16 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
             ZHLN::Editor::SceneViewport {sceneViewport.x, sceneViewport.y, sceneViewport.width, sceneViewport.height}, uiCapturesKeyboard
         );
 
-        if (state != nullptr && state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Escape)) && !uiCapturesKeyboard &&
-            !transformActive) {
-            engine.GetWindow().Close();
-            break;
+        // Escape never quits the session -- quitting belongs to the window's
+        // close button / the OS quit path. Blender-style, the press walks a
+        // ladder instead: a live transform modal consumes it above to cancel;
+        // a focused text field owns it (GUI unfocus); otherwise it clears the
+        // current selection. Edge-detected so a held key clears once.
+        const bool escDown = state != nullptr && state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Escape));
+        if (escDown && !escWasDown && !uiCapturesKeyboard && !transformActive) {
+            s_NativeEditorState.selectedEntity = ZHLN::Entity::Null();
         }
+        escWasDown = escDown;
 
         // Ctrl+S saves the world as a scene document. Edge-detected by hand:
         // InputStateComponent carries key *levels*, not presses, so a held
