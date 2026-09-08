@@ -17,6 +17,7 @@
 #include <expected>
 #include <memory>
 #include <optional>
+#include <string_view>
 
 namespace ZHLN {
 
@@ -68,10 +69,10 @@ enum class PhysicalDeviceType : uint8_t {
 
 /// Snapshot of renderer identity and optional-feature status. `rendererName`
 /// and `gpuName` remain valid for the lifetime of the RenderContext that
-/// produced the snapshot (GPU names may be up to 256 characters).
+/// produced the snapshot.
 struct RenderInfo {
-    const char*        rendererName         = "";
-    const char*        gpuName              = "";
+    std::string_view   rendererName         = {};
+    std::string_view   gpuName              = {};
     PhysicalDeviceType deviceType           = PhysicalDeviceType::Other;
     PresentationMode   presentationMode     = PresentationMode::OffscreenOnly;
     bool               meshShadingSupported = false;

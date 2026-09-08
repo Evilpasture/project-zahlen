@@ -324,8 +324,8 @@ auto RenderContext::GetInfo() const noexcept -> RenderInfo {
             break;
     }
     return RenderInfo {
-        .rendererName         = _impl->appName.data(),
-        .gpuName              = &props.deviceName[0],
+        .rendererName         = _impl->appName,
+        .gpuName              = props.deviceName,
         .deviceType           = deviceType,
         .presentationMode     = _impl->presentationMode,
         .meshShadingSupported = _impl->ctx.MeshShadersSupported(),
