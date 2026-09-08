@@ -1193,7 +1193,6 @@ VkResult ZHLN_AllocateCommandBuffers(const VkDevice device, ZHLN_CommandPool* co
 }
 
 void ZHLN_ResetCommandPool(const VkDevice device, const ZHLN_CommandPool* const restrict pool) {
-    vkResetCommandPool(device, pool->e, const ZHLN_CommandPool* const restrict pool) {
     vkResetCommandPool(device, pool->pool, 0);
 }
 
@@ -2427,12 +2426,6 @@ void ZHLN_CmdBuildTlas(
     };
 
     VkAccelerationStructureBuildRangeInfoKHR        range_info      = {.primitiveCount = instance_count};
-    const VkAccelerationStructureBuildRangeInfoKHR* p_range_infos[] = {&range_info};
-    ctx->build_as(cmd, 1, &build_info, p_range_infos);
-}
-
-// NOLINTEND(misc-misplaced-const, readability-identifier-length)
-dRangeInfoKHR        range_info      = {.primitiveCount = instance_count};
     const VkAccelerationStructureBuildRangeInfoKHR* p_range_infos[] = {&range_info};
     ctx->build_as(cmd, 1, &build_info, p_range_infos);
 }
