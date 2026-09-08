@@ -764,5 +764,3 @@ onClickAction = "editor.save_scene"
 int main() {
     return ZHLN::Test::Runner::Run<TOMLTestSuite>();
 }
-();
-}

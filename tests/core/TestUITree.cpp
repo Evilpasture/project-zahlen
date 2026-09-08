@@ -15,6 +15,7 @@ enum class UITreeTestError : uint8_t {
     ActionRegistryFailed ZHLN_ANNOTATION(ZHLN::Description<"ActionRegistry bind / invoke did not behave as specified."> {}) = 1,
     PropertyStoreFailed  ZHLN_ANNOTATION(ZHLN::Description<"PropertyStore get / set did not round-trip or keep types."> {}),
     RenderWalkFailed     ZHLN_ANNOTATION(ZHLN::Description<"RenderUITree did not walk a CPU-constructed tree."> {}),
+    TreeMutationFailed   ZHLN_ANNOTATION(ZHLN::Description<"FindNodeById / InsertChild / RemoveNodeById did not mutate the tree as specified."> {}),
 };
 
 struct UITreeTestSuite {
