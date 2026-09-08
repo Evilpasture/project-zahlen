@@ -136,6 +136,7 @@ module;
 #include <Zahlen/Core/Loop.hpp>
 #include <Zahlen/Core/Math.hpp>
 #include <Zahlen/Core/MemoryPool.hpp>
+#include <Zahlen/Core/Pages.hpp>
 #include <Zahlen/Core/Pair.hpp>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Core/Prefetch.hpp>

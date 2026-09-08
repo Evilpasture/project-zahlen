@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Core/Pages.hpp>
 #include <Zahlen/Core/Platform.hpp>
 #include <bit>
 #include <cstddef>
