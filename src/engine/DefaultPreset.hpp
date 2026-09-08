@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <Zahlen/Common.h>
 #include <Zahlen/Entity.hpp>
 #include <cstdint>
 #include <string_view>
@@ -18,7 +17,10 @@ struct Scene;
 
 enum class FallbackReason : uint8_t { None = 0, MissingBootScript, MissingNativeModule, ScriptExecutionError };
 
-class ZHLN_API DefaultPreset {
+/// Compiled-in fail-safe scene. Engine-private: hosts that do not want it set
+/// `EngineConfig::disableFallbackScene` at Create rather than talking to this
+/// type.
+class DefaultPreset {
   public:
     static void               BuildFallbackScene(Engine& engine, FallbackReason reason, std::string_view detailMessage = "");
 
@@ -49,17 +51,10 @@ class ZHLN_API DefaultPreset {
     /// calls this; the state is owner-scoped until the preset itself is moved
     /// into the engine.
     static void ReleaseFor(const Engine* engine) noexcept;
-    static void               SetDisabled(bool disabled) noexcept {
-        s_Disabled = disabled;
-    }
-    [[nodiscard]] static bool IsDisabled() noexcept {
-        return s_Disabled;
-    }
 
   private:
     static inline bool           s_IsActive       = false;
     static inline const Engine*  s_Owner          = nullptr;
-    static inline bool           s_Disabled       = false;
     static inline FallbackReason s_Reason         = FallbackReason::None;
     static inline char           s_DetailMsg[256] = "";
 

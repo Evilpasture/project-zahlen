@@ -19,7 +19,6 @@ module;
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
-#include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/Input.hpp>
@@ -762,8 +761,6 @@ void Initialize(ZHLN::Engine& engine) {
     ZHLN::GLTF::InstallDeviceLostHandler(engine);
 
     engine.InitializeDefaultScene();
-    ZHLN::DefaultPreset::SetDisabled(true);
-
     {
         auto& reg     = engine.GetRegistry();
         auto  camEnts = reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>();

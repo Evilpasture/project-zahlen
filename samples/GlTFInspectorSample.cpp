@@ -11,7 +11,6 @@
 
 #include <Zahlen/Clock.hpp>
 #include <Zahlen/CommandLine.hpp>
-#include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -38,7 +37,8 @@ auto main(int argc, char* argv[]) -> int {
 
     auto engineRes = ZHLN::Engine::Create(
         {.physics = {.maxBodies = 2048, .maxBodyPairs = 4096, .maxContactConstraints = 4096},
-         .render  = {.appName = "Zahlen :: glTF Inspector", .vsync = options.vsync, .fullscreen = options.fullscreen}}
+         .render  = {.appName = "Zahlen :: glTF Inspector", .vsync = options.vsync, .fullscreen = options.fullscreen},
+         .disableFallbackScene = true}
     );
 
     if (!engineRes) {

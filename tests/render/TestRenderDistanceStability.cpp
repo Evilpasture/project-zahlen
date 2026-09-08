@@ -54,7 +54,6 @@
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
-#include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Profiler.hpp>
@@ -552,7 +551,6 @@ struct DistanceStabilitySuite {
     }
 
     static auto CreateTestEngine() -> std::unique_ptr<ZHLN::Engine> {
-        ZHLN::DefaultPreset::SetDisabled(true);
 
         const ZHLN::EngineConfig cfg {
             .physics = {.maxBodies = 256, .maxBodyPairs = 512, .maxContactConstraints = 512, .tempAllocatorSize = 8 * 1024 * 1024},
@@ -564,7 +562,8 @@ struct DistanceStabilitySuite {
                 .fullscreen     = false,
                 .validationMode = ZHLN::ValidationMode::On, // Robustness test: VUIDs ARE failures.
                 .headless       = true
-            }
+            },
+            .disableFallbackScene = true,
         };
 
         auto engineRes = ZHLN::Engine::Create(cfg);

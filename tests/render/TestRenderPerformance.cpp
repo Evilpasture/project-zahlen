@@ -12,7 +12,6 @@
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
-#include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -139,7 +138,6 @@ struct RenderPerfEnvironment {
 };
 
 auto CreateTestEngine(uint32_t width, uint32_t height, ZHLN::ValidationMode mode) -> std::unique_ptr<ZHLN::Engine> {
-    ZHLN::DefaultPreset::SetDisabled(true);
 
     const ZHLN::EngineConfig cfg {
         .physics = {.maxBodies = 2048, .maxBodyPairs = 4096, .maxContactConstraints = 4096, .tempAllocatorSize = 16 * 1024 * 1024},
@@ -151,7 +149,8 @@ auto CreateTestEngine(uint32_t width, uint32_t height, ZHLN::ValidationMode mode
             .fullscreen     = false,
             .validationMode = mode,
             .headless       = true
-        }
+        },
+        .disableFallbackScene = true,
     };
 
     auto engineRes = ZHLN::Engine::Create(cfg);

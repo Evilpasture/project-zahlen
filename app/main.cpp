@@ -24,7 +24,6 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/CreativeWorksManager.hpp>
-#include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/gui/GUI.hpp>
@@ -560,8 +559,6 @@ auto main(int argc, char* argv[]) -> int {
                 ZHLN::Platform::Init();
                 ZHLN::SetupSignalHandler();
                 ZHLN::TaskSystem::Init();
-                ZHLN::DefaultPreset::SetDisabled(true);
-
                 uint32_t w = options.fullscreen ? 0 : 1280;
                 uint32_t h = options.fullscreen ? 0 : 720;
 
@@ -576,6 +573,7 @@ auto main(int argc, char* argv[]) -> int {
                         .validationMode = options.validationMode,
                         .headless       = options.headless,
                     },
+                    .disableFallbackScene = true,
                 };
 
                 auto engine_res = ZHLN::Engine::Create(config);

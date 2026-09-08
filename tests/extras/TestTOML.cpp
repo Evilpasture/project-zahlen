@@ -27,7 +27,6 @@
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Reflection.hpp>
-#include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Scene.hpp>
 #include <Zahlen/ecs/ECS.hpp>
@@ -421,7 +420,49 @@ intensity = 250.0
          * the Instance by position.
          */
         std::expected<void, ZHLN::Error> the_fallback_scene_description_round_trips() {
-            const ZHLN::Scene::Scene& scene = ZHLN::DefaultPreset::FallbackScene();
+            ZHLN::Scene::Scene scene;
+            scene.name        = "Zahlen Fallback";
+            scene.camera      = ZHLN::Scene::SceneCamera {.position = {0.0f, 3.8f, 7.5f}, .yaw = -90.0f, .pitch = -14.0f, .fov = 52.0f};
+            scene.environment = ZHLN::Scene::SceneEnvironment {.enableSSR = false, .enableRTR = true};
+
+            ZHLN::Scene::SceneEntity ground;
+            ground.name     = "FallbackGround";
+            ground.shape    = ZHLN::Scene::ShapeKind::Plane;
+            ground.extent   = 35.0f;
+            ground.material = ZHLN::Scene::SceneMaterial {.baseColor = {0.12f, 0.14f, 0.18f, 1.0f}, .roughness = 0.05f, .metallic = 0.30f};
+
+            ZHLN::Scene::SceneEntity emblem;
+            emblem.name        = "FallbackEmblem";
+            emblem.shape       = ZHLN::Scene::ShapeKind::Box;
+            emblem.halfExtents = {1.2f, 1.2f, 1.2f};
+            emblem.transform   = ZHLN::Scene::Transform {.position = {0.0f, 2.0f, 0.0f}};
+            emblem.material    = ZHLN::Scene::SceneMaterial {.baseColor = {0.1f, 0.6f, 0.95f, 1.0f}, .roughness = 0.15f, .metallic = 0.85f};
+
+            scene.entities.push_back(std::move(ground));
+            scene.entities.push_back(std::move(emblem));
+
+            ZHLN::Scene::SceneLight sun;
+            sun.name      = "FallbackSun";
+            sun.type      = "Sun";
+            sun.position  = {12.0f, 25.0f, 12.0f};
+            sun.rotation  = {50.0f, -35.0f, 0.0f};
+            sun.direction = {0.4f, 1.0f, 0.3f};
+            sun.color     = {1.0f, 0.96f, 0.88f};
+            sun.intensity = 180.0f;
+            sun.radius    = 0.0f;
+            sun.range     = 0.0f;
+
+            ZHLN::Scene::SceneLight orbit;
+            orbit.name      = "FallbackPointLight";
+            orbit.type      = "Point";
+            orbit.position  = {0.0f, 2.5f, 0.0f};
+            orbit.color     = {0.2f, 0.85f, 1.0f};
+            orbit.intensity = 220.0f;
+            orbit.radius    = 0.6f;
+            orbit.range     = 18.0f;
+
+            scene.lights.push_back(std::move(sun));
+            scene.lights.push_back(std::move(orbit));
 
             if (!ZHLN::Test::ExpectEq(scene.entities.size(), size_t {2}) || !ZHLN::Test::ExpectEq(scene.lights.size(), size_t {2})) {
                 return {};

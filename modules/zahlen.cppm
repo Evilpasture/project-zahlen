@@ -150,7 +150,6 @@ module;
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/CreativeWorksManager.hpp>
-#include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
@@ -443,10 +442,8 @@ using ZHLN::CommandLineOptions;
 using ZHLN::CPUProfiler;
 using ZHLN::CreativeWorkLoadRequest;
 using ZHLN::CreativeWorksManager;
-using ZHLN::DefaultPreset;
 using ZHLN::Engine;
 using ZHLN::EngineConfig;
-using ZHLN::FallbackReason;
 using ZHLN::GameplayDriver;
 using ZHLN::HandleCommandLine;
 using ZHLN::KeyCode;

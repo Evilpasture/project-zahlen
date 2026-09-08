@@ -23,7 +23,7 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/CreativeWorksManager.hpp>
-#include <Zahlen/DefaultPreset.hpp>
+#include "DefaultPreset.hpp"
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/FrameScheduler.hpp>
 #include <Zahlen/Input.hpp>
@@ -145,6 +145,10 @@ class EngineFrameStepAccess {
   public:
     [[nodiscard]] static auto NativeGameplayModule(Engine& engine) -> NativeScriptModule& {
         return *engine._impl->nativeScriptModule;
+    }
+
+    [[nodiscard]] static auto Config(Engine& engine) -> const EngineConfig& {
+        return engine._impl->config;
     }
 };
 
@@ -305,6 +309,10 @@ void Present(Engine& engine, float dt, FrameContext& ctx) {
 
 /// Auto-detect missing gameplay scripts / modules and engage the Fallback Preset.
 void Fallback(Engine& engine, float dt, FrameContext& ctx) {
+    if (EngineFrameStepAccess::Config(engine).disableFallbackScene) {
+        return;
+    }
+
     if (!DefaultPreset::IsActive()) {
         if ((ctx.driver == GameplayDriver::Fennel || ctx.driver == GameplayDriver::Hybrid) && !std::filesystem::exists("scripts/boot.lua") &&
             !std::filesystem::exists("scripts/boot.fnl")) {

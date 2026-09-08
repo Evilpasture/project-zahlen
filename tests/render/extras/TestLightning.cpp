@@ -3,7 +3,6 @@
 
 #include "TestsFramework.hpp"
 #include <Zahlen/Components.hpp>
-#include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -40,7 +39,6 @@ struct LightningTestSuite {
         // 1. Full Headless Engine Strike Lifecycle & Ambience Flashing
         // ====================================================================
         std::expected<void, ZHLN::Error> headless_engine_strike_lifecycle_and_light_cleanup() {
-            ZHLN::DefaultPreset::SetDisabled(true);
 
             const ZHLN::EngineConfig engineCfg {
                 .physics = {.maxBodies = 256, .maxBodyPairs = 512, .maxContactConstraints = 512, .tempAllocatorSize = 8 * 1024 * 1024},
@@ -52,7 +50,8 @@ struct LightningTestSuite {
                     .fullscreen     = false,
                     .validationMode = ZHLN::ValidationMode::On,
                     .headless       = true
-                }
+                },
+                .disableFallbackScene = true,
             };
 
             auto engineRes   = ZHLN::Engine::Create(engineCfg);
@@ -152,7 +151,6 @@ struct LightningTestSuite {
         // 2. Multiple Overlapping Lightning Strikes (Exposure Stack Invariant)
         // ====================================================================
         std::expected<void, ZHLN::Error> overlapping_strikes_ambience_stack_integrity() {
-            ZHLN::DefaultPreset::SetDisabled(true);
 
             const ZHLN::EngineConfig engineCfg {
                 .physics = {.maxBodies = 256, .maxBodyPairs = 512, .maxContactConstraints = 512, .tempAllocatorSize = 8 * 1024 * 1024},
@@ -164,7 +162,8 @@ struct LightningTestSuite {
                     .fullscreen     = false,
                     .validationMode = ZHLN::ValidationMode::On,
                     .headless       = true
-                }
+                },
+                .disableFallbackScene = true,
             };
 
             auto engineRes   = ZHLN::Engine::Create(engineCfg);
@@ -224,11 +223,11 @@ struct LightningTestSuite {
         // 3. Raw registry destroy and explicit despawn use distinct safe paths
         // ====================================================================
         std::expected<void, ZHLN::Error> lightning_resources_survive_component_erasure_until_reconciled() {
-            ZHLN::DefaultPreset::SetDisabled(true);
             const ZHLN::EngineConfig engineCfg {
                 .physics = {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 4 * 1024 * 1024},
                 .render  = {.appName = "Lightning Resource Reconciliation Test", .width = 320, .height = 240, .vsync = false,
-                            .fullscreen = false, .validationMode = ZHLN::ValidationMode::On, .headless = true}
+                            .fullscreen = false, .validationMode = ZHLN::ValidationMode::On, .headless = true},
+                .disableFallbackScene = true,
             };
 
             auto engineRes = ZHLN::Engine::Create(engineCfg);

@@ -32,7 +32,6 @@
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Core/SignalManager.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
-#include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
@@ -162,8 +161,6 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::SetupSignalHandler();
     InstallProvokeSignal();
     ZHLN::TaskSystem::Init();
-    ZHLN::DefaultPreset::SetDisabled(true);
-
     auto engineRes = ZHLN::Engine::Create(
         {.physics = {.maxBodies = 1024, .maxBodyPairs = 2048, .maxContactConstraints = 2048},
          .render  = {
@@ -172,7 +169,8 @@ auto main(int argc, char* argv[]) -> int {
               .fullscreen     = options.fullscreen,
               .validationMode = options.validationMode,
               .headless       = options.headless,
-          }}
+          },
+          .disableFallbackScene = true}
     );
     if (!engineRes) {
         ZHLN::Log("FATAL: Failed to initialize Engine: {}", engineRes.error().Message());

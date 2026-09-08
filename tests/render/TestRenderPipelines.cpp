@@ -6,7 +6,6 @@
 #include "Zahlen/Render.hpp"
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
-#include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -39,7 +38,6 @@ struct RenderPipelinesTestSuite {
             // Leaving the fallback preset on engages RTR + a second ground/box/UI
             // on the first Tick (no libgameplay.so), which device-lost the GPU
             // and rebuilt the whole renderer inside the 15s test alarm.
-            ZHLN::DefaultPreset::SetDisabled(true);
 
             const ZHLN::EngineConfig cfg {
                 .physics = {.maxBodies = 512, .maxBodyPairs = 1024, .maxContactConstraints = 1024, .tempAllocatorSize = 16 * 1024 * 1024},
@@ -51,7 +49,8 @@ struct RenderPipelinesTestSuite {
                     .fullscreen     = false,
                     .validationMode = ZHLN::ValidationMode::On,
                     .headless       = true
-                }
+                },
+                .disableFallbackScene = true,
             };
 
             // Exclusive engine: only one Vulkan instance may be live at a
@@ -109,7 +108,6 @@ struct RenderPipelinesTestSuite {
         // state. Engine::Create therefore returns the plain unique owner that
         // callers already pass to every system and factory.
         std::expected<void, ZHLN::Error> engine_creation_keeps_context_explicit() {
-            ZHLN::DefaultPreset::SetDisabled(true);
 
             const ZHLN::EngineConfig cfg {
                 .physics = {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 4 * 1024 * 1024},
@@ -121,7 +119,8 @@ struct RenderPipelinesTestSuite {
                     .fullscreen     = false,
                     .validationMode = ZHLN::ValidationMode::On,
                     .headless       = true
-                }
+                },
+                .disableFallbackScene = true,
             };
 
             ZHLN::Test::Headless::ShutdownPooledEngines();
@@ -228,7 +227,6 @@ struct RenderPipelinesTestSuite {
         // It also pins the ambient chain: each engine publishes itself for its
         // own lifetime, and the context is empty once the last one is gone.
         std::expected<void, ZHLN::Error> engines_are_serial_and_the_slot_is_released() {
-            ZHLN::DefaultPreset::SetDisabled(true);
 
             const auto smallCfg = [](const char* name) -> ZHLN::EngineConfig {
                 return ZHLN::EngineConfig {
@@ -241,7 +239,8 @@ struct RenderPipelinesTestSuite {
                         .fullscreen     = false,
                         .validationMode = ZHLN::ValidationMode::On,
                         .headless       = true
-                    }
+                    },
+                    .disableFallbackScene = true,
                 };
             };
 

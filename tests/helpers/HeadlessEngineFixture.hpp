@@ -24,7 +24,6 @@
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
@@ -60,18 +59,15 @@ struct EngineOptions {
     bool             enableMeshShading     = true;
 };
 
-/// Creates a headless engine with validation enabled and the default preset
+/// Creates a headless engine with validation enabled and the fallback scene
 /// suppressed, then seeds the default scene.
 ///
 /// Prefer AcquireEngine below unless the test genuinely needs a cold device.
 ///
 /// Returns an empty owner on failure; callers assert rather than dereference.
-/// The default preset is disabled process-wide, which is what keeps the engine
-/// from injecting its own sun, floor and camera into a scene the test is
-/// trying to measure.
+/// EngineConfig::disableFallbackScene keeps the engine from injecting its own
+/// sun, floor and camera into a scene the test is trying to measure.
 [[nodiscard]] inline auto CreateEngine(const EngineOptions& opts = {}) -> std::unique_ptr<ZHLN::Engine> {
-    ZHLN::DefaultPreset::SetDisabled(true);
-
     const ZHLN::EngineConfig cfg {
         .physics = {
             .maxBodies             = opts.maxBodies,
@@ -89,7 +85,8 @@ struct EngineOptions {
             .fullscreen     = false,
             .validationMode = ZHLN::ValidationMode::On,
             .headless       = true
-        }
+        },
+        .disableFallbackScene = true,
     };
 
     auto engineRes = ZHLN::Engine::Create(cfg);
@@ -176,7 +173,6 @@ private:
 inline void ResetScene(ZHLN::Engine& engine) {
     engine.GetRegistry().Clear();
     engine.InitializeDefaultScene();
-    ZHLN::DefaultPreset::SetDisabled(true);
 
     // The camera is engine state, not an entity, so Clear does not touch it.
     // Tests routinely set only the fields they care about (position and yaw but

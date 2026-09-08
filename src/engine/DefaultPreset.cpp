@@ -5,7 +5,7 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
-#include <Zahlen/DefaultPreset.hpp>
+#include "DefaultPreset.hpp"
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/Input.hpp>
@@ -137,7 +137,7 @@ void DefaultPreset::ClearFallback() noexcept {
 }
 
 void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, std::string_view detailMessage) {
-    if (s_IsActive || s_Disabled) {
+    if (s_IsActive) {
         return;
     }
 
@@ -208,7 +208,7 @@ void DefaultPreset::Update(Engine& engine, float dt) {
     // Owner check: the handles below belong to the registry of the engine that
     // built the scene, and resolving them against a different registry patches
     // unrelated entities that happen to occupy the same slots.
-    if (!s_IsActive || s_Disabled || s_Owner != &engine) {
+    if (!s_IsActive || s_Owner != &engine) {
         return;
     }
 
