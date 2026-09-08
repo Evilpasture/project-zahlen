@@ -39,6 +39,7 @@
 #include <string_view>
 #include <toml/SceneTOML.hpp>
 #include <toml/TOML.hpp>
+#include <toml/UITOML.hpp>
 #include <unordered_map>
 #include <vector>
 
@@ -507,6 +508,63 @@ intensity = 250.0
             return {};
         }
 
+        /**
+         * A UI tree document is the reflected UINode, the same way a scene
+         * document is the reflected Scene. Colours are `[r, g, b, a]`, kinds
+         * are enumerator names, and children are [[children]] tables.
+         */
+        std::expected<void, ZHLN::Error> a_ui_tree_document_is_just_the_reflected_uinode() {
+            constexpr std::string_view kTree = R"(
+id = "panel"
+kind = "Column"
+label = "Root"
+
+[box]
+padding = 8.0
+gap = 4.0
+color = [0.1, 0.1, 0.12, 1.0]
+
+[[children]]
+id = "title"
+kind = "Text"
+label = "Hello"
+
+[[children]]
+id = "save"
+kind = "Button"
+label = "Save"
+onClickAction = "editor.save_scene"
+)";
+
+            const auto parsed = ZHLN::ReflectTOML::TryParse<ZHLN::GUI::UINode>(kTree);
+            if (!ZHLN::Test::ExpectTrue(parsed.has_value())) {
+                return {};
+            }
+
+            ZHLN::Test::ExpectEq(parsed->id, std::string {"panel"});
+            ZHLN::Test::ExpectTrue(parsed->kind == ZHLN::GUI::NodeKind::Column);
+            ZHLN::Test::ExpectEq(parsed->box.padding, 8.0f);
+            ZHLN::Test::ExpectEq(parsed->box.color.x, 0.1f);
+            ZHLN::Test::ExpectEq(parsed->children.size(), size_t {2});
+            if (parsed->children.size() == 2) {
+                ZHLN::Test::ExpectTrue(parsed->children[0].kind == ZHLN::GUI::NodeKind::Text);
+                ZHLN::Test::ExpectEq(parsed->children[1].onClickAction, std::string {"editor.save_scene"});
+            }
+
+            const std::string emitted  = ZHLN::ReflectTOML::SerializeTOML(*parsed);
+            const auto        reparsed = ZHLN::ReflectTOML::TryParse<ZHLN::GUI::UINode>(emitted);
+            if (!ZHLN::Test::ExpectTrue(reparsed.has_value())) {
+                ZHLN::Println("    [INFO] re-emitted ui tree:\n{}", emitted);
+                return {};
+            }
+            ZHLN::Test::ExpectEq(ZHLN::ReflectTOML::SerializeTOML(*reparsed), emitted);
+            ZHLN::Test::ExpectTrue(emitted.contains("kind = \"Column\""));
+            ZHLN::Test::ExpectTrue(emitted.contains("color = [0.1, 0.1, 0.12, 1.0]"));
+            ZHLN::Test::ExpectTrue(emitted.contains("onClickAction = \"editor.save_scene\""));
+
+            return {};
+        }
+
         // ====================================================================
         // Extraction
         // ====================================================================
@@ -705,4 +763,6 @@ intensity = 250.0
 // tests/extras/CMakeLists.txt), so this owns its own entry point.
 int main() {
     return ZHLN::Test::Runner::Run<TOMLTestSuite>();
+}
+();
 }

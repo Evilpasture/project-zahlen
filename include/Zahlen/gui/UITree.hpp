@@ -17,9 +17,12 @@
 // UINode is the description. It is format-free, the same way Scene::Scene is:
 // extras/toml can walk it later without this header knowing a parser exists.
 // RenderUITree is the walk that turns one description into one frame of
-// Context calls.
+// Context calls. FindNodeById / InsertChild / RemoveNodeById are the mutations
+// a builder needs once Design mode has handed it a clickedId.
 // ===========================================================================
 
+#include <Jolt/Jolt.h>
+#include <Jolt/Math/Float4.h>
 #include <Zahlen/Common.h>
 #include <Zahlen/gui/GUI.hpp>
 #include <functional>
@@ -35,6 +38,21 @@ enum class NodeKind : uint8_t { Box = 0, Row, Column, Text, Button, Checkbox, Sl
 /// so a builder can select a node instead of firing "Save".
 enum class TreeMode : uint8_t { Preview = 0, Design };
 
+/// Layout knobs for a UINode. Same fields as BoxConfig, but colours are Jolt
+/// storage vectors so a document can say `color = [r, g, b, a]` rather than a
+/// table of SIMD lanes.
+struct NodeBox {
+    Sizing      width        = {};
+    Sizing      height       = {};
+    JPH::Float4 color        = {0.0f, 0.0f, 0.0f, 0.0f};
+    JPH::Float4 cornerRadius = {0.0f, 0.0f, 0.0f, 0.0f};
+    float       padding      = 0.0f;
+    float       gap          = 0.0f;
+    Direction   direction    = Direction::Column;
+    Alignment   alignMain    = Alignment::Start;
+    Alignment   alignCross   = Alignment::Start;
+};
+
 /// One widget in a layout tree. Defaults match BoxConfig / widget defaults so
 /// a document can name only what differs.
 struct UINode {
@@ -46,11 +64,11 @@ struct UINode {
     /// PropertyStore path a Checkbox / Slider / TextInput reads and writes.
     std::string bindProperty;
 
-    BoxConfig box {};
-    float     fontSize  = 16.0f;
-    JPH::Vec4 textColor = {1.0f, 1.0f, 1.0f, 1.0f};
-    float     minVal    = 0.0f;
-    float     maxVal    = 1.0f;
+    NodeBox     box {};
+    float       fontSize  = 16.0f;
+    JPH::Float4 textColor = {1.0f, 1.0f, 1.0f, 1.0f};
+    float       minVal    = 0.0f;
+    float       maxVal    = 1.0f;
 
     std::vector<UINode> children;
 };
@@ -109,15 +127,29 @@ struct RenderUITreeResult {
     bool actionInvoked = false;
 };
 
+/// Resolves a Design-mode clickedId (a node.id, or a generated path like
+/// "panel/0/1" when the node has no id) to the live node. Null when missing.
+[[nodiscard]] ZHLN_API auto FindNodeById(UINode& root, std::string_view targetId) -> UINode*;
+[[nodiscard]] ZHLN_API auto FindNodeById(const UINode& root, std::string_view targetId) -> const UINode*;
+
+/// Appends @p child under the node named by @p parentId. False if the parent
+/// is not in the tree.
+[[nodiscard]] ZHLN_API auto InsertChild(UINode& root, std::string_view parentId, UINode child) -> bool;
+
+/// Removes the named node and its subtree. The root itself cannot be removed.
+[[nodiscard]] ZHLN_API auto RemoveNodeById(UINode& root, std::string_view targetId) -> bool;
+
 /// Walks @p root once, issuing Context calls. Must run between BeginFrame and
 /// EndFrame / EndFrameAndRender. @p properties is non-const because bound
 /// widgets write back; pass a dummy store when the tree has no bindings.
+/// @p selectedId is tinted in Design mode so a builder can see the selection.
 [[nodiscard]] ZHLN_API auto RenderUITree(
     Context&              gui,
     const UINode&         root,
     const ActionRegistry& actions,
     PropertyStore&        properties,
-    TreeMode              mode = TreeMode::Preview
+    TreeMode              mode       = TreeMode::Preview,
+    std::string_view      selectedId = {}
 ) -> RenderUITreeResult;
 
 } // namespace ZHLN::GUI

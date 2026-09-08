@@ -114,6 +114,82 @@ struct UITreeTestSuite {
 
             return {};
         }
+
+        std::expected<void, ZHLN::Error> find_insert_and_remove_use_the_same_ids_as_the_walk() {
+            ZHLN::GUI::UINode root;
+            root.id   = "panel";
+            root.kind = ZHLN::GUI::NodeKind::Column;
+            root.children.push_back(ZHLN::GUI::UINode {.kind = ZHLN::GUI::NodeKind::Text, .label = "Hello"});
+            root.children.push_back(ZHLN::GUI::UINode {
+                .id            = "save",
+                .kind          = ZHLN::GUI::NodeKind::Button,
+                .label         = "Save",
+                .onClickAction = "editor.save_scene",
+            });
+
+            // Named nodes resolve by id; anonymous children by the path
+            // RenderUITree would report ("panel/0").
+            ZHLN::GUI::UINode* hello = ZHLN::GUI::FindNodeById(root, "panel/0");
+            ZHLN::GUI::UINode* save  = ZHLN::GUI::FindNodeById(root, "save");
+            if (!ZHLN::Test::ExpectTrue(hello != nullptr && save != nullptr && ZHLN::GUI::FindNodeById(root, "panel") == &root)) {
+                return std::unexpected(UITreeTestError::TreeMutationFailed);
+            }
+            ZHLN::Test::ExpectEq(std::string_view(hello->label), std::string_view("Hello"));
+            ZHLN::Test::ExpectEq(std::string_view(save->label), std::string_view("Save"));
+            ZHLN::Test::ExpectTrue(ZHLN::GUI::FindNodeById(root, "missing") == nullptr);
+            ZHLN::Test::ExpectTrue(ZHLN::GUI::FindNodeById(root, "") == nullptr);
+
+            const ZHLN::GUI::UINode& constRoot = root;
+            ZHLN::Test::ExpectTrue(ZHLN::GUI::FindNodeById(constRoot, "save") == save);
+
+            ZHLN::Test::ExpectTrue(ZHLN::GUI::InsertChild(
+                root, "panel", ZHLN::GUI::UINode {.id = "ssr", .kind = ZHLN::GUI::NodeKind::Checkbox, .label = "SSR"}
+            ));
+            ZHLN::Test::ExpectEq(root.children.size(), size_t {3});
+            ZHLN::Test::ExpectTrue(ZHLN::GUI::FindNodeById(root, "ssr") != nullptr);
+            ZHLN::Test::ExpectFalse(ZHLN::GUI::InsertChild(root, "nope", ZHLN::GUI::UINode {}));
+
+            // The root cannot be deleted; a named child can, and so can an
+            // anonymous one addressed by path.
+            ZHLN::Test::ExpectFalse(ZHLN::GUI::RemoveNodeById(root, "panel"));
+            ZHLN::Test::ExpectTrue(ZHLN::GUI::RemoveNodeById(root, "save"));
+            ZHLN::Test::ExpectTrue(ZHLN::GUI::FindNodeById(root, "save") == nullptr);
+            ZHLN::Test::ExpectTrue(ZHLN::GUI::RemoveNodeById(root, "panel/0"));
+            ZHLN::Test::ExpectEq(root.children.size(), size_t {1});
+            ZHLN::Test::ExpectEq(std::string_view(root.children[0].id), std::string_view("ssr"));
+
+            return {};
+        }
+
+        std::expected<void, ZHLN::Error> design_mode_does_not_invoke_and_accepts_a_selection() {
+            ZHLN::ECS::Registry registry;
+            ZHLN::GUI::Context  gui(registry, {640, 480});
+            gui.BeginFrame(0.016f);
+
+            ZHLN::GUI::UINode root;
+            root.id   = "panel";
+            root.kind = ZHLN::GUI::NodeKind::Column;
+            root.box.color = {0.1f, 0.1f, 0.1f, 1.0f};
+            root.children.push_back(ZHLN::GUI::UINode {
+                .id            = "save",
+                .kind          = ZHLN::GUI::NodeKind::Button,
+                .label         = "Save",
+                .onClickAction = "editor.save_scene",
+            });
+
+            ZHLN::GUI::ActionRegistry actions;
+            int                       saves = 0;
+            actions.Bind("editor.save_scene", [&]() { ++saves; });
+            ZHLN::GUI::PropertyStore properties;
+
+            const auto result =
+                ZHLN::GUI::RenderUITree(gui, root, actions, properties, ZHLN::GUI::TreeMode::Design, "panel");
+            gui.EndFrame();
+
+            ZHLN::Test::ExpectFalse(result.actionInvoked);
+            ZHLN::Test::ExpectEq(saves, 0);
+            return {};
+        }
     };
 };
 

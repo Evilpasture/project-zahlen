@@ -17,7 +17,7 @@ endif()
 #                  (reflection-driven JSON serialisation + compile-time schema)
 #   extras/toml/   TOML.hpp (reflection-driven TOML), SceneTOML.hpp (Jolt
 #                  vector bindings; what makes a core ZHLN::Scene::Scene a
-#                  document)
+#                  document), UITOML.hpp (the same for GUI::UINode)
 #   extras/glTF/   the glTF/GLB importer (GLTFImporter.*) plus the drop-a-file
 #                  inspector (ZHLN.glTF). The importer is the one extra that
 #                  produces data core then consumes: it fills the prefab cache,

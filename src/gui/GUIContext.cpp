@@ -599,6 +599,25 @@ bool Context::IsItemActive() const noexcept {
     return _impl ? _impl->lastItemActive : false;
 }
 
+bool Context::IsPointerOver(std::string_view id) const noexcept {
+    const auto rect = GetLastFrameRect(id);
+    if (!rect || !_impl) {
+        return false;
+    }
+    auto*       input = _impl->registry.GetSingleton<Components::InputStateComponent>();
+    const float mx    = input ? input->mouseX : -1.0f;
+    const float my    = input ? input->mouseY : -1.0f;
+    return mx >= rect->x && mx <= (rect->x + rect->width) && my >= rect->y && my <= (rect->y + rect->height);
+}
+
+bool Context::IsPointerPressedThisFrame() const noexcept {
+    if (!_impl || !_impl->clayContext) {
+        return false;
+    }
+    Clay_SetCurrentContext(_impl->clayContext);
+    return Clay_GetPointerState().state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME;
+}
+
 bool Context::Checkbox(std::string_view label, bool& checked) noexcept {
     Clay_SetCurrentContext(_impl->clayContext);
     bool           changed = false;

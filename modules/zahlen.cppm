@@ -423,11 +423,15 @@ using ZHLN::GUI::TextBounds;
 using ZHLN::GUI::TextLineHeight;
 using ZHLN::GUI::MeasureTextBounds;
 using ZHLN::GUI::NodeKind;
+using ZHLN::GUI::NodeBox;
 using ZHLN::GUI::TreeMode;
 using ZHLN::GUI::UINode;
 using ZHLN::GUI::ActionRegistry;
 using ZHLN::GUI::PropertyStore;
 using ZHLN::GUI::RenderUITreeResult;
+using ZHLN::GUI::FindNodeById;
+using ZHLN::GUI::InsertChild;
+using ZHLN::GUI::RemoveNodeById;
 using ZHLN::GUI::RenderUITree;
 } // namespace GUI
 

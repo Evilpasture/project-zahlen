@@ -137,7 +137,7 @@ included. The concrete case that motivated the rule:
 | Layer | Contents | Dependencies it carries |
 | :--- | :--- | :--- |
 | `extras/json/` | `JSON.hpp` (opaque document) + `JSONSchema.hpp` (reflection-driven reader/writer + compile-time schema), `JSONSchema.hpp` (compile-time schema → C++ type) | simdjson |
-| `extras/toml/` | `TOML.hpp` (reflection-driven documents), `SceneTOML.hpp` (binds a core `Scene::Scene` to the document format) | none |
+| `extras/toml/` | `TOML.hpp` (reflection-driven documents), `SceneTOML.hpp` (binds a core `Scene::Scene` to the document format), `UITOML.hpp` (the same for `GUI::UINode`) | none |
 | `extras/glTF/` | `GLTFImporter.*` (the glTF/GLB reader), `glTF.*` (the drop-a-file inspector, module `ZHLN.glTF`) | cgltf, stb_image, meshoptimizer, and `extras/json` for the custom node members |
 | `extras/Scripting/` | `ScriptBinder.hpp` / `ScriptBinderRegistry.hpp` / `ScriptECSBridge.*` / `ScriptValueTypes.hpp` (reflection-driven class table and ECS bridge, Lua-independent) | none |
 | `extras/Scripting/Lua/` | `LuaScriptRuntime.*` (the LuaJIT state), `Scripting.cpp` (the C ABI and command dispatch), `ScriptingABI.*` (the ffi shim), `scripts/` (the Fennel sources) | LuaJIT |
@@ -429,9 +429,11 @@ later load from TOML is a `GUI::UINode` tree: `kind` / `label` /
 walks it into `Context` calls and looks actions up in a host-owned
 `ActionRegistry` (`"editor.save_scene"` → the function that runs) and
 bound values in a `PropertyStore`. Preview mode invokes; Design mode
-records the clicked node id instead so a builder click cannot fire Save.
-The tree is format-free — extras/toml can walk it later the same way it
-walks `Scene::Scene`.
+records the clicked node id (including empty Box/Row/Column hits) instead
+so a builder click cannot fire Save, and tints `selectedId`.
+`FindNodeById` / `InsertChild` / `RemoveNodeById` turn that string into a
+live node. The tree is format-free — `extras/toml/UITOML.hpp` walks it
+the same way `SceneTOML.hpp` walks `Scene::Scene`.
 
 ### Extras: the native editor
 

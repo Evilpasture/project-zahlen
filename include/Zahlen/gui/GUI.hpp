@@ -221,6 +221,13 @@ class ZHLN_API Context {
     [[nodiscard]] std::optional<ElementRect> GetLastFrameRect(std::string_view id) const noexcept;
     [[nodiscard]] bool IsItemActive() const noexcept;
 
+    /// True if the pointer sits inside the last-frame rectangle of @p id
+    /// (the same string handed to Box). First frame is always false.
+    [[nodiscard]] bool IsPointerOver(std::string_view id) const noexcept;
+
+    /// True on the frame the pointer went down, independent of any widget.
+    [[nodiscard]] bool IsPointerPressedThisFrame() const noexcept;
+
     bool Checkbox(std::string_view label, bool& checked) noexcept;
     bool Slider(std::string_view label, float& value, float minVal, float maxVal) noexcept;
 
