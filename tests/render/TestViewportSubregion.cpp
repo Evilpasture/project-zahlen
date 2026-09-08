@@ -154,6 +154,7 @@ void DisableJitterVignetteAndTargetDrive(ZHLN::ECS::Registry& reg) {
         reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [](auto& pp) {
             pp.fullBright        = 1;
             pp.vignetteIntensity = 0.0f;
+            pp.bloomStrength     = 0.0f;
             pp.enableSSR         = 0;
             pp.enableRTR         = 0;
         });
@@ -246,7 +247,8 @@ struct ViewportSubregionTestSuite {
 
             const int leakedA = RedOutside(a, bandA);
             const int leakedB = RedOutside(b, bandB);
-            ZHLN::Test::ExpectTrue(leakedA == 0 && leakedB == 0);
+            ZHLN::Test::ExpectEq(leakedA, 0);
+            ZHLN::Test::ExpectEq(leakedB, 0);
             if (leakedA != 0 || leakedB != 0) {
                 return std::unexpected(ViewportSubregionError::SceneLeaked);
             }

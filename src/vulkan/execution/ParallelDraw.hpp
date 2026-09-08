@@ -32,6 +32,11 @@ struct SecondaryInheritance {
     // Offsets are reflected independently so Slang-inserted padding is kept.
     std::span<const uint32_t>        pushDataFrameOffsets;
     std::span<const VkDeviceAddress> pushDataFrameAddresses;
+
+    // Secondaries always vkCmdSetViewport/Scissor (they do not inherit those
+    // from the primary). Width or height <= 1 means the full `extent` passed
+    // to ParallelDrawDispatch — same convention as DynamicPass::Viewport.
+    VkViewport viewport {};
 };
 
 namespace detail {
@@ -130,11 +135,28 @@ inline void ParallelDrawDispatch(
         // No thread_local, no global shared state.
         CommandEncoder encoder(sec_cmd, inheritDesc.context);
 
-        // Standard, un-flipped viewport
-        const VkViewport viewport = {
-            .x = 0.0F, .y = 0.0F, .width = static_cast<float>(extent.width), .height = static_cast<float>(extent.height), .minDepth = 0.0F, .maxDepth = 1.0F
+        // Secondaries own viewport/scissor; without this they rasterize the
+        // full framebuffer even when the scene is confined to a sub-rect.
+        const bool useVp = inheritDesc.viewport.width > 1.0F && inheritDesc.viewport.height > 1.0F;
+        const VkViewport viewport = useVp ? inheritDesc.viewport :
+            VkViewport {
+                .x        = 0.0F,
+                .y        = 0.0F,
+                .width    = static_cast<float>(extent.width),
+                .height   = static_cast<float>(extent.height),
+                .minDepth = 0.0F,
+                .maxDepth = 1.0F
+            };
+        const VkRect2D scissor = {
+            .offset = {
+                .x = useVp ? static_cast<int32_t>(inheritDesc.viewport.x) : 0,
+                .y = useVp ? static_cast<int32_t>(inheritDesc.viewport.y) : 0
+            },
+            .extent = {
+                .width  = useVp ? static_cast<uint32_t>(inheritDesc.viewport.width) : extent.width,
+                .height = useVp ? static_cast<uint32_t>(inheritDesc.viewport.height) : extent.height
+            }
         };
-        const VkRect2D scissor = {.offset = {.x = 0, .y = 0}, .extent = extent};
         vkCmdSetViewport(sec_cmd, 0, 1, &viewport);
         vkCmdSetScissor(sec_cmd, 0, 1, &scissor);
 

@@ -413,8 +413,10 @@ struct CpuCullingPolicyPass1 {
         VkCommandBuffer cmd          = recorder.cmd;
         auto&           ctx          = recorder.ctx;
         const auto&     colorFormats = ActiveGBuffer::array;
+        const auto      sceneVp      = ctx.EffectiveViewport();
 
         Vk::DynamicPass(color_att.extent)
+            .Viewport(sceneVp)
             .AddColor(color_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorScene)
             .AddColor(vel_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorVelocity)
             .AddColor(norm_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorNormalRoughness)
@@ -440,6 +442,7 @@ struct CpuCullingPolicyPass1 {
                         .context                = &ctx.ctx,
                         .pushDataFrameOffsets   = ctx.heapPushDataLayout.frameAddressOffsets,
                         .pushDataFrameAddresses = std::span<const VkDeviceAddress> {frameAddresses.data(), frameAddresses.size()},
+                        .viewport               = sceneVp,
                     },
                     {.width = color_att.extent.width, .height = color_att.extent.height}, drawCount, kParallelChunkSize, TaskSystemSchedulerAdapter {},
                     [&](uint32_t /*chunkIdx*/) -> VkCommandBuffer {
@@ -478,6 +481,7 @@ struct CpuCullingPolicyPass2 {
         VkCommandBuffer cmd = recorder.cmd;
         auto&           ctx = recorder.ctx;
         Vk::DynamicPass(color_att.extent)
+            .Viewport(ctx.EffectiveViewport())
             .AddColor(color_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
             .AddColor(vel_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
             .AddColor(norm_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
@@ -1029,6 +1033,7 @@ void ViewmodelPass::Execute(
     ctx.BindHeapsAndPushFrame(cmd);
 
     Vk::DynamicPass(in.sceneColor.extent)
+        .Viewport(ctx.EffectiveViewport())
         .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .AddColor(in.velocity, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .AddColor(in.normRough, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
