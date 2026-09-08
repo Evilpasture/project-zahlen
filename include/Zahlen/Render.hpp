@@ -179,6 +179,9 @@ class ZHLN_API RenderContext {
     [[nodiscard]] ViewportRect GetViewport() const noexcept;
     [[nodiscard]] const char*  GetRendererName() const;
     [[nodiscard]] const char*  GetGPUName() const;
+    /// True when the selected physical device is VK_PHYSICAL_DEVICE_TYPE_CPU
+    /// (llvmpipe / SwiftShader). Hang-GPU diagnostics are host SIGSEGVs there.
+    [[nodiscard]] bool IsSoftwareDevice() const noexcept;
     [[nodiscard]] uint32_t     GetFrameIndex() const noexcept;
     /// How this context presents frames (see PresentationMode).
     [[nodiscard]] PresentationMode GetPresentationMode() const noexcept;

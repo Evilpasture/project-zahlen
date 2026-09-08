@@ -16,8 +16,9 @@
 //   3. RebuildVulkanResources (core GPU caches + font atlas)
 //   4. runs DeviceLostCallbacks so this sample can re-upload the arena
 //
-// The GPU hang waits on the OS timeout (Windows TDR / NVIDIA timeout). Expect
-// several seconds of freeze before the dump and the rebuilt scene come back.
+// Discrete GPUs hang until the OS timeout (Windows TDR / NVIDIA timeout).
+// CPU Vulkan (llvmpipe) has no TDR: the hang shader would SIGSEGV a host
+// worker, so the sample calls HandleDeviceLost() directly instead.
 // Ctrl+C / SIGINT still quits (engine crash handler).
 //
 //   ./build/samples/DeviceLostRecoverySample
@@ -237,11 +238,25 @@ auto main(int argc, char* argv[]) -> int {
         const bool signalNow = g_ProvokeRequested.exchange(false, std::memory_order::relaxed);
         const bool autoNow   = !autoProvoked && autoProvokeFrame != 0 && engine->GetCurrentFrame() >= autoProvokeFrame;
         if ((f9Down && !f9WasDown) || signalNow || autoNow) {
-            ZHLN::Log(
-                "[Sample] Provoking GPU hang (frame {}, DeviceLostCount={}). The OS timeout may freeze the process for several seconds.",
-                engine->GetCurrentFrame(), ZHLN::RenderContext::DeviceLostCount()
-            );
-            engine->ProvokeDeviceLost();
+            auto& rc = engine->GetRenderContext();
+            if (rc.IsSoftwareDevice()) {
+                // llvmpipe has no TDR: the hang shader is a host SIGSEGV on a
+                // worker, and the crash handler then deadlocks waiting for Main.
+                ZHLN::Log(
+                    "[Sample] CPU Vulkan device '{}' — simulating device-lost recovery (frame {}).", rc.GetGPUName(), engine->GetCurrentFrame()
+                );
+                if (auto lost = engine->HandleDeviceLost(); !lost) {
+                    ZHLN::Log("[Sample] Recovery failed: {}", lost.error().Message());
+                    engine->GetWindow().Close();
+                    break;
+                }
+            } else {
+                ZHLN::Log(
+                    "[Sample] Provoking GPU hang (frame {}, DeviceLostCount={}). The OS timeout may freeze the process for several seconds.",
+                    engine->GetCurrentFrame(), ZHLN::RenderContext::DeviceLostCount()
+                );
+                engine->ProvokeDeviceLost();
+            }
             autoProvoked = autoProvoked || autoNow;
         }
         f9WasDown = f9Down;

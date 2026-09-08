@@ -330,6 +330,10 @@ auto RenderContext::GetGPUName() const -> const char* {
     return &_impl->ctx.PhysicalInfo().properties.properties.deviceName[0];
 }
 
+bool RenderContext::IsSoftwareDevice() const noexcept {
+    return _impl->ctx.PhysicalInfo().properties.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU;
+}
+
 auto RenderContext::GetFrameIndex() const noexcept -> uint32_t {
     return _impl->frame_index;
 }
