@@ -242,11 +242,21 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
             // leaving the extension enabled but task/mesh shading OFF.
             f.multiviewMeshShader = caps.supportsMultiviewMeshShader ? VK_TRUE : VK_FALSE;
         })
-        // VK_KHR_device_fault: queryable crash reports after VK_ERROR_DEVICE_LOST.
-        // FeatureChain::Optional drops the whole struct if any requested bit is
-        // missing, so vendor-binary is only asked for when the device has it.
+        // VK_KHR_device_fault (header 362): vkGetDeviceFaultReportsKHR after
+        // device lost. FeatureChain::Optional drops the whole struct if any
+        // requested bit is missing, so extras are only asked for when present.
         .Optional<VkPhysicalDeviceFaultFeaturesKHR>([physicalDevice](auto& f) -> auto {
-            const auto supported      = Vk::QueryFeatureSupport<VkPhysicalDeviceFaultFeaturesKHR>(physicalDevice);
+            const auto supported                 = Vk::QueryFeatureSupport<VkPhysicalDeviceFaultFeaturesKHR>(physicalDevice);
+            f.deviceFault                        = VK_TRUE;
+            f.deviceFaultVendorBinary            = supported.deviceFaultVendorBinary;
+            f.deviceFaultReportMasked            = supported.deviceFaultReportMasked;
+            f.deviceFaultDeviceLostOnMasked      = supported.deviceFaultDeviceLostOnMasked;
+        })
+        // VK_EXT_device_fault: shipping drivers still expose the older
+        // vkGetDeviceFaultInfoEXT query. Enable it independently so a KHR-less
+        // device still dumps something.
+        .Optional<VkPhysicalDeviceFaultFeaturesEXT>([physicalDevice](auto& f) -> auto {
+            const auto supported      = Vk::QueryFeatureSupport<VkPhysicalDeviceFaultFeaturesEXT>(physicalDevice);
             f.deviceFault             = VK_TRUE;
             f.deviceFaultVendorBinary = supported.deviceFaultVendorBinary;
         })
@@ -301,8 +311,10 @@ auto GetDeviceExtensions(VkPhysicalDevice physicalDevice, bool noSwapchain, bool
         // Support was already probed once into HardwareCaps; re-probing here
         // would repeat the diagnostics for every failure.
         .OptionalGroup({VK_EXT_MESH_SHADER_EXTENSION_NAME}, meshShaderSupported)
-        // VK_KHR_device_fault: vkGetDeviceFaultInfoKHR after device lost.
+        // Device-lost crash reports: KHR is the redesigned reports API;
+        // EXT is the older single-query dump still shipping on current drivers.
         .Optional(VK_KHR_DEVICE_FAULT_EXTENSION_NAME)
+        .Optional(VK_EXT_DEVICE_FAULT_EXTENSION_NAME)
         .Build()
         .transform_error([](auto err) -> Error { return err; });
 }

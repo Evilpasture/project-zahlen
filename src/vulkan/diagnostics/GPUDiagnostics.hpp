@@ -109,8 +109,8 @@ struct DebugUtilsTracker {
 };
 static_assert(GPUCrashTrackerBackend<DebugUtilsTracker>);
 
-/// VK_KHR_device_fault dump. Valid to call after VK_ERROR_DEVICE_LOST; Volk
-/// supplies vkGetDeviceFaultInfoKHR once the extension is enabled.
+/// Device-lost dump. Prefers VK_KHR_device_fault (vkGetDeviceFaultReportsKHR)
+/// and falls back to VK_EXT_device_fault (vkGetDeviceFaultInfoEXT).
 struct DeviceFaultTracker {
     DeviceFaultTracker() = default;
     explicit DeviceFaultTracker(VkDevice inDevice) noexcept: device(inDevice) {
