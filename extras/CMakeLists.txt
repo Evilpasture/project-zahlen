@@ -61,8 +61,12 @@ file(GLOB_RECURSE ZHLN_EXTRAS_MODULES
 # extras/editor is likewise its own target (zahlen_editor): the composition
 # root gates --editor on ZHLN_HAS_EDITOR rather than pulling the editor into
 # every extras consumer.
+#
+# extras/Console (zahlen_console) depends on zahlen_scripting, so it also
+# stays out of the extras archive.
 list(FILTER ZHLN_EXTRAS_MODULES EXCLUDE REGEX ".*/extras/Scripting/.*")
 list(FILTER ZHLN_EXTRAS_MODULES EXCLUDE REGEX ".*/extras/editor/.*")
+list(FILTER ZHLN_EXTRAS_MODULES EXCLUDE REGEX ".*/extras/Console/.*")
 
 # 2. Discover all implementation source files (.cpp)
 file(GLOB_RECURSE ZHLN_EXTRAS_SOURCES
@@ -71,6 +75,7 @@ file(GLOB_RECURSE ZHLN_EXTRAS_SOURCES
 )
 list(FILTER ZHLN_EXTRAS_SOURCES EXCLUDE REGEX ".*/extras/Scripting/.*")
 list(FILTER ZHLN_EXTRAS_SOURCES EXCLUDE REGEX ".*/extras/editor/.*")
+list(FILTER ZHLN_EXTRAS_SOURCES EXCLUDE REGEX ".*/extras/Console/.*")
 
 add_library(zahlen_extras STATIC)
 
@@ -148,3 +153,4 @@ endif()
 
 add_subdirectory(Scripting)
 add_subdirectory(editor)
+add_subdirectory(Console)

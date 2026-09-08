@@ -142,6 +142,7 @@ included. The concrete case that motivated the rule:
 | `extras/Scripting/` | `ScriptBinder.hpp` / `ScriptBinderRegistry.hpp` / `ScriptECSBridge.*` / `ScriptValueTypes.hpp` (reflection-driven class table and ECS bridge, Lua-independent) | none |
 | `extras/Scripting/Lua/` | `LuaScriptRuntime.*` (the LuaJIT state), `Scripting.cpp` (the C ABI and command dispatch), `ScriptingABI.*` (the ffi shim), `scripts/` (the Fennel sources) | LuaJIT |
 | `extras/editor/` | Native world editor (`zahlen_editor`: Hierarchy + Inspector). Linked only by the composition root (`ZHLN_HAS_EDITOR`) | none |
+| `extras/Console/` | In-memory `GameConsole` plus `ConsoleDebugger` (`zahlen_console`). Reflection commands go through `zahlen_scripting` | none |
 
 Core has no JSON, TOML, model-file or scripting dependency at all, so a
 core-only build (`-DZHLN_BUILD_EXTRAS=OFF`) needs none of those installed and
