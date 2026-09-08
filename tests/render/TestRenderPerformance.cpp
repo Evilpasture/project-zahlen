@@ -150,7 +150,7 @@ auto CreateTestEngine(uint32_t width, uint32_t height, ZHLN::ValidationMode mode
             .validationMode = mode,
             .headless       = true
         },
-        .disableFallbackScene = true,
+        .enableFallbackScene = false,
     };
 
     auto engineRes = ZHLN::Engine::Create(cfg);

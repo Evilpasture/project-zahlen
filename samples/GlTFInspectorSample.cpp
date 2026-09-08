@@ -38,7 +38,7 @@ auto main(int argc, char* argv[]) -> int {
     auto engineRes = ZHLN::Engine::Create(
         {.physics = {.maxBodies = 2048, .maxBodyPairs = 4096, .maxContactConstraints = 4096},
          .render  = {.appName = "Zahlen :: glTF Inspector", .vsync = options.vsync, .fullscreen = options.fullscreen},
-         .disableFallbackScene = true}
+         .enableFallbackScene = false}
     );
 
     if (!engineRes) {

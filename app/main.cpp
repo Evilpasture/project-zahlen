@@ -573,7 +573,7 @@ auto main(int argc, char* argv[]) -> int {
                         .validationMode = options.validationMode,
                         .headless       = options.headless,
                     },
-                    .disableFallbackScene = true,
+                    .enableFallbackScene = false,
                 };
 
                 auto engine_res = ZHLN::Engine::Create(config);

@@ -65,8 +65,8 @@ struct EngineOptions {
 /// Prefer AcquireEngine below unless the test genuinely needs a cold device.
 ///
 /// Returns an empty owner on failure; callers assert rather than dereference.
-/// EngineConfig::disableFallbackScene keeps the engine from injecting its own
-/// sun, floor and camera into a scene the test is trying to measure.
+/// EngineConfig::enableFallbackScene is false so the engine cannot inject its
+/// own sun, floor and camera into a scene the test is trying to measure.
 [[nodiscard]] inline auto CreateEngine(const EngineOptions& opts = {}) -> std::unique_ptr<ZHLN::Engine> {
     const ZHLN::EngineConfig cfg {
         .physics = {
@@ -86,7 +86,7 @@ struct EngineOptions {
             .validationMode = ZHLN::ValidationMode::On,
             .headless       = true
         },
-        .disableFallbackScene = true,
+        .enableFallbackScene = false,
     };
 
     auto engineRes = ZHLN::Engine::Create(cfg);

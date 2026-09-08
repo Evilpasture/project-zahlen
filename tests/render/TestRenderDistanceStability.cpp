@@ -563,7 +563,7 @@ struct DistanceStabilitySuite {
                 .validationMode = ZHLN::ValidationMode::On, // Robustness test: VUIDs ARE failures.
                 .headless       = true
             },
-            .disableFallbackScene = true,
+            .enableFallbackScene = false,
         };
 
         auto engineRes = ZHLN::Engine::Create(cfg);

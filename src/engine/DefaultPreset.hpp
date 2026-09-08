@@ -18,7 +18,7 @@ struct Scene;
 enum class FallbackReason : uint8_t { None = 0, MissingBootScript, MissingNativeModule, ScriptExecutionError };
 
 /// Compiled-in fail-safe scene. Engine-private: hosts that do not want it set
-/// `EngineConfig::disableFallbackScene` at Create rather than talking to this
+/// `EngineConfig::enableFallbackScene` false at Create rather than talking to this
 /// type.
 class DefaultPreset {
   public:

@@ -47,7 +47,7 @@ struct ExplosionTestSuite {
                 .validationMode = ZHLN::ValidationMode::On,
                 .headless       = true
             },
-            .disableFallbackScene = true,
+            .enableFallbackScene = false,
         };
 
         auto engineRes = ZHLN::Engine::Create(cfg);

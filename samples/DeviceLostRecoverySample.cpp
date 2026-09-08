@@ -170,7 +170,7 @@ auto main(int argc, char* argv[]) -> int {
               .validationMode = options.validationMode,
               .headless       = options.headless,
           },
-          .disableFallbackScene = true}
+          .enableFallbackScene = false}
     );
     if (!engineRes) {
         ZHLN::Log("FATAL: Failed to initialize Engine: {}", engineRes.error().Message());

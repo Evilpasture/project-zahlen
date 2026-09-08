@@ -212,11 +212,11 @@ struct RenderConfig {
 struct EngineConfig {
     PhysicsConfig physics;
     RenderConfig  render;
-    /// When true, the engine never injects the compiled-in fallback scene
-    /// (missing boot script / native gameplay module). Hosts that own the
-    /// scene -- tests, the editor, samples -- set this so the preset cannot
-    /// add its own sun, floor and camera.
-    bool disableFallbackScene = false;
+    /// When true (the default), a missing boot script or native gameplay
+    /// module injects the compiled-in fallback scene. Hosts that own the
+    /// scene -- tests, the editor, samples -- set this false so the preset
+    /// cannot add its own sun, floor and camera.
+    bool enableFallbackScene = true;
 };
 
 } // namespace ZHLN

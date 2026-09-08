@@ -50,7 +50,7 @@ struct RenderPipelinesTestSuite {
                     .validationMode = ZHLN::ValidationMode::On,
                     .headless       = true
                 },
-                .disableFallbackScene = true,
+                .enableFallbackScene = false,
             };
 
             // Exclusive engine: only one Vulkan instance may be live at a
@@ -120,7 +120,7 @@ struct RenderPipelinesTestSuite {
                     .validationMode = ZHLN::ValidationMode::On,
                     .headless       = true
                 },
-                .disableFallbackScene = true,
+                .enableFallbackScene = false,
             };
 
             ZHLN::Test::Headless::ShutdownPooledEngines();
@@ -240,7 +240,7 @@ struct RenderPipelinesTestSuite {
                         .validationMode = ZHLN::ValidationMode::On,
                         .headless       = true
                     },
-                    .disableFallbackScene = true,
+                    .enableFallbackScene = false,
                 };
             };
 

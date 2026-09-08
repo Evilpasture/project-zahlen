@@ -309,7 +309,7 @@ void Present(Engine& engine, float dt, FrameContext& ctx) {
 
 /// Auto-detect missing gameplay scripts / modules and engage the Fallback Preset.
 void Fallback(Engine& engine, float dt, FrameContext& ctx) {
-    if (EngineFrameStepAccess::Config(engine).disableFallbackScene) {
+    if (!EngineFrameStepAccess::Config(engine).enableFallbackScene) {
         return;
     }
 
