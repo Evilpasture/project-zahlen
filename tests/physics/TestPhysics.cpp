@@ -130,7 +130,7 @@ struct PhysicsTestSuite {
             ZHLN::Test::ExpectEq(pc.GetActiveBodyCount(), 1u);
 
             registry.Destroy(owner);
-            pc.ReconcileOrphanedBodies(registry);
+            pc.ReconcileOrphanedBodies(registry.AliveQuery());
             // Reconciliation uses the normal command queue: the slot remains
             // present until the next physics step drains that command.
             ZHLN::Test::ExpectEq(pc.GetActiveBodyCount(), 1u);

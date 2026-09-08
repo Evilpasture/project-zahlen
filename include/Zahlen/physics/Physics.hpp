@@ -28,10 +28,6 @@ class SkeletonPose;
 
 namespace ZHLN {
 
-namespace ECS {
-class Registry;
-}
-
 namespace Layers {
 enum ID : JPH::ObjectLayer { NON_MOVING = 0, MOVING = 1, NUM_LAYERS = 2 };
 }
@@ -292,7 +288,7 @@ class ZHLN_API PhysicsContext {
     /// Queues every live body whose recorded ECS owner has died. Called by the
     /// physics phase before stepping, so registry destruction cannot strand Jolt
     /// objects after the component record has disappeared.
-    void ReconcileOrphanedBodies(const ECS::Registry& registry);
+    void ReconcileOrphanedBodies(EntityAliveQuery alive);
     void SetLinearVelocity(ZHLN::Entity handle, JPH::Vec3Arg velocity);
     void SetCharacterVelocity(ZHLN::Entity handle, JPH::Vec3Arg velocity);
     void SetCharacterPosition(ZHLN::Entity handle, JPH::RVec3Arg position);

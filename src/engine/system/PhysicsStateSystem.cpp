@@ -50,7 +50,7 @@ static void VerifyRealVisualInterpolation(Engine& engine, float alpha) noexcept 
 namespace ZHLN {
 
 void PhysicsStateSystem::Reconcile(Engine& engine) noexcept {
-    engine.GetPhysicsContext().ReconcileOrphanedBodies(engine.GetRegistry());
+    engine.GetPhysicsContext().ReconcileOrphanedBodies(engine.GetRegistry().AliveQuery());
 }
 
 void PhysicsStateSystem::WriteBack(Engine& engine) noexcept {

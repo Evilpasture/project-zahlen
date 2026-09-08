@@ -784,7 +784,7 @@ Engine::~Engine() {
     }
     _impl->registry.Clear();
     if (_impl->renderContext != nullptr) {
-        _impl->renderContext->ReconcileEntityBuffers(_impl->registry);
+        _impl->renderContext->ReconcileEntityBuffers(_impl->registry.AliveQuery());
     }
     _impl->articulationSystem.reset();
     _impl->physicsContext.reset();
@@ -1073,7 +1073,7 @@ auto Engine::Tick(float dt, GameplayDriver driver) -> GameplayStatus {
 
     // Resource contexts retain owner/handle pairs outside ECS component
     // storage. Reconcile before any phase can observe this frame's world.
-    _impl->renderContext->ReconcileEntityBuffers(_impl->registry);
+    _impl->renderContext->ReconcileEntityBuffers(_impl->registry.AliveQuery());
 
     FrameContext ctx {.driver = driver, .status = GameplayStatus::OK, .deviceLost = false};
 

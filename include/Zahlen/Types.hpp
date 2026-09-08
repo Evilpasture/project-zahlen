@@ -93,6 +93,10 @@ enum class TextureHandle : uint64_t { Invalid = 0 };
 enum class TerrainHandle : uint64_t { Invalid = 0 };
 enum class AudioHandle : uint64_t { Invalid = 0 };
 enum class SynthHandle : uint64_t { Invalid = 0 };
+
+enum class AudioWaveformType : uint8_t { Sine = 0, Square = 1, Triangle = 2, Sawtooth = 3 };
+enum class AudioFilterType : uint8_t { LowPass = 0, HighPass = 1, BandPass = 2, Notch = 3 };
+enum class AudioNoiseType : uint8_t { White = 0, Pink = 1, Brownian = 2 };
 // NOLINTEND(performance-enum-size)
 // NOTE: these are BINDLESS SLOT indices conceptually, but they are NOT valid
 // TextureHandles. TextureHandle keys are hashed asset ids

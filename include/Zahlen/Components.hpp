@@ -27,10 +27,6 @@ struct Skeleton;
 
 enum class RagdollState : uint8_t { Inactive, Kinematic, PartialBlend, Dynamic };
 
-enum class AudioWaveformType : uint8_t { Sine = 0, Square = 1, Triangle = 2, Sawtooth = 3 };
-enum class AudioFilterType : uint8_t { LowPass = 0, HighPass = 1, BandPass = 2, Notch = 3 };
-enum class AudioNoiseType : uint8_t { White = 0, Pink = 1, Brownian = 2 };
-
 struct Components {
 
     struct PBRComponent {

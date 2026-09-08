@@ -20,10 +20,6 @@
 
 namespace ZHLN {
 
-namespace ECS {
-class Registry;
-}
-
 // ============================================================================
 // Renderer Capability Errors
 // Backend-neutral errors produced by the renderer's optional-feature paths
@@ -281,7 +277,7 @@ class ZHLN_API RenderContext {
     /// ledgers. DespawnEntity uses this for immediate ordered teardown.
     void ReleaseEntityBuffers(Entity owner);
     /// Reclaims tracked buffers whose ECS owner has already died.
-    void ReconcileEntityBuffers(const ECS::Registry& registry);
+    void ReconcileEntityBuffers(EntityAliveQuery alive);
     [[nodiscard]] auto GetTrackedEntityBufferCount() const noexcept -> size_t;
 
     // --- VK_EXT_mesh_shader ---

@@ -114,7 +114,7 @@ ZHLN_API void AudioSystem(Engine& engine, float dt) {
     // 4. FIRE AND FORGET DISPATCH & ORPHAN FADEOUT
     // ========================================================================
     audio.FlushEvents();
-    audio.ReconcileVoices(reg, dt);
+    audio.ReconcileVoices(reg.AliveQuery(), dt);
 }
 
 } // namespace ZHLN

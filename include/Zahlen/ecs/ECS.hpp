@@ -188,6 +188,18 @@ class ZHLN_API Registry {
 
     void               Destroy(Entity entity);
     [[nodiscard]] auto IsAlive(Entity entity) const noexcept -> bool;
+
+    /// Resource-context liveness query. Render/Audio/Physics take this instead
+    /// of Registry so their public headers stay free of ECS.
+    [[nodiscard]] auto AliveQuery() const noexcept -> EntityAliveQuery {
+        return {
+            .userdata = this,
+            .isAlive  = [](const void* userdata, Entity entity) noexcept -> bool {
+                return static_cast<const Registry*>(userdata)->IsAlive(entity);
+            },
+        };
+    }
+
     void               Clear();
 
     auto RegisterComponentDynamic(std::string_view name, size_t size, size_t alignment) -> uint32_t;

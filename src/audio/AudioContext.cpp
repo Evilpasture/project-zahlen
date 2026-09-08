@@ -3,7 +3,6 @@
 
 // src/audio/AudioContext.cpp
 
-#include "Zahlen/ecs/ECS.hpp"
 #include <filesystem>
 
 // miniaudio runtime-links the JACK client library: ma_context_init__jack
@@ -1012,7 +1011,7 @@ void AudioContext::ReleaseOwner(Entity owner) noexcept {
     });
 }
 
-void AudioContext::ReconcileVoices(ECS::Registry& reg, float dt) {
+void AudioContext::ReconcileVoices(EntityAliveQuery alive, float dt) {
     // 1. Clean Transients
     Lock(_impl->transientMutex, [&] -> void {
         using namespace ZHLN::Ranges;
@@ -1045,7 +1044,7 @@ void AudioContext::ReconcileVoices(ECS::Registry& reg, float dt) {
                 continue;
             }
 
-            if (slot.owner != Entity::Null() && !reg.IsAlive(slot.owner)) {
+            if (slot.owner != Entity::Null() && !alive(slot.owner)) {
                 slot.isStopping = true;
                 slot.owner      = Entity::Null();
             }
@@ -1078,7 +1077,7 @@ void AudioContext::ReconcileVoices(ECS::Registry& reg, float dt) {
                 continue;
             }
 
-            if (slot.owner != Entity::Null() && !reg.IsAlive(slot.owner)) {
+            if (slot.owner != Entity::Null() && !alive(slot.owner)) {
                 slot.synthData->isStopping.store(true, std::memory_order::release);
                 slot.owner = Entity::Null();
             }

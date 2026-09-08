@@ -6,7 +6,6 @@
 #include "Resources.hpp"
 #include "Zahlen/Types.hpp"
 #include <Zahlen/Core/Ranges.hpp>
-#include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -248,11 +247,11 @@ void RenderContext::ReleaseEntityBuffers(Entity owner) {
     }
 }
 
-void RenderContext::ReconcileEntityBuffers(const ECS::Registry& registry) {
+void RenderContext::ReconcileEntityBuffers(EntityAliveQuery alive) {
     using namespace ZHLN::Ranges;
-    auto reconcileTracked = [this, &registry](auto& trackedBuffers) {
-        trackedBuffers | EraseIf([this, &registry](const auto& tracked) {
-            if (!registry.IsAlive(Entity::Unpack(tracked.first))) {
+    auto reconcileTracked = [this, alive](auto& trackedBuffers) {
+        trackedBuffers | EraseIf([this, alive](const auto& tracked) {
+            if (!alive(Entity::Unpack(tracked.first))) {
                 DestroyBuffer(tracked.second);
                 return true;
             }
@@ -265,7 +264,7 @@ void RenderContext::ReconcileEntityBuffers(const ECS::Registry& registry) {
 
     std::vector<uint64_t> particleKeys;
     _impl->particleBufferMap.ForEach([&](uint64_t key, const auto& tracked) {
-        if (!registry.IsAlive(Entity::Unpack(tracked.first))) {
+        if (!alive(Entity::Unpack(tracked.first))) {
             DestroyBuffer(tracked.second);
             particleKeys.push_back(key);
         }

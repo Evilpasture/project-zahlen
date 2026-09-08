@@ -32,7 +32,6 @@
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/physics/Physics.hpp>
-#include <Zahlen/ecs/ECS.hpp>
 #include <alloca.h>
 #include <cstdlib>
 #include <cstring>
@@ -885,7 +884,7 @@ void PhysicsContext::DestroyBody(Entity handle) {
     ZHLN::Lock(world.sync.shadowLock, [&] { QueueDestroyBodyLocked(world, handle); });
 }
 
-void PhysicsContext::ReconcileOrphanedBodies(const ECS::Registry& registry) {
+void PhysicsContext::ReconcileOrphanedBodies(EntityAliveQuery alive) {
     auto& world = _impl->world;
     ZHLN::Lock(world.sync.shadowLock, [&] {
         for (uint32_t slot = 0; slot < world.slotCapacity; ++slot) {
@@ -894,7 +893,7 @@ void PhysicsContext::ReconcileOrphanedBodies(const ECS::Registry& registry) {
             }
 
             const Entity owner = world.bodyOwners[slot];
-            if (owner != Entity::Null() && !registry.IsAlive(owner)) {
+            if (owner != Entity::Null() && !alive(owner)) {
                 QueueDestroyBodyLocked(world, Entity {.index = slot, .generation = world.generations[slot].load(std::memory_order::acquire)});
             }
         }
