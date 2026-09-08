@@ -760,6 +760,34 @@ consteval auto HasAnnotation() -> bool {
     return false;
 }
 
+/// True when a struct, class, or a functor/lambda's operator() carries Tag.
+template <typename Tag, typename T>
+consteval auto TypeHasAnnotation() -> bool {
+    using CleanT            = std::remove_cvref_t<T>;
+    constexpr auto typeInfo = std::meta::dealias(^^CleanT);
+
+    if constexpr (HasAnnotation<Tag, typeInfo>()) {
+        return true;
+    } else if constexpr (requires { &CleanT::operator(); }) {
+        constexpr auto opInfo = std::meta::dealias(^^CleanT::operator());
+        return HasAnnotation<Tag, opInfo>();
+    }
+    return false;
+}
+
+/// True when a function pointer or callable NTTP carries annotation Tag.
+/// Function-pointer NTTPs reflect as pointer values; annotations on the
+/// pointed-to function may be invisible, so a class-type NTTP (empty
+/// annotated functor / lambda) is also accepted via TypeHasAnnotation.
+template <typename Tag, auto Fn>
+consteval auto FunctionHasAnnotation() -> bool {
+    constexpr auto info = std::meta::dealias(^^Fn);
+    if constexpr (HasAnnotation<Tag, info>()) {
+        return true;
+    }
+    return TypeHasAnnotation<Tag, decltype(Fn)>();
+}
+
 template <std::meta::info ScopeInfo, typename Tag, typename F>
 constexpr void ForEachAnnotatedTypeInScope(F&& f) {
     [:Expand(std::define_static_array(std::meta::members_of(ScopeInfo, std::meta::access_context::current()))):] >> [&]<auto m>() -> auto {

@@ -142,6 +142,16 @@ consteval bool HasAnnotation() {
     return false;
 }
 
+template <typename Tag, auto Fn>
+consteval auto FunctionHasAnnotation() -> bool {
+    return true;
+}
+
+template <typename Tag, typename T>
+consteval auto TypeHasAnnotation() -> bool {
+    return true;
+}
+
 template <auto EntityInfo>
 consteval std::string_view GetDescriptionText() {
     return {};

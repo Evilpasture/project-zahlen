@@ -5,6 +5,7 @@
 #include "TTYBackend.hpp"
 #include <Zahlen/Core/Platform.hpp> // This handles windows.h and includes unistd.h on Unix
 #include <Zahlen/Core/Print.hpp>
+#include <Zahlen/Core/SignalManager.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/Thread.hpp> // For GetCurrentFiberID()
@@ -12,7 +13,6 @@
 #include <atomic>
 #include <cctype> // For std::isprint
 #include <cmath>  // For std::isnan, std::abs
-#include <csignal>
 #include <cstdarg>                  // For va_list, va_start, va_end
 #include <cstdint>                  // For uint8_t, uint32_t, uint64_t
 #include <cstdio>                   // For FILE, stderr, stdout, vfprintf
@@ -97,8 +97,11 @@ inline auto SafeRead(const void* src, void* dest, size_t size) noexcept -> bool 
 #endif
 }
 
-std::atomic<int>      s_PendingSignal {0};
+// 0 = idle, 1 = crash pending for the main loop, -1 = dump in progress.
+std::atomic<int>      s_PendingPhase {0};
+std::atomic<uint32_t> s_PendingKind {0};
 std::atomic<void*>    s_FaultAddr {nullptr};
+std::atomic<uint64_t> s_PendingThread {0};
 std::atomic<LogLevel> s_LogLevel {LogLevel::Moderate};
 
 // Low-level writer strictly dedicated to signal handler pathways
@@ -422,27 +425,9 @@ void MemoryDump(const void* ptr, size_t size, std::string_view label, LogContext
 
 // --- Original Signal and Crash Diagnostic Logic ---
 
-static void PerformDiagnosticDump(int sig, void* addr, Engine* engine) {
-    const char* sigName = "UNKNOWN";
-    switch (sig) {
-        case SIGSEGV:
-            sigName = "SIGSEGV (Access Violation)";
-            break;
-        case SIGILL:
-            sigName = "SIGILL (Illegal Instruction)";
-            break;
-        case SIGFPE:
-            sigName = "SIGFPE (Math Error)";
-            break;
-        case SIGABRT:
-            sigName = "SIGABRT (Abort)";
-            break;
-#ifndef _WIN32
-        case SIGBUS:
-            sigName = "SIGBUS (Bus Error)";
-            break;
-#endif
-    }
+static void PerformDiagnosticDump(const SignalEvent& ev, Engine* engine) {
+    const std::string_view sigName = Reflect::EnumToString(ev.signal);
+    const void*            addr    = ev.faultAddress;
 
     auto sig_header  = ZHLN::Format("\n{}DIAGNOSTIC REPORT FOR SIGNAL: {}{}\n", Color::Red, sigName, Color::Reset);
     auto addr_header = ZHLN::Format("Faulting Address: {}{}{}\n", Color::Yellow, addr, Color::Reset);
@@ -562,105 +547,89 @@ static void PerformDiagnosticDump(int sig, void* addr, Engine* engine) {
     WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), "\n");
 }
 
-static void ProcessCrash(int sig, void* addr) {
-    // If the signal is SIGABRT, it was raised by std::abort() inside InternalPanic.
-    // We already printed the panic and stacktrace, so exit immediately.
-    if (sig == SIGABRT) {
-        _exit(sig);
+static void ProcessCrash(const SignalEvent& ev) {
+    // Panic already printed the stacktrace and then aborted.
+    if (ev.signal == Signal::Abort) {
+        _exit(1);
     }
 
-    // DOUBLE-FAULT GUARD:
     int expected = 0;
-    if (!s_PendingSignal.compare_exchange_strong(expected, sig)) {
+    if (!s_PendingPhase.compare_exchange_strong(expected, 1)) {
         if (expected == -1) {
             ZHLN::Println("!! SECONDARY CRASH DURING DIAGNOSTICS. ABORTING !!");
         }
-        _exit(sig);
+        _exit(1);
     }
 
-    s_FaultAddr.store(addr);
+    s_PendingKind.store(static_cast<uint32_t>(ev.signal), std::memory_order::relaxed);
+    s_FaultAddr.store(ev.faultAddress, std::memory_order::relaxed);
+    s_PendingThread.store(ev.threadId, std::memory_order::relaxed);
 
     if (ZHLN::GetCurrentFiberID() == 1) {
         ZHLN::Print("\n[ZHLN] Terminal signal on Main Thread. Attempting emergency dump...\n");
 
-        // Mark that we are now in the "Emergency Dump" phase
-        s_PendingSignal.store(-1);
-        // If TTY was active, it recovers. If GLFW was active, this is a silent no-op.
+        s_PendingPhase.store(-1);
         TTYBackend::EmergencyRestore();
+        PerformDiagnosticDump(ev, nullptr);
+        _exit(1);
+    }
 
-        PerformDiagnosticDump(sig, addr, nullptr);
-
-        _exit(sig);
-    } else {
-        ZHLN::Print("\n[ZHLN] Signal intercepted in Worker. Main Thread will dump soon...\n");
-        while (true) {
-            HALT_THREAD();
-        }
+    ZHLN::Print("\n[ZHLN] Signal intercepted in Worker. Main Thread will dump soon...\n");
+    while (true) {
+        HALT_THREAD();
     }
 }
 
-#ifdef _WIN32
-static LONG WINAPI VectoredCrashHandler(PEXCEPTION_POINTERS pExceptionInfo) {
-    int sig = 0;
-    switch (pExceptionInfo->ExceptionRecord->ExceptionCode) {
-        case EXCEPTION_ACCESS_VIOLATION:
-        case EXCEPTION_STACK_OVERFLOW:
-            sig = SIGSEGV;
-            break;
-        case EXCEPTION_ILLEGAL_INSTRUCTION:
-            sig = SIGILL;
-            break;
-        case EXCEPTION_FLT_DIVIDE_BY_ZERO:
-        case EXCEPTION_INT_DIVIDE_BY_ZERO:
-            sig = SIGFPE;
-            break;
-        default:
-            return EXCEPTION_CONTINUE_SEARCH;
-    }
-    ProcessCrash(sig, pExceptionInfo->ExceptionRecord->ExceptionAddress);
-    return EXCEPTION_CONTINUE_SEARCH;
-}
-#else
-static void PosixCrashHandler(int sig, siginfo_t* info, void* /*context*/) {
-    // Intercept standard user terminations (Ctrl+C / Kill)
-    if (sig == SIGINT || sig == SIGTERM) {
-        ZHLN::TTYBackend::EmergencyRestore();
-        _exit(0); // Exit cleanly immediately
-    }
+namespace {
 
-    // Forward standard fatal errors to the crash handler
-    ProcessCrash(sig, info->si_addr);
-}
-#endif
+struct HandleRequestStop ZHLN_ANNOTATION(ZHLN::SignalSafe {}) {
+    void operator()(const SignalEvent&) const noexcept {
+        TTYBackend::EmergencyRestore();
+        _exit(0);
+    }
+};
+
+struct HandleAbort ZHLN_ANNOTATION(ZHLN::SignalSafe {}) {
+    void operator()(const SignalEvent&) const noexcept {
+        _exit(1);
+    }
+};
+
+struct HandleFatal ZHLN_ANNOTATION(ZHLN::SignalSafe {}) {
+    void operator()(const SignalEvent& ev) const noexcept {
+        ProcessCrash(ev);
+    }
+};
+
+} // namespace
 
 void CheckForCrashes(Engine* engine) {
-    int sig = s_PendingSignal.load();
-    if (sig <= 0) {
+    if (s_PendingPhase.load(std::memory_order::acquire) != 1) {
         return;
     }
 
-    s_PendingSignal.store(-1);
-    PerformDiagnosticDump(sig, s_FaultAddr.load(), engine);
+    s_PendingPhase.store(-1, std::memory_order::release);
+    const SignalEvent ev {
+        .signal       = static_cast<Signal>(s_PendingKind.load(std::memory_order::relaxed)),
+        .faultAddress = s_FaultAddr.load(std::memory_order::relaxed),
+        .threadId     = s_PendingThread.load(std::memory_order::relaxed),
+    };
+    PerformDiagnosticDump(ev, engine);
     std::abort();
 }
 
 void SetupSignalHandler() {
-#ifdef _WIN32
-    AddVectoredExceptionHandler(1, VectoredCrashHandler);
-#else
-    struct sigaction sa {};
-    sa.sa_sigaction = PosixCrashHandler;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = SA_SIGINFO;
-
-    sigaction(SIGSEGV, &sa, nullptr);
-    sigaction(SIGBUS, &sa, nullptr);
-    sigaction(SIGILL, &sa, nullptr);
-    sigaction(SIGFPE, &sa, nullptr);
-    sigaction(SIGABRT, &sa, nullptr);
-    sigaction(SIGINT, &sa, nullptr);
-    sigaction(SIGTERM, &sa, nullptr);
-#endif
+    static std::atomic<bool> s_defaultsRegistered {false};
+    if (!s_defaultsRegistered.exchange(true, std::memory_order::acq_rel)) {
+        SignalManager::RegisterSafeHandler<HandleRequestStop {}>(Signal::Interrupt);
+        SignalManager::RegisterSafeHandler<HandleRequestStop {}>(Signal::Terminate);
+        SignalManager::RegisterSafeHandler<HandleFatal {}>(Signal::AccessViolation);
+        SignalManager::RegisterSafeHandler<HandleFatal {}>(Signal::IllegalInstruction);
+        SignalManager::RegisterSafeHandler<HandleFatal {}>(Signal::MathError);
+        SignalManager::RegisterSafeHandler<HandleFatal {}>(Signal::BusError);
+        SignalManager::RegisterSafeHandler<HandleAbort {}>(Signal::Abort);
+    }
+    SignalManager::Install();
 }
 
 auto JoltTraceBridge(const char* inFMT, ...) noexcept -> void {

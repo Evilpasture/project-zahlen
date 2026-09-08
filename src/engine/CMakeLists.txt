@@ -6,6 +6,7 @@
 # and rendering passes own their source lists in sibling directories.
 set(RAW_ENGINE_SOURCES
     AssertHandler.cpp
+    SignalManager.cpp
     DefaultPreset.cpp
     Engine.cpp
     FileSystemWatcher.cpp

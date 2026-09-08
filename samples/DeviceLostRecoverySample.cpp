@@ -7,8 +7,7 @@
 // recovery. The scene is a handful of CreativeWorksFactory primitives.
 // ProvokeDeviceLost is armed by:
 //   - F9 in a windowed session
-//   - SIGQUIT (Ctrl+\) or SIGUSR1 (`kill -USR1 <pid>`) in any session
-//   - SIGBREAK (Ctrl+Break) on Windows
+//   - Signal::Quit (Ctrl+\) or Signal::User1 (`kill -USR1 <pid>`) on POSIX
 //   - ZHLN_PROVOKE_DEVICE_LOST_FRAME=<n>
 // Tick's Present step then:
 //   1. dumps fault reports (KHR reports API, EXT fallback)
@@ -31,6 +30,7 @@
 #include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Platform.hpp>
+#include <Zahlen/Core/SignalManager.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
@@ -47,7 +47,6 @@
 
 #include <algorithm>
 #include <atomic>
-#include <csignal>
 #include <cstdint>
 #include <cstdlib>
 #include <span>
@@ -57,20 +56,15 @@ namespace {
 
 std::atomic<bool> g_ProvokeRequested {false};
 
-void OnProvokeSignal(int /*sig*/) {
-    g_ProvokeRequested.store(true, std::memory_order::relaxed);
-}
+struct HandleProvoke ZHLN_ANNOTATION(ZHLN::SignalSafe {}) {
+    void operator()(const ZHLN::SignalEvent&) const noexcept {
+        g_ProvokeRequested.store(true, std::memory_order::relaxed);
+    }
+};
 
 void InstallProvokeSignal() {
-#ifdef _WIN32
-    std::signal(SIGBREAK, OnProvokeSignal);
-#else
-    struct sigaction action {};
-    action.sa_handler = OnProvokeSignal;
-    sigemptyset(&action.sa_mask);
-    sigaction(SIGUSR1, &action, nullptr);
-    sigaction(SIGQUIT, &action, nullptr);
-#endif
+    ZHLN::SignalManager::RegisterSafeHandler<HandleProvoke {}>(ZHLN::Signal::User1);
+    ZHLN::SignalManager::RegisterSafeHandler<HandleProvoke {}>(ZHLN::Signal::Quit);
 }
 
 inline constexpr float     kAmbientExposure = 10.0f;
@@ -205,7 +199,7 @@ auto main(int argc, char* argv[]) -> int {
 
     const uint32_t autoProvokeFrame = EnvironmentU32("ZHLN_PROVOKE_DEVICE_LOST_FRAME");
     ZHLN::Log(
-        "[DeviceLostRecoverySample] Ready (pid={}, {}, gpu={}). F9, Ctrl+\\ / SIGQUIT, or SIGUSR1 {}.", ZHLN::GetPID(),
+        "[DeviceLostRecoverySample] Ready (pid={}, {}, gpu={}). F9, Ctrl+\\, or kill -USR1 {}.", ZHLN::GetPID(),
         options.headless ? "headless" : "windowed", engine->GetRenderContext().GetGPUName(),
         engine->GetRenderContext().GetDeviceType() == ZHLN::PhysicalDeviceType::CPU ? "simulates device-lost recovery" : "hangs the GPU"
     );
