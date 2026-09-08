@@ -109,6 +109,26 @@ struct DebugUtilsTracker {
 };
 static_assert(GPUCrashTrackerBackend<DebugUtilsTracker>);
 
+/// VK_KHR_device_fault dump. Valid to call after VK_ERROR_DEVICE_LOST; Volk
+/// supplies vkGetDeviceFaultInfoKHR once the extension is enabled.
+struct DeviceFaultTracker {
+    DeviceFaultTracker() = default;
+    explicit DeviceFaultTracker(VkDevice inDevice) noexcept: device(inDevice) {
+    }
+
+    void WriteCheckpoint(VkCommandBuffer /*unused*/, std::string_view /*unused*/) const noexcept {
+    }
+    void RegisterShader(std::span<const uint32_t> /*unused*/, std::string_view /*unused*/) const noexcept {
+    }
+    void OnDeviceLost() const noexcept;
+    void Shutdown() noexcept {
+        device = VK_NULL_HANDLE;
+    }
+
+    VkDevice device = VK_NULL_HANDLE;
+};
+static_assert(GPUCrashTrackerBackend<DeviceFaultTracker>);
+
 class GPUDiagnostics {
   public:
     GPUDiagnostics() = default;
@@ -123,6 +143,9 @@ class GPUDiagnostics {
 
     void Create(GPUVendor vendor, VkDevice device, VkPhysicalDevice physical, DiagnosticConfig config = {}) {
         Shutdown();
+
+        _config       = config;
+        _faultTracker = DeviceFaultTracker(device);
 
         auto configured = CreateConfiguredGPUCrashTracker(vendor, device, physical, config);
         if (!configured.Empty()) {
@@ -156,6 +179,9 @@ class GPUDiagnostics {
 
     [[gnu::always_inline]]
     void OnDeviceLost() const noexcept {
+        if (_config.enableCrashDumps) {
+            _faultTracker.OnDeviceLost();
+        }
         std::visit([](const auto& backend) noexcept { backend.OnDeviceLost(); }, _tracker);
     }
 
@@ -163,6 +189,8 @@ class GPUDiagnostics {
     void Shutdown() noexcept {
         std::visit([](auto& backend) noexcept { backend.Shutdown(); }, _tracker);
         _tracker.emplace<NullTracker>();
+        _faultTracker.Shutdown();
+        _config = {};
     }
 
     [[nodiscard]] bool IsActive() const noexcept {
@@ -183,7 +211,9 @@ class GPUDiagnostics {
     static_assert(GPUCrashTrackerBackend<NullTracker>);
 
     using TrackerVariant = std::variant<NullTracker, CallbackCrashTracker, DebugUtilsTracker>;
-    TrackerVariant _tracker;
+    TrackerVariant     _tracker;
+    DiagnosticConfig   _config {};
+    DeviceFaultTracker _faultTracker;
 };
 
 } // namespace ZHLN::Vk
