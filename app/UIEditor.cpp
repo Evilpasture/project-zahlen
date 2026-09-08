@@ -22,8 +22,10 @@
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Window.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/gui/UITree.hpp>
 #if defined(ZHLN_HAS_UI_TOML)
