@@ -18,7 +18,6 @@
 #include <editor/GUIEditor.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/ecs/ECS.hpp>
-#include <ui/UIComponents.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -34,7 +33,6 @@ namespace {
 
 namespace GUI = ZHLN::GUI;
 using Comp    = ZHLN::Components;
-using UIComp  = ZHLN::GUI::UIComponents;
 
 // ============================================================================
 // The component table
@@ -85,11 +83,7 @@ constexpr auto kComponentKinds = MakeComponentKinds<
     Comp::TransformComponent,
     Comp::PBRComponent,
     Comp::LightComponent,
-    Comp::PostProcessSettingsComponent,
-    UIComp::UIRectComponent,
-    UIComp::UIFlexComponent,
-    UIComp::UIPanelComponent,
-    UIComp::TextComponent>();
+    Comp::PostProcessSettingsComponent>();
 
 // The editor and the edited scene share one registry, so the hierarchy
 // has to know which subtree is chrome. Walk HierarchyComponent upward
@@ -540,18 +534,25 @@ void DrawHierarchyPanel(GUI::Context& gui, ZHLN::Engine& engine, EditorState& st
     };
 
     // Snapshot + sort: GetEntitiesWith returns dense-array order, which
-    // reshuffles on every swap-remove destroy. UI entities sort by
-    // (hierarchyDepth, layoutOrder) — the stable key layout/render/
-    // hit-testing already use. Pure 3D entities (no UIRectComponent) have
-    // no layout stamps; they fall back to (0, entity index) so the list is
-    // still deterministic and they group ahead of deep UI nesting.
+    // reshuffles on every swap-remove destroy. Indent from HierarchyComponent
+    // parent walks; sibling order is the entity index so the list is
+    // deterministic without a private UI layout stamp.
     std::vector<Row> rows;
     for (const ZHLN::Entity e: reg.GetEntitiesWith<Comp::NameComponent>()) {
         if (IsEditorEntity(e, reg, state.editorRoot)) {
             continue;
         }
-        const auto* rect = reg.Get<UIComp::UIRectComponent>(e);
-        rows.push_back(Row {e, rect != nullptr ? rect->hierarchyDepth : 0u, rect != nullptr ? rect->layoutOrder : e.index});
+        uint32_t     depth = 0;
+        ZHLN::Entity cur   = e;
+        for (int guard = 0; guard < 128; ++guard) {
+            const auto* hierarchy = reg.Get<Comp::HierarchyComponent>(cur);
+            if (hierarchy == nullptr || hierarchy->parent == ZHLN::Entity::Null()) {
+                break;
+            }
+            ++depth;
+            cur = hierarchy->parent;
+        }
+        rows.push_back(Row {e, depth, e.index});
     }
     std::stable_sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) -> bool {
         if (a.depth != b.depth)
@@ -692,18 +693,6 @@ void DrawInspectorPanel(GUI::Context& gui, ZHLN::ECS::Registry& reg, EditorState
         ZHLN::Reflect::ForEachFieldWithName(c, sink);
     });
     section("postprocess", "Post Process", reg.Get<Comp::PostProcessSettingsComponent>(sel), [](Comp::PostProcessSettingsComponent& c, auto&& sink) -> void {
-        ZHLN::Reflect::ForEachFieldWithName(c, sink);
-    });
-    section("rect", "Rect", reg.Get<UIComp::UIRectComponent>(sel), [](UIComp::UIRectComponent& c, auto&& sink) -> void {
-        ZHLN::Reflect::ForEachFieldWithName(c, sink);
-    });
-    section("flex", "Flex", reg.Get<UIComp::UIFlexComponent>(sel), [](UIComp::UIFlexComponent& c, auto&& sink) -> void {
-        ZHLN::Reflect::ForEachFieldWithName(c, sink);
-    });
-    section("panel", "Panel", reg.Get<UIComp::UIPanelComponent>(sel), [](UIComp::UIPanelComponent& c, auto&& sink) -> void {
-        ZHLN::Reflect::ForEachFieldWithName(c, sink);
-    });
-    section("text", "Text", reg.Get<UIComp::TextComponent>(sel), [](UIComp::TextComponent& c, auto&& sink) -> void {
         ZHLN::Reflect::ForEachFieldWithName(c, sink);
     });
 

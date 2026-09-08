@@ -141,7 +141,6 @@ included. The concrete case that motivated the rule:
 | `extras/glTF/` | `GLTFImporter.*` (the glTF/GLB reader), `glTF.*` (the drop-a-file inspector, module `ZHLN.glTF`) | cgltf, stb_image, meshoptimizer, and `extras/json` for the custom node members |
 | `extras/Scripting/` | `ScriptBinder.hpp` / `ScriptBinderRegistry.hpp` / `ScriptECSBridge.*` / `ScriptValueTypes.hpp` (reflection-driven class table and ECS bridge, Lua-independent) | none |
 | `extras/Scripting/Lua/` | `LuaScriptRuntime.*` (the LuaJIT state), `Scripting.cpp` (the C ABI and command dispatch), `ScriptingABI.*` (the ffi shim), `scripts/` (the Fennel sources) | LuaJIT |
-| `extras/ui/` | Retained ECS UI components (`UIComponents`) plus panel/image/gradient/plot vertex emitters (`UIGeometry`) | none |
 | `extras/editor/` | Native world editor (`zahlen_editor`: Hierarchy + Inspector). Linked only by the composition root (`ZHLN_HAS_EDITOR`) | none |
 
 Core has no JSON, TOML, model-file or scripting dependency at all, so a
@@ -423,13 +422,7 @@ The scene singleton `GUI::UISettingsComponent` owns the baked SDF font atlas
 (`fontAtlas` / `defaultFontAtlas`). Core never walks a private UI parent
 link: `DespawnEntity` follows `Components::HierarchyComponent` only.
 
-### Extras: retained ECS UI and the native editor
-
-Retained widget components (`UIRectComponent`, `UIPanelComponent`, flex,
-image, gradient, plot) live in `extras/ui/` (`#include <ui/UIComponents.hpp>`).
-Parenting is `HierarchyComponent`. Geometry emitters (`AppendPanelVertices`,
-image/gradient/plot, HSV) are `extras/ui/UIGeometry.hpp`. Word wrap helpers
-that call `MeasureTextBounds` are `extras/ui/TextWrap.hpp`.
+### Extras: the native editor
 
 The native world editor (Hierarchy + Inspector) is `extras/editor/`
 (`#include <editor/GUIEditor.hpp>`), built as `zahlen_editor` and linked only

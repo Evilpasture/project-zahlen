@@ -19,7 +19,6 @@
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/gui/GUI.hpp>
-#include <ui/UIComponents.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <chrono>
@@ -465,42 +464,33 @@ void InitComponentRegistry() {
         return;
     }
 
-    // One entry per component type, whatever container declares it: core owns
-    // ZHLN::Components, the GUI subsystem owns ZHLN::GUI::UIComponents, and a
-    // script must not be able to tell which is which.
-    const auto registerContainer = []<typename Container>() {
-        ZHLN::Reflect::ForEachNestedType<Container>([]<typename Comp>() {
-            std::string_view name = ZHLN::Reflect::TypeName<Comp>();
+    ZHLN::Reflect::ForEachNestedType<Components>([]<typename Comp>() {
+        std::string_view name = ZHLN::Reflect::TypeName<Comp>();
 
-            s_ComponentRegistry[name] = ComponentRegistryEntry {
-                .add = [](ZHLN::ECS::Registry& reg, ZHLN::Entity entity) -> void* {
-                    if constexpr (std::is_same_v<Comp, Components::PhysicsComponent>) {
-                        return nullptr; // Read-only physics handle
-                    } else if constexpr (std::is_default_constructible_v<Comp>) {
-                        return &reg.template Add<Comp>(entity, Comp {});
-                    } else {
-                        return nullptr;
-                    }
-                },
-                .getBuffer = [](ZHLN::ECS::Registry& reg) -> ZHLN_BufferView {
-                    auto             raw        = reg.GetRawArray<Comp>();
-                    constexpr size_t floatCount = ZHLN::Reflect::GetFloatFieldsCount<Comp>();
-
-                    if constexpr (std::is_same_v<Comp, Components::PhysicsComponent>) {
-                        return ZHLN::ViewComposer::Build(&reg, raw.data(), "Q", raw.size());
-                    } else if constexpr (floatCount > 0) {
-                        return ZHLN::ViewComposer::Build(&reg, raw.data(), "f", raw.size(), floatCount);
-                    } else {
-                        return ZHLN::ViewComposer::Build(&reg, raw.data(), "B", raw.size());
-                    }
+        s_ComponentRegistry[name] = ComponentRegistryEntry {
+            .add = [](ZHLN::ECS::Registry& reg, ZHLN::Entity entity) -> void* {
+                if constexpr (std::is_same_v<Comp, Components::PhysicsComponent>) {
+                    return nullptr; // Read-only physics handle
+                } else if constexpr (std::is_default_constructible_v<Comp>) {
+                    return &reg.template Add<Comp>(entity, Comp {});
+                } else {
+                    return nullptr;
                 }
-            };
-        });
-    };
+            },
+            .getBuffer = [](ZHLN::ECS::Registry& reg) -> ZHLN_BufferView {
+                auto             raw        = reg.GetRawArray<Comp>();
+                constexpr size_t floatCount = ZHLN::Reflect::GetFloatFieldsCount<Comp>();
 
-    registerContainer.operator()<Components>();
-    registerContainer.operator()<GUI::UIComponents>();
-    // Hoisted out of UIComponents: ForEachNestedType would not see it.
+                if constexpr (std::is_same_v<Comp, Components::PhysicsComponent>) {
+                    return ZHLN::ViewComposer::Build(&reg, raw.data(), "Q", raw.size());
+                } else if constexpr (floatCount > 0) {
+                    return ZHLN::ViewComposer::Build(&reg, raw.data(), "f", raw.size(), floatCount);
+                } else {
+                    return ZHLN::ViewComposer::Build(&reg, raw.data(), "B", raw.size());
+                }
+            }
+        };
+    });
     RegisterComponentType<GUI::UISettingsComponent>(ZHLN::Reflect::TypeName<GUI::UISettingsComponent>(), "B");
 }
 

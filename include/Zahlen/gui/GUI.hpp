@@ -50,14 +50,11 @@ struct BoxConfig {
 /// Scene singleton that owns the baked SDF font atlas.
 ///
 /// Immediate-mode Clay (`GUI::Context`) reads `fontAtlas` each BeginFrame.
-/// `nextLayoutOrder` is a retained-UI creation stamp (extras/ui): Clay does
-/// not consume it. Lives on the registry rather than on Context because
-/// Context is rebuilt every frame and a per-frame counter would reshuffle
-/// sibling order after a collapse.
+/// Lives on the registry rather than on Context because Context is rebuilt
+/// every frame.
 struct UISettingsComponent {
     TextureHandle defaultFontAtlas = TextureHandle::Invalid;
     FontAtlas     fontAtlas;
-    uint32_t      nextLayoutOrder  = 1;
 };
 
 struct TextBounds {
