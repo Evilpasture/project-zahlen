@@ -4,25 +4,31 @@
 // samples/DeviceLostRecoverySample.cpp
 //
 // Interactive host for VK_KHR_device_fault dumps and Engine::HandleDeviceLost
-// recovery. The scene is a handful of CreativeWorksFactory primitives. F9
-// (or ZHLN_PROVOKE_DEVICE_LOST_FRAME=<n>) dispatches the hang-GPU compute
-// shader via Engine::ProvokeDeviceLost(). Tick's Present step then:
+// recovery. The scene is a handful of CreativeWorksFactory primitives.
+// ProvokeDeviceLost is armed by:
+//   - F9 in a windowed session
+//   - SIGQUIT (Ctrl+\) or SIGUSR1 (`kill -USR1 <pid>`) in any session
+//   - SIGBREAK (Ctrl+Break) on Windows
+//   - ZHLN_PROVOKE_DEVICE_LOST_FRAME=<n>
+// Tick's Present step then:
 //   1. dumps fault reports (KHR reports API, EXT fallback)
 //   2. tears down and recreates RenderContext
 //   3. RebuildVulkanResources (core GPU caches + font atlas)
 //   4. runs DeviceLostCallbacks so this sample can re-upload the arena
 //
-// The GPU hang waits on the OS timeout (Windows TDR, NVIDIA's
-// NVreg_EnableGpuFirmware / linux timeout). Expect several seconds of freeze
-// before the dump and the rebuilt scene come back.
+// The GPU hang waits on the OS timeout (Windows TDR / NVIDIA timeout). Expect
+// several seconds of freeze before the dump and the rebuilt scene come back.
+// Ctrl+C / SIGINT still quits (engine crash handler).
 //
 //   ./build/samples/DeviceLostRecoverySample
-//   ZHLN_PROVOKE_DEVICE_LOST_FRAME=60 ./build/samples/DeviceLostRecoverySample
+//   ./build/samples/DeviceLostRecoverySample --headless
+//   ZHLN_PROVOKE_DEVICE_LOST_FRAME=60 ./build/samples/DeviceLostRecoverySample --headless
 
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Clock.hpp>
 #include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
+#include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
@@ -38,12 +44,32 @@
 #include <Jolt/Math/Vec4.h>
 
 #include <algorithm>
+#include <atomic>
+#include <csignal>
 #include <cstdint>
 #include <cstdlib>
 #include <span>
 #include <vector>
 
 namespace {
+
+std::atomic<bool> g_ProvokeRequested {false};
+
+void OnProvokeSignal(int /*sig*/) {
+    g_ProvokeRequested.store(true, std::memory_order::relaxed);
+}
+
+void InstallProvokeSignal() {
+#ifdef _WIN32
+    std::signal(SIGBREAK, OnProvokeSignal);
+#else
+    struct sigaction action {};
+    action.sa_handler = OnProvokeSignal;
+    sigemptyset(&action.sa_mask);
+    sigaction(SIGUSR1, &action, nullptr);
+    sigaction(SIGQUIT, &action, nullptr);
+#endif
+}
 
 inline constexpr float     kAmbientExposure = 10.0f;
 inline constexpr float     kSunIntensity    = 28.0f;
@@ -137,12 +163,19 @@ auto main(int argc, char* argv[]) -> int {
 
     ZHLN::SetLogLevel(options.logLevel);
     ZHLN::SetupSignalHandler();
+    InstallProvokeSignal();
     ZHLN::TaskSystem::Init();
     ZHLN::DefaultPreset::SetDisabled(true);
 
     auto engineRes = ZHLN::Engine::Create(
         {.physics = {.maxBodies = 1024, .maxBodyPairs = 2048, .maxContactConstraints = 2048},
-         .render  = {.appName = "Zahlen :: Device Lost Recovery", .vsync = options.vsync, .fullscreen = options.fullscreen}}
+         .render  = {
+              .appName        = "Zahlen :: Device Lost Recovery",
+              .vsync          = options.vsync,
+              .fullscreen     = options.fullscreen,
+              .validationMode = options.validationMode,
+              .headless       = options.headless,
+          }}
     );
     if (!engineRes) {
         ZHLN::Log("FATAL: Failed to initialize Engine: {}", engineRes.error().Message());
@@ -150,7 +183,9 @@ auto main(int argc, char* argv[]) -> int {
     }
 
     auto engine = std::move(engineRes.value());
-    engine->GetWindow().Focus();
+    if (!options.headless) {
+        engine->GetWindow().Focus();
+    }
     engine->InitializeDefaultScene();
 
     std::vector<ZHLN::Entity> arena;
@@ -167,7 +202,10 @@ auto main(int argc, char* argv[]) -> int {
     });
 
     const uint32_t autoProvokeFrame = EnvironmentU32("ZHLN_PROVOKE_DEVICE_LOST_FRAME");
-    ZHLN::Log("[DeviceLostRecoverySample] Ready. Right-click look, F9 hangs the GPU and recovers. Watch for [GPU DEVICE FAULT] then the rebuilt scene.");
+    ZHLN::Log(
+        "[DeviceLostRecoverySample] Ready (pid={}, {}). F9, Ctrl+\\ / SIGQUIT, or SIGUSR1 hangs the GPU. Watch for [GPU DEVICE FAULT] then the rebuilt scene.",
+        ZHLN::GetPID(), options.headless ? "headless" : "windowed"
+    );
     if (autoProvokeFrame != 0) {
         ZHLN::Log("[DeviceLostRecoverySample] Will ProvokeDeviceLost on frame {}.", autoProvokeFrame);
     }
@@ -196,8 +234,9 @@ auto main(int argc, char* argv[]) -> int {
             });
         }
 
-        const bool autoNow = !autoProvoked && autoProvokeFrame != 0 && engine->GetCurrentFrame() >= autoProvokeFrame;
-        if ((f9Down && !f9WasDown) || autoNow) {
+        const bool signalNow = g_ProvokeRequested.exchange(false, std::memory_order::relaxed);
+        const bool autoNow   = !autoProvoked && autoProvokeFrame != 0 && engine->GetCurrentFrame() >= autoProvokeFrame;
+        if ((f9Down && !f9WasDown) || signalNow || autoNow) {
             ZHLN::Log(
                 "[Sample] Provoking GPU hang (frame {}, DeviceLostCount={}). The OS timeout may freeze the process for several seconds.",
                 engine->GetCurrentFrame(), ZHLN::RenderContext::DeviceLostCount()
