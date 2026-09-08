@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <expected>
 #include <format>
+#include <fstream>
 #include <source_location>
 #include <string>
 #include <string_view>
@@ -107,7 +108,36 @@ struct AssertionFailure {
     std::string      actualValue;
     std::string      expectedValue;
     std::string_view op; // "==" or "!=" or "true" or "false" or "ValidationError" or "DeviceLost" or "PerfRegression"
+    std::string      expression; // trimmed source line at `line`, when readable
 };
+
+// Best-effort: source_location has no expression text, so we read the file.
+[[nodiscard]] inline auto ReadSourceLine(std::string_view path, uint32_t line) -> std::string {
+    if (path.empty() || line == 0) {
+        return {};
+    }
+    std::ifstream in {std::string {path}};
+    if (!in) {
+        return {};
+    }
+    std::string text;
+    uint32_t    n = 0;
+    while (std::getline(in, text)) {
+        ++n;
+        if (n != line) {
+            continue;
+        }
+        const auto start = text.find_first_not_of(" \t");
+        if (start != std::string::npos) {
+            text.erase(0, start);
+        }
+        while (!text.empty() && (text.back() == '\r' || text.back() == ' ' || text.back() == '\t')) {
+            text.pop_back();
+        }
+        return text;
+    }
+    return {};
+}
 
 
 inline unsigned int GetDefaultTimeoutSeconds() noexcept {
@@ -209,7 +239,12 @@ bool ExpectEq(const T1& actual, const T2& expected, std::source_location loc = s
 
     auto& ctx = GetThreadLocalContext();
     ctx.failures.push_back(
-        {.file = loc.file_name(), .line = loc.line(), .actualValue = FormatValue(actual), .expectedValue = FormatValue(expected), .op = "=="}
+        {.file          = loc.file_name(),
+         .line          = loc.line(),
+         .actualValue   = FormatValue(actual),
+         .expectedValue = FormatValue(expected),
+         .op            = "==",
+         .expression    = ReadSourceLine(loc.file_name(), loc.line())}
     );
     return false;
 }
@@ -227,7 +262,12 @@ bool ExpectNe(const T1& actual, const T2& expected, std::source_location loc = s
 
     auto& ctx = GetThreadLocalContext();
     ctx.failures.push_back(
-        {.file = loc.file_name(), .line = loc.line(), .actualValue = FormatValue(actual), .expectedValue = FormatValue(expected), .op = "!="}
+        {.file          = loc.file_name(),
+         .line          = loc.line(),
+         .actualValue   = FormatValue(actual),
+         .expectedValue = FormatValue(expected),
+         .op            = "!=",
+         .expression    = ReadSourceLine(loc.file_name(), loc.line())}
     );
     return false;
 }
@@ -237,7 +277,31 @@ inline bool ExpectTrue(bool condition, std::source_location loc = std::source_lo
         return true;
     }
     auto& ctx = GetThreadLocalContext();
-    ctx.failures.push_back({.file = loc.file_name(), .line = loc.line(), .actualValue = "false", .expectedValue = "true", .op = "true"});
+    ctx.failures.push_back(
+        {.file          = loc.file_name(),
+         .line          = loc.line(),
+         .actualValue   = "false",
+         .expectedValue = "true",
+         .op            = "true",
+         .expression    = ReadSourceLine(loc.file_name(), loc.line())}
+    );
+    return false;
+}
+
+template <typename T>
+bool ExpectInRange(const T& actual, const T& lo, const T& hi, std::source_location loc = std::source_location::current()) {
+    if (actual >= lo && actual <= hi) {
+        return true;
+    }
+    auto& ctx = GetThreadLocalContext();
+    ctx.failures.push_back(
+        {.file          = loc.file_name(),
+         .line          = loc.line(),
+         .actualValue   = FormatValue(actual),
+         .expectedValue = "[" + FormatValue(lo) + ", " + FormatValue(hi) + "]",
+         .op            = "in range",
+         .expression    = ReadSourceLine(loc.file_name(), loc.line())}
+    );
     return false;
 }
 
@@ -246,7 +310,14 @@ inline bool ExpectFalse(bool condition, std::source_location loc = std::source_l
         return true;
     }
     auto& ctx = GetThreadLocalContext();
-    ctx.failures.push_back({.file = loc.file_name(), .line = loc.line(), .actualValue = "true", .expectedValue = "false", .op = "false"});
+    ctx.failures.push_back(
+        {.file          = loc.file_name(),
+         .line          = loc.line(),
+         .actualValue   = "true",
+         .expectedValue = "false",
+         .op            = "false",
+         .expression    = ReadSourceLine(loc.file_name(), loc.line())}
+    );
     return false;
 }
 
@@ -374,9 +445,12 @@ TestStats RunSuite() {
                         ZHLN::Println("    {}GPU Failure: {}{}", Color::Red, f.actualValue, Color::Reset);
                     } else {
                         ZHLN::Println("    {}Location: {}:{}{}", Color::Gray, f.file, f.line, Color::Reset);
+                        if (!f.expression.empty()) {
+                            ZHLN::Println("      Condition: {}", f.expression);
+                        }
                         if (f.op == "true" || f.op == "false") {
-                            ZHLN::Println("      Expected condition to be: {}", f.expectedValue);
-                            ZHLN::Println("      Actual condition was    : {}", f.actualValue);
+                            ZHLN::Println("      Evaluated to: {}", f.actualValue);
+                            ZHLN::Println("      Expected:     {}", f.expectedValue);
                         } else {
                             ZHLN::Println("      Comparison mismatch on  : '{}'", f.op);
                             ZHLN::Println("        Actual value          : {}", f.actualValue);

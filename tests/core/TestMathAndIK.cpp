@@ -35,14 +35,14 @@ struct MathAndIKTestSuite {
             static_assert(bakedPower == 0.125f);
             static_assert(bakedRoot > 2.99f && bakedRoot < 3.01f);
 
-            ZHLN::Test::ExpectTrue(ZHLN::Math::Smoothstep(0.0f, 1.0f, 0.5f) == 0.5f);
-            ZHLN::Test::ExpectTrue(ZHLN::Math::Abs(-7) == 7);
-            ZHLN::Test::ExpectTrue(ZHLN::Math::Lerp(2.0f, 6.0f, 0.25f) == 3.0f);
+            ZHLN::Test::ExpectEq(ZHLN::Math::Smoothstep(0.0f, 1.0f, 0.5f), 0.5f);
+            ZHLN::Test::ExpectEq(ZHLN::Math::Abs(-7), 7);
+            ZHLN::Test::ExpectEq(ZHLN::Math::Lerp(2.0f, 6.0f, 0.25f), 3.0f);
 
             const float noise = ZHLN::Math::FBM(0.25f, 0.75f, 4);
             const float cell  = ZHLN::Math::Worley(0.25f, 0.75f);
-            ZHLN::Test::ExpectTrue(noise >= 0.0f && noise <= 1.0f);
-            ZHLN::Test::ExpectTrue(cell >= 0.0f && cell <= 1.0f);
+            ZHLN::Test::ExpectInRange(noise, 0.0f, 1.0f);
+            ZHLN::Test::ExpectInRange(cell, 0.0f, 1.0f);
             return {};
         }
 
