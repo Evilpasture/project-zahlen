@@ -15,9 +15,12 @@ set_target_properties(zahlen_gui PROPERTIES
     CXX_EXTENSIONS OFF
 )
 
-target_include_directories(zahlen_gui PUBLIC
-    ${PROJECT_SOURCE_DIR}/include
-    ${PROJECT_SOURCE_DIR}/src
+# GUI implementation headers must not leak to dependent subsystems.
+target_include_directories(zahlen_gui
+    PUBLIC
+        ${PROJECT_SOURCE_DIR}/include
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 target_include_directories(zahlen_gui SYSTEM PUBLIC

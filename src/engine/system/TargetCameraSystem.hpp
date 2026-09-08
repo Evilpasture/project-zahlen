@@ -11,7 +11,7 @@ namespace ECS {
 class Registry;
 } // namespace ECS
 
-class Camera;
+struct Camera;
 
 class TargetCameraSystem {
   public:

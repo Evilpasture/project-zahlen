@@ -4,7 +4,7 @@
 #include "CullingSystem.hpp"
 #include "LightingSystem.hpp"
 #include "Zahlen/Render.hpp"
-#include "engine/system/CameraSystem.hpp"
+#include "CameraSystem.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/ControlFlow.hpp>
@@ -13,7 +13,6 @@
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Profiler.hpp>
 #include <Zahlen/ecs/ECS.hpp>
-#include <physics/PhysicsWorld.hpp>
 
 namespace ZHLN::Tests { namespace {
 void VerifyCullingResults(const ECS::Registry& reg, const JPH::Array<Entity>& visible, const Camera& cam) noexcept {

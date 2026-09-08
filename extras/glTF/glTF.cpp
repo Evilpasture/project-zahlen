@@ -21,7 +21,7 @@ module;
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
-#include <Zahlen/GUI.hpp>
+#include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -171,7 +171,7 @@ void ClearInstances(InspectorState& state) {
     auto& reg = state.engine->GetRegistry();
     for (ZHLN::Entity e: state.instances) {
         if (e != ZHLN::Entity::Null() && reg.IsAlive(e)) {
-            reg.Destroy(e);
+            DespawnEntity(*state.engine, e);
         }
     }
     state.instances.clear();

@@ -7,6 +7,7 @@
 
 #include "TestsFramework.hpp"
 #include <Zahlen/GraphicsSettings.hpp>
+#include <array>
 
 using namespace ZHLN;
 
@@ -21,6 +22,7 @@ struct GraphicsSettingsSuite {
         PresetSignatureMismatch ZHLN_ANNOTATION(ZHLN::Description<"ApplyPreset() left a tier's signature field at the wrong value."> {}),
         ConfigEqualityFailed    ZHLN_ANNOTATION(ZHLN::Description<"Two GraphicsSettings values that should be identical compared unequal."> {}),
         EnumToStringFailed      ZHLN_ANNOTATION(ZHLN::Description<"GraphicsSettings enum <-> string conversion did not round-trip."> {}),
+        StyleControlsFailed     ZHLN_ANNOTATION(ZHLN::Description<"Blit colour-style controls were not retained as non-signature graphics settings."> {}),
     };
 
     struct Tests {
@@ -32,6 +34,12 @@ struct GraphicsSettingsSuite {
             }
             if (!ZHLN::Test::ExpectEq(gfx.qualityPreset, QualityLevel::Medium)) {
                 return std::unexpected(GraphicsSettingsTestError::PresetDetectionFailed);
+            }
+            if (!ZHLN::Test::ExpectTrue(
+                    gfx.post.exposure == 0.015f && gfx.post.bloomStrength == 0.5f && gfx.post.contrast == 1.0f &&
+                    gfx.post.saturation == 1.0f && gfx.post.tonemapper == 1 && gfx.post.colorFilter == std::array {1.0f, 1.0f, 1.0f}
+                )) {
+                return std::unexpected(GraphicsSettingsTestError::StyleControlsFailed);
             }
             return {};
         }
@@ -87,6 +95,8 @@ struct GraphicsSettingsSuite {
             gfx.post.vignetteIntensity      = 1.4f;
             gfx.environment.ambientExposure = 12.0f;
             gfx.antiAliasing.fxaaSubpix     = 0.5f;
+            gfx.post.exposure               = 0.03f;
+            gfx.post.tonemapper             = 3;
             if (!ZHLN::Test::ExpectEq(gfx.DetectPreset(), QualityLevel::High)) {
                 return std::unexpected(GraphicsSettingsTestError::PresetDetectionFailed);
             }
@@ -99,7 +109,39 @@ struct GraphicsSettingsSuite {
             return {};
         }
 
-        // --- 5. Custom preset is a no-op ---------------------------------------
+        // --- 5. Blit colour style is configuration, never a quality tier ----
+        std::expected<void, ZHLN::Error> blit_style_is_non_signature_configuration() {
+            GraphicsSettings baseline {};
+            GraphicsSettings styled {};
+            styled.ApplyPreset(QualityLevel::High);
+            styled.post.exposure      = 0.02f;
+            styled.post.bloomStrength = 0.8f;
+            styled.post.contrast      = 1.1f;
+            styled.post.saturation    = 0.85f;
+            styled.post.tonemapper    = 3;
+            styled.post.colorFilter   = {1.0f, 0.9f, 0.8f};
+
+            // Presets choose cost, not colour style; all six values survive.
+            styled.ApplyPreset(QualityLevel::High);
+            if (!ZHLN::Test::ExpectTrue(
+                    styled.post.exposure == 0.02f && styled.post.bloomStrength == 0.8f && styled.post.contrast == 1.1f &&
+                    styled.post.saturation == 0.85f && styled.post.tonemapper == 3 && styled.post.colorFilter == std::array {1.0f, 0.9f, 0.8f}
+                )) {
+                return std::unexpected(GraphicsSettingsTestError::StyleControlsFailed);
+            }
+            if (!ZHLN::Test::ExpectEq(styled.DetectPreset(), QualityLevel::High)) {
+                return std::unexpected(GraphicsSettingsTestError::StyleControlsFailed);
+            }
+
+            styled = baseline;
+            styled.post.exposure = 0.02f;
+            if (!ZHLN::Test::ExpectFalse(baseline.ConfigEquals(styled))) {
+                return std::unexpected(GraphicsSettingsTestError::StyleControlsFailed);
+            }
+            return {};
+        }
+
+        // --- 6. Custom preset is a no-op ---------------------------------------
         std::expected<void, ZHLN::Error> custom_preset_is_noop() {
             GraphicsSettings gfx {};
             gfx.ApplyPreset(QualityLevel::Ultra);
@@ -110,7 +152,7 @@ struct GraphicsSettingsSuite {
             return {};
         }
 
-        // --- 6. ConfigEquals ignores jitter, catches configuration ------------
+        // --- 7. ConfigEquals ignores jitter, catches configuration ------------
         std::expected<void, ZHLN::Error> config_equality_semantics() {
             GraphicsSettings a {};
             GraphicsSettings b {};
@@ -139,7 +181,7 @@ struct GraphicsSettingsSuite {
             return {};
         }
 
-        // --- 7. Tier labels come from the reflection machinery -----------------
+        // --- 8. Tier labels come from the reflection machinery -----------------
         // GraphicsSettings.hpp declares no hand-rolled ToString; the generic
         // ZHLN::ToString (Reflect::EnumToMessage -> identifier fallback) names
         // the tiers.

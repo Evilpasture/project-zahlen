@@ -449,6 +449,10 @@ auto Window::GetTTYContext() const -> void* {
     return _impl->tty_context;
 }
 
+auto Window::GetRequiredGraphicsInstanceExtensions() const -> std::vector<std::string_view> {
+    return _impl->is_tty ? TTYBackend::GetRequiredInstanceExtensions() : std::vector<std::string_view> {};
+}
+
 auto Window::GetInputReceiver() const noexcept -> const WindowInputReceiver& {
     return _impl->receiver;
 }

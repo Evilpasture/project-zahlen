@@ -65,12 +65,10 @@ struct EngineOptions {
 /// Prefer AcquireEngine below unless the test genuinely needs a cold device.
 ///
 /// Returns an empty owner on failure; callers assert rather than dereference.
-/// The engine is published as the ambient context for as long as the returned
-/// ScopedEngine lives. The
-/// default preset is disabled process-wide, which is what keeps the engine
+/// The default preset is disabled process-wide, which is what keeps the engine
 /// from injecting its own sun, floor and camera into a scene the test is
 /// trying to measure.
-[[nodiscard]] inline auto CreateEngine(const EngineOptions& opts = {}) -> ZHLN::ScopedEngine {
+[[nodiscard]] inline auto CreateEngine(const EngineOptions& opts = {}) -> std::unique_ptr<ZHLN::Engine> {
     ZHLN::DefaultPreset::SetDisabled(true);
 
     const ZHLN::EngineConfig cfg {
@@ -104,7 +102,7 @@ struct EngineOptions {
 }
 
 /// Convenience overload for the common "just give me a 640x480 engine" case.
-[[nodiscard]] inline auto CreateEngine(std::string_view appName, uint32_t width = 640, uint32_t height = 480) -> ZHLN::ScopedEngine {
+[[nodiscard]] inline auto CreateEngine(std::string_view appName, uint32_t width = 640, uint32_t height = 480) -> std::unique_ptr<ZHLN::Engine> {
     return CreateEngine(EngineOptions {.appName = appName, .width = width, .height = height});
 }
 
@@ -190,21 +188,17 @@ namespace Detail {
 
 /// One slot, not a map.
 ///
-/// A keyed pool kept two engines alive at once and fell over: the ambient
-/// engine pointers were raw globals with no teardown, and Jolt's factory and
-/// type registration were acquired per engine but released by whichever engine
-/// died first. Both are fixed -- the context is an owned EngineContextScope and
-/// the Jolt registration is refcounted -- but two coexisting engines have never
-/// actually been run on hardware, so this stays conservative: a configuration
-/// change destroys the current engine before building the next, exactly as the
-/// per-test engines did.
+/// A keyed pool has not been validated on every Vulkan driver, so this stays
+/// conservative: a configuration change destroys the current engine before
+/// building the next, exactly as the per-test engines did. Jolt registration is
+/// process-refcounted, so serial engine lifetimes remain safe.
 ///
 /// That still collapses every run of same-resolution tests into a single
 /// initialisation, which is nearly all of them. Going back to a keyed pool is a
 /// small change to this struct once a green run says coexistence works.
 struct EngineSlot {
     EngineOptions      opts {};
-    ZHLN::ScopedEngine engine;
+    std::unique_ptr<ZHLN::Engine> engine;
 };
 
 [[nodiscard]] inline auto Slot() -> EngineSlot& {

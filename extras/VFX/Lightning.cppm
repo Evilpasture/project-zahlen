@@ -53,8 +53,6 @@ export struct LightningComponent {
     Entity impactLightEntity = Entity::Null();
 
     float baseAmbientExposure = 4.5f;
-
-    static void OnDestroy(LightningComponent* c) noexcept;
 };
 
 namespace Lightning {

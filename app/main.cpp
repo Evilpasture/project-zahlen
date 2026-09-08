@@ -16,21 +16,19 @@
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
-#include "physics/PhysicsWorld.hpp"
 #include <Jolt/Physics/Collision/CastResult.h>
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Clock.hpp>
 #include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/Console.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/CreativeWorksManager.hpp>
 #include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
-#include <Zahlen/GUI.hpp>
-#include <Zahlen/GUIEditor.hpp>
+#include <Zahlen/gui/GUI.hpp>
+#include <Zahlen/gui/GUIEditor.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -261,7 +259,7 @@ void RunNativeEditorFrame(ZHLN::GUI::Context& gui, ZHLN::Engine& engine, float d
                     .gap          = 6.0f,
                     .direction    = ZHLN::GUI::Direction::Column
                 },
-                [&]() -> void { ZHLN::Editor::DrawHierarchyPanel(gui, reg, s_NativeEditorState, "Hierarchy"); }
+                [&]() -> void { ZHLN::Editor::DrawHierarchyPanel(gui, engine, s_NativeEditorState, "Hierarchy"); }
             );
 
             // Center: Viewport overlay toolbar

@@ -34,8 +34,9 @@
 // The same tile the renderer binds, embedded so the discriminator is measured
 // against the real asset rather than an idealised stand-in.
 // NOLINTBEGIN(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
+
 constexpr uint8_t kBlueNoisePng[] = {
-#embed "../../resources/shaders/LDR_RGBA_0.png"
+#embed "LDR_RGBA_0.png"
 };
 // NOLINTEND(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
 
@@ -187,7 +188,7 @@ struct NoiseMetricTestSuite {
         /// sampling onto a line.
         std::expected<void, ZHLN::Error> blue_noise_channels_are_decorrelated() {
             int            w = 0, h = 0, c = 0;
-            unsigned char* px    = stbi_load_from_memory(kBlueNoisePng, static_cast<int>(sizeof(kBlueNoisePng)), &w, &h, &c, 4);
+            unsigned char* px = stbi_load_from_memory(kBlueNoisePng, static_cast<int>(sizeof(kBlueNoisePng)), &w, &h, &c, 4);
             if (!ZHLN::Test::ExpectTrue(px != nullptr && w > 0 && h > 0)) {
                 return std::unexpected(NoiseMetricError::BlueNoiseDecodeFailed);
             }
@@ -222,7 +223,7 @@ struct NoiseMetricTestSuite {
         /// regenerated mip), which defeats the purpose of sampling it.
         std::expected<void, ZHLN::Error> blue_noise_is_high_frequency() {
             int            w = 0, h = 0, c = 0;
-            unsigned char* px    = stbi_load_from_memory(kBlueNoisePng, static_cast<int>(sizeof(kBlueNoisePng)), &w, &h, &c, 4);
+            unsigned char* px = stbi_load_from_memory(kBlueNoisePng, static_cast<int>(sizeof(kBlueNoisePng)), &w, &h, &c, 4);
             if (!ZHLN::Test::ExpectTrue(px != nullptr && w >= 64 && h >= 64)) {
                 return std::unexpected(NoiseMetricError::BlueNoiseDecodeFailed);
             }

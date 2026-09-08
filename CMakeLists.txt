@@ -140,6 +140,24 @@ if(NOT ZHLN_TESTS_PUBLIC_API_RESULT EQUAL 0)
 endif()
 message(STATUS "${ZHLN_TESTS_PUBLIC_API_OUTPUT}")
 
+# Core implementation directories are hermetic: a subsystem may consume the
+# public include/ surface and its own src/<subsystem>/ headers, never a
+# sibling's private implementation. Keep this configure-time check in lockstep
+# with the target include visibility below.
+execute_process(
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_subsystem_boundaries.py"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    RESULT_VARIABLE ZHLN_SUBSYSTEM_BOUNDARIES_RESULT
+    OUTPUT_VARIABLE ZHLN_SUBSYSTEM_BOUNDARIES_OUTPUT
+    ERROR_VARIABLE ZHLN_SUBSYSTEM_BOUNDARIES_ERROR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_STRIP_TRAILING_WHITESPACE
+)
+if(NOT ZHLN_SUBSYSTEM_BOUNDARIES_RESULT EQUAL 0)
+    message(FATAL_ERROR "${ZHLN_SUBSYSTEM_BOUNDARIES_ERROR}")
+endif()
+message(STATUS "${ZHLN_SUBSYSTEM_BOUNDARIES_OUTPUT}")
+
 # Reflection internals live in include/Zahlen/Core/Reflection.hpp and nowhere
 # else; module interface units must never declare a detail namespace -- module
 # internals are internal by not being exported, and a detail namespace only
@@ -327,7 +345,7 @@ endif()
 # silently run every render suite on the CPU rasteriser and print
 # "[VULKAN] Selected physical device: llvmpipe" while a perfectly good GPU sat
 # in the same box. Device scoring was never the problem — the GPU simply was
-# never enumerated (see ZHLN_Internal_DefaultScoreFn in src/render/RenderCore.c,
+# never enumerated (see ZHLN_Internal_DefaultScoreFn in src/vulkan/RenderCore.c,
 # which ranks a discrete GPU at 1'000'000 and a CPU device at 0).
 #
 # Default OFF: tests use the host Vulkan installation. Turn it ON for a hermetic
@@ -460,65 +478,6 @@ if(APPLE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-enum-enum-conversion -Wno-deprecated-anon-enum-enum-conversion")
 endif()
 
-
-
-set(RAW_ENGINE_SOURCES
-    src/engine/AssertHandler.cpp
-    src/engine/DefaultPreset.cpp
-    src/engine/graphics/RenderFrame.cpp
-    src/engine/graphics/RenderGraphBuilder.cpp
-    src/engine/graphics/RenderDrawCommands.cpp
-    src/engine/graphics/RenderInit.cpp
-    src/engine/graphics/init/RenderInitDevice.cpp
-    src/engine/graphics/init/RenderInitHeaps.cpp
-    src/engine/graphics/init/RenderInitTargets.cpp
-    src/engine/graphics/init/RenderInitScenePipelines.cpp
-    src/engine/graphics/init/RenderInitPostProcess.cpp
-    src/engine/graphics/init/RenderInitUI.cpp
-    src/engine/graphics/RenderResources.cpp
-    src/engine/Engine.cpp
-    src/engine/CreativeWorksFactory.cpp
-    src/engine/graphics/MeshBuilder.cpp
-    src/engine/graphics/TextureManager.cpp
-    src/engine/system/TextureSystem.cpp
-    src/engine/system/AnimationSystem.cpp
-    src/engine/CreativeWorksManager.cpp
-    src/engine/Window.cpp
-    src/engine/Platform.cpp
-    src/engine/Console.cpp
-    src/engine/Profiler.cpp
-    src/engine/graphics/Resources.cpp
-    src/engine/system/RenderSystem.cpp
-    src/engine/system/GraphicsSettingsSync.cpp
-    src/engine/system/DecalSystem.cpp
-    src/engine/system/MovementSystem.cpp
-    src/engine/system/AudioSystem.cpp
-    src/engine/system/ArticulationSystem.cpp
-    src/engine/system/CullingSystem.cpp
-    src/engine/graphics/Sky.cpp
-    src/engine/graphics/BRDFLUT.cpp
-    src/engine/system/PhysicsSystem.cpp
-    src/engine/system/TerrainSystem.cpp
-    src/engine/system/LODSystem.cpp
-    src/engine/system/ParticleSystem.cpp
-    src/engine/CommandLine.cpp
-    src/engine/system/TargetCameraSystem.cpp
-    src/engine/TTYBackend.cpp
-    src/engine/system/TransformSystem.cpp
-    src/engine/system/PhysicsStateSystem.cpp
-    src/engine/system/LightingSystem.cpp
-    src/engine/system/InputSystem.cpp
-    src/engine/system/CameraSystem.cpp
-    src/engine/graphics/RenderDocInit.cpp
-    src/engine/system/InteractionSystem.cpp
-    src/engine/WindowSurface.cpp
-    src/engine/graphics/RenderProcedural.cpp
-    src/engine/graphics/RenderPasses.cpp
-    src/engine/graphics/RenderSetup.cpp
-    src/engine/Scene.cpp
-    src/engine/ScriptRunner.cpp
-)
-
 find_library(ZSTD_LIBRARY NAMES zstd zstd_static HINTS "/opt/homebrew/lib" "/usr/local/lib" "/usr/lib")
 if(NOT ZSTD_LIBRARY)
     message(FATAL_ERROR "Could not find zstd library. Please install it (e.g., 'brew install zstd').")
@@ -539,14 +498,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     pkg_check_modules(LIBSEAT REQUIRED IMPORTED_TARGET libseat)
 endif()
 
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/render)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/vulkan)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/threading)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/physics)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/ecs)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/audio)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/gui)
-
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/engine/graphics/OpenGLHacks)
 
 # --- ASSEMBLE COMPILER FLAGS METADATA ---
 set(COMPILER_FLAGS_LIST "${CMAKE_CXX_FLAGS}")
@@ -566,9 +523,13 @@ endif()
 string(STRIP "${COMPILER_FLAGS_LIST}" COMPILER_FLAGS_LIST)
 string(REGEX REPLACE " +" " " COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST}")
 
-zahlen_transpile_sources(ENGINE_SOURCES ${RAW_ENGINE_SOURCES})
+add_library(zahlen_engine SHARED)
 
-add_library(zahlen_engine SHARED ${ENGINE_SOURCES})
+# Engine implementation and renderer each own their source lists and attach to
+# zahlen_engine. Keep the Vulkan backend above so these layers can consume its
+# public headers.
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/engine)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/render)
 
 # The renderer (and Volk inside it) must bind to THIS image's symbols:
 # executables linking zahlen_render's static archive alongside the engine
@@ -584,7 +545,7 @@ if(UNIX AND NOT APPLE)
 endif()
 
 target_precompile_headers(zahlen_engine PRIVATE
-    "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/src/render/Rendering.hpp>"
+    "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/src/vulkan/Rendering.hpp>"
 )
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
@@ -595,23 +556,6 @@ set_target_properties(zahlen_engine PROPERTIES
     CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON
 )
-
-# --- COMPILE-TIME PROFILING ---
-option(ZHLN_PROFILE_RENDER_FRAME_COMPILE "Enable GCC compile-time profiling for RenderFrame.cpp" OFF)
-
-if(ZHLN_PROFILE_RENDER_FRAME_COMPILE)
-    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-        set_source_files_properties(src/engine/graphics/RenderFrame.cpp PROPERTIES
-            COMPILE_OPTIONS "-ftime-report"
-        )
-        message(STATUS "GCC compile-time profiling enabled for RenderFrame.cpp")
-    elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-        set_source_files_properties(src/engine/graphics/RenderFrame.cpp PROPERTIES
-            COMPILE_OPTIONS "-ftime-trace"
-        )
-        message(STATUS "Clang time-trace profiling enabled for RenderFrame.cpp")
-    endif()
-endif()
 
 target_compile_definitions(zahlen_engine PRIVATE
     ZHLN_ENGINE_BUILD
@@ -696,7 +640,14 @@ target_include_directories(zahlen_engine SYSTEM PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/clay
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/cgltf
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/stb
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+# The engine target composes src/engine with the high-level src/render layer.
+# That layer consumes renderer-backend implementation types, so expose only
+# src/vulkan privately to this composed target rather than the entire src/
+# tree. No other subsystem implementation directory is searchable here.
+target_include_directories(zahlen_engine PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/vulkan
 )
 
 # --- SHADER COMPILATION ---
@@ -745,9 +696,9 @@ add_executable(zahlen
 target_link_libraries(zahlen PRIVATE zahlen_engine Jolt)
 target_compile_definitions(zahlen PRIVATE JPH_DOUBLE_PRECISION)
 
-# The composition root reaches engine internals (engine/Platform.hpp,
-# physics/PhysicsWorld.hpp). While it lived at src/main.cpp those resolved
-# relative to the file; from app/ the path has to be explicit.
+# The composition root wires engine-private platform and editor services. It is
+# intentionally the only non-subsystem target that can see src/; core targets
+# themselves are restricted to their local implementation directories.
 target_include_directories(zahlen PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 set_target_properties(zahlen PROPERTIES

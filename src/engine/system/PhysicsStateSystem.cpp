@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "PhysicsStateSystem.hpp"
-#include "engine/system/TransformSystem.hpp"
+#include "TransformSystem.hpp"
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Engine.hpp>
@@ -10,7 +10,6 @@
 #include <algorithm>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
-#include <physics/PhysicsWorld.hpp>
 
 namespace ZHLN::Tests {
 static void VerifyRealVisualInterpolation(Engine& engine, float alpha) noexcept {
@@ -50,9 +49,13 @@ static void VerifyRealVisualInterpolation(Engine& engine, float alpha) noexcept 
 
 namespace ZHLN {
 
+void PhysicsStateSystem::Reconcile(Engine& engine) noexcept {
+    engine.GetPhysicsContext().ReconcileOrphanedBodies(engine.GetRegistry());
+}
+
 void PhysicsStateSystem::WriteBack(Engine& engine) noexcept {
-    auto&       reg   = engine.GetRegistry();
-    const auto& world = engine.GetPhysicsContext().GetWorld();
+    auto& reg = engine.GetRegistry();
+    auto& pc  = engine.GetPhysicsContext();
 
     auto entities  = reg.GetEntitiesWith<Components::PhysicsComponent>();
     auto physComps = reg.GetRawArray<Components::PhysicsComponent>();
@@ -63,22 +66,20 @@ void PhysicsStateSystem::WriteBack(Engine& engine) noexcept {
         auto*  state = reg.Get<Components::PhysicsStateComponent>(e);
 
         if (state != nullptr) {
-            uint32_t dense = world.slotToDense[phys.physicsHandle.index];
-            size_t   base  = static_cast<size_t>(dense) * 4;
+            // DespawnEntity marks a slot pending immediately, while plain
+            // Registry::Destroy is reconciled at the next physics phase. The
+            // context validates that lifecycle state and returns one coherent
+            // interpolation snapshot without exposing PhysicsWorld's dense SoA.
+            Physics::BodyStateSnapshot bodyState {};
+            if (!pc.TryGetBodyState(phys.physicsHandle, bodyState)) {
+                continue;
+            }
 
-            bool isCharacter = (world.slotStates[phys.physicsHandle.index].load(std::memory_order::relaxed) == Physics::SLOT_CHARACTER);
-
-            // Read directly from Jolt's robust double-buffered history
             state->lastPhysicsSyncFrame = engine.GetCurrentFrame();
-            state->prevPosition         = JPH::Vec3(
-                static_cast<float>(world.prevPositions[base]), static_cast<float>(world.prevPositions[base + 1]),
-                static_cast<float>(world.prevPositions[base + 2])
-            );
-            state->currPosition = JPH::Vec3(
-                static_cast<float>(world.positions[base]), static_cast<float>(world.positions[base + 1]), static_cast<float>(world.positions[base + 2])
-            );
+            state->prevPosition         = bodyState.previousPosition;
+            state->currPosition         = bodyState.currentPosition;
 
-            if (isCharacter) {
+            if (bodyState.isCharacter) {
                 auto* move = reg.Get<Components::MovementComponent>(e);
                 if (move != nullptr) {
                     state->prevRotation = move->prevOrientation;
@@ -88,9 +89,8 @@ void PhysicsStateSystem::WriteBack(Engine& engine) noexcept {
                     state->currRotation = JPH::Quat::sIdentity();
                 }
             } else {
-                state->prevRotation =
-                    JPH::Quat(world.prevRotations[base], world.prevRotations[base + 1], world.prevRotations[base + 2], world.prevRotations[base + 3]);
-                state->currRotation = JPH::Quat(world.rotations[base], world.rotations[base + 1], world.rotations[base + 2], world.rotations[base + 3]);
+                state->prevRotation = bodyState.previousRotation;
+                state->currRotation = bodyState.currentRotation;
             }
         }
     }

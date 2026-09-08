@@ -28,7 +28,6 @@
       // The singular Dispatch mechanism handling ALL C/Lua interactions.
       uint32_t ZHLN_GetCommandID(const char* cmdName);
       uint64_t ZHLN_DispatchCommand(ZHLN_Engine* engine, uint32_t cmdID, const void* args);
-      ZHLN_Engine* ZHLN_GetEngineContext(void);
 
       typedef struct ZHLN_RaycastResult {
           uint64_t entity;
@@ -165,17 +164,24 @@
           int useLocalProbe;
           float vignetteIntensity;
           float vignettePower;
+          float glowIntensity;
           int enableSSR;
           int enableRTR;
           int fullBright;
+          float exposure;
+          float bloomStrength;
+          float contrast;
+          float saturation;
+          int tonemapper;
+          float colorFilter[4] __attribute__((aligned(16)));
           float ambientExposure;
-          float probeMin[4];
-          float probeMax[4];
-          float probePos[4];
-          float skyZenith[4];
-          float skyHorizon[4];
-          float skyGround[4];
-      } PostProcessSettingsComponent;
+          float probeMin[4] __attribute__((aligned(16)));
+          float probeMax[4] __attribute__((aligned(16)));
+          float probePos[4] __attribute__((aligned(16)));
+          float skyZenith[4] __attribute__((aligned(16)));
+          float skyHorizon[4] __attribute__((aligned(16)));
+          float skyGround[4] __attribute__((aligned(16)));
+      } __attribute__((aligned(16))) PostProcessSettingsComponent;
 
       typedef struct DebugSettingsComponent {
           int physicsDrawMode;
@@ -466,7 +472,6 @@
       typedef struct RaycastPenetrationArgs { double ox, oy, oz; float dx, dy, dz; float maxDist; uint64_t ignoreEntity; ZHLN_RaycastPenetrationResult* outResult; } RaycastPenetrationArgs;
       typedef struct SetMoveInputArgs { uint64_t entityRaw; float x; float z; } SetMoveInputArgs;
       typedef struct UnprojectArgs { float ndcX; float ndcY; double* ox; double* oy; double* oz; float* dx; float* dy; float* dz; } UnprojectArgs;
-      typedef struct LogInventoryArgs { const char* msg; } LogInventoryArgs;
       typedef struct RegisterDynamicComponentArgs {
           const char* name;
           uint64_t size;

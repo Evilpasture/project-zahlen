@@ -38,7 +38,7 @@
 // with no document layer compiled in at all.
 //
 // Instantiating is a pure function of the description plus the engine it is
-// given -- no ambient engine, no process-global scene state. Two engines can
+// given -- no hidden engine, no process-global scene state. Two engines can
 // hold the same Scene at once, and re-instantiating the same description
 // produces the same scene, which is the property the render tests need.
 //
@@ -163,6 +163,15 @@ struct SceneEnvironment {
     /// scene is worth tracing reflections for is a property of the scene.
     bool enableSSR = true;
     bool enableRTR = false;
+
+    /// Final Blit colour style. Tonemapper values mirror blit.slang:
+    /// 0 = Linear, 1 = ACES, 2 = Reinhard, 3 = Neutral.
+    float       exposure      = 0.015f;
+    float       bloomStrength = 0.5f;
+    float       contrast      = 1.0f;
+    float       saturation    = 1.0f;
+    int32_t     tonemapper    = 1;
+    JPH::Float3 colorFilter   = {1.0f, 1.0f, 1.0f};
 };
 
 /// A whole scene. This is the root table of the document.

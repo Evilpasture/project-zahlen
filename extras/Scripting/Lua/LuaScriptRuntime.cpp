@@ -3,7 +3,6 @@
 
 #include <Scripting/Lua/LuaScriptRuntime.hpp>
 #include <Scripting/ScriptBinderRegistry.hpp>
-#include <Zahlen/Console.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <algorithm>
@@ -59,7 +58,6 @@ int LuaBridge_Log(lua_State* L) {
     }
 
     ZHLN::LogManual(file, ar.currentline, msg, ZHLN::Color::Green);
-    ZHLN::GameConsole::Log(msg, {.r = 0.4f, .g = 1.0f, .b = 0.4f, .a = 1.0f});
 
     return 0;
 }
@@ -138,6 +136,12 @@ void LuaScriptRuntime::Initialize(Engine* engine) {
     }
     _initialized = true;
 
+    // The runtime, not a process-global C ABI, supplies the engine to the
+    // bootstrap module. Lua keeps this lightuserdata only for the lifetime of
+    // this runtime, which is owned by the Engine's ScriptRunner.
+    lua_pushlightuserdata(L, engine);
+    lua_setglobal(L, "ZHLN_EngineContext");
+
     // Populate the ScriptBinder registry before any script runs. Every lookup
     // in ScriptECSBridge and every ZHLN_InvokeMethod resolves against it, so
     // without this the registry is empty and all of them fail with
@@ -192,7 +196,7 @@ void LuaScriptRuntime::ExecuteString(std::string_view code) {
     }
     if (luaL_dostring(L, code.data()) != LUA_OK) {
         std::string err = lua_tostring(L, -1);
-        ZHLN::GameConsole::Log("Lua Error: " + err, {.r = 1.0f, .g = 0.4f, .b = 0.4f, .a = 1.0f});
+        Log("Lua Error: {}", err);
         lua_pop(L, 1);
     }
 }
@@ -224,7 +228,6 @@ void LuaScriptRuntime::ReloadFile(std::string_view path) {
         lua_pop(L, 1);
     } else {
         Log("Script Hot-Reloaded: {}", path);
-        ZHLN::GameConsole::Log("Hot-Reloaded: " + std::string(path), {.r = 0.2f, .g = 0.8f, .b = 1.0f, .a = 1.0f});
     }
 }
 

@@ -128,7 +128,6 @@ module;
 #include <Zahlen/Common.h>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Config.hpp>
-#include <Zahlen/Console.hpp>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Core/ControlFlow.hpp>
@@ -136,6 +135,7 @@ module;
 #include <Zahlen/Core/Format.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/Loop.hpp>
+#include <Zahlen/Core/Math.hpp>
 #include <Zahlen/Core/MemoryPool.hpp>
 #include <Zahlen/Core/Pair.hpp>
 #include <Zahlen/Core/Platform.hpp>
@@ -154,8 +154,9 @@ module;
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
+#include <Zahlen/FileSystemWatcher.hpp>
 #include <Zahlen/Format.hpp>
-#include <Zahlen/GUI.hpp>
+#include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/IK.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
@@ -222,6 +223,11 @@ using ZHLN::Description;
 using ZHLN::Dump;
 using ZHLN::Error;
 using ZHLN::ErrorCategory;
+using ZHLN::FileSystemWatcher;
+using ZHLN::FileWatchAction;
+using ZHLN::FileWatchCallback;
+using ZHLN::FileWatchEvent;
+using ZHLN::FileWatchHandle;
 using ZHLN::FixedString;
 using ZHLN::Format;
 using ZHLN::GetLogLevel;
@@ -241,6 +247,7 @@ using ZHLN::String256;
 using ZHLN::String32;
 using ZHLN::String64;
 using ZHLN::Trace;
+using ZHLN::WatchDescriptor;
 
 namespace Reflect {
 using ZHLN::Reflect::AnnotatedName;
@@ -317,6 +324,26 @@ using ZHLN::VertexPosition;
 using ZHLN::VertexSkin;
 
 namespace Math {
+using ZHLN::Math::Abs;
+using ZHLN::Math::Clamp;
+using ZHLN::Math::constexpr_exp;
+using ZHLN::Math::constexpr_ln;
+using ZHLN::Math::FastIntPower;
+using ZHLN::Math::FBM;
+using ZHLN::Math::Floor;
+using ZHLN::Math::Fract;
+using ZHLN::Math::Hash;
+using ZHLN::Math::Lerp;
+using ZHLN::Math::Max;
+using ZHLN::Math::Min;
+using ZHLN::Math::Mix;
+using ZHLN::Math::Noise;
+using ZHLN::Math::Power;
+using ZHLN::Math::Saturate;
+using ZHLN::Math::Sin;
+using ZHLN::Math::Smoothstep;
+using ZHLN::Math::Sqrt;
+using ZHLN::Math::Worley;
 using ZHLN::Math::CalculateFrustumAABB;
 using ZHLN::Math::CreateLookAt;
 using ZHLN::Math::CreateOrtho;
@@ -407,7 +434,6 @@ using ZHLN::ScriptRunner;
 // Engine
 using ZHLN::CatalogEntry;
 using ZHLN::Clock;
-using ZHLN::ColorRGBA;
 using ZHLN::CommandLineError;
 using ZHLN::CommandLineOptions;
 using ZHLN::CPUProfiler;
@@ -417,7 +443,6 @@ using ZHLN::DefaultPreset;
 using ZHLN::Engine;
 using ZHLN::EngineConfig;
 using ZHLN::FallbackReason;
-using ZHLN::GameConsole;
 using ZHLN::GameplayDriver;
 using ZHLN::HandleCommandLine;
 using ZHLN::KeyCode;

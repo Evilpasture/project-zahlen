@@ -599,7 +599,7 @@ auto AttachCharacterRig(
 
         // Clean up the redundant prefab container root (parts[0]).
         if (writtenCount > 0) {
-            reg.Destroy(parts[0]);
+            ZHLN::DespawnEntity(engine, parts[0]);
         }
 
         // Variadic component registration: AnimatorComponent triggers RigBoneMap discovery

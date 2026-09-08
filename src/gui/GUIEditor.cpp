@@ -3,7 +3,7 @@
 //
 // src/gui/GUIEditor.cpp
 //
-// Native editor panels (Hierarchy + Inspector). See include/Zahlen/GUIEditor.hpp
+// Native editor panels (Hierarchy + Inspector). See include/Zahlen/gui/GUIEditor.hpp
 // for the design notes; this file is where the reflection iteration lives, so
 // that the transpiler fallback (tools/transpile_reflection.py, which rewrites
 // reflection calls by translation-unit source offset) sees and flattens it.
@@ -11,10 +11,11 @@
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Format.hpp>
+#include <Zahlen/Engine.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Core/Reflection.hpp>
-#include <Zahlen/GUI.hpp>
-#include <Zahlen/GUIEditor.hpp>
+#include <Zahlen/gui/GUI.hpp>
+#include <Zahlen/gui/GUIEditor.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/gui/UIComponents.hpp>
@@ -84,6 +85,7 @@ constexpr auto kComponentKinds = MakeComponentKinds<
     Comp::TransformComponent,
     Comp::PBRComponent,
     Comp::LightComponent,
+    Comp::PostProcessSettingsComponent,
     UIComp::UIRectComponent,
     UIComp::UIFlexComponent,
     UIComp::UIPanelComponent,
@@ -235,7 +237,8 @@ auto CreateEntity(ZHLN::ECS::Registry& reg, std::string_view name) -> ZHLN::Enti
     return entity;
 }
 
-void DestroySelected(ZHLN::ECS::Registry& reg, EditorState& state) noexcept {
+void DestroySelected(ZHLN::Engine& engine, EditorState& state) noexcept {
+    auto&               reg    = engine.GetRegistry();
     const ZHLN::Entity victim = state.selectedEntity;
 
     // Cleared first: if the handle turns out to be stale the editor must not be
@@ -245,7 +248,7 @@ void DestroySelected(ZHLN::ECS::Registry& reg, EditorState& state) noexcept {
     if (victim == ZHLN::Entity::Null() || !reg.IsAlive(victim)) {
         return;
     }
-    reg.Destroy(victim);
+    ZHLN::DespawnEntity(engine, victim);
 }
 
 // ============================================================================
@@ -528,7 +531,8 @@ void UpdateTransformMode(
     state.transformPrevInput = level;
 }
 
-void DrawHierarchyPanel(GUI::Context& gui, ZHLN::ECS::Registry& reg, EditorState& state, std::string_view id) {
+void DrawHierarchyPanel(GUI::Context& gui, ZHLN::Engine& engine, EditorState& state, std::string_view id) {
+    auto& reg = engine.GetRegistry();
     struct Row {
         ZHLN::Entity entity;
         uint32_t     depth;
@@ -567,7 +571,7 @@ void DrawHierarchyPanel(GUI::Context& gui, ZHLN::ECS::Registry& reg, EditorState
     }
     if (state.selectedEntity != ZHLN::Entity::Null() && reg.IsAlive(state.selectedEntity) &&
         gui.Button("Delete", JPH::Vec4(0.42f, 0.16f, 0.16f, 0.95f))) {
-        DestroySelected(reg, state);
+        DestroySelected(engine, state);
     }
     gui.EndRow();
 
@@ -685,6 +689,9 @@ void DrawInspectorPanel(GUI::Context& gui, ZHLN::ECS::Registry& reg, EditorState
         ZHLN::Reflect::ForEachFieldWithName(c, sink);
     });
     section("light", "Light", reg.Get<Comp::LightComponent>(sel), [](Comp::LightComponent& c, auto&& sink) -> void {
+        ZHLN::Reflect::ForEachFieldWithName(c, sink);
+    });
+    section("postprocess", "Post Process", reg.Get<Comp::PostProcessSettingsComponent>(sel), [](Comp::PostProcessSettingsComponent& c, auto&& sink) -> void {
         ZHLN::Reflect::ForEachFieldWithName(c, sink);
     });
     section("rect", "Rect", reg.Get<UIComp::UIRectComponent>(sel), [](UIComp::UIRectComponent& c, auto&& sink) -> void {

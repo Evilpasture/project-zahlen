@@ -3,6 +3,7 @@
 
 #include "TestsFramework.hpp"
 #include <Zahlen/Camera.hpp>
+#include <Zahlen/Core/Math.hpp>
 #include <Zahlen/IK.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <cmath>
@@ -17,6 +18,34 @@ enum class MathTestError : uint32_t {
 
 struct MathAndIKTestSuite {
     struct Tests {
+        // --- 0. Freestanding Scalar Math ---
+        std::expected<void, ZHLN::Error> scalar_math() {
+            static_assert(ZHLN::Math::Floor(-1.25) == -2.0);
+            static_assert(ZHLN::Math::Fract(-1.25) == 0.75);
+            static_assert(ZHLN::Math::Min({7, 3, 5}) == 3);
+            static_assert(ZHLN::Math::Max(3, 7) == 7);
+            static_assert(ZHLN::Math::Clamp(-2, 0, 1) == 0);
+            static_assert(ZHLN::Math::Saturate(2.0f) == 1.0f);
+            static_assert(
+                ZHLN::Math::PackColor(static_cast<uint8_t>(0x12), static_cast<uint8_t>(0x34), static_cast<uint8_t>(0x56)) == 0xFF563412U
+            );
+
+            constexpr float bakedPower = ZHLN::Math::Power(2.0f, -3);
+            constexpr float bakedRoot  = ZHLN::Math::Sqrt(9.0f);
+            static_assert(bakedPower == 0.125f);
+            static_assert(bakedRoot > 2.99f && bakedRoot < 3.01f);
+
+            ZHLN::Test::ExpectTrue(ZHLN::Math::Smoothstep(0.0f, 1.0f, 0.5f) == 0.5f);
+            ZHLN::Test::ExpectTrue(ZHLN::Math::Abs(-7) == 7);
+            ZHLN::Test::ExpectTrue(ZHLN::Math::Lerp(2.0f, 6.0f, 0.25f) == 3.0f);
+
+            const float noise = ZHLN::Math::FBM(0.25f, 0.75f, 4);
+            const float cell  = ZHLN::Math::Worley(0.25f, 0.75f);
+            ZHLN::Test::ExpectTrue(noise >= 0.0f && noise <= 1.0f);
+            ZHLN::Test::ExpectTrue(cell >= 0.0f && cell <= 1.0f);
+            return {};
+        }
+
         // --- 1. Analytic 2-Bone IK Solver ---
         std::expected<void, ZHLN::Error> two_bone_ik_solver() {
             // Setup limb: Upper Arm (len 2.0) + Lower Arm (len 2.0) = Max reach 4.0

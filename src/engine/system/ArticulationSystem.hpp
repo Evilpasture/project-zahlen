@@ -8,9 +8,14 @@
 // clang-format on
 #include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Vec3.h>
+#include <Jolt/Physics/Ragdoll/Ragdoll.h>
 #include <Zahlen/Common.h>
+#include <Zahlen/Components.hpp>
 #include <Zahlen/Entity.hpp>
+#include <algorithm>
 #include <array>
+#include <cstddef>
+#include <vector>
 
 namespace ZHLN {
 
@@ -43,7 +48,26 @@ class ZHLN_API ArticulationSystem {
 
     void Update(Engine& engine, float dt);
 
+    /// Releases a ragdoll's Jolt registration while its ECS component is still
+    /// addressable. DespawnEntity uses this before Registry::Destroy.
+    void Release(Engine& engine, Entity owner) noexcept;
+    /// Drains retained registrations before the PhysicsContext is destroyed.
+    void Shutdown(Engine& engine) noexcept;
+
     static void BindSkeleton(uint32_t jointOffset, const Skeleton& skeleton) noexcept;
+
+  private:
+    struct TrackedRagdoll {
+        Entity                 owner = Entity::Null();
+        JPH::Ref<JPH::Ragdoll> instance;
+        bool                   isAddedToPhysics = false;
+    };
+
+    void Reconcile(Engine& engine) noexcept;
+    void Track(Entity owner, const Components::RagdollComponent& component);
+    void ReleaseTracked(Engine& engine, size_t index) noexcept;
+
+    std::vector<TrackedRagdoll> _tracked;
 };
 
 } // namespace ZHLN

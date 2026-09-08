@@ -82,6 +82,7 @@ struct CPUPipelineHarness {
             ZHLN::Components::PhysicsComponent {charPhys},
             ZHLN::Components::PhysicsStateComponent {.currPosition = JPH::Vec3(spawnPos), .prevPosition = JPH::Vec3(spawnPos)}
         );
+        pc.SetBodyOwner(charPhys, player);
 
         pc.OptimizeBroadphase();
 

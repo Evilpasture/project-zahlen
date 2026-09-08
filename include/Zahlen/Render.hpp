@@ -9,6 +9,7 @@
 #include <Zahlen/Core/Pair.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Error.hpp>
+#include <Zahlen/Entity.hpp>
 #include <Zahlen/Types.hpp>
 #include <Zahlen/Window.hpp>
 #include <atomic>
@@ -18,6 +19,10 @@
 #include <optional>
 
 namespace ZHLN {
+
+namespace ECS {
+class Registry;
+}
 
 // ============================================================================
 // Renderer Capability Errors
@@ -125,6 +130,7 @@ struct DecalParams {
 };
 
 struct Camera;
+class FileSystemWatcher;
 
 class ZHLN_API RenderContext {
   private:
@@ -140,9 +146,11 @@ class ZHLN_API RenderContext {
     RenderContext(const RenderContext&)                    = delete;
     auto operator=(const RenderContext&) -> RenderContext& = delete;
 
-    [[nodiscard]] static std::expected<std::unique_ptr<RenderContext>, Error> Create(Window& window, const RenderConfig& cfg) noexcept;
-
-    void CheckShaderReload() noexcept;
+    /// Pass the engine-owned watcher to enable development shader reloads. The
+    /// optional pointer keeps direct RenderContext users source-compatible and,
+    /// when non-null, must outlive the RenderContext.
+    [[nodiscard]] static std::expected<std::unique_ptr<RenderContext>, Error>
+        Create(Window& window, const RenderConfig& cfg, FileSystemWatcher* fileSystemWatcher = nullptr) noexcept;
 
     [[nodiscard]] std::optional<Extent2D> GetFramebufferSize() const;
 
@@ -185,7 +193,9 @@ class ZHLN_API RenderContext {
     // Reuse or create skinned scratch VBO for an entity without leaking handles
     BufferHandle GetOrCreateSkinnedScratchBuffer(uint64_t entityKey, uint32_t vertexCount);
     BufferHandle CreateStorageBuffer(size_t size);
-    BufferHandle GetOrCreateParticleBuffer(uint64_t entityKey, uint32_t maxParticles);
+    /// Reuses an owner-scoped particle buffer for one effect subresource. The
+    /// render lifecycle reclaims it when owner dies or is explicitly despawned.
+    BufferHandle GetOrCreateParticleBuffer(Entity owner, uint32_t subresourceKey, uint32_t maxParticles);
     void         SubmitParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const ParticleEmitterParams& params);
     void SubmitMeshParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const MeshParticleEmitterParams& params, AssetID mesh, MaterialID mat);
 
@@ -252,6 +262,16 @@ class ZHLN_API RenderContext {
 
     ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& GetTracked2DEmitters() noexcept;
     ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& GetTracked3DEmitters() noexcept;
+
+    /// Records a buffer outside ECS storage. The owner association survives a
+    /// plain Registry::Destroy so the render lifecycle can reclaim it later.
+    void TrackEntityBuffer(Entity owner, BufferHandle buffer);
+    /// Releases every buffer currently attributed to owner, including particle
+    /// ledgers. DespawnEntity uses this for immediate ordered teardown.
+    void ReleaseEntityBuffers(Entity owner);
+    /// Reclaims tracked buffers whose ECS owner has already died.
+    void ReconcileEntityBuffers(const ECS::Registry& registry);
+    [[nodiscard]] auto GetTrackedEntityBufferCount() const noexcept -> size_t;
 
     // --- VK_EXT_mesh_shader ---
     /// True when the device exposes mesh shading with limits sufficient for the

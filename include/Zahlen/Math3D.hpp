@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
+#include <Zahlen/Core/Math.hpp>
 #include <cmath>
 #include <cstring>
 
@@ -197,13 +198,13 @@ constexpr auto PackNormal(float x, float y, float z, float w = 0.0f) -> Packed10
     return {(ws << 30) | (zs << 20) | (ys << 10) | xs};
 }
 
-// Simple Color packer
+// Normalized-float color packer. The byte layout itself is owned by the
+// freestanding scalar implementation in <Zahlen/Core/Math.hpp>.
 constexpr auto PackColor(float r, float g, float b, float a = 1.0f) -> PackedRGBA8 {
-    uint32_t rs = static_cast<uint32_t>(r * 255.0f) & 0xFF;
-    uint32_t gs = static_cast<uint32_t>(g * 255.0f) & 0xFF;
-    uint32_t bs = static_cast<uint32_t>(b * 255.0f) & 0xFF;
-    uint32_t as = static_cast<uint32_t>(a * 255.0f) & 0xFF;
-    return {(as << 24) | (bs << 16) | (gs << 8) | rs};
+    const auto toByte = [](float channel) constexpr {
+        return static_cast<uint8_t>(Clamp(channel, 0.0f, 1.0f) * 255.0f);
+    };
+    return {PackColor(toByte(r), toByte(g), toByte(b), toByte(a))};
 }
 
 inline auto FloatToHalf(float f) -> uint16_t {

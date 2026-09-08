@@ -8,7 +8,7 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <cgltf.h>
 #include <cstring>
-#include <engine/Platform.hpp>
+#include "Platform.hpp"
 #include <new>
 #include <vector>
 

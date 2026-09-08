@@ -239,15 +239,7 @@ class ZHLN_API Registry {
 
         if (!_components[id]) {
             typename SparseSet::DestructorFn dt = nullptr;
-            if constexpr (requires(DecayedT* t) { DecayedT::OnDestroy(t); }) {
-                dt = [](void* ptr) -> auto {
-                    auto* obj = static_cast<DecayedT*>(ptr);
-                    DecayedT::OnDestroy(obj);
-                    if constexpr (!std::is_trivially_destructible_v<DecayedT>) {
-                        obj->~DecayedT();
-                    }
-                };
-            } else if constexpr (!std::is_trivially_destructible_v<DecayedT>) {
+            if constexpr (!std::is_trivially_destructible_v<DecayedT>) {
                 dt = [](void* ptr) -> auto { static_cast<DecayedT*>(ptr)->~DecayedT(); };
             }
             _components[id] = new SparseSet(sizeof(DecayedT), alignof(DecayedT), &this->sync, dt);
@@ -390,15 +382,7 @@ class ZHLN_API Registry {
 
         if (!_components[id]) {
             typename SparseSet::DestructorFn dt = nullptr;
-            if constexpr (requires(T* t) { T::OnDestroy(t); }) {
-                dt = [](void* ptr) -> auto {
-                    auto* obj = static_cast<T*>(ptr);
-                    T::OnDestroy(obj);
-                    if constexpr (!std::is_trivially_destructible_v<T>) {
-                        obj->~T();
-                    }
-                };
-            } else if constexpr (!std::is_trivially_destructible_v<T>) {
+            if constexpr (!std::is_trivially_destructible_v<T>) {
                 dt = [](void* ptr) -> auto { static_cast<T*>(ptr)->~T(); };
             }
             _components[id] = new SparseSet(sizeof(T), alignof(T), &this->sync, dt);

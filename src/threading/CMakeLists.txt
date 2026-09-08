@@ -18,10 +18,13 @@ set_target_properties(zahlen_threading PROPERTIES
     CXX_EXTENSIONS OFF
 )
 
-# Allow other modules to find the headers
-target_include_directories(zahlen_threading PUBLIC 
-    ${PROJECT_SOURCE_DIR}/include
-    ${PROJECT_SOURCE_DIR}/src
+# Publish only supported threading headers; fiber implementation files are
+# local to this target.
+target_include_directories(zahlen_threading
+    PUBLIC
+        ${PROJECT_SOURCE_DIR}/include
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 # Enable ASM support if not already inherited

@@ -26,11 +26,13 @@
 #include <Jolt/Physics/Constraints/MotorSettings.h>
 #include <Jolt/Physics/Constraints/SliderConstraint.h>
 #include <Jolt/Physics/PhysicsSystem.h>
+#include <Jolt/Skeleton/SkeletonPose.h>
 #include <Zahlen/Buffer.h>
 #include <Zahlen/Core/ControlFlow.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/physics/Physics.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 #include <alloca.h>
 #include <cstdlib>
 #include <cstring>
@@ -282,7 +284,7 @@ void PhysicsContext::Step(float deltaTime) {
     });
 
     if (capturedCount > 0) {
-        world.FlushCommands(world.commandQueueSpare.data(), capturedCount);
+        world.FlushCommands(world.commandQueueSpare.data(), capturedCount, _impl->characterMap, _impl->activeCharacters);
     }
 
     world.contactCount.store(0, std::memory_order::relaxed);
@@ -321,6 +323,10 @@ auto PhysicsContext::GetActiveBodyCount() const -> uint32_t {
 
 auto PhysicsContext::GetMemoryUsage() const -> size_t {
     return _impl->tempAllocator->GetSize();
+}
+
+void PhysicsContext::TraceDiagnostics() const {
+    ZHLN::Trace(_impl->world);
 }
 
 void PhysicsContext::OptimizeBroadphase() {
@@ -407,7 +413,8 @@ auto PhysicsContext::CreateRigidBody(
     JPH::ObjectLayer      layer,
     uint32_t              materialID,
     uint32_t              category,
-    uint32_t              mask
+    uint32_t              mask,
+    Entity                owner
 ) -> ZHLN::Entity {
     auto&                 world = _impl->world;
     Physics::MaterialData mat {};
@@ -432,6 +439,7 @@ auto PhysicsContext::CreateRigidBody(
         world.slotToDense[handle.index] = dense;
         world.denseToSlot[dense]        = handle.index;
         world.slotStates[handle.index].store(SLOT_ALIVE, std::memory_order::release);
+        world.bodyOwners[handle.index] = owner;
 
         const uint32_t j_idx = id.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
         world.idToHandleMap[j_idx].store(handle.Pack(), std::memory_order::release);
@@ -558,16 +566,19 @@ auto PhysicsContext::CreateMeshBody(
     JPH::RVec3Arg         pos,
     JPH::QuatArg          rot,
     uint32_t              category,
-    uint32_t              mask
+    uint32_t              mask,
+    Entity                owner
 ) -> ZHLN::Entity {
     JPH::ShapeRefC shape = Physics::CreateMeshShape(vertices, vertexCount, indices, indexCount);
     if (shape == nullptr) {
         return ZHLN::Entity::Null();
     }
-    return CreateRigidBody(shape, pos, rot, JPH::EMotionType::Static, Layers::NON_MOVING, 0, category, mask);
+    return CreateRigidBody(shape, pos, rot, JPH::EMotionType::Static, Layers::NON_MOVING, 0, category, mask, owner);
 }
 
-auto PhysicsContext::CreateCharacter(JPH::RVec3Arg position, const Physics::DualShapeConfig& config, uint32_t category, uint32_t mask) -> ZHLN::Entity {
+auto PhysicsContext::CreateCharacter(
+    JPH::RVec3Arg position, const Physics::DualShapeConfig& config, uint32_t category, uint32_t mask, Entity owner
+) -> ZHLN::Entity {
     auto* impl  = _impl.get();
     auto& world = impl->world;
 
@@ -604,6 +615,7 @@ auto PhysicsContext::CreateCharacter(JPH::RVec3Arg position, const Physics::Dual
         world.slotToDense[handle.index] = dense;
         world.denseToSlot[dense]        = handle.index;
         world.slotStates[handle.index].store(SLOT_CHARACTER, std::memory_order::release);
+        world.bodyOwners[handle.index] = owner;
         world.categories[dense] = category;
         world.masks[dense]      = mask;
 
@@ -735,33 +747,157 @@ auto PhysicsContext::GetEntityHandle(JPH::BodyID bodyID) const -> ZHLN::Entity {
     return ZHLN::Entity::Unpack(rawData);
 }
 
-void PhysicsContext::DestroyBody(ZHLN::Entity handle) {
-    auto&          world = _impl->world;
-    const uint32_t slot  = handle.index;
+void PhysicsContext::ActivateRagdoll(JPH::Ragdoll& ragdoll, const JPH::SkeletonPose& pose, JPH::Vec3Arg initialVelocity) noexcept {
+    auto& world = _impl->world;
+    ZHLN::Lock(world.sync.shadowLock, [&] {
+        ragdoll.AddToPhysicsSystem(JPH::EActivation::Activate);
+        ragdoll.SetPose(pose);
+        ragdoll.SetLinearAndAngularVelocity(initialVelocity, JPH::Vec3::sZero());
+    });
+}
 
-    if (slot >= world.slotCapacity) {
+void PhysicsContext::RemoveRagdoll(JPH::Ragdoll& ragdoll) noexcept {
+    auto& world = _impl->world;
+    ZHLN::Lock(world.sync.shadowLock, [&] { ragdoll.RemoveFromPhysicsSystem(); });
+}
+
+void PhysicsContext::DriveRagdollPose(JPH::Ragdoll& ragdoll, const JPH::SkeletonPose& pose) noexcept {
+    auto& world = _impl->world;
+    ZHLN::Lock(world.sync.shadowLock, [&] {
+        ragdoll.Activate();
+        ragdoll.DriveToPoseUsingMotors(pose);
+    });
+}
+
+void PhysicsContext::AddRagdollImpulse(JPH::Ragdoll& ragdoll, uint32_t jointIndex, JPH::Vec3Arg impulse) noexcept {
+    auto& world = _impl->world;
+    ZHLN::Lock(world.sync.shadowLock, [&] {
+        if (jointIndex >= ragdoll.GetBodyCount()) {
+            return;
+        }
+        const JPH::BodyID bodyID = ragdoll.GetBodyID(jointIndex);
+        if (!bodyID.IsInvalid()) {
+            world.bodyInterface->AddImpulse(bodyID, impulse);
+            world.bodyInterface->ActivateBody(bodyID);
+        }
+    });
+}
+
+auto PhysicsContext::TryGetBodyPosition(Entity handle, JPH::RVec3& outPosition) const noexcept -> bool {
+    const auto& world = _impl->world;
+    return ZHLN::Lock(world.sync.shadowLock, [&] -> bool {
+        if (handle.index >= world.slotCapacity || world.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
+            return false;
+        }
+        if (!Physics::GetSlotPredicate(world.slotStates[handle.index].load(std::memory_order::acquire)).isActive) {
+            return false;
+        }
+        const uint32_t dense = world.slotToDense[handle.index];
+        if (dense >= world.count.load(std::memory_order::acquire)) {
+            return false;
+        }
+        const size_t base = static_cast<size_t>(dense) * 4;
+        outPosition = JPH::RVec3(world.positions[base], world.positions[base + 1], world.positions[base + 2]);
+        return true;
+    });
+}
+
+auto PhysicsContext::TryGetBodyState(Entity handle, Physics::BodyStateSnapshot& outState) const noexcept -> bool {
+    const auto& world = _impl->world;
+    return ZHLN::Lock(world.sync.shadowLock, [&] -> bool {
+        if (handle.index >= world.slotCapacity || world.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
+            return false;
+        }
+
+        const uint8_t slotState = world.slotStates[handle.index].load(std::memory_order::acquire);
+        if (!Physics::GetSlotPredicate(slotState).isActive) {
+            return false;
+        }
+
+        const uint32_t dense = world.slotToDense[handle.index];
+        if (dense >= world.count.load(std::memory_order::acquire)) {
+            return false;
+        }
+
+        const size_t base = static_cast<size_t>(dense) * 4;
+        outState.previousPosition = JPH::Vec3(
+            static_cast<float>(world.prevPositions[base]), static_cast<float>(world.prevPositions[base + 1]),
+            static_cast<float>(world.prevPositions[base + 2])
+        );
+        outState.currentPosition = JPH::Vec3(
+            static_cast<float>(world.positions[base]), static_cast<float>(world.positions[base + 1]), static_cast<float>(world.positions[base + 2])
+        );
+        outState.previousRotation =
+            JPH::Quat(world.prevRotations[base], world.prevRotations[base + 1], world.prevRotations[base + 2], world.prevRotations[base + 3]);
+        outState.currentRotation = JPH::Quat(world.rotations[base], world.rotations[base + 1], world.rotations[base + 2], world.rotations[base + 3]);
+        outState.isCharacter = slotState == Physics::SLOT_CHARACTER;
+        return true;
+    });
+}
+
+auto PhysicsContext::GetRagdollPose(JPH::Ragdoll& ragdoll, JPH::RVec3& outRootOffset, JPH::Mat44* outWorldJoints) const noexcept -> bool {
+    if (outWorldJoints == nullptr) {
+        return false;
+    }
+    const auto& world = _impl->world;
+    ZHLN::Lock(world.sync.shadowLock, [&] { ragdoll.GetPose(outRootOffset, outWorldJoints); });
+    return true;
+}
+
+namespace {
+
+void QueueDestroyBodyLocked(Physics::PhysicsWorld& world, Entity handle) {
+    const uint32_t slot = handle.index;
+    if (slot >= world.slotCapacity || world.generations[slot].load(std::memory_order::acquire) != handle.generation) {
         return;
     }
-    if (world.generations[slot].load(std::memory_order::acquire) != handle.generation) {
-        return;
-    }
 
-    const uint8_t                state = world.slotStates[slot].load(std::memory_order::acquire);
-    const Physics::SlotPredicate pred  = Physics::GetSlotPredicate(state);
-
-    if (!pred.isDestructible) {
+    const auto predicate = Physics::GetSlotPredicate(world.slotStates[slot].load(std::memory_order::acquire));
+    if (!predicate.isDestructible) {
         return;
     }
 
     world.slotStates[slot].store(Physics::SLOT_PENDING_DESTROY, std::memory_order::release);
+    if (world.commandCount >= world.commandQueue.size()) {
+        const size_t newCapacity = world.commandQueue.empty() ? 64 : world.commandQueue.size() * 2;
+        world.commandQueue.resize(newCapacity);
+        world.commandQueueSpare.resize(newCapacity);
+    }
+    world.commandQueue[world.commandCount++] = {.type = Physics::CommandType::DestroyBody, .handle = handle};
+}
 
-    ZHLN::Lock(world.sync.shadowLock, [&] -> void {
-        if (world.commandCount >= world.commandQueue.size()) {
-            size_t newCap = world.commandQueue.size() == 0 ? 64 : world.commandQueue.size() * 2;
-            world.commandQueue.resize(newCap);
-            world.commandQueueSpare.resize(newCap);
+} // namespace
+
+void PhysicsContext::SetBodyOwner(Entity handle, Entity owner) {
+    auto& world = _impl->world;
+    ZHLN::Lock(world.sync.shadowLock, [&] {
+        if (handle.index >= world.slotCapacity || world.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
+            return;
         }
-        world.commandQueue[world.commandCount++] = {.type = Physics::CommandType::DestroyBody, .handle = handle};
+        if (Physics::GetSlotPredicate(world.slotStates[handle.index].load(std::memory_order::acquire)).isActive) {
+            world.bodyOwners[handle.index] = owner;
+        }
+    });
+}
+
+void PhysicsContext::DestroyBody(Entity handle) {
+    auto& world = _impl->world;
+    ZHLN::Lock(world.sync.shadowLock, [&] { QueueDestroyBodyLocked(world, handle); });
+}
+
+void PhysicsContext::ReconcileOrphanedBodies(const ECS::Registry& registry) {
+    auto& world = _impl->world;
+    ZHLN::Lock(world.sync.shadowLock, [&] {
+        for (uint32_t slot = 0; slot < world.slotCapacity; ++slot) {
+            if (!Physics::GetSlotPredicate(world.slotStates[slot].load(std::memory_order::acquire)).isActive) {
+                continue;
+            }
+
+            const Entity owner = world.bodyOwners[slot];
+            if (owner != Entity::Null() && !registry.IsAlive(owner)) {
+                QueueDestroyBodyLocked(world, Entity {.index = slot, .generation = world.generations[slot].load(std::memory_order::acquire)});
+            }
+        }
     });
 }
 

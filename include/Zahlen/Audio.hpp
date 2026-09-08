@@ -76,6 +76,9 @@ class ZHLN_API AudioContext {
     void               StopLoopSynth(SynthHandle handle, float fadeOutSeconds = 0.08f);
 
     // --- Lifecycle Reconciler ---
+    /// Notifies the audio ledger that an owner is being explicitly despawned.
+    /// The normal audio update performs the thread-safe fade and reclamation.
+    void ReleaseOwner(Entity owner) noexcept;
     void ReconcileVoices(ECS::Registry& reg, float dt);
 
     struct Impl;

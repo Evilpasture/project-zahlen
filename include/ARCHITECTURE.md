@@ -38,8 +38,9 @@ To preserve the engine's data-oriented design (DOD), cache locality, zero-alloca
 * Logic MUST be written as pure, stateless system functions (`void SystemName(Engine& engine, float dt)`).
 * Systems MUST NOT store internal state across frames. If a calculation needs memory across frames, that memory belongs in a Component attached to an Entity or a Global Settings Entity.
 
-#### 4. Automated Component Resource Cleanup
-* Component GPU allocations (VBOs, IBOs, Textures) MUST be released via the `static void OnDestroy(Component* c)` hook declared on the Component struct.
+#### 4. External Resource Lifecycle
+* Components describe resources but do not execute lifecycle callbacks. The owning resource system/context MUST track its external handles with their ECS owner and reconcile dead owners.
+* Use `DespawnEntity` for immediate child-before-parent teardown and resource notification; ordinary `Registry::Destroy` is reclaimed at the owning system's reconciliation point.
 * Systems MUST NOT manually manage raw heap pointers or manage class destructors.
 
 #### 5. Environment & Global State Isolation
@@ -77,13 +78,9 @@ struct LightningComponent {
     BufferHandle vboPos  = BufferHandle::Invalid;
     BufferHandle vboAttr = BufferHandle::Invalid;
 
-    // Automated RAII cleanup on entity destruction
-    static void OnDestroy(LightningComponent* c) noexcept {
-        if (auto* engine = GetEngineContext()) {
-            engine->GetRenderContext().DestroyBuffer(c->vboPos);
-            engine->GetRenderContext().DestroyBuffer(c->vboAttr);
-        }
-    }
+    // Component state only. Spawn records the VBOs with RenderContext using
+    // the owning entity; its render lifecycle reconciles them after ordinary
+    // Registry::Destroy, while DespawnEntity releases them immediately.
 };
 
 // GOOD: Stateless System Function
@@ -219,7 +216,7 @@ links no parser and no Lua runtime.
   ```
 
   Every `ScriptRunner` method is a no-op while nothing is installed, so the
-  engine, the fallback preset and the console all ask for script work without a
+  engine and the fallback preset ask for script work without a
   guard and without knowing whether anything is listening. A core-only build
   simply runs C++.
 * **The composition root lives in `app/`, not `src/`.** Wiring an engine
@@ -403,7 +400,7 @@ When porting prototype gameplay or math logic from a **TypeScript + Three.js + R
 | **Clip Depth Range** | $[-1, 1]$ (WebGL) | $[0, 1]$ (Vulkan) | ⚠️ **Use `Math::CreatePerspective`** |
 | **Euler Rotation Order** | Default: 'XYZ' | Default: 'YXZ' (Yaw, Pitch, Roll) | Use `MathUtils::EulerYXZ` or `EulerXYZ` |
 
-## 8. Native ECS UI (`Zahlen/GUI.hpp`)
+## 8. Native ECS UI (`Zahlen/gui/GUI.hpp`)
 
 ImGui stays for debug overlays; in-engine tooling is built with the engine's own
 UI toolkit. It obeys the Core Law: there is no widget object. A `GUI::Context`
