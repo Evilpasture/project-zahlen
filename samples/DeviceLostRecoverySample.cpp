@@ -206,7 +206,7 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::Log(
         "[DeviceLostRecoverySample] Ready (pid={}, {}, gpu={}). F9, Ctrl+\\ / SIGQUIT, or SIGUSR1 {}.", ZHLN::GetPID(),
         options.headless ? "headless" : "windowed", engine->GetRenderContext().GetGPUName(),
-        engine->GetRenderContext().GetDeviceType() == ZHLN::PhysicalDeviceType::Cpu ? "simulates device-lost recovery" : "hangs the GPU"
+        engine->GetRenderContext().GetDeviceType() == ZHLN::PhysicalDeviceType::CPU ? "simulates device-lost recovery" : "hangs the GPU"
     );
     if (autoProvokeFrame != 0) {
         ZHLN::Log("[DeviceLostRecoverySample] Will ProvokeDeviceLost on frame {}.", autoProvokeFrame);
