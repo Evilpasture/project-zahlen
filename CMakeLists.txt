@@ -345,7 +345,7 @@ endif()
 # silently run every render suite on the CPU rasteriser and print
 # "[VULKAN] Selected physical device: llvmpipe" while a perfectly good GPU sat
 # in the same box. Device scoring was never the problem — the GPU simply was
-# never enumerated (see ZHLN_Internal_DefaultScoreFn in src/vulkan/RenderCore.c,
+# never enumerated (see ZHLN_Internal_DefaultScoreFn in src/vulkan/core/RenderCore.c,
 # which ranks a discrete GPU at 1'000'000 and a CPU device at 0).
 #
 # Default OFF: tests use the host Vulkan installation. Turn it ON for a hermetic

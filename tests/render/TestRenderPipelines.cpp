@@ -213,7 +213,7 @@ struct RenderPipelinesTestSuite {
         //
         // Why refused: volk resolves Vulkan entry points into process-global
         // dispatch tables (volkLoadInstance / volkLoadDevice in
-        // src/vulkan/RenderCore.c), so a second device would silently rebind
+        // src/vulkan/core/RenderCore.c), so a second device would silently rebind
         // the function pointers the first one is calling through.
         // Vk::Instance::Create claims a single live-instance slot rather than
         // let that happen. Lifting the restriction -- the prerequisite for more

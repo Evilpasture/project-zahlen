@@ -5,7 +5,6 @@
 #include "../IBLProcessor.hpp"
 #include "../RenderInternal.hpp"
 #include "../Resources.hpp"
-#include <StagingContext.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <array>

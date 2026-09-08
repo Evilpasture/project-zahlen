@@ -57,7 +57,7 @@ block). Legacy passes are ordered so their invalidations are harmless.
 
 ## 2. Heap Layout
 
-`Vk::HeapManager` (src/vulkan/DescriptorHeap.hpp) owns both heaps:
+`Vk::HeapManager` (src/vulkan/pipeline/DescriptorHeap.hpp) owns both heaps:
 
 ```
 resource heap buffer:

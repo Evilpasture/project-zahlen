@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "RenderInternal.hpp"
-#include "Instance.hpp"
 #include "OpenGLHacks/HostBlit.hpp"
 #include "Zahlen/Profiler.hpp"
 #include <Zahlen/Core/Reflection.hpp>
